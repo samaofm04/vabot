@@ -567,14 +567,29 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
 
 
 def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
-    """Envoie un REEL de la Bibliothèque dans banger-{identity} au FORMAT COMPLET
-    (identique au bot quand il envoie un reel a un VA) : vidéo CLEAN + EXEMPLE
-    + message CAPTION + message DESCRIPTION.
+    """Envoie un REEL de la Bibliothèque dans banger-{identity} : la MÊME carte
+    que celle que le bot livre a un VA dans son -content (cogs/user.py,
+    _livrer_contenu) -- « **1/1** · <photo> identite », la video (et son
+    exemple) dans la galerie, puis « Caption à copier » et « Description à
+    copier ».
 
-    `video_path` = chemin du fichier video CLEAN. caption/description/exemple sont
-    deduits par convention de nommage (meme que cogs/autopost.random_reel_data) :
-    <stem>.txt, <stem>.desc.txt, <stem>.example.<ext>.
+    Ce salon gardait l'ancien format (« ▶ REEL — identité / ↓ Télécharge la
+    vidéo CLEAN », « 📝 CAPTION (à mettre PAR-DESSUS…) », « 📄 DESCRIPTION (à
+    coller dans le champ légende…) ») alors que le bot l'avait quitte le
+    27/09/2026 : deux formats pour la meme chose, dont un avec les consignes
+    que le proprietaire a fait retirer (« ils savent très bien ce qu'ils ont
+    à faire »). Il coupait en plus la caption a 1990 signes sans le dire.
+    Une seule voie desormais : la carte, et si Discord la refuse, le repli de
+    _livrer_contenu (en-tete + fichier(s), puis les textes en blocs a copier,
+    decoupes et non coupes), ecrit au journal du bot.
+
+    `video_path` = chemin du fichier video CLEAN. Caption, description et
+    exemple sont lus par le lecteur du bot (_video_meta : <stem>.txt,
+    <stem>.desc.txt, <stem>.example.<ext>) : une legende reprise d'un autre
+    compte (desc_retenue) est retenue ici comme chez le VA, et la carte le dit.
     Retourne (ok, info_str, meta) ; meta={guild_id,channel_id,message_ids} ou None.
+    message_ids = TOUS les messages postes (un seul pour la carte, plusieurs
+    pour le repli) : /cloud/banger_unmark les supprime tels quels.
     """
     import asyncio
     from pathlib import Path as _P
@@ -589,29 +604,16 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
     video_path = _P(video_path)
     if not video_path.exists() or not video_path.is_file():
         return False, "fichier introuvable", None
-
-    def _unesc(s):
-        return s.replace("\\n", "\n") if s else s
-    caption = ""
-    description = ""
     try:
-        cap_p = video_path.with_suffix(".txt")
-        if cap_p.exists():
-            caption = _unesc(cap_p.read_text(encoding="utf-8").strip())
-    except Exception:
-        pass
-    try:
-        desc_p = video_path.with_suffix(".desc.txt")
-        if desc_p.exists():
-            description = _unesc(desc_p.read_text(encoding="utf-8").strip())
-    except Exception:
-        pass
-    example = None
-    for ext in VIDEO_EXTS:
-        c = video_path.parent / f"{video_path.stem}.example{ext}"
-        if c.exists():
-            example = c
-            break
+        # Le module du bot, deja charge dans ce processus : sa carte et son
+        # lecteur de voisins. Sans lui, pas d'envoi -- et on le dit, plutot
+        # que de retomber sur un second format qui divergerait.
+        from cogs import user as _u
+        caption, description, example = _u._video_meta(video_path)
+        retenue = not description and _u.desc_retenue(video_path)
+    except Exception as e:
+        print(f"[banger] carte des VA indisponible ({type(e).__name__}: {e})", flush=True)
+        return False, f"carte des VA indisponible ({type(e).__name__}: {e})", None
 
     async def _do_send():
         import discord
@@ -637,34 +639,40 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
             if video_path.stat().st_size > limit:
                 return (False, f"video {video_path.stat().st_size//(1024*1024)} Mo > limite Discord "
                                f"({limit//(1024*1024)} Mo) — serveur non boost ?", None)
-            intro = f"▶ **REEL — identité `{ident}`**\n↓ Télécharge la vidéo CLEAN."
-            if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
-            files = [discord.File(str(video_path), filename=video_path.name)]
-            if example:
-                files.append(discord.File(str(example), filename=f"EXEMPLE_{example.name}"))
             sent_ids = []  # on garde tous les message_id pour pouvoir les supprimer plus tard
+
+            class _SuiviSalon:
+                """Ce que _livrer_contenu attend d'une interaction (`guild`,
+                `followup.send`), branche sur le salon banger. Chaque message
+                poste est retenu : sans ca, un repli en plusieurs messages
+                laisserait des restes que « retirer l'etoile » n'efface pas."""
+                def __init__(s):
+                    s.guild = guild
+                    s.followup = s
+
+                async def send(s, content=None, **kw):
+                    m = await banger.send(content, **kw)
+                    sent_ids.append(m.id)
+                    return m
+
+            medias = [(video_path, video_path.name)]
+            if example:
+                medias.append((example, f"EXEMPLE_{example.name}"))
+            alertes = [_u._ALERTE_EXEMPLE] if example else []
+            if retenue:
+                alertes.append(_u._ALERTE_DESC_RETENUE)
             try:
-                m = await banger.send(content=intro, files=files)
-                sent_ids.append(m.id)
-            except discord.HTTPException:
-                try:
-                    m = await banger.send(content=intro, file=discord.File(str(video_path), filename=video_path.name))
-                    sent_ids.append(m.id)
-                except discord.HTTPException as e:
-                    return False, f"erreur envoi Discord: {e}", None
-            if caption:
-                m = await banger.send("📝 **CAPTION** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
-                sent_ids.append(m.id)
-                m = await banger.send(caption[:1990])
-                sent_ids.append(m.id)
-            if description:
-                m = await banger.send("📄 **DESCRIPTION** (à coller dans le **champ légende** du post) :")
-                sent_ids.append(m.id)
-                # Discord cap 2000 car/message -> on decoupe les longues descriptions
-                for i in range(0, len(description), 1990):
-                    m = await banger.send(description[i:i + 1990])
-                    sent_ids.append(m.id)
+                await _u._livrer_contenu(
+                    _SuiviSalon(), 1, 1, ident, medias,
+                    textes=[(_u._T_CAP, caption), (_u._T_DESC, description)],
+                    alertes=alertes, quoi=f"banger {ident}")
+            except FileNotFoundError:
+                return False, "fichier introuvable (déplacé entre-temps)", None
+            except discord.HTTPException as e:
+                # La carte, puis l'ancien envoi (avec, puis sans l'exemple)
+                # refuses. Ce qui a pu partir avant l'echec est dit.
+                deja = f" ({len(sent_ids)} message(s) déjà posté(s))" if sent_ids else ""
+                return False, f"erreur envoi Discord{deja}: {e}", None
             meta = {"guild_id": guild.id, "channel_id": banger.id, "message_ids": sent_ids}
             return True, f"#{banger.name}", meta
         if not found_category:
@@ -56888,8 +56896,8 @@ def create_app():
         if _off.est_desactivee(path):
             return jsonify({"ok": False,
                             "error": "vidéo désactivée (caption déjà incrustée)"})
-        # Format COMPLET (REEL — identité + CLEAN + EXEMPLE + CAPTION + DESCRIPTION),
-        # comme quand le bot envoie un reel a un VA.
+        # La carte des VA (cogs/user.py, _livrer_contenu) : video + exemple,
+        # caption et description a copier -- le meme format que le bot.
         ok, msg, meta = _send_reel_to_banger_channel(identity, path)
         if ok:
             # etoile jaune + on memorise les message_id pour pouvoir les supprimer
@@ -58389,7 +58397,7 @@ def create_app():
         if not str(p).startswith(str(base)) or not p.exists() or not p.is_file():
             return jsonify({"ok": False, "error": "fichier introuvable"})
         # Description optionnelle (captions) : posée en sidecar <stem>.desc.txt,
-        # le format d'envoi banger la lit déjà (message DESCRIPTION après la vidéo).
+        # l'envoi banger la lit déjà (bloc « Description à copier » de la carte).
         desc_txt = (request.form.get("desc") or "").strip()[:1000]
         if desc_txt:
             try:

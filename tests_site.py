@@ -13665,6 +13665,17 @@ try:
         check("all-banger : matin et all-banger partagent les memes briques (description, bouton, video)",
               all("blocs_description_discord(" in _inA.getsource(f) and "bloc_video_discord(" in
                   _inA.getsource(f) for f in (_bgA.fiche_discord, _abA.vue_message)))
+        # Les cartes de livraison du salon -content des VA (demande du
+        # proprietaire du 27/09/2026 : « comme all-banger ») prennent les MEMES
+        # briques : une galerie ou un bloc a copier construits deux fois
+        # divergeraient a la premiere retouche. Le detail des cartes est
+        # verifie dans tests_jailbreak.py (« cartes livraison : »).
+        import cogs.user as _cuA
+        check("all-banger : les cartes de livraison des VA reprennent sa galerie et son bloc a copier",
+              "bloc_medias_discord(" in _inA.getsource(_cuA._carte_livraison)
+              and "contenu_a_copier(" in _inA.getsource(_cuA._carte_livraison)
+              and "contenu_a_copier(" in _inA.getsource(_bgA.blocs_description_discord)
+              and "bloc_medias_discord(" in _inA.getsource(_bgA.bloc_video_discord))
     finally:
         _bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER, \
             _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video, _abA.FICHIER_HIKER, \
@@ -25996,6 +26007,212 @@ try:
 except Exception as _eL:
     import traceback as _tbL
     check("liens infloww : testable", False, repr(_eL)[:200] + " " + _tbL.format_exc()[-800:])
+
+
+# ==============================================================================
+# Salon banger de l'identite (etoile ★ du site) : la carte des VA (27/09/2026)
+# ==============================================================================
+# /cloud/banger_mark postait encore l'ancien format -- « ▶ REEL — identité /
+# ↓ Télécharge la vidéo CLEAN », « 📝 CAPTION (à mettre PAR-DESSUS…) »,
+# « 📄 DESCRIPTION (à coller dans le champ légende…) » -- alors que le bot
+# livre desormais une carte : deux formats pour la meme chose, dont un avec
+# les consignes que le proprietaire a fait retirer. La caption y etait en plus
+# coupee a 1990 signes sans le dire. Rejoue par le VRAI
+# _send_reel_to_banger_channel, bot et salon simules (aucun reseau).
+print()
+print("=" * 70)
+print("SALON BANGER DE L'IDENTITE : la carte des VA")
+print("=" * 70)
+try:
+    import asyncio as _aioBg, threading as _thBg, tempfile as _tfBg, shutil as _shBg
+    import inspect as _inBg, types as _tyBg, logging as _lgBg
+    from pathlib import Path as _PBg
+    import discord as _dBg
+    import web_upload as _wBg
+    import cogs.user as _uBg
+
+    _nBg = [5000]
+
+    class _MsgBg:
+        def __init__(s):
+            _nBg[0] += 1
+            s.id = _nBg[0]
+            s.efface = False
+
+        async def delete(s):
+            s.efface = True
+
+    class _SalonBg(_dBg.TextChannel):
+        """Un salon texte (le code filtre sur isinstance) qui garde ce qui
+        partirait : le texte, la vue, les noms des pieces jointes."""
+        def __init__(s, nom, cid):
+            s.name, s.id = nom, cid
+            s.envois, s.refuser_carte, s.msgs = [], False, {}
+
+        async def send(s, content=None, **kw):
+            fs = list(kw.get("files") or []) + ([kw["file"]] if kw.get("file") else [])
+            noms = [f.filename for f in fs]
+            for f in fs:
+                f.close()
+            if s.refuser_carte and isinstance(kw.get("view"), _dBg.ui.LayoutView):
+                raise _dBg.HTTPException(_tyBg.SimpleNamespace(status=400, reason="refus"),
+                                         "carte refusee")
+            m = _MsgBg()
+            s.msgs[m.id] = m
+            s.envois.append({"content": content, "view": kw.get("view"), "noms": noms, "id": m.id})
+            return m
+
+        async def fetch_message(s, mid):
+            return s.msgs[mid]
+
+    class _CatBg:
+        def __init__(s, nom, chans):
+            s.name, s.channels = nom, chans
+
+    class _EmoBg:
+        def __init__(s, nom):
+            s.name, s.id = nom, 777
+
+        def __str__(s):
+            return f"<:{s.name}:{s.id}>"
+
+    class _GuildeBg:
+        def __init__(s, salon):
+            s.id, s.filesize_limit = 4242, 25 * 1024 * 1024
+            s.emojis = [_EmoBg(_uBg._identity_emoji_name("lola"))]
+            s.categories = [_CatBg("papote", []), _CatBg("lola", [salon])]
+
+    class _BotBg:
+        def __init__(s, boucle, salon):
+            s.guilds, s.loop, s._salon = [_GuildeBg(salon)], boucle, salon
+
+        def get_channel(s, cid):
+            return s._salon if cid == s._salon.id else None
+
+    class _JournalBg(_lgBg.Handler):
+        def __init__(s):
+            super().__init__(_lgBg.DEBUG)
+            s.lignes = []
+
+        def emit(s, r):
+            s.lignes.append(r.getMessage())
+
+    def _lireBg(env):
+        kids = env["view"].to_components()[0]["components"]
+        return ([k["content"] for k in kids if k["type"] == 10],
+                [it["media"]["url"] for k in kids if k["type"] == 12 for it in k["items"]])
+
+    _TBg = _PBg(_tfBg.mkdtemp(prefix="banger_salon_"))
+    # Une caption plus longue que l'ancienne coupe muette (1990), avec un saut
+    # de ligne ecrit « \n » dans le fichier, comme le site les ecrit.
+    _CAPBg = "Caption longue " * 170 + "\nfin"
+    _DESCBg = "Nouvelle tenue ✨ #ootd"
+    _vBg = _TBg / "reel 1.mp4"
+    _vBg.write_bytes(b"\x00" * 64)
+    _vBg.with_suffix(".txt").write_text(_CAPBg.replace("\n", "\\n"), encoding="utf-8")
+    _vBg.with_suffix(".desc.txt").write_text(_DESCBg, encoding="utf-8")
+    (_TBg / "reel 1.example.mp4").write_bytes(b"\x01" * 64)
+    # Legende reprise d'un autre compte, en attente de relecture : retenue.
+    _v2Bg = _TBg / "reel2.mp4"
+    _v2Bg.write_bytes(b"\x00" * 64)
+    _v2Bg.with_suffix(".desc.txt").write_text("merci @autre_creatrice", encoding="utf-8")
+    _v2Bg.with_suffix(".acheck.txt").write_text("reprise du post", encoding="utf-8")
+
+    _ANCIENBg = ("Télécharge", "PAR-DESSUS", "champ légende", "REEL — identité",
+                 "NE PAS la télécharger", "à coller dans")
+    _EBg = f"**1/1** · <:{_uBg._identity_emoji_name('lola')}:777> lola"
+    _journalBg = _JournalBg()
+    _logBg = _lgBg.getLogger("vabot.user")
+    _logBg.addHandler(_journalBg)
+    _bBg = _aioBg.new_event_loop()
+    _thBg.Thread(target=_bBg.run_forever, daemon=True).start()
+    _svBg = _wBg._BOT_REF
+    try:
+        _sBg = _SalonBg("💥・banger-lola", 9101)
+        _wBg._BOT_REF = _BotBg(_bBg, _sBg)
+        _okBg, _msgBgR, _metaBg = _wBg._send_reel_to_banger_channel("lola", _vBg)
+        _e = _sBg.envois
+        check("salon banger : UN message, la carte (vue + pieces jointes, aucun texte a cote)",
+              _okBg is True and _msgBgR == "#💥・banger-lola" and len(_e) == 1
+              and isinstance(_e[0]["view"], _dBg.ui.LayoutView) and _e[0]["content"] is None
+              and _e[0]["noms"] == ["reel_1.mp4", "EXEMPLE_reel_1.example.mp4"],
+              (_okBg, _msgBgR, [(x["content"], x["noms"]) for x in _e]))
+        _txBg, _urBg = _lireBg(_e[0]) if _e and _e[0]["view"] is not None else ([], [])
+        check("salon banger : en-tete « **1/1** · <photo> lola », galerie = pieces jointes",
+              _txBg[:1] == [_EBg]
+              and _urBg == ["attachment://reel_1.mp4", "attachment://EXEMPLE_reel_1.example.mp4"],
+              (_txBg[:1], _urBg))
+        check("salon banger : caption ENTIERE (plus coupee a 1990 signes) et description, "
+              "dans leurs blocs a copier",
+              "**Caption à copier**\n```\n" + _CAPBg + "\n```" in _txBg
+              and "**Description à copier**\n```\n" + _DESCBg + "\n```" in _txBg,
+              [t[:50] for t in _txBg])
+        check("salon banger : l'exemple reste signale dans la carte",
+              _uBg._ALERTE_EXEMPLE in _txBg, _txBg[:2])
+        # Tout ce qui est parti dans le salon : la carte ET un eventuel texte.
+        _toutBg = "\n".join(_txBg + [str(x["content"] or "") for x in _e])
+        check("salon banger : plus aucune consigne de l'ancien format",
+              _txBg and not [a for a in _ANCIENBg if a in _toutBg],
+              [a for a in _ANCIENBg if a in _toutBg] or "aucune carte")
+        check("salon banger : l'accuse garde l'id du message (retirer l'etoile l'efface)",
+              _metaBg == {"guild_id": 4242, "channel_id": 9101, "message_ids": [_e[0]["id"]]}
+              if _e else False, _metaBg)
+        _delBg = _wBg._delete_banger_messages(_metaBg or {})
+        check("salon banger : retirer l'etoile supprime la carte",
+              _delBg == (True, "1 message(s) supprimé(s)")
+              and all(m.efface for m in _sBg.msgs.values()), _delBg)
+
+        # Discord refuse la carte : l'ancien envoi, SANS ses consignes, rien de
+        # perdu, chaque message retenu pour l'effacement, et le journal le dit.
+        _s2Bg = _SalonBg("banger-lola", 9102)
+        _s2Bg.refuser_carte = True
+        _wBg._BOT_REF = _BotBg(_bBg, _s2Bg)
+        del _journalBg.lignes[:]
+        _ok2Bg, _m2Bg, _meta2Bg = _wBg._send_reel_to_banger_channel("lola", _vBg)
+        _c2Bg = [str(x["content"] or "") for x in _s2Bg.envois]
+        _codeBg = "".join(c[4:-4] for c in _c2Bg if c.startswith("```\n") and c.endswith("\n```"))
+        check("salon banger, carte refusee : repli en texte, video et exemple joints, journalise",
+              _ok2Bg is True and not [x for x in _s2Bg.envois if x["view"] is not None]
+              and _s2Bg.envois and _s2Bg.envois[0]["noms"] == ["reel_1.mp4", "EXEMPLE_reel_1.example.mp4"]
+              and _c2Bg[0].startswith(_EBg)
+              and any("refusee" in l and "ancien envoi" in l for l in _journalBg.lignes),
+              (_ok2Bg, _c2Bg[:2], _journalBg.lignes[-2:]))
+        check("salon banger, carte refusee : caption et description arrivent entieres",
+              "".join(_CAPBg.split()) in "".join(_codeBg.split()) and _DESCBg in _codeBg
+              and "**Caption à copier**" in _c2Bg and "**Description à copier**" in _c2Bg,
+              (len(_codeBg), _c2Bg[1:3]))
+        check("salon banger, carte refusee : aucune consigne de l'ancien format",
+              not [a for a in _ANCIENBg if a in "\n".join(_c2Bg)],
+              [a for a in _ANCIENBg if a in "\n".join(_c2Bg)])
+        check("salon banger, carte refusee : TOUS les messages du repli sont retenus pour l'effacement",
+              (_meta2Bg or {}).get("message_ids") == [x["id"] for x in _s2Bg.envois]
+              and len(_s2Bg.envois) >= 5, (_meta2Bg, len(_s2Bg.envois)))
+
+        # Legende reprise d'un autre compte : retenue comme chez le VA, et dite.
+        _s3Bg = _SalonBg("banger-lola", 9103)
+        _wBg._BOT_REF = _BotBg(_bBg, _s3Bg)
+        _ok3Bg, _m3Bg, _meta3Bg = _wBg._send_reel_to_banger_channel("lola", _v2Bg)
+        _tx3Bg = _lireBg(_s3Bg.envois[0])[0] if _s3Bg.envois and _s3Bg.envois[0]["view"] else []
+        check("salon banger : une legende reprise d'un autre compte (@) est retenue, et la carte le dit",
+              _ok3Bg is True and _uBg._ALERTE_DESC_RETENUE in _tx3Bg
+              and not [t for t in _tx3Bg if "autre_creatrice" in t or "Description à copier" in t],
+              (_ok3Bg, _m3Bg, _tx3Bg))
+    finally:
+        _wBg._BOT_REF = _svBg
+        _bBg.call_soon_threadsafe(_bBg.stop)
+        _logBg.removeHandler(_journalBg)
+        _shBg.rmtree(_TBg, ignore_errors=True)
+    # Les phrases ENVOYEES d'avant (avec leur gras) : la docstring les cite
+    # sans gras pour dire pourquoi elles sont parties.
+    _srcBg = _inBg.getsource(_wBg._send_reel_to_banger_channel)
+    check("salon banger : le code passe par la carte des VA, plus par l'ancien format",
+          "_livrer_contenu(" in _srcBg and "**PAR-DESSUS" not in _srcBg
+          and "**champ légende**" not in _srcBg
+          and "Format COMPLET" not in _PBg("web_upload.py").read_text(encoding="utf-8"),
+          [p for p in ("**PAR-DESSUS", "**champ légende**") if p in _srcBg])
+except Exception as _eBg:
+    import traceback as _tbBg
+    check("salon banger : testable", False, repr(_eBg)[:200] + " " + _tbBg.format_exc()[-800:])
 
 print()
 print("=" * 70)

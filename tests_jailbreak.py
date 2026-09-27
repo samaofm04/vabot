@@ -12973,6 +12973,1230 @@ finally:
 check("defaut epingles : aucune ecriture dans data/",
       len(_V2_AUDIT["ecrits"]) == _nEcritsDE, str(_V2_AUDIT["ecrits"][_nEcritsDE:][:5]))
 
+
+
+# ==============================================================================
+# CARTES DE LIVRAISON (demande du proprietaire du 27/09/2026) : le cahier, verifie
+# ==============================================================================
+# Un contenu livre au VA dans son salon -content arrivait en trois ou quatre
+# messages : « 🎞️ REEL MONTÉ 1/5 → à poster sur ton compte n°1 (`x`) / 📥
+# Poste cette vidéo telle quelle… », la video, « 📄 DESCRIPTION REEL MONTÉ
+# 1/5 (à coller dans le champ légende) : », puis le texte. Le proprietaire :
+# « ils savent très bien ce qu'ils ont à faire » -- il veut la forme des
+# cartes du salon all-banger (bangers.py) : UNE carte « Components V2 » par
+# contenu, avec SEULEMENT « **1/5** · <photo> compte », le media dans une
+# galerie, et le texte a copier. Les VRAIS avertissements restent (montage
+# rate, brute non rendue unique, exemple, legende retenue).
+#
+# Ce que cette partie rejoue (scratchpad/plan_cartes_livraison.md), par le
+# VRAI chemin (UserCog._run_for_model -> commande -> _livrer_contenu -> proxy
+# -content), tirages remplaces par des fichiers temporaires et moteur video
+# simule :
+#   0. all-banger inchange : les briques mises en commun rendent la meme chose ;
+#   1. chaque type de livraison des menus VA part en UNE carte : en-tete exact,
+#      media joint (nom = galerie, nom sur), texte exact dans son bloc, aucune
+#      consigne « notice », avertissements gardes, limites Discord tenues ;
+#   2. le ✨ General (la reserve), le menu central, le menu VA FR, « Choisir
+#      ma brute » ;
+#   3. le repli : carte refusee ou impossible -> l'ancien envoi, journalise,
+#      jamais un contenu perdu ; un fichier trop lourd ne coupe pas le lot ;
+#   4. les proxies passent view= et files=, jamais de content ;
+#   5. plus aucune livraison hors de _livrer_contenu, plus aucune phrase
+#      « notice » dans les messages envoyes (Name, Pseudo, Bio compris) ;
+#   6. (ajout du 27/09/2026) plus aucun message d'intro avant la barre de
+#      progression : elle est le premier message, et porte ce que l'intro
+#      disait d'utile (« 3 sur 5 demandés », les ecartes).
+# Les anciens tests ne figeaient aucun texte de livraison : aucun n'a eu a
+# changer. Toute ecriture sous le vrai data/ est comptee par _V2_AUDIT.
+print()
+print("=" * 70)
+print("CARTES DE LIVRAISON du salon -content (27/09/2026)")
+print("=" * 70)
+
+
+def _v2_bloc_cartes_livraison():
+    "Cahier « cartes de livraison » (27/09/2026) : une carte all-banger par contenu livre au VA."
+    import asyncio
+    import logging
+    import os
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    def check(nom, ok, detail=""):
+        _check_v2("cartes livraison : " + nom, ok, "" if ok else str(detail)[:400])
+
+    class _Journal(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lignes = []
+
+        def emit(self, r):
+            self.lignes.append(r.getMessage())
+
+    JOURNAL = _Journal()
+    _log_u = logging.getLogger("vabot.user")
+    _niveau_u = _log_u.level
+    _log_u.addHandler(JOURNAL)
+    _log_u.setLevel(logging.INFO)
+
+    def journal(motif):
+        return any(motif in l for l in JOURNAL.lignes)
+
+    TMP = Path(tempfile.mkdtemp(prefix="cartes_livraison_"))
+    _vrai_data = os.path.realpath("data")
+    assert not os.path.realpath(TMP).startswith(_vrai_data + os.sep), TMP
+    # Le moteur video et l'attente sont simules ; remis en place a la sortie,
+    # meme si une verification leve (ils vivent hors des modules sauvegardes).
+    _sav_noctus = sys.modules.get("noctus_web")
+    _sav_sleep = asyncio.sleep
+    try:
+        _cartes_livraison_corps(check, journal, JOURNAL, TMP)
+    finally:
+        asyncio.sleep = _sav_sleep
+        if _sav_noctus is None:
+            sys.modules.pop("noctus_web", None)
+        else:
+            sys.modules["noctus_web"] = _sav_noctus
+        _log_u.removeHandler(JOURNAL)
+        _log_u.setLevel(_niveau_u)
+        shutil.rmtree(TMP, ignore_errors=True)
+
+
+def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
+    "Le corps du cahier « cartes de livraison » ; _v2_bloc_cartes_livraison remet tout en place."
+    import ast
+    import asyncio
+    import inspect
+    import json
+    import os
+    import re
+    import sys
+    import types
+    from pathlib import Path
+    import discord
+    import bangers
+    import brutes_off
+    import guild_features
+    import cogs.user as U
+
+    # ---------------------------------------------------------------------------
+    # Faux Discord : ce qui partirait vraiment (textes, vue, noms ET chemins des
+    # pieces jointes), et si un `content` a ete passe -- un message V2 n'en a pas.
+    # ---------------------------------------------------------------------------
+    class Emo:
+        def __init__(self, name, eid):
+            self.name, self.id = name, eid
+
+        def __str__(self):
+            return f"<:{self.name}:{self.id}>"
+
+    class Guilde:
+        def __init__(self, gid, emojis=(), us=True):
+            self.id = gid
+            self.emojis = list(emojis)
+            self.us = us
+            self.text_channels = []
+            self.filesize_limit = 25 * 1024 * 1024
+            self.members = []
+            self.chunked = True
+
+    class Cat:
+        def __init__(self):
+            self.text_channels = []
+
+    class Msg:
+        _n = [1000]
+
+        def __init__(self, **kw):
+            Msg._n[0] += 1
+            self.id = Msg._n[0]
+            self.kw = kw
+            self.edits = []
+            self.flags = types.SimpleNamespace(ephemeral=bool(kw.get("ephemeral")))
+
+        async def edit(self, **kw):
+            self.edits.append(kw)
+            return self
+
+    def http_exc(status=413, texte="Request entity too large"):
+        return discord.HTTPException(types.SimpleNamespace(status=status, reason=texte), texte)
+
+    def enregistrer(content, kw, passe):
+        fichiers = list(kw.get("files") or []) + ([kw["file"]] if kw.get("file") else [])
+        rec = dict(kw)
+        rec["content"] = content
+        rec["_content_passe"] = passe
+        rec["_noms"] = [f.filename for f in fichiers]
+        rec["_srcs"] = [os.path.realpath(getattr(f.fp, "name", "")) for f in fichiers]
+        return rec
+
+    def _refus(obj, kw):
+        """Discord refuse la carte (refuser_carte), ou TOUT envoi qui joint un
+        fichier de ce nom (trop_lourd), carte comme ancien envoi."""
+        if obj.refuser_carte and isinstance(kw.get("view"), discord.ui.LayoutView):
+            raise http_exc()
+        fichiers = list(kw.get("files") or []) + ([kw["file"]] if kw.get("file") else [])
+        if obj.trop_lourd and any(f.filename in obj.trop_lourd for f in fichiers):
+            raise http_exc()
+        if obj.max_fichiers and len(fichiers) > obj.max_fichiers:
+            raise http_exc()
+
+    class Salon:
+        def __init__(self, cid, name, guild, category=None):
+            self.id, self.name, self.guild, self.category = cid, name, guild, category
+            self.envois = []
+            self.refuser_carte = False
+            self.trop_lourd = set()
+            self.max_fichiers = 0
+            self.mention = f"<#{cid}>"
+
+        async def send(self, *args, **kw):
+            # AVANT le pop : sinon un `content=None` passe explicitement serait invisible.
+            passe = bool(args) or ("content" in kw)
+            content = args[0] if args else kw.pop("content", None)
+            _refus(self, kw)
+            rec = enregistrer(content, kw, passe)
+            rec["_msg"] = Msg(**kw)
+            self.envois.append(rec)
+            return rec["_msg"]
+
+        async def fetch_message(self, mid):
+            raise discord.NotFound(types.SimpleNamespace(status=404, reason="nf"), "nf")
+
+    class Rep:
+        def __init__(self):
+            self.faits = []
+            self._done = False
+            self.type = None
+
+        def is_done(self):
+            return self._done
+
+        async def defer(self, **kw):
+            self.faits.append(("defer", kw))
+            self._done = True
+            self.type = discord.InteractionResponseType.deferred_message_update
+
+        async def send_message(self, content=None, **kw):
+            self.faits.append(("send_message", content, kw))
+            self._done = True
+
+        async def edit_message(self, **kw):
+            self.faits.append(("edit_message", kw))
+            self._done = True
+
+        async def send_modal(self, m):
+            self.faits.append(("modal", m))
+            self._done = True
+
+    class Suivi:
+        def __init__(self):
+            self.envois = []
+            self.refuser_carte = False
+            self.trop_lourd = set()
+            self.max_fichiers = 0
+
+        async def send(self, *args, **kw):
+            passe = bool(args) or ("content" in kw)
+            content = args[0] if args else kw.pop("content", None)
+            _refus(self, kw)
+            self.envois.append(enregistrer(content, kw, passe))
+            return Msg(**kw)
+
+    class Itx:
+        def __init__(self, guild, channel, uid=4242):
+            self.guild = guild
+            self.channel = channel
+            self.user = types.SimpleNamespace(id=uid, name="va_test", roles=[], mention=f"<@{uid}>")
+            self.response = Rep()
+            self.followup = Suivi()
+            self.client = None
+            self.data = {}
+            self.message = None
+
+        async def original_response(self):
+            return Msg()
+
+    def dossier(gid, emojis=(), us=True, nom="abdoul_9684"):
+        """Un dossier de VA : salons <nom>-menu et <nom>-content dans une categorie."""
+        g = Guilde(gid, emojis, us)
+        cat = Cat()
+        menu = Salon(gid * 10 + 1, nom + "-menu", g, cat)
+        cont = Salon(gid * 10 + 2, nom + "-content", g, cat)
+        cat.text_channels = [menu, cont]
+        g.text_channels = [menu, cont]
+        return g, menu, cont
+
+    def lancer(coro):
+        return asyncio.run(coro)
+
+    # ---------------------------------------------------------------------------
+    # Donnees de test (dossier temporaire, jamais data/) et tirages remplaces
+    # ---------------------------------------------------------------------------
+    ID = TMP / "identites"
+
+    def fichier(p, octets=b"\x00" * 64):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(octets)
+        return p
+
+    def texte_voisin(p, t):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(t, encoding="utf-8")
+        return p
+
+    DESC_A = "Nouvelle vidéo 💕 #fyp #pour_toi\nlien en bio"
+    DESC_B = "Deuxième légende\navec _underscores_ et *étoiles*"
+    CAP_A = "POV : tu découvres mon compte"
+    CAP_B = "quand il répond enfin 😳"
+    # Brutes : un nom que Discord reecrirait (espace, parentheses) et un sur.
+    BRUTES = [fichier(ID / "lola/brutes/brute a (1).mp4"), fichier(ID / "lola/brutes/brute_b.mp4")]
+    texte_voisin(BRUTES[0].with_suffix(".desc.txt"), DESC_A)
+    # Templates : t1 avec description, t2 avec une legende reprise d'un AUTRE
+    # compte, en attente de relecture -> retenue.
+    TPL = [fichier(ID / "lola/templates/t1.mp4"), fichier(ID / "lola/templates/t2.mp4")]
+    texte_voisin(TPL[0].with_suffix(".desc.txt"), DESC_B)
+    texte_voisin(TPL[1].with_suffix(".desc.txt"), "Repris de @autre_createatrice https://x.y")
+    texte_voisin(TPL[1].with_suffix(".acheck.txt"), "a relire")
+    DRAFT = {"segments": "[]", "cut": 2.0}
+    REELS = [fichier(ID / "lola/videos/r1.mp4"), fichier(ID / "lola/videos/r2.mp4")]
+    EXEMPLE = fichier(ID / "lola/videos/r1.example.mp4")
+    IMGS = [fichier(ID / "lola/posts/p1.jpg"), fichier(ID / "lola/posts/p2.jpg")]
+    IMG_EX = fichier(ID / "lola/posts/p1.example.jpg")
+    PPS = [fichier(ID / "lola/profile_pics/pp1.png"), fichier(ID / "lola/profile_pics/pp2.png")]
+    TRENDS = [fichier(ID / "lola/trends/tr1.mp4"), fichier(ID / "lola/trends/tr2.mp4")]
+    SON_1 = "Son : « Espresso » à 0:12"
+    texte_voisin(TRENDS[0].with_suffix(".txt"), SON_1)
+    texte_voisin(TRENDS[0].with_suffix(".desc.txt"), DESC_A)
+    texte_voisin(TRENDS[1].with_suffix(".txt"), "Son libre")
+
+    CAPS = [{"id": "c1", "text": CAP_A, "desc": DESC_A, "enabled": True, "x": 0.5, "y": 0.3},
+            {"id": "c2", "text": CAP_B, "desc": "", "enabled": True, "x": 0.5, "y": 0.3}]
+    BLOC = {"items": CAPS, "font": "TikTokSans", "style": {}}
+
+    # -- moteur video simule : la sortie est un fichier temporaire, et on retient
+    # de quelle source elle vient (pour savoir quelle description attendre).
+    GEN = {}
+    RATES = set()       # sources dont le montage « rate » (repli du moteur)
+    PERDUS = set()      # sources dont la video produite disparait avant l'envoi
+
+    class FauxNoctus(types.ModuleType):
+        def setup_ok(self):
+            return True
+
+        def gen_from_draft(self, video, draft, variantes, x, brutes, rapport=None):
+            m = f"m{len(GEN) + 1}"
+            out = fichier(TMP / "out" / f"{m}.mp4")
+            GEN[m] = {"out": os.path.realpath(out), "video": os.path.realpath(video), "draft": draft}
+            if rapport is not None and Path(video).name in RATES:
+                rapport.update({"repli": True, "message": "aucune vidéo brute utilisable"})
+            return m
+
+        def status(self, m):
+            return {"state": "done", "pct": 100}
+
+        def output_paths(self, m):
+            if Path(GEN[m]["video"]).name in PERDUS:
+                os.remove(GEN[m]["out"])
+            return [Path(GEN[m]["out"])]
+
+    sys.modules["noctus_web"] = FauxNoctus("noctus_web")
+
+    async def _pas_d_attente(*a, **k):
+        return None
+
+    asyncio.sleep = _pas_d_attente
+
+    async def _pas_de_garde(interaction, threads_ok=False):
+        return False
+
+    U._EMOJIS_CREES.clear()
+    U._reserve_ouverte_aux_va = lambda: False
+    U.load_transform_config = lambda: {"enabled": False, "delete_source_after_use": False}
+    U.load_image_config = lambda: {"enabled": False}
+    U._captions_block = lambda ident: BLOC
+    U.fav_captions_for = lambda ident: [CAPS[0]]
+    U.fav_captions_desactivees = lambda ident: []
+    U.fav_brutes_for = lambda ident, limit=15: list(BRUTES)
+    U.fav_templates_for = lambda ident, limit=15, **_kw: ([(TPL[0], DRAFT)], 0)
+    U.tous_templates_for = lambda ident, limit=15, **_kw: ([(TPL[0], DRAFT)], 0)
+    U.marque_templates_for = (lambda cle, ident, limit=15, exiger_banger=False, ecartes=None:
+                              ([(TPL[0], DRAFT)], 0))
+    U.va_ready_montages_for = (lambda ident, n, ecartes=None:
+                               [(TPL[0], DRAFT, DESC_B), (TPL[1], DRAFT, None)][:n])
+    U.random_n_reels_for = (lambda ident, n:
+                            [(REELS[0], CAP_A, DESC_A, EXEMPLE), (REELS[1], CAP_B, None, None)][:n])
+    U.banger_reels_for = (lambda ident, limit=15:
+                          [(REELS[0], CAP_A, DESC_A, EXEMPLE), (REELS[1], CAP_B, None, None)])
+    U.trends_for = lambda ident, limit=3: list(TRENDS)[:limit]
+    TIRAGE = {"img": 0, "pp": 0, "cta": 0}
+
+    def _tirer_image(ident):
+        TIRAGE["img"] += 1
+        i = (TIRAGE["img"] - 1) % 2
+        return (IMGS[i], CAP_A if i == 0 else None, DESC_B if i == 0 else None,
+                IMG_EX if i == 0 else None)
+
+    def _tirer_pp(ident=None):
+        TIRAGE["pp"] += 1
+        return PPS[(TIRAGE["pp"] - 1) % 2]
+
+    def _tirer_cta(ident):
+        TIRAGE["cta"] += 1
+        return IMGS[(TIRAGE["cta"] - 1) % 2]
+
+    U.random_post_for = _tirer_image
+    U.random_story_for = _tirer_image
+    U.random_profile_pic = _tirer_pp
+    U.random_story_cta_image_for = _tirer_cta
+    U.random_story_cta_caption = lambda: CAP_B
+    brutes_off.lister = lambda d, extensions=None: list(BRUTES)
+    guild_features.is_us_guild = (lambda g: bool(getattr(g, "us", False))
+                                  if not isinstance(g, int) else False)
+
+    COG = U.UserCog.__new__(U.UserCog)
+    COG.bot = None
+    # Sur l'INSTANCE : la classe reste intacte pour le reste de la suite.
+    COG._gate_contenu = _pas_de_garde
+
+    # ---------------------------------------------------------------------------
+    # Lecture d'une carte
+    # ---------------------------------------------------------------------------
+    #: Les consignes que le proprietaire ne veut plus lire (minuscules).
+    NOTICES = (
+        "à poster sur ton", "compte n°", "poste cette vidéo **telle quelle**",
+        "poste cette vidéo telle quelle", "poste **tel quel**", "champ légende",
+        "à coller dans", "télécharge la vidéo", "télécharge la photo", "télécharge et upload",
+        "est **déjà incrusté**", "**déjà écrite**", "par-dessus",
+        "poste-la telle quelle", "règle :", "poste **reel", "une différente sur ton",
+        "copie celui", "mets-en une différente", "19h et 23h", "upload sur instagram",
+        # Les intros de /videobrut, ⭐ Vidéo brut et 💥 Reels Banger (relecture) :
+        # des consignes aussi, que le chantier avait oubliees.
+        "à toi de les monter", "à reposter",
+    )
+    #: Ce qu'une carte ne dit plus : le type de contenu, les vues, la fleche.
+    LIBELLES = re.compile(
+        r"REEL MONT|TEMPLATE|TRASH|FLASH|CAPTION BANGER|MONTAGE BANGER|REEL CAPTION|"
+        r"VIDÉO BRUTE|BRUTE BANGER|BRUTE CHOISIE|STORY|POST\b|Photo de profil|DESCRIPTION|"
+        r"\bCAPTION\b|\bvues\b|→")
+    E_LOLA = Emo("idlola", 111)
+    E_BLONDE = Emo("idblonde", 222)
+
+    def rel(p):
+        return os.path.realpath(str(p))
+
+    def cartes(envois):
+        return [e for e in envois if isinstance(e.get("view"), discord.ui.LayoutView)]
+
+    def lire(rec):
+        comp = rec["view"].to_components()
+        cont = comp[0]
+        kids = cont["components"]
+        textes = [k["content"] for k in kids if k["type"] == 10]
+        urls = [it["media"]["url"] for k in kids if k["type"] == 12 for it in k["items"]]
+        sep = next((i for i, k in enumerate(kids) if k["type"] == 14), None)
+        blocs = [k["content"] for k in kids[sep + 1:] if k["type"] == 10] if sep is not None else []
+        return {"comp": comp, "entete": textes[0] if textes else "", "textes": textes,
+                "urls": urls, "blocs": blocs, "types": [k["type"] for k in kids],
+                "accent": cont.get("accent_color"), "noms": rec["_noms"], "srcs": rec["_srcs"],
+                "vue": rec["view"], "rec": rec, "racine": [c["type"] for c in comp]}
+
+    def bloc(titre, t):
+        return "**" + titre + "**\n```\n" + t + "\n```"
+
+    def textes_du_salon(envois):
+        out = []
+        for e in envois:
+            if e.get("content"):
+                out.append(str(e["content"]))
+            if isinstance(e.get("view"), discord.ui.LayoutView):
+                out.extend(lire(e)["textes"])
+        return out
+
+    def notices(envois):
+        return [(n, t[:80]) for t in textes_du_salon(envois) for n in NOTICES if n in t.lower()]
+
+    def entete(i, n, nom="lola", emo=E_LOLA):
+        return f"**{i}/{n}** · {emo} {nom}" if emo else f"**{i}/{n}** · {nom}"
+
+    def forme(c):
+        """Ce que TOUTE carte doit respecter ; [] si tout va bien."""
+        pb = []
+        if not c["noms"] or c["urls"] != ["attachment://" + n for n in c["noms"]]:
+            pb.append(("galerie != pieces jointes", c["urls"], c["noms"]))
+        if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", n) for n in c["noms"]):
+            pb.append(("nom de piece jointe non sur", c["noms"]))
+        if c["racine"] != [17]:
+            pb.append(("pas UN conteneur", c["racine"]))
+        if c["vue"].content_length() > 4000 or c["vue"].total_children_count > 40:
+            pb.append(("limites V2", c["vue"].content_length(), c["vue"].total_children_count))
+        if c["rec"].get("content") or c["rec"].get("_content_passe") or c["rec"].get("embed") \
+                or c["rec"].get("embeds"):
+            pb.append("content ou embed a cote de la vue")
+        # Les libelles : ni dans l'en-tete, ni dans une ligne hors bloc a copier.
+        lib = [t for t in c["textes"][:1] + [t for t in c["textes"] if not t.startswith("**")]
+               if LIBELLES.search(t)]
+        if lib:
+            pb.append(("libelle / vues / fleche", lib))
+        return pb
+
+    def verifier_lot(nom, envois, n, *, desc_de, cap_de=None, son_de=None, alertes_de=None,
+                     bloquant_de=None, emo=E_LOLA, ident="lola", srcs=None):
+        cs = [lire(r) for r in cartes(envois)]
+        check(f"{nom} : {n} carte(s), une par contenu", len(cs) == n,
+              "%d carte(s) ; envois : %s" % (len(cs), [str(e.get("content"))[:60] for e in envois]))
+        pb = [(i, p) for i, c in enumerate(cs, 1) for p in forme(c)]
+        check(f"{nom} : forme all-banger (galerie = piece jointe au nom sur, un conteneur, "
+              f"<= 4000 signes, <= 40 composants, ni content ni embed, ni libelle ni vues)",
+              cs and not pb, pb[:3])
+        mauvais = [(i, c["entete"]) for i, c in enumerate(cs, 1) if c["entete"] != entete(i, n, ident, emo)]
+        check(f"{nom} : en-tete exact « {entete(1, n, ident, emo)} »", cs and not mauvais, mauvais[:3])
+        pb = []
+        for i, c in enumerate(cs, 1):
+            if srcs is not None and c["srcs"][:1] and c["srcs"][0] not in srcs:
+                pb.append((i, "media", c["srcs"]))
+            d = desc_de(c)
+            bd = [b for b in c["blocs"] if b.startswith("**Description à copier**")]
+            if bd != ([bloc("Description à copier", d)] if d else []):
+                pb.append((i, "description", bd))
+            if cap_de is not None:
+                cap = cap_de(c)
+                bc = [b for b in c["blocs"] if b.startswith("**Caption à copier**")]
+                if bc != ([bloc("Caption à copier", cap)] if cap else []):
+                    pb.append((i, "caption", bc))
+            if son_de is not None and bloc("SON / CONSIGNE", son_de(c)) not in c["blocs"]:
+                pb.append((i, "son", c["blocs"]))
+        check(f"{nom} : le media tire et ses textes exacts dans leurs blocs a copier",
+              cs and not pb, pb[:3])
+        if alertes_de is not None or bloquant_de is not None:
+            pb = []
+            for i, c in enumerate(cs, 1):
+                for a in (alertes_de(c) if alertes_de else []):
+                    if not any(a in t for t in c["textes"][1:]):
+                        pb.append((i, "avertissement perdu", a[:40]))
+                if bloquant_de is not None and \
+                        (c["accent"] == U._COULEUR_CARTE_ALERTE) != bool(bloquant_de(c)):
+                    pb.append((i, "lisere", c["accent"]))
+            check(f"{nom} : avertissements gardes dans la carte, lisere rouge seulement "
+                  f"pour « ne poste pas »", cs and not pb, pb[:3])
+        tr = notices(envois)
+        check(f"{nom} : aucune consigne « notice » dans le salon", not tr, tr[:3])
+        return cs
+
+    NUM = {"n": 0}
+
+    def lot_us(tag, cmd, count=2, supports=True, model="lola", brute_de=None,
+               emojis=(E_LOLA, E_BLONDE), refuser=False, trop_lourd=(), max_fichiers=0):
+        """Un clic du panneau US : tout doit partir dans le -content, rien ailleurs."""
+        NUM["n"] += 1
+        g, menu, cont = dossier(700 + NUM["n"], emojis=emojis)
+        cont.refuser_carte = refuser
+        cont.trop_lourd = set(trop_lourd)
+        cont.max_fichiers = max_fichiers
+        GEN.clear()
+        itx = Itx(g, menu)
+        # Une commande qui LEVE est un echec nomme, pas la fin du bloc : les
+        # lots suivants disent encore ce qu'ils ont a dire.
+        err = None
+        try:
+            lancer(COG._run_for_model(itx, model, cmd, count=count, supports_count=supports,
+                                      brute_de=brute_de))
+        except Exception as e:                               # noqa: BLE001
+            err = repr(e)[:200]
+        check(f"{tag} : va au bout sans lever, rien dans le salon -menu ni en ephemere",
+              err is None and not menu.envois and not itx.followup.envois,
+              err or (menu.envois[:1], itx.followup.envois[:1]))
+        return cont
+
+    def source_montee(c):
+        return next((v["video"] for v in GEN.values() if c["srcs"] and v["out"] == c["srcs"][0]), None)
+
+    def desc_template(c):
+        return DESC_B if source_montee(c) == rel(TPL[0]) else None
+
+    def desc_caption(c):
+        info = next((v for v in GEN.values() if c["srcs"] and v["out"] == c["srcs"][0]), None)
+        segs = json.loads(info["draft"].get("segments") or "[]") if info else []
+        incrustes = [s.get("text") for s in segs]
+        cap = next((x for x in CAPS if x["text"] in incrustes), None) or {}
+        return cap.get("desc") or None
+
+    DESC_PAR_SRC = {rel(BRUTES[0]): DESC_A, rel(BRUTES[1]): None, rel(REELS[0]): DESC_A,
+                    rel(REELS[1]): None, rel(TRENDS[0]): DESC_A, rel(TRENDS[1]): None,
+                    rel(IMGS[0]): DESC_B, rel(IMGS[1]): None}
+    CAP_PAR_SRC = {rel(REELS[0]): CAP_A, rel(REELS[1]): CAP_B, rel(IMGS[0]): CAP_A, rel(IMGS[1]): None}
+    SON_PAR_SRC = {rel(TRENDS[0]): SON_1, rel(TRENDS[1]): "Son libre"}
+
+    # ===========================================================================
+    # 0. ALL-BANGER INCHANGE : les briques mises en commun rendent la meme chose
+    # ===========================================================================
+    print("\n== 0. briques partagees avec all-banger ==")
+    url = "https://www.instagram.com/p/SC1/"
+
+    def rendu_desc(d, joindre):
+        enf, fs = bangers.blocs_description_discord("SC1", d, url, joindre)
+        noms = [f.filename for f in fs]
+        for f in fs:
+            f.close()
+        return [e.content for e in enf if isinstance(e, discord.ui.TextDisplay)], noms
+
+    # Valeurs de l'ANCIENNE fonction (avant la mise en commun), a l'identique.
+    check("all-banger : une description de 2701 signes avec .txt coupee a 2700, « … » et renvoi au fichier",
+          rendu_desc("a" * 2701, True) == (["**Description à copier**\n```\n" + "a" * 2700
+                                             + "…\n```\nTexte complet dans le fichier ci-dessous."],
+                                            ["SC1_description.txt"]),
+          rendu_desc("a" * 2701, True))
+    check("all-banger : sans .txt, coupe a 3500 et sans renvoi",
+          rendu_desc("b" * 3501, False) == (["**Description à copier**\n```\n" + "b" * 3500 + "…\n```"], [])
+          and rendu_desc("b" * 3500, False) == (["**Description à copier**\n```\n" + "b" * 3500 + "\n```"], []),
+          rendu_desc("b" * 3501, False))
+    check("all-banger : un bloc deja entoure de ``` est deballe, les ``` restants casses",
+          rendu_desc("```\ndéjà en bloc\n```", False)[0] == ["**Description à copier**\n```\ndéjà en bloc\n```"]
+          and rendu_desc("x ``` y", False)[0] == ["**Description à copier**\n```\nx ` ` ` y\n```"],
+          (rendu_desc("```\ndéjà en bloc\n```", False), rendu_desc("x ``` y", False)))
+    _aucune = (["**Description**\nAucune description récupérée pour ce reel."], [])
+    check("all-banger : sans description, « Aucune description récupérée », ni bloc ni fichier",
+          rendu_desc(None, True) == _aucune and rendu_desc("", False) == _aucune,
+          (rendu_desc(None, True), rendu_desc("", False)))
+    _g, _f = bangers.bloc_video_discord("SC1", REELS[0], "Vidéo de @x")
+    check("all-banger : bloc_video_discord garde sa galerie et son nom <shortcode>.mp4",
+          _g.to_component_dict()["items"][0]["media"]["url"] == "attachment://SC1.mp4"
+          and _g.to_component_dict()["items"][0].get("description") == "Vidéo de @x"
+          and _f.filename == "SC1.mp4" and rel(_f.fp.name) == rel(REELS[0]))
+    _f.close()
+    try:
+        bangers.bloc_video_discord("SC1", TMP / "absent.mp4")
+        _leve = False
+    except FileNotFoundError:
+        _leve = True
+    check("all-banger : un fichier absent leve FileNotFoundError, comme avant", _leve)
+    # UNE mise en forme pour les deux salons : deux constructions separees
+    # divergeaient a la premiere retouche.
+    check("briques : la carte de livraison et all-banger partagent galerie et bloc a copier",
+          "bloc_medias_discord(" in inspect.getsource(U._carte_livraison)
+          and "contenu_a_copier(" in inspect.getsource(U._carte_livraison)
+          and "contenu_a_copier(" in inspect.getsource(bangers.blocs_description_discord)
+          and "bloc_medias_discord(" in inspect.getsource(bangers.bloc_video_discord))
+
+    # ===========================================================================
+    # 1. PANNEAU JAILBREAK US : chaque livraison part en carte dans le -content
+    # ===========================================================================
+    print("\n== 1. une carte par contenu, type par type ==")
+    # Reel monte : description ; la legende retenue est dite (jamais en silence).
+    cont = lot_us("reel monte", COG.reelmonte)
+    verifier_lot("reel monte", cont.envois, 2, desc_de=desc_template,
+                 alertes_de=lambda c: [U._ALERTE_DESC_RETENUE] if source_montee(c) == rel(TPL[1]) else [],
+                 bloquant_de=lambda c: False)
+    check("reel monte : le nom de piece jointe d'avant (reel_monte_<n>.mp4)",
+          [lire(r)["noms"] for r in cartes(cont.envois)] == [["reel_monte_1.mp4"], ["reel_monte_2.mp4"]])
+
+    # Montage rate : « NE POSTE PAS » garde, AUCUNE description, lisere rouge.
+    RATES.add(TPL[0].name)
+    try:
+        cont = lot_us("reel monte rate", COG.reelmonte, count=1)
+    finally:
+        RATES.clear()
+    verifier_lot("reel monte rate", cont.envois, 1, desc_de=lambda c: None,
+                 alertes_de=lambda c: ["NE POSTE PAS cette vidéo telle quelle",
+                                       "aucune vidéo brute utilisable"],
+                 bloquant_de=lambda c: True)
+
+    for nom_cmd in ("templatebrut", "templatebanger", "bruttemplate"):
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=2)
+        verifier_lot(nom_cmd, cont.envois, 2, desc_de=desc_template, bloquant_de=lambda c: False)
+
+    for nom_cmd in ("templatetrash", "templatetrashbanger", "bruttrash", "templatetrashbrut",
+                    "templateflash", "templateflashbanger", "brutflash", "templateflashbrut"):
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=1)
+        cs = verifier_lot(nom_cmd, cont.envois, 1, desc_de=desc_template, bloquant_de=lambda c: False)
+        marque = "trash" if "trash" in nom_cmd else "flash"
+        check(f"{nom_cmd} : piece jointe {marque}_1.mp4",
+              [c["noms"] for c in cs] == [[f"{marque}_1.mp4"]], [c["noms"] for c in cs])
+
+    for nom_cmd, prefixe in (("reelcaption", "reel_caption"), ("captionbanger", "caption_banger"),
+                             ("montagebanger", "montage_banger"), ("brutcaption", "montage_banger")):
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=2)
+        cs = verifier_lot(nom_cmd, cont.envois, 2, desc_de=desc_caption, bloquant_de=lambda c: False)
+        check(f"{nom_cmd} : pieces jointes {prefixe}_<n>.mp4",
+              [c["noms"] for c in cs] == [[f"{prefixe}_1.mp4"], [f"{prefixe}_2.mp4"]],
+              [c["noms"] for c in cs])
+
+    # Brute + caption a ecrire (captionbrut) : les DEUX textes dans la carte,
+    # plus coupes en silence a 1800 signes.
+    cont = lot_us("captionbrut", COG._send_caption_plus_brute, supports=False)
+    verifier_lot("captionbrut", cont.envois, 2, desc_de=lambda c: DESC_A, cap_de=lambda c: CAP_A,
+                 srcs={rel(b) for b in BRUTES})
+
+    for nom_cmd, sup in (("videobrut", True), ("_send_brutes_bangers", False)):
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=2, supports=sup)
+        cs = verifier_lot(nom_cmd, cont.envois, 2, desc_de=lambda c: None, srcs={rel(b) for b in BRUTES},
+                          bloquant_de=lambda c: False)
+        check(f"{nom_cmd} : nom de piece jointe rendu sur (« brute a (1).mp4 » -> « brute_a_1.mp4 »)",
+              sorted(c["noms"][0] for c in cs) == ["brute_a_1.mp4", "brute_b.mp4"],
+              [c["noms"] for c in cs])
+
+    # Brute non rendue unique : le VA la posterait telle quelle -> doublon.
+    # Lisere ROUGE (relecture) : trois brutes arrivaient en trois cartes bleues
+    # identiques, et la ligne « ne la poste pas » en italique se perdait. Les
+    # quatre voies : /videobrut, ⭐ Vidéo brut, les trends, « Telle quelle ».
+    async def _telle_quelle_non_unique():
+        gX, menuX, contX = dossier(772, emojis=(E_LOLA,))
+        itx = Itx(gX, contX)
+        await U.ChoixCaptionView(COG, "lola", BRUTES[0])._sans_caption(itx)
+        return contX.envois[:] + itx.followup.envois[:]
+
+    _cfg0, _meta0 = U.load_transform_config, U.transform_metadata_strict
+    U.load_transform_config = lambda: {"enabled": True, "metadata_only": True}
+    U.transform_metadata_strict = lambda src, dst, **k: False
+    try:
+        cont = lot_us("videobrut non unique", COG.videobrut, count=1)
+        cont_bb = lot_us("brute banger non unique", COG._send_brutes_bangers, supports=False)
+        cont_tr = lot_us("trend non unique", COG.trends, count=1)
+        envois_tq = lancer(_telle_quelle_non_unique())
+    finally:
+        U.load_transform_config, U.transform_metadata_strict = _cfg0, _meta0
+    _NU = ["pas** pu etre rendue unique"]
+    verifier_lot("videobrut non unique", cont.envois, 1, desc_de=lambda c: None,
+                 alertes_de=lambda c: _NU, bloquant_de=lambda c: True)
+    verifier_lot("brute banger non unique", cont_bb.envois, 2, desc_de=lambda c: None,
+                 alertes_de=lambda c: _NU, bloquant_de=lambda c: True, srcs={rel(b) for b in BRUTES})
+    verifier_lot("trend non unique", cont_tr.envois, 1, desc_de=lambda c: DESC_PAR_SRC[c["srcs"][0]],
+                 son_de=lambda c: SON_PAR_SRC[c["srcs"][0]], alertes_de=lambda c: _NU,
+                 bloquant_de=lambda c: True, srcs={rel(t) for t in TRENDS})
+    verifier_lot("choisir ma brute, telle quelle, non unique", envois_tq, 1, desc_de=lambda c: DESC_A,
+                 alertes_de=lambda c: _NU, bloquant_de=lambda c: True, srcs={rel(BRUTES[0])})
+
+    cont = lot_us("trends", COG.trends, count=2)
+    verifier_lot("trends", cont.envois, 2, desc_de=lambda c: DESC_PAR_SRC[c["srcs"][0]],
+                 son_de=lambda c: SON_PAR_SRC[c["srcs"][0]], srcs={rel(t) for t in TRENDS})
+
+    for nom_cmd, sup in (("reel", True), ("_send_banger_reels", False)):
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=2, supports=sup)
+        cs = verifier_lot(nom_cmd, cont.envois, 2, desc_de=lambda c: DESC_PAR_SRC[c["srcs"][0]],
+                          cap_de=lambda c: CAP_PAR_SRC[c["srcs"][0]],
+                          alertes_de=lambda c: ["**EXEMPLE**"] if len(c["noms"]) > 1 else [],
+                          srcs={rel(r) for r in REELS})
+        check(f"{nom_cmd} : l'exemple est la 2e piece jointe, dans la meme galerie",
+              cs and cs[0]["noms"] == ["r1.mp4", "EXEMPLE_r1.example.mp4"]
+              and cs[0]["srcs"][1] == rel(EXEMPLE), cs and cs[0]["noms"])
+
+    for nom_cmd in ("post", "story"):
+        TIRAGE["img"] = 0
+        cont = lot_us(nom_cmd, getattr(COG, nom_cmd), count=2)
+        verifier_lot(nom_cmd, cont.envois, 2, desc_de=lambda c: DESC_PAR_SRC[c["srcs"][0]],
+                     cap_de=lambda c: CAP_PAR_SRC[c["srcs"][0]],
+                     alertes_de=lambda c: ["**EXEMPLE**"] if len(c["noms"]) > 1 else [],
+                     srcs={rel(i) for i in IMGS})
+
+    TIRAGE["cta"] = 0
+    cont = lot_us("storycta", COG.storycta, count=2)
+    verifier_lot("storycta", cont.envois, 2, desc_de=lambda c: None, cap_de=lambda c: CAP_B,
+                 srcs={rel(i) for i in IMGS})
+
+    TIRAGE["pp"] = 0
+    cont = lot_us("pp", COG.profilepic, count=2)
+    cs = verifier_lot("pp", cont.envois, 2, desc_de=lambda c: None, srcs={rel(p) for p in PPS})
+    check("pp : seulement l'en-tete et l'image (aucun bloc de texte)",
+          cs and all(c["types"] == [10, 12] for c in cs), [c["types"] for c in cs])
+
+    # ===========================================================================
+    # 2. ✨ GENERAL, MENU CENTRAL, MENU VA FR, CHOISIR MA BRUTE
+    # ===========================================================================
+    print("\n== 2. General, menu central, menu FR, Choisir ma brute ==")
+    # Le General sert la RESERVE (Blonde) : la carte porte sa photo et son nom,
+    # comme l'ancien « (`identity`) ».
+    cont = lot_us("general reelcaption", COG.reelcaption, count=2, model="blonde", brute_de="lola")
+    verifier_lot("general reelcaption", cont.envois, 2, desc_de=desc_caption, emo=E_BLONDE, ident="blonde")
+    TIRAGE["pp"] = 0
+    cont = lot_us("general pp", COG.profilepic, count=1, model="blonde", brute_de="lola")
+    verifier_lot("general pp", cont.envois, 1, desc_de=lambda c: None, emo=E_BLONDE, ident="blonde")
+
+    async def _central():
+        tok = U._IDENTITY_OVERRIDE.set("lola")
+        try:
+            gC, menuC, _c = dossier(992, emojis=(E_LOLA,), us=False)
+            persoC = Salon(9921, "va-lola", gC)
+            COG._va_channel = lambda uid: persoC
+            itxC = Itx(gC, menuC)
+            await COG._central_run(itxC, COG.reelmonte)
+            return persoC, itxC
+        finally:
+            U._IDENTITY_OVERRIDE.reset(tok)
+
+    GEN.clear()
+    persoC, itxC = lancer(_central())
+    verifier_lot("menu central", persoC.envois, 2, desc_de=desc_template)
+    check("menu central : rien sous le menu, ni en suivi", not itxC.followup.envois, itxC.followup.envois[:1])
+
+    gF, menuF, contF = dossier(880, emojis=(E_LOLA,), us=False)
+    GEN.clear()
+    itxF = Itx(gF, menuF)
+    lancer(COG._run_for_model(itxF, "lola", COG.reelmonte, count=2, supports_count=True))
+    check("menu VA FR : les cartes partent par le suivi de l'interaction, rien dans les salons",
+          not menuF.envois and not contF.envois)
+    verifier_lot("menu VA FR", itxF.followup.envois, 2, desc_de=desc_template)
+
+    async def _choix():
+        gX, menuX, contX = dossier(770, emojis=(E_LOLA,))
+        out = {}
+
+        async def etape(cle, fn):
+            """Chaque voie a part : une qui leve ne cache pas les suivantes."""
+            contX.envois.clear()
+            GEN.clear()
+            itx = Itx(gX, contX)         # le menu ephemere vit sous le -content
+            err = None
+            try:
+                await fn(itx)
+            except Exception as e:                           # noqa: BLE001
+                err = repr(e)[:200]
+            out[cle] = (contX.envois[:] + itx.followup.envois[:], err)
+
+        vue = U.ChoixCaptionView(COG, "lola", BRUTES[0])
+        await etape("telle", vue._sans_caption)
+
+        async def _biblio(itx):
+            itx.data = {"values": ["0"]}
+            await vue._caption_choisie(itx)
+        await etape("biblio", _biblio)
+
+        async def _libre(itx):
+            m = U.CaptionLibreModal(COG, "lola", BRUTES[1])
+            m.texte._value = "ma caption à moi"
+            m.description._value = "ma description"
+            await m.on_submit(itx)
+        await etape("libre", _libre)
+        # La brute rangee entre le choix et l'envoi : dite au VA (levait jusqu'a
+        # discord.py, le VA ne lisait rien).
+        await etape("rangee", U.ChoixCaptionView(COG, "lola", TMP / "rangee.mp4")._sans_caption)
+        return out
+
+    o = lancer(_choix())
+    for cle, quoi in (("telle", "telle quelle"), ("biblio", "caption de la bibliotheque"),
+                      ("libre", "sa caption"), ("rangee", "brute rangee entre-temps")):
+        check(f"choisir ma brute, {quoi} : va au bout sans lever", o[cle][1] is None, o[cle][1])
+    cs = verifier_lot("choisir ma brute, telle quelle", o["telle"][0], 1, desc_de=lambda c: DESC_A,
+                      srcs={rel(BRUTES[0])}, bloquant_de=lambda c: False)
+    check("choisir ma brute, telle quelle : publique (pas d'ephemere force)",
+          cs and not cs[0]["rec"].get("ephemeral"))
+    cs = verifier_lot("choisir ma brute, caption de la bibliotheque", o["biblio"][0], 1,
+                      desc_de=lambda c: DESC_A)
+    check("choisir ma brute, caption de la bibliotheque : piece jointe brute_caption_1.mp4",
+          [c["noms"] for c in cs] == [["brute_caption_1.mp4"]], [c["noms"] for c in cs])
+    verifier_lot("choisir ma brute, sa caption", o["libre"][0], 1, desc_de=lambda c: "ma description")
+    check("choisir ma brute : une brute rangee entre-temps est dite au VA",
+          not cartes(o["rangee"][0])
+          and any("introuvable" in str(e.get("content") or "") for e in o["rangee"][0]),
+          [e.get("content") for e in o["rangee"][0]])
+
+    # ===========================================================================
+    # 3. EN-TETE : emoji absent, nom a « _ », sans identite ; noms de fichier
+    # ===========================================================================
+    print("\n== 3. en-tete et noms de pieces jointes ==")
+    cont = lot_us("en-tete sans emoji", COG.reelmonte, count=1, emojis=())
+    cs = [lire(r) for r in cartes(cont.envois)]
+    check("en-tete : emoji absent du serveur -> « **1/1** · lola », le nom seul",
+          [c["entete"] for c in cs] == ["**1/1** · lola"], [c["entete"] for c in cs])
+    check("en-tete : un nom a « _ » est echappe (pas d'italique)",
+          U._entete_carte(2, 5, "ema_bb0") == "**2/5** · ema\\_bb0", U._entete_carte(2, 5, "ema_bb0"))
+    check("en-tete : sans identite (PP du vivier partage), le rang seul",
+          U._entete_carte(1, 3, None) == "**1/3**" and U._entete_carte(1, 3, "  ") == "**1/3**")
+    check("pieces jointes : nom ramene a [A-Za-z0-9_.-], extension gardee, jamais vide",
+          U._nom_piece_jointe("ééé.MP4") == "media.mp4" and U._nom_piece_jointe("a b(2).jpg") == "a_b_2.jpg"
+          and U._nom_piece_jointe("ma vidéo (2).MP4") == "ma_vid_o_2.mp4",
+          (U._nom_piece_jointe("ééé.MP4"), U._nom_piece_jointe("a b(2).jpg"),
+           U._nom_piece_jointe("ma vidéo (2).MP4")))
+    _v, _fs = U._carte_livraison(1, 2, "lola", [(REELS[0], "x.mp4"), (EXEMPLE, "x.mp4")])
+    _noms = [f.filename for f in _fs]
+    _urls = [it["media"]["url"] for k in _v.to_components()[0]["components"] if k["type"] == 12
+             for it in k["items"]]
+    for _f in _fs:
+        _f.close()
+    check("pieces jointes : deux noms identiques sont separes (la galerie montrerait deux fois la 1re)",
+          len(set(_noms)) == 2 and _urls == ["attachment://" + n for n in _noms], (_noms, _urls))
+
+    # ===========================================================================
+    # 4. REPLI : carte refusee ou impossible -> l'ancien envoi, rien de perdu
+    # ===========================================================================
+    print("\n== 4. repli ==")
+    del JOURNAL.lignes[:]
+    cont = lot_us("carte refusee", COG.reelmonte, count=2, refuser=True)
+    check("carte refusee par Discord : aucune carte, et le journal le dit",
+          not cartes(cont.envois) and journal("refusee") and journal("ancien envoi"), JOURNAL.lignes[-2:])
+    avec_fichier = [e for e in cont.envois if e["_noms"]]
+    check("carte refusee : chaque contenu repart avec son fichier",
+          [e["_noms"] for e in avec_fichier] == [["reel_monte_1.mp4"], ["reel_monte_2.mp4"]],
+          [e["_noms"] for e in avec_fichier])
+    check("carte refusee : le texte du repli porte le meme en-tete que la carte",
+          [str(e["content"]).split("\n")[0] for e in avec_fichier] == [entete(1, 2), entete(2, 2)],
+          [e["content"] for e in avec_fichier])
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    check("carte refusee : la description part quand meme, entiere, en bloc de code",
+          "**Description à copier**" in contenus and ("```\n" + DESC_B + "\n```") in contenus, contenus[-4:])
+    check("carte refusee : l'avertissement « légende retenue » part quand meme",
+          any(U._ALERTE_DESC_RETENUE in c for c in contenus))
+    tr = notices(cont.envois)
+    check("carte refusee : le repli n'a pas ses anciennes consignes", not tr, tr[:3])
+
+    RATES.add(TPL[0].name)
+    try:
+        cont = lot_us("carte refusee, montage rate", COG.reelmonte, count=1, refuser=True)
+    finally:
+        RATES.clear()
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    check("repli d'un montage rate : « NE POSTE PAS » garde, pas de description",
+          any("NE POSTE PAS" in c for c in contenus) and "**Description à copier**" not in contenus, contenus)
+
+    # L'exemple fait deborder la taille permise : le contenu part seul, et l'omission se dit.
+    del JOURNAL.lignes[:]
+    cont = lot_us("repli, exemple trop lourd", COG.reel, count=1, refuser=True, max_fichiers=1)
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    avec_fichier = [e for e in cont.envois if e["_noms"]]
+    check("repli, exemple trop lourd : la video part seule, l'omission est dite et journalisee",
+          [e["_noms"] for e in avec_fichier] == [["r1.mp4"]]
+          and "Exemple omis" in str(avec_fichier[0]["content"] if avec_fichier else "")
+          and journal("repli sans lui"), (contenus, JOURNAL.lignes[-2:]))
+    check("repli, exemple trop lourd : caption et description suivent",
+          ("```\n" + CAP_A + "\n```") in contenus and ("```\n" + DESC_A + "\n```") in contenus, contenus)
+
+    # Textes trop longs pour tenir ensemble dans 4000 signes : pas de coupe
+    # muette, la carte est refusee et l'ancien envoi les livre ENTIERS.
+    del JOURNAL.lignes[:]
+    LONG_CAP = "L" * 3900
+    LONG_DESC = ("ligne de description\n" * 150).strip()
+    _caps0 = U.fav_captions_for
+    U.fav_captions_for = lambda ident: [{"id": "cl", "text": LONG_CAP, "desc": LONG_DESC, "enabled": True}]
+    try:
+        cont = lot_us("textes trop longs", COG._send_caption_plus_brute, supports=False)
+    finally:
+        U.fav_captions_for = _caps0
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    blocs_code = "".join(c[4:-4] for c in contenus if c.startswith("```\n") and c.endswith("\n```"))
+    check("textes trop longs pour une carte : ancien envoi, et le journal dit pourquoi",
+          not cartes(cont.envois) and journal("non construite"), JOURNAL.lignes[-2:])
+    check("textes trop longs : caption ET description arrivent ENTIERES (decoupees, pas coupees)",
+          blocs_code.count(LONG_CAP) == 2
+          and blocs_code.replace("\n", "").count(LONG_DESC.replace("\n", "")) == 2,
+          (len(blocs_code), blocs_code.count(LONG_CAP)))
+
+    # Une description plus longue que le plafond des bangers, mais seule : coupee
+    # comme dans all-banger (« … »), et la coupe se dit au journal.
+    del JOURNAL.lignes[:]
+    _v, _fs = U._carte_livraison(1, 1, "lola", [(BRUTES[1], "b.mp4")],
+                                 textes=[(U._T_DESC, "d" * 3800)], quoi="essai long")
+    for _f in _fs:
+        _f.close()
+    _bl = [t.content for t in _v.walk_children() if isinstance(t, discord.ui.TextDisplay)][-1]
+    check("description de 3800 signes : coupee comme all-banger (3500 + « … ») et journalisee",
+          _bl == bloc(U._T_DESC, "d" * 3500 + "…") and _v.content_length() <= 4000 and journal("coupe"),
+          (len(_bl), JOURNAL.lignes[-1:]))
+
+    # Un fichier que Discord refuse (carte ET ancien envoi) : dit au VA, la suite part.
+    cont = lot_us("/reel trop lourd", COG.reel, count=2, trop_lourd={"r1.mp4"})
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    check("/reel : un reel trop lourd est dit au VA, le suivant part en carte",
+          any("impossible d'envoyer (trop lourd)" in c for c in contenus) and len(cartes(cont.envois)) == 1,
+          contenus)
+    TIRAGE["pp"] = 0
+    cont = lot_us("pp trop lourde", COG.profilepic, count=2, trop_lourd={"pp1.png"})
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    check("pp : une photo refusee est dite au VA, la suivante part (le lot n'est plus coupe)",
+          any("Photo de profil 1/2 : envoi impossible" in c for c in contenus)
+          and len(cartes(cont.envois)) == 1, contenus)
+
+    # Source rangee entre le tirage et l'envoi (doublons_vault) : dit, la suite part.
+    _perdu = TMP / "perdu.mp4"
+    U.fav_brutes_for = lambda ident, limit=15: [_perdu, BRUTES[1]]
+    try:
+        cont = lot_us("source disparue", COG._send_brutes_bangers, supports=False)
+    finally:
+        U.fav_brutes_for = lambda ident, limit=15: list(BRUTES)
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    check("source disparue : « introuvable » dit au VA, la suivante part en carte",
+          any("introuvable" in c for c in contenus) and len(cartes(cont.envois)) == 1, contenus)
+
+    # Video PRODUITE disparue avant l'envoi : dit, la barre va au bout, la suite part.
+    PERDUS.add(TPL[0].name)
+    try:
+        cont = lot_us("video produite disparue", COG.reelmonte, count=2)
+    finally:
+        PERDUS.clear()
+    contenus = [str(e.get("content") or "") for e in cont.envois]
+    _barre = [e for e in cont.envois if e.get("embed") is not None]
+    _fin = (_barre[0]["_msg"].edits[-1]["embed"].description
+            if _barre and _barre[0]["_msg"].edits else "")
+    check("video produite disparue : « introuvable » dit, la suivante part en carte, barre au bout",
+          any("envoi impossible (introuvable)" in c for c in contenus) and len(cartes(cont.envois)) == 1
+          and "2/2" in _fin, (contenus, _fin))
+
+    # ===========================================================================
+    # 5. LES PROXIES : view= et files= passent, jamais de content
+    # ===========================================================================
+    print("\n== 5. proxies ==")
+    _v, _fs = U._carte_livraison(1, 1, "lola", [(BRUTES[1], "b.mp4")], textes=[(U._T_DESC, DESC_A)])
+    reel_ = Suivi()
+    lancer(U._RedirectFollowup(reel_, None).send(view=_v, files=_fs))
+    e = reel_.envois[0] if reel_.envois else {}
+    check("_RedirectFollowup sans -content : carte en ephemere, view + files, AUCUN content passe",
+          e.get("view") is _v and e.get("_noms") == ["b.mp4"] and e.get("ephemeral") is True
+          and not e.get("_content_passe"), {k: e.get(k) for k in ("ephemeral", "_noms", "_content_passe")})
+    g, menu, cont = dossier(990)
+    lancer(U._RedirectFollowup(Suivi(), cont).send(view=_v, files=_fs))
+    e = cont.envois[0] if cont.envois else {}
+    check("_RedirectFollowup vers le -content : view + files, aucun content",
+          e.get("view") is _v and e.get("_noms") == ["b.mp4"] and not e.get("_content_passe"))
+    cont.envois.clear()
+    px = U._JBRedirect(Itx(g, menu), cont)
+    lancer(px.response.send_message(view=_v, files=_fs))
+    e = cont.envois[0] if cont.envois else {}
+    check("_RedirectResponse vers le -content : view + files, aucun content, rien dans le -menu",
+          e.get("view") is _v and e.get("_noms") == ["b.mp4"] and not e.get("_content_passe")
+          and not menu.envois)
+    perso = Salon(991, "va-lola", g)
+    proxy = U._ChannelProxy(Itx(g, menu), perso)
+    lancer(proxy.followup.send(view=_v, files=_fs))
+    e = perso.envois[0] if perso.envois else {}
+    check("_SendProxy (menu central) : view + files, aucun content",
+          e.get("view") is _v and e.get("_noms") == ["b.mp4"] and not e.get("_content_passe"))
+    lancer(proxy.followup.send("texte"))
+    check("_SendProxy : un texte passe toujours", perso.envois[-1].get("content") == "texte")
+    for _f in _fs:
+        _f.close()
+
+    # ===========================================================================
+    # 6. PLUS AUCUNE LIVRAISON HORS DE LA CARTE, PLUS AUCUNE CONSIGNE
+    # ===========================================================================
+    print("\n== 6. une seule voie, plus de consignes ==")
+    _src = Path("cogs/user.py").read_text(encoding="utf-8")
+    _arbre = ast.parse(_src)
+    _porteur = {}
+    for _n in ast.walk(_arbre):          # du plus englobant au plus interne
+        if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for _s in ast.walk(_n):
+                if isinstance(_s, ast.Call):
+                    _porteur[id(_s)] = _n.name
+    _fichiers, _livreurs = [], set()
+    for _n in ast.walk(_arbre):
+        if not isinstance(_n, ast.Call):
+            continue
+        if isinstance(_n.func, ast.Attribute) and _n.func.attr == "File" \
+                and getattr(_n.func.value, "id", None) == "discord":
+            _fichiers.append(_porteur.get(id(_n), "?"))
+        if getattr(_n.func, "id", None) == "_livrer_contenu":
+            _livreurs.add(_porteur.get(id(_n), "?"))
+    # Deux exceptions NOMMEES : le tutoriel (un mode d'emploi, pas un contenu)
+    # et la planche de « Choisir ma brute » (un menu, pas une livraison).
+    _HORS_LIVRAISON = {"_livrer_contenu", "_send_tutoriel", "_planche_et_texte"}
+    check("une seule voie : aucun fichier joint hors de _livrer_contenu (sauf tutoriel et planche)",
+          not (set(_fichiers) - _HORS_LIVRAISON), sorted(set(_fichiers) - _HORS_LIVRAISON))
+    _ATTENDUS = {"profilepic", "_send_image_content", "storycta", "_deliver_reels_loop",
+                 "_gen_and_send_montaged", "_send_caption_plus_brute", "_envoyer_brutes_meta",
+                 "_gen_and_send_caption", "_sans_caption"}
+    check("une seule voie : les 9 fonctions d'envoi passent par _livrer_contenu",
+          _ATTENDUS <= _livreurs, sorted(_ATTENDUS - _livreurs))
+
+    def _litteraux(code):
+        """Les chaines que le code peut ENVOYER : constantes et morceaux de
+        f-strings, sans les docstrings ni les commentaires -- qui citent les
+        anciennes phrases pour dire pourquoi elles sont parties."""
+        arbre = ast.parse(code)
+        docs = set()
+        for n in ast.walk(arbre):
+            if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if n.body and isinstance(n.body[0], ast.Expr) \
+                        and isinstance(getattr(n.body[0], "value", None), ast.Constant):
+                    docs.add(id(n.body[0].value))
+        return "\n".join(n.value for n in ast.walk(arbre)
+                         if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs)
+
+    _lit = _litteraux(_src)
+    # Des MORCEAUX : une f-string est coupee a chaque {…} dans l'arbre.
+    _PARTIES = ("Copie celui que tu veux", "Copie celui qui te plait", "mets-en une différente par compte",
+                "**Compte ", "à poster sur ton", "compte n°", "Poste cette vidéo **telle quelle**",
+                "à coller dans le **champ légende**", "(champ légende) :", "Télécharge la",
+                "Télécharge et upload", "poste **tel quel**", "À POSTER LE SOIR ENTRE 19H ET 23H",
+                "RÈGLE : 1 reel", "PAR-DESSUS la", "écris la caption dessus", "DESCRIPTION** (",
+                "** (à coller")
+    check("messages envoyes : plus aucune consigne « notice » (Name, Pseudo, Bio, livraisons, entetes)",
+          not [p for p in _PARTIES if p in _lit], [p for p in _PARTIES if p in _lit])
+    check("messages envoyes : les vrais avertissements restent (pseudos pris, 1 reel par compte)",
+          "ils peuvent être pris à tout moment" in _lit and _lit.count("1 reel différent par compte") >= 2)
+
+    async def _bios():
+        gT, menuT, contT = dossier(660, emojis=(E_LOLA,))
+        _it = iter(["bio un", "bio deux", "bio trois"])
+        U.random_bio_for = lambda ident: next(_it)
+        tok = U._IDENTITY_OVERRIDE.set("lola")
+        try:
+            itx = Itx(gT, contT)
+            await COG.bio.callback(COG, itx, 3)
+            return itx.response.faits
+        finally:
+            U._IDENTITY_OVERRIDE.reset(tok)
+
+    faits = lancer(_bios())
+    msg = faits[-1][1] if faits and faits[-1][0] == "send_message" else ""
+    check("bio : « **1/3** bio un », sans « Compte 1. » ni « mets-en une différente »",
+          "**1/3** bio un" in msg and "**3/3** bio trois" in msg and "Compte" not in msg
+          and "différente" not in msg, msg)
+
+    # ===========================================================================
+    # 7. AJOUT DU 27/09/2026 : PLUS AUCUN MESSAGE D'INTRO AVANT LA BARRE
+    # ===========================================================================
+    # Le proprietaire : « 5 reel(s) déjà monté(s)… je les génère pour toi… »,
+    # « N reel(s) caption… », « N MONTAGE(S) BANGER… » -- la carte de
+    # progression « ça suffit largement ». Ce que l'intro disait d'utile
+    # (combien sur combien demandes, ce qui a ete ecarte) passe SOUS la barre.
+    print("\n== 7. plus d'intro avant la barre ==")
+
+    def barre(envois):
+        """(le message de la barre, sa derniere description) ; (None, "") sans barre."""
+        b = next((e for e in envois if e.get("embed") is not None
+                  and str(e["embed"].title or "")[:1] in ("⏳", "✅")), None)
+        if b is None:
+            return None, ""
+        eds = [k["embed"] for k in b["_msg"].edits if k.get("embed") is not None]
+        return b, (eds[-1] if eds else b["embed"]).description or ""
+
+    _PROGRESSIFS = ("reelmonte", "reelcaption", "captionbanger", "montagebanger", "brutcaption",
+                    "templatebrut", "templatebanger", "bruttemplate",
+                    "templatetrash", "templatetrashbanger", "bruttrash", "templatetrashbrut",
+                    "templateflash", "templateflashbanger", "brutflash", "templateflashbrut")
+    for nom_cmd in _PROGRESSIFS:
+        cont = lot_us(f"sans intro, {nom_cmd}", getattr(COG, nom_cmd), count=5)
+        b, fin = barre(cont.envois)
+        textes = [str(e.get("content"))[:70] for e in cont.envois if e.get("content")]
+        n = len(cartes(cont.envois))
+        check(f"sans intro, {nom_cmd} : la barre est le PREMIER message, aucun texte avant ni apres",
+              b is not None and cont.envois and cont.envois[0] is b and not textes,
+              (textes, [bool(e.get("embed")) for e in cont.envois[:2]]))
+        # Moins que demande : la barre le dit, jusqu'au bout. Autant : rien.
+        attendu = f"**{n}** sur **5** demandés" if n < 5 else None
+        check(f"sans intro, {nom_cmd} : « {n} sur 5 demandés » sous la barre (seulement si moins)",
+              n >= 1 and ((attendu in fin) if attendu else ("demandés" not in fin))
+              and ("terminé" in fin), (n, fin))
+
+    # Les ecartes : dits sous la barre, plus dans un message a part.
+    _caps0 = U.fav_captions_for
+    U.fav_captions_for = lambda ident: [CAPS[0], {"id": "vide", "text": "   ", "enabled": True}]
+    try:
+        cont = lot_us("sans intro, captions ecartees", COG.captionbanger, count=2)
+    finally:
+        U.fav_captions_for = _caps0
+    b, fin = barre(cont.envois)
+    check("sans intro : « 1 caption(s) favorite(s) écartée(s) : texte vide » sous la barre",
+          "1 caption(s) favorite(s) écartée(s) : texte vide." in fin
+          and not [e for e in cont.envois if e.get("content")], fin)
+    _fav0 = U.fav_templates_for
+    U.fav_templates_for = lambda ident, limit=15, **_kw: ([(TPL[0], DRAFT)], 3)
+    try:
+        cont = lot_us("sans intro, templates sans coupe", COG.templatebrut, count=2)
+    finally:
+        U.fav_templates_for = _fav0
+    b, fin = barre(cont.envois)
+    check("sans intro : « 3 template(s) étoilé(s) écarté(s) : pas de point de coupe » sous la barre",
+          "3 template(s) étoilé(s) écarté(s)" in fin and not [e for e in cont.envois if e.get("content")],
+          fin)
+    _mq0 = U.marque_templates_for
+
+    def _marque_ecarts(cle, ident, limit=15, exiger_banger=False, ecartes=None):
+        if ecartes is not None:
+            ecartes["desactives"] = 2
+        return [(TPL[0], DRAFT)], 1
+    U.marque_templates_for = _marque_ecarts
+    try:
+        cont = lot_us("sans intro, marque ecartes", COG.templatetrash, count=3)
+    finally:
+        U.marque_templates_for = _mq0
+    b, fin = barre(cont.envois)
+    check("sans intro : Trash dit ses ecartes (coupe, ⊘) et « 1 sur 3 demandés » sous la barre",
+          "écarté(s) : pas de" in fin and "2 montage(s)" in fin and "mis de côté ⊘" in fin
+          and "**1** sur **3** demandés" in fin and not [e for e in cont.envois if e.get("content")],
+          fin)
+
+    # La barre refusee par Discord : la note ne se perd pas avec elle.
+    class _SuiviSansBarre(Suivi):
+        async def send(self, *args, **kw):
+            if kw.get("embed") is not None:
+                raise http_exc(400, "embed refuse")
+            return await Suivi.send(self, *args, **kw)
+
+    del JOURNAL.lignes[:]
+    _itxB = types.SimpleNamespace(followup=_SuiviSansBarre())
+    _pB = U._Progression(_itxB, 3, "Essai", note=["ℹ️ **1** sur **3** demandés — tout le stock (x).", ""])
+    lancer(_pB.demarrer())
+    check("barre refusee : la note part seule (jamais perdue en silence), et le journal le dit",
+          _pB.message is None and [e.get("content") for e in _itxB.followup.envois]
+          == ["ℹ️ **1** sur **3** demandés — tout le stock (x)."]
+          and journal("barre de progression refusee"),
+          ([e.get("content") for e in _itxB.followup.envois], JOURNAL.lignes[-2:]))
+    check("barre : la note est une ligne courte, sans l'ancienne justification",
+          U.UserCog._note_plafond(5, 3, "q") == "ℹ️ **3** sur **5** demandés — tout le stock (q)."
+          and U.UserCog._note_plafond(5, 5, "q") == "" and U.UserCog._note_plafond(None, 3, "q") == "")
+    _PHRASES_INTRO = ("je les génère", "Je les génère", "je les **génère", "15-30s chacun",
+                      "déjà monté(s) pour", "reel(s) caption pour", "MONTAGE(S) BANGER pour",
+                      "VIDÉO(S) À CAPTION BANGER", "TEMPLATE pour", "Tu en as demande")
+    check("messages envoyes : plus aucune intro de generation (« je les génère », « ≈15-30s »…)",
+          not [p for p in _PHRASES_INTRO if p in _lit], [p for p in _PHRASES_INTRO if p in _lit])
+
+    # Les intros qui RESTENT (envois sans barre, quasi instantanes) : le
+    # decompte seul, comme les trends (relecture). « à toi de les monter »,
+    # « tes meilleurs, à reposter » etaient des consignes, oubliees par le
+    # chantier. Ce qui est utile reste : « Seulement N… », la regle anti-doublon.
+    def premier_texte(envois):
+        return str(envois[0].get("content") or "") if envois else ""
+
+    cont = lot_us("intro videobrut", COG.videobrut, count=2)
+    check("intro /videobrut : le decompte seul",
+          premier_texte(cont.envois) == "🎥 **2 vidéo(s) brute(s) pour `lola`**",
+          premier_texte(cont.envois))
+    cont = lot_us("intro videobrut, moins que demande", COG.videobrut, count=5)
+    check("intro /videobrut : « Seulement N… (tu en as demandé M) » garde sous le decompte",
+          premier_texte(cont.envois) == ("🎥 **2 vidéo(s) brute(s) pour `lola`**\nℹ️ Seulement **2** "
+                                         "vidéo(s) brute(s) dispo (tu en as demandé 5)."),
+          premier_texte(cont.envois))
+    cont = lot_us("intro brute banger", COG._send_brutes_bangers, supports=False)
+    check("intro ⭐ Vidéo brut banger : le decompte seul",
+          premier_texte(cont.envois) == "⭐ **2 VIDÉO(S) BRUTE(S) BANGER pour `lola`**",
+          premier_texte(cont.envois))
+    cont = lot_us("intro reels banger", COG._send_banger_reels, supports=False)
+    check("intro 💥 Reels Banger : le decompte et la regle anti-doublon, rien d'autre",
+          premier_texte(cont.envois) == "💥 **2 REEL(S) BANGER pour `lola`**\n🚨 **1 reel différent par compte.**",
+          premier_texte(cont.envois))
+    _CONSIGNES_INTRO = ("à toi de les monter", "tes meilleurs, à reposter", "les meilleures, sans texte")
+    check("messages envoyes : plus de « à toi de les monter » ni de « tes meilleurs, à reposter »",
+          not [p for p in _CONSIGNES_INTRO if p in _lit], [p for p in _CONSIGNES_INTRO if p in _lit])
+
+
+_CL_MODULES = [_v2imp.import_module(n) for n in (
+    "cogs.user", "cogs.welcome", "guild_features", "brutes_off", "bangers")]
+_savCL = {m: dict(vars(m)) for m in _CL_MODULES}
+_savEtatsCL = {k: dict(getattr(_v2_u, k)) for k in (
+    "_JB_PANNEAU_COURANT", "_JB_SOUS_MENUS", "_DERNIER_PANNEAU_JB", "_MENU_BTN_FEATURE",
+    "_EMOJIS_CREES")}
+_nEcritsCL = len(_V2_AUDIT["ecrits"])
+_V2_AUDIT["actif"] = True
+try:
+    _v2_bloc_cartes_livraison()
+except Exception as _eCL:
+    check("cartes livraison : testable", False,
+          repr(_eCL)[:200] + " " + _v2tb.format_exc()[-700:])
+finally:
+    _V2_AUDIT["actif"] = False
+    for _mCL, _dCL in _savCL.items():
+        for _kCL in [k for k in vars(_mCL) if k not in _dCL]:
+            delattr(_mCL, _kCL)
+        for _kCL, _valCL in _dCL.items():
+            if vars(_mCL).get(_kCL, _savCL) is not _valCL:
+                setattr(_mCL, _kCL, _valCL)
+    for _kCL, _dCL in _savEtatsCL.items():
+        getattr(_v2_u, _kCL).clear()
+        getattr(_v2_u, _kCL).update(_dCL)
+check("cartes livraison : aucune ecriture dans data/",
+      len(_V2_AUDIT["ecrits"]) == _nEcritsCL, str(_V2_AUDIT["ecrits"][_nEcritsCL:][:5]))
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:

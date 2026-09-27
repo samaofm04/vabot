@@ -1283,20 +1283,23 @@ class _Progression:
     DELAI_MINI = 4.0
 
     def __init__(self, interaction, total, titre="Génération des reels",
-                 mot="Reel", note=""):
+                 mot="Reel", note=()):
         self.interaction = interaction
         self.total = max(1, int(total or 1))
         self.titre = titre
-        # CE QUE DISAIT L'ANCIEN MESSAGE D'INTRO, EN UNE LIGNE (27/09/2026).
-        # Le proprietaire a fait retirer l'intro (« 5 reel(s) deja montes pour
-        # blonde — je les genere pour toi… ») : la carte suffit. Mais « 3 sur
-        # 5 demandes » ou « 2 ecartes » ne doivent pas disparaitre en silence :
-        # ils restent ici, sur la carte, a chaque mise a jour.
-        self.note = str(note or "").strip()
         # LE MOT DE L ELEMENT. Le corps disait « Reel N/total » en dur :
         # au-dessus d un TEMPLATE ou d un FLASH, il annoncait le mauvais
         # objet. Le titre ne coiffe que l en-tete, pas les lignes.
         self.mot = str(mot or "Reel")
+        # CE QUE L INTRO DISAIT D UTILE. Le message qui precedait la barre
+        # (« 5 reels... je les genere pour toi... ») est retire (27/09/2026,
+        # le proprietaire : la barre « ça suffit largement »). « 3 sur 5
+        # demandés » ou « 2 écartées » ne partent pas avec lui : sans eux,
+        # demander cinq et en recevoir trois ressemble a une panne. Ces
+        # lignes restent sous la barre, a chaque edition.
+        if isinstance(note, str):
+            note = [note]
+        self.note = "\n".join(str(l).strip() for l in (note or ()) if str(l or "").strip())
         self.message = None
         self.faits = 0
         self._dernier = 0.0
@@ -1313,10 +1316,10 @@ class _Progression:
         lignes = [self._barre(part) + f"  **{int(round(part * 100))} %**",
                   f"{self.mot} **{min(self.faits + 1, self.total)}/{self.total}**"
                   if not self._fini else f"**{self.total}/{self.total}** — terminé"]
-        if self.note:
-            lignes.append(self.note)
         if detail:
             lignes.append(detail)
+        if self.note:
+            lignes.append(self.note)
         return "\n".join(lignes)
 
     async def demarrer(self):
@@ -1326,8 +1329,18 @@ class _Progression:
                            description=self._corps(0.0, "démarrage…"),
                            color=_d.Color.blurple())
             self.message = await self.interaction.followup.send(embed=emb, wait=True)
-        except Exception:
+        except Exception as e:
             self.message = None            # jamais bloquant : c est un confort
+            log.warning("barre de progression refusee (%s: %s)", type(e).__name__, e)
+            # ... mais la note, elle, n en est pas un : elle vivait dans
+            # l intro, retiree. Sans barre, elle part seule plutot que se
+            # perdre sans trace.
+            if self.note:
+                try:
+                    await self.interaction.followup.send(self.note)
+                except Exception as e2:
+                    log.warning("note de la barre perdue (%s: %s) : %s",
+                                type(e2).__name__, e2, self.note)
 
     async def poser(self, part, detail="", force=False):
         """Met la barre a `part` (0..1). Silencieux si trop tot, sauf `force`."""
@@ -3619,38 +3632,33 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = len(reels)
-        # Sans l'explication « CAPTION = par-dessus · DESCRIPTION = légende »
-        # (27/09/2026) : les VA la connaissent. La regle anti-doublon reste,
-        # elle evite un shadowban.
+        # Le decompte seul (27/09/2026) : ni « CAPTION = par-dessus ·
+        # DESCRIPTION = légende », ni « tes meilleurs, à reposter » -- « ils
+        # savent très bien ce qu'ils ont à faire ». La regle anti-doublon
+        # reste : ce n'est pas une consigne, elle evite un shadowban.
         await interaction.followup.send(
-            f"💥 **{total} REEL(S) BANGER pour `{identity}`** — tes meilleurs, à reposter ! 🔥\n"
+            f"💥 **{total} REEL(S) BANGER pour `{identity}`**\n"
             f"🚨 **1 reel différent par compte.**")
         await self._deliver_reels_loop(interaction, reels, identity, label="BANGER", delete_after=False)
 
     @staticmethod
     def _note_plafond(demande, total, quoi):
-        """La phrase a ajouter quand le stock a rogne la quantite demandee.
+        """La ligne a poser sous la barre quand le stock a rogne la quantite
+        demandee ; "" sinon.
 
         Sans elle, demander sept et recevoir trois est indistinguable d'un
         selecteur casse -- c'est exactement la plainte qui a mene ici. Le
         plafond, lui, doit rester : au-dela des combinaisons reelles,
         _pick_fresh recycle et le VA republie deux fois la meme video.
+
+        UNE ligne courte (27/09/2026) : elle vit desormais DANS la carte de
+        progression (_Progression, `note`), l'intro qui la portait est
+        retiree. Le « Seulement N reel(s) monté(s) » de /reelmonte passe par
+        elle aussi : deux formulations du meme fait finissaient par diverger.
         """
         if not demande or total >= demande:
             return ""
-        return (f"\n\u26a0\ufe0f Tu en as demande **{demande}**, il en part "
-                f"**{total}** : c'est tout ce que permet le stock ({quoi}). "
-                f"Au-dela, la meme video repartirait deux fois.")
-
-    @staticmethod
-    def _note_courte(demande, total, quoi, *autres):
-        """La ligne de la carte de progression qui remplace l'intro : le
-        plafond du stock (« 3 sur 5 demandés (…) ») et les ecartes. Vide si
-        rien n'est a dire."""
-        bouts = [a for a in autres if a]
-        if demande and total < demande:
-            bouts.append(f"{total} sur {demande} demandés ({quoi})")
-        return "ℹ️ " + " · ".join(bouts) if bouts else ""
+        return f"ℹ️ **{total}** sur **{demande}** demandés — tout le stock ({quoi})."
 
     async def _send_caption_bangers(self, interaction, nombre=3):
         """Bouton '⭐ Caption Banger' : les captions marquees favorites sur le site.
@@ -3749,15 +3757,18 @@ class UserCog(commands.Cog):
         # caption ne redonne pas la meme video : c'est le texte incruste qui
         # change. Ce qu'il faut eviter, c'est la meme PAIRE deux fois.
         total = min(nombre, len(utiles) * len(brutes))
-        # Plus de message d'intro (27/09/2026) : la carte de progression
-        # suffit, et porte en une ligne ce que l'intro disait d'utile.
-        _note = self._note_courte(
-            nombre, total, f"{len(utiles)} caption(s) ⭐ × {len(brutes)} brute(s) ⭐",
-            f"{vides} caption(s) vide(s) écartée(s)" if vides else "")
+        # PLUS D'INTRO avant la barre (27/09/2026, le proprietaire : la barre
+        # « ça suffit largement »). Ce qu'elle disait d'utile -- combien
+        # d'ecartees, pourquoi moins que demande -- passe SOUS la barre.
+        notes = []
+        if vides:
+            notes.append(f"ℹ️ {vides} caption(s) favorite(s) écartée(s) : texte vide.")
+        notes.append(self._note_plafond(
+            nombre, total, f"{len(utiles)} caption(s) ⭐, {len(brutes)} brute(s) ⭐"))
 
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Captions incrustées",
-                             mot="Caption", note=_note)
+                             mot="Caption", note=notes)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(utiles, used_c, key=lambda c: c.get("id"))
@@ -3884,10 +3895,11 @@ class UserCog(commands.Cog):
         # Le plafond par les combinaisons REELLES reste : sans lui, 1 brute +
         # 1 caption sortiraient sept fois la meme video.
         total = min(nombre, len(brutes) * len(caps))
-        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
+        # PLUS D'INTRO avant la barre (27/09/2026) : la note de plafond passe
+        # SOUS la barre.
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Montages caption + brut",
-                             mot="Montage", note=self._note_courte(
+                             mot="Montage", note=self._note_plafond(
                                  nombre, total,
                                  f"{len(brutes)} brute(s) × {len(caps)} caption(s)"))
         await suivi.demarrer()
@@ -3991,14 +4003,17 @@ class UserCog(commands.Cog):
         # trois, sans un mot. Le plafond par les combinaisons reelles
         # reste : au-dela, _pick_fresh recycle et on republie le meme.
         total = min(nombre, len(templates) * len(brutes))
-        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
+        # PLUS D'INTRO avant la barre (27/09/2026) : les ecartes et la note de
+        # plafond passent SOUS la barre.
+        notes = []
+        if sans_coupe:
+            notes.append(f"ℹ️ {sans_coupe} template(s) étoilé(s) écarté(s) : "
+                         f"pas de point de coupe.")
+        notes.append(self._note_plafond(
+            nombre, total, f"{len(templates)} template(s) × {len(brutes)} brute(s)"))
         used_t, used_b = set(), set()
         suivi = _Progression(interaction, total, "Assemblage template + brut",
-                             mot="Template", note=self._note_courte(
-                                 nombre, total,
-                                 f"{len(templates)} template(s) × {len(brutes)} brute(s)",
-                                 f"{sans_coupe} template(s) sans point de coupe écarté(s)"
-                                 if sans_coupe else ""))
+                             mot="Template", note=notes)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
@@ -4071,10 +4086,10 @@ class UserCog(commands.Cog):
             cle, identity, exiger_banger=exiger_banger, ecartes=ecartes)
         brutes = fav_brutes_for(identity) if brute_favorite else []
 
-        # CE QUI A ETE ECARTE SE DIT TOUJOURS, dans les deux messages : un
-        # admin qui a tague cinq montages et n'en voit aucun arriver doit
-        # apprendre pourquoi (point de coupe, ⊘, double marque, registre
-        # illisible), pas chercher une panne ailleurs.
+        # CE QUI A ETE ECARTE SE DIT TOUJOURS, dans le refus comme sous la
+        # barre de progression : un admin qui a tague cinq montages et n'en
+        # voit aucun arriver doit apprendre pourquoi (point de coupe, ⊘,
+        # double marque, registre illisible), pas chercher une panne ailleurs.
         notes = []
         if sans_coupe:
             notes.append(f"ℹ️ {sans_coupe} montage(s) {logo} écarté(s) : pas de "
@@ -4128,20 +4143,20 @@ class UserCog(commands.Cog):
         total = min(nombre, len(templates) * (len(brutes) if brute_favorite else 1))
         # Le libelle nomme ce que le VA a demande. « ⭐ Brut + Flash » se
         # disait « FLASH BANGER + BRUT », comme la double etoile, alors que
-        # son template n'est pas etoile.
+        # son template n'est pas etoile. Il ne s'affiche plus que dans les
+        # messages d'erreur (_gen_and_send_montaged, `label`).
         haut = court.upper()
         libelle = (f"{haut} BANGER + BRUT" if exiger_banger and brute_favorite
                    else f"BRUT BANGER + {haut}" if brute_favorite
                    else f"TEMPLATE {haut} BANGER" if exiger_banger
                    else f"TEMPLATE {haut}")
-        avec = " avec ta brute ⭐" if brute_favorite else ""
-        # Plus de message d'intro (27/09/2026) : la carte de progression porte
-        # les ecartes (`notes`) et le plafond, en une ligne.
-        _note = self._note_courte(
+        # PLUS D'INTRO avant la barre (27/09/2026, le proprietaire : la barre
+        # « ça suffit largement ») : les ecartes et la note de plafond passent
+        # SOUS la barre.
+        notes.append(self._note_plafond(
             nombre, total,
             f"{len(templates)} montage(s) {logo}"
-            + (f" × {len(brutes)} brute(s)" if brute_favorite else ""),
-            *[str(n).lstrip("ℹ️⚠️ \ufe0f").strip() for n in notes])
+            + (f" × {len(brutes)} brute(s)" if brute_favorite else "")))
 
         # La famille de reserve : la meme regle que noctus_reserve.
         # FAMILLE_PAR_ACTION (templateflashbrut -> flash_brut, brutflash ->
@@ -4155,7 +4170,7 @@ class UserCog(commands.Cog):
                    else cle)
         used_t, used_b = set(), set()
         suivi = _Progression(interaction, total, f"Montages {court}", mot=court,
-                             note=_note)
+                             note=notes)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
@@ -4260,9 +4275,9 @@ class UserCog(commands.Cog):
                 "**Vidéo brut**.)_", ephemeral=True)
             return
         await interaction.response.defer()
-        entete = (f"⭐ **{len(brutes)} VIDÉO(S) BRUTE(S) BANGER pour "
-                  f"`{identity}`** — les meilleures, sans texte ni montage : à "
-                  f"toi de les monter. 🔥")
+        # Le decompte seul, comme les trends (27/09/2026) : « à toi de les
+        # monter » etait une consigne que les VA connaissent.
+        entete = f"⭐ **{len(brutes)} VIDÉO(S) BRUTE(S) BANGER pour `{identity}`**"
         await self._envoyer_brutes_meta(interaction, brutes, identity,
                                         "BRUTE BANGER", entete)
 
@@ -4552,13 +4567,16 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = len(ready)
-        # Plus de message d'intro (27/09/2026, « génération des reels, reel
-        # 1/5, rendu en cours, ça suffit largement »). LA BARRE reste : entre
-        # le clic et le premier fichier il se passe une minute, et sans elle
-        # le VA relancait la commande.
+        # PLUS D'INTRO avant la barre (27/09/2026, le proprietaire : la barre
+        # « ça suffit largement »). Le « Seulement N (tu en as demandé M) »,
+        # qui partait en message a part, passe SOUS la barre.
+        #
+        # LA BARRE. Entre le clic et le premier fichier il se passe une
+        # minute pendant laquelle le salon ne disait RIEN : le VA relancait la
+        # commande, ce qui refabriquait tout et allongeait encore l attente.
         suivi = _Progression(interaction, total, "Génération des reels",
-                             note=self._note_courte(nombre, total,
-                                                    "reels montés approuvés"))
+                             note=self._note_plafond(
+                                 nombre, total, "reel(s) monté(s) approuvé(s)"))
         await suivi.demarrer()
         for idx, (video, draft, description) in enumerate(ready, start=1):
             await self._gen_and_send_montaged(
@@ -4600,8 +4618,11 @@ class UserCog(commands.Cog):
         await interaction.response.defer()
         picked = random.sample(vids, min(nombre, len(vids)))
         total = len(picked)
-        entete = (f"🎥 **{total} vidéo(s) brute(s) pour `{identity}`** — sans "
-                  f"texte ni montage, à toi de les monter.")
+        # Le decompte seul, comme les trends (27/09/2026) : « sans texte ni
+        # montage, à toi de les monter » etait une consigne. Le « Seulement
+        # N… » reste : sans lui, en demander cinq et en recevoir deux passe
+        # pour un selecteur casse.
+        entete = f"🎥 **{total} vidéo(s) brute(s) pour `{identity}`**"
         if total < nombre:
             entete += (f"\nℹ️ Seulement **{total}** vidéo(s) brute(s) dispo "
                        f"(tu en as demandé {nombre}).")
@@ -4670,10 +4691,14 @@ class UserCog(commands.Cog):
                 # UNE carte (27/09/2026) : « 1/3 · <photo> model », la video,
                 # les textes a copier. Plus de « VIDÉO BRUTE 1/3 » ni de
                 # « (champ légende) », et plus de coupe muette a 1800 signes.
+                # Lisere ROUGE quand elle n'a pas pu etre rendue unique : sans
+                # lui, trois brutes arrivaient en trois cartes bleues
+                # identiques, et la ligne en italique se perdait -- le VA
+                # publiait la brute non reecrite, doublon d'empreinte compris.
                 try:
                     await _livrer_contenu(interaction, idx, total, identity,
                                           [(fichier, v.name)], textes=textes,
-                                          alertes=alertes,
+                                          alertes=alertes, bloquant=bool(_raison),
                                           quoi=f"{label} {idx}/{total}")
                 except FileNotFoundError:
                     await interaction.followup.send(f"⚠️ {label} {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
@@ -4730,7 +4755,8 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = min(nombre, len(brutes) * 3)
-        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
+        # PLUS D'INTRO avant la barre (27/09/2026, le proprietaire : la barre
+        # « ça suffit largement ») : elle dit deja combien et ou on en est.
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Captions incrustées",
                              mot="Caption")
@@ -7297,9 +7323,12 @@ class ChoixCaptionView(discord.ui.View):
                 _av = ("⚠️ _Elle n a **pas** pu etre rendue unique — ne la "
                        "poste pas telle quelle, previens un admin._"
                        if _raison else "")
+                # Rouge avec l'avertissement, comme « Video brut » : une carte
+                # bleue qui dit « ne la poste pas » ne se remarque pas.
                 await _livrer_contenu(interaction, 1, 1, self.identity,
                                       [(fichier, self.video.name)],
                                       textes=[(_T_DESC, desc)], alertes=[_av],
+                                      bloquant=bool(_raison),
                                       quoi="brute choisie")
         except FileNotFoundError:
             # Rangee entre le choix et l'envoi (doublons_vault) : levait
