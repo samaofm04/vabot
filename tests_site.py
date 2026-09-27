@@ -28710,6 +28710,89 @@ except Exception as _eDs:
     import traceback as _tbDs
     check("desactives : testable", False, repr(_eDs)[:200] + " " + _tbDs.format_exc()[-700:])
 
+print()
+print("=" * 70)
+print("NOTIFICATIONS : reglage dans Preferences, et jamais sur les boutons de la visionneuse")
+print("=" * 70)
+# 27/09/2026 : en desactivant depuis la visionneuse, le message « ⊘ Desactive »
+# se posait en haut a droite, pile sur ⊘ ⭐ ✕, et avalait les clics.
+try:
+    import web_upload as _wNo
+    import shutil as _shNo, subprocess as _spNo, json as _jsNo
+    _hNo = _wNo.UPLOAD_HTML
+    check("preferences : la case « Notifications » et son choix sont dans la page",
+          'id="va-notifs-select" onchange="vaSetNotifs(this.value)"' in _hNo
+          and '<option value="erreurs">Seulement les erreurs et les avertissements</option>' in _hNo)
+    check("css : visionneuse ouverte -> messages en bas a gauche, sans prendre les clics",
+          ".toast-container.toast-sous-lb{top:auto;right:auto;bottom:24px;left:24px}" in _hNo
+          and ".toast-container.toast-sous-lb .toast{pointer-events:none}" in _hNo)
+    _dNo = _hNo.find("function vaNotifsMode(){")
+    _fNo = _hNo.find("\nfunction ", _hNo.find("function showToast(message, type, duration, force){") + 10)
+    check("js : le reglage est lu dans le MEME script que showToast (toasts du chargement)",
+          0 < _dNo < _hNo.find("function showToast(") < _fNo)
+    _nodeNo = _shNo.which("node")
+    if _nodeNo and _dNo > 0 and _fNo > _dNo:
+        _stub = r"""
+var stock = {};
+var localStorage = {getItem:function(k){ return k in stock ? stock[k] : null; }, setItem:function(k,v){ stock[k]=String(v); }};
+function El(id){ this.id=id||''; this.children=[]; this.className=''; this._cl={}; var me=this;
+  this.classList={add:function(c){me._cl[c]=1;}, remove:function(c){delete me._cl[c];},
+    contains:function(c){return !!me._cl[c];}, toggle:function(c,on){ if(on===undefined) on=!me._cl[c]; if(on) me._cl[c]=1; else delete me._cl[c]; return on; }};
+  this.style={}; this.appendChild=function(x){ this.children.push(x); x.parentNode=this; return x; };
+  this.setAttribute=function(){}; this.addEventListener=function(){}; this.querySelector=function(){ return new El(); };
+  this.remove=function(){ var p=this.parentNode; if(p) p.children=p.children.filter(function(x){return x!==me;}); };
+  Object.defineProperty(this,'innerHTML',{set:function(v){ this._html=v; }, get:function(){ return this._html||''; }});
+}
+var body = new El('body'), lb = new El('lightbox'), byId = {lightbox: lb};
+var document = {body: body, getElementById:function(id){ return byId[id] || null; },
+  createElement:function(){ return new El(); }, readyState:'complete', addEventListener:function(){}};
+body.appendChild = function(x){ this.children.push(x); if(x.id) byId[x.id]=x; return x; };
+var window = {}; function setTimeout(){ return 0; } function clearTimeout(){}
+function requestAnimationFrame(f){ return 0; }
+function nb(){ var c=byId['toast-container']; return c ? c.children.length : 0; }
+function vaLogoPour(){ return ''; }   // logos de marque : hors sujet ici
+"""
+        _scen = r"""
+var res = {};
+showToast('✓ fait', 'success'); res.defaut = nb();
+localStorage.setItem('va_notifs', 'erreurs');
+showToast('✓ fait', 'success'); showToast('ℹ️ info', 'info'); res.masque = nb();
+showToast('✕ echec', 'error'); showToast('⚠ attention', 'warning'); res.erreurs = nb();
+showToast('🔕 force', 'info', 2000, true); res.force = nb();
+lb.classList.add('show'); showToast('✕ echec 2', 'error');
+res.sous_lb = byId['toast-container'].classList.contains('toast-sous-lb');
+lb.classList.remove('show'); showToast('✕ echec 3', 'error');
+res.hors_lb = byId['toast-container'].classList.contains('toast-sous-lb');
+localStorage.getItem = function(){ throw new Error('bloque'); };
+res.sans_stockage = vaNotifsMode();
+console.log(JSON.stringify(res));
+"""
+        _fJ = TMP / "notifs_toast.js"
+        _fJ.write_text(_stub + _hNo[_dNo:_fNo] + "\n" + _scen, encoding="utf-8")
+        _rJ = _spNo.run([_nodeNo, str(_fJ)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+        try:
+            _resNo = _jsNo.loads((_rJ.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            _resNo = {}
+        _errNo = ((_rJ.stderr or "")[:300] + " " + str(_resNo))
+        check("js : par defaut, une confirmation s affiche", _resNo.get("defaut") == 1, _errNo)
+        check("js : reglage « erreurs » -> les confirmations (succes, info) ne s affichent plus",
+              _resNo.get("masque") == 1, _errNo)
+        check("js : une erreur et un avertissement s affichent TOUJOURS",
+              _resNo.get("erreurs") == 3, _errNo)
+        check("js : le message qui confirme le reglage passe quand meme (force)",
+              _resNo.get("force") == 4, _errNo)
+        check("js : visionneuse ouverte -> les messages quittent ses boutons, puis reviennent",
+              _resNo.get("sous_lb") is True and _resNo.get("hors_lb") is False, _errNo)
+        check("js : sans stockage (navigation privee) -> tout afficher",
+              _resNo.get("sans_stockage") == "toutes", _errNo)
+    else:
+        print("     (node absent ou fonctions introuvables : showToast non execute)")
+        check("js : showToast et le reglage sont trouvables", _dNo > 0 and _fNo > _dNo)
+except Exception as _eNo:
+    import traceback as _tbNo
+    check("notifications : testable", False, repr(_eNo)[:200] + " " + _tbNo.format_exc()[-400:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

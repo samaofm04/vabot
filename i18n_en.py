@@ -171,6 +171,12 @@ FORMS = {
     "Casse": "Case",
     "Langue": "Language",
     "Langue de l'interface": "Interface language",
+    # Reglage « Notifications » (Preferences)
+    "Les petits messages qui s'affichent après une action (désactivé, sélection, copié…)":
+        "The small messages shown after an action (disabled, selection, copied…)",
+    "Messages de confirmation": "Confirmation messages",
+    "Tout afficher (par défaut)": "Show everything (default)",
+    "Seulement les erreurs et les avertissements": "Only errors and warnings",
     "Français (par défaut)": "French",
     "Anglais": "English",
     "(optionnel)": "(optional)",

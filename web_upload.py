@@ -2233,6 +2233,9 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 
 /* ============ TOAST NOTIFICATIONS ============ */
 .toast-container{position:fixed;top:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:200000;pointer-events:none;max-width:420px}
+/* visionneuse ouverte : en bas a gauche, sans prendre les clics (showToast) */
+.toast-container.toast-sous-lb{top:auto;right:auto;bottom:24px;left:24px}
+.toast-container.toast-sous-lb .toast{pointer-events:none}
 .toast{background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #3b82f6;border-radius:10px;padding:14px 18px;color:#fff;font-size:14px;box-shadow:0 12px 32px rgba(0,0,0,.6);display:flex;align-items:flex-start;gap:12px;pointer-events:auto;animation:toastIn .4s cubic-bezier(.16,1,.3,1);min-width:280px;backdrop-filter:blur(10px)}
 .toast.success{border-left-color:#00d68f;background:#0f1f17}
 .toast.error{border-left-color:#ff4757;background:#1f0f0f}
@@ -4393,12 +4396,24 @@ function vaLogoPour(txt){
   return '';
 }
 
-function showToast(message, type, duration){
+// Reglage « Notifications » (Preferences), memorise sur cet appareil. Defini
+// ICI, dans le meme script que showToast : un toast peut partir au chargement,
+// avant les scripts de fin de page. localStorage peut manquer (navigation
+// privee) : on retombe alors sur « tout afficher ».
+function vaNotifsMode(){
+  try{ return localStorage.getItem('va_notifs') === 'erreurs' ? 'erreurs' : 'toutes'; }
+  catch(e){ return 'toutes'; }
+}
+function showToast(message, type, duration, force){
   type = type || 'info';
   duration = duration || 4500;
   // Skip les messages d auth (geres par le wrapper fetch global qui redirige)
   var msgLower = (message || '').toString().toLowerCase();
   if(msgLower.indexOf('unauth') !== -1) return;
+  // Reglage « Notifications » (Preferences) : les confirmations (succes,
+  // info) peuvent etre coupees ; une erreur ou un avertissement passe
+  // TOUJOURS -- ce qui a echoue ne doit jamais passer inapercu.
+  if(!force && (type === 'success' || type === 'info') && vaNotifsMode() === 'erreurs') return;
   // L'emoji de tete du message EST l'icone de la notification (↓ Drive,
   // ↓ telechargement...) : plus parlant que la pastille verte generique, et
   // c'est ainsi que se lisent les notifications d'iOS.
@@ -4420,6 +4435,12 @@ function showToast(message, type, duration){
     container.className = 'toast-container';
     document.body.appendChild(container);
   }
+  // VISIONNEUSE OUVERTE : les messages descendent en bas a gauche et laissent
+  // passer les clics. En haut a droite, ils se posaient pile sur ses boutons
+  // ⊘ ⭐ ✕ et avalaient les clics 4 a 5 secondes : on ne pouvait pas
+  // enchainer les desactivations (constate le 27/09/2026).
+  var _lb = document.getElementById('lightbox');
+  container.classList.toggle('toast-sous-lb', !!(_lb && _lb.classList.contains('show')));
   var icon = _emo || (type === 'success' ? '✓' : type === 'error' ? '✕'
                       : type === 'warning' ? '⚠️' : 'ℹ️');
   var toast = document.createElement('div');
@@ -15954,6 +15975,16 @@ document.addEventListener('keydown', function(e){
 </select>
 <small style="margin-top:8px">Le choix est mémorisé sur cet appareil. Certains écrans restent en français&nbsp;: dis-le-moi et je les complète.</small>
 </div>
+<div class="box">
+<h3 style="margin-top:0">Notifications</h3>
+<small>Les petits messages qui s'affichent après une action (désactivé, sélection, copié…)</small>
+<label style="margin-top:14px">Messages de confirmation</label>
+<select id="va-notifs-select" onchange="vaSetNotifs(this.value)">
+  <option value="toutes">Tout afficher (par défaut)</option>
+  <option value="erreurs">Seulement les erreurs et les avertissements</option>
+</select>
+<small style="margin-top:8px">Une erreur ou un avertissement s'affiche toujours&nbsp;: ce qui a échoué ne doit jamais passer inaperçu. Le choix est mémorisé sur cet appareil.</small>
+</div>
 </div>
 
 <!-- SETTINGS - SÉCURITÉ -->
@@ -17083,6 +17114,22 @@ function vaSetLangue(l){
   }
   setTimeout(function(){ location.reload(); }, 350);
 }
+function vaSetNotifs(v){
+  v = (v === 'erreurs') ? 'erreurs' : 'toutes';
+  try{ localStorage.setItem('va_notifs', v); }catch(e){}
+  // force : ce message-la s'affiche meme quand on vient de couper les autres
+  showToast(v === 'erreurs'
+    ? '🔕 Confirmations masquées — les erreurs et avertissements restent affichés'
+    : '🔔 Toutes les notifications sont affichées', 'info', 2600, true);
+}
+(function(){
+  function init(){
+    var sel = document.getElementById('va-notifs-select');
+    if(sel) sel.value = vaNotifsMode();
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
 // refleter la langue en cours dans le selecteur
 (function(){
   function init(){
