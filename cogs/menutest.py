@@ -736,6 +736,82 @@ def demo_models_vue(plan: dict) -> discord.ui.View:
     return vue
 
 
+# ---------------------------------------------------------------------------
+# /demonumero : MAQUETTE du panneau « Numéro Instagram » (27/09/2026).
+#
+# Le proprietaire : « fais un truc plus beau, avec une icone ». Il juge sur
+# Discord avant la production (voir /demopanneau) : on lui montre UN message
+# au lieu des trois d aujourd hui (panneau, numero, code), avec l icone
+# emojis/numero_instagram.png en vignette. Les trois etats se parcourent en
+# cliquant ; RIEN n est achete, aucun appel a GetAText.
+
+_DEMO_NUM_ICONE = Path(__file__).resolve().parent.parent / "emojis" / "numero_instagram.png"
+_DEMO_NUM_NOM = "numero_instagram.png"
+_DEMO_NUM_ROSE = 0xE1306C
+
+
+class _DemoNumBouton(discord.ui.Button):
+    def __init__(self, vue, cle, label, emoji, style):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.vue_demo, self.cle = vue, cle
+
+    async def callback(self, interaction: discord.Interaction):
+        v = self.vue_demo
+        if self.cle == "prendre":
+            v.etat, v.valeur = "attente", "+1 555 014 2294"
+        elif self.cle == "mail":
+            v.etat, v.valeur = "attente", "lena.rivers482@gmail.com"
+        elif self.cle == "autre":
+            v.etat = "attente"
+            v.valeur = ("+1 555 019 7731" if v.valeur.startswith("+")
+                        else "maya.cole917@gmail.com")
+        elif self.cle == "code":
+            v.etat = "code"
+        elif self.cle in ("annuler", "fini"):
+            v.etat, v.valeur = "vide", ""
+        v.construire()
+        await interaction.response.edit_message(view=v)
+
+
+class DemoNumero(discord.ui.LayoutView):
+    """Le panneau numero en maquette : vide, en attente du code, code recu."""
+
+    def __init__(self):
+        super().__init__(timeout=900)
+        self.etat, self.valeur = "vide", ""
+        self.construire()
+
+    def construire(self):
+        self.clear_items()
+        ui = discord.ui
+        vignette = ui.Thumbnail("attachment://" + _DEMO_NUM_NOM)
+        B = discord.ButtonStyle
+        if self.etat == "vide":
+            tete = ui.Section(ui.TextDisplay("## Numéro Instagram"),
+                              ui.TextDisplay("-# 💵 99,94 $"), accessory=vignette)
+            rangee = ui.ActionRow(
+                _DemoNumBouton(self, "prendre", "Prendre un numéro", "📱", B.success),
+                _DemoNumBouton(self, "mail", "Mail", "📧", B.secondary))
+        else:
+            est_mail = not self.valeur.startswith("+")
+            ligne = ("⏳ En attente du code…" if self.etat == "attente"
+                     else "🔑 **Code : `482913`**")
+            tete = ui.Section(ui.TextDisplay(f"## `{self.valeur}`"),
+                              ui.TextDisplay(("📧 " if est_mail else "🇺🇸 ") + ligne),
+                              accessory=vignette)
+            if self.etat == "attente":
+                rangee = ui.ActionRow(
+                    _DemoNumBouton(self, "code", "Redemander un code", "🔄", B.primary),
+                    _DemoNumBouton(self, "autre", "Autre", "🔁", B.secondary),
+                    _DemoNumBouton(self, "annuler", "Annuler", "❌", B.danger))
+            else:
+                rangee = ui.ActionRow(
+                    _DemoNumBouton(self, "fini", "C'est bon", "✅", B.success),
+                    _DemoNumBouton(self, "code", "Nouveau code", "🔄", B.primary),
+                    _DemoNumBouton(self, "autre", "Autre", "🔁", B.secondary))
+        self.add_item(ui.Container(tete, rangee, accent_colour=_DEMO_NUM_ROSE))
+
+
 class MenuTest(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -796,6 +872,19 @@ class MenuTest(commands.Cog):
             return
         await interaction.response.send_message(
             texte, view=demo_models_vue(plan), ephemeral=True)
+
+    @app_commands.command(
+        name="demonumero",
+        description="[DÉMO] Aperçu du nouveau panneau Numéro Instagram — rien n'est acheté",
+    )
+    async def demonumero(self, interaction: discord.Interaction):
+        if not _DEMO_NUM_ICONE.exists():
+            await interaction.response.send_message(
+                "⚠️ Icône introuvable (emojis/numero_instagram.png).", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            view=DemoNumero(), ephemeral=True,
+            file=discord.File(str(_DEMO_NUM_ICONE), filename=_DEMO_NUM_NOM))
 
     @app_commands.command(
         name="demopanneau",
