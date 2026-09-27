@@ -1460,7 +1460,7 @@ async def _ensure_num_panel(bot, channel):
 
 async def create_us_tickets(guild, member, bot=None):
     """Garantit l'état cible d'un membre : UN dossier (catégorie) à son pseudo
-    contenant ses 3 salons dans l'ordre menu → content → numero-mail, le menu
+    contenant ses salons dans l'ordre de US_TICKET_SUFFIXES, le menu
     Jailbreak US épinglé dans -menu (lecture seule). Idempotent.
     Retourne (créés, erreurs)."""
     created, errors = [], []
@@ -2726,7 +2726,7 @@ class Welcome(commands.Cog):
             await interaction.response.send_message(
                 "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
             return
-        # RÉCONCILIATEUR : l'objectif est « 4 salons par personne, c'est tout » —
+        # RÉCONCILIATEUR : l'objectif est « les salons de US_TICKET_SUFFIXES, c'est tout » —
         # menu → content → numero-mail → download, groupés par personne,
         # sans doublon ni orphelin.
         import re as _re
@@ -2784,8 +2784,11 @@ class Welcome(commands.Cog):
             plan.append(f"🗑 **{len(to_del)}** salon(s) à supprimer — doublons/orphelins ({_nd})")
         else:
             plan.append("🗑 rien à supprimer (aucun doublon ni orphelin détecté)")
-        plan.append("📁 un **dossier par personne** (catégorie à son pseudo) avec ses 3 salons "
-                    "dans l'ordre `menu` → `content` → `numero-mail`")
+        # derive du tuple : ce texte annoncait encore « 3 salons, menu ->
+        # content -> numero-mail » alors qu'il y en a 5 (download, spoofer)
+        plan.append("📁 un **dossier par personne** (catégorie à son pseudo) avec ses "
+                    f"{len(US_TICKET_SUFFIXES)} salons dans l'ordre "
+                    + " → ".join(f"`{s}`" for s in US_TICKET_SUFFIXES))
         warn_txt = ("\n⚠️ " + "\n⚠️ ".join(warn[:5])) if warn else ""
 
         class _ConfirmAll(discord.ui.View):
