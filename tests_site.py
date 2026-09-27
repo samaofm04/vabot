@@ -6307,7 +6307,12 @@ res.off_bouton = bo.getAttribute('data-on');                  // '1'
 toggleFavBruteFilter(sb.btn);
 res.off_et_fav = nbCaches(sb.grid);                           // attendu 3
 toggleOffBruteFilter(bo); toggleFavBruteFilter(sb.btn);
-res.off_eteint = nbCaches(sb.grid);                           // attendu 0
+// CHANGE VOULU (27/09/2026) : filtres eteints, les desactivees ne reviennent
+// PLUS grisees -- la vue de base les cache (« je veux jamais les voir de base,
+// uniquement si je clique sur Desactivees »). Avant : 0 carte cachee.
+res.off_eteint = nbCaches(sb.grid);                           // attendu 2
+res.off_eteint_lesquelles = cartesO.map(function(c,i){        // attendu '0,2'
+  return c.style.display==='none' ? i : -1; }).filter(function(i){ return i>=0; }).join(',');
 console.log(JSON.stringify(res));
 """
 try:
@@ -6325,9 +6330,16 @@ try:
     # Le bouton rendu par le serveur PORTE l etat : sans data-on, la variable
     # de page reprenait la main et la galerie se vidait sous un bouton neutre.
     _srcF3 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
-    check("filtre ⊘ Desactivees : le bouton n existe que sur Video brut, apres ⭐ Bangers",
-          "id='offbrute-toggle-btn' data-on='0'" in _srcF3 and ') if subdir == "brutes" else ""' in _srcF3
-          and "{fav_brute_toggle_html}{off_brute_toggle_html}" in _srcF3)
+    # CHANGE VOULU (27/09/2026) : le bouton n est plus reserve a Video brut --
+    # chaque galerie qui porte le ⊘ sur ses cartes a son « ⊘ Desactivees »,
+    # seul endroit ou un desactive se voit -- et il vient EN DERNIER, apres
+    # ⚡ Flash Trend, pour ne pas couper la rangee des familles de montage.
+    # Sa presence galerie par galerie est verifiee sur le RENDU dans la section
+    # « DESACTIVES (⊘) » en fin de fichier.
+    check("filtre ⊘ Desactivees : le bouton part neutre, n est plus reserve a Video brut, et vient apres ⚡",
+          "id='offbrute-toggle-btn' data-on='0'" in _srcF3 and ') if subdir == "brutes" else ""' not in _srcF3
+          and "{flash_toggle_html}{off_brute_toggle_html}" in _srcF3
+          and "{fav_brute_toggle_html}{off_brute_toggle_html}" not in _srcF3)
     check("filtres etoile : le bouton rendu part neutre et porte l etat (data-on)",
           "id='banger-toggle-btn' data-on='0'" in _srcF3
           and "id='favbrute-toggle-btn' data-on='0'" in _srcF3)
@@ -6355,8 +6367,14 @@ try:
                   and _resF3.get("banger_bouton_neutre") == "0", str(_resF3)[:200])
             check("filtre ⊘ Desactivees : seules les brutes grisees (carte ou bouton ⊘)",
                   _resF3.get("off_seules") == 2 and _resF3.get("off_bouton") == "1", str(_resF3)[:200])
-            check("filtre ⊘ + ⭐ : les ⭐ desactivees seulement ; eteint, tout revient",
-                  _resF3.get("off_et_fav") == 3 and _resF3.get("off_eteint") == 0, str(_resF3)[:200])
+            # CHANGE VOULU (27/09/2026) : « eteint, tout revient » est devenu
+            # « eteint, tout revient SAUF les desactivees » (cartes 0 et 2) --
+            # la vue de base ne montre plus rien de desactive. Les deux actives
+            # doivent toujours revenir : on nomme les cartes cachees, pas
+            # seulement leur nombre.
+            check("filtre ⊘ + ⭐ : les ⭐ desactivees seulement ; eteint, tout revient sauf les desactivees",
+                  _resF3.get("off_et_fav") == 3 and _resF3.get("off_eteint") == 2
+                  and _resF3.get("off_eteint_lesquelles") == "0,2", str(_resF3)[:200])
             check("filtre ⭐ brutes : il vise la galerie visible (Template montage), pas Video brut",
                   _resF3.get("fav_portee_visible") == 2
                   and _resF3.get("fav_portee_cachee") == 0, str(_resF3)[:200])
@@ -18366,6 +18384,14 @@ try:
             _carteS = _hS2[:_hS2.find("data-fid='lea|brutes|tt_4.mp4'")]
             check("brute eteinte par le reperage du texte : carte grisee",
                   _carteS.rfind("cloud-card is-reel-off") > _carteS.rfind("class='cloud-card'"))
+            # CHANGE VOULU (27/09/2026) : grisee ne suffit plus, elle est aussi
+            # CACHEE de la vue de base des le rendu serveur -- sinon le
+            # proprietaire la retrouvait dans la visionneuse en cherchant le
+            # texte a reperer. Elle ne se voit que sous « ⊘ Desactivees ».
+            _ouvS = _carteS[_carteS.rfind("<div class='cloud-card"):]
+            _ouvS = _ouvS[:_ouvS.find(">") + 1]
+            check("brute eteinte par le reperage du texte : cachee de la vue de base (display:none)",
+                  "is-reel-off" in _ouvS and "display:none" in _ouvS, _ouvS[:160])
             _sav_users = _wS._load_web_users
             _sav_disS = _wS.DISABLED_REELS_FILE
             _wS._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
@@ -27099,6 +27125,1590 @@ try:
 except Exception as _eTm:
     import traceback as _tbTm
     check("boutons template / marques : testable", False, repr(_eTm)[:200] + " " + _tbTm.format_exc()[-500:])
+
+print()
+print("=" * 70)
+print("DESACTIVES (⊘) : caches de toutes les vues, sauf sous « ⊘ Desactivees »")
+print("=" * 70)
+# 27/09/2026, demande du proprietaire : « quand je desactive, je veux JAMAIS le
+# voir de base, UNIQUEMENT si je clique sur Desactivees » -- Video brut,
+# Caption, Templates, Reels, PP, tout. Avant, la vue de base montrait les
+# desactives GRISES : il les retrouvait dans la visionneuse (« 1 / 676 ») en
+# cherchant le texte a reperer, et « Tout selectionner » les prenait avec le
+# lot. Ce qui est verifie ici :
+#   1. le rendu SERVEUR de chaque galerie qui a le ⊘ (21 onglets) : desactives
+#      en display:none des le rendu, bouton « ⊘ Desactivees » neutre, en-tete
+#      qui dit combien sont masques ;
+#   2. l onglet Caption (enabled:false) et « Add perfect » ;
+#   3. la route de bascule, aller-retour, relue par un nouveau rendu ;
+#   4. node --check de la page et de CHAQUE fragment rendu ;
+#   5. la logique client dans le harnais node des filtres (stub F3) : base,
+#      ⊘ seul, ⊘ + ⭐, familles des templates, ★ Reels Banger ;
+#   6. les vraies fonctions de la page sur le vrai HTML des fragments :
+#      parite serveur/client, bascule depuis la vue, « Tout selectionner »,
+#      visionneuse, Caption et la liste de son editeur.
+# Tout se passe dans un dossier temporaire ; un espion (audit hook) releve
+# toute ecriture qui atteindrait data/.
+try:
+    import web_upload as _wDs
+    import marques_montage as _mmDs
+    import brutes_off as _boDs
+    import dashboard_cache as _dcDs
+    import html.parser as _hpDs
+    import re as _reDs
+    import shutil as _shDs
+    import subprocess as _spDs
+    import tempfile as _tfDs
+
+    _TDs = pathlib.Path(_tfDs.mkdtemp(prefix="desactives_"))
+    _IDDs = _TDs / "identities"
+
+    # -- l espion : toute ecriture de CE processus qui vise data/ ---------------
+    # Les fils d autres sections peuvent encore tourner : ils sont COMPTES a
+    # part (et dits), seul le fil principal -- celui des requetes de test --
+    # fait echouer la verification.
+    _AUDIT_Ds = {"actif": False, "ecrits": [], "autres": [],
+                 "data": os.path.realpath(str(_wDs.DATA_DIR))}
+
+    def _auditDs(ev, args):
+        if not _AUDIT_Ds["actif"]:
+            return
+        try:
+            chemins = []
+            if ev == "open":
+                mode, flags = args[1], args[2]
+                if (mode and any(c in str(mode) for c in "wax+")) or (
+                        isinstance(flags, int)
+                        and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)):
+                    chemins = [args[0]]
+            elif ev in ("os.rename", "os.replace", "os.remove", "os.unlink",
+                        "os.mkdir", "shutil.rmtree"):
+                chemins = list(args[:2])
+            for _p in chemins:
+                if isinstance(_p, (str, bytes, os.PathLike)):
+                    _rp = os.path.realpath(os.fsdecode(_p))
+                    if _rp == _AUDIT_Ds["data"] or _rp.startswith(_AUDIT_Ds["data"] + os.sep):
+                        (_AUDIT_Ds["ecrits"] if threading.current_thread() is threading.main_thread()
+                         else _AUDIT_Ds["autres"]).append((ev, _rp))
+        except Exception:
+            pass
+
+    sys.addaudithook(_auditDs)
+
+    _NOMS_Ds = ("FLASH_TREND_FILE", "TRASH_TREND_FILE", "FAV_BRUTES_FILE",
+                "DISABLED_REELS_FILE", "BANGER_MARKS_FILE", "CAPTIONS_FILE",
+                "IDENTITIES_DIR", "THUMB_DIR", "_load_web_users", "identity_market",
+                "_type_identite", "_pregen_thumbs_async", "_render_home_dashboard_html")
+    _savDs = {k: getattr(_wDs, k) for k in _NOMS_Ds}
+    _savStoreDs = _dcDs._STORE
+    _AUDIT_Ds["actif"] = True
+    try:
+        _wDs.FLASH_TREND_FILE = _TDs / _mmDs.MARQUES["flash"]["fichier"]
+        _wDs.TRASH_TREND_FILE = _TDs / _mmDs.MARQUES["trash"]["fichier"]
+        _wDs.FAV_BRUTES_FILE = _TDs / "fav_brutes.json"
+        _wDs.DISABLED_REELS_FILE = _TDs / "disabled_reels.json"
+        _wDs.BANGER_MARKS_FILE = _TDs / "banger_marks.json"
+        _wDs.CAPTIONS_FILE = _TDs / "captions.json"
+        _wDs.IDENTITIES_DIR = _IDDs
+        _wDs.THUMB_DIR = _TDs / "thumbnails"
+        # Les vignettes se pre-generent dans un fil de fond (ffmpeg -> le vrai
+        # dossier des vignettes) et l accueil a son cache DANS data/ : neutres.
+        _wDs._pregen_thumbs_async = lambda items: None
+        _wDs._render_home_dashboard_html = lambda *a, **k: ""
+        _stDs = _dcDs.SnapshotStore(_TDs / "dashboard_snapshots", "banc-desactives")
+        _stDs.warmer = type("_SansChauffeur", (), {"touch": lambda self: None})()
+        _dcDs._STORE = _stDs
+        _wDs._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        _wDs.identity_market = lambda i: "fr"
+        _wDs._type_identite = lambda i: "modele"
+
+        # -- LE JEU D ESSAI ---------------------------------------------------
+        _IDs = "zzds"
+        _I2Ds = "v2_zzds"
+
+        def _fichierDs(ident, sd, nom):
+            _d = _IDDs / ident / sd
+            _d.mkdir(parents=True, exist_ok=True)
+            (_d / nom).write_bytes(b"x" * 64)
+            return _d / nom
+
+        # (onglet, sous-dossier, identite, [(nom, eteint par : "" | "reg" | "off")])
+        # « reg » = disabled_reels.json (le ⊘ de toute galerie) ; « off » = le
+        # voisin .off.json d une brute (repérage du texte, et ce que lit le bot).
+        _GAL_Ds = [
+            ("cloudreels", "videos", _IDs, [("r1.mp4", ""), ("r2.mp4", "reg"),
+                                          ("r3.mp4", ""), ("r4.mp4", "reg")]),
+            ("cloudposts", "posts", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("cloudstories", "stories", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("cloudstoryctas", "storyctas", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("cloudpps", "profile_pics", _IDs, [("pp1.jpg", "reg")]),
+            ("cloudbrutes", "brutes", _IDs, [("b1.mp4", ""), ("b2.mp4", "off"), ("b3.mp4", "reg"),
+                                           ("b4.mp4", "off"), ("b5.mp4", "")]),
+            ("cloudtemplates", "templates", _IDs, [("t1.mp4", ""), ("t2.mp4", "reg"), ("t3.mp4", ""),
+                                                 ("t4.mp4", "reg"), ("t5.mp4", "reg"),
+                                                 ("t6.mp4", ""), ("t7.mp4", "reg")]),
+            ("cloudtrends", "trends", _IDs, [("a1.mp4", ""), ("a2.mp4", "reg")]),
+            ("perfectcaption", "trends_caption", _IDs, [("a1.mp4", ""), ("a2.mp4", "reg")]),
+            ("perfecttemplate", "trends_template", _IDs, [("a1.mp4", ""), ("a2.mp4", "reg")]),
+            ("provaultreels", "pro_videos", _IDs, [("a1.mp4", ""), ("a2.mp4", "reg")]),
+            ("provaultposts", "pro_posts", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("provaultstories", "pro_stories", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("provaultstoryctas", "pro_storyctas", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("provaultpps", "pro_profile_pics", _IDs, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("v2reels", "videos", _I2Ds, [("a1.mp4", ""), ("a2.mp4", "reg")]),
+            ("v2posts", "posts", _I2Ds, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("v2stories", "stories", _I2Ds, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("v2storyctas", "storyctas", _I2Ds, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("v2pps", "profile_pics", _I2Ds, [("a1.jpg", ""), ("a2.jpg", "reg")]),
+            ("v2brutes", "brutes", _I2Ds, [("a1.mp4", ""), ("a2.mp4", "off"), ("a3.mp4", "reg")]),
+        ]
+        _regDs = []
+        for _tab, _sd, _id, _fs in _GAL_Ds:
+            for _n, _how in _fs:
+                _pf = _fichierDs(_id, _sd, _n)
+                if _how == "reg":
+                    _regDs.append("%s|%s|%s" % (_id, _sd, _n))
+                elif _how == "off":
+                    _boDs.desactiver(_pf, "essai")
+        # zzcap : une identite dont TOUTES les captions sont desactivees, et une
+        # galerie (Posts) sans aucun desactive : ni compteur ni note.
+        _fichierDs("zzcap", "posts", "x1.jpg")
+        (_IDDs / "zzcap" / "brutes").mkdir(parents=True, exist_ok=True)
+
+        def _ecrireDs(p, obj):
+            safe_json.write(p, obj)
+            _wDs._invalidate_json_cache(p)
+
+        _ecrireDs(_wDs.DISABLED_REELS_FILE, sorted(_regDs))
+        _ecrireDs(_wDs.FLASH_TREND_FILE, ["%s|templates|t3.mp4" % _IDs, "%s|templates|t4.mp4" % _IDs])
+        _ecrireDs(_wDs.TRASH_TREND_FILE, ["%s|templates|t5.mp4" % _IDs])
+        _ecrireDs(_wDs.FAV_BRUTES_FILE, ["%s|brutes|b4.mp4" % _IDs, "%s|brutes|b5.mp4" % _IDs,
+                                          "%s|templates|t6.mp4" % _IDs, "%s|templates|t7.mp4" % _IDs])
+        _ecrireDs(_wDs.BANGER_MARKS_FILE, {"%s|videos|r3.mp4" % _IDs: {}, "%s|videos|r4.mp4" % _IDs: {}})
+        _ecrireDs(_wDs.CAPTIONS_FILE, {
+            _IDs: {"font": "Strong", "style": {}, "global_pos": {},
+                 "items": [{"id": "c1", "text": "Premiere active"},
+                           {"id": "c2", "text": "Seconde eteinte", "enabled": False},
+                           {"id": "c3", "text": "Troisieme active", "fav": True}]},
+            "zzcap": {"font": "Strong", "style": {}, "global_pos": {},
+                      "items": [{"id": "d1", "text": "Seule eteinte", "enabled": False}]}})
+        _wDs._oublier_identites()
+
+        _appDs = _wDs.create_app()
+        _appDs.config["TESTING"] = True
+        _cDs = _appDs.test_client()
+        with _cDs.session_transaction() as _sDs:
+            _sDs["auth"] = True; _sDs["username"] = "admin"; _sDs["role"] = "owner"
+        # La page est en anglais par defaut : les libelles sont verifies en francais.
+        _cDs.set_cookie("va_lang", "fr")
+
+        def _fragDs(tab, sd, ident):
+            _r = _cDs.get("/?lazy=%s&cloud_%s_ident=%s" % (tab, sd, ident),
+                          headers={"X-Tab-Ajax": "1"})
+            return _r.status_code, _r.get_data(as_text=True)
+
+        def _cartesDs(h):
+            """[(nom, cachee, grisee, bouton ⊘ allume)] des cartes d un fragment."""
+            _out = []
+            _ms = list(_reDs.finditer(r"<div class='cloud-card([^']*)' style='([^']*)'>", h))
+            for _k, _m in enumerate(_ms):
+                _fin = _ms[_k + 1].start() if _k + 1 < len(_ms) else len(h)
+                _bloc = h[_m.end():_fin]
+                _f = _reDs.search(r"data-fid='([^']*)'", _bloc)
+                _out.append(((_f.group(1).split("|")[-1] if _f else "?"),
+                             "display:none" in _m.group(2), "is-reel-off" in _m.group(1),
+                             "reel-disable is-off" in _bloc))
+            return _out
+
+        def _pl(n, mot):
+            return "%d %s%s" % (n, mot, "s" if n > 1 else "")
+
+        # -- 1. RENDU SERVEUR, GALERIE PAR GALERIE -------------------------------
+        _FRAGS_Ds = {}
+        _pbRendu, _pbBase, _pbActifs, _pbBouton, _pbCompte, _pbCoherent = [], [], [], [], [], []
+        # Templates : t3 (⚡, actif) est cache par sa MARQUE, pas par le ⊘.
+        _marquesDs = {"cloudtemplates": {"t3.mp4"}}
+        for _tab, _sd, _id, _fs in _GAL_Ds:
+            _st, _h = _fragDs(_tab, _sd, _id)
+            _FRAGS_Ds[_tab] = _h
+            if _st != 200 or "id='vault-grid'" not in _h:
+                # Le fragment AJAX rend « » sur une exception : une galerie vide
+                # passerait pour une galerie sans desactive.
+                _pbRendu.append("%s (%s, %d o)" % (_tab, _st, len(_h)))
+                continue
+            _cs = _cartesDs(_h)
+            _eteintsA = {n for n, how in _fs if how}
+            _actifsA = {n for n, how in _fs if not how} - _marquesDs.get(_tab, set())
+            _vus = {n for n, cachee, _g, _b in _cs if not cachee}
+            _caches = {n for n, cachee, _g, _b in _cs if cachee}
+            if _vus & _eteintsA or not _eteintsA <= _caches:
+                _pbBase.append("%s: vus=%s" % (_tab, sorted(_vus)))
+            if _vus != _actifsA:
+                _pbActifs.append("%s: vus=%s attendu=%s" % (_tab, sorted(_vus), sorted(_actifsA)))
+            if _h.count("id='offbrute-toggle-btn'") != 1 or _h.count("id='offbrute-toggle-btn' data-on='0'") != 1:
+                _pbBouton.append(_tab)
+            _cpt = _reDs.search(r"data-vault-header-count[^>]*>(.*?)</div>", _h, _reDs.S)
+            _cptT = _reDs.sub(r"<[^>]+>", "", _cpt.group(1)) if _cpt else ""
+            _nOff = len(_eteintsA)
+            if ("%s · %s %s" % (_pl(len(_fs), "fichier"), "0.0 MB", "")).strip() not in _cptT \
+                    or (" · %s %s" % (_pl(_nOff, "désactivé"), "masqué" + ("s" if _nOff > 1 else ""))) not in _cptT:
+                _pbCompte.append("%s: « %s »" % (_tab, _cptT))
+            # Grisee, bouton ⊘ allume et cachee vont ENSEMBLE : le client lit la
+            # carte OU le bouton, le serveur doit poser les trois.
+            if any((g != b) or (g and not c) or (n in _eteintsA) != g for n, c, g, b in _cs):
+                _pbCoherent.append("%s: %s" % (_tab, _cs))
+        check("desactives (serveur) : les %d galeries qui ont le ⊘ se rendent (200, grille presente)"
+              % len(_GAL_Ds), not _pbRendu, " | ".join(_pbRendu))
+        check("desactives (serveur) : vue de base SANS aucun desactive, dans chaque galerie (display:none des le rendu)",
+              not _pbBase, " | ".join(_pbBase)[:300])
+        check("desactives (serveur) : ... et les actifs y restent tous (rien d autre ne disparait)",
+              not _pbActifs, " | ".join(_pbActifs)[:300])
+        check("desactives (serveur) : une carte desactivee est grisee, son ⊘ allume ET cachee (les trois ensemble)",
+              not _pbCoherent, " | ".join(_pbCoherent)[:300])
+        check("desactives (serveur) : bouton « ⊘ Desactivees » dans CHAQUE galerie, une fois, neutre (data-on='0')",
+              not _pbBouton, str(_pbBouton))
+        check("desactives (serveur) : l en-tete dit « N fichiers · N desactive(s) masque(s) » dans chaque galerie",
+              not _pbCompte, " | ".join(_pbCompte)[:300])
+        _hB = _FRAGS_Ds.get("cloudbrutes", "")
+        check("desactives (serveur) : Video brut -> b2 et b4 (.off.json) caches comme b3 (registre), b1 et b5 affichees",
+              {n for n, c, _g, _b in _cartesDs(_hB) if c} == {"b2.mp4", "b3.mp4", "b4.mp4"}
+              and "5 fichiers · 0.0 MB · 3 désactivés masqués" in _reDs.sub(r"<[^>]+>", "", _hB),
+              str(_cartesDs(_hB)))
+        _hT = _FRAGS_Ds.get("cloudtemplates", "")
+        _ordreT = [_m.group(1) for _m in _reDs.finditer(
+            r"id='(template-toggle-btn|trash-toggle-btn|flash-toggle-btn|offbrute-toggle-btn)'", _hT)]
+        check("desactives (serveur) : « ⊘ Desactivees » vient EN DERNIER, apres ⚡ Flash Trend (familles intactes)",
+              _ordreT == ["template-toggle-btn", "trash-toggle-btn", "flash-toggle-btn", "offbrute-toggle-btn"],
+              str(_ordreT))
+        _videDs = {}
+        for _tab in ("cloudbrutes", "cloudreels", "cloudstories", "cloudpps", "cloudtemplates", "v2posts"):
+            _mv = _reDs.search(r"id='offbrute-toggle-btn'[^>]*data-vide='([^']*)'", _FRAGS_Ds.get(_tab, ""))
+            _videDs[_tab] = _mv.group(1) if _mv else None
+        check("desactives (serveur) : chaque galerie a SON message de vue ⊘ vide (data-vide)",
+              _videDs == {"cloudbrutes": "Aucune brute désactivée", "cloudreels": "Aucun reel désactivé",
+                          "cloudstories": "Aucune story désactivée",
+                          "cloudpps": "Aucune photo de profil désactivée",
+                          "cloudtemplates": "Aucun template désactivé",
+                          "v2posts": "Aucun post désactivé"}, str(_videDs))
+        _notePP = _reDs.search(r"class='vues-empty-note'[^>]*>([^<]*)<", _FRAGS_Ds.get("cloudpps", ""))
+        check("desactives (serveur) : galerie ENTIEREMENT desactivee (PP) -> une note dit pourquoi elle est vide",
+              bool(_notePP) and _notePP.group(1)
+              == "Rien dans la vue de base : 1 désactivé (« ⊘ Désactivées » pour les voir).",
+              _notePP.group(1) if _notePP else "pas de note")
+        _st0, _h0 = _fragDs("cloudposts", "posts", "zzcap")
+        _cpt0 = _reDs.search(r"data-vault-header-count[^>]*>(.*?)</div>", _h0, _reDs.S)
+        check("desactives (serveur) : galerie sans desactive -> ni « 0 desactive » ni note, le bouton reste",
+              _st0 == 200 and _cpt0 is not None and "désactiv" not in _cpt0.group(1)
+              and "vues-empty-note" not in _h0 and "id='offbrute-toggle-btn' data-on='0'" in _h0,
+              (_cpt0.group(1) if _cpt0 else _h0[:120]))
+
+        # -- 2. ONGLET CAPTION -----------------------------------------------------
+        _rCap = _cDs.get("/?lazy=cloudcaptions&cloud_captions_ident=%s" % _IDs, headers={"X-Tab-Ajax": "1"})
+        _hCap = _rCap.get_data(as_text=True)
+        _FRAGS_Ds["cloudcaptions"] = _hCap
+        _rCap0 = _cDs.get("/?lazy=cloudcaptions&cloud_captions_ident=zzcap", headers={"X-Tab-Ajax": "1"})
+        _hCap0 = _rCap0.get_data(as_text=True)
+        _FRAGS_Ds["cloudcaptions_zzcap"] = _hCap0
+        _cartesCap = _reDs.findall(r"<div class='cap-card([^']*)' data-cid='([^']*)'", _hCap)
+        check("captions (serveur) : la caption desactivee porte cap-off, les actives non",
+              _rCap.status_code == 200
+              and sorted(_cartesCap) == sorted([("", "c1"), (" cap-off", "c2"), ("", "c3")]),
+              str(_cartesCap))
+        check("captions (serveur) : bouton « ⊘ Desactivees » present, une fois, neutre",
+              _hCap.count("id='offbrute-toggle-btn' data-on='0'") == 1
+              and "toggleOffBruteFilter(this)" in _hCap)
+        # « 2 brutes dispo » : b3, grisee par le ⊘ de la galerie (registre),
+        # n est plus dans le fond de l editeur -- CHANGE VOULU, elle y restait
+        # alors que la galerie et « Add perfect » la traitent comme eteinte.
+        _cptCap = _reDs.search(r"id='capCountInfo'[^>]*>(.*?)</div>", _hCap, _reDs.S)
+        check("captions (serveur) : le compteur dit combien sont masquees",
+              bool(_cptCap) and _cptCap.group(1).endswith("3 captions · 2 brutes dispo · 1 désactivée masquée"),
+              _cptCap.group(1) if _cptCap else "")
+        _noteCap0 = _reDs.search(r"class='cap-vue-note'[^>]*>([^<]*)<", _hCap0)
+        check("captions (serveur) : toutes desactivees -> une note, pas une grille blanche",
+              _rCap0.status_code == 200 and bool(_noteCap0)
+              and _noteCap0.group(1) == "Toutes les captions sont désactivées (1) : « ⊘ Désactivées » pour les voir."
+              and "vues-empty-note" not in _hCap, _noteCap0.group(1) if _noteCap0 else _hCap0[:120])
+
+        # Le masquage des captions passe par le CSS (classe cap-vue-off sur la
+        # grille et sur la modale de l editeur). SPECIFICITE CALCULEE, pas
+        # estimee (CLAUDE.md) : chaque regle qui pose un display sur une carte
+        # ou une ligne de l editeur doit perdre contre la regle de masquage.
+        _pageDs = _cDs.get("/?tab=cloudbrutes").get_data(as_text=True)
+        _FRAGS_Ds["_page"] = _pageDs
+
+        def _specDs(sel):
+            """(ids, classes/attributs/pseudo-classes, elements) d un selecteur."""
+            _a = _b = _c = 0
+            for _nt in _reDs.findall(r":not\(([^()]*)\)", sel):
+                _x = _specDs(_nt)
+                _a += _x[0]; _b += _x[1]; _c += _x[2]
+            _s = _reDs.sub(r":not\([^()]*\)", "", sel)
+            _c += len(_reDs.findall(r"::[a-zA-Z-]+", _s))
+            _s = _reDs.sub(r"::[a-zA-Z-]+", "", _s)
+            _b += len(_reDs.findall(r":[a-zA-Z-]+(?:\([^()]*\))?", _s))
+            _s = _reDs.sub(r":[a-zA-Z-]+(?:\([^()]*\))?", "", _s)
+            _a += len(_reDs.findall(r"#[\w-]+", _s))
+            _b += len(_reDs.findall(r"\.[\w-]+|\[[^\]]*\]", _s))
+            _c += len(_reDs.findall(r"[a-zA-Z][\w-]*", _reDs.sub(r"#[\w-]+|\.[\w-]+|\[[^\]]*\]", "", _s)))
+            return (_a, _b, _c)
+
+        _cssDs = "\n".join(_reDs.findall(r"<style[^>]*>(.*?)</style>", _pageDs + _hCap, _reDs.S))
+        _cssDs = _reDs.sub(r"/\*.*?\*/", "", _cssDs, flags=_reDs.S)
+        _reglesDs = []
+        for _m in _reDs.finditer(r"([^{}]+)\{([^{}]*)\}", _cssDs):
+            for _sel in _m.group(1).split(","):
+                _reglesDs.append((_sel.strip(), _m.group(2)))
+        # La caption EN COURS (.on) echappe au masquage de la liste de l editeur :
+        # « Ajouter un texte » sous ⊘ creait une caption aussitot cachee de sa
+        # propre liste (et on recliquait : doublon).
+        _MASQUE_Ds = {
+            "#capCards:not(.cap-vue-off) .cap-card.cap-off": "cap-card",
+            "#capCards.cap-vue-off .cap-card:not(.cap-off)": "cap-card",
+            "#cap-ed-modal:not(.cap-vue-off) #cap-ed-list .cap-ed-li.off:not(.on)": "cap-ed-li",
+            "#cap-ed-modal.cap-vue-off #cap-ed-list .cap-ed-li:not(.off):not(.on)": "cap-ed-li"}
+        _presentes = {s for s, d in _reglesDs if s in _MASQUE_Ds and _reDs.search(r"display\s*:\s*none", d)}
+        check("captions (CSS) : les quatre regles de masquage sont dans la page (grille et liste de l editeur)",
+              _presentes == set(_MASQUE_Ds), str(set(_MASQUE_Ds) - _presentes))
+        _rivales = []
+        for _sel, _decl in _reglesDs:
+            if _sel in _MASQUE_Ds or not _reDs.search(r"(^|;)\s*display\s*:", _decl):
+                continue
+            _dern = _reDs.split(r"[\s>+~]+", _sel.strip())[-1]
+            for _cible in ("cap-card", "cap-ed-li"):
+                if not _reDs.search(r"\." + _cible + r"(?![\w-])", _dern):
+                    continue
+                _mini = min(_specDs(s) for s, c in _MASQUE_Ds.items() if c == _cible)
+                if _reDs.search(r"display\s*:[^;]*!important", _decl) or _specDs(_sel) >= _mini:
+                    _rivales.append("%s %s" % (_sel, _specDs(_sel)))
+        check("captions (CSS) : aucune regle display d une carte ou d une ligne ne bat le masquage (specificite calculee)",
+              not _rivales and _specDs("#capCards:not(.cap-vue-off) .cap-card.cap-off") == (1, 3, 0)
+              and _specDs(".cap-card") == (0, 1, 0), " | ".join(_rivales)[:300])
+        check("captions (CSS) : la ligne de la caption en cours (.on) n est jamais masquee (specificite 2-4-0)",
+              _specDs("#cap-ed-modal.cap-vue-off #cap-ed-list .cap-ed-li:not(.off):not(.on)") == (2, 4, 0)
+              and _specDs("#cap-ed-modal:not(.cap-vue-off) #cap-ed-list .cap-ed-li.off:not(.on)") == (2, 4, 0))
+        check("captions (serveur) : les cartes n ont pas de display en ligne (il battrait le CSS)",
+              not _reDs.search(r"<div class='cap-card[^>]*style=", _hCap))
+
+        # Le Drive cache ses desactives par le CSS de la PAGE (classe drive-vue-off
+        # sur la galerie) : les regles doivent y etre, et aucune autre regle qui
+        # pose un display sur une carte ne doit les battre. Specificite CALCULEE.
+        _DRIVE_CSS_Ds = [
+            ".vault-gallery.drive-galerie:not(.drive-vue-off) .cloud-card.is-reel-off",
+            ".vault-gallery.drive-galerie.drive-vue-off .cloud-card:not(.is-reel-off)",
+            ".vault-gallery.drive-galerie.drive-vue-off .drive-sec-sans-off",
+            ".vault-gallery.drive-galerie.drive-vue-off .drive-note-base",
+            ".vault-gallery.drive-galerie:not(.drive-vue-off) .drive-note-vue-off",
+            ".vault-gallery.drive-galerie:not(.drive-vue-off) .drive-cpt-off",
+            ".vault-gallery.drive-galerie.drive-vue-off .drive-cpt-base"]
+        _presDr = {s for s, d in _reglesDs if s in _DRIVE_CSS_Ds and _reDs.search(r"display\s*:\s*none", d)}
+        _miniDr = min(_specDs(s) for s in _DRIVE_CSS_Ds[:2])
+        _rivDr = []
+        for _sel, _decl in _reglesDs:
+            if _sel in _DRIVE_CSS_Ds or not _reDs.search(r"(^|;)\s*display\s*:", _decl):
+                continue
+            _dern = _reDs.split(r"[\s>+~]+", _sel.strip())[-1]
+            if _reDs.search(r"\.cloud-card(?![\w-])", _dern) and (
+                    _reDs.search(r"display\s*:[^;]*!important", _decl) or _specDs(_sel) >= _miniDr):
+                _rivDr.append("%s %s" % (_sel, _specDs(_sel)))
+        check("drive (CSS) : les regles de masquage sont dans la page, et aucune regle display d une carte ne les bat",
+              _presDr == set(_DRIVE_CSS_Ds) and not _rivDr and _miniDr == (0, 5, 0),
+              str(sorted(set(_DRIVE_CSS_Ds) - _presDr)) + " | " + " | ".join(_rivDr)[:300])
+
+        # -- 3. « ADD PERFECT » : les desactives ne sont plus proposes, et COMPTES --
+        _pfDs = {}
+        for _ty in ("brutes", "templates", "flash", "trash", "captions"):
+            _j = _cDs.get("/perfect/liste?identity=%s&type=%s" % (_IDs, _ty)).get_json() or {}
+            _pfDs[_ty] = (sorted(str(x.get("nom") or x.get("id")) for x in _j.get("items", [])),
+                          _j.get("desactives"))
+        check("add perfect : brutes -> b1 et b5 seules, les 3 eteintes (.off.json ET registre) COMPTEES",
+              _pfDs["brutes"] == (["b1.mp4", "b5.mp4"], 3), str(_pfDs["brutes"]))
+        check("add perfect : templates, ⚡ et Trash -> sans les desactives, comptes par famille",
+              _pfDs["templates"] == (["t1.mp4", "t6.mp4"], 2) and _pfDs["flash"] == (["t3.mp4"], 1)
+              and _pfDs["trash"] == ([], 1),
+              str({k: _pfDs[k] for k in ("templates", "flash", "trash")}))
+        check("add perfect : captions -> la desactivee n est plus proposee, et elle est comptee",
+              _pfDs["captions"] == (["c1", "c3"], 1), str(_pfDs["captions"]))
+
+        # -- 4. LA ROUTE DE BASCULE, RELUE PAR UN NOUVEAU RENDU ---------------------
+        def _visDs(tab, sd, ident):
+            """(cartes affichees, texte de l en-tete) d un nouveau rendu."""
+            _st, _h = _fragDs(tab, sd, ident)
+            _m = _reDs.search(r"data-vault-header-count[^>]*>(.*?)</div>", _h, _reDs.S)
+            return ({n for n, c, _g, _b in _cartesDs(_h) if not c},
+                    _reDs.sub(r"<[^>]+>", "", _m.group(1)) if _m else "")
+
+        _j1 = _cDs.post("/reel/toggle_disabled", data={"file_id": "%s|brutes|b1.mp4" % _IDs}).get_json() or {}
+        # Le voisin est relu TOUT DE SUITE : la reactivation plus bas l efface.
+        _voisin1 = (_IDDs / _IDs / "brutes" / "b1.off.json").exists()
+        _v1 = _visDs("cloudbrutes", "brutes", _IDs)
+        _j2 = _cDs.post("/reel/toggle_disabled", data={"file_id": "%s|brutes|b1.mp4" % _IDs}).get_json() or {}
+        _v2 = _visDs("cloudbrutes", "brutes", _IDs)
+        check("bascule : une brute desactivee (son .off.json) quitte la vue de base au rendu suivant, le compteur suit",
+              _j1 == {"ok": True, "disabled": True} and _voisin1
+              and _v1[0] == {"b5.mp4"} and "4 désactivés masqués" in _v1[1], (str(_j1), _v1))
+        check("bascule : ... reactivee, elle revient, et le compteur redescend",
+              _j2 == {"ok": True, "disabled": False} and _v2[0] == {"b1.mp4", "b5.mp4"}
+              and not (_IDDs / _IDs / "brutes" / "b1.off.json").exists()
+              and "3 désactivés masqués" in _v2[1], (str(_j2), _v2))
+        _j3 = _cDs.post("/reel/toggle_disabled", data={"file_id": "%s|videos|r1.mp4" % _IDs}).get_json() or {}
+        _v3 = _visDs("cloudreels", "videos", _IDs)
+        _j4 = _cDs.post("/reel/toggle_disabled", data={"file_id": "%s|videos|r1.mp4" % _IDs}).get_json() or {}
+        _v4 = _visDs("cloudreels", "videos", _IDs)
+        check("bascule : un reel (registre) desactive puis reactive -> cache puis de retour dans la vue de base",
+              _j3.get("disabled") is True and _v3[0] == {"r3.mp4"} and "3 désactivés masqués" in _v3[1]
+              and _j4.get("disabled") is False and _v4[0] == {"r1.mp4", "r3.mp4"}
+              and "2 désactivés masqués" in _v4[1], (_v3, _v4))
+
+        # -- 4 bis. LE DRIVE (Bibliotheque, Bibliotheque 2, Vault PRO) -----------------
+        # Il montrait tout en couleur, sans filtre ⊘, et ses pastilles comptaient
+        # les desactives : sa visionneuse feuilletait les brutes eteintes au
+        # milieu des autres. Meme regle que les galeries (_media_desactive) ;
+        # le masquage passe par une CLASSE et le CSS de la page (verifie plus bas).
+        def _driveDs(tab, key, ident):
+            _r = _cDs.get("/?lazy=%s&%s=%s" % (tab, key, ident), headers={"X-Tab-Ajax": "1"})
+            _h = _r.get_data(as_text=True)
+            _cs = [("%s/%s" % (_m.group(3), _m.group(4)), "is-reel-off" in _m.group(1),
+                    "display" in _m.group(2))
+                   for _m in _reDs.finditer(
+                       r"<div class='cloud-card([^']*)' style='([^']*)'>\s*<div onclick='openLightbox\(\"/cloud/file/[^/]+/([^/]+)/([^\"]+)\"", _h)]
+            _cpt = _reDs.search(r"data-vault-header-count[^>]*>(.*?)</div>", _h, _reDs.S)
+            return _r.status_code, _h, _cs, (_cpt.group(1) if _cpt else "")
+
+        _DRIVES_Ds = [
+            ("clouddrive", "cloud_drive_ident", _IDs, 23,
+             {"profile_pics/pp1.jpg", "videos/r2.mp4", "videos/r4.mp4", "posts/a2.jpg", "stories/a2.jpg",
+              "storyctas/a2.jpg", "brutes/b2.mp4", "brutes/b3.mp4", "brutes/b4.mp4",
+              "templates/t2.mp4", "templates/t4.mp4", "templates/t5.mp4", "templates/t7.mp4"}),
+            ("v2drive", "v2_drive_ident", _I2Ds, 13,
+             {"videos/a2.mp4", "posts/a2.jpg", "stories/a2.jpg", "storyctas/a2.jpg",
+              "profile_pics/a2.jpg", "brutes/a2.mp4", "brutes/a3.mp4"}),
+            ("provaultdrive", "cloud_pro_drive_ident", _IDs, 10,
+             {"pro_videos/a2.mp4", "pro_posts/a2.jpg", "pro_stories/a2.jpg", "pro_storyctas/a2.jpg",
+              "pro_profile_pics/a2.jpg"}),
+        ]
+        _pbDrive, _DRIVE_CS_Ds = [], {}
+        for _tab, _key, _id, _nTot, _offAtt in _DRIVES_Ds:
+            _st, _h, _cs, _cpt = _driveDs(_tab, _key, _id)
+            _FRAGS_Ds[_tab] = _h
+            _DRIVE_CS_Ds[_tab] = _cs
+            _offVu = {k for k, off, _d in _cs if off}
+            _nOff = len(_offAtt)
+            _entete = ("%d fichiers au total · %d désactivés masqués" % (_nTot, _nOff))
+            if _st != 200 or "class='vault-gallery drive-galerie'" not in _h:
+                _pbDrive.append("%s: rendu %s" % (_tab, _st))
+            elif _offVu != _offAtt or len(_cs) != _nTot:
+                _pbDrive.append("%s: grises=%s (%d cartes)" % (_tab, sorted(_offVu ^ _offAtt), len(_cs)))
+            elif any(_d for _k, _o, _d in _cs):
+                _pbDrive.append("%s: display en ligne sur une carte (le CSS doit decider)" % _tab)
+            elif _h.count("id='offbrute-toggle-btn' data-on='0' onclick='toggleOffBruteFilter(this)'") != 1:
+                _pbDrive.append("%s: bouton « ⊘ Desactivees » absent ou double" % _tab)
+            elif ("<span class='drive-cpt-base'>%s</span>" % _entete) not in _cpt \
+                    or ("<span class='drive-cpt-off'>%d fichiers au total · %d désactivés</span>"
+                        % (_nTot, _nOff)) not in _cpt:
+                _pbDrive.append("%s: en-tete « %s »" % (_tab, _cpt))
+        check("drive : Bibliotheque, Bibliotheque 2 et Vault PRO -> les desactives (registre ET .off.json) portent "
+              "is-reel-off, sans display en ligne, un bouton « ⊘ Desactivees » neutre, l en-tete compte les masques",
+              not _pbDrive, " | ".join(_pbDrive)[:400])
+        _hDr = _FRAGS_Ds.get("clouddrive", "")
+        _pastDr = dict(_reDs.findall(
+            r"font-size:14px'>([^<]+)</span><span style='background:rgba\(59,130,246,.15\)[^>]*>(.*?)</span></div>", _hDr))
+        check("drive : chaque pastille dit « N · K desactive(s) masque(s) » (et « N · K desactive(s) » sous ⊘)",
+              _pastDr.get("🎞️ Rushs bruts") == ("<span class='drive-cpt-base'>5 · 3 désactivés masqués</span>"
+                                                "<span class='drive-cpt-off'>5 · 3 désactivés</span>")
+              and _pastDr.get("🎵 Templates montage", "").startswith("<span class='drive-cpt-base'>7 · 4 désactivés masqués")
+              and _pastDr.get("📷 Posts", "").startswith("<span class='drive-cpt-base'>2 · 1 désactivé masqué</span>"),
+              str(_pastDr)[:300])
+        _noteDr = _reDs.findall(r"class='drive-note-base'[^>]*>([^<]*)<", _hDr)
+        # Toutes les sections de zzds ont au moins un desactive : aucune ne doit
+        # disparaitre sous ⊘ (drive-sec-sans-off).
+        check("drive : une section ENTIEREMENT desactivee (PP) dit pourquoi elle est vide, les autres non",
+              _noteDr == ["Désactivé (1) : « ⊘ Désactivées » pour les voir."]
+              and "drive-sec-sans-off" not in _hDr, str(_noteDr))
+        _st0D, _h0D, _cs0D, _cpt0D = _driveDs("clouddrive", "cloud_drive_ident", "zzcap")
+        _FRAGS_Ds["clouddrive_zzcap"] = _h0D
+        check("drive : identite sans desactive -> ni compte « desactive », ni carte grisee ; la note de la vue ⊘ vide est la",
+              _st0D == 200 and "désactiv" not in _cpt0D and not any(o for _k, o, _d in _cs0D)
+              and "class='drive-note-vue-off'" in _h0D and "drive-sec-sans-off" in _h0D, _cpt0D)
+
+        # -- 4 ter. /a-relire ET LA CLOCHE : sans les desactives, comptes a part ---------
+        # t2 (template ⊘) et b2 (brute .off.json) portaient encore « a relire » et
+        # « a verifier » : la cloche du bandeau les comptait.
+        _dTpl, _dBr = _IDDs / _IDs / "templates", _IDDs / _IDs / "brutes"
+        for _n in ("t1", "t2"):
+            (_dTpl / (_n + ".acheck.txt")).write_text("a relire\nhttps://x.test/p\n", encoding="utf-8")
+            (_dTpl / (_n + ".desc.txt")).write_text("desc " + _n, encoding="utf-8")
+            safe_json.write(_dTpl / (_n + ".analyse.json"),
+                            {"cut_at": 2.0, "duration": 8.0, "captions": [{"text": "cap " + _n}],
+                             "verifier": {"priorite": "haute", "raisons": ["essai"]}})
+        for _n in ("b1", "b2"):
+            (_dBr / (_n + ".acheck.txt")).write_text("a relire\n", encoding="utf-8")
+        _hAr = _cDs.get("/a-relire").get_data(as_text=True)
+        _jAr = _cDs.get("/analyses/etat").get_json() or {}
+        _mAr = _reDs.search(r"class='a-relire-masques'[^>]*>([^<]*)<", _hAr)
+        check("a relire : les desactives (template ⊘, brute .off.json) ne sont plus listes, les actifs restent",
+              "t1.mp4" in _hAr and "b1.mp4" in _hAr and "t2.mp4" not in _hAr and "b2.mp4" not in _hAr,
+              str([n for n in ("t1.mp4", "t2.mp4", "b1.mp4", "b2.mp4") if n in _hAr]))
+        check("a relire : ... et la page dit combien sont masques (des fichiers, t2 compte une fois)",
+              bool(_mAr) and _mAr.group(1).startswith("2 élément(s) désactivé(s) non listé(s) (⊘)"),
+              _mAr.group(1) if _mAr else "pas de mention")
+        check("a relire : la cloche (/analyses/etat) ne compte que les actifs, et les masques a part",
+              _jAr.get("a_relire") == 2 and _jAr.get("a_verifier") == 1 and _jAr.get("desactives_masques") == 2,
+              str({k: _jAr.get(k) for k in ("a_relire", "a_verifier", "desactives_masques")}))
+
+        # -- 4 quater. « REPERER LE TEXTE » : chaque entree dit si elle est deja eteinte --
+        # b1 et b5 en service, b2 et b4 (.off.json), b3 (⊘ de la galerie) : la meme
+        # regle que la galerie. b4 et b5 illisibles (non conclu).
+        for _n, _v in (("b1", True), ("b2", True), ("b3", True), ("b4", None), ("b5", None)):
+            _wDs._textecheck_ecrire(_dBr / (_n + ".mp4"), _v, (["promo"] if _v else []),
+                                    ("" if _v else "illisible"))
+        _rapDs = (_cDs.get("/cloud/scan_texte_etat?identity=%s" % _IDs).get_json() or {}).get("rapport") or {}
+        check("reperer le texte : « desactivee » sur chaque entree, avec la regle de la galerie (.off.json ET ⊘)",
+              [(x["fichier"], x.get("desactivee")) for x in _rapDs.get("avec_texte", [])]
+              == [("b1.mp4", False), ("b2.mp4", True), ("b3.mp4", True)]
+              and [(x["fichier"], x.get("desactivee")) for x in _rapDs.get("non_conclu", [])]
+              == [("b4.mp4", True), ("b5.mp4", False)],
+              str(_rapDs)[:300])
+        check("reperer le texte : les compteurs d action restent sur le .off.json (ce que lit le bot)",
+              _rapDs.get("a_eteindre") == 2 and _rapDs.get("desactivees") == 2
+              and sorted(_rapDs.get("desactivees_noms") or []) == ["b2.mp4", "b3.mp4", "b4.mp4"],
+              str({k: _rapDs.get(k) for k in ("a_eteindre", "desactivees", "desactivees_noms")}))
+        _RAP_Ds = _rapDs
+
+        # -- 4 quinquies. LE FOND DE L EDITEUR DE CAPTIONS : sans la brute ⊘ du registre --
+        _mCapB = _reDs.search(r"id='capLibData'>(.*?)</script>", _hCap, _reDs.S)
+        _capB = json.loads(_mCapB.group(1).replace("<\\/", "</")).get("brutes") if _mCapB else None
+        check("captions (serveur) : le fond de l editeur ecarte la brute ⊘ du registre (b3), pas seulement le .off.json",
+              _capB == ["b1.mp4", "b5.mp4"], str(_capB))
+
+        # -- 5. NODE --CHECK : LA PAGE ET CHAQUE FRAGMENT RENDU -----------------------
+        # Scripts ET gestionnaires on… (onclick='…') : c est du JavaScript que
+        # le navigateur execute, et une apostrophe mal echappee dans une chaine
+        # Python le tue sans erreur serveur. Les fragments arrivent en AJAX :
+        # le controle de la page principale ne les voit pas.
+        _nodeDs = _shDs.which("node")
+
+        class _GestDs(_hpDs.HTMLParser):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.gest = []
+
+            def handle_starttag(self, tag, attrs):
+                for _k, _v in attrs:
+                    if _k.startswith("on") and _v:
+                        self.gest.append(_v)
+
+        if _nodeDs:
+            _casDs, _nbScripts, _nbGest, _nbJson = [], 0, 0, 0
+            for _nomF, _hF in sorted(_FRAGS_Ds.items()):
+                _blocs = _reDs.findall(r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", _hF, _reDs.S)
+                _nbJson += sum(1 for a, c in _blocs if "json" in a.lower())
+                _codes = [c for a, c in _blocs if "json" not in a.lower()]
+                _g = _GestDs()
+                _g.feed(_hF)
+                _codes.append("\n".join("function _g%d(event){\n%s\n}" % (i, x) for i, x in enumerate(_g.gest)))
+                _nbGest += len(_g.gest)
+                for _k, _src in enumerate(_codes):
+                    if not _src.strip():
+                        continue
+                    _nbScripts += 1
+                    _fJ = TMP / ("desactives_%s_%d.js" % (_nomF.strip("_"), _k))
+                    _fJ.write_text(_src, encoding="utf-8")
+                    _rJ = _spDs.run([_nodeDs, "--check", str(_fJ)], capture_output=True,
+                                    text=True, encoding="utf-8", timeout=90)
+                    if _rJ.returncode != 0:
+                        _casDs.append("%s#%d : %s" % (_nomF, _k, (_rJ.stderr or "")[:160]))
+            # Les blocs JSON sont des donnees : ecartes de node, mais COMPTES.
+            print("     (node --check : %d blocs de code, %d gestionnaires on… compris ; "
+                  "%d blocs JSON ecartes)" % (_nbScripts, _nbGest, _nbJson))
+            check("desactives : node --check de la page et des %d fragments rendus (scripts + gestionnaires)"
+                  % (len(_FRAGS_Ds) - 1), not _casDs and _nbScripts > len(_FRAGS_Ds) and _nbGest > 100,
+                  " | ".join(_casDs)[:400])
+        else:
+            print("     (node absent : le JS des fragments desactives n a pas ete verifie)")
+
+        # -- 6. LE HARNAIS NODE DES FILTRES (stub F3) : ⊘ ET LES AUTRES FILTRES --------
+        # Les memes plages que « Filtres etoile des galeries » : les vraies
+        # fonctions, un DOM minimal. Une carte desactivee = carte grisee OU
+        # bouton ⊘ allume (le client lit les deux).
+        _uplDs = _wDs._marques_remplacer(_wDs.UPLOAD_HTML)
+        _dA = _uplDs.find("function vaultSectionVisible(){")
+        _fA = _uplDs.find("// ⌫ Vide le salon banger-")
+        _dB = _uplDs.find("function favBruteApply(sec){")
+        _fB = _uplDs.find("// === Repérage des brutes")
+        _plagesDs = min(_dA, _fA, _dB, _fB) >= 0 and _fA > _dA and _fB > _dB
+        check("desactives (JS) : vaultCarteOff, vaultCompteOff et vaultDeselectionner sont dans les plages executees",
+              _plagesDs and all(("function %s(" % n) in _uplDs[_dA:_fA]
+                                for n in ("vaultCarteOff", "vaultCompteOff", "vaultDeselectionner",
+                                          "vaultVuesAppliquer", "applyBangerFilter"))
+              and "function toggleOffBruteFilter(" in _uplDs[_dB:_fB]
+              # ★ n a plus de moteur a part : l ancien reaffichait les desactives
+              # a chaque clic d etoile.
+              and "function vaultFiltreAppliquer(" not in _uplDs)
+        _SCEN_Ds = r"""
+function carte(grid, o){
+  var c=new El('div'); c.classes.push('cloud-card');
+  if(o.gris) c.classes.push('is-reel-off');
+  [['banger-star','is-banger',o.banger],['fav-brute-star','is-fav',o.fav],
+   ['trash-trend','is-trash-trend',o.trash],['flash-trend','is-flash',o.flash],
+   ['reel-disable','is-off',o.bouton]].forEach(function(x){
+    var b=new El('button'); b.classes.push(x[0]); if(x[2]) b.classes.push(x[1]); c.appendChild(b); });
+  var cb=new El('input'); cb.classes.push('sel-cb'); cb.checked=!!o.coche; c.appendChild(cb);
+  c.nom=o.nom; grid.appendChild(c); return c;
+}
+function section(id, boutons, cartes){
+  var sec=new El('div'); sec.classes.push('form-section'); sec.attrs.id=id;
+  boutons.forEach(function(b){ var e=new El('button'); e.attrs.id=b; e.setAttribute('data-on','0'); sec.appendChild(e); });
+  var cpt=new El('span'); cpt.classes.push('vault-off-compte'); sec.appendChild(cpt);
+  var grid=new El('div'); grid.attrs.id='vault-grid'; sec.appendChild(grid);
+  racine.appendChild(sec);
+  cartes.forEach(function(o){ carte(grid,o); });
+  return {sec:sec, grid:grid};
+}
+function vus(s){ return s.grid.querySelectorAll('.cloud-card').filter(function(c){
+  return c.style.display!=='none'; }).map(function(c){ return c.nom; }).join(','); }
+function bt(s,id){ return s.sec.querySelector('#'+id); }
+function cpt(s){ return s.sec.querySelector('.vault-off-compte').textContent; }
+function note(s){ var n=s.sec.querySelector('.vues-empty-note');
+  return (n && n.style.display!=='none') ? n.textContent : ''; }
+var F={'offbrute-toggle-btn':toggleOffBruteFilter,'favbrute-toggle-btn':toggleFavBruteFilter,
+  'template-toggle-btn':toggleTemplateTrendFilter,'trash-toggle-btn':toggleTrashTrendFilter,
+  'flash-toggle-btn':toggleFlashTrendFilter,'banger-toggle-btn':toggleBangerFilter};
+function clic(s,id){ F[id](bt(s,id)); }
+var res={};
+// --- Video brut : base / ⊘ seul / ⊘ + ⭐ / ⭐ seul ------------------------------
+var b=section('form-cloudbrutes',['favbrute-toggle-btn','offbrute-toggle-btn'],
+  [{nom:'b1'},{nom:'b2',gris:true,bouton:true},{nom:'b3',bouton:true},
+   {nom:'b4',fav:true,gris:true,coche:true},{nom:'b5',fav:true,coche:true}]);
+vaultVuesAppliquer(b.sec);
+res.b_base=vus(b); res.b_base_cpt=cpt(b);
+res.b_decoche=[b.grid.querySelectorAll('.sel-cb')[3].checked, b.grid.querySelectorAll('.sel-cb')[4].checked].join(',');
+clic(b,'offbrute-toggle-btn'); res.b_off=vus(b); res.b_off_cpt=cpt(b);
+clic(b,'favbrute-toggle-btn'); res.b_off_fav=vus(b);
+clic(b,'offbrute-toggle-btn'); res.b_fav=vus(b);
+clic(b,'favbrute-toggle-btn'); res.b_retour=vus(b);
+vider();
+// --- Templates : les familles avec des desactives ---------------------------------
+var t=section('form-cloudtemplates',['favbrute-toggle-btn','template-toggle-btn','trash-toggle-btn',
+  'flash-toggle-btn','offbrute-toggle-btn'],
+  [{nom:'base'},{nom:'baseFav',fav:true},{nom:'baseOff',gris:true,bouton:true},
+   {nom:'baseFavOff',fav:true,gris:true,bouton:true},{nom:'trash',trash:true},
+   {nom:'trashOff',trash:true,gris:true,bouton:true},{nom:'flash',flash:true},
+   {nom:'flashOff',flash:true,bouton:true},{nom:'flashFavOff',flash:true,fav:true,gris:true}]);
+vaultVuesAppliquer(t.sec); res.t_base=vus(t); res.t_base_cpt=cpt(t);
+clic(t,'offbrute-toggle-btn'); res.t_off=vus(t); res.t_off_cpt=cpt(t);
+clic(t,'favbrute-toggle-btn'); res.t_off_fav=vus(t); clic(t,'favbrute-toggle-btn');
+clic(t,'template-toggle-btn'); res.t_off_template=vus(t); clic(t,'template-toggle-btn');
+clic(t,'trash-toggle-btn'); res.t_off_trash=vus(t);
+clic(t,'flash-toggle-btn'); res.t_off_trash_flash=vus(t); clic(t,'trash-toggle-btn');
+res.t_off_flash=vus(t);
+clic(t,'offbrute-toggle-btn'); res.t_flash=vus(t);
+clic(t,'trash-toggle-btn'); res.t_trash_flash=vus(t); clic(t,'flash-toggle-btn');
+res.t_trash=vus(t); clic(t,'trash-toggle-btn');
+clic(t,'template-toggle-btn'); clic(t,'favbrute-toggle-btn'); res.t_template_fav=vus(t);
+clic(t,'template-toggle-btn'); clic(t,'favbrute-toggle-btn'); res.t_retour=vus(t);
+vider();
+// Une famille dont le seul membre est desactive : la note dit qu il est masque.
+var t2=section('form-cloudtemplates',['favbrute-toggle-btn','trash-toggle-btn','offbrute-toggle-btn'],
+  [{nom:'base'},{nom:'trashOff',trash:true,gris:true,bouton:true}]);
+bt(t2,'offbrute-toggle-btn').setAttribute('data-vide','Aucun template désactivé');
+clic(t2,'trash-toggle-btn'); res.t2_note=note(t2);
+clic(t2,'trash-toggle-btn'); clic(t2,'offbrute-toggle-btn'); clic(t2,'favbrute-toggle-btn');
+res.t2_note_off_fav=note(t2);
+vider();
+// --- Reels : ★ Reels Banger passe par le meme moteur ----------------------------
+var r=section('form-cloudreels',['banger-toggle-btn','offbrute-toggle-btn'],
+  [{nom:'r1'},{nom:'r2',gris:true,bouton:true},{nom:'r3',banger:true},{nom:'r4',banger:true,gris:true,bouton:true}]);
+vaultVuesAppliquer(r.sec); res.r_base=vus(r);
+clic(r,'banger-toggle-btn'); res.r_banger=vus(r);
+clic(r,'offbrute-toggle-btn'); res.r_banger_off=vus(r);
+clic(r,'banger-toggle-btn'); res.r_off=vus(r);
+clic(r,'offbrute-toggle-btn');
+applyBangerFilter();         // ce que fait _setBangerStar au clic d une etoile
+res.r_apres_etoile=vus(r);
+vider();
+// --- Tout desactive, aucun filtre : la vue de base le dit ------------------------
+var p=section('form-cloudpps',['offbrute-toggle-btn'],[{nom:'pp1',gris:true,bouton:true}]);
+vaultVuesAppliquer(p.sec); res.p_note=note(p); res.p_cpt=cpt(p);
+clic(p,'offbrute-toggle-btn'); res.p_off=vus(p); res.p_note_off=note(p);
+vider();
+// --- Sous un filtre, la note ne promet QUE les desactives que ce filtre ------
+// retiendrait (constate : « 4 desactives masques » sous Trash, et ⊘ n en
+// montrait qu un), et le compteur sous ⊘ dit combien sont affiches.
+var t3=section('form-cloudtemplates',['favbrute-toggle-btn','trash-toggle-btn','flash-toggle-btn','offbrute-toggle-btn'],
+  [{nom:'base'},{nom:'baseOff',gris:true,bouton:true},{nom:'flashOff',flash:true,gris:true,bouton:true},
+   {nom:'trashOff',trash:true,gris:true,bouton:true},{nom:'baseFavOff',fav:true,gris:true,bouton:true}]);
+clic(t3,'trash-toggle-btn'); res.t3_note_trash=note(t3);
+clic(t3,'offbrute-toggle-btn'); res.t3_off_trash=vus(t3);
+clic(t3,'trash-toggle-btn'); clic(t3,'favbrute-toggle-btn'); res.t3_off_fav=vus(t3); res.t3_off_fav_cpt=cpt(t3);
+clic(t3,'offbrute-toggle-btn'); res.t3_fav_note=note(t3);
+console.log(JSON.stringify(res));
+"""
+        if _nodeDs and _plagesDs:
+            _fN = TMP / "desactives_filtres.js"
+            _fN.write_text(_uplDs[_dA:_fA] + "\n" + _uplDs[_dB:_fB] + "\n"
+                           + _DOM_STUB_F3.split("var res = {};")[0] + _SCEN_Ds, encoding="utf-8")
+            _rN = _spDs.run([_nodeDs, str(_fN)], capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+            try:
+                _RDs = json.loads((_rN.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _RDs = {}
+            _eN = ((_rN.stderr or "")[-300:] + " " + str(_RDs))[:400]
+            check("desactives (JS) : Video brut, vue de base = sans les grisees (carte OU bouton ⊘)",
+                  _RDs.get("b_base") == "b1,b5" and _RDs.get("b_base_cpt") == " · 3 désactivés masqués", _eN)
+            check("desactives (JS) : une desactivee cachee est DECOCHEE (la corbeille agit sur la selection)",
+                  _RDs.get("b_decoche") == "false,true", _eN)
+            # Sous ⊘ le compteur dit combien sont REELLEMENT affiches (« (3
+            # affiches) ») : « seuls affiches » au-dessus d une carte sous ⊘ + ⭐
+            # laissait croire qu il en manquait -- CHANGE VOULU.
+            check("desactives (JS) : ⊘ seul -> seulement les desactivees, le compteur dit combien sont affichees",
+                  _RDs.get("b_off") == "b2,b3,b4" and _RDs.get("b_off_cpt") == " · 3 désactivés (3 affichés)", _eN)
+            check("desactives (JS) : ⊘ + ⭐ -> les ⭐ desactivees ; ⭐ seul -> les ⭐ ACTIVES ; tout eteint -> la base",
+                  _RDs.get("b_off_fav") == "b4" and _RDs.get("b_fav") == "b5" and _RDs.get("b_retour") == "b1,b5", _eN)
+            check("desactives (JS) : Templates, vue de base = ni marques ni desactives",
+                  _RDs.get("t_base") == "base,baseFav" and _RDs.get("t_base_cpt") == " · 5 désactivés masqués", _eN)
+            check("desactives (JS) : Templates, ⊘ seul = TOUS les desactives, marques compris (la corbeille)",
+                  _RDs.get("t_off") == "baseOff,baseFavOff,trashOff,flashOff,flashFavOff"
+                  and _RDs.get("t_off_cpt") == " · 5 désactivés (5 affichés)", _eN)
+            check("desactives (JS) : ⊘ + ⭐ / ⊘ + Template Trend -> les desactives que l autre bouton retient",
+                  _RDs.get("t_off_fav") == "baseFavOff,flashFavOff"
+                  and _RDs.get("t_off_template") == "baseOff,baseFavOff", _eN)
+            check("desactives (JS) : ⊘ + Trash, ⊘ + ⚡, ⊘ + Trash + ⚡ (familles en union, desactives seuls)",
+                  _RDs.get("t_off_trash") == "trashOff"
+                  and _RDs.get("t_off_trash_flash") == "trashOff,flashOff,flashFavOff"
+                  and _RDs.get("t_off_flash") == "flashOff,flashFavOff", _eN)
+            check("desactives (JS) : ⚡, Trash + ⚡, Trash, Template Trend + ⭐ -> jamais un desactive",
+                  _RDs.get("t_flash") == "flash" and _RDs.get("t_trash_flash") == "trash,flash"
+                  and _RDs.get("t_trash") == "trash" and _RDs.get("t_template_fav") == "baseFav", _eN)
+            check("desactives (JS) : tous les filtres eteints -> la vue de base, sans desactive",
+                  _RDs.get("t_retour") == "base,baseFav", _eN)
+            check("desactives (JS) : famille vide faute de desactive -> la note dit qu il est masque et ou le trouver",
+                  _RDs.get("t2_note") == ("Aucun montage %s %s pour cette identité. "
+                                        "(1 désactivé masqué : « ⊘ Désactivées ».)"
+                                        % (_mmDs.MARQUES["trash"]["emoji"], _mmDs.MARQUES["trash"]["nom"]))
+                  and _RDs.get("t2_note_off_fav") == "Aucun template désactivé parmi les ⭐ pour cette identité.",
+                  _eN)
+            check("desactives (JS) : famille vide sous filtre -> la note ne compte QUE les desactives que ce filtre retiendrait",
+                  _RDs.get("t3_note_trash") == ("Aucun montage %s %s pour cette identité. "
+                                              "(1 désactivé masqué : « ⊘ Désactivées ».)"
+                                              % (_mmDs.MARQUES["trash"]["emoji"], _mmDs.MARQUES["trash"]["nom"]))
+                  and _RDs.get("t3_off_trash") == "trashOff"
+                  and _RDs.get("t3_fav_note") == "Aucun ⭐ pour cette identité. (1 désactivé masqué : « ⊘ Désactivées ».)",
+                  _eN)
+            check("desactives (JS) : ⊘ + ⭐ -> le compteur dit « 4 desactives (1 affiche) », pas « seuls affiches »",
+                  _RDs.get("t3_off_fav") == "baseFavOff" and _RDs.get("t3_off_fav_cpt") == " · 4 désactivés (1 affiché)",
+                  _eN)
+            check("desactives (JS) : ★ Reels Banger -> les ★ actifs ; ★ + ⊘ -> les ★ desactives ; ⊘ -> les desactives",
+                  _RDs.get("r_base") == "r1,r3" and _RDs.get("r_banger") == "r3"
+                  and _RDs.get("r_banger_off") == "r4" and _RDs.get("r_off") == "r2,r4", _eN)
+            check("desactives (JS) : un clic d etoile (applyBangerFilter) ne reaffiche plus les desactives",
+                  _RDs.get("r_apres_etoile") == "r1,r3", _eN)
+            check("desactives (JS) : tout desactive -> la vue de base dit pourquoi elle est vide ; ⊘ les montre",
+                  _RDs.get("p_note") == "Rien dans la vue de base : 1 désactivé (« ⊘ Désactivées » pour les voir)."
+                  and _RDs.get("p_cpt") == " · 1 désactivé masqué"
+                  and _RDs.get("p_off") == "pp1" and _RDs.get("p_note_off") == "", _eN)
+        elif not _nodeDs:
+            print("     (node absent : le filtre ⊘ n a pas ete execute)")
+
+        # -- 7. LES VRAIES FONCTIONS DE LA PAGE SUR LE VRAI HTML DES FRAGMENTS ----------
+        # Bascule depuis la vue, le rapport « Reperer le texte » (desactivation en
+        # lot), « Tout selectionner », visionneuse, Caption : ces
+        # fonctions vivent hors des plages du stub F3 et lisent offsetParent,
+        # des selecteurs descendants, des :not(). On les extrait par leur nom
+        # du script principal RENDU, et on les fait tourner sur l arbre des
+        # fragments serveur. Le CSS qui cache les captions est emule (cacheParCss).
+        _scriptsPage = [s for s in _reDs.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", _pageDs, _reDs.S)
+                        if "function vaultVuesAppliquer" in s]
+        check("desactives (visionneuse...) : le script principal de la page est retrouve (une fois)",
+              len(_scriptsPage) == 1, len(_scriptsPage))
+        # Le compte de la liste de l editeur passe par un ENROBAGE de
+        # capEdLibRender (ses lignes sont dans le contexte des patchs du VPS) :
+        # il doit etre pose au chargement, dans le MEME script que la fonction
+        # enrobee. Le harnais plus bas l appelle lui-meme, il ne le verrait pas.
+        check("captions (editeur) : l enrobage du compte (capEdVueEnrober) est appele au chargement, dans le script de capEdLibRender",
+              len(_scriptsPage) == 1 and "\n}\ncapEdVueEnrober();\n" in _scriptsPage[0]
+              and "function capEdLibRender(" in _scriptsPage[0])
+
+        def _extraireDs(src, nom):
+            """Le texte d une fonction nommee (accolades comptees ; chaines,
+            commentaires et expressions regulieres sautes)."""
+            _m = _reDs.search(r"(?:async\s+)?function\s+" + _reDs.escape(nom) + r"\s*\(", src)
+            if not _m:
+                raise LookupError("fonction introuvable : " + nom)
+            _i = src.index("{", _m.end())
+            _prof, _j, _n = 0, _i, len(src)
+            while _j < _n:
+                _ch = src[_j]
+                if _ch in "'\"`":
+                    _q = _ch
+                    _j += 1
+                    while _j < _n and src[_j] != _q:
+                        _j += 2 if src[_j] == "\\" else 1
+                elif _ch == "/" and src[_j + 1] == "/":
+                    _j = src.index("\n", _j)
+                elif _ch == "/" and src[_j + 1] == "*":
+                    _j = src.index("*/", _j) + 1
+                elif _ch == "/" and _reDs.search(r"[=(,:!&|?{};]\s*$", src[max(0, _j - 3):_j] or ""):
+                    _j += 1
+                    while _j < _n and src[_j] != "/":
+                        if src[_j] == "[":
+                            while src[_j] != "]":
+                                _j += 2 if src[_j] == "\\" else 1
+                        _j += 2 if src[_j] == "\\" else 1
+                elif _ch == "{":
+                    _prof += 1
+                elif _ch == "}":
+                    _prof -= 1
+                    if _prof == 0:
+                        return src[_m.start():_j + 1]
+                _j += 1
+            raise LookupError("fin introuvable : " + nom)
+
+        class _ArbreDs(_hpDs.HTMLParser):
+            VIDES = {"img", "input", "br", "hr", "meta", "link", "source", "path", "line",
+                     "circle", "polygon", "polyline", "rect"}
+
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.racine = {"t": "frag", "a": {}, "c": [], "x": ""}
+                self.pile = [self.racine]
+
+            def _noeud(self, tag, attrs):
+                return {"t": tag, "a": {k: (v if v is not None else "") for k, v in attrs},
+                        "c": [], "x": ""}
+
+            def handle_starttag(self, tag, attrs):
+                _nd = self._noeud(tag, attrs)
+                self.pile[-1]["c"].append(_nd)
+                if tag not in self.VIDES:
+                    self.pile.append(_nd)
+
+            def handle_startendtag(self, tag, attrs):
+                self.pile[-1]["c"].append(self._noeud(tag, attrs))
+
+            def handle_endtag(self, tag):
+                for _k in range(len(self.pile) - 1, 0, -1):
+                    if self.pile[_k]["t"] == tag:
+                        del self.pile[_k:]
+                        return
+
+            def handle_data(self, d):
+                self.pile[-1]["x"] += d
+
+        def _arbreDs(h):
+            _a = _ArbreDs()
+            _a.feed(h)
+            return _a.racine
+
+        _NOMS_JS_Ds = [
+            "vaultSectionVisible", "vaultFiltreOn", "vaultFiltreSection", "vaultCarteOff",
+            "vaultDeselectionner", "vaultCompteOff", "vaultFiltreBouton", "vaultVuesAppliquer",
+            "applyBangerFilter", "toggleBangerFilter", "favBruteApply", "toggleFavBruteFilter",
+            "toggleFlashTrendFilter", "toggleTemplateTrendFilter", "toggleTrashTrendFilter",
+            "toggleOffBruteFilter", "capOffRefiltrer", "toggleReelDisabled", "scanTexteAfficher",
+            "lbCollectGallery", "lbCarte", "lbActionsSync", "lbAction", "lbRetirerCarte",
+            "lbRender", "lbPrev", "lbNext", "openLightbox", "closeLightbox", "lbKeyboard",
+            "vaultSelectAll", "toggleSelect", "updateActionBar",
+            "capLibInit", "capVueOff", "capVueEditeur", "capVueAppliquer", "capIdsAffiches",
+            "capSelAll", "capSelUpdateBar",
+            # correctifs de la relecture : fond de l editeur, partage, editeur,
+            # doublons et plafond
+            "capBrutesSuivre", "capShareOpen", "capEdCur", "capEdPremiereVue", "capEdCompteVue",
+            "capEdVueEnrober", "capEdOpen", "capEdDelete", "capEdLibRender", "capEdAddText",
+            "capNorm", "capSim", "capAddWarnCheck", "capAddSubmit", "capOcrAjouterIci"]
+        _STUB_RICHE_Ds = r"""
+function parseCompound(s){
+  var r={tag:null,id:null,classes:[],attrs:[],nots:[]}, i=0;
+  var m=s.match(/^[a-zA-Z][a-zA-Z0-9-]*/); if(m){ r.tag=m[0].toLowerCase(); i=m[0].length; }
+  while(i<s.length){
+    var ch=s[i];
+    if(ch==='#'){ var a=s.slice(i+1).match(/^[A-Za-z0-9_-]+/)[0]; r.id=a; i+=1+a.length; }
+    else if(ch==='.'){ var b=s.slice(i+1).match(/^[A-Za-z0-9_-]+/)[0]; r.classes.push(b); i+=1+b.length; }
+    else if(ch==='['){ var j=s.indexOf(']',i), inner=s.slice(i+1,j);
+      var mm=inner.match(/^([A-Za-z0-9_-]+)(?:([*^$]?=)["']?([^"']*)["']?)?$/);
+      r.attrs.push({n:mm[1],op:mm[2]||null,v:mm[3]}); i=j+1; }
+    else if(s.slice(i,i+5)===':not('){ var k=s.indexOf(')',i); r.nots.push(parseCompound(s.slice(i+5,k))); i=k+1; }
+    else throw new Error('selecteur non gere : '+s);
+  }
+  return r;
+}
+function matchC(el,c){
+  if(!el||!el.tag) return false;
+  if(c.tag && el.tag!==c.tag) return false;
+  if(c.id && el.attrs.id!==c.id) return false;
+  for(var i=0;i<c.classes.length;i++) if(el.classes.indexOf(c.classes[i])<0) return false;
+  for(var j=0;j<c.attrs.length;j++){ var a=c.attrs[j], v=el.attrs[a.n];
+    if(v===undefined) return false;
+    if(a.op==='=' && v!==a.v) return false;
+    if(a.op==='*=' && v.indexOf(a.v)<0) return false;
+    if(a.op==='^=' && v.indexOf(a.v)!==0) return false; }
+  for(var k=0;k<c.nots.length;k++) if(matchC(el,c.nots[k])) return false;
+  return true;
+}
+function correspond(el, sel){
+  return sel.split(',').some(function(part){
+    var toks=part.trim().split(/\s+/);
+    if(!matchC(el, parseCompound(toks[toks.length-1]))) return false;
+    var anc=el.parent, k=toks.length-2;
+    while(k>=0){
+      var c=parseCompound(toks[k]);
+      while(anc && !matchC(anc,c)) anc=anc.parent;
+      if(!anc) return false;
+      anc=anc.parent; k--;
+    }
+    return true;
+  });
+}
+function El(tag){ this.tag=tag; this.classes=[]; this.attrs={}; this.children=[]; this.parent=null;
+  this.style={}; this._txt=''; this.checked=false; this.disabled=false; this._html=''; }
+El.prototype.setAttribute=function(k,v){ this.attrs[k]=String(v); if(k==='class') this.classes=String(v).split(/\s+/).filter(Boolean); };
+El.prototype.getAttribute=function(k){ return (k in this.attrs)?this.attrs[k]:null; };
+El.prototype.removeAttribute=function(k){ delete this.attrs[k]; };
+El.prototype.appendChild=function(c){ c.parent=this; this.children.push(c); return c; };
+Object.defineProperty(El.prototype,'id',{get:function(){ return this.attrs.id||''; },
+  set:function(v){ this.attrs.id=String(v); }});
+Object.defineProperty(El.prototype,'parentNode',{get:function(){ return this.parent; }});
+El.prototype.insertBefore=function(n, ref){ n.parent=this; var i=this.children.indexOf(ref);
+  if(i<0) this.children.push(n); else this.children.splice(i,0,n); return n; };
+Object.defineProperty(El.prototype,'className',{get:function(){ return this.classes.join(' '); },
+  set:function(v){ this.classes=String(v).split(/\s+/).filter(Boolean); }});
+Object.defineProperty(El.prototype,'textContent',{get:function(){
+    return this._txt + this.children.map(function(c){ return c.textContent; }).join(''); },
+  set:function(v){ this._txt=String(v); this.children=[]; }});
+Object.defineProperty(El.prototype,'innerHTML',{get:function(){ return this._html; },
+  set:function(v){ this._html=String(v); this.children=[]; }});
+Object.defineProperty(El.prototype,'classList',{get:function(){ var self=this; return {
+  add:function(n){ if(self.classes.indexOf(n)<0) self.classes.push(n); },
+  remove:function(n){ var i=self.classes.indexOf(n); if(i>=0) self.classes.splice(i,1); },
+  contains:function(n){ return self.classes.indexOf(n)>=0; },
+  toggle:function(n,f){ if(f===undefined) f=(self.classes.indexOf(n)<0); if(f) this.add(n); else this.remove(n); return f; } }; }});
+// Le CSS de la page qui cache les captions par CLASSE (verifie plus haut) :
+// emule ici, sinon offsetParent ne verrait que les display en ligne.
+function cacheParCss(el){
+  if(el.classes.indexOf('cap-card')>=0 && el.parent && el.parent.attrs.id==='capCards')
+    return el.parent.classes.indexOf('cap-vue-off')>=0 ? el.classes.indexOf('cap-off')<0 : el.classes.indexOf('cap-off')>=0;
+  if(el.classes.indexOf('cap-ed-li')>=0){
+    // la caption en cours (.on) n est jamais masquee (:not(.on) des deux regles)
+    if(el.classes.indexOf('on')>=0) return false;
+    var md=el.closest('#cap-ed-modal'); var vo=!!(md&&md.classes.indexOf('cap-vue-off')>=0);
+    return vo ? el.classes.indexOf('off')<0 : el.classes.indexOf('off')>=0;
+  }
+  // Le Drive : les regles .drive-galerie de la page (verifiees plus haut).
+  var g=el.parent; while(g && g.tag && g.classes.indexOf('drive-galerie')<0) g=g.parent;
+  if(g && g.tag){
+    var dvo=g.classes.indexOf('drive-vue-off')>=0, cl=el.classes;
+    if(cl.indexOf('cloud-card')>=0) return dvo ? cl.indexOf('is-reel-off')<0 : cl.indexOf('is-reel-off')>=0;
+    if(cl.indexOf('drive-sec-sans-off')>=0 || cl.indexOf('drive-note-base')>=0 || cl.indexOf('drive-cpt-base')>=0) return dvo;
+    if(cl.indexOf('drive-note-vue-off')>=0 || cl.indexOf('drive-cpt-off')>=0) return !dvo;
+  }
+  return false;
+}
+Object.defineProperty(El.prototype,'offsetParent',{get:function(){
+  var n=this; while(n && n.tag){ if(n.style.display==='none' || cacheParCss(n)) return null; if(n===racine) return racine; n=n.parent; }
+  return null; }});
+El.prototype.descendants=function(){ var out=[]; (function w(n){ n.children.forEach(function(c){ out.push(c); w(c); }); })(this); return out; };
+El.prototype.querySelectorAll=function(s){ return this.descendants().filter(function(e){ return correspond(e,s); }); };
+El.prototype.querySelector=function(s){ var r=this.querySelectorAll(s); return r.length?r[0]:null; };
+El.prototype.closest=function(s){ var n=this; while(n && n.tag){ if(correspond(n,s)) return n; n=n.parent; } return null; };
+El.prototype.contains=function(o){ while(o){ if(o===this) return true; o=o.parent; } return false; };
+El.prototype.addEventListener=function(){};
+El.prototype.dispatchEvent=function(ev){
+  if(ev.type==='change'){
+    var oc=this.getAttribute('onchange'); if(oc) (new Function('event', oc)).call(this, ev);
+    var cs=this.getAttribute('data-capsel'); if(cs!=null){ capSelSet[cs]=!!this.checked; capSelUpdateBar(); }
+  }
+  return true;
+};
+El.prototype.click=function(){ var oc=this.getAttribute('onclick');
+  if(oc) (new Function('event', oc)).call(this, {stopPropagation:function(){}, preventDefault:function(){}}); };
+function Event(t,o){ this.type=t; this.bubbles=!!(o&&o.bubbles); }
+var racine = new El('body');
+var document = {
+  querySelectorAll:function(s){ return racine.querySelectorAll(s); },
+  querySelector:function(s){ return racine.querySelector(s); },
+  getElementById:function(id){ return racine.querySelector('#'+id); },
+  createElement:function(t){ return new El(t); },
+  addEventListener:function(){}, removeEventListener:function(){}
+};
+var window = globalThis;
+var TOASTS=[]; function showToast(m,t){ TOASTS.push([m,t]); }
+function alert(m){ TOASTS.push(['ALERT '+m,'alert']); }
+function construire(n, parent){
+  var e=new El(n.t);
+  Object.keys(n.a).forEach(function(k){ e.setAttribute(k, n.a[k]); });
+  if(/display\s*:\s*none/.test(n.a.style||'')) e.style.display='none';
+  if('checked' in n.a) e.checked=true;
+  e._txt=n.x||'';
+  parent.appendChild(e);
+  n.c.forEach(function(c){ construire(c, e); });
+  return e;
+}
+// Le navigateur injecte le fragment DANS la section de l onglet.
+function section(idSec, frag){
+  var sec=new El('div'); sec.classes.push('form-section'); sec.attrs.id=idSec;
+  racine.appendChild(sec);
+  frag.c.forEach(function(c){ construire(c, sec); });
+  return sec;
+}
+function construireLightbox(){
+  var lb=new El('div'); lb.attrs.id='lightbox'; racine.appendChild(lb);
+  ['lightbox-content','lb-pos','lb-total'].forEach(function(i){ var e=new El('div'); e.attrs.id=i; lb.appendChild(e); });
+  ['lb-prev','lb-next','lb-edit-btn','lb-banger','lb-fav','lb-trash','lb-flash','lb-off'].forEach(function(c){ var e=new El('button'); e.classes.push(c); lb.appendChild(e); });
+  var w=new El('label'); w.classes.push('lb-sel-wrap'); lb.appendChild(w); var cb=new El('input'); cb.classes.push('lb-sel-cb'); w.appendChild(cb);
+  var md=new El('div'); md.attrs.id='cap-ed-modal'; racine.appendChild(md);
+  var li=new El('div'); li.attrs.id='cap-ed-list'; md.appendChild(li);
+}
+function vider(){ racine.children.length=0; construireLightbox(); }
+// Le serveur, simule : l etat ⊘ de chaque fichier, bascule a chaque POST.
+var SERVEUR_OFF = {};
+function fetch(url, opts){
+  var fid = opts && opts.body && opts.body.get ? opts.body.get('file_id') : '';
+  var now = !SERVEUR_OFF[fid]; SERVEUR_OFF[fid]=now;
+  return Promise.resolve({ json:function(){ return Promise.resolve({ok:true, disabled:now}); } });
+}
+function FormData(){ this.d={}; } FormData.prototype.set=function(k,v){ this.d[k]=v; }; FormData.prototype.get=function(k){ return this.d[k]; };
+FormData.prototype.append=FormData.prototype.set;
+var selectedFiles = new Set();
+var capSelSet = {};
+var capLib={identity:'',block:null,brutes:[],max:80};
+var lbGallery=[], lbIndex=0, lbEditMode=false;
+function lbLoadMeta(){} function lbToggleEdit(){}
+function dodo(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+function cartes(sec){ return sec.querySelectorAll('#vault-grid .cloud-card'); }
+function fidDe(c){ var b=c.querySelector('.vault-card-bg[data-fid]'); var f=b?b.getAttribute('data-fid'):'?'; return f.slice(f.lastIndexOf('|')+1); }
+function vus(sec){ return cartes(sec).filter(function(c){ return c.style.display!=='none'; }).map(fidDe).sort(); }
+function carte(sec, nom){ return cartes(sec).filter(function(c){ return fidDe(c)===nom; })[0]; }
+function btn(sec, id){ return sec.querySelector('#'+id); }
+function note(sec){ var n=sec.querySelector('.vues-empty-note'); return (n && n.style.display!=='none') ? n.textContent : null; }
+function compte(sec){ var e=sec.querySelector('.vault-off-compte'); return e?e.textContent:null; }
+function etatServeur(sec){ cartes(sec).forEach(function(c){
+  SERVEUR_OFF[c.querySelector('.vault-card-bg[data-fid]').getAttribute('data-fid')]=vaultCarteOff(c); }); }
+function selTri(){ return Array.from(selectedFiles).sort(); }
+function capCoches(){ return Object.keys(capSelSet).filter(function(k){ return capSelSet[k]; }).sort(); }
+"""
+        _SCEN_RICHE_Ds = r"""
+// Ce que les fonctions de l editeur appellent sans que ce soit l objet du test.
+var capEdState={mode:'item',cid:null,img:null,pend:null,cache:{}};
+var capOcr={items:[]};
+function capEdVideoLoad(){} function capEdSync(){} function capEdRender(){}
+function capRenderCards(){} function capSave(){} function capAddClose(){}
+function nxMEsc(s){ return String(s); }
+function confirm(){ return true; }
+// Ce que le patch caption-studio du VPS ajoute : « Mes captions N » = TOUTES.
+function capStudioTimeline(){ var e=document.getElementById('cap-st-count');
+  if(e) e.textContent=String(((capLib.block||{}).items||[]).length); }
+var R = {};
+async function principal(){
+  // 1. Parite serveur / client en vue de base : memes cartes, meme compteur, meme note.
+  ['cloudbrutes','cloudtemplates','cloudreels','cloudpps','cloudposts','v2brutes','provaultreels'].forEach(function(k){
+    vider();
+    var s = section('form-'+k, FRAGS[k]);
+    var serveur = vus(s).join(','), cS = compte(s), nS = note(s);
+    vaultVuesAppliquer(s);
+    R['parite_'+k] = (serveur===vus(s).join(',') && cS===compte(s) && nS===note(s))
+      ? 'ok' : [serveur, vus(s).join(','), cS, compte(s), nS, note(s)].join(' | ');
+  });
+  // 2. Desactiver depuis la vue de base : la carte part, la selection aussi.
+  vider();
+  var sb = section('form-cloudbrutes', FRAGS.cloudbrutes);
+  etatServeur(sb); vaultVuesAppliquer(sb);
+  var c1 = carte(sb,'b1.mp4'), cb1 = c1.querySelector('.sel-cb');
+  cb1.checked = true; cb1.dispatchEvent(new Event('change'));
+  R.sel_avant = selTri();
+  TOASTS.length = 0;
+  await toggleReelDisabled(c1.querySelector('.reel-disable'), 'zzds|brutes|b1.mp4');
+  R.bascule = {vus: vus(sb), cpt: compte(sb), toast: TOASTS.slice(), sel: selTri(), coche: cb1.checked,
+               grisee: c1.classList.contains('is-reel-off')};
+  // ... et depuis « ⊘ Desactivees », la reactivation la fait quitter la vue filtree
+  toggleOffBruteFilter(btn(sb,'offbrute-toggle-btn'));
+  R.off_avant = vus(sb);
+  TOASTS.length = 0;
+  await toggleReelDisabled(carte(sb,'b1.mp4').querySelector('.reel-disable'), 'zzds|brutes|b1.mp4');
+  R.reactive = {vus: vus(sb), toast: TOASTS.slice(), cpt: compte(sb)};
+  toggleOffBruteFilter(btn(sb,'offbrute-toggle-btn'));
+  R.base_apres = vus(sb);
+  // 3. « Tout selectionner » : jamais un desactive cache.
+  selectedFiles.clear();
+  vaultSelectAll(); R.tout_base = selTri();
+  vaultSelectAll();
+  toggleFavBruteFilter(btn(sb,'favbrute-toggle-btn'));
+  vaultSelectAll(); R.tout_fav = selTri();
+  vaultSelectAll(); toggleFavBruteFilter(btn(sb,'favbrute-toggle-btn'));
+  toggleOffBruteFilter(btn(sb,'offbrute-toggle-btn'));
+  vaultSelectAll(); R.tout_off = selTri();
+  toggleOffBruteFilter(btn(sb,'offbrute-toggle-btn'));
+  R.sel_retour_base = selTri();
+  selectedFiles.clear();
+  // 4. Visionneuse : « 1 / N » sans les desactives ; ⊘ depuis elle passe au suivant.
+  var urlDe = function(c){ var w=c.querySelector('[onclick*="openLightbox"]');
+    return w.getAttribute('onclick').match(/openLightbox\("([^"]+)"/)[1]; };
+  openLightbox(urlDe(carte(sb,'b5.mp4')), true, 'b5.mp4', 'zzds|brutes|b5.mp4', '');
+  R.lb_ouvert = {total: document.getElementById('lb-total').textContent,
+                 liste: lbGallery.map(function(x){ return x.name; }), courant: lbGallery[lbIndex].name};
+  lbAction('off'); await dodo(30);
+  R.lb_off1 = {total: document.getElementById('lb-total').textContent, liste: lbGallery.map(function(x){ return x.name; }),
+               courant: (lbGallery[lbIndex]||{}).name, ouvert: document.getElementById('lightbox').classList.contains('show'),
+               grille: vus(sb)};
+  lbAction('off'); await dodo(30);
+  R.lb_off2 = {liste: lbGallery.map(function(x){ return x.name; }),
+               ouvert: document.getElementById('lightbox').classList.contains('show'), grille: vus(sb), note: note(sb)};
+  await dodo(450);
+  // Sous « ⊘ Desactivees » : la visionneuse ne feuillette QUE les desactives,
+  // et reactiver l element affiche le retire de la liste.
+  toggleOffBruteFilter(btn(sb,'offbrute-toggle-btn'));
+  openLightbox(urlDe(carte(sb,'b2.mp4')), true, 'b2.mp4', 'zzds|brutes|b2.mp4', '');
+  R.lb_filtre = {liste: lbGallery.map(function(x){ return x.name; }).sort(), total: document.getElementById('lb-total').textContent};
+  var avant = lbGallery[lbIndex].name;
+  lbAction('off'); await dodo(30);
+  R.lb_filtre_reactive = {avant: avant, liste: lbGallery.map(function(x){ return x.name; }).sort(),
+                          total: document.getElementById('lb-total').textContent, vus: vus(sb)};
+  closeLightbox(); await dodo(450);
+  // 4 bis. Le rapport « Reperer le texte » eteint (et rallume) des brutes EN
+  //    LOT : les cartes repeintes quittent (ou retrouvent) la vue de base.
+  vider();
+  var sr = section('form-cloudbrutes', FRAGS.cloudbrutes);
+  vaultVuesAppliquer(sr);
+  R.scan_avant = vus(sr);
+  var rap = {identite:'zzds', avec_texte:[{fichier:'b1.mp4', extraits:['promo'], desactivee:true}],
+             sans_texte:0, non_conclu:[], desactivees:3, a_eteindre:0, a_rallumer:0,
+             total_examine:1, total_brutes:5,
+             desactivees_noms:['b1.mp4','b2.mp4','b3.mp4','b4.mp4']};
+  scanTexteAfficher(rap);
+  R.scan_eteint = {vus: vus(sr), cpt: compte(sr), grisee: carte(sr,'b1.mp4').classList.contains('is-reel-off')};
+  rap.desactivees_noms = ['b1.mp4','b3.mp4','b4.mp4'];
+  scanTexteAfficher(rap);
+  R.scan_rallume = {vus: vus(sr), cpt: compte(sr)};
+  // 5. Galerie Templates : ⊘ seul montre aussi les marques desactives ; la
+  //    visionneuse ouverte en vue de base ne voit ni marque ni desactive.
+  vider();
+  var st = section('form-cloudtemplates', FRAGS.cloudtemplates);
+  openLightbox(urlDe(carte(st,'t1.mp4')), true, 't1.mp4', 'zzds|templates|t1.mp4', '');
+  R.lb_tpl = lbGallery.map(function(x){ return x.name; }).sort();
+  closeLightbox(); await dodo(450);
+  toggleOffBruteFilter(btn(st,'offbrute-toggle-btn')); R.tpl_off = vus(st);
+  // 6. Onglet Caption : grille, « ☑ Tout », liste de l editeur, filtre.
+  vider();
+  var sc = section('form-cloudcaptions', FRAGS.cloudcaptions);
+  capLib={identity:'',block:null,brutes:[],max:80}; capSelSet={};
+  var grille = document.getElementById('capCards');
+  function capVus(){ return grille.querySelectorAll('.cap-card').filter(function(c){ return c.offsetParent!==null; }).map(function(c){ return c.getAttribute('data-cid'); }); }
+  var info = document.getElementById('capCountInfo');
+  R.cap_serveur = {vus: capVus(), cpt: info.textContent};
+  capVueAppliquer();
+  R.cap_client = {vus: capVus(), cpt: info.textContent};
+  R.cap_ids = capIdsAffiches();
+  capSelAll();
+  R.cap_tout = capCoches();
+  R.cap_case_cachee = grille.querySelector('.cap-card.cap-off .sel-cb').checked;
+  var liste = document.getElementById('cap-ed-list');
+  [['c1',''],['c2','off'],['c3','']].forEach(function(x){ var li=new El('div'); li.classes.push('cap-ed-li'); if(x[1]) li.classes.push(x[1]); li.attrs['data-capedli']=x[0]; liste.appendChild(li); });
+  function edVus(){ return liste.querySelectorAll('.cap-ed-li').filter(function(e){ return e.offsetParent!==null; }).map(function(e){ return e.getAttribute('data-capedli'); }); }
+  capLibInit();
+  R.ed_base = edVus();
+  toggleOffBruteFilter(btn(sc,'offbrute-toggle-btn'));
+  R.cap_off = {vus: capVus(), cpt: info.textContent, ids: capIdsAffiches(), sel: capCoches(), ed: edVus(),
+               bouton: btn(sc,'offbrute-toggle-btn').getAttribute('data-on')};
+  vaultSelectAll();
+  R.cap_tout_off = capCoches();
+  toggleOffBruteFilter(btn(sc,'offbrute-toggle-btn'));
+  R.cap_retour = {vus: capVus(), sel: capCoches(), ed: edVus()};
+  // une caption desactivee a l instant (la classe que pose capRenderCards)
+  grille.querySelectorAll('.cap-card').filter(function(c){ return c.getAttribute('data-cid')==='c1'; })[0].classes.push('cap-off');
+  capVueAppliquer();
+  R.cap_c1_off = {vus: capVus(), cpt: info.textContent};
+  // Identite re-rendue (bouton neutre) : la modale de l editeur, globale, suit.
+  toggleOffBruteFilter(btn(sc,'offbrute-toggle-btn'));
+  R.ed_modale_filtre = document.getElementById('cap-ed-modal').classList.contains('cap-vue-off');
+  racine.children.splice(racine.children.indexOf(sc),1);
+  var sc2 = section('form-cloudcaptions', FRAGS.cloudcaptions_zzcap);
+  grille = document.getElementById('capCards'); info = document.getElementById('capCountInfo');
+  capLibInit();
+  R.ed_modale_rerendu = document.getElementById('cap-ed-modal').classList.contains('cap-vue-off');
+  var noteC = function(){ var n=grille.querySelector('.cap-vue-note'); return (n&&n.style.display!=='none')?n.textContent:null; };
+  R.zzcap_serveur = {vus: capVus(), note: noteC()};
+  capVueAppliquer();
+  R.zzcap_client = {vus: capVus(), note: noteC(), cpt: info.textContent};
+  toggleOffBruteFilter(btn(sc2,'offbrute-toggle-btn'));
+  R.zzcap_off = {vus: capVus(), note: noteC(), cpt: info.textContent};
+  // 7. DRIVE : le CSS (classe drive-vue-off) cache les desactives ; la
+  //    visionneuse, qui ne prend que les cartes affichees, suit seule.
+  vider();
+  var sdr = section('form-clouddrive', FRAGS.clouddrive);
+  var galDr = sdr.querySelector('.drive-galerie');
+  var queue = function(u){ var p=u.split('/'); return p[p.length-2]+'/'+decodeURIComponent(p[p.length-1]); };
+  var urlDr = function(c){ return c.querySelector('[onclick*="openLightbox"]').getAttribute('onclick').match(/openLightbox\("([^"]+)"/)[1]; };
+  var drVus = function(s){ return s.querySelectorAll('.cloud-card').filter(function(c){ return c.offsetParent!==null; })
+    .map(function(c){ return queue(urlDr(c)); }).sort(); };
+  var drVisible = function(s, cls){ var e=s.querySelector('.'+cls); return !!(e && e.offsetParent!==null); };
+  var carteDr = function(s, q){ return s.querySelectorAll('.cloud-card').filter(function(c){ return queue(urlDr(c))===q; })[0]; };
+  R.drive_base = {vus: drVus(sdr), note_pp: drVisible(sdr,'drive-note-base'), cpt_base: drVisible(sdr,'drive-cpt-base'),
+                  cpt_off: drVisible(sdr,'drive-cpt-off')};
+  openLightbox(urlDr(carteDr(sdr,'brutes/b1.mp4')), true, 'b1.mp4', '', '');
+  R.drive_lb_base = {liste: lbGallery.map(function(x){ return queue(x.url); }).sort(),
+                     total: document.getElementById('lb-total').textContent};
+  closeLightbox(); await dodo(450);
+  toggleOffBruteFilter(btn(sdr,'offbrute-toggle-btn'));
+  R.drive_off = {vus: drVus(sdr), classe: galDr.classList.contains('drive-vue-off'),
+                 bouton: btn(sdr,'offbrute-toggle-btn').getAttribute('data-on'),
+                 note_pp: drVisible(sdr,'drive-note-base'), cpt_base: drVisible(sdr,'drive-cpt-base'),
+                 cpt_off: drVisible(sdr,'drive-cpt-off')};
+  openLightbox(urlDr(carteDr(sdr,'brutes/b2.mp4')), true, 'b2.mp4', '', '');
+  R.drive_lb_off = lbGallery.map(function(x){ return queue(x.url); }).sort();
+  closeLightbox(); await dodo(450);
+  toggleOffBruteFilter(btn(sdr,'offbrute-toggle-btn'));
+  R.drive_retour = drVus(sdr);
+  // une identite sans desactive : sous ⊘, sa section part et la note parle
+  vider();
+  var sdz = section('form-clouddrive', FRAGS.clouddrive_zzcap);
+  R.drive_vide_base = {vus: drVus(sdz), note: drVisible(sdz,'drive-note-vue-off')};
+  toggleOffBruteFilter(btn(sdz,'offbrute-toggle-btn'));
+  R.drive_vide_off = {vus: drVus(sdz), note: drVisible(sdz,'drive-note-vue-off'),
+                      section: drVisible(sdz,'drive-sec-sans-off')};
+  // 8. Le FOND de l editeur de captions suit un ⊘ pose dans Video brut (et le
+  //    rapport « Reperer le texte ») : la liste n etait relue qu au changement
+  //    d identite.
+  vider();
+  var scB = section('form-cloudcaptions', FRAGS.cloudcaptions);
+  var sbB = section('form-cloudbrutes', FRAGS.cloudbrutes);
+  capLib={identity:'',block:null,brutes:[],max:80}; capSelSet={};
+  capLibInit(); R.fond_avant = capLib.brutes.slice();
+  etatServeur(sbB); vaultVuesAppliquer(sbB);
+  await toggleReelDisabled(carte(sbB,'b1.mp4').querySelector('.reel-disable'), 'zzds|brutes|b1.mp4');
+  capLibInit();     // ce que fait le clic suivant dans l onglet Caption
+  R.fond_off = {brutes: capLib.brutes.slice(), json: JSON.parse(document.getElementById('capLibData').textContent).brutes,
+                cpt: document.getElementById('capCountInfo').textContent};
+  await toggleReelDisabled(carte(sbB,'b1.mp4').querySelector('.reel-disable'), 'zzds|brutes|b1.mp4');
+  capLibInit(); R.fond_on = capLib.brutes.slice();
+  scanTexteAfficher({identite:'zzds', avec_texte:[], non_conclu:[], desactivees:3, a_eteindre:0, a_rallumer:0,
+                     total_examine:0, total_brutes:5, desactivees_noms:['b1.mp4','b2.mp4','b3.mp4','b4.mp4']});
+  capLibInit(); R.fond_scan = capLib.brutes.slice();
+  // 9. « ↗ Partager » sans selection : les ids de la VUE, envoyes nommement.
+  vider();
+  var scS = section('form-cloudcaptions', FRAGS.cloudcaptions);
+  capLib={identity:'',block:null,brutes:[],max:80}; capSelSet={};
+  var PICK=null; window.nxModelPicker=function(o){ PICK=o; };
+  var ENVOIS=[], fetchAvant=fetch, uiS={busy:function(){}, close:function(){}};
+  fetch=function(u,o){ ENVOIS.push(o && o.body && o.body.d ? JSON.parse(JSON.stringify(o.body.d)) : {});
+    return Promise.resolve({json:function(){ return Promise.resolve({ok:true, added:1, targets:['zzcap']}); }}); };
+  capShareOpen();
+  if(PICK) PICK.onConfirm(['zzcap'], null, uiS);
+  await dodo(20);
+  R.share_base = {info: PICK ? PICK.info : null, ids: ENVOIS.length ? ENVOIS[0].ids : null};
+  toggleOffBruteFilter(btn(scS,'offbrute-toggle-btn'));
+  PICK=null; ENVOIS.length=0;
+  capShareOpen();
+  if(PICK) PICK.onConfirm(['zzcap'], null, uiS);
+  await dodo(20);
+  R.share_off = {info: PICK ? PICK.info : null, ids: ENVOIS.length ? ENVOIS[0].ids : null};
+  fetch=fetchAvant;
+  // 10. Editeur de captions : repli sur la VUE, compte et note selon la vue,
+  //     la caption en cours toujours visible dans la liste.
+  vider();
+  var scE = section('form-cloudcaptions', FRAGS.cloudcaptions);
+  capLib={identity:'',block:null,brutes:[],max:80}; capSelSet={};
+  capLibInit();
+  var mdE=document.getElementById('cap-ed-modal');
+  var pjE=new El('div'); pjE.attrs.id='cap-ed-proj'; mdE.appendChild(pjE);
+  var scE2=new El('small'); scE2.attrs.id='cap-st-count'; mdE.appendChild(scE2);
+  capEdVueEnrober(); capEdVueEnrober();     // une seule fois, meme appele deux fois
+  capLib.block.items=[{id:'A',text:'a',enabled:false},{id:'B',text:'b'},{id:'C',text:'c'}];
+  capEdOpen('item','C');
+  capEdDelete();
+  R.ed_suppr = {cid: capEdState.cid, mode: capEdState.mode, proj: pjE.textContent};
+  capEdOpen('item','inconnue');
+  R.ed_repli = capEdState.cid;
+  capStudioTimeline();
+  R.ed_timeline = scE2.textContent;
+  capLib.block.items=[{id:'A',text:'a',enabled:false}];
+  capEdOpen('item', null);
+  var noteE=document.getElementById('cap-ed-list').querySelector('.cap-ed-vue-note');
+  R.ed_toutes_off = {mode: capEdState.mode, proj: pjE.textContent,
+                     note: (noteE && noteE.style.display!=='none') ? noteE.textContent : null};
+  capLib.block.items=[{id:'A',text:'a',enabled:false},{id:'B',text:'b'}];
+  toggleOffBruteFilter(btn(scE,'offbrute-toggle-btn'));
+  capEdOpen('item', null);
+  R.ed_off_repli = {cid: capEdState.cid, proj: pjE.textContent};
+  capEdAddText();
+  var nouv = capEdState.cid;
+  // la liste telle que capEdLibRender la dessine (classes on / off), sous ⊘
+  var listeE=document.getElementById('cap-ed-list'); listeE.children.length=0;
+  (capLib.block.items||[]).forEach(function(c){ var li=new El('div'); li.classes.push('cap-ed-li');
+    if(c.enabled===false) li.classes.push('off'); if(capEdState.cid===c.id) li.classes.push('on');
+    li.attrs['data-capedli']=String(c.id); listeE.appendChild(li); });
+  var edV=function(){ return listeE.querySelectorAll('.cap-ed-li').filter(function(e){ return e.offsetParent!==null; })
+    .map(function(e){ return e.getAttribute('data-capedli')===nouv ? 'NOUVELLE' : e.getAttribute('data-capedli'); }); };
+  R.ed_ajout_off = edV();
+  toggleOffBruteFilter(btn(scE,'offbrute-toggle-btn'));
+  R.ed_ajout_base = edV();
+  // 11. Doublon ou plafond venant d une caption desactivee (cachee) : le dire.
+  vider();
+  var scD = section('form-cloudcaptions', FRAGS.cloudcaptions);
+  capLib={identity:'',block:null,brutes:[],max:80}; capSelSet={};
+  capLibInit();
+  capLib.block.items=[{id:'h',text:'Hello',enabled:false},{id:'d',text:'Deux mots ici'}];
+  var taD=new El('textarea'); taD.value='Hello'; var wdD=new El('div');
+  capAddWarnCheck(taD, wdD); R.dup_avert = wdD.textContent;
+  var laD=new El('div'); laD.attrs.id='capAddList'; racine.appendChild(laD);
+  var wrD=new El('div'); wrD.classes.push('capadd-wrap'); laD.appendChild(wrD);
+  var t1D=new El('textarea'); t1D.classes.push('capadd-ta'); t1D.value='Hello'; wrD.appendChild(t1D);
+  var d1D=new El('textarea'); d1D.classes.push('capadd-desc'); d1D.value=''; wrD.appendChild(d1D);
+  TOASTS.length=0; capAddSubmit(); R.dup_envoi = TOASTS.slice();
+  // le plafond vient du bloc #capLibData (capLibInit le relit a chaque appel)
+  var eMax=document.getElementById('capLibData'), jMax=JSON.parse(eMax.textContent);
+  jMax.max=2; eMax.textContent=JSON.stringify(jMax); t1D.value='Tout nouveau texte';
+  TOASTS.length=0; capAddSubmit(); R.dup_plafond = TOASTS.slice();
+  jMax.max=80; eMax.textContent=JSON.stringify(jMax); capLibInit();
+  TOASTS.length=0; capOcrAjouterIci(['Hello','Encore autre chose']); R.dup_ocr = TOASTS.slice();
+  // 12. Sous ⊘, une carte ACTIVE cochee sort de la selection (les deux sens).
+  vider(); selectedFiles.clear();
+  var sRl = section('form-cloudreels', FRAGS.cloudreels);
+  vaultVuesAppliquer(sRl);
+  var cbR1 = carte(sRl,'r1.mp4').querySelector('.sel-cb'); cbR1.checked=true; cbR1.dispatchEvent(new Event('change'));
+  R.sel_r1 = selTri();
+  toggleOffBruteFilter(btn(sRl,'offbrute-toggle-btn'));
+  R.sel_r1_off = {sel: selTri(), coche: cbR1.checked};
+  TOASTS.length=0; vaultSelectAll();
+  R.sel_tout_off = {sel: selTri(), toast: TOASTS.slice()};
+  selectedFiles.clear();
+  // 13. Le rapport « Reperer le texte » (le VRAI, servi par la route) ne liste
+  //     que les brutes EN SERVICE, et compte les autres a part.
+  vider();
+  var sTx = section('form-cloudbrutes', FRAGS.cloudbrutes);
+  scanTexteAfficher(JSON.parse(JSON.stringify(RAP)));
+  var bxT=document.getElementById('scantexte-rapport');
+  R.scan_rap = bxT ? bxT.innerHTML : null;
+  var rap2=JSON.parse(JSON.stringify(RAP));
+  rap2.avec_texte.forEach(function(x){ x.desactivee=true; }); rap2.a_eteindre=0;
+  scanTexteAfficher(rap2);
+  R.scan_rap_apres = bxT ? bxT.innerHTML : null;
+  console.log(JSON.stringify(R));
+}
+principal().catch(function(e){ console.log(JSON.stringify({ERREUR: String(e && e.stack || e)})); });
+"""
+        if _nodeDs and len(_scriptsPage) == 1:
+            try:
+                _codePage = "\n".join(_extraireDs(_scriptsPage[0], n) for n in _NOMS_JS_Ds)
+                _mLb = _reDs.search(r"var LB_ACTIONS = \[.*?\n\];", _scriptsPage[0], _reDs.S)
+                _codePage += "\n" + (_mLb.group(0) if _mLb else "var LB_ACTIONS = [];") + "\n"
+                _extraitOk = bool(_mLb)
+            except LookupError as _eL:
+                _codePage, _extraitOk = "", False
+                check("desactives (visionneuse...) : fonctions extraites de la page", False, str(_eL))
+            if _extraitOk:
+                _fragsJ = {k: _arbreDs(_FRAGS_Ds[k]) for k in
+                           ("cloudbrutes", "cloudtemplates", "cloudreels", "cloudpps", "cloudposts",
+                            "v2brutes", "provaultreels", "cloudcaptions", "cloudcaptions_zzcap",
+                            "clouddrive", "clouddrive_zzcap")}
+                _fR = TMP / "desactives_riche_code.js"
+                # RAP : le rapport « Reperer le texte » tel que la route l a servi (4 quater).
+                _fR.write_text(_STUB_RICHE_Ds + "\n" + _codePage + "\nvar FRAGS = "
+                               + json.dumps(_fragsJ, ensure_ascii=False) + ";\nvar RAP = "
+                               + json.dumps(_RAP_Ds, ensure_ascii=False) + ";\n" + _SCEN_RICHE_Ds,
+                               encoding="utf-8")
+                # Au niveau GLOBAL (vm.runInThisContext) : les gestionnaires
+                # onclick/onchange des cartes sont rejoues par new Function, qui
+                # ne voit que les globales -- pas la portee d un module node.
+                _fL = TMP / "desactives_riche.js"
+                _fL.write_text("require('vm').runInThisContext(require('fs').readFileSync("
+                               + json.dumps(str(_fR)) + ", 'utf8'), {filename: 'desactives_riche_code.js'});\n",
+                               encoding="utf-8")
+                _rR = _spDs.run([_nodeDs, str(_fL)], capture_output=True, text=True,
+                                encoding="utf-8", timeout=120)
+                try:
+                    _QDs = json.loads((_rR.stdout or "").strip().splitlines()[-1])
+                except Exception:
+                    _QDs = {}
+                _eQ = ((_rR.stderr or "")[-300:] + " " + str(_QDs))[:500]
+                _parites = {k[len("parite_"):]: v for k, v in _QDs.items() if k.startswith("parite_")}
+                check("desactives (page) : parite serveur/client en vue de base (cartes, compteur, note) sur 7 galeries",
+                      len(_parites) == 7 and all(v == "ok" for v in _parites.values()),
+                      str({k: v for k, v in _parites.items() if v != "ok"} or _eQ)[:400])
+                _bq = _QDs.get("bascule") or {}
+                check("desactives (page) : ⊘ depuis la vue de base -> la carte part, le compteur suit, le toast dit ou la retrouver",
+                      _QDs.get("sel_avant") == ["zzds|brutes|b1.mp4"] and _bq.get("vus") == ["b5.mp4"]
+                      and _bq.get("cpt") == " · 4 désactivés masqués" and _bq.get("grisee") is True
+                      and _bq.get("toast") == [["⊘ Désactivé — masqué ici, à retrouver dans « ⊘ Désactivées »",
+                                                 "warning"]], _eQ)
+                check("desactives (page) : ... et elle sort de la selection (case decochee, plus dans le lot)",
+                      _bq.get("sel") == [] and _bq.get("coche") is False, _eQ)
+                _rq = _QDs.get("reactive") or {}
+                check("desactives (page) : reactiver sous « ⊘ Desactivees » -> elle quitte la vue filtree, revient dans la base",
+                      _QDs.get("off_avant") == ["b1.mp4", "b2.mp4", "b3.mp4", "b4.mp4"]
+                      and _rq.get("vus") == ["b2.mp4", "b3.mp4", "b4.mp4"]
+                      and _rq.get("toast") == [["✓ Réactivé — de retour dans la vue normale", "success"]]
+                      and _rq.get("cpt") == " · 3 désactivés (3 affichés)"
+                      and _QDs.get("base_apres") == ["b1.mp4", "b5.mp4"], _eQ)
+                _se, _sr = (_QDs.get("scan_eteint") or {}), (_QDs.get("scan_rallume") or {})
+                check("desactives (page) : « Reperer le texte » eteint en lot -> les brutes repeintes quittent la vue de base",
+                      _QDs.get("scan_avant") == ["b1.mp4", "b5.mp4"] and _se.get("vus") == ["b5.mp4"]
+                      and _se.get("grisee") is True and _se.get("cpt") == " · 4 désactivés masqués", _eQ)
+                check("desactives (page) : ... et une brute qu il rallume revient dans la vue de base",
+                      _sr.get("vus") == ["b2.mp4", "b5.mp4"] and _sr.get("cpt") == " · 3 désactivés masqués", _eQ)
+                check("desactives (page) : « Tout selectionner » en vue de base ne prend AUCUN desactive",
+                      _QDs.get("tout_base") == ["zzds|brutes|b1.mp4", "zzds|brutes|b5.mp4"], _eQ)
+                check("desactives (page) : « Tout selectionner » sous ⭐ -> la ⭐ active, pas la ⭐ desactivee",
+                      _QDs.get("tout_fav") == ["zzds|brutes|b5.mp4"], _eQ)
+                check("desactives (page) : sous ⊘ il ne prend que les desactives ; retour a la base -> ils sortent du lot",
+                      _QDs.get("tout_off") == ["zzds|brutes|b2.mp4", "zzds|brutes|b3.mp4", "zzds|brutes|b4.mp4"]
+                      and _QDs.get("sel_retour_base") == [], _eQ)
+                _lo, _l1, _l2 = (_QDs.get("lb_ouvert") or {}), (_QDs.get("lb_off1") or {}), (_QDs.get("lb_off2") or {})
+                check("desactives (page) : la visionneuse (« 1 / N ») ne compte pas les desactives",
+                      _lo.get("total") == "2" and _lo.get("liste") == ["b5.mp4", "b1.mp4"]
+                      and _lo.get("courant") == "b5.mp4", _eQ)
+                check("desactives (page) : ⊘ depuis la visionneuse -> l element sort, le suivant s affiche, le total baisse",
+                      _l1.get("total") == "1" and _l1.get("liste") == ["b1.mp4"] and _l1.get("courant") == "b1.mp4"
+                      and _l1.get("ouvert") is True and _l1.get("grille") == ["b1.mp4"], _eQ)
+                check("desactives (page) : ... le dernier desactive ferme la visionneuse, la grille dit pourquoi elle est vide",
+                      _l2.get("liste") == [] and _l2.get("ouvert") is False and _l2.get("grille") == []
+                      and _l2.get("note") == "Rien dans la vue de base : 5 désactivés (« ⊘ Désactivées » pour les voir).",
+                      _eQ)
+                _lf, _lfr = (_QDs.get("lb_filtre") or {}), (_QDs.get("lb_filtre_reactive") or {})
+                check("desactives (page) : sous ⊘, la visionneuse ne feuillette QUE les desactives ; reactiver retire l element",
+                      _lf.get("liste") == ["b1.mp4", "b2.mp4", "b3.mp4", "b4.mp4", "b5.mp4"] and _lf.get("total") == "5"
+                      and _lfr.get("avant") == "b2.mp4" and _lfr.get("total") == "4"
+                      and "b2.mp4" not in (_lfr.get("liste") or ["b2.mp4"])
+                      and "b2.mp4" not in (_lfr.get("vus") or ["b2.mp4"]), _eQ)
+                check("desactives (page) : visionneuse des Templates en vue de base -> ni montage marque ni desactive",
+                      _QDs.get("lb_tpl") == ["t1.mp4", "t6.mp4"], _eQ)
+                check("desactives (page) : Templates sous ⊘ seul -> tous les desactives, montages marques compris",
+                      _QDs.get("tpl_off") == ["t2.mp4", "t4.mp4", "t5.mp4", "t7.mp4"], _eQ)
+                _cs_, _cc_ = (_QDs.get("cap_serveur") or {}), (_QDs.get("cap_client") or {})
+                check("desactives (Caption) : vue de base sans la caption desactivee, serveur ET client, meme compteur",
+                      _cs_.get("vus") == ["c1", "c3"] and _cc_.get("vus") == ["c1", "c3"]
+                      and _cs_.get("cpt") == _cc_.get("cpt")
+                      == "3 captions · 2 brutes dispo · 1 désactivée masquée", _eQ)
+                check("desactives (Caption) : « ☑ Tout » ne coche pas la caption desactivee cachee",
+                      _QDs.get("cap_ids") == ["c1", "c3"] and _QDs.get("cap_tout") == ["c1", "c3"]
+                      and _QDs.get("cap_case_cachee") is False, _eQ)
+                _co = _QDs.get("cap_off") or {}
+                check("desactives (Caption) : filtre ⊘ -> la desactivee seule (grille ET liste de l editeur), selection videe",
+                      _QDs.get("ed_base") == ["c1", "c3"] and _co.get("vus") == ["c2"] and _co.get("ed") == ["c2"]
+                      and _co.get("ids") == ["c2"] and _co.get("sel") == [] and _co.get("bouton") == "1"
+                      and _co.get("cpt") == "3 captions · 2 brutes dispo · 1 désactivée (seule affichée)", _eQ)
+                check("desactives (Caption) : sous ⊘, « Tout selectionner » ne prend que la desactivee ; retour -> base, lot vide",
+                      _QDs.get("cap_tout_off") == ["c2"]
+                      and _QDs.get("cap_retour") == {"vus": ["c1", "c3"], "sel": [], "ed": ["c1", "c3"]}, _eQ)
+                check("desactives (Caption) : une caption desactivee a l instant quitte la vue, le compteur suit",
+                      _QDs.get("cap_c1_off") == {"vus": ["c3"],
+                                               "cpt": "3 captions · 2 brutes dispo · 2 désactivées masquées"}, _eQ)
+                check("desactives (Caption) : la modale de l editeur (globale) repart sans filtre avec la nouvelle identite",
+                      _QDs.get("ed_modale_filtre") is True and _QDs.get("ed_modale_rerendu") is False, _eQ)
+                _z0, _z1, _z2 = (_QDs.get("zzcap_serveur") or {}), (_QDs.get("zzcap_client") or {}), (_QDs.get("zzcap_off") or {})
+                check("desactives (Caption) : toutes desactivees -> note en vue de base (serveur = client), la note part sous ⊘",
+                      _z0.get("vus") == [] and _z1.get("vus") == [] and _z0.get("note") == _z1.get("note")
+                      == "Toutes les captions sont désactivées (1) : « ⊘ Désactivées » pour les voir."
+                      and _z2.get("vus") == ["d1"] and _z2.get("note") is None
+                      and _z2.get("cpt") == "1 caption · 0 brutes dispo · 1 désactivée (seule affichée)", _eQ)
+                # -- Drive : la classe de la galerie decide, la visionneuse suit --
+                _drOff = sorted(_DRIVES_Ds[0][4])
+                _drAct = sorted(k for k, _o, _d in _DRIVE_CS_Ds.get("clouddrive", []) if not _o)
+                _db, _do = (_QDs.get("drive_base") or {}), (_QDs.get("drive_off") or {})
+                _dlb = _QDs.get("drive_lb_base") or {}
+                check("drive (page) : vue de base -> seulement les actifs ; la visionneuse (« 1 / N ») ne feuillette qu eux",
+                      len(_drAct) == 10 and _db.get("vus") == _drAct and _dlb.get("liste") == _drAct
+                      and _dlb.get("total") == "10" and _db.get("note_pp") is True
+                      and _db.get("cpt_base") is True and _db.get("cpt_off") is False, _eQ)
+                check("drive (page) : « ⊘ Desactivees » -> seulement les desactives, dans la grille ET la visionneuse ; compte « sous filtre »",
+                      _do.get("vus") == _drOff and _QDs.get("drive_lb_off") == _drOff and _do.get("classe") is True
+                      and _do.get("bouton") == "1" and _do.get("note_pp") is False
+                      and _do.get("cpt_base") is False and _do.get("cpt_off") is True, _eQ)
+                check("drive (page) : ⊘ eteint -> retour a la vue de base",
+                      _QDs.get("drive_retour") == _drAct, _eQ)
+                check("drive (page) : identite sans desactive -> sous ⊘ la section part et une note le dit",
+                      _QDs.get("drive_vide_base") == {"vus": ["posts/x1.jpg"], "note": False}
+                      and _QDs.get("drive_vide_off") == {"vus": [], "note": True, "section": False}, _eQ)
+                # -- Le fond de l editeur de captions suit un ⊘ pose ailleurs --
+                check("captions (page) : une brute ⊘ dans Video brut quitte le fond de l editeur ET « N brutes dispo », "
+                      "et y revient rallumee ; le lot de « Reperer le texte » aussi",
+                      _QDs.get("fond_avant") == ["b1.mp4", "b5.mp4"]
+                      and _QDs.get("fond_off") == {"brutes": ["b5.mp4"], "json": ["b5.mp4"],
+                                                    "cpt": "3 captions · 1 brute dispo · 1 désactivée masquée"}
+                      and _QDs.get("fond_on") == ["b1.mp4", "b5.mp4"] and _QDs.get("fond_scan") == ["b5.mp4"], _eQ)
+                # -- « ↗ Partager » sans selection --
+                _shb, _sho = (_QDs.get("share_base") or {}), (_QDs.get("share_off") or {})
+                check("captions (page) : « ↗ Partager » sans selection -> les captions AFFICHEES, envoyees nommement "
+                      "(jamais la desactivee cachee), et la modale compte juste",
+                      str(_shb.get("info") or "").startswith("2 captions (toutes celles affichées)")
+                      and _shb.get("ids") == '["c1","c3"]', _eQ)
+                check("captions (page) : ... et sous « ⊘ Desactivees », seulement la desactivee",
+                      str(_sho.get("info") or "").startswith("1 caption (toutes celles affichées)")
+                      and _sho.get("ids") == '["c2"]', _eQ)
+                # -- Editeur de captions --
+                check("captions (editeur) : apres suppression, la suivante est prise dans la VUE (pas la desactivee items[0])",
+                      _QDs.get("ed_suppr") == {"cid": "B", "mode": "item",
+                                               "proj": "@zzds · 1 caption · 1 désactivée masquée"}
+                      and _QDs.get("ed_repli") == "B", _eQ)
+                check("captions (editeur) : « Mes captions N » (studio du VPS) compte la vue, pas toutes les captions",
+                      _QDs.get("ed_timeline") == "1", _eQ)
+                check("captions (editeur) : toutes desactivees -> position globale et une note dans la liste",
+                      _QDs.get("ed_toutes_off") == {
+                          "mode": "global", "proj": "@zzds · 0 caption · 1 désactivée masquée",
+                          "note": "Toutes les captions sont désactivées (1) : « ⊘ Désactivées » pour les voir."}, _eQ)
+                check("captions (editeur) : sous ⊘, le repli prend une desactivee et l en-tete le dit",
+                      _QDs.get("ed_off_repli") == {"cid": "A", "proj": "@zzds · 1 caption désactivée · 1 active masquée"},
+                      _eQ)
+                check("captions (editeur) : « Ajouter un texte » sous ⊘ -> la nouvelle caption reste visible dans la liste (.on)",
+                      _QDs.get("ed_ajout_off") == ["A", "NOUVELLE"] and _QDs.get("ed_ajout_base") == ["B", "NOUVELLE"], _eQ)
+                # -- Doublon ou plafond venant d une desactivee cachee --
+                check("captions (ajout) : un doublon d une caption DESACTIVEE dit ou elle est et comment la reprendre",
+                      _QDs.get("dup_avert") == ("⊘ Déjà utilisée telle quelle — déjà là mais désactivée : "
+                                                "« ⊘ Désactivées » pour la réactiver — elle sera ignorée.")
+                      and _QDs.get("dup_envoi") == [["Déjà dans la bibliothèque (doublons ignorés) — dont 1 désactivée(s), "
+                                                     "cachée(s) : « ⊘ Désactivées » pour la réactiver", "warning"]], _eQ)
+                check("captions (ajout) : le plafond compte les desactivees masquees, et le dit",
+                      _QDs.get("dup_plafond") == [["✕ Bibliothèque pleine : 2 captions au maximum pour @zzds, dont 1 "
+                                                   "désactivée masquée (« ⊘ Désactivées »). Supprime avant d ajouter — "
+                                                   "1 caption refusée.", "error"]], _eQ)
+                check("captions (captures) : « N deja presente(s) » dit combien sont des desactivees cachees",
+                      _QDs.get("dup_ocr") == [["✓ @zzds : 1 caption(s) ajoutée(s) · 1 déjà présente(s), dont 1 "
+                                               "désactivée(s) cachée(s) : « ⊘ Désactivées » pour la réactiver",
+                                               "success"]], _eQ)
+                # -- Selection : l axe ⊘ decoche dans les deux sens --
+                check("desactives (page) : r1 coche puis ⊘ allume -> r1 sort de la selection ; « Tout selectionner » = ce qui est vu",
+                      _QDs.get("sel_r1") == ["zzds|videos|r1.mp4"]
+                      and _QDs.get("sel_r1_off") == {"sel": [], "coche": False}
+                      and _QDs.get("sel_tout_off") == {"sel": ["zzds|videos|r2.mp4", "zzds|videos|r4.mp4"],
+                                                       "toast": [["☑ 2 éléments sélectionnés", "info"]]}, _eQ)
+                # -- Le rapport « Reperer le texte » --
+                _sr1, _sr2 = str(_QDs.get("scan_rap") or ""), str(_QDs.get("scan_rap_apres") or "")
+                check("reperer le texte (page) : le rapport ne liste que les brutes EN SERVICE, les autres comptees a part",
+                      "<b>1 brute(s) en service portent du texte</b>" in _sr1 and "b1.mp4" in _sr1
+                      and "b2.mp4" not in _sr1 and "b3.mp4" not in _sr1
+                      and "· 2 déjà désactivée(s), masquée(s)" in _sr1
+                      and "Désactiver ces 2 vidéo(s) (dont 1 déjà masquée(s) par l’ancien ⊘)" in _sr1
+                      and "1 vidéo(s) en service sont restées illisibles" in _sr1
+                      and "1 illisible(s) déjà désactivée(s), masquée(s)." in _sr1, _sr1[:400])
+                check("reperer le texte (page) : apres « Desactiver ces N », la liste RETRECIT (0 en service, 3 masquees)",
+                      "<b>0 brute(s) en service portent du texte</b>" in _sr2 and "b1.mp4" not in _sr2
+                      and "· 3 déjà désactivée(s), masquée(s)" in _sr2 and "Désactiver ces" not in _sr2, _sr2[:400])
+                if "ERREUR" in _QDs or not _QDs:
+                    check("desactives (page) : le harnais a tourne jusqu au bout", False, _eQ)
+        elif not _nodeDs:
+            print("     (node absent : visionneuse, selection et Caption n ont pas ete executees)")
+    finally:
+        _AUDIT_Ds["actif"] = False
+        for _k, _v in _savDs.items():
+            setattr(_wDs, _k, _v)
+        _dcDs._STORE = _savStoreDs
+        for _p in (_wDs.DISABLED_REELS_FILE, _wDs.CAPTIONS_FILE, _wDs.FAV_BRUTES_FILE,
+                   _wDs.BANGER_MARKS_FILE, _wDs.FLASH_TREND_FILE, _wDs.TRASH_TREND_FILE):
+            try:
+                _wDs._invalidate_json_cache(_p)
+            except Exception:
+                pass
+        _wDs._oublier_identites()
+        _shDs.rmtree(_TDs, ignore_errors=True)
+    check("desactives : aucune ecriture dans data/ pendant toute la section",
+          not _AUDIT_Ds["ecrits"], str(_AUDIT_Ds["ecrits"][:5]))
+    if _AUDIT_Ds["autres"]:
+        # Ne jamais ecarter en silence : un autre fil a ecrit dans data/ pendant
+        # la section. Ce n est pas elle, mais cela doit se voir.
+        print("     (attention : %d ecriture(s) dans data/ par un AUTRE fil pendant la section : %s)"
+              % (len(_AUDIT_Ds["autres"]), _AUDIT_Ds["autres"][:3]))
+except Exception as _eDs:
+    import traceback as _tbDs
+    check("desactives : testable", False, repr(_eDs)[:200] + " " + _tbDs.format_exc()[-700:])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

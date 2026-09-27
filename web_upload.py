@@ -768,6 +768,37 @@ def _toggle_disabled_reel(file_id: str) -> bool:
     return now_off
 
 
+def _brutes_eteintes(dossier) -> set:
+    """Les tiges des brutes éteintes par leur voisin .off.json dans ce dossier.
+
+    UNE lecture du dossier pour toute une galerie, au lieu d'un exists() par
+    vidéo : Vidéo brut en compte plus de 600."""
+    try:
+        return {f.name[:-len(SUFFIXE_DESACTIVE)]
+                for f in dossier.glob("*" + SUFFIXE_DESACTIVE)}
+    except Exception:
+        return set()
+
+
+def _media_desactive(ident: str, sd: str, p, reg: set, brutes_off=None) -> bool:
+    """Ce média est-il désactivé (⊘) ? LA règle de tout l'affichage.
+
+    Deux registres : disabled_reels.json (le ⊘ de n'importe quelle galerie,
+    `reg`) et, pour une brute, son voisin .off.json (le repérage du texte, et
+    ce que lit le bot). Les galeries, le Drive, /a-relire et le rapport
+    « Repérer le texte » passent tous par ici. Observé avant : le Drive avait
+    sa propre idée (aucune), et montrait en couleur ce que la galerie cachait.
+    `brutes_off` : le résultat de _brutes_eteintes() quand on l'a déjà ; sinon
+    le voisin est cherché fichier par fichier."""
+    if f"{ident}|{sd}|{p.name}" in reg:
+        return True
+    if sd != "brutes":
+        return False
+    if brutes_off is None:
+        return brute_desactivee(p)
+    return p.stem in brutes_off
+
+
 # ---- Rushs bruts favoris (⭐) : un VRAI favori, local, sans Discord ----------
 #
 # À ne pas confondre avec banger_marks.json, qui porte le même symbole : c'est
@@ -2072,6 +2103,35 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 .cloud-card.is-reel-off{opacity:.4;filter:grayscale(1);transition:opacity .2s ease,filter .2s ease}
 .cloud-card.is-reel-off:hover{opacity:.6}
 .cloud-card.is-reel-off .card-actions{opacity:1;filter:none}
+/* Captions désactivées (⊘) : cachées de la vue de base, seules visibles sous
+   « ⊘ Désactivées » (classe cap-vue-off, posée par capVueAppliquer). Par une
+   CLASSE et pas carte par carte : la grille est rendue par Flask puis
+   reconstruite par capRenderCards à chaque clic, et la liste de l'éditeur par
+   capEdLibRender, que des patchs du VPS réécrivent. Une règle vaut pour tous
+   ces rendus. Spécificité 1-3-0 et plus : au-dessus des display des cartes
+   (.cap-card 0-1-0, #cap-ed-modal .cap-ed-li 1-1-0). */
+#capCards:not(.cap-vue-off) .cap-card.cap-off{display:none}
+#capCards.cap-vue-off .cap-card:not(.cap-off){display:none}
+/* Dans la liste de l'éditeur, la caption EN COURS (.on) reste visible quelle
+   que soit la vue : « Ajouter un texte » sous « ⊘ Désactivées » créait une
+   caption active aussitôt cachée de sa propre liste (on recliquait, doublon),
+   et le repli après une suppression pouvait éditer une ligne invisible.
+   Spécificité 2-4-0 : au-dessus du display:flex que le patch caption-studio
+   du VPS pose sur #cap-ed-modal .cap-ed-li (1-1-0, 1-2-1 en thème clair). */
+#cap-ed-modal:not(.cap-vue-off) #cap-ed-list .cap-ed-li.off:not(.on){display:none}
+#cap-ed-modal.cap-vue-off #cap-ed-list .cap-ed-li:not(.off):not(.on){display:none}
+/* Drive (lecture seule) : même règle que les galeries, portée par une
+   CLASSE de la galerie que « ⊘ Désactivées » bascule (toggleOffBruteFilter).
+   Vue de base : ni carte désactivée, ni compte « sous filtre ». Vue ⊘ :
+   seulement elles, et les sections qui n'en ont aucune disparaissent.
+   Spécificité 0-5-0 et plus : .cloud-card n'a pas d'autre display. */
+.vault-gallery.drive-galerie:not(.drive-vue-off) .cloud-card.is-reel-off{display:none}
+.vault-gallery.drive-galerie.drive-vue-off .cloud-card:not(.is-reel-off){display:none}
+.vault-gallery.drive-galerie.drive-vue-off .drive-sec-sans-off{display:none}
+.vault-gallery.drive-galerie.drive-vue-off .drive-note-base{display:none}
+.vault-gallery.drive-galerie:not(.drive-vue-off) .drive-note-vue-off{display:none}
+.vault-gallery.drive-galerie:not(.drive-vue-off) .drive-cpt-off{display:none}
+.vault-gallery.drive-galerie.drive-vue-off .drive-cpt-base{display:none}
 
 /* Pop quand checkbox sélectionnée */
 .sel-cb:checked,.txt-sel-cb:checked{animation:pop .25s ease}
@@ -5480,36 +5540,41 @@ function vaultFiltreSection(btn){
   var s = (btn && btn.closest) ? btn.closest('.form-section') : null;
   return s || vaultSectionVisible();
 }
-// Masque/rétablit les cartes d'UNE grille et gère son message « rien à
-// montrer ». Le message porte une CLASSE (pas un id) : il y en a un par
-// galerie, un id serait à nouveau ambigu dans le document.
-// selExclu : un selecteur dont les cartes sont RETIREES de cette vue, filtre
-// actif ou non. C'est ce qui rend un tag exclusif plutot qu'additif — sans
-// lui, un montage Flash Trend reapparaitrait dans la vue de base des qu'on
-// eteint un filtre, et le tag ne voudrait plus rien dire.
-function vaultFiltreAppliquer(sec, actif, selEtoile, classeVide, texteVide, selExclu){
-  if(!sec) return;
-  var grid = sec.querySelector('#vault-grid');
-  if(!grid) return;
-  var shown = 0;
-  grid.querySelectorAll('.cloud-card').forEach(function(c){
-    var exclu = selExclu ? c.querySelector(selExclu) : null;
-    if(!actif){ c.style.display = exclu ? 'none' : ''; return; }
-    var on = c.querySelector(selEtoile) && !exclu;
-    c.style.display = on ? '' : 'none';
-    if(on) shown++;
-  });
-  var empty = sec.querySelector('.' + classeVide);
-  if(actif && shown === 0){
-    if(!empty){
-      empty = document.createElement('div');
-      empty.className = classeVide;
-      empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
-      empty.textContent = texteVide;
-      grid.appendChild(empty);
-    }
-    empty.style.display = '';
-  } else if(empty){ empty.style.display = 'none'; }
+// Une carte est-elle désactivée (⊘) ? La carte grisée OU son bouton ⊘
+// allumé : le clic et le repérage du texte posent les deux, et une carte
+// repeinte à moitié ne doit pas échapper à la règle.
+function vaultCarteOff(c){
+  return !!(c && (c.classList.contains('is-reel-off') || c.querySelector('.reel-disable.is-off')));
+}
+// Une carte que l'axe ⊘ cache ne reste pas cochée, DANS LES DEUX SENS : une
+// désactivée en vue de base, une active sous « ⊘ Désactivées ». La barre ⌫
+// agit sur la SÉLECTION, pas sur l'écran : cocher trois vidéos puis en
+// désactiver une la laissait dans le lot, et la corbeille emportait un
+// fichier qu'on ne voyait plus. Observé aussi dans l'autre sens : r1 coché,
+// ⊘ allumé, « Tout sélectionner » annonçait 2 éléments et le lot en portait
+// 3. L'onglet Caption fait déjà de même (capVueAppliquer).
+// Les autres filtres (⭐, ★, familles) gardent la sélection, comme avant : on
+// coche des templates sous ⚡ puis sous Trash pour les partager d'un coup.
+function vaultDeselectionner(c){
+  var cb = c && c.querySelector ? c.querySelector('.sel-cb') : null;
+  if(!cb || !cb.checked) return;
+  cb.checked = false;
+  try{ cb.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
+}
+// Le compteur de l'en-tête (« 676 fichiers · 42 désactivés masqués ») suit
+// les clics : sans ça il gardait le chiffre du rendu serveur, et une vidéo
+// désactivée à l'instant semblait avoir disparu du dossier.
+// Sous ⊘, il dit combien sont RÉELLEMENT affichés (shown) : ⊘ + ⭐ montre les
+// seuls désactivés ⭐, et « 3 désactivés (seuls affichés) » au-dessus d'une
+// carte laissait croire qu'il en manquait deux.
+function vaultCompteOff(sec, nOff, oOn, shown){
+  var e = sec ? sec.querySelector('.vault-off-compte') : null;
+  if(!e) return;
+  var n = shown || 0;
+  e.textContent = !nOff ? ''
+    : (' · ' + nOff + ' désactivé' + (nOff > 1 ? 's' : '')
+       + (oOn ? (' (' + n + ' affiché' + (n > 1 ? 's' : '') + ')')
+              : (' masqué' + (nOff > 1 ? 's' : ''))));
 }
 // Recopie l'état sur le bouton : c'est lui qui le porte d'un clic à l'autre.
 function vaultFiltreBouton(b, actif, labelOn, labelOff){
@@ -5523,15 +5588,32 @@ function vaultFiltreBouton(b, actif, labelOn, labelOff){
 // Les filtres se COMBINENT, ils ne s'excluent pas.
 //
 //     aucun          tout, SAUF les marques   -- la marque sort de la vue de base
+//                    ET SAUF les ⊘            -- un désactivé n'a rien à y faire
 //     ⭐ seul        les ⭐ non marques
 //     ⚡ seul        les ⚡
 //     ⭐ + ⚡        les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
 //     Trash seul     les Trash
 //     ⭐ + Trash     les Trash qui sont ⭐     -- « Trash Banger »
 //     Trash + ⚡     les Trash ET les ⚡        -- les FAMILLES s'additionnent
+//     ⊘ seul         TOUS les désactivés, marqués ou non
+//     ⊘ + le reste   les désactivés que les autres boutons retiennent
 //
 // Les familles (Trash, ⚡) s'unissent, l'etoile les recoupe. Aucun bouton
 // n'eteint l'autre : c'est ce qui avait echoue plus bas.
+//
+// ⊘ EST LE SEUL ENDROIT OU UN DESACTIVE SE VOIT. Demande du proprietaire
+// (27/09/2026) : « quand je désactive, je veux JAMAIS le voir de base,
+// UNIQUEMENT si je clique sur Désactivées ». Avant, la vue de base les
+// montrait grisés : il les retrouvait dans la visionneuse (« 1 / 676 ») en
+// cherchant le texte à repérer, et « Tout sélectionner » les prenait. La
+// visionneuse et la sélection ne lisent que les cartes AFFICHÉES : les
+// cacher ici les en retire aussi. Seul, ⊘ montre aussi les montages
+// marqués : c'est la corbeille, on doit y retrouver TOUT ce qu'on a éteint,
+// sans deviner sous quelle famille le chercher.
+//
+// ★ Reels Banger passe par ici aussi. Il avait son propre moteur, qui ne
+// savait rien des désactivés : chaque clic d'étoile réaffichait les cartes
+// que la vue de base venait de cacher.
 //
 // Une carte qui porte encore les deux marques (donnee ancienne) se lit ⚡ :
 // la meme priorite que le serveur (marques_montage.PRIORITE), sinon elle
@@ -5550,58 +5632,96 @@ function vaultVuesAppliquer(sec){
   if(!sec) return;
   var grid = sec.querySelector('#vault-grid');
   if(!grid) return;
+  var kOn = vaultFiltreOn(sec, 'banger-toggle-btn');
   var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
   var gOn = vaultFiltreOn(sec, 'template-toggle-btn');
   var tOn = vaultFiltreOn(sec, 'trash-toggle-btn');
   var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
+  // Le même id sur chaque galerie (Reels, Posts, Vidéo brut, Templates...) :
+  // il est né sur les brutes, et le thème clair le vise déjà par cet id.
   var oOn = vaultFiltreOn(sec, 'offbrute-toggle-btn');
-  var shown = 0;
+  var familles = (gOn || tOn || fOn);
+  // nOffRetenus : les désactivés que la vue ⊘ montrerait avec les MÊMES
+  // autres filtres. C'est eux que la note d'une vue vide annonce : compter
+  // tous les désactivés de la galerie promettait 4 cartes sous Trash, et ⊘
+  // n'en montrait qu'une.
+  var shown = 0, nOff = 0, nMarq = 0, nOffRetenus = 0;
   grid.querySelectorAll('.cloud-card').forEach(function(c){
     // La classe du BOUTON de la carte fait foi, pas une classe de carte :
     // c'est elle que la bascule pose et que la visionneuse relit.
     var estFlash = !!c.querySelector('.flash-trend.is-flash');
     var estTrash = !estFlash && !!c.querySelector('.trash-trend.is-trash-trend');
     var estFav = !!c.querySelector('.fav-brute-star.is-fav');
+    var estBanger = !!c.querySelector('.banger-star.is-banger');
+    var estOff = vaultCarteOff(c);
     // Sans filtre de famille, les montages marques restent CACHES : c'est la
     // marque qui les sort de la vue ordinaire, et c'est tout son interet.
     // Template Trend = les montages SANS marque : une famille comme les
     // autres, qui s'additionne a Trash et ⚡.
     var estBase = !estFlash && !estTrash;
-    var ok = (gOn || tOn || fOn) ? ((gOn && estBase) || (tOn && estTrash) || (fOn && estFlash))
-                                 : estBase;
+    if(estOff) nOff++;
+    else if(!estBase) nMarq++;
+    var ok = familles ? ((gOn && estBase) || (tOn && estTrash) || (fOn && estFlash))
+                      : (oOn || estBase);
     if(bOn && !estFav) ok = false;
-    // ⊘ : la carte grisée OU son bouton ⊘ allumé (les deux vont ensemble ;
-    // le repérage du texte et le clic les posent tous les deux)
-    if(oOn && !(c.classList.contains('is-reel-off') || c.querySelector('.reel-disable.is-off'))) ok = false;
+    if(kOn && !estBanger) ok = false;
+    // Sans famille, ⊘ seul montre TOUT désactivé, marqué compris (la corbeille).
+    var okSiOff = (familles ? ((gOn && estBase) || (tOn && estTrash) || (fOn && estFlash)) : true)
+                  && (!bOn || estFav) && (!kOn || estBanger);
+    if(estOff && okSiOff) nOffRetenus++;
+    // Désactivé ⇔ ⊘ allumé : ni plus, ni moins.
+    if(estOff !== oOn) ok = false;
     c.style.display = ok ? '' : 'none';
     if(ok) shown++;
+    else if(estOff !== oOn) vaultDeselectionner(c);
   });
+  vaultCompteOff(sec, nOff, oOn, shown);
   var vide = sec.querySelector('.vues-empty-note');
-  if(shown === 0 && (bOn || gOn || tOn || fOn || oOn)){
+  var filtre = (kOn || bOn || familles || oOn);
+  // La vue de base peut être vide sans aucun filtre : tout est désactivé ou
+  // marqué. Une grille blanche passerait pour une panne — on dit pourquoi.
+  if(shown === 0 && (filtre || nOff || nMarq)){
     if(!vide){
       vide = document.createElement('div');
       vide.className = 'vues-empty-note';
       vide.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
       grid.appendChild(vide);
     }
-    var familles = [];
-    if(gOn) familles.push('🎞️ Template Trend');
-    if(tOn) familles.push('{marque_trash_emoji_js} {marque_trash_nom_js}');
-    if(fOn) familles.push('⚡ Flash Trend');
-    vide.textContent = familles.length
-      ? ('Aucun montage ' + familles.join(' ni ') + (bOn ? ' marqué ⭐' : '')
-         + ' pour cette identité.')
-      : (oOn ? ('Aucune brute désactivée' + (bOn ? ' parmi les ⭐' : '') + ' pour cette identité.')
-             : 'Aucun ⭐ pour cette identité.');
+    var fams = [];
+    if(gOn) fams.push('🎞️ Template Trend');
+    if(tOn) fams.push('{marque_trash_emoji_js} {marque_trash_nom_js}');
+    if(fOn) fams.push('⚡ Flash Trend');
+    var bo = sec.querySelector('#offbrute-toggle-btn');
+    var txt;
+    if(fams.length){
+      txt = 'Aucun montage ' + fams.join(' ni ') + (oOn ? ' désactivé' : '')
+          + (bOn ? ' marqué ⭐' : '') + ' pour cette identité.';
+    } else if(oOn){
+      txt = ((bo && bo.getAttribute('data-vide')) || 'Aucun élément désactivé')
+          + (bOn ? ' parmi les ⭐' : '') + (kOn ? ' parmi les ★ bangers' : '')
+          + ' pour cette identité.';
+    } else if(kOn){
+      txt = 'Aucun reel marqué ★ banger pour cette identité.';
+    } else if(bOn){
+      txt = 'Aucun ⭐ pour cette identité.';
+    } else {
+      var raisons = [];
+      if(nOff) raisons.push(nOff + ' désactivé' + (nOff > 1 ? 's' : '') + ' (« ⊘ Désactivées » pour les voir)');
+      if(nMarq) raisons.push(nMarq + ' montage' + (nMarq > 1 ? 's' : '') + ' marqué' + (nMarq > 1 ? 's' : '') + ' (voir leurs filtres)');
+      txt = 'Rien dans la vue de base : ' + raisons.join(' et ') + '.';
+    }
+    // Des désactivés que CE filtre retiendrait existent, mais ⊘ est éteint :
+    // les nommer, sinon « aucun ⭐ » laisserait croire que le ⭐ désactivé a
+    // disparu. Seulement ceux-là : ⊘ doit montrer ce que la note promet.
+    if(!oOn && nOffRetenus && filtre) txt += ' (' + nOffRetenus + ' désactivé' + (nOffRetenus > 1 ? 's' : '') + ' masqué' + (nOffRetenus > 1 ? 's' : '') + ' : « ⊘ Désactivées ».)';
+    vide.textContent = txt;
     vide.style.display = '';
   } else if(vide){ vide.style.display = 'none'; }
 }
 
+// ★ Reels Banger : le même moteur que les autres filtres (voir plus haut).
 function applyBangerFilter(sec){
-  sec = sec || vaultSectionVisible();
-  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'banger-toggle-btn'),
-                       '.banger-star.is-banger', 'banger-empty-note',
-                       'Aucun reel marqué ★ banger pour cette identité.');
+  vaultVuesAppliquer(sec);
 }
 function toggleBangerFilter(btn){
   var sec = vaultFiltreSection(btn);
@@ -5710,8 +5830,13 @@ async function toggleBanger(btn, fileId){
   }
 }
 async function toggleReelDisabled(btn, fileId){
-  // Désactive/réactive un reel : grise la carte + état persisté serveur
+  // Désactive/réactive : grise la carte + état persisté serveur, et la carte
+  // QUITTE la vue où on l'a cliquée — la vue de base n'a pas de désactivés,
+  // « ⊘ Désactivées » n'a qu'eux.
   var card = btn.closest('.cloud-card');
+  // La section vient du BOUTON, pas de « la première section visible » :
+  // plusieurs galeries portent le même #vault-grid (voir vaultFiltreSection).
+  var sec = vaultFiltreSection(btn);
   btn.disabled = true; btn.style.opacity = '0.55';
   try{
     var fd = new FormData(); fd.set('file_id', fileId);
@@ -5722,9 +5847,26 @@ async function toggleReelDisabled(btn, fileId){
     if(card) card.classList.toggle('is-reel-off', off);
     btn.classList.toggle('is-off', off);
     btn.style.color = off ? '#ef4444' : '#9aa0a6';
-    // filtre « ⊘ Désactivées » allumé : une brute rallumée quitte la vue
-    capOffRefiltrer();
-    if(typeof showToast === 'function') showToast(off ? '⊘ Vidéo désactivée' : '✓ Vidéo réactivée', off ? 'warning' : 'success');
+    vaultVuesAppliquer(sec);
+    // Une brute : le fond de l'éditeur de captions (déjà chargé) suit.
+    var pFid = String(fileId || '').split('|');
+    if(pFid.length === 3 && pFid[1] === 'brutes' && typeof capBrutesSuivre === 'function'){
+      var etB = {}; etB[pFid[2]] = off; capBrutesSuivre(pFid[0], etB);
+    }
+    // Le fragment préchargé de cette identité garde l'état d'AVANT : sans ce
+    // vidage, un aller-retour d'identité ramenait la carte dans la vue de base.
+    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+    var partie = !!(card && card.style.display === 'none');
+    // Depuis la visionneuse : l'élément qu'on vient d'éteindre n'a plus sa
+    // place dans la liste qu'on feuillette, on passe au suivant.
+    if(partie && typeof lbRetirerCarte === 'function') lbRetirerCarte(card);
+    // Où la retrouver : sans le dire, une carte qui disparaît au clic passe
+    // pour une suppression.
+    if(typeof showToast === 'function'){
+      showToast(off ? ('⊘ Désactivé' + (partie ? ' — masqué ici, à retrouver dans « ⊘ Désactivées »' : ''))
+                    : ('✓ Réactivé' + (partie ? ' — de retour dans la vue normale' : '')),
+                off ? 'warning' : 'success');
+    }
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
@@ -5936,24 +6078,37 @@ function toggleFavBruteFilter(btn){
   vaultFiltreBouton(b, actif, '⭐ Bangers ✓', '⭐ Bangers');
   favBruteApply(sec);
 }
-// Refiltre la galerie visible apres un ⊘, SEULEMENT si elle porte le bouton
-// « ⊘ Desactivees » (Video brut) : sur Reels, vaultVuesAppliquer aurait
-// reaffiche les cartes que « ★ Reels Banger » cache par sa propre logique.
+// Refiltre la galerie visible apres un ⊘ posé en lot (rapport « Repérer le
+// texte ») : les brutes qu'il vient d'éteindre quittent la vue de base.
+// Il se limitait autrefois aux galeries portant « ⊘ Désactivées » parce que
+// ★ Reels Banger avait son propre moteur ; ils n'en font plus qu'un.
 function capOffRefiltrer(){
   try{
     var s = vaultSectionVisible();
-    if(s && s.querySelector('#offbrute-toggle-btn')) vaultVuesAppliquer(s);
+    if(s) vaultVuesAppliquer(s);
   }catch(e){}
 }
-// ⊘ Desactivees : seules les brutes grisees. Se combine avec ⭐ (les ⭐
-// desactivees). Le rouge du ⊘ plutot que le dore des etoiles.
+// ⊘ Desactivees : seuls les elements grises — le seul endroit ou ils se
+// voient. Present sur chaque galerie qui a le bouton ⊘ sur ses cartes. Se
+// combine avec ⭐, ★ et les familles. Le rouge du ⊘ plutot que le dore des
+// etoiles.
 function toggleOffBruteFilter(btn){
   var sec = vaultFiltreSection(btn);
   var b = btn || (sec ? sec.querySelector('#offbrute-toggle-btn') : null);
   var actif = !(b && b.getAttribute('data-on') === '1');
   vaultFiltreBouton(b, actif, '⊘ Désactivées ✓', '⊘ Désactivées');
   if(b){ b.style.background = actif ? '#3a1111' : '#1a1a1a'; b.style.borderColor = actif ? '#ef4444' : '#3a3a3a'; }
+  // Le Drive (lecture seule) n'a pas de #vault-grid : ses cartes sont cachées
+  // par une CLASSE de la galerie (règles .drive-galerie), dans les deux sens.
+  // La visionneuse suit seule : elle ne prend que les cartes affichées.
+  var gal = (b && b.closest) ? b.closest('.drive-galerie') : null;
+  if(gal) gal.classList.toggle('drive-vue-off', actif);
   vaultVuesAppliquer(sec);
+  // L'onglet Caption porte le même bouton : ses cartes ne sont pas des
+  // .cloud-card mais des .cap-card, cachées par une classe (capVueAppliquer).
+  if(sec && sec.querySelector('#capCards') && typeof capVueAppliquer === 'function'){
+    capVueAppliquer(); capVueEditeur();
+  }
 }
 // === « Appliquer a toutes » : propager les tags des montages ===========
 //
@@ -6080,12 +6235,24 @@ function scanTexteAfficher(rap){
     else if(sec) sec.appendChild(boite);
     else document.body.appendChild(boite);
   }
-  var h = '<b>' + (rap.avec_texte || []).length + ' brute(s) portent déjà du texte</b>'
+  // Seulement les brutes EN SERVICE : celles déjà désactivées (voisin
+  // .off.json ou ⊘ de la galerie, x.desactivee) ne se voient plus que sous
+  // « ⊘ Désactivées ». Avant, « Désactiver ces 40 vidéo(s) » redessinait la
+  // même liste de 40 noms sous le même titre : elle ne rétrécissait jamais,
+  // et on revoyait ce qu'on venait d'écarter en cherchant le texte.
+  // Écartées mais COMPTÉES, à part.
+  var actives = (rap.avec_texte || []).filter(function(x){ return !x.desactivee; });
+  var nMasq = (rap.avec_texte || []).length - actives.length;
+  var h = '<b>' + actives.length + ' brute(s) en service portent du texte</b>'
         + ' <span style="color:#9a9aa6">— sur ' + rap.total_examine + ' examinée(s), '
         + rap.total_brutes + ' au total</span>';
-  if((rap.avec_texte || []).length){
+  if(nMasq){
+    h += '<div data-scan-masquees style="margin-top:4px;color:#9a9aa6;font-size:12px">· ' + nMasq
+       + ' déjà désactivée(s), masquée(s) — « ⊘ Désactivées » pour les revoir</div>';
+  }
+  if(actives.length){
     h += '<div style="margin-top:10px;max-height:320px;overflow:auto">';
-    rap.avec_texte.forEach(function(x){
+    actives.forEach(function(x){
       var ex = (x.extraits || []).join(' · ');
       h += '<div style="padding:6px 0;border-top:1px solid #24242c">'
          + '<code style="color:#f5c518">' + x.fichier + '</code>'
@@ -6104,9 +6271,16 @@ function scanTexteAfficher(rap){
   if(reste || rap.a_rallumer || rap.desactivees){
     h += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
     if(reste){
+      // reste compte le seul .off.json (ce que lit le bot) : une brute grisée
+      // par l'ancien ⊘ de la galerie est masquée de la liste mais encore à
+      // éteindre pour le bot. Le dire, sinon le bouton annonce plus de vidéos
+      // que la liste n'en montre.
+      var dejaMasq = Math.max(0, reste - actives.length);
       h += '<button type="button" data-scanact="off" class="btn"'
          + ' style="width:auto;margin:0;padding:9px 16px">'
-         + 'Désactiver ces ' + reste + ' vidéo(s)</button>';
+         + 'Désactiver ces ' + reste + ' vidéo(s)'
+         + (dejaMasq ? (' (dont ' + dejaMasq + ' déjà masquée(s) par l’ancien ⊘)') : '')
+         + '</button>';
     }
     if(rap.a_rallumer){
       h += '<button type="button" data-scanact="on-sans" class="btn"'
@@ -6124,12 +6298,19 @@ function scanTexteAfficher(rap){
        + 'désactivée reste sur le disque, elle cesse simplement de partir '
        + 'chez les VA.</span></div>';
   }
-  if((rap.non_conclu || []).length){
+  // Même règle pour les illisibles : une brute déjà désactivée n'a plus à
+  // être signalée, elle est seulement comptée à part.
+  var ncActives = (rap.non_conclu || []).filter(function(x){ return !x.desactivee; });
+  var ncMasq = (rap.non_conclu || []).length - ncActives.length;
+  if(ncActives.length || ncMasq){
     // Jamais rangées avec les « sans texte » : on n'a pas su lire, ce n'est
     // pas la même chose que « pas de texte ».
     h += '<div style="margin-top:10px;color:#e0a33a">'
-       + rap.non_conclu.length + ' vidéo(s) sont restées illisibles — '
-       + 'elles ne sont proposées à rien.</div>';
+       + (ncActives.length ? (ncActives.length + ' vidéo(s) en service sont restées illisibles — '
+                              + 'elles ne sont proposées à rien.') : '')
+       + (ncMasq ? ('<span style="color:#9a9aa6">' + (ncActives.length ? ' · ' : '') + ncMasq
+                    + ' illisible(s) déjà désactivée(s), masquée(s).</span>') : '')
+       + '</div>';
   }
   boite.innerHTML = h;
   /* Les cartes suivent le rapport : sans ca, « Desactiver ces 40 videos »
@@ -6139,17 +6320,21 @@ function scanTexteAfficher(rap){
   var eteintes = {};
   (rap.desactivees_noms || []).forEach(function(n){ eteintes[n] = true; });
   var prefixe = (rap.identite || '') + '|brutes|';
+  var etatsB = {};
   document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(el){
     var fid = el.getAttribute('data-fid') || '';
     if(fid.indexOf(prefixe) !== 0) return;
     if(!rap.desactivees_noms) return;
     var nom = fid.slice(prefixe.length);
     var off = !!eteintes[nom], card = el.closest('.cloud-card');
+    etatsB[nom] = off;
     if(card) card.classList.toggle('is-reel-off', off);
     var b = card ? card.querySelector('button[onclick*="toggleReelDisabled"]') : null;
     if(b){ b.classList.toggle('is-off', off); b.style.color = off ? '#ef4444' : '#9aa0a6'; }
   });
   capOffRefiltrer();   // la vue « ⊘ Désactivées » suit le rapport
+  // Les brutes éteintes en lot quittent aussi le fond de l'éditeur de captions.
+  if(typeof capBrutesSuivre === 'function') capBrutesSuivre(rap.identite || '', etatsB);
   try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
   // data-attributs + addEventListener : ce JS vit dans une chaine Python, et
   // une apostrophe echappee a la main y tuerait le script de la page entiere,
@@ -6284,6 +6469,39 @@ function lbAction(quoi){
   // supposer que ca a marche. Un refus d'ecriture laisse donc le bouton
   // eteint, ce qui est la verite.
   setTimeout(lbActionsSync, 400);
+}
+// Retire du lecteur ouvert l'element dont la carte vient de quitter la vue
+// (desactive depuis la vue de base, reactive depuis « ⊘ Desactivees ») et
+// montre le suivant. La liste du lecteur est relevee A L'OUVERTURE : sans ce
+// retrait, le compteur gardait « 1 / 676 » et la fleche Suivant repassait
+// par la video qu'on venait d'eteindre en cherchant le texte a reperer.
+function lbRetirerCarte(card){
+  var modal = document.getElementById('lightbox');
+  if(!modal || !modal.classList.contains('show') || !card) return;
+  var bg = card.querySelector('.vault-card-bg[data-fid]');
+  var fid = bg ? (bg.getAttribute('data-fid') || '') : '';
+  if(!fid) return;
+  var idx = -1;
+  for(var i = 0; i < lbGallery.length; i++){
+    if(lbGallery[i].fileId === fid){ idx = i; break; }
+  }
+  if(idx < 0) return;
+  lbGallery.splice(idx, 1);
+  if(!lbGallery.length){ closeLightbox(); return; }
+  if(idx === lbIndex){
+    // Le suivant a pris sa place ; sur le dernier, lbRender recule d'un cran.
+    lbRender();
+    return;
+  }
+  // Un autre element que celui affiche : on ne relance pas la video en
+  // cours, on recale seulement la position et le total.
+  if(idx < lbIndex) lbIndex--;
+  var pos = document.getElementById('lb-pos'), tot = document.getElementById('lb-total');
+  if(pos) pos.textContent = (lbIndex + 1);
+  if(tot) tot.textContent = lbGallery.length;
+  var prev = document.querySelector('.lb-prev'), next = document.querySelector('.lb-next');
+  if(prev) prev.disabled = (lbIndex === 0);
+  if(next) next.disabled = (lbIndex >= lbGallery.length - 1);
 }
 
 function lbRender(){
@@ -8568,11 +8786,173 @@ function capLibInit(){
     capLib.identity=j.identity;
     // meme defaut que le serveur (CAPTION_POLICE_DEFAUT / CAPTION_STYLE_DEFAUT)
     capLib.block=j.block||{font:'InstagramModerne',style:{size:63,bold:false},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
-    capLib.brutes=j.brutes||[];
     capLib.rev=j.rev||'';
     capLib.marche=j.marche||'';
+    capLib.brutesRetirees={};
   }
+  // Les brutes (fond de l'éditeur, « N brutes dispo ») sont relues à CHAQUE
+  // appel, pas seulement au changement d'identité : la section refaite par
+  // vaultGoTo sur la même identité apporte la liste à jour, et une brute
+  // désactivée entre-temps dans Vidéo brut défilait encore derrière
+  // « ⟳ autre brute ». capBrutesSuivre tient ce bloc à jour entre deux rendus.
+  capLib.brutes=j.brutes||[];
+  // L'éditeur est une modale GLOBALE : il garde la vue de la dernière fois
+  // alors que la section, re-rendue à chaque identité, repart sans filtre.
+  // capEdOpen passe par ici avant de dessiner sa liste.
+  capVueEditeur();
   return true;
+}
+// Le fond de l'éditeur de captions suit un ⊘ posé AILLEURS (galerie Vidéo
+// brut, visionneuse, « Repérer le texte ») : une brute éteinte porte déjà un
+// texte incrusté, en poser un second par-dessus n'a aucun sens. etats =
+// {nom: éteinte ?} pour l'identité ident. Le bloc #capLibData suit aussi,
+// sinon capLibInit remettrait l'ancienne liste au clic suivant.
+// Une brute rallumée revient si c'est ici qu'on l'avait retirée, ou si la
+// liste est complète : le serveur n'en envoie que 80 (brutes[:80]), une
+// liste plus courte les contient donc toutes.
+function capBrutesSuivre(ident, etats){
+  if(!ident || !capLib || capLib.identity !== ident) return;
+  var l = (capLib.brutes || []).slice(), change = false;
+  var ret = capLib.brutesRetirees = capLib.brutesRetirees || {};
+  var complete = l.length < 80;
+  Object.keys(etats || {}).forEach(function(nom){
+    var i = l.indexOf(nom);
+    if(etats[nom] && i >= 0){ l.splice(i, 1); ret[nom] = true; change = true; }
+    else if(!etats[nom] && i < 0 && (ret[nom] || complete)){ l.push(nom); delete ret[nom]; change = true; }
+  });
+  if(!change) return;
+  l.sort();
+  capLib.brutes = l;
+  var el = document.getElementById('capLibData');
+  if(el){
+    try{
+      var j = JSON.parse(el.textContent || '{}');
+      if(j && j.identity === ident){ j.brutes = l.slice(); el.textContent = JSON.stringify(j); }
+    }catch(e){}
+  }
+  // « N brutes dispo » de l'en-tête Caption
+  if(document.getElementById('capCards') && typeof capVueAppliquer === 'function'){
+    try{ capVueAppliquer(); }catch(e){}
+  }
+}
+// === « ⊘ Désactivées » de l'onglet Caption ===
+// Demande du propriétaire (27/09/2026) : une caption désactivée (hors
+// tirage) ne se voit plus que sous ce filtre — ni dans la grille, ni dans la
+// liste de l'éditeur. Pour la réactiver : allumer le filtre, cliquer son ⊘.
+// L'état vit sur le BOUTON rendu, comme dans les galeries (vaultFiltreOn) ;
+// il porte leur id pour avoir leur style et leur geste.
+function capVueOff(){
+  var g=document.getElementById('capCards');
+  var sec=(g&&g.closest)?g.closest('.form-section'):null;
+  var b=sec?sec.querySelector('#offbrute-toggle-btn'):null;
+  return !!(b&&b.getAttribute('data-on')==='1');
+}
+function capVueEditeur(){
+  var ed=document.getElementById('cap-ed-modal');
+  if(ed) ed.classList.toggle('cap-vue-off',capVueOff());
+}
+// La première caption de la VUE courante (base : une active ; sous « ⊘
+// Désactivées » : une désactivée), ou null. C'est elle que l'éditeur prend
+// quand il doit choisir seul (ouverture sans caption, après une
+// suppression) : items[0] pouvait être une désactivée, cachée de la liste.
+function capEdPremiereVue(){
+  var on=capVueOff();
+  return (((capLib||{}).block||{}).items||[]).filter(function(c){ return (c.enabled===false)===on; })[0]||null;
+}
+// Compte et note de la liste de l'éditeur, selon la VUE. « @x · 3 captions »
+// au-dessus de deux lignes (la troisième, désactivée, cachée) laissait croire
+// à une perte, et une liste entièrement désactivée restait blanche sans un
+// mot. La caption en cours compte comme visible : la règle CSS la garde (.on).
+function capEdCompteVue(){
+  var items=((capLib||{}).block||{}).items||[], on=capVueOff(), nOff=0, nVue=0, nVis=0;
+  items.forEach(function(c){
+    var off=(c.enabled===false);
+    if(off) nOff++;
+    if(off===on) nVue++;
+    if(off===on || (capEdState.mode==='item' && capEdState.cid===c.id)) nVis++;
+  });
+  var nAct=items.length-nOff, s=function(n){ return n>1?'s':''; };
+  var txt=on
+    ? (nOff+' caption'+s(nOff)+' désactivée'+s(nOff)+(nAct?(' · '+nAct+' active'+s(nAct)+' masquée'+s(nAct)):''))
+    : (nVue+' caption'+s(nVue)+(nOff?(' · '+nOff+' désactivée'+s(nOff)+' masquée'+s(nOff)):''));
+  var pj=document.getElementById('cap-ed-proj');
+  if(pj&&capLib.identity) pj.textContent='@'+capLib.identity+' · '+txt;
+  // « Mes captions N » du studio (patch caption-studio du VPS) : le nombre
+  // de lignes de la vue, le détail en infobulle.
+  var sc=document.getElementById('cap-st-count');
+  if(sc){ sc.textContent=String(nVue); sc.title=txt; }
+  var el=document.getElementById('cap-ed-list'); if(!el) return;
+  var note=el.querySelector('.cap-ed-vue-note');
+  if(items.length&&!nVis){
+    if(!note){
+      note=document.createElement('div'); note.className='cap-ed-vue-note';
+      note.style.cssText='font-size:11px;color:#75757f;line-height:1.5;padding:4px 2px';
+      el.appendChild(note);
+    }
+    note.textContent=on?'Aucune caption désactivée pour cette identité.'
+      :('Toutes les captions sont désactivées ('+nOff+') : « ⊘ Désactivées » pour les voir.');
+    note.style.display='';
+  } else if(note){ note.style.display='none'; }
+}
+// capEdLibRender (et capStudioTimeline, que le patch caption-studio du VPS
+// ajoute) écrivent « N captions » = toutes les captions. Leurs lignes sont
+// dans le CONTEXTE des patchs du VPS : les modifier ferait tomber ces patchs
+// en silence au prochain auto_pull. On les ENROBE donc après coup, une fois :
+// l'original tourne, puis capEdCompteVue réécrit le compte selon la vue.
+function capEdVueEnrober(){
+  if(typeof capEdLibRender==='function'&&!capEdLibRender.__vue){
+    var brutLR=capEdLibRender;
+    capEdLibRender=function(){ var r=brutLR.apply(this,arguments); try{ capEdCompteVue(); }catch(e){} return r; };
+    capEdLibRender.__vue=true;
+  }
+  if(typeof capStudioTimeline==='function'&&!capStudioTimeline.__vue){
+    var brutST=capStudioTimeline;
+    capStudioTimeline=function(){ var r=brutST.apply(this,arguments); try{ capEdCompteVue(); }catch(e){} return r; };
+    capStudioTimeline.__vue=true;
+  }
+}
+capEdVueEnrober();
+// Applique la vue : le CSS cache (classe cap-vue-off), ceci compte, explique
+// une vue vide, et retire de la sélection ce qui vient d'être caché — la
+// corbeille agit sur la SÉLECTION, pas sur l'écran. Ici TOUT ce qui est
+// caché sort de la sélection : l'onglet n'a pas d'autre filtre, une caption
+// cachée ne se voit donc plus du tout.
+function capVueAppliquer(){
+  var pret=capLibInit();
+  var on=capVueOff();
+  var grid=document.getElementById('capCards'); if(!grid) return;
+  grid.classList.toggle('cap-vue-off',on);
+  var nOff=0, nTot=0, retire=false;
+  grid.querySelectorAll('.cap-card').forEach(function(c){
+    var off=c.classList.contains('cap-off');
+    nTot++; if(off) nOff++;
+    if(off===on) return;
+    var cb=c.querySelector('.sel-cb'), id=cb?cb.getAttribute('data-capsel'):null;
+    if(cb&&cb.checked) cb.checked=false;
+    if(id&&capSelSet[id]){ delete capSelSet[id]; retire=true; }
+  });
+  if(retire) capSelUpdateBar();
+  var vis=on?nOff:(nTot-nOff);
+  var note=grid.querySelector('.cap-vue-note');
+  if(nTot&&!vis){
+    if(!note){
+      note=document.createElement('div'); note.className='cap-vue-note';
+      note.style.cssText='grid-column:1/-1;padding:40px 20px;text-align:center;color:#666;font-size:13px';
+      grid.appendChild(note);
+    }
+    note.textContent=on?'Aucune caption désactivée pour cette identité.'
+      :('Toutes les captions sont désactivées ('+nOff+') : « ⊘ Désactivées » pour les voir.');
+    note.style.display='';
+  } else if(note){ note.style.display='none'; }
+  // Le compteur dit combien sont masquées : « 12 captions » au-dessus de 10
+  // cartes laissait croire que deux avaient été perdues.
+  var info=document.getElementById('capCountInfo');
+  if(info&&pret){
+    var nb=(capLib.brutes||[]).length;
+    info.textContent=nTot+' caption'+(nTot!==1?'s':'')+' · '+nb+' brute'+(nb!==1?'s':'')+' dispo'
+      +(nOff?(' · '+nOff+' désactivée'+(nOff>1?'s':'')
+              +(on?(nOff>1?' (seules affichées)':' (seule affichée)'):(' masquée'+(nOff>1?'s':'')))):'');
+  }
 }
 // Sélection (cercles ⚪ des cartes) -> barre flottante #cap-action-bar (même
 // pilule que la galerie ; élément GLOBAL, survit au swap vaultGoTo)
@@ -8598,13 +8978,21 @@ function capSelClear(){
 // absent apres un changement d'onglet, JSON pas encore la...) et les boutons
 // sortaient alors en silence : « Tout », « Partager » et la corbeille ne
 // faisaient rien, sans le moindre message. On retombe sur le DOM.
+// SEULEMENT celles de la vue courante : « ☑ Tout » ne doit jamais prendre
+// une caption désactivée cachée (ni une active sous « ⊘ Désactivées »). La
+// règle est lue sur la carte (cap-off) et sur le filtre, pas sur la mise en
+// page : elle vaut aussi quand l'onglet n'est pas à l'écran.
 function capIdsAffiches(){
-  var ids=[];
+  var ids=[], on=capVueOff(), cartes=0;
   document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){
+    cartes++;
+    var c=cb.closest?cb.closest('.cap-card'):null;
+    if(c&&c.classList.contains('cap-off')!==on) return;
     var v=cb.getAttribute('data-capsel'); if(v) ids.push(v);
   });
-  if(!ids.length && window.capLib && capLib.block && capLib.block.items){
-    ids=capLib.block.items.map(function(c){ return String(c.id); });
+  if(!cartes && window.capLib && capLib.block && capLib.block.items){
+    ids=capLib.block.items.filter(function(c){ return (c.enabled===false)===on; })
+                          .map(function(c){ return String(c.id); });
   }
   return ids;
 }
@@ -8619,7 +9007,11 @@ function capSelAll(){
   var all=(n<ids.length);            // pas tout coché -> tout cocher, sinon tout vider
   capSelSet={};
   if(all) ids.forEach(function(id){ capSelSet[id]=true; });
-  document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){ cb.checked=all; });
+  // Les cases CACHÉES restent décochées : les cocher toutes faisait partir
+  // les désactivées avec le lot, sans qu'on les ait vues.
+  document.querySelectorAll('#capCards .sel-cb').forEach(function(cb){
+    cb.checked=!!capSelSet[cb.getAttribute('data-capsel')];
+  });
   capSelUpdateBar();
 }
 function capSelDelete(){
@@ -8698,8 +9090,9 @@ function capRenderCards(){
   }
   grid.innerHTML=out.join('');
   capSelUpdateBar();
-  var info=document.getElementById('capCountInfo');
-  if(info){ var n=items.length; info.textContent=n+' caption'+(n!==1?'s':'')+' · '+capLib.brutes.length+' brute'+(capLib.brutes.length!==1?'s':'')+' dispo'; }
+  // Vue ⊘, note de vue vide et compteur (avec les masquées) : un seul endroit
+  // pour le rendu serveur, ce rendu-ci et le clic sur le filtre.
+  capVueAppliquer();
 }
 var capSaveT=null;
 /* ---- 📷 Captures -> captions (lecture gratuite, relecture, envoi) ---- */
@@ -8924,10 +9317,17 @@ async function capOcrEnvoyer(){
 function capOcrAjouterIci(textes){
   if(!capLibInit()) return;
   var vus={}, doublons=0, ajout=[];
-  (capLib.block.items||[]).forEach(function(c){ vus[capNorm(String(c.text||''))]=1; });
+  // Comme capAddSubmit : un doublon qui vient d'une caption DÉSACTIVÉE
+  // (cachée de la vue de base) est nommé comme tel, et le plafond dit
+  // combien de désactivées masquées il compte.
+  var doublonsOff=0, nOffLib=0;
+  (capLib.block.items||[]).forEach(function(c){
+    var k=capNorm(String(c.text||''));
+    if(c.enabled===false){ nOffLib++; if(!vus[k]) vus[k]='off'; } else vus[k]=1;
+  });
   textes.forEach(function(t){
     t=String(t).slice(0,300); var k=capNorm(t);
-    if(vus[k]){ doublons++; return; }
+    if(vus[k]){ doublons++; if(vus[k]==='off') doublonsOff++; return; }
     vus[k]=1; ajout.push(t);
   });
   var max=capLib.max||80, place=Math.max(0, max-(capLib.block.items||[]).length);
@@ -8942,8 +9342,10 @@ function capOcrAjouterIci(textes){
     capSave();
   }
   var msg='✓ @'+capLib.identity+' : '+ajout.length+' caption(s) ajoutée(s)'
-    +(doublons?(' · '+doublons+' déjà présente(s)'):'')
-    +(refuses?(' · '+refuses+' refusée(s) : plafond de '+max+' atteint'):'');
+    +(doublons?(' · '+doublons+' déjà présente(s)'
+      +(doublonsOff?(', dont '+doublonsOff+' désactivée(s) cachée(s) : « ⊘ Désactivées » pour la réactiver'):'')):'')
+    +(refuses?(' · '+refuses+' refusée(s) : plafond de '+max+' atteint'
+      +(nOffLib?(', dont '+nOffLib+' désactivée(s) masquée(s)'):'')):'');
   capOcr.items.forEach(function(x){ if(!x.retire) x.envoye=true; });
   var e=document.getElementById('capocr-etat'); if(e) e.textContent=msg;
   if(typeof showToast==='function') showToast(msg, refuses?'warning':'success', 9000);
@@ -9133,7 +9535,15 @@ document.addEventListener('click', function(ev){
   else if(act==='place-global'){ capEdOpen('global',null); }
   else if(act==='toggle'){
     var itT=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
-    if(itT){ itT.enabled=(itT.enabled===false); capRenderCards(); capSave(); }
+    if(itT){
+      itT.enabled=(itT.enabled===false); capRenderCards(); capSave();
+      // La carte vient de QUITTER la vue (capVueAppliquer) : dire où la
+      // retrouver, sinon elle passe pour supprimée.
+      if(typeof showToast==='function') showToast(itT.enabled===false
+        ? '⊘ Caption désactivée — masquée ici, à retrouver dans « ⊘ Désactivées »'
+        : '✓ Caption réactivée — de retour dans la vue normale',
+        itT.enabled===false?'warning':'success');
+    }
   }
   else if(act==='fav'){
     // ⭐ favori : la caption entre dans le tirage du bouton « Montage Banger »
@@ -9190,10 +9600,10 @@ function capAddWarnCheck(ta,wd){
   if(!wd) return;
   var v=String(ta.value||'').trim();
   if(!v||!capLibInit()){ wd.style.display='none'; return; }
-  var nv=capNorm(v), best=null, bestS=0, bestField=false;
+  var nv=capNorm(v), best=null, bestS=0, bestField=false, bestOff=false;
   (capLib.block.items||[]).forEach(function(c){
     var s=(capNorm(c.text)===nv)?1:capSim(v,c.text);
-    if(s>bestS){ bestS=s; best=String(c.text||''); bestField=false; }
+    if(s>bestS){ bestS=s; best=String(c.text||''); bestField=false; bestOff=(c.enabled===false); }
   });
   // seuls les champs AU-DESSUS comptent : l envoi garde le premier et ignore
   // les suivants (avant, le premier champ etait aussi annonce « ignore »)
@@ -9203,13 +9613,17 @@ function capAddWarnCheck(ta,wd){
     if(!auDessus) return;
     var ov=String(o.value||'').trim(); if(!ov) return;
     var s=(capNorm(ov)===nv)?1:capSim(v,ov);
-    if(s>bestS){ bestS=s; best=ov; bestField=true; }
+    if(s>bestS){ bestS=s; best=ov; bestField=true; bestOff=false; }
   });
+  // Le doublon est une caption DÉSACTIVÉE : elle est cachée de la vue de
+  // base, et « déjà utilisée » renvoyait chercher une carte introuvable.
+  // On dit où elle est, et comment la reprendre.
+  var ouOff=(bestOff&&!bestField)?' — déjà là mais désactivée : « ⊘ Désactivées » pour la réactiver':'';
   if(bestS>=0.999){
-    wd.textContent='⊘ Déjà utilisée telle quelle'+(bestField?' (autre champ au-dessus)':'')+' — elle sera ignorée.';
+    wd.textContent='⊘ Déjà utilisée telle quelle'+(bestField?' (autre champ au-dessus)':'')+ouOff+' — elle sera ignorée.';
     wd.style.color='#ef4444'; wd.style.display='block';
   }else if(bestS>=0.55){
-    wd.textContent='⚠️ Ressemble beaucoup à une caption déjà utilisée : « '+best.slice(0,70)+(best.length>70?'…':'')+' »';
+    wd.textContent='⚠️ Ressemble beaucoup à une caption déjà utilisée : « '+best.slice(0,70)+(best.length>70?'…':'')+' »'+ouOff;
     wd.style.color='#f59e0b'; wd.style.display='block';
   }else{
     wd.style.display='none';
@@ -9223,12 +9637,18 @@ function capShareOpen(){
       showToast('Recharge l’onglet Caption : les données ne sont pas chargées','error');
     return;
   }
-  var items=(capLib.block.items||[]);
-  if(!items.length && !capIdsAffiches().length){
+  var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
+  // Sans sélection : les captions de la VUE, envoyées nommément. Une liste
+  // vide voulait dire « toutes » pour le serveur, désactivées comprises (ou
+  // les actives, cachées, sous « ⊘ Désactivées ») : elles partaient chez
+  // chaque model cochée et y prenaient une place sous le plafond, pendant que
+  // la modale annonçait « 3 captions (toutes) » au-dessus de 2 cartes.
+  var sansSel=!ids.length;
+  if(sansSel) ids=capIdsAffiches();
+  if(!ids.length){
     if(typeof showToast==='function') showToast('Aucune caption à partager','warning'); return;
   }
-  var ids=[]; for(var k in capSelSet){ if(capSelSet[k]) ids.push(k); }
-  var nSel=ids.length||items.length||capIdsAffiches().length;
+  var nSel=ids.length;
   // La section Caption NOMMEMENT : « la premiere section visible » tombait
   // sur une autre galerie (toutes les sections vivent dans la meme page) et
   // le partage listait alors les mauvaises models.
@@ -9257,7 +9677,7 @@ function capShareOpen(){
   }
   nxModelPicker({
     title:'Partager ces captions à…',
-    info:nSel+' caption'+(nSel>1?'s':'')+(ids.length?' sélectionnée'+(nSel>1?'s':''):' (toutes)')
+    info:nSel+' caption'+(nSel>1?'s':'')+(sansSel?' (toutes celles affichées)':' sélectionnée'+(nSel>1?'s':''))
       +' — <b>copiées</b> chez chaque model cochée (positions et descriptions comprises, doublons ignorés). Les originales restent en place.',
     rows:rows,
     onConfirm:function(sel,_x,ui){
@@ -9344,20 +9764,28 @@ function capAddSubmit(){
   // dédupe NORMALISÉE (casse/ponctuation ignorées) + comptage des « très proches »
   var seen={}, dropped=0, near=0;
   var existing=(capLib.block.items||[]).map(function(c){ return String(c.text||''); });
-  existing.forEach(function(t){ seen[capNorm(t)]=1; });
+  // Une caption DÉSACTIVÉE est cachée de la vue de base : un doublon qui
+  // vient d'elle (ou un plafond qu'elle remplit) doit le dire, sinon on la
+  // cherche en vain à l'écran. seen vaut 'off' pour elle.
+  var droppedOff=0, nOffLib=0;
+  (capLib.block.items||[]).forEach(function(c){
+    var k=capNorm(String(c.text||''));
+    if(c.enabled===false){ nOffLib++; if(!seen[k]) seen[k]='off'; } else seen[k]=1;
+  });
+  var dontOff=function(){ return droppedOff?(' — dont '+droppedOff+' désactivée(s), cachée(s) : « ⊘ Désactivées » pour la réactiver'):''; };
   var vals=[];
   document.querySelectorAll('#capAddList .capadd-wrap').forEach(function(w){
     var t=w.querySelector('.capadd-ta'), d=w.querySelector('.capadd-desc');
     var v=String(t&&t.value||'').trim(); if(!v) return;
     v=v.slice(0,300);
     var nv=capNorm(v);
-    if(seen[nv]){ dropped++; return; }
+    if(seen[nv]){ dropped++; if(seen[nv]==='off') droppedOff++; return; }
     if(existing.some(function(x){ return capSim(v,x)>=0.55; })) near++;
     seen[nv]=1;
     vals.push({text:v, desc:String(d&&d.value||'').trim().slice(0,1000)});
   });
   if(!vals.length){
-    if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
+    if(typeof showToast==='function') showToast(dropped?('Déjà dans la bibliothèque (doublons ignorés)'+dontOff()):'Écris au moins une caption','warning',dropped&&droppedOff?9000:undefined);
     return;
   }
   // PLAFOND : le serveur n'en garde que capLib.max et refuse le reste. Avant,
@@ -9367,9 +9795,12 @@ function capAddSubmit(){
   var max=capLib.max||80;
   var place=Math.max(0, max-(capLib.block.items||[]).length);
   var refusesPlein=Math.max(0, vals.length-place);
+  // Le plafond compte AUSSI les désactivées, masquées de la grille : « pleine
+  // à 80 » au-dessus de 70 cartes, sans le dire, passait pour un bug.
+  var offPlafond=nOffLib?(', dont '+nOffLib+' désactivée'+(nOffLib>1?'s':'')+' masquée'+(nOffLib>1?'s':'')+' (« ⊘ Désactivées »)'):'';
   if(place<=0){
     if(typeof showToast==='function') showToast('✕ Bibliothèque pleine : '+max+' captions au maximum pour @'
-      +capLib.identity+'. Supprime avant d ajouter — '+vals.length+' caption'
+      +capLib.identity+offPlafond+'. Supprime avant d ajouter — '+vals.length+' caption'
       +(vals.length>1?'s refusées':' refusée')+'.','error',9000);
     return;
   }
@@ -9383,10 +9814,10 @@ function capAddSubmit(){
   capAddClose(true);
   capRenderCards(); capSave();
   if(typeof showToast==='function') showToast('✓ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
-    +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')):'')
-    +(refusesPlein?(' · ✕ '+refusesPlein+' refusée'+(refusesPlein>1?'s':'')+' : plafond de '+max+' atteint'):'')
+    +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')+dontOff()):'')
+    +(refusesPlein?(' · ✕ '+refusesPlein+' refusée'+(refusesPlein>1?'s':'')+' : plafond de '+max+' atteint'+offPlafond):'')
     +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''),
-    (refusesPlein||near)?'warning':'success', (refusesPlein||near)?9000:undefined);
+    (refusesPlein||near||droppedOff)?'warning':'success', (refusesPlein||near||droppedOff)?9000:undefined);
 }
 // CAPTURES collées ou glissées dans « Add captions » : chaque image remplit
 // un champ caption avec le texte lu (gratuit : Gemini, sinon Tesseract).
@@ -9641,6 +10072,12 @@ function capEdOpen(mode,cid){
   if(!capLibInit()) return;
   var st=capEdState;
   st.mode=mode||'item'; st.cid=cid||null; st.img=null;
+  // Caption introuvable : la première de la VUE (base ou « ⊘ Désactivées »),
+  // sinon la position globale. Le repli items[0] juste dessous prenait une
+  // caption désactivée que la liste cache, et l'éditeur l'affichait sur la
+  // vidéo. (Ce repli-là est gardé tel quel parce que ses lignes sont dans
+  // le contexte d'un patch du VPS ; la ligne ci-dessous tranche avant lui.)
+  if(st.mode==='item'&&!capEdCur()){ var vue0=capEdPremiereVue(); if(vue0) st.cid=vue0.id; else st.mode='global'; }
   if(st.mode==='item'&&!capEdCur()){
     var first=((capLib.block||{}).items||[])[0];
     if(first) st.cid=first.id; else st.mode='global';
@@ -9708,7 +10145,9 @@ function capEdDelete(){
   var it=capEdCur(); if(!it) return;
   if(!confirm('Supprimer cette caption ?')) return;
   capLib.block.items=(capLib.block.items||[]).filter(function(c){return c.id!==it.id;});
-  var nxt=(capLib.block.items[0]||null);
+  // La suivante est prise dans la VUE : items[0] tombait sur une caption
+  // désactivée, cachée de la liste, que l'éditeur montrait alors à l'écran.
+  var nxt=capEdPremiereVue();
   capEdState.cid=nxt?nxt.id:null; if(!nxt) capEdState.mode='global';
   capEdState.img=null;
   capEdLibRender(); capEdSync(); capEdRender(); capRenderCards(); capSave();
@@ -10463,7 +10902,14 @@ async function pfEtape1(){
   try{
     var j = await pfListe('brutes');
     var it = (j && j.items) || [];
-    if(!it.length){ pfVide('Aucune vidéo brute pour cette model. Dépose-en dans l onglet Vidéo brut.'); return; }
+    // Les brutes désactivées (⊘) ne sont pas proposées : le dire, sinon une
+    // liste courte ou vide ne dirait pas pourquoi.
+    var nOffB = (j && j.desactives) || 0;
+    if(nOffB) pfTitre('Add perfect — 1. La vidéo', 'Choisis la brute de départ · '
+                      + nOffB + ' désactivée(s) (⊘) non proposée(s)');
+    if(!it.length){ pfVide(nOffB ? ('Aucune vidéo brute disponible : les ' + nOffB
+                                    + ' de cette model sont désactivées (⊘).')
+                                 : 'Aucune vidéo brute pour cette model. Dépose-en dans l onglet Vidéo brut.'); return; }
     var h = '';
     for(var i=0;i<it.length;i++){
       h += '<button type="button" class="pf-card" data-pfbrute="' + pfEsc(it[i].id)
@@ -10506,12 +10952,13 @@ async function pfEtape3(genre){
   try{
     var j = await pfListe(genre);
     var it = (j && j.items) || [];
-    // Les templates mis de cote (⊘) ne sont plus proposes : les compter,
-    // sinon une liste vide ne dirait pas pourquoi.
+    // Les templates et captions mis de cote (⊘) ne sont plus proposes : les
+    // compter, sinon une liste vide ne dirait pas pourquoi.
     if(j && j.desactives){
       pfTitre('Add perfect — ' + rang + 'Choisis ' + (noms[genre] || genre),
               'Vidéo retenue : ' + pfState.bruteNom + ' · ' + j.desactives
-              + ' template(s) mis de côté (⊘) non proposé(s)');
+              + (genre === 'captions' ? ' caption(s) désactivée(s) (⊘) non proposée(s)'
+                                      : ' template(s) mis de côté (⊘) non proposé(s)'));
     }
     // Un registre de marque illisible : le serveur ne sait plus trier
     // Template, Trash et Flash. Sans ce bandeau, un Flash etait propose sous
@@ -23626,13 +24073,16 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     # client, sinon la carte bougerait au premier clic de filtre. L'appelant
     # a deja tranche une donnee ancienne doublement marquee (Flash l'emporte) :
     # is_trash_trend n'arrive vrai que seul.
-    _marquee = bool(is_flash_trend or is_trash_trend)
+    # Une carte DESACTIVEE (⊘) aussi : elle ne se voit que sous « ⊘
+    # Désactivées ». Cachée ICI et pas seulement par le script : sinon elle
+    # s'affichait grisée le temps du chargement, puis disparaissait.
+    _cachee = bool(is_flash_trend or is_trash_trend or is_disabled)
     return (
         f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}"
         f"{(' is-flash-card' if is_flash_trend else '')}"
         f"{(' is-trash-card' if is_trash_trend and not is_flash_trend else '')}' "
         f"style='background:transparent;border:0;border-radius:10px;"
-        f"position:relative{';display:none' if _marquee else ''}'>"
+        f"position:relative{';display:none' if _cachee else ''}'>"
         f"{actions_html}"
         f"{media_html}"
         f"</div>"
@@ -25457,11 +25907,31 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             params.append(f"cloud_{subdir}_type={type_filter}")
         return "?" + "&".join(params)
 
+    # Les DÉSACTIVÉS (⊘), lus UNE fois pour la galerie : les cartes, le
+    # compteur de l'en-tête et le message de vue vide en ont besoin. Deux
+    # registres : disabled_reels.json (le ⊘ de toute galerie) et, pour une
+    # brute, son voisin .off.json (repérage du texte, brutes_off) — c'est même
+    # LE réglage que lit le bot. Sans ce second regard, 40 brutes éteintes par
+    # le repérage restaient en couleur.
+    # La règle elle-même est _media_desactive, partagée avec le Drive.
+    _disabled_reels = _load_disabled_reels()
+    _brutes_off = _brutes_eteintes(folder) if subdir == "brutes" else set()
+
+    def _est_off(p):
+        return _media_desactive(selected, subdir, p, _disabled_reels, _brutes_off)
+
     # Compteur fichiers affichés (après filtre)
     n_shown = len(files)
     filter_label = ""
     if filter_date:
         filter_label = f" · filtré au {filter_date}"
+    # Les désactivés sont CACHÉS de la vue de base : le total les compte, et
+    # l'en-tête dit combien sont masqués. Sans ça, « 676 fichiers » au-dessus
+    # de 634 cartes laissait croire que 42 vidéos avaient disparu. Le même
+    # texte que vaultCompteOff, qui le tient à jour après chaque clic.
+    n_off = sum(1 for p in files if _est_off(p))
+    off_label = (f" · {n_off} désactivé{'s' if n_off > 1 else ''} "
+                 f"masqué{'s' if n_off > 1 else ''}") if n_off else ""
 
     sort_btn_html = (
         "<div class='vault-sort'>"
@@ -25533,16 +26003,36 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
     ) if subdir in ("brutes", "templates") else ""
 
-    # Bouton « ⊘ Désactivées » : ne montrer QUE les brutes grisées (⊘ à la
-    # main ou éteintes par « Repérer le texte »), pour les revoir et en
-    # rallumer. Même mécanique que ⭐ Bangers : le bouton porte l'état.
+    # Bouton « ⊘ Désactivées » : ne montrer QUE les éléments grisés (⊘ à la
+    # main, ou brutes éteintes par « Repérer le texte »), pour les revoir et
+    # en rallumer. Même mécanique que ⭐ Bangers : le bouton porte l'état.
+    # Sur CHAQUE galerie, puisque chaque carte porte le ⊘ : c'est le SEUL
+    # endroit où un désactivé se voit (demande du propriétaire, 27/09/2026 :
+    # « je veux jamais le voir de base, uniquement si je clique sur
+    # Désactivées »). Il est né sur Vidéo brut, d'où son id ; le thème clair
+    # le vise par cet id. data-vide : le message quand la vue ⊘ est vide.
+    _off_vide = {"brutes": "Aucune brute désactivée",
+                 "videos": "Aucun reel désactivé", "pro_videos": "Aucun reel désactivé",
+                 "templates": "Aucun template désactivé",
+                 "posts": "Aucun post désactivé", "pro_posts": "Aucun post désactivé",
+                 "stories": "Aucune story désactivée",
+                 "pro_stories": "Aucune story désactivée",
+                 "storyctas": "Aucune story CTA désactivée",
+                 "pro_storyctas": "Aucune story CTA désactivée",
+                 "profile_pics": "Aucune photo de profil désactivée",
+                 "pro_profile_pics": "Aucune photo de profil désactivée",
+                 "trends": "Aucune trend désactivée",
+                 "trends_caption": "Aucune trend désactivée",
+                 "trends_template": "Aucune trend désactivée",
+                 }.get(subdir, "Aucun élément désactivé")
     off_brute_toggle_html = (
         "<button type='button' id='offbrute-toggle-btn' data-on='0' onclick='toggleOffBruteFilter(this)' "
-        "title='Afficher seulement les brutes désactivées (grisées)' "
+        f"data-vide='{html_escape(_off_vide)}' "
+        "title='Afficher seulement les éléments désactivés (⊘) — ils sont cachés partout ailleurs' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f87171;cursor:pointer;font-size:13px;"
         "font-weight:700;font-family:inherit;white-space:nowrap'>⊘ Désactivées</button>"
-    ) if subdir == "brutes" else ""
+    )
 
     # Les registres de marques, lus UNE fois pour la galerie, en STRICT : un
     # registre illisible se lirait comme vide et TOUS ses montages
@@ -25788,7 +26278,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
         f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
         f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
-        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}"
+        f"<span class='vault-off-compte'>{off_label}</span></div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         # ✎ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
@@ -25825,8 +26316,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
         # flex-wrap : sur un telephone, un bouton de plus poussait la rangee
-        # hors de l'ecran. Ordre voulu : ⭐ Bangers · Trash · ⚡ Flash Trend.
-        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{off_brute_toggle_html}{template_trend_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
+        # hors de l'ecran. Ordre voulu : ⭐ Bangers · Trash · ⚡ Flash Trend,
+        # puis ⊘ Désactivées EN DERNIER : il se combine avec tous les autres
+        # et ne doit pas couper la rangée des familles de montage.
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{template_trend_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{off_brute_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
         + _marques_avis_html(_marques_g, _marques_err, selected, files)
     )
@@ -25853,17 +26346,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
 
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
-        _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
-        # Une brute s'éteint aussi par son voisin .off.json (repérage du texte,
-        # brutes_off) — c'est même LE réglage que lit le bot. Sans ce second
-        # regard, 40 brutes éteintes par le repérage restaient en couleur.
-        _brutes_off = set()
-        if subdir == "brutes" and folder.exists():
-            try:
-                _brutes_off = {f.name[:-len(SUFFIXE_DESACTIVE)]
-                               for f in folder.glob("*" + SUFFIXE_DESACTIVE)}
-            except Exception:
-                _brutes_off = set()
+        # (les désactivés, _disabled_reels et _brutes_off, sont lus plus haut :
+        # l'en-tête les compte)
         _fav_brutes = _load_fav_brutes()  # idem : rushs bruts marqués ⭐ favoris
         # Montages marques (exclus de la vue de base), lus plus haut en strict.
         # Une donnee ancienne qui porte les deux marques se montre sous UNE
@@ -25929,7 +26413,25 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(_marque_de(file_id) == "flash"), is_trash_trend=(_marque_de(file_id) == "trash"), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=_est_off(p), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(_marque_de(file_id) == "flash"), is_trash_trend=(_marque_de(file_id) == "trash"), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+        # Tout est caché (désactivé ou marqué) : le dire dès le rendu, avec le
+        # texte exact de vaultVuesAppliquer. Une grille blanche sous « 12
+        # fichiers » passerait pour une panne.
+        _n_marq = sum(1 for p in files if not _est_off(p)
+                      and _marque_de(f"{selected}|{subdir}|{p.name}"))
+        _vide_html = ""
+        if n_off + _n_marq >= total_files:
+            _raisons = []
+            if n_off:
+                _raisons.append(f"{n_off} désactivé{'s' if n_off > 1 else ''} "
+                                "(« ⊘ Désactivées » pour les voir)")
+            if _n_marq:
+                _raisons.append(f"{_n_marq} montage{'s' if _n_marq > 1 else ''} "
+                                f"marqué{'s' if _n_marq > 1 else ''} (voir leurs filtres)")
+            _vide_html = (
+                "<div class='vues-empty-note' style='grid-column:1/-1;text-align:center;"
+                "color:#888;padding:34px;font-size:14px'>"
+                f"Rien dans la vue de base : {' et '.join(_raisons)}.</div>")
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -25938,6 +26440,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             # taille fixe qui recouvraient tout.
             + "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px' id='vault-grid'>"
             + "".join(cards_html)
+            + _vide_html
             + "</div>"
         )
         # ?openmontage=<fichier> : ouvre l'editeur sur CE template (lien
@@ -26456,7 +26959,13 @@ def rapport_texte_brutes(identity: str) -> dict:
     _marques = _load_disabled_reels()
     noms_eteints = []
     for p in _brutes_d_identite(identity):
-        if brute_desactivee(p) or f"{identity}|brutes|{p.name}" in _marques:
+        # « desactivee » de chaque entrée suit la MÊME règle que la galerie
+        # (_media_desactive) : l'écran s'en sert pour ne plus lister, parmi
+        # les brutes à texte, celles qu'on a déjà éteintes. Les compteurs
+        # d'action (a_eteindre, desactivees) restent sur le seul .off.json,
+        # celui que lit le bot.
+        masquee = _media_desactive(identity, "brutes", p, _marques)
+        if masquee:
             noms_eteints.append(p.name)
         if brute_desactivee(p):
             desactivees += 1
@@ -26477,7 +26986,7 @@ def rapport_texte_brutes(identity: str) -> dict:
                 a_eteindre += 1
             avec.append({"fichier": p.name,
                          "extraits": d.get("extraits") or [],
-                         "desactivee": brute_desactivee(p),
+                         "desactivee": masquee,
                          "le": d.get("le")})
         elif d.get("texte") is False:
             sans += 1
@@ -26486,7 +26995,8 @@ def rapport_texte_brutes(identity: str) -> dict:
             # Une video qu'on n'a pas su lire ne doit jamais glisser dans une
             # liste de suppressions par defaut.
             inconnu.append({"fichier": p.name,
-                            "erreur": d.get("erreur") or "non conclu"})
+                            "erreur": d.get("erreur") or "non conclu",
+                            "desactivee": masquee})
     return {"identite": identity, "avec_texte": avec, "sans_texte": sans,
             "non_conclu": inconnu,
             "desactivees": desactivees, "a_eteindre": a_eteindre,
@@ -26647,10 +27157,16 @@ def _planifier_templates(videos=None, demarrer: bool = True) -> int:
     return ajout
 
 
-def _montages_a_verifier() -> list:
+def _montages_a_verifier(ecartes: list = None) -> list:
     """Templates analyses et pas encore valides (analyse SANS brouillon).
-    Priorite haute d'abord, puis les plus recents."""
+    Priorite haute d'abord, puis les plus recents.
+
+    Un template DESACTIVE (⊘) n'y est pas : il est mis de cote, le proposer
+    a la verification contredisait le geste, et la cloche du bandeau restait
+    allumee pour lui. Il est COMPTE dans `ecartes` (liste fournie par
+    l'appelant) : /a-relire dit combien sont masques."""
     out = []
+    _reg = _load_disabled_reels()
     try:
         for d in sorted(IDENTITIES_DIR.iterdir()):
             dossier = d / "templates"
@@ -26668,6 +27184,10 @@ def _montages_a_verifier() -> list:
                     continue
                 video = par_tige.get(stem)
                 if video is None:
+                    continue
+                if _media_desactive(d.name, "templates", video, _reg):
+                    if ecartes is not None:
+                        ecartes.append((d.name, "templates", video.name))
                     continue
                 try:
                     a = json.loads(ap.read_text(encoding="utf-8"))
@@ -26996,8 +27516,14 @@ def _render_cloud_captions_html() -> str:
     # Brutes de l'identité : fond de l'éditeur + matière première du tirage.
     # Les DESACTIVEES sont ecartees : ce sont celles qui portent deja une
     # caption incrustee, en poser une seconde par-dessus n aurait aucun sens.
+    # _off.lister n'écarte que le voisin .off.json : une brute grisée par le ⊘
+    # de la galerie (disabled_reels.json) restait dans ce fond et dans « N
+    # brutes dispo », alors que la galerie et « Add perfect » la traitent
+    # comme éteinte. Même règle qu'eux (_media_desactive).
+    _reg_cap = _load_disabled_reels()
     brutes = [p.name for p in _off.lister(IDENTITIES_DIR / selected / "brutes",
-                                          extensions=VIDEO_EXTS)]
+                                          extensions=VIDEO_EXTS)
+              if not _media_desactive(selected, "brutes", p, _reg_cap, set())]
 
     # ---- Sidebar identités (même vault que brutes/templates) ----
     def _vitem(ident):
@@ -27060,6 +27586,12 @@ def _render_cloud_captions_html() -> str:
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
     n_sel = len(block["items"])
+    # Les captions DÉSACTIVÉES (hors tirage) sont cachées de la vue de base
+    # (CSS #capCards, voir capVueAppliquer) : le compteur dit combien, avec le
+    # texte exact du script qui le tient à jour ensuite.
+    n_off = sum(1 for it in block["items"] if it.get("enabled") is False)
+    cap_off_label = (f" · {n_off} désactivée{'s' if n_off > 1 else ''} "
+                     f"masquée{'s' if n_off > 1 else ''}") if n_off else ""
     header = (
         "<div class='vault-gallery-header' style='justify-content:space-between'>"
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
@@ -27069,7 +27601,7 @@ def _render_cloud_captions_html() -> str:
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
         f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
         f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
-        f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
+        f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo{cap_off_label}</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         # ↗ Partager = même modale que « Appliquer ce montage à… » (nxModelPicker) :
@@ -27092,6 +27624,19 @@ def _render_cloud_captions_html() -> str:
         "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
         "Add captions</button>"
         "</div></div>"
+        # « ⊘ Désactivées » : le SEUL endroit où une caption hors tirage se
+        # voit, et donc d'où on la réactive (filtre allumé, puis son ⊘). Le
+        # même bouton que les galeries — id, style, place à droite sous
+        # l'en-tête — pour le même geste partout.
+        "<div style='display:flex;align-items:center;justify-content:flex-end;gap:8px;"
+        "flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0'>"
+        "<button type='button' id='offbrute-toggle-btn' data-on='0' onclick='toggleOffBruteFilter(this)' "
+        "data-vide='Aucune caption désactivée' "
+        "title='Afficher seulement les captions désactivées (hors tirage) — elles sont cachées ailleurs' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f87171;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⊘ Désactivées</button>"
+        "</div>"
     )
 
     # Style et position globale se règlent DANS l'éditeur (comme Template
@@ -27190,6 +27735,13 @@ def _render_cloud_captions_html() -> str:
                if _desc else "")
             + "</div>"
         )
+    # Toutes désactivées : la vue de base serait une grille blanche. Le même
+    # message que capVueAppliquer, qui le reprend après chaque clic.
+    if block["items"] and n_off == len(block["items"]):
+        cards.append(
+            "<div class='cap-vue-note' style='grid-column:1/-1;padding:40px 20px;"
+            "text-align:center;color:#666;font-size:13px'>Toutes les captions sont "
+            f"désactivées ({n_off}) : « ⊘ Désactivées » pour les voir.</div>")
     grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px'>"
             + "".join(cards) + "</div>")
 
@@ -27363,6 +27915,46 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
     n_sel = _total(selected)
+
+    # ---- Les DÉSACTIVÉS (⊘) : cachés du Drive aussi -------------------------
+    # Demande du propriétaire (27/09/2026) : un désactivé ne se voit QUE sous
+    # « ⊘ Désactivées ». Le Drive montrait tout en couleur, et sa visionneuse
+    # (lbCollectGallery, qui prend les cartes affichées) feuilletait les
+    # brutes éteintes au milieu des autres. Même règle que les galeries
+    # (_media_desactive), un registre lu UNE fois pour toute la page. Le Drive
+    # reste en lecture seule : on cache, on n'écrit rien.
+    # Caché par une CLASSE (is-reel-off) et une règle CSS de la page, pas par
+    # un display en ligne : la même règle vaut dans les deux sens, sans script
+    # pour repeindre chaque carte.
+    # Les dossiers sont lus ICI, une fois : l'en-tête a besoin du compte des
+    # désactivés avant que les sections ne soient dessinées.
+    _reg_off = _load_disabled_reels()
+    _fichiers_par_sd, _off_par_sd = {}, {}
+    for sd, _l, exts, _v in sections:
+        _folder = IDENTITIES_DIR / selected / sd
+        _fs = []
+        if _folder.exists():
+            _fs = sorted(
+                (p for p in _folder.iterdir()
+                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name),
+                key=lambda p: p.stat().st_mtime, reverse=True)
+        _b_off = _brutes_eteintes(_folder) if (sd == "brutes" and _fs) else set()
+        _fichiers_par_sd[sd] = _fs
+        _off_par_sd[sd] = {p.name for p in _fs
+                           if _media_desactive(selected, sd, p, _reg_off, _b_off)}
+    n_off_drive = sum(len(v) for v in _off_par_sd.values())
+
+    def _deux_comptes(n_off, base_txt):
+        """Le compte de la vue de base et celui de la vue ⊘, l'un ou l'autre
+        affiché selon la classe de la galerie : « masqués » sous le filtre
+        allumé serait faux."""
+        if not n_off:
+            return base_txt
+        s = "s" if n_off > 1 else ""
+        return (f"<span class='drive-cpt-base'>{base_txt} · {n_off} désactivé{s} masqué{s}</span>"
+                f"<span class='drive-cpt-off'>{base_txt} · {n_off} désactivé{s}</span>")
+
+    _total_txt = f"{n_sel} fichier{'s' if n_sel != 1 else ''} au total"
     header = (
         "<div class='vault-gallery-header' style='justify-content:space-between'>"
         "<div style='display:flex;align-items:center;gap:12px;flex:1;min-width:0'>"
@@ -27372,10 +27964,22 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
         f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
         f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
-        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_sel} fichier{'s' if n_sel != 1 else ''} au total</div>"
+        f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>"
+        f"{_deux_comptes(n_off_drive, _total_txt)}</div>"
         "</div></div>"
+        "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0'>"
+        # « ⊘ Désactivées » : le même bouton que les galeries (id, style,
+        # geste). toggleOffBruteFilter bascule la classe drive-vue-off de la
+        # galerie ; il ne désactive rien, le Drive reste en lecture seule.
+        "<button type='button' id='offbrute-toggle-btn' data-on='0' onclick='toggleOffBruteFilter(this)' "
+        "data-vide='Aucun élément désactivé' "
+        "title='Afficher seulement les éléments désactivés (⊘) — ils sont cachés partout ailleurs' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f87171;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⊘ Désactivées</button>"
         "<span title='Aucune suppression possible depuis le Drive' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(34,197,94,.12);color:#22c55e;border-radius:8px;font-size:12px;font-weight:700;flex-shrink:0'>🔒 Lecture seule</span>"
+        "</div>"
         "</div>"
     )
 
@@ -27694,15 +28298,10 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
     )
     blocks = []
     for sd, label, exts, is_video in sections:
-        folder = IDENTITIES_DIR / selected / sd
-        files = []
-        if folder.exists():
-            files = sorted(
-                (p for p in folder.iterdir()
-                 if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name),
-                key=lambda p: p.stat().st_mtime, reverse=True)
+        files = _fichiers_par_sd.get(sd) or []
         if not files:
             continue
+        eteints = _off_par_sd.get(sd) or set()
         is_video_js = "true" if is_video else "false"
         cards = []
         for p in files:
@@ -27710,7 +28309,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             thumb = f"/cloud/thumb/{selected}/{sd}/{_url_nom(p.name)}"
             # file_id VIDE : lightbox en pur visionnage (pas de crayon/étoile).
             cards.append(
-                "<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
+                f"<div class='cloud-card{' is-reel-off' if p.name in eteints else ''}' "
+                "style='background:transparent;border:0;border-radius:10px;position:relative'>"
                 f"<div onclick='openLightbox(\"{url}\",{is_video_js},\"{p.name}\",\"\",\"\")' "
                 f"title='{p.name}' class='vault-card-bg' "
                 "style='cursor:pointer;position:relative;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden'>"
@@ -27718,14 +28318,25 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 + (play_badge if is_video else "")
                 + "</div></div>"
             )
+        n_off = len(eteints)
+        # Une section ENTIÈREMENT désactivée : son titre resterait au-dessus
+        # d'une grille vide en vue de base — la note dit pourquoi et où voir.
+        tout_off = (n_off == len(files))
+        note_base = (
+            "<div class='drive-note-base' style='grid-column:1/-1;text-align:center;color:#888;"
+            "padding:18px;font-size:13px'>"
+            f"{'Tous désactivés' if n_off > 1 else 'Désactivé'} ({n_off}) : "
+            "« ⊘ Désactivées » pour les voir.</div>"
+        ) if tout_off else ""
         blocks.append(
-            "<div style='margin-top:22px'>"
+            "<div class='drive-sec" + ("" if n_off else " drive-sec-sans-off") + "' style='margin-top:22px'>"
             f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:10px'>"
             f"<span style='font-weight:700;font-size:14px'>{label}</span>"
-            f"<span style='background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px'>{len(files)}</span>"
+            f"<span style='background:rgba(59,130,246,.15);color:#3b82f6;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px'>{_deux_comptes(n_off, str(len(files)))}</span>"
             "</div>"
             "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px'>"
             + "".join(cards)
+            + note_base
             + "</div></div>"
         )
     if not blocks:
@@ -27734,11 +28345,17 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"<p style='margin:0;font-size:13px'>Aucun fichier pour @{_v2_label(selected)} — uploade depuis les pages {vault_label}.</p>"
             "</div>"
         )
+    elif not n_off_drive:
+        # Sous « ⊘ Désactivées », une identité sans désactivé montrerait une
+        # page blanche : ce message ne s'affiche que sous le filtre (CSS).
+        blocks.append(
+            "<div class='drive-note-vue-off' style='padding:40px 20px;text-align:center;color:#888;"
+            "font-size:13px'>Aucun élément désactivé pour cette identité.</div>")
 
     return (
         "<div class='vault-layout'>"
         + vault_sidebar
-        + f"<div class='vault-gallery'>{header}{sync_box}{''.join(blocks)}</div>"
+        + f"<div class='vault-gallery drive-galerie'>{header}{sync_box}{''.join(blocks)}</div>"
         + "</div>"
     )
 
@@ -58174,7 +58791,9 @@ def create_app():
 
         Un template MIS DE COTE (⊘, disabled_reels.json) n'est plus propose :
         le griser, c'est le sortir de la rotation, et le proposer ici defaisait
-        le geste. Ils sont comptes (`desactives`) et l'ecran le dit.
+        le geste. Ils sont comptes (`desactives`) et l'ecran le dit. Meme regle
+        pour une brute eteinte (.off.json ou ⊘) et une caption hors tirage
+        (enabled false) : un desactive ne se voit que sous « ⊘ Desactivees ».
         """
         from flask import jsonify
         if not is_auth():
@@ -58194,16 +58813,25 @@ def create_app():
             bloc = _load_captions_lib().get(identity)
             items = (bloc or {}).get("items") if isinstance(bloc, dict) else bloc
             out = []
+            # Une caption DÉSACTIVÉE (hors tirage, ⊘) n'est plus proposée : elle
+            # ne se voit nulle part hors du filtre « ⊘ Désactivées » (demande
+            # du propriétaire, 27/09/2026). Comptée, pour qu'une liste courte
+            # dise pourquoi.
+            desactives = 0
             for i, c in enumerate(items or []):
                 txt = c.get("text") if isinstance(c, dict) else c
                 txt = str(txt or "").strip()
                 if not txt:
                     continue
+                if isinstance(c, dict) and c.get("enabled") is False:
+                    desactives += 1
+                    continue
                 out.append({
                     "id": str((c.get("id") if isinstance(c, dict) else None) or i),
                     "texte": txt[:280],
                 })
-            return jsonify({"ok": True, "type": genre, "items": out})
+            return jsonify({"ok": True, "type": genre, "items": out,
+                            "desactives": desactives})
 
         sous_dossier = {"brutes": "brutes", "templates": "templates"}.get(genre)
         if genre in _mm.MARQUES:
@@ -58222,7 +58850,9 @@ def create_app():
         # La liste reste servie (le choix est fait a la main), l'avertissement
         # part avec elle.
         marques, err_mq = (_marques_etat() if est_montage else ({}, []))
-        eteints = _load_disabled_reels() if est_montage else set()
+        # Le ⊘ de la galerie (disabled_reels.json) vaut pour les BRUTES aussi :
+        # une brute grisée là-bas par l'ancienne marque n'était pas écartée ici.
+        eteints = _load_disabled_reels()
         desactives = 0
         # Une brute DESACTIVEE porte deja du texte incruste : la proposer ici
         # reviendrait a en poser un second par-dessus. Le reste du site l ecarte
@@ -58235,17 +58865,18 @@ def create_app():
         for p in sorted(dossier.iterdir()):
             if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
                 continue
-            if _off_pf is not None and _off_pf.est_desactivee(p):
-                continue
             fid = f"{identity}|{sous_dossier}|{p.name}"
             if est_montage:
                 # La famille de CE montage : "" (template), "flash" ou "trash".
                 famille = _marque_effective(marques, fid)
                 if famille != ("" if genre == "templates" else genre):
                     continue
-                if fid in eteints:
-                    desactives += 1
-                    continue
+            # Écartée, mais COMPTÉE — la brute éteinte par son .off.json
+            # l'était en silence : une liste qui fond sans explication passe
+            # pour une panne.
+            if fid in eteints or (_off_pf is not None and _off_pf.est_desactivee(p)):
+                desactives += 1
+                continue
             out.append({
                 "id": fid,
                 "nom": p.name,
@@ -58258,9 +58889,8 @@ def create_app():
                 # souris s arrete dessus, jamais les cinquante d un coup.
                 "fichier": f"/cloud/file/{identity}/{sous_dossier}/{_url_nom(p.name)}",
             })
-        rep = {"ok": True, "type": genre, "items": out}
+        rep = {"ok": True, "type": genre, "items": out, "desactives": desactives}
         if est_montage:
-            rep["desactives"] = desactives
             if err_mq:
                 rep["erreurs"] = err_mq
                 rep["avertissement"] = (
@@ -60842,9 +61472,14 @@ def create_app():
             pass
         return comm, taux
 
-    def _a_relire_liste():
-        """Les descriptions reprises d'un post et pas encore validees."""
+    def _a_relire_liste(ecartes: list = None):
+        """Les descriptions reprises d'un post et pas encore validees.
+
+        Sans les medias DESACTIVES (⊘, meme regle que la galerie) : ils ne
+        se voient que sous « ⊘ Desactivees », et la cloche du bandeau les
+        comptait. Ecartes mais COMPTES dans `ecartes` si l'appelant la fournit."""
         out = []
+        _reg = _load_disabled_reels()
         try:
             for d in sorted(IDENTITIES_DIR.iterdir()):
                 if not d.is_dir():
@@ -60859,6 +61494,10 @@ def create_app():
                                       if (dossier / (stem + e)).exists()), None)
                         if video is None:
                             continue          # video partie : marqueur orphelin
+                        if _media_desactive(d.name, sub, video, _reg):
+                            if ecartes is not None:
+                                ecartes.append((d.name, sub, video.name))
+                            continue
                         desc = ""
                         dp = dossier / (stem + ".desc.txt")
                         try:
@@ -60903,8 +61542,14 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False}), 401
         etat = analyses_etat()
-        etat["a_relire"] = len(_a_relire_liste())
-        etat["a_verifier"] = len(_montages_a_verifier())
+        # Seulement les medias en service : la cloche ne s'allume plus pour un
+        # template ou une brute mis de cote (⊘). Les masques sont comptes a part.
+        _ec = []
+        etat["a_relire"] = len(_a_relire_liste(_ec))
+        etat["a_verifier"] = len(_montages_a_verifier(_ec))
+        # Un template peut etre a la fois « a relire » et « a verifier » : on
+        # compte des FICHIERS, pas des lignes.
+        etat["desactives_masques"] = len(set(_ec))
         return jsonify({"ok": True, **etat})
 
     @app.route("/a-relire/valider_montage", methods=["POST"])
@@ -60939,7 +61584,18 @@ def create_app():
         """Les descriptions reprises automatiquement, a valider une par une."""
         if not is_auth():
             return redirect("/")
-        lst = _a_relire_liste()
+        # Les medias desactives (⊘) ne sont pas listes — ni ici, ni dans la
+        # cloche — mais ils sont COMPTES, et la page le dit en tete.
+        _ecartes = []
+        lst = _a_relire_liste(_ecartes)
+        mv = _montages_a_verifier(_ecartes)
+        _masques = ""
+        if _ecartes:
+            # Des FICHIERS : un template a la fois a relire et a verifier
+            # n'est compte qu'une fois.
+            _masques = ("<p class='a-relire-masques' style='margin:0 0 14px;color:#666;font-size:13px'>"
+                        "%d élément(s) désactivé(s) non listé(s) (⊘) : ils se retrouvent "
+                        "sous « ⊘ Désactivées » dans leur galerie.</p>" % len(set(_ecartes)))
 
         # Diagnostic : sans ces trois conditions, rien ne peut arriver dans
         # cette liste — autant le dire ici plutot que de laisser chercher.
@@ -61025,7 +61681,7 @@ def create_app():
                      "puis valide.</p>" % len(lst)) + "".join(cartes) + _rappel
         # --- Templates analyses en arriere-plan, hors service jusqu'a
         # validation. Priorite haute d'abord : c'est la que l'analyse doute.
-        mv = _montages_a_verifier()
+        # (mv est lu plus haut, avec les desactives ecartes et comptes.)
         bloc_mv = ""
         if mv:
             lignes_mv = []
@@ -61086,7 +61742,7 @@ def create_app():
         return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
                 "padding:26px;max-width:720px;margin:30px auto;background:#fff;"
                 "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
-                + bloc_mv +
+                + _masques + bloc_mv +
                 "<h2 style='margin:0 0 10px'>Descriptions a relire</h2>"
                 + corps +
                 "<p style='margin-top:16px'><a href='/?tab=cloudtemplates'>"
