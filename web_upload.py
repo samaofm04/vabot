@@ -65563,7 +65563,7 @@ def create_app():
             from cogs.welcome import US_TICKET_SUFFIXES, _us_norm, salon_de_service
             suffixes = tuple("-" + s for s in US_TICKET_SUFFIXES)
         except Exception:
-            suffixes = ("-menu", "-numero-mail", "-content", "-download")
+            suffixes = ("-menu", "-spoofer", "-numero-mail", "-content", "-download")
 
             def _us_norm(n):
                 return str(n or "").strip().lower()

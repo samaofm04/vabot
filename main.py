@@ -32,7 +32,9 @@ PREFIX = os.getenv("PREFIX", "!")
 #
 # L'etat des deux applications se lit sur youl4b.com/version : serveurs,
 # commandes sur 100, cogs charges, et les cogs en echec avec leur erreur.
-MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes", "noctuspool", "sessionsvoc",
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement",
+             # Salon -spoofer des VA : ZERO commande slash (le bot est a 100/100).
+             "spoofer", "reportcomptes", "noctuspool", "sessionsvoc",
              # Releve qui est en vocal pendant son shift de chatting. Il
              # declare ZERO commande slash : le bot en porte deja 101 pour
              # un plafond de 100, et un cog qui en ajouterait une ferait

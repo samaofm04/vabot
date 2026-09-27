@@ -9740,6 +9740,352 @@ except Exception as _eDl:
 
 
 # ==============================================================================
+# Salon -spoofer (27/09/2026) : un fichier, N versions uniques, dans -content
+# « il arrive, il selectionne le nombre, de base 5, il clique et il drop son
+# media [...] la meme technologie que mon video metadonnee. Photos et videos. »
+# Tout en dossier temporaire ; Discord en salons factices ; ffmpeg reel.
+# ==============================================================================
+print()
+print("=" * 70)
+print("Salon -spoofer des VA")
+print("=" * 70)
+try:
+    import asyncio as _aSp, tempfile as _tfSp, hashlib as _hlSp, subprocess as _spSp
+    import re as _reSp, json as _jsSp, shutil as _shSp
+    from pathlib import Path as _PSp
+    import discord as _dSp
+    import cogs.spoofer as _sp
+    import cogs.user as _cuSp
+    import cogs.welcome as _wlSp
+    import image_transform as _itSp
+    _TMPSp = _PSp(_tfSp.mkdtemp())
+    _savSp = {"marq": _sp.MARQUEUR, "ltc": _cuSp.load_transform_config,
+              "tms": _cuSp.transform_metadata_strict, "bae": _cuSp.brute_a_envoyer,
+              "cut": _wlSp.create_us_tickets, "pause": _sp.PAUSE_ENVOI}
+    try:
+        _sp.MARQUEUR = _TMPSp / "spoofer_en_cours.json"
+        _sp.PAUSE_ENVOI = 0
+        _US = 1535758943324999711
+
+        class _MsgSp:
+            def __init__(s, salon, auteur, contenu="", fichiers=(), comps=(), vue=None):
+                s.salon, s.author, s.content = salon, auteur, contenu
+                s.fichiers, s.components, s.vue, s.embeds = list(fichiers), list(comps), vue, []
+            async def delete(s):
+                s.salon.messages.remove(s)
+
+        class _CatSp:
+            def __init__(s):
+                s.text_channels = []
+
+        class _GuSp:
+            def __init__(s):
+                s.id, s.name, s.filesize_limit = _US, "Youl4b", 10 * 1024 * 1024
+                s.text_channels, s.categories, s.members = [], [], []
+
+        class _SalonSp:
+            _n = 500
+            def __init__(s, nom, gu, cat=None):
+                _SalonSp._n += 1
+                s.id, s.name, s.guild, s.category = _SalonSp._n, nom, gu, cat
+                s.mention, s.messages = "<#%d>" % s.id, []
+                gu.text_channels.append(s)
+                if cat is not None:
+                    cat.text_channels.append(s)
+            async def send(s, content=None, files=None, view=None, **kw):
+                noms = [f.filename for f in (files or [])]
+                # garder les octets : les fichiers vivent dans un dossier temporaire
+                octets = [f.fp.read() for f in (files or [])]
+                m = _MsgSp(s, _moiSp, content or "", noms, vue=view)
+                m.octets = octets
+                if view is not None:
+                    m.components = list(view.children)
+                s.messages.append(m)
+                return m
+            def history(s, limit=100):
+                async def _g():
+                    for m in list(s.messages)[::-1][:limit]:
+                        yield m
+                return _g()
+
+        class _UserSp:
+            def __init__(s, i, nom):
+                s.id, s.name, s.bot = i, nom, False
+                s.mention = "<@%d>" % i
+
+        class _RespSp:
+            def __init__(s):
+                s.modals, s.editions, s.defers, s.envois, s._f = [], [], [], [], False
+            async def send_modal(s, m):
+                s.modals.append(m); s._f = True
+            async def edit_message(s, **kw):
+                s.editions.append(kw); s._f = True
+            async def defer(s, **kw):
+                s.defers.append(kw); s._f = True
+            async def send_message(s, content=None, **kw):
+                s.envois.append(content); s._f = True
+            def is_done(s):
+                return s._f
+
+        class _SuiteSp:
+            def __init__(s):
+                s.envois = []
+            async def send(s, content=None, **kw):
+                s.envois.append(content)
+
+        class _ClientSp:
+            def __init__(s, cog):
+                s.cog = cog
+            def get_cog(s, n):
+                return s.cog if n == "Spoofer" else None
+
+        class _InterSp:
+            def __init__(s, user, salon, cog):
+                s.user, s.channel, s.guild = user, salon, salon.guild
+                s.response, s.followup = _RespSp(), _SuiteSp()
+                s.client, s.filesize_limit = _ClientSp(cog), 10 * 1024 * 1024
+
+        class _PieceSp:
+            def __init__(s, nom, octets):
+                s.filename, s._o, s.size = nom, octets, len(octets)
+            async def save(s, chemin):
+                _PSp(chemin).write_bytes(s._o)
+
+        class _BotSp:
+            def __init__(s):
+                s.user, s.guilds, s.dyn = _moiSp, [], []
+            def add_dynamic_items(s, *it):
+                s.dyn += list(it)
+            def get_channel(s, i):
+                return next((c for g in s.guilds for c in g.text_channels if c.id == i), None)
+            async def wait_until_ready(s):
+                return None
+
+        _moiSp = _UserSp(999, "jesus")
+        _bobSp = _UserSp(4242, "bob")
+
+        def _video(chemin, dur=2):
+            _spSp.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=size=320x568:rate=25",
+                       "-f", "lavfi", "-i", "sine=frequency=440", "-t", str(dur), "-c:v", "libx264",
+                       "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(chemin)], check=True, capture_output=True)
+            return _PSp(chemin).read_bytes()
+
+        def _md5(b):
+            return _hlSp.md5(b).hexdigest()
+
+        async def _scenario():
+            r = {}
+            gu = _GuSp()
+            cat = _CatSp()
+            spf = _SalonSp("bob-spoofer", gu, cat)
+            ct = _SalonSp("bob-content", gu, cat)
+            bot = _BotSp(); bot.guilds = [gu]
+            cog = _sp.Spoofer(bot)
+            await cog.cog_load()
+            cog._entretien.cancel()
+            r["dyn"] = [c.__name__ for c in bot.dyn]
+            # 🔢 : la fenetre en premiere reponse, puis le panneau redessine
+            it = _InterSp(_bobSp, spf, cog)
+            await _sp.SpfQte(5).callback(it)
+            fq = it.response.modals[0]
+            fq.nombre._value = "3"
+            await fq.on_submit(it)
+            r["qte"] = (type(fq).__name__, sorted(_sp._custom_ids(type("M", (), {
+                "components": it.response.editions[0]["view"].children})())) if it.response.editions else [])
+            it2 = _InterSp(_bobSp, spf, cog)
+            fq2 = _sp.FenetreQuantite(5); fq2.nombre._value = "9"
+            await fq2.on_submit(it2)
+            r["qte9"] = ([m.content for m in ct.messages], it2.response.editions)
+            ct.messages.clear()
+            # 📤 : la fenetre du fichier porte le nombre du bouton
+            it3 = _InterSp(_bobSp, spf, cog)
+            await _sp.SpfGo(3).callback(it3)
+            r["go"] = (type(it3.response.modals[0]).__name__, it3.response.modals[0].q,
+                       it3.response.modals[0].to_dict()["components"][0])
+            cog.en_cours.add(_bobSp.id)
+            it4 = _InterSp(_bobSp, spf, cog)
+            await _sp.SpfGo(3).callback(it4)
+            r["occupe"] = (it4.response.modals, [m.content for m in ct.messages])
+            cog.en_cours.discard(_bobSp.id); ct.messages.clear()
+            # VIDEO : 3 versions, interrupteur COUPE sur la page (le spoofer
+            # passe outre), dans -content, sans texte, toutes differentes
+            _cuSp.load_transform_config = lambda: {"enabled": False, "metadata_only": True}
+            src = _video(_TMPSp / "v.mp4")
+            it5 = _InterSp(_bobSp, spf, cog)
+            fen = _sp.FenetreFichier(3)
+            fen.fichier.component._values = [_PieceSp("download (3)_2_2.mp4", src)]
+            avant = set(_PSp(_tfSp.gettempdir()).glob("spoof_*"))
+            await fen.on_submit(it5)
+            r["video"] = ([m.fichiers for m in ct.messages], [m.content for m in ct.messages],
+                          [_md5(o) for m in ct.messages for o in getattr(m, "octets", [])],
+                          _md5(src), len(spf.messages), it5.response.defers,
+                          set(_PSp(_tfSp.gettempdir()).glob("spoof_*")) - avant,
+                          _jsSp.loads(_sp.MARQUEUR.read_text()), set(cog.en_cours))
+            ct.messages.clear()
+            # PHOTO PNG : 3 .jpg differents avec un EXIF d'iPhone
+            from PIL import Image as _Img
+            _Img.new("RGB", (300, 400), (200, 30, 90)).save(_TMPSp / "p.png")
+            bilan_p = await cog.traiter(_InterSp(_bobSp, spf, cog),
+                                        _PieceSp("photo.png", (_TMPSp / "p.png").read_bytes()), 3)
+            outs = [o for m in ct.messages for o in getattr(m, "octets", [])]
+            exifs = []
+            for o in outs:
+                (_TMPSp / "o.jpg").write_bytes(o)
+                exifs.append(_Img.open(_TMPSp / "o.jpg").getexif().get(0x0110))
+            r["photo"] = (bilan_p, [m.fichiers for m in ct.messages], len({_md5(o) for o in outs}), exifs)
+            ct.messages.clear()
+            # PHOTO portrait d'iPhone (stockee couchee, Orientation=6) : redressee
+            im = _Img.new("RGB", (400, 300), (10, 120, 200))
+            ex = im.getexif(); ex[0x0112] = 6
+            im.save(_TMPSp / "o6.jpg", exif=ex)
+            await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("IMG_1.jpg", (_TMPSp / "o6.jpg").read_bytes()), 1)
+            (_TMPSp / "r.jpg").write_bytes(ct.messages[0].octets[0])
+            r["portrait"] = _Img.open(_TMPSp / "r.jpg").size
+            ct.messages.clear()
+            # ffmpeg en echec : rien de faux livre, et c'est DIT
+            _cuSp.transform_metadata_strict = lambda *a, **k: False
+            b_ko = await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("x.mp4", src), 3)
+            r["ko"] = (b_ko, [m.content for m in ct.messages], [m.fichiers for m in ct.messages])
+            _cuSp.transform_metadata_strict = _savSp["tms"]
+            ct.messages.clear()
+            # video plus lourde que ce que Discord accepte : mode complet impose
+            vus = []
+
+            async def _espion(video, dossier, identity="", sortie=None, forcer=False, complet=None):
+                vus.append((forcer, complet))
+                return video, False, "espion"
+            _cuSp.brute_a_envoyer = _espion
+            gros = _PieceSp("gros.mov", src); gros.size = 50 * 1024 * 1024
+            await cog.traiter(_InterSp(_bobSp, spf, cog), gros, 2)
+            r["complet"] = vus
+            _cuSp.brute_a_envoyer = _savSp["bae"]
+            ct.messages.clear()
+            # format refuse
+            b_txt = await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("notes.txt", b"x"), 5)
+            r["txt"] = (b_txt["refus"], [m.content for m in ct.messages])
+            ct.messages.clear()
+            # redemarrage pendant un spoof : le VA est prevenu
+            _sp._marquer(_bobSp.id, {"salon": ct.id, "fichier": "clip.mp4", "q": 5, "t": 1})
+            await cog._prevenir_interrompus()
+            r["interrompu"] = ([m.content for m in ct.messages], _jsSp.loads(_sp.MARQUEUR.read_text()))
+            ct.messages.clear()
+            # ENTRETIEN : un ancien panneau part, la livraison et l'humain restent
+            vieux = _MsgSp(spf, _moiSp, comps=[type("B", (), {"custom_id": "spf:go:5", "children": []})()])
+            livraison = _MsgSp(spf, _moiSp, fichiers=["IMG_1.MP4"])
+            humain = _MsgSp(spf, _bobSp, "salut")
+            spf.messages[:] = [vieux, livraison, humain]
+            n1 = await cog.assurer_panneau(spf)
+            n2 = await cog.assurer_panneau(spf)
+            arch = _SalonSp("⬇️・all-spoofer", gu)
+            n3 = await cog.assurer_panneau(arch)
+            r["entretien"] = (n1, n2, n3, vieux in spf.messages, livraison in spf.messages,
+                              humain in spf.messages,
+                              sum(1 for m in spf.messages if _sp.panneau_a_jour(m, _moiSp.id)))
+            # provisionnement : seul le VA qui a des salons SANS -spoofer
+            appels = []
+
+            async def _cr(guild, member, bot=None):
+                appels.append(member.name)
+                return [], []
+            _wlSp.create_us_tickets = _cr
+            g2 = _GuSp()
+            kim, seven = _UserSp(1, "kim"), _UserSp(2, "seven")
+            g2.members = [_bobSp, kim, seven, _moiSp]
+            _moiSp.bot = True
+            for n in ("bob-menu", "bob-content", "kim-menu", "kim-spoofer"):
+                _SalonSp(n, g2)
+            r["provision"] = (await cog._provisionner(g2), appels)
+            _moiSp.bot = False
+            return r
+
+        _rSp = _aSp.run(_scenario())
+        check("spoofer : les deux boutons restent vivants apres un redemarrage (DynamicItem)",
+              _rSp["dyn"] == ["SpfQte", "SpfGo"], str(_rSp["dyn"]))
+        _pSp = _sp.panneau(5).to_components()
+        check("spoofer : panneau = « 🔢 5 » (meme dessin que Brune) + « 📤 Spoofer », sans texte",
+              len(_pSp) == 1 and [c.get("custom_id") for c in _pSp[0]["components"]] == ["spf:qb:5", "spf:go:5"]
+              and _pSp[0]["components"][0]["emoji"]["name"] == "🔢" and _pSp[0]["components"][0]["style"] == 2
+              and not any("content" in c for c in _pSp), str(_pSp))
+        check("spoofer : un nombre hors 1-5 (ancien bouton, saisie) retombe a 5",
+              _sp.SpfQte.__discord_ui_compiled_template__.fullmatch("spf:qb:7") is None
+              and _sp._borne("9") == 5 and _sp._borne("x") == 5 and _sp._borne(2) == 2)
+        check("spoofer : 🔢 ouvre la saisie en premiere reponse ; « 3 » redessine le panneau",
+              _rSp["qte"][0] == "FenetreQuantite" and {"spf:qb:3", "spf:go:3"} <= set(_rSp["qte"][1]),
+              str(_rSp["qte"]))
+        check("spoofer : « 9 » -> une ligne dans -content, le panneau ne bouge pas",
+              _rSp["qte9"][0] and "entre 1 et 5" in _rSp["qte9"][0][0] and not _rSp["qte9"][1],
+              str(_rSp["qte9"]))
+        check("spoofer : 📤 ouvre la fenetre du fichier (1 fichier, obligatoire) avec le nombre affiche",
+              _rSp["go"][0] == "FenetreFichier" and _rSp["go"][1] == 3
+              and _rSp["go"][2]["type"] == 18 and _rSp["go"][2]["component"]["type"] == 19
+              and _rSp["go"][2]["component"]["min_values"] == 1
+              and _rSp["go"][2]["component"]["max_values"] == 1, str(_rSp["go"]))
+        check("spoofer : spoof deja en cours -> pas de fenetre, une ligne dans -content",
+              _rSp["occupe"][0] == [] and _rSp["occupe"][1] and "pas fini" in _rSp["occupe"][1][0],
+              str(_rSp["occupe"]))
+        _fV, _cV, _mV, _srcV, _nSpf, _dfV, _tmpV, _mqV, _ecV = _rSp["video"]
+        check("spoofer : video -> 3 versions dans -content, SANS texte, rien dans -spoofer",
+              sum(len(f) for f in _fV) == 3 and all(c == "" for c in _cV) and _nSpf == 0, str(_rSp["video"][:2]))
+        check("spoofer : les 3 versions sont toutes differentes, et de la source",
+              len(set(_mV)) == 3 and _srcV not in _mV, str(_mV))
+        check("spoofer : noms d'iPhone (IMG_XXXX), pas le nom d'origine",
+              all(_reSp.fullmatch(r"IMG_\d{4}\.MP4", n) for f in _fV for n in f), str(_fV))
+        check("spoofer : marche interrupteur coupe sur la page (le VA le demande)",
+              sum(len(f) for f in _fV) == 3)
+        check("spoofer : accuse silencieux, verrou rendu, marqueur vide, temporaires effaces",
+              len(_dfV) == 1 and _mqV == {} and _ecV == set() and not _tmpV, str((_dfV, _mqV, _tmpV)))
+        _bP, _fP, _nP, _exP = _rSp["photo"]
+        check("spoofer : photo PNG -> 3 .jpg differents avec un modele d'iPhone en EXIF",
+              _bP["livrees"] == 3 and _nP == 3 and all(n.endswith(".JPG") for f in _fP for n in f)
+              and all(e and "iPhone" in str(e) for e in _exP), str(_rSp["photo"]))
+        check("spoofer : une photo portrait d'iPhone ressort DEBOUT (Orientation=6 redressee)",
+              _rSp["portrait"][0] < _rSp["portrait"][1], str(_rSp["portrait"]))
+        _bK, _cK, _fK = _rSp["ko"]
+        check("spoofer : ffmpeg en echec -> aucune fausse version, « 0/3 — 3 ratée(s) »",
+              _bK["livrees"] == 0 and not any(_fK) and _cK and "0/3" in _cK[-1] and "ratée" in _cK[-1],
+              str(_rSp["ko"]))
+        check("spoofer : video trop lourde pour Discord -> mode complet impose (debit borne)",
+              _rSp["complet"] and all(v == (True, True) for v in _rSp["complet"]), str(_rSp["complet"]))
+        check("spoofer : un autre format -> refuse, et dit",
+              _rSp["txt"][0] == "format" and "format" in (_rSp["txt"][1] or [""])[0], str(_rSp["txt"]))
+        check("spoofer : spoof coupe par un redemarrage -> le VA est prevenu, marqueur vide",
+              _rSp["interrompu"][0] and "redémarrage" in _rSp["interrompu"][0][0]
+              and _rSp["interrompu"][1] == {}, str(_rSp["interrompu"]))
+        _eSp = _rSp["entretien"]
+        check("spoofer : entretien -> l'ancien panneau part, UN panneau pose, puis plus rien",
+              _eSp[0] == 1 and _eSp[1] == 0 and not _eSp[3] and _eSp[6] == 1, str(_eSp))
+        check("spoofer : entretien -> les livraisons et les messages des humains restent",
+              _eSp[4] and _eSp[5], str(_eSp))
+        check("spoofer : jamais de panneau dans un salon de service (« ⬇️・all-spoofer »)",
+              _eSp[2] == 0)
+        check("spoofer : les VA deja la recoivent leur -spoofer (create_us_tickets), et eux seuls",
+              _rSp["provision"] == (1, ["bob"]), str(_rSp["provision"]))
+        _srcW = _PSp("cogs/welcome.py").read_text(encoding="utf-8")
+        check("spoofer : salon juste apres -menu ; /ticketsall lit la liste (plus d'expression en dur)",
+              _wlSp.US_TICKET_SUFFIXES == ("menu", "spoofer", "download", "numero-mail", "content")
+              and "menu|content|numero-mail|download" not in _srcW
+              and '"|".join(_re.escape(s) for s in US_TICKET_SUFFIXES)' in _srcW
+              and "_ensure_spoof_panel(bot, chans[\"spoofer\"])" in _srcW)
+        check("spoofer : aucune commande slash (bot principal a 100/100), charge sur le bot principal",
+              _sp.Spoofer.__cog_app_commands__ == []
+              and '"spoofer"' in _PSp("main.py").read_text(encoding="utf-8").split("MAIN_COGS")[1].split("]")[0])
+        check("spoofer : brute_a_envoyer garde son comportement par defaut (interrupteur, nom, mode)",
+              "if not forcer and not bool(cfg.get(\"enabled\", False))" in _PSp("cogs/user.py").read_text(encoding="utf-8")
+              and _cuSp.brute_a_envoyer.__defaults__ == ("", None, False, None))
+    finally:
+        _sp.MARQUEUR = _savSp["marq"]
+        _sp.PAUSE_ENVOI = _savSp["pause"]
+        _cuSp.load_transform_config = _savSp["ltc"]
+        _cuSp.transform_metadata_strict = _savSp["tms"]
+        _cuSp.brute_a_envoyer = _savSp["bae"]
+        _wlSp.create_us_tickets = _savSp["cut"]
+        _shSp.rmtree(_TMPSp, ignore_errors=True)
+except Exception as _eSp:
+    import traceback as _tbSp
+    check("spoofer : testable", False, repr(_eSp)[:200] + " " + _tbSp.format_exc()[-700:])
+
+
+# ==============================================================================
 # Fond sombre pose en dur : le texte doit porter SA couleur
 # ==============================================================================
 try:

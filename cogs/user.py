@@ -7405,7 +7405,7 @@ def journal_brutes():
     return list(_JOURNAL_BRUTES)[::-1]
 
 
-async def brute_a_envoyer(video, dossier, identity=""):
+async def brute_a_envoyer(video, dossier, identity="", sortie=None, forcer=False, complet=None):
     """(fichier a envoyer, metadonnees reecrites ?) pour UNE brute.
 
     Un seul endroit decide, parce qu il y a PLUSIEURS boutons qui envoient une
@@ -7425,11 +7425,16 @@ async def brute_a_envoyer(video, dossier, identity=""):
     Demandee mais pas appliquee (ffmpeg absent ou en echec) : la video part
     quand meme -- un envoi ne doit pas s arreter pour ca -- et la ligne va au
     JOURNAL du serveur. Muet pour le VA, visible pour qui administre.
+
+    Pour le salon -spoofer (cogs/spoofer.py, 27/09/2026) : `sortie` nomme le
+    fichier (plusieurs versions dans un meme dossier s ecrasaient),
+    `forcer` passe outre l interrupteur (le VA demande expressement le
+    spoof), `complet` impose le mode (None = celui de la page).
     """
     import asyncio as _aio
     video = Path(video)
     cfg = load_transform_config()
-    if not bool(cfg.get("enabled", False)):
+    if not forcer and not bool(cfg.get("enabled", False)):
         _noter_brute(video.name, identity, False, False, "interrupteur coupe", "")
         return video, False, ""
 
@@ -7439,7 +7444,7 @@ async def brute_a_envoyer(video, dossier, identity=""):
     # - complet : les filtres bougent l image. Indispensable si le VA POSTE la
     #   brute telle quelle — Instagram compare ce qu on voit, et des
     #   metadonnees ne changent rien a ce qu on voit.
-    complet = not bool(cfg.get("metadata_only", True))
+    complet = (not bool(cfg.get("metadata_only", True))) if complet is None else bool(complet)
     moteur = transform_full_strict if complet else transform_metadata_strict
     mode = "complet" if complet else "metadonnees"
 
@@ -7448,7 +7453,7 @@ async def brute_a_envoyer(video, dossier, identity=""):
     # sans rien changer — et comme le VA la poste telle quelle, c est un
     # doublon publie. On reessaie ; chaque tentative retire ses propres des.
     essais = _BRUTE_ESSAIS if complet else 1
-    sortie = Path(dossier) / video.name
+    sortie = Path(sortie) if sortie else Path(dossier) / video.name
     detail = ""
     # Le re-encodage gonfle le fichier (debit configure a 5000-6000 kbps) : une
     # brute de 40 s sortirait a 27 Mo, au-dela de ce que Discord accepte, et le

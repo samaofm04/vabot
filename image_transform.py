@@ -336,7 +336,7 @@ def transform_image(input_path, output_path, config=None, target="post"):
         return True
 
     try:
-        from PIL import Image, ImageEnhance
+        from PIL import Image, ImageEnhance, ImageOps
     except ImportError:
         shutil.copy2(input_path, output_path)
         return True
@@ -345,6 +345,13 @@ def transform_image(input_path, output_path, config=None, target="post"):
 
     try:
         img = Image.open(input_path)
+        # L'orientation d'une photo de telephone vit dans l'EXIF (Orientation=6
+        # pour un portrait stocke couche). L'EXIF reecrit plus bas la remet a
+        # 1 : sans ce redressement, la photo ressortait COUCHEE.
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
         original_mode = img.mode
         if img.mode != "RGB":
             img = img.convert("RGB")

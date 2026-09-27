@@ -571,14 +571,13 @@ async def _push_content_menu(bot, channel, identity, member):
 # @pseudo-content (le contenu généré arrive là) et @pseudo-numero-mail,
 # privés, dans la catégorie TAFF. L'ordre du tuple = ordre de création
 # (menu juste au-dessus de content).
-#: Quatre salons par VA. "download" ajoute le 27/08 : le menu de
+#: Cinq salons par VA. "download" ajoute le 27/08 : le menu de
 #: telechargement Instagram y vit en permanence, comme le menu Jailbreak
-#: vit dans -menu.
+#: vit dans -menu. "spoofer" ajoute le 27/09 (cogs/spoofer.py).
 #:
-#: ATTENTION : cette constante ne suffit pas. /ticketsall porte SA PROPRE
-#: expression reguliere, ecrite en dur. Ajouter un suffixe ici sans l'y
-#: ajouter aussi cree une boucle : le reconciliateur cree les salons, ne
-#: les reconnait pas au passage suivant, et les recree indefiniment.
+#: /ticketsall construit son expression a partir de US_TICKET_SUFFIXES : il
+#: l'avait ecrite en dur, et un suffixe oublie y comptait chaque salon comme
+#: « manquant », ne supprimait jamais un orphelin ni sa categorie.
 async def _ensure_dl_panel(bot, ch):
     """Pose le menu de telechargement dans un salon -download. Idempotent.
 
@@ -610,9 +609,24 @@ async def _ensure_dl_panel(bot, ch):
         print(f"[dl] panneaux non poses dans {getattr(ch, 'name', '?')} : {e}")
 
 
+async def _ensure_spoof_panel(bot, ch):
+    """Le panneau du spoofer dans un salon -spoofer (cogs/spoofer.py). Un
+    salon deja a jour n'est pas touche. Cog absent : DIT, pas tu."""
+    if bot is None or ch is None or salon_de_service(getattr(ch, "name", "")):
+        return
+    cog = bot.get_cog("Spoofer")
+    if cog is None:
+        log.warning(f"[spoofer] cog absent : pas de panneau dans {getattr(ch, 'name', '?')}")
+        return
+    try:
+        await cog.assurer_panneau(ch)
+    except Exception as e:
+        print(f"[spoofer] panneau non pose dans {getattr(ch, 'name', '?')} : {e}")
+
+
 #: L ORDRE DE CE TUPLE EST L ORDRE DES SALONS dans la categorie du VA :
 #: le reconciliateur les repositionne dans cet ordre exact.
-US_TICKET_SUFFIXES = ("menu", "download", "numero-mail", "content")
+US_TICKET_SUFFIXES = ("menu", "spoofer", "download", "numero-mail", "content")
 
 
 def _us_norm(nm):
@@ -1503,6 +1517,9 @@ async def create_us_tickets(guild, member, bot=None):
     # Le menu de telechargement vit dans -download, en permanence.
     if chans.get("download") is not None:
         await _ensure_dl_panel(bot, chans["download"])
+    # Le panneau du spoofer vit dans -spoofer, en permanence.
+    if chans.get("spoofer") is not None:
+        await _ensure_spoof_panel(bot, chans["spoofer"])
     # Migration : retirer l'ancien menu épinglé dans -content (version précédente).
     if content_ch is not None and bot is not None:
         try:
@@ -2713,7 +2730,7 @@ class Welcome(commands.Cog):
         # menu → content → numero-mail → download, groupés par personne,
         # sans doublon ni orphelin.
         import re as _re
-        pat = _re.compile(r"-(menu|content|numero-mail|download)$")
+        pat = _re.compile(r"-(" + "|".join(_re.escape(s) for s in US_TICKET_SUFFIXES) + r")$")
         members = [m for m in guild.members if not m.bot and m.id != interaction.user.id]
         expected = {}
         for m in members:
@@ -2849,7 +2866,8 @@ class Welcome(commands.Cog):
                                    if discord.utils.find(
                                        lambda c, n=_us_ticket_name(m, s): _us_norm(c.name) == n,
                                        guild.text_channels))
-                        lines.append(("✅" if have == 3 else "🛠") + f" `{_us_base(m)}` — {have}/3")
+                        _n = len(US_TICKET_SUFFIXES)
+                        lines.append(("✅" if have == _n else "🛠") + f" `{_us_base(m)}` — {have}/{_n}")
                     msg = (f"✅ <@{inv_id}> Rangement terminé : {removed} supprimé(s), "
                            f"{ok} créé(s)"
                            + (f", {failed} échec(s) (voir logs)" if failed else "") + "\n"
