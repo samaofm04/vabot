@@ -1445,6 +1445,24 @@ async def _ensure_num_panel(bot, channel):
         from cogs.numeros import poser_panneau
         ncog = bot.get_cog("NumerosCog")
         if ncog is None:
+            # Ce bot n'a pas le module : on passe la main au bot ADMIN, qui
+            # tourne dans le meme processus (meme boucle asyncio). Avant, le
+            # panneau d'un nouveau VA n'etait simplement jamais pose.
+            adm = _bot_admin()
+            acog = adm.get_cog("NumerosCog") if adm is not None else None
+            if acog is not None:
+                ach = adm.get_channel(getattr(channel, "id", 0))
+                if ach is None:
+                    try:
+                        ach = await adm.fetch_channel(channel.id)
+                    except Exception as e:                  # noqa: BLE001
+                        log.warning(
+                            "panneau numero non pose dans #%s : le bot admin ne voit "
+                            "pas le salon (%s) — bouton « Donner l'acces au bot "
+                            "admin » du site, puis /panelnumeroall",
+                            getattr(channel, "name", "?"), type(e).__name__)
+                        return False
+                return await poser_panneau(adm, ach, acog)
             # Ce bot cree les salons mais n a plus le module des numeros : il a
             # demenage sur le bot admin pour liberer des places de commandes.
             # Le panneau etait donc simplement SAUTE — chaque nouveau ticket
@@ -1463,6 +1481,22 @@ async def _ensure_num_panel(bot, channel):
         return False
 
 
+def _bot_admin():
+    """Le bot ADMIN (Akinator), qui tourne dans le meme processus que ce bot.
+
+    C'est lui qui porte le module des numeros depuis qu'il a fallu liberer des
+    places de commandes sur le principal. None s'il ne tourne pas."""
+    import sys as _sys
+    return getattr(_sys.modules.get("web_upload"), "_BOT_ADMIN_REF", None)
+
+
+def _membre_bot_admin(guild):
+    """Le bot admin en tant que MEMBRE de ce serveur, ou None."""
+    adm = _bot_admin()
+    uid = getattr(getattr(adm, "user", None), "id", None)
+    return guild.get_member(uid) if (guild is not None and uid) else None
+
+
 def _us_droits_ticket(guild, membres, suffix) -> dict:
     """Les droits d'un salon de VA : prive, le(s) VA voi(en)t tout, ecrivent
     et joignent partout sauf dans -menu (lecture seule). Un seul endroit
@@ -1477,6 +1511,17 @@ def _us_droits_ticket(guild, membres, suffix) -> dict:
     ow[guild.me] = discord.PermissionOverwrite(
         view_channel=True, send_messages=True, manage_channels=True,
         manage_messages=True)
+    # LE BOT ADMIN AUSSI (27/09/2026). Il porte le panneau des numeros ; sans
+    # cette regle il ne voyait meme pas le salon d'un VA arrive apres le
+    # dernier clic sur « Donner l'acces au bot admin » : carter_izac avait un
+    # -numero-mail vide, et /panelnumeroall comptait 26 salons au lieu de 27.
+    # Memes droits que ce bouton (voir, ecrire, historique, messages), plus
+    # joindre un fichier : le panneau porte son icone en piece jointe.
+    adm = _membre_bot_admin(guild)
+    if adm is not None and adm != guild.me:
+        ow[adm] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+            manage_messages=True, attach_files=True, embed_links=True)
     return ow
 
 

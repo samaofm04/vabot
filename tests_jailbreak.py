@@ -19097,6 +19097,70 @@ check("general brutes ⭐ : aucune ecriture dans data/",
       len(_V2_AUDIT["ecrits"]) == _nEcritsGB, str(_V2_AUDIT["ecrits"][_nEcritsGB:][:5]))
 
 
+
+# ---------------------------------------------------------------------------
+# Salons d un NOUVEAU VA : le bot admin (panneau des numeros) y a acces des la
+# creation, et c est lui qui pose le panneau (27/09/2026, carter_izac avait un
+# -numero-mail vide : le bot admin ne voyait pas le salon).
+print()
+print("=" * 70)
+print("Nouveau VA : le bot admin voit son -numero-mail et y pose le panneau")
+print("=" * 70)
+try:
+    import asyncio as _aAc, sys as _sAc
+    import cogs.welcome as _wAc
+    class _MbAc:
+        def __init__(self, i, bot=True): self.id = i; self.bot = bot
+        def __hash__(self): return hash(self.id)
+        def __eq__(self, o): return getattr(o, "id", None) == self.id
+    _meAc, _admAc, _vaAc = _MbAc(1), _MbAc(2), _MbAc(3, bot=False)
+    class _GAc:
+        default_role = _MbAc(0, bot=False); me = _meAc
+        def get_member(self, i): return {1: _meAc, 2: _admAc, 3: _vaAc}.get(i)
+    class _AdmBotAc:
+        user = type("U", (), {"id": 2})()
+        def __init__(self): self.poses = []; self.cog = object()
+        def get_cog(self, n): return self.cog if n == "NumerosCog" else None
+        def get_channel(self, i): return None
+        async def fetch_channel(self, i): return type("C", (), {"id": i, "name": "x-numero-mail"})()
+    class _MainBotAc:
+        def get_cog(self, n): return None
+    _wuAc = type("M", (), {})()
+    _admRef = _AdmBotAc(); _wuAc._BOT_ADMIN_REF = _admRef
+    _savWu = _sAc.modules.get("web_upload")
+    _sAc.modules["web_upload"] = _wuAc
+    try:
+        _owAc = _wAc._us_droits_ticket(_GAc(), [_vaAc], "numero-mail")
+        _pAc = _owAc.get(_admAc)
+        check("nouveau VA : le bot admin est dans les droits de ses salons",
+              _pAc is not None and _pAc.view_channel and _pAc.send_messages
+              and _pAc.attach_files and _pAc.read_message_history)
+        import cogs.numeros as _nAc
+        _savPP = _nAc.poser_panneau
+        async def _faux_poser(bot, ch, cog, **k):
+            _admRef.poses.append((bot, getattr(ch, "id", None), cog)); return True
+        _nAc.poser_panneau = _faux_poser
+        try:
+            _okAc = _aAc.run(_wAc._ensure_num_panel(_MainBotAc(), type("C", (), {"id": 77, "name": "x-numero-mail"})()))
+        finally:
+            _nAc.poser_panneau = _savPP
+        check("nouveau VA : le bot principal passe la main au bot admin pour le panneau",
+              _okAc is True and _admRef.poses and _admRef.poses[0][0] is _admRef
+              and _admRef.poses[0][1] == 77, str(_admRef.poses))
+        _wuAc._BOT_ADMIN_REF = None
+        _ow2 = _wAc._us_droits_ticket(_GAc(), [_vaAc], "numero-mail")
+        check("nouveau VA : sans bot admin, les droits restent ceux d avant",
+              _admAc not in _ow2 and _vaAc in _ow2)
+    finally:
+        if _savWu is not None:
+            _sAc.modules["web_upload"] = _savWu
+        else:
+            _sAc.modules.pop("web_upload", None)
+except Exception as _eAc:
+    import traceback as _tbAc
+    _tbAc.print_exc()
+    check("nouveau VA : testable", False, repr(_eAc)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
