@@ -149,6 +149,23 @@ class NumPanelView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
+    async def on_error(self, itx: discord.Interaction, error: Exception, item):
+        # 27/09/2026 : « ca ne marche pas » sans une ligne dans le journal. Une
+        # exception dans un bouton restait invisible des deux cotes : on la
+        # journalise, et le VA la lit au lieu d un bouton muet.
+        log.exception("numgen: erreur au clic %s dans #%s",
+                      getattr(item, "custom_id", "?"),
+                      getattr(getattr(itx, "channel", None), "name", "?"),
+                      exc_info=error)
+        try:
+            msg = "❌ Erreur : %s" % (str(error)[:300] or type(error).__name__)
+            if itx.response.is_done():
+                await itx.followup.send(msg, ephemeral=True)
+            else:
+                await itx.response.send_message(msg, ephemeral=True)
+        except Exception:                                    # noqa: BLE001
+            pass
+
     # Boutons DIRECTS en Instagram/Threads : c'est Insta dans 100 % des cas.
     # « Autre service » a ete retire le 30/08/2026 — il n'ajoutait qu'un
     # detour de deux ecrans pour un cas qui ne se presentait pas.
@@ -220,6 +237,22 @@ class NumerosCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @commands.Cog.listener()
+    async def on_interaction(self, itx: discord.Interaction):
+        """Trace chaque clic du panneau numero/mail (27/09/2026).
+
+        Le panneau « ne marchait pas » sans rien laisser dans le journal : on
+        ne savait meme pas si le clic arrivait jusqu au bot. Une ligne par clic
+        suffit a le dire."""
+        try:
+            cid = str((getattr(itx, "data", None) or {}).get("custom_id") or "")
+        except Exception:                                    # noqa: BLE001
+            return
+        if cid.startswith("numgen:"):
+            log.info("numgen: clic %s par %s (%s) dans #%s", cid,
+                     getattr(itx.user, "name", "?"), getattr(itx.user, "id", "?"),
+                     getattr(getattr(itx, "channel", None), "name", "?"))
+
     async def cog_load(self):
         try:
             self.bot.add_view(NumPanelView(self))
@@ -251,10 +284,18 @@ class NumerosCog(commands.Cog):
         await maj_trois(self.bot, ch, actif=None,
                         souci_num="⏳ Recherche d'un numéro…",
                         souci_code="")
+        log.info("numgen: %s demande dans #%s", kind, getattr(ch, "name", "?"))
         if kind == "sms":
             ok, res = await asyncio.to_thread(numgen.get_number, service)
         else:
             ok, res = await asyncio.to_thread(numgen.get_mail, service)
+        if ok:
+            log.info("numgen: %s obtenu (%s, %s) pour #%s", kind,
+                     (res or {}).get("provider"), (res or {}).get("country"),
+                     getattr(ch, "name", "?"))
+        else:
+            log.warning("numgen: %s refuse pour #%s : %s", kind,
+                        getattr(ch, "name", "?"), str(res)[:300])
         if not ok:
             # Un solde vide ou un fournisseur a sec se DIT dans la place du
             # numero, qui reste visible : demande user — le bloc ne disparait
@@ -1098,6 +1139,23 @@ class ActionsView(discord.ui.View):
 
     async def _cog(self, itx):
         return self.cog or itx.client.get_cog("NumerosCog")
+
+    async def on_error(self, itx: discord.Interaction, error: Exception, item):
+        # 27/09/2026 : « ca ne marche pas » sans une ligne dans le journal. Une
+        # exception dans un bouton restait invisible des deux cotes : on la
+        # journalise, et le VA la lit au lieu d un bouton muet.
+        log.exception("numgen: erreur au clic %s dans #%s",
+                      getattr(item, "custom_id", "?"),
+                      getattr(getattr(itx, "channel", None), "name", "?"),
+                      exc_info=error)
+        try:
+            msg = "❌ Erreur : %s" % (str(error)[:300] or type(error).__name__)
+            if itx.response.is_done():
+                await itx.followup.send(msg, ephemeral=True)
+            else:
+                await itx.response.send_message(msg, ephemeral=True)
+        except Exception:                                    # noqa: BLE001
+            pass
 
     @discord.ui.button(label="Redemander un code", emoji="🔄",
                        style=discord.ButtonStyle.primary,
