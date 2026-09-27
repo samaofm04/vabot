@@ -9798,9 +9798,11 @@ try:
                 octets = [f.fp.read() for f in (files or [])]
                 m = _MsgSp(s, _moiSp, content or "", noms, vue=view)
                 m.octets = octets
-                # la piece jointe unique (l'icone du panneau)
-                m.attachments = [type("A", (), {"filename": f.filename})()
-                                 for f in (files or []) + ([file] if file else [])]
+                # comme Discord : un message Components V2 ne LISTE PAS la
+                # piece jointe qu'il affiche en vignette (constate le 27/09)
+                m.attachments = [] if view is not None else [
+                    type("A", (), {"filename": f.filename})()
+                    for f in (files or []) + ([file] if file else [])]
                 if view is not None:
                     m.components = list(view.children)
                 s.messages.append(m)
@@ -10031,6 +10033,17 @@ try:
               len(_pSp0) == 1 and [c.get("custom_id") for c in _pSp0[0]["components"]] == ["spf:qb:5", "spf:go:5"]
               and "attachment://" not in str(_pSp0), str(_pSp0)[:200])
         check("spoofer : l'icone est dans le depot", _sp._ICONE.exists() and _sp._ICONE.stat().st_size > 1000)
+        # le panneau tel que Discord le rend (27/09) : attachments [], l'icone
+        # dans la vignette, en lien CDN
+        _Th = type("Th", (), {"media": type("M", (), {"url": "https://cdn.discordapp.com/attachments/"
+                                                              "1/2/spoofer.png?ex=6aba&is=6ab8"})(),
+                              "children": []})
+        _Se = type("Se", (), {"children": [], "accessory": _Th()})
+        _Co = type("Co", (), {"children": [_Se()], "accessory": None})
+        _reel = type("R", (), {"attachments": [], "components": [_Co()]})()
+        _nu = type("R", (), {"attachments": [], "components": [type("Rg", (), {"children": []})()]})()
+        check("spoofer : l'icone se reconnait dans la vignette (Discord ne la liste pas en piece jointe)",
+              _sp._porte_icone(_reel) and not _sp._porte_icone(_nu))
         check("spoofer : un nombre hors 1-5 (ancien bouton, saisie) retombe a 5",
               _sp.SpfQte.__discord_ui_compiled_template__.fullmatch("spf:qb:7") is None
               and _sp._borne("9") == 5 and _sp._borne("x") == 5 and _sp._borne(2) == 2)

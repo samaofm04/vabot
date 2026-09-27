@@ -198,8 +198,27 @@ def panneau(q: int = QTE_DEFAUT, icone=None) -> discord.ui.LayoutView:
 
 
 def _porte_icone(message) -> bool:
-    return any(getattr(a, "filename", "") == _ICONE_NOM
-               for a in (getattr(message, "attachments", None) or []))
+    """Le panneau montre-t-il l'icone ? On la cherche DANS la vignette : un
+    message Components V2 ne liste pas la piece jointe qu'il affiche
+    (« attachments »: [] constate le 27/09), et la chercher la faisait
+    reposer les 34 panneaux a chaque demarrage -- et redessiner sans
+    l'icone le panneau d'un VA qui change le nombre."""
+    if any(getattr(a, "filename", "") == _ICONE_NOM
+           for a in (getattr(message, "attachments", None) or [])):
+        return True
+    pile = list(getattr(message, "components", None) or [])
+    while pile:
+        c = pile.pop()
+        url = str(getattr(getattr(c, "media", None), "url", "") or "")
+        if ("/" + _ICONE_NOM) in url or url.endswith(":" + "//" + _ICONE_NOM) \
+                or url.split("?")[0].endswith(_ICONE_NOM):
+            return True
+        pile += list(getattr(c, "children", None) or [])
+        pile += list(getattr(c, "components", None) or [])
+        acc = getattr(c, "accessory", None)
+        if acc is not None:
+            pile.append(acc)
+    return False
 
 
 def _custom_ids(message) -> set:
@@ -249,8 +268,18 @@ class FenetreQuantite(discord.ui.Modal, title="🔢"):
         try:
             # la vignette pointe sur la piece jointe DU message : un
             # panneau qui ne l'a pas est redessine sans elle
-            await interaction.response.edit_message(
-                view=panneau(q, icone=_porte_icone(getattr(interaction, "message", None))))
+            icone = _porte_icone(getattr(interaction, "message", None))
+            try:
+                await interaction.response.edit_message(view=panneau(q, icone=icone))
+            except discord.HTTPException:
+                if not icone:
+                    raise
+                # piece jointe perdue : on la renvoie, une fois (comme le
+                # panneau Numero)
+                f = fichier_icone()
+                await interaction.response.edit_message(
+                    view=panneau(q, icone=f is not None),
+                    attachments=[f] if f is not None else [])
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] panneau non redessine : {type(e).__name__}: {e}")
             if not interaction.response.is_done():
