@@ -8,6 +8,8 @@ import random
 import re
 import tempfile
 import time
+import functools
+import weakref
 from pathlib import Path
 import discord
 from discord import app_commands
@@ -1432,6 +1434,12 @@ _T_CAP = "Caption à copier"
 #: legende, et le VA la reconnait a ce mot.
 _T_SON = "SON / CONSIGNE"
 
+#: Le nom d'un texte a copier : un bouton gris, desactive, sous le texte. Le
+#: titre ecrit dans le message partait avec « Copier le texte » sur
+#: telephone ; un bouton n'est pas du texte. Tout texte est nomme, sauf une
+#: description seule -- ce que le VA attend sous une video (_envoyer_textes).
+_ETIQUETTES = {_T_CAP: "📝 Caption", _T_DESC: "📄 Description", _T_SON: "🎵 Son"}
+
 #: Discord refuse un message en composants au-dela de 4000 signes de texte en
 #: tout, ou de 40 composants.
 _V2_TEXTE_MAX = 4000
@@ -1550,11 +1558,39 @@ def _carte_livraison(rang, total, identite, medias, *, guild=None, textes=(),
     return vue, fichiers
 
 
+#: Un verrou par destinataire (serveur, qui clique, salon du clic) : les
+#: messages d'UN contenu -- la carte puis ses textes -- se suivent sans qu'un
+#: autre envoi vers le meme salon s'intercale. Deux clics rapproches (ou deux
+#: etoiles sur le site) glissaient la description de l'un sous la carte de
+#: l'autre. Faibles : un verrou que plus personne ne tient disparait.
+_VERROUS_LIVRAISON = weakref.WeakValueDictionary()
+
+
+def _verrou_livraison(interaction):
+    cle = (getattr(getattr(interaction, "guild", None), "id", None),
+           getattr(getattr(interaction, "user", None), "id", None),
+           getattr(interaction, "channel_id", None))
+    v = _VERROUS_LIVRAISON.get(cle)
+    if v is None:
+        v = _VERROUS_LIVRAISON[cle] = asyncio.Lock()
+    return v
+
+
+def _un_contenu_a_la_fois(fn):
+    @functools.wraps(fn)
+    async def _sous_verrou(interaction, *a, **k):
+        async with _verrou_livraison(interaction):
+            return await fn(interaction, *a, **k)
+    return _sous_verrou
+
+
+@_un_contenu_a_la_fois
 async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                           textes=(), alertes=(), bloquant=False, quoi="contenu",
-                          textes_a_part=True, recette=None):
+                          textes_a_part=True, recette=None, bilan=None):
     """Livre UN contenu au VA : la carte (_carte_livraison), sinon l'ancien
-    envoi (en-tete + fichier(s), puis chaque texte en bloc de code).
+    envoi (en-tete + fichier(s)) ; puis chaque texte a copier, seul dans son
+    message (_envoyer_textes).
 
     -> « carte » ou « repli ». UN CONTENU N'EST JAMAIS PERDU : une carte
     refusee (fichier trop gros, refus de Discord, limite depassee) est ecrite
@@ -1568,16 +1604,18 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
 
     `recette` : de quoi est faite la video livree (brute, template, caption),
     notee APRES l'envoi pour les favoris automatiques (_noter_livraison). Un
-    banger ne de cette video retrouvera sa recette exacte."""
+    banger ne de cette video retrouvera sa recette exacte.
+
+    `bilan` (dict) : recoit « textes_rates », les textes que Discord a
+    refuses apres le media (_envoyer_textes ne les fait pas remonter)."""
     guild = getattr(interaction, "guild", None)
-    # LES TEXTES A COPIER SORTENT DE LA CARTE (27/09/2026). Dans une carte
-    # (Components V2), Discord ne pose PAS son bouton « copier » sur les blocs
-    # de code ; il le pose sur ceux d'un message ordinaire. Le proprietaire
-    # veut ce bouton dans le salon -content des VA : la carte porte l'en-tete
-    # et le media, et chaque texte suit, juste en dessous, dans son propre
-    # message (_envoyer_a_copier). `textes_a_part=False` garde les textes
-    # DANS la carte : le salon banger de l'identite retire son message quand
-    # l'etoile est retiree sur le site, et des textes a part y resteraient.
+    # LES TEXTES A COPIER SORTENT DE LA CARTE (27/09/2026). La carte porte
+    # l'en-tete et le media ; chaque texte suit, juste en dessous, SEUL dans
+    # son message (_envoyer_a_copier) : sur telephone, « Copier le texte »
+    # prend le message entier -- dans la carte, il emportait « 5/5 », le nom
+    # de la model et le titre. `textes_a_part=False` les garde DANS la carte
+    # (plus aucun appelant depuis que le salon banger retient tous ses
+    # messages pour les effacer, 28/09/2026).
     try:
         vue, fichiers = _carte_livraison(rang, total, identite, medias,
                                          guild=guild,
@@ -1603,9 +1641,7 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                 f.close()
         if envoyee:
             if textes_a_part:
-                for titre, texte in textes:
-                    if str(texte or "").strip():
-                        await _envoyer_a_copier(interaction, titre, texte)
+                _textes_rates(quoi, await _envoyer_textes(interaction, textes), bilan)
             await _noter_livraison(interaction, identite, medias, recette, quoi)
             return "carte"
 
@@ -1634,11 +1670,42 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
         await interaction.followup.send(
             content=tete + "\n⚠️ *(Exemple omis : trop lourd)*",
             file=discord.File(str(chemin), filename=_nom_piece_jointe(nom)))
-    for titre, texte in textes:
-        if str(texte or "").strip():
-            await _envoyer_a_copier(interaction, titre, texte)
+    _textes_rates(quoi, await _envoyer_textes(interaction, textes), bilan)
     await _noter_livraison(interaction, identite, medias, recette, quoi)
     return "repli"
+
+
+def _textes_rates(quoi, rates, bilan):
+    """Le media est parti, pas tous ses textes : au journal, et dans
+    `bilan` pour l'appelant qui doit le savoir (le salon banger annule)."""
+    if rates:
+        log.warning("%s : media livre, texte(s) %s non livre(s)", quoi, ", ".join(rates))
+    if bilan is not None:
+        bilan["textes_rates"] = list(rates)
+
+
+async def _envoyer_textes(interaction, textes):
+    """Les textes a copier d'UN contenu, dans l'ordre, chacun a part
+    (_envoyer_a_copier). -> les titres de ceux que Discord a refuses.
+
+    Une description seule n'a pas de nom : c'est ce que le VA attend sous une
+    video. Tout autre texte est nomme -- une caption a incruster ou une
+    consigne de son, arrivee nue, se prendrait pour la description a coller.
+
+    Un texte refuse n'arrete pas les suivants, et ne remonte pas : la carte
+    est deja partie, et l'appelant dirait « trop lourd » au VA pour un media
+    bien arrive. Il est ecrit au journal et rendu a l'appelant."""
+    a_copier = [(t, x) for t, x in textes if str(x or "").strip()]
+    rates = []
+    for titre, texte in a_copier:
+        try:
+            await _envoyer_a_copier(interaction, titre, texte,
+                                    etiquette=len(a_copier) > 1 or titre != _T_DESC)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("texte a copier « %s » (%d signes) refuse : %s: %s",
+                        titre, len(str(texte)), type(e).__name__, e)
+            rates.append(titre)
+    return rates
 
 
 def _recette_montage(template, rapport, fiche_reserve, famille, label):
@@ -1712,19 +1779,94 @@ async def _noter_livraison(interaction, identite, medias, recette, quoi):
         log.warning("livraison %s non notee (%s: %s)", quoi, type(e).__name__, e)
 
 
-async def _envoyer_a_copier(interaction, titre, texte):
-    """« **Description à copier** » et son bloc de code, dans UN message
-    ordinaire : c'est la que Discord pose son bouton « copier ». Un texte
-    trop long pour un message part en plusieurs blocs, sous le titre, et
-    jamais coupe (_envoyer_texte, qui garde aussi le repli des textes
-    contenant eux-memes des accents graves)."""
-    t = str(texte or "")
-    msg = "**" + titre + "**\n```\n" + t + "\n```"
-    if "```" not in t and len(msg) <= 1990:
-        await interaction.followup.send(msg)
-        return
-    await interaction.followup.send(f"**{titre}**")
-    await _envoyer_texte(interaction, t)
+def _u16(t):
+    """La longueur que Discord compte : en UTF-16 (un emoji en vaut deux)."""
+    return len(t.encode("utf-16-le")) // 2
+
+
+def _morceaux_a_copier(texte, maxi=2000):
+    """`texte` en messages d'au plus `maxi` signes (comptes en UTF-16, comme
+    Discord), qui se RECOLLENT EXACTEMENT bout a bout.
+
+    Discord retire les blancs au debut et a la fin d'un message. Coupe sur
+    une espace ou un saut de ligne, le blanc disparaissait : le VA qui
+    recollait les deux messages obtenait « outfitgirl ». Chaque coupe passe
+    donc entre deux caracteres non blancs -- au milieu d'un mot, pres du
+    dernier saut de ligne (sinon de la derniere espace) qui tient. Moins joli
+    a l'ecran, exact une fois colle : c'est ce qui compte, et au-dela de
+    2000 signes c'est rare (Instagram s'arrete a 2200)."""
+    t = str(texte or "").strip()
+    out = []
+    while t and _u16(t) > maxi:
+        # le plus long debut qui tient
+        bas, haut = 1, len(t)
+        while bas < haut:
+            m = (bas + haut + 1) // 2
+            if _u16(t[:m]) <= maxi:
+                bas = m
+            else:
+                haut = m - 1
+        lim = bas
+
+        def _nette(c):
+            return 0 < c < len(t) and not t[c - 1].isspace() and not t[c].isspace()
+        coupe = None
+        for sep in ("\n", " "):
+            p = t.rfind(sep, lim // 2, lim)
+            if p > 0:
+                coupe = next((c for c in range(p - 1, lim // 2, -1) if _nette(c)), None)
+                if coupe is not None:
+                    break
+        if coupe is None:
+            coupe = next((c for c in range(lim, lim // 2, -1) if _nette(c)), lim)
+        out.append(t[:coupe])
+        t = t[coupe:]
+    if t:
+        out.append(t)
+    return out
+
+
+def _vue_etiquette(titre):
+    """Le bouton gris qui nomme un texte : desactive, il ne fait rien."""
+    v = discord.ui.View(timeout=1)     # rien a ecouter : la vue n'est pas gardee
+    v.add_item(discord.ui.Button(label=_ETIQUETTES.get(titre, titre), disabled=True,
+                                 style=discord.ButtonStyle.secondary,
+                                 custom_id="copie:etiquette"))
+    return v
+
+
+async def _envoyer_a_copier(interaction, titre, texte, etiquette=False):
+    """Le texte SEUL, dans un message ordinaire : ni titre, ni bloc de code.
+
+    Sur telephone, un bloc de code n'a pas de bouton « copier » (il n'existe
+    que sur ordinateur), et l'appui long « Copier le texte » prend le message
+    ENTIER, tel qu'il est ecrit : le VA collait « **Description à copier** »
+    et les ``` avec sa legende (28/09/2026, « sur tel copie ca marche pas »).
+    Un message qui ne contient que le texte se copie exact, d'un appui long.
+
+    Rien n'est echappe : la copie prend le texte brut, un « \\_ » ajoute
+    partirait avec. L'affichage peut mettre un mot en italique, ce qui est
+    copie reste ce qui a ete ecrit. Aucune mention ne notifie (une legende
+    peut contenir @everyone), aucun lien ne deplie d'apercu.
+
+    `etiquette` : le bouton qui le nomme (_ETIQUETTES), sur son premier
+    message -- decide par _envoyer_textes.
+
+    Plus de 2000 signes (limite d'un message de bot) : plusieurs messages qui
+    se recollent exactement (_morceaux_a_copier), jamais tronques -- et le
+    journal le dit."""
+    # Jamais de morceau blanc (_morceaux_a_copier coupe entre deux non-blancs) ;
+    # garde-fou quand meme : Discord refuse un message vide.
+    bouts = [b for b in _morceaux_a_copier(texte) if b.strip()]
+    if len(bouts) > 1:
+        log.info("texte a copier « %s » : %d signes, en %d messages",
+                 titre, len(str(texte)), len(bouts))
+    for i, bout in enumerate(bouts):
+        kw = {"allowed_mentions": discord.AllowedMentions.none(),
+              "suppress_embeds": True}
+        if etiquette and i == 0:
+            kw["view"] = _vue_etiquette(titre)
+        await interaction.followup.send(bout, **kw)
 
 
 _ETRANGER = re.compile(r"(?:^|[^\w@])@[A-Za-z0-9._]{3,}|https?://|\bwww\.")
@@ -2887,7 +3029,9 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
 class _SendProxy:
     """Imite interaction.response ET interaction.followup mais envoie dans un salon cible.
     Permet de réutiliser les commandes telles quelles en redirigeant leur sortie."""
-    _OK = ("embed", "embeds", "file", "files", "view", "allowed_mentions", "tts")
+    # suppress_embeds : un lien dans une legende a copier ne deplie pas d'apercu.
+    _OK = ("embed", "embeds", "file", "files", "view", "allowed_mentions", "tts",
+           "suppress_embeds")
 
     def __init__(self, channel):
         self._ch = channel

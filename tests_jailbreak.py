@@ -13557,10 +13557,10 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         return os.path.realpath(str(p))
 
     def cartes(envois):
-        # Les textes a copier ne sont plus DANS la carte (27/09/2026) : Discord
-        # ne pose son bouton « copier » que sur les blocs d'un message
-        # ordinaire. Chaque carte emporte donc les messages qui la suivent,
-        # jusqu'a la carte suivante, pour que ses blocs se lisent avec elle.
+        # Les textes a copier ne sont plus DANS la carte (27/09/2026), et ils
+        # partent SEULS dans leur message (28/09/2026 : sur telephone, « Copier
+        # le texte » prend le message entier). Chaque carte emporte donc les
+        # messages qui la suivent, jusqu'a la carte suivante.
         out, courante = [], None
         for e in envois:
             if isinstance(e.get("view"), discord.ui.LayoutView):
@@ -13568,8 +13568,20 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
                 e["_suite"] = []
                 out.append(e)
             elif courante is not None and e.get("content"):
-                courante["_suite"].append(str(e["content"]))
+                courante["_suite"].append(e)
         return out
+
+    def etiquette(e):
+        """Le libelle du bouton gris qui nomme un texte a copier, ou None."""
+        v = e.get("view")
+        if not isinstance(v, discord.ui.View):
+            return None
+        bs = [b for b in v.children if isinstance(b, discord.ui.Button)]
+        return bs[0].label if len(bs) == 1 and bs[0].disabled else ("?", len(bs))
+
+    def copies(rec):
+        """[(etiquette, texte)] des textes a copier qui suivent la carte."""
+        return [(etiquette(e), str(e["content"])) for e in rec.get("_suite", [])]
 
     def lire(rec):
         comp = rec["view"].to_components()
@@ -13579,9 +13591,9 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         urls = [it["media"]["url"] for k in kids if k["type"] == 12 for it in k["items"]]
         sep = next((i for i, k in enumerate(kids) if k["type"] == 14), None)
         blocs = [k["content"] for k in kids[sep + 1:] if k["type"] == 10] if sep is not None else []
-        blocs += [c for c in rec.get("_suite", []) if c.startswith("**") and "\n```\n" in c]
         return {"comp": comp, "entete": textes[0] if textes else "", "textes": textes,
-                "urls": urls, "blocs": blocs, "types": [k["type"] for k in kids],
+                "urls": urls, "blocs": blocs, "copies": copies(rec),
+                "suite": rec.get("_suite", []), "types": [k["type"] for k in kids],
                 "accent": cont.get("accent_color"), "noms": rec["_noms"], "srcs": rec["_srcs"],
                 "vue": rec["view"], "rec": rec, "racine": [c["type"] for c in comp]}
 
@@ -13639,18 +13651,24 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         for i, c in enumerate(cs, 1):
             if srcs is not None and c["srcs"][:1] and c["srcs"][0] not in srcs:
                 pb.append((i, "media", c["srcs"]))
-            d = desc_de(c)
-            bd = [b for b in c["blocs"] if b.startswith("**Description à copier**")]
-            if bd != ([bloc("Description à copier", d)] if d else []):
-                pb.append((i, "description", bd))
-            if cap_de is not None:
-                cap = cap_de(c)
-                bc = [b for b in c["blocs"] if b.startswith("**Caption à copier**")]
-                if bc != ([bloc("Caption à copier", cap)] if cap else []):
-                    pb.append((i, "caption", bc))
-            if son_de is not None and bloc("SON / CONSIGNE", son_de(c)) not in c["blocs"]:
-                pb.append((i, "son", c["blocs"]))
-        check(f"{nom} : le media tire et ses textes exacts dans leurs blocs a copier",
+            # Ce que la carte doit etre suivie de : chaque texte SEUL dans son
+            # message, sans titre ni bloc de code ; nomme par un bouton gris
+            # seulement quand ils sont plusieurs.
+            att = [(U._T_CAP, cap_de(c) if cap_de else None),
+                   (U._T_SON, son_de(c) if son_de else None),
+                   (U._T_DESC, desc_de(c))]
+            att = [(t, str(x).strip()) for t, x in att if str(x or "").strip()]
+            # Nom : tout texte sauf une description seule (_envoyer_textes).
+            voulu = sorted((U._ETIQUETTES[t] if len(att) > 1 or t != U._T_DESC else None, x)
+                           for t, x in att)
+            if c["blocs"] or sorted(c["copies"], key=str) != sorted(voulu, key=str):
+                pb.append((i, "textes", c["copies"], c["blocs"]))
+            for e in c["suite"]:
+                if not (isinstance(e.get("allowed_mentions"), discord.AllowedMentions)
+                        and not e["allowed_mentions"].everyone and not e["allowed_mentions"].users
+                        and not e["allowed_mentions"].roles and e.get("suppress_embeds") is True):
+                    pb.append((i, "mention ou apercu possible", str(e["content"])[:40]))
+        check(f"{nom} : le media tire et ses textes exacts, chacun seul dans son message",
               cs and not pb, pb[:3])
         if alertes_de is not None or bloquant_de is not None:
             pb = []
@@ -14015,9 +14033,10 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
           [str(e["content"]).split("\n")[0] for e in avec_fichier] == [entete(1, 2), entete(2, 2)],
           [e["content"] for e in avec_fichier])
     contenus = [str(e.get("content") or "") for e in cont.envois]
-    # Titre et bloc dans UN message ordinaire (bouton « copier » de Discord).
-    check("carte refusee : la description part quand meme, entiere, en bloc de code",
-          bloc(U._T_DESC, DESC_B) in contenus, contenus[-4:])
+    # Le texte seul, sans titre ni bloc (copie par appui long sur telephone).
+    check("carte refusee : la description part quand meme, entiere, seule dans son message",
+          DESC_B.strip() in contenus
+          and not [c for c in contenus if "à copier**" in c or c.startswith("```")], contenus[-4:])
     check("carte refusee : l'avertissement « légende retenue » part quand meme",
           any(U._ALERTE_DESC_RETENUE in c for c in contenus))
     tr = notices(cont.envois)
@@ -14031,7 +14050,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     contenus = [str(e.get("content") or "") for e in cont.envois]
     check("repli d'un montage rate : « NE POSTE PAS » garde, pas de description",
           any("NE POSTE PAS" in c for c in contenus)
-          and not any(c.startswith("**Description à copier**") for c in contenus), contenus)
+          and not any(DESC_B.strip() in c for c in contenus), contenus)
 
     # L'exemple fait deborder la taille permise : le contenu part seul, et l'omission se dit.
     del JOURNAL.lignes[:]
@@ -14042,8 +14061,10 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
           [e["_noms"] for e in avec_fichier] == [["r1.mp4"]]
           and "Exemple omis" in str(avec_fichier[0]["content"] if avec_fichier else "")
           and journal("repli sans lui"), (contenus, JOURNAL.lignes[-2:]))
-    check("repli, exemple trop lourd : caption et description suivent",
-          bloc(U._T_CAP, CAP_A) in contenus and bloc(U._T_DESC, DESC_A) in contenus, contenus)
+    _etq = {str(e.get("content")): etiquette(e) for e in cont.envois}
+    check("repli, exemple trop lourd : caption et description suivent, seules, nommees",
+          _etq.get(CAP_A.strip()) == U._ETIQUETTES[U._T_CAP]
+          and _etq.get(DESC_A.strip()) == U._ETIQUETTES[U._T_DESC], _etq)
 
     # Textes trop longs pour un message : pas de coupe muette. Depuis que les
     # textes suivent la carte (27/09/2026, bouton « copier »), la carte part
@@ -14057,16 +14078,164 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         cont = lot_us("textes trop longs", COG._send_caption_plus_brute, supports=False)
     finally:
         U.fav_captions_for = _caps0
-    contenus = [str(e.get("content") or "") for e in cont.envois]
-    blocs_code = "".join(c[4:-4] for c in contenus if c.startswith("```\n") and c.endswith("\n```"))
+    # Les textes qui suivent les cartes, recolles bout a bout.
+    blocs_code = "".join(str(e.get("content") or "") for c in cartes(cont.envois)
+                         for e in c["_suite"])
+    _longs = [len(str(e.get("content") or "")) for c in cartes(cont.envois) for e in c["_suite"]]
     check("textes trop longs : les cartes partent quand meme, chacune suivie de ses textes",
           cartes(cont.envois) and len(cartes(cont.envois)) == blocs_code.count(LONG_CAP)
           and not journal("non construite"),
           (len(cartes(cont.envois)), blocs_code.count(LONG_CAP), JOURNAL.lignes[-2:]))
     check("textes trop longs : caption ET description arrivent ENTIERES (decoupees, pas coupees)",
           blocs_code.count(LONG_CAP) == 2
-          and blocs_code.replace("\n", "").count(LONG_DESC.replace("\n", "")) == 2,
-          (len(blocs_code), blocs_code.count(LONG_CAP)))
+          and blocs_code.replace("\n", "").count(LONG_DESC.replace("\n", "")) == 2
+          and max(_longs or [0]) <= 2000,
+          (len(blocs_code), blocs_code.count(LONG_CAP), _longs))
+    check("textes trop longs : la decoupe est dite au journal (titre, signes, messages)",
+          journal("texte a copier « " + U._T_CAP + " » : 3900 signes, en 2 messages")
+          and journal("texte a copier « " + U._T_DESC + " »"), JOURNAL.lignes[-4:])
+
+    # LE TEXTE A COPIER, SEUL (28/09/2026). Sur telephone, un bloc de code n'a
+    # pas de bouton « copier » et l'appui long copie le message ENTIER, brut :
+    # le titre et les ``` partaient avec la legende.
+    class _EnvCp:
+        def __init__(self):
+            self.envois = []
+            self.followup = self
+
+        async def send(self, content=None, **kw):
+            self.envois.append(dict(kw, content=content))
+
+    _cp = _EnvCp()
+    _txt = "  Nouvelle tenue ✨ @mon_compte_perso *3*5* https://x.co @everyone\n# titre  "
+    lancer(U._envoyer_a_copier(_cp, U._T_DESC, _txt))
+    _m = _cp.envois[0] if len(_cp.envois) == 1 else {}
+    check("texte a copier : le message ne contient QUE le texte, tel qu'il est ecrit "
+          "(ni titre, ni bloc de code, ni echappement)",
+          _m.get("content") == _txt.strip() and "view" not in _m, _cp.envois)
+    _am = _m.get("allowed_mentions")
+    check("texte a copier : aucune mention ne notifie, aucun lien ne deplie d'apercu",
+          isinstance(_am, discord.AllowedMentions) and not _am.everyone and not _am.users
+          and not _am.roles and _m.get("suppress_embeds") is True, _m)
+    _cp = _EnvCp()
+    lancer(U._envoyer_a_copier(_cp, U._T_CAP, "une caption", etiquette=True))
+    _v = _cp.envois[0].get("view") if _cp.envois else None
+    _bt = [c for c in getattr(_v, "children", [])]
+    check("texte a copier : nomme par UN bouton gris desactive (le nom n'est pas copie)",
+          _cp.envois and _cp.envois[0]["content"] == "une caption" and len(_bt) == 1
+          and _bt[0].disabled and _bt[0].label == U._ETIQUETTES[U._T_CAP]
+          and _bt[0].style == discord.ButtonStyle.secondary and _v.timeout is not None,
+          [(e["content"], _bt) for e in _cp.envois])
+    _cp = _EnvCp()
+    _emo = "😀" * 1500 + "\n" + "😀" * 1500
+    lancer(U._envoyer_a_copier(_cp, U._T_DESC, _emo, etiquette=True))
+    _u16 = [len(str(e["content"]).encode("utf-16-le")) // 2 for e in _cp.envois]
+    check("texte a copier : un texte plein d'emojis tient dans Discord (2000 en UTF-16), "
+          "rien de perdu, le nom sur le premier message seulement",
+          len(_cp.envois) >= 2 and max(_u16) <= 2000
+          and "".join(str(e["content"]) for e in _cp.envois).count("😀") == 3000
+          and [bool(e.get("view")) for e in _cp.envois] == [True] + [False] * (len(_cp.envois) - 1),
+          _u16)
+    _cp = _EnvCp()
+    _blanc = "a" * 1999 + "\n" + " " * 1500 + "\n" + "x" * 1000
+    lancer(U._envoyer_a_copier(_cp, U._T_DESC, _blanc))
+    check("texte a copier : jamais de message vide (Discord le refuserait), rien de perdu",
+          _cp.envois and all(str(e["content"]).strip() for e in _cp.envois)
+          and "".join(str(e["content"]) for e in _cp.envois) == _blanc,
+          [len(str(e["content"])) for e in _cp.envois])
+    # Discord retire les blancs au bord d'un message : une coupe sur une espace
+    # collait deux mots au recollage (« outfitgirl »). Recolles tels que
+    # Discord les affiche, les morceaux doivent redonner le texte EXACT.
+    _mots = " ".join(["outfit", "girl", "today", "summer", "vibes"] * 90)[:2121]
+    _lignes = "\n".join(f"ligne {i} de la legende ✨" for i in range(120))
+    _mixte = ("🔥 top " * 500).strip()
+    _pb = []
+    for _nom, _t in (("mots", _mots), ("lignes", _lignes), ("emojis", _mixte),
+                     ("banger", "Caption longue " * 170 + "\nfin"), ("blanc", _blanc)):
+        _b = U._morceaux_a_copier(_t)
+        if not (len(_b) >= 2 and "".join(x.strip() for x in _b) == _t.strip()
+                and all(x == x.strip() for x in _b)
+                and all(len(x.encode("utf-16-le")) // 2 <= 2000 for x in _b)):
+            _pb.append((_nom, [len(x) for x in _b]))
+    check("texte a copier > 2000 signes : chaque coupe entre deux non-blancs, les morceaux "
+          "se recollent EXACTEMENT (Discord retire les blancs de bord)", not _pb, _pb)
+    check("texte a copier : un texte qui tient part en UN message, intact",
+          U._morceaux_a_copier("  a b\n" + "c" * 1990 + "  ") == ["a b\n" + "c" * 1990])
+    _cp = _EnvCp()
+    lancer(U._envoyer_textes(_cp, [(U._T_CAP, "   "), (U._T_DESC, "la desc")]))
+    check("textes : une description seule n'a pas de nom",
+          [(e["content"], e.get("view")) for e in _cp.envois] == [("la desc", None)],
+          _cp.envois)
+    _cp = _EnvCp()
+    lancer(U._envoyer_textes(_cp, [(U._T_CAP, "a incruster"), (U._T_DESC, "")]))
+    _v = _cp.envois[0].get("view") if len(_cp.envois) == 1 else None
+    check("textes : une caption seule est nommee (sinon prise pour la description a coller)",
+          _v is not None and _v.children[0].label == U._ETIQUETTES[U._T_CAP], _cp.envois)
+
+    # Un texte refuse APRES la carte : le media est arrive, le VA ne doit pas
+    # lire « trop lourd », et le texte suivant part quand meme.
+    class _EnvRefus(_EnvCp):
+        async def send(self, content=None, **kw):
+            if content == "caption refusee":
+                raise http_exc(400, "Invalid Form Body")
+            self.envois.append(dict(kw, content=content))
+
+    del JOURNAL.lignes[:]
+    _cp = _EnvRefus()
+    _bil = {}
+    _r = lancer(U._livrer_contenu(_cp, 1, 1, "lola", [(BRUTES[1], "b.mp4")], bilan=_bil,
+                                  textes=[(U._T_CAP, "caption refusee"), (U._T_DESC, "desc ok")],
+                                  quoi="essai refus"))
+    check("texte refuse apres la carte : rien ne remonte, la description suit, le journal "
+          "et le bilan le disent",
+          _r == "carte" and [e["content"] for e in _cp.envois if e.get("content")] == ["desc ok"]
+          and _bil.get("textes_rates") == [U._T_CAP] and journal("non livre"),
+          (_r, _bil, [e.get("content") for e in _cp.envois], JOURNAL.lignes[-2:]))
+
+    # Deux envois simultanes vers le meme salon : chaque carte garde ses
+    # textes juste en dessous (avant, la description de l'un pouvait passer
+    # sous la carte de l'autre).
+    class _EnvLent(_EnvCp):
+        async def send(self, content=None, **kw):
+            # Une VRAIE attente (asyncio.sleep est simule dans ce cahier) :
+            # sans elle, rien ne s'intercalerait et le test ne prouverait rien.
+            _f = asyncio.get_running_loop().create_future()
+            asyncio.get_running_loop().call_later(0.005, _f.set_result, None)
+            await _f
+            self.envois.append(dict(kw, content=content))
+    _cp = _EnvLent()
+
+    async def _deux():
+        await asyncio.gather(
+            U._livrer_contenu(_cp, 1, 2, "lola", [(BRUTES[1], "b.mp4")],
+                              textes=[(U._T_CAP, "capA"), (U._T_DESC, "descA")], quoi="A"),
+            U._livrer_contenu(_cp, 2, 2, "lola", [(BRUTES[1], "b.mp4")],
+                              textes=[(U._T_CAP, "capB"), (U._T_DESC, "descB")], quoi="B"))
+    lancer(_deux())
+    _ordre = ["carte" if isinstance(e.get("view"), discord.ui.LayoutView) else e.get("content")
+              for e in _cp.envois]
+    check("deux envois simultanes : chaque carte est suivie de SES textes, sans melange",
+          _ordre in (["carte", "capA", "descA", "carte", "capB", "descB"],
+                     ["carte", "capB", "descB", "carte", "capA", "descA"]), _ordre)
+    # Le menu central passe par _SendProxy : ses options doivent suivre.
+    class _SalonCp:
+        def __init__(self):
+            self.kw = []
+            self.id = 5151
+
+        async def send(self, **kw):
+            self.kw.append(kw)
+    _sc = _SalonCp()
+    lancer(U._envoyer_a_copier(U._ChannelProxy(types.SimpleNamespace(user=None), _sc), U._T_DESC, "d"))
+    check("menu central : le texte a copier garde « sans apercu » et « aucune mention »",
+          _sc.kw and _sc.kw[0].get("suppress_embeds") is True
+          and isinstance(_sc.kw[0].get("allowed_mentions"), discord.AllowedMentions), _sc.kw)
+    import inspect as _inCp
+    _pw = _inCp.signature(discord.Webhook.send).parameters
+    check("followup (Webhook.send) accepte « suppress_embeds », « allowed_mentions » et « view »",
+          all(k in _pw for k in ("suppress_embeds", "allowed_mentions", "view")))
+    check("salon -content : « suppress_embeds », « allowed_mentions » et « view » sont transmis",
+          {"suppress_embeds", "allowed_mentions", "view"} <= U._KW_SALON)
 
     # Une description plus longue que le plafond des bangers, mais seule : coupee
     # comme dans all-banger (« … »), et la coupe se dit au journal.
@@ -14238,11 +14407,12 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     # (combien sur combien demandes, ce qui a ete ecarte) passe SOUS la barre.
     print("\n== 7. plus d'intro avant la barre ==")
 
-    def copie(c):
-        """Un message « **Titre à copier** » + bloc de code, qui suit sa carte."""
-        c = str(c or "")
-        return c.startswith(("**Description à copier**", "**Caption à copier**",
-                             "**SON / CONSIGNE**"))
+    def copie(e):
+        """Un texte a copier : seul dans son message, qui suit sa carte, sans
+        mention ni apercu (_envoyer_a_copier)."""
+        return (e.get("suppress_embeds") is True
+                and isinstance(e.get("allowed_mentions"), discord.AllowedMentions)
+                and not (e.get("file") or e.get("files") or e.get("embed")))
 
     def barre(envois):
         """(le message de la barre, sa derniere description) ; (None, "") sans barre."""
@@ -14263,7 +14433,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         # Les seuls messages ordinaires permis : les blocs a copier qui
         # SUIVENT une carte (bouton « copier » de Discord, 27/09/2026).
         textes = [str(e.get("content"))[:70] for e in cont.envois
-                  if e.get("content") and not copie(e["content"])]
+                  if e.get("content") and not copie(e)]
         _i1 = next((i for i, e in enumerate(cont.envois)
                     if isinstance(e.get("view"), discord.ui.LayoutView)), len(cont.envois))
         check(f"sans intro, {nom_cmd} : aucun bloc a copier avant la premiere carte",
@@ -14288,7 +14458,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     b, fin = barre(cont.envois)
     check("sans intro : « 1 caption(s) favorite(s) écartée(s) : texte vide » sous la barre",
           "1 caption(s) favorite(s) écartée(s) : texte vide." in fin
-          and not [e for e in cont.envois if e.get("content") and not copie(e["content"])], fin)
+          and not [e for e in cont.envois if e.get("content") and not copie(e)], fin)
     _fav0 = U.fav_templates_for
     U.fav_templates_for = lambda ident, limit=15, **_kw: ([(TPL[0], DRAFT)], 3)
     try:
@@ -14297,7 +14467,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
         U.fav_templates_for = _fav0
     b, fin = barre(cont.envois)
     check("sans intro : « 3 template(s) étoilé(s) écarté(s) : pas de point de coupe » sous la barre",
-          "3 template(s) étoilé(s) écarté(s)" in fin and not [e for e in cont.envois if e.get("content") and not copie(e["content"])],
+          "3 template(s) étoilé(s) écarté(s)" in fin and not [e for e in cont.envois if e.get("content") and not copie(e)],
           fin)
     _mq0 = U.marque_templates_for
 
@@ -14313,7 +14483,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     b, fin = barre(cont.envois)
     check("sans intro : Trash dit ses ecartes (coupe, ⊘) et « 1 sur 3 demandés » sous la barre",
           "écarté(s) : pas de" in fin and "2 montage(s)" in fin and "mis de côté ⊘" in fin
-          and "**1** sur **3** demandés" in fin and not [e for e in cont.envois if e.get("content") and not copie(e["content"])],
+          and "**1** sur **3** demandés" in fin and not [e for e in cont.envois if e.get("content") and not copie(e)],
           fin)
 
     # La barre refusee par Discord : la note ne se perd pas avec elle.

@@ -27459,6 +27459,7 @@ try:
         def __init__(s, nom, cid):
             s.name, s.id = nom, cid
             s.envois, s.refuser_carte, s.msgs = [], False, {}
+            s.refuser_texte = None
 
         async def send(s, content=None, **kw):
             fs = list(kw.get("files") or []) + ([kw["file"]] if kw.get("file") else [])
@@ -27468,9 +27469,14 @@ try:
             if s.refuser_carte and isinstance(kw.get("view"), _dBg.ui.LayoutView):
                 raise _dBg.HTTPException(_tyBg.SimpleNamespace(status=400, reason="refus"),
                                          "carte refusee")
+            if s.refuser_texte is not None and content == s.refuser_texte:
+                raise _dBg.HTTPException(_tyBg.SimpleNamespace(status=400, reason="refus"),
+                                         "texte refuse")
             m = _MsgBg()
             s.msgs[m.id] = m
-            s.envois.append({"content": content, "view": kw.get("view"), "noms": noms, "id": m.id})
+            s.envois.append({"content": content, "view": kw.get("view"), "noms": noms, "id": m.id,
+                             "mentions": kw.get("allowed_mentions"),
+                             "sans_apercu": kw.get("suppress_embeds")})
             return m
 
         async def fetch_message(s, mid):
@@ -27543,21 +27549,41 @@ try:
         _wBg._BOT_REF = _BotBg(_bBg, _sBg)
         _okBg, _msgBgR, _metaBg = _wBg._send_reel_to_banger_channel("lola", _vBg)
         _e = _sBg.envois
-        check("salon banger : UN message, la carte (vue + pieces jointes, aucun texte a cote)",
-              _okBg is True and _msgBgR == "#💥・banger-lola" and len(_e) == 1
+        # 28/09/2026 : les textes suivent la carte, chacun SEUL dans son
+        # message (sur telephone, « Copier le texte » prend le message entier).
+        check("salon banger : la carte d'abord (vue + pieces jointes, aucun texte dedans)",
+              _okBg is True and _msgBgR == "#💥・banger-lola" and _e
               and isinstance(_e[0]["view"], _dBg.ui.LayoutView) and _e[0]["content"] is None
               and _e[0]["noms"] == ["reel_1.mp4", "EXEMPLE_reel_1.example.mp4"],
               (_okBg, _msgBgR, [(x["content"], x["noms"]) for x in _e]))
+
+        def _etqBg(x):
+            _b = [c for c in getattr(x.get("view"), "children", []) if isinstance(c, _dBg.ui.Button)]
+            return _b[0].label if len(_b) == 1 and _b[0].disabled else None
+
+        def _suiteBg(envois):
+            return [x for x in envois if x["view"] is None or not isinstance(x["view"], _dBg.ui.LayoutView)]
         _txBg, _urBg = _lireBg(_e[0]) if _e and _e[0]["view"] is not None else ([], [])
         check("salon banger : en-tete « **1/1** · <photo> lola », galerie = pieces jointes",
               _txBg[:1] == [_EBg]
               and _urBg == ["attachment://reel_1.mp4", "attachment://EXEMPLE_reel_1.example.mp4"],
               (_txBg[:1], _urBg))
-        check("salon banger : caption ENTIERE (plus coupee a 1990 signes) et description, "
-              "dans leurs blocs a copier",
-              "**Caption à copier**\n```\n" + _CAPBg + "\n```" in _txBg
-              and "**Description à copier**\n```\n" + _DESCBg + "\n```" in _txBg,
-              [t[:50] for t in _txBg])
+        _sBgT = _suiteBg(_e[1:])
+        _capRecue = "".join(str(x["content"]) for x in _sBgT[:-1])
+        check("salon banger : caption ENTIERE (plus coupee a 1990 signes) puis description, "
+              "chacune seule, sans titre ni bloc de code, nommees par un bouton gris",
+              len(_sBgT) == 3 and not [t for t in _txBg if "à copier" in t]
+              and "".join(_CAPBg.split()) == "".join(_capRecue.split())
+              and _sBgT[-1]["content"] == _DESCBg
+              and _etqBg(_sBgT[0]) == "📝 Caption" and _etqBg(_sBgT[1]) is None
+              and _etqBg(_sBgT[-1]) == "📄 Description"
+              and all(len(str(x["content"])) <= 2000 and "```" not in str(x["content"])
+                      for x in _sBgT),
+              [(str(x["content"])[:30], _etqBg(x)) for x in _sBgT])
+        check("salon banger : les textes ne notifient personne et ne deplient aucun apercu",
+              _sBgT and all(x["sans_apercu"] is True and x["mentions"] is not None
+                            and not x["mentions"].everyone for x in _sBgT),
+              [(x["sans_apercu"], x["mentions"]) for x in _sBgT])
         check("salon banger : l'exemple reste signale dans la carte",
               _uBg._ALERTE_EXEMPLE in _txBg, _txBg[:2])
         # Tout ce qui est parti dans le salon : la carte ET un eventuel texte.
@@ -27565,12 +27591,13 @@ try:
         check("salon banger : plus aucune consigne de l'ancien format",
               _txBg and not [a for a in _ANCIENBg if a in _toutBg],
               [a for a in _ANCIENBg if a in _toutBg] or "aucune carte")
-        check("salon banger : l'accuse garde l'id du message (retirer l'etoile l'efface)",
-              _metaBg == {"guild_id": 4242, "channel_id": 9101, "message_ids": [_e[0]["id"]]}
+        check("salon banger : l'accuse garde l'id de CHAQUE message (retirer l'etoile les efface)",
+              _metaBg == {"guild_id": 4242, "channel_id": 9101,
+                          "message_ids": [x["id"] for x in _e]}
               if _e else False, _metaBg)
         _delBg = _wBg._delete_banger_messages(_metaBg or {})
-        check("salon banger : retirer l'etoile supprime la carte",
-              _delBg == (True, "1 message(s) supprimé(s)")
+        check("salon banger : retirer l'etoile supprime la carte ET ses textes",
+              _delBg == (True, f"{len(_e)} message(s) supprimé(s)")
               and all(m.efface for m in _sBg.msgs.values()), _delBg)
 
         # Discord refuse la carte : l'ancien envoi, SANS ses consignes, rien de
@@ -27581,30 +27608,41 @@ try:
         del _journalBg.lignes[:]
         _ok2Bg, _m2Bg, _meta2Bg = _wBg._send_reel_to_banger_channel("lola", _vBg)
         _c2Bg = [str(x["content"] or "") for x in _s2Bg.envois]
-        # Un texte court part en UN message « **Titre** + bloc » (bouton
-        # « copier » de Discord, 27/09/2026) ; un texte long, sous son titre,
-        # en plusieurs blocs. Les deux formes comptent.
-        _codeBg = "".join(
-            (c[4:-4] if c.startswith("```\n") else c.split("\n```\n", 1)[1][:-4])
-            for c in _c2Bg if c.endswith("\n```")
-            and (c.startswith("```\n") or (c.startswith("**") and "\n```\n" in c)))
+        # Apres l'en-tete et les fichiers : les textes, seuls, sans titre ni
+        # bloc de code (28/09/2026), la caption longue en deux messages.
+        _codeBg = "".join(_c2Bg[1:])
         check("salon banger, carte refusee : repli en texte, video et exemple joints, journalise",
-              _ok2Bg is True and not [x for x in _s2Bg.envois if x["view"] is not None]
+              _ok2Bg is True
+              and not [x for x in _s2Bg.envois if isinstance(x["view"], _dBg.ui.LayoutView)]
               and _s2Bg.envois and _s2Bg.envois[0]["noms"] == ["reel_1.mp4", "EXEMPLE_reel_1.example.mp4"]
               and _c2Bg[0].startswith(_EBg)
               and any("refusee" in l and "ancien envoi" in l for l in _journalBg.lignes),
               (_ok2Bg, _c2Bg[:2], _journalBg.lignes[-2:]))
-        check("salon banger, carte refusee : caption et description arrivent entieres",
-              "".join(_CAPBg.split()) in "".join(_codeBg.split()) and _DESCBg in _codeBg
-              and any(c.startswith("**Caption à copier**") for c in _c2Bg)
-              and any(c.startswith("**Description à copier**") for c in _c2Bg),
+        check("salon banger, carte refusee : caption et description arrivent entieres, seules",
+              "".join(_CAPBg.split()) in "".join(_codeBg.split()) and _c2Bg[-1] == _DESCBg
+              and not [c for c in _c2Bg if "à copier" in c or "```" in c]
+              and _etqBg(_s2Bg.envois[1]) == "📝 Caption"
+              and _etqBg(_s2Bg.envois[-1]) == "📄 Description",
               (len(_codeBg), _c2Bg[1:3]))
         check("salon banger, carte refusee : aucune consigne de l'ancien format",
               not [a for a in _ANCIENBg if a in "\n".join(_c2Bg)],
               [a for a in _ANCIENBg if a in "\n".join(_c2Bg)])
         check("salon banger, carte refusee : TOUS les messages du repli sont retenus pour l'effacement",
               (_meta2Bg or {}).get("message_ids") == [x["id"] for x in _s2Bg.envois]
-              and len(_s2Bg.envois) >= 5, (_meta2Bg, len(_s2Bg.envois)))
+              and len(_s2Bg.envois) == 4, (_meta2Bg, len(_s2Bg.envois)))
+
+        # Un texte refuse APRES la carte : l'envoi a moitie fait est retire
+        # (sans etoile, rien ne l'effacerait, et un second clic la doublerait),
+        # et le site le dit.
+        _s4Bg = _SalonBg("banger-lola", 9104)
+        _s4Bg.refuser_texte = _DESCBg
+        _wBg._BOT_REF = _BotBg(_bBg, _s4Bg)
+        _ok4Bg, _m4Bg, _meta4Bg = _wBg._send_reel_to_banger_channel("lola", _vBg)
+        check("salon banger : texte refuse apres la carte -> envoi annule, carte et caption "
+              "retirees, le site le dit",
+              _ok4Bg is False and _meta4Bg is None and "refusé" in _m4Bg and "annulé" in _m4Bg
+              and len(_s4Bg.envois) == 3 and all(m.efface for m in _s4Bg.msgs.values()),
+              (_ok4Bg, _m4Bg, len(_s4Bg.envois), [m.efface for m in _s4Bg.msgs.values()]))
 
         # Legende reprise d'un autre compte : retenue comme chez le VA, et dite.
         _s3Bg = _SalonBg("banger-lola", 9103)
@@ -27613,7 +27651,8 @@ try:
         _tx3Bg = _lireBg(_s3Bg.envois[0])[0] if _s3Bg.envois and _s3Bg.envois[0]["view"] else []
         check("salon banger : une legende reprise d'un autre compte (@) est retenue, et la carte le dit",
               _ok3Bg is True and _uBg._ALERTE_DESC_RETENUE in _tx3Bg
-              and not [t for t in _tx3Bg if "autre_creatrice" in t or "Description à copier" in t],
+              and not [t for t in _tx3Bg if "autre_creatrice" in t or "Description à copier" in t]
+              and not [x for x in _s3Bg.envois if "autre_creatrice" in str(x["content"] or "")],
               (_ok3Bg, _m3Bg, _tx3Bg))
     finally:
         _wBg._BOT_REF = _svBg

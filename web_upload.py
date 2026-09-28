@@ -570,8 +570,9 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
     """Envoie un REEL de la Bibliothèque dans banger-{identity} : la MÊME carte
     que celle que le bot livre a un VA dans son -content (cogs/user.py,
     _livrer_contenu) -- « **1/1** · <photo> identite », la video (et son
-    exemple) dans la galerie, puis « Caption à copier » et « Description à
-    copier ».
+    exemple) dans la galerie -- puis la caption et la description, chacune
+    SEULE dans son message, pour qu'un appui long sur telephone ne copie
+    qu'elle (28/09/2026).
 
     Ce salon gardait l'ancien format (« ▶ REEL — identité / ↓ Télécharge la
     vidéo CLEAN », « 📝 CAPTION (à mettre PAR-DESSUS…) », « 📄 DESCRIPTION (à
@@ -580,8 +581,8 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
     que le proprietaire a fait retirer (« ils savent très bien ce qu'ils ont
     à faire »). Il coupait en plus la caption a 1990 signes sans le dire.
     Une seule voie desormais : la carte, et si Discord la refuse, le repli de
-    _livrer_contenu (en-tete + fichier(s), puis les textes en blocs a copier,
-    decoupes et non coupes), ecrit au journal du bot.
+    _livrer_contenu (en-tete + fichier(s), puis les memes textes, decoupes et
+    non coupes), ecrit au journal du bot.
 
     `video_path` = chemin du fichier video CLEAN. Caption, description et
     exemple sont lus par le lecteur du bot (_video_meta : <stem>.txt,
@@ -649,11 +650,28 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
                 def __init__(s):
                     s.guild = guild
                     s.followup = s
+                    # La cle du verrou de _livrer_contenu : deux etoiles vers
+                    # ce salon ne melangent pas leurs textes.
+                    s.channel_id = banger.id
 
                 async def send(s, content=None, **kw):
                     m = await banger.send(content, **kw)
                     sent_ids.append(m.id)
                     return m
+
+            async def _retirer_partiels():
+                """Un envoi a moitie fait est RETIRE : une carte sans ses textes
+                (ou des textes sans carte) resterait sans etoile, donc sans
+                rien pour l'effacer, et un second clic la doublerait."""
+                n = 0
+                for mid in sent_ids:
+                    try:
+                        await (await banger.fetch_message(mid)).delete()
+                        n += 1
+                    except Exception as e:                  # noqa: BLE001
+                        print(f"[banger] message partiel {mid} non retire "
+                              f"({type(e).__name__}: {e})", flush=True)
+                return n
 
             medias = [(video_path, video_path.name)]
             if example:
@@ -661,21 +679,28 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
             alertes = [_u._ALERTE_EXEMPLE] if example else []
             if retenue:
                 alertes.append(_u._ALERTE_DESC_RETENUE)
+            bilan = {}
             try:
                 await _u._livrer_contenu(
-                    _SuiviSalon(), 1, 1, ident, medias,
+                    _SuiviSalon(), 1, 1, ident, medias, bilan=bilan,
                     textes=[(_u._T_CAP, caption), (_u._T_DESC, description)],
-                    # UN seul message dans ce salon : retirer l'etoile le
-                    # supprime, textes compris (voir _livrer_contenu).
-                    textes_a_part=False,
+                    # Les textes suivent la carte, chacun dans son message,
+                    # comme chez le VA : dans la carte, « Copier le texte »
+                    # les rendait inseparables sur telephone. _SuiviSalon
+                    # retient chaque message : retirer l'etoile les efface.
                     alertes=alertes, quoi=f"banger {ident}")
             except FileNotFoundError:
                 return False, "fichier introuvable (déplacé entre-temps)", None
-            except discord.HTTPException as e:
+            except Exception as e:                           # noqa: BLE001
                 # La carte, puis l'ancien envoi (avec, puis sans l'exemple)
-                # refuses. Ce qui a pu partir avant l'echec est dit.
-                deja = f" ({len(sent_ids)} message(s) déjà posté(s))" if sent_ids else ""
-                return False, f"erreur envoi Discord{deja}: {e}", None
+                # refuses -- ou une coupure en cours de route.
+                n = await _retirer_partiels() if sent_ids else 0
+                deja = f" ({n} message(s) partiel(s) retiré(s))" if sent_ids else ""
+                return False, f"erreur envoi Discord{deja}: {type(e).__name__}: {e}", None
+            if bilan.get("textes_rates"):
+                n = await _retirer_partiels()
+                return (False, "Discord a refusé " + " et ".join(bilan["textes_rates"])
+                        + f" : envoi annulé, {n} message(s) retiré(s)", None)
             meta = {"guild_id": guild.id, "channel_id": banger.id, "message_ids": sent_ids}
             return True, f"#{banger.name}", meta
         if not found_category:
