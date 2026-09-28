@@ -654,3 +654,338 @@ def dessiner_bilan(resume: dict, attendus, photos: dict, jour: str = "",
     if len(octets) > POIDS_MAX:
         raise ValueError("image du bilan trop lourde (%d octets)" % len(octets))
     return octets
+
+
+# ==============================================================================
+# Le message EN DIRECT d'une session (demande du proprietaire du 28/09 : « la
+# meme chose » que le bilan, pour le message qui suit la session en cours).
+# ==============================================================================
+#
+# Le meme message sert deux fois : reecrit toutes les quatre minutes tant que
+# la session tourne, puis fige a la fin -- il devient le compte rendu
+# definitif. L'image dit donc toujours DE QUAND elle date (« relevé à
+# 10:24 ») : c'est ce qui remplace le pied « Mis à jour toutes les 4 min ».
+
+#: Vu il y a deux minutes au plus : encore dans le salon. Le pointage passe
+#: chaque minute ; au-dela de deux sans etre vu, la personne est partie (la
+#: regle du direct texte, _ligne_presence).
+ENCORE_LA_SECONDES = 120
+
+GRIS_PASTILLE = (78, 80, 88)
+VERT_CLAIR = (87, 242, 135)
+
+
+def _hhmm(ts, fuseau: str = "") -> str:
+    """« 10:02 » dans le fuseau du suivi ; « ? » si l'horodatage manque."""
+    from zoneinfo import ZoneInfo
+    try:
+        tz = ZoneInfo(fuseau or "Africa/Porto-Novo")
+    except Exception:                                 # noqa: BLE001
+        tz = _dt.timezone.utc
+    try:
+        return _dt.datetime.fromtimestamp(float(ts), tz).strftime("%H:%M")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
+
+
+def direct(session: dict, attendus, maintenant: float = None, fige: bool = False,
+           fuseau: str = "", jour: str = "") -> dict:
+    """Ce que l'image du direct montre, calcule sans rien dessiner.
+
+    `session` est UNE entree de `sessions_voc.resume_jour(..., limiter_aux_
+    attendus=False)["sessions"]` : tous ceux que le registre a vus a cette
+    session, presents (au-dela du seuil) et partiels (en dessous). Ceux qui
+    ne sont pas attendus restent, marques « hors liste » : le direct texte
+    les filtrait (`if k in noms`), ils disparaissaient sans un mot.
+    """
+    import time as _t
+    maintenant = _t.time() if maintenant is None else float(maintenant)
+    attendus = [a for a in (attendus or []) if isinstance(a, dict) and a.get("id")]
+    index = {str(a["id"]): a for a in attendus}
+    liste_connue = bool(index)
+
+    def personne(p):
+        uid = str(p.get("id") or "")
+        try:
+            vu_il_y_a = maintenant - float(p.get("derniere"))
+        except (TypeError, ValueError):
+            vu_il_y_a = None
+        # Au gel, jamais « encore la » : le message ne bouge plus, et
+        # l'afficher serait faux pour toujours.
+        encore = (not fige) and vu_il_y_a is not None and vu_il_y_a <= ENCORE_LA_SECONDES
+        return {"id": uid,
+                # Le nom du SITE quand la personne est attendue (comme le
+                # bilan), sinon le dernier nom connu du registre.
+                "nom": (index.get(uid) or {}).get("nom") or p.get("nom") or uid,
+                "attendu": uid in index,
+                "secondes": int(p.get("secondes") or 0),
+                "arrive": _hhmm(p.get("premiere"), fuseau) if p.get("premiere") else "?",
+                "etat": "encore_la" if encore else "parti",
+                "parti": _hhmm(p.get("derniere"), fuseau) if p.get("derniere") else "?"}
+
+    def tri(liste):
+        return sorted(liste, key=lambda g: (-g["secondes"], g["nom"].casefold()))
+
+    presents = tri(personne(p) for p in (session.get("presents") or []) if p.get("id"))
+    partiels = tri(personne(p) for p in (session.get("partiels") or []) if p.get("id"))
+    vus = {g["id"] for g in presents} | {g["id"] for g in partiels}
+    manquants = sorted(([dict(a, id=str(a["id"])) for a in attendus if str(a["id"]) not in vus]
+                        if liste_connue else []),
+                       key=lambda a: str(a.get("nom") or "").casefold())
+    hl = session.get("heures_locales") or {}
+    heure = hl.get("BJ") or session.get("heure") or "?"
+    nom = str(session.get("nom") or session.get("id") or "Session")
+    return {
+        "id": session.get("id"), "nom": nom, "heure": heure, "mg": hl.get("MG") or "",
+        "titre": "%s · %s" % (nom, heure), "fige": bool(fige), "jour": jour or "",
+        "releve": _hhmm(maintenant, fuseau), "fuseau": fuseau or "",
+        "presents": presents, "partiels": partiels, "manquants": manquants,
+        "liste_connue": liste_connue, "attendus": len(index),
+        "attendus_vus": sum(1 for g in presents + partiels if g["attendu"]),
+        "vus": len(presents) + len(partiels),
+        "hors_liste": sum(1 for g in presents + partiels if not g["attendu"]) if liste_connue else 0,
+    }
+
+
+def ids_direct(session: dict, attendus, fige: bool = False) -> list:
+    """Les identifiants dont l'image du direct montre la photo."""
+    d = direct(session, attendus, fige=fige)
+    return [g["id"] for g in d["presents"] + d["partiels"]] + [a["id"] for a in d["manquants"]]
+
+
+def _date_courte(jour: str) -> str:
+    """« dimanche 27/09 », ou rien si le jour est illisible."""
+    try:
+        d = _dt.date.fromisoformat(str(jour))
+    except ValueError:
+        return ""
+    return "%s %02d/%02d" % (_JOURS[d.weekday()], d.day, d.month)
+
+
+def dessiner_direct(session: dict, attendus, photos: dict, maintenant: float = None,
+                    fige: bool = False, fuseau: str = "", jour: str = "") -> bytes:
+    """Le PNG du message en direct d'une session. Leve si l'image est impossible.
+
+    Meme largeur, memes polices, meme palette et memes regles de noms que
+    le bilan : les deux images se lisent de la meme facon dans le salon.
+    """
+    t = direct(session, attendus, maintenant, fige, fuseau, jour)
+    photos = photos or {}
+    K = _K
+    largeur = LARGEUR
+
+    def p(v):
+        return int(round(v * K))
+
+    f_titre = police("bold", p(46))
+    f_sous = police("regular", p(24))
+    f_compte = police("bold", p(34))
+    f_compte2 = police("regular", p(25))
+    f_petit = police("regular", p(24))
+    f_petit_b = police("bold", p(24))
+    f_nom = police("medium", p(27))
+    f_pastille = police("bold", p(25))
+    f_duree = police("bold", p(28))
+    f_section = police("bold", p(28))
+    f_absent = police("regular", p(25))
+    f_etat = police("bold", p(24))
+
+    mesure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    marge = 40
+    h_tete = 128
+    h_section = 54
+    h_ligne = 72
+    h_vide = 80
+    avatar = 56
+    h_abs = 54
+    petit = 44
+    # Colonnes d'une ligne, de droite a gauche : la pastille d'etat (« parti
+    # 10:40 », la plus large, tient en 150 px), la duree, l'heure d'arrivee ;
+    # le nom prend le reste (430 px : les noms du 27/09 tiennent entiers).
+    l_etat = 176
+    x_etat = largeur - marge - 14 - l_etat
+    l_duree = 124
+    x_duree = x_etat - 16 - l_duree
+    x_arrive = x_duree - 16 - 150
+    x_nom = marge + 14 + avatar + 16
+    l_nom = x_arrive - 14 - x_nom
+
+    libelles_abs = []
+    for a in t["manquants"]:
+        court, autres = nom_court(a.get("nom"))
+        court = nettoyer(court, f_absent)
+        libelles_abs.append((court, court or "VA …%s" % str(a["id"])[-4:],
+                             " +%d" % autres if autres else ""))
+
+    def place_abs(nb):
+        return p((largeur - 2 * marge) / nb - petit - 28)
+
+    nb_col_abs = 4 if libelles_abs and all(
+        _largeur(mesure, nom + suf, f_absent) <= place_abs(4)
+        for _, nom, suf in libelles_abs) else 3
+
+    # --- hauteur : chaque bloc ne compte que s'il est dessine ---------------
+    hauteur = marge + h_tete
+    if t["presents"] or t["partiels"]:
+        if t["presents"]:
+            hauteur += h_section + h_ligne * len(t["presents"])
+        if t["partiels"]:
+            hauteur += 14 + h_section + h_ligne * len(t["partiels"])
+    else:
+        hauteur += h_vide
+    rangs_abs = (len(t["manquants"]) + nb_col_abs - 1) // nb_col_abs
+    if t["liste_connue"]:
+        hauteur += 14 + h_section + (h_abs * rangs_abs if rangs_abs else 44)
+    else:
+        hauteur += 14 + 60
+    hauteur += 28
+
+    img = Image.new("RGB", (p(largeur), p(hauteur)), FOND)
+    d = ImageDraw.Draw(img)
+
+    # --- en-tete -------------------------------------------------------------
+    droite = p(largeur - marge)
+    # Le compteur d'abord : le titre se coupe devant lui, jamais l'inverse.
+    if t["liste_connue"]:
+        fin = " sur %d" % t["attendus"]
+        d.text((droite, p(marge + 4)), fin, font=f_compte2, fill=TEXTE_2, anchor="rt")
+        x_fin = droite - _largeur(d, fin, f_compte2)
+        compteur = texte_compteur(t["attendus_vus"])
+        d.text((x_fin, p(marge)), compteur, font=f_compte, fill=TEXTE, anchor="rt")
+        x_compteur = x_fin - _largeur(d, compteur, f_compte)
+        if t["hors_liste"]:
+            d.text((droite, p(marge + 62)), "+ %d hors liste" % t["hors_liste"],
+                   font=f_petit_b, fill=AMBRE, anchor="rt")
+    else:
+        compteur = texte_compteur(t["vus"], False)
+        d.text((droite, p(marge)), compteur, font=f_compte, fill=TEXTE, anchor="rt")
+        x_compteur = droite - _largeur(d, compteur, f_compte)
+        d.text((droite, p(marge + 62)), "liste des attendus inconnue",
+               font=f_petit_b, fill=AMBRE, anchor="rt")
+
+    etat_txt = "Terminée" if t["fige"] else "En cours"
+    l_pastille = _largeur(d, etat_txt, f_etat) + p(36)
+    place_titre = x_compteur - p(marge) - l_pastille - p(18 + 30)
+    titre = ajuster(d, nettoyer(t["titre"], f_titre), f_titre, max(p(120), place_titre))
+    d.text((p(marge), p(marge)), titre, font=f_titre, fill=TEXTE, anchor="lt")
+    xp = p(marge) + _largeur(d, titre, f_titre) + p(18)
+    fond_p, encre_p = ((GRIS_PASTILLE, TEXTE) if t["fige"] else (VERT, (255, 255, 255)))
+    d.rounded_rectangle((xp, p(marge + 5), xp + l_pastille, p(marge + 45)),
+                        radius=p(20), fill=fond_p)
+    d.text((xp + l_pastille / 2, p(marge + 25)), etat_txt, font=f_etat, fill=encre_p, anchor="mm")
+    sous = [x for x in (_date_courte(t["jour"]), "BJ %s" % t["heure"],
+                        ("MG %s" % t["mg"]) if t["mg"] else "") if x]
+    d.text((p(marge), p(marge + 66)), " · ".join(sous), font=f_sous, fill=TEXTE_2, anchor="lt")
+    if not t["fige"]:
+        x_rel = p(marge) + _largeur(d, " · ".join(sous), f_sous)
+        d.text((x_rel, p(marge + 66)), " · relevé à %s" % t["releve"], font=f_petit_b,
+               fill=VERT_CLAIR, anchor="lt")
+
+    y = marge + h_tete
+
+    def section(y, libelle):
+        d.line((p(marge), p(y + 4), p(largeur - marge), p(y + 4)), fill=SEPARATEUR, width=p(2))
+        d.text((p(marge), p(y + 16)), libelle, font=f_section, fill=TEXTE, anchor="lt")
+        return y + h_section
+
+    def ligne(y, r, g, partiel):
+        if r % 2 == 0:
+            d.rectangle((p(marge), p(y), p(largeur - marge), p(y + h_ligne)), fill=FOND_LIGNE)
+        court, autres = nom_court(g["nom"])
+        court = nettoyer(court, f_nom)
+        rond = _rond(photos.get(g["id"]), g["id"], court, p(avatar))
+        img.paste(rond, (p(marge + 14), p(y + (h_ligne - avatar) / 2)), rond)
+        court = court or "VA …%s" % g["id"][-4:]
+        notes = []
+        if not g["attendu"] and t["liste_connue"]:
+            notes.append(("hors liste", AMBRE, f_petit_b))
+        if autres:
+            notes.append(("+%d compte%s" % (autres, "s" if autres > 1 else ""), TEXTE_3, f_petit))
+        if notes:
+            d.text((p(x_nom), p(y + 8)), ajuster(d, court, f_nom, p(l_nom)),
+                   font=f_nom, fill=TEXTE, anchor="lt")
+            xn, x_max = p(x_nom), p(x_nom + l_nom)
+            for k, (txt, coul, fn) in enumerate(notes):
+                if k:
+                    txt = "· " + txt
+                    xn += _largeur(d, " ", fn)
+                txt = ajuster(d, txt, fn, max(0, x_max - xn))
+                d.text((xn, p(y + 61)), txt, font=fn, fill=coul, anchor="ls")
+                xn += _largeur(d, txt, fn)
+        else:
+            d.text((p(x_nom), p(y + h_ligne / 2)), ajuster(d, court, f_nom, p(l_nom)),
+                   font=f_nom, fill=TEXTE, anchor="lm")
+        cy = y + h_ligne / 2
+        d.text((p(x_arrive), p(cy)), "arrivé %s" % g["arrive"], font=f_petit,
+               fill=TEXTE_2, anchor="lm")
+        cx = x_duree + l_duree / 2
+        if partiel:
+            # Le temps AUSSI pour un passage court : deux minutes et
+            # quarante ne se valent pas, c'est ce chiffre qui dit s'il faut
+            # en parler.
+            d.rounded_rectangle((p(cx - 56), p(cy - 23), p(cx + 56), p(cy + 23)),
+                                radius=p(23), fill=ORANGE)
+            d.text((p(cx), p(cy)), "%d min" % (g["secondes"] // 60), font=f_pastille,
+                   fill=ORANGE_TEXTE, anchor="mm")
+        else:
+            d.text((p(cx), p(cy)), duree(g["secondes"]), font=f_duree, fill=TEXTE, anchor="mm")
+        if g["etat"] == "encore_la":
+            txt, fond, encre = "encore là", VERT, (255, 255, 255)
+        else:
+            txt, fond, encre = "parti %s" % g["parti"], GRIS_PASTILLE, TEXTE
+        d.rounded_rectangle((p(x_etat), p(cy - 23), p(x_etat + l_etat), p(cy + 23)),
+                            radius=p(23), fill=fond)
+        d.text((p(x_etat + l_etat / 2), p(cy)), ajuster(d, txt, f_pastille, p(l_etat - 16)),
+               font=f_pastille, fill=encre, anchor="mm")
+
+    if t["presents"] or t["partiels"]:
+        if t["presents"]:
+            y = section(y, "Présents (%d)" % len(t["presents"]))
+            for r, g in enumerate(t["presents"]):
+                ligne(y, r, g, False)
+                y += h_ligne
+        if t["partiels"]:
+            y = section(y + 14, "Passés vite (%d)" % len(t["partiels"]))
+            for r, g in enumerate(t["partiels"]):
+                ligne(y, r, g, True)
+                y += h_ligne
+    else:
+        d.rounded_rectangle((p(marge), p(y), p(largeur - marge), p(y + h_vide - 12)),
+                            radius=p(12), fill=FOND_LIGNE)
+        d.text((p(marge + 20), p(y + (h_vide - 12) / 2)),
+               "Personne n'est venu à cette session." if t["fige"] else "Personne pour l'instant.",
+               font=f_nom, fill=TEXTE_2, anchor="lm")
+        y += h_vide
+
+    # --- en bas : qui manque (ou pourquoi on ne peut pas le dire) -----------
+    y += 14
+    if not t["liste_connue"]:
+        d.line((p(marge), p(y + 4), p(largeur - marge), p(y + 4)), fill=SEPARATEUR, width=p(2))
+        d.text((p(marge), p(y + 22)),
+               ajuster(d, "Liste des VA attendus inconnue : les absents ne peuvent pas être établis.",
+                       f_absent, p(largeur - 2 * marge)),
+               font=f_absent, fill=AMBRE, anchor="lt")
+    else:
+        y = section(y, ("Absents (%d)" if t["fige"] else "Pas encore là (%d)") % len(t["manquants"]))
+        if not t["manquants"]:
+            d.text((p(marge), p(y + 4)), "Aucun : tous les VA attendus sont passés.",
+                   font=f_absent, fill=TEXTE_2, anchor="lt")
+        l_case = (largeur - 2 * marge) / nb_col_abs
+        for k, a in enumerate(t["manquants"]):
+            ligne_a, col_a = divmod(k, nb_col_abs)
+            x = marge + col_a * l_case
+            ya = y + ligne_a * h_abs
+            court_net, nom, suf = libelles_abs[k]
+            rond = _rond(photos.get(a["id"]), a["id"], court_net, p(petit), attenue=True)
+            img.paste(rond, (p(x), p(ya + (h_abs - petit) / 2)), rond)
+            d.text((p(x + petit + 12), p(ya + h_abs / 2)),
+                   libelle_absent(d, nom, suf, f_absent, place_abs(nb_col_abs)),
+                   font=f_absent, fill=TEXTE_2, anchor="lm")
+
+    final = img.resize((largeur, hauteur), Image.LANCZOS)
+    out = io.BytesIO()
+    final.save(out, "PNG", optimize=False, compress_level=6)
+    octets = out.getvalue()
+    if len(octets) > POIDS_MAX:
+        raise ValueError("image du direct trop lourde (%d octets)" % len(octets))
+    return octets

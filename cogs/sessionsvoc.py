@@ -301,6 +301,230 @@ async def contenu_bilan(bot, jour: str) -> tuple:
         return {"embed": embed_resume_texte(jour, att)}, infos
 
 
+# ==============================================================================
+# Le message EN DIRECT en image (demande du proprietaire du 28/09 : « la meme
+# chose » que le bilan pour le message qui suit la session en cours). Fonctions
+# de module pour la meme raison que le bilan : /demosessions (bot admin) doit
+# montrer EXACTEMENT ce que le bot principal pose dans le salon.
+# ==============================================================================
+
+#: La piece jointe du direct : une par session, remplacee a chaque
+#: reecriture. [a-zA-Z0-9_.-] seulement (sinon Discord renomme le fichier et
+#: la galerie « attachment://... » pointe dans le vide).
+NOM_DIRECT = "direct_%s_%s.png"
+
+#: Un gel qui echoue est retente a la minute suivante, GEL_ESSAIS_MAX fois ;
+#: ensuite toutes les GEL_ESPACEMENT secondes. Abandonner apres dix minutes
+#: laissait le message sur « En cours » pour toujours des qu'une panne Discord
+#: durait un peu : le gel doit avoir lieu, fige ne passe a True qu'apres une
+#: reecriture reussie.
+GEL_ESSAIS_MAX = 10
+GEL_ESPACEMENT = 15 * 60
+#: Seule limite : sept jours apres la fin de la session (un week-end de panne
+#: est couvert). Au-dela -- acces au salon retire pour de bon --, on arrete de
+#: relire en le disant (gel_rate) ; direct_purger n'est appele nulle part, le
+#: registre ne s'en chargerait pas.
+GEL_ABANDON = 7 * 24 * 3600
+
+#: Discord plafonne le texte d'un message en composants (V2) a 4000
+#: caracteres, tous blocs confondus.
+TEXTE_V2_MAX = 3900
+
+
+def titre_direct(session: dict) -> str:
+    """« Session 1 · 10:00 » : le titre court au-dessus de l'image."""
+    return "%s · %02d:%02d" % (session.get("nom") or session.get("id") or "Session",
+                               int(session.get("heure") or 0), int(session.get("minute") or 0))
+
+
+def est_v2(msg) -> bool:
+    """Ce message est-il deja en composants V2 ? Le drapeau ne s'enleve jamais :
+    un message V2 ne peut plus porter d'embed, seulement des composants."""
+    return bool(getattr(getattr(msg, "flags", None), "components_v2", False))
+
+
+def _session_du_resume(session: dict, att) -> tuple:
+    """(entree de resume_jour pour cette session, fuseau) -- TOUS les vus, hors liste compris."""
+    r = sv.resume_jour(session["jour"], attendus=att, limiter_aux_attendus=False)
+    entree = next((x for x in r["sessions"] if x["id"] == session["id"]), None)
+    if entree is None:
+        raise LookupError("session %s absente de la configuration du %s"
+                          % (session.get("id"), session.get("jour")))
+    return entree, r["fuseau"]
+
+
+def embed_direct_texte(session: dict, att, fige: bool = False, maintenant: float = None) -> discord.Embed:
+    """Le direct en TEXTE (l'ancien format) : le repli quand l'image est impossible.
+
+    Le MEME message sert pendant la session et apres : tant qu'elle tourne il
+    est reecrit, et au dernier passage il devient le compte rendu definitif.
+    Deux messages -- un « en cours » puis un « bilan » -- auraient laisse le
+    premier mentir pour toujours dans l'historique du salon.
+
+    Les personnes hors de la liste des attendus y figurent, marquees : le
+    filtre `if k in noms` les faisait disparaitre sans un mot.
+    """
+    maintenant = _t.time() if maintenant is None else float(maintenant)
+    jour, sid = session["jour"], session["id"]
+    brut = sv.presences(jour, sid)
+    noms = {str(a["id"]): a["nom"] for a in (att or [])}
+    gens = sorted(
+        ({"id": k, "nom": noms.get(k) or v.get("nom") or k,
+          "hors_liste": bool(noms) and k not in noms,
+          "secondes": int(v.get("secondes") or 0),
+          "premiere": v.get("premiere"), "derniere": v.get("derniere")}
+         for k, v in brut.items() if isinstance(v, dict)),
+        key=lambda g: -g["secondes"])
+    seuil = sv.config()["presence_min_secondes"]
+    presents = [g for g in gens if g["secondes"] >= seuil]
+    partiels = [g for g in gens if g["secondes"] < seuil]
+    hl = sv.heures_locales(session)
+    e = discord.Embed(
+        title="%s — %02d:%02d" % (session["nom"], session["heure"], session["minute"]),
+        color=0x9AA0A6 if fige else 0x22C55E)
+    e.description = ("Terminée." if fige else "En cours…") + \
+        "  ·  BJ %s · MG %s" % (hl.get("BJ", "?"), hl.get("MG", "?"))
+    if presents:
+        SessionsVoc._ajouter_lignes(e, "Présents (%d)" % len(presents),
+                                   [SessionsVoc._ligne_presence(g, maintenant, fige) for g in presents])
+    else:
+        e.add_field(name="Présents (0)", value="*personne pour l'instant*", inline=False)
+    if partiels:
+        # LE TEMPS AUSSI, ICI. Une liste de noms nus laisse croire que tous
+        # ont fait la meme chose : deux minutes et quarante secondes ne se
+        # valent pas, et c'est ce chiffre qui dit s'il faut leur en parler.
+        SessionsVoc._ajouter_lignes(e, "Passés vite (%d)" % len(partiels),
+                                   ["%s (%d min)%s" % (SessionsVoc._personne(g), g["secondes"] // 60,
+                                                        " · hors liste" if g["hors_liste"] else "")
+                                    for g in partiels])
+    if fige:
+        if att:
+            vus = {g["id"] for g in gens}
+            absents = [a for a in att if str(a["id"]) not in vus]
+            SessionsVoc._ajouter_lignes(e, "Absents (%d)" % len(absents),
+                                       [SessionsVoc._personne(a) for a in absents] or ["aucun"])
+        e.set_footer(text="Compte définitif — ce message ne bouge plus.")
+    else:
+        e.set_footer(text="Mis à jour toutes les %d min." % sv.config()["maj_minutes"])
+    return e
+
+
+def texte_embed(e: discord.Embed, limite: int = TEXTE_V2_MAX) -> str:
+    """Un embed mis en texte, pour un bloc V2 : titre, description, champs, pied.
+
+    Coupe entre deux lignes et DIT combien il en manque : une liste tronquee
+    en silence se lit comme une liste complete.
+    """
+    lignes = ["## %s" % (e.title or "")]
+    if e.description:
+        lignes.append(str(e.description))
+    for f in e.fields:
+        lignes.append("**%s**" % f.name)
+        lignes.extend(str(f.value or "").splitlines())
+    if e.footer and e.footer.text:
+        lignes.append("-# %s" % e.footer.text)
+    out, total = [], 0
+    for i, l in enumerate(lignes):
+        if total + len(l) + 1 > limite - 60:
+            out.append("*… et %d ligne(s) de plus (voir la page Sessions)*" % (len(lignes) - i))
+            break
+        out.append(l)
+        total += len(l) + 1
+    return "\n".join(out)
+
+
+def vue_texte_v2(texte: str):
+    """Un message V2 fait d'un seul bloc de texte (le repli d'un direct deja en V2)."""
+    vue = discord.ui.LayoutView(timeout=None)
+    vue.add_item(discord.ui.TextDisplay(texte[:4000]))
+    return vue
+
+
+def message_direct_image(session: dict, png: bytes, alt: str = ""):
+    """(vue Components V2, fichier) : le titre court, puis l'image en grand.
+
+    Galerie a une image, comme le bilan : affichee a ~550 px, contre ~400
+    pour une image d'embed. Le nom du fichier ne change pas d'une reecriture
+    a l'autre ; la piece jointe, elle, est REMPLACEE (attachments=[fichier]).
+    """
+    ui = discord.ui
+    if not (hasattr(ui, "LayoutView") and hasattr(ui, "MediaGallery")):
+        raise RuntimeError("discord.py %s ne sait pas envoyer de galerie (V2)"
+                           % discord.__version__)
+    nom = NOM_DIRECT % (session["jour"], session["id"])
+    vue = ui.LayoutView(timeout=None)
+    vue.add_item(ui.TextDisplay("## %s" % titre_direct(session)))
+    vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+        "attachment://" + nom, description=(alt or titre_direct(session))[:1024])))
+    return vue, discord.File(io.BytesIO(png), filename=nom)
+
+
+async def contenu_direct(bot, session: dict, fige: bool = False, maintenant: float = None) -> tuple:
+    """(arguments d'envoi, infos) : le direct en image, ou l'embed texte si l'image echoue.
+
+    `infos["png"]` garde l'image : un fichier discord.File ne se lit qu'une
+    fois, et un second salon (ou un second essai) en veut un neuf.
+    Le dessin tourne hors de la boucle d'evenements (asyncio.to_thread). Les
+    photos passent par photos_avatars et son cache par cle d'avatar : un
+    redessin toutes les quatre minutes ne retelecharge pas les photos.
+    """
+    maintenant = _t.time() if maintenant is None else float(maintenant)
+    att, raison = attendus_et_etat(bot)
+    infos = {"mode": "image", "raison": raison, "attendus": att, "photos": {},
+             "erreur": "", "png": None, "alt": ""}
+    try:
+        import sessions_image as _si
+        entree, fuseau = _session_du_resume(session, att)
+        ids = _si.ids_direct(entree, att, fige=fige)
+        photos, compte = await photos_avatars(bot, ids)
+        infos["photos"] = compte
+        png = await asyncio.to_thread(_si.dessiner_direct, entree, att, photos, maintenant,
+                                      fige, fuseau, session["jour"])
+        d = _si.direct(entree, att, maintenant, fige, fuseau, session["jour"])
+        vus = d["attendus_vus"] if att else d["vus"]
+        alt = "%s — %s : %d VA %s%s" % (
+            titre_direct(session), "terminée" if fige else "en cours, relevé à %s" % d["releve"],
+            vus, ("présent%s" % ("s" if vus > 1 else "")) if att else ("vu%s" % ("s" if vus > 1 else "")),
+            (" sur %d" % d["attendus"]) if att else "")
+        infos.update(png=png, alt=alt)
+        vue, fichier = message_direct_image(session, png, alt)
+        print("[sessions] direct %s dessiné%s : %d présent(s), %d passage(s) court(s), photos %s"
+              % (sv.direct_cle(session), " (figé)" if fige else "", len(d["presents"]),
+                 len(d["partiels"]), compte), flush=True)
+        return {"view": vue, "file": fichier}, infos
+    except Exception as e:                            # noqa: BLE001
+        infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
+        print("[sessions] direct %s : image impossible (%s) — repli sur le texte"
+              % (sv.direct_cle(session), infos["erreur"]), flush=True)
+        return {"embed": embed_direct_texte(session, att, fige, maintenant)}, infos
+
+
+def session_pour_demo(jour: str = "", maintenant: float = None) -> tuple:
+    """(session, figee) pour /demosessions vue « direct », ou (None, False).
+
+    Sans jour : la session EN COURS s'il y en a une, sinon la derniere
+    terminee (aujourd'hui ou hier). Avec un jour : sa derniere session
+    terminee, ou celle qui tourne si aucune ne l'est encore.
+    """
+    maintenant = _t.time() if maintenant is None else float(maintenant)
+    if not jour:
+        s = sv.session_a(maintenant)
+        if s is not None:
+            return s, False
+        aujourd = sv.jour_de(maintenant)
+        jours = [aujourd, (_dt.date.fromisoformat(aujourd) - _dt.timedelta(days=1)).isoformat()]
+    else:
+        jours = [jour]
+    finies = [s for j in jours for s in sv.sessions_du_jour(j) if float(s["fin"]) <= maintenant]
+    if finies:
+        return max(finies, key=lambda s: float(s["fin"])), True
+    if jour:
+        s = sv.session_a(maintenant)
+        if s is not None and s.get("jour") == jour:
+            return s, False
+    return None, False
+
+
 class SessionAbsentsView(discord.ui.View):
     """Bouton persistant des essais de mise en page, liés à un message précis.
 
@@ -594,61 +818,11 @@ class SessionsVoc(commands.Cog):
                                   exclure=cfg.get("salon_bilan") or "bilan")
 
     def embed_direct(self, session: dict, fige: bool = False) -> discord.Embed:
-        """Ce qui s'affiche pendant la session, et ce qui reste apres.
+        """Le direct TEXTE (repli de l'image) : embed_direct_texte, avec les attendus du cog."""
+        return embed_direct_texte(session, self._attendus_enrichis(), fige)
 
-        Le MEME message sert aux deux : tant que la session tourne il est
-        reecrit, et au dernier passage il devient le compte rendu definitif.
-        Deux messages -- un « en cours » puis un « bilan » -- auraient laisse
-        le premier mentir pour toujours dans l'historique du salon.
-        """
-        import time as _tD
-        jour, sid = session["jour"], session["id"]
-        brut = sv.presences(jour, sid)
-        att = self._attendus_enrichis()
-        noms = {a["id"]: a["nom"] for a in att}
-        maintenant = _tD.time()
-        gens = sorted(
-            ({"id": k, "nom": noms[k],
-              "secondes": int(v.get("secondes") or 0),
-              "premiere": v.get("premiere"), "derniere": v.get("derniere")}
-             for k, v in brut.items() if k in noms),
-            key=lambda g: -g["secondes"])
-        seuil = sv.config()["presence_min_secondes"]
-        presents = [g for g in gens if g["secondes"] >= seuil]
-        partiels = [g for g in gens if g["secondes"] < seuil]
-        hl = sv.heures_locales(session)
-        e = discord.Embed(
-            title="%s — %02d:%02d" % (session["nom"], session["heure"], session["minute"]),
-            color=0x9AA0A6 if fige else 0x22C55E)
-        e.description = ("Terminée." if fige else "En cours…") + \
-            "  ·  BJ %s · MG %s" % (hl.get("BJ", "?"), hl.get("MG", "?"))
-        if presents:
-            self._ajouter_lignes(e, "Présents (%d)" % len(presents),
-                                 [self._ligne_presence(g, maintenant, fige) for g in presents])
-        else:
-            e.add_field(name="Présents (0)", value="*personne pour l'instant*",
-                        inline=False)
-        if partiels:
-            # LE TEMPS AUSSI, ICI. Une liste de noms nus laisse croire que
-            # tous ont fait la meme chose : deux minutes et quarante secondes
-            # ne se valent pas, et c'est ce chiffre qui dit s'il faut leur en
-            # parler.
-            self._ajouter_lignes(e, "Passés vite (%d)" % len(partiels),
-                                 ["%s (%d min)" % (self._personne(g), g["secondes"] // 60)
-                                  for g in partiels])
-        if fige:
-            if att:
-                vus = {g["id"] for g in gens}
-                absents = [a for a in att if str(a["id"]) not in vus]
-                self._ajouter_lignes(e, "Absents (%d)" % len(absents),
-                                     [self._personne(a) for a in absents] or ["aucun"])
-            e.set_footer(text="Compte définitif — ce message ne bouge plus.")
-        else:
-            e.set_footer(text="Mis à jour toutes les %d min."
-                              % sv.config()["maj_minutes"])
-        return e
-
-    def _ligne_presence(self, g, maintenant: float, fige: bool = False) -> str:
+    @staticmethod
+    def _ligne_presence(g, maintenant: float, fige: bool = False) -> str:
         """« Ana · arrivé 23:12 · 47 min » — et « parti 00:05 » s'il est sorti.
 
         TROIS FAITS, PAS UN. Le pseudo seul ne dit pas si quelqu'un a fait
@@ -670,7 +844,9 @@ class SessionsVoc(commands.Cog):
             except (TypeError, ValueError):
                 return "?"
 
-        bouts = [self._personne(g)]
+        bouts = [SessionsVoc._personne(g)]
+        if g.get("hors_liste"):
+            bouts.append("hors liste")
         if g.get("premiere"):
             bouts.append("arrivé %s" % _h(g["premiere"]))
         minutes = int(g.get("secondes") or 0) // 60
@@ -693,6 +869,10 @@ class SessionsVoc(commands.Cog):
         Le gel passe AVANT la mise a jour : une session qui vient de se
         terminer doit recevoir son dernier compte, meme si une autre commence
         dans la foulee.
+
+        EN IMAGE depuis le 28/09 (comme le bilan) : un message Components V2
+        -- un titre court et une galerie d'une image --, dont la piece jointe
+        est REMPLACEE a chaque reecriture.
         """
         import time as _tD
         cfg = sv.config()
@@ -705,15 +885,50 @@ class SessionsVoc(commands.Cog):
             salon = self.bot.get_channel(int(fiche.get("salon") or 0))
             if getattr(getattr(salon, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
                 continue
-            msg = await self._retrouver(fiche)
+            try:
+                if float(fiche.get("prochain_gel") or 0) > maintenant:
+                    continue            # essais espaces apres les dix premiers
+            except (TypeError, ValueError):
+                pass
             jour, sid = str(cle).split(":", 1)
             sess = next((x for x in sv.sessions_du_jour(jour) if x["id"] == sid), None)
-            if msg is not None and sess is not None:
-                try:
-                    await msg.edit(embed=self.embed_direct(sess, fige=True))
-                except Exception as e:               # noqa: BLE001
-                    print(f"[sessions] gel : {e}", flush=True)
-            sv.direct_poser(cle, dict(fiche, fige=True, maj=maintenant))
+            msg, introuvable = await self._chercher(fiche)
+            if sess is None or introuvable:
+                # Message supprime a la main (c'est un droit : on ne le
+                # reposte pas), ou session retiree de la configuration :
+                # rien a figer, on n'y revient plus.
+                print("[sessions] gel %s : %s — rien à figer"
+                      % (cle, "session retirée de la configuration" if sess is None
+                         else "message supprimé"), flush=True)
+                sv.direct_poser(cle, dict(fiche, fige=True, maj=maintenant))
+                continue
+            mode = await self._reecrire(msg, sess, True, maintenant) if msg is not None else ""
+            if mode:
+                sv.direct_poser(cle, dict(fiche, fige=True, maj=maintenant, format=mode))
+                continue
+            # LE GEL N'EST PAS MARQUE FAIT S'IL A ECHOUE : le message
+            # resterait sur « En cours », faux pour toujours. Retente a la
+            # minute suivante GEL_ESSAIS_MAX fois, puis toutes les 15 min.
+            essais = int(fiche.get("essais_gel") or 0) + 1
+            try:
+                depuis_fin = maintenant - float(fiche.get("fin") or 0)
+            except (TypeError, ValueError):
+                depuis_fin = 0.0
+            if depuis_fin >= GEL_ABANDON:
+                print("[sessions] gel %s : %d essais ratés en %d jours, abandon "
+                      "(le message reste tel quel)" % (cle, essais, GEL_ABANDON // 86400),
+                      flush=True)
+                sv.direct_poser(cle, dict(fiche, fige=True, maj=maintenant, gel_rate=True,
+                                          essais_gel=essais))
+            elif essais >= GEL_ESSAIS_MAX:
+                print("[sessions] gel %s : essai %d raté, nouvel essai dans %d min"
+                      % (cle, essais, GEL_ESPACEMENT // 60), flush=True)
+                sv.direct_poser(cle, dict(fiche, essais_gel=essais,
+                                          prochain_gel=maintenant + GEL_ESPACEMENT))
+            else:
+                print("[sessions] gel %s : essai %d raté, nouvel essai à la minute suivante"
+                      % (cle, essais), flush=True)
+                sv.direct_poser(cle, dict(fiche, essais_gel=essais))
 
         # --- ce qui tourne : poser, ou reecrire si l'heure est venue ------
         sess = sv.session_a(maintenant)
@@ -722,16 +937,7 @@ class SessionsVoc(commands.Cog):
         cle = sv.direct_cle(sess)
         fiche = sv.direct_charger().get(cle)
         if fiche is None:
-            for salon in self._salons_direct():
-                try:
-                    msg = await salon.send(embed=self.embed_direct(sess))
-                except Exception as e:               # noqa: BLE001
-                    print(f"[sessions] pose direct : {e}", flush=True)
-                    continue
-                sv.direct_poser(cle, {"salon": salon.id, "message": msg.id,
-                                      "fin": sess["fin"], "maj": maintenant,
-                                      "fige": False})
-                break                                 # un seul message, pas un par salon
+            await self._poser_direct(sess, cle, maintenant)
             return
         if fiche.get("fige"):
             return
@@ -740,11 +946,131 @@ class SessionsVoc(commands.Cog):
         msg = await self._retrouver(fiche)
         if msg is None:
             return
+        mode = await self._reecrire(msg, sess, False, maintenant)
+        if mode:
+            sv.direct_poser(cle, dict(fiche, maj=maintenant, format=mode))
+
+    async def _poser_direct(self, sess: dict, cle: str, maintenant: float):
+        """Le premier message de la session : en image, sinon en embed texte.
+
+        Un seul message, pas un par salon : le premier salon qui l'accepte
+        le garde. Un envoi qui leve a pu arriver quand meme (delai depasse
+        cote client) : on relit le salon avant de retenter en texte, sinon
+        deux directs de la meme session se suivraient.
+        """
+        kwargs, infos = await contenu_direct(self.bot, sess, False, maintenant)
+        png = infos.get("png")
+        nom = NOM_DIRECT % (sess["jour"], sess["id"])
+        for salon in self._salons_direct():
+            msg, mode = None, ""
+            if png is not None:
+                debut = discord.utils.utcnow()
+                try:
+                    vue, fichier = message_direct_image(sess, png, infos.get("alt", ""))
+                    msg = await salon.send(view=vue, file=fichier,
+                                           allowed_mentions=discord.AllowedMentions.none())
+                    mode = "image"
+                except Exception as e:               # noqa: BLE001
+                    print("[sessions] pose direct %s en image refusée dans #%s (%s: %s)"
+                          % (cle, getattr(salon, "name", "?"), type(e).__name__, str(e)[:200]),
+                          flush=True)
+                    msg = await self._direct_arrive(salon, nom, debut)
+                    if msg is not None:
+                        mode = "image"
+                        print("[sessions] direct %s : l'image était bien arrivée" % cle, flush=True)
+            if msg is None:
+                try:
+                    msg = await salon.send(embed=embed_direct_texte(sess, infos["attendus"], False,
+                                                                    maintenant),
+                                           allowed_mentions=discord.AllowedMentions.none())
+                    mode = "texte"
+                except Exception as e:               # noqa: BLE001
+                    print(f"[sessions] pose direct : {e}", flush=True)
+                    continue
+            sv.direct_poser(cle, {"salon": salon.id, "message": msg.id,
+                                  "fin": sess["fin"], "maj": maintenant,
+                                  "fige": False, "format": mode})
+            print("[sessions] direct %s posé en %s dans #%s"
+                  % (cle, mode.upper() if mode == "texte" else mode, getattr(salon, "name", "?")),
+                  flush=True)
+            break                                     # un seul message, pas un par salon
+
+    async def _direct_arrive(self, salon, nom: str, debut):
+        """Le direct que ce bot vient de poser dans `salon` (piece jointe `nom`), ou None."""
         try:
-            await msg.edit(embed=self.embed_direct(sess))
-            sv.direct_poser(cle, dict(fiche, maj=maintenant))
+            async for m in salon.history(limit=10):
+                if getattr(getattr(m, "author", None), "id", None) != getattr(self.bot.user, "id", None):
+                    continue
+                if not any(getattr(a, "filename", None) == nom for a in (getattr(m, "attachments", None) or [])):
+                    continue
+                cree = getattr(m, "created_at", None)
+                if cree is None or cree >= debut - _dt.timedelta(minutes=2):
+                    return m
         except Exception as e:                       # noqa: BLE001
-            print(f"[sessions] maj direct : {e}", flush=True)
+            print(f"[sessions] relecture du salon du direct : {e}", flush=True)
+        return None
+
+    async def _reecrire(self, msg, sess: dict, fige: bool, maintenant: float) -> str:
+        """Reecrit le direct : « image », « texte » (repli), ou « » si rien n'a pu partir.
+
+        UN MESSAGE V2 NE REDEVIENT JAMAIS UN EMBED : Discord n'enleve pas le
+        drapeau « composants ». Son repli est donc du texte DANS un bloc V2.
+        Un message encore a l'ancien format (un direct pose avant le passage
+        a l'image) est converti a la premiere reecriture -- contenu et embed
+        vides dans la meme requete, que Discord exige pour poser le drapeau --
+        et garde, lui, le repli embed tant qu'il n'est pas converti.
+        """
+        kwargs, infos = await contenu_direct(self.bot, sess, fige, maintenant)
+        cle = sv.direct_cle(sess)
+        v2 = est_v2(msg)
+        if "view" in kwargs:
+            try:
+                if v2:
+                    await msg.edit(view=kwargs["view"], attachments=[kwargs["file"]])
+                else:
+                    await msg.edit(content=None, embed=None, view=kwargs["view"],
+                                   attachments=[kwargs["file"]])
+                    print("[sessions] direct %s converti en image (ancien format embed)" % cle,
+                          flush=True)
+                return "image"
+            except Exception as e:                   # noqa: BLE001
+                print("[sessions] %s %s en image refusé (%s: %s) — repli sur le texte"
+                      % ("gel" if fige else "maj direct", cle, type(e).__name__, str(e)[:200]),
+                      flush=True)
+        embed = kwargs.get("embed") or embed_direct_texte(sess, infos["attendus"], fige, maintenant)
+        try:
+            if v2:
+                await msg.edit(view=vue_texte_v2(texte_embed(embed)), attachments=[])
+            else:
+                await msg.edit(embed=embed)
+            print("[sessions] %s %s posé en TEXTE (repli%s)"
+                  % ("gel" if fige else "maj direct", cle, ", bloc V2" if v2 else ", embed"), flush=True)
+            return "texte"
+        except Exception as e:                       # noqa: BLE001
+            print("[sessions] %s %s : texte refusé aussi (%s: %s)"
+                  % ("gel" if fige else "maj direct", cle, type(e).__name__, str(e)[:200]), flush=True)
+            return ""
+
+    async def _chercher(self, fiche: dict) -> tuple:
+        """(message, introuvable) : introuvable = supprime ou salon disparu, pour de bon.
+
+        Une erreur passagere (reseau, 5xx, acces retire le temps d'un
+        reglage) rend (None, False) : le gel se retente (espace, jusqu'a GEL_ABANDON),
+        au lieu de marquer fige une session jamais figee.
+        """
+        try:
+            salon = self.bot.get_channel(int(fiche.get("salon") or 0))
+        except (TypeError, ValueError):
+            return None, True
+        if salon is None or getattr(getattr(salon, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
+            return None, True
+        try:
+            return await salon.fetch_message(int(fiche.get("message") or 0)), False
+        except (discord.NotFound, TypeError, ValueError):
+            return None, True
+        except Exception as e:                       # noqa: BLE001
+            print(f"[sessions] relecture du direct : {type(e).__name__}: {e}", flush=True)
+            return None, False
 
     async def _retrouver(self, fiche: dict):
         """Le message deja poste, ou None s'il a ete supprime.
@@ -753,13 +1079,8 @@ class SessionsVoc(commands.Cog):
         on laisse la session sans direct. Le registre des presences, lui,
         continue de compter -- l'affichage n'est pas la mesure.
         """
-        try:
-            salon = self.bot.get_channel(int(fiche.get("salon") or 0))
-            if salon is None or getattr(getattr(salon, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
-                return None
-            return await salon.fetch_message(int(fiche.get("message") or 0))
-        except Exception:                            # noqa: BLE001
-            return None
+        msg, _introuvable = await self._chercher(fiche)
+        return msg
 
     def embed_resume(self, jour: str) -> discord.Embed:
         """Le bilan TEXTE d'une journee (repli de l'image) : embed_resume_texte."""

@@ -904,10 +904,14 @@ class MenuTest(commands.Cog):
 
     @app_commands.command(
         name="demosessions",
-        description="[DÉMO] Le bilan des sessions en image, tel qu'il sera posté — rien n'est envoyé",
+        description="[DÉMO] Le bilan (ou le direct) des sessions en image, tel qu'il sera posté — rien n'est envoyé",
     )
-    @app_commands.describe(jour="Le jour, AAAA-MM-JJ (défaut : hier, heure du Bénin)")
-    async def demosessions(self, interaction: discord.Interaction, jour: str = None):
+    @app_commands.describe(jour="Le jour, AAAA-MM-JJ (défaut : hier, heure du Bénin)",
+                           vue="bilan (défaut) : le bilan du jour · direct : le message en direct d'une session")
+    @app_commands.choices(vue=[app_commands.Choice(name="bilan", value="bilan"),
+                               app_commands.Choice(name="direct", value="direct")])
+    async def demosessions(self, interaction: discord.Interaction, jour: str = None,
+                           vue: str = "bilan"):
         # Demande du proprietaire du 28/09 : le bilan en image avec les photos.
         # Ce bot-ci (admin) n'est PAS sur Youl4b (US) : la liste des VA et les
         # photos viennent du bot PRINCIPAL, qui tourne dans le meme processus.
@@ -926,9 +930,16 @@ class MenuTest(commands.Cog):
                 await interaction.followup.send(
                     "⚠️ « %s » n'est pas une date AAAA-MM-JJ." % jour[:40], ephemeral=True)
                 return
-        else:
-            jour = (_dtD.datetime.now(_sv._tz()).date() - _dtD.timedelta(days=1)).isoformat()
         principal = _bot_principal()
+        if str(vue or "bilan") == "direct":
+            # Demande du proprietaire du 28/09 : le direct en image avec les
+            # photos. MEME fonction que le vrai direct (contenu_direct) : la
+            # session en cours s'il y en a une, sinon la derniere terminee,
+            # figee comme dans le salon.
+            await self._demo_direct(interaction, principal, jour, _svc)
+            return
+        if not jour:
+            jour = (_dtD.datetime.now(_sv._tz()).date() - _dtD.timedelta(days=1)).isoformat()
         kwargs, infos = await _svc.contenu_bilan(principal, jour)
         notes = []
         if infos["raison"]:
@@ -951,6 +962,48 @@ class MenuTest(commands.Cog):
                 embed=_svc.embed_resume_texte(jour, infos["attendus"]), ephemeral=True)
         if notes:
             await interaction.followup.send("\n".join(notes)[:1900], ephemeral=True)
+
+    @staticmethod
+    def _notes_demo(infos) -> list:
+        """Ce que la demo doit DIRE : liste inconnue (et pourquoi), photos en echec, repli."""
+        notes = []
+        if infos["raison"]:
+            notes.append("⚠️ Liste des VA attendus inconnue (%s) : pas d'absents, "
+                         "pas de « hors liste »." % infos["raison"])
+        ph = infos.get("photos") or {}
+        if ph.get("introuvables") or ph.get("echecs") or ph.get("delai"):
+            notes.append("ℹ️ Photos : %d membre(s) introuvable(s), %d échec(s), %d trop lente(s) — "
+                         "initiales à la place." % (ph.get("introuvables", 0), ph.get("echecs", 0),
+                                                    ph.get("delai", 0)))
+        return notes
+
+    async def _demo_direct(self, interaction, principal, jour, _svc):
+        """/demosessions vue « direct » : le message en direct, en prive."""
+        import sessions_voc as _sv
+        sess, fige = _svc.session_pour_demo(jour or "")
+        if sess is None:
+            await interaction.followup.send(
+                "ℹ️ Aucune session terminée ni en cours %s : rien à montrer."
+                % (("le %s" % jour) if jour else "aujourd'hui ou hier"), ephemeral=True)
+            return
+        kwargs, infos = await _svc.contenu_direct(principal, sess, fige)
+        notes = ["ℹ️ %s du %s — %s." % (_svc.titre_direct(sess), sess["jour"],
+                                        "terminée : la version figée" if fige
+                                        else "en cours : la version du moment")]
+        notes += self._notes_demo(infos)
+        if infos["mode"] == "texte":
+            notes.append("⚠️ Image impossible (%s) : le vrai direct partirait en TEXTE, "
+                         "comme ci-dessus." % infos["erreur"])
+        try:
+            await interaction.followup.send(ephemeral=True, **kwargs)
+        except Exception as e:                        # noqa: BLE001
+            notes.append("⚠️ Envoi de l'image refusé (%s: %s) : le vrai direct "
+                         "retomberait sur le texte." % (type(e).__name__, str(e)[:150]))
+            await interaction.followup.send(
+                embed=_svc.embed_direct_texte(sess, infos["attendus"], fige), ephemeral=True)
+        await interaction.followup.send("\n".join(notes)[:1900], ephemeral=True)
+        print("[sessions] démo du direct %s (%s) : %s" % (_sv.direct_cle(sess),
+              "figé" if fige else "en cours", infos["mode"]), flush=True)
 
     async def _poster(self, interaction: discord.Interaction, marche: str):
         if interaction.guild is None:

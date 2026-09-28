@@ -12764,6 +12764,391 @@ except Exception as _eBi:
     import traceback as _tbBi
     check("bilan image : testable", False, _tbBi.format_exc()[-400:])
 
+# --- Le message EN DIRECT des sessions, en IMAGE -----------------------------
+# Demande du proprietaire du 28/09 : le direct en image avec les photos, comme
+# le bilan (« c good » sur le bilan). Section a part : un echec plus haut ne
+# doit pas sauter ces tests.
+print()
+print("=" * 70)
+print("SESSIONS : le direct en image, avec les photos")
+print("=" * 70)
+try:
+    import asyncio as _aioDi
+    import io as _ioDi
+    import json as _jsDi
+    import pathlib as _plDi
+    import sys as _sysDi
+    import tempfile as _tpDi
+    import time as _tiDi
+    import types as _tyDi
+    import datetime as _dtDi
+    import discord as _dDi
+    from discord.http import handle_message_parameters as _hmpDi
+    from discord.utils import MISSING as _MISDi
+    from PIL import Image as _ImDi
+    import sessions_voc as _svDi
+    import sessions_image as _siDi
+    import cogs.sessionsvoc as _svcDi
+
+    _mnDi = _tiDi.time()
+
+    def _pDi(uid, nom, minutes, arrive_il_y_a, vu_il_y_a):
+        return {"id": uid, "nom": nom, "secondes": minutes * 60,
+                "premiere": _mnDi - arrive_il_y_a, "derniere": _mnDi - vu_il_y_a}
+
+    _ATTDi = [{"id": "11", "nom": "Roucham X1 / Roucham x2"}, {"id": "12", "nom": "Gérôme X1"},
+              {"id": "13", "nom": "Maon 1 IPHONE X"}, {"id": "14", "nom": "Safidy X1"}]
+    _SDi = {"id": "s1", "nom": "Session 1", "heure": "10:00",
+            "heures_locales": {"BJ": "10:00", "MG": "12:00"},
+            "presents": [_pDi("12", "gerome", 94, 8000, 30), _pDi("11", "x", 256, 16000, 40),
+                         _pDi("99", "Bo07 X1 / Bo07 X2", 60, 9000, 900)],
+            "partiels": [_pDi("13", "Maon", 3, 600, 400)]}
+    _dDiC = _siDi.direct(_SDi, _ATTDi, _mnDi, False, "Africa/Porto-Novo", "2026-09-27")
+    check("direct image : les presents tries par temps decroissant",
+          [g["id"] for g in _dDiC["presents"]] == ["11", "12", "99"],
+          str([(g["id"], g["secondes"]) for g in _dDiC["presents"]]))
+    check("direct image : « encore là » = vu il y a 2 min au plus, sinon « parti HH:MM »",
+          [g["etat"] for g in _dDiC["presents"]] == ["encore_la", "encore_la", "parti"]
+          and _dDiC["partiels"][0]["etat"] == "parti" and ":" in _dDiC["presents"][2]["parti"],
+          str([(g["id"], g["etat"], g["parti"]) for g in _dDiC["presents"]]))
+    _dDiF = _siDi.direct(_SDi, _ATTDi, _mnDi, True, "Africa/Porto-Novo", "2026-09-27")
+    check("direct image : au gel, jamais « encore là »",
+          all(g["etat"] == "parti" for g in _dDiF["presents"] + _dDiF["partiels"]),
+          str([g["etat"] for g in _dDiF["presents"]]))
+    check("direct image : une personne hors liste reste, marquee (plus de filtre silencieux)",
+          [g["attendu"] for g in _dDiC["presents"]] == [True, True, False] and _dDiC["hors_liste"] == 1
+          and _dDiC["presents"][2]["nom"] == "Bo07 X1 / Bo07 X2")
+    check("direct image : le nom est celui du site pour un attendu",
+          _dDiC["presents"][0]["nom"] == "Roucham X1 / Roucham x2")
+    check("direct image : « pas encore là » = attendus jamais vus, compteur sur les attendus",
+          [a["id"] for a in _dDiC["manquants"]] == ["14"]
+          and (_dDiC["attendus_vus"], _dDiC["attendus"]) == (3, 4), str(_dDiC["manquants"]))
+    _dDiI = _siDi.direct(_SDi, [], _mnDi, False, "", "2026-09-27")
+    check("direct image : attendus inconnus -> ni manquants ni « hors liste », tout le monde montre",
+          not _dDiI["liste_connue"] and _dDiI["manquants"] == [] and _dDiI["hors_liste"] == 0
+          and _dDiI["vus"] == 4)
+    check("direct image : les ids a photographier = vus + manquants",
+          _siDi.ids_direct(_SDi, _ATTDi) == ["11", "12", "99", "13", "14"],
+          str(_siDi.ids_direct(_SDi, _ATTDi)))
+
+    _A40Di = [{"id": str(500 + i), "nom": "VA %02d Jérémie" % i} for i in range(40)]
+    _S40Di = dict(_SDi, presents=[_pDi(a["id"], a["nom"], 10 + i, 3000, 30)
+                                  for i, a in enumerate(_A40Di)], partiels=[])
+    _casDi = {"en cours": (_SDi, _ATTDi, False), "fige": (_SDi, _ATTDi, True),
+              "vide": (dict(_SDi, presents=[], partiels=[]), _ATTDi, False),
+              "vide fige": (dict(_SDi, presents=[], partiels=[]), _ATTDi, True),
+              "40 presents": (_S40Di, _A40Di, False), "hors liste": (_SDi, _ATTDi[:1], False),
+              "attendus inconnus": (_SDi, [], True)}
+    _imgsDi = {}
+    for _nDi, (_sDi, _aDi, _fDi) in _casDi.items():
+        try:
+            _pngDi = _siDi.dessiner_direct(_sDi, _aDi, {"11": b"pas une image"}, _mnDi, _fDi,
+                                           "Africa/Porto-Novo", "2026-09-27")
+            _imDi = _ImDi.open(_ioDi.BytesIO(_pngDi))
+            _imDi.load()
+            _imgsDi[_nDi] = (_pngDi[:8] == b"\x89PNG\r\n\x1a\n" and _imDi.width == 1100, _imDi.size)
+        except Exception as _eDi:
+            _imgsDi[_nDi] = (False, repr(_eDi)[:120])
+    check("direct image : un PNG valide de 1100 px en cours / fige / vide / 40 / hors liste / sans liste",
+          all(ok for ok, _ in _imgsDi.values()), str(_imgsDi))
+    check("direct image : 40 presents -> l image grandit, aucune ligne coupee",
+          _imgsDi["40 presents"][0] and _imgsDi["40 presents"][1][1] > 40 * 72,
+          str(_imgsDi["40 presents"]))
+
+    # --- le cog : pose, reecriture, conversion, repli, gel ------------------
+    _dirDi = _plDi.Path(_tpDi.mkdtemp())
+    _savDi = (_svDi.FICHIER_CFG, _svDi.FICHIER_PRESENCE, _svDi.FICHIER_DIRECT)
+    _svDi.FICHIER_CFG = _dirDi / "cfg.json"
+    _svDi.FICHIER_PRESENCE = _dirDi / "pres.json"
+    _svDi.FICHIER_DIRECT = _dirDi / "direct.json"
+    _svDi._CACHE.update(sig=None, data=None)
+    _JDi = "2026-09-27"
+    _sessDi = next(x for x in _svDi.sessions_du_jour(_JDi) if x["id"] == "s1")
+    _t0Di = _sessDi["debut"] + 3600
+    _svDi.pointer([{"id": "1425494008922243183", "nom": "Roucham X1"},
+                   {"id": "1396242692719120554", "nom": "Bo07 X1"}], 60, _t0Di)
+    _vraiDessDi = _siDi.dessiner_direct
+    try:
+        class _AssetDi:
+            def __init__(self, cle):
+                self.key, self.url, self.lectures = cle, "u", 0
+
+            def replace(self, **kw):
+                return self
+
+            async def read(self):
+                self.lectures += 1
+                return b"pas une image"
+
+        _mbDi = {1425494008922243183: _tyDi.SimpleNamespace(
+            id=1425494008922243183, name="roucham_79944", bot=False, display_avatar=_AssetDi("r1")),
+            1396242692719120554: _tyDi.SimpleNamespace(
+            id=1396242692719120554, name="bo07", bot=False, display_avatar=_AssetDi("b1"))}
+        _gDi = _tyDi.SimpleNamespace(id=_svDi.SUIVI_GUILD_ID, chunked=True,
+                                     members=list(_mbDi.values()), get_member=_mbDi.get)
+
+        class _SalonDi:
+            name = "session-direct"
+            id = 777
+            guild = _tyDi.SimpleNamespace(id=_svDi.SUIVI_GUILD_ID)
+
+            def __init__(self):
+                self.envois, self.messages = [], {}
+
+            async def send(self, **kw):
+                self.envois.append(kw)
+                m = _MsgDi(v2="view" in kw)
+                self.messages[m.id] = m
+                return m
+
+            async def fetch_message(self, i):
+                if i not in self.messages:
+                    raise _dDi.NotFound(_tyDi.SimpleNamespace(status=404, reason="x"), "absent")
+                return self.messages[i]
+
+            def history(self, limit=10):
+                async def _g():
+                    for _m in []:
+                        yield _m
+                return _g()
+
+        _compteurDi = [100]
+
+        class _MsgDi:
+            """Un message : chaque edit est passe par discord.py (charge utile reelle),
+            et la regle de Discord est appliquee : un message V2 refuse un embed."""
+
+            def __init__(self, v2=False, refus_image=False):
+                _compteurDi[0] += 1
+                self.id = _compteurDi[0]
+                self.flags = _dDi.MessageFlags(components_v2=v2)
+                self.refus_image, self.charges = refus_image, []
+
+            async def edit(self, **kw):
+                params = _hmpDi(content=kw.get("content", _MISDi), embed=kw.get("embed", _MISDi),
+                                view=kw.get("view", _MISDi), attachments=kw.get("attachments", _MISDi),
+                                flags=_dDi.MessageFlags._from_value(self.flags.value))
+                ch = params.payload if params.payload is not None else _jsDi.loads(params.multipart[0]["value"])
+                if self.refus_image and kw.get("attachments"):
+                    raise _dDi.HTTPException(_tyDi.SimpleNamespace(status=500, reason="x"), "coupure")
+                if (ch.get("flags", 0) & (1 << 15)) and (ch.get("embeds") or ch.get("content")):
+                    raise _dDi.HTTPException(_tyDi.SimpleNamespace(status=400, reason="x"),
+                                             "V2 : ni embed ni contenu")
+                self.charges.append(ch)
+                if ch.get("flags", 0) & (1 << 15):
+                    self.flags = _dDi.MessageFlags(components_v2=True)
+                return self
+
+        _salDi = _SalonDi()
+        _botDi = _tyDi.SimpleNamespace(is_ready=lambda: True, user=_tyDi.SimpleNamespace(id=5),
+                                       get_guild=lambda g: _gDi if g == _svDi.SUIVI_GUILD_ID else None,
+                                       get_channel=lambda c: _salDi if c == 777 else None)
+        _cogDi = _svcDi.SessionsVoc.__new__(_svcDi.SessionsVoc)
+        _cogDi.bot, _cogDi._resumes_faits = _botDi, {}
+        _cogDi._salons_direct = lambda: [_salDi]
+        _cogDi._attendus_enrichis = lambda: []
+
+        # La pose : un message V2, une image jointe.
+        _cleDi = _svDi.direct_cle(_sessDi)
+        _aioDi.run(_cogDi._poser_direct(_sessDi, _cleDi, _t0Di))
+        _fiDi = _svDi.direct_charger().get(_cleDi) or {}
+        check("direct image : la pose -> UN message, en image (vue V2 + fichier du direct)",
+              len(_salDi.envois) == 1 and "view" in _salDi.envois[0]
+              and _salDi.envois[0]["file"].filename == "direct_2026-09-27_s1.png"
+              and _fiDi.get("format") == "image" and not _fiDi.get("fige"),
+              str((_salDi.envois, _fiDi)))
+
+        # La reecriture : la piece jointe est REMPLACEE (une seule), photos en cache.
+        _msgV2 = _salDi.messages[_fiDi["message"]]
+        _lecDi = sum(a.display_avatar.lectures for a in _mbDi.values())
+        _modeDi = _aioDi.run(_cogDi._reecrire(_msgV2, _sessDi, False, _t0Di + 240))
+        _chDi = _msgV2.charges[-1] if _msgV2.charges else {}
+        check("direct image : reecriture -> une seule piece jointe, le meme nom, drapeau V2",
+              _modeDi == "image" and len(_chDi.get("attachments", [])) == 1
+              and _chDi["attachments"][0]["filename"] == "direct_2026-09-27_s1.png"
+              and _chDi.get("flags", 0) & (1 << 15)
+              and "attachment://direct_2026-09-27_s1.png" in _jsDi.dumps(_chDi.get("components")),
+              str(_chDi)[:300])
+        check("direct image : une reecriture ne recharge pas les photos (cache par cle d avatar)",
+              sum(a.display_avatar.lectures for a in _mbDi.values()) == _lecDi and _lecDi == 2,
+              "lectures %d -> %d" % (_lecDi, sum(a.display_avatar.lectures for a in _mbDi.values())))
+        check("direct image : titre court « ## Session 1 · 10:00 » au-dessus de l image",
+              _chDi["components"][0]["content"] == "## Session 1 · 10:00", str(_chDi.get("components"))[:200])
+
+        # Un direct pose AVANT le deploiement (embed) : converti, sans doublon.
+        _anc = _MsgDi(v2=False)
+        _modeAnc = _aioDi.run(_cogDi._reecrire(_anc, _sessDi, False, _t0Di + 480))
+        _chAnc = _anc.charges[-1] if _anc.charges else {}
+        check("direct image : un ancien direct (embed) est converti a la reecriture suivante",
+              _modeAnc == "image" and _chAnc.get("content", "x") is None and _chAnc.get("embeds") == []
+              and _chAnc.get("flags", 0) & (1 << 15) and len(_chAnc.get("attachments", [])) == 1
+              and _svcDi.est_v2(_anc) and len(_salDi.envois) == 1, str(_chAnc)[:300])
+
+        # Les replis : texte DANS un bloc V2 pour un message V2, embed pour l ancien.
+        def _casseDi(*a, **k):
+            raise MemoryError("Pillow")
+        _siDi.dessiner_direct = _casseDi
+        _msgR = _MsgDi(v2=True)
+        _modeR = _aioDi.run(_cogDi._reecrire(_msgR, _sessDi, False, _t0Di))
+        _chR = _msgR.charges[-1] if _msgR.charges else {}
+        check("direct image : repli d un message V2 -> texte dans un bloc V2, image retiree",
+              _modeR == "texte" and _chR.get("attachments") == [] and "embeds" not in _chR
+              and _chR["components"][0]["type"] == 10
+              and "Session 1" in _chR["components"][0]["content"], str(_chR)[:300])
+        _embHl = _svcDi.embed_direct_texte(_sessDi, [{"id": "1425494008922243183", "nom": "Roucham X1"}],
+                                           False, _t0Di)
+        _txtHl = _svcDi.texte_embed(_embHl)
+        check("direct image : le repli texte montre aussi le hors liste (plus de filtre silencieux)",
+              "Bo07" in _txtHl and "hors liste" in _txtHl and "Roucham" in _txtHl, _txtHl[:300])
+        _msgE = _MsgDi(v2=False)
+        _modeE = _aioDi.run(_cogDi._reecrire(_msgE, _sessDi, False, _t0Di))
+        _chE = _msgE.charges[-1] if _msgE.charges else {}
+        check("direct image : repli d un message a l ancien format -> l embed, comme avant",
+              _modeE == "texte" and _chE.get("embeds") and _chE["embeds"][0]["title"] == "Session 1 — 10:00"
+              and not _svcDi.est_v2(_msgE), str(_chE)[:300])
+        _siDi.dessiner_direct = _vraiDessDi
+        _msgI = _MsgDi(v2=True, refus_image=True)
+        _modeI = _aioDi.run(_cogDi._reecrire(_msgI, _sessDi, False, _t0Di))
+        check("direct image : image refusee par Discord -> texte V2, jamais d embed sur un V2",
+              _modeI == "texte" and _msgI.charges and _msgI.charges[-1].get("attachments") == [],
+              str(_msgI.charges)[:200])
+
+        # Le gel : toujours fait, et marque fige seulement apres un gel reussi.
+        _svDi.direct_poser(_cleDi, dict(_fiDi, fin=_mnDi - 60))
+        _cogDi._salons_direct = lambda: []
+        _msgG = _salDi.messages[_fiDi["message"]]
+        _msgG.refus_image = True
+        _siDi.dessiner_direct = _casseDi
+
+        async def _refuse_tout(**kw):
+            raise _dDi.HTTPException(_tyDi.SimpleNamespace(status=500, reason="x"), "coupure")
+        _vraiEdit = _msgG.edit
+        _msgG.edit = _refuse_tout
+        _aioDi.run(_cogDi._direct())
+        _fg1 = _svDi.direct_charger()[_cleDi]
+        check("direct image : gel rate -> PAS marque fige, retente a la minute suivante",
+              not _fg1.get("fige") and _fg1.get("essais_gel") == 1, str(_fg1))
+        _msgG.edit = _vraiEdit
+        _msgG.refus_image = False
+        _siDi.dessiner_direct = _vraiDessDi
+        _aioDi.run(_cogDi._direct())
+        _fg2 = _svDi.direct_charger()[_cleDi]
+        _chG = _msgG.charges[-1] if _msgG.charges else {}
+        check("direct image : gel reussi -> fige, en image, jamais « encore là »",
+              _fg2.get("fige") is True and _fg2.get("format") == "image"
+              and _chG.get("attachments") and "encore" not in _jsDi.dumps(_chG.get("components")),
+              str(_fg2))
+        _nChG = len(_msgG.charges)
+        _aioDi.run(_cogDi._direct())
+        check("direct image : une fois fige, le message ne bouge plus",
+              len(_msgG.charges) == _nChG)
+        # Gel impossible dix fois de suite (panne Discord qui dure) : JAMAIS
+        # marque fige -- le message resterait sur « En cours » pour toujours --,
+        # les essais s'espacent (15 min) ; abandon dit seulement 7 jours apres.
+        _svDi.direct_poser("2026-09-27:s2", {"salon": 777, "message": _fiDi["message"], "fin": _mnDi - 60,
+                                            "maj": 0, "fige": False, "essais_gel": _svcDi.GEL_ESSAIS_MAX - 1})
+        _nEdG = [0]
+
+        async def _refuse_compte(**kw):
+            _nEdG[0] += 1
+            raise _dDi.HTTPException(_tyDi.SimpleNamespace(status=500, reason="x"), "coupure")
+        _msgG.edit = _refuse_compte
+        _aioDi.run(_cogDi._direct())
+        _fg3 = _svDi.direct_charger()["2026-09-27:s2"]
+        check("direct image : dix gels rates -> toujours PAS fige, prochain essai dans 15 min",
+              not _fg3.get("fige") and not _fg3.get("gel_rate")
+              and _fg3.get("essais_gel") == _svcDi.GEL_ESSAIS_MAX
+              and float(_fg3.get("prochain_gel") or 0) >= _mnDi + _svcDi.GEL_ESPACEMENT - 5, str(_fg3))
+        _nAv = _nEdG[0]
+        _aioDi.run(_cogDi._direct())
+        check("direct image : avant l heure du prochain essai, aucune reecriture tentee",
+              _nEdG[0] == _nAv and not _svDi.direct_charger()["2026-09-27:s2"].get("fige"))
+        _svDi.direct_poser("2026-09-27:s2", dict(_svDi.direct_charger()["2026-09-27:s2"], prochain_gel=0))
+        _msgG.edit = _vraiEdit
+        _aioDi.run(_cogDi._direct())
+        _fg3b = _svDi.direct_charger()["2026-09-27:s2"]
+        check("direct image : gel reussi apres la panne -> fige, en image",
+              _fg3b.get("fige") is True and _fg3b.get("format") == "image" and not _fg3b.get("gel_rate"),
+              str(_fg3b))
+        _svDi.direct_poser("2026-09-27:s4", {"salon": 777, "message": _fiDi["message"],
+                                            "fin": _mnDi - _svcDi.GEL_ABANDON - 60,
+                                            "maj": 0, "fige": False, "essais_gel": 700})
+        _msgG.edit = _refuse_tout
+        _aioDi.run(_cogDi._direct())
+        _msgG.edit = _vraiEdit
+        _fg3c = _svDi.direct_charger()["2026-09-27:s4"]
+        check("direct image : sept jours de gels rates -> abandon DIT (gel_rate), plus de relecture",
+              _fg3c.get("fige") is True and _fg3c.get("gel_rate") is True, str(_fg3c))
+        # Message supprime a la main : rien a figer, on ne le reposte pas.
+        _svDi.direct_poser("2026-09-27:s3", {"salon": 777, "message": 1, "fin": _mnDi - 60,
+                                            "maj": 0, "fige": False})
+        _nEnv = len(_salDi.envois)
+        _aioDi.run(_cogDi._direct())
+        _fg4 = _svDi.direct_charger()["2026-09-27:s3"]
+        check("direct image : message supprime -> fige sans repost",
+              _fg4.get("fige") is True and len(_salDi.envois) == _nEnv, str(_fg4))
+    finally:
+        _siDi.dessiner_direct = _vraiDessDi
+        _svDi.FICHIER_CFG, _svDi.FICHIER_PRESENCE, _svDi.FICHIER_DIRECT = _savDi
+        _svDi._CACHE.update(sig=None, data=None)
+        _svcDi._AVATARS.clear()
+        _svcDi._AVATARS_KO.clear()
+        import shutil as _shDi
+        _shDi.rmtree(_dirDi, ignore_errors=True)
+
+    # --- /demosessions : l option « vue » (bot admin) -------------------------
+    import cogs.menutest as _mtDi
+    _cmdDi = next(c for c in _mtDi.MenuTest.__cog_app_commands__ if c.name == "demosessions")
+    _prmDi = {p.name: p for p in _cmdDi.parameters}
+    check("direct image : /demosessions a une option « vue » (bilan par defaut / direct)",
+          "vue" in _prmDi and not _prmDi["vue"].required and _prmDi["vue"].default == "bilan"
+          and [c.value for c in _prmDi["vue"].choices] == ["bilan", "direct"],
+          str({k: (v.required, v.default) for k, v in _prmDi.items()}))
+    check("direct image : toujours UNE seule commande (pas de nouvelle commande sur le bot admin)",
+          [c.name for c in _mtDi.MenuTest.__cog_app_commands__].count("demosessions") == 1
+          and not any(c.name.startswith("demodirect") for c in _mtDi.MenuTest.__cog_app_commands__))
+    _sDemo, _fDemo = _svcDi.session_pour_demo("2026-09-27", _mnDi)
+    check("direct image : demo d un jour passe -> sa derniere session, figee",
+          _sDemo is not None and _sDemo["id"] == "s3" and _fDemo is True, str((_sDemo, _fDemo)))
+
+    class _SuiviDi:
+        def __init__(self):
+            self.envois = []
+
+        async def send(self, content=None, **kw):
+            self.envois.append(dict(kw, content=content))
+
+    class _RepDi:
+        async def defer(self, **kw):
+            self.kw = kw
+
+    _itDi = _tyDi.SimpleNamespace(response=_RepDi(), followup=_SuiviDi(), guild=None,
+                                  user=_tyDi.SimpleNamespace(id=1))
+    _wuDi = _sysDi.modules.get("web_upload")
+    _refSavDi = getattr(_wuDi, "_BOT_REF", None) if _wuDi else None
+    if _wuDi is None:
+        _wuDi = _tyDi.ModuleType("web_upload")
+        _sysDi.modules["web_upload"] = _wuDi
+    _wuDi._BOT_REF = None
+    try:
+        _aioDi.run(_cmdDi.callback(_mtDi.MenuTest(_tyDi.SimpleNamespace()), _itDi,
+                                   jour="2026-09-27", vue="direct"))
+    finally:
+        _wuDi._BOT_REF = _refSavDi
+    _evDi = _itDi.followup.envois
+    check("direct image : /demosessions vue direct -> l image du direct, en prive, et ce qui est montre",
+          len(_evDi) == 2 and all(e.get("ephemeral") for e in _evDi)
+          and getattr(_evDi[0].get("file"), "filename", "") == "direct_2026-09-27_s3.png"
+          and "terminée" in (_evDi[1]["content"] or "")
+          and "bot principal introuvable" in (_evDi[1]["content"] or ""),
+          str([(sorted(e), e.get("content")) for e in _evDi])[:300])
+    _srcSvDi = _plDi.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+    check("direct image : le dessin du direct tourne hors de la boucle d evenements",
+          "asyncio.to_thread(_si.dessiner_direct" in _srcSvDi)
+except Exception as _eDi:
+    import traceback as _tbDi
+    check("direct image : testable", False, _tbDi.format_exc()[-400:])
+
 # --- Classement des clics par VA (accueil) ------------------------------
 # Ce qui se joue ici : des CHIFFRES DE TRAVAIL affiches en rang. Une fusion
 # de trop reunit deux personnes sous un seul nom, une lecture ratee prise
