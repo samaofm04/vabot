@@ -261,6 +261,11 @@ ETATS = {
     "Assiduité du jour": "Attendance today",
     "Poster le résumé sur Discord": "Post the summary to Discord",
     "Poster le résumé du jour affiché": "Post the summary for the day shown",
+    "Mettre à jour le résumé du jour affiché": "Update the summary for the day shown",
+    "mis à jour dans {n} salon(s)": "updated in {n} channel(s)",
+    "posté dans {n} salon(s)": "posted in {n} channel(s)",
+    "échec dans {n} salon(s)": "failed in {n} channel(s)",
+    "aucun salon ne porte « bilan » dans son nom": "no channel has « bilan » in its name",
     "Pas encore commencée.": "Not started yet.",
     "Session en cours — les absents ne seront établis qu'à la fin.": "Session running — absences will only be established once it ends.",
     "Session non surveillée — le suivi ne tournait pas encore. Aucun absent ne peut en être déduit.":

@@ -178,15 +178,22 @@ def tableau(resume: dict, attendus, maintenant: float = None) -> dict:
         # « absents toute la journee » n'est vrai que si TOUTES les sessions
         # ont ete jugees ; sinon on dit « aux sessions terminees ».
         "journee_complete": bool(colonnes) and len(jugees) == len(colonnes),
+        # LA JOURNEE EST-ELLE FINIE ? Toutes ses sessions terminees (jugees ou
+        # non suivies). Tant qu'elle ne l'est pas, le bilan du jour est un
+        # etat du moment, reecrit au fil des sessions : l'image dit DE QUAND
+        # (« relevé à 14:40 »), comme le direct. Une journee finie ne porte
+        # pas d'heure : c'est le rendu fige, valide par le proprietaire.
+        "journee_finie": all(bool(s.get("terminee", True)) for s in resume.get("sessions") or []),
+        "releve": _hhmm(maintenant, resume.get("fuseau") or ""),
         "attendus": len(index),
         "attendus_vus": sum(1 for g in lignes if g["attendu"]),
         "hors_liste": sum(1 for g in lignes if not g["attendu"]) if liste_connue else 0,
     }
 
 
-def ids_dessines(resume: dict, attendus) -> list:
+def ids_dessines(resume: dict, attendus, maintenant: float = None) -> list:
     """Les identifiants dont l'image montre la photo (pour aller les chercher)."""
-    t = tableau(resume, attendus)
+    t = tableau(resume, attendus, maintenant)
     return [g["id"] for g in t["lignes"]] + [a["id"] for a in t["absents"]]
 
 
@@ -447,6 +454,24 @@ def dessiner_bilan(resume: dict, attendus, photos: dict, jour: str = "",
               "à l'affichage" % (n, largeur), flush=True)
     col_nom = largeur - 2 * marge - n * col_session - col_total
     h_tete = 120
+    # « relevé à HH:MM » suit la date, sur la ligne ou, a droite, s'ecrit
+    # « liste des attendus inconnue » (ou « + N hors liste ») : le 27/09 a
+    # 14:40 sans liste, les deux se chevauchaient (« relevéliste14:40... »).
+    # S'il ne tient pas avant le texte de droite, il passe sur sa propre ligne.
+    titre, date_longue = _titre_jour(jour)
+    sous = " · ".join(x for x in (date_longue, _fuseau_lisible(t["fuseau"])) if x)
+    releve = " · relevé à %s" % t["releve"]
+    if t["liste_connue"]:
+        a_droite = ("+ %d hors liste" % t["hors_liste"]) if t["hors_liste"] else ""
+    else:
+        a_droite = "liste des attendus inconnue"
+    releve_a_part = False
+    if not t["journee_finie"]:
+        x_fin_releve = p(marge) + _largeur(mesure, sous, f_sous) + _largeur(mesure, releve, f_petit_b)
+        x_droite = p(largeur - marge) - (_largeur(mesure, a_droite, f_petit_b) if a_droite else 0)
+        if a_droite and x_fin_releve + p(24) > x_droite:
+            releve_a_part = True
+            h_tete += 34
     avec_etat = any(c["etat"] != "jugee" for c in t["colonnes"])
     # Trop large pour sa colonne, l'etiquette passe sur deux lignes.
     etiquettes = {}
@@ -493,10 +518,17 @@ def dessiner_bilan(resume: dict, attendus, photos: dict, jour: str = "",
     d = ImageDraw.Draw(img)
 
     # --- titre et compteur --------------------------------------------------
-    titre, date_longue = _titre_jour(jour)
     d.text((p(marge), p(marge)), titre, font=f_titre, fill=TEXTE, anchor="lt")
-    sous = " · ".join(x for x in (date_longue, _fuseau_lisible(t["fuseau"])) if x)
     d.text((p(marge), p(marge + 62)), sous, font=f_sous, fill=TEXTE_2, anchor="lt")
+    if not t["journee_finie"]:
+        # La journee n'est pas finie : ce bilan est reecrit au fil des
+        # sessions, il dit donc l'heure de son releve (meme vert que le direct).
+        if releve_a_part:
+            d.text((p(marge), p(marge + 96)), "relevé à %s" % t["releve"],
+                   font=f_petit_b, fill=VERT_CLAIR, anchor="lt")
+        else:
+            d.text((p(marge) + _largeur(d, sous, f_sous), p(marge + 62)), releve,
+                   font=f_petit_b, fill=VERT_CLAIR, anchor="lt")
     droite = p(largeur - marge)
     if t["liste_connue"]:
         fin = " sur %d" % t["attendus"]
@@ -526,7 +558,10 @@ def dessiner_bilan(resume: dict, attendus, photos: dict, jour: str = "",
         # Colonne entiere assombrie : rien n'y est juge. Pas de tuile quand
         # personne n'a ete vu -- elle n'a aucune cellule a couvrir, et la
         # phrase « Personne n'a ete vu... » s'ecrivait par-dessus.
-        if c["etat"] != "jugee" and t["lignes"]:
+        # Journee en cours et personne encore vu : la tuile est dessinee
+        # quand meme (les sessions « à venir » hachurees), la phrase reste
+        # alors dans la colonne des noms.
+        if c["etat"] != "jugee" and (t["lignes"] or not t["journee_finie"]):
             tuile = Image.new("RGB", (p(col_session - 8), p(corps)), FOND_COLONNE_GRISE)
             if c["etat"] in ("non_suivie", "a_venir"):
                 # Hachures dessinees DANS la tuile : tracees sur l'image
@@ -554,11 +589,23 @@ def dessiner_bilan(resume: dict, attendus, photos: dict, jour: str = "",
            fill=TEXTE, anchor="mt")
 
     # --- une ligne par personne vue -----------------------------------------
-    if not t["lignes"]:
+    if not t["lignes"] and t["journee_finie"]:
         d.text((p(marge + 20), p(y_corps + h_vide / 2)),
                ajuster(d, "Personne n'a été vu aux sessions ce jour-là.", f_nom,
                        p(largeur - 2 * marge - 40)),
                font=f_nom, fill=TEXTE_2, anchor="lm")
+    elif not t["lignes"]:
+        # Journee en cours : « ce jour-là » se lisait comme le verdict de la
+        # journee entiere, sur un message pose des 01:45 et relu a 03:00.
+        # Sur deux lignes, dans la colonne des noms (les tuiles a cote).
+        mots, l1 = "Personne n'a encore été vu aux sessions du jour.".split(), ""
+        l_max = p(col_nom - 40)
+        while mots and _largeur(d, (l1 + " " + mots[0]).strip(), f_nom) <= l_max:
+            l1 = (l1 + " " + mots.pop(0)).strip()
+        for k, txt in enumerate(x for x in (l1, " ".join(mots)) if x):
+            d.text((p(marge + 20), p(y_corps + h_vide / 2 + (k - 0.5) * 34 if mots else
+                                     y_corps + h_vide / 2)),
+                   ajuster(d, txt, f_nom, l_max), font=f_nom, fill=TEXTE_2, anchor="lm")
     for r, g in enumerate(t["lignes"]):
         y = y_corps + r * h_ligne
         if r % 2 == 0:

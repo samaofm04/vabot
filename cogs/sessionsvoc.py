@@ -240,7 +240,7 @@ def message_bilan_image(jour: str, png: bytes, ligne: str, alt: str = ""):
     return vue, discord.File(io.BytesIO(png), filename=nom)
 
 
-def embed_resume_texte(jour: str, att) -> discord.Embed:
+def embed_resume_texte(jour: str, att, maintenant: float = None) -> discord.Embed:
     """Le bilan TEXTE (l'ancien format) : le repli quand l'image est impossible.
 
     LE PREMIER BILAN ETAIT ILLISIBLE. Les absents arrivaient en une seule
@@ -251,14 +251,18 @@ def embed_resume_texte(jour: str, att) -> discord.Embed:
 
     Vert = present. Rouge = absent. Orange = passe sans rester.
     """
-    r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=True)
-    e = discord.Embed(
-        title=titre_bilan(jour),
-        description=("Jessye US · Youl4b. Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
-                     if att else
-                     "Heures en %s. Liste des VA attendus inconnue : seuls "
-                     "les presents sont fiables." % r["fuseau"]),
-        color=0x5865F2)
+    r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=True, maintenant=maintenant)
+    description = ("Jessye US · Youl4b. Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
+                   if att else
+                   "Heures en %s. Liste des VA attendus inconnue : seuls "
+                   "les presents sont fiables." % r["fuseau"])
+    if not all(s2.get("terminee", True) for s2 in r["sessions"]):
+        # Le bilan du jour en cours (repli texte du message tenu a jour) :
+        # l'heure du releve, comme sur l'image.
+        import sessions_image as _siT
+        description += " Relevé à %s." % _siT._hhmm(
+            _t.time() if maintenant is None else maintenant, r["fuseau"])
+    e = discord.Embed(title=titre_bilan(jour), description=description, color=0x5865F2)
     for s2 in r["sessions"]:
         hl = s2.get("heures_locales") or {}
         entete = "%s — %s" % (s2["nom"], s2["heure"])
@@ -268,37 +272,50 @@ def embed_resume_texte(jour: str, att) -> discord.Embed:
     return e
 
 
-async def contenu_bilan(bot, jour: str) -> tuple:
+async def contenu_bilan(bot, jour: str, maintenant: float = None) -> tuple:
     """(arguments de send, infos) : le bilan en image, ou le texte si l'image echoue.
 
     Un bilan ne doit JAMAIS etre perdu : toute erreur du dessin (police,
     Pillow, photo...) retombe sur l'embed texte, avec la cause au journal.
     Le dessin tourne hors de la boucle d'evenements (asyncio.to_thread) :
     une image de soixante lignes ne doit pas figer le bot.
+
+    `maintenant` : l'instant du releve (le bilan du jour tenu a jour, et
+    /demosessions qui le montre). Une journee pas finie porte « relevé à ».
+    `infos["png"]`, `["ligne"]`, `["alt"]` gardent de quoi refaire le
+    message : un discord.File ne se lit qu'une fois, et deux salons « bilan »
+    en veulent chacun un -- sans redessiner ni relire les photos.
     """
+    maintenant = _t.time() if maintenant is None else float(maintenant)
     att, raison = attendus_et_etat(bot)
-    infos = {"mode": "image", "raison": raison, "attendus": att, "photos": {}, "erreur": ""}
+    infos = {"mode": "image", "raison": raison, "attendus": att, "photos": {}, "erreur": "",
+             "png": None, "ligne": "", "alt": "", "maintenant": maintenant}
     try:
         import sessions_image as _si
-        r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=False)
-        ids = _si.ids_dessines(r, att)
+        r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=False, maintenant=maintenant)
+        ids = _si.ids_dessines(r, att, maintenant)
         photos, compte = await photos_avatars(bot, ids)
         infos["photos"] = compte
-        png = await asyncio.to_thread(_si.dessiner_bilan, r, att, photos, jour)
-        t = _si.tableau(r, att)
+        png = await asyncio.to_thread(_si.dessiner_bilan, r, att, photos, jour, maintenant)
+        t = _si.tableau(r, att, maintenant)
         vus = t["attendus_vus"] if att else len(t["lignes"])
         alt = (("Bilan des sessions du %s : %d VA présent%s sur %d"
                 % (jour, vus, "s" if vus > 1 else "", t["attendus"])) if att else
                "Bilan des sessions du %s : %d VA vu%s" % (jour, vus, "s" if vus > 1 else ""))
-        vue, fichier = message_bilan_image(jour, png, ligne_courte(r["fuseau"], att), alt)
-        print("[sessions] bilan %s dessiné : %d ligne(s), %d absent(s), photos %s"
-              % (jour, len(t["lignes"]), len(t["absents"]), compte), flush=True)
+        if not t["journee_finie"]:
+            alt += " (journée en cours, relevé à %s)" % t["releve"]
+        ligne = ligne_courte(r["fuseau"], att)
+        vue, fichier = message_bilan_image(jour, png, ligne, alt)
+        infos.update(png=png, ligne=ligne, alt=alt)
+        print("[sessions] bilan %s dessiné%s : %d ligne(s), %d absent(s), photos %s"
+              % (jour, "" if t["journee_finie"] else " (relevé à %s)" % t["releve"],
+                 len(t["lignes"]), len(t["absents"]), compte), flush=True)
         return {"view": vue, "file": fichier}, infos
     except Exception as e:                            # noqa: BLE001
         infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
         print("[sessions] bilan %s : image impossible (%s) — repli sur le bilan texte"
               % (jour, infos["erreur"]), flush=True)
-        return {"embed": embed_resume_texte(jour, att)}, infos
+        return {"embed": embed_resume_texte(jour, att, maintenant)}, infos
 
 
 # ==============================================================================
@@ -724,10 +741,18 @@ class SessionsVoc(commands.Cog):
             await self._direct()
         except Exception as e:                       # noqa: BLE001
             print(f"[sessions] direct : {e}", flush=True)
+        # Le bilan d'HIER avant le message du jour : bot eteint toute une
+        # journee et redemarre a 8 h 30, l'ordre inverse posait le message du
+        # jour puis, en dessous, le bilan de la veille -- « le dernier message
+        # est encore l'ancien bilan », la plainte du 28/09.
         try:
             await self._resume_si_lheure()
         except Exception as e:                       # noqa: BLE001
             print(f"[sessions] resume : {e}", flush=True)
+        try:
+            await self._bilan_vivant()
+        except Exception as e:                       # noqa: BLE001
+            print(f"[sessions] bilan du jour : {e}", flush=True)
 
     @boucle.before_loop
     async def _avant(self):
@@ -762,32 +787,315 @@ class SessionsVoc(commands.Cog):
     # ------------------------------------------------------------------ #
     # Le resume du jour
     # ------------------------------------------------------------------ #
+    def _verrou(self) -> asyncio.Lock:
+        """Un seul passage a la fois sur les messages du bilan.
+
+        Le bouton du site (poster_resume) tourne dans la boucle du bot EN MEME
+        TEMPS que la boucle d'une minute : sans verrou, un clic pendant la
+        pose du message du jour en posait un second.
+        """
+        v = getattr(self, "_verrou_bilan", None)
+        if v is None:
+            v = self._verrou_bilan = asyncio.Lock()
+        return v
+
     async def _resume_si_lheure(self):
+        """A `resume_heure` (8 h au Benin), le bilan d'HIER : fige, et jamais en double.
+
+        Depuis le 28/09 le bilan d'une journee est pose des sa premiere session
+        et reecrit au fil des sessions (_bilan_vivant). A l'heure du bilan :
+        - le message du jour existe dans le salon -> on s'assure qu'il est
+          fige a jour (derniere reecriture si besoin) et on NE poste RIEN ;
+        - il n'existe pas (bot eteint toute la journee, salon cree apres,
+          message supprime a la main) -> le bilan part comme avant (image,
+          puis repli texte) : un bilan ne se perd jamais.
+        """
         cfg = sv.config()
         if not cfg.get("resume_actif"):
             return
-        maintenant = _dt.datetime.now(sv._tz())
+        # L'horloge par time.time() (et non datetime.now) : la meme que le
+        # reste du cog, que les simulations remplacent.
+        maintenant_ts = _t.time()
+        maintenant = _dt.datetime.fromtimestamp(maintenant_ts, sv._tz())
         if maintenant.hour != int(cfg.get("resume_heure", 8)):
             return
         # Le resume porte sur la journee ECOULEE : a huit heures du matin, ce
         # qui interesse le proprietaire est la nuit qui vient de passer, pas
         # la journee qui commence et dont aucune session n'a encore eu lieu.
         hier = (maintenant.date() - _dt.timedelta(days=1)).isoformat()
+        contenu = None
         for salon in self._salons_resume():
-            cle = "%s:%s" % (getattr(salon.guild, "id", 0), hier)
+            # Par SALON, pas par serveur : avec deux salons « bilan » sur
+            # Youl4b, la cle « serveur:jour » marquait le second comme servi
+            # des que le premier l'etait.
+            cle = "%s:%s" % (getattr(salon, "id", 0), hier)
             if self._resumes_faits.get(cle):
                 continue
             try:
-                # Un redémarrage pendant l'heure du bilan vide la mémoire.
-                # Retrouver le message déjà publié avant d'en créer un autre
-                # -- en image (nouveau) comme en embed texte (ancien, repli).
-                if await self._deja_publie(salon, hier):
+                async with self._verrou():
+                    fait, contenu = await self._bilan_de_9h(salon, hier, maintenant_ts, contenu)
+                if fait:
                     self._resumes_faits[cle] = True
-                    continue
-                await self.envoyer_bilan(salon, hier)
-                self._resumes_faits[cle] = True
             except Exception as e:                   # noqa: BLE001
                 print(f"[sessions] envoi resume : {e}", flush=True)
+
+    async def _bilan_de_9h(self, salon, hier: str, maintenant: float, contenu) -> tuple:
+        """(fait, contenu) pour UN salon. `fait` faux = a retenter a la minute suivante."""
+        nom = getattr(salon, "name", "?")
+        fiche = sv.bilan_fiche(hier, salon.id)
+        if fiche and fiche.get("message") and not fiche.get("supprime"):
+            msg, introuvable = await self._chercher(fiche)
+            if msg is not None:
+                if not fiche.get("fige"):
+                    if contenu is None:
+                        contenu = await contenu_bilan(self.bot, hier, maintenant)
+                    mode = await self._reecrire_bilan(msg, hier, contenu)
+                    if not mode:
+                        print("[sessions] bilan %s : dernière réécriture refusée dans #%s — "
+                              "retentée à la minute suivante, rien de posté" % (hier, nom), flush=True)
+                        return False, contenu
+                    sv.bilan_poser(hier, salon.id, dict(fiche, maj=maintenant, format=mode, fige=True,
+                                                        essais=0, prochain=0))
+                    print("[sessions] bilan %s figé à l'heure du bilan dans #%s (%s)"
+                          % (hier, nom, mode), flush=True)
+                print("[sessions] bilan %s : le message du jour est déjà dans #%s — pas de second"
+                      % (hier, nom), flush=True)
+                return True, contenu
+            if not introuvable:
+                # Illisible pour l'instant (reseau, 5xx) : il existe peut-etre
+                # encore. Poster maintenant ferait deux bilans du meme jour.
+                print("[sessions] bilan %s : message du jour illisible dans #%s — "
+                      "retenté à la minute suivante" % (hier, nom), flush=True)
+                return False, contenu
+            print("[sessions] bilan %s : le message du jour a disparu de #%s — "
+                  "le bilan final est reposté" % (hier, nom), flush=True)
+        elif fiche and fiche.get("supprime"):
+            print("[sessions] bilan %s : le message du jour avait été supprimé à la main dans #%s — "
+                  "le bilan final est reposté" % (hier, nom), flush=True)
+        # Comportement d'avant le 28/09 : retrouver un bilan deja publie (un
+        # redemarrage pendant l'heure du bilan vide la memoire ; ancien embed,
+        # image de 46e6240 ou message du jour), sinon le poster.
+        deja = await self._bilans_publies(salon, hier)
+        if deja:
+            sv.bilan_poser(hier, salon.id, {"salon": salon.id, "message": deja[0].id, "maj": maintenant,
+                                            "fige": True, "format": "repris"})
+            return True, contenu
+        mode, msg = await self._envoyer_bilan(salon, hier)
+        sv.bilan_poser(hier, salon.id, {"salon": salon.id, "message": getattr(msg, "id", None),
+                                        "maj": maintenant, "fige": True, "format": mode,
+                                        "poste_a_l_heure_du_bilan": True})
+        return True, contenu
+
+    # ------------------------------------------------------------------ #
+    # Le bilan du JOUR, tenu a jour au fil des sessions
+    # ------------------------------------------------------------------ #
+    async def _bilan_vivant(self):
+        """Le bilan de la journee, pose des sa premiere session et reecrit ensuite.
+
+        Demande du proprietaire du 28/09 : « un session-bilan toujours a jour,
+        genre toutes les sessions ». Dans chaque salon « bilan », UN message
+        par jour : pose des qu'une session du jour commence, reecrit toutes
+        les `maj_minutes` (4) pendant une session et une fois apres la fin de
+        chacune, puis FIGE quand la derniere est terminee. Plus besoin
+        d'attendre le lendemain matin pour voir la journee.
+
+        Deux jours a regarder : aujourd'hui, et hier -- la session de 23 h
+        finit a 2 h, le lendemain.
+        """
+        cfg = sv.config()
+        if not cfg.get("resume_actif"):
+            return
+        maintenant = _t.time()
+        aujourd = sv.jour_de(maintenant)
+        veille = (_dt.date.fromisoformat(aujourd) - _dt.timedelta(days=1)).isoformat()
+        salons = self._salons_resume()
+        if not salons:
+            return
+        for jour in (veille, aujourd):
+            try:
+                async with self._verrou():
+                    await self._bilan_vivant_jour(jour, salons, maintenant, cfg)
+            except Exception as e:                   # noqa: BLE001
+                print(f"[sessions] bilan du jour {jour} : {type(e).__name__}: {e}", flush=True)
+
+    @staticmethod
+    def _bilan_a_reecrire(fiche: dict, sessions: list, maintenant: float, cfg: dict) -> bool:
+        """Faut-il reecrire ce message maintenant ?
+
+        Jamais plus d'une fois par tranche de `maj_minutes` et par salon. Et
+        seulement s'il y a du neuf : une session en cours, ou une session
+        terminee depuis la derniere reecriture (son compte definitif). Entre
+        deux sessions, rien ne bouge : l'image garde son « relevé à ».
+        """
+        try:
+            maj = float(fiche.get("maj") or 0)
+        except (TypeError, ValueError):
+            maj = 0.0
+        if maintenant - maj < cfg["maj_minutes"] * 60:
+            return False
+        try:
+            if float(fiche.get("prochain") or 0) > maintenant:
+                return False                    # essais espaces apres une panne
+        except (TypeError, ValueError):
+            pass
+        en_cours = any(float(s["debut"]) <= maintenant < float(s["fin"]) for s in sessions)
+        fin_non_vue = any(maj < float(s["fin"]) <= maintenant for s in sessions)
+        return en_cours or fin_non_vue
+
+    async def _bilan_vivant_jour(self, jour: str, salons: list, maintenant: float, cfg: dict):
+        sessions = sv.sessions_du_jour(jour)
+        debut, fin = sv.journee_bornes(jour)
+        if debut is None or maintenant < debut:
+            return                                    # la journee n'a pas commence
+        a_faire = []
+        for salon in salons:
+            fiche = sv.bilan_fiche(jour, salon.id)
+            if fiche is None:
+                # Pas de message : on le pose tant que la journee n'est pas
+                # finie (bot redemarre, salon cree en cours de journee). Apres,
+                # c'est l'heure du bilan qui s'en charge.
+                if maintenant < fin:
+                    a_faire.append((salon, None))
+                continue
+            if fiche.get("fige") or fiche.get("supprime"):
+                continue
+            if self._bilan_a_reecrire(fiche, sessions, maintenant, cfg):
+                a_faire.append((salon, fiche))
+        if not a_faire:
+            return
+        # UN dessin pour tous les salons de ce passage : les photos passent
+        # par le cache partage avec le direct, l'image est refaite par salon
+        # a partir des memes octets.
+        contenu = await contenu_bilan(self.bot, jour, maintenant)
+        for salon, fiche in a_faire:
+            try:
+                if fiche is None:
+                    await self._poser_bilan_vivant(salon, jour, contenu, maintenant, fin)
+                else:
+                    await self._maj_bilan_vivant(salon, jour, fiche, contenu, maintenant, fin)
+            except Exception as e:                   # noqa: BLE001
+                print("[sessions] bilan du jour %s dans #%s : %s: %s"
+                      % (jour, getattr(salon, "name", "?"), type(e).__name__, e), flush=True)
+
+    async def _poser_bilan_vivant(self, salon, jour: str, contenu, maintenant: float, fin: float):
+        """Le premier message du jour dans ce salon -- ou celui qui y est deja.
+
+        Un bilan de ce jour deja dans le salon (bouton du site avant le
+        deploiement, fiche perdue) est REPRIS et reecrit : jamais deux bilans
+        d'un meme jour dans un salon.
+        """
+        nom = getattr(salon, "name", "?")
+        deja = await self._bilans_publies(salon, jour)
+        if deja:
+            fiche = {"salon": salon.id, "message": deja[0].id, "maj": 0, "fige": False,
+                     "format": "repris", "pose": maintenant}
+            sv.bilan_poser(jour, salon.id, fiche)
+            print("[sessions] bilan du jour %s : un bilan de ce jour est déjà dans #%s — repris, "
+                  "pas de second" % (jour, nom), flush=True)
+            await self._maj_bilan_vivant(salon, jour, fiche, contenu, maintenant, fin)
+            return
+        mode, msg = await self._envoyer_bilan(salon, jour, contenu, repli_v2=True)
+        if msg is None:
+            # Parti mais introuvable a la relecture : on ne sait pas lequel
+            # reecrire. Le passage suivant le reprendra (_bilans_publies).
+            print("[sessions] bilan du jour %s : posé dans #%s mais pas retrouvé — "
+                  "repris au passage suivant" % (jour, nom), flush=True)
+            return
+        sv.bilan_purger()
+        sv.bilan_poser(jour, salon.id, {"salon": salon.id, "message": msg.id, "maj": maintenant,
+                                        "fige": maintenant >= fin, "format": mode, "pose": maintenant})
+        print("[sessions] bilan du jour %s posé en %s dans #%s — réécrit au fil des sessions"
+              % (jour, mode, nom), flush=True)
+
+    async def _maj_bilan_vivant(self, salon, jour: str, fiche: dict, contenu, maintenant: float,
+                                fin: float) -> str:
+        """Reecrit le message du jour ; le fige si la journee est finie. Rend le mode, ou « »."""
+        nom = getattr(salon, "name", "?")
+        msg, introuvable = await self._chercher(fiche)
+        if introuvable:
+            # SUPPRIME A LA MAIN : c'est un droit, comme pour le direct. Pas
+            # de repost aujourd'hui ; l'heure du bilan, demain, reposte le
+            # bilan final -- un bilan ne se perd jamais.
+            sv.bilan_poser(jour, salon.id, dict(fiche, supprime=True, maj=maintenant))
+            print("[sessions] bilan du jour %s : message supprimé à la main dans #%s — pas reposté "
+                  "aujourd'hui ; le bilan final partira à l'heure du bilan, demain" % (jour, nom),
+                  flush=True)
+            return ""
+        mode = await self._reecrire_bilan(msg, jour, contenu) if msg is not None else ""
+        if mode:
+            # Journee finie mais dessin rate (repli texte) : PAS fige. L'heure
+            # du bilan, demain, le reecrit une derniere fois (en image si le
+            # dessin remarche) puis le fige -- sinon le bilan final de la
+            # journee restait du texte pour toujours, alors qu'avant le 28/09
+            # le 9 h aurait poste l'image.
+            fige = maintenant >= fin and mode == "image"
+            suite = ""
+            if fige:
+                suite = " — journée finie, message figé"
+            elif maintenant >= fin:
+                suite = " — journée finie mais en texte : dernier essai en image à l'heure du bilan"
+            sv.bilan_poser(jour, salon.id, dict(fiche, maj=maintenant, format=mode, fige=fige,
+                                                essais=0, prochain=0))
+            print("[sessions] bilan du jour %s réécrit (%s) dans #%s%s"
+                  % (jour, mode, nom, suite), flush=True)
+            return mode
+        # Refuse (image ET texte) ou illisible : pas marque fait, retente. Dix
+        # essais a la minute, puis toutes les 15 min ; abandon DIT sept jours
+        # apres la fin de la journee (la regle du gel du direct).
+        essais = int(fiche.get("essais") or 0) + 1
+        if maintenant - fin >= GEL_ABANDON:
+            sv.bilan_poser(jour, salon.id, dict(fiche, fige=True, gel_rate=True, essais=essais))
+            print("[sessions] bilan du jour %s : %d essais ratés dans #%s, abandon (le message "
+                  "reste tel quel)" % (jour, essais, nom), flush=True)
+        elif essais >= GEL_ESSAIS_MAX:
+            sv.bilan_poser(jour, salon.id, dict(fiche, essais=essais,
+                                                prochain=maintenant + GEL_ESPACEMENT))
+            print("[sessions] bilan du jour %s : essai %d raté dans #%s, nouvel essai dans %d min"
+                  % (jour, essais, nom, GEL_ESPACEMENT // 60), flush=True)
+        else:
+            sv.bilan_poser(jour, salon.id, dict(fiche, essais=essais))
+            print("[sessions] bilan du jour %s : essai %d raté dans #%s, nouvel essai à la minute "
+                  "suivante" % (jour, essais, nom), flush=True)
+        return ""
+
+    async def _reecrire_bilan(self, msg, jour: str, contenu) -> str:
+        """Reecrit un bilan : « image », « texte » (repli), ou « » si rien n'a pu partir.
+
+        La piece jointe est REMPLACEE (attachments=[fichier]) : une seule.
+        Un message V2 ne redevient jamais un embed : son repli est du texte
+        DANS un bloc V2. Un bilan a l'ancien format (embed) est converti a la
+        premiere reecriture, contenu et embed vides dans la meme requete.
+        """
+        kwargs, infos = contenu
+        v2 = est_v2(msg)
+        if infos.get("png"):
+            try:
+                vue, fichier = message_bilan_image(jour, infos["png"], infos.get("ligne") or "",
+                                                   infos.get("alt") or "")
+                if v2:
+                    await msg.edit(view=vue, attachments=[fichier])
+                else:
+                    await msg.edit(content=None, embed=None, view=vue, attachments=[fichier])
+                    print("[sessions] bilan %s converti en image (ancien format embed)" % jour,
+                          flush=True)
+                return "image"
+            except Exception as e:                   # noqa: BLE001
+                print("[sessions] réécriture du bilan %s en image refusée (%s: %s) — repli sur le texte"
+                      % (jour, type(e).__name__, str(e)[:200]), flush=True)
+        embed = kwargs.get("embed") or embed_resume_texte(jour, infos.get("attendus") or [],
+                                                          infos.get("maintenant"))
+        try:
+            if v2:
+                await msg.edit(view=vue_texte_v2(texte_embed(embed)), attachments=[])
+            else:
+                await msg.edit(embed=embed)
+            print("[sessions] bilan %s réécrit en TEXTE (repli%s)"
+                  % (jour, ", bloc V2" if v2 else ", embed"), flush=True)
+            return "texte"
+        except Exception as e:                       # noqa: BLE001
+            print("[sessions] réécriture du bilan %s : texte refusé aussi (%s: %s)"
+                  % (jour, type(e).__name__, str(e)[:200]), flush=True)
+            return ""
 
     def _salons_texte(self, motif: str, exclure: str = "") -> list:
         """Les salons TEXTE dont le nom porte `motif` (et pas `exclure`).
@@ -1111,16 +1419,27 @@ class SessionsVoc(commands.Cog):
         return cree >= debut - _dt.timedelta(minutes=2)
 
     async def envoyer_bilan(self, salon, jour: str) -> str:
-        """Poste le bilan dans `salon` : « image », ou « texte » en repli.
+        """Poste le bilan dans `salon` : « image », ou « texte » en repli."""
+        mode, _msg = await self._envoyer_bilan(salon, jour)
+        return mode
 
-        L'image d'abord ; si le dessin OU l'envoi echoue, l'ancien embed
-        texte -- un bilan n'est jamais perdu. Avant ce repli on relit le
-        salon : un envoi qui a expire cote client a pu arriver quand meme,
-        et deux bilans le meme jour se liraient comme deux journees.
-        Leve seulement si le texte aussi est refuse (la boucle reessaie).
+    async def _envoyer_bilan(self, salon, jour: str, contenu=None, repli_v2: bool = False) -> tuple:
+        """Poste le bilan dans `salon` : (« image » ou « texte », message ou None).
+
+        L'image d'abord ; si le dessin OU l'envoi echoue, le texte -- un bilan
+        n'est jamais perdu. Avant ce repli on relit le salon : un envoi qui a
+        expire cote client a pu arriver quand meme, et deux bilans le meme
+        jour se liraient comme deux journees.
+        `repli_v2` (le message du jour, reecrit ensuite) : le texte part DANS
+        un bloc V2, pour que les reecritures suivantes restent des messages
+        V2 ; sinon l'ancien embed. Leve seulement si le texte aussi est
+        refuse (la boucle reessaie).
         """
-        kwargs, infos = await contenu_bilan(self.bot, jour)
-        if "embed" not in kwargs:
+        if contenu is None:
+            contenu = await contenu_bilan(self.bot, jour)
+        kwargs, infos = contenu
+        avant, debut = None, discord.utils.utcnow()
+        if infos.get("png") or "view" in kwargs:
             # Les bilans de ce jour DEJA la avant l'envoi. Sans ce releve, la
             # relecture du repli prenait un bilan plus ancien (bouton du site
             # a 12 h) pour l'image qui venait d'echouer (nouveau clic a 20 h,
@@ -1132,26 +1451,51 @@ class SessionsVoc(commands.Cog):
                 avant = None
             debut = discord.utils.utcnow()
             try:
-                await salon.send(allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+                if infos.get("png"):
+                    vue, fichier = message_bilan_image(jour, infos["png"], infos.get("ligne") or "",
+                                                       infos.get("alt") or "")
+                    envoi = {"view": vue, "file": fichier}
+                else:
+                    envoi = kwargs
+                msg = await salon.send(allowed_mentions=discord.AllowedMentions.none(), **envoi)
                 print("[sessions] bilan %s posté en image dans #%s"
                       % (jour, getattr(salon, "name", "?")), flush=True)
-                return "image"
+                return "image", msg
             except Exception as e:                   # noqa: BLE001
                 print("[sessions] bilan %s : envoi de l'image refusé (%s: %s) — repli sur le texte"
                       % (jour, type(e).__name__, str(e)[:200]), flush=True)
-                try:
-                    if any(self._poste_pendant(m, avant, debut)
-                           for m in await self._bilans_publies(salon, jour)):
-                        print("[sessions] bilan %s : l'image était bien arrivée, pas de repli"
-                              % jour, flush=True)
-                        return "image"
-                except Exception as e2:              # noqa: BLE001
-                    print(f"[sessions] relecture avant repli : {e2}", flush=True)
-            kwargs = {"embed": embed_resume_texte(jour, infos["attendus"])}
-        await salon.send(**kwargs)
-        print("[sessions] bilan %s posté en TEXTE dans #%s"
-              % (jour, getattr(salon, "name", "?")), flush=True)
-        return "texte"
+                arrive = await self._arrive_pendant(salon, jour, avant, debut)
+                if arrive is not None:
+                    print("[sessions] bilan %s : l'image était bien arrivée, pas de repli"
+                          % jour, flush=True)
+                    return "image", arrive
+        embed = kwargs.get("embed") or embed_resume_texte(jour, infos.get("attendus") or [],
+                                                          infos.get("maintenant"))
+        if repli_v2:
+            try:
+                msg = await salon.send(view=vue_texte_v2(texte_embed(embed)),
+                                       allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                # Arrive quand meme ? (meme relecture que pour l'image)
+                arrive = await self._arrive_pendant(salon, jour, avant, debut)
+                if arrive is not None:
+                    return "texte", arrive
+                raise
+        else:
+            msg = await salon.send(embed=embed)
+        print("[sessions] bilan %s posté en TEXTE%s dans #%s"
+              % (jour, " (bloc V2)" if repli_v2 else "", getattr(salon, "name", "?")), flush=True)
+        return "texte", msg
+
+    async def _arrive_pendant(self, salon, jour: str, avant, debut):
+        """Le bilan de ce jour poste par la tentative qui vient d'echouer, ou None."""
+        try:
+            for m in await self._bilans_publies(salon, jour):
+                if self._poste_pendant(m, avant, debut):
+                    return m
+        except Exception as e2:                      # noqa: BLE001
+            print(f"[sessions] relecture avant repli : {e2}", flush=True)
+        return None
 
     @staticmethod
     def _corps_session(s2: dict, complet=False) -> str:
@@ -1241,23 +1585,71 @@ class SessionsVoc(commands.Cog):
             print("[sessions] Jessye US / Youl4b : %d personnes attendues" % len(attendus), flush=True)
         return attendus
 
-    async def poster_resume(self, jour: str = "") -> int:
-        """Poste le resume sur demande (bouton du tableau de bord).
+    async def poster_resume(self, jour: str = "") -> dict:
+        """Le bouton du site : poste le bilan du jour affiche -- ou le MET A JOUR.
 
-        Rend le nombre de salons servis : zero veut dire « aucun salon ne
-        correspond a la convention de nom », ce que l'ecran doit pouvoir dire
-        au lieu d'afficher un succes silencieux.
+        Si ce jour a deja son message dans un salon « bilan » (le message du
+        jour tenu a jour, ou un bilan deja poste), il est REECRIT : un second
+        bilan du meme jour se lirait comme une autre journee. Sinon il est
+        poste comme avant. Rend {postes, mis_a_jour, echecs} : le site dit
+        lequel des deux a eu lieu, et « 0 salon » n'est pas un succes.
         """
         if not jour:
             jour = sv.jour_de(_t.time())
-        n = 0
-        for salon in self._salons_resume():
-            try:
-                await self.envoyer_bilan(salon, jour)
-                n += 1
-            except Exception as e:                   # noqa: BLE001
-                print(f"[sessions] envoi manuel : {e}", flush=True)
-        return n
+        out = {"postes": 0, "mis_a_jour": 0, "echecs": 0}
+        contenu = None
+        async with self._verrou():
+            for salon in self._salons_resume():
+                try:
+                    maintenant = _t.time()
+                    _debut, fin = sv.journee_bornes(jour)
+                    fin = maintenant if fin is None else fin
+                    fiche = sv.bilan_fiche(jour, salon.id)
+                    msg = None
+                    if fiche and fiche.get("message") and not fiche.get("supprime"):
+                        msg, introuvable = await self._chercher(fiche)
+                        if msg is None and not introuvable:
+                            raise RuntimeError("message du jour illisible pour l'instant : "
+                                               "rien de posté (il existe peut-être encore)")
+                    if msg is None:
+                        deja = await self._bilans_publies(salon, jour)
+                        msg = deja[0] if deja else None
+                    if contenu is None:
+                        contenu = await contenu_bilan(self.bot, jour, maintenant)
+                    if msg is not None:
+                        base = fiche if fiche and not fiche.get("supprime") else {}
+                        if not contenu[1].get("png") and (base.get("fige") or maintenant >= fin):
+                            # Dessin impossible au moment du clic : reecrire
+                            # un bilan FINI remplacerait son image par du
+                            # texte, pour toujours. On le laisse tel quel.
+                            raise RuntimeError("dessin impossible (%s) : le bilan déjà posté est "
+                                               "laissé tel quel" % (contenu[1].get("erreur") or "?"))
+                        mode = await self._reecrire_bilan(msg, jour, contenu)
+                        if not mode:
+                            raise RuntimeError("mise à jour refusée par Discord")
+                        # Fige seulement en image (meme regle que _maj_bilan_vivant) :
+                        # un repli texte d'une journee finie est repris en image a
+                        # l'heure du bilan.
+                        sv.bilan_poser(jour, salon.id, dict(
+                            base, salon=salon.id, message=msg.id, maj=maintenant, format=mode,
+                            fige=bool(base.get("fige")) or (maintenant >= fin and mode == "image"),
+                            supprime=False, essais=0, prochain=0))
+                        out["mis_a_jour"] += 1
+                        print("[sessions] bouton du site : bilan %s mis à jour dans #%s"
+                              % (jour, getattr(salon, "name", "?")), flush=True)
+                    else:
+                        mode, msg = await self._envoyer_bilan(salon, jour, contenu,
+                                                              repli_v2=maintenant < fin)
+                        if msg is not None:
+                            sv.bilan_poser(jour, salon.id, {
+                                "salon": salon.id, "message": msg.id, "maj": maintenant,
+                                "fige": maintenant >= fin and mode == "image", "format": mode,
+                                "pose": maintenant})
+                        out["postes"] += 1
+                except Exception as e:               # noqa: BLE001
+                    out["echecs"] += 1
+                    print(f"[sessions] envoi manuel : {e}", flush=True)
+        return out
 
     def etat_direct(self) -> dict:
         """Qui est dans les salons MAINTENANT, pour le bandeau du site.

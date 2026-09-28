@@ -13149,6 +13149,550 @@ except Exception as _eDi:
     import traceback as _tbDi
     check("direct image : testable", False, _tbDi.format_exc()[-400:])
 
+# --- Le bilan du JOUR, tenu a jour au fil des sessions -----------------------
+# Demande du proprietaire du 28/09 : un bilan du jour toujours a jour (« un
+# session-bilan toujours a jour stp, genre toutes les sessions »). UN message
+# par jour et par salon « bilan », pose des la premiere session, reecrit
+# toutes les 4 min pendant une session et apres chaque fin, fige quand la
+# journee est finie ; l'heure du bilan du lendemain ne poste plus de second.
+# Section a part : un echec plus haut ne doit pas sauter ces tests.
+print()
+print("=" * 70)
+print("SESSIONS : le bilan du jour tenu a jour (toutes les sessions)")
+print("=" * 70)
+try:
+    import asyncio as _aioBv
+    import inspect as _inspBv
+    import datetime as _dtBv
+    import io as _ioBv
+    import json as _jsBv
+    import pathlib as _plBv
+    import tempfile as _tpBv
+    import time as _tiBv
+    import types as _tyBv
+    import discord as _dBv
+    from discord.http import handle_message_parameters as _hmpBv
+    from discord.utils import MISSING as _MISBv
+    from PIL import Image as _ImBv
+    import safe_json as _sjBv
+    import sessions_voc as _svBv
+    import sessions_image as _siBv
+    import cogs.sessionsvoc as _svcBv
+
+    _dirBv = _plBv.Path(_tpBv.mkdtemp())
+    _savBv = (_svBv.FICHIER_CFG, _svBv.FICHIER_PRESENCE, _svBv.FICHIER_DIRECT,
+              _svBv.FICHIER_BILAN, _svBv.FICHIER_JAILBREAK)
+    _svBv.FICHIER_CFG = _dirBv / "cfg.json"
+    _svBv.FICHIER_PRESENCE = _dirBv / "pres.json"
+    _svBv.FICHIER_DIRECT = _dirBv / "direct.json"
+    _svBv.FICHIER_BILAN = _dirBv / "bilan.json"
+    _svBv.FICHIER_JAILBREAK = _dirBv / "jb.json"
+    _svBv._CACHE.update(sig=None, data=None)
+    _sjBv.write(_svBv.FICHIER_JAILBREAK, {"jessye": {"vas": [
+        {"name": "Ana X1", "discord_username": "ana"}, {"name": "Zoe X1", "discord_username": "zoe"}]}})
+    _TZBv = _svBv._tz()
+    _HBv = [0.0]
+    _vraiTimeBv, _vraiUtcBv = _tiBv.time, _dBv.utils.utcnow
+    _vraiDessBv = _siBv.dessiner_bilan
+
+    def _aBv(j, h, m=0):
+        # j au-dela de 30 : octobre (31 -> 01/10), pour les scenarios de fin de bloc.
+        _HBv[0] = (_dtBv.datetime(2026, 9, 1, h, m, tzinfo=_TZBv)
+                   + _dtBv.timedelta(days=j - 1)).timestamp()
+
+    _bufBv = _ioBv.BytesIO()
+    _ImBv.new("RGB", (8, 8), (200, 30, 30)).save(_bufBv, "PNG")
+    _PPBv = _bufBv.getvalue()
+
+    class _AssetBv:
+        def __init__(self, cle):
+            self.key, self.url, self.lectures = cle, "u", 0
+
+        def replace(self, **kw):
+            return self
+
+        async def read(self):
+            self.lectures += 1
+            return _PPBv
+
+    _mbBv = {10000000000000001: _tyBv.SimpleNamespace(id=10000000000000001, name="ana", bot=False,
+                                                     display_avatar=_AssetBv("ana1")),
+             10000000000000002: _tyBv.SimpleNamespace(id=10000000000000002, name="zoe", bot=False,
+                                                     display_avatar=_AssetBv("zoe1"))}
+    _gBv = _tyBv.SimpleNamespace(id=_svBv.SUIVI_GUILD_ID, chunked=True,
+                                 members=list(_mbBv.values()), get_member=_mbBv.get)
+    _nBv = [5000]
+
+    class _MsgBv:
+        """Un message : chaque envoi et chaque edit passent par discord.py (charge
+        utile reelle) ; un message V2 refuse embed et contenu, comme Discord."""
+
+        def __init__(self, salon, charge):
+            _nBv[0] += 1
+            self.id, self.salon, self.charges = _nBv[0], salon, [charge]
+            self.author = _tyBv.SimpleNamespace(id=5)
+            self.created_at = _dBv.utils.utcnow()
+            self.embeds = [_dBv.Embed.from_dict(e) for e in charge.get("embeds") or []]
+            self.flags = _dBv.MessageFlags(components_v2=bool(charge.get("flags", 0) & (1 << 15)))
+            self.attachments = [_tyBv.SimpleNamespace(filename=x["filename"])
+                                for x in charge.get("attachments") or []]
+            self.components = []
+
+        async def edit(self, **kw):
+            if self.salon.refus_edit:
+                self.salon.refus_edit -= 1
+                raise _dBv.HTTPException(_tyBv.SimpleNamespace(status=500, reason="x"), "coupure")
+            params = _hmpBv(content=kw.get("content", _MISBv), embed=kw.get("embed", _MISBv),
+                            view=kw.get("view", _MISBv), attachments=kw.get("attachments", _MISBv),
+                            flags=_dBv.MessageFlags._from_value(self.flags.value))
+            ch = params.payload if params.payload is not None else _jsBv.loads(params.multipart[0]["value"])
+            if (ch.get("flags", 0) & (1 << 15)) and (ch.get("embeds") or ch.get("content")):
+                raise _dBv.HTTPException(_tyBv.SimpleNamespace(status=400, reason="x"), "V2 : ni embed ni contenu")
+            self.charges.append(ch)
+            if "attachments" in ch:
+                self.attachments = [_tyBv.SimpleNamespace(filename=x["filename"]) for x in ch["attachments"]]
+            if ch.get("flags", 0) & (1 << 15):
+                self.flags = _dBv.MessageFlags(components_v2=True)
+                self.embeds = []
+            return self
+
+    class _SalonBv:
+        def __init__(self, sid, nom):
+            self.id, self.name = sid, nom
+            self.guild = _tyBv.SimpleNamespace(id=_svBv.SUIVI_GUILD_ID)
+            self.messages, self.envois, self.refus_edit = {}, [], 0
+
+        async def send(self, **kw):
+            params = _hmpBv(content=kw.get("content", _MISBv), embed=kw.get("embed", _MISBv),
+                            view=kw.get("view", _MISBv), file=kw.get("file", _MISBv))
+            ch = params.payload if params.payload is not None else _jsBv.loads(params.multipart[0]["value"])
+            m = _MsgBv(self, ch)
+            self.messages[m.id] = m
+            self.envois.append(ch)
+            return m
+
+        async def fetch_message(self, i):
+            if int(i) not in self.messages:
+                raise _dBv.NotFound(_tyBv.SimpleNamespace(status=404, reason="x"), "Unknown Message")
+            return self.messages[int(i)]
+
+        def history(self, limit=20):
+            async def _g():
+                for _i in sorted(self.messages, reverse=True)[:limit]:
+                    yield self.messages[_i]
+            return _g()
+
+    _B1, _B2 = _SalonBv(781, "📊・session-bilan"), _SalonBv(782, "bilan-2")
+    _SALONSBv = {781: _B1, 782: _B2}
+    _botBv = _tyBv.SimpleNamespace(is_ready=lambda: True, user=_tyBv.SimpleNamespace(id=5),
+                                   get_guild=lambda g: _gBv if g == _svBv.SUIVI_GUILD_ID else None,
+                                   get_channel=lambda c: _SALONSBv.get(int(c)))
+
+    def _cogBvN(salons=None):
+        c = _svcBv.SessionsVoc.__new__(_svcBv.SessionsVoc)
+        c.bot, c._resumes_faits = _botBv, {}
+        c._salons_resume = lambda: list(salons or [_B1, _B2])
+        return c
+
+    def _pas(c):
+        # Meme ordre que boucle() : le bilan d hier AVANT le message du jour.
+        _aioBv.run(c._resume_si_lheure())
+        _aioBv.run(c._bilan_vivant())
+
+    def _fBv(j, s):
+        return _svBv.bilan_fiche(j, s.id) or {}
+
+    def _pjBv(m):
+        return [x.filename for x in m.attachments]
+
+    _JBv = "2026-09-27"
+    _dessinsBv = [0]
+
+    def _dessCompte(*a, **k):
+        _dessinsBv[0] += 1
+        return _vraiDessBv(*a, **k)
+    _siBv.dessiner_bilan = _dessCompte
+    _tiBv.time = lambda: _HBv[0]
+    _dBv.utils.utcnow = lambda: _dtBv.datetime.fromtimestamp(_HBv[0], _dtBv.timezone.utc)
+    try:
+        # La veille (26/09) : son message du jour est deja fige (la session de
+        # 23 h du 26 finit a 2 h le 27 : sans fiche, le 26 aurait le sien).
+        for _s in (_B1, _B2):
+            _svBv.bilan_poser("2026-09-26", _s.id, {"salon": _s.id, "message": 1, "fige": True})
+        _cBv = _cogBvN()
+        _aBv(27, 1, 40)
+        _pas(_cBv)
+        check("bilan du jour : rien avant le debut de la premiere session (01:40 < 01:45)",
+              not _B1.envois and not _B2.envois and "2026-09-27" not in _svBv.bilan_charger())
+        _aBv(27, 1, 45)
+        _svBv.pointer([{"id": "10000000000000001", "nom": "Ana X1"}], 60, _HBv[0])
+        _pas(_cBv)
+        _m1 = _B1.messages[_fBv(_JBv, _B1).get("message")] if _fBv(_JBv, _B1).get("message") in _B1.messages else None
+        _p1 = _B1.envois[0] if _B1.envois else {}
+        check("bilan du jour : pose au debut de la 1re session, UN message par salon « bilan », en V2 + image",
+              len(_B1.envois) == 1 and len(_B2.envois) == 1 and _m1 is not None
+              and _p1.get("flags", 0) & (1 << 15) and _pjBv(_m1) == ["bilan_sessions_2026-09-27.png"]
+              and _p1["components"][0]["content"].startswith("## Sessions du 2026-09-27")
+              and _fBv(_JBv, _B1).get("fige") is False and _fBv(_JBv, _B2).get("message"),
+              str((_B1.envois[:1], _svBv.bilan_charger()))[:400])
+        check("bilan du jour : deux salons, UN seul dessin pour les deux (meme passage)",
+              _dessinsBv[0] == 1, str(_dessinsBv))
+        check("bilan du jour : l anti-doublon reconnait le message du jour (image + titre)",
+              _svcBv.est_bilan_du(_m1, _JBv, 5))
+        for _mn in (46, 47, 48):
+            _aBv(27, 1, _mn)
+            _pas(_cBv)
+        check("bilan du jour : rien de reecrit avant 4 min", len(_m1.charges) == 1, str(len(_m1.charges)))
+        _aBv(27, 1, 49)
+        _svBv.pointer([{"id": "10000000000000001", "nom": "Ana X1"},
+                       {"id": "10000000000000002", "nom": "Zoe X1"}], 60, _HBv[0])
+        _pas(_cBv)
+        _chBv = _m1.charges[-1]
+        check("bilan du jour : reecriture a 4 min -> UNE piece jointe (remplacee), le meme message",
+              len(_m1.charges) == 2 and len(_chBv.get("attachments", [])) == 1
+              and _chBv["attachments"][0]["filename"] == "bilan_sessions_2026-09-27.png"
+              and "embeds" not in _chBv and "content" not in _chBv and len(_B1.envois) == 1,
+              str(_chBv)[:300])
+        _lecBv = sum(m.display_avatar.lectures for m in _mbBv.values())
+        # Redemarrage en pleine journee : un cog neuf, la fiche relue sur disque.
+        _cBv = _cogBvN()
+        _aBv(27, 1, 53)
+        _pas(_cBv)
+        check("bilan du jour : redemarrage en pleine journee -> aucun second message, le meme est reecrit",
+              len(_B1.envois) == 1 and len(_m1.charges) == 3)
+        check("bilan du jour : une reecriture ne relit pas les photos (cache photos_avatars, partage avec le direct)",
+              sum(m.display_avatar.lectures for m in _mbBv.values()) == _lecBv == 2,
+              str((_lecBv, sum(m.display_avatar.lectures for m in _mbBv.values()))))
+        # Gel de S4 (fin 05:00) : derniere reecriture apres la fin, puis rien
+        # jusqu a la session suivante.
+        _aBv(27, 4, 58)
+        _pas(_cBv)
+        _nAv = len(_m1.charges)
+        _aBv(27, 5, 1)
+        _pas(_cBv)
+        check("bilan du jour : 4 min au moins entre deux reecritures, meme a la fin d une session",
+              len(_m1.charges) == _nAv)
+        _aBv(27, 5, 2)
+        _pas(_cBv)
+        _aBv(27, 5, 6)
+        _pas(_cBv)
+        check("bilan du jour : gel d une session -> UNE reecriture apres sa fin (05:02), puis rien",
+              len(_m1.charges) == _nAv + 1 and _fBv(_JBv, _B1)["maj"] == _HBv[0] - 240,
+              str((len(_m1.charges) - _nAv, _fBv(_JBv, _B1))))
+        _aBv(27, 8, 0)
+        _nAv = len(_m1.charges)
+        _pas(_cBv)
+        _aBv(27, 9, 0)
+        _pas(_cBv)
+        check("bilan du jour : entre deux sessions, plus aucune reecriture ; a l heure du bilan, le 26 (message disparu) est reposte, le 27 intact",
+              len(_m1.charges) == _nAv and len(_B1.envois) == 2
+              and _svcBv.est_bilan_du(_B1.messages[max(_B1.messages)], "2026-09-26", 5),
+              str((len(_m1.charges) - _nAv, len(_B1.envois))))
+        # Repli texte V2 : le dessin casse -> texte DANS un bloc V2.
+        _aBv(27, 10, 0)
+
+        def _casseBv(*a, **k):
+            raise OSError("police")
+        _siBv.dessiner_bilan = _casseBv
+        _pas(_cBv)
+        _siBv.dessiner_bilan = _dessCompte
+        _chR = _m1.charges[-1]
+        check("bilan du jour : dessin impossible -> texte dans un bloc V2, image retiree, jamais d embed",
+              _chR.get("attachments") == [] and _chR["components"][0]["type"] == 10 and "embeds" not in _chR
+              and _chR["components"][0]["content"].startswith("## Sessions du 2026-09-27")
+              and "Relevé à 10:00" in _chR["components"][0]["content"]
+              and _fBv(_JBv, _B1).get("format") == "texte", str(_chR)[:300])
+        _aBv(27, 10, 4)
+        _pas(_cBv)
+        check("bilan du jour : apres le repli, l image revient (drapeau V2 garde)",
+              _pjBv(_m1) == ["bilan_sessions_2026-09-27.png"] and _m1.charges[-1]["components"][1]["type"] == 12)
+        # Image refusee par Discord : repli texte V2 dans la foulee.
+        _aBv(27, 10, 8)
+        _B1.refus_edit = 1
+        _pas(_cBv)
+        check("bilan du jour : image refusee (500) -> repli texte V2, compte comme reecrit",
+              _m1.charges[-1].get("attachments") == [] and _fBv(_JBv, _B1).get("format") == "texte")
+        # Tout refuse : pas marque fait, retente a la minute suivante.
+        _aBv(27, 10, 12)
+        _B1.refus_edit = 2
+        _maj0 = _fBv(_JBv, _B1)["maj"]
+        _pas(_cBv)
+        check("bilan du jour : image ET texte refuses -> pas marque fait, essai compte",
+              _fBv(_JBv, _B1)["maj"] == _maj0 and _fBv(_JBv, _B1).get("essais") == 1)
+        _aBv(27, 10, 13)
+        _pas(_cBv)
+        check("bilan du jour : ... et retente a la minute suivante", _fBv(_JBv, _B1).get("essais") == 0
+              and _fBv(_JBv, _B1)["maj"] == _HBv[0])
+        # Le bouton du site pendant la journee : MIS A JOUR, rien de poste.
+        _aBv(27, 14, 0)
+        _nE1, _nE2 = len(_B1.envois), len(_B2.envois)
+        _btBv = _aioBv.run(_cBv.poster_resume(_JBv))
+        check("bilan du jour : bouton du site -> « mis à jour » dans les 2 salons, aucun second message",
+              _btBv == {"postes": 0, "mis_a_jour": 2, "echecs": 0}
+              and (len(_B1.envois), len(_B2.envois)) == (_nE1, _nE2) and not _fBv(_JBv, _B1).get("fige"),
+              str(_btBv))
+        # Suppression a la main dans le 2e salon : pas de repost le jour meme.
+        _mB2 = _fBv(_JBv, _B2)["message"]
+        _B2.messages.pop(_mB2)
+        _aBv(27, 14, 4)
+        _pas(_cBv)
+        _aBv(27, 14, 30)
+        _pas(_cBv)
+        check("bilan du jour : supprime a la main -> PAS reposte le jour meme (fiche « supprime »)",
+              len(_B2.envois) == _nE2 and _fBv(_JBv, _B2).get("supprime") is True)
+        # Gel de la journee : apres 02:00 le 28, derniere reecriture, FIGE.
+        _aBv(28, 1, 57)
+        _pas(_cBv)
+        _aBv(28, 2, 1)
+        _nAv = len(_m1.charges)
+        _pas(_cBv)
+        check("bilan du jour : fin de la derniere session -> derniere reecriture, message FIGE",
+              len(_m1.charges) == _nAv + 1 and _fBv(_JBv, _B1).get("fige") is True
+              and _pjBv(_m1) == ["bilan_sessions_2026-09-27.png"], str(_fBv(_JBv, _B1)))
+        _aBv(28, 3, 0)
+        _pas(_cBv)
+        check("bilan du jour : une fois fige, le message ne bouge plus", len(_m1.charges) == _nAv + 1)
+        # L heure du bilan du 28 : 0 pose la ou le message du jour est la,
+        # le bilan FINAL la ou il a ete supprime.
+        _aBv(28, 8, 0)
+        _nE1, _nE2 = len(_B1.envois), len(_B2.envois)
+        _pas(_cBv)
+        _nouv27 = [c for c in _B1.envois[_nE1:] + _B2.envois[_nE2:]
+                   if "Sessions du 2026-09-27" in _jsBv.dumps(c)]
+        check("bilan du jour : heure du bilan, message du jour present -> AUCUNE pose",
+              not [c for c in _B1.envois[_nE1:] if "Sessions du 2026-09-27" in _jsBv.dumps(c)])
+        check("bilan du jour : heure du bilan, message supprime -> le bilan final est reposte, un seul, fige",
+              len(_nouv27) == 1 and _fBv(_JBv, _B2).get("fige") and not _fBv(_JBv, _B2).get("supprime")
+              and _fBv(_JBv, _B2)["message"] in _B2.messages, str((_nouv27, _fBv(_JBv, _B2)))[:300])
+        _aBv(28, 8, 5)
+        _nE = len(_B1.envois) + len(_B2.envois)
+        _pas(_cogBvN())
+        check("bilan du jour : redemarrage pendant l heure du bilan -> rien de reposte",
+              len(_B1.envois) + len(_B2.envois) == _nE)
+        # Heure du bilan SANS message du jour (bot eteint toute la journee) :
+        # comportement d avant, image puis texte.
+        _d = _svBv.bilan_charger()
+        _d.pop("2026-09-28", None)
+        _sjBv.write(_svBv.FICHIER_BILAN, _d)
+        for _s in (_B1, _B2):
+            for _i in [i for i, m in _s.messages.items() if _svcBv.est_bilan_du(m, "2026-09-28", 5)]:
+                _s.messages.pop(_i)
+        _aBv(29, 8, 0)
+        _nE1, _nE2 = len(_B1.envois), len(_B2.envois)
+        _aioBv.run(_cogBvN()._resume_si_lheure())
+        check("bilan du jour : heure du bilan sans message du jour -> le bilan part (un par salon), fige",
+              (len(_B1.envois) - _nE1, len(_B2.envois) - _nE2) == (1, 1)
+              and _fBv("2026-09-28", _B1).get("fige") and _fBv("2026-09-28", _B2).get("fige"),
+              str((len(_B1.envois) - _nE1, len(_B2.envois) - _nE2)))
+        # L anti-doublon reconnait toujours l ancien embed : un bilan texte
+        # d avant le 28/09 n est pas double.
+        _aBv(29, 11, 0)
+        _anc = _aioBv.run(_B1.send(embed=_dBv.Embed(title="Sessions du 2026-09-20")))
+        _btAnc = _aioBv.run(_cogBvN([_B1]).poster_resume("2026-09-20"))
+        check("bilan du jour : bouton sur un jour qui a un ancien bilan (embed) -> mis a jour et converti en V2",
+              _btAnc == {"postes": 0, "mis_a_jour": 1, "echecs": 0} and _svcBv.est_v2(_anc)
+              and _anc.charges[-1].get("embeds") == [] and _pjBv(_anc) == ["bilan_sessions_2026-09-20.png"],
+              str((_btAnc, _anc.charges[-1:]))[:300])
+        _btNeuf = _aioBv.run(_cogBvN([_B1]).poster_resume("2026-09-21"))
+        check("bilan du jour : bouton sur un jour sans bilan -> « posté »",
+              _btNeuf == {"postes": 1, "mis_a_jour": 0, "echecs": 0} and _fBv("2026-09-21", _B1).get("fige"))
+        # Re-clic pendant une panne du dessin : le bilan FINI garde son image
+        # (sinon le bouton remplacait l image d un jour fige par du texte).
+        _m21 = _B1.messages.get(_fBv("2026-09-21", _B1).get("message"))
+        _nC21, _nE21 = (len(_m21.charges) if _m21 is not None else -1), len(_B1.envois)
+        _siBv.dessiner_bilan = _casseBv
+        try:
+            _btKo = _aioBv.run(_cogBvN([_B1]).poster_resume("2026-09-21"))
+        finally:
+            _siBv.dessiner_bilan = _dessCompte
+        check("bilan du jour : bouton + dessin impossible sur un bilan fini -> echec dit, image gardee, rien de poste",
+              _btKo == {"postes": 0, "mis_a_jour": 0, "echecs": 1} and _m21 is not None
+              and len(_m21.charges) == _nC21 and len(_B1.envois) == _nE21
+              and _pjBv(_m21) == ["bilan_sessions_2026-09-21.png"],
+              str((_btKo, _nC21, _m21 and len(_m21.charges))))
+        # Journee finie pendant une panne du dessin : le repli texte n est PAS
+        # fige ; l heure du bilan le reecrit en image puis le fige, sans second
+        # message (sinon le bilan final restait du texte pour toujours).
+        _cG = _cogBvN([_B1])
+        _aBv(30, 1, 57)
+        _pas(_cG)
+        _m29 = _B1.messages.get(_fBv("2026-09-29", _B1).get("message"))
+        _aBv(30, 2, 1)
+        _siBv.dessiner_bilan = _casseBv
+        try:
+            _pas(_cG)
+        finally:
+            _siBv.dessiner_bilan = _dessCompte
+        _fT = _fBv("2026-09-29", _B1)
+        _nC = len(_m29.charges) if _m29 is not None else -1
+        _aBv(30, 2, 30)
+        _pas(_cG)
+        _nC2 = len(_m29.charges) if _m29 is not None else -1
+        _nE = len(_B1.envois)
+        _aBv(30, 8, 0)
+        _pas(_cG)
+        check("bilan du jour : journee finie en repli texte -> pas figee, l heure du bilan la reecrit en image et la fige, sans second message",
+              _m29 is not None and _fT.get("format") == "texte" and _fT.get("fige") is False
+              and _nC2 == _nC and len(_m29.charges) == _nC + 1
+              and _pjBv(_m29) == ["bilan_sessions_2026-09-29.png"]
+              and _fBv("2026-09-29", _B1).get("fige") is True and len(_B1.envois) == _nE,
+              str((_fT, _nC, _nC2, len(_m29.charges) if _m29 is not None else None, _fBv("2026-09-29", _B1)))[:400])
+        # Bot eteint tout le 01/10, redemarre le 02/10 a 08:30 (heure du
+        # bilan) : le bilan du 01 part AVANT le message du 02, qui reste le
+        # dernier du salon (l ordre inverse etait la plainte du 28/09).
+        _nE = len(_B1.envois)
+        _aBv(32, 8, 30)
+        _pas(_cogBvN([_B1]))
+        _nouvR = sorted(_B1.messages)[-2:]
+        check("bilan du jour : redemarrage a l heure du bilan -> bilan d hier puis message du jour, celui-ci en DERNIER",
+              len(_B1.envois) == _nE + 2
+              and _svcBv.est_bilan_du(_B1.messages[_nouvR[0]], "2026-10-01", 5)
+              and _svcBv.est_bilan_du(_B1.messages[_nouvR[1]], "2026-10-02", 5)
+              and _fBv("2026-10-01", _B1).get("fige") and _fBv("2026-10-02", _B1).get("fige") is False,
+              str((len(_B1.envois) - _nE, _fBv("2026-10-01", _B1), _fBv("2026-10-02", _B1)))[:400])
+        _srcBoucle = _inspBv.getsource(_svcBv.SessionsVoc.boucle.coro)
+        check("bilan du jour : boucle() appelle _resume_si_lheure AVANT _bilan_vivant",
+              -1 < _srcBoucle.find("_resume_si_lheure()") < _srcBoucle.find("_bilan_vivant()"))
+        # Le registre a part : sans effet sur direct_a_figer / direct_purger.
+        _svBv.direct_poser("2026-09-27:s1", {"salon": 1, "message": 2, "fin": 0, "fige": False})
+        _avDir = _svBv.FICHIER_DIRECT.read_bytes()
+        _svBv.bilan_poser("2020-01-01", 781, {"salon": 781, "message": 3, "fige": False})
+        check("bilan du jour : le registre du bilan est un fichier a part, direct_a_figer ne voit que les directs",
+              [k for k, _ in _svBv.direct_a_figer(_HBv[0])] == ["2026-09-27:s1"]
+              and _svBv.FICHIER_DIRECT.read_bytes() == _avDir
+              and not any("bilan" in str(k) or len(str(k).split(":")) != 2 for k in _svBv.direct_charger()))
+        _svBv.direct_purger(1)
+        check("bilan du jour : direct_purger ne touche pas au registre du bilan",
+              "2020-01-01" in _svBv.bilan_charger() and _svBv.bilan_purger(60) >= 1
+              and "2020-01-01" not in _svBv.bilan_charger())
+    finally:
+        _tiBv.time, _dBv.utils.utcnow = _vraiTimeBv, _vraiUtcBv
+        _siBv.dessiner_bilan = _vraiDessBv
+
+    # « relevé à » dans l en-tete, SEULEMENT tant que la journee n est pas finie.
+    _RBv = _svBv.resume_jour(_JBv, maintenant=_dtBv.datetime(2026, 9, 27, 14, 40, tzinfo=_TZBv).timestamp())
+    _RBvF = _svBv.resume_jour(_JBv, maintenant=_dtBv.datetime(2026, 9, 28, 8, 0, tzinfo=_TZBv).timestamp())
+    _txtBv = []
+    _vraiTextBv = _siBv.ImageDraw.ImageDraw.text
+
+    _boitesBv = []
+
+    def _espionBv(self, xy, text, *a, **k):
+        _txtBv.append(str(text))
+        try:
+            _boitesBv.append((str(text), id(self), self.textbbox(xy, text, font=k.get("font"),
+                                                                 anchor=k.get("anchor"))))
+        except Exception:
+            pass
+        return _vraiTextBv(self, xy, text, *a, **k)
+
+    def _chevauchentBv():
+        """Les textes qui se chevauchent avec « relevé à » (vide = lisible)."""
+        # Meme feuille seulement : les initiales des ronds sont dessinees sur
+        # une petite image a part, dans son propre repere.
+        rel = [(q, b) for t, q, b in _boitesBv if "relev" in t]
+        return [t for t, q, b in _boitesBv if "relev" not in t for qr, r in rel
+                if q == qr and b[0] < r[2] and r[0] < b[2] and b[1] < r[3] and r[1] < b[3]]
+    _AttBv = [{"id": "10000000000000001", "nom": "Ana X1"}]
+    _t1440 = _dtBv.datetime(2026, 9, 27, 14, 40, tzinfo=_TZBv).timestamp()
+    _t1200v = _dtBv.datetime(2026, 8, 2, 12, 0, tzinfo=_TZBv).timestamp()
+    _t0800v = _dtBv.datetime(2026, 8, 3, 8, 0, tzinfo=_TZBv).timestamp()
+    _siBv.ImageDraw.ImageDraw.text = _espionBv
+    try:
+        _siBv.dessiner_bilan(_RBv, [], {}, _JBv, _t1440)
+        _enCours, _chevInc = list(_txtBv), _chevauchentBv()
+        _txtBv.clear(); _boitesBv.clear()
+        _RBvC = _svBv.resume_jour(_JBv, attendus=_AttBv, limiter_aux_attendus=False, maintenant=_t1440)
+        _siBv.dessiner_bilan(_RBvC, _AttBv, {}, _JBv, _t1440)
+        _enCoursC, _chevCon = list(_txtBv), _chevauchentBv()
+        _txtBv.clear(); _boitesBv.clear()
+        _siBv.dessiner_bilan(_RBvF, [], {}, _JBv, _dtBv.datetime(2026, 9, 28, 8, 0, tzinfo=_TZBv).timestamp())
+        _fini = list(_txtBv)
+        # Un jour ou personne n est venu : en cours, puis fini.
+        _txtBv.clear()
+        _siBv.dessiner_bilan(_svBv.resume_jour("2026-08-02", attendus=_AttBv, maintenant=_t1200v),
+                             _AttBv, {}, "2026-08-02", _t1200v)
+        _videEnCours = " ".join(_txtBv)
+        _txtBv.clear()
+        _siBv.dessiner_bilan(_svBv.resume_jour("2026-08-02", attendus=_AttBv, maintenant=_t0800v),
+                             _AttBv, {}, "2026-08-02", _t0800v)
+        _videFini = " ".join(_txtBv)
+    finally:
+        _siBv.ImageDraw.ImageDraw.text = _vraiTextBv
+    check("bilan du jour : « relevé à 14:40 » dans l en-tete tant que la journee n est pas finie",
+          any("relevé à 14:40" in t for t in _enCours) and " · relevé à 14:40" in _enCoursC
+          and not _siBv.tableau(_RBv, [], _HBv[0])["journee_finie"],
+          str([t for t in _enCours + _enCoursC if "relev" in t]))
+    check("bilan du jour : « relevé à » ne chevauche aucun texte, liste des attendus inconnue ou connue",
+          not _chevInc and not _chevCon and "liste des attendus inconnue" in _enCours,
+          str((_chevInc, _chevCon)))
+    check("bilan du jour : personne encore vu, journee en cours -> phrase de journee en cours, pas « ce jour-là »",
+          "Personne n'a encore" in _videEnCours and "ce jour-là" not in _videEnCours
+          and "Personne n'a été vu aux sessions ce jour-là." in _videFini,
+          str((_videEnCours[:300], _videFini[:300])))
+    check("bilan du jour : journee finie -> aucune heure de releve (le rendu fige valide)",
+          not any("relev" in t for t in _fini)
+          and _siBv.tableau(_RBvF, [], _HBv[0])["journee_finie"] is True, str([t for t in _fini if "relev" in t]))
+
+    # Le site : le bouton dit « Mettre à jour » quand le jour a deja son message
+    # (rendu serveur), et le JS dit « mis à jour » / « posté » (rendu client).
+    import web_upload as _wBv
+    _srcWBv = _plBv.Path("web_upload.py").read_text(encoding="utf-8")
+    _libBv = {}
+    _appBv = _wBv.create_app() if hasattr(_wBv, "create_app") else None
+    for _cas in ("sans", "avec"):
+        if _cas == "avec":
+            _svBv.bilan_poser("2026-09-25", 781, {"salon": 781, "message": 1, "fige": True})
+        else:
+            _svBv.FICHIER_BILAN.unlink(missing_ok=True)
+        with _appBv.test_request_context("/?tab=sessions&jour=2026-09-25"):
+            _hBv = _wBv._render_sessions_html()
+        _mBv = __import__("re").search(r"<button[^>]*sessionsResume[^>]*>([^<]*)</button>", _hBv)
+        _libBv[_cas] = (_mBv.group(1) if _mBv else "", "data-etat='%s'" % ("maj" if _cas == "avec" else "pose")
+                        in (_mBv.group(0) if _mBv else ""))
+    check("bilan du jour : le bouton du site dit « Mettre à jour » quand le jour a deja son message (rendu serveur)",
+          _libBv["sans"] == ("Poster le résumé du jour affiché", True)
+          and _libBv["avec"] == ("Mettre à jour le résumé du jour affiché", True), str(_libBv))
+    check("bilan du jour : le JS du bouton distingue « mis à jour » et « posté » (rendu client)",
+          "bouts.push(lib('mis_a_jour', j.mis_a_jour))" in _srcWBv
+          and "bouts.push(lib('postes', j.postes))" in _srcWBv
+          and "btn.textContent=lib('maj', '')" in _srcWBv
+          and '"mis_a_jour": maj' in _srcWBv)
+    # En anglais (langue par defaut) : les textes que le JS pose apres un clic
+    # viennent du rendu serveur traduit, jamais d une chaine francaise du JS.
+    with _appBv.test_request_context("/?tab=sessions&jour=2026-09-25"):
+        _hEnBv = _wBv._traduire_html(_wBv._render_sessions_html())
+    _libEn = __import__("re").search(r"<span id='se-lib' hidden>(.*?)</span></span>", _hEnBv)
+    check("bilan du jour : en anglais, les libelles poses par le JS apres un clic sont traduits",
+          _libEn is not None and "Update the summary for the day shown" in _libEn.group(1)
+          and "updated in {n} channel(s)" in _libEn.group(1)
+          and "posted in {n} channel(s)" in _libEn.group(1)
+          and "failed in {n} channel(s)" in _libEn.group(1)
+          and not __import__("re").search(r"[àéè]", _libEn.group(1))
+          and "btn.textContent='Mettre" not in _srcWBv,
+          (_libEn.group(1) if _libEn else _hEnBv[-300:])[:300])
+    import i18n_en as _i18Bv
+    check("bilan du jour : le nouveau libelle est traduit",
+          "Mettre à jour le résumé du jour affiché" in _i18Bv.TRADUCTIONS)
+    _srcSvBv = _plBv.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+    check("bilan du jour : dessin hors de la boucle, meme construction que /demosessions (contenu_bilan)",
+          "asyncio.to_thread(_si.dessiner_bilan, r, att, photos, jour, maintenant)" in _srcSvBv
+          and "contenu = await contenu_bilan(self.bot, jour, maintenant)" in _srcSvBv)
+except Exception as _eBv:
+    import traceback as _tbBv
+    check("bilan du jour : testable", False, _tbBv.format_exc()[-500:])
+finally:
+    try:
+        (_svBv.FICHIER_CFG, _svBv.FICHIER_PRESENCE, _svBv.FICHIER_DIRECT,
+         _svBv.FICHIER_BILAN, _svBv.FICHIER_JAILBREAK) = _savBv
+        _svBv._CACHE.update(sig=None, data=None)
+        _svcBv._AVATARS.clear()
+        _svcBv._AVATARS_KO.clear()
+        import shutil as _shBv
+        _shBv.rmtree(_dirBv, ignore_errors=True)
+    except Exception:
+        pass
+
 # --- Classement des clics par VA (accueil) ------------------------------
 # Ce qui se joue ici : des CHIFFRES DE TRAVAIL affiches en rang. Une fusion
 # de trop reunit deux personnes sous un seul nom, une lecture ratee prise

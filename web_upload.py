@@ -47536,6 +47536,11 @@ def _render_sessions_html() -> str:
             attendus = []
     resume = _sv.resume_jour(jour, attendus=attendus, limiter_aux_attendus=True)
     gens = _sv.resume_par_personne(jour, attendus=attendus, limiter_aux_attendus=True)
+    try:
+        _bilan_deja_la = any(isinstance(f, dict) and f.get("message") and not f.get("supprime")
+                             for f in (_sv.bilan_charger().get(jour) or {}).values())
+    except Exception:
+        _bilan_deja_la = False
     cog = _sessions_cog()
     direct = None
     if cog is not None:
@@ -47667,11 +47672,28 @@ def _render_sessions_html() -> str:
               # d hier. Puisque la page a deja une navigation par jour,
               # c est elle qui doit decider -- sinon il faut un second
               # selecteur pour dire la meme chose.
-              "<button type='button' class='se-btn' data-jour='%s' "
-              "onclick='sessionsResume(this)'>"
-              "Poster le résumé du jour affiché</button>"
+              # Le jour affiche a deja son message dans un salon « bilan »
+              # (tenu a jour depuis le 28/09) : le bouton le MET A JOUR, et
+              # le dit -- le JS change le libelle de la meme facon apres un
+              # premier envoi.
+              "<button type='button' class='se-btn' data-jour='%s' data-etat='%s' "
+              "onclick='sessionsResume(this)'>%s</button>"
               "<span class='se-msg' id='se-msg'></span>"
-              "</div>" % (hier, hier, jour, demain, demain, jour)
+              # Les textes que le JS pose apres un clic, rendus ICI pour
+              # passer par _traduire_html (qui ne touche pas aux <script>) :
+              # sans ca, en anglais (langue par defaut), le bouton repassait
+              # au francais des le premier clic.
+              "<span id='se-lib' hidden>"
+              "<span data-k='maj'>Mettre à jour le résumé du jour affiché</span>"
+              "<span data-k='mis_a_jour'>mis à jour dans {n} salon(s)</span>"
+              "<span data-k='postes'>posté dans {n} salon(s)</span>"
+              "<span data-k='echecs'>échec dans {n} salon(s)</span>"
+              "<span data-k='aucun'>aucun salon ne porte « bilan » dans son nom</span>"
+              "</span>"
+              "</div>" % (hier, hier, jour, demain, demain, jour,
+                          "maj" if _bilan_deja_la else "pose",
+                          "Mettre à jour le résumé du jour affiché" if _bilan_deja_la
+                          else "Poster le résumé du jour affiché")
             + "<div class='se-grille'>" + "".join(cartes) + "</div>"
             + "<div class='se-bloc'><div class='se-bloc-t'>Assiduité du jour</div>"
             + "".join(lignes) + "</div>"
@@ -47888,9 +47910,23 @@ function sessionsResume(btn){
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(!m) return;
-      if(j && j.ok) m.textContent = j.salons
-        ? ('posté dans '+j.salons+' salon(s) : '+(j.jour||''))
-        : "aucun salon ne porte « bilan » dans son nom";
+      // Textes rendus (et traduits) par le serveur dans #se-lib.
+      function lib(k, n){
+        var e=document.querySelector('#se-lib [data-k='+k+']');
+        return (e ? e.textContent : k).replace('{n}', n);
+      }
+      if(j && j.ok){
+        var bouts=[];
+        if(j.mis_a_jour) bouts.push(lib('mis_a_jour', j.mis_a_jour));
+        if(j.postes) bouts.push(lib('postes', j.postes));
+        if(!j.mis_a_jour && !j.postes && j.salons) bouts.push(lib('postes', j.salons));
+        if(j.echecs) bouts.push(lib('echecs', j.echecs));
+        m.textContent = bouts.length ? (bouts.join(', ')+' : '+(j.jour||'')) : lib('aucun', '');
+        if((j.mis_a_jour || j.postes || j.salons) && btn){
+          btn.setAttribute('data-etat','maj');
+          btn.textContent=lib('maj', '');
+        }
+      }
       else m.textContent = (j && j.error) || 'échec';
     })
     .catch(function(){ if(m) m.textContent='échec'; });
@@ -60891,7 +60927,17 @@ def create_app():
             n = fut.result(timeout=25)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:160]})
-        return jsonify({"ok": True, "salons": int(n or 0), "jour": jour})
+        # Depuis le 28/09 le bilan du jour est tenu a jour dans le salon : le
+        # bouton MET A JOUR le message deja la au lieu d en poster un second.
+        # La reponse dit lequel des deux (« posté » / « mis à jour »).
+        if not isinstance(n, dict):
+            n = {"postes": int(n or 0), "mis_a_jour": 0, "echecs": 0}
+        postes, maj = int(n.get("postes") or 0), int(n.get("mis_a_jour") or 0)
+        echecs = int(n.get("echecs") or 0)
+        if not (postes or maj) and echecs:
+            return jsonify({"ok": False, "error": "échec dans %d salon(s) : voir le journal du bot" % echecs})
+        return jsonify({"ok": True, "salons": postes + maj, "postes": postes, "mis_a_jour": maj,
+                        "echecs": echecs, "jour": jour})
 
     @app.route("/identity/types", methods=["POST"])
     def identity_types_set():

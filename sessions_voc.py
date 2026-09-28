@@ -42,6 +42,12 @@ import safe_json
 FICHIER_CFG = Path("data") / "sessions_cfg.json"
 FICHIER_PRESENCE = Path("data") / "sessions_presence.json"
 FICHIER_DIRECT = Path("data") / "sessions_direct.json"
+#: Le message du BILAN DU JOUR tenu a jour (demande du proprietaire du 28/09 :
+#: « un session-bilan toujours a jour, toutes les sessions »). Un fichier A
+#: PART : direct_a_figer et direct_purger decoupent les cles de
+#: sessions_direct.json en « jour:session » -- une cle « bilan:... » y serait
+#: prise pour une session a figer.
+FICHIER_BILAN = Path("data") / "sessions_bilan.json"
 FICHIER_JAILBREAK = Path("data") / "jailbreak.json"
 SUIVI_GUILD_ID = 1535758943324999711  # Youl4b uniquement
 SUIVI_IDENTITE = "jessye"
@@ -454,6 +460,63 @@ def direct_a_figer(ts) -> list:
     return out
 
 
+def journee_bornes(jour: str) -> tuple:
+    """(debut de la premiere session, fin de la derniere) pour ce jour, ou (None, None).
+
+    La journee d'un bilan deborde sur le lendemain : la session de 23 h
+    finit a 2 h. C'est cette fin-la qui dit « la journee est finie ».
+    """
+    ss = sessions_du_jour(jour)
+    if not ss:
+        return None, None
+    return min(float(s["debut"]) for s in ss), max(float(s["fin"]) for s in ss)
+
+
+def bilan_charger() -> dict:
+    """Les messages « bilan du jour » : {jour: {id du salon: fiche}}.
+
+    Sur disque, pas en memoire : apres un redemarrage en pleine journee, un
+    message qu'on ne retrouve plus est un message qu'on reposte -- deux
+    bilans du meme jour dans le salon se liraient comme deux journees.
+    """
+    d = safe_json.load(FICHIER_BILAN, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def bilan_fiche(jour: str, salon_id) -> Optional[dict]:
+    """La fiche du bilan de `jour` dans ce salon, ou None."""
+    f = (bilan_charger().get(str(jour)) or {})
+    f = f.get(str(salon_id)) if isinstance(f, dict) else None
+    return dict(f) if isinstance(f, dict) else None
+
+
+def bilan_poser(jour: str, salon_id, fiche: dict) -> None:
+    """Ecrit la fiche (jour, salon), atomiquement (safe_json)."""
+    d = bilan_charger()
+    par_jour = d.get(str(jour))
+    if not isinstance(par_jour, dict):
+        par_jour = {}
+    par_jour[str(salon_id)] = dict(fiche)
+    d[str(jour)] = par_jour
+    FICHIER_BILAN.parent.mkdir(parents=True, exist_ok=True)
+    safe_json.write(FICHIER_BILAN, d)
+
+
+def bilan_purger(jours_gardes: int = 60) -> int:
+    """Oublie les fiches des vieux jours (figees depuis longtemps)."""
+    import time as _t
+    limite = (_dt.datetime.fromtimestamp(_t.time(), _tz()).date()
+              - _dt.timedelta(days=max(1, int(jours_gardes)))).isoformat()
+    d = bilan_charger()
+    vieux = [k for k in d if str(k) < limite]
+    if not vieux:
+        return 0
+    for k in vieux:
+        d.pop(k, None)
+    safe_json.write(FICHIER_BILAN, d)
+    return len(vieux)
+
+
 def direct_purger(jours_gardes: int = 30) -> int:
     """Oublie les vieux messages figes : leur id ne sert plus a rien."""
     import time as _t
@@ -633,7 +696,8 @@ def attendus() -> list:
     return out
 
 
-def resume_jour(jour: str, attendus=None, *, limiter_aux_attendus=False) -> dict:
+def resume_jour(jour: str, attendus=None, *, limiter_aux_attendus=False,
+                maintenant: Optional[float] = None) -> dict:
     """Qui etait la, qui ne l'etait pas, session par session.
 
     `attendus` est la liste des VA qu'on attendait -- [{id, nom}] . Sans elle,
@@ -650,7 +714,9 @@ def resume_jour(jour: str, attendus=None, *, limiter_aux_attendus=False) -> dict
     # etait pas.
     depuis = premier_releve()
     import time as _t_rj
-    maintenant_ts = _t_rj.time()
+    # `maintenant` : l'instant du releve. Le bilan du jour tenu a jour le
+    # passe, pour que le texte, l'image et « relevé à » disent le meme instant.
+    maintenant_ts = _t_rj.time() if maintenant is None else float(maintenant)
     lignes = []
     for s in sessions_du_jour(jour):
         # REGISTRE VIDE = ON N'A JAMAIS RIEN VU, donc on ne juge rien. La
