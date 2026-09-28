@@ -25,7 +25,9 @@ deja connectes n'existent plus pour le bot, et un evenement perdu laisse
 quelqu'un « present » indefiniment. Relever la liste chaque minute mesure du
 temps reellement passe, et se repare tout seul au tour suivant.
 """
+import asyncio
 import datetime as _dt
+import io
 import json
 from pathlib import Path
 import time as _t
@@ -41,6 +43,262 @@ import sessions_voc as sv
 _sans_accent = sv.sans_accent
 
 FICHIER_APERCUS = Path("data") / "sessions_apercus.json"
+
+
+# ==============================================================================
+# Le bilan en IMAGE (demande du proprietaire du 28/09 : « plus beau, avec la
+# PP »). Fonctions de module, pas methodes : /demosessions, sur le bot ADMIN,
+# doit produire EXACTEMENT le meme message avec le bot PRINCIPAL -- une
+# seconde construction aurait fini par montrer autre chose que le vrai.
+# ==============================================================================
+
+#: Le nom de la piece jointe. Il sert aussi a reconnaitre un bilan deja poste
+#: (anti-doublon) ; [a-zA-Z0-9_.-] seulement, sinon Discord le reecrit et la
+#: galerie « attachment://... » pointe dans le vide.
+NOM_IMAGE = "bilan_sessions_%s.png"
+
+#: Photos deja lues, par cle d'avatar Discord (elle change quand la photo
+#: change) : le bilan quotidien et les essais ne retelechargent pas tout.
+_AVATARS: dict = {}
+_AVATARS_MAX = 400
+
+
+def titre_bilan(jour: str) -> str:
+    """« Sessions du 2026-09-27 » : le repere de l'anti-doublon, ancien et nouveau format."""
+    return "Sessions du %s" % jour
+
+
+def attendus_et_etat(bot) -> tuple:
+    """(attendus, raison si la liste est inconnue).
+
+    La raison est dite par /demosessions : « liste inconnue » sans cause
+    laissait croire a un bug du bilan quand le bot n'etait simplement pas
+    encore connecte.
+    """
+    if bot is None:
+        return [], "bot principal introuvable dans ce processus"
+    if not bot.is_ready():
+        return [], "bot principal pas encore connecté"
+    guilde = bot.get_guild(sv.SUIVI_GUILD_ID)
+    if guilde is None:
+        return [], "le bot principal ne voit pas le serveur Youl4b (US)"
+    if not guilde.chunked:
+        # Ne pas établir une liste avec un cache incomplet.
+        return [], "liste des membres de Youl4b (US) pas encore complète"
+    return sv.attendus_jessye(guilde.members), ""
+
+
+def textes_composants(composants):
+    """Tous les textes d'un message en composants (V2), a toute profondeur."""
+    for c in composants or []:
+        t = getattr(c, "content", None)
+        if isinstance(t, str):
+            yield t
+        yield from textes_composants(getattr(c, "children", None))
+        acc = getattr(c, "accessory", None)
+        if acc is not None:
+            yield from textes_composants([acc])
+
+
+def est_bilan_du(msg, jour: str, moi_id) -> bool:
+    """Ce message est-il le bilan de `jour` poste par ce bot ? Ancien OU nouveau format.
+
+    Ancien : un embed titre « Sessions du AAAA-MM-JJ ». Nouveau : un message
+    en composants dont le premier texte est ce titre, avec l'image
+    bilan_sessions_AAAA-MM-JJ.png. Ne reconnaitre que l'un des deux, c'etait
+    reposter le bilan apres chaque redemarrage pendant l'heure du bilan.
+    """
+    if getattr(getattr(msg, "author", None), "id", None) != moi_id:
+        return False
+    titre = titre_bilan(jour)
+    if any(getattr(e, "title", None) == titre for e in (getattr(msg, "embeds", None) or [])):
+        return True
+    if any(getattr(a, "filename", None) == NOM_IMAGE % jour
+           for a in (getattr(msg, "attachments", None) or [])):
+        return True
+    for t in textes_composants(getattr(msg, "components", None)):
+        premiere = (t.strip().splitlines() or [""])[0]
+        if premiere.lstrip("#").strip() == titre:
+            return True
+    return False
+
+
+def ligne_courte(resume_fuseau: str, att) -> str:
+    """La ligne sous le titre : fuseau et nombre d'attendus, ou l'avertissement."""
+    if att:
+        return "Jessye US · Youl4b · heures en %s · %d VA attendu%s" % (
+            resume_fuseau, len(att), "s" if len(att) > 1 else "")
+    return ("Heures en %s. Liste des VA attendus inconnue : seuls les présents "
+            "sont fiables." % resume_fuseau)
+
+
+#: Photos en echec recemment (cle -> heure) : un CDN en panne n'est pas
+#: rattendu pour le salon suivant ni pour un second clic. Retentees ensuite.
+_AVATARS_KO: dict = {}
+_AVATARS_KO_DUREE = 600
+
+
+async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
+                         delai_total: float = 8.0) -> tuple:
+    """({id: octets PNG}, compte) — les photos de profil, via le serveur suivi.
+
+    En parallele mais limite (six a la fois) ; chaque echec donne des
+    initiales dans l'image et est COMPTE, jamais avale.
+
+    UN DELAI TOTAL, pas seulement par photo. Avec 15 s par photo et six a la
+    fois, un CDN muet faisait attendre ceil(18/6) x 15 = 45 s le vrai 27/09 :
+    le bouton du site (/sessions/resume_now attend 25 s) repondait « echec »,
+    le bilan partait quand meme a 45 s, et le clic suivant -- naturel apres
+    un « echec » -- en postait un second. Passe `delai_total`, les photos
+    manquantes sont des initiales, comptees en « delai ».
+    """
+    compte = {"lues": 0, "cache": 0, "introuvables": 0, "echecs": 0, "delai": 0}
+    guilde = None
+    try:
+        if bot is not None and bot.is_ready():
+            guilde = bot.get_guild(sv.SUIVI_GUILD_ID)
+    except Exception:                                 # noqa: BLE001
+        guilde = None
+    if guilde is None:
+        compte["introuvables"] = len(ids)
+        return {}, compte
+    verrou = asyncio.Semaphore(paralleles)
+
+    async def une(uid):
+        try:
+            membre = guilde.get_member(int(uid))
+        except (TypeError, ValueError):
+            membre = None
+        if membre is None:
+            compte["introuvables"] += 1
+            return uid, None
+        cle = None
+        try:
+            asset = membre.display_avatar.replace(size=taille, format="png")
+            cle = "%s:%d" % (getattr(asset, "key", "") or asset.url, taille)
+            if cle in _AVATARS:
+                compte["cache"] += 1
+                return uid, _AVATARS[cle]
+            if _t.time() - _AVATARS_KO.get(cle, 0) < _AVATARS_KO_DUREE:
+                compte["echecs"] += 1
+                return uid, None
+            async with verrou:
+                octets = await asyncio.wait_for(asset.read(), timeout=delai_total)
+            if len(_AVATARS) >= _AVATARS_MAX:
+                _AVATARS.pop(next(iter(_AVATARS)))
+            _AVATARS[cle] = octets
+            _AVATARS_KO.pop(cle, None)
+            compte["lues"] += 1
+            return uid, octets
+        except asyncio.CancelledError:
+            # Annulee par le delai total : comptee plus bas, en « delai ».
+            if cle:
+                _AVATARS_KO[cle] = _t.time()
+            raise
+        except Exception as e:                        # noqa: BLE001
+            compte["echecs"] += 1
+            if cle:
+                _AVATARS_KO[cle] = _t.time()
+            print("[sessions] photo de %s illisible (%s) : initiales à la place"
+                  % (uid, type(e).__name__), flush=True)
+            return uid, None
+
+    taches = [asyncio.ensure_future(une(u)) for u in ids]
+    if not taches:
+        return {}, compte
+    faites, en_attente = await asyncio.wait(taches, timeout=delai_total)
+    for tache in en_attente:
+        tache.cancel()
+    if en_attente:
+        await asyncio.gather(*en_attente, return_exceptions=True)
+        compte["delai"] = len(en_attente)
+        print("[sessions] %d photo(s) pas arrivée(s) en %.0f s : initiales à la place"
+              % (len(en_attente), delai_total), flush=True)
+    res = [tache.result() for tache in faites if not tache.cancelled()]
+    if len(_AVATARS_KO) > _AVATARS_MAX:
+        _AVATARS_KO.clear()
+    return {u: o for u, o in res if o}, compte
+
+
+def message_bilan_image(jour: str, png: bytes, ligne: str, alt: str = ""):
+    """(vue Components V2, fichier) : le titre, la ligne courte, l'image en grand.
+
+    Pourquoi une galerie V2 et pas un embed : une image d'embed est affichee
+    a ~400 px de large, une galerie a une seule image prend toute la largeur
+    du message (~550 px) -- et c'est ce qui rend le tableau lisible sans
+    l'ouvrir. Pas de conteneur autour : il retirerait sa marge a l'image.
+    """
+    ui = discord.ui
+    if not (hasattr(ui, "LayoutView") and hasattr(ui, "MediaGallery")):
+        raise RuntimeError("discord.py %s ne sait pas envoyer de galerie (V2)"
+                           % discord.__version__)
+    nom = NOM_IMAGE % jour
+    vue = ui.LayoutView(timeout=None)
+    vue.add_item(ui.TextDisplay("## %s\n-# %s" % (titre_bilan(jour), ligne)))
+    vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+        "attachment://" + nom, description=(alt or titre_bilan(jour))[:1024])))
+    return vue, discord.File(io.BytesIO(png), filename=nom)
+
+
+def embed_resume_texte(jour: str, att) -> discord.Embed:
+    """Le bilan TEXTE (l'ancien format) : le repli quand l'image est impossible.
+
+    LE PREMIER BILAN ETAIT ILLISIBLE. Les absents arrivaient en une seule
+    phrase separee par des virgules -- cent soixante-dix-neuf noms colles,
+    qu'on ne pouvait ni parcourir ni compter. Le proprietaire a demande
+    des retours a la ligne et des pastilles ; c'est la bonne forme, parce
+    qu'on lit une liste de gens en la balayant, pas en la lisant.
+
+    Vert = present. Rouge = absent. Orange = passe sans rester.
+    """
+    r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=True)
+    e = discord.Embed(
+        title=titre_bilan(jour),
+        description=("Jessye US · Youl4b. Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
+                     if att else
+                     "Heures en %s. Liste des VA attendus inconnue : seuls "
+                     "les presents sont fiables." % r["fuseau"]),
+        color=0x5865F2)
+    for s2 in r["sessions"]:
+        hl = s2.get("heures_locales") or {}
+        entete = "%s — %s" % (s2["nom"], s2["heure"])
+        if hl.get("MG"):
+            entete += "  (BJ %s · MG %s)" % (hl.get("BJ", "?"), hl["MG"])
+        SessionsVoc._ajouter_lignes(e, entete, SessionsVoc._corps_session(s2, complet=True).splitlines())
+    return e
+
+
+async def contenu_bilan(bot, jour: str) -> tuple:
+    """(arguments de send, infos) : le bilan en image, ou le texte si l'image echoue.
+
+    Un bilan ne doit JAMAIS etre perdu : toute erreur du dessin (police,
+    Pillow, photo...) retombe sur l'embed texte, avec la cause au journal.
+    Le dessin tourne hors de la boucle d'evenements (asyncio.to_thread) :
+    une image de soixante lignes ne doit pas figer le bot.
+    """
+    att, raison = attendus_et_etat(bot)
+    infos = {"mode": "image", "raison": raison, "attendus": att, "photos": {}, "erreur": ""}
+    try:
+        import sessions_image as _si
+        r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=False)
+        ids = _si.ids_dessines(r, att)
+        photos, compte = await photos_avatars(bot, ids)
+        infos["photos"] = compte
+        png = await asyncio.to_thread(_si.dessiner_bilan, r, att, photos, jour)
+        t = _si.tableau(r, att)
+        vus = t["attendus_vus"] if att else len(t["lignes"])
+        alt = (("Bilan des sessions du %s : %d VA présent%s sur %d"
+                % (jour, vus, "s" if vus > 1 else "", t["attendus"])) if att else
+               "Bilan des sessions du %s : %d VA vu%s" % (jour, vus, "s" if vus > 1 else ""))
+        vue, fichier = message_bilan_image(jour, png, ligne_courte(r["fuseau"], att), alt)
+        print("[sessions] bilan %s dessiné : %d ligne(s), %d absent(s), photos %s"
+              % (jour, len(t["lignes"]), len(t["absents"]), compte), flush=True)
+        return {"view": vue, "file": fichier}, infos
+    except Exception as e:                            # noqa: BLE001
+        infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
+        print("[sessions] bilan %s : image impossible (%s) — repli sur le bilan texte"
+              % (jour, infos["erreur"]), flush=True)
+        return {"embed": embed_resume_texte(jour, att)}, infos
 
 
 class SessionAbsentsView(discord.ui.View):
@@ -297,17 +555,12 @@ class SessionsVoc(commands.Cog):
                 continue
             try:
                 # Un redémarrage pendant l'heure du bilan vide la mémoire.
-                # Retrouver le message déjà publié avant d'en créer un autre.
-                deja_publie = False
-                async for msg in salon.history(limit=20):
-                    if msg.author.id == self.bot.user.id and any(
-                            e.title == "Sessions du %s" % hier for e in msg.embeds):
-                        deja_publie = True
-                        break
-                if deja_publie:
+                # Retrouver le message déjà publié avant d'en créer un autre
+                # -- en image (nouveau) comme en embed texte (ancien, repli).
+                if await self._deja_publie(salon, hier):
                     self._resumes_faits[cle] = True
                     continue
-                await salon.send(embed=self.embed_resume(hier))
+                await self.envoyer_bilan(salon, hier)
                 self._resumes_faits[cle] = True
             except Exception as e:                   # noqa: BLE001
                 print(f"[sessions] envoi resume : {e}", flush=True)
@@ -509,40 +762,88 @@ class SessionsVoc(commands.Cog):
             return None
 
     def embed_resume(self, jour: str) -> discord.Embed:
-        """Le bilan d'une journee : une ligne par personne, une pastille.
+        """Le bilan TEXTE d'une journee (repli de l'image) : embed_resume_texte."""
+        return embed_resume_texte(jour, self._attendus_enrichis())
 
-        LE PREMIER BILAN ETAIT ILLISIBLE. Les absents arrivaient en une seule
-        phrase separee par des virgules -- cent soixante-dix-neuf noms colles,
-        qu'on ne pouvait ni parcourir ni compter. Le proprietaire a demande
-        des retours a la ligne et des pastilles ; c'est la bonne forme, parce
-        qu'on lit une liste de gens en la balayant, pas en la lisant.
+    async def _bilans_publies(self, salon, jour: str) -> list:
+        """Les bilans de ce jour deja dans le salon (ancien ou nouveau format)."""
+        return [msg async for msg in salon.history(limit=20)
+                if est_bilan_du(msg, jour, self.bot.user.id)]
 
-        Vert = present. Rouge = absent. Orange = passe sans rester.
+    async def _deja_publie(self, salon, jour: str) -> bool:
+        """Le bilan de ce jour est-il deja dans le salon (ancien ou nouveau format) ?"""
+        return bool(await self._bilans_publies(salon, jour))
+
+    @staticmethod
+    def _poste_pendant(msg, avant, debut) -> bool:
+        """Ce bilan est-il celui de la tentative qui vient d'echouer ?
+
+        Absent du releve fait juste avant l'envoi, ET pas anterieur a son
+        debut (deux minutes de marge pour l'horloge) : un bilan plus ancien
+        du meme jour n'est jamais pris pour lui.
         """
-        att = self._attendus_enrichis()
-        r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=True)
-        e = discord.Embed(
-            title="Sessions du %s" % jour,
-            description=("Jessye US · Youl4b. Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
-                         if att else
-                         "Heures en %s. Liste des VA attendus inconnue : seuls "
-                         "les presents sont fiables." % r["fuseau"]),
-            color=0x5865F2)
-        for s2 in r["sessions"]:
-            hl = s2.get("heures_locales") or {}
-            entete = "%s — %s" % (s2["nom"], s2["heure"])
-            if hl.get("MG"):
-                entete += "  (BJ %s · MG %s)" % (hl.get("BJ", "?"), hl["MG"])
-            self._ajouter_lignes(e, entete, self._corps_session(s2, complet=True).splitlines())
-        return e
+        if avant is not None and getattr(msg, "id", None) in avant:
+            return False
+        cree = getattr(msg, "created_at", None)
+        if cree is None:
+            return avant is not None
+        return cree >= debut - _dt.timedelta(minutes=2)
 
-    def _corps_session(self, s2: dict, complet=False) -> str:
+    async def envoyer_bilan(self, salon, jour: str) -> str:
+        """Poste le bilan dans `salon` : « image », ou « texte » en repli.
+
+        L'image d'abord ; si le dessin OU l'envoi echoue, l'ancien embed
+        texte -- un bilan n'est jamais perdu. Avant ce repli on relit le
+        salon : un envoi qui a expire cote client a pu arriver quand meme,
+        et deux bilans le meme jour se liraient comme deux journees.
+        Leve seulement si le texte aussi est refuse (la boucle reessaie).
+        """
+        kwargs, infos = await contenu_bilan(self.bot, jour)
+        if "embed" not in kwargs:
+            # Les bilans de ce jour DEJA la avant l'envoi. Sans ce releve, la
+            # relecture du repli prenait un bilan plus ancien (bouton du site
+            # a 12 h) pour l'image qui venait d'echouer (nouveau clic a 20 h,
+            # 413) : aucun texte ne partait et le site affichait « poste ».
+            try:
+                avant = {getattr(m, "id", None) for m in await self._bilans_publies(salon, jour)}
+            except Exception as e0:                  # noqa: BLE001
+                print(f"[sessions] releve avant envoi : {e0}", flush=True)
+                avant = None
+            debut = discord.utils.utcnow()
+            try:
+                await salon.send(allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+                print("[sessions] bilan %s posté en image dans #%s"
+                      % (jour, getattr(salon, "name", "?")), flush=True)
+                return "image"
+            except Exception as e:                   # noqa: BLE001
+                print("[sessions] bilan %s : envoi de l'image refusé (%s: %s) — repli sur le texte"
+                      % (jour, type(e).__name__, str(e)[:200]), flush=True)
+                try:
+                    if any(self._poste_pendant(m, avant, debut)
+                           for m in await self._bilans_publies(salon, jour)):
+                        print("[sessions] bilan %s : l'image était bien arrivée, pas de repli"
+                              % jour, flush=True)
+                        return "image"
+                except Exception as e2:              # noqa: BLE001
+                    print(f"[sessions] relecture avant repli : {e2}", flush=True)
+            kwargs = {"embed": embed_resume_texte(jour, infos["attendus"])}
+        await salon.send(**kwargs)
+        print("[sessions] bilan %s posté en TEXTE dans #%s"
+              % (jour, getattr(salon, "name", "?")), flush=True)
+        return "texte"
+
+    @staticmethod
+    def _corps_session(s2: dict, complet=False) -> str:
         """Le contenu d'une session : une personne par ligne, ou un mot.
 
         Discord plafonne un champ a 1024 caracteres. On coupe donc, mais on
         DIT combien de lignes manquent : une liste tronquee en silence se lit
         comme une liste complete, et c'est elle qu'on croira.
+
+        Statique : le bilan texte de repli se construit aussi sans le cog
+        (embed_resume_texte, pour /demosessions sur le bot admin).
         """
+        self = SessionsVoc   # ses aides (_ligne_pastille...) sont statiques
         if not s2.get("surveillee", True):
             return ("*Session non surveillée — le suivi ne tournait pas encore. "
                     "Aucun absent ne peut en être déduit.*")
@@ -609,12 +910,10 @@ class SessionsVoc(commands.Cog):
 
     def _attendus_enrichis(self) -> list:
         """Les personnes de Jessye, nommées comme sur le site, sur Youl4b."""
-        if self.bot is None or not self.bot.is_ready():
+        # Une seule regle, partagee avec le bilan en image et /demosessions.
+        attendus, raison = attendus_et_etat(self.bot)
+        if raison:
             return []
-        guilde = self.bot.get_guild(sv.SUIVI_GUILD_ID)
-        if guilde is None or not guilde.chunked:
-            return []  # Ne pas établir une liste avec un cache incomplet.
-        attendus = sv.attendus_jessye(guilde.members)
         signature = tuple((a["id"], a["nom"]) for a in attendus)
         if signature != getattr(self, "_roster_signature", None):
             self._roster_signature = signature
@@ -633,7 +932,7 @@ class SessionsVoc(commands.Cog):
         n = 0
         for salon in self._salons_resume():
             try:
-                await salon.send(embed=self.embed_resume(jour))
+                await self.envoyer_bilan(salon, jour)
                 n += 1
             except Exception as e:                   # noqa: BLE001
                 print(f"[sessions] envoi manuel : {e}", flush=True)

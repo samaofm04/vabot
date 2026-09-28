@@ -12451,6 +12451,319 @@ try:
 except Exception as _eSe:
     check("sessions : testable", False, repr(_eSe)[:220])
 
+# --- Le bilan des sessions en IMAGE ---------------------------------------
+# Demande du proprietaire du 28/09 : le bilan en image avec les photos
+# (maquette A : un tableau, une ligne par VA, une colonne par session, les
+# absents en bas). Hors du bloc ci-dessus : un echec plus haut y saute tous
+# les tests suivants, et ceux-ci doivent tourner quoi qu'il arrive.
+print()
+print("=" * 70)
+print("SESSIONS : le bilan en image, avec les photos")
+print("=" * 70)
+try:
+    import asyncio as _aioBi
+    import io as _ioBi
+    import pathlib as _plBi
+    import tempfile as _tpBi
+    import types as _tyBi
+    import discord as _dBi
+    from PIL import Image as _ImBi
+    import sessions_voc as _svBi
+    import sessions_image as _si
+    import cogs.sessionsvoc as _svc
+
+    def _sessBi(sid, h, pres=(), part=(), **etat):
+        base = {"id": sid, "nom": "Session %s" % sid[1:], "heure": h,
+                "heures_locales": {"BJ": h, "MG": "%02d:00" % ((int(h[:2]) + 2) % 24)},
+                "debut": 0, "fin": 1, "absents": [], "attendus_connus": True,
+                "surveillee": True, "terminee": True, "jugeable": True,
+                "presents": [{"id": i, "nom": n, "secondes": s} for i, n, s in pres],
+                "partiels": [{"id": i, "nom": n, "secondes": s} for i, n, s in part]}
+        base.update(etat)
+        return base
+
+    _ATTBi = [{"id": "11", "nom": "Roucham X1 / Roucham x2"}, {"id": "12", "nom": "Gérôme X1"},
+              {"id": "13", "nom": "Maon 1 IPHONE X"}, {"id": "14", "nom": "Safidy X1"},
+              {"id": "15", "nom": "VA NOUM 1X1 / VA NOUM 2X1 / VA NOUM 3X1 / VA NOUM 4X1 / "
+                                  "VA NOUM 5X1 / VA NOUM 6x1"}]
+    _RBi = {"jour": "2026-09-27", "fuseau": "Africa/Porto-Novo", "sessions": [
+        _sessBi("s4", "02:00", pres=[("11", "Roucham X1 / Roucham x2", 87 * 60),
+                                     ("99", "Bo07 X1 / Bo07 X2", 76 * 60)]),
+        _sessBi("s1", "10:00", pres=[("11", "x", 357 * 60), ("12", "Gérôme X1", 169 * 60)]),
+        _sessBi("s2", "17:00", part=[("13", "Maon 1 IPHONE X", 3 * 60)]),
+        _sessBi("s3", "23:00", pres=[("11", "x", 72 * 60)])]}
+    _tBi = _si.tableau(_RBi, _ATTBi)
+    check("bilan image : une ligne par VA vu, triees par total decroissant",
+          [g["id"] for g in _tBi["lignes"]] == ["11", "12", "99", "13"],
+          str([(g["id"], g["total"]) for g in _tBi["lignes"]]))
+    check("bilan image : le nom affiche est celui du site, pas celui du registre",
+          _tBi["lignes"][0]["nom"] == "Roucham X1 / Roucham x2")
+    check("bilan image : une personne vue hors de la liste des attendus reste, marquee",
+          [g["attendu"] for g in _tBi["lignes"]] == [True, True, False, True]
+          and _tBi["hors_liste"] == 1, "Bo07 disparaissait du bilan texte sans un mot")
+    check("bilan image : « N VA presents sur M » compte les attendus vus, passages courts compris",
+          (_tBi["attendus_vus"], _tBi["attendus"]) == (3, 5), str((_tBi["attendus_vus"], _tBi["attendus"])))
+    check("bilan image : absents toute la journee = attendus jamais vus",
+          [a["id"] for a in _tBi["absents"]] == ["14", "15"] and _tBi["journee_complete"],
+          str([a["id"] for a in _tBi["absents"]]))
+    check("bilan image : present et passage court restent distincts",
+          _tBi["lignes"][3]["cellules"] == {"s2": ("partiel", 180)}
+          and _tBi["lignes"][0]["cellules"]["s4"] == ("present", 87 * 60))
+    check("bilan image : les sessions dans l ordre du bilan (02:00 d abord)",
+          [c["heure"] for c in _tBi["colonnes"]] == ["02:00", "10:00", "17:00", "23:00"])
+
+    _pngBi = _si.dessiner_bilan(_RBi, _ATTBi, {"11": b"pas une image"}, "2026-09-27")
+    _imBi = _ImBi.open(_ioBi.BytesIO(_pngBi))
+    check("bilan image : un PNG valide, 1100 px de large",
+          _pngBi[:8] == b"\x89PNG\r\n\x1a\n" and _imBi.format == "PNG"
+          and _imBi.width == 1100, str(_imBi.size))
+    # Une journee type (le 27/09 : 7 lignes dont un hors liste, 11 absents
+    # aux noms longs) : pas plus haute que large. A 84 px par ligne elle
+    # sortait en portrait (1100 x 1230), alors que le test disait « paysage ».
+    _A17 = [{"id": str(300 + i), "nom": "Miranto carbacho X%d / Miranto X9" % i} for i in range(17)]
+    _R17 = dict(_RBi, sessions=[_sessBi("s4", "02:00", pres=[(a["id"], a["nom"], 3600) for a in _A17[:6]]
+                                        + [("399", "Bo07 X1", 4560)]),
+                                _sessBi("s1", "10:00"), _sessBi("s2", "17:00"), _sessBi("s3", "23:00")])
+    _im17 = _ImBi.open(_ioBi.BytesIO(_si.dessiner_bilan(_R17, _A17, {}, "2026-09-27")))
+    _t17 = _si.tableau(_R17, _A17)
+    check("bilan image : journee type (7 lignes, 11 absents) -> pas plus haute que large",
+          len(_t17["lignes"]) == 7 and len(_t17["absents"]) == 11
+          and _im17.width == 1100 and _im17.height <= _im17.width, str(_im17.size))
+    _rondBi = _si._rond(b"pas une image", "11", "Roucham X1", 40)
+    check("bilan image : une photo illisible donne des initiales, pas un echec",
+          _rondBi.size == (40, 40) and _rondBi.mode == "RGBA" and _si._initiales("Bo07 X1") == "BO"
+          and _si._initiales("Maon 1 IPHONE X") == "MI", str((_rondBi.size, _si._initiales("Bo07 X1"))))
+    # Les « Inter-*.ttf » du depot sont des pages HTML (telechargement rate) :
+    # sans repli, la police interne de Pillow effacait les accents.
+    _fBi = _si.police("bold", 30)
+    check("bilan image : une vraie police, avec les accents et le tiret",
+          isinstance(_fBi, _si.ImageFont.FreeTypeFont) and "Aileron" not in _si.nom_police(_fBi)
+          and all(_si._dessinable(_fBi, c) for c in "éôÉ—·"), _si.nom_police(_fBi))
+    check("bilan image : nom long -> premier compte + « +5 »",
+          _si.nom_court(_ATTBi[4]["nom"]) == ("VA NOUM 1X1", 5), str(_si.nom_court(_ATTBi[4]["nom"])))
+    check("bilan image : les emojis sont retires, les accents gardes",
+          _si.nettoyer("Émilie 🔥✨ X1", _fBi) == "Émilie X1", _si.nettoyer("Émilie 🔥✨ X1", _fBi))
+    _dBiI = _si.ImageDraw.Draw(_ImBi.new("RGB", (10, 10)))
+    _ajBi = _si.ajuster(_dBiI, "Andrianantenaina Rasoamanarivo Rakotoarisoa X1", _fBi, 200)
+    check("bilan image : un nom trop long est coupe d un « … », jamais deborde",
+          _ajBi.endswith("…") and _dBiI.textlength(_ajBi, font=_fBi) <= 200, _ajBi)
+
+    # LES ETATS : rien n est juge sur ce qu on ne regardait pas, ni sur ce
+    # qui n est pas fini.
+    import time as _tiBi
+    _mnBi = _tiBi.time()
+    _REt = {"jour": "2026-09-28", "fuseau": "Africa/Porto-Novo", "sessions": [
+        _sessBi("s4", "02:00", surveillee=False, jugeable=False),
+        _sessBi("s1", "10:00", terminee=False, jugeable=False, debut=_mnBi - 60,
+                pres=[("12", "Gérôme X1", 600)]),
+        _sessBi("s2", "17:00", terminee=False, jugeable=False, debut=_mnBi + 3600),
+        _sessBi("s3", "23:00", terminee=False, jugeable=False, debut=_mnBi + 7200)]}
+    _tEt = _si.tableau(_REt, _ATTBi, _mnBi)
+    check("bilan image : non suivie / en cours / a venir sont dits par colonne",
+          [c["etat"] for c in _tEt["colonnes"]] == ["non_suivie", "en_cours", "a_venir", "a_venir"],
+          str([c["etat"] for c in _tEt["colonnes"]]))
+    check("bilan image : sans session jugee, aucun absent n est deduit",
+          _tEt["absents_etablis"] is False and _tEt["absents"] == [])
+    _REt2 = dict(_REt, sessions=[_sessBi("s4", "02:00")] + _REt["sessions"][1:])
+    _tEt2 = _si.tableau(_REt2, _ATTBi, _mnBi)
+    check("bilan image : journee incomplete -> « absents aux sessions terminees »",
+          _tEt2["absents_etablis"] and not _tEt2["journee_complete"])
+    _tSl = _si.tableau(_RBi, [])
+    check("bilan image : liste des attendus inconnue -> pas d absents, pas de « hors liste »",
+          not _tSl["liste_connue"] and _tSl["absents"] == [] and _tSl["hors_liste"] == 0
+          and len(_tSl["lignes"]) == 4)
+    _RVide = dict(_RBi, sessions=[dict(s, presents=[], partiels=[]) for s in _RBi["sessions"]])
+    _tVi = _si.tableau(_RVide, _ATTBi)
+    check("bilan image : journee sans personne -> tout le monde absent, aucune ligne",
+          _tVi["lignes"] == [] and len(_tVi["absents"]) == 5)
+    _okEt = True
+    for _rEt, _aEt in ((_REt, _ATTBi), (_REt2, _ATTBi), (_RBi, []), (_RVide, _ATTBi),
+                       (_RVide, []), ({"jour": "2026-09-27", "fuseau": "", "sessions": []}, [])):
+        try:
+            _ImBi.open(_ioBi.BytesIO(_si.dessiner_bilan(_rEt, _aEt, {}, _rEt["jour"], _mnBi))).verify()
+        except Exception as _eEt:
+            _okEt = repr(_eEt)
+    check("bilan image : chaque etat se dessine (en cours, non suivie, sans liste, vide)",
+          _okEt is True, str(_okEt))
+
+    # SOIXANTE VA : l image grandit, aucune ligne n est coupee.
+    _A60 = [{"id": str(700 + i), "nom": "VA %02d Jérémie" % i} for i in range(60)]
+    _R60 = dict(_RBi, sessions=[_sessBi("s1", "10:00", pres=[(a["id"], a["nom"], 600 + i * 60)
+                                                              for i, a in enumerate(_A60)])])
+    _t60 = _si.tableau(_R60, _A60)
+    _im60 = _ImBi.open(_ioBi.BytesIO(_si.dessiner_bilan(_R60, _A60, {}, "2026-09-27")))
+    check("bilan image : 60 VA -> 60 lignes, l image grandit",
+          len(_t60["lignes"]) == 60 and _im60.height > 60 * 72 and _im60.width == 1100,
+          "%d lignes, %s" % (len(_t60["lignes"]), _im60.size))
+
+    # CONSTATS DE RELECTURE DU 28/09 : chacun a ete vu sur un rendu.
+    _fEtBi = _si.police("bold", 48)
+    _etBi = _si.lignes_etiquette(_dBiI, "non suivie", _fEtBi, 2 * (128 - 14))
+    check("bilan image : « non suivie » passe sur deux lignes (plus de « non suivienon suivie »)",
+          _etBi == ["non", "suivie"] and all(_dBiI.textlength(x, font=_fEtBi) <= 2 * (128 - 14) for x in _etBi)
+          and _si.lignes_etiquette(_dBiI, "en cours", _fEtBi, 2 * (128 - 14)) == ["en cours"], str(_etBi))
+    check("bilan image : « 1 VA présent » au singulier, « 6 VA présents » au pluriel",
+          _si.texte_compteur(1) == "1 VA présent" and _si.texte_compteur(0) == "0 VA présent"
+          and _si.texte_compteur(6) == "6 VA présents" and _si.texte_compteur(1, False) == "1 VA vu")
+    _fAbBi = _si.police("regular", 50)
+    _labBi = _si.libelle_absent(_dBiI, "Gérôme Ñúñez Ëlodie Çà X1", " +2", _fAbBi, 2 * 268)
+    check("bilan image : absent au nom long -> le « +N » reste apres le « … »",
+          _labBi.endswith("… +2") and _dBiI.textlength(_labBi, font=_fAbBi) <= 2 * 268, _labBi)
+    _trBi = _ImBi.new("RGBA", (128, 128), (0, 0, 0, 0))
+    _si.ImageDraw.Draw(_trBi).rectangle((40, 40, 88, 88), fill=(200, 30, 30, 255))
+    _bTrBi = _ioBi.BytesIO()
+    _trBi.save(_bTrBi, "PNG")
+    _rTrBi = _si._rond(_bTrBi.getvalue(), "1", "Logo X1", 64)
+    check("bilan image : avatar a fond transparent -> le fond reste transparent (plus de disque noir)",
+          _rTrBi.getpixel((12, 32))[3] == 0 and _rTrBi.getpixel((32, 32))[3] == 255,
+          str((_rTrBi.getpixel((12, 32)), _rTrBi.getpixel((32, 32)))))
+    _R5s = dict(_RBi, sessions=_RBi["sessions"] + [_sessBi("s5", "20:00")])
+    _im5s = _ImBi.open(_ioBi.BytesIO(_si.dessiner_bilan(_R5s, _ATTBi, {}, "2026-09-27")))
+    check("bilan image : 5 sessions -> toujours 1100 px de large (texte >= 12 px a l ecran)",
+          _im5s.width == 1100, str(_im5s.size))
+
+    # L ANTI-DOUBLON : ancien format (embed) ET nouveau (image en composants).
+    _vueBi, _fichBi = _svc.message_bilan_image("2026-09-27", _pngBi, "ligne")
+    from discord.components import _component_factory as _cfBi
+    _compsBi = [_cfBi(c) for c in _vueBi.to_components()]
+    _moiBi = _tyBi.SimpleNamespace(id=5)
+
+    def _msgBi(**kw):
+        return _tyBi.SimpleNamespace(author=kw.pop("author", _moiBi), embeds=kw.pop("embeds", []),
+                                     attachments=kw.pop("attachments", []),
+                                     components=kw.pop("components", []))
+
+    check("bilan image : le nouveau message porte le titre et l image jointe",
+          _fichBi.filename == "bilan_sessions_2026-09-27.png"
+          and "attachment://bilan_sessions_2026-09-27.png" in str(_vueBi.to_components()))
+    check("bilan image : anti-doublon, l ancien format (embed) est reconnu",
+          _svc.est_bilan_du(_msgBi(embeds=[_dBi.Embed(title="Sessions du 2026-09-27")]), "2026-09-27", 5))
+    check("bilan image : anti-doublon, le nouveau format (composants) est reconnu",
+          _svc.est_bilan_du(_msgBi(components=_compsBi), "2026-09-27", 5))
+    check("bilan image : anti-doublon, la piece jointe seule suffit",
+          _svc.est_bilan_du(_msgBi(attachments=[_tyBi.SimpleNamespace(
+              filename="bilan_sessions_2026-09-27.png")]), "2026-09-27", 5))
+    check("bilan image : anti-doublon, ni un autre jour ni un autre auteur",
+          not _svc.est_bilan_du(_msgBi(components=_compsBi), "2026-09-28", 5)
+          and not _svc.est_bilan_du(_msgBi(components=_compsBi,
+                                           author=_tyBi.SimpleNamespace(id=6)), "2026-09-27", 5)
+          and not _svc.est_bilan_du(_msgBi(embeds=[_dBi.Embed(title="Sessions du 2026-09-2")]),
+                                    "2026-09-27", 5))
+
+    # LE REPLI : un bilan n est jamais perdu.
+    _dirBi = _plBi.Path(_tpBi.mkdtemp())
+    _savBi = (_svBi.FICHIER_CFG, _svBi.FICHIER_PRESENCE)
+    _svBi.FICHIER_CFG, _svBi.FICHIER_PRESENCE = _dirBi / "cfg.json", _dirBi / "pres.json"
+    _svBi._CACHE.update(sig=None, data=None)
+    _vraiDess = _si.dessiner_bilan
+    try:
+        _kwOk, _infOk = _aioBi.run(_svc.contenu_bilan(None, "2026-09-27"))
+        check("bilan image : sans bot principal, l image part quand meme et dit pourquoi",
+              _infOk["mode"] == "image" and "view" in _kwOk and "bot principal" in _infOk["raison"],
+              str(_infOk)[:200])
+
+        def _casse(*a, **k):
+            raise RuntimeError("dessin casse")
+        _si.dessiner_bilan = _casse
+        _kwKo, _infKo = _aioBi.run(_svc.contenu_bilan(None, "2026-09-27"))
+        check("bilan image : si le dessin leve, repli sur l embed texte (meme titre)",
+              _infKo["mode"] == "texte" and _kwKo["embed"].title == "Sessions du 2026-09-27"
+              and "dessin casse" in _infKo["erreur"], str(_infKo)[:200])
+        _si.dessiner_bilan = _vraiDess
+
+        class _SalonBi:
+            name = "session-bilan"
+
+            def __init__(self, refuse_image):
+                self.refuse, self.envois = refuse_image, []
+
+            async def send(self, **kw):
+                if "view" in kw and self.refuse:
+                    raise _dBi.HTTPException(_tyBi.SimpleNamespace(status=400, reason="x"), "refus")
+                self.envois.append(sorted(kw))
+
+            def history(self, limit=20):
+                async def _gen():
+                    for _m in []:
+                        yield _m
+                return _gen()
+
+        _cogBi = _svc.SessionsVoc.__new__(_svc.SessionsVoc)
+        _cogBi.bot = _tyBi.SimpleNamespace(user=_moiBi, is_ready=lambda: False)
+        _salOk, _salKo = _SalonBi(False), _SalonBi(True)
+        _modeOk = _aioBi.run(_cogBi.envoyer_bilan(_salOk, "2026-09-27"))
+        _modeKo = _aioBi.run(_cogBi.envoyer_bilan(_salKo, "2026-09-27"))
+        check("bilan image : le bilan part en image (vue + fichier)",
+              _modeOk == "image" and _salOk.envois == [["allowed_mentions", "file", "view"]],
+              str(_salOk.envois))
+        check("bilan image : envoi de l image refuse -> un seul bilan, en texte",
+              _modeKo == "texte" and _salKo.envois == [["embed"]], str(_salKo.envois))
+
+        # Un bilan PLUS ANCIEN du meme jour (bouton du site a 12 h) ne doit
+        # pas passer pour l image qui vient d echouer (nouveau clic a 20 h) :
+        # sinon aucun texte ne part et le site affiche « poste ».
+        import datetime as _dtBi
+        _ancBi = _msgBi(attachments=[_tyBi.SimpleNamespace(filename="bilan_sessions_2026-09-27.png")])
+        _ancBi.id = 1
+        _ancBi.created_at = _dBi.utils.utcnow() - _dtBi.timedelta(hours=8)
+
+        class _SalonAncBi(_SalonBi):
+            def history(self, limit=20):
+                async def _gen():
+                    yield _ancBi
+                return _gen()
+        _salAnc = _SalonAncBi(True)
+        _modeAnc = _aioBi.run(_cogBi.envoyer_bilan(_salAnc, "2026-09-27"))
+        check("bilan image : image refusee a cote d un bilan plus ancien du jour -> le texte part",
+              _modeAnc == "texte" and _salAnc.envois == [["embed"]], str((_modeAnc, _salAnc.envois)))
+
+        # Un CDN muet : un delai TOTAL, pas 15 s par photo et par paquet de
+        # six (45 s le 27/09, au-dela des 25 s du bouton du site).
+        class _AssetMuetBi:
+            key, url = "muet", "u"
+
+            def replace(self, **kw):
+                return self
+
+            async def read(self):
+                await _aioBi.sleep(60)
+        _mbBi = {i: _tyBi.SimpleNamespace(id=i, display_avatar=_AssetMuetBi()) for i in range(1, 19)}
+        _gMuBi = _tyBi.SimpleNamespace(get_member=_mbBi.get)
+        _botMuBi = _tyBi.SimpleNamespace(is_ready=lambda: True, get_guild=lambda g: _gMuBi)
+        _t0Bi = _tiBi.time()
+        _phMu, _cMu = _aioBi.run(_svc.photos_avatars(_botMuBi, [str(i) for i in _mbBi], delai_total=0.5))
+        check("bilan image : photos, un delai total borne l attente (CDN muet -> initiales)",
+              _tiBi.time() - _t0Bi < 3 and _phMu == {} and _cMu["delai"] == 18,
+              str((round(_tiBi.time() - _t0Bi, 1), _cMu)))
+        _svc._AVATARS_KO.clear()
+    finally:
+        _si.dessiner_bilan = _vraiDess
+        _svBi.FICHIER_CFG, _svBi.FICHIER_PRESENCE = _savBi
+        _svBi._CACHE.update(sig=None, data=None)
+        import shutil as _shBi
+        _shBi.rmtree(_dirBi, ignore_errors=True)
+
+    # LA DEMO : sur le bot ADMIN (le principal est a 100/100 commandes).
+    import main as _mainBi
+    import cogs.menutest as _mtBi
+    _srcSvBi = _plBi.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+    _srcMtBi = _plBi.Path("cogs/menutest.py").read_text(encoding="utf-8")
+    check("bilan image : /demosessions est enregistree sur le bot admin, pas sur le principal",
+          "demosessions" in [c.name for c in _mtBi.MenuTest.__cog_app_commands__]
+          and "menutest" in _mainBi.ADMIN_COGS and "menutest" not in _mainBi.MAIN_COGS
+          and not __import__("re").search(r"@(?:app_commands|commands)\.(?:command|hybrid_command)",
+                                          _srcSvBi),
+          "le cog du bilan (bot principal) ne doit declarer aucune commande")
+    check("bilan image : /demosessions est globale, repond en prive, et reprend le vrai bilan",
+          "@app_commands.guilds" not in _srcMtBi
+          and "defer(ephemeral=True, thinking=True)" in _srcMtBi
+          and "_svc.contenu_bilan(principal, jour)" in _srcMtBi)
+    check("bilan image : le dessin tourne hors de la boucle d evenements",
+          "asyncio.to_thread(_si.dessiner_bilan" in _srcSvBi)
+except Exception as _eBi:
+    import traceback as _tbBi
+    check("bilan image : testable", False, _tbBi.format_exc()[-400:])
+
 # --- Classement des clics par VA (accueil) ------------------------------
 # Ce qui se joue ici : des CHIFFRES DE TRAVAIL affiches en rang. Une fusion
 # de trop reunit deux personnes sous un seul nom, une lecture ratee prise

@@ -902,6 +902,56 @@ class MenuTest(commands.Cog):
         await interaction.response.send_message(
             view=DemoPanneauDirect("model"), ephemeral=True)
 
+    @app_commands.command(
+        name="demosessions",
+        description="[DÉMO] Le bilan des sessions en image, tel qu'il sera posté — rien n'est envoyé",
+    )
+    @app_commands.describe(jour="Le jour, AAAA-MM-JJ (défaut : hier, heure du Bénin)")
+    async def demosessions(self, interaction: discord.Interaction, jour: str = None):
+        # Demande du proprietaire du 28/09 : le bilan en image avec les photos.
+        # Ce bot-ci (admin) n'est PAS sur Youl4b (US) : la liste des VA et les
+        # photos viennent du bot PRINCIPAL, qui tourne dans le meme processus.
+        # Le message est construit par LA MEME fonction que le vrai bilan
+        # (cogs.sessionsvoc.contenu_bilan) : la demo ne peut pas montrer
+        # autre chose que ce qui sera poste.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        import datetime as _dtD
+        import sessions_voc as _sv
+        import cogs.sessionsvoc as _svc
+        from cogs.welcome import _bot_principal
+        if jour:
+            try:
+                jour = _dtD.date.fromisoformat(jour.strip()).isoformat()
+            except ValueError:
+                await interaction.followup.send(
+                    "⚠️ « %s » n'est pas une date AAAA-MM-JJ." % jour[:40], ephemeral=True)
+                return
+        else:
+            jour = (_dtD.datetime.now(_sv._tz()).date() - _dtD.timedelta(days=1)).isoformat()
+        principal = _bot_principal()
+        kwargs, infos = await _svc.contenu_bilan(principal, jour)
+        notes = []
+        if infos["raison"]:
+            notes.append("⚠️ Liste des VA attendus inconnue (%s) : pas d'absents, "
+                         "pas de « hors liste »." % infos["raison"])
+        ph = infos.get("photos") or {}
+        if ph.get("introuvables") or ph.get("echecs") or ph.get("delai"):
+            notes.append("ℹ️ Photos : %d membre(s) introuvable(s), %d échec(s), %d trop lente(s) — "
+                         "initiales à la place." % (ph.get("introuvables", 0), ph.get("echecs", 0),
+                                                    ph.get("delai", 0)))
+        if infos["mode"] == "texte":
+            notes.append("⚠️ Image impossible (%s) : le vrai bilan partirait en TEXTE, "
+                         "comme ci-dessus." % infos["erreur"])
+        try:
+            await interaction.followup.send(ephemeral=True, **kwargs)
+        except Exception as e:                        # noqa: BLE001
+            notes.append("⚠️ Envoi de l'image refusé (%s: %s) : le vrai bilan "
+                         "retomberait sur le texte." % (type(e).__name__, str(e)[:150]))
+            await interaction.followup.send(
+                embed=_svc.embed_resume_texte(jour, infos["attendus"]), ephemeral=True)
+        if notes:
+            await interaction.followup.send("\n".join(notes)[:1900], ephemeral=True)
+
     async def _poster(self, interaction: discord.Interaction, marche: str):
         if interaction.guild is None:
             await interaction.response.send_message(
