@@ -965,7 +965,7 @@ class MenuTest(commands.Cog):
 
     @app_commands.command(
         name="democlics",
-        description="[DÉMO] Le classement clics + abonnés en image, tel qu'il est posté — rien n'est envoyé",
+        description="[DÉMO] Les deux images du report clics (US vs global, Subs & LTV), telles que postées",
     )
     async def democlics(self, interaction: discord.Interaction):
         # Demande du proprietaire du 29/09 : les classements du report #click
@@ -973,10 +973,12 @@ class MenuTest(commands.Cog):
         # 100/100 commandes). L'image vient du bot PRINCIPAL, qui tourne dans
         # le meme processus, et de LA MEME fonction que le report
         # (cogs.clickrecap) : la demo ne peut pas montrer autre chose.
+        # Depuis la 2e demande du 29/09 : les DEUX images (« Clicks — US vs
+        # global » et « Subs & LTV »), dans la meme mise en page que le report.
         await interaction.response.defer(ephemeral=True, thinking=True)
         import cogs.clickrecap as _cr
         from cogs.welcome import _bot_principal
-        png, infos, notes = await _cr.demo_classement(
+        images, infos, notes = await _cr.demo_classement(
             _bot_principal(), getattr(interaction, "channel_id", None))
         ps = infos.get("pseudos") or {}
         ph = infos.get("photos") or {}
@@ -989,13 +991,16 @@ class MenuTest(commands.Cog):
         if ph.get("echecs") or ph.get("delai"):
             notes.append("ℹ️ Photos : %d échec(s), %d trop lente(s) — initiales à la place."
                          % (ph.get("echecs", 0), ph.get("delai", 0)))
-        if png is None:
-            notes.append("⚠️ Image impossible (%s) : le report garde ses classements en TEXTE."
+        for quoi, err in sorted((infos.get("erreurs") or {}).items()):
+            notes.append("⚠️ Image %s non dessinée (%s) : sa partie reste en TEXTE dans le report."
+                         % (quoi, err))
+        if not images:
+            notes.append("⚠️ Images impossibles (%s) : le report garde tout son TEXTE."
                          % (infos.get("erreur") or "pas de données"))
         else:
             try:
-                vue, fichier = _cr.vue_classement(png, infos.get("alt") or "")
-                await interaction.followup.send(view=vue, file=fichier, ephemeral=True)
+                vue, fichiers = _cr.vue_images(images)
+                await interaction.followup.send(view=vue, files=fichiers, ephemeral=True)
             except Exception as e:                    # noqa: BLE001
                 notes.append("⚠️ Envoi de l'image refusé (%s: %s) : le report retomberait "
                              "sur le texte." % (type(e).__name__, str(e)[:150]))

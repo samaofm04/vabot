@@ -3437,6 +3437,20 @@ _TRACKING_CACHE: Dict[str, Any] = {}     # {"t": ts, "v": [...]}
 _TRACKING_TTL = 600                      # 10 min
 
 
+def _revenu_net(rev):
+    """Le revenu net d'un lien de suivi, en dollars, ou None s'il manque.
+
+    None et pas 0 : un revenu que MyPuls n'a pas rendu n'est pas un lien qui
+    n'a rien rapporte -- divise par des abonnes, il ferait une LTV de 0 $."""
+    total = rev.get("total") if isinstance(rev, dict) else rev
+    if total is None or isinstance(total, bool) or total == "":
+        return None
+    try:
+        return round(float(total), 2)
+    except (TypeError, ValueError):
+        return None
+
+
 def api_tracking_links(force: bool = False, debut: str = "", fin: str = "") -> list:
     """Les liens de suivi, normalises. [] si l'API refuse.
 
@@ -3492,6 +3506,12 @@ def api_tracking_links(force: bool = False, debut: str = "", fin: str = "") -> l
             "visites": it.get("visits_total"),
             "visites_periode": it.get("visits_period"),
             "actif": bool(it.get("active", True)),
+            # LE REVENU NET DE LA PERIODE, en dollars (None si absent). Il
+            # arrive dans la MEME reponse : l'image « Subs & LTV » du report
+            # des clics s'en sert sans un appel de plus. Meme lecture que la
+            # page Liens Infloww (infloww_liens._lire_mypuls) : `revenue`,
+            # ou `revenue.total` quand MyPuls le detaille.
+            "revenu": _revenu_net(it.get("revenue")),
         })
     _TRACKING_CACHE[cle] = out
     _TRACKING_CACHE["t|" + cle] = _t.time()

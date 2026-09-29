@@ -16397,28 +16397,36 @@ try:
 except Exception as _eR3:
     check("ranking : testable", False, repr(_eR3)[:220])
 
-# --- Les classements clics et abonnes en IMAGE ---------------------------
-# Demande du proprietaire du 29/09 : les classements clics et abonnes en
-# image avec les photos, « la meme chose que pour les sessions, un tableau
-# avec les PP ». Une ligne par PERSONNE, toutes ; « — » pour ce qu'on n'a
-# pas su lire, jamais 0 ; l'embed texte garde tout le reste.
+# --- Le report des clics en DEUX IMAGES -----------------------------------
+# Demande du proprietaire du 29/09 (1) : les classements clics et abonnes en
+# image avec les photos, « la meme chose que pour les sessions ».
+# Demande du proprietaire du 29/09 (2) : deux tableaux, clics US vs global
+# sur 4 periodes (aujourd'hui, hier, quinzaine, quinzaine precedente), et
+# abonnes et LTV. Une ligne par PERSONNE, une sous-ligne par lien ; « — »
+# pour ce qu'on n'a pas su lire, « · » avant l'arrivee, jamais 0 ; colonnes
+# mesurees (plus de nombres colles) ; LTV = net ÷ subs, la regle de la page
+# Liens Infloww ; revenu lu dans les 3 appels existants ; quinzaine
+# precedente lue une fois puis gardee.
 try:
-    import asyncio as _aioK, io as _ioK, types as _tyK
+    import asyncio as _aioK, io as _ioK, types as _tyK, copy as _copyK
     import discord as _dcK
     import clics_image as _ciK
     import clics_personnes as _cpK
     from cogs import clickrecap as _crK
     from PIL import Image as _ImK
 
+    def _PK(a, b):
+        return {"marche": a, "total": b}
+
     def _donK(personnes, resume=None):
-        """Des donnees de report : [(nom de lien, clics, abonnes ou None)]."""
+        """Des donnees de report : [(nom de lien, clics quinzaine, abonnes ou None)]."""
         par_lien, ab = [], []
         for nom, cl, a in personnes:
             par_lien.append({"lien": nom, "depuis": "",
-                             "periodes": [{"marche": 0, "total": 0}] * 2
-                             + [{"marche": cl, "total": cl}]})
+                             "periodes": [_PK(0, 0)] * 2 + [_PK(cl, cl)] + [_PK(0, 0)]})
             if a is not None:
-                ab.append({"lien": nom, "auj": 0, "quinz": a, "prec": 0})
+                ab.append({"lien": nom, "auj": 0, "quinz": a, "prec": 0,
+                           "net_quinz": 10.0 * a, "net_prec": 0.0})
         return {"marche": "US", "par_lien": par_lien, "abonnes": ab,
                 "resume": resume if resume is not None else [
                     {"quand": "Today", "marche": None, "total": 82},
@@ -16429,42 +16437,49 @@ try:
                  ("(BO7) 1", 3905, 58), ("(Abdoul) 1", 2544, 71),
                  ("(Kylmich) 1", 1210, None), ("VA 9", None, None),
                  ("(DOLAD) 1", 42, 2), ("TEMPLATE", 0, None)])
-    _tK = _ciK.tableau(_dK, {"roucham": "roucham_79944", "abdoul": "abdoul_9684"},
-                       periode="16 Sep → 30 Sep", espace="JESSY", liens=8, maj="14:30")
+    _annK = {"roucham": "roucham_79944", "abdoul": "abdoul_9684"}
+    _tK = _ciK.tableau_clics(_dK, _annK, periode="16 Sep → 30 Sep", espace="JESSY",
+                             liens=8, maj="14:30")
+    _sK = _ciK.tableau_subs(_dK, _annK, periode="16 Sep → 30 Sep", maj="14:30")
     _lK = _tK["lignes"]
     check("clics en image : une ligne par personne, trie par clics",
           [x["titre"] for x in _lK] == ["Roucham", "BO7", "Abdoul", "Kylmich", "DOLAD", "VA 9"],
           [x["titre"] for x in _lK])
+    # Un rang pour un NOMBRE seulement : « VA 9 » (clics non lus) n'en a pas.
     check("clics en image : rangs 1..n, liens regroupes",
-          [x["rang"] for x in _lK] == [1, 2, 3, 4, 5, 6] and _lK[0]["liens"] == 2
-          and _lK[0]["clics"] == 4812, _lK[0])
+          [x["rang"] for x in _lK] == [1, 2, 3, 4, 5, None] and _lK[0]["n_liens"] == 2
+          and _lK[0]["cellules"][2] == (4812, 4812), _lK[0])
     check("clics en image : un gabarit n'est pas une personne",
           all(x["titre"] != "TEMPLATE" for x in _lK))
-    # Le rang aux abonnes : la reponse de l'ancien second classement.
+    # Le rang aux abonnes : l'image « Subs & LTV » est triee par abonnes.
     check("clics en image : rang abonnes (qui convertit)",
-          [(_x["titre"], _x["rang_abonnes"]) for _x in _lK[:3]]
-          == [("Roucham", 1), ("BO7", 3), ("Abdoul", 2)], [x["rang_abonnes"] for x in _lK])
-    _kyK = next(x for x in _lK if x["titre"] == "Kylmich")
+          [(x["titre"], x["rang"]) for x in _sK["lignes"][:4]]
+          == [("Roucham", 1), ("Abdoul", 2), ("BO7", 3), ("DOLAD", 4)],
+          [(x["titre"], x["rang"]) for x in _sK["lignes"]])
+    _kyK = next(x for x in _sK["lignes"] if x["titre"] == "Kylmich")
     check("clics en image : sans lien de suivi MyPuls, « — » et jamais 0",
-          _kyK["abonnes"] is None and _kyK["taux"] is None and _kyK["rang_abonnes"] is None
-          and _ciK.nombre(_kyK["abonnes"]) == "—", _kyK)
+          _kyK["quinz"] is None and _kyK["taux"] is None and _kyK["rang"] is None
+          and _kyK["ltv"] is None and _ciK.nombre(_kyK["quinz"]) == "—"
+          and _ciK.dollars(_kyK["net"]) == "—" and _sK["sans_suivi"] == 2
+          and _sK["lignes"][-2:] == [x for x in _sK["lignes"] if not x["suivi"]], _kyK)
     _vaK = next(x for x in _lK if x["titre"] == "VA 9")
     check("clics en image : clics non lus -> « — », en fin de liste",
-          _vaK["clics"] is None and _ciK.nombre(None) == "—" and _vaK["rang"] == 6, _vaK)
+          _vaK["cellules"][2] == (None, None) and _ciK.nombre(None) == "—" and _vaK["rang"] is None,
+          _vaK)
     # Seuils cales sur le vrai report du 29/09 (taux de 10,5 % a 28 %).
     check("clics en image : taux et couleurs (seuils 12 % / 20 %, gris sous 50 clics)",
           _ciK.niveau_taux(20.3, 1415) == "fort" and _ciK.niveau_taux(13.8, 1022) == "moyen"
           and _ciK.niveau_taux(10.5, 4202) == "faible" and _ciK.niveau_taux(28.0, 42) == "petit"
           and _ciK.niveau_taux(20.0, 50) == "fort" and _ciK.niveau_taux(12.0, 500) == "moyen"
           and _ciK.niveau_taux(None, 100) == "aucun"
-          and next(x for x in _lK if x["titre"] == "DOLAD")["niveau"] == "petit")
+          and next(x for x in _sK["lignes"] if x["titre"] == "DOLAD")["niveau"] == "petit")
     check("clics en image : tuiles = memes chiffres, « — » si illisible",
           [(_x["quand"], _ciK.nombre(_x["valeur"]), _x["detail"]) for _x in _tK["tuiles"]]
           == [("Today", "82", "global"), ("Yesterday", "900", "global 1 253"),
               ("This week", "—", "global")], _tK["tuiles"])
     check("clics en image : sans Discord compte (pour faire remplir les fiches)",
-          _tK["sans_discord"] == 4 and _ciK.pseudos(_tK) == ["abdoul_9684", "roucham_79944"],
-          (_tK["sans_discord"], _ciK.pseudos(_tK)))
+          _tK["sans_discord"] == 4 and _ciK.pseudos(_tK, _sK) == ["abdoul_9684", "roucham_79944"],
+          (_tK["sans_discord"], _ciK.pseudos(_tK, _sK)))
 
     # Le pseudo de la fiche -> un membre du serveur : UNIQUE, sinon initiales.
     _mK = [_tyK.SimpleNamespace(id=1, name="roucham_79944", bot=False),
@@ -16477,42 +16492,237 @@ try:
           (_idsK, _cptK))
 
     # Le dessin : PNG, 1100 px, photos absentes = initiales, noms emoji.
-    _pngK = _ciK.dessiner(_tK, {"roucham_79944": b"pas une image"})
+    _pngK = _ciK.dessiner_clics(_tK, {"roucham_79944": b"pas une image"})
+    _pngS = _ciK.dessiner_subs(_sK, {"roucham_79944": b"pas une image"})
     _imK = _ImK.open(_ioK.BytesIO(_pngK))
-    check("clics en image : PNG de 1100 px de large", _imK.size[0] == 1100, _imK.size)
-    _t60 = _ciK.tableau(_donK([("(Personne %02d) 1" % i, 1000 - i, i % 5 or None)
-                                for i in range(70)]), {})
+    check("clics en image : PNG de 1100 px de large",
+          _imK.size[0] == 1100 and _ImK.open(_ioK.BytesIO(_pngS)).size[0] == 1100, _imK.size)
+    _t60 = _ciK.tableau_clics(_donK([("(Personne %02d) 1" % i, 1000 - i, i % 5 or None)
+                                     for i in range(70)]), {})
     check("clics en image : 70 personnes -> 60 dessinees, le reste DIT",
           len(_t60["lignes"]) == _ciK.PLAFOND == 60 and _t60["caches"] == 10
           and _t60["personnes"] == 70, (len(_t60["lignes"]), _t60["caches"]))
-    _im60 = _ImK.open(_ioK.BytesIO(_ciK.dessiner(_t60, {})))
+    _im60 = _ImK.open(_ioK.BytesIO(_ciK.dessiner_clics(_t60, {})))
     check("clics en image : 60 lignes, l'image grandit (aucune coupee)",
           _im60.size[0] == 1100 and _im60.size[1] > 60 * 60, _im60.size)
-    _tE = _ciK.tableau(_donK([("(\U0001F525 Nathaniel \U0001F525) 1", 10, 1),
-                              ("(" + "Tres-long-nom-" * 8 + ") 1", 5, None)]), {})
-    _pngE = _ciK.dessiner(_tE, {})
+    _dE = _donK([("(\U0001F525 Nathaniel \U0001F525) 1", 10, 1),
+                 ("(" + "Tres-long-nom-" * 8 + ") 1", 5, None)])
+    _pngE = _ciK.dessiner_clics(_ciK.tableau_clics(_dE, {}), {})
+    _pngE2 = _ciK.dessiner_subs(_ciK.tableau_subs(_dE, {}), {})
     _fK = _ciK.police("medium", 54)
     check("clics en image : emojis retires, nom long dessine sans erreur",
           _ciK.nettoyer("\U0001F525 Nathaniel \U0001F525", _fK) == "Nathaniel"
-          and _pngE[:4] == b"\x89PNG")
+          and _pngE[:4] == b"\x89PNG" and _pngE2[:4] == b"\x89PNG")
 
-    # L'embed allege : resume et classements retires, le reste intact, et la
-    # coupe « Truncated » defaite quand l'image a rendu la place.
-    _eK = _dcK.Embed(title="t", description="**40** link(s) tracked.  ·  US = x")
+    # --- Les chiffres de la capture du proprietaire (29/09), par lien ---
+    _capK = [("(PAMPAM) 1", (3, 3), (1, 1), (42, 129)),
+             ("(Ricardo) 1", (1, 1), (8, 10), (32, 54)),
+             ("(Roucham) 1", (9, 15), (4, 13), (346, 619)),
+             ("(Roucham) 1SP", (1, 6), (63, 161), (329, 1318)),
+             ("(Safidy) 1", (12, 23), (25, 35), (618, 1108)),
+             ("(TRAVIS) 1", (14, 26), (11, 22), (79, 152)),
+             ("(VA 1 Noum) 1", (33, 96), (50, 122), (1450, 4098)),
+             ("(VA 2 Noum) 1", (31, 98), (29, 87), (960, 3170)),
+             ("(VA 3 Noum) 1", (8, 19), (17, 26), (1030, 3348)),
+             ("(VA 4 Noum) 1", (21, 38), (105, 184), (4218, 11205))]
+    _dC = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
+        {"lien": n, "depuis": "", "periodes": [_PK(*a), _PK(*b), _PK(*q), _PK(None, None)]}
+        for n, a, b, q in _capK]}
+    _tC = _ciK.tableau_clics(_dC, {})
+    _rouK = next(x for x in _tC["lignes"] if x["titre"] == "Roucham")
+    check("deux tableaux : clics tries par US de la quinzaine en cours",
+          [x["titre"] for x in _tC["lignes"][:4]] == ["VA 4 Noum", "VA 1 Noum", "VA 3 Noum",
+                                                      "VA 2 Noum"]
+          and _tC["lignes"][0]["cellules"][2] == (4218, 11205), [x["titre"] for x in _tC["lignes"]])
+    check("deux tableaux : une sous-ligne par lien sous une personne a plusieurs liens",
+          [li["nom"] for li in _rouK["liens"]] == ["(Roucham) 1", "(Roucham) 1SP"]
+          and _rouK["liens"][1]["cellules"][:3] == [(1, 6), (63, 161), (329, 1318)]
+          and _rouK["cellules"][2] == (675, 1937)
+          and all(not x["liens"] for x in _tC["lignes"] if x["titre"] != "Roucham"),
+          _rouK)
+    check("deux tableaux : quatre colonnes Today / Yesterday / quinzaine / precedente",
+          _tC["colonnes"] == ["Today", "Yesterday", "16–30", "1–15"]
+          and _crK._colonnes_en(__import__("datetime").date(2026, 9, 29))
+          == ["Today", "Yesterday", "16–30", "1–15"]
+          and _crK._colonnes_en(__import__("datetime").date(2026, 10, 3))
+          == ["Today", "Yesterday", "1–15", "Sep 16–30"])
+    # « 1221450 4098 », « 184421811205 » : la capture. Les colonnes sont
+    # MESUREES sur le plus grand nombre, avec un ecart minimal.
+    _gC = _ciK.gabarit_clics(_tC)
+    _dBig = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
+        {"lien": "(Big) %d" % i, "depuis": "",
+         "periodes": [_PK(123456, 1234567), _PK(99999, 888888), _PK(412345, 1120500),
+                      _PK(654321, 987654)]} for i in (1, 2)]}
+    _gB = _ciK.gabarit_clics(_ciK.tableau_clics(_dBig, {}))
+    check("deux tableaux : les colonnes tiennent (nombres a 5-6 chiffres, jamais colles)",
+          all(l >= b + _ciK.ECART_COLONNES for l, b in zip(_gC["largeurs"], _gC["besoins"]))
+          and all(l >= b + _ciK.ECART_COLONNES for l, b in zip(_gB["largeurs"], _gB["besoins"]))
+          and _gC["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_CLICS and _gC["echelle"] == 1.0
+          and _gB["x_fin_nom"] > _ciK.X_NOM
+          and _ciK.nombre(11205) == "11 205" and _ciK.nombre(1234567) == "1 234 567",
+          (_gC, _gB))
+    _sBig = _ciK.tableau_subs({"marche": "US", "par_lien": _dBig["par_lien"], "abonnes": [
+        {"lien": "(Big) 1", "auj": 12345, "quinz": 123456, "prec": 99999,
+         "net_quinz": 1234567.89, "net_prec": 999999.0}]}, {})
+    _gS = _ciK.gabarit_subs(_sBig)
+    check("deux tableaux : colonnes des abonnes mesurees aussi",
+          _gS["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_SUBS
+          and _ciK.dessiner_subs(_sBig, {})[:4] == b"\x89PNG", _gS)
+
+    # « — » et « · », jamais 0, et jamais un total partiel.
+    _dN = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
+        {"lien": "(Zed) 1", "depuis": "", "periodes": [_PK(5, 9), _PK("NA", "NA"), _PK(10, 20),
+                                                       _PK("NA", "NA")]},
+        {"lien": "(Zed) 2", "depuis": "", "periodes": [_PK(None, None), _PK("NA", "NA"),
+                                                       _PK(3, 4), _PK(7, 8)]}]}
+    _zK = _ciK.tableau_clics(_dN, {})["lignes"][0]
+    check("deux tableaux : un lien illisible -> total « — », pas un total partiel",
+          _zK["cellules"][0] == (None, None) and _ciK.nombre(_zK["cellules"][0][0]) == "—")
+    check("deux tableaux : tout avant l'arrivee -> « · » ; « · » ignore dans un total",
+          _zK["cellules"][1] == ("NA", "NA") and _ciK.nombre("NA") == "·"
+          and _zK["cellules"][3] == (7, 8) and _zK["cellules"][2] == (13, 24))
+    check("deux tableaux : somme -- vide None, NA, illisible None, jamais 0",
+          _ciK.somme([]) is None and _ciK.somme(["NA", "NA"]) == "NA"
+          and _ciK.somme([1, None]) is None and _ciK.somme([1, "NA", 2]) == 3
+          and _ciK.somme([0, 0]) == 0)
+    check("deux tableaux : dessin avec « — » et « · » sans erreur",
+          _ciK.dessiner_clics(_ciK.tableau_clics(_dN, {}), {})[:4] == b"\x89PNG")
+
+    # LTV = net ÷ subs, LA regle de la page Liens Infloww (importee).
+    import infloww_liens as _ilK
+    check("deux tableaux : LTV = net ÷ subs, la regle de infloww_liens._somme",
+          abs(_ciK.ltv(1500.5, 104) - 1500.5 / 104) < 1e-9
+          and _ciK.ltv(1500.5, 104) == _ilK._somme([{"clics": None, "abonnes": 104,
+                                                      "net": 150050}])["par_sub"])
+    check("deux tableaux : 0 sub -> pas de LTV (« — »), pas 0 $",
+          _ciK.ltv(120.0, 0) is None and _ciK.ltv(None, 12) is None
+          and _ciK.ltv("NA", "NA") == "NA" and _ciK.dollars(None) == "—"
+          and _ciK.dollars(12.4, cents=True) == "$12.40" and _ciK.dollars(5227.4) == "$5 227")
+    check("deux tableaux : fleche LTV discrete (5 %), rien sans comparaison",
+          _ciK.fleche(14.2, 13.1) == "haut" and _ciK.fleche(11.8, 12.9) == "bas"
+          and _ciK.fleche(13.0, 12.8) == "" and _ciK.fleche(13.0, None) == ""
+          and _ciK.fleche(13.0, "NA") == "")
+    _dL = {"marche": "US", "resume": [], "par_lien": [
+        {"lien": "(Roucham) 1", "depuis": "", "periodes": [_PK(9, 15), _PK(4, 13), _PK(346, 619),
+                                                           _PK(300, 500)]},
+        {"lien": "(Roucham) 1SP", "depuis": "", "periodes": [_PK(1, 6), _PK(63, 161),
+                                                             _PK(329, 1318), _PK(1, 2)]},
+        {"lien": "(Zero) 1", "depuis": "", "periodes": [_PK(1, 1)] * 4}],
+        "abonnes": [{"lien": "(Roucham) 1", "auj": 2, "quinz": 104, "prec": 90,
+                     "net_quinz": 1500.5, "net_prec": 900.0},
+                    {"lien": "(Zero) 1", "auj": 0, "quinz": 0, "prec": 0,
+                     "net_quinz": 0.0, "net_prec": 0.0}]}
+    _sL = {x["titre"]: x for x in _ciK.tableau_subs(_dL, {})["lignes"]}
+    check("deux tableaux : subs & LTV par personne (net, LTV, fleche, conversion)",
+          _sL["Roucham"]["quinz"] == 104 and _sL["Roucham"]["net"] == 1500.5
+          and abs(_sL["Roucham"]["ltv"] - 1500.5 / 104) < 1e-9
+          and _sL["Roucham"]["ltv_prec"] == 10.0 and _sL["Roucham"]["fleche"] == "haut"
+          # conversion sur les liens SUIVIS : 104 / 346, pas 104 / 675
+          and _sL["Roucham"]["taux"] == 30.1 and _sL["Roucham"]["clics"] == 346
+          and _sL["Zero"]["ltv"] is None and _sL["Zero"]["quinz"] == 0, _sL)
+    # LES GABARITS NE SONT PAS DES PERSONNES, MAIS ILS SONT NOMMES : l'image
+    # remplace le tableau texte qui les montrait (relecture du 29/09).
+    _dT = _copyK.deepcopy(_dL)
+    _dT["par_lien"].append({"lien": "TEMPLATE OF LOLA (Copy)", "depuis": "",
+                            "periodes": [_PK(3, 4), _PK(5, 6), _PK(35, 70), _PK(1, 2)]})
+    _dT["par_lien"].append({"lien": "TEMPLATE MYM EMMA", "depuis": "",
+                            "periodes": [_PK(0, 0)] * 4})
+    _dT["abonnes"].append({"lien": "TEMPLATE OF LOLA (Copy)", "auj": 1, "quinz": 60, "prec": 5,
+                           "net_quinz": 600.0, "net_prec": 50.0})
+    _tT, _sT = _ciK.tableau_clics(_dT, {}), _ciK.tableau_subs(_dT, {})
+    check("deux tableaux : liens gabarits comptes et nommes dans le pied des deux images",
+          _tT["gabarits"] == ["TEMPLATE OF LOLA (Copy)", "TEMPLATE MYM EMMA"]
+          and _sT["gabarits"] == ["TEMPLATE OF LOLA (Copy)"]
+          and all("TEMPLATE" not in x["titre"] for x in _tT["lignes"] + _sT["lignes"])
+          and _ciK._pied_gabarits(_sT["gabarits"])
+          == "1 template link not shown: TEMPLATE OF LOLA (Copy)"
+          and _ciK.dessiner_clics(_tT, {})[:4] == b"\x89PNG"
+          and _ciK.dessiner_subs(_sT, {})[:4] == b"\x89PNG", (_tT["gabarits"], _sT["gabarits"]))
+    check("deux tableaux : dollars arrondis au demi superieur, pas au pair",
+          [_ciK.dollars(x) for x in (12.5, 13.5, 2.5, 0.5, 1500.5, 12.49)]
+          == ["$13", "$14", "$3", "$1", "$1 501", "$12"] and _ciK.nombre(2.5) == "3")
+    # La quinzaine en cours illisible chez MyPuls (le jour et la precedente
+    # lus) : tous « — », et le critere d'egalite (le MOINS de clics) donnait
+    # l'or a celui qui n'avait rien fait.
+    _dQ = {"marche": "US", "resume": [], "par_lien": [
+        {"lien": "(%s) 1" % n, "depuis": "", "periodes": [_PK(1, 2), _PK(1, 2), _PK(q, 2 * q),
+                                                          _PK(1, 2)]}
+        for n, q in (("Kevin", 0), ("DOLAD", 42), ("Mike", 61))],
+        "abonnes": [{"lien": "(%s) 1" % n, "auj": 1, "quinz": None, "prec": 3,
+                     "net_quinz": None, "net_prec": 30.0} for n in ("DOLAD", "Kevin", "Mike")]}
+    _sQ = _ciK.tableau_subs(_dQ, {})
+    _dNA = _copyK.deepcopy(_dL)
+    _dNA["par_lien"].append({"lien": "(Tout NA) 1", "depuis": "2026-10-01",
+                             "periodes": [_PK("NA", "NA")] * 4})
+    _dNA["abonnes"].append({"lien": "(Tout NA) 1", "auj": "NA", "quinz": "NA", "prec": "NA",
+                            "net_quinz": "NA", "net_prec": "NA"})
+    _sNA = {x["titre"]: x for x in _ciK.tableau_subs(_dNA, {})["lignes"]}
+    check("deux tableaux : pas de rang ni de medaille sans chiffre (« — », « · »)",
+          all(x["rang"] is None for x in _sQ["lignes"]) and _sQ["quinz_lus"] == 0
+          and _sNA["Tout NA"]["rang"] is None and _sNA["Roucham"]["rang"] == 1
+          and _sNA["Zero"]["rang"] == 2,
+          ([(x["titre"], x["rang"]) for x in _sQ["lignes"]], _sNA["Tout NA"]["rang"]))
+    # Les sous-lignes : la fin du nom (« 1SP ») distingue les liens, c'est la
+    # parenthese qu'on raccourcit.
+    _drK = _ciK._mesureur()
+    _flK = _ciK.police("regular", _ciK._p(22))
+    _libK = [_ciK.libelle_lien(_drK, "(VA 4 Noum) %s" % _x, _flK, _ciK._p(120))
+             for _x in ("1", "1SP", "2", "3")]
+    check("deux tableaux : sous-ligne trop longue -> la parenthese raccourcie, le numero garde",
+          len(set(_libK)) == 4 and all(_l.endswith(") " + _x) or _l == _x
+                                       for _l, _x in zip(_libK, ("1", "1SP", "2", "3")))
+          and _ciK.libelle_lien(_drK, "(VA 4 Noum) 1SP", _flK, _ciK._p(400))
+          == "(VA 4 Noum) 1SP", _libK)
+    # Des sous-lignes « 12 000 / 35 000 » fixent la largeur : descendre sous
+    # 0,84 ne rendait aucune place et rapetissait les chiffres principaux.
+    _dEch = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
+        {"lien": "(VA 4 Noum) %s" % _x, "depuis": "", "periodes": [_PK(12000, 35000)] * 4}
+        for _x in ("1", "1SP")] + [{"lien": "(Safidy) 1", "depuis": "",
+                                    "periodes": [_PK(1, 2)] * 4}]}
+    _gEch = _ciK.gabarit_clics(_ciK.tableau_clics(_dEch, {}, colonnes=[
+        "Today", "Yesterday", "16–30", "Aug 16–31"]))
+    check("deux tableaux : les chiffres ne rapetissent pas sans gagner de place",
+          _gEch["echelle"] == 0.84, _gEch)
+    _dRev = _copyK.deepcopy(_dL)
+    _dRev["abonnes"][0]["net_quinz"] = None
+    check("deux tableaux : revenu absent -> net et LTV « — », les abonnes restent",
+          [x for x in _ciK.tableau_subs(_dRev, {})["lignes"] if x["titre"] == "Roucham"][0]
+          ["net"] is None)
+
+    # L'embed allege : ce que chaque image POSTEE remplace, et rien d'autre.
     _chK = [("​", "resume", False), ("\U0001F3C6 Clicks ranking — x", "1", False),
             ("⭐ Subs ranking — y", "2", False), ("⚠️ Weekly market total unavailable", "w", False),
-            ("👥 Subscribers — a", "s" * 900, False), ("📋 Per link — US", "p" * 900, False)]
-    for _n, _v, _i in _chK[:4]:
-        _eK.add_field(name=_n, value=_v, inline=_i)
-    _eK.add_field(name="⚠️ Truncated", value="x", inline=False)
-    _crK._alleger_pour_image(_eK, _chK)
-    check("clics en image : l'embed perd resume et classements, garde le reste",
-          [f.name for f in _eK.fields] == ["⚠️ Weekly market total unavailable",
-                                           "👥 Subscribers — a", "📋 Per link — US"]
-          and "link(s) tracked" in _eK.description, [f.name for f in _eK.fields])
+            ("👥 Subscribers — a", "s" * 900, False), ("📋 Per link — US", "p" * 900, False),
+            ("📋 Per link — US (2/2)", "p" * 900, False),
+            ("\U0001F4A4 Out of the table", "z", False)]
 
-    # L'espace du classement n'a pas d'identite dans sa config : sans repli,
-    # annuaire vide, « 27 without a Discord account » et que des initiales.
+    def _embK():
+        e = _dcK.Embed(title="t", description="**40** link(s) tracked.  ·  US = x")
+        for _n, _v, _i in _chK[:4]:
+            e.add_field(name=_n, value=_v, inline=_i)
+        e.add_field(name="⚠️ Truncated", value="x", inline=False)
+        return e
+    _eK = _embK()
+    _crK._alleger_pour_image(_eK, _chK, {"clics", "subs"})
+    check("clics en image : l'embed perd resume et classements, garde le reste",
+          [f.name for f in _eK.fields] == ["⚠️ Weekly market total unavailable"]
+          and "link(s) tracked" in _eK.description, [f.name for f in _eK.fields])
+    _eK1 = _embK()
+    _crK._alleger_pour_image(_eK1, _chK, {"clics"})
+    _eK2 = _embK()
+    _crK._alleger_pour_image(_eK2, _chK, {"subs"})
+    check("deux tableaux : image des clics seule -> la section Subscribers reste",
+          [f.name for f in _eK1.fields] == ["⭐ Subs ranking — y",
+                                            "⚠️ Weekly market total unavailable",
+                                            "👥 Subscribers — a"], [f.name for f in _eK1.fields])
+    check("deux tableaux : image des abonnes seule -> le tableau par lien reste",
+          [f.name for f in _eK2.fields] == ["​", "\U0001F3C6 Clicks ranking — x",
+                                            "⚠️ Weekly market total unavailable",
+                                            "📋 Per link — US", "📋 Per link — US (2/2)",
+                                            "\U0001F4A4 Out of the table"],
+          [f.name for f in _eK2.fields])
+
+    # L'espace du classement n'a pas d'identite dans sa config.
     check("clics en image : l'espace du classement trouve ses fiches VA",
           _crK._identite_fiches({"team_id": _cpK.ESPACE_RANKING}) == _cpK.IDENTITE_RANKING
           and _crK._identite_fiches({"team_id": "tm_autre"}) == ""
@@ -16521,16 +16731,33 @@ try:
           _crK._periode_en(__import__("datetime").date(2026, 9, 16),
                            __import__("datetime").date(2026, 9, 30)) == "16 Sep → 30 Sep")
 
-    # Repli : dessin impossible -> None, cause dite ; le report reste texte.
-    _vraiK = _ciK.dessiner
-    _ciK.dessiner = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("police"))
+    # Repli : dessin impossible -> [] et cause dite ; une image ratee
+    # n'emporte pas l'autre.
+    _vraiC, _vraiS = _ciK.dessiner_clics, _ciK.dessiner_subs
+    _ciK.dessiner_clics = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("police"))
+    _ciK.dessiner_subs = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("police"))
     try:
-        _pK, _tRK, _iK = _aioK.run(_crK.image_classement(
+        _pK, _tRK, _iK = _aioK.run(_crK.images_report(
+            None, {"donnees": _dK, "identite": ""}, None))
+        _ciK.dessiner_clics = _vraiC
+        _pK1, _tRK1, _iK1 = _aioK.run(_crK.images_report(
             None, {"donnees": _dK, "identite": ""}, None))
     finally:
-        _ciK.dessiner = _vraiK
+        _ciK.dessiner_clics, _ciK.dessiner_subs = _vraiC, _vraiS
     check("clics en image : dessin impossible -> repli texte, cause dite",
-          _pK is None and _iK["mode"] == "texte" and "police" in _iK["erreur"], _iK)
+          _pK == [] and _iK["mode"] == "texte" and "police" in _iK["erreur"], _iK)
+    check("deux tableaux : l'image des abonnes ratee n'emporte pas celle des clics",
+          [x["quoi"] for x in _pK1] == ["clics"] and "police" in _iK1["erreurs"]["subs"]
+          and _pK1[0]["nom"] == _ciK.NOM_CLICS, _iK1)
+    _pK2, _t2, _iK2 = _aioK.run(_crK.images_report(
+        None, {"donnees": dict(_dK, abonnes=[]), "identite": ""}, None))
+    check("deux tableaux : aucun abonne lu -> pas d'image Subs (pas une image de tirets)",
+          [x["quoi"] for x in _pK2] == ["clics"] and "subs" in _iK2["erreurs"], _iK2)
+    _pK3, _t3, _iK3 = _aioK.run(_crK.images_report(
+        None, {"donnees": _dQ, "identite": ""}, None))
+    check("deux tableaux : quinzaine MyPuls illisible -> pas d'image Subs, la section texte reste",
+          [x["quoi"] for x in _pK3] == ["clics"]
+          and "quinzaine" in _iK3["erreurs"].get("subs", ""), _iK3)
     check("clics en image : rien a dessiner -> le report texte, tel quel",
           _aioK.run(_crK._classement_en_image(None, None, "k", {}, None, _eK, "", {})) is None)
 
@@ -16546,20 +16773,44 @@ try:
 
     _eR = _dcK.Embed(title="Ranking")
     _eR.add_field(name="\U0001F3C6 Clicks ranking", value="🥇 A — 10 clicks", inline=False)
+    _eR.add_field(name="⭐ Subs ranking", value="🥇 B — 9 subs", inline=False)
     check("ranking : ancien embed + image impossible -> chemin texte habituel",
-          _aioK.run(_crK._ranking_en_galerie(None, None, "k", _MsgK(False), _eR, "t", None, {})) is None)
+          _aioK.run(_crK._ranking_en_galerie(None, None, "k", _MsgK(False), _eR, "t", [], {})) is None)
     _m2 = _MsgK(True)
-    _r2 = _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m2, _eR, "t", None, {}))
+    _r2 = _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m2, _eR, "t", [], {}))
     check("ranking : deja en V2 + image impossible -> texte dans le bloc V2, sans embed",
           _r2 == "" and _m2.edits and "embed" not in _m2.edits[0]
           and _m2.edits[0]["attachments"] == [], _m2.edits)
-    _vK, _fiK = _crK.vue_classement(_pngK, "alt", "## Ranking\n-# t", None, True)
+    _imgsK = [{"quoi": "clics", "png": _pngK, "nom": _ciK.NOM_CLICS, "alt": "a"},
+              {"quoi": "subs", "png": _pngS, "nom": _ciK.NOM_SUBS, "alt": "b"}]
+    _vK, _fiK = _crK.vue_images(_imgsK, "## Ranking\n-# t", None, True)
+    _cdK = [c.to_component_dict() for c in _vK.children]
     check("ranking : galerie + ligne courte + bouton Rafraichir au meme custom_id",
-          _fiK.filename == _ciK.NOM_IMAGE == "classement_clics.png"
-          and "reportclick:refresh" in repr([c.to_component_dict() for c in _vK.children]))
+          [f.filename for f in _fiK] == ["clics_us_global.png", "abonnes_ltv.png"]
+          and "reportclick:refresh" in repr(_cdK))
+    # UNE galerie PAR image, l'une sous l'autre : deux images dans une seule
+    # galerie se rangent cote a cote, a mi-largeur, illisibles.
+    _galK = [c for c in _cdK if c.get("type") == 12]
+    check("deux tableaux : deux galeries d'une image chacune, dans l'ordre clics puis abonnes",
+          len(_galK) == 2 and all(len(g["items"]) == 1 for g in _galK)
+          and [g["items"][0]["media"]["url"] for g in _galK]
+          == ["attachment://clics_us_global.png", "attachment://abonnes_ltv.png"], _galK)
+    _m3 = _MsgK(True)
+    _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m3, _eR, "t", _imgsK[:1], {}))
+    _txt3 = repr([c.to_component_dict() for c in _m3.edits[0]["view"].children])
+    check("deux tableaux : salon ranking -- une image ratee, sa partie reste en texte",
+          len(_m3.edits[0]["attachments"]) == 1 and "Subs & LTV image unavailable" in _txt3
+          and "B — 9 subs" in _txt3 and "A — 10 clicks" not in _txt3, _txt3[:300])
+    _m4 = _MsgK(False)
+    _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m4, _eR, "t", _imgsK, {}))
+    check("deux tableaux : salon ranking -- ancien embed converti en place, deux images",
+          len(_m4.edits) == 1 and _m4.edits[0]["embed"] is None
+          and [f.filename for f in _m4.edits[0]["attachments"]]
+          == [_ciK.NOM_CLICS, _ciK.NOM_SUBS], _m4.edits)
 
-    # Conversion d'un report deja poste : l'image est RETROUVEE apres le
-    # report (config perdue) au lieu d'etre postee deux fois.
+    # Conversion d'un report deja poste : le message RETROUVE apres le report
+    # (config perdue) -- y compris l'image unique de f77f466 -- est edite en
+    # place avec les deux images, au lieu d'en poster un second.
     class _ChK:
         def __init__(s, msgs):
             s.msgs, s.envois = msgs, []
@@ -16579,27 +16830,48 @@ try:
             return _tyK.SimpleNamespace(id=99)
 
     class _ImgK:
-        def __init__(s):
+        def __init__(s, nom=None):
             s.id, s.edits = 20, []
             s.author = _tyK.SimpleNamespace(id=7)
-            s.attachments = [_tyK.SimpleNamespace(filename=_ciK.NOM_IMAGE)]
+            s.attachments = [_tyK.SimpleNamespace(filename=nom or _ciK.NOM_CLICS)]
 
         async def edit(s, **kw):
             s.edits.append(kw)
 
-    _imgK, _chK2 = _ImgK(), None
-    _chK2 = _ChK([_imgK])
     _cogK = _tyK.SimpleNamespace(bot=_tyK.SimpleNamespace(user=_tyK.SimpleNamespace(id=7)))
     _sauveCfgK = _crK._REPORT_CFG_FILE
     try:
         _crK._REPORT_CFG_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "r.json"
+        _imgK = _ImgK()
+        _chK2 = _ChK([_imgK])
         _crK._save_report_cfg({"g:c": {"channel_id": 1}})
         _okK = _aioK.run(_crK._poser_image_a_part(
-            _cogK, _chK2, "g:c", {}, _tyK.SimpleNamespace(id=10), _pngK, {}))
+            _cogK, _chK2, "g:c", {}, _tyK.SimpleNamespace(id=10), _imgsK, {}))
         check("conversion : image retrouvee apres le report, pas de doublon",
-              _okK and not _chK2.envois and len(_imgK.edits) == 1
+              _okK == {"clics", "subs"} and not _chK2.envois and len(_imgK.edits) == 1
               and _crK._load_report_cfg()["g:c"].get("image_message_id") == 20,
               (_okK, _chK2.envois, _crK._load_report_cfg()))
+        # L'image de f77f466 (« classement_clics.png »), sans trace dans la
+        # config : retrouvee, et ses pieces jointes REMPLACEES par les deux.
+        _vieux = _ImgK(_ciK.NOM_ANCIEN)
+        _chV = _ChK([_vieux])
+        _crK._save_report_cfg({"g:c": {"channel_id": 1}})
+        _okV = _aioK.run(_crK._poser_image_a_part(
+            _cogK, _chV, "g:c", {}, _tyK.SimpleNamespace(id=10), _imgsK, {}))
+        check("deux tableaux : l'image unique de f77f466 convertie en place (deux images)",
+              _okV == {"clics", "subs"} and not _chV.envois and len(_vieux.edits) == 1
+              and [f.filename for f in _vieux.edits[0]["attachments"]]
+              == [_ciK.NOM_CLICS, _ciK.NOM_SUBS]
+              and _crK._load_report_cfg()["g:c"].get("image_message_id") == 20,
+              (_okV, _vieux.edits))
+        # Aucune trace nulle part : UN envoi, les deux images dans le meme message.
+        _chN = _ChK([])
+        _okN = _aioK.run(_crK._poser_image_a_part(
+            _cogK, _chN, "g:c", {}, _tyK.SimpleNamespace(id=10), _imgsK[1:], {}))
+        check("deux tableaux : premier envoi -> un seul message ; ce qui est pose est dit",
+              _okN == {"subs"} and len(_chN.envois) == 1
+              and [f.filename for f in _chN.envois[0]["files"]] == [_ciK.NOM_SUBS],
+              (_okN, _chN.envois))
     finally:
         _crK._REPORT_CFG_FILE = _sauveCfgK
 
@@ -16638,7 +16910,7 @@ try:
     _sauveCfgK = _crK._REPORT_CFG_FILE
     try:
         _crK._REPORT_CFG_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "r.json"
-        # 1. Plus de 60 liens : rien a dessiner, l'image du cycle d'avant le DIT.
+        # 1. Plus de 60 liens : rien a dessiner, les images du cycle d'avant le DISENT.
         _chF = _ChF([])
         _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
         _cF = {"channel_id": 1, "contenu": "tout", "image_message_id": 20}
@@ -16647,9 +16919,9 @@ try:
             _cogK, _chF, "g:c", _cF, _tyK.SimpleNamespace(id=10), _dcK.Embed(), "t", {}))
         check("clics en image : plus de 60 liens -> l'ancienne image dit qu'elle est perimee",
               _rF is None and len(_imF.edits) == 1 and _imF.edits[0].get("attachments") == []
-              and "No ranking at" in repr(_imF.edits[0]["view"].children[0].content),
+              and "No images at" in repr(_imF.edits[0]["view"].children[0].content),
               _imF.edits)
-        # 2. Report passe en « classement » : l'image a part est retiree.
+        # 2. Report passe en « classement » : le message d'images a part est retire.
         _chF = _ChF([])
         _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
         _cF = {"channel_id": 1, "contenu": "classement", "image_message_id": 20}
@@ -16659,23 +16931,30 @@ try:
         check("clics en image : report passe en classement -> image a part retiree",
               _chF.suppr == [20] and "image_message_id" not in _crK._load_report_cfg()["g:c"],
               (_chF.suppr, _crK._load_report_cfg()))
-        # 3. Premiere pose apres NotFound : la config est RELUE, l'image posee
-        #    plus tot dans le cycle (au-dessus du report) est retiree.
+        # 3. Premiere pose apres NotFound : la config est RELUE, les images
+        #    posees plus tot dans le cycle (au-dessus du report) sont retirees.
         _chF = _ChF([])
         _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
         _crK._save_report_cfg({"g:c": {"channel_id": 1, "contenu": "tout",
                                        "image_message_id": 20}})
         _rapF = _tyK.SimpleNamespace(id=30)
+        _editsF = []
+
         async def _editF(**kw):
-            pass
+            _editsF.append(kw)
         _rapF.edit = _editF
+        _eF = _dcK.Embed(title="t")
         _aioK.run(_crK._image_apres_premier_envoi(
             _cogK, _chF, "g:c", {"channel_id": 1, "contenu": "tout"}, _rapF,
-            _dcK.Embed(), {"png": _pngK, "infos": {}}))
+            _eF, {"images": _imgsK[:1], "infos": {}, "champs": _chK}))
         check("clics en image : report reposte en cours de cycle -> pas d'image orpheline au-dessus",
               _chF.suppr == [20] and len(_chF.envois) == 1
               and _crK._load_report_cfg()["g:c"].get("image_message_id") == 99,
               (_chF.suppr, _chF.envois, _crK._load_report_cfg()))
+        check("deux tableaux : premiere pose -- le report n'est allege que de ce qui est pose",
+              _editsF and "👥 Subscribers — a" in [f.name for f in _editsF[0]["embed"].fields]
+              and not any(f.name.startswith("📋") for f in _editsF[0]["embed"].fields),
+              [f.name for f in _editsF[0]["embed"].fields] if _editsF else None)
     finally:
         _crK._REPORT_CFG_FILE = _sauveCfgK
     # 4. Un salon ranking (galerie V2) repasse en « tout » : Discord refuse
@@ -16688,15 +16967,186 @@ try:
           < _srcF.index("_fin_img = await _classement_en_image(")
           < _srcF.index("await _galerie_a_retirer.delete()"))
 
+    # --- Le report reel, avec un faux GetMySocial et un faux MyPuls ------
+    # Compte les appels : le revenu vient des 3 appels tracking-links deja
+    # faits ; la quinzaine precedente par lien est lue au 1er cycle, gardee,
+    # et le 2e cycle n'en relit AUCUNE.
+    import datetime as _dtK
+    _appK = {"an": [], "tr": []}
+    _echecPrecK = {"on": False}
+    _fgK = _tyK.ModuleType("gms")
+    _metK = [{"id": "l1", "display_name": "(Roucham) 1", "shortcode": "a",
+              "destination": "https://onlyfans.com/jessyewdiference/c101"},
+             {"id": "l2", "display_name": "(Roucham) 1SP", "shortcode": "b", "destination": ""},
+             {"id": "l3", "display_name": "(VA 4 Noum) 1", "shortcode": "c",
+              "destination": "https://onlyfans.com/jessyewdiference/c103"}]
+    _fgK.report_links_meta = lambda *a: list(_metK)
+    _fgK.clicks_for_ids = lambda ids, s, e: 100
+
+    def _anK(lid, a, b):
+        _appK["an"].append((lid, a, b))
+        if (a, b) == ("2026-09-01", "2026-09-15") and _echecPrecK["on"]:
+            return (None, None)
+        return ({"l1": 619, "l2": 1318, "l3": 11205}[lid],
+                {"US": {"l1": 346, "l2": 329, "l3": 4218}[lid]})
+    _fgK.analytics_for_link = _anK
+    _fgK.analytics_for_links = lambda ids, a, b: (None, None)
+    _fgK.sante_cles = lambda: []
+    _fgK.etat_quota = lambda: {}
+    _fmK = _tyK.ModuleType("mypuls")
+
+    def _trK(_f, debut, fin):
+        _appK["tr"].append((debut, fin))
+        return [{"url": "https://onlyfans.com/jessyewdiference/c101", "abonnes_periode": 104,
+                 "revenu": 1500.5},
+                {"url": "https://onlyfans.com/jessyewdiference/c103", "abonnes_periode": 443,
+                 "revenu": 5227.4}]
+    _fmK.api_tracking_links = _trK
+    _sauveModK = {k: sys.modules.get(k) for k in ("gms", "mypuls")}
+    _sauvePrecK, _sauveNowK = _crK._PREC_FILE, _crK._paris_now
+    import clics_arrivees as _caK
+    _sauveArrK = (_caK.toutes, _caK.enregistrer_liens)
+    try:
+        sys.modules["gms"], sys.modules["mypuls"] = _fgK, _fmK
+        _crK._PREC_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "prec.json"
+        _crK._paris_now = lambda: _dtK.datetime(2026, 9, 29, 14, 30)
+        _caK.toutes = lambda: {}
+        _caK.enregistrer_liens = lambda *a, **k: None
+        _cK = {"channel_id": 1, "team_id": _cpK.ESPACE_RANKING, "group_name": "J",
+               "marche": "us", "tout": True}
+
+        def _cycleK():
+            prep, sortie = {}, {}
+            tok = _crK._PREP_IMAGE.set(prep)
+            try:
+                emb = _aioK.run(_crK.ClickRecap._build_group_report(
+                    _tyK.SimpleNamespace(), _cK, sortie=sortie))
+            finally:
+                _crK._PREP_IMAGE.reset(tok)
+            return prep, emb
+        _echecPrecK["on"] = True
+        _p0, _e0 = _cycleK()
+        _an0, _tr0 = len(_appK["an"]), len(_appK["tr"])
+        _echecPrecK["on"] = False
+        _p1, _e1 = _cycleK()
+        _an1, _tr1 = len(_appK["an"]) - _an0, len(_appK["tr"]) - _tr0
+        _p2, _e2 = _cycleK()
+        _an2, _tr2 = len(_appK["an"]) - _an0 - _an1, len(_appK["tr"]) - _tr0 - _tr1
+        _precK = [x for x in _appK["an"] if x[1:] == ("2026-09-01", "2026-09-15")]
+        _garde = safe_json.load(_crK._PREC_FILE, {})
+        # DEUX LIENS AU MEME LIBELLE (relecture du 29/09) : le second dans
+        # l'ordre GetMySocial a plus de clics aujourd'hui, le tri les
+        # inverse. Chacun doit garder SA quinzaine precedente, SES abonnes et
+        # SON revenu -- indexes par nom, ils s'echangeaient.
+        _OK = "https://onlyfans.com/jessyewdiference/"
+        _homK = {"l4": ((1, 2), (10, 20), (999, 1999), "c104"),
+                 "l5": ((50, 90), (500, 900), (7, 17), "c105")}
+        _metK[:] = [{"id": k, "display_name": "(BO7) 1", "shortcode": k,
+                     "destination": _OK + v[3]} for k, v in _homK.items()]
+
+        def _anHomK(lid, a, b):
+            v = _homK[lid]
+            u, t = {("2026-09-16", "2026-09-30"): v[1],
+                    ("2026-09-01", "2026-09-15"): v[2]}.get((a, b), v[0])
+            return (t, {"US": u})
+        _fgK.analytics_for_link = _anHomK
+        _fmK.api_tracking_links = lambda _f, d, f: [
+            {"url": _OK + "c104", "abonnes_periode": 40, "revenu": 400.0},
+            {"url": _OK + "c105", "abonnes_periode": 50, "revenu": 500.0}]
+        _pH, _eH = _cycleK()
+    finally:
+        for _k, _v in _sauveModK.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+        _crK._PREC_FILE, _crK._paris_now = _sauvePrecK, _sauveNowK
+        _caK.toutes, _caK.enregistrer_liens = _sauveArrK
+    _abK = {r["lien"]: r for r in _p2["donnees"]["abonnes"]}
+    check("deux tableaux : revenu lu dans les 3 appels existants (aucun appel de plus)",
+          _tr0 == _tr1 == _tr2 == 3 and _abK["(Roucham) 1"]["net_quinz"] == 1500.5
+          and _abK["(VA 4 Noum) 1"]["net_prec"] == 5227.4, (_tr0, _tr1, _tr2, _abK))
+    check("deux tableaux : quinzaine precedente en echec -> « — », non gardee, relue",
+          _p0["donnees"]["par_lien"][0]["periodes"][3] == {"marche": None, "total": None}
+          and _an1 == 3 * 3 + 3, (_p0["donnees"]["par_lien"][0], _an1))
+    check("deux tableaux : quinzaine precedente gardee (2e cycle : 0 appel)",
+          _an2 == 3 * 3 and len(_precK) == 6
+          and sorted(_garde.get("liens") or {}) == ["l1|2026-09-01|2026-09-15",
+                                                    "l2|2026-09-01|2026-09-15",
+                                                    "l3|2026-09-01|2026-09-15"]
+          and _p2["donnees"]["par_lien"][1]["periodes"][3] == {"marche": 329, "total": 1318},
+          (_an2, len(_precK), _garde))
+    _hEntK = sorted((e["brut"]["periodes"][2]["total"], e["brut"]["periodes"][3]["total"],
+                     e["suivi"]["quinz"], e["suivi"]["net_quinz"])
+                    for e in _cpK.depuis_report(_pH["donnees"], "quinz"))
+    _hSK = _ciK.tableau_subs(_pH["donnees"], {})["lignes"]
+    check("deux tableaux : deux liens au meme libelle gardent chacun leur precedente et leurs abonnes",
+          _hEntK == [(20, 1999, 40, 400.0), (900, 17, 50, 500.0)]
+          and [(x["quinz"], x["net"]) for x in _hSK] == [(90, 900.0)], (_hEntK, _hSK))
+    _plK = {r["lien"]: r for r in _p2["donnees"]["par_lien"]}
+    check("deux tableaux : par_lien porte 4 periodes, les 3 premieres inchangees",
+          [len(r["periodes"]) for r in _p2["donnees"]["par_lien"]] == [4, 4, 4]
+          and _plK["(Roucham) 1SP"]["periodes"][2] == {"marche": 329, "total": 1318}
+          and _p2["colonnes"] == ["Today", "Yesterday", "16–30", "1–15"])
+    _tRe = _ciK.tableau_subs(_p2["donnees"], {})
+    # 1 500,50 $ -> « $1 501 » : les demis vers le haut (round() de Python
+    # arrondissait au pair).
+    check("deux tableaux : du report a l'image -- Roucham 104 subs, $1 501, LTV $14.43",
+          [(x["titre"], x["quinz"], _ciK.dollars(x["net"]), _ciK.dollars(x["ltv"], True))
+           for x in _tRe["lignes"]] == [("VA 4 Noum", 443, "$5 227", "$11.80"),
+                                        ("Roucham", 104, "$1 501", "$14.43")],
+          [(x["titre"], x["quinz"], x["net"], x["ltv"]) for x in _tRe["lignes"]])
+
+    # MyPuls : le revenu est une CLE DE PLUS, rien d'autre ne change.
+    import mypuls as _mpK
+    _sauveGetK = _mpK.api_get
+    try:
+        _mpK._TRACKING_CACHE.clear()
+        _mpK.api_get = lambda path, params=None, _essai=0: {"ok": True, "data": {"data": [
+            {"code": "c1", "name": "a", "url": "u1", "subscribers_period": 3, "revenue": 12.5},
+            {"code": "c2", "name": "b", "url": "u2", "subscribers_period": 0,
+             "revenue": {"total": "7.25"}},
+            {"code": "c3", "name": "c", "url": "u3", "subscribers_period": 1}]}}
+        _lmK = _mpK.api_tracking_links(True, "2026-09-16", "2026-09-30")
+    finally:
+        _mpK.api_get = _sauveGetK
+        _mpK._TRACKING_CACHE.clear()
+    check("deux tableaux : mypuls.api_tracking_links rend le revenu net (None si absent)",
+          [x["revenu"] for x in _lmK] == [12.5, 7.25, None]
+          and set(_lmK[0]) == {"code", "nom", "creator_id", "url", "abonnes", "abonnes_periode",
+                               "nouveaux", "visites", "visites_periode", "actif", "revenu"},
+          _lmK)
+    _srcK = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    check("deux tableaux : une periode MyPuls illisible n'est pas zero abonne",
+          "if not idx:\n                        return None" in _srcK)
+
+    # /democlics : les images du DERNIER cycle, les deux.
+    _sauveDerK = dict(_crK._DERNIERS_CLASSEMENTS)
+    _sauveCfgK = _crK._REPORT_CFG_FILE
+    try:
+        _crK._REPORT_CFG_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "r.json"
+        _crK._save_report_cfg({"g:5": {"channel_id": 5, "contenu": "tout"}})
+        _crK._DERNIERS_CLASSEMENTS["g:5"] = {"images": _imgsK, "infos": {}, "quand": time.time()}
+        _dmK, _diK, _dnK = _aioK.run(_crK.demo_classement(None, 5))
+    finally:
+        _crK._REPORT_CFG_FILE = _sauveCfgK
+        _crK._DERNIERS_CLASSEMENTS.clear()
+        _crK._DERNIERS_CLASSEMENTS.update(_sauveDerK)
+    check("deux tableaux : /democlics montre les DEUX images du dernier cycle",
+          [x["quoi"] for x in _dmK] == ["clics", "subs"]
+          and "_cr.vue_images(images)" in pathlib.Path("cogs/menutest.py").read_text(
+              encoding="utf-8"), (_dmK and [x["quoi"] for x in _dmK], _dnK))
+
     # Le calcul ne passe pas par une signature changee : la page web appelle
     # _build_group_report avec un faux « self » et les patchs du VPS
     # s'appuient sur l'appel.
-    _srcK = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
     check("clics en image : appel de _build_group_report inchange",
           "c, permettre_vide=not c.get(\"message_id\"))" in _srcK
           and "await msg.edit(content=content, embed=emb," in _srcK)
     check("clics en image : dessin hors de la boucle",
-          "asyncio.to_thread(_ci.dessiner" in _srcK)
+          "png = await asyncio.to_thread(dessin, t, photos)" in _srcK)
+    check("deux tableaux : ecriture atomique de la quinzaine precedente",
+          "safe_json.write(_PREC_FILE" in _srcK and "_PREC_FILE.write_text" not in _srcK)
     import inspect as _insK
     import cogs.sessionsvoc as _svcK
     _sigK = _insK.signature(_svcK.photos_avatars)
@@ -17102,7 +17552,7 @@ try:
     # Les trois ecrans en profitent : la carte du tableau de bord (web_upload
     # _clicrank_rangs) et l image passent par le meme par_clics.
     import clics_image as _ciR
-    _tR = _ciR.tableau({"par_lien": [
+    _tR = _ciR.tableau_clics({"par_lien": [
         {"lien": n, "depuis": "", "periodes": [{}, {}, {"marche": 1, "total": 1}]}
         for n in _liensR], "abonnes": []}, _anR)
     check("fiches VA : l image montre les memes comptes (4 sans Discord)",

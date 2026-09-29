@@ -509,11 +509,17 @@ def grouper(entrees, annuaire=None) -> list:
             g = gens[cle] = {
                 "pseudo": ps, "titre": etiquette(nom) or nom, "discord": "",
                 "rattache": "",
+                # Les entrees telles quelles, dans l'ordre : les images du
+                # report y relisent le detail de chaque lien (quatre periodes,
+                # revenu) sans refaire le regroupement -- une seconde regle
+                # de regroupement finirait par diverger de celle-ci.
+                "entrees": [],
                 "liens": [], "depuis": "",
                 "clics": None, "clics_lus": 0, "clics_non_lus": 0, "clics_na": 0,
                 "abonnes": None, "abonnes_lus": 0, "abonnes_non_lus": 0,
                 "abonnes_na": 0}
         g["liens"].append(nom)
+        g["entrees"].append(e)
         if not g["discord"]:
             # DEUX CHEMINS, ET LE PREMIER NE DEMANDE RIEN A PERSONNE.
             # Un lien nomme « va_@pseudo » PORTE deja le compte Discord : il
@@ -605,10 +611,16 @@ def depuis_report(donnees: dict, periode: str = "quinz") -> list:
             clics = v.get("marche")
             if clics is None:
                 clics = v.get("total")
-        abo = None
+        abo, suivi = None, None
         if j < len(ab) and str(ab[j].get("lien") or "") == nom:
-            abo = ab[j].get("quinz" if periode == "quinz" else "auj")
+            suivi = ab[j]
+            abo = suivi.get("quinz" if periode == "quinz" else "auj")
             j += 1
+        # « brut » et « suivi » : les lignes du report telles quelles (les
+        # quatre periodes de clics, les abonnes et le revenu du lien de
+        # suivi, None quand le lien n'en a pas). grouper les garde dans
+        # g["entrees"] ; les images du report les relisent de la.
         entrees.append({"nom": nom, "clics": clics, "abonnes": abo,
-                        "depuis": str(r.get("depuis") or "")})
+                        "depuis": str(r.get("depuis") or ""),
+                        "brut": r, "suivi": suivi})
     return entrees

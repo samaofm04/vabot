@@ -176,6 +176,48 @@ def _save_report_cfg(d: dict):
         pass
 
 
+#: LA QUINZAINE PRECEDENTE, PAR LIEN, gardee sur disque. Demande du
+#: proprietaire du 29/09 : les clics d'aujourd'hui, d'hier, de la quinzaine et
+#: de la quinzaine precedente, par personne et par lien. Une quinzaine close ne
+#: bouge plus (e4ab6f3 : « quand la quinzaine est finie, c'est juste un
+#: report ») : chaque lien est lu UNE fois, puis relu d'ici -- le quota
+#: GetMySocial ne paie pas trente appels toutes les trente minutes pour des
+#: chiffres qui ne changeront plus. Un releve n'est garde que s'il est pris
+#: APRES la fin de la periode (la regle de la paie) : c'est toujours le cas
+#: ici, la quinzaine precedente finit avant aujourd'hui (heure de Paris).
+#: {"liens": {"<id>|<debut>|<fin>": {"total", "pays", "lu"}}} ; un echec
+#: n'est jamais garde (il sera relu au cycle suivant).
+_PREC_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap_quinzaine_precedente.json"
+
+
+def _cle_prec(lid, plage) -> str:
+    return "%s|%s|%s" % (lid, plage[0], plage[1])
+
+
+def _prec_charger() -> dict:
+    """{cle: releve} ; {} si le fichier manque ou est illisible (on relira)."""
+    try:
+        d = safe_json.load(_PREC_FILE, {}) or {}
+        liens = d.get("liens") if isinstance(d, dict) else None
+        return dict(liens) if isinstance(liens, dict) else {}
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] quinzaine precedente illisible (%s) : relue" % e, flush=True)
+        return {}
+
+
+def _prec_garder(liens: dict, debut_min: str) -> None:
+    """Ecrit les releves (atomique), sans ceux d'avant `debut_min` : seule la
+    quinzaine precedente sert, les plus vieilles n'ont rien a faire la."""
+    try:
+        garde = {k: v for k, v in (liens or {}).items()
+                 if str(k).split("|")[-1] >= str(debut_min)}
+        _PREC_FILE.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write(_PREC_FILE, {"liens": garde})
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] quinzaine precedente non gardee (%s) : relue au "
+              "prochain cycle" % e, flush=True)
+
+
 def _match_shortcode(sc, links):
     sc = (sc or "").lower()
     if not sc:
@@ -552,23 +594,34 @@ def _tenir_dans_embed(emb, plafond: int = 5900) -> None:
 
 
 # ==============================================================================
-# Les classements en IMAGE (demande du proprietaire du 29/09 : « tu vois ce
-# qu'on a fait pour les sessions, fais la meme pour les clicks et subs, un
-# tableau avec les PP »). Le dessin vit dans clics_image ; ici, ce qui le
-# relie a Discord.
+# Le report en IMAGES. Deux demandes du proprietaire, le 29/09 :
+#   1) « tu vois ce qu'on a fait pour les sessions, fais la meme pour les
+#      clicks et subs, un tableau avec les PP » -> une image (f77f466) ;
+#   2) « un pour les clicks genre la US vs GLOB, et un autre pour les subs et
+#      la LTV » -> DEUX images, « Clicks — US vs global » et « Subs & LTV ».
+# Le dessin vit dans clics_image ; ici, ce qui le relie a Discord.
 #
-# LE FORMAT : l'embed texte RESTE, l'image va dans un message a part, tenu a
-# jour avec lui (salon ranking : l'image seule, en galerie).
-#   - une galerie « Components V2 » affiche l'image a ~550 px ; dans un embed,
-#     elle tomberait a ~400 et ne se lirait plus ;
+# LE FORMAT : l'embed texte RESTE (en-tete, avertissements), les images vont
+# dans UN message a part, juste dessous, tenu a jour avec lui (salon ranking :
+# le message du report devient lui-meme les deux images).
+#   - UN message, DEUX galeries d'UNE image chacune, l'une sous l'autre. Une
+#     galerie de deux images les range COTE A COTE : chacune tombe a la moitie
+#     de la largeur (~270 px au lieu de ~550 sur un ecran d'ordinateur), soit
+#     des chiffres de 22 px dessines a ~5 px -- illisibles. Deux galeries
+#     d'une image gardent chacune la pleine largeur. Et un seul message, c'est
+#     un seul identifiant a suivre (celui de l'image de f77f466, converti en
+#     place), une seule edition par cycle, pas d'ordre a garder entre deux ;
+#   - dans un embed, une image tomberait a ~400 px ;
 #   - un message V2 plafonne son texte a 4 000 signes, et le report en porte
-#     jusqu'a ~5 900 (tableau par lien, abonnes, avertissements) : le passer
-#     en V2 obligeait a couper ou a decouper le texte ;
-#   - l'embed est aussi ce que relisent la page web (sortie) et les patchs
-#     du VPS qui suivent l'envoi du report : on n'y touche pas.
+#     jusqu'a ~5 900 : le report reste un embed ;
+#   - l'embed est aussi ce que relisent la page web (sortie) et les patchs du
+#     VPS qui suivent l'envoi du report : on n'y touche pas.
+# UNE IMAGE QUI ECHOUE LAISSE SA PARTIE DU TEXTE : le tableau par lien ne part
+# que si l'image des clics est postee, la section Subscribers que si celle des
+# abonnes l'est. Rien ne disparait.
 # ==============================================================================
 
-#: Ce que _build_group_report a calcule pour l'image, rendu a
+#: Ce que _build_group_report a calcule pour les images, rendu a
 #: _post_or_update_report SANS toucher a leur signature ni a l'appel : la
 #: page web appelle _build_group_report avec un faux « self », et deux
 #: patchs du VPS s'appuient sur la ligne d'appel. Une variable de contexte
@@ -576,13 +629,25 @@ def _tenir_dans_embed(emb, plafond: int = 5900) -> None:
 #: boucle et un clic sur « Rafraichir ») ne se melangent pas.
 _PREP_IMAGE = contextvars.ContextVar("clics_prep_image", default=None)
 
-#: Le dernier classement dessine, par report : /democlics (bot admin) montre
-#: l'image REELLEMENT postee, sans relancer GetMySocial.
+#: Les dernieres images dessinees, par report : /democlics (bot admin) montre
+#: celles REELLEMENT postees, sans relancer GetMySocial.
 _DERNIERS_CLASSEMENTS = {}
 
 #: Le titre d'un champ de resume (« Today / Yesterday ... ») : une espace
 #: sans chasse, pour un champ sans titre visible.
 _NOM_RESUME = "​"
+
+#: Ce que chaque image REMPLACE dans l'embed, par debut de titre de champ.
+#: UNE table, lue par l'allegement et par le repli du salon ranking.
+#:   clics : le classement clics (🏆), le tableau par lien (📋) et la liste
+#:           des liens sortis du tableau (💤) -- l'image les montre tous ;
+#:   subs  : le classement abonnes (⭐) et la section Subscribers (👥).
+_REMPLACE = {
+    "clics": ("\U0001F3C6", "\U0001F4CB", "\U0001F4A4"),
+    "subs": ("⭐", "\U0001F465"),
+}
+#: Le nom de chaque image, dit quand elle manque.
+_NOM_PARTIE = {"clics": "Clicks", "subs": "Subs & LTV"}
 
 
 def _identite_fiches(c) -> str:
@@ -612,75 +677,129 @@ def _periode_en(debut: datetime.date, fin: datetime.date) -> str:
     return "%d %s → %d %s" % (debut.day, _en(debut), fin.day, _en(fin))
 
 
-def _alleger_pour_image(emb, champs=None) -> None:
-    """Retire de l'embed ce que l'image montre : le resume des periodes et
-    les deux classements. Le reste (avertissements, abonnes, tableau par
-    lien) ne bouge pas.
+def _colonnes_en(today: datetime.date) -> list:
+    """Les quatre colonnes des clics : Today, Yesterday, « 16–30 », « 1–15 ».
+
+    La quinzaine precedente d'un 1er-15 est le 16-fin du mois d'avant : elle
+    porte alors son mois (« Aug 16–31 »), sinon on croirait lire celle du
+    mois en cours."""
+    q_deb, q_fin = _pay_period(today)
+    p_deb, p_fin = _quinzaine_precedente(today)
+    prec = "%d–%d" % (p_deb.day, p_fin.day)
+    if p_deb.month != q_deb.month:
+        prec = "%s %s" % (_en(p_deb), prec)
+    return ["Today", "Yesterday", "%d–%d" % (q_deb.day, q_fin.day), prec]
+
+
+def _remplace(nom, quoi) -> bool:
+    n = str(nom or "")
+    if "clics" in quoi and n == _NOM_RESUME:
+        return True                  # les tuiles des periodes sont dans l'image
+    return any(n.startswith(_REMPLACE[q]) for q in quoi if q in _REMPLACE)
+
+
+def _alleger_pour_image(emb, champs=None, quoi=("clics", "subs")) -> None:
+    """Retire de l'embed ce que les images POSTEES montrent (`quoi`).
+
+    Image des clics : le resume des periodes, le classement clics, le tableau
+    par lien et la liste des liens sortis du tableau. Image des abonnes : le
+    classement abonnes et la section Subscribers. Le reste (en-tete,
+    avertissements) ne bouge pas.
 
     `champs` : les champs AVANT la garde de taille. Sans eux, un report que
-    la garde avait coupe (« Truncated ») le resterait alors que l'image vient
-    de lui rendre la place des classements.
+    la garde avait coupe (« Truncated ») le resterait alors que les images
+    viennent de lui rendre la place.
     """
+    quoi = set(quoi or ())
     if champs is None:
         champs = [(f.name, f.value, f.inline) for f in emb.fields]
-    gardes = [(n, v, i) for n, v, i in champs
-              if not (str(n or "") == _NOM_RESUME
-                      or str(n or "").startswith(_PREFIXES_CLASSEMENT))]
+    gardes = [(n, v, i) for n, v, i in champs if not _remplace(n, quoi)]
     emb.clear_fields()
     for n, v, i in gardes:
         emb.add_field(name=n, value=v, inline=i)
-    allege = emb
-    _tenir_dans_embed(allege)
+    _tenir_dans_embed(emb)
 
 
-async def image_classement(bot, prep: dict, guilde=None) -> tuple:
-    """(png ou None, tableau ou None, infos) : l'image des classements.
+async def images_report(bot, prep: dict, guilde=None) -> tuple:
+    """(images, tableaux, infos) : les deux images du report.
 
-    Le calcul et le dessin passent hors de la boucle (asyncio.to_thread) :
-    60 lignes dessinees au double ne doivent pas figer le bot. Les photos
-    passent par photos_avatars et son cache par cle d'avatar : un cycle de
-    30 minutes ne retelecharge rien tant que personne n'a change de photo.
+    `images` : [{"quoi": "clics"|"subs", "png", "nom", "alt"}], celles qui ont
+    pu etre dessinees ; [] si aucune. Chacune se rate SEULE : un dessin des
+    abonnes qui echoue n'emporte pas celui des clics.
 
-    Toute erreur rend png=None, avec la cause dans infos["erreur"] et au
-    journal : l'appelant garde alors les classements en TEXTE.
+    Le calcul et le dessin passent hors de la boucle (asyncio.to_thread). Les
+    photos passent par photos_avatars et son cache par cle d'avatar : un cycle
+    de 30 minutes ne retelecharge rien tant que personne n'a change de photo.
+
+    Toute erreur est dite dans infos (« erreur », « erreurs » par image) et au
+    journal : l'appelant garde alors la partie correspondante en TEXTE.
     """
-    infos = {"mode": "image", "erreur": "", "photos": {}, "pseudos": {},
-             "sans_discord": 0, "personnes": 0}
+    infos = {"mode": "image", "erreur": "", "erreurs": {}, "photos": {}, "pseudos": {},
+             "sans_discord": 0, "sans_suivi": 0, "personnes": 0}
     try:
         import clics_image as _ci
         import clics_personnes as _cp
         donnees = (prep or {}).get("donnees")
         if not donnees:
-            raise ValueError("aucune donnee de classement")
+            raise ValueError("aucune donnee pour les images")
         annu = await asyncio.to_thread(_cp.annuaire_va, prep.get("identite") or "")
-        t = _ci.tableau(donnees, annu, periode=prep.get("periode") or "",
-                        espace=prep.get("espace") or "", liens=prep.get("liens"),
-                        maj=prep.get("maj") or "")
-        if not t["lignes"]:
-            raise ValueError("personne a classer")
+        kw = dict(periode=prep.get("periode") or "", espace=prep.get("espace") or "",
+                  maj=prep.get("maj") or "", colonnes=prep.get("colonnes") or _ci.COLONNES)
+        tc = _ci.tableau_clics(donnees, annu, liens=prep.get("liens"), **kw)
+        ts = _ci.tableau_subs(donnees, annu, **kw)
+        if not tc["lignes"]:
+            raise ValueError("personne a montrer")
         # Le PSEUDO de la fiche VA, retrouve parmi les membres du serveur du
         # salon -- correspondance unique, sinon des initiales.
         membres = list(getattr(guilde, "members", None) or []) if guilde is not None else []
-        ids, compte_ps = _ci.resoudre_pseudos(_ci.pseudos(t), membres)
+        ids, compte_ps = _ci.resoudre_pseudos(_ci.pseudos(tc, ts), membres)
         photos_id, compte = {}, {}
         if ids:
             import cogs.sessionsvoc as _svc
             photos_id, compte = await _svc.photos_avatars(
                 bot, sorted(set(ids.values())), guilde=guilde)
         photos = {ps: photos_id[i] for ps, i in ids.items() if photos_id.get(i)}
-        png = await asyncio.to_thread(_ci.dessiner, t, photos)
-        infos.update(photos=compte, pseudos=compte_ps, sans_discord=t["sans_discord"],
-                     personnes=t["personnes"], alt=_ci.texte_alt(t))
-        print("[reportclick] classement dessine : %d personne(s), %d sans Discord, "
-              "pseudos %s, photos %s ; %s" % (t["personnes"], t["sans_discord"], compte_ps,
-                                              compte, t.get("rattachements") or ""),
-              flush=True)
-        return png, t, infos
     except Exception as e:                       # noqa: BLE001
         infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
-        print("[reportclick] classement : image impossible (%s) — classements "
-              "en texte" % infos["erreur"], flush=True)
-        return None, None, infos
+        print("[reportclick] images impossibles (%s) — report en texte"
+              % infos["erreur"], flush=True)
+        return [], {}, infos
+    images = []
+    for quoi, t, dessin, nom, alt in (
+            ("clics", tc, _ci.dessiner_clics, _ci.NOM_CLICS, _ci.texte_alt_clics),
+            ("subs", ts, _ci.dessiner_subs, _ci.NOM_SUBS, _ci.texte_alt_subs)):
+        if quoi == "subs" and not ts.get("quinz_lus"):
+            # MyPuls n'a rien rendu (ou aucun lien n'a de lien de suivi) :
+            # une image de tirets dirait « personne n'a de lien de suivi »,
+            # ce qui est faux. Pas d'image ; le texte, s'il y en a, reste.
+            # Meme chose quand SEULE la quinzaine en cours manque (le jour et
+            # la precedente lus) : la colonne du tri etait « — » partout, et
+            # l'image partait quand meme en emportant la section texte
+            # (relecture du 29/09).
+            infos["erreurs"][quoi] = (
+                "aucun abonne lu (MyPuls)" if not any(x.get("suivi") for x in ts["lignes"])
+                else "abonnes de la quinzaine illisibles (MyPuls)")
+            print("[reportclick] image Subs & LTV non dessinee : %s" % infos["erreurs"][quoi],
+                  flush=True)
+            continue
+        try:
+            png = await asyncio.to_thread(dessin, t, photos)
+            images.append({"quoi": quoi, "png": png, "nom": nom, "alt": alt(t)})
+        except Exception as e:                   # noqa: BLE001
+            infos["erreurs"][quoi] = "%s: %s" % (type(e).__name__, str(e)[:200])
+            print("[reportclick] image %s impossible (%s) — sa partie reste en texte"
+                  % (quoi, infos["erreurs"][quoi]), flush=True)
+    infos.update(photos=compte, pseudos=compte_ps, sans_discord=tc["sans_discord"],
+                 sans_suivi=ts["sans_suivi"], personnes=tc["personnes"])
+    if not images:
+        infos.update(mode="texte", erreur="; ".join(
+            "%s: %s" % (k, v) for k, v in infos["erreurs"].items()) or "aucune image")
+    print("[reportclick] images dessinees : %s ; %d personne(s), %d sans Discord, "
+          "%d sans lien de suivi, pseudos %s, photos %s ; %s"
+          % ([im["quoi"] for im in images] or "aucune", tc["personnes"], tc["sans_discord"],
+             ts["sans_suivi"], compte_ps, compte, tc.get("rattachements") or ""),
+          flush=True)
+    return images, {"clics": tc, "subs": ts}, infos
 
 
 class _BoutonRafraichir(discord.ui.Button):
@@ -701,30 +820,36 @@ class _BoutonRafraichir(discord.ui.Button):
         await _rafraichir(interaction, self.cog)
 
 
-def vue_classement(png: bytes, alt: str = "", entete: str = "", cog=None,
-                   bouton: bool = False):
-    """(vue Components V2, fichier) : l'image en galerie, en grand.
+def vue_images(images, entete: str = "", cog=None, bouton: bool = False,
+               manque: str = ""):
+    """(vue Components V2, [fichiers]) : chaque image dans SA galerie, l'une
+    sous l'autre, a pleine largeur (voir LE FORMAT plus haut).
 
-    `entete` : une ligne de texte au-dessus (salon ranking) ; `bouton` : le
-    « Rafraichir » du report. Un fichier discord.File ne se lit qu'une fois :
-    une nouvelle paire a chaque envoi.
+    `entete` : une ligne de texte au-dessus (salon ranking) ; `manque` : du
+    texte sous les images, pour ce qu'une image ratee ne montre pas ;
+    `bouton` : le « Rafraichir » du report. Un discord.File ne se lit qu'une
+    fois : une nouvelle liste a chaque envoi.
     """
     import io as _io
-    import clics_image as _ci
     ui = discord.ui
     if not (hasattr(ui, "LayoutView") and hasattr(ui, "MediaGallery")):
         raise RuntimeError("discord.py %s ne sait pas envoyer de galerie (V2)"
                            % discord.__version__)
+    if not images:
+        raise ValueError("aucune image a envoyer")
     vue = ui.LayoutView(timeout=None)
     if entete:
         vue.add_item(ui.TextDisplay(entete[:1000]))
-    vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
-        "attachment://" + _ci.NOM_IMAGE, description=(alt or "Clicks ranking")[:1024])))
+    for im in images:
+        vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+            "attachment://" + im["nom"], description=(im.get("alt") or im["nom"])[:1024])))
+    if manque:
+        vue.add_item(ui.TextDisplay(manque[:2800]))
     if bouton:
         rang = ui.ActionRow()
         rang.add_item(_BoutonRafraichir(cog))
         vue.add_item(rang)
-    return vue, discord.File(_io.BytesIO(png), filename=_ci.NOM_IMAGE)
+    return vue, [discord.File(_io.BytesIO(im["png"]), filename=im["nom"]) for im in images]
 
 
 def _est_v2(msg) -> bool:
@@ -733,16 +858,19 @@ def _est_v2(msg) -> bool:
 
 
 def _porte_image(msg, moi_id) -> bool:
-    """Ce message est-il l'image des classements postee par ce bot ?"""
+    """Ce message est-il celui des images du report, poste par ce bot ?
+
+    Les DEUX noms d'aujourd'hui, et celui de l'image unique de f77f466 : un
+    message d'avant est ainsi retrouve et converti en place, pas double."""
     import clics_image as _ci
     if getattr(getattr(msg, "author", None), "id", None) != moi_id:
         return False
-    return any(getattr(a, "filename", None) == _ci.NOM_IMAGE
+    return any(getattr(a, "filename", None) in _ci.NOMS
                for a in (getattr(msg, "attachments", None) or []))
 
 
 def _retenir_image(cle: str, champ: str, valeur) -> None:
-    """Retient l'identifiant du message image dans la config de CE report.
+    """Retient l'identifiant du message des images dans la config de CE report.
 
     Relue juste avant d'ecrire, comme message_id : un /reportclick_off a pu
     passer pendant l'envoi, et on ne ressuscite pas un report coupe.
@@ -756,25 +884,27 @@ def _retenir_image(cle: str, champ: str, valeur) -> None:
         _save_report_cfg(fresh)
 
 
-async def _poser_image_a_part(cog, ch, cle: str, c: dict, report, png, infos,
-                              absente: str = "") -> bool:
-    """L'image des classements dans SON message, juste sous le report.
+async def _poser_image_a_part(cog, ch, cle: str, c: dict, report, images, infos,
+                              absente: str = "") -> set:
+    """Les images du report dans LEUR message, juste sous le report.
 
-    Rend True quand l'image est en place (l'embed peut alors etre allege),
-    False sinon : les classements restent en texte dans le report.
+    Rend l'ensemble des parties en place ({"clics", "subs"}, ou une seule) :
+    l'embed peut alors etre allege de celles-la ; set() sinon, et le report
+    garde tout son texte.
 
-    JAMAIS DEUX IMAGES. Le message est retenu dans la config
+    JAMAIS DEUX MESSAGES. Le message est retenu dans la config
     (image_message_id) ; sans trace -- config perdue, /setreportclick
     relance --, on le RETROUVE parmi les messages qui suivent le report avant
-    d'en poster un autre. Une image posee AVANT le report (le report a ete
-    reposte) est retiree : elle se lirait au-dessus d'un report qui ne la
-    concerne plus.
+    d'en poster un autre, y compris l'image unique de f77f466, CONVERTIE en
+    place. Un message pose AVANT le report (le report a ete reposte) est
+    retire : il se lirait au-dessus d'un report qui ne le concerne plus.
 
-    `absente` : avec png=None, la ligne qui remplace une image devenue
-    perimee (par defaut : les classements sont revenus dans le report).
+    `absente` : sans image, la ligne qui remplace un message devenu perime
+    (par defaut : le report a repris tout son texte).
     """
     moi = getattr(getattr(cog, "bot", None), "user", None)
     moi_id = getattr(moi, "id", None)
+    images = list(images or [])
     image = None
     mid = c.get("image_message_id")
     if mid:
@@ -784,64 +914,66 @@ async def _poser_image_a_part(cog, ch, cle: str, c: dict, report, png, infos,
             ancien = None
             _retenir_image(cle, "image_message_id", None)
         except Exception as e:                   # noqa: BLE001
-            # Discord ne repond pas : on ne poste pas une seconde image au
-            # hasard. Les classements restent en texte pour ce cycle.
-            print("[reportclick] %s : image du classement illisible (%s) — "
-                  "classements en texte" % (cle, e), flush=True)
-            return False
+            # Discord ne repond pas : on ne poste pas un second message au
+            # hasard. Le report garde son texte pour ce cycle.
+            print("[reportclick] %s : message des images illisible (%s) — "
+                  "report en texte" % (cle, e), flush=True)
+            return set()
         if ancien is not None and int(ancien.id) < int(report.id):
             try:
                 await ancien.delete()
-                print("[reportclick] %s : ancienne image du classement retiree "
-                      "(posee avant le report)" % cle, flush=True)
+                print("[reportclick] %s : anciennes images retirees (posees avant "
+                      "le report)" % cle, flush=True)
             except Exception as e:               # noqa: BLE001
-                print("[reportclick] %s : ancienne image non retiree (%s)" % (cle, e),
+                print("[reportclick] %s : anciennes images non retirees (%s)" % (cle, e),
                       flush=True)
             _retenir_image(cle, "image_message_id", None)
             ancien = None
         image = ancien
-    if image is None and png is not None and moi_id is not None and hasattr(ch, "history"):
+    if image is None and images and moi_id is not None and hasattr(ch, "history"):
         try:
             async for m in ch.history(limit=15, after=report, oldest_first=True):
                 if _porte_image(m, moi_id):
                     image = m
-                    print("[reportclick] %s : image du classement retrouvee (%s)"
+                    print("[reportclick] %s : message des images retrouve (%s)"
                           % (cle, m.id), flush=True)
                     break
         except Exception as e:                   # noqa: BLE001
-            print("[reportclick] %s : recherche de l'image impossible (%s)" % (cle, e),
+            print("[reportclick] %s : recherche des images impossible (%s)" % (cle, e),
                   flush=True)
     try:
-        if png is None:
+        if not images:
             if image is not None:
-                # L'image ne peut pas etre refaite : elle ne doit pas rester
-                # la, figee, a se faire passer pour le classement du moment.
+                # Les images ne peuvent pas etre refaites : elles ne doivent pas
+                # rester la, figees, a se faire passer pour les chiffres du
+                # moment.
                 await image.edit(view=_vue_texte(absente or (
-                    "-# ⚠️ Ranking image unavailable at %s — the ranking is back "
+                    "-# ⚠️ Report images unavailable at %s — the figures are back "
                     "in the report above." % _paris_now().strftime("%H:%M"))),
                     attachments=[])
-                print("[reportclick] %s : image du classement marquee perimee (%s)"
+                print("[reportclick] %s : images marquees perimees (%s)"
                       % (cle, image.id), flush=True)
-            return False
-        vue, fichier = vue_classement(png, infos.get("alt") or "")
+            return set()
+        vue, fichiers = vue_images(images)
         if image is not None:
-            await image.edit(view=vue, attachments=[fichier])
+            # La conversion du message de f77f466 est cette meme edition :
+            # ses pieces jointes sont REMPLACEES par les deux nouvelles.
+            await image.edit(view=vue, attachments=fichiers)
         else:
-            image = await ch.send(view=vue, files=[fichier])
-            print("[reportclick] %s : image du classement postee (%s)" % (cle, image.id),
-                  flush=True)
+            image = await ch.send(view=vue, files=fichiers)
+            print("[reportclick] %s : images postees (%s)" % (cle, image.id), flush=True)
         if str(c.get("image_message_id") or "") != str(image.id):
             _retenir_image(cle, "image_message_id", image.id)
-        return True
+        return {im["quoi"] for im in images}
     except Exception as e:                       # noqa: BLE001
-        print("[reportclick] %s : image du classement refusee (%s: %s) — "
-              "classements en texte" % (cle, type(e).__name__, str(e)[:200]), flush=True)
-        return False
+        print("[reportclick] %s : images refusees (%s: %s) — report en texte"
+              % (cle, type(e).__name__, str(e)[:200]), flush=True)
+        return set()
 
 
 async def _retirer_image_a_part(ch, cle: str, c: dict) -> None:
-    """Un report passe en « classement » : son image A PART n'a plus lieu
-    d'etre (le message du report devient lui-meme la galerie).
+    """Un report passe en « classement » : son message d'images A PART n'a
+    plus lieu d'etre (le message du report devient lui-meme la galerie).
 
     Vu en relecture le 29/09 : /setreportclick contenu:classement relance
     dans le salon d'un report complet reprenait image_message_id ; plus rien
@@ -854,13 +986,13 @@ async def _retirer_image_a_part(ch, cle: str, c: dict) -> None:
     try:
         ancien = await ch.fetch_message(int(mid))
         await ancien.delete()
-        print("[reportclick] %s : image a part retiree (report passe en "
+        print("[reportclick] %s : images a part retirees (report passe en "
               "classement)" % cle, flush=True)
     except discord.NotFound:
         pass
     except Exception as e:                       # noqa: BLE001
         # On garde l'id : le cycle suivant reessaie.
-        print("[reportclick] %s : image a part non retiree (%s)" % (cle, e), flush=True)
+        print("[reportclick] %s : images a part non retirees (%s)" % (cle, e), flush=True)
         return
     _retenir_image(cle, "image_message_id", None)
 
@@ -872,18 +1004,22 @@ def _vue_texte(texte: str):
     return vue
 
 
-def _texte_classements(emb) -> str:
+def _texte_classements(emb, prefixes=None, plafond: int = 3900, titre: bool = True) -> str:
     """Les classements de l'embed, en texte pour un bloc V2 (repli d'un salon
-    ranking deja converti : un message V2 ne reprend jamais d'embed)."""
-    lignes = ["## %s" % (emb.title or "")]
+    ranking deja converti : un message V2 ne reprend jamais d'embed).
+    `prefixes` : seulement les champs qui commencent ainsi (la partie dont
+    l'image manque)."""
+    lignes = ["## %s" % (emb.title or "")] if titre else []
     for f in emb.fields:
+        if prefixes and not str(f.name or "").startswith(tuple(prefixes)):
+            continue
         lignes.append("**%s**" % f.name)
         lignes.extend(str(f.value or "").splitlines())
-    if emb.footer and emb.footer.text:
+    if titre and emb.footer and emb.footer.text:
         lignes.append("-# %s" % emb.footer.text)
     out, total = [], 0
     for i, l in enumerate(lignes):
-        if total + len(l) + 1 > 3900:
+        if total + len(l) + 1 > plafond:
             out.append("_… +%d line(s)_" % (len(lignes) - i))
             break
         out.append(l)
@@ -892,18 +1028,18 @@ def _texte_classements(emb) -> str:
 
 
 def _ligne_sans_classement() -> str:
-    """La ligne qui remplace l'image quand il n'y a plus rien a classer."""
-    return ("-# ⚠️ No ranking at %s — per-link clicks are unavailable (more "
-            "than 60 links, or no per-link detail from GetMySocial). The ranking "
-            "image comes back here once they are." % _paris_now().strftime("%H:%M"))
+    """La ligne qui remplace les images quand il n'y a plus rien a montrer."""
+    return ("-# ⚠️ No images at %s — per-link clicks are unavailable (more "
+            "than 60 links, or no per-link detail from GetMySocial). The report "
+            "images come back here once they are." % _paris_now().strftime("%H:%M"))
 
 
 async def _classement_en_image(cog, ch, cle: str, c: dict, msg, emb, content: str,
                                prep: dict):
-    """Branche l'image des classements sur la publication d'un report.
+    """Branche les images sur la publication d'un report.
 
     Rend None pour laisser _post_or_update_report editer le report texte
-    (avec l'embed allege si l'image est en place), ou une chaine quand le
+    (avec l'embed allege des parties en image), ou une chaine quand le
     message a ete traite ICI (salon ranking en galerie) : "" si tout va bien,
     sinon la raison.
     """
@@ -912,12 +1048,12 @@ async def _classement_en_image(cog, ch, cle: str, c: dict, msg, emb, content: st
         await _retirer_image_a_part(ch, cle, c)
     if not isinstance(prep, dict) or not prep.get("donnees"):
         if not classement and msg is not None and c.get("image_message_id"):
-            # Plus de 60 liens, ou pas de detail par lien : rien a dessiner, et
-            # le report n'a plus de classements du tout. Sans ceci, l'image du
-            # cycle d'avant restait sous le report, figee, avec son « updated »
-            # perime -- vu en relecture le 29/09.
+            # Plus de 60 liens, ou pas de detail par lien : rien a dessiner.
+            # Sans ceci, les images du cycle d'avant restaient sous le
+            # report, figees, avec leur « updated » perime -- vu en relecture
+            # le 29/09.
             await _poser_image_a_part(
-                cog, ch, cle, c, msg, None, {}, absente=_ligne_sans_classement())
+                cog, ch, cle, c, msg, [], {}, absente=_ligne_sans_classement())
         if (msg is not None and _est_v2(msg) and classement):
             # Salon ranking deja converti et rien a dessiner : le texte, dans
             # un bloc V2 (Discord refuserait l'embed).
@@ -930,27 +1066,44 @@ async def _classement_en_image(cog, ch, cle: str, c: dict, msg, emb, content: st
                 return f"edition refusee ({e})"[:180]
         return None
     guilde = getattr(ch, "guild", None)
-    png, t, infos = await image_classement(getattr(cog, "bot", None), prep, guilde)
-    prep.update(png=png, infos=infos)
-    if png is not None:
-        _DERNIERS_CLASSEMENTS[cle] = {"png": png, "infos": infos, "t": t,
+    images, tables, infos = await images_report(getattr(cog, "bot", None), prep, guilde)
+    prep.update(images=images, infos=infos)
+    if images:
+        _DERNIERS_CLASSEMENTS[cle] = {"images": images, "infos": infos, "tables": tables,
                                       "quand": time.time(),
                                       "contenu": c.get("contenu") or "tout"}
     if classement:
-        return await _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos)
+        return await _ranking_en_galerie(cog, ch, cle, msg, emb, content, images, infos)
     if msg is None:
-        # Premiere pose : l'image suivra le report (_image_apres_premier_envoi),
-        # pour se lire EN DESSOUS. Le report part complet.
+        # Premiere pose : les images suivront le report
+        # (_image_apres_premier_envoi), pour se lire EN DESSOUS. Le report
+        # part complet.
         return None
-    if await _poser_image_a_part(cog, ch, cle, c, msg, png, infos):
-        _alleger_pour_image(emb, prep.get("champs"))
+    posees = await _poser_image_a_part(cog, ch, cle, c, msg, images, infos)
+    if posees:
+        _alleger_pour_image(emb, prep.get("champs"), posees)
     return None
 
 
-async def _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos):
-    """Le salon ranking : l'image seule, une ligne courte, le bouton."""
+def _manque_ranking(emb, images) -> str:
+    """Salon ranking : le texte de la partie dont l'image a echoue, pour
+    qu'elle ne disparaisse pas du salon."""
+    faites = {im["quoi"] for im in images or []}
+    morceaux = []
+    for quoi in ("clics", "subs"):
+        if quoi in faites:
+            continue
+        txt = _texte_classements(emb, _REMPLACE[quoi], plafond=1300, titre=False)
+        if txt.strip():
+            morceaux.append("-# ⚠️ %s image unavailable at %s — in text:\n%s"
+                            % (_NOM_PARTIE[quoi], _paris_now().strftime("%H:%M"), txt))
+    return "\n".join(morceaux)
+
+
+async def _ranking_en_galerie(cog, ch, cle, msg, emb, content, images, infos):
+    """Le salon ranking : les deux images, une ligne courte, le bouton."""
     titre = emb.title or "Ranking"
-    if png is None:
+    if not images:
         if msg is not None and _est_v2(msg):
             try:
                 vue = _vue_texte(_texte_classements(emb))
@@ -963,32 +1116,33 @@ async def _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos):
                 return f"edition refusee ({e})"[:180]
         return None          # ancien format ou premiere pose : l'embed texte
     entete = "## %s\n-# %s" % (titre, content)
+    manque = _manque_ranking(emb, images)
     if msg is not None:
         try:
-            vue, fichier = vue_classement(png, infos.get("alt") or "", entete, cog, True)
+            vue, fichiers = vue_images(images, entete, cog, True, manque)
             if _est_v2(msg):
-                await msg.edit(view=vue, attachments=[fichier])
+                await msg.edit(view=vue, attachments=fichiers)
             else:
                 # Ancien format (embed) : converti dans la MEME requete,
                 # contenu et embed vides -- le message garde son epingle et
                 # sa place, pas de second message.
-                await msg.edit(content=None, embed=None, view=vue, attachments=[fichier])
-                print("[reportclick] %s : classement converti en image (ancien "
+                await msg.edit(content=None, embed=None, view=vue, attachments=fichiers)
+                print("[reportclick] %s : classement converti en images (ancien "
                       "format embed)" % cle, flush=True)
             return ""
         except discord.NotFound:
             msg = None
         except Exception as e:                   # noqa: BLE001
-            print("[reportclick] %s : image du classement refusee (%s: %s)"
+            print("[reportclick] %s : images du classement refusees (%s: %s)"
                   % (cle, type(e).__name__, str(e)[:200]), flush=True)
             if not _est_v2(msg):
                 return None      # l'embed texte, par le chemin habituel
             return f"edition refusee ({e})"[:180]
     try:
-        vue, fichier = vue_classement(png, infos.get("alt") or "", entete, cog, True)
-        m = await ch.send(view=vue, files=[fichier])
+        vue, fichiers = vue_images(images, entete, cog, True, manque)
+        m = await ch.send(view=vue, files=fichiers)
     except Exception as e:                       # noqa: BLE001
-        print("[reportclick] %s : envoi de l'image refuse (%s: %s) — texte"
+        print("[reportclick] %s : envoi des images refuse (%s: %s) — texte"
               % (cle, type(e).__name__, str(e)[:200]), flush=True)
         return None
     try:
@@ -1001,45 +1155,47 @@ async def _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos):
 
 async def _image_apres_premier_envoi(cog, ch, cle: str, c: dict, report, emb,
                                      prep: dict) -> None:
-    """Premiere pose (ou report reposte) : l'image vient APRES, puis le report
-    est allege. Si l'image echoue, le report reste tel quel, complet."""
+    """Premiere pose (ou report reposte) : les images viennent APRES, puis le
+    report est allege. Si elles echouent, le report reste tel quel, complet."""
     try:
         if str(c.get("contenu") or "").strip().lower() == "classement":
             return
-        # La config RELUE : une image a pu etre posee plus tot dans ce meme
-        # cycle, avant que l'edition du report ne tombe sur NotFound. Avec le
-        # `c` d'avant, elle restait au-dessus du nouveau report, orpheline --
-        # vu en relecture le 29/09.
+        # La config RELUE : des images ont pu etre posees plus tot dans ce
+        # meme cycle, avant que l'edition du report ne tombe sur NotFound.
+        # Avec le `c` d'avant, elles restaient au-dessus du nouveau report,
+        # orphelines -- vu en relecture le 29/09.
         c = _load_report_cfg().get(cle, c)
-        if not isinstance(prep, dict) or "png" not in prep:
-            # Rien a dessiner (plus de 60 liens...) : une image d'un cycle
-            # precedent, restee au-dessus du report reposte, est retiree.
+        if not isinstance(prep, dict) or "images" not in prep:
+            # Rien a dessiner (plus de 60 liens...) : des images d'un cycle
+            # precedent, restees au-dessus du report reposte, sont retirees.
             if c.get("image_message_id"):
-                await _poser_image_a_part(cog, ch, cle, c, report, None, {},
+                await _poser_image_a_part(cog, ch, cle, c, report, [], {},
                                           absente=_ligne_sans_classement())
             return
-        if await _poser_image_a_part(cog, ch, cle, c, report, prep.get("png"),
-                                     prep.get("infos") or {}):
-            _alleger_pour_image(emb, prep.get("champs"))
+        posees = await _poser_image_a_part(cog, ch, cle, c, report, prep.get("images"),
+                                           prep.get("infos") or {})
+        if posees:
+            _alleger_pour_image(emb, prep.get("champs"), posees)
             await report.edit(embed=emb)
     except Exception as e:                       # noqa: BLE001
-        print("[reportclick] %s : image apres la premiere pose : %s" % (cle, e),
+        print("[reportclick] %s : images apres la premiere pose : %s" % (cle, e),
               flush=True)
 
 
 async def demo_classement(bot, channel_id=None) -> tuple:
-    """(png ou None, infos, notes) pour /democlics (bot admin).
+    """(images, infos, notes) pour /democlics (bot admin) : les DEUX images.
 
     Le report du salon de l'utilisateur, sinon le premier report configure.
-    L'image est celle du DERNIER cycle (celle qui est postee) ; sans cycle
-    depuis le demarrage, elle est calculee maintenant, par le MEME chemin que
-    le report -- une lecture GetMySocial, comme le bouton Rafraichir.
+    Les images sont celles du DERNIER cycle (celles qui sont postees) ; sans
+    cycle depuis le demarrage, elles sont calculees maintenant, par le MEME
+    chemin que le report -- une lecture GetMySocial, comme le bouton
+    Rafraichir.
     """
     notes = []
     cfg = _load_report_cfg()
     reports = _reports_configures(cfg)
     if not reports:
-        return None, {}, ["ℹ️ Aucun report de clics configuré."]
+        return [], {}, ["ℹ️ Aucun report de clics configuré."]
     choisi = next(((k, c) for k, c in reports
                    if str(c.get("channel_id")) == str(channel_id)), None)
     if choisi is None:
@@ -1049,13 +1205,13 @@ async def demo_classement(bot, channel_id=None) -> tuple:
                      % choisi[1].get("channel_id"))
     cle, c = choisi
     deja = _DERNIERS_CLASSEMENTS.get(cle)
-    if deja and deja.get("png"):
-        notes.append("ℹ️ L'image du dernier cycle, il y a %d min (celle qui est postée)."
+    if deja and deja.get("images"):
+        notes.append("ℹ️ Les images du dernier cycle, il y a %d min (celles qui sont postées)."
                      % max(0, int((time.time() - deja["quand"]) // 60)))
-        return deja["png"], deja.get("infos") or {}, notes
+        return deja["images"], deja.get("infos") or {}, notes
     cog = bot.get_cog("ClickRecap") if bot is not None else None
     if cog is None:
-        return None, {}, notes + ["⚠️ Bot principal ou module des clics introuvable."]
+        return [], {}, notes + ["⚠️ Bot principal ou module des clics introuvable."]
     prep = {}
     jeton = _PREP_IMAGE.set(prep)
     try:
@@ -1063,11 +1219,11 @@ async def demo_classement(bot, channel_id=None) -> tuple:
     finally:
         _PREP_IMAGE.reset(jeton)
     if emb is None:
-        return None, {}, notes + ["⚠️ GetMySocial n'a rien renvoyé (quota ou panne)."]
+        return [], {}, notes + ["⚠️ GetMySocial n'a rien renvoyé (quota ou panne)."]
     ch = bot.get_channel(int(c["channel_id"]))
-    png, _t, infos = await image_classement(bot, prep, getattr(ch, "guild", None))
-    notes.append("ℹ️ Aucun cycle depuis le démarrage : image calculée maintenant.")
-    return png, infos, notes
+    images, _t, infos = await images_report(bot, prep, getattr(ch, "guild", None))
+    notes.append("ℹ️ Aucun cycle depuis le démarrage : images calculées maintenant.")
+    return images, infos, notes
 
 
 def _personne_du_lien(nom) -> str:
@@ -1618,6 +1774,14 @@ class ClickRecap(commands.Cog):
         # Le nom affiche ne porte pas la destination : on la garde a part pour
         # en tirer le code de suivi MyPuls (…/c85) plus bas.
         _dest_par_nom = {}
+        # CE QUI VOYAGE AVEC UNE LIGNE, PAS AVEC UN NOM : {id(periodes):
+        # (lien GetMySocial, quinzaine precedente)}. GetMySocial ne garantit
+        # pas l'unicite des libelles : indexes par nom, deux liens « (BO7) 1 »
+        # s'echangeaient leur quinzaine precedente des que le tri par clics
+        # les inversait, et recevaient tous deux les abonnes et le revenu du
+        # dernier (relecture du 29/09). La cle est la liste des periodes de
+        # la ligne, vivante tant que `rows` l'est.
+        _par_ligne = {}
         if ids and not all_none and len(ids) <= _MAX_PER_LIEN:
             # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
             # mais il rend aussi le detail par pays. Les clics du marche sortent
@@ -1686,10 +1850,65 @@ class ClickRecap(commands.Cog):
                 for m in _avec_id}
 
             _plages_lien = [_plages_de(m["id"]) for m in _avec_id]
-            per = await asyncio.gather(*[
-                asyncio.gather(*[_un(m["id"], pl) for pl in pls])
-                for m, pls in zip(_avec_id, _plages_lien)
-            ])
+
+            # LA QUINZAINE PRECEDENTE, PAR LIEN (voir _PREC_FILE) : gardee
+            # sur disque, lue une seule fois. Coupee a la date d'arrivee
+            # comme les autres periodes. Un echec ne bloque rien : « — »
+            # dans l'image, la raison au journal, et on relira.
+            _pq_deb, _pq_fin = _quinzaine_precedente(today)
+            _garde_prec = _prec_charger()
+            _plages_prec = [
+                (_arr.couper((_pq_deb, _pq_fin), _depuis.get(str(m["id"]) or "", ""))
+                 if _arr else (_pq_deb.isoformat(), _pq_fin.isoformat()))
+                for m in _avec_id]
+            _prec_bilan = {"garde": 0, "lu": 0, "echec": 0, "na": 0}
+            _prec_raisons = []
+
+            async def _prec_un(lid, plage):
+                if plage is None:
+                    _prec_bilan["na"] += 1
+                    return "NA"
+                _g = _garde_prec.get(_cle_prec(lid, plage))
+                if isinstance(_g, dict) and isinstance(_g.get("total"), int):
+                    _prec_bilan["garde"] += 1
+                    return _g["total"], dict(_g.get("pays") or {})
+                try:
+                    _r = await _un(lid, plage)
+                except Exception as _e_p:        # noqa: BLE001
+                    _r = (None, None)
+                    _prec_raisons.append("%s: %s" % (type(_e_p).__name__, str(_e_p)[:80]))
+                if isinstance(_r, tuple) and isinstance(_r[0], int):
+                    _garde_prec[_cle_prec(lid, plage)] = {
+                        "total": _r[0], "pays": dict(_r[1] or {}),
+                        "lu": _paris_now().strftime("%Y-%m-%d %H:%M")}
+                    _prec_bilan["lu"] += 1
+                else:
+                    _prec_bilan["echec"] += 1
+                return _r
+
+            per, _prec_releves = await asyncio.gather(
+                asyncio.gather(*[
+                    asyncio.gather(*[_un(m["id"], pl) for pl in pls])
+                    for m, pls in zip(_avec_id, _plages_lien)]),
+                asyncio.gather(*[_prec_un(m["id"], pl)
+                                 for m, pl in zip(_avec_id, _plages_prec)]))
+            if _prec_bilan["lu"]:
+                _prec_garder(_garde_prec, _pq_deb.isoformat())
+            if _prec_bilan["echec"]:
+                _quota_p = ""
+                try:
+                    _qp = gms.etat_quota()
+                    if _qp.get("pause_s"):
+                        _quota_p = " ; quota GetMySocial epuise, reprise vers %s" % _qp.get("reprise")
+                except Exception:
+                    pass
+                _prec_raisons.insert(0, "GetMySocial n'a pas rendu le releve%s" % _quota_p)
+            print("[reportclick] quinzaine precedente %s..%s par lien : %d gardee(s), "
+                  "%d lue(s), %d en echec, %d avant arrivee%s"
+                  % (_pq_deb, _pq_fin, _prec_bilan["garde"], _prec_bilan["lu"],
+                     _prec_bilan["echec"], _prec_bilan["na"],
+                     (" — " + " | ".join(dict.fromkeys(_prec_raisons))[:300])
+                     if _prec_bilan["echec"] else ""), flush=True)
 
             def _duo_de(couple):
                 """(clics du marche, total).
@@ -1721,10 +1940,14 @@ class ClickRecap(commands.Cog):
                                                  and c[0] is not None))
             _hors_periode = sum(1 for q in per for c in q if c == "NA")
 
-            for m, trio in zip(_avec_id, per):
+            for m, trio, _pr in zip(_avec_id, per, _prec_releves):
                 label = m.get("display_name") or m.get("shortcode") or "?"
-                rows.append((label, [_duo_de(c) for c in trio]))
+                _periodes = [_duo_de(c) for c in trio]
+                rows.append((label, _periodes))
                 _dest_par_nom[str(label)] = m.get("destination") or ""
+                # A part de `rows` : le tri, les ecartes et le tableau texte
+                # ne regardent que les trois periodes du jour.
+                _par_ligne[id(_periodes)] = (m, _duo_de(_pr))
 
             def _rang(v):
                 """Pour le tri : « — » et « · » ne sont pas des nombres."""
@@ -2015,11 +2238,23 @@ class ClickRecap(commands.Cog):
                         )] = _depuis.get(str(_m.get("id")), "")
                 except Exception:
                     _dep_par_nom = {}
+                # La 4e periode, la quinzaine precedente, vient a part : les
+                # trois premieres restent celles que tout le reste lit.
+                def _prec_de(p):
+                    return (_par_ligne.get(id(p)) or (None, (None, None)))[1]
+
+                def _dep_de(lab, p):
+                    _m_l = (_par_ligne.get(id(p)) or (None,))[0]
+                    if _m_l is not None:
+                        return _depuis.get(str(_m_l.get("id")), "")
+                    return _dep_par_nom.get(_nom_propre(lab), "")
+
                 _donnees["par_lien"] = [
                     {"lien": _nom_propre(lab),
-                     "depuis": _dep_par_nom.get(_nom_propre(lab), ""),
+                     "depuis": _dep_de(lab, p),
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
-                                  for i in (0, 1, 2)]}
+                                  for i in (0, 1, 2)]
+                     + [dict(zip(("marche", "total"), _prec_de(p)))]}
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
                 # CE QUI NE DIT RIEN SORT DU TABLEAU, MAIS EST NOMME.
                 #
@@ -2110,9 +2345,18 @@ class ClickRecap(commands.Cog):
 
                 _iJ, _iQ, _iP = _index(_jour), _index(_quinz), _index(_prec)
 
-                def _n(idx, adr):
+                def _n(idx, adr, champ="abonnes_periode"):
+                    # UNE PERIODE ILLISIBLE N'EST PAS ZERO. MyPuls rend []
+                    # quand il refuse : chaque lien y valait 0 abonne, et le
+                    # revenu 0 $. Rien de lu -> None (« — »).
+                    if not idx:
+                        return None
                     _t = idx.get(adr)
-                    return (_t or {}).get("abonnes_periode") or 0
+                    if champ == "revenu":
+                        # Lien absent de la periode : rien gagne. Present
+                        # sans revenu : on ne sait pas (None), pas 0 $.
+                        return (_t or {}).get("revenu") if _t is not None else 0.0
+                    return (_t or {}).get(champ) or 0
 
                 # LES ABONNES S'ARRETENT AUSSI A LA DATE D'ARRIVEE.
                 #
@@ -2133,7 +2377,10 @@ class ClickRecap(commands.Cog):
                 for _pn, _deb_p, _fin_p in (("q", _q_deb, _q_fin),
                                             ("p", _p_deb, _p_fin)):
                     _dedans = sorted({
-                        _d for _d in _dep_par_lab.values()
+                        # Par lien, pas par nom : deux homonymes peuvent ne
+                        # pas etre arrives le meme jour.
+                        _d for _d in (_depuis.get(str(_m_d.get("id")), "")
+                                      for _m_d in _avec_id)
                         if _d and _deb_p.isoformat() < _d <= _fin_p.isoformat()})
                     for _d in _dedans:
                         try:
@@ -2143,9 +2390,9 @@ class ClickRecap(commands.Cog):
                             print("[reportclick] periode raccourcie %s %s : %s"
                                   % (_pn, _d, _e_sup), flush=True)
 
-                def _ab(_pn, _idx, _adr, _deb_p, _fin_p, _dep):
+                def _ab(_pn, _idx, _adr, _deb_p, _fin_p, _dep, champ="abonnes_periode"):
                     if not _dep:
-                        return _n(_idx, _adr)
+                        return _n(_idx, _adr, champ)
                     if _fin_p.isoformat() < _dep:
                         return "NA"          # avant son arrivee
                     if _deb_p.isoformat() < _dep:
@@ -2153,17 +2400,25 @@ class ClickRecap(commands.Cog):
                         # Pas de releve raccourci : on ne sait pas ce qui lui
                         # revient. Rendre le chiffre entier lui attribuerait
                         # les jours d'avant.
-                        return _n(_i2, _adr) if _i2 is not None else None
-                    return _n(_idx, _adr)
+                        return _n(_i2, _adr, champ) if _i2 is not None else None
+                    return _n(_idx, _adr, champ)
 
                 _assoc = []
                 for lab, _p in rows:
-                    _adr = _cle_adresse(_dest_par_nom.get(str(lab), ""))
+                    # La destination et la date d'arrivee DE CETTE LIGNE : par
+                    # le nom, deux liens homonymes recevaient les abonnes et
+                    # le revenu du dernier.
+                    _m_l = (_par_ligne.get(id(_p)) or (None,))[0]
+                    _adr = _cle_adresse(
+                        (_m_l.get("destination") or "") if _m_l is not None
+                        else _dest_par_nom.get(str(lab), ""))
                     if not _adr:
                         continue
                     if _adr not in _iJ and _adr not in _iQ and _adr not in _iP:
                         continue
-                    _dep_l = _dep_par_lab.get(str(lab), "")
+                    _dep_l = (_depuis.get(str(_m_l.get("id")), "")
+                              if _m_l is not None
+                              else _dep_par_lab.get(str(lab), ""))
                     _assoc.append((
                         _nom_propre(lab), _adr,
                         # « Aujourd'hui » ne se coupe pas : arriver dans la
@@ -2171,7 +2426,11 @@ class ClickRecap(commands.Cog):
                         "NA" if (_dep_l and today.isoformat() < _dep_l)
                         else _n(_iJ, _adr),
                         _ab("q", _iQ, _adr, _q_deb, _q_fin, _dep_l),
-                        _ab("p", _iP, _adr, _p_deb, _p_fin, _dep_l)))
+                        _ab("p", _iP, _adr, _p_deb, _p_fin, _dep_l),
+                        # Le revenu NET, lu dans les MEMES reponses (aucun
+                        # appel de plus), coupe a l'arrivee comme les abonnes.
+                        _ab("q", _iQ, _adr, _q_deb, _q_fin, _dep_l, "revenu"),
+                        _ab("p", _iP, _adr, _p_deb, _p_fin, _dep_l, "revenu")))
 
                 # PAR ORDRE ALPHABETIQUE. Un classement par chiffres change
                 # d'ordre a chaque heure : on cherche quelqu'un et il a
@@ -2184,8 +2443,9 @@ class ClickRecap(commands.Cog):
                 # nom, donc « (BO7) 1 » precede « (BO7) 2 » naturellement.
                 _assoc.sort(key=lambda x: _cle_tri(x[0]))
                 _donnees["abonnes"] = [
-                    {"lien": _n2, "auj": _a1, "quinz": _a2, "prec": _a3}
-                    for _n2, _adr2, _a1, _a2, _a3 in _assoc]
+                    {"lien": _n2, "auj": _a1, "quinz": _a2, "prec": _a3,
+                     "net_quinz": _r2, "net_prec": _r3}
+                    for _n2, _adr2, _a1, _a2, _a3, _r2, _r3 in _assoc]
                 _donnees["quinzaine"] = "%s→%s" % (_fr(_q_deb), _fr(_q_fin))
                 _donnees["precedente"] = "%s→%s" % (_fr(_p_deb), _fr(_p_fin))
                 _e = (f"{'LINK':<18}{'AUJ':>5}{'QUINZ':>7}{'PRÉC':>7}")
@@ -2204,7 +2464,7 @@ class ClickRecap(commands.Cog):
                         return "·"
                     return "—" if v is None else str(v)
 
-                for _nom, _adr, _a1, _a2, _a3 in _assoc:
+                for _nom, _adr, _a1, _a2, _a3, _r2, _r3 in _assoc:
                     _ligne = (f"{str(_nom)[:17]:<18}"
                               f"{_fa(_a1):>5}{_fa(_a2):>7}{_fa(_a3):>7}")
                     if _cour and _taille + 1 + len(_ligne) > _PLAFOND:
@@ -2252,6 +2512,7 @@ class ClickRecap(commands.Cog):
                 _prep_i.update(
                     donnees=_donnees, identite=_identite_fiches(c), espace=name,
                     liens=len(ids), periode=_periode_en(cyc_s, cyc_e),
+                    colonnes=_colonnes_en(today),
                     maj=_paris_now().strftime("%H:%M"))
 
             # LES CLASSEMENTS PASSENT DEVANT LE DETAIL. On les calcule ici,
