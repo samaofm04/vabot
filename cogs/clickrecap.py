@@ -9,6 +9,7 @@ de Paris à la main (DST inclus), pour lancer une seule fois après minuit Paris
 """
 import asyncio
 import calendar
+import contextvars
 import datetime
 import json
 import pathlib
@@ -547,6 +548,524 @@ def _tenir_dans_embed(emb, plafond: int = 5900) -> None:
         print("[reportclick] garde de taille : %s" % _e, flush=True)
 
 
+# ==============================================================================
+# Les classements en IMAGE (demande du proprietaire du 29/09 : « tu vois ce
+# qu'on a fait pour les sessions, fais la meme pour les clicks et subs, un
+# tableau avec les PP »). Le dessin vit dans clics_image ; ici, ce qui le
+# relie a Discord.
+#
+# LE FORMAT : l'embed texte RESTE, l'image va dans un message a part, tenu a
+# jour avec lui (salon ranking : l'image seule, en galerie).
+#   - une galerie « Components V2 » affiche l'image a ~550 px ; dans un embed,
+#     elle tomberait a ~400 et ne se lirait plus ;
+#   - un message V2 plafonne son texte a 4 000 signes, et le report en porte
+#     jusqu'a ~5 900 (tableau par lien, abonnes, avertissements) : le passer
+#     en V2 obligeait a couper ou a decouper le texte ;
+#   - l'embed est aussi ce que relisent la page web (sortie) et les patchs
+#     du VPS qui suivent l'envoi du report : on n'y touche pas.
+# ==============================================================================
+
+#: Ce que _build_group_report a calcule pour l'image, rendu a
+#: _post_or_update_report SANS toucher a leur signature ni a l'appel : la
+#: page web appelle _build_group_report avec un faux « self », et deux
+#: patchs du VPS s'appuient sur la ligne d'appel. Une variable de contexte
+#: est propre a la tache asyncio : deux reports publies en meme temps (la
+#: boucle et un clic sur « Rafraichir ») ne se melangent pas.
+_PREP_IMAGE = contextvars.ContextVar("clics_prep_image", default=None)
+
+#: Le dernier classement dessine, par report : /democlics (bot admin) montre
+#: l'image REELLEMENT postee, sans relancer GetMySocial.
+_DERNIERS_CLASSEMENTS = {}
+
+#: Le titre d'un champ de resume (« Today / Yesterday ... ») : une espace
+#: sans chasse, pour un champ sans titre visible.
+_NOM_RESUME = "​"
+
+
+def _identite_fiches(c) -> str:
+    """L'identite du site dont les fiches VA donnent les comptes Discord.
+
+    Le report de l'espace du classement est configure SANS identite (un
+    workspace entier, pas un groupe). annuaire_va('') rendait un annuaire
+    vide : personne n'avait de compte Discord, le report disait « 27 without
+    a Discord account » et l'image n'aurait montre que des initiales. La
+    carte du tableau de bord lit deja IDENTITE_RANKING pour ce meme espace :
+    une seule regle pour les deux.
+    """
+    ident = str((c or {}).get("identity") or "").strip()
+    if ident:
+        return ident
+    try:
+        import clics_personnes as _cp
+    except Exception:                            # noqa: BLE001
+        return ""
+    if str((c or {}).get("team_id") or "") == _cp.ESPACE_RANKING:
+        return _cp.IDENTITE_RANKING
+    return ""
+
+
+def _periode_en(debut: datetime.date, fin: datetime.date) -> str:
+    """« 16 Sep → 30 Sep » : la quinzaine du report, en anglais."""
+    return "%d %s → %d %s" % (debut.day, _en(debut), fin.day, _en(fin))
+
+
+def _alleger_pour_image(emb, champs=None) -> None:
+    """Retire de l'embed ce que l'image montre : le resume des periodes et
+    les deux classements. Le reste (avertissements, abonnes, tableau par
+    lien) ne bouge pas.
+
+    `champs` : les champs AVANT la garde de taille. Sans eux, un report que
+    la garde avait coupe (« Truncated ») le resterait alors que l'image vient
+    de lui rendre la place des classements.
+    """
+    if champs is None:
+        champs = [(f.name, f.value, f.inline) for f in emb.fields]
+    gardes = [(n, v, i) for n, v, i in champs
+              if not (str(n or "") == _NOM_RESUME
+                      or str(n or "").startswith(_PREFIXES_CLASSEMENT))]
+    emb.clear_fields()
+    for n, v, i in gardes:
+        emb.add_field(name=n, value=v, inline=i)
+    allege = emb
+    _tenir_dans_embed(allege)
+
+
+async def image_classement(bot, prep: dict, guilde=None) -> tuple:
+    """(png ou None, tableau ou None, infos) : l'image des classements.
+
+    Le calcul et le dessin passent hors de la boucle (asyncio.to_thread) :
+    60 lignes dessinees au double ne doivent pas figer le bot. Les photos
+    passent par photos_avatars et son cache par cle d'avatar : un cycle de
+    30 minutes ne retelecharge rien tant que personne n'a change de photo.
+
+    Toute erreur rend png=None, avec la cause dans infos["erreur"] et au
+    journal : l'appelant garde alors les classements en TEXTE.
+    """
+    infos = {"mode": "image", "erreur": "", "photos": {}, "pseudos": {},
+             "sans_discord": 0, "personnes": 0}
+    try:
+        import clics_image as _ci
+        import clics_personnes as _cp
+        donnees = (prep or {}).get("donnees")
+        if not donnees:
+            raise ValueError("aucune donnee de classement")
+        annu = await asyncio.to_thread(_cp.annuaire_va, prep.get("identite") or "")
+        t = _ci.tableau(donnees, annu, periode=prep.get("periode") or "",
+                        espace=prep.get("espace") or "", liens=prep.get("liens"),
+                        maj=prep.get("maj") or "")
+        if not t["lignes"]:
+            raise ValueError("personne a classer")
+        # Le PSEUDO de la fiche VA, retrouve parmi les membres du serveur du
+        # salon -- correspondance unique, sinon des initiales.
+        membres = list(getattr(guilde, "members", None) or []) if guilde is not None else []
+        ids, compte_ps = _ci.resoudre_pseudos(_ci.pseudos(t), membres)
+        photos_id, compte = {}, {}
+        if ids:
+            import cogs.sessionsvoc as _svc
+            photos_id, compte = await _svc.photos_avatars(
+                bot, sorted(set(ids.values())), guilde=guilde)
+        photos = {ps: photos_id[i] for ps, i in ids.items() if photos_id.get(i)}
+        png = await asyncio.to_thread(_ci.dessiner, t, photos)
+        infos.update(photos=compte, pseudos=compte_ps, sans_discord=t["sans_discord"],
+                     personnes=t["personnes"], alt=_ci.texte_alt(t))
+        print("[reportclick] classement dessine : %d personne(s), %d sans Discord, "
+              "pseudos %s, photos %s" % (t["personnes"], t["sans_discord"], compte_ps,
+                                         compte), flush=True)
+        return png, t, infos
+    except Exception as e:                       # noqa: BLE001
+        infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
+        print("[reportclick] classement : image impossible (%s) — classements "
+              "en texte" % infos["erreur"], flush=True)
+        return None, None, infos
+
+
+class _BoutonRafraichir(discord.ui.Button):
+    """Le bouton « Rafraichir » d'un message en composants (salon ranking).
+
+    Le MEME custom_id que ReportRefreshView : apres un redemarrage, c'est la
+    vue persistante enregistree au chargement qui repond ; avant, celle-ci.
+    Les deux passent par _rafraichir : un seul comportement.
+    """
+
+    def __init__(self, cog=None):
+        super().__init__(label="Rafraîchir", emoji="🔄",
+                         style=discord.ButtonStyle.secondary,
+                         custom_id="reportclick:refresh")
+        self.cog = cog
+
+    async def callback(self, interaction: discord.Interaction):
+        await _rafraichir(interaction, self.cog)
+
+
+def vue_classement(png: bytes, alt: str = "", entete: str = "", cog=None,
+                   bouton: bool = False):
+    """(vue Components V2, fichier) : l'image en galerie, en grand.
+
+    `entete` : une ligne de texte au-dessus (salon ranking) ; `bouton` : le
+    « Rafraichir » du report. Un fichier discord.File ne se lit qu'une fois :
+    une nouvelle paire a chaque envoi.
+    """
+    import io as _io
+    import clics_image as _ci
+    ui = discord.ui
+    if not (hasattr(ui, "LayoutView") and hasattr(ui, "MediaGallery")):
+        raise RuntimeError("discord.py %s ne sait pas envoyer de galerie (V2)"
+                           % discord.__version__)
+    vue = ui.LayoutView(timeout=None)
+    if entete:
+        vue.add_item(ui.TextDisplay(entete[:1000]))
+    vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+        "attachment://" + _ci.NOM_IMAGE, description=(alt or "Clicks ranking")[:1024])))
+    if bouton:
+        rang = ui.ActionRow()
+        rang.add_item(_BoutonRafraichir(cog))
+        vue.add_item(rang)
+    return vue, discord.File(_io.BytesIO(png), filename=_ci.NOM_IMAGE)
+
+
+def _est_v2(msg) -> bool:
+    """Un message V2 ne redevient jamais un embed : son repli est du texte."""
+    return bool(getattr(getattr(msg, "flags", None), "components_v2", False))
+
+
+def _porte_image(msg, moi_id) -> bool:
+    """Ce message est-il l'image des classements postee par ce bot ?"""
+    import clics_image as _ci
+    if getattr(getattr(msg, "author", None), "id", None) != moi_id:
+        return False
+    return any(getattr(a, "filename", None) == _ci.NOM_IMAGE
+               for a in (getattr(msg, "attachments", None) or []))
+
+
+def _retenir_image(cle: str, champ: str, valeur) -> None:
+    """Retient l'identifiant du message image dans la config de CE report.
+
+    Relue juste avant d'ecrire, comme message_id : un /reportclick_off a pu
+    passer pendant l'envoi, et on ne ressuscite pas un report coupe.
+    """
+    fresh = _load_report_cfg()
+    if cle in fresh and isinstance(fresh[cle], dict):
+        if valeur is None:
+            fresh[cle].pop(champ, None)
+        else:
+            fresh[cle][champ] = valeur
+        _save_report_cfg(fresh)
+
+
+async def _poser_image_a_part(cog, ch, cle: str, c: dict, report, png, infos,
+                              absente: str = "") -> bool:
+    """L'image des classements dans SON message, juste sous le report.
+
+    Rend True quand l'image est en place (l'embed peut alors etre allege),
+    False sinon : les classements restent en texte dans le report.
+
+    JAMAIS DEUX IMAGES. Le message est retenu dans la config
+    (image_message_id) ; sans trace -- config perdue, /setreportclick
+    relance --, on le RETROUVE parmi les messages qui suivent le report avant
+    d'en poster un autre. Une image posee AVANT le report (le report a ete
+    reposte) est retiree : elle se lirait au-dessus d'un report qui ne la
+    concerne plus.
+
+    `absente` : avec png=None, la ligne qui remplace une image devenue
+    perimee (par defaut : les classements sont revenus dans le report).
+    """
+    moi = getattr(getattr(cog, "bot", None), "user", None)
+    moi_id = getattr(moi, "id", None)
+    image = None
+    mid = c.get("image_message_id")
+    if mid:
+        try:
+            ancien = await ch.fetch_message(int(mid))
+        except discord.NotFound:
+            ancien = None
+            _retenir_image(cle, "image_message_id", None)
+        except Exception as e:                   # noqa: BLE001
+            # Discord ne repond pas : on ne poste pas une seconde image au
+            # hasard. Les classements restent en texte pour ce cycle.
+            print("[reportclick] %s : image du classement illisible (%s) — "
+                  "classements en texte" % (cle, e), flush=True)
+            return False
+        if ancien is not None and int(ancien.id) < int(report.id):
+            try:
+                await ancien.delete()
+                print("[reportclick] %s : ancienne image du classement retiree "
+                      "(posee avant le report)" % cle, flush=True)
+            except Exception as e:               # noqa: BLE001
+                print("[reportclick] %s : ancienne image non retiree (%s)" % (cle, e),
+                      flush=True)
+            _retenir_image(cle, "image_message_id", None)
+            ancien = None
+        image = ancien
+    if image is None and png is not None and moi_id is not None and hasattr(ch, "history"):
+        try:
+            async for m in ch.history(limit=15, after=report, oldest_first=True):
+                if _porte_image(m, moi_id):
+                    image = m
+                    print("[reportclick] %s : image du classement retrouvee (%s)"
+                          % (cle, m.id), flush=True)
+                    break
+        except Exception as e:                   # noqa: BLE001
+            print("[reportclick] %s : recherche de l'image impossible (%s)" % (cle, e),
+                  flush=True)
+    try:
+        if png is None:
+            if image is not None:
+                # L'image ne peut pas etre refaite : elle ne doit pas rester
+                # la, figee, a se faire passer pour le classement du moment.
+                await image.edit(view=_vue_texte(absente or (
+                    "-# ⚠️ Ranking image unavailable at %s — the ranking is back "
+                    "in the report above." % _paris_now().strftime("%H:%M"))),
+                    attachments=[])
+                print("[reportclick] %s : image du classement marquee perimee (%s)"
+                      % (cle, image.id), flush=True)
+            return False
+        vue, fichier = vue_classement(png, infos.get("alt") or "")
+        if image is not None:
+            await image.edit(view=vue, attachments=[fichier])
+        else:
+            image = await ch.send(view=vue, files=[fichier])
+            print("[reportclick] %s : image du classement postee (%s)" % (cle, image.id),
+                  flush=True)
+        if str(c.get("image_message_id") or "") != str(image.id):
+            _retenir_image(cle, "image_message_id", image.id)
+        return True
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] %s : image du classement refusee (%s: %s) — "
+              "classements en texte" % (cle, type(e).__name__, str(e)[:200]), flush=True)
+        return False
+
+
+async def _retirer_image_a_part(ch, cle: str, c: dict) -> None:
+    """Un report passe en « classement » : son image A PART n'a plus lieu
+    d'etre (le message du report devient lui-meme la galerie).
+
+    Vu en relecture le 29/09 : /setreportclick contenu:classement relance
+    dans le salon d'un report complet reprenait image_message_id ; plus rien
+    ne lisait ce champ, et l'ancienne image restait sous la galerie, figee --
+    deux classements dans le salon, dont un faux.
+    """
+    mid = (c or {}).get("image_message_id")
+    if not mid:
+        return
+    try:
+        ancien = await ch.fetch_message(int(mid))
+        await ancien.delete()
+        print("[reportclick] %s : image a part retiree (report passe en "
+              "classement)" % cle, flush=True)
+    except discord.NotFound:
+        pass
+    except Exception as e:                       # noqa: BLE001
+        # On garde l'id : le cycle suivant reessaie.
+        print("[reportclick] %s : image a part non retiree (%s)" % (cle, e), flush=True)
+        return
+    _retenir_image(cle, "image_message_id", None)
+
+
+def _vue_texte(texte: str):
+    """Un message V2 fait d'un seul bloc de texte."""
+    vue = discord.ui.LayoutView(timeout=None)
+    vue.add_item(discord.ui.TextDisplay(texte[:4000]))
+    return vue
+
+
+def _texte_classements(emb) -> str:
+    """Les classements de l'embed, en texte pour un bloc V2 (repli d'un salon
+    ranking deja converti : un message V2 ne reprend jamais d'embed)."""
+    lignes = ["## %s" % (emb.title or "")]
+    for f in emb.fields:
+        lignes.append("**%s**" % f.name)
+        lignes.extend(str(f.value or "").splitlines())
+    if emb.footer and emb.footer.text:
+        lignes.append("-# %s" % emb.footer.text)
+    out, total = [], 0
+    for i, l in enumerate(lignes):
+        if total + len(l) + 1 > 3900:
+            out.append("_… +%d line(s)_" % (len(lignes) - i))
+            break
+        out.append(l)
+        total += len(l) + 1
+    return "\n".join(out)
+
+
+def _ligne_sans_classement() -> str:
+    """La ligne qui remplace l'image quand il n'y a plus rien a classer."""
+    return ("-# ⚠️ No ranking at %s — per-link clicks are unavailable (more "
+            "than 60 links, or no per-link detail from GetMySocial). The ranking "
+            "image comes back here once they are." % _paris_now().strftime("%H:%M"))
+
+
+async def _classement_en_image(cog, ch, cle: str, c: dict, msg, emb, content: str,
+                               prep: dict):
+    """Branche l'image des classements sur la publication d'un report.
+
+    Rend None pour laisser _post_or_update_report editer le report texte
+    (avec l'embed allege si l'image est en place), ou une chaine quand le
+    message a ete traite ICI (salon ranking en galerie) : "" si tout va bien,
+    sinon la raison.
+    """
+    classement = str(c.get("contenu") or "").strip().lower() == "classement"
+    if classement:
+        await _retirer_image_a_part(ch, cle, c)
+    if not isinstance(prep, dict) or not prep.get("donnees"):
+        if not classement and msg is not None and c.get("image_message_id"):
+            # Plus de 60 liens, ou pas de detail par lien : rien a dessiner, et
+            # le report n'a plus de classements du tout. Sans ceci, l'image du
+            # cycle d'avant restait sous le report, figee, avec son « updated »
+            # perime -- vu en relecture le 29/09.
+            await _poser_image_a_part(
+                cog, ch, cle, c, msg, None, {}, absente=_ligne_sans_classement())
+        if (msg is not None and _est_v2(msg) and classement):
+            # Salon ranking deja converti et rien a dessiner : le texte, dans
+            # un bloc V2 (Discord refuserait l'embed).
+            try:
+                vue = _vue_texte(_texte_classements(emb))
+                vue.add_item(discord.ui.ActionRow(_BoutonRafraichir(cog)))
+                await msg.edit(view=vue, attachments=[])
+                return ""
+            except Exception as e:               # noqa: BLE001
+                return f"edition refusee ({e})"[:180]
+        return None
+    guilde = getattr(ch, "guild", None)
+    png, t, infos = await image_classement(getattr(cog, "bot", None), prep, guilde)
+    prep.update(png=png, infos=infos)
+    if png is not None:
+        _DERNIERS_CLASSEMENTS[cle] = {"png": png, "infos": infos, "t": t,
+                                      "quand": time.time(),
+                                      "contenu": c.get("contenu") or "tout"}
+    if classement:
+        return await _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos)
+    if msg is None:
+        # Premiere pose : l'image suivra le report (_image_apres_premier_envoi),
+        # pour se lire EN DESSOUS. Le report part complet.
+        return None
+    if await _poser_image_a_part(cog, ch, cle, c, msg, png, infos):
+        _alleger_pour_image(emb, prep.get("champs"))
+    return None
+
+
+async def _ranking_en_galerie(cog, ch, cle, msg, emb, content, png, infos):
+    """Le salon ranking : l'image seule, une ligne courte, le bouton."""
+    titre = emb.title or "Ranking"
+    if png is None:
+        if msg is not None and _est_v2(msg):
+            try:
+                vue = _vue_texte(_texte_classements(emb))
+                vue.add_item(discord.ui.ActionRow(_BoutonRafraichir(cog)))
+                await msg.edit(view=vue, attachments=[])
+                print("[reportclick] %s : classement en TEXTE (repli, bloc V2)" % cle,
+                      flush=True)
+                return ""
+            except Exception as e:               # noqa: BLE001
+                return f"edition refusee ({e})"[:180]
+        return None          # ancien format ou premiere pose : l'embed texte
+    entete = "## %s\n-# %s" % (titre, content)
+    if msg is not None:
+        try:
+            vue, fichier = vue_classement(png, infos.get("alt") or "", entete, cog, True)
+            if _est_v2(msg):
+                await msg.edit(view=vue, attachments=[fichier])
+            else:
+                # Ancien format (embed) : converti dans la MEME requete,
+                # contenu et embed vides -- le message garde son epingle et
+                # sa place, pas de second message.
+                await msg.edit(content=None, embed=None, view=vue, attachments=[fichier])
+                print("[reportclick] %s : classement converti en image (ancien "
+                      "format embed)" % cle, flush=True)
+            return ""
+        except discord.NotFound:
+            msg = None
+        except Exception as e:                   # noqa: BLE001
+            print("[reportclick] %s : image du classement refusee (%s: %s)"
+                  % (cle, type(e).__name__, str(e)[:200]), flush=True)
+            if not _est_v2(msg):
+                return None      # l'embed texte, par le chemin habituel
+            return f"edition refusee ({e})"[:180]
+    try:
+        vue, fichier = vue_classement(png, infos.get("alt") or "", entete, cog, True)
+        m = await ch.send(view=vue, files=[fichier])
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] %s : envoi de l'image refuse (%s: %s) — texte"
+              % (cle, type(e).__name__, str(e)[:200]), flush=True)
+        return None
+    try:
+        await m.pin()
+    except Exception:                            # noqa: BLE001
+        pass
+    _retenir_image(cle, "message_id", m.id)
+    return ""
+
+
+async def _image_apres_premier_envoi(cog, ch, cle: str, c: dict, report, emb,
+                                     prep: dict) -> None:
+    """Premiere pose (ou report reposte) : l'image vient APRES, puis le report
+    est allege. Si l'image echoue, le report reste tel quel, complet."""
+    try:
+        if str(c.get("contenu") or "").strip().lower() == "classement":
+            return
+        # La config RELUE : une image a pu etre posee plus tot dans ce meme
+        # cycle, avant que l'edition du report ne tombe sur NotFound. Avec le
+        # `c` d'avant, elle restait au-dessus du nouveau report, orpheline --
+        # vu en relecture le 29/09.
+        c = _load_report_cfg().get(cle, c)
+        if not isinstance(prep, dict) or "png" not in prep:
+            # Rien a dessiner (plus de 60 liens...) : une image d'un cycle
+            # precedent, restee au-dessus du report reposte, est retiree.
+            if c.get("image_message_id"):
+                await _poser_image_a_part(cog, ch, cle, c, report, None, {},
+                                          absente=_ligne_sans_classement())
+            return
+        if await _poser_image_a_part(cog, ch, cle, c, report, prep.get("png"),
+                                     prep.get("infos") or {}):
+            _alleger_pour_image(emb, prep.get("champs"))
+            await report.edit(embed=emb)
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] %s : image apres la premiere pose : %s" % (cle, e),
+              flush=True)
+
+
+async def demo_classement(bot, channel_id=None) -> tuple:
+    """(png ou None, infos, notes) pour /democlics (bot admin).
+
+    Le report du salon de l'utilisateur, sinon le premier report configure.
+    L'image est celle du DERNIER cycle (celle qui est postee) ; sans cycle
+    depuis le demarrage, elle est calculee maintenant, par le MEME chemin que
+    le report -- une lecture GetMySocial, comme le bouton Rafraichir.
+    """
+    notes = []
+    cfg = _load_report_cfg()
+    reports = _reports_configures(cfg)
+    if not reports:
+        return None, {}, ["ℹ️ Aucun report de clics configuré."]
+    choisi = next(((k, c) for k, c in reports
+                   if str(c.get("channel_id")) == str(channel_id)), None)
+    if choisi is None:
+        choisi = next(((k, c) for k, c in reports
+                       if str(c.get("contenu") or "") != "classement"), reports[0])
+        notes.append("ℹ️ Pas de report dans ce salon : celui de <#%s>."
+                     % choisi[1].get("channel_id"))
+    cle, c = choisi
+    deja = _DERNIERS_CLASSEMENTS.get(cle)
+    if deja and deja.get("png"):
+        notes.append("ℹ️ L'image du dernier cycle, il y a %d min (celle qui est postée)."
+                     % max(0, int((time.time() - deja["quand"]) // 60)))
+        return deja["png"], deja.get("infos") or {}, notes
+    cog = bot.get_cog("ClickRecap") if bot is not None else None
+    if cog is None:
+        return None, {}, notes + ["⚠️ Bot principal ou module des clics introuvable."]
+    prep = {}
+    jeton = _PREP_IMAGE.set(prep)
+    try:
+        emb = await cog._build_group_report(c)
+    finally:
+        _PREP_IMAGE.reset(jeton)
+    if emb is None:
+        return None, {}, notes + ["⚠️ GetMySocial n'a rien renvoyé (quota ou panne)."]
+    ch = bot.get_channel(int(c["channel_id"]))
+    png, _t, infos = await image_classement(bot, prep, getattr(ch, "guild", None))
+    notes.append("ℹ️ Aucun cycle depuis le démarrage : image calculée maintenant.")
+    return png, infos, notes
+
+
 def _personne_du_lien(nom) -> str:
     """La PERSONNE derriere un nom de lien, ou '' si on ne peut pas la nommer.
 
@@ -761,47 +1280,53 @@ class ReportRefreshView(discord.ui.View):
                        style=discord.ButtonStyle.secondary,
                        custom_id="reportclick:refresh")
     async def b_refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = self.cog or interaction.client.get_cog("ClickRecap")
-        if cog is None:
-            await interaction.response.send_message("⚠️ Module indispo.", ephemeral=True)
-            return
-        cid = getattr(interaction.channel, "id", None)
-        cfg = _load_report_cfg()
-        vises = [cle for cle, c in _reports_configures(cfg)
-                 if str(c.get("channel_id")) == str(cid)]
-        if not vises:
-            await interaction.response.send_message(
-                "ℹ️ Aucun report configuré dans ce salon.", ephemeral=True)
-            return
-        reste = _REFRESH_ATTENTE_S - (time.time() - _REFRESH_DERNIER.get(cid, 0))
-        if reste > 0:
-            # On le DIT au lieu de faire semblant : un bouton qui ne repond
-            # rien passe pour casse, et la personne reclique.
-            await interaction.response.send_message(
-                f"⏳ Déjà rafraîchi il y a moins d'une minute. Réessaie dans "
-                f"{int(reste)} s — les chiffres viennent de GetMySocial, "
-                f"qui a un quota.", ephemeral=True)
-            return
-        _REFRESH_DERNIER[cid] = time.time()
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            _soucis = []
-            for cle in vises:
-                _r = await cog._post_or_update_report(cle)
-                if _r:
-                    _soucis.append(_r)
-            # « Report mis a jour » alors que rien n'est parti, c'est le
-            # message le plus trompeur qu'on puisse afficher.
-            await interaction.followup.send(
-                ("⚠️ Rien n'a pu être mis à jour :\n**"
-                 + "**\n**".join(_soucis[:3]) + "**")
-                if _soucis else "🔄 Report mis à jour.", ephemeral=True)
-        except Exception as e:
-            # Le compteur est relache : l'essai n'a rien coute en quota, la
-            # personne ne doit pas attendre une minute pour retenter.
-            _REFRESH_DERNIER.pop(cid, None)
-            await interaction.followup.send(
-                f"⚠️ Mise à jour impossible : {str(e)[:120]}", ephemeral=True)
+        await _rafraichir(interaction, self.cog)
+
+
+async def _rafraichir(interaction: discord.Interaction, cog=None):
+    """Le clic sur « Rafraichir » : sous le report (vue classique) comme sous
+    le classement en image du salon ranking (message en composants V2)."""
+    cog = cog or interaction.client.get_cog("ClickRecap")
+    if cog is None:
+        await interaction.response.send_message("⚠️ Module indispo.", ephemeral=True)
+        return
+    cid = getattr(interaction.channel, "id", None)
+    cfg = _load_report_cfg()
+    vises = [cle for cle, c in _reports_configures(cfg)
+             if str(c.get("channel_id")) == str(cid)]
+    if not vises:
+        await interaction.response.send_message(
+            "ℹ️ Aucun report configuré dans ce salon.", ephemeral=True)
+        return
+    reste = _REFRESH_ATTENTE_S - (time.time() - _REFRESH_DERNIER.get(cid, 0))
+    if reste > 0:
+        # On le DIT au lieu de faire semblant : un bouton qui ne repond
+        # rien passe pour casse, et la personne reclique.
+        await interaction.response.send_message(
+            f"⏳ Déjà rafraîchi il y a moins d'une minute. Réessaie dans "
+            f"{int(reste)} s — les chiffres viennent de GetMySocial, "
+            f"qui a un quota.", ephemeral=True)
+        return
+    _REFRESH_DERNIER[cid] = time.time()
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        _soucis = []
+        for cle in vises:
+            _r = await cog._post_or_update_report(cle)
+            if _r:
+                _soucis.append(_r)
+        # « Report mis a jour » alors que rien n'est parti, c'est le
+        # message le plus trompeur qu'on puisse afficher.
+        await interaction.followup.send(
+            ("⚠️ Rien n'a pu être mis à jour :\n**"
+             + "**\n**".join(_soucis[:3]) + "**")
+            if _soucis else "🔄 Report mis à jour.", ephemeral=True)
+    except Exception as e:
+        # Le compteur est relache : l'essai n'a rien coute en quota, la
+        # personne ne doit pas attendre une minute pour retenter.
+        _REFRESH_DERNIER.pop(cid, None)
+        await interaction.followup.send(
+            f"⚠️ Mise à jour impossible : {str(e)[:120]}", ephemeral=True)
 
 
 class MyClicksView(discord.ui.View):
@@ -1008,6 +1533,8 @@ class ClickRecap(commands.Cog):
                 # autre salon.
                 neuf = dict(c)
                 neuf.pop("message_id", None)
+                # Ni son image : elle vit dans le salon du report d'origine.
+                neuf.pop("image_message_id", None)
                 neuf["channel_id"] = ch.id
                 neuf["contenu"] = "classement"
                 cfg[k] = neuf
@@ -1711,6 +2238,14 @@ class ClickRecap(commands.Cog):
             # ce qu'on venait d'y mettre.
             if sortie is not None:
                 sortie.update(_donnees)
+            # Ce qu'il faut pour dessiner les classements (voir _PREP_IMAGE) :
+            # les MEMES donnees que le texte, rien n'est recalcule.
+            _prep_i = _PREP_IMAGE.get()
+            if _prep_i is not None:
+                _prep_i.update(
+                    donnees=_donnees, identite=_identite_fiches(c), espace=name,
+                    liens=len(ids), periode=_periode_en(cyc_s, cyc_e),
+                    maj=_paris_now().strftime("%H:%M"))
 
             # LES CLASSEMENTS PASSENT DEVANT LE DETAIL. On les calcule ici,
             # parce que _donnees n'est complet qu'apres _tableau(), mais on
@@ -1718,7 +2253,7 @@ class ClickRecap(commands.Cog):
             # porte ? », et elle ne se lit pas apres trente lignes de tableau.
             try:
                 for _ic, (_nc, _vc) in enumerate(
-                        _champs_classements(_donnees, c.get("identity") or "")):
+                        _champs_classements(_donnees, _identite_fiches(c))):
                     emb.insert_field_at(1 + _ic, name=_nc, value=_vc,
                                         inline=False)
             except Exception as _e_rang:         # noqa: BLE001
@@ -1773,6 +2308,11 @@ class ClickRecap(commands.Cog):
         # s'apprete a retirer.
         if str(c.get("contenu") or "tout").strip().lower() == "classement":
             _garder_que_les_classements(emb)
+        # Les champs AVANT la garde de taille : si l'image prend la place des
+        # classements, le report allege n'a plus a etre coupe.
+        _prep_c = _PREP_IMAGE.get()
+        if _prep_c is not None and _prep_c.get("donnees") is not None:
+            _prep_c["champs"] = [(f.name, f.value, f.inline) for f in emb.fields]
         _tenir_dans_embed(emb)
 
         # Pas de drapeau dans le PIED de page : Discord y rend les emoji en
@@ -1804,6 +2344,10 @@ class ClickRecap(commands.Cog):
                 ch = await self.bot.fetch_channel(int(c["channel_id"]))
             except Exception as e:
                 return f"salon introuvable ({e})"[:180]
+        # Un dictionnaire neuf par publication, que _build_group_report remplit
+        # pour l'image des classements (voir _PREP_IMAGE).
+        _prep_img = {}
+        _PREP_IMAGE.set(_prep_img)
         # LES PERMISSIONS, AVANT D'ESSAYER. Sans « Envoyer des messages » ou
         # « Liens integres », l'envoi leve une Forbidden qu'on attrapait plus
         # bas sans la montrer. Les nommer permet de corriger en dix secondes.
@@ -1841,6 +2385,25 @@ class ClickRecap(commands.Cog):
                 # Erreur transitoire (5xx/perm) : on garde l'ancien message,
                 # mais on dit pourquoi on ne l'a pas rafraichi.
                 return f"message existant illisible ({e})"[:180]
+        # LES CLASSEMENTS EN IMAGE (demande du proprietaire du 29/09). Dans le
+        # report : l'image a part, et l'embed allege si elle est en place.
+        # Dans le salon ranking : le message devient la galerie. Si l'image
+        # echoue, rien ne change : les classements restent en texte.
+        # UN REPORT COMPLET NE PEUT PAS VIVRE DANS UN MESSAGE V2. Un salon
+        # ranking (galerie) repasse en « tout » par /setreportclick garde son
+        # message_id ; Discord refusait alors l'embed a chaque cycle et le
+        # report ne revenait jamais (vu en relecture le 29/09). On en poste un
+        # neuf ; l'ancienne galerie n'est retiree qu'une fois le neuf parti.
+        _galerie_a_retirer = None
+        if (msg is not None and _est_v2(msg)
+                and str(c.get("contenu") or "").strip().lower() != "classement"):
+            print("[reportclick] %s : message V2 (ancien classement) -> report "
+                  "complet reposte" % guild_id, flush=True)
+            _galerie_a_retirer, msg = msg, None
+        _fin_img = await _classement_en_image(self, ch, guild_id, c, msg, emb,
+                                              content, _prep_img)
+        if _fin_img is not None:
+            return _fin_img
         if msg is not None:
             try:
                 await msg.edit(content=content, embed=emb,
@@ -1868,6 +2431,17 @@ class ClickRecap(commands.Cog):
             if guild_id in fresh:
                 fresh[guild_id]["message_id"] = m.id
                 _save_report_cfg(fresh)
+            if _galerie_a_retirer is not None:
+                try:
+                    await _galerie_a_retirer.delete()
+                    print("[reportclick] %s : ancienne galerie retiree (%s)"
+                          % (guild_id, _galerie_a_retirer.id), flush=True)
+                except Exception as e:           # noqa: BLE001
+                    print("[reportclick] %s : ancienne galerie non retiree (%s)"
+                          % (guild_id, e), flush=True)
+            # L'image des classements vient APRES le report, pour se lire
+            # dessous ; le report n'est allege qu'une fois l'image en place.
+            await _image_apres_premier_envoi(self, ch, guild_id, c, m, emb, _prep_img)
             return ""
         except Exception as e:
             print(f"[reportclick] post initial échoué : {e}", flush=True)
@@ -2754,6 +3328,10 @@ class ClickRecap(commands.Cog):
             if (isinstance(old, dict) and str(old.get("channel_id")) == str(cid)
                     and old.get("message_id")):
                 new_c["message_id"] = old["message_id"]
+                # L'image des classements aussi : sans elle, le cycle suivant
+                # en posterait une seconde sous le report.
+                if old.get("image_message_id"):
+                    new_c["image_message_id"] = old["image_message_id"]
                 if ancienne != cle:
                     cfg.pop(ancienne, None)   # migrée vers la clé par salon
                 break

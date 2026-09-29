@@ -16397,6 +16397,319 @@ try:
 except Exception as _eR3:
     check("ranking : testable", False, repr(_eR3)[:220])
 
+# --- Les classements clics et abonnes en IMAGE ---------------------------
+# Demande du proprietaire du 29/09 : les classements clics et abonnes en
+# image avec les photos, « la meme chose que pour les sessions, un tableau
+# avec les PP ». Une ligne par PERSONNE, toutes ; « — » pour ce qu'on n'a
+# pas su lire, jamais 0 ; l'embed texte garde tout le reste.
+try:
+    import asyncio as _aioK, io as _ioK, types as _tyK
+    import discord as _dcK
+    import clics_image as _ciK
+    import clics_personnes as _cpK
+    from cogs import clickrecap as _crK
+    from PIL import Image as _ImK
+
+    def _donK(personnes, resume=None):
+        """Des donnees de report : [(nom de lien, clics, abonnes ou None)]."""
+        par_lien, ab = [], []
+        for nom, cl, a in personnes:
+            par_lien.append({"lien": nom, "depuis": "",
+                             "periodes": [{"marche": 0, "total": 0}] * 2
+                             + [{"marche": cl, "total": cl}]})
+            if a is not None:
+                ab.append({"lien": nom, "auj": 0, "quinz": a, "prec": 0})
+        return {"marche": "US", "par_lien": par_lien, "abonnes": ab,
+                "resume": resume if resume is not None else [
+                    {"quand": "Today", "marche": None, "total": 82},
+                    {"quand": "Yesterday", "marche": 900, "total": 1253},
+                    {"quand": "This week", "marche": None, "total": None}]}
+
+    _dK = _donK([("(Roucham) 1", 3100, 96), ("(Roucham) 2", 1712, None),
+                 ("(BO7) 1", 3905, 58), ("(Abdoul) 1", 2544, 71),
+                 ("(Kylmich) 1", 1210, None), ("VA 9", None, None),
+                 ("(DOLAD) 1", 42, 2), ("TEMPLATE", 0, None)])
+    _tK = _ciK.tableau(_dK, {"roucham": "roucham_79944", "abdoul": "abdoul_9684"},
+                       periode="16 Sep → 30 Sep", espace="JESSY", liens=8, maj="14:30")
+    _lK = _tK["lignes"]
+    check("clics en image : une ligne par personne, trie par clics",
+          [x["titre"] for x in _lK] == ["Roucham", "BO7", "Abdoul", "Kylmich", "DOLAD", "VA 9"],
+          [x["titre"] for x in _lK])
+    check("clics en image : rangs 1..n, liens regroupes",
+          [x["rang"] for x in _lK] == [1, 2, 3, 4, 5, 6] and _lK[0]["liens"] == 2
+          and _lK[0]["clics"] == 4812, _lK[0])
+    check("clics en image : un gabarit n'est pas une personne",
+          all(x["titre"] != "TEMPLATE" for x in _lK))
+    # Le rang aux abonnes : la reponse de l'ancien second classement.
+    check("clics en image : rang abonnes (qui convertit)",
+          [(_x["titre"], _x["rang_abonnes"]) for _x in _lK[:3]]
+          == [("Roucham", 1), ("BO7", 3), ("Abdoul", 2)], [x["rang_abonnes"] for x in _lK])
+    _kyK = next(x for x in _lK if x["titre"] == "Kylmich")
+    check("clics en image : sans lien de suivi MyPuls, « — » et jamais 0",
+          _kyK["abonnes"] is None and _kyK["taux"] is None and _kyK["rang_abonnes"] is None
+          and _ciK.nombre(_kyK["abonnes"]) == "—", _kyK)
+    _vaK = next(x for x in _lK if x["titre"] == "VA 9")
+    check("clics en image : clics non lus -> « — », en fin de liste",
+          _vaK["clics"] is None and _ciK.nombre(None) == "—" and _vaK["rang"] == 6, _vaK)
+    # Seuils cales sur le vrai report du 29/09 (taux de 10,5 % a 28 %).
+    check("clics en image : taux et couleurs (seuils 12 % / 20 %, gris sous 50 clics)",
+          _ciK.niveau_taux(20.3, 1415) == "fort" and _ciK.niveau_taux(13.8, 1022) == "moyen"
+          and _ciK.niveau_taux(10.5, 4202) == "faible" and _ciK.niveau_taux(28.0, 42) == "petit"
+          and _ciK.niveau_taux(20.0, 50) == "fort" and _ciK.niveau_taux(12.0, 500) == "moyen"
+          and _ciK.niveau_taux(None, 100) == "aucun"
+          and next(x for x in _lK if x["titre"] == "DOLAD")["niveau"] == "petit")
+    check("clics en image : tuiles = memes chiffres, « — » si illisible",
+          [(_x["quand"], _ciK.nombre(_x["valeur"]), _x["detail"]) for _x in _tK["tuiles"]]
+          == [("Today", "82", "global"), ("Yesterday", "900", "global 1 253"),
+              ("This week", "—", "global")], _tK["tuiles"])
+    check("clics en image : sans Discord compte (pour faire remplir les fiches)",
+          _tK["sans_discord"] == 4 and _ciK.pseudos(_tK) == ["abdoul_9684", "roucham_79944"],
+          (_tK["sans_discord"], _ciK.pseudos(_tK)))
+
+    # Le pseudo de la fiche -> un membre du serveur : UNIQUE, sinon initiales.
+    _mK = [_tyK.SimpleNamespace(id=1, name="roucham_79944", bot=False),
+           _tyK.SimpleNamespace(id=2, name="Abdoul_9684", bot=False),
+           _tyK.SimpleNamespace(id=3, name="abdoul_9684", bot=False),
+           _tyK.SimpleNamespace(id=4, name="xman484", bot=True)]
+    _idsK, _cptK = _ciK.resoudre_pseudos(["roucham_79944", "abdoul_9684", "xman484", "absent"], _mK)
+    check("clics en image : pseudo unique -> photo ; ambigu, bot, absent -> initiales",
+          _idsK == {"roucham_79944": "1"} and _cptK == {"introuvables": 2, "ambigus": 1},
+          (_idsK, _cptK))
+
+    # Le dessin : PNG, 1100 px, photos absentes = initiales, noms emoji.
+    _pngK = _ciK.dessiner(_tK, {"roucham_79944": b"pas une image"})
+    _imK = _ImK.open(_ioK.BytesIO(_pngK))
+    check("clics en image : PNG de 1100 px de large", _imK.size[0] == 1100, _imK.size)
+    _t60 = _ciK.tableau(_donK([("(Personne %02d) 1" % i, 1000 - i, i % 5 or None)
+                                for i in range(70)]), {})
+    check("clics en image : 70 personnes -> 60 dessinees, le reste DIT",
+          len(_t60["lignes"]) == _ciK.PLAFOND == 60 and _t60["caches"] == 10
+          and _t60["personnes"] == 70, (len(_t60["lignes"]), _t60["caches"]))
+    _im60 = _ImK.open(_ioK.BytesIO(_ciK.dessiner(_t60, {})))
+    check("clics en image : 60 lignes, l'image grandit (aucune coupee)",
+          _im60.size[0] == 1100 and _im60.size[1] > 60 * 60, _im60.size)
+    _tE = _ciK.tableau(_donK([("(\U0001F525 Nathaniel \U0001F525) 1", 10, 1),
+                              ("(" + "Tres-long-nom-" * 8 + ") 1", 5, None)]), {})
+    _pngE = _ciK.dessiner(_tE, {})
+    _fK = _ciK.police("medium", 54)
+    check("clics en image : emojis retires, nom long dessine sans erreur",
+          _ciK.nettoyer("\U0001F525 Nathaniel \U0001F525", _fK) == "Nathaniel"
+          and _pngE[:4] == b"\x89PNG")
+
+    # L'embed allege : resume et classements retires, le reste intact, et la
+    # coupe « Truncated » defaite quand l'image a rendu la place.
+    _eK = _dcK.Embed(title="t", description="**40** link(s) tracked.  ·  US = x")
+    _chK = [("​", "resume", False), ("\U0001F3C6 Clicks ranking — x", "1", False),
+            ("⭐ Subs ranking — y", "2", False), ("⚠️ Weekly market total unavailable", "w", False),
+            ("👥 Subscribers — a", "s" * 900, False), ("📋 Per link — US", "p" * 900, False)]
+    for _n, _v, _i in _chK[:4]:
+        _eK.add_field(name=_n, value=_v, inline=_i)
+    _eK.add_field(name="⚠️ Truncated", value="x", inline=False)
+    _crK._alleger_pour_image(_eK, _chK)
+    check("clics en image : l'embed perd resume et classements, garde le reste",
+          [f.name for f in _eK.fields] == ["⚠️ Weekly market total unavailable",
+                                           "👥 Subscribers — a", "📋 Per link — US"]
+          and "link(s) tracked" in _eK.description, [f.name for f in _eK.fields])
+
+    # L'espace du classement n'a pas d'identite dans sa config : sans repli,
+    # annuaire vide, « 27 without a Discord account » et que des initiales.
+    check("clics en image : l'espace du classement trouve ses fiches VA",
+          _crK._identite_fiches({"team_id": _cpK.ESPACE_RANKING}) == _cpK.IDENTITE_RANKING
+          and _crK._identite_fiches({"team_id": "tm_autre"}) == ""
+          and _crK._identite_fiches({"team_id": _cpK.ESPACE_RANKING, "identity": "x"}) == "x")
+    check("clics en image : quinzaine en anglais",
+          _crK._periode_en(__import__("datetime").date(2026, 9, 16),
+                           __import__("datetime").date(2026, 9, 30)) == "16 Sep → 30 Sep")
+
+    # Repli : dessin impossible -> None, cause dite ; le report reste texte.
+    _vraiK = _ciK.dessiner
+    _ciK.dessiner = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("police"))
+    try:
+        _pK, _tRK, _iK = _aioK.run(_crK.image_classement(
+            None, {"donnees": _dK, "identite": ""}, None))
+    finally:
+        _ciK.dessiner = _vraiK
+    check("clics en image : dessin impossible -> repli texte, cause dite",
+          _pK is None and _iK["mode"] == "texte" and "police" in _iK["erreur"], _iK)
+    check("clics en image : rien a dessiner -> le report texte, tel quel",
+          _aioK.run(_crK._classement_en_image(None, None, "k", {}, None, _eK, "", {})) is None)
+
+    # Salon ranking, ancien format, image impossible : l'embed texte (chemin
+    # habituel) ; deja converti en V2 : du texte DANS le bloc V2.
+    class _MsgK:
+        def __init__(s, v2):
+            s.flags = _tyK.SimpleNamespace(components_v2=v2)
+            s.id, s.edits = 5, []
+
+        async def edit(s, **kw):
+            s.edits.append(kw)
+
+    _eR = _dcK.Embed(title="Ranking")
+    _eR.add_field(name="\U0001F3C6 Clicks ranking", value="🥇 A — 10 clicks", inline=False)
+    check("ranking : ancien embed + image impossible -> chemin texte habituel",
+          _aioK.run(_crK._ranking_en_galerie(None, None, "k", _MsgK(False), _eR, "t", None, {})) is None)
+    _m2 = _MsgK(True)
+    _r2 = _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m2, _eR, "t", None, {}))
+    check("ranking : deja en V2 + image impossible -> texte dans le bloc V2, sans embed",
+          _r2 == "" and _m2.edits and "embed" not in _m2.edits[0]
+          and _m2.edits[0]["attachments"] == [], _m2.edits)
+    _vK, _fiK = _crK.vue_classement(_pngK, "alt", "## Ranking\n-# t", None, True)
+    check("ranking : galerie + ligne courte + bouton Rafraichir au meme custom_id",
+          _fiK.filename == _ciK.NOM_IMAGE == "classement_clics.png"
+          and "reportclick:refresh" in repr([c.to_component_dict() for c in _vK.children]))
+
+    # Conversion d'un report deja poste : l'image est RETROUVEE apres le
+    # report (config perdue) au lieu d'etre postee deux fois.
+    class _ChK:
+        def __init__(s, msgs):
+            s.msgs, s.envois = msgs, []
+
+        async def fetch_message(s, i):
+            raise _dcK.NotFound(_tyK.SimpleNamespace(status=404, reason="x"), "x")
+
+        def history(s, limit=10, after=None, oldest_first=None):
+            async def g():
+                for m in s.msgs:
+                    if m.id > after.id:
+                        yield m
+            return g()
+
+        async def send(s, **kw):
+            s.envois.append(kw)
+            return _tyK.SimpleNamespace(id=99)
+
+    class _ImgK:
+        def __init__(s):
+            s.id, s.edits = 20, []
+            s.author = _tyK.SimpleNamespace(id=7)
+            s.attachments = [_tyK.SimpleNamespace(filename=_ciK.NOM_IMAGE)]
+
+        async def edit(s, **kw):
+            s.edits.append(kw)
+
+    _imgK, _chK2 = _ImgK(), None
+    _chK2 = _ChK([_imgK])
+    _cogK = _tyK.SimpleNamespace(bot=_tyK.SimpleNamespace(user=_tyK.SimpleNamespace(id=7)))
+    _sauveCfgK = _crK._REPORT_CFG_FILE
+    try:
+        _crK._REPORT_CFG_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "r.json"
+        _crK._save_report_cfg({"g:c": {"channel_id": 1}})
+        _okK = _aioK.run(_crK._poser_image_a_part(
+            _cogK, _chK2, "g:c", {}, _tyK.SimpleNamespace(id=10), _pngK, {}))
+        check("conversion : image retrouvee apres le report, pas de doublon",
+              _okK and not _chK2.envois and len(_imgK.edits) == 1
+              and _crK._load_report_cfg()["g:c"].get("image_message_id") == 20,
+              (_okK, _chK2.envois, _crK._load_report_cfg()))
+    finally:
+        _crK._REPORT_CFG_FILE = _sauveCfgK
+
+    # Relecture du 29/09 : quatre facons de laisser une image figee ou un
+    # report bloque, chacune reproduite en simulation avant correction.
+    class _ChF:
+        """Un salon dont chaque message connu peut etre lu, edite, supprime."""
+        def __init__(s, msgs):
+            s.msgs, s.envois, s.suppr = {m.id: m for m in msgs}, [], []
+
+        async def fetch_message(s, i):
+            if int(i) not in s.msgs:
+                raise _dcK.NotFound(_tyK.SimpleNamespace(status=404, reason="x"), "x")
+            return s.msgs[int(i)]
+
+        def history(s, limit=10, after=None, oldest_first=None):
+            async def g():
+                for i in sorted(s.msgs):
+                    if i > after.id:
+                        yield s.msgs[i]
+            return g()
+
+        async def send(s, **kw):
+            s.envois.append(kw)
+            return _tyK.SimpleNamespace(id=99)
+
+    class _ImgF(_ImgK):
+        def __init__(s, i, salon):
+            super().__init__()
+            s.id, s.salon = i, salon
+
+        async def delete(s):
+            s.salon.suppr.append(s.id)
+            s.salon.msgs.pop(s.id, None)
+
+    _sauveCfgK = _crK._REPORT_CFG_FILE
+    try:
+        _crK._REPORT_CFG_FILE = pathlib.Path(__import__("tempfile").mkdtemp()) / "r.json"
+        # 1. Plus de 60 liens : rien a dessiner, l'image du cycle d'avant le DIT.
+        _chF = _ChF([])
+        _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
+        _cF = {"channel_id": 1, "contenu": "tout", "image_message_id": 20}
+        _crK._save_report_cfg({"g:c": dict(_cF)})
+        _rF = _aioK.run(_crK._classement_en_image(
+            _cogK, _chF, "g:c", _cF, _tyK.SimpleNamespace(id=10), _dcK.Embed(), "t", {}))
+        check("clics en image : plus de 60 liens -> l'ancienne image dit qu'elle est perimee",
+              _rF is None and len(_imF.edits) == 1 and _imF.edits[0].get("attachments") == []
+              and "No ranking at" in repr(_imF.edits[0]["view"].children[0].content),
+              _imF.edits)
+        # 2. Report passe en « classement » : l'image a part est retiree.
+        _chF = _ChF([])
+        _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
+        _cF = {"channel_id": 1, "contenu": "classement", "image_message_id": 20}
+        _crK._save_report_cfg({"g:c": dict(_cF)})
+        _aioK.run(_crK._classement_en_image(
+            _cogK, _chF, "g:c", _cF, None, _dcK.Embed(), "t", {}))
+        check("clics en image : report passe en classement -> image a part retiree",
+              _chF.suppr == [20] and "image_message_id" not in _crK._load_report_cfg()["g:c"],
+              (_chF.suppr, _crK._load_report_cfg()))
+        # 3. Premiere pose apres NotFound : la config est RELUE, l'image posee
+        #    plus tot dans le cycle (au-dessus du report) est retiree.
+        _chF = _ChF([])
+        _imF = _ImgF(20, _chF); _chF.msgs[20] = _imF
+        _crK._save_report_cfg({"g:c": {"channel_id": 1, "contenu": "tout",
+                                       "image_message_id": 20}})
+        _rapF = _tyK.SimpleNamespace(id=30)
+        async def _editF(**kw):
+            pass
+        _rapF.edit = _editF
+        _aioK.run(_crK._image_apres_premier_envoi(
+            _cogK, _chF, "g:c", {"channel_id": 1, "contenu": "tout"}, _rapF,
+            _dcK.Embed(), {"png": _pngK, "infos": {}}))
+        check("clics en image : report reposte en cours de cycle -> pas d'image orpheline au-dessus",
+              _chF.suppr == [20] and len(_chF.envois) == 1
+              and _crK._load_report_cfg()["g:c"].get("image_message_id") == 99,
+              (_chF.suppr, _chF.envois, _crK._load_report_cfg()))
+    finally:
+        _crK._REPORT_CFG_FILE = _sauveCfgK
+    # 4. Un salon ranking (galerie V2) repasse en « tout » : Discord refuse
+    #    l'embed dans un message V2 ; le report est reposte, la galerie retiree
+    #    une fois le neuf parti.
+    _srcF = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    check("clics en image : message V2 + contenu tout -> report reposte, galerie retiree ensuite",
+          "_galerie_a_retirer, msg = msg, None" in _srcF
+          and _srcF.index("_galerie_a_retirer, msg = msg, None")
+          < _srcF.index("_fin_img = await _classement_en_image(")
+          < _srcF.index("await _galerie_a_retirer.delete()"))
+
+    # Le calcul ne passe pas par une signature changee : la page web appelle
+    # _build_group_report avec un faux « self » et les patchs du VPS
+    # s'appuient sur l'appel.
+    _srcK = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    check("clics en image : appel de _build_group_report inchange",
+          "c, permettre_vide=not c.get(\"message_id\"))" in _srcK
+          and "await msg.edit(content=content, embed=emb," in _srcK)
+    check("clics en image : dessin hors de la boucle",
+          "asyncio.to_thread(_ci.dessiner" in _srcK)
+    import inspect as _insK
+    import cogs.sessionsvoc as _svcK
+    _sigK = _insK.signature(_svcK.photos_avatars)
+    check("clics en image : photos_avatars reutilisee, serveur optionnel",
+          "guilde" in _sigK.parameters and _sigK.parameters["guilde"].default is None)
+    import cogs.menutest as _mtK
+    check("clics en image : /democlics sur le bot ADMIN, rien de plus sur le principal",
+          [c.name for c in _mtK.MenuTest.__cog_app_commands__].count("democlics") == 1
+          and not any(c.name == "democlics" for c in _crK.ClickRecap.__cog_app_commands__))
+except Exception as _eK:
+    import traceback as _tbK
+    check("clics en image : testable", False, repr(_eK)[:220] + _tbK.format_exc()[-400:])
+
 # --- Le report des clics sur un telephone --------------------------------
 # Capture du proprietaire : un tableau de 54 signes de large, quarante lignes
 # sur cinquante ne portant que des « — » et des « 0 ». « Les mecs sur

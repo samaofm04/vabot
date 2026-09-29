@@ -963,6 +963,45 @@ class MenuTest(commands.Cog):
         if notes:
             await interaction.followup.send("\n".join(notes)[:1900], ephemeral=True)
 
+    @app_commands.command(
+        name="democlics",
+        description="[DÉMO] Le classement clics + abonnés en image, tel qu'il est posté — rien n'est envoyé",
+    )
+    async def democlics(self, interaction: discord.Interaction):
+        # Demande du proprietaire du 29/09 : les classements du report #click
+        # en image, avec les photos. Sur le bot ADMIN (le principal est a
+        # 100/100 commandes). L'image vient du bot PRINCIPAL, qui tourne dans
+        # le meme processus, et de LA MEME fonction que le report
+        # (cogs.clickrecap) : la demo ne peut pas montrer autre chose.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        import cogs.clickrecap as _cr
+        from cogs.welcome import _bot_principal
+        png, infos, notes = await _cr.demo_classement(
+            _bot_principal(), getattr(interaction, "channel_id", None))
+        ps = infos.get("pseudos") or {}
+        ph = infos.get("photos") or {}
+        if infos.get("sans_discord"):
+            notes.append("ℹ️ %d personne(s) sans compte Discord sur leur fiche VA."
+                         % infos["sans_discord"])
+        if ps.get("introuvables") or ps.get("ambigus"):
+            notes.append("ℹ️ Pseudos Discord : %d introuvable(s) sur le serveur, %d ambigu(s) — "
+                         "initiales à la place." % (ps.get("introuvables", 0), ps.get("ambigus", 0)))
+        if ph.get("echecs") or ph.get("delai"):
+            notes.append("ℹ️ Photos : %d échec(s), %d trop lente(s) — initiales à la place."
+                         % (ph.get("echecs", 0), ph.get("delai", 0)))
+        if png is None:
+            notes.append("⚠️ Image impossible (%s) : le report garde ses classements en TEXTE."
+                         % (infos.get("erreur") or "pas de données"))
+        else:
+            try:
+                vue, fichier = _cr.vue_classement(png, infos.get("alt") or "")
+                await interaction.followup.send(view=vue, file=fichier, ephemeral=True)
+            except Exception as e:                    # noqa: BLE001
+                notes.append("⚠️ Envoi de l'image refusé (%s: %s) : le report retomberait "
+                             "sur le texte." % (type(e).__name__, str(e)[:150]))
+        await interaction.followup.send("\n".join(notes)[:1900] or "ℹ️ Rien à signaler.",
+                                        ephemeral=True)
+
     @staticmethod
     def _notes_demo(infos) -> list:
         """Ce que la demo doit DIRE : liste inconnue (et pourquoi), photos en echec, repli."""

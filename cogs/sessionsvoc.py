@@ -139,7 +139,7 @@ _AVATARS_KO_DUREE = 600
 
 
 async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
-                         delai_total: float = 8.0) -> tuple:
+                         delai_total: float = 8.0, guilde=None) -> tuple:
     """({id: octets PNG}, compte) — les photos de profil, via le serveur suivi.
 
     En parallele mais limite (six a la fois) ; chaque echec donne des
@@ -151,14 +151,19 @@ async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
     le bilan partait quand meme a 45 s, et le clic suivant -- naturel apres
     un « echec » -- en postait un second. Passe `delai_total`, les photos
     manquantes sont des initiales, comptees en « delai ».
+
+    `guilde` : le serveur ou chercher les membres. Par defaut, le serveur
+    suivi (Youl4b US) -- le bilan des sessions. Le classement des clics
+    (clics_image) passe le serveur de SON salon : c'est la que vivent les VA
+    dont il montre la photo. Le cache des photos est le meme pour les deux.
     """
     compte = {"lues": 0, "cache": 0, "introuvables": 0, "echecs": 0, "delai": 0}
-    guilde = None
-    try:
-        if bot is not None and bot.is_ready():
-            guilde = bot.get_guild(sv.SUIVI_GUILD_ID)
-    except Exception:                                 # noqa: BLE001
-        guilde = None
+    if guilde is None:
+        try:
+            if bot is not None and bot.is_ready():
+                guilde = bot.get_guild(sv.SUIVI_GUILD_ID)
+        except Exception:                             # noqa: BLE001
+            guilde = None
     if guilde is None:
         compte["introuvables"] = len(ids)
         return {}, compte
