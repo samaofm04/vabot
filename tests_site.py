@@ -16572,11 +16572,13 @@ try:
           _gS["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_SUBS
           and _ciK.dessiner_subs(_sBig, {})[:4] == b"\x89PNG", _gS)
     # « Il ne faut surtout pas mettre ca » (proprietaire, 29/09 au soir) :
-    # aucun montant dans l'image des abonnes, que les VA lisent dans #click.
+    # pas le net dans l'image des abonnes, que les VA lisent dans #click. La
+    # LTV reste (« uniquement le numero, un dollar, deux dollars »).
     _eS = _ciK._gabarit_subs(_ciK._mesureur(), _sBig)["entetes"]
-    check("deux tableaux : l'image des abonnes ne montre AUCUN montant (ni net, ni LTV)",
-          _eS == ["Today", "16–30", "1–15", "Conv."] and _sBig["titre"] == "Subs"
-          and "LTV" not in _ciK.texte_alt_subs(_sBig) and "$" not in _ciK.texte_alt_subs(_sBig),
+    check("deux tableaux : l'image des abonnes montre la LTV mais JAMAIS le net",
+          _eS == ["Today", "16–30", "1–15", "LTV $/sub", "Conv."] and _sBig["titre"] == "Subs"
+          and not any("net" in e.lower() for e in _eS)
+          and "$" not in _ciK.texte_alt_subs(_sBig),
           (_eS, _sBig["titre"]))
 
     # 29/09 au soir : la fleche d'evolution. « Si c'est en train de faire plus
@@ -16707,9 +16709,9 @@ try:
           and _gSe["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_SUBS
           and _ciK.dessiner_clics(_ciK.tableau_clics(_dBigE, {}, bornes=_bdK), {})[:4]
           == b"\x89PNG", (_gBe, _flFin, _col4, _gSe, _gSn))
-    check("evolution : toujours AUCUN montant dans l'image des abonnes",
+    check("evolution : toujours pas le net dans l'image des abonnes (la LTV seule)",
           _ciK._gabarit_subs(_ciK._mesureur(), _sEv)["entetes"]
-          == ["Today", "16–30", "1–15", "Conv."]
+          == ["Today", "16–30", "1–15", "LTV $/sub", "Conv."]
           and "$" not in _ciK.texte_alt_subs(_sEv))
 
     # « — » et « · », jamais 0, et jamais un total partiel.

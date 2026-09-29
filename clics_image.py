@@ -20,10 +20,11 @@ valide deux maquettes, dessinees ici :
       cours ; sous une personne a plusieurs liens, une sous-ligne par lien
       (« (Roucham) 1SP   1 / 6 · 63 / 161 · 329 / 1 318 »), pour garder le
       detail que montrait le tableau texte.
-  « Subs »  abonnes Today · 16–30 (en gras) · 1–15 et conversion (pastille).
-      AUCUN MONTANT (ni net ni LTV) : l'image part dans #click, que les VA
-      lisent (proprietaire, 29/09 au soir : « il ne faut surtout pas mettre
-      ca »). Le revenu reste lu et calcule (tableau_subs), jamais dessine.
+  « Subs »  abonnes Today · 16–30 (en gras) · 1–15, LTV ($ / sub) et
+      conversion (pastille). JAMAIS LE NET : l'image part dans #click, que les
+      VA lisent (proprietaire, 29/09 au soir : « il ne faut surtout pas mettre
+      ca »). La LTV seule reste (« uniquement le numero, un dollar, deux
+      dollars »). Le revenu est lu et calcule (tableau_subs), jamais dessine.
 
 Ce module ne fait QUE le calcul et le dessin : ni Discord, ni reseau, ni
 fichier ecrit. Il se teste seul ; le cog lui passe tout ce qu'il faut. Les
@@ -1021,15 +1022,16 @@ def _fleche_evo(d, x, cy, sens: str, taille: float = TAILLE_EVO) -> None:
 
 
 def _gabarit_subs(d, t: dict) -> dict:
-    """Les quatre colonnes des abonnes : Today, 16–30 (en gras : la quinzaine
-    en cours), 1–15, Conv. Largeurs MESUREES sur le plus long texte de
-    chacune, comme pour les clics ; la conversion prend la largeur de sa
-    pastille.
+    """Les cinq colonnes des abonnes : Today, 16–30 (en gras : la quinzaine
+    en cours), 1–15, LTV $/sub, Conv. Largeurs MESUREES sur le plus long
+    texte de chacune, comme pour les clics ; la LTV garde 20 px pour sa
+    petite fleche, la conversion la largeur de sa pastille.
 
-    AUCUN MONTANT. Le proprietaire, le 29/09 au soir : « combien d'argent net
+    PAS LE NET. Le proprietaire, le 29/09 au soir : « combien d'argent net
     ils ont rapporte a l'agence, il ne faut surtout pas mettre ca ». L'image
-    part dans #click, que les VA lisent. La LTV sort aussi : multipliee par
-    les abonnes, elle redonne le net.
+    part dans #click, que les VA lisent. La LTV, elle, reste : « c'est
+    uniquement le numero, un dollar, deux dollars » (meme soir, apres l'avoir
+    fait retirer par prudence).
 
     La fleche d'evolution des abonnes a sa place (PLACE_EVO) a droite de la
     colonne 16–30, comptee dans SA largeur, comme pour les clics."""
@@ -1038,26 +1040,27 @@ def _gabarit_subs(d, t: dict) -> dict:
     colonnes = list(t.get("colonnes") or COLONNES)[:4]
     while len(colonnes) < 4:
         colonnes.append("")
-    entetes = [colonnes[0], colonnes[2], colonnes[3], "Conv."]
+    entetes = [colonnes[0], colonnes[2], colonnes[3], "LTV $/sub", "Conv."]
     f_col = police("bold", _p(22))
     meilleur = None
     for echelle in (1.0, 0.9, 0.8, 0.72):
         f_ch = police("medium", _p(26 * echelle))
         f_ch_b = police("bold", _p(28 * echelle))
         f_pastille = police("bold", _p(22 * max(echelle, 0.9)))
-        valeurs = [[], [], [], []]
+        valeurs = [[], [], [], [], []]
         for g in lignes:
             valeurs[0].append((nombre(g["auj"]), f_ch))
             valeurs[1].append((nombre(g["quinz"]), f_ch_b))
             valeurs[2].append((nombre(g["prec"]), f_ch))
-            valeurs[3].append((taux_txt(g["taux"]), f_pastille))
+            valeurs[3].append((dollars(g["ltv"], cents=True), f_ch))
+            valeurs[4].append((taux_txt(g["taux"]), f_pastille))
         besoins = []
-        for k in range(4):
+        for k in range(5):
             w = _l(d, entetes[k], f_col)
             for txt, f in valeurs[k]:
-                w = max(w, _l(d, txt, f) + (26 if k == 3 else 0))
+                w = max(w, _l(d, txt, f) + (26 if k == 4 else 0) + (20 if k == 3 else 0))
             besoins.append(w + 26)
-        besoins[3] = max(besoins[3], 116)
+        besoins[4] = max(besoins[4], 116)
         besoins[1] += reserve
         x_fin_nom = LARGEUR - 40 - sum(besoins)
         if x_fin_nom - X_NOM >= NOM_MIN_SUBS:
@@ -1116,7 +1119,7 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
     for w in besoins:
         x += w
         bords.append(x - 12)
-    x_conv = bords[3] - (besoins[3] - 12) / 2
+    x_conv = bords[4] - (besoins[4] - 12) / 2
     # Les abonnes de la quinzaine s'alignent a gauche de la place de la fleche.
     bords[1] -= gb["reserve"]
 
@@ -1130,9 +1133,9 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
     cy = y0 + (h_entete - 6) / 2
     d.text((_p(x_rang), _p(cy)), "#", font=f_col, fill=TEXTE_2, anchor="mm")
     d.text((_p(x_nom), _p(cy)), "VA", font=f_col, fill=TEXTE_2, anchor="lm")
-    for k in range(4):
+    for k in range(5):
         coul = TEXTE if k == 1 else TEXTE_2
-        if k == 3:
+        if k == 4:
             d.text((_p(x_conv), _p(cy)), entetes[k], font=f_col, fill=coul, anchor="mm")
         else:
             d.text((_p(bords[k]), _p(cy)), entetes[k], font=f_col, fill=coul, anchor="rm")
@@ -1165,6 +1168,14 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
             bb = d.textbbox((_p(bords[1]), _p(cy)), nombre(g["quinz"]), font=f_ch_b, anchor="rm")
             _fleche_evo(d, bords[1] + ECART_EVO, (bb[1] + bb[3]) / 2 / _K, g["evo"])
         _chiffre(2, nombre(g["prec"]), f_ch)
+        # LTV : la petite fleche (vs la quinzaine d'avant) a DROITE du
+        # chiffre, dans la place gardee pour elle. Jamais le net.
+        lt = dollars(g["ltv"], cents=True)
+        d.text((_p(bords[3] - 20), _p(cy)), lt, font=f_ch,
+               fill=TEXTE_3 if lt in ("—", "·") else TEXTE, anchor="rm")
+        if g.get("fleche"):
+            _triangle(d, bords[3] - 12, cy, g["fleche"] == "haut",
+                      FLECHE_HAUT if g["fleche"] == "haut" else FLECHE_BAS)
         if g["niveau"] == "aucun":
             d.text((_p(x_conv), _p(cy)), "—", font=f_ch, fill=TEXTE_3, anchor="mm")
         else:
