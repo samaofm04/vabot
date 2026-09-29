@@ -692,8 +692,14 @@ def _finir(img, largeur, hauteur, quoi: str) -> bytes:
 
 
 def _rond_personne(img, photos, g, x, y, avatar, nom):
+    # « Roucham SPAM » : LA MEME PP que Roucham (le proprietaire, 29/09 au
+    # soir : « la meme PP et tout, mais juste avec ecrit SPAM a cote »). La
+    # photo suit deja, par le meme compte Discord ; sans photo, les initiales
+    # et la couleur sont aussi celles de la personne de base -- sinon « RS »
+    # sur une autre couleur faisait croire a quelqu'un d'autre.
     rond = _si._rond(photos.get(g["discord"]) if g.get("discord") else None,
-                     g["cle"], nom or "?", _p(avatar))
+                     _cp.personne_de_base(g["cle"]), _cp.personne_de_base(nom) or "?",
+                     _p(avatar))
     img.paste(rond, (_p(x), _p(y)), rond)
 
 

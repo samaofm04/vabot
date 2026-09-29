@@ -157,8 +157,74 @@ def propre(nom) -> str:
     return n.replace("( ", "(").replace(" )", ")")
 
 
+# --- Le lien SPAM : une personne a part -------------------------------------
+#
+# 29/09 au soir, le proprietaire : « il n'y a pas les liens spam. Gerome, il
+# devrait y avoir un Gerome SPAM. Abdoul, un deuxieme Abdoul, la meme PP et
+# tout, mais juste avec ecrit SPAM a cote. » Le report rangeait
+# « (Roucham) 1SPAM » SOUS Roucham, comme un telephone de plus, alors que le
+# podium (podium_discord.personne / cle_entite) et la page Liens Infloww le
+# comptent A PART -- et que la paie des VA SPAM (au sub) s'appuie sur cette
+# separation. Deux regles pour la meme chose : c'est celle du podium qui gagne.
+#
+# UN LIEN EST SPAM SI « spam » EST DANS SON NOM, ou qu'il soit et quelle que
+# soit la casse (« (Roucham) 1SPAM », « (PAMPAM) 1 SPAM », « (Abdoul) SPAM »,
+# « (Roucham SPAM) ») : meme test que podium_discord (« SPAM » in n.upper()).
+# La personne est alors l'etiquette du nom SANS « spam », suivie de « SPAM ».
+#
+# On n'ote que le MOT spam, pas les lettres « spam » collees a un mot : sans
+# ca, « (Spamy) 1 » devenait « y SPAM », « (Espam) 1 » « E SPAM », et
+# « va_@spamking » prenait le compte Discord « king » -- le @ et la photo de
+# quelqu'un d'autre. Un chiffre devant reste accepte (« 1SPAM »). Un nom colle
+# (« Spamy ») reste entier : « Spamy SPAM », comme le podium.
+_SPAM = re.compile(r"[\s/._-]*(?<![^\W\d_])spam(?![^\W\d_])[\s/._-]*",
+                   re.IGNORECASE)
+_PAREN_VIDE = re.compile(r"\(\s*\)")
+#: Ce qui s'ajoute a la personne de base : « Roucham » -> « Roucham SPAM ».
+SUFFIXE_SPAM = " SPAM"
+
+
+def est_spam(nom) -> bool:
+    """Ce nom de lien est-il un lien SPAM ? (« spam » n'importe ou, toute casse)"""
+    return "spam" in str(nom or "").lower()
+
+
+def sans_spam(nom) -> str:
+    """Le nom du lien sans le mot « spam » : « (Roucham) 1SPAM » -> « (Roucham) 1 ».
+
+    Une parenthese qui ne contenait que lui disparait (« LaBoule (SPAM) » ->
+    « LaBoule ») : laissee vide, elle faisait sortir « LaBoule () » tel quel."""
+    n = _SPAM.sub(" ", str(nom or ""))
+    return propre(_PAREN_VIDE.sub(" ", n))
+
+
+def personne_de_base(personne) -> str:
+    """« Roucham SPAM » -> « Roucham », « roucham spam » -> « roucham » ; une
+    personne qui n'est pas SPAM est rendue telle quelle.
+
+    C'est la personne dont la fiche VA (donc le @ et la photo) sert aussi a sa
+    ligne SPAM : le lien SPAM est le sien, il n'a pas de fiche a lui."""
+    p = str(personne or "").strip()
+    if p.lower().endswith(SUFFIXE_SPAM.lower()):
+        return p[:-len(SUFFIXE_SPAM)].strip()
+    return p
+
+
 def etiquette(nom) -> str:
     """La PERSONNE derriere un nom de lien, dans sa casse d'origine.
+
+    UN LIEN SPAM EST UNE PERSONNE A PART (voir est_spam) : « (Roucham) 1SPAM »
+    donne « Roucham SPAM », « (PAMPAM) 1 SPAM » donne « PAMPAM SPAM » -- la
+    regle ci-dessous appliquee au nom sans « spam », puis « SPAM » en
+    majuscules, quelle que soit la casse du lien. Si ce nom-la ne nomme
+    personne (« VA 9 SPAM », « SPAM 1 » : aucune lettre), la ligne reste
+    anonyme : pas de « SPAM » seul, pas de « 1 SPAM ».
+
+    ECART CONNU AVEC LE PODIUM, anterieur au SPAM : podium_discord.personne
+    prend le « @pseudo » ou qu'il soit dans le nom ; ici seul le prefixe
+    « va_@ » le fait. « Twitter VA 1 @abdoul » reste donc tel quel, sans
+    fiche. Aucun lien reel n'a cette forme au 29/09 ; si ca arrive, reprendre
+    la regle de l'arobase du podium ici, avec un test.
 
     Les liens s'appellent « VA 12 (Roucham) », « VA 13 Gerome »,
     « VA 8 (VA 2 Noum) », « (BO7) 2 ». Deux numerotations s'y melangent, et
@@ -198,6 +264,21 @@ def etiquette(nom) -> str:
     « VA 1 » sans etre la meme personne.
     """
     n = propre(nom)
+    if not n or est_gabarit(n):
+        return ""
+    if est_spam(n):
+        base = _etiquette_sans_spam(sans_spam(n))
+        # « SPAM 1 », « (SPAM) 1 », « SPAM1 » : il ne reste qu'un numero de
+        # telephone. Sans ce garde-fou, ils devenaient une personne « 1 SPAM »
+        # ou deux liens SPAM de gens differents se retrouvaient fondus.
+        if not any(ch.isalpha() for ch in base):
+            return ""
+        return base + SUFFIXE_SPAM
+    return _etiquette_sans_spam(n)
+
+
+def _etiquette_sans_spam(n: str) -> str:
+    """etiquette() d'un nom deja propre, qui n'est ni un gabarit ni un SPAM."""
     if not n or est_gabarit(n):
         return ""
     if n.lower().startswith("va_"):            # « va_@pseudo » : le pseudo suit
@@ -377,6 +458,9 @@ def index_fiches(annuaire) -> list:
 def fiche_de(personne, annuaire, index=None) -> tuple:
     """(compte Discord, etape) pour une personne de lien (`pseudo()`).
 
+    Une personne SPAM (« roucham spam ») est cherchee SANS « spam » : sa
+    fiche est celle de sa personne de base (personne_de_base).
+
     ("", "ambigu") quand une etape designe plusieurs comptes ; ("", "sans
     pseudo") quand elle ne trouve que des fiches dont le pseudo n'est pas
     saisi ; ("", "") quand aucune ne trouve rien. Les etapes, dans l'ordre :
@@ -394,7 +478,10 @@ def fiche_de(personne, annuaire, index=None) -> tuple:
                    coupe sur « . _ chiffres » (4 lettres au moins) --
                    moan = moan_ofm (fiche « Maon 1 IPHONE X »)
     """
-    ps = str(personne or "").strip()
+    # UNE PERSONNE SPAM PREND LA FICHE DE SA PERSONNE DE BASE : « Abdoul
+    # SPAM » n'a pas de fiche, c'est le lien SPAM d'Abdoul -- meme @, meme
+    # photo (le proprietaire : « la meme PP et tout »).
+    ps = personne_de_base(personne)
     annu = annuaire or {}
     if not ps or not annu:
         return "", ""
@@ -528,7 +615,9 @@ def grouper(entrees, annuaire=None) -> list:
             # creatrice, par fiche_de -- et on laisse vide au moindre doute.
             # « rattache » garde l'etape qui a trouve : le journal le dit.
             if nom.lower().startswith("va_"):
-                g["discord"], g["rattache"] = ps, ("lien" if ps else "")
+                # « va_@pseudo_spam » : le compte est le pseudo SANS spam.
+                base = personne_de_base(ps)
+                g["discord"], g["rattache"] = base, ("lien" if base else "")
             else:
                 g["discord"], g["rattache"] = fiche_de(ps, annu, idx)
         _ajouter(g, "clics", e.get("clics"))

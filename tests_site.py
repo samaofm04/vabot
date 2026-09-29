@@ -17578,7 +17578,13 @@ try:
         "miranto": ("mirantocarbacho", "premier mot"),
         "moan": ("moan_ofm", "pseudo"), "travis": ("travis_sctt_", "pseudo"),
         "laboule": ("laboule.8", "pseudo"),
-        "bo7": ("", ""), "bryan": ("", ""), "dolad": ("", ""), "mykey": ("", "")}
+        "bo7": ("", ""), "bryan": ("", ""), "dolad": ("", ""), "mykey": ("", ""),
+        # 29/09 au soir : le lien SPAM compte a part, comme sur le podium et la
+        # page Liens Infloww -- une personne de plus, avec la fiche (le @, la
+        # photo) de sa personne de base, trouvee par la meme etape.
+        "abdoul spam": ("abdoul_9684", "exact"), "gerome spam": ("bid_a", "plie"),
+        "pampam spam": ("pampam.i", "plie"),
+        "ricardo spam": ("ricko0535", "premier mot")}
     _gR = _cpA.par_clics([{"nom": n, "clics": 1, "abonnes": None}
                           for n in _liensR], _anR)
     _vuR = {g["pseudo"]: (g["discord"], g["rattache"]) for g in _gR}
@@ -17587,13 +17593,13 @@ try:
     check("fiches VA : le tableau reel du 29/09, personne par personne",
           not _ecartsR and set(_vuR) == set(_attR),
           " | ".join(_ecartsR[:4]) or str(sorted(set(_vuR) ^ set(_attR))))
-    check("fiches VA : 21 rattaches, 4 sans fiche (bo7, bryan, dolad, mykey)",
-          sum(1 for d, _ in _vuR.values() if d) == 21
+    check("fiches VA : 25 rattaches (dont 4 SPAM), 4 sans fiche (bo7, bryan, dolad, mykey)",
+          sum(1 for d, _ in _vuR.values() if d) == 25
           and sorted(k for k, (d, _) in _vuR.items() if not d)
           == ["bo7", "bryan", "dolad", "mykey"], str(_vuR))
     check("fiches VA : le journal dit l etape de chacun",
-          _cpA.bilan_rattachements(_gR) == "rattaches : exact 6, plie 3, "
-          "ordre 6, premier mot 3, pseudo 3, lien 0, ambigus 0, "
+          _cpA.bilan_rattachements(_gR) == "rattaches : exact 7, plie 5, "
+          "ordre 6, premier mot 4, pseudo 3, lien 0, ambigus 0, "
           "fiche sans pseudo 0, sans fiche 4",
           _cpA.bilan_rattachements(_gR))
 
@@ -17708,7 +17714,7 @@ try:
         for n in _liensR], "abonnes": []}, _anR)
     check("fiches VA : l image montre les memes comptes (4 sans Discord)",
           _tR["sans_discord"] == 4 and "moan_ofm" in _ciR.pseudos(_tR)
-          and "rattaches : exact 6" in _tR["rattachements"],
+          and "rattaches : exact 7" in _tR["rattachements"],
           "%s / %s" % (_tR["sans_discord"], _tR.get("rattachements")))
 
     # « LaBoule ( Phone ) » : la parenthese nomme un APPAREIL, la personne est
@@ -17727,7 +17733,8 @@ try:
                      ("va_@priscah0908", "priscah0908"), ("va_@x", "x"),
                      ("Roucham X2", "Roucham"), ("(Roucham X2) 1", "Roucham"),
                      ("TEMPLATE MYM EMMA (Copy)", ""), ("bo7 7", "bo7"),
-                     ("(Abdoul) SPAM", "Abdoul"), ("(PAMPAM) 1 SPAM", "PAMPAM")):
+                     # 29/09 au soir : le lien SPAM est une personne a part
+                     ("(Abdoul) SPAM", "Abdoul SPAM"), ("(PAMPAM) 1 SPAM", "PAMPAM SPAM")):
         check("etiquette : %r -> %r" % (_nR, _vR),
               _cpA.etiquette(_nR) == _vR and _cpA.pseudo(_nR) == _vR.lower(),
               repr(_cpA.etiquette(_nR)))
@@ -17737,6 +17744,157 @@ try:
              if _crR._personne_du_lien(n) != _cpA.etiquette(n)]
     check("etiquette : clickrecap._personne_du_lien suit clics_personnes",
           not _difR, str(_difR[:4]))
+
+    # 29/09 au soir : le lien SPAM compte a part, comme sur le podium et la
+    # page Liens Infloww. Le proprietaire : « Gerome, il devrait y avoir un
+    # Gerome SPAM. Abdoul, un deuxieme Abdoul, la meme PP et tout, mais juste
+    # avec ecrit SPAM a cote. » Le report rangeait « (Roucham) 1SPAM » SOUS
+    # Roucham ; podium_discord le compte comme une personne de plus, et la
+    # paie des VA SPAM (au sub) s appuie sur cette separation.
+    import podium_discord as _pdS
+    # Les VRAIS noms de l espace JESSY (29/09).
+    _reelsS = ["(Abdoul) SPAM", "(Gerome) SPAM", "(Kylmich) SPAM",
+               "(PAMPAM) 1 SPAM", "(Ricardo) 1 SPAM", "(Roucham) 1SPAM",
+               "(Roucham) 1", "(Roucham) 2", "(Abdoul) 1", "(Gerome) 1",
+               "(PAMPAM) 1", "(Ricardo) 1", "(Kylmich) 1"]
+    for _nS, _vS in (("(Abdoul) SPAM", "Abdoul SPAM"), ("(Gerome) SPAM", "Gerome SPAM"),
+                     ("(Kylmich) SPAM", "Kylmich SPAM"), ("(PAMPAM) 1 SPAM", "PAMPAM SPAM"),
+                     ("(Ricardo) 1 SPAM", "Ricardo SPAM"),
+                     ("(Roucham) 1SPAM", "Roucham SPAM"), ("(Roucham) 1", "Roucham")):
+        check("spam : %r -> %r" % (_nS, _vS),
+              _cpA.etiquette(_nS) == _vS and _cpA.pseudo(_nS) == _vS.lower(),
+              repr(_cpA.etiquette(_nS)))
+    # DEUX MAPPINGS VALENT DEUX COMPORTEMENTS : memes personnes que le podium.
+    _entS = _pdS.entites([{"id": str(i), "display_name": n} for i, n in enumerate(_reelsS)])
+    _nosS = {}
+    for _i, _nS in enumerate(_reelsS):
+        _nosS.setdefault(_cpA.etiquette(_nS), []).append(str(_i))
+    check("spam : memes personnes que podium_discord.entites sur les vrais noms",
+          _nosS == {k: v["ids"] for k, v in _entS.items()},
+          str(sorted(set(_nosS) ^ set(_entS))))
+    # La casse du lien ne compte pas, et SPAM s ecrit toujours en majuscules.
+    check("spam : casse indifferente, SPAM affiche en majuscules",
+          _cpA.etiquette("(Roucham) 1spam") == "Roucham SPAM"
+          and _cpA.etiquette("(Roucham) 1 Spam") == "Roucham SPAM"
+          and _cpA.pseudo("(roucham) 1SPAM") == "roucham spam"
+          and _cpA.est_spam("x sPaM") and not _cpA.est_spam("(Roucham) 1"))
+    # « SPAM » dans la parenthese : meme personne, pas « Roucham SPAM SPAM ».
+    check("spam : SPAM dans la parenthese",
+          _cpA.etiquette("(Roucham SPAM)") == "Roucham SPAM"
+          and _cpA.etiquette("(Roucham SPAM) 2") == "Roucham SPAM"
+          and _cpA.etiquette("(Roucham/SPAM) 1") == "Roucham SPAM"
+          and _cpA.etiquette("VA 13 Gerome SPAM") == "Gerome SPAM"
+          and _cpA.etiquette("LaBoule (SPAM)") == "LaBoule SPAM",
+          repr([_cpA.etiquette(x) for x in ("(Roucham SPAM)", "(Roucham/SPAM) 1",
+                                            "LaBoule (SPAM)")]))
+    # Rendre "" plutot que deviner : un SPAM qui ne nomme personne reste anonyme.
+    check("spam : un SPAM sans nom reste une ligne anonyme",
+          _cpA.etiquette("VA 9 SPAM") == "" and _cpA.etiquette("TEMPLATE SPAM") == ""
+          and _cpA.etiquette("SPAM") == "" and _cpA.etiquette("SPAM 1") == ""
+          and _cpA.etiquette("(SPAM) 1") == "" and _cpA.etiquette("SPAM1") == "",
+          repr([_cpA.etiquette(x) for x in ("SPAM 1", "(SPAM) 1", "SPAM1")]))
+    # Deux « SPAM n » de gens differents : deux lignes anonymes, pas « 1 SPAM ».
+    _anoS = _cpA.grouper([{"nom": "SPAM 1", "clics": 1, "abonnes": None},
+                          {"nom": "SPAM 2", "clics": 2, "abonnes": None}])
+    check("spam : deux SPAM sans nom ne se fondent pas",
+          len(_anoS) == 2 and all(g["pseudo"] == "" for g in _anoS),
+          str([(g["titre"], g["pseudo"]) for g in _anoS]))
+    # SEUL LE MOT spam s ote : colle a des lettres, il fait partie du nom.
+    # Sans ca, « (Spamy) 1 » donnait « y SPAM » et « va_@spamking » le compte
+    # « king » -- le @ et la photo de quelqu un d autre.
+    check("spam : spam colle a un mot reste dans le nom",
+          _cpA.etiquette("(Spamy) 1") == "Spamy SPAM"
+          and _cpA.etiquette("(Spammer) 2") == "Spammer SPAM"
+          and _cpA.etiquette("(Espam) 1") == "Espam SPAM"
+          and _cpA.etiquette("(Roucham) 1SPAM") == "Roucham SPAM"
+          and _cpA.etiquette("(Gerome) antispam") == "Gerome SPAM",
+          repr([_cpA.etiquette(x) for x in ("(Spamy) 1", "(Spammer) 2", "(Espam) 1")]))
+    _spkS = _cpA.grouper([{"nom": "va_@spamking", "clics": 1, "abonnes": None},
+                          {"nom": "(Spamy) 1", "clics": 2, "abonnes": None}],
+                         {_cpA.norme_fiche("Spamy X1"): "spamy_dc"})
+    check("spam : va_@spamking garde le compte spamking, Spamy sa fiche",
+          sorted((g["titre"], g["discord"]) for g in _spkS)
+          == [("Spamy SPAM", "spamy_dc"), ("spamking SPAM", "spamking")],
+          str([(g["titre"], g["discord"], g["rattache"]) for g in _spkS]))
+    # La fiche (le @, la photo) est celle de la personne de base, par la meme
+    # etape ; « Roucham » et « Roucham SPAM » restent deux lignes.
+    _gS = _cpA.par_clics([{"nom": n, "clics": 10 + i, "abonnes": None}
+                          for i, n in enumerate(_reelsS)], _anR)
+    _tabS = {g["titre"]: (g["discord"], g["rattache"], len(g["liens"])) for g in _gS}
+    check("spam : le @ et la photo de la personne de base",
+          _tabS == {"Abdoul": ("abdoul_9684", "exact", 1),
+                    "Abdoul SPAM": ("abdoul_9684", "exact", 1),
+                    "Gerome": ("bid_a", "plie", 1), "Gerome SPAM": ("bid_a", "plie", 1),
+                    "Kylmich": ("xman484", "exact", 1),
+                    "Kylmich SPAM": ("xman484", "exact", 1),
+                    "PAMPAM": ("pampam.i", "plie", 1),
+                    "PAMPAM SPAM": ("pampam.i", "plie", 1),
+                    "Ricardo": ("ricko0535", "premier mot", 1),
+                    "Ricardo SPAM": ("ricko0535", "premier mot", 1),
+                    "Roucham": ("roucham_79944", "exact", 2),
+                    "Roucham SPAM": ("roucham_79944", "exact", 1)}, str(_tabS))
+    check("spam : fiche_de cherche sans SPAM, le journal les compte",
+          _cpA.fiche_de("roucham spam", _anR) == _cpA.fiche_de("roucham", _anR)
+          and _cpA.personne_de_base("Roucham SPAM") == "Roucham"
+          and _cpA.personne_de_base("VA 2 Noum") == "VA 2 Noum"
+          and _cpA.bilan_rattachements(_gS).startswith("rattaches : exact 6, plie 4, "
+                                                       "ordre 0, premier mot 2"),
+          _cpA.bilan_rattachements(_gS))
+    # « va_@pseudo_spam » : le compte porte par le lien, sans « spam ».
+    _vaS = _cpA.par_clics([{"nom": "va_@priscah0908_spam", "clics": 1, "abonnes": None}])
+    check("spam : va_@pseudo_spam garde le compte du pseudo",
+          _vaS[0]["titre"] == "priscah0908 SPAM" and _vaS[0]["discord"] == "priscah0908"
+          and _vaS[0]["rattache"] == "lien", str(_vaS[0]["titre"]))
+    # LES DEUX IMAGES : deux lignes, chacune ses chiffres ; des sous-lignes
+    # par lien seulement la ou il en reste plusieurs.
+    import clics_image as _ciS
+
+    def _perS(c):
+        return {"marche": c, "total": c + 5}
+    _donS = {"marche": "US", "resume": [],
+             "par_lien": [{"lien": n, "depuis": "",
+                           "periodes": [_perS(1), _perS(2), _perS(c), _perS(c // 2)]}
+                          for n, c in (("(Roucham) 1", 300), ("(Roucham) 2", 100),
+                                       ("(Roucham) 1SPAM", 700), ("(Abdoul) SPAM", 50))],
+             "abonnes": [{"lien": n, "auj": 1, "quinz": a, "prec": a // 2,
+                          "net_quinz": 5.0 * a, "net_prec": 2.0 * a}
+                         for n, a in (("(Roucham) 1", 30), ("(Roucham) 1SPAM", 90),
+                                      ("(Abdoul) SPAM", 4))]}
+    _tcS = _ciS.tableau_clics(_donS, _anR)
+    _lcS = {x["titre"]: x for x in _tcS["lignes"]}
+    check("spam : image des clics, Roucham et Roucham SPAM sur deux lignes",
+          set(_lcS) == {"Roucham", "Roucham SPAM", "Abdoul SPAM"}
+          and _lcS["Roucham"]["cellules"][2] == (400, 410)
+          and len(_lcS["Roucham"]["liens"]) == 2
+          and _lcS["Roucham SPAM"]["cellules"][2] == (700, 705)
+          and _lcS["Roucham SPAM"]["liens"] == [] and _lcS["Roucham SPAM"]["rang"] == 1
+          and _lcS["Roucham SPAM"]["discord"] == "roucham_79944"
+          and _lcS["Roucham SPAM"]["cle"] != _lcS["Roucham"]["cle"]
+          and _tcS["sans_discord"] == 0, str({k: v["cellules"][2] for k, v in _lcS.items()}))
+    _tsS = _ciS.tableau_subs(_donS, _anR)
+    _lsS = {x["titre"]: x for x in _tsS["lignes"]}
+    check("spam : image des abonnes, chacun ses abonnes, sa LTV, sa conversion",
+          _lsS["Roucham SPAM"]["quinz"] == 90 and _lsS["Roucham"]["quinz"] == 30
+          and _lsS["Roucham SPAM"]["taux"] == round(90 * 100.0 / 700, 1)
+          and _lsS["Roucham"]["taux"] == 10.0
+          and _lsS["Roucham SPAM"]["discord"] == _lsS["Roucham"]["discord"]
+          and _lsS["Abdoul SPAM"]["discord"] == "abdoul_9684"
+          and _ciS.pseudos(_tcS, _tsS) == ["abdoul_9684", "roucham_79944"],
+          str({k: (v["quinz"], v["taux"]) for k, v in _lsS.items()}))
+    _pngS1 = _ciS.dessiner_clics(_tcS, {})
+    _pngS2 = _ciS.dessiner_subs(_tsS, {})
+    check("spam : les deux images se dessinent",
+          _pngS1[:4] == b"\x89PNG" and _pngS2[:4] == b"\x89PNG"
+          and "Roucham SPAM" in _ciS.texte_alt_clics(_tcS))
+    # La carte du tableau de bord suit : le meme par_clics.
+    import web_upload as _wS
+    _rgS = _wS._clicrank_rangs({"ok": True, "start": "2026-09-16", "end": "2026-09-29",
+                                "links": [{"id": "s%d" % i, "name": n, "clicks": c, "lu": True}
+                                          for i, (n, c) in enumerate(
+                                              (("(Roucham) 1", 30), ("(Roucham) 1SPAM", 70)))]})
+    check("spam : la carte du tableau de bord aussi",
+          [(g["titre"], g["clics"]) for g in _rgS]
+          == [("Roucham SPAM", 70), ("Roucham", 30)], str([g["titre"] for g in _rgS]))
 
     # SUR DISCORD : des backticks, jamais une mention. « <@id> » ferait sonner
     # la personne a chaque edition du message, toutes les 30 minutes.
