@@ -16579,6 +16579,139 @@ try:
           and "LTV" not in _ciK.texte_alt_subs(_sBig) and "$" not in _ciK.texte_alt_subs(_sBig),
           (_eS, _sBig["titre"]))
 
+    # 29/09 au soir : la fleche d'evolution. « Si c'est en train de faire plus
+    # de subs que d'habitude, un truc vert vers le haut, sinon rouge, sinon
+    # orange » -- sur les clics ET sur les subs. « D'habitude » = le rythme par
+    # jour de la quinzaine precedente ; aujourd'hui (pas fini) sort du rythme
+    # en cours ; les vraies bornes des quinzaines, jamais 15 jours en dur.
+    _DvK = __import__("datetime").date
+    _bvK = (_DvK(2026, 9, 16), _DvK(2026, 9, 30), _DvK(2026, 9, 1), _DvK(2026, 9, 15),
+            _DvK(2026, 9, 29))                    # 13 jours complets, precedente 15 jours
+
+    def _evK(a, j, p, arr=(), b=_bvK):
+        return _ciK.evolution(a, j, p, *b, arrivees=arr)
+    # Precedente 150 en 15 jours = 10/jour. 143 en 13 jours = 11/jour : 1,10 pile.
+    check("evolution : 1,10 pile -> vert, juste dessous -> orange",
+          _evK(143 + 7, 7, 150) == "haut" and _evK(142 + 7, 7, 150) == "stable",
+          (_evK(150, 7, 150), _evK(149, 7, 150)))
+    check("evolution : 0,90 pile -> rouge, juste dessus -> orange",
+          _evK(117 + 3, 3, 150) == "bas" and _evK(118 + 3, 3, 150) == "stable",
+          (_evK(120, 3, 150), _evK(121, 3, 150)))
+    check("evolution : aujourd'hui (pas fini) sort du rythme en cours",
+          _evK(143 + 60, 60, 150) == "haut" and _evK(143 + 60, 0, 150) == "haut"
+          and _evK(130, 0, 150) == "stable" and _evK(130, 20, 150) == "bas")
+    check("evolution : 1er jour de la quinzaine (aucun jour complet) -> pas de fleche",
+          _evK(40, 40, 150, b=_bvK[:4] + (_DvK(2026, 9, 16),)) == ""
+          and _evK(8, 1, 150, b=_bvK[:4] + (_DvK(2026, 9, 17),)) == "bas")
+    check("evolution : « — » ou « · » -> pas de fleche",
+          _evK(None, 0, 150) == _evK(100, None, 150) == _evK(100, 0, None) == ""
+          and _evK("NA", 0, 150) == _evK(100, 0, "NA") == _evK(100, "NA", 150) == "")
+    check("evolution : precedente 0 -> vert si quelque chose depuis, rien sinon",
+          _evK(5, 0, 0) == "haut" and _evK(0, 0, 0) == "" and _evK(4, 4, 0) == "")
+    check("evolution : arrivee pendant l'une des deux quinzaines -> pas de fleche",
+          _evK(200, 0, 150, ["2026-09-20"]) == "" and _evK(200, 0, 150, ["2026-09-05"]) == ""
+          and _evK(200, 0, 150, ["", "2026-09-16"]) == ""
+          and _evK(200, 0, 150, ["2026-09-01"]) == "haut"
+          and _evK(200, 0, 150, ["2026-08-10", ""]) == "haut"
+          and _evK(200, 0, 150, ["pas une date"]) == "")
+    # 1-15 novembre, precedente 16-31 octobre = 16 jours : 160 -> 10/jour.
+    # 44 en 4 jours = 11/jour -> vert ; avec 15 jours en dur, 10,67/jour -> orange.
+    _b16K = (_DvK(2026, 11, 1), _DvK(2026, 11, 15), _DvK(2026, 10, 16), _DvK(2026, 10, 31),
+             _DvK(2026, 11, 5))
+    _b13K = (_DvK(2026, 3, 1), _DvK(2026, 3, 15), _DvK(2026, 2, 16), _DvK(2026, 2, 28),
+             _DvK(2026, 3, 3))
+    check("evolution : quinzaine de 16 jours (et 13 en fevrier), les vraies bornes",
+          _evK(44 + 3, 3, 160, b=_b16K) == "haut" and _evK(43 + 3, 3, 160, b=_b16K) == "stable"
+          and _evK(18, 0, 130, b=_b13K) == "bas" and _evK(22, 0, 130, b=_b13K) == "haut"
+          and _evK(20, 0, 130, b=_b13K) == "stable"
+          and _crK._bornes_evolution(_DvK(2026, 11, 5)) == dict(zip(
+              ("debut_q", "fin_q", "debut_p", "fin_p", "aujourd_hui"), _b16K)))
+    check("evolution : seuils nommes, exacts",
+          _ciK.EVO_HAUT == __import__("fractions").Fraction(11, 10)
+          and _ciK.EVO_BAS == __import__("fractions").Fraction(9, 10))
+
+    # Dans les tableaux : sur la PERSONNE, pas sur ses sous-lignes par lien.
+    _bdK = dict(zip(("debut_q", "fin_q", "debut_p", "fin_p", "aujourd_hui"), _bvK))
+    _dEv = {"marche": "US", "resume": [], "par_lien": [
+        {"lien": "(Haut) 1", "depuis": "", "periodes": [_PK(7, 9), _PK(1, 1), _PK(150, 300),
+                                                        _PK(100, 900)]},
+        {"lien": "(Haut) 2", "depuis": "", "periodes": [_PK(0, 0), _PK(1, 1), _PK(50, 60),
+                                                        _PK(50, 60)]},
+        {"lien": "(Bas) 1", "depuis": "", "periodes": [_PK(0, 0), _PK(1, 1), _PK(100, 900),
+                                                       _PK(300, 300)]},
+        {"lien": "(Egal) 1", "depuis": "", "periodes": [_PK(0, 0), _PK(1, 1), _PK(130, 130),
+                                                        _PK(150, 150)]},
+        {"lien": "(Neuf) 1", "depuis": "2026-09-20", "periodes": [_PK(0, 0), _PK(1, 1),
+                                                                  _PK(90, 90), _PK("NA", "NA")]}],
+        "abonnes": [
+            {"lien": "(Haut) 1", "auj": 1, "quinz": 30, "prec": 15, "net_quinz": 5.0,
+             "net_prec": 5.0},
+            {"lien": "(Bas) 1", "auj": 0, "quinz": 5, "prec": 30, "net_quinz": 5.0,
+             "net_prec": 5.0},
+            {"lien": "(Egal) 1", "auj": 0, "quinz": 13, "prec": 15, "net_quinz": 5.0,
+             "net_prec": 5.0},
+            {"lien": "(Neuf) 1", "auj": 0, "quinz": 9, "prec": "NA", "net_quinz": 5.0,
+             "net_prec": "NA"}]}
+    _tEv = _ciK.tableau_clics(_dEv, {}, bornes=_bdK)
+    _sEv = _ciK.tableau_subs(_dEv, {}, bornes=_bdK)
+    _evC = {x["titre"]: x["evo"] for x in _tEv["lignes"]}
+    _evS = {x["titre"]: x["evo"] for x in _sEv["lignes"]}
+    check("evolution : fleches du tableau des clics (US), rien pour une arrivee en cours",
+          _evC == {"Haut": "haut", "Bas": "bas", "Egal": "stable", "Neuf": ""}, _evC)
+    check("evolution : jamais sur les sous-lignes par lien",
+          [len(x["liens"]) for x in _tEv["lignes"] if x["titre"] == "Haut"] == [2]
+          and all("evo" not in li for x in _tEv["lignes"] for li in x["liens"]))
+    check("evolution : fleches du tableau des abonnes",
+          _evS == {"Haut": "haut", "Bas": "bas", "Egal": "stable", "Neuf": ""}, _evS)
+    _dEvG = _copyK.deepcopy(_dEv)
+    _dEvG["marche"] = ""
+    check("evolution : sans marche, calculee sur le global",
+          {x["titre"]: x["evo"] for x in _ciK.tableau_clics(_dEvG, {}, bornes=_bdK)["lignes"]}
+          ["Bas"] == "haut"
+          and all(x["evo"] == "" for x in _ciK.tableau_clics(_dEv, {})["lignes"])
+          and all(x["evo"] == "" for x in _ciK.tableau_subs(_dEv, {})["lignes"]))
+
+    def _couleursK(png):
+        _imE = _ImK.open(_ioK.BytesIO(png)).convert("RGB")
+        _px = set(_imE.getdata())
+        return [c in _px for c in (_ciK.VERT_EVO, _ciK.ORANGE_EVO, _ciK.ROUGE_EVO)]
+    check("evolution : les trois fleches dessinees (clics ET subs), aucune sans bornes",
+          _couleursK(_ciK.dessiner_clics(_tEv, {})) == [True, True, True]
+          and _couleursK(_ciK.dessiner_subs(_sEv, {})) == [True, True, True]
+          and _couleursK(_ciK.dessiner_clics(_ciK.tableau_clics(_dEv, {}), {}))
+          == [False, False, False])
+    # Gabarit : nombres a 6 chiffres ET fleche -- la place de la fleche est
+    # comptee dans la largeur de la colonne, elle ne mord pas sur la suivante.
+    _gBn = _ciK.gabarit_clics(_ciK.tableau_clics(_dBig, {}))
+    _dBigE = _copyK.deepcopy(_dBig)
+    _gBe = _ciK.gabarit_clics(_ciK.tableau_clics(_dBigE, {}, bornes=_bdK))
+    _flFin = (_gBe["x_fin_nom"] + sum(_gBe["largeurs"][:3]) - 14 - _gBe["reserve"]
+              + _ciK.ECART_EVO + _ciK.TAILLE_EVO)
+    _col4 = _gBe["x_fin_nom"] + sum(_gBe["largeurs"]) - 14 - _gBe["besoins"][3]
+    _sBigE = _ciK.tableau_subs({"marche": "US", "par_lien": _dBig["par_lien"], "abonnes": [
+        {"lien": "(Big) 1", "auj": 12345, "quinz": 523456, "prec": 99999,
+         "net_quinz": 1.0, "net_prec": 1.0}]}, {}, bornes=_bdK)
+    _gSe, _gSn = _ciK.gabarit_subs(_sBigE), _ciK.gabarit_subs(dict(_sBigE, lignes=[
+        dict(x, evo="") for x in _sBigE["lignes"]]))
+    check("evolution : gabarit sans chevauchement (6 chiffres + fleche)",
+          [x["evo"] for x in _ciK.tableau_clics(_dBigE, {}, bornes=_bdK)["lignes"]] == ["bas"]
+          and _gBn["reserve"] == 0 and _gBe["reserve"] == _ciK.PLACE_EVO
+          and _ciK.PLACE_EVO >= _ciK.ECART_EVO + _ciK.TAILLE_EVO
+          and _gBe["largeurs"][2] >= _gBe["besoins"][2] + _ciK.ECART_COLONNES + _ciK.PLACE_EVO
+          and _col4 - _flFin >= _ciK.ECART_COLONNES
+          and _gBe["x_fin_nom"] > _ciK.X_NOM
+          and [x["evo"] for x in _sBigE["lignes"]] == ["haut"]
+          and _gSe["reserve"] == _ciK.PLACE_EVO and _gSn["reserve"] == 0
+          and _gSe["echelle"] == _gSn["echelle"]
+          and _gSe["besoins"][1] == _gSn["besoins"][1] + _ciK.PLACE_EVO
+          and _gSe["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_SUBS
+          and _ciK.dessiner_clics(_ciK.tableau_clics(_dBigE, {}, bornes=_bdK), {})[:4]
+          == b"\x89PNG", (_gBe, _flFin, _col4, _gSe, _gSn))
+    check("evolution : toujours AUCUN montant dans l'image des abonnes",
+          _ciK._gabarit_subs(_ciK._mesureur(), _sEv)["entetes"]
+          == ["Today", "16–30", "1–15", "Conv."]
+          and "$" not in _ciK.texte_alt_subs(_sEv))
+
     # « — » et « · », jamais 0, et jamais un total partiel.
     _dN = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
         {"lien": "(Zed) 1", "depuis": "", "periodes": [_PK(5, 9), _PK("NA", "NA"), _PK(10, 20),
@@ -17098,6 +17231,12 @@ try:
           [len(r["periodes"]) for r in _p2["donnees"]["par_lien"]] == [4, 4, 4]
           and _plK["(Roucham) 1SP"]["periodes"][2] == {"marche": 329, "total": 1318}
           and _p2["colonnes"] == ["Today", "Yesterday", "16–30", "1–15"])
+    # 29/09 au soir : la fleche d'evolution recoit les bornes du report.
+    check("evolution : le report donne ses bornes aux images",
+          _p2.get("bornes") == _crK._bornes_evolution(__import__("datetime").date(2026, 9, 29))
+          and _p2["bornes"]["debut_p"] == __import__("datetime").date(2026, 9, 1)
+          and "bornes=prep.get(\"bornes\")" in pathlib.Path("cogs/clickrecap.py").read_text(
+              encoding="utf-8"), _p2.get("bornes"))
     _tRe = _ciK.tableau_subs(_p2["donnees"], {})
     # 1 500,50 $ -> « $1 501 » : les demis vers le haut (round() de Python
     # arrondissait au pair).

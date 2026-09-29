@@ -691,6 +691,16 @@ def _colonnes_en(today: datetime.date) -> list:
     return ["Today", "Yesterday", "%d–%d" % (q_deb.day, q_fin.day), prec]
 
 
+def _bornes_evolution(today: datetime.date) -> dict:
+    """Les dates dont la fleche d'evolution des images a besoin
+    (clics_image.evolution) : les VRAIES bornes des deux quinzaines -- le
+    16-31 a 16 jours, le 16-28 fevrier 13 -- et le jour du report."""
+    q_deb, q_fin = _pay_period(today)
+    p_deb, p_fin = _quinzaine_precedente(today)
+    return {"debut_q": q_deb, "fin_q": q_fin, "debut_p": p_deb, "fin_p": p_fin,
+            "aujourd_hui": today}
+
+
 def _remplace(nom, quoi) -> bool:
     n = str(nom or "")
     if "clics" in quoi and n == _NOM_RESUME:
@@ -744,7 +754,8 @@ async def images_report(bot, prep: dict, guilde=None) -> tuple:
             raise ValueError("aucune donnee pour les images")
         annu = await asyncio.to_thread(_cp.annuaire_va, prep.get("identite") or "")
         kw = dict(periode=prep.get("periode") or "", espace=prep.get("espace") or "",
-                  maj=prep.get("maj") or "", colonnes=prep.get("colonnes") or _ci.COLONNES)
+                  maj=prep.get("maj") or "", colonnes=prep.get("colonnes") or _ci.COLONNES,
+                  bornes=prep.get("bornes"))
         tc = _ci.tableau_clics(donnees, annu, liens=prep.get("liens"), **kw)
         ts = _ci.tableau_subs(donnees, annu, **kw)
         if not tc["lignes"]:
@@ -2512,7 +2523,7 @@ class ClickRecap(commands.Cog):
                 _prep_i.update(
                     donnees=_donnees, identite=_identite_fiches(c), espace=name,
                     liens=len(ids), periode=_periode_en(cyc_s, cyc_e),
-                    colonnes=_colonnes_en(today),
+                    colonnes=_colonnes_en(today), bornes=_bornes_evolution(today),
                     maj=_paris_now().strftime("%H:%M"))
 
             # LES CLASSEMENTS PASSENT DEVANT LE DETAIL. On les calcule ici,

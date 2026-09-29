@@ -54,7 +54,9 @@ CE QUI N'EST JAMAIS INVENTE
   de quelqu'un d'autre ;
 - un caractere que la police ne dessine pas (emoji) : retire.
 """
+import datetime
 import decimal
+import fractions
 import io
 
 from PIL import Image, ImageDraw
@@ -126,6 +128,34 @@ FLECHE_BAS = (230, 90, 90)
 #: Les colonnes par defaut : aujourd'hui, hier, la quinzaine en cours, la
 #: precedente. Le cog passe les vraies (« 1–15 » / « Aug 16–31 »...).
 COLONNES = ("Today", "Yesterday", "16–30", "1–15")
+
+# --- L'evolution : une fleche verte, orange ou rouge -------------------------
+#
+# Le proprietaire, le 29/09 au soir : « si c'est en train de faire plus de
+# subs que d'habitude, il y a un truc vert vers le haut, sinon il y a un truc
+# rouge, sinon il y a un truc orange » -- pour les clics comme pour les subs.
+#
+# « D'habitude », c'est le RYTHME de la quinzaine precedente. On compare des
+# rythmes par jour, jamais des totaux : le 20 du mois, la quinzaine en cours
+# n'a que 4 jours et perdrait toujours contre une quinzaine finie. Aujourd'hui
+# n'est pas fini non plus : il sort du rythme en cours (a 9 h, il ferait
+# baisser tout le monde).
+#
+# Plus de 10 % au-dessus de l'habitude : vert. Plus de 10 % en dessous :
+# rouge. Entre les deux, c'est le rythme habituel : orange. Des seuils en
+# fractions EXACTES : 1,1 en virgule flottante ne tombe pas pile, et un
+# rythme exactement 10 % au-dessus doit etre vert.
+EVO_HAUT = fractions.Fraction(11, 10)
+EVO_BAS = fractions.Fraction(9, 10)
+VERT_EVO = FLECHE_HAUT
+ORANGE_EVO = ORANGE_PASTILLE
+ROUGE_EVO = FLECHE_BAS
+#: La fleche dessinee (px finaux), l'ecart qui la separe du chiffre, et la
+#: place que le gabarit lui garde a droite de la colonne -- MESUREE dans la
+#: largeur de la colonne, pour que la fleche ne morde jamais sur la suivante.
+TAILLE_EVO = 16
+ECART_EVO = 8
+PLACE_EVO = ECART_EVO + TAILLE_EVO + 4
 
 
 def niveau_taux(taux, clics) -> str:
@@ -242,6 +272,83 @@ def fleche(actuel, avant) -> str:
     return ""
 
 
+def _date(v):
+    """Une date, depuis un datetime.date ou une chaine ISO ; None sinon."""
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    if isinstance(v, datetime.date):
+        return v
+    try:
+        return datetime.date.fromisoformat(str(v or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def _exact(v) -> fractions.Fraction:
+    return fractions.Fraction(str(v))
+
+
+def evolution(actuel, du_jour, precedent, debut_q, fin_q, debut_p, fin_p,
+              aujourd_hui, arrivees=()) -> str:
+    """« haut » (vert), « stable » (orange), « bas » (rouge) ou "" (pas de fleche).
+
+    `actuel` : la valeur de la quinzaine en cours (aujourd'hui compris) ;
+    `du_jour` : celle d'aujourd'hui ; `precedent` : la quinzaine precedente.
+    Les bornes sont celles du report (dates ou ISO), jamais 15 jours en dur :
+    le 16-31 en a 16, le 16-28 fevrier 13.
+
+      rythme en cours  = (actuel - du_jour) / jours COMPLETS de la quinzaine
+      rythme habituel  = precedent / jours de la quinzaine precedente
+      rapport >= 1,10 -> « haut » ; <= 0,90 -> « bas » ; sinon « stable »
+
+    PAS DE FLECHE plutot qu'une fleche inventee :
+      - une valeur « — » (illisible) ou « · » (avant son arrivee) ;
+      - le 1er jour de la quinzaine : aucun jour complet, aucun rythme ;
+      - une arrivee sur un lien PENDANT l'une des deux quinzaines : l'une
+        des periodes est coupee, les deux ne se comparent pas ;
+      - precedente a 0 et rien depuis ; une valeur negative (incoherente).
+    Precedente a 0 et quelque chose depuis : « haut ».
+    """
+    dq, fq, dp, fp, auj = (_date(x) for x in (debut_q, fin_q, debut_p, fin_p, aujourd_hui))
+    if None in (dq, fq, dp, fp, auj) or not (dq <= auj <= fq) or dp > fp:
+        return ""
+    for a in arrivees or ():
+        if not a:
+            continue
+        da = _date(a)
+        # Une date d'arrivee illisible : on ne sait pas si les periodes sont
+        # entieres, donc pas de fleche.
+        if da is None or dp < da <= fq:
+            return ""
+    if not all(_est_nombre(v) for v in (actuel, du_jour, precedent)):
+        return ""
+    jours = (auj - dq).days
+    if jours <= 0:
+        return ""
+    jours_p = (fp - dp).days + 1
+    fait = _exact(actuel) - _exact(du_jour)
+    avant = _exact(precedent)
+    if fait < 0 or avant < 0:
+        return ""
+    if avant == 0:
+        return "haut" if fait > 0 else ""
+    rapport = (fait / jours) / (avant / jours_p)
+    if rapport >= EVO_HAUT:
+        return "haut"
+    if rapport <= EVO_BAS:
+        return "bas"
+    return "stable"
+
+
+def _evo(actuel, du_jour, precedent, bornes, arrivees) -> str:
+    """evolution() avec les bornes du report ; sans bornes, pas de fleche."""
+    if not isinstance(bornes, dict):
+        return ""
+    return evolution(actuel, du_jour, precedent, bornes.get("debut_q"), bornes.get("fin_q"),
+                     bornes.get("debut_p"), bornes.get("fin_p"), bornes.get("aujourd_hui"),
+                     arrivees)
+
+
 def _cle(g) -> str:
     """La cle d'une personne, la meme que grouper() : le pseudo, sinon le
     premier lien (deux « VA 9 » anonymes restent deux lignes)."""
@@ -313,17 +420,23 @@ def _tri(v) -> tuple:
 
 
 def tableau_clics(donnees: dict, annuaire=None, periode: str = "", espace: str = "",
-                  liens: int = None, maj: str = "", colonnes=COLONNES) -> dict:
+                  liens: int = None, maj: str = "", colonnes=COLONNES,
+                  bornes: dict = None) -> dict:
     """Le contenu de l'image « Clicks — US vs global ».
 
     `donnees` : le dictionnaire `_donnees` de _build_group_report -- les MEMES
     chiffres que le texte, jamais recalcules. `par_lien[i]["periodes"]` :
     aujourd'hui, hier, la quinzaine en cours, la precedente (4e, gardee sur
     disque par le cog ; absente -> « — »).
+
+    `bornes` : {"debut_q", "fin_q", "debut_p", "fin_p", "aujourd_hui"}, les
+    dates du report, pour la fleche d'evolution (voir evolution()). Absentes :
+    aucune fleche.
     """
     donnees = donnees or {}
     marche = bool(donnees.get("marche"))
     gens = _personnes(donnees, annuaire)
+    k_tri = 0 if marche else 1
     lignes = []
     for g in gens:
         detail = [{"nom": _cp.propre(e.get("nom")), "cellules": _cellules_lien(e, marche)}
@@ -333,6 +446,11 @@ def tableau_clics(donnees: dict, annuaire=None, periode: str = "", espace: str =
             us = somme([d["cellules"][k][0] for d in detail]) if marche else None
             gl = somme([d["cellules"][k][1] for d in detail])
             cellules.append((us, gl))
+        # LA FLECHE, SUR LA PERSONNE SEULEMENT (pas sur ses sous-lignes par
+        # lien), calculee sur le chiffre qu'on classe : les clics US, le
+        # global quand le report n'a pas de marche.
+        evo = _evo(cellules[2][k_tri], cellules[0][k_tri], cellules[3][k_tri], bornes,
+                   [e.get("depuis") for e in g.get("entrees") or []])
         lignes.append({
             "titre": str(g.get("titre") or ""),
             "discord": str(g.get("discord") or ""),
@@ -342,10 +460,10 @@ def tableau_clics(donnees: dict, annuaire=None, periode: str = "", espace: str =
             # sous une personne a un seul lien, il recopierait sa ligne.
             "liens": detail if len(detail) > 1 else [],
             "n_liens": len(detail),
+            "evo": evo,
         })
     # TRIE PAR CLICS US DE LA QUINZAINE EN COURS (le global sans marche) ;
     # un total illisible part en fin de liste, pas a zero.
-    k_tri = 0 if marche else 1
     lignes.sort(key=lambda x: (_tri(x["cellules"][2][k_tri]), _tri(x["cellules"][2][1]),
                                x["titre"].lower()))
     # UN RANG, UNE MEDAILLE, SEULEMENT POUR UN NOMBRE. « — » (pas lu) et
@@ -378,7 +496,7 @@ def tableau_clics(donnees: dict, annuaire=None, periode: str = "", espace: str =
 
 
 def tableau_subs(donnees: dict, annuaire=None, periode: str = "", espace: str = "",
-                 maj: str = "", colonnes=COLONNES) -> dict:
+                 maj: str = "", colonnes=COLONNES, bornes: dict = None) -> dict:
     """Le contenu de l'image « Subs & LTV ».
 
     Les abonnes et le revenu viennent de `donnees["abonnes"]` : les TROIS
@@ -391,6 +509,10 @@ def tableau_subs(donnees: dict, annuaire=None, periode: str = "", espace: str = 
     US de la quinzaine) : diviser les abonnes d'un lien par les clics de tous
     les liens de la personne la faisait paraitre moins bonne qu'elle n'est --
     meme choix que le CVR de la page Liens Infloww.
+
+    LA FLECHE D'EVOLUTION porte sur les abonnes (aujourd'hui, quinzaine,
+    precedente), avec les `bornes` du report ; les dates d'arrivee sont celles
+    des liens SUIVIS, ceux dont viennent les chiffres.
     """
     donnees = donnees or {}
     marche = bool(donnees.get("marche"))
@@ -402,7 +524,8 @@ def tableau_subs(donnees: dict, annuaire=None, periode: str = "", espace: str = 
                 "cle": _cle(g), "suivi": bool(suivies)}
         if not suivies:
             base.update(auj=None, quinz=None, prec=None, net=None, ltv=None,
-                        ltv_prec=None, fleche="", taux=None, clics=None, niveau="aucun")
+                        ltv_prec=None, fleche="", taux=None, clics=None, niveau="aucun",
+                        evo="")
             lignes.append(base)
             continue
         s = [e["suivi"] for e in suivies]
@@ -418,7 +541,8 @@ def tableau_subs(donnees: dict, annuaire=None, periode: str = "", espace: str = 
                 if _est_nombre(quinz) and _est_nombre(clics) and clics > 0 else None)
         base.update(auj=auj, quinz=quinz, prec=prec, net=net, ltv=l_q, ltv_prec=l_p,
                     fleche=fleche(l_q, l_p), taux=taux, clics=clics,
-                    niveau=niveau_taux(taux, clics))
+                    niveau=niveau_taux(taux, clics),
+                    evo=_evo(quinz, auj, prec, bornes, [e.get("depuis") for e in suivies]))
         lignes.append(base)
     # TRIE PAR ABONNES DE LA QUINZAINE EN COURS ; a egalite, celui qui a
     # depense le moins de clics d'abord (il convertit mieux). Les personnes
@@ -634,9 +758,15 @@ def _gabarit_clics(d, t: dict) -> dict:
     une grille) ; si les noms n'ont plus NOM_MIN_CLICS, chacune reprend SA
     largeur, puis les chiffres rapetissent (le gros jamais plus petit que le
     petit). Jamais deux nombres colles -- le defaut de la capture du 29/09
-    (« 184421811205 ») ; au pire, c'est le NOM qui est coupe (« … »)."""
+    (« 184421811205 ») ; au pire, c'est le NOM qui est coupe (« … »).
+
+    LA FLECHE D'EVOLUTION a sa place a droite de la quinzaine en cours
+    (PLACE_EVO, ajoutee a la largeur de CETTE colonne) : les chiffres restent
+    alignes sur leur bord, la fleche ne mord jamais sur la colonne suivante.
+    Pas de fleche dans le tableau, pas de place prise."""
     marche = bool(t.get("marche"))
     lignes = t.get("lignes") or []
+    reserve = PLACE_EVO if any(g.get("evo") for g in lignes) else 0
     colonnes = list(t.get("colonnes") or COLONNES)[:4]
     while len(colonnes) < 4:
         colonnes.append("")
@@ -663,10 +793,12 @@ def _gabarit_clics(d, t: dict) -> dict:
             besoins.append(w)
         l_col = max(max(besoins) + ECART_COLONNES, 118)
         largeurs = [l_col] * 4
+        largeurs[2] += reserve
         x_fin_nom = LARGEUR - 40 - sum(largeurs)
         if x_fin_nom - X_NOM >= NOM_MIN_CLICS:
             break
         largeurs = [max(b + ECART_COLONNES, 100) for b in besoins]
+        largeurs[2] += reserve
         x_fin_nom = LARGEUR - 40 - sum(largeurs)
         if x_fin_nom - X_NOM >= NOM_MIN_CLICS:
             break
@@ -685,14 +817,14 @@ def _gabarit_clics(d, t: dict) -> dict:
         echelle, f_gros, f_petit, f_sous = (meilleur["echelle"], meilleur["f_gros"],
                                             meilleur["f_petit"], meilleur["f_sous"])
     return {"colonnes": colonnes, "besoins": besoins, "largeurs": largeurs,
-            "x_fin_nom": x_fin_nom, "echelle": echelle,
+            "x_fin_nom": x_fin_nom, "echelle": echelle, "reserve": reserve,
             "f_gros": f_gros, "f_petit": f_petit, "f_sous": f_sous}
 
 
 def gabarit_clics(t: dict) -> dict:
     """Le gabarit des colonnes des clics, sans dessiner (pour les tests)."""
     g = _gabarit_clics(_mesureur(), t)
-    return {k: g[k] for k in ("besoins", "largeurs", "x_fin_nom", "echelle")}
+    return {k: g[k] for k in ("besoins", "largeurs", "x_fin_nom", "echelle", "reserve")}
 
 
 def dessiner_clics(t: dict, photos: dict = None) -> bytes:
@@ -737,6 +869,8 @@ def dessiner_clics(t: dict, photos: dict = None) -> bytes:
     f_gros, f_petit, f_sous_c = gb["f_gros"], gb["f_petit"], gb["f_sous"]
     # Les bords DROITS des colonnes (chiffres alignes a droite).
     x_cols = [x_fin_nom + sum(gb["largeurs"][:k + 1]) - 14 for k in range(4)]
+    # La quinzaine en cours s'aligne a gauche de la place de la fleche.
+    x_cols[2] -= gb["reserve"]
 
     # --- en-tete ---------------------------------------------------------
     n_pers = t.get("personnes") or 0
@@ -823,6 +957,15 @@ def dessiner_clics(t: dict, photos: dict = None) -> bytes:
             else:
                 d.text((_p(x_cols[k]), _p(cy)), petit, font=f_gros,
                        fill=TEXTE if petit not in ("—", "·") else TEXTE_3, anchor="rm")
+        if g.get("evo"):
+            # A cote du chiffre qu'elle juge (le US, sinon le global), a sa
+            # hauteur : centree sur le dessin reel des chiffres.
+            gros2, petit2 = _cellule_duo(g["cellules"][2])
+            if marche:
+                bb = d.textbbox((_p(x_cols[2]), _p(cy + 2)), gros2, font=f_gros, anchor="rs")
+            else:
+                bb = d.textbbox((_p(x_cols[2]), _p(cy)), petit2, font=f_gros, anchor="rm")
+            _fleche_evo(d, x_cols[2] + ECART_EVO, (bb[1] + bb[3]) / 2 / _K, g["evo"])
         ys = yl + h_ligne + 4
         for li in sous:
             cs = ys + h_sous / 2
@@ -851,13 +994,30 @@ def dessiner_clics(t: dict, photos: dict = None) -> bytes:
     return _finir(img, largeur, hauteur, "des clics")
 
 
-def _triangle(d, x, cy, haut: bool, couleur) -> None:
-    """Une fleche dessinee (la police n'a pas ↑ ↓ partout) : 12 px."""
+def _triangle(d, x, cy, haut: bool, couleur, taille: float = 12) -> None:
+    """Une fleche dessinee (la police n'a pas ↑ ↓ partout) : 12 px par defaut."""
+    k = taille / 12.0
     if haut:
-        pts = [(x, cy + 5), (x + 12, cy + 5), (x + 6, cy - 6)]
+        pts = [(x, cy + 5 * k), (x + 12 * k, cy + 5 * k), (x + 6 * k, cy - 6 * k)]
     else:
-        pts = [(x, cy - 5), (x + 12, cy - 5), (x + 6, cy + 6)]
+        pts = [(x, cy - 5 * k), (x + 12 * k, cy - 5 * k), (x + 6 * k, cy + 6 * k)]
     d.polygon([(_p(a), _p(b)) for a, b in pts], fill=couleur)
+
+
+def _fleche_evo(d, x, cy, sens: str, taille: float = TAILLE_EVO) -> None:
+    """La fleche d'evolution, de `x` a `x + taille` (px finaux), centree sur cy :
+    triangle vert vers le haut, fleche orange horizontale, triangle rouge vers
+    le bas. Dessinee : la police n'a pas les emoji."""
+    if sens == "haut":
+        _triangle(d, x, cy, True, VERT_EVO, taille)
+    elif sens == "bas":
+        _triangle(d, x, cy, False, ROUGE_EVO, taille)
+    elif sens == "stable":
+        # « → » : un trait et une pointe, pour ne pas se lire « lecture ».
+        ep = taille * 0.14
+        d.rectangle((_p(x), _p(cy - ep), _p(x + taille * 0.6), _p(cy + ep)), fill=ORANGE_EVO)
+        d.polygon([(_p(x + taille * 0.42), _p(cy - taille * 0.42)), (_p(x + taille), _p(cy)),
+                   (_p(x + taille * 0.42), _p(cy + taille * 0.42))], fill=ORANGE_EVO)
 
 
 def _gabarit_subs(d, t: dict) -> dict:
@@ -869,8 +1029,12 @@ def _gabarit_subs(d, t: dict) -> dict:
     AUCUN MONTANT. Le proprietaire, le 29/09 au soir : « combien d'argent net
     ils ont rapporte a l'agence, il ne faut surtout pas mettre ca ». L'image
     part dans #click, que les VA lisent. La LTV sort aussi : multipliee par
-    les abonnes, elle redonne le net."""
+    les abonnes, elle redonne le net.
+
+    La fleche d'evolution des abonnes a sa place (PLACE_EVO) a droite de la
+    colonne 16–30, comptee dans SA largeur, comme pour les clics."""
     lignes = t.get("lignes") or []
+    reserve = PLACE_EVO if any(g.get("evo") for g in lignes) else 0
     colonnes = list(t.get("colonnes") or COLONNES)[:4]
     while len(colonnes) < 4:
         colonnes.append("")
@@ -894,6 +1058,7 @@ def _gabarit_subs(d, t: dict) -> dict:
                 w = max(w, _l(d, txt, f) + (26 if k == 3 else 0))
             besoins.append(w + 26)
         besoins[3] = max(besoins[3], 116)
+        besoins[1] += reserve
         x_fin_nom = LARGEUR - 40 - sum(besoins)
         if x_fin_nom - X_NOM >= NOM_MIN_SUBS:
             break
@@ -903,14 +1068,14 @@ def _gabarit_subs(d, t: dict) -> dict:
     else:
         echelle, besoins, x_fin_nom, f_ch, f_ch_b, f_pastille = meilleur
     return {"entetes": entetes, "besoins": besoins, "x_fin_nom": x_fin_nom,
-            "echelle": echelle, "f_col": f_col, "f_ch": f_ch, "f_ch_b": f_ch_b,
+            "echelle": echelle, "reserve": reserve, "f_col": f_col, "f_ch": f_ch, "f_ch_b": f_ch_b,
             "f_pastille": f_pastille}
 
 
 def gabarit_subs(t: dict) -> dict:
     """Le gabarit des colonnes des abonnes, sans dessiner (pour les tests)."""
     g = _gabarit_subs(_mesureur(), t)
-    return {k: g[k] for k in ("besoins", "x_fin_nom", "echelle")}
+    return {k: g[k] for k in ("besoins", "x_fin_nom", "echelle", "reserve")}
 
 
 def dessiner_subs(t: dict, photos: dict = None) -> bytes:
@@ -952,6 +1117,8 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
         x += w
         bords.append(x - 12)
     x_conv = bords[3] - (besoins[3] - 12) / 2
+    # Les abonnes de la quinzaine s'alignent a gauche de la place de la fleche.
+    bords[1] -= gb["reserve"]
 
     n_pers = t.get("personnes") or 0
     droite = "%d %s" % (n_pers, "person" if n_pers == 1 else "people")
@@ -994,6 +1161,9 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
 
         _chiffre(0, nombre(g["auj"]), f_ch)
         _chiffre(1, nombre(g["quinz"]), f_ch_b, fort=True)
+        if g.get("evo"):
+            bb = d.textbbox((_p(bords[1]), _p(cy)), nombre(g["quinz"]), font=f_ch_b, anchor="rm")
+            _fleche_evo(d, bords[1] + ECART_EVO, (bb[1] + bb[3]) / 2 / _K, g["evo"])
         _chiffre(2, nombre(g["prec"]), f_ch)
         if g["niveau"] == "aucun":
             d.text((_p(x_conv), _p(cy)), "—", font=f_ch, fill=TEXTE_3, anchor="mm")
