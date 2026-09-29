@@ -20,8 +20,10 @@ valide deux maquettes, dessinees ici :
       cours ; sous une personne a plusieurs liens, une sous-ligne par lien
       (« (Roucham) 1SP   1 / 6 · 63 / 161 · 329 / 1 318 »), pour garder le
       detail que montrait le tableau texte.
-  « Subs & LTV »  abonnes Today · 16–30 (en gras) · 1–15, revenu net 16–30,
-      LTV ($ / sub, fleche discrete vs 1–15) et conversion (pastille).
+  « Subs »  abonnes Today · 16–30 (en gras) · 1–15 et conversion (pastille).
+      AUCUN MONTANT (ni net ni LTV) : l'image part dans #click, que les VA
+      lisent (proprietaire, 29/09 au soir : « il ne faut surtout pas mettre
+      ca »). Le revenu reste lu et calcule (tableau_subs), jamais dessine.
 
 Ce module ne fait QUE le calcul et le dessin : ni Discord, ni reseau, ni
 fichier ecrit. Il se teste seul ; le cog lui passe tout ce qu'il faut. Les
@@ -81,26 +83,32 @@ NOMS = (NOM_CLICS, NOM_SUBS, NOM_ANCIEN)
 #: lignes font deja une image de ~4 000 px de haut. Aujourd'hui : 27.
 PLAFOND = 60
 
-# --- Le taux de conversion : trois couleurs, et un gris ---------------------
+# --- Le taux de conversion : cinq couleurs, et un gris ----------------------
 #
-# LES SEUILS, cales sur le vrai report du 29/09 (capture du proprietaire) :
-# les taux de l'equipe vont de 10,5 % a 28 %. Sous 12 %, rouge ; 20 % et
-# plus, vert ; entre les deux, orange. Des bornes FIXES : une couleur qui
+# LES SEUILS DU PROPRIETAIRE (29/09 au soir) : « la conversion, c'est les
+# personnes qui cliquent et qui s'abonnent. 10 %, c'est bien, c'est la base.
+# Jusqu'a 7,5 %, ca va. Entre 7,5 et 5, c'est orange. Moins de 5, rouge. A
+# partir de 15, 20, c'est vraiment top. » Des bornes FIXES : une couleur qui
 # change parce que les autres ont bouge ne se lit pas d'un jour sur l'autre.
 #
 # LE GRIS. Sous 50 clics, un seul abonne fait 2 % et deux font 4 % : le taux
 # dit le hasard, pas la personne. On l'ecrit quand meme, en gris.
-TAUX_FORT = 20.0
-TAUX_MOYEN = 12.0
+TAUX_TOP = 15.0
+TAUX_BIEN = 10.0
+TAUX_CORRECT = 7.5
+TAUX_MOYEN = 5.0
 CLICS_MIN_TAUX = 50
 
+VERT_VIF_PASTILLE = (34, 197, 94)
 VERT_PASTILLE = (36, 128, 70)
+VERT_CLAIR_PASTILLE = (163, 207, 98)
 ORANGE_PASTILLE = (240, 178, 50)
 ROUGE_PASTILLE = (218, 55, 60)
 GRIS_PASTILLE = (78, 80, 88)
-_ENCRE_PASTILLE = {"fort": (255, 255, 255), "moyen": (30, 31, 34),
-                   "faible": (255, 255, 255), "petit": (225, 227, 230)}
-_FOND_PASTILLE = {"fort": VERT_PASTILLE, "moyen": ORANGE_PASTILLE,
+_ENCRE_PASTILLE = {"top": (8, 40, 20), "bien": (255, 255, 255), "correct": (24, 40, 12),
+                   "moyen": (30, 31, 34), "faible": (255, 255, 255), "petit": (225, 227, 230)}
+_FOND_PASTILLE = {"top": VERT_VIF_PASTILLE, "bien": VERT_PASTILLE,
+                  "correct": VERT_CLAIR_PASTILLE, "moyen": ORANGE_PASTILLE,
                   "faible": ROUGE_PASTILLE, "petit": GRIS_PASTILLE}
 
 #: Le podium : or, argent, bronze -- les memes rangs que les medailles du
@@ -121,13 +129,18 @@ COLONNES = ("Today", "Yesterday", "16–30", "1–15")
 
 
 def niveau_taux(taux, clics) -> str:
-    """« fort », « moyen », « faible », « petit » (trop peu de clics) ou « aucun »."""
+    """« top » (15 % et plus), « bien » (10), « correct » (7,5), « moyen » (5),
+    « faible » (sous 5 %), « petit » (trop peu de clics) ou « aucun »."""
     if taux is None:
         return "aucun"
     if not isinstance(clics, (int, float)) or clics < CLICS_MIN_TAUX:
         return "petit"
-    if taux >= TAUX_FORT:
-        return "fort"
+    if taux >= TAUX_TOP:
+        return "top"
+    if taux >= TAUX_BIEN:
+        return "bien"
+    if taux >= TAUX_CORRECT:
+        return "correct"
     if taux >= TAUX_MOYEN:
         return "moyen"
     return "faible"
@@ -425,7 +438,7 @@ def tableau_subs(donnees: dict, annuaire=None, periode: str = "", espace: str = 
         else:
             x["rang"] = None
     return {
-        "titre": "Subs & LTV",
+        "titre": "Subs",
         "periode": str(periode or ""),
         "espace": str(espace or ""),
         "maj": str(maj or ""),
@@ -848,36 +861,39 @@ def _triangle(d, x, cy, haut: bool, couleur) -> None:
 
 
 def _gabarit_subs(d, t: dict) -> dict:
-    """Les six colonnes des abonnes : Today, 16–30 (en gras : la quinzaine
-    en cours), 1–15, Net 16–30, LTV, Conv. Largeurs MESUREES sur le plus long
-    texte de chacune, comme pour les clics ; la LTV garde 20 px pour sa
-    fleche, la conversion la largeur de sa pastille."""
+    """Les quatre colonnes des abonnes : Today, 16–30 (en gras : la quinzaine
+    en cours), 1–15, Conv. Largeurs MESUREES sur le plus long texte de
+    chacune, comme pour les clics ; la conversion prend la largeur de sa
+    pastille.
+
+    AUCUN MONTANT. Le proprietaire, le 29/09 au soir : « combien d'argent net
+    ils ont rapporte a l'agence, il ne faut surtout pas mettre ca ». L'image
+    part dans #click, que les VA lisent. La LTV sort aussi : multipliee par
+    les abonnes, elle redonne le net."""
     lignes = t.get("lignes") or []
     colonnes = list(t.get("colonnes") or COLONNES)[:4]
     while len(colonnes) < 4:
         colonnes.append("")
-    entetes = [colonnes[0], colonnes[2], colonnes[3], "Net " + colonnes[2], "LTV $/sub", "Conv."]
+    entetes = [colonnes[0], colonnes[2], colonnes[3], "Conv."]
     f_col = police("bold", _p(22))
     meilleur = None
     for echelle in (1.0, 0.9, 0.8, 0.72):
         f_ch = police("medium", _p(26 * echelle))
         f_ch_b = police("bold", _p(28 * echelle))
         f_pastille = police("bold", _p(22 * max(echelle, 0.9)))
-        valeurs = [[], [], [], [], [], []]
+        valeurs = [[], [], [], []]
         for g in lignes:
             valeurs[0].append((nombre(g["auj"]), f_ch))
             valeurs[1].append((nombre(g["quinz"]), f_ch_b))
             valeurs[2].append((nombre(g["prec"]), f_ch))
-            valeurs[3].append((dollars(g["net"]), f_ch))
-            valeurs[4].append((dollars(g["ltv"], cents=True), f_ch))
-            valeurs[5].append((taux_txt(g["taux"]), f_pastille))
+            valeurs[3].append((taux_txt(g["taux"]), f_pastille))
         besoins = []
-        for k in range(6):
+        for k in range(4):
             w = _l(d, entetes[k], f_col)
             for txt, f in valeurs[k]:
-                w = max(w, _l(d, txt, f) + (26 if k == 5 else 0) + (20 if k == 4 else 0))
+                w = max(w, _l(d, txt, f) + (26 if k == 3 else 0))
             besoins.append(w + 26)
-        besoins[5] = max(besoins[5], 116)
+        besoins[3] = max(besoins[3], 116)
         x_fin_nom = LARGEUR - 40 - sum(besoins)
         if x_fin_nom - X_NOM >= NOM_MIN_SUBS:
             break
@@ -898,7 +914,7 @@ def gabarit_subs(t: dict) -> dict:
 
 
 def dessiner_subs(t: dict, photos: dict = None) -> bytes:
-    """Le PNG « Subs & LTV ». Leve si l'image est impossible (le cog garde
+    """Le PNG « Subs ». Leve si l'image est impossible (le cog garde
     alors la section Subscribers en texte)."""
     photos = photos or {}
     largeur, marge = LARGEUR, 40
@@ -935,11 +951,11 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
     for w in besoins:
         x += w
         bords.append(x - 12)
-    x_conv = bords[5] - (besoins[5] - 12) / 2
+    x_conv = bords[3] - (besoins[3] - 12) / 2
 
     n_pers = t.get("personnes") or 0
     droite = "%d %s" % (n_pers, "person" if n_pers == 1 else "people")
-    _entete(img, d, t, t.get("titre") or "Subs & LTV", marge, largeur, droite)
+    _entete(img, d, t, t.get("titre") or "Subs", marge, largeur, droite)
 
     y0 = marge + h_tete + 10
     d.rounded_rectangle((_p(marge), _p(y0), _p(largeur - marge), _p(y0 + h_entete - 6)),
@@ -947,9 +963,9 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
     cy = y0 + (h_entete - 6) / 2
     d.text((_p(x_rang), _p(cy)), "#", font=f_col, fill=TEXTE_2, anchor="mm")
     d.text((_p(x_nom), _p(cy)), "VA", font=f_col, fill=TEXTE_2, anchor="lm")
-    for k in range(6):
+    for k in range(4):
         coul = TEXTE if k == 1 else TEXTE_2
-        if k == 5:
+        if k == 3:
             d.text((_p(x_conv), _p(cy)), entetes[k], font=f_col, fill=coul, anchor="mm")
         else:
             d.text((_p(bords[k]), _p(cy)), entetes[k], font=f_col, fill=coul, anchor="rm")
@@ -979,14 +995,6 @@ def dessiner_subs(t: dict, photos: dict = None) -> bytes:
         _chiffre(0, nombre(g["auj"]), f_ch)
         _chiffre(1, nombre(g["quinz"]), f_ch_b, fort=True)
         _chiffre(2, nombre(g["prec"]), f_ch)
-        _chiffre(3, dollars(g["net"]), f_ch, fort=True)
-        # LTV : la fleche a DROITE du chiffre, dans la place gardee pour elle.
-        lt = dollars(g["ltv"], cents=True)
-        d.text((_p(bords[4] - 20), _p(cy)), lt, font=f_ch,
-               fill=TEXTE_3 if lt in ("—", "·") else TEXTE, anchor="rm")
-        if g.get("fleche"):
-            _triangle(d, bords[4] - 12, cy, g["fleche"] == "haut",
-                      FLECHE_HAUT if g["fleche"] == "haut" else FLECHE_BAS)
         if g["niveau"] == "aucun":
             d.text((_p(x_conv), _p(cy)), "—", font=f_ch, fill=TEXTE_3, anchor="mm")
         else:
@@ -1015,6 +1023,6 @@ def texte_alt_clics(t: dict) -> str:
 def texte_alt_subs(t: dict) -> str:
     tete = [x for x in (t.get("lignes") or []) if x.get("suivi")][:3]
     podium = ", ".join("%s %s subs" % (x["titre"], nombre(x["quinz"])) for x in tete)
-    return ("Subs & LTV %s: %d people%s" % (
+    return ("Subs %s: %d people%s" % (
         t.get("periode") or "", t.get("personnes") or 0,
         (" — top: " + podium) if podium else ""))[:1024]

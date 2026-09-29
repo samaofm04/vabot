@@ -647,7 +647,7 @@ _REMPLACE = {
     "subs": ("⭐", "\U0001F465"),
 }
 #: Le nom de chaque image, dit quand elle manque.
-_NOM_PARTIE = {"clics": "Clicks", "subs": "Subs & LTV"}
+_NOM_PARTIE = {"clics": "Clicks", "subs": "Subs"}
 
 
 def _identite_fiches(c) -> str:
@@ -779,7 +779,7 @@ async def images_report(bot, prep: dict, guilde=None) -> tuple:
             infos["erreurs"][quoi] = (
                 "aucun abonne lu (MyPuls)" if not any(x.get("suivi") for x in ts["lignes"])
                 else "abonnes de la quinzaine illisibles (MyPuls)")
-            print("[reportclick] image Subs & LTV non dessinee : %s" % infos["erreurs"][quoi],
+            print("[reportclick] image Subs non dessinee : %s" % infos["erreurs"][quoi],
                   flush=True)
             continue
         try:

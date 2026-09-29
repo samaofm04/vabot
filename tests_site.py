@@ -16466,11 +16466,14 @@ try:
     check("clics en image : clics non lus -> « — », en fin de liste",
           _vaK["cellules"][2] == (None, None) and _ciK.nombre(None) == "—" and _vaK["rang"] is None,
           _vaK)
-    # Seuils cales sur le vrai report du 29/09 (taux de 10,5 % a 28 %).
-    check("clics en image : taux et couleurs (seuils 12 % / 20 %, gris sous 50 clics)",
-          _ciK.niveau_taux(20.3, 1415) == "fort" and _ciK.niveau_taux(13.8, 1022) == "moyen"
-          and _ciK.niveau_taux(10.5, 4202) == "faible" and _ciK.niveau_taux(28.0, 42) == "petit"
-          and _ciK.niveau_taux(20.0, 50) == "fort" and _ciK.niveau_taux(12.0, 500) == "moyen"
+    # Les seuils du proprietaire (29/09 au soir) : 15 % top, 10 % bien (la
+    # base), 7,5 % ca va, 5 % orange, en dessous rouge ; gris sous 50 clics.
+    check("clics en image : taux et couleurs (seuils 15 / 10 / 7,5 / 5 %, gris sous 50 clics)",
+          _ciK.niveau_taux(20.3, 1415) == "top" and _ciK.niveau_taux(13.8, 1022) == "bien"
+          and _ciK.niveau_taux(8.0, 1000) == "correct" and _ciK.niveau_taux(6.0, 500) == "moyen"
+          and _ciK.niveau_taux(4.9, 4202) == "faible" and _ciK.niveau_taux(28.0, 42) == "petit"
+          and _ciK.niveau_taux(15.0, 50) == "top" and _ciK.niveau_taux(10.0, 500) == "bien"
+          and _ciK.niveau_taux(7.5, 500) == "correct" and _ciK.niveau_taux(5.0, 500) == "moyen"
           and _ciK.niveau_taux(None, 100) == "aucun"
           and next(x for x in _sK["lignes"] if x["titre"] == "DOLAD")["niveau"] == "petit")
     check("clics en image : tuiles = memes chiffres, « — » si illisible",
@@ -16568,6 +16571,13 @@ try:
     check("deux tableaux : colonnes des abonnes mesurees aussi",
           _gS["x_fin_nom"] - _ciK.X_NOM >= _ciK.NOM_MIN_SUBS
           and _ciK.dessiner_subs(_sBig, {})[:4] == b"\x89PNG", _gS)
+    # « Il ne faut surtout pas mettre ca » (proprietaire, 29/09 au soir) :
+    # aucun montant dans l'image des abonnes, que les VA lisent dans #click.
+    _eS = _ciK._gabarit_subs(_ciK._mesureur(), _sBig)["entetes"]
+    check("deux tableaux : l'image des abonnes ne montre AUCUN montant (ni net, ni LTV)",
+          _eS == ["Today", "16–30", "1–15", "Conv."] and _sBig["titre"] == "Subs"
+          and "LTV" not in _ciK.texte_alt_subs(_sBig) and "$" not in _ciK.texte_alt_subs(_sBig),
+          (_eS, _sBig["titre"]))
 
     # « — » et « · », jamais 0, et jamais un total partiel.
     _dN = {"marche": "US", "resume": [], "abonnes": [], "par_lien": [
@@ -16799,7 +16809,7 @@ try:
     _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m3, _eR, "t", _imgsK[:1], {}))
     _txt3 = repr([c.to_component_dict() for c in _m3.edits[0]["view"].children])
     check("deux tableaux : salon ranking -- une image ratee, sa partie reste en texte",
-          len(_m3.edits[0]["attachments"]) == 1 and "Subs & LTV image unavailable" in _txt3
+          len(_m3.edits[0]["attachments"]) == 1 and "Subs image unavailable" in _txt3
           and "B — 9 subs" in _txt3 and "A — 10 clicks" not in _txt3, _txt3[:300])
     _m4 = _MsgK(False)
     _aioK.run(_crK._ranking_en_galerie(None, None, "k", _m4, _eR, "t", _imgsK, {}))

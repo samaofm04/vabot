@@ -965,7 +965,7 @@ class MenuTest(commands.Cog):
 
     @app_commands.command(
         name="democlics",
-        description="[DÉMO] Les deux images du report clics (US vs global, Subs & LTV), telles que postées",
+        description="[DÉMO] Les deux images du report clics (US vs global, Subs), telles que postées",
     )
     async def democlics(self, interaction: discord.Interaction):
         # Demande du proprietaire du 29/09 : les classements du report #click
