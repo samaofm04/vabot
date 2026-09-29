@@ -15615,6 +15615,10 @@ try:
     import types as _tyR
     import discord as _dR
     import cogs.numeros as _nR, numgen as _gR, cogs.user as _uR
+    # Ces scenarios relisent le TEXTE des embeds du recap : ils tournent en
+    # mode texte (le repli du recap en image). L'image est verifiee plus bas
+    # (demande du proprietaire du 29/09 : le debrief-day en image).
+    _nR.RECAP_IMAGE = False
     from datetime import datetime as _dtR, timedelta as _tdR, timezone as _tzR
     _savR = (_nR.SALONS_FILE, _nR.POLL_SECONDS, _gR.status, _gR.get_number, _gR.balances,
              _gR.get_code, _gR.cancel, _gR.finish, _gR.retry, _uR._is_staff_member,
@@ -16180,6 +16184,10 @@ try:
     import discord as _dQ
     import safe_json as _sjQ
     import cogs.numeros as _nQ, numgen as _gQ, cogs.user as _uQ
+    # Ces scenarios relisent le TEXTE des embeds du recap : ils tournent en
+    # mode texte (le repli du recap en image). L'image est verifiee plus bas
+    # (demande du proprietaire du 29/09 : le debrief-day en image).
+    _nQ.RECAP_IMAGE = False
 
     _savNQ = {k: getattr(_nQ, k) for k in ("SALONS_FILE", "POLL_SECONDS")}
     _savGQ = {k: getattr(_gQ, k) for k in (
@@ -17174,6 +17182,10 @@ try:
     import types as _tyZ
     import discord as _dZ
     import cogs.numeros as _nZ
+    # Ces scenarios relisent le TEXTE des embeds du recap : ils tournent en
+    # mode texte (le repli du recap en image). L'image est verifiee plus bas
+    # (demande du proprietaire du 29/09 : le debrief-day en image).
+    _nZ.RECAP_IMAGE = False
     import safe_json as _sjZ
     from datetime import datetime as _dtZ, timedelta as _tdZ, timezone as _tzZ
     _savZ = (_nZ.SALONS_FILE, _nZ.HISTO_FILE, _nZ.RECAP_FILE)
@@ -18634,6 +18646,720 @@ except Exception as _eZ:
     import traceback as _tbZ
     _tbZ.print_exc()
     check("recap a 0 : testable", False, repr(_eZ)[:200])
+
+
+# ---------------------------------------------------------------------------
+# Demande du proprietaire du 29/09 : le debrief-day en image avec les photos
+# (« tu vois ce qu'on a fait pour les sessions, fais un truc style pour les
+# debrief-day, avec PP et tout »). Le dessin seul (numeros_image), puis le
+# recap entier contre un FAUX serveur Discord qui recoit les charges
+# construites par discord.py lui-meme (vrais discord.Message,
+# PartialMessage.edit, handle_message_parameters) et applique les regles des
+# messages V2 : ni embed ni contenu, drapeau impossible a retirer.
+print()
+print("=" * 70)
+print("Recap numeros en IMAGE (debrief-day, demande du 29/09)")
+print("=" * 70)
+try:
+    import asyncio as _aI, tempfile as _tfI, logging as _lgI, shutil as _shI
+    import io as _ioI, json as _jsI, copy as _cpI, types as _tyI
+    import discord as _dI
+    from discord.message import Message as _MessageI
+    from discord.http import handle_message_parameters as _hmpI
+    from datetime import datetime as _dtI, timedelta as _tdI, timezone as _tzI
+    from PIL import Image as _ImI
+    import cogs.numeros as _nI
+    import numeros_image as _niI
+    import cogs.sessionsvoc as _svcI
+    import cogs.menutest as _mtI
+    _savI = (_nI.SALONS_FILE, _nI.HISTO_FILE, _nI.RECAP_FILE, _nI.RECAP_IMAGE,
+             _niI.dessiner_recap)
+    _envI = os.environ.pop("VA_MACHINE_PROD", None)
+    _tmpI = pathlib.Path(_tfI.mkdtemp(prefix="recapimage_"))
+    _auditI, _nEcritsI = _V2_AUDIT["actif"], len(_V2_AUDIT["ecrits"])
+    _V2_AUDIT["actif"] = True
+    _nI.RECAP_IMAGE = True
+    _MISSI = _dI.utils.MISSING
+    try:
+        _UTCI = _tzI(_tdI(hours=1))
+        _KWI = dict(seuil_loupe=_nI.RECAP_SEUIL_LOUPE, zero_direct=_nI.RECAP_ZERO_DIRECT,
+                    zero_final=_nI.RECAP_ZERO_FINAL, tz=_nI.BENIN)
+
+        def _ppI(couleur):
+            b = _ioI.BytesIO()
+            _ImI.new("RGB", (128, 128), couleur).save(b, "PNG")
+            return b.getvalue()
+
+        def _pngI(b):
+            im = _ImI.open(_ioI.BytesIO(b))
+            im.load()
+            return im
+
+        def _vaI(n, c, sans=0, att=0):
+            return {"n": n, "c": c, "sans": sans, "attente": att, "nom": ""}
+
+        def _aggI(vas, mails=0, rendus=0):
+            return {"vas": vas, "numeros": sum(v["n"] for v in vas.values()), "mails": mails,
+                    "mails_codes": 0, "rendus": rendus,
+                    "attente": sum(v["attente"] for v in vas.values())}
+
+        # ---- 1. le dessin seul -------------------------------------------
+        J = _dtI(2026, 9, 29).date()
+        t708 = _dtI(2026, 9, 29, 7, 8, tzinfo=_UTCI).timestamp()
+        aggD = _aggI({"1": _vaI(9, 4, 5), "2": _vaI(6, 6), "3": _vaI(3, 1, 0, 2),
+                      "4": _vaI(2, 1, 1)}, mails=1, rendus=1)
+        nomsD = {"1": "DONALD", "2": "Harrys la fureur 👹",
+                 "3": "Gérôme Ñúñez Ëlodie au nom beaucoup trop long pour sa colonne", "4": ""}
+        photosD = {"1": _ppI((200, 120, 90)), "2": b"pas une image"}
+        rendus_ = {}
+        for nom_, direct_, depuis_, agg_ in (
+                ("direct", True, None, aggD), ("fige", False, None, aggD),
+                ("partiel", False, t708 - 3600, aggD), ("zero direct", True, None, _aggI({})),
+                ("zero fige", False, None, _aggI({})),
+                ("40 VA", True, None, _aggI({str(100 + k): _vaI(40 - k, (40 - k) // 2, k % 6)
+                                             for k in range(40)}))):
+            png_ = _niI.dessiner_recap(J, agg_, nomsD, photosD, direct_, depuis_, t708, **_KWI)
+            rendus_[nom_] = _pngI(png_)
+        check("image : PNG valide, 1100 px de large, en direct / fige / partiel / zero / 40 VA "
+              "(nom long, emoji, photo illisible, photo absente, VA sans nom)",
+              all(im.format == "PNG" and im.width == 1100 for im in rendus_.values()),
+              {k: (im.format, im.size) for k, im in rendus_.items()})
+        check("image : 40 VA -> l'image grandit, rien n'est coupe (40 lignes de 82 px)",
+              rendus_["40 VA"].height >= 40 * 82 + 128
+              and rendus_["40 VA"].height > rendus_["direct"].height,
+              (rendus_["40 VA"].height, rendus_["direct"].height))
+        tD = _niI.recap(J, aggD, nomsD, True, None, t708, 4, _nI.BENIN)
+        tF = _niI.recap(J, aggD, nomsD, False, None, t708, 4, _nI.BENIN)
+        tP = _niI.recap(J, aggD, nomsD, False, t708 - 3600, t708, 4, _nI.BENIN)
+        tZ = _niI.recap(J, _aggI({}), {}, True, None, t708, 4, _nI.BENIN)
+        check("image : en-tete « En direct » + « mardi 29/09 · depuis 00h00 · heure du Bénin · "
+              "mis à jour à 07h08 », figee « Journée complète » / « Journée partielle » (de 06h08)",
+              tD["etat"] == "En direct" and tD["date"] == "mardi 29/09"
+              and tD["sous"] == ["depuis 00h00", "heure du Bénin"]
+              and tD["maj"] == "mis à jour à 07h08"
+              and tF["etat"] == "Journée complète" and tF["maj"] == ""
+              and tF["sous"][0] == "de 00h00 à 23h59"
+              and tP["etat"] == "Journée partielle" and tP["sous"][0] == "de 06h08 à 23h59",
+              (tD["etat"], tD["sous"], tD["maj"], tF["etat"], tP["sous"]))
+        check("image : a 0, pas d'heure de mise a jour (regle du texte)", tZ["maj"] == "", tZ)
+        check("image : total « Total : 20 numéros · 12 codes (60 %) », mails et rendus gardes",
+              _niI.texte_total(tD) == "Total : 20 numéros · 12 codes (60 %)"
+              and tD["mails"] == 1 and tD["rendus"] == 1,
+              (_niI.texte_total(tD), tD["mails"], tD["rendus"]))
+        # Le tri : le MEME que le texte (numeros, codes, nom), une seule cle.
+        aggT = _aggI({"a": _vaI(5, 3), "b": _vaI(5, 4), "c": _vaI(7, 0), "d": _vaI(5, 3)})
+        nomsT = {"a": "zoé", "b": "Yann", "c": "Xavier", "d": "Anna"}
+        _tt, morcT = _nI.texte_recap(J, aggT, nomsT, en_direct=t708)
+        ordreTexte = [l_.split(" — ")[0][2:] for l_ in morcT[0].split("\n") if l_.startswith("• ")]
+        ordreImage = [nomsT[l_["id"]] for l_ in _niI.recap(J, aggT, nomsT, True, None, t708, 4,
+                                                            _nI.BENIN, _nI._cle_nom_recap(nomsT))["lignes"]]
+        check("image : meme tri que le texte (numeros decroissants, codes, puis nom)",
+              ordreTexte == ordreImage == ["Xavier", "Yann", "Anna", "zoé"],
+              (ordreTexte, ordreImage))
+        check("image : seuils de la barre -- vert >= 75 %, orange 40-74 %, rouge < 40 %",
+              [_niI.niveau_reussite(x) for x in (100, 75, 74, 40, 39, 0)]
+              == ["vert", "vert", "orange", "orange", "rouge", "rouge"])
+        lo = {l_["id"]: l_["sans"] for l_ in _niI.recap(
+            J, _aggI({"q": _vaI(9, 5, 4), "r": _vaI(9, 6, 3)}), {}, True, None, t708,
+            _nI.RECAP_SEUIL_LOUPE, _nI.BENIN)["lignes"]}
+        check("image : loupe « sans code » au seuil exact du texte (4 oui, 3 non)",
+              _nI.RECAP_SEUIL_LOUPE == 4 and lo == {"q": 4, "r": 0}, lo)
+        check("image : « en attente » compte les numeros qui attendent leur code",
+              [l_["attente"] for l_ in tD["lignes"] if l_["id"] == "3"] == [2])
+        check("image : uid sans nom -> l'uid, comme le texte",
+              [l_["nom"] for l_ in tD["lignes"] if l_["id"] == "4"] == ["4"])
+        alts = [_nI.alt_recap(J, a_, f_, t708, d_) for a_ in (
+                aggD, _aggI({}), _aggI({str(100 + k): _vaI(40 - k, 3) for k in range(40)}, 12, 7))
+                for f_ in (True, False) for d_ in (None, t708 - 3600)]
+        check("image : texte de remplacement court (<= 256 avec le titre), titre du recap en tete",
+              all(len("%s\n%s" % a_) <= 256 for a_ in alts)
+              and alts[0][0] == _nI.titre_recap(J, False) and alts[2][0] == _nI.titre_recap(J, True),
+              [len("%s\n%s" % a_) for a_ in alts])
+
+        # Chevauchements (relecture du 29/09) : « 1 en attente » passait sur
+        # le « 20 » de « 20 numéros », un nom tronque touchait « 100 », et
+        # « Journée partielle » + 377 numéros coupait le titre.
+        def _mesI(vas, noms, direct_=True, depuis_=None):
+            m_ = []
+            _niI.dessiner_recap(J, _aggI(vas), noms, {}, direct_, depuis_, t708, mesures=m_, **_KWI)
+            return m_
+        long_ = "Gérôme Ñúñez Ëlodie au nom beaucoup trop long pour sa colonne"
+        geo_ = []
+        for n_, s_, a_ in ((9, 4, 1), (20, 4, 1), (12, 8, 2), (99, 88, 11), (128, 95, 16),
+                           (999, 999, 999)):
+            l_ = _mesI({"1": _vaI(n_, 0, s_, a_)}, {"1": long_})[1]
+            geo_.append((n_, s_, a_, l_["pastilles"], l_["pastilles_fin"], l_["nom_fin"],
+                         l_["chiffre_debut"]))
+        check("image : pastilles et nom s'arretent AVANT le chiffre des numeros (20/4/1, 99/88/11, "
+              "128/95/16...) -- raccourcies (« N att. »), jamais cachees",
+              all(pf_ <= cd_ - 12 and nf_ <= cd_ - 16 and len(pa_) == 2
+                  for _n, _s, _a, pa_, pf_, nf_, cd_ in geo_), geo_)
+        tit_ = [(d_, n_, _mesI({"1": _vaI(n_, 1)}, {"1": "X"}, dir_, d_)[0])
+                for dir_, d_ in ((True, None), (False, None), (False, t708 - 3600))
+                for n_ in (9, 100, 377, 999, 9999)]
+        check("image : le titre « Récap numéros SMS » n'est jamais coupe (999 numéros, "
+              "« Journée partielle »), la pastille d'etat ne touche pas le compteur",
+              all(h_["titre"] == "Récap numéros SMS"
+                  and h_["pastille_fin"] + 30 <= h_["compteur_debut"] + 0.5
+                  for _d, _n, h_ in tit_), [(n_, h_["titre"]) for _d, n_, h_ in tit_])
+        sty_ = _mesI({"1": _vaI(9, 4), "2": _vaI(3, 3), "3": _vaI(2, 1)},
+                     {"1": "𝓑𝓮𝓵𝓵𝓪 𝓥𝓐", "2": "ＷＩＤＥ", "3": "Léa² 🌸"})
+        check("image : pseudos en lettres stylisees (𝓑𝓮𝓵𝓵𝓪 𝓥𝓐, ＷＩＤＥ) -> « Bella VA », « WIDE », "
+              "pas l'identifiant ; « Léa² » garde son ²",
+              [x_["nom"] for x_ in sty_[1:]] == ["Bella VA", "WIDE", "Léa²"], sty_[1:])
+        # Vrai recap du 29/09 : le pseudo Discord « …FIXE/SPAM » etait coupe au
+        # « / » et affiche « +1 », un second compte qui n'existe pas.
+        sl_ = _mesI({"1": _vaI(3, 2), "2": _vaI(2, 1)},
+                    {"1": "🔞⭐ROUCHAM 1 IPHONE X FIXE/SPAM", "2": "VA NOUM 1X1 / VA NOUM 2X1"})
+        check("image : un « / » dans un pseudo (FIXE/SPAM) n'invente pas de « +1 » ; "
+              "« A / B » (deux fiches) garde son « +1 »",
+              "+1" not in sl_[1]["nom"] and sl_[2]["nom"].endswith("+1"),
+              [x_["nom"] for x_ in sl_[1:]])
+
+        # ---- 2. le recap entier contre un faux serveur Discord ------------
+        _HI = [0.0]
+        _REGLESI = []
+
+        class _SrvI:
+            def __init__(self):
+                self.msgs, self.n, self.envois, self.edits = {}, 10 ** 15, [], []
+                self.nonces = {}
+
+            def appliquer(self, data, p):
+                v2_avant = bool(data.get("flags", 0) & (1 << 15))
+                nouveau = dict(data)
+                for k in ("content", "embeds", "components", "flags"):
+                    if k in p:
+                        nouveau[k] = p[k] if p[k] is not None else ("" if k == "content" else [])
+                if "attachments" in p:
+                    nouveau["attachments"] = [
+                        {"id": str(9000 + i), "filename": x["filename"], "size": 1,
+                         "url": "https://cdn/att/%s" % x["filename"],
+                         "proxy_url": "https://cdn/att/%s" % x["filename"]}
+                        for i, x in enumerate(p["attachments"])]
+                v2 = bool(nouveau.get("flags", 0) & (1 << 15))
+                if v2_avant and not v2:
+                    _REGLESI.append(p)
+                    raise _dI.HTTPException(_tyI.SimpleNamespace(status=400, reason="x"),
+                                            "drapeau V2 retire")
+                if v2 and (nouveau.get("embeds") or nouveau.get("content")):
+                    _REGLESI.append(p)
+                    raise _dI.HTTPException(_tyI.SimpleNamespace(status=400, reason="x"),
+                                            "V2 avec embed/contenu")
+                return nouveau
+        _SRVI = _SrvI()
+
+        def _chargeI(params):
+            return (params.payload if params.payload is not None
+                    else _jsI.loads(params.multipart[0]["value"]))
+
+        # Les salons par identifiant : une edition avec piece jointe dans un
+        # salon sans « Joindre des fichiers » est refusee, comme un envoi.
+        _SALONSI = {}
+
+        class _EtatI:
+            allowed_mentions = None
+
+            def __init__(self):
+                self.http = _tyI.SimpleNamespace(edit_message=self.edit_message)
+
+            async def edit_message(self, cid, mid, params):
+                p = _chargeI(params)
+                s_ = _SALONSI.get(int(cid))
+                if s_ is not None and s_.refus_image is not None and p.get("attachments"):
+                    raise s_.refus_image
+                if int(mid) not in _SRVI.msgs:
+                    raise _dI.NotFound(_tyI.SimpleNamespace(status=404, reason="x"), "Unknown")
+                _SRVI.edits.append((int(mid), p, _HI[0]))
+                _SRVI.msgs[int(mid)] = _SRVI.appliquer(_SRVI.msgs[int(mid)], p)
+                return _SRVI.msgs[int(mid)]
+
+            def store_user(self, d, **k):
+                return _dI.User(state=self, data=d)
+
+            def prevent_view_updates_for(self, i):
+                pass
+
+            def store_view(self, v, i=None):
+                pass
+
+            def _get_guild(self, i):
+                return None
+
+            def __getattr__(self, n):
+                return lambda *a, **k: None
+        _ETATI = _EtatI()
+        _MOII = {"id": "1", "username": "admin", "discriminator": "0", "avatar": None}
+
+        class _GuildeI:
+            def __init__(self, gid, nom, membres):
+                self.id, self.name, self.text_channels = gid, nom, []
+                self.membres, self.unavailable = membres, False
+
+            def get_member(self, uid):
+                return self.membres.get(int(uid))
+
+        class _AssetI:
+            def __init__(self, cle, octets):
+                self.key, self.url, self.octets, self.lectures = cle, "https://cdn/%s" % cle, octets, 0
+
+            def replace(self, **k):
+                return self
+
+            async def read(self):
+                self.lectures += 1
+                return self.octets
+
+        def _membreI(uid, nom, couleur):
+            return _tyI.SimpleNamespace(id=uid, display_name=nom, name=nom.lower(),
+                                        display_avatar=_AssetI("av%d" % uid, _ppI(couleur)))
+
+        class _SalonI:
+            def __init__(self, sid, nom, guild):
+                self.id, self.name, self.guild = sid, nom, guild
+                self.type, self._state = _dI.ChannelType.text, _ETATI
+                self.refus_image = None
+                guild.text_channels.append(self)
+                _SALONSI[sid] = self
+
+            def _msg(self, data):
+                return _MessageI(state=_ETATI, channel=self, data=_cpI.deepcopy(data))
+
+            async def send(self, **kw):
+                params = _hmpI(content=kw.get("content", _MISSI), embed=kw.get("embed", _MISSI),
+                               view=kw.get("view", _MISSI), file=kw.get("file", _MISSI),
+                               allowed_mentions=kw.get("allowed_mentions", _MISSI),
+                               nonce=kw.get("nonce", _MISSI))
+                p = _chargeI(params)
+                if self.refus_image is not None and p.get("attachments"):
+                    raise self.refus_image
+                nonce = p.get("nonce")
+                if nonce is not None and nonce in _SRVI.nonces:
+                    return self._msg(_SRVI.msgs[_SRVI.nonces[nonce]])
+                _SRVI.n += 1
+                nid = _SRVI.n
+                base = {"id": str(nid), "channel_id": str(self.id), "author": _MOII,
+                        "content": "", "embeds": [], "attachments": [], "flags": 0,
+                        "components": [], "type": 0, "tts": False, "mention_everyone": False,
+                        "mentions": [], "mention_roles": [], "pinned": False,
+                        "timestamp": _dtI.fromtimestamp(_HI[0], _tzI.utc).isoformat(),
+                        "edited_timestamp": None}
+                _SRVI.msgs[nid] = _SRVI.appliquer(base, p)
+                if nonce is not None:
+                    _SRVI.nonces[nonce] = nid
+                _SRVI.envois.append((nid, p, self.id, _HI[0]))
+                return self._msg(_SRVI.msgs[nid])
+
+            def get_partial_message(self, mid):
+                return _dI.PartialMessage(channel=self, id=int(mid))
+
+            def history(self, limit=50, **k):
+                async def gen():
+                    mine = [i for i in sorted(_SRVI.msgs, reverse=True)
+                            if _SRVI.msgs[i]["channel_id"] == str(self.id)]
+                    for i in mine[:limit]:
+                        yield self._msg(_SRVI.msgs[i])
+                return gen()
+
+            def poser(self, data):
+                """Un message deja la (ancien format, ou poste avant un registre perdu)."""
+                _SRVI.n += 1
+                d = dict({"id": str(_SRVI.n), "channel_id": str(self.id), "author": _MOII,
+                          "content": "", "embeds": [], "attachments": [], "flags": 0,
+                          "components": [], "type": 0, "tts": False, "mention_everyone": False,
+                          "mentions": [], "mention_roles": [], "pinned": False,
+                          "timestamp": _dtI.fromtimestamp(_HI[0], _tzI.utc).isoformat(),
+                          "edited_timestamp": None}, **data)
+                _SRVI.msgs[_SRVI.n] = d
+                return _SRVI.n
+
+        class _BotI:
+            def __init__(self, guilds):
+                self.user = _tyI.SimpleNamespace(id=1)
+                self.guilds = list(guilds)
+
+            def is_ready(self):
+                return True
+
+            def get_guild(self, gid):
+                return next((g for g in self.guilds if g.id == int(gid)), None)
+
+            def get_channel(self, cid):
+                return next((c for g in self.guilds for c in g.text_channels
+                             if c.id == int(cid)), None)
+
+            def get_user(self, i):
+                return None
+
+        def _cheminsI(nom):
+            _nI.SALONS_FILE = _tmpI / nom / "numgen_salons.json"
+            _nI.HISTO_FILE = _tmpI / nom / "numgen_historique.json"
+            _nI.RECAP_FILE = _tmpI / nom / "numgen_recap.json"
+
+        def _mondeI(nom, *guilds):
+            _cheminsI(nom)
+            _svcI._AVATARS.clear()
+            _svcI._AVATARS_KO.clear()
+            return _BotI(guilds)
+
+        _seqI = iter(range(1, 10 ** 6))
+
+        def _priseI(g, uid, t, issue="code", nom=None):
+            aid = "i%d" % next(_seqI)
+            actif = {"id": aid, "kind": "sms", "provider": "getatext", "service": "ig",
+                     "valeur": "+1777%07d" % int(aid[1:]), "par": uid, "pris_le": int(t)}
+            u = _tyI.SimpleNamespace(id=uid, display_name=nom) if nom else None
+            assert _nI.histo_prise(actif, _tyI.SimpleNamespace(id=g.id + 1, guild=g), u,
+                                   maintenant=t)
+            if issue in ("code", "annule"):
+                assert _nI.histo_evenement("sms", aid, issue, maintenant=t + 30)
+
+        def _du_salonI(salon):
+            return [i for i in sorted(_SRVI.msgs) if _SRVI.msgs[i]["channel_id"] == str(salon.id)]
+
+        def _lireI(salon, mid):
+            return salon._msg(_SRVI.msgs[mid])
+
+        def _galerieI(m):
+            """(titre court, [alt], [pieces jointes]) d'un message V2 image."""
+            titres, alts = [], []
+            for c in _nI._composants(m.components):
+                if isinstance(getattr(c, "content", None), str):
+                    titres.append(c.content)
+                for it in (getattr(c, "items", None) or []):
+                    alts.append(it.description)
+            return titres, alts, [a.filename for a in m.attachments]
+
+        def _tsI(j, h=0, mi=0, s_=0):
+            return _dtI(j.year, j.month, j.day, tzinfo=_UTCI).timestamp() + h * 3600 + mi * 60 + s_
+
+        async def _tourI(cog, t):
+            _HI[0] = t
+            return await cog.recap_tour(maintenant=t)
+
+        async def _scenI():
+            D = _nI.jour_benin(time.time())
+            nomF = _nI.NOM_IMAGE_RECAP % D.isoformat()
+            # ---- A. une journee en image : message a 0, numeros, photos, gel
+            belarmin = _membreI(7, "Belarmin 🔥", (30, 140, 200))
+            kora = _membreI(21, "Kora", (200, 60, 120))
+            G = _GuildeI(7701, "YouL4b US", {7: belarmin, 21: kora})
+            bot = _mondeI("a", G)
+            DB = _SalonI(77010, "📊・debrief-day", G)
+            _SalonI(77011, "belarmin-numero-mail", G)
+            cog = _nI.NumerosCog(bot)
+            _priseI(G, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")   # historique plus ancien
+            await _tourI(cog, _tsI(D, 0, 0, 30))
+            (m0,) = _du_salonI(DB)
+            msg0 = _lireI(DB, m0)
+            ti0, al0, pj0 = _galerieI(msg0)
+            check("recap image : le message a 0 part en V2 -- « ## 📊 Récap numéros SMS — <jour> » "
+                  "+ UNE image, ni embed ni contenu",
+                  _nI.est_v2(msg0) and not msg0.embeds and not msg0.content
+                  and ti0 == ["## " + _nI.titre_recap(D, False)] and pj0 == [nomF]
+                  and len(al0) == 1 and _nI.RECAP_ZERO_DIRECT in al0[0],
+                  (ti0, al0, pj0, msg0.flags.value))
+            fiche = (_nI._recap_lire() or {}).get("jours", {}).get(D.isoformat(), {}).get("7701", {})
+            check("recap image : la fiche retient le message et son format (v2)",
+                  fiche.get("messages") == [m0] and fiche.get("v2") == [m0], fiche)
+            _priseI(G, 7, _tsI(D, 8), nom="Belarmin")
+            await _tourI(cog, _tsI(D, 8, 0, 40))
+            _priseI(G, 21, _tsI(D, 8, 5), issue="annule", nom="Kora")
+            await _tourI(cog, _tsI(D, 8, 5, 40))
+            ed = [e for e in _SRVI.edits if e[0] == m0]
+            msgA = _lireI(DB, m0)
+            _t, alA, pjA = _galerieI(msgA)
+            check("recap image : chaque numero REECRIT le meme message (pas de second), "
+                  "piece jointe REMPLACEE -- une seule",
+                  _du_salonI(DB) == [m0] and len(ed) == 2
+                  and all(len(e[1].get("attachments") or []) == 1 for e in ed)
+                  and pjA == [nomF], (len(_du_salonI(DB)), len(ed), pjA))
+            check("recap image : son texte relisible dit l'etat du moment (« Total : 2 numéro(s) »)",
+                  "Total : 2 numéro(s)" in alA[0] and "mis à jour à 08h05" in alA[0], alA)
+            check("recap image : photos lues UNE fois, le cache sert au tour suivant",
+                  belarmin.display_avatar.lectures == 1 and kora.display_avatar.lectures == 1,
+                  (belarmin.display_avatar.lectures, kora.display_avatar.lectures))
+            # Une pluie d'evenements : au plus une reecriture par minute.
+            n_av = len(_SRVI.edits)
+            for k in range(8):
+                _priseI(G, 21, _tsI(D, 9, 0, 7 * k), nom="Kora")
+                await _tourI(cog, _tsI(D, 9, 0, 7 * k + 1))
+            await _tourI(cog, _tsI(D, 9, 2))
+            ecr = [e[2] for e in _SRVI.edits[n_av:] if e[0] == m0]
+            check("recap image : une rafale de 8 numeros en 50 s -> au plus UNE reecriture par "
+                  "minute, la derniere valeur part",
+                  len(ecr) >= 1 and all(b - a >= 60 for a, b in zip(ecr, ecr[1:]))
+                  and "Total : 10 numéro(s)" in _galerieI(_lireI(DB, m0))[1][0],
+                  (ecr, _galerieI(_lireI(DB, m0))[1]))
+            # Minuit : le meme message fige, le jour suivant a son message a 0.
+            await _tourI(cog, _tsI(D + _tdI(days=1), 0, 0, 30))
+            msgF = _lireI(DB, m0)
+            tiF, alF, pjF = _galerieI(msgF)
+            j2 = [i for i in _du_salonI(DB) if i != m0]
+            check("recap image : minuit -> le MEME message fige (« Journée complète »), toujours "
+                  "V2 et une image ; le lendemain a son propre message",
+                  alF[0].startswith(_nI.titre_recap(D, False) + "\nJournée complète")
+                  and pjF == [nomF] and len(j2) == 1 and _nI.est_v2(msgF),
+                  (alF, pjF, j2))
+            cog2 = _nI.NumerosCog(bot)
+            n_env = len(_SRVI.envois)
+            await _tourI(cog2, _tsI(D + _tdI(days=1), 0, 3))
+            check("recap image : redemarrage (nouvelle instance) -> rien de reposte",
+                  len(_SRVI.envois) == n_env and len(_du_salonI(DB)) == 2,
+                  (len(_SRVI.envois) - n_env, len(_du_salonI(DB))))
+
+            # ---- B. le direct du matin a l'ANCIEN format (embed) : converti
+            G2 = _GuildeI(7702, "YouL4b", {7: belarmin})
+            bot = _mondeI("b", G2)
+            DB2 = _SalonI(77020, "debrief-day", G2)
+            _priseI(G2, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+            _priseI(G2, 7, _tsI(D, 6, 50), nom="Belarmin")
+            _HI[0] = _tsI(D, 6, 51)
+            ancien = DB2.poser({"embeds": [{"type": "rich", "title": _nI.titre_recap(D, True),
+                                            "description": "En cours : depuis 00h00, heure du "
+                                            "Bénin — mis à jour à 06h51.\n\n• Belarmin — 1 "
+                                            "numéro(s) · 1 code (100 %)\n\nTotal : 1 numéro(s)"}]})
+            cogB = _nI.NumerosCog(bot)
+            n_env = len(_SRVI.envois)
+            _priseI(G2, 7, _tsI(D, 7, 8), nom="Belarmin")
+            await _tourI(cogB, _tsI(D, 7, 8, 30))
+            conv = [e[1] for e in _SRVI.edits if e[0] == ancien]
+            msgB = _lireI(DB2, ancien)
+            check("recap image : le direct du matin (embed, registre sans trace) est RETROUVE et "
+                  "CONVERTI -- contenu et embed vides + drapeau V2 + image, meme requete",
+                  len(_SRVI.envois) == n_env and len(conv) == 1
+                  and conv[0].get("content") is None and conv[0].get("embeds") == []
+                  and conv[0].get("flags", 0) & (1 << 15) and len(conv[0].get("attachments")) == 1
+                  and _nI.est_v2(msgB) and not msgB.embeds, (len(_SRVI.envois) - n_env, conv[:1]))
+            # Registre perdu apres la conversion (copie .prev comprise) : le
+            # message V2 est retrouve.
+            for f_ in (_nI.RECAP_FILE, _nI.RECAP_FILE.with_name(_nI.RECAP_FILE.name + ".prev")):
+                if f_.exists():
+                    f_.unlink()
+            cogB2 = _nI.NumerosCog(bot)
+            n_env = len(_SRVI.envois)
+            _priseI(G2, 7, _tsI(D, 7, 20), nom="Belarmin")
+            await _tourI(cogB2, _tsI(D, 7, 20, 30))
+            check("recap image : registre perdu -> le message V2 (image) est RETROUVE, pas reposte",
+                  len(_SRVI.envois) == n_env and _du_salonI(DB2) == [ancien]
+                  and "Total : 3 numéro(s)" in _galerieI(_lireI(DB2, ancien))[1][0],
+                  (len(_SRVI.envois) - n_env, _du_salonI(DB2)))
+            check("recap image : _retrouver reconnait les deux formats (embed ET image V2)",
+                  _nI._est_recap_du(_lireI(DB2, ancien), D, {_nI.titre_recap(D, True),
+                                                            _nI.titre_recap(D, False)})
+                  and _nI._est_recap_du(_MessageI(state=_ETATI, channel=DB2, data=dict(
+                      _SRVI.msgs[ancien], embeds=[{"type": "rich", "title": _nI.titre_recap(D, True),
+                                                   "description": "x"}], components=[],
+                      flags=0, attachments=[])), D, {_nI.titre_recap(D, True)}))
+            # Les jours passes ne sont pas retouches : un fige d'avant-hier reste embed.
+            jV = D - _tdI(days=2)
+            vieux = DB2.poser({"embeds": [{"type": "rich", "title": _nI.titre_recap(jV),
+                                           "description": "Journée complète : de 00h00 à 23h59, "
+                                           "heure du Bénin.\n\nAucun SMS ce jour-là."}]})
+            n_ed = len([e for e in _SRVI.edits if e[0] == vieux])
+            await _tourI(cogB2, _tsI(D, 7, 30))
+            await _tourI(cogB2, _tsI(D + _tdI(days=1), 0, 1))
+            check("recap image : un recap fige des jours passes (embed) n'est pas retouche",
+                  len([e for e in _SRVI.edits if e[0] == vieux]) == n_ed
+                  and not _nI.est_v2(_lireI(DB2, vieux)))
+
+            # ---- C. repli : dessin impossible -> texte, dans le format du message
+            def _casse(*a, **k):
+                raise OSError("police introuvable (essai)")
+            G3 = _GuildeI(7703, "YouLab IG", {7: belarmin})
+            bot = _mondeI("c", G3)
+            DB3 = _SalonI(77030, "debrief-day", G3)
+            _priseI(G3, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+            _priseI(G3, 7, _tsI(D, 10), nom="Belarmin")
+            cogC = _nI.NumerosCog(bot)
+            await _tourI(cogC, _tsI(D, 10, 0, 30))
+            (mC,) = _du_salonI(DB3)
+            _niI.dessiner_recap = _casse
+            try:
+                _priseI(G3, 7, _tsI(D, 10, 5), nom="Belarmin")
+                await _tourI(cogC, _tsI(D, 10, 5, 30))
+                msgC = _lireI(DB3, mC)
+                ecC = [e[1] for e in _SRVI.edits if e[0] == mC]
+                txt = [c.content for c in _nI._composants(msgC.components)
+                       if isinstance(getattr(c, "content", None), str)]
+                check("recap image : dessin impossible sur un message V2 -> le texte du recap "
+                      "DANS un bloc V2, image retiree, jamais d'embed",
+                      _nI.est_v2(msgC) and not msgC.embeds and not msgC.attachments
+                      and len(txt) == 1 and "• Belarmin 🔥 — 2 numéro(s)" in txt[0]
+                      and txt[0].startswith("## " + _nI.titre_recap(D, True))
+                      and ecC and ecC[-1].get("attachments") == [], (txt, ecC[-1:]))
+                # Un message embed (ancien format) garde l'embed en repli.
+                G4 = _GuildeI(7704, "YouL4b", {7: belarmin})
+                bot = _mondeI("d", G4)
+                DB4 = _SalonI(77040, "debrief-day", G4)
+                _priseI(G4, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+                _HI[0] = _tsI(D, 11)
+                emb4 = DB4.poser({"embeds": [{"type": "rich", "title": _nI.titre_recap(D, True),
+                                              "description": "En cours : depuis 00h00, heure "
+                                              "du Bénin.\n\nPas de SMS pour le moment."}]})
+                _priseI(G4, 7, _tsI(D, 11, 1), nom="Belarmin")
+                cogD = _nI.NumerosCog(bot)
+                await _tourI(cogD, _tsI(D, 11, 1, 30))
+                msg4 = _lireI(DB4, emb4)
+                check("recap image : dessin impossible sur un message embed -> l'embed texte, "
+                      "comme avant (pas de conversion a moitie)",
+                      not _nI.est_v2(msg4) and msg4.embeds
+                      and "• Belarmin 🔥 — 1 numéro(s)" in (msg4.embeds[0].description or "")
+                      and _du_salonI(DB4) == [emb4], (msg4.embeds[:1], _du_salonI(DB4)))
+            finally:
+                _niI.dessiner_recap = _savI[4]
+                _cheminsI("c")
+            # Le dessin revient : l'image au changement suivant, meme message.
+            _priseI(G3, 7, _tsI(D, 12), nom="Belarmin")
+            await _tourI(cogC, _tsI(D, 12, 0, 30))
+            check("recap image : le dessin revenu, l'image revient dans le MEME message",
+                  _du_salonI(DB3) == [mC] and _galerieI(_lireI(DB3, mC))[2] == [nomF])
+
+            # ---- E. image refusee NET (droit « Joindre des fichiers ») : le texte
+            G5 = _GuildeI(7705, "YouL4b", {7: belarmin})
+            bot = _mondeI("e", G5)
+            DB5 = _SalonI(77050, "debrief-day", G5)
+            DB5.refus_image = _dI.Forbidden(_tyI.SimpleNamespace(status=403, reason="x"),
+                                            "Missing Permissions")
+            _priseI(G5, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+            _priseI(G5, 7, _tsI(D, 13), nom="Belarmin")
+            cogE = _nI.NumerosCog(bot)
+            await _tourI(cogE, _tsI(D, 13, 0, 30))
+            m5 = _du_salonI(DB5)
+            check("recap image : image refusee net (403) -> le recap part en TEXTE, un seul "
+                  "message, et ce salon reste en texte",
+                  len(m5) == 1 and _lireI(DB5, m5[0]).embeds and 77050 in cogE._recap_sans_image,
+                  (m5, cogE._recap_sans_image))
+
+            # Le texte passe a la place de l'image est COMPLET : rien a
+            # refaire. Avant, le tour suivant reecrivait le meme texte.
+            n5 = len([e for e in _SRVI.edits if e[0] == m5[0]])
+            await _tourI(cogE, _tsI(D, 13, 2))
+            await _tourI(cogE, _tsI(D, 13, 4))
+            check("recap image : image refusee a l'ENVOI, texte complet passe -> aucune "
+                  "reecriture du meme texte aux tours suivants",
+                  len([e for e in _SRVI.edits if e[0] == m5[0]]) == n5,
+                  len([e for e in _SRVI.edits if e[0] == m5[0]]) - n5)
+            G7 = _GuildeI(7707, "YouL4b", {7: belarmin})
+            # Un second serveur : son numero relit TOUS les recaps -- c'est la
+            # que le texte passe se reecrivait s'il etait mal signe.
+            G7b = _GuildeI(7717, "YouLab IG", {21: kora})
+            bot = _mondeI("g", G7, G7b)
+            DB7 = _SalonI(77070, "debrief-day", G7)
+            _SalonI(77170, "debrief-day", G7b)
+            _priseI(G7, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+            _priseI(G7, 7, _tsI(D, 14), nom="Belarmin")
+            cogG = _nI.NumerosCog(bot)
+            await _tourI(cogG, _tsI(D, 14, 0, 40))
+            (m7,) = _du_salonI(DB7)
+            DB7.refus_image = _dI.Forbidden(_tyI.SimpleNamespace(status=403, reason="x"),
+                                            "Missing Permissions")
+            n7 = len([e for e in _SRVI.edits if e[0] == m7])
+            _priseI(G7, 7, _tsI(D, 14, 5), nom="Belarmin")
+            await _tourI(cogG, _tsI(D, 14, 5, 40))
+            await _tourI(cogG, _tsI(D, 14, 7))
+            _priseI(G7b, 21, _tsI(D, 14, 8), nom="Kora")
+            await _tourI(cogG, _tsI(D, 14, 8, 30))
+            await _tourI(cogG, _tsI(D, 14, 10))
+            ed7 = [e[1] for e in _SRVI.edits if e[0] == m7][n7:]
+            txt7 = [c.content for c in _nI._composants(_lireI(DB7, m7).components)
+                    if isinstance(getattr(c, "content", None), str)]
+            check("recap image : image refusee a l'EDITION d'un message V2 -> le texte complet "
+                  "dans un bloc V2, UNE reecriture, pas une seconde identique au tour suivant "
+                  "(ni quand un autre serveur fait relire les recaps)",
+                  len(ed7) == 1 and ed7[0].get("attachments") == [] and len(txt7) == 1
+                  and "• Belarmin 🔥 — 2 numéro(s)" in txt7[0], (len(ed7), txt7))
+
+            # ---- G. un numero en attente a 23h50, expire a 00h10 : l'image
+            # FIGEE de la veille est redessinee sans « en attente ». Signee
+            # sur le texte seul, elle gardait « 1 en attente » pour toujours.
+            G8 = _GuildeI(7708, "YouL4b", {7: belarmin})
+            bot = _mondeI("h", G8)
+            DB8 = _SalonI(77080, "debrief-day", G8)
+            _priseI(G8, 7, _tsI(D - _tdI(days=3), 10), nom="Belarmin")
+            _priseI(G8, 7, _tsI(D, 23, 40), nom="Belarmin")
+            _priseI(G8, 7, _tsI(D, 23, 50), issue="rien", nom="Belarmin")
+            vus8 = []
+
+            def _espionI(jour, agg, noms, photos, en_direct, *a, **k):
+                vus8.append((jour, en_direct, sorted(int(v.get("attente") or 0)
+                                                     for v in agg["vas"].values()),
+                             int(agg.get("mails_codes") or 0)))
+                return _savI[4](jour, agg, noms, photos, en_direct, *a, **k)
+            _niI.dessiner_recap = _espionI
+            try:
+                cogH = _nI.NumerosCog(bot)
+                await _tourI(cogH, _tsI(D, 23, 50, 40))
+                (m8,) = [i for i in _du_salonI(DB8)]
+                await _tourI(cogH, _tsI(D + _tdI(days=1), 0, 0, 30))
+                gel8 = [v for v in vus8 if v[0] == D and not v[1]]
+                await _tourI(cogH, _tsI(D + _tdI(days=1), 0, 11))
+                await _tourI(cogH, _tsI(D + _tdI(days=1), 0, 13))
+            finally:
+                _niI.dessiner_recap = _savI[4]
+            apres8 = [v for v in vus8 if v[0] == D and not v[1]]
+            fiche8 = ((_nI._recap_lire() or {}).get("jours", {}).get(D.isoformat(), {})
+                      .get("7708", {}))
+            check("recap image : un numero en attente a 23h50 qui expire a 00h10 -> l'image FIGEE "
+                  "est redessinee sans « en attente », puis la journee est close",
+                  gel8 and gel8[-1][2] == [1] and apres8[-1][2] == [0]
+                  and len(apres8) == len(gel8) + 1 and fiche8.get("fige") is True
+                  and _galerieI(_lireI(DB8, m8))[2] == [_nI.NOM_IMAGE_RECAP % D.isoformat()],
+                  (gel8, apres8, fiche8.get("fige")))
+
+            check("recap image : regles V2 respectees -- aucune charge refusable envoyee",
+                  not _REGLESI, _REGLESI[:1])
+
+            # ---- F. /demodebrief : le rendu reel du serveur, en prive, rien d'ecrit
+            bot = _mondeI("a", G)       # l'historique du scenario A
+            histo_avant = _nI.HISTO_FILE.read_bytes()
+            reg_avant = _nI.RECAP_FILE.read_bytes()
+            envois = []
+
+            class _RepI:
+                async def defer(self, **k):
+                    envois.append(("defer", k))
+
+                async def send_message(self, *a, **k):
+                    envois.append(("send_message", k))
+
+            class _SuiteI:
+                async def send(self, *a, **k):
+                    envois.append(("followup", k))
+            itx = _tyI.SimpleNamespace(guild=G, response=_RepI(), followup=_SuiteI(),
+                                       user=_tyI.SimpleNamespace(id=7))
+            mt = _mtI.MenuTest(bot)
+            await _mtI.MenuTest.demodebrief.callback(mt, itx, D.isoformat())
+            fu = [k for q, k in envois if q == "followup"]
+            vue = fu[0].get("view") if fu else None
+            check("demo : /demodebrief repond en PRIVE avec l'image du serveur (meme vue que le vrai)",
+                  fu and all(k.get("ephemeral") for k in fu)
+                  and isinstance(vue, _dI.ui.LayoutView)
+                  and fu[0].get("file") is not None and fu[0]["file"].filename == nomF
+                  and ("defer", {"ephemeral": True, "thinking": True}) in envois, envois)
+            check("demo : rien d'ecrit (historique et registre intacts)",
+                  _nI.HISTO_FILE.read_bytes() == histo_avant
+                  and _nI.RECAP_FILE.read_bytes() == reg_avant)
+            cmds = {c.name: c for c in _mtI.MenuTest.__cog_app_commands__}
+            check("demo : /demodebrief est globale, sur le bot admin (MenuTest), option « jour »",
+                  "demodebrief" in cmds and "jour" in [p_.name for p_ in cmds["demodebrief"].parameters]
+                  and not getattr(cmds["demodebrief"], "_guild_ids", None)
+                  and "menutest" in pathlib.Path("main.py").read_text(encoding="utf-8")
+                  .split("ADMIN_COGS")[1].split("]")[0])
+        _aI.run(_scenI())
+    finally:
+        (_nI.SALONS_FILE, _nI.HISTO_FILE, _nI.RECAP_FILE, _nI.RECAP_IMAGE,
+         _niI.dessiner_recap) = _savI
+        if _envI is not None:
+            os.environ["VA_MACHINE_PROD"] = _envI
+        _V2_AUDIT["actif"] = _auditI
+        _shI.rmtree(_tmpI, ignore_errors=True)
+    check("recap image : aucune ecriture dans data/",
+          len(_V2_AUDIT["ecrits"]) == _nEcritsI, str(_V2_AUDIT["ecrits"][_nEcritsI:][:5]))
+except Exception as _eI:
+    import traceback as _tbI
+    _tbI.print_exc()
+    check("recap image : testable", False, repr(_eI)[:200])
 
 
 # ---------------------------------------------------------------------------

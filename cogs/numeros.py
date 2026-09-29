@@ -23,11 +23,14 @@ UN message par jour (heure du Bénin), créé dès minuit sur un serveur qui a u
 panneau numéros et un debrief-day (« Pas de SMS pour le moment. »), ailleurs
 au premier numéro ; édité au fil des événements (une édition par minute au
 plus), puis figé à minuit en récap final par édition du même message
-(`recap_tour`).
+(`recap_tour`). Depuis le 29/09/2026, le message est une IMAGE avec les photos
+des VA (Components V2, `contenu_recap`, dessin dans numeros_image) ; le texte
+reste le repli (dessin impossible, image refusée).
 """
 import asyncio
 import functools
 import hashlib
+import io
 import logging
 import os
 import re
@@ -39,6 +42,11 @@ from discord import app_commands
 from discord.ext import commands
 
 import numgen
+# Module PUR a l'import (ni Pillow ni Discord) : l'ordre des VA et le
+# pourcentage du recap, partages par le texte et l'image. Pillow n'est charge
+# qu'au dessin -- absent ou casse, le recap retombe sur le texte, le cog se
+# charge quand meme.
+import numeros_image as _nimg
 import safe_json as _safe_json
 from pathlib import Path as _Path
 
@@ -340,6 +348,10 @@ class NumerosCog(commands.Cog):
         self._registre_neuf_le = None
         self._recap_connus = {}
         self._figer_aggs = {}
+        # _recap_sans_image : salons ou l'image a ete refusee NET (droit
+        # « Joindre des fichiers » absent, charge refusee) -- le recap y part
+        # en texte pour ce processus, sans retenter l'image a chaque edition.
+        self._recap_sans_image = set()
         self._reveil = None
         self._reveil_boucle = None
 
@@ -1842,8 +1854,10 @@ class NumerosCog(commands.Cog):
             async for m in hist(limit=RECAP_RETROUVER):
                 if getattr(getattr(m, "author", None), "id", None) != moi:
                     continue
-                embs = getattr(m, "embeds", None) or []
-                if embs and getattr(embs[0], "title", None) in titres:
+                # Ancien format (embed) ET nouveau (image V2) : le direct du
+                # matin poste en embed doit etre repris -- et converti --, pas
+                # doublé d'un message en image.
+                if _est_recap_du(m, jour, titres):
                     # Une fois : une edition refusee du message retrouve le
                     # faisait redire chaque minute.
                     self._dire_une_fois(
@@ -1886,10 +1900,25 @@ class NumerosCog(commands.Cog):
                 return _ILLISIBLE
         return None
 
-    async def _editer_recap(self, salon, mid, emb, cle, gid, fiche, reg, bilan, repli,
-                            a_refaire=True):
-        """Edite un message du recap : « ok », « disparu » (a poster a neuf),
-        ou « echec » (a retenter au prochain tour).
+    def _image_refusee(self, salon, e):
+        """L'image du recap refusee NET dans ce salon : texte pour la suite du
+        processus, dit une fois."""
+        self._recap_sans_image.add(getattr(salon, "id", None))
+        self._dire_une_fois(
+            ("image_refusee", getattr(salon, "id", None)), log.warning,
+            "numgen: recap : image refusee dans #%s (%s: %s) -- le recap y part en texte",
+            getattr(salon, "name", "?"), type(e).__name__, e)
+
+    async def _editer_recap(self, salon, mid, part, cle, gid, fiche, reg, bilan, repli,
+                            a_refaire=True, v2=False):
+        """Edite un message du recap : « ok », « texte » (l'image refusee net,
+        le texte est passe a sa place), « disparu » (a poster a neuf), ou
+        « echec » (a retenter au prochain tour).
+
+        `part` : ce que le message doit montrer (_PartRecap : l'image, ou un
+        morceau de texte). `v2` : le message est deja en composants V2 -- sinon
+        (ancien format, embed) l'image le CONVERTIT : contenu et embed vides
+        dans la meme requete, que Discord exige pour poser le drapeau.
 
         `repli` : le message DOIT changer (recap « en direct » a figer). S'il
         ne peut pas etre edite (droits, ou RECAP_FINAL_ESSAIS erreurs de
@@ -1903,9 +1932,18 @@ class NumerosCog(commands.Cog):
         suivant (_direct_a_refaire) pour retenter -- pas pour un message a 0
         en direct (voir _synchroniser)."""
         try:
-            await salon.get_partial_message(int(mid)).edit(
-                embed=emb, allowed_mentions=discord.AllowedMentions.none())
-            return "ok"
+            try:
+                await salon.get_partial_message(int(mid)).edit(**part.edition(v2))
+                return "ok"
+            except Exception as e:                           # noqa: BLE001
+                if not (part.image and _refus_net(e)) or isinstance(e, discord.NotFound):
+                    raise
+                # L'image refusee net (droit « Joindre des fichiers », charge
+                # refusee) : le texte tout de suite, dans le format du message
+                # -- pas une journee entiere « echec » a chaque minute.
+                self._image_refusee(salon, e)
+                await salon.get_partial_message(int(mid)).edit(**part.repli().edition(v2))
+                return "texte"
         except discord.NotFound:
             log.warning("numgen: recap du %s : le message %s a disparu de #%s -- il est "
                         "poste a neuf", cle, mid, getattr(salon, "name", "?"))
@@ -2023,11 +2061,28 @@ class NumerosCog(commands.Cog):
         partiel = (reg.get("partiel") or {}).get(cle)
         titre, morceaux = texte_recap(jour, agg, noms, en_direct=None if final else now,
                                       depuis_ts=partiel)
+        # En image (demande du 29/09), sauf salon ou elle a ete refusee net.
+        # Le dessin n'a lieu qu'au moment d'ecrire (plus bas) : un tour sans
+        # nouveau chiffre ne dessine rien.
+        image = RECAP_IMAGE and getattr(salon, "id", None) not in self._recap_sans_image
+        alt = alt_recap(jour, agg, final, now, partiel)
         # La signature ne porte PAS l'heure de mise a jour : sans nouveau
         # chiffre, aucune edition. Elle distingue 0 et non 0 : le premier
         # numero doit EDITER le message « Pas de SMS pour le moment. ».
-        signature = (bool(final), bool(agg["numeros"]),
-                     tuple(texte_recap(jour, agg, noms, depuis_ts=partiel)[1]))
+        signature_texte = (bool(final), bool(agg["numeros"]),
+                           tuple(texte_recap(jour, agg, noms, depuis_ts=partiel)[1]))
+        # L'image montre plus que le texte : « N en attente » par VA et les
+        # codes des mails. Signee sur le texte seul, elle restait fausse :
+        # un numero en attente qui expire ou est annule, un mail qui recoit
+        # son code ne changent pas le texte -- aucune reecriture, et un
+        # numero pris a 23h50 laissait « 1 en attente » sur l'image FIGEE de
+        # la veille (simule : rv_db_rythme_sim1). En mode texte, rien de plus :
+        # ces champs n'y sont pas, les signer reecrivait pour rien.
+        signature = signature_texte
+        if image:
+            signature = signature_texte + (
+                tuple(sorted((str(u), int(v.get("attente") or 0)) for u, v in agg["vas"].items())),
+                int(agg.get("mails_codes") or 0))
         msgs = [m for m in (fiche.get("messages") or []) if m]
         deja_final = _finalise(fiche)
         salon_remplace = False
@@ -2095,7 +2150,14 @@ class NumerosCog(commands.Cog):
                 fiche.update(salon=getattr(salon, "id", None), messages=[trouve.id],
                              message=trouve.id, numeros=agg["numeros"], mails=agg["mails"],
                              rendus=agg.get("rendus", 0))
-                deja = _retrouve_a_jour(trouve, titre, morceaux, final, agg)
+                # Son format, lu sur le message lui-meme : un message V2 ne
+                # s'edite pas comme un embed.
+                if est_v2(trouve):
+                    fiche["v2"] = [trouve.id]
+                else:
+                    fiche.pop("v2", None)
+                deja = (_retrouve_a_jour(trouve, alt[0], [alt[1]], final, agg, image=True)
+                        if image else _retrouve_a_jour(trouve, titre, morceaux, final, agg))
                 if deja:
                     # Rien a editer : le message dit deja ce qu'il faut (meme
                     # texte), ou c'est un « Aucun SMS » deja fige d'un jour a
@@ -2157,19 +2219,41 @@ class NumerosCog(commands.Cog):
             return "echec"
         # Figer un message « en direct » : repli permis s'il ne s'edite pas.
         repli = bool(final) and not deja_final and bool(msgs)
-        embeds = [discord.Embed(title=titre if i == 0 else titre + " (suite)",
-                                description=texte, colour=_ROSE)
-                  for i, texte in enumerate(morceaux)]
-        # Des morceaux en trop (texte raccourci) : vides, pas supprimes -- un
-        # message du recap ne disparait jamais du fait du bot.
-        embeds += [discord.Embed(title=titre + " (suite)", description="—", colour=_ROSE)
-                   for _ in range(len(msgs) - len(morceaux))]
+        # Les messages connus en V2 (image, ou texte de repli dans un bloc V2).
+        v2s = {x for x in (fiche.get("v2") or []) if x in msgs}
+        png = None
+        if image:
+            # Le dessin ICI seulement : le message doit changer.
+            infos = await contenu_recap(self.bot, guild, jour, agg, noms, final, now, partiel)
+            png = infos["png"]
+        if png is not None:
+            # UNE image, UN message : les morceaux de texte n'ont plus lieu.
+            parts = [_PartRecap(titre, morceaux[0], png=png, jour=jour, alt=alt,
+                                morceaux=morceaux)]
+        else:
+            if v2s:
+                # Repli texte d'un recap deja V2 : un bloc de texte V2 tient
+                # 4000 signes, titre compris -- coupe plus court.
+                morceaux = texte_recap(jour, agg, noms, limite=RECAP_TEXTE_V2_MAX,
+                                       en_direct=None if final else now,
+                                       depuis_ts=partiel)[1]
+            parts = [_PartRecap(titre if i == 0 else titre + " (suite)", texte)
+                     for i, texte in enumerate(morceaux)]
+        n_parts = len(parts)
+        # Des morceaux en trop (texte raccourci, ou recap devenu image) : vides,
+        # pas supprimes -- un message du recap ne disparait jamais du fait du
+        # bot.
+        parts += [_PartRecap(titre + " (suite)", "—") for _ in range(len(msgs) - n_parts)]
         nouveaux = list(msgs)
         poste = reposte = False
         morts = set()
         # Faux si Discord a rendu, pour un nonce deja vu, un message qui ne
         # porte pas ce texte et qu'il n'a pas ete possible d'editer.
         texte_sur = True
+        # Vrai si l'image a ete refusee net et le texte passe a sa place : la
+        # signature retenue est alors celle du TEXTE (le salon est en texte
+        # pour la suite du processus, le tour suivant la calcule sans image).
+        en_texte = False
         # Message a 0 en direct : son texte ne bouge pas de la journee (pas
         # d'heure de mise a jour), seul un redemarrage le reedite. Une edition
         # refusee (acces au salon retire) posait _direct_a_refaire : chaque
@@ -2177,15 +2261,31 @@ class NumerosCog(commands.Cog):
         # lectures, 120 editions sur 120 tours simules). Le prochain
         # evenement, ou minuit, retente -- comme pour un envoi a 0 refuse.
         a_refaire = not (vide and not final)
-        for i, emb in enumerate(embeds):
+        for i, part in enumerate(parts):
             if i < len(nouveaux):
-                r = await self._editer_recap(salon, nouveaux[i], emb, cle, gid, fiche, reg,
-                                             bilan, repli, a_refaire=a_refaire)
-                if r == "ok":
+                r = await self._editer_recap(salon, nouveaux[i], part, cle, gid, fiche, reg,
+                                             bilan, repli, a_refaire=a_refaire,
+                                             v2=nouveaux[i] in v2s)
+                if r in ("ok", "texte"):
+                    if part.image and r == "ok":
+                        v2s.add(nouveaux[i])
+                    if r == "texte":
+                        en_texte = True
+                        if not part.repli_complet(nouveaux[i] in v2s):
+                            # Seul le premier morceau du texte est passe : le
+                            # tour suivant (texte pour ce salon) remet tout.
+                            texte_sur = False
+                            if not final:
+                                self._direct_a_refaire = True
+                        # Texte complet : rien a refaire. Le forcer quand
+                        # meme, c'etait le MEME texte reecrit au tour
+                        # suivant, parfois 30 s apres (gel de minuit, reveil
+                        # sur evenement) -- a chaque redemarrage dans un salon
+                        # sans « Joindre des fichiers » (rv_db_rythme_sim2).
                     continue
                 if r == "echec":
                     return "echec"
-                if i >= len(morceaux):
+                if i >= n_parts:
                     morts.add(i)    # morceau en trop disparu : rien a remettre
                     continue
             # Nonce du message logique (_nonce_recap) : renvoye apres une
@@ -2196,8 +2296,23 @@ class NumerosCog(commands.Cog):
             nonce = _nonce_recap(cle, gid, sid, i, final,
                                  nouveaux[i] if i < len(nouveaux) else None)
             try:
-                m = await salon.send(embed=emb, allowed_mentions=discord.AllowedMentions.none(),
-                                     nonce=nonce)
+                try:
+                    m = await salon.send(nonce=nonce, **part.envoi())
+                except Exception as e:                       # noqa: BLE001
+                    if not (part.image and _refus_net(e)) or isinstance(e, discord.NotFound):
+                        raise
+                    # Image refusee net : le texte (embed), meme nonce -- une
+                    # requete refusee n'a rien cree.
+                    self._image_refusee(salon, e)
+                    en_texte = True
+                    if not part.repli_complet(False):
+                        # Premier morceau seulement : le tour suivant poste
+                        # la suite. Complet, rien a refaire (voir plus haut).
+                        texte_sur = False
+                        if not final:
+                            self._direct_a_refaire = True
+                    part = part.repli()
+                    m = await salon.send(nonce=nonce, **part.envoi())
             except Exception as e:                           # noqa: BLE001
                 if not _refus_net(e):
                     # Pas de refus net de Discord (connexion coupee, 5xx) : le
@@ -2279,16 +2394,25 @@ class NumerosCog(commands.Cog):
             # (_retrouver) doit le relire, pas se fier au « rien trouve ».
             self._recap_absents.discard((cle, getattr(salon, "id", None)))
             self._incertain_tranche(reg, cle, sid)
-            rendu = (getattr(m, "embeds", None) or [None])[0]
-            if rendu is not None and _texte_embed(rendu) != _texte_embed(emb):
+            # Compare sans les blancs de bord (Discord peut les retirer) : un
+            # message rendu identique n'est pas reedite.
+            lus = _textes_recap(m)
+            if lus and (tuple(x.strip() for x in lus[0]) != tuple(x.strip() for x in part.attendu())
+                        or (part.image and not est_v2(m))):
                 # Discord a rendu le message deja cree avec ce nonce (reponse
                 # perdue au tour d'avant) : il porte le texte d'alors -- « Pas
-                # de SMS » quand le premier numero arrive entre-temps. Remis au
-                # texte voulu tout de suite ; sinon la signature ne le dit pas
-                # a jour, et le tour suivant (ou minuit) retente.
-                r = await self._editer_recap(salon, getattr(m, "id", None), emb, cle, gid,
-                                             fiche, reg, bilan, False, a_refaire=a_refaire)
+                # de SMS » quand le premier numero arrive entre-temps -- ou
+                # l'ancien format. Remis au contenu voulu tout de suite ; sinon
+                # la signature ne le dit pas a jour, et le tour suivant (ou
+                # minuit) retente.
+                r = await self._editer_recap(salon, getattr(m, "id", None), part, cle, gid,
+                                             fiche, reg, bilan, False, a_refaire=a_refaire,
+                                             v2=est_v2(m))
                 texte_sur = texte_sur and r == "ok"
+                if r == "ok" and (part.image or est_v2(m)):
+                    v2s.add(getattr(m, "id", None))
+            elif part.image or est_v2(m):
+                v2s.add(getattr(m, "id", None))
             if i < len(nouveaux):
                 nouveaux[i] = getattr(m, "id", None)
                 reposte = True
@@ -2301,6 +2425,7 @@ class NumerosCog(commands.Cog):
             fiche.update(salon=getattr(salon, "id", None), messages=list(nouveaux),
                          message=nouveaux[0], numeros=agg["numeros"], mails=agg["mails"],
                          rendus=agg.get("rendus", 0))
+            _fiche_v2(fiche, v2s, nouveaux)
             fiche.setdefault("finalise", False)
             self._poser_fiche(reg, cle, gid, fiche)
         nouveaux = [x for i, x in enumerate(nouveaux) if i not in morts]
@@ -2309,8 +2434,9 @@ class NumerosCog(commands.Cog):
         # « rendus » au registre aussi : une fiche a 0 numero mais avec des
         # numeros rendus n'est pas « vide » -- l'historique perdu, elle ne doit
         # pas etre figee en « Aucun SMS » (_fiche_vide).
+        _fiche_v2(fiche, v2s, nouveaux)
         fiche.update(salon=getattr(salon, "id", None), messages=nouveaux, message=nouveaux[0],
-                     parts=len(morceaux), le=int(now), numeros=agg["numeros"],
+                     parts=n_parts, le=int(now), numeros=agg["numeros"],
                      mails=agg["mails"], rendus=agg.get("rendus", 0),
                      finalise=bool(final) and texte_sur,
                      fige=bool(final) and texte_sur and not agg["attente"])
@@ -2318,7 +2444,7 @@ class NumerosCog(commands.Cog):
             fiche["repli"] = True
         self._poser_fiche(reg, cle, gid, fiche)
         if texte_sur:
-            self._recap_signes[(cle, gid)] = signature
+            self._recap_signes[(cle, gid)] = signature_texte if en_texte else signature
         else:
             self._recap_signes.pop((cle, gid), None)
         if poste or reposte:
@@ -3563,35 +3689,40 @@ def _fiche_vide(fiche) -> bool:
 
 
 def _montre_des_numeros(m) -> bool:
-    """Le message (un recap deja poste) affiche au moins une ligne de VA."""
-    embs = getattr(m, "embeds", None) or []
-    desc = str(getattr(embs[0], "description", "") or "") if embs else ""
+    """Le message (un recap deja poste) affiche au moins une ligne de VA.
+    Tout format (_textes_recap)."""
+    lus = _textes_recap(m)
+    desc = lus[0][1] if lus else ""
     return any(ligne.startswith("• ") for ligne in desc.split("\n"))
 
 
 def _message_a_zero(m) -> bool:
     """Le message (un recap deja poste) est un PUR message a 0 : apres
     l'en-tete et la ligne vide, rien que « Pas de SMS pour le moment. » ou
-    « Aucun SMS ce jour-là. » -- ni VA, ni total, ni mails, ni rendus."""
-    embs = getattr(m, "embeds", None) or []
-    if len(embs) != 1:
+    « Aucun SMS ce jour-là. » -- ni VA, ni total, ni mails, ni rendus.
+    Tout format : embed, image (son texte de remplacement), texte V2."""
+    lus = _textes_recap(m)
+    if len(lus) != 1:
         return False
-    lignes = str(getattr(embs[0], "description", "") or "").split("\n")
+    lignes = lus[0][1].split("\n")
     return lignes[1:] in (["", RECAP_ZERO_DIRECT], ["", RECAP_ZERO_FINAL])
 
 
-def _retrouve_a_jour(m, titre, morceaux, final, agg) -> str:
+def _retrouve_a_jour(m, titre, morceaux, final, agg, image=False) -> str:
     """Le recap A 0 retrouve `m` (registre perdu) n'a pas a etre edite :
     « identique » (meme titre, meme texte), « fige » (un « Aucun SMS » deja
     fige, pour une journee finie qui est toujours a 0), sinon "".
 
+    `image` : le recap part en image -- un message a l'ancien format (embed)
+    au meme texte n'est PAS « identique » : il est reecrit, donc converti.
+
     Un recap a numeros garde le chemin d'avant (toujours edite, repli si
     l'edition est refusee) : le changer est une autre decision."""
-    embs = getattr(m, "embeds", None) or []
-    if not _agg_vide(agg) or not embs or getattr(embs[0], "title", None) != titre:
+    lus = _textes_recap(m)
+    if not _agg_vide(agg) or not lus or lus[0][0] != titre:
         return ""
-    if (len(embs) == 1 and len(morceaux) == 1
-            and str(getattr(embs[0], "description", "") or "") == morceaux[0]):
+    if (len(lus) == 1 and len(morceaux) == 1 and lus[0][1] == morceaux[0]
+            and (not image or est_v2(m))):
         return "identique"
     if final and _message_a_zero(m):
         return "fige"
@@ -3613,13 +3744,6 @@ def _nonce_recap(cle, gid, salon_id, i, final, remplace):
     brut = "recap|%s|%s|%s|%d|%d|%s" % (cle, gid, salon_id, int(i), int(bool(final)),
                                         remplace or "")
     return int(hashlib.sha1(brut.encode("utf-8")).hexdigest()[:15], 16)
-
-
-def _texte_embed(emb):
-    """(titre, description) d'un embed, sans les blancs de bord que Discord
-    peut retirer : un message rendu identique ne doit pas etre reedite."""
-    return (str(getattr(emb, "title", None) or "").strip(),
-            str(getattr(emb, "description", None) or "").strip())
 
 
 def _cle_incertain(cle, sid):
@@ -3654,9 +3778,7 @@ def _perdu_par_l_historique(m, agg) -> str:
     perte de data/ etait ecrase par « Pas de SMS », puis « Aucun SMS »."""
     if _message_a_zero(m):
         return ""
-    embs = getattr(m, "embeds", None) or []
-    lignes = [ligne for e in embs
-              for ligne in str(getattr(e, "description", "") or "").split("\n")]
+    lignes = [ligne for _t, desc in _textes_recap(m) for ligne in desc.split("\n")]
     perdu = []
     if not agg.get("numeros") and (
             _montre_des_numeros(m)
@@ -3766,10 +3888,10 @@ def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
         return discord.utils.escape_markdown(str(noms.get(uid) or uid))[:80]
 
     if agg["numeros"]:
-        vas = sorted(agg["vas"].items(),
-                     key=lambda kv: (-kv[1]["n"], -kv[1]["c"], nom(kv[0]).lower()))
+        # Le MEME ordre que l'image (_nimg.ordre_vas, meme cle de nom).
+        vas = _nimg.ordre_vas(agg["vas"], _cle_nom_recap(noms))
         for uid, v in vas:
-            pct = int(v["c"] * 100 / v["n"] + 0.5) if v["n"] else 0
+            pct = _nimg.pourcent(v["c"], v["n"])
             ligne = "• %s — %d numéro(s) · %d code%s (%d %%)" % (
                 nom(uid), v["n"], v["c"], "s" if v["c"] > 1 else "", pct)
             if v["sans"] >= RECAP_SEUIL_LOUPE:
@@ -3789,6 +3911,304 @@ def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
         lignes.append("↩️ %d numéro(s) rendu(s) par le bot : impossibles à "
                       "afficher, remboursés" % agg["rendus"])
     return titre, _decouper(lignes, limite)
+
+
+class _PartRecap:
+    """Un message du recap a ecrire : l'image (le recap entier) ou un morceau
+    de texte. Il sait se mettre en charge d'envoi et d'edition dans les deux
+    formats : un discord.File ne se lit qu'une fois, chaque charge en a un neuf.
+    """
+
+    def __init__(self, titre, texte, png=None, jour=None, alt=None, morceaux=None):
+        self.titre, self.texte = titre, texte
+        self.png, self.jour, self.alt = png, jour, alt
+        self.morceaux = morceaux
+
+    @property
+    def image(self):
+        return self.png is not None
+
+    def attendu(self):
+        """(titre, description) tels que _textes_recap les relira."""
+        return (self.alt[0], self.alt[1]) if self.image else (self.titre, self.texte)
+
+    def repli(self):
+        """Le texte a la place de l'image (premier morceau)."""
+        return _PartRecap(self.titre, (self.morceaux or [self.texte])[0])
+
+    def repli_complet(self, v2) -> bool:
+        """Le texte de repli dit-il TOUT le recap ? Un seul morceau, et, dans
+        un message deja V2, sans la coupe a 4000 signes de vue_recap_texte."""
+        morceaux = self.morceaux or [self.texte]
+        if len(morceaux) > 1:
+            return False
+        return not v2 or len("## %s\n%s" % (self.titre, morceaux[0])) <= RECAP_V2_BLOC_MAX
+
+    def _embed(self):
+        return discord.Embed(title=self.titre, description=self.texte, colour=_ROSE)
+
+    def edition(self, v2):
+        """Arguments de Message.edit. Un message V2 ne redevient jamais un
+        embed : son texte va dans un bloc V2. Un embed recoit l'image en
+        devenant V2 (contenu et embed vides, meme requete) ; la piece jointe
+        est REMPLACEE -- une seule."""
+        am = discord.AllowedMentions.none()
+        if self.image:
+            vue, fichier = vue_recap_image(self.jour, self.png, *self.alt)
+            if v2:
+                return dict(view=vue, attachments=[fichier], allowed_mentions=am)
+            return dict(content=None, embed=None, view=vue, attachments=[fichier],
+                        allowed_mentions=am)
+        if v2:
+            return dict(view=vue_recap_texte(self.titre, self.texte), attachments=[],
+                        allowed_mentions=am)
+        return dict(embed=self._embed(), allowed_mentions=am)
+
+    def envoi(self):
+        """Arguments de send (sans le nonce)."""
+        am = discord.AllowedMentions.none()
+        if self.image:
+            vue, fichier = vue_recap_image(self.jour, self.png, *self.alt)
+            return dict(view=vue, file=fichier, allowed_mentions=am)
+        return dict(embed=self._embed(), allowed_mentions=am)
+
+
+def _fiche_v2(fiche, v2s, messages):
+    """Retient dans la fiche les messages du recap deja en V2 (« v2 ») : ils
+    s'editent autrement qu'un embed, et le registre survit aux redemarrages."""
+    garde = [x for x in messages if x in v2s]
+    if garde:
+        fiche["v2"] = garde
+    else:
+        fiche.pop("v2", None)
+
+
+def _cle_nom_recap(noms):
+    """La cle de tri par nom du recap (a numeros et codes egaux) : le nom tel
+    que le texte l'affiche, en minuscules. Une seule definition pour le texte
+    et l'image."""
+    def cle(uid):
+        return discord.utils.escape_markdown(str(noms.get(uid) or uid))[:80].lower()
+    return cle
+
+
+# ---------------------------------------------------------------------------
+# Le recap en IMAGE (demande du proprietaire du 29/09 : « tu vois ce qu'on a
+# fait pour les sessions, fais un truc style pour les debrief-day, avec PP et
+# tout »). Un message Components V2 : le titre court, puis une galerie d'UNE
+# image (affichee ~550 px de large, contre ~400 pour une image d'embed).
+# Ce qui DECIDE quand poster, editer, figer ne change pas : seul le rendu et
+# le format du message changent.
+# ---------------------------------------------------------------------------
+
+#: False : le recap texte d'avant (embed), partout. Les scenarios de tests qui
+#: relisent le texte des embeds s'en servent ; en production, l'image.
+RECAP_IMAGE = True
+#: La piece jointe du recap, remplacee a chaque reecriture (UNE seule).
+#: [a-zA-Z0-9_.-] seulement : sinon Discord renomme le fichier et la galerie
+#: « attachment://... » pointe dans le vide.
+NOM_IMAGE_RECAP = "recap_numeros_%s.png"
+#: Texte d'un message V2 : 4000 signes au plus, tous blocs confondus (titre
+#: compris) -- le repli texte d'un message deja V2 se coupe plus court que
+#: la description d'un embed (4096).
+RECAP_TEXTE_V2_MAX = 3800
+#: Le bloc de texte V2 lui-meme (titre compris) : Discord refuse au-dela.
+RECAP_V2_BLOC_MAX = 4000
+#: Texte de remplacement de l'image : discord.py annonce 256 signes au plus.
+RECAP_ALT_MAX = 256
+
+
+def alt_recap(jour, agg, final, maintenant, depuis_ts=None) -> tuple:
+    """(titre, description) du texte de remplacement de l'image.
+
+    Il sert aussi au CODE : un message en image ne porte plus d'embed, et le
+    recap doit toujours savoir relire ce qu'il a poste (_textes_recap) --
+    titre et journee, « Pas de SMS » ou « Aucun SMS » (message a 0), total,
+    mails, numeros rendus : les memes lignes, dans les memes mots, que le
+    texte. Court (RECAP_ALT_MAX) : ni la liste des VA ni les heures des codes."""
+    # L'en-tete du texte, tel quel (une seule definition) : « En cours :
+    # depuis 00h00, heure du Bénin — mis à jour à 07h08. », « Journée
+    # complète : ... ». Les noms ne servent pas a l'en-tete.
+    titre, morceaux = texte_recap(jour, agg, {}, en_direct=None if final else maintenant,
+                                  depuis_ts=depuis_ts)
+    lignes = [morceaux[0].split("\n")[0], ""]
+    if agg.get("numeros"):
+        codes = sum(v["c"] for v in agg["vas"].values())
+        lignes.append("Total : %d numéro(s) · %d code%s (%d %%) · %d VA" % (
+            agg["numeros"], codes, "s" if codes > 1 else "",
+            _nimg.pourcent(codes, agg["numeros"]), len(agg["vas"])))
+    else:
+        lignes.append(RECAP_ZERO_DIRECT if not final else RECAP_ZERO_FINAL)
+    if agg.get("mails"):
+        lignes.append("📧 %d mail(s)" % agg["mails"])
+    if agg.get("rendus"):
+        lignes.append("↩️ %d numéro(s) rendu(s) par le bot" % agg["rendus"])
+    desc = "\n".join(lignes)
+    place = RECAP_ALT_MAX - len(titre) - 1
+    return titre, desc[:max(0, place)]
+
+
+def vue_recap_image(jour, png, titre_alt, desc_alt):
+    """(vue Components V2, fichier) : le titre court, puis l'image en grand.
+
+    Le texte de remplacement (titre + description, voir alt_recap) porte ce
+    que le code relit du message. Pas de conteneur autour : il retirerait sa
+    marge a l'image."""
+    ui = discord.ui
+    if not (hasattr(ui, "LayoutView") and hasattr(ui, "MediaGallery")):
+        raise RuntimeError("discord.py %s ne sait pas envoyer de galerie (V2)"
+                           % discord.__version__)
+    nom = NOM_IMAGE_RECAP % jour.isoformat()
+    vue = ui.LayoutView(timeout=None)
+    vue.add_item(ui.TextDisplay("## %s" % titre_recap(jour, False)))
+    vue.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+        "attachment://" + nom, description=("%s\n%s" % (titre_alt, desc_alt))[:RECAP_ALT_MAX])))
+    return vue, discord.File(io.BytesIO(png), filename=nom)
+
+
+def vue_recap_texte(titre, texte):
+    """Un message V2 fait d'un seul bloc de texte : le repli d'un recap deja
+    en V2 (un message V2 ne redevient jamais un embed : Discord n'enleve pas
+    le drapeau « composants »)."""
+    vue = discord.ui.LayoutView(timeout=None)
+    vue.add_item(discord.ui.TextDisplay(("## %s\n%s" % (titre, texte))[:RECAP_V2_BLOC_MAX]))
+    return vue
+
+
+def est_v2(m) -> bool:
+    """Le message est-il en composants V2 ? (drapeau qui ne s'enleve jamais)"""
+    return bool(getattr(getattr(m, "flags", None), "components_v2", False))
+
+
+def _composants(liste):
+    """Tous les composants d'un message, a toute profondeur."""
+    for c in liste or []:
+        yield c
+        yield from _composants(getattr(c, "children", None))
+        acc = getattr(c, "accessory", None)
+        if acc is not None:
+            yield from _composants([acc])
+
+
+def _textes_recap(m) -> list:
+    """[(titre, description)] d'un recap deja poste, QUEL QUE SOIT son format.
+
+    Embed (l'ancien format) : titre et description de chaque embed. Image
+    (V2) : le texte de remplacement de la galerie (alt_recap), dont la
+    premiere ligne est le titre. Repli texte V2 : chaque bloc de texte, « ## »
+    retire du titre. Tout ce qui relit un recap (_retrouver, message a 0,
+    historique perdu, nonce) passe par ici : relire un seul des formats,
+    c'etait reposter -- ou effacer -- l'autre."""
+    embs = getattr(m, "embeds", None) or []
+    if embs:
+        return [(str(getattr(e, "title", None) or ""), str(getattr(e, "description", None) or ""))
+                for e in embs]
+    alts, textes = [], []
+    for c in _composants(getattr(m, "components", None)):
+        for it in (getattr(c, "items", None) or []):
+            desc = getattr(it, "description", None)
+            if isinstance(desc, str) and desc:
+                alts.append(desc)
+        t = getattr(c, "content", None)
+        if isinstance(t, str):
+            textes.append(t)
+    out = []
+    for brut in (alts or textes):
+        lignes = brut.split("\n")
+        out.append((lignes[0].lstrip("#").strip(), "\n".join(lignes[1:])))
+    return out
+
+
+def _a_image_recap(m, jour) -> bool:
+    """Le message porte l'image du recap de ce jour (piece jointe)."""
+    nom = NOM_IMAGE_RECAP % jour.isoformat()
+    return any(getattr(a, "filename", None) == nom for a in (getattr(m, "attachments", None) or []))
+
+
+def _est_recap_du(m, jour, titres) -> bool:
+    """Ce message (de ce bot) est-il le recap de `jour` ? Ancien format (titre
+    d'embed) OU nouveau (texte de l'image, titre court du message V2, nom de
+    la piece jointe)."""
+    lus = _textes_recap(m)
+    if lus and lus[0][0] in titres:
+        return True
+    if _a_image_recap(m, jour):
+        return True
+    for c in _composants(getattr(m, "components", None)):
+        t = getattr(c, "content", None)
+        if isinstance(t, str) and (t.strip().split("\n") or [""])[0].lstrip("#").strip() in titres:
+            return True
+    return False
+
+
+async def contenu_recap(bot, guild, jour, agg, noms, final, maintenant, depuis_ts=None) -> dict:
+    """{"png", "alt", "erreur", "photos"} : l'image du recap d'un serveur.
+
+    `png` None : image impossible (Pillow, police, dessin...) ou desactivee
+    -- le recap part en TEXTE, cause au journal : jamais perdu. Les photos
+    passent par photos_avatars (cache par cle d'avatar, delai global) : une
+    reecriture par minute ne retelecharge pas les photos. Le dessin tourne
+    hors de la boucle d'evenements (asyncio.to_thread)."""
+    infos = {"png": None, "alt": alt_recap(jour, agg, final, maintenant, depuis_ts),
+             "erreur": "", "photos": {}}
+    if not RECAP_IMAGE:
+        infos["erreur"] = "image desactivee (RECAP_IMAGE)"
+        return infos
+    try:
+        from cogs.sessionsvoc import photos_avatars
+        ids = _nimg.ids_photos(agg)
+        photos, compte = await photos_avatars(bot, ids, guilde_id=int(getattr(guild, "id", 0) or 0),
+                                              journal="numgen")
+        infos["photos"] = compte
+        infos["png"] = await asyncio.to_thread(
+            functools.partial(_nimg.dessiner_recap, jour, agg, noms, photos, not final, depuis_ts,
+                              maintenant, seuil_loupe=RECAP_SEUIL_LOUPE,
+                              zero_direct=RECAP_ZERO_DIRECT, zero_final=RECAP_ZERO_FINAL,
+                              tz=BENIN, cle_nom=_cle_nom_recap(noms)))
+    except Exception as e:                                   # noqa: BLE001
+        infos["png"] = None
+        infos["erreur"] = "%s: %s" % (type(e).__name__, str(e)[:200])
+        log.warning("numgen: recap du %s (serveur %s) : image impossible (%s) -- repli sur le "
+                    "texte", jour.isoformat(), getattr(guild, "id", "?"), infos["erreur"])
+    return infos
+
+
+def _histo_lire_seul():
+    """L'historique en LECTURE seule (la demo : _histo_cloturer, lui, ecrit
+    les expirations)."""
+    try:
+        return _histo_lire()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("numgen: historique illisible (%s: %s)", type(e).__name__, e)
+        return None
+
+
+async def message_recap_demo(bot, guild, jour=None, maintenant=None) -> tuple:
+    """(arguments d'envoi, infos) : le recap du serveur `guild` pour `jour`
+    (defaut : aujourd'hui, heure du Benin), construit EXACTEMENT comme le vrai
+    (memes noms, memes photos, meme image, meme repli) -- pour /demodebrief.
+    Rien n'est ecrit : ni historique, ni registre."""
+    now = float(time.time() if maintenant is None else maintenant)
+    aujourdhui = jour_benin(now)
+    jour = jour or aujourdhui
+    final = jour < aujourdhui
+    entrees = _histo_lire_seul()
+    if entrees is None:
+        raise RuntimeError("historique des numeros illisible")
+    agg = agreger(entrees, jour, now).get(str(getattr(guild, "id", 0))) or _agg_zero()
+    noms = {}
+    for uid, v in agg["vas"].items():
+        noms[uid] = await _nom_va(bot, guild, uid, v.get("nom"))
+    reg = _recap_lire() or {}
+    partiel = (reg.get("partiel") or {}).get(jour.isoformat())
+    infos = await contenu_recap(bot, guild, jour, agg, noms, final, now, partiel)
+    infos.update(agg=agg, final=final, jour=jour)
+    if infos["png"] is not None:
+        vue, fichier = vue_recap_image(jour, infos["png"], *infos["alt"])
+        return {"view": vue, "file": fichier}, infos
+    titre, morceaux = texte_recap(jour, agg, noms, en_direct=None if final else now,
+                                  depuis_ts=partiel)
+    return {"embed": discord.Embed(title=titre, description=morceaux[0], colour=_ROSE)}, infos
 
 
 def _salons_debrief(guild):

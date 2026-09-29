@@ -139,7 +139,8 @@ _AVATARS_KO_DUREE = 600
 
 
 async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
-                         delai_total: float = 8.0, guilde=None) -> tuple:
+                         delai_total: float = 8.0, guilde=None, guilde_id: int = None,
+                         journal: str = "sessions") -> tuple:
     """({id: octets PNG}, compte) — les photos de profil, via le serveur suivi.
 
     En parallele mais limite (six a la fois) ; chaque echec donne des
@@ -155,13 +156,20 @@ async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
     `guilde` : le serveur ou chercher les membres. Par defaut, le serveur
     suivi (Youl4b US) -- le bilan des sessions. Le classement des clics
     (clics_image) passe le serveur de SON salon : c'est la que vivent les VA
-    dont il montre la photo. Le cache des photos est le meme pour les deux.
+    dont il montre la photo. `guilde_id` : la meme chose par identifiant --
+    le recap des numeros (bot admin) lit le serveur de son salon
+    « debrief-day ». Le cache des photos est le meme pour tous. `journal` :
+    le prefixe des lignes de journal.
     """
     compte = {"lues": 0, "cache": 0, "introuvables": 0, "echecs": 0, "delai": 0}
+    # Deux appelants avaient generalise cette fonction chacun a sa facon le
+    # 29/09 (clics : `guilde`, l'objet ; numeros : `guilde_id`) : UNE seule
+    # regle -- l'objet s'il est donne, sinon l'identifiant, sinon le serveur
+    # des sessions.
     if guilde is None:
         try:
             if bot is not None and bot.is_ready():
-                guilde = bot.get_guild(sv.SUIVI_GUILD_ID)
+                guilde = bot.get_guild(sv.SUIVI_GUILD_ID if guilde_id is None else int(guilde_id))
         except Exception:                             # noqa: BLE001
             guilde = None
     if guilde is None:
@@ -204,8 +212,8 @@ async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
             compte["echecs"] += 1
             if cle:
                 _AVATARS_KO[cle] = _t.time()
-            print("[sessions] photo de %s illisible (%s) : initiales à la place"
-                  % (uid, type(e).__name__), flush=True)
+            print("[%s] photo de %s illisible (%s) : initiales à la place"
+                  % (journal, uid, type(e).__name__), flush=True)
             return uid, None
 
     taches = [asyncio.ensure_future(une(u)) for u in ids]
@@ -217,8 +225,8 @@ async def photos_avatars(bot, ids, taille: int = 128, paralleles: int = 6,
     if en_attente:
         await asyncio.gather(*en_attente, return_exceptions=True)
         compte["delai"] = len(en_attente)
-        print("[sessions] %d photo(s) pas arrivée(s) en %.0f s : initiales à la place"
-              % (len(en_attente), delai_total), flush=True)
+        print("[%s] %d photo(s) pas arrivée(s) en %.0f s : initiales à la place"
+              % (journal, len(en_attente), delai_total), flush=True)
     res = [tache.result() for tache in faites if not tache.cancelled()]
     if len(_AVATARS_KO) > _AVATARS_MAX:
         _AVATARS_KO.clear()

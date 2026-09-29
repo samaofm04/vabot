@@ -1002,6 +1002,49 @@ class MenuTest(commands.Cog):
         await interaction.followup.send("\n".join(notes)[:1900] or "ℹ️ Rien à signaler.",
                                         ephemeral=True)
 
+    @app_commands.command(
+        name="demodebrief",
+        description="[DÉMO] Le récap numéros SMS en image, tel qu'il est posté dans debrief-day — rien n'est envoyé",
+    )
+    @app_commands.describe(jour="Le jour, AAAA-MM-JJ (défaut : aujourd'hui, heure du Bénin)")
+    async def demodebrief(self, interaction: discord.Interaction, jour: str = None):
+        # Demande du proprietaire du 29/09 : le debrief-day en image avec les
+        # photos. Le recap est poste par CE bot (admin) : la demo prend le
+        # serveur ou elle est tapee, et construit le message par LA MEME
+        # fonction que le vrai (numeros.message_recap_demo -> contenu_recap,
+        # vue_recap_image) -- rien n'est ecrit, ni historique ni registre.
+        import datetime as _dtR
+        import cogs.numeros as _nR
+        if interaction.guild is None:
+            await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
+            return
+        j = None
+        if jour:
+            try:
+                j = _dtR.date.fromisoformat(jour.strip())
+            except ValueError:
+                await interaction.response.send_message(
+                    "⚠️ « %s » n'est pas une date AAAA-MM-JJ." % jour[:40], ephemeral=True)
+                return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            kwargs, infos = await _nR.message_recap_demo(self.bot, interaction.guild, j)
+        except Exception as e:                        # noqa: BLE001
+            await interaction.followup.send("⚠️ Récap impossible (%s: %s)."
+                                            % (type(e).__name__, str(e)[:150]), ephemeral=True)
+            return
+        await interaction.followup.send(ephemeral=True, **kwargs)
+        # Rien d'autre que le rendu (pas de texte notice) -- sauf ce qui
+        # rendrait la demo trompeuse : l'image impossible (le vrai partirait
+        # en texte), des photos manquantes.
+        notes = []
+        if infos.get("png") is None:
+            notes.append("⚠️ Image impossible (%s) : le vrai récap partirait en TEXTE, "
+                         "comme ci-dessus." % infos.get("erreur"))
+        notes += self._notes_demo({"raison": "", "photos": infos.get("photos") or {}})
+        if notes:
+            await interaction.followup.send("\n".join(notes)[:1900], ephemeral=True)
+
     @staticmethod
     def _notes_demo(infos) -> list:
         """Ce que la demo doit DIRE : liste inconnue (et pourquoi), photos en echec, repli."""
