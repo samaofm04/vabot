@@ -16922,6 +16922,221 @@ try:
     check("discord : « VA 2 Noum » ne prend pas le compte de « VA 1 Noum »",
           _parA["VA 2 Noum"]["discord"] == "noum2_x")
 
+    # 29/09 : le proprietaire -- les comptes Discord sont dans les fiches VA.
+    # « normalement ils sont dans le truc VA, c est bien la ». Le report disait
+    # « 21 without a Discord account » sur 27 : les fiches et les liens ne
+    # s ecrivent pas pareil, et seule l egalite stricte rattachait. Les VRAIS
+    # noms de l identite jessye et de l espace JESSY, releves le 29/09.
+    _fichesR = [
+        ("VA NOUM 1X1", "noum0075"), ("VA NOUM 2x1", "noum0075"),
+        ("VA NOUM 3x1", "noum0075"), ("VA NOUM 4x1", "noum0075"),
+        ("VA NOUM 5x1", "noum0075"), ("VA NOUM 6x1", "noum0075"),
+        ("Safidy X1", "svfidy_shiznit"), ("Miranto carbacho X1", "mirantocarbacho"),
+        ("Donald X1", "dollarshunter_20102"), ("Andry R X1", "raberinoro_45174"),
+        ("Andry R X2", "raberinoro_45174"), ("Jaurel X1", "jaurel0516"),
+        ("Jaurel X2", "jaurel0516"), ("Jaurel X3", "jaurel0516"),
+        ("Kylmich X1", "xman484"), ("Abdoul X1", "abdoul_9684"),
+        ("Roucham X1", "roucham_79944"), ("Roucham x2", "roucham_79944"),
+        ("G\u00e9r\u00f4me X1", "bid_a"), ("PAM PAM X1", "pampam.i"),
+        ("TRAVISS X1", "travis_sctt_"), ("Ricardo parckeur X1", "ricko0535"),
+        ("BOSS LA BOULE", "laboule.8"), ("Carter X 1", "carter_izac"),
+        ("Carter X 2", "carter_izac"), ("Carter X 3", "carter_izac"),
+        ("VA 2", ""), ("VA 3", ""), ("VA 4", ""), ("Plafond", ""),
+        ("Maon 1 IPHONE X", "moan_ofm"), ("YAZID 1 IPHONE X", "samuel.0314"),
+        ("Eud jp", "eud0616_94567")]
+
+    def _annuR(fiches):
+        """L annuaire comme annuaire_va le construit (sans disque) : le MEME
+        calcul, pas une copie -- les fiches sans pseudo y entrent avec ""."""
+        return _cpA.annuaire_de_fiches(
+            [{"name": n, "discord_username": d} for n, d in fiches])
+
+    _anR = _annuR(_fichesR)
+    _liensR = ["(Abdoul) 1", "(Abdoul) SPAM", "(ANDRY) 1", "(ANDRY) 2",
+               "( BO7 ) 1", "( BO7 ) 2", "( BO7 ) 3", "( BO7 ) 4",
+               "( Bryan ) 1", "( Bryan ) 2", "(Carter) 1", "(DOLAD) 1",
+               "(Gerome) 1", "(Gerome) SPAM", "(Jaurel) 1", "(Kylmich) 1",
+               "(Miranto) 1", "( Moan ) 1", "(Mykey) 1", "(PAMPAM) 1",
+               "(PAMPAM) 1 SPAM", "LaBoule ( Phone )", "Laboule ( X )",
+               "(Ricardo) 1", "(Ricardo) 1 SPAM", "(Roucham) 1", "(Safidy) 1",
+               "(TRAVIS) 1", "( VA 1 Noum ) 1", "( VA 2 Noum ) 1",
+               "( VA 3 Noum ) 1", "( VA 4 Noum ) 1", "( VA 5 Noum ) 1",
+               "( VA 6 Noum ) 1", "( Yazid ) 1", "TEMPLATE MYM EMMA (Copy)"]
+    _attR = {
+        "abdoul": ("abdoul_9684", "exact"), "carter": ("carter_izac", "exact"),
+        "jaurel": ("jaurel0516", "exact"), "kylmich": ("xman484", "exact"),
+        "roucham": ("roucham_79944", "exact"),
+        "safidy": ("svfidy_shiznit", "exact"),
+        "gerome": ("bid_a", "plie"), "pampam": ("pampam.i", "plie"),
+        "yazid": ("samuel.0314", "plie"),
+        "va 1 noum": ("noum0075", "ordre"), "va 2 noum": ("noum0075", "ordre"),
+        "va 3 noum": ("noum0075", "ordre"), "va 4 noum": ("noum0075", "ordre"),
+        "va 5 noum": ("noum0075", "ordre"), "va 6 noum": ("noum0075", "ordre"),
+        "andry": ("raberinoro_45174", "premier mot"),
+        "ricardo": ("ricko0535", "premier mot"),
+        "miranto": ("mirantocarbacho", "premier mot"),
+        "moan": ("moan_ofm", "pseudo"), "travis": ("travis_sctt_", "pseudo"),
+        "laboule": ("laboule.8", "pseudo"),
+        "bo7": ("", ""), "bryan": ("", ""), "dolad": ("", ""), "mykey": ("", "")}
+    _gR = _cpA.par_clics([{"nom": n, "clics": 1, "abonnes": None}
+                          for n in _liensR], _anR)
+    _vuR = {g["pseudo"]: (g["discord"], g["rattache"]) for g in _gR}
+    _ecartsR = ["%s -> %r (attendu %r)" % (k, _vuR.get(k), v)
+                for k, v in sorted(_attR.items()) if _vuR.get(k) != v]
+    check("fiches VA : le tableau reel du 29/09, personne par personne",
+          not _ecartsR and set(_vuR) == set(_attR),
+          " | ".join(_ecartsR[:4]) or str(sorted(set(_vuR) ^ set(_attR))))
+    check("fiches VA : 21 rattaches, 4 sans fiche (bo7, bryan, dolad, mykey)",
+          sum(1 for d, _ in _vuR.values() if d) == 21
+          and sorted(k for k, (d, _) in _vuR.items() if not d)
+          == ["bo7", "bryan", "dolad", "mykey"], str(_vuR))
+    check("fiches VA : le journal dit l etape de chacun",
+          _cpA.bilan_rattachements(_gR) == "rattaches : exact 6, plie 3, "
+          "ordre 6, premier mot 3, pseudo 3, lien 0, ambigus 0, "
+          "fiche sans pseudo 0, sans fiche 4",
+          _cpA.bilan_rattachements(_gR))
+
+    # Chaque etape, isolee, sur un vrai nom.
+    for _pR, _eR in (("abdoul", ("abdoul_9684", "exact")),
+                     ("gerome", ("bid_a", "plie")),
+                     ("pampam", ("pampam.i", "plie")),
+                     ("yazid", ("samuel.0314", "plie")),
+                     ("va 4 noum", ("noum0075", "ordre")),
+                     ("andry", ("raberinoro_45174", "premier mot")),
+                     ("ricardo", ("ricko0535", "premier mot")),
+                     ("miranto", ("mirantocarbacho", "premier mot")),
+                     ("moan", ("moan_ofm", "pseudo")),
+                     ("travis", ("travis_sctt_", "pseudo")),
+                     ("laboule", ("laboule.8", "pseudo"))):
+        check("fiches VA : %s -> %s par l etape %s" % (_pR, _eR[0], _eR[1]),
+              _cpA.fiche_de(_pR, _anR) == _eR, str(_cpA.fiche_de(_pR, _anR)))
+    # Les suffixes d appareil tombent COTE FICHE, pas les numeros de personne.
+    check("fiches VA : « 2 IPHONE X FIXE » et « /SPAM » sont des appareils",
+          _cpA.fiche_de("zelie", {"zelie 2 iphone x fixe": "zel_1"}) == ("zel_1", "plie")
+          and _cpA.fiche_de("zelie", {"zelie/spam": "zel_1"}) == ("zel_1", "plie")
+          and _cpA.fiche_de("zelie", {"zelie fixe": "zel_1"}) == ("zel_1", "plie"))
+    check("fiches VA : un nombre seul n est pas un appareil (VA NOUM 4 != VA NOUM)",
+          _cpA.fiche_de("va noum", _anR) == ("", ""), str(_cpA.fiche_de("va noum", _anR)))
+    # UN RATTACHEMENT FAUX SE PAIE : deux comptes possibles -> personne.
+    _amR = dict(_anR, **{"andry m": "andry_autre"})
+    check("fiches VA : deux comptes pour « andry » -> aucun rattachement, compte ambigu",
+          _cpA.fiche_de("andry", _amR) == ("", "ambigu"),
+          str(_cpA.fiche_de("andry", _amR)))
+    _gAm = _cpA.par_clics([{"nom": "(ANDRY) 1", "clics": 1, "abonnes": None}], _amR)
+    check("fiches VA : l ambigu se compte dans le journal",
+          _gAm[0]["discord"] == "" and "ambigus 1" in _cpA.bilan_rattachements(_gAm),
+          _cpA.bilan_rattachements(_gAm))
+    # Plusieurs fiches d UN compte ne font pas une ambiguite (les six Noum).
+    check("fiches VA : plusieurs fiches d un meme compte comptent pour un",
+          _cpA.fiche_de("va 1 noum", _anR) == ("noum0075", "ordre")
+          and _cpA.fiche_de("jaur", {"jaur a": "j1", "jaur b": "J1"})[0] in ("j1", "J1"))
+    # Une etape ambigue ARRETE : on ne descend pas a une etape plus lache.
+    check("fiches VA : une etape ambigue ne passe pas la main a la suivante",
+          _cpA.fiche_de("gerome", {"gerome": "g_1", "g\u00e9r\u00f4me x1": "g_2",
+                                   "gerome dupont": "g_3"}) == ("g_1", "exact")
+          and _cpA.fiche_de("gerome", {"g\u00e9r\u00f4me x1": "g_2", "ge rome": "g_4",
+                                       "gerome dupont": "g_3"}) == ("", "ambigu"))
+    # UNE FICHE SANS PSEUDO EST QUAND MEME UNE FICHE. Relecture du 29/09 :
+    # l annuaire ne gardait que les fiches avec pseudo, et les etapes laches
+    # donnaient alors « (Samuel) 1 » au compte de Yazid (samuel.0314) et
+    # « (Andry) 1 » a Andry R, alors que leurs propres fiches existaient.
+    _spR = _annuR(_fichesR + [("Samuel X1", ""), ("Andry X1", "")])
+    check("fiches VA : les fiches sans pseudo sont dans l annuaire, avec \"\"",
+          _spR.get("samuel") == "" and _spR.get("andry") == ""
+          and _spR.get("va 2") == "" and _spR.get("andry r") == "raberinoro_45174",
+          str({k: v for k, v in _spR.items() if not v}))
+    check("fiches VA : « Samuel X1 » sans pseudo -> pas le compte de Yazid",
+          _cpA.fiche_de(_cpA.pseudo("(Samuel) 1"), _spR) == ("", "sans pseudo"),
+          str(_cpA.fiche_de("samuel", _spR)))
+    check("fiches VA : « Andry X1 » sans pseudo -> pas le compte d Andry R",
+          _cpA.fiche_de(_cpA.pseudo("(Andry) 1"), _spR) == ("", "sans pseudo"),
+          str(_cpA.fiche_de("andry", _spR)))
+    _gSp = _cpA.par_clics([{"nom": "(Samuel) 1", "clics": 1, "abonnes": None},
+                           {"nom": "(ANDRY) 1", "clics": 1, "abonnes": None}], _spR)
+    check("fiches VA : la fiche sans pseudo se compte dans le journal",
+          all(g["discord"] == "" for g in _gSp)
+          and "fiche sans pseudo 2" in _cpA.bilan_rattachements(_gSp),
+          _cpA.bilan_rattachements(_gSp))
+    # Une etape lache qui trouve une AUTRE fiche sans pseudo s arrete aussi.
+    check("fiches VA : premier mot sur une fiche sans pseudo -> rien",
+          _cpA.fiche_de("samuel", _annuR([("YAZID 1 IPHONE X", "samuel.0314"),
+                                          ("Samuel Rakoto X1", "")]))
+          == ("", "sans pseudo")
+          and _cpA.fiche_de("andry", _annuR([("Andry R X1", "r_1"), ("Andry Z", "")]))
+          == ("", "ambigu"))
+    # Mais l AUTRE telephone d une fiche qui a un pseudo n empeche rien.
+    check("fiches VA : « YAZID 2 IPHONE X » sans pseudo ne cache pas « YAZID 1 »",
+          _cpA.fiche_de("yazid", _annuR([("YAZID 1 IPHONE X", "samuel.0314"),
+                                         ("YAZID 2 IPHONE X", "")]))
+          == ("samuel.0314", "plie")
+          and _annuR([("Andry R X2", ""), ("Andry R X1", "r_1")]) == {"andry r": "r_1"})
+    # « VA 2 Noum (Phone) » et « VA 3 Noum (Phone) » : deux personnes (12/09),
+    # et le meme VA que « (VA 2 Noum) 1 ».
+    _gPh = _cpA.par_clics([{"nom": "VA 2 Noum (Phone)", "clics": 100, "abonnes": None},
+                           {"nom": "VA 3 Noum (Phone)", "clics": 50, "abonnes": None},
+                           {"nom": "(VA 2 Noum) 1", "clics": 7, "abonnes": None}], _anR)
+    check("fiches VA : « VA 2 Noum (Phone) » et « VA 3 Noum (Phone) » restent deux lignes",
+          sorted((g["titre"], len(g["liens"]), g["clics"]) for g in _gPh)
+          == [("VA 2 Noum", 2, 107), ("VA 3 Noum", 1, 50)],
+          str([(g["titre"], g["liens"]) for g in _gPh]))
+    # Un mot court rattache n importe qui : en dessous de 4 lettres, rien.
+    check("fiches VA : un mot court (< 4 lettres) ne rattache pas",
+          _cpA.fiche_de("bo", {"bo sam": "bosam_1"}) == ("", "")
+          and _cpA.fiche_de("eud", {"eud jp": "eud0616_94567"}) == ("", "")
+          and _cpA.fiche_de("sam", {"x": "sam.9"}) == ("", ""))
+    # Pas de distance d edition : « andri » n est pas « andry ».
+    check("fiches VA : aucune ressemblance floue",
+          _cpA.fiche_de("andri", _anR) == ("", "")
+          and _cpA.fiche_de("safid", _anR) == ("", ""))
+    # LE REGROUPEMENT NE BOUGE PAS : les six Noum partagent un compte, mais
+    # restent six personnes (proprietaire, 12/09) : meme @, six lignes.
+    _noR = [g for g in _gR if g["discord"] == "noum0075"]
+    check("fiches VA : les six Noum gardent six lignes sous le meme compte",
+          len(_noR) == 6 and all(len(g["liens"]) == 1 for g in _noR),
+          str([g["titre"] for g in _noR]))
+    # SEULE fusion voulue : LaBoule (Phone) + Laboule (X) = une personne.
+    _lbR = [g for g in _gR if g["pseudo"] == "laboule"]
+    check("fiches VA : LaBoule ( Phone ) et Laboule ( X ) font UNE personne",
+          len(_lbR) == 1 and len(_lbR[0]["liens"]) == 2
+          and _lbR[0]["titre"] == "LaBoule", str(_lbR))
+    # Les trois ecrans en profitent : la carte du tableau de bord (web_upload
+    # _clicrank_rangs) et l image passent par le meme par_clics.
+    import clics_image as _ciR
+    _tR = _ciR.tableau({"par_lien": [
+        {"lien": n, "depuis": "", "periodes": [{}, {}, {"marche": 1, "total": 1}]}
+        for n in _liensR], "abonnes": []}, _anR)
+    check("fiches VA : l image montre les memes comptes (4 sans Discord)",
+          _tR["sans_discord"] == 4 and "moan_ofm" in _ciR.pseudos(_tR)
+          and "rattaches : exact 6" in _tR["rattachements"],
+          "%s / %s" % (_tR["sans_discord"], _tR.get("rattachements")))
+
+    # « LaBoule ( Phone ) » : la parenthese nomme un APPAREIL, la personne est
+    # devant. Et RIEN D AUTRE ne change dans la regle.
+    for _nR, _vR in (("LaBoule ( Phone )", "LaBoule"), ("Laboule ( X )", "Laboule"),
+                     ("LaBoule (iPhone) 2", "LaBoule"), ("prisca 10 (Copy)", "prisca"),
+                     ("(X) 1", "X"), ("VA 3 (Phone)", "Phone"),
+                     ("VA 2 Noum (Phone)", "VA 2 Noum"), ("VA: 4 (X)", "X"),
+                     ("VA 13 Gerome (Phone)", "VA 13 Gerome"),
+                     # les exemples des docstrings d etiquette et de pseudo
+                     ("VA 12 (Roucham)", "Roucham"), ("VA 13 Gerome", "Gerome"),
+                     ("VA 8 (VA 2 Noum)", "VA 2 Noum"), ("(BO7) 2", "BO7"),
+                     ("( BO7 ) 1", "BO7"), ("(VA 2 Noum) 1", "VA 2 Noum"),
+                     ("( VA 1 Noum ) 1", "VA 1 Noum"), ("jaurel 10", "jaurel"),
+                     ("VA 9", ""), ("VA 1", ""), ("vanessa 3", "vanessa"),
+                     ("va_@priscah0908", "priscah0908"), ("va_@x", "x"),
+                     ("Roucham X2", "Roucham"), ("(Roucham X2) 1", "Roucham"),
+                     ("TEMPLATE MYM EMMA (Copy)", ""), ("bo7 7", "bo7"),
+                     ("(Abdoul) SPAM", "Abdoul"), ("(PAMPAM) 1 SPAM", "PAMPAM")):
+        check("etiquette : %r -> %r" % (_nR, _vR),
+              _cpA.etiquette(_nR) == _vR and _cpA.pseudo(_nR) == _vR.lower(),
+              repr(_cpA.etiquette(_nR)))
+    # DEUX MAPPINGS VALENT DEUX COMPORTEMENTS : le cog suit la meme regle.
+    from cogs import clickrecap as _crR
+    _difR = [n for n in _liensR + ["VA 13 Gerome", "VA 1", "TEMPLATE"]
+             if _crR._personne_du_lien(n) != _cpA.etiquette(n)]
+    check("etiquette : clickrecap._personne_du_lien suit clics_personnes",
+          not _difR, str(_difR[:4]))
+
     # SUR DISCORD : des backticks, jamais une mention. « <@id> » ferait sonner
     # la personne a chaque edition du message, toutes les 30 minutes.
     _srcA = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")

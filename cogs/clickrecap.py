@@ -515,6 +515,9 @@ def _champs_classements(donnees: dict, identite: str = "") -> list:
     # panne : c'est une fiche VA dont personne n'a rempli le pseudo Discord.
     # Tant que ca ne se voit pas, personne ne le remplit.
     _sans = sum(1 for g in gens if not g.get("discord"))
+    # Le journal dit PAR QUELLE ETAPE chacun a ete retrouve (fiche_de) : un
+    # rattachement lache qui se trompe doit pouvoir se retrouver.
+    print("[reportclick] %s" % _cp.bilan_rattachements(gens), flush=True)
     if champs and _sans:
         _n0, _v0 = champs[0]
         champs[0] = (_n0, (_v0 + "\n_(%d without a Discord account on their "
@@ -669,8 +672,9 @@ async def image_classement(bot, prep: dict, guilde=None) -> tuple:
         infos.update(photos=compte, pseudos=compte_ps, sans_discord=t["sans_discord"],
                      personnes=t["personnes"], alt=_ci.texte_alt(t))
         print("[reportclick] classement dessine : %d personne(s), %d sans Discord, "
-              "pseudos %s, photos %s" % (t["personnes"], t["sans_discord"], compte_ps,
-                                         compte), flush=True)
+              "pseudos %s, photos %s ; %s" % (t["personnes"], t["sans_discord"], compte_ps,
+                                              compte, t.get("rattachements") or ""),
+              flush=True)
         return png, t, infos
     except Exception as e:                       # noqa: BLE001
         infos.update(mode="texte", erreur="%s: %s" % (type(e).__name__, str(e)[:200]))
@@ -1084,14 +1088,17 @@ def _personne_du_lien(nom) -> str:
     Les espaces sont normalises : le meme compte s'ecrit « ( BO7 ) 1 » ici et
     « (BO7) 2 » la, ce qui en ferait deux personnes.
 
-    Rend '' quand il n'y a pas de parentheses (« VA 1 », « TEMPLATE ») : mieux
+    Rend '' quand on ne peut nommer personne (« VA 1 », « TEMPLATE ») : mieux
     vaut ne pas regrouper que regrouper a tort. Dans certains workspaces, cinq
     liens s'appellent tous « VA 1 » sans etre la meme personne.
+
+    29/09 : LA REGLE EST CELLE DE clics_personnes.etiquette, et plus une copie.
+    Celle-ci prenait « LaBoule ( Phone ) » pour une personne nommee « Phone »
+    quand le classement, lui, allait en apprendre une autre -- deux regles
+    pour decider la meme chose finissent par dire deux choses.
     """
-    m = re.search(r"\((.*?)\)", str(nom or ""))
-    if not m:
-        return ""
-    return re.sub(r"\s+", " ", m.group(1)).strip()
+    import clics_personnes as _cp
+    return _cp.etiquette(nom)
 
 
 def _cle_tri(nom) -> tuple:

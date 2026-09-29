@@ -138,7 +138,8 @@ def tableau(donnees: dict, annuaire=None, periode: str = "", espace: str = "",
 
     `donnees` : le dictionnaire `_donnees` de _build_group_report (resume,
     par_lien, abonnes) -- les MEMES chiffres que le texte, jamais recalcules.
-    `annuaire` : {nom de fiche normalise: pseudo Discord} (annuaire_va).
+    `annuaire` : {nom de fiche normalise: pseudo Discord} (annuaire_va) ; la
+    fiche de chacun se retrouve par clics_personnes.fiche_de.
     `periode` : « 16 Sep → 30 Sep » ; `espace` : le nom du workspace ;
     `liens` : le nombre de liens suivis ; `maj` : « 14:30 ».
     """
@@ -189,6 +190,8 @@ def tableau(donnees: dict, annuaire=None, periode: str = "", espace: str = "",
         "caches": max(0, len(lignes) - PLAFOND),
         "personnes": len(lignes),
         "sans_discord": sum(1 for x in lignes if not x["discord"]),
+        # Par quelle etape de fiche_de chacun a ete retrouve : pour le journal.
+        "rattachements": _cp.bilan_rattachements(gens),
         "abonnes_lus": any(x["abonnes"] is not None for x in lignes),
         "max_clics": max([x["clics"] for x in lignes
                           if isinstance(x["clics"], (int, float))] or [0]),

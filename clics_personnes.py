@@ -28,6 +28,7 @@ rapporte » la ou il faut lire « on ne sait pas ».
 from __future__ import annotations
 
 import re
+import unicodedata
 import zlib
 
 # --- L'espace GetMySocial du classement -------------------------------------
@@ -129,6 +130,10 @@ _PAREN = re.compile(r"\(([^()]*)\)")
 _TETE_VA = re.compile(r"^va\b\s*\d*\s*[:.\-]?\s*", re.IGNORECASE)
 _QUEUE_NUM = re.compile(r"\s+\d+$")
 _QUEUE_X = re.compile(r"\s*x\s*\d+$", re.IGNORECASE)
+#: Ce qu'on trouve entre parentheses quand elles nomment un APPAREIL et pas
+#: quelqu'un : « LaBoule ( Phone ) », « Laboule ( X ) », « prisca 10 (Copy) ».
+#: Chaque mot doit en etre un ; « (VA 2 Noum) » ou « (BO7) » n'en sont pas.
+_MOT_APPAREIL = re.compile(r"^(?:i?phone|x\d*|spam|fixe|cop(?:y|ie)|\d+)$", re.IGNORECASE)
 
 #: « TEMPLATE », et les quatre facons de l'ecrire de travers qu'on trouve dans
 #: les vrais noms de liens (temaplte, tempalte, teamplte). Ce ne sont pas des
@@ -174,6 +179,20 @@ def etiquette(nom) -> str:
     fois chacun : « VA 13 Gerome » donne Gerome, « jaurel 10 » donne jaurel,
     et « VA 9 » ne nomme personne.
 
+    UNE EXCEPTION, ET UNE SEULE : la parenthese qui nomme un APPAREIL.
+    « LaBoule ( Phone ) » et « Laboule ( X ) » sont les deux telephones de
+    LaBoule -- vu le 29/09 : le report en faisait deux personnes, « Phone » et
+    « X », et aucune n'avait de fiche VA. Quand CHAQUE mot de la parenthese est
+    un libelle d'appareil (phone, iphone, x, spam, fixe, copy, un nombre) ET
+    qu'un nom la precede, la personne est ce nom, sans son nombre final ni
+    son « X<n> ». Sans nom devant (« VA 3 (Phone) »), rien ne change.
+
+    Le « VA n » de tete, lui, RESTE : « VA 2 Noum (Phone) » est VA 2 Noum,
+    comme « (VA 2 Noum) 1 ». Le peler faisait de « VA 2 Noum (Phone) » et
+    « VA 3 Noum (Phone) » une seule personne « Noum », rattachee ensuite a un
+    compte -- la fusion du 12/09, payee cette fois. « VA 13 Gerome (Phone) »
+    reste donc a part de « (Gerome) 1 » : une ligne en trop se voit.
+
     Rendre "" plutot que deviner : mieux vaut une ligne anonyme qu'un
     regroupement invente. Dans certains espaces, cinq liens s'appellent
     « VA 1 » sans etre la meme personne.
@@ -185,10 +204,24 @@ def etiquette(nom) -> str:
         return n[3:].lstrip("@ ").strip()
     m = _PAREN.search(n)
     if m and m.group(1).strip():
+        dedans = [x for x in re.split(r"[\s/._-]+", m.group(1)) if x]
+        if dedans and all(_MOT_APPAREIL.match(x) for x in dedans):
+            devant = n[:m.start()].strip()
+            # Un vrai nom, avec au moins une lettre une fois le « VA n » de
+            # tete ote : « VA 3 » ou « VA: 4 » seuls ne nomment personne.
+            if any(ch.isalpha() for ch in _peler(devant)):
+                devant = _QUEUE_NUM.sub("", devant).strip()
+                return _QUEUE_X.sub("", devant).strip()
         # Rien n'est pele a l'interieur, sauf le suffixe « X<n> » : celui-la
         # designe bien un telephone de plus, pas quelqu'un d'autre.
         return _QUEUE_X.sub("", m.group(1).strip()).strip()
-    n = _TETE_VA.sub("", n).strip()
+    return _peler(n)
+
+
+def _peler(n: str) -> str:
+    """Un nom SANS parentheses : le « VA n » de tete et le nombre final se
+    pelent une fois chacun, puis le suffixe « X<n> »."""
+    n = _TETE_VA.sub("", str(n or "").strip()).strip()
     n = _QUEUE_NUM.sub("", n).strip()
     return _QUEUE_X.sub("", n).strip()
 
@@ -211,7 +244,7 @@ def norme_fiche(nom) -> str:
 
 
 def annuaire_va(identite: str = "") -> dict:
-    """{nom de fiche normalise: pseudo Discord} pour UNE identite.
+    """{nom de fiche normalise: pseudo Discord, ou ""} pour UNE identite.
 
     LA FRONTIERE D'IDENTITE NE SE FRANCHIT PAS : le meme nom de fiche sous
     deux creatrices designe deux personnes differentes, fusion_vas le dit en
@@ -222,6 +255,11 @@ def annuaire_va(identite: str = "") -> dict:
     fiche nee d'un compte, d'une migration ou du Google Sheet arrive avec une
     chaine vide. Ces fiches-la ne rattachent personne, et c'est tres bien : un
     rattachement absent se voit, un rattachement faux se paie.
+
+    MAIS ELLES SONT DANS L'ANNUAIRE, avec "" : sans elles, les etapes laches
+    de fiche_de ne voyaient pas la propre fiche de quelqu'un et donnaient la
+    personne au compte d'un AUTRE -- « (Andry) 1 » partait chez « Andry R »
+    alors qu'une fiche « Andry X1 » existait, sans pseudo encore saisi.
     """
     ident = str(identite or "").strip().lower()
     if not ident:
@@ -231,19 +269,189 @@ def annuaire_va(identite: str = "") -> dict:
         fiches = _jb.list_vas_for_identity(ident)
     except Exception:
         return {}
+    return annuaire_de_fiches(fiches)
+
+
+def annuaire_de_fiches(fiches) -> dict:
+    """Le calcul d'annuaire_va, sans disque : [{"name", "discord_username"}]
+    -> {nom de fiche normalise: pseudo Discord, ou "" s'il n'est pas saisi}.
+
+    Une cle qui a un pseudo sur UNE de ses fiches le garde : « Andry R X1 »
+    (pseudo) et « Andry R X2 » (vide) sont les deux telephones d'Andry R.
+    """
     out = {}
     for v in fiches or []:
         if not isinstance(v, dict):
             continue
         cle = norme_fiche(v.get("name"))
         pseudo_d = str(v.get("discord_username") or "").strip().lstrip("@")
-        if cle and pseudo_d:
-            # PREMIER ARRIVE, PREMIER SERVI, et on ne remplace jamais : rien
-            # n'interdit a deux fiches de porter le meme nom normalise (add_va
-            # ne verifie que le nom brut). Ecraser reviendrait a attribuer la
-            # ligne au dernier lu, c'est-a-dire au hasard du fichier.
-            out.setdefault(cle, pseudo_d)
+        if not cle:
+            continue
+        if pseudo_d:
+            # PREMIER ARRIVE, PREMIER SERVI parmi les fiches QUI ONT un pseudo,
+            # et on ne remplace jamais : rien n'interdit a deux fiches de porter
+            # le meme nom normalise (add_va ne verifie que le nom brut).
+            # Ecraser reviendrait a attribuer la ligne au dernier lu,
+            # c'est-a-dire au hasard du fichier.
+            if not out.get(cle):
+                out[cle] = pseudo_d
+        else:
+            out.setdefault(cle, "")
     return out
+
+
+# --- Retrouver la fiche d'une personne malgre l'ecriture ---------------------
+#
+# 29/09 : le report disait « 21 without a Discord account » sur 27 personnes,
+# alors que presque toutes ont un pseudo sur leur fiche VA. Le proprietaire :
+# « normalement ils sont dans le truc VA, c'est bien la ». Les fiches et les
+# liens sont tapes a la main, par des gens differents : « (Gerome) 1 » contre
+# « Gérôme X1 », « (PAMPAM) 1 » contre « PAM PAM X1 », « (VA 4 Noum) 1 »
+# contre « VA NOUM 4x1 », « (ANDRY) 1 » contre « Andry R X1 ». L'egalite
+# stricte n'en rattachait que 6.
+#
+# UN SEUL RESOLVEUR, par etapes, de la plus sure a la moins sure. On s'arrete
+# a la PREMIERE etape qui trouve quelque chose :
+#   un seul compte Discord   -> rattache (plusieurs fiches d'un meme compte,
+#                               comme les six « VA NOUM », comptent pour un) ;
+#   plusieurs comptes        -> AUCUN rattachement, compte « ambigu », et on
+#                               ne descend PAS aux etapes plus laches.
+# Pas de distance d'edition, pas d'autre heuristique : un rattachement absent
+# se voit, un rattachement faux se paie.
+
+#: L'ordre des etapes, tel qu'il sort dans le journal et dans g["rattache"].
+ETAPES = ("exact", "plie", "ordre", "premier mot", "pseudo")
+
+#: Les suffixes d'appareil ajoutes a la main aux fiches : « X1 », « x 2 »,
+#: « 1 IPHONE X », « 2 IPHONE X FIXE », « /SPAM », « FIXE ». Un nombre SEUL en
+#: fin de fiche n'en est pas un : « VA NOUM 4 » n'est pas « VA NOUM ».
+_SUFFIXE_APPAREIL = re.compile(
+    r"(?:\s*/\s*spam|\s+spam|\s+fixe|\s*\bx\s*\d+"
+    r"|\s+\d+\s*i?phone(?:\s*x)?|\s+i?phone(?:\s*x)?)\s*$", re.IGNORECASE)
+#: Le pseudo Discord se coupe sur « . », « _ » et les chiffres : « moan_ofm »
+#: -> moan, « laboule.8 » -> laboule, « travis_sctt_ » -> travis.
+_COUPE_PSEUDO = re.compile(r"[._\d]+")
+#: En dessous de 4 lettres, un mot rattache n'importe qui (« va », « bo »).
+_LETTRES_MIN = 4
+
+
+def _sans_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", s)
+                   if not unicodedata.combining(c))
+
+
+def _mots(s) -> list:
+    """Les mots, en minuscules et sans accents ; ponctuation et espaces tombent."""
+    return [m for m in re.split(r"[\W_]+", _sans_accents(str(s or "").lower())) if m]
+
+
+def _base_fiche(cle) -> str:
+    """Le nom de fiche sans ses suffixes d'appareil, retires jusqu'au dernier
+    (« 2 IPHONE X FIXE » : FIXE, puis « 2 IPHONE X »)."""
+    n, avant = _sans_accents(str(cle or "").lower()).strip(), None
+    while n != avant:
+        avant, n = n, _SUFFIXE_APPAREIL.sub("", n).strip()
+    return n
+
+
+def index_fiches(annuaire) -> list:
+    """Les formes comparables de chaque fiche de l'annuaire (calculees une fois).
+
+    Les fiches SANS pseudo y sont aussi, avec compte "" : elles ne rattachent
+    jamais, mais elles ARRETENT la recherche (voir fiche_de)."""
+    out = []
+    for cle, compte in (annuaire or {}).items():
+        compte = str(compte or "").strip().lstrip("@")
+        if not cle:
+            continue
+        mots = _mots(_base_fiche(cle))
+        tete = _COUPE_PSEUDO.split(_sans_accents(compte.lower()))[0] if compte else ""
+        out.append({"cle": cle, "compte": compte,
+                    "plie": "".join(mots),
+                    "mots": tuple(sorted(mots)),
+                    "premier": mots[0] if mots else "",
+                    "tete": tete})
+    return out
+
+
+def fiche_de(personne, annuaire, index=None) -> tuple:
+    """(compte Discord, etape) pour une personne de lien (`pseudo()`).
+
+    ("", "ambigu") quand une etape designe plusieurs comptes ; ("", "sans
+    pseudo") quand elle ne trouve que des fiches dont le pseudo n'est pas
+    saisi ; ("", "") quand aucune ne trouve rien. Les etapes, dans l'ordre :
+
+      exact        norme_fiche(personne) est une cle de l'annuaire
+      plie         memes lettres une fois plies des deux cotes : minuscules,
+                   sans accents, sans ponctuation ni espaces, et cote fiche
+                   sans suffixe d'appareil -- gerome = « Gérôme X1 »,
+                   pampam = « PAM PAM X1 », yazid = « YAZID 1 IPHONE X »
+      ordre        memes mots dans un autre ordre -- « va 4 noum » =
+                   « VA NOUM 4x1 »
+      premier mot  la personne est le premier mot de la fiche (4 lettres au
+                   moins) -- andry = « Andry R X1 »
+      pseudo       la personne est le debut du pseudo Discord de la fiche,
+                   coupe sur « . _ chiffres » (4 lettres au moins) --
+                   moan = moan_ofm (fiche « Maon 1 IPHONE X »)
+    """
+    ps = str(personne or "").strip()
+    annu = annuaire or {}
+    if not ps or not annu:
+        return "", ""
+    if norme_fiche(ps) in annu:
+        # SA fiche existe. Sans pseudo, on s'arrete la : descendre aux etapes
+        # laches donnerait la personne au compte de quelqu'un d'autre.
+        c = str(annu.get(norme_fiche(ps)) or "").strip().lstrip("@")
+        return (c, "exact") if c else ("", "sans pseudo")
+    idx = index if index is not None else index_fiches(annu)
+    p_mots = _mots(ps)
+    p_plie = "".join(p_mots)
+    if not p_plie:
+        return "", ""
+    assez = sum(ch.isalpha() for ch in p_plie) >= _LETTRES_MIN
+    p_tri = tuple(sorted(p_mots))
+    for etape, ok in (
+            ("plie", lambda f: f["plie"] == p_plie),
+            ("ordre", lambda f: f["mots"] == p_tri),
+            ("premier mot", lambda f: assez and f["premier"] == p_plie),
+            ("pseudo", lambda f: assez and f["tete"] == p_plie)):
+        # UN COMPTE, pas une fiche : la casse du pseudo ne fait pas deux
+        # personnes. Le premier trouve donne l'ecriture rendue.
+        trouvees = [f for f in idx if ok(f)]
+        comptes = {}
+        for f in trouvees:
+            if f["compte"]:
+                comptes.setdefault(f["compte"].casefold(), f["compte"])
+        # Une fiche SANS pseudo trouvee ici est peut-etre la vraie fiche de
+        # cette personne : on ne rattache pas par-dessus, et on ne descend pas.
+        # Seule exception : un autre telephone d'une fiche qui A un pseudo
+        # (memes lettres ou memes mots une fois les suffixes d'appareil otes
+        # -- « YAZID 2 IPHONE X » a cote de « YAZID 1 IPHONE X »).
+        avec = {(f["plie"], f["mots"]) for f in trouvees if f["compte"]}
+        autres = [f for f in trouvees if not f["compte"]
+                  and not any(f["plie"] == pl or f["mots"] == mo for pl, mo in avec)]
+        if autres:
+            return "", ("ambigu" if comptes else "sans pseudo")
+        if len(comptes) == 1:
+            return next(iter(comptes.values())), etape
+        if comptes:
+            return "", "ambigu"
+    return "", ""
+
+
+def bilan_rattachements(gens) -> str:
+    """« rattaches : exact 6, plie 3, ordre 6, premier mot 3, pseudo 3,
+    lien 0, ambigus 0, fiche sans pseudo 0, sans fiche 4 » -- pour le journal.
+    « fiche sans pseudo » : la fiche est trouvee, il manque le @ a saisir."""
+    n = {}
+    for g in gens or []:
+        r = str((g or {}).get("rattache") or "")
+        n[r] = n.get(r, 0) + 1
+    morceaux = ["%s %d" % (e, n.get(e, 0)) for e in ETAPES + ("lien",)]
+    morceaux.append("ambigus %d" % n.get("ambigu", 0))
+    morceaux.append("fiche sans pseudo %d" % n.get("sans pseudo", 0))
+    morceaux.append("sans fiche %d" % n.get("", 0))
+    return "rattaches : " + ", ".join(morceaux)
 
 
 # --- Le regroupement --------------------------------------------------------
@@ -283,6 +491,7 @@ def grouper(entrees, annuaire=None) -> list:
     `depuis` pour que l'ecran puisse le dire.
     """
     annu = annuaire or {}
+    idx = index_fiches(annu)
     gens = {}
     for e in entrees or []:
         nom = propre((e or {}).get("nom"))
@@ -299,6 +508,7 @@ def grouper(entrees, annuaire=None) -> list:
             # « Va 2 Noum » la ou le lien dit « VA 2 Noum ».
             g = gens[cle] = {
                 "pseudo": ps, "titre": etiquette(nom) or nom, "discord": "",
+                "rattache": "",
                 "liens": [], "depuis": "",
                 "clics": None, "clics_lus": 0, "clics_non_lus": 0, "clics_na": 0,
                 "abonnes": None, "abonnes_lus": 0, "abonnes_non_lus": 0,
@@ -308,10 +518,13 @@ def grouper(entrees, annuaire=None) -> list:
             # DEUX CHEMINS, ET LE PREMIER NE DEMANDE RIEN A PERSONNE.
             # Un lien nomme « va_@pseudo » PORTE deja le compte Discord : il
             # n'y a pas de rapprochement a faire, donc pas d'erreur possible.
-            # Sinon on cherche une fiche VA du MEME nom, chez la MEME
-            # creatrice -- et on laisse vide au moindre doute.
-            g["discord"] = (ps if nom.lower().startswith("va_")
-                            else annu.get(norme_fiche(ps), ""))
+            # Sinon on cherche la fiche VA de cette personne, chez la MEME
+            # creatrice, par fiche_de -- et on laisse vide au moindre doute.
+            # « rattache » garde l'etape qui a trouve : le journal le dit.
+            if nom.lower().startswith("va_"):
+                g["discord"], g["rattache"] = ps, ("lien" if ps else "")
+            else:
+                g["discord"], g["rattache"] = fiche_de(ps, annu, idx)
         _ajouter(g, "clics", e.get("clics"))
         _ajouter(g, "abonnes", e.get("abonnes"))
         d = str(e.get("depuis") or "")
