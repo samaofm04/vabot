@@ -2,7 +2,7 @@
 """La categorie « 🧰 Outils » du serveur FR : un salon par outil, commun a tous.
 
 POURQUOI (demande du proprietaire, 03/10/2026)
-    Les outils des dossiers US (spoofer, telechargement) sur Va IG. Un
+    Les outils des dossiers US (spoofer, telechargement, numeros) sur Va IG. Un
     dossier par VA y coute 6 salons : 160 VA = 960 salons, Discord plafonne
     a 500 par serveur. Le proprietaire : « le meme channel pour tout le
     monde [...] chacun ne voit pas ce qu'il fait a l'interieur ».
@@ -34,7 +34,11 @@ CATEGORIE = "🧰 Outils"
 #: (cle, nom a la creation). La cle est le nom sans decor : le proprietaire
 #: renomme les salons a la main (« ⬇️・all-download »), un salon renomme doit
 #: rester reconnu.
-SALONS = (("spoofer", "📤・spoofer"), ("download", "⬇️・download"))
+#: « ・ » et pas « - » dans le nom du salon des numeros : « 📱-numero-mail »
+#: finirait par « -numero-mail », le suffixe des salons PRIVES d'un VA US, et
+#: /panelnumeroall le cacherait a tout le monde.
+SALONS = (("spoofer", "📤・spoofer"), ("download", "⬇️・download"),
+          ("numero-mail", "📱・numero-mail"))
 
 
 def _norm(nom) -> str:
@@ -179,6 +183,8 @@ class Outils(commands.Cog):
                 bilan["panneaux"] += await tl.poser_panneaux(dl, canal)
         else:
             print("[outils] cog Telechargement absent : panneau du download non pose")
+        # Le panneau des numeros est pose par le bot ADMIN (cogs/numeros.py,
+        # _panneau_commun) : c'est lui qui porte le module des numeros.
         if bilan["crees"] or bilan["panneaux"]:
             print(f"[outils] {guilde.name} : crees {bilan['crees']}, "
                   f"{bilan['panneaux']} panneau(x) pose(s)")

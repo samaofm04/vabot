@@ -39,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import numgen
 # Module PUR a l'import (ni Pillow ni Discord) : l'ordre des VA et le
@@ -356,6 +356,7 @@ class NumerosCog(commands.Cog):
         self._reveil_boucle = None
 
     async def cog_unload(self):
+        self._panneau_commun.cancel()
         t = self._recap_tache
         if t is not None and hasattr(t, "cancel"):
             t.cancel()
@@ -447,7 +448,47 @@ class NumerosCog(commands.Cog):
                      getattr(itx.user, "name", "?"), getattr(itx.user, "id", "?"),
                      getattr(getattr(itx, "channel", None), "name", "?"))
 
+    @tasks.loop(minutes=30)
+    async def _panneau_commun(self):
+        """Le panneau du salon commun 📱・numero-mail (serveur FR). Le salon
+        est cree par le bot principal (cogs/outils.py) ; le panneau DOIT etre
+        de ce bot : le principal porte des boutons numgen:* « perime »
+        (cogs/general.py) qui repondraient a sa place."""
+        for g in list(getattr(self.bot, "guilds", []) or []):
+            for c in list(getattr(g, "text_channels", []) or []):
+                if not _salon_commun(c):
+                    continue
+                mid = _id_message(_salon(c.id).get("panneau"))
+                if mid:
+                    try:
+                        await c.fetch_message(mid)
+                        continue
+                    except discord.NotFound:
+                        _salon_ecrire(c.id, panneau=None, v2=None)
+                    except Exception as e:                   # noqa: BLE001
+                        log.warning("numgen: panneau commun de #%s illisible (%s: %s)",
+                                    c.name, type(e).__name__, e)
+                        continue
+                try:
+                    ok = await poser_panneau(self.bot, c, self)
+                    log.info("numgen: panneau commun de #%s %s", c.name,
+                             "pose" if ok else "NON pose")
+                except Exception as e:                       # noqa: BLE001
+                    log.exception("numgen: panneau commun de #%s (%s: %s)",
+                                  c.name, type(e).__name__, e)
+
+    @_panneau_commun.before_loop
+    async def _avant_panneau_commun(self):
+        await self.bot.wait_until_ready()
+        # le bot principal cree le salon a son demarrage
+        await asyncio.sleep(90)
+
     async def cog_load(self):
+        try:
+            self._panneau_commun.start()
+        except Exception as e:                               # noqa: BLE001
+            log.error("numgen: boucle du panneau commun non lancee (%s: %s)",
+                      type(e).__name__, e)
         # Vues persistantes : un clic sur un message DEJA poste doit trouver
         # son repondant apres un redemarrage. Une vue porte TOUS les boutons
         # du panneau (chaque etat n'en montre que deux ou trois) ; l'autre sert
@@ -485,6 +526,9 @@ class NumerosCog(commands.Cog):
         if ch is None:
             await itx.response.send_message("À utiliser dans un salon.", ephemeral=True)
             return
+        if _salon_commun(ch):
+            await self.clic_commun(itx, action)
+            return
         if action == "sms" and not numgen.status()["sms_ok"]:
             await itx.response.send_message(
                 "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.",
@@ -505,6 +549,59 @@ class NumerosCog(commands.Cog):
             await self.nouvelle_activation(itx, action, "ig")
         else:
             await self.action_salon(itx, action)
+
+    async def clic_commun(self, itx, action):
+        """Le panneau COMMUN du serveur FR (categorie Outils, cogs/outils.py).
+
+        Il ne porte jamais de numero : tous les VA le voient, le numero et son
+        code y seraient lus par tout le monde, et deux VA s'y ecraseraient
+        (le registre est par salon). Le clic ouvre donc LE panneau du VA dans
+        SON salon va- ; le code, Autre, Annuler et C'est bon s'y passent comme
+        dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement."""
+        from cogs.outils import SANS_SALON, salon_perso
+        if action not in ("sms", "mail"):
+            await _ephemere(itx, "📱 La suite se passe dans ton salon.")
+            return
+        perso = salon_perso(getattr(itx, "guild", None), getattr(itx, "user", None))
+        if perso is None:
+            await _ephemere(itx, SANS_SALON)
+            return
+        if action == "sms" and not numgen.status()["sms_ok"]:
+            await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
+            return
+        await itx.response.defer()
+        await self._panneau_en_bas(perso)
+        achete = await self.nouvelle_activation(itx, action, "ig", canal=perso)
+        actif = _salon(perso.id).get("actif") or {}
+        if achete or actif.get("par") == getattr(itx.user, "id", None):
+            await _ephemere(itx, "📱 C'est dans %s." % perso.mention)
+
+    async def _panneau_en_bas(self, canal):
+        """Le panneau du VA, en bas de son salon. Celui d'hier, remonte par
+        les menus et les livraisons du jour, changerait sans qu'il le voie :
+        il est retire et repose (le numero en cours vit dans le registre, il
+        suit)."""
+        rec = _salon(canal.id)
+        mid = _id_message(rec.get("panneau"))
+        if mid and rec.get("v2"):
+            try:
+                recents = [m.id async for m in canal.history(limit=5)]
+            except Exception:                                # noqa: BLE001
+                recents = []
+            if mid in recents:
+                return
+            try:
+                vieux = await canal.fetch_message(mid)
+                await vieux.delete()
+            except discord.NotFound:
+                pass
+            except Exception as e:                           # noqa: BLE001
+                # pas supprime : on le laisse ou il est plutot que d'en avoir deux
+                log.warning("numgen: panneau de #%s non deplace (%s: %s)",
+                            getattr(canal, "name", "?"), type(e).__name__, e)
+                return
+            _salon_ecrire(canal.id, panneau=None, v2=None)
+        await poser_panneau(self.bot, canal, self, menage=False)
 
     async def convertir_si_ancien(self, itx):
         """Le message clique n'est pas le panneau V2 du salon : on convertit.
@@ -531,7 +628,8 @@ class NumerosCog(commands.Cog):
                           getattr(ch, "name", "?"), type(e).__name__, e)
             return False
 
-    async def nouvelle_activation(self, itx, kind="sms", service="ig", par=None):
+    async def nouvelle_activation(self, itx, kind="sms", service="ig", par=None,
+                                  canal=None):
         """Prend un numero (ou un mail) et le montre DANS le panneau.
 
         Rien d'ephemere : le VA n'a pas a garder un message fantome ouvert, et
@@ -541,9 +639,16 @@ class NumerosCog(commands.Cog):
         « Autre » garde celui du numero remplace. Un admin qui aidait un VA
         devenait proprietaire du nouveau numero, et le VA recevait « 🔒 Ce
         numéro a été pris par @admin » sur le numero dont il se servait.
+
+        `canal` : le salon du panneau, quand ce n'est pas celui du clic (le
+        panneau commun du serveur FR achete dans le salon va- du VA).
+        Rend True si un numero a ete pris et affiche.
         """
-        ch = getattr(itx, "channel", None)
+        ch = canal or getattr(itx, "channel", None)
         if ch is None:
+            return
+        if _salon_commun(ch):
+            log.error("numgen: achat refuse dans le salon COMMUN #%s", getattr(ch, "name", "?"))
             return
         rec0 = _salon(ch.id)
         en_cours = rec0.get("actif")
@@ -568,7 +673,9 @@ class NumerosCog(commands.Cog):
             return
         self._achats.add(ch.id)
         try:
-            await self._acheter(itx, ch, kind, service, par=par)
+            if not await _quota_fr_ok(itx, ch, kind, par):
+                return
+            return await self._acheter(itx, ch, kind, service, par=par)
         finally:
             self._achats.discard(ch.id)
 
@@ -603,7 +710,9 @@ class NumerosCog(commands.Cog):
             return
         log.info("numgen: %s demande dans #%s", kind, getattr(ch, "name", "?"))
         if kind == "sms":
-            ok, res = await asyncio.to_thread(numgen.get_number, service)
+            # +33 sur le serveur FR, sans repli sur un autre pays ; ailleurs
+            # le reglage global (None)
+            ok, res = await asyncio.to_thread(numgen.get_number, service, _pays(ch))
         else:
             ok, res = await asyncio.to_thread(numgen.get_mail, service)
         if not ok:
@@ -678,6 +787,7 @@ class NumerosCog(commands.Cog):
             await self._garder_non_rendu(itx, ch, actif, raison)
             return
         self._ecouter(ch)
+        return True
 
     async def _garder_non_rendu(self, itx, ch, actif, raison):
         """Le fournisseur REFUSE de reprendre un numero inaffichable.
@@ -4688,6 +4798,11 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     bilan.setdefault("vires", 0)
     if bot is None or channel is None:
         return False
+    if menage and _serveur_fr(channel) and not _salon_commun(channel):
+        # Sur le serveur FR le panneau vit dans le salon va- du VA, avec ses
+        # menus et ses livraisons (spoofer, telechargement) : le menage y
+        # supprimerait tous les messages de bot.
+        menage = False
     nom = getattr(channel, "name", "?")
     cog = cog or bot.get_cog("NumerosCog")
     if cog is None:
@@ -4909,6 +5024,83 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
         except Exception as e:                               # noqa: BLE001
             log.warning("numgen: icone de #%s jointe mais non notee au registre (%s: %s)",
                         nom, type(e).__name__, e)
+    return True
+
+
+# ---- Serveur FR : le panneau commun de la categorie Outils (03/10/2026) -----
+# Proprietaire : numeros « +33 », « 3 numero max » par jour et par VA.
+QUOTA_JOUR_FR = 3
+PAYS_FR = "78"           # France, numgen.PAYS
+
+
+def _serveur_fr(channel) -> bool:
+    try:
+        from cogs.outils import SERVEURS
+    except Exception:                                        # noqa: BLE001
+        return False
+    return int(getattr(getattr(channel, "guild", None), "id", 0) or 0) in SERVEURS
+
+
+def _salon_commun(channel) -> bool:
+    try:
+        from cogs.outils import est_salon_outils
+        return est_salon_outils(channel, "numero-mail")
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _pays(channel):
+    """Le pays impose par le serveur : la France sur le serveur FR. None
+    ailleurs : le reglage global de /smskey et du site (US par defaut), avec
+    son repli sur les autres pays."""
+    return PAYS_FR if _serveur_fr(channel) else None
+
+
+def numeros_du_jour(uid, gid, maintenant=None) -> int:
+    """Les numeros (SMS) pris aujourd'hui (heure du Benin) par `uid` sur le
+    serveur `gid`. Un numero rendu -- rembourse -- ne compte pas : « Autre »
+    sur un numero sans code ne doit pas manger le quota. Leve si
+    l'historique est illisible."""
+    jour = jour_benin(time.time() if maintenant is None else maintenant)
+    n = 0
+    for a in _histo_lire():
+        if (a.get("type") or "sms") != "sms" or a.get("rendu_le"):
+            continue
+        if str(a.get("par")) != str(uid) or str(a.get("serveur")) != str(gid):
+            continue
+        if jour_benin(a.get("pris_le")) == jour:
+            n += 1
+    return n
+
+
+async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:
+    """3 numeros par jour et par VA sur le serveur FR ; le staff n'est pas
+    bride (il teste, il depanne). Historique illisible : on n'achete pas --
+    sans lui, rien ne bornerait plus la depense."""
+    if kind != "sms" or not _serveur_fr(channel):
+        return True
+    user = getattr(itx, "user", None)
+    if not par:
+        try:
+            from cogs.user import _is_staff_member
+            if _is_staff_member(user):
+                return True
+        except Exception:                                    # noqa: BLE001
+            pass
+    qui = par or getattr(user, "id", 0)
+    try:
+        n = numeros_du_jour(qui, channel.guild.id)
+    except Exception as e:                                   # noqa: BLE001
+        log.error("numgen: quota FR illisible (%s: %s) : rien n'est achete",
+                  type(e).__name__, e)
+        await _ephemere(itx, "❌ L'historique des numéros ne se lit plus : rien n'a "
+                             "été acheté. Préviens un admin.")
+        return False
+    if n >= QUOTA_JOUR_FR:
+        log.info("numgen: quota FR atteint pour %s (%d/%d)", qui, n, QUOTA_JOUR_FR)
+        await _ephemere(itx, "📵 %d numéros aujourd'hui : c'est le maximum. "
+                             "Reviens demain." % QUOTA_JOUR_FR)
+        return False
     return True
 
 
