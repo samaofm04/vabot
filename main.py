@@ -43,7 +43,10 @@ MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_remind
              # ecrire=true ; en attendant il ne fait que construire la
              # couverture, qui est ce qui permettra de juger sans accuser
              # a tort.
-             "presenceshift"]
+             "presenceshift",
+             # Categorie « 🧰 Outils » du serveur FR (salons communs spoofer
+             # et download) : ZERO commande slash, comme spoofer.
+             "outils"]
 ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # Banc d'essai des menus. Sur le bot ADMIN et pas le
               # principal : celui-ci declare deja 101 commandes pour un

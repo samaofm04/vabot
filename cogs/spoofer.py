@@ -107,7 +107,37 @@ def _est_salon_spoofer(canal) -> bool:
             return False
     except Exception:
         pass
-    return _norm(nom).endswith("-spoofer")
+    return _norm(nom).endswith("-spoofer") or _commun(canal)
+
+
+def _commun(canal) -> bool:
+    """Le salon spoofer COMMUN de la categorie Outils (serveur FR, cogs/outils.py) :
+    un panneau pour tous, le nombre retenu par personne, les fichiers dans le
+    salon va- de chacun."""
+    try:
+        from cogs.outils import est_salon_outils
+        return est_salon_outils(canal, "spoofer")
+    except Exception:
+        return False
+
+
+#: Le nombre choisi par personne dans le salon commun : le nombre du panneau
+#: (custom_id) y serait celui du dernier VA qui l'a change, pour tous.
+QTE_PERSO = _RACINE / "data" / "spoofer_qte.json"
+
+
+def qte_perso(uid) -> int:
+    d = safe_json.load(QTE_PERSO, default={}) or {}
+    return _borne((d if isinstance(d, dict) else {}).get(str(uid), QTE_DEFAUT))
+
+
+def retenir_qte(uid, q: int) -> None:
+    d = safe_json.load(QTE_PERSO, default={}) or {}
+    d = d if isinstance(d, dict) else {}
+    d[str(uid)] = _borne(q)
+    QTE_PERSO.parent.mkdir(parents=True, exist_ok=True)
+    if not safe_json.write(QTE_PERSO, d, indent=1):
+        print(f"[spoofer] nombre de {uid} non ecrit : perdu au prochain redemarrage")
 
 
 # ───────────────────────────────────────────────────────────── panneau ──
@@ -139,7 +169,8 @@ class SpfQte(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:qb:(?P<q>
 
     async def callback(self, interaction: discord.Interaction):
         # La fenetre doit etre la TOUTE PREMIERE reponse (trois secondes).
-        await interaction.response.send_modal(FenetreQuantite(self.q))
+        q = qte_perso(interaction.user.id) if _commun(interaction.channel) else self.q
+        await interaction.response.send_modal(FenetreQuantite(q))
 
 
 class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[1-5])"):
@@ -162,7 +193,14 @@ class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[
         if cog is not None and interaction.user.id in cog.en_cours:
             await _dire(interaction, "⏳ Ton spoof précédent n'est pas fini.")
             return
-        await interaction.response.send_modal(FenetreFichier(self.q))
+        q = self.q
+        if _commun(interaction.channel):
+            from cogs.outils import SANS_SALON, salon_perso
+            if salon_perso(interaction.guild, interaction.user) is None:
+                await interaction.response.send_message(SANS_SALON, ephemeral=True)
+                return
+            q = qte_perso(interaction.user.id)
+        await interaction.response.send_modal(FenetreFichier(q))
 
 
 #: L'icone du panneau (27/09 : « mets cette icone pour le spoofer », comme
@@ -282,6 +320,10 @@ class FenetreQuantite(discord.ui.Modal, title="🔢"):
             q = 0
         if not 1 <= q <= QTE_MAX:
             await _dire(interaction, f"🔢 Choisis un nombre entre 1 et {QTE_MAX}.")
+            return
+        if _commun(getattr(interaction, "channel", None)):
+            retenir_qte(interaction.user.id, q)
+            await interaction.response.send_message(f"🔢 {q}", ephemeral=True)
             return
         try:
             # la vignette pointe sur la piece jointe DU message : un
@@ -421,7 +463,14 @@ async def versions_photo(src: Path, dossier: Path, q: int) -> tuple:
 
 def _cible_content(interaction):
     """Le salon -content du VA (meme recherche que le contenu du menu :
-    categorie d'abord). A defaut, le salon ou l'on a clique."""
+    categorie d'abord). A defaut, le salon ou l'on a clique.
+
+    Dans le salon commun des Outils : le salon va- du VA, ou None -- jamais
+    le salon commun, ou tout le monde verrait ses fichiers."""
+    canal = getattr(interaction, "channel", None)
+    if _commun(canal):
+        from cogs.outils import salon_perso
+        return salon_perso(getattr(interaction, "guild", None), interaction.user)
     try:
         from cogs.user import _us_content_target
         c = _us_content_target(interaction)
@@ -580,6 +629,13 @@ class Spoofer(commands.Cog):
         nom = str(getattr(piece, "filename", "") or "fichier")
         ext = Path(nom).suffix.lower()
         bilan = {"q": q, "livrees": 0, "ratees": 0, "lourdes": 0, "refus": ""}
+        if cible is None:
+            # salon commun sans salon va- (le bouton l'a deja refuse ; une
+            # fenetre ouverte avant que le salon disparaisse arrive ici)
+            from cogs.outils import SANS_SALON
+            bilan["refus"] = "salon"
+            await _dire(interaction, SANS_SALON)
+            return bilan
         if ext not in VIDEOS and ext not in PHOTOS:
             bilan["refus"] = "format"
             await _dire(interaction, f"📎 {nom} : format non pris (photo ou vidéo).")

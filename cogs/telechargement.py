@@ -182,8 +182,21 @@ def salon_reserve(canal) -> bool:
         return _norm(nom).startswith("all-")
 
 
-def salon_de_livraison(canal):
+def _commun(canal) -> bool:
+    """Le salon download COMMUN de la categorie Outils (serveur FR,
+    cogs/outils.py) : un panneau pour tous les VA."""
+    try:
+        from cogs.outils import est_salon_outils
+        return est_salon_outils(canal, "download")
+    except Exception:
+        return False
+
+
+def salon_de_livraison(canal, membre=None):
     """Ou les fichiers atterrissent : le salon -content du meme VA.
+
+    Depuis le salon commun des Outils : le salon va- de `membre`, ou None --
+    jamais le salon commun, ou tout le monde verrait ses fichiers.
 
     Le salon -download ne porte que le panneau ; y deverser des dizaines
     de fichiers les repousserait hors de vue. Le contenu genere vit deja dans
@@ -192,6 +205,9 @@ def salon_de_livraison(canal):
     Si le salon jumeau n existe pas, on reste sur place plutot que de perdre
     les fichiers.
     """
+    if _commun(canal):
+        from cogs.outils import salon_perso
+        return salon_perso(getattr(canal, "guild", None), membre)
     nom = getattr(canal, "name", "") or ""
     if not _norm(nom).endswith("-download"):
         return canal
@@ -790,6 +806,10 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         # trainait un peu (constate le 27/08).
         await inter.response.send_message(
             f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
+        if _commun(getattr(inter, "channel", None)):
+            # salon commun : le panneau montrerait a tous le compte du
+            # dernier VA ; le sien vient de lui etre dit, a lui seul
+            return
         try:
             await inter.message.edit(view=PanneauTelechargement(self.cog, username, n))
         except Exception:
@@ -849,12 +869,16 @@ class PanneauTelechargement(discord.ui.LayoutView):
                 "Choisis d'abord un compte (bouton 👤).", ephemeral=True)
             return
         username, n = garde
+        cible = salon_de_livraison(inter.channel, inter.user)
+        if cible is None:
+            from cogs.outils import SANS_SALON
+            await inter.response.send_message(SANS_SALON, ephemeral=True)
+            return
         occupe = self.cog.reserver(inter.user.id, username)
         if occupe:
             await inter.response.send_message(occupe, ephemeral=True)
             return
         try:
-            cible = salon_de_livraison(inter.channel)
             await inter.response.send_message(
                 f"**@{username}** - {long_} : ca part dans "
                 f"{getattr(cible, 'mention', '#?')}.", ephemeral=True)
