@@ -40,6 +40,8 @@ MAX_TEXTE = 2000
 LIMITES_BOOST = {0: 10, 1: 10, 2: 50, 3: 100}      # en Mo
 MARGE = 0.92                         # on vise un peu sous la limite : Discord compte l'enveloppe
 CACHE_DIR = DATA_DIR / "onboarding_compresse"
+SECRET_FICHIER = DATA_DIR / "onboarding_secret"
+SITE = "https://youl4b.com"
 _LIMITE: Dict[str, Any] = {}
 MAX_JOINTES = 10
 ATTENTE_S = 6.0                      # on laisse la rafale de frappes se calmer
@@ -121,6 +123,82 @@ def limite_octets() -> int:
               flush=True)
     _LIMITE.update({"octets": mo * 1024 * 1024, "quand": time.time()})
     return mo * 1024 * 1024
+
+
+def _secret() -> bytes:
+    """La clé qui signe les liens de téléchargement, créée au premier besoin."""
+    try:
+        if SECRET_FICHIER.exists():
+            v = SECRET_FICHIER.read_bytes().strip()
+            if v:
+                return v
+    except OSError:
+        pass
+    import os as _os
+    v = _os.urandom(32).hex().encode()
+    SECRET_FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    SECRET_FICHIER.write_bytes(v)
+    try:
+        SECRET_FICHIER.chmod(0o600)
+    except OSError:
+        pass
+    return v
+
+
+def jeton_media(step_id: str, media_id: str) -> str:
+    """Un jeton qui ouvre CE fichier et aucun autre.
+
+    Signé, donc impossible à deviner et impossible à bricoler pour atteindre
+    un autre fichier du serveur. Rien n'est stocké : le lien reste valable tant
+    que la clé ne change pas, et changer la clé les révoque tous d'un coup.
+    """
+    import base64
+    import hmac
+    corps = f"{step_id}:{media_id}".encode()
+    sign = hmac.new(_secret(), corps, hashlib.sha256).digest()[:12]
+    return (base64.urlsafe_b64encode(corps).decode().rstrip("=") + "."
+            + base64.urlsafe_b64encode(sign).decode().rstrip("="))
+
+
+def lire_jeton(jeton: str) -> Optional[Tuple[str, str]]:
+    """(step_id, media_id) si la signature tient, None sinon."""
+    import base64
+    import hmac
+    try:
+        brut, _, sig = str(jeton or "").partition(".")
+        if not brut or not sig:
+            return None
+        def _d(x):
+            return base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))
+        corps = _d(brut)
+        attendu = hmac.new(_secret(), corps, hashlib.sha256).digest()[:12]
+        # comparaison a temps constant : comparer avec == laisse fuiter
+        # l'information octet par octet
+        if not hmac.compare_digest(_d(sig), attendu):
+            return None
+        sid, _, mid = corps.decode().partition(":")
+        return (sid, mid) if sid and mid else None
+    except Exception:
+        return None
+
+
+def telechargements_de(etape: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """[(nom, adresse)] pour chaque fichier de l'étape, en qualité d'origine.
+
+    La copie envoyée dans Discord est compressée pour tenir dans la limite ;
+    celle-ci est l'originale. Un VA qui veut la regarder en grand la télécharge.
+    """
+    base = str(config().get("site") or SITE).rstrip("/")
+    out = []
+    for m in (etape.get("media") or []):
+        if m.get("kind") == "link" or not m.get("path"):
+            continue
+        sid, mid = str(etape.get("id") or ""), str(m.get("id") or "")
+        if not (sid and mid):
+            continue
+        out.append((str(m.get("name") or "fichier"),
+                    f"{base}/ob/{jeton_media(sid, mid)}"))
+    return out
 
 
 def _duree(chemin: Path) -> float:
@@ -221,6 +299,10 @@ def corps_de(etape: Dict[str, Any]) -> str:
              and (m.get("url") or m.get("name")) not in jouables]
     if liens:
         corps = (corps + "\n\n" if corps else "") + "\n".join("📎 " + str(l) for l in liens)
+    tel = telechargements_de(etape)
+    if tel:
+        corps = (corps + "\n\n" if corps else "") + "\n".join(
+            f"⬇️ [{nom} — qualité d'origine]({url})" for nom, url in tel)
     return corps[:MAX_ENCADRE]
 
 

@@ -34514,6 +34514,28 @@ try:
     check("une video trop lourde est compressee, pas refusee",
           "def comprimer" in _plO("onboarding_discord.py").read_text(encoding="utf-8"))
 
+    # --- le lien de telechargement : signe, et il n ouvre qu UN fichier
+    _j = _od.jeton_media("s1", "m1")
+    check("le jeton se relit", _od.lire_jeton(_j) == ("s1", "m1"))
+    check("un jeton bricole est refuse",
+          _od.lire_jeton(_j[:-2] + "xx") is None and _od.lire_jeton("") is None
+          and _od.lire_jeton("nimporte.quoi") is None)
+    check("deux fichiers n ont pas le meme jeton",
+          _od.jeton_media("s1", "m1") != _od.jeton_media("s1", "m2"))
+    _etel = {"id": "s1", "title": "T", "media": [
+        {"id": "m1", "kind": "video", "name": "demo.mp4", "path": "/tmp/x.mp4"},
+        {"id": "m2", "kind": "link", "name": "https://z"}]}
+    check("un fichier a son lien de telechargement, un lien n en a pas",
+          [n for n, _u in _od.telechargements_de(_etel)] == ["demo.mp4"])
+    check("le lien apparait dans l encadre, en qualite d origine",
+          "qualité d'origine" in _od.encadre_de(_etel, 0)["description"]
+          and "/ob/" in _od.encadre_de(_etel, 0)["description"])
+    _srcW = _plO("web_upload.py").read_text(encoding="utf-8")
+    check("la route publique existe et force le telechargement",
+          '@app.route("/ob/<jeton>")' in _srcW and "as_attachment=True" in _srcW)
+    check("elle refuse un jeton qui ne tient pas",
+          "Lien invalide ou revoque" in _srcW)
+
     check("une etape sans corps ne rend pas un encadre vide",
           _od.encadre_de({"icon": "👋", "title": "Bienvenue"}, 0)["title"] == "👋 Bienvenue")
     check("l empreinte ne bouge pas sans raison",

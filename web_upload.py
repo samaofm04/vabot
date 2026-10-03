@@ -71442,6 +71442,37 @@ def create_app():
             return "", 404
         return send_file(str(p), conditional=True)
 
+    @app.route("/ob/<jeton>")
+    def onboarding_media_public(jeton):
+        """Telecharger un media d onboarding sans mot de passe, par lien signe.
+
+        Le salon Discord est lu par des VA qui n ont PAS de compte sur le site :
+        la route normale leur rendait 401. Le jeton est signe et ne designe
+        qu un seul fichier — il ne peut pas servir a en atteindre un autre.
+        """
+        from flask import send_file
+        from pathlib import Path as _P
+        try:
+            import onboarding as ob
+            import onboarding_discord as od
+        except Exception:
+            return "", 500
+        lu = od.lire_jeton(jeton)
+        if not lu:
+            return "Lien invalide ou revoque.", 404
+        m = ob.get_media(lu[0], lu[1])
+        if not m or not m.get("path"):
+            return "", 404
+        p = _P(m["path"])
+        if not p.exists():
+            return "", 404
+        # as_attachment : on veut un telechargement, pas une lecture dans
+        # l onglet — le VA garde le fichier en qualite d origine
+        r = send_file(str(p), conditional=True, as_attachment=True,
+                      download_name=str(m.get("name") or p.name))
+        r.headers["X-Robots-Tag"] = "noindex"
+        return r
+
     @app.route("/veille/add", methods=["POST"])
     def veille_add():
         if not is_auth():
