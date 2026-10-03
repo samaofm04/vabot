@@ -11158,8 +11158,20 @@ try:
     _dR2 = _srcR2.index("var VABOT_MENU_RANGE = {")
     _tableR2 = _srcR2[_dR2:_srcR2.index("};", _dR2)]
     for _id in ("tab-remote", "tab-remote2", "tab-sessions", "tab-valist",
-                "tab-onboarding", "tab-paievas", "tab-gmsdash", "grp-vault2"):
+                "tab-paievas", "tab-gmsdash", "grp-vault2"):
         check("menu : %s est range" % _id, "'%s'" % _id in _tableR2)
+    # Onboarding est REVENU au menu le 03/10/2026, a la demande du proprietaire
+    check("menu : Onboarding n est plus range, il est revenu",
+          "'tab-onboarding'" not in _tableR2)
+    # ET LE RETIRER DE LA TABLE NE SUFFISAIT PAS. Le code remontait au groupe
+    # parent dans TOUS les cas : ranger « VA list », qui vit dans le groupe
+    # « VAs », emportait Onboarding avec. Seul un en-tete de groupe emporte
+    # desormais ses enfants.
+    check("menu : un item se cache seul, il n emporte pas son groupe",
+          "e.classList.contains('group')" in _srcR2
+          and "var bloc = (tete && e.closest)" in _srcR2)
+    check("menu : l item range reste neutralise, pas seulement invisible",
+          "aria-hidden" in _srcR2 and "e.disabled = true" in _srcR2)
     # LA RUBRIQUE « PHONE FARM » NE POINTE PAS SUR REMOTE 2. J avais suppose
     # que « le parc » designait le poste de pilotage interne ; le
     # proprietaire a donne l adresse : c est YouLab Phone Farm, une appli qui

@@ -4306,7 +4306,6 @@ var VABOT_MENU_RANGE = {
   'tab-remote2':    'Remote 2',
   'tab-sessions':   'Sessions',
   'tab-valist':     'Délégations VA',
-  'tab-onboarding': 'Onboarding',
   'tab-paievas':    'Paie VAs',
   'tab-gmsdash':    'Dashboard clics',
   'grp-vault2':     'Bibliothèque 2'
@@ -4317,9 +4316,15 @@ function vabotMenuRange(){
     var e = document.getElementById(id);
     if(!e) return;
     ranges.push(VABOT_MENU_RANGE[id]);
-    // Un groupe se range en entier : masquer sa seule tete laisserait ses
-    // enfants orphelins au milieu du menu.
-    var bloc = e.closest ? (e.closest('.group') || e) : e;
+    // UN GROUPE SE RANGE EN ENTIER, UN ITEM NON.
+    //
+    // On remontait au groupe parent dans tous les cas. Ranger « VA list »,
+    // qui vit dans le groupe « VAs », emportait donc tout le groupe -- dont
+    // Onboarding, qu'on voulait garder. Un item se cache seul ; seul un
+    // en-tete de groupe (grp-...) emporte ses enfants, sinon ils resteraient
+    // orphelins au milieu du menu.
+    var tete = e.classList && e.classList.contains('group');
+    var bloc = (tete && e.closest) ? (e.closest('.group') || e) : e;
     bloc.style.display = 'none';
     // ET ON COUPE LE CLIC, pas juste la vue. Un display:none suffit a
     // l'oeil ; il ne suffit pas a un raccourci clavier, a un ancien lien,
