@@ -68,8 +68,12 @@ SANS_LIMITE = {479005370438778891, 402069419393679370}
 #: Comptes dont le lien de CHAQUE model reste en service, roles ou pas :
 #: aligner ne les coupe jamais. Proprietaire, 03/10/2026 : « nourdine229_08534,
 #: mon VA manager : un lien pour chaque model », « les 6 tournent en meme
-#: temps pour lui, sans les desactiver ».
-TOUTES_MODELS = {1454580913190211730}
+#: temps pour lui, sans les desactiver » ; puis « pour york_emerick12 aussi,
+#: priscah0908_23400 et fahnih_37050 ».
+TOUTES_MODELS = {1454580913190211730,    # nourdine229_08534
+                 1390429527087251618,    # york_emerick12 (BOSS, sans ticket)
+                 1525406324970618890,    # priscah0908_23400
+                 1525508553081753621}    # fahnih_37050
 
 
 def sans_limite(uid) -> bool:

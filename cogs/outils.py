@@ -316,6 +316,13 @@ _ESSAI_FAIT = Path(__file__).resolve().parent.parent / "data" / "essai_liens_fr.
 LIENS_DEMANDES = [
     {"id": "2026-10-03-nourdine", "uid": 1454580913190211730, "pseudo": "nourdine229_08534",
      "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
+    # « york_emerick12 pour lui aussi, priscah0908_23400 et aussi fahnih_37050 »
+    {"id": "2026-10-03-york", "uid": 1390429527087251618, "pseudo": "york_emerick12",
+     "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
+    {"id": "2026-10-03-priscah", "uid": 1525406324970618890, "pseudo": "priscah0908_23400",
+     "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
+    {"id": "2026-10-03-fahnih", "uid": 1525508553081753621, "pseudo": "fahnih_37050",
+     "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
 ]
 _LIENS_FAIT = Path(__file__).resolve().parent.parent / "data" / "liens_demandes_fr.json"
 
@@ -546,6 +553,9 @@ class Outils(commands.Cog):
                     recap.append(f"❌ {model} : {r.get('erreur')}"
                                  + "".join(f" · {k.upper()} déjà créé {v}" for k, v in (r.get("trackings") or {}).items()))
                 recap += [f"   ⚠️ {s}" for s in r.get("soucis") or []]
+                # GetMySocial limite par minute : le lien Lola de nourdine a pris
+                # un 429 au milieu de six creations d'affilee (03/10)
+                await asyncio.sleep(8)
             if ticket is not None and liens:
                 try:
                     await ticket.send(f"🔗 **Tes liens, un par model** <@{d['uid']}>",
@@ -570,8 +580,14 @@ class Outils(commands.Cog):
                         await staff.send(texte[i:i + 1900])
                 except Exception:                            # noqa: BLE001
                     pass
-        for d in a_faire:
-            self.bot.loop.create_task(_tache(d))
+        async def _toutes():
+            # une demande apres l'autre, jamais en parallele (meme quota)
+            for d in a_faire:
+                try:
+                    await _tache(d)
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[outils] liens demandes {d['id']} : {type(e).__name__}: {e}", flush=True)
+        self.bot.loop.create_task(_toutes())
         return len(a_faire)
 
     async def _clean_demande(self, guilde) -> bool:
