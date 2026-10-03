@@ -499,7 +499,7 @@ def _menu_va_texte(aide, threads, avec_menus, identite=None, mention=None,
 
 
 USERS_FILE = DATA_DIR / "users.json"
-TUTO_VIDEO_FILE = DATA_DIR / "tutoriel.mp4"  # vidéo explicative (bouton "Comprends rien ?")
+TUTO_VIDEO_FILE = DATA_DIR / "tutoriel.mp4"  # vidéo explicative (bouton « 📖 Tuto »)
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
 # Config demandes de lien. Nouveau format PAR SERVEUR : {"<guild_id>": {channel_id, role_id}}.
 # Rétro-compat : ancien format global {channel_id, role_id} encore lu en fallback.
@@ -6185,7 +6185,7 @@ class UserCog(commands.Cog):
             body += f"\n… +{len(lines) - len(out)} autre(s) (trop pour un message)"
         await interaction.response.send_message(body, ephemeral=True)
 
-    #: L'etape du plan d'onboarding que montre « Comprends rien ? ». Le texte
+    #: L'etape du plan d'onboarding que montre « 📖 Tuto ». Le texte
     #: vit la-bas : il se corrige depuis le site ou depuis son Google Doc, et
     #: le bouton suit sans qu'on retouche au code.
     TUTO_ETAPE = "Le serveur — comment ça marche"
@@ -6203,7 +6203,7 @@ class UserCog(commands.Cog):
         return None
 
     async def _send_tutoriel(self, interaction):
-        """Bouton 'Comprends rien ?' : le tutoriel du serveur, et la video si elle existe.
+        """Bouton « 📖 Tuto » : le tutoriel du serveur, et la video si elle existe.
 
         Le texte vient du plan d'onboarding, pas d'une copie dans le code :
         une explication ecrite a deux endroits finit toujours par dire deux
@@ -6249,7 +6249,7 @@ class UserCog(commands.Cog):
 
     @app_commands.command(
         name="settutoriel",
-        description="[ADMIN] Définit la vidéo explicative montrée par le bouton « Comprends rien ? »",
+        description="[ADMIN] Définit la vidéo explicative montrée par le bouton « 📖 Tuto »",
     )
     @app_commands.describe(video="La vidéo explicative (mp4/mov). Elle remplace l'ancienne.")
     async def settutoriel(self, interaction: discord.Interaction, video: discord.Attachment):
@@ -6271,7 +6271,7 @@ class UserCog(commands.Cog):
         _mo = video.size / (1024 * 1024)
         await interaction.followup.send(
             f"✅ Vidéo explicative enregistrée (**{_mo:.1f} Mo**). "
-            "Le bouton **« Comprends rien ? »** la montrera aux VA.\n"
+            "Le bouton **« 📖 Tuto »** la montrera aux VA.\n"
             "⚠️ Si elle est trop lourde pour Discord (~25 Mo sans boost), l'envoi aux VA "
             "peut échouer — garde-la légère.",
             ephemeral=True)
@@ -8574,8 +8574,8 @@ _MENU_VA_DISPOSITION = (
                   "ton lien si tu en as un, sinon les managers sont prévenus"),
         _BoutonVA("pay", "Mon paiement", "💸", _BS.secondary,
                   "comment tu reçois ton argent (crypto ou TapTap)"),
-        _BoutonVA("tuto", "Comprends rien ?", "❓", _BS.secondary,
-                  "une vidéo qui explique comment tout marche"),
+        _BoutonVA("tuto", "Tuto", "📖", _BS.secondary,
+                  "le serveur expliqué : les boutons, le podium, le warm-up"),
     )),
     ("Tes comptes", (
         _BoutonVA("addaccount", "Ajouter un compte", "➕", _BS.primary,
@@ -8827,7 +8827,7 @@ _LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success
                 ("comptes", "Mes comptes", "📷", discord.ButtonStyle.secondary),
                 # Le tutoriel du serveur, au MEME niveau que le reste : enfoui
                 # dans le menu complet, personne ne l'ouvrait.
-                ("tuto", "Comprends rien ?", "❓", discord.ButtonStyle.secondary))
+                ("tuto", "Tuto", "📖", discord.ButtonStyle.secondary))
 _LIGNE_SUIVI_CLES = {c for c, *_ in _LIGNE_SUIVI}
 
 
@@ -9131,7 +9131,7 @@ class ContentMenuView(discord.ui.LayoutView):
       Name, Pseudo, PP, Bio, ⭐ Vidéo brut
       un menu deroulant par famille de _FAMILLES_MENU (Caption, Template,
       Trash, Flash), sans etape
-      Mes clics, Assistance, Demander un lien, Mon paiement, Comprends rien ?
+      Mes clics, Assistance, Demander un lien, Mon paiement, Tuto
       Ajouter un compte, Mes comptes Insta
     Construite sans reglages (enregistrement au demarrage, tests) elle porte
     TOUT ; _filter_menu_view / _menu_va la reconstruisent pour un serveur.
@@ -9471,7 +9471,7 @@ class CentralMenuView(discord.ui.View):
         await interaction.response.send_message(
             embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
 
-    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu2:tuto", row=2)
+    @discord.ui.button(label="Tuto", emoji="📖", style=discord.ButtonStyle.secondary, custom_id="cmenu2:tuto", row=2)
     async def b_tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_tutoriel(interaction)
 
