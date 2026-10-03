@@ -5538,6 +5538,68 @@ function igPeriod(btn, period){
   window.__igCurrentPeriod = period;
   igApplyPeriodFilter();
 }
+// Filters : Views / Likes / Followers. 0 = pas de borne. Ces champs etaient
+// decoratifs : on pouvait taper, rien ne bougeait.
+function igFiltresNum(){
+  var v = function(id){
+    var el = document.getElementById(id);
+    var n = el ? parseInt(el.value, 10) : 0;
+    return (isNaN(n) || n < 0) ? 0 : n;
+  };
+  return {vues:[v('ig-f-vues-min'), v('ig-f-vues-max')],
+          likes:[v('ig-f-likes-min'), v('ig-f-likes-max')],
+          abo:[v('ig-f-abo-min'), v('ig-f-abo-max')]};
+}
+function igPasseNum(card, f){
+  var dans = function(val, b){ return (!b[0] || val >= b[0]) && (!b[1] || val <= b[1]); };
+  return dans(parseInt(card.getAttribute('data-views')) || 0, f.vues)
+      && dans(parseInt(card.getAttribute('data-likes')) || 0, f.likes)
+      && dans(parseInt(card.getAttribute('data-followers')) || 0, f.abo);
+}
+function igNbFiltresNum(f){
+  var n = 0;
+  [f.vues, f.likes, f.abo].forEach(function(b){ if(b[0] || b[1]) n++; });
+  return n;
+}
+// Pastille sur le bouton Filters : un filtre actif mais invisible (panneau
+// ferme) ferait croire qu il manque des reels.
+function igBadgeFiltres(){
+  var btn = document.getElementById('ig-filters-btn');
+  if(!btn) return;
+  var n = igNbFiltresNum(igFiltresNum()) + ((window.__igCrea || []).length ? 1 : 0);
+  var b = document.getElementById('ig-filters-nb');
+  if(!b){
+    b = document.createElement('span');
+    b.id = 'ig-filters-nb';
+    b.style.cssText = 'background:#3b82f6;color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:none;align-items:center;justify-content:center';
+    btn.appendChild(b);
+  }
+  b.textContent = n;
+  b.style.display = n ? 'inline-flex' : 'none';
+}
+window.igFiltresNumChange = function(){
+  clearTimeout(window.__igNumT);
+  window.__igNumT = setTimeout(function(){
+    igApplyPeriodFilter();
+    igFiltrerVueCrea();
+  }, 250);
+};
+// La vue des createrices n a pas de periode, mais les bornes s y appliquent.
+function igFiltrerVueCrea(){
+  var vue = document.getElementById('ig-crea-vue');
+  if(!vue || vue.style.display !== 'block') return;
+  var f = igFiltresNum(), n = 0, tot = 0;
+  vue.querySelectorAll('.reel-card').forEach(function(card){
+    tot++;
+    var ok = igPasseNum(card, f);
+    card.style.display = ok ? '' : 'none';
+    if(ok) n++;
+  });
+  var info = document.getElementById('ig-period-info');
+  if(info && vue.getAttribute('data-libelle')){
+    info.textContent = n + (n < tot ? ' / ' + tot : '') + ' reel(s) — ' + vue.getAttribute('data-libelle');
+  }
+}
 function igApplyPeriodFilter(){
   var period = window.__igCurrentPeriod || 'week';
   var now = Math.floor(Date.now() / 1000);
@@ -5546,21 +5608,25 @@ function igApplyPeriodFilter(){
   else if(period === 'week') threshold = now - 604800; // 7 jours
   else threshold = now - 2592000;                      // 30 jours
   var visible = 0;
+  var f = igFiltresNum();
   igCartesSuivies().forEach(function(card){
     var ts = parseInt(card.getAttribute('data-ts')) || 0;
-    if(ts === 0 || ts >= threshold){
+    if((ts === 0 || ts >= threshold) && igPasseNum(card, f)){
       card.style.display = '';
       visible++;
     } else {
       card.style.display = 'none';
     }
   });
+  igBadgeFiltres();
   // Les createrices choisies ont leur propre compteur (igCreaVue)
   if((window.__igCrea || []).length) return;
   var info = document.getElementById('ig-period-info');
   if(info){
     var labels = { 'day': '24 dernières heures', 'week': '7 derniers jours', 'month': '30 derniers jours' };
-    info.textContent = visible + ' reel(s) — ' + (labels[period] || '');
+    var nf = igNbFiltresNum(f);
+    info.textContent = visible + ' reel(s) — ' + (labels[period] || '')
+      + (nf ? ' · ' + nf + ' filtre' + (nf > 1 ? 's' : '') + ' actif' + (nf > 1 ? 's' : '') : '');
   }
 }
 // Appliquer le filtre par défaut au chargement (week)
@@ -5706,6 +5772,7 @@ window.igCreaChercher = function(){
 window.igCreaBasculer = function(u){
   var i = window.__igCrea.indexOf(u);
   if(i >= 0) window.__igCrea.splice(i, 1); else window.__igCrea.push(u);
+  igBadgeFiltres();
   igCreaRendre();
   igCreaChercher();
   igCreaVue();
@@ -5771,8 +5838,8 @@ window.igCreaVue = function(){
         return;
       }
       vue.innerHTML = d.html;
-      var info = document.getElementById('ig-period-info');
-      if(info) info.textContent = d.nb + ' reel(s) — ' + sel.map(function(u){ return '@' + u; }).join(', ') + ', du plus récent au plus ancien';
+      vue.setAttribute('data-libelle', sel.map(function(u){ return '@' + u; }).join(', ') + ', du plus récent au plus ancien');
+      igFiltrerVueCrea();
     })
     .catch(function(){
       if(vue.getAttribute('data-cle') === cle) vue.innerHTML = '<div style="padding:30px 20px;text-align:center;color:#f87171">Erreur réseau</div>';
@@ -5852,6 +5919,7 @@ function igClearFilters(){
   igCreaRendre();
   igCreaChercher();
   igCreaVue();
+  igApplyPeriodFilter();
 }
 // Fermer le menu si clic à l'extérieur
 document.addEventListener('click', function(e){
@@ -15968,24 +16036,24 @@ function showFeed(btn,name){
 
       <div class="filter-section" style="margin-bottom:18px">
         <div style="display:flex;gap:10px">
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Min.</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Max.</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Min.</div><input type="number" id="ig-f-vues-min" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Views — Max.</div><input type="number" id="ig-f-vues-max" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
         </div>
       </div>
 
       <div class="filter-section" style="margin-bottom:18px">
         <div style="font-weight:600;margin-bottom:8px;font-size:14px">Likes</div>
         <div style="display:flex;gap:10px">
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" id="ig-f-likes-min" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" id="ig-f-likes-max" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
         </div>
       </div>
 
       <div class="filter-section" style="margin-bottom:18px">
         <div style="font-weight:600;margin-bottom:8px;font-size:14px">Followers</div>
         <div style="display:flex;gap:10px">
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
-          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" value="0" min="0" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Min. Value</div><input type="number" id="ig-f-abo-min" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
+          <div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:4px">Max. Value</div><input type="number" id="ig-f-abo-max" class="ig-f-num" value="0" min="0" step="1" inputmode="numeric" oninput="igFiltresNumChange()" style="width:100%;padding:9px 10px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px"></div>
         </div>
       </div>
 
@@ -30690,6 +30758,7 @@ def _insta_trends_vue_creatrices(pseudos: list) -> dict:
             r = dict(r)
             r["_owner"] = prof.get("username") or h
             r["_owner_pp"] = prof.get("profile_pic_url") or ""
+            r["_owner_followers"] = prof.get("followers") or 0
             items.append((r, moy))
     items.sort(key=lambda x: x[0].get("taken_at") or 0, reverse=True)
     lignes = []
@@ -30794,7 +30863,7 @@ def _insta_trend_card_html(r: dict, avg_views: float) -> str:
             f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
         )
     return f"""
-<div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+<div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-followers="{int(r.get('_owner_followers') or 0)}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='igHoverPlay(this)'
        onmouseleave='igHoverStop(this)'

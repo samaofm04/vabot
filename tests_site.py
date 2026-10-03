@@ -34901,10 +34901,21 @@ try:
               and _vT["html"].index("/p/R1/") < _vT["html"].index("/p/R2/"), _vT.get("nb"))
         check("trends : un compte non suivi est refuse",
               not _wT._insta_trends_vue_creatrices(["pas_suivi"]).get("ok"))
+        _cacheT.write_text(_jT.dumps({"profile": {"username": "a1", "followers": 4321}, "reels": [
+            {"shortcode": "R1", "is_video": True, "views": 10, "likes": 3,
+             "taken_at": int(_tT.time()) - 3600, "url": "https://www.instagram.com/p/R1/"}]}),
+            encoding="utf-8")
+        check("trends : chaque carte porte les abonnes de son compte (filtre Followers)",
+              'data-followers="4321"' in _wT._insta_trends_ou_vide()
+              and 'data-followers="4321"' in (_wT._insta_trends_vue_creatrices(["a1"]).get("html") or ""))
         _srcT = (pathlib.Path(_wT.__file__)).read_text(encoding="utf-8")
         check("trends : le filtre de periode ne compte plus les cartes de la Veille",
               "querySelectorAll('#ig-grille .reel-card')" in _srcT
               and "var cards = document.querySelectorAll('.reel-card');\n  var visible = 0, hidden = 0;" not in _srcT)
+        check("trends : les champs Views / Likes / Followers filtrent vraiment",
+              all('id="ig-f-%s"' % _k in _srcT for _k in
+                  ("vues-min", "vues-max", "likes-min", "likes-max", "abo-min", "abo-max"))
+              and "igPasseNum(card, f)" in _srcT)
         check("trends : telechargement gratuit d abord, sans seuil de vues",
               "MIN_VUES_TELECHARGEMENT" not in _srcT and "faits = list(ex.map(_gratuit, batch))" in _srcT)
     finally:
