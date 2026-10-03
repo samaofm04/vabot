@@ -16,8 +16,10 @@ DECLENCHEMENT
     s'efface pas : un humain valide chaque creation.
 
 CE QUI N'EST JAMAIS FAIT EN SILENCE
-    Un bouton dont le tracking n'a pas pu etre cree garde l'adresse du lien de
-    base, et la raison remonte au manager (`soucis`). Une creation sans
+    Un bouton dont le tracking n'a pas pu etre cree est RETIRE de la copie (les
+    liens de base pointent vers un compte d'exemple), et la raison remonte au
+    manager (`soucis`). Sans aucun tracking, ou si la copie garde les boutons
+    du lien de base, aucun lien n'est donne au VA. Une creation sans
     plateforme reconnue est refusee avant de rien payer.
 """
 from __future__ import annotations
@@ -190,12 +192,19 @@ def _mots_doux(model: str, essai: int) -> str:
 
 def boutons_remplaces(boutons: List[Dict[str, Any]], urls: Dict[str, str]) -> List[Dict[str, Any]]:
     """Les boutons tels quels (images, effets, couleurs : un update_link
-    remplace TOUT le tableau), seule l'adresse des boutons OF / MYM change."""
+    remplace TOUT le tableau), seule l'adresse des boutons OF / MYM change.
+
+    Un bouton OF / MYM SANS tracking est RETIRE : les six liens de base
+    pointent vers un compte d'exemple (Lashwana, constate le 03/10/2026). Le
+    premier lien de Mario a garde le bouton MYM de Lashwana (MyPuls refusait
+    le tracking MYM) : les fans d'Amelia seraient partis chez une autre."""
     out = []
     for b in boutons or []:
         b2 = copy.deepcopy(b)
         p = plateforme(b2.get("url"))
-        if p and urls.get(p):
+        if p:
+            if not urls.get(p):
+                continue
             b2["url"] = urls[p]
         out.append(b2)
     return out
@@ -288,15 +297,15 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                                   f"n'est pas réservé, un nouveau clic recréera « {nom} »")
             out = {"ok": False, "erreur": erreur, "soucis": list(soucis), "trackings": dict(urls)}
             if link_id:
-                out["soucis"].append(f"copie GetMySocial {link_id} déjà créée "
-                                     "(elle pointe vers le lien de base)")
+                out["soucis"].append(f"copie GetMySocial {link_id} déjà créée, avec les boutons "
+                                     "du lien de base : à supprimer dans GetMySocial")
             return out
 
         try:
             for p in plates:
                 cid = cfg.get(p)
                 if not cid:
-                    soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — lien de base gardé")
+                    soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — bouton retiré")
                     continue
                 douteux[p] = "demandé"
                 t = creer_tracking(nom, int(cid))
@@ -305,7 +314,10 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                     douteux.pop(p, None)
                 else:
                     douteux[p] = t.get("url") or t.get("erreur") or "?"
-                    soucis.append(f"{p.upper()} : {t.get('erreur')} — lien de base gardé")
+                    soucis.append(f"{p.upper()} : {t.get('erreur')} — bouton retiré")
+            if not urls:
+                # chaque bouton du lien partirait chez le compte d'exemple
+                return _echec("aucun tracking MyPuls créé : lien non fabriqué")
 
             lien, sc = None, ""
             for essai in range(12):
@@ -328,10 +340,13 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
             # comme un update_link refuse, et le lien est enregistre quand meme.
             maj = {"link_id": link_id, "team_id": EQUIPE, "display_name": nom}
             try:
-                maj["buttons"] = boutons_remplaces(lire_lien(link_id).get("buttons") or [], urls)
+                boutons = lire_lien(link_id).get("buttons") or []
             except Exception as e:                           # noqa: BLE001
-                soucis.append(f"copie illisible ({e}) : boutons non remplacés, elle pointe "
-                              "encore vers le lien de base")
+                # ceux du lien de base, lus plus haut : jamais la copie telle
+                # quelle, dont les boutons vont chez le compte d'exemple
+                boutons = base.get("buttons") or []
+                soucis.append(f"copie illisible ({e}) : boutons repris du lien de base")
+            maj["buttons"] = boutons_remplaces(boutons, urls)
             try:
                 groupe = groupe_de(model)
             except Exception as e:                           # noqa: BLE001
@@ -343,8 +358,9 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                 soucis.append(f"groupe « {cfg['nom']} » introuvable et non créé : lien hors groupe")
             r = gms._call_tool("update_link", maj)
             if not r.get("ok"):
-                soucis.append(f"boutons non mis à jour ({r.get('error')}) : la copie pointe "
-                              "encore vers le lien de base")
+                # la copie garde les boutons du lien de base (compte d'exemple) :
+                # la donner au VA enverrait ses fans chez une autre
+                return _echec(f"boutons non mis à jour ({r.get('error')})")
         except Exception as e:                               # noqa: BLE001
             return _echec(f"interrompu : {type(e).__name__}: {e}")
         public = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"

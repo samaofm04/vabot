@@ -138,7 +138,11 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
                    timeout=mypuls.TIMEOUT)
         mypuls._save_rotated_cookies(s)
         if r.status_code != 200:
-            return {"ok": False, "erreur": f"MyPuls a refusé (HTTP {r.status_code})"}
+            # LA RAISON, pas seulement le code : le tracking MYM d'Amelia
+            # revenait « HTTP 400 » (03/10/2026) sans rien pour savoir quoi
+            # changer, et la session MyPuls n'existe que sur le VPS.
+            return {"ok": False, "erreur": f"MyPuls a refusé (HTTP {r.status_code}) : "
+                                           f"{_raison_refus(r)}"}
         try:
             rep = r.json()
         except Exception:
@@ -159,6 +163,23 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
         return {"ok": True, "url": vise[0]["url"], "code": vise[0]["code"], "erreur": ""}
     except Exception as e:
         return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
+
+
+def _raison_refus(r) -> str:
+    """Le message d'une reponse MyPuls en erreur (JSON Laravel : message +
+    errors par champ), sinon le debut du texte brut."""
+    try:
+        d = r.json()
+        if isinstance(d, dict):
+            morceaux = [str(d.get("message") or "")]
+            for champ, msgs in (d.get("errors") or {}).items():
+                morceaux.append(f"{champ}: {' '.join(map(str, msgs)) if isinstance(msgs, list) else msgs}")
+            txt = " | ".join(m for m in morceaux if m)
+            if txt:
+                return txt[:300]
+    except Exception:                                        # noqa: BLE001
+        pass
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r.text or ""))[:300] or "réponse vide"
 
 
 def _tracking_de(session, html: str):
