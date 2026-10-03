@@ -34687,7 +34687,7 @@ try:
                              "ABC"))
 
     import gdrive_sync as _g, onboarding as _ob, onboarding_discord as _od2
-    _sav = (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link, _od2.planifier)
+    _sav = (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link, _od2.publier)
     try:
         _dossiers = {"racine": [{"id": "d1", "name": "01 - JOUR 0", "mimeType": "x.folder"},
                                 {"id": "d9", "name": "videoooo", "mimeType": "x.folder"}],
@@ -34719,7 +34719,7 @@ try:
             return {"ok": True}
         _ob.add_media_link = _add
         _publie = []
-        _od2.planifier = lambda d=0: _publie.append(d)
+        _od2.publier = lambda force=False: (_publie.append(1) or {"crees": [], "corriges": []})
 
         _b = _odr.scanner()
         check("la video du dossier 01 va bien a la DEUXIEME etape",
@@ -34729,7 +34729,9 @@ try:
               any("videoooo" in x for x in _b["ignores"]) and len(_ajouts) == 1)
         check("ce qui n est ni video ni image est laisse de cote",
               not [a for a in _ajouts if "texte" in a[2]])
-        check("Discord est prevenu une fois les videos rattachees", _publie)
+        check("Discord est mis a jour TOUT DE SUITE, pas par une minuterie",
+              _publie and "planifier" not in
+              __import__("pathlib").Path("onboarding_drive.py").read_text(encoding="utf-8"))
 
         _ajouts.clear(); _publie.clear()
         _b2 = _odr.scanner()
@@ -34737,7 +34739,23 @@ try:
               not _ajouts and not _b2["ajoutes"] and not _publie)
     finally:
         (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link,
-         _od2.planifier) = _sav
+         _od2.publier) = _sav
+
+    # --- le texte vit dans un Google Doc, modifiable d un clic
+    _srcDr = _plD("onboarding_drive.py").read_text(encoding="utf-8")
+    check("le texte est un vrai Google Doc, pas un fichier a telecharger",
+          "vnd.google-apps.document" in _srcDr and "def _creer_doc" in _srcDr)
+    check("l export est decode en UTF-8 par nous, pas devine",
+          'r.content.decode("utf-8")' in _srcDr)
+    check("le titre du doc n est pas recopie dans la description",
+          _odr._corps_du_doc("📆 JOUR 0 — titre\n\nFais ceci\nPuis cela\n")
+          == "Fais ceci\nPuis cela")
+    check("le doc porte le titre puis le corps",
+          _odr.texte_de_etape({"icon": "📆", "title": "J0", "description": "Fais ceci"})
+          == "📆 J0\n\nFais ceci\n")
+    check("le dernier qui ecrit l emporte, dans les deux sens",
+          'bilan["textes"].append(f\'{etape.get("title")} : texte repris du doc\')' in _srcDr
+          and 'doc mis a jour' in _srcDr)
 
     _srcD = _plD("web_upload.py").read_text(encoding="utf-8")
     check("le ramassage tourne dans la boucle du site",
