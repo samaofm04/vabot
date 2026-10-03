@@ -87,6 +87,24 @@ def reminders_enabled(guild_or_id) -> bool:
             and _gid(guild_or_id) not in SANS_RAPPELS)
 
 
+#: Serveurs où le bot écrit dans le salon « rappels », au lieu des rappels
+#: dans chaque ticket : UNE annonce publique par tâche et par jour (Story 10h,
+#: Reel 16h, Story CTA 20h), au plus 3 relances anonymes tant qu'un VA n'a pas
+#: cliqué, et le message « comptes » lundi, jeudi et dimanche. Va IG,
+#: propriétaire 03/10/2026 : « c'est le mec qui clique mais tout le monde peut
+#: le faire, chacun voit son truc en vert, ça change que pour lui ». Les autres
+#: serveurs gardent leurs rappels par ticket (reminders_enabled) et ne
+#: reçoivent rien de tout ça. Un serveur d'ici doit aussi être dans
+#: SANS_RAPPELS, sinon il reçoit les deux.
+ANNONCES_POST = {"1505418484052394004"}   # Va IG
+
+
+def annonces_post_enabled(guild_or_id) -> bool:
+    """True si ce serveur reçoit les annonces, relances et message comptes du
+    salon « rappels » (cogs/cta_reminder.AnnoncesPost)."""
+    return _gid(guild_or_id) in ANNONCES_POST
+
+
 def is_restricted(guild_or_id) -> bool:
     """True si le serveur est explicitement configuré (bridé)."""
     gid = _gid(guild_or_id)
