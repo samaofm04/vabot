@@ -2680,6 +2680,15 @@ def _jb_can_use(interaction):
             return True
     except Exception:
         pass
+    # Serveur FR (03/10/2026) : le panneau s'ouvre par 📋 Menu dans le ticket,
+    # pour ses models -- tout VA qui en a une s'en sert, sans role a gerer.
+    try:
+        if _menu_outils_ici(getattr(interaction, "guild", None)):
+            from cogs.welcome import models_du_membre
+            if models_du_membre(interaction.user):
+                return True
+    except Exception:                                        # noqa: BLE001
+        pass
     return _has_jailbreak_role(interaction.user)
 
 
@@ -8524,12 +8533,21 @@ class MenuLigneVA(discord.ui.LayoutView):
 
 
 async def _ligne_ouvrir_menu(cog, interaction):
-    """Le menu complet de la model de CETTE ligne, pour le seul cliqueur. Ses
-    clics sont servis par la vue persistante du menu complet."""
+    """📋 Menu : le PANNEAU de la model de cette ligne (celui du serveur US :
+    photo et nom, 🔢, Name / Pseudo / PP / Bio / Story / Story CTA / Post, Brut,
+    Caption, Template, Trash, Flash), pour le seul cliqueur. Proprietaire,
+    03/10/2026 : « pour le menu il faut celui pour les VA, ca ». Tout son
+    etat est dans ses custom_id : ses clics repondent par les motifs
+    dynamiques, et le contenu arrive dans le ticket (_run_for_model)."""
     msg = getattr(interaction, "message", None)
     ident = (_menu_va_lire(msg)[0] if msg is not None else None) \
         or get_user_identity(interaction.user.id)
-    vue = _menu_va(cog, ident, getattr(interaction, "guild", None), sans_outils=True)
+    if not ident:
+        await interaction.response.send_message(
+            "⚠️ Aucune model sur ce menu — demande à un manager.", ephemeral=True)
+        return
+    vue = _jb_panel(cog, str(ident).strip().lower(), _JB_QTE_DEFAUT, marche="fr",
+                    guild=getattr(interaction, "guild", None))
     _vue_sans_suivi(vue)
     await interaction.response.send_message(view=vue, ephemeral=True)
 
