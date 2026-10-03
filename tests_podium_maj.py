@@ -948,6 +948,11 @@ try:
         pd._etat = lambda: _etat_avec(pd.FORMAT_AFFICHAGE, pd.FORMAT_AFFICHAGE)
         check("format a jour, une minute apres : rien (la cadence reprend)",
               not pd.a_rafraichir(IG, _t + 60) and not pd.a_rafraichir_subs(IG, _t + 60))
+        _g_vieux = _etat_avec("ancien", "ancien")["subs"][IG]
+        _g_neuf = _etat_avec(pd.FORMAT_AFFICHAGE, pd.FORMAT_AFFICHAGE)["subs"][IG]
+        check("_subs_du (la question que rafraichir_subs se repose) dit oui a l'ancien format, "
+              "non au format a jour dans la cadence",
+              pd._subs_du(IG, _g_vieux, _t + 60) and not pd._subs_du(IG, _g_neuf, _t + 60))
         check("chaque ecriture du message vivant note le format (POST, PATCH, quinzaine)",
               src.count('"format": FORMAT_AFFICHAGE') >= 2 and 'garde["format"] = FORMAT_AFFICHAGE' in src)
     finally:

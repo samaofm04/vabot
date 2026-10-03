@@ -1495,6 +1495,11 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         return True
     if not (garde.get("messages") or garde.get("message")):
         return True
+    if garde.get("format") != FORMAT_AFFICHAGE:
+        # presentation changee : refaire tout de suite. ICI, et pas seulement
+        # dans a_rafraichir_subs : rafraichir_subs repose la meme question et
+        # sortait sans rien faire (constate le 03/10 apres f6b44cf)
+        return True
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes_subs")
                   or _config().get("minutes") or MINUTES_LIVE)
     return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
@@ -1528,12 +1533,7 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
         return True
     if _pause_gms():
         return False
-    garde = (d.get("subs") or {}).get(gid) or {}
-    if (garde.get("saison") == saison_en_cours()[0].isoformat()
-            and (garde.get("messages") or garde.get("message"))
-            and garde.get("format") != FORMAT_AFFICHAGE):
-        return True                     # presentation changee : refaire tout de suite
-    return _subs_du(gid, garde, t)
+    return _subs_du(gid, (d.get("subs") or {}).get(gid) or {}, t)
 
 
 def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
