@@ -290,6 +290,16 @@ def _rendre_visible_aux_futurs_va(ids) -> None:
         print(f"[outils] salons non ajoutes a l'isolation : {type(e).__name__}: {e}")
 
 
+#: Reset des tickets du serveur FR demande au bot (proprietaire, 03/10/2026 :
+#: « reset », « oui, lance-le » -- il ne peut pas taper /resettickets a ma
+#: place). Fait UNE fois : la trace est ecrite AVANT de commencer. Coupe par
+#: un redemarrage (chaque push en provoque un), il REPREND la ou il en etait
+#: au lieu de tout refaire -- trois reprises au plus, pour qu'un reset qui
+#: plante a chaque fois ne tourne pas indefiniment.
+RESET_DEMANDE = "2026-10-03"
+_RESET_FAIT = Path(__file__).resolve().parent.parent / "data" / "reset_tickets_fr.json"
+
+
 class Outils(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -310,6 +320,10 @@ class Outils(commands.Cog):
                     await self.assurer(guilde)
                 except Exception as e:                       # noqa: BLE001
                     print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
+            try:
+                await self._reset_demande(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] reset des tickets : {type(e).__name__}: {e}")
             # les salons d'information : l'isolation d'un VA qui arrive les
             # lui cacherait (un refus par salon), sauf ceux de cette liste
             try:
@@ -352,6 +366,51 @@ class Outils(commands.Cog):
     @_entretien.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+
+    async def _reset_demande(self, guilde) -> bool:
+        fait = safe_json.load(_RESET_FAIT, default={}) or {}
+        etat = fait.get(RESET_DEMANDE)
+        if etat and (etat.get("fin") or etat.get("reprises", 0) >= 3):
+            return False
+        depuis = None
+        if etat:
+            depuis = etat.get("debut")
+            etat["reprises"] = etat.get("reprises", 0) + 1
+        else:
+            etat = fait[RESET_DEMANDE] = {"debut": int(__import__("time").time())}
+        if not safe_json.write(_RESET_FAIT, fait, indent=1):
+            print("[outils] trace du reset non ecrite : reset NON lance (il pourrait "
+                  "se refaire a chaque demarrage)", flush=True)
+            return False
+        from cogs.welcome import reset_tickets
+        salon = discord.utils.find(lambda c: "entrées" in c.name or "entrees" in c.name,
+                                   guilde.text_channels)
+
+        async def signaler(texte):
+            print(f"[outils] reset : {texte}", flush=True)
+            if salon is not None:
+                try:
+                    await salon.send(texte)
+                except Exception:                            # noqa: BLE001
+                    pass
+
+        async def _tache():
+            try:
+                if depuis:
+                    await signaler("🔄 Reset coupe par un redemarrage : reprise")
+                b = await reset_tickets(guilde, self.bot, signaler, depuis=depuis)
+                fin = safe_json.load(_RESET_FAIT, default={}) or {}
+                fin.setdefault(RESET_DEMANDE, {})["fin"] = int(__import__("time").time())
+                safe_json.write(_RESET_FAIT, fin, indent=1)
+                await signaler(f"✅ Reset des tickets fini : {b['faits']} ticket(s) neuf(s)"
+                               + (f" · non archives : {', '.join(b['archives_ratees'][:15])}"
+                                  if b["archives_ratees"] else "")
+                               + (f" · archives SANS ticket neuf : {', '.join(b['tickets_rates'][:15])}"
+                                  if b["tickets_rates"] else ""))
+            except Exception as e:                           # noqa: BLE001
+                await signaler(f"❌ Reset interrompu : {type(e).__name__}: {e}")
+        self.bot.loop.create_task(_tache())
+        return True
 
     async def _roles_models(self, guilde) -> int:
         wcog = self.bot.get_cog("Welcome")

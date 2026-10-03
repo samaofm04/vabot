@@ -1676,13 +1676,17 @@ async def _categorie_archives(guild):
         reason="Reset des tickets : archives")
 
 
+class _DejaArchive(Exception):
+    """Reprise d'un reset : ce ticket est deja dans les archives."""
+
+
 def _nom_archive(nom) -> str:
     import re as _re
     m = _re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", nom_sans_decor(nom))
     return ("ancien-" + (m.group(1) if m else nom_sans_decor(nom).lstrip("-")))[:100]
 
 
-async def reset_tickets(guild, bot, signaler=None) -> dict:
+async def reset_tickets(guild, bot, signaler=None, depuis=None) -> dict:
     """Repart a zero (proprietaire, 03/10/2026 : « reset tous les tickets, a
     partir de zero, avec le message d'onboarding ») SANS RIEN SUPPRIMER.
 
@@ -1694,24 +1698,44 @@ async def reset_tickets(guild, bot, signaler=None) -> dict:
 
     Un ticket qui n'a pas pu etre archive n'est PAS remplace : le VA en
     aurait deux. Rend le bilan ; `signaler(texte)` (async) recoit la
-    progression."""
-    bilan = {"faits": 0, "archives_ratees": [], "tickets_rates": [], "absents": 0}
+    progression.
+
+    `depuis` (horodatage du debut) : REPRISE d'un reset coupe par un
+    redemarrage -- chaque push en redemarre le bot, et un reset dure une
+    dizaine de minutes. Un ticket cree depuis est deja neuf : garde. Un ticket
+    deja archive (coupure entre l'archivage et le ticket neuf) : le VA recoit
+    son ticket neuf sans second archivage."""
+    bilan = {"faits": 0, "archives_ratees": [], "tickets_rates": [], "absents": 0,
+             "deja_neufs": 0}
     cibles = []
     for uid, e in (load_users() or {}).items():
-        if not isinstance(e, dict) or not e.get("channel_id"):
+        if not isinstance(e, dict):
+            continue
+        m = guild.get_member(int(uid)) if str(uid).isdigit() else None
+        if depuis and not e.get("channel_id") and e.get("ancien_ticket") \
+                and guild.get_channel(int(e["ancien_ticket"])) is not None:
+            if m is not None and not m.bot:
+                cibles.append((m, None))      # archive faite, ticket neuf jamais cree
+            continue
+        if not e.get("channel_id"):
             continue
         ancien = guild.get_channel(int(e["channel_id"]))
         if ancien is None:
             continue                          # fiche d'un autre serveur
-        m = guild.get_member(int(uid)) if str(uid).isdigit() else None
         if m is None or m.bot:
             bilan["absents"] += 1
+            continue
+        if depuis and getattr(ancien, "created_at", None) is not None \
+                and ancien.created_at.timestamp() >= depuis and not _salon_archive(ancien):
+            bilan["deja_neufs"] += 1
             continue
         cibles.append((m, ancien))
     if signaler:
         await signaler(f"🔄 Reset de {len(cibles)} ticket(s)…")
     for i, (m, ancien) in enumerate(cibles, 1):
         try:
+            if ancien is None or _salon_archive(ancien):
+                raise _DejaArchive
             arch = await _categorie_archives(guild)
             # « ancien-<pseudo> », SANS « va- » : vaactivity, vasort et le recap
             # des clics reperent les tickets par « va-<pseudo> » en fin de nom
@@ -1719,13 +1743,15 @@ async def reset_tickets(guild, bot, signaler=None) -> dict:
             await ancien.edit(name=_nom_archive(ancien.name),
                               category=arch, sync_permissions=True,
                               reason="Reset des tickets : archive")
+        except _DejaArchive:
+            pass
         except Exception as x:                               # noqa: BLE001
             bilan["archives_ratees"].append(f"{ancien.name} ({type(x).__name__})")
             log.warning(f"reset : {ancien.name} non archive ({x}) -- ticket garde")
             continue
         users = load_users()
         fiche = users.get(str(m.id))
-        if isinstance(fiche, dict):
+        if isinstance(fiche, dict) and ancien is not None:
             fiche["ancien_ticket"] = ancien.id
             fiche["channel_id"] = None
             save_users(users)
@@ -2492,6 +2518,55 @@ class Welcome(commands.Cog):
             pass
         log.info(f"verification : {after.id} verifie, parcours d'arrivee")
         await self._accueillir(after, load_welcome_config())
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(self, before, after):
+        try:
+            await self._ticket_change_de_categorie(before, after)
+        except Exception as e:                               # noqa: BLE001
+            log.error(f"ticket deplace ({getattr(after, 'name', '?')}) : {e}")
+
+    async def _ticket_change_de_categorie(self, before, after):
+        """Un ticket deplace A LA MAIN dans la categorie d'une autre model
+        (serveur FR) : le VA passe a cette model. Proprietaire, 03/10/2026 :
+        « si je change de categorie, ca change la model ».
+
+        Sans ca, auto_sort_channels le remettait dans la categorie de sa fiche
+        dix minutes plus tard. La fiche change d'abord (auto_sort la suit),
+        puis les roles : le nouveau est AJOUTE avant que l'ancien parte --
+        _apres_roles_models poste alors son menu et ouvre ses salons, et un VA
+        a plusieurs models garde les autres. Les deplacements du bot lui-meme
+        (vers la categorie de sa fiche, vers les archives) ne changent rien."""
+        guild = getattr(after, "guild", None)
+        if not _serveur_fr(guild) or not isinstance(after, discord.TextChannel):
+            return
+        if getattr(before, "category_id", None) == getattr(after, "category_id", None):
+            return
+        cat = getattr(after, "category", None)
+        model = str(getattr(cat, "name", "") or "").strip().lower()
+        if not model or model not in models_du_serveur(guild):
+            return
+        users = load_users()
+        uid = next((u for u, e in users.items() if isinstance(e, dict)
+                    and int(e.get("channel_id") or 0) == after.id), None)
+        if uid is None:
+            return
+        fiche = users[uid]
+        ancienne = str(fiche.get("identity") or "").strip().lower()
+        if ancienne == model:
+            return
+        fiche["identity"] = model
+        save_users(users)
+        log.info(f"models : ticket de {uid} deplace dans {model} (etait {ancienne or '-'})")
+        membre = guild.get_member(int(uid)) if str(uid).isdigit() else None
+        if membre is None:
+            return
+        nouveau = role_du_model(guild, model)
+        vieux = role_du_model(guild, ancienne) if ancienne else None
+        if nouveau is not None and nouveau not in membre.roles:
+            await membre.add_roles(nouveau, reason=f"Ticket deplace dans {model}")
+        if vieux is not None and vieux in membre.roles:
+            await membre.remove_roles(vieux, reason=f"Ticket deplace hors de {ancienne}")
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
