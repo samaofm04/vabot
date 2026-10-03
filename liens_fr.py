@@ -53,6 +53,20 @@ MODELS: Dict[str, Dict[str, Any]] = {
     "emma": {"nom": "Emma", "of": None, "mym": 1733},
 }
 _CACHE_LIENS: Dict[str, Any] = {"t": 0.0, "liens": []}
+#: Comptes SANS LIMITE : chaque « Demander un lien » cree un NOUVEAU lien,
+#: tout de suite, sans manager. Proprietaire, 03/10/2026 : « pour moi Mario,
+#: mets un truc sans limite, comme ca je peux check » -- marioofm, son compte
+#: de test VA (role Amelia sur Va IG). Chaque essai est REEL : trackings MyPuls
+#: (ils ne s'effacent pas) et lien GetMySocial, gardes dans « essais » du
+#: registre pour le menage.
+SANS_LIMITE = {479005370438778891}
+
+
+def sans_limite(uid) -> bool:
+    try:
+        return int(uid) in SANS_LIMITE
+    except (TypeError, ValueError):
+        return False
 
 
 def _liens_equipe(force: bool = False) -> List[Dict[str, Any]]:
@@ -112,10 +126,33 @@ def lien_de(uid, model: str) -> Optional[Dict[str, Any]]:
 
 def _numero(model: str) -> int:
     """Le prochain numero de VA de cette model : « Amelia 1 » est le lien de
-    base, les VA commencent a 2."""
-    pris = [int(e.get("numero") or 0) for k, e in (_etat().get("liens") or {}).items()
+    base, les VA commencent a 2. Les essais du compte sans limite, les liens
+    retires (/resetlien) et les tentatives ratees apres creation comptent
+    aussi : leur nom « Amelia VA n » existe deja chez MyPuls."""
+    d = _etat()
+    pris = [int(e.get("numero") or 0) for k, e in (d.get("liens") or {}).items()
             if k.endswith(":" + model) and isinstance(e, dict)]
+    for liste in ("essais", "echecs", "retires"):
+        pris += [int(e.get("numero") or 0) for e in (d.get(liste) or [])
+                 if isinstance(e, dict) and e.get("model") == model]
     return max([1] + pris) + 1
+
+
+def retirer(uid) -> List[Dict[str, Any]]:
+    """/resetlien (serveur FR) : sort les liens de ce VA du registre « liens »
+    -- sa prochaine demande en refera un -- et les garde dans « retires » :
+    leurs trackings MyPuls existent toujours, leur numero reste pris."""
+    with _VERROU:
+        d = _etat()
+        liens = d.get("liens") or {}
+        sortis = [{**liens.pop(k), "retire": int(time.time())}
+                  for k in [k for k, e in liens.items()
+                            if k.startswith(f"{int(uid)}:") and isinstance(e, dict)]]
+        if sortis:
+            d.setdefault("retires", []).extend(sortis)
+            if not safe_json.write(ETAT, d, indent=1):
+                raise RuntimeError("registre data/liens_va_fr.json non écrit")
+        return sortis
 
 
 # ─── GetMySocial ──────────────────────────────────────────────────────────
@@ -210,7 +247,7 @@ def _verifie_createrice(r: Dict[str, Any], creator_id: int) -> Dict[str, Any]:
 def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
     """Le lien de ce VA pour cette model. Rend {ok, deja, public_url,
     display_name, soucis, erreur}. Idempotent : un lien deja fait est rendu
-    tel quel, sans rien recreer."""
+    tel quel, sans rien recreer -- sauf pour un compte SANS_LIMITE."""
     import gms
     model = str(model or "").strip().lower()
     cfg = MODELS.get(model)
@@ -218,7 +255,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         return {"ok": False, "erreur": f"« {model} » n'est pas une model FR"}
     with _VERROU:
         deja = lien_de(uid, model)
-        if deja and deja.get("public_url"):
+        if deja and deja.get("public_url") and not sans_limite(uid):
             return {"ok": True, "deja": True, **deja}
         gabarit = lien_de_base(model)
         if not gabarit:
@@ -230,50 +267,86 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
             return {"ok": False, "erreur": f"le lien de base de {cfg['nom']} n'a aucun bouton OF ni MYM"}
         n = _numero(model)
         nom = f"{cfg['nom']} VA {n} @{pseudo}"[:60]
+        # douteux : trackings demandes a MyPuls sans confirmation (MYM non
+        # relu, poste chez une autre createrice) -- peut-etre crees quand meme
+        urls, douteux, soucis, link_id = {}, {}, [], ""
 
-        urls, soucis = {}, []
-        for p in plates:
-            cid = cfg.get(p)
-            if not cid:
-                soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — lien de base gardé")
-                continue
-            t = creer_tracking(nom, int(cid))
-            if t.get("ok"):
-                urls[p] = t["url"]
+        def _echec(erreur: str) -> Dict[str, Any]:
+            """Rate APRES une creation definitive (tracking MyPuls, copie
+            GetMySocial) : la tentative est notee (son numero reste pris) et
+            ses adresses sont rendues -- pas un « lien non cree » sans rien,
+            suivi au clic d'apres de nouveaux trackings au meme nom."""
+            if urls or douteux or link_id:
+                d = _etat()
+                d.setdefault("echecs", []).append({
+                    "uid": str(uid), "pseudo": pseudo, "model": model, "numero": n,
+                    "display_name": nom, "trackings": dict(urls), "douteux": dict(douteux),
+                    "link_id": link_id, "erreur": erreur, "quand": int(time.time())})
+                ETAT.parent.mkdir(parents=True, exist_ok=True)
+                if not safe_json.write(ETAT, d, indent=1):
+                    soucis.append(f"registre data/liens_va_fr.json non écrit : le numéro {n} "
+                                  f"n'est pas réservé, un nouveau clic recréera « {nom} »")
+            out = {"ok": False, "erreur": erreur, "soucis": list(soucis), "trackings": dict(urls)}
+            if link_id:
+                out["soucis"].append(f"copie GetMySocial {link_id} déjà créée "
+                                     "(elle pointe vers le lien de base)")
+            return out
+
+        try:
+            for p in plates:
+                cid = cfg.get(p)
+                if not cid:
+                    soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — lien de base gardé")
+                    continue
+                douteux[p] = "demandé"
+                t = creer_tracking(nom, int(cid))
+                if t.get("ok"):
+                    urls[p] = t["url"]
+                    douteux.pop(p, None)
+                else:
+                    douteux[p] = t.get("url") or t.get("erreur") or "?"
+                    soucis.append(f"{p.upper()} : {t.get('erreur')} — lien de base gardé")
+
+            lien, sc = None, ""
+            for essai in range(12):
+                # a partir du numero du VA : sinon le 13e VA d'une model epuisait
+                # les douze essais sur des adresses deja prises
+                sc = _mots_doux(model, (n - 2) + essai)
+                r = gms.duplicate_link(gabarit, sc, nom, "", EQUIPE)
+                if r.get("ok"):
+                    lien = r.get("link") or {}
+                    break
+                if "shortcode" not in str(r.get("error") or "").lower():
+                    return _echec(f"GetMySocial : {r.get('error')}")
+            if not lien or not lien.get("id"):
+                return _echec("GetMySocial : aucune adresse libre")
+            link_id = str(lien["id"])
+
+            # Les boutons : relus sur la COPIE (ses images sont les siennes), seule
+            # l'adresse OF / MYM change, et le lien rejoint le groupe de la model.
+            # La copie existe deja : un refus ici (quota, 429) devient un souci,
+            # comme un update_link refuse, et le lien est enregistre quand meme.
+            maj = {"link_id": link_id, "team_id": EQUIPE, "display_name": nom}
+            try:
+                maj["buttons"] = boutons_remplaces(lire_lien(link_id).get("buttons") or [], urls)
+            except Exception as e:                           # noqa: BLE001
+                soucis.append(f"copie illisible ({e}) : boutons non remplacés, elle pointe "
+                              "encore vers le lien de base")
+            try:
+                groupe = groupe_de(model)
+            except Exception as e:                           # noqa: BLE001
+                groupe = ""
+                print(f"[liens_fr] groupe de {model} : {type(e).__name__}: {e}", flush=True)
+            if groupe:
+                maj["group_id"] = groupe
             else:
-                soucis.append(f"{p.upper()} : {t.get('erreur')} — lien de base gardé")
-
-        lien, sc = None, ""
-        for essai in range(12):
-            # a partir du numero du VA : sinon le 13e VA d'une model epuisait
-            # les douze essais sur des adresses deja prises
-            sc = _mots_doux(model, (n - 2) + essai)
-            r = gms.duplicate_link(gabarit, sc, nom, "", EQUIPE)
-            if r.get("ok"):
-                lien = r.get("link") or {}
-                break
-            if "shortcode" not in str(r.get("error") or "").lower():
-                return {"ok": False, "erreur": f"GetMySocial : {r.get('error')}", "soucis": soucis,
-                        "trackings": urls}
-        if not lien or not lien.get("id"):
-            return {"ok": False, "erreur": "GetMySocial : aucune adresse libre", "soucis": soucis,
-                    "trackings": urls}
-        link_id = str(lien["id"])
-
-        # Les boutons : relus sur la COPIE (ses images sont les siennes), seule
-        # l'adresse OF / MYM change, et le lien rejoint le groupe de la model.
-        copie = lire_lien(link_id)
-        maj = {"link_id": link_id, "team_id": EQUIPE, "display_name": nom,
-               "buttons": boutons_remplaces(copie.get("buttons") or [], urls)}
-        groupe = groupe_de(model)
-        if groupe:
-            maj["group_id"] = groupe
-        else:
-            soucis.append(f"groupe « {cfg['nom']} » introuvable et non créé : lien hors groupe")
-        r = gms._call_tool("update_link", maj)
-        if not r.get("ok"):
-            soucis.append(f"boutons non mis à jour ({r.get('error')}) : la copie pointe "
-                          "encore vers le lien de base")
+                soucis.append(f"groupe « {cfg['nom']} » introuvable et non créé : lien hors groupe")
+            r = gms._call_tool("update_link", maj)
+            if not r.get("ok"):
+                soucis.append(f"boutons non mis à jour ({r.get('error')}) : la copie pointe "
+                              "encore vers le lien de base")
+        except Exception as e:                               # noqa: BLE001
+            return _echec(f"interrompu : {type(e).__name__}: {e}")
         public = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
         entree = {"pseudo": pseudo, "model": model, "numero": n, "link_id": link_id,
                   "shortcode": sc, "public_url": public, "display_name": nom,
@@ -281,6 +354,8 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                   "quand": int(time.time())}
         d = _etat()
         d.setdefault("liens", {})[f"{int(uid)}:{model}"] = entree
+        if sans_limite(uid):
+            d.setdefault("essais", []).append(entree)
         ETAT.parent.mkdir(parents=True, exist_ok=True)
         if not safe_json.write(ETAT, d, indent=1):
             soucis.append("registre data/liens_va_fr.json non écrit : un 2e clic recréerait")

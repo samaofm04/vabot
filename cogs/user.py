@@ -2905,6 +2905,28 @@ class _JBRedirect:
         return getattr(object.__getattribute__(self, "_itx"), name)
 
 
+def _model_lien_fr(member, identity) -> str:
+    """La model du lien FR : celle demandee (menu clique, ou la fiche) si le
+    VA en a le role, sinon son premier role de model. La demande et la
+    generation passent par ici : elles ne peuvent pas viser deux models."""
+    model = str(identity or "").strip().lower()
+    try:
+        from cogs.welcome import models_du_membre
+        mods = models_du_membre(member) if member is not None else []
+        if mods and model not in mods:
+            model = mods[0]
+    except Exception:                                        # noqa: BLE001
+        pass
+    return model
+
+
+def _lr_cle_fr(uid, model) -> str:
+    """Cle de link_request_state.json sur le serveur FR : un lien PAR MODEL.
+    La cle par VA des autres serveurs refusait le lien Julia d'un VA qui
+    avait deja celui d'Amelia."""
+    return f"{int(uid)}:{str(model or '').strip().lower()}"
+
+
 async def _generer_lien_fr(interaction, uid, identity):
     """« Générer le lien » sur le serveur FR : liens_fr.generer, puis le lien
     dans le salon du VA, comme ailleurs. Ce qui n'a pas pu se faire (un
@@ -2916,14 +2938,7 @@ async def _generer_lien_fr(interaction, uid, identity):
     va_ch = interaction.client.get_channel(ch_id) if ch_id else None
     member = interaction.guild.get_member(uid) if interaction.guild else None
     pseudo = (getattr(member, "name", "") or str(uid)).lower()
-    model = str(identity or "").strip().lower()
-    try:
-        from cogs.welcome import models_du_membre
-        mods = models_du_membre(member) if member is not None else []
-        if mods and model not in mods:
-            model = mods[0]
-    except Exception:                                        # noqa: BLE001
-        pass
+    model = _model_lien_fr(member, identity)
     try:
         res = await asyncio.to_thread(liens_fr.generer, uid, pseudo, model, interaction.user.id)
     except Exception as e:                                   # noqa: BLE001
@@ -2939,10 +2954,10 @@ async def _generer_lien_fr(interaction, uid, identity):
         return
     url = res.get("public_url", "")
     if res.get("deja"):
-        _lr_mark_generated(uid, url, res.get("display_name", ""))
+        _lr_mark_generated(_lr_cle_fr(uid, model), url, res.get("display_name", ""))
         await _lr_send_blocked(interaction, uid, url)
         return
-    _lr_mark_generated(uid, url, res.get("display_name", ""))
+    _lr_mark_generated(_lr_cle_fr(uid, model), url, res.get("display_name", ""))
     if va_ch:
         try:
             await va_ch.send(_link_message(url, getattr(va_ch, "guild", None)))
@@ -2959,24 +2974,30 @@ async def _generer_lien_fr(interaction, uid, identity):
     await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
 
 
-class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
+class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button],
+                    template=r"genlink:(?P<uid>\d+)(?::(?P<model>[a-z0-9_]+))?"):
     """Bouton « Générer le lien » sur une demande de lien. L'ID du VA est dans le
     custom_id -> persistant (marche même après un redémarrage du bot). Réservé staff.
-    Au clic : génère le lien GMS et l'envoie dans le salon perso du VA."""
+    Au clic : génère le lien GMS et l'envoie dans le salon perso du VA.
 
-    def __init__(self, user_id: int):
+    Serveur FR : la model demandee y est aussi (« genlink:<uid>:amelia ») --
+    sans elle, la demande faite du menu Julia d'un VA Amelia + Julia
+    generait un lien Amelia. Les anciens boutons, sans model, marchent encore."""
+
+    def __init__(self, user_id: int, model: str = ""):
         self.user_id = int(user_id)
+        self.model = str(model or "").strip().lower()
         super().__init__(
             discord.ui.Button(
                 label="Générer le lien", emoji="🔗",
                 style=discord.ButtonStyle.success,
-                custom_id=f"genlink:{int(user_id)}",
+                custom_id=f"genlink:{int(user_id)}" + (f":{self.model}" if self.model else ""),
             )
         )
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(int(match["uid"]))
+        return cls(int(match["uid"]), match["model"] or "")
 
     async def callback(self, interaction: discord.Interaction):
         if not _is_staff_member(interaction.user):
@@ -2987,8 +3008,12 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         uid = self.user_id
+        fr = _menu_outils_ici(interaction.guild)
         # Bloc DUR anti-doublon (couche 1, locale) : ce VA a déjà eu un lien -> on refuse.
-        _ex = _lr_existing(uid)
+        # Serveur FR : un lien PAR MODEL, l'anti-doublon est celui de
+        # liens_fr.generer -- celui-ci, par VA, refusait sa 2e model (ou
+        # bloquait un ancien VA US sur son lien US).
+        _ex = None if fr else _lr_existing(uid)
         if _ex:
             await _lr_send_blocked(interaction, uid, _ex.get("url", ""))
             return
@@ -3007,13 +3032,13 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
         _LINK_GEN_INFLIGHT.add(uid)
         try:
             # Identité du LIEN = identité dédiée du serveur (ex: hybride) si définie.
-            identity = _link_identity(interaction.guild, uid)
+            identity = (self.model if fr else "") or _link_identity(interaction.guild, uid)
             if not identity:
                 await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
                 return
-            if _menu_outils_ici(interaction.guild):
-                # Serveur FR : copie du lien de base de SA model (equipe NOUM
-                # FR) aux boutons OF / MYM sur ses trackings MyPuls (liens_fr).
+            if fr:
+                # Serveur FR : copie du lien de base de SA model (equipe VA IG
+                # DISCORD) aux boutons OF / MYM sur ses trackings MyPuls (liens_fr).
                 await _generer_lien_fr(interaction, uid, identity)
                 return
             # Salon perso + handle du VA
@@ -5618,7 +5643,7 @@ class UserCog(commands.Cog):
                     pass
         return ids
 
-    async def _notify_managers_link_request(self, member, identity, guild):
+    async def _notify_managers_link_request(self, member, identity, guild, model=""):
         """Prévient les managers (salon + @rôle + DM) qu'un VA demande son lien.
         Posté DANS le serveur du VA (par serveur) + ping du rôle boss/manager."""
         gid = getattr(guild, "id", None)
@@ -5652,7 +5677,7 @@ class UserCog(commands.Cog):
                 ping = " ".join(r.mention for r in boss_roles[:3]) + (" " if boss_roles else "")
             view = discord.ui.View(timeout=None)
             try:
-                view.add_item(GenLinkButton(member.id))
+                view.add_item(GenLinkButton(member.id, model))
             except Exception:
                 view = None
             try:
@@ -5692,6 +5717,9 @@ class UserCog(commands.Cog):
             )
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
+        if _menu_outils_ici(interaction.guild):
+            await self._demande_lien_fr(interaction, uid, identity)
+            return
 
         # 1) Lien déjà connu en local -> on l'affiche (sauf s'il est d'une autre
         #    identité que celle dédiée au serveur : alors on le considère périmé).
@@ -5768,6 +5796,58 @@ class UserCog(commands.Cog):
                 "ou un admin doit faire `/setliensalon` + **donner au bot l'accès au salon**.",
                 ephemeral=True,
             )
+
+    async def _demande_lien_fr(self, interaction, uid, identity):
+        """« Demander un lien » sur le serveur FR : un lien PAR MODEL (celle du
+        menu clique), tenu par liens_fr. Le parcours des autres serveurs
+        montrait a un ancien VA US son lien US, refusait la 2e model d'un VA,
+        et cherchait sur GetMySocial un lien « va<pseudo> » qu'aucun lien FR
+        (« Amelia VA 3 @pseudo ») ne porte : un appel du quota pour rien a
+        chaque clic.
+
+        Compte SANS LIMITE (liens_fr.SANS_LIMITE) : le lien est genere tout de
+        suite, a chaque clic, sans manager."""
+        import liens_fr
+        model = _model_lien_fr(interaction.user, identity)
+        if liens_fr.sans_limite(uid):
+            if uid in _LINK_GEN_INFLIGHT:
+                await interaction.followup.send(
+                    "⏳ Une génération est déjà en cours — patiente quelques secondes.", ephemeral=True)
+                return
+            _LINK_GEN_INFLIGHT.add(uid)
+            try:
+                await _generer_lien_fr(interaction, uid, model)
+            finally:
+                _LINK_GEN_INFLIGHT.discard(uid)
+            return
+        deja = liens_fr.lien_de(uid, model)
+        if deja and deja.get("public_url"):
+            await interaction.followup.send(
+                _link_message(deja["public_url"], interaction.guild), ephemeral=True)
+            return
+        cle = _lr_cle_fr(uid, model)
+        if _lr_is_pending(cle):
+            await interaction.followup.send(
+                "⏳ **Ta demande est déjà en attente** — un manager va t'envoyer ton lien. "
+                "Pas besoin de re-cliquer 🙂", ephemeral=True)
+            return
+        try:
+            posted = await self._notify_managers_link_request(
+                interaction.user, model, interaction.guild, model=model)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("demande de lien FR de %s non postee : %s", uid, e)
+            posted = None
+        if posted is not None:
+            _lr_mark_pending(cle)
+            await interaction.followup.send(
+                f"✅ **Demande envoyée aux managers !** (dans {posted.mention}) "
+                "Tu vas recevoir ton lien bientôt 🔗", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "⚠️ **Aucun salon `demande-de-lien` joignable** sur ce serveur "
+                "(salon introuvable ou le bot ne peut pas y écrire). Recliquera plus tard, "
+                "ou un admin doit faire `/setliensalon` + **donner au bot l'accès au salon**.",
+                ephemeral=True)
 
     @app_commands.command(name="lien", description="Demande ton lien aux managers")
     async def lien(self, interaction: discord.Interaction):
@@ -6562,11 +6642,17 @@ class UserCog(commands.Cog):
         cleared = False
         if uid is not None:
             d = _lr_load()
-            cleared = str(uid) in d
-            d.pop(str(uid), None)
+            # les cles par model du serveur FR (« <uid>:<model> ») aussi
+            mes_cles = [k for k in d if k == str(uid) or k.startswith(f"{uid}:")]
+            cleared = bool(mes_cles)
+            for k in mes_cles:
+                d.pop(k, None)
             save_json(LINK_STATE_FILE, d)
         who = f"<@{uid}>" if uid is not None else f"`{handle}`"
         msg = f"✅ Anti-doublon réinitialisé pour {who}" + ("" if cleared or uid is None else " (rien en local)") + "."
+        if uid is not None and _menu_outils_ici(interaction.guild):
+            await self._resetlien_fr(interaction, uid, msg, supprimer_gms, regenerer)
+            return
         # 2) Optionnel : supprimer TOUS les liens va_@<handle> sur GMS (sinon la
         #    couche 2 rebloque ou affiche un ancien lien d'une autre identité).
         # regenerer implique de supprimer l'ancien lien d'abord (sinon doublon)
@@ -6624,6 +6710,55 @@ class UserCog(commands.Cog):
             except Exception as e:
                 msg += f"\n⚠️ Régénération : {e}"
         await interaction.followup.send(msg, ephemeral=True)
+
+    async def _resetlien_fr(self, interaction, uid, msg, supprimer_gms, regenerer):
+        """/resetlien sur le serveur FR : l'anti-doublon y est le registre de
+        liens_fr (un lien par model), pas un « va_@pseudo » sur GetMySocial --
+        le parcours general annoncait un reset que la demande FR ne voyait
+        pas, et « regenerer » creait un lien au format US que personne ne
+        montrait. Les liens retires restent notes (liens_fr.retirer)."""
+        import liens_fr
+        try:
+            retires = await asyncio.to_thread(liens_fr.retirer, uid)
+        except Exception as e:                               # noqa: BLE001
+            await interaction.followup.send(f"{msg}\n⚠️ Registre des liens FR non modifié : {e}",
+                                            ephemeral=True)
+            return
+        if retires:
+            msg += "\n♻️ Retiré(s) du registre FR : " + ", ".join(
+                f"{e.get('display_name')} ({e.get('public_url')})" for e in retires)
+            msg += "\n_(leurs trackings MyPuls restent : ils ne s'effacent pas)_"
+        else:
+            msg += "\n(aucun lien FR au registre)"
+        if supprimer_gms or regenerer:
+            try:
+                import gms
+                faits, rates = 0, []
+                for e in retires:
+                    if not e.get("link_id"):
+                        continue
+                    r = await asyncio.to_thread(gms.delete_link, e["link_id"])
+                    if r.get("ok"):
+                        faits += 1
+                    else:
+                        rates.append(f"{e.get('display_name')} ({r.get('error')})")
+                msg += f"\n🗑️ **{faits}** lien(s) GetMySocial supprimé(s)."
+                if rates:
+                    msg += "\n⚠️ Non supprimé(s) : " + ", ".join(rates)
+            except Exception as e:                           # noqa: BLE001
+                msg += f"\n⚠️ GMS indispo : {e}"
+        await interaction.followup.send(msg[:1900], ephemeral=True)
+        if regenerer:
+            # les models dont un lien vient d'etre retire, sinon celle de sa fiche
+            # passees par _model_lien_fr AVANT de dedoublonner : une model
+            # dont il n'a plus le role retombe sur une autre, deja refaite
+            membre = interaction.guild.get_member(uid) if interaction.guild else None
+            models = list(dict.fromkeys(
+                _model_lien_fr(membre, m)
+                for m in ([e.get("model") for e in retires if e.get("model")]
+                          or [get_user_identity(uid)])))
+            for model in models:
+                await _generer_lien_fr(interaction, uid, model)
 
     @app_commands.command(
         name="menu",
