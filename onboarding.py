@@ -50,6 +50,10 @@ PDF_EXT = {"pdf"}
 
 # Limite par fichier - cohérent avec Telegram bot upload limit
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+#: Un encart Discord tient 4096 caracteres. L'ancien plafond de 1000 venait
+#: d'un affichage disparu, et il coupait le tutoriel du serveur en plein milieu
+#: d'une phrase, sans rien dire.
+MAX_DESCRIPTION = 4000
 
 # Etapes par defaut - importees depuis cogs/onboarding.py (le bot Discord)
 DEFAULT_STEPS = [
@@ -250,7 +254,7 @@ def add_step(icon: str = "📅", title: str = "Nouvelle étape",
         "order": next_order,
         "icon": (icon or "📅").strip()[:8],
         "title": (title or "Nouvelle étape").strip()[:200],
-        "description": (description or "").strip()[:1000],
+        "description": (description or "").strip()[:MAX_DESCRIPTION],
         "media": [],
     }
     data["steps"].append(step)
@@ -264,7 +268,8 @@ def update_step(step_id: str, **fields) -> bool:
         if s.get("id") == step_id:
             for k in ("icon", "title", "description"):
                 if k in fields and fields[k] is not None:
-                    s[k] = str(fields[k]).strip()[:200 if k != "description" else 1000]
+                    limite = MAX_DESCRIPTION if k == "description" else 200
+                    s[k] = str(fields[k]).strip()[:limite]
             _save(data)
             return True
     return False

@@ -6185,9 +6185,52 @@ class UserCog(commands.Cog):
             body += f"\n… +{len(lines) - len(out)} autre(s) (trop pour un message)"
         await interaction.response.send_message(body, ephemeral=True)
 
+    #: L'etape du plan d'onboarding que montre « Comprends rien ? ». Le texte
+    #: vit la-bas : il se corrige depuis le site ou depuis son Google Doc, et
+    #: le bouton suit sans qu'on retouche au code.
+    TUTO_ETAPE = "Le serveur — comment ça marche"
+
+    def _tutoriel_etape(self):
+        """L'encart du tutoriel, ou None s'il n'existe pas encore."""
+        try:
+            import onboarding as _ob
+            import onboarding_discord as _od
+        except Exception:
+            return None
+        for rang, e in enumerate(_ob.list_steps()):
+            if str(e.get("title") or "").strip() == self.TUTO_ETAPE:
+                return _od.encadre_de(e, rang)
+        return None
+
     async def _send_tutoriel(self, interaction):
-        """Bouton 'Comprends rien ?' : envoie la vidéo explicative (data/tutoriel.mp4)
-        en privé au VA (ré-upload natif -> lecture inline)."""
+        """Bouton 'Comprends rien ?' : le tutoriel du serveur, et la video si elle existe.
+
+        Le texte vient du plan d'onboarding, pas d'une copie dans le code :
+        une explication ecrite a deux endroits finit toujours par dire deux
+        choses differentes.
+        """
+        encart = self._tutoriel_etape()
+        if encart is not None:
+            em = discord.Embed(title=encart.get("title") or "📘 Le serveur",
+                               description=(encart.get("description") or "")[:4096],
+                               color=encart.get("color") or 0x3B82F6)
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            fichier = None
+            if TUTO_VIDEO_FILE.exists():
+                try:
+                    fichier = discord.File(str(TUTO_VIDEO_FILE), filename="tutoriel.mp4")
+                except Exception:
+                    fichier = None
+            try:
+                if fichier is not None:
+                    await interaction.followup.send(embed=em, file=fichier, ephemeral=True)
+                else:
+                    await interaction.followup.send(embed=em, ephemeral=True)
+            except Exception as e:
+                await interaction.followup.send(
+                    f"⚠️ Impossible d'afficher le tutoriel ({e}). Préviens un admin.",
+                    ephemeral=True)
+            return
         if not TUTO_VIDEO_FILE.exists():
             await interaction.response.send_message(
                 "📹 La vidéo explicative n'est pas encore disponible — un admin doit la "
