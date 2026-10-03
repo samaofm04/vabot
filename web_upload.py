@@ -71224,6 +71224,15 @@ def create_app():
         return jsonify({"ok": tp.mark_used(cat, eid, ident)})
 
     # ============ ONBOARDING ============
+    def _onboarding_vers_discord():
+        """Demande au pont de republier le plan. Ne fait JAMAIS echouer la
+        sauvegarde : le plan vit sur le site, Discord n en est que le reflet."""
+        try:
+            import onboarding_discord as _od
+            _od.planifier()
+        except Exception as _e_od:
+            print(f"[onboarding] pont : {type(_e_od).__name__}: {_e_od}", flush=True)
+
     @app.route("/onboarding/render", methods=["GET"])
     def onboarding_render():
         if not is_auth():
@@ -71281,6 +71290,7 @@ def create_app():
         title = (request.form.get("title") or "Nouvelle étape").strip()
         desc = (request.form.get("description") or "").strip()
         step = ob.add_step(icon=icon, title=title, description=desc)
+        _onboarding_vers_discord()
         return jsonify({"ok": True, "step": step})
 
     @app.route("/onboarding/step/update", methods=["POST"])
@@ -71302,6 +71312,7 @@ def create_app():
             if v is not None:
                 fields[k] = v
         ok = ob.update_step(sid, **fields)
+        _onboarding_vers_discord()
         return jsonify({"ok": ok})
 
     @app.route("/onboarding/step/delete", methods=["POST"])
@@ -71316,6 +71327,7 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         sid = (request.form.get("step_id") or "").strip()
         ok = ob.delete_step(sid)
+        _onboarding_vers_discord()
         return jsonify({"ok": ok})
 
     @app.route("/onboarding/step/reorder", methods=["POST"])
@@ -71331,6 +71343,7 @@ def create_app():
         raw = (request.form.get("order") or "").strip()
         ids = [x.strip() for x in raw.split(",") if x.strip()]
         ob.reorder_steps(ids)
+        _onboarding_vers_discord()
         return jsonify({"ok": True})
 
     @app.route("/onboarding/media/upload", methods=["POST"])
@@ -71351,6 +71364,7 @@ def create_app():
             content = f.read()
         except Exception as e:
             return jsonify({"ok": False, "error": f"Lecture echouee : {e}"})
+        _onboarding_vers_discord()
         return jsonify(ob.add_media_file(sid, f.filename or "media", content))
 
     @app.route("/onboarding/media/link", methods=["POST"])
@@ -71366,6 +71380,7 @@ def create_app():
         sid = (request.form.get("step_id") or "").strip()
         url = (request.form.get("url") or "").strip()
         name = (request.form.get("name") or "").strip()
+        _onboarding_vers_discord()
         return jsonify(ob.add_media_link(sid, url, name))
 
     @app.route("/onboarding/media/delete", methods=["POST"])
@@ -71381,6 +71396,7 @@ def create_app():
         sid = (request.form.get("step_id") or "").strip()
         mid = (request.form.get("media_id") or "").strip()
         ok = ob.delete_media(sid, mid)
+        _onboarding_vers_discord()
         return jsonify({"ok": ok})
 
     @app.route("/onboarding/media/<step_id>/<media_id>")

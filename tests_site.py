@@ -34393,6 +34393,104 @@ except Exception as _eVd:
 finally:
     _shVd.rmtree(_dirVd, ignore_errors=True)
 
+# ------------------------------ 34. Pont Onboarding -> salon Discord
+print()
+print("=" * 70)
+print("Onboarding : le site ecrit, Discord suit")
+print("=" * 70)
+try:
+    import onboarding_discord as _od
+    from pathlib import Path as _plO
+    import tempfile as _tfO, json as _jsO
+
+    _e1 = {"id": "s1", "icon": "📆", "title": "JOUR 0", "description": "Fais ceci",
+           "media": [{"id": "m1", "kind": "link", "name": "https://x/y"}]}
+    check("le message porte le titre en gras et les liens a la fin",
+          _od.texte_de(_e1) == "**📆 JOUR 0**\n\nFais ceci\n\n📎 https://x/y")
+    check("une etape sans corps ne rend pas un message vide",
+          _od.texte_de({"icon": "👋", "title": "Bienvenue"}) == "**👋 Bienvenue**")
+    check("l empreinte ne bouge pas sans raison",
+          _od.empreinte(_e1) == _od.empreinte(_jsO.loads(_jsO.dumps(_e1))))
+    _e2 = _jsO.loads(_jsO.dumps(_e1)); _e2["description"] = "Fais cela"
+    check("elle bouge des que le texte change", _od.empreinte(_e1) != _od.empreinte(_e2))
+    _e3 = _jsO.loads(_jsO.dumps(_e1)); _e3["media"].append({"id": "m2", "kind": "video",
+                                                            "name": "v.mp4", "size": 9})
+    check("et des qu un media est ajoute", _od.empreinte(_e1) != _od.empreinte(_e3))
+
+    # les fichiers : ce qui est ecarte est NOMME, jamais tu
+    _d = _plO(_tfO.mkdtemp())
+    (_d / "ok.mp4").write_bytes(b"x" * 10)
+    _etape = {"title": "T", "media": [
+        {"kind": "video", "name": "ok.mp4", "path": str(_d / "ok.mp4")},
+        {"kind": "video", "name": "parti.mp4", "path": str(_d / "parti.mp4")},
+        {"kind": "link", "name": "https://z"}]}
+    _pris, _ecartes = _od.fichiers_de(_etape)
+    check("un fichier present est pris, un lien n est pas un fichier",
+          [n for n, _o in _pris] == ["ok.mp4"])
+    check("un fichier disparu est nomme dans le compte rendu",
+          len(_ecartes) == 1 and "parti.mp4" in _ecartes[0] and "absent" in _ecartes[0])
+
+    _savO = (_od.CONFIG_FICHIER, _od.ETAT_FICHIER, _od._api, _od._api_fichiers)
+    try:
+        _od.CONFIG_FICHIER = _d / "cfg.json"; _od.ETAT_FICHIER = _d / "etat.json"
+        check("sans configuration, le pont ne fait RIEN",
+              _od.actif() is False and "désactivé" in _od.publier()["rates"][0])
+
+        _od.CONFIG_FICHIER.write_text(_jsO.dumps({"salon": "sal", "actif": True}),
+                                      encoding="utf-8")
+        import onboarding as _ob
+        _savSteps = _ob.list_steps
+        _ob.list_steps = lambda: [dict(_e1), {"id": "s2", "icon": "⏳",
+                                              "title": "ATTENDRE", "description": "patiente"}]
+        _appels = []
+
+        def _faux(me, ch, **kw):
+            _appels.append((me, ch, kw.get("json") or {}))
+            return 200, {"id": "M" + str(len(_appels))}
+        _od._api = _faux
+        _b1 = _od.publier()
+        check("premier passage : les deux etapes sont creees",
+              len(_b1["crees"]) == 2 and not _b1["corriges"]
+              and [a[0] for a in _appels] == ["POST", "POST"])
+
+        _appels.clear()
+        _b2 = _od.publier()
+        check("rien n a change : AUCUN appel a Discord",
+              _b2["inchanges"] == 2 and not _appels)
+
+        _ob.list_steps = lambda: [dict(_e1, description="Fais autrement"),
+                                  {"id": "s2", "icon": "⏳", "title": "ATTENDRE",
+                                   "description": "patiente"}]
+        _appels.clear()
+        _b3 = _od.publier()
+        check("une etape modifiee est CORRIGEE sur place, pas repostee",
+              _b3["corriges"] == ["JOUR 0"] and _b3["inchanges"] == 1
+              and [a[0] for a in _appels] == ["PATCH"])
+
+        _ob.list_steps = lambda: [dict(_e1, description="Fais autrement")]
+        _appels.clear()
+        _b4 = _od.publier()
+        check("une etape supprimee du plan disparait du salon",
+              _b4["effaces"] == ["s2"] and [a[0] for a in _appels] == ["DELETE"])
+
+        # on ne s approprie pas le message de quelqu un d autre
+        _od._api = lambda me, ch, **kw: (
+            (200, {"id": "9"}) if ch == "/users/@me" else
+            (200, {"author": {"id": "autre"}}))
+        check("le pont refuse d adopter un message qui n est pas du bot",
+              _od.adopter(["m1"])["ok"] is False)
+    finally:
+        _ob.list_steps = _savSteps
+        (_od.CONFIG_FICHIER, _od.ETAT_FICHIER, _od._api, _od._api_fichiers) = _savO
+
+    _srcO = _plO("web_upload.py").read_text(encoding="utf-8")
+    check("toutes les routes qui modifient le plan previennent le pont",
+          _srcO.count("_onboarding_vers_discord()") >= 7)
+    check("le pont ne peut pas faire echouer une sauvegarde",
+          "[onboarding] pont :" in _srcO)
+except Exception as _eO:
+    check("pont onboarding : testable", False, repr(_eO)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
