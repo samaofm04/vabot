@@ -8877,15 +8877,21 @@ class MenuLigneVA(discord.ui.LayoutView):
         # absent), comme dans le menu complet ; sans filtre (vue enregistree
         # au demarrage), tous les custom_id
         feats, threads = _reglages_menu(guild) if filtrer else (None, False)
-        suivi = ui.ActionRow()
+        # UNE RANGEE DISCORD PORTE CINQ BOUTONS, PAS SIX. Le sixieme a fait
+        # tomber tout le menu (« maximum number of children exceeded ») : plus
+        # personne ne pouvait l'ouvrir. On deborde donc sur une rangee de plus.
+        suivis, courante = [], None
         for cle, lib, emo, style in _LIGNE_SUIVI:
             if cle == "lien" and sans_demande:
                 continue
-            if _bouton_va_permis("cmenu:" + cle, feats, threads):
-                suivi.add_item(_BoutonLigneVA(cog, cle, lib, emo, style))
+            if not _bouton_va_permis("cmenu:" + cle, feats, threads):
+                continue
+            if courante is None or len(courante.children) >= 5:
+                courante = ui.ActionRow()
+                suivis.append(courante)
+            courante.add_item(_BoutonLigneVA(cog, cle, lib, emo, style))
         elements = [ui.TextDisplay("\n".join(haut + bas)), rangee]
-        if suivi.children:
-            elements.append(suivi)
+        elements += [r for r in suivis if r.children]
         self.add_item(ui.Container(*elements, accent_colour=discord.Colour.blurple()))
 
     def a_des_elements(self) -> bool:
