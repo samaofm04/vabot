@@ -34695,7 +34695,17 @@ try:
                             {"id": "t1", "name": "texte.txt", "mimeType": "text/plain"}],
                      "d9": [{"id": "v9", "name": "autre.mp4", "mimeType": "video/mp4"}]}
 
+        _crees_dossiers = []
+
         class _Faux:
+            def post(self, url, params=None, json=None, timeout=None, **kw):
+                _crees_dossiers.append((json or {}).get("name"))
+                class R:
+                    status_code = 200
+                    def json(self_in):
+                        return {"id": "neuf"}
+                return R()
+
             def get(self, url, params=None, timeout=None):
                 import re as _r
                 m = _r.search(r"'([^']+)' in parents", (params or {}).get("q", ""))
@@ -34722,6 +34732,8 @@ try:
         _od2.publier = lambda force=False: (_publie.append(1) or {"crees": [], "corriges": []})
 
         _b = _odr.scanner()
+        check("l etape sans dossier en recoit un, numerote",
+              _crees_dossiers == ["00 - Bienvenue"], str(_crees_dossiers))
         check("la video du dossier 01 va bien a la DEUXIEME etape",
               _ajouts and _ajouts[0][0] == "s1"
               and "drive.google.com/file/d/v1/view" in _ajouts[0][1])
@@ -34740,6 +34752,16 @@ try:
     finally:
         (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link,
          _od2.publier) = _sav
+
+    # --- une etape neuve recoit son dossier Drive
+    check("le dossier porte le numero de l etape, pas seulement son titre",
+          _odr._nom_dossier(9, {"title": "Le serveur"}) == "09 - Le serveur")
+    check("un titre a caracteres interdits ne casse pas le nom de dossier",
+          "/" not in _odr._nom_dossier(0, {"title": "a/b:c"})
+          and ":" not in _odr._nom_dossier(0, {"title": "a/b:c"}))
+    _srcN = _plD("onboarding_drive.py").read_text(encoding="utf-8")
+    check("on cherche le dossier par son NUMERO, pas par son titre",
+          "def _creer_dossiers_manquants" in _srcN and "n = _rang(d.get(\"name\"))" in _srcN)
 
     # --- le texte vit dans un Google Doc, modifiable d un clic
     _srcDr = _plD("onboarding_drive.py").read_text(encoding="utf-8")

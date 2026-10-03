@@ -178,6 +178,9 @@ def scanner() -> Dict[str, Any]:
     etapes = ob.list_steps()
     etat = _etat()
     change = False
+    # Une etape neuve n'a pas encore de dossier : on le cree, sinon son texte
+    # n'aurait jamais de Doc et il faudrait y penser a la main.
+    _creer_dossiers_manquants(session, etapes, bilan)
     for d in _enfants(session, racine()):
         if not str(d.get("mimeType", "")).endswith("folder"):
             continue
@@ -269,3 +272,34 @@ def _texte(session, ob, dossier: Dict[str, Any], etape: Dict[str, Any],
             fiche["doc_h"] = _empreinte(attendu)
             fiche["plan_h"] = h_plan
             bilan["textes"].append(f'{etape.get("title")} : doc mis a jour')
+
+
+def _nom_dossier(rang: int, etape: Dict[str, Any]) -> str:
+    propre = re.sub(r"[\\/:*?\"<>|]", "-", str(etape.get("title") or "")).strip()
+    return f"{rang:02d} - {propre}"[:90]
+
+
+def _creer_dossiers_manquants(session, etapes: List[Dict[str, Any]],
+                              bilan: Dict[str, Any]) -> None:
+    """Un dossier par etape, cree s'il manque. Le numero suffit a reconnaitre.
+
+    On cherche par le NUMERO, pas par le titre : renommer une etape ne doit pas
+    fabriquer un second dossier a cote du premier.
+    """
+    presents = {}
+    for d in _enfants(session, racine()):
+        if str(d.get("mimeType", "")).endswith("folder"):
+            n = _rang(d.get("name"))
+            if n is not None:
+                presents[n] = d
+    for rang, etape in enumerate(etapes):
+        if rang in presents:
+            continue
+        nom = _nom_dossier(rang, etape)
+        r = session.post(API, params={"supportsAllDrives": "true"},
+                         json={"name": nom, "mimeType": "application/vnd.google-apps.folder",
+                               "parents": [racine()]}, timeout=60)
+        if r.status_code in (200, 201):
+            bilan.setdefault("dossiers", []).append(nom)
+        else:
+            bilan["rates"].append(f"dossier {nom} : HTTP {r.status_code}")
