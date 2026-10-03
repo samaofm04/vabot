@@ -308,6 +308,17 @@ ESSAI_LIEN = {"id": "2026-10-03-emma", "uid": 479005370438778891,
               "pseudo": "marioofm", "model": "emma"}
 _ESSAI_FAIT = Path(__file__).resolve().parent.parent / "data" / "essai_liens_fr.json"
 
+#: Liens demandes au bot pour un VA, une fois (proprietaire, 03/10/2026 :
+#: « nourdine229_08534, mon VA manager : un lien pour chaque model, avec son
+#: tracking », « 6 liens, 1 pour chaque »). Trace ecrite avant ; chaque lien
+#: est poste SEUL dans son ticket (copiable au telephone), le detail des
+#: trackings va au salon du staff.
+LIENS_DEMANDES = [
+    {"id": "2026-10-03-nourdine", "uid": 1454580913190211730, "pseudo": "nourdine229_08534",
+     "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
+]
+_LIENS_FAIT = Path(__file__).resolve().parent.parent / "data" / "liens_demandes_fr.json"
+
 #: Nettoyage des tickets demande au bot (proprietaire, 03/10/2026 : « clean
 #: toutes les conv, supprime tout meme le menu, je refais l'onboarding ; juste
 #: le menu, garde l'epingle »). Chaque ticket VA : tout efface, puis sa ligne
@@ -445,6 +456,10 @@ class Outils(commands.Cog):
                 await self._clean_demande(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] nettoyage des tickets : {type(e).__name__}: {e}")
+            try:
+                await self._liens_demandes(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] liens demandes : {type(e).__name__}: {e}")
             # les salons d'information : l'isolation d'un VA qui arrive les
             # lui cacherait (un refus par salon), sauf ceux de cette liste
             try:
@@ -487,6 +502,77 @@ class Outils(commands.Cog):
     @_entretien.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+
+    async def _liens_demandes(self, guilde) -> int:
+        fait = safe_json.load(_LIENS_FAIT, default={}) or {}
+        # une model ratee (MyPuls, GetMySocial) est reessayee au demarrage
+        # suivant, trois passages au plus ; une model faite ne l'est plus
+        a_faire = []
+        for d in LIENS_DEMANDES:
+            e = fait.get(d["id"]) or {}
+            restent = [m for m in d["models"] if m not in (e.get("faits") or [])]
+            if restent and int(e.get("passages") or 0) < 3:
+                a_faire.append({**d, "models": restent})
+                fait[d["id"]] = {**e, "passages": int(e.get("passages") or 0) + 1,
+                                 "debut": int(__import__("time").time())}
+        if not a_faire:
+            return 0
+        if not safe_json.write(_LIENS_FAIT, fait, indent=1):
+            print("[outils] trace des liens demandes non ecrite : rien lance", flush=True)
+            return 0
+        staff = discord.utils.find(lambda c: "entrées" in c.name or "entrees" in c.name,
+                                   guilde.text_channels)
+
+        async def _tache(d):
+            import liens_fr
+            from cogs.welcome import load_users
+            fiche = (load_users() or {}).get(str(d["uid"])) or {}
+            ticket = guilde.get_channel(int(fiche.get("channel_id") or 0)) if isinstance(fiche, dict) else None
+            recap = [f"🔗 **Liens de @{d['pseudo']}** (demandés par le propriétaire)"]
+            liens = []
+            faits = []
+            for model in d["models"]:
+                try:
+                    r = await asyncio.to_thread(liens_fr.generer, d["uid"], d["pseudo"], model,
+                                                "proprietaire")
+                except Exception as e:                       # noqa: BLE001
+                    r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+                if r.get("ok"):
+                    faits.append(model)
+                    liens.append((model, r.get("public_url")))
+                    recap.append(f"✅ **{r.get('display_name')}** → {r.get('public_url')}"
+                                 + "".join(f" · {k.upper()} {v}" for k, v in (r.get("trackings") or {}).items()))
+                else:
+                    recap.append(f"❌ {model} : {r.get('erreur')}"
+                                 + "".join(f" · {k.upper()} déjà créé {v}" for k, v in (r.get("trackings") or {}).items()))
+                recap += [f"   ⚠️ {s}" for s in r.get("soucis") or []]
+            if ticket is not None and liens:
+                try:
+                    await ticket.send(f"🔗 **Tes liens, un par model** <@{d['uid']}>",
+                                      allowed_mentions=discord.AllowedMentions(users=True))
+                    for model, url in liens:
+                        await ticket.send(f"**{liens_fr.MODELS[model]['nom']}**")
+                        await ticket.send(url)          # seul : l'appui long le copie entier
+                except Exception as e:                       # noqa: BLE001
+                    recap.append(f"⚠️ liens non postés dans son ticket : {type(e).__name__}: {e}")
+            elif liens:
+                recap.append("⚠️ pas de ticket trouvé : liens non postés chez lui")
+            texte = "\n".join(recap)
+            print(f"[outils] liens demandes {d['id']} :\n{texte}", flush=True)
+            fin = safe_json.load(_LIENS_FAIT, default={}) or {}
+            e = fin.setdefault(d["id"], {})
+            e["faits"] = sorted(set(e.get("faits") or []) | set(faits))
+            e.update(fin=int(__import__("time").time()), recap=texte[:4000])
+            safe_json.write(_LIENS_FAIT, fin, indent=1)
+            if staff is not None:
+                try:
+                    for i in range(0, len(texte), 1900):
+                        await staff.send(texte[i:i + 1900])
+                except Exception:                            # noqa: BLE001
+                    pass
+        for d in a_faire:
+            self.bot.loop.create_task(_tache(d))
+        return len(a_faire)
 
     async def _clean_demande(self, guilde) -> bool:
         fait = safe_json.load(_CLEAN_FAIT, default={}) or {}

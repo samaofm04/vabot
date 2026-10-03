@@ -65,6 +65,13 @@ _CACHE_LIENS: Dict[str, Any] = {"t": 0.0, "liens": []}
 SANS_LIMITE = {479005370438778891, 402069419393679370}
 
 
+#: Comptes dont le lien de CHAQUE model reste en service, roles ou pas :
+#: aligner ne les coupe jamais. Proprietaire, 03/10/2026 : « nourdine229_08534,
+#: mon VA manager : un lien pour chaque model », « les 6 tournent en meme
+#: temps pour lui, sans les desactiver ».
+TOUTES_MODELS = {1454580913190211730}
+
+
 def sans_limite(uid) -> bool:
     try:
         return int(uid) in SANS_LIMITE
@@ -386,7 +393,8 @@ def aligner(membres, force: bool = False) -> List[Dict[str, Any]]:
             u = str(int(uid))
         except (TypeError, ValueError):
             continue
-        par_uid[u] = {str(m).strip().lower() for m in models or []}
+        par_uid[u] = ({str(m).strip().lower() for m in models or []}
+                      if int(u) not in TOUTES_MODELS else set(MODELS))
         if pseudo:
             par_pseudo[str(pseudo).strip().lower()] = u
     if not par_uid:
