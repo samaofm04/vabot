@@ -205,9 +205,14 @@ def salon_de_livraison(canal, membre=None):
     Si le salon jumeau n existe pas, on reste sur place plutot que de perdre
     les fichiers.
     """
-    if _commun(canal):
-        from cogs.outils import salon_perso
-        return salon_perso(getattr(canal, "guild", None), membre)
+    try:
+        from cogs import outils
+        if outils.serveur_outils(getattr(canal, "guild", None)):
+            # serveur FR : salon commun ou bouton du menu VA (cogs/outils.py)
+            return outils.ou_livrer(canal, membre)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[telechargement] regle de livraison FR : {type(e).__name__}: {e}")
+        return None
     nom = getattr(canal, "name", "") or ""
     if not _norm(nom).endswith("-download"):
         return canal
@@ -871,8 +876,10 @@ class PanneauTelechargement(discord.ui.LayoutView):
         username, n = garde
         cible = salon_de_livraison(inter.channel, inter.user)
         if cible is None:
-            from cogs.outils import SANS_SALON
-            await inter.response.send_message(SANS_SALON, ephemeral=True)
+            from cogs.outils import refus
+            await inter.response.send_message(
+                refus(inter.channel, inter.user) or "Rien ne peut t'être livré ici.",
+                ephemeral=True)
             return
         occupe = self.cog.reserver(inter.user.id, username)
         if occupe:

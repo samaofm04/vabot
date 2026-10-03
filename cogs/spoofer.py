@@ -195,9 +195,10 @@ class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[
             return
         q = self.q
         if _commun(interaction.channel):
-            from cogs.outils import SANS_SALON, salon_perso
-            if salon_perso(interaction.guild, interaction.user) is None:
-                await interaction.response.send_message(SANS_SALON, ephemeral=True)
+            from cogs.outils import refus
+            non = refus(interaction.channel, interaction.user)
+            if non:
+                await interaction.response.send_message(non, ephemeral=True)
                 return
             q = qte_perso(interaction.user.id)
         await interaction.response.send_modal(FenetreFichier(q))
@@ -468,9 +469,14 @@ def _cible_content(interaction):
     Dans le salon commun des Outils : le salon va- du VA, ou None -- jamais
     le salon commun, ou tout le monde verrait ses fichiers."""
     canal = getattr(interaction, "channel", None)
-    if _commun(canal):
-        from cogs.outils import salon_perso
-        return salon_perso(getattr(interaction, "guild", None), interaction.user)
+    try:
+        from cogs import outils
+        if outils.serveur_outils(getattr(canal, "guild", None)):
+            # serveur FR : salon commun ou bouton du menu VA (cogs/outils.py)
+            return outils.ou_livrer(canal, interaction.user)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[spoofer] regle de livraison FR : {type(e).__name__}: {e}")
+        return None
     try:
         from cogs.user import _us_content_target
         c = _us_content_target(interaction)
@@ -632,9 +638,10 @@ class Spoofer(commands.Cog):
         if cible is None:
             # salon commun sans salon va- (le bouton l'a deja refuse ; une
             # fenetre ouverte avant que le salon disparaisse arrive ici)
-            from cogs.outils import SANS_SALON
+            from cogs.outils import refus
             bilan["refus"] = "salon"
-            await _dire(interaction, SANS_SALON)
+            await _dire(interaction, refus(interaction.channel, interaction.user)
+                        or "Rien ne peut t'être livré ici.")
             return bilan
         if ext not in VIDEOS and ext not in PHOTOS:
             bilan["refus"] = "format"

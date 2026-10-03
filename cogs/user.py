@@ -8104,6 +8104,25 @@ _BoutonVA = _collections.namedtuple("_BoutonVA", "cle libelle emoji style aide")
 
 #: La place des menus deroulants de famille dans la disposition.
 _MENU_VA_FAMILLES = "_familles"
+#: La rangee des outils : seulement sur les serveurs de cogs/outils.py.
+_MENU_VA_OUTILS = "Outils"
+
+
+def _menu_outils_ici(guild) -> bool:
+    try:
+        from cogs.outils import serveur_outils
+        return serveur_outils(guild)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _outils_pour(identite) -> bool:
+    """Les models ouvertes aux outils (cogs/outils.MODELS_OUTILS)."""
+    try:
+        from cogs.outils import identite_permise
+        return identite_permise(identite)
+    except Exception:                                        # noqa: BLE001
+        return False
 
 _BS = discord.ButtonStyle
 
@@ -8127,6 +8146,16 @@ _MENU_VA_DISPOSITION = (
         _BoutonVA("bio", "Bio", "💬", _BS.secondary, "des bios prêtes à coller"),
         _BoutonVA("brutbanger", "⭐ Vidéo brut", None, _BS.primary,
                   "tes meilleures brutes ⭐, sans montage"),
+    )),
+    # Serveur FR seulement (cogs/outils.py) : une ligne, les trois outils des
+    # dossiers US, livres dans le ticket (proprietaire, 03/10/2026).
+    (_MENU_VA_OUTILS, (
+        _BoutonVA("spoofer", "Spoofer", "📤", _BS.primary,
+                  "ta photo ou ta vidéo en versions uniques"),
+        _BoutonVA("download", "Download", "⬇️", _BS.primary,
+                  "PP, bio, posts et reels d'un compte Insta"),
+        _BoutonVA("numero", "Numéro", "📱", _BS.primary,
+                  "un numéro +33 ou un mail pour valider un compte"),
     )),
     ("Montages", _MENU_VA_FAMILLES),
     ("Suivi et aide", (
@@ -8394,6 +8423,9 @@ class ContentMenuView(discord.ui.LayoutView):
                                 + " · ".join(noms) + ") : choisis ta variante, "
                                 "chaque option dit ce qu'elle envoie.")
                 continue
+            if titre == _MENU_VA_OUTILS and filtrer and not (
+                    _menu_outils_ici(guild) and _outils_pour(self.identite)):
+                continue
             rangee, morceaux = ui.ActionRow(), []
             for b in boutons:
                 if not _bouton_va_permis("cmenu:" + b.cle, feats, threads):
@@ -8428,6 +8460,75 @@ class ContentMenuView(discord.ui.LayoutView):
 
     async def _clic_banger(self, interaction: discord.Interaction):
         await self.cog._send_banger_reels(interaction)
+
+    # -- Outils (serveur FR) : livres par cogs/outils.ou_livrer -----------------
+
+    async def _clic_spoofer(self, interaction: discord.Interaction):
+        """La fenetre du spoofer, tout de suite (trois secondes), avec le
+        nombre de versions de CE VA (🔢 du salon commun, 5 par defaut)."""
+        from cogs import outils, spoofer as spf
+        cog = interaction.client.get_cog("Spoofer") if interaction.client else None
+        if cog is None:
+            await interaction.response.send_message(
+                "📤 Spoofer indisponible pour le moment.", ephemeral=True)
+            return
+        non = outils.refus(interaction.channel, interaction.user)
+        if non:
+            await interaction.response.send_message(non, ephemeral=True)
+            return
+        if interaction.user.id in cog.en_cours:
+            await interaction.response.send_message(
+                "⏳ Ton spoof précédent n'est pas fini.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            spf.FenetreFichier(spf.qte_perso(interaction.user.id)))
+
+    async def _clic_download(self, interaction: discord.Interaction):
+        """Le panneau du telechargement, pour lui seul : son compte retenu
+        s'y affiche. Ses boutons sont ceux de la vue persistante."""
+        from cogs import outils, telechargement as tl
+        cog = interaction.client.get_cog("Telechargement") if interaction.client else None
+        if cog is None:
+            await interaction.response.send_message(
+                "⬇️ Download indisponible pour le moment.", ephemeral=True)
+            return
+        non = outils.refus(interaction.channel, interaction.user)
+        if non:
+            await interaction.response.send_message(non, ephemeral=True)
+            return
+        pseudo, combien = cog.choix.get(interaction.user.id, ("", 30))
+        await interaction.response.send_message(
+            view=tl.PanneauTelechargement(cog, pseudo, combien), ephemeral=True)
+
+    async def _clic_numero(self, interaction: discord.Interaction):
+        """Le panneau Numero en bas du ticket. Il est au bot ADMIN (le module
+        des numeros y vit, cogs/numeros.py) : ce bot lui passe la main, comme
+        welcome._ensure_num_panel. Prendre un numero se fait sur le panneau :
+        +33 et 3 par jour, regles du serveur."""
+        from cogs import outils
+        non = outils.refus(interaction.channel, interaction.user)
+        if non:
+            await interaction.response.send_message(non, ephemeral=True)
+            return
+        cible = outils.ou_livrer(interaction.channel, interaction.user)
+        await interaction.response.defer()
+        try:
+            from cogs.welcome import _bot_admin
+            adm = _bot_admin()
+            acog = adm.get_cog("NumerosCog") if adm is not None else None
+            if acog is None:
+                raise RuntimeError("bot admin ou module des numeros absent")
+            ach = adm.get_channel(cible.id) or await adm.fetch_channel(cible.id)
+            await acog._panneau_en_bas(ach)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu VA : panneau numero non pose dans #%s (%s: %s)",
+                        getattr(cible, "name", "?"), type(e).__name__, e)
+            await interaction.followup.send(
+                "📱 Numéros indisponibles pour le moment.", ephemeral=True)
+            return
+        if cible.id != getattr(interaction.channel, "id", None):
+            await interaction.followup.send("📱 C'est dans %s." % cible.mention,
+                                            ephemeral=True)
 
     async def _clic_story(self, interaction: discord.Interaction):
         await self.cog.story.callback(self.cog, interaction)

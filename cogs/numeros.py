@@ -558,14 +558,15 @@ class NumerosCog(commands.Cog):
         (le registre est par salon). Le clic ouvre donc LE panneau du VA dans
         SON salon va- ; le code, Autre, Annuler et C'est bon s'y passent comme
         dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement."""
-        from cogs.outils import SANS_SALON, salon_perso
+        from cogs.outils import ou_livrer, refus
         if action not in ("sms", "mail"):
             await _ephemere(itx, "📱 La suite se passe dans ton salon.")
             return
-        perso = salon_perso(getattr(itx, "guild", None), getattr(itx, "user", None))
-        if perso is None:
-            await _ephemere(itx, SANS_SALON)
+        non = refus(itx.channel, getattr(itx, "user", None))
+        if non:
+            await _ephemere(itx, non)
             return
+        perso = ou_livrer(itx.channel, getattr(itx, "user", None))
         if action == "sms" and not numgen.status()["sms_ok"]:
             await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
             return

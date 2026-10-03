@@ -53,6 +53,10 @@ def _serveur_outils(guilde) -> bool:
     return int(getattr(guilde, "id", 0) or 0) in SERVEURS
 
 
+#: Le nom public : les cogs spoofer, telechargement, numeros et user s'en servent.
+serveur_outils = _serveur_outils
+
+
 def est_categorie_outils(cat) -> bool:
     return (cat is not None and _serveur_outils(getattr(cat, "guild", None))
             and _norm(getattr(cat, "name", "")) == _norm(CATEGORIE))
@@ -85,8 +89,78 @@ def salon_perso(guilde, membre):
     return canal
 
 
+def _tickets() -> set:
+    """Les salons va- des VA (users.json), toutes guildes confondues."""
+    try:
+        from cogs.welcome import load_users
+        return {int((e or {}).get("channel_id") or 0)
+                for e in (load_users() or {}).values() if isinstance(e, dict)}
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils] users.json illisible : {type(e).__name__}: {e}")
+        return set()
+
+
+def ou_livrer(canal, membre):
+    """Ou livrer un outil lance sur le serveur FR -- LA regle des trois outils.
+
+    Depuis le ticket d'un VA (les boutons de son menu) : ce ticket, meme
+    clique par un manager qui l'aide. Ailleurs -- le salon commun, un menu
+    central, un salon public : le ticket du membre, ou None s'il n'en a pas.
+    Jamais un salon que d'autres voient."""
+    cible = _ticket_vise(canal, membre)
+    if cible is not None and not identite_permise(identite_du_ticket(cible)):
+        return None
+    return cible
+
+
+def _ticket_vise(canal, membre):
+    """Le ticket ou livrer, identite non regardee (ou_livrer, refus)."""
+    if (canal is not None and not est_salon_outils(canal)
+            and int(getattr(canal, "id", 0) or 0) in _tickets()):
+        return canal
+    return salon_perso(getattr(canal, "guild", None), membre)
+
+
+#: Les MODELS dont les VA ont les outils. Proprietaire, 03/10/2026 : « les
+#: meufs de OF Julia, Amelia, Lola [...] uniquement, on fait par demande » ;
+#: « c'est uniquement models, pas d'identite » -- Emma, Sarah et Alicia, les
+#: identites du serveur FR, n'en ont pas. Dans le code, une model est une
+#: identite (users.json « identity », sa categorie de tickets).
+MODELS_OUTILS = frozenset({"julia", "amelia", "lola"})
+
+
+def identite_permise(identite) -> bool:
+    return str(identite or "").strip().lower() in MODELS_OUTILS
+
+
+def identite_du_ticket(canal) -> str:
+    """L'identite du VA a qui est ce ticket (users.json), ou ""."""
+    try:
+        from cogs.welcome import load_users
+        cid = int(getattr(canal, "id", 0) or 0)
+        for e in (load_users() or {}).values():
+            if isinstance(e, dict) and int(e.get("channel_id") or 0) == cid:
+                return str(e.get("identity") or "")
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils] users.json illisible : {type(e).__name__}: {e}")
+    return ""
+
+
 #: La phrase du refus, la meme pour tous les outils.
 SANS_SALON = "Tu n'as pas de salon VA sur ce serveur : rien ne peut t'être livré."
+PAS_ENCORE = "🔒 Les outils ne sont pas encore ouverts pour ta model."
+
+
+def refus(canal, membre) -> str:
+    """"" si l'outil peut servir ce clic, sinon la phrase a dire au VA.
+    Chaque outil la dit AVANT de travailler : un spoof ou un numero ne se
+    paie pas pour etre refuse a la livraison."""
+    cible = _ticket_vise(canal, membre)
+    if cible is None:
+        return SANS_SALON
+    if not identite_permise(identite_du_ticket(cible)):
+        return PAS_ENCORE
+    return ""
 
 
 def _droits(guilde, moi):

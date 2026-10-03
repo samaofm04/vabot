@@ -3083,7 +3083,7 @@ try:
           _limitesV2Tb(_vM))
     _rM = _rowsV2Tb(_vM)
     check("familles : menu VA -> un menu par famille (cmenu:sel:), dans l ordre de la table, apres les boutons",
-          len(_rM) == 8 and _rM[2:6] == [["cmenu:sel:" + f.cle] for f in _uTb._FAMILLES_MENU],
+          len(_rM) == 9 and _rM[3:7] == [["cmenu:sel:" + f.cle] for f in _uTb._FAMILLES_MENU],
           str(_rM))
     _vH = _uTb.ContentMenuHeritageView(None)
     _idsH = [it.custom_id for it in _vH.children]
@@ -5420,12 +5420,28 @@ def _v2_bloc_menu_va():
     R_ATTENDU = [
         ["cmenu:reel", "cmenu:banger", "cmenu:story", "cmenu:storycta", "cmenu:post"],
         ["cmenu:name", "cmenu:pseudo", "cmenu:pp", "cmenu:bio", "cmenu:brutbanger"],
+        # Outils (03/10/2026) : la vue persistante les porte ; le menu poste
+        # ne les montre qu'au serveur FR, aux identites ouvertes
+        ["cmenu:spoofer", "cmenu:download", "cmenu:numero"],
         ["cmenu:sel:caption"], ["cmenu:sel:template"], ["cmenu:sel:trash"], ["cmenu:sel:flash"],
         ["cmenu:clics", "cmenu:help", "cmenu:lien", "cmenu:pay", "cmenu:tuto"],
         ["cmenu:addaccount", "cmenu:comptes"],
     ]
-    check("structure : rangees = cahier (Reel… / Name… / 4 menus / Mes clics… / comptes)",
+    check("structure : rangees = cahier (Reel… / Name… / Outils / 4 menus / Mes clics… / comptes)",
           rangees(v) == R_ATTENDU, rangees(v))
+    # Outils (03/10/2026) : la rangee n'est POSTEE qu'au serveur FR, et
+    # seulement aux models ouvertes (cogs/outils.MODELS_OUTILS).
+    _gFR = types.SimpleNamespace(id=1505418484052394004, name="fr", emojis=[], roles=[])
+    _gUS = types.SimpleNamespace(id=1535758943324999711, name="us", emojis=[], roles=[])
+
+    def _a_outils(vv):
+        return "cmenu:spoofer" in [c for r in rangees(vv) for c in r]
+    check("outils : menu FR d'une identite ouverte (julia) -> la rangee",
+          _a_outils(U._menu_va(None, "julia", _gFR)))
+    check("outils : identite non ouverte, ou autre serveur -> pas de rangee",
+          not _a_outils(U._menu_va(None, "emma", _gFR))
+          and not _a_outils(U._menu_va(None, "julia", _gUS))
+          and not _a_outils(U._menu_va(None, None, _gFR)))
     check("structure : dans les limites de Discord (%d composants, %d car.)"
           % (v.total_children_count, v.content_length()),
           not limites(v) and v.total_children_count <= 40, limites(v))
@@ -5468,13 +5484,16 @@ def _v2_bloc_menu_va():
     _anc = {b.custom_id: b for b in _ancien_menu_va().children if isinstance(b, ui.Button)
             and not b.custom_id.startswith("cmenu:fam:")}
     _diff = []
+    _OUTILS = ("cmenu:spoofer", "cmenu:download", "cmenu:numero")
     for b in boutons(v):
+        if b.custom_id in _OUTILS:
+            continue                  # nouveaux : pas d'ancien a qui ressembler
         a = _anc.get(b.custom_id)
         if a is None or (a.label, str(a.emoji), a.style) != (b.label, str(b.emoji), b.style):
             _diff.append((b.custom_id, b.label, str(b.emoji), b.style,
                           a and (a.label, str(a.emoji), a.style)))
     check("boutons : les 17 boutons gardent custom_id, libelle, emoji et style de l'ancien menu",
-          not _diff and len(boutons(v)) == 17, _diff)
+          not _diff and len(boutons(v)) == 20, _diff)
     check("boutons : chaque bouton de la table a sa methode (_clic_<cle>)",
           all(hasattr(U.ContentMenuView, "_clic_" + b.custom_id.split(":", 1)[1]) for b in boutons(v))
           and not v.inconnues)
@@ -5574,14 +5593,16 @@ def _v2_bloc_menu_va():
         raise RuntimeError("reglages illisibles")
 
 
+    # Hors serveur FR (guild None), la rangee Outils n'est jamais postee.
+    R_SANS_OUTILS = [r for r in R_ATTENDU if r[0] != "cmenu:spoofer"]
     GF.get_features = _panne
     vP = U._menu_va(COG, "julia", None)
     check("reglages : module en panne -> menu complet, comme avant",
-          rangees(vP) == R_ATTENDU, rangees(vP))
+          rangees(vP) == R_SANS_OUTILS, rangees(vP))
     reglages()
     check("reglages : _filter_menu_view garde son contrat (rend la vue, reconstruite)",
           U._filter_menu_view(U.ContentMenuView(None), None) is not None
-          and rangees(U._filter_menu_view(U.ContentMenuView(None), None)) == R_ATTENDU)
+          and rangees(U._filter_menu_view(U.ContentMenuView(None), None)) == R_SANS_OUTILS)
 
     # ===========================================================================
     # 3. ENREGISTREMENT, MOTIFS, REDEMARRAGE
@@ -5644,7 +5665,7 @@ def _v2_bloc_menu_va():
     _neufs = [c for r in rangees(U.ContentMenuView(None)) for c in r]
     _mauv = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
     check("motifs : chaque custom_id du menu V2 est servi par UN element exactement",
-          not _mauv and len(_neufs) == 21, _mauv)
+          not _mauv and len(_neufs) == 24, _mauv)
     _ANCIENS_MENU = ("reel", "story", "post", "storycta", "banger", "reelmonte", "pseudo",
                      "name", "bio", "pp", "lien", "clics", "help", "tuto", "addaccount",
                      "comptes", "pay", "capbanger", "montagebanger", "templateflash",
