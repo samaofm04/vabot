@@ -58750,6 +58750,15 @@ def create_app():
                 return jsonify(_rep_cp)
         except Exception as _e_cp:
             print(f"[copie] route : {type(_e_cp).__name__}: {_e_cp}", flush=True)
+        # /annonce et sa fenetre : le texte d'un manager publie PAR LE BOT
+        # (annonces_discord). Meme principe, None quand ce n'est pas pour lui.
+        try:
+            import annonces_discord as _an
+            _rep_an = _an.traiter(charge)
+            if _rep_an is not None:
+                return jsonify(_rep_an)
+        except Exception as _e_an:
+            print(f"[annonce] route : {type(_e_an).__name__}: {_e_an}", flush=True)
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])
