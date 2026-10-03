@@ -48,6 +48,7 @@ except Exception:
     BOUTON_COPIE = None
 
 SERVEURS = ["1445108485090971710",       # YouLab TWITTER
+            "1505418484052394004",       # Va IG (serveur FR) : Luigi y est, meme jeton
             "1498948161039896586",       # YouLab THREADS
             "1552152470464110703"]       # YouLab - Entretien
 
@@ -178,6 +179,10 @@ def api_fichiers(methode: str, chemin: str, payload: dict, fichiers):
         return 0, {"message": str(e)[:200]}
 
 
+import re as _re_salons
+_re_ticket = _re_salons.compile(r"(^|-)va-[^-]")
+
+
 def salons(gid: str):
     """Les salons texte, groupés par catégorie — « name » ou « bio » seuls ne
     disent rien, il y en a dans plusieurs catégories."""
@@ -187,7 +192,12 @@ def salons(gid: str):
     for c in rep:
         _SALON_SERVEUR[str(c["id"])] = str(gid)
     cats = {c["id"]: c.get("name") or "" for c in rep if c.get("type") == 4}
-    textes = [c for c in rep if c.get("type") in (0, 5)]
+    # Va IG : 160 tickets « 🔴-12-va-pseudo » et les catégories d'archives
+    # noyaient la liste (on y cherche annonce, rappels, général-<model>…).
+    # Un ticket ou une archive n'est pas un salon où l'on publie pour tous.
+    textes = [c for c in rep if c.get("type") in (0, 5)
+              and not _re_ticket.search(c.get("name") or "")
+              and "archives" not in (cats.get(c.get("parent_id")) or "").lower()]
     textes.sort(key=lambda c: (cats.get(c.get("parent_id"), "~"), c.get("position", 0)))
     return [{"id": str(c["id"]), "nom": c.get("name") or "",
              "categorie": cats.get(c.get("parent_id"), "(sans catégorie)")} for c in textes]
@@ -301,7 +311,7 @@ button:disabled{opacity:.5;cursor:default}
 .danger button:hover{background:var(--rouge);color:#fff}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
-<p class="sous">Le message est posté par <b>Siri</b>. Tout se passe sur ta machine — rien n'est déployé.
+<p class="sous">Le message est posté par le bot du serveur (<b>Luigi</b>). Tout se passe sur ta machine — rien n'est déployé.
 <span style="opacity:.55">· outil du __DATE__</span></p>
 <div class="grille">
   <div class="carte">
