@@ -35023,6 +35023,47 @@ try:
 except Exception as _eTm:
     check("theme mario : testable", False, repr(_eTm)[:200])
 
+# ------------------- 96. Le podium retrouve son salon meme redecore (Mario)
+print()
+print("Podium : un salon redecore reste trouvable")
+try:
+    import podium_discord as _pdS
+
+    check("le nom nu ignore la decoration posee devant",
+          _pdS._nom_nu("─│🏆┤-podium") == _pdS._nom_nu("─│🏁┤-podium")
+          == _pdS._nom_nu("🏁・podium") == _pdS._nom_nu("podium") == "podium")
+    check("le nom nu garde les tirets du MOT (banger-amelia reste entier)",
+          _pdS._nom_nu("💥・banger-amelia") == "banger-amelia")
+
+    _salonsS = []
+
+    def _faux_apiS(methode, route, **kw):
+        return 200, [{"id": str(1000 + i), "name": n} for i, n in enumerate(_salonsS)]
+
+    _vraiS = _pdS._api
+    _pdS._api = _faux_apiS
+    try:
+        # 1. le nom exact l emporte toujours
+        _salonsS[:] = ["─│🏆┤-podium", "─│🏁┤-podium"]
+        check("salon : le nom exact passe avant le nom nu",
+              _pdS._salon("1", "─│🏆┤-podium") == "1000")
+        # 2. redecore : retrouve quand meme
+        _salonsS[:] = ["blabla", "─│🏁┤-podium"]
+        check("salon : redecore en Mario, le podium le retrouve",
+              _pdS._salon("1", "─│🏆┤-podium") == "1001")
+        # 3. deux salons au meme nom nu : on ne devine pas
+        _salonsS[:] = ["─│🏁┤-podium", "🏆・podium"]
+        check("salon : deux candidats -> aucun choisi (pas de podium au hasard)",
+              _pdS._salon("1", "─│🏆┤-podium") == "")
+        # 4. absent : rien, comme avant
+        _salonsS[:] = ["─│💭┤-discussion"]
+        check("salon : vraiment absent -> vide",
+              _pdS._salon("1", "─│🏆┤-podium") == "")
+    finally:
+        _pdS._api = _vraiS
+except Exception as _eS:
+    check("podium salon : testable", False, repr(_eS)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

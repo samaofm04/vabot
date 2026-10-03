@@ -2041,6 +2041,22 @@ def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 
+def _nom_nu(nom) -> str:
+    """Le nom du salon sans la décoration posée devant à la main.
+
+    La MÊME normalisation que cogs/outils et cogs/welcome (nom_sans_decor) :
+    deux façons de lire un nom de salon, c'est un salon reconnu d'un côté et
+    pas de l'autre. Importée ici plutôt que recopiée, et seulement à l'appel —
+    un relevé doit pouvoir tourner sans discord.py.
+    """
+    try:
+        from cogs.welcome import nom_sans_decor
+        nu = nom_sans_decor(nom)
+    except Exception:                                        # noqa: BLE001
+        nu = str(nom or "").strip().lower()
+    return nu.lstrip("-_ ")
+
+
 def _salon(gid: str, voulu: str = "") -> str:
     code, rep = _api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(rep, list):
@@ -2049,6 +2065,21 @@ def _salon(gid: str, voulu: str = "") -> str:
     for x in rep:
         if x.get("name") == voulu:
             return str(x["id"])
+    # LE PROPRIETAIRE REDECORE SES SALONS A LA MAIN. « ⬇️・all-download » avait
+    # deja fait disparaitre les copies de telechargement sans un mot (journal du
+    # 26/09) ; un « ─│🏁┤-podium » repeint en thème Mario aurait fait pareil au
+    # podium. On retombe donc sur le nom NU, comme le reste du dépôt.
+    cible = _nom_nu(voulu)
+    trouves = [x for x in rep if _nom_nu(x.get("name")) == cible] if cible else []
+    if len(trouves) == 1:
+        print(f"[podium] {gid} : salon « {voulu} » retrouvé sous le nom "
+              f"« {trouves[0].get('name')} » (même nom nu)", flush=True)
+        return str(trouves[0]["id"])
+    if len(trouves) > 1:
+        # choisir au hasard, ce serait poster le podium dans le mauvais salon
+        print(f"[podium] {gid} : {len(trouves)} salons se lisent « {cible} » ("
+              + ", ".join(str(x.get("name")) for x in trouves)
+              + ") — aucun choisi, il faut en renommer un", flush=True)
     return ""
 
 
