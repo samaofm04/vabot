@@ -181,6 +181,83 @@ def liens_gms_de(pseudo: str, model: str = "", force: bool = True) -> List[Dict[
     return out
 
 
+def _reparer(uid, model: str, entree: Dict[str, Any]):
+    """Complete SUR PLACE le lien d'un VA dont un bouton n'a pas son tracking
+    (MYM refuse ou non relu a la creation) : meme adresse, rien a supprimer
+    puis refaire. Proprietaire, 03/10/2026 : « un truc fixe pour reparer sans
+    avoir a supprimer et refaire des liens a chaque fois ».
+
+    Le tracking manquant est d'abord cherche dans MyPuls A SON NOM (cree mais
+    jamais relu : pas de doublon), cree sinon ; les boutons sont reposes
+    depuis le lien de base (un bouton retire revient). Rend (entree, change).
+    Rien a faire : aucun appel reseau si l'entree connait ses plateformes."""
+    import gms
+    cfg = MODELS.get(model) or {}
+    urls = dict(entree.get("trackings") or {})
+    gabarit, base = lien_de_base(model), None
+    attendues = entree.get("plateformes")
+    if attendues is None:
+        if not gabarit:
+            return entree, False
+        base = lire_lien(gabarit)
+        attendues = sorted({plateforme(b.get("url")) for b in base.get("buttons") or []} - {""})
+    manquantes = [p for p in attendues if cfg.get(p) and not urls.get(p)]
+    if (not manquantes and entree.get("boutons_a_jour") is not False) or not entree.get("link_id"):
+        if entree.get("plateformes") is None:
+            # notees une fois : les clics suivants ne relisent plus le lien de base
+            entree = {**entree, "plateformes": attendues}
+            d = _etat()
+            d.setdefault("liens", {})[f"{int(uid)}:{model}"] = entree
+            safe_json.write(ETAT, d, indent=1)
+        return entree, False
+    nomt = nom_tracking(entree.get("display_name") or "")
+    soucis, nouveaux = [], {}
+    for p in manquantes:
+        cid = int(cfg[p])
+        try:
+            url, _ = _relire_api(nomt, cid)
+        except Exception as e:                               # noqa: BLE001
+            url = ""
+            print(f"[liens_fr] reparation : relecture API impossible ({e})", flush=True)
+        if not url:
+            t = creer_tracking(nomt, cid)
+            url = t.get("url") if t.get("ok") else ""
+            if not url:
+                soucis.append(f"{p.upper()} : {t.get('erreur')} — bouton toujours absent")
+        if url:
+            nouveaux[p] = url
+    urls.update(nouveaux)
+    etaient_ok = boutons_ok = entree.get("boutons_a_jour")
+    if nouveaux or boutons_ok is False:
+        try:
+            base = base or lire_lien(gabarit)
+            copie = lire_lien(entree["link_id"])
+            # la version de la COPIE quand elle a encore le bouton (ses images),
+            # celle du lien de base pour un bouton qui avait ete retire
+            libelle = lambda b: str(b.get("label") or b.get("title") or "")
+            dans_copie = {libelle(b): b for b in copie.get("buttons") or []}
+            boutons = [dans_copie.get(libelle(b), b) for b in base.get("buttons") or []]
+            r = gms._call_tool("update_link", {"link_id": entree["link_id"], "team_id": EQUIPE,
+                                               "buttons": boutons_remplaces(boutons, urls)})
+            boutons_ok = bool(r.get("ok"))
+            if not boutons_ok:
+                soucis.append(f"boutons non mis à jour ({r.get('error')}) — réessayé au prochain clic")
+        except Exception as e:                               # noqa: BLE001
+            boutons_ok = False
+            soucis.append(f"boutons non mis à jour ({type(e).__name__}: {e}) — réessayé au prochain clic")
+    entree = {**entree, "trackings": urls, "plateformes": attendues, "soucis": soucis,
+              "boutons_a_jour": boutons_ok, "repare": int(time.time())}
+    d = _etat()
+    d.setdefault("liens", {})[f"{int(uid)}:{model}"] = entree
+    ETAT.parent.mkdir(parents=True, exist_ok=True)
+    if not safe_json.write(ETAT, d, indent=1):
+        soucis.append("registre data/liens_va_fr.json non écrit")
+    print(f"[liens_fr] reparation de {entree.get('display_name')} : ajout {sorted(nouveaux)}, "
+          f"boutons {'ok' if boutons_ok else 'NON'}", flush=True)
+    # change = un bouton de plus, ou des boutons enfin reposes -- pas un essai rate
+    return entree, bool(nouveaux) or (etaient_ok is False and boutons_ok is True)
+
+
 def retirer(uid) -> List[Dict[str, Any]]:
     """/resetlien (serveur FR) : sort les liens de ce VA du registre « liens »
     -- sa prochaine demande en refera un -- et les garde dans « retires » :
@@ -337,8 +414,15 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         return {"ok": False, "erreur": f"« {model} » n'est pas une model FR"}
     with _VERROU:
         deja = lien_de(uid, model)
-        if deja and deja.get("public_url") and not sans_limite(uid):
-            return {"ok": True, "deja": True, **deja}
+        if deja and deja.get("public_url"):
+            # un bouton sans tracking : repare sur place, meme adresse ; un
+            # compte sans limite n'a un NOUVEAU lien que si rien n'etait a reparer
+            try:
+                deja, change = _reparer(uid, model, deja)
+            except Exception as e:                           # noqa: BLE001
+                deja, change = {**deja, "soucis": [f"réparation impossible : {type(e).__name__}: {e}"]}, False
+            if change or not sans_limite(uid):
+                return {"ok": True, "deja": True, "vient_d_etre_repare": change, **deja}
         if not sans_limite(uid):
             # absent du registre mais present dans GetMySocial a son nom : on le
             # reprend (et le registre est repare) au lieu d'un doublon -- avec
@@ -458,6 +542,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         entree = {"pseudo": pseudo, "model": model, "numero": n, "link_id": link_id,
                   "shortcode": sc, "public_url": public, "display_name": nom,
                   "trackings": urls, "soucis": soucis, "par": str(par or ""),
+                  "plateformes": plates, "boutons_a_jour": True,
                   "quand": int(time.time())}
         d = _etat()
         d.setdefault("liens", {})[f"{int(uid)}:{model}"] = entree

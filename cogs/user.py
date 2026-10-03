@@ -2953,9 +2953,21 @@ async def _generer_lien_fr(interaction, uid, identity):
         await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
         return
     url = res.get("public_url", "")
+    if res.get("deja") and res.get("vient_d_etre_repare"):
+        # meme adresse : le VA l'a deja, rien a lui renvoyer
+        _lr_mark_generated(_lr_cle_fr(uid, model), url, res.get("display_name", ""))
+        lignes = [f"🔧 **{res.get('display_name')}** réparé, même adresse → {url}"]
+        lignes += [f"• tracking {k.upper()} : {v}" for k, v in (res.get("trackings") or {}).items()]
+        lignes += [f"⚠️ {s}" for s in res.get("soucis") or []]
+        await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
+        return
     if res.get("deja"):
         _lr_mark_generated(_lr_cle_fr(uid, model), url, res.get("display_name", ""))
         await _lr_send_blocked(interaction, uid, url)
+        if res.get("soucis"):
+            # une reparation tentee sans succes : le dire, pas seulement « deja un lien »
+            await interaction.followup.send("\n".join(f"⚠️ {s}" for s in res["soucis"])[:1900],
+                                            ephemeral=True)
         return
     _lr_mark_generated(_lr_cle_fr(uid, model), url, res.get("display_name", ""))
     if va_ch:
