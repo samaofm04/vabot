@@ -70,11 +70,21 @@ def enabled(guild_or_id, feature: str) -> bool:
     return feature in get_features(guild_or_id)
 
 
+#: Serveurs SANS aucun rappel (Story du jour, Reel, Story CTA, suivi des
+#: comptes). Va IG, proprietaire 03/10/2026 : « je veux plus de rappel, je
+#: vais creer un truc dans annonce ; pour savoir si le mec est actif : s'il
+#: demande des photos c'est good ». L'activite se lit aux clics sur le menu
+#: (cogs/vaactivity, alimente par le bot principal), pas aux rappels.
+SANS_RAPPELS = {"1505418484052394004"}   # Va IG
+
+
 def reminders_enabled(guild_or_id) -> bool:
     """True si les rappels/suivi (Story du jour, Reel, Suivi des comptes…) sont
     actifs sur ce serveur. OFF automatiquement en mode Threads (c'est Threads,
-    pas Insta), et désactivable via la fonction 'rappels'."""
-    return enabled(guild_or_id, "rappels") and not threads_mode(guild_or_id)
+    pas Insta) et sur les serveurs de SANS_RAPPELS, et désactivable via la
+    fonction 'rappels'."""
+    return (enabled(guild_or_id, "rappels") and not threads_mode(guild_or_id)
+            and _gid(guild_or_id) not in SANS_RAPPELS)
 
 
 def is_restricted(guild_or_id) -> bool:

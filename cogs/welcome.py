@@ -2645,6 +2645,26 @@ class Welcome(commands.Cog):
         await self._accueillir(after, load_welcome_config())
 
     @commands.Cog.listener()
+    async def on_interaction(self, interaction):
+        """Un clic d'un VA sur un bouton du bot principal (menu, contenu, lien,
+        outils…) compte pour son activite. Le cog vaactivity tourne sur le bot
+        ADMIN, et Discord n'envoie un clic QU'AU bot qui a poste le bouton :
+        depuis ce passage, aucune demande de contenu n'etait comptee et les
+        tickets de Va IG restaient 🔴 (constate le 03/10/2026, proprietaire :
+        « s'il demande des photos, c'est qu'il est actif »)."""
+        try:
+            if getattr(interaction.user, "bot", True):
+                return
+            adm = _bot_admin()
+            if adm is None or adm is self.bot:               # meme bot : il compte deja
+                return
+            cog = adm.get_cog("VAActivity")
+            if cog is not None:
+                cog._record(interaction.user.id)
+        except Exception as e:                               # noqa: BLE001
+            log.debug(f"activite (clic) non comptee : {e}")
+
+    @commands.Cog.listener()
     async def on_guild_channel_update(self, before, after):
         try:
             await self._ticket_change_de_categorie(before, after)
