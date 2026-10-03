@@ -5282,6 +5282,7 @@ class UserCog(commands.Cog):
         # Le menu VA en V2 : construit SANS reglage, il porte tous ses
         # custom_id (boutons « cmenu:<cle> », menus « cmenu:sel:<famille> »).
         _enregistrer("menu VA", lambda: self.bot.add_view(ContentMenuView(self)))
+        _enregistrer("ligne du menu VA (FR)", lambda: self.bot.add_view(MenuLigneVA(self)))
         # Ce que les menus VA deja epingles portent encore et que le V2 n'a
         # plus : les boutons retires le 25/09/2026, puis les lanceurs « ▸ »
         # (cmenu:fam:…), qui convertissent leur menu en V2 au clic. Sans ces
@@ -5453,7 +5454,7 @@ class UserCog(commands.Cog):
         premiere de son texte (_menu_va_texte), et allowed_mentions s'y
         applique comme au contenu d'avant."""
         guild = getattr(channel, "guild", None)
-        view = _menu_va(self, identity, guild, mention=mention_user_id)
+        view = _menu_a_poster(self, identity, guild, mention=mention_user_id)
         if not view.a_des_elements():
             return False  # aucune fonction de menu activée sur ce serveur
         try:
@@ -6334,10 +6335,15 @@ class UserCog(commands.Cog):
         serveur. clean_onboarding=True supprime aussi l'intro d'onboarding (mode
         Threads). Retourne le nombre de salons traités."""
         pinned = 0
+        nettoyes = set()
         for ch, uid, ident in self._va_targets(guild):
             try:
-                await self._delete_old_menus(ch, also_onboarding=clean_onboarding)
-                _view = _menu_va(self, ident, guild)
+                # une fois par salon : un VA a deux models a deux menus, le
+                # second nettoyage effacait le premier tout juste pose
+                if ch.id not in nettoyes:
+                    await self._delete_old_menus(ch, also_onboarding=clean_onboarding)
+                    nettoyes.add(ch.id)
+                _view = _menu_a_poster(self, ident, guild)
                 if not _view.a_des_elements():
                     continue
                 msg = await ch.send(view=_view)
@@ -8306,10 +8312,155 @@ def _une_ligne_par_model(cibles):
     return out
 
 
-def _menu_va(cog, identite=None, guild=None, mention=None):
+# -- Outils du serveur FR (cogs/outils.py) : le menu complet et la ligne
+# les appellent ; livres par cogs/outils.ou_livrer -----------------------
+
+async def _outil_spoofer(interaction):
+    """La fenetre du spoofer, tout de suite (trois secondes), avec le
+    nombre de versions de CE VA (🔢 du salon commun, 5 par defaut)."""
+    from cogs import outils, spoofer as spf
+    cog = interaction.client.get_cog("Spoofer") if interaction.client else None
+    if cog is None:
+        await interaction.response.send_message(
+            "📤 Spoofer indisponible pour le moment.", ephemeral=True)
+        return
+    non = outils.refus(interaction.channel, interaction.user)
+    if non:
+        await interaction.response.send_message(non, ephemeral=True)
+        return
+    if interaction.user.id in cog.en_cours:
+        await interaction.response.send_message(
+            "⏳ Ton spoof précédent n'est pas fini.", ephemeral=True)
+        return
+    await interaction.response.send_modal(
+        spf.FenetreFichier(spf.qte_perso(interaction.user.id)))
+
+async def _outil_download(interaction):
+    """Le panneau du telechargement, pour lui seul : son compte retenu
+    s'y affiche. Ses boutons sont ceux de la vue persistante."""
+    from cogs import outils, telechargement as tl
+    cog = interaction.client.get_cog("Telechargement") if interaction.client else None
+    if cog is None:
+        await interaction.response.send_message(
+            "⬇️ Download indisponible pour le moment.", ephemeral=True)
+        return
+    non = outils.refus(interaction.channel, interaction.user)
+    if non:
+        await interaction.response.send_message(non, ephemeral=True)
+        return
+    pseudo, combien = cog.choix.get(interaction.user.id, ("", 30))
+    await interaction.response.send_message(
+        view=tl.PanneauTelechargement(cog, pseudo, combien), ephemeral=True)
+
+async def _outil_numero(interaction):
+    """Le panneau Numero en bas du ticket. Il est au bot ADMIN (le module
+    des numeros y vit, cogs/numeros.py) : ce bot lui passe la main, comme
+    welcome._ensure_num_panel. Prendre un numero se fait sur le panneau :
+    +33 et 3 par jour, regles du serveur."""
+    from cogs import outils
+    non = outils.refus(interaction.channel, interaction.user)
+    if non:
+        await interaction.response.send_message(non, ephemeral=True)
+        return
+    cible = outils.ou_livrer(interaction.channel, interaction.user)
+    await interaction.response.defer()
+    try:
+        from cogs.welcome import _bot_admin
+        adm = _bot_admin()
+        acog = adm.get_cog("NumerosCog") if adm is not None else None
+        if acog is None:
+            raise RuntimeError("bot admin ou module des numeros absent")
+        ach = adm.get_channel(cible.id) or await adm.fetch_channel(cible.id)
+        await acog._panneau_en_bas(ach)
+    except Exception as e:                               # noqa: BLE001
+        log.warning("menu VA : panneau numero non pose dans #%s (%s: %s)",
+                    getattr(cible, "name", "?"), type(e).__name__, e)
+        await interaction.followup.send(
+            "📱 Numéros indisponibles pour le moment.", ephemeral=True)
+        return
+    if cible.id != getattr(interaction.channel, "id", None):
+        await interaction.followup.send("📱 C'est dans %s." % cible.mention,
+                                        ephemeral=True)
+
+
+#: Prefixe des boutons de la ligne du serveur FR (MenuLigneVA) : distinct
+#: des boutons du menu complet, chaque custom_id n'a qu'un repondant.
+_CMENU_LIGNE = "cmenu:l:"
+
+
+class _BoutonLigneVA(discord.ui.Button):
+    def __init__(self, cog, cle, libelle, emoji):
+        super().__init__(label=libelle, emoji=emoji, style=discord.ButtonStyle.primary,
+                         custom_id=_CMENU_LIGNE + cle)
+        self.cog, self.cle = cog, cle
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.cle == "menu":
+            await _ligne_ouvrir_menu(self.cog, interaction)
+            return
+        f = {"spoofer": _outil_spoofer, "download": _outil_download,
+             "numero": _outil_numero}.get(self.cle)
+        if f is not None:
+            await _avec_model_du_menu(interaction, lambda: f(interaction))
+
+
+class MenuLigneVA(discord.ui.LayoutView):
+    """« Ton menu » du serveur FR en UNE ligne. Proprietaire, 03/10/2026 :
+    « un message qui ouvre ce menu, un pour spoofer, un pour download ; le
+    truc avec caption et tout, c'est quand je clique sur menu ».
+
+    📋 Menu ouvre le menu complet (pour le seul cliqueur) ; les outils
+    seulement pour les models ouvertes (cogs/outils.MODELS_OUTILS). Le texte
+    porte l'identite et la marque du menu VA : _menu_va_lire et
+    _delete_old_menus le traitent comme l'autre format. Persistant."""
+
+    def __init__(self, cog, identite=None, mention=None, outils=True):
+        super().__init__(timeout=None)
+        ui = discord.ui
+        haut = []
+        if mention:
+            haut.append(f"<@{int(mention)}> 👇 **Ton menu du jour est prêt !**")
+        haut.append("## ☀️ Ton menu")
+        bas = [f"-# Identité : `{identite}`"] if identite else []
+        bas.append(_MENU_VA_MARQUE)
+        rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", "📋"))
+        if outils:
+            for cle, lib, emo in (("spoofer", "Spoofer", "📤"), ("download", "Download", "⬇️"),
+                                  ("numero", "Numéro", "📱")):
+                rangee.add_item(_BoutonLigneVA(cog, cle, lib, emo))
+        self.add_item(ui.Container(ui.TextDisplay("\n".join(haut + bas)), rangee,
+                                   accent_colour=discord.Colour.blurple()))
+
+    def a_des_elements(self) -> bool:
+        return True
+
+
+async def _ligne_ouvrir_menu(cog, interaction):
+    """Le menu complet de la model de CETTE ligne, pour le seul cliqueur. Ses
+    clics sont servis par la vue persistante du menu complet."""
+    msg = getattr(interaction, "message", None)
+    ident = (_menu_va_lire(msg)[0] if msg is not None else None) \
+        or get_user_identity(interaction.user.id)
+    vue = _menu_va(cog, ident, getattr(interaction, "guild", None), sans_outils=True)
+    _vue_sans_suivi(vue)
+    await interaction.response.send_message(view=vue, ephemeral=True)
+
+
+def _menu_a_poster(cog, identite, guild, mention=None):
+    """Ce qui se poste dans un ticket : la ligne sur le serveur FR, le menu
+    complet ailleurs (Threads, Twitter...)."""
+    if _menu_outils_ici(guild):
+        return MenuLigneVA(cog, identite, mention, outils=_outils_pour(identite))
+    return _menu_va(cog, identite, guild, mention=mention)
+
+
+def _menu_va(cog, identite=None, guild=None, mention=None, sans_outils=False):
     """Le menu VA pret a partir : reglages de `guild` appliques, texte
-    compris. `mention` : l'id du VA a pinger en tete (menu du jour)."""
+    compris. `mention` : l'id du VA a pinger en tete (menu du jour).
+    `sans_outils` : sans la rangee Outils (ouvert depuis la ligne du serveur
+    FR, qui les porte deja)."""
     vue = ContentMenuView(cog, identite=identite, mention=mention)
+    vue.sans_outils = sans_outils
     return _filter_menu_view(vue, guild)
 
 
@@ -8492,8 +8643,8 @@ class ContentMenuView(discord.ui.LayoutView):
                                 + " · ".join(noms) + ") : choisis ta variante, "
                                 "chaque option dit ce qu'elle envoie.")
                 continue
-            if titre == _MENU_VA_OUTILS and filtrer and not (
-                    _menu_outils_ici(guild) and _outils_pour(self.identite)):
+            if titre == _MENU_VA_OUTILS and (getattr(self, "sans_outils", False) or (
+                    filtrer and not (_menu_outils_ici(guild) and _outils_pour(self.identite)))):
                 continue
             rangee, morceaux = ui.ActionRow(), []
             for b in boutons:
@@ -8533,71 +8684,13 @@ class ContentMenuView(discord.ui.LayoutView):
     # -- Outils (serveur FR) : livres par cogs/outils.ou_livrer -----------------
 
     async def _clic_spoofer(self, interaction: discord.Interaction):
-        """La fenetre du spoofer, tout de suite (trois secondes), avec le
-        nombre de versions de CE VA (🔢 du salon commun, 5 par defaut)."""
-        from cogs import outils, spoofer as spf
-        cog = interaction.client.get_cog("Spoofer") if interaction.client else None
-        if cog is None:
-            await interaction.response.send_message(
-                "📤 Spoofer indisponible pour le moment.", ephemeral=True)
-            return
-        non = outils.refus(interaction.channel, interaction.user)
-        if non:
-            await interaction.response.send_message(non, ephemeral=True)
-            return
-        if interaction.user.id in cog.en_cours:
-            await interaction.response.send_message(
-                "⏳ Ton spoof précédent n'est pas fini.", ephemeral=True)
-            return
-        await interaction.response.send_modal(
-            spf.FenetreFichier(spf.qte_perso(interaction.user.id)))
+        await _outil_spoofer(interaction)
 
     async def _clic_download(self, interaction: discord.Interaction):
-        """Le panneau du telechargement, pour lui seul : son compte retenu
-        s'y affiche. Ses boutons sont ceux de la vue persistante."""
-        from cogs import outils, telechargement as tl
-        cog = interaction.client.get_cog("Telechargement") if interaction.client else None
-        if cog is None:
-            await interaction.response.send_message(
-                "⬇️ Download indisponible pour le moment.", ephemeral=True)
-            return
-        non = outils.refus(interaction.channel, interaction.user)
-        if non:
-            await interaction.response.send_message(non, ephemeral=True)
-            return
-        pseudo, combien = cog.choix.get(interaction.user.id, ("", 30))
-        await interaction.response.send_message(
-            view=tl.PanneauTelechargement(cog, pseudo, combien), ephemeral=True)
+        await _outil_download(interaction)
 
     async def _clic_numero(self, interaction: discord.Interaction):
-        """Le panneau Numero en bas du ticket. Il est au bot ADMIN (le module
-        des numeros y vit, cogs/numeros.py) : ce bot lui passe la main, comme
-        welcome._ensure_num_panel. Prendre un numero se fait sur le panneau :
-        +33 et 3 par jour, regles du serveur."""
-        from cogs import outils
-        non = outils.refus(interaction.channel, interaction.user)
-        if non:
-            await interaction.response.send_message(non, ephemeral=True)
-            return
-        cible = outils.ou_livrer(interaction.channel, interaction.user)
-        await interaction.response.defer()
-        try:
-            from cogs.welcome import _bot_admin
-            adm = _bot_admin()
-            acog = adm.get_cog("NumerosCog") if adm is not None else None
-            if acog is None:
-                raise RuntimeError("bot admin ou module des numeros absent")
-            ach = adm.get_channel(cible.id) or await adm.fetch_channel(cible.id)
-            await acog._panneau_en_bas(ach)
-        except Exception as e:                               # noqa: BLE001
-            log.warning("menu VA : panneau numero non pose dans #%s (%s: %s)",
-                        getattr(cible, "name", "?"), type(e).__name__, e)
-            await interaction.followup.send(
-                "📱 Numéros indisponibles pour le moment.", ephemeral=True)
-            return
-        if cible.id != getattr(interaction.channel, "id", None):
-            await interaction.followup.send("📱 C'est dans %s." % cible.mention,
-                                            ephemeral=True)
+        await _outil_numero(interaction)
 
     async def _clic_story(self, interaction: discord.Interaction):
         await self.cog.story.callback(self.cog, interaction)
