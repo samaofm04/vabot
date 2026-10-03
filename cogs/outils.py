@@ -227,6 +227,18 @@ def _droits(guilde, moi):
     return droits
 
 
+#: Les categories d'information du serveur FR, copiees de Twitter le
+#: 03/10/2026 (« |<<<<< ACCUEIL >>>>>| », « <<<🔔NOTIFICATION >>> ») : leurs
+#: salons sont pour tous les VA (✅ Verifie).
+CATEGORIES_INFO = ("accueil", "notification")
+
+
+def salons_info(guilde) -> list:
+    return [c for c in (getattr(guilde, "text_channels", None) or [])
+            if getattr(c, "category", None) is not None
+            and any(k in str(c.category.name).lower() for k in CATEGORIES_INFO)]
+
+
 def _rendre_visible_aux_futurs_va(ids) -> None:
     """Les salons s'ajoutent aux « salons d'aide » de l'isolation : sinon un
     VA qui arrive est masque de TOUS les salons (anonymat) et ne verrait
@@ -264,6 +276,12 @@ class Outils(commands.Cog):
                     await self.assurer(guilde)
                 except Exception as e:                       # noqa: BLE001
                     print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
+            # les salons d'information : l'isolation d'un VA qui arrive les
+            # lui cacherait (un refus par salon), sauf ceux de cette liste
+            try:
+                _rendre_visible_aux_futurs_va([c.id for c in salons_info(guilde)])
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] salons d'information : {type(e).__name__}: {e}")
             # un role de model a chaque VA qui a une fiche et aucun role
             # (fiches faites par /adduser, VA d'avant les roles)
             try:
