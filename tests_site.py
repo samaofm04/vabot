@@ -34787,6 +34787,137 @@ try:
 except Exception as _eD:
     check("drive onboarding : testable", False, repr(_eD)[:200])
 
+print()
+print("=" * 70)
+print("Trends Instagram : releve toutes les 3 h, enveloppe a part, filtres")
+print("=" * 70)
+try:
+    import hiker_reels as _hkT
+    import insta_scraper as _iscT
+    import web_upload as _wT
+    _TMPT = TMP / "trends3h"
+    _TMPT.mkdir(parents=True, exist_ok=True)
+    _savT = {"hk": {k: getattr(_hkT, k) for k in ("_BUDGET_FILE", "_BUDGET_TRENDS_FILE",
+                                                  "_PK_FILE", "get_token", "_appel")},
+             "isc": {k: getattr(_iscT, k) for k in ("WATCHLIST_FILE", "CACHE_DIR",
+                                                    "scrape_profile", "is_auth_configured")},
+             "w": {k: getattr(_wT, k) for k in ("_TRENDS_PASSAGES_FILE", "_predownload_en_fond")}}
+    try:
+        _hkT._BUDGET_FILE = _TMPT / "hiker_budget.json"
+        _hkT._BUDGET_TRENDS_FILE = _TMPT / "hiker_budget_trends.json"
+        _hkT._PK_FILE = _TMPT / "hiker_pk.json"
+        _hkT.get_token = lambda: "jeton-factice"
+        _appelsT = []
+
+        def _faux_appelT(chemin, token, timeout, **params):
+            _appelsT.append(chemin)
+            if chemin == "/v1/user/by/username":
+                return {"user": {"pk": "42", "username": params.get("username"),
+                                 "follower_count": 1000}}, ""
+            return [{"media": {"code": "ABC", "play_count": 5000, "taken_at_ts": 1790000000}}], ""
+        _hkT._appel = _faux_appelT
+        # l'enveloppe commune est pleine : la veille ne doit pas en dependre
+        _hkT._BUDGET_FILE.write_text('{"jour": "%s", "utilise": %d}'
+                                     % (_hkT._aujourdhui(), _hkT.PLAFOND_JOUR), encoding="utf-8")
+        _rT = _hkT.scrape_profile("compte.a", 12, poste="trends")
+        check("trends : enveloppe commune vide, la veille releve quand meme",
+              "error" not in _rT and len(_rT.get("reels") or []) == 1, _rT)
+        check("trends : debite sa propre enveloppe (2 requetes), pas la commune",
+              _hkT.budget_du_jour("trends")["utilise"] == 2
+              and _hkT.budget_du_jour()["utilise"] == _hkT.PLAFOND_JOUR)
+        _appelsT.clear()
+        _rT2 = _hkT.scrape_profile("compte.a", 12, poste="trends", profil=False)
+        check("trends : passage leger = les reels seuls, 1 requete (pk connu)",
+              _appelsT == ["/v1/user/clips"] and _hkT.budget_du_jour("trends")["utilise"] == 3,
+              _appelsT)
+        _appelsT.clear()
+        _hkT.scrape_profile("compte.neuf", 12, poste="trends", profil=False)
+        check("trends : compte jamais vu = profil quand meme (pk inconnu)",
+              _appelsT[:1] == ["/v1/user/by/username"])
+        _rT3 = _hkT.scrape_profile("compte.b", 12)
+        check("trends : le suivi des comptes reste borne par l enveloppe commune",
+              "enveloppe du jour epuisee" in (_rT3.get("error") or ""), _rT3)
+
+        # --- passage de la watchlist : les echecs sont comptes, pas jetes
+        _iscT.WATCHLIST_FILE = _TMPT / "watchlist.json"
+        _iscT.CACHE_DIR = _TMPT / "cache"
+        _iscT.CACHE_DIR.mkdir(exist_ok=True)
+        _iscT.WATCHLIST_FILE.write_text('["a1", "a2", "a3", "a4"]', encoding="utf-8")
+        _iscT.is_auth_configured = lambda: True
+        _vusT = []
+
+        def _faux_spT(u, limit=12, poste="", profil=True):
+            _vusT.append((u, poste, profil))
+            if u == "a2":
+                return {"error": "HikerAPI: enveloppe du jour epuisee (1000/1000 requetes)."}
+            return {"profile": {}, "reels": []}
+        _iscT.scrape_profile = _faux_spT
+        _wT._TRENDS_PASSAGES_FILE = _TMPT / "trends_passages.json"
+        _lancesT = []
+        _wT._predownload_en_fond = lambda: _lancesT.append(1)
+        _resT = _wT.run_insta_watchlist_scrape(limit=12, label="test", skip_fresh_hours=0,
+                                               delay=0, complet=False)
+        check("trends : un echec est compte et remonte (plus de except: pass)",
+              _resT.get("failed") == 3 and "enveloppe" in (_resT.get("error") or ""), _resT)
+        check("trends : enveloppe vide = arret, les comptes suivants ne sont pas essayes",
+              [v[0] for v in _vusT] == ["a1", "a2"], _vusT)
+        check("trends : la watchlist passe par le poste trends, en passage leger",
+              all(v[1] == "trends" and v[2] is False for v in _vusT))
+        _dT = _wT._trends_passages().get("dernier") or {}
+        check("trends : le bilan du passage est garde sur disque (survit au redemarrage)",
+              _dT.get("echecs") == 3 and _dT.get("comptes_en_echec") == ["a2", "a3", "a4"], _dT)
+        check("trends : un releve qui rapporte lance le telechargement", _lancesT == [1])
+
+        # --- creneaux toutes les 3 h, rattrapage
+        import datetime as _dtT
+        _cT = _wT._trends_creneau(_dtT.datetime(2026, 10, 3, 23, 10))
+        check("trends : a 23 h 10, le creneau courant est celui de 21 h",
+              _cT[0] == "2026-10-03#21" and _cT[1] == 21, _cT)
+        _cT2 = _wT._trends_creneau(_dtT.datetime(2026, 10, 4, 0, 40))
+        check("trends : apres minuit, creneau 0 h (passage complet)", _cT2[1] == 0, _cT2)
+        check("trends : 8 releves par jour (toutes les 3 h)",
+              _wT._INSTA_TRENDS_SCRAPE_HOURS == [0, 3, 6, 9, 12, 15, 18, 21])
+
+        # --- rendu : la grille, le pied, la reprise des filtres
+        _cacheT = _iscT.CACHE_DIR / "a1.json"
+        import json as _jT, time as _tT
+        _cacheT.write_text(_jT.dumps({"profile": {"username": "a1"}, "reels": [
+            {"shortcode": "R1", "is_video": True, "views": 10, "taken_at": int(_tT.time()) - 3600,
+             "url": "https://www.instagram.com/p/R1/", "caption": "l'apostrophe"},
+            {"shortcode": "R2", "is_video": True, "views": 20, "taken_at": int(_tT.time()) - 90 * 86400,
+             "url": "https://www.instagram.com/p/R2/"}]}), encoding="utf-8")
+        _gT = _wT._insta_trends_ou_vide()
+        check("trends : une seule zone rechargeable, grille identifiee",
+              _gT.startswith("<div id='ig-trends-zone'>") and "id='ig-grille'" in _gT)
+        check("trends : la grille reprend les filtres en arrivant",
+              "window.igApresInjection()" in _gT and "__igCreatrices" in _gT)
+        check("trends : Rafraichir n est plus en bas de la grille",
+              "/insta/scrape_all" not in _gT)
+        check("trends : 4 comptes suivis proposes dans Creators, meme sans reel",
+              _gT.count('{"u": "a') == 4 or _gT.count('"u": "a') == 4, _gT[-400:])
+        _vT = _wT._insta_trends_vue_creatrices(["a1", "pas_suivi"])
+        check("trends : Creators montre TOUS les posts (meme > 30 j), du plus recent",
+              _vT.get("ok") and _vT.get("nb") == 2 and _vT.get("comptes") == ["a1"]
+              and _vT["html"].index("/p/R1/") < _vT["html"].index("/p/R2/"), _vT.get("nb"))
+        check("trends : un compte non suivi est refuse",
+              not _wT._insta_trends_vue_creatrices(["pas_suivi"]).get("ok"))
+        _srcT = (pathlib.Path(_wT.__file__)).read_text(encoding="utf-8")
+        check("trends : le filtre de periode ne compte plus les cartes de la Veille",
+              "querySelectorAll('#ig-grille .reel-card')" in _srcT
+              and "var cards = document.querySelectorAll('.reel-card');\n  var visible = 0, hidden = 0;" not in _srcT)
+        check("trends : telechargement gratuit d abord, sans seuil de vues",
+              "MIN_VUES_TELECHARGEMENT" not in _srcT and "faits = list(ex.map(_gratuit, batch))" in _srcT)
+    finally:
+        for _k, _v in _savT["hk"].items():
+            setattr(_hkT, _k, _v)
+        for _k, _v in _savT["isc"].items():
+            setattr(_iscT, _k, _v)
+        for _k, _v in _savT["w"].items():
+            setattr(_wT, _k, _v)
+except Exception as _eT:
+    import traceback as _tbT
+    check("trends 3h : testable", False, (repr(_eT) + _tbT.format_exc()[-300:])[:500])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

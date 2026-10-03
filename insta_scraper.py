@@ -1238,10 +1238,14 @@ def purge_dead_watchlist(days: int = 7) -> list:
     return dead
 
 
-def scrape_profile(username: str, limit: int = 50) -> dict:
+def scrape_profile(username: str, limit: int = 50, poste: str = "",
+                   profil: bool = True) -> dict:
     """Scrape un profil (voir _scrape_profile_impl) + suivi de santé watchlist :
-    un « profil introuvable » est horodaté, un succès blanchit le compte."""
-    result = _scrape_profile_impl(username, limit)
+    un « profil introuvable » est horodaté, un succès blanchit le compte.
+
+    poste : enveloppe HikerAPI à débiter (« trends » pour la veille Trends).
+    profil=False : les reels seulement (voir hiker_reels.scrape_profile)."""
+    result = _scrape_profile_impl(username, limit, poste, profil)
     try:
         record_scrape_result(username, result)
     except Exception as e:
@@ -1249,7 +1253,8 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
     return result
 
 
-def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
+def _scrape_profile_impl(username: str, limit: int = 50, poste: str = "",
+                        profil: bool = True) -> dict:
     """Scrape un profil : profil info + N derniers posts.
 
     Ordre de tentatives :
@@ -1277,7 +1282,7 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
             import hiker_reels as _hk
             if not _hk.configured():
                 return {"error": "HikerAPI: jeton absent (Settings)"}
-            res = _hk.scrape_profile(username, limit)
+            res = _hk.scrape_profile(username, limit, poste=poste, profil=profil)
             if "error" not in res:
                 return _write_cache(username, res)
             return res
@@ -1306,7 +1311,7 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
         try:
             import hiker_reels as _hk
             if _hk.configured():
-                _repli = _hk.scrape_profile(username, limit)
+                _repli = _hk.scrape_profile(username, limit, poste=poste, profil=profil)
                 if "error" not in _repli:
                     log.info(f"HikerAPI a pris le relais pour {username}")
                     return _write_cache(username, _repli)

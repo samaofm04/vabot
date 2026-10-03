@@ -2358,6 +2358,27 @@ button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px
 
 /* Period buttons Day/Week/Month - smooth */
 .ig-period{transition:background .18s ease,color .18s ease!important}
+.ig-rafraichir{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;margin:0;border:1px solid #34363a;border-radius:10px;background:#1c1d1f;color:#b9bec7;font-size:14px;font-weight:500;font-family:inherit;line-height:1;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
+.ig-rafraichir svg{width:16px;height:16px;flex-shrink:0}
+.ig-rafraichir:hover{color:#e5e7eb;border-color:#4a4d52}
+.ig-rafraichir[disabled]{opacity:.7;cursor:wait}
+.ig-rafraichir[disabled] svg{animation:igTourne 1s linear infinite}
+@keyframes igTourne{to{transform:rotate(360deg)}}
+.ig-releve-info{font-size:12px;color:#8b909a;white-space:nowrap}
+.ig-releve-info.retard{color:#fbbf24}
+body.light .ig-rafraichir{background:#f5f6f8;border-color:#dce0e5;color:#59616d}
+.ig-crea-ligne{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;margin:0;background:none;border:0;border-bottom:1px solid #1d1d1d;border-radius:0;color:#ddd;font-size:13px;font-weight:500;font-family:inherit;text-align:left;cursor:pointer}
+.ig-crea-ligne:last-child{border-bottom:0}
+.ig-crea-ligne:hover{background:#1c1c1c}
+.ig-crea-ligne.choisie{color:#fff;background:rgba(59,130,246,.14)}
+.ig-crea-ligne img{width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#222}
+.ig-crea-ligne .ig-crea-n{margin-left:auto;color:#777;font-size:11px;white-space:nowrap}
+.ig-crea-ligne .ig-crea-ok{color:#3b82f6;font-weight:800;width:12px;text-align:center}
+.ig-crea-puce{display:inline-flex;align-items:center;gap:2px;margin:0 6px 6px 0;padding:3px 3px 3px 9px;background:rgba(59,130,246,.16);border:1px solid rgba(59,130,246,.4);border-radius:999px;color:#cfe0ff;font-size:12px;font-weight:600}
+.ig-crea-puce button{background:none;border:0;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 5px;margin:0}
+body.light .ig-crea-ligne{color:#374151;border-bottom-color:#eef0f3}
+body.light .ig-crea-ligne:hover{background:#f3f4f6}
+body.light .ig-crea-puce{color:#1d4ed8}
 
 /* Action bar - slide up */
 #action-bar,#cap-action-bar,#txt-action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
@@ -5500,6 +5521,12 @@ window.toggleReelExpand = function(card){
   }
 };
 
+// Les cartes de la veille Trends SEULEMENT. #feed-veille porte aussi des
+// .reel-card, sans data-ts, que le filtre comptait comme visibles : d'ou
+// « 232 reel(s) — 24 dernieres heures » sous une grille de 3 cartes.
+function igCartesSuivies(){
+  return document.querySelectorAll('#ig-grille .reel-card');
+}
 function igPeriod(btn, period){
   document.querySelectorAll('.ig-period').forEach(function(b){
     b.style.background='none';
@@ -5518,19 +5545,18 @@ function igApplyPeriodFilter(){
   if(period === 'day') threshold = now - 86400;       // 1 jour
   else if(period === 'week') threshold = now - 604800; // 7 jours
   else threshold = now - 2592000;                      // 30 jours
-  var cards = document.querySelectorAll('.reel-card');
-  var visible = 0, hidden = 0;
-  cards.forEach(function(card){
+  var visible = 0;
+  igCartesSuivies().forEach(function(card){
     var ts = parseInt(card.getAttribute('data-ts')) || 0;
     if(ts === 0 || ts >= threshold){
       card.style.display = '';
       visible++;
     } else {
       card.style.display = 'none';
-      hidden++;
     }
   });
-  // Affiche un compteur si filtre actif
+  // Les createrices choisies ont leur propre compteur (igCreaVue)
+  if((window.__igCrea || []).length) return;
   var info = document.getElementById('ig-period-info');
   if(info){
     var labels = { 'day': '24 dernières heures', 'week': '7 derniers jours', 'month': '30 derniers jours' };
@@ -5539,9 +5565,219 @@ function igApplyPeriodFilter(){
 }
 // Appliquer le filtre par défaut au chargement (week)
 window.addEventListener('DOMContentLoaded', function(){
-  window.__igCurrentPeriod = 'week';
-  setTimeout(igApplyPeriodFilter, 100);
+  if(!window.__igCurrentPeriod) window.__igCurrentPeriod = 'week';
 });
+// La grille arrive APRES la page (onglet differe), et de nouveau apres un
+// « Rafraichir ». Un clic sur 24h fait pendant le chargement ne trouvait
+// aucune carte, puis la grille arrivait non filtree : il fallait recliquer
+// deux ou trois fois. Elle appelle cette fonction en arrivant, qui lui
+// applique les choix deja faits.
+window.igApresInjection = function(){
+  var m = window.__igReleve || {};
+  var sp = document.getElementById('ig-releve-info');
+  if(sp){
+    sp.textContent = m.texte || '';
+    sp.title = m.detail || '';
+    sp.className = 'ig-releve-info' + (m.retard ? ' retard' : '');
+  }
+  igApplyPeriodFilter();
+  if(window.__igCurrentSort) igApplySort(window.__igCurrentSort);
+  igCreaRendre();
+  igCreaChercher();
+  if((window.__igCrea || []).length) igCreaVue();
+};
+// ----- Rafraichir : releve de la watchlist, puis grille rechargee sur place
+window.igRafraichir = function(btn){
+  if(!btn || btn.disabled) return;
+  var txt = btn.querySelector('.ig-rafraichir-txt');
+  btn.disabled = true;
+  if(txt) txt.textContent = 'Relevé…';
+  fetch('/insta/scrape_all', {method:'POST', credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){
+        btn.disabled = false;
+        if(txt) txt.textContent = 'Rafraîchir';
+        if(typeof showToast === 'function') showToast((d && d.error) || 'Erreur', 'error');
+        return;
+      }
+      igSuivreReleve(btn, d.t0 || 0);
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      if(txt) txt.textContent = 'Rafraîchir';
+      if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error');
+    });
+};
+function igSuivreReleve(btn, t0){
+  var txt = btn.querySelector('.ig-rafraichir-txt');
+  var debut = Date.now();
+  clearInterval(window.__igReleveTimer);
+  window.__igReleveTimer = setInterval(function(){
+    fetch('/insta/scrape_status', {credentials:'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d) return;
+        var fini = d.status !== 'in_progress' && (d.finished_at || 0) >= t0;
+        if(!fini && Date.now() - debut < 15 * 60 * 1000){
+          if(txt && d.status === 'in_progress') txt.textContent = (d.done || 0) + ' / ' + (d.total || 0);
+          return;
+        }
+        clearInterval(window.__igReleveTimer);
+        btn.disabled = false;
+        if(txt) txt.textContent = 'Rafraîchir';
+        if(typeof showToast === 'function'){
+          if(d.failed) showToast(d.failed + ' compte(s) non relevé(s) : ' + (d.error || ''), 'error');
+          else showToast('Reels à jour', 'success');
+        }
+        igRechargerGrille();
+      })
+      .catch(function(){});
+  }, 2500);
+}
+window.igRechargerGrille = function(){
+  var zone = document.getElementById('ig-trends-zone');
+  if(!zone) return;
+  var q = (window.location.search || '').replace(/^[?]/, '');
+  fetch('/?lazy=igtrends' + (q ? '&' + q : ''), {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
+    .then(function(r){ if(!r.ok) throw 0; return r.text(); })
+    .then(function(html){
+      var bac = document.createElement('div');
+      bac.innerHTML = html;
+      var neuve = bac.querySelector('#ig-trends-zone');
+      if(!neuve || !zone.parentNode) return;
+      if(typeof igStopAllReels === 'function') igStopAllReels();
+      zone.parentNode.replaceChild(neuve, zone);
+      // Un script pose par innerHTML ne s'execute pas : on rejoue le sien.
+      neuve.querySelectorAll('script').forEach(function(old){
+        var sc = document.createElement('script');
+        sc.textContent = old.textContent;
+        old.parentNode.replaceChild(sc, old);
+      });
+    })
+    .catch(function(){
+      if(typeof showToast === 'function') showToast('Grille non rechargée : actualise la page', 'error');
+    });
+};
+// ----- Filters > Creators : cibler une ou plusieurs createrices suivies
+window.__igCrea = window.__igCrea || [];
+function igCreaListe(){ return window.__igCreatrices || []; }
+window.igCreaChercher = function(){
+  var box = document.getElementById('ig-crea-liste');
+  if(!box) return;
+  var inp = document.getElementById('ig-crea-search');
+  var q = ((inp && inp.value) || '').trim().toLowerCase().replace(/^@/, '');
+  var liste = igCreaListe();
+  box.innerHTML = '';
+  var vide = function(t){
+    var d = document.createElement('div');
+    d.style.cssText = 'padding:10px 12px;color:#888;font-size:13px';
+    d.textContent = t;
+    box.appendChild(d);
+  };
+  if(!liste.length){ vide('Chargement des comptes suivis…'); return; }
+  var res = liste.filter(function(c){ return !q || c.u.indexOf(q) >= 0; });
+  if(!res.length){ vide('Aucun compte suivi ne contient « ' + q + ' ».'); return; }
+  res.slice(0, 100).forEach(function(c){
+    var choisie = window.__igCrea.indexOf(c.u) >= 0;
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ig-crea-ligne' + (choisie ? ' choisie' : '');
+    var ok = document.createElement('span');
+    ok.className = 'ig-crea-ok';
+    ok.textContent = choisie ? '✓' : '';
+    var im = document.createElement('img');
+    im.loading = 'lazy';
+    im.alt = '';
+    im.src = '/insta/pp/' + encodeURIComponent(c.u);
+    im.onerror = function(){ this.style.visibility = 'hidden'; };
+    var nom = document.createElement('span');
+    nom.textContent = '@' + c.u;
+    var n = document.createElement('span');
+    n.className = 'ig-crea-n';
+    n.textContent = c.n ? (c.n + ' reel' + (c.n > 1 ? 's' : '') + ' / 30 j') : 'rien sur 30 j';
+    b.appendChild(ok); b.appendChild(im); b.appendChild(nom); b.appendChild(n);
+    // stopPropagation : la liste est redessinee au clic, et l ecouteur qui
+    // ferme le panneau ne trouverait plus le bouton dans le DOM
+    b.onclick = function(ev){ ev.stopPropagation(); igCreaBasculer(c.u); };
+    box.appendChild(b);
+  });
+};
+window.igCreaBasculer = function(u){
+  var i = window.__igCrea.indexOf(u);
+  if(i >= 0) window.__igCrea.splice(i, 1); else window.__igCrea.push(u);
+  igCreaRendre();
+  igCreaChercher();
+  igCreaVue();
+};
+window.igCreaRendre = function(){
+  var box = document.getElementById('ig-crea-choisies');
+  if(!box) return;
+  box.innerHTML = '';
+  if(!window.__igCrea.length){
+    var d = document.createElement('div');
+    d.style.cssText = 'padding:2px 2px 8px';
+    d.textContent = 'No creators selected';
+    box.appendChild(d);
+    return;
+  }
+  window.__igCrea.forEach(function(u){
+    var p = document.createElement('span');
+    p.className = 'ig-crea-puce';
+    p.appendChild(document.createTextNode('@' + u));
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.title = 'Retirer';
+    x.textContent = '×';
+    x.onclick = function(ev){ ev.stopPropagation(); igCreaBasculer(u); };
+    p.appendChild(x);
+    box.appendChild(p);
+  });
+};
+// Les createrices choisies : TOUS leurs derniers posts (pas seulement ceux de
+// la grille, qui s arrete a 30 jours), du plus recent au plus ancien. La
+// periode ne s applique pas : on veut voir ce qu elles ont poste en dernier.
+window.igCreaVue = function(){
+  var vue = document.getElementById('ig-crea-vue');
+  var grille = document.getElementById('ig-grille');
+  var sel = window.__igCrea || [];
+  document.querySelectorAll('.ig-period').forEach(function(b){ b.style.opacity = sel.length ? '.4' : ''; });
+  if(!vue) return;
+  if(!sel.length){
+    vue.style.display = 'none';
+    vue.innerHTML = '';
+    vue.removeAttribute('data-cle');
+    if(grille) grille.style.display = '';
+    igApplyPeriodFilter();
+    return;
+  }
+  var cle = sel.join(',');
+  if(vue.getAttribute('data-cle') === cle && vue.style.display === 'block') return;
+  vue.setAttribute('data-cle', cle);
+  if(typeof igStopAllReels === 'function') igStopAllReels();
+  if(grille) grille.style.display = 'none';
+  vue.style.display = 'block';
+  vue.innerHTML = '<div style="padding:40px 20px;text-align:center;color:#888">Chargement…</div>';
+  fetch('/insta/trends/compte?u=' + encodeURIComponent(cle), {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(vue.getAttribute('data-cle') !== cle) return;
+      if(!d || !d.ok){
+        vue.innerHTML = '';
+        var e = document.createElement('div');
+        e.style.cssText = 'padding:30px 20px;text-align:center;color:#f87171';
+        e.textContent = (d && d.error) || 'Erreur';
+        vue.appendChild(e);
+        return;
+      }
+      vue.innerHTML = d.html;
+      var info = document.getElementById('ig-period-info');
+      if(info) info.textContent = d.nb + ' reel(s) — ' + sel.map(function(u){ return '@' + u; }).join(', ') + ', du plus récent au plus ancien';
+    })
+    .catch(function(){
+      if(vue.getAttribute('data-cle') === cle) vue.innerHTML = '<div style="padding:30px 20px;text-align:center;color:#f87171">Erreur réseau</div>';
+    });
+};
 function igToggleSort(){
   var menu = document.getElementById('ig-sort-menu');
   var arrow = document.getElementById('ig-sort-arrow');
@@ -5562,14 +5798,15 @@ function igSelectSort(btn, label){
   var c = btn.querySelector('.check');
   if(c) c.style.display='block';
   igToggleSort(); // ferme le menu
-  // Appliquer le tri sur les cartes
+  // Memorise le tri : la grille rechargee (Rafraichir) le reprend
+  window.__igCurrentSort = label;
   igApplySort(label);
 }
 function igApplySort(label){
-  // Trouver la grille des reels
-  var card = document.querySelector('.reel-card');
-  if(!card) return;
-  var grid = card.parentElement;
+  // La grille de la veille Trends (la premiere .reel-card du DOM pouvait
+  // etre celle d'une autre grille)
+  var grid = document.getElementById('ig-grille');
+  if(!grid) return;
   var cards = Array.prototype.slice.call(grid.querySelectorAll('.reel-card'));
   // Définir la fonction de comparaison selon le label
   var cmp;
@@ -5604,12 +5841,17 @@ function igToggleFilters(){
   var panel = document.getElementById('ig-filters-panel');
   if(!panel) return;
   panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+  if(panel.style.display === 'block'){ igCreaRendre(); igCreaChercher(); }
 }
 function igClearFilters(){
   var panel = document.getElementById('ig-filters-panel');
   if(!panel) return;
   panel.querySelectorAll('input[type=number]').forEach(function(i){ i.value=0; });
   panel.querySelectorAll('input[type=text]').forEach(function(i){ i.value=''; });
+  window.__igCrea = [];
+  igCreaRendre();
+  igCreaChercher();
+  igCreaVue();
 }
 // Fermer le menu si clic à l'extérieur
 document.addEventListener('click', function(e){
@@ -12413,9 +12655,9 @@ function showTab(group,name,title,subtitle){
       window.history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
     }
   }catch(e){}
-  // Instagram Trends : la page affiche le DERNIER scrape (instantané). Le scrape
-  // tourne en arrière-plan (2x/jour 00h/12h + à l'ajout d'un compte), PLUS à
-  // l'ouverture. Si un scrape programmé est en cours, on rattache juste la barre.
+  // Instagram Trends : la page affiche le DERNIER relevé (instantané). Le relevé
+  // tourne en arrière-plan (toutes les 3 h + à l'ajout d'un compte + bouton
+  // Rafraîchir). Si un relevé programmé est en cours, on rattache juste la barre.
   // Remote : le sondeur ne part plus que si la section est visible. Sans ce
   // reveil, la file resterait vide jusqu au tic suivant, soit 5 s apres
   // l ouverture de l onglet.
@@ -15713,7 +15955,10 @@ function showFeed(btn,name){
     <button onclick="igPeriod(this,'month')" class="ig-period" style="padding:8px 18px;background:none;border:0;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;border-radius:7px;margin:0" title="Reels des 30 derniers jours">30j</button>
   </div>
 
-  <div style="position:relative;margin-left:auto">
+  <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <span id="ig-releve-info" class="ig-releve-info"></span>
+  <button type="button" id="ig-rafraichir" class="ig-rafraichir" onclick="igRafraichir(this)" title="Relever maintenant les reels de tous les comptes suivis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg><span class="ig-rafraichir-txt">Rafraîchir</span></button>
+  <div style="position:relative">
     <div onclick="igToggleFilters()" id="ig-filters-btn" style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:8px 16px;display:flex;align-items:center;gap:8px;cursor:pointer;color:#fff;user-select:none">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       <span style="font-weight:600;font-size:14px">Filters</span>
@@ -15746,15 +15991,12 @@ function showFeed(btn,name){
 
       <div class="filter-section" style="margin-bottom:18px">
         <div style="font-weight:600;margin-bottom:8px;font-size:14px">Creators</div>
-        <div style="padding:10px 12px;background:#0f0f0f;border:1px solid #333;color:#666;border-radius:6px;font-size:13px;margin-bottom:8px">No creators selected</div>
+        <div id="ig-crea-choisies" style="padding:8px 10px 2px;background:#0f0f0f;border:1px solid #333;color:#666;border-radius:6px;font-size:13px;margin-bottom:8px;min-height:38px"><div style="padding:2px 2px 8px">No creators selected</div></div>
         <div style="position:relative">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#666" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" placeholder="Search creators" style="width:100%;padding:9px 10px 9px 32px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px">
+          <input type="text" id="ig-crea-search" placeholder="Search creators" autocomplete="off" oninput="igCreaChercher()" style="width:100%;padding:9px 10px 9px 32px;background:#0f0f0f;border:1px solid #333;color:#fff;border-radius:6px;font-size:14px">
         </div>
-        <div style="margin-top:8px;padding:10px 12px;background:#0f0f0f;border:1px solid #333;border-radius:6px;color:#888;font-size:13px">
-          You haven't added any creators yet.<br>
-          <a href="#" onclick="comingSoon();return false;" style="color:#7289da">Add your first creator</a> now.
-        </div>
+        <div id="ig-crea-liste" style="margin-top:8px;max-height:230px;overflow-y:auto;background:#0f0f0f;border:1px solid #333;border-radius:6px"></div>
       </div>
 
       <div class="filter-section" style="margin-bottom:18px">
@@ -15769,7 +16011,10 @@ function showFeed(btn,name){
       <button onclick="igClearFilters()" style="width:100%;padding:11px;background:#2a2a2a;border:0;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;margin:8px 0 0">Clear Filters</button>
     </div>
   </div>
+  </div>
 </div>
+
+<div id="ig-crea-vue" style="display:none"></div>
 
 {insta_trends_html_or_empty}
 
@@ -30088,16 +30333,42 @@ _insta_trends_scrape_lock = _trends_threading.Lock()
 _insta_trends_scrape_state = {"status": "idle", "done": 0, "total": 0}
 
 
+# Etat du dernier passage, GARDE SUR DISQUE. Le site redemarre des dizaines
+# de fois par jour (un push = un redemarrage) : en memoire, un creneau
+# interrompu par un deploiement etait perdu, et l'ecran ne pouvait pas dire
+# de quand datait ce qu'il montrait.
+_TRENDS_PASSAGES_FILE = DATA_DIR / "insta" / "trends_passages.json"
+
+
+def _trends_passages() -> dict:
+    try:
+        d = safe_json.load(_TRENDS_PASSAGES_FILE, {})
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _trends_passages_maj(**champs) -> None:
+    d = _trends_passages()
+    d.update(champs)
+    try:
+        safe_json.write(_TRENDS_PASSAGES_FILE, d)
+    except Exception as e:
+        print(f"[insta-trends] etat du passage non ecrit : {e}", flush=True)
+
+
 def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
-                               skip_fresh_hours: float = 10.0, delay: float = 3.0) -> dict:
+                               skip_fresh_hours: float = 10.0, delay: float = 3.0,
+                               complet: bool = True) -> dict:
     """Scrape SÉQUENTIEL de toute la watchlist Trends -> data/insta/cache/.
-    Partagé par /insta/scrape_all et le scheduler 00h/12h. Garde anti-chevauchement.
+    Partagé par /insta/scrape_all et le planificateur. Garde anti-chevauchement.
 
     skip_fresh_hours : ne re-scrape PAS un profil dont le cache date de moins de N
-    heures (économise la quota/rate-limit RapidAPI + Instagram ; évite de re-brûler
-    sur des « Rafraîchir » rapprochés). Les créneaux 00h/12h sont à 12h d'écart donc
-    couvrent quand même tout. delay : pause entre comptes (anti rate-limit).
-    Retourne {started, count, scraped, skipped, reason}."""
+    heures (le planificateur passe « depuis le début du créneau » : un passage
+    relancé après un redémarrage ne relit pas ce qui est déjà fait).
+    complet=False : les reels seulement, sans le profil (1 requête au lieu de 2).
+    Tout passe par l'enveloppe HikerAPI de la veille (poste « trends »).
+    Retourne {started, count, scraped, skipped, failed, error, reason}."""
     import time as _t
     try:
         from insta_scraper import (load_watchlist, scrape_profile,
@@ -30117,8 +30388,11 @@ def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
     try:
         _insta_trends_scrape_state.update(
             {"status": "in_progress", "done": 0, "total": len(wl),
-             "started_at": int(_t.time()), "label": label})
-        scraped = skipped = 0
+             "started_at": int(_t.time()), "label": label,
+             "failed": 0, "error": ""})
+        scraped = skipped = failed = 0
+        erreur = ""
+        en_echec = []
         for i, u in enumerate(wl):
             fresh = False
             try:
@@ -30131,18 +30405,52 @@ def run_insta_watchlist_scrape(limit: int = 12, label: str = "manual",
             if fresh:
                 skipped += 1
             else:
+                # Le resultat etait jete : un echec ne laissait aucune trace,
+                # et 41 comptes sur 65 ont pu rester sans releve pendant que
+                # l'ecran montrait les anciens reels comme si de rien n'etait.
                 try:
-                    scrape_profile(u, limit=limit)
+                    res = scrape_profile(u, limit=limit, poste="trends", profil=complet)
+                    err = (res or {}).get("error") if isinstance(res, dict) else "réponse vide"
+                except Exception as e:
+                    err = f"{type(e).__name__}: {e}"
+                if err:
+                    failed += 1
+                    erreur = str(err)[:200]
+                    en_echec.append(str(u))
+                    # Enveloppe du jour vide : les comptes suivants echoueraient
+                    # tous de la meme facon, inutile de les essayer un par un.
+                    if "enveloppe du jour" in erreur:
+                        reste = [str(x) for x in wl[i + 1:]]
+                        failed += len(reste)
+                        en_echec.extend(reste)
+                        _insta_trends_scrape_state["done"] = len(wl)
+                        break
+                else:
                     scraped += 1
-                except Exception:
-                    pass
                 if i < len(wl) - 1:
                     _t.sleep(delay)  # anti rate-limit (seulement après un vrai scrape)
             _insta_trends_scrape_state["done"] = i + 1
-        _insta_trends_scrape_state["status"] = "idle"
-        _insta_trends_scrape_state["finished_at"] = int(_t.time())
+            _insta_trends_scrape_state["failed"] = failed
+        fini = int(_t.time())
+        _insta_trends_scrape_state.update(
+            {"status": "idle", "finished_at": fini, "failed": failed, "error": erreur})
+        _trends_passages_maj(dernier={
+            "label": label, "fin": fini, "complet": bool(complet),
+            "comptes": len(wl), "releves": scraped, "deja_frais": skipped,
+            "echecs": failed, "erreur": erreur, "comptes_en_echec": en_echec[:80]})
+        if failed:
+            print(f"[insta-trends] {label} : {failed}/{len(wl)} compte(s) en echec "
+                  f"— {erreur}", flush=True)
+        # Un releve apporte de nouveaux reels : leurs liens CDN sont frais
+        # maintenant, autant les telecharger tout de suite que dans une heure.
+        if scraped:
+            try:
+                _predownload_en_fond()
+            except Exception as e:
+                print(f"[insta-trends] telechargement non lance : {e}", flush=True)
         return {"started": True, "count": len(wl), "scraped": scraped,
-                "skipped": skipped, "reason": "ok"}
+                "skipped": skipped, "failed": failed, "error": erreur,
+                "reason": "ok"}
     finally:
         _insta_trends_scrape_lock.release()
 
@@ -30166,28 +30474,60 @@ def _paris_now_web():
     return u + _dt.timedelta(hours=offset)
 
 
-_INSTA_TRENDS_SCRAPE_HOURS = [0]      # 00h Paris, une seule fois par jour
-# UN SEUL passage quotidien. Un compte concurrent qui publie trois fois
-# par jour tient largement dans les ~12 reels d'une page : deux creneaux
-# ne rapportaient aucune donnee de plus, ils doublaient juste la facture.
-_insta_trends_last_slot = None
+# Toutes les 3 h (choix du proprietaire, 03/10/2026). Une passe unique a
+# minuit laissait le filtre « 24h » presque vide le soir : a 23 h, il ne
+# restait que les reels publies entre 23 h et minuit la veille — 3 reels pour
+# 65 comptes. Minuit relit aussi le profil (abonnes, photo) ; les autres
+# creneaux, les reels seulement.
+_INSTA_TRENDS_SCRAPE_HOURS = [0, 3, 6, 9, 12, 15, 18, 21]
 _INSTA_TRENDS_SCHED_STARTED = False
 
 
-def _insta_trends_scheduler_loop():
-    """Thread daemon : scrape la watchlist Trends à 00h et 12h (Paris). Poll 5 min,
-    1× par créneau/jour, ne chevauche jamais un scrape manuel (lock)."""
+def _trends_creneau(now_paris) -> tuple:
+    """(clé, heure, début en epoch) du dernier créneau commencé à l'heure de Paris."""
     import time as _t
-    global _insta_trends_last_slot
+    import datetime as _dt
+    heures = [h for h in _INSTA_TRENDS_SCRAPE_HOURS if h <= now_paris.hour]
+    base = now_paris
+    if not heures:
+        base = now_paris - _dt.timedelta(days=1)
+        heures = [max(_INSTA_TRENDS_SCRAPE_HOURS)]
+    debut = base.replace(hour=heures[-1], minute=0, second=0, microsecond=0)
+    epoch = _t.time() - (now_paris - debut).total_seconds()
+    return f"{debut.date().isoformat()}#{heures[-1]}", heures[-1], epoch
+
+
+def _insta_trends_scheduler_loop():
+    """Thread daemon : relève la watchlist Trends à chaque créneau (Paris).
+
+    Le créneau n'est noté sur disque qu'une fois le passage FINI : un
+    redémarrage au milieu le relance au tour suivant (5 min), sans relire les
+    comptes déjà faits depuis le début du créneau. Avant, le créneau vivait en
+    mémoire et ne valait que pendant l'heure pile : un déploiement à 0 h 05
+    suffisait à sauter la journée."""
+    import time as _t
     while True:
         try:
-            now = _paris_now_web()
-            if now.hour in _INSTA_TRENDS_SCRAPE_HOURS:
-                slot = f"{now.date().isoformat()}#{now.hour}"
-                if _insta_trends_last_slot != slot:
-                    _insta_trends_last_slot = slot
-                    res = run_insta_watchlist_scrape(limit=12, label=f"sched-{now.hour}h")
-                    print(f"[insta-trends-sched] créneau {slot} -> {res}", flush=True)
+            cle, heure, debut = _trends_creneau(_paris_now_web())
+            etat = _trends_passages()
+            if etat.get("creneau_fait") != cle:
+                # Le profil une fois par jour : à minuit, ou dès qu'aucun
+                # passage complet n'a eu lieu depuis 20 h (site éteint à 0 h).
+                complet = (heure == 0 or _t.time()
+                           - float(etat.get("dernier_complet") or 0) > 20 * 3600)
+                frais_h = max(0.01, (_t.time() - debut) / 3600)
+                res = run_insta_watchlist_scrape(
+                    limit=12, label=f"sched-{heure}h", skip_fresh_hours=frais_h,
+                    complet=complet)
+                print(f"[insta-trends-sched] créneau {cle} -> {res}", flush=True)
+                if res.get("started"):
+                    maj = {"creneau_fait": cle}
+                    if complet:
+                        maj["dernier_complet"] = _t.time()
+                    _trends_passages_maj(**maj)
+                elif res.get("reason") != "déjà en cours":
+                    # Watchlist vide, module absent : rien à rattraper.
+                    _trends_passages_maj(creneau_fait=cle)
         except Exception as e:
             print(f"[insta-trends-sched] crash: {e}", flush=True)
         _t.sleep(300)
@@ -30200,7 +30540,8 @@ def _start_insta_trends_scheduler():
     _INSTA_TRENDS_SCHED_STARTED = True
     _trends_threading.Thread(target=_insta_trends_scheduler_loop, daemon=True,
                              name="insta-trends-scheduler").start()
-    print("[insta-trends-sched] thread démarré — scrape 00h / 12h Paris", flush=True)
+    print("[insta-trends-sched] thread démarré — relevé toutes les 3 h (Paris)",
+          flush=True)
 
 
 def _local_reel_src(url: str, owner: str, cdn_url: str) -> str:
@@ -30232,10 +30573,12 @@ def _insta_trends_ou_vide() -> str:
     qu'elle est servie a la demande, il doit vivre avec le producteur : sinon
     l'onglet vide s'affiche blanc, sans dire quoi faire.
     """
+    # Une seule zone, remplacee d'un bloc par « Rafraichir » (igRechargerGrille).
     grille = _render_insta_trends_grid_html()
     if grille:
-        return grille
+        return f"<div id='ig-trends-zone'>{grille}</div>"
     return (
+        "<div id='ig-trends-zone'>"
         "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;"
         "padding:60px 20px;text-align:center;color:#666'>"
         "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' "
@@ -30246,146 +30589,211 @@ def _insta_trends_ou_vide() -> str:
         "<p style='margin:0;font-size:14px'>Ajoute des comptes dans "
         "<b>Instagram → Accounts</b> et lance un scrape.<br>"
         "Configure d'abord tes cookies dans <b>Settings → Cookies Instagram</b>.</p>"
-        "</div>")
+        "</div></div>")
 
 
-def _render_insta_trends_grid_html() -> str:
-    """Grille des reels scrapés depuis tous les comptes en watchlist."""
+def _trends_fraicheur(wl: list) -> dict:
+    """De quand date ce que montre la grille, et quels comptes sont en retard.
+
+    Le 03/10/2026, 41 comptes sur 65 n'avaient plus ete releves depuis 2 a 7
+    jours et rien ne le disait : la grille montrait les vieux reels comme si
+    elle etait a jour. On le dit maintenant, en haut, avec la raison."""
+    import time as _t
     try:
-        from insta_scraper import get_all_cached_reels, load_watchlist
+        from insta_scraper import CACHE_DIR, _clean_username
     except Exception:
-        return ""
-    reels = get_all_cached_reels()
-    wl = load_watchlist()
-    # Ne garder QUE les reels des comptes actuellement dans la watchlist (onglet
-    # Accounts). Sinon les comptes supprimés / hors-liste (dont le cache reels
-    # n'est pas toujours nettoyé) continueraient d'apparaître dans Trends.
-    _wl_set = {str(u or "").lower().strip().lstrip("@") for u in wl}
-    reels = [r for r in reels
-             if str(r.get("_owner") or "").lower().strip().lstrip("@") in _wl_set]
-    # Si watchlist non vide mais cache vide → afficher CTA pour scrape
-    if not reels and wl:
-        return (
-            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:40px 20px;text-align:center'>"
-            f"<h3 style='margin:0 0 8px;color:#fff'>↓ {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
-            "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
-            "<button type='button' onclick=\"if(!confirm('Scraper tous les comptes ? Compte ~10 sec par compte (en arriere-plan).')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='◌ ...'; fetch('/insta/scrape_all',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}).catch(e=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');});\" "
-            "style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0'>"
-            "↻ Scraper tous mes comptes maintenant</button></div>"
-        )
-    if not reels:
-        return ""
+        return {}
+    now = _t.time()
+    dates, retard = [], []
+    for u in wl or []:
+        h = _clean_username(u)
+        if not h:
+            continue
+        try:
+            m = (CACHE_DIR / f"{h}.json").stat().st_mtime
+        except OSError:
+            m = 0
+        dates.append(m)
+        # deux creneaux manques (6 h) plus une marge
+        if now - m > 7 * 3600:
+            retard.append(h)
+    dernier = max(dates) if dates else 0
+    passage = (_trends_passages().get("dernier") or {})
+    pn = _paris_now_web()
+    prochain = next((h for h in _INSTA_TRENDS_SCRAPE_HOURS if h > pn.hour),
+                    _INSTA_TRENDS_SCRAPE_HOURS[0])
+    if dernier:
+        mins = int((now - dernier) // 60)
+        quand = (f"il y a {mins} min" if mins < 60
+                 else f"il y a {mins // 60} h {mins % 60:02d}" if mins < 1440
+                 else f"il y a {mins // 1440} j")
+        texte = f"Relevé {quand} · prochain à {prochain} h"
+    else:
+        texte = "Jamais relevé"
+    return {"texte": texte, "retard": len(retard), "comptes_retard": retard[:80],
+            "total": len(dates), "erreur": str(passage.get("erreur") or "")[:200],
+            "detail": (f"{len(dates) - len(retard)}/{len(dates)} comptes à jour"
+                       + (f" — dernière erreur : {passage.get('erreur')}"
+                          if passage.get("erreur") else ""))}
 
-    # Calculer la moyenne de views par compte pour l'indicateur "Nx trending"
-    avg_views_by_owner = {}
-    counts_by_owner = {}
-    for r in reels:
-        owner = r.get("_owner", "?")
-        v = r.get("views") or 0
-        avg_views_by_owner[owner] = avg_views_by_owner.get(owner, 0) + v
-        counts_by_owner[owner] = counts_by_owner.get(owner, 0) + 1
-    for owner in avg_views_by_owner:
-        if counts_by_owner[owner] > 0:
-            avg_views_by_owner[owner] = avg_views_by_owner[owner] / counts_by_owner[owner]
-    # On filtre d'abord par date (30 derniers jours = la plus grande periode UI)
-    # pour eviter de rendre des centaines de vieux viraux. Puis on tri par views.
-    # Cap a 1000 pour la performance (3000 DOM elements pour 1 reel ferait
-    # ramer un peu).
-    import time as _time
-    cutoff_30d = _time.time() - 30 * 86400
-    reels = [r for r in reels if (r.get("taken_at") or 0) >= cutoff_30d or not r.get("taken_at")]
-    reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
-    # Barre de progression du pré-téléchargement (7 derniers jours) : combien de
-    # vidéos sont déjà prêtes en local. Rafraîchie en JS via /insta/dl_status.
-    cards = [
-        "<div id='ig-dl-bar' style='margin:14px 0 0;background:#12121a;border:1px solid #26263a;"
-        "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
-        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>↓ Vidéos prêtes</span>"
-        "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
-        "<div id='ig-dl-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);"
-        "border-radius:5px;transition:width .4s'></div></div>"
-        "<span id='ig-dl-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
-        "<button type='button' id='ig-dl-now' onclick='igDownloadNow(this)' "
-        "title='Télécharger maintenant toutes les vidéos manquantes (en fond)' "
-        "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>↓ Télécharger</button>"
-        "</div>",
-        "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
-    for r in reels[:1000]:
-        thumb = r.get("thumbnail_url") or ""
-        owner = r.get("_owner", "?")
-        owner_pic = r.get("_owner_pp") or ""
-        url = r.get("url", "#")
-        video_url = r.get("video_url") or ""
-        views = r.get("views") or 0
-        likes = r.get("likes", 0)
-        comments = r.get("comments", 0)
-        # échappe " ET ' (les data-attrs de la carte sont en simple quote) +
-        # < > : sinon une apostrophe dans la caption cassait l'attribut ->
-        # bouton ⚑ mort. Aligné sur la Veille (:19909).
-        caption = ((r.get("caption") or "").strip()
-                   .replace('"', "&quot;").replace("'", "&#39;")
-                   .replace("<", "&lt;").replace(">", "&gt;"))
-        caption_short = caption[:100]
-        # Construire le contenu HTML de la caption (ou fallback avec lien IG)
-        if caption:
-            caption_html = _format_caption_html(caption)
-        else:
-            caption_html = (
-                '<span style="color:#888;font-style:italic">Pas de caption Instagram pour ce reel'
-                '<br><a href="' + url + '" target="_blank" '
-                'style="color:#3b82f6;text-decoration:underline;font-size:11.5px;font-style:normal">'
-                'Voir sur Instagram &rarr;</a></span>'
-            )
-        is_video = r.get("is_video")
-        taken_at = r.get("taken_at", 0) or 0
-        time_ago = _time_ago(taken_at)
-        # Données pour le tri JS
-        d_views = int(views or 0)
-        d_likes = int(likes or 0)
-        d_comments = int(comments or 0)
-        # Indicateur trending : combien de fois la moyenne du compte
-        avg = avg_views_by_owner.get(owner, 0)
-        if avg > 0 and views > 0:
-            ratio = views / avg
-            trending_x = f"{ratio:.1f}x" if ratio < 10 else f"{int(ratio)}x"
-        else:
-            trending_x = ""
-        trending_html = ""
-        if trending_x:
-            # Badge plus clean : pill avec icone trending + valeur
-            trending_html = (
-                '<div style="display:inline-flex;align-items:center;gap:5px;color:#fff;font-weight:800;font-size:12px;margin-bottom:6px;'
-                'background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px;letter-spacing:.2px;'
-                'text-shadow:0 1px 3px rgba(0,0,0,.9)">'
-                '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
-                '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
-                f'{trending_x}</div>'
-            )
-        # Avatar
-        avatar = ""
-        if owner_pic:
-            avatar = f"<img src='{owner_pic}' loading='lazy' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
-        # mp4 déjà sur disque -> on sert le fichier local (proxy ÉTAPE 0) au
-        # lieu de l'URL CDN qui expire et déclenche le mur de vérification
-        video_url = _local_reel_src(url, owner, video_url)
-        # Marqueur « déjà sur le serveur » : _local_reel_src ne renvoie l'URL du
-        # proxy local QUE si le mp4 existe sur disque.
-        dl_ready = video_url.startswith("/insta/proxy_video")
-        dl_badge = "" if (dl_ready or not is_video) else (
-            "<div class='reel-dl-badge' style='position:absolute;top:44px;left:10px;"
-            "background:rgba(0,0,0,.62);backdrop-filter:blur(6px);color:#fbbf24;font-size:10px;font-weight:700;"
-            "padding:4px 9px;border-radius:9px;z-index:3;display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap'>"
-            "◌ pas encore téléchargé</div>")
-        # Video preview au hover
-        video_html = ""
-        if is_video and video_url:
-            # src direct + preload='none' : le browser ne charge RIEN tant que
-            # l'user clique pas. igPlayInline set v.src et appelle v.play().
-            video_html = (
-                f"<video class='reel-video' src='{video_url}' muted loop playsinline preload='none' "
-                f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
-            )
-        cards.append(f"""
+
+def _trends_alerte_html(fr: dict) -> str:
+    """Bandeau au-dessus de la grille quand des comptes ne sont plus releves."""
+    from html import escape as _esc
+    n = int((fr or {}).get("retard") or 0)
+    if not n:
+        return ""
+    comptes = ", ".join("@" + c for c in (fr.get("comptes_retard") or [])[:12])
+    plus = n - min(n, 12)
+    err = fr.get("erreur") or ""
+    return (
+        "<div style='margin:14px 0 0;padding:10px 14px;border-radius:10px;"
+        "background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);"
+        "color:#fbbf24;font-size:12.5px;line-height:1.5'>"
+        f"⚠ <b>{n} compte(s) sur {fr.get('total', 0)}</b> pas relevé(s) depuis plus de 7 h"
+        " : leurs derniers reels manquent peut-être. "
+        f"<span style='color:#d6b46a'>{_esc(comptes)}{f' et {plus} autre(s)' if plus else ''}</span>"
+        + (f"<br>Dernière erreur : {_esc(err)}" if err else "")
+        + "</div>")
+
+
+def _insta_trends_vue_creatrices(pseudos: list) -> dict:
+    """Filters → Creators : tous les derniers posts des comptes choisis, du plus
+    récent au plus ancien. Seulement des comptes SUIVIS (la watchlist) : lus
+    dans le cache, sans aucun appel payant."""
+    from html import escape as _esc
+    try:
+        from insta_scraper import get_cached, load_watchlist, _clean_username, CACHE_DIR
+    except Exception as e:
+        return {"ok": False, "error": f"module indispo: {e}"}
+    suivis = {_clean_username(u) for u in (load_watchlist() or [])}
+    choix = []
+    for x in pseudos or []:
+        h = _clean_username(x)
+        if h and h in suivis and h not in choix:
+            choix.append(h)
+    choix = choix[:20]
+    if not choix:
+        return {"ok": False, "error": "Aucun de ces comptes n'est dans tes comptes suivis."}
+    import time as _t
+    items, sans = [], []
+    for h in choix:
+        data = get_cached(h) or {}
+        prof = data.get("profile") or {}
+        rs = data.get("reels") or []
+        if not rs:
+            sans.append(h)
+            continue
+        vues = [int(r.get("views") or 0) for r in rs]
+        moy = (sum(vues) / len(vues)) if vues else 0
+        for r in rs:
+            r = dict(r)
+            r["_owner"] = prof.get("username") or h
+            r["_owner_pp"] = prof.get("profile_pic_url") or ""
+            items.append((r, moy))
+    items.sort(key=lambda x: x[0].get("taken_at") or 0, reverse=True)
+    lignes = []
+    for h in choix:
+        try:
+            age = _t.time() - (CACHE_DIR / f"{h}.json").stat().st_mtime
+            quand = (f"relevé il y a {int(age // 60)} min" if age < 3600
+                     else f"relevé il y a {int(age // 3600)} h" if age < 86400
+                     else f"relevé il y a {int(age // 86400)} j")
+        except OSError:
+            quand = "jamais relevé"
+        lignes.append(f"<b>@{_esc(h)}</b> <span style='color:#777'>({quand})</span>")
+    entete = (
+        "<div style='margin:14px 0 0;color:#aaa;font-size:13px;line-height:1.6'>"
+        + " · ".join(lignes)
+        + (f"<br><span style='color:#fbbf24'>Aucun reel relevé pour "
+           f"{', '.join('@' + _esc(h) for h in sans)}.</span>" if sans else "")
+        + "</div>")
+    grille = ("<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));"
+              "gap:16px;margin-top:14px'>"
+              + "".join(_insta_trend_card_html(r, moy) for r, moy in items)
+              + "</div>")
+    return {"ok": True, "html": entete + grille, "nb": len(items), "comptes": choix}
+
+
+def _insta_trend_card_html(r: dict, avg_views: float) -> str:
+    """Carte d'un reel de la veille Trends. Partagée par la grille et la
+    vue des créatrices choisies (Filters → Creators) : deux rendus séparés
+    auraient divergé au premier correctif."""
+    thumb = r.get("thumbnail_url") or ""
+    owner = r.get("_owner", "?")
+    owner_pic = r.get("_owner_pp") or ""
+    url = r.get("url", "#")
+    video_url = r.get("video_url") or ""
+    views = r.get("views") or 0
+    likes = r.get("likes", 0)
+    comments = r.get("comments", 0)
+    # échappe " ET ' (les data-attrs de la carte sont en simple quote) +
+    # < > : sinon une apostrophe dans la caption cassait l'attribut ->
+    # bouton ⚑ mort. Aligné sur la Veille (:19909).
+    caption = ((r.get("caption") or "").strip()
+               .replace('"', "&quot;").replace("'", "&#39;")
+               .replace("<", "&lt;").replace(">", "&gt;"))
+    caption_short = caption[:100]
+    # Construire le contenu HTML de la caption (ou fallback avec lien IG)
+    if caption:
+        caption_html = _format_caption_html(caption)
+    else:
+        caption_html = (
+            '<span style="color:#888;font-style:italic">Pas de caption Instagram pour ce reel'
+            '<br><a href="' + url + '" target="_blank" '
+            'style="color:#3b82f6;text-decoration:underline;font-size:11.5px;font-style:normal">'
+            'Voir sur Instagram &rarr;</a></span>'
+        )
+    is_video = r.get("is_video")
+    taken_at = r.get("taken_at", 0) or 0
+    time_ago = _time_ago(taken_at)
+    # Données pour le tri JS
+    d_views = int(views or 0)
+    d_likes = int(likes or 0)
+    d_comments = int(comments or 0)
+    # Indicateur trending : combien de fois la moyenne du compte
+    avg = avg_views or 0
+    if avg > 0 and views > 0:
+        ratio = views / avg
+        trending_x = f"{ratio:.1f}x" if ratio < 10 else f"{int(ratio)}x"
+    else:
+        trending_x = ""
+    trending_html = ""
+    if trending_x:
+        # Badge plus clean : pill avec icone trending + valeur
+        trending_html = (
+            '<div style="display:inline-flex;align-items:center;gap:5px;color:#fff;font-weight:800;font-size:12px;margin-bottom:6px;'
+            'background:rgba(0,0,0,.42);backdrop-filter:blur(8px);padding:4px 9px;border-radius:9px;letter-spacing:.2px;'
+            'text-shadow:0 1px 3px rgba(0,0,0,.9)">'
+            '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+            '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
+            f'{trending_x}</div>'
+        )
+    # Avatar
+    avatar = ""
+    if owner_pic:
+        avatar = f"<img src='{owner_pic}' loading='lazy' style='width:22px;height:22px;border-radius:50%;object-fit:cover'>"
+    # mp4 déjà sur disque -> on sert le fichier local (proxy ÉTAPE 0) au
+    # lieu de l'URL CDN qui expire et déclenche le mur de vérification
+    video_url = _local_reel_src(url, owner, video_url)
+    # Marqueur « déjà sur le serveur » : _local_reel_src ne renvoie l'URL du
+    # proxy local QUE si le mp4 existe sur disque.
+    dl_ready = video_url.startswith("/insta/proxy_video")
+    dl_badge = "" if (dl_ready or not is_video) else (
+        "<div class='reel-dl-badge' style='position:absolute;top:44px;left:10px;"
+        "background:rgba(0,0,0,.62);backdrop-filter:blur(6px);color:#fbbf24;font-size:10px;font-weight:700;"
+        "padding:4px 9px;border-radius:9px;z-index:3;display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap'>"
+        "◌ pas encore téléchargé</div>")
+    # Video preview au hover
+    video_html = ""
+    if is_video and video_url:
+        # src direct + preload='none' : le browser ne charge RIEN tant que
+        # l'user clique pas. igPlayInline set v.src et appelle v.play().
+        video_html = (
+            f"<video class='reel-video' src='{video_url}' muted loop playsinline preload='none' "
+            f"style='position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s'></video>"
+        )
+    return f"""
 <div class="reel-card cloud-card" data-ts="{taken_at}" data-views="{d_views}" data-likes="{d_likes}" data-comments="{d_comments}" data-trending="{int((d_views/max(avg,1))*100) if avg > 0 else 0}" data-url="{url}" data-video-url="{video_url}" data-thumb="{thumb}" data-owner="{owner}" data-owner-pp="{owner_pic}" data-caption="{caption}" data-time-ago="{time_ago}" style="background:#0f0f0f;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
   <div class="reel-media" style="position:relative;width:100%;aspect-ratio:9/16;background:#000;cursor:pointer;overflow:hidden"
        onmouseenter='igHoverPlay(this)'
@@ -30447,13 +30855,96 @@ def _render_insta_trends_grid_html() -> str:
       </button>
     </div>
   </div>
-</div>""")
+</div>"""
+
+
+def _render_insta_trends_grid_html() -> str:
+    """Grille des reels scrapés depuis tous les comptes en watchlist."""
+    try:
+        from insta_scraper import get_all_cached_reels, load_watchlist
+    except Exception:
+        return ""
+    reels = get_all_cached_reels()
+    wl = load_watchlist()
+    # Ne garder QUE les reels des comptes actuellement dans la watchlist (onglet
+    # Accounts). Sinon les comptes supprimés / hors-liste (dont le cache reels
+    # n'est pas toujours nettoyé) continueraient d'apparaître dans Trends.
+    _wl_set = {str(u or "").lower().strip().lstrip("@") for u in wl}
+    reels = [r for r in reels
+             if str(r.get("_owner") or "").lower().strip().lstrip("@") in _wl_set]
+    fraicheur = _trends_fraicheur(wl)
+    # Filters → Creators : TOUS les comptes suivis, meme ceux sans reel recent
+    import time as _tc
+    _c30 = _tc.time() - 30 * 86400
+    _n30 = {}
+    for _r in reels:
+        if (_r.get("taken_at") or 0) >= _c30:
+            _o = str(_r.get("_owner") or "").lower().strip().lstrip("@")
+            _n30[_o] = _n30.get(_o, 0) + 1
+    creatrices = [{"u": u, "n": _n30.get(u, 0)} for u in sorted(_wl_set) if u]
+    # Si watchlist non vide mais cache vide → afficher CTA pour scrape
+    if not reels and wl:
+        return (
+            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:40px 20px;text-align:center'>"
+            f"<h3 style='margin:0 0 8px;color:#fff'>↓ {len(wl)} compte(s) en watchlist — aucun reel scrapé</h3>"
+            "<p style='margin:0 0 20px;color:#888;font-size:14px'>Lance un scrape pour récupérer leurs reels.</p>"
+            "<button type='button' onclick=\"if(!confirm('Scraper tous les comptes ? Compte ~10 sec par compte (en arriere-plan).')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='◌ ...'; fetch('/insta/scrape_all',{method:'POST'}).then(r=>r.json()).then(d=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}).catch(e=>{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');});\" "
+            "style='padding:14px 28px;background:#3b82f6;color:#fff;border:0;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;margin:0'>"
+            "↻ Scraper tous mes comptes maintenant</button></div>"
+        )
+    if not reels:
+        return ""
+
+    # Calculer la moyenne de views par compte pour l'indicateur "Nx trending"
+    avg_views_by_owner = {}
+    counts_by_owner = {}
+    for r in reels:
+        owner = r.get("_owner", "?")
+        v = r.get("views") or 0
+        avg_views_by_owner[owner] = avg_views_by_owner.get(owner, 0) + v
+        counts_by_owner[owner] = counts_by_owner.get(owner, 0) + 1
+    for owner in avg_views_by_owner:
+        if counts_by_owner[owner] > 0:
+            avg_views_by_owner[owner] = avg_views_by_owner[owner] / counts_by_owner[owner]
+    # On filtre d'abord par date (30 derniers jours = la plus grande periode UI)
+    # pour eviter de rendre des centaines de vieux viraux. Puis on tri par views.
+    # Cap a 1000 pour la performance (3000 DOM elements pour 1 reel ferait
+    # ramer un peu).
+    import time as _time
+    cutoff_30d = _time.time() - 30 * 86400
+    reels = [r for r in reels if (r.get("taken_at") or 0) >= cutoff_30d or not r.get("taken_at")]
+    reels.sort(key=lambda r: (r.get("views") or 0), reverse=True)
+    # Barre de progression du pré-téléchargement (7 derniers jours) : combien de
+    # vidéos sont déjà prêtes en local. Rafraîchie en JS via /insta/dl_status.
+    cards = [
+        "<div id='ig-dl-bar' style='margin:14px 0 0;background:#12121a;border:1px solid #26263a;"
+        "border-radius:11px;padding:10px 14px;display:flex;align-items:center;gap:12px'>"
+        "<span style='font-size:12px;color:#9aa0b4;white-space:nowrap'>↓ Vidéos prêtes</span>"
+        "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
+        "<div id='ig-dl-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);"
+        "border-radius:5px;transition:width .4s'></div></div>"
+        "<span id='ig-dl-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
+        "<button type='button' id='ig-dl-now' onclick='igDownloadNow(this)' "
+        "title='Télécharger maintenant toutes les vidéos manquantes (en fond)' "
+        "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>↓ Télécharger</button>"
+        "</div>",
+        "<div id='ig-grille' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
+    cards.insert(0, _trends_alerte_html(fraicheur))
+    for r in reels[:1000]:
+        cards.append(_insta_trend_card_html(
+            r, avg_views_by_owner.get(r.get("_owner", "?"), 0)))
     cards.append("</div>")
-    cards.append(f"<div style='margin-top:18px;display:flex;justify-content:space-between;align-items:center'>"
-                 f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small>"
-                 f"<button type='button' onclick=\"if(!confirm('Rafraichir tous les comptes ? (en arriere-plan)')) return; var b=this; b.disabled=true; var o=b.innerHTML; b.innerHTML='◌ ...'; fetch('/insta/scrape_all',{{method:'POST'}}).then(r=>r.json()).then(d=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast(d&&d.ok?(d.message||'Scrape lance'):(d&&d.error||'Erreur'),d&&d.ok?'success':'error');}}).catch(e=>{{b.disabled=false;b.innerHTML=o;if(typeof showToast==='function')showToast('Erreur: '+e,'error');}});\" "
-                 f"style='padding:8px 18px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin:0'>"
-                 f"↻ Rafraîchir</button></div>")
+    # Le bouton « Rafraichir » est monte dans la barre du haut (demande du
+    # proprietaire) : en bas, il fallait faire defiler toute la grille.
+    cards.append(f"<div style='margin-top:18px'>"
+                 f"<small id='ig-period-info'>{len(reels)} reel(s) au total</small></div>")
+    # Donnees pour la barre (heure du releve) et pour Filters → Creators,
+    # puis reprise des filtres deja choisis (periode, tri, createrices).
+    _meta = json.dumps({"releve": fraicheur, "creatrices": creatrices},
+                       ensure_ascii=False).replace("</", "<\\/")
+    cards.append("<script>(function(){var m=" + _meta + ";"
+                 "window.__igReleve=m.releve;window.__igCreatrices=m.creatrices;"
+                 "if(window.igApresInjection)window.igApresInjection();})();</script>")
     return "".join(cards)
 
 
@@ -56869,19 +57360,24 @@ def _ensure_video_state(sc: str) -> dict:
 _PREDL_STATE = {"running": False, "done": 0, "total": 0, "ts": 0}
 
 
-# Sous ce nombre de vues, un reel de la veille n'est pas telecharge.
-# Le disque, la bande passante et les requetes de resolution d'URL sont
-# tous consommes par des videos que personne ne regardera : un reel a
-# 300 vues n'apprend rien sur ce qui marche. Le seuil ne cache rien pour
-# autant — les reels ecartes restent visibles dans Trends, ils n'ont
-# simplement pas leur mp4 sur le serveur.
-MIN_VUES_TELECHARGEMENT = 10000
+# TOUT est telecharge (demande du proprietaire, 03/10/2026) : la barre
+# « Videos pretes » restait a 28 / 160 parce que les reels sous 10 000 vues
+# etaient ecartes. Le telechargement lui-meme ne coute rien — un GET sur le
+# lien CDN que le releve fournit deja. Ce seuil ne decide plus que d'une
+# chose : quand PAYER une resolution d'URL (reels_source, HikerAPI puis
+# Apify), seulement si le lien gratuit a echoue et que le reel la vaut.
+MIN_VUES_RESOLUTION_PAYANTE = 10000
 
 
 def _predownload_missing(max_workers: int = 4) -> dict:
     """Télécharge EN PARALLÈLE (sans cookie) les mp4 manquants des reels vidéo
-    des 7 derniers jours déjà scrapés. Réutilisé par le démon ET le bouton
-    « télécharger maintenant ». Cookie-free -> on peut paralléliser sans risque.
+    des 7 derniers jours déjà scrapés. Réutilisé par le démon, la fin de chaque
+    relevé Trends ET le bouton « télécharger maintenant ».
+
+    D'abord les chemins GRATUITS (lien du relevé, page publique, yt-dlp) ; une
+    résolution payante seulement pour ce qui a échoué. Avant, chaque paquet
+    était résolu par HikerAPI AVANT même d'essayer le lien qu'on avait déjà :
+    une requête payée par vidéo, pour rien.
     """
     import time as _t2
     if _PREDL_STATE["running"]:
@@ -56895,7 +57391,6 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     wl = {str(u or "").lower().strip().lstrip("@") for u in (load_watchlist() or [])}
     cutoff = _t2.time() - 7 * 86400
     todo = []
-    sous_seuil = 0          # reels ecartes faute de vues : remonte dans le bilan
     for r in get_all_cached_reels():
         if not r.get("is_video"):
             continue
@@ -56904,57 +57399,45 @@ def _predownload_missing(max_workers: int = 4) -> dict:
         ta = r.get("taken_at") or 0
         if ta and ta < cutoff:
             continue
-        # SEUIL DE VUES. On compte les ecartes plutot que de les jeter en
-        # silence : sans ce compteur, un seuil mal regle ferait disparaitre
-        # la moitie de la veille sans que rien ne le signale.
-        _v = r.get("views")
-        if _v is not None and int(_v or 0) < MIN_VUES_TELECHARGEMENT:
-            sous_seuil += 1
-            continue
         m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
         if not m:
             continue
         sc = m.group(1)
         if (INSTA_VIDEOS_DIR / f"{sc}.mp4").exists():
             continue
-        todo.append((ta or 0, sc, r.get("url") or "", r.get("video_url") or ""))
+        _v = r.get("views")
+        todo.append((ta or 0, sc, r.get("url") or "", r.get("video_url") or "",
+                     None if _v is None else int(_v or 0)))
     # PRIORITE AUX PLUS RECENTES : taken_at décroissant (0 = date inconnue -> fin)
     todo.sort(key=lambda x: x[0], reverse=True)
-    todo = [(sc, purl, vurl) for (_ta, sc, purl, vurl) in todo]
+    todo = [(sc, purl, vurl, vues) for (_ta, sc, purl, vurl, vues) in todo]
     _PREDL_STATE.update({"running": True, "done": 0, "total": len(todo),
                          "ts": _t2.time(), "active": set()})
-
-    # APIFY (si configuré) : résout les video_url EN BATCH via un service tiers
-    # qui extrait avec SES proxies -> zéro cookie, zéro risque de ban, et couvre
-    # les reels que nos méthodes publiques ratent. On remplit un cache {sc:vurl}
-    # pour que _one() télécharge directement le lien fourni.
     _PREDL_STATE["apify"] = {}
-    _apify_total = {"n": 0}
+    bilan = {"a_telecharger": len(todo), "gratuits": 0, "payes": 0,
+             "resolus_payants": 0, "echecs": 0, "echecs_sous_seuil": 0}
 
     try:
         import reels_source as _ap
     except Exception:
         _ap = None
 
-    def _one(item, apify_url=""):
-        sc, purl, vurl = item
+    def _gratuit(item) -> bool:
+        """Lien CDN du relevé, puis page publique, puis yt-dlp : sans clé."""
+        sc, purl, vurl, _vues = item
         f = INSTA_VIDEOS_DIR / f"{sc}.mp4"
         _act = _PREDL_STATE.get("active")
         try:
             if f.exists():
-                return
+                return True
             if isinstance(_act, set):
                 _act.add(sc)   # ce reel devient "en cours" -> carte bleue cote UI
-            # TOUT sans cookie : 0) lien Apify (le plus fiable), 1) lien direct
-            # CDN du scrape, 2) scrape page publique, 3) yt-dlp public.
-            if apify_url and _download_reel_video(sc, apify_url):
-                return
             if vurl and _download_reel_video(sc, vurl):
-                return
+                return True
             try:
                 pub = _scrape_ig_page_for_video(sc)
                 if pub and _download_reel_video(sc, pub):
-                    return
+                    return True
             except Exception:
                 pass
             info = {}
@@ -56970,48 +57453,73 @@ def _predownload_missing(max_workers: int = 4) -> dict:
                         (INSTA_VIDEOS_DIR / f"{sc}.txt").write_text(info["description"], encoding="utf-8")
                     except Exception:
                         pass
+                return True
         except Exception:
             pass
         finally:
             if isinstance(_act, set):
                 _act.discard(sc)
             _PREDL_STATE["done"] += 1
+        return f.exists()
 
-    # LOT PAR LOT, les plus RÉCENTES d'abord : pour chaque paquet de 12 (todo est
-    # trié récent->ancien), on résout les video_url via Apify PUIS on télécharge
-    # ce paquet en parallèle. La barre monte tout de suite (au lieu d'attendre
-    # que TOUT soit résolu), et les récentes sont prêtes en premier.
+    # LOT PAR LOT, les plus RÉCENTES d'abord : la barre monte tout de suite, et
+    # les récentes sont prêtes en premier. Dans chaque paquet de 12, les chemins
+    # gratuits d'abord ; la résolution payante ne voit que les ratés.
     try:
         with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
             for i in range(0, len(todo), 12):
                 batch = todo[i:i + 12]
-                apify_map: Dict[str, str] = {}
-                if _ap and _ap.configured():
-                    _d = {}
-                    purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v) in batch]
-                    try:
-                        res = _ap.fetch_video_urls(purls, diag=_d)
-                        for sc2, d2 in res.items():
-                            if d2.get("video_url"):
-                                apify_map[sc2] = d2["video_url"]
-                                _apify_total["n"] += 1
-                            if d2.get("caption"):
-                                try:
-                                    (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
-                                        d2["caption"], encoding="utf-8")
-                                except Exception:
-                                    pass
-                    except Exception as _e:
-                        _d = {"error": f"{type(_e).__name__}: {_e}"}
-                    _PREDL_STATE["apify"] = {"resolved": _apify_total["n"],
-                                             "status": _d.get("status"),
-                                             "error": _d.get("error") or ""}
-                # télécharge ce paquet en parallèle avant de résoudre le suivant
-                list(ex.map(lambda it: _one(it, apify_map.get(it[0], "")), batch))
+                faits = list(ex.map(_gratuit, batch))
+                bilan["gratuits"] += sum(1 for ok in faits if ok)
+                rates = [it for it, ok in zip(batch, faits) if not ok]
+                a_payer = [it for it in rates
+                           if it[3] is None or it[3] >= MIN_VUES_RESOLUTION_PAYANTE]
+                bilan["echecs_sous_seuil"] += len(rates) - len(a_payer)
+                if not (a_payer and _ap and _ap.configured()):
+                    bilan["echecs"] += len(a_payer)
+                    continue
+                _d = {}
+                liens: Dict[str, str] = {}
+                purls = [(p or f"https://www.instagram.com/reel/{s}/") for (s, p, _v, _n) in a_payer]
+                try:
+                    res = _ap.fetch_video_urls(purls, diag=_d)
+                    for sc2, d2 in res.items():
+                        if d2.get("video_url"):
+                            liens[sc2] = d2["video_url"]
+                            bilan["resolus_payants"] += 1
+                        if d2.get("caption"):
+                            try:
+                                (INSTA_VIDEOS_DIR / f"{sc2}.txt").write_text(
+                                    d2["caption"], encoding="utf-8")
+                            except Exception:
+                                pass
+                except Exception as _e:
+                    _d = {"error": f"{type(_e).__name__}: {_e}"}
+                _PREDL_STATE["apify"] = {"resolved": bilan["resolus_payants"],
+                                         "status": _d.get("status"),
+                                         "error": _d.get("error") or ""}
+                payes = list(ex.map(
+                    lambda it: bool(liens.get(it[0]))
+                    and _download_reel_video(it[0], liens[it[0]]), a_payer))
+                bilan["payes"] += sum(1 for ok in payes if ok)
+                bilan["echecs"] += sum(1 for ok in payes if not ok)
     finally:
         _PREDL_STATE["running"] = False
-    return {"downloaded_attempt": len(todo), "apify_resolved": _apify_total["n"],
-            "sous_seuil_vues": sous_seuil}
+    return bilan
+
+
+def _predownload_en_fond() -> None:
+    """Lance un passage de téléchargement en fond, s'il n'y en a pas déjà un."""
+    if _PREDL_STATE.get("running"):
+        return
+    import threading as _th
+
+    def _go():
+        try:
+            log.info(f"[insta-dl] apres releve : {_predownload_missing(max_workers=4)}")
+        except Exception as e:
+            log.warning(f"[insta-dl] apres releve : {e}")
+    _th.Thread(target=_go, daemon=True, name="insta-dl-apres-releve").start()
 
 
 def _ensure_video_worker(sc: str, url: str):
@@ -74921,14 +75429,42 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not wl:
             return jsonify({"ok": False, "error": "watchlist vide"})
         import threading
-        # Scrape factorisé en arrière-plan (même fonction que le scheduler 00h/12h ;
-        # le lock empêche un chevauchement manuel/programmé).
-        threading.Thread(target=run_insta_watchlist_scrape,
-                         kwargs={"limit": 12, "label": "manual"}, daemon=True).start()
+        import time as _t
+        t0 = int(_t.time())
+        # Un passage programmé tourne déjà : la page suit celui-là.
+        if _insta_trends_scrape_lock.locked():
+            return jsonify({"ok": True, "count": len(wl), "already": True, "t0": t0,
+                            "message": "Relevé déjà en cours…"})
+        # L'état passe « en cours » TOUT DE SUITE : sans ça, la page qui
+        # interroge /insta/scrape_status juste après le clic lisait encore
+        # « idle » et croyait le relevé fini avant qu'il n'ait commencé.
+        _insta_trends_scrape_state.update(
+            {"status": "in_progress", "done": 0, "total": len(wl),
+             "started_at": t0, "label": "manual", "failed": 0, "error": ""})
+
+        def _go():
+            # Les reels seulement (1 requête par compte), et pas les comptes
+            # relevés il y a moins de 15 min : on peut cliquer quand on veut.
+            res = run_insta_watchlist_scrape(limit=12, label="manual",
+                                             skip_fresh_hours=0.25, complet=False)
+            if not res.get("started") and res.get("reason") != "déjà en cours":
+                _insta_trends_scrape_state.update(
+                    {"status": "idle", "finished_at": int(_t.time()),
+                     "failed": 0, "error": str(res.get("reason") or "")})
+        threading.Thread(target=_go, daemon=True).start()
         return jsonify({
-            "ok": True, "count": len(wl), "scrape_started": True,
-            "message": f"Scrape de {len(wl)} compte(s) lancé en arrière-plan (~10s par compte)…",
+            "ok": True, "count": len(wl), "scrape_started": True, "t0": t0,
+            "message": f"Relevé de {len(wl)} compte(s) lancé…",
         })
+
+    @app.route("/insta/trends/compte", methods=["GET"])
+    def insta_trends_compte():
+        """Filters → Creators : les derniers posts des comptes suivis choisis."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        pseudos = [x for x in (request.args.get("u") or "").split(",") if x.strip()]
+        return jsonify(_insta_trends_vue_creatrices(pseudos))
 
     @app.route("/settings/ai_key", methods=["POST"])
     def settings_ai_key():

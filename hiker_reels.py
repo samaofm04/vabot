@@ -238,37 +238,62 @@ _BUDGET_FILE = DATA_DIR / "hiker_budget.json"
 # au-dela, on refuse et on le DIT, plutot que de vider le solde en silence.
 PLAFOND_JOUR = 10000
 
+# UN POSTE A PART pour la veille Trends (Instagram → Trends).
+#
+# Mesure du 03/10/2026 : l'enveloppe commune etait vide a 21 h 30 (10 000 /
+# 10 000), et elle ne se recharge qu'a minuit UTC — 2 h a Paris. La veille
+# Trends passait a 00 h Paris, donc dans les dernieres heures de ce compteur :
+# elle n'a releve que 24 comptes sur 65, les 41 autres ont echoue sans un mot,
+# et a 23 h le filtre « 24h » ne montrait plus que 3 reels. Meme principe que
+# la reserve du telechargeur (hiker_medias) : un petit poste a elle, qui ne
+# prend rien au suivi des comptes et que le suivi ne peut pas vider.
+#
+# Le proprietaire a choisi le 03/10/2026 un releve toutes les 3 h : un passage
+# complet a minuit (65 comptes x 2 appels = 130) et sept passages « reels
+# seulement » (65 x 1), soit ~585 requetes par jour. La marge couvre les
+# « Rafraichir » et les recherches d'un compte a la main.
+ENVELOPPE_TRENDS = 1000
+_BUDGET_TRENDS_FILE = DATA_DIR / "hiker_budget_trends.json"
+
+
+def _poste(poste: str = "") -> tuple:
+    """(fichier compteur, plafond) du poste demande."""
+    if poste == "trends":
+        return _BUDGET_TRENDS_FILE, ENVELOPPE_TRENDS
+    return _BUDGET_FILE, PLAFOND_JOUR
+
 
 def _aujourdhui() -> str:
     import datetime as _dt
     return _dt.date.today().isoformat()
 
 
-def budget_du_jour() -> dict:
+def budget_du_jour(poste: str = "") -> dict:
     """{jour, utilise, plafond, restant} — lisible pour l'afficher."""
+    fichier, plafond = _poste(poste)
     try:
-        d = safe_json.load_or_prev(_BUDGET_FILE)
+        d = safe_json.load_or_prev(fichier)
         d = d if isinstance(d, dict) else {}
     except Exception:
         d = {}
     jour = _aujourdhui()
     utilise = int(d.get("utilise") or 0) if d.get("jour") == jour else 0
-    return {"jour": jour, "utilise": utilise, "plafond": PLAFOND_JOUR,
-            "restant": max(0, PLAFOND_JOUR - utilise)}
+    return {"jour": jour, "utilise": utilise, "plafond": plafond,
+            "restant": max(0, plafond - utilise)}
 
 
-def _consommer(combien: int) -> bool:
+def _consommer(combien: int, poste: str = "") -> bool:
     """Reserve `combien` requetes. Faux si l'enveloppe du jour est epuisee.
 
     On reserve AVANT d'appeler, pas apres : compter apres coup laisserait
     passer une rafale entiere avant que le compteur ne s'en apercoive.
     """
-    etat = budget_du_jour()
+    etat = budget_du_jour(poste)
     if etat["restant"] < combien:
         return False
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        safe_json.write_text(_BUDGET_FILE, json.dumps(
+        safe_json.write_text(_poste(poste)[0], json.dumps(
             {"jour": etat["jour"], "utilise": etat["utilise"] + combien},
             ensure_ascii=False))
     except Exception as e:
@@ -340,8 +365,16 @@ def _appel(chemin: str, token: str, timeout: int, **params):
         return None, "reponse non-JSON"
 
 
-def scrape_profile(username: str, limit: int = 50) -> dict:
-    """Profil + reels recents. Meme contrat que _scrape_via_rapidapi."""
+def scrape_profile(username: str, limit: int = 50, poste: str = "",
+                   profil: bool = True) -> dict:
+    """Profil + reels recents. Meme contrat que _scrape_via_rapidapi.
+
+    poste="trends" : compte sur l'enveloppe de la veille Trends, pas sur la
+    commune (voir ENVELOPPE_TRENDS).
+    profil=False : les reels seulement, quand le pk est deja connu (passages
+    de la veille Trends en journee). Le profil vide qui en sort ne coute rien :
+    insta_scraper._write_cache garde la photo et les abonnes du releve
+    precedent."""
     token = get_token()
     username = (username or "").strip().lstrip("@").lower()
     if not token:
@@ -359,25 +392,33 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
     # cartes s'affichaient sans avatar. _write_cache rattrapait en gardant
     # l'ancienne valeur, mais un compte jamais releve restait vide, et le
     # compteur d'abonnes de tous les autres cessait d'etre mis a jour.
-    if not _consommer(2):
-        e = budget_du_jour()
+    #
+    # Exception voulue : profil=False, pour la veille Trends en journee. Elle
+    # relit le meme compte toutes les 3 h ; ses abonnes et sa photo n'ont pas
+    # a l'etre plus d'une fois par jour, le passage de minuit s'en charge.
+    leger = (not profil) and bool(pk)
+    if not _consommer(1 if leger else 2, poste):
+        e = budget_du_jour(poste)
         return {"error": "HikerAPI: enveloppe du jour epuisee (%d/%d requetes). "
                          "Le solde est preserve ; la collecte reprend demain."
                          % (e["utilise"], e["plafond"])}
 
-    data, err = _appel("/v1/user/by/username", token, 45, username=username)
-    if err:
-        # Un pk deja connu permet de tenter les reels quand meme : mieux
-        # vaut des vues sans compteur d'abonnes que rien du tout.
-        if not pk:
-            return {"error": "HikerAPI: " + err}
+    if leger:
         user = {}
     else:
-        user = data.get("user") if isinstance(data.get("user"), dict) else (data or {})
-        pk = user.get("pk") or user.get("id") or pk
-        if not pk:
-            return {"error": "HikerAPI: compte sans identifiant (introuvable ?)"}
-        _pk_retenir(username, pk)
+        data, err = _appel("/v1/user/by/username", token, 45, username=username)
+        if err:
+            # Un pk deja connu permet de tenter les reels quand meme : mieux
+            # vaut des vues sans compteur d'abonnes que rien du tout.
+            if not pk:
+                return {"error": "HikerAPI: " + err}
+            user = {}
+        else:
+            user = data.get("user") if isinstance(data.get("user"), dict) else (data or {})
+            pk = user.get("pk") or user.get("id") or pk
+            if not pk:
+                return {"error": "HikerAPI: compte sans identifiant (introuvable ?)"}
+            _pk_retenir(username, pk)
 
     data, err = _appel("/v1/user/clips", token, 60, user_id=pk)
     if err:
