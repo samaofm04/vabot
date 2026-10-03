@@ -325,8 +325,13 @@ LIENS_DEMANDES = [
      "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
     # son lien Amelia (« ameliababy ») existait avant, avec les boutons du lien
     # de base (Lashwana) : generer le repare sur place, meme adresse ; rien a
-    # reposter dans son ticket
+    # reposter dans son ticket. Le MYM a echoue la premiere fois (MYM en panne) :
+    # repris tout seul aux demarrages suivants.
     {"id": "2026-10-03-priscah-amelia-repare", "uid": 1525406324970618890,
+     "pseudo": "priscah0908_23400", "models": ["amelia"], "poster": False},
+    # la premiere reparation est notee faite sur le serveur (ancien code) : une
+    # demande neuve pour le MYM qui manque encore
+    {"id": "2026-10-03-priscah-amelia-mym", "uid": 1525406324970618890,
      "pseudo": "priscah0908_23400", "models": ["amelia"], "poster": False},
 ]
 _LIENS_FAIT = Path(__file__).resolve().parent.parent / "data" / "liens_demandes_fr.json"
@@ -550,7 +555,11 @@ class Outils(commands.Cog):
                 except Exception as e:                       # noqa: BLE001
                     r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
                 if r.get("ok"):
-                    faits.append(model)
+                    # un bouton encore sans tracking (MYM en panne : « HTTP 500,
+                    # impossible de creer le lien sur MYM », 03/10) : le lien
+                    # est donne, mais la model sera reprise au passage suivant
+                    if not any("absent" in str(s) or "retiré" in str(s) for s in r.get("soucis") or []):
+                        faits.append(model)
                     liens.append((model, r.get("public_url")))
                     recap.append(f"✅ **{r.get('display_name')}** → {r.get('public_url')}"
                                  + "".join(f" · {k.upper()} {v}" for k, v in (r.get("trackings") or {}).items()))
