@@ -34,6 +34,28 @@ podium, et c'est de l'argent.
 LES RÔLES NE SONT PAS POSÉS PAR LE BOT. Rien ne relie un numéro de VA à un
 compte Discord, et le bot n'a pas la permission de lire la liste des membres.
 Les primes se réclament à la main, comme le bonus du jour.
+
+UN MESSAGE PAR PÉRIODE, ET IL RESTE. Propriétaire, 03/10/2026 : « il reste
+fixe et un autre se lance », « que ça reste là, la période après la période,
+le truc bouge plus ». Chaque semaine et chaque quinzaine a SON message, jamais
+effacé : vivant pendant la période, puis figé sur place sur les chiffres de
+la période entière, avec une ligne qui dit que c'est fini. Un message neuf
+part ensuite, en dessous. Avant, la semaine finie restait « SEMAINE EN COURS
+— Rien n'est joué » avec des chiffres vieux de deux heures, à côté d'un
+podium posté à part et mêlé au message de la semaine suivante.
+
+Ce que podium.json en retient :
+  vivants[gid]       semaine, message, vu, dernier (relevé gardé pour figer
+                     sans GetMySocial), termine (le lundi, « terminée » déjà dit)
+  postes["gid:lundi"]   le message du podium (celui de la semaine, figé)
+  figes[gid][lundi]     historique des semaines figées (mode podium, reposte
+                        ou sans_podium ; ping = la mention @everyone,
+                        ping_a_refaire si Discord l'a refusée en passant)
+  subs[gid]          saison, messages (les pages), vu, dernier
+  subs_a_figer[gid][debut]  quinzaine finie pas encore figée (essais, depuis ;
+                        pages/faites une fois calculées, pour reprendre sans
+                        relever GetMySocial une seconde fois)
+  subs_figes[gid][debut]    historique des quinzaines figées
 """
 from __future__ import annotations
 
@@ -406,8 +428,90 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
 
 
 # ─── le message ──────────────────────────────────────────────────────────
+def _heure_podium() -> int:
+    return int(_config().get("heure") or HEURE_POST)
+
+
+def _horodatage() -> str:
+    return _maintenant().strftime("%d/%m à %Hh%M")
+
+
+def _instantane(cl: Dict[str, Any], fin: Optional[dt.date] = None) -> Dict[str, Any]:
+    """Ce qu'on garde du dernier relevé réussi, pour pouvoir figer sans GetMySocial.
+
+    Si GetMySocial ne rend rien le jour où une période se termine, son message
+    doit quand même cesser de se dire « en cours » : on le fige alors sur ces
+    chiffres-là, et le message dit de quand ils datent. `fin` : le dernier
+    jour que ce relevé demandait (voir _couvre).
+    """
+    return {"lignes": [dict(x) for x in (cl.get("lignes") or [])],
+            "illisibles": list(cl.get("illisibles") or []),
+            "frais": bool(cl.get("frais", True)),
+            "sans_numero": list(cl.get("sans_numero") or []),
+            "le": _horodatage(),
+            "jusqu_au": fin.isoformat() if fin else "",
+            "le_iso": _maintenant().isoformat(timespec="minutes")}
+
+
+def _couvre(snap: Dict[str, Any], fin: dt.date) -> bool:
+    """Le relevé gardé compte-t-il la période ENTIÈRE, son dernier jour compris ?
+
+    Il faut qu'il ait demandé ce jour-là ET qu'il ait été pris après : un
+    relevé du dimanche 20h n'a pas les clics du dimanche soir. Celui du lundi
+    00h10 (« semaine terminée ») les a : figer dessus ne trompe personne, et
+    se passe d'un nouvel appel à GetMySocial.
+    """
+    try:
+        return (bool(snap.get("lignes"))
+                and str(snap.get("jusqu_au") or "") >= fin.isoformat()
+                and str(snap.get("le_iso") or "")[:10] > fin.isoformat())
+    except Exception:
+        return False
+
+
+# Un 403 de Discord n'est pas toujours définitif : 50001 (Missing Access) et
+# 50013 (Missing Permissions) viennent des réglages du salon, et l'accès revient
+# quand on le rend. Les prendre pour « message supprimé » notait la semaine
+# figée et l'oubliait : une fois l'accès rendu, elle restait « SEMAINE EN
+# COURS » pour toujours.
+ACCES_RETIRE = (50001, 50013)
+
+
+def _passager(code: Any, rep: Any = None) -> bool:
+    """Discord injoignable, qui freine, ou un salon dont l'accès a été retiré :
+    ça repassera, on réessaie plus tard sur le MÊME message.
+
+    Un 404 (message supprimé à la main) ou un 403 50005 (message posté par un
+    autre bot, que celui-ci ne peut pas éditer) ne repassera jamais : là, on
+    se rabat tout de suite au lieu d'attendre pour rien.
+    """
+    try:
+        c = int(code)
+    except Exception:
+        return True
+    if c == 403 and isinstance(rep, dict):
+        try:
+            return int(rep.get("code") or 0) in ACCES_RETIRE
+        except Exception:
+            return False
+    return c <= 0 or c == 429 or c >= 500
+
+
+def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
+    return (f'⚠️ _Chiffres du dernier relevé ({snap.get("le") or "date inconnue"}) : '
+            f"GetMySocial n'a pas rendu {periode} entière._")
+
+
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-                 en_cours: bool = False, gid: Optional[str] = None) -> Dict[str, Any]:
+                 en_cours: bool = False, gid: Optional[str] = None,
+                 termine: bool = False, avertissement: str = "") -> Dict[str, Any]:
+    """Le message de la semaine, dans l'un de ses trois états :
+
+    - `en_cours` : le message vivant, réédité tout au long de la semaine ;
+    - `termine` : le lundi avant l'heure du podium — la semaine entière est
+      comptée, le podium officiel est annoncé pour l'heure dite ;
+    - ni l'un ni l'autre : le résultat final. Il ne bougera plus, et il le dit.
+    """
     pf = _profil(gid)
     lignes = cl["lignes"]
     if en_cours:
@@ -416,8 +520,15 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
              f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**',
              "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._", ""]
     else:
+        # passé l'heure (bot redémarré pendant que le podium échoue), « à 9h »
+        # serait déjà faux
+        quand = (f"ce lundi à {_heure_podium()}h" if _maintenant().hour < _heure_podium()
+                 else "dans la journée")
         c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
-             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**', ""]
+             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**',
+             (f"🏁 _Semaine terminée. Le podium officiel arrive {quand}, sur ce message._"
+              if termine
+              else "🔒 _Semaine terminée : classement arrêté, il ne bougera plus._"), ""]
     for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
         if i < 3:
             c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
@@ -440,9 +551,12 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
 
     if cl["illisibles"]:
+        # « il remontera au prochain passage » n'est vrai que du message
+        # vivant : un message figé n'a plus de prochain passage
         c += ["", "⚠️ **Classement incomplet** : " + ", ".join(cl["illisibles"])
                   + " — relevé indisponible"
                   + (", il remontera au prochain passage." if en_cours
+                     else ", il sera relu pour le podium officiel." if termine
                      else ", à confirmer avant de payer.")]
     if not cl["frais"]:
         c += ["", "⚠️ _Liste des liens non rafraîchie (GetMySocial injoignable) : "
@@ -450,31 +564,45 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if cl.get("sans_numero"):
         c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
               "écarté(s) le temps que la liste revienne._"]
+    if avertissement:
+        c += ["", avertissement]
 
     pied = f'YOULAB • Marché {pf["marche"]} · comptes VA, sans pseudo'
     if en_cours:
-        pied += " · mis à jour " + _maintenant().strftime("%d/%m à %Hh%M")
+        pied += " · mis à jour " + _horodatage()
+    elif termine:
+        pied += " · semaine terminée · relevé du " + _horodatage()
+    else:
+        pied += " · résultat final"
     return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
+                      else "🏁 PODIUM SUBS — SEMAINE TERMINÉE" if termine
                       else "🏆 PODIUM SUBS DE LA SEMAINE"),
-            "color": 0xE67E22 if en_cours else 0xF1C40F,
+            "color": 0xE67E22 if en_cours else 0x95A5A6 if termine else 0xF1C40F,
             "description": "\n".join(c)[:4096],
             "footer": {"text": pied}}
 
 
 def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-               totaux: Dict[str, int], gid: Optional[str] = None) -> List[Dict[str, Any]]:
+               totaux: Dict[str, int], gid: Optional[str] = None,
+               final: bool = False, avertissement: str = "") -> List[Dict[str, Any]]:
     """Le classement de la quinzaine, découpé en autant de messages qu'il faut.
 
     Discord coupe une description à 4096 caractères. Plutôt que de tronquer —
     ce qui ferait croire à quelqu'un du bas de tableau qu'il n'existe pas —, on
     répartit sur plusieurs messages, numérotés « page 2/3 ». Le total de la
     période va sur la dernière page : c'est là qu'on le cherche.
+
+    `final` : la quinzaine est finie, ces pages ne bougeront plus. Le titre
+    porte ses dates (plusieurs quinzaines figées se suivent dans le salon) et
+    plus rien ne promet un « prochain passage ».
     """
     p = _profil(gid)
     lignes = cl["lignes"]
     tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
             f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
             f'Clics **{p["marche"]}** · **{len(lignes)}** comptes classés\n')
+    if final:
+        tete += "🔒 _Période terminée : classement arrêté, il ne bougera plus._\n"
 
     rangs = []
     for i, x in enumerate(lignes):
@@ -489,10 +617,16 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     total = sum(int(x["clics"]) for x in lignes)
     queue = [f'\n👥 **Total période**\n**{total}** subs']
     if cl["illisibles"]:
-        queue.append("\n⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
-                     + " — ils remonteront au prochain passage.")
+        if final:
+            queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
+                         + " — à confirmer.")
+        else:
+            queue.append("\n⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
+                         + " — ils remonteront au prochain passage.")
     if not cl["frais"]:
         queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
+    if avertissement:
+        queue.append("\n" + avertissement)
     bas = "\n".join(queue)
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
@@ -515,20 +649,53 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         corps = tete + "\n" + "\n".join(page)
         if n == len(pages):
             corps += "\n" + bas
-        pied = (f'YOULAB • Marché {p["marche"]} · comptes VA, sans pseudo · mis à jour '
-                + _maintenant().strftime("%d/%m à %Hh%M"))
+        pied = (f'YOULAB • Marché {p["marche"]} · comptes VA, sans pseudo · '
+                + ("résultat final" if final else "mis à jour " + _horodatage()))
         if len(pages) > 1:
             pied = f"page {n}/{len(pages)} · " + pied
-        out.append({"title": ("📊 Classement subs — la quinzaine"
-                              + (f" ({n}/{len(pages)})" if len(pages) > 1 else "")),
-                    "color": 0x3B82F6,
+        titre = (f'📊 Classement subs — quinzaine du {debut.strftime("%d/%m")} '
+                 f'au {fin.strftime("%d/%m")} (terminée)' if final
+                 else "📊 Classement subs — la quinzaine")
+        out.append({"title": titre + (f" ({n}/{len(pages)})" if len(pages) > 1 else ""),
+                    "color": 0x64748B if final else 0x3B82F6,
                     "description": corps[:4096],
                     "footer": {"text": pied}})
     return out
 
 
+def _alltime_lu(gid: Optional[str] = None) -> Dict[str, int]:
+    """Le dernier total « depuis toujours » connu, SANS appeler GetMySocial.
+
+    Figer une quinzaine ne doit rien coûter de plus au quota, et doit marcher
+    pendant une pause de GetMySocial : le total relevé le jour de la fin (ou
+    la veille) est le bon chiffre pour une page qui ne bougera plus.
+    """
+    profil = _profil(gid)
+    fichier = DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
+    try:
+        return {k: int(v) for k, v in (_lire(fichier, {}).get("totaux") or {}).items()}
+    except Exception:
+        return {}
+
+
+# Une quinzaine finie dont le relevé complet rate (GetMySocial en pause, muet,
+# ou un VA illisible) est réessayée, mais pas à chaque tour : chaque essai
+# coûte un appel par VA, et le quota est partagé avec le tableau de bord.
+# Au bout de 48 h, on fige avec ce qu'on a — rien ne reste « vivant » à vie.
+ESSAI_FIGER_MIN = 120
+ABANDON_FIGER_H = 48
+
+
 def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
-    """Met à jour (ou crée) le classement vivant de la quinzaine, sur N pages."""
+    """Met à jour (ou crée) le classement vivant de la quinzaine, sur N pages.
+
+    Une quinzaine nouvelle veut des messages neufs. Mais AVANT de les poster,
+    les pages de la quinzaine finie sont figées sur place, sur les chiffres de
+    la période entière (propriétaire, 03/10/2026 : « que ça reste là, la
+    période après la période, le truc bouge plus »). Avant, elles restaient
+    telles quelles : « mis à jour », « ils remonteront au prochain passage »,
+    et des chiffres vieux d'une heure ou deux.
+    """
     gid = str(gid)
     debut, fin_saison = saison_en_cours(jour)
     aujourd = jour or _aujourdhui()
@@ -539,12 +706,48 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_SUBS} introuvable sur {gid}", flush=True)
         return ""
+
+    # `message` (au singulier) est l'ancien format : un seul identifiant
+    ids = list(garde.get("messages") or ([garde["message"]] if garde.get("message") else []))
+    ancienne = str(garde.get("saison") or "")
+    if ancienne != debut.isoformat():
+        if ids and ancienne and ancienne < debut.isoformat():
+            # noté AVANT d'essayer : si le relevé rate ou si le bot redémarre
+            # au milieu, la quinzaine reste à figer, elle n'est pas oubliée
+            d.setdefault("subs_a_figer", {}).setdefault(gid, {})[ancienne] = {
+                "fin": saison_en_cours(dt.date.fromisoformat(ancienne))[1].isoformat(),
+                "messages": [str(x) for x in ids], "depuis": time.time(), "essais": 0,
+                "dernier": garde.get("dernier") or {}}
+            vivants.pop(gid, None)
+            _ecrire(d)
+            print(f"[podium] quinzaine {ancienne} finie sur {gid} : {len(ids)} page(s) à figer",
+                  flush=True)
+        ids = []                      # quinzaine nouvelle : messages neufs
+    # les quinzaines finies d'abord : leurs pages restent AU-DESSUS des neuves
+    _figer_quinzaines(gid, d, salon)
+    # figer a pu reprendre des pages vivantes de la quinzaine neuve (voir
+    # _page_neuve) : on repart de ce qu'il en reste
+    garde = vivants.get(gid) or {}
+    if str(garde.get("saison") or "") == debut.isoformat():
+        ids = [str(x) for x in (garde.get("messages")
+                                or ([garde["message"]] if garde.get("message") else []))]
+    if jour is None and not _subs_du(gid, garde):
+        # on n'est passé que pour réécrire des pages figées déjà calculées
+        # (Discord les avait refusées) : la quinzaine vivante garde son rythme,
+        # et ce passage ne coûte aucun relevé
+        return str((ids or [""])[0])
+
+    if _pause_gms():
+        # on n'est passé que pour figer sans GetMySocial (48 h écoulées)
+        print("[podium] GetMySocial en pause : classement de la quinzaine remis au prochain tour",
+              flush=True)
+        return ""
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
     cl = classement(debut, min(aujourd, fin_saison), gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
-        return str((garde.get("messages") or [""])[0])
+        return str((ids or [""])[0])
     try:
         totaux = alltime(gid)
     except Exception as e:
@@ -552,16 +755,19 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
         totaux = {}
     pages = pages_subs(cl, debut, fin_saison, totaux, gid=gid)
 
-    # `message` (au singulier) est l'ancien format : un seul identifiant
-    ids = list(garde.get("messages") or ([garde["message"]] if garde.get("message") else []))
-    if garde.get("saison") != debut.isoformat():
-        ids = []                      # quinzaine nouvelle : messages neufs
     neufs: List[str] = []
     for i, page in enumerate(pages):
         corps = {"embeds": [page]}
         if i < len(ids):
             code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
             if code == 200:
+                neufs.append(ids[i])
+                continue
+            if _passager(code, rep):
+                # la page est toujours là : en poster une autre laissait celle-ci
+                # « mis à jour » pour toujours, jamais figée, à côté de la neuve
+                print(f"[podium] page {i + 1} : Discord indisponible (HTTP {code}), "
+                      "gardée pour le prochain passage", flush=True)
                 neufs.append(ids[i])
                 continue
             # supprimé à la main : on en refait un plutôt que de rester muet
@@ -579,22 +785,244 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
 
     if not neufs:
         return ""
-    vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time()}
+    vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time(),
+                    "dernier": _instantane(cl, min(aujourd, fin_saison))}
     _ecrire(d)
     print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes, '
           f'{len(neufs)} page(s)', flush=True)
     return neufs[0]
 
 
-def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
-    if _pause_gms():
+def _figer_quinzaines(gid: str, d: Dict[str, Any], salon: str) -> None:
+    attente = (d.get("subs_a_figer") or {}).get(gid) or {}
+    for saison in sorted(attente):
+        try:
+            _figer_quinzaine(gid, d, salon, saison, attente[saison])
+        except Exception as e:
+            # une quinzaine qui ne se fige pas ne doit pas bloquer la neuve
+            print(f"[podium] quinzaine {saison} à figer sur {gid} : {type(e).__name__}: {e}",
+                  flush=True)
+
+
+def _page_neuve(gid: str, d: Dict[str, Any], salon: str, saison: str,
+                corps: Dict[str, Any]) -> Tuple[str, int, Any]:
+    """Un message de plus pour une quinzaine figée, à SA place dans le salon.
+
+    Figée en retard (relevé raté à minuit, page supprimée à la main), elle a
+    déjà sous elle les pages de la quinzaine neuve : un POST passerait en
+    dessous, et les deux périodes se mêleraient dans le salon. La première
+    page vivante de la quinzaine neuve, qui la suit immédiatement, est donc
+    reprise et devient la page figée ; la quinzaine neuve repart en messages
+    neufs, en dessous, au même passage (« vu » remis à zéro).
+    Rend (id, code, réponse) ; id vide si rien n'a pu être écrit.
+    """
+    vif = (d.get("subs") or {}).get(gid) or {}
+    attente = (d.get("subs_a_figer") or {}).get(gid) or {}
+    pages = vif.get("messages")
+    # une quinzaine plus récente encore en attente se placera elle-même :
+    # on ne lui vole pas la place
+    if (str(vif.get("saison") or "") > saison and isinstance(pages, list)
+            and not any(s > saison for s in attente)):
+        while pages:
+            cand = str(pages[0])
+            code, rep = _api("PATCH", f"/channels/{salon}/messages/{cand}", json=corps)
+            if code == 200:
+                pages.pop(0)
+                vif["vu"] = 0
+                print(f"[podium] page vivante {cand} de la quinzaine {vif.get('saison')} reprise "
+                      f"pour la quinzaine figée {saison} (elle repart en dessous)", flush=True)
+                return cand, code, rep
+            if _passager(code, rep):
+                return "", code, rep
+            pages.pop(0)               # supprimée à la main : la suivante
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+    if code == 200 and isinstance(rep, dict) and rep.get("id"):
+        return str(rep["id"]), code, rep
+    return "", code, rep
+
+
+def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
+                     rec: Dict[str, Any]) -> bool:
+    """Fige les pages d'une quinzaine finie, sur les chiffres de la période entière.
+
+    Rend True une fois figée (elle quitte alors `subs_a_figer` et n'est plus
+    jamais retouchée). Un relevé incomplet laisse la quinzaine en attente :
+    nouvel essai dans ESSAI_FIGER_MIN minutes, et passé ABANDON_FIGER_H
+    heures, on fige avec ce qu'on a, en le disant.
+
+    Les pages, une fois calculées, sont gardées dans l'état, et chaque page
+    écrite y est notée aussitôt. Si Discord refuse une page en passant, le
+    tour suivant reprend là où on en était : sans relever GetMySocial une
+    seconde fois (un appel par VA), sans reposter une page déjà refaite, et
+    sans jamais noter « figée » une quinzaine à qui il manque une page.
+    """
+    t = time.time()
+    abandon = t - float(rec.get("depuis") or t) >= ABANDON_FIGER_H * 3600
+    # le premier passage après 48 h n'attend pas l'espacement des essais : il
+    # fige avec ce qu'on a, quoi que rende GetMySocial
+    premier_abandon = abandon and not rec.get("abandon")
+    if abandon:
+        rec["abandon"] = True
+    debut, fin = dt.date.fromisoformat(saison), dt.date.fromisoformat(str(rec["fin"]))
+    if not rec.get("pages"):
+        if (not premier_abandon and rec.get("essai")
+                and t - float(rec["essai"]) < ESSAI_FIGER_MIN * 60):
+            return False
+        cl: Optional[Dict[str, Any]] = None
+        raison = ""
+        if _pause_gms():
+            raison = "GetMySocial en pause"
+        else:
+            cl = classement(debut, fin, gid=gid)
+            rec["essais"] = int(rec.get("essais") or 0) + 1
+            if not cl["lignes"]:
+                raison = "aucun relevé"
+            elif cl["illisibles"]:
+                raison = "relevé illisible : " + ", ".join(cl["illisibles"])
+        rec["essai"] = t
+        avert = ""
+        if raison:
+            if not abandon:
+                print(f"[podium] quinzaine {debut} → {fin} pas encore figée sur {gid} ({raison}) : "
+                      f"nouvel essai dans {ESSAI_FIGER_MIN} min, figée quoi qu'il arrive "
+                      f"{ABANDON_FIGER_H} h après la fin", flush=True)
+                _ecrire(d)
+                return False
+            if cl is None or not cl["lignes"]:
+                snap = rec.get("dernier") or {}
+                if snap.get("lignes"):
+                    cl = snap
+                    avert = "" if _couvre(snap, fin) else _avert_dernier_releve(snap, "la période")
+                else:
+                    cl = {"lignes": [], "illisibles": list((cl or {}).get("illisibles") or []),
+                          "frais": bool((cl or {}).get("frais", True))}
+                    avert = "⚠️ _GetMySocial n'a rendu aucun chiffre pour cette période._"
+            print(f"[podium] quinzaine {debut} → {fin} sur {gid} : {raison} depuis "
+                  f"{ABANDON_FIGER_H} h, figée avec ce qu'on a", flush=True)
+        # gardées AVANT d'écrire : un refus de Discord ou un redémarrage au
+        # milieu reprend ces pages-là, il ne relève pas GetMySocial à nouveau
+        # (et ne risque pas de remplacer des chiffres complets par un relevé
+        # plus pauvre, deux heures plus tard)
+        rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid), gid=gid, final=True,
+                                  avertissement=avert)
+        rec["complet_calc"] = not raison
+        rec["comptes"] = len(cl["lignes"])
+        rec["faites"] = 0
+        _ecrire(d)
+
+    pages = list(rec["pages"])
+    # une entrée par page, à sa place : la page i du salon est ids[i]
+    ids = [str(x) for x in (rec.get("messages") or [])]
+    manquantes = [int(x) for x in (rec.get("manquantes") or [])]
+
+    def en_attente(faites: int) -> bool:
+        rec["messages"] = ids
+        rec["faites"] = faites
+        _ecrire(d)
         return False
-    garde = (_etat().get("subs") or {}).get(str(gid)) or {}
+
+    for i in range(int(rec.get("faites") or 0), len(pages)):
+        corps = {"embeds": [pages[i]]}
+        mid = ""
+        if i < len(ids) and ids[i]:
+            code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
+            if code == 200:
+                mid = ids[i]
+            elif _passager(code, rep):
+                print(f"[podium] quinzaine {debut} : page {i + 1} — Discord indisponible "
+                      f"(HTTP {code}), reprise au prochain tour", flush=True)
+                return en_attente(i)
+            else:
+                # supprimée à la main : refaite, sinon des VA disparaîtraient du
+                # classement final
+                print(f"[podium] page figée {i + 1} inéditable (HTTP {code}), reposte", flush=True)
+        if not mid:
+            mid, code, rep = _page_neuve(gid, d, salon, saison, corps)
+        if not mid:
+            if abandon and not _passager(code, rep):
+                # 48 h passées et Discord refuse pour de bon : figée sans
+                # cette page, et l'historique le dit
+                print(f"[podium] quinzaine {debut} : page figée {i + 1} refusée pour de bon "
+                      f"(HTTP {code}) {str(rep)[:140]} — figée SANS elle", flush=True)
+                manquantes.append(i + 1)
+                rec["manquantes"] = manquantes
+                continue
+            # pas noté figé avec une page en moins : les VA de cette page et le
+            # total (sur la dernière) disparaîtraient du classement final
+            print(f"[podium] quinzaine {debut} : page figée {i + 1} refusée (HTTP {code}) "
+                  f"{str(rep)[:140]} — reprise au prochain tour", flush=True)
+            return en_attente(i)
+        if i < len(ids):
+            ids[i] = mid
+        else:
+            ids.append(mid)
+        # noté page par page : un échec plus loin ne la fera pas reposter
+        rec["messages"] = ids
+        rec["faites"] = i + 1
+        _ecrire(d)
+
+    # moins de pages qu'en direct : les pages en trop diraient n'importe quoi
+    reste = []
+    for surplus in ids[len(pages):]:
+        c, r = _api("DELETE", f"/channels/{salon}/messages/{surplus}")
+        print(f"[podium] page en trop {surplus} retirée (HTTP {c})", flush=True)
+        if c not in (200, 204) and _passager(c, r):
+            reste.append(surplus)     # encore « mis à jour » : à retirer au prochain tour
+    if reste:
+        ids[len(pages):] = reste
+        return en_attente(len(pages))
+
+    ecrites = [ids[k] for k in range(len(pages)) if k + 1 not in manquantes and k < len(ids)]
+    complet = bool(rec.get("complet_calc")) and not manquantes
+    fige = {"fin": fin.isoformat(), "messages": ecrites, "complet": complet,
+            "essais": int(rec.get("essais") or 0),
+            "le": _maintenant().isoformat(timespec="minutes")}
+    if manquantes:
+        fige["manquantes"] = manquantes
+    d.setdefault("subs_figes", {}).setdefault(gid, {})[saison] = fige
+    attente = (d.get("subs_a_figer") or {}).get(gid) or {}
+    attente.pop(saison, None)
+    if not attente:
+        (d.get("subs_a_figer") or {}).pop(gid, None)
+    _ecrire(d)
+    print(f'[podium] quinzaine {debut} → {fin} figée sur {gid} : {rec.get("comptes", 0)} comptes, '
+          f'{len(ecrites)} page(s){"" if complet else " (incomplète)"}'
+          + (f", page(s) {manquantes} MANQUANTE(S)" if manquantes else ""), flush=True)
+    return True
+
+
+def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool:
+    """Le classement vivant de la quinzaine a-t-il passé l'âge (ou n'existe pas) ?"""
     if garde.get("saison") != saison_en_cours()[0].isoformat():
+        return True
+    if not (garde.get("messages") or garde.get("message")):
         return True
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes_subs")
                   or _config().get("minutes") or MINUTES_LIVE)
-    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+    return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
+    gid = str(gid)
+    t = maintenant or time.time()
+    d = _etat()
+    # une quinzaine finie qui attend depuis 48 h se fige MAINTENANT, sans
+    # attendre le prochain passage (deux heures sur Va IG) ni la fin d'une
+    # pause de GetMySocial : elle se fige alors sur son dernier relevé.
+    # Une fois : ce passage calcule ses pages, et si Discord refuse alors
+    # d'écrire, c'est la règle suivante (pages gardées) qui le fait repasser
+    attente = (d.get("subs_a_figer") or {}).get(gid) or {}
+    if any(t - float(r.get("depuis") or t) >= ABANDON_FIGER_H * 3600 and not r.get("abandon")
+           for r in attente.values()):
+        return True
+    # des pages figées déjà calculées que Discord a refusées : les réécrire
+    # ne coûte aucun relevé, on n'attend pas deux heures avec une page qui
+    # se dit encore « mis à jour »
+    if any(r.get("pages") for r in attente.values()):
+        return True
+    if _pause_gms():
+        return False
+    return _subs_du(gid, (d.get("subs") or {}).get(gid) or {}, t)
 
 
 def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
@@ -687,15 +1115,212 @@ def _salon(gid: str, voulu: str = "") -> str:
     return ""
 
 
+# ─── la semaine finie : figée sur place ──────────────────────────────────
+MENTION_PODIUM = "@everyone 🏆 Podium subs de la semaine !"
+
+
+def _serveur_connu(d: Dict[str, Any], gid: str) -> bool:
+    """Le serveur a déjà un podium derrière lui (message vivant, podium posté
+    ou semaine figée). Un serveur tout neuf n'a pas de podium à attendre."""
+    return bool((d.get("vivants") or {}).get(gid)
+                or (d.get("figes") or {}).get(gid)
+                or any(str(k).startswith(f"{gid}:") for k in (d.get("postes") or {})))
+
+
+def _attente_podium(d: Dict[str, Any], gid: str, jour: Optional[dt.date] = None) -> bool:
+    """Vrai le lundi tant que le podium de la semaine finie n'est pas parti.
+
+    Pendant ce temps, la semaine neuve n'a pas de message : posté à 00h10,
+    il passerait AU-DESSUS du podium de 09h dans le salon, et les semaines ne
+    se liraient plus dans l'ordre. Le mardi, la semaine neuve part quoi qu'il
+    arrive (le message de la semaine finie est alors figé sans podium).
+    Une date passée à la main (rattrapage) n'attend rien : on ne sait pas
+    l'heure qu'il « est » ce jour-là.
+    """
+    auj = _aujourdhui()
+    j = jour or auj
+    if j != auj or j.weekday() != 0:
+        return False
+    if (d.get("postes") or {}).get(f"{gid}:{semaine_passee(j)[0].isoformat()}"):
+        return False
+    return _serveur_connu(d, gid)
+
+
+def _semaine_terminee(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any]) -> None:
+    """Le lundi avant le podium, le message de la semaine finie le DIT.
+
+    Une seule fois, sur les chiffres de la semaine entière (lundi → dimanche) :
+    le dernier passage du dimanche datait d'une ou deux heures. Ensuite, plus
+    aucun appel à GetMySocial jusqu'au podium — le drapeau `termine` y veille.
+    """
+    lundi = dt.date.fromisoformat(str(garde["semaine"]))
+    dimanche = lundi + dt.timedelta(days=6)
+    cl: Optional[Dict[str, Any]] = classement(lundi, dimanche, gid=gid)
+    avert = ""
+    if cl["lignes"]:
+        garde["dernier"] = _instantane(cl, dimanche)
+    else:
+        # un classement vide remplacerait des chiffres corrects par rien
+        snap = garde.get("dernier") or {}
+        cl = snap if snap.get("lignes") else None
+        avert = _avert_dernier_releve(snap, "la semaine") if cl else ""
+    if cl is None:
+        # rien à montrer : le message garde ses chiffres, le podium de 09h le figera
+        print(f"[podium] semaine {lundi} terminée sur {gid} : aucun relevé, message laissé "
+              "tel quel jusqu'au podium", flush=True)
+    else:
+        code, _rep = _api("PATCH", f"/channels/{salon}/messages/{garde['message']}",
+                          json={"embeds": [embed_podium(cl, lundi, dimanche, gid=gid,
+                                                        termine=True, avertissement=avert)]})
+        if code != 200:
+            # une seule tentative : le podium de 09h repasse de toute façon
+            # sur ce message (ou en poste un neuf s'il a disparu)
+            print(f"[podium] semaine {lundi} : message {garde['message']} inéditable "
+                  f"(HTTP {code}), le podium s'en chargera", flush=True)
+        else:
+            print(f"[podium] semaine {lundi} → {dimanche} terminée sur {gid}, "
+                  f"podium à {_heure_podium()}h", flush=True)
+    garde["termine"] = True
+    garde["vu"] = time.time()
+    d.setdefault("vivants", {})[gid] = garde
+    _ecrire(d)
+
+
+def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any]) -> bool:
+    """Fige le message d'une semaine finie dont le podium n'est jamais parti.
+
+    Le podium a raté tout le lundi (GetMySocial muet), ou le bot était éteint :
+    sans ça, le message restait « SEMAINE EN COURS — Rien n'est joué » pour
+    toujours, au-dessus de la semaine suivante. Ni @everyone ni primes ici :
+    ils n'appartiennent qu'au podium du lundi.
+
+    Rend False si Discord est en panne passagère ou l'accès au salon retiré
+    (403 50001/50013) : le message vivant est gardé, et le tour suivant
+    réessaie sans redemander les chiffres (l'embed attend dans l'état). Rend
+    False aussi pendant une pause de GetMySocial sans relevé de la semaine
+    entière : figer des chiffres partiels pour toujours serait pire qu'attendre.
+    """
+    lundi = dt.date.fromisoformat(str(garde["semaine"]))
+    dimanche = lundi + dt.timedelta(days=6)
+    mid = str(garde.get("message") or "")
+    embed = garde.get("embed_final")
+    complet = bool(garde.get("embed_complet"))
+    if not embed:
+        snap = garde.get("dernier") or {}
+        avert = ""
+        if _pause_gms():
+            # quota épuisé : on fige sur le relevé « terminée » du lundi, qui
+            # compte déjà la semaine entière. Sans lui, on attend la fin de la
+            # pause plutôt que de figer pour toujours des chiffres partiels.
+            if not _couvre(snap, dimanche):
+                print(f"[podium] semaine {lundi} : GetMySocial en pause et pas de relevé de la "
+                      "semaine entière, figée à la fin de la pause", flush=True)
+                return False
+            cl = snap
+            complet = not snap.get("illisibles")
+        else:
+            cl = classement(lundi, dimanche, gid=gid)
+            complet = bool(cl["lignes"]) and not cl["illisibles"]
+            if not cl["lignes"]:
+                if snap.get("lignes"):
+                    cl = snap
+                    couvre = _couvre(snap, dimanche)
+                    avert = "" if couvre else _avert_dernier_releve(snap, "la semaine")
+                    complet = couvre and not snap.get("illisibles")
+                else:
+                    cl = {"lignes": [], "illisibles": list(cl.get("illisibles") or []),
+                          "frais": bool(cl.get("frais", True))}
+                    avert = "⚠️ _GetMySocial n'a rendu aucun chiffre pour cette semaine._"
+        embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert)
+    code, _rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"embeds": [embed]})
+    if code != 200 and _passager(code, _rep):
+        garde["embed_final"] = embed
+        garde["embed_complet"] = complet
+        d.setdefault("vivants", {})[gid] = garde
+        _ecrire(d)
+        print(f"[podium] semaine {lundi} : Discord indisponible ou salon inaccessible "
+              f"(HTTP {code}), message figé au prochain tour", flush=True)
+        return False
+    if code != 200:
+        print(f"[podium] semaine {lundi} : message {mid} inéditable (HTTP {code}, supprimé "
+              "à la main ?) — rien à figer", flush=True)
+    d.setdefault("figes", {}).setdefault(gid, {})[lundi.isoformat()] = {
+        "message": mid, "fin": dimanche.isoformat(), "mode": "sans_podium",
+        "edite": code == 200, "complet": complet,
+        "le": _maintenant().isoformat(timespec="minutes")}
+    print(f"[podium] semaine {lundi} → {dimanche} figée sans podium sur {gid} "
+          f'({"chiffres complets" if complet else "chiffres partiels"})', flush=True)
+    return True
+
+
+def _mentionner(gid: str, salon: str, mid: str, reponse: bool = True) -> Tuple[str, str]:
+    """La mention @everyone du podium. Rend (id du message, reste à faire).
+
+    Une édition ne notifie personne : la mention part à côté, en RÉPONSE au
+    message figé, pour qu'un clic y mène. Mais répondre exige « Lire
+    l'historique des messages » dans le salon (Discord 160002), ce que l'ancien
+    podium, posté d'un bloc avec @everyone, ne demandait pas : un refus de ce
+    genre (4xx) repart tout de suite en mention simple, avec le lien du
+    podium. Discord en panne (429, 5xx) n'a rien créé : « reste à faire »
+    dit sous quelle forme réessayer au tour suivant. Un délai dépassé (code
+    0) a pu passer quand même : pas de second essai, un @everyone en double
+    dérangerait tout le serveur.
+    """
+    base = {"content": MENTION_PODIUM, "allowed_mentions": {"parse": ["everyone"]}}
+    if reponse:
+        code, rep = _api("POST", f"/channels/{salon}/messages", json=dict(
+            base, message_reference={"message_id": mid, "fail_if_not_exists": False}))
+        if code == 200 and isinstance(rep, dict) and rep.get("id"):
+            return str(rep["id"]), ""
+        print(f"[podium] mention @everyone en réponse refusée (HTTP {code}) {str(rep)[:140]}",
+              flush=True)
+        if code <= 0:
+            return "", ""
+        if code == 429 or code >= 500:
+            return "", "reponse"
+    lien = f"https://discord.com/channels/{gid}/{salon}/{mid}"
+    code, rep = _api("POST", f"/channels/{salon}/messages",
+                     json=dict(base, content=f"{MENTION_PODIUM}\n➡️ {lien}"))
+    if code == 200 and isinstance(rep, dict) and rep.get("id"):
+        return str(rep["id"]), ""
+    print(f"[podium] mention @everyone simple refusée (HTTP {code}) {str(rep)[:140]}", flush=True)
+    return "", ("simple" if code == 429 or code >= 500 else "")
+
+
 def poster_podium(gid: str, jour: Optional[dt.date] = None,
                   mentionner: bool = True, forcer: bool = False) -> str:
-    """Poste le podium de la semaine passée. Ne le poste pas deux fois."""
+    """Le podium de la semaine passée. Une fois.
+
+    Il ne poste pas un message de plus : il FIGE sur place celui de la
+    semaine (chiffres du lundi au dimanche, « il ne bougera plus »), puis
+    mentionne tout le monde en RÉPONSE à ce message. Avant, chaque semaine
+    laissait un « SEMAINE EN COURS » orphelin aux chiffres périmés, et un
+    podium posté à part, mélangé au message de la semaine suivante.
+    Le message a disparu (supprimé à la main) : le podium est posté à neuf.
+    `forcer` : refait le podium sur le même message s'il existe.
+    """
     gid = str(gid)
     debut, fin = semaine_passee(jour)
     d = _etat()
     postes = d.setdefault("postes", {})
     cle = f"{gid}:{debut.isoformat()}"
     if postes.get(cle) and not forcer:
+        fg = ((d.get("figes") or {}).get(gid) or {}).get(debut.isoformat()) or {}
+        if mentionner and fg.get("ping_a_refaire") and not fg.get("ping"):
+            # le podium est figé, mais Discord avait refusé la mention en
+            # passant : elle seule repart (aucun relevé), tant que c'est lundi
+            salon = _salon(gid)
+            if salon:
+                ping, reste = _mentionner(gid, salon, str(postes[cle]),
+                                          reponse=fg["ping_a_refaire"] != "simple")
+                fg["ping"] = ping
+                if reste:
+                    fg["ping_a_refaire"] = reste
+                else:
+                    fg.pop("ping_a_refaire", None)
+                _ecrire(d)
+                if ping:
+                    print(f"[podium] {debut} : mention @everyone partie au nouvel essai", flush=True)
         return str(postes[cle])
     salon = _salon(gid)
     if not salon:
@@ -710,15 +1335,53 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
               f'({cl["entites"]} entites, {len(cl["illisibles"])} illisible(s)) — '
               "rien poste, nouvel essai au prochain tour", flush=True)
         return ""
-    corps: Dict[str, Any] = {"embeds": [embed_podium(cl, debut, fin, gid=gid)]}
-    if mentionner:
-        corps["content"] = "@everyone 🏆 Podium subs de la semaine !"
-        corps["allowed_mentions"] = {"parse": ["everyone"]}
-    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
-    if code != 200 or not rep.get("id"):
-        print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
-        return ""
-    postes[cle] = str(rep["id"])
+    embed = embed_podium(cl, debut, fin, gid=gid)
+
+    vivants = d.setdefault("vivants", {})
+    vivant = vivants.get(gid) or {}
+    fige = ((d.get("figes") or {}).get(gid) or {}).get(debut.isoformat()) or {}
+    if forcer and postes.get(cle):
+        cible = str(postes[cle])
+    elif vivant.get("semaine") == debut.isoformat() and vivant.get("message"):
+        cible = str(vivant["message"])
+    else:
+        cible = str(fige.get("message") or "")
+
+    mid, mode, ping, reste = "", "podium", "", ""
+    if cible:
+        code, _rep = _api("PATCH", f"/channels/{salon}/messages/{cible}",
+                          json={"embeds": [embed]})
+        if code == 200:
+            mid = cible
+        elif _passager(code, _rep):
+            print(f"[podium] {debut} : Discord indisponible ou salon inaccessible (HTTP {code}), "
+                  "nouvel essai au prochain tour", flush=True)
+            return ""
+        else:
+            print(f"[podium] message de la semaine {cible} inéditable (HTTP {code}) : "
+                  "podium posté à neuf", flush=True)
+    if mid:
+        if mentionner:
+            ping, reste = _mentionner(gid, salon, mid)
+            if not ping:
+                print(f"[podium] {debut} : le podium est figé sans mention"
+                      + (" — nouvel essai au prochain tour" if reste else ""), flush=True)
+    else:
+        corps: Dict[str, Any] = {"embeds": [embed]}
+        if mentionner:
+            corps["content"] = MENTION_PODIUM
+            corps["allowed_mentions"] = {"parse": ["everyone"]}
+        code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+        if code != 200 or not rep.get("id"):
+            print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
+            return ""
+        mid, mode = str(rep["id"]), "reposte"
+    postes[cle] = mid
+    d.setdefault("figes", {}).setdefault(gid, {})[debut.isoformat()] = {
+        "message": mid, "fin": fin.isoformat(), "mode": mode, "ping": ping,
+        "complet": not cl["illisibles"], "le": _maintenant().isoformat(timespec="minutes")}
+    if reste:
+        d["figes"][gid][debut.isoformat()]["ping_a_refaire"] = reste
     # le podium public reste anonyme ; le nom, le montant et l'adresse ne se
     # disent que dans le salon prive du gagnant, son manager mentionne
     try:
@@ -728,18 +1391,16 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
             print(f"[podium] primes annoncees : {b}", flush=True)
     except Exception as e:
         print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
-    # Le message vivant de la semaine ecoulee a fini son office. Mais le lundi
-    # a 09h il montre deja la semaine QUI COMMENCE (elle a bascule a 00h) :
-    # le jeter sans regarder laissait un « SEMAINE EN COURS » orphelin fige
-    # dans le salon, et en faisait creer un second juste apres.
-    _v = d.setdefault("vivants", {})
-    if (_v.get(gid) or {}).get("semaine") == debut.isoformat():
-        _v.pop(gid, None)
+    # Le message vivant de la semaine ecoulee est devenu le podium : il n'est
+    # plus vivant. Celui de la semaine neuve part juste apres (rafraichir, meme
+    # tour de boucle), en dessous du podium.
+    if vivant.get("semaine") == debut.isoformat():
+        vivants.pop(gid, None)
     _ecrire(d)
-    print(f'[podium] {debut} → {fin} postée dans {gid} : {len(cl["lignes"])} entités, '
+    print(f'[podium] {debut} → {fin} figée dans {gid} ({mode}) : {len(cl["lignes"])} entités, '
           f'{len(cl["illisibles"])} illisible(s), liste {"fraîche" if cl["frais"] else "du cache"}',
           flush=True)
-    return str(rep["id"])
+    return mid
 
 
 def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
@@ -749,8 +1410,10 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     fois par jour noierait le salon, et Discord ne notifie pas une édition —
     personne n'est dérangé pour trois clics de plus.
 
-    Une semaine nouvelle veut un message neuf : celui de la semaine d'avant
-    reste en place, il est devenu l'archive.
+    Une semaine nouvelle veut un message neuf, mais pas avant que l'ancien
+    soit fini : le lundi, il dit « semaine terminée » en attendant le podium
+    (qui le fige), et la semaine neuve ne part qu'après le podium. Si le
+    podium n'est jamais venu, l'ancien est figé ici, sans mention.
     """
     gid = str(gid)
     debut, fin = semaine_en_cours(jour)
@@ -761,6 +1424,32 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
+
+    ancienne = str(garde.get("semaine") or "")
+    if garde.get("message") and ancienne and ancienne < debut.isoformat():
+        if (ancienne == (debut - dt.timedelta(days=7)).isoformat()
+                and _attente_podium(d, gid, jour)):
+            if not garde.get("termine"):
+                _semaine_terminee(gid, d, salon, garde)
+            return str(garde["message"])
+        # mardi (ou plus tard) sans podium : on ne laisse JAMAIS un « en cours »
+        # derrière soi
+        if not _figer_semaine(gid, d, salon, garde):
+            return ""
+        vivants.pop(gid, None)
+        garde = {}
+        _ecrire(d)
+    if not garde.get("message") and _attente_podium(d, gid, jour):
+        print(f"[podium] {gid} : semaine du {debut} retenue jusqu'au podium "
+              "de la semaine passée", flush=True)
+        return ""
+    if _pause_gms():
+        # on n'est passé que pour figer la semaine finie sur ses chiffres
+        # gardés : la semaine neuve attend GetMySocial pour avoir les siens
+        print(f"[podium] {gid} : GetMySocial en pause, semaine du {debut} lancée à son retour",
+              flush=True)
+        return ""
+
     cl = classement(debut, fin, gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         # aucun relevé du tout : on ne remplace pas un classement correct par du vide
@@ -771,31 +1460,76 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     mid = str(garde.get("message") or "")
     if mid and garde.get("semaine") == debut.isoformat():
         code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
-        if code == 200:
+        if code == 200 or _passager(code, rep):
+            if code != 200:
+                # Discord en panne passagère (ou l'accès au salon retiré) : le
+                # message est toujours là. En poster un autre laissait celui-ci
+                # « SEMAINE EN COURS » pour toujours, jamais figé, à côté du
+                # neuf. Le passage compte quand même (pas un relevé toutes les
+                # 10 min) : réessai à l'heure suivante, sur le même message.
+                print(f"[podium] édition du message vivant {mid} refusée (HTTP {code}), "
+                      "nouvel essai au prochain passage", flush=True)
             garde["vu"] = time.time()
+            garde["dernier"] = _instantane(cl, fin)
             vivants[gid] = garde
             _ecrire(d)
             return mid
-        # le message a pu être supprimé à la main : on en refait un plutôt
-        # que de rester muet jusqu'à la semaine prochaine
+        # le message a été supprimé à la main : on en refait un plutôt que de
+        # rester muet jusqu'à la semaine prochaine
         print(f"[podium] édition refusée (HTTP {code}), nouveau message", flush=True)
 
     code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
     if code != 200 or not rep.get("id"):
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
-    vivants[gid] = {"semaine": debut.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    vivants[gid] = {"semaine": debut.isoformat(), "message": str(rep["id"]), "vu": time.time(),
+                    "dernier": _instantane(cl, fin)}
     _ecrire(d)
     print(f'[podium] message vivant {debut} → {fin} : {len(cl["lignes"])} entités', flush=True)
     return str(rep["id"])
 
 
+def _figeable_sans_gms(d: Dict[str, Any], gid: str, garde: Dict[str, Any]) -> bool:
+    """La semaine finie peut-elle être figée maintenant, sans GetMySocial ?
+
+    Oui si la porte du lundi est ouverte et qu'on a déjà ses chiffres entiers :
+    le relevé « terminée » du lundi, ou l'embed final qui attendait un Discord
+    revenu. Sans ça, une pause du quota (jusqu'à 24 h) laissait le message
+    dire « le podium officiel arrive ce lundi à 9h » le mardi, et la semaine
+    neuve attendait avec lui.
+    """
+    sem = str(garde.get("semaine") or "")
+    courante = semaine_en_cours()[0]
+    if not garde.get("message") or not sem or sem >= courante.isoformat():
+        return False
+    if sem == (courante - dt.timedelta(days=7)).isoformat() and _attente_podium(d, gid):
+        return False
+    try:
+        dimanche = dt.date.fromisoformat(sem) + dt.timedelta(days=6)
+    except Exception:
+        return False
+    return bool(garde.get("embed_final")) or _couvre(garde.get("dernier") or {}, dimanche)
+
+
 def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
     """Vrai quand le message vivant a passé l'âge, ou n'existe pas encore."""
+    gid = str(gid)
     if _pause_gms():
-        return False
-    garde = (_etat().get("vivants") or {}).get(str(gid)) or {}
+        d = _etat()
+        return _figeable_sans_gms(d, gid, (d.get("vivants") or {}).get(gid) or {})
+    d = _etat()
+    garde = (d.get("vivants") or {}).get(gid) or {}
     if garde.get("semaine") != semaine_en_cours()[0].isoformat():
+        if _attente_podium(d, gid):
+            # lundi, podium pas encore parti : la semaine neuve attend. Reste
+            # seulement à dire « terminée » (une fois) ou à figer un message
+            # plus vieux encore ; tout autre passage serait un appel
+            # GetMySocial pour rien.
+            if not garde.get("message"):
+                return False
+            passee = semaine_passee()[0].isoformat()
+            ancienne = str(garde.get("semaine") or "")
+            return ancienne < passee or (ancienne == passee and not garde.get("termine"))
         return True
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
@@ -817,4 +1551,4 @@ def _pause_gms() -> bool:
 def a_poster(maintenant: Optional[dt.datetime] = None) -> bool:
     """Vrai un lundi, passé l'heure de publication."""
     n = maintenant or _maintenant()
-    return n.weekday() == 0 and n.hour >= int(_config().get("heure") or HEURE_POST)
+    return n.weekday() == 0 and n.hour >= _heure_podium()
