@@ -5498,7 +5498,7 @@ class UserCog(commands.Cog):
                 ch = self.bot.get_channel(cid)
                 if ch is not None:
                     out.append((ch, uid, ident))
-        return out
+        return _une_ligne_par_model(out)
 
     async def _push_menu_to_all_vas(self, guild=None):
         """Poste le menu (avec @ping) dans le salon de chaque VA. Retourne le nb d'envois.
@@ -8195,7 +8195,8 @@ class _BoutonMenuVA(discord.ui.Button):
         self.cle = spec.cle
 
     async def callback(self, interaction: discord.Interaction):
-        await getattr(self.menu, "_clic_" + self.cle)(interaction)
+        await _avec_model_du_menu(
+            interaction, lambda: getattr(self.menu, "_clic_" + self.cle)(interaction))
 
 
 class _MenuFamilleVA(discord.ui.Select):
@@ -8233,8 +8234,66 @@ class _MenuFamilleVA(discord.ui.Select):
         # enregistre au demarrage est partage par tous les salons va-.
         valeurs = ((getattr(interaction, "data", None) or {}).get("values")
                    or list(self.values or []))
-        await _menu_va_choisir(self.menu.cog, interaction, self.famille,
-                               (valeurs or [""])[0])
+        await _avec_model_du_menu(interaction, lambda: _menu_va_choisir(
+            self.menu.cog, interaction, self.famille, (valeurs or [""])[0]))
+
+
+def _model_du_menu_clique(interaction):
+    """La model du menu clique, quand ce n'est pas celle de la fiche du VA et
+    qu'il l'a en role (serveur FR : un role par model, plusieurs roles =
+    plusieurs menus). None sinon : le contenu part pour sa fiche, comme avant."""
+    msg = getattr(interaction, "message", None)
+    if msg is None:
+        return None
+    try:
+        ident = str((_menu_va_lire(msg) or (None, None))[0] or "").strip().lower()
+        if not ident:
+            return None
+        from cogs.welcome import models_du_membre
+        if ident not in models_du_membre(getattr(interaction, "user", None)):
+            return None
+        if ident == str(get_user_identity(interaction.user.id) or "").strip().lower():
+            return None
+        return ident
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("menu VA : model du menu illisible (%s: %s)", type(e).__name__, e)
+        return None
+
+
+async def _avec_model_du_menu(interaction, faire):
+    """`faire()` pour la model du menu clique (_IDENTITY_OVERRIDE, comme le
+    menu US par model) : le menu Amelia d'un VA Julia + Amelia sert Amelia."""
+    ident = _model_du_menu_clique(interaction)
+    jeton = _IDENTITY_OVERRIDE.set(ident) if ident else None
+    try:
+        return await faire()
+    finally:
+        if jeton is not None:
+            _IDENTITY_OVERRIDE.reset(jeton)
+
+
+def _une_ligne_par_model(cibles):
+    """(salon, uid, identite) -> une ligne par model du VA (roles du serveur
+    FR) : un VA de Julia et d'Amelia recoit les deux menus. Sans role de
+    model, la ligne reste celle de sa fiche."""
+    try:
+        from cogs.welcome import models_du_membre
+    except Exception:                                        # noqa: BLE001
+        return list(cibles)
+    out = []
+    for ch, uid, ident in cibles:
+        membre = None
+        try:
+            g = getattr(ch, "guild", None)
+            membre = g.get_member(int(uid)) if (g is not None and uid) else None
+        except (TypeError, ValueError):
+            membre = None
+        models = models_du_membre(membre) if membre is not None else []
+        if models:
+            out += [(ch, uid, m) for m in models]
+        else:
+            out.append((ch, uid, ident))
+    return out
 
 
 def _menu_va(cog, identite=None, guild=None, mention=None):

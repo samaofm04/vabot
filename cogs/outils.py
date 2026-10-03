@@ -108,7 +108,7 @@ def ou_livrer(canal, membre):
     central, un salon public : le ticket du membre, ou None s'il n'en a pas.
     Jamais un salon que d'autres voient."""
     cible = _ticket_vise(canal, membre)
-    if cible is not None and not identite_permise(identite_du_ticket(cible)):
+    if cible is not None and not _ticket_permis(cible):
         return None
     return cible
 
@@ -151,6 +151,30 @@ SANS_SALON = "Tu n'as pas de salon VA sur ce serveur : rien ne peut t'être livr
 PAS_ENCORE = "🔒 Les outils ne sont pas encore ouverts pour ta model."
 
 
+def models_du_ticket(canal) -> list:
+    """Les models du VA a qui est ce ticket : celle de sa fiche, plus celles
+    de ses roles (serveur FR, plusieurs roles = plusieurs models)."""
+    out = []
+    ident = identite_du_ticket(canal)
+    if ident:
+        out.append(ident.strip().lower())
+    try:
+        from cogs.welcome import load_users, models_du_membre
+        cid = int(getattr(canal, "id", 0) or 0)
+        uid = next((u for u, e in (load_users() or {}).items()
+                    if isinstance(e, dict) and int(e.get("channel_id") or 0) == cid), None)
+        g = getattr(canal, "guild", None)
+        m = g.get_member(int(uid)) if (g is not None and uid) else None
+        out += [x for x in (models_du_membre(m) if m is not None else []) if x not in out]
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils] models du ticket : {type(e).__name__}: {e}")
+    return out
+
+
+def _ticket_permis(cible) -> bool:
+    return any(identite_permise(m) for m in models_du_ticket(cible))
+
+
 def refus(canal, membre) -> str:
     """"" si l'outil peut servir ce clic, sinon la phrase a dire au VA.
     Chaque outil la dit AVANT de travailler : un spoof ou un numero ne se
@@ -158,7 +182,7 @@ def refus(canal, membre) -> str:
     cible = _ticket_vise(canal, membre)
     if cible is None:
         return SANS_SALON
-    if not identite_permise(identite_du_ticket(cible)):
+    if not _ticket_permis(cible):
         return PAS_ENCORE
     return ""
 
@@ -232,6 +256,12 @@ class Outils(commands.Cog):
                 await self.assurer(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
+            # un role de model a chaque VA qui a une fiche et aucun role
+            # (fiches faites par /adduser, VA d'avant les roles)
+            try:
+                await self._roles_models(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] roles de model : {type(e).__name__}: {e}")
             # le message « Se vérifier » : pose par le bot de la verification
             # (Luigi), pas par celui-ci -- le clic irait a la mauvaise application
             try:
@@ -245,6 +275,23 @@ class Outils(commands.Cog):
     @_entretien.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+
+    async def _roles_models(self, guilde) -> int:
+        wcog = self.bot.get_cog("Welcome")
+        if wcog is None or not hasattr(wcog, "donner_role_model"):
+            return 0
+        from cogs.welcome import load_users
+        n = 0
+        for uid, e in (load_users() or {}).items():
+            if not isinstance(e, dict) or not e.get("identity"):
+                continue
+            m = guilde.get_member(int(uid)) if str(uid).isdigit() else None
+            if m is not None and not m.bot and await wcog.donner_role_model(m, e["identity"]):
+                n += 1
+                await asyncio.sleep(0.5)
+        if n:
+            print(f"[outils] {guilde.name} : {n} role(s) de model pose(s)")
+        return n
 
     async def assurer(self, guilde) -> dict:
         """La categorie, ses salons et leurs panneaux. Idempotent : ce qui

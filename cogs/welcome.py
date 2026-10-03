@@ -380,6 +380,50 @@ def _verif_porte(guild):
     return c if c and c.get("porte") and c.get("role_verifie") else None
 
 
+def models_du_membre(member) -> list:
+    """Les models d'un VA d'apres ses ROLES, sur le serveur FR. Proprietaire,
+    03/10/2026 : « un role par model », « s'il y a plusieurs roles c'est qu'il
+    y a plusieurs models ».
+
+    Un role compte s'il porte le nom d'une categorie du serveur : les
+    categories de tickets portent le nom de leur model (find_identity_category)
+    -- creer la categorie et le role d'une nouvelle model suffit. Ordre : la
+    position du role, du plus haut au plus bas (la premiere est la model
+    principale). [] hors serveur FR, ou sans role de model."""
+    guild = getattr(member, "guild", None)
+    try:
+        from cogs.outils import serveur_outils
+        if not serveur_outils(guild):
+            return []
+    except Exception:                                        # noqa: BLE001
+        return []
+    cats = {str(getattr(c, "name", "")).strip().lower()
+            for c in (getattr(guild, "categories", None) or [])}
+    roles = [r for r in (getattr(member, "roles", None) or [])
+             if str(getattr(r, "name", "")).strip().lower() in cats]
+    roles.sort(key=lambda r: -int(getattr(r, "position", 0) or 0))
+    out = []
+    for r in roles:
+        n = str(r.name).strip().lower()
+        if n not in out:
+            out.append(n)
+    return out
+
+
+def identites_du_membre(member, identite=None) -> list:
+    """Ses models par les roles ; sans role de model, l'identite de sa fiche."""
+    return models_du_membre(member) or ([str(identite).strip().lower()] if identite else [])
+
+
+def role_du_model(guild, identite):
+    """Le role d'une model (meme nom que sa categorie), ou None."""
+    n = str(identite or "").strip().lower()
+    if not n or find_identity_category(guild, n) is None:
+        return None
+    return discord.utils.find(lambda r: str(r.name).strip().lower() == n,
+                              getattr(guild, "roles", None) or [])
+
+
 def _a_le_role(member, rid) -> bool:
     return any(str(getattr(r, "id", "")) == str(rid) for r in (getattr(member, "roles", None) or []))
 
@@ -458,7 +502,13 @@ async def sync_general_channel_access(guild, member, identity):
 
     Best-effort (ignore les erreurs). Retourne (granted, revoked) pour le report.
     """
-    ident_lc = (identity or "").strip().lower()
+    # Une identite, ou plusieurs : un VA a plusieurs models (roles du serveur
+    # FR) voit les salons de CHACUNE, et ceux d'aucune autre.
+    if isinstance(identity, str) or identity is None:
+        idents = {(identity or "").strip().lower()} - {""}
+    else:
+        idents = {str(i).strip().lower() for i in identity} - {""}
+    ident_lc = ",".join(sorted(idents))
     granted = 0
     revoked = 0
     for ch in guild.text_channels:
@@ -467,7 +517,7 @@ async def sync_general_channel_access(guild, member, identity):
             continue
         try:
             cur = ch.overwrites_for(member)
-            if ident_lc and suffix == ident_lc:
+            if idents and suffix in idents:
                 # Son identite -> acces garanti (skip si deja accorde)
                 if cur.view_channel is not True:
                     await ch.set_permissions(
@@ -476,7 +526,7 @@ async def sync_general_channel_access(guild, member, identity):
                         send_messages=True,
                         read_message_history=True,
                         attach_files=True,
-                        reason=f"VA assignee a {ident_lc} - acces salons identite",
+                        reason=f"VA assignee a {suffix} - acces salons identite",
                     )
                     granted += 1
             elif not ident_lc:
@@ -2122,6 +2172,9 @@ class Welcome(commands.Cog):
                     log.error(f"on_member_join auto-ticket: {error} (member={member.id})")
                 else:
                     log.info(f"on_member_join: ticket cree automatiquement pour {member.id} -> {channel.id}")
+                    e = load_users().get(str(member.id))
+                    await self.donner_role_model(
+                        member, (e or {}).get("identity") if isinstance(e, dict) else None)
             except Exception as e:
                 log.error(f"on_member_join auto-ticket exception: {e}")
             return
@@ -2149,6 +2202,72 @@ class Welcome(commands.Cog):
             await channel.send(content=text, view=WelcomeContinueView())
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")
+
+    async def donner_role_model(self, member, identite):
+        """Le role de sa model a un VA qui n'en a aucun (ticket neuf, fiche
+        faite par /adduser). Pose par le bot : _apres_roles_models ne lui
+        reposte pas un menu que le ticket vient de recevoir."""
+        if not identite or models_du_membre(member):
+            return False
+        role = role_du_model(member.guild, identite)
+        if role is None:
+            return False
+        if not hasattr(self, "_roles_auto"):
+            self._roles_auto = set()
+        self._roles_auto.add(member.id)
+        try:
+            await member.add_roles(role, reason=f"Model {identite} (fiche du VA)")
+            return True
+        except Exception as e:                               # noqa: BLE001
+            self._roles_auto.discard(member.id)
+            log.warning(f"role {identite} non pose a {member.id} : {e}")
+            return False
+
+    async def _apres_roles_models(self, before, after):
+        """Les roles de model ont change (serveur FR) : la fiche suit.
+
+        - La model principale (fiche users.json, celle du contenu sans menu
+          precis) devient la premiere des roles si elle n'en fait plus partie ;
+          le ticket passe dans sa categorie.
+        - Les salons des models : toutes celles des roles, aucune autre.
+        - Une model AJOUTEE recoit son menu dans le ticket (sauf role pose
+          par le bot a la creation du ticket, qui a deja le sien).
+        Rien sans fiche (pas encore de ticket) ni quand tous les roles partent
+        (la fiche garde sa model : un retrait par erreur ne vide rien)."""
+        if getattr(after, "bot", False):
+            return
+        avant, apres = models_du_membre(before), models_du_membre(after)
+        if avant == apres or not apres:
+            return
+        auto = after.id in getattr(self, "_roles_auto", set())
+        getattr(self, "_roles_auto", set()).discard(after.id)
+        users = load_users()
+        e = users.get(str(after.id))
+        if not isinstance(e, dict):
+            return
+        ch = after.guild.get_channel(int(e.get("channel_id") or 0))
+        ident = str(e.get("identity") or "").strip().lower()
+        if ident not in apres:
+            e["identity"] = apres[0]
+            save_users(users)
+            log.info(f"models : {after.id} passe de {ident or '-'} a {apres[0]} (roles {apres})")
+            cat = find_identity_category(after.guild, apres[0])
+            if ch is not None and cat is not None and getattr(ch, "category", None) != cat:
+                try:
+                    await ch.edit(category=cat, sync_permissions=False,
+                                  reason=f"Model {apres[0]} (role)")
+                except Exception as x:                       # noqa: BLE001
+                    log.warning(f"ticket de {after.id} non deplace vers {apres[0]} : {x}")
+        await sync_general_channel_access(after.guild, after, apres)
+        if auto or ch is None:
+            return
+        ucog = self.bot.get_cog("UserCog") if self.bot else None
+        for m in [m for m in apres if m not in avant]:
+            try:
+                if ucog is not None and hasattr(ucog, "_post_menu"):
+                    await ucog._post_menu(ch, m, mention_user_id=after.id)
+            except Exception as x:                           # noqa: BLE001
+                log.warning(f"menu {m} non poste a {after.id} : {x}")
 
     async def _apres_verification(self, before, after):
         """✅ Verifie vient d'etre pose (par Luigi, cogs verif_discord) sur un
@@ -2186,6 +2305,10 @@ class Welcome(commands.Cog):
             await self._apres_verification(before, after)
         except Exception as e:                               # noqa: BLE001
             log.error(f"apres verification de {getattr(after, 'id', '?')} : {e}")
+        try:
+            await self._apres_roles_models(before, after)
+        except Exception as e:                               # noqa: BLE001
+            log.error(f"roles de model de {getattr(after, 'id', '?')} : {e}")
         try:
             if before.roles == after.roles:
                 return
@@ -2375,9 +2498,10 @@ class Welcome(commands.Cog):
                         member = None
                     if not member:
                         continue
-                    identity_to_members.setdefault(
-                        ident.lower().strip(), set()
-                    ).add(member)
+                    # ses models par les roles (serveur FR), sinon sa fiche :
+                    # sans ca, la 2e model d'un VA lui etait retiree ici
+                    for i in identites_du_membre(member, ident):
+                        identity_to_members.setdefault(i, set()).add(member)
 
                 for ch in guild.text_channels:
                     suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
