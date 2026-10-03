@@ -65,6 +65,25 @@ TW, IG = pd.TWITTER_ID, pd.VA_IG_ID
 GIDS = (TW, IG)
 J = dt.timedelta(days=1)
 
+# Va IG porte le thème Mario (clé « theme » de podium_discord.SERVEURS, vérifié
+# en détail par tests_podium_mario.py) : ses titres et la ligne de son podium
+# figé sont ceux de la course. Twitter garde les siens. .get : ce fichier tourne
+# aussi sur un code sans thème (tests_podium_us.py, section H), où Va IG
+# reprend les mots de Twitter.
+_MARIO = bool(pd.SERVEURS.get(IG, {}).get("theme"))
+
+
+def _mots(twitter, mario):
+    return {TW: twitter, IG: mario if _MARIO else twitter}
+
+
+T_EN_COURS = _mots("🔴 PODIUM SUBS — SEMAINE EN COURS", "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄")
+T_TERMINE = _mots("🏁 PODIUM SUBS — SEMAINE TERMINÉE", "🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE")
+T_FINAL = _mots("🏆 PODIUM SUBS DE LA SEMAINE", "🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE")
+T_QUINZAINE = _mots("📊 Classement subs", "🏎️ Championnat des subs")
+FIN_PODIUM = _mots("Semaine terminée : classement arrêté, il ne bougera plus.",
+                   "Course terminée : le podium ne bougera plus.")
+
 # ---------------------------------------------------------------- bac à sable --
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="podium_fige_test_"))
 _SAUVE = {k: getattr(pd, k) for k in (
@@ -306,7 +325,7 @@ def vivant_dans(js):
 
 def fige(js):
     t = titre(js)
-    return t == "🏆 PODIUM SUBS DE LA SEMAINE" or "(terminée)" in t
+    return t in T_FINAL.values() or "(terminée)" in t
 
 
 def controle_figes(etiquette):
@@ -386,7 +405,7 @@ try:
     for g in GIDS:
         js = msgs(P(g))[vivant_w[g]]["json"]
         check(f"{g} dimanche soir : le message de la semaine est vivant",
-              "SEMAINE EN COURS" in titre(js))
+              titre(js) == T_EN_COURS[g])
         check(f"{g} dimanche soir : le dernier relevé est gardé pour figer sans GetMySocial",
               (etat["vivants"][g].get("dernier") or {}).get("lignes")
               and etat["vivants"][g]["dernier"]["le"] == "27/09 à 20h00")
@@ -398,7 +417,7 @@ try:
         js = msgs(P(g))[vivant_w[g]]["json"]
         d0 = texte(js)
         check(f"{g} lundi 00h10 : le message dit « semaine terminée »",
-              titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE", titre(js))
+              titre(js) == T_TERMINE[g], titre(js))
         check(f"{g} lundi 00h10 : le podium officiel est annoncé pour 9h, sur ce message",
               "Le podium officiel arrive ce lundi à 9h, sur ce message" in d0)
         va1 = premier(g)
@@ -421,7 +440,7 @@ try:
               pd.a_rafraichir(g) is False)
         check(f"{g} lundi 08h50 : « terminée » n'a été écrit qu'une fois",
               sum(1 for x in appels_sur(vivant_w[g]) if x["m"] == "PATCH"
-                  and titre(x["json"]) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE") == 1)
+                  and titre(x["json"]) == T_TERMINE[g]) == 1)
         check(f"{g} lundi 08h50 : toujours aucun message neuf dans le salon du podium",
               not posts(P(g), apres=dt.datetime(2026, 9, 27, 21, 0)))
 
@@ -434,9 +453,8 @@ try:
         d9 = texte(js)
         check(f"{g} 09h : le podium est le MÊME message, figé sur place",
               etat["postes"].get(f"{g}:{LUN_W}") == mid)
-        check(f"{g} 09h : titre du podium final", titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE")
-        check(f"{g} 09h : le message dit qu'il ne bougera plus",
-              "Semaine terminée : classement arrêté, il ne bougera plus." in d9)
+        check(f"{g} 09h : titre du podium final", titre(js) == T_FINAL[g])
+        check(f"{g} 09h : le message dit qu'il ne bougera plus", FIN_PODIUM[g] in d9)
         check(f"{g} 09h : pied « résultat final »",
               js["embeds"][0]["footer"]["text"].endswith("· résultat final"))
         va1 = premier(g)
@@ -458,7 +476,7 @@ try:
         neufs = [x for x in posts(P(g), apres=neuf - dt.timedelta(minutes=1))
                  if (x["json"] or {}).get("embeds")]
         check(f"{g} 09h : le message de la semaine neuve part APRÈS (même tour)",
-              len(neufs) == 1 and "SEMAINE EN COURS" in titre(neufs[0]["json"])
+              len(neufs) == 1 and titre(neufs[0]["json"]) == T_EN_COURS[g]
               and DISCORD.appels.index(neufs[0]) > DISCORD.appels.index(ping[0]))
         check(f"{g} 09h : le message neuf est sous le podium dans le salon",
               msgs(P(g))[etat["vivants"][g]["message"]]["rang"] > msgs(P(g))[mid]["rang"])
@@ -473,7 +491,7 @@ try:
               and len([x for x in posts(P(g)) if (x["json"] or {}).get("content")]) == 1)
         js = msgs(S(g))[page_old[g]]["json"]
         check(f"{g} 30/09 23h50 : la quinzaine est encore vivante",
-              titre(js) == "📊 Classement subs — la quinzaine")
+              titre(js) == f"{T_QUINZAINE[g]} — la quinzaine")
 
     jeudi = dt.datetime(2026, 10, 1, 0, 10)
     a(jeudi)
@@ -482,7 +500,7 @@ try:
         js = msgs(S(g))[page_old[g]]["json"]
         ds = texte(js)
         check(f"{g} 01/10 : l'ancienne page est figée, ses dates dans le titre",
-              titre(js) == "📊 Classement subs — quinzaine du 16/09 au 30/09 (terminée)", titre(js))
+              titre(js) == f"{T_QUINZAINE[g]} — quinzaine du 16/09 au 30/09 (terminée)", titre(js))
         check(f"{g} 01/10 : elle dit que la période est finie et ne bougera plus",
               "Période terminée : classement arrêté, il ne bougera plus." in ds
               and js["embeds"][0]["footer"]["text"].endswith("· résultat final"))
@@ -500,7 +518,7 @@ try:
         check(f"{g} 01/10 : la quinzaine neuve a SA page, postée après la figée",
               nouv["saison"] == S_NEW.isoformat() and nouv["messages"][0] != page_old[g]
               and msgs(S(g))[nouv["messages"][0]]["rang"] > msgs(S(g))[page_old[g]]["rang"]
-              and titre(msgs(S(g))[nouv["messages"][0]]["json"]) == "📊 Classement subs — la quinzaine")
+              and titre(msgs(S(g))[nouv["messages"][0]]["json"]) == f"{T_QUINZAINE[g]} — la quinzaine")
         fig_patch = [x for x in appels_sur(page_old[g]) if x["m"] == "PATCH" and fige(x["json"])]
         neuve_post = [x for x in posts(S(g), apres=jeudi - dt.timedelta(minutes=1))]
         check(f"{g} 01/10 : figée AVANT que la neuve parte",
@@ -526,7 +544,7 @@ try:
         js1 = msgs(P(g))[mid_w1]["json"] if mid_w1 in msgs(P(g)) else {}
         va1 = premier(g)
         check(f"{g} lundi 05/10 : la semaine du 28/09 est figée à son tour, sur place",
-              titre(js1) == "🏆 PODIUM SUBS DE LA SEMAINE"
+              titre(js1) == T_FINAL[g]
               and f'**{va1}** — **{complet(g, va1, LUN_W1, DIM_W1)}** subs' in texte(js1))
         apres_final = [x for x in appels_sur(vivant_w[g])
                        if x["quand"] > neuf]
@@ -550,8 +568,7 @@ try:
               sem_ordre)
         check(f"{g} : seul le message de la semaine en cours est vivant",
               [titre(m["json"]) for _mid, m in ordre if (m["json"] or {}).get("embeds")]
-              == ["🏆 PODIUM SUBS DE LA SEMAINE", "🏆 PODIUM SUBS DE LA SEMAINE",
-                  "🔴 PODIUM SUBS — SEMAINE EN COURS"])
+              == [T_FINAL[g], T_FINAL[g], T_EN_COURS[g]])
         periodes = {}
         for mid, m in msgs(S(g)).items():
             periodes.setdefault(periode_du(m["json"]), []).append(mid)
@@ -637,7 +654,7 @@ try:
     for g in GIDS:
         js = msgs(P(g))[vivant_w[g]]["json"]
         check(f"{g} relevé vide à 00h10 : « terminée » avec le dernier relevé, et il le dit",
-              titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE"
+              titre(js) == T_TERMINE[g]
               and "Chiffres du dernier relevé (27/09 à 20h00)" in texte(js), texte(js)[-300:])
     t = dt.datetime(2026, 9, 28, 9, 0)
     while t <= dt.datetime(2026, 9, 28, 23, 50):
@@ -659,8 +676,8 @@ try:
         mid = vivant_w[g]
         js = msgs(P(g))[mid]["json"]
         check(f"{g} mardi : la semaine finie est FIGÉE (podium final, il ne bougera plus)",
-              titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE"
-              and "il ne bougera plus" in texte(js))
+              titre(js) == T_FINAL[g]
+              and FIN_PODIUM[g] in texte(js))
         check(f"{g} mardi : aucune mention @everyone",
               not [x for x in posts(P(g)) if "@everyone" in str((x["json"] or {}).get("content"))])
         check(f"{g} mardi : aucune prime annoncée", (g, LUN_W.isoformat()) not in _PRIMES)
@@ -672,7 +689,7 @@ try:
         check(f"{g} mardi : la semaine neuve part APRÈS le gel",
               len(neufs) == 1 and len(fin_patch) == 1
               and DISCORD.appels.index(fin_patch[0]) < DISCORD.appels.index(neufs[0])
-              and "SEMAINE EN COURS" in titre(neufs[0]["json"]))
+              and titre(neufs[0]["json"]) == T_EN_COURS[g])
         check(f"{g} : depuis lundi, deux éditions (« terminée » puis finale), pas une de plus",
               len([x for x in appels_sur(mid) if x["m"] == "PATCH" and x["quand"] >= lundi]) == 2)
     va1 = premier(TW)
@@ -772,13 +789,13 @@ try:
     check("Va IG avant 48 h : toujours en attente, essais espacés d'au moins 2 h",
           2 < essais_ig <= 1 + 48 // 2, essais_ig)
     check("Va IG avant 48 h : l'ancienne page est encore dans son état vivant",
-          titre(msgs(S(IG))[page_old[IG]]["json"]) == "📊 Classement subs — la quinzaine")
+          titre(msgs(S(IG))[page_old[IG]]["json"]) == f"{T_QUINZAINE[IG]} — la quinzaine")
     abandon = dt.datetime(2026, 10, 3, 0, 20)
     a(abandon)
     etat = pd._etat()
     js = msgs(S(IG))[page_old[IG]]["json"]
     check("Va IG à 48 h : figée avec le dernier relevé, et le message le dit",
-          titre(js) == "📊 Classement subs — quinzaine du 16/09 au 30/09 (terminée)"
+          titre(js) == f"{T_QUINZAINE[IG]} — quinzaine du 16/09 au 30/09 (terminée)"
           and "Chiffres du dernier relevé (30/09 à 23h50)" in texte(js)
           and "il ne bougera plus" in texte(js), texte(js)[-300:])
     check("Va IG à 48 h : historique « incomplet », plus rien en attente",
@@ -1189,7 +1206,7 @@ try:
         js = msgs(P(g))[w[g]]["json"]
         va1 = premier(g)
         check(f"{g} pause, mardi : figée sur les chiffres de la semaine entière, sans promesse périmée",
-              titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE" and "podium officiel arrive" not in texte(js)
+              titre(js) == T_FINAL[g] and "podium officiel arrive" not in texte(js)
               and "dernier relevé" not in texte(js)
               and f'**{va1}** — **{complet(g, va1, LUN_W, DIM_W)}** subs' in texte(js), texte(js)[:300])
         check(f"{g} pause, mardi : figée dès le premier tour du mardi",
@@ -1206,7 +1223,7 @@ try:
     for g in GIDS:
         neufs = posts(P(g), apres=fin_pause - dt.timedelta(minutes=1))
         check(f"{g} fin de la pause : la semaine neuve part, sous la semaine figée",
-              len(neufs) == 1 and "SEMAINE EN COURS" in titre(neufs[0]["json"]))
+              len(neufs) == 1 and titre(neufs[0]["json"]) == T_EN_COURS[g])
     controle_orphelins("pause lundi-mardi")
 
     # ================================================================ 16. --

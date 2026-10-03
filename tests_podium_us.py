@@ -175,6 +175,26 @@ def check(label, cond, detail=""):
 
 TW, IG = pd.TWITTER_ID, pd.VA_IG_ID
 GIDS = (TW, IG)
+# Va IG porte aussi le thème Mario (clé « theme », vérifié en détail par
+# tests_podium_mario.py). Le faux Discord ne crée pas d'emoji : ses trois
+# premières places portent les marqueurs de repli 👑 ⭐ 🍄, le montant 🪙, les
+# places suivantes 🟢, et ses titres sont ceux de la course. Les chiffres, les
+# rangs et les primes contrôlés ici n'en dépendent pas. Twitter garde 🥇 🥈 🥉
+# et 💰. .get : sans le thème, Va IG reprend les mots de Twitter.
+MARIO = bool(pd.SERVEURS[IG].get("theme"))
+MED_IG = ["👑", "⭐", "🍄"] if MARIO else ["🥇", "🥈", "🥉"]
+PIECE_IG = "🪙" if MARIO else "💰"
+SUITE_IG = "🟢 " if MARIO else ""
+T_IG = ({"en_cours": "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄",
+         "termine": "🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE",
+         "final": "🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE",
+         "quinzaine": "🏎️ Championnat des subs"} if MARIO else
+        {"en_cours": "🔴 PODIUM SUBS — SEMAINE EN COURS",
+         "termine": "🏁 PODIUM SUBS — SEMAINE TERMINÉE",
+         "final": "🏆 PODIUM SUBS DE LA SEMAINE",
+         "quinzaine": "📊 Classement subs"})
+FIN_IG = ("Course terminée : le podium ne bougera plus." if MARIO
+          else "Semaine terminée : classement arrêté, il ne bougera plus.")
 
 
 # ------------------------------------------------------- le faux Discord --
@@ -327,9 +347,11 @@ def msg(salon, mid):
 # FR) » (l'ancien rang FR à côté du montant) et le groupe « FR 📸 / US 🐦 »
 # restent lus : une marque revenue sur une ligne doit faire échouer les
 # contrôles, pas les rendre aveugles.
-RE_PODIUM = re.compile(r"^(?:(🥇|🥈|🥉)|(\d+)\.) \*{0,2}(.+?)\*{0,2} — \*\*(\d+)\*\* subs"
-                       r"(?: · (FR 📸|US 🐦))?(?: · 💰 \*\*(\d+)\$\*\*(?: \((\d+)(?:er|e) VA FR\))?)?$")
-RE_SUBS = re.compile(r"^(?:(🥇|🥈|🥉)|(\d+)\.) \*{0,2}(.+?)\*{0,2} — \*{0,2}(\d+)\*{0,2} subs"
+# Les marqueurs du thème de Va IG (👑 ⭐ 🍄, 🪙, 🟢 devant les places 4+) sont
+# lus aussi ; QUEL marqueur est sur quelle ligne, c'est aux contrôles de le dire.
+RE_PODIUM = re.compile(r"^(?:(🥇|🥈|🥉|👑|⭐|🍄)|(\d+)\.(?: 🟢)?) \*{0,2}(.+?)\*{0,2} — \*\*(\d+)\*\* subs"
+                       r"(?: · (FR 📸|US 🐦))?(?: · (?:💰|🪙) \*\*(\d+)\$\*\*(?: \((\d+)(?:er|e) VA FR\))?)?$")
+RE_SUBS = re.compile(r"^(?:(🥇|🥈|🥉|👑|⭐|🍄)|(\d+)\.(?: 🟢)?) \*{0,2}(.+?)\*{0,2} — \*{0,2}(\d+)\*{0,2} subs"
                      r"(?: · (FR 📸|US 🐦))?(?: · 🌐 (\d+) all-time)?$")
 
 
@@ -359,8 +381,10 @@ LUN_W1 = dt.date(2026, 9, 28)
 S_OLD, S_OLD_FIN, S_NEW = dt.date(2026, 9, 16), dt.date(2026, 9, 30), dt.date(2026, 10, 1)
 ABO_MIX = "Abonnements de **toute l'agence**"
 # mêlé aussi, le bloc des primes de Twitter : les trois premiers de la liste
-PRIMES_GEN = ["🎁 **Les 3 meilleurs de la semaine touchent une prime :**",
-              "🥇 1er → **10$**", "🥈 2e → **5$**", "🥉 3e → **3$**"]
+# (avec le thème, le bloc de la course : mêmes montants, mêmes places)
+PRIMES_GEN = (["🏆 **Le podium de la course gagne des pièces :**" if MARIO
+               else "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
+              + [f"{MED_IG[0]} 1er → **10$**", f"{MED_IG[1]} 2e → **5$**", f"{MED_IG[2]} 3e → **3$**"])
 
 
 def controle_podium_mix(etiquette, js, d0, d1, entier=True):
@@ -376,8 +400,9 @@ def controle_podium_mix(etiquette, js, d0, d1, entier=True):
     check(f"{etiquette} : le marché n'est dit nulle part, paie comprise (plus de « VA FR »)",
           not marche_dit(t), marche_dit(t))
     check(f"{etiquette} : médailles aux trois premières places, quel que soit le marché",
-          [x["med"] for x in ls[:3]] == ["🥇", "🥈", "🥉"] and ls[0]["va"] == "VA 1"
-          and all(x["med"] is None for x in ls[3:]))
+          [x["med"] for x in ls[:3]] == MED_IG and ls[0]["va"] == "VA 1"
+          and all(x["med"] is None for x in ls[3:])
+          and all(x["brut"].startswith(f'{x["rang"]}. {SUITE_IG}') for x in ls[3:]))
     primes = {x["va"]: x["extra"] for x in ls if x["extra"] is not None}
     check(f"{etiquette} : 💰 aux trois premiers du classement mêlé (10 / 5 / 3 $), "
           "VA US compris : VA 1 (US) 10$, Amelia VA 3 (FR) 5$, VA 2 (US) 3$",
@@ -386,9 +411,9 @@ def controle_podium_mix(etiquette, js, d0, d1, entier=True):
     check(f"{etiquette} : rien à côté du 💰 (plus de « (1er VA FR) ») — le rang de la ligne "
           "est celui qu'on réclame",
           all(x["rang_fr"] is None for x in ls)
-          and f"\n🥇 **VA 1** — **{attendu('VA 1', d0, d1)}** subs · 💰 **10$**\n" in t
-          and f"\n🥈 **Amelia VA 3** — **{attendu('Amelia VA 3', d0, d1)}** subs · 💰 **5$**\n" in t
-          and f"\n🥉 **VA 2** — **{attendu('VA 2', d0, d1)}** subs · 💰 **3$**\n" in t,
+          and f"\n{MED_IG[0]} **VA 1** — **{attendu('VA 1', d0, d1)}** subs · {PIECE_IG} **10$**\n" in t
+          and f"\n{MED_IG[1]} **Amelia VA 3** — **{attendu('Amelia VA 3', d0, d1)}** subs · {PIECE_IG} **5$**\n" in t
+          and f"\n{MED_IG[2]} **VA 2** — **{attendu('VA 2', d0, d1)}** subs · {PIECE_IG} **3$**\n" in t,
           [x["brut"] for x in ls[:3]])
     check(f"{etiquette} : la prime se réclame avec « ton rang de la semaine », comme sur Twitter",
           "avec **ton rang de la semaine** et" in t and "ton rang parmi" not in t, t[-500:])
@@ -414,7 +439,7 @@ def controle_subs_mix(etiquette, js, d0, d1, totaux_us=None, totaux_fr=None):
           "\nSubs de **toute l'agence** · **8** comptes classés\n" in t, t[:300])
     check(f"{etiquette} : le marché n'est dit nulle part dans la page", not marche_dit(t), marche_dit(t))
     check(f"{etiquette} : la quinzaine ne paie rien — ni 💰 ni prime",
-          "💰" not in t and "prime" not in t.lower(), t[-400:])
+          "💰" not in t and "🪙" not in t and "prime" not in t.lower(), t[-400:])
     tot = sum(attendu(v, d0, d1) for v in FR_NOMS | US_NOMS)
     check(f"{etiquette} : un seul total, la somme de toutes les lignes ({tot})",
           tot == sum(x["clics"] for x in ls)
@@ -573,7 +598,7 @@ try:
         js = msg(P(IG), etat["vivants"][IG]["message"])
         controle_podium_mix("vivant mardi", js, LUN_W, t.date())
         check("vivant mardi : toujours « Semaine en cours » et « Rien n'est joué »",
-              titre(js) == "🔴 PODIUM SUBS — SEMAINE EN COURS" and "Rien n'est joué" in desc(js))
+              titre(js) == T_IG["en_cours"] and "rien n'est joué" in desc(js).lower())
         check("vivant mardi : Va IG n'a fait AUCUN appel GetMySocial sur les liens de Twitter "
               "(relevé de Twitter repris, all-time compris)", not us_par_ig(t), us_par_ig(t)[:3])
         page = msg(S(IG), etat["subs"][IG]["messages"][0])
@@ -583,7 +608,7 @@ try:
               set(totaux_us) == US_NOMS and set(totaux_fr) == FR_NOMS, (totaux_us, totaux_fr))
         controle_subs_mix("quinzaine vivante", page, S_OLD, t.date(), totaux_us, totaux_fr)
         check("quinzaine vivante : toujours « la quinzaine » et « mis à jour »",
-              titre(page) == "📊 Classement subs — la quinzaine" and "mis à jour" in pied(page))
+              titre(page) == f'{T_IG["quinzaine"]} — la quinzaine' and "mis à jour" in pied(page))
         for nom, snap in (("semaine", etat["vivants"][IG]["dernier"]),
                           ("quinzaine", etat["subs"][IG]["dernier"])):
             check(f"relevé gardé pour figer ({nom}) : les seuls VA FR, sans marque ni prime",
@@ -612,11 +637,11 @@ try:
         t = m(2026, 9, 28, 0, 10)
         etat = pd._etat()
         js = msg(P(IG), etat["vivants"][IG]["message"])
-        check("lundi 00h10 : « semaine terminée » sur Va IG", titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE")
+        check("lundi 00h10 : « semaine terminée » sur Va IG", titre(js) == T_IG["termine"])
         controle_podium_mix("lundi 00h10", js, LUN_W, DIM_W)
         check("lundi 00h10 : chiffres de la semaine ENTIÈRE, des deux côtés",
-              "\n🥇 **VA 1** — **1680** subs · 💰 **10$**\n" in desc(js)
-              and "\n🥈 **Amelia VA 3** — **1512** subs · 💰 **5$**\n" in desc(js),
+              f"\n{MED_IG[0]} **VA 1** — **1680** subs · {PIECE_IG} **10$**\n" in desc(js)
+              and f"\n{MED_IG[1]} **Amelia VA 3** — **1512** subs · {PIECE_IG} **5$**\n" in desc(js),
               desc(js)[:500])
         check("lundi 00h10 : zéro appel US de Va IG (le relevé « terminée » de Twitter est repris)",
               not us_par_ig(t), us_par_ig(t)[:3])
@@ -626,8 +651,8 @@ try:
         etat = pd._etat()
         mid = etat["postes"][f"{IG}:{LUN_W}"]
         js = msg(P(IG), mid)
-        check("lundi 9h : le podium de Va IG est figé, mêlé", titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE"
-              and "il ne bougera plus" in desc(js) and pied(js).endswith("· résultat final"))
+        check("lundi 9h : le podium de Va IG est figé, mêlé", titre(js) == T_IG["final"]
+              and FIN_IG in desc(js) and pied(js).endswith("· résultat final"))
         controle_podium_mix("podium final", js, LUN_W, DIM_W)
         prim = [x for x in _PRIMES if x[0] == IG and x[1] == LUN_W.isoformat()]
         cl = prim[0][2] if prim else {"lignes": []}
@@ -662,14 +687,14 @@ try:
         fg = etat["subs_figes"][IG][S_OLD.isoformat()]
         js = msg(S(IG), fg["messages"][0])
         check("01/10 : la quinzaine finie de Va IG est figée",
-              titre(js) == "📊 Classement subs — quinzaine du 16/09 au 30/09 (terminée)"
+              titre(js) == f'{T_IG["quinzaine"]} — quinzaine du 16/09 au 30/09 (terminée)'
               and "Période terminée : classement arrêté, il ne bougera plus." in desc(js)
               and pied(js).endswith("· résultat final") and fg["complet"] is True, titre(js))
         controle_subs_mix("quinzaine figée", js, S_OLD, S_OLD_FIN)
         check("quinzaine figée : chiffres de la période ENTIÈRE (16 → 30/09), pas ceux de 23h50",
-              re.search(r"^🥇 \*\*VA 1\*\* — \*\*3600\*\* subs( · 🌐 \d+ all-time)?$",
+              re.search(f"^{MED_IG[0]}" + r" \*\*VA 1\*\* — \*\*3600\*\* subs( · 🌐 \d+ all-time)?$",
                         desc(js), re.M)
-              and re.search(r"^🥈 \*\*Amelia VA 3\*\* — \*\*3240\*\* subs( · 🌐 \d+ all-time)?$",
+              and re.search(f"^{MED_IG[1]}" + r" \*\*Amelia VA 3\*\* — \*\*3240\*\* subs( · 🌐 \d+ all-time)?$",
                             desc(js), re.M), desc(js)[:400])
         check("01/10 : zéro appel US de Va IG pour figer", not us_par_ig(t), us_par_ig(t)[:3])
         check("quinzaine figée : rien n'y parle encore au présent",
@@ -764,15 +789,15 @@ try:
     t = desc(pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us1))
     ls = lignes(t)
     check("un VA US premier : 🥇 et 💰 10$ (les primes vont aux trois premiers de toute l'agence)",
-          ls[0]["brut"] == "🥇 **VA 1** — **100** subs · 💰 **10$**", ls[:1])
+          ls[0]["brut"] == f"{MED_IG[0]} **VA 1** — **100** subs · {PIECE_IG} **10$**", ls[:1])
     check("un VA FR deuxième derrière lui : 🥈 et 💰 5$ — son vrai rang, plus « (1er VA FR) »",
-          ls[1]["brut"] == "🥈 **Amelia VA 3** — **40** subs · 💰 **5$**", ls[1:2])
+          ls[1]["brut"] == f"{MED_IG[1]} **Amelia VA 3** — **40** subs · {PIECE_IG} **5$**", ls[1:2])
     check("une ligne à zéro sub dans le top 3 : 🥉 sans 💰 (suivi_va ne la paie pas), et le "
           "3$ ne passe pas au 4e",
-          ls[2]["brut"] == "🥉 **Amelia VA 1** — **0** subs"
-          and ls[3]["brut"] == "4. Lola VA 2 — **0** subs" and len(ls) == 4, [x["brut"] for x in ls])
+          ls[2]["brut"] == f"{MED_IG[2]} **Amelia VA 1** — **0** subs"
+          and ls[3]["brut"] == f"4. {SUITE_IG}Lola VA 2 — **0** subs" and len(ls) == 4, [x["brut"] for x in ls])
     check("… 💰 deux fois exactement, et nulle part un rang FR ou « VA FR »",
-          t.count("💰") == 2 and "VA FR" not in t and not marche_dit(t), t)
+          t.count(PIECE_IG) == 2 and "VA FR" not in t and not marche_dit(t), t)
     paye = pd._classement_paye(IG, cl_fr, us1)
     check("la liste payée est la liste affichée, rang pour rang, prime pour prime",
           [(x["va"], x.get("prime")) for x in paye["lignes"]]
@@ -791,7 +816,8 @@ try:
     ls = lignes(desc(pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us2)))
     check("deux VA US devant : 10$ et 5$ pour eux, le VA FR 3e touche 3$",
           [(x["med"], x["va"], x["extra"]) for x in ls[:4]]
-          == [("🥇", "VA 1", 10), ("🥈", "VA 2", 5), ("🥉", "Amelia VA 3", 3), (None, "Amelia VA 1", None)],
+          == [(MED_IG[0], "VA 1", 10), (MED_IG[1], "VA 2", 5), (MED_IG[2], "Amelia VA 3", 3),
+              (None, "Amelia VA 1", None)],
           [x["brut"] for x in ls])
     # une ligne US à zéro dans le top 3 : même règle, quel que soit le marché
     ls = lignes(desc(pd.embed_podium({"lignes": [L("Amelia VA 3", 40, 3, "amelia")], "illisibles": [],
@@ -805,7 +831,7 @@ try:
     us_zero = {"lignes": [dict(x, clics=0) for x in us2["lignes"]], "illisibles": [], "frais": True}
     t = desc(pd.embed_podium(tout_zero, LUN_W, DIM_W, gid=IG, us=us_zero))
     check("tout le monde à zéro, FR et US : aucun 💰 dans le classement",
-          not [x for x in lignes(t) if x["extra"]] and len(lignes(t)) == 5 and t.count("💰") == 0, t)
+          not [x for x in lignes(t) if x["extra"]] and len(lignes(t)) == 5 and t.count(PIECE_IG) == 0, t)
     # un VA FR loin derrière vingt VA US : toujours visible, à son vrai rang
     us20 = {"lignes": [L(f"VA {i}", 200 - i, i) for i in range(1, 21)], "illisibles": [], "frais": True}
     cl3 = {"lignes": [L("Amelia VA 3", 40, 3, "amelia"), L("Amelia VA 1", 30, 1, "amelia"),
@@ -819,7 +845,7 @@ try:
           {x["va"]: x["extra"] for x in ls if x["extra"]} == {"VA 1": 10, "VA 2": 5, "VA 3": 3})
     check("… les quinze premiers d'abord, puis « … », puis les VA FR, puis le compte des autres",
           [x["rang"] or 0 for x in ls][:3] == [0, 0, 0] and [x["rang"] for x in ls][3:15] == list(range(4, 16))
-          and "**15** subs" not in t and "\n…\n21. Amelia VA 3" in t
+          and "**15** subs" not in t and f"\n…\n21. {SUITE_IG}Amelia VA 3" in t
           and "… _et 5 autres_ 👏" in t, t[-600:])
     # à égalité de clics : VA FR d'abord, toujours le même ordre — et donc la même prime
     eg = {"lignes": [L("VA 1", 40, 1)], "illisibles": [], "frais": True}
@@ -851,7 +877,7 @@ try:
     def c_fr_lundi():
         etat = pd._etat()
         ig_final = [x for x in DISCORD.appels if x["p"].startswith(f"/channels/{P(IG)}/")
-                    and titre(x["json"]) == "🏆 PODIUM SUBS DE LA SEMAINE"]
+                    and titre(x["json"]) == T_IG["final"]]
         check("lundi 23h50, FR muet : aucun podium sur Va IG, même avec les VA US disponibles",
               not ig_final and not (etat.get("postes") or {}).get(f"{IG}:{LUN_W}"))
         check("lundi, FR muet : aucune prime annoncée sur Va IG",
@@ -860,7 +886,7 @@ try:
               (etat.get("postes") or {}).get(f"{TW}:{LUN_W}"))
         js = msg(P(IG), etat["vivants"][IG]["message"])
         check("lundi, FR muet : « terminée » sur le dernier relevé FR, et il le dit",
-              titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE"
+              titre(js) == T_IG["termine"]
               and "Chiffres du dernier relevé (27/09 à 20h00)" in desc(js), desc(js)[-300:])
 
     def c_fr_mardi():
@@ -868,7 +894,7 @@ try:
         fg = etat["figes"][IG][LUN_W.isoformat()]
         js = msg(P(IG), fg["message"])
         check("mardi, FR revenu : la semaine de Va IG est figée sans podium, mêlée",
-              fg["mode"] == "sans_podium" and titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE"
+              fg["mode"] == "sans_podium" and titre(js) == T_IG["final"]
               and fg["complet"] is True)
         controle_podium_mix("gel du mardi", js, LUN_W, DIM_W)
         check("mardi : toujours aucune prime sur Va IG (elles n'appartiennent qu'au podium)",
@@ -903,7 +929,7 @@ try:
         check("gel en pause après un redémarrage : VA FR seuls, avec les mots d'avant (rien d'inventé)",
               sans_us(js) and "Abonnements via Instagram 📸 — clics **FR**" in desc(js)
               and pied(js) == "YOULAB • Marché FR · comptes VA, sans pseudo · résultat final"
-              and "🎁 **Les 3 meilleurs de la semaine touchent une prime :**" in desc(js), desc(js)[:300])
+              and PRIMES_GEN[0] in desc(js), desc(js)[:300])
         check("… et toujours aucun appel GetMySocial", not [x for x in GMS if x["quand"] >= mardi])
 
     derouler(pd, [(t, oubli if t == mardi else act) for t, act in CAL_PAUSE], {mardi: c_pause_oubli})
@@ -924,6 +950,11 @@ try:
             # aussi, pour comparer au code d'avant. Il a ses tests à lui
             # (tests_podium_maj.py).
             pd.SERVEURS[IG].pop("bouton_maj", None)
+            # le thème Mario (clé « theme », venue après 61e291f) change titres,
+            # couleurs et marqueurs : retiré lui aussi. Sans lui, Va IG doit
+            # retomber sur le code d'avant à l'octet près (tests_podium_mario.py
+            # le compare aussi au code d'avant le thème)
+            pd.SERVEURS[IG].pop("theme", None)
             sans = {nom: derouler(pd, cal) for nom, cal, _x in cals}
             check("sans la clé, Va IG ne relève jamais un lien de Twitter", not us_par_ig())
         finally:
@@ -946,9 +977,12 @@ try:
                   "seul le contenu change",
                   [(x[0], x[1]) for x in ig_ref] == [(x[0], x[1]) for x in ig_avec]
                   and ig_ref != ig_avec)
-        # les rendus seuls, pour un serveur FR et pour Twitter
+        # les rendus seuls, pour un serveur FR et pour Twitter (Va IG sans son
+        # thème, retiré ici et remis plus bas : avec, ses titres et marqueurs
+        # changent, c'est voulu)
         CLOCK["now"] = m(2026, 9, 28, 8, 0)
         cl_ill = dict(cl3, illisibles=["Lola VA 2"], frais=False)
+        _theme_ig = pd.SERVEURS[IG].pop("theme", None)
         for g in (IG, TW, None):
             for kw in ({"en_cours": True}, {"termine": True}, {}):
                 check(f"embed_podium {g or 'sans serveur'} {kw or 'final'} : rendu d'avant",
@@ -972,6 +1006,12 @@ try:
                   "défaut d'avant laissé au propriétaire)",
                   r_ == ancien.embed_podium(cl_zero, LUN_W, DIM_W, gid=g)
                   and "— **0** subs · 💰 **3$**" in desc(r_), desc(r_)[:400])
+        if _theme_ig is not None:
+            pd.SERVEURS[IG]["theme"] = _theme_ig
+            r_ = pd.embed_podium(cl_zero, LUN_W, DIM_W, gid=IG)
+            check("repli FR seul, Va IG avec son thème : la même règle d'avant, seule la pièce change "
+                  "(« 0 subs · 🪙 3$ »)",
+                  "— **0** subs · 🪙 **3$**" in desc(r_) and "💰" not in desc(r_), desc(r_)[:400])
 
     # ================================================================ 7. --
     print()
@@ -1032,7 +1072,7 @@ try:
               (b.get("zero_sub"), [x["brut"] for x in rendu[:3]]))
         # le rang et le montant que le gagnant lit en privé (« 🥈 2e de la
         # semaine — 5.00$ ») sont ceux de sa ligne sur le podium
-        publics = {x["va"]: (pd.MEDAILLES.index(x["med"]) + 1, float(x["extra"]))
+        publics = {x["va"]: (MED_IG.index(x["med"]) + 1, float(x["extra"]))
                    for x in gagnants if not _us(x["va"])}
         check(f"rang et montant annoncés en privé = ceux de la ligne du podium ({nom})",
               prives_de(ann) == publics, (prives_de(ann), publics))
@@ -1259,7 +1299,7 @@ try:
                    and x["p"] == f"/channels/{P(IG)}/messages/{mid}" and x["quand"] == t], mentions)
         controle_podium_mix("podium corrigé à 11h10", js, LUN_W, DIM_W)
         check("… toujours arrêté : « il ne bougera plus », « résultat final »",
-              titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE" and "il ne bougera plus" in desc(js)
+              titre(js) == T_IG["final"] and FIN_IG in desc(js)
               and pied(js).endswith("· résultat final"))
         fg = etat["figes"][IG][LUN_W.isoformat()]
         check("… l'historique dit complet, plus rien de retenu",
@@ -1359,7 +1399,7 @@ try:
         controle_subs_mix("quinzaine figée après relecture", js, S_OLD, S_OLD_FIN)
         tot_q = sum(attendu(v, S_OLD, S_OLD_FIN) for v in FR_NOMS | US_NOMS)
         check(f"… VA 3 y est, 1800 subs, total de toute l'agence {tot_q}, aucun avertissement",
-              "\n5. VA 3 — 1800 subs · 🌐 " in desc(js)
+              f"\n5. {SUITE_IG}VA 3 — 1800 subs · 🌐 " in desc(js)
               and f"👥 **Total période**\n**{tot_q}** subs" in desc(js)
               and "⚠️" not in desc(js), desc(js)[-500:])
         check("… sans un appel US de Va IG (le relevé complet de Twitter, 02h20, est repris)",
@@ -1549,8 +1589,9 @@ try:
     _e = pd.embed_podium(_cl, dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=IG, us=_us)
     _d = _e["description"]
     check("Jessye : podium « 🥇 **Jessye VA 7** — 58 subs · 💰 10$ », Amelia VA 3 2e 5$, Jessye VA 12 3e 3$",
-          "🥇 **Jessye VA 7** — **58** subs · 💰 **10$**" in _d and "🥈 **Amelia VA 3** — **41** subs · 💰 **5$**" in _d
-          and "🥉 **Jessye VA 12** — **17** subs · 💰 **3$**" in _d, _d[:600])
+          f"{MED_IG[0]} **Jessye VA 7** — **58** subs · {PIECE_IG} **10$**" in _d
+          and f"{MED_IG[1]} **Amelia VA 3** — **41** subs · {PIECE_IG} **5$**" in _d
+          and f"{MED_IG[2]} **Jessye VA 12** — **17** subs · {PIECE_IG} **3$**" in _d, _d[:600])
     check("Jessye : aucun VA US sans son nom (« **VA 7** » nu absent)", "**VA 7**" not in _d and "**VA 12**" not in _d)
     check("Jessye : l'avertissement nomme aussi « Jessye VA 3 »", "Jessye VA 3" in _d, _d[-400:])
     _pay = pd._classement_paye(IG, _cl, _us)
@@ -1561,7 +1602,7 @@ try:
                         {"Amelia VA 3": 50}, gid=IG, us=_us, totaux_us={"VA 7": 900, "VA 12": 40})
     _t = "\n".join(x["description"] for x in _pg)
     check("Jessye : quinzaine « Jessye VA 7 » avec SON all-time de Twitter (900), Amelia VA 3 le sien (50)",
-          "🥇 **Jessye VA 7** — **58** subs · 🌐 900 all-time" in _t and "**Amelia VA 3** — **41** subs · 🌐 50 all-time" in _t, _t[:500])
+          f"{MED_IG[0]} **Jessye VA 7** — **58** subs · 🌐 900 all-time" in _t and "**Amelia VA 3** — **41** subs · 🌐 50 all-time" in _t, _t[:500])
     _tw = pd.embed_podium(_us, dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=TW)
     check("Jessye : Twitter garde « VA 7 » (rien ne change sur son serveur)",
           "Jessye" not in json.dumps(_tw, ensure_ascii=False) and "**VA 7**" in _tw["description"])

@@ -6,7 +6,8 @@ main », « le bouton refresh ». Deux heures entre deux relevés sur Va IG :
 le staff veut voir le podium et le classement subs bouger tout de suite.
 
 Ce qui est vérifié :
-  - le bouton (gris, « Mettre à jour », 🔄, custom_id « podium:maj ») est
+  - le bouton (gris, « Mettre à jour » — « Relancer la course » sous le
+    thème Mario de Va IG —, 🔄, custom_id « podium:maj ») est
     sous le message VIVANT de la semaine et sous chaque page VIVANTE de la
     quinzaine de Va IG, à l'envoi comme à chaque réédition ; jamais sur
     Twitter (aucun « components » envoyé, ses messages restent ceux d'avant) ;
@@ -148,11 +149,21 @@ def check(label, cond, detail=""):
 
 TW, IG = pd.TWITTER_ID, pd.VA_IG_ID
 GIDS = (TW, IG)
-BOUTON = [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Mettre à jour",
+# Va IG porte le thème Mario (clé « theme », tests_podium_mario.py) : son
+# bouton s'appelle « Relancer la course » (même emoji, même custom_id) et ses
+# titres sont ceux de la course. .get : sans le thème, les mots d'avant.
+_MARIO = bool(pd.SERVEURS[IG].get("theme"))
+BOUTON = [{"type": 1, "components": [{"type": 2, "style": 2,
+                                      "label": "Relancer la course" if _MARIO else "Mettre à jour",
                                       "emoji": {"name": "🔄"}, "custom_id": "podium:maj"}]}]
 ROLE_MANAGER_IG = vd.SERVEURS_EXTRA[IG]["role_manager"]
 ROLE_MANAGER_TW = vd.SERVEURS_EXTRA[TW]["role_manager"]
-VIVANTS = ("🔴 PODIUM SUBS — SEMAINE EN COURS", "📊 Classement subs — la quinzaine")
+T_TERMINE_IG = ("🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE" if _MARIO
+                else "🏁 PODIUM SUBS — SEMAINE TERMINÉE")
+T_FINAL_IG = ("🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE" if _MARIO
+              else "🏆 PODIUM SUBS DE LA SEMAINE")
+VIVANTS = ("🔴 PODIUM SUBS — SEMAINE EN COURS", "📊 Classement subs — la quinzaine",
+           "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄", "🏎️ Championnat des subs — la quinzaine")
 
 
 # ------------------------------------------------------- le faux Discord --
@@ -455,13 +466,13 @@ try:
     mid_old = etat["vivants"][IG]["message"]
     js = DISCORD.salons[f"{IG}-podium"][mid_old]["json"]
     check("lundi 00h10, « semaine terminée » : le bouton s'en va",
-          titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE" and js.get("components") == [],
+          titre(js) == T_TERMINE_IG and js.get("components") == [],
           (titre(js), js.get("components")))
     a(m(2026, 9, 28, 9, 0))
     etat = pd._etat()
     js = DISCORD.salons[f"{IG}-podium"][mid_old]["json"]
     check("lundi 9h, podium figé sur place : sans bouton",
-          etat["postes"][f"{IG}:{LUN_W}"] == mid_old and titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE"
+          etat["postes"][f"{IG}:{LUN_W}"] == mid_old and titre(js) == T_FINAL_IG
           and js.get("components") == [], (titre(js), js.get("components")))
     neuf = etat["vivants"][IG]["message"]
     check("… et la semaine neuve repart avec le bouton, sous le podium",
@@ -490,10 +501,10 @@ try:
             js = DISCORD.salons[f"{IG}-podium"].get(fg.get("message"), {}).get("json") or {}
             check(f"{nom} : semaine figée sans podium, et sans bouton",
                   fg.get("mode") == "sans_podium" and js.get("components") == []
-                  and titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE", (fg, js.get("components")))
+                  and titre(js) == T_FINAL_IG, (fg, js.get("components")))
         if cal is CAL_REPOSTE:
             rep = [x for x in DISCORD.appels if x["m"] == "POST" and x["p"] == f"/channels/{IG}-podium/messages"
-                   and titre(x["json"]) == "🏆 PODIUM SUBS DE LA SEMAINE"]
+                   and titre(x["json"]) == T_FINAL_IG]
             check(f"{nom} : le podium reposté n'a pas de bouton",
                   len(rep) == 1 and rep[0]["json"].get("components") == []
                   and rep[0]["json"].get("content", "").startswith("@everyone"), rep)
@@ -756,7 +767,7 @@ try:
           and etat["vivants"][IG]["message"] == mid_old, nouv_p)
     js = DISCORD.salons[f"{IG}-podium"][mid_old]["json"]
     check("… le message de la semaine finie reste « terminée », sans bouton",
-          titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE" and js.get("components") == [])
+          titre(js) == T_TERMINE_IG and js.get("components") == [])
     check("… aucun relevé de semaine (ni la finie, ni la neuve) : la porte du lundi tient",
           not [x for x in GMS[g0:] if x["marche"] == "FR" and x["d0"] in ("2026-09-21", "2026-09-28")],
           [(x["d0"], x["d1"]) for x in GMS[g0:]])

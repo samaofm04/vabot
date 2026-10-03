@@ -78,6 +78,17 @@ leurs règles de gel restent maîtresses : un clic le lundi à 3h ne lance pas
 la semaine neuve avant le podium. Un seul passage à la fois (_exclusif) :
 un clic pendant le tour de la boucle, ou l'inverse, ne poste rien deux fois.
 
+LE THÈME MARIO (clé « theme », Va IG seulement). Propriétaire, 03/10/2026 :
+« tu penses y'a moyen de faire un theme Mario pour tout ca », puis « vas-y ».
+« Grand Prix des subs » pour la semaine, « Championnat des subs » pour la
+quinzaine, les têtes de Mario, Luigi et Peach aux trois premières places
+(emojis du serveur, posés par _assurer_emojis ; 👑 ⭐ 🍄 tant qu'ils
+manquent), 🪙 à la place du 💰, une vignette du site en haut à droite, le
+bouton « Relancer la course ». Rien d'autre ne bouge : mêmes chiffres, mêmes
+primes, mêmes avertissements, même pied. Sans la clé, le message d'avant.
+Un message figé relit la liste des têtes juste avant son rendu
+(_tetes_sures) : il ne gardera jamais pour toujours une tête disparue.
+
 Ce que podium.json en retient :
   vivants[gid]       semaine, message, vu, dernier (relevé gardé pour figer
                      sans GetMySocial), termine (le lundi, « terminée » déjà dit)
@@ -93,12 +104,18 @@ Ce que podium.json en retient :
                         relever GetMySocial une seconde fois ; sans_bouton
                         quand le bouton 🔄 de ses pages est déjà retiré)
   subs_figes[gid][debut]    historique des quinzaines figées
+
+Et podium_emojis.json : {gid: {nom: id}} des têtes du thème sur chaque
+serveur, plus _essais[gid] (jour du dernier passage chez Discord, et l'échec
+s'il y en a eu un) — un essai par jour au plus.
 """
 from __future__ import annotations
 
+import base64
 import contextvars
 import datetime as dt
 import functools
+import hashlib
 import json
 import re
 import threading
@@ -181,7 +198,18 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # messages deja postes, a leur prochaine edition ; sans la cle, rien
                # n'est envoye a Discord (Twitter, a l'octet pres comme avant) et un
                # bouton deja pose resterait.
-               "bouton_maj": True},
+               "bouton_maj": True,
+               # L'habillage « Mario Kart » du podium et du classement subs.
+               # Proprietaire, 03/10/2026 :
+               # « tu penses y'a moyen de faire un theme Mario pour tout ca »,
+               # puis « vas-y » (les bots s'appellent deja Mario, Luigi,
+               # Peach…). Voir THEMES : titres, couleurs, vignette, tetes des
+               # personnages au top 3, bouton « Relancer la course ».
+               # Les chiffres, les primes, les avertissements et le pied ne
+               # changent pas. POUR LE RETIRER : enlever cette cle ; chaque message
+               # redevient celui d'avant, a l'octet pres, au passage suivant (les
+               # messages deja figes gardent leur habillage).
+               "theme": "mario"},
 }
 
 
@@ -244,6 +272,310 @@ def _aujourdhui() -> dt.date:
 def _api(methode: str, chemin: str, **kw):
     from verif_discord import api
     return api(methode, chemin, **kw)
+
+
+# ─── le thème (clé « theme » de SERVEURS) ────────────────────────────────
+# Un thème ne touche QUE l'habillage : titres, couleurs, vignette, marqueurs
+# des places, libellé du bouton. Les rangs, les montants, les règles de prime,
+# les avertissements et le pied restent ceux du message sans thème : ce
+# message paie, et son sens ne doit pas dépendre d'un décor. Un serveur sans
+# la clé (Twitter) reçoit exactement le message d'avant.
+THEMES: Dict[str, Dict[str, Any]] = {
+    "mario": {
+        # le message de la semaine : vivant, « terminée » (lundi avant 9h), final
+        "titres": {"en_cours": "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄",
+                   "termine": "🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE",
+                   "final": "🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE"},
+        "lignes": {"en_cours": "🔴 _La course continue… rien n'est joué !_",
+                   # même promesse que sans thème : l'heure, et CE message
+                   "termine": "🏁 _Ligne d'arrivée franchie ! Le podium officiel arrive {quand}, "
+                              "sur ce message._",
+                   "final": "🔒 _Course terminée : le podium ne bougera plus._"},
+        # rouge Mario pendant la course, or une fois la ligne franchie
+        "couleurs": {"en_cours": 0xE52521, "termine": 0xF8C51C, "final": 0xF8C51C},
+        "primes": "🏆 **Le podium de la course gagne des pièces :**",
+        # la quinzaine : bleu Mario vivante, or figée
+        "subs": "🏎️ Championnat des subs",
+        "couleurs_subs": {"vivant": 0x049CD8, "final": 0xF8C51C},
+        # servies par Flask (dossier static/ du dépôt), publiques pour Discord
+        "vignettes": {"podium": "podium/grand_prix.png", "subs": "podium/championnat.png"},
+        # 1er, 2e, 3e : les têtes des personnages (emojis du serveur, voir
+        # _assurer_emojis), sinon ces trois-là
+        "emojis": ["kart_mario", "kart_luigi", "kart_peach"],
+        "repli": ["👑", "⭐", "🍄"],
+        "piece": "🪙",                 # à la place du 💰 : même montant, même règle
+        "suite": "🟢",                 # devant les places 4 et plus
+        "bouton": "Relancer la course",
+    },
+}
+
+# Les PNG des têtes, versionnés avec le code (le VPS n'a rien à dessiner).
+EMOJIS_DOSSIER = Path(__file__).resolve().parent / "emojis"
+EMOJI_MAX_OCTETS = 256 * 1024          # au-delà, Discord refuse l'emoji
+# Le dossier static/ du dépôt, que Flask (web_upload) sert à /static/ : les
+# vignettes y sont, Discord va les y chercher.
+STATIC_DOSSIER = Path(__file__).resolve().parent / "static"
+
+
+def _theme(gid: Optional[str]) -> Optional[Dict[str, Any]]:
+    """L'habillage du serveur, ou None (pas de clé, thème inconnu, pas de serveur)."""
+    if not gid:
+        return None
+    return THEMES.get(str(_profil(gid).get("theme") or ""))
+
+
+def _fichier_emojis() -> Path:
+    # relu à chaque appel, pas figé à l'import : les tests déplacent DATA_DIR
+    # dans un dossier temporaire, et le vrai data/ ne doit jamais être touché
+    return DATA_DIR / "podium_emojis.json"
+
+
+def _emojis_connus(gid: str) -> Dict[str, str]:
+    """{nom: id} des têtes connues sur ce serveur, lues dans le cache. Aucun réseau."""
+    d = _lire(_fichier_emojis(), {})
+    g = d.get(str(gid)) if isinstance(d, dict) else None
+    if not isinstance(g, dict):
+        return {}
+    return {str(k): str(v) for k, v in g.items() if str(v).isdigit()}
+
+
+def _marqueurs(gid: Optional[str], tetes: bool = True) -> List[str]:
+    """Les marqueurs des trois premières places. Appelé par les rendus : il
+    LIT le cache, il ne demande jamais rien à Discord (le rendu doit marcher
+    sans réseau, et un relevé ne doit pas attendre des emojis).
+
+    Les trois têtes ou aucune : un Mario à côté d'un ⭐ ferait croire à un
+    message cassé. Sans thème, les médailles d'avant.
+    `tetes=False` : 👑 ⭐ 🍄 même si le cache a les têtes (message figé dont
+    les têtes n'ont pas pu être vérifiées, voir _tetes_sures).
+    """
+    th = _theme(gid)
+    if not th:
+        return list(MEDAILLES)
+    ids = _emojis_connus(str(gid))
+    if tetes and all(n in ids for n in th["emojis"]):
+        return [f"<:{n}:{ids[n]}>" for n in th["emojis"]]
+    return list(th["repli"])
+
+
+@functools.lru_cache(maxsize=None)
+def _version_statique(rel: str) -> str:
+    """Les huit premiers caractères du md5 de static/<rel>, ou "" s'il manque.
+
+    Lu une fois par processus : un déploiement redémarre le bot, et l'image
+    ne change qu'avec lui.
+    """
+    try:
+        return hashlib.md5((STATIC_DOSSIER / rel).read_bytes()).hexdigest()[:8]
+    except OSError as e:
+        # dit une seule fois (le résultat est gardé), pas à chaque rendu : la
+        # vignette manquera sur Discord, le message, lui, part entier
+        print(f"[podium] vignette static/{rel} illisible ({type(e).__name__}) : adresse "
+              "sans version, l'image manquera sur Discord", flush=True)
+        return ""
+
+
+def _vignette(th: Dict[str, Any], quoi: str) -> Dict[str, str]:
+    """La vignette en haut à droite de l'embed : une adresse publique du site,
+    que Discord va chercher lui-même.
+
+    L'adresse porte la version du fichier (« ?v= »). Le site marque toute
+    réponse sous /static/, 404 compris, « public, max-age=604800, immutable »
+    (web_upload._perf_after_request), et Cloudflare s'y tient : une seule
+    demande de l'adresse AVANT la mise en ligne (le 03/10, en relisant ce
+    thème) gardait le 404 sept jours dans le cache de Cloudflare, et le
+    podium serait resté sans image. La requête fait partie de la clé de cache
+    de Cloudflare (vérifié : un « ?v= » neuf repart chez Flask) ; une image
+    changée plus tard sous le même nom change aussi d'adresse, et se voit
+    aussitôt au lieu d'une semaine après.
+    """
+    from verif_discord import SITE
+    rel = th["vignettes"][quoi]
+    v = _version_statique(rel)
+    return {"url": f'{SITE.rstrip("/")}/static/{rel}' + (f"?v={v}" if v else "")}
+
+
+def _tetes_du_serveur(liste: List[Any], noms: List[str], connus: Dict[str, str]) -> Dict[str, str]:
+    """{nom: id} des têtes que la liste des emojis du serveur porte vraiment.
+
+    La liste fait foi, pas le cache. Une tête « indisponible » (perdue avec
+    les boosts du serveur) ne s'affiche plus : elle ne compte pas. Deux du
+    même nom : celle du cache si elle y est encore (celle des messages déjà
+    postés).
+    """
+    sur_place: Dict[str, List[str]] = {}
+    for e in liste:
+        if (isinstance(e, dict) and e.get("name") in noms and str(e.get("id") or "").isdigit()
+                and e.get("available", True) is not False):
+            sur_place.setdefault(str(e["name"]), []).append(str(e["id"]))
+    return {n: (connus[n] if connus.get(n) in sur_place[n] else sur_place[n][0])
+            for n in noms if sur_place.get(n)}
+
+
+def _tetes_sures(gid: str) -> bool:
+    """Juste avant le rendu d'un message FIGÉ : les têtes du cache sont-elles
+    encore sur le serveur ? False : ce message-là prend 👑 ⭐ 🍄.
+
+    _assurer_emojis ne regarde la liste qu'une fois par jour. Une tête
+    supprimée à la main entre-temps gardait son identifiant dans le cache,
+    et un message figé l'affichait POUR TOUJOURS en « :kart_luigi: »
+    (reproduit en revue : supprimée le lundi à 8h, vérifiée à 00h10, le
+    podium de 9h la portait ; la pose du lendemain ne touche plus un message
+    figé). Ici, une simple lecture de la liste, hors de la limite d'un essai
+    par jour : aucune création, aucune permission requise, et quelques gels
+    par semaine seulement. Appelé par poster_podium, _figer_semaine,
+    _primes_retenues et _figer_quinzaine ; jamais par un rendu, ni pour le
+    « terminée » du lundi, que le podium de 9h réécrit de toute façon.
+
+    Une tête disparue quitte aussi le cache : les messages vivants passent
+    en 👑 ⭐ 🍄 jusqu'à ce que la pose du lendemain la refasse. Liste
+    illisible : False — 👑 ⭐ 🍄 sont toujours justes, une tête invérifiée
+    ne l'est peut-être plus, et ce message ne sera jamais corrigé — mais le
+    cache est gardé (une liste ratée ne prouve rien, voir _assurer_emojis).
+    Sans thème, ou sans les trois têtes au cache, rien à relire : aucun appel.
+    """
+    th = _theme(gid)
+    noms = list((th or {}).get("emojis") or [])
+    if not noms:
+        return True
+    gid = str(gid)
+    connus = _emojis_connus(gid)
+    if not all(n in connus for n in noms):
+        return True                    # le rendu est déjà en repli
+    repli = " ".join(th["repli"])
+    try:
+        code, rep = _api("GET", f"/guilds/{gid}/emojis")
+    except Exception as e:
+        code, rep = None, f"{type(e).__name__}: {e}"
+    if code != 200 or not isinstance(rep, list):
+        print(f"[podium] {gid} : têtes du thème non vérifiées avant un message figé (liste "
+              f"illisible, HTTP {code}) {str(rep)[:120]} — {repli} sur ce message", flush=True)
+        return False
+    neufs = _tetes_du_serveur(rep, noms, connus)
+    if any(neufs.get(n) != connus.get(n) for n in noms):
+        d = _lire(_fichier_emojis(), {})
+        if not isinstance(d, dict):
+            d = {}
+        d[gid] = neufs
+        safe_json.write(_fichier_emojis(), d)
+        partis = [n for n in noms if n not in neufs]
+        refaits = [n for n in noms if n in neufs and neufs[n] != connus[n]]
+        print(f"[podium] {gid} : têtes du thème relues avant un message figé"
+              + (f" — plus sur le serveur : {', '.join(partis)} (supprimée(s) à la main ?), "
+                 f"{repli} sur ce message et jusqu'à la pose de demain" if partis else "")
+              + (f" — reposée(s) à la main sous un autre identifiant, reprise(s) : "
+                 f"{', '.join(refaits)}" if refaits else ""), flush=True)
+    return True
+
+
+def _assurer_emojis(gid: str) -> Dict[str, str]:
+    """Pose sur le serveur les têtes des personnages (kart_mario…), une fois.
+
+    Appelé par les passages qui parlent DÉJÀ à Discord (rafraichir,
+    rafraichir_subs, poster_podium, et donc les gels), jamais par un rendu.
+    Le cache data/podium_emojis.json garde {serveur: {nom: id}} ; Discord
+    n'est interrogé qu'une fois par jour au plus : la liste des emojis du
+    serveur (une tête supprimée à la main est vue, et refaite), puis la
+    création de celles qui manquent, depuis les PNG de emojis/.
+
+    Rien ici ne doit bloquer ni casser un podium : sans la permission
+    « Gérer les expressions » (403, Discord 50013), serveur plein ou Discord
+    en panne, le message part avec 👑 ⭐ 🍄, le journal le dit UNE fois, et
+    l'essai suivant attend le lendemain — pas une rafale de refus toutes les
+    dix minutes. Une liste illisible ne crée rien : sans elle, on ne sait pas
+    si les têtes existent déjà, et Discord accepte deux emojis du même nom
+    (un emplacement perdu sur cinquante).
+    """
+    th = _theme(gid)
+    noms = list((th or {}).get("emojis") or [])
+    if not noms:
+        return {}
+    gid = str(gid)
+    try:
+        return _assurer_emojis_sur(gid, noms, th)
+    except Exception as e:
+        # l'essai du jour est déjà noté (voir plus bas) : pas de nouvel essai
+        # avant demain, même sur une erreur inattendue
+        print(f"[podium] {gid} : têtes du thème : {type(e).__name__}: {e} — marqueurs "
+              f"{' '.join(th['repli'])} en attendant, nouvel essai demain", flush=True)
+        return _emojis_connus(gid)
+
+
+def _assurer_emojis_sur(gid: str, noms: List[str], th: Dict[str, Any]) -> Dict[str, str]:
+    fichier = _fichier_emojis()
+    d = _lire(fichier, {})
+    if not isinstance(d, dict):
+        d = {}
+    connus = _emojis_connus(gid)
+    essais = d.get("_essais") if isinstance(d.get("_essais"), dict) else {}
+    d["_essais"] = essais
+    jour = _aujourdhui().isoformat()
+    if (essais.get(gid) or {}).get("jour") == jour:
+        return connus
+    # noté AVANT d'appeler Discord : une exception plus bas, ou un arrêt du
+    # bot au milieu, ne relance pas l'essai au passage suivant
+    essais[gid] = {"jour": jour}
+    safe_json.write(fichier, d)
+
+    repli = " ".join(th["repli"])
+    code, rep = _api("GET", f"/guilds/{gid}/emojis")
+    if code != 200 or not isinstance(rep, list):
+        echec = f"liste des emojis du serveur illisible (HTTP {code}) {str(rep)[:120]}"
+        essais[gid]["echec"] = echec
+        safe_json.write(fichier, d)
+        print(f"[podium] {gid} : têtes du thème non vérifiées — {echec}. "
+              + ("Têtes du cache gardées" if all(n in connus for n in noms)
+                 else f"Marqueurs {repli} en attendant")
+              + ", nouvel essai demain", flush=True)
+        return connus
+
+    # ce que le serveur porte vraiment : la liste fait foi, pas le cache
+    neufs = _tetes_du_serveur(rep, noms, connus)
+    disparus = [n for n in noms if n in connus and n not in neufs]
+
+    crees: List[str] = []
+    echec = ""
+    for n in [n for n in noms if n not in neufs]:
+        png = EMOJIS_DOSSIER / f"{n}.png"
+        try:
+            octets = png.read_bytes()
+        except OSError as e:
+            echec = f"{png.name} illisible ({type(e).__name__})"
+            break
+        if len(octets) > EMOJI_MAX_OCTETS:
+            echec = f"{png.name} trop lourd ({len(octets)} octets, Discord en refuse plus de 256 Ko)"
+            break
+        code, rep = _api("POST", f"/guilds/{gid}/emojis", json={
+            "name": n, "roles": [],
+            "image": "data:image/png;base64," + base64.b64encode(octets).decode("ascii")})
+        if code in (200, 201) and isinstance(rep, dict) and str(rep.get("id") or "").isdigit():
+            neufs[n] = str(rep["id"])
+            crees.append(n)
+            continue
+        dc = rep.get("code") if isinstance(rep, dict) else None
+        echec = (f"création de {n} refusée (HTTP {code}" + (f", Discord {dc}" if dc else "") + ")"
+                 + (" : il manque au bot la permission « Gérer les expressions »"
+                    if code == 403 or dc == 50013 else f" {str(rep)[:120]}"))
+        # la même cause refuserait les suivantes : on s'arrête là, demain on
+        # ne refera que celles qui manquent encore
+        break
+
+    d[gid] = neufs
+    if echec:
+        essais[gid]["echec"] = echec
+    safe_json.write(fichier, d)
+    if echec:
+        print(f"[podium] {gid} : têtes du thème incomplètes — {echec}. Marqueurs {repli} en "
+              f"attendant, nouvel essai demain"
+              + (f" (prêtes : {', '.join(sorted(neufs))})" if neufs else ""), flush=True)
+    elif crees or disparus or neufs != connus:
+        trouvees = [n for n in noms if n in neufs and n not in crees and connus.get(n) != neufs[n]]
+        print(f"[podium] {gid} : têtes du thème prêtes"
+              + (f", créées : {', '.join(crees)}" if crees else "")
+              + (f", trouvées sur le serveur : {', '.join(trouvees)}" if trouvees else "")
+              + (f" (supprimées à la main, refaites : {', '.join(disparus)})" if disparus else ""),
+              flush=True)
+    return neufs
 
 
 # ─── un seul passage à la fois ───────────────────────────────────────────
@@ -794,15 +1126,18 @@ def _boutons(gid: Optional[str], vivant: bool) -> Dict[str, Any]:
     composants les GARDE : le message figé aurait encore proposé de mettre à
     jour une période finie. Serveur sans la clé (Twitter) : rien du tout, le
     message est celui d'avant, à l'octet près.
+    Avec un thème, seul le libellé change (« Relancer la course ») : l'emoji
+    et le custom_id restent, un bouton déjà posé continue de marcher.
     """
     pf = _profil(gid)
     if "bouton_maj" not in pf:
         return {}
     if not (vivant and pf["bouton_maj"]):
         return {"components": []}
+    th = _theme(gid)
     return {"components": [{"type": 1, "components": [{
-        "type": 2, "style": 2, "label": "Mettre à jour", "emoji": {"name": "🔄"},
-        "custom_id": BOUTON_MAJ}]}]}
+        "type": 2, "style": 2, "label": th["bouton"] if th else "Mettre à jour",
+        "emoji": {"name": "🔄"}, "custom_id": BOUTON_MAJ}]}]}
 
 
 def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
@@ -844,7 +1179,9 @@ def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False,
     return out
 
 
-def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[str]:
+def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any],
+                       med: Optional[List[str]] = None,
+                       th: Optional[Dict[str, Any]] = None) -> List[str]:
     """Les lignes du podium quand VA FR et VA US sont mêlés.
 
     Médailles et 💰 aux trois premières places, quel que soit le marché — le
@@ -853,7 +1190,12 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[st
     celui qu'on donne pour réclamer. Tous les VA FR restent visibles, même
     au-delà des quinze premiers : ce sont eux qui lisent ce salon, et un VA US
     plus fort en clics ne doit pas leur cacher leur rang.
+    `med`, `th` : les marqueurs et le thème du serveur (têtes, 🪙, 🟢) ; sans
+    eux, les médailles et le 💰 d'avant.
     """
+    med = med or MEDAILLES
+    piece = th["piece"] if th else "💰"
+    suite = f'{th["suite"]} ' if th else ""
     montres = [i for i, x in enumerate(mix)
                if i < COMBIEN_AFFICHES or x["marche"] == pf["marche"]]
     out: List[str] = []
@@ -866,10 +1208,10 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[st
         if i < 3:
             # le même 💰 que Twitter ; absent sur une ligne à zéro sub, que
             # suivi_va ne paie pas (signalé le 03/10 : « 0 subs · 💰 3$ »)
-            queue = f' · 💰 **{x["prime"]:.0f}$**' if x.get("prime") else ""
-            out.append(f'{MEDAILLES[i]} **{x.get("affiche") or x["va"]}** — **{x["clics"]}** subs{queue}')
+            queue = f' · {piece} **{x["prime"]:.0f}$**' if x.get("prime") else ""
+            out.append(f'{med[i]} **{x.get("affiche") or x["va"]}** — **{x["clics"]}** subs{queue}')
         else:
-            out.append(f'{i + 1}. {x.get("affiche") or x["va"]} — **{x["clics"]}** subs')
+            out.append(f'{i + 1}. {suite}{x.get("affiche") or x["va"]} — **{x["clics"]}** subs')
     reste = len(mix) - len(montres)
     if reste > 0:
         out.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
@@ -879,7 +1221,7 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[st
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                  en_cours: bool = False, gid: Optional[str] = None,
                  termine: bool = False, avertissement: str = "",
-                 us: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 us: Optional[Dict[str, Any]] = None, tetes: bool = True) -> Dict[str, Any]:
     """Le message de la semaine, dans l'un de ses trois états :
 
     - `en_cours` : le message vivant, réédité tout au long de la semaine ;
@@ -890,11 +1232,19 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     `us` (Va IG, clé « avec_us ») : le classement des VA de Twitter, mêlé à
     celui des VA FR (`cl`) ; les primes vont aux trois premiers de la liste
     mêlée, celle que suivi_va reçoit (_classement_paye).
+
+    `tetes=False` (thème) : 👑 ⭐ 🍄 au lieu des têtes du cache — un message
+    figé dont les têtes n'ont pas pu être vérifiées (_tetes_sures).
     """
     pf = _profil(gid)
     lignes = cl["lignes"]
     mix = _melange(cl, us, pf)
     tw = SERVEURS[TWITTER_ID]
+    # le thème ne change que l'habillage (voir THEMES) ; sans lui, chaque
+    # chaîne ci-dessous est celle d'avant
+    th = _theme(gid)
+    etat = "en_cours" if en_cours else "termine" if termine else "final"
+    med = _marqueurs(gid, tetes)
     # mêlé, l'en-tête dit seulement que le classement couvre toute l'agence :
     # c'est vrai, et c'est le compromis annoncé au propriétaire (pas de VA US
     # rebaptisés en VA FR, pas de marché ligne à ligne)
@@ -904,26 +1254,32 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
              abo,
-             "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._", ""]
+             (th["lignes"]["en_cours"] if th
+              else "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._"), ""]
     else:
         # passé l'heure (bot redémarré pendant que le podium échoue), « à 9h »
         # serait déjà faux
         quand = (f"ce lundi à {_heure_podium()}h" if _maintenant().hour < _heure_podium()
                  else "dans la journée")
+        if th:
+            dit = th["lignes"][etat].format(quand=quand)
+        else:
+            dit = (f"🏁 _Semaine terminée. Le podium officiel arrive {quand}, sur ce message._"
+                   if termine
+                   else "🔒 _Semaine terminée : classement arrêté, il ne bougera plus._")
         c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
-             abo,
-             (f"🏁 _Semaine terminée. Le podium officiel arrive {quand}, sur ce message._"
-              if termine
-              else "🔒 _Semaine terminée : classement arrêté, il ne bougera plus._"), ""]
+             abo, dit, ""]
     if mix is not None:
-        c += _lignes_podium_mix(mix, pf)
+        c += _lignes_podium_mix(mix, pf, med, th)
     else:
+        piece = th["piece"] if th else "💰"
+        suite = f'{th["suite"]} ' if th else ""
         for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
             if i < 3:
-                c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
-                         f'· 💰 **{PRIMES[i]:.0f}$**')
+                c.append(f'{med[i]} **{x["va"]}** — **{x["clics"]}** subs '
+                         f'· {piece} **{PRIMES[i]:.0f}$**')
             else:
-                c.append(f'{i + 1}. {x["va"]} — **{x["clics"]}** subs')
+                c.append(f'{i + 1}. {suite}{x["va"]} — **{x["clics"]}** subs')
         reste = len(lignes) - COMBIEN_AFFICHES
         if reste > 0:
             c.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
@@ -934,9 +1290,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     # classement affiché, VA US compris (propriétaire, 03/10/2026), et le rang
     # affiché est celui qu'on réclame. Avant, « 🥈 2e VA FR » renvoyait à un
     # second classement, celui des seuls VA FR, que le message ne montrait pas.
-    c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
+    c += ["", th["primes"] if th else "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
     for i, p in enumerate(PRIMES):
-        c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
+        c.append(f'{med[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
     c += ["", f'💸 **Pour recevoir ta prime :** envoie un message à **@{pf["bot"]}** dans '
               "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
               "USDC (réseau Solana)**.",
@@ -971,11 +1327,46 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         pied += " · semaine terminée · relevé du " + _horodatage()
     else:
         pied += " · résultat final"
+    texte = "\n".join(c)
+    if len(texte) > 4096 and th:
+        # L'habillage rallonge le message. Une tête de personnage s'écrit
+        # « <:kart_mario:1234…> », 33 caractères contre un pour 👑, et il y en
+        # a six (podium et bloc des primes) : près de deux cents de plus. Le
+        # « 🟢 » des places 4 et plus en ajoute deux par ligne : une centaine
+        # de VA FR, encore deux cents. Relu en revue : à 100 VA FR, le message
+        # sans thème tenait, celui du thème était coupé au milieu de la
+        # réclamation des primes. Le thème ne doit jamais faire couper ce qui
+        # tiendrait sans lui : il cède son habillage, le plus lourd d'abord,
+        # tant que ça ne tient pas. Ainsi réduit, il n'est jamais plus long
+        # que sans thème (ses lignes d'état et de primes sont plus courtes, ou
+        # égales pour « terminée »). Les remplacements donnent exactement le
+        # rendu sans cet habillage : aucun nom de VA ne contient « <:kart_ »,
+        # et seules les lignes de rang commencent par « 4. 🟢 ».
+        retire = []
+        if med != th["repli"]:
+            for tete, repli in zip(med, th["repli"]):
+                texte = texte.replace(tete, repli)
+            retire.append(f"les têtes ({' '.join(th['repli'])} à la place)")
+        if len(texte) > 4096:
+            texte = re.sub(rf"^(\d+)\. {re.escape(th['suite'])} ", r"\1. ", texte, flags=re.M)
+            retire.append(f"le {th['suite']} des places 4 et plus")
+        print(f"[podium] {gid} : podium trop long avec l'habillage du thème — retiré : "
+              f"{', '.join(retire)}", flush=True)
+    if len(texte) > 4096:
+        # Discord refuse au-delà : coupé, mais jamais sans le dire
+        print(f"[podium] {gid} : podium de {len(texte)} caractères, coupé à 4096 (limite de "
+              f"Discord) : la fin du message manque", flush=True)
+    if th:
+        return {"title": th["titres"][etat],
+                "color": th["couleurs"][etat],
+                "thumbnail": _vignette(th, "podium"),
+                "description": texte[:4096],
+                "footer": {"text": pied}}
     return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
                       else "🏁 PODIUM SUBS — SEMAINE TERMINÉE" if termine
                       else "🏆 PODIUM SUBS DE LA SEMAINE"),
             "color": 0xE67E22 if en_cours else 0x95A5A6 if termine else 0xF1C40F,
-            "description": "\n".join(c)[:4096],
+            "description": texte[:4096],
             "footer": {"text": pied}}
 
 
@@ -983,7 +1374,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                totaux: Dict[str, int], gid: Optional[str] = None,
                final: bool = False, avertissement: str = "",
                us: Optional[Dict[str, Any]] = None,
-               totaux_us: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+               totaux_us: Optional[Dict[str, int]] = None,
+               tetes: bool = True) -> List[Dict[str, Any]]:
     """Le classement de la quinzaine, découpé en autant de messages qu'il faut.
 
     Discord coupe une description à 4096 caractères. Plutôt que de tronquer —
@@ -997,11 +1389,17 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
 
     `us`, `totaux_us` (Va IG, clé « avec_us ») : les VA de Twitter et leurs
     totaux « depuis toujours », mêlés aux VA FR.
+    `tetes=False` : comme embed_podium (page figée aux têtes invérifiées).
     """
     p = _profil(gid)
     lignes = cl["lignes"]
     mix = _melange(cl, us, p)
     tw = SERVEURS[TWITTER_ID]
+    # le thème : titre, couleur, vignette, têtes au top 3 et 🟢 ensuite. La
+    # quinzaine ne paie rien : pas de 🪙 ici, comme pas de 💰 sans thème
+    th = _theme(gid)
+    med = _marqueurs(gid, tetes)
+    suite = f'{th["suite"]} ' if th else ""
     if mix is None:
         tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
                 f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
@@ -1024,9 +1422,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
         suffixe = f' · 🌐 {at} all-time' if at is not None else ""
         nom = x.get("affiche") or x["va"]
-        rangs.append(f'{MEDAILLES[i]} **{nom}** — **{x["clics"]}** subs{suffixe}'
+        rangs.append(f'{med[i]} **{nom}** — **{x["clics"]}** subs{suffixe}'
                      if i < 3 else
-                     f'{i + 1}. {nom} — {x["clics"]} subs{suffixe}')
+                     f'{i + 1}. {suite}{nom} — {x["clics"]} subs{suffixe}')
     if not rangs:
         rangs = ["_Aucun relevé pour cette période._"]
 
@@ -1051,7 +1449,10 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     bas = "\n".join(queue)
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
-    # dernière doit aussi loger le total, d'où la marge plus large
+    # dernière doit aussi loger le total, d'où la marge plus large. Les
+    # lignes sont comptées telles qu'écrites : une tête du thème (« <:kart_
+    # mario:…> », 33 caractères) pèse ce qu'elle pèse, et pousse la ligne
+    # suivante sur une autre page plutôt que de la faire couper
     MARGE = 3600
     pages: List[List[str]] = [[]]
     taille = len(tete)
@@ -1076,6 +1477,22 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                 + ("résultat final" if final else "mis à jour " + _horodatage()))
         if len(pages) > 1:
             pied = f"page {n}/{len(pages)} · " + pied
+        if len(corps) > 4096:
+            # un bas de page démesuré (des dizaines d'illisibles) : Discord
+            # refuse au-delà, la coupe est dite au journal
+            print(f"[podium] {gid} : page {n}/{len(pages)} de la quinzaine, {len(corps)} "
+                  "caractères, coupée à 4096 (limite de Discord)", flush=True)
+        if th:
+            nom_q = th["subs"]
+            out.append({"title": (f'{nom_q} — quinzaine du {debut.strftime("%d/%m")} '
+                                  f'au {fin.strftime("%d/%m")} (terminée)' if final
+                                  else f"{nom_q} — la quinzaine")
+                                 + (f" ({n}/{len(pages)})" if len(pages) > 1 else ""),
+                        "color": th["couleurs_subs"]["final" if final else "vivant"],
+                        "thumbnail": _vignette(th, "subs"),
+                        "description": corps[:4096],
+                        "footer": {"text": pied}})
+            continue
         titre = (f'📊 Classement subs — quinzaine du {debut.strftime("%d/%m")} '
                  f'au {fin.strftime("%d/%m")} (terminée)' if final
                  else "📊 Classement subs — la quinzaine")
@@ -1134,6 +1551,9 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     if not salon:
         print(f"[podium] salon {SALON_SUBS} introuvable sur {gid}", flush=True)
         return ""
+    # les têtes du thème avant tout rendu (pages vivantes ET figées) : ici, où
+    # l'on parle déjà à Discord, jamais dans pages_subs
+    _assurer_emojis(gid)
 
     # `message` (au singulier) est l'ancien format : un seul identifiant
     ids = list(garde.get("messages") or ([garde["message"]] if garde.get("message") else []))
@@ -1399,9 +1819,11 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         # plus pauvre, deux heures plus tard)
         if not us_lu:
             us = _us_pour(gid, debut, fin, cl)
+        # figées pour toujours : les têtes du thème relues juste avant
+        tetes = _tetes_sures(gid)
         rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid), gid=gid, final=True,
                                   avertissement=avert, us=us,
-                                  totaux_us=_alltime_lu(TWITTER_ID) if us else None)
+                                  totaux_us=_alltime_lu(TWITTER_ID) if us else None, tetes=tetes)
         rec["complet_calc"] = not raison
         rec["comptes"] = len(cl["lignes"])
         rec["faites"] = 0
@@ -1510,7 +1932,10 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
 #: autre format est refait au passage suivant, sans attendre sa cadence (deux
 #: heures sur Va IG). Le 03/10/2026, le nouveau podium (primes au top 3,
 #: « Jessye VA n ») n'aurait paru que deux heures apres sa mise en ligne.
-FORMAT_AFFICHAGE = "2026-10-03-bouton"
+#: Le 03/10/2026 au soir : le thème Mario de Va IG (titres, têtes, bouton
+#: « Relancer la course ») — sans ce changement, il n'aurait paru qu'au relevé
+#: suivant, deux heures après la mise en ligne.
+FORMAT_AFFICHAGE = "2026-10-03-mario"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
@@ -1749,7 +2174,9 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
         us = _us_pour(gid, lundi, dimanche, cl)
         if _us_manquants(us):
             complet = False            # le message le dit : des VA US y manquent
-        embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert, us=us)
+        # figé pour toujours : les têtes du thème relues juste avant
+        tetes = _tetes_sures(gid)
+        embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert, us=us, tetes=tetes)
     code, _rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
                       json={"embeds": [embed], **_boutons(gid, False)})
     if code != 200 and _passager(code, _rep):
@@ -1868,8 +2295,10 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     salon = _salon(gid)
     if not salon:
         return
+    # le podium figé est réécrit : ses têtes relues juste avant, comme à 9h
+    tetes = _tetes_sures(gid)
     code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
-                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us)],
+                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us, tetes=tetes)],
                            **_boutons(gid, False)})
     if code != 200 and _passager(code, rep):
         print(f"[podium] {gid} {debut} : podium a corriger, Discord indisponible (HTTP {code}) -- "
@@ -1903,6 +2332,8 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     `forcer` : refait le podium sur le même message s'il existe.
     """
     gid = str(gid)
+    # avant tout rendu, y compris la correction des primes retenues plus bas
+    _assurer_emojis(gid)
     debut, fin = semaine_passee(jour)
     d = _etat()
     postes = d.setdefault("postes", {})
@@ -1958,7 +2389,10 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
               "aux 3 premiers de toute l'agence, VA US compris), nouvel essai au prochain tour",
               flush=True)
         return ""
-    embed = embed_podium(cl, debut, fin, gid=gid, us=us)
+    # Ce podium ne bougera plus : ses têtes sont relues juste avant (la pose
+    # du jour a pu précéder une suppression à la main, voir _tetes_sures)
+    tetes = _tetes_sures(gid)
+    embed = embed_podium(cl, debut, fin, gid=gid, us=us, tetes=tetes)
 
     vivants = d.setdefault("vivants", {})
     vivant = vivants.get(gid) or {}
@@ -2058,6 +2492,8 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
+    # avant tout rendu : la semaine vivante, « terminée » et le gel du mardi
+    _assurer_emojis(gid)
 
     ancienne = str(garde.get("semaine") or "")
     if garde.get("message") and ancienne and ancienne < debut.isoformat():
