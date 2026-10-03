@@ -2031,6 +2031,7 @@ class Admin(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         import liens_fr
+        nom = liens_fr.nom_tracking(nom)        # MYM refuse espaces et accents
         cfg = liens_fr.MODELS.get(model.value) or {}
         plates = ["of", "mym"] if (plateforme is None or plateforme.value == "les2") else [plateforme.value]
         lignes = [f"**{cfg.get('nom', model.value)}** — tracking « {nom} »"]

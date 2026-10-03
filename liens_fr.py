@@ -107,6 +107,18 @@ def groupe_de(model: str) -> str:
 _VERROU = threading.Lock()
 
 
+def nom_tracking(nom: str) -> str:
+    """Le nom du tracking MyPuls : lettres, chiffres, - et _, jamais d'espace.
+    MYM refusait « Emma VA 2 @pseudo » (« Nom refusé : utilisez uniquement des
+    lettres, des chiffres, un tiret (-) ou un tiret bas (_), sans espace ni
+    accent », 03/10/2026) ; proprietaire : « mets des tirets bas, jamais
+    d'espace ». « Emma VA 2 @pseudo » -> « Emma_VA_2_pseudo »."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(nom or "")).encode("ascii", "ignore").decode()
+    t = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_-]+", "_", t)).strip("_-")
+    return t[:60] or "VA"
+
+
 def plateforme(url: str) -> str:
     """« of », « mym », ou "" pour l'adresse d'un bouton."""
     u = str(url or "").lower()
@@ -308,7 +320,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                     soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — bouton retiré")
                     continue
                 douteux[p] = "demandé"
-                t = creer_tracking(nom, int(cid))
+                t = creer_tracking(nom_tracking(nom), int(cid))
                 if t.get("ok"):
                     urls[p] = t["url"]
                     douteux.pop(p, None)
