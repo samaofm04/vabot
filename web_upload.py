@@ -431,6 +431,15 @@ def _resolve_discord_user_by_handle(handle: str, guilde: str = ""):
     return _result
 
 
+def _est_all_banger_nom(nom) -> bool:
+    """« ...all-banger... » : un miroir (all_banger.py), jamais LE salon banger
+    d'une identite. Va IG, 03/10/2026 : un « all-banger-<model> » se range
+    sous « banger-<model> » et finit pareil -- le ★ ou « Vider le salon
+    banger » auraient pu viser le miroir."""
+    import re as _re
+    return "allbanger" in _re.sub(r"[^a-z0-9]", "", str(nom or "").lower())
+
+
 def _find_identity_category(guild, identity: str):
     """Trouve la categorie portant le nom de l'identite (case-insensitive)."""
     target = identity.lower().strip()
@@ -527,7 +536,8 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
             # On cherche UNIQUEMENT dans la categorie de l'identite -> jamais le
             # mauvais salon banger d'une autre identite.
             cands = [c for c in cat.channels
-                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()
+                     and not _est_all_banger_nom(c.name)]
             if not cands:
                 return False, f"pas de salon 'banger' dans la categorie '{ident}'"
             # Priorite au salon qui se termine par '-{identite}' (ex '💥・banger-amelia')
@@ -626,7 +636,8 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
                 continue
             found_category = True
             cands = [c for c in cat.channels
-                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()
+                     and not _est_all_banger_nom(c.name)]
             if not cands:
                 return False, f"pas de salon 'banger' dans la categorie '{ident}'", None
             banger = None
@@ -1890,7 +1901,8 @@ def _purge_banger_channel(identity: str) -> tuple:
             if cat is None:
                 continue
             cands = [c for c in cat.channels
-                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()]
+                     if isinstance(c, discord.TextChannel) and "banger" in c.name.lower()
+                     and not _est_all_banger_nom(c.name)]
             if not cands:
                 return False, f"pas de salon 'banger' dans la categorie '{ident}'", 0
             banger = None
