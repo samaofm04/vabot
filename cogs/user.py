@@ -8448,8 +8448,8 @@ _CMENU_LIGNE = "cmenu:l:"
 
 
 class _BoutonLigneVA(discord.ui.Button):
-    def __init__(self, cog, cle, libelle, emoji):
-        super().__init__(label=libelle, emoji=emoji, style=discord.ButtonStyle.primary,
+    def __init__(self, cog, cle, libelle, emoji, style=discord.ButtonStyle.primary):
+        super().__init__(label=libelle, emoji=emoji, style=style,
                          custom_id=_CMENU_LIGNE + cle)
         self.cog, self.cle = cog, cle
 
@@ -8461,6 +8461,25 @@ class _BoutonLigneVA(discord.ui.Button):
              "numero": _outil_numero}.get(self.cle)
         if f is not None:
             await _avec_model_du_menu(interaction, lambda: f(interaction))
+            return
+        if self.cle in _LIGNE_SUIVI_CLES:
+            # le MEME traitement que le bouton du menu complet : il ne lit que
+            # self.cog
+            appel = getattr(ContentMenuView, "_clic_" + self.cle)
+            import types as _types
+            porteur = _types.SimpleNamespace(cog=self.cog)
+            await _avec_model_du_menu(interaction, lambda: appel(porteur, interaction))
+
+
+#: La 2e rangee de la ligne (proprietaire, 03/10/2026 : « le demander je le
+#: veux au niveau du menu de base avec spoofer, mets aussi SOS, mes [clics]
+#: et mon paiement ») : (cle, libelle, emoji, style), les memes que dans le
+#: menu complet.
+_LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success),
+                ("help", "Assistance", "🆘", discord.ButtonStyle.danger),
+                ("clics", "Mes clics", "📊", discord.ButtonStyle.success),
+                ("pay", "Mon paiement", "💸", discord.ButtonStyle.secondary))
+_LIGNE_SUIVI_CLES = {c for c, *_ in _LIGNE_SUIVI}
 
 
 class MenuLigneVA(discord.ui.LayoutView):
@@ -8473,7 +8492,7 @@ class MenuLigneVA(discord.ui.LayoutView):
     porte l'identite et la marque du menu VA : _menu_va_lire et
     _delete_old_menus le traitent comme l'autre format. Persistant."""
 
-    def __init__(self, cog, identite=None, mention=None, outils=True):
+    def __init__(self, cog, identite=None, mention=None, outils=True, guild=None, filtrer=False):
         super().__init__(timeout=None)
         ui = discord.ui
         haut = []
@@ -8487,8 +8506,18 @@ class MenuLigneVA(discord.ui.LayoutView):
             for cle, lib, emo in (("spoofer", "Spoofer", "📤"), ("download", "Download", "⬇️"),
                                   ("numero", "Numéro", "📱")):
                 rangee.add_item(_BoutonLigneVA(cog, cle, lib, emo))
-        self.add_item(ui.Container(ui.TextDisplay("\n".join(haut + bas)), rangee,
-                                   accent_colour=discord.Colour.blurple()))
+        # 2e rangee : les reglages du serveur (une fonction coupee, son bouton
+        # absent), comme dans le menu complet ; sans filtre (vue enregistree
+        # au demarrage), tous les custom_id
+        feats, threads = _reglages_menu(guild) if filtrer else (None, False)
+        suivi = ui.ActionRow()
+        for cle, lib, emo, style in _LIGNE_SUIVI:
+            if _bouton_va_permis("cmenu:" + cle, feats, threads):
+                suivi.add_item(_BoutonLigneVA(cog, cle, lib, emo, style))
+        elements = [ui.TextDisplay("\n".join(haut + bas)), rangee]
+        if suivi.children:
+            elements.append(suivi)
+        self.add_item(ui.Container(*elements, accent_colour=discord.Colour.blurple()))
 
     def a_des_elements(self) -> bool:
         return True
@@ -8509,7 +8538,8 @@ def _menu_a_poster(cog, identite, guild, mention=None):
     """Ce qui se poste dans un ticket : la ligne sur le serveur FR, le menu
     complet ailleurs (Threads, Twitter...)."""
     if _menu_outils_ici(guild):
-        return MenuLigneVA(cog, identite, mention, outils=_outils_pour(identite))
+        return MenuLigneVA(cog, identite, mention, outils=_outils_pour(identite),
+                           guild=guild, filtrer=True)
     return _menu_va(cog, identite, guild, mention=mention)
 
 
