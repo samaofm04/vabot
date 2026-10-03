@@ -649,6 +649,22 @@ async def create_va_channel(guild, member, identity):
             return None
 
 
+def _gere_par_role(ch, guild) -> bool:
+    """Un salon dont la vue se decide par ROLE : @everyone refuse, un role
+    l'accorde (salons de model, d'accueil... du serveur FR, 03/10/2026). Un
+    refus au nom du VA y passerait AVANT son role -- un overwrite de membre
+    l'emporte -- et le VA de Julia ne verrait plus le salon Julia."""
+    try:
+        ow = ch.overwrites
+        ev = ow.get(guild.default_role)
+        if ev is None or ev.view_channel is not False:
+            return False
+        return any(isinstance(t, discord.Role) and t != guild.default_role
+                   and o.view_channel is True for t, o in ow.items())
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
     """Isole un VA (anonymat) ET lui (re)donne ses accès.
 
@@ -667,6 +683,8 @@ async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
     for ch in guild.channels:
         if ch.id in skip_ids or isinstance(ch, discord.CategoryChannel):
             continue
+        if _gere_par_role(ch, guild):
+            continue          # son role decide ; un refus a son nom l'ecraserait
         try:
             await ch.set_permissions(member, view_channel=False,
                                      reason="VA isolation - anonymat")
