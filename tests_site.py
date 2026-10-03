@@ -34649,6 +34649,85 @@ try:
 except Exception as _eO:
     check("pont onboarding : testable", False, repr(_eO)[:200])
 
+# ------------------------- 35. Les videos du Drive rejoignent leur etape
+print()
+print("=" * 70)
+print("Drive : une video deposee rejoint son etape toute seule")
+print("=" * 70)
+try:
+    import onboarding_drive as _odr
+    from pathlib import Path as _plD
+
+    check("le numero en tete du dossier fait loi, pas le titre",
+          _odr._rang("01 - JOUR 0 — Creation") == 1
+          and _odr._rang("08 - JOUR 6+") == 8
+          and _odr._rang("videoooo") is None)
+    check("un dossier mal numerote est ignore, pas devine",
+          _odr._rang("3 bis - x") is None and _odr._rang("") is None)
+    check("une video deja rattachee est reconnue a son identifiant Drive",
+          _odr._deja({"media": [{"url": "https://drive.google.com/file/d/ABC/view"}]}, "ABC")
+          and not _odr._deja({"media": [{"url": "https://drive.google.com/file/d/XYZ/view"}]},
+                             "ABC"))
+
+    import gdrive_sync as _g, onboarding as _ob, onboarding_discord as _od2
+    _sav = (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link, _od2.planifier)
+    try:
+        _dossiers = {"racine": [{"id": "d1", "name": "01 - JOUR 0", "mimeType": "x.folder"},
+                                {"id": "d9", "name": "videoooo", "mimeType": "x.folder"}],
+                     "d1": [{"id": "v1", "name": "rotate.mp4", "mimeType": "video/mp4"},
+                            {"id": "t1", "name": "texte.txt", "mimeType": "text/plain"}],
+                     "d9": [{"id": "v9", "name": "autre.mp4", "mimeType": "video/mp4"}]}
+
+        class _Faux:
+            def get(self, url, params=None, timeout=None):
+                import re as _r
+                m = _r.search(r"'([^']+)' in parents", (params or {}).get("q", ""))
+                cle = "racine" if m and m.group(1) == _odr.racine() else (m.group(1) if m else "")
+                class R:
+                    status_code = 200
+                    def json(self_in):
+                        return {"files": _dossiers.get(cle, [])}
+                return R()
+        _g._session = lambda: _Faux()
+        _etapes = [{"id": "s0", "title": "Bienvenue", "media": []},
+                   {"id": "s1", "title": "JOUR 0", "media": []}]
+        _ob.list_steps = lambda: _etapes
+        _ob.get_step = lambda sid: next((e for e in _etapes if e["id"] == sid), None)
+        _ajouts = []
+
+        def _add(sid, url, nom=""):
+            _ajouts.append((sid, url, nom))
+            next(e for e in _etapes if e["id"] == sid)["media"].append(
+                {"kind": "link", "url": url, "name": nom})
+            return {"ok": True}
+        _ob.add_media_link = _add
+        _publie = []
+        _od2.planifier = lambda d=0: _publie.append(d)
+
+        _b = _odr.scanner()
+        check("la video du dossier 01 va bien a la DEUXIEME etape",
+              _ajouts and _ajouts[0][0] == "s1"
+              and "drive.google.com/file/d/v1/view" in _ajouts[0][1])
+        check("un dossier hors plan est compte, pas avale",
+              any("videoooo" in x for x in _b["ignores"]) and len(_ajouts) == 1)
+        check("ce qui n est ni video ni image est laisse de cote",
+              not [a for a in _ajouts if "texte" in a[2]])
+        check("Discord est prevenu une fois les videos rattachees", _publie)
+
+        _ajouts.clear(); _publie.clear()
+        _b2 = _odr.scanner()
+        check("un second passage ne rattache RIEN deux fois",
+              not _ajouts and not _b2["ajoutes"] and not _publie)
+    finally:
+        (_g._session, _ob.list_steps, _ob.get_step, _ob.add_media_link,
+         _od2.planifier) = _sav
+
+    _srcD = _plD("web_upload.py").read_text(encoding="utf-8")
+    check("le ramassage tourne dans la boucle du site",
+          "_ramasser_drive()" in _srcD and "minutes: int = 5" in _srcD)
+except Exception as _eD:
+    check("drive onboarding : testable", False, repr(_eD)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

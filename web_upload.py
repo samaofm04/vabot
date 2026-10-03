@@ -58035,6 +58035,28 @@ def _suivi_va(gid: str, heures: int = 24) -> None:
         print(f"[suivi] {gid} : {type(e).__name__}: {e}", flush=True)
 
 
+_DRIVE_VU = {"quand": 0.0}
+
+
+def _ramasser_drive(minutes: int = 5) -> None:
+    """Ramasse les videos deposees sur Drive et les rattache aux etapes.
+
+    Toutes les cinq minutes : le proprietaire depose, puis regarde Discord
+    presque tout de suite. Plus espace, il croirait que ca ne marche pas.
+    """
+    import time as _t_d
+    if _t_d.time() - float(_DRIVE_VU.get("quand") or 0) < minutes * 60:
+        return
+    _DRIVE_VU["quand"] = _t_d.time()
+    try:
+        import onboarding_drive as _odr
+        b = _odr.scanner()
+        if any(b[k] for k in ("ajoutes", "rates")):
+            print(f"[drive] ramassage : {b}", flush=True)
+    except Exception as e:
+        print(f"[drive] ramassage : {type(e).__name__}: {e}", flush=True)
+
+
 def _start_podium_semaine_daemon() -> bool:
     """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
@@ -58090,6 +58112,8 @@ def _start_podium_semaine_daemon() -> bool:
                 # le salon « modele a suivre » suit la watchlist Instagram :
                 # il ne depend d'aucun serveur Discord en particulier
                 _sync_modeles_a_suivre()
+                # les videos deposees sur Drive rejoignent leur etape
+                _ramasser_drive()
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)
