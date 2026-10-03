@@ -721,6 +721,17 @@ async def _push_content_menu(bot, channel, identity, member):
             await user_cog._post_menu(channel, identity, mention_user_id=getattr(member, "id", None))
     except Exception as e:
         log.warning(f"_push_content_menu: {e}")
+        return
+    # Serveur FR : la ligne epinglee seule, sans avis (lignes_suivent_roles).
+    # Un VA sans role encore (ticket neuf) : son role, pose juste apres par
+    # donner_role_model, la fera epingler (_apres_roles_models).
+    guild = getattr(channel, "guild", None)
+    if _serveur_fr(guild):
+        try:
+            frais = guild.get_member(getattr(member, "id", 0)) or member
+            await lignes_suivent_roles(guild, frais, channel, bot, garder_sans_role=True)
+        except Exception as e:                               # noqa: BLE001
+            log.warning(f"_push_content_menu : ligne non epinglee ({e})")
 
 
 # ---- Tickets du serveur US (Youl4b) : 3 salons simples par membre ----
@@ -1676,6 +1687,92 @@ async def _categorie_archives(guild):
         reason="Reset des tickets : archives")
 
 
+async def lignes_suivent_roles(guild, membre, ch, bot, garder_sans_role=False) -> dict:
+    """Serveur FR : les lignes de menu du ticket = les models du VA (ses
+    roles), une par model, EPINGLEES, sans l'avis « … a epingle un message ».
+    Proprietaire, 03/10/2026 : apres le nettoyage, un ticket avec le seul menu
+    epingle.
+
+    Sans ca, Priscah passee d'Alicia a Amelia (role) gardait sa ligne
+    « Identite : alicia » epinglee a cote de la nouvelle, qui, elle, ne
+    l'etait pas. Ne touche qu'aux messages DU BOT : lignes de menu (reperees
+    par leur marque « menu-contenu-va » et leur identite) et avis
+    d'epinglage ; jamais un contenu, jamais un message d'un membre.
+
+    `garder_sans_role` : un VA sans aucun role de model garde ses lignes
+    (passage de rattrapage : un role pas encore relu ne doit rien vider).
+    Rend {"retirees", "doublons", "posees", "epinglees", "avis"}."""
+    from cogs.user import _MENU_VA_PIED, _jb_epingler, _menu_a_poster, _menu_va_lire, _textes_v2
+    bilan = {"retirees": [], "doublons": 0, "posees": [], "epinglees": 0, "avis": 0}
+    moi = getattr(getattr(guild, "me", None), "id", None)
+    if ch is None or membre is None or moi is None:
+        return bilan
+    models = models_du_membre(membre)
+    if not models and garder_sans_role:
+        return bilan
+    lignes, avis = {}, []
+    async for m in ch.history(limit=100):                    # du plus recent au plus ancien
+        if getattr(getattr(m, "author", None), "id", None) != moi:
+            continue
+        if m.type == discord.MessageType.pins_add:
+            avis.append(m)
+            continue
+        if not any(_MENU_VA_PIED in t for t in _textes_v2(m)):
+            continue
+        ident = str((_menu_va_lire(m) or (None, None))[0] or "").strip().lower()
+        if ident:
+            lignes.setdefault(ident, []).append(m)
+    gardees = {}
+    for ident, ms in lignes.items():
+        if ident not in models:
+            for m in ms:
+                await m.delete()
+            bilan["retirees"].append(ident)
+            continue
+        # la deja epinglee (pas d'epinglage ni d'avis de plus), sinon la plus recente
+        garde = next((m for m in ms if getattr(m, "pinned", False)), ms[0])
+        gardees[ident] = garde
+        for m in ms:
+            if m is not garde:
+                await m.delete()
+                bilan["doublons"] += 1
+    ucog = bot.get_cog("UserCog") if bot is not None else None
+    for ident in models:
+        if ident in gardees or ucog is None:
+            continue
+        vue = _menu_a_poster(ucog, ident, guild, va=membre.id)
+        if not vue.a_des_elements():
+            continue
+        gardees[ident] = await ch.send(view=vue)
+        bilan["posees"].append(ident)
+    for m in gardees.values():
+        if not getattr(m, "pinned", False):
+            # le point de passage des epinglages (garde-fou des tests) ; hors
+            # salon -menu US il laisse l'avis, retire juste apres
+            await _jb_epingler(m, ch, "ligne de menu FR")
+            bilan["epinglees"] += 1
+    if bilan["epinglees"]:
+        # l'avis d'un epinglage tout neuf n'est pas encore dans `avis`
+        await asyncio.sleep(1)
+        async for m in ch.history(limit=6):
+            if m.type == discord.MessageType.pins_add and m.id not in {a.id for a in avis}:
+                avis.append(m)
+    for m in avis:
+        try:
+            await m.delete()
+            bilan["avis"] += 1
+        except discord.NotFound:
+            pass
+    if bilan["retirees"] or bilan["doublons"] or bilan["posees"] or bilan["epinglees"]:
+        log.info(f"lignes de menu de {membre.id} ({ch.name}) : {bilan}")
+    return bilan
+
+
+#: Passage unique de Welcome.lignes_rattrapage (une cle par demande).
+LIGNES_DEMANDE = "2026-10-03"
+LIGNES_FAIT = Path(__file__).resolve().parent.parent / "data" / "lignes_roles_fr.json"
+
+
 class _DejaArchive(Exception):
     """Reprise d'un reset : ce ticket est deja dans les archives."""
 
@@ -2294,6 +2391,7 @@ class Welcome(commands.Cog):
         self._verrou_liens = asyncio.Lock()
         self._taches_liens = set()
         self.liens_suivent_roles.start()
+        self.lignes_rattrapage.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
@@ -2301,6 +2399,7 @@ class Welcome(commands.Cog):
         self.auto_secure_general_channels.cancel()
         self.ouvrir_numeros.cancel()
         self.liens_suivent_roles.cancel()
+        self.lignes_rattrapage.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -2455,10 +2554,10 @@ class Welcome(commands.Cog):
           precis) devient la premiere des roles si elle n'en fait plus partie ;
           le ticket passe dans sa categorie.
         - Les salons des models : toutes celles des roles, aucune autre.
-        - Une model AJOUTEE recoit son menu dans le ticket (sauf role pose
-          par le bot a la creation du ticket, qui a deja le sien).
-        Rien sans fiche (pas encore de ticket) ni quand tous les roles partent
-        (la fiche garde sa model : un retrait par erreur ne vide rien)."""
+        - Les lignes de menu du ticket suivent les roles : une par model,
+          epinglees, celle d'une model perdue retiree (lignes_suivent_roles).
+        Rien sans fiche (pas encore de ticket). Quand tous les roles partent,
+        la fiche garde sa model : un role rendu repose sa ligne."""
         if getattr(after, "bot", False):
             return
         avant, apres = models_du_membre(before), models_du_membre(after)
@@ -2473,9 +2572,18 @@ class Welcome(commands.Cog):
         self._taches_liens.add(t)
         t.add_done_callback(self._taches_liens.discard)
         if not apres:
-            # plus aucune model : plus ses salons ; sa fiche attend un role
+            # plus aucune model : plus ses salons ni ses lignes de menu ; sa
+            # fiche attend un role (un role rendu repose la ligne)
             await sync_general_channel_access(after.guild, after, [])
             log.info(f"models : {after.id} n'a plus de role de model (salons retires)")
+            e0 = load_users().get(str(after.id))
+            ch0 = after.guild.get_channel(int((e0 or {}).get("channel_id") or 0)) \
+                if isinstance(e0, dict) else None
+            if ch0 is not None and not (getattr(self, "_roles_auto", set()) & {after.id}):
+                try:
+                    await lignes_suivent_roles(after.guild, after, ch0, self.bot)
+                except Exception as x:                       # noqa: BLE001
+                    log.warning(f"lignes de menu de {after.id} non alignees : {x}")
             return
         auto = after.id in getattr(self, "_roles_auto", set())
         getattr(self, "_roles_auto", set()).discard(after.id)
@@ -2497,15 +2605,16 @@ class Welcome(commands.Cog):
                 except Exception as x:                       # noqa: BLE001
                     log.warning(f"ticket de {after.id} non deplace vers {apres[0]} : {x}")
         await sync_general_channel_access(after.guild, after, apres)
-        if auto or ch is None:
+        if ch is None:
             return
-        ucog = self.bot.get_cog("UserCog") if self.bot else None
-        for m in [m for m in apres if m not in avant]:
-            try:
-                if ucog is not None and hasattr(ucog, "_post_menu"):
-                    await ucog._post_menu(ch, m, mention_user_id=after.id)
-            except Exception as x:                           # noqa: BLE001
-                log.warning(f"menu {m} non poste a {after.id} : {x}")
+        # Une ligne par model gagnee, celle d'une model perdue retiree, toutes
+        # epinglees sans avis (lignes_suivent_roles). Role pose par le bot a la
+        # creation du ticket (`auto`) : sa ligne est deja la, elle est
+        # seulement epinglee.
+        try:
+            await lignes_suivent_roles(after.guild, after, ch, self.bot)
+        except Exception as x:                               # noqa: BLE001
+            log.warning(f"lignes de menu de {after.id} non alignees : {x}")
 
     async def _apres_verification(self, before, after):
         """✅ Verifie vient d'etre pose (par Luigi, cogs verif_discord) sur un
@@ -2737,6 +2846,45 @@ class Welcome(commands.Cog):
 
     @liens_suivent_roles.before_loop
     async def _avant_liens_suivent_roles(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=24)
+    async def lignes_rattrapage(self):
+        """UNE fois (trace LIGNES_FAIT) : chaque ticket du serveur FR passe par
+        lignes_suivent_roles. Les roles changes entre le nettoyage des tickets
+        (03/10/2026, 14 h 26) et ce correctif avaient laisse la ligne de
+        l'ancienne model (Priscah : « alicia » a cote d'« amelia »). Un VA sans
+        aucun role garde ses lignes : un role pas encore relu ne vide rien."""
+        fait = safe_json.load(LIGNES_FAIT, default={}) or {}
+        if fait.get(LIGNES_DEMANDE):
+            return
+        for guild in list(self.bot.guilds):
+            if not _serveur_fr(guild):
+                continue
+            n = {"tickets": 0, "changes": 0, "rates": 0}
+            for uid, e in list((load_users() or {}).items()):
+                if not isinstance(e, dict) or not str(uid).isdigit():
+                    continue
+                ch = guild.get_channel(int(e.get("channel_id") or 0))
+                membre = guild.get_member(int(uid))
+                if ch is None or membre is None:
+                    continue
+                n["tickets"] += 1
+                try:
+                    b = await lignes_suivent_roles(guild, membre, ch, self.bot,
+                                                   garder_sans_role=True)
+                    if b["retirees"] or b["doublons"] or b["posees"] or b["epinglees"]:
+                        n["changes"] += 1
+                except Exception as x:                       # noqa: BLE001
+                    n["rates"] += 1
+                    log.warning(f"rattrapage des lignes : {ch.name} : {type(x).__name__}: {x}")
+                await asyncio.sleep(1)
+            log.info(f"rattrapage des lignes de menu ({guild.name}) : {n}")
+        fait[LIGNES_DEMANDE] = int(time.time())
+        safe_json.write(LIGNES_FAIT, fait, indent=1)
+
+    @lignes_rattrapage.before_loop
+    async def _avant_lignes_rattrapage(self):
         await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=10)

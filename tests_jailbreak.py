@@ -20364,7 +20364,7 @@ try:
         _srcR = _inLf.getsource(_wLf.Welcome._apres_roles_models)
         check("roles : la bascule des liens part AVANT tout return (aucune model, role pose par le bot)",
               _srcR.index("_liens_suivent") < _srcR.index("if not apres:")
-              and _srcR.index("_liens_suivent") < _srcR.index("if auto or ch is None"))
+              and _srcR.index("_liens_suivent") < _srcR.index("if ch is None"))
         _srcS = _inLf.getsource(_wLf.Welcome._liens_suivent)
         check("roles : les roles sont relus sous verrou, au moment de basculer",
               _srcS.index("async with self._verrou_liens") < _srcS.index("models_du_membre(m)"))
