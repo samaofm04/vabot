@@ -199,7 +199,8 @@ def _va_channel_target_name(name, has_link):
     n = name or ""
     dot = n[0] if n[:1] in _ACTIVITY_DOTS else ""
     gear = "⚙️" if "⚙" in n else ""  # préserve le marqueur "0 clic 3j" (géré par clickrecap)
-    return f"{dot}{LINK_MARK if has_link else ''}{gear}-va-{handle}"
+    from nom_ticket import nom_ticket, numero      # et le numero du VA (serveur FR)
+    return nom_ticket(dot, LINK_MARK if has_link else "", gear, numero(n), handle)
 
 
 async def _apply_va_link_mark(channel, has_link, reason="marqueur lien VA"):
@@ -5613,6 +5614,11 @@ class UserCog(commands.Cog):
         Si `guild` est fourni, ne pousse QUE dans les salons va- de ce serveur."""
         sent = sautes = 0
         for ch, uid, ident in self._va_targets(guild):
+            # Serveur FR : le menu y est EPINGLE, seul dans le ticket (« juste
+            # le menu, garde l'epingle », 03/10/2026) -- le reposter chaque
+            # nuit le remplissait de nouveau.
+            if guild is None and _serveur_fr_de(ch):
+                continue
             # Identite en pause : pas de menu (ses boutons refuseraient tous).
             if _identite_en_pause(ident):
                 sautes += 1

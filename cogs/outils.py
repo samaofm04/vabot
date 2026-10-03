@@ -308,6 +308,14 @@ ESSAI_LIEN = {"id": "2026-10-03-emma", "uid": 479005370438778891,
               "pseudo": "marioofm", "model": "emma"}
 _ESSAI_FAIT = Path(__file__).resolve().parent.parent / "data" / "essai_liens_fr.json"
 
+#: Nettoyage des tickets demande au bot (proprietaire, 03/10/2026 : « clean
+#: toutes les conv, supprime tout meme le menu, je refais l'onboarding ; juste
+#: le menu, garde l'epingle »). Chaque ticket VA : tout efface, puis sa ligne
+#: de menu (une par model) postee et epinglee, sans l'avis « a epingle ».
+#: UNE fois, trace ecrite avant.
+CLEAN_DEMANDE = "2026-10-03"
+_CLEAN_FAIT = Path(__file__).resolve().parent.parent / "data" / "clean_tickets_fr.json"
+
 
 def _createrices_mypuls() -> list:
     """Pour l'essai de lien : les createrices des models FR que MyPuls donne
@@ -350,9 +358,68 @@ class Outils(commands.Cog):
 
     async def cog_load(self):
         self._entretien.start()
+        self._numeros.start()
 
     async def cog_unload(self):
         self._entretien.cancel()
+        self._numeros.cancel()
+
+    @tasks.loop(minutes=10)
+    async def _numeros(self):
+        """Le numero du VA dans le nom de son salon (« 🟢-12-va-bob »), le meme
+        que celui de son lien (liens_fr.numero_va). Un nouveau ticket, ou un
+        ticket change de categorie, a le sien dans les dix minutes."""
+        for guilde in list(getattr(self.bot, "guilds", []) or []):
+            if not _serveur_outils(guilde):
+                continue
+            try:
+                await self.numeroter(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] numeros des VA : {type(e).__name__}: {e}", flush=True)
+
+    @_numeros.before_loop
+    async def _avant_numeros(self):
+        await self.bot.wait_until_ready()
+
+    async def numeroter(self, guilde) -> dict:
+        import liens_fr
+        from cogs.welcome import load_users, models_du_serveur
+        from nom_ticket import nom_ticket, numero
+        bilan = {"renommes": 0, "deja": 0, "sans_va": [], "rates": []}
+        par_salon = {int(e.get("channel_id") or 0): uid for uid, e in (load_users() or {}).items()
+                     if isinstance(e, dict) and str(uid).isdigit()}
+        models = set(models_du_serveur(guilde))
+        for cat in guilde.categories:
+            model = str(cat.name or "").strip().lower()
+            if model not in models:
+                continue
+            for ch in sorted(cat.text_channels, key=lambda c: c.position):
+                import re as _re
+                m = _re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", (ch.name or "").lower())
+                if not m:
+                    continue
+                uid = par_salon.get(ch.id)
+                if uid is None:
+                    bilan["sans_va"].append(ch.name)     # ticket sans fiche : compte, pas numerote
+                    continue
+                n = await asyncio.to_thread(liens_fr.numero_va, uid, model)
+                cur = ch.name or ""
+                rond = cur[0] if cur[:1] in ("🟢", "🟠", "🔴") else ""
+                cible = nom_ticket(rond, "🔗" if "🔗" in cur else "", "⚙️" if "⚙" in cur else "",
+                                   n, m.group(1))
+                if numero(cur) == str(n):
+                    bilan["deja"] += 1
+                    continue
+                try:
+                    await ch.edit(name=cible, reason=f"Numero du VA ({model} {n})")
+                    bilan["renommes"] += 1
+                    await asyncio.sleep(1.5)
+                except Exception as e:                       # noqa: BLE001
+                    bilan["rates"].append(f"{ch.name} ({type(e).__name__})")
+        if bilan["renommes"] or bilan["sans_va"] or bilan["rates"]:
+            print(f"[outils] numeros des VA : {bilan['renommes']} renomme(s), {bilan['deja']} deja bons, "
+                  f"sans fiche {bilan['sans_va'][:10]}, rates {bilan['rates'][:10]}", flush=True)
+        return bilan
 
     @tasks.loop(hours=24)
     async def _entretien(self):
@@ -372,6 +439,10 @@ class Outils(commands.Cog):
                 await self._essai_lien(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] essai de lien : {type(e).__name__}: {e}")
+            try:
+                await self._clean_demande(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] nettoyage des tickets : {type(e).__name__}: {e}")
             # les salons d'information : l'isolation d'un VA qui arrive les
             # lui cacherait (un refus par salon), sauf ceux de cette liste
             try:
@@ -414,6 +485,83 @@ class Outils(commands.Cog):
     @_entretien.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+
+    async def _clean_demande(self, guilde) -> bool:
+        fait = safe_json.load(_CLEAN_FAIT, default={}) or {}
+        if fait.get(CLEAN_DEMANDE):
+            return False
+        fait[CLEAN_DEMANDE] = {"debut": int(__import__("time").time())}
+        if not safe_json.write(_CLEAN_FAIT, fait, indent=1):
+            print("[outils] trace du nettoyage non ecrite : nettoyage NON lance", flush=True)
+            return False
+        ucog = self.bot.get_cog("UserCog")
+        if ucog is None:
+            print("[outils] nettoyage des tickets : UserCog absent, rien fait", flush=True)
+            return False
+        salon_staff = discord.utils.find(lambda c: "entrées" in c.name or "entrees" in c.name,
+                                         guilde.text_channels)
+
+        async def signaler(texte):
+            print(f"[outils] nettoyage : {texte}", flush=True)
+            if salon_staff is not None:
+                try:
+                    await salon_staff.send(texte)
+                except Exception:                            # noqa: BLE001
+                    pass
+
+        async def _tache():
+            import re as _re
+            from cogs.user import _menu_a_poster, _une_ligne_par_model
+            from cogs.welcome import _salon_archive, load_users
+            # TOUS les tickets, meme sans role de model (_va_targets les saute :
+            # ils seraient restes pleins) ; leurs lignes de menu a part
+            fiches = {int(e.get("channel_id") or 0): (uid, e.get("identity"))
+                      for uid, e in (load_users() or {}).items()
+                      if isinstance(e, dict) and str(uid).isdigit()}
+            par_salon = {}
+            for ch in guilde.text_channels:
+                if _salon_archive(ch) or not _re.search(r"(?:^|[^a-z0-9])va-[a-z0-9_.]+$",
+                                                        (ch.name or "").lower()):
+                    continue
+                uid, ident = fiches.get(ch.id, (None, None))
+                lignes = [(u, i) for _c, u, i in _une_ligne_par_model([(ch, uid, ident)])] if uid else []
+                par_salon[ch.id] = (ch, lignes)
+            await signaler(f"🧹 Nettoyage de {len(par_salon)} ticket(s)…")
+            faits, sans_menu, rates = 0, [], []
+            for i, (ch, lignes) in enumerate(par_salon.values(), 1):
+                try:
+                    await ch.purge(limit=None, bulk=True, reason="Nettoyage des tickets")
+                    poses = 0
+                    for uid, ident in lignes:
+                        if uid is None:
+                            continue
+                        vue = _menu_a_poster(ucog, ident, guilde, va=int(uid))
+                        if not vue.a_des_elements():
+                            continue
+                        msg = await ch.send(view=vue)
+                        await msg.pin(reason="Menu permanent VA (h24)")
+                        poses += 1
+                    # l'avis « … a epingle un message » : seul le menu reste
+                    async for m in ch.history(limit=6):
+                        if m.type == discord.MessageType.pins_add:
+                            await m.delete()
+                    faits += 1
+                    if not poses:
+                        sans_menu.append(ch.name)
+                except Exception as e:                       # noqa: BLE001
+                    rates.append(f"{ch.name} ({type(e).__name__})")
+                if i % 25 == 0:
+                    await signaler(f"🧹 {i}/{len(par_salon)}…")
+                await asyncio.sleep(1)
+            fin = safe_json.load(_CLEAN_FAIT, default={}) or {}
+            fin.setdefault(CLEAN_DEMANDE, {})["fin"] = int(__import__("time").time())
+            safe_json.write(_CLEAN_FAIT, fin, indent=1)
+            await signaler(f"✅ Nettoyage fini : {faits} ticket(s), menu épinglé seul"
+                           + (f" · SANS menu (pas de fiche ou de rôle) : {', '.join(sans_menu[:15])}"
+                              if sans_menu else "")
+                           + (f" · ratés : {', '.join(rates[:15])}" if rates else ""))
+        self.bot.loop.create_task(_tache())
+        return True
 
     async def _essai_lien(self, guilde) -> bool:
         fait = safe_json.load(_ESSAI_FAIT, default={}) or {}

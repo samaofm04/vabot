@@ -156,7 +156,7 @@ def _numero(model: str) -> int:
 def model_du_nom(display_name: str) -> str:
     """« Amelia VA 3 @pseudo » -> « amelia » ; "" si ce n'est pas un nom de
     lien de VA FR."""
-    m = re.match(r"^\s*(\S+) VA \d+ @", str(display_name or ""))
+    m = re.match(r"^\s*(\S+) VA \d+(?:-\d+)? @", str(display_name or ""))
     if not m:
         return ""
     return next((k for k, c in MODELS.items() if c["nom"].lower() == m.group(1).lower()), "")
@@ -258,6 +258,51 @@ def _reparer(uid, model: str, entree: Dict[str, Any]):
     return entree, bool(nouveaux) or (etaient_ok is False and boutons_ok is True)
 
 
+# ─── Le numero du VA : le meme dans le nom de son salon et dans son lien ──
+#: Proprietaire, 03/10/2026 : « le numero du VA a cote [du salon] », puis
+#: « faut que ce soit synchro avec le lien » -- seven_ofm est « Amelia VA 3 »
+#: dans GetMySocial, son salon doit dire 3. UN numero par (model, VA), donne
+#: une fois et garde : dans l'ordre des salons de la categorie, ou celui de
+#: son lien s'il en a deja un. Jamais redonne a un autre (un nom de tracking
+#: MyPuls deja pris resterait ambigu). Fichier a part, son propre verrou :
+#: generer() tient _VERROU pendant tout son reseau.
+NUMEROS = _RACINE / "data" / "numeros_va_fr.json"
+_VERROU_NUM = threading.Lock()
+
+
+def _pris(model: str, numeros: Dict[str, Any]) -> set:
+    """Les numeros deja portes dans cette model : VA numerotes, liens,
+    essais, echecs, retraits."""
+    pris = {int(v) for v in (numeros.get(model) or {}).values() if str(v).isdigit()}
+    d = _etat()
+    pris |= {int(e.get("numero") or 0) for k, e in (d.get("liens") or {}).items()
+             if k.endswith(":" + model) and isinstance(e, dict)}
+    for liste in ("essais", "echecs", "retires"):
+        pris |= {int(e.get("numero") or 0) for e in (d.get(liste) or [])
+                 if isinstance(e, dict) and e.get("model") == model}
+    return pris - {0}
+
+
+def numero_va(uid, model: str, creer: bool = True) -> int:
+    """Le numero du VA dans cette model (0 s'il n'en a pas et creer=False)."""
+    model = str(model or "").strip().lower()
+    with _VERROU_NUM:
+        numeros = safe_json.load(NUMEROS, default={}) or {}
+        par = numeros.setdefault(model, {})
+        if str(int(uid)) in par:
+            return int(par[str(int(uid))])
+        if not creer:
+            return 0
+        pris = _pris(model, numeros)
+        n = int((lien_de(uid, model) or {}).get("numero") or 0)
+        if not n or n in {int(v) for v in par.values()}:
+            n = next(i for i in range(1, 100000) if i not in pris)
+        par[str(int(uid))] = n
+        if not safe_json.write(NUMEROS, numeros, indent=1):
+            print(f"[liens_fr] numero {n} de {uid} ({model}) NON enregistre", flush=True)
+        return n
+
+
 def retirer(uid) -> List[Dict[str, Any]]:
     """/resetlien (serveur FR) : sort les liens de ce VA du registre « liens »
     -- sa prochaine demande en refera un -- et les garde dans « retires » :
@@ -276,7 +321,7 @@ def retirer(uid) -> List[Dict[str, Any]]:
 
 
 # ─── Le lien suit le role ─────────────────────────────────────────────────
-_RE_NOM_VA = re.compile(r"^\s*\S+ VA \d+ @(\S+)\s*$")
+_RE_NOM_VA = re.compile(r"^\s*\S+ VA \d+(?:-\d+)? @(\S+)\s*$")
 
 
 def _actif_gms(l: Dict[str, Any]) -> Optional[bool]:
@@ -523,7 +568,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                 entree = {"pseudo": pseudo, "model": model, "link_id": str(trouve.get("id") or ""),
                           "shortcode": trouve["shortcode"], "display_name": trouve.get("display_name"),
                           "public_url": f"{gms.PUBLIC_LINK_DOMAIN}/{trouve['shortcode']}",
-                          "numero": int((re.search(r" VA (\d+) @", str(trouve.get("display_name"))) or [0, 0])[1]),
+                          "numero": int((re.search(r" VA (\d+)(?:-\d+)? @", str(trouve.get("display_name"))) or [0, 0])[1]),
                           "repris": "trouvé à son nom dans GetMySocial, absent du registre",
                           "par": str(par or ""), "quand": int(time.time())}
                 d = _etat()
@@ -540,8 +585,19 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         plates = sorted({plateforme(b.get("url")) for b in base.get("buttons") or []} - {""})
         if not plates:
             return {"ok": False, "erreur": f"le lien de base de {cfg['nom']} n'a aucun bouton OF ni MYM"}
-        n = _numero(model)
+        n = numero_va(uid, model)
         nom = f"{cfg['nom']} VA {n} @{pseudo}"[:60]
+        noms_pris = {str(e.get("display_name")) for e in
+                     list((_etat().get("liens") or {}).values()) + _etat().get("essais", [])
+                     + _etat().get("echecs", []) + _etat().get("retires", []) if isinstance(e, dict)}
+        if sans_limite(uid):
+            # un lien de plus pour le meme VA : son numero, et un rang (« 3-2 »)
+            k = 2
+            while nom in noms_pris:
+                nom = f"{cfg['nom']} VA {n}-{k} @{pseudo}"[:60]
+                k += 1
+        # deja essaye sous ce nom (un echec) : ses trackings existent peut-etre
+        reessai = nom in noms_pris
         # douteux : trackings demandes a MyPuls sans confirmation (MYM non
         # relu, poste chez une autre createrice) -- peut-etre crees quand meme
         urls, douteux, soucis, link_id = {}, {}, [], ""
@@ -574,7 +630,16 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                     soucis.append(f"{p.upper()} : aucune créatrice MyPuls pour {cfg['nom']} — bouton retiré")
                     continue
                 douteux[p] = "demandé"
-                t = creer_tracking(nom_tracking(nom), int(cid))
+                t = {}
+                if reessai:
+                    # le tracking d'un essai rate au meme nom : repris, pas recree
+                    try:
+                        u, _ = _relire_api(nom_tracking(nom), int(cid))
+                        t = {"ok": True, "url": u} if u else {}
+                    except Exception as e:                   # noqa: BLE001
+                        print(f"[liens_fr] relecture avant reessai impossible : {e}", flush=True)
+                if not t:
+                    t = creer_tracking(nom_tracking(nom), int(cid))
                 if t.get("ok"):
                     urls[p] = t["url"]
                     douteux.pop(p, None)
@@ -589,7 +654,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
             for essai in range(12):
                 # a partir du numero du VA : sinon le 13e VA d'une model epuisait
                 # les douze essais sur des adresses deja prises
-                sc = _mots_doux(model, (n - 2) + essai)
+                sc = _mots_doux(model, max(0, n - 2) + essai)
                 r = gms.duplicate_link(gabarit, sc, nom, "", EQUIPE)
                 if r.get("ok"):
                     lien = r.get("link") or {}

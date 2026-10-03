@@ -131,7 +131,8 @@ def _va_name_set_gear(name, has_gear):
     dot = n[0] if n[:1] in ("🟢", "🟠", "🔴") else ""
     link = "🔗" if "🔗" in n else ""
     gear = GEAR_MARK if has_gear else ""
-    return f"{dot}{link}{gear}-va-{h}"
+    from nom_ticket import nom_ticket, numero      # garde le numero du VA (FR)
+    return nom_ticket(dot, link, gear, numero(n), h)
 
 
 _LINKCACHE_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "clickrecap_links.json"

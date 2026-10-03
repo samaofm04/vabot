@@ -281,7 +281,8 @@ class VAActivity(commands.Cog):
                 # à 0 clic/3j) : on ne touche QU'au rond d'activité.
                 link = "🔗" if "🔗" in cur else ""
                 gear = "⚙️" if "⚙" in cur else ""
-                target = f"{dot}{link}{gear}-va-{h}"
+                from nom_ticket import nom_ticket, numero    # garde le numero du VA (FR)
+                target = nom_ticket(dot, link, gear, numero(cur), h)
                 try:
                     await ch.edit(name=target, reason="VA activity score")
                     st["renamed"] += 1
