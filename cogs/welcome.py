@@ -364,6 +364,26 @@ def pick_next_identity():
     return picked
 
 
+def _verif_porte(guild):
+    """La config de verification du serveur (verif_discord) s'il exige ✅
+    Verifie AVANT le ticket (« porte », Va IG depuis le 03/10/2026), sinon None.
+
+    Sur un tel serveur, l'arrivee ne cree plus rien : un ticket et ses droits
+    de membre ouvriraient des salons a quelqu'un qui ne s'est pas verifie, et
+    l'isolation lui cacherait jusqu'au salon de verification."""
+    try:
+        import verif_discord as vd
+        c = vd.serveur(str(getattr(guild, "id", "") or "")) if getattr(guild, "id", None) else None
+    except Exception as e:                                   # noqa: BLE001
+        log.warning(f"verification illisible pour {getattr(guild, 'name', '?')} : {e}")
+        return None
+    return c if c and c.get("porte") and c.get("role_verifie") else None
+
+
+def _a_le_role(member, rid) -> bool:
+    return any(str(getattr(r, "id", "")) == str(rid) for r in (getattr(member, "roles", None) or []))
+
+
 def find_identity_category(guild, identity):
     """Trouve la categorie portant le nom de l'identite (case-insensitive)."""
     target = identity.lower().strip()
@@ -2083,6 +2103,17 @@ class Welcome(commands.Cog):
                 log.error(f"on_member_join US tickets exception: {e}")
             return
 
+        porte = _verif_porte(member.guild)
+        if porte and not _a_le_role(member, porte["role_verifie"]):
+            log.info(f"on_member_join: {member.id} attend la verification "
+                     f"(son ticket viendra avec ✅ Verifie)")
+            return
+        await self._accueillir(member, cfg)
+
+    async def _accueillir(self, member, cfg):
+        """Le parcours d'arrivee d'un VA : ticket direct, ou bienvenue avec
+        « Continuer ». A l'arrivee -- ou, sur un serveur a verification, quand
+        ✅ Verifie est pose (_apres_verification)."""
         # Mode auto-ticket: cree direct le salon, sans passer par le welcome public
         if cfg.get("auto_create_ticket_on_join", True):
             try:
@@ -2119,10 +2150,42 @@ class Welcome(commands.Cog):
         except Exception as e:
             log.error(f"on_member_join: erreur envoi welcome: {e}")
 
+    async def _apres_verification(self, before, after):
+        """✅ Verifie vient d'etre pose (par Luigi, cogs verif_discord) sur un
+        serveur a verification : le parcours d'arrivee demarre maintenant.
+
+        Rien pour qui a DEJA son ticket sur ce serveur : la pose en masse de ✅
+        aux membres deja la (03/10/2026) ne devait pas refaire 155 tickets ni
+        re-isoler tout le monde. Rien non plus pour le staff et les bots."""
+        if getattr(after, "bot", False):
+            return
+        porte = _verif_porte(after.guild)
+        if not porte:
+            return
+        rid = porte["role_verifie"]
+        if _a_le_role(before, rid) or not _a_le_role(after, rid):
+            return
+        e = load_users().get(str(after.id))
+        cid = int((e or {}).get("channel_id") or 0) if isinstance(e, dict) else 0
+        if cid and after.guild.get_channel(cid) is not None:
+            return
+        try:
+            from cogs.user import _is_staff_member
+            if _is_staff_member(after):
+                return
+        except Exception:                                    # noqa: BLE001
+            pass
+        log.info(f"verification : {after.id} verifie, parcours d'arrivee")
+        await self._accueillir(after, load_welcome_config())
+
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         """Donner @Jailbreak FR doit changer le menu TOUT DE SUITE — sans
         avoir a lancer /resetmenus derriere."""
+        try:
+            await self._apres_verification(before, after)
+        except Exception as e:                               # noqa: BLE001
+            log.error(f"apres verification de {getattr(after, 'id', '?')} : {e}")
         try:
             if before.roles == after.roles:
                 return

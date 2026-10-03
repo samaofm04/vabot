@@ -163,13 +163,32 @@ def refus(canal, membre) -> str:
     return ""
 
 
+def _role_verifie(guilde):
+    """✅ Verifie si le serveur exige la verification (verif_discord, « porte »)."""
+    try:
+        import verif_discord as vd
+        c = vd.serveur(str(guilde.id)) or {}
+        if c.get("porte") and c.get("role_verifie"):
+            return guilde.get_role(int(c["role_verifie"]))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils] verification illisible : {type(e).__name__}: {e}")
+    return None
+
+
 def _droits(guilde, moi):
-    """Tout le monde voit, personne n'ecrit ; le bot pose ses panneaux."""
+    """Tout le monde voit, personne n'ecrit ; le bot pose ses panneaux. Sur
+    un serveur a verification, « tout le monde » = ✅ Verifie : un nouveau
+    non verifie ne voit que le salon de verification."""
     voir = discord.PermissionOverwrite(
         view_channel=True, read_message_history=True, send_messages=False,
         add_reactions=False, create_public_threads=False,
         create_private_threads=False, send_messages_in_threads=False)
-    droits = {guilde.default_role: voir}
+    verifie = _role_verifie(guilde)
+    if verifie is not None:
+        droits = {guilde.default_role: discord.PermissionOverwrite(view_channel=False),
+                  verifie: voir}
+    else:
+        droits = {guilde.default_role: voir}
     if moi is not None:
         droits[moi] = discord.PermissionOverwrite(
             view_channel=True, send_messages=True, read_message_history=True,
@@ -213,6 +232,15 @@ class Outils(commands.Cog):
                 await self.assurer(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
+            # le message « Se vérifier » : pose par le bot de la verification
+            # (Luigi), pas par celui-ci -- le clic irait a la mauvaise application
+            try:
+                import verif_discord as vd
+                etat = await asyncio.to_thread(vd.assurer_message_verif, str(guilde.id))
+                if etat not in ("deja", "pas de salon de verification"):
+                    print(f"[outils] message de verification de {guilde.name} : {etat}")
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] message de verification : {type(e).__name__}: {e}")
 
     @_entretien.before_loop
     async def _avant(self):

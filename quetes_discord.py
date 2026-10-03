@@ -162,6 +162,12 @@ def _bouton_valider(jour: dt.date) -> List[Dict[str, Any]]:
 def poster_quete(gid: str, jour: Optional[dt.date] = None, mentionner: bool = True) -> str:
     """Poste la quête du jour. Ne la poste pas deux fois le même jour."""
     gid = str(gid)
+    try:
+        import verif_discord as _vd
+        if (_vd.serveur(gid) or {}).get("quetes") is False:
+            return ""        # serveur sans quete du jour (Va IG) : rien, sans erreur
+    except Exception:                                        # noqa: BLE001
+        pass
     j = jour or dt.date.today()
     d = _etat()
     postees = d.setdefault("postees", {})

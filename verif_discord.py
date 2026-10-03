@@ -113,6 +113,12 @@ SITE = "https://youl4b.com"
 # mauvais serveur.
 TWITTER_ID = "1445108485090971710"
 THREADS_ID = "1498948161039896586"
+# Le serveur FR des VA Instagram (03/10/2026). Ses VA sont geres par les bots
+# discord.py (main.py) ; la verification y passe par Luigi (ex-Siri,
+# application de Siri), admin du serveur. « porte » : l'arrivee ne cree plus
+# le ticket, c'est ✅ Verifie qui le cree (cogs/welcome.py). « quetes » faux :
+# pas de quete du jour ici.
+VA_IG_ID = "1505418484052394004"
 SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {
         "nom": "YouLab TWITTER", "auto": False,
@@ -141,6 +147,19 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
                      ("💰 Comment tu es payé", "1552664989167517758"),
                      ("📚 Les formations", "1552665145434706040"),
                      ("❓ Tes questions", "1552665139424141333")],
+    },
+    # Proprietaire, 03/10/2026 : Benin et Madagascar comme ailleurs, un
+    # resultat propre passe seul, les 164 membres deja la verifies d'office,
+    # le ticket cree des la verification.
+    VA_IG_ID: {
+        "nom": "Va IG", "auto": True,
+        "role_verifie": "1555740262767001710", "role_manager": "1505821464375328798",
+        "role_attente": "1555740268085379243", "role_suspect": "1555740273240449081",
+        "salon_entrees": "1555740303309144064", "salon_attente": "1555740310817079317",
+        "salon_suspicions": "1555740328269717555", "salon_bienvenue": "",
+        "salon_verification": "1555740464668483654",
+        "etapes": {}, "parcours": [],
+        "porte": True, "quetes": False,
     },
 }
 
@@ -321,7 +340,7 @@ def bots() -> List[Dict[str, Any]]:
     siri = {"id": "siri", "nom": "Siri", "app_id": str(APP_ID or "").strip(),
             "cle_publique": str(CLE_PUBLIQUE_APP or "").strip().lower(),
             "fichier_jeton": DATA_DIR / "seven_bot_token", "variable_env": "SEVEN_BOT_TOKEN",
-            "serveurs": {TWITTER_ID, GUILD_ID}}
+            "serveurs": {TWITTER_ID, GUILD_ID, VA_IG_ID}}
     second = {"id": "threads", "nom": "Threads",
               "app_id": str(c.get("threads_app_id") or THREADS_APP_ID or "").strip(),
               "cle_publique": str(c.get("threads_cle_publique") or THREADS_CLE_PUBLIQUE or "").strip().lower(),
@@ -1161,6 +1180,51 @@ def donner_role(uid: str, cfg: Optional[Dict[str, Any]] = None) -> bool:
     return _role("PUT", uid, cfg["role_verifie"], cfg["id"])
 
 
+def _apres_validation(cfg: Optional[Dict[str, Any]]) -> str:
+    """Ce qui arrive au membre une fois valide. Sans salon de bienvenue (Va
+    IG), personne ne le mentionne dans #bienvenue : c'est son salon qui s'ouvre."""
+    if (cfg or {}).get("salon_bienvenue"):
+        return "Tu seras mentionné dans #bienvenue dès que c'est fait."
+    return "Ton salon s'ouvrira dès que c'est fait."
+
+
+def assurer_message_verif(gid: str) -> str:
+    """Le message « Se vérifier » du salon de verification de `gid`, pose par
+    le bot du serveur (le clic va a l'application qui a poste le message :
+    pose par un bot discord.py, il tomberait dans le vide). Idempotent : rend
+    "deja", "pose", ou la raison de l'echec. Seuls les serveurs qui
+    declarent « salon_verification » sont concernes."""
+    cfg = serveur(gid) or {}
+    salon = cfg.get("salon_verification")
+    if not salon:
+        return "pas de salon de verification"
+    with sur_serveur(gid):
+        app = str(bot_du_serveur(gid).get("app_id") or "")
+        code, msgs = api("GET", f"/channels/{salon}/messages?limit=20")
+        if code != 200:
+            return f"salon illisible (HTTP {code})"
+
+        def _boutons(m):
+            for rangee in m.get("components") or []:
+                for c in rangee.get("components") or []:
+                    yield c.get("custom_id")
+        for m in msgs or []:
+            auteur = str((m.get("author") or {}).get("id") or "")
+            if (auteur == app or not app) and "verif:start" in set(_boutons(m)):
+                return "deja"
+        corps = {"embeds": [{"title": "🔐 Vérification", "color": 0x5865F2,
+                             "description": "Clique sur **Se vérifier** pour accéder au serveur."}],
+                 "components": [{"type": 1, "components": [
+                     {"type": 2, "style": 3, "custom_id": "verif:start",
+                      "label": "Se vérifier", "emoji": {"name": "✅"}}]}]}
+        code, rep = api("POST", f"/channels/{salon}/messages", json=corps)
+        if code != 200:
+            print(f"[verif] message « Se vérifier » NON pose sur {gid} : HTTP {code} {str(rep)[:200]}", flush=True)
+            return f"non pose (HTTP {code})"
+        print(f"[verif] message « Se vérifier » pose sur {gid}", flush=True)
+        return "pose"
+
+
 def _ouvrir(uid: str, cfg: Optional[Dict[str, Any]] = None) -> int:
     """Role Vérifié, retire En attente / Suspect, et bienvenue publique.
     Rend le code HTTP de la pose du role (404 : il a quitte le serveur)."""
@@ -1389,7 +1453,7 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
     # Pas de « refuse » a l'ecran, meme pour une IP etrangere : un Francais
     # peut etre un vrai VA, un responsable tranche avec les boutons.
     return {"etat": "attente", "message": "⏳ Ta demande d'accès doit être validée à la main par un responsable. "
-                                          "Tu seras mentionné dans #bienvenue dès que c'est fait."}
+                                          + _apres_validation(cfg)}
 
 
 # ─── Interactions Discord (bouton « Se vérifier », boutons manager) ───────
@@ -1510,7 +1574,7 @@ def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             # un nouvel essai finirait de toute facon en attente, et reposterait
             # une alerte a chaque clic
             _message_unique(uid, p.get("token"), gid=gid, app=app)
-            return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. Tu seras mentionné dans #bienvenue dès que c'est fait.")
+            return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. " + _apres_validation(cfg))
         jeton = creer_jeton(uid, gid=gid)
         # le nouveau lien remplace l'ancien, qui ne sert plus
         _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""), gid=gid, app=app)
