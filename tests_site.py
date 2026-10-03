@@ -20783,8 +20783,10 @@ try:
           and _deJ._jeton_pour("/guilds/1552152470464110703") == "jeton-siri")
     check("un salon inconnu retombe sur Siri, pas sur Jarvis",
           _deJ._jeton_pour("/channels/999/messages") == "jeton-siri")
-    check("l outil liste bien les trois serveurs",
-          _deJ.THREADS_ID in _deJ.SERVEURS and len(_deJ.SERVEURS) == 3)
+    # Va IG y est depuis c7974e0 (Luigi y est, meme jeton que Twitter)
+    check("l outil liste bien les quatre serveurs (Va IG compris)",
+          _deJ.THREADS_ID in _deJ.SERVEURS and "1505418484052394004" in _deJ.SERVEURS
+          and len(_deJ.SERVEURS) == 4)
 except Exception as _eJ:
     check("outil local jarvis : testable", False, repr(_eJ)[:200])
 

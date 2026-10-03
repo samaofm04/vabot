@@ -44,9 +44,10 @@ Ce qui est vérifié :
   - un VA de Twitter sans relevé n'est jamais retiré en silence : un relevé
     troué ne remplace pas un relevé complet, la quinzaine attend Twitter
     pour figer, et ce qui manque encore est dit dans le message ;
-  - SANS la clé, chaque appel à Discord est identique à celui du code d'avant
-    l'interrupteur (commit 61e291f, lu dans git) ; AVEC la clé, ceux de
-    Twitter le sont aussi ; et tests_podium_fige.py passe sur ce code-là.
+  - SANS la clé (ni celle du bouton 🔄, « bouton_maj »), chaque appel à Discord
+    est identique à celui du code d'avant l'interrupteur (commit 61e291f, lu
+    dans git) ; AVEC la clé, ceux de Twitter le sont aussi ; et
+    tests_podium_fige.py passe sur ce code-là.
 
 Faux Discord, faux GetMySocial (le VRAI classement tourne dessus), horloge
 simulée, dossier temporaire : aucun appel réseau, rien n'est écrit dans data/.
@@ -918,6 +919,11 @@ try:
         ref = {nom: derouler(ancien, cal) for nom, cal, _x in cals}
         try:
             pd.SERVEURS[IG].pop("avec_us", None)
+            # le bouton « 🔄 Mettre à jour » (clé « bouton_maj », venue après
+            # 61e291f) ajoute ses composants aux messages de Va IG : retiré lui
+            # aussi, pour comparer au code d'avant. Il a ses tests à lui
+            # (tests_podium_maj.py).
+            pd.SERVEURS[IG].pop("bouton_maj", None)
             sans = {nom: derouler(pd, cal) for nom, cal, _x in cals}
             check("sans la clé, Va IG ne relève jamais un lien de Twitter", not us_par_ig())
         finally:

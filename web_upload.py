@@ -58091,6 +58091,9 @@ def _start_podium_semaine_daemon() -> bool:
                         continue
                     # tout ce qui suit agit sur CE serveur, avec son bot
                     with _vd_p.sur_serveur(gid):
+                        # Un clic sur « 🔄 Mettre a jour » en cours : chaque appel
+                        # ci-dessous saute son tour (verrou de podium_discord,
+                        # journal « passage saute ») plutot que de poster en double.
                         # le lundi : on fige la semaine ecoulee, une fois, avec
                         # @everyone. Le message vivant repart a neuf ensuite.
                         if _p.a_poster():
@@ -58813,6 +58816,15 @@ def create_app():
                 return jsonify(_rep_an)
         except Exception as _e_an:
             print(f"[annonce] route : {type(_e_an).__name__}: {_e_an}", flush=True)
+        # Le bouton « 🔄 Mettre à jour » du podium et du classement subs
+        # (podium_discord). Même principe, None quand ce n'est pas le sien.
+        try:
+            import podium_discord as _pdm
+            _rep_pdm = _pdm.traiter(charge)
+            if _rep_pdm is not None:
+                return jsonify(_rep_pdm)
+        except Exception as _e_pdm:
+            print(f"[podium] route : {type(_e_pdm).__name__}: {_e_pdm}", flush=True)
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])

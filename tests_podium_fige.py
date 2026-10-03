@@ -139,7 +139,10 @@ class FauxDiscord:
                 return v if isinstance(v, tuple) else (v, {"message": "panne"})
             if mid not in msgs:
                 return 404, {"message": "Unknown Message", "code": 10008}
-            msgs[mid]["json"] = js
+            # une édition ne remplace que ce qu'elle envoie, comme le vrai
+            # Discord : celle qui retire le seul bouton 🔄 de Va IG (« components »
+            # seul) laisse l'embed en place
+            msgs[mid]["json"] = dict(msgs[mid]["json"] or {}, **(js or {}))
             msgs[mid]["versions"].append(js)
             return 200, {"id": mid}
         if methode == "DELETE":
@@ -729,8 +732,11 @@ try:
         rec = (etat.get("subs_a_figer") or {}).get(g, {}).get(S_OLD.isoformat())
         check(f"{g} 01/10 relevé raté : la quinzaine finie reste à figer, notée dans l'état",
               rec and rec["messages"] == [page_old[g]] and rec["essais"] == 1, rec)
+        # Va IG : seul son bouton 🔄 s'en va dès maintenant (« components » seul,
+        # vérifié dans tests_podium_maj.py) ; l'embed, lui, attend le gel
         check(f"{g} 01/10 relevé raté : l'ancienne page n'est pas encore touchée",
-              not [x for x in appels_sur(page_old[g]) if x["quand"] >= jeudi])
+              not [x for x in appels_sur(page_old[g]) if x["quand"] >= jeudi
+                   and set(x["json"] or {}) != {"components"}])
 
     a(dt.datetime(2026, 10, 1, 1, 10))
     check("01h10 : pas de nouvel essai avant 2 h (quota)",

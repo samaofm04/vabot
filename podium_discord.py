@@ -66,6 +66,18 @@ annonces privées attendent le relevé complet, puis le podium est corrigé
 sur place. Le relevé gardé pour figer reste celui des seuls VA FR (le
 relevé US vit en mémoire, voir _releve_us).
 
+LE BOUTON « 🔄 METTRE À JOUR » (clé « bouton_maj », Va IG seulement).
+Propriétaire, 03/10/2026 : « mets un truc pour reload a la main », « le
+bouton refresh ». Deux heures entre deux relevés, c'est long quand un VA
+vient de faire ses subs. Le message vivant de la semaine et les pages
+vivantes de la quinzaine portent ce bouton ; un message figé (« terminée »,
+podium, semaine ou quinzaine finie) n'en porte jamais : une période finie n'a
+plus rien à mettre à jour. Réservé au staff (traiter, plus bas). Le clic
+relance rafraichir puis rafraichir_subs sans attendre leur rythme, mais
+leurs règles de gel restent maîtresses : un clic le lundi à 3h ne lance pas
+la semaine neuve avant le podium. Un seul passage à la fois (_exclusif) :
+un clic pendant le tour de la boucle, ou l'inverse, ne poste rien deux fois.
+
 Ce que podium.json en retient :
   vivants[gid]       semaine, message, vu, dernier (relevé gardé pour figer
                      sans GetMySocial), termine (le lundi, « terminée » déjà dit)
@@ -78,14 +90,18 @@ Ce que podium.json en retient :
   subs[gid]          saison, messages (les pages), vu, dernier
   subs_a_figer[gid][debut]  quinzaine finie pas encore figée (essais, depuis ;
                         pages/faites une fois calculées, pour reprendre sans
-                        relever GetMySocial une seconde fois)
+                        relever GetMySocial une seconde fois ; sans_bouton
+                        quand le bouton 🔄 de ses pages est déjà retiré)
   subs_figes[gid][debut]    historique des quinzaines figées
 """
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
+import functools
 import json
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -156,7 +172,16 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # la meme personne », « ou sinon ecris Jessye »). « Jessye VA 12 »
                # et pas « Amelia VA 12 » : Amelia a ses propres numeros FR, un
                # vrai « Amelia VA 12 » se serait cru sur le podium.
-               "nom_us": "Jessye"},
+               "nom_us": "Jessye",
+               # Le bouton « 🔄 Mettre à jour » sous les messages VIVANTS (proprietaire,
+               # 03/10/2026 : « mets un truc pour reload a la main », « le bouton
+               # refresh ») : deux heures entre deux releves, le staff veut voir les
+               # subs tout de suite. Lu par _boutons et traiter seulement. POUR LE
+               # RETIRER : False, pas la cle retiree. False enleve aussi le bouton des
+               # messages deja postes, a leur prochaine edition ; sans la cle, rien
+               # n'est envoye a Discord (Twitter, a l'octet pres comme avant) et un
+               # bouton deja pose resterait.
+               "bouton_maj": True},
 }
 
 
@@ -219,6 +244,42 @@ def _aujourdhui() -> dt.date:
 def _api(methode: str, chemin: str, **kw):
     from verif_discord import api
     return api(methode, chemin, **kw)
+
+
+# ─── un seul passage à la fois ───────────────────────────────────────────
+# La boucle de dix minutes (web_upload) et le bouton « 🔄 Mettre à jour »
+# (traiter) appellent les mêmes fonctions. Deux passages en même temps
+# liraient chacun l'état, posteraient chacun le message neuf de la semaine
+# (ou de la quinzaine), et le dernier à écrire effacerait l'autre : un
+# message en double dans le salon, et un message vivant oublié. Le verrou est
+# UN pour tout le module, pas un par serveur : podium.json est un seul
+# fichier pour tous les serveurs, et un clic sur Va IG pendant que la boucle
+# écrit Twitter perdrait l'écriture de l'un des deux (chacun réécrit le
+# fichier entier, lu avant l'autre).
+# Jamais d'attente : le clic répond « déjà en cours » (Discord ne donne que
+# 3 s pour répondre), la boucle saute ce passage et le refait au tour suivant.
+_VERROU = threading.Lock()
+# vrai dans le travail d'un clic, qui tient déjà le verrou (pris par
+# traiter, rendu par _maj_en_fond, dans un autre fil)
+_TIENT = contextvars.ContextVar("podium_tient_le_verrou", default=False)
+
+
+def _exclusif(f):
+    @functools.wraps(f)
+    def enveloppe(gid, *args, **kw):
+        if _TIENT.get():
+            return f(gid, *args, **kw)
+        if not _VERROU.acquire(blocking=False):
+            print(f"[podium] {f.__name__} {gid} : une mise à jour tourne déjà (bouton 🔄 ou "
+                  "boucle), passage sauté, repris au prochain tour", flush=True)
+            return ""
+        jeton = _TIENT.set(True)
+        try:
+            return f(gid, *args, **kw)
+        finally:
+            _TIENT.reset(jeton)
+            _VERROU.release()
+    return enveloppe
 
 
 # ─── la semaine ──────────────────────────────────────────────────────────
@@ -722,6 +783,28 @@ def _passager(code: Any, rep: Any = None) -> bool:
     return c <= 0 or c == 429 or c >= 500
 
 
+BOUTON_MAJ = "podium:maj"
+
+
+def _boutons(gid: Optional[str], vivant: bool) -> Dict[str, Any]:
+    """Ce qu'un message envoyé à Discord porte en plus de son embed.
+
+    Vivant, sur un serveur à bouton : le bouton « 🔄 Mettre à jour ». Figé :
+    « components » vide, envoyé exprès. Une édition qui ne dit rien des
+    composants les GARDE : le message figé aurait encore proposé de mettre à
+    jour une période finie. Serveur sans la clé (Twitter) : rien du tout, le
+    message est celui d'avant, à l'octet près.
+    """
+    pf = _profil(gid)
+    if "bouton_maj" not in pf:
+        return {}
+    if not (vivant and pf["bouton_maj"]):
+        return {"components": []}
+    return {"components": [{"type": 1, "components": [{
+        "type": 2, "style": 2, "label": "Mettre à jour", "emoji": {"name": "🔄"},
+        "custom_id": BOUTON_MAJ}]}]}
+
+
 def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
     return (f'⚠️ _Chiffres du dernier relevé ({snap.get("le") or "date inconnue"}) : '
             f"GetMySocial n'a pas rendu {periode} entière._")
@@ -1026,7 +1109,8 @@ ESSAI_FIGER_MIN = 120
 ABANDON_FIGER_H = 48
 
 
-def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
+@_exclusif
+def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = False) -> str:
     """Met à jour (ou crée) le classement vivant de la quinzaine, sur N pages.
 
     Une quinzaine nouvelle veut des messages neufs. Mais AVANT de les poster,
@@ -1035,6 +1119,10 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     période après la période, le truc bouge plus »). Avant, elles restaient
     telles quelles : « mis à jour », « ils remonteront au prochain passage »,
     et des chiffres vieux d'une heure ou deux.
+
+    `forcer` (bouton « 🔄 Mettre à jour ») : relève la quinzaine vivante même
+    si son dernier relevé a moins de deux heures. Le gel des quinzaines finies
+    n'en est pas changé (ses essais gardent leur espacement).
     """
     gid = str(gid)
     debut, fin_saison = saison_en_cours(jour)
@@ -1071,10 +1159,12 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     if str(garde.get("saison") or "") == debut.isoformat():
         ids = [str(x) for x in (garde.get("messages")
                                 or ([garde["message"]] if garde.get("message") else []))]
-    if jour is None and not _subs_du(gid, garde):
+    if jour is None and not forcer and not _subs_du(gid, garde):
         # on n'est passé que pour réécrire des pages figées déjà calculées
         # (Discord les avait refusées) : la quinzaine vivante garde son rythme,
-        # et ce passage ne coûte aucun relevé
+        # et ce passage ne coûte aucun relevé. Le bouton 🔄 passe outre : sans
+        # ça, un clic moins de deux heures après le dernier relevé ne
+        # changeait rien au classement
         return str((ids or [""])[0])
 
     if _pause_gms():
@@ -1101,7 +1191,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
 
     neufs: List[str] = []
     for i, page in enumerate(pages):
-        corps = {"embeds": [page]}
+        corps = {"embeds": [page], **_boutons(gid, True)}
         if i < len(ids):
             code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
             if code == 200:
@@ -1130,7 +1220,8 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     if not neufs:
         return ""
     vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time(),
-                    "dernier": _instantane(cl, min(aujourd, fin_saison))}
+                    "dernier": _instantane(cl, min(aujourd, fin_saison)),
+                    "format": FORMAT_AFFICHAGE}
     _ecrire(d)
     print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes, '
           f'{len(neufs)} page(s)', flush=True)
@@ -1140,12 +1231,61 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
 def _figer_quinzaines(gid: str, d: Dict[str, Any], salon: str) -> None:
     attente = (d.get("subs_a_figer") or {}).get(gid) or {}
     for saison in sorted(attente):
+        fige = False
         try:
-            _figer_quinzaine(gid, d, salon, saison, attente[saison])
+            fige = _figer_quinzaine(gid, d, salon, saison, attente[saison])
         except Exception as e:
             # une quinzaine qui ne se fige pas ne doit pas bloquer la neuve
             print(f"[podium] quinzaine {saison} à figer sur {gid} : {type(e).__name__}: {e}",
                   flush=True)
+        if not fige:
+            try:
+                _quinzaine_sans_bouton(gid, d, salon, saison)
+            except Exception as e:
+                print(f"[podium] quinzaine {saison} sur {gid}, bouton 🔄 à retirer : "
+                      f"{type(e).__name__}: {e}", flush=True)
+
+
+def _quinzaine_sans_bouton(gid: str, d: Dict[str, Any], salon: str, saison: str) -> None:
+    """Retire le bouton 🔄 des pages d'une quinzaine finie qui attend son gel.
+
+    Figée tout de suite (le cas courant), ses pages perdent le bouton avec
+    leur embed final : rien à faire ici. Mais un VA illisible à minuit, une
+    pause de GetMySocial ou un refus de Discord la laissent en attente jusqu'à
+    48 h, et ses pages gardaient le bouton tout ce temps : un clic répondait
+    « mise à jour lancée » sans jamais les toucher (le clic relève la
+    quinzaine VIVANTE). La semaine, elle, le perd dès « terminée » le lundi.
+    Seuls les composants sont envoyés : Discord garde l'embed qu'on ne lui
+    renvoie pas, les derniers chiffres restent affichés jusqu'au gel.
+    Une fois par quinzaine (« sans_bouton ») ; Discord en panne passagère :
+    nouvel essai au passage suivant. Twitter (sans la clé) : rien, aucun appel.
+    """
+    retrait = _boutons(gid, False)
+    rec = (((d.get("subs_a_figer") or {}).get(gid) or {}).get(saison))
+    if not retrait or not isinstance(rec, dict) or rec.get("sans_bouton"):
+        return
+    ids = [str(x) for x in (rec.get("messages") or [])]
+    # les pages déjà réécrites figées (« faites ») n'ont plus de bouton
+    reste, perdues = 0, []
+    for mid in ids[int(rec.get("faites") or 0):]:
+        if not mid:
+            continue
+        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=retrait)
+        if code != 200 and _passager(code, rep):
+            reste += 1
+        elif code != 200:
+            # supprimée à la main (404) : plus de bouton à retirer, le gel la
+            # refera ; dit au journal, pas oublié
+            perdues.append(f"{mid} (HTTP {code})")
+    if reste:
+        print(f"[podium] quinzaine {saison} sur {gid} : bouton 🔄 de {reste} page(s) pas "
+              "retiré (Discord indisponible), nouvel essai au prochain passage", flush=True)
+        return
+    rec["sans_bouton"] = True
+    _ecrire(d)
+    print(f"[podium] quinzaine {saison} sur {gid} : finie, pas encore figée — bouton 🔄 retiré "
+          f"de ses pages" + (f", page(s) introuvable(s) : {', '.join(perdues)}" if perdues else ""),
+          flush=True)
 
 
 def _page_neuve(gid: str, d: Dict[str, Any], salon: str, saison: str,
@@ -1279,7 +1419,8 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         return False
 
     for i in range(int(rec.get("faites") or 0), len(pages)):
-        corps = {"embeds": [pages[i]]}
+        # figée : le bouton 🔄 de la page vivante s'en va avec elle
+        corps = {"embeds": [pages[i]], **_boutons(gid, False)}
         mid = ""
         if i < len(ids) and ids[i]:
             code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
@@ -1359,6 +1500,14 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
     return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 
+#: La presentation des messages vivants. A CHANGER a chaque modification de ce
+#: qu'ils affichent (libelles, primes, bouton…) : un message ecrit dans un
+#: autre format est refait au passage suivant, sans attendre sa cadence (deux
+#: heures sur Va IG). Le 03/10/2026, le nouveau podium (primes au top 3,
+#: « Jessye VA n ») n'aurait paru que deux heures apres sa mise en ligne.
+FORMAT_AFFICHAGE = "2026-10-03-bouton"
+
+
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     gid = str(gid)
     t = maintenant or time.time()
@@ -1379,7 +1528,12 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
         return True
     if _pause_gms():
         return False
-    return _subs_du(gid, (d.get("subs") or {}).get(gid) or {}, t)
+    garde = (d.get("subs") or {}).get(gid) or {}
+    if (garde.get("saison") == saison_en_cours()[0].isoformat()
+            and (garde.get("messages") or garde.get("message"))
+            and garde.get("format") != FORMAT_AFFICHAGE):
+        return True                     # presentation changee : refaire tout de suite
+    return _subs_du(gid, garde, t)
 
 
 def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
@@ -1415,6 +1569,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
                                + _maintenant().strftime("%d/%m à %Hh%M")}}
 
 
+@_exclusif                      # il écrit lui aussi dans podium.json
 def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     """Met à jour (ou crée) le bonus du jour. Un message NEUF par journée."""
     gid = str(gid)
@@ -1529,7 +1684,9 @@ def _semaine_terminee(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, 
         code, _rep = _api("PATCH", f"/channels/{salon}/messages/{garde['message']}",
                           json={"embeds": [embed_podium(cl, lundi, dimanche, gid=gid,
                                                         termine=True, avertissement=avert,
-                                                        us=_us_pour(gid, lundi, dimanche, cl))]})
+                                                        us=_us_pour(gid, lundi, dimanche, cl))],
+                                # la semaine est finie : plus de bouton 🔄
+                                **_boutons(gid, False)})
         if code != 200:
             # une seule tentative : le podium de 09h repasse de toute façon
             # sur ce message (ou en poste un neuf s'il a disparu)
@@ -1593,7 +1750,8 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
         if _us_manquants(us):
             complet = False            # le message le dit : des VA US y manquent
         embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert, us=us)
-    code, _rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"embeds": [embed]})
+    code, _rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                      json={"embeds": [embed], **_boutons(gid, False)})
     if code != 200 and _passager(code, _rep):
         garde["embed_final"] = embed
         garde["embed_complet"] = complet
@@ -1711,7 +1869,8 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     if not salon:
         return
     code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
-                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us)]})
+                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us)],
+                           **_boutons(gid, False)})
     if code != 200 and _passager(code, rep):
         print(f"[podium] {gid} {debut} : podium a corriger, Discord indisponible (HTTP {code}) -- "
               "nouvel essai au prochain tour", flush=True)
@@ -1730,6 +1889,7 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     _ecrire(d)
 
 
+@_exclusif
 def poster_podium(gid: str, jour: Optional[dt.date] = None,
                   mentionner: bool = True, forcer: bool = False) -> str:
     """Le podium de la semaine passée. Une fois.
@@ -1812,8 +1972,9 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
 
     mid, mode, ping, reste = "", "podium", "", ""
     if cible:
+        # figé : le bouton 🔄 du message vivant s'en va
         code, _rep = _api("PATCH", f"/channels/{salon}/messages/{cible}",
-                          json={"embeds": [embed]})
+                          json={"embeds": [embed], **_boutons(gid, False)})
         if code == 200:
             mid = cible
         elif _passager(code, _rep):
@@ -1830,7 +1991,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
                 print(f"[podium] {debut} : le podium est figé sans mention"
                       + (" — nouvel essai au prochain tour" if reste else ""), flush=True)
     else:
-        corps: Dict[str, Any] = {"embeds": [embed]}
+        corps: Dict[str, Any] = {"embeds": [embed], **_boutons(gid, False)}
         if mentionner:
             corps["content"] = MENTION_PODIUM
             corps["allowed_mentions"] = {"parse": ["everyone"]}
@@ -1875,6 +2036,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     return mid
 
 
+@_exclusif
 def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     """Met à jour (ou crée) le message VIVANT de la semaine en cours.
 
@@ -1928,7 +2090,8 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
         print("[podium] aucun relevé, message vivant laissé tel quel", flush=True)
         return str(garde.get("message") or "")
     corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True, gid=gid,
-                                     us=_us_pour(gid, debut, fin, cl))]}
+                                     us=_us_pour(gid, debut, fin, cl))],
+             **_boutons(gid, True)}
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("semaine") == debut.isoformat():
@@ -1944,6 +2107,9 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
                       "nouvel essai au prochain passage", flush=True)
             garde["vu"] = time.time()
             garde["dernier"] = _instantane(cl, fin)
+            # même sur une panne passagère : le passage compte (pas un relevé
+            # GetMySocial toutes les 10 min pour un Discord en panne)
+            garde["format"] = FORMAT_AFFICHAGE
             vivants[gid] = garde
             _ecrire(d)
             return mid
@@ -1956,7 +2122,7 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
     vivants[gid] = {"semaine": debut.isoformat(), "message": str(rep["id"]), "vu": time.time(),
-                    "dernier": _instantane(cl, fin)}
+                    "dernier": _instantane(cl, fin), "format": FORMAT_AFFICHAGE}
     _ecrire(d)
     print(f'[podium] message vivant {debut} → {fin} : {len(cl["lignes"])} entités', flush=True)
     return str(rep["id"])
@@ -2004,6 +2170,8 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
             ancienne = str(garde.get("semaine") or "")
             return ancienne < passee or (ancienne == passee and not garde.get("termine"))
         return True
+    if garde.get("message") and garde.get("format") != FORMAT_AFFICHAGE:
+        return True                     # presentation changee : refaire tout de suite
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
@@ -2025,3 +2193,114 @@ def a_poster(maintenant: Optional[dt.datetime] = None) -> bool:
     """Vrai un lundi, passé l'heure de publication."""
     n = maintenant or _maintenant()
     return n.weekday() == 0 and n.hour >= _heure_podium()
+
+
+# ─── le bouton « 🔄 Mettre à jour » ──────────────────────────────────────
+# Deux minutes entre deux clics sur un même serveur : un relevé, c'est un
+# appel GetMySocial par VA, et le quota est partagé avec le tableau de bord.
+# En mémoire : un redémarrage le remet à zéro, sans conséquence.
+ATTENTE_MAJ_S = 120
+_DERNIER_CLIC: Dict[str, float] = {}
+
+
+def _ephemere(texte: str) -> Dict[str, Any]:
+    return {"type": 4, "data": {"content": texte[:2000], "flags": 64,
+                                "allowed_mentions": {"parse": []}}}
+
+
+def _en_fond(f) -> None:
+    # le fil de verif_discord, comme /annonce : les tests le remplacent par un
+    # appel direct. Le serveur du clic, lui, est reposé par _maj_en_fond.
+    from verif_discord import _EN_FOND
+    _EN_FOND(f)
+
+
+def _staff(p: Dict[str, Any]) -> bool:
+    """La même règle que /annonce (annonces_discord._manager) : administrateur,
+    gestion des rôles, ou rôle manager du serveur."""
+    import verif_discord as vd
+    cfg = vd.serveur(str(p.get("guild_id") or ""))
+    membre = p.get("member") or {}
+    try:
+        if cfg is not None:
+            return vd._est_manager(membre, cfg)
+        return bool(vd._permissions(membre) & 0x8)
+    except Exception:
+        return False
+
+
+def _maj_en_fond(gid: str, suivi: Optional[Dict[str, bool]] = None) -> None:
+    """Le travail d'un clic, après la réponse à Discord : la semaine, puis la
+    quinzaine, hors rythme. Leurs règles de gel décident encore de tout (le
+    lundi avant le podium, la semaine neuve attend, clic ou pas). Le verrou,
+    pris par traiter, est rendu ici quoi qu'il arrive."""
+    if suivi is not None:
+        suivi["parti"] = True          # désormais, c'est ici que le verrou se rend
+    jeton = _TIENT.set(True)
+    try:
+        import verif_discord as vd
+        with vd.sur_serveur(gid):
+            for nom, f in (("message de la semaine", lambda: rafraichir(gid)),
+                           ("classement de la quinzaine", lambda: rafraichir_subs(gid, forcer=True))):
+                try:
+                    f()
+                except Exception as e:
+                    # la quinzaine passe quand même si la semaine a échoué
+                    print(f"[podium] {gid} bouton 🔄 : {nom} : {type(e).__name__}: {e}", flush=True)
+        print(f"[podium] {gid} : mise à jour à la main (bouton 🔄) terminée", flush=True)
+    except Exception as e:
+        print(f"[podium] {gid} bouton 🔄 : {type(e).__name__}: {e}", flush=True)
+    finally:
+        _TIENT.reset(jeton)
+        _VERROU.release()
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Le clic sur « 🔄 Mettre à jour ». None si ce n'est pas ce bouton :
+    l'appelant (web_upload, /discord/interactions) passe au module suivant.
+
+    Toujours une réponse éphémère, tout de suite (3 s au plus pour Discord) ;
+    le relevé, lui, prend une minute et part en fond."""
+    p = p or {}
+    if p.get("type") != 3 or str((p.get("data") or {}).get("custom_id") or "") != BOUTON_MAJ:
+        return None
+    gid = str(p.get("guild_id") or "")
+    if not _staff(p):
+        return _ephemere("🔒 Réservé au staff.")
+    if not (SERVEURS.get(gid) or {}).get("bouton_maj"):
+        # un bouton resté d'avant sur un serveur qui n'en veut plus : rien à
+        # lancer, et rien de faux à promettre
+        return _ephemere("ℹ️ Ce classement se met à jour tout seul, plusieurs fois par jour.")
+    if not _VERROU.acquire(blocking=False):
+        return _ephemere("⏳ Mise à jour déjà en cours.")
+    suivi = {"parti": False}
+    try:
+        t = time.time()
+        dernier = _DERNIER_CLIC.get(gid)
+        if dernier is not None and 0 <= t - dernier < ATTENTE_MAJ_S:
+            return _ephemere("⏳ Déjà mis à jour il y a moins de 2 minutes.")
+        if _pause_gms():
+            return _ephemere("⏸️ GetMySocial est en pause : le podium et le classement se "
+                             "mettront à jour au prochain passage.")
+        uid = str(((p.get("member") or {}).get("user") or {}).get("id") or "")
+        print(f"[podium] {gid} : bouton 🔄 par {uid or '?'}, mise à jour lancée", flush=True)
+        _DERNIER_CLIC[gid] = t
+        try:
+            _en_fond(lambda: _maj_en_fond(gid, suivi))
+        except Exception as e:
+            print(f"[podium] {gid} bouton 🔄 : lancement impossible : {type(e).__name__}: {e}",
+                  flush=True)
+            if not suivi["parti"]:
+                _DERNIER_CLIC.pop(gid, None)
+                return _ephemere("❌ Mise à jour impossible pour le moment : réessaie dans un instant.")
+        else:
+            # le fil est lancé : c'est LUI qui rendra le verrou, même s'il n'a
+            # pas encore commencé. Le rendre ici aussi laisserait la boucle
+            # entrer pendant le travail du clic, et poster en double.
+            suivi["parti"] = True
+        return _ephemere("🔄 Mise à jour lancée : le podium et le classement changent dans une minute.")
+    finally:
+        # aucun travail lancé (refus, ou fil qui n'a pas pu partir) : personne
+        # d'autre ne rendrait le verrou, et le podium resterait bloqué pour de bon
+        if not suivi["parti"]:
+            _VERROU.release()
