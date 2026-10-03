@@ -5057,7 +5057,7 @@ def _v2_bloc_menu_va():
         ("cmenu:help", "Assistance", "🆘", "danger", 3),
         ("cmenu:lien", "Demander un lien", "🔗", "success", 3),
         ("cmenu:pay", "Mon paiement", "💸", "secondary", 3),
-        ("cmenu:tuto", "Comprends rien ?", "❓", "secondary", 3),
+        ("cmenu:tuto", "Tuto", "📖", "secondary", 3),
         ("cmenu:addaccount", "Ajouter un compte", "➕", "primary", 4),
         ("cmenu:comptes", "Mes comptes Insta", "📷", "secondary", 4),
         ("cmenu:fam:caption", "Caption ▸", "💬", "primary", 2),
@@ -5449,8 +5449,10 @@ def _v2_bloc_menu_va():
         ["cmenu:reel", "cmenu:banger", "cmenu:story", "cmenu:storycta", "cmenu:post"],
         ["cmenu:name", "cmenu:pseudo", "cmenu:pp", "cmenu:bio", "cmenu:brutbanger"],
         # Outils (03/10/2026) : la vue persistante les porte ; le menu poste
-        # ne les montre qu'au serveur FR, aux identites ouvertes
-        ["cmenu:spoofer", "cmenu:download", "cmenu:numero"],
+        # ne les montre qu'au serveur FR, aux identites ouvertes. « Numéro »
+        # est parti le meme jour avec son salon (1bdc31c) : le garder ici
+        # aurait laisse croire qu'il revient.
+        ["cmenu:spoofer", "cmenu:download"],
         ["cmenu:sel:caption"], ["cmenu:sel:template"], ["cmenu:sel:trash"], ["cmenu:sel:flash"],
         ["cmenu:clics", "cmenu:help", "cmenu:lien", "cmenu:pay", "cmenu:tuto"],
         ["cmenu:addaccount", "cmenu:comptes"],
@@ -5521,7 +5523,7 @@ def _v2_bloc_menu_va():
             _diff.append((b.custom_id, b.label, str(b.emoji), b.style,
                           a and (a.label, str(a.emoji), a.style)))
     check("boutons : les 17 boutons gardent custom_id, libelle, emoji et style de l'ancien menu",
-          not _diff and len(boutons(v)) == 20, _diff)
+          not _diff and len(boutons(v)) == 19, _diff)
     check("boutons : chaque bouton de la table a sa methode (_clic_<cle>)",
           all(hasattr(U.ContentMenuView, "_clic_" + b.custom_id.split(":", 1)[1]) for b in boutons(v))
           and not v.inconnues)
@@ -5693,7 +5695,7 @@ def _v2_bloc_menu_va():
     _neufs = [c for r in rangees(U.ContentMenuView(None)) for c in r]
     _mauv = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
     check("motifs : chaque custom_id du menu V2 est servi par UN element exactement",
-          not _mauv and len(_neufs) == 24, _mauv)
+          not _mauv and len(_neufs) == 23, _mauv)
     _ANCIENS_MENU = ("reel", "story", "post", "storycta", "banger", "reelmonte", "pseudo",
                      "name", "bio", "pp", "lien", "clics", "help", "tuto", "addaccount",
                      "comptes", "pay", "capbanger", "montagebanger", "templateflash",
