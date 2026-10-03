@@ -8487,7 +8487,10 @@ class _BoutonLigneVA(discord.ui.Button):
 _LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success),
                 ("help", "Assistance", "🆘", discord.ButtonStyle.danger),
                 ("clics", "Mes clics", "📊", discord.ButtonStyle.success),
-                ("pay", "Mon paiement", "💸", discord.ButtonStyle.secondary))
+                ("pay", "Mon paiement", "💸", discord.ButtonStyle.secondary),
+                # « mets un truc renseigner mes comptes actifs » (03/10) : la
+                # fenetre des 3 comptes Insta, pre-remplie, comptes verifies
+                ("comptes", "Mes comptes", "📷", discord.ButtonStyle.secondary))
 _LIGNE_SUIVI_CLES = {c for c, *_ in _LIGNE_SUIVI}
 
 
