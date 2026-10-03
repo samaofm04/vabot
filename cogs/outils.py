@@ -299,6 +299,50 @@ def _rendre_visible_aux_futurs_va(ids) -> None:
 RESET_DEMANDE = "2026-10-03"
 _RESET_FAIT = Path(__file__).resolve().parent.parent / "data" / "reset_tickets_fr.json"
 
+#: Essai de lien demande au bot (proprietaire, 03/10/2026 : « essaie avec
+#: Emma, je crois que je n'ai plus l'abo MyPuls des autres, vas-y teste ») :
+#: le tracking MYM d'Amelia revenait HTTP 400. UNE fois, trace ecrite avant ;
+#: le resultat, et les createrices que MyPuls donne au compte, vont dans le
+#: ticket de Mario, ou le proprietaire teste.
+ESSAI_LIEN = {"id": "2026-10-03-emma", "uid": 479005370438778891,
+              "pseudo": "marioofm", "model": "emma"}
+_ESSAI_FAIT = Path(__file__).resolve().parent.parent / "data" / "essai_liens_fr.json"
+
+
+def _createrices_mypuls() -> list:
+    """Pour l'essai de lien : les createrices des models FR que MyPuls donne
+    au compte (page /creators = celles qu'il gere encore) et leur etat dans
+    l'API. Le proprietaire croyait ne plus avoir l'abonnement de certaines."""
+    import liens_fr
+    import mypuls
+    out = []
+    try:
+        page = mypuls.list_creators(force_refresh=True)
+        gerees = {int(v): k for k, v in (page.get("creators") or {}).items()}
+        if not page.get("ok"):
+            out.append(f"⚠️ page MyPuls /creators : {page.get('error')}")
+    except Exception as e:                                   # noqa: BLE001
+        gerees = {}
+        out.append(f"⚠️ page MyPuls /creators : {type(e).__name__}: {e}")
+    try:
+        api = {int(c["id"]): c for c in mypuls.api_creators_parsed() if c.get("id")}
+    except Exception as e:                                   # noqa: BLE001
+        api = {}
+        out.append(f"⚠️ API MyPuls /creators : {type(e).__name__}: {e}")
+    for m, cfg in liens_fr.MODELS.items():
+        morceaux = []
+        for p in ("of", "mym"):
+            cid = cfg.get(p)
+            if not cid:
+                continue
+            nom = gerees.get(int(cid))
+            etat = api.get(int(cid))
+            morceaux.append(f"{p.upper()} {cid} " + (f"✅ {nom}" if nom else "❌ absente de la page")
+                            + (f" (API : {'active' if etat.get('active') else 'INACTIVE'})" if etat
+                               else " (absente de l'API)"))
+        out.append(f"**{cfg['nom']}** : " + " · ".join(morceaux))
+    return out
+
 
 class Outils(commands.Cog):
     def __init__(self, bot):
@@ -324,6 +368,10 @@ class Outils(commands.Cog):
                 await self._reset_demande(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] reset des tickets : {type(e).__name__}: {e}")
+            try:
+                await self._essai_lien(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] essai de lien : {type(e).__name__}: {e}")
             # les salons d'information : l'isolation d'un VA qui arrive les
             # lui cacherait (un refus par salon), sauf ceux de cette liste
             try:
@@ -366,6 +414,48 @@ class Outils(commands.Cog):
     @_entretien.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+
+    async def _essai_lien(self, guilde) -> bool:
+        fait = safe_json.load(_ESSAI_FAIT, default={}) or {}
+        if fait.get(ESSAI_LIEN["id"]):
+            return False
+        fait[ESSAI_LIEN["id"]] = {"debut": int(__import__("time").time())}
+        if not safe_json.write(_ESSAI_FAIT, fait, indent=1):
+            print("[outils] trace de l'essai de lien non ecrite : essai NON lance", flush=True)
+            return False
+        uid, model = ESSAI_LIEN["uid"], ESSAI_LIEN["model"]
+
+        async def _tache():
+            lignes = [f"🧪 **Essai de lien {model.capitalize()}** (demandé par le propriétaire)"]
+            try:
+                import liens_fr
+                lignes += await asyncio.to_thread(_createrices_mypuls)
+                res = await asyncio.to_thread(liens_fr.generer, uid, ESSAI_LIEN["pseudo"], model,
+                                              "essai du proprietaire")
+                if res.get("ok"):
+                    lignes.append(f"✅ **{res.get('display_name')}** → {res.get('public_url')}")
+                else:
+                    lignes.append(f"❌ {res.get('erreur')}")
+                lignes += [f"• tracking {k.upper()} : {v}" for k, v in (res.get("trackings") or {}).items()]
+                lignes += [f"⚠️ {s}" for s in res.get("soucis") or []]
+            except Exception as e:                           # noqa: BLE001
+                lignes.append(f"❌ essai interrompu : {type(e).__name__}: {e}")
+            texte = "\n".join(lignes)[:1900]
+            print(f"[outils] essai de lien :\n{texte}", flush=True)
+            fin = safe_json.load(_ESSAI_FAIT, default={}) or {}
+            fin.setdefault(ESSAI_LIEN["id"], {})["resultat"] = texte
+            safe_json.write(_ESSAI_FAIT, fin, indent=1)
+            try:
+                from cogs.welcome import load_users
+                fiche = (load_users() or {}).get(str(uid)) or {}
+                salon = guilde.get_channel(int(fiche.get("channel_id") or 0)) or discord.utils.find(
+                    lambda c: "demande" in c.name and "lien" in c.name, guilde.text_channels)
+                if salon is not None:
+                    await salon.send(texte)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] essai de lien non poste : {e}", flush=True)
+        self.bot.loop.create_task(_tache())
+        return True
 
     async def _reset_demande(self, guilde) -> bool:
         fait = safe_json.load(_RESET_FAIT, default={}) or {}
