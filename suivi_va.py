@@ -242,6 +242,11 @@ def _annoncer_primes_fr(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, A
     for rang, ligne in enumerate(cl.get("lignes") or []):
         if rang >= len(pod.PRIMES):
             break
+        if not int(ligne.get("clics") or 0):
+            # sur le podium sans un seul sub : pas de prime a annoncer (signale
+            # le 03/10 : « Amelia VA 3 — 0 subs · 💰 3$ »)
+            bilan.setdefault("zero_sub", []).append(ligne.get("va"))
+            continue
         model, n = str(ligne.get("model") or ""), int(ligne.get("numero") or 0)
         uid = next((u for u, v in (numeros.get(model) or {}).items() if int(v) == n), None)
         fiche = users.get(str(uid)) if uid else None
