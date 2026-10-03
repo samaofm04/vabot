@@ -159,7 +159,11 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "salon_suspicions": "1555740328269717555", "salon_bienvenue": "",
         "salon_verification": "1555740464668483654",
         "etapes": {}, "parcours": [],
-        "porte": True, "quetes": False,
+        # Proprietaire, 03/10/2026 : « laisse pour le moment tout le monde en
+        # verifie ». Porte FERMEE = l'arrivee cree le ticket comme avant et pose
+        # ✅ Verifie d'office (cogs/welcome.py) ; True la rouvre (et il faudra
+        # montrer 🔐┃verification a @everyone).
+        "porte": False, "quetes": False,
     },
 }
 

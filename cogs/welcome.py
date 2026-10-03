@@ -474,6 +474,17 @@ def role_du_model(guild, identite):
                               getattr(guild, "roles", None) or [])
 
 
+def _verif_config(guild):
+    """La config de verification du serveur, porte ouverte ou non ; None si
+    le serveur n'en a pas."""
+    try:
+        import verif_discord as vd
+        gid = str(getattr(guild, "id", "") or "")
+        return vd.SERVEURS_EXTRA.get(gid) if gid else None
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def _a_le_role(member, rid) -> bool:
     return any(str(getattr(r, "id", "")) == str(rid) for r in (getattr(member, "roles", None) or []))
 
@@ -2296,6 +2307,16 @@ class Welcome(commands.Cog):
                 log.error(f"on_member_join US tickets exception: {e}")
             return
 
+        vcfg = _verif_config(member.guild)
+        if vcfg and not vcfg.get("porte") and vcfg.get("role_verifie"):
+            # verification pas encore ouverte : verifie d'office, pour que le
+            # jour ou elle s'ouvre, personne de deja la ne perde rien
+            role = member.guild.get_role(int(vcfg["role_verifie"]))
+            if role is not None and not _a_le_role(member, role.id):
+                try:
+                    await member.add_roles(role, reason="Verifie d'office (verification pas encore ouverte)")
+                except Exception as e:                       # noqa: BLE001
+                    log.warning(f"on_member_join : ✅ non pose a {member.id} : {e}")
         porte = _verif_porte(member.guild)
         if porte and not _a_le_role(member, porte["role_verifie"]):
             log.info(f"on_member_join: {member.id} attend la verification "
