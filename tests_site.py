@@ -34254,6 +34254,16 @@ try:
                   r"<button type='button' class='jb-side-va", _hD))
               and int(_smV.group(2)) == _hD.count("<div class='jb-side-id jb-section'"),
               _smV and _smV.groups())
+        # « je vois que les VA qui ont mis des comptes » (03/10) : 105 (ancien
+        # format, aucun compte, aucune fiche) n'a pas de carte, mais il est
+        # compte ET nomme dans le bandeau -- jamais tu.
+        check("allumee : un VA sans aucun compte n a pas de carte, il est compte dans le bandeau",
+              "__discord__105'" not in _hD and "<span>sans compte</span>" in _hD
+              and "VA sans compte (pas affichés)" in _hD,
+              ("__discord__105'" in _hD, "<span>sans compte</span>" in _hD))
+        check("allumee : chaque section d identite affichee a au moins une entree",
+              all(_reVd.search(r"data-va-id='%s\|" % _reVd.escape(_i), _hD)
+                  for _i in _reVd.findall(r"<div class='jb-side-id jb-section' data-identity='([^']*)'", _hD)))
 
         # -- routes : le cookie porte l'option --------------------------
         _appV = _wV.create_app()

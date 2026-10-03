@@ -40962,6 +40962,7 @@ def _jb_dc_filtrer(identities, all_accounts, stats):
     extra: dict = {}              # ident -> comptes des cartes, en plus des lignes du rendu
     montres_tous: set = set()     # handles affiches en ligne, toutes identites
     n_lignes: dict = {}           # ident -> lignes du rendu
+    fiches_vides: list = []       # (ident, nom) : fiche Discord sans compte
     for i in identities:
         il = str(i).lower()
         entree = all_accounts.get(il) if isinstance(all_accounts, dict) else None
@@ -40992,6 +40993,16 @@ def _jb_dc_filtrer(identities, all_accounts, stats):
                 montres.add(h)
             else:
                 sv_masques.append((il, str(a.get("username") or "")))
+        # « je vois que les VA qui ont mis des comptes » (proprietaire,
+        # 03/10/2026) : une fiche Discord sans aucun compte n'est pas montree
+        # -- comptee et nommee dans le bandeau, jamais tue.
+        avec = {str(a.get("va") or "").strip().lower() for a in garde_acc
+                if str(a.get("va") or "").strip()}
+        _gv = []
+        for v in garde_vas:
+            nm = (str(v.get("name") or "") if isinstance(v, dict) else str(v or "")).strip()
+            (_gv.append(v) if nm.lower() in avec else fiches_vides.append((il, nm)))
+        garde_vas = _gv
         if il not in ids_dc:
             continue
         nouv = dict(entree) if isinstance(entree, dict) else {}
@@ -41004,6 +41015,17 @@ def _jb_dc_filtrer(identities, all_accounts, stats):
     # UNE AUTRE identite, et d'une carte a l'autre : compares a la seule
     # identite de la carte, libre.ig (« Sans VA » de julia, declare par un VA
     # de lola) comptait deux fois dans COMPTES.
+    # Pas de carte pour un VA qui n'a declare AUCUN compte (meme regle) : il
+    # rejoint le compte « sans compte » du bandeau.
+    sans_compte = []
+    for il, us in list((rat.get("sans_fiche") or {}).items()):
+        gardes = [u for u in us if (rat["vas"].get(u) or {}).get("handles")]
+        sans_compte += [u for u in us if u not in gardes]
+        if gardes:
+            rat["sans_fiche"][il] = gardes
+        else:
+            del rat["sans_fiche"][il]
+    etat["sans_compte"], etat["fiches_vides"] = sans_compte, fiches_vides
     deja = set(montres_tous)
     for il in acc_f:
         sup = set()
@@ -41022,7 +41044,11 @@ def _jb_dc_filtrer(identities, all_accounts, stats):
     # « COMPTES » affichait le parc entier au-dessus d'une liste filtree.
     st = dict(stats) if isinstance(stats, dict) else {}
     st["total_accounts"], st["identities_with_accounts"] = total, len(ids_avec)
-    return [i for i in identities if str(i).lower() in ids_dc], acc_f, st
+    # Seules les identites qui ont quelque chose a montrer : une identite dont
+    # tous les VA sont « sans compte » ne laisse pas de section vide.
+    ids_aff = ({il for il, e in acc_f.items() if e.get("accounts") or e.get("vas")}
+               | set(rat.get("sans_fiche") or {}))
+    return [i for i in identities if str(i).lower() in ids_aff], acc_f, st
 
 
 def _jb_dc_tr(texte: str) -> str:
@@ -41097,6 +41123,11 @@ def _bandeau_va_discord(rat: dict, etat: dict) -> str:
                    "Le pseudo Discord écrit sur la fiche est celui du membre"),
              _pill("quiet", n_sf, "sans fiche",
                    "VA du serveur qu’aucune fiche ne représente : carte en lecture seule")]
+    sc = etat.get("sans_compte") or []
+    fv = etat.get("fiches_vides") or []
+    if sc or fv:
+        pills.append(_pill("quiet", len(sc) + len(fv), "sans compte",
+                           "VA du serveur qui n’a encore mis aucun compte : pas affiché"))
     f_nom = rat.get("fiches_par_nom") or []
     if f_nom:
         pills.append(_pill("warn", len(f_nom), "rattachés par nom, pseudo à poser",
@@ -41169,6 +41200,9 @@ def _bandeau_va_discord(rat: dict, etat: dict) -> str:
                  sum(len(v.get("invalides") or []) for v in vas.values()))
         + _liste("Identités hors liste des modèles", l_hm)
         + _liste("Fiches rattachées par nom (pseudo Discord à poser)", l_nom)
+        + _liste("VA sans compte (pas affichés)",
+                 sorted([html_escape(_nom(u)) for u in sc], key=str.lower)
+                 + [f"@{html_escape(c[0])} — {html_escape(c[1])}" for c in fv])
         + _liste("Fiches non-Discord masquées", l_mq)
         + _liste("Comptes sans VA masqués", l_sv)
         + _liste("Fiches à plusieurs VA", l_co)
@@ -41624,12 +41658,20 @@ def _jb_dc_portee(html: str, etat: dict, manques: list) -> str:
             html = html[:k] + "".join(cartes_det) + html[k:]
         else:
             manques.append("emplacement des cartes (#jb-no-selection)")
-    # Le resume du bas de colonne compte aussi ces VA
-    if n_cartes_tot:
-        m = re.search(r"(id='jb-side-summary'>[^<]*<b>)(\d+)(</b>)(.*?<b>)(\d+)(</b>)", html, re.S)
-        if m:
-            html = (html[:m.start()] + m.group(1) + str(int(m.group(2)) + n_cartes_tot) + m.group(3)
-                    + m.group(4) + str(int(m.group(5)) + n_ids_neuves) + m.group(6) + html[m.end():])
+    # Le resume du bas de colonne : RECOMPTE sur ce qui est affiche (chaque
+    # entree de la colonne, « Sans VA » compris comme dans le rendu d'origine,
+    # et les identites qui en ont). Ajouter les cartes au calcul du rendu
+    # disait « 7 identites » sous six sections (capture du 03/10).
+    # classes en plus admises : les cartes (jb-dc-ro), et ce qu'un patch ajouterait
+    _vids = re.findall(r"<button type='button' class='jb-side-va(?: [^']*)?' data-va-id='([^']*)'",
+                       html)
+    _n_va, _n_id = len(_vids), len({v.split("|", 1)[0] for v in _vids})
+    m = re.search(r"(id='jb-side-summary'>[^<]*<b>)(\d+)(</b>)(.*?<b>)(\d+)(</b>)", html, re.S)
+    if m:
+        html = (html[:m.start()] + m.group(1) + str(_n_va) + m.group(3)
+                + m.group(4) + str(_n_id) + m.group(6) + html[m.end():])
+    elif n_cartes_tot:
+        manques.append("resume du bas de colonne")
     # Fiche selectionnee par defaut : une carte, si le rendu n'en a pas
     if premier:
         html = html.replace("<main class='jb-main-pane' id='jb-main-pane' data-default-va=''>",

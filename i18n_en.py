@@ -484,6 +484,11 @@ EQUIPE = {
 # les nombres sont a cote, hors du noeud traduit. Pas d'apostrophe droite
 # dans les infobulles : echappee dans la page, elle ne correspondrait plus.
 VA_DISCORD = {
+    # 03/10 : les VA sans aucun compte ne sont pas montres, ils sont comptes
+    "sans compte": "no account",
+    "VA du serveur qui n’a encore mis aucun compte : pas affiché":
+        "Server VA with no account entered yet: not shown",
+    "VA sans compte (pas affichés)": "VAs with no account (not shown)",
     "VA du serveur Discord Va IG": "VA on the Va IG Discord server",
     "Les VA du serveur Discord Va IG": "VAs of the Va IG Discord server",
     "Afficher seulement les VA du serveur Discord Va IG":
