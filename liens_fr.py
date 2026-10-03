@@ -3,7 +3,7 @@
 
 POURQUOI (proprietaire, 03/10/2026)
     « Pour le lien de tracking, pareil que pour Twitter, tu crées pour le VA
-    tranquillement. » Chaque model a, dans l'equipe GetMySocial NOUM FR, un
+    tranquillement. » Chaque model a, dans l'equipe GetMySocial des VA, un
     lien de base « <Model> 1 » (getmysocial.com/<model>_bby) : une page aux
     boutons OF et/ou MYM. Le lien d'un VA en est la COPIE, dont chaque bouton
     pointe vers un lien de tracking MyPuls cree pour lui (« fais automatique
@@ -35,25 +35,54 @@ import safe_json
 _RACINE = Path(__file__).resolve().parent
 ETAT = _RACINE / "data" / "liens_va_fr.json"
 
-#: L'equipe GetMySocial des liens du marche FR.
-EQUIPE = "tm_6abb029639f60ccb3a54be05"          # NOUM FR
-#: Par model : le lien de base (gabarit), son groupe, ses createurs MyPuls.
-#: OF : revenus_segments.py ; MYM : KNOWN_MYM_IDS. Emma n'a pas encore de
-#: lien de base (proprietaire, 03/10 : « je vais m'occuper de faire Emma »).
+#: L'equipe GetMySocial des liens des VA du serveur FR. Proprietaire,
+#: 03/10/2026 : « faut creer dans ce groupe, par categorie » -- VA IG
+#: DISCORD, un groupe par model. GetMySocial ne copie un lien que DANS son
+#: equipe (404 link_not_in_team, essaye le 03/10) : les liens de base
+#: <model>_bby doivent y etre.
+EQUIPE = "tm_6ac06401e06eabe3b9ef45f6"          # VA IG DISCORD
+#: Par model : son nom, ses createurs MyPuls (OF : revenus_segments.py ;
+#: MYM : KNOWN_MYM_IDS). Le lien de base et le groupe se trouvent dans
+#: l'equipe (lien_de_base, groupe_de) : rien d'ecrit en dur qui deviendrait faux.
 MODELS: Dict[str, Dict[str, Any]] = {
-    "amelia": {"nom": "Amelia", "gabarit": "lnk_6abb0e200dd198afa5b790ab",
-               "groupe": "grp_6abb02e432dc5667804cf059", "of": 3106, "mym": 769},
-    "lola": {"nom": "Lola", "gabarit": "lnk_6abb133cdc67221cf4568012",
-             "groupe": "grp_6abb02e839f60ccb3a54c4d9", "of": 3673, "mym": 1116},
-    "julia": {"nom": "Julia", "gabarit": "lnk_6abb0b62f2b2af1514677a5a",
-              "groupe": "grp_6abb02f50dd198afa5b71cf7", "of": 3109, "mym": 679},
-    "sarah": {"nom": "Sarah", "gabarit": "lnk_6abb1c1df2b2af151468309d",
-              "groupe": "grp_6abb02fc32dc5667804cf2d7", "of": None, "mym": 1469},
-    "alicia": {"nom": "Alicia", "gabarit": "lnk_6abb1fcc87c242132b9b6a95",
-               "groupe": "grp_6abb0309565fe4f627be9927", "of": None, "mym": 2896},
-    "emma": {"nom": "Emma", "gabarit": "",
-             "groupe": "grp_6abb030339f60ccb3a54c80d", "of": None, "mym": 1733},
+    "amelia": {"nom": "Amelia", "of": 3106, "mym": 769},
+    "lola": {"nom": "Lola", "of": 3673, "mym": 1116},
+    "julia": {"nom": "Julia", "of": 3109, "mym": 679},
+    "sarah": {"nom": "Sarah", "of": None, "mym": 1469},
+    "alicia": {"nom": "Alicia", "of": None, "mym": 2896},
+    "emma": {"nom": "Emma", "of": None, "mym": 1733},
 }
+_CACHE_LIENS: Dict[str, Any] = {"t": 0.0, "liens": []}
+
+
+def _liens_equipe(force: bool = False) -> List[Dict[str, Any]]:
+    """Les liens de l'equipe, gardes 10 min : le quota GetMySocial est
+    partage avec le reste du site."""
+    import gms
+    if force or time.time() - _CACHE_LIENS["t"] > 600:
+        r = gms.list_links_team(EQUIPE)
+        ls = r.get("links") if isinstance(r, dict) else r
+        _CACHE_LIENS.update(t=time.time(), liens=list(ls or []))
+    return _CACHE_LIENS["liens"]
+
+
+def lien_de_base(model: str) -> str:
+    """L'id du lien de base de la model dans l'equipe : adresse « <model>_bby »
+    (ou qui commence ainsi), sinon nomme « <Model> 1 ». "" s'il n'y est pas."""
+    nom = MODELS.get(model, {}).get("nom", model)
+    for force in (False, True):
+        for l in _liens_equipe(force):
+            sc = str(l.get("shortcode") or "").lower()
+            dn = str(l.get("display_name") or "").strip().lower()
+            if sc == f"{model}_bby" or sc.startswith(f"{model}_bby") or dn == f"{nom.lower()} 1":
+                return str(l.get("id") or "")
+    return ""
+
+
+def groupe_de(model: str) -> str:
+    """Le groupe de la model dans l'equipe, cree s'il manque (liens_va)."""
+    import liens_va
+    return liens_va.groupe_manager(EQUIPE, MODELS.get(model, {}).get("nom", model))
 
 #: Une creation a la fois. La createrice active de MyPuls est un etat du
 #: SERVEUR MyPuls, attache au cookie partage : deux creations croisees (ou une
@@ -187,13 +216,15 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
     cfg = MODELS.get(model)
     if not cfg:
         return {"ok": False, "erreur": f"« {model} » n'est pas une model FR"}
-    if not cfg.get("gabarit"):
-        return {"ok": False, "erreur": f"{cfg['nom']} n'a pas encore de lien de base dans GetMySocial"}
     with _VERROU:
         deja = lien_de(uid, model)
         if deja and deja.get("public_url"):
             return {"ok": True, "deja": True, **deja}
-        base = lire_lien(cfg["gabarit"])
+        gabarit = lien_de_base(model)
+        if not gabarit:
+            return {"ok": False, "erreur": f"pas de lien de base « {model}_bby » ({cfg['nom']} 1) "
+                                           "dans l'équipe GetMySocial VA IG DISCORD"}
+        base = lire_lien(gabarit)
         plates = sorted({plateforme(b.get("url")) for b in base.get("buttons") or []} - {""})
         if not plates:
             return {"ok": False, "erreur": f"le lien de base de {cfg['nom']} n'a aucun bouton OF ni MYM"}
@@ -217,7 +248,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
             # a partir du numero du VA : sinon le 13e VA d'une model epuisait
             # les douze essais sur des adresses deja prises
             sc = _mots_doux(model, (n - 2) + essai)
-            r = gms.duplicate_link(cfg["gabarit"], sc, nom, "", EQUIPE)
+            r = gms.duplicate_link(gabarit, sc, nom, "", EQUIPE)
             if r.get("ok"):
                 lien = r.get("link") or {}
                 break
@@ -232,9 +263,13 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         # Les boutons : relus sur la COPIE (ses images sont les siennes), seule
         # l'adresse OF / MYM change, et le lien rejoint le groupe de la model.
         copie = lire_lien(link_id)
-        maj = {"link_id": link_id, "team_id": EQUIPE, "group_id": cfg["groupe"],
-               "display_name": nom,
+        maj = {"link_id": link_id, "team_id": EQUIPE, "display_name": nom,
                "buttons": boutons_remplaces(copie.get("buttons") or [], urls)}
+        groupe = groupe_de(model)
+        if groupe:
+            maj["group_id"] = groupe
+        else:
+            soucis.append(f"groupe « {cfg['nom']} » introuvable et non créé : lien hors groupe")
         r = gms._call_tool("update_link", maj)
         if not r.get("ok"):
             soucis.append(f"boutons non mis à jour ({r.get('error')}) : la copie pointe "
