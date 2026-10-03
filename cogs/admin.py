@@ -1,3 +1,4 @@
+import asyncio
 import os
 import io
 import json
@@ -2007,6 +2008,50 @@ class Admin(commands.Cog):
                 file=discord.File(buf, filename="vas_by_identity.txt"),
                 ephemeral=True,
             )
+
+    @app_commands.command(
+        name="testtracking",
+        description="[ADMIN] Crée un tracking link MyPuls d'une model FR (OF / MYM) — définitif, ne s'efface pas")
+    @app_commands.describe(model="La model FR", plateforme="OF, MYM, ou les deux (défaut)",
+                           nom="Le nom du tracking dans MyPuls (défaut : test)")
+    @app_commands.choices(
+        model=[app_commands.Choice(name=n.capitalize(), value=n)
+               for n in ("amelia", "lola", "julia", "sarah", "alicia", "emma")],
+        plateforme=[app_commands.Choice(name="OF + MYM", value="les2"),
+                    app_commands.Choice(name="OF", value="of"),
+                    app_commands.Choice(name="MYM", value="mym")])
+    async def testtracking(self, interaction: discord.Interaction,
+                           model: app_commands.Choice[str],
+                           plateforme: app_commands.Choice[str] = None,
+                           nom: str = "test"):
+        """Essai a la main de la creation (proprietaire, 03/10/2026 : « fais un
+        test pour Amelia, appelle-le test, sur MYM et sur OF »). Tourne sur le
+        serveur : la session MyPuls valide n'existe que la."""
+        if not await self.require_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        import liens_fr
+        cfg = liens_fr.MODELS.get(model.value) or {}
+        plates = ["of", "mym"] if (plateforme is None or plateforme.value == "les2") else [plateforme.value]
+        lignes = [f"**{cfg.get('nom', model.value)}** — tracking « {nom} »"]
+        for p in plates:
+            cid = cfg.get(p)
+            if not cid:
+                lignes.append(f"➖ {p.upper()} : {cfg.get('nom')} n'a pas de compte {p.upper()}")
+                continue
+
+            def _creer(c=int(cid)):
+                # le meme verrou que les liens des VA : la createrice active
+                # de MyPuls est partagee
+                with liens_fr._VERROU:
+                    return liens_fr.creer_tracking(nom, c)
+            try:
+                r = await asyncio.to_thread(_creer)
+            except Exception as e:                            # noqa: BLE001
+                r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+            lignes.append(f"✅ {p.upper()} (créatrice {cid}) : {r.get('url')}" if r.get("ok")
+                          else f"❌ {p.upper()} (créatrice {cid}) : {r.get('erreur')}")
+        await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
 
     @app_commands.command(
         name="resettickets",
