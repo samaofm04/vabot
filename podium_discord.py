@@ -48,9 +48,23 @@ VA IG MONTRE AUSSI LES VA US, POUR LE MOMENT (clé « avec_us » de SERVEURS,
 voir là pour couper). Les VA de Twitter y paraissent sous leur vrai libellé
 anonyme (« VA 12 ») avec leurs clics US ; l'en-tête dit que le classement
 couvre toute l'agence, sans marque FR/US ligne à ligne. Le relevé de
-Twitter est repris en mémoire, pas refait. Rien de cela ne touche à la
-paie : le classement gardé, figé et payé reste celui des seuls VA FR, et
-le 💰 dit toujours « VA FR ».
+Twitter est repris en mémoire, pas refait.
+
+LES PRIMES DE VA IG VONT AUX TROIS PREMIERS DE CE CLASSEMENT MÊLÉ, VA FR
+comme VA US (propriétaire, 03/10/2026 : « les primes elles vont aux 3
+meilleurs VA, c'est tout, pas de distinction pour le moment »), s'ils ont
+au moins un sub. suivi_va reçoit la liste mêlée, dans l'ordre affiché : un
+VA FR gagnant est prévenu dans son ticket au montant de son VRAI rang. Un
+VA US n'a pas de ticket sur Va IG ; primé ici, il l'est TOUJOURS aussi sur
+Twitter, pour les mêmes subs (le tri mêlé garde l'ordre de Twitter) : le
+journal le dit, rang et prime Twitter à l'appui, et laisse au propriétaire
+la prime Va IG (en plus, ou à personne : « un seul prix par personne »).
+Sans relevé US, ce podium ne sait pas qui sont ses trois premiers : il
+attend, comme sans relevé FR. Un VA US sans relevé y décale peut-être les
+rangs payés : le podium part (« à confirmer avant de payer »), mais les
+annonces privées attendent le relevé complet, puis le podium est corrigé
+sur place. Le relevé gardé pour figer reste celui des seuls VA FR (le
+relevé US vit en mémoire, voir _releve_us).
 
 Ce que podium.json en retient :
   vivants[gid]       semaine, message, vu, dernier (relevé gardé pour figer
@@ -58,7 +72,9 @@ Ce que podium.json en retient :
   postes["gid:lundi"]   le message du podium (celui de la semaine, figé)
   figes[gid][lundi]     historique des semaines figées (mode podium, reposte
                         ou sans_podium ; ping = la mention @everyone,
-                        ping_a_refaire si Discord l'a refusée en passant)
+                        ping_a_refaire si Discord l'a refusée en passant ;
+                        primes_attente = le relevé FR du podium, tant que
+                        ses annonces privées attendent le relevé US complet)
   subs[gid]          saison, messages (les pages), vu, dernier
   subs_a_figer[gid][debut]  quinzaine finie pas encore figée (essais, depuis ;
                         pages/faites une fois calculées, pour reprendre sans
@@ -121,14 +137,26 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # le mec du US, comme ca ca fait comme si y'a des vrais mecs », « mets
                # les VA US aussi », « juste pour le moment, je te dirai pour couper
                # plus tard ». Les VA de Twitter (« VA 7 », clics US) s'affichent
-               # alors a cote des VA FR, partout sur Va IG ; les primes restent aux
-               # VA FR. Il voulait aussi les faire passer pour des VA « Alicia » :
+               # alors a cote des VA FR, partout sur Va IG. Les primes vont aux
+               # trois premiers de ce classement mele, VA US compris (meme jour :
+               # « les primes elles vont aux 3 meilleurs VA, c'est tout, pas de
+               # distinction pour le moment ») ; un VA US prime ici l'est toujours
+               # aussi sur Twitter (memes subs) : sa prime Va IG reste a trancher
+               # par le proprietaire, le journal la lui pose.
+               # Il voulait aussi les faire passer pour des VA « Alicia » :
                # refuse, ce serait preter le travail d'un VA a un autre sur un
                # classement qui paie. Compromis annonce : leur vrai libelle
                # (« VA 12 »), un en-tete « toute l'agence », aucune marque FR/US
                # ligne a ligne. POUR COUPER : retirer cette cle, rien d'autre (sans
-               # elle, chaque message redevient exactement celui d'avant).
-               "avec_us": True},
+               # elle, chaque message redevient exactement celui d'avant, et les
+               # primes celles des seuls VA FR).
+               "avec_us": True,
+               # Le nom des VA US sur Va IG : ils travaillent Jessye, et Amelia
+               # EST Jessye sur le marche FR (proprietaire, 03/10/2026 : « c'est
+               # la meme personne », « ou sinon ecris Jessye »). « Jessye VA 12 »
+               # et pas « Amelia VA 12 » : Amelia a ses propres numeros FR, un
+               # vrai « Amelia VA 12 » se serait cru sur le podium.
+               "nom_us": "Jessye"},
 }
 
 
@@ -538,9 +566,20 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _nom_us(pf: Dict[str, Any], va: str) -> str:
+    """« VA 12 » de Twitter tel qu'il s'affiche sur ce serveur (« Jessye VA 12 »)."""
+    return f'{pf["nom_us"]} {va}' if pf.get("nom_us") else str(va)
+
+
 def _us_manquants(us: Optional[Dict[str, Any]]) -> List[str]:
     """Les VA US sans relevé, absents d'un classement mêlé : à dire, jamais à taire."""
     return list((us or {}).get("illisibles") or []) if (us or {}).get("lignes") else []
+
+
+def _mele(gid: Optional[str]) -> bool:
+    """Ce serveur montre-t-il les VA US à côté des siens ? Le seul endroit qui
+    lit la clé « avec_us » : la retirer coupe tout d'un coup."""
+    return str(gid or "") != TWITTER_ID and bool(_profil(gid).get("avec_us"))
 
 
 def _us_pour(gid: Optional[str], debut: dt.date, fin: dt.date,
@@ -550,7 +589,7 @@ def _us_pour(gid: Optional[str], debut: dt.date, fin: dt.date,
     None aussi quand le relevé FR est vide : un classement fait des seuls VA
     US ne doit jamais paraître sur Va IG (personne n'y serait payable).
     """
-    if str(gid or "") == TWITTER_ID or not _profil(gid).get("avec_us"):
+    if not _mele(gid):
         return None
     if not (cl or {}).get("lignes"):
         return None
@@ -570,25 +609,47 @@ def _melange(cl: Dict[str, Any], us: Optional[Dict[str, Any]],
 
     None quand il n'y a rien à mêler : le message est alors exactement celui
     d'avant. Chaque ligne garde son marché en interne (rien ne l'affiche :
-    il sert à garder les VA FR visibles, à prendre le bon all-time, à
-    départager) ; « prime » n'est posée que sur les VA FR que suivi_va
-    paiera vraiment : les trois premiers du classement FR (le même que lui),
-    s'ils ont au moins un sub. À égalité de clics, le tri stable garde
-    l'ordre de chaque classement, VA FR d'abord.
+    il sert à garder les VA FR visibles, à prendre le bon all-time, à nommer
+    au journal les VA US primés, déjà primés sur Twitter).
+
+    « prime » va aux trois premiers de CETTE liste, quel que soit leur marché
+    (propriétaire, 03/10/2026 : « les primes elles vont aux 3 meilleurs VA,
+    c'est tout »), au montant de leur rang, s'ils ont au moins un sub — la
+    règle de suivi_va._annoncer_primes_fr, qui reçoit cette même liste (voir
+    _classement_paye) et passe un gagnant à zéro sans donner sa prime au
+    suivant. À égalité de clics, le tri stable garde l'ordre de chaque
+    classement, VA FR d'abord : le même ordre à chaque relevé, et donc la
+    même prime.
     """
     if not us or not us.get("lignes") or not cl.get("lignes"):
         return None
     tw = SERVEURS[TWITTER_ID]
     fr = [dict(x, marche=pf["marche"]) for x in cl["lignes"]]
-    for rang, x in enumerate(fr[:len(PRIMES)]):
+    # « affiche » : le nom montre ; « va » reste le libelle de Twitter, celui
+    # des totaux all-time et du journal des primes a payer a la main
+    autres = [dict(x, marche=tw["marche"], affiche=_nom_us(pf, x["va"])) for x in us["lignes"]]
+    mix = sorted(fr + autres, key=lambda x: (-int(x.get("clics") or 0),
+                                             x["marche"] != pf["marche"]))
+    for rang, x in enumerate(mix[:len(PRIMES)]):
         if int(x.get("clics") or 0) > 0:
             x["prime"] = PRIMES[rang]
-            # le rang que suivi_va lui annonce en privé (« 🥇 1e de la
-            # semaine »), et qu'il doit donner pour réclamer
-            x["rang_fr"] = rang + 1
-    autres = [dict(x, marche=tw["marche"]) for x in us["lignes"]]
-    return sorted(fr + autres, key=lambda x: (-int(x.get("clics") or 0),
-                                              x["marche"] != pf["marche"]))
+    return mix
+
+
+def _classement_paye(gid: Optional[str], cl: Dict[str, Any],
+                     us: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Le classement que suivi_va paie : celui que le podium AFFICHE.
+
+    Mêlé (Va IG, clé « avec_us ») : la liste de toute l'agence, dans l'ordre
+    du message. suivi_va annonce au rang de la ligne : un VA FR 2e derrière un
+    VA US apprend « 2e — 5$ », comme le dit son 💰. Avant, il recevait le
+    classement FR seul, et l'aurait annoncé 1er. Une ligne US n'a pas de
+    model : suivi_va ne lui trouve aucun ticket et la range dans « inconnus »
+    — _payer la nomme au journal, avec sa prime Twitter.
+    Sans VA US à côté, le classement FR, comme avant.
+    """
+    mix = _melange(cl, us, _profil(gid))
+    return cl if mix is None else dict(cl, lignes=mix)
 
 
 # ─── le message ──────────────────────────────────────────────────────────
@@ -666,7 +727,8 @@ def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
             f"GetMySocial n'a pas rendu {periode} entière._")
 
 
-def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False) -> List[str]:
+def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False,
+              pf: Optional[Dict[str, Any]] = None) -> List[str]:
     """Les lignes « ⚠️ » d'un classement mêlé pour les VA US qui y manquent.
 
     Avant, un VA de Twitter sans relevé disparaissait du message de Va IG sans
@@ -674,18 +736,24 @@ def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False)
     Les mots restent neutres (« Sans relevé », pas « VA US ») : le classement
     se présente comme celui de toute l'agence, sans marché ligne à ligne,
     mais qui manque est toujours dit, nom par nom.
-    `etat` : en_cours, termine ou final — ce qui sera encore relu, ou non.
+    `etat` : en_cours, termine, paie (podium arrêté) ou final (quinzaine,
+    sans prime) — ce qui sera encore relu, ou ce qu'il reste à faire.
     `liste_dite` : la liste FR, elle aussi périmée, l'a déjà dit — sans
     marché, une seconde ligne presque identique ne dirait rien de plus.
     """
     out: List[str] = []
-    manque = _us_manquants(us)
+    # les noms tels que le classement les montre (« Jessye VA 3 »)
+    manque = [_nom_us(pf or {}, v) for v in _us_manquants(us)]
     if manque:
         plus = len(manque) > 1
         suite = {"en_cours": (", ils remonteront" if plus else ", il remontera")
                              + " au prochain passage.",
                  "termine": (", ils seront relus" if plus else ", il sera relu")
-                            + " pour le podium officiel."}.get(etat, ".")
+                            + " pour le podium officiel.",
+                 # le podium arrêté paie les trois premiers de toute l'agence :
+                 # un VA US absent a pu en être, et décaler les rangs payés —
+                 # le même avertissement qu'un VA FR illisible
+                 "paie": ", à confirmer avant de payer."}.get(etat, ".")
         out += ["", "⚠️ **Sans relevé** : " + ", ".join(manque)
                 + f' — {"absents" if plus else "absent"} de ce classement' + suite]
     if (us or {}).get("lignes") and not us.get("frais", True) and not liste_dite:
@@ -696,11 +764,12 @@ def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False)
 def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[str]:
     """Les lignes du podium quand VA FR et VA US sont mêlés.
 
-    Les médailles restent aux trois premières places, quel que soit le
-    marché ; le 💰 ne va qu'aux VA FR réellement payés. Tous les VA FR restent
-    visibles, même au-delà des quinze premiers : ce sont eux qui lisent ce
-    salon, et un VA US plus fort en clics ne doit pas leur cacher leur rang ni
-    leur prime.
+    Médailles et 💰 aux trois premières places, quel que soit le marché — le
+    💰 seulement sur une ligne d'au moins un sub (voir _melange). Rien d'autre
+    à côté du montant : le rang de la ligne EST celui que suivi_va annonce, et
+    celui qu'on donne pour réclamer. Tous les VA FR restent visibles, même
+    au-delà des quinze premiers : ce sont eux qui lisent ce salon, et un VA US
+    plus fort en clics ne doit pas leur cacher leur rang.
     """
     montres = [i for i, x in enumerate(mix)
                if i < COMBIEN_AFFICHES or x["marche"] == pf["marche"]]
@@ -711,15 +780,13 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[st
         if i != avant + 1:
             out.append("…")
         avant = i
-        # le rang FR à côté du montant : le rang affiché est celui du
-        # classement mêlé (« 4. »), mais suivi_va annonce et paie au rang FR
-        # (« 2e de la semaine »). Sans lui, un VA réclamait sa prime au 4e rang.
-        # Aucune autre marque : le marché n'est plus dit ligne à ligne
-        # (propriétaire), seul ce qui touche à la paie reste « VA FR ».
-        queue = (f' · 💰 **{x["prime"]:.0f}$** ({x["rang_fr"]}{"er" if x["rang_fr"] == 1 else "e"} '
-                 f'VA {pf["marche"]})' if x.get("prime") else "")
-        out.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{queue}' if i < 3
-                   else f'{i + 1}. {x["va"]} — **{x["clics"]}** subs{queue}')
+        if i < 3:
+            # le même 💰 que Twitter ; absent sur une ligne à zéro sub, que
+            # suivi_va ne paie pas (signalé le 03/10 : « 0 subs · 💰 3$ »)
+            queue = f' · 💰 **{x["prime"]:.0f}$**' if x.get("prime") else ""
+            out.append(f'{MEDAILLES[i]} **{x.get("affiche") or x["va"]}** — **{x["clics"]}** subs{queue}')
+        else:
+            out.append(f'{i + 1}. {x.get("affiche") or x["va"]} — **{x["clics"]}** subs')
     reste = len(mix) - len(montres)
     if reste > 0:
         out.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
@@ -738,7 +805,8 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     - ni l'un ni l'autre : le résultat final. Il ne bougera plus, et il le dit.
 
     `us` (Va IG, clé « avec_us ») : le classement des VA de Twitter, mêlé à
-    celui des VA FR ; `cl` reste le classement FR, le seul qui paie.
+    celui des VA FR (`cl`) ; les primes vont aux trois premiers de la liste
+    mêlée, celle que suivi_va reçoit (_classement_paye).
     """
     pf = _profil(gid)
     lignes = cl["lignes"]
@@ -779,22 +847,15 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if not lignes:
         c.append("_Aucun relevé cette semaine._")
 
-    if mix is None:
-        c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
-        for i, p in enumerate(PRIMES):
-            c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
-    else:
-        # pas de médaille ici : les médailles du classement mêlé peuvent être à
-        # des VA US, et « 🥇 1er → 10$ » leur promettrait une prime
-        c += ["", f'🎁 **Les 3 meilleurs VA {pf["marche"]} de la semaine touchent une prime :**']
-        for i, p in enumerate(PRIMES):
-            c.append(f'💰 {i + 1}{"er" if i == 0 else "e"} VA {pf["marche"]} → **{p:.0f}$**')
-    # mêlé, « ton rang de la semaine » ne dit plus lequel : le rang affiché
-    # compte aussi les VA US, la prime se paie au rang parmi les VA FR
-    rang = ("ton rang de la semaine" if mix is None
-            else f'ton rang parmi les VA {pf["marche"]}')
+    # mêlé aussi, les mots de Twitter : les primes vont aux trois premiers du
+    # classement affiché, VA US compris (propriétaire, 03/10/2026), et le rang
+    # affiché est celui qu'on réclame. Avant, « 🥈 2e VA FR » renvoyait à un
+    # second classement, celui des seuls VA FR, que le message ne montrait pas.
+    c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
+    for i, p in enumerate(PRIMES):
+        c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
     c += ["", f'💸 **Pour recevoir ta prime :** envoie un message à **@{pf["bot"]}** dans '
-              f"**ton espace perso** avec **{rang}** et **ton adresse "
+              "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
               "USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification",
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
@@ -814,8 +875,8 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
               "écarté(s) le temps que la liste revienne._"]
     if mix is not None:
-        c += _avert_us(us, "en_cours" if en_cours else "termine" if termine else "final",
-                       liste_dite=not cl["frais"])
+        c += _avert_us(us, "en_cours" if en_cours else "termine" if termine else "paie",
+                       liste_dite=not cl["frais"], pf=pf)
     if avertissement:
         c += ["", avertissement]
 
@@ -879,9 +940,10 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             # personne : chaque total vient du fichier de son serveur
             at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
         suffixe = f' · 🌐 {at} all-time' if at is not None else ""
-        rangs.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{suffixe}'
+        nom = x.get("affiche") or x["va"]
+        rangs.append(f'{MEDAILLES[i]} **{nom}** — **{x["clics"]}** subs{suffixe}'
                      if i < 3 else
-                     f'{i + 1}. {x["va"]} — {x["clics"]} subs{suffixe}')
+                     f'{i + 1}. {nom} — {x["clics"]} subs{suffixe}')
     if not rangs:
         rangs = ["_Aucun relevé pour cette période._"]
 
@@ -900,7 +962,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
     if mix is not None:
         queue += ["\n" + x for x in _avert_us(us, "final" if final else "en_cours",
-                                               liste_dite=not cl["frais"]) if x]
+                                               liste_dite=not cl["frais"], pf=p) if x]
     if avertissement:
         queue.append("\n" + avertissement)
     bas = "\n".join(queue)
@@ -1586,6 +1648,88 @@ def _mentionner(gid: str, salon: str, mid: str, reponse: bool = True) -> Tuple[s
     return "", ("simple" if code == 429 or code >= 500 else "")
 
 
+def _payer(gid: str, debut: dt.date, fin: dt.date, cl: Dict[str, Any],
+           us: Optional[Dict[str, Any]]) -> None:
+    """Les primes de la semaine, annoncées chacune dans le salon du gagnant.
+
+    Le podium public reste anonyme ; le nom, le montant et l'adresse ne se
+    disent que dans le salon privé du gagnant, son manager mentionné.
+    Mêlé (Va IG) : suivi_va reçoit la liste affichée, pour annoncer à chaque
+    VA FR le montant de son VRAI rang (2e derrière un VA US : 5$, pas 10$).
+    """
+    paye = _classement_paye(gid, cl, us)
+    pf = _profil(gid)
+    rang_tw = {x["va"]: i for i, x in enumerate((us or {}).get("lignes") or [])}
+    doubles = []
+    for x in paye["lignes"][:len(PRIMES)]:
+        if not x.get("prime") or x.get("marche", pf["marche"]) == pf["marche"]:
+            continue
+        r = rang_tw.get(x["va"])
+        tw = (f'aussi {r + 1}{"er" if r == 0 else "e"} du classement Twitter, memes subs : '
+              f"prime Twitter {PRIMES[r]:.2f}$" if r is not None and r < len(PRIMES)
+              else "hors du podium Twitter")
+        doubles.append(f'{x["va"]} : {x["prime"]:.2f}$ ({tw})')
+    if doubles:
+        # Un VA US n'a pas de ticket sur Va IG (suivi_va le range dans
+        # « inconnus »), et il est TOUJOURS aussi primé sur Twitter pour les
+        # mêmes subs : le tri mêlé garde l'ordre de Twitter, les VA US du top 3
+        # d'ici sont les premiers de là-bas. Ce journal disait « a payer A LA
+        # MAIN … personne n'est prevenu » : suivi à la lettre, il faisait payer
+        # deux fois les mêmes subs, quand les deux podiums disent « un seul prix
+        # par personne ». Le choix revient au propriétaire.
+        print(f"[podium] {gid} {debut} : prime(s) Va IG a des VA US, A TRANCHER : "
+              + ", ".join(doubles) + ' -- "un seul prix par personne" : la prime Va IG en plus '
+              "du prix Twitter, ou a personne ? Au proprietaire. Aucun ticket sur Va IG : rien "
+              "n'y est annonce.", flush=True)
+    try:
+        import suivi_va
+        b = suivi_va.annoncer_primes(gid, paye, debut, fin)
+        if any(b.values()):
+            print(f"[podium] primes annoncees : {b}", flush=True)
+    except Exception as e:
+        print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
+
+
+def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
+                     fg: Dict[str, Any], mid: str) -> None:
+    """Les annonces privées d'un podium mêlé parti sans tous ses VA US.
+
+    Appelé à chaque tour du lundi, le podium déjà posté. Le relevé US est relu
+    au plus toutes les deux heures (_releve_us) ; tant qu'un VA y manque, rien
+    ne bouge. Complet : le podium est réédité sur place, sur le relevé FR de
+    9h et ce relevé US (une édition ne notifie personne, pas de second
+    @everyone), puis les primes sont annoncées sur cette liste-là. Jamais
+    complet de la journée : rien n'est annoncé, le podium dit « à confirmer
+    avant de payer », et le journal de 9h l'a dit — mieux qu'un montant faux
+    promis en privé.
+    """
+    snap = (fg.get("primes_attente") or {}).get("cl") or {}
+    us = _releve_us(debut, fin)
+    if not snap.get("lignes") or us is None or _us_manquants(us):
+        return
+    salon = _salon(gid)
+    if not salon:
+        return
+    code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us)]})
+    if code != 200 and _passager(code, rep):
+        print(f"[podium] {gid} {debut} : podium a corriger, Discord indisponible (HTTP {code}) -- "
+              "nouvel essai au prochain tour", flush=True)
+        return
+    if code != 200:
+        print(f"[podium] {gid} {debut} : podium {mid} ineditable (HTTP {code}, supprime a la "
+              "main ?) -- primes annoncees sur le releve complet quand meme", flush=True)
+    print(f"[podium] {gid} {debut} : releve US complet -- podium corrige sur place, primes "
+          "annoncees", flush=True)
+    # annoncer AVANT d'oublier l'attente : un arrêt entre les deux refait le
+    # tour suivant, et suivi_va ne redit jamais une prime déjà dite
+    _payer(gid, debut, fin, snap, us)
+    fg.pop("primes_attente", None)
+    fg["complet"] = code == 200 and not snap.get("illisibles")
+    fg["corrige"] = _maintenant().isoformat(timespec="minutes")
+    _ecrire(d)
+
+
 def poster_podium(gid: str, jour: Optional[dt.date] = None,
                   mentionner: bool = True, forcer: bool = False) -> str:
     """Le podium de la semaine passée. Une fois.
@@ -1620,6 +1764,10 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
                 _ecrire(d)
                 if ping:
                     print(f"[podium] {debut} : mention @everyone partie au nouvel essai", flush=True)
+        if fg.get("primes_attente"):
+            # les annonces privées attendent le relevé US complet (voir plus
+            # bas) : tant que c'est lundi, chaque tour regarde s'il l'est
+            _primes_retenues(gid, d, debut, fin, fg, str(postes[cle]))
         return str(postes[cle])
     salon = _salon(gid)
     if not salon:
@@ -1634,10 +1782,22 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
               f'({cl["entites"]} entites, {len(cl["illisibles"])} illisible(s)) — '
               "rien poste, nouvel essai au prochain tour", flush=True)
         return ""
-    # sur Va IG, les VA US ne sont qu'affichés à côté : `cl` reste le classement
-    # des VA FR, le seul gardé et le seul payé (suivi_va, plus bas). Un relevé
-    # FR vide est déjà reparti plus haut : jamais un podium de VA US seuls.
+    # sur Va IG, les VA US sont classés à côté des VA FR, et les primes vont
+    # aux trois premiers de l'ensemble (suivi_va, plus bas, reçoit la liste
+    # mêlée). Un relevé FR vide est déjà reparti plus haut : jamais un podium
+    # de VA US seuls, que personne sur Va IG ne pourrait réclamer.
     us = _us_pour(gid, debut, fin, cl)
+    if _mele(gid) and us is None:
+        # Sans relevé US, ce podium ne sait pas qui sont ses trois premiers.
+        # Avant, il partait avec les seuls VA FR, payait leurs trois premiers
+        # (un VA FR 2e derrière un VA US apprenait « 1e — 10$ ») et se figeait
+        # ainsi pour toujours. Même règle qu'un relevé FR raté : rien posté,
+        # nouvel essai au prochain tour ; le mardi, la semaine se fige sans
+        # podium ni prime (_figer_semaine), comme sans relevé FR.
+        print(f"[podium] {gid} {debut} : releve US indisponible -- podium retenu (ses primes vont "
+              "aux 3 premiers de toute l'agence, VA US compris), nouvel essai au prochain tour",
+              flush=True)
+        return ""
     embed = embed_podium(cl, debut, fin, gid=gid, us=us)
 
     vivants = d.setdefault("vivants", {})
@@ -1687,15 +1847,22 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
         "le": _maintenant().isoformat(timespec="minutes")}
     if reste:
         d["figes"][gid][debut.isoformat()]["ping_a_refaire"] = reste
-    # le podium public reste anonyme ; le nom, le montant et l'adresse ne se
-    # disent que dans le salon prive du gagnant, son manager mentionne
-    try:
-        import suivi_va
-        b = suivi_va.annoncer_primes(gid, cl, debut, fin)
-        if any(b.values()):
-            print(f"[podium] primes annoncees : {b}", flush=True)
-    except Exception as e:
-        print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
+    manque_us = _us_manquants(us)
+    if manque_us:
+        # Un VA US sans relevé a pu être dans le top 3 : les rangs payés
+        # peuvent encore bouger. Le podium le dit (« à confirmer avant de
+        # payer »), mais suivi_va, lui, promettait tout de suite en privé : un
+        # VA FR 1er ici, 2e une fois le VA US relu, apprenait « 1e — 10$ » pour
+        # une place à 5$, et le podium, posté une fois, ne revenait jamais
+        # dessus. Le relevé FR est gardé ; _primes_retenues corrige le podium
+        # et annonce dès que le relevé US est complet.
+        d["figes"][gid][debut.isoformat()]["primes_attente"] = {"cl": _instantane(cl, fin)}
+        print(f'[podium] {gid} {debut} : releve US incomplet ({", ".join(manque_us)}) -- annonces '
+              "privees des primes RETENUES : un absent peut changer les rangs payes. Relu toutes "
+              "les 2 h ce lundi ; des qu'il est complet, le podium est corrige sur place et les "
+              "primes annoncees.", flush=True)
+    else:
+        _payer(gid, debut, fin, cl, us)
     # Le message vivant de la semaine ecoulee est devenu le podium : il n'est
     # plus vivant. Celui de la semaine neuve part juste apres (rafraichir, meme
     # tour de boucle), en dessous du podium.

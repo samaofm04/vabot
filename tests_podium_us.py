@@ -11,18 +11,31 @@ Ce qu'il voulait aussi : faire passer les VA US pour des VA « Alicia ».
 Refusé (le travail d'un VA prêté à un autre, sur un classement qui paie).
 Compromis annoncé : leur vrai libellé anonyme (« VA 12 »), un en-tête qui
 dit que le classement couvre toute l'agence, aucune marque FR/US ligne à
-ligne ; ce qui touche à la paie dit toujours « VA FR ».
+ligne. Les primes, d'abord gardées aux VA FR, vont depuis aux trois premiers
+de ce classement mêlé (propriétaire, 03/10/2026 : « les primes elles vont
+aux 3 meilleurs VA, c'est tout, pas de distinction pour le moment »).
 
 Ce qui est vérifié :
   - une seule liste, du plus fort au plus faible : VA FR (« Amelia VA 3 »,
     clics FR/BE/CH/LU/MC) et VA US (« VA 1 », clics US), sans marché ligne
-    à ligne ni nulle part dans le texte, hors paie ; en-têtes « toute
+    à ligne ni nulle part dans le texte, paie comprise ; en-têtes « toute
     l'agence », un seul total, avertissements neutres (« Sans relevé ») ;
-  - l'argent : 💰 seulement à côté des VA FR vraiment payés (trois premiers
-    FR avec au moins un sub), même quand un VA US est premier ou qu'un VA FR
-    à zéro est dans le top 3, avec le rang FR que suivi_va leur annonce en
-    privé (« (2e VA FR) ») ; suivi_va reçoit le classement FR SEUL ; un
-    relevé FR raté ne donne jamais un podium fait de VA US ;
+  - l'argent : 💰 aux trois premiers du classement mêlé, VA US compris,
+    s'ils ont au moins un sub (un VA US premier touche 10$, le VA FR deuxième
+    5$, une ligne à zéro dans le top 3 rien, et sa prime ne passe pas au
+    suivant) ; plus de « (1er VA FR) », le bloc des primes et la réclamation
+    reprennent les mots de Twitter ; suivi_va reçoit la liste mêlée dans
+    l'ordre affiché, et le VRAI suivi_va y annonce à chaque VA FR le montant
+    de son rang réel, range les VA US dans « inconnus » (pas de ticket sur
+    Va IG) ; le journal dit qu'un VA US gagnant sur Va IG est TOUJOURS déjà
+    primé au podium Twitter pour les mêmes subs (rang et montant Twitter) :
+    la prime Va IG est à trancher par le propriétaire, pas « à payer » ;
+    un relevé FR raté ne donne jamais un podium fait de VA US, un relevé US
+    indisponible jamais un podium payé aux seuls VA FR (retenu, comme un
+    relevé FR raté) ; un VA US sans relevé au podium arrêté : « à confirmer
+    avant de payer », les annonces privées RETENUES (un absent décale les
+    rangs payés), puis le podium corrigé sur place et payé une fois le
+    relevé complet — jamais un montant faux promis en privé ;
   - le quota : Va IG reprend le relevé que Twitter vient de faire, aucun
     appel GetMySocial de plus (ni pour les clics, ni pour l'all-time) ; après
     un redémarrage, deux relevés US au plus (semaine, quinzaine) ;
@@ -74,6 +87,7 @@ J = dt.timedelta(days=1)
 
 # ------------------------------------------------ faux suivi_va (la paie) --
 _PRIMES = []
+PAIE_9H = {}                           # ce que le podium de 9h a passé à la paie (section 1)
 _faux_suivi = types.ModuleType("suivi_va")
 _faux_suivi.annoncer_primes = lambda gid, cl, debut, fin: (
     _PRIMES.append((str(gid), debut.isoformat(), copy.deepcopy(cl)))
@@ -198,7 +212,11 @@ TMP = pathlib.Path(tempfile.mkdtemp(prefix="podium_us_test_"))
 _SAUVE = {k: getattr(pd, k) for k in (
     "DATA_DIR", "ETAT_FICHIER", "CONFIG_FICHIER", "NUMEROS_FICHIER", "LIENS_CACHE",
     "ALLTIME_FICHIER", "_maintenant", "_aujourdhui", "_api", "_salon", "_pause_gms", "time")}
-_SAUVE_IG = dict(pd.SERVEURS[IG])
+_SAUVE_IG_VRAI = dict(pd.SERVEURS[IG])
+# Les sections ci-dessous verifient les VA US sous leur libelle Twitter (« VA 1 ») ;
+# le nom affiche sur Va IG (« nom_us » : « Jessye VA 1 ») a sa propre section, a la fin.
+_SAUVE_IG = {k: v for k, v in _SAUVE_IG_VRAI.items() if k != "nom_us"}
+pd.SERVEURS[IG].pop("nom_us", None)
 _NB_BAC = [0]
 
 
@@ -304,10 +322,10 @@ def msg(salon, mid):
     return (DISCORD.salons.get(salon, {}).get(mid) or {}).get("json")
 
 
-# « · 💰 **10$** (1er VA FR) » : le montant, puis le rang FR, celui que
-# suivi_va annonce en privé et auquel la prime se réclame. Le groupe
-# « FR 📸 / US 🐦 » reste lu : une marque de marché revenue sur une ligne
-# doit faire échouer les contrôles, pas les rendre aveugles.
+# « · 💰 **10$** » : le montant, au rang de la ligne. Le groupe « (1er VA
+# FR) » (l'ancien rang FR à côté du montant) et le groupe « FR 📸 / US 🐦 »
+# restent lus : une marque revenue sur une ligne doit faire échouer les
+# contrôles, pas les rendre aveugles.
 RE_PODIUM = re.compile(r"^(?:(🥇|🥈|🥉)|(\d+)\.) \*{0,2}(.+?)\*{0,2} — \*\*(\d+)\*\* subs"
                        r"(?: · (FR 📸|US 🐦))?(?: · 💰 \*\*(\d+)\$\*\*(?: \((\d+)(?:er|e) VA FR\))?)?$")
 RE_SUBS = re.compile(r"^(?:(🥇|🥈|🥉)|(\d+)\.) \*{0,2}(.+?)\*{0,2} — \*{0,2}(\d+)\*{0,2} subs"
@@ -339,8 +357,9 @@ LUN_W, DIM_W = dt.date(2026, 9, 21), dt.date(2026, 9, 27)
 LUN_W1 = dt.date(2026, 9, 28)
 S_OLD, S_OLD_FIN, S_NEW = dt.date(2026, 9, 16), dt.date(2026, 9, 30), dt.date(2026, 10, 1)
 ABO_MIX = "Abonnements de **toute l'agence**"
-PRIMES_MIX = ["🎁 **Les 3 meilleurs VA FR de la semaine touchent une prime :**",
-              "💰 1er VA FR → **10$**", "💰 2e VA FR → **5$**", "💰 3e VA FR → **3$**"]
+# mêlé aussi, le bloc des primes de Twitter : les trois premiers de la liste
+PRIMES_GEN = ["🎁 **Les 3 meilleurs de la semaine touchent une prime :**",
+              "🥇 1er → **10$**", "🥈 2e → **5$**", "🥉 3e → **3$**"]
 
 
 def controle_podium_mix(etiquette, js, d0, d1, entier=True):
@@ -353,26 +372,32 @@ def controle_podium_mix(etiquette, js, d0, d1, entier=True):
     check(f"{etiquette} : aucune ligne ne porte de marché (ni FR 📸 ni US 🐦)",
           all(x["marche"] is None and "📸" not in x["brut"] and "🐦" not in x["brut"] for x in ls)
           and len(ls) == len(ORDRE), [x["brut"] for x in ls])
-    check(f"{etiquette} : le marché n'est dit nulle part, hors paie (« VA FR » du 💰 et des primes)",
+    check(f"{etiquette} : le marché n'est dit nulle part, paie comprise (plus de « VA FR »)",
           not marche_dit(t), marche_dit(t))
     check(f"{etiquette} : médailles aux trois premières places, quel que soit le marché",
           [x["med"] for x in ls[:3]] == ["🥇", "🥈", "🥉"] and ls[0]["va"] == "VA 1"
           and all(x["med"] is None for x in ls[3:]))
     primes = {x["va"]: x["extra"] for x in ls if x["extra"] is not None}
-    check(f"{etiquette} : 💰 seulement aux trois VA FR payés (10 / 5 / 3 $), aucun aux VA US",
-          primes == {"Amelia VA 3": 10, "Amelia VA 1": 5, "Lola VA 2": 3}, primes)
-    rangs = {x["va"]: x["rang_fr"] for x in ls if x["extra"] is not None}
-    check(f"{etiquette} : à côté du 💰, le rang FR (celui que suivi_va annonce), pas le rang mêlé",
-          rangs == {"Amelia VA 3": 1, "Amelia VA 1": 2, "Lola VA 2": 3}
-          and "· 💰 **10$** (1er VA FR)" in t and "· 💰 **5$** (2e VA FR)" in t, rangs)
-    check(f"{etiquette} : la prime se réclame avec le rang parmi les VA FR",
-          "avec **ton rang parmi les VA FR** et" in t and "ton rang de la semaine" not in t, t[-500:])
+    check(f"{etiquette} : 💰 aux trois premiers du classement mêlé (10 / 5 / 3 $), "
+          "VA US compris : VA 1 (US) 10$, Amelia VA 3 (FR) 5$, VA 2 (US) 3$",
+          primes == {ORDRE[0]: 10, ORDRE[1]: 5, ORDRE[2]: 3}
+          and primes == {"VA 1": 10, "Amelia VA 3": 5, "VA 2": 3}, primes)
+    check(f"{etiquette} : rien à côté du 💰 (plus de « (1er VA FR) ») — le rang de la ligne "
+          "est celui qu'on réclame",
+          all(x["rang_fr"] is None for x in ls)
+          and f"\n🥇 **VA 1** — **{attendu('VA 1', d0, d1)}** subs · 💰 **10$**\n" in t
+          and f"\n🥈 **Amelia VA 3** — **{attendu('Amelia VA 3', d0, d1)}** subs · 💰 **5$**\n" in t
+          and f"\n🥉 **VA 2** — **{attendu('VA 2', d0, d1)}** subs · 💰 **3$**\n" in t,
+          [x["brut"] for x in ls[:3]])
+    check(f"{etiquette} : la prime se réclame avec « ton rang de la semaine », comme sur Twitter",
+          "avec **ton rang de la semaine** et" in t and "ton rang parmi" not in t, t[-500:])
     check(f"{etiquette} : aucun VA manquant, aucun avertissement",
           "Sans relevé" not in t and "non rafraîchie" not in t and "⚠️" not in t, t[-400:])
     check(f"{etiquette} : en-tête « toute l'agence », juste sous les dates",
           t.split("\n")[1] == ABO_MIX, t[:300])
-    check(f"{etiquette} : bloc des primes réservé aux VA FR, sans médaille",
-          all(p in t for p in PRIMES_MIX) and "🥇 1er → **10$**" not in t, t[-700:])
+    check(f"{etiquette} : bloc des primes de Twitter (« Les 3 meilleurs de la semaine », "
+          "🥇 1er → 10$…), plus rien de « VA FR »",
+          all(p in t for p in PRIMES_GEN) and "VA FR" not in t and "💰 1er" not in t, t[-700:])
     check(f"{etiquette} : pied « Marchés FR + US »",
           pied(js).startswith("YOULAB • Marchés FR + US · comptes VA, sans pseudo"), pied(js))
 
@@ -387,6 +412,8 @@ def controle_subs_mix(etiquette, js, d0, d1, totaux_us=None, totaux_fr=None):
     check(f"{etiquette} : en-tête « Subs de toute l'agence · 8 comptes classés »",
           "\nSubs de **toute l'agence** · **8** comptes classés\n" in t, t[:300])
     check(f"{etiquette} : le marché n'est dit nulle part dans la page", not marche_dit(t), marche_dit(t))
+    check(f"{etiquette} : la quinzaine ne paie rien — ni 💰 ni prime",
+          "💰" not in t and "prime" not in t.lower(), t[-400:])
     tot = sum(attendu(v, d0, d1) for v in FR_NOMS | US_NOMS)
     check(f"{etiquette} : un seul total, la somme de toutes les lignes ({tot})",
           tot == sum(x["clics"] for x in ls)
@@ -402,17 +429,11 @@ def controle_subs_mix(etiquette, js, d0, d1, totaux_us=None, totaux_fr=None):
 
 def marche_dit(texte):
     """Ce qui, dans un texte mêlé, dirait encore le marché d'un VA : les lignes
-    qui nomment FR, US, Twitter, Instagram ou leurs emojis. Seule la paie
-    garde « VA FR » (💰 sur la ligne, bloc des primes, rang à réclamer)."""
-    out = []
-    for l in texte.split("\n"):
-        if re.search(r"\bUS\b|🐦|📸|Twitter|Instagram|Marchés?\b", l):
-            out.append(l)
-        elif re.search(r"\bFR\b", l) and not (
-                "💰" in l or "Les 3 meilleurs VA FR de la semaine touchent une prime" in l
-                or "ton rang parmi les VA FR" in l):
-            out.append(l)
-    return out
+    qui nomment FR, US, Twitter, Instagram ou leurs emojis. Plus d'exception
+    pour la paie : les primes vont aux trois premiers de toute l'agence, le
+    « VA FR » du 💰 et du bloc des primes n'a plus lieu d'être."""
+    return [l for l in texte.split("\n")
+            if re.search(r"\bUS\b|\bFR\b|🐦|📸|Twitter|Instagram|Marchés?\b", l)]
 
 
 def sans_us(js):
@@ -435,6 +456,61 @@ def charger_ancien():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+# ----------------------------------------- le VRAI suivi_va, sur une liste --
+_SV = {}
+NUMEROS_FR = {"amelia": {"u3": 3, "u1": 1}, "lola": {"u2": 2, "u5": 5}}
+
+
+def suivi_reel(paye, debut=None, fin=None):
+    """Le VRAI suivi_va._annoncer_primes_fr sur `paye` (la liste que
+    poster_podium lui passe) : Discord, tickets et numéros simulés, aucun
+    réseau. Rend (bilan, annonces postées dans les salons des gagnants)."""
+    import os
+    import liens_fr
+    import requests
+    if "sv" not in _SV:
+        spec = importlib.util.spec_from_file_location("suivi_va_vrai", BOT / "suivi_va.py")
+        sv_ = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sv_)
+        num = TMP / "numeros_va_fr.json"
+        safe_json.write_text(num, json.dumps(NUMEROS_FR))
+        _SV.update(sv=sv_, num=num, n=0)
+    sv_ = _SV["sv"]
+    _SV["n"] += 1
+    sv_.ETAT_FICHIER = TMP / f"suivi_{_SV['n']}.json"
+    users = {u: {"channel_id": f"salon-{u}"} for u in ("u1", "u2", "u3", "u5")}
+    sauve = (liens_fr.NUMEROS, safe_json.load, requests.post, os.environ.get("DISCORD_TOKEN"))
+    vrai_load = safe_json.load
+    annonces = []
+    try:
+        liens_fr.NUMEROS = _SV["num"]
+        safe_json.load = lambda chemin, default=None: (
+            users if pathlib.Path(chemin).name == "users.json" else vrai_load(chemin, default=default))
+        requests.post = lambda url, timeout=None, headers=None, json=None: (
+            annonces.append(json) or types.SimpleNamespace(status_code=200))
+        os.environ["DISCORD_TOKEN"] = "faux-jeton"
+        b = sv_._annoncer_primes_fr(IG, paye, debut or LUN_W, fin or DIM_W)
+    finally:
+        liens_fr.NUMEROS, safe_json.load, requests.post = sauve[:3]
+        if sauve[3] is None:
+            os.environ.pop("DISCORD_TOKEN", None)
+        else:
+            os.environ["DISCORD_TOKEN"] = sauve[3]
+    return b, annonces
+
+
+def prives_de(annonces):
+    """{VA : (rang, montant)} tels que le gagnant les lit dans son salon
+    (« 🥈 2e de la semaine — 5.00$ »)."""
+    out = {}
+    for an in annonces:
+        e_ = an["embeds"][0]
+        out[re.search(r"· \*\*(.+?)\*\* ·", e_["description"]).group(1)] = (
+            int(re.match(r"\S+ (\d+)e de la semaine", e_["title"]).group(1)),
+            float(re.search(r"— ([\d.]+)\$$", e_["title"]).group(1)))
+    return out
 
 
 def muet_fr_semaine():
@@ -538,8 +614,8 @@ try:
         check("lundi 00h10 : « semaine terminée » sur Va IG", titre(js) == "🏁 PODIUM SUBS — SEMAINE TERMINÉE")
         controle_podium_mix("lundi 00h10", js, LUN_W, DIM_W)
         check("lundi 00h10 : chiffres de la semaine ENTIÈRE, des deux côtés",
-              "\n🥇 **VA 1** — **1680** subs\n" in desc(js)
-              and "\n🥈 **Amelia VA 3** — **1512** subs · 💰 **10$** (1er VA FR)\n" in desc(js),
+              "\n🥇 **VA 1** — **1680** subs · 💰 **10$**\n" in desc(js)
+              and "\n🥈 **Amelia VA 3** — **1512** subs · 💰 **5$**\n" in desc(js),
               desc(js)[:500])
         check("lundi 00h10 : zéro appel US de Va IG (le relevé « terminée » de Twitter est repris)",
               not us_par_ig(t), us_par_ig(t)[:3])
@@ -553,17 +629,31 @@ try:
               and "il ne bougera plus" in desc(js) and pied(js).endswith("· résultat final"))
         controle_podium_mix("podium final", js, LUN_W, DIM_W)
         prim = [x for x in _PRIMES if x[0] == IG and x[1] == LUN_W.isoformat()]
-        cl = prim[0][2] if prim else {}
-        check("la paie reçoit le classement FR SEUL : ses trois VA FR, dans l'ordre FR, rien d'autre",
-              len(prim) == 1 and [x["va"] for x in cl["lignes"]] == ["Amelia VA 3", "Amelia VA 1", "Lola VA 2"]
-              and [x["clics"] for x in cl["lignes"]] == [1512, 1008, 672]
-              and not any(k in x for x in cl["lignes"] for k in ("marche", "pastille", "prime")), prim)
+        cl = prim[0][2] if prim else {"lignes": []}
+        PAIE_9H.update(cl=cl, js=js)
+        check("la paie reçoit le classement MÊLÉ, une fois, dans l'ordre affiché (VA US compris)",
+              len(prim) == 1
+              and [(x["va"], x["clics"]) for x in cl["lignes"]] == classement_attendu(LUN_W, DIM_W)
+              and [x["va"] for x in cl["lignes"]] == [x["va"] for x in lignes(desc(js))],
+              [(x["va"], x["clics"]) for x in cl["lignes"]])
+        check("… le rang de chaque ligne y est celui du podium : 💰 10 / 5 / 3 $ sur les trois "
+              "premiers, VA 1 (US) compris, rien au-delà",
+              [x.get("prime") for x in cl["lignes"]] == [10.0, 5.0, 3.0] + [None] * (len(ORDRE) - 3),
+              [x.get("prime") for x in cl["lignes"]])
+        check("… ce dont suivi_va a besoin : model et numéro des VA FR, aucun model aux VA US "
+              "(pas de ticket sur Va IG : rangés dans « inconnus », payés à la main)",
+              {x["va"]: (x["model"], x["numero"]) for x in cl["lignes"] if x["va"] in FR_NOMS}
+              == {"Amelia VA 3": ("amelia", 3), "Amelia VA 1": ("amelia", 1), "Lola VA 2": ("lola", 2)}
+              and all(x["model"] == "" for x in cl["lignes"] if x["va"] in US_NOMS),
+              [(x["va"], x.get("model"), x.get("numero")) for x in cl["lignes"]])
         prim_tw = [x for x in _PRIMES if x[0] == TW and x[1] == LUN_W.isoformat()]
-        check("la paie de Twitter reçoit ses VA seuls",
-              len(prim_tw) == 1 and {x["va"] for x in prim_tw[0][2]["lignes"]} == US_NOMS)
+        check("la paie de Twitter reçoit ses VA seuls, tels que relevés (rien d'ajouté)",
+              len(prim_tw) == 1 and {x["va"] for x in prim_tw[0][2]["lignes"]} == US_NOMS
+              and not any(k in x for x in prim_tw[0][2]["lignes"] for k in ("marche", "prime")))
         check("lundi 9h : zéro appel US de Va IG", not us_par_ig(t), us_par_ig(t)[:3])
         fg = etat["figes"][IG][LUN_W.isoformat()]
-        check("lundi 9h : historique « podium », complet", fg["mode"] == "podium" and fg["complet"] is True)
+        check("lundi 9h : historique « podium », complet, rien de retenu",
+              fg["mode"] == "podium" and fg["complet"] is True and "primes_attente" not in fg)
 
     def c_quinzaine():
         t = m(2026, 10, 1, 0, 10)
@@ -668,39 +758,76 @@ try:
 
     cl_fr = {"lignes": [L("Amelia VA 3", 40, 3, "amelia"), L("Amelia VA 1", 0, 1, "amelia"),
                         L("Lola VA 2", 0, 2, "lola")], "illisibles": [], "frais": True}
+    # le cas demandé : un VA US 1er, un VA FR 2e, une ligne à zéro sub 3e
+    us1 = {"lignes": [L("VA 1", 100, 1)], "illisibles": [], "frais": True}
+    t = desc(pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us1))
+    ls = lignes(t)
+    check("un VA US premier : 🥇 et 💰 10$ (les primes vont aux trois premiers de toute l'agence)",
+          ls[0]["brut"] == "🥇 **VA 1** — **100** subs · 💰 **10$**", ls[:1])
+    check("un VA FR deuxième derrière lui : 🥈 et 💰 5$ — son vrai rang, plus « (1er VA FR) »",
+          ls[1]["brut"] == "🥈 **Amelia VA 3** — **40** subs · 💰 **5$**", ls[1:2])
+    check("une ligne à zéro sub dans le top 3 : 🥉 sans 💰 (suivi_va ne la paie pas), et le "
+          "3$ ne passe pas au 4e",
+          ls[2]["brut"] == "🥉 **Amelia VA 1** — **0** subs"
+          and ls[3]["brut"] == "4. Lola VA 2 — **0** subs" and len(ls) == 4, [x["brut"] for x in ls])
+    check("… 💰 deux fois exactement, et nulle part un rang FR ou « VA FR »",
+          t.count("💰") == 2 and "VA FR" not in t and not marche_dit(t), t)
+    paye = pd._classement_paye(IG, cl_fr, us1)
+    check("la liste payée est la liste affichée, rang pour rang, prime pour prime",
+          [(x["va"], x.get("prime")) for x in paye["lignes"]]
+          == [("VA 1", 10.0), ("Amelia VA 3", 5.0), ("Amelia VA 1", None), ("Lola VA 2", None)]
+          and [x["va"] for x in paye["lignes"]] == [x["va"] for x in ls])
+    _avant = copy.deepcopy((cl_fr, us1))
+    pd._classement_paye(IG, cl_fr, us1)
+    pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us1)
+    check("… sans toucher aux relevés (ni marché ni prime posés sur le classement FR gardé)",
+          (cl_fr, us1) == _avant)
+    check("sans VA US à côté, la paie reçoit le classement FR lui-même, comme avant",
+          pd._classement_paye(IG, cl_fr, None) is cl_fr
+          and pd._classement_paye(IG, cl_fr, {"lignes": []}) is cl_fr
+          and pd._classement_paye(TW, cl_fr, None) is cl_fr)
     us2 = {"lignes": [L("VA 1", 100, 1), L("VA 2", 50, 2)], "illisibles": [], "frais": True}
-    e = pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us2)
-    ls = lignes(desc(e))
-    check("un VA US premier : il a la 🥇, pas de 💰",
-          ls[0]["va"] == "VA 1" and ls[0]["med"] == "🥇" and ls[0]["extra"] is None, ls[:2])
-    check("un VA FR à zéro sub dans le top 3 FR : pas de 💰 (suivi_va ne le paie pas)",
-          [x["va"] for x in ls if x["extra"]] == ["Amelia VA 3"]
-          and next(x for x in ls if x["va"] == "Amelia VA 3")["extra"] == 10
-          and next(x for x in ls if x["va"] == "Amelia VA 3")["med"] == "🥉", [x["brut"] for x in ls])
-    check("💰 n'apparaît qu'une fois dans le classement", sum("💰 **" in x["brut"] for x in ls) == 1)
+    ls = lignes(desc(pd.embed_podium(cl_fr, LUN_W, DIM_W, gid=IG, us=us2)))
+    check("deux VA US devant : 10$ et 5$ pour eux, le VA FR 3e touche 3$",
+          [(x["med"], x["va"], x["extra"]) for x in ls[:4]]
+          == [("🥇", "VA 1", 10), ("🥈", "VA 2", 5), ("🥉", "Amelia VA 3", 3), (None, "Amelia VA 1", None)],
+          [x["brut"] for x in ls])
+    # une ligne US à zéro dans le top 3 : même règle, quel que soit le marché
+    ls = lignes(desc(pd.embed_podium({"lignes": [L("Amelia VA 3", 40, 3, "amelia")], "illisibles": [],
+                                      "frais": True}, LUN_W, DIM_W, gid=IG,
+                                     us={"lignes": [L("VA 1", 0, 1), L("VA 2", 0, 2)],
+                                         "illisibles": [], "frais": True})))
+    check("une ligne US à zéro dans le top 3 : pas de 💰 non plus (à égalité, le VA FR d'abord)",
+          [(x["va"], x["extra"]) for x in ls] == [("Amelia VA 3", 10), ("VA 1", None), ("VA 2", None)],
+          [x["brut"] for x in ls])
     tout_zero = {"lignes": [dict(x, clics=0) for x in cl_fr["lignes"]], "illisibles": [], "frais": True}
-    check("tout le monde à zéro côté FR : aucun 💰 dans le classement",
-          not [x for x in lignes(desc(pd.embed_podium(tout_zero, LUN_W, DIM_W, gid=IG, us=us2)))
-               if x["extra"]])
-    # un VA FR loin derrière vingt VA US : toujours visible, avec sa prime
+    us_zero = {"lignes": [dict(x, clics=0) for x in us2["lignes"]], "illisibles": [], "frais": True}
+    t = desc(pd.embed_podium(tout_zero, LUN_W, DIM_W, gid=IG, us=us_zero))
+    check("tout le monde à zéro, FR et US : aucun 💰 dans le classement",
+          not [x for x in lignes(t) if x["extra"]] and len(lignes(t)) == 5 and t.count("💰") == 0, t)
+    # un VA FR loin derrière vingt VA US : toujours visible, à son vrai rang
     us20 = {"lignes": [L(f"VA {i}", 200 - i, i) for i in range(1, 21)], "illisibles": [], "frais": True}
     cl3 = {"lignes": [L("Amelia VA 3", 40, 3, "amelia"), L("Amelia VA 1", 30, 1, "amelia"),
                       L("Lola VA 2", 20, 2, "lola")], "illisibles": [], "frais": True}
     t = desc(pd.embed_podium(cl3, LUN_W, DIM_W, gid=IG, us=us20))
     ls = lignes(t)
-    check("VA FR au-delà des 15 premiers : affichés quand même, à leur vrai rang, avec leur 💰",
+    check("VA FR au-delà des 15 premiers : affichés quand même, à leur vrai rang, sans 💰",
           [(x["rang"], x["va"], x["extra"]) for x in ls if x["va"] in FR_NOMS]
-          == [(21, "Amelia VA 3", 10), (22, "Amelia VA 1", 5), (23, "Lola VA 2", 3)], t[-900:])
+          == [(21, "Amelia VA 3", None), (22, "Amelia VA 1", None), (23, "Lola VA 2", None)], t[-900:])
+    check("… les primes aux trois premiers, des VA US : VA 1 10$, VA 2 5$, VA 3 3$",
+          {x["va"]: x["extra"] for x in ls if x["extra"]} == {"VA 1": 10, "VA 2": 5, "VA 3": 3})
     check("… les quinze premiers d'abord, puis « … », puis les VA FR, puis le compte des autres",
           [x["rang"] or 0 for x in ls][:3] == [0, 0, 0] and [x["rang"] for x in ls][3:15] == list(range(4, 16))
           and "**15** subs" not in t and "\n…\n21. Amelia VA 3" in t
           and "… _et 5 autres_ 👏" in t, t[-600:])
-    # à égalité de clics : VA FR d'abord, toujours le même ordre
+    # à égalité de clics : VA FR d'abord, toujours le même ordre — et donc la même prime
     eg = {"lignes": [L("VA 1", 40, 1)], "illisibles": [], "frais": True}
     r_a = desc(pd.embed_podium(cl3, LUN_W, DIM_W, gid=IG, us=eg))
     r_b = desc(pd.embed_podium(cl3, LUN_W, DIM_W, gid=IG, us=eg))
-    check("à égalité, le VA FR passe devant, et le rendu ne change pas d'un appel à l'autre",
-          [x["va"] for x in lignes(r_a)][:2] == ["Amelia VA 3", "VA 1"] and r_a == r_b)
+    check("à égalité, le VA FR passe devant (10$, le VA US 5$), et le rendu ne change pas d'un "
+          "appel à l'autre",
+          [(x["va"], x["extra"]) for x in lignes(r_a)][:3]
+          == [("Amelia VA 3", 10), ("VA 1", 5), ("Amelia VA 1", 3)] and r_a == r_b)
     # rien à mêler : exactement le message d'avant
     check("sans VA US (relevé indisponible), le message est le message FR d'avant",
           pd.embed_podium(cl3, LUN_W, DIM_W, gid=IG, us=None) == pd.embed_podium(cl3, LUN_W, DIM_W, gid=IG)
@@ -825,11 +952,25 @@ try:
                 check(f"pages_subs {g or 'sans serveur'} final={fin_} : rendu d'avant",
                       pd.pages_subs(cl_ill, S_OLD, S_OLD_FIN, {"Amelia VA 3": 7}, gid=g, final=fin_)
                       == ancien.pages_subs(cl_ill, S_OLD, S_OLD_FIN, {"Amelia VA 3": 7}, gid=g, final=fin_))
+        # Défaut d'AVANT, gardé exprès : le message des seuls VA FR (clé coupée,
+        # ou relevé US indisponible hors podium) met encore « 💰 3$ » sur une
+        # ligne à zéro sub du top 3, que suivi_va ne paie pas. Le corriger
+        # changerait le message sans la clé, qui doit rester celui d'avant :
+        # c'est au propriétaire d'en décider. Avec la clé, ce repli n'atteint
+        # plus jamais le podium payé (retenu sans relevé US, section 7).
+        cl_zero = {"lignes": [dict(x, clics=c) for x, c in zip(cl3["lignes"], (41, 9, 0))],
+                   "illisibles": [], "frais": True}
+        for g in (IG, TW):
+            r_ = pd.embed_podium(cl_zero, LUN_W, DIM_W, gid=g)
+            check(f"repli FR seul {g} : ligne à zéro du top 3 rendue comme avant (« 0 subs · 💰 3$ », "
+                  "défaut d'avant laissé au propriétaire)",
+                  r_ == ancien.embed_podium(cl_zero, LUN_W, DIM_W, gid=g)
+                  and "— **0** subs · 💰 **3$**" in desc(r_), desc(r_)[:400])
 
     # ================================================================ 7. --
     print()
     print("=" * 70)
-    print("7. Un seul interrupteur, temporaire, et la paie n'est pas touchée")
+    print("7. Un seul interrupteur, temporaire ; la paie reçoit ce que le podium affiche")
     print("=" * 70)
     src = (BOT / "podium_discord.py").read_text(encoding="utf-8")
     check("Va IG porte l'interrupteur, Twitter non",
@@ -837,67 +978,180 @@ try:
     check("l'interrupteur n'est lu qu'à un seul endroit",
           src.count('.get("avec_us")') == 1 and src.count("avec_us") >= 2)
     _i = src.find('"avec_us": True')
-    check("la clé dit qu'elle est temporaire et comment couper",
-          _i > 0 and "juste pour le moment" in src[_i - 900:_i] and "POUR COUPER" in src[_i - 900:_i])
-    check("la paie reçoit toujours `cl`, le classement FR",
-          "suivi_va.annoncer_primes(gid, cl, debut, fin)" in src)
+    check("la clé dit qu'elle est temporaire, à qui vont les primes, et comment couper",
+          _i > 0 and "juste pour le moment" in src[_i - 1400:_i] and "POUR COUPER" in src[_i - 1400:_i]
+          and "les primes elles vont aux 3" in src[_i - 1400:_i])
+    check("la paie reçoit la liste affichée (_classement_paye), plus le classement FR seul",
+          "paye = _classement_paye(gid, cl, us)" in src
+          and "suivi_va.annoncer_primes(gid, paye, debut, fin)" in src
+          and "suivi_va.annoncer_primes(gid, cl, debut, fin)" not in src)
 
-    # le 💰 affiché = ce que le VRAI suivi_va annonce et paie : on le fait
-    # tourner (Discord, tickets et numéros simulés) sur les mêmes classements
-    import os
-    import liens_fr
-    import requests
-    _spec = importlib.util.spec_from_file_location("suivi_va_vrai", BOT / "suivi_va.py")
-    sv = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(sv)
-    _num = TMP / "numeros_va_fr.json"
-    safe_json.write_text(_num, json.dumps({"amelia": {"u3": 3, "u1": 1}, "lola": {"u2": 2, "u5": 5}}))
-    _users = {u: {"channel_id": f"salon-{u}"} for u in ("u1", "u2", "u3", "u5")}
-    _sauve_sv = (liens_fr.NUMEROS, safe_json.load, requests.post, os.environ.get("DISCORD_TOKEN"))
-    _vrai_load = safe_json.load
+    # le 💰 affiché = ce que le VRAI suivi_va annonce : on le fait tourner
+    # (Discord, tickets et numéros simulés) sur la liste que poster_podium lui
+    # passe, et on compare au podium rendu
+    import contextlib
+    import random
+
+    def _us(nom):
+        return nom.startswith("VA ")            # « VA 12 » : Twitter ; « Amelia VA 3 » : Va IG
+
+    cl4 = {"lignes": cl3["lignes"] + [L("Lola VA 5", 10, 5, "lola")], "illisibles": [], "frais": True}
+    petit_us = {"lignes": [L("VA 1", 5, 1)], "illisibles": [], "frais": True}
+    cas = []
+    for nom, (cl_, us_) in {
+            "VA US 1er, VA FR 2e, ligne à zéro 3e": (cl_fr, us1),
+            "deux VA US devant, le VA FR 3e": (cl_fr, us2),
+            "trois VA FR devant un VA US": (cl3, petit_us),
+            "quatre VA FR (le 4e jamais payé)": (cl4, petit_us),
+            "vingt VA US devant : aucun VA FR payé": (cl3, us20),
+            "tout le monde à zéro": (tout_zero, us_zero)}.items():
+        cas.append((nom, pd._classement_paye(IG, cl_, us_),
+                    lignes(desc(pd.embed_podium(cl_, LUN_W, DIM_W, gid=IG, us=us_)))))
+    cas.append(("le podium de 9h de la section 1, tel que poster_podium l'a passé",
+                PAIE_9H.get("cl") or {"lignes": []}, lignes(desc(PAIE_9H.get("js")))))
     _annonces = []
+    for nom, paye, rendu in cas:
+        b, ann = suivi_reel(paye)
+        _annonces += ann
+        payes = {d.split(" : ")[0]: float(d.split(" : ")[1].rstrip("$")) for d in b["dits"]}
+        gagnants = [x for x in rendu if x["extra"] is not None]
+        check(f"💰 des VA FR = paie réelle de suivi_va ({nom})",
+              payes == {x["va"]: float(x["extra"]) for x in gagnants if not _us(x["va"])},
+              (payes, [x["brut"] for x in gagnants]))
+        check(f"VA US gagnants : dans « inconnus », personne de prévenu à leur place ({nom})",
+              sorted(b["inconnus"]) == sorted(x["va"] for x in gagnants if _us(x["va"])),
+              (b["inconnus"], [x["brut"] for x in gagnants]))
+        check(f"ligne à zéro dans le top 3 : ni 💰 ni annonce ({nom})",
+              sorted(b.get("zero_sub") or []) == sorted(x["va"] for x in rendu[:3] if not x["clics"]),
+              (b.get("zero_sub"), [x["brut"] for x in rendu[:3]]))
+        # le rang et le montant que le gagnant lit en privé (« 🥈 2e de la
+        # semaine — 5.00$ ») sont ceux de sa ligne sur le podium
+        publics = {x["va"]: (pd.MEDAILLES.index(x["med"]) + 1, float(x["extra"]))
+                   for x in gagnants if not _us(x["va"])}
+        check(f"rang et montant annoncés en privé = ceux de la ligne du podium ({nom})",
+              prives_de(ann) == publics, (prives_de(ann), publics))
+    p9 = [a_ for a_ in _annonces if "Amelia VA 3" in a_["embeds"][0]["description"]]
+    check("podium de 9h : Amelia VA 3, 2e derrière un VA US, apprend « 🥈 2e de la semaine — "
+          "5.00$ » (avant, le classement FR seul l'aurait annoncée 1re à 10$)",
+          p9 and p9[-1]["embeds"][0]["title"] == "🥈 2e de la semaine — 5.00$",
+          p9[-1]["embeds"][0]["title"] if p9 else None)
+    check("suivi_va a bien annoncé dans les salons des gagnants FR (le test n'est pas vide)",
+          len(_annonces) == 1 + 1 + 3 + 3 + 0 + 0 + 1
+          and all(x.get("content", "").startswith("<@u") for x in _annonces), len(_annonces))
+
+    # un VA US primé sur Va IG est TOUJOURS l'un des trois primés de Twitter, à
+    # un rang au moins aussi bon : le tri mêlé est stable et garde l'ordre de
+    # Twitter, les lignes US du top 3 mêlé sont donc les premières de Twitter
+    rnd = random.Random(20261003)
+    hors = []
+    for _ in range(3000):
+        u_ = sorted([L(f"VA {i}", rnd.randint(0, 30), i) for i in range(1, rnd.randint(1, 8) + 1)],
+                    key=lambda x: (-x["clics"], x["model"], x["numero"]))
+        f_ = sorted([L(f"Amelia VA {i}", rnd.randint(0, 30), i, "amelia")
+                     for i in range(1, rnd.randint(1, 8) + 1)],
+                    key=lambda x: (-x["clics"], x["model"], x["numero"]))
+        p_ = pd._classement_paye(IG, {"lignes": f_, "illisibles": [], "frais": True},
+                                 {"lignes": u_, "illisibles": [], "frais": True})
+        rang_tw = {x["va"]: i for i, x in enumerate(u_)}
+        for i, x in enumerate(p_["lignes"][:3]):
+            if x.get("prime") and _us(x["va"]) and not rang_tw[x["va"]] <= i < 3:
+                hors.append((i, x["va"], rang_tw[x["va"]]))
+    check("3000 classements tirés au hasard : chaque VA US primé sur Va IG est aussi primé sur "
+          "Twitter, mêmes subs, à un rang au moins aussi bon (d'où le journal, plus bas)", not hors, hors[:3])
+
+    # le journal : un VA US primé sur Va IG l'est déjà sur Twitter, pour les
+    # mêmes subs. Avant : « a payer A LA MAIN … personne n'est prevenu » —
+    # suivi, le propriétaire payait deux fois les mêmes subs.
+    def podium_journal(gid):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pd.poster_podium(gid)
+        return buf.getvalue()
+
+    installer(pd)
+    CLOCK["now"] = m(2026, 9, 28, 9, 0)
+    log_tw = podium_journal(TW)
+    log_ig = podium_journal(IG)
+    etat = pd._etat()
+    tw_js = msg(P(TW), etat["postes"][f"{TW}:{LUN_W}"])
+    ig_js = msg(P(IG), etat["postes"][f"{IG}:{LUN_W}"])
+    tw_pod = {x["va"]: (pd.MEDAILLES.index(x["med"]) + 1, x["extra"], x["clics"])
+              for x in lignes(desc(tw_js)) if x["med"] and x["extra"]}
+    ig_us = {x["va"]: (x["extra"], x["clics"]) for x in lignes(desc(ig_js)) if x["extra"] and _us(x["va"])}
+    ligne_us = [l for l in log_ig.splitlines() if "VA US" in l]
+    check("podium de Va IG : le journal dit que les VA US primés le sont AUSSI sur Twitter, mêmes "
+          "subs (rang et prime Twitter), et que la prime Va IG est à trancher",
+          ligne_us == [f"[podium] {IG} {LUN_W} : prime(s) Va IG a des VA US, A TRANCHER : "
+                       "VA 1 : 10.00$ (aussi 1er du classement Twitter, memes subs : prime Twitter 10.00$), "
+                       "VA 2 : 3.00$ (aussi 2e du classement Twitter, memes subs : prime Twitter 5.00$) -- "
+                       "\"un seul prix par personne\" : la prime Va IG en plus du prix Twitter, ou a "
+                       "personne ? Au proprietaire. Aucun ticket sur Va IG : rien n'y est annonce."],
+          log_ig[-900:])
+    dits = {va: (int(r), float(tw), float(ig)) for va, ig, r, tw in re.findall(
+        r"(VA \d+) : ([\d.]+)\$ \(aussi (\d+)(?:er|e) du classement Twitter, memes subs : "
+        r"prime Twitter ([\d.]+)\$\)",
+        "\n".join(ligne_us))}
+    check("… ce qu'il dit de Twitter est ce que le podium Twitter AFFICHE (rang, 💰, mêmes subs), "
+          "et ce qu'il dit de Va IG ce que Va IG affiche",
+          set(dits) == set(ig_us) == {"VA 1", "VA 2"}
+          and all(dits[v][:2] == tw_pod[v][:2] and dits[v][2] == ig_us[v][0]
+                  and tw_pod[v][2] == ig_us[v][1] for v in dits), (dits, tw_pod, ig_us))
+    prim_tw = [x for x in _PRIMES if x[0] == TW]
+    check("… et la paie de Twitter les a reçus à ces rangs-là (annoncés dans LEUR ticket Twitter)",
+          len(prim_tw) == 1 and all(prim_tw[0][2]["lignes"][dits[v][0] - 1]["va"] == v for v in dits),
+          [x["va"] for x in prim_tw[0][2]["lignes"][:3]] if prim_tw else None)
+    check("… plus de « a payer A LA MAIN » ni de « personne n'est prevenu » ; rien de tel chez "
+          "Twitter, ni rien de retenu",
+          "A LA MAIN" not in log_ig and "personne n'est prevenu" not in log_ig
+          and "VA US" not in log_tw and "retenu" not in log_tw + log_ig, log_tw[-400:])
+
+    # relevé US indisponible : le podium de Va IG paie les trois premiers de
+    # toute l'agence, il ne sait pas qui ils sont. Avant : podium des seuls VA
+    # FR, payé à leurs trois premiers, figé pour toujours.
+    installer(pd)
+    TW_MUET.add((LUN_W.isoformat(), DIM_W.isoformat()))
+    CLOCK["now"] = m(2026, 9, 28, 9, 0)
+    podium_journal(TW)
+    log_ig = podium_journal(IG)
+    etat = pd._etat()
+    check("relevé US indisponible : AUCUN podium sur Va IG, aucune prime (plus de podium payé aux "
+          "seuls VA FR)",
+          not (etat.get("postes") or {}).get(f"{IG}:{LUN_W}") and not [x for x in _PRIMES if x[0] == IG]
+          and not [x for x in DISCORD.appels if x["p"].startswith(f"/channels/{P(IG)}/")],
+          [x["p"] for x in DISCORD.appels])
+    check("… le journal dit pourquoi, et qu'il réessaie au prochain tour",
+          f"[podium] {IG} {LUN_W} : releve US indisponible -- podium retenu (ses primes vont aux 3 "
+          "premiers de toute l'agence, VA US compris), nouvel essai au prochain tour" in log_ig,
+          log_ig[-600:])
+    TW_MUET.clear()
+    CLOCK["now"] = m(2026, 9, 28, 9, 10)
+    podium_journal(TW)
+    log_ig = podium_journal(IG)
+    etat = pd._etat()
+    js = msg(P(IG), (etat.get("postes") or {}).get(f"{IG}:{LUN_W}"))
+    controle_podium_mix("relevé US revenu à 9h10 : podium mêlé", js, LUN_W, DIM_W)
+    prim = [x for x in _PRIMES if x[0] == IG]
+    check("… payé une fois, sur la liste mêlée affichée",
+          len(prim) == 1 and [x["va"] for x in prim[0][2]["lignes"]] == ORDRE
+          and [x.get("prime") for x in prim[0][2]["lignes"][:3]] == [10.0, 5.0, 3.0],
+          [x["va"] for x in prim[0][2]["lignes"]] if prim else None)
     try:
-        liens_fr.NUMEROS = _num
-        safe_json.load = lambda chemin, default=None: (
-            _users if pathlib.Path(chemin).name == "users.json" else _vrai_load(chemin, default=default))
-        requests.post = lambda url, timeout=None, headers=None, json=None: (
-            _annonces.append(json) or types.SimpleNamespace(status_code=200))
-        os.environ["DISCORD_TOKEN"] = "faux-jeton"
-        cas = {
-            "un VA FR seul au-dessus de zéro": cl_fr,
-            "trois VA FR payables": cl3,
-            "quatre VA FR (le 4e jamais payé)": {"lignes": cl3["lignes"] + [L("Lola VA 5", 10, 5, "lola")],
-                                                 "illisibles": [], "frais": True},
-            "tous les VA FR à zéro": tout_zero,
-        }
-        for k, (nom, cl_) in enumerate(cas.items()):
-            sv.ETAT_FICHIER = TMP / f"suivi_{k}.json"
-            n_av = len(_annonces)
-            b = sv._annoncer_primes_fr(IG, cl_, LUN_W, DIM_W)
-            payes = {d.split(" : ")[0]: float(d.split(" : ")[1].rstrip("$")) for d in b["dits"]}
-            rendu = lignes(desc(pd.embed_podium(cl_, LUN_W, DIM_W, gid=IG, us=us20)))
-            affiches = {x["va"]: float(x["extra"]) for x in rendu if x["extra"] is not None}
-            check(f"💰 = paie réelle de suivi_va ({nom})",
-                  payes == affiches and (bool(payes) or cl_ is tout_zero), (payes, affiches))
-            # le rang que le gagnant lit en privé (« 🥈 2e de la semaine ») est
-            # celui qu'il lit à côté de son 💰 en public, et qu'il donne pour réclamer
-            prives = {}
-            for an in _annonces[n_av:]:
-                e_ = an["embeds"][0]
-                prives[re.search(r"· \*\*(.+?)\*\* ·", e_["description"]).group(1)] = int(
-                    re.match(r"\S+ (\d+)e de la semaine", e_["title"]).group(1))
-            publics = {x["va"]: x["rang_fr"] for x in rendu if x["extra"] is not None}
-            check(f"rang FR affiché = rang annoncé en privé par suivi_va ({nom})",
-                  prives == publics and all(publics.values()) or (not prives and not publics),
-                  (prives, publics))
-        check("suivi_va a bien annoncé dans les salons des gagnants (le test n'est pas vide)",
-              len(_annonces) == 1 + 3 + 3 and all(x.get("content", "").startswith("<@u") for x in _annonces))
+        pd.SERVEURS[IG].pop("avec_us", None)
+        installer(pd)
+        TW_MUET.add((LUN_W.isoformat(), DIM_W.isoformat()))
+        CLOCK["now"] = m(2026, 9, 28, 9, 0)
+        log_ig = podium_journal(IG)
+        js = msg(P(IG), (pd._etat().get("postes") or {}).get(f"{IG}:{LUN_W}"))
+        check("sans la clé : Twitter muet ne retient rien, rien de tout cela au journal, la paie "
+              "reçoit le classement FR comme avant",
+              sans_us(js) and "releve US" not in log_ig and "VA US" not in log_ig
+              and "retenu" not in log_ig
+              and [x["va"] for x in _PRIMES[-1][2]["lignes"]] == ["Amelia VA 3", "Amelia VA 1", "Lola VA 2"]
+              and not any(k in x for x in _PRIMES[-1][2]["lignes"] for k in ("marche", "prime")),
+              log_ig[-400:])
     finally:
-        liens_fr.NUMEROS, safe_json.load, requests.post = _sauve_sv[:3]
-        if _sauve_sv[3] is None:
-            os.environ.pop("DISCORD_TOKEN", None)
-        else:
-            os.environ["DISCORD_TOKEN"] = _sauve_sv[3]
+        pd.SERVEURS[IG].clear()
+        pd.SERVEURS[IG].update(_SAUVE_IG)
 
     # ================================================================ 8. --
     print()
@@ -943,27 +1197,137 @@ try:
               "⚠️ **Sans relevé** : VA 1 — absent de ce classement, il sera relu pour le "
               "podium officiel." in t and "**VA 1**" not in t and not marche_dit(t), t[-500:])
 
+    B_ = {}
+
+    def _retenues(fg):
+        return ((fg.get("primes_attente") or {}).get("cl") or {}).get("lignes") or []
+
     def c_9h_toujours():
         etat = pd._etat()
-        js = msg(P(IG), etat["postes"][f"{IG}:{LUN_W}"])
+        mid = etat["postes"][f"{IG}:{LUN_W}"]
+        js = msg(P(IG), mid)
+        B_.update(mid=mid, js9=copy.deepcopy(js))
         t = desc(js)
         ls = lignes(t)
-        check("9h, VA 1 toujours muet : le podium final de Va IG le dit (pas de VA 1 inventé)",
-              "⚠️ **Sans relevé** : VA 1 — absent de ce classement." in t and not marche_dit(t)
+        # VA 1 aurait été premier : son absence décale les trois rangs payés.
+        # Comme pour un VA FR illisible, le podium arrêté le dit avant la paie.
+        check("9h, VA 1 toujours muet : le podium final de Va IG le dit, « à confirmer avant de "
+              "payer » comme un VA FR illisible (pas de VA 1 inventé)",
+              "⚠️ **Sans relevé** : VA 1 — absent de ce classement, à confirmer avant de payer."
+              in t and not marche_dit(t)
               and "VA 1" not in [x["va"] for x in ls] and len(ls) == 7, t[-600:])
-        check("… les primes FR ne bougent pas (10 / 5 / 3 $ au rang FR)",
+        check("… il affiche les primes des trois premiers de ce qui est relevé (10 / 5 / 3 $), sans rang FR",
               {x["va"]: (x["extra"], x["rang_fr"]) for x in ls if x["extra"]}
-              == {"Amelia VA 3": (10, 1), "Amelia VA 1": (5, 2), "Lola VA 2": (3, 3)})
-        check("… et l'historique ne le dit pas complet",
-              etat["figes"][IG][LUN_W.isoformat()]["complet"] is False)
+              == {"Amelia VA 3": (10, None), "VA 2": (5, None), "Amelia VA 1": (3, None)},
+              [x["brut"] for x in ls[:3]])
+        fg = etat["figes"][IG][LUN_W.isoformat()]
+        check("… l'historique ne le dit pas complet, et garde le relevé FR (sans marché ni prime) "
+              "pour annoncer plus tard",
+              fg["complet"] is False
+              and {x["va"] for x in _retenues(fg)} == FR_NOMS
+              and not any(k in x for x in _retenues(fg) for k in ("marche", "prime")),
+              fg)
+        check("… et AUCUNE prime annoncée en privé tant que VA 1 manque (avant : Amelia VA 3 "
+              "apprenait « 🥇 1e — 10.00$ » pour ce qui sera une 2e place à 5$)",
+              not [x for x in _PRIMES if x[0] == IG], [x[2]["lignes"][:3] for x in _PRIMES if x[0] == IG])
+
+    def c_9h10():
+        t = m(2026, 9, 28, 9, 10)
+        check("9h10, VA 1 toujours muet : rien d'annoncé, podium intact, aucun appel US de Va IG "
+              "(le relevé troué a moins de deux heures)",
+              not [x for x in _PRIMES if x[0] == IG] and msg(P(IG), B_["mid"]) == B_["js9"]
+              and not [x for x in us_par_ig(t) if (x["d0"], x["d1"]) == W], us_par_ig(t)[:3])
+
+    def c_11h10():
+        t = m(2026, 9, 28, 11, 10)
+        etat = pd._etat()
+        mid = etat["postes"][f"{IG}:{LUN_W}"]
+        js = msg(P(IG), mid)
+        check("11h10, VA 1 revenu : Va IG relit les VA US (deux heures après le dernier essai), une fois",
+              len([x for x in us_par_ig(t) if (x["d0"], x["d1"]) == W]) == 5, us_par_ig(t)[:3])
+        mentions = [x for x in DISCORD.appels if x["m"] == "POST" and x["p"] == f"/channels/{P(IG)}/messages"
+                    and "@everyone" in ((x["json"] or {}).get("content") or "")]
+        check("… le podium est corrigé SUR PLACE : même message, une seule mention @everyone (celle de 9h)",
+              mid == B_["mid"] and len(mentions) == 1
+              and [x["quand"] for x in DISCORD.appels if x["m"] == "PATCH"
+                   and x["p"] == f"/channels/{P(IG)}/messages/{mid}" and x["quand"] == t], mentions)
+        controle_podium_mix("podium corrigé à 11h10", js, LUN_W, DIM_W)
+        check("… toujours arrêté : « il ne bougera plus », « résultat final »",
+              titre(js) == "🏆 PODIUM SUBS DE LA SEMAINE" and "il ne bougera plus" in desc(js)
+              and pied(js).endswith("· résultat final"))
+        fg = etat["figes"][IG][LUN_W.isoformat()]
+        check("… l'historique dit complet, plus rien de retenu",
+              fg["complet"] is True and "primes_attente" not in fg and fg["mode"] == "podium", fg)
         prim = [x for x in _PRIMES if x[0] == IG]
-        check("… la paie reçoit toujours le classement FR seul",
-              len(prim) == 1 and [x["va"] for x in prim[0][2]["lignes"]]
-              == ["Amelia VA 3", "Amelia VA 1", "Lola VA 2"])
+        check("… les primes annoncées une fois, sur la liste corrigée : VA 1 10$, Amelia VA 3 5$, VA 2 3$",
+              len(prim) == 1 and [x["va"] for x in prim[0][2]["lignes"]] == ORDRE
+              and [x.get("prime") for x in prim[0][2]["lignes"]] == [10.0, 5.0, 3.0] + [None] * 5,
+              [(x["va"], x.get("prime")) for x in prim[0][2]["lignes"]] if prim else None)
+        B_["paye"] = prim[0][2] if prim else {"lignes": []}
+
+    def c_11h20():
+        t = m(2026, 9, 28, 11, 20)
+        check("11h20 : plus rien à faire — ni édition du podium, ni seconde annonce, ni relevé US",
+              len([x for x in _PRIMES if x[0] == IG]) == 1
+              and not [x for x in DISCORD.appels if x["quand"] == t
+                       and x["p"] == f"/channels/{P(IG)}/messages/{B_['mid']}"]
+              and not [x for x in us_par_ig(t) if (x["d0"], x["d1"]) == W])
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        derouler(pd, [(m(2026, 9, 22, 12, 0), None), (m(2026, 9, 27, 20, 0), None),
+                      (m(2026, 9, 28, 0, 10), t1_muet_semaine), (m(2026, 9, 28, 9, 0), None),
+                      (m(2026, 9, 28, 9, 10), None), (m(2026, 9, 28, 11, 10), LIEN_MUET.clear),
+                      (m(2026, 9, 28, 11, 20), None)],
+                 {m(2026, 9, 28, 0, 10): c_0010_partiel, m(2026, 9, 28, 9, 0): c_9h_toujours,
+                  m(2026, 9, 28, 9, 10): c_9h10, m(2026, 9, 28, 11, 10): c_11h10,
+                  m(2026, 9, 28, 11, 20): c_11h20})
+    journal = buf.getvalue()
+    print(journal, end="")
+    check("journal 9h : les annonces privées sont dites RETENUES, avec le VA qui manque",
+          f"[podium] {IG} {LUN_W} : releve US incomplet (VA 1) -- annonces privees des primes "
+          "RETENUES : un absent peut changer les rangs payes. Relu toutes les 2 h ce lundi ; des "
+          "qu'il est complet, le podium est corrige sur place et les primes annoncees." in journal,
+          [l for l in journal.splitlines() if IG in l][-6:])
+    check("journal 11h10 : relevé complet, podium corrigé, primes annoncées ; les VA US primés "
+          "aussi primés sur Twitter, à trancher",
+          f"[podium] {IG} {LUN_W} : releve US complet -- podium corrige sur place, primes annoncees"
+          in journal
+          and f"[podium] {IG} {LUN_W} : prime(s) Va IG a des VA US, A TRANCHER : VA 1 : 10.00$ "
+              "(aussi 1er du classement Twitter, memes subs : prime Twitter 10.00$), VA 2 : 3.00$ "
+              "(aussi 2e du classement Twitter, memes subs : prime Twitter 5.00$)" in journal,
+          [l for l in journal.splitlines() if IG in l][-6:])
+    # le VRAI suivi_va sur la liste passée à 11h10 : ce que chacun lit en privé
+    b, ann = suivi_reel(B_.get("paye") or {"lignes": []})
+    check("… le VRAI suivi_va y annonce Amelia VA 3 « 🥈 2e — 5.00$ » (son vrai rang), VA 1 et "
+          "VA 2 dans « inconnus », personne d'autre",
+          prives_de(ann) == {"Amelia VA 3": (2, 5.0)} and sorted(b["inconnus"]) == ["VA 1", "VA 2"],
+          (prives_de(ann), b))
+
+    # -- B'. VA 1 muet tout le lundi : le podium dit « à confirmer », personne
+    # n'apprend un montant qui serait faux ; relu toutes les deux heures, au
+    # plus ; le mardi, plus rien ne tourne (journal de 9h : à faire à la main)
+    def c_jamais():
+        etat = pd._etat()
+        fg = etat["figes"][IG][LUN_W.isoformat()]
+        mid = etat["postes"][f"{IG}:{LUN_W}"]
+        lu = sorted({x["quand"] for g, mo, ap in PASSES if g == IG for x in ap
+                     if x["marche"] == "US" and (x["d0"], x["d1"]) == W})
+        check("VA 1 muet tout le lundi : aucune prime annoncée sur Va IG, toujours retenues",
+              not [x for x in _PRIMES if x[0] == IG] and fg.get("primes_attente") and fg["complet"] is False)
+        check("… le podium de 9h n'a plus été touché",
+              not [x for x in DISCORD.appels if x["p"] == f"/channels/{P(IG)}/messages/{mid}"
+                   and x["quand"] > m(2026, 9, 28, 9, 0)])
+        check("… Va IG a relu les VA US au plus toutes les deux heures, et seulement le lundi",
+              lu and all((b_ - a_) >= dt.timedelta(hours=2) for a_, b_ in zip(lu, lu[1:]))
+              and all(x.date() == LUN_W + 7 * J for x in lu), lu)
 
     derouler(pd, [(m(2026, 9, 22, 12, 0), None), (m(2026, 9, 27, 20, 0), None),
-                  (m(2026, 9, 28, 0, 10), t1_muet_semaine), (m(2026, 9, 28, 9, 0), None)],
-             {m(2026, 9, 28, 0, 10): c_0010_partiel, m(2026, 9, 28, 9, 0): c_9h_toujours})
+                  (m(2026, 9, 28, 0, 10), t1_muet_semaine), (m(2026, 9, 28, 9, 0), None),
+                  (m(2026, 9, 28, 9, 10), None), (m(2026, 9, 28, 11, 10), None),
+                  (m(2026, 9, 28, 13, 20), None), (m(2026, 9, 28, 23, 50), None),
+                  (m(2026, 9, 29, 0, 10), None), (m(2026, 9, 29, 12, 0), None)],
+             {m(2026, 9, 29, 12, 0): c_jamais})
 
     # -- C. la quinzaine : VA 3 muet chez Twitter à 00h10, revenu à 02h20.
     # Avant : Va IG figeait à 00h10 sans VA 3, pour toujours, « 7 comptes ».
@@ -1100,6 +1464,28 @@ try:
           and "⚠️ _Liste des liens non rafraîchie : des VA peuvent manquer._" in desc(pg[-1])
           and not marche_dit(desc(pg[-1])) and not marche_dit(desc(pgf[-1])),
           (desc(pg[-1])[-300:], desc(pgf[-1])[-300:]))
+    # « terminée » promet la relecture ; le podium arrêté, qui paie les trois
+    # premiers de toute l'agence, dit « à confirmer avant de payer » des deux
+    # côtés (un VA US absent a pu être dans le top 3) ; la quinzaine, qui ne
+    # paie rien, ne parle pas de payer
+    cl_ill_b = dict(cl3b, illisibles=["Lola VA 4"])
+    tt = desc(pd.embed_podium(cl_ill_b, LUN_W, DIM_W, gid=IG, termine=True, us=us_t))
+    tf = desc(pd.embed_podium(cl_ill_b, LUN_W, DIM_W, gid=IG, us=us_t))
+    check("terminée : VA FR illisible et VA US sans relevé seront relus pour le podium officiel",
+          "⚠️ **Classement incomplet** : Lola VA 4 — relevé indisponible, il sera relu pour le "
+          "podium officiel." in tt
+          and "⚠️ **Sans relevé** : VA 2, VA 3 — absents de ce classement, ils seront relus pour "
+          "le podium officiel." in tt, tt[-600:])
+    check("podium arrêté : « à confirmer avant de payer » pour le VA FR illisible ET pour les VA US "
+          "sans relevé",
+          "⚠️ **Classement incomplet** : Lola VA 4 — relevé indisponible, à confirmer avant de "
+          "payer." in tf
+          and "⚠️ **Sans relevé** : VA 2, VA 3 — absents de ce classement, à confirmer avant de "
+          "payer." in tf and not marche_dit(tf), tf[-600:])
+    check("quinzaine figée (sans prime) : jamais « payer »",
+          "payer" not in desc(pgf[-1])
+          and "payer" not in desc(pd.pages_subs(cl_ill_b, S_OLD, S_OLD_FIN, {}, gid=IG, final=True,
+                                                us=us_t)[-1]))
     # les deux listes périmées : sans marché, deux lignes presque identiques
     # ne diraient rien de plus — celle d'avant (VA FR) suffit, une seule fois
     cl3s = dict(cl3b, frais=False)
@@ -1142,6 +1528,42 @@ try:
         check("après la coupe, tests_podium_fige.py passe toujours (rien n'y dépend du code temporaire)",
               r.returncode == 0 and re.search(r"RESULTAT : \d+ OK / 0 ECHEC", r.stdout), fin_)
 
+    # ================= nom des VA US sur Va IG : « Jessye VA n » (proprietaire, 03/10)
+    print("\nNom affiche des VA US (« nom_us »)")
+    check("Va IG : les VA US s'appellent « Jessye » (Amelia est Jessye sur le marche FR)",
+          _SAUVE_IG_VRAI.get("nom_us") == "Jessye" and "nom_us" not in pd.SERVEURS[TW])
+    pd.SERVEURS[IG].clear()
+    pd.SERVEURS[IG].update(_SAUVE_IG_VRAI)
+    _cl = {"lignes": [{"va": "Amelia VA 3", "numero": 3, "clics": 41, "liens": 1, "spam": False, "model": "amelia"},
+                      {"va": "Lola VA 2", "numero": 2, "clics": 0, "liens": 1, "spam": False, "model": "lola"}],
+           "illisibles": [], "frais": True, "sans_numero": []}
+    _us = {"lignes": [{"va": "VA 7", "numero": 7, "clics": 58, "liens": 1, "spam": False, "model": ""},
+                      {"va": "VA 12", "numero": 12, "clics": 17, "liens": 1, "spam": False, "model": ""}],
+           "illisibles": ["VA 3"], "frais": True, "sans_numero": []}
+    _e = pd.embed_podium(_cl, dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=IG, us=_us)
+    _d = _e["description"]
+    check("Jessye : podium « 🥇 **Jessye VA 7** — 58 subs · 💰 10$ », Amelia VA 3 2e 5$, Jessye VA 12 3e 3$",
+          "🥇 **Jessye VA 7** — **58** subs · 💰 **10$**" in _d and "🥈 **Amelia VA 3** — **41** subs · 💰 **5$**" in _d
+          and "🥉 **Jessye VA 12** — **17** subs · 💰 **3$**" in _d, _d[:600])
+    check("Jessye : aucun VA US sans son nom (« **VA 7** » nu absent)", "**VA 7**" not in _d and "**VA 12**" not in _d)
+    check("Jessye : l'avertissement nomme aussi « Jessye VA 3 »", "Jessye VA 3" in _d, _d[-400:])
+    _pay = pd._classement_paye(IG, _cl, _us)
+    check("Jessye : suivi_va et le journal des primes gardent le libelle Twitter (« VA 7 », model vide)",
+          [x["va"] for x in _pay["lignes"]][:3] == ["VA 7", "Amelia VA 3", "VA 12"]
+          and _pay["lignes"][0].get("model") == "" and _pay["lignes"][0].get("affiche") == "Jessye VA 7")
+    _pg = pd.pages_subs(_cl, dt.date(2026, 10, 1), dt.date(2026, 10, 15),
+                        {"Amelia VA 3": 50}, gid=IG, us=_us, totaux_us={"VA 7": 900, "VA 12": 40})
+    _t = "\n".join(x["description"] for x in _pg)
+    check("Jessye : quinzaine « Jessye VA 7 » avec SON all-time de Twitter (900), Amelia VA 3 le sien (50)",
+          "🥇 **Jessye VA 7** — **58** subs · 🌐 900 all-time" in _t and "**Amelia VA 3** — **41** subs · 🌐 50 all-time" in _t, _t[:500])
+    _tw = pd.embed_podium(_us, dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=TW)
+    check("Jessye : Twitter garde « VA 7 » (rien ne change sur son serveur)",
+          "Jessye" not in json.dumps(_tw, ensure_ascii=False) and "**VA 7**" in _tw["description"])
+    pd.SERVEURS[IG].pop("nom_us", None)
+    _sans = pd.embed_podium(_cl, dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=IG, us=_us)
+    check("sans « nom_us » : retour au libelle Twitter (« **VA 7** »)", "**VA 7**" in _sans["description"]
+          and "Jessye" not in _sans["description"])
+
 except Exception as _e:
     import traceback
     check("podium US : testable", False, repr(_e)[:200] + " " + traceback.format_exc()[-1500:])
@@ -1149,7 +1571,7 @@ finally:
     for _k, _v in _SAUVE.items():
         setattr(pd, _k, _v)
     pd.SERVEURS[IG].clear()
-    pd.SERVEURS[IG].update(_SAUVE_IG)
+    pd.SERVEURS[IG].update(_SAUVE_IG_VRAI)
     pd._RELEVES.clear()
     shutil.rmtree(TMP, ignore_errors=True)
 
