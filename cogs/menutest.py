@@ -812,6 +812,59 @@ class DemoNumero(discord.ui.LayoutView):
         self.add_item(ui.Container(tete, rangee, accent_colour=_DEMO_NUM_ROSE))
 
 
+# /demomenu : MAQUETTE de « Ton menu » en UNE ligne (03/10/2026).
+#
+# Le proprietaire : « Remplacer Ton menu » -- une ligne de boutons, le detail
+# s'ouvre au clic. 📋 Menu ouvre le VRAI menu du VA (cogs/user._menu_va,
+# reglages du serveur), pour lui seul ; les trois outils n'apparaissent
+# qu'aux models ouvertes (cogs/outils.MODELS_OUTILS). Ici rien n'est lance :
+# chaque clic du menu ouvert repond « maquette ».
+
+async def _demo_menu_rien(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "🧪 Maquette : en vrai, ça lance l'action dans ton ticket.", ephemeral=True)
+
+
+def _demo_menu_complet(model, guild):
+    """Le vrai menu VA de cette model, cliquable sans effet."""
+    from cogs.user import _menu_va
+    vue = _menu_va(None, model, guild)
+    vue.timeout = 900
+    for it in vue.walk_children():
+        if isinstance(it, (discord.ui.Button, discord.ui.Select)):
+            it.callback = _demo_menu_rien
+    return vue
+
+
+class _DemoLigneBouton(discord.ui.Button):
+    def __init__(self, cle, label, emoji, model):
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.primary)
+        self.cle, self.model = cle, model
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.cle == "menu":
+            await interaction.response.send_message(
+                view=_demo_menu_complet(self.model, interaction.guild), ephemeral=True)
+            return
+        await _demo_menu_rien(interaction)
+
+
+class DemoMenuLigne(discord.ui.LayoutView):
+    """« Ton menu » en une ligne : 📋 Menu, puis les outils si la model les a."""
+
+    def __init__(self, model):
+        super().__init__(timeout=900)
+        from cogs.outils import identite_permise
+        ui = discord.ui
+        rangee = ui.ActionRow(_DemoLigneBouton("menu", "Menu", "📋", model))
+        if identite_permise(model):
+            for cle, lib, emo in (("spoofer", "Spoofing", "📤"), ("download", "Download", "⬇️"),
+                                  ("numero", "Numéro", "📱")):
+                rangee.add_item(_DemoLigneBouton(cle, lib, emo, model))
+        self.add_item(ui.Container(ui.TextDisplay("## ☀️ Ton menu"), rangee,
+                                   accent_colour=discord.Colour.blurple()))
+
+
 class MenuTest(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -872,6 +925,18 @@ class MenuTest(commands.Cog):
             return
         await interaction.response.send_message(
             texte, view=demo_models_vue(plan), ephemeral=True)
+
+    @app_commands.command(
+        name="demomenu",
+        description="[DÉMO] « Ton menu » en une ligne (📋 Menu + outils) — rien n'est lancé",
+    )
+    @app_commands.describe(model="La model du VA (julia, amelia, lola ont les outils)")
+    @app_commands.choices(model=[app_commands.Choice(name=m.capitalize(), value=m)
+                                 for m in ("julia", "amelia", "lola", "emma", "sarah", "alicia")])
+    async def demomenu(self, interaction: discord.Interaction,
+                       model: app_commands.Choice[str] = None):
+        await interaction.response.send_message(
+            view=DemoMenuLigne(model.value if model else "julia"), ephemeral=True)
 
     @app_commands.command(
         name="demonumero",
