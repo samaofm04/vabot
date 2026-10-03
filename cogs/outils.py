@@ -321,6 +321,18 @@ class Outils(commands.Cog):
                 activer_scrape_models_fr(models_du_serveur(guilde))
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] scrape des models FR : {type(e).__name__}: {e}")
+            # Les photos en emojis (PP des models, reserves du ✨ General,
+            # icones des boutons) : le panneau 📋 Menu les lit au clic, sans
+            # le temps d'en creer. Va IG n'en avait aucun (03/10/2026).
+            try:
+                from cogs.user import (ensure_action_emojis, ensure_identity_emojis,
+                                       ensure_reserve_emojis)
+                from cogs.welcome import models_du_serveur
+                await ensure_identity_emojis(guilde, models_du_serveur(guilde))
+                await ensure_reserve_emojis(guilde)
+                await ensure_action_emojis(guilde)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] emojis du serveur FR : {type(e).__name__}: {e}")
             # un role de model a chaque VA qui a une fiche et aucun role
             # (fiches faites par /adduser, VA d'avant les roles)
             try:

@@ -8645,10 +8645,23 @@ async def _ligne_ouvrir_menu(cog, interaction):
         await interaction.response.send_message(
             "⚠️ Aucune model sur ce menu — demande à un manager.", ephemeral=True)
         return
-    vue = _jb_panel(cog, str(ident).strip().lower(), _JB_QTE_DEFAUT, marche="fr",
-                    guild=getattr(interaction, "guild", None))
+    guild = getattr(interaction, "guild", None)
+    ident = str(ident).strip().lower()
+    vue = _jb_panel(cog, ident, _JB_QTE_DEFAUT, marche="fr", guild=guild)
     _vue_sans_suivi(vue)
     await interaction.response.send_message(view=vue, ephemeral=True)
+    # Puis le ✨ General de la model (« le truc Brunette », comme sous le
+    # panneau US) : le contenu des reserves liees, pour lui seul aussi. Sans
+    # reserve liee, il n'a que sa quantite : on ne l'envoie pas.
+    try:
+        gen = _jb_general(cog, ident, _JB_QTE_DEFAUT, guild=guild)
+        ids = [getattr(c, "custom_id", "") or "" for c in gen.walk_children()]
+        if any(i.startswith(("jbg:a:", "jbg:s:")) for i in ids):
+            _vue_sans_suivi(gen)
+            await interaction.followup.send(view=gen, ephemeral=True)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("📋 Menu : General de %s non ouvert (%s: %s)", ident,
+                    type(e).__name__, e)
 
 
 def _menu_a_poster(cog, identite, guild, mention=None):
@@ -10826,10 +10839,19 @@ async def ensure_reserve_emojis(guild) -> dict:
     sans icone, et le journal le dit. -> {reserve: emoji}."""
     if guild is None:
         return {}
+    reserves = None
     try:
         import guild_features as _gf
         if not _gf.is_us_guild(guild):
-            return {}
+            if not _menu_outils_ici(guild):
+                return {}
+            # Serveur FR (03/10/2026 : « mets la PP d'Amelia et aussi le
+            # truc Brunette ») : les reserves de SES models seulement -- 50
+            # emplacements d'emoji, pas de place pour celles de l'US.
+            import type_identite as _ti
+            from cogs.welcome import models_du_serveur
+            reserves = sorted({r for m in models_du_serveur(guild)
+                               for r in (_ti.reserves_liees(m)[0] or [])})
     except Exception as e:                                   # noqa: BLE001
         log.warning("emojis des reserves : serveur non reconnu (%s: %s)",
                     type(e).__name__, e)
@@ -10838,8 +10860,9 @@ async def ensure_reserve_emojis(guild) -> dict:
     # la liste meme que le menage des emojis garde (_jb_idents_des_menus) :
     # avant, celles de TOUTES les identites -- une reserve liee a une model
     # en pause prenait une place pour un General qui ne la montrera pas.
-    idents = _jb_idents_des_menus(strict=False)
-    reserves = list(idents[1]) if idents else []
+    if reserves is None:
+        idents = _jb_idents_des_menus(strict=False)
+        reserves = list(idents[1]) if idents else []
     if not reserves:
         return {}
     out = await ensure_identity_emojis(guild, reserves,
