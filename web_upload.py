@@ -57993,6 +57993,28 @@ def _sync_liens_va(gid: str, minutes: int = 30) -> None:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
 
 
+_MODELES_VU = {"t": 0}
+
+
+def _sync_modeles_a_suivre(heures: int = 6) -> None:
+    """Le salon « modele a suivre » suit la watchlist Instagram du site.
+
+    Toutes les six heures : on n ajoute pas un compte a la watchlist toutes
+    les dix minutes, et chaque tour relit le cache de scrape.
+    """
+    import time as _t_m
+    if _t_m.time() - float(_MODELES_VU.get("t") or 0) < heures * 3600:
+        return
+    _MODELES_VU["t"] = _t_m.time()
+    try:
+        import modeles_discord as _md
+        b = _md.synchroniser()
+        if b.get("ajoutes") or b.get("rates"):
+            print(f"[modeles] {b}", flush=True)
+    except Exception as e:
+        print(f"[modeles] {type(e).__name__}: {e}", flush=True)
+
+
 _SUIVI_VU = {}
 
 
@@ -58065,6 +58087,9 @@ def _start_podium_semaine_daemon() -> bool:
                         # groupe, un VA deplace a la main voit son lien suivre
                         _sync_liens_va(gid)
                         _suivi_va(gid)
+                # le salon « modele a suivre » suit la watchlist Instagram :
+                # il ne depend d'aucun serveur Discord en particulier
+                _sync_modeles_a_suivre()
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)

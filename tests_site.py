@@ -19566,6 +19566,90 @@ try:
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 
+# ------------------------- 34. Le salon « modele a suivre » suit la watchlist
+print()
+print("=" * 70)
+print("Modeles a suivre : le salon suit la watchlist Instagram")
+print("=" * 70)
+try:
+    import modeles_discord as _mdT
+    import insta_scraper as _iscT
+    from pathlib import Path as _plM
+    import tempfile as _tfM, json as _jsM
+
+    check("un lien se construit pareil avec ou sans arobase",
+          _mdT.lien("alice") == _mdT.lien("@alice") == "https://instagram.com/alice")
+
+    _savM = (_mdT.ETAT_FICHIER, _mdT._api, _iscT.watchlist_status)
+    try:
+        _mdT.ETAT_FICHIER = _plM(_tfM.mkdtemp()) / "m.json"
+        _iscT.watchlist_status = lambda: [
+            {"username": "grosse", "followers": 9000, "nb_reels": 12, "dead_days": None},
+            {"username": "petite", "followers": 10, "nb_reels": 12, "dead_days": None},
+            {"username": "sansreel", "followers": 500, "nb_reels": 0, "dead_days": None},
+            {"username": "morte", "followers": 800, "nb_reels": 12, "dead_days": 3}]
+        _a = _mdT.actifs()
+        check("un profil introuvable ou sans reel n est pas un modele a suivre",
+              [r["username"] for r in _a] == ["grosse", "petite"])
+
+        _envois = []
+        _mdT._api = lambda me, ch, **kw: (_envois.append((kw.get("json") or {}).get("content"))
+                                          or (200, {"id": "m%d" % len(_envois)}))
+        _b = _mdT.synchroniser(salon="sal")
+        check("les nouveaux partent du plus gros au plus petit",
+              _envois == ["https://instagram.com/grosse", "https://instagram.com/petite"]
+              and _b["ajoutes"] == ["grosse", "petite"])
+
+        _envois.clear()
+        _b2 = _mdT.synchroniser(salon="sal")
+        check("un compte deja poste ne repart JAMAIS",
+              not _envois and _b2["deja"] == 2 and not _b2["ajoutes"])
+
+        # une seule nouveaute : elle seule part
+        _iscT.watchlist_status = lambda: [
+            {"username": "grosse", "followers": 9000, "nb_reels": 12, "dead_days": None},
+            {"username": "petite", "followers": 10, "nb_reels": 12, "dead_days": None},
+            {"username": "neuve", "followers": 50, "nb_reels": 12, "dead_days": None}]
+        _envois.clear()
+        _b3 = _mdT.synchroniser(salon="sal")
+        check("un compte ajoute a la watchlist arrive seul dans le salon",
+              _envois == ["https://instagram.com/neuve"] and _b3["ajoutes"] == ["neuve"])
+
+        # un compte qui tombe est DIT, jamais efface
+        _iscT.watchlist_status = lambda: [
+            {"username": "grosse", "followers": 9000, "nb_reels": 12, "dead_days": None}]
+        _envois.clear()
+        _b4 = _mdT.synchroniser(salon="sal")
+        check("un compte qui tombe est signale, pas efface",
+              _b4["tombes"] == ["neuve", "petite"] and not _envois)
+
+        # LE PIEGE : watchlist illisible n est pas watchlist vide
+        _iscT.watchlist_status = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        check("watchlist illisible : on ne declare personne tombe",
+              _mdT.actifs() is None)
+        _b5 = _mdT.synchroniser(salon="sal")
+        check("et on ne poste rien du tout",
+              not _b5["ajoutes"] and not _b5["tombes"] and _b5["rates"])
+
+        # l amorcage reprend ce qui est deja dans le salon, sans reposter
+        _mdT.ETAT_FICHIER = _plM(_tfM.mkdtemp()) / "m2.json"
+        _mdT._api = lambda me, ch, **kw: (200, [
+            {"id": "x1", "content": "https://instagram.com/grosse"},
+            {"id": "x2", "content": "https://instagram.com/petite"},
+            {"id": "x3", "content": "un message qui n est pas un lien"}])
+        _am = _mdT.amorcer(salon="sal")
+        check("l amorcage reprend les liens deja postes et ignore le reste",
+              _am["ok"] and _am["repris"] == 2)
+    finally:
+        (_mdT.ETAT_FICHIER, _mdT._api, _iscT.watchlist_status) = _savM
+
+    _srcM = _plM("web_upload.py").read_text(encoding="utf-8")
+    check("la synchro tourne dans la boucle du site",
+          "_sync_modeles_a_suivre()" in _srcM and "heures: int = 6" in _srcM)
+except Exception as _eM:
+    check("modeles a suivre : testable", False, repr(_eM)[:200])
+
+
 # ------------------------------------- 33. Suivi des VA (sommeil, essai, paie)
 print()
 print("=" * 70)
