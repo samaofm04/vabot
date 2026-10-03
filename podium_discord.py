@@ -156,7 +156,7 @@ VA_IG_ID = "1505418484052394004"
 SERVEURS: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {"equipes": None,                # podium_config, sinon EQUIPES_VA
                  "pays": ("US",), "marche": "US", "source": "Twitter 🐦",
-                 "bot": "Siri", "fr": False, "bonus": True, "minutes": None,
+                 "bot": "Luigi", "fr": False, "bonus": True, "minutes": None,
                  "alltime": None},               # ALLTIME_FICHIER
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
@@ -219,8 +219,11 @@ def _profil(gid: Optional[str] = None) -> Dict[str, Any]:
     return SERVEURS.get(str(gid or "")) or SERVEURS[TWITTER_ID]
 
 PRIMES = [10.0, 5.0, 3.0]
-# Le bot s'appelle « Siri » pour les membres (son application s'appelle SEVEN
-# dans le portail Discord). Un VA qu'on envoie chercher « @SEVEN » ne le trouve pas.
+# Le nom du bot que les membres voient change : « Siri » jusqu'au 03/10/2026,
+# « Luigi » depuis (son application s'appelle SEVEN dans le portail Discord, un
+# nom que personne ne peut mentionner). Un VA envoye chercher « @Siri » ne
+# trouvait plus personne. Le nom a mentionner se lit donc dans le profil du
+# serveur, SERVEURS[gid]["bot"] -- jamais ecrit en dur dans un message.
 MEDAILLES = ["🥇", "🥈", "🥉"]
 COMBIEN_AFFICHES = 15
 HEURE_POST = 9          # lundi, heure française
@@ -1961,7 +1964,8 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     return _subs_du(gid, (d.get("subs") or {}).get(gid) or {}, t)
 
 
-def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
+def embed_bonus(cl: Dict[str, Any], jour: dt.date,
+                gid: Optional[str] = None) -> Dict[str, Any]:
     """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
     lignes = cl["lignes"]
     c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · clics **US** '
@@ -1978,7 +1982,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
         c += ["", "_Personne n'a encore de sub aujourd'hui — le classement bouge "
                   "dès le premier._"]
     c += ["", "————————————",
-          "🎁 **Pour recevoir ton bonus :** envoie un message à **@Siri** dans "
+          f'🎁 **Pour recevoir ton bonus :** envoie un message à **@{_profil(gid)["bot"]}** dans '
           "**ton espace perso** avec **ton rang du jour (top 1, 2 ou 3)** et "
           "**ton adresse USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification"]
@@ -2010,7 +2014,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
         return str(garde.get("message") or "")
-    corps = {"embeds": [embed_bonus(cl, j)]}
+    corps = {"embeds": [embed_bonus(cl, j, gid)]}
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("jour") == j.isoformat():

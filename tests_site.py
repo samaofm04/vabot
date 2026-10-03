@@ -20248,11 +20248,28 @@ try:
           _pd.personne("( BO7 ) 1") == ("BO7", False)
           and _pd.personne("(Gerome) SPAM") == ("Gerome", True))
 
-    # le bot s appelle Siri pour les membres : les renvoyer vers « @SEVEN »,
-    # c est les envoyer chercher quelqu un qui n existe pas
+    # Le nom du bot change (« Siri » -> « Luigi » le 03/10/2026) : figer celui du
+    # jour dans ce test, c est reproduire le bug. Ce qui doit tenir, c est que les
+    # messages LISENT le nom dans le profil du serveur, et que les profils portent
+    # le nom actuel. Le bonus du jour renvoyait vers « @Siri » longtemps apres le
+    # renommage, parce que le nom y etait ecrit en dur.
     _srcNom = _plP("podium_discord.py").read_text(encoding="utf-8")
-    check("les primes renvoient vers @Siri, le nom que les membres voient",
-          "**@Siri**" in _srcNom and "**@SEVEN**" not in _srcNom)
+    check("le nom du bot a mentionner n est pas ecrit en dur",
+          '_profil(gid)["bot"]' in _srcNom
+          and "**@Siri**" not in _srcNom and "**@SEVEN**" not in _srcNom)
+    check("chaque fiche de serveur porte le nom actuel du bot",
+          bool(_pd.SERVEURS)
+          and all((f.get("bot") or "") == "Luigi" for f in _pd.SERVEURS.values()))
+    # et le rendu, pas seulement la source : le message tel que Discord le recoit
+    _clBon = {"lignes": [], "illisibles": [], "frais": True}
+    _dscBon = _pd.embed_bonus(_clBon, _dtVtk.date(2026, 10, 3),
+                              _pd.TWITTER_ID)["description"]
+    check("le bonus du jour renvoie vers le bot tel qu il s appelle aujourd hui",
+          "**@Luigi**" in _dscBon and "Siri" not in _dscBon)
+    # sans serveur (anciens appels), le repli Twitter doit rester lisible
+    check("le bonus sans serveur nomme quand meme un bot",
+          "**@Luigi**" in _pd.embed_bonus(_clBon,
+                                          _dtVtk.date(2026, 10, 3))["description"])
 
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
