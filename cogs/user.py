@@ -8563,8 +8563,6 @@ _MENU_VA_DISPOSITION = (
                   "ta photo ou ta vidéo en versions uniques"),
         _BoutonVA("download", "Download", "⬇️", _BS.primary,
                   "PP, bio, posts et reels d'un compte Insta"),
-        _BoutonVA("numero", "Numéro", "📱", _BS.primary,
-                  "un numéro +33 ou un mail pour valider un compte"),
     )),
     ("Montages", _MENU_VA_FAMILLES),
     ("Suivi et aide", (
@@ -8801,8 +8799,9 @@ class _BoutonLigneVA(discord.ui.Button):
         if self.cle == "menu":
             await _ligne_ouvrir_menu(self.cog, interaction)
             return
-        f = {"spoofer": _outil_spoofer, "download": _outil_download,
-             "numero": _outil_numero}.get(self.cle)
+        # plus de « numero » : son bouton et son salon ont ete retires le
+        # 03/10/2026 — le garder ici aurait laisse croire qu il revient
+        f = {"spoofer": _outil_spoofer, "download": _outil_download}.get(self.cle)
         if f is not None:
             await _avec_model_du_menu(interaction, lambda: f(interaction))
             return
@@ -8825,7 +8824,10 @@ _LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success
                 ("pay", "Mon paiement", "💸", discord.ButtonStyle.secondary),
                 # « mets un truc renseigner mes comptes actifs » (03/10) : la
                 # fenetre des 3 comptes Insta, pre-remplie, comptes verifies
-                ("comptes", "Mes comptes", "📷", discord.ButtonStyle.secondary))
+                ("comptes", "Mes comptes", "📷", discord.ButtonStyle.secondary),
+                # Le tutoriel du serveur, au MEME niveau que le reste : enfoui
+                # dans le menu complet, personne ne l'ouvrait.
+                ("tuto", "Comprends rien ?", "❓", discord.ButtonStyle.secondary))
 _LIGNE_SUIVI_CLES = {c for c, *_ in _LIGNE_SUIVI}
 
 
@@ -8866,8 +8868,10 @@ class MenuLigneVA(discord.ui.LayoutView):
         bas.append(_MENU_VA_MARQUE)
         rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", "📋"))
         if outils:
-            for cle, lib, emo in (("spoofer", "Spoofer", "📤"), ("download", "Download", "⬇️"),
-                                  ("numero", "Numéro", "📱")):
+            # « Numéro » retiré le 03/10/2026 avec son salon : le bouton
+            # n'aurait plus mené nulle part.
+            for cle, lib, emo in (("spoofer", "Spoofer", "📤"),
+                                  ("download", "Download", "⬇️")):
                 rangee.add_item(_BoutonLigneVA(cog, cle, lib, emo))
         # 2e rangee : les reglages du serveur (une fonction coupee, son bouton
         # absent), comme dans le menu complet ; sans filtre (vue enregistree
