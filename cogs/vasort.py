@@ -164,21 +164,44 @@ async def _apply_order(guild, category, desired):
     return done, fails
 
 
+def _sans_separateurs(guild) -> bool:
+    """Serveur FR (cogs/outils.SERVEURS) : pas de separateurs. Proprietaire,
+    03/10/2026 : « pas besoin de mettre lien actif, sans lien etc., il y a
+    deja [le 🔗] dans le nom ». Le tri par groupe reste."""
+    try:
+        from cogs.outils import serveur_outils
+        return serveur_outils(guild)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 async def sort_guild(guild, create_seps=True) -> tuple:
     """Trie toutes les catégories avec des salons VA.
     -> (cats_modifiées, moves, echecs)"""
     cats = moves = fails = 0
+    sans_seps = _sans_separateurs(guild)
     for cat in guild.categories:
         others, groups, seps = _split(cat)
         n_vas = sum(len(v) for v in groups.values())
-        if n_vas < 1:
+        if n_vas < 1 or sans_seps:
             # plus de VA : retire les séparateurs orphelins
-            for ch in list(seps.values()):
+            # (serveur sans separateurs : ils partent aussi -- salons vides
+            # du bot, reserves au staff, qu'il recree sinon)
+            for g_, ch in list(seps.items()):
                 try:
-                    await ch.delete(reason="Plus de salons VA ici")
+                    await ch.delete(reason="Plus de salons VA ici" if n_vas < 1
+                                    else "Serveur sans separateurs (le 🔗 est dans le nom)")
+                    seps.pop(g_, None)
                 except Exception as e:
                     print(f"[vasort] suppression separateur #{ascii(getattr(ch, 'name', '?'))} : {e}",
                           flush=True)
+            if n_vas < 1:
+                continue
+            n, nf = await _apply_order(guild, cat, _desired(others, groups, seps))
+            fails += nf
+            if n:
+                cats += 1
+                moves += n
             continue
         sep_changed = await _sync_separators(guild, cat, groups, seps, allow_create=create_seps)
         desired = _desired(others, groups, seps)
