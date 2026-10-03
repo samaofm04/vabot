@@ -22,6 +22,9 @@ CE QUI N'EST PAS ICI
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+
+import safe_json
 
 import discord
 from discord.ext import commands, tasks
@@ -239,6 +242,37 @@ def salons_info(guilde) -> list:
             and any(k in str(c.category.name).lower() for k in CATEGORIES_INFO)]
 
 
+#: Le reglage du site « identites scrapees » (web_upload.SCRAPE_IDENTS_FILE) et
+#: la trace de l'activation des models FR, faite UNE fois : si le proprietaire
+#: en coupe une ensuite depuis le site, le bot ne la rallume pas.
+_SCRAPE_IDENTS = Path(__file__).resolve().parent.parent / "data" / "scrape_identites.json"
+_SCRAPE_FR_FAIT = Path(__file__).resolve().parent.parent / "data" / "scrape_models_fr.json"
+
+
+def activer_scrape_models_fr(models) -> list:
+    """Ajoute les models FR aux identites scrapees (proprietaire, 03/10/2026 :
+    bangers FR, « oui, les 6 models »). Sans fichier de reglage, tout est deja
+    scrape : rien a faire. Rend les models ajoutees."""
+    if (safe_json.load(_SCRAPE_FR_FAIT, default={}) or {}).get("fait"):
+        return []
+    d = safe_json.load(_SCRAPE_IDENTS, default=None)
+    ajoutees = []
+    if isinstance(d, dict) and isinstance(d.get("actives"), list):
+        actives = [str(x).strip().lower() for x in d["actives"]]
+        if "*" not in actives:
+            ajoutees = [m for m in models if m and m not in actives]
+            if ajoutees:
+                d["actives"] = actives + ajoutees
+                if not safe_json.write(_SCRAPE_IDENTS, d, indent=1):
+                    print("[outils] identites scrapees non ecrites : on reessaiera", flush=True)
+                    return []
+    safe_json.write(_SCRAPE_FR_FAIT, {"fait": int(__import__("time").time()),
+                                      "ajoutees": ajoutees}, indent=1)
+    if ajoutees:
+        print(f"[outils] scrape Instagram active pour {ajoutees}", flush=True)
+    return ajoutees
+
+
 def _rendre_visible_aux_futurs_va(ids) -> None:
     """Les salons s'ajoutent aux « salons d'aide » de l'isolation : sinon un
     VA qui arrive est masque de TOUS les salons (anonymat) et ne verrait
@@ -282,6 +316,11 @@ class Outils(commands.Cog):
                 _rendre_visible_aux_futurs_va([c.id for c in salons_info(guilde)])
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] salons d'information : {type(e).__name__}: {e}")
+            try:
+                from cogs.welcome import models_du_serveur
+                activer_scrape_models_fr(models_du_serveur(guilde))
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] scrape des models FR : {type(e).__name__}: {e}")
             # un role de model a chaque VA qui a une fiche et aucun role
             # (fiches faites par /adduser, VA d'avant les roles)
             try:

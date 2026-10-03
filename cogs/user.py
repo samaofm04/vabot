@@ -7346,6 +7346,102 @@ def _insta_handle_check(raw: str):
         return (u, "unknown")
 
 
+#: Serveur FR : comptes au plus par personne Discord (proprietaire, 03/10/2026 :
+#: « quand il [clique] Mes comptes, ca l'envoie sur la page, plafond a 10
+#: comptes pour les personnes Discord »).
+COMPTES_FR_MAX = 10
+
+
+def _comptes_fr_du_va(model, nom) -> list:
+    """Les comptes de CE VA (son nom Discord) pour cette model, sur la page
+    « Comptes par identite » (jailbreak.json)."""
+    import jailbreak as _jb
+    n = str(nom or "").strip().lower()
+    return [str(a.get("username") or "") for a in _jb.list_accounts(model)
+            if str(a.get("va") or "").strip().lower() == n and a.get("username")]
+
+
+def _enregistrer_comptes_fr(model, nom, handles) -> dict:
+    """Inscrit les comptes sur la page, sous la model, au nom Discord du VA
+    (vas[].discord_username = son pseudo Discord : la page et l'onglet VA
+    Discord le relient par la). Rien n'est retire : un compte efface de la
+    fenetre reste sur la page. Plafond : COMPTES_FR_MAX par personne, toutes
+    models confondues."""
+    import jailbreak as _jb
+    nom = str(nom or "").strip().lower()
+    _jb.add_va(model, nom, discord_username=nom)          # False s'il existe deja
+    a_lui = {u.lower() for u in _comptes_fr_du_va(model, nom)}
+    total = len(_jb.accounts_for_discord_username(nom))
+    out = {"ajoutes": [], "deja": [], "ailleurs": [], "plafond": []}
+    for u in handles:
+        if u.lower() in a_lui:
+            out["deja"].append(u)
+            continue
+        if total >= COMPTES_FR_MAX:
+            out["plafond"].append(u)
+            continue
+        try:
+            _jb.add_account(model, u, va=nom)
+            out["ajoutes"].append(u)
+            a_lui.add(u.lower())
+            total += 1
+        except ValueError:
+            out["ailleurs"].append(u)                     # deja la, sous un autre VA
+    return out
+
+
+class MesComptesFRModal(discord.ui.Modal, title="📷 Mes comptes Instagram"):
+    """Serveur FR : les comptes du VA, envoyes sur la page du site."""
+    comptes = discord.ui.TextInput(
+        label=f"Tes comptes Insta (un par ligne, {COMPTES_FR_MAX} max)",
+        style=discord.TextStyle.paragraph, placeholder="@pseudo ou lien insta, un par ligne",
+        required=True, max_length=1500)
+
+    def __init__(self, model, deja=()):
+        super().__init__()
+        self.model = str(model or "").strip().lower()
+        if deja:
+            self.comptes.default = "\n".join("@" + d for d in deja)[:1500]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        bruts, vus = [], set()
+        for l in re.split(r"[\n,;]+", self.comptes.value or ""):
+            l = l.strip()
+            if l and l.lower() not in vus:
+                vus.add(l.lower())
+                bruts.append(l)
+        lignes, valides = [], []
+        for raw in bruts[:COMPTES_FR_MAX * 2]:
+            u, status = await asyncio.to_thread(_insta_handle_check, raw)
+            if status in ("ok", "unknown") and u:
+                valides.append(u)
+            elif status == "notfound":
+                lignes.append(f"❌ @{u} : compte introuvable")
+            else:
+                lignes.append(f"❌ `{raw[:40]}` : @ ou lien invalide")
+        if len(bruts) > COMPTES_FR_MAX * 2:
+            lignes.append(f"⛔ {len(bruts) - COMPTES_FR_MAX * 2} ligne(s) de trop, ignorée(s)")
+        try:
+            r = await asyncio.to_thread(_enregistrer_comptes_fr, self.model,
+                                        interaction.user.name, valides)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("comptes FR de %s non enregistres (%s: %s)",
+                        interaction.user.name, type(e).__name__, e)
+            await interaction.followup.send(
+                "⚠️ Impossible d'enregistrer tes comptes pour l'instant. Réessaie, et "
+                "préviens un admin si ça persiste.\n" + "\n".join(lignes), ephemeral=True)
+            return
+        lignes = ([f"✅ @{u} : ajouté" for u in r["ajoutes"]]
+                  + [f"✔️ @{u} : déjà enregistré" for u in r["deja"]]
+                  + [f"↪️ @{u} : déjà sur la page sous un autre VA — demande à un manager"
+                     for u in r["ailleurs"]]
+                  + [f"⛔ @{u} : {COMPTES_FR_MAX} comptes maximum" for u in r["plafond"]]
+                  + lignes)
+        await interaction.followup.send(
+            "📷 **Tes comptes Instagram :**\n" + "\n".join(lignes)[:1800], ephemeral=True)
+
+
 class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram"):
     """Saisie des 3 comptes Insta du VA, avec validation d'existence en direct."""
     insta1 = discord.ui.TextInput(label="Insta 1", placeholder="@pseudo ou lien insta", required=False, max_length=150)
@@ -8875,6 +8971,20 @@ class ContentMenuView(discord.ui.LayoutView):
     async def _clic_comptes(self, interaction: discord.Interaction):
         if not _menu_feature_check(interaction, "contenu"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
+            return
+        if _menu_outils_ici(getattr(interaction, "guild", None)):
+            # Serveur FR : les comptes partent sur la page du site, sous la
+            # model de CE menu (_avec_model_du_menu), 10 au plus.
+            model = str(get_user_identity(interaction.user.id) or "").strip().lower()
+            if not model:
+                await interaction.response.send_message(
+                    "⚠️ Aucune model sur ton compte — demande à un manager.", ephemeral=True)
+                return
+            try:
+                deja = _comptes_fr_du_va(model, interaction.user.name)
+            except Exception:                                # noqa: BLE001
+                deja = []
+            await interaction.response.send_modal(MesComptesFRModal(model, deja))
             return
         # Ouvre le modal de saisie des 3 comptes Insta (Insta 1/2/3) : pseudo OU lien,
         # avec validation d'existence. Pre-rempli avec ce que le VA a deja mis.
