@@ -1941,8 +1941,11 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
 #: « Jessye VA n ») n'aurait paru que deux heures apres sa mise en ligne.
 #: Le 03/10/2026 au soir : le thème Mario de Va IG (titres, têtes, bouton
 #: « Relancer la course ») — sans ce changement, il n'aurait paru qu'au relevé
-#: suivant, deux heures après la mise en ligne.
-FORMAT_AFFICHAGE = "2026-10-03-mario"
+#: suivant, deux heures après la mise en ligne. Puis le kart des places 4 et
+#: plus : marqueur change, donc format change — le message avait justement
+#: garde son rond vert apres la mise en ligne, faute d'avoir touche a cette
+#: ligne.
+FORMAT_AFFICHAGE = "2026-10-03-mario-karts"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
