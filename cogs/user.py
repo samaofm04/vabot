@@ -2979,6 +2979,7 @@ async def _generer_lien_fr(interaction, uid, identity):
             await _apply_va_link_mark(va_ch, True, reason="lien généré")
         except Exception:                                    # noqa: BLE001
             pass
+    await rafraichir_lien_des_menus(interaction.client, uid, model)
     lignes = [f"✅ **{res.get('display_name')}** → {url}"]
     for k, v in (res.get("trackings") or {}).items():
         lignes.append(f"• tracking {k.upper()} : {v}")
@@ -5559,7 +5560,8 @@ class UserCog(commands.Cog):
         premiere de son texte (_menu_va_texte), et allowed_mentions s'y
         applique comme au contenu d'avant."""
         guild = getattr(channel, "guild", None)
-        view = _menu_a_poster(self, identity, guild, mention=mention_user_id)
+        view = _menu_a_poster(self, identity, guild, mention=mention_user_id,
+                              va=mention_user_id or _va_du_salon(channel))
         if not view.a_des_elements():
             return False  # aucune fonction de menu activée sur ce serveur
         try:
@@ -6503,7 +6505,7 @@ class UserCog(commands.Cog):
                 if ch.id not in nettoyes:
                     await self._delete_old_menus(ch, also_onboarding=clean_onboarding)
                     nettoyes.add(ch.id)
-                _view = _menu_a_poster(self, ident, guild)
+                _view = _menu_a_poster(self, ident, guild, va=uid)
                 if not _view.a_des_elements():
                     continue
                 msg = await ch.send(view=_view)
@@ -8786,15 +8788,31 @@ class MenuLigneVA(discord.ui.LayoutView):
     📋 Menu ouvre le menu complet (pour le seul cliqueur) ; les outils
     seulement pour les models ouvertes (cogs/outils.MODELS_OUTILS). Le texte
     porte l'identite et la marque du menu VA : _menu_va_lire et
-    _delete_old_menus le traitent comme l'autre format. Persistant."""
+    _delete_old_menus le traitent comme l'autre format. Persistant.
 
-    def __init__(self, cog, identite=None, mention=None, outils=True, guild=None, filtrer=False):
+    `lien` : l'adresse GetMySocial du VA pour cette model (_lien_du_menu).
+    Proprietaire, 03/10/2026 : « mets le lien dans le menu, comme ca il ne
+    demande jamais » -- l'adresse seule sur sa ligne (un appui long dessus
+    la copie, sur telephone), et plus de « Demander un lien », sauf pour les
+    comptes sans limite qui s'en servent pour tester (liens_fr.SANS_LIMITE)."""
+
+    def __init__(self, cog, identite=None, mention=None, outils=True, guild=None, filtrer=False,
+                 lien="", va=None):
         super().__init__(timeout=None)
         ui = discord.ui
         haut = []
         if mention:
             haut.append(f"<@{int(mention)}> 👇 **Ton menu du jour est prêt !**")
         haut.append("## ☀️ Ton menu")
+        if lien:
+            haut.append(f"🔗 {lien}")
+        sans_demande = False
+        if lien:
+            try:
+                import liens_fr
+                sans_demande = not liens_fr.sans_limite(va or mention)
+            except Exception:                                # noqa: BLE001
+                sans_demande = True
         bas = [f"-# Identité : `{identite}`"] if identite else []
         bas.append(_MENU_VA_MARQUE)
         rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", "📋"))
@@ -8808,6 +8826,8 @@ class MenuLigneVA(discord.ui.LayoutView):
         feats, threads = _reglages_menu(guild) if filtrer else (None, False)
         suivi = ui.ActionRow()
         for cle, lib, emo, style in _LIGNE_SUIVI:
+            if cle == "lien" and sans_demande:
+                continue
             if _bouton_va_permis("cmenu:" + cle, feats, threads):
                 suivi.add_item(_BoutonLigneVA(cog, cle, lib, emo, style))
         elements = [ui.TextDisplay("\n".join(haut + bas)), rangee]
@@ -8852,13 +8872,75 @@ async def _ligne_ouvrir_menu(cog, interaction):
                     type(e).__name__, e)
 
 
-def _menu_a_poster(cog, identite, guild, mention=None):
+def _lien_du_menu(uid, identite) -> str:
+    """L'adresse du lien GetMySocial du VA pour cette model (serveur FR) ; ""
+    sans lien, ou s'il est coupe (role de la model retire, liens_fr.aligner)."""
+    if not uid or not identite:
+        return ""
+    try:
+        import liens_fr
+        e = liens_fr.lien_de(uid, str(identite).strip().lower())
+    except Exception as x:                                   # noqa: BLE001
+        log.warning("menu VA : lien de %s illisible (%s: %s)", uid, type(x).__name__, x)
+        return ""
+    if not isinstance(e, dict) or e.get("actif") is False:
+        return ""
+    return str(e.get("public_url") or "")
+
+
+def _va_du_salon(channel):
+    """L'id du VA dont `channel` est le ticket (users.json), None sinon."""
+    cid = getattr(channel, "id", None)
+    if cid is None:
+        return None
+    for u, e in (load_json(USERS_FILE, {}) or {}).items():
+        if isinstance(e, dict) and int(e.get("channel_id") or 0) == cid and str(u).isdigit():
+            return int(u)
+    return None
+
+
+def _menu_a_poster(cog, identite, guild, mention=None, va=None):
     """Ce qui se poste dans un ticket : la ligne sur le serveur FR, le menu
-    complet ailleurs (Threads, Twitter...)."""
+    complet ailleurs (Threads, Twitter...). `va` : le VA du ticket (a defaut,
+    celui mentionne), pour poser son lien dans la ligne."""
     if _menu_outils_ici(guild):
+        va = va or mention
         return MenuLigneVA(cog, identite, mention, outils=_outils_pour(identite),
-                           guild=guild, filtrer=True)
+                           guild=guild, filtrer=True, lien=_lien_du_menu(va, identite), va=va)
     return _menu_va(cog, identite, guild, mention=mention)
+
+
+async def rafraichir_lien_des_menus(bot, uid, model) -> int:
+    """Redessine SUR PLACE les lignes de menu de cette model dans le ticket du
+    VA : son lien vient d'etre cree, coupe ou remis en service. Sans ca, il
+    n'apparaissait qu'au menu du lendemain. Rend le nombre de menus refaits."""
+    model = str(model or "").strip().lower()
+    e = (load_json(USERS_FILE, {}) or {}).get(str(uid))
+    cid = int(e.get("channel_id") or 0) if isinstance(e, dict) else 0
+    ch = bot.get_channel(cid) if cid else None
+    cog = bot.get_cog("UserCog")
+    moi = getattr(getattr(bot, "user", None), "id", None)
+    if ch is None or cog is None or moi is None or not _menu_outils_ici(ch.guild):
+        return 0
+    n = 0
+    try:
+        async for m in ch.history(limit=50):
+            # l'ancien menu en embed ne devient pas un message V2 par edition
+            if getattr(m, "embeds", None) or not _est_menu_va(m, moi):
+                continue
+            ident, mention = _menu_va_lire(m)
+            if str(ident or "").strip().lower() != model:
+                continue
+            try:
+                await m.edit(view=_menu_a_poster(cog, ident, ch.guild, mention=mention, va=uid))
+                n += 1
+            except Exception as x:                           # noqa: BLE001
+                log.warning("menu VA %s : lien non redessine dans #%s (%s: %s)",
+                            m.id, getattr(ch, "name", "?"), type(x).__name__, x)
+    except Exception as x:                                   # noqa: BLE001
+        log.warning("menu VA : historique de #%s illisible (%s: %s)",
+                    getattr(ch, "name", "?"), type(x).__name__, x)
+    return n
 
 
 def _menu_va(cog, identite=None, guild=None, mention=None, sans_outils=False):

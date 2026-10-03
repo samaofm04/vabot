@@ -275,6 +275,97 @@ def retirer(uid) -> List[Dict[str, Any]]:
         return sortis
 
 
+# ─── Le lien suit le role ─────────────────────────────────────────────────
+_RE_NOM_VA = re.compile(r"^\s*\S+ VA \d+ @(\S+)\s*$")
+
+
+def _actif_gms(l: Dict[str, Any]) -> Optional[bool]:
+    """Le lien est-il en service chez GetMySocial (`status` « active ») ?
+    None si la liste ne le dit pas."""
+    s = str(l.get("status") or "").strip().lower()
+    return (s == "active") if s else None
+
+
+def aligner(membres, force: bool = False) -> List[Dict[str, Any]]:
+    """Le lien d'un VA pour une model suit le ROLE de cette model : coupe dans
+    GetMySocial (disable_link) quand le VA ne l'a plus, remis en service
+    quand il le retrouve. Proprietaire, 03/10/2026 : « ok vas-y pour les
+    disable, et pour MyPuls pas besoin de supprimer » -- RIEN n'est supprime :
+    l'adresse est deja dans les stories du VA, ses clics restent, et un role
+    retire par erreur se repare en le redonnant.
+
+    `membres` : [(uid, pseudo Discord, [models de ses roles])], les SEULS VA
+    traites : un VA que le bot ne voit pas garde ses liens tels quels. Les
+    liens sont lus dans l'equipe (rattaches par le registre, sinon A LEUR
+    NOM « Amelia VA 3 @pseudo ») : le registre du VPS a deja perdu une
+    entree, et les essais des comptes sans limite n'y sont pas.
+
+    Ne remet en service QUE ce que cette fonction a coupe (« coupes_role »
+    du registre) : un lien coupe a la main dans GetMySocial le reste.
+    Rend les bascules tentees : [{uid, model, nom, actif, ok, erreur}]."""
+    import gms
+    par_uid, par_pseudo = {}, {}
+    for uid, pseudo, models in membres or []:
+        try:
+            u = str(int(uid))
+        except (TypeError, ValueError):
+            continue
+        par_uid[u] = {str(m).strip().lower() for m in models or []}
+        if pseudo:
+            par_pseudo[str(pseudo).strip().lower()] = u
+    if not par_uid:
+        return []
+    faits = []
+    with _VERROU:
+        d = _etat()
+        liens = d.get("liens") or {}
+        par_lien = {str(e.get("link_id")): k.split(":", 1)[0] for k, e in liens.items()
+                    if isinstance(e, dict) and e.get("link_id")}
+        coupes = d.get("coupes_role") if isinstance(d.get("coupes_role"), dict) else {}
+        for l in _liens_equipe(force):
+            dn, lid = str(l.get("display_name") or ""), str(l.get("id") or "")
+            model, m = model_du_nom(dn), _RE_NOM_VA.match(dn)
+            if not model or not lid:
+                continue
+            uid = par_lien.get(lid) or (par_pseudo.get(m.group(1).lower()) if m else None)
+            if uid not in par_uid:
+                continue
+            voulu, actif = model in par_uid[uid], _actif_gms(l)
+            if actif is None:
+                print(f"[liens_fr] {dn} : etat inconnu chez GetMySocial (status "
+                      f"{l.get('status')!r}), laisse tel quel", flush=True)
+                continue
+            if actif == voulu or (voulu and lid not in coupes):
+                continue
+            try:
+                r = gms.enable_link(lid) if voulu else gms.disable_link(lid)
+            except Exception as e:                           # noqa: BLE001
+                r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            ok = bool(r.get("ok"))
+            if ok:
+                # la liste est gardee 10 min : sans ca, chaque passage
+                # refaisait la meme bascule jusqu'a son rafraichissement
+                l["status"] = "active" if voulu else "disabled"
+                if voulu:
+                    coupes.pop(lid, None)
+                else:
+                    coupes[lid] = {"nom": dn, "uid": uid, "model": model, "quand": int(time.time())}
+                for k, e in liens.items():
+                    if isinstance(e, dict) and str(e.get("link_id")) == lid:
+                        e["actif"] = voulu
+            faits.append({"uid": uid, "model": model, "nom": dn, "actif": voulu, "ok": ok,
+                          "erreur": "" if ok else str(r.get("error") or "refus GetMySocial")[:160]})
+            print(f"[liens_fr] {dn} {'remis en service' if voulu else 'coupe'} "
+                  f"(role {model} {'rendu' if voulu else 'retire'}) : "
+                  f"{'ok' if ok else 'ECHEC ' + faits[-1]['erreur']}", flush=True)
+        if any(f["ok"] for f in faits):
+            d["coupes_role"] = coupes
+            ETAT.parent.mkdir(parents=True, exist_ok=True)
+            if not safe_json.write(ETAT, d, indent=1):
+                print("[liens_fr] registre data/liens_va_fr.json non ecrit apres bascule", flush=True)
+    return faits
+
+
 # ─── GetMySocial ──────────────────────────────────────────────────────────
 def _objet(res: Dict[str, Any]) -> Dict[str, Any]:
     """L'objet lien d'une reponse MCP (dict, ou texte JSON / repr)."""

@@ -2287,12 +2287,20 @@ class Welcome(commands.Cog):
         self.auto_sort_channels.start()
         self.auto_secure_general_channels.start()
         self.ouvrir_numeros.start()
+        # une bascule de liens a la fois, dans l'ordre des evenements : un
+        # ticket deplace fait passer _apres_roles_models deux fois (role
+        # ajoute, puis l'ancien retire) -- le premier passage, s'il finissait
+        # second, remettait en service le lien que le second venait de couper
+        self._verrou_liens = asyncio.Lock()
+        self._taches_liens = set()
+        self.liens_suivent_roles.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
         self.auto_sort_channels.cancel()
         self.auto_secure_general_channels.cancel()
         self.ouvrir_numeros.cancel()
+        self.liens_suivent_roles.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -2456,6 +2464,14 @@ class Welcome(commands.Cog):
         avant, apres = models_du_membre(before), models_du_membre(after)
         if avant == apres:
             return
+        # Le lien GetMySocial de chaque model suit le role (liens_fr.aligner),
+        # A COTE : une generation de lien tient le meme verrou pendant tout son
+        # reseau, la fiche et les salons n'ont pas a l'attendre. Avant tout
+        # return : un VA sans plus aucun role, ou dont le role est pose par le
+        # bot, est concerne aussi.
+        t = asyncio.create_task(self._liens_suivent(after.guild, [after.id]))
+        self._taches_liens.add(t)
+        t.add_done_callback(self._taches_liens.discard)
         if not apres:
             # plus aucune model : plus ses salons ; sa fiche attend un role
             await sync_general_channel_access(after.guild, after, [])
@@ -2674,6 +2690,53 @@ class Welcome(commands.Cog):
 
     @check_pending_deletions.before_loop
     async def before_check_deletions(self):
+        await self.bot.wait_until_ready()
+
+    async def _liens_suivent(self, guild, uids=None):
+        """Les liens FR des VA `uids` (tous les membres si None) suivent leurs
+        roles de model : coupes ou remis en service (liens_fr.aligner), puis
+        leur ligne de menu redessinee. Les roles sont relus AU MOMENT de
+        basculer, pas ceux de l'evenement : le dernier etat gagne toujours."""
+        if not _serveur_fr(guild):
+            return
+        async with self._verrou_liens:
+            if uids is None:
+                gens = [m for m in guild.members if not m.bot]
+            else:
+                gens = [m for m in (guild.get_member(int(u)) for u in uids) if m is not None]
+            membres = [(m.id, m.name, models_du_membre(m)) for m in gens]
+            if not membres:
+                return
+            try:
+                import liens_fr
+                faits = await asyncio.to_thread(liens_fr.aligner, membres, uids is None)
+            except Exception as e:                           # noqa: BLE001
+                log.warning(f"liens FR : roles non suivis ({type(e).__name__}: {e})")
+                return
+        for f in faits:
+            if not f.get("ok"):
+                log.warning(f"liens FR : {f.get('nom')} non {'remis' if f.get('actif') else 'coupe'} "
+                            f"({f.get('erreur')}) -- reessaye dans 30 min")
+                continue
+            try:
+                from cogs.user import rafraichir_lien_des_menus
+                await rafraichir_lien_des_menus(self.bot, f["uid"], f["model"])
+            except Exception as e:                           # noqa: BLE001
+                log.warning(f"liens FR : menu de {f.get('uid')} non redessine ({e})")
+
+    @tasks.loop(minutes=30)
+    async def liens_suivent_roles(self):
+        """Toutes les 30 min, et au demarrage : rattrape ce qu'on_member_update
+        n'a pas vu (role change pendant un redemarrage, coupure refusee par le
+        quota GetMySocial)."""
+        for guild in list(self.bot.guilds):
+            try:
+                await self._liens_suivent(guild)
+            except Exception as e:                           # noqa: BLE001
+                log.warning(f"liens FR ({getattr(guild, 'name', '?')}) : {type(e).__name__}: {e}")
+
+    @liens_suivent_roles.before_loop
+    async def _avant_liens_suivent_roles(self):
         await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=10)

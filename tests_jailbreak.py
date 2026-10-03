@@ -20225,6 +20225,165 @@ except Exception as _eOv:
     _tbOv.print_exc()
     check("salons existants : testable", False, repr(_eOv)[:200])
 
+# ===========================================================================
+# LIENS FR : le lien du VA dans sa ligne de menu, et il suit le role
+# (proprietaire, 03/10/2026 : « mets le lien dans le menu », « vas-y pour
+# les disable »). Registre et GetMySocial simules : rien de reel n'est touche.
+# ===========================================================================
+print(SEP1)
+print("LIENS FR : lien dans le menu, coupe / remis selon le role")
+try:
+    import asyncio as _asLf, tempfile as _tfLf, types as _tyLf
+    import discord as _dcLf
+    import gms as _gLf
+    import liens_fr as _lf
+    import safe_json as _sjLf
+    import cogs.user as _uLf
+    _dLf = pathlib.Path(_tfLf.mkdtemp())
+    _sauveLf = (_lf.ETAT, dict(_lf._CACHE_LIENS), _gLf.enable_link, _gLf.disable_link,
+                _uLf.USERS_FILE, _uLf._menu_outils_ici)
+    _appels = []
+    _gLf.enable_link = lambda lid: (_appels.append(("on", lid)), {"ok": True})[1]
+    _gLf.disable_link = lambda lid: (_appels.append(("off", lid)), {"ok": True})[1]
+    _lf.ETAT = _dLf / "liens_va_fr.json"
+    _SEVEN = 402069419393679370            # compte sans limite (liens_fr.SANS_LIMITE)
+    try:
+        _lf._CACHE_LIENS.update(t=time.time() + 3600, liens=[
+            {"id": "lnk_e", "display_name": "Emma VA 3 @seven_ofm", "status": "active"},
+            {"id": "lnk_a", "display_name": "Amelia VA 3 @seven_ofm", "status": "active"},
+            {"id": "lnk_l", "display_name": "Alicia VA 3 @seven_ofm", "status": "active"},
+            {"id": "lnk_m", "display_name": "Amelia VA 4 @autre", "status": "disabled"},
+            {"id": "lnk_x", "display_name": "Lola VA 2 @inconnu", "status": "active"},
+            {"id": "lnk_b", "display_name": "Amelia 1", "status": "active"},
+        ])
+        _sjLf.write(_lf.ETAT, {"liens": {
+            "77:emma": {"link_id": "lnk_e", "public_url": "https://getmysocial.com/emmalovee"},
+            "77:amelia": {"link_id": "lnk_a", "public_url": "https://getmysocial.com/amelialovee"},
+            "78:amelia": {"link_id": "lnk_m", "public_url": "https://getmysocial.com/x"}}}, indent=1)
+        _lf.aligner([(77, "seven_ofm", ["emma"]), (78, "autre", ["amelia"])])
+        check("aligner : les liens des models sans role sont coupes (registre ou nom), pas celui du role",
+              sorted(_appels) == [("off", "lnk_a"), ("off", "lnk_l")], _appels)
+        check("aligner : un lien coupe a la main dans GetMySocial n'est pas remis en service",
+              ("on", "lnk_m") not in _appels, _appels)
+        check("aligner : un VA absent de la liste et le lien de base ne sont pas touches",
+              not any(l in ("lnk_x", "lnk_b") for _, l in _appels), _appels)
+        _eLf = _lf._etat()
+        check("aligner : registre -- l'entree passe actif False, la coupure est notee",
+              _eLf["liens"]["77:amelia"].get("actif") is False
+              and {"lnk_a", "lnk_l"} <= set(_eLf.get("coupes_role", {}))
+              and "actif" not in _eLf["liens"]["77:emma"], _eLf)
+        del _appels[:]
+        _lf.aligner([(77, "seven_ofm", ["emma"])])
+        check("aligner : un 2e passage ne refait aucune bascule", _appels == [], _appels)
+        _lf.aligner([(77, "seven_ofm", ["emma", "amelia"])])
+        _eLf = _lf._etat()
+        check("aligner : role rendu -> lien remis en service, sorti des coupures",
+              _appels == [("on", "lnk_a")] and _eLf["liens"]["77:amelia"].get("actif") is True
+              and "lnk_a" not in _eLf["coupes_role"] and "lnk_l" in _eLf["coupes_role"], _appels)
+        del _appels[:]
+        _gLf.disable_link = lambda lid: (_appels.append(("off", lid)), {"ok": False, "error": "quota"})[1]
+        _fLf = _lf.aligner([(77, "seven_ofm", [])])
+        _eLf = _lf._etat()
+        check("aligner : coupure refusee -> remontee avec sa raison, registre inchange",
+              _fLf and all(not x["ok"] and x["erreur"] == "quota" for x in _fLf)
+              and _eLf["liens"]["77:emma"].get("actif") is not False, _fLf)
+
+        # --- la ligne de menu
+        def _idsLf(v):
+            return [getattr(c, "custom_id", None) for c in v.walk_children()]
+
+        def _txtLf(v):
+            return "\n".join(t.content for t in v.walk_children() if isinstance(t, _dcLf.ui.TextDisplay))
+
+        _cogLf = _tyLf.SimpleNamespace()
+        _vLf = _uLf.MenuLigneVA(_cogLf, "emma", lien="https://getmysocial.com/emmalovee", va=77)
+        check("ligne : l'adresse du lien est sur sa propre ligne, sous le titre",
+              "## ☀️ Ton menu\n🔗 https://getmysocial.com/emmalovee" in _txtLf(_vLf), _txtLf(_vLf))
+        check("ligne : avec un lien, plus de « Demander un lien » (le reste de la rangee reste)",
+              "cmenu:l:lien" not in _idsLf(_vLf) and "cmenu:l:help" in _idsLf(_vLf), _idsLf(_vLf))
+        check("ligne : l'identite et la marque restent lisibles (_menu_va_lire)",
+              _uLf._menu_va_lire(_tyLf.SimpleNamespace(components=_vLf.children, embeds=[], content=None))[0] == "emma")
+        _vLf = _uLf.MenuLigneVA(_cogLf, "emma", lien="https://getmysocial.com/emmalovee", va=_SEVEN)
+        check("ligne : un compte sans limite garde « Demander un lien » pour tester",
+              "cmenu:l:lien" in _idsLf(_vLf))
+        _vLf = _uLf.MenuLigneVA(_cogLf, "emma", va=77)
+        check("ligne : sans lien, « Demander un lien » et aucune ligne 🔗",
+              "cmenu:l:lien" in _idsLf(_vLf) and "🔗" not in _txtLf(_vLf))
+        check("_lien_du_menu : le lien en service de la model, rien pour un lien coupe ou absent",
+              _uLf._lien_du_menu(77, "Emma") == "https://getmysocial.com/emmalovee"
+              and _uLf._lien_du_menu(77, "alicia") == "" and _uLf._lien_du_menu(None, "emma") == "")
+        _eLf = _lf._etat()
+        _eLf["liens"]["77:emma"]["actif"] = False
+        _sjLf.write(_lf.ETAT, _eLf, indent=1)
+        check("_lien_du_menu : lien coupe (role retire) -> pas affiche",
+              _uLf._lien_du_menu(77, "emma") == "")
+        _eLf["liens"]["77:emma"].pop("actif")
+        _sjLf.write(_lf.ETAT, _eLf, indent=1)
+
+        # --- redessin sur place, dans le ticket du VA
+        _uLf.USERS_FILE = _dLf / "users.json"
+        _sjLf.write(_uLf.USERS_FILE, {"77": {"identity": "emma", "channel_id": 5150}}, indent=1)
+        _uLf._menu_outils_ici = lambda g: True
+        _MOI = 999
+
+        class _MsgLf:
+            def __init__(self, vue, auteur=_MOI, embeds=()):
+                self.id, self.author, self.embeds = id(self), _tyLf.SimpleNamespace(id=auteur), list(embeds)
+                self.content, self.components, self.edits = None, vue.children, []
+
+            async def edit(self, **k):
+                self.edits.append(k)
+
+        _m_emma = _MsgLf(_uLf.MenuLigneVA(_cogLf, "emma", mention=77))
+        _m_lola = _MsgLf(_uLf.MenuLigneVA(_cogLf, "lola"))
+        _m_autre = _MsgLf(_uLf.MenuLigneVA(_cogLf, "emma"), auteur=1)
+
+        class _SalonLf:
+            id, guild, name = 5150, _tyLf.SimpleNamespace(id=1505418484052394004), "ticket"
+
+            async def history(self, limit=50):
+                for m in (_m_emma, _m_lola, _m_autre):
+                    yield m
+
+        _botLf = _tyLf.SimpleNamespace(user=_tyLf.SimpleNamespace(id=_MOI),
+                                       get_channel=lambda i: _SalonLf() if i == 5150 else None,
+                                       get_cog=lambda n: _cogLf)
+        _nLf = _asLf.run(_uLf.rafraichir_lien_des_menus(_botLf, 77, "emma"))
+        _vNeuve = _m_emma.edits[-1]["view"] if _m_emma.edits else None
+        check("redessin : seul le menu de la model, poste par le bot, est refait",
+              _nLf == 1 and not _m_lola.edits and not _m_autre.edits, _nLf)
+        check("redessin : le menu refait porte le lien et garde la mention du jour",
+              _vNeuve is not None and "🔗 https://getmysocial.com/emmalovee" in _txtLf(_vNeuve)
+              and _txtLf(_vNeuve).startswith("<@77> 👇") and "cmenu:l:lien" not in _idsLf(_vNeuve))
+        check("redessin : ticket introuvable -> 0, sans lever",
+              _asLf.run(_uLf.rafraichir_lien_des_menus(_botLf, 12345, "emma")) == 0)
+
+        # --- branchements
+        import inspect as _inLf
+        import cogs.welcome as _wLf
+        _srcR = _inLf.getsource(_wLf.Welcome._apres_roles_models)
+        check("roles : la bascule des liens part AVANT tout return (aucune model, role pose par le bot)",
+              _srcR.index("_liens_suivent") < _srcR.index("if not apres:")
+              and _srcR.index("_liens_suivent") < _srcR.index("if auto or ch is None"))
+        _srcS = _inLf.getsource(_wLf.Welcome._liens_suivent)
+        check("roles : les roles sont relus sous verrou, au moment de basculer",
+              _srcS.index("async with self._verrou_liens") < _srcS.index("models_du_membre(m)"))
+        _srcI = _inLf.getsource(_wLf.Welcome.__init__)
+        check("roles : rattrapage lance au demarrage (toutes les 30 min)",
+              "self.liens_suivent_roles.start()" in _srcI)
+        _srcG = _inLf.getsource(_uLf._generer_lien_fr)
+        check("generation : le menu du ticket montre le lien neuf tout de suite",
+              "rafraichir_lien_des_menus(interaction.client, uid, model)" in _srcG)
+    finally:
+        (_lf.ETAT, _cache, _gLf.enable_link, _gLf.disable_link,
+         _uLf.USERS_FILE, _uLf._menu_outils_ici) = _sauveLf
+        _lf._CACHE_LIENS.clear()
+        _lf._CACHE_LIENS.update(_cache)
+except Exception as _eLf:
+    import traceback as _tbLf
+    _tbLf.print_exc()
+    check("liens FR : testable", False, repr(_eLf)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
