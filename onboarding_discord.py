@@ -34,7 +34,13 @@ CONFIG_FICHIER = DATA_DIR / "onboarding_discord.json"
 ETAT_FICHIER = DATA_DIR / "onboarding_discord_etat.json"
 
 MAX_TEXTE = 2000
-MAX_FICHIER = 24 * 1024 * 1024      # Discord refuse au-delà sans boost
+# Discord plafonne la taille d'un fichier selon le niveau de boost du serveur.
+# Sans boost c'est 10 Mo — et une capture d'écran de téléphone en fait trois
+# cents. On la fait donc rétrécir au lieu de la refuser.
+LIMITES_BOOST = {0: 10, 1: 10, 2: 50, 3: 100}      # en Mo
+MARGE = 0.92                         # on vise un peu sous la limite : Discord compte l'enveloppe
+CACHE_DIR = DATA_DIR / "onboarding_compresse"
+_LIMITE: Dict[str, Any] = {}
 MAX_JOINTES = 10
 ATTENTE_S = 6.0                      # on laisse la rafale de frappes se calmer
 MAX_ENCADRE = 4096                   # une description d'encadre tient plus large
@@ -94,7 +100,112 @@ def _api(methode: str, chemin: str, **kw):
     return api(methode, chemin, **kw)
 
 
+def limite_octets() -> int:
+    """La taille maximale d'un fichier sur CE serveur, demandée à Discord.
+
+    Codée en dur, elle aurait menti le jour où le serveur est boosté — et on
+    aurait continué à écraser des vidéos sans raison. Gardée une heure.
+    """
+    if _LIMITE.get("quand", 0) > time.time() - 3600 and _LIMITE.get("octets"):
+        return int(_LIMITE["octets"])
+    mo = 10
+    try:
+        salon = str(config().get("salon") or "")
+        c, ch = _api("GET", f"/channels/{salon}")
+        gid = str((ch or {}).get("guild_id") or "")
+        if gid:
+            c2, g = _api("GET", f"/guilds/{gid}")
+            mo = LIMITES_BOOST.get(int((g or {}).get("premium_tier") or 0), 10)
+    except Exception as e:
+        print(f"[onboarding] limite de taille : {type(e).__name__}: {e} — 10 Mo retenu",
+              flush=True)
+    _LIMITE.update({"octets": mo * 1024 * 1024, "quand": time.time()})
+    return mo * 1024 * 1024
+
+
+def _duree(chemin: Path) -> float:
+    import subprocess
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "format=duration", "-of", "csv=p=0", str(chemin)],
+                           capture_output=True, text=True, timeout=120)
+        return float((r.stdout or "0").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def comprimer(chemin: Path, cible: int) -> Tuple[Optional[Path], str]:
+    """Rétrécit une vidéo sous `cible` octets. Rend (fichier, explication).
+
+    Le débit se calcule depuis la DURÉE : viser une qualité fixe donnerait un
+    fichier de taille inconnue, et on se serait fait refuser une deuxième fois.
+    Le résultat est gardé : republier dix fois ne doit pas recompresser dix fois.
+    """
+    import subprocess
+    duree = _duree(chemin)
+    if duree <= 0:
+        return None, "durée illisible (ffprobe)"
+    try:
+        st = chemin.stat()
+        cle = hashlib.sha1(f"{chemin}|{st.st_mtime_ns}|{st.st_size}|{cible}"
+                           .encode()).hexdigest()[:16]
+    except OSError as e:
+        return None, f"fichier illisible ({type(e).__name__})"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    sortie = CACHE_DIR / f"{cle}.mp4"
+    if sortie.exists() and 0 < sortie.stat().st_size <= cible:
+        return sortie, "déjà compressée"
+
+    audio = 64_000
+    for hauteur in (720, 480, 360):
+        video = int((cible * 8 * MARGE) / duree) - audio
+        if video < 120_000:
+            video = 120_000
+        cmd = ["ffmpeg", "-y", "-i", str(chemin),
+               "-vf", f"scale=-2:'min({hauteur},ih)'",
+               "-c:v", "libx264", "-preset", "veryfast",
+               "-b:v", str(video), "-maxrate", str(int(video * 1.2)),
+               "-bufsize", str(int(video * 2)),
+               "-c:a", "aac", "-b:a", str(audio), "-movflags", "+faststart",
+               str(sortie)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=1800)
+        except Exception as e:
+            return None, f"ffmpeg : {type(e).__name__}"
+        if r.returncode != 0 or not sortie.exists():
+            return None, "ffmpeg a échoué"
+        if sortie.stat().st_size <= cible:
+            return sortie, (f"compressée {chemin.stat().st_size // (1024*1024)} Mo → "
+                            f"{sortie.stat().st_size // (1024*1024)} Mo en {hauteur}p")
+        # trop gros encore : on redescend d'un cran plutôt que d'abandonner
+    return None, (f"impossible de passer sous {cible // (1024*1024)} Mo "
+                  f"({int(duree)} s de vidéo)")
+
+
 # ─── ce qu'une étape donne comme message ─────────────────────────────────
+# Discord n'allume un lecteur que pour une poignee de sites, et SEULEMENT
+# quand l'adresse est dans le texte du message : dans un encadre, elle reste un
+# lien bleu. Google Drive n'en fait pas partie — un lien Drive fait quitter
+# Discord, c'est tout.
+LECTEURS = ("youtube.com/watch", "youtu.be/", "youtube.com/shorts",
+            "vimeo.com/", "streamable.com/", "clips.twitch.tv/", "twitch.tv/videos/")
+
+
+def est_lecteur(url: str) -> bool:
+    u = str(url or "").lower()
+    return any(m in u for m in LECTEURS)
+
+
+def lecteurs_de(etape: Dict[str, Any]) -> List[str]:
+    """Les adresses qui se jouent sur place, a mettre DANS le texte."""
+    out = []
+    for m in (etape.get("media") or []):
+        u = m.get("url") or m.get("name") or ""
+        if m.get("kind") == "link" and est_lecteur(u) and u not in out:
+            out.append(str(u))
+    return out
+
+
 def titre_de(etape: Dict[str, Any]) -> str:
     return ((etape.get("icon") or "") + " " + (etape.get("title") or "")).strip()[:256]
 
@@ -102,8 +213,12 @@ def titre_de(etape: Dict[str, Any]) -> str:
 def corps_de(etape: Dict[str, Any]) -> str:
     """Le corps de l'encadré : le texte de l'étape, puis ses liens."""
     corps = (etape.get("description") or "").strip()
+    # les adresses qui se jouent sont remontees dans le texte : les repeter ici
+    # aurait donne le meme lien deux fois, une fois jouable et une fois mort
+    jouables = set(lecteurs_de(etape))
     liens = [m.get("name") or m.get("url") for m in (etape.get("media") or [])
-             if m.get("kind") == "link" and (m.get("name") or m.get("url"))]
+             if m.get("kind") == "link" and (m.get("name") or m.get("url"))
+             and (m.get("url") or m.get("name")) not in jouables]
     if liens:
         corps = (corps + "\n\n" if corps else "") + "\n".join("📎 " + str(l) for l in liens)
     return corps[:MAX_ENCADRE]
@@ -131,6 +246,7 @@ def fichiers_de(etape: Dict[str, Any]) -> Tuple[List[Tuple[str, bytes]], List[st
     """
     pris: List[Tuple[str, bytes]] = []
     ecartes: List[str] = []
+    plafond = limite_octets()
     for m in (etape.get("media") or []):
         if m.get("kind") == "link":
             continue
@@ -140,9 +256,17 @@ def fichiers_de(etape: Dict[str, Any]) -> Tuple[List[Tuple[str, bytes]], List[st
             ecartes.append(f"{nom} (fichier absent)")
             continue
         taille = chemin.stat().st_size
-        if taille > MAX_FICHIER:
-            ecartes.append(f"{nom} ({taille // (1024 * 1024)} Mo, trop lourd pour Discord)")
-            continue
+        if taille > plafond:
+            if str(m.get("kind")) != "video":
+                ecartes.append(f"{nom} ({taille // (1024 * 1024)} Mo, "
+                               f"au-dessus des {plafond // (1024 * 1024)} Mo de Discord)")
+                continue
+            petite, mot = comprimer(chemin, plafond)
+            if petite is None:
+                ecartes.append(f"{nom} ({taille // (1024 * 1024)} Mo) : {mot}")
+                continue
+            print(f"[onboarding] {nom} : {mot}", flush=True)
+            chemin = petite
         if len(pris) >= MAX_JOINTES:
             ecartes.append(f"{nom} (plus de {MAX_JOINTES} pièces jointes)")
             continue
@@ -163,7 +287,8 @@ def empreinte(etape: Dict[str, Any], rang: int = 0) -> str:
             str(m.get("size") or ""), str(m.get("url") or ""))
            for m in (etape.get("media") or [])]
     brut = json.dumps([titre_de(etape), corps_de(etape), couleur_de(etape, rang),
-                       sorted(med)], ensure_ascii=False, sort_keys=True)
+                       lecteurs_de(etape), sorted(med)],
+                      ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(brut.encode("utf-8")).hexdigest()
 
 
@@ -202,7 +327,8 @@ def publier(force: bool = False) -> Dict[str, Any]:
         # content vide ET embeds : en corrigeant un ancien message en texte
         # brut, sans le vider on aurait eu le texte DEUX fois, une en clair et
         # une dans l'encadre.
-        corps = {"content": "", "embeds": [encadre_de(etape, rang)],
+        corps = {"content": "\n".join(lecteurs_de(etape))[:MAX_TEXTE],
+                 "embeds": [encadre_de(etape, rang)],
                  "allowed_mentions": {"parse": []}}
 
         if fiche.get("id"):

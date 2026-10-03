@@ -34499,6 +34499,21 @@ try:
           _od.couleur_de({}, 0) == _od.couleur_de({}, len(_od.COULEURS)))
     check("une couleur posee sur l etape l emporte sur celle du rang",
           _od.couleur_de({"couleur": "#123456"}, 3) == 0x123456)
+    # --- ce qui se joue sur place, et ce qui ne se joue pas
+    _ey = {"icon": "📆", "title": "J1", "description": "Regarde",
+           "media": [{"kind": "link", "name": "https://youtu.be/abc"},
+                     {"kind": "link", "name": "https://drive.google.com/file/d/x"}]}
+    check("YouTube se joue dans Discord, Drive non",
+          _od.lecteurs_de(_ey) == ["https://youtu.be/abc"]
+          and _od.est_lecteur("https://drive.google.com/file/d/x") is False)
+    check("un lien jouable n est PAS repete dans l encadre",
+          "youtu.be" not in _od.encadre_de(_ey, 0)["description"]
+          and "drive.google.com" in _od.encadre_de(_ey, 0)["description"])
+    check("la taille maximale est demandee a Discord, pas codee en dur",
+          "premium_tier" in _plO("onboarding_discord.py").read_text(encoding="utf-8"))
+    check("une video trop lourde est compressee, pas refusee",
+          "def comprimer" in _plO("onboarding_discord.py").read_text(encoding="utf-8"))
+
     check("une etape sans corps ne rend pas un encadre vide",
           _od.encadre_de({"icon": "👋", "title": "Bienvenue"}, 0)["title"] == "👋 Bienvenue")
     check("l empreinte ne bouge pas sans raison",
@@ -34548,6 +34563,8 @@ try:
               and [a[0] for a in _appels] == ["POST", "POST"])
         check("ce qui part est un encadre, et son texte n est PAS aussi en clair",
               _appels[0][2].get("embeds") and _appels[0][2].get("content") == "")
+        check("le texte du message ne sert qu aux adresses qui se jouent",
+              all(not a[2].get("content") for a in _appels))
         check("les deux etapes n ont pas la meme couleur",
               _appels[0][2]["embeds"][0]["color"] != _appels[1][2]["embeds"][0]["color"])
 
