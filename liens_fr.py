@@ -619,7 +619,13 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                 ETAT.parent.mkdir(parents=True, exist_ok=True)
                 safe_json.write(ETAT, d, indent=1)
                 print(f"[liens_fr] {entree['display_name']} repris de GetMySocial (absent du registre)", flush=True)
-                return {"ok": True, "deja": True, **entree}
+                # repris tel quel, il pouvait garder les boutons du lien de base :
+                # « Amelia VA 1 @priscah0908_23400 » pointait chez Lashwana (03/10)
+                try:
+                    entree, change = _reparer(uid, model, entree)
+                except Exception as e:                       # noqa: BLE001
+                    entree, change = {**entree, "soucis": [f"réparation impossible : {type(e).__name__}: {e}"]}, False
+                return {"ok": True, "deja": True, "vient_d_etre_repare": change, **entree}
         gabarit = lien_de_base(model)
         if not gabarit:
             return {"ok": False, "erreur": f"pas de lien de base « {model}_bby » ({cfg['nom']} 1) "

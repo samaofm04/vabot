@@ -323,6 +323,11 @@ LIENS_DEMANDES = [
      "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
     {"id": "2026-10-03-fahnih", "uid": 1525508553081753621, "pseudo": "fahnih_37050",
      "models": ["amelia", "lola", "julia", "sarah", "alicia", "emma"]},
+    # son lien Amelia (« ameliababy ») existait avant, avec les boutons du lien
+    # de base (Lashwana) : generer le repare sur place, meme adresse ; rien a
+    # reposter dans son ticket
+    {"id": "2026-10-03-priscah-amelia-repare", "uid": 1525406324970618890,
+     "pseudo": "priscah0908_23400", "models": ["amelia"], "poster": False},
 ]
 _LIENS_FAIT = Path(__file__).resolve().parent.parent / "data" / "liens_demandes_fr.json"
 
@@ -556,7 +561,9 @@ class Outils(commands.Cog):
                 # GetMySocial limite par minute : le lien Lola de nourdine a pris
                 # un 429 au milieu de six creations d'affilee (03/10)
                 await asyncio.sleep(8)
-            if ticket is not None and liens:
+            if d.get("poster", True) is False:
+                pass
+            elif ticket is not None and liens:
                 try:
                     await ticket.send(f"🔗 **Tes liens, un par model** <@{d['uid']}>",
                                       allowed_mentions=discord.AllowedMentions(users=True))
