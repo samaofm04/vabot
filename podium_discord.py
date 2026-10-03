@@ -307,7 +307,11 @@ THEMES: Dict[str, Dict[str, Any]] = {
         "emojis": ["kart_mario", "kart_luigi", "kart_peach"],
         "repli": ["👑", "⭐", "🍄"],
         "piece": "🪙",                 # à la place du 💰 : même montant, même règle
-        "suite": "🟢",                 # devant les places 4 et plus
+        # Devant les places 4 et plus. Proprietaire, 03/10/2026 : « la liste
+        # de VA et tout, et pour le podium aussi, tout le VA quoi » -- le rond
+        # vert laissait le reste du classement hors de la course. Un kart dit
+        # qu'ils y sont encore ; les trois premiers gardent leur tête.
+        "suite": "🏎️",
         "bouton": "Relancer la course",
     },
 }
@@ -1193,7 +1197,7 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any],
     celui qu'on donne pour réclamer. Tous les VA FR restent visibles, même
     au-delà des quinze premiers : ce sont eux qui lisent ce salon, et un VA US
     plus fort en clics ne doit pas leur cacher leur rang.
-    `med`, `th` : les marqueurs et le thème du serveur (têtes, 🪙, 🟢) ; sans
+    `med`, `th` : les marqueurs et le thème du serveur (têtes, 🪙, 🏎️) ; sans
     eux, les médailles et le 💰 d'avant.
     """
     med = med or MEDAILLES
@@ -1335,7 +1339,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         # L'habillage rallonge le message. Une tête de personnage s'écrit
         # « <:kart_mario:1234…> », 33 caractères contre un pour 👑, et il y en
         # a six (podium et bloc des primes) : près de deux cents de plus. Le
-        # « 🟢 » des places 4 et plus en ajoute deux par ligne : une centaine
+        # kart des places 4 et plus en ajoute trois par ligne : une centaine
         # de VA FR, encore deux cents. Relu en revue : à 100 VA FR, le message
         # sans thème tenait, celui du thème était coupé au milieu de la
         # réclamation des primes. Le thème ne doit jamais faire couper ce qui
@@ -1344,7 +1348,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         # que sans thème (ses lignes d'état et de primes sont plus courtes, ou
         # égales pour « terminée »). Les remplacements donnent exactement le
         # rendu sans cet habillage : aucun nom de VA ne contient « <:kart_ »,
-        # et seules les lignes de rang commencent par « 4. 🟢 ».
+        # et seules les lignes de rang commencent par « 4. 🏎️ ».
         retire = []
         if med != th["repli"]:
             for tete, repli in zip(med, th["repli"]):
@@ -1398,7 +1402,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     lignes = cl["lignes"]
     mix = _melange(cl, us, p)
     tw = SERVEURS[TWITTER_ID]
-    # le thème : titre, couleur, vignette, têtes au top 3 et 🟢 ensuite. La
+    # le thème : titre, couleur, vignette, têtes au top 3 et 🏎️ ensuite. La
     # quinzaine ne paie rien : pas de 🪙 ici, comme pas de 💰 sans thème
     th = _theme(gid)
     med = _marqueurs(gid, tetes)

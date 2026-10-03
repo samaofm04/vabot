@@ -177,14 +177,18 @@ TW, IG = pd.TWITTER_ID, pd.VA_IG_ID
 GIDS = (TW, IG)
 # Va IG porte aussi le thème Mario (clé « theme », vérifié en détail par
 # tests_podium_mario.py). Le faux Discord ne crée pas d'emoji : ses trois
-# premières places portent les marqueurs de repli 👑 ⭐ 🍄, le montant 🪙, les
-# places suivantes 🟢, et ses titres sont ceux de la course. Les chiffres, les
+# premières places portent les marqueurs de repli, le montant et le marqueur
+# des places suivantes du thème -- LUS dans podium_discord.THEMES, jamais
+# recopiés : le marqueur est passé du rond vert au kart le 03/10/2026 et deux
+# suites de tests l'avaient figé en dur. Les titres sont ceux de la course. Les
+# chiffres, les
 # rangs et les primes contrôlés ici n'en dépendent pas. Twitter garde 🥇 🥈 🥉
 # et 💰. .get : sans le thème, Va IG reprend les mots de Twitter.
 MARIO = bool(pd.SERVEURS[IG].get("theme"))
-MED_IG = ["👑", "⭐", "🍄"] if MARIO else ["🥇", "🥈", "🥉"]
-PIECE_IG = "🪙" if MARIO else "💰"
-SUITE_IG = "🟢 " if MARIO else ""
+_TH_IG = pd.THEMES.get(pd.SERVEURS[IG].get("theme") or "") or {}
+MED_IG = list(_TH_IG["repli"]) if MARIO else ["🥇", "🥈", "🥉"]
+PIECE_IG = _TH_IG["piece"] if MARIO else "💰"
+SUITE_IG = (_TH_IG["suite"] + " ") if MARIO else ""
 T_IG = ({"en_cours": "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄",
          "termine": "🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE",
          "final": "🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE",
@@ -347,11 +351,14 @@ def msg(salon, mid):
 # FR) » (l'ancien rang FR à côté du montant) et le groupe « FR 📸 / US 🐦 »
 # restent lus : une marque revenue sur une ligne doit faire échouer les
 # contrôles, pas les rendre aveugles.
-# Les marqueurs du thème de Va IG (👑 ⭐ 🍄, 🪙, 🟢 devant les places 4+) sont
-# lus aussi ; QUEL marqueur est sur quelle ligne, c'est aux contrôles de le dire.
-RE_PODIUM = re.compile(r"^(?:(🥇|🥈|🥉|👑|⭐|🍄)|(\d+)\.(?: 🟢)?) \*{0,2}(.+?)\*{0,2} — \*\*(\d+)\*\* subs"
+# Les marqueurs du thème de Va IG sont lus aussi ; QUEL marqueur est sur
+# quelle ligne, c'est aux contrôles de le dire. Ils viennent du thème, pour
+# qu'un marqueur changé ne rende pas ces contrôles aveugles.
+_MQ = "|".join(re.escape(m) for m in (MED_IG if MARIO else []) + ["🥇", "🥈", "🥉"])
+_SU = f"(?: {re.escape(_TH_IG['suite'])})?" if MARIO else ""
+RE_PODIUM = re.compile(rf"^(?:({_MQ})|(\d+)\.{_SU}) \*{{0,2}}(.+?)\*{{0,2}} — \*\*(\d+)\*\* subs"
                        r"(?: · (FR 📸|US 🐦))?(?: · (?:💰|🪙) \*\*(\d+)\$\*\*(?: \((\d+)(?:er|e) VA FR\))?)?$")
-RE_SUBS = re.compile(r"^(?:(🥇|🥈|🥉|👑|⭐|🍄)|(\d+)\.(?: 🟢)?) \*{0,2}(.+?)\*{0,2} — \*{0,2}(\d+)\*{0,2} subs"
+RE_SUBS = re.compile(rf"^(?:({_MQ})|(\d+)\.{_SU}) \*{{0,2}}(.+?)\*{{0,2}} — \*{{0,2}}(\d+)\*{{0,2}} subs"
                      r"(?: · (FR 📸|US 🐦))?(?: · 🌐 (\d+) all-time)?$")
 
 

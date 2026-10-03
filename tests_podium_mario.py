@@ -12,7 +12,7 @@ Ce qui est vérifié :
   - chaque état du message de la semaine (vivant, « terminée », final) et de
     la quinzaine (vivante, figée) : titre, couleur, vignette, marqueurs du top
     3 (têtes si le serveur les a, 👑 ⭐ 🍄 sinon, jamais un mélange), 🪙 aux
-    primés selon la même règle qu'avant (au moins un sub), 🟢 aux suivants, le
+    primés selon la même règle qu'avant (au moins un sub), un kart aux suivants, le
     bloc des primes ; et tout le reste MOT POUR MOT comme sans thème
     (réclamation, numéro de VA, avertissements, pied) ;
   - le bouton « Relancer la course » (🔄, podium:maj) sous les messages vivants ;
@@ -28,7 +28,7 @@ Ce qui est vérifié :
     quinzaine figée) relit la liste juste avant son rendu : une tête
     supprimée à la main depuis la vérification du jour n'y reste jamais pour
     toujours ; liste illisible à ce moment-là : 👑 ⭐ 🍄 sur ce message ;
-  - la longueur : des têtes, puis le 🟢, qui feraient couper le podium cèdent
+  - la longueur : des têtes, puis le kart, qui feraient couper le podium cèdent
     la place ; jamais coupé là où le message sans thème tient ; la quinzaine
     compte leur vraie longueur pour paginer ;
   - la vignette porte la version de son fichier (?v=) : un 404 gardé par le
@@ -159,6 +159,10 @@ REPLI = ["👑", "⭐", "🍄"]
 IDS = {"kart_mario": "1424242424242424101", "kart_luigi": "1424242424242424102",
        "kart_peach": "1424242424242424103"}
 TETES = [f"<:{n}:{IDS[n]}>" for n in NOMS]
+#: Le marqueur des places 4 et plus, LU dans le theme et jamais recopie : le
+#: proprietaire l'a fait passer du rond vert au kart le 03/10/2026, et deux
+#: suites de tests le figeaient en dur.
+SUITE = pd.THEMES["mario"]["suite"]
 T_EN_COURS = "🏁 GRAND PRIX DES SUBS — COURSE EN COURS 🍄"
 T_TERMINE = "🏁 GRAND PRIX DES SUBS — COURSE TERMINÉE"
 T_FINAL = "🏆 GRAND PRIX DES SUBS — PODIUM DE LA SEMAINE"
@@ -387,7 +391,7 @@ def vers_avant(texte, marqueurs):
         texte = texte.replace(ancien, neuf)
     for mq, med in zip(marqueurs, ["🥇", "🥈", "🥉"]):
         texte = texte.replace(mq, med)
-    return re.sub(r"^(\d+)\. 🟢 ", r"\1. ", texte, flags=re.M)
+    return re.sub(rf"^(\d+)\. {re.escape(SUITE)} ", r"\1. ", texte, flags=re.M)
 
 
 def charger_ancien():
@@ -412,8 +416,10 @@ CL_FR = {"lignes": [L("Amelia VA 3", 212, 3, "amelia"), L("Lola VA 2", 151, 2, "
 US = {"lignes": [L("VA 8", 241, 8), L("VA 12", 193, 12), L("VA 3", 120, 3), L("VA 5", 33, 5)],
       "illisibles": [], "frais": True}
 TOP = [("Jessye VA 8", 241, 10), ("Amelia VA 3", 212, 5), ("Jessye VA 12", 193, 3)]
-SUITE = ["4. 🟢 Lola VA 2 — **151** subs", "5. 🟢 Jessye VA 3 — **120** subs",
-         "6. 🟢 Jessye VA 5 — **33** subs", "7. 🟢 Amelia VA 1 — **0** subs"]
+LIGNES_SUITE = [f"4. {SUITE} Lola VA 2 — **151** subs",
+                f"5. {SUITE} Jessye VA 3 — **120** subs",
+                f"6. {SUITE} Jessye VA 5 — **33** subs",
+                f"7. {SUITE} Amelia VA 1 — **0** subs"]
 
 CAL_NORMAL = [(m(2026, 9, 22, 12, 0), None), (m(2026, 9, 22, 14, 10), None),
               (m(2026, 9, 27, 20, 0), None), (m(2026, 9, 28, 0, 10), None),
@@ -584,7 +590,7 @@ try:
             check(f"{et} : la ligne d'état de la course", d_.split("\n")[2] == ligne, d_.split("\n")[:4])
             top = [f"{marqueurs[i]} **{va}** — **{c}** subs · 🪙 **{p}$**" for i, (va, c, p) in enumerate(TOP)]
             check(f"{et} : le top 3 avec ses marqueurs et ses pièces (Jessye VA 8 1er, la VA FR 2e)",
-                  "\n".join(top + SUITE) in d_, d_[:700])
+                  "\n".join(top + LIGNES_SUITE) in d_, d_[:700])
             check(f"{et} : bloc des primes « Le podium de la course gagne des pièces », places et montants exacts",
                   "\n".join([BLOC_PRIMES, f"{marqueurs[0]} 1er → **10$**", f"{marqueurs[1]} 2e → **5$**",
                              f"{marqueurs[2]} 3e → **3$**"]) in d_, d_[-700:])
@@ -636,7 +642,7 @@ try:
     # sans VA US (clé « avec_us » coupée, ou relevé indisponible) : même habillage,
     # même règle d'avant (le 3e touche son 3$ même à zéro, défaut laissé au propriétaire)
     seul = pd.embed_podium(CL_FR, LUN_W, DIM_W, gid=IG)
-    check("VA FR seuls : têtes, 🪙 et 🟢 aussi, règle de prime d'avant",
+    check(f"VA FR seuls : têtes, 🪙 et {SUITE} aussi, règle de prime d'avant",
           f"{TETES[0]} **Amelia VA 3** — **212** subs · 🪙 **10$**" in desc(seul)
           and f"{TETES[2]} **Amelia VA 1** — **0** subs · 🪙 **3$**" in desc(seul)
           and vers_avant(desc(seul), TETES) == desc(sans_theme(lambda: pd.embed_podium(CL_FR, LUN_W, DIM_W, gid=IG))),
@@ -674,12 +680,12 @@ try:
                   len(pgs) == 1 and titre(e_) == t_ and e_["color"] == coul
                   and e_["thumbnail"] == {"url": VIGNETTE_SUBS}, (titre(e_), hex(e_.get("color", 0))))
             d_ = desc(e_)
-            check(f"{et} : têtes au top 3, 🟢 ensuite, all-time de chacun",
+            check(f"{et} : têtes au top 3, {SUITE} ensuite, all-time de chacun",
                   "\n".join([f"{marqueurs[0]} **Jessye VA 8** — **241** subs · 🌐 5000 all-time",
                              f"{marqueurs[1]} **Amelia VA 3** — **212** subs · 🌐 900 all-time",
                              f"{marqueurs[2]} **Jessye VA 12** — **193** subs · 🌐 4100 all-time",
-                             "4. 🟢 Lola VA 2 — 151 subs · 🌐 400 all-time",
-                             "5. 🟢 Jessye VA 3 — 120 subs · 🌐 800 all-time"]) in d_, d_[:600])
+                             f"4. {SUITE} Lola VA 2 — 151 subs · 🌐 400 all-time",
+                             f"5. {SUITE} Jessye VA 3 — 120 subs · 🌐 800 all-time"]) in d_, d_[:600])
             check(f"{et} : la quinzaine ne paie rien — ni 🪙 ni 💰", "🪙" not in d_ and "💰" not in d_)
             sans = sans_theme(lambda: pd.pages_subs(CL_FR, S_OLD, S_OLD_FIN, tot, gid=IG, final=final,
                                                     us=US, totaux_us=tot_us))
@@ -952,11 +958,11 @@ try:
         check("… avec les têtes posées : il repart en 👑 ⭐ 🍄, entier (rien de coupé), et le dit",
               desc(e_) == long_repli and desc(e_).endswith("c'est le même chaque semaine._")
               and "trop long" in log and "les têtes" in log
-              and "🟢" not in log, (len(desc(e_)), log))      # les têtes suffisaient : le 🟢 reste
+              and SUITE not in log, (len(desc(e_)), log))    # les têtes suffisaient : le kart reste
         e_, log = journal(lambda: pd.embed_podium(cl_fr_n(n_fr + 60), LUN_W, DIM_W, gid=IG, us=us_long))
         check("trop long même en repli : coupé à 4096 (limite de Discord), mais dit au journal",
               len(desc(e_)) == 4096 and "coupé à 4096" in log, log)
-    # Le 🟢 des places 4 et plus pèse deux caractères par ligne : une
+    # Le kart des places 4 et plus pèse trois caractères par ligne : une
     # centaine de VA FR, et c'est lui qui faisait couper (relu en revue) un
     # podium qui tient SANS thème — la coupe tombait sur la réclamation des
     # primes. Le thème ne doit jamais faire couper ce qui tiendrait sans lui.
@@ -966,13 +972,13 @@ try:
              "final": ("🔒 _Semaine terminée : classement arrêté, il ne bougera plus._", L_FINAL)}
 
     def vers_theme(texte, etat):
-        """Le rendu sans thème habillé en Mario, avec 👑 ⭐ 🍄 et 🟢, SANS
+        """Le rendu sans thème habillé en Mario, avec 👑 ⭐ 🍄 et le kart, SANS
         rien retirer : ce que le thème écrirait s'il ne cédait rien."""
         texte = texte.replace(_mots[etat][0], _mots[etat][1]).replace(
             "🎁 **Les 3 meilleurs de la semaine touchent une prime :**", BLOC_PRIMES).replace("💰", "🪙")
         for med, mq in zip(["🥇", "🥈", "🥉"], REPLI):
             texte = texte.replace(med, mq)
-        return re.sub(r"^(\d+)\. ", r"\1. 🟢 ", texte, flags=re.M)
+        return re.sub(r"^(\d+)\. ", rf"\\1. {SUITE} ", texte, flags=re.M)
 
     for etat_, kw in (("final", {}), ("termine", {"termine": True}), ("en_cours", {"en_cours": True})):
         for cache in ("sans têtes", "têtes posées"):
@@ -987,7 +993,7 @@ try:
                     break
                 n_bord, sans_d = n, d_
             et = f"podium {etat_}, {cache}, {n_bord} VA FR"
-            check(f"{et} : cas construit — sans thème il tient, habillé (🟢 compris) il ne tiendrait pas",
+            check(f"{et} : cas construit — sans thème il tient, habillé ({SUITE} compris) il ne tiendrait pas",
                   n_bord and len(sans_d) <= 4096 and len(vers_theme(sans_d, etat_)) > 4096,
                   (n_bord, len(sans_d), len(vers_theme(sans_d, etat_))))
             e_, log = journal(lambda: pd.embed_podium(cl_fr_n(n_bord), LUN_W, DIM_W, gid=IG, us=us_long, **kw))
@@ -996,24 +1002,24 @@ try:
                   and "**ton adresse USDC (réseau Solana)**.\nUn seul prix par personne · payé à la main après "
                       "vérification\n\n🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"
                   in desc(e_), (len(desc(e_)), log, desc(e_)[-200:]))
-            check(f"{et} : le même message que sans thème, mot pour mot, aux marqueurs près (🟢 retirés, 👑 ⭐ 🍄)",
+            check(f"{et} : le même message que sans thème, mot pour mot, aux marqueurs près ({SUITE} retirés, 👑 ⭐ 🍄)",
                   vers_avant(desc(e_).replace(_mots[etat_][1], _mots[etat_][0]), REPLI) == sans_d
-                  and "🟢" not in desc(e_) and "<:kart_" not in desc(e_)
+                  and SUITE not in desc(e_) and "<:kart_" not in desc(e_)
                   and desc(e_).count("👑") == 2 and titre(e_) == {"final": T_FINAL, "termine": T_TERMINE,
                                                                  "en_cours": T_EN_COURS}[etat_])
             check(f"{et} : dit au journal (une ligne), et seulement ce qu'il a fallu retirer",
                   len([l for l in log.splitlines() if "trop long" in l]) == 1
-                  and "🟢" in log and (("têtes" in log) == (cache == "têtes posées")), log)
-    # juste sous le bord : le 🟢 reste (rien n'est retiré sans nécessité)
+                  and SUITE in log and (("têtes" in log) == (cache == "têtes posées")), log)
+    # juste sous le bord : le kart reste (rien n'est retiré sans nécessité)
     effacer_cache()
     for n in range(40, 300):
         d_, _ = journal(lambda: desc(pd.embed_podium(cl_fr_n(n + 1), LUN_W, DIM_W, gid=IG, us=us_long)))
-        if "🟢" not in d_ or not d_.endswith(FIN_PODIUM):
+        if SUITE not in d_ or not d_.endswith(FIN_PODIUM):
             break
     _e, _log = journal(lambda: pd.embed_podium(cl_fr_n(n), LUN_W, DIM_W, gid=IG, us=us_long))
-    check(f"{n} VA FR, habillé il tient encore : le 🟢 reste, rien au journal",
-          "🟢" in desc(_e) and desc(_e).endswith(FIN_PODIUM) and len(desc(_e)) <= 4096 and not _log
-          and desc(_e).count("🟢") == len(re.findall(r"^\d+\. ", desc(_e), flags=re.M)), _log)
+    check(f"{n} VA FR, habillé il tient encore : le {SUITE} reste, rien au journal",
+          SUITE in desc(_e) and desc(_e).endswith(FIN_PODIUM) and len(desc(_e)) <= 4096 and not _log
+          and desc(_e).count(SUITE) == len(re.findall(r"^\d+\. ", desc(_e), flags=re.M)), _log)
     # la quinzaine : ses pages comptent la vraie longueur des lignes
     poser_cache()
     cl_q = {"lignes": [L(f"Amelia VA {i}", 500 - i, i, "amelia") for i in range(1, 121)],
