@@ -1620,6 +1620,92 @@ def _membre_bot_admin(guild):
     return guild.get_member(uid) if (guild is not None and uid) else None
 
 
+#: Les categories d'archives des tickets (reset_tickets) : 50 salons au plus
+#: par categorie, Discord refuse au-dela.
+ARCHIVES = "🗄️ Archives tickets"
+
+
+async def _categorie_archives(guild):
+    """Une categorie d'archives avec de la place, creee au besoin : cachee a
+    @everyone, donc aux VA ; le staff (admin) la voit."""
+    for cat in guild.categories:
+        if nom_sans_decor(cat.name).startswith("archives tickets") and len(cat.channels) < 50:
+            return cat
+    n = sum(1 for c in guild.categories if nom_sans_decor(c.name).startswith("archives tickets"))
+    return await guild.create_category(
+        ARCHIVES + (f" {n + 1}" if n else ""),
+        overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False)},
+        reason="Reset des tickets : archives")
+
+
+def _nom_archive(nom) -> str:
+    import re as _re
+    m = _re.search(r"(?:^|[^a-z0-9])va-([a-z0-9_.]+)$", nom_sans_decor(nom))
+    return ("ancien-" + (m.group(1) if m else nom_sans_decor(nom).lstrip("-")))[:100]
+
+
+async def reset_tickets(guild, bot, signaler=None) -> dict:
+    """Repart a zero (proprietaire, 03/10/2026 : « reset tous les tickets, a
+    partir de zero, avec le message d'onboarding ») SANS RIEN SUPPRIMER.
+
+    Pour chaque VA du serveur : son ticket est renomme « archive-… » et range
+    dans une categorie d'archives, cachee aux VA (ses droits se calent sur la
+    categorie) ; sa fiche perd le salon -- et garde tout le reste (model,
+    paiement, comptes Insta) ; setup_va_ticket lui cree un ticket neuf, avec
+    le message d'onboarding et son menu.
+
+    Un ticket qui n'a pas pu etre archive n'est PAS remplace : le VA en
+    aurait deux. Rend le bilan ; `signaler(texte)` (async) recoit la
+    progression."""
+    bilan = {"faits": 0, "archives_ratees": [], "tickets_rates": [], "absents": 0}
+    cibles = []
+    for uid, e in (load_users() or {}).items():
+        if not isinstance(e, dict) or not e.get("channel_id"):
+            continue
+        ancien = guild.get_channel(int(e["channel_id"]))
+        if ancien is None:
+            continue                          # fiche d'un autre serveur
+        m = guild.get_member(int(uid)) if str(uid).isdigit() else None
+        if m is None or m.bot:
+            bilan["absents"] += 1
+            continue
+        cibles.append((m, ancien))
+    if signaler:
+        await signaler(f"🔄 Reset de {len(cibles)} ticket(s)…")
+    for i, (m, ancien) in enumerate(cibles, 1):
+        try:
+            arch = await _categorie_archives(guild)
+            # « ancien-<pseudo> », SANS « va- » : vaactivity, vasort et le recap
+            # des clics reperent les tickets par « va-<pseudo> » en fin de nom
+            # -- « archive-va-x » aurait continue d'etre traite comme un ticket
+            await ancien.edit(name=_nom_archive(ancien.name),
+                              category=arch, sync_permissions=True,
+                              reason="Reset des tickets : archive")
+        except Exception as x:                               # noqa: BLE001
+            bilan["archives_ratees"].append(f"{ancien.name} ({type(x).__name__})")
+            log.warning(f"reset : {ancien.name} non archive ({x}) -- ticket garde")
+            continue
+        users = load_users()
+        fiche = users.get(str(m.id))
+        if isinstance(fiche, dict):
+            fiche["ancien_ticket"] = ancien.id
+            fiche["channel_id"] = None
+            save_users(users)
+        try:
+            ch, err = await setup_va_ticket(guild, m, bot=bot, isoler=False)
+            if err:
+                raise RuntimeError(err)
+            bilan["faits"] += 1
+        except Exception as x:                               # noqa: BLE001
+            bilan["tickets_rates"].append(f"{m.name} ({x})")
+            log.error(f"reset : ticket neuf de {m.name} rate : {x}")
+        if signaler and i % 20 == 0:
+            await signaler(f"🔄 {i}/{len(cibles)}…")
+        await asyncio.sleep(1.5)
+    log.info(f"reset des tickets de {guild.name} : {bilan}")
+    return bilan
+
+
 def _bot_principal():
     """Le bot PRINCIPAL (celui qui cree les salons des VA), ou None."""
     import sys as _sys
@@ -1883,8 +1969,11 @@ async def create_us_tickets(guild, member, bot=None):
     return created, errors
 
 
-async def setup_va_ticket(guild, member, bot=None):
+async def setup_va_ticket(guild, member, bot=None, isoler=True):
     """Cree le ticket d'un VA: assignation identite + salon + intro.
+
+    `isoler` faux : pas de passe d'isolation (un refus de vue par salon du
+    serveur, ~220 appels) -- reset_tickets s'en passe, ses VA sont deja isoles.
 
     Retourne (channel, error_message_or_None).
     Reutilise une assignation existante si elle existe.
@@ -2049,7 +2138,8 @@ async def setup_va_ticket(guild, member, bot=None):
 
     # Isole le VA (cache tout sauf ticket + salons d'identité + salons d'aide)
     # et grant les salons d'aide.
-    await _isolate_va_and_grant(guild, member, identity, channel.id)
+    if isoler:
+        await _isolate_va_and_grant(guild, member, identity, channel.id)
 
     # Donne acces aux salons de l'identite (general/banger/exemple-compte)
     try:

@@ -2008,6 +2008,59 @@ class Admin(commands.Cog):
                 ephemeral=True,
             )
 
+    @app_commands.command(
+        name="resettickets",
+        description="[ADMIN] Serveur FR : ticket neuf + onboarding pour chaque VA (anciens archivés, rien supprimé)")
+    @app_commands.describe(confirmer="True pour lancer ; sans, la commande dit seulement combien de tickets")
+    async def resettickets(self, interaction: discord.Interaction, confirmer: bool = False):
+        if not await self.require_admin(interaction):
+            return
+        from cogs.outils import serveur_outils
+        from cogs.welcome import _bot_principal, load_users, reset_tickets
+        if not serveur_outils(interaction.guild):
+            await interaction.response.send_message(
+                "Seulement sur le serveur FR (Va IG).", ephemeral=True)
+            return
+        n = sum(1 for e in (load_users() or {}).values()
+                if isinstance(e, dict) and e.get("channel_id")
+                and interaction.guild.get_channel(int(e["channel_id"])) is not None)
+        if not confirmer:
+            await interaction.response.send_message(
+                f"🔄 **{n} ticket(s)** seraient refaits : l'ancien archivé (caché aux VA, "
+                "gardé pour le staff), un neuf avec le message d'onboarding. "
+                "Relance avec `confirmer: True`.", ephemeral=True)
+            return
+        principal = _bot_principal()
+        g = principal.get_guild(interaction.guild.id) if principal is not None else None
+        if g is None:
+            await interaction.response.send_message(
+                "Bot principal indisponible.", ephemeral=True)
+            return
+        salon = interaction.channel
+        await interaction.response.send_message(
+            f"🔄 Reset lancé ({n} tickets) — la progression arrive ici.", ephemeral=True)
+
+        async def signaler(texte):
+            try:
+                await salon.send(texte)
+            except Exception:                                 # noqa: BLE001
+                pass
+
+        async def _tache():
+            try:
+                b = await reset_tickets(g, principal, signaler)
+                lignes = [f"✅ Reset fini : **{b['faits']}** ticket(s) neuf(s)."]
+                if b["archives_ratees"]:
+                    lignes.append(f"⚠️ Non archivés (gardés tels quels) : {', '.join(b['archives_ratees'][:20])}")
+                if b["tickets_rates"]:
+                    lignes.append(f"⚠️ Archivés SANS ticket neuf : {', '.join(b['tickets_rates'][:20])}")
+                await signaler("\n".join(lignes))
+            except Exception as x:                            # noqa: BLE001
+                await signaler(f"❌ Reset interrompu : {type(x).__name__}: {x}")
+
+        # la boucle du bot principal : c'est lui qui cree les salons
+        principal.loop.create_task(_tache())
+
     @app_commands.command(name="adduser", description="Crée un salon privé pour un VA + onboarding (option: identité forcée)")
     @app_commands.describe(
         user="Le VA à onboarder",
