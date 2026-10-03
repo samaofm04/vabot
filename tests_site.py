@@ -34509,6 +34509,27 @@ try:
     check("un lien jouable n est PAS repete dans l encadre",
           "youtu.be" not in _od.encadre_de(_ey, 0)["description"]
           and "drive.google.com" in _od.encadre_de(_ey, 0)["description"])
+    # --- Drive : on ne peut pas le jouer dans Discord, on le rend lisible en ligne
+    check("l identifiant Drive est reconnu dans ses trois ecritures",
+          _od.drive_id("https://drive.google.com/file/d/1AbC_dEf-GhIjk/view?usp=sharing")
+          == _od.drive_id("https://drive.google.com/open?id=1AbC_dEf-GhIjk")
+          == _od.drive_id("https://drive.google.com/uc?export=download&id=1AbC_dEf-GhIjk")
+          == "1AbC_dEf-GhIjk")
+    check("ce qui n est pas Drive n est pas pris pour du Drive",
+          _od.drive_id("https://youtu.be/abc") == ""
+          and _od.drive_id("https://discord.com/channels/1/2/3") == "")
+    _edr = {"id": "s1", "title": "T", "description": "Fais ceci", "media": [
+        {"id": "m1", "kind": "link",
+         "name": "https://drive.google.com/file/d/1AbC_dEf-GhIjk/view"}]}
+    _ddr = _od.encadre_de(_edr, 0)["description"]
+    check("un Drive donne DEUX gestes : regarder en ligne, et telecharger",
+          "▶️ [Regarder" in _ddr and "⬇️ [Télécharger" in _ddr)
+    check("regarder ne telecharge pas : c est le lecteur de Drive",
+          "/file/d/1AbC_dEf-GhIjk/view" in _ddr
+          and "uc?export=download&id=1AbC_dEf-GhIjk" in _ddr)
+    check("l adresse Drive n est pas repetee en plus des deux gestes",
+          _ddr.count("1AbC_dEf-GhIjk") == 2 and "📎 https://drive" not in _ddr)
+
     check("la taille maximale est demandee a Discord, pas codee en dur",
           "premium_tier" in _plO("onboarding_discord.py").read_text(encoding="utf-8"))
     check("une video trop lourde est compressee, pas refusee",

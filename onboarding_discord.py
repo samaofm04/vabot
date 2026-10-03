@@ -269,6 +269,26 @@ LECTEURS = ("youtube.com/watch", "youtu.be/", "youtube.com/shorts",
             "vimeo.com/", "streamable.com/", "clips.twitch.tv/", "twitch.tv/videos/")
 
 
+# Google Drive ne se joue PAS dans Discord — aucun moyen de l'y forcer. Mais
+# une adresse Drive brute ne dit pas ce qu'elle fait : on la coupe en deux
+# gestes nommes, regarder et telecharger, pour que le VA sache ou il va.
+import re as _re
+_DRIVE = (_re.compile(r"drive\.google\.com/file/d/([A-Za-z0-9_-]{10,})"),
+          _re.compile(r"drive\.google\.com/open\?id=([A-Za-z0-9_-]{10,})"),
+          _re.compile(r"drive\.google\.com/uc\?[^ ]*id=([A-Za-z0-9_-]{10,})"),
+          _re.compile(r"docs\.google\.com/[^ ]*/d/([A-Za-z0-9_-]{10,})"))
+
+
+def drive_id(url: str) -> str:
+    """L'identifiant du fichier Drive, ou « » si ce n'est pas un lien Drive."""
+    u = str(url or "")
+    for motif in _DRIVE:
+        m = motif.search(u)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def est_lecteur(url: str) -> bool:
     u = str(url or "").lower()
     return any(m in u for m in LECTEURS)
@@ -296,9 +316,31 @@ def corps_de(etape: Dict[str, Any]) -> str:
     jouables = set(lecteurs_de(etape))
     liens = [m.get("name") or m.get("url") for m in (etape.get("media") or [])
              if m.get("kind") == "link" and (m.get("name") or m.get("url"))
-             and (m.get("url") or m.get("name")) not in jouables]
+             and (m.get("url") or m.get("name")) not in jouables
+             # un Drive est rendu plus bas en deux gestes : le repeter ici
+             # aurait donne la meme adresse trois fois
+             and not drive_id(m.get("url") or m.get("name") or "")]
     if liens:
         corps = (corps + "\n\n" if corps else "") + "\n".join("📎 " + str(l) for l in liens)
+    # un lien Drive devient deux gestes nommes
+    drives = []
+    for m in (etape.get("media") or []):
+        if m.get("kind") != "link":
+            continue
+        u = m.get("url") or m.get("name") or ""
+        ident = drive_id(u)
+        if ident:
+            drives.append((str(m.get("name") or "la vidéo"), ident))
+    if drives:
+        bloc = []
+        for nom, ident in drives:
+            nom_court = nom if not nom.startswith("http") else "la vidéo"
+            bloc.append(
+                f"▶️ [Regarder {nom_court}](https://drive.google.com/file/d/{ident}/view)"
+                f"  ·  ⬇️ [Télécharger]"
+                f"(https://drive.google.com/uc?export=download&id={ident})")
+        corps = (corps + "\n\n" if corps else "") + "\n".join(bloc)
+
     tel = telechargements_de(etape)
     if tel:
         corps = (corps + "\n\n" if corps else "") + "\n".join(
