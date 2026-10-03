@@ -523,13 +523,22 @@ def _identity_of_channel(ch_name):
     return None
 
 
+def _salon_archive(ch) -> bool:
+    """Un salon range dans une categorie d'archives (« 🗄️ Archives salons »,
+    « 🗄️ Archives tickets »...). Va IG, 03/10/2026 : les general-<model> et
+    exemple-compte-<model> y ont ete archives, caches aux VA ; l'entretien des
+    10 minutes, qui les reconnait a leur nom, leur redonnait l'acces."""
+    cat = getattr(ch, "category", None)
+    return cat is not None and "archives" in str(getattr(cat, "name", "")).lower()
+
+
 def find_identity_channels(guild, identity):
     """Tous les salons par-identité (general/banger/exemple-compte) d'une identité."""
     target = (identity or "").strip().lower()
     if not target:
         return []
     return [ch for ch in getattr(guild, "text_channels", [])
-            if _identity_of_channel(ch.name) == target]
+            if _identity_of_channel(ch.name) == target and not _salon_archive(ch)]
 
 
 def find_general_channel_for_identity(guild, identity):
@@ -539,7 +548,7 @@ def find_general_channel_for_identity(guild, identity):
         return None
     for ch in guild.text_channels:
         norm = ch.name.lower().replace("é", "e").replace("è", "e")
-        if not norm.startswith("general-"):
+        if not norm.startswith("general-") or _salon_archive(ch):
             continue
         suffix = norm[len("general-"):].strip()
         if suffix == target:
@@ -574,7 +583,7 @@ async def sync_general_channel_access(guild, member, identity):
     revoked = 0
     for ch in guild.text_channels:
         suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
-        if suffix is None:
+        if suffix is None or _salon_archive(ch):
             continue
         try:
             cur = ch.overwrites_for(member)
@@ -2692,8 +2701,8 @@ class Welcome(commands.Cog):
 
                 for ch in guild.text_channels:
                     suffix = _identity_of_channel(ch.name)  # general-/banger-/exemple-compte-
-                    if suffix is None:
-                        continue
+                    if suffix is None or _salon_archive(ch):
+                        continue          # archive : plus de droits a redonner
 
                     # 1) @everyone : cache le salon par defaut
                     everyone = guild.default_role
