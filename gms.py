@@ -431,6 +431,10 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
             stripped = payload.strip()
             if stripped.lower().startswith("error ") or stripped.lower().startswith("error("):
                 return {"ok": False, "error": stripped[:500]}
+            # un outil renomme chez GetMySocial : sans ca, « Unknown tool:
+            # delete_link » passait pour une suppression reussie
+            if stripped.lower().startswith("unknown tool"):
+                return {"ok": False, "error": f"{stripped[:200]} (outil absent chez GetMySocial)"}
         return {"ok": True, "data": payload}
     return {"ok": True, "data": result}
 
@@ -1224,12 +1228,27 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
 
 
 def delete_link(link_id: str) -> Dict[str, Any]:
-    res = _call_tool("delete_link", {"link_id": link_id})
-    if res.get("ok"):
-        try:
-            invalidate_grouping_cache()  # sinon le lien supprimé reste en cache
-        except Exception:
-            pass
+    """Supprime UN lien -- definitif, GetMySocial n'a pas de corbeille.
+
+    L'outil s'appelle delete_links (par lots, `ids`). L'ancien « delete_link »
+    n'existe plus : GetMySocial repondait « Unknown tool » et ca passait pour
+    un succes -- /resetlien et la page des liens annoncaient des suppressions
+    qui n'avaient pas lieu (constate le 03/10/2026). Le succes se lit dans
+    `deleted` : un id refuse n'echoue pas l'appel, il part dans `failed`."""
+    res = _call_tool("delete_links", {"ids": [link_id]})
+    if not res.get("ok"):
+        return res
+    d = res.get("data") if isinstance(res.get("data"), dict) else {}
+    if link_id not in (d.get("deleted") or []):
+        rate = next((f for f in d.get("failed") or []
+                     if isinstance(f, dict) and f.get("id") == link_id), {})
+        err = rate.get("error") if isinstance(rate.get("error"), dict) else {}
+        return {"ok": False, "data": d,
+                "error": f"non supprimé : {err.get('message') or err.get('code') or d or 'réponse vide'}"}
+    try:
+        invalidate_grouping_cache()  # sinon le lien supprimé reste en cache
+    except Exception:
+        pass
     return res
 
 

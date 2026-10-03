@@ -6730,18 +6730,32 @@ class UserCog(commands.Cog):
             msg += "\n_(leurs trackings MyPuls restent : ils ne s'effacent pas)_"
         else:
             msg += "\n(aucun lien FR au registre)"
+        # ses liens retrouves A LEUR NOM dans GetMySocial, registre ou pas : le
+        # 03/10, celui de Mario n'etait plus au registre et rien n'etait supprime
+        membre = interaction.guild.get_member(uid) if interaction.guild else None
+        pseudo = (getattr(membre, "name", "") or "").lower()
+        vus = {e.get("link_id") for e in retires}
+        try:
+            hors_registre = [l for l in await asyncio.to_thread(liens_fr.liens_gms_de, pseudo)
+                             if l.get("id") and l.get("id") not in vus]
+        except Exception as e:                               # noqa: BLE001
+            hors_registre = []
+            msg += f"\n⚠️ Recherche GetMySocial par nom impossible : {e}"
+        if hors_registre:
+            msg += "\n🔎 Hors registre, trouvé(s) à son nom : " + ", ".join(
+                f"{l.get('display_name')} (getmysocial.com/{l.get('shortcode')})" for l in hors_registre)
+        a_supprimer = ([(e.get("link_id"), e.get("display_name")) for e in retires if e.get("link_id")]
+                       + [(l["id"], l.get("display_name")) for l in hors_registre])
         if supprimer_gms or regenerer:
             try:
                 import gms
                 faits, rates = 0, []
-                for e in retires:
-                    if not e.get("link_id"):
-                        continue
-                    r = await asyncio.to_thread(gms.delete_link, e["link_id"])
+                for lid, nom in a_supprimer:
+                    r = await asyncio.to_thread(gms.delete_link, lid)
                     if r.get("ok"):
                         faits += 1
                     else:
-                        rates.append(f"{e.get('display_name')} ({r.get('error')})")
+                        rates.append(f"{nom} ({r.get('error')})")
                 msg += f"\n🗑️ **{faits}** lien(s) GetMySocial supprimé(s)."
                 if rates:
                     msg += "\n⚠️ Non supprimé(s) : " + ", ".join(rates)
@@ -6752,11 +6766,11 @@ class UserCog(commands.Cog):
             # les models dont un lien vient d'etre retire, sinon celle de sa fiche
             # passees par _model_lien_fr AVANT de dedoublonner : une model
             # dont il n'a plus le role retombe sur une autre, deja refaite
-            membre = interaction.guild.get_member(uid) if interaction.guild else None
             models = list(dict.fromkeys(
                 _model_lien_fr(membre, m)
                 for m in ([e.get("model") for e in retires if e.get("model")]
-                          or [get_user_identity(uid)])))
+                          + [liens_fr.model_du_nom(l.get("display_name")) for l in hors_registre]
+                          or [get_user_identity(uid)]) if m))
             for model in models:
                 await _generer_lien_fr(interaction, uid, model)
 

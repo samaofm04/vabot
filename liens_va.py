@@ -113,14 +113,14 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
     import mypuls
     cid = int(creator_id or config().get("creator_id") or 0)
     if not cid:
-        return {"ok": False, "erreur": "aucune créatrice choisie"}
+        return {"ok": False, "refuse": True, "erreur": "aucune créatrice choisie"}
     nom = str(nom or "").strip()[:60]
     if not nom:
-        return {"ok": False, "erreur": "nom vide"}
+        return {"ok": False, "refuse": True, "erreur": "nom vide"}
 
     s = mypuls._make_session()
     if s is None:
-        return {"ok": False, "erreur": "session MyPuls indisponible (cookies)"}
+        return {"ok": False, "refuse": True, "erreur": "session MyPuls indisponible (cookies)"}
     try:
         s.get(f"{mypuls.BASE_URL}/switch-creator/{cid}?from=app_pushs",
               timeout=mypuls.TIMEOUT, allow_redirects=True)
@@ -141,15 +141,15 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
             # LA RAISON, pas seulement le code : le tracking MYM d'Amelia
             # revenait « HTTP 400 » (03/10/2026) sans rien pour savoir quoi
             # changer, et la session MyPuls n'existe que sur le VPS.
-            return {"ok": False, "erreur": f"MyPuls a refusé (HTTP {r.status_code}) : "
-                                           f"{_raison_refus(r)}"}
+            return {"ok": False, "refuse": True,
+                    "erreur": f"MyPuls a refusé (HTTP {r.status_code}) : {_raison_refus(r)}"}
         try:
             rep = r.json()
         except Exception:
             return {"ok": False, "erreur": "MyPuls a répondu autre chose que du JSON "
                                            "(session expirée ?)"}
         if not rep.get("success"):
-            return {"ok": False, "erreur": str(rep.get("message") or "refus MyPuls")[:140]}
+            return {"ok": False, "refuse": True, "erreur": str(rep.get("message") or "refus MyPuls")[:140]}
 
         # MyPuls ne rend pas toujours le lien créé : on relit la page et on
         # prend celui qui n'y était pas. Deviner le code (« le dernier + 1 »)
@@ -158,8 +158,12 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
         neufs = [l for l in _tracking_de(s, page2.text) if l["code"] not in avant]
         vise = [l for l in neufs if l["nom"] == nom] or neufs
         if not vise:
-            return {"ok": False, "erreur": "créé, mais introuvable à la relecture — "
-                                           "à vérifier à la main dans MyPuls"}
+            # l'adresse dans la reponse de creation, si MyPuls la donne
+            dedans = _adresse_dans(rep)
+            if dedans:
+                return {"ok": True, "url": dedans, "code": "", "erreur": ""}
+            return {"ok": False, "reponse": rep,
+                    "erreur": "créé, mais introuvable à la relecture — à vérifier à la main dans MyPuls"}
         return {"ok": True, "url": vise[0]["url"], "code": vise[0]["code"], "erreur": ""}
     except Exception as e:
         return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
@@ -182,8 +186,23 @@ def _raison_refus(r) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r.text or ""))[:300] or "réponse vide"
 
 
+def _adresse_dans(o) -> str:
+    """Une adresse OnlyFans / MYM n'importe ou dans une reponse JSON."""
+    if isinstance(o, str):
+        return o if re.match(r"https?://(www\.)?(onlyfans\.com|mym\.(fans|me))/", o) else ""
+    vals = o.values() if isinstance(o, dict) else (o if isinstance(o, list) else [])
+    for v in vals:
+        a = _adresse_dans(v)
+        if a:
+            return a
+    return ""
+
+
 def _tracking_de(session, html: str):
-    """Les tracking links lus dans la page : [{code, nom, url}]."""
+    """Les tracking links lus dans la page : [{code, nom, url}]. Les adresses
+    MYM aussi (le 03/10/2026, un tracking MYM cree etait « introuvable a la
+    relecture » : seules les adresses OnlyFans etaient lues) -- leur code est
+    l'adresse entiere, la comparaison avant/apres ne garde que la nouvelle."""
     out, vus = [], set()
     for m in re.finditer(r'https://onlyfans\.com/([A-Za-z0-9._-]+)/(c\d+)', html):
         code = m.group(2)
@@ -191,6 +210,12 @@ def _tracking_de(session, html: str):
             continue
         vus.add(code)
         out.append({"code": code, "nom": "", "url": m.group(0)})
+    for m in re.finditer(r'https?://(?:www\.)?mym\.(?:fans|me)/[A-Za-z0-9._~/?=&%-]+', html):
+        url = m.group(0).rstrip("/.&?")
+        if url in vus:
+            continue
+        vus.add(url)
+        out.append({"code": url, "nom": "", "url": url})
     return out
 
 

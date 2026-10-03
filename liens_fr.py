@@ -60,8 +60,9 @@ _CACHE_LIENS: Dict[str, Any] = {"t": 0.0, "liens": []}
 #: mets un truc sans limite, comme ca je peux check » -- marioofm, son compte
 #: de test VA (role Amelia sur Va IG). Chaque essai est REEL : trackings MyPuls
 #: (ils ne s'effacent pas) et lien GetMySocial, gardes dans « essais » du
-#: registre pour le menage.
-SANS_LIMITE = {479005370438778891}
+#: registre pour le menage. Son compte principal 7🎰 (seven_ofm) aussi : il
+#: teste depuis celui-ci et tombait sur « demande deja en attente » (03/10).
+SANS_LIMITE = {479005370438778891, 402069419393679370}
 
 
 def sans_limite(uid) -> bool:
@@ -152,6 +153,34 @@ def _numero(model: str) -> int:
     return max([1] + pris) + 1
 
 
+def model_du_nom(display_name: str) -> str:
+    """« Amelia VA 3 @pseudo » -> « amelia » ; "" si ce n'est pas un nom de
+    lien de VA FR."""
+    m = re.match(r"^\s*(\S+) VA \d+ @", str(display_name or ""))
+    if not m:
+        return ""
+    return next((k for k, c in MODELS.items() if c["nom"].lower() == m.group(1).lower()), "")
+
+
+def liens_gms_de(pseudo: str, model: str = "", force: bool = True) -> List[Dict[str, Any]]:
+    """Les liens FR d'un VA retrouves A LEUR NOM dans l'equipe (« Amelia VA 3
+    @pseudo ») : filet quand le registre ne les a pas. Le 03/10/2026,
+    /resetlien n'y a pas trouve le lien de Mario cree une demi-heure plus tot
+    (cause inconnue, le registre n'est lisible que sur le VPS)."""
+    pseudo = str(pseudo or "").strip().lower()
+    if not pseudo:
+        return []
+    out = []
+    for l in _liens_equipe(force):
+        dn = str(l.get("display_name") or "").strip()
+        if not dn.lower().endswith(f" @{pseudo}"):
+            continue
+        mod = model_du_nom(dn)
+        if mod and (not model or mod == model):
+            out.append(l)
+    return out
+
+
 def retirer(uid) -> List[Dict[str, Any]]:
     """/resetlien (serveur FR) : sort les liens de ce VA du registre « liens »
     -- sa prochaine demande en refera un -- et les garde dans « retires » :
@@ -231,18 +260,50 @@ def creer_tracking(nom: str, creator_id: int) -> Dict[str, Any]:
     r = liens_va.creer_tracking(nom, creator_id)
     if r.get("ok") and r.get("url"):
         return _verifie_createrice(r, creator_id)
-    # Cree mais pas relu dans la page (MYM : son adresse n'est pas une adresse
-    # OnlyFans) : l'API publique liste toutes les plateformes.
+    if r.get("refuse"):
+        return r                        # refuse avant creation : rien n'existe
+    # Cree mais pas relu dans la page : l'API, TOUTES ses pages (au-dela des
+    # 500 premiers trackings, le plus recent n'est pas dans la premiere), et
+    # l'adresse quel que soit le nom de son champ.
+    vu = None
     try:
-        import mypuls
         for _ in range(3):
-            for l in mypuls.api_tracking_links(force=True) or []:
-                if str(l.get("creator_id")) == str(creator_id) and l.get("nom") == nom and l.get("url"):
-                    return {"ok": True, "url": l["url"], "code": l.get("code"), "erreur": ""}
+            url, vu = _relire_api(nom, creator_id)
+            if url:
+                return {"ok": True, "url": url, "code": (vu or {}).get("code"), "erreur": ""}
             time.sleep(3)
     except Exception as e:                                   # noqa: BLE001
-        return {"ok": False, "erreur": f"relecture MyPuls : {type(e).__name__}: {e}"}
-    return {"ok": False, "erreur": r.get("erreur") or "créé ? introuvable à la relecture — à vérifier dans MyPuls"}
+        return {"ok": False, "erreur": f"créé, relecture MyPuls impossible : {type(e).__name__}: {e}"}
+    # Le diagnostic, pour corriger sans acces au serveur : ce que MyPuls a
+    # repondu a la creation, et ce que l'API en dit.
+    diag = (f"réponse : {json.dumps(r.get('reponse'), ensure_ascii=False)[:200]}" if r.get("reponse")
+            else f"{r.get('erreur')}")
+    diag += (f" · API : {json.dumps(vu, ensure_ascii=False)[:250]}" if vu
+             else " · absent de l'API")
+    return {"ok": False, "erreur": f"créé, mais adresse introuvable ({diag}) — à vérifier dans MyPuls"}
+
+
+def _relire_api(nom: str, creator_id: int):
+    """(adresse, ligne brute) du tracking `nom` de cette createrice dans l'API
+    MyPuls, page apres page ; ("", None) s'il n'y est pas."""
+    import mypuls
+    for page in range(1, 6):
+        res = mypuls.api_get("tracking-links", {"per_page": 500, "page": page})
+        if not res.get("ok"):
+            raise RuntimeError(str(res.get("error"))[:150])
+        d = res.get("data")
+        items = d if isinstance(d, list) else None
+        if items is None and isinstance(d, dict):
+            inner = d.get("data")
+            items = inner.get("data") if isinstance(inner, dict) else inner
+        items = [it for it in (items or []) if isinstance(it, dict)]
+        for it in items:
+            if str(it.get("creator_id")) == str(creator_id) and str(it.get("name") or "").strip() == nom:
+                import liens_va
+                return (str(it.get("url") or "") or liens_va._adresse_dans(it)), it
+        if len(items) < 500:
+            break
+    return "", None
 
 
 def _verifie_createrice(r: Dict[str, Any], creator_id: int) -> Dict[str, Any]:
@@ -278,6 +339,24 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
         deja = lien_de(uid, model)
         if deja and deja.get("public_url") and not sans_limite(uid):
             return {"ok": True, "deja": True, **deja}
+        if not sans_limite(uid):
+            # absent du registre mais present dans GetMySocial a son nom : on le
+            # reprend (et le registre est repare) au lieu d'un doublon -- avec
+            # des trackings MyPuls en plus, qui ne s'effacent pas
+            trouve = next(iter(liens_gms_de(pseudo, model, force=False)), None)
+            if trouve and trouve.get("shortcode"):
+                entree = {"pseudo": pseudo, "model": model, "link_id": str(trouve.get("id") or ""),
+                          "shortcode": trouve["shortcode"], "display_name": trouve.get("display_name"),
+                          "public_url": f"{gms.PUBLIC_LINK_DOMAIN}/{trouve['shortcode']}",
+                          "numero": int((re.search(r" VA (\d+) @", str(trouve.get("display_name"))) or [0, 0])[1]),
+                          "repris": "trouvé à son nom dans GetMySocial, absent du registre",
+                          "par": str(par or ""), "quand": int(time.time())}
+                d = _etat()
+                d.setdefault("liens", {})[f"{int(uid)}:{model}"] = entree
+                ETAT.parent.mkdir(parents=True, exist_ok=True)
+                safe_json.write(ETAT, d, indent=1)
+                print(f"[liens_fr] {entree['display_name']} repris de GetMySocial (absent du registre)", flush=True)
+                return {"ok": True, "deja": True, **entree}
         gabarit = lien_de_base(model)
         if not gabarit:
             return {"ok": False, "erreur": f"pas de lien de base « {model}_bby » ({cfg['nom']} 1) "
