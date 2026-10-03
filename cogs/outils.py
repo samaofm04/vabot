@@ -31,6 +31,11 @@ from discord.ext import commands, tasks
 SERVEURS = frozenset({1505418484052394004})
 
 CATEGORIE = "🧰 Outils"
+#: Les salons communs (categorie Outils) : plus crees ni entretenus depuis que
+#: les outils sont sur la ligne du ticket (proprietaire, 03/10/2026 : « ca du
+#: coup pas besoin d'avoir »). Faux : le bot ne recree plus rien ; des salons
+#: deja la continuent de marcher tant qu'on ne les supprime pas.
+SALONS_COMMUNS = False
 #: (cle, nom a la creation). La cle est le nom sans decor : le proprietaire
 #: renomme les salons a la main (« ⬇️・all-download »), un salon renomme doit
 #: rester reconnu.
@@ -254,10 +259,11 @@ class Outils(commands.Cog):
         for guilde in list(getattr(self.bot, "guilds", []) or []):
             if not _serveur_outils(guilde):
                 continue
-            try:
-                await self.assurer(guilde)
-            except Exception as e:                           # noqa: BLE001
-                print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
+            if SALONS_COMMUNS:
+                try:
+                    await self.assurer(guilde)
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[outils] {getattr(guilde, 'name', '?')} : {type(e).__name__}: {e}")
             # un role de model a chaque VA qui a une fiche et aucun role
             # (fiches faites par /adduser, VA d'avant les roles)
             try:
