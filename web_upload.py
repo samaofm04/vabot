@@ -37275,6 +37275,10 @@ def _render_jailbreak_html() -> str:
     stats = jb.stats()
     import insta_scraper as _ig_health
     collector_paused = bool(_ig_health.rapidapi_pause())
+    # Bouton « Discord » de la barre d'outils : allume, seuls les VA du serveur
+    # Va IG. On filtre ici les DONNEES (une ligne) ; le reste se pose sur le
+    # HTML produit -- voir _jb_option_discord, et pourquoi pas ici.
+    identities, all_accounts, stats = _jb_dc_filtrer(identities, all_accounts, stats)
 
     # Accountability : on charge UNE fois les données d'activité, puis on compte
     # par (identité, VA) — surtout PAS par VA global : un même VA peut gérer des
@@ -40531,6 +40535,1182 @@ async function obImportDiscord(){
 """
 
     return header_html + cards_html + add_step_html + js
+
+
+# === OPTION « DISCORD » DE « COMPTES PAR IDENTITE » ==========================
+#
+# Un bouton « Discord » dans la barre d'outils de la page. Allume : seuls les
+# VA du serveur Discord Va IG -- leurs fiches, les comptes « Sans VA » qu'ils
+# ont declares, une carte en lecture seule pour ceux qui n'ont pas de fiche, et
+# un bandeau qui compte TOUT ce qui est cache. Eteint : la page de tous les
+# jours, avec le logo Discord a cote de chaque fiche rattachee. Pas d'onglet a
+# part : « ne cree pas une copie, ajoute une option » (proprietaire, 03/10/2026).
+#
+# POURQUOI UN EMBALLAGE PLUTOT QUE DES LIGNES DANS LE RENDU. Le VPS reapplique
+# apres chaque deploiement des patchs locaux ancres sur les lignes de
+# _render_jailbreak_html (en-tete, barre d'outils, lignes de compte, modales,
+# JS, return) ; un patch qui ne s'applique plus est ignore EN SILENCE. Une
+# premiere version qui ajoutait ses morceaux dans ces lignes en faisait tomber
+# 22 sur 72. Le rendu ne recoit donc qu'UNE ligne (apres collector_paused) qui
+# filtre les DONNEES ; le bouton, les logos, le bandeau et les cartes se posent
+# sur le HTML produit, sur des reperes presents dans la page du depot ET dans
+# celle des patchs, et chaque repere manquant est dit dans le journal.
+#
+# La portee voyage dans un cookie de session (_JB_DC_COOKIE) pose par le
+# bouton : le chargement differe, le rafraichissement doux (jbSoftRefresh) et
+# un rechargement le renvoient d'eux-memes, sans toucher a leur JS.
+
+import contextvars as _cv_dc
+import functools as _ft_dc
+
+#: Le meme identifiant que verif_discord.VA_IG_ID et cogs/outils.SERVEURS. Par
+#: ID : le nom du serveur FR s'ecrit de deux facons dans le depot.
+_VA_IG_GUILD_ID = 1505418484052394004
+
+_JB_DC_COOKIE = "jb_scope"
+
+#: Le logo Discord (simple-icons). Le trace suit `currentColor` : la couleur
+#: vient d'une classe, et donc du theme.
+_DISCORD_LOGO_D = (
+    "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648"
+    "-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00"
+    "-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799"
+    ".0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00"
+    ".0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495"
+    "-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105"
+    "c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 "
+    "0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 "
+    "1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004"
+    "-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857"
+    "-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 "
+    "2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 "
+    "1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"
+)
+
+#: Le trace UNE fois par page, rappele par <use> : une centaine de fiches avec
+#: deux logos chacune auraient ajoute ~250 Ko de chemins. Pose en tete du
+#: fragment, hors de #jb-sections-wrap / #jb-main-pane que jbSoftRefresh
+#: remplace.
+_JB_DC_SYMBOLE = (
+    "<svg class='jb-dc-defs' aria-hidden='true'>"
+    "<symbol id='jb-dc-logo' viewBox='0 0 24 24'>"
+    "<path fill='currentColor' d='" + _DISCORD_LOGO_D + "'/></symbol></svg>"
+)
+
+#: Le logo pose a cote d'une fiche (liste de gauche, en-tete de la fiche).
+_JB_DC_ICO = (
+    "<span class='jb-dc-ico' title='VA du serveur Discord Va IG'>"
+    "<svg viewBox='0 0 24 24' aria-hidden='true' focusable='false'>"
+    "<use href='#jb-dc-logo'/></svg></span>"
+)
+
+
+def _handle_va_discord(raw) -> str:
+    """Le handle Instagram normalise d'une saisie Discord, ou ''.
+
+    « Mes comptes » accepte « @Pseudo », « pseudo » ou le lien complet ; des
+    entrees anciennes portent encore le lien. Sans _pseudo_instagram, un lien
+    devenait « httpsinstagram.comxxx » et ne retrouvait jamais son compte.
+    """
+    if not isinstance(raw, str):
+        return ""
+    p = _pseudo_instagram(raw)
+    return _normalize_insta_handle(p) if p else ""
+
+
+def _va_ig_vue_discord() -> tuple:
+    """(membres, salons, profils) du serveur Va IG, ou (None, None, None).
+
+    membres = {uid: member.name} ; salons = {id de salon} ; profils =
+    {uid: {nom, avatar}}. None veut dire « on ne sait pas » (bot pas pret,
+    serveur invisible pour lui), PAS « personne » : le bandeau le dit.
+
+    SEUL member.name sert au rattachement : c'est ce que « Mes comptes »
+    ecrit sur la fiche, et ce que bangers.comptes_admis compare. Le nom
+    affiche et le surnom, melanges au pseudo, rattachaient la fiche d'une
+    « Sarah » absente du serveur au membre « csarah » qui s'affiche Sarah. Ils
+    restent dans profils, pour l'affichage seulement.
+    """
+    if not _discord_observable():
+        return (None, None, None)
+    try:
+        g = _BOT_REF.get_guild(_VA_IG_GUILD_ID)
+    except Exception:
+        g = None
+    if g is None:
+        return (None, None, None)
+    membres, profils, salons = {}, {}, set()
+    try:
+        for m in list(getattr(g, "members", None) or []):
+            if getattr(m, "bot", False):
+                continue
+            uid = str(m.id)
+            membres[uid] = str(getattr(m, "name", "") or "")
+            try:
+                av = _avatar_petit(str(m.display_avatar.url))
+            except Exception:
+                av = ""
+            profils[uid] = {"nom": getattr(m, "display_name", "") or getattr(m, "name", "") or "",
+                            "avatar": av}
+    except Exception as e:
+        log.warning(f"[va-discord] membres de Va IG illisibles : {e}")
+        return (None, None, None)
+    try:
+        for c in list(getattr(g, "channels", None) or []):
+            salons.add(str(c.id))
+    except Exception:
+        pass
+    if not membres and not salons:
+        # Cache de guilde vide (reconnexion) : « personne n'est membre »
+        # ecarterait tous les VA en silence. On ne sait pas -> repli.
+        return (None, None, None)
+    return (membres, salons, profils)
+
+
+def _rattachement_va_discord(users, jb_data, membres=None, salons=None,
+                             profils=None, marche=None) -> dict:
+    """Qui est un VA du serveur Discord Va IG, et quelles fiches de « Comptes
+    par identite » (jailbreak.json) lui reviennent.
+
+    Fonction PURE (tout arrive en argument) : le filtre de l'option Discord et
+    le logo pose a cote des fiches en dependent tous les deux, et deux regles
+    separees finiraient par diverger.
+
+    Les VA :
+      - ceux de users.json (bouton « Mes comptes » : insta_accounts) qui sont
+        membres de Va IG, ou dont le salon (channel_id) est un salon de Va IG
+        (cache de membres incomplet). Sans le bot : ceux dont l'identite est
+        du marche FR (serveur_verifie=False, le bandeau le dit) ;
+      - les membres de Va IG que le pseudo Discord d'une fiche (ou, faute de
+        pseudo, son nom) designe, meme absents de users.json : « Mes
+        comptes » du serveur FR ecrit la fiche directement
+        (vas[].discord_username = member.name), sans users.json.
+    Le rattachement d'une fiche :
+      1. par handle : un compte declare dans users.json est sous cette fiche ;
+      2. par pseudo (bot pret) : vas[].discord_username EST le member.name
+         d'un membre (casse ignoree, sans @). Rien d'approche : ni nom
+         affiche, ni sans ponctuation, ni sans suffixe numerique -- chacun
+         rattachait la fiche d'un VA absent du serveur a un autre membre ;
+      3. par nom (bot pret) : fiche SANS pseudo (explicite, ou implicite =
+         nom porte par les comptes) dont le nom EST le member.name d'un
+         membre. « Mes comptes » nomme la fiche d'apres le pseudo, mais
+         add_va refuse un nom deja pris : les comptes s'y rangent sans que le
+         pseudo soit ecrit. Le bandeau les compte (pseudo a poser).
+    2 et 3 sont la regle de bangers.comptes_admis (origin/main d062992) :
+    la page et les salons banger disent le meme « VA Discord ». Une fiche dont
+    le pseudo est renseigne et DIFFERENT reste jugee sur ce pseudo-la.
+    Rien n'est ecarte en silence : chaque exclu l'est avec sa raison, chaque
+    handle introuvable est garde, une fiche a plusieurs VA garde ses VA, une
+    fiche dont le pseudo n'est celui d'aucun membre est nommee avec lui.
+    """
+    serveur_verifie = membres is not None or salons is not None
+
+    def _pseudo(x) -> str:
+        return str(x or "").strip().lstrip("@").casefold()
+
+    _m = {}
+    for u, nm in (membres.items() if isinstance(membres, dict) else []):
+        if nm is not None and not isinstance(nm, str):
+            # Forme d'avant (un ensemble de noms) : str() la rendrait
+            # introuvable sans un mot. On refuse, bruyamment.
+            raise TypeError(f"membres[{u!r}] doit etre le member.name (str), pas {type(nm).__name__}")
+        _m[str(u)] = _pseudo(nm)
+    membres = _m
+    par_nom_membre: dict = {}     # member.name (casefold) -> [uid]
+    for u, nm in membres.items():
+        if nm:
+            par_nom_membre.setdefault(nm, []).append(u)
+    salons = {str(s) for s in (salons or ())}
+    profils = profils if isinstance(profils, dict) else {}
+    marche = marche or identity_market
+
+    # 1) Le referentiel : handle -> fiches, fiche -> pseudo Discord
+    par_handle: dict = {}         # handle -> [(ident_lc, va_lc)] ; va_lc '' = sans VA
+    pseudos: dict = {}            # (ident_lc, va_lc) -> discord_username ecrit sur la fiche
+    noms_fiches: dict = {}        # (ident_lc, va_lc) -> nom affiche
+    for ident, entree in (jb_data.items() if isinstance(jb_data, dict) else []):
+        il = str(ident or "").strip().lower()
+        if not il:
+            continue
+        if isinstance(entree, list):
+            accts, fiches_v = entree, []
+        elif isinstance(entree, dict):
+            accts, fiches_v = (entree.get("accounts") or []), (entree.get("vas") or [])
+        else:
+            continue
+        for v in fiches_v:
+            if isinstance(v, dict):
+                nm = str(v.get("name") or "").strip()
+                du = str(v.get("discord_username") or "").strip()
+            elif isinstance(v, str):
+                nm, du = v.strip(), ""
+            else:
+                continue
+            if not nm:
+                continue
+            cle = (il, nm.lower())
+            noms_fiches.setdefault(cle, nm)
+            if du and cle not in pseudos:
+                pseudos[cle] = du
+        for a in accts:
+            if not isinstance(a, dict):
+                continue
+            h = _normalize_insta_handle(str(a.get("username") or ""))
+            if not h:
+                continue
+            va = str(a.get("va") or "").strip()
+            if va:
+                noms_fiches.setdefault((il, va.lower()), va)
+            lst = par_handle.setdefault(h, [])
+            if (il, va.lower()) not in lst:
+                lst.append((il, va.lower()))
+
+    def _nouveau(u, ident, chan, handles, invalides, source):
+        pr = profils.get(u) if isinstance(profils.get(u), dict) else {}
+        return {"uid": u, "identity": ident, "channel_id": chan, "source": source,
+                "handles": handles, "invalides": invalides,
+                "nom": str(pr.get("nom") or ""), "avatar": str(pr.get("avatar") or ""),
+                "fiches": [], "sans_va": [], "orphelins": [], "via": set()}
+
+    # 2) Les VA de users.json, et ceux qu'on ecarte (avec leur raison)
+    vas: dict = {}
+    exclus = {"hors_va_ig": [], "sans_identite": [], "format_invalide": []}
+    for uid, e in (users.items() if isinstance(users, dict) else []):
+        u = str(uid).strip()
+        if isinstance(e, str):
+            # Ancien format : users.json[uid] = "julia" (identite seule)
+            ident, chan, bruts = e.strip().lower(), "", []
+        elif isinstance(e, dict):
+            ident = str(e.get("identity") or "").strip().lower()
+            chan = str(e.get("channel_id") or "").strip()
+            bruts = e.get("insta_accounts") or []
+            if not isinstance(bruts, list):
+                bruts = [bruts]
+        else:
+            exclus["format_invalide"].append(u)
+            continue
+        if serveur_verifie:
+            if not (u in membres or (chan and chan in salons)):
+                exclus["hors_va_ig"].append(u)
+                continue
+        elif ident and marche(ident) != "fr":
+            exclus["hors_va_ig"].append(u)
+            continue
+        handles, invalides = [], []
+        for x in bruts:
+            h = _handle_va_discord(x)
+            if not h:
+                invalides.append(str(x)[:60])
+            elif h not in handles:
+                handles.append(h)
+        if not serveur_verifie and not ident and not any(
+                marche(il) == "fr" for h in handles for (il, _x) in par_handle.get(h, [])):
+            # Repli sans le bot ET sans identite : rien ne le dit du marche FR.
+            exclus["sans_identite"].append(u)
+            continue
+        # Une entree SANS identite reste candidate : son handle porte sa
+        # fiche, et la fiche porte l'identite. L'ecarter ici perdait le
+        # rattachement d'un membre de Va IG qui n'a fait que « Mes comptes ».
+        vas[u] = _nouveau(u, ident, chan, handles, invalides, "users")
+
+    # 3) Rattachement
+    fiches: dict = {}             # (ident_lc, va_lc) -> [uid]
+    via: dict = {}                # (ident_lc, va_lc) -> {"handle", "pseudo"}
+    handles_sans_va: dict = {}    # (ident_lc, handle) -> [uid]
+    orphelins: dict = {}          # uid -> [handle absent du referentiel]
+
+    def _lier(cle, u, voie):
+        lst = fiches.setdefault(cle, [])
+        if u not in lst:
+            lst.append(u)
+        via.setdefault(cle, set()).add(voie)
+        vas[u]["via"].add(voie)
+        if cle not in vas[u]["fiches"]:
+            vas[u]["fiches"].append(cle)
+
+    for u, v in vas.items():
+        for h in v["handles"]:
+            hits = par_handle.get(h)
+            if not hits:
+                orphelins.setdefault(u, []).append(h)
+                v["orphelins"].append(h)
+                continue
+            for (il, va_lc) in hits:
+                if va_lc:
+                    _lier((il, va_lc), u, "handle")
+                else:
+                    lst = handles_sans_va.setdefault((il, h), [])
+                    if u not in lst:
+                        lst.append(u)
+                    if (il, h) not in v["sans_va"]:
+                        v["sans_va"].append((il, h))
+    pseudos_inconnus: dict = {}   # (ident_lc, va_lc) -> pseudo qu'aucun membre ne porte
+    par_nom: list = []            # fiches rattachees par leur nom (pseudo a poser)
+    if membres:
+        for cle in noms_fiches:
+            du = pseudos.get(cle, "")
+            if du:
+                hits = par_nom_membre.get(_pseudo(du), [])
+                voie = "pseudo"
+                if not hits:
+                    pseudos_inconnus[cle] = du
+            else:
+                hits = par_nom_membre.get(_pseudo(noms_fiches[cle]), [])
+                voie = "nom"
+                if hits:
+                    par_nom.append(cle)
+            for u in hits:
+                if u not in vas:
+                    vas[u] = _nouveau(u, "", "", [], [], "membre")
+                _lier(cle, u, voie)
+
+    # 4) Les VA sans fiche : une carte sous leur identite (celle de users.json,
+    #    a defaut celle des comptes « Sans VA » qu'ils ont declares).
+    sans_fiche: dict = {}
+    for u in list(vas):
+        v = vas[u]
+        if v["fiches"]:
+            continue
+        il = v["identity"] or (v["sans_va"][0][0] if v["sans_va"] else "")
+        if il:
+            v["identite_carte"] = il
+            sans_fiche.setdefault(il, []).append(u)
+        else:
+            exclus["sans_identite"].append(u)
+            v_orph = orphelins.pop(u, None)
+            exclus.setdefault("_handles", {})[u] = list(v_orph or [])
+            del vas[u]
+    identites = ({il for (il, _x) in fiches} | {il for (il, _x) in handles_sans_va}
+                 | set(sans_fiche))
+    return {
+        "vas": vas, "fiches": fiches, "via": via, "noms_fiches": noms_fiches,
+        "handles_sans_va": handles_sans_va, "orphelins": orphelins,
+        "sans_fiche": sans_fiche, "exclus": exclus, "identites": identites,
+        "handles_ref": set(par_handle),
+        "par_handle": sum(1 for v in vas.values() if "handle" in v["via"]),
+        "par_pseudo": sum(1 for v in vas.values() if "pseudo" in v["via"]),
+        "par_nom": sum(1 for v in vas.values() if "nom" in v["via"]),
+        "fiches_par_nom": par_nom, "pseudos_inconnus": pseudos_inconnus,
+        "collisions": {c: us for c, us in fiches.items() if len(us) > 1},
+        "serveur_verifie": serveur_verifie,
+    }
+
+
+def _noms_discord(uids, profils=None) -> dict:
+    """uid -> nom lisible (profil du membre, sinon cache d'utilisateurs du
+    bot), pour que le bandeau nomme les exclus au lieu d'aligner des numeros.
+    Un uid introuvable garde son numero : c'est tout ce qu'on sait."""
+    profils = profils if isinstance(profils, dict) else {}
+    out = {}
+    for u in uids:
+        nom = str((profils.get(u) or {}).get("nom") or "") if isinstance(profils.get(u), dict) else ""
+        if not nom and _BOT_REF is not None:
+            try:
+                usr = _BOT_REF.get_user(int(u))
+                nom = (getattr(usr, "global_name", "") or getattr(usr, "name", "") or "") if usr else ""
+            except Exception:
+                nom = ""
+        out[u] = nom
+    return out
+
+
+#: L'etat d'UN rendu de la page : portee demandee, rattachement, ce que le
+#: filtre a cache. ContextVar : chaque requete Flask a le sien, meme quand
+#: deux pages se rendent en meme temps dans deux fils.
+_JB_DC_ETAT = _cv_dc.ContextVar("jb_dc_etat", default=None)
+
+
+def _jb_dc_comptes(entree) -> tuple:
+    """(comptes, fiches explicites) d'une entree du referentiel, quel que
+    soit son format (liste = ancien format, dict = v2)."""
+    if isinstance(entree, list):
+        return [a for a in entree if isinstance(a, dict)], []
+    if isinstance(entree, dict):
+        return ([a for a in (entree.get("accounts") or []) if isinstance(a, dict)],
+                list(entree.get("vas") or []))
+    return [], []
+
+
+def _jb_dc_filtrer(identities, all_accounts, stats):
+    """Appelee par _render_jailbreak_html sur ses donnees, juste apres leur
+    lecture. Calcule le rattachement Discord (pour le logo, dans les deux
+    portees) et, option allumee, rend (identites, referentiel, compteurs)
+    LIMITES aux VA du serveur Va IG. Les donnees recues ne sont jamais
+    modifiees : jailbreak.list_all() relit le fichier, mais un cache futur
+    serait corrompu en douce."""
+    etat = _JB_DC_ETAT.get()
+    if etat is None:
+        return identities, all_accounts, stats
+    try:
+        membres, salons, profils = _va_ig_vue_discord()
+        rat = _rattachement_va_discord(_load_users(), all_accounts, membres, salons, profils)
+        etat["profils"] = profils or {}
+    except Exception as e:
+        etat["erreur"] = f"{type(e).__name__}: {e}"[:200]
+        log.warning(f"[va-discord] rattachement impossible : {etat['erreur']}")
+        return identities, all_accounts, stats
+    etat["rat"] = rat
+    if not etat.get("discord"):
+        return identities, all_accounts, stats
+
+    fiches, hsv = rat["fiches"], rat["handles_sans_va"]
+    ids_dc = rat["identites"]
+    ids_modeles = {str(i).lower() for i in identities}
+    masquees, sv_masques = [], []
+    acc_f: dict = {}
+    total, ids_avec = 0, set()
+    extra: dict = {}              # ident -> comptes des cartes, en plus des lignes du rendu
+    montres_tous: set = set()     # handles affiches en ligne, toutes identites
+    n_lignes: dict = {}           # ident -> lignes du rendu
+    for i in identities:
+        il = str(i).lower()
+        entree = all_accounts.get(il) if isinstance(all_accounts, dict) else None
+        accts, vas_l = _jb_dc_comptes(entree)
+        garde_vas, vus = [], set()
+        for v in vas_l:
+            nm = (str(v.get("name") or "") if isinstance(v, dict) else str(v or "")).strip()
+            if not nm or nm.lower() in vus:
+                continue
+            vus.add(nm.lower())
+            if (il, nm.lower()) in fiches:
+                garde_vas.append(v)
+            else:
+                masquees.append((il, nm))
+        garde_acc, montres = [], set()
+        for a in accts:
+            va = str(a.get("va") or "").strip()
+            h = _normalize_insta_handle(str(a.get("username") or ""))
+            if va:
+                if (il, va.lower()) in fiches:
+                    garde_acc.append(a)
+                    montres.add(h)
+                elif va.lower() not in vus:      # fiche implicite (nom porte par les comptes)
+                    vus.add(va.lower())
+                    masquees.append((il, va))
+            elif (il, h) in hsv:
+                garde_acc.append(a)
+                montres.add(h)
+            else:
+                sv_masques.append((il, str(a.get("username") or "")))
+        if il not in ids_dc:
+            continue
+        nouv = dict(entree) if isinstance(entree, dict) else {}
+        nouv["accounts"], nouv["vas"] = garde_acc, garde_vas
+        acc_f[il] = nouv
+        montres_tous |= montres
+        n_lignes[il] = len(garde_acc)
+    # Les handles des cartes « sans fiche » deja affiches en ligne (un compte
+    # « Sans VA » qu'il a declare) ne comptent qu'une fois -- y compris sous
+    # UNE AUTRE identite, et d'une carte a l'autre : compares a la seule
+    # identite de la carte, libre.ig (« Sans VA » de julia, declare par un VA
+    # de lola) comptait deux fois dans COMPTES.
+    deja = set(montres_tous)
+    for il in acc_f:
+        sup = set()
+        for u in rat["sans_fiche"].get(il, []):
+            sup |= set(rat["vas"][u]["handles"]) - deja
+        deja |= sup
+        extra[il] = len(sup)
+        n = n_lignes[il] + len(sup)
+        total += n
+        if n:
+            ids_avec.add(il)
+    etat["masquees"], etat["sans_va_masques"] = masquees, sv_masques
+    etat["hors_modeles"] = sorted(ids_dc - ids_modeles)
+    etat["extra_comptes"] = extra
+    # LES COMPTEURS DU HAUT SUR LE MEME PERIMETRE que la liste : sans ca,
+    # « COMPTES » affichait le parc entier au-dessus d'une liste filtree.
+    st = dict(stats) if isinstance(stats, dict) else {}
+    st["total_accounts"], st["identities_with_accounts"] = total, len(ids_avec)
+    return [i for i in identities if str(i).lower() in ids_dc], acc_f, st
+
+
+def _jb_dc_tr(texte: str) -> str:
+    """Le libelle dans la langue de la requete, pour ce que _traduire_html ne
+    traduit pas (attributs data-*) ou ne doit pas traduire partout (mots
+    generiques : i18n_en.VA_DISCORD_LOCAL). Hors requete : le francais."""
+    try:
+        from flask import has_request_context
+        if not has_request_context() or _langue_courante() != "en":
+            return texte
+        import i18n_en as _i18n_dc
+        return (getattr(_i18n_dc, "VA_DISCORD_LOCAL", {}).get(texte)
+                or _i18n_dc.TRADUCTIONS.get(texte) or texte)
+    except Exception:
+        return texte
+
+
+def _jb_dc_nombre(n) -> str:
+    """1234 -> 1.2k, comme les lignes de compte de la page."""
+    try:
+        n = int(n)
+    except Exception:
+        return "—"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
+
+
+def _bandeau_va_discord(rat: dict, etat: dict) -> str:
+    """Le haut de la page, option Discord allumee : ce qui est montre, et
+    surtout ce qui ne l'est pas, avec la raison. Chaque libelle est son propre
+    noeud de texte (_traduire_html compare le noeud ENTIER) ; les nombres
+    sont a cote. Pas d'apostrophe droite dans les infobulles : echappee, elle
+    ne correspondrait plus a la cle de traduction."""
+    vas = rat.get("vas") or {}
+    exclus = rat.get("exclus") or {}
+    noms = etat.get("noms") or {}
+
+    def _nom(u):
+        v = vas.get(u) or {}
+        return v.get("nom") or noms.get(u) or u
+
+    def _pill(cls, nombre, texte, titre=""):
+        t = f" title='{titre}'" if titre else ""
+        return (f"<span class='jb-dc-pill {cls}'{t}><b>{nombre}</b> "
+                f"<span>{texte}</span></span>")
+
+    def _liste(texte, items, n=None):
+        if not items:
+            return ""
+        n = len(items) if n is None else n
+        return (f"<details class='jb-dc-det'><summary><span>{texte}</span> ({n})</summary>"
+                "<ul class='jb-dc-liste'>" + "".join(f"<li>{x}</li>" for x in items)
+                + "</ul></details>")
+
+    n_sf = sum(len(x) for x in (rat.get("sans_fiche") or {}).values())
+    orph = rat.get("orphelins") or {}
+    n_orph = sum(len(x) for x in orph.values())
+    n_ex = sum(len(exclus.get(k) or []) for k in ("hors_va_ig", "sans_identite", "format_invalide"))
+    coll = rat.get("collisions") or {}
+    noms_f = rat.get("noms_fiches") or {}
+    masquees = etat.get("masquees") or []
+    sv_masques = etat.get("sans_va_masques") or []
+    hors_modeles = etat.get("hors_modeles") or []
+
+    pills = [_pill("ok", len(vas), "VA Discord"),
+             _pill("ok", rat.get("par_handle", 0), "rattachés par handle",
+                   "Un compte déclaré sur Discord est sous cette fiche"),
+             _pill("ok", rat.get("par_pseudo", 0), "rattachés par pseudo",
+                   "Le pseudo Discord écrit sur la fiche est celui du membre"),
+             _pill("quiet", n_sf, "sans fiche",
+                   "VA du serveur qu’aucune fiche ne représente : carte en lecture seule")]
+    f_nom = rat.get("fiches_par_nom") or []
+    if f_nom:
+        pills.append(_pill("warn", len(f_nom), "rattachés par nom, pseudo à poser",
+                           "Fiche sans pseudo Discord dont le nom est le pseudo d’un membre"))
+    p_inc = rat.get("pseudos_inconnus") or {}
+    if n_orph:
+        pills.append(_pill("warn", n_orph, "handles hors référentiel"))
+    if masquees:
+        pills.append(_pill("quiet", len(masquees), "fiches non-Discord masquées"))
+    if sv_masques:
+        pills.append(_pill("quiet", len(sv_masques), "comptes sans VA masqués"))
+    if hors_modeles:
+        pills.append(_pill("warn", len(hors_modeles), "identités hors liste des modèles"))
+    if n_ex:
+        pills.append(_pill("quiet", n_ex, "exclus"))
+    if coll:
+        pills.append(_pill("warn", len(coll), "fiches à plusieurs VA"))
+
+    alerte = ""
+    if not rat.get("serveur_verifie"):
+        raison = ("Appartenance au serveur non vérifiée (bot hors ligne)"
+                  if not _discord_observable() else
+                  "Appartenance au serveur non vérifiée (serveur Va IG invisible pour le bot)")
+        alerte = (f"<div class='jb-dc-alerte'>⚠ <span>{raison}</span></div>"
+                  "<div class='jb-dc-note'><span>Repli : les VA dont l’identité est du "
+                  "marché FR. Le rattachement par pseudo est suspendu.</span></div>")
+
+    raisons = {"hors_va_ig": ("hors du serveur Va IG" if rat.get("serveur_verifie")
+                              else "identité hors du marché FR"),
+               "sans_identite": "sans identité",
+               "format_invalide": "entrée illisible dans users.json"}
+    h_exclus = exclus.get("_handles") or {}
+    l_ex = []
+    for k in ("hors_va_ig", "sans_identite", "format_invalide"):
+        for u in exclus.get(k, []):
+            nm = noms.get(u) or ""
+            qui = (f"{html_escape(nm)} ({html_escape(u)})" if nm else html_escape(u))
+            hs = h_exclus.get(u) or []
+            suite = (" : " + ", ".join("@" + html_escape(h) for h in hs)) if hs else ""
+            l_ex.append(f"{qui} — <span>{raisons.get(k, k)}</span>{suite}")
+    l_orph = [f"{html_escape(_nom(u))} : " + ", ".join("@" + html_escape(h) for h in hs)
+              for u, hs in orph.items()]
+    l_inval = [f"{html_escape(_nom(u))} : " + ", ".join(html_escape(x) for x in v["invalides"])
+               for u, v in vas.items() if v.get("invalides")]
+    par_ident: dict = {}
+    for u, v in vas.items():
+        for il in ({c[0] for c in v["fiches"]} | {v.get("identite_carte") or ""}) - {""}:
+            par_ident.setdefault(il, []).append(_nom(u))
+    l_hm = [f"@{html_escape(i)} — " + ", ".join(html_escape(x) for x in par_ident.get(i, []))
+            for i in hors_modeles]
+    # Une fiche cachee qui porte un pseudo : on le montre, c'est le plus
+    # souvent une faute de frappe (le membre s'appelle autrement) ou un VA
+    # parti du serveur -- et le rattachement n'approche plus les noms.
+    l_mq = [f"@{html_escape(i)} — {html_escape(n)}"
+            + (f" · <span>pseudo absent de Va IG</span> : {html_escape(p_inc[(i, n.lower())])}"
+               if (i, n.lower()) in p_inc else "")
+            for i, n in masquees]
+    l_nom = [f"@{html_escape(c[0])} — {html_escape(noms_f.get(c, c[1]))}" for c in f_nom]
+    l_sv = [f"@{html_escape(i)} — @{html_escape(h)}" for i, h in sv_masques]
+    l_co = [f"@{html_escape(c[0])} — {html_escape(noms_f.get(c, c[1]))} : "
+            + ", ".join(html_escape(_nom(u)) for u in us) for c, us in coll.items()]
+
+    return (
+        "<div class='jb-dc-bandeau' id='jb-dc-bandeau'>"
+        f"<div class='jb-dc-titre'>{_JB_DC_ICO}<span>Les VA du serveur Discord Va IG</span></div>"
+        "<div class='jb-dc-ligne'>" + "".join(pills) + "</div>"
+        + alerte
+        + _liste("Handles absents du référentiel", l_orph, n_orph)
+        + _liste("Saisies illisibles", l_inval,
+                 sum(len(v.get("invalides") or []) for v in vas.values()))
+        + _liste("Identités hors liste des modèles", l_hm)
+        + _liste("Fiches rattachées par nom (pseudo Discord à poser)", l_nom)
+        + _liste("Fiches non-Discord masquées", l_mq)
+        + _liste("Comptes sans VA masqués", l_sv)
+        + _liste("Fiches à plusieurs VA", l_co)
+        + _liste("Exclus", l_ex, n_ex)
+        + "</div>"
+    )
+
+
+def _jb_dc_carte(v: dict, il: str, cache: dict, refs: set, noms=None) -> tuple:
+    """(bouton de la colonne, carte de detail, va_id, nb de comptes) d'un VA
+    du serveur Va IG qu'aucune fiche ne represente.
+
+    LECTURE SEULE : ses comptes viennent de users.json (« Mes comptes »), pas
+    du referentiel -- ni ✎ ni × ni « + Ajouter ». Ses lignes ne portent PAS
+    la classe jb-row : jbAutoFillPending interrogerait /external/stats_batch
+    pour les « non scrapes », donc scraperait ces comptes et depenserait du
+    quota RapidAPI a chaque ouverture. data-va-name='' et data-va-drag : le
+    glisser l'ignore, /jailbreak/reorder_vas ne recoit jamais son nom."""
+    u = v["uid"]
+    noms = noms or {}
+    hs = list(v["handles"])
+    ident_s = html_escape(il)
+    va_id = f"{il}|__discord__{u}"
+    va_id_s = html_escape(va_id)
+    nom = v.get("nom") or noms.get(u) or ("Discord " + u)
+    nom_s = html_escape(nom)
+    st_l = [cache.get(h) if isinstance(cache.get(h), dict) else {} for h in hs]
+    # « Comptes bannis détectés » est deja l'infobulle des fiches de la page :
+    # le traduire pour cette carte la traduisait aussi la-bas, seule au milieu
+    # de ses voisines en francais. Un libelle propre a la carte.
+    if any(s.get("banned") for s in st_l):
+        cls, titre = "banned", "Un compte déclaré est banni"
+    elif any(s and not s.get("error") for s in st_l):
+        cls, titre = "on", "Statistiques relevées"
+    else:
+        cls, titre = "pending", "Pas de statistique relevée"
+    hue = sum(ord(c) for c in nom) % 360
+    init = html_escape(nom[:1].upper() or "?")
+    if v.get("avatar"):
+        av_side = av_det = (f"<img src='{html_escape(v['avatar'])}' loading='lazy' "
+                            f"decoding='async' alt='{nom_s}'>")
+    else:
+        av_side = f"<div class='jb-side-va-fb' style='background:hsl({hue},55%,45%)'>{init}</div>"
+        av_det = f"<div class='jb-detail-head-fb' style='background:hsl({hue},55%,45%)'>{init}</div>"
+    side = (
+        f"<button type='button' class='jb-side-va jb-dc-ro' data-va-id='{va_id_s}' "
+        f"data-identity='{ident_s}' data-va-name='' data-va-drag='off' "
+        f"data-dc-uid='{html_escape(u)}' onclick='jbSelectVa(this)'>"
+        f"<div class='jb-side-va-pp-wrap'>{av_side}"
+        f"<span class='jb-side-va-status {cls}' title='{titre}'></span></div>"
+        f"<div class='jb-side-va-info'><div class='jb-side-va-name'>{nom_s}</div>"
+        f"<div class='jb-side-va-discord'><span>sans fiche</span></div></div>"
+        f"{_JB_DC_ICO}<span class='jb-side-va-count'>{len(hs)}</span></button>"
+    )
+    if hs:
+        def _abonnes(x):
+            try:
+                return -int((x[1] or {}).get("followers") or 0)
+            except (TypeError, ValueError):
+                return 0
+        lignes = []
+        for h, s in sorted(zip(hs, st_l), key=_abonnes):
+            h_s = html_escape(h)
+            if s.get("banned"):
+                badge = "<span class='jb-dc-badge ban'>Compte banni</span>"
+            elif s and not s.get("error"):
+                badge = ""
+            elif h in refs:
+                badge = ("<span class='jb-dc-badge' title='Compte du référentiel, "
+                         "pas encore relevé par le scrape'>Pas encore relevé</span>")
+            else:
+                badge = ("<span class='jb-dc-badge' title='Déclaré sur Discord, absent du "
+                         "référentiel : aucune statistique relevée'>Hors scrape</span>")
+            ok = bool(s) and not s.get("error") and not s.get("banned")
+            nums = "".join(
+                f"<span class='jb-dc-n c{n}'>{_jb_dc_nombre(s.get(k)) if ok and s.get(k) is not None else '—'}</span>"
+                for n, k in enumerate(("followers", "daily", "weekly", "biweekly"), 1))
+            lignes.append(
+                f"<div class='jb-dc-ro-row' data-handle='{h_s}'>"
+                f"<a class='jb-dc-h' href='https://www.instagram.com/{h_s}/' target='_blank' "
+                f"rel='noopener noreferrer' title='@{h_s}'>@{h_s}</a>{nums}"
+                f"<span class='jb-dc-b'>{badge}</span></div>")
+        # Les en-tetes de colonne sont traduits ICI (_jb_dc_tr), pas par le
+        # dictionnaire global : « abonnés » est aussi le libelle des lignes
+        # va-ig3 d'autres pages, que la cle globale passait a moitie en anglais.
+        comptes = (
+            "<div class='jb-dc-ro-row jb-dc-ro-head'><span>Instagram</span>"
+            + "".join(f"<span class='jb-dc-n c{n}'><span>{html_escape(_jb_dc_tr(t))}</span></span>"
+                      for n, t in enumerate(("abonnés", "vues 24 h", "vues 7 j", "vues 14 j"), 1))
+            + "<span class='jb-dc-b'></span></div>" + "".join(lignes))
+    else:
+        comptes = ("<div class='jb-empty-section'><span>Aucun compte Instagram déclaré "
+                   "sur Discord</span></div>")
+    inval = ""
+    if v.get("invalides"):
+        inval = (f"<span class='jb-dc-pill warn'><b>{len(v['invalides'])}</b> "
+                 f"<span>saisie(s) illisible(s)</span></span>")
+    det = (
+        f"<div class='jb-va-detail jb-dc-ro' data-va-id='{va_id_s}' "
+        f"data-identity='{ident_s}' data-va-name=''>"
+        f"<div class='jb-detail-head'>"
+        f"<div class='jb-detail-head-pp-wrap'>{av_det}"
+        f"<span class='jb-detail-head-status {cls}' title='{titre}'></span></div>"
+        f"<div class='jb-detail-head-info'>"
+        f"<div class='jb-detail-head-name'>{nom_s}{_JB_DC_ICO}</div>"
+        f"<div class='jb-detail-head-meta'>"
+        f"<span class='jb-detail-head-pill'>@{ident_s}</span>"
+        f"<span class='jb-dc-pill quiet'><span>sans fiche</span></span>{inval}"
+        f"</div></div>"
+        f"<span class='jb-detail-count-badge'>{len(hs)} "
+        f"<span>{'compte déclaré' if len(hs) == 1 else 'comptes déclarés'}</span></span>"
+        f"</div>"
+        f"<div class='jb-dc-ro-liste'>{comptes}</div>"
+        f"<div class='jb-dc-note jb-dc-ro-note'><span>Comptes déclarés par le VA sur Discord. "
+        f"Lecture seule : pour les gérer ici, crée sa fiche avec « + Ajouter un VA » "
+        f"et ajoute-lui ces comptes.</span></div>"
+        f"</div>"
+    )
+    return side, det, va_id, len(hs)
+
+
+#: Le style de l'option : bouton, logo, bandeau, cartes. Chaque couleur a sa
+#: contrepartie claire, par classe : une couleur en style inline serait
+#: reecrite par les regles generales du theme clair.
+_JB_DC_CSS = (
+    "<style id='jb-dc-css'>"
+    ".jb-dc-defs{position:absolute;width:0;height:0;overflow:hidden}"
+    ".jb-dc-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;"
+    "background:#1a1a1a;border:1px solid #2a2a2a;color:#c7cbe0;border-radius:9px;padding:8px 12px;"
+    "font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;line-height:1}"
+    ".jb-dc-toggle svg{width:15px;height:15px;color:#5865f2;flex-shrink:0}"
+    ".jb-dc-toggle:hover{border-color:#5865f2;color:#fff}"
+    ".jb-dc-toggle.on{background:#5865f2;border-color:#5865f2;color:#fff}"
+    ".jb-dc-toggle.on svg{color:#fff}"
+    ".jb-dc-toggle:disabled{opacity:.6;cursor:progress}"
+    ".jb-dc-ico{display:inline-flex;align-items:center;flex-shrink:0;color:#5865f2;line-height:0;cursor:help}"
+    ".jb-dc-ico svg{width:14px;height:14px;display:block}"
+    ".jb-side-va .jb-dc-ico{margin:0 2px 0 auto}"
+    ".jb-dc-bandeau{margin:0 0 14px;padding:12px 14px;border:1px solid rgba(88,101,242,.35);border-radius:12px;"
+    "background:rgba(88,101,242,.07);color:#c7cbe0;font-size:12px;display:flex;flex-direction:column;gap:8px}"
+    ".jb-dc-titre{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;color:#a5b4fc}"
+    ".jb-dc-ligne{display:flex;flex-wrap:wrap;gap:6px;align-items:center}"
+    ".jb-dc-pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:3px 9px;"
+    "border-radius:8px;white-space:nowrap;background:rgba(148,163,184,.12);color:#cbd5e1}"
+    ".jb-dc-pill.ok{background:rgba(88,101,242,.16);color:#c7d2fe}"
+    ".jb-dc-pill.warn{background:rgba(245,158,11,.14);color:#fbbf24}"
+    ".jb-dc-pill.quiet{background:rgba(148,163,184,.10);color:#9ca3af}"
+    ".jb-detail-head-meta .jb-dc-pill{margin-left:6px}"
+    ".jb-dc-alerte{color:#fbbf24;font-weight:700}"
+    ".jb-dc-det summary{cursor:pointer;font-weight:700}"
+    ".jb-dc-liste{margin:6px 0 2px 14px;padding:0;line-height:1.6;word-break:break-word}"
+    ".jb-dc-note{color:#8b8fa3;font-size:11px;line-height:1.5}"
+    ".jb-dc-ro-note{margin-top:12px;padding-top:10px;border-top:1px dashed #1f1f1f}"
+    # Le panneau de droite n'a pas la largeur de la fenetre : les colonnes
+    # se replient sur SA largeur (requete de conteneur), le handle garde sa
+    # place et c'est le badge qui se coupe -- l'inverse ecrasait le handle
+    # en « @… » sur un portable.
+    ".jb-dc-ro-liste{display:flex;flex-direction:column;gap:6px;margin-top:12px;container-type:inline-size}"
+    ".jb-dc-ro-row{display:grid;grid-template-columns:minmax(110px,1fr) repeat(4,minmax(46px,max-content)) minmax(0,max-content);"
+    "gap:10px;align-items:center;padding:9px 12px;border:1px solid #1f2230;border-radius:10px;"
+    "background:#0f1116;color:#e6e6ea;font-size:12px}"
+    ".jb-dc-ro-row.jb-dc-ro-head{background:transparent;border-color:transparent;padding-top:0;padding-bottom:0;"
+    "color:#8b8fa3;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}"
+    ".jb-dc-h{color:#e6e6ea;font-weight:700;text-decoration:none;min-width:0;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap}"
+    ".jb-dc-h:hover{text-decoration:underline}"
+    ".jb-dc-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}"
+    ".jb-dc-b{text-align:right;min-width:0}"
+    ".jb-dc-badge{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+    "font-size:10px;font-weight:700;padding:2px 8px;border-radius:7px;background:rgba(148,163,184,.12);color:#9ca3af;"
+    "vertical-align:middle;cursor:help}"
+    ".jb-dc-badge.ban{background:rgba(239,68,68,.14);color:#f87171}"
+    ".jb-dc-ro .jb-detail-count-badge{white-space:nowrap}"
+    "@container (max-width:520px){.jb-dc-ro-row{grid-template-columns:minmax(100px,1fr) repeat(2,minmax(44px,max-content)) minmax(0,max-content)}"
+    ".jb-dc-ro-row .jb-dc-n.c3,.jb-dc-ro-row .jb-dc-n.c4{display:none}}"
+    "@container (max-width:330px){.jb-dc-ro-row{grid-template-columns:minmax(0,1fr) minmax(0,max-content)}"
+    ".jb-dc-ro-row .jb-dc-n{display:none}}"
+    "[data-dc-fige]{visibility:hidden}"
+    "body.light .jb-dc-toggle{background:#fff;border-color:#d1d5db;color:#374151}"
+    "body.light .jb-dc-toggle:hover{border-color:#5865f2;color:#1f2937}"
+    "body.light .jb-dc-toggle.on{background:#5865f2;border-color:#5865f2;color:#fff}"
+    "body.light .jb-dc-ico{color:#4752c4}"
+    "body.light .jb-dc-bandeau{color:#374151;background:rgba(88,101,242,.06)}"
+    "body.light .jb-dc-titre{color:#4338ca}"
+    "body.light .jb-dc-pill{background:#eef0f4;color:#374151}"
+    "body.light .jb-dc-pill.ok{background:rgba(88,101,242,.12);color:#3730a3}"
+    "body.light .jb-dc-pill.warn{background:rgba(245,158,11,.14);color:#b45309}"
+    "body.light .jb-dc-pill.quiet{background:#f3f4f6;color:#4b5563}"
+    "body.light .jb-dc-alerte{color:#b45309}"
+    "body.light .jb-dc-note{color:#4b5563}"
+    "body.light .jb-dc-ro-note{border-top-color:#e5e7eb}"
+    "body.light .jb-dc-ro-row{background:#fff;border-color:#e5e7eb;color:#111827}"
+    "body.light .jb-dc-ro-row.jb-dc-ro-head{background:transparent;border-color:transparent;color:#6b7280}"
+    "body.light .jb-dc-h{color:#111827}"
+    "body.light .jb-dc-badge{background:#f3f4f6;color:#4b5563}"
+    "body.light .jb-dc-badge.ban{background:rgba(239,68,68,.1);color:#b91c1c}"
+    "</style>"
+)
+
+#: Le bouton : pose ou efface le cookie, puis recharge la section seule par le
+#: chargeur differe de la page (le meme chemin que la premiere ouverture). Si
+#: le chargeur manque (page d'une autre version), on recharge la page : le
+#: cookie suit. Pas d'apostrophe droite dans ce JS : il vit dans une chaine
+#: Python, et une seule mal echappee casse le script entier sans un mot.
+#:
+#: L'ETAT VIENT DE CE QUI EST A L'ECRAN, pas du bouton. Le cookie est commun a
+#: tous les onglets du navigateur ; jbSoftRefresh (apres chaque action)
+#: recharge #jb-main-pane selon le cookie, mais pas la barre d'outils : un
+#: onglet dont un autre onglet avait eteint l'option revenait a toute la liste
+#: sous un bouton encore « allume », et le clic suivant ne faisait rien. Le
+#: bandeau #jb-dc-bandeau n'existe qu'option allumee, DANS #jb-main-pane :
+#: il dit l'etat de ce qui est affiche. Un observateur resynchronise le bouton
+#: a chaque remplacement du panneau.
+_JB_DC_JS = (
+    "<script>"
+    "function jbDcAllumee(){ return !!document.getElementById(\"jb-dc-bandeau\"); }"
+    "function jbDcSync(){"
+    "  var b = document.getElementById(\"jb-dc-toggle\");"
+    "  if(!b) return;"
+    "  var on = jbDcAllumee();"
+    "  if(on){ b.classList.add(\"on\"); } else { b.classList.remove(\"on\"); }"
+    "  b.setAttribute(\"aria-pressed\", on ? \"true\" : \"false\");"
+    "  var t = b.getAttribute(on ? \"data-t-on\" : \"data-t-off\");"
+    "  if(t){ b.title = t; }"
+    "}"
+    "function jbBasculeDiscord(btn){"
+    "  var on = !jbDcAllumee();"
+    "  try {"
+    "    document.cookie = on ? \"" + _JB_DC_COOKIE + "=discord; path=/; SameSite=Lax\""
+    "                         : \"" + _JB_DC_COOKIE + "=; path=/; max-age=0; SameSite=Lax\";"
+    "  } catch(e){}"
+    "  if(btn){ btn.disabled = true; }"
+    "  var sec = (btn && btn.closest) ? btn.closest(\".form-section\") : null;"
+    "  if(!sec) sec = document.getElementById(\"form-jailbreak\");"
+    "  var tp = document.getElementById(\"jb-dc-trou\");"
+    "  if(!sec || !tp || typeof chargerOngletDiffere !== \"function\"){ window.location.reload(); return; }"
+    "  sec.innerHTML = tp.innerHTML;"
+    "  chargerOngletDiffere(sec);"
+    "}"
+    "(function(){"
+    "  jbDcSync();"
+    "  var m = document.getElementById(\"jb-main-pane\");"
+    "  if(m && !m.__jbDcObs && typeof MutationObserver === \"function\"){"
+    "    m.__jbDcObs = new MutationObserver(function(){ jbDcSync(); });"
+    "    m.__jbDcObs.observe(m, {childList: true});"
+    "  }"
+    "})();"
+    "</script>"
+)
+
+
+def _jb_dc_bouton(on: bool) -> str:
+    """Le bouton « Discord » de la barre d'outils ; allume, il le montre.
+    data-t-on / data-t-off : les deux infobulles, deja dans la langue de la
+    page (_traduire_html ne traduit que title), pour que jbDcSync change
+    l'infobulle quand l'etat affiche change sans recharger la barre."""
+    t_on, t_off = "Revenir à tous les comptes", "Afficher seulement les VA du serveur Discord Va IG"
+    titre = t_on if on else t_off
+    return (f"<button type='button' id='jb-dc-toggle' class='jb-dc-toggle{' on' if on else ''}' "
+            f"aria-pressed='{'true' if on else 'false'}' title='{titre}' "
+            f"data-t-on='{html_escape(_jb_dc_tr(t_on))}' data-t-off='{html_escape(_jb_dc_tr(t_off))}' "
+            f"onclick='jbBasculeDiscord(this)'>"
+            f"<svg viewBox='0 0 24 24' aria-hidden='true' focusable='false'>"
+            f"<use href='#jb-dc-logo'/></svg>Discord</button>")
+
+
+def _jb_dc_poser(html: str, etat: dict) -> str:
+    """Pose l'option sur le HTML produit par _render_jailbreak_html.
+
+    Chaque insertion s'appuie sur un repere present dans le rendu du depot ET
+    dans celui que les patchs du VPS reecrivent (barre d'outils, boutons
+    .jb-side-va, cartes .jb-va-detail, sections .jb-side-id, #jb-main-pane) ;
+    un repere manquant est dit dans le journal, jamais saute en silence.
+    Idempotent : un marqueur par insertion."""
+    if not isinstance(html, str) or "id='jb-dc-css'" in html:
+        return html
+    dis = bool(etat.get("discord"))
+    rat = etat.get("rat")
+    manques: list = []
+
+    # 1) Barre d'outils : le bouton, apres le choix d'identite.
+    bouton = _jb_dc_bouton(dis)
+    i = html.find("<select id='jb-filter-identity'")
+    j = html.find("</select>", i) if i >= 0 else -1
+    if j >= 0:
+        j += len("</select>")
+        html = html[:j] + bouton + html[j:]
+    else:
+        # Pas de barre (aucune identite a montrer) : le bouton reste
+        # atteignable, sinon on ne pourrait plus eteindre l'option.
+        k = html.find("<div class='jb-empty-page'>")
+        if k < 0:
+            manques.append("barre d'outils")
+            k = 0
+        html = html[:k] + "<div class='jb-toolbar'>" + bouton + "</div>" + html[k:]
+
+    if dis and rat is not None:
+        # Des noms plutot que des numeros : les exclus, et les VA dont le
+        # membre n'a pas de profil (salon de Va IG, absent du cache).
+        etat.setdefault("noms", _noms_discord(
+            [u for k in ("hors_va_ig", "sans_identite", "format_invalide")
+             for u in (rat.get("exclus") or {}).get(k, [])]
+            + [u for u, v in (rat.get("vas") or {}).items() if not v.get("nom")],
+            etat.get("profils")))
+
+    # 2) Le logo Discord a cote de chaque fiche rattachee (deux portees).
+    fiches = set((rat or {}).get("fiches") or {})
+    ids = {f"{il}|{va}" for (il, va) in fiches}
+    if ids:
+        html = _jb_dc_logos(html, ids, (rat or {}) if dis else None, etat.get("noms"))
+
+    if dis:
+        html = _jb_dc_portee(html, etat, manques)
+
+    if manques:
+        msg = "[va-discord] repere introuvable dans la page : " + ", ".join(manques)
+        log.warning(msg)
+        print(msg, flush=True)
+    trou = ("<template id='jb-dc-trou'><div data-lazy-tab='jailbreak' "
+            "style='padding:60px 20px;text-align:center'>"
+            "<div class='va-loading'>Chargement…</div></div></template>")
+    return _JB_DC_CSS + _JB_DC_SYMBOLE + trou + html + _JB_DC_JS
+
+
+def _jb_dc_logos(html: str, ids: set, rat, noms_dc=None) -> str:
+    """Le logo dans le bouton de la colonne (avant le compteur) et dans le nom
+    de la carte de detail des fiches `ids` ({'ident|va'}). rat (portee
+    Discord seulement) : ajoute aussi, dans l'en-tete, le nom du membre et
+    l'avertissement d'une fiche a plusieurs VA."""
+    import html as _h_dc
+    out, pos = [], 0
+    motif = re.compile(r"<button type='button' class='jb-side-va' data-va-id='([^']*)'"
+                       r"|<div class='jb-va-detail' data-va-id='([^']*)'")
+    noms = {}
+    if rat:
+        for (il, va), us in (rat.get("fiches") or {}).items():
+            noms[f"{il}|{va}"] = [(rat["vas"][u].get("nom") or (noms_dc or {}).get(u) or u)
+                                  for u in us if u in rat["vas"]]
+    for m in motif.finditer(html):
+        if m.start() < pos:
+            continue
+        vid = _h_dc.unescape(m.group(1) if m.group(1) is not None else m.group(2))
+        if vid not in ids:
+            continue
+        if m.group(1) is not None:
+            fin = html.find("</button>", m.end())
+            k = html.find("<span class='jb-side-va-count'>", m.end(), fin if fin >= 0 else None)
+            if k < 0 or "jb-dc-ico" in html[m.end():k]:
+                continue
+            out.append(html[pos:k] + _JB_DC_ICO)
+            pos = k
+            continue
+        a = html.find("<div class='jb-detail-head-name'", m.end())
+        b = html.find(">", a) if a >= 0 else -1
+        c = html.find("</div>", b) if b >= 0 else -1
+        suivant = html.find("<div class='jb-va-detail'", m.end())
+        if c < 0 or (0 <= suivant < c) or "jb-dc-ico" in html[b:c]:
+            continue
+        out.append(html[pos:c] + _JB_DC_ICO)
+        pos = c
+        if rat and noms.get(vid):
+            d = html.find("<div class='jb-detail-head-meta'>", pos)
+            e = html.find("</div>", d) if d >= 0 else -1
+            if 0 <= d and (suivant < 0 or e < suivant):
+                pills = "".join(f"<span class='jb-dc-pill ok' title='Membre du serveur Discord Va IG'>"
+                                f"{html_escape(n)}</span>" for n in noms[vid])
+                if len(noms[vid]) > 1:
+                    pills += ("<span class='jb-dc-pill warn' title='Plusieurs comptes Discord "
+                              "désignent cette fiche : à vérifier'>⚠ <span>plusieurs VA Discord</span></span>")
+                out.append(html[pos:e] + pills)
+                pos = e
+    out.append(html[pos:])
+    return "".join(out)
+
+
+def _jb_dc_portee(html: str, etat: dict, manques: list) -> str:
+    """Option allumee : bandeau, cartes des VA sans fiche, compteurs des
+    sections, et ni glisser de fiche ni glisser d'identite (la liste est
+    FILTREE : /jailbreak/reorder_vas repousserait en fin les fiches cachees,
+    et l'ordre local des identites perdrait celles qu'on ne voit pas)."""
+    rat = etat.get("rat")
+    if rat is None:
+        err = html_escape(etat.get("erreur") or "rattachement indisponible")
+        bloc = ("<div class='jb-dc-bandeau' id='jb-dc-bandeau'><div class='jb-dc-alerte'>⚠ "
+                "<span>Filtre Discord impossible : page complète affichée.</span></div>"
+                f"<div class='jb-dc-note'>{err}</div></div>")
+        k = html.find("<main class='jb-main-pane' id='jb-main-pane'")
+        k = html.find(">", k) + 1 if k >= 0 else html.find("<div class='jb-empty-page'>")
+        if k > 0:
+            return html[:k] + bloc + html[k:]
+        manques.append("emplacement du bandeau")
+        return bloc + html
+    # Cartes des VA sans fiche, dans la section de leur identite
+    cartes_det, premier = [], ""
+    sf = rat.get("sans_fiche") or {}
+    cache = {}
+    if any(sf.values()):
+        try:
+            cache = _load_insta_3_stats_cache()
+        except Exception:
+            cache = {}
+    extra = etat.get("extra_comptes") or {}
+    n_cartes_tot, n_ids_neuves = 0, 0
+    for il, us in sf.items():
+        m = re.search(r"<div class='jb-side-id jb-section' data-identity='%s'[^>]*>"
+                      % re.escape(html_escape(il)), html)
+        if not m:
+            # Identite hors modeles : nommee dans le bandeau. Sinon, c'est le
+            # repere qui manque -- a dire.
+            if il not in (etat.get("hors_modeles") or []):
+                manques.append(f"section @{il}")
+            continue
+        fin_sec = html.find("<div class='jb-side-id jb-section'", m.end())
+        fin_sec = len(html) if fin_sec < 0 else fin_sec
+        k = html.find("<button type='button' class='jb-side-add-va'", m.end(), fin_sec)
+        if k < 0:
+            manques.append(f"section @{il}")
+            continue
+        sides = []
+        for u in us:
+            side, det, vid, n = _jb_dc_carte(rat["vas"][u], il, cache, rat.get("handles_ref") or set(),
+                                             etat.get("noms"))
+            sides.append(side)
+            cartes_det.append(det)
+            if n and not premier:
+                premier = vid
+        html = html[:k] + "".join(sides) + html[k:]
+        # Les compteurs de la section suivent : nombre de fiches, comptes
+        # (jbApplyFilter de la page patchee les additionne pour « COMPTES »).
+        tete = html[m.start():m.end()]
+        cpt = re.search(r"data-account-count='(\d+)'", tete)
+        if cpt:
+            tete2 = tete.replace(cpt.group(0), "data-account-count='%d'"
+                                 % (int(cpt.group(1)) + int(extra.get(il, 0))), 1)
+            html = html[:m.start()] + tete2 + html[m.end():]
+        fin_sec = html.find("<div class='jb-side-id jb-section'", m.start() + 10)
+        fin_sec = len(html) if fin_sec < 0 else fin_sec
+        sec = html[m.start():fin_sec]
+        n_avant = re.search(r"<span class='jb-side-id-count'>(\d+)</span>", sec)
+        vide = ("<div style='padding:8px 10px;color:#666;font-size:10.5px;font-style:italic'>"
+                "Aucun VA — commence par en ajouter un</div>")
+        if vide in sec:
+            n_ids_neuves += 1
+        sec2 = sec.replace(vide, "")
+        if n_avant:
+            sec2 = sec2.replace(n_avant.group(0), "<span class='jb-side-id-count'>%d</span>"
+                                % (int(n_avant.group(1)) + len(us)), 1)
+        html = html[:m.start()] + sec2 + html[fin_sec:]
+        n_cartes_tot += len(us)
+    if cartes_det:
+        k = html.find("<div class='jb-no-selection' id='jb-no-selection'>")
+        if k >= 0:
+            html = html[:k] + "".join(cartes_det) + html[k:]
+        else:
+            manques.append("emplacement des cartes (#jb-no-selection)")
+    # Le resume du bas de colonne compte aussi ces VA
+    if n_cartes_tot:
+        m = re.search(r"(id='jb-side-summary'>[^<]*<b>)(\d+)(</b>)(.*?<b>)(\d+)(</b>)", html, re.S)
+        if m:
+            html = (html[:m.start()] + m.group(1) + str(int(m.group(2)) + n_cartes_tot) + m.group(3)
+                    + m.group(4) + str(int(m.group(5)) + n_ids_neuves) + m.group(6) + html[m.end():])
+    # Fiche selectionnee par defaut : une carte, si le rendu n'en a pas
+    if premier:
+        html = html.replace("<main class='jb-main-pane' id='jb-main-pane' data-default-va=''>",
+                            "<main class='jb-main-pane' id='jb-main-pane' data-default-va='%s'>"
+                            % html_escape(premier), 1)
+    # Ni glisser de fiche, ni glisser d'identite (voir la docstring)
+    html = re.sub(r"(<button type='button' class='jb-side-va' data-va-id='[^']*'[^>]*?)"
+                  r"( onclick='jbSelectVa\(this\)'>)",
+                  lambda mm: mm.group(0) if "data-va-drag" in mm.group(1)
+                  else mm.group(1) + " data-va-drag='off'" + mm.group(2), html)
+    html = html.replace("<div class='jb-drag-handle' draggable='true'",
+                        "<div class='jb-drag-handle' draggable='false' data-dc-fige='1'")
+    # Le bandeau : en tete du panneau de droite, que jbSoftRefresh recopie
+    # (il suit donc chaque action). Sans panneau (aucune fiche) : avant le
+    # message de page vide, qui change de texte.
+    bandeau = _bandeau_va_discord(rat, etat)
+    k = html.find("<main class='jb-main-pane' id='jb-main-pane'")
+    if k >= 0:
+        k = html.find(">", k) + 1
+        html = html[:k] + bandeau + html[k:]
+    else:
+        k = html.find("<div class='jb-empty-page'>")
+        if k >= 0:
+            e = html.find("</div>", k)
+            html = (html[:k] + bandeau + "<div class='jb-empty-page'><span>Aucun VA du serveur "
+                    "Discord Va IG à afficher.</span></div>" + html[e + len("</div>"):])
+        else:
+            manques.append("emplacement du bandeau")
+            html = bandeau + html
+    return html
+
+
+def _jb_dc_cookie() -> bool:
+    """Le cookie de l'option dit-il « Discord » ? Faux hors requete."""
+    try:
+        from flask import has_request_context, request as _rq
+        return bool(has_request_context()
+                    and (_rq.cookies.get(_JB_DC_COOKIE) or "").strip().lower() == "discord")
+    except Exception:
+        return False
+
+
+def _jb_option_discord(rendu):
+    """Emballe _render_jailbreak_html : lit l'option (cookie, ou `portee`
+    passe par un test), rend la page, pose l'option sur le HTML.
+
+    Remplace le NOM du module : _prods, la branche fragment et les tests le
+    resolvent a l'appel, et passent donc par ici sans changer une ligne.
+
+    Le fragment de jbSoftRefresh (?frag=1) sortait en francais dans
+    l'interface anglaise (la branche ne traduit pas, le chargement differe
+    si) : la colonne, et desormais le bandeau, changeaient de langue apres
+    chaque action. On le traduit ici."""
+    @_ft_dc.wraps(rendu)
+    def _rendu_avec_option(portee=None):
+        if portee is None:
+            portee = "discord" if _jb_dc_cookie() else "all"
+        etat = {"discord": portee == "discord"}
+        jeton = _JB_DC_ETAT.set(etat)
+        try:
+            html = rendu()
+        finally:
+            _JB_DC_ETAT.reset(jeton)
+        try:
+            html = _jb_dc_poser(html, etat)
+        except Exception as e:
+            msg = f"[va-discord] option non posee : {type(e).__name__}: {e}"
+            log.warning(msg)
+            print(msg, flush=True)
+        try:
+            from flask import has_request_context, request as _rq
+            if (has_request_context() and _rq.args.get("frag") and not _rq.args.get("lazy")
+                    and _langue_courante() == "en"):
+                html = _traduire_html(html)
+        except Exception:
+            pass
+        return html
+    return _rendu_avec_option
+
+
+_render_jailbreak_html = _jb_option_discord(_render_jailbreak_html)
 
 
 def _render_tiktok_trends_html() -> str:

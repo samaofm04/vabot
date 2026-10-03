@@ -406,6 +406,34 @@ except Exception as e:
 check("page Jailbreak rendue", ok_render, html if not ok_render else "")
 if ok_render:
     check("script injecté échappé", "<script>alert(1)</script>" not in html)
+# Option « Discord » allumee : le meme rendu, limite aux VA du serveur Va IG.
+# Le nom Discord (profil du membre) et une saisie « Mes comptes » sont
+# pieges ; users.json est un fichier temporaire, le bot est simule.
+import shutil as _shJV, tempfile as _tfJV
+import safe_json as _sjJV
+_dJV = pathlib.Path(_tfJV.mkdtemp(prefix="jb_optdiscord_"))
+_svJV = (w.USERS_FILE, w._va_ig_vue_discord)
+try:
+    w.USERS_FILE = _dJV / "users.json"
+    _sjJV.write(w.USERS_FILE, {"999": {"identity": IDENT, "channel_id": 1,
+                                       "insta_accounts": ["X<script>alert(1)</script>",
+                                                          "inject_test", "hors.ref"]}})
+    w._va_ig_vue_discord = lambda: ({"999": "x"}, {"1"},
+                                    {"999": {"nom": "X<script>alert(1)</script>", "avatar": ""}})
+    html_d = w._render_jailbreak_html("discord")
+    ok_d = True
+except Exception as e:
+    ok_d, html_d = False, repr(e)
+finally:
+    w.USERS_FILE, w._va_ig_vue_discord = _svJV
+    _shJV.rmtree(_dJV, ignore_errors=True)
+check("page Jailbreak, option Discord allumee, rendue", ok_d, html_d if not ok_d else "")
+if ok_d:
+    check("option Discord : bouton allume, pseudo / handle / fiche pieges echappes",
+          "id='jb-dc-toggle' class='jb-dc-toggle on' aria-pressed='true'" in html_d
+          and "id='jb-dc-bandeau'" in html_d
+          and "<script>alert(1)</script>" not in html_d
+          and "X&lt;script&gt;alert(1)&lt;/script&gt;" in html_d)
 for fn in ("_render_jbanalyse_html", "_render_jbactivite_html"):
     try:
         getattr(w, fn)()

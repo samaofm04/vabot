@@ -479,6 +479,94 @@ EQUIPE = {
     "Valider": "Confirm",
 }
 
+# --- Option « Discord » de « Comptes par identite » (web_upload, _jb_dc_*) ----
+# Chaque libelle est dans son propre <span> (ou son propre attribut title) :
+# les nombres sont a cote, hors du noeud traduit. Pas d'apostrophe droite
+# dans les infobulles : echappee dans la page, elle ne correspondrait plus.
+VA_DISCORD = {
+    "VA du serveur Discord Va IG": "VA on the Va IG Discord server",
+    "Les VA du serveur Discord Va IG": "VAs of the Va IG Discord server",
+    "Afficher seulement les VA du serveur Discord Va IG":
+        "Show only the VAs of the Va IG Discord server",
+    "Revenir à tous les comptes": "Back to all accounts",
+    "VA Discord": "Discord VAs",
+    "rattachés par handle": "matched by handle",
+    "rattachés par pseudo": "matched by username",
+    "rattachés par nom, pseudo à poser": "matched by name, username to set",
+    "Fiche sans pseudo Discord dont le nom est le pseudo d’un membre":
+        "Profile without a Discord username whose name is a member’s username",
+    "Fiches rattachées par nom (pseudo Discord à poser)":
+        "Profiles matched by name (Discord username to set)",
+    "pseudo absent de Va IG": "username not on Va IG",
+    "sans fiche": "no profile",
+    "handles hors référentiel": "handles outside the registry",
+    "fiches non-Discord masquées": "non-Discord profiles hidden",
+    "comptes sans VA masqués": "accounts without a VA hidden",
+    "identités hors liste des modèles": "identities outside the model list",
+    "exclus": "excluded",
+    "fiches à plusieurs VA": "profiles with several VAs",
+    "Un compte déclaré sur Discord est sous cette fiche":
+        "An account declared on Discord is under this profile",
+    "Le pseudo Discord écrit sur la fiche est celui du membre":
+        "The Discord username written on the profile is the member’s",
+    "VA du serveur qu’aucune fiche ne représente : carte en lecture seule":
+        "Server VAs that no profile represents: read-only card",
+    "Appartenance au serveur non vérifiée (bot hors ligne)":
+        "Server membership not checked (bot offline)",
+    "Appartenance au serveur non vérifiée (serveur Va IG invisible pour le bot)":
+        "Server membership not checked (the bot cannot see the Va IG server)",
+    "Repli : les VA dont l’identité est du marché FR. Le rattachement par pseudo est suspendu.":
+        "Fallback: VAs whose identity is on the FR market. Matching by username is paused.",
+    "Filtre Discord impossible : page complète affichée.":
+        "Discord filter unavailable: showing the full page.",
+    "Handles absents du référentiel": "Handles missing from the registry",
+    "Saisies illisibles": "Unreadable entries",
+    "Identités hors liste des modèles": "Identities outside the model list",
+    "Fiches non-Discord masquées": "Non-Discord profiles hidden",
+    "Comptes sans VA masqués": "Accounts without a VA hidden",
+    "Fiches à plusieurs VA": "Profiles with several VAs",
+    "Exclus": "Excluded",
+    "hors du serveur Va IG": "not on the Va IG server",
+    "identité hors du marché FR": "identity outside the FR market",
+    "sans identité": "no identity",
+    "entrée illisible dans users.json": "unreadable entry in users.json",
+    "Un compte déclaré est banni": "A declared account is banned",
+    "Statistiques relevées": "Statistics collected",
+    "Pas de statistique relevée": "No statistics collected",
+    "Compte banni": "Banned account",
+    "Pas encore relevé": "Not collected yet",
+    "Compte du référentiel, pas encore relevé par le scrape":
+        "Registry account, not collected by the scrape yet",
+    "Hors scrape": "Not scraped",
+    "Déclaré sur Discord, absent du référentiel : aucune statistique relevée":
+        "Declared on Discord, missing from the registry: no statistics collected",
+    "Aucun compte Instagram déclaré sur Discord": "No Instagram account declared on Discord",
+    "saisie(s) illisible(s)": "unreadable entry(ies)",
+    "compte déclaré": "declared account",
+    "comptes déclarés": "declared accounts",
+    "Comptes déclarés par le VA sur Discord. Lecture seule : pour les gérer ici, crée sa "
+    "fiche avec « + Ajouter un VA » et ajoute-lui ces comptes.":
+        "Accounts the VA declared on Discord. Read only: to manage them here, create their "
+        "profile with « + Add a VA » and add these accounts to it.",
+    "Membre du serveur Discord Va IG": "Member of the Va IG Discord server",
+    "Plusieurs comptes Discord désignent cette fiche : à vérifier":
+        "Several Discord accounts point to this profile: to check",
+    "plusieurs VA Discord": "several Discord VAs",
+    "Aucun VA du serveur Discord Va IG à afficher.": "No VA of the Va IG Discord server to show.",
+}
+
+# Mots GENERIQUES de l'option Discord, traduits par la page elle-meme
+# (web_upload._jb_dc_tr), PAS fondus dans TRADUCTIONS : _traduire_html
+# compare chaque noeud de texte du site, et « abonnés » est aussi le libelle
+# des lignes va-ig3 d'autres pages -- la cle globale les passait a moitie en
+# anglais (« followers » a cote de « vues 24h »).
+VA_DISCORD_LOCAL = {
+    "abonnés": "followers",
+    "vues 24 h": "views 24h",
+    "vues 7 j": "views 7d",
+    "vues 14 j": "views 14d",
+}
+
 # --- Favoris automatiques, liste « À vérifier » (web_upload._favoris_auto_html)
 # Une carte par reel, une ligne par proposition : « Brut », « Montage »,
 # « Caption », chacune avec OK / Non. Le nombre de « OK pour les sûres » est
@@ -495,7 +583,8 @@ FAVORIS = {
 # Le dictionnaire complet, dans l'ordre : les libelles les plus longs d'abord
 # (sinon « Posts » remplacerait le debut de « Posts programmes »).
 TRADUCTIONS = {}
-for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE, EQUIPE, FAVORIS):
+for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE, EQUIPE, FAVORIS,
+              VA_DISCORD):
     TRADUCTIONS.update(_bloc)
 
 

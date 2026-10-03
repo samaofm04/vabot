@@ -33877,6 +33877,500 @@ except Exception as _eNo:
     import traceback as _tbNo
     check("notifications : testable", False, repr(_eNo)[:200] + " " + _tbNo.format_exc()[-400:])
 
+# ------------------------------- Option « Discord » de « Comptes par identite »
+print()
+print("=" * 70)
+print("Option Discord : « Comptes par identite » limite aux VA du serveur Va IG")
+print("=" * 70)
+import html as _htVd
+import re as _reVd
+import shutil as _shVd
+import subprocess as _spVd
+
+_dirVd = pathlib.Path(tempfile.mkdtemp(prefix="vadiscord_"))
+try:
+    import web_upload as _wV
+    import jailbreak as _jbV, va_portal as _vpV, jb_objectifs as _obV
+    import type_identite as _tiV, identite_admin as _iaV, sheets_sync as _ssV
+    import dashboard_cache as _dcV
+
+    # -----------------------------------------------------------------
+    # 1. La regle d'appartenance et de rattachement, sur des dictionnaires
+    # -----------------------------------------------------------------
+    _RV = _wV._rattachement_va_discord
+    _JBV = {
+        "julia": {"vas": [{"name": "Paul", "discord_username": ""},
+                          # Le cas Noum : fiche d'une identite FR, pas un VA du
+                          # Discord. Elle ne doit pas entrer par l'identite.
+                          {"name": "Noum", "discord_username": "noum0075"},
+                          {"name": "Lea", "discord_username": "Lea_Va"},
+                          {"name": "Prisca", "discord_username": "priscah0908_23400"},
+                          {"name": "Nina", "discord_username": ""},
+                          # Ecrite par « Mes comptes » du serveur FR (cogs/user.py) :
+                          # nom = pseudo Discord = member.name, aucun users.json.
+                          {"name": "marie_va", "discord_username": "marie_va"}],
+                  "accounts": [{"id": 1, "username": "paul.ig", "va": "Paul"},
+                               {"id": 2, "username": "noum.ig", "va": "Noum"},
+                               {"id": 3, "username": "lea.ig", "va": "Lea"},
+                               {"id": 4, "username": "libre.ig", "va": ""},
+                               {"id": 5, "username": "autre.libre", "va": ""},
+                               {"id": 8, "username": "marie.one", "va": "marie_va"},
+                               {"id": 10, "username": "nina.ig", "va": "Nina"},
+                               {"id": 11, "username": "prisca.ig", "va": "Prisca"},
+                               # « Sans VA » de julia, declare par 112 (VA de lola)
+                               {"id": 12, "username": "partage.ig", "va": ""}]},
+        "lola": {"vas": [{"name": "Jo <b>", "discord_username": ""}],
+                 "accounts": [{"id": 6, "username": "lola.un", "va": "Jo <b>"}]},
+        "jessye": {"vas": [{"name": "Safidy", "discord_username": "safidy"}],
+                   "accounts": [{"id": 7, "username": "jess.ig", "va": "Safidy"}]},
+        "amelia": {"vas": [{"name": "Zed", "discord_username": ""}],
+                   "accounts": [{"id": 9, "username": "zed.ig", "va": "Zed"}]},
+    }
+    _USV = {
+        "101": {"identity": "julia", "channel_id": 9001, "insta_accounts": ["@PAUL.IG", "extra1.ig"]},
+        "102": {"identity": "Lola", "channel_id": 9002,
+                "insta_accounts": ["https://www.instagram.com/Lola.Un/?igsh=abc"]},
+        "103": {"identity": "julia", "channel_id": 9003},
+        "104": {"identity": "julia", "channel_id": 9004,
+                "insta_accounts": ["libre.ig", "orph.ig", "o2", "o3", "o4", "X<script>"]},
+        "105": "julia",
+        "106": {"identity": "jessye", "channel_id": 7777, "insta_accounts": ["jess.ig"]},
+        "107": 42,
+        "108": {"identity": "", "channel_id": 9008},
+        # Membre de Va IG qui n'a fait que « Mes comptes » : aucune identite.
+        "111": {"insta_accounts": ["Nina.IG"]},
+        # VA de lola sans fiche : un compte « Sans VA » de julia + un neuf.
+        "112": {"identity": "lola", "channel_id": 9002, "insta_accounts": ["partage.ig", "neuf.ig"]},
+    }
+    _frV = lambda i: "us" if i == "jessye" else "fr"
+    _avantV = json.dumps(_USV, sort_keys=True)
+    # Bot hors ligne : repli sur le marche, rattachement par handle seulement
+    _A = _RV(_USV, _JBV, marche=_frV)
+    check("option discord : bot hors ligne -> serveur_verifie=False (et repli sur le marche FR)",
+          _A["serveur_verifie"] is False and "106" in _A["exclus"]["hors_va_ig"]
+          and "101" in _A["vas"], (_A["serveur_verifie"], _A["exclus"]))
+    check("option discord : handle avec @ et majuscules -> rattache a sa fiche",
+          _A["fiches"].get(("julia", "paul")) == ["101"], _A["fiches"])
+    check("option discord : handle donne en lien (avec ?igsh=) -> rattache a sa fiche",
+          _A["fiches"].get(("lola", "jo <b>")) == ["102"], _A["fiches"])
+    check("option discord : handle d un compte sans VA -> range dans handles_sans_va",
+          _A["handles_sans_va"].get(("julia", "libre.ig")) == ["104"], _A["handles_sans_va"])
+    check("option discord : handle absent du referentiel -> orphelin, garde",
+          _A["orphelins"].get("104") == ["orph.ig", "o2", "o3", "o4"]
+          and _A["orphelins"].get("101") == ["extra1.ig"], _A["orphelins"])
+    check("option discord : saisie illisible gardee et nommee (jamais ecartee en silence)",
+          _A["vas"]["104"]["invalides"] == ["X<script>"], _A["vas"]["104"]["invalides"])
+    check("option discord : VA sans fiche -> sans_fiche de son identite",
+          set(_A["sans_fiche"].get("julia", [])) == {"103", "104", "105"}, _A["sans_fiche"])
+    check("option discord : ancien format (users.json[uid] = identite) accepte, sans handle",
+          _A["vas"].get("105", {}).get("identity") == "julia" and _A["vas"]["105"]["handles"] == [])
+    check("option discord : entree invalide et entree vide sans identite -> exclues avec leur raison",
+          _A["exclus"]["format_invalide"] == ["107"] and _A["exclus"]["sans_identite"] == ["108"],
+          _A["exclus"])
+    check("option discord : sans identite mais un handle sur une fiche FR -> rattache (repli)",
+          _A["fiches"].get(("julia", "nina")) == ["111"], _A["fiches"])
+    check("option discord : la fiche Noum (identite FR, pas un VA Discord) n est pas rattachee",
+          ("julia", "noum") not in _A["fiches"] and "jessye" not in _A["identites"], _A["identites"])
+    check("option discord : sans le bot, aucun rattachement par pseudo",
+          ("julia", "lea") not in _A["fiches"] and ("julia", "marie_va") not in _A["fiches"]
+          and _A["par_pseudo"] == 0)
+    _D = _RV({"301": {"insta_accounts": ["jess.ig"]}}, _JBV, marche=_frV)
+    check("option discord : repli, sans identite et handle hors FR -> exclu (sans identite)",
+          _D["exclus"]["sans_identite"] == ["301"] and "301" not in _D["vas"], _D["exclus"])
+    # Bot pret : membre de Va IG, ou salon de Va IG (cache de membres incomplet)
+    _MBV = {"101": "paulva", "103": "lea_va", "104": "x", "105": "",
+            "108": "", "109": "priscah0908", "111": "nina.d", "120": "marie_va"}
+    _B = _RV(dict(_USV, **{"109": {"identity": "julia", "channel_id": 9009}}), _JBV,
+             membres=_MBV, salons={"9001", "9002"})
+    check("option discord : bot pret -> membre de Va IG OU salon de Va IG",
+          _B["serveur_verifie"] is True and "102" in _B["vas"] and "106" in _B["exclus"]["hors_va_ig"],
+          _B["exclus"])
+    check("option discord : membre SANS identite rattache par son handle (pas ecarte avant)",
+          _B["fiches"].get(("julia", "nina")) == ["111"] and "111" not in _B["exclus"]["sans_identite"],
+          (_B["fiches"].get(("julia", "nina")), _B["exclus"]))
+    check("option discord : rattachement par pseudo = member.name, casse ignoree (Lea_Va = lea_va)",
+          _B["fiches"].get(("julia", "lea")) == ["103"] and "pseudo" in _B["via"][("julia", "lea")],
+          _B["fiches"])
+    check("option discord : fiche de « Mes comptes » FR (pseudo = member.name) -> son membre, "
+          "meme absent de users.json",
+          _B["fiches"].get(("julia", "marie_va")) == ["120"]
+          and _B["vas"]["120"]["source"] == "membre", _B["fiches"].get(("julia", "marie_va")))
+    check("option discord : pseudo de fiche avec suffixe -> PAS de rapprochement, pseudo nomme",
+          ("julia", "prisca") not in _B["fiches"]
+          and _B["pseudos_inconnus"].get(("julia", "prisca")) == "priscah0908_23400",
+          (_B["fiches"], _B["pseudos_inconnus"]))
+    check("option discord : compteurs par handle / par pseudo / par nom",
+          _B["par_handle"] == 3 and _B["par_pseudo"] == 2 and _B["par_nom"] == 0,
+          (_B["par_handle"], _B["par_pseudo"], _B["par_nom"]))
+    # Le nom affiche ou le surnom d'un membre ne rattachent RIEN : la fiche
+    # d'une Sarah absente du serveur allait au membre « csarah » (affiche
+    # Sarah), celle de « lea » aussi a « lea_b » (affiche Lea).
+    _F = _RV({}, {"julia": {"vas": [{"name": "Sarah", "discord_username": "sarah2003"},
+                                    {"name": "lea", "discord_username": "lea"}],
+                            "accounts": [{"id": 1, "username": "s.ig", "va": "Sarah"},
+                                         {"id": 2, "username": "l.ig", "va": "lea"}]}},
+             membres={"C": "csarah", "A": "lea", "B": "lea_b"}, salons=set(),
+             profils={"C": {"nom": "Sarah"}, "B": {"nom": "Lea"}})
+    check("option discord : seul member.name compte (ni nom affiche, ni approche)",
+          _F["fiches"] == {("julia", "lea"): ["A"]} and not _F["collisions"]
+          and _F["pseudos_inconnus"] == {("julia", "sarah"): "sarah2003"},
+          (_F["fiches"], _F["collisions"], _F["pseudos_inconnus"]))
+    # Fiche SANS pseudo nommee d'apres le member.name (add_va avait refuse le
+    # nom deja pris), et fiche implicite (nom porte par les comptes) : par nom,
+    # comme bangers.comptes_admis. Un pseudo DIFFERENT reste seul juge.
+    _G = _RV({}, {"julia": {"vas": [{"name": "Lea_VA", "discord_username": ""},
+                                    {"name": "kim", "discord_username": "autre_kim"}],
+                            "accounts": [{"id": 1, "username": "lea1.ig", "va": "Lea_VA"},
+                                         {"id": 2, "username": "impl.ig", "va": "marie_x"},
+                                         {"id": 3, "username": "kim.ig", "va": "kim"}]}},
+             membres={"120": "lea_va", "121": "marie_x", "122": "kim"}, salons=set())
+    check("option discord : fiche sans pseudo et fiche implicite -> rattachees par leur nom",
+          _G["fiches"].get(("julia", "lea_va")) == ["120"] and _G["fiches"].get(("julia", "marie_x")) == ["121"]
+          and _G["via"][("julia", "lea_va")] == {"nom"} and _G["par_nom"] == 2
+          and sorted(_G["fiches_par_nom"]) == [("julia", "lea_va"), ("julia", "marie_x")]
+          and not _G["sans_fiche"], (_G["fiches"], _G["sans_fiche"]))
+    check("option discord : pseudo renseigne et different -> pas de repli sur le nom",
+          ("julia", "kim") not in _G["fiches"]
+          and _G["pseudos_inconnus"].get(("julia", "kim")) == "autre_kim", _G["fiches"])
+    _H = _RV({}, {"julia": {"vas": [{"name": "lea_va", "discord_username": ""}], "accounts": []}},
+             marche=_frV)
+    check("option discord : sans le bot, pas de rattachement par nom",
+          not _H["fiches"] and _H["par_nom"] == 0, _H["fiches"])
+    try:
+        _RV({}, _JBV, membres={"1": {"x"}}, salons=set())
+        _okT = False
+    except TypeError:
+        _okT = True
+    check("option discord : membres sous l ancienne forme (ensemble de noms) -> refuse, pas ignore",
+          _okT)
+    _E = _RV({}, {"julia": {"vas": [{"name": "Julia Fiche", "discord_username": "julia2003"}],
+                            "accounts": []}},
+             membres={"102": "julia", "900": "julia2003"}, salons=set())
+    check("option discord : pas de repli sans suffixe quand un membre porte le nom entier",
+          _E["fiches"].get(("julia", "julia fiche")) == ["900"], _E["fiches"])
+    _C = _RV({"201": {"identity": "julia", "insta_accounts": ["paul.ig"]},
+              "202": {"identity": "julia", "insta_accounts": ["Paul.IG"]}}, _JBV, marche=_frV)
+    check("option discord : deux VA sur une fiche -> fiche gardee, collision signalee",
+          _C["collisions"].get(("julia", "paul")) == ["201", "202"], _C["collisions"])
+    check("option discord : la fonction ne modifie pas ce qu on lui passe",
+          json.dumps(_USV, sort_keys=True) == _avantV)
+
+    # -----------------------------------------------------------------
+    # 2. Rendu et routes, sur un faux referentiel
+    # -----------------------------------------------------------------
+    _sV = _dirVd / "site"
+    (_sV / "identities").mkdir(parents=True)
+    _savV = {
+        "jb": (_jbV.DATA_DIR, _jbV.JAILBREAK_FILE, _jbV.BACKUP_DIR, _jbV.PREV_FILE,
+               _jbV.TOMB_FILE, _jbV._LAST_GOOD.get("data")),
+        "vp": (_vpV.DATA_DIR, _vpV.LIENS_FILE),
+        "ob": (_obV.DATA_DIR, _obV.OBJECTIFS_FILE, _obV.HISTO_FILE, _obV.VA_ACT_CFG,
+               _obV.SCRAPE_IDENTS_FILE),
+        "ti": (_tiV.FICHIER, _tiV.FICHIER_LIENS, _tiV._DOSSIER),
+        "ia": (_iaV.DATA, _iaV.IDENTITES, _iaV.CORBEILLE),
+        "ss": (_ssV.push_all, _ssV.push_all_async, _ssV._push_all_folder, _ssV._push_all_single),
+        "dc": _dcV._STORE,
+        "wu": (_wV.DATA_DIR, _wV.IDENTITIES_DIR, _wV.USERS_FILE, _wV._load_web_users,
+               _wV._va_ig_vue_discord, _wV._load_insta_3_stats_cache),
+    }
+    try:
+        _jbV.DATA_DIR = _sV
+        _jbV.JAILBREAK_FILE = _sV / "jailbreak.json"
+        _jbV.BACKUP_DIR = _sV / "jb_backups"
+        _jbV.PREV_FILE = _sV / "jailbreak.prev.json"
+        _jbV.TOMB_FILE = _sV / "jb_tombstones.json"
+        _jbV._LAST_GOOD["data"] = None
+        _vpV.DATA_DIR, _vpV.LIENS_FILE = _sV, _sV / "jb_va_liens.json"
+        _obV.DATA_DIR = _sV
+        _obV.OBJECTIFS_FILE = _sV / "jb_objectifs.json"
+        _obV.HISTO_FILE = _sV / "jb_report_comptes.json"
+        _obV.VA_ACT_CFG = _sV / "va_activity_cfg.json"
+        _obV.SCRAPE_IDENTS_FILE = _sV / "scrape_identites.json"
+        _tiV.FICHIER = _sV / "identity_type.json"
+        _tiV.FICHIER_LIENS = _sV / "identity_reserves.json"
+        _tiV._DOSSIER = _sV / "identities"
+        _tiV._CACHE.update(sig=None, data={})
+        _tiV._CACHE_LIENS.update(sig=None, data={})
+        _iaV.DATA, _iaV.IDENTITES = _sV, _sV / "identities"
+        _iaV.CORBEILLE = _sV / "_corbeille_identites"
+        # Les routes poussent vers Google Sheets en arriere-plan : jamais d'ici.
+        _ssV.push_all = lambda *a, **k: False
+        _ssV.push_all_async = lambda *a, **k: None
+        _ssV._push_all_folder = lambda *a, **k: False
+        _ssV._push_all_single = lambda *a, **k: False
+        _stV = _dcV.SnapshotStore(_sV / "dashboard_snapshots", "banc-vadiscord")
+        _stV.warmer = type("_SansChauffeur", (), {"touch": lambda self: None})()
+        _dcV._STORE = _stV
+        _wV.DATA_DIR = _sV
+        _wV.IDENTITIES_DIR = _sV / "identities"
+        _wV.USERS_FILE = _sV / "users.json"
+        _wV._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        # Le bot du banc « voit » Va IG (101, 103, 104, 105, 108, 111, 120
+        # membres ; 102 par son salon ; 106 ni l'un ni l'autre).
+        _wV._va_ig_vue_discord = lambda: (
+            _MBV, {"9001", "9002"},
+            {"101": {"nom": "Paul D", "avatar": ""},
+             "104": {"nom": "X<script>alert(1)</script>", "avatar": ""},
+             "120": {"nom": "Marie", "avatar": ""}})
+        _wV._load_insta_3_stats_cache = lambda: {
+            "orph.ig": {"followers": 1234, "daily": 10, "weekly": 50, "biweekly": 90},
+            "paul.ig": {"followers": 10, "daily": 1, "weekly": 2, "biweekly": 3}}
+        safe_json.write(_tiV.FICHIER, {})
+        safe_json.write(_jbV.JAILBREAK_FILE, _JBV)
+        safe_json.write(_wV.USERS_FILE, _USV)
+        for _iV in _JBV:
+            (_sV / "identities" / _iV).mkdir()
+        _wV._oublier_identites()
+
+        _hD = _wV._render_jailbreak_html("discord")
+        _hA = _wV._render_jailbreak_html("all")
+        _hN = _wV._render_jailbreak_html()          # hors requete : option eteinte
+        _hR = _wV._render_jailbreak_html.__wrapped__()   # le rendu seul, sans l'option
+
+        def _blocV(h, motif, fin):
+            """Le morceau de h qui commence au motif et finit au premier `fin`."""
+            i = h.find(motif)
+            if i < 0:
+                return ""
+            j = h.find(fin, i)
+            return h[i:j if j > 0 else len(h)]
+
+        def _btnV(h, va_id):
+            return (_blocV(h, "class='jb-side-va' data-va-id='%s'" % va_id, "</button>")
+                    or _blocV(h, "class='jb-side-va jb-dc-ro' data-va-id='%s'" % va_id, "</button>"))
+
+        def _carteV(h, va_id):
+            i = h.find("<div class='jb-va-detail' data-va-id='%s'" % va_id)
+            if i < 0:
+                i = h.find("<div class='jb-va-detail jb-dc-ro' data-va-id='%s'" % va_id)
+            if i < 0:
+                return ""
+            j = h.find("<div class='jb-va-detail", i + 10)
+            k = h.find("<div class='jb-no-selection'", i)
+            fins = [x for x in (j, k) if x > 0]
+            return h[i:min(fins) if fins else len(h)]
+
+        # -- option eteinte : la page de tous les jours + le logo -----------
+        _ICOv = _wV._JB_DC_ICO
+        check("eteinte : le bouton Discord est dans la barre d outils, eteint",
+              "<button type='button' id='jb-dc-toggle' class='jb-dc-toggle' aria-pressed='false'" in _hA
+              and _hA.find("id='jb-dc-toggle'") > _hA.find("<select id='jb-filter-identity'") > 0
+              and _hA.find("id='jb-dc-toggle'") < _hA.find("id='jb-sections-wrap'"))
+        check("eteinte : hors requete (pas de cookie), meme rendu que la portee « all »",
+              _hN == _hA)
+        _sansV = _hA
+        _sansV = _reVd.sub(r"^<style id='jb-dc-css'>.*?</style><svg class='jb-dc-defs'.*?</svg>"
+                           r"<template id='jb-dc-trou'>.*?</template>", "", _sansV, count=1, flags=_reVd.S)
+        _sansV = _reVd.sub(r"<script>function jbDcAllumee.*?</script>$", "", _sansV,
+                           count=1, flags=_reVd.S)
+        _sansV = _reVd.sub(r"<button type='button' id='jb-dc-toggle'.*?</button>", "", _sansV,
+                           flags=_reVd.S).replace(_ICOv, "")
+        check("eteinte : rien d autre ne change (le rendu moins bouton et logos = le rendu seul)",
+              _sansV == _hR, (len(_sansV), len(_hR)))
+        check("eteinte : toutes les fiches, aucun bandeau, aucune carte Discord, glisser intact",
+              all("data-va-id='%s'" % x in _hA for x in ("julia|noum", "jessye|safidy", "amelia|zed"))
+              and "id='jb-dc-bandeau'" not in _hA and "__discord__" not in _hA
+              and "data-va-drag='off'" not in _hA and "data-dc-fige='1'" not in _hA)
+        check("logo : sur une fiche rattachee (liste ET en-tete de la fiche)",
+              _ICOv in _btnV(_hA, "julia|paul")
+              and "<div class='jb-detail-head-name'>Paul" + _ICOv + "</div>" in _carteV(_hA, "julia|paul")
+              and _ICOv in _btnV(_hA, "julia|lea") and _ICOv in _btnV(_hA, "julia|nina"))
+        check("logo : fiche ecrite par « Mes comptes » FR, retrouvee par son pseudo",
+              _ICOv in _btnV(_hA, "julia|marie_va") and _ICOv in _carteV(_hA, "julia|marie_va"))
+        check("logo : absent d une fiche non-Discord (Noum, Safidy, Zed)",
+              _btnV(_hA, "julia|noum") and _ICOv not in _btnV(_hA, "julia|noum")
+              and _ICOv not in _carteV(_hA, "julia|noum")
+              and _ICOv not in _btnV(_hA, "jessye|safidy") and _ICOv not in _btnV(_hA, "amelia|zed"))
+        check("logo : nom de fiche echappe a cote du logo",
+              "<div class='jb-detail-head-name'>Jo &lt;b&gt;" + _ICOv in _hA
+              and _ICOv in _btnV(_hA, "lola|jo &lt;b&gt;"))
+        check("logo : symbole local, couleur par classe avec sa contrepartie claire",
+              "<symbol id='jb-dc-logo'" in _hA and "<use href='#jb-dc-logo'/>" in _hA
+              and ".jb-dc-ico{" in _hA and "body.light .jb-dc-ico{" in _hA
+              and "class='jb-dc-ico' style=" not in _hA)
+
+        # -- option allumee -------------------------------------------------
+        check("allumee : le bouton le montre (classe on, aria-pressed)",
+              "<button type='button' id='jb-dc-toggle' class='jb-dc-toggle on' aria-pressed='true'" in _hD)
+        check("allumee : seules les fiches des VA Discord",
+              all("data-va-id='%s'" % x in _hD for x in
+                  ("julia|paul", "julia|lea", "julia|nina", "julia|marie_va",
+                   "lola|jo &lt;b&gt;"))
+              and "data-va-id='julia|noum'" not in _hD and "data-va-id='julia|prisca'" not in _hD)
+        check("allumee : identite sans VA Discord absente (jessye, amelia)",
+              "data-identity='jessye'" not in _hD and "data-identity='amelia'" not in _hD)
+        _iBv = _hD.find("id='jb-dc-bandeau'")
+        check("allumee : le bandeau est en tete du panneau de droite (jbSoftRefresh le recopie)",
+              _hD.find("id='jb-main-pane'") < _iBv < _hD.find("<div class='jb-va-detail"), _iBv)
+        check("allumee : fiches cachees comptees ET nommees, identites entierement cachees comprises",
+              "fiches non-Discord masquées" in _hD and "@julia — Noum" in _hD
+              and "@julia — Prisca · <span>pseudo absent de Va IG</span> : priscah0908_23400" in _hD
+              and "@jessye — Safidy" in _hD and "@amelia — Zed" in _hD)
+        check("allumee : seuls les comptes Sans VA declares sur Discord restent",
+              "data-handle='libre.ig'" in _carteV(_hD, "julia|__no_va__")
+              and "autre.libre" not in _carteV(_hD, "julia|__no_va__")
+              and "@julia — @autre.libre" in _hD)
+        check("allumee : le VA sans fiche a sa carte, dans la section de son identite",
+              _btnV(_hD, "julia|__discord__104") and _carteV(_hD, "julia|__discord__104")
+              and _hD.find("data-va-id='julia|__discord__104'")
+              < _hD.find("<button type='button' class='jb-side-add-va' onclick=\"jbOpenAddVaModal('julia')"))
+        _c104 = _carteV(_hD, "julia|__discord__104")
+        check("allumee : tous ses handles, sans plafond",
+              all("data-handle='%s'" % _h in _c104 for _h in ("libre.ig", "orph.ig", "o2", "o3", "o4")),
+              _reVd.findall(r"data-handle='([^']*)'", _c104))
+        check("allumee : stats du scrape quand elles existent, sinon « Hors scrape »",
+              "1.2k" in _c104 and ">Hors scrape</span>" in _c104)
+        check("allumee : carte en lecture seule (ni ✎ ni ×, aucune ligne jb-row a scraper)",
+              "jbRemoveAccount" not in _c104 and "jbOpenEditModal" not in _c104
+              and "jb-row" not in _c104 and "jbOpenAddModal" not in _c104)
+        check("allumee : ni glisser de fiche (reorder_vas), ni glisser d identite",
+              all("data-va-drag='off'" in _btnV(_hD, x) for x in ("julia|paul", "julia|__discord__104"))
+              and "class='jb-drag-handle' draggable='true'" not in _hD)
+        check("allumee : bandeau -- exclus, handles hors referentiel, saisies illisibles",
+              "Exclus" in _hD and ("106 — " in _hD or "(106) — " in _hD) and "Handles absents du référentiel" in _hD
+              and "Paul D : @extra1.ig" in _hD and "Saisies illisibles" in _hD)
+        check("allumee : en-tete de la fiche -- le membre Discord rattache",
+              "title='Membre du serveur Discord Va IG'>Paul D</span>" in _carteV(_hD, "julia|paul"))
+        check("allumee : pseudos et handles echappes (users.json et profils Discord)",
+              "<script>alert(1)</script>" not in _hD and "X<script>" not in _hD
+              and "X&lt;script&gt;alert(1)&lt;/script&gt;" in _hD and "X&lt;script&gt;" in _hD)
+        _kpiV = _reVd.search(r"id='jb-kpi-comptes'><div[^>]*>(\d+)<", _hD)
+        _nsV = sum(int(x) for x in _reVd.findall(r"data-account-count='(\d+)'", _hD))
+        _hsV = set(_reVd.findall(r"data-handle='([^']*)'", _hD))
+        check("allumee : COMPTES = lignes affichees = somme des sections (un handle compte une fois)",
+              _kpiV is not None and int(_kpiV.group(1)) == _nsV == len(_hsV),
+              (_kpiV and _kpiV.group(1), _nsV, sorted(_hsV)))
+        # partage.ig : ligne « Sans VA » de julia ET carte de 112 (lola) --
+        # un seul compte, compte une fois (avant : deux dans COMPTES).
+        _secV = dict(_reVd.findall(r"<div class='jb-side-id jb-section' data-identity='([^']*)'"
+                                   r"[^>]*data-account-count='(\d+)'", _hD))
+        check("allumee : un handle affiche sous une autre identite ne compte pas deux fois",
+              "data-handle='partage.ig'" in _carteV(_hD, "julia|__no_va__")
+              and "data-handle='partage.ig'" in _carteV(_hD, "lola|__discord__112")
+              and _secV.get("lola") == "2" and _secV.get("julia") is not None, _secV)
+        _smV = _reVd.search(r"id='jb-side-summary'>[^<]*<b>(\d+)</b>.*?<b>(\d+)</b>", _hD, _reVd.S)
+        check("allumee : le resume de colonne compte aussi les cartes",
+              _smV is not None and int(_smV.group(1)) == len(_reVd.findall(
+                  r"<button type='button' class='jb-side-va", _hD))
+              and int(_smV.group(2)) == _hD.count("<div class='jb-side-id jb-section'"),
+              _smV and _smV.groups())
+
+        # -- routes : le cookie porte l'option --------------------------
+        _appV = _wV.create_app()
+        _appV.config["TESTING"] = True
+
+        def _clientV(dc, langue="fr"):
+            _c = _appV.test_client()
+            with _c.session_transaction() as _s:
+                _s["auth"] = True
+                _s["username"] = "admin"
+                _s["role"] = "owner"
+            _c.set_cookie("va_lang", langue)
+            if dc:
+                _c.set_cookie("jb_scope", "discord")
+            return _c
+
+        _hdV = {"X-Tab-Ajax": "1"}
+        _rV = {}
+        for _dcV2 in (False, True):
+            _cV = _clientV(_dcV2)
+            for _uV in ("/?lazy=jailbreak", "/?tab=jailbreak&frag=1"):
+                _rr = _cV.get(_uV, headers=_hdV)
+                _rV[(_dcV2, _uV)] = (_rr.status_code, _rr.get_data(as_text=True))
+        check("routes : sans le cookie, differe et fragment = tout le parc, bouton eteint",
+              all(_rV[(False, u)][0] == 200 and "data-va-id='julia|noum'" in _rV[(False, u)][1]
+                  and "aria-pressed='false'" in _rV[(False, u)][1]
+                  for u in ("/?lazy=jailbreak", "/?tab=jailbreak&frag=1")))
+        check("routes : avec le cookie jb_scope=discord, differe ET rafraichissement filtres",
+              all(_rV[(True, u)][0] == 200 and "data-va-id='julia|noum'" not in _rV[(True, u)][1]
+                  and "id='jb-dc-bandeau'" in _rV[(True, u)][1]
+                  and "aria-pressed='true'" in _rV[(True, u)][1]
+                  for u in ("/?lazy=jailbreak", "/?tab=jailbreak&frag=1")))
+        _enV = _clientV(True, "en").get("/?tab=jailbreak&frag=1", headers=_hdV).get_data(as_text=True)
+        check("anglais : le fragment rafraichi est traduit (bandeau, cartes, bouton)",
+              "Not scraped" in _enV and "Hors scrape" not in _enV
+              and "VAs of the Va IG Discord server" in _enV and "Back to all accounts" in _enV
+              and "data-t-off='Show only the VAs of the Va IG Discord server'" in _enV
+              and "<span>followers</span>" in _enV and "<span>abonnés</span>" not in _enV)
+        # Les mots generiques de l'option ne sont PAS dans le dictionnaire
+        # global : « abonnés » est aussi le libelle des lignes va-ig3 d'autres
+        # pages, qui passaient a moitie en anglais.
+        import i18n_en as _i18nV
+        check("anglais : aucune cle de l option ne traduit un texte d une autre page",
+              all(k not in _i18nV.TRADUCTIONS for k in ("abonnés", "vues 24 h", "vues 7 j", "vues 14 j",
+                                                       "Comptes bannis détectés"))
+              and _i18nV.VA_DISCORD_LOCAL.get("abonnés") == "followers")
+        _jsT = _wV._JB_DC_JS
+        # Le cookie est commun aux onglets : l'etat se lit sur l'ecran (bandeau
+        # dans #jb-main-pane), et le bouton suit chaque remplacement du panneau.
+        check("js : l etat vient de l ecran (bandeau), le bouton se resynchronise",
+              "var on = !jbDcAllumee();" in _jsT and "getElementById(\"jb-dc-bandeau\")" in _jsT
+              and "aria-pressed" not in _jsT.split("function jbBasculeDiscord")[1].split("}")[0]
+              and "new MutationObserver" in _jsT and "observe(m, {childList: true})" in _jsT
+              and "data-t-on='Revenir à tous les comptes'" in _rV[(False, "/?lazy=jailbreak")][1]
+              and "data-t-off='Afficher seulement les VA du serveur Discord Va IG'"
+              in _rV[(True, "/?tab=jailbreak&frag=1")][1])
+        check("js : le bouton pose / efface le cookie et recharge la section par le chargeur differe",
+              "function jbBasculeDiscord(btn)" in _jsT and "jb_scope=discord; path=/" in _jsT
+              and "max-age=0" in _jsT and "chargerOngletDiffere(sec)" in _jsT
+              and "window.location.reload()" in _jsT
+              and "<div data-lazy-tab='jailbreak'" in _rV[(True, "/?lazy=jailbreak")][1])
+        _nodeV = _shVd.which("node")
+        if _nodeV:
+            _cassV, _nbV = [], 0
+            for (_dcV2, _uV), (_st, _hV) in _rV.items():
+                for _k, _sc in enumerate(_reVd.findall(
+                        r"<script(?![^>]*\b(?:src=|type=.application/json))[^>]*>(.*?)</script>",
+                        _hV, _reVd.S)):
+                    _fJv = _dirVd / ("%s_%s_%d.js" % ("dc" if _dcV2 else "tout",
+                                                       "frag" if "frag" in _uV else "lazy", _k))
+                    _fJv.write_text(_sc, encoding="utf-8")
+                    _nbV += 1
+                    _rJv = _spVd.run([_nodeV, "--check", str(_fJv)], capture_output=True,
+                                     text=True, timeout=60)
+                    if _rJv.returncode:
+                        _cassV.append("%s: %s" % (_fJv.name, (_rJv.stderr or "")[:160]))
+            check("js : les scripts des fragments, option allumee et eteinte, passent node --check",
+                  _nbV >= 8 and not _cassV, " | ".join(_cassV) or _nbV)
+        else:
+            print("     (node absent : le JavaScript de l option Discord n a PAS ete verifie)")
+
+        # -- garde-fous de structure (patchs locaux du VPS) ----------------
+        _srcV = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+        _dJv = _srcV.index("def _render_jailbreak_html() -> str:")
+        _fJv2 = _srcV.index(chr(10) + "def ", _dJv + 40)
+        check("structure : le rendu ne recoit qu UNE ligne, apres collector_paused",
+              _srcV.count("def _render_jailbreak_html") == 1
+              and _srcV[_dJv:_fJv2].count("_jb_dc_") == 1
+              and "collector_paused = bool(_ig_health.rapidapi_pause())" + chr(10)
+              in _srcV[_dJv:_fJv2])
+        check("structure : l emballage remplace le nom APRES la definition",
+              _srcV.count("_render_jailbreak_html = _jb_option_discord(_render_jailbreak_html)") == 1
+              and _srcV.index("_render_jailbreak_html = _jb_option_discord(") > _fJv2
+              and _wV._render_jailbreak_html.__wrapped__.__name__ == "_render_jailbreak_html")
+        check("structure : pas d onglet ni de permission a part (option dans la page)",
+              "vadiscord" not in _srcV and "__jbTab" not in _srcV)
+    finally:
+        (_jbV.DATA_DIR, _jbV.JAILBREAK_FILE, _jbV.BACKUP_DIR, _jbV.PREV_FILE,
+         _jbV.TOMB_FILE, _jbV._LAST_GOOD["data"]) = _savV["jb"]
+        (_vpV.DATA_DIR, _vpV.LIENS_FILE) = _savV["vp"]
+        (_obV.DATA_DIR, _obV.OBJECTIFS_FILE, _obV.HISTO_FILE, _obV.VA_ACT_CFG,
+         _obV.SCRAPE_IDENTS_FILE) = _savV["ob"]
+        (_tiV.FICHIER, _tiV.FICHIER_LIENS, _tiV._DOSSIER) = _savV["ti"]
+        _tiV._CACHE.update(sig=None, data={})
+        _tiV._CACHE_LIENS.update(sig=None, data={})
+        (_iaV.DATA, _iaV.IDENTITES, _iaV.CORBEILLE) = _savV["ia"]
+        (_ssV.push_all, _ssV.push_all_async, _ssV._push_all_folder, _ssV._push_all_single) = _savV["ss"]
+        _dcV._STORE = _savV["dc"]
+        (_wV.DATA_DIR, _wV.IDENTITIES_DIR, _wV.USERS_FILE, _wV._load_web_users,
+         _wV._va_ig_vue_discord, _wV._load_insta_3_stats_cache) = _savV["wu"]
+        _wV._oublier_identites()
+except Exception as _eVd:
+    import traceback as _tbVd
+    check("option discord : testable", False, repr(_eVd)[:200] + " " + _tbVd.format_exc()[-600:])
+finally:
+    _shVd.rmtree(_dirVd, ignore_errors=True)
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
