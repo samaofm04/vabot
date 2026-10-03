@@ -34489,12 +34489,22 @@ try:
 
     _e1 = {"id": "s1", "icon": "📆", "title": "JOUR 0", "description": "Fais ceci",
            "media": [{"id": "m1", "kind": "link", "name": "https://x/y"}]}
-    check("le message porte le titre en gras et les liens a la fin",
-          _od.texte_de(_e1) == "**📆 JOUR 0**\n\nFais ceci\n\n📎 https://x/y")
-    check("une etape sans corps ne rend pas un message vide",
-          _od.texte_de({"icon": "👋", "title": "Bienvenue"}) == "**👋 Bienvenue**")
+    _enc = _od.encadre_de(_e1, 1)
+    check("chaque etape est un encadre : titre, corps, et les liens a la fin",
+          _enc["title"] == "📆 JOUR 0"
+          and _enc["description"] == "Fais ceci\n\n📎 https://x/y")
+    check("la barre de couleur change d une etape a l autre",
+          _od.couleur_de(_e1, 0) != _od.couleur_de(_e1, 1))
+    check("la palette tourne si le plan s allonge",
+          _od.couleur_de({}, 0) == _od.couleur_de({}, len(_od.COULEURS)))
+    check("une couleur posee sur l etape l emporte sur celle du rang",
+          _od.couleur_de({"couleur": "#123456"}, 3) == 0x123456)
+    check("une etape sans corps ne rend pas un encadre vide",
+          _od.encadre_de({"icon": "👋", "title": "Bienvenue"}, 0)["title"] == "👋 Bienvenue")
     check("l empreinte ne bouge pas sans raison",
-          _od.empreinte(_e1) == _od.empreinte(_jsO.loads(_jsO.dumps(_e1))))
+          _od.empreinte(_e1, 1) == _od.empreinte(_jsO.loads(_jsO.dumps(_e1)), 1))
+    check("mais elle suit le rang : reordonner change la couleur",
+          _od.empreinte(_e1, 0) != _od.empreinte(_e1, 1))
     _e2 = _jsO.loads(_jsO.dumps(_e1)); _e2["description"] = "Fais cela"
     check("elle bouge des que le texte change", _od.empreinte(_e1) != _od.empreinte(_e2))
     _e3 = _jsO.loads(_jsO.dumps(_e1)); _e3["media"].append({"id": "m2", "kind": "video",
@@ -34536,6 +34546,10 @@ try:
         check("premier passage : les deux etapes sont creees",
               len(_b1["crees"]) == 2 and not _b1["corriges"]
               and [a[0] for a in _appels] == ["POST", "POST"])
+        check("ce qui part est un encadre, et son texte n est PAS aussi en clair",
+              _appels[0][2].get("embeds") and _appels[0][2].get("content") == "")
+        check("les deux etapes n ont pas la meme couleur",
+              _appels[0][2]["embeds"][0]["color"] != _appels[1][2]["embeds"][0]["color"])
 
         _appels.clear()
         _b2 = _od.publier()

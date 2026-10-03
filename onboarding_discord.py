@@ -37,6 +37,32 @@ MAX_TEXTE = 2000
 MAX_FICHIER = 24 * 1024 * 1024      # Discord refuse au-delà sans boost
 MAX_JOINTES = 10
 ATTENTE_S = 6.0                      # on laisse la rafale de frappes se calmer
+MAX_ENCADRE = 4096                   # une description d'encadre tient plus large
+
+# Une couleur par etape, posee sur la barre de gauche de l'encadre. C'est le
+# seul moyen Discord de marquer « on change de jour » sans ajouter une ligne de
+# separation que personne ne lit. La palette tourne si le plan s'allonge.
+COULEURS = [0xF1C40F,   # accueil  — dore
+            0x3B82F6,   # jour 0   — bleu
+            0xF59E0B,   # attente  — orange
+            0x22C55E,   # jour 1   — vert
+            0x06B6D4,   # jour 2   — turquoise
+            0x8B5CF6,   # jour 3   — violet
+            0xEC4899,   # jour 4   — rose
+            0xEF4444,   # jour 5   — rouge
+            0x10B981]   # jour 6+  — emeraude
+
+
+def couleur_de(etape: Dict[str, Any], rang: int) -> int:
+    """La couleur de l'etape : la sienne si elle en a une, sinon celle du rang."""
+    brute = etape.get("couleur") or etape.get("color")
+    if brute not in (None, ""):
+        try:
+            return int(str(brute).lstrip("#"), 16) if isinstance(brute, str) else int(brute)
+        except (TypeError, ValueError):
+            pass
+    palette = config().get("couleurs") or COULEURS
+    return int(palette[rang % len(palette)])
 
 
 def _lire(chemin: Path, defaut):
@@ -69,16 +95,32 @@ def _api(methode: str, chemin: str, **kw):
 
 
 # ─── ce qu'une étape donne comme message ─────────────────────────────────
-def texte_de(etape: Dict[str, Any]) -> str:
-    """Le message tel qu'il sera lu : titre en gras, corps, liens à la fin."""
-    titre = ((etape.get("icon") or "") + " " + (etape.get("title") or "")).strip()
+def titre_de(etape: Dict[str, Any]) -> str:
+    return ((etape.get("icon") or "") + " " + (etape.get("title") or "")).strip()[:256]
+
+
+def corps_de(etape: Dict[str, Any]) -> str:
+    """Le corps de l'encadré : le texte de l'étape, puis ses liens."""
     corps = (etape.get("description") or "").strip()
     liens = [m.get("name") or m.get("url") for m in (etape.get("media") or [])
              if m.get("kind") == "link" and (m.get("name") or m.get("url"))]
-    txt = f"**{titre}**" + (f"\n\n{corps}" if corps else "")
     if liens:
-        txt += "\n\n" + "\n".join("📎 " + str(l) for l in liens)
-    return txt[:MAX_TEXTE]
+        corps = (corps + "\n\n" if corps else "") + "\n".join("📎 " + str(l) for l in liens)
+    return corps[:MAX_ENCADRE]
+
+
+def encadre_de(etape: Dict[str, Any], rang: int) -> Dict[str, Any]:
+    """L'étape en encadré : sa barre de couleur marque le changement de jour."""
+    return {"title": titre_de(etape),
+            "description": corps_de(etape),
+            "color": couleur_de(etape, rang)}
+
+
+def texte_de(etape: Dict[str, Any]) -> str:
+    """Le rendu en texte brut — sert encore aux empreintes et aux essais."""
+    titre = titre_de(etape)
+    corps = corps_de(etape)
+    return (f"**{titre}**" + (f"\n\n{corps}" if corps else ""))[:MAX_TEXTE]
 
 
 def fichiers_de(etape: Dict[str, Any]) -> Tuple[List[Tuple[str, bytes]], List[str]]:
@@ -111,12 +153,17 @@ def fichiers_de(etape: Dict[str, Any]) -> Tuple[List[Tuple[str, bytes]], List[st
     return pris, ecartes
 
 
-def empreinte(etape: Dict[str, Any]) -> str:
-    """Change dès que le message rendu changerait — et pas avant."""
+def empreinte(etape: Dict[str, Any], rang: int = 0) -> str:
+    """Change dès que le message rendu changerait — et pas avant.
+
+    La couleur en fait partie : réordonner deux étapes change leur couleur, et
+    sans ça le salon aurait gardé l'ancienne.
+    """
     med = [(str(m.get("id")), str(m.get("kind")), str(m.get("name")),
             str(m.get("size") or ""), str(m.get("url") or ""))
            for m in (etape.get("media") or [])]
-    brut = json.dumps([texte_de(etape), sorted(med)], ensure_ascii=False, sort_keys=True)
+    brut = json.dumps([titre_de(etape), corps_de(etape), couleur_de(etape, rang),
+                       sorted(med)], ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(brut.encode("utf-8")).hexdigest()
 
 
@@ -140,20 +187,23 @@ def publier(force: bool = False) -> Dict[str, Any]:
     connus = d.setdefault("messages", {})
     vivants = set()
 
-    for etape in etapes:
+    for rang, etape in enumerate(etapes):
         sid = str(etape.get("id") or "")
         if not sid:
             continue
         vivants.add(sid)
-        emp = empreinte(etape)
+        emp = empreinte(etape, rang)
         fiche = connus.get(sid) or {}
         if fiche.get("id") and fiche.get("empreinte") == emp and not force:
             bilan["inchanges"] += 1
             continue
-        txt = texte_de(etape)
         fichiers, ecartes = fichiers_de(etape)
         bilan["ecartes"] += [f'{etape.get("title")} : {x}' for x in ecartes]
-        corps = {"content": txt, "allowed_mentions": {"parse": []}}
+        # content vide ET embeds : en corrigeant un ancien message en texte
+        # brut, sans le vider on aurait eu le texte DEUX fois, une en clair et
+        # une dans l'encadre.
+        corps = {"content": "", "embeds": [encadre_de(etape, rang)],
+                 "allowed_mentions": {"parse": []}}
 
         if fiche.get("id"):
             # On REMPLACE les pièces jointes : sans la liste, Discord garde les
@@ -261,13 +311,13 @@ def adopter(ids: List[str]) -> Dict[str, Any]:
     d = _etat()
     connus = d.setdefault("messages", {})
     pris = []
-    for etape, mid in zip(etapes, ids):
+    for rang, (etape, mid) in enumerate(zip(etapes, ids)):
         c, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
         if c != 200:
             return {"ok": False, "erreur": f"message {mid} illisible (HTTP {c})"}
         if str(((msg.get("author") or {}).get("id")) or "") != mon_id:
             return {"ok": False, "erreur": f"le message {mid} n'est pas du bot : refus"}
-        connus[str(etape["id"])] = {"id": str(mid), "empreinte": empreinte(etape)}
+        connus[str(etape["id"])] = {"id": str(mid), "empreinte": empreinte(etape, rang)}
         pris.append(etape.get("title"))
     _ecrire(d)
     return {"ok": True, "adoptes": pris}
