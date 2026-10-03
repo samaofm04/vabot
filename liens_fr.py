@@ -268,6 +268,35 @@ def _reparer(uid, model: str, entree: Dict[str, Any]):
 #: generer() tient _VERROU pendant tout son reseau.
 NUMEROS = _RACINE / "data" / "numeros_va_fr.json"
 _VERROU_NUM = threading.Lock()
+#: Numeros donnes a la main par le proprietaire : {model: {uid: numero}}.
+#: « prisca amelia 1 » (03/10/2026) : Priscah (priscah0908_23400) est
+#: Amelia VA 1 -- celui qui le portait (marioofm, son compte de test, sans
+#: lien vivant) en recoit un autre, libre. Re-applique a chaque appel : un
+#: fichier numeros_va_fr.json remis a zero n'efface pas la volonte.
+NUMEROS_IMPOSES: Dict[str, Dict[int, int]] = {
+    "amelia": {1525406324970618890: 1},
+}
+
+
+def _imposer(model: str, numeros: Dict[str, Any]) -> bool:
+    """Applique NUMEROS_IMPOSES a la table de cette model ; True si elle a
+    change. Celui qui occupait un numero impose prend le plus petit libre."""
+    voulus = NUMEROS_IMPOSES.get(model) or {}
+    if not voulus:
+        return False
+    par = numeros.setdefault(model, {})
+    change = False
+    for uid, n in voulus.items():
+        if par.get(str(uid)) == n:
+            continue
+        for autre, v in list(par.items()):
+            if int(v) == n and autre != str(uid):
+                pris = _pris(model, numeros) | set(voulus.values())
+                par[autre] = next(i for i in range(1, 100000) if i not in pris)
+                print(f"[liens_fr] {model} {n} impose a {uid} : {autre} passe a {par[autre]}", flush=True)
+        par[str(uid)] = n
+        change = True
+    return change
 
 
 def _pris(model: str, numeros: Dict[str, Any]) -> set:
@@ -288,12 +317,14 @@ def numero_va(uid, model: str, creer: bool = True) -> int:
     model = str(model or "").strip().lower()
     with _VERROU_NUM:
         numeros = safe_json.load(NUMEROS, default={}) or {}
+        if _imposer(model, numeros) and not safe_json.write(NUMEROS, numeros, indent=1):
+            print(f"[liens_fr] numeros imposes de {model} NON enregistres", flush=True)
         par = numeros.setdefault(model, {})
         if str(int(uid)) in par:
             return int(par[str(int(uid))])
         if not creer:
             return 0
-        pris = _pris(model, numeros)
+        pris = _pris(model, numeros) | set((NUMEROS_IMPOSES.get(model) or {}).values())
         n = int((lien_de(uid, model) or {}).get("numero") or 0)
         if not n or n in {int(v) for v in par.values()}:
             n = next(i for i in range(1, 100000) if i not in pris)
