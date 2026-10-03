@@ -182,8 +182,13 @@ def faux_classement(debut, fin, pause=0.3, gid=None):
         lignes.append({"va": va, "numero": i + 1, "clics": total, "liens": 1, "spam": False,
                        "model": ""})
     lignes.sort(key=lambda x: (-x["clics"], x["numero"]))
-    return {"lignes": lignes, "illisibles": sorted(ill), "frais": True,
-            "entites": len(BASES[gid]), "liens": len(BASES[gid]), "sans_numero": []}
+    out = {"lignes": lignes, "illisibles": sorted(ill), "frais": True,
+           "entites": len(BASES[gid]), "liens": len(BASES[gid]), "sans_numero": []}
+    # comme le vrai classement : un relevé de Twitter est gardé pour Va IG,
+    # qui le reprend au lieu d'en refaire un (clé « avec_us »). getattr : ce
+    # fichier doit encore tourner le jour où ce code temporaire sera retiré
+    getattr(pd, "_retenir", lambda *x: None)(gid, debut, fin, out)
+    return out
 
 
 pd.classement = faux_classement
@@ -209,6 +214,7 @@ def remise_a_zero():
     ILLISIBLES.clear()
     GMS.clear()
     _PRIMES.clear()
+    getattr(pd, "_RELEVES", {}).clear()   # les relevés gardés en mémoire pour Va IG
     PAUSE["on"] = False
 
 
@@ -478,9 +484,15 @@ try:
               "Période terminée : classement arrêté, il ne bougera plus." in ds
               and js["embeds"][0]["footer"]["text"].endswith("· résultat final"))
         va1 = premier(g)
+        # Va IG avec la clé « avec_us » (temporaire) : la page montre aussi les
+        # VA de Twitter, et son total unique est celui de toute l'agence. .get :
+        # sans la clé (ou sans le code), le total redevient celui de ses VA seuls
+        mele = g == IG and pd.SERVEURS.get(IG, {}).get("avec_us")
+        total = sum(complet(x, v, S_OLD, S_OLD_FIN) for x in ((g, TW) if mele else (g,))
+                    for v in BASES[x])
         check(f"{g} 01/10 : chiffres de la quinzaine ENTIÈRE (16 → 30/09)",
               f'**{va1}** — **{complet(g, va1, S_OLD, S_OLD_FIN)}** subs' in ds
-              and f'**{sum(complet(g, v, S_OLD, S_OLD_FIN) for v in BASES[g])}** subs' in ds, ds[:400])
+              and f'👥 **Total période**\n**{total}** subs' in ds, ds[:400])
         nouv = etat["subs"][g]
         check(f"{g} 01/10 : la quinzaine neuve a SA page, postée après la figée",
               nouv["saison"] == S_NEW.isoformat() and nouv["messages"][0] != page_old[g]

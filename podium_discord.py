@@ -44,6 +44,14 @@ part ensuite, en dessous. Avant, la semaine finie restait « SEMAINE EN COURS
 — Rien n'est joué » avec des chiffres vieux de deux heures, à côté d'un
 podium posté à part et mêlé au message de la semaine suivante.
 
+VA IG MONTRE AUSSI LES VA US, POUR LE MOMENT (clé « avec_us » de SERVEURS,
+voir là pour couper). Les VA de Twitter y paraissent sous leur vrai libellé
+anonyme (« VA 12 ») avec leurs clics US ; l'en-tête dit que le classement
+couvre toute l'agence, sans marque FR/US ligne à ligne. Le relevé de
+Twitter est repris en mémoire, pas refait. Rien de cela ne touche à la
+paie : le classement gardé, figé et payé reste celui des seuls VA FR, et
+le 💰 dit toujours « VA FR ».
+
 Ce que podium.json en retient :
   vivants[gid]       semaine, message, vu, dernier (relevé gardé pour figer
                      sans GetMySocial), termine (le lundi, « terminée » déjà dit)
@@ -107,7 +115,20 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                "source": "Instagram 📸", "bot": "Luigi", "fr": True,
                # pas de salon bonus sur Va IG ; deux heures entre deux releves :
                # un appel GetMySocial par VA, et le quota est partage avec le site
-               "bonus": False, "minutes": 120, "alltime": "podium_alltime_va_ig.json"},
+               "bonus": False, "minutes": 120, "alltime": "podium_alltime_va_ig.json",
+               # TEMPORAIRE. Avec trois VA, le podium et les subs de Va IG avaient
+               # l'air vides. Proprietaire, 03/10/2026 : « pour les subs mais aussi
+               # le mec du US, comme ca ca fait comme si y'a des vrais mecs », « mets
+               # les VA US aussi », « juste pour le moment, je te dirai pour couper
+               # plus tard ». Les VA de Twitter (« VA 7 », clics US) s'affichent
+               # alors a cote des VA FR, partout sur Va IG ; les primes restent aux
+               # VA FR. Il voulait aussi les faire passer pour des VA « Alicia » :
+               # refuse, ce serait preter le travail d'un VA a un autre sur un
+               # classement qui paie. Compromis annonce : leur vrai libelle
+               # (« VA 12 »), un en-tete « toute l'agence », aucune marque FR/US
+               # ligne a ligne. POUR COUPER : retirer cette cle, rien d'autre (sans
+               # elle, chaque message redevient exactement celui d'avant).
+               "avec_us": True},
 }
 
 
@@ -384,9 +405,13 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     # à égalité, le numéro départage : deux relevés de la même semaine doivent
     # rendre le même ordre, sinon le podium changerait tout seul d'un appel à l'autre
     lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
-    return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
-            "entites": len(ents), "liens": len(liens),
-            "sans_numero": sorted(sans_numero)}
+    out = {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
+           "entites": len(ents), "liens": len(liens),
+           "sans_numero": sorted(sans_numero)}
+    # Twitter relève de toute façon ses VA pour ses propres messages : Va IG
+    # reprend ce relevé au lieu d'en refaire un (voir _releve_us)
+    _retenir(gid, debut, fin, out)
+    return out
 
 
 def alltime(gid: Optional[str] = None) -> Dict[str, int]:
@@ -425,6 +450,145 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
                          json.dumps({"jour": fin, "totaux": totaux},
                                     ensure_ascii=False, indent=2, sort_keys=True))
     return {k: int(v) for k, v in totaux.items()}
+
+
+# ─── Va IG : les VA US à côté des VA FR (temporaire, clé « avec_us ») ─────
+# Les relevés de Twitter gardés en mémoire : {(gid, début, fin): {t, jour, cl}}.
+# Un relevé, c'est un appel GetMySocial par VA de Twitter (une trentaine) :
+# Twitter le fait déjà pour ses propres messages, Va IG le reprend. Un relevé
+# de moins de deux heures (le rythme de Va IG) est repris tel quel ; un relevé
+# pris APRÈS la fin de sa période la compte entière, et vaut pour toujours.
+CACHE_US_MIN = 120
+_RELEVES: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+
+def _qualite(cl: Dict[str, Any]) -> Tuple[bool, int, int]:
+    """Plus grand = plus complet : liste des liens fraîche, moins de VA
+    illisibles, plus de VA classés."""
+    return (bool(cl.get("frais", True)), -len(cl.get("illisibles") or []),
+            len(cl.get("lignes") or []))
+
+
+def _retenir(gid: Optional[str], debut: dt.date, fin: dt.date, cl: Dict[str, Any]) -> None:
+    """Garde un relevé de Twitter pour Va IG. Un relevé vide ne remplace rien,
+    et un relevé plus pauvre ne remplace pas celui, plus complet, d'une
+    période déjà finie."""
+    if str(gid or "") != TWITTER_ID or not (cl or {}).get("lignes"):
+        return
+    t = time.time()
+    # quatre jours : une quinzaine figée au bout de 48 h (ABANDON_FIGER_H)
+    # trouve encore le relevé de sa période entière
+    for k in [k for k, e in _RELEVES.items() if not 0 <= t - e["t"] <= 4 * 86400]:
+        _RELEVES.pop(k, None)
+    cle = (TWITTER_ID, debut.isoformat(), fin.isoformat())
+    jour = _aujourdhui().isoformat()
+    neuf = {"lignes": [dict(x) for x in cl["lignes"]],
+            "illisibles": list(cl.get("illisibles") or []),
+            "frais": bool(cl.get("frais", True))}
+    ancien = _RELEVES.get(cle)
+    if (ancien and ancien["jour"] > fin.isoformat() and jour > fin.isoformat()
+            and _qualite(ancien["cl"]) > _qualite(neuf)):
+        # la période est finie, ses clics ne bougent plus : le relevé complet
+        # de 00h10 restait écrasé par celui du podium de 9h où un VA n'avait
+        # pas répondu, et Va IG figeait son podium sans ce VA, sans un mot
+        ancien["essai"] = t
+        return
+    _RELEVES[cle] = {"t": t, "essai": t, "jour": jour, "cl": neuf}
+
+
+def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
+    """Le classement des VA de Twitter sur cette période, sans le refaire si
+    Twitter vient de le faire. None si on ne l'a pas (pause, panne, vide).
+
+    Un relevé pris après la fin de sa période la compte entière. S'il lui
+    manque des VA (illisibles), il est relu, deux heures au moins après le
+    dernier essai ; en attendant il est rendu tel quel, et le message dit
+    qui manque (un VA illisible n'est pas un zéro, ni un absent)."""
+    cle = (TWITTER_ID, debut.isoformat(), fin.isoformat())
+    e = _RELEVES.get(cle)
+    t = time.time()
+    entier = bool(e) and e["jour"] > fin.isoformat()
+    if e:
+        if entier:
+            if (not e["cl"]["illisibles"] or _pause_gms()
+                    or 0 <= t - float(e.get("essai") or e["t"]) < CACHE_US_MIN * 60):
+                return e["cl"]
+        # moins de deux heures ne suffit que pour une période en cours : la
+        # quinzaine figée à 00h10 n'a pas à reprendre le relevé de 23h50,
+        # qui n'a pas les clics de la dernière demi-heure
+        elif fin >= _aujourdhui() and 0 <= t - e["t"] < CACHE_US_MIN * 60:
+            return e["cl"]
+    if _pause_gms():
+        # quota épuisé : des chiffres US périmés, ou pris avant la fin de la
+        # période (et figés pour toujours), seraient pires que de ne pas les
+        # montrer — le message reste alors celui des seuls VA FR
+        return None
+    try:
+        cl = classement(debut, fin, gid=TWITTER_ID)
+    except Exception as ex:
+        print(f"[podium] relevé US pour Va IG : {type(ex).__name__}: {ex}", flush=True)
+        cl = {}
+    _retenir(TWITTER_ID, debut, fin, cl)
+    e2 = _RELEVES.get(cle)
+    if e2 and ((cl or {}).get("lignes") or entier):
+        # relevé raté : un relevé entier déjà gardé, même troué, vaut mieux que
+        # rien (ses absents sont dits) ; un relevé d'avant la fin, non
+        e2["essai"] = t
+        return e2["cl"]
+    return None
+
+
+def _us_manquants(us: Optional[Dict[str, Any]]) -> List[str]:
+    """Les VA US sans relevé, absents d'un classement mêlé : à dire, jamais à taire."""
+    return list((us or {}).get("illisibles") or []) if (us or {}).get("lignes") else []
+
+
+def _us_pour(gid: Optional[str], debut: dt.date, fin: dt.date,
+             cl: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Les VA US à montrer à côté des VA FR de ce serveur, ou None.
+
+    None aussi quand le relevé FR est vide : un classement fait des seuls VA
+    US ne doit jamais paraître sur Va IG (personne n'y serait payable).
+    """
+    if str(gid or "") == TWITTER_ID or not _profil(gid).get("avec_us"):
+        return None
+    if not (cl or {}).get("lignes"):
+        return None
+    us = _releve_us(debut, fin)
+    if us is None:
+        print(f"[podium] {gid} : VA US non affichés ({debut} → {fin}), relevé Twitter "
+              "indisponible — message avec les seuls VA FR", flush=True)
+    elif us.get("illisibles"):
+        print(f'[podium] {gid} : {len(us["illisibles"])} VA US sans relevé, signalés dans le '
+              "message : " + ", ".join(us["illisibles"][:8]), flush=True)
+    return us
+
+
+def _melange(cl: Dict[str, Any], us: Optional[Dict[str, Any]],
+             pf: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Les lignes FR et US en une seule liste, du plus fort au plus faible.
+
+    None quand il n'y a rien à mêler : le message est alors exactement celui
+    d'avant. Chaque ligne garde son marché en interne (rien ne l'affiche :
+    il sert à garder les VA FR visibles, à prendre le bon all-time, à
+    départager) ; « prime » n'est posée que sur les VA FR que suivi_va
+    paiera vraiment : les trois premiers du classement FR (le même que lui),
+    s'ils ont au moins un sub. À égalité de clics, le tri stable garde
+    l'ordre de chaque classement, VA FR d'abord.
+    """
+    if not us or not us.get("lignes") or not cl.get("lignes"):
+        return None
+    tw = SERVEURS[TWITTER_ID]
+    fr = [dict(x, marche=pf["marche"]) for x in cl["lignes"]]
+    for rang, x in enumerate(fr[:len(PRIMES)]):
+        if int(x.get("clics") or 0) > 0:
+            x["prime"] = PRIMES[rang]
+            # le rang que suivi_va lui annonce en privé (« 🥇 1e de la
+            # semaine »), et qu'il doit donner pour réclamer
+            x["rang_fr"] = rang + 1
+    autres = [dict(x, marche=tw["marche"]) for x in us["lignes"]]
+    return sorted(fr + autres, key=lambda x: (-int(x.get("clics") or 0),
+                                              x["marche"] != pf["marche"]))
 
 
 # ─── le message ──────────────────────────────────────────────────────────
@@ -502,22 +666,93 @@ def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
             f"GetMySocial n'a pas rendu {periode} entière._")
 
 
+def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False) -> List[str]:
+    """Les lignes « ⚠️ » d'un classement mêlé pour les VA US qui y manquent.
+
+    Avant, un VA de Twitter sans relevé disparaissait du message de Va IG sans
+    un mot (le journal seul le disait), et les médailles glissaient d'un cran.
+    Les mots restent neutres (« Sans relevé », pas « VA US ») : le classement
+    se présente comme celui de toute l'agence, sans marché ligne à ligne,
+    mais qui manque est toujours dit, nom par nom.
+    `etat` : en_cours, termine ou final — ce qui sera encore relu, ou non.
+    `liste_dite` : la liste FR, elle aussi périmée, l'a déjà dit — sans
+    marché, une seconde ligne presque identique ne dirait rien de plus.
+    """
+    out: List[str] = []
+    manque = _us_manquants(us)
+    if manque:
+        plus = len(manque) > 1
+        suite = {"en_cours": (", ils remonteront" if plus else ", il remontera")
+                             + " au prochain passage.",
+                 "termine": (", ils seront relus" if plus else ", il sera relu")
+                            + " pour le podium officiel."}.get(etat, ".")
+        out += ["", "⚠️ **Sans relevé** : " + ", ".join(manque)
+                + f' — {"absents" if plus else "absent"} de ce classement' + suite]
+    if (us or {}).get("lignes") and not us.get("frais", True) and not liste_dite:
+        out += ["", "⚠️ _Liste des liens non rafraîchie : des VA peuvent manquer._"]
+    return out
+
+
+def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any]) -> List[str]:
+    """Les lignes du podium quand VA FR et VA US sont mêlés.
+
+    Les médailles restent aux trois premières places, quel que soit le
+    marché ; le 💰 ne va qu'aux VA FR réellement payés. Tous les VA FR restent
+    visibles, même au-delà des quinze premiers : ce sont eux qui lisent ce
+    salon, et un VA US plus fort en clics ne doit pas leur cacher leur rang ni
+    leur prime.
+    """
+    montres = [i for i, x in enumerate(mix)
+               if i < COMBIEN_AFFICHES or x["marche"] == pf["marche"]]
+    out: List[str] = []
+    avant = -1
+    for i in montres:
+        x = mix[i]
+        if i != avant + 1:
+            out.append("…")
+        avant = i
+        # le rang FR à côté du montant : le rang affiché est celui du
+        # classement mêlé (« 4. »), mais suivi_va annonce et paie au rang FR
+        # (« 2e de la semaine »). Sans lui, un VA réclamait sa prime au 4e rang.
+        # Aucune autre marque : le marché n'est plus dit ligne à ligne
+        # (propriétaire), seul ce qui touche à la paie reste « VA FR ».
+        queue = (f' · 💰 **{x["prime"]:.0f}$** ({x["rang_fr"]}{"er" if x["rang_fr"] == 1 else "e"} '
+                 f'VA {pf["marche"]})' if x.get("prime") else "")
+        out.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{queue}' if i < 3
+                   else f'{i + 1}. {x["va"]} — **{x["clics"]}** subs{queue}')
+    reste = len(mix) - len(montres)
+    if reste > 0:
+        out.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
+    return out
+
+
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                  en_cours: bool = False, gid: Optional[str] = None,
-                 termine: bool = False, avertissement: str = "") -> Dict[str, Any]:
+                 termine: bool = False, avertissement: str = "",
+                 us: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Le message de la semaine, dans l'un de ses trois états :
 
     - `en_cours` : le message vivant, réédité tout au long de la semaine ;
     - `termine` : le lundi avant l'heure du podium — la semaine entière est
       comptée, le podium officiel est annoncé pour l'heure dite ;
     - ni l'un ni l'autre : le résultat final. Il ne bougera plus, et il le dit.
+
+    `us` (Va IG, clé « avec_us ») : le classement des VA de Twitter, mêlé à
+    celui des VA FR ; `cl` reste le classement FR, le seul qui paie.
     """
     pf = _profil(gid)
     lignes = cl["lignes"]
+    mix = _melange(cl, us, pf)
+    tw = SERVEURS[TWITTER_ID]
+    # mêlé, l'en-tête dit seulement que le classement couvre toute l'agence :
+    # c'est vrai, et c'est le compromis annoncé au propriétaire (pas de VA US
+    # rebaptisés en VA FR, pas de marché ligne à ligne)
+    abo = (f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**' if mix is None
+           else "Abonnements de **toute l'agence**")
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
-             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**',
+             abo,
              "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._", ""]
     else:
         # passé l'heure (bot redémarré pendant que le podium échoue), « à 9h »
@@ -525,27 +760,41 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         quand = (f"ce lundi à {_heure_podium()}h" if _maintenant().hour < _heure_podium()
                  else "dans la journée")
         c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
-             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**',
+             abo,
              (f"🏁 _Semaine terminée. Le podium officiel arrive {quand}, sur ce message._"
               if termine
               else "🔒 _Semaine terminée : classement arrêté, il ne bougera plus._"), ""]
-    for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
-        if i < 3:
-            c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
-                     f'· 💰 **{PRIMES[i]:.0f}$**')
-        else:
-            c.append(f'{i + 1}. {x["va"]} — **{x["clics"]}** subs')
-    reste = len(lignes) - COMBIEN_AFFICHES
-    if reste > 0:
-        c.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
+    if mix is not None:
+        c += _lignes_podium_mix(mix, pf)
+    else:
+        for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
+            if i < 3:
+                c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
+                         f'· 💰 **{PRIMES[i]:.0f}$**')
+            else:
+                c.append(f'{i + 1}. {x["va"]} — **{x["clics"]}** subs')
+        reste = len(lignes) - COMBIEN_AFFICHES
+        if reste > 0:
+            c.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
     if not lignes:
         c.append("_Aucun relevé cette semaine._")
 
-    c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
-    for i, p in enumerate(PRIMES):
-        c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
+    if mix is None:
+        c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
+        for i, p in enumerate(PRIMES):
+            c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
+    else:
+        # pas de médaille ici : les médailles du classement mêlé peuvent être à
+        # des VA US, et « 🥇 1er → 10$ » leur promettrait une prime
+        c += ["", f'🎁 **Les 3 meilleurs VA {pf["marche"]} de la semaine touchent une prime :**']
+        for i, p in enumerate(PRIMES):
+            c.append(f'💰 {i + 1}{"er" if i == 0 else "e"} VA {pf["marche"]} → **{p:.0f}$**')
+    # mêlé, « ton rang de la semaine » ne dit plus lequel : le rang affiché
+    # compte aussi les VA US, la prime se paie au rang parmi les VA FR
+    rang = ("ton rang de la semaine" if mix is None
+            else f'ton rang parmi les VA {pf["marche"]}')
     c += ["", f'💸 **Pour recevoir ta prime :** envoie un message à **@{pf["bot"]}** dans '
-              "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
+              f"**ton espace perso** avec **{rang}** et **ton adresse "
               "USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification",
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
@@ -564,10 +813,14 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if cl.get("sans_numero"):
         c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
               "écarté(s) le temps que la liste revienne._"]
+    if mix is not None:
+        c += _avert_us(us, "en_cours" if en_cours else "termine" if termine else "final",
+                       liste_dite=not cl["frais"])
     if avertissement:
         c += ["", avertissement]
 
-    pied = f'YOULAB • Marché {pf["marche"]} · comptes VA, sans pseudo'
+    pied = (f'YOULAB • Marché {pf["marche"]} · comptes VA, sans pseudo' if mix is None
+            else f'YOULAB • Marchés {pf["marche"]} + {tw["marche"]} · comptes VA, sans pseudo')
     if en_cours:
         pied += " · mis à jour " + _horodatage()
     elif termine:
@@ -584,7 +837,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
 
 def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                totaux: Dict[str, int], gid: Optional[str] = None,
-               final: bool = False, avertissement: str = "") -> List[Dict[str, Any]]:
+               final: bool = False, avertissement: str = "",
+               us: Optional[Dict[str, Any]] = None,
+               totaux_us: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     """Le classement de la quinzaine, découpé en autant de messages qu'il faut.
 
     Discord coupe une description à 4096 caractères. Plutôt que de tronquer —
@@ -595,18 +850,34 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     `final` : la quinzaine est finie, ces pages ne bougeront plus. Le titre
     porte ses dates (plusieurs quinzaines figées se suivent dans le salon) et
     plus rien ne promet un « prochain passage ».
+
+    `us`, `totaux_us` (Va IG, clé « avec_us ») : les VA de Twitter et leurs
+    totaux « depuis toujours », mêlés aux VA FR.
     """
     p = _profil(gid)
     lignes = cl["lignes"]
-    tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
-            f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
-            f'Clics **{p["marche"]}** · **{len(lignes)}** comptes classés\n')
+    mix = _melange(cl, us, p)
+    tw = SERVEURS[TWITTER_ID]
+    if mix is None:
+        tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
+                f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
+                f'Clics **{p["marche"]}** · **{len(lignes)}** comptes classés\n')
+    else:
+        # le même en-tête que le podium mêlé : toute l'agence, sans marché
+        tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
+                f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
+                f"Subs de **toute l'agence** · **{len(mix)}** comptes classés\n")
     if final:
         tete += "🔒 _Période terminée : classement arrêté, il ne bougera plus._\n"
 
     rangs = []
-    for i, x in enumerate(lignes):
-        at = totaux.get(x["va"])
+    for i, x in enumerate(lignes if mix is None else mix):
+        if mix is None:
+            at = totaux.get(x["va"])
+        else:
+            # « VA 3 » de Twitter et « Amelia VA 3 » ne sont pas la même
+            # personne : chaque total vient du fichier de son serveur
+            at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
         suffixe = f' · 🌐 {at} all-time' if at is not None else ""
         rangs.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{suffixe}'
                      if i < 3 else
@@ -614,7 +885,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if not rangs:
         rangs = ["_Aucun relevé pour cette période._"]
 
-    total = sum(int(x["clics"]) for x in lignes)
+    # mêlé : un seul total, celui de toutes les lignes affichées — l'en-tête
+    # annonce toute l'agence, un total par marché redirait ce qu'on ne dit plus
+    total = sum(int(x["clics"]) for x in (lignes if mix is None else mix))
     queue = [f'\n👥 **Total période**\n**{total}** subs']
     if cl["illisibles"]:
         if final:
@@ -625,6 +898,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                          + " — ils remonteront au prochain passage.")
     if not cl["frais"]:
         queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
+    if mix is not None:
+        queue += ["\n" + x for x in _avert_us(us, "final" if final else "en_cours",
+                                               liste_dite=not cl["frais"]) if x]
     if avertissement:
         queue.append("\n" + avertissement)
     bas = "\n".join(queue)
@@ -649,7 +925,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         corps = tete + "\n" + "\n".join(page)
         if n == len(pages):
             corps += "\n" + bas
-        pied = (f'YOULAB • Marché {p["marche"]} · comptes VA, sans pseudo · '
+        marches = (f'Marché {p["marche"]}' if mix is None
+                   else f'Marchés {p["marche"]} + {tw["marche"]}')
+        pied = (f'YOULAB • {marches} · comptes VA, sans pseudo · '
                 + ("résultat final" if final else "mis à jour " + _horodatage()))
         if len(pages) > 1:
             pied = f"page {n}/{len(pages)} · " + pied
@@ -753,7 +1031,11 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     except Exception as e:
         print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
         totaux = {}
-    pages = pages_subs(cl, debut, fin_saison, totaux, gid=gid)
+    us = _us_pour(gid, debut, min(aujourd, fin_saison), cl)
+    # le total « depuis toujours » des VA US : celui que Twitter relève chaque
+    # jour pour lui-même, lu sans appeler GetMySocial
+    pages = pages_subs(cl, debut, fin_saison, totaux, gid=gid, us=us,
+                       totaux_us=_alltime_lu(TWITTER_ID) if us else None)
 
     neufs: List[str] = []
     for i, page in enumerate(pages):
@@ -879,6 +1161,16 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
                 raison = "aucun relevé"
             elif cl["illisibles"]:
                 raison = "relevé illisible : " + ", ".join(cl["illisibles"])
+        us: Optional[Dict[str, Any]] = None
+        us_lu = False
+        if not raison:
+            # Va IG (clé « avec_us ») : les VA US affichés doivent être entiers
+            # eux aussi. Figée à 00h10 sur un relevé de Twitter où un VA n'avait
+            # pas répondu, la page le perdait pour toujours, alors que Twitter,
+            # lui, attendait et figeait complet deux heures plus tard.
+            us, us_lu = _us_pour(gid, debut, fin, cl), True
+            if _us_manquants(us):
+                raison = "relevé US illisible : " + ", ".join(_us_manquants(us))
         rec["essai"] = t
         avert = ""
         if raison:
@@ -903,8 +1195,11 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         # milieu reprend ces pages-là, il ne relève pas GetMySocial à nouveau
         # (et ne risque pas de remplacer des chiffres complets par un relevé
         # plus pauvre, deux heures plus tard)
+        if not us_lu:
+            us = _us_pour(gid, debut, fin, cl)
         rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid), gid=gid, final=True,
-                                  avertissement=avert)
+                                  avertissement=avert, us=us,
+                                  totaux_us=_alltime_lu(TWITTER_ID) if us else None)
         rec["complet_calc"] = not raison
         rec["comptes"] = len(cl["lignes"])
         rec["faites"] = 0
@@ -1171,7 +1466,8 @@ def _semaine_terminee(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, 
     else:
         code, _rep = _api("PATCH", f"/channels/{salon}/messages/{garde['message']}",
                           json={"embeds": [embed_podium(cl, lundi, dimanche, gid=gid,
-                                                        termine=True, avertissement=avert)]})
+                                                        termine=True, avertissement=avert,
+                                                        us=_us_pour(gid, lundi, dimanche, cl))]})
         if code != 200:
             # une seule tentative : le podium de 09h repasse de toute façon
             # sur ce message (ou en poste un neuf s'il a disparu)
@@ -1231,7 +1527,10 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
                     cl = {"lignes": [], "illisibles": list(cl.get("illisibles") or []),
                           "frais": bool(cl.get("frais", True))}
                     avert = "⚠️ _GetMySocial n'a rendu aucun chiffre pour cette semaine._"
-        embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert)
+        us = _us_pour(gid, lundi, dimanche, cl)
+        if _us_manquants(us):
+            complet = False            # le message le dit : des VA US y manquent
+        embed = embed_podium(cl, lundi, dimanche, gid=gid, avertissement=avert, us=us)
     code, _rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"embeds": [embed]})
     if code != 200 and _passager(code, _rep):
         garde["embed_final"] = embed
@@ -1335,7 +1634,11 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
               f'({cl["entites"]} entites, {len(cl["illisibles"])} illisible(s)) — '
               "rien poste, nouvel essai au prochain tour", flush=True)
         return ""
-    embed = embed_podium(cl, debut, fin, gid=gid)
+    # sur Va IG, les VA US ne sont qu'affichés à côté : `cl` reste le classement
+    # des VA FR, le seul gardé et le seul payé (suivi_va, plus bas). Un relevé
+    # FR vide est déjà reparti plus haut : jamais un podium de VA US seuls.
+    us = _us_pour(gid, debut, fin, cl)
+    embed = embed_podium(cl, debut, fin, gid=gid, us=us)
 
     vivants = d.setdefault("vivants", {})
     vivant = vivants.get(gid) or {}
@@ -1379,7 +1682,9 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     postes[cle] = mid
     d.setdefault("figes", {}).setdefault(gid, {})[debut.isoformat()] = {
         "message": mid, "fin": fin.isoformat(), "mode": mode, "ping": ping,
-        "complet": not cl["illisibles"], "le": _maintenant().isoformat(timespec="minutes")}
+        # complet : rien ne manque au message, VA US affichés compris
+        "complet": not cl["illisibles"] and not _us_manquants(us),
+        "le": _maintenant().isoformat(timespec="minutes")}
     if reste:
         d["figes"][gid][debut.isoformat()]["ping_a_refaire"] = reste
     # le podium public reste anonyme ; le nom, le montant et l'adresse ne se
@@ -1455,7 +1760,8 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
         # aucun relevé du tout : on ne remplace pas un classement correct par du vide
         print("[podium] aucun relevé, message vivant laissé tel quel", flush=True)
         return str(garde.get("message") or "")
-    corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True, gid=gid)]}
+    corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True, gid=gid,
+                                     us=_us_pour(gid, debut, fin, cl))]}
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("semaine") == debut.isoformat():
