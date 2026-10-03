@@ -221,6 +221,60 @@ def _prevenir_manager(gid: str, uid: str, salon: str, jours: int) -> bool:
 
 
 # ─── la paie du lundi ────────────────────────────────────────────────────
+def _annoncer_primes_fr(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
+    """Va IG : « Amelia VA 3 » -> le VA qui porte le numero 3 dans Amelia
+    (liens_fr.numero_va, data/numeros_va_fr.json) -> son ticket (users.json).
+
+    Poste par le bot PRINCIPAL : c'est lui qui voit les tickets des VA (un
+    second bot ne les voit pas toujours, malgre son role). Meme message que
+    sur Twitter, sans manager (Va IG n'en note pas par VA). Une fois par VA et
+    par semaine."""
+    import os
+    import requests
+    import liens_fr
+    import podium_discord as pod
+    d = _etat()
+    faits = d.setdefault("primes", {})
+    bilan = {"dits": [], "sans_adresse": [], "inconnus": [], "un_seul_prix": []}
+    numeros = safe_json.load(liens_fr.NUMEROS, default={}) or {}
+    users = safe_json.load(Path(__file__).resolve().parent / "data" / "users.json", default={}) or {}
+    jeton = os.environ.get("DISCORD_TOKEN", "")
+    for rang, ligne in enumerate(cl.get("lignes") or []):
+        if rang >= len(pod.PRIMES):
+            break
+        model, n = str(ligne.get("model") or ""), int(ligne.get("numero") or 0)
+        uid = next((u for u, v in (numeros.get(model) or {}).items() if int(v) == n), None)
+        fiche = users.get(str(uid)) if uid else None
+        salon = str((fiche or {}).get("channel_id") or "") if isinstance(fiche, dict) else ""
+        if not uid or not salon or not jeton:
+            bilan["inconnus"].append(ligne.get("va"))
+            continue
+        cle_p = f'{gid}:{uid}:{debut.isoformat()}'
+        if faits.get(cle_p):
+            # deja prime cette semaine (deux models sur le podium) : un seul
+            # prix par personne, comme le dit le podium -- note, pas tu
+            bilan["un_seul_prix"].append(ligne.get("va"))
+            continue
+        montant = pod.PRIMES[rang]
+        r = requests.post(f"https://discord.com/api/v10/channels/{salon}/messages", timeout=20,
+                          headers={"Authorization": f"Bot {jeton}"}, json={
+            "content": f"<@{uid}>", "allowed_mentions": {"users": [str(uid)]},
+            "embeds": [{"title": f'{pod.MEDAILLES[rang]} {rang + 1}e de la semaine — {montant:.2f}$',
+                        "color": 0xF1C40F,
+                        "description": (f'Semaine du **{debut.strftime("%d/%m")}** au '
+                                        f'**{fin.strftime("%d/%m")}** · **{ligne.get("va")}** · '
+                                        f'**{ligne.get("clics")}** subs.\n'
+                                        f'💸 Envoie ton **adresse USDC (réseau Solana)** à '
+                                        f'**@{pod._profil(gid)["bot"]}** ici pour recevoir ta prime.')}]})
+        if r.status_code == 200:
+            faits[cle_p] = int(time.time())
+            bilan["dits"].append(f'{ligne.get("va")} : {montant:.2f}$')
+        else:
+            print(f"[suivi_va] prime {ligne.get('va')} non annoncee (HTTP {r.status_code})", flush=True)
+    _ecrire(d)
+    return bilan
+
+
 def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
     """Dit à chaque gagnant, dans SON salon, ce qu'il touche et où ça part.
 
@@ -232,6 +286,8 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
     import podium_discord as pod
     import tickets_discord as tk
     gid = str(gid)
+    if pod._profil(gid).get("fr"):
+        return _annoncer_primes_fr(gid, cl, debut, fin)
     d = _etat()
     faits = d.setdefault("primes", {})
     bilan = {"dits": [], "sans_adresse": [], "inconnus": []}

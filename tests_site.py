@@ -19941,7 +19941,7 @@ try:
     _sauv_afl = _gmsP.analytics_for_links
     _sauv_liens = _pd.liens_bruts
     try:
-        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"},
+        _pd.liens_bruts = lambda *_a, **_k: ([{"id": "a", "display_name": "( BO7 ) 1"},
                                     {"id": "c", "display_name": "(Gerome) 1"}], True)
         _gmsP.analytics_for_links = lambda ids, d0, d1: (
             (None, None) if ids == ["c"] else (10, {"US": 7, "FR": 3}))
@@ -19956,7 +19956,7 @@ try:
               "clics **US**" in _e["description"])
 
         # la liste des liens vient d en haut : le cache perime avait coute le vrai n°1
-        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"}], False)
+        _pd.liens_bruts = lambda *_a, **_k: ([{"id": "a", "display_name": "( BO7 ) 1"}], False)
         _gmsP.analytics_for_links = lambda ids, d0, d1: (10, {"US": 7})
         _cl2 = _pd.classement(_dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20), pause=0)
         _e2 = _pd.embed_podium(_cl2, _dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20))
@@ -19979,7 +19979,7 @@ try:
         _pd.ETAT_FICHIER = _plP(_tf2.mkdtemp()) / "podium.json"
         _pd._salon = lambda gid: "sal"
         _pd._pause_gms = lambda: False
-        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"}], True)
+        _pd.liens_bruts = lambda *_a, **_k: ([{"id": "a", "display_name": "( BO7 ) 1"}], True)
         _gmsP.analytics_for_links = lambda ids, d0, d1: (9, {"US": 9})
         _savApi = _pd._api
 
@@ -20012,7 +20012,7 @@ try:
 
         # aucun releve : on ne remplace pas un classement correct par du vide
         _appelsP.clear()
-        _pd.liens_bruts = lambda: ([], True)
+        _pd.liens_bruts = lambda *_a, **_k: ([], True)
         _pd.rafraichir("g1", jour=_dtP.date(2026, 10, 5))
         check("sans aucun releve, le message en place n est pas ecrase",
               not [x for x in _appelsP if x[0] in ("POST", "PATCH")])

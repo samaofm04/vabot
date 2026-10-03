@@ -66,9 +66,33 @@ EQUIPES_VA = ["tm_6a0e4739bfa0c238f20a8bf5",   # JESSY LE RETOUR
               "tm_6ab46ebb11a0232c11211b1a"]   # EMY TWITTER
 EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 
-# Les serveurs ou le podium, les subs et le bonus sont publies. Les chiffres
-# viennent des liens VA de Twitter : les afficher sur Threads serait faux.
-SERVEURS = {"1445108485090971710"}             # YouLab TWITTER
+# Les serveurs ou le podium, les subs et le bonus sont publies, et CE QUE
+# chacun compte. Les chiffres de Twitter affiches sur Threads seraient faux ;
+# Va IG (serveur FR, proprietaire 03/10/2026 : « lance le truc des subs comme
+# pour Twitter avec le numero du VA », « fais aussi le podium », primes
+# « comme Twitter ») a SES liens, SES pays et ses numeros « Amelia VA 3 » --
+# les memes que le nom du ticket et le lien (liens_fr.numero_va).
+TWITTER_ID = "1445108485090971710"
+VA_IG_ID = "1505418484052394004"
+SERVEURS: Dict[str, Dict[str, Any]] = {
+    TWITTER_ID: {"equipes": None,                # podium_config, sinon EQUIPES_VA
+                 "pays": ("US",), "marche": "US", "source": "Twitter 🐦",
+                 "bot": "Siri", "fr": False, "bonus": True, "minutes": None,
+                 "alltime": None},               # ALLTIME_FICHIER
+    VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
+               # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
+               "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",
+               "source": "Instagram 📸", "bot": "Luigi", "fr": True,
+               # pas de salon bonus sur Va IG ; deux heures entre deux releves :
+               # un appel GetMySocial par VA, et le quota est partage avec le site
+               "bonus": False, "minutes": 120, "alltime": "podium_alltime_va_ig.json"},
+}
+
+
+def _profil(gid: Optional[str] = None) -> Dict[str, Any]:
+    """Ce que compte ce serveur. Sans serveur (pages du site, anciens appels) :
+    Twitter, comme avant."""
+    return SERVEURS.get(str(gid or "")) or SERVEURS[TWITTER_ID]
 
 PRIMES = [10.0, 5.0, 3.0]
 # Le bot s'appelle « Siri » pour les membres (son application s'appelle SEVEN
@@ -190,14 +214,14 @@ def cle_entite(nom: str, spam: bool) -> str:
     return f"{nom} SPAM" if spam else nom
 
 
-def liens_bruts() -> Tuple[List[Dict[str, Any]], bool]:
-    """(liens, frais) sur TOUS les espaces de VA.
+def liens_bruts(gid: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
+    """(liens, frais) sur TOUS les espaces de VA du serveur.
 
     `frais` n'est vrai que si chaque espace a repondu. Un seul repli sur le
     cache suffit a le rendre faux : le message le dira, plutot que de laisser
     croire a une liste complete.
     """
-    equipes = list(_config().get("equipes") or
+    equipes = list(_profil(gid).get("equipes") or _config().get("equipes") or
                    ([_config()["equipe"]] if _config().get("equipe") else EQUIPES_VA))
     tout: List[Dict[str, Any]] = []
     vus = set()
@@ -237,6 +261,34 @@ def entites(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def entites_fr(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Va IG : {« amelia:3 »: {nom « Amelia VA 3 », model, numero, ids}}.
+
+    Le numero est dans le nom du lien (« Amelia VA 3 @pseudo ») : c'est celui
+    du VA dans sa model, le meme que son ticket. Les liens en plus d'un compte
+    de test (« Amelia VA 3-2 @… ») vont au meme VA ; le lien de base « Amelia
+    1 » et tout ce qui n'est pas un lien de VA est ecarte. Aucun pseudo dans
+    le libelle : le classement reste anonyme, comme sur Twitter."""
+    import liens_fr
+    out: Dict[str, Dict[str, Any]] = {}
+    for l in liens:
+        dn = str(l.get("display_name") or "").strip()
+        model = liens_fr.model_du_nom(dn)
+        m = re.search(r" VA (\d+)(?:-\d+)? @", dn)
+        if not model or not m:
+            continue
+        n = int(m.group(1))
+        cle = f"{model}:{n}"
+        e = out.setdefault(cle, {"nom": f'{liens_fr.MODELS[model]["nom"]} VA {n}', "spam": False,
+                                 "ids": [], "model": model, "numero": n})
+        e["ids"].append(str(l["id"]))
+    return out
+
+
+def _clics(pays: Optional[Dict[str, Any]], profil: Dict[str, Any]) -> int:
+    return sum(int((pays or {}).get(p) or 0) for p in profil["pays"])
+
+
 def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
     """La table clé → numéro de VA, complétée et gardée sur disque.
 
@@ -269,13 +321,22 @@ def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
 
 
 # ─── le classement ───────────────────────────────────────────────────────
-def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, Any]:
-    """{lignes, illisibles, frais} — les clics US par entité, du plus fort au plus faible."""
+def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
+               gid: Optional[str] = None) -> Dict[str, Any]:
+    """{lignes, illisibles, frais} — les clics du marché du serveur (US pour
+    Twitter) par entité, du plus fort au plus faible."""
     import gms
+    profil = _profil(gid)
     d0, d1 = debut.isoformat(), fin.isoformat()
-    liens, frais = liens_bruts()
-    ents = entites(liens)
-    table = numeros(list(ents.keys()), attribuer=frais)
+    liens, frais = liens_bruts(gid)
+    if profil["fr"]:
+        ents = entites_fr(liens)
+        # le numero vient du nom du lien : rien a attribuer ici, et la table
+        # de Twitter (podium_numeros.json) n'est pas touchee
+        table = {c: e["numero"] for c, e in ents.items()}
+    else:
+        ents = entites(liens)
+        table = numeros(list(ents.keys()), attribuer=frais)
     sans_numero = [c for c in ents if c not in table]
     if sans_numero:
         print(f"[podium] {len(sans_numero)} compte(s) sans numero, ecartes : "
@@ -289,36 +350,44 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, An
             _, pays = gms.analytics_for_links(e["ids"], d0, d1)
         except Exception:
             pays = None
-        va = f'VA {table.get(cle, 0)}'
+        va = e["nom"] if profil["fr"] else f'VA {table.get(cle, 0)}'
         if pays is None:
             illisibles.append(va)
         else:
             lignes.append({"va": va, "numero": table.get(cle, 999),
-                           "clics": int((pays or {}).get("US") or 0),
-                           "liens": len(e["ids"]), "spam": e["spam"]})
+                           "clics": _clics(pays, profil),
+                           "liens": len(e["ids"]), "spam": e["spam"],
+                           "model": e.get("model", "")})
         time.sleep(pause)
     # à égalité, le numéro départage : deux relevés de la même semaine doivent
     # rendre le même ordre, sinon le podium changerait tout seul d'un appel à l'autre
-    lignes.sort(key=lambda x: (-x["clics"], x["numero"]))
+    lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
     return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
             "entites": len(ents), "liens": len(liens),
             "sans_numero": sorted(sans_numero)}
 
 
-def alltime() -> Dict[str, int]:
+def alltime(gid: Optional[str] = None) -> Dict[str, int]:
     """Le total « depuis toujours » par entité, recalculé une fois par jour.
 
     Ce chiffre ne bouge presque pas d'une heure à l'autre : le redemander à
     chaque rafraîchissement doublait le nombre d'appels pour rien, et volait
-    le quota du tableau de bord.
+    le quota du tableau de bord. Un fichier par serveur : « VA 3 » de Twitter
+    et « Amelia VA 3 » de Va IG ne sont pas la même personne.
     """
-    cache = _lire(ALLTIME_FICHIER, {})
+    profil = _profil(gid)
+    fichier = DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
+    cache = _lire(fichier, {})
     if cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux"):
         return {k: int(v) for k, v in cache["totaux"].items()}
     import gms
-    liens, _ = liens_bruts()
-    ents = entites(liens)
-    table = numeros(list(ents.keys()))
+    liens, _ = liens_bruts(gid)
+    if profil["fr"]:
+        ents = entites_fr(liens)
+        table = {c: e["numero"] for c, e in ents.items()}
+    else:
+        ents = entites(liens)
+        table = numeros(list(ents.keys()))
     fin = _aujourdhui().isoformat()
     totaux = dict(cache.get("totaux") or {})
     for cle, e in ents.items():
@@ -328,9 +397,9 @@ def alltime() -> Dict[str, int]:
             pays = None
         if pays is not None:
             # un relevé raté garde l'ancien total plutôt que de l'effacer
-            totaux[f'VA {table.get(cle, 0)}'] = int((pays or {}).get("US") or 0)
+            totaux[e["nom"] if profil["fr"] else f'VA {table.get(cle, 0)}'] = _clics(pays, profil)
         time.sleep(0.3)
-    safe_json.write_text(ALLTIME_FICHIER,
+    safe_json.write_text(fichier,
                          json.dumps({"jour": fin, "totaux": totaux},
                                     ensure_ascii=False, indent=2, sort_keys=True))
     return {k: int(v) for k, v in totaux.items()}
@@ -338,16 +407,17 @@ def alltime() -> Dict[str, int]:
 
 # ─── le message ──────────────────────────────────────────────────────────
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-                 en_cours: bool = False) -> Dict[str, Any]:
+                 en_cours: bool = False, gid: Optional[str] = None) -> Dict[str, Any]:
+    pf = _profil(gid)
     lignes = cl["lignes"]
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
-             "Abonnements via Twitter 🐦 — clics **US**",
+             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**',
              "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._", ""]
     else:
         c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
-             "Abonnements via Twitter 🐦 — clics **US**", ""]
+             f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**', ""]
     for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
         if i < 3:
             c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
@@ -363,7 +433,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
     for i, p in enumerate(PRIMES):
         c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
-    c += ["", "💸 **Pour recevoir ta prime :** envoie un message à **@Siri** dans "
+    c += ["", f'💸 **Pour recevoir ta prime :** envoie un message à **@{pf["bot"]}** dans '
               "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
               "USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification",
@@ -381,7 +451,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
               "écarté(s) le temps que la liste revienne._"]
 
-    pied = "YOULAB • Marché US · comptes VA, sans pseudo"
+    pied = f'YOULAB • Marché {pf["marche"]} · comptes VA, sans pseudo'
     if en_cours:
         pied += " · mis à jour " + _maintenant().strftime("%d/%m à %Hh%M")
     return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
@@ -392,7 +462,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
 
 
 def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-               totaux: Dict[str, int]) -> List[Dict[str, Any]]:
+               totaux: Dict[str, int], gid: Optional[str] = None) -> List[Dict[str, Any]]:
     """Le classement de la quinzaine, découpé en autant de messages qu'il faut.
 
     Discord coupe une description à 4096 caractères. Plutôt que de tronquer —
@@ -400,10 +470,11 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     répartit sur plusieurs messages, numérotés « page 2/3 ». Le total de la
     période va sur la dernière page : c'est là qu'on le cherche.
     """
+    p = _profil(gid)
     lignes = cl["lignes"]
     tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
             f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
-            f'Clics **US** · **{len(lignes)}** comptes classés\n')
+            f'Clics **{p["marche"]}** · **{len(lignes)}** comptes classés\n')
 
     rangs = []
     for i, x in enumerate(lignes):
@@ -444,7 +515,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         corps = tete + "\n" + "\n".join(page)
         if n == len(pages):
             corps += "\n" + bas
-        pied = ("YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
+        pied = (f'YOULAB • Marché {p["marche"]} · comptes VA, sans pseudo · mis à jour '
                 + _maintenant().strftime("%d/%m à %Hh%M"))
         if len(pages) > 1:
             pied = f"page {n}/{len(pages)} · " + pied
@@ -470,16 +541,16 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
         return ""
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
-    cl = classement(debut, min(aujourd, fin_saison))
+    cl = classement(debut, min(aujourd, fin_saison), gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((garde.get("messages") or [""])[0])
     try:
-        totaux = alltime()
+        totaux = alltime(gid)
     except Exception as e:
         print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
         totaux = {}
-    pages = pages_subs(cl, debut, fin_saison, totaux)
+    pages = pages_subs(cl, debut, fin_saison, totaux, gid=gid)
 
     # `message` (au singulier) est l'ancien format : un seul identifiant
     ids = list(garde.get("messages") or ([garde["message"]] if garde.get("message") else []))
@@ -521,7 +592,8 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     garde = (_etat().get("subs") or {}).get(str(gid)) or {}
     if garde.get("saison") != saison_en_cours()[0].isoformat():
         return True
-    minutes = int(_config().get("minutes_subs") or _config().get("minutes") or MINUTES_LIVE)
+    minutes = int(_profil(gid).get("minutes") or _config().get("minutes_subs")
+                  or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 
@@ -569,7 +641,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_BONUS} introuvable sur {gid}", flush=True)
         return ""
-    cl = classement(j, j)
+    cl = classement(j, j, gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
         return str(garde.get("message") or "")
@@ -595,7 +667,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
 
 
 def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
-    if _pause_gms():
+    if _pause_gms() or not _profil(gid).get("bonus", True):
         return False
     garde = (_etat().get("bonus") or {}).get(str(gid)) or {}
     if garde.get("jour") != _aujourdhui().isoformat():
@@ -629,7 +701,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     if not salon:
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
-    cl = classement(debut, fin)
+    cl = classement(debut, fin, gid=gid)
     if not cl["lignes"]:
         # GetMySocial muet un lundi matin : sans cela on publiait un podium VIDE
         # avec @everyone, et la semaine etait marquee comme faite POUR TOUJOURS.
@@ -638,7 +710,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
               f'({cl["entites"]} entites, {len(cl["illisibles"])} illisible(s)) — '
               "rien poste, nouvel essai au prochain tour", flush=True)
         return ""
-    corps: Dict[str, Any] = {"embeds": [embed_podium(cl, debut, fin)]}
+    corps: Dict[str, Any] = {"embeds": [embed_podium(cl, debut, fin, gid=gid)]}
     if mentionner:
         corps["content"] = "@everyone 🏆 Podium subs de la semaine !"
         corps["allowed_mentions"] = {"parse": ["everyone"]}
@@ -689,12 +761,12 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
-    cl = classement(debut, fin)
+    cl = classement(debut, fin, gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         # aucun relevé du tout : on ne remplace pas un classement correct par du vide
         print("[podium] aucun relevé, message vivant laissé tel quel", flush=True)
         return str(garde.get("message") or "")
-    corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True)]}
+    corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True, gid=gid)]}
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("semaine") == debut.isoformat():
@@ -725,7 +797,7 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
     garde = (_etat().get("vivants") or {}).get(str(gid)) or {}
     if garde.get("semaine") != semaine_en_cours()[0].isoformat():
         return True
-    minutes = int(_config().get("minutes") or MINUTES_LIVE)
+    minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 
