@@ -7361,6 +7361,32 @@ def _comptes_fr_du_va(model, nom) -> list:
             if str(a.get("va") or "").strip().lower() == n and a.get("username")]
 
 
+def _relier_fiche_discord(_jb, model, nom) -> None:
+    """Fiche deja la sous ce nom (add_va a refuse) : lui poser le pseudo
+    Discord si elle n'en a pas.
+
+    Sans ca, une fiche creee sur le site, ou fabriquee par add_account avec un
+    pseudo vide, gardait discord_username="" : les comptes du bouton s'y
+    rangeaient, le VA lisait « ✅ ajoute », mais les bangers FR
+    (bangers.comptes_admis) et le plafond par personne ne le voyaient pas.
+    Un pseudo DEJA renseigne et different n'est pas ecrase : la fiche est
+    peut-etre celle de quelqu'un d'autre — on le signale seulement."""
+    entree = (_jb.list_all() or {}).get(str(model or "").strip().lower()) or {}
+    fiche = next((v for v in entree.get("vas") or []
+                  if isinstance(v, dict) and str(v.get("name") or "").strip().lower() == nom), None)
+    pseudo = str((fiche or {}).get("discord_username") or "").strip().lstrip("@").lower()
+    if pseudo == nom:
+        return
+    if pseudo:
+        log.warning("comptes FR : %s/%s porte le pseudo Discord « %s », laisse tel quel",
+                    model, nom, pseudo)
+        return
+    # update_va materialise aussi la fiche implicite (un nom porte par des
+    # comptes seulement).
+    if _jb.update_va(model, nom, discord_username=nom):
+        log.info("comptes FR : pseudo Discord pose sur la fiche existante %s/%s", model, nom)
+
+
 def _enregistrer_comptes_fr(model, nom, handles) -> dict:
     """Inscrit les comptes sur la page, sous la model, au nom Discord du VA
     (vas[].discord_username = son pseudo Discord : la page et l'onglet VA
@@ -7369,7 +7395,8 @@ def _enregistrer_comptes_fr(model, nom, handles) -> dict:
     models confondues."""
     import jailbreak as _jb
     nom = str(nom or "").strip().lower()
-    _jb.add_va(model, nom, discord_username=nom)          # False s'il existe deja
+    if not _jb.add_va(model, nom, discord_username=nom):
+        _relier_fiche_discord(_jb, model, nom)
     a_lui = {u.lower() for u in _comptes_fr_du_va(model, nom)}
     total = len(_jb.accounts_for_discord_username(nom))
     out = {"ajoutes": [], "deja": [], "ailleurs": [], "plafond": []}

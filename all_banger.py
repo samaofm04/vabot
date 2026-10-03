@@ -14,6 +14,12 @@ Le message est une carte Components V2 faite des MÊMES briques que la fiche
 du matin (bangers.bloc_video_discord, bangers.blocs_description_discord),
 sans son en-tête : ni compte, ni VA, ni likes, ni date.
 
+Deux serveurs depuis le 03/10/2026 (« banger et all-banger comme sur les
+US ») : le all-banger de Youl4b reprend le 💥・banger de Jessye ; sur le
+serveur FR « Va IG », chaque model a le sien, 💥・all-banger-<model>, miroir
+de son 💥・banger-<model> (pas de all-banger commun). Le registre reste UN
+(une entrée par shortcode) ; chaque envoi porte son marché (cf. MARCHES).
+
 Pourquoi un module à part, et pas une case de plus dans bangers.json :
 bangers.examiner() relit et réécrit TOUT ce registre à chaque compte scrapé,
 depuis quatre threads à la fois, sans verrou entre la lecture et l'écriture.
@@ -73,6 +79,28 @@ DOSSIER_CACHE_INSTA = _ICI / "data" / "insta" / "videos"
 
 #: Le serveur où vit le salon. Celui de la publication quotidienne : Youl4b.
 GUILD_ID = _bg.GUILD_ID
+
+#: Les marchés, dans l'ordre des passages : Youl4b (Jessye) puis, depuis le
+#: 03/10/2026, chaque model du serveur FR « Va IG » (« fr:<model> »), qui a
+#: son propre 💥・all-banger-<model>. Un banger ne part QUE dans le all-banger
+#: de la model dont il est paru le 💥・banger le matin, et un salon absent ne
+#: retient pas les autres (cf. traiter_envois).
+MARCHES = ("us",) + tuple("fr:" + m for m in _bg.MODELS_FR)
+
+
+def guild_du_marche(marche) -> int:
+    """Le serveur d'un marché ; tout ce qui n'est pas « fr:… » reste Youl4b."""
+    return int(_bg.GUILD_FR) if str(marche or "").startswith("fr") else int(GUILD_ID)
+
+
+def model_du_marche(marche) -> str:
+    """« fr:amelia » → « amelia » ; "" pour Youl4b."""
+    m = str(marche or "")
+    return m.split(":", 1)[1] if m.startswith("fr:") else ""
+
+
+def _serveur(guild_id) -> str:
+    return "Va IG" if int(guild_id or 0) == int(_bg.GUILD_FR) else "Youl4b"
 
 #: Le nom du salon, tel que le propriétaire l'a écrit. Il est comparé une fois
 #: réduit à ses lettres et chiffres (cf. est_salon_all_banger).
@@ -562,6 +590,11 @@ def est_salon_all_banger(nom: str) -> bool:
     return _squelette(nom) in ("allbanger", "allbangers")
 
 
+def est_salon_all_banger_fr(nom: str) -> bool:
+    """« 💥・all-banger-<model> » d'une model FR (égalité, comme au-dessus)."""
+    return _squelette(nom) in {"allbanger" + m for m in _bg.MODELS_FR}
+
+
 def trouver_salon(guild):
     """Le salon texte « all-banger » du serveur, ou None."""
     salons = [c for c in (getattr(guild, "text_channels", None) or [])
@@ -570,7 +603,8 @@ def trouver_salon(guild):
         return None
     salons.sort(key=lambda c: (getattr(c, "position", 0) or 0, getattr(c, "id", 0) or 0))
     if len(salons) > 1:
-        _dire_une_fois("plusieurs", "[all-banger] plusieurs salons « all-banger » sur le "
+        _dire_une_fois(f"plusieurs:{getattr(guild, 'id', '')}",
+                       "[all-banger] plusieurs salons « all-banger » sur le "
                        f"serveur : envoi dans #{salons[0].name} ({salons[0].id})")
     if getattr(salons[0], "id", None) == _bg.CHANNEL_ID:
         _dire_une_fois("meme_salon", "[all-banger] le salon « all-banger » est AUSSI celui "
@@ -768,15 +802,34 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
       {"echec": raison}                 définitif (vidéo disparue)
       {"refuse": raison, "status"}      Discord a dit non (4xx) : rien créé
       {"incertain": raison}             peut-être parti : on vérifiera
+
+    Le serveur : `guild_id` s'il est donné, sinon celui du marché de
+    l'entrée (`e["marche"]`, écrit avec l'intention d'envoi) — une reprise
+    après coupure revérifie dans LE salon où le message est peut-être parti.
     """
     import discord
     sc = str(shortcode or "")
-    guild = client.get_guild(int(guild_id or GUILD_ID))
+    marche = str((e or {}).get("marche") or "")
+    gid = int(guild_id or 0) or guild_du_marche(marche)
+    serveur = _serveur(gid)
+    guild = client.get_guild(gid)
     if guild is None:
-        return {"salon_absent": "serveur Youl4b hors de portée du bot"}
-    salon = trouver_salon(guild)
+        return {"salon_absent": f"serveur {serveur} hors de portée du bot"}
+    if gid == int(_bg.GUILD_FR):
+        # Le all-banger DE LA MODEL, par son nom hors archives ; l'identifiant
+        # du 03/10/2026 en secours, s'il a été renommé depuis.
+        model = model_du_marche(marche)
+        nom = f"all-banger-{model or '?'}"
+        salon = _bg.salon_banger_de(guild, model, all_banger=True) if model else None
+        if salon is None and model and hasattr(guild, "get_channel"):
+            salon = guild.get_channel(int(_bg.ALL_BANGERS_FR.get(model) or 0))
+            if salon is not None and _bg.dans_archives(salon):
+                salon = None
+    else:
+        nom = NOM_SALON
+        salon = trouver_salon(guild)
     if salon is None:
-        return {"salon_absent": f"aucun salon « {NOM_SALON} » sur Youl4b"}
+        return {"salon_absent": f"aucun salon « {nom} » sur {serveur}"}
     moi = getattr(guild, "me", None)
     if moi is not None and hasattr(salon, "permissions_for"):
         droits = salon.permissions_for(moi)
@@ -916,25 +969,72 @@ def passes_par_salon_banger(force: bool = False) -> frozenset:
     return _SALON_BANGER["ids"]
 
 
-def a_poster() -> List[str]:
-    """Les bangers à poster ou à vérifier, dans l'ordre CHRONOLOGIQUE de
-    publication du reel (le plus ancien d'abord). SEULEMENT ceux passés dans
-    💥・banger (passes_par_salon_banger) ; les autres attendent, comptés.
+#: Le périmètre FR : les reels parus dans un 💥・banger-<model> du serveur FR.
+_SALONS_FR = {"quand": 0.0, "racine": "", "ids": {}}
 
-    Le rattrapage verse d'un coup des centaines de reels de dates mêlées : le
-    salon doit se lire comme un fil, du plus vieux au plus récent. La date
-    vient de l'entrée (`poste_le`), à défaut de la fiche du registre des
-    bangers (entrées d'avant ce champ), à défaut de la détection.
-    """
+
+def passes_par_salons_fr(force: bool = False) -> Dict[str, str]:
+    """{shortcode: model} des reels réellement postés dans un salon
+    💥・banger-<model> du serveur FR : un journal FR
+    (bangers.DOSSIER_JOURNEES/fr/<model>/) à l'état « envoye ». Le journal
+    est la seule trace de ce flux ; son dossier dit la model, donc le
+    all-banger où le reel part. Relu au plus une fois par minute (et dès que
+    le dossier des journaux change)."""
+    now = time.time()
+    racine = pathlib.Path(_bg.DOSSIER_JOURNEES) / "fr"
+    if (not force and str(racine) == _SALONS_FR["racine"]
+            and now - _SALONS_FR["quand"] < SALON_BANGER_CACHE_SEC):
+        return _SALONS_FR["ids"]
+    ids: Dict[str, str] = {}
+    illisibles = []
+    try:
+        fichiers = sorted(racine.glob("*/*.json"))
+    except Exception:                                         # noqa: BLE001
+        fichiers = []
+    for f in fichiers:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8") or "{}")
+        except Exception:                                     # noqa: BLE001
+            illisibles.append(f"{f.parent.name}/{f.name}")
+            continue
+        for sc, it in ((d.get("reels") or {}) if isinstance(d, dict) else {}).items():
+            if isinstance(it, dict) and it.get("etat") == "envoye" and it.get("message_id"):
+                ids.setdefault(sc, f.parent.name)
+    if illisibles:
+        _dire_une_fois("salons_fr:illisibles:" + ",".join(illisibles[:5]),
+                       f"[all-banger] {len(illisibles)} journal(aux) FR illisible(s) pour le "
+                       f"périmètre ({', '.join(illisibles[:5])}) : leurs bangers attendent")
+    _SALONS_FR.update(quand=now, racine=str(racine), ids=ids)
+    return _SALONS_FR["ids"]
+
+
+def _marche_de(sc: str, e: dict, perim_us, perim_fr) -> Optional[str]:
+    """Le marché d'un banger. Une intention d'envoi en cours garde LE sien
+    (une reprise revérifie là où le message est peut-être parti) ; sinon le
+    serveur où il est paru le matin, Youl4b d'abord. None : jamais paru."""
+    if e.get("etat") == "envoi" and e.get("marche") in MARCHES:
+        return e["marche"]
+    if sc in perim_us:
+        return "us"
+    if sc in perim_fr and "fr:" + perim_fr[sc] in MARCHES:
+        return "fr:" + perim_fr[sc]
+    return None
+
+
+def _a_poster_par_marche() -> Dict[str, List[str]]:
+    """{marché: shortcodes à poster ou à vérifier}, chaque liste dans l'ordre
+    chronologique (cf. a_poster). Un seul passage sur le registre."""
     reg = charger().get("reels") or {}
     fiches = None
-    out = []
-    perimetre = passes_par_salon_banger()
+    out: Dict[str, list] = {m: [] for m in MARCHES}
+    perim_us = passes_par_salon_banger()
+    perim_fr = passes_par_salons_fr()
     hors = 0
     for sc, e in reg.items():
         if not isinstance(e, dict) or e.get("etat") not in ("pret", "envoi"):
             continue
-        if sc not in perimetre:
+        marche = _marche_de(sc, e, perim_us, perim_fr)
+        if marche is None:
             hors += 1
             continue
         poste = _bg._entier(e.get("poste_le"))
@@ -943,12 +1043,27 @@ def a_poster() -> List[str]:
                 fiches = _bg.charger().get("reels") or {}
             poste = _bg._entier((fiches.get(sc) or {}).get("poste_le"))
         detecte = _bg._entier(e.get("detecte_le"))
-        out.append((poste or detecte, detecte, sc))
+        out[marche].append((poste or detecte, detecte, sc))
     if hors:
         _dire_une_fois(f"hors_salon_banger:{hors}", f"[all-banger] {hors} banger(s) "
-                       "prêt(s) mais jamais passé(s) dans 💥・banger : ils attendent, "
+                       "prêt(s) mais jamais passé(s) dans un salon 💥・banger : ils attendent, "
                        "non postés", logging.INFO)
-    return [sc for _, _, sc in sorted(out)]
+    return {m: [sc for _, _, sc in sorted(v)] for m, v in out.items()}
+
+
+def a_poster(marche: str = "us") -> List[str]:
+    """Les bangers à poster ou à vérifier dans le all-banger d'un marché, dans
+    l'ordre CHRONOLOGIQUE de publication du reel (le plus ancien d'abord).
+    SEULEMENT ceux passés dans un salon 💥・banger de ce serveur
+    (passes_par_salon_banger pour Youl4b, passes_par_salons_fr pour le FR) ;
+    les autres attendent, comptés.
+
+    Le rattrapage verse d'un coup des centaines de reels de dates mêlées : le
+    salon doit se lire comme un fil, du plus vieux au plus récent. La date
+    vient de l'entrée (`poste_le`), à défaut de la fiche du registre des
+    bangers (entrées d'avant ce champ), à défaut de la détection.
+    """
+    return _a_poster_par_marche().get(marche, [])
 
 
 def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
@@ -984,6 +1099,14 @@ def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
     Les bangers devenus prêts PENDANT le passage (téléchargés entre deux
     envois) partent dans ce même passage, après les autres : sinon ils
     attendaient le tour suivant, jusqu'à PERIODE_SEC plus tard.
+
+    UN MARCHÉ ARRÊTÉ NE RETIENT PAS L'AUTRE (serveur FR, 03/10/2026) : ce
+    qui arrête le passage (salon absent, droits, issue incertaine) n'arrête
+    que le marché touché ; Youl4b et le FR ont chacun leur salon. Seul un
+    registre impossible à écrire arrête tout. La cause d'attente du FR va
+    dans `attentes` : `attente` reste celle de Youl4b, qui règle seule la
+    cadence du fil (sinon un salon FR manquant le ferait tourner toutes les
+    30 s au lieu de 10 min).
     """
     delai = DELAI_ENTRE_MESSAGES if delai is None else float(delai)
     bilan = {"envoyes": 0, "retrouves": 0, "trop_lourds": 0, "refus": 0,
@@ -995,12 +1118,17 @@ def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
     # Chaque banger est traité AU PLUS une fois par passage : un refusé ou un
     # non vérifiable reste « prêt » / « envoi », il ne doit pas boucler.
     vus: set = set()
-    suite = "suivant"
-    while suite != "arret":
-        lot = [sc for sc in a_poster() if sc not in vus]
+    arretes: set = set()
+    tout_arreter = False
+    while not tout_arreter:
+        par_marche = _a_poster_par_marche()
+        lot = [(m, sc) for m in MARCHES if m not in arretes
+               for sc in par_marche.get(m, []) if sc not in vus]
         if not lot:
             break
-        for sc in lot:
+        for marche, sc in lot:
+            if marche in arretes:
+                continue
             vus.add(sc)
             if entre_envois is not None:
                 try:
@@ -1025,14 +1153,17 @@ def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
                     attendre = verifier and reste > 0 and not attendu
                     if not attendre:
                         if not verifier:
-                            e.update(etat="envoi", intention_le=now, nonce=nonce_de(sc))
+                            # Le marché est écrit AVEC l'intention : après une
+                            # coupure, la vérification se fait dans le bon serveur.
+                            e.update(etat="envoi", intention_le=now, nonce=nonce_de(sc),
+                                     marche=marche, guild_id=guild_du_marche(marche))
                             if not _ecrire(d):
                                 bilan["attente"] = "registre non enregistré"
                                 log.error("[all-banger] intention d'envoi non enregistrée : "
                                           "envoi suspendu")
                                 suite = "arret"
                                 break
-                        demande = dict(e, shortcode=sc, verifier=verifier)
+                        demande = dict(e, shortcode=sc, verifier=verifier, marche=marche)
                 if attendre:
                     # Hors du verrou : les scrapes continuent d'écrire pendant ce temps.
                     attendu = True
@@ -1045,7 +1176,7 @@ def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
                     dormir(delai)
                 appels += 1
                 res = poster(sc, demande) or {"incertain": "reponse_vide"}
-                suite = _appliquer_envoi(sc, res, verifier, bilan, refus_en_serie)
+                suite = _appliquer_envoi(sc, res, verifier, bilan, refus_en_serie, marche)
                 if res.get("message_id"):
                     refus_en_serie = False
                     if not res.get("retrouve"):
@@ -1055,19 +1186,33 @@ def traiter_envois(poster: Callable, dormir: Callable = time.sleep,
                 if suite != "reessayer":
                     break
             if suite == "arret":
-                break
+                arretes.add(marche)
+                if bilan.get("attente") == "registre non enregistré":
+                    tout_arreter = True
+                    break
     return bilan
 
 
+def _noter_attente(bilan: dict, marche: str, cause: str) -> None:
+    """La cause d'attente d'un marché : `attente` pour Youl4b (elle règle la
+    cadence du fil, comme avant le serveur FR), `attentes[marché]` sinon."""
+    if marche == "us":
+        bilan["attente"] = cause
+    else:
+        bilan.setdefault("attentes", {})[marche] = cause
+
+
 def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
-                     refus_en_serie: bool = False) -> str:
+                     refus_en_serie: bool = False, marche: str = "us") -> str:
     """Consigne le résultat d'un envoi (ou d'une vérification). Rend la suite :
     « suivant » (banger tranché, ou bloqué seul : on passe au suivant),
     « reessayer » (vérifié absent : à renvoyer tout de suite) ou « arret »
-    (plus rien ne partira dans ce passage).
+    (plus rien ne partira dans ce passage, pour ce marché).
 
     `refus_en_serie` : l'envoi précédent de ce passage a déjà été refusé pour
     son contenu."""
+    # Une cause par marché dans le journal : Youl4b garde ses clés d'avant.
+    absent_cle = "salon_absent:" if marche == "us" else f"salon_absent@{marche}:"
     with _VERROU:
         d = charger()
         e = d["reels"].get(sc)
@@ -1087,7 +1232,7 @@ def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
             e.pop("raison_envoi", None)
             _ecrire(d)
             bilan["retrouves" if res.get("retrouve") else "envoyes"] += 1
-            for _cle in [k for k in _DITS if k.startswith("salon_absent:")]:
+            for _cle in [k for k in _DITS if k.startswith(absent_cle)]:
                 _DITS.discard(_cle)
             log.info(f"[all-banger] {sc} : {'retrouvé' if res.get('retrouve') else 'posté'} "
                      f"dans le salon (message {res['message_id']})")
@@ -1111,8 +1256,8 @@ def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
             # passage ; les suivants, eux, n'ont rien à vérifier et partent.
             e["raison_envoi"] = str(res["non_verifiable"])[:120]
             _ecrire(d)
-            bilan["attente"] = str(res["non_verifiable"])
-            _dire_une_fois("non_verifiable:" + bilan["attente"],
+            _noter_attente(bilan, marche, str(res["non_verifiable"]))
+            _dire_une_fois("non_verifiable:" + str(res["non_verifiable"]),
                            f"[all-banger] {sc} : {res['non_verifiable']} — ce banger attend "
                            f"(ni renvoyé ni abandonné) ; les suivants partent")
             return "suivant"
@@ -1121,12 +1266,13 @@ def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
                 e["etat"] = "pret"          # rien n'est parti
                 e.pop("intention_le", None)
                 _ecrire(d)
-            bilan["attente"] = str(res["salon_absent"])
+            _noter_attente(bilan, marche, str(res["salon_absent"]))
             # Une ligne par CAUSE : si le bot revient mais que le salon
             # manque toujours, cette seconde cause doit se voir aussi.
-            _dire_une_fois("salon_absent:" + bilan["attente"],
+            _dire_une_fois(absent_cle + str(res["salon_absent"]),
                            f"[all-banger] {res['salon_absent']} : les vidéos restent "
-                           f"en attente et partiront dès que ce sera réglé")
+                           f"en attente et partiront dès que ce sera réglé"
+                           + ("" if marche == "us" else " (les autres serveurs continuent)"))
             return "arret"
         if res.get("trop_lourd"):
             e.update(etat="trop_lourd", taille=int(res.get("taille") or 0),
@@ -1472,7 +1618,8 @@ async def supprimer_message(client, shortcode: str, e: dict) -> dict:
         return {"introuvable": True}
     except discord.HTTPException as ex:
         return {"erreur": f"salon {getattr(ex, 'status', '?')}"}
-    if not est_salon_all_banger(getattr(salon, "name", "")):
+    if not (est_salon_all_banger(getattr(salon, "name", ""))
+            or est_salon_all_banger_fr(getattr(salon, "name", ""))):
         return {"refuse": f"salon inattendu #{getattr(salon, 'name', '?')}"}
     try:
         m = await salon.fetch_message(mid)

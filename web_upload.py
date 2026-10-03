@@ -56518,41 +56518,54 @@ _BANGER_CYCLE = {"en_cours": False, "ts": 0.0, "dernier": {}}
 
 
 def _banger_cycle() -> dict:
-    """À 9 h Paris : toutes les fiches de la veille, puis le récapitulatif."""
+    """À 9 h Paris : toutes les fiches de la veille, puis le récapitulatif.
+
+    Un salon 💥・banger par marché (bangers.salons()) : Jessye sur Youl4b,
+    et depuis le 03/10/2026 une model par salon sur le serveur FR « Va IG ».
+    Chaque salon a son journal et son try (bangers.publier_salons) : un salon
+    FR absent ne retient ni les autres models, ni Jessye. Le bilan rendu
+    reste celui de Jessye ; ceux du FR sont sous « fr »."""
     import asyncio
     import bangers as bg
     import time as clock
     jour, _, _, pret = bg.fenetre_veille()
     suivi = identites_suivies()
-    bilan = {"jour": jour, "annonces": 0}
-    if not ("*" in suivi or bg.IDENTITE in suivi):
-        bilan["attente"] = "Identité désactivée"
-    elif not (_BOT_REF and _BOT_REF.is_ready()):
-        bilan["attente"] = "Bot indisponible"
-    elif not pret:
-        bilan["attente"] = "Envoi à partir de 9 h, heure de Paris"
-    else:
-        try:
-            journal = bg._lire_journee(jour)
-            if journal and journal.get("termine") and journal.get("format") == bg.FORMAT_DISCORD:
-                bilan.update(termine=True, total=len(journal["reels"]))
-            else:
-                loop = _BOT_REF.loop
-                def attendre(coro, timeout=180):
-                    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
-                channel, gerants = attendre(bg.contexte_publication(_BOT_REF), timeout=60)
-                def preparer(fiches):
-                    resultat = bg.preparer_fiches(fiches)
-                    for f in resultat.values():
-                        f['discord_id'] = gerants.get(f.get('va'), '')
-                    return resultat
-                bilan = bg.publier_journee(jour, preparer,
-                    lambda f, it: attendre(bg.publier_fiche_discord(_BOT_REF, channel, f, it)),
-                    lambda j, i, page: attendre(bg.publier_recap_discord(_BOT_REF, channel, j, i, page)),
-                    strict_veille=True)
-        except Exception as e:
-            log.error(f"[bangers] journée interrompue : {type(e).__name__}")
-            bilan = {"jour": jour, "erreur": "Envoi interrompu : vérifier le journal du jour"}
+
+    def publier(salon):
+        bilan = {"jour": jour, "annonces": 0}
+        if not ("*" in suivi or salon["identite"] in suivi):
+            return dict(bilan, attente="Identité désactivée")
+        if not (_BOT_REF and _BOT_REF.is_ready()):
+            return dict(bilan, attente="Bot indisponible")
+        if not pret:
+            return dict(bilan, attente="Envoi à partir de 9 h, heure de Paris")
+        journal = bg._lire_journee(jour, salon["dossier"])
+        if journal and journal.get("termine") and journal.get("format") == bg.FORMAT_DISCORD:
+            return dict(bilan, termine=True, total=len(journal["reels"]))
+        loop = _BOT_REF.loop
+        def attendre(coro, timeout=180):
+            return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
+        channel, gerants, s, membres = attendre(bg.contexte_salon(_BOT_REF, salon), timeout=60)
+        # FR : seuls les comptes des VA du Discord FR, relevés AVANT que la
+        # journée ne soit figée (publier_journee ne s'en sert qu'à ce moment-là).
+        admis = bg.comptes_admis(s["identite"], membres) if s["discord_seulement"] else None
+        def preparer(fiches):
+            # Jessye : Apify (statistiques et vidéo du jour). Le FR : rien de
+            # payant, le propriétaire refuse Apify -- relevé du scrape et CDN.
+            resultat = (bg.preparer_fiches(fiches) if s["apify"]
+                        else bg.preparer_fiches_gratuit(fiches, s["identite"]))
+            for f in resultat.values():
+                f['discord_id'] = gerants.get(f.get('va'), '')
+            return resultat
+        return bg.publier_journee(jour, preparer,
+            lambda f, it: attendre(bg.publier_fiche_discord(_BOT_REF, channel, f, it, s)),
+            lambda j, i, page: attendre(bg.publier_recap_discord(_BOT_REF, channel, j, i, page, s)),
+            strict_veille=True, salon=s, admis=admis)
+
+    resultats = bg.publier_salons(bg.salons(), publier, jour)
+    bilan = resultats.pop("us", None) or {"jour": jour, "annonces": 0}
+    if resultats:
+        bilan["fr"] = resultats
     _BANGER_CYCLE.update(ts=clock.time(), dernier=bilan)
     return bilan
 

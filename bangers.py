@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Archive des bangers et sélection quotidienne de Jessye / Youl4b.
+"""Archive des bangers et sélection quotidienne : Jessye / Youl4b, et les
+models du serveur FR « Va IG » (un salon chacune, depuis le 03/10/2026).
 
 Le registre conserve tous les liens, descriptions et vidéos récupérées.
 La production passe par publier_journee : à partir de 9 h (Europe/Paris),
-tous les reels publiés la veille au-dessus du seuil, avec un journal durable.
+tous les reels publiés la veille au-dessus du seuil, avec un journal durable
+par salon (cf. salons()).
 Les anciens sélecteurs glissants restent pour compatibilité ; le site ne
 les utilise plus pour envoyer ou télécharger automatiquement.
 """
@@ -550,8 +552,12 @@ def bilan() -> dict:
     }
 
 
-# Sélection quotidienne — publication de la veille, Jessye / Youl4b.
-"""Sélection du matin : publications de la veille, uniquement Jessye / Youl4b.
+# Sélection quotidienne — publication de la veille, un salon par marché.
+"""Sélection du matin : publications de la veille, un salon 💥・banger par marché.
+
+Youl4b (US) : Jessye seule, dans son salon fixe, comme avant. Serveur FR
+« Va IG » (03/10/2026) : un salon « 💥・banger-<model> » par model, et
+seulement les comptes des VA du Discord FR (cf. comptes_admis).
 
 Le journal fige tous les reels éligibles une fois par jour. Une intention d'envoi est
 écrite AVANT Discord : un résultat incertain ne provoque jamais un doublon.
@@ -560,12 +566,15 @@ Les archives restent dans bangers.py ; ce module ne supprime aucun contenu.
 from datetime import datetime, time as dt_time, timedelta
 import fcntl
 import json
+import logging
 from pathlib import Path
 import threading
 import time
 from zoneinfo import ZoneInfo
 
 import safe_json
+
+log = logging.getLogger("vabot.bangers")
 
 TZ = ZoneInfo("Europe/Paris")
 HEURE = 9
@@ -574,6 +583,100 @@ GUILD_ID = 1535758943324999711
 CHANNEL_ID = 1548115360702664804
 DOSSIER_JOURNEES = Path(__file__).resolve().parent / "data" / "bangers_journees"
 _JOURNEE_LOCK = threading.Lock()
+#: Un verrou par journal de model FR. Avec le seul _JOURNEE_LOCK, la
+#: préparation d'une model FR (téléchargements CDN, jusqu'à 60 s chacun) rendait
+#: « en cours » la journée de Jessye lancée à côté (bouton du site, boucle).
+_VERROUS_FR: dict = {}
+_VERROUS_FR_GARDE = threading.Lock()
+
+
+def _verrou_du_dossier(dossier) -> threading.Lock:
+    """Jessye garde _JOURNEE_LOCK, partagé avec cycle_quotidien (même dossier) ;
+    chaque journal FR a le sien."""
+    if Path(dossier) == Path(DOSSIER_JOURNEES):
+        return _JOURNEE_LOCK
+    with _VERROUS_FR_GARDE:
+        return _VERROUS_FR.setdefault(str(dossier), threading.Lock())
+
+# Serveur FR « Va IG » (le propriétaire, 03/10/2026 : « banger et all-banger
+# comme sur les US »). Par model, deux salons visibles des seuls VA qui ont
+# son rôle : 💥・banger-<model> et son miroir 💥・all-banger-<model>
+# (all_banger.py). PAS de all-banger commun (« pas de allbanger dans va ig »).
+# Youl4b ne garde QUE Jessye : un reel FR posté là-bas serait lu par des VA
+# qui ne travaillent pas cette model.
+GUILD_FR = 1505418484052394004
+MODELS_FR = ("amelia", "emma", "sarah", "julia", "lola", "alicia")
+#: Les salons recréés le 03/10/2026, en tête de la catégorie de chaque model.
+#: Le NOM est cherché d'abord, HORS archives : les anciens 💥・banger-<model>
+#: ont été rangés dans « 🗄️ Archives salons » sous le même nom, et le plus
+#: haut placé des deux était l'archivé. Ces identifiants ne servent que de
+#: secours (cf. contexte_salon).
+SALONS_FR = {"amelia": 1555783269172117706, "emma": 1555783279251165327,
+             "julia": 1555783289199919124, "lola": 1555783298633171024,
+             "sarah": 1555783308858761228, "alicia": 1555783318362923148}
+#: « 💥・all-banger-<model> », juste sous le 💥・banger de la model : même
+#: recherche par le nom (salon_banger_de(..., all_banger=True)).
+ALL_BANGERS_FR = {"amelia": 1555784484081901588, "julia": 1555784490276888689,
+                  "lola": 1555784496182206505, "sarah": 1555784501341331596,
+                  "alicia": 1555784507351900291, "emma": 1555784513009885257}
+#: Le nom affiché dans la carte et le récapitulatif, comme les menus FR
+#: (cogs/user._capitalize_smart) l'écrivent.
+LIBELLES_FR = {"amelia": "Amélia"}
+
+
+def salon_us() -> dict:
+    """Le salon 💥・banger de Youl4b : Jessye, salon fixe, préparation Apify.
+
+    Relu à chaque appel, jamais figé à l'import : les essais déplacent
+    DOSSIER_JOURNEES et les autres constantes du module."""
+    return {"cle": "us", "marche": "us", "identite": IDENTITE, "libelle": "Jessye",
+            "serveur": "Youl4b", "guild_id": GUILD_ID, "channel_id": CHANNEL_ID,
+            "nom": "", "dossier": DOSSIER_JOURNEES, "apify": True,
+            "discord_seulement": False}
+
+
+def salon_fr(model) -> dict:
+    """Le salon « 💥・banger-<model> » du serveur FR.
+
+    Son journal vit à part (DOSSIER_JOURNEES/fr/<model>) : celui de Jessye
+    reste au premier niveau, là où passes_par_salon_banger le lit. Jamais
+    d'Apify (le propriétaire le refuse) : preparer_fiches_gratuit."""
+    m = str(model or "").strip().lower()
+    return {"cle": "fr:" + m, "marche": "fr:" + m, "identite": m,
+            "libelle": LIBELLES_FR.get(m, m.capitalize()), "serveur": "Va IG",
+            "guild_id": GUILD_FR, "channel_id": SALONS_FR.get(m, 0), "nom": "banger-" + m,
+            "dossier": DOSSIER_JOURNEES / "fr" / m, "apify": False,
+            "discord_seulement": True}
+
+
+def salons_fr() -> list:
+    return [salon_fr(m) for m in MODELS_FR]
+
+
+def salons() -> list:
+    """Tous les salons du matin, Jessye d'abord."""
+    return [salon_us()] + salons_fr()
+
+
+def _salon(salon) -> dict:
+    return salon if salon is not None else salon_us()
+
+
+class SalonAbsent(LookupError):
+    """Le salon d'une model est introuvable, ou le bot n'y a pas ses droits :
+    cette model est passée, les autres et Jessye continuent."""
+
+
+#: Les messages déjà journalisés une fois (salon FR absent…), par salon. Remis
+#: à zéro quand sa journée est terminée : une rechute se dit de nouveau.
+_DITS: set = set()
+
+
+def _dire_une_fois(cle: str, message: str, niveau=logging.WARNING) -> None:
+    if cle in _DITS:
+        return
+    _DITS.add(cle)
+    log.log(niveau, message)
 
 
 def fenetre_veille(maintenant=None):
@@ -585,13 +688,14 @@ def fenetre_veille(maintenant=None):
     return jour.isoformat(), debut, fin, local.hour >= HEURE
 
 
-def selection_veille(reels, seuil, maintenant=None):
+def selection_veille(reels, seuil, maintenant=None, identite=None):
     """Date de publication connue, bornes [minuit, minuit[, seuil courant."""
     _, debut, fin, _ = fenetre_veille(maintenant)
+    ident = IDENTITE if identite is None else identite
     candidats = []
     for f in reels:
         try:
-            if (f.get("identite") == IDENTITE and not f.get("essai")
+            if (f.get("identite") == ident and not f.get("essai")
                     and debut <= int(f.get("poste_le") or 0) < fin
                     and int(f.get("vues") or 0) >= seuil):
                 candidats.append(f)
@@ -600,8 +704,8 @@ def selection_veille(reels, seuil, maintenant=None):
     return sorted(candidats, key=lambda f: (-int(f["vues"]), f["shortcode"]))
 
 
-def _lire_journee(jour):
-    path = DOSSIER_JOURNEES / (jour + ".json")
+def _lire_journee(jour, dossier=None):
+    path = (DOSSIER_JOURNEES if dossier is None else Path(dossier)) / (jour + ".json")
     if not path.exists():
         return None
     # Pas de repli vers un journal plus ancien : il pourrait oublier un envoi.
@@ -651,8 +755,9 @@ def empreinte_contenu(fichier):
         return ""
 
 
-def _sauver_journee(record):
-    if not safe_json.write(DOSSIER_JOURNEES / (record["jour"] + ".json"), record):
+def _sauver_journee(record, dossier=None):
+    dossier = DOSSIER_JOURNEES if dossier is None else Path(dossier)
+    if not safe_json.write(dossier / (record["jour"] + ".json"), record):
         raise OSError("Journal bangers non enregistré ; envoi interrompu")
 
 
@@ -789,16 +894,17 @@ DETAILS_DIR = _ICI / 'data' / 'bangers_details'
 FORMAT_DISCORD = 2
 
 
-def selection_jour(reels, seuil_vues, jour):
+def selection_jour(reels, seuil_vues, jour, identite=None):
     date = datetime.strptime(jour, '%Y-%m-%d').date()
     if date.isoformat() != jour:
         raise ValueError('Date invalide')
     debut = datetime.combine(date, dt_time.min, TZ).timestamp()
     fin = datetime.combine(date + timedelta(days=1), dt_time.min, TZ).timestamp()
+    ident = IDENTITE if identite is None else identite
     result = []
     for f in reels:
         try:
-            if (f.get('identite') == IDENTITE and not f.get('essai')
+            if (f.get('identite') == ident and not f.get('essai')
                     and debut <= int(f.get('poste_le') or 0) < fin
                     and int(f.get('vues') or 0) >= seuil_vues):
                 result.append(f)
@@ -824,7 +930,8 @@ def donnees_fiche(f):
     out = dict(f)
     details = lire_details(f['shortcode'])
     for key in ('likes', 'commentaires', 'vues_actuelles', 'publication_apify',
-                'statistiques_le', 'erreur_apify', 'erreur_video', 'empreinte', 'annonce'):
+                'statistiques_le', 'statistiques_source', 'erreur_apify', 'erreur_video',
+                'empreinte', 'annonce'):
         if key in details:
             out[key] = details[key]
     if details.get('description'):
@@ -945,6 +1052,212 @@ def preparer_fiches(fiches):
         return {f['shortcode']: f for f in pool.map(media, fiches)}
 
 
+#: Le relevé du scrape (HikerAPI, déjà payé), un fichier par compte : vues,
+#: likes, commentaires, légende et lien CDN de chaque reel. Lu, jamais écrit ici.
+CACHE_SCRAPE = _ICI / 'data' / 'insta' / 'cache'
+#: Le cache vidéo des Trends : une copie s'y prend, jamais un déplacement.
+CACHE_VIDEOS = _ICI / 'data' / 'insta' / 'videos'
+
+
+def _reel_du_scrape(compte, sc):
+    """(le reel `sc` tel que le dernier scrape de @compte l'a vu, date du relevé),
+    ou ({}, 0) : compte jamais scrapé, relevé illisible, reel sorti de la liste."""
+    h = str(compte or '').strip().lower().lstrip('@')
+    if not h or '/' in h or '\\' in h or h.startswith('.'):
+        return {}, 0
+    try:
+        d = json.loads((CACHE_SCRAPE / (h + '.json')).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}, 0
+    if not isinstance(d, dict):
+        return {}, 0
+    for r in d.get('reels') or []:
+        if isinstance(r, dict) and str(r.get('shortcode') or '') == sc:
+            return r, _entier(d.get('scraped_at'))
+    return {}, 0
+
+
+def _video_valide(chemin):
+    """Un vrai fichier vidéo : ffprobe quand il est là, sinon la signature MP4
+    (« ftyp »). Sans ce repli, un poste sans ffprobe levait et laissait le
+    tampon derrière lui."""
+    import shutil
+    import subprocess
+    try:
+        if chemin.stat().st_size <= 1024:
+            return False
+    except OSError:
+        return False
+    if shutil.which('ffprobe'):
+        try:
+            probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                                    '-show_entries', 'stream=codec_type', '-of', 'json', str(chemin)],
+                                   capture_output=True, text=True, timeout=20)
+            return probe.returncode == 0 and bool(json.loads(probe.stdout or '{}').get('streams'))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return False
+    try:
+        with open(chemin, 'rb') as fh:
+            return b'ftyp' in fh.read(64)
+    except OSError:
+        return False
+
+
+def _preparer_gratuit_un(f):
+    import os
+    import shutil
+    sc = f['shortcode']
+    d = lire_details(sc)
+    reel, releve_le = _reel_du_scrape(f.get('compte'), sc)
+    if reel:
+        # Un compteur ne redescend pas : le plus haut entre le registre et le relevé.
+        d.update(vues_actuelles=max(_entier(reel.get('views')), _entier(f.get('vues'))),
+                 likes=_entier(reel.get('likes')), commentaires=_entier(reel.get('comments')),
+                 statistiques_source='scrape')
+        if releve_le:
+            d['statistiques_le'] = releve_le
+    else:
+        # Dit dans les détails : la carte montre alors « — » et les vues du
+        # registre, pas des zéros inventés.
+        d.setdefault('statistiques_source', 'absente')
+    textes = [str(f.get('description') or ''), str(d.get('description') or ''),
+              str((reel or {}).get('caption') or '')]
+    try:
+        if chemin_description(sc).exists():
+            textes.append(chemin_description(sc).read_text(encoding='utf-8', errors='replace'))
+    except OSError:
+        pass
+    desc = max((t.strip() for t in textes), key=len)
+    if len(desc) > len(str(d.get('description') or '')):
+        d['description'] = desc
+    target = chemin_video(sc)
+    if not video_presente(sc) and not d.get('video_tentee'):
+        d['video_tentee'] = True
+        sauver_details(sc, d)
+        DOSSIER.mkdir(parents=True, exist_ok=True)
+        # Un suffixe qui n'est PAS .mp4 : un glob("*.mp4") ne doit jamais
+        # prendre un tampon pour une vidéo de l'archive.
+        tmp = target.with_name(sc + '.preparation.part')
+        try:
+            cached = CACHE_VIDEOS / (sc + '.mp4')
+            if cached.is_file() and cached.stat().st_size > 1024:
+                shutil.copyfile(cached, tmp)
+            elif reel.get('video_url'):
+                # UN GET sur le CDN d'Instagram, sans clé ni cookie : gratuit.
+                from veille_telegram import download_video_bytes
+                info = {}
+                blob = download_video_bytes(reel['video_url'], timeout=60, info=info)
+                if blob:
+                    tmp.write_bytes(blob)
+                else:
+                    d['erreur_video'] = str(info.get('reason') or 'telechargement_impossible')[:120]
+            else:
+                d['erreur_video'] = 'aucune_source_gratuite'
+            if tmp.exists():
+                if _video_valide(tmp):
+                    os.replace(tmp, target)
+                    d['erreur_video'] = ''
+                else:
+                    d['erreur_video'] = 'fichier_video_invalide'
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+    if video_presente(sc) and 'empreinte' not in d:
+        d['empreinte'] = empreinte_contenu(target)
+    sauver_details(sc, d)
+    return donnees_fiche(f)
+
+
+def preparer_fiches_gratuit(fiches, identite):
+    """La préparation des fiches SANS rien payer (serveur FR, 03/10/2026).
+
+    Le propriétaire refuse Apify (« j'peux rien avec ») : tout vient de ce
+    qui est déjà payé ou gratuit —
+      statistiques  le dernier relevé du scrape (CACHE_SCRAPE) : vues, likes,
+                    commentaires, légende ;
+      vidéo         l'archive des bangers (all_banger l'y a descendue à la
+                    détection), sinon le cache des Trends, sinon UN GET sur le
+                    lien CDN du relevé ;
+      empreinte     calculée ici (ffmpeg), pour regrouper les copies.
+    Une vidéo introuvable n'arrête rien : la fiche part avec son lien, et la
+    raison reste dans les détails (erreur_video). Rend {shortcode: fiche}."""
+    import jailbreak
+    import subprocess
+    fiches = rattacher_proprietaires(fiches, jailbreak.list_accounts(identite))
+    out = {}
+    for f in fiches:
+        try:
+            out[f['shortcode']] = _preparer_gratuit_un(f)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            d = lire_details(f['shortcode'])
+            d['erreur_video'] = type(error).__name__
+            sauver_details(f['shortcode'], d)
+            out[f['shortcode']] = donnees_fiche(f)
+    return out
+
+
+def _handle(compte) -> str:
+    return str(compte or '').strip().lower().lstrip('@')
+
+
+def comptes_admis(identite, membres=None) -> set:
+    """Les comptes Instagram d'une model tenus par un VA du Discord FR.
+
+    Le propriétaire (03/10/2026) : seuls comptent les comptes des VA Discord.
+    Un compte est admis si son VA (jailbreak.json, sous CETTE model) porte un
+    pseudo Discord — le bouton « 📷 Mes comptes » l'y écrit
+    (cogs/user._enregistrer_comptes_fr) — et, quand on connaît les membres du
+    serveur (`membres` : leurs pseudos), si ce pseudo en fait partie. Un VA du
+    site seul, sans Discord, n'entre pas. `membres` vide ou None : on ne sait
+    pas qui est sur le serveur (intention « membres » absente), le pseudo seul
+    suffit — écarter tout le monde sur une liste vide serait se taire.
+
+    Fiche SANS pseudo Discord mais dont le NOM est le pseudo d'un membre du
+    serveur : admise. Le bouton nomme le VA d'après son pseudo Discord, mais
+    add_va refuse un nom déjà pris — fiche créée sur le site, ou fabriquée
+    par add_account avec un pseudo vide : les comptes s'y rangeaient sans que
+    le pseudo soit jamais écrit, et tous les bangers d'un VA bien présent sur
+    Va IG partaient en `hors_discord`. Seulement quand les membres sont
+    connus : sans eux, un nom ne prouve rien. Une fiche dont le pseudo est
+    renseigné et DIFFÉRENT reste jugée sur ce pseudo-là."""
+    import jailbreak
+    entree = (jailbreak.list_all() or {}).get(str(identite or '').strip().lower()) or {}
+    pseudos = {str(m or '').strip().lstrip('@').casefold() for m in (membres or ())}
+    pseudos.discard('')
+    vas_ok, par_nom = set(), []
+    declares = set()
+    for va in entree.get('vas') or []:
+        if not isinstance(va, dict):
+            continue
+        nom = str(va.get('name') or '').strip().casefold()
+        pseudo = str(va.get('discord_username') or '').strip().lstrip('@').casefold()
+        if nom:
+            declares.add(nom)
+        if nom and pseudo and (not pseudos or pseudo in pseudos):
+            vas_ok.add(nom)
+        elif nom and not pseudo and pseudos and nom in pseudos:
+            vas_ok.add(nom)
+            par_nom.append(nom)
+    # Fiches implicites (un nom porté par des comptes, absent de vas[]) : même
+    # cas — le bouton y range les comptes sans qu'aucune fiche ne reçoive le
+    # pseudo.
+    if pseudos:
+        for a in entree.get('accounts') or []:
+            nom = str(a.get('va') or '').strip().casefold() if isinstance(a, dict) else ''
+            if nom and nom not in declares and nom not in vas_ok and nom in pseudos:
+                vas_ok.add(nom)
+                par_nom.append(nom)
+    if par_nom:
+        # Compté et nommé : c'est le signe qu'une fiche attend son pseudo
+        # Discord (à poser sur le site, ou par un nouveau clic du VA).
+        log.info(f"[bangers] {identite} : {len(par_nom)} VA admis par leur nom faute de pseudo "
+                 f"Discord sur la fiche : " + ', '.join(sorted(par_nom)[:10])
+                 + (' …' if len(par_nom) > 10 else ''))
+    return {_handle(a.get('username')) for a in entree.get('accounts') or []
+            if isinstance(a, dict) and _handle(a.get('username'))
+            and str(a.get('va') or '').strip().casefold() in vas_ok}
+
+
 def gerants_discord(vas, membres):
     handles = {}
     for member in membres:
@@ -978,12 +1291,14 @@ def _mention_gerant(f):
     return ('<@' + uid + '> · ' if uid.isdigit() else '') + name
 
 
-def fiche_discord(f, fichier, limite=25 * 1024 * 1024):
+def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye'):
     """Une carte native Discord ; fichiers texte complets, mentions non notifiantes.
 
     La vidéo, la description et le bouton viennent des briques partagées avec
     le salon « all-banger » (bloc_video_discord, blocs_description_discord) ;
     seul l'en-tête (compte, VA, statistiques) est propre au message du matin.
+    `libelle` : la model du salon (« Jessye » sur Youl4b, « Amélia »… sur le
+    serveur FR).
     """
     import discord
     date = datetime.strptime(f['jour_bilan'], '%Y-%m-%d').strftime('%d/%m/%Y')
@@ -991,13 +1306,17 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024):
     commentaires = f.get('commentaires')
     label = 'commentaire' if commentaires == 1 else 'commentaires'
     header = (f"### @{f['compte']}\n**Géré par :** {_mention_gerant(f)}\n"
-              f"Jessye · Bangers du {date}\n\n**{_nombre(vues)}** vues  ·  "
+              f"{libelle} · Bangers du {date}\n\n**{_nombre(vues)}** vues  ·  "
               f"**{_nombre(commentaires)}** {label}  ·  **{_nombre(f.get('likes'))}** likes")
     if f.get('vues_actuelles') is None:
         header += '\n-# Vues du dernier relevé disponible'
     elif f.get('statistiques_le'):
         at = datetime.fromtimestamp(f['statistiques_le'], TZ).strftime('%d/%m à %H:%M')
-        header += f'\n-# Statistiques vérifiées le {at} · heure de Paris'
+        # Le relevé du scrape (serveur FR, sans Apify) n'est pas une
+        # vérification du jour : la carte dit d'où vient le chiffre.
+        header += (f'\n-# Relevé du scrape du {at} · heure de Paris'
+                   if f.get('statistiques_source') == 'scrape'
+                   else f'\n-# Statistiques vérifiées le {at} · heure de Paris')
     children = [discord.ui.TextDisplay(header), discord.ui.Separator()]
     files = []
     if fichier and fichier.is_file() and fichier.stat().st_size <= limite:
@@ -1132,13 +1451,14 @@ def blocs_description_discord(shortcode, description, url, joindre_fichier=True)
     return children, files
 
 
-def textes_recap(record):
+def textes_recap(record, salon=None):
     """Pages sans plafond de reels ; une mention par personne sur l'ensemble du bilan."""
+    s = _salon(salon)
     jour = datetime.strptime(record['jour'], '%Y-%m-%d').strftime('%d/%m/%Y')
     visibles = [(sc, it) for sc, it in record['reels'].items() if it['etat'] in ('envoye', 'doublon')]
     videos = sum(bool(it.get('fiche', {}).get('video_disponible')) for _, it in visibles if it['etat'] == 'envoye')
     descs = sum(bool(it.get('fiche', {}).get('description')) for _, it in visibles if it['etat'] == 'envoye')
-    titre = f'## Bangers du {jour} · Jessye'
+    titre = f'## Bangers du {jour} · {s["libelle"]}'
     prefix = (titre + f'\n**{len(visibles)} reels repérés** · **{videos} vidéos disponibles** · **{descs} descriptions**\n'
               'Cliquez sur votre compte pour ouvrir sa fiche.\n\n')
     pages = []; texte = prefix; mentions = []; tagged = set()
@@ -1149,7 +1469,7 @@ def textes_recap(record):
         mid = item.get('message_id')
         if item['etat'] == 'doublon':
             mid = record['reels'][item['doublon_de']].get('message_id')
-        url = f'https://discord.com/channels/{GUILD_ID}/{CHANNEL_ID}/{mid}'
+        url = f'https://discord.com/channels/{s["guild_id"]}/{s["channel_id"]}/{mid}'
         ligne = f"• {who} → [@{f['compte']}]({url})"
         if item['etat'] == 'doublon': ligne += ' · même vidéo'
         elif not f.get('video_disponible'): ligne += ' · vidéo indisponible'
@@ -1159,16 +1479,36 @@ def textes_recap(record):
         texte += ligne + '\n'
         if nouveau:
             tagged.add(uid); mentions.append(uid)
+    hors = len(record.get('hors_discord') or [])
     if not visibles:
-        texte = titre + '\nAucun reel au-dessus du seuil repéré dans les données disponibles pour cette journée.'
+        # FR : des reels au-dessus du seuil ont pu être écartés (comptes sans VA
+        # du Discord). Dire « aucun reel au-dessus du seuil » était faux, et la
+        # journée figée ne les rendait plus jamais.
+        texte = titre + ('\nAucun reel des comptes de VA du Discord au-dessus du seuil pour cette journée.'
+                         if hors else
+                         '\nAucun reel au-dessus du seuil repéré dans les données disponibles pour cette journée.')
     if any(it['etat'] == 'ignore' for it in record['reels'].values()):
         texte += '\n-# Certaines anciennes publications supprimées ont été conservées hors du récapitulatif.'
+    if hors:
+        texte += (f"\n-# {hors} reel{'s' if hors > 1 else ''} au-dessus du seuil "
+                  f"écarté{'s' if hors > 1 else ''} : comptes reliés à aucun VA du Discord "
+                  "(bouton « 📷 Mes comptes »).")
     pages.append({'texte': texte.rstrip(), 'mentions': mentions})
     return pages
 
 
-def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, strict_veille=False):
-    """Journal durable, reprise sans double envoi, bilan seulement après les fiches."""
+def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, strict_veille=False,
+                    salon=None, admis=None):
+    """Journal durable, reprise sans double envoi, bilan seulement après les fiches.
+
+    `salon` (salon_us() par défaut) : l'identité, le salon et le dossier du
+    journal. `admis` : pour un salon FR, les comptes des VA du Discord FR
+    (comptes_admis), relevés AVANT que la journée ne soit figée ; un reel
+    d'un autre compte est écarté, compté et nommé dans le journal
+    (`hors_discord`), jamais en silence."""
+    s = _salon(salon)
+    dossier = Path(s['dossier'])
+    canal = int(s['channel_id'] or 0)
     clock = time.time() if maintenant is None else maintenant
     date = datetime.strptime(jour, '%Y-%m-%d').date()
     if date.isoformat() != jour or date >= datetime.fromtimestamp(clock, TZ).date():
@@ -1176,31 +1516,52 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
     bilan = {'jour': jour, 'annonces': 0, 'reeditions': 0, 'recaps': 0, 'doublons': 0}
     if strict_veille and jour != fenetre_veille(clock)[0]:
         return dict(bilan, attente='Journée hors sélection')
-    if not _JOURNEE_LOCK.acquire(blocking=False):
+    verrou_fil = _verrou_du_dossier(dossier)
+    if not verrou_fil.acquire(blocking=False):
         return dict(bilan, en_cours=True)
     try:
-        DOSSIER_JOURNEES.mkdir(parents=True, exist_ok=True)
-        with (DOSSIER_JOURNEES / '.lock').open('a') as verrou:
+        dossier.mkdir(parents=True, exist_ok=True)
+        with (dossier / '.lock').open('a') as verrou:
             try:
                 fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 return dict(bilan, en_cours=True)
-            record = _lire_journee(jour)
+            record = _lire_journee(jour, dossier)
             if record and record.get('termine') and record.get('format') == FORMAT_DISCORD:
                 return dict(bilan, termine=True, total=len(record['reels']))
             if record is None:
                 record = {'schema': 1, 'jour': jour, 'seuil': seuil(), 'reels': {}, 'cree_le': clock}
+                if s['cle'] != 'us':
+                    record['salon'] = s['cle']
             if record.get('format') != FORMAT_DISCORD:
-                for f in selection_jour(toutes(), record['seuil'], jour):
+                if s.get('discord_seulement') and admis is None:
+                    # Sans la liste, on ne sait pas quels comptes comptent : on
+                    # ne fige rien plutôt que de tout prendre.
+                    raise ValueError('Comptes des VA Discord inconnus : sélection différée')
+                hors = []
+                for f in selection_jour(toutes(), record['seuil'], jour, identite=s['identite']):
+                    if s.get('discord_seulement') and _handle(f.get('compte')) not in admis:
+                        hors.append({'shortcode': f['shortcode'], 'compte': _handle(f.get('compte')),
+                                     'va': str(f.get('va') or '')})
+                        continue
                     a = f.get('annonce') or {}
-                    if a.get('message_id') and int(a.get('channel_id') or 0) != CHANNEL_ID:
-                        raise ValueError('Annonce existante hors Youl4b : vérification requise')
+                    if a.get('message_id') and int(a.get('channel_id') or 0) != canal:
+                        raise ValueError('Annonce existante hors Youl4b : vérification requise'
+                                         if s['cle'] == 'us' else
+                                         f"Annonce existante hors de #{s['nom']} : vérification requise")
                     item = record['reels'].setdefault(f['shortcode'], {})
                     if item.get('etat') not in ('envoi', 'a_verifier'):
                         item.update(etat='attente', message_id=item.get('message_id') or a.get('message_id'))
                     item.setdefault('fiche', dict(f, jour_bilan=jour))
+                if s.get('discord_seulement'):
+                    record.update(hors_discord=hors, comptes_discord=len(admis))
+                    if hors:
+                        log.info(f"[bangers] {s['libelle']} {jour} : {len(hors)} reel(s) écarté(s), "
+                                 f"comptes sans VA du Discord FR : "
+                                 + ', '.join('@' + h['compte'] for h in hors[:10])
+                                 + (' …' if len(hors) > 10 else ''))
                 record.update(format=FORMAT_DISCORD, selection_complete=True)
-                _sauver_journee(record)
+                _sauver_journee(record, dossier)
             if record.get('preparation_apres', 0) > clock:
                 return dict(bilan, attente='Préparation temporairement indisponible')
             a_preparer = [it['fiche'] for it in record['reels'].values() if not it.get('prepare')]
@@ -1214,9 +1575,9 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
                     record.pop('erreur_preparation', None)
                 except Exception as error:
                     record.update(erreur_preparation=type(error).__name__ + ': ' + str(error)[:150], preparation_apres=clock + 1800)
-                    _sauver_journee(record)
+                    _sauver_journee(record, dossier)
                     raise
-                _sauver_journee(record)
+                _sauver_journee(record, dossier)
             fingerprints = {it['fiche'].get('empreinte'): sc for sc, it in record['reels'].items()
                             if it['etat'] == 'envoye' and it['fiche'].get('empreinte')}
             for sc, item in record['reels'].items():
@@ -1227,20 +1588,20 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
                 original = fingerprints.get(fp) if fp else None
                 if original and original != sc and not item.get('message_id'):
                     item.update(etat='doublon', doublon_de=original)
-                    _sauver_journee(record); bilan['doublons'] += 1
+                    _sauver_journee(record, dossier); bilan['doublons'] += 1
                     continue
                 uncertain = item['etat'] in ('envoi', 'a_verifier') and not item.get('message_id')
                 edition = bool(item.get('message_id'))
                 item.update(etat='edition' if edition else 'envoi', intention_le=item.get('intention_le') or time.time())
-                _sauver_journee(record)
+                _sauver_journee(record, dossier)
                 result = publier(f, dict(item, verifier_seulement=uncertain))
                 if result.get('supprime') and edition:
                     item['etat'] = 'ignore'
-                elif result.get('message_id') and int(result.get('channel_id') or 0) == CHANNEL_ID:
+                elif result.get('message_id') and int(result.get('channel_id') or 0) == canal:
                     item.update(etat='envoye', message_id=int(result['message_id']))
-                    _sauver_journee(record)
+                    _sauver_journee(record, dossier)
                     d = lire_details(sc)
-                    d['annonce'] = {'message_id': int(result['message_id']), 'channel_id': CHANNEL_ID,
+                    d['annonce'] = {'message_id': int(result['message_id']), 'channel_id': canal,
                         'vues_affichees': f.get('vues_actuelles') or f.get('vues'),
                         'avec_video': bool(f.get('video_disponible')), 'le': int(time.time())}
                     sauver_details(sc, d)
@@ -1248,45 +1609,182 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
                     bilan['reeditions' if edition else 'annonces'] += 1
                 else:
                     item['etat'] = 'a_verifier'
-                    _sauver_journee(record)
+                    _sauver_journee(record, dossier)
                     return dict(bilan, a_verifier=sc)
-                _sauver_journee(record)
+                _sauver_journee(record, dossier)
             pages = record.setdefault('recaps', [])
             if not pages:
-                pages.extend(dict(p, etat='attente') for p in textes_recap(record))
-                _sauver_journee(record)
+                pages.extend(dict(p, etat='attente') for p in textes_recap(record, s))
+                _sauver_journee(record, dossier)
             for index, page in enumerate(pages):
                 if page['etat'] == 'envoye': continue
                 uncertain = page['etat'] in ('envoi', 'a_verifier')
                 page.update(etat='envoi', intention_le=page.get('intention_le') or time.time())
-                _sauver_journee(record)
+                _sauver_journee(record, dossier)
                 result = recapituler(jour, index, dict(page, verifier_seulement=uncertain))
-                if not result.get('message_id') or int(result.get('channel_id') or 0) != CHANNEL_ID:
-                    page['etat'] = 'a_verifier'; _sauver_journee(record)
+                if not result.get('message_id') or int(result.get('channel_id') or 0) != canal:
+                    page['etat'] = 'a_verifier'; _sauver_journee(record, dossier)
                     return dict(bilan, a_verifier='recap')
                 page.update(etat='envoye', message_id=int(result['message_id']))
-                _sauver_journee(record); bilan['recaps'] += 1
+                _sauver_journee(record, dossier); bilan['recaps'] += 1
             record.update(termine=True, termine_le=time.time())
-            _sauver_journee(record)
+            _sauver_journee(record, dossier)
             return dict(bilan, termine=True, total=len(record['reels']))
     finally:
-        _JOURNEE_LOCK.release()
+        verrou_fil.release()
+
+
+def publier_salons(liste, publier_un, jour='') -> dict:
+    """La publication du matin, salon par salon. Rend {cle du salon: bilan}.
+
+    CHAQUE SALON DANS SON PROPRE TRY : un salon FR absent, sans droits ou en
+    panne ne retient ni les autres models, ni Jessye. Une cause est dite UNE
+    fois par salon (la boucle du matin repasse chaque minute) ; elle se redit
+    après une reprise."""
+    out = {}
+    for s in liste:
+        cle = s['cle']
+        try:
+            b = publier_un(s)
+        except SalonAbsent as e:
+            _dire_une_fois(f"{cle}|absent|{e}",
+                           f"[bangers] {s['libelle']} ({s['serveur']}) : {e} — ce salon est passé, "
+                           f"les autres continuent")
+            out[cle] = {'jour': jour, 'annonces': 0, 'attente': str(e)}
+            continue
+        except Exception as e:                                # noqa: BLE001
+            _dire_une_fois(f"{cle}|erreur|{jour}|{type(e).__name__}",
+                           f"[bangers] {s['libelle']} ({s['serveur']}) : journée interrompue : "
+                           f"{type(e).__name__}: {str(e)[:160]}", logging.ERROR)
+            out[cle] = {'jour': jour, 'erreur': 'Envoi interrompu : vérifier le journal du jour'}
+            continue
+        out[cle] = b
+        if cle != 'us' and 'désactivée' in str(b.get('attente') or ''):
+            # Une model FR hors des identités scrapées n'a aucun banger : le dire.
+            _dire_une_fois(f"{cle}|desactivee",
+                           f"[bangers] {s['libelle']} ({s['serveur']}) : {b['attente']} "
+                           f"(identités scrapées) — pas de publication du matin", logging.INFO)
+        if cle != 'us' and b.get('a_verifier'):
+            # Une issue incertaine reste « à vérifier » jusqu'à ce qu'on regarde :
+            # la boucle repasse chaque minute, le dire une fois suffit.
+            _dire_une_fois(f"{cle}|a_verifier|{jour}|{b['a_verifier']}",
+                           f"[bangers] {s['libelle']} ({s['serveur']}) : envoi de "
+                           f"{b['a_verifier']} à vérifier dans #{s['nom']} — la journée attend")
+        if b.get('termine'):
+            # La journée est faite : une rechute demain se dira de nouveau.
+            for k in [k for k in _DITS if k.startswith(cle + '|')]:
+                _DITS.discard(k)
+        if cle != 'us' and any(b.get(k) for k in ('annonces', 'reeditions', 'recaps', 'doublons')):
+            log.info(f"[bangers] {s['libelle']} ({s['serveur']}) : {b}")
+    return out
+
+
+def _nom_de_salon(nom) -> str:
+    """Le nom d'un salon sans ce qu'on ajoute devant à la main (« 💥・ »)."""
+    try:
+        from cogs.welcome import nom_sans_decor
+        return nom_sans_decor(nom)
+    except Exception:                                         # noqa: BLE001
+        return re.sub(r'^[^a-z0-9_-]+', '', str(nom or '').strip().lower())
+
+
+def dans_archives(c) -> bool:
+    """Un salon rangé dans une catégorie d'archives (« 🗄️ Archives … »)."""
+    cat = getattr(c, 'category', None)
+    return cat is not None and 'archives' in str(getattr(cat, 'name', '')).lower()
+
+
+def salon_banger_de(guild, model, all_banger=False):
+    """Le salon texte « 💥・banger-<model> » du serveur (ou, `all_banger`, son
+    miroir « 💥・all-banger-<model> »), par son nom, hors archives, ou None.
+
+    « all-banger-<model> » n'est pas le salon du matin : y poster les fiches
+    mélangerait les deux fils."""
+    m = str(model or '').strip().lower()
+    cible = ('all-banger-' if all_banger else 'banger-') + m
+    trouves = []
+    for c in getattr(guild, 'text_channels', None) or []:
+        if dans_archives(c):
+            continue
+        n = _nom_de_salon(getattr(c, 'name', ''))
+        if not (n == cible or n.endswith('-' + cible)):
+            continue
+        if all_banger or not n.endswith('all-' + cible):
+            trouves.append(c)
+    if not trouves:
+        return None
+    trouves.sort(key=lambda c: (getattr(c, 'position', 0) or 0, getattr(c, 'id', 0) or 0))
+    if len(trouves) > 1:
+        _dire_une_fois(f"plusieurs|{cible}", f"[bangers] plusieurs salons « {cible} » : "
+                       f"envoi dans #{trouves[0].name} ({trouves[0].id})")
+    return trouves[0]
+
+
+async def contexte_salon(client, salon=None):
+    """(salon Discord, gérants {VA: id Discord}, salon résolu, pseudos des membres).
+
+    Jessye : le salon fixe de Youl4b, comme avant. Une model FR : son salon
+    cherché par le NOM sur le serveur FR, l'identifiant de SALONS_FR en
+    secours ; absent ou sans les droits d'écrire, de joindre un fichier et de
+    relire l'historique → SalonAbsent (cette model seule est passée). Les
+    droits sont vérifiés AVANT toute intention d'envoi : un refus après
+    l'intention laissait la fiche « à vérifier » pour toujours."""
+    import jailbreak
+    s = dict(_salon(salon))
+    if s['cle'] == 'us':
+        channel = client.get_channel(CHANNEL_ID) or await client.fetch_channel(CHANNEL_ID)
+        if channel.guild.id != GUILD_ID:
+            raise ValueError('Salon hors Youl4b')
+    else:
+        guild = client.get_guild(int(s['guild_id']))
+        if guild is None:
+            raise SalonAbsent(f"serveur {s['serveur']} hors de portée du bot")
+        channel = salon_banger_de(guild, s['identite'])
+        if channel is None and s.get('channel_id') and hasattr(guild, 'get_channel'):
+            channel = guild.get_channel(int(s['channel_id']))
+            if channel is not None and dans_archives(channel):
+                channel = None
+        if channel is None:
+            raise SalonAbsent(f"aucun salon « {s['nom']} » sur {s['serveur']}")
+        if getattr(getattr(channel, 'guild', None), 'id', None) != int(s['guild_id']):
+            raise ValueError(f"Salon hors du serveur {s['serveur']}")
+        moi = getattr(guild, 'me', None)
+        if moi is not None and hasattr(channel, 'permissions_for'):
+            droits = channel.permissions_for(moi)
+            manque = [n for n, a in (('voir le salon', 'view_channel'), ('écrire', 'send_messages'),
+                                     ('joindre un fichier', 'attach_files'),
+                                     ('voir les anciens messages', 'read_message_history'))
+                      if not getattr(droits, a, True)]
+            if manque:
+                raise SalonAbsent(f"le bot n'a pas le droit de {', '.join(manque)} "
+                                  f"dans #{channel.name}")
+        s['channel_id'] = channel.id
+    guild = channel.guild
+    membres = guild.members if guild.chunked else [m async for m in guild.fetch_members(limit=None)]
+    vas = (jailbreak.list_all().get(s['identite']) or {}).get('vas') or []
+    pseudos = {m.name for m in membres if not getattr(m, 'bot', False)}
+    return channel, gerants_discord(vas, membres), s, pseudos
 
 
 async def contexte_publication(client):
-    import jailbreak
-    channel = client.get_channel(CHANNEL_ID) or await client.fetch_channel(CHANNEL_ID)
-    if channel.guild.id != GUILD_ID:
-        raise ValueError('Salon hors Youl4b')
-    guild = channel.guild
-    membres = guild.members if guild.chunked else [m async for m in guild.fetch_members(limit=None)]
-    vas = (jailbreak.list_all().get(IDENTITE) or {}).get('vas') or []
-    return channel, gerants_discord(vas, membres)
+    """Le contexte du salon de Jessye : (salon Discord, gérants)."""
+    channel, gerants, _s, _pseudos = await contexte_salon(client)
+    return channel, gerants
 
 
 def nonce_banger(jour, reference):
     import hashlib
     return hashlib.sha256((jour + ':' + reference).encode()).hexdigest()[:24]
+
+
+def _prefixe_nonce(s) -> str:
+    """Rien pour Jessye (nonces d'avant inchangés) ; la clé du salon sinon.
+
+    discord.py envoie `enforce_nonce` : un même nonce revenu en quelques
+    minutes rend le message DÉJÀ créé. Le récapitulatif de Jessye et celui
+    d'une model FR, postés à la même minute avec « recap:0 », auraient
+    partagé le leur — et la model n'aurait jamais eu le sien."""
+    return '' if s['cle'] == 'us' else s['cle'] + ':'
 
 
 async def _retrouver_nonce(channel, client, nonce, depuis):
@@ -1298,10 +1796,11 @@ async def _retrouver_nonce(channel, client, nonce, depuis):
     return None
 
 
-async def publier_fiche_discord(client, channel, f, item):
+async def publier_fiche_discord(client, channel, f, item, salon=None):
     import discord
-    assert channel.id == CHANNEL_ID and channel.guild.id == GUILD_ID
-    nonce = nonce_banger(f['jour_bilan'], f['shortcode'])
+    s = _salon(salon)
+    assert channel.id == int(s['channel_id']) and channel.guild.id == int(s['guild_id'])
+    nonce = nonce_banger(f['jour_bilan'], _prefixe_nonce(s) + f['shortcode'])
     if item.get('verifier_seulement'):
         found = await _retrouver_nonce(channel, client, nonce, item['intention_le'])
         return {'message_id': found.id, 'channel_id': channel.id} if found else {}
@@ -1316,7 +1815,8 @@ async def publier_fiche_discord(client, channel, f, item):
                            'components': [c.to_dict() for c in old.components]})
         assert f['shortcode'] in data, 'Message différent du reel attendu'
     fichier = chemin_video(f['shortcode']) if video_presente(f['shortcode']) else None
-    view, files = fiche_discord(f, fichier, getattr(channel.guild, 'filesize_limit', 25 * 1024 * 1024))
+    view, files = fiche_discord(f, fichier, getattr(channel.guild, 'filesize_limit', 25 * 1024 * 1024),
+                                libelle=s['libelle'])
     try:
         if old:
             message = await old.edit(content=None, embeds=[], attachments=files, view=view,
@@ -1334,10 +1834,11 @@ async def publier_fiche_discord(client, channel, f, item):
         for file in files: file.close()
 
 
-async def publier_recap_discord(client, channel, jour, index, page):
+async def publier_recap_discord(client, channel, jour, index, page, salon=None):
     import discord
-    assert channel.id == CHANNEL_ID and channel.guild.id == GUILD_ID
-    nonce = nonce_banger(jour, 'recap:' + str(index))
+    s = _salon(salon)
+    assert channel.id == int(s['channel_id']) and channel.guild.id == int(s['guild_id'])
+    nonce = nonce_banger(jour, _prefixe_nonce(s) + 'recap:' + str(index))
     if page.get('verifier_seulement'):
         found = await _retrouver_nonce(channel, client, nonce, page['intention_le'])
         return {'message_id': found.id, 'channel_id': channel.id} if found else {}
