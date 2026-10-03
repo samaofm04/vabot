@@ -2896,6 +2896,60 @@ class _JBRedirect:
         return getattr(object.__getattribute__(self, "_itx"), name)
 
 
+async def _generer_lien_fr(interaction, uid, identity):
+    """« Générer le lien » sur le serveur FR : liens_fr.generer, puis le lien
+    dans le salon du VA, comme ailleurs. Ce qui n'a pas pu se faire (un
+    tracking refuse par MyPuls...) est dit au manager, jamais tu."""
+    import liens_fr
+    users = load_json(USERS_FILE, {})
+    data = users.get(str(uid), {})
+    ch_id = data.get("channel_id") if isinstance(data, dict) else None
+    va_ch = interaction.client.get_channel(ch_id) if ch_id else None
+    member = interaction.guild.get_member(uid) if interaction.guild else None
+    pseudo = (getattr(member, "name", "") or str(uid)).lower()
+    model = str(identity or "").strip().lower()
+    try:
+        from cogs.welcome import models_du_membre
+        mods = models_du_membre(member) if member is not None else []
+        if mods and model not in mods:
+            model = mods[0]
+    except Exception:                                        # noqa: BLE001
+        pass
+    try:
+        res = await asyncio.to_thread(liens_fr.generer, uid, pseudo, model, interaction.user.id)
+    except Exception as e:                                   # noqa: BLE001
+        await interaction.followup.send(f"❌ Lien non créé : {type(e).__name__}: {e}", ephemeral=True)
+        return
+    if not res.get("ok"):
+        lignes = [f"❌ {res.get('erreur', 'Génération échouée')}"]
+        if res.get("trackings"):
+            lignes.append("Trackings MyPuls DÉJÀ créés (ils ne s'effacent pas) : "
+                          + ", ".join(f"{k.upper()} {v}" for k, v in res["trackings"].items()))
+        lignes += [f"• {s}" for s in res.get("soucis") or []]
+        await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
+        return
+    url = res.get("public_url", "")
+    if res.get("deja"):
+        _lr_mark_generated(uid, url, res.get("display_name", ""))
+        await _lr_send_blocked(interaction, uid, url)
+        return
+    _lr_mark_generated(uid, url, res.get("display_name", ""))
+    if va_ch:
+        try:
+            await va_ch.send(_link_message(url, getattr(va_ch, "guild", None)))
+        except Exception:                                    # noqa: BLE001
+            pass
+        try:
+            await _apply_va_link_mark(va_ch, True, reason="lien généré")
+        except Exception:                                    # noqa: BLE001
+            pass
+    lignes = [f"✅ **{res.get('display_name')}** → {url}"]
+    for k, v in (res.get("trackings") or {}).items():
+        lignes.append(f"• tracking {k.upper()} : {v}")
+    lignes += [f"⚠️ {s}" for s in res.get("soucis") or []]
+    await interaction.followup.send("\n".join(lignes)[:1900], ephemeral=True)
+
+
 class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlink:(?P<uid>\d+)"):
     """Bouton « Générer le lien » sur une demande de lien. L'ID du VA est dans le
     custom_id -> persistant (marche même après un redémarrage du bot). Réservé staff.
@@ -2947,6 +3001,11 @@ class GenLinkButton(discord.ui.DynamicItem[discord.ui.Button], template=r"genlin
             identity = _link_identity(interaction.guild, uid)
             if not identity:
                 await interaction.followup.send("⚠️ Ce VA n'a pas d'identité assignée (`/adduser`).", ephemeral=True)
+                return
+            if _menu_outils_ici(interaction.guild):
+                # Serveur FR : copie du lien de base de SA model (equipe NOUM
+                # FR) aux boutons OF / MYM sur ses trackings MyPuls (liens_fr).
+                await _generer_lien_fr(interaction, uid, identity)
                 return
             # Salon perso + handle du VA
             users = load_json(USERS_FILE, {})

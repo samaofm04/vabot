@@ -175,7 +175,7 @@ def list_tools() -> Dict[str, Any]:
         return {"ok": False, "error": f"Erreur réseau : {e}"}
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:200]}"}
-    data = _parse_sse(r.text)
+    data = _parse_sse(r.content.decode("utf-8", "replace"))
     tools = ((data or {}).get("result") or {}).get("tools") or []
     return {"ok": True, "tools": [{"name": t.get("name"), "desc": (t.get("description") or "")[:80]} for t in tools]}
 
@@ -399,7 +399,10 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
         return _call_tool_brut(tool_name, args, _retry=False, _429=_429)
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:300]}"}
-    data = _parse_sse(r.text)
+    # UTF-8, toujours : le flux SSE arrive sans « charset », requests suppose
+    # du latin-1 et chaque emoji / accent revenait casse (« profite enð\x9f\x99\x84 »).
+    # Relire puis renvoyer des boutons ainsi aurait abime les pages (03/10/2026).
+    data = _parse_sse(r.content.decode("utf-8", "replace"))
     if not data:
         return {"ok": False, "error": f"Réponse invalide : {r.text[:300]}"}
     if "error" in data:
