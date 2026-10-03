@@ -312,7 +312,9 @@ _ESSAI_FAIT = Path(__file__).resolve().parent.parent / "data" / "essai_liens_fr.
 #: toutes les conv, supprime tout meme le menu, je refais l'onboarding ; juste
 #: le menu, garde l'epingle »). Chaque ticket VA : tout efface, puis sa ligne
 #: de menu (une par model) postee et epinglee, sans l'avis « a epingle ».
-#: UNE fois, trace ecrite avant.
+#: UNE fois, trace ecrite avant ; coupe par un redemarrage (un push d'une
+#: autre session, 12:26 le 03/10), il REPREND aux tickets pas encore faits --
+#: trois reprises au plus.
 CLEAN_DEMANDE = "2026-10-03"
 _CLEAN_FAIT = Path(__file__).resolve().parent.parent / "data" / "clean_tickets_fr.json"
 
@@ -488,9 +490,14 @@ class Outils(commands.Cog):
 
     async def _clean_demande(self, guilde) -> bool:
         fait = safe_json.load(_CLEAN_FAIT, default={}) or {}
-        if fait.get(CLEAN_DEMANDE):
+        etat = fait.get(CLEAN_DEMANDE)
+        if etat and (etat.get("fin") or etat.get("reprises", 0) >= 3):
             return False
-        fait[CLEAN_DEMANDE] = {"debut": int(__import__("time").time())}
+        if etat:
+            etat["reprises"] = etat.get("reprises", 0) + 1
+        else:
+            etat = fait[CLEAN_DEMANDE] = {"debut": int(__import__("time").time()), "faits": []}
+        deja_faits = {int(i) for i in etat.get("faits") or []}
         if not safe_json.write(_CLEAN_FAIT, fait, indent=1):
             print("[outils] trace du nettoyage non ecrite : nettoyage NON lance", flush=True)
             return False
@@ -518,19 +525,34 @@ class Outils(commands.Cog):
             fiches = {int(e.get("channel_id") or 0): (uid, e.get("identity"))
                       for uid, e in (load_users() or {}).items()
                       if isinstance(e, dict) and str(uid).isdigit()}
-            par_salon = {}
+            tous = []
             for ch in guilde.text_channels:
                 if _salon_archive(ch) or not _re.search(r"(?:^|[^a-z0-9])va-[a-z0-9_.]+$",
                                                         (ch.name or "").lower()):
                     continue
                 uid, ident = fiches.get(ch.id, (None, None))
                 lignes = [(u, i) for _c, u, i in _une_ligne_par_model([(ch, uid, ident)])] if uid else []
-                par_salon[ch.id] = (ch, lignes)
-            await signaler(f"🧹 Nettoyage de {len(par_salon)} ticket(s)…")
+                tous.append((ch, lignes))
+            vieux_faits = {int(i) for i in (etat.get("vieux_faits") or [])}
+            # Discord n'efface EN LOT que les messages de moins de 14 jours ; les
+            # plus vieux partent un par un. Le 03/10 un seul vieux ticket a
+            # bloque tous les autres pendant de longues minutes -- d'ou DEUX
+            # passes : tous les tickets d'abord (recent + menu), le vieux apres.
+            limite = discord.utils.utcnow() - __import__("datetime").timedelta(days=13, hours=12)
+
+            def _noter(**k):
+                trace = safe_json.load(_CLEAN_FAIT, default={}) or {}
+                trace.setdefault(CLEAN_DEMANDE, {}).update(k)
+                safe_json.write(_CLEAN_FAIT, trace, indent=1)
+
+            a_faire = [(ch, l) for ch, l in tous if ch.id not in deja_faits]
+            await signaler(f"🧹 Nettoyage de {len(a_faire)} ticket(s)…"
+                           + (f" (reprise : {len(deja_faits)} déjà faits)" if deja_faits else ""))
+            faits_ids = set(deja_faits)
             faits, sans_menu, rates = 0, [], []
-            for i, (ch, lignes) in enumerate(par_salon.values(), 1):
+            for i, (ch, lignes) in enumerate(a_faire, 1):
                 try:
-                    await ch.purge(limit=None, bulk=True, reason="Nettoyage des tickets")
+                    await ch.purge(limit=None, after=limite, bulk=True, reason="Nettoyage des tickets")
                     poses = 0
                     for uid, ident in lignes:
                         if uid is None:
@@ -546,20 +568,39 @@ class Outils(commands.Cog):
                         if m.type == discord.MessageType.pins_add:
                             await m.delete()
                     faits += 1
+                    faits_ids.add(ch.id)
                     if not poses:
                         sans_menu.append(ch.name)
                 except Exception as e:                       # noqa: BLE001
                     rates.append(f"{ch.name} ({type(e).__name__})")
+                if i % 10 == 0:
+                    _noter(faits=sorted(faits_ids))          # pour reprendre apres un redemarrage
                 if i % 25 == 0:
-                    await signaler(f"🧹 {i}/{len(par_salon)}…")
+                    await signaler(f"🧹 {i}/{len(a_faire)}…")
                 await asyncio.sleep(1)
-            fin = safe_json.load(_CLEAN_FAIT, default={}) or {}
-            fin.setdefault(CLEAN_DEMANDE, {})["fin"] = int(__import__("time").time())
-            safe_json.write(_CLEAN_FAIT, fin, indent=1)
-            await signaler(f"✅ Nettoyage fini : {faits} ticket(s), menu épinglé seul"
+            _noter(faits=sorted(faits_ids))
+            await signaler(f"✅ Tickets nettoyés : {faits}, menu épinglé seul"
                            + (f" · SANS menu (pas de fiche ou de rôle) : {', '.join(sans_menu[:15])}"
                               if sans_menu else "")
-                           + (f" · ratés : {', '.join(rates[:15])}" if rates else ""))
+                           + (f" · ratés : {', '.join(rates[:15])}" if rates else "")
+                           + " — reste les messages de plus de 14 jours, un par un.")
+            vieux, vieux_rates = 0, []
+            for ch, _l in tous:
+                if ch.id in vieux_faits:
+                    continue
+                try:
+                    partis = await ch.purge(limit=None, before=limite, bulk=False,
+                                            reason="Nettoyage des tickets (vieux messages)")
+                    if partis:
+                        vieux += 1
+                        print(f"[outils] nettoyage : {len(partis)} vieux message(s) de #{ch.name}", flush=True)
+                    vieux_faits.add(ch.id)
+                    _noter(vieux_faits=sorted(vieux_faits))
+                except Exception as e:                       # noqa: BLE001
+                    vieux_rates.append(f"{ch.name} ({type(e).__name__})")
+            _noter(fin=int(__import__("time").time()))
+            await signaler(f"✅ Nettoyage fini : vieux messages retirés de {vieux} ticket(s)"
+                           + (f" · ratés : {', '.join(vieux_rates[:15])}" if vieux_rates else ""))
         self.bot.loop.create_task(_tache())
         return True
 
