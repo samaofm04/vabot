@@ -410,9 +410,59 @@ def models_du_membre(member) -> list:
     return out
 
 
+def _serveur_fr(guild) -> bool:
+    try:
+        from cogs.outils import serveur_outils
+        return serveur_outils(guild)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def identites_du_membre(member, identite=None) -> list:
-    """Ses models par les roles ; sans role de model, l'identite de sa fiche."""
-    return models_du_membre(member) or ([str(identite).strip().lower()] if identite else [])
+    """Ses models par les roles ; sans role de model, l'identite de sa fiche.
+
+    Sur le serveur FR, les ROLES font foi : un VA a qui on retire tous ses
+    roles n'a plus aucune model -- plus les salons, plus de menu -- sa fiche
+    attend qu'on lui en redonne un (proprietaire, 03/10/2026)."""
+    if _serveur_fr(getattr(member, "guild", None)):
+        return models_du_membre(member)
+    return [str(identite).strip().lower()] if identite else []
+
+
+def models_du_serveur(guild) -> list:
+    """Les models du serveur FR : un role ET une categorie du meme nom. []
+    ailleurs."""
+    if not _serveur_fr(guild):
+        return []
+    cats = {str(getattr(c, "name", "")).strip().lower()
+            for c in (getattr(guild, "categories", None) or [])}
+    return sorted({str(r.name).strip().lower() for r in (getattr(guild, "roles", None) or [])
+                   if str(r.name).strip().lower() in cats})
+
+
+def identite_pour_serveur(guild, identite):
+    """Sur le serveur FR, une des models du serveur et RIEN d'autre.
+
+    Six VA y sont arrives avec des identites US (themikkiangel, ellieann…) :
+    sans categorie ni role, leurs tickets restaient en vrac en haut du
+    serveur (constate le 03/10/2026). Une identite hors liste est remplacee
+    par la model qui a le moins de VA (au hasard entre les ex aequo).
+    Ailleurs, rien ne change."""
+    models = models_du_serveur(guild)
+    if not models:
+        return identite
+    if str(identite or "").strip().lower() in models:
+        return str(identite).strip().lower()
+    charge = {m: 0 for m in models}
+    for e in (load_users() or {}).values():
+        i = str((e or {}).get("identity") or "").strip().lower() if isinstance(e, dict) else ""
+        if i in charge:
+            charge[i] += 1
+    moins = min(charge.values())
+    choix = random.choice([m for m, n in charge.items() if n == moins])
+    log.warning(f"[ticket] {getattr(guild, 'name', '?')} : identite « {identite} » hors "
+                f"des models du serveur -> {choix}")
+    return choix
 
 
 def role_du_model(guild, identite):
@@ -1943,6 +1993,9 @@ async def setup_va_ticket(guild, member, bot=None):
         if not identity:
             return None, "Aucune identité disponible. Préviens un admin."
 
+    # Serveur FR : une de ses models, jamais une identite d'ailleurs
+    identity = identite_pour_serveur(guild, identity)
+
     # Creer le salon
     channel = await create_va_channel(guild, member, identity)
     if not channel:
@@ -2237,7 +2290,12 @@ class Welcome(commands.Cog):
         if getattr(after, "bot", False):
             return
         avant, apres = models_du_membre(before), models_du_membre(after)
-        if avant == apres or not apres:
+        if avant == apres:
+            return
+        if not apres:
+            # plus aucune model : plus ses salons ; sa fiche attend un role
+            await sync_general_channel_access(after.guild, after, [])
+            log.info(f"models : {after.id} n'a plus de role de model (salons retires)")
             return
         auto = after.id in getattr(self, "_roles_auto", set())
         getattr(self, "_roles_auto", set()).discard(after.id)

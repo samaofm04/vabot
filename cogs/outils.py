@@ -156,8 +156,6 @@ def models_du_ticket(canal) -> list:
     de ses roles (serveur FR, plusieurs roles = plusieurs models)."""
     out = []
     ident = identite_du_ticket(canal)
-    if ident:
-        out.append(ident.strip().lower())
     try:
         from cogs.welcome import load_users, models_du_membre
         cid = int(getattr(canal, "id", 0) or 0)
@@ -165,9 +163,13 @@ def models_du_ticket(canal) -> list:
                     if isinstance(e, dict) and int(e.get("channel_id") or 0) == cid), None)
         g = getattr(canal, "guild", None)
         m = g.get_member(int(uid)) if (g is not None and uid) else None
-        out += [x for x in (models_du_membre(m) if m is not None else []) if x not in out]
+        if m is not None:
+            # serveur FR : les roles font foi (sans role, plus d'outils)
+            return models_du_membre(m)
     except Exception as e:                                   # noqa: BLE001
         print(f"[outils] models du ticket : {type(e).__name__}: {e}")
+    if ident:
+        out.append(ident.strip().lower())
     return out
 
 

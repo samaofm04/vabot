@@ -2036,6 +2036,8 @@ class Admin(commands.Cog):
         existing = users.get(str(user.id))
         existing_data = existing if isinstance(existing, dict) else None
 
+        # une identite donnee a la main n'est pas corrigee (garde du serveur FR)
+        _identite_forcee = bool(identity)
         # Si identite forcee fournie, prevaut sur tout
         if identity:
             forced_safe = sanitize_identity_name(identity)
@@ -2061,6 +2063,10 @@ class Admin(commands.Cog):
             from cogs.welcome import pick_next_identity, list_active_identities
             _pool = list_active_identities() or identities  # exclut jessye (jailbreak-only)
             identity = pick_next_identity() or random.choice(_pool)
+        if not _identite_forcee:
+            # serveur FR : une de ses models, jamais une identite d'ailleurs
+            from cogs.welcome import identite_pour_serveur
+            identity = identite_pour_serveur(interaction.guild, identity)
         # FUSION (et non remplacement) : recréer la fiche à partir de 3 champs
         # effaçait tout le reste — moyen de paiement (crypto/TapTap), comptes
         # Instagram liés, historique… — pour un VA qui existait déjà.

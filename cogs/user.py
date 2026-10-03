@@ -8272,6 +8272,14 @@ async def _avec_model_du_menu(interaction, faire):
             _IDENTITY_OVERRIDE.reset(jeton)
 
 
+def _serveur_fr_de(ch) -> bool:
+    try:
+        from cogs.outils import serveur_outils
+        return serveur_outils(getattr(ch, "guild", None))
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def _une_ligne_par_model(cibles):
     """(salon, uid, identite) -> une ligne par model du VA (roles du serveur
     FR) : un VA de Julia et d'Amelia recoit les deux menus. Sans role de
@@ -8291,6 +8299,8 @@ def _une_ligne_par_model(cibles):
         models = models_du_membre(membre) if membre is not None else []
         if models:
             out += [(ch, uid, m) for m in models]
+        elif membre is not None and _serveur_fr_de(ch):
+            continue          # serveur FR sans role de model : plus de menu
         else:
             out.append((ch, uid, ident))
     return out
