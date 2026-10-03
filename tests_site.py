@@ -35132,6 +35132,12 @@ try:
             _fC2 = _wC._copie_template(_dC / "copie.mp4", 4.0)
             check("copies : _copie_template trouve la copie par sa partie 2",
                   _fC2 is not None and _fC2.name == "deja.mp4", _fC2)
+            # l'ANCIEN n'est pas « copie » du nouveau : seul le plus recent l'est
+            import os as _osC, time as _tC2
+            _vieuxC = _tC2.time() - 3600
+            _osC.utime(_dC / "deja.mp4", (_vieuxC, _vieuxC))
+            check("copies : seul le plus recent est signale (pas les deux)",
+                  _wC._copie_template(_dC / "deja.mp4", 3.0) is None)
             (_dC / "copie.mp4").unlink()
             check("copies : une partie 2 d une autre duree est ecartee sans lire ses images",
                   _evC.trouver_doublon_fin(_vidC / "copie.mp4", _dC, 3.0,
@@ -35174,6 +35180,17 @@ try:
               "copie_cherchee" not in _jC.loads((_tplC / "valide.analyse.json").read_text(encoding="utf-8")))
         check("copies : un second tour ne refait pas la recherche",
               _wC._copies_templates_en_attente() == 0)
+        # v1 -> v2 : une alerte d'une ancienne version est refaite, l'ancienne retiree
+        _a1C = _jC.loads((_tplC / "neuf.analyse.json").read_text(encoding="utf-8"))
+        _a1C["copie_v"] = 1
+        _a1C["verifier"]["raisons"].append("autre raison")
+        (_tplC / "neuf.analyse.json").write_text(_jC.dumps(_a1C), encoding="utf-8")
+        _wC._copies_templates_en_attente()
+        _a2C = _jC.loads((_tplC / "neuf.analyse.json").read_text(encoding="utf-8"))
+        check("copies : une ancienne alerte est refaite sans se dedoubler",
+              _a2C.get("copie_v") == _wC.COPIE_V
+              and sum(1 for r in _a2C["verifier"]["raisons"] if str(r).startswith("copie probable")) == 1
+              and "autre raison" in _a2C["verifier"]["raisons"], _a2C)
         # --- 4) « Garder les deux » : la raison part, la priorite revient
         _appC = _wC.create_app()
         _appC.config["TESTING"] = True
@@ -35200,6 +35217,16 @@ try:
                         data={"file_id": "tstcopie|templates|neuf.mp4", "action": "corbeille"}).get_json()
         check("copies : « Doublon » passe par la corbeille (doublons_vault.supprimer), jamais un effacement",
               _cC.get("ok") and [x.name for x in _vusC] == ["neuf.mp4"], (_cC, _vusC))
+        # l'alerte d'un autre template qui pointait vers celui jete tombe
+        (_tplC / "autre.mp4").write_bytes(b"x" * 2048)
+        (_tplC / "autre.analyse.json").write_text(_jC.dumps(
+            {"verifier": {"priorite": "haute", "raisons": ["copie probable de « neuf.mp4 », x"]},
+             "copie": {"fichier": "neuf.mp4", "priorite_avant": "normale"}}), encoding="utf-8")
+        _clC.post("/noctus/template_copie",
+                  data={"file_id": "tstcopie|templates|neuf.mp4", "action": "corbeille"})
+        _a3C = _jC.loads((_tplC / "autre.analyse.json").read_text(encoding="utf-8"))
+        check("copies : jeter la copie efface l alerte de l autre (on ne jette pas les deux)",
+              "copie" not in _a3C and _a3C["verifier"]["priorite"] == "normale", _a3C)
         _srcC = pathlib.Path(_wC.__file__).read_text(encoding="utf-8")
         check("copies : la carte d une copie a son propre bandeau",
               "verif-copie::before{content:'⚠ COPIE PROBABLE — À VÉRIFIER'}" in _srcC

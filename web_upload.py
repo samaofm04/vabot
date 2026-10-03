@@ -7885,6 +7885,8 @@ function nxMCopieShow(a, fid){
   }
   v.src='/cloud/file/'+encodeURIComponent(parts[0])+'/'+encodeURIComponent(parts[1])+'/'+encodeURIComponent(parts[2]);
   v.controls=true; v.muted=true; v.loop=true; v.playsInline=true; v.autoplay=true; v.preload='metadata';
+  // la copie n'est plus la (corbeille, suppression) : rien a comparer
+  v.addEventListener('error', function(){ p.remove(); clearInterval(window.__nxMCopieT); });
   v.style.cssText='display:block;width:100%;max-height:44vh;background:rgb(0,0,0);border-radius:10px;object-fit:contain';
   p.appendChild(v);
   var row=document.createElement('div');
@@ -27693,7 +27695,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                     _ana = json.loads(_an.read_text(encoding="utf-8"))
                     _prio = (_ana.get("verifier") or {}).get("priorite") or "normale"
                     # Une copie probable se signale par son propre bandeau
-                    if (_ana.get("copie") or {}).get("fichier") and not _ana["copie"].get("ignoree"):
+                    _cop = _ana.get("copie") or {}
+                    if (_cop.get("fichier") and not _cop.get("ignoree")
+                            and (folder / _cop["fichier"]).exists()):
                         _prio = "copie"
                 except Exception:
                     _prio = "haute"
@@ -28540,6 +28544,14 @@ def _copie_template(video, coupe=None):
     except OSError:
         autres = []
     exemples = [x.name for x in autres if ".example" in x.name]
+    # « Deja mis » = arrive AVANT. Sans cette regle, deux templates en
+    # attente etaient chacun « copie » de l'autre : les deux partaient a la
+    # corbeille et le modele avec (vu le 03/10/2026, serie de « blonde »).
+    try:
+        t_video = video.stat().st_mtime
+        exemples += [x.name for x in autres if x.stat().st_mtime > t_video]
+    except OSError:
+        pass
     # la coupure de chaque template deja la : brouillon valide, sinon analyse
     coupes = {}
     for x in autres:
@@ -28568,6 +28580,26 @@ def _copie_template(video, coupe=None):
                                    exclure=exemples, coupes=coupes)
 
 
+#: Version de la recherche de copies. Une analyse d'une autre version est
+#: refaite au tour suivant (sans toucher a un « Garder les deux » deja donne).
+#: v2 : seuls les templates plus anciens comptent.
+COPIE_V = 2
+
+
+def _sans_copie(a: dict) -> dict:
+    """Retire une alerte de copie non tranchee : raison, priorite d'avant."""
+    a = dict(a or {})
+    c = a.get("copie") or {}
+    if c and not c.get("ignoree"):
+        v = dict(a.get("verifier") or {})
+        v["raisons"] = [r for r in (v.get("raisons") or [])
+                        if not str(r).startswith("copie probable de")]
+        v["priorite"] = c.get("priorite_avant") or "normale"
+        a["verifier"] = v
+        a.pop("copie", None)
+    return a
+
+
 def _avec_copie(video, a: dict) -> dict:
     """Pose sur l'analyse d'un template la copie trouvee, s'il y en a une.
 
@@ -28576,8 +28608,11 @@ def _avec_copie(video, a: dict) -> dict:
     copie a cote (nxMCopieShow). Rien n'est retire ni deplace ici."""
     from pathlib import Path as _P
     video = _P(video)
-    a = dict(a or {})
+    a = _sans_copie(a)
     a["copie_cherchee"] = True
+    a["copie_v"] = COPIE_V
+    if (a.get("copie") or {}).get("ignoree"):
+        return a        # « Garder les deux » deja donne : on ne redemande pas
     copie = _copie_template(video, a.get("cut_at"))
     if copie is None:
         return a
@@ -28626,7 +28661,7 @@ def _copies_templates_en_attente(limite: int = 40) -> int:
                     a = json.loads(ap.read_text(encoding="utf-8"))
                 except Exception:
                     continue
-                if not isinstance(a, dict) or a.get("copie_cherchee"):
+                if not isinstance(a, dict) or a.get("copie_v") == COPIE_V:
                     continue
                 a = _avec_copie(video, a)
                 # valide pendant la recherche : le brouillon fait autorite
@@ -75818,6 +75853,16 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             if not r.get("ranges"):
                 motif = "; ".join(str(m) for _n, m in (r.get("echecs") or [])[:2])
                 return jsonify({"ok": False, "error": motif or "non mis a la corbeille"})
+            # Un autre template signale comme copie de CELUI-CI n'en a plus :
+            # son alerte tombe (il ne faut pas le jeter lui aussi).
+            for _ap2 in target_dir.glob("*.analyse.json"):
+                try:
+                    _a2 = json.loads(_ap2.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if ((_a2.get("copie") or {}).get("fichier") == src.name
+                        and not _a2["copie"].get("ignoree")):
+                    safe_json.write(_ap2, _sans_copie(_a2), indent=None)
             try:
                 _invalidate_all_ttl_cache()
             except Exception:
