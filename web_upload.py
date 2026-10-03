@@ -7846,15 +7846,107 @@ document.addEventListener('click', function(ev){
   setTimeout(function(){ nxMVerifRelire(fid); }, 1500);
 }, true);
 }
+/* COPIE PROBABLE (03/10/2026) : « j'ai peur de mettre un template que j'ai
+   deja mis [...] que je sois alerte avant de valider, et quand je l'ouvre,
+   qu'on me propose la copie a cote ». Panneau pose sur le body, pas dans la
+   modale : le studio de templates du VPS redessine celle-ci, un element de
+   plus dans son HTML faisait tomber son patch. Couleurs en rgb() : les
+   regles du theme clair visent les couleurs ecrites en hexadecimal. */
+function nxMCopieShow(a, fid){
+  var old=document.getElementById('nx-m-copie'); if(old) old.remove();
+  clearInterval(window.__nxMCopieT);
+  var c=a&&a.copie;
+  if(!c||!c.fichier||c.ignoree||!fid) return;
+  var parts=String(c.file_id||'').split('|');
+  if(parts.length!==3) return;
+  var p=document.createElement('div'); p.id='nx-m-copie';
+  p.style.cssText='position:fixed;right:16px;bottom:16px;z-index:100002;width:290px;max-width:calc(100vw - 32px);'
+    +'background:rgb(20,20,22);border:1px solid rgba(220,38,38,.6);border-radius:14px;padding:12px;'
+    +'box-shadow:0 14px 40px rgba(0,0,0,.6);color:rgb(235,235,235);font-size:12.5px;line-height:1.45';
+  var h=document.createElement('div');
+  h.style.cssText='display:flex;align-items:center;gap:8px;font-weight:800;color:rgb(248,113,113);margin-bottom:6px';
+  h.appendChild(document.createTextNode('⚠ Copie probable'));
+  var x=document.createElement('button'); x.type='button'; x.textContent='×'; x.title='Masquer';
+  x.style.cssText='margin-left:auto;background:none;border:0;color:rgb(170,170,170);font-size:18px;line-height:1;cursor:pointer;padding:0 2px';
+  x.onclick=function(){ p.remove(); clearInterval(window.__nxMCopieT); };
+  h.appendChild(x); p.appendChild(h);
+  var t=document.createElement('div');
+  t.style.cssText='color:rgb(200,200,200);margin-bottom:8px';
+  var cp=parseFloat(c.coupe)||0;
+  t.textContent='La 2e partie de ce template ressemble à « '+c.fichier+' », déjà dans les templates de '+parts[0]+'. '
+    +(cp>0?'Voici sa 2e partie :':'Le voici :');
+  p.appendChild(t);
+  var v=document.createElement('video');
+  if(cp>0){
+    // la partie 2 seulement, en boucle : c'est elle qui ressemble
+    var auDebut=function(){ if(v.duration && cp<v.duration-0.3 && v.currentTime<cp-0.1) v.currentTime=cp; };
+    v.addEventListener('loadedmetadata', auDebut);
+    v.addEventListener('timeupdate', auDebut);
+  }
+  v.src='/cloud/file/'+encodeURIComponent(parts[0])+'/'+encodeURIComponent(parts[1])+'/'+encodeURIComponent(parts[2]);
+  v.controls=true; v.muted=true; v.loop=true; v.playsInline=true; v.autoplay=true; v.preload='metadata';
+  v.style.cssText='display:block;width:100%;max-height:44vh;background:rgb(0,0,0);border-radius:10px;object-fit:contain';
+  p.appendChild(v);
+  var row=document.createElement('div');
+  row.style.cssText='display:flex;gap:8px;margin-top:10px';
+  var bt=function(txt, fond, coul){
+    var b=document.createElement('button'); b.type='button'; b.textContent=txt;
+    b.style.cssText='flex:1;padding:8px 6px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;'
+      +'border:1px solid '+fond+';background:'+fond+';color:'+coul;
+    return b;
+  };
+  var bDel=bt('Doublon : à la corbeille','rgb(185,28,28)','rgb(255,255,255)');
+  var bKeep=bt('Garder les deux','rgb(38,38,42)','rgb(220,220,220)');
+  var envoyer=function(action, b){
+    b.disabled=true; var o=b.textContent; b.textContent='…';
+    var fd=new FormData(); fd.append('file_id', fid); fd.append('action', action);
+    fetch('/noctus/template_copie',{method:'POST',body:fd,credentials:'same-origin'})
+      .then(function(r){ return r.json(); }).then(function(j){
+        if(!j||!j.ok){ b.disabled=false; b.textContent=o;
+          if(typeof showToast==='function') showToast((j&&j.error)||'Erreur','error'); return; }
+        p.remove(); clearInterval(window.__nxMCopieT);
+        document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(card){
+          if(card.getAttribute('data-fid')!==fid) return;
+          if(action==='corbeille'){ var w=card.closest('.cloud-card')||card; w.remove(); }
+          else { card.classList.remove('verif-copie'); if(j.priorite!=='haute') card.classList.remove('verif-haute'); }
+        });
+        if(action==='corbeille'){
+          if(typeof nxMontageClose==='function') nxMontageClose();
+          if(typeof showToast==='function') showToast('Template mis à la corbeille — restaurable depuis Doublons et corbeille','success',6000);
+        } else {
+          if(typeof showToast==='function') showToast('Les deux sont gardés','success');
+        }
+      }).catch(function(e){ b.disabled=false; b.textContent=o;
+        if(typeof showToast==='function') showToast('Erreur : '+e,'error'); });
+  };
+  bDel.onclick=function(){
+    if(!confirm('Mettre CE template (celui ouvert) à la corbeille ? Il reste restaurable.')) return;
+    envoyer('corbeille', bDel);
+  };
+  bKeep.onclick=function(){ envoyer('garder', bKeep); };
+  row.appendChild(bKeep); row.appendChild(bDel); p.appendChild(row);
+  document.body.appendChild(p);
+  // l'editeur ferme (ou un autre template ouvert) : le panneau s'en va
+  window.__nxMCopieT=setInterval(function(){
+    var m=document.getElementById('nx-montage-modal');
+    if(!m||m.style.display==='none'||(typeof nxMState!=='undefined'&&nxMState.fid!==fid)){
+      var q=document.getElementById('nx-m-copie'); if(q) q.remove();
+      clearInterval(window.__nxMCopieT);
+    }
+  }, 700);
+}
 /* Pastille « a verifier » du template ouvert. Le brouillon propose, lui,
    arrive par nxMLoadDraft (le serveur le sert comme un brouillon marque
    « propose ») : cette fonction ne fait que le signaler. */
 function nxMVerifCharger(fid){
   nxMVerifShow(null);
+  nxMCopieShow(null);
   fetch('/noctus/montage_load?file_id='+encodeURIComponent(fid),{credentials:'same-origin'})
     .then(function(r){ return r.json(); }).then(function(j){
       if(!j || !j.ok || nxMState.fid!==fid) return;   // on a change de template entre-temps
       var a=j.analyse||null;
+      // pas encore valide (pas de brouillon enregistre) : la copie se montre
+      if(a && !(j.draft && !j.draft.propose)) nxMCopieShow(a, fid);
       if(j.draft && j.draft.propose && a){
         nxMVerifShow(a);
         var rs=((a.verifier||{}).raisons||[]);
@@ -25127,7 +25219,9 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     _va_cls += " a-approuver" if a_approuver else ""
     # Template analysé en arrière-plan, pas encore validé (hors service).
     if a_verifier:
-        _va_cls += " montage-a-verifier" + (" verif-haute" if a_verifier == "haute" else "")
+        _va_cls += (" montage-a-verifier"
+                    + (" verif-haute" if a_verifier in ("haute", "copie") else "")
+                    + (" verif-copie" if a_verifier == "copie" else ""))
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
@@ -25580,6 +25674,7 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
    dans le brouillon, absent par definition. Priorite haute en rouge. */
 .vault-card-bg.montage-a-verifier::before{content:'À VÉRIFIER';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;color:#2a1c00;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(245,158,11,.94)}
 .vault-card-bg.montage-a-verifier.verif-haute::before{content:'À VÉRIFIER — PRIORITÉ';color:#fff;background:rgba(220,38,38,.94)}
+.vault-card-bg.montage-a-verifier.verif-copie::before{content:'⚠ COPIE PROBABLE — À VÉRIFIER'}
 /* Filet : « Dispo VA » pose va-ready en direct avant que le bandeau ne soit
    retire ; le ::before commun couvrait alors toute la vignette. */
 .vault-card-bg.va-ready.montage-a-verifier::before,.vault-card-bg.va-ready.montage-a-verifier.verif-haute::before{content:'';background:none;box-shadow:none;padding:0}
@@ -27595,8 +27690,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 if (folder / (_st + ".montage.json")).exists():
                     continue
                 try:
-                    _prio = ((json.loads(_an.read_text(encoding="utf-8")).get("verifier")
-                              or {}).get("priorite") or "normale")
+                    _ana = json.loads(_an.read_text(encoding="utf-8"))
+                    _prio = (_ana.get("verifier") or {}).get("priorite") or "normale"
+                    # Une copie probable se signale par son propre bandeau
+                    if (_ana.get("copie") or {}).get("fichier") and not _ana["copie"].get("ignoree"):
+                        _prio = "copie"
                 except Exception:
                     _prio = "haute"
                 _a_verifier[_st] = _prio
@@ -28418,6 +28516,130 @@ def _templates_sans_analyse() -> list:
     return out
 
 
+def _copie_template(video, coupe=None):
+    """Le template du MEME dossier qui est la meme video, ou None.
+
+    Le proprietaire, le 03/10/2026 : « j'ai peur de parfois mettre un template
+    que j'ai deja mis ». Ni le nom ni le md5 ne suffisent : un template
+    re-exporte ou repasse par Drive est reencode. On compare ce qu'on voit,
+    avec le moteur des doublons du vault (empreintes_video).
+
+    Et seulement la PARTIE 2 : « le doublon souvent c'est la deuxieme partie,
+    la premiere elle est toujours differente ». On compare les secondes qui
+    suivent la coupure (`coupe`, celle de l'analyse), alignees sur la fin --
+    une copie exacte a forcement la meme fin. Jamais le DEBUT : deux
+    templates a la meme accroche et a une autre partie 2 sortaient en
+    « copie » (vu en essai le 03/10/2026). Les exemples (« .example ») ne
+    comptent pas."""
+    import empreintes_video as _ev
+    from pathlib import Path as _P
+    video = _P(video)
+    dossier = video.parent
+    try:
+        autres = [x for x in dossier.iterdir() if x.is_file()]
+    except OSError:
+        autres = []
+    exemples = [x.name for x in autres if ".example" in x.name]
+    # la coupure de chaque template deja la : brouillon valide, sinon analyse
+    coupes = {}
+    for x in autres:
+        if x.suffix.lower() not in VIDEO_EXTS or ".example" in x.name or x == video:
+            continue
+        for voisin in (x.with_suffix(".montage.json"), x.with_suffix(".analyse.json")):
+            try:
+                c = json.loads(voisin.read_text(encoding="utf-8")).get("cut_at")
+            except Exception:
+                continue
+            if c is not None:
+                coupes[x.name] = float(c)
+                break
+    d = _ev.duree(video)
+    if not d:
+        return None
+    if coupe is not None and 0 < float(coupe) < d:
+        longueur = d - float(coupe)
+    else:
+        # coupure inconnue (analyse en echec) : la mediane des templates du
+        # VPS, 4,2 s -- mesuree sur 589 analyses et brouillons le 03/10/2026
+        longueur = d - 4.2
+    if longueur < 1.0:
+        return None
+    return _ev.trouver_doublon_fin(video, dossier, longueur,
+                                   exclure=exemples, coupes=coupes)
+
+
+def _avec_copie(video, a: dict) -> dict:
+    """Pose sur l'analyse d'un template la copie trouvee, s'il y en a une.
+
+    La copie devient la PREMIERE raison de verifier, en priorite haute : la
+    carte passe au rouge, /a-relire la liste en tete, et l'editeur montre la
+    copie a cote (nxMCopieShow). Rien n'est retire ni deplace ici."""
+    from pathlib import Path as _P
+    video = _P(video)
+    a = dict(a or {})
+    a["copie_cherchee"] = True
+    copie = _copie_template(video, a.get("cut_at"))
+    if copie is None:
+        return a
+    ident = video.parent.parent.name
+    v = dict(a.get("verifier") or {})
+    # sa coupure : l'editeur montre la copie A PARTIR de sa partie 2, celle
+    # qui ressemble (son accroche, elle, est differente)
+    coupe_copie = None
+    for voisin in (copie.with_suffix(".montage.json"), copie.with_suffix(".analyse.json")):
+        try:
+            coupe_copie = json.loads(voisin.read_text(encoding="utf-8")).get("cut_at")
+        except Exception:
+            continue
+        if coupe_copie is not None:
+            break
+    a["copie"] = {"fichier": copie.name,
+                  "file_id": f"{ident}|{video.parent.name}|{copie.name}",
+                  "coupe": coupe_copie,
+                  "priorite_avant": v.get("priorite") or "normale"}
+    v["priorite"] = "haute"
+    v["raisons"] = ([f"copie probable de « {copie.name} », déjà dans les templates de {ident}"]
+                    + list(v.get("raisons") or []))
+    a["verifier"] = v
+    log.info(f"[templates] {ident}/{video.name} : copie probable de {copie.name}")
+    return a
+
+
+def _copies_templates_en_attente(limite: int = 40) -> int:
+    """Les templates a verifier analyses AVANT la recherche de copies : on la
+    fait pour eux aussi, quelques-uns par tour. Rend le nombre traite."""
+    fait = 0
+    try:
+        for d in sorted(IDENTITIES_DIR.iterdir()):
+            dossier = d / "templates"
+            if not dossier.is_dir():
+                continue
+            par_tige = {v.stem: v for v in dossier.iterdir()
+                        if v.is_file() and v.suffix.lower() in VIDEO_EXTS
+                        and ".example" not in v.name}
+            for ap in sorted(dossier.glob("*.analyse.json")):
+                stem = ap.name[:-len(".analyse.json")]
+                video = par_tige.get(stem)
+                if video is None or (dossier / (stem + ".montage.json")).exists():
+                    continue
+                try:
+                    a = json.loads(ap.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(a, dict) or a.get("copie_cherchee"):
+                    continue
+                a = _avec_copie(video, a)
+                # valide pendant la recherche : le brouillon fait autorite
+                if not (dossier / (stem + ".montage.json")).exists():
+                    safe_json.write(ap, a, indent=None)
+                fait += 1
+                if fait >= limite:
+                    return fait
+    except Exception as e:
+        log.warning(f"copies des templates : {e}")
+    return fait
+
+
 def _analyser_template_en_file(video) -> None:
     """Analyse un template et range le resultat. Un echec laisse AUSSI une
     analyse (avec l'erreur) : sinon la file le reprendrait toutes les 5 min,
@@ -28454,6 +28676,12 @@ def _analyser_template_en_file(video) -> None:
             # trace : sinon le template etait repris toutes les 5 min, sans fin.
             log.warning(f"analyse template {video.name}: {e}")
             out = _echec(f"{type(e).__name__} : {e}")
+        # Un template deja present sous un autre nom : dit AVANT la validation.
+        try:
+            if video.exists():
+                out = _avec_copie(video, out)
+        except Exception as e:
+            log.warning(f"copie du template {video.name} : {e}")
         # Le brouillon a pu etre enregistre PENDANT l'analyse : alors il fait
         # autorite, on ne pose rien a cote.
         if not video.with_suffix(".montage.json").exists() and video.exists():
@@ -28479,6 +28707,7 @@ def _ouvrier_templates():
         if _t.time() - dernier_tour >= TPL_RELECTURE_SEC:
             dernier_tour = _t.time()
             _planifier_templates(demarrer=False)
+            _copies_templates_en_attente()
             continue
         _t.sleep(5)
 
@@ -75549,6 +75778,52 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False, "error": "unauth"}), 401
         pseudos = [x for x in (request.args.get("u") or "").split(",") if x.strip()]
         return jsonify(_insta_trends_vue_creatrices(pseudos))
+
+    @app.route("/noctus/template_copie", methods=["POST"])
+    def noctus_template_copie():
+        """Panneau « copie probable » de l'editeur (nxMCopieShow) : garder les
+        deux, ou mettre le NOUVEAU template a la corbeille -- jamais efface,
+        restaurable depuis /vault/doublons (regle du projet)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed or parsed[0].name != "templates":
+            return jsonify({"ok": False, "error": "template introuvable"})
+        target_dir, src = parsed
+        action = request.form.get("action", "")
+        ap = src.with_suffix(".analyse.json")
+        if action == "garder":
+            try:
+                a = json.loads(ap.read_text(encoding="utf-8"))
+            except Exception:
+                return jsonify({"ok": False, "error": "analyse illisible"})
+            c = a.get("copie") or {}
+            if c and not c.get("ignoree"):
+                c["ignoree"] = True
+                a["copie"] = c
+                v = dict(a.get("verifier") or {})
+                v["raisons"] = [r for r in (v.get("raisons") or [])
+                                if not str(r).startswith("copie probable de")]
+                v["priorite"] = c.get("priorite_avant") or "normale"
+                a["verifier"] = v
+                safe_json.write(ap, a, indent=None)
+            return jsonify({"ok": True, "priorite": (a.get("verifier") or {}).get("priorite")})
+        if action == "corbeille":
+            import doublons_vault as _dv_tc
+            try:
+                r = _dv_tc.supprimer([src], _RegistresVault())
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)[:200]})
+            if not r.get("ranges"):
+                motif = "; ".join(str(m) for _n, m in (r.get("echecs") or [])[:2])
+                return jsonify({"ok": False, "error": motif or "non mis a la corbeille"})
+            try:
+                _invalidate_all_ttl_cache()
+            except Exception:
+                pass
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": "action inconnue"})
 
     @app.route("/settings/ai_key", methods=["POST"])
     def settings_ai_key():

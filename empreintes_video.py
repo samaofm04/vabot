@@ -157,7 +157,11 @@ def correspond(a: dict, b: dict) -> bool:
     communes a quelques bits pres."""
     if not durees_compatibles(a.get("duree"), b.get("duree")):
         return False
-    ia, ib = a.get("images") or {}, b.get("images") or {}
+    return _memes_images(a.get("images") or {}, b.get("images") or {})
+
+
+def _memes_images(ia: dict, ib: dict) -> bool:
+    """La plupart des images informatives communes, a quelques bits pres."""
     vues = ok = 0
     for t, (ha, infa) in ia.items():
         if t not in ib:
@@ -169,6 +173,67 @@ def correspond(a: dict, b: dict) -> bool:
         if bin(int(ha, 16) ^ int(hb, 16)).count("1") <= BITS_MAX:
             ok += 1
     return vues >= MIN_IMAGES and ok / vues >= PART_MIN
+
+
+# ------------------------------------------------------------ la fin d'une video
+#
+# Les templates de montage, le 03/10/2026 : « le doublon souvent c'est la
+# deuxieme partie, la premiere elle est toujours differente ». Un template est
+# une accroche (partie 1, changee a chaque fois) suivie de la partie 2, la
+# meme d'une copie a l'autre. Les INSTANTS comptes depuis le debut tombent
+# tous dans l'accroche (coupure mediane a 4,2 s sur le VPS) : on regarde la
+# FIN, a des instants fixes comptes depuis la derniere image. Les templates
+# sont des reels Instagram, sans carton de fin : la fin est la partie 2.
+
+#: Secondes AVANT LA FIN ou l'on regarde l'image.
+INSTANTS_FIN = (0.3, 0.7, 1.2, 1.8, 2.5, 3.3, 4.2, 5.5, 7.0, 9.0)
+VERSION_FIN = 1
+
+
+def empreinte_fin(f: Path, d: Optional[float] = None) -> dict:
+    """{"duree": s, "vf": VERSION_FIN, "images": {"0.3": [hash, informative]}}
+    -- les cles sont des secondes avant la fin. Une seule lecture des
+    dernieres secondes (-sseof), a PAS images/s."""
+    d = duree(f) if d is None else d
+    images = {}
+    if not d:
+        return {"duree": d, "images": images}
+    lire = min(d, max(INSTANTS_FIN) + 0.5)
+    ok = False
+    try:
+        r = subprocess.run(_NICE + ["ffmpeg", "-v", "error", "-sseof", f"-{lire:.2f}",
+                                    "-i", str(f), "-vf",
+                                    f"fps={PAS},scale={LARGEUR}:{HAUTEUR}:flags=area,format=gray",
+                                    "-f", "rawvideo", "-"],
+                           capture_output=True, timeout=120)
+        px, ok = r.stdout or b"", r.returncode == 0
+    except subprocess.TimeoutExpired as e:
+        px = e.stdout or b""
+    except Exception:
+        px = b""
+    taille = LARGEUR * HAUTEUR
+    n = len(px) // taille
+    for t in INSTANTS_FIN:
+        if t > d - 0.3:
+            break
+        # rang compte depuis la DERNIERE image lue : deux copies s'alignent
+        # sur leur fin, quelle que soit la longueur de leur accroche
+        k = n - 1 - int(round(t * PAS))
+        if k < 0:
+            break
+        images[str(t)] = _hash_image(px[k * taille:(k + 1) * taille])
+    if not ok:
+        # sans « vf », recalculee au prochain passage (meme regle qu'empreinte)
+        print(f"[empreintes] fin de {f.name} : lecture incomplete, {len(images)} image(s)",
+              flush=True)
+        return {"duree": d, "images": images}
+    return {"duree": d, "vf": VERSION_FIN, "images": images}
+
+
+def _images_avant(e: dict, longueur: float) -> dict:
+    """Les images de la fin qui tombent dans les `longueur` dernieres secondes."""
+    return {t: h for t, h in (e.get("images") or {}).items()
+            if float(t) <= longueur - 0.15}
 
 
 # ---------------------------------------------------------------------- cache
@@ -260,6 +325,72 @@ def trouver_doublon(nouveau: Path, dossier: Path, exclure: Iterable[str] = ()) -
             for nom in [n for n in cache if n not in vus]:
                 cache.pop(nom, None)
                 change = True
+        if change:
+            _ecrire_cache(dossier, cache)
+    return trouve
+
+
+def trouver_doublon_fin(nouveau: Path, dossier: Path, longueur: float,
+                        exclure: Iterable[str] = (), coupes: dict = None) -> Optional[Path]:
+    """Le fichier de `dossier` dont les `longueur` dernieres secondes sont la
+    MEME video que celles de `nouveau` -- sa partie 2 -- ou None.
+
+    `coupes` {nom: coupure entre partie 1 et partie 2} quand on la connait :
+    une partie 2 d'une autre duree (a ECART_EGAL pres) n'est pas la meme, et
+    ses images ne sont meme pas lues."""
+    if not longueur or longueur < 1.0:
+        return None
+    try:
+        e_neuf = empreinte_fin(nouveau)
+    except Exception:
+        return None
+    im_neuf = _images_avant(e_neuf, longueur)
+    if sum(1 for h in im_neuf.values() if h[1]) < MIN_IMAGES:
+        return None
+    exclus = set(exclure or ())
+    coupes = coupes or {}
+    with _VERROU:
+        cache = _cache(dossier)
+        change = False
+        calcules = 0
+        trouve = None
+        try:
+            fichiers = sorted(p for p in dossier.iterdir()
+                              if p.is_file() and p.suffix.lower() in EXTS_VIDEO)
+        except OSError:
+            fichiers = []
+        for f in fichiers:
+            if f.name in exclus or f.resolve() == nouveau.resolve():
+                continue
+            try:
+                sig = _signature(f)
+            except OSError:
+                continue
+            c = cache.get(f.name)
+            if not isinstance(c, dict) or c.get("sig") != sig:
+                c = {"sig": sig, "duree": duree(f)}
+                cache[f.name] = c
+                change = True
+            d = c.get("duree")
+            if not d or d < longueur - ECART_EGAL:
+                continue
+            coupe = coupes.get(f.name)
+            if coupe is not None and abs((d - float(coupe)) - longueur) > ECART_EGAL:
+                continue
+            fin = c.get("fin")
+            if not isinstance(fin, dict) or (fin.get("vf") != VERSION_FIN
+                                             and c.get("essais_fin", 0) < 3):
+                fin = empreinte_fin(f, d)
+                c["fin"] = fin
+                if fin.get("vf") != VERSION_FIN:
+                    c["essais_fin"] = c.get("essais_fin", 0) + 1
+                change = True
+                calcules += 1
+                if calcules % 20 == 0:
+                    _ecrire_cache(dossier, cache)
+            if _memes_images(im_neuf, _images_avant(fin, longueur)):
+                trouve = f
+                break
         if change:
             _ecrire_cache(dossier, cache)
     return trouve

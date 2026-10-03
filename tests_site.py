@@ -35081,6 +35081,144 @@ try:
 except Exception as _eS:
     check("podium salon : testable", False, repr(_eS)[:200])
 
+print()
+print("=" * 70)
+print("Templates : une copie (meme partie 2) est signalee avant validation")
+print("=" * 70)
+try:
+    import shutil as _shC, subprocess as _spC, json as _jC
+    import empreintes_video as _evC
+    import web_upload as _wC
+    _TC = TMP / "copies_templates"
+    _TC.mkdir(parents=True, exist_ok=True)
+    _savC = {"cache": _evC.DOSSIER_CACHE, "ids": _wC.IDENTITIES_DIR,
+             "li": _wC._list_identities, "sup": None}
+    _evC.DOSSIER_CACHE = _TC / "empreintes"
+    try:
+        # --- 1) le moteur, sur de vraies videos : accroche differente, meme partie 2
+        if _shC.which("ffmpeg") and _shC.which("ffprobe"):
+            _vidC = _TC / "videos"
+            _vidC.mkdir(exist_ok=True)
+
+            def _mkC(sortie, accroche, d_acc, partie2, taille="320:568"):
+                _spC.run(["ffmpeg", "-v", "error", "-y",
+                          "-f", "lavfi", "-t", str(d_acc), "-i", f"{accroche}=size=320x568:rate=30",
+                          "-f", "lavfi", "-t", "3", "-i", f"{partie2}=size=320x568:rate=30",
+                          "-filter_complex",
+                          f"[0:v][1:v]concat=n=2:v=1:a=0,scale={taille}[v]",
+                          "-map", "[v]", "-c:v", "libx264", "-crf", "28", str(sortie)],
+                         check=True, timeout=120)
+            _dC = _vidC / "dossier"
+            _dC.mkdir(exist_ok=True)
+            _mkC(_dC / "deja.mp4", "mandelbrot", 3, "testsrc")
+            _mkC(_dC / "autre.mp4", "mandelbrot", 3, "smptehdbars")
+            _mkC(_vidC / "copie.mp4", "life", 4, "testsrc", "270:480")
+            _mkC(_vidC / "neuve.mp4", "life", 4, "rgbtestsrc", "270:480")
+            _coupesC = {"deja.mp4": 3.0, "autre.mp4": 3.0}
+            _fC = _evC.trouver_doublon_fin(_vidC / "copie.mp4", _dC, 3.0, coupes=_coupesC)
+            check("copies : meme partie 2, autre accroche, reencodee = copie trouvee",
+                  _fC is not None and _fC.name == "deja.mp4", _fC)
+            check("copies : la comparaison par le DEBUT ne la voyait pas",
+                  _evC.trouver_doublon(_vidC / "copie.mp4", _dC) is None)
+            check("copies : une autre partie 2 n est pas une copie",
+                  _evC.trouver_doublon_fin(_vidC / "neuve.mp4", _dC, 3.0, coupes=_coupesC) is None)
+            # meme accroche, autre partie 2 : pas une copie (faux positif vu en essai)
+            _mkC(_dC / "meme_accroche.mp4", "mandelbrot", 3, "rgbtestsrc")
+            (_dC / "deja.montage.json").write_text('{"cut_at": 3.0}', encoding="utf-8")
+            (_dC / "autre.montage.json").write_text('{"cut_at": 3.0}', encoding="utf-8")
+            check("copies : meme accroche mais autre partie 2 = PAS une copie",
+                  _wC._copie_template(_dC / "meme_accroche.mp4", 3.0) is None)
+            _shC.copy(_vidC / "copie.mp4", _dC / "copie.mp4")
+            _fC2 = _wC._copie_template(_dC / "copie.mp4", 4.0)
+            check("copies : _copie_template trouve la copie par sa partie 2",
+                  _fC2 is not None and _fC2.name == "deja.mp4", _fC2)
+            (_dC / "copie.mp4").unlink()
+            check("copies : une partie 2 d une autre duree est ecartee sans lire ses images",
+                  _evC.trouver_doublon_fin(_vidC / "copie.mp4", _dC, 3.0,
+                                           coupes={"deja.mp4": 1.0, "autre.mp4": 1.0}) is None)
+        else:
+            check("copies : ffmpeg present pour tester le moteur", False, "ffmpeg absent")
+
+        # --- 2) l'analyse porte la copie, en priorite haute, raison en tete
+        _idC = _TC / "identities"
+        _tplC = _idC / "tstcopie" / "templates"
+        _tplC.mkdir(parents=True, exist_ok=True)
+        for _n in ("neuf.mp4", "ancien.mp4", "valide.mp4"):
+            (_tplC / _n).write_bytes(b"x" * 2048)
+        _wC.IDENTITIES_DIR = _idC
+        _wC._list_identities = lambda: ["tstcopie"]
+        _savC["cop"] = _wC._copie_template
+        _wC._copie_template = lambda v, coupe=None: (_tplC / "ancien.mp4") if v.name == "neuf.mp4" else None
+        _aC = _wC._avec_copie(_tplC / "neuf.mp4", {"cut_at": 3.0, "verifier": {"priorite": "normale",
+                                                                             "raisons": ["coupe incertaine"]}})
+        check("copies : l analyse dit la copie, en priorite haute, raison en premier",
+              _aC.get("copie", {}).get("file_id") == "tstcopie|templates|ancien.mp4"
+              and _aC["verifier"]["priorite"] == "haute"
+              and _aC["verifier"]["raisons"][0].startswith("copie probable de « ancien.mp4 »")
+              and _aC["verifier"]["raisons"][1] == "coupe incertaine"
+              and _aC["copie"]["priorite_avant"] == "normale", _aC)
+        (_tplC / "ancien.montage.json").write_text('{"cut_at": 2.5}', encoding="utf-8")
+        check("copies : l analyse garde la coupure de la copie (l editeur la montre depuis sa partie 2)",
+              _wC._avec_copie(_tplC / "neuf.mp4", {"cut_at": 3.0})["copie"].get("coupe") == 2.5)
+        (_tplC / "ancien.montage.json").unlink()
+        # --- 3) rattrapage : les templates analyses avant cette recherche
+        (_tplC / "neuf.analyse.json").write_text(_jC.dumps({"verifier": {"priorite": "normale", "raisons": []}}),
+                                                 encoding="utf-8")
+        (_tplC / "valide.analyse.json").write_text(_jC.dumps({"verifier": {}}), encoding="utf-8")
+        (_tplC / "valide.montage.json").write_text("{}", encoding="utf-8")
+        _nC = _wC._copies_templates_en_attente()
+        _rC = _jC.loads((_tplC / "neuf.analyse.json").read_text(encoding="utf-8"))
+        check("copies : un template deja analyse est verifie au tour suivant",
+              _nC == 1 and _rC.get("copie_cherchee") and (_rC.get("copie") or {}).get("fichier") == "ancien.mp4", (_nC, _rC))
+        check("copies : un template deja valide n est pas touche",
+              "copie_cherchee" not in _jC.loads((_tplC / "valide.analyse.json").read_text(encoding="utf-8")))
+        check("copies : un second tour ne refait pas la recherche",
+              _wC._copies_templates_en_attente() == 0)
+        # --- 4) « Garder les deux » : la raison part, la priorite revient
+        _appC = _wC.create_app()
+        _appC.config["TESTING"] = True
+        _clC = _appC.test_client()
+        with _clC.session_transaction() as _sC:
+            _sC["auth"] = True
+            _sC["username"] = "admin"
+            _sC["role"] = "owner"
+            # session du mot de passe principal : pas de compte a relire
+            # (un bloc plus haut remplace la liste des comptes)
+            _sC["legacy_owner"] = True
+        _gC = _clC.post("/noctus/template_copie",
+                        data={"file_id": "tstcopie|templates|neuf.mp4", "action": "garder"}).get_json()
+        _rC2 = _jC.loads((_tplC / "neuf.analyse.json").read_text(encoding="utf-8"))
+        check("copies : « Garder les deux » efface l alerte et rend la priorite d avant",
+              _gC.get("ok") and _rC2["copie"].get("ignoree")
+              and not any(str(r).startswith("copie probable") for r in _rC2["verifier"]["raisons"])
+              and _rC2["verifier"]["priorite"] == "normale", (_gC, _rC2))
+        import doublons_vault as _dvC
+        _savC["sup"] = _dvC.supprimer
+        _vusC = []
+        _dvC.supprimer = lambda ch, reg=None: (_vusC.extend(ch) or {"ranges": [{"nom": "neuf.mp4"}], "echecs": []})
+        _cC = _clC.post("/noctus/template_copie",
+                        data={"file_id": "tstcopie|templates|neuf.mp4", "action": "corbeille"}).get_json()
+        check("copies : « Doublon » passe par la corbeille (doublons_vault.supprimer), jamais un effacement",
+              _cC.get("ok") and [x.name for x in _vusC] == ["neuf.mp4"], (_cC, _vusC))
+        _srcC = pathlib.Path(_wC.__file__).read_text(encoding="utf-8")
+        check("copies : la carte d une copie a son propre bandeau",
+              "verif-copie::before{content:'⚠ COPIE PROBABLE — À VÉRIFIER'}" in _srcC
+              and '(" verif-copie" if a_verifier == "copie" else "")' in _srcC)
+        check("copies : l editeur montre la copie a cote tant que ce n est pas valide",
+              "if(a && !(j.draft && !j.draft.propose)) nxMCopieShow(a, fid);" in _srcC)
+    finally:
+        _evC.DOSSIER_CACHE = _savC["cache"]
+        _wC.IDENTITIES_DIR = _savC["ids"]
+        _wC._list_identities = _savC["li"]
+        if "cop" in _savC:
+            _wC._copie_template = _savC["cop"]
+        if _savC["sup"] is not None:
+            import doublons_vault as _dvC2
+            _dvC2.supprimer = _savC["sup"]
+except Exception as _eC:
+    import traceback as _tbC
+    check("copies de templates : testable", False, (repr(_eC) + _tbC.format_exc()[-400:])[:600])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
