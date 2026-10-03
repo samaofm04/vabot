@@ -34530,6 +34530,23 @@ try:
     check("l adresse Drive n est pas repetee en plus des deux gestes",
           _ddr.count("1AbC_dEf-GhIjk") == 2 and "📎 https://drive" not in _ddr)
 
+    # --- un renvoi vers CE salon ne sert a rien : Discord en fait une pastille
+    check("un lien vers un message Discord est retire",
+          _od.est_renvoi_discord("https://discord.com/channels/1/2/3")
+          and not _od.est_renvoi_discord("https://drive.google.com/file/d/x/view"))
+    _eren = {"id": "s", "title": "T", "description": "Fais ceci", "media": [
+        {"id": "m1", "kind": "link", "name": "https://discord.com/channels/1/2/3"}]}
+    check("il ne reste donc aucune pastille dans l encadre",
+          "discord.com/channels" not in _od.encadre_de(_eren, 0)["description"])
+
+    # --- un 429 n est PAS « ce message n existe plus »
+    _srcR = _plO("onboarding_discord.py").read_text(encoding="utf-8")
+    check("une cadence refusee ne fait PAS reposter un message",
+          "if code not in (404, 403, 10008)" in _srcR
+          and "def _api_patient" in _srcR)
+    check("elle est reessayee en respectant le delai annonce",
+          "retry_after" in _srcR and "rien reposté" in _srcR)
+
     check("la taille maximale est demandee a Discord, pas codee en dur",
           "premium_tier" in _plO("onboarding_discord.py").read_text(encoding="utf-8"))
     check("une video trop lourde est compressee, pas refusee",

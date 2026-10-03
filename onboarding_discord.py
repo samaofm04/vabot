@@ -102,6 +102,24 @@ def _api(methode: str, chemin: str, **kw):
     return api(methode, chemin, **kw)
 
 
+def _api_patient(methode: str, chemin: str, essais: int = 4, **kw):
+    """Comme _api, mais il attend quand Discord dit « trop vite ».
+
+    Un 429 n'est PAS « ce message n'existe plus ». Confondre les deux a coûté
+    des doublons en production : la correction d'un message etait refusee pour
+    cadence, le pont en concluait qu'il avait disparu, et en reposait un neuf.
+    """
+    for essai in range(max(1, essais)):
+        code, rep = _api(methode, chemin, **kw)
+        if code != 429:
+            return code, rep
+        attente = float((rep or {}).get("retry_after") or 1) + 0.3
+        print(f"[onboarding] cadence Discord : {attente:.1f}s avant de reessayer",
+              flush=True)
+        time.sleep(min(attente, 30))
+    return 429, {"message": "cadence Discord : abandon apres plusieurs essais"}
+
+
 def limite_octets() -> int:
     """La taille maximale d'un fichier sur CE serveur, demandée à Discord.
 
@@ -289,6 +307,13 @@ def drive_id(url: str) -> str:
     return ""
 
 
+# Un lien vers un message de CE salon ne sert a rien : Discord le transforme
+# en pastille « # salon › » qui renvoie la ou on est deja. C'etait la trace de
+# l'import d'origine ; elle n'a plus lieu d'etre une fois la video rattachee.
+def est_renvoi_discord(url: str) -> bool:
+    return "discord.com/channels/" in str(url or "")
+
+
 def est_lecteur(url: str) -> bool:
     u = str(url or "").lower()
     return any(m in u for m in LECTEURS)
@@ -316,6 +341,7 @@ def corps_de(etape: Dict[str, Any]) -> str:
     jouables = set(lecteurs_de(etape))
     liens = [m.get("name") or m.get("url") for m in (etape.get("media") or [])
              if m.get("kind") == "link" and (m.get("name") or m.get("url"))
+             and not est_renvoi_discord(m.get("url") or m.get("name") or "")
              and (m.get("url") or m.get("name")) not in jouables
              # un Drive est rendu plus bas en deux gestes : le repeter ici
              # aurait donne la meme adresse trois fois
@@ -465,15 +491,23 @@ def publier(force: bool = False) -> Dict[str, Any]:
                                           f'/channels/{salon}/messages/{fiche["id"]}',
                                           corps, fichiers)
             else:
-                code, rep = _api("PATCH", f'/channels/{salon}/messages/{fiche["id"]}',
-                                 json=corps)
+                code, rep = _api_patient("PATCH",
+                                         f'/channels/{salon}/messages/{fiche["id"]}',
+                                         json=corps)
             if code == 200:
                 connus[sid] = {"id": fiche["id"], "empreinte": emp}
                 bilan["corriges"].append(etape.get("title"))
                 continue
-            # le message a pu être supprimé à la main : on en refait un
-            print(f'[onboarding] correction refusée (HTTP {code}) pour '
-                  f'{etape.get("title")!r}, nouveau message', flush=True)
+            # UN SEUL CAS justifie de reposter : le message n'existe plus.
+            # Tout le reste (cadence, panne, droits) se repare tout seul au
+            # prochain tour, alors qu'un message de trop reste pour toujours.
+            if code not in (404, 403, 10008):
+                bilan["rates"].append(f'{etape.get("title")} : correction refusée '
+                                      f'(HTTP {code}) — rien reposté, nouvel essai '
+                                      "au prochain tour")
+                continue
+            print(f'[onboarding] {etape.get("title")!r} introuvable (HTTP {code}) : '
+                  "nouveau message", flush=True)
 
         if fichiers:
             corps["attachments"] = [{"id": i, "filename": n}
@@ -482,7 +516,7 @@ def publier(force: bool = False) -> Dict[str, Any]:
                                       corps, fichiers)
         else:
             corps.pop("attachments", None)
-            code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+            code, rep = _api_patient("POST", f"/channels/{salon}/messages", json=corps)
         if code == 200 and rep.get("id"):
             connus[sid] = {"id": str(rep["id"]), "empreinte": emp}
             bilan["crees"].append(etape.get("title"))
