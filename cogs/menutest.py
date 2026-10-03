@@ -865,6 +865,36 @@ class DemoMenuLigne(discord.ui.LayoutView):
                                    accent_colour=discord.Colour.blurple()))
 
 
+# -- Maquette du theme Mario (03/10/2026) -----------------------------------
+# Le proprietaire juge sur capture d'ecran et veut voir une disposition sur le
+# BOT ADMIN avant qu'elle parte chez les VA. Cette maquette ne recopie rien :
+# elle construit la VRAIE vue (cogs.user.MenuLigneVA) en lui donnant Va IG
+# comme serveur, puis coupe les boutons. Une maquette recopiee derive au
+# premier changement, et on finit par valider un menu qui n'existe plus.
+
+
+class _ServeurFeint:
+    """Juste un `.id` : c'est tout ce que le theme regarde d'un serveur."""
+
+    def __init__(self, gid):
+        self.id = int(gid)
+
+
+def _maquette_mario(mario: bool):
+    """La ligne de menu du ticket, avec ou sans le theme, boutons morts."""
+    from cogs.user import MenuLigneVA
+    import theme_mario
+    gid = sorted(theme_mario.GUILDS)[0] if mario else 0
+    vue = MenuLigneVA(None, identite="amelia", mention=None, outils=True,
+                      guild=_ServeurFeint(gid) if gid else None,
+                      filtrer=False, lien="https://gms.link/emycute", va=None)
+    vue.timeout = 900
+    for it in vue.walk_children():
+        if isinstance(it, (discord.ui.Button, discord.ui.Select)):
+            it.callback = _demo_menu_rien
+    return vue
+
+
 class MenuTest(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1170,6 +1200,17 @@ class MenuTest(commands.Cog):
             return
         await interaction.response.send_message(
             embed=_embed(marche, len(noms)), view=MenuTestEntree(marche))
+
+    @app_commands.command(
+        name="demomario",
+        description="[DÉMO] Le thème Mario de Va IG : avant / après — rien n'est envoyé",
+    )
+    async def demomario(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            "**Avant** (ce que voient Va Twitter et YouL4b US) :", ephemeral=True)
+        await interaction.followup.send(view=_maquette_mario(False), ephemeral=True)
+        await interaction.followup.send("**Après** (Va IG) :", ephemeral=True)
+        await interaction.followup.send(view=_maquette_mario(True), ephemeral=True)
 
     @app_commands.command(
         name="menutest",

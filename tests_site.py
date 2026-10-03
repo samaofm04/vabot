@@ -34929,6 +34929,97 @@ except Exception as _eT:
     import traceback as _tbT
     check("trends 3h : testable", False, (repr(_eT) + _tbT.format_exc()[-300:])[:500])
 
+# ----------------------------- 95. Le theme Mario hors du podium (menu, warm-up)
+print()
+print("Theme Mario : le menu du VA et le warm-up suivent le podium")
+try:
+    import pathlib as _plTm
+    import theme_mario as _tm
+    import podium_discord as _pdTm
+    import onboarding_discord as _odTm
+
+    class _GTm:
+        def __init__(self, i):
+            self.id = int(i)
+
+    _IG, _TW = _pdTm.VA_IG_ID, _pdTm.TWITTER_ID
+
+    # UN SEUL endroit decide qu un serveur est Mario : la cle « theme » du
+    # podium. Si ce module en tenait une seconde liste, on finirait avec un
+    # podium Mario et un menu qui ne l est pas.
+    check("le theme ne tient pas sa propre liste : il lit la cle du podium",
+          '_profil(gid)' not in _plTm.Path("theme_mario.py").read_text(encoding="utf-8")
+          and "podium_discord.SERVEURS" in _plTm.Path("theme_mario.py").read_text(encoding="utf-8")
+          and _pdTm.SERVEURS[_IG].get("theme") == _tm.NOM)
+    check("le theme s allume sur Va IG, pas sur Twitter",
+          _tm.actif(_GTm(_IG)) and _tm.actif(_IG) and _tm.actif(int(_IG))
+          and not _tm.actif(_GTm(_TW)) and not _tm.actif(None)
+          and not _tm.actif("") and not _tm.actif("pas un nombre"))
+    # Retirer la cle doit tout eteindre, menu compris : c est la promesse
+    # ecrite dans podium_discord (« POUR LE RETIRER : enlever cette cle »).
+    _gardeTm = _pdTm.SERVEURS[_IG].pop("theme")
+    try:
+        check("retirer la cle du podium eteint aussi le menu",
+              not _tm.actif(_GTm(_IG))
+              and _tm.titre_menu(_GTm(_IG), "☀️ Ton menu") == "☀️ Ton menu"
+              and _tm.emoji("menu", _GTm(_IG), "📋") == "📋")
+    finally:
+        _pdTm.SERVEURS[_IG]["theme"] = _gardeTm
+    check("la palette du menu est celle du podium, pas une deuxieme",
+          _tm.ROUGE == _pdTm.THEMES["mario"]["couleurs"]["en_cours"]
+          and _tm.OR == _pdTm.THEMES["mario"]["couleurs"]["final"]
+          and _tm.BLEU == _pdTm.THEMES["mario"]["couleurs_subs"]["vivant"])
+
+    # La regle qui protege les deux autres serveurs : hors theme, chaque
+    # fonction rend EXACTEMENT la valeur qu on lui donne -- celle d avant.
+    check("hors theme, la couleur d avant est rendue telle quelle",
+          all(_tm.couleur(r, g, 0x5865F2) == 0x5865F2
+              for r in _tm.COULEURS for g in (_GTm(_TW), None, "")))
+    check("hors theme, l emoji et le titre d avant sont rendus tels quels",
+          _tm.emoji("menu", _GTm(_TW), "ZZ") == "ZZ"
+          and _tm.titre_menu(_GTm(_TW), "ZZ") == "ZZ"
+          and _tm.titre_menu(None, "ZZ") == "ZZ")
+    check("un role de couleur inconnu retombe sur la valeur d avant",
+          _tm.couleur("role-absent", _GTm(_IG), 0x123456) == 0x123456)
+    # Les boutons qui disent deja ce qu ils font gardent leur emoji : les
+    # deguiser ferait chercher le VA.
+    check("Download, Assistance, le lien, les comptes et le Tuto gardent leur emoji",
+          all(_tm.emoji(c, _GTm(_IG), d) == d
+              for c, d in (("download", "⬇️"), ("help", "🆘"), ("lien", "🔗"),
+                           ("comptes", "📷"), ("tuto", "📖"))))
+    check("sur Va IG, Menu devient le champignon et les clics des pieces",
+          _tm.emoji("menu", _GTm(_IG), "📋") == "🍄"
+          and _tm.emoji("clics", _GTm(_IG), "📊") == "🪙"
+          and _tm.emoji("pay", _GTm(_IG), "💸") == "⭐"
+          and _tm.titre_menu(_GTm(_IG), "☀️ Ton menu") == "🍄 Ton menu")
+    check("la piece du menu est celle du podium",
+          _tm.EMOJIS["clics"] == _pdTm.THEMES["mario"]["piece"])
+
+    # Le warm-up : c est le SALON qui designe Va IG (pas de cle serveur dans
+    # data/onboarding_discord.json).
+    check("warm-up : le salon de Va IG est reconnu, un autre non",
+          _tm.warmup_ici("1511674589627813959")
+          and not _tm.warmup_ici("123") and not _tm.warmup_ici(None))
+    check("warm-up : une couleur par etape du plan",
+          len(_tm.COULEURS_WARMUP) == len(_odTm.COULEURS) == 9)
+    check("warm-up : la couleur ecrite sur l etape l emporte toujours",
+          _odTm.couleur_de({"couleur": "#123456"}, 3) == 0x123456)
+
+    # Ce que le theme n a PAS le droit de toucher : le bot relit ces reperes
+    # pour retrouver ses propres menus.
+    _srcTm = _plTm.Path("cogs/user.py").read_text(encoding="utf-8")
+    check("le theme ne touche ni la marque, ni la mention, ni l identite",
+          '_MENU_VA_PIED = "menu-contenu-va"' in _srcTm
+          and '<@{int(mention)}> 👇' in _srcTm
+          and '-# Identité : `{identite}`' in _srcTm)
+    check("les custom_id de la ligne restent ceux des messages deja postes",
+          '_CMENU_LIGNE = "cmenu:l:"' in _srcTm)
+    check("le titre et le cadre du menu passent par le theme, pas par du dur",
+          'theme_mario.titre_menu(guild, "☀️ Ton menu")' in _srcTm
+          and _srcTm.count("accent_colour=discord.Colour.blurple()") == 0)
+except Exception as _eTm:
+    check("theme mario : testable", False, repr(_eTm)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

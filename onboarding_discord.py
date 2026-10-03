@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import safe_json
+import theme_mario
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_FICHIER = DATA_DIR / "onboarding_discord.json"
@@ -69,7 +70,14 @@ def couleur_de(etape: Dict[str, Any], rang: int) -> int:
             return int(str(brute).lstrip("#"), 16) if isinstance(brute, str) else int(brute)
         except (TypeError, ValueError):
             pass
-    palette = config().get("couleurs") or COULEURS
+    # L'ordre compte : la couleur ecrite sur l'etape depuis le site l'emporte
+    # (ci-dessus), puis la palette choisie dans la config, puis le theme du
+    # serveur. Ce module ne connait QUE son salon -- pas de cle serveur dans
+    # data/onboarding_discord.json -- donc c'est le salon qui designe Va IG.
+    palette = (config().get("couleurs")
+               or (theme_mario.COULEURS_WARMUP
+                   if theme_mario.warmup_ici(config().get("salon")) else None)
+               or COULEURS)
     return int(palette[rang % len(palette)])
 
 

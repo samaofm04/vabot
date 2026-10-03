@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 
 import marques_montage
 import safe_json
+import theme_mario
 from video_transform import (transform_video, transform_metadata_strict,
                              transform_full_strict,
                              load_config as load_transform_config)
@@ -466,7 +467,7 @@ def _menu_va_lire(m):
 
 
 def _menu_va_texte(aide, threads, avec_menus, identite=None, mention=None,
-                   inconnues=()) -> str:
+                   inconnues=(), guild=None) -> str:
     """Le texte en tete du menu VA (TextDisplay), qui remplace l'embed.
 
     `aide` : une ligne par rangee REELLEMENT posee (ContentMenuView). Sa
@@ -476,7 +477,10 @@ def _menu_va_texte(aide, threads, avec_menus, identite=None, mention=None,
     haut = []
     if mention:
         haut.append(f"<@{int(mention)}> 👇 **Ton menu du jour est prêt !**")
-    haut.append("## 🧵 Ton menu Threads" if threads else "## ☀️ Ton menu")
+    # Va IG porte le theme Mario (theme_mario) : son titre est le champignon.
+    # Les autres serveurs gardent le soleil, et le mode Threads sa pelote.
+    haut.append("## 🧵 Ton menu Threads" if threads
+                else "## " + theme_mario.titre_menu(guild, "☀️ Ton menu"))
     haut.append("Clique sur un bouton, ou choisis directement dans un menu 👇"
                 if avec_menus else "Clique sur un bouton 👇")
     haut += list(aide)
@@ -8854,7 +8858,7 @@ class MenuLigneVA(discord.ui.LayoutView):
         haut = []
         if mention:
             haut.append(f"<@{int(mention)}> 👇 **Ton menu du jour est prêt !**")
-        haut.append("## ☀️ Ton menu")
+        haut.append("## " + theme_mario.titre_menu(guild, "☀️ Ton menu"))
         if lien:
             haut.append(f"🔗 {lien}")
         sans_demande = False
@@ -8866,13 +8870,14 @@ class MenuLigneVA(discord.ui.LayoutView):
                 sans_demande = True
         bas = [f"-# Identité : `{identite}`"] if identite else []
         bas.append(_MENU_VA_MARQUE)
-        rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", "📋"))
+        _emo = lambda cle, defaut: theme_mario.emoji(cle, guild, defaut)
+        rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", _emo("menu", "📋")))
         if outils:
             # « Numéro » retiré le 03/10/2026 avec son salon : le bouton
             # n'aurait plus mené nulle part.
             for cle, lib, emo in (("spoofer", "Spoofer", "📤"),
                                   ("download", "Download", "⬇️")):
-                rangee.add_item(_BoutonLigneVA(cog, cle, lib, emo))
+                rangee.add_item(_BoutonLigneVA(cog, cle, lib, _emo(cle, emo)))
         # 2e rangee : les reglages du serveur (une fonction coupee, son bouton
         # absent), comme dans le menu complet ; sans filtre (vue enregistree
         # au demarrage), tous les custom_id
@@ -8889,10 +8894,12 @@ class MenuLigneVA(discord.ui.LayoutView):
             if courante is None or len(courante.children) >= 5:
                 courante = ui.ActionRow()
                 suivis.append(courante)
-            courante.add_item(_BoutonLigneVA(cog, cle, lib, emo, style))
+            courante.add_item(_BoutonLigneVA(cog, cle, lib, _emo(cle, emo), style))
         elements = [ui.TextDisplay("\n".join(haut + bas)), rangee]
         elements += [r for r in suivis if r.children]
-        self.add_item(ui.Container(*elements, accent_colour=discord.Colour.blurple()))
+        # Le cadre : rouge Mario sur Va IG, blurple partout ailleurs.
+        self.add_item(ui.Container(*elements, accent_colour=discord.Colour(
+            theme_mario.couleur("menu", guild, discord.Colour.blurple().value))))
 
     def a_des_elements(self) -> bool:
         return True
@@ -9164,7 +9171,8 @@ class ContentMenuView(discord.ui.LayoutView):
         self.threads = threads
         self.inconnues = []
         self.nb_elements = 0
-        boite = ui.Container(accent_colour=discord.Colour.blurple())
+        boite = ui.Container(accent_colour=discord.Colour(
+            theme_mario.couleur("menu", guild, discord.Colour.blurple().value)))
         texte = ui.TextDisplay(_MENU_VA_MARQUE)      # ecrit a la fin
         boite.add_item(texte)
         aide, avec_menus = [], False
@@ -9218,7 +9226,7 @@ class ContentMenuView(discord.ui.LayoutView):
                 boite.add_item(rangee)
                 aide.append(f"**{titre}** — " + " · ".join(morceaux))
         texte.content = _menu_va_texte(aide, threads, avec_menus, self.identite,
-                                       self.mention, self.inconnues)
+                                       self.mention, self.inconnues, guild=guild)
         self.add_item(boite)
 
     # -- ce que fait chaque bouton (cle de _MENU_VA_DISPOSITION) -------------
