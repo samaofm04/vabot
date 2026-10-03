@@ -34916,6 +34916,9 @@ try:
               all('id="ig-f-%s"' % _k in _srcT for _k in
                   ("vues-min", "vues-max", "likes-min", "likes-max", "abo-min", "abo-max"))
               and "igPasseNum(card, f)" in _srcT)
+        check("trends : la barre « Videos pretes » se relance quand la grille arrive",
+              "if(typeof igDlBoucle === 'function') igDlBoucle();" in _srcT
+              and "window.__igDlBoucle = false; return;" in _srcT)
         check("trends : telechargement gratuit d abord, sans seuil de vues",
               "MIN_VUES_TELECHARGEMENT" not in _srcT and "faits = list(ex.map(_gratuit, batch))" in _srcT)
     finally:

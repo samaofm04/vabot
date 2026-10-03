@@ -4910,12 +4910,23 @@ window.igDownloadNow = function(btn){
   // window.__igDlLast, on reprogramme selon cet etat.
   window.__igDlLast = false;
   function loop(){
-    if(!document.getElementById('ig-dl-bar')) return;
-    igRefreshDlBar();
+    var bar = document.getElementById('ig-dl-bar');
+    if(!bar){ window.__igDlBoucle = false; return; }
+    // Onglet Trends masque : on ne questionne pas le serveur pour rien
+    if(bar.offsetParent !== null) igRefreshDlBar();
     setTimeout(loop, window.__igDlLast ? 2500 : 20000);
   }
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loop);
-  else loop();
+  // La barre arrive avec la grille DIFFEREE, apres le chargement de la page :
+  // la boucle lancee au DOMContentLoaded ne la trouvait pas et s'arretait pour
+  // de bon — la barre restait sur « … » pendant que le serveur, lui,
+  // telechargeait. La grille relance la boucle en arrivant (igApresInjection).
+  window.igDlBoucle = function(){
+    if(window.__igDlBoucle) return;
+    window.__igDlBoucle = true;
+    loop();
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', window.igDlBoucle);
+  else window.igDlBoucle();
 })();
 // Barre « Sur Telegram » (Veille) : X/Y reels non envoyes deja pre-chauffes
 // (file_id) -> leur envoi est instantane. Meme mecanique que ig-dl-bar.
@@ -5648,6 +5659,9 @@ window.igApresInjection = function(){
   }
   igApplyPeriodFilter();
   if(window.__igCurrentSort) igApplySort(window.__igCurrentSort);
+  // Barre « Videos pretes » : tout de suite, puis la boucle de suivi
+  if(typeof igRefreshDlBar === 'function') igRefreshDlBar();
+  if(typeof igDlBoucle === 'function') igDlBoucle();
   igCreaRendre();
   igCreaChercher();
   if((window.__igCrea || []).length) igCreaVue();
@@ -12734,6 +12748,7 @@ function showTab(group,name,title,subtitle){
     if(typeof remoteEtat === 'function') remoteEtat();
   }
   if(name === 'igtrends'){
+    if(typeof igRefreshDlBar === 'function') igRefreshDlBar();
     try{
       fetch('/insta/scrape_status').then(function(r){return r.json();}).then(function(d){
         if(d && d.status === 'in_progress'){ showGameLoader(d.total || 1); }
