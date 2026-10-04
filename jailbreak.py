@@ -443,12 +443,21 @@ def update_account(identity: str, account_id: int, **fields) -> bool:
     return found
 
 
-def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict[str, Any]:
+def bulk_add_accounts(identity: str, usernames: List[str], va: str = "",
+                      identifiants: Dict[str, Any] = None) -> Dict[str, Any]:
     """Cree plusieurs comptes 'skeleton' (juste username + va) en une fois.
     L user complete plus tard les autres champs via Edit.
 
+    identifiants : {pseudo: (mot de passe, cle 2FA)}, venus de lignes
+    « pseudo:mdp:CLE2FA » (le proprietaire, 04/10/2026 : « qu'il capte auto
+    [...] quand j'add des comptes avec leur login »). Un pseudo DEJA connu,
+    dans cette identite ou dans une autre, recoit ses identifiants LA OU IL
+    EST, sans etre recree ; un pseudo nouveau est cree ici avec eux.
+
     Returns : {added: int, skipped_dup: int, skipped_invalid: int,
-               added_usernames: [...], skipped_dups: [...]}
+               added_usernames: [...], skipped_dups: [...],
+               identifiants_ranges: ["identite/pseudo", ...],
+               identifiants_changes: int, identifiants_crees: int}
     Dedupe : ne re-cree pas un compte dont le username existe deja pour
     cette identite (case-insensitive)."""
     identity = (identity or "").strip().lower()
@@ -456,9 +465,43 @@ def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict
         raise ValueError("Identite vide")
     if not usernames:
         return {"added": 0, "skipped_dup": 0, "skipped_invalid": 0,
-                "added_usernames": [], "skipped_dups": []}
+                "added_usernames": [], "skipped_dups": [],
+                "identifiants_ranges": [], "identifiants_changes": 0,
+                "identifiants_crees": 0}
     data = _load()
     entry = _ensure_identity(data, identity)
+    idf = {str(k or "").strip().lstrip("@").lower(): v
+           for k, v in (identifiants or {}).items() if str(k or "").strip()}
+    now_idf = int(time.time())
+    # Les pseudos du fichier deja connus, TOUTES identites : leurs identifiants
+    # vont sur leur compte, ou qu'il soit.
+    ranges: List[str] = []
+    connus = set()
+    n_changes = 0
+    if idf:
+        for ident_k, ent in data.items():
+            if not isinstance(ent, dict):
+                continue
+            for a in (ent.get("accounts") or []):
+                u_l = (a.get("username") or "").strip().lower()
+                if u_l not in idf:
+                    continue
+                mdp, cle = idf[u_l]
+                mdp = (mdp or "").strip()[:200]
+                cle = (cle or "").strip()[:500]
+                change = False
+                if mdp and a.get("password") != mdp:
+                    a["password"] = mdp
+                    change = True
+                if cle and (a.get("two_fa") or "") != cle:
+                    a["two_fa"] = cle
+                    a["two_fa_validated"] = False    # nouvelle cle : a revalider
+                    change = True
+                if change:
+                    a["updated_at"] = now_idf
+                    n_changes += 1
+                ranges.append(f"{ident_k}/{a.get('username')}")
+                connus.add(u_l)
     va_clean = (va or "").strip()[:60]
     # Set des usernames existants pour dedupe
     existing = {(a.get("username") or "").strip().lower(): True
@@ -481,17 +524,20 @@ def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict
         if not u:
             skipped_invalid += 1
             continue
+        if u.lower() in connus:
+            continue          # ses identifiants sont deja ranges sur son compte
         if u.lower() in existing:
             skipped_dups.append(u)
             continue
         while next_id in used_ids:
             next_id += 1
+        mdp_n, cle_n = idf.get(u.lower(), ("", ""))
         acct = {
             "id": next_id,
             "username": u,
-            "password": "",
+            "password": (mdp_n or "").strip()[:200],
             "email": "",
-            "two_fa": "",
+            "two_fa": (cle_n or "").strip()[:500],
             "two_fa_validated": False,
             "va": va_clean,
             "notes": "",
@@ -518,6 +564,9 @@ def bulk_add_accounts(identity: str, usernames: List[str], va: str = "") -> Dict
         "skipped_invalid": skipped_invalid,
         "added_usernames": added_usernames,
         "skipped_dups": skipped_dups,
+        "identifiants_ranges": ranges,
+        "identifiants_changes": n_changes,
+        "identifiants_crees": sum(1 for u in added_usernames if u.lower() in idf),
     }
 
 

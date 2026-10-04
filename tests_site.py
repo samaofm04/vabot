@@ -35685,6 +35685,85 @@ try:
 except Exception as _eB:
     check("budget gms : testable", False, repr(_eB)[:200])
 
+print()
+print("=" * 70)
+print("Comptes par identite : Bulk avec pseudo:mdp:CLE2FA")
+print("=" * 70)
+try:
+    import web_upload as _wI
+    import jailbreak as _jbI
+    _cle = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+    check("identifiants : pseudo:mdp:cle, un « : » dans le mot de passe reste entier",
+          _wI._ligne_identifiants("u_1:pa:ss:" + _cle) == ("u_1", "pa:ss", _cle))
+    check("identifiants : , et ; dans le mot de passe restent entiers, sans cle",
+          _wI._ligne_identifiants("u2:p,a;s") == ("u2", "p,a;s", ""))
+    check("identifiants : cle en minuscules et avec espaces normalisee",
+          _wI._ligne_identifiants("u3:pw:jbsw y3dp ehpk 3pxp") == ("u3", "pw", "JBSWY3DPEHPK3PXP"))
+    check("identifiants : un lien Instagram n est pas une ligne d identifiants",
+          _wI._ligne_identifiants("https://www.instagram.com/x?igsi=1") is None)
+    check("identifiants : un pseudo seul garde l ancienne lecture",
+          _wI._ligne_identifiants("@u4") is None)
+    check("identifiants : pseudo illisible -> ecarte (pseudo vide)",
+          (_wI._ligne_identifiants("pas un pseudo!:pw:" + _cle) or ("x",))[0] == "")
+    # --- rangement : donnees en memoire, jamais le vrai jailbreak.json
+    _memI = {"ida": {"accounts": [{"id": 1, "username": "Connu", "password": "ancien",
+                                   "two_fa": "", "two_fa_validated": True}], "vas": []},
+             "idb": {"accounts": [], "vas": []}}
+    _savI = (_jbI._load, _jbI._save, _jbI.tomb_clear)
+    _ecritI = []
+    try:
+        _jbI._load = lambda: _memI
+        _jbI._save = lambda d: _ecritI.append(1)
+        _jbI.tomb_clear = lambda *a, **k: None
+        _rI = _jbI.bulk_add_accounts("idb", ["connu", "neuf", "simple"],
+                                     identifiants={"connu": ("nouveau", _cle), "neuf": ("pw2", "")})
+        _cI = _memI["ida"]["accounts"][0]
+        check("identifiants : un pseudo deja connu (autre identite) recoit ses identifiants LA OU IL EST",
+              _cI["password"] == "nouveau" and _cI["two_fa"] == _cle
+              and _cI["two_fa_validated"] is False
+              and not any(a["username"].lower() == "connu" for a in _memI["idb"]["accounts"]), _memI)
+        _nI = {a["username"]: a for a in _memI["idb"]["accounts"]}
+        check("identifiants : un nouveau pseudo est cree ici avec son mot de passe",
+              _nI.get("neuf", {}).get("password") == "pw2" and _nI.get("simple", {}).get("password") == "", _nI)
+        check("identifiants : le bilan dit ou ils ont ete ranges",
+              _rI["identifiants_ranges"] == ["ida/Connu"] and _rI["identifiants_changes"] == 1
+              and _rI["identifiants_crees"] == 1 and _rI["added"] == 2 and _ecritI, _rI)
+    finally:
+        _jbI._load, _jbI._save, _jbI.tomb_clear = _savI
+    # --- la route : la ligne lue entiere, jamais le mot de passe dans le message
+    _vuI = {}
+    _savR = (_jbI.bulk_add_accounts, _wI._kick_scrape_handles)
+    try:
+        def _fauxI(identity, usernames, va="", identifiants=None):
+            _vuI.update(identity=identity, usernames=list(usernames), idf=dict(identifiants or {}))
+            return {"added": 1, "skipped_dup": 0, "skipped_invalid": 0, "added_usernames": ["neuf"],
+                    "skipped_dups": [], "identifiants_ranges": ["autre/connu"],
+                    "identifiants_changes": 1, "identifiants_crees": 1}
+        _jbI.bulk_add_accounts = _fauxI
+        _wI._kick_scrape_handles = lambda *a, **k: 0
+        _appI = _wI.create_app()
+        _appI.config["TESTING"] = True
+        _clI = _appI.test_client()
+        with _clI.session_transaction() as _sI:
+            _sI["auth"] = True; _sI["username"] = "admin"; _sI["role"] = "owner"
+            _sI["legacy_owner"] = True
+        _jI = _clI.post("/jailbreak/bulk_add_accounts", data={
+            "identity": "idb", "ajax": "1",
+            "usernames": "neuf:mot,de;passe:" + _cle + "\nconnu:x:" + _cle + "\nsimple1, simple2"}).get_json()
+        check("identifiants : la route garde le mot de passe entier et coupe encore les pseudos simples",
+              _vuI.get("idf", {}).get("neuf") == ("mot,de;passe", _cle)
+              and _vuI.get("usernames") == ["neuf", "connu", "simple1", "simple2"], _vuI)
+        check("identifiants : le message dit ou ils sont ranges, sans aucun mot de passe",
+              _jI and _jI.get("ok") and "autre" in _jI.get("msg", "")
+              and "mot,de" not in _jI.get("msg", "") and _cle not in _jI.get("msg", ""), _jI)
+    finally:
+        _jbI.bulk_add_accounts, _wI._kick_scrape_handles = _savR
+    check("identifiants : la fenetre Bulk l annonce (script pose apres le HTML)",
+          "__jbBulkIdf" in _wI._jb_bulk_identifiants(lambda *a, **k: "<textarea id='jb-bulk-textarea'>")())
+except Exception as _eI:
+    import traceback as _tbI
+    check("identifiants bulk : testable", False, (repr(_eI) + _tbI.format_exc()[-400:])[:600])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

@@ -876,6 +876,31 @@ _IG_PAS_UN_COMPTE = {"p", "reel", "reels", "stories", "explore", "tv", "s",
                      "accounts", "direct", "challenge"}
 
 
+def _ligne_identifiants(ligne):
+    """« pseudo:motdepasse:CLE2FA » -> (pseudo, mot de passe, cle 2FA).
+
+    None si la ligne n'est pas de ce format (pseudo seul, @pseudo, lien) :
+    l'appelant la lit alors comme avant. ("", ...) si elle l'est mais que le
+    pseudo est illisible : l'appelant la compte comme ecartee.
+
+    Decoupe au PREMIER « : » (le pseudo n'en contient jamais) et au DERNIER
+    (la cle 2FA, en base32, non plus) : un mot de passe qui contient « : »,
+    « , » ou « ; » reste entier. Sans cle 2FA reconnaissable en fin de
+    ligne, tout ce qui suit le pseudo est le mot de passe."""
+    t = str(ligne or "").strip()
+    if ":" not in t or re.match(r"(?i)^\s*https?:", t) or "instagram.com/" in t.lower():
+        return None
+    pseudo_brut, reste = t.split(":", 1)
+    pseudo = _pseudo_instagram(pseudo_brut)
+    mdp, cle = reste, ""
+    if ":" in reste:
+        avant, dernier = reste.rsplit(":", 1)
+        c = dernier.replace(" ", "").upper()
+        if re.fullmatch(r"[A-Z2-7]{16,64}=*", c):
+            mdp, cle = avant, c
+    return pseudo, mdp.strip(), cle
+
+
 def _pseudo_instagram(ligne) -> str:
     """Le pseudo Instagram d'une ligne collee, ou '' si on n'en tire rien.
 
@@ -42726,7 +42751,55 @@ def _jb_option_discord(rendu):
     return _rendu_avec_option
 
 
+# La fenetre « Bulk » accepte aussi « pseudo:mdp:CLE2FA » (04/10/2026). Dit
+# SOUS sa zone de texte, limite relevee (8000 caracteres : ~100 comptes avec
+# identifiants, la colle s'arretait en silence au-dela), compteur juste -- par
+# un script pose APRES le HTML : la fenetre est retouchee par les patchs du
+# VPS, une ligne changee dedans les ferait tomber.
+_JB_BULK_IDF_JS = r"""<script>(function(){
+if(window.__jbBulkIdf) return; window.__jbBulkIdf = 1;
+function prep(ta){
+  if(!ta || ta.__idf) return; ta.__idf = 1;
+  ta.maxLength = 200000;
+  var n = document.createElement('small');
+  n.id = 'jb-bulk-idf-note';
+  n.style.cssText = 'display:block;margin-top:6px;font-size:11px;color:rgb(34,197,94)';
+  n.textContent = 'Aussi accepté : pseudo:motdepasse:CLÉ2FA, une ligne par compte. Un pseudo déjà présent (ici ou dans une autre identité) reçoit ses identifiants sans être recréé.';
+  ta.parentNode.insertBefore(n, ta.nextSibling);
+}
+document.addEventListener('focusin', function(e){ if(e.target && e.target.id === 'jb-bulk-textarea') prep(e.target); });
+document.addEventListener('input', function(e){
+  if(!e.target || e.target.id !== 'jb-bulk-textarea') return;
+  prep(e.target);
+  var cnt = document.getElementById('jb-bulk-count'); if(!cnt) return;
+  var n = 0, idf = 0;
+  e.target.value.split('\n').forEach(function(l){
+    l = l.trim(); if(!l) return;
+    if(l.indexOf(':') > 0 && !/^https?:/i.test(l) && l.toLowerCase().indexOf('instagram.com/') < 0){ n++; idf++; }
+    else { n += l.split(/[,;\t]+/).filter(function(x){ return x.trim(); }).length; }
+  });
+  cnt.textContent = n + ' compte(s) détecté(s)' + (idf ? ' — dont ' + idf + ' avec identifiants' : '');
+  cnt.style.color = n > 0 ? 'rgb(34,197,94)' : 'rgb(136,136,136)';
+});
+})();</script>"""
+
+
+def _jb_bulk_identifiants(rendu):
+    @_ft_dc.wraps(rendu)
+    def _rendu(*a, **kw):
+        html = rendu(*a, **kw)
+        if isinstance(html, str) and "jb-bulk-textarea" in html:
+            html += _JB_BULK_IDF_JS
+        return html
+    return _rendu
+
+
+# Sous l'option Discord, pas par-dessus : son emballage pose son script a la
+# toute FIN du HTML, et ses tests relisent le rendu « seul » par __wrapped__.
+_render_jailbreak_html = _jb_bulk_identifiants(_render_jailbreak_html)
 _render_jailbreak_html = _jb_option_discord(_render_jailbreak_html)
+
+
 
 
 def _render_tiktok_trends_html() -> str:
@@ -71435,18 +71508,32 @@ def create_app():
         # depuis un partage — auquel cas tout ce qui suit « ? » est du suivi
         # (igsi, utm_source) et n'appartient pas au pseudo.
         usernames, ecartes = [], []
-        for chunk in usernames_raw.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines():
-            brut = chunk.strip()
-            if not brut:
+        identifiants = {}
+        for ligne in usernames_raw.splitlines():
+            # « pseudo:mdp:CLE2FA » : lue ENTIERE, avant la coupe sur , ; et
+            # tabulation, qui aurait tranche un mot de passe en morceaux.
+            idf = _ligne_identifiants(ligne)
+            if idf is not None:
+                if idf[0]:
+                    if idf[0] not in usernames:
+                        usernames.append(idf[0])
+                    identifiants[idf[0]] = (idf[1], idf[2])
+                else:
+                    # le pseudo seul : jamais le mot de passe dans un message
+                    ecartes.append(ligne.split(":", 1)[0].strip()[:60] + ":…")
                 continue
-            u = _pseudo_instagram(brut)
-            if u:
-                if u not in usernames:
-                    usernames.append(u)
-            else:
-                # Compté et montré, jamais perdu en silence : une ligne avalée
-                # sans un mot, c'est un compte qu'on croit ajouté.
-                ecartes.append(brut[:60])
+            for chunk in ligne.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines():
+                brut = chunk.strip()
+                if not brut:
+                    continue
+                u = _pseudo_instagram(brut)
+                if u:
+                    if u not in usernames:
+                        usernames.append(u)
+                else:
+                    # Compté et montré, jamais perdu en silence : une ligne avalée
+                    # sans un mot, c'est un compte qu'on croit ajouté.
+                    ecartes.append(brut[:60])
         if not usernames:
             _det = (" Lignes non reconnues : " + ", ".join(ecartes[:5])) if ecartes else ""
             if request.form.get("ajax") == "1":
@@ -71455,7 +71542,8 @@ def create_app():
                                 "error": ("Aucun compte reconnu." + _det)[:300]})
             return _error("✕ Aucun username fourni." + _det, tab="jailbreak")
         try:
-            res = jb.bulk_add_accounts(identity, usernames, va=va)
+            res = jb.bulk_add_accounts(identity, usernames, va=va,
+                                       identifiants=identifiants)
         except ValueError as e:
             if request.form.get("ajax") == "1":
                 from flask import jsonify
@@ -71474,6 +71562,16 @@ def create_app():
         except Exception as _e_ks:
             print(f"[jb-bulk-scrape] launch fail: {_e_ks}", flush=True)
         parts = [f"<b>{res['added']}</b> comptes ajoutés"]
+        if res.get("identifiants_crees"):
+            parts.append(f"{res['identifiants_crees']} avec mot de passe / 2FA")
+        _rgs = res.get("identifiants_ranges") or []
+        if _rgs:
+            # rangés sur des comptes qui existaient : dire OU (autre identité)
+            _ailleurs = sorted({r.split("/", 1)[0] for r in _rgs} - {identity})
+            parts.append(f"identifiants rangés sur {len(_rgs)} compte(s) existant(s)"
+                         + (f" ({res.get('identifiants_changes', 0)} mis à jour)"
+                            if res.get("identifiants_changes") != len(_rgs) else "")
+                         + (" — dont dans " + ", ".join(_ailleurs[:6]) if _ailleurs else ""))
         if res['skipped_dup']:
             parts.append(f"{res['skipped_dup']} doublons ignorés")
         if res['skipped_invalid']:
