@@ -35560,29 +35560,52 @@ try:
         for _ in range(5):
             _gB._api_note(200)
         check("chaque appel est compte", _gB.appels_24h() == 5)
-        # « today: 0 » : ce qu on avait consomme EST le plafond
+        # UN REFUS APRES CINQ APPELS N APPREND RIEN. Notre compteur part de
+        # zero apres un redemarrage alors que la journee de GetMySocial peut
+        # etre deja consommee : en croire un plafond de 5 a bloque le podium
+        # en production le 04/10 (reste = -4, meme la paie refusee).
         _gB._budget_noter_plafond(_gB.appels_24h())
-        check("le plafond s apprend sur un refus, il ne se suppose pas",
-              _gB.budget()["plafond"] == 5)
+        check("un refus apres 5 appels n apprend AUCUN plafond",
+              _gB.budget()["plafond"] is None and _gB.budget_ok("podium") is True)
+        check("un plafond deja ecrit sous le seuil est ignore, pas applique",
+              (_gB._BUDGET.update({"plafond": 5}) or True)
+              and _gB.budget()["plafond"] is None
+              and _gB.budget_ok("podium") is True)
+        # « today: 0 » sur un compteur credible : la, on apprend
+        _gB._BUDGET.update({"plafond": None})
+        _gB._budget_noter_plafond(_gB.PLAFOND_MINI * 8)
+        check("le plafond s apprend sur un compteur credible",
+              _gB.budget()["plafond"] == _gB.PLAFOND_MINI * 8)
         check("le plafond est ecrit sur disque (66 redemarrages ne l effacent pas)",
               _gB._BUDGET_FICHIER.exists())
-        # budget serre : la paie passe, le fond non
-        _gB._BUDGET["plafond"] = _gB.appels_24h() + 10
+        # budget serre : la paie passe, le fond non. On pose directement le
+        # seau de l heure plutot que de compter 10 000 appels un par un.
+        _gB._BUDGET["heures"] = {_gB._heure_cle(): 9990}
+        _gB._BUDGET["plafond"] = 10000
         check("budget au plus juste : la paie passe, le fond s efface",
               _gB.budget_ok("podium") is True
               and _gB.budget_ok("dashboard") is False
               and _gB.budget_ok("autres") is False)
-        _gB._BUDGET["plafond"] = _gB.appels_24h() + _gB.RESERVE_NORMALE + 100
+        # LES RESERVES SONT DES PARTS DU PLAFOND, pas des nombres fixes : avec
+        # une reserve fixe de 6 000, un plafond de 1 200 aurait tout refuse.
+        _bb = _gB.budget()
+        check("les reserves suivent le plafond (des parts, pas des nombres)",
+              _bb["reserve_fond"] == int(10000 * _gB.PART_FOND)
+              and _bb["reserve_paie"] == int(10000 * _gB.PART_PAIE)
+              and _bb["reserve_fond"] > _bb["reserve_paie"])
+        _gB._BUDGET["heures"] = {_gB._heure_cle(): 10}
         check("budget large : tout le monde passe",
               _gB.budget_ok("podium") and _gB.budget_ok("dashboard")
               and _gB.budget_ok("autres"))
         # plus rien du tout : meme la paie s arrete (mieux vaut ca qu un 429)
-        _gB._BUDGET["plafond"] = 1
+        _gB._BUDGET["plafond"] = 10000
+        _gB._BUDGET["heures"] = {_gB._heure_cle(): 10000}
         check("plafond atteint : meme la paie s arrete au lieu de prendre un 429",
               _gB.budget_ok("podium") is False)
-        check("le plafond garde le PLUS BAS jamais vu",
-              (_gB._budget_noter_plafond(9999) or True)
-              and _gB.budget()["plafond"] == 1)
+        _gB._BUDGET["plafond"] = _gB.PLAFOND_MINI * 2
+        check("le plafond garde le PLUS BAS jamais vu (credible)",
+              (_gB._budget_noter_plafond(_gB.PLAFOND_MINI * 9) or True)
+              and _gB.budget()["plafond"] == _gB.PLAFOND_MINI * 2)
         check("etat_quota montre le budget", "budget" in _gB.etat_quota())
     finally:
         _gB._BUDGET_FICHIER = _vraiF

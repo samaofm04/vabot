@@ -320,10 +320,18 @@ PRIORITES = {
     "podium": "paie", "paie": "paie", "prime": "paie", "report": "paie",
     "dashboard": "fond", "widget-vas": "fond", "warm": "fond",
 }
-#: Jamais touchees par autre chose que la paie.
-RESERVE_PAIE = 2000
-#: Au-dessus de cette marge, le travail de fond s'efface.
-RESERVE_NORMALE = 6000
+#: EN DESSOUS, ON NE CROIT PAS CE QU ON MESURE. Notre compteur ne vaut que
+#: s'il a tourne toute la fenetre. Au premier demarrage — ou apres une remise a
+#: zero — il part de zero alors que la journee de GetMySocial est peut-etre
+#: deja consommee : un refus « today: 0 » arrive alors qu'on n'a compte que
+#: cinq appels, et on apprendrait un plafond de cinq. C'est arrive en
+#: production le 04/10/2026, et ca a bloque le podium (reste = -4, tout
+#: refuse). Sous ce seuil, un refus est signale et JETE.
+PLAFOND_MINI = 1000
+#: Les reserves sont des PARTS du plafond, pas des nombres fixes : un plafond
+#: de 1 200 avec une reserve fixe de 6 000 aurait tout refuse d'entree.
+PART_PAIE = 0.15        # les 15 derniers pour cent n'appartiennent qu'a la paie
+PART_FOND = 0.40        # le travail de fond s'efface bien avant
 
 
 def _heure_cle(t=None) -> str:
@@ -375,15 +383,28 @@ def budget() -> dict:
     with _BUDGET_LOCK:
         _budget_charger()
         plafond = _BUDGET["plafond"]
+    # un plafond deja ecrit sous le seuil (version d'avant ce garde-fou) est
+    # ignore plutot que de bloquer la paie
+    if plafond and int(plafond) < PLAFOND_MINI:
+        plafond = None
     faits = appels_24h()
     return {"appels_24h": faits, "plafond": plafond,
             "reste": (plafond - faits) if plafond else None,
-            "reserve_paie": RESERVE_PAIE, "reserve_normale": RESERVE_NORMALE}
+            "reserve_paie": int(plafond * PART_PAIE) if plafond else None,
+            "reserve_fond": int(plafond * PART_FOND) if plafond else None}
 
 
 def _budget_noter_plafond(faits: int) -> None:
-    """« today: 0 » : ce qu'on avait consomme EST le plafond. On garde le plus bas."""
-    if faits <= 0:
+    """« today: 0 » : ce qu'on avait consomme EST le plafond — si on y croit.
+
+    On n'apprend rien d'un compteur qui ne couvre pas la journee de
+    GetMySocial (voir PLAFOND_MINI) : mieux vaut aucun plafond qu'un plafond
+    de cinq, qui refuserait tout, podium compris.
+    """
+    if faits < PLAFOND_MINI:
+        print(f"[gms] refus « today: 0 » apres seulement {faits} appel(s) comptes "
+              f"(moins de {PLAFOND_MINI}) : notre compteur ne couvre pas la "
+              "journee de GetMySocial, plafond NON appris", flush=True)
         return
     with _BUDGET_LOCK:
         _budget_charger()
@@ -425,8 +446,8 @@ def budget_ok(tag: Optional[str] = None) -> bool:
     if rang == "paie":
         return reste > 0
     if rang == "fond":
-        return reste > RESERVE_NORMALE
-    return reste > RESERVE_PAIE
+        return reste > b["reserve_fond"]
+    return reste > b["reserve_paie"]
 
 
 def _api_note(status):
