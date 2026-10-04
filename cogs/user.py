@@ -2542,7 +2542,13 @@ def random_image_with_pair(directory):
     ]
     if not images:
         return None, None, None, None
-    image = random.choice(images)
+    return _image_et_paire(random.choice(images))
+
+
+def _image_et_paire(image):
+    """(image, caption, description, exemple) : ses voisins .txt, .desc.txt
+    et .example.* (meme dossier)."""
+    directory = image.parent
     cap_path = image.with_suffix(".txt")
     desc_path = image.with_suffix(".desc.txt")
     caption = unescape_newlines(cap_path.read_text(encoding="utf-8").strip()) if cap_path.exists() else None
@@ -2562,6 +2568,42 @@ def random_post_for(identity):
 
 def random_story_for(identity):
     return random_image_with_pair(IDENTITIES_DIR / identity / "stories")
+
+
+def _reserves_des_stories(identity):
+    """Ou chercher les stories typees : la reserve elle-meme (✨ General,
+    l'identite active y est la reserve), sinon les reserves LIEES a la model
+    (son menu de base, « 📋 Menu »)."""
+    ident = (identity or "").strip().lower()
+    try:
+        import type_identite as _ti
+        if _ti.est_reserve(ident):
+            return [ident]
+        return list(_ti.reserves_liees(ident)[0])
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("stories typees de %s : reserves illisibles (%s: %s)",
+                    ident, type(e).__name__, e)
+        return []
+
+
+def random_story_typee(identity, type_story):
+    """🌿 Story life / ✈️ Story travel : une story de ce TYPE (types_story),
+    prise dans les reserves de _reserves_des_stories. Une story sans type
+    n'est servie par aucun des deux -- le site l'affiche « SANS TYPE »."""
+    import types_story as _ts
+    reg = _ts.lire()
+    images = []
+    for r in _reserves_des_stories(identity):
+        d = IDENTITIES_DIR / r / "stories"
+        if not d.is_dir():
+            continue
+        images += [p for p in d.iterdir()
+                   if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+                   and not p.stem.lower().endswith(".example")
+                   and _ts.type_de(r, p.name, reg) == type_story]
+    if not images:
+        return None, None, None, None
+    return _image_et_paire(random.choice(images))
 
 
 STORY_CTA_CAPTIONS_FILE = DATA_DIR / "story_cta_captions.txt"
@@ -5897,6 +5939,35 @@ class UserCog(commands.Cog):
             f"✅ Menu poussé à **{sent}** VA(s) de **{interaction.guild.name}** (chacun @pingé dans son salon).",
             ephemeral=True,
         )
+
+    # --- 📖 Story me · 🌿 Story life · ✈️ Story travel (05/10/2026) --------
+    # Methodes ordinaires, pas des commandes slash : le bot principal en a deja
+    # 100 sur 100. _run_for_model sait appeler une methode liee.
+    async def storyme(self, interaction, nombre: int = 1):
+        """📖 Story me : une story de LA MODEL, son dossier a elle. Dans le
+        ✨ General l'identite active est la reserve : on repasse sur la model
+        cliquee (_MODEL_REELLE) le temps du tirage."""
+        model = _MODEL_REELLE.get()
+        jeton = _IDENTITY_OVERRIDE.set(model) if model else None
+        try:
+            await self._send_image_content(interaction, "story", "story", random_story_for,
+                                           load_image_config(), count=nombre)
+        finally:
+            if jeton is not None:
+                _IDENTITY_OVERRIDE.reset(jeton)
+
+    async def storylife(self, interaction, nombre: int = 1):
+        """🌿 Story life : une story de type Life des reserves (voir
+        random_story_typee)."""
+        await self._send_image_content(interaction, "story life", "story",
+                                       lambda i: random_story_typee(i, "life"),
+                                       load_image_config(), count=nombre)
+
+    async def storytravel(self, interaction, nombre: int = 1):
+        """✈️ Story travel : une story de type Travel des reserves."""
+        await self._send_image_content(interaction, "story travel", "story",
+                                       lambda i: random_story_typee(i, "travel"),
+                                       load_image_config(), count=nombre)
 
     async def _run_for_model(self, interaction, model, cmd, count=None, supports_count=False,
                              brute_de=None):
@@ -9660,6 +9731,14 @@ _JB_ACTIONS_US = [
     ('story', '📖 Story', 'story', True),
     ('storycta', '📲 Story CTA', 'storycta', True),
     ('post', '🖼️ Post', 'post', True),
+    # Les trois stories (05/10/2026) : « Story » devient « Story me » (la
+    # model), plus « Story life » et « Story travel » (les reserves, par type).
+    # « story » reste ci-dessus : les panneaux deja postes la portent encore.
+    ('storyme', '📖 Story me', 'storyme', True),
+    # Cles COURTES (8 au plus, comme « storycta ») : elles entrent dans le
+    # custom_id, plafonne a 100 caracteres avec les noms de model et de reserve.
+    ('stlife', '🌿 Story life', 'storylife', True),
+    ('sttravel', '✈️ Story travel', 'storytravel', True),
     ('brute', '🎥 Vidéo brut', 'videobrut', True),
     ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
@@ -9721,7 +9800,7 @@ _JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflas
 _JB_QTE = "_qte"
 _JB_BOUTONS_V2 = (
     (_JB_QTE, "name", "pseudo", "pp", "bio"),
-    ("story", "storycta", "post"),
+    ("storyme", "stlife", "sttravel", "storycta", "post"),
 )
 
 #: Le menu 🎥 Brut : le brut nu, la brute etoilee, et l'outil qui la choisit.
@@ -9739,7 +9818,9 @@ _FAMILLES_PANNEAU = (_FAMILLE_BRUT,) + _FAMILLES_MENU
 #: encore « jbus:a:…:trend:… » et doivent continuer de repondre. Etre ici,
 #: c'est etre masquee EXPRES : le filet de _jb_disposition ne la compte pas
 #: comme oubliee.
-_JB_MASQUEES = frozenset({"trend"})
+#: « story » (05/10/2026) : remplacee par Story me / life / travel, elle
+#: reste servie pour les panneaux deja postes.
+_JB_MASQUEES = frozenset({"trend", "story"})
 
 #: Le marche FRANCAIS sans les menus Caption, Template, Trash et Flash
 #: (proprietaire, 05/10/2026 : « disable des trucs pour le marche francais
@@ -10843,6 +10924,11 @@ _ICONES_ACTIONS = {
     "reelcaption": "vareelcaption",
     "reelmonte": "vareelmonte",
     "story": "vastory",
+    # Les trois stories partagent l'icone de Story : le serveur US n'a plus
+    # d'emplacement d'emoji (50 sur 50). C'est le libelle qui les distingue.
+    "storyme": "vastory",
+    "stlife": "vastory",
+    "sttravel": "vastory",
     "post": "vapost",
     "storycta": "vastorycta",
     "pseudo": "vapseudo",
@@ -13632,8 +13718,10 @@ def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None, masquer=N
 # « panneau-general-us » (pied de l'ancien embed, derniere ligne du texte
 # V2 du 26/09 au matin) reste reconnue pour les messages deja postes.
 
-#: Les BOUTONS du General (rangee 1) : ce que la reserve sert telle quelle.
-_JB_GEN_BOUTONS = ("pp", "bio", "story", "storycta", "post")
+#: Les BOUTONS du General : ce que la reserve sert telle quelle. Story me
+#: vient de la MODEL, Story life / travel des stories typees de la reserve
+#: (05/10/2026). Sept boutons : deux rangees (5 au plus par rangee Discord).
+_JB_GEN_BOUTONS = ("pp", "bio", "storyme", "stlife", "sttravel", "storycta", "post")
 
 #: Les MENUS du General, dans l'ordre de _FAMILLES_MENU (Caption, Template,
 #: Trash, Flash -- les marques dans l'ordre de marques_montage). Lus dans
@@ -13671,6 +13759,9 @@ def _jb_gen_famille(cle):
 #: Libelle, commande et quantite se lisent par _jb_action : rien n'est
 #: recopie de _JB_ACTIONS_US.
 _JB_GENERAL_RANGEES = {_k: 1 for _k in _JB_GEN_BOUTONS}
+# L'ancien bouton « Story » des General deja postes : toujours servi (la
+# reserve), et son premier clic convertit le message.
+_JB_GENERAL_RANGEES["story"] = 1
 _JB_GENERAL_RANGEES.update({_a: 2 + _i for _i, _f in enumerate(_JB_GEN_FAMILLES)
                             for _a in _f.actions})
 
@@ -13875,6 +13966,11 @@ def _jb_general(cog, model, qty=_JB_QTE_DEFAUT, reserve=None, guild=None):
         if entree is None:
             manquantes.append(key)
             continue
+        if len(boutons.children) >= 5:
+            # Discord : cinq boutons au plus par rangee, sinon le message
+            # ENTIER est refuse.
+            rangees.append(boutons)
+            boutons = ui.ActionRow()
         boutons.add_item(JBGenButton(model, active, key, qty, label=entree[1],
                                      row=None, icone=_ic.get(key)))
     if boutons.children:

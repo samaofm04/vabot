@@ -14476,6 +14476,11 @@ document.addEventListener('click',function(e){
 <select name="identity" required class="up-input">{ident_opts}</select>
 </div>
 <div class="up-card">
+<div class="up-step"><span class="up-dot"></span><h3>Type de story (réserves)</h3></div>
+<select name="story_type" class="up-input"><option value="life">🌿 Life</option><option value="travel">✈️ Travel</option></select>
+<div style="font-size:12px;color:#888;margin-top:6px">Pour une réserve : Story life ou Story travel du menu. Ignoré pour une model (ses stories partent en Story me).</div>
+</div>
+<div class="up-card">
 <div class="up-step"><span class="up-dot"></span><h3>Select media</h3></div>
 <label class="up-drop">
 <input type="file" name="photo" accept="image/*" required class="up-file-main" multiple>
@@ -25238,7 +25243,77 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
         + "</div>")
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None, a_verifier: str = "", is_trash_trend: bool = False) -> str:
+#: Les filtres « Toutes · 🌿 Life · ✈️ Travel · ⚠ Sans type » d'une galerie
+#: de stories de RESERVE, et la bascule des cartes (storyTypeBasculer). Le
+#: filtre passe par une CLASSE (st-cache) : les autres filtres de la galerie
+#: (⊘ Desactivees…) posent leur propre display, il ne doit pas les defaire.
+_STORY_TYPE_JS = r"""<script>(function(){
+if(window.storyTypeBasculer) return;
+function compter(){
+  var n = {all:0, life:0, travel:0, none:0};
+  document.querySelectorAll('#vault-grid .cloud-card[data-story-type]').forEach(function(c){
+    n.all++; n[c.getAttribute('data-story-type')] = (n[c.getAttribute('data-story-type')] || 0) + 1;
+  });
+  document.querySelectorAll('.st-chip').forEach(function(ch){
+    var k = ch.getAttribute('data-st'), b = ch.querySelector('b');
+    if(b) b.textContent = n[k] || 0;
+    if(k === 'none') ch.style.display = n.none ? '' : 'none';
+  });
+}
+function appliquer(){
+  var f = window.__stFiltre || 'all';
+  document.querySelectorAll('#vault-grid .cloud-card[data-story-type]').forEach(function(c){
+    c.classList.toggle('st-cache', f !== 'all' && c.getAttribute('data-story-type') !== f);
+  });
+}
+window.storyTypeFiltre = function(chip){
+  document.querySelectorAll('.st-chip').forEach(function(c){ c.classList.toggle('on', c === chip); });
+  window.__stFiltre = chip.getAttribute('data-st');
+  appliquer();
+};
+window.storyTypeBasculer = function(btn, fid){
+  var carte = btn.closest('.cloud-card'); if(!carte) return;
+  var suivant = carte.getAttribute('data-story-type') === 'life' ? 'travel' : 'life';
+  var fd = new FormData(); fd.append('file_id', fid); fd.append('type', suivant);
+  btn.disabled = true;
+  fetch('/stories/type', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false;
+      if(!j || !j.ok){ if(typeof showToast === 'function') showToast((j && j.error) || 'Erreur', 'error'); return; }
+      carte.setAttribute('data-story-type', suivant);
+      var bg = carte.querySelector('.vault-card-bg');
+      if(bg){ bg.classList.remove('st-life', 'st-travel', 'st-none'); bg.classList.add('st-' + suivant); }
+      btn.textContent = suivant === 'life' ? '🌿' : '✈️';
+      compter(); appliquer();
+    })
+    .catch(function(e){ btn.disabled = false; if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); });
+};
+})();</script>
+<style>
+.st-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;border:1px solid #2f323a;background:#181a1f;color:#cfd3da;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.st-chip b{font-weight:800;opacity:.75}
+.st-chip.on{border-color:#3b82f6;background:rgba(59,130,246,.16);color:#bcd2ff}
+body.light .st-chip{background:#f5f6f8;border-color:#dce0e5;color:#374151}
+body.light .st-chip.on{background:rgba(59,130,246,.12);color:#1d4ed8;border-color:#3b82f6}
+</style>"""
+
+
+def _story_type_chips(total: int, n: dict) -> str:
+    """Les filtres d'une galerie de stories de reserve. « Sans type » n'apparait
+    que s'il y en a : ces stories ne partent par aucun bouton du menu."""
+    chips = [("all", "Toutes", total), ("life", "🌿 Life", n.get("life", 0)),
+             ("travel", "✈️ Travel", n.get("travel", 0)), ("none", "⚠ Sans type", n.get("", 0))]
+    cache = " style='display:none'"
+    html = "".join(
+        f"<button type='button' class='st-chip{' on' if k == 'all' else ''}' data-st='{k}' "
+        f"onclick='storyTypeFiltre(this)'{cache if (k == 'none' and not c) else ''}>"
+        f"{lib} · <b>{c}</b></button>" for k, lib, c in chips)
+    return ("<div class='story-type-chips' style='display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px'>"
+            + html + "</div>" + _STORY_TYPE_JS)
+
+
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None, a_verifier: str = "", is_trash_trend: bool = False, story_type: str = None) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -25300,6 +25375,10 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     # en ambre. Le proprietaire doit le voir SANS ouvrir la carte.
     _va_cls += " a-approuver" if a_approuver else ""
     # Template analysé en arrière-plan, pas encore validé (hors service).
+    # Story d'une RESERVE : son type (types_story) en bande, « SANS TYPE »
+    # quand elle n'en a pas. None = pas une story de reserve, rien.
+    if story_type is not None:
+        _va_cls += " story-type st-" + (story_type or "none")
     if a_verifier:
         _va_cls += (" montage-a-verifier"
                     + (" verif-haute" if a_verifier in ("haute", "copie") else "")
@@ -25442,6 +25521,16 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><circle cx='12' cy='12' r='9'/><line x1='5.6' y1='5.6' x2='18.4' y2='18.4'/></svg>"
             f"</button>"
         )
+        # Story de reserve : bascule 🌿 Life <-> ✈️ Travel (une story sans
+        # type passe en Life au premier clic).
+        story_btn = ""
+        if story_type is not None:
+            _st_ic = {"life": "🌿", "travel": "✈️"}.get(story_type, "＋")
+            story_btn = (
+                f"<button class='card-edit-btn story-type-btn' "
+                f"onclick='event.stopPropagation();storyTypeBasculer(this, \"{fid_safe}\")' "
+                f"title='Type de story (Life / Travel) : cliquer pour changer' "
+                f"style='font-size:12px'>{_st_ic}</button>")
         actions_html = (
             # flex-wrap + une largeur bornee : un montage porte ⭐ · Trash · ⚡ ·
             # montage · ⊘ · selection, six pastilles (198 px) pour une carte
@@ -25455,6 +25544,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"{flash_btn}"
             f"{montage_btn}"
             f"{edit_btn}"
+            f"{story_btn}"
             f"{disable_btn}"
             f"<label class='sel-circle-wrap' onclick='event.stopPropagation()' style='cursor:pointer;display:block'>"
             f"<input type='checkbox' class='sel-cb' "
@@ -25478,7 +25568,8 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}"
         f"{(' is-flash-card' if is_flash_trend else '')}"
         f"{(' is-trash-card' if is_trash_trend and not is_flash_trend else '')}' "
-        f"style='background:transparent;border:0;border-radius:10px;"
+        + (f"data-story-type='{story_type or 'none'}' " if story_type is not None else "")
+        + f"style='background:transparent;border:0;border-radius:10px;"
         f"position:relative{';display:none' if _cachee else ''}'>"
         f"{actions_html}"
         f"{media_html}"
@@ -25757,6 +25848,11 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 .vault-card-bg.montage-a-verifier::before{content:'À VÉRIFIER';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;color:#2a1c00;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(245,158,11,.94)}
 .vault-card-bg.montage-a-verifier.verif-haute::before{content:'À VÉRIFIER — PRIORITÉ';color:#fff;background:rgba(220,38,38,.94)}
 .vault-card-bg.montage-a-verifier.verif-copie::before{content:'⚠ COPIE PROBABLE — À VÉRIFIER'}
+.vault-card-bg.story-type::before{position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;box-shadow:0 -2px 8px rgba(0,0,0,.22)}
+.vault-card-bg.st-life::before{content:'🌿 LIFE';background:rgba(34,197,94,.94);color:#05250f}
+.vault-card-bg.st-travel::before{content:'✈️ TRAVEL';background:rgba(56,189,248,.94);color:#032536}
+.vault-card-bg.st-none::before{content:'⚠ SANS TYPE';background:rgba(245,158,11,.94);color:#2a1c00}
+.cloud-card.st-cache{display:none}
 /* Filet : « Dispo VA » pose va-ready en direct avant que le bandeau ne soit
    retire ; le ::before commun couvrait alors toute la vignette. */
 .vault-card-bg.va-ready.montage-a-verifier::before,.vault-card-bg.va-ready.montage-a-verifier.verif-haute::before{content:'';background:none;box-shadow:none;padding:0}
@@ -27814,6 +27910,18 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 for p in files])
         except Exception:
             pass
+        # Stories d'une RESERVE : leur type (types_story) -- 🌿 Life, ✈️ Travel,
+        # ou SANS TYPE. None ailleurs : aucune bande, aucun filtre.
+        _st_reg = None
+        if subdir == "stories":
+            try:
+                import type_identite as _ti_st
+                if _ti_st.est_reserve(selected):
+                    import types_story as _ts_st
+                    _st_reg = _ts_st.lire()
+            except Exception as _e_st:
+                log.warning(f"types de story de {selected} illisibles : {_e_st}")
+                _st_reg = None
         for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
             clean_url = f"/cloud/file/{selected}/{subdir}/{_url_nom(p.name)}"
@@ -27830,7 +27938,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=_est_off(p), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(_marque_de(file_id) == "flash"), is_trash_trend=(_marque_de(file_id) == "trash"), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=_est_off(p), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(_marque_de(file_id) == "flash"), is_trash_trend=(_marque_de(file_id) == "trash"), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage, story_type=(_ts_st.type_de(selected, p.name, _st_reg) if _st_reg is not None else None)))
         # Tout est caché (désactivé ou marqué) : le dire dès le rendu, avec le
         # texte exact de vaultVuesAppliquer. Une grille blanche sous « 12
         # fichiers » passerait pour une panne.
@@ -27849,8 +27957,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "<div class='vues-empty-note' style='grid-column:1/-1;text-align:center;"
                 "color:#888;padding:34px;font-size:14px'>"
                 f"Rien dans la vue de base : {' et '.join(_raisons)}.</div>")
+        _chips_st = ""
+        if _st_reg is not None:
+            _n_st = {"life": 0, "travel": 0, "": 0}
+            for _p_st in files:
+                _t_st = _ts_st.type_de(selected, _p_st.name, _st_reg)
+                _n_st[_t_st] = _n_st.get(_t_st, 0) + 1
+            _chips_st = _story_type_chips(len(files), _n_st)
         gallery = (
             gallery_header
+            + _chips_st
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
             # disponible (fenetre reduite, panneau ouvert a cote...). Avant :
             # 3 colonnes FIGEES -> cartes minuscules sous des pastilles a
@@ -60947,10 +61063,57 @@ def create_app():
     def upload_story():
         if not is_auth():
             return redirect("/")
-        return _save_image_or_video_with_pair(
-            {"photo": request.files.get("photo"), "example": request.files.get("example")},
+        # Le TYPE (🌿 Life / ✈️ Travel), pour une story de RESERVE : pose
+        # seulement si le fichier vient d'etre cree (un homonyme refuse ne
+        # recoit rien).
+        photo = request.files.get("photo")
+        ident = (request.form.get("identity") or "").strip().lower()
+        type_st = (request.form.get("story_type") or "").strip().lower()
+        cible = None
+        if photo and photo.filename and _vault_subdir("stories") == "stories":
+            cible = IDENTITIES_DIR / ident / "stories" / _safe_upload_name(photo.filename)
+        existait = bool(cible and cible.exists())
+        rep = _save_image_or_video_with_pair(
+            {"photo": photo, "example": request.files.get("example")},
             request.form, _vault_subdir("stories"), IMAGE_EXTS,
         )
+        if cible is not None and not existait and cible.exists():
+            try:
+                import type_identite as _ti_up
+                import types_story as _ts_up
+                if type_st in _ts_up.TYPES and _ti_up.est_reserve(ident):
+                    _ts_up.poser(ident, [cible.name], type_st)
+            except Exception as e:
+                log.warning(f"type de story non pose pour {ident}/{cible.name} : {e}")
+        return rep
+
+    @app.route("/stories/type", methods=["POST"])
+    def stories_type():
+        """La bascule 🌿 Life / ✈️ Travel d'une story de reserve (galerie)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        parsed = _parse_file_id(request.form.get("file_id", ""))
+        if not parsed or parsed[0].name != "stories":
+            return jsonify({"ok": False, "error": "story introuvable"})
+        target_dir, src = parsed
+        ident = target_dir.parent.name
+        type_st = (request.form.get("type") or "").strip().lower()
+        try:
+            import type_identite as _ti_ty
+            import types_story as _ts_ty
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+        if not _ti_ty.est_reserve(ident):
+            return jsonify({"ok": False, "error": "Seules les stories des réserves ont un type "
+                                                  "(celles d'une model partent en Story me)."})
+        if type_st not in _ts_ty.TYPES:
+            return jsonify({"ok": False, "error": "type inconnu"})
+        try:
+            _ts_ty.poser(ident, [src.name], type_st)
+        except OSError as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+        return jsonify({"ok": True, "type": type_st})
 
     @app.route("/upload/storycta", methods=["POST"])
     def upload_storycta():
@@ -77392,6 +77555,11 @@ class _RegistresVault:
                     erreurs.append(f"{fichier.name} non écrit")
         tr = _transferer_marques(de, vers)
         erreurs += tr.get("erreurs") or []
+        try:
+            import types_story as _ts_rv
+            _ts_rv.transferer(de, vers)
+        except Exception as e:
+            erreurs.append(f"type de story non reporté ({e})")
         if tr.get("perdue"):
             erreurs.append(f"marque {tr['perdue'].get('marque')} non reportée")
         return erreurs
@@ -77406,6 +77574,11 @@ class _RegistresVault:
             if not safe_json.write_text(DISABLED_REELS_FILE, json.dumps(sorted(s), ensure_ascii=False)):
                 erreurs.append("disabled_reels.json non écrit")
         _r, _e = _pop_marques(fid)
+        try:
+            import types_story as _ts_rv
+            _ts_rv.oublier(fid)
+        except Exception as e:
+            erreurs.append(f"type de story non retiré ({e})")
         return erreurs + list(_e)
 
     def apres_rangement(self, ident, section, nom):

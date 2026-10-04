@@ -5456,7 +5456,7 @@ try:
     # plafonne a cinq rangees, sept n y tiendraient pas.
     _familles_us = [_f.cle for _f in _uFv._FAMILLES_PANNEAU]
     check("favoris : le panneau US = 2 rangees de boutons puis un menu par famille",
-          _rowsFv == {0: 5, 1: 3, **{2 + _i: 1 for _i in range(len(_familles_us))}}
+          _rowsFv == {0: 5, 1: 5, **{2 + _i: 1 for _i in range(len(_familles_us))}}
           and _familles_us == ["brut", "caption", "template", "trash", "flash"],
           str((_rowsFv, _familles_us)))
     check("favoris : et il ne deborde jamais les 5 places par rangee",
@@ -22883,9 +22883,11 @@ try:
         # options d un menu n en ont pas.
         _acts1 = [i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")] + [
             a for _o in _m1.values() for a in _o]
-        check("general : une reserve -> 21 actions (5 boutons + 4 menus de 4 variantes) + la quantite, pas de choix de reserve",
-              len(_ids1) == 10 and len(_acts1) == 21 and len(set(_acts1)) == 21
-              and sum(i.startswith("jbg:a:") for i in _ids1) == 5
+        # 05/10/2026, CHANGEMENT VOULU : Story devient Story me, + Story life et
+        # Story travel -- 7 boutons (sur deux rangees), 23 actions.
+        check("general : une reserve -> 23 actions (7 boutons + 4 menus de 4 variantes) + la quantite, pas de choix de reserve",
+              len(_ids1) == 12 and len(_acts1) == 23 and len(set(_acts1)) == 23
+              and sum(i.startswith("jbg:a:") for i in _ids1) == 7
               and sum(i.startswith("jbg:s:") for i in _ids1) == 4
               and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:200])
         import marques_montage as _mmGn
@@ -22904,8 +22906,10 @@ try:
               and len(_mmGn.MARQUES["trash"]["actions"]) == len(_mmGn.MARQUES["flash"]["actions"]) == 4
               and all(len(r) == 1 for r in _rangeesGn(_v1) if r[0].startswith("jbg:s:")),
               str((_ordreMGn, _m1)))
+        # « story » reste dans la liste blanche sans etre posee : les General
+        # deja postes portent encore ce bouton et doivent repondre.
         check("general : les cles sont exactement celles de la liste blanche",
-              set(_acts1) == set(_cuGn._JB_GENERAL_RANGEES)
+              set(_acts1) | {"story"} == set(_cuGn._JB_GENERAL_RANGEES)
               and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US},
               str(set(_acts1) ^ set(_cuGn._JB_GENERAL_RANGEES)))
         # CHANGEMENT VOULU (menus epures, 26/09/2026) : plus de pied d embed NI
@@ -35763,6 +35767,104 @@ try:
 except Exception as _eI:
     import traceback as _tbI
     check("identifiants bulk : testable", False, (repr(_eI) + _tbI.format_exc()[-400:])[:600])
+
+print()
+print("=" * 70)
+print("Stories des reserves : types 🌿 Life / ✈️ Travel")
+print("=" * 70)
+try:
+    import types_story as _tsS
+    import type_identite as _tiS
+    import web_upload as _wS
+    import io as _ioS, shutil as _shS, subprocess as _spS
+    _TS = TMP / "types_story"
+    (_TS / "identities" / "brune" / "stories").mkdir(parents=True, exist_ok=True)
+    (_TS / "identities" / "amelia" / "stories").mkdir(parents=True, exist_ok=True)
+    _savS = (_tsS.FICHIER, _tiS.est_reserve, _wS.IDENTITIES_DIR, _wS._list_identities)
+    try:
+        _tsS.FICHIER = _TS / "story_types.json"
+        _tiS.est_reserve = lambda i: str(i).lower() == "brune"
+        _wS.IDENTITIES_DIR = _TS / "identities"
+        _wS._list_identities = lambda: ["brune", "amelia"]
+        # --- le registre
+        check("types : poser, puis l'autre type REMPLACE le premier",
+              _tsS.poser("brune", ["a.jpg"], "life") == 1
+              and _tsS.poser("brune", ["a.jpg"], "travel") == 1
+              and _tsS.type_de("brune", "a.jpg") == "travel")
+        try:
+            _tsS.poser("brune", ["a.jpg"], "beach")
+            _refusS = False
+        except ValueError:
+            _refusS = True
+        check("types : un type inconnu est refuse",
+              _refusS and _tsS.type_de("brune", "a.jpg") == "travel")
+        _tsS.poser("brune", ["b.jpg"], "life")
+        check("types : un doublon range transmet son type a l'exemplaire garde",
+              _tsS.transferer("brune|stories|b.jpg", "brune|stories|b2.jpg")
+              and _tsS.type_de("brune", "b2.jpg") == "life" and _tsS.type_de("brune", "b.jpg") == "")
+        _wS._RegistresVault().oublier("brune|stories|b2.jpg")
+        check("types : une story mise a la corbeille perd son type (pas d'heritage par homonyme)",
+              _tsS.type_de("brune", "b2.jpg") == "")
+        # --- l'envoi et la bascule
+        _appS = _wS.create_app()
+        _appS.config["TESTING"] = True
+        _cS = _appS.test_client()
+        with _cS.session_transaction() as _sS:
+            _sS["auth"] = True; _sS["username"] = "admin"; _sS["role"] = "owner"
+            _sS["legacy_owner"] = True
+        _png = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+                b"\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00"
+                b"\x00\x00IEND\xaeB`\x82")
+        _cS.post("/upload/story", data={"identity": "brune", "story_type": "travel",
+                                        "photo": (_ioS.BytesIO(_png), "plage.png")},
+                 content_type="multipart/form-data")
+        check("envoi : une story de RESERVE recoit le type choisi",
+              (_TS / "identities" / "brune" / "stories" / "plage.png").exists()
+              and _tsS.type_de("brune", "plage.png") == "travel", _tsS.lire())
+        _cS.post("/upload/story", data={"identity": "amelia", "story_type": "life",
+                                        "photo": (_ioS.BytesIO(_png), "moi.png")},
+                 content_type="multipart/form-data")
+        check("envoi : une story de MODEL n'a pas de type (elle part en Story me)",
+              (_TS / "identities" / "amelia" / "stories" / "moi.png").exists()
+              and _tsS.type_de("amelia", "moi.png") == "")
+        _jS = _cS.post("/stories/type", data={"file_id": "brune|stories|plage.png", "type": "life"}).get_json()
+        check("bascule : Travel -> Life sur une story de reserve",
+              _jS.get("ok") and _tsS.type_de("brune", "plage.png") == "life", _jS)
+        _jS2 = _cS.post("/stories/type", data={"file_id": "amelia|stories|moi.png", "type": "life"}).get_json()
+        check("bascule : refusee pour une model, en le disant",
+              not _jS2.get("ok") and "réserves" in (_jS2.get("error") or ""), _jS2)
+        # --- la carte et les filtres
+        _carteS = _wS._preview_card("/x", "/t", _TS / "identities" / "brune" / "stories" / "plage.png",
+                                    False, "brune|stories|plage.png", story_type="life")
+        check("carte : bande Life, attribut de filtre et bouton de bascule",
+              "story-type st-life" in _carteS and "data-story-type='life'" in _carteS
+              and "storyTypeBasculer(this" in _carteS)
+        _carteN = _wS._preview_card("/x", "/t", _TS / "identities" / "brune" / "stories" / "x.png",
+                                    False, "brune|stories|x.png", story_type="")
+        check("carte : une story de reserve sans type le DIT (SANS TYPE)",
+              "st-none" in _carteN and "data-story-type='none'" in _carteN)
+        _carteM = _wS._preview_card("/x", "/t", _TS / "identities" / "amelia" / "stories" / "moi.png",
+                                    False, "amelia|stories|moi.png")
+        check("carte : une story de model n'a ni bande ni bascule",
+              "story-type" not in _carteM and "storyTypeBasculer" not in _carteM)
+        _chS = _wS._story_type_chips(3, {"life": 2, "travel": 1, "": 0})
+        check("filtres : Toutes · Life · Travel, « Sans type » cache quand il n'y en a pas",
+              "data-st='life'" in _chS and "🌿 Life · <b>2</b>" in _chS
+              and "data-st='none' onclick='storyTypeFiltre(this)' style='display:none'" in _chS)
+        if _shS.which("node"):
+            import re as _reS
+            _jsS = _reS.search(r"<script>(.*?)</script>", _wS._STORY_TYPE_JS, _reS.S).group(1)
+            (_TS / "st.js").write_text(_jsS, encoding="utf-8")
+            _nS = _spS.run(["node", "--check", str(_TS / "st.js")], capture_output=True, text=True)
+            check("filtres : le script passe node --check", _nS.returncode == 0, _nS.stderr[:200])
+        _srcS = pathlib.Path(_wS.__file__).read_text(encoding="utf-8")
+        check("envoi : le formulaire des stories propose le type",
+              '<select name="story_type" class="up-input">' in _srcS)
+    finally:
+        (_tsS.FICHIER, _tiS.est_reserve, _wS.IDENTITIES_DIR, _wS._list_identities) = _savS
+except Exception as _eS:
+    import traceback as _tbS
+    check("types de story : testable", False, (repr(_eS) + _tbS.format_exc()[-400:])[:600])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

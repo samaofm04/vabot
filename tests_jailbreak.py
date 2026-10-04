@@ -2932,7 +2932,7 @@ try:
               not _limitesV2Tb(_vP), _limitesV2Tb(_vP))
         check("familles : panneau US (%s) = quantite+identite, publications, un menu par famille" % _nomG,
               _rP == [["jbus:qb:emma:3"] + ["jbus:a:emma:%s:3" % k for k in ("name", "pseudo", "pp", "bio")],
-                      ["jbus:a:emma:%s:3" % k for k in ("story", "storycta", "post")]]
+                      ["jbus:a:emma:%s:3" % k for k in ("storyme", "stlife", "sttravel", "storycta", "post")]]
               + [["jbus:s:emma:%s:3" % f] for f in _FAMS_PTb],
               str(_rP))
     check("familles : l ordre des menus suit la table unique (Brut, puis Trash entre Template et Flash)",
@@ -2946,7 +2946,7 @@ try:
           _uTb._jb_disposition()[1] == []
           and all(a[0] in _uTb._JB_RANGEES or a[0] in _uTb._JB_MASQUEES
                   for a in _uTb._JB_ACTIONS_US)
-          and _uTb._JB_MASQUEES == {"trend"},
+          and _uTb._JB_MASQUEES == {"trend", "story"},
           str(_uTb._jb_disposition()[1]))
     _vL = _uTb._jb_panel(None, "a" * 60, 100, "us", _GUILD_ICTb)
     check("familles : identite de 60 caracteres et quantite 100 -> custom_id <= 100",
@@ -3879,8 +3879,8 @@ def _v2_bloc_panneau():
     check("table : Trash et Flash lus dans marques_montage",
           U._famille_panneau("trash").actions == tuple(U.marques_montage.marque("trash")["actions"])
           and U._famille_panneau("flash").actions == tuple(U.marques_montage.marque("flash")["actions"]))
-    check("table : boutons = [qte, name, pseudo, pp, bio], [story, storycta, post]",
-          U._JB_BOUTONS_V2 == (("_qte", "name", "pseudo", "pp", "bio"), ("story", "storycta", "post")))
+    check("table : boutons = [qte, name, pseudo, pp, bio], [storyme, stlife, sttravel, storycta, post]",
+          U._JB_BOUTONS_V2 == (("_qte", "name", "pseudo", "pp", "bio"), ("storyme", "stlife", "sttravel", "storycta", "post")))
     _disp, _hors = U._jb_disposition()
     check("table : aucune action oubliee (trend masquee expres)",
           _hors == [] and not [a[0] for a in U._JB_ACTIONS_US
@@ -3932,7 +3932,7 @@ def _v2_bloc_panneau():
         check("panneau (%s) : dans les limites de Discord" % _nomg, not limites(v), limites(v))
         r = rangees(v)
         attendu = [["jbus:qb:emma:3"] + ["jbus:a:emma:%s:3" % k for k in ("name", "pseudo", "pp", "bio")],
-                   ["jbus:a:emma:%s:3" % k for k in ("story", "storycta", "post")]] + \
+                   ["jbus:a:emma:%s:3" % k for k in ("storyme", "stlife", "sttravel", "storycta", "post")]] + \
                   [["jbus:s:emma:%s:3" % f] for f in ("brut", "caption", "template", "trash", "flash")]
         check("panneau (%s) : rangees = quantite+identite, publications, 5 menus" % _nomg,
               r == attendu, r)
@@ -3992,8 +3992,9 @@ def _v2_bloc_panneau():
           _bt[0].custom_id == "jbus:qb:emma:3" and _bt[0].item.label == "3"
           and str(_bt[0].item.emoji) == "🔢" and _bt[0].item.style == discord.ButtonStyle.secondary,
           (_bt[0].custom_id, _bt[0].item.label, _bt[0].item.emoji))
-    check("panneau : le panneau compte 22 composants",
-          U._jb_panel(None, "emma", 3).total_children_count == 22,
+    # 05/10/2026 : + Story life et Story travel dans la rangee des publications.
+    check("panneau : le panneau compte 24 composants",
+          U._jb_panel(None, "emma", 3).total_children_count == 24,
           U._jb_panel(None, "emma", 3).total_children_count)
 
     v0 = U._jb_panel(None, "_", 3)
@@ -4876,11 +4877,12 @@ def _v2_bloc_panneau():
         if isinstance(i, ui.ActionRow):
             rB.append([type(c).__name__ + ":" + (getattr(c, "key", "") or getattr(c, "famille", "") or "")
                        for c in i.children])
-    check("B : meme disposition (quantite en menu a part, 4 + 3 boutons, 5 menus)",
+    check("B : meme disposition (quantite en menu a part, 4 + 5 boutons, 5 menus)",
           rB == [["_JailbreakQtySelect:"],
                  ["_JailbreakActionButton:name", "_JailbreakActionButton:pseudo",
                   "_JailbreakActionButton:pp", "_JailbreakActionButton:bio"],
-                 ["_JailbreakActionButton:story", "_JailbreakActionButton:storycta",
+                 ["_JailbreakActionButton:storyme", "_JailbreakActionButton:stlife",
+                  "_JailbreakActionButton:sttravel", "_JailbreakActionButton:storycta",
                   "_JailbreakActionButton:post"]]
           + [["_JailbreakFamilleSelect:%s" % f.cle] for f in U._FAMILLES_PANNEAU], rB)
     check("B : texte + V2, timeout 180, aucun element dynamique (il expire)",
@@ -6694,8 +6696,9 @@ def _v2_bloc_general():
     # ===========================================================================
     # 1. LA TABLE DU GENERAL
     # ===========================================================================
-    check("table : boutons = PP, Bio, Story, Story CTA, Post",
-          U._JB_GEN_BOUTONS == ("pp", "bio", "story", "storycta", "post"), U._JB_GEN_BOUTONS)
+    check("table : boutons = PP, Bio, Story me, Story life, Story travel, Story CTA, Post",
+          U._JB_GEN_BOUTONS == ("pp", "bio", "storyme", "stlife", "sttravel", "storycta", "post"),
+          U._JB_GEN_BOUTONS)
     check("table : menus Caption, Template, Trash, Flash, dans cet ordre (celui de _FAMILLES_MENU)",
           [f.cle for f in U._JB_GEN_FAMILLES] == ["caption", "template", "trash", "flash"]
           and [(f.emoji, f.nom) for f in U._JB_GEN_FAMILLES]
@@ -6737,11 +6740,12 @@ def _v2_bloc_general():
           set(U._JB_GENERAL_RANGEES) & _brut)
     check("table : liste blanche = les 13 cles d'avant + les 8 variantes a brute ⭐ "
           "(anciens boutons jbg:a: toujours valides)",
-          set(U._JB_GENERAL_RANGEES) == _ANCIENNES_CLES | _NOUVELLES_CLES
-          and len(U._JB_GENERAL_RANGEES) == 21 and _ANCIENNES_CLES <= set(U._JB_GENERAL_RANGEES),
-          set(U._JB_GENERAL_RANGEES) ^ (_ANCIENNES_CLES | _NOUVELLES_CLES))
+          # + les trois stories du 05/10/2026 ; « story » reste (anciens General)
+          set(U._JB_GENERAL_RANGEES) == _ANCIENNES_CLES | _NOUVELLES_CLES | {"storyme", "stlife", "sttravel"}
+          and len(U._JB_GENERAL_RANGEES) == 24 and _ANCIENNES_CLES <= set(U._JB_GENERAL_RANGEES),
+          set(U._JB_GENERAL_RANGEES) ^ (_ANCIENNES_CLES | _NOUVELLES_CLES | {"storyme", "stlife", "sttravel"}))
     check("table : rangees prevues deduites (1 = boutons, 2..5 = menus, 4 cles par menu)",
-          U._JB_GENERAL_RANGEES == {**{k: 1 for k in U._JB_GEN_BOUTONS},
+          U._JB_GENERAL_RANGEES == {**{k: 1 for k in U._JB_GEN_BOUTONS}, "story": 1,
                                     "reelcaption": 2, "capbanger": 2, "brutcaption": 2,
                                     "montagebanger": 2, "reelmonte": 3, "templatebanger": 3,
                                     "bruttemplate": 3, "templatebrut": 3,
@@ -6834,9 +6838,10 @@ def _v2_bloc_general():
         v = U._jb_general(None, "lola", 3, guild=_g)
         check("1 reserve (%s) : bloc V2 turquoise, texte en tete, dans les limites" % _nomg,
               est_v2_bloc(v) and not limites(v), limites(v))
-        check("1 reserve (%s) : rangees = [Quantite], [PP, Bio, Story, Story CTA, Post], 4 menus" % _nomg,
+        check("1 reserve (%s) : rangees = [Quantite], [PP…Story travel], [Story CTA, Post], 4 menus" % _nomg,
               rangees(v) == [["jbg:qb:lola:blonde:3"],
-                             ["jbg:a:lola:blonde:%s:3" % k for k in ("pp", "bio", "story", "storycta", "post")],
+                             ["jbg:a:lola:blonde:%s:3" % k for k in ("pp", "bio", "storyme", "stlife", "sttravel")],
+                             ["jbg:a:lola:blonde:%s:3" % k for k in ("storycta", "post")],
                              ["jbg:s:lola:blonde:caption:3"], ["jbg:s:lola:blonde:template:3"],
                              ["jbg:s:lola:blonde:trash:3"], ["jbg:s:lola:blonde:flash:3"]], rangees(v))
         _sel = selects(v)
@@ -6888,7 +6893,7 @@ def _v2_bloc_general():
               and "menu-contenu-va" not in _js)
 
     v1 = U._jb_general(None, "lola", 3)
-    check("1 reserve : 18 composants (pas de bouton de reserve)", v1.total_children_count == 18,
+    check("1 reserve : 21 composants (pas de bouton de reserve)", v1.total_children_count == 21,
           v1.total_children_count)
     v2 = U._jb_general(None, "duo", 5, reserve="brune")
     r2 = rangees(v2)
@@ -6896,7 +6901,7 @@ def _v2_bloc_general():
           r2[0] == ["jbg:r:duo:blonde:5", "jbg:r:duo:brune:5", "jbg:qb:duo:brune:5"]
           and [b.item.style for b in boutons(v2)[:2]] == [discord.ButtonStyle.secondary,
                                                           discord.ButtonStyle.success]
-          and r2[2] == ["jbg:s:duo:brune:caption:5"] and texte(v2) == "## Brune"
+          and r2[3] == ["jbg:s:duo:brune:caption:5"] and texte(v2) == "## Brune"
           and str(boutons(v2)[2].item.emoji) == "🔢" and boutons(v2)[2].item.label == "5", (r2, texte(v2)))
     v6 = U._jb_general(None, "six", 3, reserve="r6", guild=GUILD_IC)
     # Menus epures (26/09/2026) : les reserves sans bouton ne sont plus DITES
@@ -6905,7 +6910,7 @@ def _v2_bloc_general():
           rangees(v6)[0] == ["jbg:r:six:r1:3", "jbg:r:six:r2:3", "jbg:r:six:r3:3", "jbg:r:six:r6:3",
                              "jbg:qb:six:r6:3"]
           and texte(v6) == "## R6" and journal("General six : 2 reserve(s) liee(s) sans bouton (4 au plus) : r4, r5")
-          and not limites(v6) and v6.total_children_count == 22, (rangees(v6)[0], texte(v6)))
+          and not limites(v6) and v6.total_children_count == 25, (rangees(v6)[0], texte(v6)))
     vr = U._jb_general(None, "duo", 3, reserve="inconnue")
     check("reserve demandee non liee -> retombe sur la premiere liee",
           rangees(vr)[0][-1] == "jbg:qb:duo:blonde:3")
@@ -6953,7 +6958,7 @@ def _v2_bloc_general():
           (rangees(vT2), texte(vT2)))
     check("_jb_general_ids_poses : couvre reserves, quantite, boutons ET menus",
           sorted(i.split(":")[1] for i in U._jb_general_ids_poses("m", ["a", "b"], "a", 3))
-          == sorted(["r", "r", "qb"] + ["a"] * 5 + ["s"] * 4))
+          == sorted(["r", "r", "qb"] + ["a"] * 7 + ["s"] * 4))
 
     # Texte trop long (liens ecartes innombrables) : coupe, marque gardee.
     LIENS["bavarde"] = (["blonde"], [("x%03d" % i, "raison " + "tres longue " * 30) for i in range(40)])
@@ -7546,7 +7551,8 @@ def _v2_bloc_general():
         v = ui.View(timeout=None)
         v.add_item(U.JBGenQtyBouton(model, res, qty))
         # Les rangees d'AVANT (e5a5f53) : boutons, captions, templates, marques.
-        _rg = {**{k: 1 for k in U._JB_GEN_BOUTONS}, "reelcaption": 2, "capbanger": 2,
+        _rg = {**{k: 1 for k in ("pp", "bio", "story", "storycta", "post")},
+               "reelcaption": 2, "capbanger": 2,
                "reelmonte": 3, "templatebanger": 3, _TRASH[0]: 4, _TRASH[1]: 4,
                _FLASH[0]: 4, _FLASH[1]: 4}
         for k in sorted(_ANCIENNES_CLES):
@@ -8065,8 +8071,8 @@ def _v2_bloc_general():
     vP = U._jb_panel(None, "emma", 3)
     # Menus epures (26/09/2026) : plus de ligne-marque, l'en-tete seul ; le
     # panneau se reconnait a ses custom_id.
-    check("panneau d'actions : meme disposition qu'en production (22 composants, 5 menus), en-tete seul, reconnu",
-          vP.total_children_count == 22 and len(selects(vP)) == 5
+    check("panneau d'actions : meme disposition qu'en production (24 composants, 5 menus), en-tete seul, reconnu",
+          vP.total_children_count == 24 and len(selects(vP)) == 5
           and texte(vP) == "## Emma" and U._est_panneau_actions(Msg(view=vP), MOI), texte(vP))
     # Remise du panneau : la garde (model, quantite) est intacte.
     chP = Salon(120)
@@ -10733,8 +10739,9 @@ def _v2_bloc_menus_epures():
           [type(c).__name__ for c in vP.children[0].children])
     check("panneau : boutons et menus INCHANGES (quantite, Name…Bio / Story…Post / 5 familles)",
           [d.item.custom_id.split(":")[3] if d.item.custom_id.startswith("jbus:a:") else
-           d.item.custom_id.split(":")[1] for d in dyn(vP)][:9]
-          == ["qb", "name", "pseudo", "pp", "bio", "story", "storycta", "post", "s"]
+           d.item.custom_id.split(":")[1] for d in dyn(vP)][:11]
+          == ["qb", "name", "pseudo", "pp", "bio", "storyme", "stlife", "sttravel",
+              "storycta", "post", "s"]
           and [d.famille for d in dyn(vP, U.JBMenuFamille)] == [f.cle for f in U._FAMILLES_PANNEAU]
           and not limites(vP), limites(vP))
     vP2 = U._jb_panel(None, "lola", 5, guild=Guilde(778))
@@ -10755,9 +10762,9 @@ def _v2_bloc_menus_epures():
     check("General : en-tete EXACT « ## <:idbrune:556> Brune », seul texte",
           textes(vG) == ["## <:idbrune:556> Brune"], textes(vG))
     _ids_G = [d.item.custom_id for d in dyn(vG)]
-    check("General : reserves (Brune active, Blonde) + 🔢, PP/Bio/Story/Story CTA/Post, 4 menus",
+    check("General : reserves (Brune active, Blonde) + 🔢, PP/Bio/Story me/life/travel/Story CTA/Post, 4 menus",
           _ids_G[:3] == ["jbg:r:lola:brune:5", "jbg:r:lola:blonde:5", "jbg:qb:lola:brune:5"]
-          and [c.split(":")[4] for c in _ids_G[3:8]] == list(U._JB_GEN_BOUTONS)
+          and [c.split(":")[4] for c in _ids_G[3:3 + len(U._JB_GEN_BOUTONS)]] == list(U._JB_GEN_BOUTONS)
           and [d.famille for d in dyn(vG, U.JBGenMenu)] == [f.cle for f in U._JB_GEN_FAMILLES]
           and not limites(vG), (_ids_G, limites(vG)))
     vGb = U._jb_general(None, "lola", 5, reserve="blonde", guild=gE)
@@ -20436,6 +20443,73 @@ except Exception as _eMf:
     import traceback as _tbMf
     _tbMf.print_exc()
     check("menu FR : testable", False, repr(_eMf)[:200])
+
+# ---- Stories : 📖 Story me · 🌿 Story life · ✈️ Story travel (05/10/2026) --
+print()
+print("Stories me / life / travel dans le menu de la model et le General")
+try:
+    import tempfile as _tfSt, pathlib as _plSt
+    from cogs import user as _uSt
+    import types_story as _tsSt
+    import type_identite as _tiSt
+
+    def _elemsSt(v):
+        out = []
+        for c in v.walk_children():
+            i = getattr(c, "item", c)
+            if getattr(i, "custom_id", None):
+                out.append(getattr(i, "label", None) or getattr(i, "placeholder", None) or i.custom_id)
+        return out
+    _identSt = next((d.name for d in sorted(_uSt.IDENTITIES_DIR.iterdir())
+                     if d.is_dir() and not _uSt._jb_panel_probleme(d.name, 1)), "julia")
+    _pSt = _elemsSt(_uSt._jb_panel(None, _identSt, 1, marche="fr"))
+    check("stories : le menu de la model a Story me · Story life · Story travel · Story CTA · Post",
+          [x for x in _pSt if "Story" in x or x.endswith("Post")]
+          == ["📖 Story me", "🌿 Story life", "✈️ Story travel", "📲 Story CTA", "🖼️ Post"], _pSt)
+    check("stories : l'ancien « Story » reste servi (masque, pas supprime)",
+          _uSt._jb_action("story") is not None and "story" in _uSt._JB_MASQUEES
+          and "story" in _uSt._JB_GENERAL_RANGEES)
+    check("stories : aucune action sans place dans le panneau",
+          _uSt._jb_disposition()[1] == [] and _uSt._jb_disposition("fr")[1] == [])
+    check("stories : le General pose ses 7 boutons sur deux rangees (5 au plus)",
+          list(_uSt._JB_GEN_BOUTONS)[:5] == ["pp", "bio", "storyme", "stlife", "sttravel"]
+          and "storyme" in _uSt._JB_GENERAL_RANGEES)
+    _srcSt = __import__("inspect").getsource(_uSt._jb_general)
+    check("stories : le General coupe ses boutons par rangees de 5",
+          "if len(boutons.children) >= 5:" in _srcSt)
+    # tirage par type, sur un dossier a part
+    _tmpSt = _plSt.Path(_tfSt.mkdtemp())
+    (_tmpSt / "brune" / "stories").mkdir(parents=True)
+    for _n in ("a.jpg", "b.jpg", "c.jpg"):
+        (_tmpSt / "brune" / "stories" / _n).write_bytes(b"x")
+    _savSt = (_uSt.IDENTITIES_DIR, _tsSt.FICHIER, _tiSt.est_reserve, _tiSt.reserves_liees)
+    try:
+        _uSt.IDENTITIES_DIR = _tmpSt
+        _tsSt.FICHIER = _tmpSt / "story_types.json"
+        _tiSt.est_reserve = lambda i: i == "brune"
+        _tiSt.reserves_liees = lambda m: (["brune"], [])
+        _tsSt.poser("brune", ["a.jpg"], "life")
+        _tsSt.poser("brune", ["b.jpg"], "travel")
+        check("stories : Story life tire une story Life de la reserve",
+              {_uSt.random_story_typee("brune", "life")[0].name for _ in range(15)} == {"a.jpg"})
+        check("stories : depuis la model, Story travel prend dans ses reserves liees",
+              _uSt.random_story_typee("amelia", "travel")[0].name == "b.jpg")
+        check("stories : une story sans type n'est servie par aucun des deux",
+              all(_uSt.random_story_typee("brune", t)[0].name != "c.jpg"
+                  for t in ("life", "travel") for _ in range(15)))
+        _tsSt.FICHIER = _tmpSt / "vide.json"
+        check("stories : aucune story du type -> rien (le VA le lit, pas d'erreur)",
+              _uSt.random_story_typee("brune", "life") == (None, None, None, None))
+    finally:
+        (_uSt.IDENTITIES_DIR, _tsSt.FICHIER, _tiSt.est_reserve, _tiSt.reserves_liees) = _savSt
+    _srcMe = __import__("inspect").getsource(_uSt.UserCog.storyme)
+    check("stories : Story me repasse sur la MODEL dans le General",
+          "_MODEL_REELLE.get()" in _srcMe and "_IDENTITY_OVERRIDE.set(model)" in _srcMe
+          and "_IDENTITY_OVERRIDE.reset(jeton)" in _srcMe)
+except Exception as _eSt:
+    import traceback as _tbSt
+    _tbSt.print_exc()
+    check("stories me/life/travel : testable", False, repr(_eSt)[:200])
 
 if FAILS:
     print("ECHECS :")
