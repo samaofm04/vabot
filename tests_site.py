@@ -35413,6 +35413,70 @@ try:
 except Exception as _eQ:
     check("quota gms : testable", False, repr(_eQ)[:200])
 
+print()
+print("=" * 70)
+print("Templates : la vignette montre la coupure (debut de la partie 2)")
+print("=" * 70)
+try:
+    import shutil as _shV, subprocess as _spV, json as _jV
+    import web_upload as _wV
+    if not (_shV.which("ffmpeg") and _shV.which("ffprobe")):
+        check("vignette coupure : ffmpeg present", False, "ffmpeg absent")
+    else:
+        _TV = TMP / "vignette_coupure"
+        _dV = _TV / "identities" / "tstvign" / "templates"
+        _dV.mkdir(parents=True, exist_ok=True)
+        _vV = _dV / "modele.mp4"
+        # accroche JAUNE 3 s, puis partie 2 CYAN 3 s
+        _spV.run(["ffmpeg", "-v", "error", "-y",
+                  "-f", "lavfi", "-t", "3", "-i", "color=c=yellow:s=320x568:r=30",
+                  "-f", "lavfi", "-t", "3", "-i", "color=c=cyan:s=320x568:r=30",
+                  "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+                  "-c:v", "libx264", str(_vV)], check=True, timeout=120)
+        _savV = (_wV.IDENTITIES_DIR, _wV._list_identities, _wV.THUMB_DIR)
+        try:
+            _wV.IDENTITIES_DIR = _TV / "identities"
+            _wV._list_identities = lambda: ["tstvign"]
+            _wV.THUMB_DIR = _TV / "thumbs"
+            _appV = _wV.create_app()
+            _appV.config["TESTING"] = True
+            _cV = _appV.test_client()
+            with _cV.session_transaction() as _sV:
+                _sV["auth"] = True; _sV["username"] = "admin"; _sV["role"] = "owner"
+                _sV["legacy_owner"] = True
+            from PIL import Image as _ImV
+            import io as _ioV
+
+            def _teinteV():
+                _r = _cV.get("/cloud/thumb/tstvign/templates/modele.mp4")
+                _im = _ImV.open(_ioV.BytesIO(_r.data)).convert("RGB").resize((8, 8))
+                _px = list(_im.getdata())
+                return (sum(x[0] for x in _px) / 64, sum(x[2] for x in _px) / 64)
+            _rV, _bV = _teinteV()
+            check("vignette : sans coupure connue, l image du debut (jaune)",
+                  _rV > 150 and _bV < 100, (_rV, _bV))
+            (_dV / "modele.analyse.json").write_text('{"cut_at": 3.0}', encoding="utf-8")
+            _rV, _bV = _teinteV()
+            check("vignette : template a verifier = image a la coupure de l analyse (cyan)",
+                  _rV < 100 and _bV > 150, (_rV, _bV))
+            check("vignette : la coupure entre dans la cle (deplacee = refaite)",
+                  (_TV / "thumbs" / f"v{_wV.THUMB_RECETTE}" / "tstvign" / "templates"
+                   / "modele.mp4@3.00.jpg").exists())
+            (_dV / "modele.montage.json").write_text('{"cut_at": 0.5}', encoding="utf-8")
+            _rV, _bV = _teinteV()
+            check("vignette : le brouillon valide fait autorite sur l analyse",
+                  _rV > 150 and _bV < 100, (_rV, _bV))
+            check("vignette : coupure inconnue de _coupe_template = None",
+                  _wV._coupe_template(_dV / "absent.mp4") is None)
+            _srcV = pathlib.Path(_wV.__file__).read_text(encoding="utf-8")
+            check("vignette : l adresse de la carte porte la coupure (cache du navigateur)",
+                  'thumb_url += f"?c={_coupes_tpl[p.name]:.2f}"' in _srcV)
+        finally:
+            _wV.IDENTITIES_DIR, _wV._list_identities, _wV.THUMB_DIR = _savV
+except Exception as _eV:
+    import traceback as _tbV
+    check("vignette coupure : testable", False, (repr(_eV) + _tbV.format_exc()[-400:])[:600])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

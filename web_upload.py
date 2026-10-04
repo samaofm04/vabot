@@ -24823,6 +24823,56 @@ def _vignette_trop_sombre(chemin: Path) -> bool:
         return False          # illisible ici : on ne juge pas, on garde
 
 
+def _coupe_template(video: Path):
+    """La coupure (fin de l'accroche, debut de la partie 2) d'un template :
+    celle du brouillon valide, sinon celle de l'analyse. None si inconnue."""
+    for voisin in (video.with_suffix(".montage.json"), video.with_suffix(".analyse.json")):
+        try:
+            c = json.loads(voisin.read_text(encoding="utf-8")).get("cut_at")
+        except Exception:
+            continue
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            continue
+        if c > 0:
+            return c
+    return None
+
+
+def _vignette_a_la_coupe(src: Path, dest: Path, coupe: float) -> bool:
+    """Vignette d'un template prise a sa COUPURE, au debut de la partie 2.
+
+    Le proprietaire, le 04/10/2026 : « on voit que la premiere image [...]
+    mets l'image de quand il y a le cut, comme ca visuellement je sais ».
+    L'accroche change d'une copie a l'autre ; c'est la partie 2, le montage,
+    qui fait reconnaitre un template. Un tiers de seconde apres la coupure
+    (une transition tombe pile dessus), parmi 8 images seulement : le filtre
+    a 60 images de la vignette ordinaire pouvait partir 2 s plus loin."""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        duree, _w, _h = _probe_video(src)
+        t = coupe + 0.35
+        if duree > 0 and t > duree - 0.15:
+            t = max(0.0, coupe + (duree - coupe) / 2)
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", str(src),
+               "-vf", f"thumbnail=8,scale={THUMB_SIZE}:-2", "-frames:v", "1", "-q:v", "5",
+               str(dest)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=25)
+        except subprocess.TimeoutExpired:
+            dest.unlink(missing_ok=True)
+            return False
+        if r.returncode != 0 or not _vignette_valide(dest):
+            dest.unlink(missing_ok=True)
+            # coupure au-dela de la fin (analyse fausse) : la vignette ordinaire
+            return _generate_video_thumbnail(src, dest)
+        return True
+    except Exception as e:
+        log.error(f"vignette a la coupure pour {src}: {e}")
+        return False
+
+
 def _extraire_image(src: Path, dest: Path, depart: float) -> bool:
     """Une image representative a partir de `depart` secondes.
 
@@ -24957,9 +25007,11 @@ def _vignette_valide(chemin: Path) -> bool:
     return False
 
 
-def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
+def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool,
+                             coupe: float = None) -> Path:
     """Retourne le path du thumbnail, en le générant si besoin (1 génération max
-    par clé grâce au verrou ; le 2e appelant attend puis trouve le fichier)."""
+    par clé grâce au verrou ; le 2e appelant attend puis trouve le fichier).
+    coupe : un template, pris a sa coupure (la cle doit alors la porter)."""
     thumb = _thumb_path_for(rel_key)
     if thumb.exists():
         # Perimee ? La cle porte le NOM du fichier, pas son contenu : supprimer
@@ -24978,7 +25030,9 @@ def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
     with _thumb_gen_lock(rel_key):
         if thumb.exists():   # généré pendant l'attente du verrou
             return thumb
-        if is_video:
+        if is_video and coupe:
+            ok = _vignette_a_la_coupe(src, thumb, coupe)
+        elif is_video:
             ok = _generate_video_thumbnail(src, thumb)
         else:
             ok = _generate_image_thumbnail(src, thumb)
@@ -25005,10 +25059,11 @@ def _pregen_thumbs_async(items):
             from concurrent.futures import ThreadPoolExecutor
 
             def _une(it):
-                src, key, isv = it
+                src, key, isv = it[:3]
                 try:
                     if not _thumb_path_for(key).exists():
-                        _get_or_create_thumbnail(src, key, isv)
+                        _get_or_create_thumbnail(src, key, isv,
+                                                 it[3] if len(it) > 3 else None)
                 except Exception:
                     pass
 
@@ -27716,9 +27771,21 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                     _va_ready_stems.add(_mj.name[:-len(".montage.json")])
         # PERF : pré-génère les thumbnails manquants en arrière-plan -> quand le
         # navigateur les demande, ils sont déjà prêts (plus de ffmpeg bloquant).
+        # Templates : la vignette montre la COUPURE (voir _vignette_a_la_coupe).
+        # La coupure entre dans la cle ET dans l'adresse : deplacee dans
+        # l'editeur, la vignette est refaite et le navigateur la recharge.
+        _coupes_tpl = {}
+        if subdir == "templates":
+            for p in files:
+                if p.suffix.lower() in VIDEO_EXTS and ".example" not in p.name:
+                    _c_tpl = _coupe_template(p)
+                    if _c_tpl:
+                        _coupes_tpl[p.name] = _c_tpl
         try:
             _pregen_thumbs_async([
-                (p, f"{selected}/{subdir}/{p.name}", p.suffix.lower() in VIDEO_EXTS)
+                (p, f"{selected}/{subdir}/{p.name}"
+                    + (f"@{_coupes_tpl[p.name]:.2f}" if p.name in _coupes_tpl else ""),
+                 p.suffix.lower() in VIDEO_EXTS, _coupes_tpl.get(p.name))
                 for p in files])
         except Exception:
             pass
@@ -27733,6 +27800,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             else:
                 url = clean_url
                 thumb_url = f"/cloud/thumb/{selected}/{subdir}/{_url_nom(p.name)}"
+                if p.name in _coupes_tpl:
+                    thumb_url += f"?c={_coupes_tpl[p.name]:.2f}"
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
@@ -60799,7 +60868,14 @@ def create_app():
         # TOUS les dossiers video (reels, rushs bruts, templates, reels PRO) :
         # sinon la miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
         is_video = subdir in DOSSIERS_VIDEO
-        thumb = _get_or_create_thumbnail(src, rel_key, is_video)
+        # Un template : l'image de la coupure (debut de la partie 2). La cle
+        # porte la coupure : la deplacer dans l'editeur refait la vignette.
+        coupe = None
+        if is_video and subdir == "templates" and ".example" not in src.name:
+            coupe = _coupe_template(src)
+            if coupe:
+                rel_key = f"{rel_key}@{coupe:.2f}"
+        thumb = _get_or_create_thumbnail(src, rel_key, is_video, coupe)
         if thumb is None or not thumb.exists():
             # Repli. Il servait le fichier ORIGINAL — pour une video, c'est
             # envoyer plusieurs megaoctets dans un <img>, qui n'affiche alors
