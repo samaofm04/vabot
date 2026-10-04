@@ -20386,6 +20386,57 @@ except Exception as _eLf:
     _tbLf.print_exc()
     check("liens FR : testable", False, repr(_eLf)[:200])
 
+# ---- Menu FR sans Caption / Template / Trash / Flash (05/10/2026) ---------
+print()
+print("Menu FR : Caption, Template, Trash et Flash masques (maquette /demomenufr)")
+try:
+    from cogs import user as _uMf
+    from cogs import menutest as _mtMf
+
+    def _elemsMf(v):
+        out = []
+        for c in v.walk_children():
+            i = getattr(c, "item", c)
+            if getattr(i, "custom_id", None):
+                out.append(getattr(i, "placeholder", None) or getattr(i, "label", None) or i.custom_id)
+        return out
+    _identMf = next((d.name for d in sorted(_uMf.IDENTITIES_DIR.iterdir())
+                     if d.is_dir() and not _uMf._jb_panel_probleme(d.name, 1)), "julia")
+    _savMf = _uMf._JB_FR_MASQUE_ACTIF
+    try:
+        _uMf._JB_FR_MASQUE_ACTIF = False
+        _frMf = _elemsMf(_uMf._jb_panel(None, _identMf, 1, marche="fr"))
+        check("menu FR : interrupteur eteint = panneau inchange (Caption... Flash... la)",
+              "💬 Caption…" in _frMf and "⚡ Flash…" in _frMf, _frMf)
+        _mqMf = _elemsMf(_uMf._jb_panel(None, _identMf, 1, marche="fr", masquer=True))
+        check("menu FR : maquette = les boutons + Brut, sans Caption/Template/Trash/Flash",
+              "🎥 Brut…" in _mqMf and "🖼️ Post" in _mqMf
+              and not any(x in _mqMf for x in ("💬 Caption…", "🎞️ Template…", "💀 Trash…", "⚡ Flash…")),
+              _mqMf)
+        _usMf = _elemsMf(_uMf._jb_panel(None, _identMf, 1, marche="us", masquer=True))
+        check("menu FR : le marche US n'est jamais masque", "💬 Caption…" in _usMf, _usMf)
+        _uMf._JB_FR_MASQUE_ACTIF = True
+        _ephMf = [c.placeholder for c in _uMf.JailbreakActionsView(None, _identMf, us=False).walk_children()
+                  if getattr(c, "placeholder", None)]
+        check("menu FR : le panneau ephemere des serveurs FR suit l'interrupteur",
+              "🎥 Brut…" in _ephMf and "💬 Caption…" not in _ephMf, _ephMf)
+        _uMf._JB_FR_MASQUE_ACTIF = False
+        _vMf = _uMf._jb_panel(None, _identMf, 1, marche="fr", masquer=True)
+        _mtMf._griser_tout(_vMf)
+        _actifsMf = [getattr(c, "item", c).custom_id for c in _vMf.walk_children()
+                     if getattr(getattr(c, "item", c), "custom_id", None)
+                     and not getattr(getattr(c, "item", c), "disabled", True)]
+        check("menu FR : la maquette est entierement grisee (un clic ne livre rien)",
+              _actifsMf == [], _actifsMf)
+        check("menu FR : actions masquees = pas « sans place » (aucun orphelin)",
+              _uMf._jb_disposition("fr", True)[1] == [])
+    finally:
+        _uMf._JB_FR_MASQUE_ACTIF = _savMf
+except Exception as _eMf:
+    import traceback as _tbMf
+    _tbMf.print_exc()
+    check("menu FR : testable", False, repr(_eMf)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:

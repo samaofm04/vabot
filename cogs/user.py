@@ -9741,6 +9741,26 @@ _FAMILLES_PANNEAU = (_FAMILLE_BRUT,) + _FAMILLES_MENU
 #: comme oubliee.
 _JB_MASQUEES = frozenset({"trend"})
 
+#: Le marche FRANCAIS sans les menus Caption, Template, Trash et Flash
+#: (proprietaire, 05/10/2026 : « disable des trucs pour le marche francais
+#: [...] retire caption, template, trash, flash »). MASQUES, pas supprimes :
+#: les panneaux deja postes portent encore leurs custom_id et doivent
+#: continuer de repondre ; Brut (et le Reel FR des patchs du VPS) restent.
+_JB_FAMILLES_MASQUEES_FR = frozenset({"caption", "template", "trash", "flash"})
+#: Eteint tant que le proprietaire n'a pas valide la maquette /demomenufr
+#: (bot admin) : « montre-moi avant a quoi ca va ressembler ».
+_JB_FR_MASQUE_ACTIF = False
+
+
+def _jb_familles_masquees(marche="us", masquer=None):
+    """Les familles retirees des menus pour ce marche. `masquer` force le
+    masquage (True, la maquette) ou l'interdit (False) ; None suit
+    _JB_FR_MASQUE_ACTIF."""
+    if str(marche or "").strip().lower() != "fr":
+        return frozenset()
+    actif = _JB_FR_MASQUE_ACTIF if masquer is None else bool(masquer)
+    return _JB_FAMILLES_MASQUEES_FR if actif else frozenset()
+
 
 def _famille_panneau(cle):
     """La famille `cle` des menus du panneau (Brut compris), ou None."""
@@ -9760,8 +9780,12 @@ _JB_RANGEES.update({_k: len(_JB_BOUTONS_V2) + _i
                     for _i, _f in enumerate(_FAMILLES_PANNEAU) for _k in _f.actions})
 
 
-def _jb_disposition():
+def _jb_disposition(marche="us", masquer=None):
     """([(sorte, cle, rangee)], hors) -- le panneau, dans l'ordre d'affichage.
+
+    `marche` / `masquer` : les menus retires pour ce marche
+    (_jb_familles_masquees) ne sont pas poses ; leurs actions ne sont pas
+    pour autant « sans place » (masquees EXPRES).
 
     `sorte` vaut « qte » (la quantite), « action » (un bouton) ou « menu »
     (le menu deroulant d'une famille de _FAMILLES_PANNEAU). `rangee` est le
@@ -9784,7 +9808,9 @@ def _jb_disposition():
         out += [("action", k, rangee) for k in orphelines[:5]]
         rangee += 1
     hors = orphelines[5:]
-    out += [("menu", f.cle, rangee + i) for i, f in enumerate(_FAMILLES_PANNEAU)]
+    _masquees = _jb_familles_masquees(marche, masquer)
+    out += [("menu", f.cle, rangee + i) for i, f in
+            enumerate([f for f in _FAMILLES_PANNEAU if f.cle not in _masquees])]
     if orphelines:
         log.warning("panneau US : %d action(s) sans place prevue (%s)%s",
                     len(orphelines), ", ".join(orphelines),
@@ -10685,7 +10711,7 @@ class JailbreakActionsView(discord.ui.LayoutView):
     def _build(self):
         ui = discord.ui
         self.clear_items()
-        disposition, self._hors = _jb_disposition()
+        disposition, self._hors = _jb_disposition("us" if self.us else "fr")
         self._inconnues = []
         rangees = {}
         for sorte, cle, rangee in disposition:
@@ -13487,7 +13513,7 @@ def _jb_panel_probleme(ident, qty) -> str:
     return ""
 
 
-def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None):
+def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None, masquer=None):
     """Le panneau permanent : une LayoutView « Components V2 ».
 
     Un bloc (conteneur a accent rouge fonce) : l'en-tete « <photo> Model »
@@ -13505,8 +13531,8 @@ def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None):
     panneau (_est_panneau_actions). Un nom que les boutons ne savent pas
     porter (_jb_panel_probleme) : l'en-tete et la quantite, la raison au
     journal (et dans le -content au clic, _jb_model_panneau). `marche`
-    n'est plus lu (la meme liste pour tout le monde) ; il reste pour les
-    appelants.
+    sert aux menus retires d'un marche (le FR : _jb_familles_masquees) ;
+    `masquer` force ou interdit ce retrait (la maquette /demomenufr).
 
     Tout l'etat (model, quantite) est dans les custom_id : aucune memoire, et
     les elements repondent encore apres un redemarrage.
@@ -13535,7 +13561,7 @@ def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None):
         boite.add_item(ui.TextDisplay(_jb_entete(ident, guild)))
         return _quantite_seule()
     _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
-    disposition, hors = _jb_disposition()
+    disposition, hors = _jb_disposition(marche, masquer)
     rangees, inconnues = {}, []
     for sorte, cle, r in disposition:
         if sorte == "qte":

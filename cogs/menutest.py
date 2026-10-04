@@ -112,6 +112,19 @@ def _models(marche: str):
                   if d.is_dir() and not d.name.lower().startswith("v2_"))[:25]
 
 
+def _griser_tout(vue):
+    """Grise CHAQUE bouton et menu d'une vue, y compris ceux qu'enveloppe un
+    element dynamique (DynamicItem.item) : griser l'enveloppe seule laissait
+    le vrai bouton cliquable, et une maquette aurait livre du contenu."""
+    for el in vue.walk_children():
+        for cible in (el, getattr(el, "item", None)):
+            if cible is not None and hasattr(cible, "disabled"):
+                try:
+                    cible.disabled = True
+                except Exception:
+                    pass
+
+
 class _Bouton(discord.ui.Button):
     """Un bouton du double. Sert une variante DEJA en reserve.
 
@@ -967,6 +980,23 @@ class MenuTest(commands.Cog):
                        model: app_commands.Choice[str] = None):
         await interaction.response.send_message(
             view=DemoMenuLigne(model.value if model else "julia"), ephemeral=True)
+
+    @app_commands.command(
+        name="demomenufr",
+        description="[DÉMO] Menu FR sans Caption, Template, Trash, Flash — rien n'est lancé",
+    )
+    @app_commands.describe(model="La model du menu")
+    @app_commands.choices(model=[app_commands.Choice(name=m.capitalize(), value=m)
+                                 for m in ("amelia", "julia", "lola", "emma", "sarah", "alicia")])
+    async def demomenufr(self, interaction: discord.Interaction,
+                         model: app_commands.Choice[str] = None):
+        """Le panneau « 📋 Menu » FR tel qu'il sera, masquage force. Tout est
+        GRISE : un clic ne lance rien, ne livre rien dans aucun ticket."""
+        from cogs.user import _jb_panel, _JB_QTE_DEFAUT
+        vue = _jb_panel(None, model.value if model else "amelia", _JB_QTE_DEFAUT,
+                        marche="fr", guild=interaction.guild, masquer=True)
+        _griser_tout(vue)
+        await interaction.response.send_message(view=vue, ephemeral=True)
 
     @app_commands.command(
         name="demonumero",
