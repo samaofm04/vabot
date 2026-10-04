@@ -9747,9 +9747,10 @@ _JB_MASQUEES = frozenset({"trend"})
 #: les panneaux deja postes portent encore leurs custom_id et doivent
 #: continuer de repondre ; Brut (et le Reel FR des patchs du VPS) restent.
 _JB_FAMILLES_MASQUEES_FR = frozenset({"caption", "template", "trash", "flash"})
-#: Eteint tant que le proprietaire n'a pas valide la maquette /demomenufr
-#: (bot admin) : « montre-moi avant a quoi ca va ressembler ».
-_JB_FR_MASQUE_ACTIF = False
+#: Allume le 05/10/2026, apres la maquette /demomenufr et sa capture :
+#: « pour la model c'est good, parfait, vas-y ». Remettre False rend les
+#: quatre menus au marche FR, sans rien d'autre a toucher.
+_JB_FR_MASQUE_ACTIF = True
 
 
 def _jb_familles_masquees(marche="us", masquer=None):
