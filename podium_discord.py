@@ -703,7 +703,8 @@ def liens_bruts(gid: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
             import gms
             # force_refresh : la liste est mise en cache deux minutes cote gms,
             # et un lien cree la veille doit apparaitre des le lendemain.
-            r = gms.list_links_team(equipe, force_refresh=True) or {}
+            with _etiquette("podium"):
+                r = gms.list_links_team(equipe, force_refresh=True) or {}
             vivants = r.get("links") or r.get("data") or []
             if r.get("ok") is not False and vivants:
                 liens = vivants
@@ -818,7 +819,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         if cle not in table:
             continue
         try:
-            _, pays = gms.analytics_for_links(e["ids"], d0, d1)
+            with _etiquette("podium"):
+                _, pays = gms.analytics_for_links(e["ids"], d0, d1)
         except Exception:
             pays = None
         va = e["nom"] if profil["fr"] else f'VA {table.get(cle, 0)}'
@@ -867,7 +869,8 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
     totaux = dict(cache.get("totaux") or {})
     for cle, e in ents.items():
         try:
-            _, pays = gms.analytics_for_links(e["ids"], ALLTIME_DEPUIS, fin)
+            with _etiquette("podium"):
+                _, pays = gms.analytics_for_links(e["ids"], ALLTIME_DEPUIS, fin)
         except Exception:
             pays = None
         if pays is not None:
@@ -2724,6 +2727,23 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
         return True                     # presentation changee : refaire tout de suite
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _etiquette(nom: str):
+    """L'etiquette d'appel GetMySocial (gms.api_tag), qui garde au podium sa
+    reserve quand le budget du jour baisse (gms.PRIORITES).
+
+    NE DOIT JAMAIS FAIRE TOMBER UN RELEVE : les suites de tests remplacent
+    `gms` par un faux module sans api_tag, et une etiquette de comptabilite
+    n'a pas a decider si le podium sort ou non. Sans elle, l'appel part quand
+    meme -- il est seulement compte comme « autres ».
+    """
+    import contextlib
+    try:
+        import gms
+        return gms.api_tag(nom)
+    except Exception:                                        # noqa: BLE001
+        return contextlib.nullcontext()
 
 
 def _quota_dit() -> str:

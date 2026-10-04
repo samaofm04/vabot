@@ -35540,6 +35540,128 @@ except Exception as _eP:
     import traceback as _tbP
     check("copies validees : testable", False, (repr(_eP) + _tbP.format_exc()[-400:])[:600])
 
+# ------- 99. Le budget du jour, le tour de garde, et la page /clics gardee
+print()
+print("Quota GMS : budget du jour, tour de garde, page /clics")
+try:
+    import pathlib as _plB, tempfile as _tpB, time as _tB, shutil as _shB
+    import gms as _gB
+
+    # --- le budget : on n invente jamais un plafond -------------------------
+    _vraiF = _gB._BUDGET_FICHIER
+    _tmpB = _tpB.mkdtemp(prefix="gms_budget_")
+    _gB._BUDGET_FICHIER = _plB.Path(_tmpB) / "gms_budget.json"
+    _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": True, "ecrit": 0.0})
+    try:
+        check("sans plafond connu, rien n est refuse (on ne devine pas un budget)",
+              _gB.budget()["plafond"] is None and _gB.budget_ok("dashboard") is True
+              and _gB.budget_ok("podium") is True)
+        # on compte nos appels, heure par heure
+        for _ in range(5):
+            _gB._api_note(200)
+        check("chaque appel est compte", _gB.appels_24h() == 5)
+        # « today: 0 » : ce qu on avait consomme EST le plafond
+        _gB._budget_noter_plafond(_gB.appels_24h())
+        check("le plafond s apprend sur un refus, il ne se suppose pas",
+              _gB.budget()["plafond"] == 5)
+        check("le plafond est ecrit sur disque (66 redemarrages ne l effacent pas)",
+              _gB._BUDGET_FICHIER.exists())
+        # budget serre : la paie passe, le fond non
+        _gB._BUDGET["plafond"] = _gB.appels_24h() + 10
+        check("budget au plus juste : la paie passe, le fond s efface",
+              _gB.budget_ok("podium") is True
+              and _gB.budget_ok("dashboard") is False
+              and _gB.budget_ok("autres") is False)
+        _gB._BUDGET["plafond"] = _gB.appels_24h() + _gB.RESERVE_NORMALE + 100
+        check("budget large : tout le monde passe",
+              _gB.budget_ok("podium") and _gB.budget_ok("dashboard")
+              and _gB.budget_ok("autres"))
+        # plus rien du tout : meme la paie s arrete (mieux vaut ca qu un 429)
+        _gB._BUDGET["plafond"] = 1
+        check("plafond atteint : meme la paie s arrete au lieu de prendre un 429",
+              _gB.budget_ok("podium") is False)
+        check("le plafond garde le PLUS BAS jamais vu",
+              (_gB._budget_noter_plafond(9999) or True)
+              and _gB.budget()["plafond"] == 1)
+        check("etat_quota montre le budget", "budget" in _gB.etat_quota())
+    finally:
+        _gB._BUDGET_FICHIER = _vraiF
+        _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0})
+        _shB.rmtree(_tmpB, ignore_errors=True)
+
+    _srcB = _plB.Path("gms.py").read_text(encoding="utf-8")
+    check("les deux chemins qui partent vraiment consultent le budget",
+          _srcB.count("if not budget_ok():") == 2)
+    check("le podium porte l etiquette qui lui garde une reserve",
+          _plB.Path("podium_discord.py").read_text(encoding="utf-8")
+          .count('_etiquette("podium")') >= 3
+          and _gB.PRIORITES.get("podium") == "paie")
+    # L ETIQUETTE NE DOIT JAMAIS FAIRE TOMBER UN RELEVE. Les suites de tests
+    # remplacent gms par un faux module sans api_tag ; une comptabilite n a
+    # pas a decider si le podium sort (constate : 0 OK / 2 echecs d un coup).
+    import sys as _syB
+    import podium_discord as _pdB
+    _vraiG = _syB.modules.get("gms")
+    try:
+        import types as _tyB
+        _syB.modules["gms"] = _tyB.SimpleNamespace()     # un gms sans api_tag
+        with _pdB._etiquette("podium"):
+            _dedans = True
+        check("l etiquette ne tombe pas quand gms n a pas api_tag", _dedans)
+    finally:
+        if _vraiG is not None:
+            _syB.modules["gms"] = _vraiG
+        else:
+            _syB.modules.pop("gms", None)
+
+    # --- le tour de garde des VA : sur disque -------------------------------
+    import web_upload as _wuB
+    check("tour de garde : sa date est sur disque, pas en memoire",
+          "_SUIVI_VU_FICHIER = DATA_DIR" in
+          _plB.Path("web_upload.py").read_text(encoding="utf-8"))
+    _tmpS = _tpB.mkdtemp(prefix="suivi_vu_")
+    _vraiS = _wuB._SUIVI_VU_FICHIER
+    _wuB._SUIVI_VU_FICHIER = _plB.Path(_tmpS) / "suivi_va_vu.json"
+    _wuB._SUIVI_VU = {}
+    try:
+        _wuB._suivi_vu_poser("42", _tB.time())
+        check("tour de garde : la date est ecrite", _wuB._SUIVI_VU_FICHIER.exists())
+        _wuB._SUIVI_VU = {}          # un processus neuf
+        check("tour de garde : relue apres un redemarrage",
+              float(_wuB._suivi_vu_lire().get("42") or 0) > 0)
+    finally:
+        _wuB._SUIVI_VU_FICHIER = _vraiS
+        _wuB._SUIVI_VU = {}
+        _shB.rmtree(_tmpS, ignore_errors=True)
+
+    # --- la page /clics : rendus gardes sur disque --------------------------
+    import clics_portail as _cpB
+    check("page /clics : un rendu coute 124 appels, il est garde 15 min",
+          _cpB.TTL_RENDU >= 900 and _cpB.TTL_ECHEC < _cpB.TTL_RENDU)
+    check("page /clics : un ECHEC se garde moins longtemps qu une vraie page",
+          _cpB._ttl(503) == _cpB.TTL_ECHEC and _cpB._ttl(200) == _cpB.TTL_RENDU)
+    _tmpC = _tpB.mkdtemp(prefix="clics_cache_")
+    _vraiFC = _cpB.FICHIER_CACHE
+    _cpB.FICHIER_CACHE = _plB.Path(_tmpC) / "rendus.json"
+    _cpB._CACHE.clear()
+    _cpB._CACHE_LU[0] = True
+    try:
+        _cpB._cache_poser("cle1", "tout", "<html>page</html>", 200)
+        check("page /clics : le rendu est ecrit sur disque",
+              _cpB.FICHIER_CACHE.exists())
+        _cpB._CACHE.clear()
+        _cpB._CACHE_LU[0] = False     # un processus neuf
+        check("page /clics : le rendu est repris apres un redemarrage",
+              _cpB._cache_lire().get(("cle1", "tout"), (0, "", 0))[1]
+              == "<html>page</html>")
+    finally:
+        _cpB.FICHIER_CACHE = _vraiFC
+        _cpB._CACHE.clear()
+        _cpB._CACHE_LU[0] = False
+        _shB.rmtree(_tmpC, ignore_errors=True)
+except Exception as _eB:
+    check("budget gms : testable", False, repr(_eB)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

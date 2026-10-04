@@ -59063,7 +59063,35 @@ def _sync_modeles_a_suivre(heures: int = 6) -> None:
         print(f"[modeles] {type(e).__name__}: {e}", flush=True)
 
 
+#: Quand le tour de garde des VA a tourne, PAR SERVEUR et SUR DISQUE. En
+#: memoire, les 66 redemarrages du 03/10/2026 l'ont relance 66 fois : un
+#: travail « une fois par jour » qui coute un appel GetMySocial par VA est
+#: alors parti 66 fois, ~3 500 appels pour 54 utiles.
+_SUIVI_VU_FICHIER = DATA_DIR / "suivi_va_vu.json"
 _SUIVI_VU = {}
+
+
+def _suivi_vu_lire() -> dict:
+    global _SUIVI_VU
+    if _SUIVI_VU:
+        return _SUIVI_VU
+    try:
+        d = safe_json.load(_SUIVI_VU_FICHIER, default={}) or {}
+        _SUIVI_VU = {str(k): float(v or 0) for k, v in d.items()}
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[suivi] tour de garde : date illisible ({type(e).__name__}: {e})",
+              flush=True)
+        _SUIVI_VU = {}
+    return _SUIVI_VU
+
+
+def _suivi_vu_poser(gid: str, quand: float) -> None:
+    _suivi_vu_lire()[str(gid)] = float(quand)
+    try:
+        safe_json.write(_SUIVI_VU_FICHIER, _SUIVI_VU)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[suivi] tour de garde non enregistre ({type(e).__name__}: {e}) — "
+              "il repartira au prochain redemarrage", flush=True)
 
 
 def _suivi_va(gid: str, heures: int = 24) -> None:
@@ -59071,9 +59099,9 @@ def _suivi_va(gid: str, heures: int = 24) -> None:
     changent pas assez vite pour valoir un relevé toutes les dix minutes, et
     chaque VA coute un appel a GetMySocial."""
     import time as _t_v
-    if _t_v.time() - float(_SUIVI_VU.get(gid) or 0) < heures * 3600:
+    if _t_v.time() - float(_suivi_vu_lire().get(str(gid)) or 0) < heures * 3600:
         return
-    _SUIVI_VU[gid] = _t_v.time()
+    _suivi_vu_poser(gid, _t_v.time())
     try:
         import suivi_va as _sv
         b = _sv.verifier(gid)

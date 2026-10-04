@@ -49,11 +49,61 @@ import safe_json
 RACINE = "/clics"
 FICHIER = Path("data") / "clics_portail.json"
 
-#: Le rendu est garde quelques minutes. Le report interroge GetMySocial et
-#: MyPuls ; sans cache, dix personnes qui ouvrent le lien en meme temps font
-#: dix fois le travail — et le quota MyPuls est de 60 requetes par minute.
-TTL_RENDU = 240
+#: Le rendu est garde. Le report interroge GetMySocial et MyPuls ; sans cache,
+#: dix personnes qui ouvrent le lien en meme temps font dix fois le travail —
+#: et le quota MyPuls est de 60 requetes par minute.
+#:
+#: QUINZE MINUTES, ET NON QUATRE. Une ouverture coute 124 appels GetMySocial
+#: (99 lien par lien), sur une quota JOURNALIERE qui a ete epuisee le
+#: 03/10/2026. Quatre minutes, c'etait jusqu'a 360 rendus par jour, soit
+#: 44 600 appels pour une page de lecture. La page affiche son heure de
+#: relevé : un lecteur voit tout de suite de quand datent les chiffres.
+TTL_RENDU = 900
+#: Un ECHEC se garde moins longtemps : la source revient, la page doit suivre.
+TTL_ECHEC = 240
 _CACHE: dict = {}
+#: SUR DISQUE : le bot redemarre a chaque deploiement (66 fois le 03/10) et un
+#: cache en memoire repartait vide a chaque fois — donc 124 appels de plus a la
+#: premiere ouverture suivante.
+FICHIER_CACHE = Path("data") / "clics_portail_rendus.json"
+_CACHE_LU = [False]
+
+
+def _ttl(statut) -> int:
+    return TTL_ECHEC if int(statut or 200) >= 400 else TTL_RENDU
+
+
+def _cache_lire() -> dict:
+    """Reprend les rendus gardes, une fois par processus."""
+    if _CACHE_LU[0]:
+        return _CACHE
+    _CACHE_LU[0] = True
+    try:
+        d = safe_json.load(FICHIER_CACHE, default={}) or {}
+        t = time.time()
+        for k, v in (d.items() if isinstance(d, dict) else []):
+            if not isinstance(v, list) or len(v) < 3:
+                continue
+            cle, _, vue = str(k).partition("|")
+            if not vue or not 0 <= t - float(v[0] or 0) < _ttl(v[2]):
+                continue
+            _CACHE[(cle, vue)] = (float(v[0]), str(v[1]), int(v[2]))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[clics] rendus gardes illisibles ({type(e).__name__}: {e})", flush=True)
+    return _CACHE
+
+
+def _cache_poser(cle: str, vue: str, page: str, statut: int) -> None:
+    _cache_lire()[(cle, vue)] = (time.time(), page, int(statut))
+    try:
+        t = time.time()
+        safe_json.write(FICHIER_CACHE,
+                        {f"{c}|{v}": [e[0], e[1], (e[2] if len(e) > 2 else 200)]
+                         for (c, v), e in _CACHE.items()
+                         if 0 <= t - float(e[0]) < _ttl(e[2] if len(e) > 2 else 200)})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[clics] rendu non garde ({type(e).__name__}: {e}) — la prochaine "
+              "ouverture repaiera les appels", flush=True)
 
 
 # ==============================================================================
@@ -850,8 +900,8 @@ def register(app, deps):
 
         cle = str(d.get("cle") or "")
         portee = d.get("portee") if isinstance(d.get("portee"), dict) else None
-        hit = _CACHE.get((cle, vue))
-        if hit and (time.time() - hit[0]) < TTL_RENDU:
+        hit = _cache_lire().get((cle, vue))
+        if hit and (time.time() - hit[0]) < _ttl(hit[2] if len(hit) > 2 else 200):
             _noter_vue(jeton)
             # LE STATUT VOYAGE AVEC LA PAGE. Une page d'echec resservie en
             # 200 dit « tout va bien » a tout ce qui ne lit pas le texte.
@@ -894,7 +944,7 @@ def register(app, deps):
                            time.strftime("%d/%m %H:%M"))
             # On garde CE rendu-la un moment : sans cache, dix ouvertures de
             # la page relancaient dix rafales.
-            _CACHE[(cle, vue)] = (time.time(), _echec, 503)
+            _cache_poser(cle, vue, _echec, 503)
             return Response(_echec, status=503,
                             mimetype="text/html; charset=utf-8")
 
@@ -905,7 +955,7 @@ def register(app, deps):
                                  str(emb.description or "").replace("**", ""),
                                  _d, time.strftime("%d/%m %H:%M"),
                                  str(jeton), vue)
-            _CACHE[(cle, vue)] = (time.time(), page, 200)
+            _cache_poser(cle, vue, page, 200)
             _noter_vue(jeton)
             return Response(page, mimetype="text/html; charset=utf-8")
 
@@ -930,7 +980,7 @@ def register(app, deps):
         page = _page(str(emb.title or "Clics"),
                      str(emb.description or "").replace("**", ""),
                      blocs, time.strftime("%d/%m %H:%M"))
-        _CACHE[(cle, vue)] = (time.time(), page, 200)
+        _cache_poser(cle, vue, page, 200)
         _noter_vue(jeton)
         return Response(page, mimetype="text/html; charset=utf-8")
 

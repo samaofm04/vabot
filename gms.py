@@ -294,9 +294,157 @@ class api_tag:
         return False
 
 
+# ---- Le budget du jour : ce qui empeche de vider la quota --------------
+#
+# La quota de GetMySocial est JOURNALIERE et commune aux quatre cles (elles
+# appartiennent au meme compte). Le 03/10/2026 elle est tombee a zero : le
+# podium, qui paie, n'a plus rien pu relever de la soiree, pendant qu'un demon
+# de prechauffage continuait a servir un tableau que personne ne regardait.
+#
+# On compte donc NOS appels, par heure, SUR DISQUE (le bot redemarre a chaque
+# deploiement). Et on apprend le plafond : le jour ou l'API dit « today: 0 »,
+# le nombre d'appels des 24 dernieres heures EST le plafond. Tant qu'on ne l'a
+# jamais vu, on ne refuse rien -- on ne devine pas un budget.
+#
+# La fenetre est GLISSANTE, pas « depuis minuit » : le refus du 03/10 disait
+# « retry after 7836s » a 05h18, donc la remise a zero de GetMySocial tombe
+# vers 07h28, pas a minuit. Compter par jour calendaire aurait decale le
+# plafond appris d'un tiers de journee.
+_BUDGET_FICHIER = Path(__file__).resolve().parent / "data" / "gms_budget.json"
+_BUDGET = {"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0}
+_BUDGET_LOCK = _threading.Lock()
+
+#: Ce que vaut chaque etiquette d'appel quand le budget baisse. Les etiquettes
+#: sont celles d'api_tag, deja posees dans le depot.
+PRIORITES = {
+    "podium": "paie", "paie": "paie", "prime": "paie", "report": "paie",
+    "dashboard": "fond", "widget-vas": "fond", "warm": "fond",
+}
+#: Jamais touchees par autre chose que la paie.
+RESERVE_PAIE = 2000
+#: Au-dessus de cette marge, le travail de fond s'efface.
+RESERVE_NORMALE = 6000
+
+
+def _heure_cle(t=None) -> str:
+    return time.strftime("%Y-%m-%dT%H", time.localtime(t or time.time()))
+
+
+def _budget_charger() -> None:
+    if _BUDGET["lu"]:
+        return
+    _BUDGET["lu"] = True
+    try:
+        d = json.loads(_BUDGET_FICHIER.read_text(encoding="utf-8"))
+    except Exception:                                        # noqa: BLE001
+        return
+    if not isinstance(d, dict):
+        return
+    h = d.get("heures")
+    if isinstance(h, dict):
+        _BUDGET["heures"] = {str(k): int(v or 0) for k, v in h.items()
+                             if str(k)[:4].isdigit()}
+    p = d.get("plafond")
+    if isinstance(p, int) and p > 0:
+        _BUDGET["plafond"] = p
+
+
+def _budget_ecrire(force: bool = False) -> None:
+    """Au plus une ecriture par minute : ce compteur bouge a chaque appel."""
+    t = time.time()
+    if not force and t - float(_BUDGET["ecrit"]) < 60:
+        return
+    _BUDGET["ecrit"] = t
+    try:
+        safe_json.write(_BUDGET_FICHIER, {"heures": _BUDGET["heures"],
+                                          "plafond": _BUDGET["plafond"]})
+    except Exception:                                        # noqa: BLE001
+        pass          # compter est un confort : ca ne doit jamais casser un appel
+
+
+def appels_24h() -> int:
+    """Nos appels des vingt-quatre dernieres heures (fenetre glissante)."""
+    with _BUDGET_LOCK:
+        _budget_charger()
+        cles = {_heure_cle(time.time() - i * 3600) for i in range(24)}
+        return sum(v for k, v in _BUDGET["heures"].items() if k in cles)
+
+
+def budget() -> dict:
+    """De quoi l'AFFICHER et le comprendre : consomme, plafond, reste."""
+    with _BUDGET_LOCK:
+        _budget_charger()
+        plafond = _BUDGET["plafond"]
+    faits = appels_24h()
+    return {"appels_24h": faits, "plafond": plafond,
+            "reste": (plafond - faits) if plafond else None,
+            "reserve_paie": RESERVE_PAIE, "reserve_normale": RESERVE_NORMALE}
+
+
+def _budget_noter_plafond(faits: int) -> None:
+    """« today: 0 » : ce qu'on avait consomme EST le plafond. On garde le plus bas."""
+    if faits <= 0:
+        return
+    with _BUDGET_LOCK:
+        _budget_charger()
+        avant = _BUDGET["plafond"]
+        _BUDGET["plafond"] = faits if not avant else min(int(avant), faits)
+        change = _BUDGET["plafond"] != avant
+        _budget_ecrire(force=True)
+    if change:
+        print(f"[gms] plafond journalier appris : {_BUDGET['plafond']} appels "
+              "(mesure sur un refus « today: 0 »)", flush=True)
+
+
+_BUDGET_DIT = [0.0]
+
+
+def _budget_dire_refus() -> None:
+    t = time.time()
+    if t - _BUDGET_DIT[0] < 60:
+        return
+    _BUDGET_DIT[0] = t
+    b = budget()
+    print(f"[gms] budget du jour : {b['appels_24h']}/{b['plafond']} appels, "
+          f"il reste {b['reste']} — les appels non prioritaires attendent "
+          f"(etiquette « {getattr(_API_LOCAL, 'tag', None) or 'autres'} »)", flush=True)
+
+
+def budget_ok(tag: Optional[str] = None) -> bool:
+    """Cet appel a-t-il encore le droit de partir ?
+
+    Sans plafond connu, OUI : on ne refuse jamais sur une supposition. Sinon,
+    chacun garde sa reserve -- la paie passe tant qu'il reste un appel, le
+    travail de fond s'efface bien avant.
+    """
+    b = budget()
+    if not b["plafond"]:
+        return True
+    reste = b["reste"]
+    rang = PRIORITES.get(str(tag or getattr(_API_LOCAL, "tag", None) or "autres"), "normal")
+    if rang == "paie":
+        return reste > 0
+    if rang == "fond":
+        return reste > RESERVE_NORMALE
+    return reste > RESERVE_PAIE
+
+
 def _api_note(status):
     try:
         _API_LOG.append((time.time(), getattr(_API_LOCAL, "tag", None) or "autres", int(status or 0)))
+    except Exception:
+        pass
+    try:
+        with _BUDGET_LOCK:
+            _budget_charger()
+            k = _heure_cle()
+            _BUDGET["heures"][k] = int(_BUDGET["heures"].get(k, 0)) + 1
+            # on ne garde que trente heures : de quoi couvrir la fenetre
+            # glissante, pas l'historique du mois
+            if len(_BUDGET["heures"]) > 40:
+                for vieux in sorted(_BUDGET["heures"])[:-30]:
+                    _BUDGET["heures"].pop(vieux, None)
+            _budget_ecrire()
     except Exception:
         pass
 
@@ -347,6 +495,12 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
     recrée et on réessaie UNE fois."""
     if not get_api_key():
         return {"ok": False, "error": "Clé API GetMySocial non configurée"}
+    if not budget_ok():
+        # Le budget du jour descend : seule la paie passe encore. Dit une fois
+        # par minute au plus, sinon le journal devient illisible.
+        _budget_dire_refus()
+        return {"ok": False, "error": "Budget GetMySocial du jour reserve a la "
+                                      "paie (podium, primes) — relance plus tard"}
     _reste = pause_restante()
     if _reste > 0:
         # « Do not retry before then » : on n'ouvre meme pas la connexion.
@@ -533,6 +687,11 @@ def _noter_refus(message: str) -> None:
         _PAUSE["jusqu"] = time.time() + min(secondes, 86400)
         _PAUSE["raison"] = txt[:200]
         _PAUSE["restant_jour"] = reste
+    if reste == 0:
+        # « today: 0 » : ce qu'on avait consomme dans la fenetre glissante EST
+        # le plafond. C'est la seule occasion de l'apprendre -- un appel qui
+        # passe ne dit pas combien il en reste.
+        _budget_noter_plafond(appels_24h())
 
 
 def pause_restante() -> int:
@@ -547,10 +706,15 @@ def etat_quota() -> dict:
     reste = pause_restante()
     with _SANTE_LOCK:
         raison, jour = _PAUSE["raison"], _PAUSE["restant_jour"]
-    return {"pause_s": reste,
-            "reprise": time.strftime("%H:%M", time.localtime(time.time() + reste))
-                       if reste else "",
-            "restant_jour": jour, "raison": raison}
+    out = {"pause_s": reste,
+           "reprise": time.strftime("%H:%M", time.localtime(time.time() + reste))
+                      if reste else "",
+           "restant_jour": jour, "raison": raison}
+    try:
+        out["budget"] = budget()
+    except Exception:                                        # noqa: BLE001
+        pass
+    return out
 
 
 def _quota_libere() -> None:
@@ -1818,6 +1982,9 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
     api_key = _effective_key()
     if not api_key:
         return {"ok": False, "error": "API key absente"}
+    if not budget_ok():
+        _budget_dire_refus()
+        return {"ok": False, "error": "Budget GetMySocial du jour reserve a la paie"}
     # LE SEUL CHEMIN QUI TAPAIT SUR UNE PORTE FERMEE. Tout le reste passe par
     # _call_tool_brut, qui refuse d'ouvrir la connexion pendant une pause ;
     # celui-ci, non — et comme il ne notait pas non plus le refus, un 429 de
