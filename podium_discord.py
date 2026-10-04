@@ -887,7 +887,67 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
 # de moins de deux heures (le rythme de Va IG) est repris tel quel ; un relevé
 # pris APRÈS la fin de sa période la compte entière, et vaut pour toujours.
 CACHE_US_MIN = 120
+#: Les relevés de Twitter gardés pour Va IG. SUR DISQUE, pas seulement en
+#: mémoire : le bot redémarre à chaque déploiement — soixante-six fois le
+#: 03/10/2026 — et chaque redémarrage jetait ce que _releve_us est fait pour
+#: réutiliser. Résultat : un relevé complet de vingt-sept appels refait au
+#: passage suivant (et la quota GetMySocial, commune aux quatre clés du compte,
+#: épuisée en fin de journée), ou, quand elle l'était déjà, les VA de Jessye
+#: absents du podium alors qu'on les avait lus une heure plus tôt.
 _RELEVES: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+_RELEVES_LUS = False
+
+
+def _fichier_releves() -> Path:
+    # relu à chaque appel, pas figé à l'import : les tests déplacent DATA_DIR
+    # dans un dossier temporaire, et le vrai data/ ne doit jamais être touché
+    return DATA_DIR / "podium_releves.json"
+
+
+def _cle_releve(cle: Tuple[str, str, str]) -> str:
+    return "|".join(cle)
+
+
+def _charger_releves() -> None:
+    """Reprend les relevés du disque, une fois par processus."""
+    global _RELEVES_LUS
+    if _RELEVES_LUS:
+        return
+    _RELEVES_LUS = True
+    d = _lire(_fichier_releves(), {})
+    if not isinstance(d, dict):
+        return
+    t = time.time()
+    repris = 0
+    for k, e in d.items():
+        bouts = str(k).split("|")
+        if len(bouts) != 3 or not isinstance(e, dict):
+            continue
+        cl = e.get("cl")
+        if not isinstance(cl, dict) or not cl.get("lignes"):
+            continue
+        # la même fenêtre de quatre jours qu'en mémoire : un relevé plus vieux
+        # ne dit plus rien de la période en cours
+        if not 0 <= t - float(e.get("t") or 0) <= 4 * 86400:
+            continue
+        _RELEVES[(bouts[0], bouts[1], bouts[2])] = {
+            "t": float(e.get("t") or 0), "essai": float(e.get("essai") or e.get("t") or 0),
+            "jour": str(e.get("jour") or ""), "cl": cl}
+        repris += 1
+    if repris:
+        print(f"[podium] {repris} relevé(s) repris du disque (les VA de l'autre "
+              "marché restent affichés après un redémarrage)", flush=True)
+
+
+def _sauver_releves() -> None:
+    """Écriture atomique : une coupure au mauvais moment laisserait un JSON
+    tronqué, et le podium repartirait sans aucun relevé gardé."""
+    try:
+        safe_json.write(_fichier_releves(),
+                        {_cle_releve(k): v for k, v in _RELEVES.items()})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] relevés non enregistrés ({type(e).__name__}: {e}) — ils "
+              "seront perdus au prochain redémarrage", flush=True)
 
 
 def _qualite(cl: Dict[str, Any]) -> Tuple[bool, int, int]:
@@ -903,6 +963,7 @@ def _retenir(gid: Optional[str], debut: dt.date, fin: dt.date, cl: Dict[str, Any
     période déjà finie."""
     if str(gid or "") != TWITTER_ID or not (cl or {}).get("lignes"):
         return
+    _charger_releves()
     t = time.time()
     # quatre jours : une quinzaine figée au bout de 48 h (ABANDON_FIGER_H)
     # trouve encore le relevé de sa période entière
@@ -920,8 +981,10 @@ def _retenir(gid: Optional[str], debut: dt.date, fin: dt.date, cl: Dict[str, Any
         # de 00h10 restait écrasé par celui du podium de 9h où un VA n'avait
         # pas répondu, et Va IG figeait son podium sans ce VA, sans un mot
         ancien["essai"] = t
+        _sauver_releves()
         return
     _RELEVES[cle] = {"t": t, "essai": t, "jour": jour, "cl": neuf}
+    _sauver_releves()
 
 
 def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
@@ -932,6 +995,7 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     manque des VA (illisibles), il est relu, deux heures au moins après le
     dernier essai ; en attendant il est rendu tel quel, et le message dit
     qui manque (un VA illisible n'est pas un zéro, ni un absent)."""
+    _charger_releves()
     cle = (TWITTER_ID, debut.isoformat(), fin.isoformat())
     e = _RELEVES.get(cle)
     t = time.time()
@@ -962,6 +1026,7 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
         # relevé raté : un relevé entier déjà gardé, même troué, vaut mieux que
         # rien (ses absents sont dits) ; un relevé d'avant la fin, non
         e2["essai"] = t
+        _sauver_releves()
         return e2["cl"]
     return None
 
@@ -1444,8 +1509,15 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
                          + " — à confirmer.")
         else:
-            queue.append("\n⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
-                         + " — ils remonteront au prochain passage.")
+            pourquoi = _quota_dit()
+            if pourquoi:
+                # la raison, pas le mur de noms : vingt-trois lignes de VA
+                # prenaient la moitié du message sans rien expliquer
+                queue.append(f'\n⚠️ **{len(cl["illisibles"])}** compte(s) sans relevé '
+                             f'— {pourquoi}.')
+            else:
+                queue.append("\n⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
+                             + " — ils remonteront au prochain passage.")
     if not cl["frais"]:
         queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
     if mix is not None:
@@ -2652,6 +2724,29 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
         return True                     # presentation changee : refaire tout de suite
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _quota_dit() -> str:
+    """« quota GetMySocial épuisée, reprise vers 07h28 », ou "" si ce n'est pas elle.
+
+    Vingt-trois noms alignés ne disent pas POURQUOI ils manquent : le
+    propriétaire a lu cette liste comme une panne du classement, alors que la
+    quota JOURNALIÈRE du compte — commune aux quatre clés, elles appartiennent
+    toutes au même compte — était simplement à zéro. La raison vaut mieux que
+    la liste. Rend "" dès qu'on ne sait pas : on ne remplace jamais les noms
+    par une explication qu'on n'a pas.
+    """
+    try:
+        import gms
+        e = gms.etat_quota() or {}
+    except Exception:                                        # noqa: BLE001
+        return ""
+    if not int(e.get("pause_s") or 0):
+        return ""
+    h = str(e.get("reprise") or "").replace(":", "h")
+    return ("quota GetMySocial épuisée pour aujourd'hui"
+            + (f", reprise vers {h}" if h else "")
+            + " — leurs chiffres reviennent seuls")
 
 
 def _pause_gms() -> bool:

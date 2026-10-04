@@ -35246,6 +35246,78 @@ except Exception as _eC:
     import traceback as _tbC
     check("copies de templates : testable", False, (repr(_eC) + _tbC.format_exc()[-400:])[:600])
 
+# ------------ 97. Le podium garde ses releves et dit POURQUOI un VA manque
+print()
+print("Podium : relevés gardés sur disque, et la quota se dit")
+try:
+    import datetime as _dtR, pathlib as _plR, tempfile as _tpR, importlib as _ilR
+    import podium_discord as _pdR
+
+    # DATA_DIR deplace : ces controles ecrivent, le vrai data/ ne doit JAMAIS
+    # etre touche (les suites tournent sur la machine du proprietaire)
+    _tmpR = _tpR.mkdtemp(prefix="podium_releves_")
+    _vraiR = _pdR.DATA_DIR
+    _pdR.DATA_DIR = _plR.Path(_tmpR)
+    try:
+        _clR = {"lignes": [{"va": "VA 8", "numero": 8, "clics": 241, "liens": 1,
+                            "spam": False, "model": ""}],
+                "illisibles": [], "frais": True}
+        _d0R, _d1R = _dtR.date(2026, 9, 28), _dtR.date(2026, 10, 4)
+        _pdR._RELEVES.clear()
+        _pdR._RELEVES_LUS = False
+        _pdR._retenir(_pdR.TWITTER_ID, _d0R, _d1R, _clR)
+        _fR = _plR.Path(_tmpR) / "podium_releves.json"
+        check("relevé : écrit sur disque (il survivra au redémarrage)", _fR.exists())
+        # un processus neuf : la memoire est vide, le disque doit la remplir
+        _pdR._RELEVES.clear()
+        _pdR._RELEVES_LUS = False
+        _pdR._charger_releves()
+        _cleR = (_pdR.TWITTER_ID, _d0R.isoformat(), _d1R.isoformat())
+        check("relevé : repris du disque par un processus neuf",
+              _cleR in _pdR._RELEVES
+              and _pdR._RELEVES[_cleR]["cl"]["lignes"][0]["va"] == "VA 8")
+        check("relevé : la reprise ne se fait qu une fois par processus",
+              _pdR._RELEVES_LUS is True)
+        # un relevé vieux de plus de quatre jours ne dit plus rien
+        _pdR._RELEVES[_cleR]["t"] = 0.0
+        _pdR._sauver_releves()
+        _pdR._RELEVES.clear()
+        _pdR._RELEVES_LUS = False
+        _pdR._charger_releves()
+        check("relevé : plus vieux que quatre jours, il n est pas repris",
+              _cleR not in _pdR._RELEVES)
+        check("relevé : un fichier illisible ne fait pas tomber le podium",
+              (_fR.write_text("{ pas du json", encoding="utf-8") or True)
+              and (setattr(_pdR, "_RELEVES_LUS", False) or True)
+              and (_pdR._charger_releves() or True))
+    finally:
+        _pdR.DATA_DIR = _vraiR
+        _pdR._RELEVES.clear()
+        _pdR._RELEVES_LUS = False
+        import shutil as _shR
+        _shR.rmtree(_tmpR, ignore_errors=True)
+
+    # la quota se dit, au lieu d aligner vingt-trois noms
+    _srcR = _plR.Path("podium_discord.py").read_text(encoding="utf-8")
+    check("le mur de noms cède la place a la raison quand on la connait",
+          "_quota_dit()" in _srcR and "compte(s) sans relevé" in _srcR)
+    import gms as _gmsR
+    _vraiQ = _gmsR.etat_quota
+    try:
+        _gmsR.etat_quota = lambda: {"pause_s": 0, "reprise": ""}
+        check("quota libre : on ne raconte rien", _pdR._quota_dit() == "")
+        _gmsR.etat_quota = lambda: {"pause_s": 7836, "reprise": "07:28"}
+        _ditR = _pdR._quota_dit()
+        check("quota épuisée : la raison ET l heure de reprise",
+              "quota GetMySocial" in _ditR and "07h28" in _ditR, _ditR)
+        _gmsR.etat_quota = lambda: (_ for _ in ()).throw(RuntimeError("casse"))
+        check("gms illisible : on garde les noms plutot qu une raison inventée",
+              _pdR._quota_dit() == "")
+    finally:
+        _gmsR.etat_quota = _vraiQ
+except Exception as _eR:
+    check("podium relevés : testable", False, repr(_eR)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
