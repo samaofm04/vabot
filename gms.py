@@ -644,6 +644,14 @@ def list_links(limit: int = 100) -> Dict[str, Any]:
     }
 
 
+#: Les espaces du compte, gardes dix minutes. Sans cache, teams_via_api
+#: partait a CHAQUE rendu de l'accueil (web_upload._g appelle son producteur
+#: tout de suite, sans paresse) : un appel par visite, plus un par demarrage du
+#: site — soixante-six le 03/10/2026.
+_TEAMS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_TEAMS_TTL = 600
+
+
 def teams_via_api() -> List[Dict[str, Any]]:
     """Les workspaces du compte, par la CLE API. [] si l'appel echoue.
 
@@ -656,8 +664,13 @@ def teams_via_api() -> List[Dict[str, Any]]:
     Passe par la cle API et non par le cookie de session : le cookie expire, la
     cle non.
     """
+    if (_TEAMS_CACHE["data"] is not None
+            and 0 <= time.time() - float(_TEAMS_CACHE["ts"]) < _TEAMS_TTL):
+        return list(_TEAMS_CACHE["data"])
     res = _call_tool("list_teams", {"limit": 100})
     if not res.get("ok"):
+        # UN ECHEC NE SE MET PAS EN CACHE : une secousse passagere deviendrait
+        # dix minutes de liste vide.
         return []
     d = res.get("data") or {}
     out = []
@@ -666,6 +679,7 @@ def teams_via_api() -> List[Dict[str, Any]]:
         if tid:
             out.append({"id": tid, "name": str(t.get("name") or "").strip(),
                         "link_count": t.get("link_count")})
+    _TEAMS_CACHE.update({"ts": time.time(), "data": list(out)})
     return out
 
 
@@ -1804,6 +1818,16 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
     api_key = _effective_key()
     if not api_key:
         return {"ok": False, "error": "API key absente"}
+    # LE SEUL CHEMIN QUI TAPAIT SUR UNE PORTE FERMEE. Tout le reste passe par
+    # _call_tool_brut, qui refuse d'ouvrir la connexion pendant une pause ;
+    # celui-ci, non — et comme il ne notait pas non plus le refus, un 429 de
+    # quota journalier ne fermait jamais rien ici. Il entretenait le refus.
+    _reste = pause_restante()
+    if _reste > 0:
+        return {"ok": False,
+                "error": "Quota GetMySocial epuise — reprise vers %s (%d min)"
+                         % (time.strftime("%H:%M", time.localtime(time.time() + _reste)),
+                            _reste // 60)}
     tid = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
     c = _LINKS_TEAM_CACHE.get(tid)
     if (not force_refresh and c and c.get("data") is not None
@@ -1827,6 +1851,13 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
                 return {"ok": False, "error": f"reseau: {e}"}
             if r.status_code == 429:            # rate-limit -> on souffle puis on retente
                 _gms_note_429()
+                # Le corps porte « today: 0 » quand c'est le budget du JOUR qui
+                # est fini : le noter arme la pause pour tout le monde. Sans
+                # ca, cette fonction etait la seule a ne jamais la declencher.
+                _noter_refus(r.text or "")
+                if pause_restante() > 0:
+                    return {"ok": False, "error": "Quota GetMySocial epuise "
+                                                  "pour aujourd hui"}
                 if _try < len(_sleeps):
                     time.sleep(_sleeps[_try])
                 continue

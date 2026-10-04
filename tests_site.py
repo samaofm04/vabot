@@ -35318,6 +35318,101 @@ try:
 except Exception as _eR:
     check("podium relevés : testable", False, repr(_eR)[:200])
 
+# ------------- 98. La quota GetMySocial : on ne prechauffe plus pour personne
+print()
+print("Quota GMS : les prechauffages ne tournent que pour quelqu un")
+try:
+    import pathlib as _plQ, tempfile as _tpQ, time as _tQ, shutil as _shQ
+    import web_upload as _wuQ
+
+    _srcQ = _plQ.Path("web_upload.py").read_text(encoding="utf-8")
+    # LE DEFAUT D ORIGINE : la fenetre de fraicheur (25 min) etait plus courte
+    # que le cycle du demon (30 min), donc TOUT etait recalcule a chaque tour.
+    check("la fenetre de fraicheur est plus longue que le cycle du demon",
+          _wuQ._GMSDASH_WARM_FENETRE_S > 30 * 60
+          and "< 25 * 60" not in _srcQ.split("_gmsdash_warm_loop")[-1][:2000])
+
+    _tmpQ = _tpQ.mkdtemp(prefix="gmsdash_vu_")
+    _vraiQ = _wuQ._GMSDASH_VU_FICHIER
+    _wuQ._GMSDASH_VU_FICHIER = _plQ.Path(_tmpQ) / "gmsdash_vu.json"
+    try:
+        check("sans aucune ouverture, le demon ne prechauffe pas",
+              _wuQ._gmsdash_regarde_recemment() is False)
+        _wuQ._gmsdash_vu()
+        check("une ouverture est notee sur disque",
+              _wuQ._GMSDASH_VU_FICHIER.exists()
+              and _wuQ._gmsdash_regarde_recemment() is True)
+        # la trace est sur DISQUE : elle survit a un redemarrage (66 le 03/10)
+        check("la trace survit a un redemarrage (elle est sur disque, pas en memoire)",
+              "_GMSDASH_VU_FICHIER = DATA_DIR" in _srcQ)
+        # ecriture au plus une fois par 5 min : pas de disque martele
+        _av = _wuQ._GMSDASH_VU_FICHIER.stat().st_mtime
+        _wuQ._gmsdash_vu()
+        check("deux ouvertures rapprochees n ecrivent qu une fois",
+              _wuQ._GMSDASH_VU_FICHIER.stat().st_mtime == _av)
+        # vieille ouverture : on arrete de chauffer
+        import safe_json as _sjQ
+        _sjQ.write(_wuQ._GMSDASH_VU_FICHIER,
+                   {"t": _tQ.time() - (_wuQ._GMSDASH_VU_H + 1) * 3600})
+        check("ouverture trop vieille : le demon se rendort",
+              _wuQ._gmsdash_regarde_recemment() is False)
+    finally:
+        _wuQ._GMSDASH_VU_FICHIER = _vraiQ
+        _shQ.rmtree(_tmpQ, ignore_errors=True)
+
+    # le prechauffage de l accueil suit la meme regle
+    _wuQ._DERNIERE_REQUETE["t"] = 0.0
+    check("accueil : personne depuis le demarrage -> pas de prechauffage",
+          _wuQ._site_regarde_recemment() is False)
+    _wuQ._DERNIERE_REQUETE["t"] = _tQ.time()
+    check("accueil : une requete vient d arriver -> on chauffe",
+          _wuQ._site_regarde_recemment() is True)
+    _wuQ._DERNIERE_REQUETE["t"] = _tQ.time() - _wuQ._VISITE_FRAICHE_S - 10
+    check("accueil : plus rien depuis une heure -> on s arrete",
+          _wuQ._site_regarde_recemment() is False)
+    check("accueil : un fichier statique ne compte pas pour une visite",
+          'if not path.startswith("/static/"):' in _srcQ)
+    check("les deux boucles consultent bien la regle avant de calculer",
+          _srcQ.count("_gmsdash_regarde_recemment()") >= 2
+          and _srcQ.count("_site_regarde_recemment()") >= 2)
+
+    # --- gms.py : deux fuites fermees -------------------------------------
+    import gms as _gQ
+    _srcG = _plQ.Path("gms.py").read_text(encoding="utf-8")
+    _vraiP = _gQ.pause_restante
+    try:
+        _gQ.pause_restante = lambda: 3600
+        _rQ = _gQ.list_links_team("tm_test")
+        check("liste des liens : pendant une pause, on n ouvre meme pas la connexion",
+              _rQ.get("ok") is False and "Quota" in str(_rQ.get("error")))
+    finally:
+        _gQ.pause_restante = _vraiP
+    check("liste des liens : un 429 arme enfin le disjoncteur",
+          "_noter_refus(r.text or \"\")" in _srcG.split("def list_links_team")[1][:4000])
+    # la liste des espaces : un cache, et un echec qui ne se met PAS en cache
+    _gQ._TEAMS_CACHE.update({"ts": 0.0, "data": None})
+    _vraiC = _gQ._call_tool
+    _appels = []
+    try:
+        _gQ._call_tool = lambda n, a=None, **k: (_appels.append(n) or
+                                                 {"ok": True, "data": {"data": [
+                                                     {"id": "tm_1", "name": "un"}]}})
+        _gQ.teams_via_api(); _gQ.teams_via_api(); _gQ.teams_via_api()
+        check("liste des espaces : trois rendus de l accueil, un seul appel",
+              len(_appels) == 1, _appels)
+        _gQ._TEAMS_CACHE.update({"ts": 0.0, "data": None})
+        _appels.clear()
+        _gQ._call_tool = lambda n, a=None, **k: (_appels.append(n) or
+                                                 {"ok": False, "error": "secousse"})
+        _gQ.teams_via_api(); _gQ.teams_via_api()
+        check("liste des espaces : un echec n est PAS mis en cache",
+              len(_appels) == 2, _appels)
+    finally:
+        _gQ._call_tool = _vraiC
+        _gQ._TEAMS_CACHE.update({"ts": 0.0, "data": None})
+except Exception as _eQ:
+    check("quota gms : testable", False, repr(_eQ)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

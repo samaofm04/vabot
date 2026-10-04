@@ -45358,6 +45358,60 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
 
 _GMSDASH_WARM_STARTED = False
 
+#: La derniere requete servie a quelqu'un (hors fichiers statiques). Le
+#: prechauffage de l'accueil s'y adosse : il tournait 24 h/24, toutes les cinq
+#: minutes, et appelait GetMySocial pour une sparkline que personne ne
+#: regardait -- 3 456 appels par jour sans un seul visiteur.
+_DERNIERE_REQUETE = {"t": 0.0}
+#: Au-dela, on considere que personne ne regarde.
+_VISITE_FRAICHE_S = 3600
+
+
+def _site_regarde_recemment() -> bool:
+    import time as _t_v
+    return 0 <= _t_v.time() - float(_DERNIERE_REQUETE["t"]) <= _VISITE_FRAICHE_S
+
+
+#: QUAND LE DASHBOARD CLICS A ETE OUVERT POUR LA DERNIERE FOIS. Sur disque :
+#: le bot redemarre a chaque deploiement (66 fois le 03/10/2026) et une trace
+#: en memoire aurait relance le prechauffage a chaque fois.
+_GMSDASH_VU_FICHIER = DATA_DIR / "gmsdash_vu.json"
+#: On ne prechauffe plus pour personne. Sans ouverture depuis 24 h, le demon
+#: ne calcule RIEN : il se rendort.
+_GMSDASH_VU_H = 24
+#: Et quand on prechauffe, on ne refait une periode que si elle a vieilli de
+#: six heures. C'ETAIT VINGT-CINQ MINUTES POUR UN CYCLE DE TRENTE : la fenetre
+#: etait plus courte que le cycle, donc TOUT etait recalcule a chaque tour --
+#: 1 520 appels toutes les 30 minutes, 56 000 par jour, pour un tableau de
+#: consultation d'ou ne sort aucune prime. C'est ce qui vidait la quota du
+#: compte, et avec elle le podium qui, lui, paie.
+_GMSDASH_WARM_FENETRE_S = 6 * 3600
+
+
+def _gmsdash_vu(quand=None) -> None:
+    """Note qu'on vient d'ouvrir le Dashboard clics (au plus une fois/5 min)."""
+    import time as _t_vu
+    t = float(quand or _t_vu.time())
+    try:
+        d = safe_json.load(_GMSDASH_VU_FICHIER, default={}) or {}
+        if t - float((d or {}).get("t") or 0) < 300:
+            return
+        safe_json.write(_GMSDASH_VU_FICHIER, {"t": t})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[gmsdash-warm] visite non notee ({type(e).__name__}: {e})", flush=True)
+
+
+def _gmsdash_regarde_recemment() -> bool:
+    """Quelqu'un a-t-il ouvert le Dashboard clics depuis _GMSDASH_VU_H heures ?"""
+    import time as _t_vu
+    try:
+        d = safe_json.load(_GMSDASH_VU_FICHIER, default={}) or {}
+        return 0 <= _t_vu.time() - float(d.get("t") or 0) <= _GMSDASH_VU_H * 3600
+    except Exception:                                        # noqa: BLE001
+        # on ne sait pas : on prechauffe (le doute profite a la page, pas au
+        # silence), mais la fenetre de six heures borne la depense
+        return True
+
 
 def _gmsdash_warm_loop():
     """Recalcule toutes les catégories × périodes en boucle, en tâche de fond.
@@ -45371,6 +45425,13 @@ def _gmsdash_warm_loop():
             if not gms.is_configured():
                 _t_w.sleep(600)
                 continue
+            if not _gmsdash_regarde_recemment():
+                # personne n'a ouvert le tableau depuis 24 h : rien a chauffer.
+                # Il reste servi a la demande, un peu plus lentement.
+                print("[gmsdash-warm] tableau non ouvert depuis "
+                      f"{_GMSDASH_VU_H} h : aucun calcul ce tour", flush=True)
+                _t_w.sleep(30 * 60)
+                continue
             ids = [tid for tid, _n in GMSDASH_TEAMS]
             t0 = _t_w.time()
             for tid in ids:
@@ -45380,7 +45441,8 @@ def _gmsdash_warm_loop():
                         hit = _GMSDASH_MEM.get(key)
                     if (hit and (hit.get("payload") or {}).get("links")
                             and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
-                            and ((_t_w.time() - int(hit.get("ts", 0))) < 25 * 60
+                            and ((_t_w.time() - int(hit.get("ts", 0)))
+                                 < _GMSDASH_WARM_FENETRE_S
                                  or _gmsdash_definitif(hit))):
                         # Frais ET au bon format -> pas de recalcul. Ou bien
                         # DEFINITIF : une quinzaine close ne se remesure pas,
@@ -59535,6 +59597,12 @@ def create_app():
         # 1) Cache-Control aggressif sur les fichiers statiques (images, etc.)
         try:
             path = request.path
+            # Quelqu'un se sert du site : les prechauffages de fond peuvent
+            # reprendre. Les fichiers statiques ne comptent pas (un onglet
+            # oublie qui recharge une image n'est pas une visite).
+            if not path.startswith("/static/"):
+                import time as _t_v2
+                _DERNIERE_REQUETE["t"] = _t_v2.time()
             if any(path.startswith(p) for p in (
                 "/static/", "/identity/avatar/", "/sfs_proof/",
                 "/insta/proxy_video", "/insta/video/", "/profile_pic/",
@@ -62621,6 +62689,7 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         if not team:
             return jsonify({"ok": False, "error": "catégorie manquante"})
+        _gmsdash_vu()          # c'est une VRAIE ouverture : le prechauffage reprend
         if team not in {t[0] for t in GMSDASH_TEAMS}:
             return jsonify({"ok": False, "error": "catégorie inconnue"})
         try:
@@ -77026,6 +77095,14 @@ def start_in_thread():
         _t_wh.sleep(20)                      # laisse le serveur démarrer
         while True:
             try:
+                # PERSONNE NE REGARDE : on ne chauffe pas. Ce rendu appelle
+                # GetMySocial pour la sparkline des clics par modele ; il
+                # tournait toutes les cinq minutes, jour et nuit, meme sans un
+                # seul visiteur. L'accueil repart froid (deux secondes et
+                # demie) a la premiere ouverture, puis se rechauffe seul.
+                if not _site_regarde_recemment():
+                    _t_wh.sleep(300)
+                    continue
                 from flask import Flask as _F_wh
                 _app_wh = _F_wh(__name__)
                 with _app_wh.test_request_context("/"):
