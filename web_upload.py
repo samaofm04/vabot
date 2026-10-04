@@ -28795,6 +28795,65 @@ def _analyser_template_en_file(video) -> None:
             _ANALYSES["en_cours"] = max(0, _ANALYSES["en_cours"] - 1)
 
 
+# Les copies parmi TOUS les templates, valides compris : la verification a
+# l'analyse ne voit que les nouveaux. Le proprietaire, le 04/10/2026 :
+# « liste moi les copies deja validees pour que je fasse le tri ».
+TPL_COPIES_RAPPORT = DATA_DIR / "templates_copies.json"
+TPL_COPIES_GARDEES = DATA_DIR / "templates_copies_gardees.json"
+_TPL_COPIES_SCAN = {"en_cours": False, "fait": 0, "total": 0}
+
+
+def _scanner_copies_templates() -> dict:
+    """Cherche, pour chaque template, un template PLUS ANCIEN de la meme
+    identite dont il est la copie (meme partie 2 : _copie_template). Ecrit le
+    rapport. Long au premier passage (une empreinte par template), ensuite
+    tout vient du cache des empreintes."""
+    import time as _t
+    if _TPL_COPIES_SCAN["en_cours"]:
+        return {}
+    debut = _t.time()
+    _TPL_COPIES_SCAN.update({"en_cours": True, "fait": 0, "total": 0, "debut": int(debut)})
+    try:
+        videos = []
+        for d in sorted(IDENTITIES_DIR.iterdir()):
+            dossier = d / "templates"
+            if not dossier.is_dir():
+                continue
+            videos += [v for v in sorted(dossier.iterdir())
+                       if v.is_file() and v.suffix.lower() in VIDEO_EXTS
+                       and ".example" not in v.name]
+        _TPL_COPIES_SCAN["total"] = len(videos)
+        paires, echecs = [], 0
+        for v in videos:
+            try:
+                o = _copie_template(v, _coupe_template(v))
+            except Exception as e:
+                echecs += 1
+                log.warning(f"copies des templates : {v.name} : {e}")
+                o = None
+            if o is not None:
+                paires.append({"identite": v.parent.parent.name, "copie": v.name,
+                               "original": o.name,
+                               "copie_validee": v.with_suffix(".montage.json").exists()})
+            _TPL_COPIES_SCAN["fait"] += 1
+        rapport = {"le": int(_t.time()), "duree": int(_t.time() - debut),
+                   "templates": len(videos), "echecs": echecs, "paires": paires}
+        safe_json.write(TPL_COPIES_RAPPORT, rapport)
+        log.info(f"[templates] copies : {len(paires)} sur {len(videos)} templates "
+                 f"en {rapport['duree']} s ({echecs} echec(s))")
+        return rapport
+    finally:
+        _TPL_COPIES_SCAN["en_cours"] = False
+
+
+def _scanner_copies_en_fond() -> bool:
+    if _TPL_COPIES_SCAN["en_cours"]:
+        return False
+    threading.Thread(target=_scanner_copies_templates, daemon=True,
+                     name="copies-templates").start()
+    return True
+
+
 def _ouvrier_templates():
     import time as _t
     dernier_tour = 0.0
@@ -28812,6 +28871,8 @@ def _ouvrier_templates():
             dernier_tour = _t.time()
             _planifier_templates(demarrer=False)
             _copies_templates_en_attente()
+            if not TPL_COPIES_RAPPORT.exists():
+                _scanner_copies_en_fond()
             continue
         _t.sleep(5)
 
@@ -65277,7 +65338,179 @@ def create_app():
                 "<h2 style='margin:0 0 10px'>Descriptions a relire</h2>"
                 + corps +
                 "<p style='margin-top:16px'><a href='/?tab=cloudtemplates'>"
-                "Retour aux templates</a></p></div>")
+                "Retour aux templates</a> &middot; <a href='/templates/copies'>"
+                "Copies de templates déjà validées</a></p></div>")
+
+    @app.route("/templates/copies")
+    def page_copies_templates():
+        """Les copies parmi les templates DEJA la (valides compris), groupees
+        par paire : la meme paire est souvent dans vingt identites, copiee par
+        la synchro du marche. Trier d'un coup, identite par identite au besoin."""
+        if not is_auth():
+            return redirect("/")
+        from urllib.parse import quote as _qc
+        msg = session.pop("copies_msg", "")
+        etat = dict(_TPL_COPIES_SCAN)
+        rapport = safe_json.load(TPL_COPIES_RAPPORT, {}) or {}
+        if not rapport and not etat["en_cours"]:
+            _scanner_copies_en_fond()
+            etat = dict(_TPL_COPIES_SCAN, en_cours=True)
+        gardees = set(safe_json.load(TPL_COPIES_GARDEES, []) or [])
+        groupes = {}
+        for p in rapport.get("paires") or []:
+            ident, cop, ori = p.get("identite"), p.get("copie"), p.get("original")
+            dossier = IDENTITIES_DIR / str(ident) / "templates"
+            if (f"{ident}|{cop}|{ori}" in gardees or not (dossier / str(cop)).exists()
+                    or not (dossier / str(ori)).exists()):
+                continue
+            g = groupes.setdefault((cop, ori), {"identites": [], "a_verifier": 0})
+            g["identites"].append(ident)
+            if not p.get("copie_validee"):
+                g["a_verifier"] += 1
+        # les paires presentes dans le plus d'identites d'abord
+        ordre = sorted(groupes.items(), key=lambda kv: (-len(kv[1]["identites"]), kv[0]))
+
+        def _vign(ident, nom):
+            c = _coupe_template(IDENTITIES_DIR / ident / "templates" / nom)
+            base = f"/cloud/thumb/{_qc(ident)}/templates/{_qc(nom)}"
+            video = f"/cloud/file/{_qc(ident)}/templates/{_qc(nom)}"
+            return (f"<a href='{video}' target='_blank' title='Voir la vidéo' style='flex-shrink:0'>"
+                    f"<img src='{base}" + (f"?c={c:.2f}" if c else "") + "' loading='lazy' "
+                    "style='width:110px;height:196px;object-fit:cover;border-radius:9px;"
+                    "background:#000;display:block'></a>")
+        blocs = []
+        for (cop, ori), g in ordre:
+            ids = sorted(g["identites"])
+            puces = "".join(
+                "<label style='display:inline-flex;align-items:center;gap:4px;margin:0 8px 6px 0;"
+                "font-size:12.5px;background:#f3f4f6;border-radius:999px;padding:3px 10px'>"
+                f"<input type='checkbox' name='identites' value='{html_escape(i, quote=True)}' checked>"
+                f"@{html_escape(i)}</label>" for i in ids)
+            blocs.append(
+                "<form method='POST' action='/templates/copies/trier' style='border:1px solid #fecaca;"
+                "background:#fef2f2;border-radius:12px;padding:12px 14px;margin-bottom:12px'>"
+                f"<input type='hidden' name='copie' value='{html_escape(cop, quote=True)}'>"
+                f"<input type='hidden' name='original' value='{html_escape(ori, quote=True)}'>"
+                "<div style='display:flex;gap:12px;align-items:flex-start'>"
+                + "<div style='text-align:center;font-size:11px;color:#666'>" + _vign(ids[0], ori)
+                + "déjà là</div>"
+                + "<div style='text-align:center;font-size:11px;color:#b91c1c'>" + _vign(ids[0], cop)
+                + "copie</div>"
+                + "<div style='flex:1;min-width:0;font-size:13px'>"
+                f"<div><b>« {html_escape(cop)} »</b></div>"
+                f"<div style='color:#666;margin:2px 0 8px'>même 2e partie que « {html_escape(ori)} », "
+                "arrivé avant</div>"
+                f"<div style='margin-bottom:6px;color:#374151'>Dans {len(ids)} identité(s)"
+                + (f" — dont {g['a_verifier']} pas encore validée(s)" if g["a_verifier"] else "")
+                + " :</div>" + puces
+                + "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:6px'>"
+                "<button name='action' value='corbeille' onclick=\"return confirm('Mettre la COPIE "
+                "à la corbeille dans les identités cochées ? Restaurable depuis Doublons et corbeille.')\" "
+                "style='padding:8px 14px;background:#b91c1c;border:0;color:#fff;border-radius:9px;"
+                "font:inherit;font-weight:600;cursor:pointer'>Copie à la corbeille</button>"
+                "<button name='action' value='garder' style='padding:8px 14px;background:#fff;"
+                "border:1px solid #d1d5db;color:#111;border-radius:9px;font:inherit;font-weight:600;"
+                "cursor:pointer'>Garder les deux</button></div></div></div></form>")
+        import time as _tcp
+        if etat.get("en_cours"):
+            tete = ("<p style='padding:10px 12px;background:#eff6ff;border-radius:9px;color:#1e40af'>"
+                    f"Recherche en cours : {etat.get('fait', 0)} / {etat.get('total', 0) or '…'} "
+                    "templates. La page se met à jour toute seule.</p>"
+                    "<meta http-equiv='refresh' content='8'>")
+        elif rapport:
+            age = int((_tcp.time() - rapport.get("le", 0)) // 60)
+            quand = (f"il y a {age} min" if age < 60 else f"il y a {age // 60} h" if age < 2880
+                     else f"il y a {age // 1440} j")
+            tete = ("<p style='color:#666;font-size:13px'>"
+                    f"{len(ordre)} paire(s) sur {rapport.get('templates', 0)} templates · "
+                    f"recherche faite {quand}"
+                    + (f" · {rapport.get('echecs')} vidéo(s) illisible(s)" if rapport.get("echecs") else "")
+                    + "</p>")
+        else:
+            tete = ""
+        relancer = ("" if etat.get("en_cours") else
+                    "<form method='POST' action='/templates/copies/relancer' style='margin:0'>"
+                    "<button style='padding:7px 12px;background:#fff;border:1px solid #d1d5db;"
+                    "border-radius:9px;font:inherit;cursor:pointer'>↻ Relancer la recherche</button></form>")
+        vide = ("<p>Aucune copie entre tes templates.</p>"
+                if rapport and not ordre and not etat.get("en_cours") else "")
+        bandeau = (f"<p style='padding:10px 12px;background:#f0fdf4;border-radius:9px;color:#166534'>"
+                   f"{msg}</p>" if msg else "")
+        return ("<title>Copies de templates</title>"
+                "<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
+                "padding:26px;max-width:760px;margin:30px auto;background:#fff;"
+                "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                "<div style='display:flex;align-items:center;gap:12px;justify-content:space-between'>"
+                "<h2 style='margin:0'>Copies de templates</h2>" + relancer + "</div>"
+                "<p style='color:#666;font-size:13px;margin:6px 0 12px'>Deux templates d'une même "
+                "identité dont la <b>2e partie</b> est la même vidéo (l'accroche peut changer). "
+                "La copie est le plus récent. Cliquer une vignette ouvre la vidéo.</p>"
+                + bandeau + tete + vide + "".join(blocs) +
+                "<p style='margin-top:16px'><a href='/?tab=cloudtemplates'>Retour aux templates</a>"
+                " &middot; <a href='/a-relire'>À relire</a></p></div>")
+
+    @app.route("/templates/copies/relancer", methods=["POST"])
+    def page_copies_templates_relancer():
+        if not is_auth():
+            return redirect("/")
+        _scanner_copies_en_fond()
+        return redirect("/templates/copies")
+
+    @app.route("/templates/copies/trier", methods=["POST"])
+    def page_copies_templates_trier():
+        """Corbeille (jamais efface : doublons_vault) ou « garder les deux »."""
+        if not is_auth():
+            return redirect("/")
+        cop = request.form.get("copie", "")
+        ori = request.form.get("original", "")
+        if (not cop or not ori or any(x in n for n in (cop, ori) for x in ("/", "\\", ".."))):
+            session["copies_msg"] = "Demande invalide."
+            return redirect("/templates/copies")
+        connues = set(_list_identities())
+        idents = [i for i in request.form.getlist("identites") if i in connues]
+        if not idents:
+            session["copies_msg"] = "Aucune identité cochée : rien n'a été fait."
+            return redirect("/templates/copies")
+        action = request.form.get("action", "")
+        if action == "garder":
+            g = list(safe_json.load(TPL_COPIES_GARDEES, []) or [])
+            for i in idents:
+                cle = f"{i}|{cop}|{ori}"
+                if cle not in g:
+                    g.append(cle)
+            safe_json.write(TPL_COPIES_GARDEES, g)
+            session["copies_msg"] = f"Gardés tous les deux dans {len(idents)} identité(s)."
+            return redirect("/templates/copies")
+        if action != "corbeille":
+            session["copies_msg"] = "Action inconnue."
+            return redirect("/templates/copies")
+        chemins = [IDENTITIES_DIR / i / "templates" / cop for i in idents]
+        chemins = [c for c in chemins if c.is_file()]
+        import doublons_vault as _dv_cp
+        try:
+            r = _dv_cp.supprimer(chemins, _RegistresVault())
+        except Exception as e:
+            r = {"ranges": [], "echecs": [("*", str(e)[:150])]}
+        # une alerte d'analyse qui designait cette copie comme original tombe
+        for c in chemins:
+            if c.exists():
+                continue
+            for _ap in c.parent.glob("*.analyse.json"):
+                try:
+                    _a = json.loads(_ap.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if (_a.get("copie") or {}).get("fichier") == c.name and not _a["copie"].get("ignoree"):
+                    safe_json.write(_ap, _sans_copie(_a), indent=None)
+        try:
+            _invalidate_all_ttl_cache()
+        except Exception:
+            pass
+        n_ok, n_ko = len(r.get("ranges") or []), len(r.get("echecs") or [])
+        session["copies_msg"] = (f"Copie mise à la corbeille dans {n_ok} identité(s) — "
+                                 "restaurable depuis <a href='/vault/doublons'>Doublons et corbeille</a>."
+                                 + (f" {n_ko} échec(s)." if n_ko else ""))
+        return redirect("/templates/copies")
 
     @app.route("/a-relire/valider", methods=["POST"])
     def page_a_relire_valider():

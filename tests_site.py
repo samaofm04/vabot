@@ -35477,6 +35477,69 @@ except Exception as _eV:
     import traceback as _tbV
     check("vignette coupure : testable", False, (repr(_eV) + _tbV.format_exc()[-400:])[:600])
 
+print()
+print("=" * 70)
+print("Templates : la page des copies deja validees, pour trier")
+print("=" * 70)
+try:
+    import web_upload as _wP
+    import doublons_vault as _dvP
+    _TP = TMP / "copies_page"
+    for _i in ("ida", "idb"):
+        _dP = _TP / "identities" / _i / "templates"
+        _dP.mkdir(parents=True, exist_ok=True)
+        for _n in ("original.mp4", "copie.mp4", "seul.mp4"):
+            (_dP / _n).write_bytes(b"x" * 2048)
+        (_dP / "copie.montage.json").write_text('{"cut_at": 3.0}', encoding="utf-8")
+    _savP = (_wP.IDENTITIES_DIR, _wP._list_identities, _wP._copie_template,
+             _wP.TPL_COPIES_RAPPORT, _wP.TPL_COPIES_GARDEES, _dvP.supprimer)
+    try:
+        _wP.IDENTITIES_DIR = _TP / "identities"
+        _wP._list_identities = lambda: ["ida", "idb"]
+        _wP._copie_template = lambda v, coupe=None: (v.parent / "original.mp4") if v.name == "copie.mp4" else None
+        _wP.TPL_COPIES_RAPPORT = _TP / "rapport.json"
+        _wP.TPL_COPIES_GARDEES = _TP / "gardees.json"
+        _rP = _wP._scanner_copies_templates()
+        check("copies validees : le rapport liste la copie dans chaque identite",
+              sorted((x["identite"], x["copie"], x["original"]) for x in _rP["paires"])
+              == [("ida", "copie.mp4", "original.mp4"), ("idb", "copie.mp4", "original.mp4")]
+              and all(x["copie_validee"] for x in _rP["paires"]) and _rP["templates"] == 6, _rP)
+        _appP = _wP.create_app()
+        _appP.config["TESTING"] = True
+        _cP = _appP.test_client()
+        with _cP.session_transaction() as _sP:
+            _sP["auth"] = True; _sP["username"] = "admin"; _sP["role"] = "owner"
+            _sP["legacy_owner"] = True
+        _hP = _cP.get("/templates/copies").get_data(as_text=True)
+        check("copies validees : une paire = un bloc, ses deux identites a cocher",
+              _hP.count("action='/templates/copies/trier'") == 1
+              and "value='ida' checked" in _hP and "value='idb' checked" in _hP
+              and "Dans 2 identité(s)" in _hP, _hP[:300])
+        _vusP = []
+        _dvP.supprimer = lambda ch, reg=None: (_vusP.extend(ch) or
+                                               {"ranges": [{"nom": c.name} for c in ch], "echecs": []})
+        _cP.post("/templates/copies/trier", data={"copie": "copie.mp4", "original": "original.mp4",
+                                                  "identites": ["idb"], "action": "corbeille"})
+        check("copies validees : corbeille = la COPIE, seulement dans les identites cochees",
+              [(x.parent.parent.name, x.name) for x in _vusP] == [("idb", "copie.mp4")], _vusP)
+        check("copies validees : un nom de fichier piege est refuse",
+              _cP.post("/templates/copies/trier", data={"copie": "../x.mp4", "original": "original.mp4",
+                                                       "identites": ["ida"], "action": "corbeille"}
+                       ).status_code == 302 and len(_vusP) == 1)
+        _cP.post("/templates/copies/trier", data={"copie": "copie.mp4", "original": "original.mp4",
+                                                  "identites": ["ida", "idb"], "action": "garder"})
+        _hP2 = _cP.get("/templates/copies").get_data(as_text=True)
+        check("copies validees : « Garder les deux » retire la paire de la liste",
+              "action='/templates/copies/trier'" not in _hP2 and "0 paire(s)" in _hP2, _hP2[-400:])
+        check("copies validees : la page a relire y mene",
+              "href='/templates/copies'" in pathlib.Path(_wP.__file__).read_text(encoding="utf-8"))
+    finally:
+        (_wP.IDENTITIES_DIR, _wP._list_identities, _wP._copie_template,
+         _wP.TPL_COPIES_RAPPORT, _wP.TPL_COPIES_GARDEES, _dvP.supprimer) = _savP
+except Exception as _eP:
+    import traceback as _tbP
+    check("copies validees : testable", False, (repr(_eP) + _tbP.format_exc()[-400:])[:600])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
