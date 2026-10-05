@@ -33005,7 +33005,7 @@ def _render_sfs_html() -> str:
         "    }"
         # montant de la paie SFS du VA : accès complets seulement (__sfsPaie)
         "    if(window.__sfsPaie){"
-        "      h+='<div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Paie SFS du VA (par mois)</div>'"
+        "      h+='<div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Paie SFS du VA (par mois, payée par quinzaine : la moitié chacune)</div>'"
         "        +'<div style=\"display:flex;gap:6px;align-items:center;flex-wrap:wrap\"><input id=\"sfs-paie\" type=\"number\" min=\"0\" step=\"1\" value=\"'+(+window.__sfsPaie.montant||0)+'\" style=\"width:110px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\"> $'"
         "        +'<button type=\"button\" onclick=\"sfsPaieSave()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
         "        +'<span style=\"font-size:11.5px;color:#889\">réparti entre les comptes suivis ; le détail est dans ▥ Bilan SFS</span></div>';"
@@ -33050,7 +33050,7 @@ def _render_sfs_html() -> str:
         "    if(!j.ok){ alert('✕ '+(j.error||'Erreur')); return; }"
         "    if(window.__sfsPaie) window.__sfsPaie.montant=j.montant;"
         "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
-        "    alert('✓ Paie SFS : '+j.montant+' $ par mois');"
+        "    alert('✓ Paie SFS : '+j.montant+' $ par mois, soit '+(j.montant/2)+' $ par quinzaine');"
         "  }catch(err){ alert('✕ '+err); }"
         "}"
         "async function sfsAlTg(){"
@@ -33161,16 +33161,19 @@ def _render_sfs_html() -> str:
         # venir ne compte pas : un SFS programmé n'est pas un SFS fait.
         # Paie SFS du VA (05/10/2026 : « 250 $ pour un SFS au moins tous les deux
         # jours sur mes comptes ; dès qu'il n'a pas un SFS, ça lui retire de
-        # l'argent »). Le montant du mois se partage entre les comptes SUIVIS
-        # (point vert) ; le mois est coupé en tranches de 2 jours ; chaque
-        # tranche TERMINÉE sans SFS sur un compte retire sa part. Une tranche
-        # en cours ne coûte rien ; les push MyM programmés ne comptent pas.
+        # l'argent » ; « par mois, et je le paye toutes les 2 semaines : 125 »).
+        # Le montant du MOIS est payé en deux quinzaines (1er-15, 16-fin) de
+        # la moitié chacune. Dans une quinzaine, la moitié se partage entre
+        # les comptes SUIVIS (point vert) ; elle est coupée en tranches de 2
+        # jours ; chaque tranche TERMINÉE sans SFS sur un compte retire sa
+        # part. Une tranche en cours ne coûte rien ; les push MyM programmés
+        # ne comptent pas.
         "function sfsPaieBloc(){"
         "  var P=window.__sfsPaie; if(!P || !(+P.montant>0)) return '';"
         "  var mo=''; try{ mo=new URLSearchParams(location.search).get('sfs_month')||''; }catch(e){}"
         "  var now=new Date(), y=now.getFullYear(), m=now.getMonth(), mm=/^(\\d{4})-(\\d{2})$/.exec(mo);"
         "  if(mm){ y=+mm[1]; m=+mm[2]-1; }"
-        "  var nbJ=new Date(y,m+1,0).getDate(), W=Math.ceil(nbJ/2), auj=new Date(now.getFullYear(),now.getMonth(),now.getDate());"
+        "  var nbJ=new Date(y,m+1,0).getDate(), auj=new Date(now.getFullYear(),now.getMonth(),now.getDate());"
         "  var od=window.__ofPushData||{}, C=[];"
         "  function ajout(n,p){ if(n && sfsSuivi(n) && C.every(function(x){ return x.p!==p || sfsNormNom(x.n)!==sfsNormNom(n); })) C.push({n:n,p:p,j:{}}); }"
         "  (od.creators||[]).forEach(function(c){ ajout(c.creator,'OF'); });"
@@ -33179,16 +33182,23 @@ def _render_sfs_html() -> str:
         "  function noter(nom,p,d){ if(!d || d.getFullYear()!==y || d.getMonth()!==m || d>now) return; var k=sfsNormNom(nom); C.forEach(function(c){ if(c.p===p && sfsNormNom(c.n)===k) c.j[d.getDate()]=1; }); }"
         "  (od.items||[]).forEach(function(it){ if(!it.sent||ofJamaisParti(it)||!it.date||!isSfsPush(it.text)) return; var q=it.date.split('-'); noter(it.creator,'OF',new Date(+q[0],+q[1]-1,+q[2],12)); });"
         "  (window.__sfsPushCache||[]).forEach(function(x){ if(!/@[a-z0-9_.]/i.test(x.description||'')) return; var a=String(x.sentAt||'').split(/[ \\/:]/); if(a.length<3) return; noter(x.creator,'MyM',new Date(+a[2],+a[1]-1,+a[0],+(a[3]||0),+(a[4]||0))); });"
-        "  var part=P.montant/C.length, tr=part/W, ret=0, manq=0;"
         "  function $f(v){ return v.toFixed(2).replace('.',',')+' '+(P.devise||'$'); }"
-        "  var lignes=C.map(function(c){ var fait=0, ecoule=0;"
-        "    for(var w=0;w<W;w++){ var d1=2*w+1, d2=Math.min(2*w+2,nbJ), ok=!!(c.j[d1]||c.j[d2]); if(new Date(y,m,d2)<auj){ ecoule++; if(ok) fait++; else { manq++; ret+=tr; c.r=(c.r||0)+tr; } } }"
-        "    return '<tr><td style=\"padding:3px 10px 3px 0\">'+sfsEsc(c.n)+' <span style=\"color:#889\">'+c.p+'</span></td><td style=\"padding:3px 10px\">'+fait+' / '+ecoule+' tranche(s)</td><td style=\"padding:3px 0;text-align:right'+(c.r?';color:#f87171':'')+'\">'+(c.r?'−'+$f(c.r):'0')+'</td></tr>'; }).join('');"
         "  var mois=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'][m];"
-        "  return '<div style=\"border:1px solid rgba(148,163,184,.35);border-radius:10px;padding:10px 12px;margin-bottom:14px\">'"
-        "    +'<div style=\"font-weight:800;font-size:13px;margin-bottom:4px\">Paie SFS du VA — '+mois+' '+y+' : <span style=\"color:#f59e0b\">'+$f(P.montant-ret)+'</span> à payer</div>'"
-        "    +'<div style=\"font-size:11.5px;color:#889;margin-bottom:6px\">'+$f(P.montant)+' ÷ '+C.length+' compte(s) suivi(s) = '+$f(part)+' par compte, mois coupé en '+W+' tranches de 2 jours = '+$f(tr)+' par tranche. Chaque tranche terminée sans SFS retire sa part'+(manq?(' : '+manq+' manquée(s), −'+$f(ret)):' : aucune manquée')+'. Visible des accès complets seulement.</div>'"
-        "    +'<table style=\"font-size:12px;border-collapse:collapse\">'+lignes+'</table></div>';"
+        "  var moitie=P.montant/2, part=moitie/C.length;"
+        "  var h='<div style=\"border:1px solid rgba(148,163,184,.35);border-radius:10px;padding:10px 12px;margin-bottom:14px\">'"
+        "    +'<div style=\"font-weight:800;font-size:13px;margin-bottom:2px\">Paie SFS du VA — '+mois+' '+y+'</div>'"
+        "    +'<div style=\"font-size:11.5px;color:#889;margin-bottom:6px\">'+$f(P.montant)+' par mois, payé par quinzaine : '+$f(moitie)+' ÷ '+C.length+' compte(s) suivi(s) = '+$f(part)+' par compte et par quinzaine. Chaque tranche de 2 jours terminée sans SFS sur un compte retire sa part. Visible des accès complets seulement.</div>';"
+        "  [[1,15],[16,nbJ]].forEach(function(Q){"
+        "    var W=Math.ceil((Q[1]-Q[0]+1)/2), tr=part/W, ret=0, manq=0, finie=new Date(y,m,Q[1])<auj, debut=new Date(y,m,Q[0])<=auj;"
+        "    var lignes=C.map(function(c){ var fait=0, ecoule=0, r=0;"
+        "      for(var w=0;w<W;w++){ var d1=Q[0]+2*w, d2=Math.min(d1+1,Q[1]), ok=!!(c.j[d1]||c.j[d2]); if(new Date(y,m,d2)<auj){ ecoule++; if(ok) fait++; else { manq++; ret+=tr; r+=tr; } } }"
+        "      return '<tr><td style=\"padding:2px 10px 2px 0\">'+sfsEsc(c.n)+' <span style=\"color:#889\">'+c.p+'</span></td><td style=\"padding:2px 10px\">'+fait+' / '+ecoule+' tranche(s)</td><td style=\"padding:2px 0;text-align:right'+(r?';color:#f87171':'')+'\">'+(r?'−'+$f(r):'0')+'</td></tr>'; }).join('');"
+        "    var etat=finie?'à payer':(debut?'en cours':'à venir');"
+        "    h+='<div style=\"margin-top:8px\"><div style=\"font-weight:700;font-size:12.5px\">'+(Q[0]===1?'1er':Q[0])+' – '+Q[1]+' '+mois+' : <span style=\"color:#f59e0b\">'+$f(moitie-ret)+'</span> '+etat"
+        "      +' <span style=\"color:#889;font-weight:400\">('+W+' tranches de 2 jours = '+$f(tr)+' la tranche'+(manq?(' ; '+manq+' manquée(s), −'+$f(ret)):'')+')</span></div>'"
+        "      +(debut?('<table style=\"font-size:12px;border-collapse:collapse;margin-top:3px\">'+lignes+'</table>'):'')+'</div>';"
+        "  });"
+        "  return h+'</div>';"
         "}"
         "function renderSfsBilan(){"
         "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"

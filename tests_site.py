@@ -6799,10 +6799,12 @@ global.window = { __sfsPaie: { montant: 250, devise: '$' }, __sfsSuiviOff: ['Jes
             _tPAL = json.loads((_rPAL.stdout or "").strip().splitlines()[-1])
         except Exception:
             _tPAL = ""
-        check("paie : 250 $ / 7 comptes suivis, 16 tranches ; 9 manquees au 5/10 -> 229,91 $",
-              "229,91 $ à payer" in _tPAL and "9 manquée(s), −20,09 $" in _tPAL
-              and "35,71 $ par compte" in _tPAL and "2,23 $ par tranche" in _tPAL,
+        check("paie : 250 $ / mois payes par quinzaine -> 125 $ / 7 comptes, 8 tranches ; 9 manquees au 5/10 -> 104,91 $",
+              "1er – 15 octobre : 104,91 $ en cours" in _tPAL and "9 manquée(s), −20,09 $" in _tPAL
+              and "17,86 $ par compte et par quinzaine" in _tPAL and "2,23 $ la tranche" in _tPAL,
               ((_rPAL.stderr or "") + " " + _tPAL)[:300])
+        check("paie : la seconde quinzaine (16-31) est a venir, entiere",
+              "16 – 31 octobre : 125,00 $ à venir" in _tPAL, _tPAL[:300])
         check("paie : annule avant envoi, message sans @, push programme et compte coupe ne comptent pas",
               "Amelia OF 1 / 2" in _tPAL and "Julia OF 0 / 2" in _tPAL
               and "Lolatacrush MyM 0 / 2" in _tPAL and "Jessye" not in _tPAL, _tPAL[:300])
