@@ -77972,9 +77972,18 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
 
     # Page « Photos de profil » (/pfp) : recherche d'images Pinterest via
     # Yandex et Bing, OK / Non qui apprennent le style (photos_profil.py).
+    # « Pousser pour OF / MYM » copie dans les PP ou les stories des
+    # identités : la page reçoit la liste du site, la règle de marché et la
+    # nature (réserve ou non), elle ne les refait pas.
     try:
         import photos_profil
-        photos_profil.register(app, is_auth, _is_admin)
+        photos_profil.register(app, is_auth, _is_admin, {
+            "identites": _list_content_identities,
+            "marche": _marche_mod.de,
+            "nature": _type_identite,
+            "dossier": lambda i: IDENTITIES_DIR / str(i).strip().lower() / "profile_pics",
+            "apres": _invalidate_all_ttl_cache,
+        })
     except Exception as _pp_e:
         log.error(f"photos_profil register échoué: {_pp_e}")
 

@@ -149,7 +149,99 @@ r = pp._classer(sid2, cands, [], False, "t")
 check("moins de 3 Non : rien n'est mis de côté", not r["ecartees"], f"{r['ecartees']}")
 pp._vecteurs_candidates, pp._pret = orig_vc, orig_pret
 
-print("5) Page et routes (vrai create_app)")
+print("5) Pousser pour OF / MYM")
+IDS = TMP / "identities"
+appels = []
+pp._PP.clear()
+pp._PP.update({"identites": lambda: ["usA", "usB", "frC"],
+               "marche": lambda i: "fr" if i == "frC" else "us",
+               "dossier": lambda i: IDS / str(i).lower() / "profile_pics",
+               "apres": lambda: appels.append(1)})
+pp._telecharger = lambda u, *a, **k: img
+pp.juger(sid, "ppush", "ok", {"img": "https://exemple.org/p.jpg", "vign": "https://exemple.org/v.jpg"})
+pp._telecharger = orig_dl
+garde = TMP / sid / "garde" / "ppush.png"
+(IDS / "usa" / "profile_pics").mkdir(parents=True)
+(IDS / "usa" / "profile_pics" / "pp_1.jpg").write_bytes(_png((1, 2, 3), fmt="JPEG"))
+(IDS / "usb" / "profile_pics").mkdir(parents=True)
+(IDS / "usb" / "profile_pics" / "pp_7.png").write_bytes(garde.read_bytes())
+cs = pp.cibles("us")
+check("cibles : seules les models du marché, avec leur nombre de PP",
+      [(c["id"], c["n"]) for c in cs] == [("usA", 1), ("usB", 1)], f"{cs}")
+r = pp.pousser(sid, ["ppush"], "us", ["usA", "usB", "frC", "inconnue"])
+check("pousser OF : copiée là où elle manque, pas en double ailleurs",
+      r["ok"] and r["copiees"] == 1 and r["deja"] == 1, f"{r}")
+check("pousser OF : nommage pp_N du site, sans écraser",
+      (IDS / "usa" / "profile_pics" / "pp_2.png").read_bytes() == garde.read_bytes()
+      and (IDS / "usa" / "profile_pics" / "pp_1.jpg").exists())
+check("pousser OF : model MYM et inconnue refusées, et dites", sorted(r["refusees"]) == ["frc", "inconnue"], f"{r}")
+check("pousser OF : aucun fichier temporaire laissé",
+      not list(IDS.rglob("*.tmp")), f"{list(IDS.rglob('*.tmp'))}")
+check("pousser OF : l'image garde la trace des models servies",
+      pp._avis(sid)["ppush"]["pousse"]["us"] == ["usA", "usB"], f"{pp._avis(sid)['ppush']}")
+check("pousser OF : compteurs du site rafraîchis", len(appels) == 1, f"{appels}")
+r = pp.pousser(sid, ["ppush"], "us", ["usA", "usB"])
+check("pousser deux fois : rien de recopié", r["ok"] and r["copiees"] == 0 and r["deja"] == 2
+      and len(list((IDS / "usa" / "profile_pics").iterdir())) == 2, f"{r}")
+check("pousser MYM sans model MYM cochée : refusé", not pp.pousser(sid, ["ppush"], "fr", ["usA"])["ok"])
+check("marché inconnu : refusé", not pp.pousser(sid, ["ppush"], "xx", ["usA"])["ok"])
+check("image non gardée : rien de poussé", not pp.pousser(sid, ["pzz", "pbon2"], "us", ["usA"])["ok"])
+check("page : la carte dit OF ✓", next(g for g in pp.gardees(sid) if g["cle"] == "ppush")["pousse"] == {"us": 2, "fr": 0})
+
+print("5b) Catégories : PP, Story me, life, travel, night")
+import types_story
+types_story.FICHIER = TMP / "story_types.json"      # jamais le vrai registre
+st = pp.styles()
+check("une catégorie par usage, PP en premier (un style perso suit sa catégorie)",
+      [s["usage"] for s in st if s["nom"] != "Classement"] == ["pp", "me", "life", "travel", "night"]
+      and [s["nom"] for s in st][:2] == ["PP", "Classement"] and st[0]["id"] == sid, f"{st}")
+vieux = TMP / "vieux_styles.json"
+import safe_json
+safe_json.write(vieux, {"styles": [{"id": "abcdef12", "nom": "Mon style", "cree": 1, "recherches": []}]})
+orig_sf = pp.STYLES_FILE
+pp.STYLES_FILE = vieux
+st2 = pp.styles()
+check("« Mon style » du premier jour devient la catégorie PP",
+      st2[0]["id"] == "abcdef12" and st2[0]["usage"] == "pp" and st2[0]["nom"] == "PP" and len(st2) == 5, f"{st2}")
+pp.STYLES_FILE = orig_sf
+ids_st = {s["usage"]: s["id"] for s in st}
+natures = {"usA": "identite", "usR": "reserve", "frM": "modele", "frR": "reserve"}
+pp._PP.clear()
+pp._PP.update({"identites": lambda: list(natures), "marche": lambda i: "fr" if i.startswith("fr") else "us",
+               "nature": lambda i: natures[i], "dossier": lambda i: IDS / str(i).lower() / "profile_pics"})
+check("Story life : seules les réserves, cochées d'office",
+      [(c["id"], c["coche"]) for c in pp.cibles("us", "life")] == [("usR", True)], f"{pp.cibles('us', 'life')}")
+check("Story me : pas de réserve", [c["id"] for c in pp.cibles("fr", "me")] == ["frM"], f"{pp.cibles('fr', 'me')}")
+check("PP : toutes les identités du marché", [c["id"] for c in pp.cibles("us", "pp")] == ["usA", "usR"])
+pp._telecharger = lambda u, *a, **k: img
+pp.juger(ids_st["life"], "plife", "ok", {"img": "https://exemple.org/l.jpg"})
+pp.juger(ids_st["night"], "pnight", "ok", {"img": "https://exemple.org/n.jpg"})
+pp.juger(ids_st["me"], "pme", "ok", {"img": "https://exemple.org/m.jpg"})
+pp._telecharger = orig_dl
+r = pp.pousser(ids_st["life"], ["plife"], "us", ["usR", "usA"])
+story = IDS / "usr" / "stories" / "pfp_plife.png"
+check("Story life : copiée dans stories/ de la réserve", r["ok"] and r["copiees"] == 1 and story.is_file(), f"{r}")
+check("Story life : type life posé (sinon aucun bouton ne la sert)",
+      types_story.type_de("usR", "pfp_plife.png") == "life", f"{types_story.lire()}")
+check("Story life : une identité qui n'est pas une réserve est refusée", r["refusees"] == ["usa"], f"{r}")
+check("Story life : rien dans les PP", not (IDS / "usr" / "profile_pics").exists()
+      or not list((IDS / "usr" / "profile_pics").glob("pfp_*")))
+r = pp.pousser(ids_st["life"], ["plife"], "us", ["usR"])
+check("Story life : deux fois, pas de doublon", r["ok"] and r["copiees"] == 0 and r["deja"] == 1
+      and len(list((IDS / "usr" / "stories").iterdir())) == 1, f"{r}")
+r = pp.pousser(ids_st["night"], ["pnight"], "us", ["usR"])
+check("Story night : refusée tant que le type n'existe pas (aucun bouton ne la servirait)",
+      not r["ok"] and "night" in r["erreur"].lower() and not (IDS / "usr" / "stories" / "pfp_pnight.png").exists(),
+      f"{r}")
+check("Story night : la page le sait d'avance", pp.etat(ids_st["night"])["usages"]["night"]["possible"] is False)
+r = pp.pousser(ids_st["me"], ["pme"], "fr", ["frM", "frR"])
+check("Story me : stories/ de la model, sans type, réserve refusée",
+      r["ok"] and (IDS / "frm" / "stories" / "pfp_pme.png").is_file()
+      and types_story.type_de("frM", "pfp_pme.png") == "" and r["refusees"] == ["frr"], f"{r}")
+check("format : PP carré, stories verticales", pp.etat(ids_st["life"])["usages"]["life"]["format"] == "vertical"
+      and pp._format(None, "carre") == "carre" and pp._format(True) == "carre" and pp._format("xx", "vertical") == "vertical")
+
+print("6) Page et routes (vrai create_app)")
 try:
     import web_upload as w
     app = w.create_app()
@@ -184,11 +276,16 @@ try:
     check("envoi venu d'un autre site : refusé", r.status_code == 403, f"HTTP {r.status_code}")
     r = adm.get(f"/pfp/zip/{sid}")
     check("zip des gardées", r.status_code == 200 and r.data[:2] == b"PK", f"HTTP {r.status_code}")
+    r = adm.get(f"/pfp/cibles?marche=us&style={sid}")
+    check("admin : liste des cibles", r.status_code == 200 and r.get_json()["usage"] == "pp", r.get_data(as_text=True)[:120])
     ch = _client("chatteur1", "chatter")
     check("rôle restreint : page refusée", ch.get("/pfp").status_code == 403)
     check("rôle restreint : écriture refusée",
           ch.post("/pfp/avis", json={"style": sid, "cle": "pzz", "v": "ok"}).status_code == 403)
     check("rôle restreint : fichier refusé", ch.get(f"/pfp/zip/{sid}").status_code == 403)
+    check("rôle restreint : pousser refusé",
+          ch.post("/pfp/pousser", json={"style": sid, "cles": ["ppush"], "marche": "us",
+                                        "identites": ["usA"]}).status_code == 403)
     anon = app.test_client()
     check("anonyme : renvoyé à la connexion", anon.get("/pfp").status_code in (301, 302))
     w._load_web_users = orig_users

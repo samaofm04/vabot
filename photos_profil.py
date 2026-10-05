@@ -101,9 +101,77 @@ class ErreurSource(Exception):
     """Une source n'a pas répondu comme prévu ; le message va sur la page."""
 
 
+# ---------------------------------------------------------------- catégories
+
+#: Ce qu'on cherche, et où ça part. Le propriétaire, le 05/10/2026 : « met moi
+#: un truc pour life, me et travel et night [...] pp aussi ». Chaque catégorie
+#: est un style (elle apprend ses propres OK / Non), avec un format par défaut
+#: (une story est verticale, une PP carrée) et une destination :
+#: - pp : profile_pics/ des identités, que sert le bouton 🖼 PP du menu ;
+#: - me : stories/ des models elles-mêmes (📖 Story me), sans type ;
+#: - life / travel / night : stories/ des RÉSERVES, avec ce type dans
+#:   types_story — ce que servent 🌿 Story life et ✈️ Story travel. Un type
+#:   absent de types_story.TYPES (night, au 05/10) n'a pas de bouton dans le
+#:   menu Discord : la page cherche et garde, mais refuse de pousser des
+#:   stories que rien ne servirait.
+USAGES: Dict[str, Dict[str, Any]] = {
+    "pp": {"nom": "PP", "emoji": "🖼", "format": "carre", "dest": "pp", "unite": "PP",
+           "phrase": "dans les photos de profil des models cochées. Les VA les reçoivent avec le bouton 🖼 PP du menu Discord.",
+           "idees": ["anime girl pfp", "cartoon girl pfp aesthetic", "kawaii cat pfp", "y2k cartoon pfp"]},
+    "me": {"nom": "Story me", "emoji": "📖", "format": "vertical", "dest": "me", "unite": "stories",
+           "phrase": "dans les stories des models cochées. Les VA les reçoivent avec le bouton 📖 Story me.",
+           "idees": ["mirror selfie aesthetic no face", "outfit of the day aesthetic", "nails aesthetic hand",
+                     "makeup vanity aesthetic"]},
+    "life": {"nom": "Story life", "emoji": "🌿", "format": "vertical", "dest": "reserve", "unite": "life",
+             "phrase": "dans les stories 🌿 Life des réserves cochées. Les VA les reçoivent avec le bouton 🌿 Story life.",
+             "idees": ["aesthetic coffee morning", "gym aesthetic", "cozy bedroom aesthetic", "brunch aesthetic",
+                       "shopping bags aesthetic"]},
+    "travel": {"nom": "Story travel", "emoji": "✈️", "format": "vertical", "dest": "reserve", "unite": "travel",
+               "phrase": "dans les stories ✈️ Travel des réserves cochées. Les VA les reçoivent avec le bouton ✈️ Story travel.",
+               "idees": ["beach sunset aesthetic", "airplane window view", "luxury hotel room aesthetic",
+                         "pool villa aesthetic", "dubai aesthetic"]},
+    "night": {"nom": "Story night", "emoji": "🌙", "format": "vertical", "dest": "reserve", "unite": "night",
+              "phrase": "dans les stories 🌙 Night des réserves cochées. Les VA les reçoivent avec le bouton 🌙 Story night.",
+              "idees": ["night city lights aesthetic", "night drive car aesthetic", "club party night aesthetic",
+                        "cocktail bar night aesthetic", "rooftop night aesthetic"]},
+}
+#: format -> (paramètre iorient de Yandex, filtre qft de Bing)
+FORMATS = {"carre": ("square", "+filterui:aspect-square"),
+           "vertical": ("vertical", "+filterui:aspect-tall"),
+           "tout": (None, None)}
+
+
+def _format(fmt: Any, defaut: str = "carre") -> str:
+    if fmt is True:
+        return "carre"
+    if fmt is False:
+        return "tout"
+    return fmt if fmt in FORMATS else defaut
+
+
+def _types_story():
+    try:
+        import types_story
+        return types_story
+    except Exception:
+        return None
+
+
+def pousse_possible(usage: str) -> Tuple[bool, str]:
+    u = USAGES.get(usage) or {}
+    if u.get("dest") != "reserve":
+        return True, ""
+    ts = _types_story()
+    if ts is None or usage not in getattr(ts, "TYPES", {}):
+        return False, (f"Le type {u.get('nom', usage)} n'existe pas encore : aucun bouton {u.get('emoji', '')} "
+                       f"{u.get('nom', usage)} dans le menu Discord ne servirait ces stories. "
+                       "Tu peux déjà chercher et garder.")
+    return True, ""
+
+
 # ---------------------------------------------------------------- styles
 
-_VERROU_STYLES = threading.Lock()
+_VERROU_STYLES = threading.RLock()
 _VERROUS: Dict[str, threading.RLock] = {}
 
 
@@ -116,13 +184,29 @@ def _verrou(style_id: str) -> threading.RLock:
 
 
 def styles() -> List[Dict[str, Any]]:
-    d = safe_json.load(STYLES_FILE, default={}) or {}
-    lst = [s for s in d.get("styles") or [] if isinstance(s, dict) and _ID_STYLE.match(str(s.get("id")))]
-    if not lst:
-        # premier passage : un style par défaut, pour que la page serve tout de suite
-        lst = [{"id": secrets.token_hex(4), "nom": "Mon style", "cree": int(time.time()), "recherches": []}]
-        safe_json.write(STYLES_FILE, {"styles": lst})
-    return lst
+    """Les styles, catégories d'abord. Chaque catégorie de USAGES en a au
+    moins un, créé au premier passage ; un style d'avant les catégories
+    (« Mon style », le premier jour) devient la catégorie PP."""
+    with _VERROU_STYLES:
+        d = safe_json.load(STYLES_FILE, default={}) or {}
+        lst = [s for s in d.get("styles") or [] if isinstance(s, dict) and _ID_STYLE.match(str(s.get("id")))]
+        change = False
+        for s in lst:
+            if s.get("usage") not in USAGES:
+                s["usage"] = "pp"
+                if s.get("nom") == "Mon style":
+                    s["nom"] = USAGES["pp"]["nom"]
+                change = True
+        presents = {s["usage"] for s in lst}
+        for u, meta in USAGES.items():
+            if u not in presents:
+                lst.append({"id": secrets.token_hex(4), "nom": meta["nom"], "usage": u,
+                            "cree": int(time.time()), "recherches": []})
+                change = True
+        if change:
+            safe_json.write(STYLES_FILE, {"styles": lst})
+    ordre = list(USAGES)
+    return sorted(lst, key=lambda s: (ordre.index(s["usage"]), s.get("cree", 0)))
 
 
 def _style(style_id: str) -> Optional[Dict[str, Any]]:
@@ -135,11 +219,12 @@ def _enregistrer_styles(lst: List[Dict[str, Any]]) -> None:
     safe_json.write(STYLES_FILE, {"styles": lst})
 
 
-def creer_style(nom: str) -> Dict[str, Any]:
+def creer_style(nom: str, usage: str = "pp") -> Dict[str, Any]:
     nom = re.sub(r"\s+", " ", str(nom or "")).strip()[:60] or "Nouveau style"
+    usage = usage if usage in USAGES else "pp"
     with _VERROU_STYLES:
         lst = styles()
-        s = {"id": secrets.token_hex(4), "nom": nom, "cree": int(time.time()), "recherches": []}
+        s = {"id": secrets.token_hex(4), "nom": nom, "usage": usage, "cree": int(time.time()), "recherches": []}
         lst.append(s)
         _enregistrer_styles(lst)
     return s
@@ -286,11 +371,12 @@ def _entites_yandex(etat: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [ents[k] for k in ordre if isinstance(ents.get(k), dict)]
 
 
-def yandex_texte(requete: str, page: int = 0, carre: bool = True) -> Tuple[List[Dict[str, Any]], bool]:
+def yandex_texte(requete: str, page: int = 0, fmt: Any = "carre") -> Tuple[List[Dict[str, Any]], bool]:
     """(candidates, fin) pour une page de recherche texte."""
     params = {"text": requete, "p": max(0, int(page))}
-    if carre:
-        params["iorient"] = "square"
+    orient = FORMATS[_format(fmt)][0]
+    if orient:
+        params["iorient"] = orient
     with _YX_VERROU:
         _yx_espacer()
         try:
@@ -342,10 +428,11 @@ def yandex_similaires(image: bytes) -> List[Dict[str, Any]]:
     return [c for c in (depuis_yandex(e) for e in _entites_yandex(etat)) if c]
 
 
-def bing(requete: str, carre: bool = True) -> List[Dict[str, Any]]:
+def bing(requete: str, fmt: Any = "carre") -> List[Dict[str, Any]]:
     params = {"q": requete, "first": 0, "count": 35, "mmasync": 1}
-    if carre:
-        params["qft"] = "+filterui:aspect-square"
+    qft = FORMATS[_format(fmt)][1]
+    if qft:
+        params["qft"] = qft
     try:
         r = requests.get("https://www.bing.com/images/async", params=params, timeout=20,
                          headers={"User-Agent": UA, "Cookie": "SRCHHPGUSR=ADLT=MODERATE",
@@ -704,23 +791,25 @@ def _classer(style_id: str, cands: List[Dict[str, Any]], erreurs: List[str], fin
             "apprentissage": {"ok": len(pos), "non": len(neg)}}
 
 
-def chercher(style_id: str, requete: str, page: int = 0, carre: bool = True) -> Dict[str, Any]:
-    if not _style(style_id):
+def chercher(style_id: str, requete: str, page: int = 0, fmt: Any = None) -> Dict[str, Any]:
+    st = _style(style_id)
+    if not st:
         return {"ok": False, "erreur": "Style inconnu."}
+    fmt_ = _format(fmt, USAGES[st["usage"]]["format"])
     requete = re.sub(r"\s+", " ", str(requete or "")).strip()[:200]
     if not requete:
         return {"ok": False, "erreur": "Décris l'image cherchée."}
     page = max(0, min(int(page or 0), 20))
     cands, erreurs, fin = [], [], False
     try:
-        c, fin = yandex_texte(requete, page, carre)
+        c, fin = yandex_texte(requete, page, fmt_)
         cands += c
     except ErreurSource as e:
         erreurs.append(f"Yandex : {e}")
         fin = page > 0
     if page == 0:
         try:
-            cands += bing(requete, carre)
+            cands += bing(requete, fmt_)
         except ErreurSource as e:
             erreurs.append(f"Bing : {e}")
         _noter_recherche(style_id, requete)
@@ -1003,7 +1092,8 @@ def gardees(style_id: str) -> List[Dict[str, Any]]:
         out.append({"cle": k, "fichier": e.get("fichier") or "", "vign": e.get("vign") or "",
                     "img": e.get("img") or "", "page": e.get("page") or "", "titre": e.get("titre") or "",
                     "src": e.get("src") or "", "echec": e.get("echec") or "",
-                    "en_cours": not e.get("fichier") and not e.get("echec")})
+                    "en_cours": not e.get("fichier") and not e.get("echec"),
+                    "pousse": {m: len((e.get("pousse") or {}).get(m) or []) for m in MARCHES}})
     return out
 
 
@@ -1030,13 +1120,199 @@ def archive_zip(style_id: str) -> Optional[Tuple[bytes, str]]:
     return buf.getvalue(), f"pfp-{nom}-{n}.zip"
 
 
+# ---------------------------------------------------------------- pousser vers les models
+
+#: Les photos de profil que le bouton 🖼 PP du menu Discord donne aux VA
+#: vivent par identité : data/identities/<id>/profile_pics/pp_N.ext. Le
+#: marché de l'identité (marche.py) dit de quel côté elle est : US = OnlyFans,
+#: FR = MYM. Ce module ne connaît ni la liste des identités ni leurs
+#: dossiers : le site les lui passe à register() (_PP), pour qu'il n'importe
+#: pas web_upload et qu'une seule règle décide quelles identités existent.
+MARCHES = {"us": "OF", "fr": "MYM"}
+_PP: Dict[str, Any] = {}
+_EXT_PP = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def _pp_branche() -> bool:
+    return all(callable(_PP.get(k)) for k in ("identites", "marche", "dossier"))
+
+
+def _photos_pp(d: Path) -> List[Path]:
+    if not d.is_dir():
+        return []
+    return [x for x in d.iterdir() if x.is_file() and x.suffix.lower() in _EXT_PP]
+
+
+def _dossier_dest(identite: str, usage: str) -> Path:
+    """profile_pics/ pour une PP, stories/ (son voisin) pour une story."""
+    d = _PP["dossier"](identite)
+    return d if USAGES[usage]["dest"] == "pp" else d.parent / "stories"
+
+
+def _nature(identite: str) -> str:
+    try:
+        return str(_PP["nature"](identite)) if callable(_PP.get("nature")) else ""
+    except Exception:
+        return ""
+
+
+def cibles(marche: str, usage: str = "pp") -> List[Dict[str, Any]]:
+    """Les identités d'un marché où cette catégorie peut partir, avec ce
+    qu'elles ont déjà : PP pour une PP, stories pour Story me, stories de ce
+    type pour une réserve. « coche » : la proposition par défaut de la page."""
+    u = USAGES.get(usage)
+    if marche not in MARCHES or not u or not _pp_branche():
+        return []
+    reg = {}
+    if u["dest"] == "reserve":
+        ts = _types_story()
+        if ts is None or usage not in getattr(ts, "TYPES", {}):
+            return []
+        reg = ts.lire()
+    out = []
+    for i in sorted(_PP["identites"](), key=str.lower):
+        try:
+            if _PP["marche"](i) != marche:
+                continue
+        except Exception:
+            continue
+        nat = _nature(i)
+        if u["dest"] == "reserve" and nat != "reserve":
+            continue
+        if u["dest"] == "me" and nat == "reserve":
+            continue          # une réserve n'a pas de Story me : ses stories ont un type
+        photos = _photos_pp(_dossier_dest(i, usage))
+        if u["dest"] == "reserve":
+            n = sum(1 for x in photos if reg.get(_types_story().cle(i, x.name)) == usage)
+            coche = True      # peu de réserves, et c'est tout leur rôle
+        else:
+            n = len(photos)
+            coche = n > 0
+        out.append({"id": i, "n": n, "coche": coche})
+    return out
+
+
+def pousser(style_id: str, cles: List[str], marche: str, identites: List[str]) -> Dict[str, Any]:
+    """COPIE des images gardées là où la catégorie du style les envoie (PP,
+    Story me, story typée d'une réserve). Une image déjà présente dans un
+    dossier (mêmes octets) n'y est pas recopiée : pousser deux fois ne fait
+    pas de doublon côté VA."""
+    st = _style(style_id)
+    if not st:
+        return {"ok": False, "erreur": "Style inconnu."}
+    usage = st["usage"]
+    u = USAGES[usage]
+    if marche not in MARCHES:
+        return {"ok": False, "erreur": "Marché inconnu."}
+    if not _pp_branche():
+        return {"ok": False, "erreur": "Les dossiers des models ne sont pas branchés sur cette page."}
+    possible, raison = pousse_possible(usage)
+    if not possible:
+        return {"ok": False, "erreur": raison}
+    valides = {c["id"].lower(): c["id"] for c in cibles(marche, usage)}
+    demandees = list(dict.fromkeys(str(i or "").strip().lower() for i in (identites or [])[:100]))
+    tgts = [valides[x] for x in demandees if x in valides]
+    refusees = [x for x in demandees if x and x not in valides]
+    if not tgts:
+        quoi = "réserve" if u["dest"] == "reserve" else "model"
+        return {"ok": False, "erreur": f"Aucune {quoi} {MARCHES[marche]} cochée."}
+    avis = _avis(style_id)
+    images, sans_fichier = [], 0
+    for k in list(dict.fromkeys(cles or []))[:500]:
+        e = avis.get(str(k))
+        if not e or e.get("v") != "ok":
+            continue
+        f = chemin_fichier(style_id, e.get("fichier") or "")
+        if f:
+            images.append((str(k), f.read_bytes(), f.suffix.lower()))
+        else:
+            sans_fichier += 1
+    if not images:
+        return {"ok": False, "erreur": "Aucune image prête : téléchargement en cours ou échoué."}
+    empreintes = {k: hashlib.md5(b).hexdigest() for k, b, _ in images}
+    ts = _types_story() if u["dest"] == "reserve" else None
+    copiees, deja, fait, a_typer = 0, 0, {}, {}
+    for t in tgts:
+        d = _dossier_dest(t, usage)
+        d.mkdir(parents=True, exist_ok=True)
+        # comparer par taille d'abord : l'empreinte n'est calculée que pour
+        # les fichiers de même taille (un dossier en compte jusqu'à 240)
+        par_taille: Dict[int, List[Path]] = {}
+        for x in _photos_pp(d):
+            par_taille.setdefault(x.stat().st_size, []).append(x)
+        for k, b, ext in images:
+            meme = next((x for x in par_taille.get(len(b), [])
+                         if hashlib.md5(x.read_bytes()).hexdigest() == empreintes[k]), None)
+            if meme is not None:
+                deja += 1
+                fait.setdefault(k, []).append(t)
+                a_typer.setdefault(t, []).append(meme.name)   # déjà là, mais peut-être sans type
+                continue
+            if u["dest"] == "pp":
+                # même nommage que /upload/pp et /cloud/pp_apply
+                n = len(list(d.glob("*"))) + 1
+                cible = d / f"pp_{n}{ext}"
+                while cible.exists():
+                    n += 1
+                    cible = d / f"pp_{n}{ext}"
+            else:
+                # une story garde un nom lisible et propre à l'image
+                cible = d / f"pfp_{k[:17]}{ext}"
+                n = 2
+                while cible.exists():
+                    cible = d / f"pfp_{k[:17]}_{n}{ext}"
+                    n += 1
+            tmp = d / f".{cible.name}.tmp"
+            with open(tmp, "wb") as fh:
+                fh.write(b)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, cible)
+            par_taille.setdefault(len(b), []).append(cible)
+            copiees += 1
+            fait.setdefault(k, []).append(t)
+            a_typer.setdefault(t, []).append(cible.name)
+    erreurs = []
+    if ts is not None:
+        # sans type, une story de réserve n'est servie par aucun bouton
+        for t, noms in a_typer.items():
+            try:
+                ts.poser(t, noms, usage)
+            except Exception as e:
+                erreurs.append(f"{t} : type {usage} non posé ({type(e).__name__})")
+    with _verrou(style_id):
+        frais = _avis(style_id)
+        for k, lst in fait.items():
+            if k in frais:
+                p = frais[k].setdefault("pousse", {})
+                p[marche] = sorted(set(p.get(marche) or []) | set(lst))
+        _enregistrer_avis(style_id, frais)
+    if copiees and callable(_PP.get("apres")):
+        try:
+            _PP["apres"]()            # compteurs des menus du site à jour
+        except Exception:
+            pass
+    print(f"[pfp] poussé {u['nom']} {MARCHES[marche]} : {copiees} copie(s), {deja} déjà là, "
+          f"{len(images)} image(s) x {len(tgts)} identité(s)" + (f", {len(erreurs)} erreur(s)" if erreurs else ""),
+          flush=True)
+    return {"ok": True, "copiees": copiees, "deja": deja, "images": len(images), "models": len(tgts),
+            "sans_fichier": sans_fichier, "refusees": refusees, "erreurs": erreurs,
+            "gardees": gardees(style_id)}
+
+
 def etat(style_id: Optional[str] = None) -> Dict[str, Any]:
     lst = styles()
     s = _style(style_id) if style_id else None
     s = s or lst[0]
-    return {"styles": [{"id": x["id"], "nom": x["nom"]} for x in lst], "style": s["id"],
+    usages = {}
+    for k, u in USAGES.items():
+        possible, raison = pousse_possible(k)
+        usages[k] = {c: u[c] for c in ("nom", "emoji", "format", "dest", "unite", "phrase", "idees")}
+        usages[k].update(possible=possible, raison=raison)
+    return {"styles": [{"id": x["id"], "nom": x["nom"], "usage": x["usage"]} for x in lst], "style": s["id"],
+            "usage": s["usage"], "usages": usages,
             "recherches": s.get("recherches") or [], "stats": _stats(_avis(s["id"])),
-            "gardees": gardees(s["id"]), "modele": etat_modele()}
+            "gardees": gardees(s["id"]), "modele": etat_modele(), "pp": _pp_branche()}
 
 
 # ---------------------------------------------------------------- page
@@ -1079,6 +1355,15 @@ h1{font-size:20px;margin:0}
 .btn.bleu{background:var(--bleu);border-color:var(--bleu);color:#fff}
 .btn:disabled{opacity:.45;cursor:default}
 .case{color:var(--faible);font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer}
+.sel{padding:10px 10px;border-radius:10px;border:1px solid var(--bord);background:#0e0e0e;color:var(--texte);font:inherit;
+  font-size:13.5px}
+.chip.idee{border-style:dashed}
+.chip .sep{opacity:.5}
+.note-dest{font-size:12.5px;color:var(--ambre);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.4);
+  border-radius:10px;padding:8px 12px;margin:0 0 12px}
+body.vertical .carte .im{aspect-ratio:9/16}
+/* « Tout pousser en Story travel pour MYM » dépassait l'écran d'un téléphone */
+.barre .btn{white-space:normal;max-width:100%}
 .recentes{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
 .appr{font-size:12.5px;color:var(--faible);background:var(--carte);border:1px solid var(--bord);border-radius:10px;
   padding:8px 12px;margin:0 0 14px}
@@ -1127,17 +1412,36 @@ h1{font-size:20px;margin:0}
 #zoom img{max-width:min(92vw,900px);max-height:78vh;border-radius:10px}
 #zoom .lien{color:#cfd8e3;font-size:13px;max-width:90vw;overflow-wrap:anywhere;text-align:center}
 #toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#000;color:#fff;border:1px solid var(--bord);
-  padding:9px 16px;border-radius:10px;font-size:13px;display:none;z-index:10;max-width:90vw}
+  padding:9px 16px;border-radius:10px;font-size:13px;display:none;z-index:12;max-width:90vw}
 input[type=file]{display:none}
+.pousse{display:flex;gap:6px;padding:6px 6px 0}
+.pousse button{flex:1;padding:8px 0;border-radius:8px;border:1px solid var(--bord);background:#1a1a1a;color:var(--texte);
+  font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.pousse button.fait{border-color:var(--vert)}
+.pousse button:disabled{opacity:.4;cursor:default}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;
+  z-index:11;padding:16px}
+#modal[hidden]{display:none}
+#modal .boite{background:var(--carte);border:1px solid var(--bord);border-radius:14px;padding:16px;width:min(440px,100%);
+  max-height:86vh;display:flex;flex-direction:column;gap:10px}
+#modal h3{margin:0;font-size:16px}
+#modal .m-sous{color:var(--faible);font-size:12.5px;margin:0}
+#modal .m-liste{overflow:auto;border:1px solid var(--bord);border-radius:10px;padding:4px 0;min-height:60px}
+.m-ligne{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;font-size:14px}
+.m-ligne:hover{background:#1a1a1a}
+.m-ligne input{width:18px;height:18px;margin:0}
+.m-ligne .m-n{margin-left:auto;color:var(--faible);font-size:12px}
+#modal .m-bas{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:520px){.grille{grid-template-columns:repeat(2,1fr);gap:8px}.btn{padding:10px 12px}}
 </style></head><body>
 <div class="tete"><a class="retour" href="/">← Dashboard</a><h1>Photos de profil</h1></div>
-<p class="sous">Décris l'image, garde (OK) ou écarte (Non) : chaque choix apprend ton style et range les recherches suivantes.
-Images trouvées sur Pinterest via Yandex et Bing.</p>
+<p class="sous">Choisis la catégorie, décris l'image, garde (OK) ou écarte (Non) : chaque catégorie apprend tes goûts à part.
+Les gardées se poussent en PP ou en story pour OF et MYM. Images trouvées sur Pinterest via Yandex et Bing.</p>
 <div class="styles" id="styles"></div>
 <div class="barre">
   <input type="text" id="q" placeholder="ex. anime girl pink hair pfp, chat noir dessin, cartoon boy cap" autocomplete="off">
-  <label class="case"><input type="checkbox" id="carre" checked> Carrées</label>
+  <select id="format" class="sel" title="Forme des images cherchées"><option value="carre">Carré</option>
+    <option value="vertical">Vertical (story)</option><option value="tout">Tout format</option></select>
   <button class="btn bleu" id="go">Chercher</button>
   <button class="btn" id="pourtoi" title="Des images proches de celles que tu as gardées">✨ Pour toi</button>
   <button class="btn" id="ajout" title="Les photos que tu utilises déjà : elles apprennent ton style tout de suite">📎 Mes exemples</button>
@@ -1150,12 +1454,21 @@ Images trouvées sur Pinterest via Yandex et Bing.</p>
 <div id="v-garde" hidden></div>
 <div id="zoom"><img alt="" referrerpolicy="no-referrer"><div class="lien"></div></div>
 <div id="toast"></div>
+<div id="modal" hidden><div class="boite">
+  <h3></h3><p class="m-sous"></p>
+  <div class="m-liste"></div>
+  <div class="m-bas"><button class="btn" id="m-tout">Tout cocher</button><button class="btn" id="m-annuler">Annuler</button>
+  <button class="btn bleu" id="m-ok">Pousser</button></div>
+</div></div>
 <script id="pfp-donnees" type="application/json">__DONNEES__</script>
 <script>
 (function(){
 "use strict";
 var D = JSON.parse(document.getElementById("pfp-donnees").textContent);
-var S = {style: D.style, res: null, req: null, page: 0, occupe: false, stats: D.stats, gardees: D.gardees, modele: D.modele};
+var S = {style: D.style, res: null, req: null, page: 0, occupe: false, stats: D.stats, gardees: D.gardees, modele: D.modele, pp: D.pp};
+var U = (D.usages || {})[D.usage] || {nom: "PP", emoji: "🖼", format: "carre", dest: "pp", unite: "PP", phrase: "", idees: [], possible: true};
+var NOMS = {us: "OF", fr: "MYM"}, DRAPEAUX = {us: "🇺🇸", fr: "🇫🇷"};
+var P = {marche: null, cles: []};
 var $ = function(id){ return document.getElementById(id); };
 
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -1174,13 +1487,20 @@ function post(url, corps){
 
 function rendreStyles(){
   var h = D.styles.map(function(s){
-    return "<button class=\"chip" + (s.id === S.style ? " on" : "") + "\" data-s=\"" + esc(s.id) + "\">" + esc(s.nom) + "</button>";
+    var u = (D.usages || {})[s.usage] || {};
+    return "<button class=\"chip" + (s.id === S.style ? " on" : "") + "\" data-s=\"" + esc(s.id) + "\""
+      + " title=\"" + esc(u.nom || "") + "\">" + esc((u.emoji ? u.emoji + " " : "") + s.nom) + "</button>";
   }).join("");
   h += "<button class=\"chip\" id=\"nouveau\">＋ Nouveau style</button>";
   h += "<button class=\"chip\" id=\"renommer\" title=\"Renommer le style affiché\">✏️</button>";
   $("styles").innerHTML = h;
-  $("recentes").innerHTML = (D.recherches || []).map(function(r){
-    return "<button class=\"chip petit\" data-r=\"" + esc(r) + "\">" + esc(r) + "</button>"; }).join("");
+  var deja = {};
+  var rec = (D.recherches || []).map(function(r){ deja[r.toLowerCase()] = 1;
+    return "<button class=\"chip petit\" data-r=\"" + esc(r) + "\">" + esc(r) + "</button>"; });
+  // des idées de départ propres à la catégorie, après les recherches déjà faites
+  var idees = (U.idees || []).filter(function(r){ return !deja[r.toLowerCase()]; }).map(function(r){
+    return "<button class=\"chip petit idee\" data-r=\"" + esc(r) + "\" title=\"Idée de recherche\">💡 " + esc(r) + "</button>"; });
+  $("recentes").innerHTML = rec.concat(idees).join("");
 }
 
 function rendreAppr(){
@@ -1263,7 +1583,7 @@ function lancer(req){
   else { var b = $("plus"); if (b) { b.disabled = true; b.textContent = "Chargement…"; } }
   montrer("res");
   var url = req.type === "texte" ? "/pfp/chercher" : (req.type === "pourtoi" ? "/pfp/pour-toi" : "/pfp/similaires");
-  post(url, {style: S.style, q: req.q, page: req.page, carre: $("carre").checked, cle: req.cle, meta: req.meta}).then(function(j){
+  post(url, {style: S.style, q: req.q, page: req.page, format: $("format").value, cle: req.cle, meta: req.meta}).then(function(j){
     S.occupe = false;
     if (!j.ok) {
       if (ajout) { toast(j.erreur || "Erreur"); rendreRes(); }
@@ -1310,8 +1630,12 @@ function rafraichirGardees(){
 function rendreGardees(){
   var g = S.gardees || [];
   var h = "";
-  if (!g.length) { $("v-garde").innerHTML = "<div class=\"vide\">Rien de gardé dans ce style pour l'instant.</div>"; majOnglets(); return; }
-  h += "<div class=\"barre\"><a class=\"btn bleu\" href=\"/pfp/zip/" + encodeURIComponent(S.style) + "\">⬇️ Tout télécharger (.zip)</a></div>";
+  if (!U.possible) h += "<div class=\"note-dest\">" + esc(U.raison) + "</div>";
+  if (!g.length) { $("v-garde").innerHTML = h + "<div class=\"vide\">Rien de gardé dans ce style pour l'instant.</div>"; majOnglets(); return; }
+  var off = U.possible ? "" : " disabled title=\"" + esc(U.raison) + "\"";
+  h += "<div class=\"barre\"><a class=\"btn bleu\" href=\"/pfp/zip/" + encodeURIComponent(S.style) + "\">⬇️ Tout télécharger (.zip)</a>"
+    + "<button class=\"btn pousser-tout\" data-m=\"us\"" + off + ">🇺🇸 Tout pousser en " + esc(U.nom) + " pour OF</button>"
+    + "<button class=\"btn pousser-tout\" data-m=\"fr\"" + off + ">🇫🇷 Tout pousser en " + esc(U.nom) + " pour MYM</button></div>";
   h += "<div class=\"grille\">" + g.map(function(x){
     var src = x.fichier ? "/pfp/fichier/" + encodeURIComponent(S.style) + "/" + encodeURIComponent(x.fichier) : x.vign;
     var bas;
@@ -1320,12 +1644,80 @@ function rendreGardees(){
     else bas = "<span>Téléchargement…</span>";
     return "<div class=\"carte v-ok\" data-cle=\"" + esc(x.cle) + "\" title=\"" + esc(x.titre) + "\">"
       + "<div class=\"im\"><img loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\"" + esc(src) + "\" alt=\"\"></div>"
+      + "<div class=\"pousse\">" + ["us", "fr"].map(function(m){
+          var n = (x.pousse || {})[m] || 0;
+          return "<button class=\"p-un" + (n ? " fait" : "") + "\" data-m=\"" + m + "\"" + (x.fichier && U.possible ? "" : " disabled")
+            + " title=\"" + esc(!U.possible ? U.raison : (n ? "Déjà chez " + n + " " + NOMS[m] : "Pousser en " + U.nom + " pour " + NOMS[m])) + "\">"
+            + DRAPEAUX[m] + " " + NOMS[m] + (n ? " ✓" : "") + "</button>";
+        }).join("") + "</div>"
       + "<div class=\"etat\" style=\"display:flex\">" + bas + "<button class=\"retirer\">retirer</button></div>"
       + (x.src === "exemple" ? "<div class=\"note\">exemple ajouté</div>" : "")
       + "</div>";
   }).join("") + "</div>";
   $("v-garde").innerHTML = h;
   majOnglets();
+}
+
+function lireMemo(m){
+  try { var v = JSON.parse(localStorage.getItem("pfp-cibles-" + D.usage + "-" + m) || "null"); return Array.isArray(v) ? v : null; }
+  catch (e) { return null; }
+}
+function ecrireMemo(m, ids){ try { localStorage.setItem("pfp-cibles-" + D.usage + "-" + m, JSON.stringify(ids)); } catch (e) {} }
+
+function cochees(){
+  return Array.prototype.slice.call(document.querySelectorAll("#modal .m-liste input:checked")).map(function(i){ return i.value; });
+}
+function majCompte(){
+  var n = cochees().length, b = $("m-ok");
+  b.disabled = !n;
+  var quoi = U.dest === "reserve" ? "réserve" : "model";
+  b.textContent = n ? "Pousser vers " + n + " " + quoi + "(s)" : "Coche au moins une " + quoi;
+}
+
+function ouvrirPousser(m, cles){
+  if (!S.pp) { toast("Les dossiers des models ne sont pas branchés sur cette page."); return; }
+  if (!U.possible) { toast(U.raison); return; }
+  if (!cles.length) { toast("Aucune image prête : attends la fin du téléchargement."); return; }
+  P.marche = m; P.cles = cles;
+  var md = $("modal"), liste = md.querySelector(".m-liste");
+  md.querySelector("h3").textContent = DRAPEAUX[m] + " Pousser en " + U.emoji + " " + U.nom + " pour " + NOMS[m];
+  md.querySelector(".m-sous").textContent = cles.length + " image(s) à copier " + U.phrase + " Une image déjà présente n'est pas recopiée.";
+  liste.innerHTML = "<div class=\"attente\">Chargement…</div>";
+  $("m-ok").disabled = true;
+  md.hidden = false;
+  fetch("/pfp/cibles?marche=" + m + "&style=" + encodeURIComponent(S.style), {credentials: "same-origin"}).then(function(r){ return r.json(); }).then(function(j){
+    var lst = j.cibles || [], memo = lireMemo(m);
+    if (!lst.length) {
+      liste.innerHTML = "<div class=\"vide\">Aucune " + (U.dest === "reserve" ? "réserve " : "model ") + NOMS[m] + " pour " + esc(U.nom) + ".</div>";
+      majCompte(); return;
+    }
+    liste.innerHTML = lst.map(function(x){
+      var coche = memo ? memo.indexOf(x.id) >= 0 : x.coche;
+      return "<label class=\"m-ligne\"><input type=\"checkbox\" value=\"" + esc(x.id) + "\"" + (coche ? " checked" : "") + ">"
+        + "<span>" + esc(x.id) + "</span><span class=\"m-n\">" + x.n + " " + esc(U.unite) + "</span></label>";
+    }).join("");
+    majCompte();
+  }).catch(function(){ liste.innerHTML = "<div class=\"err\">Liste des models illisible.</div>"; });
+}
+
+function fermerPousser(){ $("modal").hidden = true; }
+
+function lancerPousser(){
+  var ids = cochees(), b = $("m-ok");
+  if (!ids.length) return;
+  ecrireMemo(P.marche, ids);
+  b.disabled = true; b.textContent = "Copie…";
+  post("/pfp/pousser", {style: S.style, cles: P.cles, marche: P.marche, identites: ids}).then(function(j){
+    if (!j.ok) { toast(j.erreur || "Rien n'a été poussé"); majCompte(); return; }
+    fermerPousser();
+    var t = "✅ " + j.copiees + " copie(s) en " + U.nom + " chez " + j.models + " "
+      + (U.dest === "reserve" ? "réserve(s) " : "model(s) ") + NOMS[P.marche];
+    if (j.deja) t += " · " + j.deja + " déjà là";
+    if (j.sans_fichier) t += " · " + j.sans_fichier + " image(s) pas encore téléchargée(s), ignorée(s)";
+    if ((j.erreurs || []).length) t += " · ⚠️ " + j.erreurs.join(" ; ");
+    toast(t);
+    if (j.gardees) { S.gardees = j.gardees; rendreGardees(); }
+  });
 }
 
 function majOnglets(){
@@ -1353,8 +1745,8 @@ document.addEventListener("click", function(ev){
   if ((el = t.closest(".chip[data-s]"))) { if (el.getAttribute("data-s") !== S.style) changerStyle(el.getAttribute("data-s")); return; }
   if ((el = t.closest(".chip[data-r]"))) { $("q").value = el.getAttribute("data-r"); lancer({type: "texte", q: $("q").value, page: 0}); return; }
   if (t.id === "nouveau") {
-    var nom = prompt("Nom du nouveau style (ex. Anime rose, Chats cartoon) :");
-    if (nom) post("/pfp/style", {action: "creer", nom: nom}).then(function(j){ if (j.ok) changerStyle(j.style.id); else toast(j.erreur || "Erreur"); });
+    var nom = prompt("Nom du nouveau style (il partira en " + U.emoji + " " + U.nom + ", comme celui affiché) :");
+    if (nom) post("/pfp/style", {action: "creer", nom: nom, usage: D.usage}).then(function(j){ if (j.ok) changerStyle(j.style.id); else toast(j.erreur || "Erreur"); });
     return;
   }
   if (t.id === "renommer") {
@@ -1367,6 +1759,19 @@ document.addEventListener("click", function(ev){
   if (t.id === "plus") { lancer({type: "texte", q: S.req.q, page: S.req.page + 1}); return; }
   if (t.id === "encore") { lancer({type: "pourtoi", page: 0}); return; }
   if (t.id === "voir-ec") { var g = $("g-ec"); g.hidden = !g.hidden; return; }
+  if (t.closest("#modal")) {
+    if (t.id === "m-annuler" || t.id === "modal") fermerPousser();
+    else if (t.id === "m-ok") lancerPousser();
+    else if (t.id === "m-tout") {
+      var cases = document.querySelectorAll("#modal .m-liste input"), toutes = cochees().length === cases.length;
+      cases.forEach(function(i){ i.checked = !toutes; }); majCompte();
+    } else if (t.closest(".m-ligne")) setTimeout(majCompte, 0);
+    return;
+  }
+  if ((el = t.closest(".pousser-tout"))) {
+    ouvrirPousser(el.getAttribute("data-m"), (S.gardees || []).filter(function(x){ return x.fichier; }).map(function(x){ return x.cle; }));
+    return;
+  }
   var c = t.closest(".carte");
   if (!c) return;
   if (t.closest(".im")) {
@@ -1376,8 +1781,9 @@ document.addEventListener("click", function(ev){
     return;
   }
   if (t.closest("#v-garde")) {
+    if (t.classList.contains("p-un")) { ouvrirPousser(t.getAttribute("data-m"), [c.getAttribute("data-cle")]); return; }
     if (t.classList.contains("retirer")) {
-      if (!confirm("Retirer cette image des gardées ? (elle part dans la corbeille du style)")) return;
+      if (!confirm("Retirer cette image des gardées ? Elle part dans la corbeille du style ; les copies déjà poussées aux models restent.")) return;
       post("/pfp/avis", {style: S.style, cle: c.getAttribute("data-cle"), v: "annuler"}).then(function(j){
         if (j.ok) { S.stats = j.stats; rendreAppr(); rafraichirGardees(); } else toast(j.erreur || "Erreur"); });
     } else if (t.classList.contains("reessayer")) {
@@ -1416,6 +1822,9 @@ $("fichiers").addEventListener("change", function(){
     }).catch(function(){ toast("Envoi impossible"); });
 });
 
+$("format").value = U.format || "carre";
+document.body.classList.toggle("vertical", U.format === "vertical");
+if (U.idees && U.idees.length) $("q").placeholder = "ex. " + U.idees.slice(0, 3).join(", ");
 rendreStyles(); rendreAppr(); rendreGardees(); suivreModele();
 })();
 </script>
@@ -1425,11 +1834,19 @@ rendreStyles(); rendreAppr(); rendreGardees(); suivreModele();
 
 # ---------------------------------------------------------------- routes
 
-def register(app, is_auth, is_admin):
+def register(app, is_auth, is_admin, pp: Optional[Dict[str, Any]] = None):
     """Routes /pfp/*. Admin seulement : la page télécharge sur le serveur et
     écrit dans data/. Les POST viennent de la page elle-même (Sec-Fetch-Site),
-    en plus du cookie SameSite=Lax de la session."""
+    en plus du cookie SameSite=Lax de la session.
+
+    `pp` : ce que le site prête pour « Pousser pour OF / MYM » — identites()
+    (la liste des identités), marche(id) (« fr » / « us »), nature(id)
+    (« modele » / « identite » / « reserve »), dossier(id) (son dossier de
+    photos de profil ; stories/ est son voisin) et apres() (rafraîchir ses
+    compteurs)."""
     from flask import Response, jsonify, redirect, request, send_file
+    if pp:
+        _PP.update(pp)
 
     def _refus_lecture():
         if not is_auth():
@@ -1487,7 +1904,7 @@ def register(app, is_auth, is_admin):
             return refus
         c = _corps()
         return _protege(lambda: chercher(str(c.get("style") or ""), str(c.get("q") or ""),
-                                         int(c.get("page") or 0), bool(c.get("carre", True))))
+                                         int(c.get("page") or 0), c.get("format")))
 
     @app.route("/pfp/pour-toi", methods=["POST"])
     def pfp_pour_toi():
@@ -1540,11 +1957,33 @@ def register(app, is_auth, is_admin):
 
         def _faire():
             if c.get("action") == "creer":
-                return {"ok": True, "style": creer_style(str(c.get("nom") or ""))}
+                return {"ok": True, "style": creer_style(str(c.get("nom") or ""), str(c.get("usage") or "pp"))}
             if c.get("action") == "renommer":
                 return {"ok": renommer_style(str(c.get("id") or ""), str(c.get("nom") or ""))}
             return {"ok": False, "erreur": "Action inconnue."}
         return _protege(_faire)
+
+    @app.route("/pfp/cibles")
+    def pfp_cibles():
+        refus = _refus_lecture()
+        if refus is not None:
+            return _json({"ok": False}, 403)
+        m = str(request.args.get("marche") or "")
+        st = _style(str(request.args.get("style") or "")) or {}
+        u = st.get("usage") or "pp"
+        return _protege(lambda: {"ok": True, "marche": m, "nom": MARCHES.get(m, ""), "usage": u,
+                                 "cibles": cibles(m, u)})
+
+    @app.route("/pfp/pousser", methods=["POST"])
+    def pfp_pousser():
+        refus = _refus_ecriture()
+        if refus is not None:
+            return refus
+        c = _corps()
+        cles = c.get("cles") if isinstance(c.get("cles"), list) else []
+        ids = c.get("identites") if isinstance(c.get("identites"), list) else []
+        return _protege(lambda: pousser(str(c.get("style") or ""), [str(x) for x in cles],
+                                        str(c.get("marche") or ""), [str(x) for x in ids]))
 
     @app.route("/pfp/fichier/<style_id>/<nom>")
     def pfp_fichier(style_id, nom):
