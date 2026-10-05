@@ -88,6 +88,13 @@ SEUIL_PROCHE = 0.80
 K_VOISINS = 3
 
 MAX_IMAGE = 20 * 1024 * 1024
+
+#: Banques d'images : leurs aperçus portent un filigrane (« VectorStock »,
+#: « alamy » en travers de l'image, vu dans les résultats du 05/10), donc
+#: aucune n'est utilisable en PP ni en story. Écartées et comptées.
+_BANQUES = re.compile(r"(?:^|\.)(?:vectorstock|alamy|shutterstock|dreamstime|istockphoto|gettyimages|"
+                      r"depositphotos|123rf|freepik|canstockphoto|bigstockphoto|pond5|colourbox|vecteezy|"
+                      r"pngtree|pikbest|lovepik|stock\.adobe)\.", re.I)
 MAX_EXEMPLES = 30
 
 _ID_STYLE = re.compile(r"^[0-9a-f]{8}$")
@@ -124,12 +131,16 @@ USAGES: Dict[str, Dict[str, Any]] = {
                      "makeup vanity aesthetic"]},
     "life": {"nom": "Story life", "emoji": "🌿", "format": "vertical", "dest": "reserve", "unite": "life",
              "phrase": "dans les stories 🌿 Life des réserves cochées. Les VA les reçoivent avec le bouton 🌿 Story life.",
-             "idees": ["aesthetic coffee morning", "gym aesthetic", "cozy bedroom aesthetic", "brunch aesthetic",
-                       "shopping bags aesthetic"]},
+             # le propriétaire, le 05/10 : « comme si j'étais une fille de 18,
+             # 19, 20, 21, 22 ans [...] des trucs mignons », « pas des trucs de fou »
+             "idees": ["iced coffee aesthetic", "cute room decor aesthetic", "matcha latte aesthetic",
+                       "study desk aesthetic", "pastel nails aesthetic", "bubble tea aesthetic",
+                       "picnic aesthetic", "sunset walk aesthetic"]},
     "travel": {"nom": "Story travel", "emoji": "✈️", "format": "vertical", "dest": "reserve", "unite": "travel",
                "phrase": "dans les stories ✈️ Travel des réserves cochées. Les VA les reçoivent avec le bouton ✈️ Story travel.",
-               "idees": ["beach sunset aesthetic", "airplane window view", "luxury hotel room aesthetic",
-                         "pool villa aesthetic", "dubai aesthetic"]},
+               "idees": ["girls trip aesthetic", "beach day aesthetic", "road trip aesthetic",
+                         "summer vacation aesthetic", "train window view aesthetic", "ice cream beach aesthetic",
+                         "airport aesthetic", "camping aesthetic"]},
     "night": {"nom": "Story night", "emoji": "🌙", "format": "vertical", "dest": "reserve", "unite": "night",
               "phrase": "dans les stories 🌙 Night des réserves cochées. Les VA les reçoivent avec le bouton 🌙 Story night.",
               "idees": ["night city lights aesthetic", "night drive car aesthetic", "club party night aesthetic",
@@ -219,12 +230,14 @@ def _enregistrer_styles(lst: List[Dict[str, Any]]) -> None:
     safe_json.write(STYLES_FILE, {"styles": lst})
 
 
-def creer_style(nom: str, usage: str = "pp") -> Dict[str, Any]:
+def creer_style(nom: str, usage: str = "pp", idees: Optional[List[str]] = None) -> Dict[str, Any]:
     nom = re.sub(r"\s+", " ", str(nom or "")).strip()[:60] or "Nouveau style"
     usage = usage if usage in USAGES else "pp"
     with _VERROU_STYLES:
         lst = styles()
         s = {"id": secrets.token_hex(4), "nom": nom, "usage": usage, "cree": int(time.time()), "recherches": []}
+        if idees:
+            s["idees"] = [re.sub(r"\s+", " ", str(x)).strip()[:80] for x in idees if str(x).strip()][:10]
         lst.append(s)
         _enregistrer_styles(lst)
     return s
@@ -728,15 +741,26 @@ def _completer_vecteurs(style_id: str, avis: Dict[str, Dict[str, Any]], limite: 
 
 # ---------------------------------------------------------------- classement
 
+def _banque(c: Dict[str, Any]) -> bool:
+    for u in (c.get("img"), c.get("page")):
+        h = urllib.parse.urlsplit(str(u or "")).hostname or ""
+        if _BANQUES.search(h):
+            return True
+    return False
+
+
 def _classer(style_id: str, cands: List[Dict[str, Any]], erreurs: List[str], fin: bool,
              titre: str) -> Dict[str, Any]:
     import numpy as np
     avis = _avis(style_id)
-    vus, uniques, deja = set(), [], 0
+    vus, uniques, deja, filigranes = set(), [], 0, 0
     for c in cands:
         if c["cle"] in vus:
             continue
         vus.add(c["cle"])
+        if _banque(c):
+            filigranes += 1
+            continue
         if c["cle"] in avis:
             deja += 1
             continue
@@ -786,7 +810,7 @@ def _classer(style_id: str, cands: List[Dict[str, Any]], erreurs: List[str], fin
         gardees.sort(key=lambda c: c.get("score", -9), reverse=True)
         ecartees.sort(key=lambda c: c.get("score", -9), reverse=True)
     return {"ok": True, "titre": titre, "images": gardees, "ecartees": ecartees,
-            "doublons": doublons, "deja_jugees": deja, "fin": fin, "erreurs": erreurs,
+            "doublons": doublons, "deja_jugees": deja, "filigranes": filigranes, "fin": fin, "erreurs": erreurs,
             "classe": classe, "sans_vecteur": sum(1 for c in uniques if c["cle"] not in vecs) if vecs else 0,
             "apprentissage": {"ok": len(pos), "non": len(neg)}}
 
@@ -1093,7 +1117,8 @@ def gardees(style_id: str) -> List[Dict[str, Any]]:
                     "img": e.get("img") or "", "page": e.get("page") or "", "titre": e.get("titre") or "",
                     "src": e.get("src") or "", "echec": e.get("echec") or "",
                     "en_cours": not e.get("fichier") and not e.get("echec"),
-                    "pousse": {m: len((e.get("pousse") or {}).get(m) or []) for m in MARCHES}})
+                    # « us » / « fr » : les envois d'avant le bouton unique
+                    "pousse_n": len({i for v in (e.get("pousse") or {}).values() for i in (v or [])})})
     return out
 
 
@@ -1125,7 +1150,10 @@ def archive_zip(style_id: str) -> Optional[Tuple[bytes, str]]:
 #: Les photos de profil que le bouton 🖼 PP du menu Discord donne aux VA
 #: vivent par identité : data/identities/<id>/profile_pics/pp_N.ext. Le
 #: marché de l'identité (marche.py) dit de quel côté elle est : US = OnlyFans,
-#: FR = MYM. Ce module ne connaît ni la liste des identités ni leurs
+#: FR = MYM ; il n'est plus qu'un drapeau sur la page : le propriétaire a
+#: retiré les deux boutons OF / MYM (« je me suis trompé », 05/10) — une PP
+#: suit le LOOK d'un groupe de models, pas son marché. « tout » = les deux
+#: marchés. Ce module ne connaît ni la liste des identités ni leurs
 #: dossiers : le site les lui passe à register() (_PP), pour qu'il n'importe
 #: pas web_upload et qu'une seule règle décide quelles identités existent.
 MARCHES = {"us": "OF", "fr": "MYM"}
@@ -1156,13 +1184,34 @@ def _nature(identite: str) -> str:
         return ""
 
 
-def cibles(marche: str, usage: str = "pp") -> List[Dict[str, Any]]:
+def _empreintes_exemples(style_id: Optional[str]) -> Dict[int, set]:
+    """{taille: {md5}} des exemples d'un style — les photos que les models
+    utilisent déjà et qui ont servi à l'amorcer."""
+    out: Dict[int, set] = {}
+    if not style_id or not _style(style_id):
+        return out
+    for e in _avis(style_id).values():
+        if e.get("v") == "ok" and e.get("src") == "exemple":
+            f = chemin_fichier(style_id, e.get("fichier") or "")
+            if f:
+                b = f.read_bytes()
+                out.setdefault(len(b), set()).add(hashlib.md5(b).hexdigest())
+    return out
+
+
+def cibles(marche: str, usage: str = "pp", style_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Les identités d'un marché où cette catégorie peut partir, avec ce
     qu'elles ont déjà : PP pour une PP, stories pour Story me, stories de ce
-    type pour une réserve. « coche » : la proposition par défaut de la page."""
+    type pour une réserve. « coche » : la proposition par défaut de la page.
+
+    Un style amorcé avec les PP d'un groupe (les 18 PP blondes de blonde,
+    ellieann...) coche les identités qui ont déjà ces PP — et elles seules :
+    chaque groupe de models a son look, et le cocher partout aurait mis des
+    blondes chez les brunes."""
     u = USAGES.get(usage)
-    if marche not in MARCHES or not u or not _pp_branche():
+    if (marche not in MARCHES and marche != "tout") or not u or not _pp_branche():
         return []
+    exemples = _empreintes_exemples(style_id) if u["dest"] != "reserve" else {}
     reg = {}
     if u["dest"] == "reserve":
         ts = _types_story()
@@ -1172,9 +1221,10 @@ def cibles(marche: str, usage: str = "pp") -> List[Dict[str, Any]]:
     out = []
     for i in sorted(_PP["identites"](), key=str.lower):
         try:
-            if _PP["marche"](i) != marche:
-                continue
+            mk = _PP["marche"](i)
         except Exception:
+            continue
+        if marche != "tout" and mk != marche:
             continue
         nat = _nature(i)
         if u["dest"] == "reserve" and nat != "reserve":
@@ -1188,11 +1238,17 @@ def cibles(marche: str, usage: str = "pp") -> List[Dict[str, Any]]:
         else:
             n = len(photos)
             coche = n > 0
-        out.append({"id": i, "n": n, "coche": coche})
+        meme_look = 0
+        if exemples:
+            meme_look = sum(1 for x in photos if x.stat().st_size in exemples
+                            and hashlib.md5(x.read_bytes()).hexdigest() in exemples[x.stat().st_size])
+            coche = meme_look > 0
+        out.append({"id": i, "n": n, "coche": coche, "look": meme_look, "marche": mk})
     return out
 
 
 def pousser(style_id: str, cles: List[str], marche: str, identites: List[str]) -> Dict[str, Any]:
+    # marche : « tout », ou « us » / « fr » pour ne viser qu'un côté
     """COPIE des images gardées là où la catégorie du style les envoie (PP,
     Story me, story typée d'une réserve). Une image déjà présente dans un
     dossier (mêmes octets) n'y est pas recopiée : pousser deux fois ne fait
@@ -1202,20 +1258,20 @@ def pousser(style_id: str, cles: List[str], marche: str, identites: List[str]) -
         return {"ok": False, "erreur": "Style inconnu."}
     usage = st["usage"]
     u = USAGES[usage]
-    if marche not in MARCHES:
+    if marche not in MARCHES and marche != "tout":
         return {"ok": False, "erreur": "Marché inconnu."}
     if not _pp_branche():
         return {"ok": False, "erreur": "Les dossiers des models ne sont pas branchés sur cette page."}
     possible, raison = pousse_possible(usage)
     if not possible:
         return {"ok": False, "erreur": raison}
-    valides = {c["id"].lower(): c["id"] for c in cibles(marche, usage)}
+    valides = {c["id"].lower(): c["id"] for c in cibles(marche, usage)}   # sans le look : il ne fait que cocher
     demandees = list(dict.fromkeys(str(i or "").strip().lower() for i in (identites or [])[:100]))
     tgts = [valides[x] for x in demandees if x in valides]
     refusees = [x for x in demandees if x and x not in valides]
     if not tgts:
         quoi = "réserve" if u["dest"] == "reserve" else "model"
-        return {"ok": False, "erreur": f"Aucune {quoi} {MARCHES[marche]} cochée."}
+        return {"ok": False, "erreur": f"Aucune {quoi} cochée."}
     avis = _avis(style_id)
     images, sans_fichier = [], 0
     for k in list(dict.fromkeys(cles or []))[:500]:
@@ -1285,14 +1341,14 @@ def pousser(style_id: str, cles: List[str], marche: str, identites: List[str]) -
         for k, lst in fait.items():
             if k in frais:
                 p = frais[k].setdefault("pousse", {})
-                p[marche] = sorted(set(p.get(marche) or []) | set(lst))
+                p["ids"] = sorted(set(p.get("ids") or []) | set(lst))
         _enregistrer_avis(style_id, frais)
     if copiees and callable(_PP.get("apres")):
         try:
             _PP["apres"]()            # compteurs des menus du site à jour
         except Exception:
             pass
-    print(f"[pfp] poussé {u['nom']} {MARCHES[marche]} : {copiees} copie(s), {deja} déjà là, "
+    print(f"[pfp] poussé {u['nom']} ({marche}) : {copiees} copie(s), {deja} déjà là, "
           f"{len(images)} image(s) x {len(tgts)} identité(s)" + (f", {len(erreurs)} erreur(s)" if erreurs else ""),
           flush=True)
     return {"ok": True, "copiees": copiees, "deja": deja, "images": len(images), "models": len(tgts),
@@ -1310,7 +1366,7 @@ def etat(style_id: Optional[str] = None) -> Dict[str, Any]:
         usages[k] = {c: u[c] for c in ("nom", "emoji", "format", "dest", "unite", "phrase", "idees")}
         usages[k].update(possible=possible, raison=raison)
     return {"styles": [{"id": x["id"], "nom": x["nom"], "usage": x["usage"]} for x in lst], "style": s["id"],
-            "usage": s["usage"], "usages": usages,
+            "usage": s["usage"], "usages": usages, "idees": s.get("idees") or USAGES[s["usage"]]["idees"],
             "recherches": s.get("recherches") or [], "stats": _stats(_avis(s["id"])),
             "gardees": gardees(s["id"]), "modele": etat_modele(), "pp": _pp_branche()}
 
@@ -1436,7 +1492,7 @@ input[type=file]{display:none}
 </style></head><body>
 <div class="tete"><a class="retour" href="/">← Dashboard</a><h1>Photos de profil</h1></div>
 <p class="sous">Choisis la catégorie, décris l'image, garde (OK) ou écarte (Non) : chaque catégorie apprend tes goûts à part.
-Les gardées se poussent en PP ou en story pour OF et MYM. Images trouvées sur Pinterest via Yandex et Bing.</p>
+Les gardées se poussent en PP ou en story chez les models choisies. Images trouvées sur Pinterest via Yandex et Bing.</p>
 <div class="styles" id="styles"></div>
 <div class="barre">
   <input type="text" id="q" placeholder="ex. anime girl pink hair pfp, chat noir dessin, cartoon boy cap" autocomplete="off">
@@ -1467,8 +1523,8 @@ Les gardées se poussent en PP ou en story pour OF et MYM. Images trouvées sur 
 var D = JSON.parse(document.getElementById("pfp-donnees").textContent);
 var S = {style: D.style, res: null, req: null, page: 0, occupe: false, stats: D.stats, gardees: D.gardees, modele: D.modele, pp: D.pp};
 var U = (D.usages || {})[D.usage] || {nom: "PP", emoji: "🖼", format: "carre", dest: "pp", unite: "PP", phrase: "", idees: [], possible: true};
-var NOMS = {us: "OF", fr: "MYM"}, DRAPEAUX = {us: "🇺🇸", fr: "🇫🇷"};
-var P = {marche: null, cles: []};
+var DRAPEAUX = {us: "🇺🇸", fr: "🇫🇷"};
+var P = {cles: []};
 var $ = function(id){ return document.getElementById(id); };
 
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -1498,7 +1554,7 @@ function rendreStyles(){
   var rec = (D.recherches || []).map(function(r){ deja[r.toLowerCase()] = 1;
     return "<button class=\"chip petit\" data-r=\"" + esc(r) + "\">" + esc(r) + "</button>"; });
   // des idées de départ propres à la catégorie, après les recherches déjà faites
-  var idees = (U.idees || []).filter(function(r){ return !deja[r.toLowerCase()]; }).map(function(r){
+  var idees = (D.idees || U.idees || []).filter(function(r){ return !deja[r.toLowerCase()]; }).map(function(r){
     return "<button class=\"chip petit idee\" data-r=\"" + esc(r) + "\" title=\"Idée de recherche\">💡 " + esc(r) + "</button>"; });
   $("recentes").innerHTML = rec.concat(idees).join("");
 }
@@ -1549,6 +1605,7 @@ function rendreRes(){
   if (r.classe) infos.push("rangées selon tes goûts");
   if (r.deja_jugees) infos.push(r.deja_jugees + " déjà jugée(s), masquée(s)");
   if (r.doublons) infos.push(r.doublons + " doublon(s) d'images déjà vues, masqué(s)");
+  if (r.filigranes) infos.push(r.filigranes + " image(s) de banques d'images (filigrane) écartée(s)");
   if (r.sans_vecteur) infos.push(r.sans_vecteur + " vignette(s) illisible(s), en fin de liste");
   h += "<div class=\"infos\">" + esc(infos.join(" · ")) + "</div>";
   (r.erreurs || []).forEach(function(e){ h += "<div class=\"err\">" + esc(e) + "</div>"; });
@@ -1595,6 +1652,7 @@ function lancer(req){
       S.res.images = S.res.images.concat(j.images.filter(function(c){ return !vus[c.cle]; }));
       S.res.ecartees = (S.res.ecartees || []).concat((j.ecartees || []).filter(function(c){ return !vus[c.cle]; }));
       S.res.fin = j.fin; S.res.erreurs = j.erreurs; S.res.doublons += j.doublons; S.res.deja_jugees += j.deja_jugees;
+      S.res.filigranes = (S.res.filigranes || 0) + (j.filigranes || 0);
       S.res.classe = S.res.classe || j.classe;
     } else { S.res = j; }
     if (req.type === "texte" && req.page === 0) ajouterRecente(req.q);
@@ -1627,42 +1685,49 @@ function rafraichirGardees(){
     }).catch(function(){});
 }
 
+function carteGardee(x){
+  var src = x.fichier ? "/pfp/fichier/" + encodeURIComponent(S.style) + "/" + encodeURIComponent(x.fichier) : x.vign;
+  var bas;
+  if (x.fichier) bas = "<a href=\"" + esc(src) + "\" download>⬇️ Télécharger</a>";
+  else if (x.echec) bas = "<span>Original introuvable</span> <button class=\"reessayer\">réessayer</button>";
+  else bas = "<span>Téléchargement…</span>";
+  var ex = x.src === "exemple";
+  return "<div class=\"carte v-ok\" data-cle=\"" + esc(x.cle) + "\" title=\"" + esc(x.titre) + "\">"
+    + "<div class=\"im\"><img loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\"" + esc(src) + "\" alt=\"\"></div>"
+    + (ex ? "" : "<div class=\"pousse\"><button class=\"p-un" + (x.pousse_n ? " fait" : "") + "\"" + (x.fichier && U.possible ? "" : " disabled")
+      + " title=\"" + esc(!U.possible ? U.raison : (x.pousse_n ? "Déjà chez " + x.pousse_n + " model(s)" : "Pousser en " + U.nom)) + "\">"
+      + (x.pousse_n ? "📤 Poussée ✓ (" + x.pousse_n + ")" : "📤 Pousser") + "</button></div>")
+    + "<div class=\"etat\" style=\"display:flex\">" + bas + "<button class=\"retirer\">retirer</button></div>"
+    + "</div>";
+}
+
 function rendreGardees(){
-  var g = S.gardees || [];
+  var tout = S.gardees || [];
+  // les exemples (photos déjà chez les models) apprennent le style ; ils ne
+  // se mélangent pas aux trouvailles et ne repartent pas avec « Tout pousser »
+  var g = tout.filter(function(x){ return x.src !== "exemple"; });
+  var ex = tout.filter(function(x){ return x.src === "exemple"; });
   var h = "";
   if (!U.possible) h += "<div class=\"note-dest\">" + esc(U.raison) + "</div>";
-  if (!g.length) { $("v-garde").innerHTML = h + "<div class=\"vide\">Rien de gardé dans ce style pour l'instant.</div>"; majOnglets(); return; }
+  if (!g.length && !ex.length) { $("v-garde").innerHTML = h + "<div class=\"vide\">Rien de gardé dans ce style pour l'instant.</div>"; majOnglets(); return; }
   var off = U.possible ? "" : " disabled title=\"" + esc(U.raison) + "\"";
   h += "<div class=\"barre\"><a class=\"btn bleu\" href=\"/pfp/zip/" + encodeURIComponent(S.style) + "\">⬇️ Tout télécharger (.zip)</a>"
-    + "<button class=\"btn pousser-tout\" data-m=\"us\"" + off + ">🇺🇸 Tout pousser en " + esc(U.nom) + " pour OF</button>"
-    + "<button class=\"btn pousser-tout\" data-m=\"fr\"" + off + ">🇫🇷 Tout pousser en " + esc(U.nom) + " pour MYM</button></div>";
-  h += "<div class=\"grille\">" + g.map(function(x){
-    var src = x.fichier ? "/pfp/fichier/" + encodeURIComponent(S.style) + "/" + encodeURIComponent(x.fichier) : x.vign;
-    var bas;
-    if (x.fichier) bas = "<a href=\"" + esc(src) + "\" download>⬇️ Télécharger</a>";
-    else if (x.echec) bas = "<span>Original introuvable</span> <button class=\"reessayer\">réessayer</button>";
-    else bas = "<span>Téléchargement…</span>";
-    return "<div class=\"carte v-ok\" data-cle=\"" + esc(x.cle) + "\" title=\"" + esc(x.titre) + "\">"
-      + "<div class=\"im\"><img loading=\"lazy\" referrerpolicy=\"no-referrer\" src=\"" + esc(src) + "\" alt=\"\"></div>"
-      + "<div class=\"pousse\">" + ["us", "fr"].map(function(m){
-          var n = (x.pousse || {})[m] || 0;
-          return "<button class=\"p-un" + (n ? " fait" : "") + "\" data-m=\"" + m + "\"" + (x.fichier && U.possible ? "" : " disabled")
-            + " title=\"" + esc(!U.possible ? U.raison : (n ? "Déjà chez " + n + " " + NOMS[m] : "Pousser en " + U.nom + " pour " + NOMS[m])) + "\">"
-            + DRAPEAUX[m] + " " + NOMS[m] + (n ? " ✓" : "") + "</button>";
-        }).join("") + "</div>"
-      + "<div class=\"etat\" style=\"display:flex\">" + bas + "<button class=\"retirer\">retirer</button></div>"
-      + (x.src === "exemple" ? "<div class=\"note\">exemple ajouté</div>" : "")
-      + "</div>";
-  }).join("") + "</div>";
+    + "<button class=\"btn pousser-tout\"" + off + ">📤 Tout pousser en " + esc(U.nom) + "</button></div>";
+  h += g.length ? "<div class=\"grille\">" + g.map(carteGardee).join("") + "</div>"
+    : "<div class=\"vide\">Aucune trouvaille gardée pour l'instant : cherche, puis ✅ OK.</div>";
+  if (ex.length) {
+    h += "<div class=\"replie\"><button class=\"btn\" id=\"voir-ex\">Exemples du style (" + ex.length + ") : tes photos de départ</button>"
+      + "<div class=\"grille\" id=\"g-ex\" hidden style=\"margin-top:10px\">" + ex.map(carteGardee).join("") + "</div></div>";
+  }
   $("v-garde").innerHTML = h;
   majOnglets();
 }
 
-function lireMemo(m){
-  try { var v = JSON.parse(localStorage.getItem("pfp-cibles-" + D.usage + "-" + m) || "null"); return Array.isArray(v) ? v : null; }
+function lireMemo(){
+  try { var v = JSON.parse(localStorage.getItem("pfp-cibles-" + S.style) || "null"); return Array.isArray(v) ? v : null; }
   catch (e) { return null; }
 }
-function ecrireMemo(m, ids){ try { localStorage.setItem("pfp-cibles-" + D.usage + "-" + m, JSON.stringify(ids)); } catch (e) {} }
+function ecrireMemo(ids){ try { localStorage.setItem("pfp-cibles-" + S.style, JSON.stringify(ids)); } catch (e) {} }
 
 function cochees(){
   return Array.prototype.slice.call(document.querySelectorAll("#modal .m-liste input:checked")).map(function(i){ return i.value; });
@@ -1674,27 +1739,27 @@ function majCompte(){
   b.textContent = n ? "Pousser vers " + n + " " + quoi + "(s)" : "Coche au moins une " + quoi;
 }
 
-function ouvrirPousser(m, cles){
+function ouvrirPousser(cles){
   if (!S.pp) { toast("Les dossiers des models ne sont pas branchés sur cette page."); return; }
   if (!U.possible) { toast(U.raison); return; }
   if (!cles.length) { toast("Aucune image prête : attends la fin du téléchargement."); return; }
-  P.marche = m; P.cles = cles;
+  P.cles = cles;
   var md = $("modal"), liste = md.querySelector(".m-liste");
-  md.querySelector("h3").textContent = DRAPEAUX[m] + " Pousser en " + U.emoji + " " + U.nom + " pour " + NOMS[m];
+  md.querySelector("h3").textContent = "📤 Pousser en " + U.emoji + " " + U.nom;
   md.querySelector(".m-sous").textContent = cles.length + " image(s) à copier " + U.phrase + " Une image déjà présente n'est pas recopiée.";
   liste.innerHTML = "<div class=\"attente\">Chargement…</div>";
   $("m-ok").disabled = true;
   md.hidden = false;
-  fetch("/pfp/cibles?marche=" + m + "&style=" + encodeURIComponent(S.style), {credentials: "same-origin"}).then(function(r){ return r.json(); }).then(function(j){
-    var lst = j.cibles || [], memo = lireMemo(m);
+  fetch("/pfp/cibles?marche=tout&style=" + encodeURIComponent(S.style), {credentials: "same-origin"}).then(function(r){ return r.json(); }).then(function(j){
+    var lst = j.cibles || [], memo = lireMemo();
     if (!lst.length) {
-      liste.innerHTML = "<div class=\"vide\">Aucune " + (U.dest === "reserve" ? "réserve " : "model ") + NOMS[m] + " pour " + esc(U.nom) + ".</div>";
+      liste.innerHTML = "<div class=\"vide\">Aucune " + (U.dest === "reserve" ? "réserve" : "model") + " pour " + esc(U.nom) + ".</div>";
       majCompte(); return;
     }
     liste.innerHTML = lst.map(function(x){
       var coche = memo ? memo.indexOf(x.id) >= 0 : x.coche;
       return "<label class=\"m-ligne\"><input type=\"checkbox\" value=\"" + esc(x.id) + "\"" + (coche ? " checked" : "") + ">"
-        + "<span>" + esc(x.id) + "</span><span class=\"m-n\">" + x.n + " " + esc(U.unite) + "</span></label>";
+        + "<span>" + (DRAPEAUX[x.marche] || "") + " " + esc(x.id) + "</span><span class=\"m-n\">" + (x.look ? x.look + " du style · " : "") + x.n + " " + esc(U.unite) + "</span></label>";
     }).join("");
     majCompte();
   }).catch(function(){ liste.innerHTML = "<div class=\"err\">Liste des models illisible.</div>"; });
@@ -1705,13 +1770,13 @@ function fermerPousser(){ $("modal").hidden = true; }
 function lancerPousser(){
   var ids = cochees(), b = $("m-ok");
   if (!ids.length) return;
-  ecrireMemo(P.marche, ids);
+  ecrireMemo(ids);
   b.disabled = true; b.textContent = "Copie…";
-  post("/pfp/pousser", {style: S.style, cles: P.cles, marche: P.marche, identites: ids}).then(function(j){
+  post("/pfp/pousser", {style: S.style, cles: P.cles, marche: "tout", identites: ids}).then(function(j){
     if (!j.ok) { toast(j.erreur || "Rien n'a été poussé"); majCompte(); return; }
     fermerPousser();
     var t = "✅ " + j.copiees + " copie(s) en " + U.nom + " chez " + j.models + " "
-      + (U.dest === "reserve" ? "réserve(s) " : "model(s) ") + NOMS[P.marche];
+      + (U.dest === "reserve" ? "réserve(s)" : "model(s)");
     if (j.deja) t += " · " + j.deja + " déjà là";
     if (j.sans_fichier) t += " · " + j.sans_fichier + " image(s) pas encore téléchargée(s), ignorée(s)";
     if ((j.erreurs || []).length) t += " · ⚠️ " + j.erreurs.join(" ; ");
@@ -1721,7 +1786,7 @@ function lancerPousser(){
 }
 
 function majOnglets(){
-  document.querySelector(".ong[data-o=garde]").textContent = "Gardées (" + (S.gardees || []).length + ")";
+  document.querySelector(".ong[data-o=garde]").textContent = "Gardées (" + (S.gardees || []).filter(function(x){ return x.src !== "exemple"; }).length + ")";
 }
 
 function montrer(o){
@@ -1759,6 +1824,7 @@ document.addEventListener("click", function(ev){
   if (t.id === "plus") { lancer({type: "texte", q: S.req.q, page: S.req.page + 1}); return; }
   if (t.id === "encore") { lancer({type: "pourtoi", page: 0}); return; }
   if (t.id === "voir-ec") { var g = $("g-ec"); g.hidden = !g.hidden; return; }
+  if (t.id === "voir-ex") { var gx = $("g-ex"); gx.hidden = !gx.hidden; return; }
   if (t.closest("#modal")) {
     if (t.id === "m-annuler" || t.id === "modal") fermerPousser();
     else if (t.id === "m-ok") lancerPousser();
@@ -1769,7 +1835,7 @@ document.addEventListener("click", function(ev){
     return;
   }
   if ((el = t.closest(".pousser-tout"))) {
-    ouvrirPousser(el.getAttribute("data-m"), (S.gardees || []).filter(function(x){ return x.fichier; }).map(function(x){ return x.cle; }));
+    ouvrirPousser((S.gardees || []).filter(function(x){ return x.fichier && x.src !== "exemple"; }).map(function(x){ return x.cle; }));
     return;
   }
   var c = t.closest(".carte");
@@ -1781,7 +1847,7 @@ document.addEventListener("click", function(ev){
     return;
   }
   if (t.closest("#v-garde")) {
-    if (t.classList.contains("p-un")) { ouvrirPousser(t.getAttribute("data-m"), [c.getAttribute("data-cle")]); return; }
+    if (t.classList.contains("p-un")) { ouvrirPousser([c.getAttribute("data-cle")]); return; }
     if (t.classList.contains("retirer")) {
       if (!confirm("Retirer cette image des gardées ? Elle part dans la corbeille du style ; les copies déjà poussées aux models restent.")) return;
       post("/pfp/avis", {style: S.style, cle: c.getAttribute("data-cle"), v: "annuler"}).then(function(j){
@@ -1824,7 +1890,8 @@ $("fichiers").addEventListener("change", function(){
 
 $("format").value = U.format || "carre";
 document.body.classList.toggle("vertical", U.format === "vertical");
-if (U.idees && U.idees.length) $("q").placeholder = "ex. " + U.idees.slice(0, 3).join(", ");
+var ID0 = D.idees || U.idees || [];
+if (ID0.length) $("q").placeholder = "ex. " + ID0.slice(0, 3).join(", ");
 rendreStyles(); rendreAppr(); rendreGardees(); suivreModele();
 })();
 </script>
@@ -1972,7 +2039,7 @@ def register(app, is_auth, is_admin, pp: Optional[Dict[str, Any]] = None):
         st = _style(str(request.args.get("style") or "")) or {}
         u = st.get("usage") or "pp"
         return _protege(lambda: {"ok": True, "marche": m, "nom": MARCHES.get(m, ""), "usage": u,
-                                 "cibles": cibles(m, u)})
+                                 "cibles": cibles(m, u, st.get("id"))})
 
     @app.route("/pfp/pousser", methods=["POST"])
     def pfp_pousser():

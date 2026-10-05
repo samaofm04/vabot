@@ -81,6 +81,10 @@ try:
 except pp.ErreurSource as e:
     check("Yandex : captcha signalé", "anti-robot" in str(e), str(e))
 
+check("banque d'images (filigrane) reconnue", pp._banque({"img": "https://cdn.vectorstock.com/i/x.jpg"})
+      and pp._banque({"page": "https://www.alamy.com/stock-photo-x.html"})
+      and not pp._banque({"img": a, "page": "https://www.pinterest.com/pin/1/"}))
+
 print("3) Avis, téléchargement, corbeille")
 pp._TELECHARGEMENTS = type("Sync", (), {"submit": staticmethod(lambda f, *a: f(*a))})()
 sid = pp.styles()[0]["id"]
@@ -178,7 +182,7 @@ check("pousser OF : model MYM et inconnue refusées, et dites", sorted(r["refuse
 check("pousser OF : aucun fichier temporaire laissé",
       not list(IDS.rglob("*.tmp")), f"{list(IDS.rglob('*.tmp'))}")
 check("pousser OF : l'image garde la trace des models servies",
-      pp._avis(sid)["ppush"]["pousse"]["us"] == ["usA", "usB"], f"{pp._avis(sid)['ppush']}")
+      pp._avis(sid)["ppush"]["pousse"]["ids"] == ["usA", "usB"], f"{pp._avis(sid)['ppush']}")
 check("pousser OF : compteurs du site rafraîchis", len(appels) == 1, f"{appels}")
 r = pp.pousser(sid, ["ppush"], "us", ["usA", "usB"])
 check("pousser deux fois : rien de recopié", r["ok"] and r["copiees"] == 0 and r["deja"] == 2
@@ -186,7 +190,19 @@ check("pousser deux fois : rien de recopié", r["ok"] and r["copiees"] == 0 and 
 check("pousser MYM sans model MYM cochée : refusé", not pp.pousser(sid, ["ppush"], "fr", ["usA"])["ok"])
 check("marché inconnu : refusé", not pp.pousser(sid, ["ppush"], "xx", ["usA"])["ok"])
 check("image non gardée : rien de poussé", not pp.pousser(sid, ["pzz", "pbon2"], "us", ["usA"])["ok"])
-check("page : la carte dit OF ✓", next(g for g in pp.gardees(sid) if g["cle"] == "ppush")["pousse"] == {"us": 2, "fr": 0})
+r = pp.pousser(sid, ["ppush"], "tout", ["usA", "frC"])
+check("bouton unique (« tout ») : les deux marchés dans le même envoi",
+      r["ok"] and r["copiees"] == 1 and r["deja"] == 1 and (IDS / "frc" / "profile_pics").is_dir(), f"{r}")
+check("page : la carte dit Poussée ✓ (3 models)", next(g for g in pp.gardees(sid) if g["cle"] == "ppush")["pousse_n"] == 3,
+      f"{pp.gardees(sid)}")
+check("cibles « tout » : chaque ligne porte son drapeau",
+      {c["id"]: c["marche"] for c in pp.cibles("tout", "pp")} == {"usA": "us", "usB": "us", "frC": "fr"})
+ex_f = next(TMP.glob(f"{sid}/garde/x*.png"))
+(IDS / "usa" / "profile_pics" / "pp_9.png").write_bytes(ex_f.read_bytes())
+cl = {c["id"]: c for c in pp.cibles("us", "pp", sid)}
+check("style amorcé : coche les models qui ont déjà ses PP, et elles seules",
+      cl["usA"]["coche"] and cl["usA"]["look"] == 1 and not cl["usB"]["coche"], f"{cl}")
+check("sans style : la règle d'avant (des PP = cochée)", all(c["coche"] for c in pp.cibles("us", "pp")))
 
 print("5b) Catégories : PP, Story me, life, travel, night")
 import types_story
@@ -238,6 +254,9 @@ r = pp.pousser(ids_st["me"], ["pme"], "fr", ["frM", "frR"])
 check("Story me : stories/ de la model, sans type, réserve refusée",
       r["ok"] and (IDS / "frm" / "stories" / "pfp_pme.png").is_file()
       and types_story.type_de("frM", "pfp_pme.png") == "" and r["refusees"] == ["frr"], f"{r}")
+s_bl = pp.creer_style("PP blonde", "pp", ["blonde cartoon girl pfp", "  "])
+check("style à idées propres : la page les montre à la place de celles de la catégorie",
+      pp.etat(s_bl["id"])["idees"] == ["blonde cartoon girl pfp"] and pp.etat(sid)["idees"] == pp.USAGES["pp"]["idees"])
 check("format : PP carré, stories verticales", pp.etat(ids_st["life"])["usages"]["life"]["format"] == "vertical"
       and pp._format(None, "carre") == "carre" and pp._format(True) == "carre" and pp._format("xx", "vertical") == "vertical")
 
