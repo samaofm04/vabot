@@ -31863,6 +31863,7 @@ SFS_ALERTES_FILE = DATA_DIR / "sfs_alertes.json"            # réglages (models,
 SFS_ALERTES_ETAT_FILE = DATA_DIR / "sfs_alertes_etat.json"  # alertes déjà parties sur Telegram
 SFS_ALERTES_HEURES = (9, 22)   # Telegram : pas de message la nuit, gardé pour 9 h
 SFS_PAIE_DEFAUT = 250.0        # $ par mois au VA des SFS (dit par le propriétaire le 05/10/2026)
+SFS_PUSHS_CACHE_FILE = DATA_DIR / "sfs_pushs_cache.json"   # push MyM relus (programmés compris)
 
 
 def _sfs_alertes_cfg() -> dict:
@@ -31962,10 +31963,69 @@ def _sfs_alertes_lignes(al: dict) -> list:
     return out
 
 
+def _sfs_programmes() -> list:
+    """[(clé, ligne)] des SFS PROGRAMMÉS à venir sur les comptes suivis :
+    file d'attente OnlyFans et push MyM à date future (MyPuls les liste avec
+    les envoyés). Pour le message « nouveau SFS programmé » (05/10/2026 :
+    « envoie aussi un message quand il y a un SFS programmé, comme ça j'ai
+    la notif »)."""
+    import datetime as _dt
+    import mypuls
+
+    def _n(x):
+        return re.sub(r"[^a-z0-9]", "", str(x or "").lower())
+
+    off = {_n(k) for k, v in (_sfs_alertes_cfg().get("models") or {}).items() if v is False}
+    ti = _of_aujourdhui().isoformat()
+    out = []
+    for it in _of_pushs_avec_envois(_load_of_pushs()).get("items") or []:
+        d = it.get("date") or ""
+        if it.get("sent") or d < ti or not mypuls.is_sfs_text(it.get("text")):
+            continue
+        cre = it.get("creator") or "?"
+        if _n(cre) in off:
+            continue
+        parts = mypuls.sfs_partenaires(it.get("text"), it.get("of_username"))
+        # « JJ/MM » ou « JJ/MM (programmé) » : dans l'ordre des dates, pas des chaînes
+        deja = sorted({x for m in (it.get("doublon") or []) for x in (m.get("d") or [])},
+                      key=lambda x: (x[3:5], x[0:2]))
+        out.append((f"p|OF|{it.get('creator_id') or cre}|{it.get('id')}",
+                    f"• {cre} (OF) — {d[8:10]}/{d[5:7]} à {it.get('time') or '?'} → "
+                    + (", ".join("@" + x for x in parts) or "SFS")
+                    + (f"  ⚠ même SFS déjà le {', '.join(deja)}" if deja else "")))
+    try:
+        from zoneinfo import ZoneInfo
+        maintenant = _dt.datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+    except Exception:
+        maintenant = _dt.datetime.now()
+    cache = safe_json.load(SFS_PUSHS_CACHE_FILE, None)
+    pushs = (cache.get("pushs") or []) if isinstance(cache, dict) else []
+    for p in pushs:
+        txt = p.get("description") or ""
+        if not re.search(r"@[a-z0-9_.]", txt, re.I):   # règle SFS MyM : un @
+            continue
+        try:
+            quand = _dt.datetime.strptime(p.get("sentAt") or "", "%d/%m/%Y %H:%M")
+        except ValueError:
+            continue
+        cre = p.get("creator") or "?"
+        if quand <= maintenant or _n(cre) in off:
+            continue
+        parts = mypuls.sfs_partenaires(txt)
+        out.append((f"p|MyM|{cre}|{p.get('id')}",
+                    f"• {cre} (MyM) — {quand:%d/%m} à {quand:%H:%M} → "
+                    + (", ".join("@" + x for x in parts) or "SFS")))
+    return out
+
+
 def _sfs_alertes_telegram() -> dict:
     """Envoie au groupe Telegram réglé les alertes SFS pas encore parties,
-    en un seul message. Appelé par le relevé automatique (machine de
-    production) toutes les 10 min ; rien la nuit."""
+    en un seul message, puis les SFS nouvellement programmés dans un second.
+    Appelé par le relevé automatique (machine de production) toutes les
+    10 min ; rien la nuit.
+
+    Les SFS déjà programmés au premier passage sont notés sans être envoyés :
+    sinon le groupe recevait d'un coup des dizaines de messages « nouveau »."""
     import datetime as _dt
     import time as _t
     cfg = _sfs_alertes_cfg()
@@ -31980,22 +32040,37 @@ def _sfs_alertes_telegram() -> dict:
     if not (SFS_ALERTES_HEURES[0] <= h < SFS_ALERTES_HEURES[1]):
         return {"ok": True, "envoye": 0, "note": "nuit : gardé pour le matin"}
     etat = safe_json.load(SFS_ALERTES_ETAT_FILE, None)
-    vus = (etat or {}).get("vus") if isinstance(etat, dict) else None
-    vus = vus if isinstance(vus, dict) else {}
-    neuves = [(k, l) for k, l in _sfs_alertes_lignes(_of_alertes_courantes()) if k not in vus]
-    if not neuves:
-        return {"ok": True, "envoye": 0}
-    texte = ("⚠ Alertes SFS OnlyFans\n\n" + "\n".join(l for _, l in neuves)
-             + "\n\nhttps://youl4b.com/?tab=sfs")
-    r = _telegram_envoyer(chat, texte)
-    if not r.get("ok"):
-        log.warning(f"[alertes-sfs] Telegram refusé : {r.get('error')}")
-        return {"ok": False, "error": r.get("error"), "envoye": 0}
+    etat = etat if isinstance(etat, dict) else {}
+    vus = etat.get("vus") if isinstance(etat.get("vus"), dict) else {}
     now = int(_t.time())
-    vus.update({k: now for k, _ in neuves})
-    vus = {k: v for k, v in vus.items() if now - int(v or 0) < 40 * 86400}
-    safe_json.write(SFS_ALERTES_ETAT_FILE, {"vus": vus})
-    return {"ok": True, "envoye": len(neuves)}
+    envoye, erreur = 0, ""
+    neuves = [(k, l) for k, l in _sfs_alertes_lignes(_of_alertes_courantes()) if k not in vus]
+    if neuves:
+        r = _telegram_envoyer(chat, "⚠ Alertes SFS OnlyFans\n\n" + "\n".join(l for _, l in neuves)
+                              + "\n\nhttps://youl4b.com/?tab=sfs")
+        if r.get("ok"):
+            vus.update({k: now for k, _ in neuves})
+            envoye += len(neuves)
+        else:
+            erreur = r.get("error") or "envoi refusé"
+    prog = [(k, l) for k, l in _sfs_programmes() if k not in vus]
+    if prog and not etat.get("prog_init"):
+        vus.update({k: now for k, _ in prog})          # existants : notés, pas envoyés
+    elif prog:
+        r = _telegram_envoyer(chat, "📅 Nouveaux SFS programmés\n\n" + "\n".join(l for _, l in prog)
+                              + "\n\nhttps://youl4b.com/?tab=sfs")
+        if r.get("ok"):
+            vus.update({k: now for k, _ in prog})
+            envoye += len(prog)
+        else:
+            erreur = erreur or r.get("error") or "envoi refusé"
+    if erreur:
+        log.warning(f"[alertes-sfs] Telegram refusé : {erreur}")
+    # un SFS programmé peut l'être 2 mois à l'avance : sa clé dure 90 jours
+    vus = {k: v for k, v in vus.items()
+           if now - int(v or 0) < (90 if k.startswith("p|") else 40) * 86400}
+    safe_json.write(SFS_ALERTES_ETAT_FILE, {"vus": vus, "prog_init": True})
+    return {"ok": not erreur, "envoye": envoye, "error": erreur}
 
 
 def _sfs_point_suivi(nom: str, models: dict) -> str:
@@ -32326,7 +32401,9 @@ def _start_mym_releve_daemon() -> bool:
     return True
 
 
-OF_RELEVE_INTERVALLE_S = 2 * 3600
+# 30 min (2 h avant) : un SFS tout juste programmé doit arriver vite sur
+# Telegram (05/10/2026)
+OF_RELEVE_INTERVALLE_S = 30 * 60
 _OF_RELEVE_DEMARRE = []
 
 
@@ -32336,7 +32413,7 @@ def _start_of_releve_daemon() -> bool:
     Sans lui, l'historique ne se relisait qu'à l'ouverture du planning SFS :
     l'alerte « pas de SFS depuis 2 jours » aurait sonné sur un relevé vieux de
     plusieurs jours, pour une model qui en avait envoyé. Toutes les 10 min,
-    relit si le dernier relevé (page ou fil) a plus de 2 h.
+    relit si le dernier relevé (page ou fil) a plus de OF_RELEVE_INTERVALLE_S.
 
     Machine de production seulement : le poste de dev a son propre data/."""
     if _OF_RELEVE_DEMARRE or not _machine_proprietaire("releve-of"):
@@ -32363,7 +32440,7 @@ def _start_of_releve_daemon() -> bool:
             time.sleep(600)
 
     threading.Thread(target=_boucle, name="releve-of", daemon=True).start()
-    print("[releve-of] relevé OnlyFans + Mass DM armé (toutes les 2 h)", flush=True)
+    print("[releve-of] relevé OnlyFans + Mass DM armé (toutes les 30 min)", flush=True)
     return True
 
 
@@ -32387,7 +32464,7 @@ def _mym_pushs_relire() -> dict:
 
 
 def _mym_pushs_relire_brut() -> dict:
-    _cache_f = DATA_DIR / "sfs_pushs_cache.json"
+    _cache_f = SFS_PUSHS_CACHE_FILE
     try:
         import mypuls
     except Exception as e:
@@ -60948,7 +61025,7 @@ def create_app():
         _start_favoris_auto_daemon()
     except Exception as _e:
         log.warning(f"favoris automatiques non démarrés: {_e}")
-    # File OnlyFans + historique Mass DM relus toutes les 2 h : les alertes
+    # File OnlyFans + historique Mass DM relus toutes les 30 min : les alertes
     # SFS (doublon, model sans SFS depuis 2 jours) ne dépendent pas d'une visite
     try:
         _start_of_releve_daemon()
@@ -72153,7 +72230,7 @@ def create_app():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
         from flask import jsonify
-        _cache_f = DATA_DIR / "sfs_pushs_cache.json"
+        _cache_f = SFS_PUSHS_CACHE_FILE
         if not request.args.get("refresh"):
             try:
                 _blob = json.loads(_cache_f.read_text(encoding="utf-8"))

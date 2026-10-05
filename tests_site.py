@@ -6923,6 +6923,60 @@ console.log(JSON.stringify({bloc, barre, detail}));"""
           _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["telegram"]
           == {"chat_id": "-4055555555", "titre": ""})
     _trAL.SFS_ALERTES_FILE, _trAL._reply = _savTrAL
+    # « envoie aussi un message quand un SFS est programme » (05/10/2026)
+    import datetime as _dtPG
+    _savPgAL = (_wAL.SFS_PUSHS_CACHE_FILE, _wAL.OF_PUSHS_FILE.read_text(encoding="utf-8"),
+                _wAL.SFS_ALERTES_HEURES, _wAL._telegram_envoyer)
+    _wAL.SFS_PUSHS_CACHE_FILE = _tmpAL / "sfs_pushs_cache.json"
+    _jPG = _savJourAL()
+    _demPG = (_jPG + _dtPG.timedelta(days=1)).isoformat()
+    _hierPG = (_jPG - _dtPG.timedelta(days=1)).isoformat()
+    _wAL.SFS_ALERTES_FILE.write_text(_jsAL.dumps({"models": {"Julia": True, "Emy": False,
+                                                             "Sarahmycrush": False},
+                                                  "telegram": {"chat_id": "-4012345678"}}))
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps({"counters": {}, "creators": [], "items": [
+        {"id": 701, "type": "chat", "date": _demPG, "time": "19:00", "creator": "Julia",
+         "creator_id": 3109, "of_username": "julia.brw", "text": "Tu connais @romy ? onlyfans.com/romy/c1"},
+        {"id": 702, "type": "chat", "date": _demPG, "time": "20:00", "creator": "Julia",
+         "creator_id": 3109, "text": "Tu dors ?"},
+        {"id": 703, "type": "chat", "date": _hierPG, "time": "19:00", "creator": "Julia",
+         "creator_id": 3109, "text": "SFS @vieux"},
+        {"id": 704, "type": "chat", "date": _demPG, "time": "19:00", "creator": "Emy",
+         "creator_id": 3352, "text": "SFS @coupee"}]}))
+    _fmtPG = lambda d: (d.strftime("%d/%m/%Y") + " 21:00")
+    _wAL.SFS_PUSHS_CACHE_FILE.write_text(_jsAL.dumps({"ts": 0, "pushs": [
+        {"id": 9001, "creator": "Lolatacrush", "description": "Va voir @kiki", "sentAt": _fmtPG(_jPG + _dtPG.timedelta(days=2))},
+        {"id": 9002, "creator": "Lolatacrush", "description": "Va voir @passe", "sentAt": _fmtPG(_jPG - _dtPG.timedelta(days=2))},
+        {"id": 9003, "creator": "Sarahmycrush", "description": "SFS @coupee", "sentAt": _fmtPG(_jPG + _dtPG.timedelta(days=2))},
+        {"id": 9004, "creator": "Lolatacrush", "description": "promo sans arobase", "sentAt": _fmtPG(_jPG + _dtPG.timedelta(days=2))}]}))
+    _pgAL = dict(_wAL._sfs_programmes())
+    check("SFS programmes : OF et MyM a venir, sur les comptes suivis seulement",
+          sorted(_pgAL) == ["p|MyM|Lolatacrush|9001", "p|OF|3109|701"], str(sorted(_pgAL)))
+    check("SFS programmes : la ligne dit le compte, le jour, l heure et la partenaire",
+          _pgAL.get("p|OF|3109|701", "").startswith("• Julia (OF) — " + _demPG[8:10] + "/" + _demPG[5:7] + " à 19:00 → @romy")
+          and "@kiki" in _pgAL.get("p|MyM|Lolatacrush|9001", ""), str(_pgAL)[:300])
+    _tgPG = []
+    _wAL._telegram_envoyer = lambda chat, texte: (_tgPG.append(texte) or {"ok": True})
+    _wAL.SFS_ALERTES_HEURES = (0, 24)
+    _wAL.SFS_ALERTES_ETAT_FILE.write_text("{}")
+    _wAL._sfs_alertes_telegram()
+    check("SFS programmes : ceux deja la au premier passage sont notes, pas envoyes",
+          not any("Nouveaux SFS programmés" in t for t in _tgPG)
+          and _jsAL.loads(_wAL.SFS_ALERTES_ETAT_FILE.read_text(encoding="utf-8")).get("prog_init"))
+    _ofPG = _jsAL.loads(_wAL.OF_PUSHS_FILE.read_text(encoding="utf-8"))
+    _ofPG["items"].append({"id": 705, "type": "chat", "date": _demPG, "time": "21:30", "creator": "Julia",
+                           "creator_id": 3109, "text": "Nouvelle copine @lea"})
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps(_ofPG))
+    _tgPG.clear()
+    _wAL._sfs_alertes_telegram()
+    check("SFS programmes : un NOUVEAU SFS programme part sur Telegram (la notif)",
+          len(_tgPG) == 1 and _tgPG[0].startswith("📅 Nouveaux SFS programmés")
+          and "Julia (OF)" in _tgPG[0] and "à 21:30 → @lea" in _tgPG[0], str(_tgPG)[:300])
+    _tgPG.clear()
+    _wAL._sfs_alertes_telegram()
+    check("SFS programmes : une seule fois", not _tgPG)
+    (_wAL.SFS_PUSHS_CACHE_FILE, _pqPG, _wAL.SFS_ALERTES_HEURES, _wAL._telegram_envoyer) = _savPgAL
+    _wAL.OF_PUSHS_FILE.write_text(_pqPG)
     _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
                                     "chat": {"role": "chatter", "password": "x"}}
     _cChAL = _appAL.test_client()
