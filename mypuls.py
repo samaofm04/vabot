@@ -3303,12 +3303,26 @@ def of_queue(creator_id: int, start: str, end: str,
     except Exception:
         return {"ok": False, "error": "file d'attente : réponse illisible", "of_user": of_user}
     items: List[Dict[str, Any]] = []
+    # miniatures des messages programmés : servies par le proxy OF de MyPuls
+    # (« /of-nav/https://cdn2.onlyfans.com/… » ; le CDN direct répond 403).
+    # Gardées À PART : ce sont des liens signés, ils n'ont rien à faire dans
+    # data/of_pushs.json ni dans la page.
+    thumb_urls: Dict[str, str] = {}
     for it in lst:
         if not isinstance(it, dict):
             continue
         ent = it.get("entity") or {}
         text = _of_html_to_text(ent.get("text") or "") or (ent.get("rawText") or "").strip()
         d, tm = _of_local_datetime(ent.get("scheduledAt") or it.get("publishDateTime") or "")
+        media = []
+        for mm in ent.get("media") or []:
+            mid = str((mm or {}).get("id") or "")
+            if not _OF_MEDIA_ID_RE.match(mid):
+                continue
+            media.append({"id": mid, "type": "video" if mm.get("type") == "video" else "photo"})
+            u = (((mm.get("files") or {}).get("thumb") or {}).get("url") or "")
+            if str(u).startswith("/of-nav/"):
+                thumb_urls[mid] = u
         items.append({
             "id": ent.get("id") or it.get("id"),
             "type": it.get("type") or ent.get("responseType") or "",
@@ -3318,9 +3332,46 @@ def of_queue(creator_id: int, start: str, end: str,
             "links": list(dict.fromkeys(_OF_LINK_RE.findall(text))),
             "mentions": list(dict.fromkeys(_OF_MENTION_RE.findall(text))),
             "lists": ent.get("sentRulesExtra") or "",
+            "media": media,
+            "media_count": max(int(ent.get("mediaCount") or 0), len(media)),
         })
     items.sort(key=lambda x: (x["date"], x["time"]))
-    return {"ok": True, "of_user": of_user, "items": items}
+    return {"ok": True, "of_user": of_user, "items": items, "thumb_urls": thumb_urls}
+
+
+def _of_queue_thumbs(session: requests.Session, h: str, urls: Dict[str, str],
+                     jusqu_a: float) -> Tuple[int, int]:
+    """Copie locale des miniatures des messages programmés (créatrice
+    sélectionnée dans `session`), sous le même nom que celles de l'historique
+    Mass DM : une fois parti, le message retrouve la même image. Rien au-delà
+    de `jusqu_a` (epoch) : le relevé ne doit pas s'éterniser, le reste vient
+    au suivant. Retourne (copiées, en échec)."""
+    import time as _t
+    done = failed = 0
+    for mid, u in urls.items():
+        p = of_massdm_media_path(h, mid, False)
+        if p is None or p.exists():
+            continue
+        if _t.time() > jusqu_a:
+            break
+        try:
+            r = session.get(BASE_URL + u, timeout=TIMEOUT)
+        except Exception:
+            failed += 1
+            continue
+        if r.status_code != 200 or not r.content \
+                or not (r.headers.get("content-type") or "").lower().startswith("image/"):
+            failed += 1
+            continue
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.{_th.get_ident()}.tmp")
+            tmp.write_bytes(r.content)
+            os.replace(tmp, p)
+            done += 1
+        except Exception:
+            failed += 1
+    return done, failed
 
 
 def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
@@ -3362,6 +3413,8 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
     massdm_errors: List[str] = []
     seen_of: Dict[Any, str] = {}   # id OF -> pseudo déjà servi
     seen_hash: Dict[str, str] = {}  # empreinte Mass DM -> pseudo déjà servi
+    import time as _t
+    budget_images = _t.time() + 20   # miniatures des programmés : 20 s par relevé au plus
     with _OF_SWITCH_LOCK:
         for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
             pseudo = c.get("pseudo") or str(c.get("id"))
@@ -3378,6 +3431,15 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
                                     of_username=(res.get("of_user") or {}).get("username") or "")
                 if not md.get("ok") or md.get("error"):
                     massdm_errors.append(f"{pseudo}: {md.get('error') or 'historique Mass DM illisible'}")
+            if res.get("ok") and opened.get("ok"):
+                # l'empreinte relie le message programmé à ses images
+                for it in res.get("items") or []:
+                    it["hash"] = opened["hash"]
+                _ok_i, _ko_i = _of_queue_thumbs(s, opened["hash"], res.get("thumb_urls") or {},
+                                                budget_images)
+                if _ko_i:
+                    massdm_errors.append(f"{pseudo}: {_ko_i} miniature(s) de messages programmés "
+                                         f"non copiée(s), nouvel essai au prochain relevé")
             _of_queue_one(c, pseudo, res, items, counters, per, errors, seen_of)
     try:
         _save_rotated_cookies(s)

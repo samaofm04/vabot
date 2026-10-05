@@ -6693,6 +6693,74 @@ try:
           and "/mypuls/avatar/9999" in _hUsAL and "data-suivi='Zzus Test ♡'" in _hUsAL
           and "filterSfsByIdentity(&quot;Zzus Test \\u2661&quot;,this)" in _hUsAL)
     check("models US : un compte inactif n a pas de ligne", "Zzinactive" not in _hUsAL)
+    # le @ OnlyFans a la place des noms, sans « abonnes » (05/10/2026)
+    _mpAL.OF_MASSDM_FILE.write_text(_jsAL.dumps(dict(
+        _jsAL.loads(_mpAL.OF_MASSDM_FILE.read_text(encoding="utf-8")),
+        creators={"9999": {"creator": "Zzus Test ♡", "of_username": "zzus.of"}})))
+    _mpAL.api_configured = lambda: True
+    _mpAL.api_creators_cached = lambda force=False: [
+        {"pseudo": "Zzus Test ♡", "platform": "onlyfans", "active": True, "id": 9999}]
+    _hAtAL = _cAL.get("/").get_data(as_text=True)
+    _mpAL.api_configured, _mpAL.api_creators_cached = _savApiAL
+    _rowAL = _hAtAL[_hAtAL.find("data-ident='Zzus Test ♡'"):]
+    _rowAL = _rowAL[:_rowAL.find("</div></div>") + 400]
+    check("liste OF : le @ du compte OnlyFans a la place du nom, sans ligne « abonnes »",
+          "@zzus.of" in _rowAL and "abonnés" not in _rowAL)
+    # photos des messages PROGRAMMES : identifiants gardes, liens signes a part
+    class _SqAL:
+        def __init__(self):
+            self.vus = []
+
+        def get(self, url, headers=None, timeout=None, params=None, allow_redirects=True):
+            self.vus.append(url)
+            class _R:
+                pass
+            r = _R()
+            r.status_code, r.headers = 200, {"content-type": "application/json"}
+            if url.endswith("/users/me"):
+                r.json = lambda: {"id": 77, "username": "itsslola", "name": "Lola"}
+            elif "/schedules" in url:
+                r.json = lambda: {"list": [{"type": "chat", "entity": {
+                    "id": 5, "text": "<p>SFS @romy</p>", "scheduledAt": "2026-10-06T16:00:00+00:00",
+                    "mediaCount": 2, "media": [
+                        {"id": 4685157154, "type": "photo",
+                         "files": {"thumb": {"url": "/of-nav/https://cdn2.onlyfans.com/t.jpg?Policy=x"}}},
+                        {"id": "../x", "type": "photo", "files": {}}]}}]}
+            else:
+                r.headers = {"content-type": "image/jpeg"}
+                r.content = b"\xff\xd8\xff\xe0jpeg"
+            return r
+
+    _sqAL = _SqAL()
+    _qAL = _mpAL.of_queue(3673, "2026-10-05", "2026-10-12", session=_sqAL, switched=True)
+    check("file : les photos d un message programme sont gardees (id valide seulement)",
+          _qAL["items"][0]["media"] == [{"id": "4685157154", "type": "photo"}]
+          and _qAL["items"][0]["media_count"] == 2
+          and _qAL["thumb_urls"] == {"4685157154": "/of-nav/https://cdn2.onlyfans.com/t.jpg?Policy=x"}
+          and "thumb_urls" not in _qAL["items"][0])
+    import time as _tQAL
+    _savMdirAL = _mpAL.OF_MASSDM_MEDIA_DIR
+    _mpAL.OF_MASSDM_MEDIA_DIR = _tmpAL / "media"
+    _okQAL = _mpAL._of_queue_thumbs(_sqAL, "930fa1edf9deb9ed", _qAL["thumb_urls"], _tQAL.time() + 30)
+    check("file : la miniature passe par le proxy MyPuls et prend le nom des envois",
+          _okQAL == (1, 0) and _sqAL.vus[-1].endswith("/of-nav/https://cdn2.onlyfans.com/t.jpg?Policy=x")
+          and _mpAL.of_massdm_media_path("930fa1edf9deb9ed", "4685157154").exists())
+    _nQAL = len(_sqAL.vus)
+    _mpAL._of_queue_thumbs(_sqAL, "930fa1edf9deb9ed", _qAL["thumb_urls"], _tQAL.time() + 30)
+    check("file : deja copiee -> aucun appel", len(_sqAL.vus) == _nQAL)
+    check("file : budget depasse -> rien ne part (le relevé ne s eternise pas)",
+          _mpAL._of_queue_thumbs(_sqAL, "930fa1edf9deb9ed", {"123": "/of-nav/x"}, 0) == (0, 0))
+    _mpAL.OF_MASSDM_MEDIA_DIR = _savMdirAL
+    _qiAL = dict(_qAL["items"][0], creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed",
+                 date=_dAL(1))
+    _savPqAL = _wAL.OF_PUSHS_FILE.read_text(encoding="utf-8")
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps({"items": [_qiAL], "counters": {}, "creators": []}))
+    _fqAL = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())
+    _wAL.OF_PUSHS_FILE.write_text(_savPqAL)
+    _qthAL = [i for i in _fqAL["items"] if i.get("id") == 5]
+    check("planning : le message programme a sa vignette, par la route locale des images",
+          _qthAL and _qthAL[0].get("thumbs") == [{"u": "/sfssetup/of_media/930fa1edf9deb9ed/4685157154",
+                                                   "v": False, "f": True}])
     check("suivi : calendrier OF et MyM, panneau du jour, bilan et ligne d etat filtrent",
           "if(!ofMatch(it) || !sfsSuivi(it.creator)) return;" in _hSAL
           and "if(!sfsSuivi(p.creator)) continue;" in _hSAL

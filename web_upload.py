@@ -32086,6 +32086,15 @@ def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
 
     # copies : le relevé `blob` ne doit pas emporter les marques de doublon
     queue = [dict(it) for it in (out.get("items") or []) if it.get("sent") or not _deja_parti(it)]
+    # les photos des messages PROGRAMMÉS (copiées au relevé par mypuls) : même
+    # route que celles des envois ; l'image entière retombe sur la miniature
+    for it in queue:
+        h = it.get("hash") or ""
+        if not it.get("sent") and h and it.get("media") and not it.get("thumbs"):
+            sfs_q = is_sfs(it.get("text"))
+            it["thumbs"] = [{"u": f"/sfssetup/of_media/{h}/{m.get('id')}",
+                             "v": m.get("type") == "video", "f": sfs_q}
+                            for m in (it.get("media") or [])[:8] if m.get("id")]
     # Alertes : les créatrices du relevé + celles qui ont envoyé ces 14 jours
     # (une créatrice dont la file n'a pas pu être lue reste surveillée).
     recent = (_of_aujourdhui() - _dt.timedelta(days=14)).isoformat()
@@ -32434,6 +32443,16 @@ def _render_sfs_html() -> str:
     # « </ » échappé : un texte de message contenant </script> fermerait le bloc.
     of_pushs_json = _json.dumps(_of_pushs_avec_envois(
         _load_of_pushs(), f"{year:04d}-{month:02d}")).replace("</", "<\\/")
+    # pseudo MyPuls -> @ OnlyFans (« Lola ღ » -> itsslolaaaaa), relevé avec
+    # l'historique Mass DM
+    _of_user_by_name = {}
+    try:
+        import mypuls as _mp_u
+        for _m in (_mp_u._of_massdm_load().get("creators") or {}).values():
+            if (_m or {}).get("creator") and _m.get("of_username"):
+                _of_user_by_name[_m["creator"]] = _m["of_username"]
+    except Exception:
+        pass
     # comptes sans suivi SFS (⚙ Réglages) : MyM compris, filtrés côté page
     _sfs_models = _sfs_alertes_cfg().get("models") or {}
     suivi_off_json = _json.dumps(sorted(k for k, v in _sfs_models.items() if v is False)
@@ -32564,14 +32583,12 @@ def _render_sfs_html() -> str:
         # Onglet initial = OF -> le sous-titre montre le profil OF (Amelia,
         # Julia...), PAS le profil MyM (Amelia_xoxo, Julia_dv). Le switch
         # d'onglet met à jour le texte depuis data-model-mym / data-model-of.
-        _nsubs = _subs_by_name.get(ident.lower().strip())
-        _subs_line = (f"<span style='font-size:10px;color:#64748b'>"
-                      f"{_nsubs:,} abonnés</span>".replace(",", " ")
-                      if _nsubs else "")
-        model_sub = (
-            f"<span class='sfs-ident-sub' style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_of_name}</span>"
-            f"{_subs_line}"
-        )
+        # Le @ du compte OnlyFans à la place des noms (lola / Lola ღ), et plus
+        # de ligne « abonnés » : le compteur du Setup OF (89, 33, 20…) ne disait
+        # rien au propriétaire (05/10/2026).
+        _of_at = _of_user_by_name.get(_of_name, "") if _of_name else ""
+        model_sub = ("" if _of_at else
+                     f"<span class='sfs-ident-sub' style='font-size:10px;color:#a855f7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{_of_name}</span>")
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
             f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' data-model='{_model_name}' "
@@ -32582,7 +32599,7 @@ def _render_sfs_html() -> str:
             f"<div style='position:relative'>{avatar}"
             f"</div>"
             f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
-            f"<span style='font-weight:600;font-size:13px;color:#fff'>{ident}</span>"
+            f"<span style='font-weight:600;font-size:13px;color:#fff'>{html_escape('@' + _of_at) if _of_at else ident}</span>"
             f"{model_sub}"
             f"</div>"
             f"{badge}"
@@ -32607,7 +32624,6 @@ def _render_sfs_html() -> str:
                if str(_ofid or "").isdigit() else "")
             + "</div>"
         )
-        _ofs = _subs_by_name.get(_ofn.lower().strip())
         rows.append(
             f"<div onclick='filterSfsByIdentity({html_escape(json.dumps(_ofn), quote=True)},this)' "
             f"class='sfs-ident-row' data-rowsource='of' data-ident='{_ofe}' data-model-of='{_ofe}' data-platforms='OF' "
@@ -32616,10 +32632,9 @@ def _render_sfs_html() -> str:
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
             f"<div style='position:relative'>{_ofav}</div>"
             f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
-            f"<span style='font-weight:600;font-size:13px;color:#fff'>{_ofe}</span>"
-            + ((f"<span style='font-size:10px;color:#64748b'>{_ofs:,} abonnés</span>").replace(",", " ")
-               if _ofs else "")
-            + f"</div>"
+            f"<span style='font-weight:600;font-size:13px;color:#fff'>"
+            f"{html_escape('@' + _of_user_by_name[_ofn]) if _of_user_by_name.get(_ofn) else _ofe}</span>"
+            f"</div>"
             f"{_sfs_point_suivi(_ofn, _sfs_models)}"
             f"</div>"
         )
