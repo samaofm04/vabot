@@ -32391,13 +32391,16 @@ def _render_sfs_html() -> str:
     # amelia -> Amelia, julia -> Julia ; lola -> rien (pas encore de compte OF).
     # C'est CE mapping qui relie les identités aux messages SFS côté OF.
     _ident_model_of = {}
+    _of_creators = []   # [(pseudo, id MyPuls)] des comptes OnlyFans actifs
     try:
         import mypuls as _mp_of
         if _mp_of.api_configured():
-            _of_names = sorted(((c.get("pseudo") or "").strip()
-                                for c in _mp_of.api_creators_cached()
-                                if c.get("active") and c.get("platform") == "onlyfans"
-                                and (c.get("pseudo") or "").strip()), key=str.lower)
+            _of_creators = sorted((((c.get("pseudo") or "").strip(), c.get("id"))
+                                   for c in _mp_of.api_creators_cached()
+                                   if c.get("active") and c.get("platform") == "onlyfans"
+                                   and (c.get("pseudo") or "").strip()),
+                                  key=lambda x: x[0].lower())
+            _of_names = [n for n, _ in _of_creators]
             for _id in _list_content_identities():
                 _idl = (_id or "").lower().strip()
                 if not _idl:
@@ -32584,6 +32587,40 @@ def _render_sfs_html() -> str:
             f"</div>"
             f"{badge}"
             f"{_sfs_point_suivi(_of_name, _sfs_models)}"
+            f"</div>"
+        )
+    # Comptes OnlyFans qu'aucune identité de la liste ne représente — les
+    # models US (Jessye, Khloe, Emy) le 05/10/2026 : absents, on ne pouvait ni
+    # filtrer le calendrier sur eux ni couper leur suivi. Une ligne chacun,
+    # sur l'onglet OF seulement (data-platforms='OF').
+    _of_montres = {(_ident_model_of.get(str(_i).lower().strip(), "") or "").lower()
+                   for _i in _list_content_identities() if "OF" in (platforms_map.get(_i) or [])}
+    for _ofn, _ofid in _of_creators:
+        if _ofn.lower() in _of_montres:
+            continue
+        _ofe = html_escape(_ofn, quote=True)
+        _ofi = (_ofn[:1] or "?").upper()
+        _ofav = (
+            f"<div style='position:relative;width:36px;height:36px;flex-shrink:0'>"
+            f"<div style='position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px'>{html_escape(_ofi)}</div>"
+            + (f"<img src='/mypuls/avatar/{int(_ofid)}' loading='lazy' decoding='async' style='position:absolute;inset:0;width:36px;height:36px;border-radius:50%;object-fit:cover' onerror=\"this.remove()\">"
+               if str(_ofid or "").isdigit() else "")
+            + "</div>"
+        )
+        _ofs = _subs_by_name.get(_ofn.lower().strip())
+        rows.append(
+            f"<div onclick='filterSfsByIdentity({html_escape(json.dumps(_ofn), quote=True)},this)' "
+            f"class='sfs-ident-row' data-rowsource='of' data-ident='{_ofe}' data-model-of='{_ofe}' data-platforms='OF' "
+            f"style='position:relative;display:flex;align-items:center;gap:10px;padding:8px 30px 8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
+            f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
+            f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
+            f"<div style='position:relative'>{_ofav}</div>"
+            f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
+            f"<span style='font-weight:600;font-size:13px;color:#fff'>{_ofe}</span>"
+            + ((f"<span style='font-size:10px;color:#64748b'>{_ofs:,} abonnés</span>").replace(",", " ")
+               if _ofs else "")
+            + f"</div>"
+            f"{_sfs_point_suivi(_ofn, _sfs_models)}"
             f"</div>"
         )
     # Rangées MyM : la liste = créateurs MyPuls (pseudos), Kiarahockey inclus.

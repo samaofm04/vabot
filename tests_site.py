@@ -6679,6 +6679,20 @@ try:
     check("point de la liste : le clic ne filtre pas la ligne et passe par le meme reglage",
           "async function sfsPointSuivi(e, el){" in _hSAL and "if(e) e.stopPropagation();" in _hSAL
           and "await sfsSuiviBasculer(decodeURIComponent(" in _hSAL and "function sfsMajPoints()" in _hSAL)
+    # models US (Jessye, Khloe, Emy) : comptes OF sans identite -> une ligne
+    # a eux dans la liste du planning, avec leur point de suivi
+    _savApiAL = (_mpAL.api_configured, _mpAL.api_creators_cached)
+    _mpAL.api_configured = lambda: True
+    _mpAL.api_creators_cached = lambda force=False: [
+        {"pseudo": "Zzus Test ♡", "platform": "onlyfans", "active": True, "id": 9999},
+        {"pseudo": "Zzinactive", "platform": "onlyfans", "active": False, "id": 9998}]
+    _hUsAL = _cAL.get("/").get_data(as_text=True)
+    _mpAL.api_configured, _mpAL.api_creators_cached = _savApiAL
+    check("models US : un compte OF sans identite a sa ligne (onglet OF), avatar et point de suivi",
+          "data-rowsource='of' data-ident='Zzus Test ♡' data-model-of='Zzus Test ♡' data-platforms='OF'" in _hUsAL
+          and "/mypuls/avatar/9999" in _hUsAL and "data-suivi='Zzus Test ♡'" in _hUsAL
+          and "filterSfsByIdentity(&quot;Zzus Test \\u2661&quot;,this)" in _hUsAL)
+    check("models US : un compte inactif n a pas de ligne", "Zzinactive" not in _hUsAL)
     check("suivi : calendrier OF et MyM, panneau du jour, bilan et ligne d etat filtrent",
           "if(!ofMatch(it) || !sfsSuivi(it.creator)) return;" in _hSAL
           and "if(!sfsSuivi(p.creator)) continue;" in _hSAL
