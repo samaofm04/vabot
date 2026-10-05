@@ -6975,6 +6975,51 @@ console.log(JSON.stringify({bloc, barre, detail}));"""
     _tgPG.clear()
     _wAL._sfs_alertes_telegram()
     check("SFS programmes : une seule fois", not _tgPG)
+    # photo dans la notif, puis suppression / deplacement (05/10/2026)
+    _phPG = []
+    _savPhPG = (_wAL._telegram_photos, _mpAL.OF_MASSDM_MEDIA_DIR)
+    _wAL._telegram_photos = lambda chat, leg, ch: (_phPG.append((leg, list(ch))) or {"ok": bool(ch)})
+    _mpAL.OF_MASSDM_MEDIA_DIR = _tmpAL / "media_pg"
+    _imgPG = _mpAL.of_massdm_media_path("930fa1edf9deb9ed", "4685157154", True)
+    _imgPG.parent.mkdir(parents=True, exist_ok=True)
+    _imgPG.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+    _ofPG = _jsAL.loads(_wAL.OF_PUSHS_FILE.read_text(encoding="utf-8"))
+    _ofPG["items"].append({"id": 706, "type": "chat", "date": _demPG, "time": "22:00", "creator": "Julia",
+                           "creator_id": 3109, "text": "Ma copine @mia", "hash": "930fa1edf9deb9ed",
+                           "media": [{"id": "4685157154", "type": "photo"}]})
+    _ofPG["items"].append({"id": 707, "type": "chat", "date": _jPG.isoformat(), "time": "00:01",
+                           "creator": "Julia", "creator_id": 3109, "text": "Deja passe @tot"})
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps(_ofPG))
+    _tgPG.clear()
+    _wAL._sfs_alertes_telegram()
+    check("photo : le nouveau SFS programme part AVEC sa photo (l image entiere copiee)",
+          any(l.startswith("📅 Nouveau SFS programmé\nJulia (OF)") and "@mia" in l and c == [str(_imgPG)]
+              for l, c in _phPG), str(_phPG)[:300])
+    check("photo : sans photo lisible, le SFS part quand meme, en texte",
+          any("@tot" in t for t in _tgPG), str(_tgPG)[:200])
+    _ofPG["items"] = [i for i in _ofPG["items"] if i["id"] not in (706, 707)]
+    for _iPG in _ofPG["items"]:
+        if _iPG["id"] == 701:
+            _iPG["time"] = "23:15"
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps(_ofPG))
+    _tgPG.clear()
+    _phPG.clear()
+    _wAL._sfs_alertes_telegram()
+    _tousPG = [l for l, _ in _phPG] + _tgPG
+    check("suppression : un SFS programme retire avant son heure est signale, avec sa photo",
+          any(l.startswith("🗑 SFS supprimé\nJulia (OF)") and "@mia" in l and c == [str(_imgPG)]
+              for l, c in _phPG), str(_tousPG)[:300])
+    check("suppression : un SFS sorti de la file APRES son heure (parti) ne l est pas",
+          not any("@tot" in t for t in _tousPG), str(_tousPG)[:300])
+    check("deplacement : changement d heure signale (ancienne ligne -> nouvelle heure)",
+          any(t.startswith("✏️ SFS déplacé\nJulia (OF)") and "à 19:00 → @romy" in t
+              and "maintenant le " + _demPG[8:10] + "/" + _demPG[5:7] + " à 23:15" in t
+              for t in _tousPG), str(_tousPG)[:300])
+    _tgPG.clear()
+    _phPG.clear()
+    _wAL._sfs_alertes_telegram()
+    check("suppression / deplacement : une seule fois", not _tgPG and not _phPG)
+    _wAL._telegram_photos, _mpAL.OF_MASSDM_MEDIA_DIR = _savPhPG
     (_wAL.SFS_PUSHS_CACHE_FILE, _pqPG, _wAL.SFS_ALERTES_HEURES, _wAL._telegram_envoyer) = _savPgAL
     _wAL.OF_PUSHS_FILE.write_text(_pqPG)
     _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},

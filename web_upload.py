@@ -31964,7 +31964,52 @@ def _sfs_alertes_lignes(al: dict) -> list:
 
 
 def _sfs_programmes() -> list:
-    """[(clé, ligne)] des SFS PROGRAMMÉS à venir sur les comptes suivis :
+    """[(clé, ligne)] des SFS programmés : voir _sfs_programmes_detail."""
+    return [(e["k"], e["l"]) for e in _sfs_programmes_detail()]
+
+
+def _mym_image_locale(url: str) -> str:
+    """L'image d'un push MyM (media.mypuls.app/<empreinte>/<id>-thumb.jpg
+    ?token=…, jeton d'une heure, relu toutes les 30 min) : l'image entière
+    d'abord, la miniature sinon, copiées sous data/of_massdm_media comme
+    celles d'OnlyFans. Chemin local, ou "" si rien n'a pu être lu."""
+    import mypuls
+    from urllib.parse import urlparse, parse_qs
+    try:
+        u = urlparse(url or "")
+        if u.scheme != "https" or not (u.hostname or "").endswith("mypuls.app"):
+            return ""
+        h, nom = (u.path.strip("/").split("/") + ["", ""])[:2]
+        mid = nom.split("-thumb.jpg")[0].split(".")[0]
+        tok = (parse_qs(u.query).get("token") or [""])[0]
+    except Exception:
+        return ""
+    for full in (True, False):
+        p = mypuls.of_massdm_media_path(h, mid, full)
+        if p is None:
+            return ""
+        if p.exists() and p.stat().st_size > 0:
+            return str(p)
+        if not tok:
+            continue
+        try:
+            import requests as _rq
+            r = _rq.get(f"https://{u.hostname}/{h}/{mid}{'.webp' if full else '-thumb.jpg'}",
+                        params={"token": tok}, timeout=20)
+            if r.status_code == 200 and r.content and \
+                    (r.headers.get("content-type") or "").startswith("image/"):
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp = p.with_name(p.name + ".tmp")
+                tmp.write_bytes(r.content)
+                os.replace(tmp, p)
+                return str(p)
+        except Exception:
+            continue
+    return ""
+
+
+def _sfs_programmes_detail() -> list:
+    """Les SFS PROGRAMMÉS à venir sur les comptes suivis :
     file d'attente OnlyFans et push MyM à date future (MyPuls les liste avec
     les envoyés). Pour le message « nouveau SFS programmé » (05/10/2026 :
     « envoie aussi un message quand il y a un SFS programmé, comme ça j'ai
@@ -31989,10 +32034,18 @@ def _sfs_programmes() -> list:
         # « JJ/MM » ou « JJ/MM (programmé) » : dans l'ordre des dates, pas des chaînes
         deja = sorted({x for m in (it.get("doublon") or []) for x in (m.get("d") or [])},
                       key=lambda x: (x[3:5], x[0:2]))
-        out.append((f"p|OF|{it.get('creator_id') or cre}|{it.get('id')}",
-                    f"• {cre} (OF) — {d[8:10]}/{d[5:7]} à {it.get('time') or '?'} → "
-                    + (", ".join("@" + x for x in parts) or "SFS")
-                    + (f"  ⚠ même SFS déjà le {', '.join(deja)}" if deja else "")))
+        photos = []
+        for m in (it.get("media") or [])[:4]:
+            for full in (True, False):
+                pp = mypuls.of_massdm_media_path(it.get("hash") or "", m.get("id"), full)
+                if pp is not None and pp.exists():
+                    photos.append(str(pp))
+                    break
+        out.append({"k": f"p|OF|{it.get('creator_id') or cre}|{it.get('id')}",
+                    "l": (f"• {cre} (OF) — {d[8:10]}/{d[5:7]} à {it.get('time') or '?'} → "
+                          + (", ".join("@" + x for x in parts) or "SFS")
+                          + (f"  ⚠ même SFS déjà le {', '.join(deja)}" if deja else "")),
+                    "c": cre, "d": d, "t": it.get("time") or "", "ph": photos})
     try:
         from zoneinfo import ZoneInfo
         maintenant = _dt.datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
@@ -32012,10 +32065,44 @@ def _sfs_programmes() -> list:
         if quand <= maintenant or _n(cre) in off:
             continue
         parts = mypuls.sfs_partenaires(txt)
-        out.append((f"p|MyM|{cre}|{p.get('id')}",
-                    f"• {cre} (MyM) — {quand:%d/%m} à {quand:%H:%M} → "
-                    + (", ".join("@" + x for x in parts) or "SFS")))
+        out.append({"k": f"p|MyM|{cre}|{p.get('id')}",
+                    "l": (f"• {cre} (MyM) — {quand:%d/%m} à {quand:%H:%M} → "
+                          + (", ".join("@" + x for x in parts) or "SFS")),
+                    "c": cre, "d": f"{quand:%Y-%m-%d}", "t": f"{quand:%H:%M}",
+                    "ph": [], "thumb": p.get("thumb") or ""})
     return out
+
+
+def _telegram_photos(chat_id: str, legende: str, chemins: list) -> dict:
+    """Une notif avec sa photo (sendPhoto) ou ses photos en album
+    (sendMediaGroup, légende sur la première) — par le bot de la veille.
+    Rien de lisible : {ok: False}, l'appelant retombe sur le texte."""
+    import veille_telegram
+    import requests as _rq
+    chemins = [c for c in chemins if c and os.path.isfile(c)][:10]
+    token = (veille_telegram.load_config() or {}).get("bot_token") or ""
+    if not chemins or not token:
+        return {"ok": False, "error": "pas de photo" if token else "bot non configuré"}
+    try:
+        base = f"https://api.telegram.org/bot{token}"
+        if len(chemins) == 1:
+            with open(chemins[0], "rb") as fh:
+                j = _rq.post(base + "/sendPhoto", timeout=60,
+                             data={"chat_id": chat_id, "caption": legende[:1000]},
+                             files={"photo": ("sfs.jpg", fh.read())}).json()
+        else:
+            fichiers, album = {}, []
+            for i, c in enumerate(chemins):
+                with open(c, "rb") as fh:
+                    fichiers[f"p{i}"] = (f"sfs{i}.jpg", fh.read())
+                album.append({"type": "photo", "media": f"attach://p{i}",
+                              **({"caption": legende[:1000]} if i == 0 else {})})
+            j = _rq.post(base + "/sendMediaGroup", timeout=90,
+                         data={"chat_id": chat_id, "media": json.dumps(album)},
+                         files=fichiers).json()
+        return {"ok": bool(j.get("ok")), "error": j.get("description") or ""}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
 
 
 def _sfs_alertes_telegram() -> dict:
@@ -32053,23 +32140,84 @@ def _sfs_alertes_telegram() -> dict:
             envoye += len(neuves)
         else:
             erreur = r.get("error") or "envoi refusé"
-    prog = [(k, l) for k, l in _sfs_programmes() if k not in vus]
-    if prog and not etat.get("prog_init"):
-        vus.update({k: now for k, _ in prog})          # existants : notés, pas envoyés
-    elif prog:
-        r = _telegram_envoyer(chat, "📅 Nouveaux SFS programmés\n\n" + "\n".join(l for _, l in prog)
-                              + "\n\nhttps://youl4b.com/?tab=sfs")
-        if r.get("ok"):
-            vus.update({k: now for k, _ in prog})
-            envoye += len(prog)
-        else:
-            erreur = erreur or r.get("error") or "envoi refusé"
+    detail = _sfs_programmes_detail()
+    cur = {e["k"]: e for e in detail}
+    prog = [e for e in detail if e["k"] not in vus]
+    avant = etat.get("programmes") if isinstance(etat.get("programmes"), dict) else None
+    if not etat.get("prog_init"):
+        vus.update({e["k"]: now for e in prog})        # existants : notés, pas envoyés
+    else:
+        # Nouveau SFS programmé : avec sa photo (« ajoute la photo du SFS dans
+        # la notif ») ; sans photo lisible, en texte groupé. Pas plus de 10
+        # albums d'un coup : Telegram ralentit un groupe qui en reçoit trop.
+        textes = []
+        for i, e in enumerate(prog):
+            if e.get("thumb") and not e.get("ph"):
+                e["ph"] = [x for x in [_mym_image_locale(e["thumb"])] if x]
+            r = (_telegram_photos(chat, "📅 Nouveau SFS programmé\n" + e["l"].lstrip("• "), e["ph"])
+                 if e.get("ph") and i < 10 else {"ok": False})
+            if r.get("ok"):
+                vus[e["k"]] = now
+                envoye += 1
+                time.sleep(1)
+            else:
+                textes.append(e)
+        if textes:
+            r = _telegram_envoyer(chat, "📅 Nouveaux SFS programmés\n\n"
+                                  + "\n".join(e["l"] for e in textes) + "\n\nhttps://youl4b.com/?tab=sfs")
+            if r.get("ok"):
+                vus.update({e["k"]: now for e in textes})
+                envoye += len(textes)
+            else:
+                erreur = erreur or r.get("error") or "envoi refusé"
+        # Supprimé / déplacé (« dis-moi quand un SFS est supprimé et tout ») :
+        # comparé à la photo du passage précédent. Un SFS qui sort de la file
+        # APRÈS son heure est parti (rien à dire) ; un compte coupé entre-temps
+        # n'est pas une suppression.
+        if avant:
+            try:
+                from zoneinfo import ZoneInfo
+                hp = _dt.datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+            except Exception:
+                hp = _dt.datetime.now()
+            off = {re.sub(r"[^a-z0-9]", "", str(k).lower())
+                   for k, v in (cfg.get("models") or {}).items() if v is False}
+            changes = []
+            for k, old in avant.items():
+                try:
+                    quand = _dt.datetime.strptime(f"{old.get('d')} {old.get('t') or '00:00'}",
+                                                  "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+                if k in cur:
+                    e = cur[k]
+                    if (e["d"], e["t"]) != (old.get("d"), old.get("t")):
+                        changes.append(("✏️ SFS déplacé\n" + old.get("l", "").lstrip("• ")
+                                        + f"\n→ maintenant le {e['d'][8:10]}/{e['d'][5:7]} à {e['t']}",
+                                        e.get("ph") or old.get("ph") or []))
+                elif quand > hp + _dt.timedelta(minutes=2) and \
+                        re.sub(r"[^a-z0-9]", "", str(old.get("c") or "").lower()) not in off:
+                    changes.append(("🗑 SFS supprimé\n" + old.get("l", "").lstrip("• "),
+                                    old.get("ph") or []))
+            for leg, ph in changes[:10]:
+                r = _telegram_photos(chat, leg, ph) if ph else {"ok": False}
+                if not r.get("ok"):
+                    r = _telegram_envoyer(chat, leg)
+                if r.get("ok"):
+                    envoye += 1
+                    time.sleep(1)
+                else:
+                    erreur = erreur or r.get("error") or "envoi refusé"
+    # la photo de la file pour le passage suivant (suppressions, déplacements)
+    etat_prog = {e["k"]: {"d": e["d"], "t": e["t"], "l": e["l"], "c": e["c"],
+                          "ph": [x for x in (e.get("ph") or []) if x]} for e in detail}
     if erreur:
         log.warning(f"[alertes-sfs] Telegram refusé : {erreur}")
     # un SFS programmé peut l'être 2 mois à l'avance : sa clé dure 90 jours
     vus = {k: v for k, v in vus.items()
            if now - int(v or 0) < (90 if k.startswith("p|") else 40) * 86400}
-    safe_json.write(SFS_ALERTES_ETAT_FILE, {"vus": vus, "prog_init": True})
+    safe_json.write(SFS_ALERTES_ETAT_FILE, {"vus": vus, "prog_init": True,
+                                            "programmes": etat_prog})
     return {"ok": not erreur, "envoye": envoye, "error": erreur}
 
 
@@ -72124,8 +72272,16 @@ def create_app():
             p = None
         if p is None:
             return ("", 404)
-        resp = send_file(str(p), conditional=True,
-                         mimetype="image/webp" if p.suffix == ".webp" else "image/jpeg")
+        # d'après l'en-tête, pas le nom : l'image entière d'un SFS programmé
+        # vient d'OnlyFans en JPEG et porte le nom « .webp » des envois
+        try:
+            with open(p, "rb") as _fh:
+                _tete = _fh.read(12)
+        except OSError:
+            _tete = b""
+        _mime = ("image/webp" if _tete[:4] == b"RIFF" and _tete[8:12] == b"WEBP"
+                 else "image/png" if _tete[:4] == b"\x89PNG" else "image/jpeg")
+        resp = send_file(str(p), conditional=True, mimetype=_mime)
         resp.headers["Cache-Control"] = "private, max-age=604800"
         return resp
 

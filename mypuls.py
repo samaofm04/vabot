@@ -3308,6 +3308,7 @@ def of_queue(creator_id: int, start: str, end: str,
     # Gardées À PART : ce sont des liens signés, ils n'ont rien à faire dans
     # data/of_pushs.json ni dans la page.
     thumb_urls: Dict[str, str] = {}
+    full_urls: Dict[str, str] = {}   # image entière, pour les SFS seulement (notif Telegram)
     for it in lst:
         if not isinstance(it, dict):
             continue
@@ -3315,14 +3316,19 @@ def of_queue(creator_id: int, start: str, end: str,
         text = _of_html_to_text(ent.get("text") or "") or (ent.get("rawText") or "").strip()
         d, tm = _of_local_datetime(ent.get("scheduledAt") or it.get("publishDateTime") or "")
         media = []
+        sfs = is_sfs_text(text)
         for mm in ent.get("media") or []:
             mid = str((mm or {}).get("id") or "")
             if not _OF_MEDIA_ID_RE.match(mid):
                 continue
             media.append({"id": mid, "type": "video" if mm.get("type") == "video" else "photo"})
-            u = (((mm.get("files") or {}).get("thumb") or {}).get("url") or "")
+            files = mm.get("files") or {}
+            u = ((files.get("thumb") or {}).get("url") or "")
             if str(u).startswith("/of-nav/"):
                 thumb_urls[mid] = u
+            uf = ((files.get("full") or {}).get("url") or "")
+            if sfs and mm.get("type") != "video" and str(uf).startswith("/of-nav/"):
+                full_urls[mid] = uf
         items.append({
             "id": ent.get("id") or it.get("id"),
             "type": it.get("type") or ent.get("responseType") or "",
@@ -3336,20 +3342,23 @@ def of_queue(creator_id: int, start: str, end: str,
             "media_count": max(int(ent.get("mediaCount") or 0), len(media)),
         })
     items.sort(key=lambda x: (x["date"], x["time"]))
-    return {"ok": True, "of_user": of_user, "items": items, "thumb_urls": thumb_urls}
+    return {"ok": True, "of_user": of_user, "items": items, "thumb_urls": thumb_urls,
+            "full_urls": full_urls}
 
 
 def _of_queue_thumbs(session: requests.Session, h: str, urls: Dict[str, str],
-                     jusqu_a: float) -> Tuple[int, int]:
+                     jusqu_a: float, full: bool = False) -> Tuple[int, int]:
     """Copie locale des miniatures des messages programmés (créatrice
     sélectionnée dans `session`), sous le même nom que celles de l'historique
     Mass DM : une fois parti, le message retrouve la même image. Rien au-delà
     de `jusqu_a` (epoch) : le relevé ne doit pas s'éterniser, le reste vient
-    au suivant. Retourne (copiées, en échec)."""
+    au suivant. `full` : l'image entière (rangée sous le nom « .webp » des
+    envois, même si OnlyFans la sert en JPEG : la route des images lit
+    l'en-tête du fichier). Retourne (copiées, en échec)."""
     import time as _t
     done = failed = 0
     for mid, u in urls.items():
-        p = of_massdm_media_path(h, mid, False)
+        p = of_massdm_media_path(h, mid, full)
         if p is None or p.exists():
             continue
         if _t.time() > jusqu_a:
@@ -3437,6 +3446,10 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
                     it["hash"] = opened["hash"]
                 _ok_i, _ko_i = _of_queue_thumbs(s, opened["hash"], res.get("thumb_urls") or {},
                                                 budget_images)
+                # l'image entière des SFS programmés : celle qui part sur Telegram
+                _ok_f, _ko_f = _of_queue_thumbs(s, opened["hash"], res.get("full_urls") or {},
+                                                budget_images, full=True)
+                _ko_i += _ko_f
                 if _ko_i:
                     massdm_errors.append(f"{pseudo}: {_ko_i} miniature(s) de messages programmés "
                                          f"non copiée(s), nouvel essai au prochain relevé")
