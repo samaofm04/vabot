@@ -6770,11 +6770,12 @@ try:
           "window.__sfsPaie = null;" in _cAL.get("/").get_data(as_text=True))
     _wAL._jbequipe_acces_complet = _savAccAL
     _jsPaieAL = _hSAL[_hSAL.find("function isSfsPush("):_hSAL.find("function sfsMajPoints(")] + "\n" \
-        + _hSAL[_hSAL.find("function sfsPaieBloc("):_hSAL.find("function renderSfsBilan(")]
+        + _hSAL[_hSAL.find("function sfsPaieCalcul("):_hSAL.find("function renderSfsBilan(")]
     _harnAL = r"""
 const RealDate = Date;
 global.Date = class extends RealDate { constructor(...a){ if(a.length) super(...a); else super(2026, 9, 5, 17, 0); } };
 global.location = { search: '' }; global.sfsEsc = s => String(s);
+const __el = { innerHTML: '' }; global.document = { getElementById: () => __el };
 global.window = { __sfsPaie: { montant: 250, devise: '$' }, __sfsSuiviOff: ['Jessye'],
   __ofPushData: { creators: [{creator:'Lola'},{creator:'Amelia'},{creator:'Julia'},{creator:'Jessye'}],
     items: [ {sent:true, creator:'Lola', date:'2026-10-01', text:'SFS @a', sent_count:5},
@@ -6786,7 +6787,12 @@ global.window = { __sfsPaie: { montant: 250, devise: '$' }, __sfsSuiviOff: ['Jes
   __sfsPushCache: [ {creator:'Amelia_xoxo', sentAt:'01/10/2026 19:00', description:'@x'},
                     {creator:'Amelia_xoxo', sentAt:'04/10/2026 19:00', description:'@y'},
                     {creator:'Lolatacrush', sentAt:'06/10/2026 20:00', description:'@programme'} ] };
-""" + _jsPaieAL + "\nconsole.log(JSON.stringify(sfsPaieBloc().replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ')));"
+""" + _jsPaieAL + r"""
+const txt = h => h.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ');
+const bloc = txt(sfsPaieBloc());
+sfsPaieBarre(); const barre = txt(__el.innerHTML);
+window.__sfsPaieOuvert = true; sfsPaieBarre(); const detail = txt(__el.innerHTML);
+console.log(JSON.stringify({bloc, barre, detail}));"""
     import shutil as _shPAL
     import subprocess as _spPAL
     _nodePAL = _shPAL.which("node")
@@ -6796,15 +6802,29 @@ global.window = { __sfsPaie: { montant: 250, devise: '$' }, __sfsSuiviOff: ['Jes
         _rPAL = _spPAL.run([_nodePAL, str(_fPAL)], capture_output=True, text=True,
                            encoding="utf-8", timeout=60)
         try:
-            _tPAL = json.loads((_rPAL.stdout or "").strip().splitlines()[-1])
+            _oPAL = json.loads((_rPAL.stdout or "").strip().splitlines()[-1])
         except Exception:
-            _tPAL = ""
+            _oPAL = {}
+        _tPAL = _oPAL.get("bloc") or ""
+        _bPAL, _dPAL = _oPAL.get("barre") or "", _oPAL.get("detail") or ""
         check("paie : 250 $ / mois payes par quinzaine -> 125 $ / 7 comptes, 8 tranches ; 9 manquees au 5/10 -> 104,91 $",
               "1er – 15 octobre : 104,91 $ en cours" in _tPAL and "9 manquée(s), −20,09 $" in _tPAL
               and "17,86 $ par compte et par quinzaine" in _tPAL and "2,23 $ la tranche" in _tPAL,
               ((_rPAL.stderr or "") + " " + _tPAL)[:300])
         check("paie : la seconde quinzaine (16-31) est a venir, entiere",
               "16 – 31 octobre : 125,00 $ à venir" in _tPAL, _tPAL[:300])
+        check("barre du haut : 104,91 $ sur 125 $ ; acquis 11,16 / perdu 20,09 (9 tranches) / a gagner 93,75",
+              "104,91 $ sur 125,00 $" in _bPAL and "acquis 11,16 $" in _bPAL
+              and "perdu −20,09 $ (9 tranches sans SFS)" in _bPAL
+              and "encore à gagner 93,75 $" in _bPAL, _bPAL[:300])
+        check("barre du haut : la quinzaine precedente (16-30 sept.) a cote",
+              "quinzaine précédente (16 – 30 septembre) : 0,00 $" in _bPAL, _bPAL[-200:])
+        check("detail au clic : une tranche ratee dit combien et sur quels comptes",
+              "1–2 octobre −8,93 $ : pas de SFS sur Julia (OF), Lolatacrush (MyM), Emmabrn (MyM), Alicia_valen (MyM)"
+              in _dPAL, _dPAL[:400])
+        check("detail au clic : tranche en cours et tranches a venir",
+              "5–6 octobre en cours : aucun SFS encore · reste 7 compte(s)" in _dPAL
+              and "15 octobre à venir" in _dPAL, _dPAL[-300:])
         check("paie : annule avant envoi, message sans @, push programme et compte coupe ne comptent pas",
               "Amelia OF 1 / 2" in _tPAL and "Julia OF 0 / 2" in _tPAL
               and "Lolatacrush MyM 0 / 2" in _tPAL and "Jessye" not in _tPAL, _tPAL[:300])
