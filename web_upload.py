@@ -31705,6 +31705,125 @@ def _load_of_pushs() -> dict:
     return {"items": [], "counters": {}, "imported_at": 0}
 
 
+OF_ENVOIS_JOURS = 92
+
+
+def _of_cle_texte(t: str) -> str:
+    """Début du texte, lettres et chiffres seulement : la file sépare ses
+    paragraphes d'un saut de ligne, l'historique Mass DM de deux."""
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())[:40]
+
+
+def _of_mois_bornes(mois: str = "") -> tuple:
+    """(début, fin) AAAA-MM-JJ de la grille du mois `mois` (AAAA-MM, défaut :
+    le mois courant), 7 jours de marge de chaque côté pour les cases des mois
+    voisins."""
+    import datetime as _dt
+    t = _dt.date.today()
+    try:
+        y, m = (int(x) for x in str(mois).split("-")[:2])
+        d1 = _dt.date(y, m, 1)
+    except Exception:
+        d1 = t.replace(day=1)
+    d2 = (d1.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
+    return ((d1 - _dt.timedelta(days=7)).isoformat(),
+            (d2 + _dt.timedelta(days=6)).isoformat())
+
+
+def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
+    """Le relevé de la file (l'à-venir) + les envois Mass DM gardés (le fait).
+
+    Sans les envois, un SFS disparaissait du planning à la minute où il
+    partait : la file ne rend que l'avenir. Un message encore dans la file ET
+    déjà dans l'historique (même créatrice, même jour, même début de texte,
+    heure à 20 min près — 19:00 programmé part à 19:03) n'est montré qu'une
+    fois, comme envoyé.
+
+    Les SFS envoyés viennent tous (92 jours : le bilan en lit 14). Les
+    messages hors-SFS — 9 envois sur 10, des relances promo — seulement pour
+    la grille du mois affiché (`mois`, AAAA-MM) : 2 229 envois en 92 jours
+    le 05/10/2026, soit ~1 Mo de plus dans une page qui en pèse déjà 1,4.
+    Tous restent dans data/of_massdm.json."""
+    import datetime as _dt
+    out = dict(blob or {})
+    g1, g2 = _of_mois_bornes(mois)
+    try:
+        import mypuls
+        since = (_dt.date.today() - _dt.timedelta(days=OF_ENVOIS_JOURS)).isoformat()
+        sent_raw = mypuls.of_massdm_items(since)
+        is_sfs = mypuls.is_sfs_text
+    except Exception as e:
+        out["errors"] = list(out.get("errors") or []) + [f"historique Mass DM illisible : {e}"]
+        return out
+    sent, index = [], {}
+    hors_grille = 0
+    for r in sent_raw:
+        sfs = is_sfs(r.get("text"))
+        if not sfs and not (g1 <= (r.get("date") or "") <= g2):
+            hors_grille += 1
+            continue
+        h = r.get("hash") or ""
+        it = {k: r.get(k) for k in (
+            "id", "type", "date", "time", "sent", "sent_count", "viewed_count",
+            "view_rate", "canceled", "media_count", "creator", "creator_id", "of_username")
+            if r.get(k) not in (None, "", [])}
+        it["links"] = r.get("links") or []
+        # un message promo n'a pas besoin de ses 1200 caractères dans la page
+        it["text"] = (r.get("text") or "") if sfs else (r.get("text") or "")[:200]
+        it["thumbs"] = [{"u": f"/sfssetup/of_media/{h}/{m.get('id')}",
+                         "v": m.get("type") == "video", "f": sfs}
+                        for m in (r.get("media") or [])[:8] if m.get("id")]
+        sent.append(it)
+        index.setdefault((str(r.get("creator_id") or r.get("creator") or ""), r.get("date")),
+                         []).append(it)
+
+    def _minutes(t):
+        try:
+            hh, mm = str(t or "").split(":")[:2]
+            return int(hh) * 60 + int(mm)
+        except Exception:
+            return None
+
+    def _deja_parti(it):
+        cands = index.get((str(it.get("creator_id") or it.get("creator") or ""), it.get("date")))
+        if not cands:
+            return False
+        k, m = _of_cle_texte(it.get("text")), _minutes(it.get("time"))
+        for s in cands:
+            ks, ms = _of_cle_texte(s.get("text")), _minutes(s.get("time"))
+            if m is not None and ms is not None and abs(ms - m) > 20:
+                continue
+            if k and ks and (k.startswith(ks) or ks.startswith(k)):
+                return True
+        return False
+
+    queue = [it for it in (out.get("items") or []) if it.get("sent") or not _deja_parti(it)]
+    out["items"] = sorted(queue + sent, key=lambda x: (x.get("date") or "", x.get("time") or "",
+                                                       str(x.get("creator") or "")))
+    out["merged_sent"] = len(sent)
+    out["sent_outside_month"] = hors_grille
+    # « 3 à venir / 5 SFS envoyés (7 j) » dans la ligne d'état du planning.
+    # « Annulé » à 0 destinataire = annulé avant de partir : pas un envoi.
+    # Annulé APRÈS (19 592 destinataires, 323 vus pour Jessye le 25/09) : parti.
+    cut = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+    par = {}
+    for it in sent:
+        if (it.get("date") or "") >= cut and is_sfs(it.get("text")) \
+                and (it.get("sent_count") or not it.get("canceled")):
+            p = par.setdefault(it.get("creator") or "?", [0, 0])
+            p[0] += 1
+            p[1] += 1 if it.get("canceled") else 0
+    creators = [dict(c) for c in (out.get("creators") or [])]
+    for c in creators:
+        n, k = par.pop(c.get("creator") or "?", [0, 0])
+        c["sent"], c["canceled"] = n, k
+    for name, (n, k) in sorted(par.items()):
+        creators.append({"creator": name, "count": 0, "sent": n, "canceled": k,
+                         "queue_unread": True})
+    out["creators"] = creators
+    return out
+
+
 def _parse_of_har(har: dict) -> dict:
     """Extrait les messages programmés OF (queue) d'un HAR onlyfans.com.
 
@@ -31861,8 +31980,6 @@ def _render_sfs_html() -> str:
     except Exception:
         pass
     ident_model_of_json = _json.dumps(_ident_model_of)
-    # SFS OnlyFans importés via HAR (lecture seule)
-    of_pushs_json = _json.dumps(_load_of_pushs())
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -31878,6 +31995,12 @@ def _render_sfs_html() -> str:
                 year, month = today.year, today.month
         except Exception:
             year, month = today.year, today.month
+    # File OnlyFans (dernier relevé) + envois Mass DM gardés : la même fusion
+    # que /sfssetup/of_queue, sinon les jours passés se vident au premier
+    # affichage et ne se remplissent qu'au rechargement en direct.
+    # « </ » échappé : un texte de message contenant </script> fermerait le bloc.
+    of_pushs_json = _json.dumps(_of_pushs_avec_envois(
+        _load_of_pushs(), f"{year:04d}-{month:02d}")).replace("</", "<\\/")
 
     # Calculer mois précédent et suivant
     prev_year = year if month > 1 else year - 1
@@ -32170,6 +32293,9 @@ def _render_sfs_html() -> str:
         "window.__sfsPushCache=null;"
         "window.__sfsShowAll=false;"
         "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /onlyfans\\.com\\//i.test(d) || /@[a-z0-9_.]/i.test(d); }"
+        # « Annulé » chez MyPuls à 0 destinataire : annulé avant de partir.
+        # Annulé avec des destinataires : parti, puis retiré — il a été vu.
+        "function ofJamaisParti(x){ return !!(x && x.sent && x.canceled && !x.sent_count); }"
         "function sfsEsc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }"
         "function toggleSfsActions(){"
         "  var m=document.getElementById('sfs-actions-menu'); if(!m) return;"
@@ -32275,7 +32401,9 @@ def _render_sfs_html() -> str:
         "  var ofNames=(od.creators||[]).map(function(c){ return c.creator; }).filter(Boolean);"
         "  var of=[];"
         "  (od.items||[]).forEach(function(it){"
-        "    if(!it.sent||!it.date||!isSfsPush(it.text)) return;"
+        # annulé avant de partir : ce n'est pas un SFS fait (retiré APRÈS
+        # l'envoi, si : la partenaire a eu ses vues)
+        "    if(!it.sent||ofJamaisParti(it)||!it.date||!isSfsPush(it.text)) return;"
         "    var p=it.date.split('-'); if(p.length!==3) return;"
         "    of.push({c:it.creator||'?', d:new Date(+p[0],+p[1]-1,+p[2])});"
         "  });"
@@ -32503,17 +32631,22 @@ def _render_sfs_html() -> str:
         "  all.forEach(function(it){ if(!ofMatch(it)) return; if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
         "  var byDate={}, undated=[];"
         "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
-        # même style compact que MyM : UNE barre bleue avec le compte par jour
+        # Même style compact que MyM, une barre par état : verte = envoyés (la
+        # trace, gardée une fois le message parti), grise = annulés avant de
+        # partir (0 destinataire), bleue = encore programmés.
         "  Object.keys(byDate).forEach(function(d){"
         "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
-        "    var list=byDate[d];"
-        "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return (x.sent?'✓ ':'')+(x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
-        "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
-        "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
-        "    bar.appendChild(n);"
-        "    (function(D){ bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(D); }; })(d);"
-        "    bars.appendChild(bar);"
+        "    var L=byDate[d];"
+        "    [[L.filter(function(x){ return x.sent && !ofJamaisParti(x); }), 'sent'], [L.filter(ofJamaisParti), 'nul'], [L.filter(function(x){ return !x.sent; }), 'sched']].forEach(function(g){"
+        "      var list=g[0], k=g[1]; if(!list.length) return;"
+        "      var bar=document.createElement('div'); bar.className='sfs-push-bar'+(k==='sched'?'':' sfs-push-sent');"
+        "      bar.title=list.length+(k==='sent'?' message(s) envoyé(s) — ':(k==='nul'?' message(s) annulé(s) avant l’envoi — ':' message(s) programmé(s) — '))+list.map(function(x){ return (x.time||'')+(x.creator?(' '+x.creator):'')+(x.canceled&&k==='sent'?' (retiré après)':''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
+        "      bar.style.cssText='background:'+({sent:'#22c55e',nul:'#6b7280',sched:'#0099ff'})[k]+';color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
+        "      var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:'+({sent:'#bbf7d0',nul:'#e5e7eb',sched:'#7dd3fc'})[k]+';border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=({sent:'✓ ',nul:'✕ ',sched:''})[k]+list.length;"
+        "      bar.appendChild(n);"
+        "      (function(D){ bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(D); }; })(d);"
+        "      bars.appendChild(bar);"
+        "    });"
         "  });"
         # Jours à compteur sans détail : juste le badge « ▤ N programmés ».
         # (Avant, les messages SANS date étaient dupliqués sous CHAQUE jour à
@@ -32551,7 +32684,10 @@ def _render_sfs_html() -> str:
         "  var box=document.getElementById('sfs-pushs-list');"
         "  if(force && box){ box.style.display=''; box.innerHTML='◌ Lecture de la file OnlyFans (via MyPuls)…'; }"
         "  try{"
-        "    var r=await fetch('/sfssetup/of_queue'+(force?'?refresh=1':'')); var j=await r.json();"
+        # le mois affiché : le serveur n'envoie les messages hors-SFS envoyés
+        # que pour cette grille (les SFS, eux, viennent tous)
+        "    var mo=''; try{ mo=new URLSearchParams(location.search).get('sfs_month')||''; }catch(e){}"
+        "    var r=await fetch('/sfssetup/of_queue?month='+encodeURIComponent(mo)+(force?'&refresh=1':'')); var j=await r.json();"
         "    if(!j.ok){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+(j.error||'Erreur'); } return; }"
         # j.data = {items, counters} ; la liste des créatrices voyage à part et
         # le Bilan SFS en a besoin (une créatrice sans aucun SFS doit sortir en
@@ -32562,9 +32698,9 @@ def _render_sfs_html() -> str:
         "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
         "    var errs=j.errors||[];"
         "    if(box && (force || errs.length || j.stale)){"
-        "      var per=(j.creators||[]).map(function(c){ return c.creator+' '+c.count+' à venir / '+(c.sent||0)+' envoyés'+(c.canceled?(' ('+c.canceled+' annulés)'):''); }).join(' · ');"
+        "      var per=(j.creators||[]).map(function(c){ return sfsEsc(c.creator)+' '+(c.queue_unread?'file non lue':(c.count+' à venir'))+' / '+(c.sent||0)+' SFS envoyé(s) sur 7 j'+(c.canceled?(' dont '+c.canceled+' retiré(s)'):''); }).join(' · ');"
         "      box.style.display='';"
-        "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.items||0)+' message(s) OnlyFans programmé(s)'+(per?(' — '+per):'')))"
+        "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.scheduled!=null?j.scheduled:(j.items||0))+' message(s) OnlyFans programmé(s)'+(j.sent?(', '+j.sent+' envoyé(s) gardé(s) en trace'):'')+(per?(' — '+per):'')))"
         "        +(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'');"
         "    }"
         "  }catch(err){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+err; } }"
@@ -32899,14 +33035,27 @@ function refreshSfsDayPanel(){{
       pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#0099ff;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Messages OnlyFans (' + dayOf.length + ')</div>';
       dayOf.forEach(function(p, pi){{
         var lk=(p.links||[]).map(function(u){{ return '<a href="'+u+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7dd3fc">'+String(u).replace(/</g,"&lt;")+'</a>'; }}).join(' ');
+        // Envoyé (historique Mass DM) : vert, même retiré après coup ; annulé avant de partir : gris ; programmé : bleu.
+        var bc=p.sent?(ofJamaisParti(p)?'#6b7280':'#22c55e'):'#0099ff';
+        var th=(p.thumbs||[]).map(function(t){{ return '<a href="'+t.u+'?full=1" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(t.v?'Vidéo':'Photo')+' : ouvrir en grand" style="position:relative;display:inline-block;width:64px;height:64px;border-radius:6px;overflow:hidden;background:#1a1a22;flex:0 0 auto">'
+          + '<img src="'+t.u+'" loading="lazy" alt="🖼" onerror="this.style.opacity=.3;this.title=&quot;Image indisponible : pas encore copiée, ou absente chez MyPuls aussi&quot;" style="width:100%;height:100%;object-fit:cover;display:block">'
+          // blanc en rgb() : body.light assombrit tout [style*="color:#fff"], et ce ▶ est posé sur la photo
+          + (t.v?'<span style="position:absolute;left:4px;bottom:2px;color:rgb(255,255,255);font-size:12px;text-shadow:0 0 3px #000">▶</span>':'')
+          + '</a>'; }}).join('');
+        var more=(p.media_count||0)-(p.thumbs||[]).length;
+        var vr=(p.view_rate!=null && p.view_rate!=='')?(' ('+String(p.view_rate).replace('.',',')+' %)'):'';
+        var meta=!p.sent ? (' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))
+          : ofJamaisParti(p) ? ' &middot; <span style="color:#9ca3af;font-weight:700" title="Annulé dans MyPuls avant de partir : 0 destinataire">✕ annulé avant l’envoi</span>'
+          : (' &middot; <span style="color:#22c55e;font-weight:700">✓ envoyé</span> à '+(p.sent_count||0).toLocaleString('fr-FR')+' &middot; vus '+(p.viewed_count||0).toLocaleString('fr-FR')+vr+(p.canceled?' &middot; <span style="color:#f87171" title="Annulé dans MyPuls après l’envoi : les abonnés l’ont reçu, puis il a été retiré">retiré après</span>':''));
         pushHtml += '<div onclick="sfsOfCardClick('+pi+')" title="Créer / modifier un SFS depuis ce message" '
-          + 'style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid #0099ff;border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:background .15s" '
+          + 'style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid '+bc+';border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:background .15s" '
           + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
-          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.sent?(' &middot; <span style="color:#22c55e">envoyé</span> à '+(p.sent_count||0)+' &middot; vus '+(p.viewed_count||0)):(' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))) + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + meta + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
+          + (th?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+th+(more>0?'<span style="align-self:center;color:#889;font-size:11px">+'+more+'</span>':'')+'</div>'):(p.media_count?'<div style="font-size:11px;color:#889;margin-top:6px">'+p.media_count+' média(s)</div>':''))
           + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')
           + '</div>';
       }});
@@ -60327,8 +60476,9 @@ def create_app():
         # mappé à son onglet ci-dessous, donc un rôle SFS légitime garde tout.
         "/sfssetup/mypuls_pushes",
         # Même chose côté OnlyFans : la file d'attente (messages programmés des
-        # modèles, liens de suivi SFS) lue via l'accès OF de MyPuls.
-        "/sfssetup/of_queue",
+        # modèles, liens de suivi SFS) lue via l'accès OF de MyPuls, et les
+        # images des envois Mass DM (les photos des modèles).
+        "/sfssetup/of_queue", "/sfssetup/of_media/",
         # Pages STANDALONE (hors système d'onglets) : elles échappaient au filet
         # car aucun préfixe ne les couvrait. « /jbactivity » (orthographe -y) ne
         # commence pas par « /jbactivite/ » (-e), d'où le trou.
@@ -60367,6 +60517,7 @@ def create_app():
         # calendrier au chargement.
         "/sfssetup/mypuls_pushes": "sfs",
         "/sfssetup/of_queue": "sfs",
+        "/sfssetup/of_media/": "sfs",
         # Bibliothèque captions : lisible par un rôle qui a l'onglet Caption
         # (permission « montage ») ; l'écriture reste admin-only (deny par défaut).
         "/captions/": "cloudcaptions",
@@ -70921,18 +71072,27 @@ def create_app():
         MÉMOIRE : même règle que les push MyM — dernier relevé resservi < 30 min,
         ?refresh=1 force la lecture live. Une créatrice en échec garde ses
         messages du relevé précédent (marqués `stale`) plutôt que de disparaître
-        du calendrier sans prévenir ; l'échec est nommé dans `errors`."""
+        du calendrier sans prévenir ; l'échec est nommé dans `errors`.
+
+        La réponse ajoute les envois Mass DM gardés (sent=True) : ils ne sont
+        PAS écrits dans data/of_pushs.json, qui reste le relevé de la file —
+        sinon le filet « relevé précédent » les ressusciterait en programmés."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
 
         def _reply(blob, **extra):
-            out = {"ok": True, "items": len(blob.get("items") or []),
-                   "dates": len(blob.get("counters") or {}),
-                   "data": {"items": blob.get("items") or [],
-                            "counters": blob.get("counters") or {}},
-                   "creators": blob.get("creators") or [],
-                   "errors": blob.get("errors") or []}
+            if "errors" in extra:
+                blob = dict(blob, errors=extra.pop("errors"))
+            full = _of_pushs_avec_envois(blob, request.args.get("month") or "")
+            its = full.get("items") or []
+            out = {"ok": True, "items": len(its),
+                   "scheduled": sum(1 for x in its if not x.get("sent")),
+                   "sent": sum(1 for x in its if x.get("sent")),
+                   "dates": len(full.get("counters") or {}),
+                   "data": {"items": its, "counters": full.get("counters") or {}},
+                   "creators": full.get("creators") or [],
+                   "errors": full.get("errors") or []}
             out.update(extra)
             return jsonify(out)
 
@@ -70950,9 +71110,12 @@ def create_app():
             return jsonify({"ok": False, "error": res.get("error") or "lecture OF impossible"})
         items = list(res.get("items") or [])
         errors = list(res.get("errors") or [])
+        # À PART de `errors` : `failed` ci-dessous lit `errors` comme « file
+        # illisible », et un historique en panne n'en est pas une.
+        massdm_errors = list(res.get("massdm_errors") or [])
         if not items and errors and prev.get("items"):
             # tout a échoué (cookies morts ?) -> dernier bon état, signalé périmé
-            return _reply(prev, cached=True, stale=True, errors=errors)
+            return _reply(prev, cached=True, stale=True, errors=errors + massdm_errors)
         # créatrices en échec : leur dernier relevé reste affiché (marqué),
         # plutôt que de les faire disparaître du calendrier sans prévenir
         failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
@@ -70971,6 +71134,7 @@ def create_app():
                     counters[it2["date"]] = counters.get(it2["date"], 0) + 1
         if kept:
             errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
+        errors += massdm_errors
         blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
                 "source": "live", "creators": res.get("creators") or [],
                 "errors": errors, "start": res.get("start"), "end": res.get("end")}
@@ -70980,6 +71144,30 @@ def create_app():
         except Exception as e:
             errors.append(f"cache non écrit : {e}")
         return _reply(blob)
+
+    @app.route("/sfssetup/of_media/<h>/<mid>", methods=["GET"])
+    def sfssetup_of_media(h, mid):
+        """Image d'un envoi Mass DM OnlyFans : miniature 150 px, ou ?full=1 pour
+        l'image entière. Copie locale (data/of_massdm_media/) ; à défaut,
+        téléchargée tant que le jeton MyPuls du dernier relevé vit (1 h)."""
+        from flask import jsonify, send_file
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls
+            full = bool(request.args.get("full"))
+            p = mypuls.of_massdm_fetch_media(h, mid, full)
+            if p is None and full:
+                # une vidéo n'a parfois que sa miniature : mieux qu'une case vide
+                p = mypuls.of_massdm_fetch_media(h, mid, False)
+        except Exception:
+            p = None
+        if p is None:
+            return ("", 404)
+        resp = send_file(str(p), conditional=True,
+                         mimetype="image/webp" if p.suffix == ".webp" else "image/jpeg")
+        resp.headers["Cache-Control"] = "private, max-age=604800"
+        return resp
 
     @app.route("/sfssetup/sfs_inbox", methods=["GET"])
     def sfssetup_sfs_inbox():

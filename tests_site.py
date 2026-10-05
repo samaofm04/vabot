@@ -6104,6 +6104,9 @@ try:
     _appOQ.config["TESTING"] = True
     _savFileOQ = _wOQ.OF_PUSHS_FILE
     _wOQ.OF_PUSHS_FILE = _plOQ.Path(_tfOQ.mkdtemp()) / "of_pushs.json"
+    # l'historique Mass DM est fusionné dans chaque réponse : ici, vide
+    _savMdOQ = _mpOQ.OF_MASSDM_FILE
+    _mpOQ.OF_MASSDM_FILE = _plOQ.Path(_tfOQ.mkdtemp()) / "of_massdm.json"
     _savAllOQ = _mpOQ.of_queue_all
     # comptes connus de la session : une section precedente peut avoir laisse
     # un autre jeu d utilisateurs, on fixe le notre (et on le restaure)
@@ -6183,8 +6186,323 @@ try:
     _wOQ._load_web_users = _savUsersOQ
     _mpOQ.of_queue_all = _savAllOQ
     _wOQ.OF_PUSHS_FILE = _savFileOQ
+    _mpOQ.OF_MASSDM_FILE = _savMdOQ
 except Exception as _eOQ:
     check("SFS OnlyFans en direct : testable", False, repr(_eOQ)[:160])
+
+print()
+print("=" * 70)
+print("24b) SFS OnlyFans : un message parti reste dans le planning (Mass DM)")
+print("=" * 70)
+# Signalé le 05/10/2026 : un SFS programmé disparaissait du planning a la
+# minute ou il partait (la file ne rend que l avenir). L historique Mass DM de
+# MyPuls le garde : texte, photos, destinataires, vus.
+try:
+    import tempfile as _tfMD
+    import json as _jsMD
+    import pathlib as _plMD
+    import datetime as _dtMD
+    import web_upload as _wMD
+    import mypuls as _mpMD
+    _tmpMD = _plMD.Path(_tfMD.mkdtemp())
+    _savMD = (_mpMD.OF_MASSDM_FILE, _mpMD.OF_MASSDM_MEDIA_DIR, _wMD.OF_PUSHS_FILE,
+              _mpMD.of_queue_all, _wMD._load_web_users, dict(_mpMD._OF_MEDIA_TOKENS),
+              _mpMD.requests)
+
+    class _ReqMD:
+        """requests vu de mypuls seulement : get simule, le reste reel (les
+        threads du site qui tournent pendant la suite gardent le vrai)."""
+        def __init__(self, get):
+            self.get = get
+
+        def __getattr__(self, k):
+            return getattr(_savMD[6], k)
+    _mpMD.OF_MASSDM_FILE = _tmpMD / "of_massdm.json"
+    _mpMD.OF_MASSDM_MEDIA_DIR = _tmpMD / "media"
+    _wMD.OF_PUSHS_FILE = _tmpMD / "of_pushs.json"
+    _todayMD = _dtMD.date.today()
+
+    def _jourMD(n):
+        return (_todayMD - _dtMD.timedelta(days=n)).isoformat()
+
+    def _rawMD(i, jour, heure, texte, annule=False, envoyes=8700, media=None):
+        return {"id": str(i), "text": texte, "sentAt": f"{jour}T{heure}:00+02:00",
+                "isFree": True, "sentCount": envoyes, "viewedCount": 300, "viewRate": 3.4,
+                "isCanceled": annule, "mediaCount": len(media or []),
+                "media": media or []}
+
+    # -- 1) un envoi de /of/massdm/page -> le format du planning
+    _itMD = _mpMD._of_massdm_item(_rawMD(
+        48029915727, "2026-10-04", "19:03",
+        "OMGGG @romyfleury\n\nCLIQUE ICI https://onlyfans.com/romyfleury/c169",
+        media=[{"id": "4685184020", "type": "photo"}, {"id": "../x", "type": "photo"},
+               {"id": "4685184022", "type": "video"}]))
+    check("Mass DM : date et heure de Paris, marque envoye",
+          (_itMD["date"], _itMD["time"], _itMD["sent"]) == ("2026-10-04", "19:03", True))
+    check("Mass DM : lien de suivi et @ extraits comme pour la file",
+          _itMD["links"] == ["https://onlyfans.com/romyfleury/c169"]
+          and _itMD["mentions"] == ["romyfleury"])
+    check("Mass DM : un id de media qui n est pas un nombre ne passe pas (il finit dans un chemin)",
+          [m["id"] for m in _itMD["media"]] == ["4685184020", "4685184022"]
+          and _itMD["media"][1]["type"] == "video")
+    check("Mass DM : la regle SFS est celle de la page (@, onlyfans.com/, mym.fans)",
+          _mpMD.is_sfs_text("tu connais @lea ?") and _mpMD.is_sfs_text("onlyfans.com/x")
+          and not _mpMD.is_sfs_text("Tu dors encore ?"))
+
+    # -- 2) ouverture : la page servie doit etre celle de la creatrice demandee
+    class _RepMD:
+        def __init__(self, text="", status=200, js=None, ctype="text/html"):
+            self.text, self.status_code, self._js = text, status, js
+            self.content = text.encode() if isinstance(text, str) else text
+            self.headers = {"content-type": ctype}
+
+        def json(self):
+            if self._js is None:
+                raise ValueError("pas du JSON")
+            return self._js
+
+    def _pageMD(cid, h="930fa1edf9deb9ed", base="https://media.mypuls.app"):
+        cfg = {"jwt": "a.eyJleHAiOjQxMDI0NDQ4MDB9.b", "creatorHash": h, "mediaBase": base,
+               "pageUrl": "/of/massdm/page"}
+        return (f'<img class="rounded-circle header-profile-user object-fit-cover" '
+                f'src="/creator/{cid}/avatar?v=1"><script> window.MYPULS_OF_MASSDM = '
+                f'{_jsMD.dumps(cfg)}; </script>')
+
+    class _SessMD:
+        """Session MyPuls simulee : la page Mass DM, puis des pages JSON."""
+        def __init__(self, html, pages=None, fail_at=None):
+            self.html, self.pages, self.fail_at, self.calls = html, list(pages or []), fail_at, []
+
+        def get(self, url, params=None, headers=None, timeout=None, allow_redirects=True):
+            self.calls.append((url, dict(params or {})))
+            if "/of/massdm/page" in url:
+                n = sum(1 for c in self.calls if "/of/massdm/page" in c[0])
+                if self.fail_at and n >= self.fail_at:
+                    return _RepMD("erreur", 502)
+                return _RepMD("", 200, self.pages.pop(0) if self.pages else {"items": []})
+            return _RepMD(self.html)
+
+        def post(self, *a, **k):
+            raise AssertionError("aucun POST vers MyPuls : lecture seule")
+
+    _mpMD._OF_MEDIA_TOKENS.clear()
+    _oMD = _mpMD.of_massdm_open(3673, _SessMD(_pageMD(3106)))
+    check("ouverture : creatrice servie != demandee -> refuse, nomme",
+          not _oMD["ok"] and "#3106" in _oMD["error"] and "sélection non prise" in _oMD["error"])
+    _oMD = _mpMD.of_massdm_open(3673, _SessMD(_pageMD(3673)))
+    check("ouverture : bonne creatrice -> empreinte, jeton des images garde en memoire",
+          _oMD == {"ok": True, "hash": "930fa1edf9deb9ed"}
+          and "930fa1edf9deb9ed" in _mpMD._OF_MEDIA_TOKENS)
+    _mpMD._OF_MEDIA_TOKENS.clear()
+    _mpMD.of_massdm_open(3673, _SessMD(_pageMD(3673, base="https://evil.example")))
+    check("ouverture : le jeton ne part jamais vers un autre domaine que mypuls.app",
+          not _mpMD._OF_MEDIA_TOKENS)
+
+    # -- 3) lecture paginee jusqu au jour demande
+    _p1MD = {"items": [_rawMD(5, _jourMD(0), "19:03", "SFS @a"),
+                       _rawMD(4, _jourMD(1), "20:30", "promo"),
+                       {"id": "", "sentAt": ""}], "next_cursor": "c2"}
+    _p2MD = {"items": [_rawMD(3, _jourMD(2), "19:03", "SFS @b"),
+                       _rawMD(2, _jourMD(10), "19:03", "trop vieux")], "next_cursor": "c3"}
+    _sMD = _SessMD("", [_p1MD, _p2MD])
+    _rMD = _mpMD.of_massdm_sent(_jourMD(5), _sMD)
+    check("lecture : s arrete au jour demande, sans lire la page suivante",
+          _rMD["complete"] and [i["id"] for i in _rMD["items"]] == ["5", "4", "3"]
+          and _rMD["pages"] == 2)
+    check("lecture : le curseur suit next_cursor", _sMD.calls[1][1] == {"cursor": "c2"})
+    check("lecture : un envoi sans id ni date est COMPTE, pas ecarte en silence",
+          _rMD["skipped"] == 1)
+    _rMD = _mpMD.of_massdm_sent(_jourMD(30), _SessMD("", [_p1MD, _p2MD], fail_at=2))
+    check("lecture : panne en page 2 -> la page 1 sert, incomplet et dit",
+          _rMD["ok"] and not _rMD["complete"] and "page 2" in _rMD["error"])
+
+    # -- 4) le fichier garde tout, ne retire rien, relit peu
+    _vusMD = []
+    _savSentMD = _mpMD.of_massdm_sent
+
+    def _sentMD(since, session, max_pages=150):
+        _vusMD.append(since)
+        return {"ok": True, "complete": True, "skipped": 0, "error": "", "pages": 1,
+                "items": [_mpMD._of_massdm_item(r) for r in session]}
+
+    _mpMD.of_massdm_sent = _sentMD
+    _OPMD = {"ok": True, "hash": "930fa1edf9deb9ed"}
+    _r1MD = _mpMD.of_massdm_sync(3673, "Lola", [
+        _rawMD(11, _jourMD(1), "19:03", "SFS @a", media=[{"id": "1", "type": "photo"}]),
+        _rawMD(12, _jourMD(40), "19:03", "SFS @b")], _OPMD, of_username="itsslola")
+    _stMD = _jsMD.loads(_mpMD.OF_MASSDM_FILE.read_text(encoding="utf-8"))
+    check("historique : premier passage sur 92 jours, 2 envois ranges",
+          _vusMD[-1] == _jourMD(92) and _r1MD["new"] == 2 and len(_stMD["items"]) == 2)
+    _r2MD = _mpMD.of_massdm_sync(3673, "Lola", [
+        _rawMD(11, _jourMD(1), "19:03", "SFS @a"),
+        _rawMD(13, _jourMD(0), "19:03", "SFS @c")], _OPMD)
+    _stMD = _jsMD.loads(_mpMD.OF_MASSDM_FILE.read_text(encoding="utf-8"))
+    check("historique : ensuite seulement les 2 derniers jours couverts",
+          _vusMD[-1] == _jourMD(3), _vusMD[-1])
+    check("historique : un envoi plus relu n est JAMAIS retire (c est la trace)",
+          "3673:12" in _stMD["items"] and len(_stMD["items"]) == 3 and _r2MD["new"] == 1)
+    check("historique : un envoi relu est mis a jour, pas double",
+          sum(1 for k in _stMD["items"] if k == "3673:11") == 1
+          and _stMD["items"]["3673:11"]["of_username"] == "itsslola")
+    _r3MD = _mpMD.of_massdm_sync(3106, "Amelia", [_rawMD(11, _jourMD(1), "19:03", "SFS @a")],
+                                 {"ok": True, "hash": "bec11225c21b226f"})
+    check("historique : un envoi deja range chez une autre creatrice -> releve refuse, nomme",
+          not _r3MD["ok"] and "Lola" in _r3MD["error"]
+          and len(_jsMD.loads(_mpMD.OF_MASSDM_FILE.read_text(encoding="utf-8"))["items"]) == 3)
+    _r4MD = _mpMD.of_massdm_sync(3106, "Amelia", [], _OPMD)
+    check("historique : meme empreinte que Lola pour Amelia -> refuse (selection non prise)",
+          not _r4MD["ok"] and "Lola" in _r4MD["error"])
+    _mpMD.of_massdm_sent = _savSentMD
+
+    # -- 5) fusion dans le planning
+    _mpMD.OF_MASSDM_FILE.write_text(_jsMD.dumps({"creators": {}, "items": {
+        "3673:1": dict(_mpMD._of_massdm_item(_rawMD(1, _jourMD(0), "19:03",
+                       "Tu connais @itsjuliettee ?\n\nElle vient de se lancer",
+                       media=[{"id": "4685184020", "type": "photo"}])),
+                       creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed"),
+        "3673:2": dict(_mpMD._of_massdm_item(_rawMD(2, _jourMD(1), "20:39", "Tu dors ?",
+                                                     annule=True)),
+                       creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed"),
+        "3673:3": dict(_mpMD._of_massdm_item(_rawMD(3, _jourMD(80), "08:00", "Coucou toi")),
+                       creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed"),
+        "3673:4": dict(_mpMD._of_massdm_item(_rawMD(4, _jourMD(80), "19:03", "SFS @vieux")),
+                       creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed"),
+        "3673:5": dict(_mpMD._of_massdm_item(_rawMD(5, _jourMD(2), "19:00", "SFS @annule",
+                                                     annule=True, envoyes=0)),
+                       creator="Lola", creator_id=3673, hash="930fa1edf9deb9ed")}}))
+    _fileMD = {"items": [
+        {"id": 90, "type": "chat", "date": _jourMD(0), "time": "19:00", "creator": "Lola",
+         "creator_id": 3673, "text": "Tu connais @itsjuliettee ?\nElle vient de se lancer"},
+        {"id": 91, "type": "chat", "date": _jourMD(0), "time": "23:00", "creator": "Lola",
+         "creator_id": 3673, "text": "Demain @autre"}],
+        "counters": {}, "creators": [{"creator": "Lola", "creator_id": 3673, "count": 2},
+                                     {"creator": "Amelia", "creator_id": 3106, "count": 0}]}
+    _fMD = _wMD._of_pushs_avec_envois(_fileMD)
+    _idsMD = [(i["id"], bool(i.get("sent"))) for i in _fMD["items"]]
+    check("fusion : un programme deja parti n apparait qu une fois, comme envoye",
+          ("1", True) in _idsMD and (90, False) not in _idsMD, str(_idsMD))
+    check("fusion : un programme pas encore parti reste", (91, False) in _idsMD)
+    check("fusion : un SFS d il y a 80 jours vient (le bilan et le calendrier le lisent)",
+          ("4", True) in _idsMD)
+    check("fusion : un message promo hors du mois affiche ne charge pas la page, mais est compte",
+          ("3", True) not in _idsMD and _fMD["sent_outside_month"] >= 1)
+    _l1MD = [i for i in _fMD["items"] if i["id"] == "1"][0]
+    check("fusion : les photos passent par la route locale des images",
+          _l1MD["thumbs"] == [{"u": "/sfssetup/of_media/930fa1edf9deb9ed/4685184020",
+                               "v": False, "f": True}])
+    _crMD = {c["creator"]: c for c in _fMD["creators"]}
+    check("fusion : SFS envoyes sur 7 j par creatrice ; annule a 0 destinataire non compte",
+          _crMD["Lola"]["sent"] == 1 and _crMD["Amelia"]["sent"] == 0, str(_crMD))
+    check("fusion : le fichier de la file n est pas touche (il ne doit garder que l avenir)",
+          [i["id"] for i in _fileMD["items"]] == [90, 91])
+
+    # -- 6) la route : envois dans la reponse, PAS dans of_pushs.json ; un
+    #       historique en panne ne ressuscite pas le releve precedent
+    _appMD = _wMD.create_app()
+    _appMD.config["TESTING"] = True
+    _wMD._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                    "chat": {"role": "chatter", "password": "x"}}
+    _cMD = _appMD.test_client()
+    with _cMD.session_transaction() as _sMD2:
+        _sMD2["auth"] = True
+        _sMD2["username"] = "admin"
+        _sMD2["role"] = "admin"
+        _sMD2["sid"] = "MD"
+    # 92 : un programme du releve precedent que la file fraiche n a plus. Si
+    # l echec de l historique comptait comme « file illisible », il reviendrait.
+    _wMD.OF_PUSHS_FILE.write_text(_jsMD.dumps(dict(
+        _fileMD, source="live", imported_at=0,
+        items=_fileMD["items"] + [{"id": 92, "type": "chat", "date": _jourMD(0), "time": "18:00",
+                                   "creator": "Lola", "creator_id": 3673,
+                                   "text": "Ancien programme @x"}])))
+    _mpMD.of_queue_all = lambda: {
+        "ok": True, "items": [_fileMD["items"][1]], "counters": {}, "errors": [],
+        "creators": [{"creator": "Lola", "creator_id": 3673, "count": 1}],
+        "massdm_errors": ["Lola: historique Mass DM : page Mass DM HTTP 502"]}
+    _jMD = _cMD.get("/sfssetup/of_queue?refresh=1").get_json()
+    check("route : reponse = file + envois gardes",
+          _jMD["ok"] and _jMD["scheduled"] == 1 and _jMD["sent"] >= 3, str(_jMD)[:160])
+    check("route : l echec de l historique est nomme",
+          any("historique Mass DM" in _e for _e in _jMD["errors"]))
+    check("route : ... sans ressusciter le programme deja parti du releve precedent",
+          not any(_x.get("id") in (90, 92) for _x in _jMD["data"]["items"]))
+    check("route : of_pushs.json ne garde que la file",
+          not any(_x.get("sent") for _x in
+                  _jsMD.loads(_wMD.OF_PUSHS_FILE.read_text(encoding="utf-8"))["items"]))
+    _htmlMD = _cMD.get("/").get_data(as_text=True)
+    check("page : les envois sont deja dans la page (rendu serveur), pas seulement en direct",
+          '"sent": true' in _htmlMD and "/sfssetup/of_media/930fa1edf9deb9ed/4685184020" in _htmlMD)
+    check("page : barre verte des envoyes, carte « envoye », bilan sans les annules",
+          "sfs-push-sent" in _htmlMD and "✓ envoyé" in _htmlMD
+          and "ofJamaisParti(it)||!it.date" in _htmlMD)
+
+    # -- 7) images : copie locale, jeton d une heure, jamais hors du dossier
+    _wMD._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                    "chat": {"role": "chatter", "password": "x"}}
+    check("images : id invalide -> 404, aucun chemin fabrique",
+          _cMD.get("/sfssetup/of_media/930fa1edf9deb9ed/..%2F..%2Fx").status_code == 404
+          and _mpMD.of_massdm_media_path("../etc", "1") is None)
+    _mpMD._OF_MEDIA_TOKENS.clear()
+    check("images : ni copie ni jeton -> 404",
+          _cMD.get("/sfssetup/of_media/930fa1edf9deb9ed/4685184020").status_code == 404)
+    _hitsMD = []
+
+    def _getMD(url, params=None, timeout=None):
+        _hitsMD.append((url, params))
+        return _RepMD(b"\xff\xd8\xff\xe0image", 200, ctype="image/jpeg")
+
+    _mpMD.requests = _ReqMD(_getMD)
+    import time as _tMD
+    _mpMD._OF_MEDIA_TOKENS["930fa1edf9deb9ed"] = ("JWT", "https://media.mypuls.app",
+                                                 _tMD.time() + 600)
+    _rMD2 = _cMD.get("/sfssetup/of_media/930fa1edf9deb9ed/4685184020")
+    check("images : jeton vivant -> telechargee, copiee, servie avec un cache",
+          _rMD2.status_code == 200 and _rMD2.mimetype == "image/jpeg"
+          and "max-age" in (_rMD2.headers.get("Cache-Control") or "")
+          and _mpMD.of_massdm_media_path("930fa1edf9deb9ed", "4685184020").exists()
+          and _hitsMD[-1] == ("https://media.mypuls.app/of/930fa1edf9deb9ed/4685184020-thumb.jpg",
+                              {"token": "JWT"}))
+    _nMD = len(_hitsMD)
+    _cMD.get("/sfssetup/of_media/930fa1edf9deb9ed/4685184020")
+    check("images : deuxieme affichage -> la copie, zero appel", len(_hitsMD) == _nMD)
+    _mpMD.requests = _ReqMD(lambda url, params=None, timeout=None: _RepMD("<html>", 200))
+    check("images : une reponse qui n est pas une image n est pas copiee",
+          _mpMD.of_massdm_fetch_media("930fa1edf9deb9ed", "999", True) is None
+          and not _mpMD.of_massdm_media_path("930fa1edf9deb9ed", "999", True).exists())
+    _mpMD.requests = _ReqMD(_getMD)
+    _dlMD = _mpMD.of_massdm_download_pending(max_files=50, budget_s=30)
+    check("images : en fond, miniature de tous + image entiere des SFS",
+          _dlMD["ok"] and _mpMD.of_massdm_media_path("930fa1edf9deb9ed", "4685184020", True).exists())
+    _cChatMD = _appMD.test_client()
+    with _cChatMD.session_transaction() as _sMD3:
+        _sMD3["auth"] = True
+        _sMD3["username"] = "chat"
+        _sMD3["role"] = "chatter"
+    check("images : role restreint bloque (ce sont les photos des modeles)",
+          _cChatMD.get("/sfssetup/of_media/930fa1edf9deb9ed/4685184020").status_code == 403)
+    _srcMD = _plMD.Path("web_upload.py").read_text(encoding="utf-8")
+    _mapMD = _srcMD[_srcMD.find("_READ_PREFIX_TO_TAB = {"):]
+    _mapMD = _mapMD[:_mapMD.find("}")]
+    check("images : lisibles avec l onglet SFS (pas de sur-blocage)",
+          '"/sfssetup/of_media/": "sfs"' in _mapMD)
+
+    # -- 8) lecture seule : le bloc Mass DM n envoie rien a MyPuls
+    _mpSrcMD = _plMD.Path("mypuls.py").read_text(encoding="utf-8")
+    _blocMD = _mpSrcMD[_mpSrcMD.find("# ============ Historique Mass DM"):
+                       _mpSrcMD.find("def get_avatar_bytes(")]
+    check("lecture seule : aucun POST dans le bloc Mass DM (send, cancel, refresh)",
+          _blocMD and ".post(" not in _blocMD)
+except Exception as _eMD:
+    import traceback as _tbMD
+    check("SFS OnlyFans Mass DM : testable", False, _tbMD.format_exc()[-300:])
+finally:
+    try:
+        (_mpMD.OF_MASSDM_FILE, _mpMD.OF_MASSDM_MEDIA_DIR, _wMD.OF_PUSHS_FILE,
+         _mpMD.of_queue_all, _wMD._load_web_users, _tokMD, _mpMD.requests) = _savMD
+        _mpMD._OF_MEDIA_TOKENS.clear()
+        _mpMD._OF_MEDIA_TOKENS.update(_tokMD)
+    except Exception:
+        pass
 
 print()
 print("=" * 70)

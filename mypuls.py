@@ -3253,8 +3253,12 @@ def _of_local_datetime(iso: str) -> Tuple[str, str]:
 
 
 def of_queue(creator_id: int, start: str, end: str,
-             session: Optional[requests.Session] = None) -> Dict[str, Any]:
+             session: Optional[requests.Session] = None,
+             switched: bool = False) -> Dict[str, Any]:
     """File d'attente OnlyFans d'une créatrice entre `start` et `end` (AAAA-MM-JJ).
+
+    `switched` : la créatrice vient d'être sélectionnée dans `session`
+    (of_massdm_open) — inutile de recharger les 150 Ko de la page.
 
     Lecture seule. Retourne {ok, of_user:{id, username, name},
     items:[{id, type, date, time, text, links, mentions, lists}], error}.
@@ -3263,11 +3267,12 @@ def of_queue(creator_id: int, start: str, end: str,
     if s is None:
         return {"ok": False, "error": "Cookies MyPuls non configurés"}
     H = {"Accept": "application/json"}
-    try:
-        s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
-              timeout=TIMEOUT, allow_redirects=True)
-    except Exception as e:
-        return {"ok": False, "error": f"switch-creator: {e}"}
+    if not switched:
+        try:
+            s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
+                  timeout=TIMEOUT, allow_redirects=True)
+        except Exception as e:
+            return {"ok": False, "error": f"switch-creator: {e}"}
     # Qui est réellement servi ? Si le switch n'a pas pris, on lirait la file
     # de la créatrice PRÉCÉDENTE en la mettant au nom de celle-ci — d'où ce
     # contrôle avant toute lecture.
@@ -3326,9 +3331,15 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
     `errors`, et deux créatrices renvoyant le MÊME compte OF (switch qui n'a
     pas pris) sont signalées au lieu d'être comptées deux fois.
 
+    Au passage, l'historique Mass DM de chaque créatrice (les envois PARTIS)
+    est relu et gardé dans data/of_massdm.json (of_massdm_sync). Ses échecs
+    vont dans `massdm_errors`, À PART : la route traite toute créatrice citée
+    dans `errors` comme une file illisible et lui remet son relevé précédent
+    — un historique en panne ne doit pas ressusciter des messages déjà partis.
+
     Retourne {ok, items:[... + creator, creator_id, of_username],
     counters:{date: n messages}, creators:[{creator, creator_id, of_username,
-    count}], errors:[str], start, end}.
+    count}], errors:[str], massdm_errors:[str], start, end}.
     """
     if not is_configured():
         return {"ok": False, "error": "Cookies MyPuls non configurés"}
@@ -3348,39 +3359,431 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
     counters: Dict[str, int] = {}
     per: List[Dict[str, Any]] = []
     errors: List[str] = []
+    massdm_errors: List[str] = []
     seen_of: Dict[Any, str] = {}   # id OF -> pseudo déjà servi
-    for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
-        pseudo = c.get("pseudo") or str(c.get("id"))
-        res = of_queue(c["id"], start, end, session=s)
-        if not res.get("ok"):
-            errors.append(f"{pseudo}: {res.get('error') or 'échec'}")
-            continue
-        ou = res.get("of_user") or {}
-        if ou.get("id") in seen_of:
-            errors.append(f"{pseudo}: même compte OF que {seen_of[ou['id']]} "
-                          f"(@{ou.get('username')}) — sélection non prise, ignorée")
-            continue
-        seen_of[ou.get("id")] = pseudo
-        n = 0
-        for it in res.get("items") or []:
-            it2 = dict(it)
-            it2["creator"] = pseudo
-            it2["creator_id"] = c.get("id")
-            it2["of_username"] = ou.get("username") or ""
-            items.append(it2)
-            n += 1
-            if it2.get("date") and it2.get("type") == "chat":
-                counters[it2["date"]] = counters.get(it2["date"], 0) + 1
-        per.append({"creator": pseudo, "creator_id": c.get("id"),
-                    "of_username": ou.get("username") or "", "count": n})
+    seen_hash: Dict[str, str] = {}  # empreinte Mass DM -> pseudo déjà servi
+    with _OF_SWITCH_LOCK:
+        for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
+            pseudo = c.get("pseudo") or str(c.get("id"))
+            opened = of_massdm_open(c["id"], s)
+            res = of_queue(c["id"], start, end, session=s, switched=bool(opened.get("ok")))
+            if not opened.get("ok"):
+                massdm_errors.append(f"{pseudo}: historique Mass DM : {opened.get('error') or 'échec'}")
+            elif opened["hash"] in seen_hash:
+                massdm_errors.append(f"{pseudo}: même historique Mass DM que "
+                                     f"{seen_hash[opened['hash']]} — sélection non prise, ignoré")
+            else:
+                seen_hash[opened["hash"]] = pseudo
+                md = of_massdm_sync(c["id"], pseudo, s, opened,
+                                    of_username=(res.get("of_user") or {}).get("username") or "")
+                if not md.get("ok") or md.get("error"):
+                    massdm_errors.append(f"{pseudo}: {md.get('error') or 'historique Mass DM illisible'}")
+            _of_queue_one(c, pseudo, res, items, counters, per, errors, seen_of)
     try:
         _save_rotated_cookies(s)
     except Exception:
         pass
+    # les images partent en fond : le jeton qui les ouvre ne vit qu'une heure
+    try:
+        start_massdm_media_download()
+    except Exception as e:
+        massdm_errors.append(f"images Mass DM : {e}")
     items.sort(key=lambda x: (x.get("date") or "", x.get("time") or "",
                               str(x.get("creator") or "")))
     return {"ok": True, "items": items, "counters": counters, "creators": per,
-            "errors": errors, "start": start, "end": end}
+            "errors": errors, "massdm_errors": massdm_errors, "start": start, "end": end}
+
+
+def _of_queue_one(c: Dict[str, Any], pseudo: str, res: Dict[str, Any],
+                  items: List[Dict[str, Any]], counters: Dict[str, int],
+                  per: List[Dict[str, Any]], errors: List[str],
+                  seen_of: Dict[Any, str]) -> None:
+    """Range la file d'une créatrice (résultat de of_queue) dans le relevé."""
+    if not res.get("ok"):
+        errors.append(f"{pseudo}: {res.get('error') or 'échec'}")
+        return
+    ou = res.get("of_user") or {}
+    if ou.get("id") in seen_of:
+        errors.append(f"{pseudo}: même compte OF que {seen_of[ou['id']]} "
+                      f"(@{ou.get('username')}) — sélection non prise, ignorée")
+        return
+    seen_of[ou.get("id")] = pseudo
+    n = 0
+    for it in res.get("items") or []:
+        it2 = dict(it)
+        it2["creator"] = pseudo
+        it2["creator_id"] = c.get("id")
+        it2["of_username"] = ou.get("username") or ""
+        items.append(it2)
+        n += 1
+        if it2.get("date") and it2.get("type") == "chat":
+            counters[it2["date"]] = counters.get(it2["date"], 0) + 1
+    per.append({"creator": pseudo, "creator_id": c.get("id"),
+                "of_username": ou.get("username") or "", "count": n})
+
+
+# ============ Historique Mass DM OnlyFans (les envois PARTIS) ============
+#
+# /schedules ne rend que l'à-venir : un message programmé qui part SORT de la
+# file, et le planning SFS le perdait — plus aucune trace du SFS fait (signalé
+# par le propriétaire le 05/10/2026). MyPuls a ouvert une page « Mass DM »
+# (/of/massdm) qui garde l'historique des envois synchronisé depuis OnlyFans :
+# texte, photos, destinataires, vus, et « Annulé » quand l'envoi a été retiré
+# après coup (les messages promo le sont presque tous ; les SFS restent).
+#
+# Ce qu'on lit (mesuré le 05/10/2026) :
+# - GET /switch-creator/<id>?from=app_pushs redirige, pour une créatrice OF,
+#   SUR /of/massdm. La page porte window.MYPULS_OF_MASSDM (empreinte de la
+#   créatrice, jeton des images valable 1 h) et l'avatar d'en-tête
+#   /creator/<id>/avatar, qui dit QUELLE créatrice est servie ;
+# - GET /of/massdm/page[?cursor=…] avec X-Requested-With -> JSON
+#   {items, next_cursor} : 10 envois par page, du plus récent au plus ancien
+#   (92 jours de Lola = 42 pages, 420 envois, 1,5 s) ;
+# - les images : media.mypuls.app/of/<empreinte>/<media>.webp (960 px,
+#   ~85 Ko) ou -thumb.jpg (150 px, ~7 Ko), ?token=<jeton> — 403 sans jeton.
+# La même page expose /of/massdm/send et /of/massdm/queue/<id>/cancel : on ne
+# les appelle JAMAIS, tout ici est en lecture.
+#
+# Les envois sont GARDÉS dans data/of_massdm.json, jamais purgés : c'est la
+# trace. Les images sont copiées dans data/of_massdm_media/<empreinte>/, car le
+# jeton qui permet de les relire expire au bout d'une heure.
+
+OF_MASSDM_FILE = DATA_DIR / "of_massdm.json"
+OF_MASSDM_MEDIA_DIR = DATA_DIR / "of_massdm_media"
+OF_MASSDM_DAYS = 92          # profondeur du premier relevé, comme les pushs MyM
+OF_MASSDM_REFRESH_DAYS = 2   # jours relus à chaque relevé : les vus montent encore
+_OF_MASSDM_CFG_RE = re.compile(r"window\.MYPULS_OF_MASSDM\s*=\s*(\{.*?\})\s*;\s*</script>", re.S)
+_OF_HEADER_CREATOR_RE = re.compile(r'header-profile-user[^>]*?src="/creator/(\d+)/avatar')
+_OF_HASH_RE = re.compile(r"^[0-9a-f]{8,64}$")
+_OF_MEDIA_ID_RE = re.compile(r"^\d{1,20}$")
+# même règle que isSfsPush() côté page : un @, un lien onlyfans.com/ ou mym.fans
+_SFS_TEXT_RE = re.compile(r"mym\.fans|onlyfans\.com/|@[a-z0-9_.]", re.I)
+# MyPuls retient UNE créatrice sélectionnée par session : deux relevés qui en
+# changent en même temps liraient chacun chez l'autre.
+_OF_SWITCH_LOCK = _th.RLock()
+_OF_MASSDM_LOCK = _th.RLock()
+_OF_MEDIA_DL_LOCK = _th.Lock()
+# empreinte -> (jeton, base des images, expiration) : en mémoire seulement
+_OF_MEDIA_TOKENS: Dict[str, Tuple[str, str, float]] = {}
+
+
+def is_sfs_text(text: str) -> bool:
+    return bool(_SFS_TEXT_RE.search(text or ""))
+
+
+def _jwt_exp(jwt: str) -> float:
+    """Expiration (epoch) lue dans le jeton, moins une marge ; 50 min si illisible."""
+    import base64
+    import time as _t
+    try:
+        part = jwt.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        exp = float(json.loads(base64.urlsafe_b64decode(part)).get("exp") or 0)
+        if exp > 0:
+            return exp - 120
+    except Exception:
+        pass
+    return _t.time() + 50 * 60
+
+
+def of_massdm_open(creator_id: int, session: requests.Session) -> Dict[str, Any]:
+    """Sélectionne la créatrice et ouvre sa page Mass DM. Retourne {ok, hash, error}.
+
+    Vérifie sur l'avatar d'en-tête que la page servie est bien celle de
+    `creator_id` : si la sélection n'a pas pris, on rangerait les envois
+    d'une autre sous son nom."""
+    try:
+        r = session.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
+                        timeout=TIMEOUT, allow_redirects=True)
+        if r.status_code == 200 and "MYPULS_OF_MASSDM" not in r.text:
+            r = session.get(f"{BASE_URL}/of/massdm", timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"page Mass DM : {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"page Mass DM HTTP {r.status_code}"}
+    m = _OF_HEADER_CREATOR_RE.search(r.text)
+    if not m and _detect_login_redirect(r.text):
+        return {"ok": False, "error": "cookies MyPuls expirés"}
+    served = int(m.group(1)) if m else None
+    if served != int(creator_id):
+        return {"ok": False, "error": f"page servie pour la créatrice #{served}, "
+                                      f"pas #{int(creator_id)} — sélection non prise"}
+    m = _OF_MASSDM_CFG_RE.search(r.text)
+    try:
+        cfg = json.loads(m.group(1)) if m else {}
+    except Exception:
+        cfg = {}
+    h = str(cfg.get("creatorHash") or "")
+    if not cfg.get("pageUrl") or not _OF_HASH_RE.match(h):
+        return {"ok": False, "error": "page Mass DM sans historique (MyPuls a changé ?)"}
+    jwt = str(cfg.get("jwt") or "")
+    base = str(cfg.get("mediaBase") or "https://media.mypuls.app").rstrip("/")
+    # le jeton part vers cette adresse : jamais ailleurs que chez MyPuls
+    if jwt and re.match(r"^https://([a-z0-9-]+\.)*mypuls\.app$", base):
+        _OF_MEDIA_TOKENS[h] = (jwt, base, _jwt_exp(jwt))
+    return {"ok": True, "hash": h}
+
+
+def _of_massdm_item(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Un envoi de /of/massdm/page, au format des messages de la file + l'envoi."""
+    text = (raw.get("text") or "").strip()
+    d, tm = _of_local_datetime(raw.get("sentAt") or "")
+    media = []
+    for mm in raw.get("media") or []:
+        mid = str((mm or {}).get("id") or "")
+        if _OF_MEDIA_ID_RE.match(mid):
+            media.append({"id": mid, "type": "video" if mm.get("type") == "video" else "photo"})
+    return {
+        "id": str(raw.get("id") or ""),
+        "type": "chat",
+        "date": d,
+        "time": tm,
+        "sent_at": raw.get("sentAt") or "",
+        "text": text[:1200],
+        "links": list(dict.fromkeys(_OF_LINK_RE.findall(text))),
+        "mentions": list(dict.fromkeys(_OF_MENTION_RE.findall(text))),
+        "lists": "",
+        "sent": True,
+        "sent_count": int(raw.get("sentCount") or 0),
+        "viewed_count": int(raw.get("viewedCount") or 0),
+        "view_rate": raw.get("viewRate"),
+        "canceled": bool(raw.get("isCanceled")),
+        "media": media,
+        "media_count": max(int(raw.get("mediaCount") or 0), len(media)),
+    }
+
+
+def of_massdm_sent(since: str, session: requests.Session,
+                   max_pages: int = 150) -> Dict[str, Any]:
+    """Envois de la créatrice DÉJÀ ouverte (of_massdm_open), du plus récent
+    jusqu'au jour `since` (AAAA-MM-JJ) inclus.
+
+    Retourne {ok, items, pages, complete, skipped, error}. complete=False : la
+    lecture s'est arrêtée avant `since` (erreur, plafond) et l'erreur le dit.
+    `skipped` compte les envois sans identifiant ou sans date lisible."""
+    H = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+    items: List[Dict[str, Any]] = []
+    cursor, pages, skipped = "", 0, 0
+    while pages < max_pages:
+        err, j = "", None
+        try:
+            r = session.get(f"{BASE_URL}/of/massdm/page", headers=H, timeout=TIMEOUT,
+                            params={"cursor": cursor} if cursor else None)
+            if r.status_code == 200:
+                j = r.json()
+            else:
+                err = f"HTTP {r.status_code}"
+        except Exception as e:
+            err = str(e)[:120]
+        if not isinstance(j, dict):
+            return {"ok": pages > 0, "items": items, "pages": pages, "complete": False,
+                    "skipped": skipped,
+                    "error": f"historique Mass DM, page {pages + 1} : {err or 'réponse illisible'}"}
+        pages += 1
+        reached = False
+        for raw in j.get("items") or []:
+            it = _of_massdm_item(raw) if isinstance(raw, dict) else {}
+            if not it.get("id") or not it.get("date"):
+                skipped += 1
+                continue
+            if it["date"] < since:
+                reached = True
+                break
+            items.append(it)
+        cursor = str(j.get("next_cursor") or "")
+        if reached or not cursor:
+            return {"ok": True, "items": items, "pages": pages, "complete": True,
+                    "skipped": skipped, "error": ""}
+    return {"ok": True, "items": items, "pages": pages, "complete": False, "skipped": skipped,
+            "error": f"historique Mass DM : arrêt à {max_pages} pages, avant le {since}"}
+
+
+def _of_massdm_load() -> Dict[str, Any]:
+    d = safe_json.load(OF_MASSDM_FILE, None)
+    if not isinstance(d, dict):
+        d = {}
+    if not isinstance(d.get("items"), dict):
+        d["items"] = {}
+    if not isinstance(d.get("creators"), dict):
+        d["creators"] = {}
+    return d
+
+
+def of_massdm_sync(creator_id: int, creator: str, session: requests.Session,
+                   opened: Dict[str, Any], of_username: str = "",
+                   days: int = OF_MASSDM_DAYS) -> Dict[str, Any]:
+    """Relit l'historique Mass DM d'une créatrice ouverte par of_massdm_open et
+    le fusionne dans data/of_massdm.json.
+
+    Premier passage : `days` jours. Ensuite, seulement ce qui est nouveau et
+    les OF_MASSDM_REFRESH_DAYS derniers jours (vus et destinataires bougent).
+    Un envoi rangé n'est jamais retiré du fichier.
+
+    Retourne {ok, new, updated, complete, skipped, error}."""
+    import time as _t
+    cid = str(int(creator_id))
+    h = str(opened.get("hash") or "")
+    floor = (date.today() - timedelta(days=max(1, int(days)))).isoformat()
+    with _OF_MASSDM_LOCK:
+        store = _of_massdm_load()
+    for ocid, om in store["creators"].items():
+        if ocid != cid and h and (om or {}).get("hash") == h:
+            return {"ok": False, "error": f"même historique Mass DM que "
+                                          f"{(om or {}).get('creator') or ocid} — ignoré"}
+    meta = dict(store["creators"].get(cid) or {})
+    covered, newest = meta.get("covered_from") or "", meta.get("newest") or ""
+    since = floor
+    if covered and covered <= floor and newest:
+        try:
+            since = max(floor, (date.fromisoformat(newest)
+                                - timedelta(days=OF_MASSDM_REFRESH_DAYS)).isoformat())
+        except ValueError:
+            since = floor
+    res = of_massdm_sent(since, session)
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error") or "historique Mass DM illisible"}
+    now = int(_t.time())
+    new = upd = 0
+    with _OF_MASSDM_LOCK:
+        store = _of_massdm_load()
+        items = store["items"]
+        # Un envoi déjà rangé chez une AUTRE créatrice : la sélection a changé
+        # entre l'ouverture et la lecture (un autre relevé en parallèle).
+        others = {k.split(":", 1)[1]: (v or {}).get("creator") or k.split(":", 1)[0]
+                  for k, v in items.items() if ":" in k and not k.startswith(cid + ":")}
+        clash = [it["id"] for it in res["items"] if it["id"] in others]
+        if clash:
+            return {"ok": False, "error": f"historique Mass DM : {len(clash)} envoi(s) déjà "
+                                          f"rangé(s) chez {others[clash[0]]} — relevé ignoré"}
+        for it in res["items"]:
+            key = f"{cid}:{it['id']}"
+            old = items.get(key) or {}
+            rec = dict(it)
+            rec.update({"creator": creator, "creator_id": int(cid), "hash": h,
+                        "of_username": of_username or old.get("of_username") or "",
+                        "first_seen": old.get("first_seen") or now, "updated": now})
+            if not old:
+                new += 1
+            elif any(old.get(k) != rec.get(k)
+                     for k in ("sent_count", "viewed_count", "canceled", "text")):
+                upd += 1
+            items[key] = rec
+        meta = dict(store["creators"].get(cid) or {})
+        if res.get("complete"):
+            # lecture continue depuis le plus récent jusqu'à `since`, et
+            # since <= newest : la couverture reste d'un seul tenant
+            meta["covered_from"] = min(meta.get("covered_from") or since, since)
+        dates = [it["date"] for it in res["items"]]
+        if dates:
+            meta["newest"] = max(dates + [meta.get("newest") or ""])
+        meta.update({"creator": creator, "hash": h, "last_sync": now,
+                     "of_username": of_username or meta.get("of_username") or "",
+                     "last_error": res.get("error") or ""})
+        store["creators"][cid] = meta
+        if not safe_json.write(OF_MASSDM_FILE, store, indent=None):
+            return {"ok": False, "error": "historique Mass DM : écriture impossible"}
+    err = res.get("error") or ""
+    if res.get("skipped"):
+        err = (err + " · " if err else "") + f"{res['skipped']} envoi(s) sans date ni identifiant"
+    return {"ok": True, "new": new, "updated": upd, "complete": bool(res.get("complete")),
+            "skipped": res.get("skipped", 0), "error": err}
+
+
+def of_massdm_items(since: str = "") -> List[Dict[str, Any]]:
+    """Envois gardés, les plus récents d'abord ; depuis `since` (AAAA-MM-JJ) si donné."""
+    with _OF_MASSDM_LOCK:
+        store = _of_massdm_load()
+    out = [dict(r) for r in store["items"].values()
+           if isinstance(r, dict) and (not since or (r.get("date") or "") >= since)]
+    out.sort(key=lambda r: (r.get("date") or "", r.get("time") or ""), reverse=True)
+    return out
+
+
+def of_massdm_media_path(h: str, media_id: str, full: bool = False) -> Optional[Path]:
+    """Chemin local d'une image d'envoi ; None si l'empreinte ou l'id est invalide
+    (ils finissent dans un chemin de fichier)."""
+    h, media_id = str(h or ""), str(media_id or "")
+    if not _OF_HASH_RE.match(h) or not _OF_MEDIA_ID_RE.match(media_id):
+        return None
+    return OF_MASSDM_MEDIA_DIR / h / (f"{media_id}.webp" if full else f"{media_id}-thumb.jpg")
+
+
+def of_massdm_fetch_media(h: str, media_id: str, full: bool = False) -> Optional[Path]:
+    """L'image d'un envoi : la copie locale, sinon téléchargée tant que le
+    jeton de cette empreinte vit (une heure après le dernier relevé). None
+    quand ni l'un ni l'autre."""
+    import time as _t
+    p = of_massdm_media_path(h, media_id, full)
+    if p is None:
+        return None
+    if p.exists() and p.stat().st_size > 0:
+        return p
+    tok = _OF_MEDIA_TOKENS.get(str(h))
+    if not tok or tok[2] < _t.time():
+        return None
+    jwt, base, _exp = tok
+    try:
+        r = requests.get(f"{base}/of/{h}/{media_id}{'.webp' if full else '-thumb.jpg'}",
+                         params={"token": jwt}, timeout=TIMEOUT)
+    except Exception:
+        return None
+    if r.status_code != 200 or not r.content \
+            or not (r.headers.get("content-type") or "").lower().startswith("image/"):
+        return None
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.{_th.get_ident()}.tmp")
+        tmp.write_bytes(r.content)
+        os.replace(tmp, p)
+    except Exception:
+        return None
+    return p
+
+
+def of_massdm_download_pending(max_files: int = 1500, budget_s: float = 600) -> Dict[str, Any]:
+    """Copie locale des images des envois gardés : la miniature de tous, l'image
+    entière des SFS (les photos de la partenaire, celles qu'on veut retrouver).
+
+    Un seul téléchargement à la fois. Retourne {ok, done, failed, waiting}."""
+    import time as _t
+    if not _OF_MEDIA_DL_LOCK.acquire(blocking=False):
+        return {"ok": False, "error": "téléchargement déjà en cours"}
+    try:
+        t0 = _t.time()
+        todo = []
+        for rec in of_massdm_items():
+            sfs = is_sfs_text(rec.get("text"))
+            for mm in rec.get("media") or []:
+                todo.append((rec.get("hash"), mm.get("id"), False))
+                if sfs:
+                    todo.append((rec.get("hash"), mm.get("id"), True))
+        done = failed = waiting = 0
+        for h, mid, full in todo:
+            p = of_massdm_media_path(h, mid, full)
+            if p is None or p.exists():
+                continue
+            if done + failed >= max_files or _t.time() - t0 > budget_s:
+                waiting += 1
+                continue
+            if of_massdm_fetch_media(h, mid, full):
+                done += 1
+            else:
+                failed += 1
+        if done or failed or waiting:
+            print(f"[massdm] images : {done} copiée(s), {failed} en échec, "
+                  f"{waiting} pour le prochain relevé", flush=True)
+        return {"ok": True, "done": done, "failed": failed, "waiting": waiting}
+    finally:
+        _OF_MEDIA_DL_LOCK.release()
+
+
+def start_massdm_media_download() -> bool:
+    """of_massdm_download_pending en fond. False si un téléchargement tourne déjà."""
+    if _OF_MEDIA_DL_LOCK.locked():
+        return False
+    _th.Thread(target=of_massdm_download_pending, name="of-massdm-media",
+               daemon=True).start()
+    return True
 
 
 def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
