@@ -6761,6 +6761,57 @@ try:
     check("planning : le message programme a sa vignette, par la route locale des images",
           _qthAL and _qthAL[0].get("thumbs") == [{"u": "/sfssetup/of_media/930fa1edf9deb9ed/4685157154",
                                                    "v": False, "f": True}])
+    # -- paie SFS du VA : 250 $ / mois sur les comptes suivis, tranche de 2 jours
+    check("paie : le montant n arrive dans la page qu aux acces complets",
+          'window.__sfsPaie = {"montant": 250.0, "devise": "$"};' in _hSAL)
+    _savAccAL = _wAL._jbequipe_acces_complet
+    _wAL._jbequipe_acces_complet = lambda: False
+    check("paie : role sans acces complet (le VA lui-meme) -> rien dans la page",
+          "window.__sfsPaie = null;" in _cAL.get("/").get_data(as_text=True))
+    _wAL._jbequipe_acces_complet = _savAccAL
+    _jsPaieAL = _hSAL[_hSAL.find("function isSfsPush("):_hSAL.find("function sfsMajPoints(")] + "\n" \
+        + _hSAL[_hSAL.find("function sfsPaieBloc("):_hSAL.find("function renderSfsBilan(")]
+    _harnAL = r"""
+const RealDate = Date;
+global.Date = class extends RealDate { constructor(...a){ if(a.length) super(...a); else super(2026, 9, 5, 17, 0); } };
+global.location = { search: '' }; global.sfsEsc = s => String(s);
+global.window = { __sfsPaie: { montant: 250, devise: '$' }, __sfsSuiviOff: ['Jessye'],
+  __ofPushData: { creators: [{creator:'Lola'},{creator:'Amelia'},{creator:'Julia'},{creator:'Jessye'}],
+    items: [ {sent:true, creator:'Lola', date:'2026-10-01', text:'SFS @a', sent_count:5},
+             {sent:true, creator:'Lola', date:'2026-10-03', text:'SFS @b', sent_count:5},
+             {sent:true, creator:'Amelia', date:'2026-10-02', text:'SFS @c', sent_count:5},
+             {sent:true, creator:'Amelia', date:'2026-10-04', text:'SFS @d', canceled:true, sent_count:0},
+             {sent:true, creator:'Julia', date:'2026-10-04', text:'promo sans arobase', sent_count:5} ] },
+  __mypulsCreators: ['Amelia_xoxo','Lolatacrush','Emmabrn','Alicia_valen'],
+  __sfsPushCache: [ {creator:'Amelia_xoxo', sentAt:'01/10/2026 19:00', description:'@x'},
+                    {creator:'Amelia_xoxo', sentAt:'04/10/2026 19:00', description:'@y'},
+                    {creator:'Lolatacrush', sentAt:'06/10/2026 20:00', description:'@programme'} ] };
+""" + _jsPaieAL + "\nconsole.log(JSON.stringify(sfsPaieBloc().replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ')));"
+    import shutil as _shPAL
+    import subprocess as _spPAL
+    _nodePAL = _shPAL.which("node")
+    if _nodePAL:
+        _fPAL = _tmpAL / "paie.js"
+        _fPAL.write_text(_harnAL, encoding="utf-8")
+        _rPAL = _spPAL.run([_nodePAL, str(_fPAL)], capture_output=True, text=True,
+                           encoding="utf-8", timeout=60)
+        try:
+            _tPAL = json.loads((_rPAL.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            _tPAL = ""
+        check("paie : 250 $ / 7 comptes suivis, 16 tranches ; 9 manquees au 5/10 -> 229,91 $",
+              "229,91 $ à payer" in _tPAL and "9 manquée(s), −20,09 $" in _tPAL
+              and "35,71 $ par compte" in _tPAL and "2,23 $ par tranche" in _tPAL,
+              ((_rPAL.stderr or "") + " " + _tPAL)[:300])
+        check("paie : annule avant envoi, message sans @, push programme et compte coupe ne comptent pas",
+              "Amelia OF 1 / 2" in _tPAL and "Julia OF 0 / 2" in _tPAL
+              and "Lolatacrush MyM 0 / 2" in _tPAL and "Jessye" not in _tPAL, _tPAL[:300])
+    _pyAL = _cAL.post("/sfssetup/paie", data={"montant": "300"}).get_json()
+    check("paie : le montant se regle (acces complet) et se garde",
+          _pyAL.get("ok") and _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["paie"]
+          == {"montant": 300.0})
+    check("paie : montant absurde refuse",
+          not _cAL.post("/sfssetup/paie", data={"montant": "-5"}).get_json().get("ok"))
     check("suivi : calendrier OF et MyM, panneau du jour, bilan et ligne d etat filtrent",
           "if(!ofMatch(it) || !sfsSuivi(it.creator)) return;" in _hSAL
           and "if(!sfsSuivi(p.creator)) continue;" in _hSAL
@@ -6860,6 +6911,8 @@ try:
     check("securite : role sans planning SFS -> reglages et groupe Telegram refuses",
           _cChAL.post("/sfssetup/alertes/model", data={"creator": "Julia", "on": "0"}).status_code == 403
           and _cChAL.post("/sfssetup/alertes_tg/config", data={"chat_id": "-100123456"}).status_code == 403)
+    check("securite : role restreint -> le montant de la paie est refuse",
+          _cChAL.post("/sfssetup/paie", data={"montant": "1"}).status_code == 403)
     _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
     _mpAL.of_queue_all = lambda: {"ok": True, "items": [], "counters": {}, "errors": [],
                                   "creators": [{"creator": "Julia", "creator_id": 3109, "count": 0}],

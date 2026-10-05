@@ -31862,6 +31862,7 @@ def _of_alertes_sfs(sent_raw: list, queue: list, noms: list) -> tuple:
 SFS_ALERTES_FILE = DATA_DIR / "sfs_alertes.json"            # réglages (models, groupe Telegram)
 SFS_ALERTES_ETAT_FILE = DATA_DIR / "sfs_alertes_etat.json"  # alertes déjà parties sur Telegram
 SFS_ALERTES_HEURES = (9, 22)   # Telegram : pas de message la nuit, gardé pour 9 h
+SFS_PAIE_DEFAUT = 250.0        # $ par mois au VA des SFS (dit par le propriétaire le 05/10/2026)
 
 
 def _sfs_alertes_cfg() -> dict:
@@ -32271,6 +32272,60 @@ def _of_alertes_courantes() -> dict:
     return val
 
 
+MYM_RELEVE_INTERVALLE_S = 30 * 60
+_MYM_RELEVE_DEMARRE = []
+
+
+def _mym_maj_et_relire() -> dict:
+    """Clique « MAJ » sur MyPuls pour chaque compte MyM suivi, laisse 2 min à
+    MyPuls, puis relit les push. MyPuls ne resynchronise ses push MyM — les
+    programmés compris — qu'à ce clic ; le site ne le faisait qu'à 00 h 05,
+    d'où « dernière MAJ le 5/10 à 2 h » vu par le propriétaire l'après-midi.
+    Les comptes au suivi coupé (⚙ Réglages) ne sont pas rafraîchis."""
+    import mypuls
+    if not (mypuls.is_configured() and mypuls.api_configured()):
+        return {"ok": False, "error": "MyPuls non configuré"}
+    off = {re.sub(r"[^a-z0-9]", "", str(k).lower())
+           for k, v in (_sfs_alertes_cfg().get("models") or {}).items() if v is False}
+    cibles = [(c.get("pseudo"), c.get("id")) for c in mypuls.api_creators_cached()
+              if c.get("active") and c.get("platform") == "mym" and c.get("id")
+              and re.sub(r"[^a-z0-9]", "", str(c.get("pseudo") or "").lower()) not in off]
+    faites = 0
+    for _nom, cid in cibles:
+        if mypuls.refresh_pushs(cid).get("ok"):
+            faites += 1
+        time.sleep(4)                      # poli avec MyPuls, comme la MAJ de nuit
+    if cibles:
+        time.sleep(120)                    # MyPuls resynchronise
+    res = _mym_pushs_relire()
+    return {"ok": bool(res.get("ok")), "maj": faites, "cibles": len(cibles),
+            "pushs": len(res.get("pushs") or []), "error": res.get("error") or ""}
+
+
+def _start_mym_releve_daemon() -> bool:
+    """MyM toutes les 30 min (demande du propriétaire, 05/10/2026 : « ça ne se
+    met pas à jour automatiquement »). Machine de production seulement."""
+    if _MYM_RELEVE_DEMARRE or not _machine_proprietaire("releve-mym"):
+        return False
+    _MYM_RELEVE_DEMARRE.append(True)
+
+    def _boucle():
+        time.sleep(240)                    # laisser le site et le relevé OF démarrer
+        while True:
+            t0 = time.time()
+            try:
+                r = _mym_maj_et_relire()
+                if not r.get("ok"):
+                    log.warning(f"[releve-mym] {r.get('error')}")
+            except Exception as e:         # noqa: BLE001
+                log.warning(f"[releve-mym] {e}")
+            time.sleep(max(60, MYM_RELEVE_INTERVALLE_S - (time.time() - t0)))
+
+    threading.Thread(target=_boucle, name="releve-mym", daemon=True).start()
+    print("[releve-mym] MAJ MyPuls + relevé des push MyM armé (toutes les 30 min)", flush=True)
+    return True
+
+
 OF_RELEVE_INTERVALLE_S = 2 * 3600
 _OF_RELEVE_DEMARRE = []
 
@@ -32310,6 +32365,108 @@ def _start_of_releve_daemon() -> bool:
     threading.Thread(target=_boucle, name="releve-of", daemon=True).start()
     print("[releve-of] relevé OnlyFans + Mass DM armé (toutes les 2 h)", flush=True)
     return True
+
+
+def _mym_pushs_relire() -> dict:
+    """Relit sur MyPuls les push MyM des modèles SFS et les garde dans
+    data/sfs_pushs_cache.json. Une seule logique pour la route
+    /sfssetup/mypuls_pushes (?refresh=1 ou cache de plus de 30 min) et pour
+    le relevé automatique (_start_mym_releve_daemon).
+
+    Sous le verrou de sélection de créatrice du relevé OnlyFans : MyPuls ne
+    retient qu'UNE créatrice par session, et les deux relevés tournent
+    maintenant chacun de leur côté."""
+    try:
+        import mypuls
+        verrou = mypuls._OF_SWITCH_LOCK
+    except Exception:
+        import contextlib
+        verrou = contextlib.nullcontext()
+    with verrou:
+        return _mym_pushs_relire_brut()
+
+
+def _mym_pushs_relire_brut() -> dict:
+    _cache_f = DATA_DIR / "sfs_pushs_cache.json"
+    try:
+        import mypuls
+    except Exception as e:
+        return {"ok": False, "error": f"Module indispo : {e}"}
+    try:
+        if not mypuls.is_configured():
+            return {"ok": False, "error": "MyPuls non configuré (cookies)"}
+        cr = mypuls.list_creators()
+        creators = cr.get("creators") or {}  # {name: id}
+        name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
+        idents = _sfssetup_identities("mym")
+        targets, seen = [], set()  # [(ident, label, cid)]
+        for ident in idents:
+            model = (mypuls.get_model_for_identity(ident) or ident).strip()
+            cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
+            if cid is None or cid in seen:
+                continue
+            seen.add(cid)
+            targets.append((ident, model or ident, cid))
+        if not targets:
+            return {"ok": True, "pushs": [],
+                    "note": "Aucun créateur MyPuls résolu pour les identités SFS"}
+        # au passage : compteurs d'abonnés du Setup rafraîchis si périmés
+        # (TTL interne) — le tri par abonnés de la sidebar reste à jour
+        # sans que l'utilisateur clique quoi que ce soit
+        try:
+            import sfs_setup as _sfs_auto
+            _sfs_auto.autofill_mypuls_if_stale()
+        except Exception:
+            pass
+        all_pushs = []
+        for ident, label, cid in targets:
+            # Avant : max_pages=1 -> seulement la 1re page (les plus recents),
+            # les jours plus anciens du mois restaient VIDES sans prevenir.
+            # Desormais on pagine jusqu'a couvrir 92 jours (mois courant + 2),
+            # borne de securite a 25 pages par creatrice.
+            res = mypuls.list_pushs(cid, max_pages=25, days=92)
+            if not res.get("ok"):
+                continue
+            for p in res.get("pushs", []):
+                p2 = dict(p)
+                p2["creator"] = label
+                p2["identity"] = ident
+                # tronque : 2000 pushs x descriptions longues feraient sauter
+                # le quota sessionStorage cote navigateur (~5 Mo)
+                p2["description"] = (p2.get("description") or "")[:600]
+                all_pushs.append(p2)
+        import datetime as _dt
+
+        def _key(p):
+            try:
+                return _dt.datetime.strptime(p.get("sentAt", ""), "%d/%m/%Y %H:%M")
+            except Exception:
+                return _dt.datetime.min
+
+        all_pushs.sort(key=_key, reverse=True)
+        # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
+        # pile '200 push au total') et les plus anciens etaient jetes.
+        if not all_pushs:
+            # collecte vide (cookies morts ?) -> ressert la dernière bonne
+            # version plutôt qu'un calendrier soudainement vide
+            try:
+                _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
+                if _blob.get("pushs"):
+                    return {"ok": True, "pushs": _blob["pushs"],
+                            "cached": True, "stale": True}
+            except Exception:
+                pass
+        else:
+            try:
+                safe_json.write_text(_cache_f, json.dumps(
+                    {"ts": time.time(), "pushs": all_pushs[:2000]},
+                    ensure_ascii=False))
+            except Exception:
+                pass
+        return {"ok": True, "pushs": all_pushs[:2000],
+                "truncated": len(all_pushs) > 2000}
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur : {e}"}
 
 
 def _render_sfs_html() -> str:
@@ -32457,6 +32614,13 @@ def _render_sfs_html() -> str:
     _sfs_models = _sfs_alertes_cfg().get("models") or {}
     suivi_off_json = _json.dumps(sorted(k for k, v in _sfs_models.items() if v is False)
                                  ).replace("</", "<\\/")
+    # Paie SFS du VA (montant du mois) : aux accès complets SEULEMENT — un
+    # rôle qui a l'onglet SFS (le VA lui-même) ne la reçoit pas dans la page.
+    _paie = None
+    if _jbequipe_acces_complet():
+        _pc = _sfs_alertes_cfg().get("paie") or {}
+        _paie = {"montant": float(_pc.get("montant") or SFS_PAIE_DEFAUT), "devise": "$"}
+    sfs_paie_json = _json.dumps(_paie)
 
     # Calculer mois précédent et suivant
     prev_year = year if month > 1 else year - 1
@@ -32839,6 +33003,13 @@ def _render_sfs_html() -> str:
         "      +'<button type=\"button\" onclick=\"sfsAlTgTest()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Tester</button></div>'"
         "      +'<div id=\"sfs-al-msg\" style=\"font-size:11.5px;margin-top:5px\"></div>';"
         "    }"
+        # montant de la paie SFS du VA : accès complets seulement (__sfsPaie)
+        "    if(window.__sfsPaie){"
+        "      h+='<div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Paie SFS du VA (par mois)</div>'"
+        "        +'<div style=\"display:flex;gap:6px;align-items:center;flex-wrap:wrap\"><input id=\"sfs-paie\" type=\"number\" min=\"0\" step=\"1\" value=\"'+(+window.__sfsPaie.montant||0)+'\" style=\"width:110px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\"> $'"
+        "        +'<button type=\"button\" onclick=\"sfsPaieSave()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
+        "        +'<span style=\"font-size:11.5px;color:#889\">réparti entre les comptes suivis ; le détail est dans ▥ Bilan SFS</span></div>';"
+        "    }"
         "    h+='</div>';"
         "  }"
         "  R.forEach(function(r){"
@@ -32872,6 +33043,15 @@ def _render_sfs_html() -> str:
         "async function sfsAlModel(el){"
         "  try{ await sfsSuiviBasculer(decodeURIComponent(el.getAttribute('data-cre')||''), el.checked); }"
         "  catch(err){ el.checked=!el.checked; alert('✕ '+(err.message||err)); }"
+        "}"
+        "async function sfsPaieSave(){"
+        "  var v=(document.getElementById('sfs-paie')||{}).value||''; var fd=new FormData(); fd.append('montant', v);"
+        "  try{ var r=await fetch('/sfssetup/paie',{method:'POST',body:fd}); var j=await r.json();"
+        "    if(!j.ok){ alert('✕ '+(j.error||'Erreur')); return; }"
+        "    if(window.__sfsPaie) window.__sfsPaie.montant=j.montant;"
+        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
+        "    alert('✓ Paie SFS : '+j.montant+' $ par mois');"
+        "  }catch(err){ alert('✕ '+err); }"
         "}"
         "async function sfsAlTg(){"
         "  var v=(document.getElementById('sfs-al-tg')||{}).value||''; var fd=new FormData(); fd.append('chat_id', v.trim());"
@@ -32979,6 +33159,37 @@ def _render_sfs_html() -> str:
         # OnlyFans : messages de masse ENVOYÉS (marqués sent, date déjà en
         # heure de Paris) ; un lien onlyfans.com compte comme un @. La file à
         # venir ne compte pas : un SFS programmé n'est pas un SFS fait.
+        # Paie SFS du VA (05/10/2026 : « 250 $ pour un SFS au moins tous les deux
+        # jours sur mes comptes ; dès qu'il n'a pas un SFS, ça lui retire de
+        # l'argent »). Le montant du mois se partage entre les comptes SUIVIS
+        # (point vert) ; le mois est coupé en tranches de 2 jours ; chaque
+        # tranche TERMINÉE sans SFS sur un compte retire sa part. Une tranche
+        # en cours ne coûte rien ; les push MyM programmés ne comptent pas.
+        "function sfsPaieBloc(){"
+        "  var P=window.__sfsPaie; if(!P || !(+P.montant>0)) return '';"
+        "  var mo=''; try{ mo=new URLSearchParams(location.search).get('sfs_month')||''; }catch(e){}"
+        "  var now=new Date(), y=now.getFullYear(), m=now.getMonth(), mm=/^(\\d{4})-(\\d{2})$/.exec(mo);"
+        "  if(mm){ y=+mm[1]; m=+mm[2]-1; }"
+        "  var nbJ=new Date(y,m+1,0).getDate(), W=Math.ceil(nbJ/2), auj=new Date(now.getFullYear(),now.getMonth(),now.getDate());"
+        "  var od=window.__ofPushData||{}, C=[];"
+        "  function ajout(n,p){ if(n && sfsSuivi(n) && C.every(function(x){ return x.p!==p || sfsNormNom(x.n)!==sfsNormNom(n); })) C.push({n:n,p:p,j:{}}); }"
+        "  (od.creators||[]).forEach(function(c){ ajout(c.creator,'OF'); });"
+        "  (window.__mypulsCreators||[]).forEach(function(n){ ajout(n,'MyM'); });"
+        "  if(!C.length) return '';"
+        "  function noter(nom,p,d){ if(!d || d.getFullYear()!==y || d.getMonth()!==m || d>now) return; var k=sfsNormNom(nom); C.forEach(function(c){ if(c.p===p && sfsNormNom(c.n)===k) c.j[d.getDate()]=1; }); }"
+        "  (od.items||[]).forEach(function(it){ if(!it.sent||ofJamaisParti(it)||!it.date||!isSfsPush(it.text)) return; var q=it.date.split('-'); noter(it.creator,'OF',new Date(+q[0],+q[1]-1,+q[2],12)); });"
+        "  (window.__sfsPushCache||[]).forEach(function(x){ if(!/@[a-z0-9_.]/i.test(x.description||'')) return; var a=String(x.sentAt||'').split(/[ \\/:]/); if(a.length<3) return; noter(x.creator,'MyM',new Date(+a[2],+a[1]-1,+a[0],+(a[3]||0),+(a[4]||0))); });"
+        "  var part=P.montant/C.length, tr=part/W, ret=0, manq=0;"
+        "  function $f(v){ return v.toFixed(2).replace('.',',')+' '+(P.devise||'$'); }"
+        "  var lignes=C.map(function(c){ var fait=0, ecoule=0;"
+        "    for(var w=0;w<W;w++){ var d1=2*w+1, d2=Math.min(2*w+2,nbJ), ok=!!(c.j[d1]||c.j[d2]); if(new Date(y,m,d2)<auj){ ecoule++; if(ok) fait++; else { manq++; ret+=tr; c.r=(c.r||0)+tr; } } }"
+        "    return '<tr><td style=\"padding:3px 10px 3px 0\">'+sfsEsc(c.n)+' <span style=\"color:#889\">'+c.p+'</span></td><td style=\"padding:3px 10px\">'+fait+' / '+ecoule+' tranche(s)</td><td style=\"padding:3px 0;text-align:right'+(c.r?';color:#f87171':'')+'\">'+(c.r?'−'+$f(c.r):'0')+'</td></tr>'; }).join('');"
+        "  var mois=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'][m];"
+        "  return '<div style=\"border:1px solid rgba(148,163,184,.35);border-radius:10px;padding:10px 12px;margin-bottom:14px\">'"
+        "    +'<div style=\"font-weight:800;font-size:13px;margin-bottom:4px\">Paie SFS du VA — '+mois+' '+y+' : <span style=\"color:#f59e0b\">'+$f(P.montant-ret)+'</span> à payer</div>'"
+        "    +'<div style=\"font-size:11.5px;color:#889;margin-bottom:6px\">'+$f(P.montant)+' ÷ '+C.length+' compte(s) suivi(s) = '+$f(part)+' par compte, mois coupé en '+W+' tranches de 2 jours = '+$f(tr)+' par tranche. Chaque tranche terminée sans SFS retire sa part'+(manq?(' : '+manq+' manquée(s), −'+$f(ret)):' : aucune manquée')+'. Visible des accès complets seulement.</div>'"
+        "    +'<table style=\"font-size:12px;border-collapse:collapse\">'+lignes+'</table></div>';"
+        "}"
         "function renderSfsBilan(){"
         "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
         "  var ps=window.__sfsPushCache||[];"
@@ -33004,7 +33215,7 @@ def _render_sfs_html() -> str:
         "  else { h+='<div style=\"color:#889;margin-bottom:12px\">MyM : aucune donnée — fais un ↻ Sync MyPuls (menu ⚙ Actions).</div>'; }"
         "  if(ofNames.length||of.length){ h+=sfsBilanBlock('OnlyFans', '#0099ff', sfsBilanRows(ofNames, of)); }"
         "  else { h+='<div style=\"color:#889\">OnlyFans : aucune donnée — fais un ↻ Sync file d’attente OnlyFans (menu ⚙ Actions).</div>'; }"
-        "  out.innerHTML=h;"
+        "  out.innerHTML=sfsPaieBloc()+h;"
         "}"
         "async function majAllPushs(){"
         "  var b=document.getElementById('sfs-maj-btn'); var box=document.getElementById('sfs-pushs-list'); if(box) box.style.display='';"
@@ -33319,6 +33530,9 @@ def _render_sfs_html() -> str:
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "  if(typeof loadSfsPushes==='function') loadSfsPushes(false);"
         "  if(typeof loadOfQueue==='function') loadOfQueue(false);"
+        # page restée ouverte : le serveur relit MyM toutes les 30 min, la page
+        # reprend ses données au même rythme (mémoire serveur : instantané)
+        "  setInterval(function(){ if(document.visibilityState!=='visible') return; if(typeof loadSfsPushes==='function') loadSfsPushes(false); if(typeof loadOfQueue==='function') loadOfQueue(false); }, 1800000);"
         "  if(typeof loadSfsInbox==='function'){"
         "    loadSfsInbox(false);"
         "    setInterval(function(){ loadSfsInbox(false); }, 180000);"
@@ -33430,6 +33644,7 @@ window.__sfsIdentModelByPlat = {{MYM: {ident_model_json}, OF: {ident_model_of_js
 window.__sfsIdentModel = window.__sfsIdentModelByPlat.OF;   /* onglet initial = OF */
 window.__ofPushData = {of_pushs_json};
 window.__sfsSuiviOff = {suivi_off_json};
+window.__sfsPaie = {sfs_paie_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
@@ -60659,6 +60874,11 @@ def create_app():
         _start_of_releve_daemon()
     except Exception as _e:
         log.warning(f"relevé OnlyFans automatique non démarré: {_e}")
+    # MyM : MAJ MyPuls + relevé des push toutes les 30 min
+    try:
+        _start_mym_releve_daemon()
+    except Exception as _e:
+        log.warning(f"relevé MyM automatique non démarré: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:
@@ -71791,6 +72011,27 @@ def create_app():
             return jsonify({"ok": False, "error": "réglage non enregistré"})
         return jsonify({"ok": True, "chat_id": chat})
 
+    @app.route("/sfssetup/paie", methods=["POST"])
+    def sfssetup_paie():
+        """Montant mensuel de la paie SFS du VA (Bilan SFS). Accès complets
+        seulement : c'est la paie de quelqu'un qui peut avoir l'onglet SFS."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if _role_allowed_tabs(_live_role()) is not None:
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        try:
+            montant = round(float(str(request.form.get("montant") or "").replace(",", ".")), 2)
+        except ValueError:
+            montant = -1
+        if not 0 < montant < 100000:
+            return jsonify({"ok": False, "error": "montant invalide"})
+        cfg = _sfs_alertes_cfg()
+        cfg["paie"] = dict(cfg.get("paie") or {}, montant=montant)
+        if not safe_json.write(SFS_ALERTES_FILE, cfg):
+            return jsonify({"ok": False, "error": "réglage non enregistré"})
+        return jsonify({"ok": True, "montant": montant})
+
     @app.route("/sfssetup/alertes_tg/test", methods=["POST"])
     def sfssetup_alertes_tg_test():
         """Message d'essai dans le groupe réglé, pour vérifier que le bot y est."""
@@ -71841,85 +72082,7 @@ def create_app():
                                     "cached": True})
             except Exception:
                 pass
-        try:
-            import mypuls
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Module indispo : {e}"})
-        try:
-            if not mypuls.is_configured():
-                return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
-            cr = mypuls.list_creators()
-            creators = cr.get("creators") or {}  # {name: id}
-            name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
-            idents = _sfssetup_identities("mym")
-            targets, seen = [], set()  # [(ident, label, cid)]
-            for ident in idents:
-                model = (mypuls.get_model_for_identity(ident) or ident).strip()
-                cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
-                if cid is None or cid in seen:
-                    continue
-                seen.add(cid)
-                targets.append((ident, model or ident, cid))
-            if not targets:
-                return jsonify({"ok": True, "pushs": [],
-                                "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
-            # au passage : compteurs d'abonnés du Setup rafraîchis si périmés
-            # (TTL interne) — le tri par abonnés de la sidebar reste à jour
-            # sans que l'utilisateur clique quoi que ce soit
-            try:
-                import sfs_setup as _sfs_auto
-                _sfs_auto.autofill_mypuls_if_stale()
-            except Exception:
-                pass
-            all_pushs = []
-            for ident, label, cid in targets:
-                # Avant : max_pages=1 -> seulement la 1re page (les plus recents),
-                # les jours plus anciens du mois restaient VIDES sans prevenir.
-                # Desormais on pagine jusqu'a couvrir 92 jours (mois courant + 2),
-                # borne de securite a 25 pages par creatrice.
-                res = mypuls.list_pushs(cid, max_pages=25, days=92)
-                if not res.get("ok"):
-                    continue
-                for p in res.get("pushs", []):
-                    p2 = dict(p)
-                    p2["creator"] = label
-                    p2["identity"] = ident
-                    # tronque : 2000 pushs x descriptions longues feraient sauter
-                    # le quota sessionStorage cote navigateur (~5 Mo)
-                    p2["description"] = (p2.get("description") or "")[:600]
-                    all_pushs.append(p2)
-            import datetime as _dt
-
-            def _key(p):
-                try:
-                    return _dt.datetime.strptime(p.get("sentAt", ""), "%d/%m/%Y %H:%M")
-                except Exception:
-                    return _dt.datetime.min
-
-            all_pushs.sort(key=_key, reverse=True)
-            # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
-            # pile '200 push au total') et les plus anciens etaient jetes.
-            if not all_pushs:
-                # collecte vide (cookies morts ?) -> ressert la dernière bonne
-                # version plutôt qu'un calendrier soudainement vide
-                try:
-                    _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
-                    if _blob.get("pushs"):
-                        return jsonify({"ok": True, "pushs": _blob["pushs"],
-                                        "cached": True, "stale": True})
-                except Exception:
-                    pass
-            else:
-                try:
-                    safe_json.write_text(_cache_f, json.dumps(
-                        {"ts": time.time(), "pushs": all_pushs[:2000]},
-                        ensure_ascii=False))
-                except Exception:
-                    pass
-            return jsonify({"ok": True, "pushs": all_pushs[:2000],
-                            "truncated": len(all_pushs) > 2000})
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Erreur : {e}"})
+        return jsonify(_mym_pushs_relire())
 
     @app.route("/debug/reel_raw", methods=["GET"])
     def debug_reel_raw():
