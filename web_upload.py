@@ -31896,21 +31896,40 @@ def _sfs_alertes_models(noms: list, sent_raw: list) -> dict:
     return models
 
 
+def _telegram_api_post(token: str, payload: dict) -> dict:
+    import requests as _rq
+    return _rq.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                    json=payload, timeout=20).json()
+
+
 def _telegram_envoyer(chat_id: str, texte: str) -> dict:
     """Un message texte dans un groupe, par le bot de la veille (@va_auto_dl_bot).
     sendMessage seulement : getUpdates appartient à tg_router, qui le lit en
     continu — un second lecteur lui volerait ses messages."""
     try:
         import veille_telegram
-        import requests as _rq
         token = (veille_telegram.load_config() or {}).get("bot_token") or ""
         if not token:
             return {"ok": False, "error": "bot Telegram non configuré (réglage de la veille)"}
-        r = _rq.post(f"https://api.telegram.org/bot{token}/sendMessage", timeout=20,
-                     json={"chat_id": chat_id, "text": texte[:4000],
-                           "disable_web_page_preview": True})
-        j = r.json()
-        return {"ok": bool(j.get("ok")), "error": j.get("description") or ""}
+        def _envoi(cid):
+            return _telegram_api_post(token, {"chat_id": cid, "text": texte[:4000],
+                                              "disable_web_page_preview": True})
+
+        j = _envoi(chat_id)
+        # Un groupe neuf est un « petit groupe » (ID en -4…) ; Telegram le passe
+        # en supergroupe (ID en -100…) au premier réglage avancé, et l'ancien
+        # ID est alors refusé. Il donne le nouveau : on le suit et on le garde.
+        nouveau = ((j.get("parameters") or {}).get("migrate_to_chat_id")
+                   if not j.get("ok") else None)
+        if nouveau:
+            j = _envoi(nouveau)
+            if j.get("ok"):
+                cfg = _sfs_alertes_cfg()
+                if str((cfg.get("telegram") or {}).get("chat_id") or "") == str(chat_id):
+                    cfg["telegram"] = dict(cfg.get("telegram") or {}, chat_id=str(nouveau))
+                    safe_json.write(SFS_ALERTES_FILE, cfg)
+        return {"ok": bool(j.get("ok")), "error": j.get("description") or "",
+                "chat_id": str(nouveau or chat_id)}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
 
@@ -32702,8 +32721,8 @@ def _render_sfs_html() -> str:
         "    M.forEach(function(m){ h+='<label style=\"display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;white-space:nowrap\"><input type=\"checkbox\" style=\"width:auto;height:auto;margin:0;display:inline-block\" data-cre=\"'+encodeURIComponent(m.creator)+'\" onchange=\"sfsAlModel(this)\"'+(m.on?' checked':'')+'>'+sfsEsc(m.creator)+'</label>'; });"
         "    var tg=(al.telegram||{}).chat_id||'';"
         "    h+='</div><div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Groupe Telegram</div>'"
-        "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis colle l’ID du groupe (il commence par -100, visible dans l’adresse de web.telegram.org). Envoi de 9 h à 22 h, une fois par alerte.</div>'"
-        "      +'<div style=\"display:flex;gap:6px;flex-wrap:wrap\"><input id=\"sfs-al-tg\" value=\"'+sfsEsc(tg)+'\" placeholder=\"-1001234567890\" style=\"flex:1;min-width:160px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\">'"
+        "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis colle l’ID du groupe : ouvre le groupe sur web.telegram.org, c’est le nombre après « # » dans l’adresse, signe moins compris (-4… ou -100…). Envoi de 9 h à 22 h, une fois par alerte.</div>'"
+        "      +'<div style=\"display:flex;gap:6px;flex-wrap:wrap\"><input id=\"sfs-al-tg\" value=\"'+sfsEsc(tg)+'\" placeholder=\"-4012345678\" style=\"flex:1;min-width:160px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\">'"
         "      +'<button type=\"button\" onclick=\"sfsAlTg()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
         "      +'<button type=\"button\" onclick=\"sfsAlTgTest()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Tester</button></div>'"
         "      +'<div id=\"sfs-al-msg\" style=\"font-size:11.5px;margin-top:5px\"></div></div>';"

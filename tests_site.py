@@ -6679,6 +6679,28 @@ try:
     check("telegram : la nuit, rien ne part (garde pour le matin)",
           _wAL._sfs_alertes_telegram().get("envoye") == 0 and len(_tgAL) == 1)
     _wAL.SFS_ALERTES_HEURES = _savHeuresAL
+    # groupe neuf passe en supergroupe : Telegram refuse l'ancien ID et donne
+    # le nouveau -> on le suit, et le reglage est mis a jour
+    _wAL._telegram_envoyer = _savAL[5]
+    import veille_telegram as _vtAL
+    _savVtAL, _savPostAL = _vtAL.load_config, _wAL._telegram_api_post
+    _vtAL.load_config = lambda: {"bot_token": "T"}
+    _postsAL = []
+
+    def _postAL(token, payload):
+        _postsAL.append(payload["chat_id"])
+        if payload["chat_id"] == "-1001234567890":
+            return {"ok": False, "description": "Bad Request: group chat was upgraded to a supergroup chat",
+                    "parameters": {"migrate_to_chat_id": -1009876543210}}
+        return {"ok": True}
+
+    _wAL._telegram_api_post = _postAL
+    _mgAL = _wAL._telegram_envoyer("-1001234567890", "x")
+    check("telegram : groupe passe en supergroupe -> nouvel ID suivi et garde",
+          _mgAL["ok"] and _postsAL == ["-1001234567890", -1009876543210]
+          and _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["telegram"]["chat_id"]
+          == "-1009876543210", str(_mgAL))
+    _vtAL.load_config, _wAL._telegram_api_post = _savVtAL, _savPostAL
     _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
                                     "chat": {"role": "chatter", "password": "x"}}
     _cChAL = _appAL.test_client()
