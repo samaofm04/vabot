@@ -32082,7 +32082,7 @@ def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
     alertes["models"] = [{"creator": n, "on": bool(models.get(n))}
                          for n in sorted(set(noms) | set(models), key=lambda x: str(x).lower())]
     _tg = (_sfs_alertes_cfg().get("telegram") or {})
-    alertes["telegram"] = {"chat_id": str(_tg.get("chat_id") or "")}
+    alertes["telegram"] = {"chat_id": str(_tg.get("chat_id") or ""), "titre": str(_tg.get("titre") or "")}
     for src, lst in (("s", sent), ("q", queue)):
         for it in lst:
             m = marques.get((src, _of_cle_creatrice(it), str(it.get("id"))))
@@ -32721,7 +32721,7 @@ def _render_sfs_html() -> str:
         "    M.forEach(function(m){ h+='<label style=\"display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;white-space:nowrap\"><input type=\"checkbox\" style=\"width:auto;height:auto;margin:0;display:inline-block\" data-cre=\"'+encodeURIComponent(m.creator)+'\" onchange=\"sfsAlModel(this)\"'+(m.on?' checked':'')+'>'+sfsEsc(m.creator)+'</label>'; });"
         "    var tg=(al.telegram||{}).chat_id||'';"
         "    h+='</div><div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Groupe Telegram</div>'"
-        "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis colle l’ID du groupe : ouvre le groupe sur web.telegram.org, c’est le nombre après « # » dans l’adresse, signe moins compris (-4… ou -100…). Envoi de 9 h à 22 h, une fois par alerte.</div>'"
+        "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis tape <b>/alertessfs</b> dans le groupe : c’est branché. Ou colle ici l’ID du groupe (le nombre après « # » dans l’adresse de web.telegram.org). Envoi de 9 h à 22 h, une fois par alerte.'+(al.telegram&&al.telegram.titre?('<br>Branché sur « '+sfsEsc(al.telegram.titre)+' ».'):'')+'</div>'"
         "      +'<div style=\"display:flex;gap:6px;flex-wrap:wrap\"><input id=\"sfs-al-tg\" value=\"'+sfsEsc(tg)+'\" placeholder=\"-4012345678\" style=\"flex:1;min-width:160px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\">'"
         "      +'<button type=\"button\" onclick=\"sfsAlTg()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
         "      +'<button type=\"button\" onclick=\"sfsAlTgTest()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Tester</button></div>'"
@@ -71666,7 +71666,10 @@ def create_app():
         if chat and not re.match(r"^(-?\d{5,20}|@[A-Za-z0-9_]{5,32})$", chat):
             return jsonify({"ok": False, "error": "ID de groupe invalide (ex. -1001234567890)"})
         cfg = _sfs_alertes_cfg()
-        cfg["telegram"] = dict(cfg.get("telegram") or {}, chat_id=chat)
+        old = cfg.get("telegram") or {}
+        # le nom vient de /alertessfs (Telegram) : il ne vaut que pour ce groupe-là
+        cfg["telegram"] = dict(old, chat_id=chat,
+                               titre=old.get("titre", "") if chat == str(old.get("chat_id") or "") else "")
         if not safe_json.write(SFS_ALERTES_FILE, cfg):
             return jsonify({"ok": False, "error": "réglage non enregistré"})
         return jsonify({"ok": True, "chat_id": chat})

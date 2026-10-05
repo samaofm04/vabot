@@ -6701,6 +6701,38 @@ try:
           and _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["telegram"]["chat_id"]
           == "-1009876543210", str(_mgAL))
     _vtAL.load_config, _wAL._telegram_api_post = _savVtAL, _savPostAL
+    # /alertessfs tape dans le groupe : branche sans chercher l ID (telephone)
+    import tg_router as _trAL
+    _savTrAL = (_trAL.SFS_ALERTES_FILE, _trAL._reply)
+    _trAL.SFS_ALERTES_FILE = _wAL.SFS_ALERTES_FILE
+    _repAL = []
+    _trAL._reply = lambda chat_id, text, thread_id=None: _repAL.append((chat_id, text))
+    _wAL.SFS_ALERTES_FILE.write_text(_jsAL.dumps({"models": {"Julia": True}}))
+    _trAL._handle_command({"sources": {}}, {"chat": {"id": 42, "type": "private"}}, "/alertessfs")
+    check("/alertessfs : en prive, refuse (il faut le groupe)",
+          "telegram" not in _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))
+          and "GROUPE" in _repAL[-1][1])
+    _trAL._handle_command({"sources": {}},
+                          {"chat": {"id": -4012345678, "type": "group", "title": "Alertes SFS"}},
+                          "/alertessfs@va_auto_dl_bot")
+    _cfgAL = _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))
+    check("/alertessfs : le groupe est branche, son nom garde, les reglages des models intacts",
+          _cfgAL["telegram"] == {"chat_id": "-4012345678", "titre": "Alertes SFS"}
+          and _cfgAL["models"] == {"Julia": True} and _repAL[-1][1].startswith("✅"))
+    _trAL._handle_command({"sources": {}},
+                          {"chat": {"id": -4099999999, "type": "group", "title": "Autre"}},
+                          "/alertessfs")
+    check("/alertessfs : un autre groupe ne vole pas la place",
+          _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["telegram"]["chat_id"]
+          == "-4012345678" and "déjà branchées" in _repAL[-1][1])
+    _hTgAL = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())["alerts"]["telegram"]
+    check("/alertessfs : le site montre le groupe branche",
+          _hTgAL == {"chat_id": "-4012345678", "titre": "Alertes SFS"})
+    _cAL.post("/sfssetup/alertes_tg/config", data={"chat_id": "-4055555555"})
+    check("site : changer d ID efface le nom de l ancien groupe",
+          _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["telegram"]
+          == {"chat_id": "-4055555555", "titre": ""})
+    _trAL.SFS_ALERTES_FILE, _trAL._reply = _savTrAL
     _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
                                     "chat": {"role": "chatter", "password": "x"}}
     _cChAL = _appAL.test_client()

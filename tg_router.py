@@ -1246,6 +1246,40 @@ def _handle_command(cfg: dict, msg: dict, text: str):
                f"• Veilles en attente d'une vidéo : {pending}\n"
                f"• Vidéos rangées : {STATUS.get('routed', 0)}", thread_id)
 
+    elif cmd == "/alertessfs":
+        _brancher_alertes_sfs(chat, chat_id, thread_id)
+
+
+SFS_ALERTES_FILE = DATA_DIR / "sfs_alertes.json"   # même fichier que ⚙ Réglages du planning SFS
+
+
+def _brancher_alertes_sfs(chat: dict, chat_id, thread_id=None):
+    """/alertessfs tapé dans un groupe : les alertes SFS OnlyFans du site y
+    arriveront. Sur téléphone, l'ID d'un groupe est introuvable (le
+    propriétaire l'a demandé le 05/10/2026) ; la commande s'en passe.
+
+    Un groupe déjà branché ne se fait pas voler sa place depuis un autre :
+    changer de groupe passe par le site (vider le champ, puis la commande)."""
+    if chat.get("type") not in ("group", "supergroup"):
+        _reply(chat_id, "⚠️ Tape /alertessfs dans le GROUPE qui doit recevoir les alertes SFS.",
+               thread_id)
+        return
+    cfg = safe_json.load(SFS_ALERTES_FILE, None)
+    cfg = cfg if isinstance(cfg, dict) else {}
+    tg = cfg.get("telegram") or {}
+    deja = str(tg.get("chat_id") or "")
+    if deja and deja != str(chat_id):
+        _reply(chat_id, "⚠️ Les alertes SFS sont déjà branchées sur un autre groupe. "
+                        "Pour changer : planning SFS du site → ⚙ Réglages → vider le "
+                        "groupe Telegram, puis retaper /alertessfs ici.", thread_id)
+        return
+    cfg["telegram"] = dict(tg, chat_id=str(chat_id), titre=str(chat.get("title") or ""))
+    if not safe_json.write(SFS_ALERTES_FILE, cfg):
+        _reply(chat_id, "⚠️ Branchement non enregistré, réessaie dans un instant.", thread_id)
+        return
+    _reply(chat_id, "✅ Les alertes SFS OnlyFans arriveront dans ce groupe, de 9 h à 22 h "
+                    "(même SFS sur le même compte, compte sans SFS depuis 2 jours).", thread_id)
+
 
 # ── Cœur du routage ─────────────────────────────────────────────────────────
 def _handle_update(cfg: dict, upd: dict):
