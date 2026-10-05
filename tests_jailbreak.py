@@ -5453,8 +5453,9 @@ def _v2_bloc_menu_va():
         # Outils (03/10/2026) : la vue persistante les porte ; le menu poste
         # ne les montre qu'au serveur FR, aux identites ouvertes. « Numéro »
         # est parti le meme jour avec son salon (1bdc31c) : le garder ici
-        # aurait laisse croire qu'il revient.
-        ["cmenu:spoofer", "cmenu:download"],
+        # aurait laisse croire qu'il revient. « Download » parti le 05/10/2026
+        # (proprietaire) : ses anciens boutons repondent par OutilsRetiresView.
+        ["cmenu:spoofer"],
         ["cmenu:sel:caption"], ["cmenu:sel:template"], ["cmenu:sel:trash"], ["cmenu:sel:flash"],
         ["cmenu:clics", "cmenu:help", "cmenu:lien", "cmenu:pay", "cmenu:tuto"],
         ["cmenu:addaccount", "cmenu:comptes"],
@@ -5474,6 +5475,18 @@ def _v2_bloc_menu_va():
           not _a_outils(U._menu_va(None, "emma", _gFR))
           and not _a_outils(U._menu_va(None, "julia", _gUS))
           and not _a_outils(U._menu_va(None, None, _gFR)))
+    # Download retire du serveur FR (05/10/2026) : ni dans le menu complet
+    # poste, ni dans la vue persistante qui sert ses clics.
+    _idsDl = lambda vv: [getattr(c, "custom_id", None) for c in vv.walk_children()]
+    check("outils : menu complet FR -> Spoofer seul, plus de Download",
+          [r for r in rangees(U._menu_va(None, "julia", _gFR)) if "cmenu:spoofer" in r]
+          == [["cmenu:spoofer"]]
+          and "cmenu:download" not in _idsDl(U._menu_va(None, "julia", _gFR))
+          and "cmenu:download" not in _idsDl(v)
+          and not hasattr(U.ContentMenuView, "_clic_download"))
+    check("outils : autres serveurs -> le menu poste reste le menu complet, sans outil",
+          isinstance(U._menu_a_poster(None, "julia", _gUS), U.ContentMenuView)
+          and not {"cmenu:spoofer", "cmenu:download"} & set(_idsDl(U._menu_a_poster(None, "julia", _gUS))))
     check("structure : dans les limites de Discord (%d composants, %d car.)"
           % (v.total_children_count, v.content_length()),
           not limites(v) and v.total_children_count <= 40, limites(v))
@@ -5525,7 +5538,7 @@ def _v2_bloc_menu_va():
             _diff.append((b.custom_id, b.label, str(b.emoji), b.style,
                           a and (a.label, str(a.emoji), a.style)))
     check("boutons : les 17 boutons gardent custom_id, libelle, emoji et style de l'ancien menu",
-          not _diff and len(boutons(v)) == 19, _diff)
+          not _diff and len(boutons(v)) == 18, _diff)
     check("boutons : chaque bouton de la table a sa methode (_clic_<cle>)",
           all(hasattr(U.ContentMenuView, "_clic_" + b.custom_id.split(":", 1)[1]) for b in boutons(v))
           and not v.inconnues)
@@ -5697,7 +5710,12 @@ def _v2_bloc_menu_va():
     _neufs = [c for r in rangees(U.ContentMenuView(None)) for c in r]
     _mauv = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
     check("motifs : chaque custom_id du menu V2 est servi par UN element exactement",
-          not _mauv and len(_neufs) == 23, _mauv)
+          not _mauv and len(_neufs) == 22, _mauv)
+    # Download retire de Va IG (05/10/2026) : ses boutons deja postes (menu
+    # complet et ligne) gardent UN repondant, OutilsRetiresView.
+    _mauvDl = [(c, qui(c)) for c in ("cmenu:download", "cmenu:l:download") if len(qui(c)) != 1]
+    check("motifs : les anciens Download (menu et ligne) servis par UN element",
+          not _mauvDl and any(isinstance(x, U.OutilsRetiresView) for x in _bot.vues), _mauvDl)
     _ANCIENS_MENU = ("reel", "story", "post", "storycta", "banger", "reelmonte", "pseudo",
                      "name", "bio", "pp", "lien", "clics", "help", "tuto", "addaccount",
                      "comptes", "pay", "capbanger", "montagebanger", "templateflash",
@@ -20392,6 +20410,235 @@ except Exception as _eLf:
     import traceback as _tbLf
     _tbLf.print_exc()
     check("liens FR : testable", False, repr(_eLf)[:200])
+
+# ---- Va IG : Download retire de la ligne et du menu (05/10/2026) ----------
+# Proprietaire : « tu peux remove pour les VA sur Va IG le truc download ».
+# La ligne epinglee garde les boutons du jour ou elle a ete postee : sans le
+# redessin, le Download restait a l'ecran dans ~160 tickets, et son clic
+# rouvrait le telechargeur.
+print()
+print("Va IG : Download retire de la ligne et du menu, lignes redessinees une fois")
+try:
+    import asyncio as _asDl, tempfile as _tfDl, types as _tyDl, pathlib as _plDl
+    import inspect as _inDl, logging as _lgDl
+    import discord as _dcDl
+    import safe_json as _sjDl
+    from cogs import user as _uDl, welcome as _wDl
+    _gFRDl = _tyDl.SimpleNamespace(id=1505418484052394004, name="fr", emojis=[], roles=[])
+    _gUSDl = _tyDl.SimpleNamespace(id=1535758943324999711, name="us", emojis=[], roles=[])
+
+    def _idsDl(v):
+        return [getattr(c, "custom_id", None) for c in v.walk_children()
+                if getattr(c, "custom_id", None)]
+
+    def _txtDl(v):
+        return "\n".join(t.content for t in v.walk_children()
+                         if isinstance(t, _dcDl.ui.TextDisplay))
+
+    # --- la ligne et le menu complet du serveur FR
+    _vDl = _uDl._menu_a_poster(None, "julia", _gFRDl, va=77)
+    _r1Dl = [c for c in _vDl.walk_children() if isinstance(c, _dcDl.ui.ActionRow)][0]
+    check("ligne FR : la 1re rangee = Menu puis Spoofer, plus de Download",
+          isinstance(_vDl, _uDl.MenuLigneVA)
+          and [b.custom_id for b in _r1Dl.children] == ["cmenu:l:menu", "cmenu:l:spoofer"]
+          and "cmenu:l:download" not in _idsDl(_vDl), _idsDl(_vDl))
+    check("ligne FR : la vue enregistree au demarrage ne porte plus Download",
+          "cmenu:l:download" not in _idsDl(_uDl.MenuLigneVA(None))
+          and "cmenu:download" not in _idsDl(_uDl.ContentMenuView(None)))
+    check("ligne FR : le theme Mario reste (champignon du Menu, titre)",
+          str(_r1Dl.children[0].emoji) == "🍄" and "## 🍄 Ton menu" in _txtDl(_vDl), _txtDl(_vDl))
+    _plein = _uDl._menu_va(None, "julia", _gFRDl)
+    check("menu complet FR : la rangee Outils garde Spoofer, sans Download",
+          "cmenu:spoofer" in _idsDl(_plein) and "cmenu:download" not in _idsDl(_plein)
+          and "Download" not in _txtDl(_plein), _idsDl(_plein))
+    check("autres serveurs : le menu poste reste le menu complet, sans outil (inchange)",
+          isinstance(_uDl._menu_a_poster(None, "julia", _gUSDl), _uDl.ContentMenuView)
+          and not {"cmenu:spoofer", "cmenu:download", "cmenu:l:download"}
+          & set(_idsDl(_uDl._menu_a_poster(None, "julia", _gUSDl))))
+
+    # --- un ancien bouton Download, avant que sa ligne soit redessinee
+    _orDl = _OutilsRetiresIds = _uDl.OutilsRetiresView(None)
+    check("ancien Download : ses deux custom_id ont un repondant persistant, unique",
+          _idsDl(_orDl) == ["cmenu:l:download", "cmenu:download"] and _orDl.is_persistent()
+          and not set(_idsDl(_orDl)) & (set(_idsDl(_uDl.MenuLigneVA(None)))
+                                        | set(_idsDl(_uDl.ContentMenuView(None)))))
+    check("ancien Download : la vue est enregistree au demarrage (cog_load)",
+          "OutilsRetiresView(self)" in _inDl.getsource(_uDl.UserCog.cog_load))
+
+    class _RepDl:
+        def __init__(self):
+            self.envois = []
+
+        async def send_message(self, *a, **k):
+            self.envois.append((a, k))
+
+    _ouvertsDl = []
+    _sauveDl = _uDl._outil_download
+
+    async def _faux_dl(inter):
+        _ouvertsDl.append(inter)
+    try:
+        _uDl._outil_download = _faux_dl
+        _iFR = _tyDl.SimpleNamespace(guild=_gFRDl, message=None, response=_RepDl(),
+                                     user=_tyDl.SimpleNamespace(id=77))
+        for _b in _orDl.children:
+            _asDl.run(_b.callback(_iFR))
+        check("ancien Download sur Va IG : une phrase pour lui seul, pas le telechargeur",
+              _iFR.response.envois == [(("⬇️ Download n'est plus dans le menu.",),
+                                        {"ephemeral": True})] * 2 and not _ouvertsDl,
+              _iFR.response.envois)
+        _iUS = _tyDl.SimpleNamespace(guild=_gUSDl, message=None, response=_RepDl(),
+                                     user=_tyDl.SimpleNamespace(id=77))
+        _asDl.run(_orDl.children[1].callback(_iUS))
+        check("ancien Download ailleurs : le telechargeur s'ouvre comme avant",
+              _ouvertsDl == [_iUS] and not _iUS.response.envois)
+    finally:
+        _uDl._outil_download = _sauveDl
+
+    # --- le redessin, une fois, sur place
+    _dDl = _plDl.Path(_tfDl.mkdtemp())
+    _MOI = 999
+    _sauveR = (_uDl.USERS_FILE, _wDl.load_users, _wDl.LIGNES_REDESSIN_FAIT, _asDl.sleep)
+    _usersDl = {"77": {"identity": "julia", "channel_id": 5150},
+                "88": {"identity": "julia", "channel_id": 6160},
+                "nope": {"channel_id": 5150}}
+
+    def _ancienne_ligne(ident, mention=None):
+        # la ligne d'avant le 05/10 : Menu, Spoofer, Download
+        v = _uDl.MenuLigneVA(None, ident, mention=mention)
+        r = [c for c in v.walk_children() if isinstance(c, _dcDl.ui.ActionRow)][0]
+        r.add_item(_uDl._BoutonLigneVA(None, "download", "Download", "⬇️"))
+        return v
+
+    class _MsgDl:
+        def __init__(self, vue=None, auteur=_MOI, embeds=(), epingle=False, rate=0):
+            self.id, self.author, self.embeds = id(self), _tyDl.SimpleNamespace(id=auteur), list(embeds)
+            self.content, self.components = None, (vue.children if vue is not None else [])
+            self.pinned, self.edits, self.epinglages, self.rate = epingle, [], 0, rate
+
+        async def edit(self, **k):
+            if self.rate:
+                self.rate -= 1
+                raise RuntimeError("edition refusee")
+            self.edits.append(k)
+
+        async def pin(self, **k):
+            self.epinglages += 1
+
+    _vAutre = _dcDl.ui.LayoutView()
+    _vAutre.add_item(_dcDl.ui.TextDisplay("un contenu du ticket"))
+    _mLigne = _MsgDl(_ancienne_ligne("julia", mention=77), epingle=True)
+    _mSansId = _MsgDl(_ancienne_ligne(None))
+    _mMembre = _MsgDl(_ancienne_ligne("julia"), auteur=1)
+    _mAutre = _MsgDl(_vAutre)
+    _mEmbed = _MsgDl(embeds=[_tyDl.SimpleNamespace(title="☀️ Ton menu")])
+    _mUS = _MsgDl(_ancienne_ligne("julia"), epingle=True)
+    _tousDl = (_mLigne, _mSansId, _mMembre, _mAutre, _mEmbed, _mUS)
+
+    class _SalonDl:
+        def __init__(self, cid, guild, msgs):
+            self.id, self.guild, self.name, self.msgs, self.envois = cid, guild, f"va-{cid}", msgs, 0
+
+        async def pins(self, limit=50):
+            for m in self.msgs:
+                if m.pinned:
+                    yield m
+
+        async def history(self, limit=50):
+            for m in self.msgs:
+                yield m
+
+        async def send(self, *a, **k):
+            self.envois += 1
+
+    _salonsDl = {5150: _SalonDl(5150, _gFRDl, [_mLigne, _mSansId, _mMembre, _mAutre, _mEmbed]),
+                 6160: _SalonDl(6160, _gUSDl, [_mUS])}
+    _botDl = _tyDl.SimpleNamespace(user=_tyDl.SimpleNamespace(id=_MOI), get_channel=_salonsDl.get,
+                                   get_cog=lambda n: _tyDl.SimpleNamespace() if n == "UserCog" else None,
+                                   guilds=[_gFRDl, _gUSDl])
+    _soiDl = _tyDl.SimpleNamespace(bot=_botDl)
+    _pausesDl = []
+
+    async def _sans_attente(s, *a, **k):
+        _pausesDl.append(s)
+    try:
+        _uDl.USERS_FILE = _dDl / "users.json"
+        _sjDl.write(_uDl.USERS_FILE, _usersDl, indent=1)
+        _wDl.load_users = lambda: dict(_usersDl)
+        _wDl.LIGNES_REDESSIN_FAIT = _dDl / "trace.json"
+        _asDl.sleep = _sans_attente
+        _passeDl = lambda: _asDl.run(_wDl.Welcome.lignes_redessin.coro(_soiDl))
+
+        # Serveur FR indisponible au demarrage (panne Discord partielle) : la
+        # passe ne trouvait aucun ticket et se marquait finie sur rien.
+        _gFRind = _tyDl.SimpleNamespace(id=_gFRDl.id, name="fr", unavailable=True)
+        for _gsDl, _quoiDl in (([_gFRind, _gUSDl], "indisponible"), ([_gUSDl], "absent du cache")):
+            _botDl.guilds = _gsDl
+            _passeDl()
+            _trDl = _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={})
+            check(f"redessin : serveur FR {_quoiDl} -> rien d'edite, pas de « fin » (reessaye)",
+                  not any(m.edits for m in _tousDl) and not _trDl.get("fin")
+                  and not _trDl.get("faits"), _trDl)
+        _botDl.guilds = [_gFRDl, _gUSDl]
+        _botDl.get_channel = lambda cid: None
+        _logsDl = []
+        _hDl = _lgDl.Handler()
+        _hDl.emit = lambda r: _logsDl.append(r.getMessage())
+        _wDl.log.addHandler(_hDl)
+        try:
+            _passeDl()
+        finally:
+            _wDl.log.removeHandler(_hDl)
+            _botDl.get_channel = _salonsDl.get
+        _trDl = _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={})
+        check("redessin : aucun salon en cache -> pas de « fin », salons absents comptes au journal",
+              not _trDl.get("fin") and not any(m.edits for m in _tousDl)
+              and any("'absents': 2" in t for t in _logsDl), (_trDl, _logsDl))
+
+        _passeDl()
+        _neuve = _mLigne.edits[0]["view"] if _mLigne.edits else None
+        check("redessin : seule la ligne du bot, marquee et avec identite, est refaite (une fois)",
+              len(_mLigne.edits) == 1
+              and not any(m.edits for m in _tousDl if m is not _mLigne),
+              [len(m.edits) for m in _tousDl])
+        check("redessin : la ligne refaite = la disposition du jour (sans Download), mention gardee",
+              _neuve is not None and "cmenu:l:download" not in _idsDl(_neuve)
+              and "cmenu:l:spoofer" in _idsDl(_neuve) and _txtDl(_neuve).startswith("<@77> 👇"))
+        check("redessin : sur place et en silence (edition de la vue seule, rien poste ni epingle)",
+              set(_mLigne.edits[0]) == {"view"} and not any(m.epinglages for m in _tousDl)
+              and not any(s.envois for s in _salonsDl.values()))
+        check("redessin : une seconde apres chaque edition", 1.0 in _pausesDl, _pausesDl)
+        _trDl = _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={})
+        check("redessin : trace = version du jour, ticket FR fait, passe finie",
+              _trDl.get("version") == _uDl.LIGNE_DISPOSITION and _trDl.get("faits") == ["77"]
+              and _trDl.get("fin"), _trDl)
+        _passeDl()
+        check("redessin : un 2e passage (redemarrage) ne refait rien",
+              len(_mLigne.edits) == 1)
+        _sjDl.write(_wDl.LIGNES_REDESSIN_FAIT, {"version": _uDl.LIGNE_DISPOSITION, "faits": ["77"]})
+        _passeDl()
+        check("redessin : reprise -- un ticket deja fait n'est pas refait, la passe se finit",
+              len(_mLigne.edits) == 1
+              and _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={}).get("fin"))
+        _sjDl.write(_wDl.LIGNES_REDESSIN_FAIT, {"version": "ancienne", "faits": ["77"], "fin": 1})
+        _mLigne.rate = 1
+        _passeDl()
+        _trDl = _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={})
+        check("redessin : nouvelle disposition, edition refusee -> ticket non marque, pas de fin",
+              len(_mLigne.edits) == 1 and _trDl.get("version") == _uDl.LIGNE_DISPOSITION
+              and "77" not in (_trDl.get("faits") or []) and not _trDl.get("fin"), _trDl)
+        _passeDl()
+        check("redessin : ... et il est repris au passage suivant",
+              len(_mLigne.edits) == 2
+              and _sjDl.load(_wDl.LIGNES_REDESSIN_FAIT, default={}).get("fin"))
+        check("redessin : la passe est lancee au demarrage du cog",
+              "self.lignes_redessin.start()" in _inDl.getsource(_wDl.Welcome.__init__))
+    finally:
+        (_uDl.USERS_FILE, _wDl.load_users, _wDl.LIGNES_REDESSIN_FAIT, _asDl.sleep) = _sauveR
+except Exception as _eDl:
+    import traceback as _tbDl
+    _tbDl.print_exc()
+    check("Download retire de Va IG : testable", False, repr(_eDl)[:200])
 
 # ---- Menu FR sans Caption / Template / Trash / Flash (05/10/2026) ---------
 print()

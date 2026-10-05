@@ -1771,6 +1771,11 @@ async def lignes_suivent_roles(guild, membre, ch, bot, garder_sans_role=False) -
 #: Passage unique de Welcome.lignes_rattrapage (une cle par demande).
 LIGNES_DEMANDE = "2026-10-03"
 LIGNES_FAIT = Path(__file__).resolve().parent.parent / "data" / "lignes_roles_fr.json"
+#: Trace de Welcome.lignes_redessin : {"version": cogs.user.LIGNE_DISPOSITION
+#: appliquee, "faits": [uid...] (reprise apres un redemarrage), "fin": ts}.
+#: Son propre fichier : lignes_rattrapage reecrit LIGNES_FAIT en entier, il
+#: aurait efface la progression ecrite entre-temps.
+LIGNES_REDESSIN_FAIT = Path(__file__).resolve().parent.parent / "data" / "lignes_disposition_fr.json"
 
 
 class _DejaArchive(Exception):
@@ -2392,6 +2397,7 @@ class Welcome(commands.Cog):
         self._taches_liens = set()
         self.liens_suivent_roles.start()
         self.lignes_rattrapage.start()
+        self.lignes_redessin.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
@@ -2400,6 +2406,7 @@ class Welcome(commands.Cog):
         self.ouvrir_numeros.cancel()
         self.liens_suivent_roles.cancel()
         self.lignes_rattrapage.cancel()
+        self.lignes_redessin.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -2905,6 +2912,78 @@ class Welcome(commands.Cog):
 
     @lignes_rattrapage.before_loop
     async def _avant_lignes_rattrapage(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=24)
+    async def lignes_redessin(self):
+        """UNE fois par disposition (cogs.user.LIGNE_DISPOSITION) : les lignes
+        de menu deja postees dans les tickets du serveur FR sont redessinees
+        SUR PLACE -- une edition, sans repost, sans epinglage, sans
+        notification. Sans ca, le Download retire le 05/10/2026 restait sur
+        ~160 lignes epinglees. Reprend ou il s'etait arrete (trace ecrite
+        apres chaque ticket) ; une seconde entre deux editions."""
+        from cogs.user import LIGNE_DISPOSITION, rafraichir_lien_des_menus
+        trace = safe_json.load(LIGNES_REDESSIN_FAIT, default={}) or {}
+        if trace.get("version") != LIGNE_DISPOSITION:
+            # nouvelle disposition : tout est a refaire, et la trace le dit
+            # tout de suite (sinon elle montrait encore l'ancienne « finie »)
+            trace = {"version": LIGNE_DISPOSITION, "faits": []}
+            safe_json.write(LIGNES_REDESSIN_FAIT, trace, indent=1)
+        if trace.get("fin"):
+            return
+        if self.bot.get_cog("UserCog") is None:
+            # sans lui rien ne se redessine : ne pas marquer la passe faite
+            log.warning("redessin des lignes de menu : UserCog absent, reessaye demain")
+            return
+        if not any(_serveur_fr(g) and not getattr(g, "unavailable", False)
+                   for g in (getattr(self.bot, "guilds", None) or ())):
+            # Serveur FR indisponible au demarrage (panne Discord partielle :
+            # on_ready part sans lui) : aucun de ses salons n'est en cache, la
+            # passe ne trouvait aucun ticket et se marquait FINIE -- les ~160
+            # lignes gardaient leur Download jusqu'a la disposition suivante.
+            log.warning("redessin des lignes de menu : serveur FR indisponible, reessaye demain")
+            return
+        faits = {str(u) for u in (trace.get("faits") or [])}
+        n = {"tickets": 0, "lignes": 0, "rates": 0, "absents": 0, "deja": len(faits)}
+        for uid, e in list((load_users() or {}).items()):
+            if not isinstance(e, dict) or not str(uid).isdigit() or str(uid) in faits:
+                continue
+            ch = self.bot.get_channel(int(e.get("channel_id") or 0))
+            if ch is None:
+                # salon supprime (VA parti) ou d'un serveur absent : compte,
+                # pas ecarte sans trace -- on ne sait pas de quel serveur il est
+                n["absents"] += 1
+                continue
+            if not _serveur_fr(getattr(ch, "guild", None)):
+                continue
+            n["tickets"] += 1
+            avant = n["rates"]
+            try:
+                n["lignes"] += await rafraichir_lien_des_menus(
+                    self.bot, int(uid), None, pause=1.0, bilan=n)
+            except Exception as x:                           # noqa: BLE001
+                n["rates"] += 1
+                log.warning(f"redessin des lignes : {ch.name} : {type(x).__name__}: {x}")
+            # un ticket rate n'est pas marque : il est repris au prochain passage
+            if n["rates"] == avant:
+                faits.add(str(uid))
+                trace["faits"] = sorted(faits)
+                safe_json.write(LIGNES_REDESSIN_FAIT, trace, indent=1)
+            await asyncio.sleep(1)
+        log.info(f"redessin des lignes de menu ({LIGNE_DISPOSITION}) : {n}")
+        if n["rates"]:
+            return          # pas de « fin » : les rates repassent demain (ou au redemarrage)
+        if not n["tickets"] and not n["deja"]:
+            # aucun ticket FR trouve, ni maintenant ni avant : cache encore
+            # vide plutot que serveur sans ticket -- pas de « fin » sur rien
+            # (un passage a vide ne coute qu'une lecture de users.json)
+            log.warning(f"redessin des lignes de menu : aucun ticket FR trouve ({n}), reessaye demain")
+            return
+        trace["fin"] = int(time.time())
+        safe_json.write(LIGNES_REDESSIN_FAIT, trace, indent=1)
+
+    @lignes_redessin.before_loop
+    async def _avant_lignes_redessin(self):
         await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=10)

@@ -5444,6 +5444,8 @@ class UserCog(commands.Cog):
                      lambda: self.bot.add_view(ContentMenuHeritageView(self)))
         _enregistrer("anciens lanceurs du menu VA",
                      lambda: self.bot.add_view(ContentMenuLanceursView(self)))
+        _enregistrer("anciens outils du menu VA (Download)",
+                     lambda: self.bot.add_view(OutilsRetiresView(self)))
         _enregistrer("menu central", lambda: self.bot.add_view(CentralMenuView(self)))
         # L'ancien menu Jailbreak a UN menu deroulant (« jbmenu:model »,
         # « jbmenuus:model ») : il n'est plus pose, mais les messages deja
@@ -8631,13 +8633,13 @@ _MENU_VA_DISPOSITION = (
         _BoutonVA("brutbanger", "⭐ Vidéo brut", None, _BS.primary,
                   "tes meilleures brutes ⭐, sans montage"),
     )),
-    # Serveur FR seulement (cogs/outils.py) : une ligne, les trois outils des
-    # dossiers US, livres dans le ticket (proprietaire, 03/10/2026).
+    # Serveur FR seulement (cogs/outils.py) : les outils des dossiers US,
+    # livres dans le ticket (proprietaire, 03/10/2026). Download retire le
+    # 05/10/2026 (« tu peux remove pour les VA sur Va IG le truc download ») :
+    # les boutons deja postes repondent par OutilsRetiresView.
     (_MENU_VA_OUTILS, (
         _BoutonVA("spoofer", "Spoofer", "📤", _BS.primary,
                   "ta photo ou ta vidéo en versions uniques"),
-        _BoutonVA("download", "Download", "⬇️", _BS.primary,
-                  "PP, bio, posts et reels d'un compte Insta"),
     )),
     ("Montages", _MENU_VA_FAMILLES),
     ("Suivi et aide", (
@@ -8875,8 +8877,10 @@ class _BoutonLigneVA(discord.ui.Button):
             await _ligne_ouvrir_menu(self.cog, interaction)
             return
         # plus de « numero » : son bouton et son salon ont ete retires le
-        # 03/10/2026 — le garder ici aurait laisse croire qu il revient
-        f = {"spoofer": _outil_spoofer, "download": _outil_download}.get(self.cle)
+        # 03/10/2026 — le garder ici aurait laisse croire qu il revient. Plus
+        # de « download » non plus (05/10/2026) : ses anciens boutons sont
+        # servis par OutilsRetiresView.
+        f = {"spoofer": _outil_spoofer}.get(self.cle)
         if f is not None:
             await _avec_model_du_menu(interaction, lambda: f(interaction))
             return
@@ -8904,6 +8908,16 @@ _LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success
                 # dans le menu complet, personne ne l'ouvrait.
                 ("tuto", "Tuto", "📖", discord.ButtonStyle.secondary))
 _LIGNE_SUIVI_CLES = {c for c, *_ in _LIGNE_SUIVI}
+
+#: Les outils de la 1re rangee de la ligne, apres 📋 Menu : (cle, libelle, emoji).
+_LIGNE_OUTILS = (("spoofer", "Spoofer", "📤"),)
+
+#: LA VERSION DE LA DISPOSITION DE LA LIGNE. Une ligne epinglee garde les
+#: boutons du jour ou elle a ete postee : sans redessin, le Download retire le
+#: 05/10/2026 restait a l'ecran dans ~160 tickets. Changer cette valeur a
+#: chaque changement de disposition : Welcome.lignes_redessin redessine alors
+#: UNE fois, sur place et sans notification, toutes les lignes du serveur FR.
+LIGNE_DISPOSITION = "2026-10-05-sans-download"
 
 
 class MenuLigneVA(discord.ui.LayoutView):
@@ -8945,9 +8959,10 @@ class MenuLigneVA(discord.ui.LayoutView):
         rangee = ui.ActionRow(_BoutonLigneVA(cog, "menu", "Menu", _emo("menu", "📋")))
         if outils:
             # « Numéro » retiré le 03/10/2026 avec son salon : le bouton
-            # n'aurait plus mené nulle part.
-            for cle, lib, emo in (("spoofer", "Spoofer", "📤"),
-                                  ("download", "Download", "⬇️")):
+            # n'aurait plus mené nulle part. « Download » retiré le 05/10/2026
+            # à la demande du propriétaire ; les lignes déjà postées sont
+            # redessinées une fois (LIGNE_DISPOSITION, Welcome.lignes_redessin).
+            for cle, lib, emo in _LIGNE_OUTILS:
                 rangee.add_item(_BoutonLigneVA(cog, cle, lib, _emo(cle, emo)))
         # 2e rangee : les reglages du serveur (une fonction coupee, son bouton
         # absent), comme dans le menu complet ; sans filtre (vue enregistree
@@ -9047,10 +9062,36 @@ def _menu_a_poster(cog, identite, guild, mention=None, va=None):
     return _menu_va(cog, identite, guild, mention=mention)
 
 
-async def rafraichir_lien_des_menus(bot, uid, model) -> int:
+async def _messages_du_ticket(ch):
+    """Les epingles du salon, puis ses 50 derniers messages, chacun une fois.
+    Les epingles d'abord : la ligne de menu est epinglee, et dans un ticket
+    ou le contenu s'empile elle sort vite des 50 derniers -- elle n'etait
+    alors jamais redessinee. Un salon sans epingles lisibles garde
+    l'historique (journalise)."""
+    vus = set()
+    try:
+        async for m in ch.pins(limit=50):
+            vus.add(getattr(m, "id", None))
+            yield m
+    except Exception as x:                                   # noqa: BLE001
+        log.warning("menu VA : epingles de #%s illisibles (%s: %s)",
+                    getattr(ch, "name", "?"), type(x).__name__, x)
+    async for m in ch.history(limit=50):
+        if getattr(m, "id", None) not in vus:
+            yield m
+
+
+async def rafraichir_lien_des_menus(bot, uid, model, pause=0.0, bilan=None) -> int:
     """Redessine SUR PLACE les lignes de menu de cette model dans le ticket du
     VA : son lien vient d'etre cree, coupe ou remis en service. Sans ca, il
-    n'apparaissait qu'au menu du lendemain. Rend le nombre de menus refaits."""
+    n'apparaissait qu'au menu du lendemain. Rend le nombre de menus refaits.
+
+    `model` vide : TOUTES ses lignes (une identite lisible exigee) -- le
+    redessin d'une nouvelle disposition (Welcome.lignes_redessin). `pause` :
+    secondes apres chaque edition. `bilan` : dict ou compter les echecs
+    (« rates »), pour les remonter plutot que les perdre dans le journal.
+    Ne touche qu'aux messages du bot qui portent la marque du menu : une
+    edition ne notifie personne, rien n'est reposte ni epingle."""
     model = str(model or "").strip().lower()
     e = (load_json(USERS_FILE, {}) or {}).get(str(uid))
     cid = int(e.get("channel_id") or 0) if isinstance(e, dict) else 0
@@ -9061,20 +9102,27 @@ async def rafraichir_lien_des_menus(bot, uid, model) -> int:
         return 0
     n = 0
     try:
-        async for m in ch.history(limit=50):
+        async for m in _messages_du_ticket(ch):
             # l'ancien menu en embed ne devient pas un message V2 par edition
             if getattr(m, "embeds", None) or not _est_menu_va(m, moi):
                 continue
             ident, mention = _menu_va_lire(m)
-            if str(ident or "").strip().lower() != model:
+            ident = str(ident or "").strip().lower()
+            if not ident or (model and ident != model):
                 continue
             try:
                 await m.edit(view=_menu_a_poster(cog, ident, ch.guild, mention=mention, va=uid))
                 n += 1
             except Exception as x:                           # noqa: BLE001
-                log.warning("menu VA %s : lien non redessine dans #%s (%s: %s)",
+                if bilan is not None:
+                    bilan["rates"] = bilan.get("rates", 0) + 1
+                log.warning("menu VA %s : ligne non redessinee dans #%s (%s: %s)",
                             m.id, getattr(ch, "name", "?"), type(x).__name__, x)
+            if pause:
+                await asyncio.sleep(pause)
     except Exception as x:                                   # noqa: BLE001
+        if bilan is not None:
+            bilan["rates"] = bilan.get("rates", 0) + 1
         log.warning("menu VA : historique de #%s illisible (%s: %s)",
                     getattr(ch, "name", "?"), type(x).__name__, x)
     return n
@@ -9313,9 +9361,6 @@ class ContentMenuView(discord.ui.LayoutView):
     async def _clic_spoofer(self, interaction: discord.Interaction):
         await _outil_spoofer(interaction)
 
-    async def _clic_download(self, interaction: discord.Interaction):
-        await _outil_download(interaction)
-
     async def _clic_numero(self, interaction: discord.Interaction):
         await _outil_numero(interaction)
 
@@ -9470,6 +9515,45 @@ class ContentMenuHeritageView(discord.ui.View):
         self.cog = cog
         for cle in self.ANCIENS:
             self.add_item(_BoutonHeritageVA(cle))
+
+
+#: Message d'un ancien bouton ⬇️ Download sur Va IG, en attendant que sa ligne
+#: soit redessinee.
+_DOWNLOAD_RETIRE = "⬇️ Download n'est plus dans le menu."
+
+
+async def _clic_download_retire(interaction):
+    """Un ancien bouton ⬇️ Download (ligne « cmenu:l:download », menu complet
+    « cmenu:download »). Sur Va IG il est retire (05/10/2026) : une phrase,
+    pas le telechargeur -- sinon le bouton encore a l'ecran le rouvrait.
+    Ailleurs, rien ne change."""
+    if _menu_outils_ici(getattr(interaction, "guild", None)):
+        await interaction.response.send_message(_DOWNLOAD_RETIRE, ephemeral=True)
+        return
+    await _avec_model_du_menu(interaction, lambda: _outil_download(interaction))
+
+
+class _BoutonOutilRetire(discord.ui.Button):
+    def __init__(self, custom_id):
+        super().__init__(label="Download", custom_id=custom_id)
+
+    async def callback(self, interaction: discord.Interaction):
+        await _clic_download_retire(interaction)
+
+
+class OutilsRetiresView(discord.ui.View):
+    """Les custom_id des outils RETIRES du menu VA, toujours geres : jamais
+    postee, enregistree au demarrage comme ContentMenuHeritageView. Sans
+    elle, un Download encore epingle ne repondait plus (« echec de
+    l'interaction »), sans une ligne dans le journal."""
+
+    ANCIENS = (_CMENU_LIGNE + "download", "cmenu:download")
+
+    def __init__(self, cog=None):
+        super().__init__(timeout=None)
+        self.cog = cog
+        for cid in self.ANCIENS:
+            self.add_item(_BoutonOutilRetire(cid))
 
 
 class ContentMenuLanceursView(discord.ui.View):
