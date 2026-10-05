@@ -1259,7 +1259,7 @@ function lancer(req){
   if (S.occupe) return;
   S.occupe = true; S.req = req;
   var ajout = req.page > 0;
-  if (!ajout) $("v-res").innerHTML = "<div class=\"attente\">" + (req.type === "texte" ? "Recherche…" : "Recherche d'images proches de tes gardées (environ 15 s)…") + "</div>";
+  if (!ajout) $("v-res").innerHTML = "<div class=\"attente\">" + (req.type === "texte" ? "Recherche…" : "Recherche d'images proches de tes gardées (jusqu'à 30 s)…") + "</div>";
   else { var b = $("plus"); if (b) { b.disabled = true; b.textContent = "Chargement…"; } }
   montrer("res");
   var url = req.type === "texte" ? "/pfp/chercher" : (req.type === "pourtoi" ? "/pfp/pour-toi" : "/pfp/similaires");
