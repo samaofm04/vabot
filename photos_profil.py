@@ -132,15 +132,25 @@ USAGES: Dict[str, Dict[str, Any]] = {
     "life": {"nom": "Story life", "emoji": "🌿", "format": "vertical", "dest": "reserve", "unite": "life",
              "phrase": "dans les stories 🌿 Life des réserves cochées. Les VA les reçoivent avec le bouton 🌿 Story life.",
              # le propriétaire, le 05/10 : « comme si j'étais une fille de 18,
-             # 19, 20, 21, 22 ans [...] des trucs mignons », « pas des trucs de fou »
-             "idees": ["iced coffee aesthetic", "cute room decor aesthetic", "matcha latte aesthetic",
-                       "study desk aesthetic", "pastel nails aesthetic", "bubble tea aesthetic",
-                       "picnic aesthetic", "sunset walk aesthetic"]},
+             # 19, 20, 21, 22 ans [...] des trucs mignons », « pas des trucs de
+             # fou », puis sa liste de moments — « sans la tête bien sûr ».
+             # [libellé affiché, recherche] : « pov » ramène des photos prises
+             # par elle-même, sans visage ; l'anglais, plus d'images Pinterest.
+             "idees": [["☕ Café", "pov coffee shop aesthetic"], ["🍸 Bar", "pov cocktails with friends aesthetic"],
+                       ["🥐 Petit-déj", "pov breakfast aesthetic"], ["🎬 Cinéma", "pov movie theater popcorn aesthetic"],
+                       ["🏋️ Salle de sport", "faceless gym girl aesthetic"], ["🎧 Musique", "pov headphones music aesthetic"],
+                       ["📺 Netflix", "pov netflix night in aesthetic"], ["🍝 Restaurant", "pov restaurant dinner aesthetic"],
+                       ["🍳 Repas", "pov homemade meal aesthetic"], ["🛋️ Chill maison", "pov cozy night in aesthetic"],
+                       ["👯 Entre amies", "faceless girls night out aesthetic"],
+                       ["📚 Fac", "pov university study aesthetic"], ["🎤 Événement", "pov concert crowd aesthetic"],
+                       ["🎉 Fête", "pov birthday party aesthetic"], ["🥂 Soirée", "pov house party aesthetic"],
+                       ["🪩 Boîte", "pov nightclub aesthetic"]]},
     "travel": {"nom": "Story travel", "emoji": "✈️", "format": "vertical", "dest": "reserve", "unite": "travel",
                "phrase": "dans les stories ✈️ Travel des réserves cochées. Les VA les reçoivent avec le bouton ✈️ Story travel.",
-               "idees": ["girls trip aesthetic", "beach day aesthetic", "road trip aesthetic",
-                         "summer vacation aesthetic", "train window view aesthetic", "ice cream beach aesthetic",
-                         "airport aesthetic", "camping aesthetic"]},
+               "idees": [["👯 Girls trip", "pov girls trip aesthetic"], ["🏖️ Plage", "pov beach day aesthetic"],
+                         ["🚗 Road trip", "pov road trip aesthetic"], ["☀️ Vacances", "pov summer vacation aesthetic"],
+                         ["🚆 Train", "pov train window view aesthetic"], ["🍦 Glace", "pov ice cream beach aesthetic"],
+                         ["✈️ Aéroport", "pov airport aesthetic"], ["⛺ Camping", "pov camping aesthetic"]]},
     "night": {"nom": "Story night", "emoji": "🌙", "format": "vertical", "dest": "reserve", "unite": "night",
               "phrase": "dans les stories 🌙 Night des réserves cochées. Les VA les reçoivent avec le bouton 🌙 Story night.",
               "idees": ["night city lights aesthetic", "night drive car aesthetic", "club party night aesthetic",
@@ -1541,6 +1551,9 @@ function post(url, corps){
     }).catch(function(){ return {ok: false, erreur: "Le serveur ne répond pas."}; });
 }
 
+// une idée : « recherche », ou [libellé affiché, recherche]
+function idee(x){ return Array.isArray(x) ? {l: x[0], q: x[1]} : {l: x, q: x}; }
+
 function rendreStyles(){
   var h = D.styles.map(function(s){
     var u = (D.usages || {})[s.usage] || {};
@@ -1554,8 +1567,8 @@ function rendreStyles(){
   var rec = (D.recherches || []).map(function(r){ deja[r.toLowerCase()] = 1;
     return "<button class=\"chip petit\" data-r=\"" + esc(r) + "\">" + esc(r) + "</button>"; });
   // des idées de départ propres à la catégorie, après les recherches déjà faites
-  var idees = (D.idees || U.idees || []).filter(function(r){ return !deja[r.toLowerCase()]; }).map(function(r){
-    return "<button class=\"chip petit idee\" data-r=\"" + esc(r) + "\" title=\"Idée de recherche\">💡 " + esc(r) + "</button>"; });
+  var idees = (D.idees || U.idees || []).map(idee).filter(function(r){ return !deja[r.q.toLowerCase()]; }).map(function(r){
+    return "<button class=\"chip petit idee\" data-r=\"" + esc(r.q) + "\" title=\"Cherche : " + esc(r.q) + "\">💡 " + esc(r.l) + "</button>"; });
   $("recentes").innerHTML = rec.concat(idees).join("");
 }
 
@@ -1891,7 +1904,7 @@ $("fichiers").addEventListener("change", function(){
 $("format").value = U.format || "carre";
 document.body.classList.toggle("vertical", U.format === "vertical");
 var ID0 = D.idees || U.idees || [];
-if (ID0.length) $("q").placeholder = "ex. " + ID0.slice(0, 3).join(", ");
+if (ID0.length) $("q").placeholder = "ex. " + ID0.slice(0, 3).map(function(x){ return idee(x).q; }).join(", ");
 rendreStyles(); rendreAppr(); rendreGardees(); suivreModele();
 })();
 </script>

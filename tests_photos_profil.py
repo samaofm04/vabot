@@ -257,6 +257,12 @@ check("Story me : stories/ de la model, sans type, réserve refusée",
 s_bl = pp.creer_style("PP blonde", "pp", ["blonde cartoon girl pfp", "  "])
 check("style à idées propres : la page les montre à la place de celles de la catégorie",
       pp.etat(s_bl["id"])["idees"] == ["blonde cartoon girl pfp"] and pp.etat(sid)["idees"] == pp.USAGES["pp"]["idees"])
+check("idées : une recherche, ou [libellé, recherche] — rien d'autre",
+      all(isinstance(x, str) or (isinstance(x, list) and len(x) == 2 and all(isinstance(y, str) and y for y in x))
+          for u in pp.USAGES.values() for x in u["idees"]))
+check("Story life : les moments demandés, sans visage (pov / faceless)",
+      len(pp.USAGES["life"]["idees"]) == 16
+      and all(("pov" in q or "faceless" in q) for _, q in pp.USAGES["life"]["idees"]))
 check("format : PP carré, stories verticales", pp.etat(ids_st["life"])["usages"]["life"]["format"] == "vertical"
       and pp._format(None, "carre") == "carre" and pp._format(True) == "carre" and pp._format("xx", "vertical") == "vertical")
 
