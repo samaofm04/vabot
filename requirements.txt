@@ -15,3 +15,5 @@ waitress>=3.0.0
 opencv-python-headless>=4.8,<5
 # Photos (Mac) copie les originaux en HEIC ; ffmpeg ne les ouvre pas (/captions/ocr)
 pillow-heif>=0.18
+# Photos de profil (/pfp) : le modele d'images CLIP qui apprend les OK / Non
+onnxruntime>=1.20

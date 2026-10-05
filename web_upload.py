@@ -77307,6 +77307,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     except Exception as _fx_e:
         log.error(f"facture_web register échoué: {_fx_e}")
 
+    # Page « Photos de profil » (/pfp) : recherche d'images Pinterest via
+    # Yandex et Bing, OK / Non qui apprennent le style (photos_profil.py).
+    try:
+        import photos_profil
+        photos_profil.register(app, is_auth, _is_admin)
+    except Exception as _pp_e:
+        log.error(f"photos_profil register échoué: {_pp_e}")
+
     # Onglet « TikTok Trends » : collecte Apify + classement (veille_tiktok_ui.py)
     try:
         import veille_tiktok_ui
