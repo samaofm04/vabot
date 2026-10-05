@@ -6652,6 +6652,31 @@ try:
           not any(i.get("doublon") for i in _fAL2["items"])
           and {"creator": "Julia", "on": False} in _fAL2["alerts"]["models"])
     _cAL.post("/sfssetup/alertes/model", data={"creator": "Julia", "on": "1"})
+    # « je veux pas avoir le suivi » : un compte coupé sort de TOUT le suivi,
+    # MyM compris ; un compte jamais réglé reste suivi
+    _cAL.post("/sfssetup/alertes/model", data={"creator": "Sarahmycrush", "on": "0"})
+    _fSAL = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())
+    check("suivi : un compte MyM coupe est dans la liste des comptes sans suivi",
+          _fSAL["alerts"]["suivi_off"] == ["Sarahmycrush"])
+    check("suivi : la liste OnlyFans des reglages ne melange pas les comptes MyM",
+          [m["creator"] for m in _fSAL["alerts"]["models"]] == ["Emy", "Julia"])
+    _wAL.SFS_ALERTES_FILE.write_text(_jsAL.dumps({"models": {"Julia": True}}))
+    check("suivi : un compte jamais regle reste suivi (Emy absente du reglage -> son retard sort)",
+          [r["creator"] for r in _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())["alerts"]["retards"]]
+          == ["Emy"])
+    _wAL.SFS_ALERTES_FILE.write_text(_jsAL.dumps({"models": {"Julia": True, "Emy": True,
+                                                             "Sarahmycrush": False}}))
+    _hSAL = _cAL.get("/").get_data(as_text=True)
+    check("suivi : la page recoit les comptes coupes (rendu serveur)",
+          'window.__sfsSuiviOff = ["Sarahmycrush"];' in _hSAL)
+    check("suivi : calendrier OF et MyM, panneau du jour, bilan et ligne d etat filtrent",
+          "if(!ofMatch(it) || !sfsSuivi(it.creator)) return;" in _hSAL
+          and "if(!sfsSuivi(p.creator)) continue;" in _hSAL
+          and _hSAL.count("!sfsSuivi(it.creator)) return;   // compte sans suivi SFS") == 1
+          and _hSAL.count("!sfsSuivi(p.creator)) return;   // compte sans suivi SFS") == 1
+          and "(window.__mypulsCreators||[]).filter(sfsSuivi)" in _hSAL
+          and "isSfsPush(it.text)||!sfsSuivi(it.creator)) return;" in _hSAL
+          and "(j.creators||[]).filter(function(c){ return sfsSuivi(c.creator); })" in _hSAL)
     # -- Telegram : un message par alerte neuve, rien la nuit, jamais deux fois
     _tgAL = []
     _wAL._telegram_envoyer = lambda chat, texte: (_tgAL.append((chat, texte)) or {"ok": True})

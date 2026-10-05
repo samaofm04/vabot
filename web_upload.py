@@ -32074,19 +32074,23 @@ def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
              if r.get("creator") and (r.get("date") or "") >= recent]
     noms = list(dict.fromkeys(noms))
     alertes, marques = _of_alertes_sfs(sent_raw, queue, noms)
-    # interrupteur par model : une model éteinte n'a ni alerte ni marque
+    # interrupteur par compte : un compte coupé n'a plus de suivi du tout
+    # (ni alerte, ni marque, ni « en retard » au bilan, ni place au calendrier
+    # — ces trois-là filtrés côté page avec suivi_off). Absent = suivi.
     models = _sfs_alertes_models(noms, sent_raw)
-    on = {n for n, v in models.items() if v}
-    alertes["doublons"] = [d for d in alertes["doublons"] if d["creator"] in on]
-    alertes["retards"] = [r for r in alertes["retards"] if r["creator"] in on]
-    alertes["models"] = [{"creator": n, "on": bool(models.get(n))}
-                         for n in sorted(set(noms) | set(models), key=lambda x: str(x).lower())]
+    off = {n for n, v in models.items() if v is False}
+    alertes["doublons"] = [d for d in alertes["doublons"] if d["creator"] not in off]
+    alertes["retards"] = [r for r in alertes["retards"] if r["creator"] not in off]
+    # les comptes OnlyFans seulement : le même fichier garde aussi ceux de MyM
+    alertes["models"] = [{"creator": n, "on": n not in off}
+                         for n in sorted(set(noms), key=lambda x: str(x).lower())]
+    alertes["suivi_off"] = sorted(off)
     _tg = (_sfs_alertes_cfg().get("telegram") or {})
     alertes["telegram"] = {"chat_id": str(_tg.get("chat_id") or ""), "titre": str(_tg.get("titre") or "")}
     for src, lst in (("s", sent), ("q", queue)):
         for it in lst:
             m = marques.get((src, _of_cle_creatrice(it), str(it.get("id"))))
-            if m and it.get("creator") in on:
+            if m and it.get("creator") not in off:
                 it["doublon"] = m
     out["alerts"] = alertes
     out["items"] = sorted(queue + sent, key=lambda x: (x.get("date") or "", x.get("time") or "",
@@ -32407,6 +32411,10 @@ def _render_sfs_html() -> str:
     # « </ » échappé : un texte de message contenant </script> fermerait le bloc.
     of_pushs_json = _json.dumps(_of_pushs_avec_envois(
         _load_of_pushs(), f"{year:04d}-{month:02d}")).replace("</", "<\\/")
+    # comptes sans suivi SFS (⚙ Réglages) : MyM compris, filtrés côté page
+    _sfs_models = _sfs_alertes_cfg().get("models") or {}
+    suivi_off_json = _json.dumps(sorted(k for k, v in _sfs_models.items() if v is False)
+                                 ).replace("</", "<\\/")
 
     # Calculer mois précédent et suivant
     prev_year = year if month > 1 else year - 1
@@ -32705,27 +32713,39 @@ def _render_sfs_html() -> str:
         # « Annulé » chez MyPuls à 0 destinataire : annulé avant de partir.
         # Annulé avec des destinataires : parti, puis retiré — il a été vu.
         "function ofJamaisParti(x){ return !!(x && x.sent && x.canceled && !x.sent_count); }"
+        # Compte sans suivi SFS (⚙ Réglages) : hors calendrier, bilan, alertes.
+        # Comparaison sur lettres et chiffres : « Khloe 💕 » = « khloe ».
+        "function sfsNormNom(n){ return String(n||'').toLowerCase().replace(/[^a-z0-9]/g,''); }"
+        "function sfsSuivi(n){ var k=sfsNormNom(n); return !(window.__sfsSuiviOff||[]).some(function(o){ return sfsNormNom(o)===k; }); }"
         "function ofJm(d){ d=String(d||''); return d.length===10?(d.slice(8,10)+'/'+d.slice(5,7)):'?'; }"
-        "function renderOfAlertes(show){"
+        # OnlyFans : alertes + réglages ; MyM : réglages seulement (les
+        # alertes ne lisent que l'historique Mass DM d'OnlyFans)
+        "function renderOfAlertes(plat){"
+        "  plat=plat||window.__currentSfsPlatform;"
         "  var box=document.getElementById('sfs-of-alertes'); if(!box) return;"
-        "  var al=(window.__ofPushData||{}).alerts||{}; var R=al.retards||[], D=al.doublons||[], M=al.models||[];"
-        "  if(!show || !(R.length||D.length||M.length)){ box.style.display='none'; box.innerHTML=''; return; }"
+        "  var isOf=(plat==='OF'), al=(window.__ofPushData||{}).alerts||{};"
+        "  var R=isOf?(al.retards||[]):[], D=isOf?(al.doublons||[]):[];"
+        "  var M=isOf?(al.models||[]).map(function(m){ return m.creator; }):(window.__mypulsCreators||[]).slice();"
+        "  if((plat!=='OF' && plat!=='MYM') || !(R.length||D.length||M.length)){ box.style.display='none'; box.innerHTML=''; return; }"
         "  var ec=(al.regle||{}).ecart_max||2;"
         "  var h='<div style=\"display:flex;align-items:center;gap:10px\"><div style=\"font-weight:800;font-size:13px;color:#f59e0b\">'"
-        "    +((R.length||D.length)?('⚠ Alertes SFS'+(R.length?(' · '+R.length+' model'+(R.length>1?'s':'')+' sans SFS depuis '+ec+' j'):'')+(D.length?(' · '+D.length+' SFS en double'):'')):'Alertes SFS : rien à signaler')"
+        "    +(!isOf?'Suivi SFS MyM':(R.length||D.length)?('⚠ Alertes SFS'+(R.length?(' · '+R.length+' model'+(R.length>1?'s':'')+' sans SFS depuis '+ec+' j'):'')+(D.length?(' · '+D.length+' SFS en double'):'')):'Alertes SFS : rien à signaler')"
         "    +'</div><a href=\"#\" onclick=\"sfsAlRegl(event)\" style=\"margin-left:auto;font-size:12px;color:#93c5fd;text-decoration:none\">⚙ Réglages</a></div>';"
         # réglages : un interrupteur par model + le groupe Telegram
         "  if(window.__sfsAlRegl){"
         "    h+='<div style=\"margin:8px 0;padding:8px 0;border-top:1px solid rgba(245,158,11,.25);border-bottom:1px solid rgba(245,158,11,.25)\">';"
-        "    h+='<div style=\"font-size:12px;font-weight:700;margin-bottom:4px\">Alertes par model (décoche celles où tu ne fais pas de SFS)</div><div style=\"display:flex;flex-wrap:wrap;gap:6px 14px\">';"
-        "    M.forEach(function(m){ h+='<label style=\"display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;white-space:nowrap\"><input type=\"checkbox\" style=\"width:auto;height:auto;margin:0;display:inline-block\" data-cre=\"'+encodeURIComponent(m.creator)+'\" onchange=\"sfsAlModel(this)\"'+(m.on?' checked':'')+'>'+sfsEsc(m.creator)+'</label>'; });"
-        "    var tg=(al.telegram||{}).chat_id||'';"
-        "    h+='</div><div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Groupe Telegram</div>'"
+        "    h+='<div style=\"font-size:12px;font-weight:700;margin-bottom:4px\">Suivi SFS par compte '+(isOf?'OnlyFans':'MyM')+' : décoche ceux où tu ne fais pas de SFS (plus de calendrier, de « en retard » ni d’alerte)</div><div style=\"display:flex;flex-wrap:wrap;gap:6px 14px\">';"
+        "    M.forEach(function(m){ m={creator:m, on:sfsSuivi(m)}; h+='<label style=\"display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;white-space:nowrap\"><input type=\"checkbox\" style=\"width:auto;height:auto;margin:0;display:inline-block\" data-cre=\"'+encodeURIComponent(m.creator)+'\" onchange=\"sfsAlModel(this)\"'+(m.on?' checked':'')+'>'+sfsEsc(m.creator)+'</label>'; });"
+        "    h+='</div>';"
+        "    if(isOf){ var tg=(al.telegram||{}).chat_id||'';"
+        "    h+='<div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Groupe Telegram</div>'"
         "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis tape <b>/alertessfs</b> dans le groupe : c’est branché. Ou colle ici l’ID du groupe (le nombre après « # » dans l’adresse de web.telegram.org). Envoi de 9 h à 22 h, une fois par alerte.'+(al.telegram&&al.telegram.titre?('<br>Branché sur « '+sfsEsc(al.telegram.titre)+' ».'):'')+'</div>'"
         "      +'<div style=\"display:flex;gap:6px;flex-wrap:wrap\"><input id=\"sfs-al-tg\" value=\"'+sfsEsc(tg)+'\" placeholder=\"-4012345678\" style=\"flex:1;min-width:160px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\">'"
         "      +'<button type=\"button\" onclick=\"sfsAlTg()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
         "      +'<button type=\"button\" onclick=\"sfsAlTgTest()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Tester</button></div>'"
-        "      +'<div id=\"sfs-al-msg\" style=\"font-size:11.5px;margin-top:5px\"></div></div>';"
+        "      +'<div id=\"sfs-al-msg\" style=\"font-size:11.5px;margin-top:5px\"></div>';"
+        "    }"
+        "    h+='</div>';"
         "  }"
         "  R.forEach(function(r){"
         "    var q=r.days===null?'aucun SFS sur 92 jours':('pas de SFS depuis '+r.days+' jour'+(r.days>1?'s':'')+' (dernier le '+ofJm(r.last)+')');"
@@ -32751,7 +32771,7 @@ def _render_sfs_html() -> str:
         "  box.innerHTML=h;"
         "  box.style.cssText='display:block;margin-top:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 12px';"
         "}"
-        "function sfsAlRegl(e){ if(e) e.preventDefault(); window.__sfsAlRegl=!window.__sfsAlRegl; renderOfAlertes(true); }"
+        "function sfsAlRegl(e){ if(e) e.preventDefault(); window.__sfsAlRegl=!window.__sfsAlRegl; renderOfAlertes(window.__currentSfsPlatform); }"
         "function sfsAlMsg(t, ko){ var m=document.getElementById('sfs-al-msg'); if(m){ m.textContent=t; m.style.color=ko?'#f87171':''; } }"
         # après un réglage : relecture (mémoire serveur, instantanée) pour
         # recalculer les alertes avec le nouvel interrupteur
@@ -32759,7 +32779,13 @@ def _render_sfs_html() -> str:
         "  var fd=new FormData(); fd.append('creator', decodeURIComponent(el.getAttribute('data-cre')||'')); fd.append('on', el.checked?'1':'0');"
         "  try{ var r=await fetch('/sfssetup/alertes/model',{method:'POST',body:fd}); var j=await r.json();"
         "    if(!j.ok){ el.checked=!el.checked; alert('✕ '+(j.error||'Erreur')); return; }"
-        "    if(typeof loadOfQueue==='function') loadOfQueue(false);"
+        "    var off=(window.__sfsSuiviOff||[]).filter(function(o){ return sfsNormNom(o)!==sfsNormNom(j.creator); });"
+        "    if(!j.on) off.push(j.creator); window.__sfsSuiviOff=off;"
+        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "    if(window.__selectedSfsDate && typeof selectSfsDay==='function') selectSfsDay(window.__selectedSfsDate);"
+        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
+        # OnlyFans : les alertes sont recalculées côté serveur (cloche, Telegram)
+        "    if(window.__currentSfsPlatform==='OF' && typeof loadOfQueue==='function') loadOfQueue(false);"
         "  }catch(err){ el.checked=!el.checked; alert('✕ '+err); }"
         "}"
         "async function sfsAlTg(){"
@@ -32873,22 +32899,23 @@ def _render_sfs_html() -> str:
         "  var ps=window.__sfsPushCache||[];"
         "  var mym=[];"
         "  ps.forEach(function(x){"
+        "    if(!sfsSuivi(x.creator)) return;"
         "    if(!/@[a-z0-9_.]/i.test(x.description||'')) return;"
         "    var d=sfsParseDmy(x.sentAt); if(!d) return;"
         "    mym.push({c:x.creator||'?', d:d});"
         "  });"
         "  var od=window.__ofPushData||{};"
-        "  var ofNames=(od.creators||[]).map(function(c){ return c.creator; }).filter(Boolean);"
+        "  var ofNames=(od.creators||[]).map(function(c){ return c.creator; }).filter(function(n){ return n && sfsSuivi(n); });"
         "  var of=[];"
         "  (od.items||[]).forEach(function(it){"
         # annulé avant de partir : ce n'est pas un SFS fait (retiré APRÈS
         # l'envoi, si : la partenaire a eu ses vues)
-        "    if(!it.sent||ofJamaisParti(it)||!it.date||!isSfsPush(it.text)) return;"
+        "    if(!it.sent||ofJamaisParti(it)||!it.date||!isSfsPush(it.text)||!sfsSuivi(it.creator)) return;"
         "    var p=it.date.split('-'); if(p.length!==3) return;"
         "    of.push({c:it.creator||'?', d:new Date(+p[0],+p[1]-1,+p[2])});"
         "  });"
         "  var h='';"
-        "  if(ps.length){ h+=sfsBilanBlock('MyM', '#f59e0b', sfsBilanRows(window.__mypulsCreators||[], mym)); }"
+        "  if(ps.length){ h+=sfsBilanBlock('MyM', '#f59e0b', sfsBilanRows((window.__mypulsCreators||[]).filter(sfsSuivi), mym)); }"
         "  else { h+='<div style=\"color:#889;margin-bottom:12px\">MyM : aucune donnée — fais un ↻ Sync MyPuls (menu ⚙ Actions).</div>'; }"
         "  if(ofNames.length||of.length){ h+=sfsBilanBlock('OnlyFans', '#0099ff', sfsBilanRows(ofNames, of)); }"
         "  else { h+='<div style=\"color:#889\">OnlyFans : aucune donnée — fais un ↻ Sync file d’attente OnlyFans (menu ⚙ Actions).</div>'; }"
@@ -32968,7 +32995,7 @@ def _render_sfs_html() -> str:
         "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='flex'; if(bOfHar)bOfHar.style.display='flex'; }"
         "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='none'; if(bOfHar)bOfHar.style.display='none'; }"
         "  if(!onPlat) return;"
-        "  if(typeof renderOfAlertes==='function') renderOfAlertes(plat==='OF');"
+        "  if(typeof renderOfAlertes==='function') renderOfAlertes(plat);"
         "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
         "  const ps=window.__sfsPushCache; if(!ps) return;"
         "  const cells={};"
@@ -32978,6 +33005,7 @@ def _render_sfs_html() -> str:
         "  const fi=(fIdent||'').toLowerCase();"
         "  const byDate={}; let parseFail=0, nonSfs=0;"
         "  for(const p of ps){"
+        "    if(!sfsSuivi(p.creator)) continue;"
         "    if(fIdent){"
         "      const cre=(p.creator||'').toLowerCase();"
         "      const okId=(p.identity===fIdent);"
@@ -33109,7 +33137,7 @@ def _render_sfs_html() -> str:
         "  var fIdent=window.__currentSfsIdent; var fModel=(fIdent && window.__sfsIdentModel)?(window.__sfsIdentModel[String(fIdent).toLowerCase()]||''):''; var fi=(fIdent||'').toLowerCase();"
         "  function ofMatch(it){ if(!fIdent || !it.creator) return true; var cre=String(it.creator).toLowerCase(); if(it.identity===fIdent) return true; if(fModel && cre===String(fModel).toLowerCase()) return true; return (cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0); }"
         "  var items=[], nonSfs=0;"
-        "  all.forEach(function(it){ if(!ofMatch(it)) return; if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
+        "  all.forEach(function(it){ if(!ofMatch(it) || !sfsSuivi(it.creator)) return; if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
         "  var byDate={}, undated=[];"
         "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
         # même style compact que MyM : UNE barre bleue avec le compte par jour,
@@ -33169,13 +33197,13 @@ def _render_sfs_html() -> str:
         # j.data = {items, counters} ; la liste des créatrices voyage à part et
         # le Bilan SFS en a besoin (une créatrice sans aucun SFS doit sortir en
         # rouge, pas disparaître)
-        "    if(j.data){ window.__ofPushData=Object.assign({}, j.data, {creators:j.creators||[], errors:j.errors||[]}); }"
+        "    if(j.data){ window.__ofPushData=Object.assign({}, j.data, {creators:j.creators||[], errors:j.errors||[]}); if(j.data.alerts && j.data.alerts.suivi_off) window.__sfsSuiviOff=j.data.alerts.suivi_off; }"
         "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
         "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
         "    var errs=j.errors||[];"
         "    if(box && (force || errs.length || j.stale)){"
-        "      var per=(j.creators||[]).map(function(c){ return sfsEsc(c.creator)+' '+(c.queue_unread?'file non lue':(c.count+' à venir'))+' / '+(c.sent||0)+' SFS envoyé(s) sur 7 j'+(c.canceled?(' dont '+c.canceled+' retiré(s)'):''); }).join(' · ');"
+        "      var per=(j.creators||[]).filter(function(c){ return sfsSuivi(c.creator); }).map(function(c){ return sfsEsc(c.creator)+' '+(c.queue_unread?'file non lue':(c.count+' à venir'))+' / '+(c.sent||0)+' SFS envoyé(s) sur 7 j'+(c.canceled?(' dont '+c.canceled+' retiré(s)'):''); }).join(' · ');"
         "      box.style.display='';"
         "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.scheduled!=null?j.scheduled:(j.items||0))+' message(s) OnlyFans programmé(s)'+(j.sent?(', '+j.sent+' envoyé(s) gardé(s) en trace'):'')+(per?(' — '+per):'')))"
         "        +(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'');"
@@ -33315,6 +33343,7 @@ window.__mypulsCreators = {mypuls_creators_json};
 window.__sfsIdentModelByPlat = {{MYM: {ident_model_json}, OF: {ident_model_of_json}}};
 window.__sfsIdentModel = window.__sfsIdentModelByPlat.OF;   /* onglet initial = OF */
 window.__ofPushData = {of_pushs_json};
+window.__sfsSuiviOff = {suivi_off_json};
 window.__identityAvatars = {avatar_map_json};
 window.__currentSfsPlatform = 'OF';
 function identityAvatarHtml(ident, size){{
@@ -33456,6 +33485,7 @@ function refreshSfsDayPanel(){{
     var aud={{subscribers:'Abonnés',ex_subscribers:'Anciens',interested:'Intéressés'}};
     var dayPushes=[];
     window.__sfsPushCache.forEach(function(p){{
+      if(typeof sfsSuivi==='function' && !sfsSuivi(p.creator)) return;   // compte sans suivi SFS
       if(ident){{
         var cre=(p.creator||'').toLowerCase();
         var okFuzzy=(cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0);
@@ -33498,6 +33528,7 @@ function refreshSfsDayPanel(){{
     var dayOf=[];
     (window.__ofPushData.items||[]).forEach(function(it){{
       if(it.date!==date) return;
+      if(typeof sfsSuivi==='function' && !sfsSuivi(it.creator)) return;   // compte sans suivi SFS
       if(ident && it.creator){{
         var cre=String(it.creator).toLowerCase();
         var okFuzzy=(cre.indexOf(fiOf)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fiOf.replace(/[^a-z0-9]/g,''))===0);
