@@ -3471,6 +3471,23 @@ def is_sfs_text(text: str) -> bool:
     return bool(_SFS_TEXT_RE.search(text or ""))
 
 
+# sans « https? » : le 26/09, Lola a envoyé « ttps://onlyfans.com/leaa2008/c57 »
+_SFS_PARTNER_LINK_RE = re.compile(r"onlyfans\.com/([A-Za-z0-9_.\-]+)", re.I)
+
+
+def sfs_partenaires(text: str, own: str = "") -> List[str]:
+    """Comptes mis en avant par un SFS : lien onlyfans.com/<compte> et @<compte>,
+    en minuscules, sans celui de la créatrice qui envoie. Sur 191 SFS en 92
+    jours (05/10/2026), tous en avaient au moins un."""
+    own = (own or "").lower().lstrip("@")
+    out: List[str] = []
+    for p in _SFS_PARTNER_LINK_RE.findall(text or "") + _OF_MENTION_RE.findall(text or ""):
+        p = p.lower().rstrip(".-")
+        if p and p != own and p not in out:
+            out.append(p)
+    return out
+
+
 def _jwt_exp(jwt: str) -> float:
     """Expiration (epoch) lue dans le jeton, moins une marge ; 50 min si illisible."""
     import base64

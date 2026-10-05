@@ -6107,6 +6107,8 @@ try:
     # l'historique Mass DM est fusionné dans chaque réponse : ici, vide
     _savMdOQ = _mpOQ.OF_MASSDM_FILE
     _mpOQ.OF_MASSDM_FILE = _plOQ.Path(_tfOQ.mkdtemp()) / "of_massdm.json"
+    _savAlOQ = _wOQ.SFS_ALERTES_FILE
+    _wOQ.SFS_ALERTES_FILE = _plOQ.Path(_tfOQ.mkdtemp()) / "sfs_alertes.json"
     _savAllOQ = _mpOQ.of_queue_all
     # comptes connus de la session : une section precedente peut avoir laisse
     # un autre jeu d utilisateurs, on fixe le notre (et on le restaure)
@@ -6187,6 +6189,7 @@ try:
     _mpOQ.of_queue_all = _savAllOQ
     _wOQ.OF_PUSHS_FILE = _savFileOQ
     _mpOQ.OF_MASSDM_FILE = _savMdOQ
+    _wOQ.SFS_ALERTES_FILE = _savAlOQ
 except Exception as _eOQ:
     check("SFS OnlyFans en direct : testable", False, repr(_eOQ)[:160])
 
@@ -6207,7 +6210,7 @@ try:
     _tmpMD = _plMD.Path(_tfMD.mkdtemp())
     _savMD = (_mpMD.OF_MASSDM_FILE, _mpMD.OF_MASSDM_MEDIA_DIR, _wMD.OF_PUSHS_FILE,
               _mpMD.of_queue_all, _wMD._load_web_users, dict(_mpMD._OF_MEDIA_TOKENS),
-              _mpMD.requests)
+              _mpMD.requests, _wMD.SFS_ALERTES_FILE)
 
     class _ReqMD:
         """requests vu de mypuls seulement : get simule, le reste reel (les
@@ -6220,6 +6223,7 @@ try:
     _mpMD.OF_MASSDM_FILE = _tmpMD / "of_massdm.json"
     _mpMD.OF_MASSDM_MEDIA_DIR = _tmpMD / "media"
     _wMD.OF_PUSHS_FILE = _tmpMD / "of_pushs.json"
+    _wMD.SFS_ALERTES_FILE = _tmpMD / "sfs_alertes.json"
     _todayMD = _dtMD.date.today()
 
     def _jourMD(n):
@@ -6432,9 +6436,12 @@ try:
     _htmlMD = _cMD.get("/").get_data(as_text=True)
     check("page : les envois sont deja dans la page (rendu serveur), pas seulement en direct",
           '"sent": true' in _htmlMD and "/sfssetup/of_media/930fa1edf9deb9ed/4685184020" in _htmlMD)
-    check("page : barre verte des envoyes, carte « envoye », bilan sans les annules",
-          "sfs-push-sent" in _htmlMD and "✓ envoyé" in _htmlMD
-          and "ofJamaisParti(it)||!it.date" in _htmlMD)
+    # pas de vert (demande du proprietaire le 05/10) : une barre bleue par jour
+    _ofjsMD = _htmlMD[_htmlMD.find("function renderOfPushes"):]
+    _ofjsMD = _ofjsMD[:_ofjsMD.find("async function loadOfQueue")]
+    check("page : une barre bleue par jour, sans vert ; carte « envoyé à » ; bilan sans les annules",
+          _ofjsMD and "#22c55e" not in _ofjsMD and "#0099ff" in _ofjsMD
+          and "envoyé à " in _htmlMD and "ofJamaisParti(it)||!it.date" in _htmlMD)
 
     # -- 7) images : copie locale, jeton d une heure, jamais hors du dossier
     _wMD._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
@@ -6498,9 +6505,216 @@ except Exception as _eMD:
 finally:
     try:
         (_mpMD.OF_MASSDM_FILE, _mpMD.OF_MASSDM_MEDIA_DIR, _wMD.OF_PUSHS_FILE,
-         _mpMD.of_queue_all, _wMD._load_web_users, _tokMD, _mpMD.requests) = _savMD
+         _mpMD.of_queue_all, _wMD._load_web_users, _tokMD, _mpMD.requests,
+         _wMD.SFS_ALERTES_FILE) = _savMD
         _mpMD._OF_MEDIA_TOKENS.clear()
         _mpMD._OF_MEDIA_TOKENS.update(_tokMD)
+    except Exception:
+        pass
+
+
+print()
+print("=" * 70)
+print("24c) Alertes SFS OnlyFans : meme SFS deux fois, model sans SFS depuis 2 jours")
+print("=" * 70)
+# Demande du proprietaire (05/10/2026) : « une alerte quand sur la meme model
+# le meme SFS est envoye » et « quand tous les 2 jours il n y a pas de SFS,
+# lundi mercredi vendredi minimum ».
+try:
+    import datetime as _dtAL
+    import json as _jsAL
+    import os as _osAL
+    import pathlib as _plAL
+    import tempfile as _tfAL
+    import web_upload as _wAL
+    import mypuls as _mpAL
+    check("partenaires : lien et @, en minuscules, sans la model elle-meme, sans doublon",
+          _mpAL.sfs_partenaires("OMG @RomyFleury 👉 https://onlyfans.com/romyfleury/c169 @itsslola",
+                                "itsslola") == ["romyfleury"])
+    check("partenaires : un lien mal colle (« ttps:// ») compte quand meme",
+          _mpAL.sfs_partenaires("PAR ICI ttps://onlyfans.com/leaa2008/c57") == ["leaa2008"])
+    _savJourAL = _wAL._of_aujourdhui
+    _jAL = _dtAL.date(2026, 10, 7)          # un mercredi
+    _wAL._of_aujourdhui = lambda: _jAL
+
+    def _dAL(n):
+        return (_jAL + _dtAL.timedelta(days=n)).isoformat()
+
+    def _sAL(i, cre, cid, n, texte, annule=False, envoyes=8000, user=""):
+        return {"id": str(i), "creator": cre, "creator_id": cid, "date": _dAL(n), "time": "19:03",
+                "text": texte, "sent": True, "canceled": annule, "sent_count": envoyes,
+                "of_username": user}
+
+    def _qAL(i, cre, cid, n, texte):
+        return {"id": i, "creator": cre, "creator_id": cid, "date": _dAL(n), "time": "19:00",
+                "type": "chat", "text": texte}
+
+    _sentAL = [
+        _sAL(1, "Julia", 3109, -2, "Tu connais @petiteapolline ?"),
+        _sAL(2, "Julia", 3109, -1, "La plus belle rousse onlyfans.com/petiteapolline/c56"),
+        _sAL(3, "Lola", 3673, -20, "Ma pote @mindymnp"),
+        _sAL(4, "Amelia", 3106, -30, "Coucou @vieille"),
+        _sAL(5, "Amelia", 3106, -20, "Re @vieille"),
+        _sAL(6, "Lola", 3673, -1, "Tu connais @petiteapolline ?"),       # autre model : pas un doublon
+        _sAL(7, "Khloe", 3108, -3, "have you met @emy.brw ?"),
+        _sAL(8, "Khloe", 3108, -1, "SFS @annule", annule=True, envoyes=0),  # jamais parti
+        _sAL(9, "Jessye", 3107, -2, "talk to @khloecute"),
+        _sAL(10, "Amelia", 3106, -2, "Coucou @nouvelle"),
+        _sAL(11, "Lola", 3673, -5, "@itsslola c est moi", user="itsslola"),
+    ]
+    _queueAL = [_qAL(90, "Lola", 3673, 1, "Ma pote @mindymnp revient"),
+                _qAL(91, "Jessye", 3107, 0, "today @someone")]
+    _alAL, _mkAL = _wAL._of_alertes_sfs(_sentAL, _queueAL,
+                                        ["Julia", "Lola", "Amelia", "Khloe", "Jessye", "Emy"])
+    _dbAL = {(d["creator"], d["partner"]): d for d in _alAL["doublons"]}
+    check("doublon : meme partenaire deux jours de suite sur la meme model -> alerte",
+          ("Julia", "petiteapolline") in _dbAL
+          and [e["d"] for e in _dbAL[("Julia", "petiteapolline")]["dates"]] == [_dAL(-2), _dAL(-1)])
+    check("doublon : programme alors que deja envoye -> alerte AVANT l envoi",
+          ("Lola", "mindymnp") in _dbAL and _dbAL[("Lola", "mindymnp")]["dates"][-1]["prog"])
+    check("doublon : la meme partenaire sur deux models differentes n en est pas un",
+          ("Lola", "petiteapolline") not in _dbAL)
+    check("doublon : plus de 7 jours apres le dernier envoi, l alerte s eteint",
+          ("Amelia", "vieille") not in _dbAL)
+    check("doublon : ... mais la carte du message le dit toujours",
+          _mkAL.get(("s", "3106", "5")) == [{"p": "vieille", "d": [_dAL(-30)[8:] + "/" + _dAL(-30)[5:7]]}])
+    check("doublon : la carte du programme nomme l envoi precedent",
+          _mkAL.get(("q", "3673", "90"), [{}])[0].get("p") == "mindymnp")
+    check("doublon : la model qui se cite elle-meme n est pas une partenaire",
+          not any(k[1] == "itsslola" for k in _dbAL))
+    _rtAL = {r["creator"]: r for r in _alAL["retards"]}
+    check("retard : 3 jours sans SFS -> alerte (un SFS annule avant l envoi ne compte pas)",
+          _rtAL.get("Khloe", {}).get("days") == 3, str(_rtAL.get("Khloe")))
+    check("retard : SFS il y a 2 jours et rien aujourd hui -> alerte (lundi -> mercredi)",
+          _rtAL.get("Amelia", {}).get("days") == 2)
+    check("retard : SFS hier -> pas d alerte", "Lola" not in _rtAL and "Julia" not in _rtAL)
+    check("retard : SFS programme aujourd hui -> pas d alerte", "Jessye" not in _rtAL)
+    check("retard : une model sans aucun SFS est signalee, pas oubliee",
+          _rtAL.get("Emy", {}).get("days") is None and "Emy" in _rtAL)
+    check("retard : prochain SFS programme indique",
+          _wAL._of_alertes_sfs([_sentAL[2]], [_queueAL[0]], ["Lola"])[0]["retards"][0]["next"] == _dAL(1))
+    # -- le planning et le centre de notifications
+    _tmpAL = _plAL.Path(_tfAL.mkdtemp())
+    _savAL = (_mpAL.OF_MASSDM_FILE, _wAL.OF_PUSHS_FILE, _wAL._load_web_users,
+              _wAL.SFS_ALERTES_FILE, _wAL.SFS_ALERTES_ETAT_FILE, _wAL._telegram_envoyer)
+    _savQAL = _mpAL.of_queue_all
+    _mpAL.OF_MASSDM_FILE = _tmpAL / "of_massdm.json"
+    _wAL.OF_PUSHS_FILE = _tmpAL / "of_pushs.json"
+    _wAL.SFS_ALERTES_FILE = _tmpAL / "sfs_alertes.json"
+    _wAL.SFS_ALERTES_ETAT_FILE = _tmpAL / "sfs_alertes_etat.json"
+    _wAL._of_aujourdhui = _savJourAL
+    _jAL = _savJourAL()
+    _mpAL.OF_MASSDM_FILE.write_text(_jsAL.dumps({"creators": {}, "items": {
+        f"{r['creator_id']}:{r['id']}": dict(r, hash="930fa1edf9deb9ed", media=[])
+        for r in [_sAL(1, "Julia", 3109, -2, "Tu connais @petiteapolline ?"),
+                  _sAL(2, "Julia", 3109, -1, "Encore @petiteapolline")]}}))
+    _wAL.OF_PUSHS_FILE.write_text(_jsAL.dumps({"source": "live", "imported_at": 0, "items": [],
+                                               "counters": {}, "creators": [
+                                                   {"creator": "Julia", "creator_id": 3109, "count": 0},
+                                                   {"creator": "Emy", "creator_id": 3352, "count": 0}]}))
+    _fAL = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())
+    check("interrupteur : amorce une fois, allume la model qui fait des SFS, eteint les autres",
+          _jsAL.loads(_wAL.SFS_ALERTES_FILE.read_text(encoding="utf-8"))["models"]
+          == {"Julia": True, "Emy": False}
+          and _fAL["alerts"]["retards"] == [])
+    # Emy allumee a la main : son retard sort
+    _wAL.SFS_ALERTES_FILE.write_text(_jsAL.dumps({"models": {"Julia": True, "Emy": True}}))
+    _fAL = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())
+    check("planning : les alertes partent avec les donnees de la page",
+          [d["partner"] for d in _fAL["alerts"]["doublons"]] == ["petiteapolline"]
+          and [r["creator"] for r in _fAL["alerts"]["retards"]] == ["Emy"])
+    check("planning : les deux cartes du doublon sont marquees",
+          sum(1 for i in _fAL["items"] if i.get("doublon")) == 2)
+    _appAL = _wAL.create_app()
+    _appAL.config["TESTING"] = True
+    _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+    _cAL = _appAL.test_client()
+    with _cAL.session_transaction() as _sAL2:
+        _sAL2["auth"] = True
+        _sAL2["username"] = "admin"
+        _sAL2["role"] = "admin"
+        _sAL2["sid"] = "AL"
+    _eAL = _cAL.get("/analyses/etat").get_json()
+    check("notifications : 1 SFS en double, 1 model sans SFS",
+          _eAL.get("sfs_doublons") == 1 and _eAL.get("sfs_retards") == 1, str(_eAL)[:200])
+    _mAL = _cAL.post("/sfssetup/alertes/model", data={"creator": "Julia", "on": "0"}).get_json()
+    _eAL = _cAL.get("/analyses/etat").get_json()
+    check("interrupteur : Julia eteinte a la main -> plus de doublon pour elle (cache recalcule)",
+          _mAL.get("ok") and _eAL.get("sfs_doublons") == 0 and _eAL.get("sfs_retards") == 1,
+          str(_eAL)[:160])
+    _fAL2 = _wAL._of_pushs_avec_envois(_wAL._load_of_pushs())
+    check("interrupteur : ... ni marque sur ses cartes, et la liste des models le montre",
+          not any(i.get("doublon") for i in _fAL2["items"])
+          and {"creator": "Julia", "on": False} in _fAL2["alerts"]["models"])
+    _cAL.post("/sfssetup/alertes/model", data={"creator": "Julia", "on": "1"})
+    # -- Telegram : un message par alerte neuve, rien la nuit, jamais deux fois
+    _tgAL = []
+    _wAL._telegram_envoyer = lambda chat, texte: (_tgAL.append((chat, texte)) or {"ok": True})
+    check("telegram : groupe invalide refuse",
+          not _cAL.post("/sfssetup/alertes_tg/config", data={"chat_id": "abc"}).get_json()["ok"])
+    check("telegram : sans groupe, rien ne part",
+          _wAL._sfs_alertes_telegram().get("envoye") == 0 and not _tgAL)
+    check("telegram : groupe enregistre",
+          _cAL.post("/sfssetup/alertes_tg/config",
+                    data={"chat_id": "-1001234567890"}).get_json().get("ok"))
+    check("telegram : le bouton Tester envoie au groupe",
+          _cAL.post("/sfssetup/alertes_tg/test").get_json().get("ok")
+          and _tgAL[-1][0] == "-1001234567890")
+    _savHeuresAL = _wAL.SFS_ALERTES_HEURES
+    _wAL.SFS_ALERTES_HEURES = (0, 24)
+    _tgAL.clear()
+    _r1AL = _wAL._sfs_alertes_telegram()
+    check("telegram : les alertes partent en UN message (doublon + model sans SFS)",
+          _r1AL.get("envoye") == 2 and len(_tgAL) == 1
+          and "@petiteapolline" in _tgAL[0][1] and "Emy" in _tgAL[0][1], str(_r1AL))
+    check("telegram : relance -> rien de neuf, rien ne repart",
+          _wAL._sfs_alertes_telegram().get("envoye") == 0 and len(_tgAL) == 1)
+    _wAL.SFS_ALERTES_HEURES = (25, 26)
+    _wAL.SFS_ALERTES_ETAT_FILE.write_text("{}")
+    check("telegram : la nuit, rien ne part (garde pour le matin)",
+          _wAL._sfs_alertes_telegram().get("envoye") == 0 and len(_tgAL) == 1)
+    _wAL.SFS_ALERTES_HEURES = _savHeuresAL
+    _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                    "chat": {"role": "chatter", "password": "x"}}
+    _cChAL = _appAL.test_client()
+    with _cChAL.session_transaction() as _sAL3:
+        _sAL3["auth"] = True
+        _sAL3["username"] = "chat"
+        _sAL3["role"] = "chatter"
+    check("securite : role sans planning SFS -> reglages et groupe Telegram refuses",
+          _cChAL.post("/sfssetup/alertes/model", data={"creator": "Julia", "on": "0"}).status_code == 403
+          and _cChAL.post("/sfssetup/alertes_tg/config", data={"chat_id": "-100123456"}).status_code == 403)
+    _wAL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+    _mpAL.of_queue_all = lambda: {"ok": True, "items": [], "counters": {}, "errors": [],
+                                  "creators": [{"creator": "Julia", "creator_id": 3109, "count": 0}],
+                                  "massdm_errors": []}
+    _rAL = _cAL.get("/sfssetup/of_queue?refresh=1").get_json()
+    check("route : les alertes voyagent dans data (le client remplace __ofPushData par data)",
+          (_rAL.get("data") or {}).get("alerts", {}).get("doublons"))
+    _hAL = _cAL.get("/").get_data(as_text=True)
+    check("page : bandeau d alertes et ligne du centre de notifications",
+          "function renderOfAlertes" in _hAL and "id='sfs-of-alertes'" in _hAL
+          and "a.sfs_doublons" in _hAL)
+    # -- relevé automatique : seulement sur la machine de production
+    _envAL = _osAL.environ.pop("VA_MACHINE_PROD", None)
+    check("releve auto : pas arme hors de la machine de production",
+          _wAL._start_of_releve_daemon() is False)
+    if _envAL is not None:
+        _osAL.environ["VA_MACHINE_PROD"] = _envAL
+    _rfAL = _wAL._of_releve_file()
+    check("releve : meme logique que la route, of_pushs.json ecrit sans les envois",
+          _rfAL["ok"] and _jsAL.loads(_wAL.OF_PUSHS_FILE.read_text(encoding="utf-8"))["source"] == "live"
+          and not any(i.get("sent") for i in
+                      _jsAL.loads(_wAL.OF_PUSHS_FILE.read_text(encoding="utf-8"))["items"]))
+    (_mpAL.OF_MASSDM_FILE, _wAL.OF_PUSHS_FILE, _wAL._load_web_users,
+     _wAL.SFS_ALERTES_FILE, _wAL.SFS_ALERTES_ETAT_FILE, _wAL._telegram_envoyer) = _savAL
+    _mpAL.of_queue_all = _savQAL
+except Exception as _eAL2:
+    import traceback as _tbAL
+    check("Alertes SFS : testables", False, _tbAL.format_exc()[-300:])
+finally:
+    try:
+        _wAL._of_aujourdhui = _savJourAL
     except Exception:
         pass
 

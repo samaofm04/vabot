@@ -13539,12 +13539,29 @@ body.light #va-notif-panel a.va-notif-ligne.encours{color:#1d4ed8!important}
    box.appendChild(l);
   }
   if(nFav) box.appendChild(ligneFavoris(nFav));
+  // Alertes SFS OnlyFans : meme partenaire envoyee deux fois sur une model,
+  // model sans SFS depuis 2 jours. Le detail est en tete du planning SFS.
+  var sd = a.sfs_doublons || 0, sr = a.sfs_retards || 0;
+  if(sd || sr){
+   var ls = document.createElement('a');
+   ls.href = '/?tab=sfs';
+   ls.className = 'va-notif-ligne';
+   ls.setAttribute('data-notif', 'sfs');
+   var bs = [];
+   if(sr) bs.push(sr + (sr > 1 ? ' models sans SFS depuis 2 j' : ' model sans SFS depuis 2 j'));
+   if(sd) bs.push(sd + ' SFS en double');
+   var ts = document.createElement('span'); ts.textContent = 'SFS : ' + bs.join(' · ');
+   var gs = document.createElement('span'); gs.className = 'va-notif-go'; gs.textContent = 'Ouvrir';
+   ls.appendChild(ts); ls.appendChild(gs);
+   box.appendChild(ls);
+  }
  }
  function maj(){
   var b = el('va-notif-btn'), n = el('va-notif-n'), ico = el('va-notif-ico');
   if(!b || !n || !ico) return;
   var a = analyse || {};
-  var aVoir = (a.a_verifier || 0) + (a.a_relire || 0) + (a.favoris_a_verifier || 0);
+  var aVoir = (a.a_verifier || 0) + (a.a_relire || 0) + (a.favoris_a_verifier || 0)
+   + (a.sfs_doublons || 0) + (a.sfs_retards || 0);
   var enCours = (a.en_cours || 0);
   var vide = el('va-notif-vide');
   if(vide) vide.style.display = (aVoir + enCours) ? 'none' : '';
@@ -31730,6 +31747,215 @@ def _of_mois_bornes(mois: str = "") -> tuple:
             (d2 + _dt.timedelta(days=6)).isoformat())
 
 
+OF_SFS_ECART_MAX = 2     # jours sans SFS : « tous les 2 jours, lundi mercredi vendredi minimum »
+OF_DOUBLON_JOURS = 7     # un doublon reste signalé 7 jours après son dernier envoi
+
+
+def _of_aujourdhui():
+    """La date à Paris : le VPS est en UTC, et à 0 h 30 un SFS de la veille
+    au soir aurait compté pour « aujourd'hui »."""
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        return _dt.datetime.now(ZoneInfo("Europe/Paris")).date()
+    except Exception:
+        return _dt.date.today()
+
+
+def _of_cle_creatrice(x: dict) -> str:
+    return str(x.get("creator_id") or x.get("creator") or "?")
+
+
+def _of_alertes_sfs(sent_raw: list, queue: list, noms: list) -> tuple:
+    """Les deux alertes SFS OnlyFans demandées par le propriétaire (05/10/2026).
+
+    - Doublon : la même partenaire mise en avant deux fois par la même model
+      (Julia : @petiteapolline le 03/10 puis le 04/10). Les SFS programmés
+      comptent, pour prévenir AVANT l'envoi. Signalé tant que le dernier des
+      deux est programmé ou date de moins de OF_DOUBLON_JOURS jours.
+    - Retard : une model sans SFS depuis OF_SFS_ECART_MAX jours, et rien de
+      programmé aujourd'hui. Les models de `noms` sans aucun SFS en sont.
+
+    Un SFS annulé avant de partir (0 destinataire) ne compte pas ; retiré
+    après l'envoi, si : il a été vu.
+
+    Retourne (alertes, marques) : alertes = {doublons, retards} ; marques =
+    {(« s » envoyé | « q » programmé, clé créatrice, id) : [{p, d}]} pour
+    signaler le doublon sur la carte du message."""
+    import datetime as _dt
+    import mypuls
+    today = _of_aujourdhui()
+    ti = today.isoformat()
+    lim = (today - _dt.timedelta(days=OF_DOUBLON_JOURS)).isoformat()
+    evts = [("s", r) for r in sent_raw
+            if mypuls.is_sfs_text(r.get("text")) and not (r.get("canceled")
+                                                         and not r.get("sent_count"))]
+    evts += [("q", it) for it in queue
+             if not it.get("sent") and mypuls.is_sfs_text(it.get("text"))]
+    nom, dernier, prochain, groupes = {}, {}, {}, {}
+    for src, x in evts:
+        c, d = _of_cle_creatrice(x), x.get("date") or ""
+        nom[c] = x.get("creator") or c
+        if d and d <= ti:
+            dernier[c] = max(dernier.get(c, ""), d)
+        elif d > ti and (not prochain.get(c) or d < prochain[c]):
+            prochain[c] = d
+        for p in mypuls.sfs_partenaires(x.get("text"), x.get("of_username")):
+            groupes.setdefault((c, p), []).append((d, x.get("time") or "", src, x))
+
+    def _jm(d):
+        return f"{d[8:10]}/{d[5:7]}" if len(d) == 10 else "?"
+
+    doublons, marques = [], {}
+    for (c, p), lst in groupes.items():
+        if len(lst) < 2:
+            continue
+        lst.sort(key=lambda e: (e[0], e[1]))
+        for e in lst:
+            autres = [_jm(o[0]) + (" (programmé)" if o[2] == "q" else "")
+                      for o in lst if o[3] is not e[3]]
+            marques.setdefault((e[2], c, str(e[3].get("id"))), []).append({"p": p, "d": autres})
+        if lst[-1][2] == "q" or lst[-1][0] >= lim:
+            doublons.append({"creator": nom[c], "partner": p,
+                             "dates": [{"d": e[0], "t": e[1], "prog": e[2] == "q"} for e in lst]})
+    doublons.sort(key=lambda a: a["dates"][-1]["d"], reverse=True)
+    # par NOM : une model sans aucun SFS n'a pas d'id dans les événements
+    der_nom, pro_nom = {}, {}
+    for c, n in nom.items():
+        der_nom[n] = max(der_nom.get(n, ""), dernier.get(c, ""))
+        if prochain.get(c):
+            pro_nom[n] = min(pro_nom.get(n) or prochain[c], prochain[c])
+    for n in noms:
+        der_nom.setdefault(n, "")
+    retards = []
+    for n, d in der_nom.items():
+        ecart = (today - _dt.date.fromisoformat(d)).days if d else None
+        if ecart is None or ecart >= OF_SFS_ECART_MAX:
+            retards.append({"creator": n, "last": d, "days": ecart, "next": pro_nom.get(n, "")})
+    retards.sort(key=lambda r: -(r["days"] if r["days"] is not None else 10 ** 6))
+    return {"doublons": doublons, "retards": retards,
+            "regle": {"ecart_max": OF_SFS_ECART_MAX, "doublon_jours": OF_DOUBLON_JOURS}}, marques
+
+
+SFS_ALERTES_FILE = DATA_DIR / "sfs_alertes.json"            # réglages (models, groupe Telegram)
+SFS_ALERTES_ETAT_FILE = DATA_DIR / "sfs_alertes_etat.json"  # alertes déjà parties sur Telegram
+SFS_ALERTES_HEURES = (9, 22)   # Telegram : pas de message la nuit, gardé pour 9 h
+
+
+def _sfs_alertes_cfg() -> dict:
+    d = safe_json.load(SFS_ALERTES_FILE, None)
+    return d if isinstance(d, dict) else {}
+
+
+def _sfs_alertes_models(noms: list, sent_raw: list) -> dict:
+    """Interrupteur des alertes, model par model ({nom: bool}).
+
+    Demande du 05/10/2026 : « activable à la main, il y a des comptes où je
+    ne fais pas de SFS ». Au tout premier calcul, allumé pour les models qui
+    ont fait un SFS ces 14 jours (Lola, Amelia, Julia ce jour-là), éteint pour
+    les autres — puis ça ne bouge plus qu'à la main. Une model arrivée après
+    commence éteinte. Figé sur disque exprès : une règle « suit l'activité »
+    éteindrait l'alerte d'une model justement au moment où elle s'arrête."""
+    import datetime as _dt
+    import mypuls
+    cfg = _sfs_alertes_cfg()
+    models = cfg.get("models")
+    if isinstance(models, dict):
+        return models
+    if not noms:                       # rien à amorcer : on attend un vrai relevé
+        return {}
+    cut = (_of_aujourdhui() - _dt.timedelta(days=14)).isoformat()
+    actives = {r.get("creator") for r in sent_raw
+               if (r.get("date") or "") >= cut and mypuls.is_sfs_text(r.get("text"))
+               and not (r.get("canceled") and not r.get("sent_count"))}
+    models = {n: n in actives for n in noms}
+    cfg["models"] = models
+    safe_json.write(SFS_ALERTES_FILE, cfg)
+    return models
+
+
+def _telegram_envoyer(chat_id: str, texte: str) -> dict:
+    """Un message texte dans un groupe, par le bot de la veille (@va_auto_dl_bot).
+    sendMessage seulement : getUpdates appartient à tg_router, qui le lit en
+    continu — un second lecteur lui volerait ses messages."""
+    try:
+        import veille_telegram
+        import requests as _rq
+        token = (veille_telegram.load_config() or {}).get("bot_token") or ""
+        if not token:
+            return {"ok": False, "error": "bot Telegram non configuré (réglage de la veille)"}
+        r = _rq.post(f"https://api.telegram.org/bot{token}/sendMessage", timeout=20,
+                     json={"chat_id": chat_id, "text": texte[:4000],
+                           "disable_web_page_preview": True})
+        j = r.json()
+        return {"ok": bool(j.get("ok")), "error": j.get("description") or ""}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def _sfs_alertes_lignes(al: dict) -> list:
+    """[(clé, ligne)] des alertes, pour Telegram. La clé dit « déjà envoyée » :
+    une model en retard une fois par jour, un doublon une fois par nouvel envoi."""
+    jour = _of_aujourdhui().isoformat()
+
+    def _jm(d):
+        return f"{d[8:10]}/{d[5:7]}" if len(d or "") == 10 else "?"
+
+    out = []
+    for r in al.get("retards") or []:
+        q = ("aucun SFS sur 92 jours" if r.get("days") is None else
+             f"pas de SFS depuis {r['days']} jours (dernier le {_jm(r.get('last'))})")
+        out.append((f"r|{r['creator']}|{jour}",
+                    f"• {r['creator']} : {q}, rien de programmé aujourd'hui"))
+    for d in al.get("doublons") or []:
+        L = d.get("dates") or []
+        if len(L) < 2:
+            continue
+        der = L[-1]
+        avant = ", ".join(_jm(e["d"]) for e in L[:-1][-3:])
+        out.append((f"d|{d['creator']}|{d['partner']}|{der['d']}",
+                    f"• {d['creator']} : @{d['partner']} "
+                    f"{'programmée' if der.get('prog') else 'envoyée'} le {_jm(der['d'])}, "
+                    f"déjà le {avant}"))
+    return out
+
+
+def _sfs_alertes_telegram() -> dict:
+    """Envoie au groupe Telegram réglé les alertes SFS pas encore parties,
+    en un seul message. Appelé par le relevé automatique (machine de
+    production) toutes les 10 min ; rien la nuit."""
+    import datetime as _dt
+    import time as _t
+    cfg = _sfs_alertes_cfg()
+    chat = str((cfg.get("telegram") or {}).get("chat_id") or "").strip()
+    if not chat:
+        return {"ok": True, "envoye": 0, "note": "aucun groupe Telegram réglé"}
+    try:
+        from zoneinfo import ZoneInfo
+        h = _dt.datetime.now(ZoneInfo("Europe/Paris")).hour
+    except Exception:
+        h = _dt.datetime.now().hour
+    if not (SFS_ALERTES_HEURES[0] <= h < SFS_ALERTES_HEURES[1]):
+        return {"ok": True, "envoye": 0, "note": "nuit : gardé pour le matin"}
+    etat = safe_json.load(SFS_ALERTES_ETAT_FILE, None)
+    vus = (etat or {}).get("vus") if isinstance(etat, dict) else None
+    vus = vus if isinstance(vus, dict) else {}
+    neuves = [(k, l) for k, l in _sfs_alertes_lignes(_of_alertes_courantes()) if k not in vus]
+    if not neuves:
+        return {"ok": True, "envoye": 0}
+    texte = ("⚠ Alertes SFS OnlyFans\n\n" + "\n".join(l for _, l in neuves)
+             + "\n\nhttps://youl4b.com/?tab=sfs")
+    r = _telegram_envoyer(chat, texte)
+    if not r.get("ok"):
+        log.warning(f"[alertes-sfs] Telegram refusé : {r.get('error')}")
+        return {"ok": False, "error": r.get("error"), "envoye": 0}
+    now = int(_t.time())
+    vus.update({k: now for k, _ in neuves})
+    vus = {k: v for k, v in vus.items() if now - int(v or 0) < 40 * 86400}
+    safe_json.write(SFS_ALERTES_ETAT_FILE, {"vus": vus})
+    return {"ok": True, "envoye": len(neuves)}
+
+
 def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
     """Le relevé de la file (l'à-venir) + les envois Mass DM gardés (le fait).
 
@@ -31797,7 +32023,31 @@ def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
                 return True
         return False
 
-    queue = [it for it in (out.get("items") or []) if it.get("sent") or not _deja_parti(it)]
+    # copies : le relevé `blob` ne doit pas emporter les marques de doublon
+    queue = [dict(it) for it in (out.get("items") or []) if it.get("sent") or not _deja_parti(it)]
+    # Alertes : les créatrices du relevé + celles qui ont envoyé ces 14 jours
+    # (une créatrice dont la file n'a pas pu être lue reste surveillée).
+    recent = (_of_aujourdhui() - _dt.timedelta(days=14)).isoformat()
+    noms = [c.get("creator") for c in (out.get("creators") or []) if c.get("creator")]
+    noms += [r.get("creator") for r in sent_raw
+             if r.get("creator") and (r.get("date") or "") >= recent]
+    noms = list(dict.fromkeys(noms))
+    alertes, marques = _of_alertes_sfs(sent_raw, queue, noms)
+    # interrupteur par model : une model éteinte n'a ni alerte ni marque
+    models = _sfs_alertes_models(noms, sent_raw)
+    on = {n for n, v in models.items() if v}
+    alertes["doublons"] = [d for d in alertes["doublons"] if d["creator"] in on]
+    alertes["retards"] = [r for r in alertes["retards"] if r["creator"] in on]
+    alertes["models"] = [{"creator": n, "on": bool(models.get(n))}
+                         for n in sorted(set(noms) | set(models), key=lambda x: str(x).lower())]
+    _tg = (_sfs_alertes_cfg().get("telegram") or {})
+    alertes["telegram"] = {"chat_id": str(_tg.get("chat_id") or "")}
+    for src, lst in (("s", sent), ("q", queue)):
+        for it in lst:
+            m = marques.get((src, _of_cle_creatrice(it), str(it.get("id"))))
+            if m and it.get("creator") in on:
+                it["doublon"] = m
+    out["alerts"] = alertes
     out["items"] = sorted(queue + sent, key=lambda x: (x.get("date") or "", x.get("time") or "",
                                                        str(x.get("creator") or "")))
     out["merged_sent"] = len(sent)
@@ -31871,6 +32121,121 @@ def _parse_of_har(har: dict) -> dict:
                     "text": txt[:600],
                 })
     return {"items": items, "counters": counters}
+
+
+def _of_releve_file() -> dict:
+    """Relit la file OnlyFans ET l'historique Mass DM (mypuls.of_queue_all),
+    puis écrit data/of_pushs.json. Une seule logique pour la route
+    /sfssetup/of_queue et pour le relevé automatique (_start_of_releve_daemon).
+
+    Retourne {ok, blob} ; {ok, blob=relevé précédent, stale, errors} quand
+    tout a échoué ; {ok: False, error} quand MyPuls n'a rien rendu."""
+    prev = _load_of_pushs()
+    try:
+        import mypuls
+        res = mypuls.of_queue_all()
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur : {e}"}
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error") or "lecture OF impossible"}
+    items = list(res.get("items") or [])
+    errors = list(res.get("errors") or [])
+    # À PART de `errors` : `failed` ci-dessous lit `errors` comme « file
+    # illisible », et un historique en panne n'en est pas une.
+    massdm_errors = list(res.get("massdm_errors") or [])
+    if not items and errors and prev.get("items"):
+        # tout a échoué (cookies morts ?) -> dernier bon état, signalé périmé
+        return {"ok": True, "blob": prev, "stale": True, "errors": errors + massdm_errors}
+    # créatrices en échec : leur dernier relevé reste affiché (marqué),
+    # plutôt que de les faire disparaître du calendrier sans prévenir
+    failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
+    counters = dict(res.get("counters") or {})
+    kept = 0
+    # une créatrice peut n'avoir raté qu'une des deux lectures (file /
+    # envoyés) : on ne remet que ce qui n'est pas déjà dans le relevé frais
+    have = {(it.get("creator"), it.get("id")) for it in items}
+    for it in prev.get("items") or []:
+        if it.get("creator") in failed and (it.get("creator"), it.get("id")) not in have:
+            it2 = dict(it)
+            it2["stale"] = True
+            items.append(it2)
+            kept += 1
+            if it2.get("date") and it2.get("type") == "chat":
+                counters[it2["date"]] = counters.get(it2["date"], 0) + 1
+    if kept:
+        errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
+    errors += massdm_errors
+    blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
+            "source": "live", "creators": res.get("creators") or [],
+            "errors": errors, "start": res.get("start"), "end": res.get("end")}
+    try:
+        OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
+    except Exception as e:
+        errors.append(f"cache non écrit : {e}")
+    return {"ok": True, "blob": blob}
+
+
+_OF_ALERTES_CACHE: dict = {}
+
+
+def _of_alertes_courantes() -> dict:
+    """Les alertes SFS pour le centre de notifications, interrogé à chaque
+    page : recalculées seulement quand le relevé, l'historique ou le jour
+    changent (l'historique pèse 1,2 Mo)."""
+    import mypuls
+    try:
+        cle = tuple((str(f), f.stat().st_mtime if f.exists() else 0)
+                    for f in (OF_PUSHS_FILE, mypuls.OF_MASSDM_FILE, SFS_ALERTES_FILE)
+                    ) + (str(_of_aujourdhui()),)
+    except Exception:
+        cle = None
+    if cle is not None and _OF_ALERTES_CACHE.get("cle") == cle:
+        return _OF_ALERTES_CACHE["val"]
+    val = _of_pushs_avec_envois(_load_of_pushs()).get("alerts") or {}
+    _OF_ALERTES_CACHE.update(cle=cle, val=val)
+    return val
+
+
+OF_RELEVE_INTERVALLE_S = 2 * 3600
+_OF_RELEVE_DEMARRE = []
+
+
+def _start_of_releve_daemon() -> bool:
+    """Relevé automatique de la file OnlyFans et de l'historique Mass DM.
+
+    Sans lui, l'historique ne se relisait qu'à l'ouverture du planning SFS :
+    l'alerte « pas de SFS depuis 2 jours » aurait sonné sur un relevé vieux de
+    plusieurs jours, pour une model qui en avait envoyé. Toutes les 10 min,
+    relit si le dernier relevé (page ou fil) a plus de 2 h.
+
+    Machine de production seulement : le poste de dev a son propre data/."""
+    if _OF_RELEVE_DEMARRE or not _machine_proprietaire("releve-of"):
+        return False
+    _OF_RELEVE_DEMARRE.append(True)
+
+    def _boucle():
+        time.sleep(90)                     # laisser le site démarrer
+        while True:
+            try:
+                age = time.time() - float(_load_of_pushs().get("imported_at") or 0)
+                if age >= OF_RELEVE_INTERVALLE_S - 60:
+                    r = _of_releve_file()
+                    if not r.get("ok") or r.get("stale"):
+                        log.warning(f"[releve-of] {r.get('error') or r.get('errors')}")
+            except Exception as e:         # noqa: BLE001
+                log.warning(f"[releve-of] {e}")
+            # à chaque tour, pas seulement après un relevé : les alertes de la
+            # nuit partent à 9 h, et une model rallumée est prise tout de suite
+            try:
+                _sfs_alertes_telegram()
+            except Exception as e:         # noqa: BLE001
+                log.warning(f"[alertes-sfs] {e}")
+            time.sleep(600)
+
+    threading.Thread(target=_boucle, name="releve-of", daemon=True).start()
+    print("[releve-of] relevé OnlyFans + Mass DM armé (toutes les 2 h)", flush=True)
+    return True
 
 
 def _render_sfs_html() -> str:
@@ -32261,6 +32626,9 @@ def _render_sfs_html() -> str:
                 # ligne de statut : VIDE et masquée par défaut (ne sert que pendant une
         # synchro / MAJ) — les phrases de recap « N SFS placés... » sont retirées
         "<div id='sfs-pushs-list' style='display:none;color:#888;font-size:13px'></div>"
+        # alertes SFS OnlyFans (doublon, model sans SFS depuis 2 jours) : rendues
+        # par renderOfAlertes() depuis __ofPushData.alerts, calculées côté serveur
+        "<div id='sfs-of-alertes' style='display:none'></div>"
         # SFS RECUS : DM entrants des fans/partenaires, lus via l'API MyPuls
         # (MyM ET OnlyFans). Historique accumule cote serveur (sfs_inbox.json).
         "<div id='sfs-inbox-wrap' style='display:none;margin-top:12px;border-top:1px solid #262636;padding-top:10px'>"
@@ -32296,6 +32664,77 @@ def _render_sfs_html() -> str:
         # « Annulé » chez MyPuls à 0 destinataire : annulé avant de partir.
         # Annulé avec des destinataires : parti, puis retiré — il a été vu.
         "function ofJamaisParti(x){ return !!(x && x.sent && x.canceled && !x.sent_count); }"
+        "function ofJm(d){ d=String(d||''); return d.length===10?(d.slice(8,10)+'/'+d.slice(5,7)):'?'; }"
+        "function renderOfAlertes(show){"
+        "  var box=document.getElementById('sfs-of-alertes'); if(!box) return;"
+        "  var al=(window.__ofPushData||{}).alerts||{}; var R=al.retards||[], D=al.doublons||[], M=al.models||[];"
+        "  if(!show || !(R.length||D.length||M.length)){ box.style.display='none'; box.innerHTML=''; return; }"
+        "  var ec=(al.regle||{}).ecart_max||2;"
+        "  var h='<div style=\"display:flex;align-items:center;gap:10px\"><div style=\"font-weight:800;font-size:13px;color:#f59e0b\">'"
+        "    +((R.length||D.length)?('⚠ Alertes SFS'+(R.length?(' · '+R.length+' model'+(R.length>1?'s':'')+' sans SFS depuis '+ec+' j'):'')+(D.length?(' · '+D.length+' SFS en double'):'')):'Alertes SFS : rien à signaler')"
+        "    +'</div><a href=\"#\" onclick=\"sfsAlRegl(event)\" style=\"margin-left:auto;font-size:12px;color:#93c5fd;text-decoration:none\">⚙ Réglages</a></div>';"
+        # réglages : un interrupteur par model + le groupe Telegram
+        "  if(window.__sfsAlRegl){"
+        "    h+='<div style=\"margin:8px 0;padding:8px 0;border-top:1px solid rgba(245,158,11,.25);border-bottom:1px solid rgba(245,158,11,.25)\">';"
+        "    h+='<div style=\"font-size:12px;font-weight:700;margin-bottom:4px\">Alertes par model (décoche celles où tu ne fais pas de SFS)</div><div style=\"display:flex;flex-wrap:wrap;gap:6px 14px\">';"
+        "    M.forEach(function(m){ h+='<label style=\"display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;white-space:nowrap\"><input type=\"checkbox\" style=\"width:auto;height:auto;margin:0;display:inline-block\" data-cre=\"'+encodeURIComponent(m.creator)+'\" onchange=\"sfsAlModel(this)\"'+(m.on?' checked':'')+'>'+sfsEsc(m.creator)+'</label>'; });"
+        "    var tg=(al.telegram||{}).chat_id||'';"
+        "    h+='</div><div style=\"font-size:12px;font-weight:700;margin:10px 0 4px\">Groupe Telegram</div>'"
+        "      +'<div style=\"font-size:11.5px;color:#889;margin-bottom:5px\">Ajoute le bot @va_auto_dl_bot au groupe, puis colle l’ID du groupe (il commence par -100, visible dans l’adresse de web.telegram.org). Envoi de 9 h à 22 h, une fois par alerte.</div>'"
+        "      +'<div style=\"display:flex;gap:6px;flex-wrap:wrap\"><input id=\"sfs-al-tg\" value=\"'+sfsEsc(tg)+'\" placeholder=\"-1001234567890\" style=\"flex:1;min-width:160px;padding:6px 8px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font-size:12.5px\">'"
+        "      +'<button type=\"button\" onclick=\"sfsAlTg()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Enregistrer</button>'"
+        "      +'<button type=\"button\" onclick=\"sfsAlTgTest()\" style=\"padding:6px 12px;border-radius:7px;border:1px solid rgba(148,163,184,.45);background:rgba(148,163,184,.16);color:inherit;cursor:pointer;font-size:12px;font-weight:700\">Tester</button></div>'"
+        "      +'<div id=\"sfs-al-msg\" style=\"font-size:11.5px;margin-top:5px\"></div></div>';"
+        "  }"
+        "  R.forEach(function(r){"
+        "    var q=r.days===null?'aucun SFS sur 92 jours':('pas de SFS depuis '+r.days+' jour'+(r.days>1?'s':'')+' (dernier le '+ofJm(r.last)+')');"
+        "    h+='<div style=\"font-size:12.5px;margin:3px 0\"><b>'+sfsEsc(r.creator)+'</b> — '+q+', rien de programmé aujourd’hui'+(r.next?(' · prochain le '+ofJm(r.next)):'')+'</div>';"
+        "  });"
+        # Deux blocs : programmé alors que déjà fait (encore évitable : à
+        # déprogrammer) puis envoyé en double ces 7 jours. Une ligne par model :
+        # 21 doublons le 05/10, une ligne chacun noyait le reste.
+        "  function blocD(liste, titre){"
+        "    if(!liste.length) return;"
+        "    var parC={}, ordre=[];"
+        "    liste.forEach(function(x){ if(!parC[x.creator]){ parC[x.creator]=[]; ordre.push(x.creator); } parC[x.creator].push(x); });"
+        "    h+='<div style=\"font-size:12px;font-weight:800;margin:8px 0 2px\">'+titre+'</div>';"
+        "    ordre.forEach(function(c){"
+        "      var bouts=parC[c].map(function(x){ var L=x.dates||[]; return '@'+sfsEsc(x.partner)+' ('+(L.length>4?'… ':'')+L.slice(-4).map(function(e){ return ofJm(e.d)+(e.prog?' programmé':''); }).join(', ')+')'; });"
+        "      h+='<div style=\"font-size:12.5px;margin:3px 0\"><b>'+sfsEsc(c)+'</b> — '+bouts.join(' · ')+'</div>';"
+        "    });"
+        "  }"
+        "  var dP=D.filter(function(x){ var L=x.dates||[]; return L.length && L[L.length-1].prog; });"
+        "  blocD(dP, 'Programmé alors que déjà envoyé sur la même model (encore évitable)');"
+        "  blocD(D.filter(function(x){ return dP.indexOf(x)<0; }), 'Envoyé deux fois sur la même model ces 7 derniers jours');"
+        "  if(R.length||D.length) h+='<div style=\"font-size:11px;color:#889;margin-top:5px\">Règle : un SFS au moins tous les '+ec+' jours par model ; un doublon reste affiché 7 jours.</div>';"
+        "  box.innerHTML=h;"
+        "  box.style.cssText='display:block;margin-top:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 12px';"
+        "}"
+        "function sfsAlRegl(e){ if(e) e.preventDefault(); window.__sfsAlRegl=!window.__sfsAlRegl; renderOfAlertes(true); }"
+        "function sfsAlMsg(t, ko){ var m=document.getElementById('sfs-al-msg'); if(m){ m.textContent=t; m.style.color=ko?'#f87171':''; } }"
+        # après un réglage : relecture (mémoire serveur, instantanée) pour
+        # recalculer les alertes avec le nouvel interrupteur
+        "async function sfsAlModel(el){"
+        "  var fd=new FormData(); fd.append('creator', decodeURIComponent(el.getAttribute('data-cre')||'')); fd.append('on', el.checked?'1':'0');"
+        "  try{ var r=await fetch('/sfssetup/alertes/model',{method:'POST',body:fd}); var j=await r.json();"
+        "    if(!j.ok){ el.checked=!el.checked; alert('✕ '+(j.error||'Erreur')); return; }"
+        "    if(typeof loadOfQueue==='function') loadOfQueue(false);"
+        "  }catch(err){ el.checked=!el.checked; alert('✕ '+err); }"
+        "}"
+        "async function sfsAlTg(){"
+        "  var v=(document.getElementById('sfs-al-tg')||{}).value||''; var fd=new FormData(); fd.append('chat_id', v.trim());"
+        "  try{ var r=await fetch('/sfssetup/alertes_tg/config',{method:'POST',body:fd}); var j=await r.json();"
+        "    if(!j.ok){ sfsAlMsg('✕ '+(j.error||'Erreur'), true); return; }"
+        "    var al=(window.__ofPushData||{}).alerts; if(al) al.telegram={chat_id:j.chat_id};"
+        "    sfsAlMsg(j.chat_id?'✓ Groupe enregistré. Clique Tester pour vérifier.':'Groupe retiré : plus d’envoi Telegram.');"
+        "  }catch(err){ sfsAlMsg('✕ '+err, true); }"
+        "}"
+        "async function sfsAlTgTest(){"
+        "  sfsAlMsg('◌ Envoi du message d’essai…');"
+        "  try{ var r=await fetch('/sfssetup/alertes_tg/test',{method:'POST'}); var j=await r.json();"
+        "    sfsAlMsg(j.ok?'✓ Message d’essai envoyé : regarde le groupe.':('✕ '+(j.error||'Erreur')), !j.ok);"
+        "  }catch(err){ sfsAlMsg('✕ '+err, true); }"
+        "}"
         "function sfsEsc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }"
         "function toggleSfsActions(){"
         "  var m=document.getElementById('sfs-actions-menu'); if(!m) return;"
@@ -32488,6 +32927,7 @@ def _render_sfs_html() -> str:
         "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='flex'; if(bOfHar)bOfHar.style.display='flex'; }"
         "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='none'; if(bOfHar)bOfHar.style.display='none'; }"
         "  if(!onPlat) return;"
+        "  if(typeof renderOfAlertes==='function') renderOfAlertes(plat==='OF');"
         "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
         "  const ps=window.__sfsPushCache; if(!ps) return;"
         "  const cells={};"
@@ -32631,22 +33071,18 @@ def _render_sfs_html() -> str:
         "  all.forEach(function(it){ if(!ofMatch(it)) return; if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
         "  var byDate={}, undated=[];"
         "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
-        # Même style compact que MyM, une barre par état : verte = envoyés (la
-        # trace, gardée une fois le message parti), grise = annulés avant de
-        # partir (0 destinataire), bleue = encore programmés.
+        # même style compact que MyM : UNE barre bleue avec le compte par jour,
+        # envoyés et programmés ensemble (le propriétaire ne veut pas de vert)
         "  Object.keys(byDate).forEach(function(d){"
         "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
-        "    var L=byDate[d];"
-        "    [[L.filter(function(x){ return x.sent && !ofJamaisParti(x); }), 'sent'], [L.filter(ofJamaisParti), 'nul'], [L.filter(function(x){ return !x.sent; }), 'sched']].forEach(function(g){"
-        "      var list=g[0], k=g[1]; if(!list.length) return;"
-        "      var bar=document.createElement('div'); bar.className='sfs-push-bar'+(k==='sched'?'':' sfs-push-sent');"
-        "      bar.title=list.length+(k==='sent'?' message(s) envoyé(s) — ':(k==='nul'?' message(s) annulé(s) avant l’envoi — ':' message(s) programmé(s) — '))+list.map(function(x){ return (x.time||'')+(x.creator?(' '+x.creator):'')+(x.canceled&&k==='sent'?' (retiré après)':''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
-        "      bar.style.cssText='background:'+({sent:'#22c55e',nul:'#6b7280',sched:'#0099ff'})[k]+';color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
-        "      var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:'+({sent:'#bbf7d0',nul:'#e5e7eb',sched:'#7dd3fc'})[k]+';border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=({sent:'✓ ',nul:'✕ ',sched:''})[k]+list.length;"
-        "      bar.appendChild(n);"
-        "      (function(D){ bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(D); }; })(d);"
-        "      bars.appendChild(bar);"
-        "    });"
+        "    var list=byDate[d]; var nS=list.filter(function(x){ return x.sent; }).length;"
+        "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
+        "    bar.title=(nS?(nS+' envoyé(s)'):'')+(nS&&list.length>nS?' · ':'')+(list.length>nS?((list.length-nS)+' programmé(s)'):'')+' — '+list.map(function(x){ return (x.time||'')+(x.creator?(' '+x.creator):'')+(x.doublon?' (doublon)':''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
+        "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
+        "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
+        "    bar.appendChild(n);"
+        "    (function(D){ bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(D); }; })(d);"
+        "    bars.appendChild(bar);"
         "  });"
         # Jours à compteur sans détail : juste le badge « ▤ N programmés ».
         # (Avant, les messages SANS date étaient dupliqués sous CHAQUE jour à
@@ -33035,8 +33471,8 @@ function refreshSfsDayPanel(){{
       pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#0099ff;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Messages OnlyFans (' + dayOf.length + ')</div>';
       dayOf.forEach(function(p, pi){{
         var lk=(p.links||[]).map(function(u){{ return '<a href="'+u+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7dd3fc">'+String(u).replace(/</g,"&lt;")+'</a>'; }}).join(' ');
-        // Envoyé (historique Mass DM) : vert, même retiré après coup ; annulé avant de partir : gris ; programmé : bleu.
-        var bc=p.sent?(ofJamaisParti(p)?'#6b7280':'#22c55e'):'#0099ff';
+        // annulé avant de partir : gris ; le reste garde le bleu des messages OnlyFans
+        var bc=ofJamaisParti(p)?'#6b7280':'#0099ff';
         var th=(p.thumbs||[]).map(function(t){{ return '<a href="'+t.u+'?full=1" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(t.v?'Vidéo':'Photo')+' : ouvrir en grand" style="position:relative;display:inline-block;width:64px;height:64px;border-radius:6px;overflow:hidden;background:#1a1a22;flex:0 0 auto">'
           + '<img src="'+t.u+'" loading="lazy" alt="🖼" onerror="this.style.opacity=.3;this.title=&quot;Image indisponible : pas encore copiée, ou absente chez MyPuls aussi&quot;" style="width:100%;height:100%;object-fit:cover;display:block">'
           // blanc en rgb() : body.light assombrit tout [style*="color:#fff"], et ce ▶ est posé sur la photo
@@ -33045,8 +33481,10 @@ function refreshSfsDayPanel(){{
         var more=(p.media_count||0)-(p.thumbs||[]).length;
         var vr=(p.view_rate!=null && p.view_rate!=='')?(' ('+String(p.view_rate).replace('.',',')+' %)'):'';
         var meta=!p.sent ? (' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))
-          : ofJamaisParti(p) ? ' &middot; <span style="color:#9ca3af;font-weight:700" title="Annulé dans MyPuls avant de partir : 0 destinataire">✕ annulé avant l’envoi</span>'
-          : (' &middot; <span style="color:#22c55e;font-weight:700">✓ envoyé</span> à '+(p.sent_count||0).toLocaleString('fr-FR')+' &middot; vus '+(p.viewed_count||0).toLocaleString('fr-FR')+vr+(p.canceled?' &middot; <span style="color:#f87171" title="Annulé dans MyPuls après l’envoi : les abonnés l’ont reçu, puis il a été retiré">retiré après</span>':''));
+          : ofJamaisParti(p) ? ' &middot; <span title="Annulé dans MyPuls avant de partir : 0 destinataire">annulé avant l’envoi</span>'
+          : (' &middot; envoyé à '+(p.sent_count||0).toLocaleString('fr-FR')+' &middot; vus '+(p.viewed_count||0).toLocaleString('fr-FR')+vr+(p.canceled?' &middot; <span title="Annulé dans MyPuls après l’envoi : les abonnés l’ont reçu, puis il a été retiré">retiré après</span>':''));
+        // même partenaire déjà mise en avant par cette model (alerte doublon)
+        var dbl=(p.doublon||[]).map(function(x){{ return '@'+String(x.p).replace(/</g,"&lt;")+' déjà le '+(x.d||[]).join(', '); }}).join(' · ');
         pushHtml += '<div onclick="sfsOfCardClick('+pi+')" title="Créer / modifier un SFS depuis ce message" '
           + 'style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid '+bc+';border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:background .15s" '
           + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
@@ -33054,6 +33492,7 @@ function refreshSfsDayPanel(){{
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
           + '<div style="font-size:11px;color:#888">' + (p.time||'?') + meta + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
+          + (dbl?('<div style="font-size:11.5px;font-weight:700;color:#f59e0b;margin-bottom:6px">⚠ Même SFS sur cette model : '+dbl+'</div>'):'')
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
           + (th?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+th+(more>0?'<span style="align-self:center;color:#889;font-size:11px">+'+more+'</span>':'')+'</div>'):(p.media_count?'<div style="font-size:11px;color:#889;margin-top:6px">'+p.media_count+' média(s)</div>':''))
           + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')
@@ -60056,6 +60495,12 @@ def create_app():
         _start_favoris_auto_daemon()
     except Exception as _e:
         log.warning(f"favoris automatiques non démarrés: {_e}")
+    # File OnlyFans + historique Mass DM relus toutes les 2 h : les alertes
+    # SFS (doublon, model sans SFS depuis 2 jours) ne dépendent pas d'une visite
+    try:
+        _start_of_releve_daemon()
+    except Exception as _e:
+        log.warning(f"relevé OnlyFans automatique non démarré: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:
@@ -60386,6 +60831,9 @@ def create_app():
         # condition, un compte « montage » pouvait supprimer l emploi du temps
         # ou ecraser une semaine entiere depuis la console.
         ("/chatting/", "chatplanning"),
+        # interrupteur des alertes SFS par model : à qui a le planning SFS
+        # (le groupe Telegram, /sfssetup/alertes_tg/, reste aux accès complets)
+        ("/sfssetup/alertes/", "sfs"),
         "/logout",
         # Le paiement des VA de /infloww/liens : la route exige elle-même la
         # clé de paiement du propriétaire (pas celle du salon) ou une session
@@ -65557,6 +66005,17 @@ def create_app():
                 etat["favoris_a_verifier"] = int(_fa_n.nb_a_verifier())
             except Exception as _e_fa:                        # noqa: BLE001
                 log.warning(f"[favoris-auto] compte a verifier illisible : {_e_fa}")
+        # Alertes SFS OnlyFans (doublon, model sans SFS depuis 2 jours) : à qui
+        # a l'onglet SFS seulement, la ligne mène au planning.
+        etat["sfs_doublons"] = etat["sfs_retards"] = 0
+        _at_s = _role_allowed_tabs(_live_role())
+        if _at_s is None or "sfs" in _at_s:
+            try:
+                _al = _of_alertes_courantes()
+                etat["sfs_doublons"] = len(_al.get("doublons") or [])
+                etat["sfs_retards"] = len(_al.get("retards") or [])
+            except Exception as _e_sfs:                       # noqa: BLE001
+                log.warning(f"[alertes-sfs] illisibles : {_e_sfs}")
         return jsonify({"ok": True, **etat})
 
     @app.route("/a-relire/valider_montage", methods=["POST"])
@@ -71090,7 +71549,10 @@ def create_app():
                    "scheduled": sum(1 for x in its if not x.get("sent")),
                    "sent": sum(1 for x in its if x.get("sent")),
                    "dates": len(full.get("counters") or {}),
-                   "data": {"items": its, "counters": full.get("counters") or {}},
+                   # les alertes voyagent DANS data : le client remplace
+                   # __ofPushData par data à chaque rechargement en direct
+                   "data": {"items": its, "counters": full.get("counters") or {},
+                            "alerts": full.get("alerts") or {}},
                    "creators": full.get("creators") or [],
                    "errors": full.get("errors") or []}
             out.update(extra)
@@ -71101,49 +71563,12 @@ def create_app():
             if prev.get("source") == "live" and \
                     time.time() - float(prev.get("imported_at") or 0) < 1800:
                 return _reply(prev, cached=True)
-        try:
-            import mypuls
-            res = mypuls.of_queue_all()
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Erreur : {e}"})
-        if not res.get("ok"):
-            return jsonify({"ok": False, "error": res.get("error") or "lecture OF impossible"})
-        items = list(res.get("items") or [])
-        errors = list(res.get("errors") or [])
-        # À PART de `errors` : `failed` ci-dessous lit `errors` comme « file
-        # illisible », et un historique en panne n'en est pas une.
-        massdm_errors = list(res.get("massdm_errors") or [])
-        if not items and errors and prev.get("items"):
-            # tout a échoué (cookies morts ?) -> dernier bon état, signalé périmé
-            return _reply(prev, cached=True, stale=True, errors=errors + massdm_errors)
-        # créatrices en échec : leur dernier relevé reste affiché (marqué),
-        # plutôt que de les faire disparaître du calendrier sans prévenir
-        failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
-        counters = dict(res.get("counters") or {})
-        kept = 0
-        # une créatrice peut n'avoir raté qu'une des deux lectures (file /
-        # envoyés) : on ne remet que ce qui n'est pas déjà dans le relevé frais
-        have = {(it.get("creator"), it.get("id")) for it in items}
-        for it in prev.get("items") or []:
-            if it.get("creator") in failed and (it.get("creator"), it.get("id")) not in have:
-                it2 = dict(it)
-                it2["stale"] = True
-                items.append(it2)
-                kept += 1
-                if it2.get("date") and it2.get("type") == "chat":
-                    counters[it2["date"]] = counters.get(it2["date"], 0) + 1
-        if kept:
-            errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
-        errors += massdm_errors
-        blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
-                "source": "live", "creators": res.get("creators") or [],
-                "errors": errors, "start": res.get("start"), "end": res.get("end")}
-        try:
-            OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
-        except Exception as e:
-            errors.append(f"cache non écrit : {e}")
-        return _reply(blob)
+        r = _of_releve_file()
+        if not r.get("ok"):
+            return jsonify({"ok": False, "error": r.get("error") or "lecture OF impossible"})
+        if r.get("stale"):
+            return _reply(r["blob"], cached=True, stale=True, errors=r.get("errors") or [])
+        return _reply(r["blob"])
 
     @app.route("/sfssetup/of_media/<h>/<mid>", methods=["GET"])
     def sfssetup_of_media(h, mid):
@@ -71168,6 +71593,56 @@ def create_app():
                          mimetype="image/webp" if p.suffix == ".webp" else "image/jpeg")
         resp.headers["Cache-Control"] = "private, max-age=604800"
         return resp
+
+    @app.route("/sfssetup/alertes/model", methods=["POST"])
+    def sfssetup_alertes_model():
+        """Allume / éteint les alertes SFS d'une model (planning SFS, onglet OF)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        d = request.get_json(silent=True) or request.form
+        nom = str(d.get("creator") or "").strip()
+        if not nom or len(nom) > 80:
+            return jsonify({"ok": False, "error": "model manquante"})
+        on = str(d.get("on") or "").lower() in ("1", "true", "on", "oui")
+        cfg = _sfs_alertes_cfg()
+        models = cfg.get("models") if isinstance(cfg.get("models"), dict) else {}
+        models[nom] = on
+        cfg["models"] = models
+        if not safe_json.write(SFS_ALERTES_FILE, cfg):
+            return jsonify({"ok": False, "error": "réglage non enregistré"})
+        return jsonify({"ok": True, "creator": nom, "on": on})
+
+    @app.route("/sfssetup/alertes_tg/config", methods=["POST"])
+    def sfssetup_alertes_tg_config():
+        """Le groupe Telegram qui reçoit les alertes SFS (vide = aucun envoi).
+        Réservé aux accès complets : ce réglage décide où partent les messages."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        d = request.get_json(silent=True) or request.form
+        chat = str(d.get("chat_id") or "").strip()
+        if chat and not re.match(r"^(-?\d{5,20}|@[A-Za-z0-9_]{5,32})$", chat):
+            return jsonify({"ok": False, "error": "ID de groupe invalide (ex. -1001234567890)"})
+        cfg = _sfs_alertes_cfg()
+        cfg["telegram"] = dict(cfg.get("telegram") or {}, chat_id=chat)
+        if not safe_json.write(SFS_ALERTES_FILE, cfg):
+            return jsonify({"ok": False, "error": "réglage non enregistré"})
+        return jsonify({"ok": True, "chat_id": chat})
+
+    @app.route("/sfssetup/alertes_tg/test", methods=["POST"])
+    def sfssetup_alertes_tg_test():
+        """Message d'essai dans le groupe réglé, pour vérifier que le bot y est."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        chat = str((_sfs_alertes_cfg().get("telegram") or {}).get("chat_id") or "")
+        if not chat:
+            return jsonify({"ok": False, "error": "aucun groupe réglé"})
+        r = _telegram_envoyer(chat, "✓ Test : les alertes SFS OnlyFans arriveront dans ce groupe.")
+        if not r.get("ok"):
+            return jsonify({"ok": False, "error": r.get("error") or "envoi refusé"})
+        return jsonify({"ok": True})
 
     @app.route("/sfssetup/sfs_inbox", methods=["GET"])
     def sfssetup_sfs_inbox():
