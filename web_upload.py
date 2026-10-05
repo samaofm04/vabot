@@ -31997,6 +31997,26 @@ def _sfs_alertes_telegram() -> dict:
     return {"ok": True, "envoye": len(neuves)}
 
 
+def _sfs_point_suivi(nom: str, models: dict) -> str:
+    """Le point à droite d'une ligne de la liste du planning SFS : vert =
+    compte suivi, gris = suivi coupé ; un clic bascule (même réglage que
+    ⚙ Réglages). Demandé le 05/10/2026 « comme pour Comptes par identité ».
+    Sans compte (identité sans profil OF), pas de point."""
+    if not nom:
+        return ""
+    cle = re.sub(r"[^a-z0-9]", "", str(nom).lower())
+    coupe = any(v is False and re.sub(r"[^a-z0-9]", "", str(k).lower()) == cle
+                for k, v in (models or {}).items())
+    return (f"<span class='sfs-suivi-dot' data-suivi='{html_escape(str(nom), quote=True)}' "
+            f"onclick='sfsPointSuivi(event,this)' "
+            f"title='{'Suivi SFS coupé : clique pour le remettre' if coupe else 'Suivi SFS actif : clique pour le couper'}' "
+            # placé sur la LIGNE (position:relative) : le planning la réaffiche
+            # en display:block, où un point « en ligne » n'a plus de largeur
+            f"style='position:absolute;right:10px;top:50%;margin-top:-6px;display:block;"
+            f"width:12px;height:12px;border-radius:50%;cursor:pointer;"
+            f"background:{'#4b5563' if coupe else '#10b981'};box-shadow:0 0 0 3px rgba(16,185,129,.18)'></span>")
+
+
 def _of_pushs_avec_envois(blob: dict, mois: str = "") -> dict:
     """Le relevé de la file (l'à-venir) + les envois Mass DM gardés (le fait).
 
@@ -32553,17 +32573,17 @@ def _render_sfs_html() -> str:
             f"<div onclick='filterSfsByIdentity(\"{ident}\",this)' "
             f"class='sfs-ident-row' data-ident='{ident}' data-platforms='{platforms_attr}' data-model='{_model_name}' "
             f"data-model-mym='{_model_name}' data-model-of='{_of_name}' "
-            f"style='display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
+            f"style='position:relative;display:flex;align-items:center;gap:10px;padding:8px 30px 8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
             f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
             f"<div style='position:relative'>{avatar}"
-            f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
             f"</div>"
             f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
             f"<span style='font-weight:600;font-size:13px;color:#fff'>{ident}</span>"
             f"{model_sub}"
             f"</div>"
             f"{badge}"
+            f"{_sfs_point_suivi(_of_name, _sfs_models)}"
             f"</div>"
         )
     # Rangées MyM : la liste = créateurs MyPuls (pseudos), Kiarahockey inclus.
@@ -32592,11 +32612,10 @@ def _render_sfs_html() -> str:
         rows.append(
             f"<div onclick='filterSfsByIdentity(\"{_matched}\",this)' "
             f"class='sfs-ident-row' data-rowsource='mypuls' data-ident='{_matched}' data-model='{_cre}' data-platforms='MYM' "
-            f"style='display:none;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
+            f"style='position:relative;display:none;align-items:center;gap:10px;padding:8px 30px 8px 10px;border-radius:8px;cursor:pointer;margin-top:4px;transition:background .15s' "
             f"onmouseover='if(!this.classList.contains(\"active\"))this.style.background=\"#1a1a1a\"' "
             f"onmouseout='if(!this.classList.contains(\"active\"))this.style.background=\"transparent\"'>"
             f"<div style='position:relative'>{_av}"
-            f"<div style='position:absolute;bottom:0;right:0;width:9px;height:9px;background:#10b981;border:2px solid #0a0a0a;border-radius:50%'></div>"
             f"</div>"
             f"<div style='display:flex;flex-direction:column;min-width:0;flex:1'>"
             f"<span style='font-weight:600;font-size:13px;color:#fff'>{_cre}</span>"
@@ -32605,6 +32624,7 @@ def _render_sfs_html() -> str:
                if _subs_by_name.get(str(_cre).lower().strip()) else "")
             + f"</div>"
             f"{_cbadge}"
+            f"{_sfs_point_suivi(_cre, _sfs_models)}"
             f"</div>"
         )
     rows.append("</div>")
@@ -32717,6 +32737,28 @@ def _render_sfs_html() -> str:
         # Comparaison sur lettres et chiffres : « Khloe 💕 » = « khloe ».
         "function sfsNormNom(n){ return String(n||'').toLowerCase().replace(/[^a-z0-9]/g,''); }"
         "function sfsSuivi(n){ var k=sfsNormNom(n); return !(window.__sfsSuiviOff||[]).some(function(o){ return sfsNormNom(o)===k; }); }"
+        # points de la liste de gauche : vert = suivi, gris = coupé (ligne estompée)
+        "function sfsMajPoints(){ document.querySelectorAll('.sfs-suivi-dot').forEach(function(d){ var on=sfsSuivi(d.getAttribute('data-suivi')); d.style.background=on?'#10b981':'#4b5563'; d.title=on?'Suivi SFS actif : clique pour le couper':'Suivi SFS coupé : clique pour le remettre'; var r=d.closest('.sfs-ident-row'); if(r) r.style.opacity=on?'':'.55'; }); }"
+        # un seul chemin pour couper / remettre le suivi (point vert ou ⚙ Réglages)
+        "async function sfsSuiviBasculer(nom, on){"
+        "  var fd=new FormData(); fd.append('creator', nom); fd.append('on', on?'1':'0');"
+        "  var r=await fetch('/sfssetup/alertes/model',{method:'POST',body:fd}); var j=await r.json();"
+        "  if(!j.ok) throw new Error(j.error||'Erreur');"
+        "  var off=(window.__sfsSuiviOff||[]).filter(function(o){ return sfsNormNom(o)!==sfsNormNom(j.creator); });"
+        "  if(!j.on) off.push(j.creator); window.__sfsSuiviOff=off;"
+        "  sfsMajPoints();"
+        "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "  if(window.__selectedSfsDate && typeof selectSfsDay==='function') selectSfsDay(window.__selectedSfsDate);"
+        "  var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
+        # OnlyFans : les alertes sont recalculées côté serveur (cloche, Telegram)
+        "  if(window.__currentSfsPlatform==='OF' && typeof loadOfQueue==='function') loadOfQueue(false);"
+        "  return j;"
+        "}"
+        "async function sfsPointSuivi(e, el){"
+        "  if(e) e.stopPropagation();"
+        "  var nom=el.getAttribute('data-suivi'); if(!nom) return;"
+        "  try{ await sfsSuiviBasculer(nom, !sfsSuivi(nom)); }catch(err){ alert('✕ '+(err.message||err)); }"
+        "}"
         "function ofJm(d){ d=String(d||''); return d.length===10?(d.slice(8,10)+'/'+d.slice(5,7)):'?'; }"
         # OnlyFans : alertes + réglages ; MyM : réglages seulement (les
         # alertes ne lisent que l'historique Mass DM d'OnlyFans)
@@ -32776,17 +32818,8 @@ def _render_sfs_html() -> str:
         # après un réglage : relecture (mémoire serveur, instantanée) pour
         # recalculer les alertes avec le nouvel interrupteur
         "async function sfsAlModel(el){"
-        "  var fd=new FormData(); fd.append('creator', decodeURIComponent(el.getAttribute('data-cre')||'')); fd.append('on', el.checked?'1':'0');"
-        "  try{ var r=await fetch('/sfssetup/alertes/model',{method:'POST',body:fd}); var j=await r.json();"
-        "    if(!j.ok){ el.checked=!el.checked; alert('✕ '+(j.error||'Erreur')); return; }"
-        "    var off=(window.__sfsSuiviOff||[]).filter(function(o){ return sfsNormNom(o)!==sfsNormNom(j.creator); });"
-        "    if(!j.on) off.push(j.creator); window.__sfsSuiviOff=off;"
-        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "    if(window.__selectedSfsDate && typeof selectSfsDay==='function') selectSfsDay(window.__selectedSfsDate);"
-        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
-        # OnlyFans : les alertes sont recalculées côté serveur (cloche, Telegram)
-        "    if(window.__currentSfsPlatform==='OF' && typeof loadOfQueue==='function') loadOfQueue(false);"
-        "  }catch(err){ el.checked=!el.checked; alert('✕ '+err); }"
+        "  try{ await sfsSuiviBasculer(decodeURIComponent(el.getAttribute('data-cre')||''), el.checked); }"
+        "  catch(err){ el.checked=!el.checked; alert('✕ '+(err.message||err)); }"
         "}"
         "async function sfsAlTg(){"
         "  var v=(document.getElementById('sfs-al-tg')||{}).value||''; var fd=new FormData(); fd.append('chat_id', v.trim());"
@@ -32984,6 +33017,7 @@ def _render_sfs_html() -> str:
         "  box.innerHTML=h;"
         "}"
         "function renderSfsPushes(){"
+        "  if(typeof sfsMajPoints==='function') sfsMajPoints();"
         "  document.querySelectorAll('.sfs-push-bar').forEach(function(el){ el.remove(); });"
         "  var panel=document.getElementById('sfs-pushs-panel');"
         "  var plat=window.__currentSfsPlatform;"

@@ -6669,6 +6669,16 @@ try:
     _hSAL = _cAL.get("/").get_data(as_text=True)
     check("suivi : la page recoit les comptes coupes (rendu serveur)",
           'window.__sfsSuiviOff = ["Sarahmycrush"];' in _hSAL)
+    _pvAL = _wAL._sfs_point_suivi("Julia", {"Julia": True})
+    _pgAL = _wAL._sfs_point_suivi("Khloe 💕", {"khloe": False})
+    check("point de la liste : vert si suivi, gris si coupe (nom compare sur lettres et chiffres)",
+          "#10b981" in _pvAL and "data-suivi='Julia'" in _pvAL
+          and "#4b5563" in _pgAL and "sfsPointSuivi(event,this)" in _pgAL)
+    check("point de la liste : pas de compte (identite sans profil OF) -> pas de point",
+          _wAL._sfs_point_suivi("", {}) == "")
+    check("point de la liste : le clic ne filtre pas la ligne et passe par le meme reglage",
+          "async function sfsPointSuivi(e, el){" in _hSAL and "if(e) e.stopPropagation();" in _hSAL
+          and "await sfsSuiviBasculer(decodeURIComponent(" in _hSAL and "function sfsMajPoints()" in _hSAL)
     check("suivi : calendrier OF et MyM, panneau du jour, bilan et ligne d etat filtrent",
           "if(!ofMatch(it) || !sfsSuivi(it.creator)) return;" in _hSAL
           and "if(!sfsSuivi(p.creator)) continue;" in _hSAL
