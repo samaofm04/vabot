@@ -13723,6 +13723,14 @@ def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None, masquer=N
 #: (05/10/2026). Sept boutons : deux rangees (5 au plus par rangee Discord).
 _JB_GEN_BOUTONS = ("pp", "bio", "storyme", "stlife", "sttravel", "storycta", "post")
 
+#: Les serveurs des VA FR ou le General ne pose PAS les trois stories
+#: (proprietaire, 05/10/2026 : « pour les VA FR ici tu peux disable story
+#: me, story life et story travel, ils sont la meme chose ») -- le menu de la
+#: model, juste au-dessus, les a deja. Va IG. Ils restent dans la liste
+#: blanche : un message deja affiche qui les porte repond encore.
+_JB_GEN_SANS_STORIES = frozenset({"1505418484052394004"})
+_JB_GEN_STORIES = ("storyme", "stlife", "sttravel")
+
 #: Les MENUS du General, dans l'ordre de _FAMILLES_MENU (Caption, Template,
 #: Trash, Flash -- les marques dans l'ordre de marques_montage). Lus dans
 #: cette table-la, rien de recopie : un libelle ou un logo change la-bas
@@ -13961,7 +13969,10 @@ def _jb_general(cog, model, qty=_JB_QTE_DEFAUT, reserve=None, guild=None):
     _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
     manquantes = []
     boutons = ui.ActionRow()
+    _sans_stories = str(getattr(guild, "id", "") or "") in _JB_GEN_SANS_STORIES
     for key in _JB_GEN_BOUTONS:
+        if _sans_stories and key in _JB_GEN_STORIES:
+            continue
         entree = _jb_action(key)
         if entree is None:
             manquantes.append(key)

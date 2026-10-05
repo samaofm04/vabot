@@ -20511,6 +20511,43 @@ except Exception as _eSt:
     _tbSt.print_exc()
     check("stories me/life/travel : testable", False, repr(_eSt)[:200])
 
+# ---- General des VA FR : sans Story me / life / travel (05/10/2026) --------
+print()
+print("General des VA FR (Va IG) : sans les trois stories, le menu de la model les a")
+try:
+    import types as _tyGs
+    from cogs import user as _uGs
+    import type_identite as _tiGs
+    _savGs = (_tiGs.reserves_liees, _uGs._est_reserve_sure)
+    try:
+        _tiGs.reserves_liees = lambda m: (["blonde"], [])
+        _uGs._est_reserve_sure = lambda m: False
+
+        def _clesGs(gid):
+            g = _tyGs.SimpleNamespace(id=gid, emojis=[])
+            v = _uGs._jb_general(None, "lola", 1, guild=g)
+            out = []
+            for c in v.walk_children():
+                i = getattr(c, "item", c)
+                cid = getattr(i, "custom_id", "") or ""
+                if cid.startswith("jbg:a:"):
+                    out.append(cid.split(":")[4])
+            return out
+        _frGs = _clesGs(1505418484052394004)
+        check("General VA FR : PP, Bio, Story CTA, Post -- sans Story me / life / travel",
+              _frGs == ["pp", "bio", "storycta", "post"], _frGs)
+        _usGs = _clesGs(1535758943324999711)
+        check("General US : les trois stories restent",
+              _usGs == list(_uGs._JB_GEN_BOUTONS), _usGs)
+        check("General VA FR : les stories restent dans la liste blanche (anciens messages)",
+              all(k in _uGs._JB_GENERAL_RANGEES for k in _uGs._JB_GEN_STORIES))
+    finally:
+        _tiGs.reserves_liees, _uGs._est_reserve_sure = _savGs
+except Exception as _eGs:
+    import traceback as _tbGs
+    _tbGs.print_exc()
+    check("General VA FR : testable", False, repr(_eGs)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
