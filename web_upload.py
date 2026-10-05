@@ -31749,6 +31749,9 @@ def _of_mois_bornes(mois: str = "") -> tuple:
 
 OF_SFS_ECART_MAX = 2     # jours sans SFS : « tous les 2 jours, lundi mercredi vendredi minimum »
 OF_DOUBLON_JOURS = 7     # un doublon reste signalé 7 jours après son dernier envoi
+# Même partenaire sur le même compte à moins de 30 jours = doublon (« pas dans
+# le même mois »). Sur deux comptes différents, même le même jour : normal.
+OF_DOUBLON_FENETRE = 30
 
 
 def _of_aujourdhui():
@@ -31770,7 +31773,8 @@ def _of_alertes_sfs(sent_raw: list, queue: list, noms: list) -> tuple:
     """Les deux alertes SFS OnlyFans demandées par le propriétaire (05/10/2026).
 
     - Doublon : la même partenaire mise en avant deux fois par la même model
-      (Julia : @petiteapolline le 03/10 puis le 04/10). Les SFS programmés
+      à moins de OF_DOUBLON_FENETRE jours (Julia : @petiteapolline le 03/10
+      puis le 04/10). Sur deux models, c'est normal. Les SFS programmés
       comptent, pour prévenir AVANT l'envoi. Signalé tant que le dernier des
       deux est programmé ou date de moins de OF_DOUBLON_JOURS jours.
     - Retard : une model sans SFS depuis OF_SFS_ECART_MAX jours, et rien de
@@ -31806,18 +31810,35 @@ def _of_alertes_sfs(sent_raw: list, queue: list, noms: list) -> tuple:
     def _jm(d):
         return f"{d[8:10]}/{d[5:7]}" if len(d) == 10 else "?"
 
+    def _ecart(a, b):
+        try:
+            return abs((_dt.date.fromisoformat(b) - _dt.date.fromisoformat(a)).days)
+        except ValueError:
+            return 10 ** 6
+
     doublons, marques = [], {}
     for (c, p), lst in groupes.items():
+        lst = sorted((e for e in lst if e[0]), key=lambda e: (e[0], e[1]))
         if len(lst) < 2:
             continue
-        lst.sort(key=lambda e: (e[0], e[1]))
+        # « pas dans le même mois » : seuls comptent les envois de la même
+        # partenaire à moins de OF_DOUBLON_FENETRE jours l'un de l'autre
         for e in lst:
             autres = [_jm(o[0]) + (" (programmé)" if o[2] == "q" else "")
-                      for o in lst if o[3] is not e[3]]
-            marques.setdefault((e[2], c, str(e[3].get("id"))), []).append({"p": p, "d": autres})
-        if lst[-1][2] == "q" or lst[-1][0] >= lim:
-            doublons.append({"creator": nom[c], "partner": p,
-                             "dates": [{"d": e[0], "t": e[1], "prog": e[2] == "q"} for e in lst]})
+                      for o in lst if o[3] is not e[3] and _ecart(o[0], e[0]) < OF_DOUBLON_FENETRE]
+            if autres:
+                marques.setdefault((e[2], c, str(e[3].get("id"))), []).append({"p": p, "d": autres})
+        # le dernier envoi qui a un précédent dans la fenêtre : c'est lui le doublon
+        for i in range(len(lst) - 1, 0, -1):
+            avant = [o for o in lst[:i] if _ecart(o[0], lst[i][0]) < OF_DOUBLON_FENETRE]
+            if not avant:
+                continue
+            der = lst[i]
+            if der[2] == "q" or der[0] >= lim:
+                doublons.append({"creator": nom[c], "partner": p,
+                                 "dates": [{"d": e[0], "t": e[1], "prog": e[2] == "q"}
+                                           for e in avant + [der]]})
+            break
     doublons.sort(key=lambda a: a["dates"][-1]["d"], reverse=True)
     # par NOM : une model sans aucun SFS n'a pas d'id dans les événements
     der_nom, pro_nom = {}, {}
@@ -31834,7 +31855,8 @@ def _of_alertes_sfs(sent_raw: list, queue: list, noms: list) -> tuple:
             retards.append({"creator": n, "last": d, "days": ecart, "next": pro_nom.get(n, "")})
     retards.sort(key=lambda r: -(r["days"] if r["days"] is not None else 10 ** 6))
     return {"doublons": doublons, "retards": retards,
-            "regle": {"ecart_max": OF_SFS_ECART_MAX, "doublon_jours": OF_DOUBLON_JOURS}}, marques
+            "regle": {"ecart_max": OF_SFS_ECART_MAX, "doublon_jours": OF_DOUBLON_JOURS,
+                      "doublon_fenetre": OF_DOUBLON_FENETRE}}, marques
 
 
 SFS_ALERTES_FILE = DATA_DIR / "sfs_alertes.json"            # réglages (models, groupe Telegram)
@@ -32704,9 +32726,9 @@ def _render_sfs_html() -> str:
         "    });"
         "  }"
         "  var dP=D.filter(function(x){ var L=x.dates||[]; return L.length && L[L.length-1].prog; });"
-        "  blocD(dP, 'Programmé alors que déjà envoyé sur la même model (encore évitable)');"
-        "  blocD(D.filter(function(x){ return dP.indexOf(x)<0; }), 'Envoyé deux fois sur la même model ces 7 derniers jours');"
-        "  if(R.length||D.length) h+='<div style=\"font-size:11px;color:#889;margin-top:5px\">Règle : un SFS au moins tous les '+ec+' jours par model ; un doublon reste affiché 7 jours.</div>';"
+        "  blocD(dP, 'Programmé alors que déjà envoyé sur le même compte (encore évitable)');"
+        "  blocD(D.filter(function(x){ return dP.indexOf(x)<0; }), 'Envoyé deux fois sur le même compte ces 7 derniers jours');"
+        "  if(R.length||D.length) h+='<div style=\"font-size:11px;color:#889;margin-top:5px\">Règle : un SFS au moins tous les '+ec+' jours par compte ; la même partenaire pas deux fois en '+((al.regle||{}).doublon_fenetre||30)+' jours sur le même compte (sur deux comptes, c’est normal).</div>';"
         "  box.innerHTML=h;"
         "  box.style.cssText='display:block;margin-top:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 12px';"
         "}"
@@ -33492,7 +33514,7 @@ function refreshSfsDayPanel(){{
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
           + '<div style="font-size:11px;color:#888">' + (p.time||'?') + meta + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
-          + (dbl?('<div style="font-size:11.5px;font-weight:700;color:#f59e0b;margin-bottom:6px">⚠ Même SFS sur cette model : '+dbl+'</div>'):'')
+          + (dbl?('<div style="font-size:11.5px;font-weight:700;color:#f59e0b;margin-bottom:6px">⚠ Même SFS sur le même compte : '+dbl+'</div>'):'')
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
           + (th?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+th+(more>0?'<span style="align-self:center;color:#889;font-size:11px">+'+more+'</span>':'')+'</div>'):(p.media_count?'<div style="font-size:11px;color:#889;margin-top:6px">'+p.media_count+' média(s)</div>':''))
           + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')

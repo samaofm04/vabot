@@ -6561,6 +6561,9 @@ try:
         _sAL(9, "Jessye", 3107, -2, "talk to @khloecute"),
         _sAL(10, "Amelia", 3106, -2, "Coucou @nouvelle"),
         _sAL(11, "Lola", 3673, -5, "@itsslola c est moi", user="itsslola"),
+        # meme partenaire a 34 jours d intervalle : pas « dans le meme mois »
+        _sAL(12, "Julia", 3109, -40, "Coucou @loin"),
+        _sAL(13, "Julia", 3109, -6, "Re @loin"),
     ]
     _queueAL = [_qAL(90, "Lola", 3673, 1, "Ma pote @mindymnp revient"),
                 _qAL(91, "Jessye", 3107, 0, "today @someone")]
@@ -6580,6 +6583,8 @@ try:
           _mkAL.get(("s", "3106", "5")) == [{"p": "vieille", "d": [_dAL(-30)[8:] + "/" + _dAL(-30)[5:7]]}])
     check("doublon : la carte du programme nomme l envoi precedent",
           _mkAL.get(("q", "3673", "90"), [{}])[0].get("p") == "mindymnp")
+    check("doublon : meme compte mais a plus de 30 jours -> pas un doublon, pas de marque",
+          ("Julia", "loin") not in _dbAL and ("s", "3109", "13") not in _mkAL)
     check("doublon : la model qui se cite elle-meme n est pas une partenaire",
           not any(k[1] == "itsslola" for k in _dbAL))
     _rtAL = {r["creator"]: r for r in _alAL["retards"]}
