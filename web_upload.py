@@ -46226,9 +46226,25 @@ GMSDASH_CACHE_FILE = DATA_DIR / "gmsdash_cache.json"
 # list_teams échoue par moments sur le VPS et la page se retrouvait vide
 # (« Aucune catégorie »). Les ids sont stables côté GetMySocial.
 GMSDASH_TEAMS = [
-    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),   # 1er = catégorie par DÉFAUT (lola, emma, amelia…)
+    ("tm_6a1ea410d882dd2173b8a315", "marche francais"),   # lola, emma, amelia…
     ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
 ]
+#: Catégories COUPÉES du Dashboard clics : ni calculées par le démon, ni
+#: proposées dans la page, ni servies par /gmsdash/data. Propriétaire,
+#: 06/10/2026 : « marché français disable pour ça ». 213 liens, ~280 appels
+#: GetMySocial par relevé : les trois quarts du coût du tableau. L'espace
+#: lui-même sert ailleurs (templates, liens VA) et y reste. L'onglet Analyse
+#: vues de CE fichier lisait ses clics 7 j dans ce relevé, mais sur le VPS un
+#: patch local le remplace par analytics_dashboard.py, qui ne prend que les
+#: clics de Jessye dans le report Discord : rien n'y change.
+#: Le remettre = le retirer d'ici.
+GMSDASH_TEAMS_COUPEES = {"tm_6a1ea410d882dd2173b8a315"}
+
+
+def _gmsdash_equipes() -> list:
+    """Les catégories du Dashboard clics qui tournent. La première est celle
+    que la page ouvre par défaut."""
+    return [(t, n) for t, n in GMSDASH_TEAMS if t not in GMSDASH_TEAMS_COUPEES]
 # Liste de SECOURS des liens par team (relevée le 26/07/2026) : la liste (REST)
 # est ce qui 429 sur le VPS, alors que les clics (MCP) passent. Avec ce secours,
 # le dashboard affiche des résultats même quand le listage est bloqué. Toute
@@ -47088,7 +47104,7 @@ def _gmsdash_warm_loop():
                       f"{_GMSDASH_VU_H} h : aucun calcul ce tour", flush=True)
                 _t_w.sleep(30 * 60)
                 continue
-            ids = [tid for tid, _n in GMSDASH_TEAMS]
+            ids = [tid for tid, _n in _gmsdash_equipes()]
             t0 = _t_w.time()
             for tid in ids:
                 for per in _GMSDASH_WARM_PERIODS:
@@ -48104,7 +48120,7 @@ setTimeout(function(){
 }, 3000);
 </script>
 """
-    _opts = "".join(f"<option value='{tid}'>{name}</option>" for tid, name in GMSDASH_TEAMS)
+    _opts = "".join(f"<option value='{tid}'>{name}</option>" for tid, name in _gmsdash_equipes())
     return css + body.replace("__GDKEY2__", key2_html).replace("__GDOPTS__", _opts)
 
 
@@ -64266,7 +64282,7 @@ def create_app():
         # bloqué sur « Chargement… ». Les noms sont en dur, le nombre de liens
         # vient du cache pré-calculé (0 = pas encore calculé, purement cosmétique).
         out = []
-        for tid, name in GMSDASH_TEAMS:
+        for tid, name in _gmsdash_equipes():
             n = 0
             with _GMSDASH_LOCK:
                 for per in ("today", "7", "30", "quinz"):
@@ -64473,6 +64489,12 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         if not team:
             return jsonify({"ok": False, "error": "catégorie manquante"})
+        if team in GMSDASH_TEAMS_COUPEES:
+            # une page ouverte avant le déploiement la redemande : on le dit,
+            # sans rien calculer (ni compter une visite qui relancerait le
+            # préchauffage)
+            return jsonify({"ok": False, "error": "catégorie coupée du Dashboard clics"
+                                                  " — recharge la page"})
         _gmsdash_vu()          # c'est une VRAIE ouverture : le prechauffage reprend
         if team not in {t[0] for t in GMSDASH_TEAMS}:
             return jsonify({"ok": False, "error": "catégorie inconnue"})

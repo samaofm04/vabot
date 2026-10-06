@@ -43,7 +43,8 @@ def check(label, cond, detail=""):
           + (f"  [{str(detail)[:300]}]" if detail and not cond else ""))
 
 
-TEAM = w.GMSDASH_TEAMS[0][0]
+TEAM = w._gmsdash_equipes()[0][0]
+FR = "tm_6a1ea410d882dd2173b8a315"
 LANCES = []
 SAUVE = {n: getattr(w, n) for n in ("_gmsdash_kick", "_paris_now_web", "_gmsdash_compute",
                                     "_gmsdash_store", "_gmsdash_regarde_recemment",
@@ -215,11 +216,14 @@ try:
             except FinDuTour:
                 pass
 
-        equipes = [t for t, _n in w.GMSDASH_TEAMS]
+        equipes = [t for t, _n in w._gmsdash_equipes()]
         un_tour({f"{t}|{p}": releve(p, ts_fige, start="2026-09-12", end="2026-09-12")
                  for t in equipes for p in w._GMSDASH_WARM_PERIODS})
         check("cache du 12/09 : toutes les périodes de toutes les catégories sont refaites",
               len(CALCULES) == len(equipes) * len(w._GMSDASH_WARM_PERIODS), CALCULES)
+        un_tour({})
+        check("marché français coupé : jamais calculé par le démon",
+              CALCULES and not any(t == FR for t, _p in CALCULES), CALCULES)
         un_tour({f"{t}|{p}": releve(p, time.time() - 3600)
                  for t in equipes for p in w._GMSDASH_WARM_PERIODS})
         check("cache du jour, vieux d'une heure : rien n'est refait (fenêtre de 6 h)",
@@ -245,7 +249,41 @@ try:
     finally:
         w._clicrank_cache = vrai_cache
 
-    print("\n— 8. la page")
+    print("\n— 8. marché français coupé du tableau (propriétaire, 06/10)")
+    check("coupé, mais toujours connu (son nom sert ailleurs)",
+          FR in w.GMSDASH_TEAMS_COUPEES and FR in {t for t, _n in w.GMSDASH_TEAMS})
+    check("la page s'ouvre sur JESSY LE RETOUR",
+          w._gmsdash_equipes()[0] == ("tm_6a0e4739bfa0c238f20a8bf5", "JESSY LE RETOUR"),
+          w._gmsdash_equipes())
+    app = w.create_app()
+    app.config["TESTING"] = True
+    vrai_users = w._load_web_users
+    w._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    vrai_vu = w._gmsdash_vu
+    w._gmsdash_vu = lambda *a, **k: None
+    try:
+        cl = app.test_client()
+        with cl.session_transaction() as ss:
+            ss["auth"] = True
+            ss["username"] = "admin"
+            ss["role"] = "owner"
+        LANCES.clear()
+        with w._GMSDASH_LOCK:
+            w._GMSDASH_MEM.clear()
+        d = cl.get(f"/gmsdash/data?team={FR}&period=7").get_json()
+        check("/gmsdash/data sur marché français : refusé en le disant, rien de lancé",
+              d and d.get("ok") is False and "coupée" in d.get("error", "") and LANCES == [],
+              (d, LANCES))
+        d = cl.get(f"/gmsdash/data?team={TEAM}&period=7").get_json()
+        check("… JESSY, lui, est servi", d and d.get("ok") is True and LANCES, (d, LANCES))
+        d = cl.get("/gmsdash/teams").get_json()
+        check("/gmsdash/teams ne le propose plus",
+              d and d.get("ok") and [t["id"] for t in d["teams"]] == [TEAM], d)
+    finally:
+        w._load_web_users = vrai_users
+        w._gmsdash_vu = vrai_vu
+
+    print("\n— 9. la page")
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")
     check("plus de « recalcul auto toutes les 30 min · ↻ pour forcer »",
           "toutes les 30 min · ↻ pour forcer" not in src)
@@ -263,6 +301,8 @@ try:
     if html:
         scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
         check("la page porte son script", bool(scripts) and "function gdAge" in "".join(scripts))
+        check("le sélecteur ne propose plus marché français",
+              FR not in html and "<option value='tm_6a0e4739bfa0c238f20a8bf5'>" in html)
         js = TMP / "gmsdash.js"
         js.write_text("\n".join(scripts), encoding="utf-8")
         try:
