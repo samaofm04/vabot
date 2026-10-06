@@ -75,6 +75,7 @@ def remise():
     gms._LIENS_SUPPRIMES.clear()
     gms._BUDGET.update({"heures": {}, "plafond": None, "lu": True, "ecrit": 0.0, "depuis": None})
     gms._DIT_TROP.clear()
+    gms._TOUR[0] = 0             # le tour de role repart de la principale
 
 
 try:
@@ -150,9 +151,24 @@ try:
     check("le widget des VA (fond) lit sur le pool, en alternant les clés",
           [a[1] for a in APPELS] in ([D1, D2], [D2, D1]), APPELS)
     APPELS.clear()
+    gms._TOUR[0] = 0
     with gms.api_tag("podium"):
-        gms._call_tool("get_analytics_overview", {"link_ids": ["lnk_a"]})
-    check("la paie (podium) lit sur la principale", APPELS[-1][1] == MAIN, APPELS)
+        for _ in range(3):
+            gms._call_tool("get_analytics_overview", {"link_ids": ["lnk_a"]})
+    check("les autres lectures (paie comprise) tournent sur les cinq clés, principale comprise",
+          [a[1] for a in APPELS] == [MAIN, D1, D2], APPELS)
+    APPELS.clear()
+    for _ in range(300):
+        gms._call_tool("list_links", {})
+    parts = {k: sum(1 for a in APPELS if a[1] == k) for k in (MAIN, D1, D2)}
+    check("sur 300 lectures, chaque clé en porte un tiers : aucune ne se vide avant les autres",
+          set(parts.values()) == {100}, parts)
+    APPELS.clear()
+    with gms.api_tag("widget-vas"):
+        for _ in range(4):
+            gms._call_tool("list_links", {})
+    check("le fond ne touche pas la principale tant que le pool répond",
+          MAIN not in [a[1] for a in APPELS], APPELS)
     APPELS.clear()
     with gms.api_tag("dashboard"), gms.use_key(D2):
         gms._call_tool("get_analytics_overview", {"link_ids": ["lnk_a"]})
@@ -165,12 +181,14 @@ try:
     print("\n— 5. le budget de la principale : la paie garde sa réserve, le reste va au pool")
     remise()
     gms._BUDGET.update({"plafond": 10000, "heures": {gms._heure_cle(): 9990}})
+    gms._TOUR[0] = 0
     with gms.api_tag("podium"):
         gms._call_tool("get_analytics_overview", {"timeframe": "today"})
     check("au plus juste : la paie passe encore sur la principale", APPELS[-1][1] == MAIN)
+    gms._TOUR[0] = 0             # son tour tombe sur la principale
     gms._call_tool("get_analytics_overview", {"timeframe": "today"})
-    check("une lecture ordinaire part sur le pool au lieu d'être refusée",
-          APPELS[-1][1] in (D1, D2), APPELS)
+    check("une lecture ordinaire dont le tour tombe sur la principale en réserve part "
+          "sur le pool au lieu d'être refusée", APPELS[-1][1] in (D1, D2), APPELS)
     APPELS.clear()
     r = gms._call_tool("update_link", {"link_id": "lnk_a"})
     check("une écriture, elle, passe : ses paniers sont à part du budget des lectures",

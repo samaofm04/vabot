@@ -77,6 +77,8 @@ def get_dash_keys() -> list:
 
 
 _DASH_RR = [0]
+#: Le tour de role des lectures entre TOUTES les cles (_choisir_cle).
+_TOUR = [0]
 
 
 def next_dash_key() -> str:
@@ -866,10 +868,11 @@ def _choisir_cle(genre: str = "lecture", tag: Optional[str] = None):
     - Une ECRITURE part de la principale (les cles du pool n'ont jamais ecrit :
       on ne decouvre pas leurs droits sur la page d'un VA), sans budget : seule
       sa pause d'ecritures l'arrete.
-    - Une LECTURE de fond (dashboard, widget des VA, prechauffage) part du
-      pool : la principale garde sa journee pour la paie.
-    - Les autres lectures partent de la principale, ou d'une cle du pool
-      quand elle est en pause ou dans la reserve de la paie (budget_ok).
+    - Les LECTURES tournent d'une cle a l'autre : celles de fond (dashboard,
+      widget des VA, prechauffage) sur le pool, la principale en dernier
+      recours ; les autres sur les cinq cles. Une cle en pause est sautee, et
+      la principale aussi quand elle entre dans la reserve de la paie
+      (budget_ok).
     - La cle choisie par l'appelant (use_key) passe d'abord, si elle est libre.
     """
     principale = get_api_key()
@@ -887,14 +890,23 @@ def _choisir_cle(genre: str = "lecture", tag: Optional[str] = None):
                           % (heure_paris(time.time() + r), r // 60))
         return principale, ""
     pool = [k for k in get_dash_keys() if k != principale and not cle_ecartee(k)]
-    if pool:
-        with _GMS_GATE_LOCK:
-            i = _DASH_RR[0]
-            _DASH_RR[0] = (i + 1) % len(pool)
-        pool = pool[i % len(pool):] + pool[:i % len(pool)]
+    with _GMS_GATE_LOCK:
+        i = _TOUR[0]
+        _TOUR[0] = (i + 1) % 1_000_000
+
+    def tourne(cles: list) -> list:
+        if not cles:
+            return []
+        j = i % len(cles)
+        return cles[j:] + cles[:j]
     explicite = str(getattr(_KEY_LOCAL, "key", None) or "")
     ordre = [explicite] if explicite else []
-    ordre += (pool + [principale]) if PRIORITES.get(tag) == "fond" else ([principale] + pool)
+    # A TOUR DE ROLE, pour qu'aucune cle ne se vide avant les autres
+    # (proprietaire, 06/10/2026 : « tu partages les cles entre elles pour pas
+    # que ca soit consomme »). Le fond tourne sur le pool, la principale en
+    # dernier recours ; le reste tourne sur les cinq.
+    ordre += (tourne(pool) + [principale]) if PRIORITES.get(tag) == "fond" \
+        else tourne([principale] + pool)
     vus, budget_refuse = set(), False
     for k in ordre:
         if not k or k in vus:
