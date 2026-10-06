@@ -492,42 +492,67 @@ def premier_essai(identite, prises: Iterable[str]) -> int:
 # fermait rien et nos appels n'etaient pas comptes -- exactement le trou que
 # list_links_team avait, et qui entretenait le refus (voir gms.py).
 
-def _refus_quota() -> str:
+def _refus_quota(genre: str = "lecture") -> str:
+    """Pourquoi ne pas appeler maintenant, ou "". Ces appels partent de la cle
+    PRINCIPALE : c'est sa pause qui compte (gms.pause_restante() dit 0 tant
+    qu'une AUTRE cle est libre, depuis le 06/10/2026), pour ce genre d'appel
+    -- un POST de page est une ecriture, que GetMySocial compte a part."""
     try:
-        reste = int(gms.pause_restante() or 0)
+        reste = int(gms.pause_cle(gms.get_api_key(), genre) or 0)
     except Exception:                                        # noqa: BLE001
-        reste = 0
+        try:
+            reste = int(gms.pause_restante() or 0)       # un gms sans pause par cle
+        except Exception:                                    # noqa: BLE001
+            reste = 0
     if reste > 0:
+        quand = time.time() + reste
+        # l'heure de Paris (le VPS tourne en UTC) ; un gms sans heure_paris
+        # (celui des tests) garde l'heure locale plutot que de tomber
+        heure = getattr(gms, "heure_paris", None)
         return ("quota GetMySocial épuisé — reprise vers "
-                + time.strftime("%H:%M", time.localtime(time.time() + reste)))
-    try:
-        if not gms.budget_ok(_etiquette()):
-            return "budget GetMySocial du jour réservé à la paie (podium, primes) — relance plus tard"
-    except Exception:                                        # noqa: BLE001
-        pass
+                + (heure(quand) if heure else time.strftime("%H:%M", time.localtime(quand))))
+    if genre == "lecture":
+        # le budget est celui des LECTURES de la principale (gms.budget_ok)
+        try:
+            if not gms.budget_ok(_etiquette()):
+                return "budget GetMySocial du jour réservé à la paie (podium, primes) — relance plus tard"
+        except Exception:                                    # noqa: BLE001
+            pass
     return ""
 
 
-def _noter(status) -> None:
+def _noter(status, genre: str = "lecture") -> None:
     """Compte l'appel dans le budget du jour de gms (a faire DANS api_tag :
-    l'etiquette est lue au moment de noter)."""
+    l'etiquette est lue au moment de noter). Une ecriture n'y entre pas."""
     try:
-        gms._api_note(status)
+        gms._api_note(status, genre)
+    except TypeError:
+        try:
+            gms._api_note(status)                        # un gms d'avant le 06/10/2026
+        except Exception:                                    # noqa: BLE001
+            pass
     except Exception:                                        # noqa: BLE001
         pass                     # compter est un confort, jamais une panne
 
 
-def _refus_429(r) -> str:
+def _refus_429(r, genre: str = "lecture") -> str:
     texte = getattr(r, "text", "") or ""
     try:
         gms._gms_note_429()
     except Exception:                                        # noqa: BLE001
         pass
     try:
-        gms._noter_refus(texte)      # « retry after N / today: 0 » arme la pause
+        # la pause de la cle PRINCIPALE, pour ce genre : un POST refuse ne
+        # ferme pas les lectures (ni n'apprend leur plafond)
+        gms._noter_refus(texte, gms.get_api_key(), genre)
+    except TypeError:
+        try:
+            gms._noter_refus(texte)                      # un gms d'avant le 06/10/2026
+        except Exception:                                    # noqa: BLE001
+            pass
     except Exception:                                        # noqa: BLE001
         pass
-    refus = _refus_quota()
+    refus = _refus_quota(genre)
     return refus or "GetMySocial freine (429) — réessaie dans une minute"
 
 
@@ -796,7 +821,7 @@ def assurer_groupe(force: bool = False) -> Tuple[str, str]:
         g = groupe_connu()
         if g:
             return g, ""
-    refus = _refus_quota() or _refus_droits("create_group")
+    refus = _refus_quota("ecriture") or _refus_droits("create_group")
     if refus:
         # create_group refuse (droits) : list_groups + create_group repayes a
         # chaque entretien et chaque creation pour le meme refus
@@ -1010,7 +1035,7 @@ def ranger_templates(liens: Optional[List[Dict[str, Any]]] = None) -> Dict[str, 
                            f"[bases_us] groupe {NOM_GROUPE} : {len(gardes)} lien(s) qui ne sont pas des pages "
                            f"de base laissé(s) en place, ni copie de VA connue ni page rejetée : "
                            f"{', '.join(out['intrus_gardes'][:8])}{'…' if len(gardes) > 8 else ''}")
-        refus = _refus_quota() if (hors or intrus) else ""
+        refus = _refus_quota("ecriture") if (hors or intrus) else ""
         if refus:
             # la liste venait du cache : les ecritures, elles, seraient refusees
             out.update(ok=False, erreur=refus)
@@ -1310,7 +1335,7 @@ def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
         rang += 1
         if sc in prises:
             continue
-        refus = _refus_quota()
+        refus = _refus_quota("ecriture")
         if refus:
             return None, sc, refus, refusees
         cle_api = gms.get_api_key()
@@ -1327,11 +1352,11 @@ def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
                                   headers={"Authorization": f"Bearer {cle_api}"},
                                   data=champs, files=fichiers, timeout=60)
             except Exception as e:                           # noqa: BLE001
-                _noter(0)
+                _noter(0, "ecriture")
                 r = None
                 panne = f"réseau : {type(e).__name__}"
             else:
-                _noter(r.status_code)
+                _noter(r.status_code, "ecriture")
         if r is None or r.status_code >= 500:
             # la requete a pu aboutir avant la coupure (524 : Cloudflare a
             # lache, l'origine a fini) : relancer sans regarder donnait deux
@@ -1366,7 +1391,7 @@ def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
         if r.status_code == 409:
             return None, sc, f"GetMySocial refuse (409 {code}) : {msg[:200]}", refusees
         if r.status_code == 429:
-            return None, sc, _refus_429(r), refusees
+            return None, sc, _refus_429(r, "ecriture"), refusees
         if r.status_code == 403 and code == "plan_limit_reached":
             # « ne pas reessayer sans agir » (doc de l'API) : il faut liberer
             # de la place ou changer de forfait, pas boucler

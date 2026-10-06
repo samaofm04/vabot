@@ -296,8 +296,16 @@ class api_tag:
 
 # ---- Le budget du jour : ce qui empeche de vider la quota --------------
 #
-# La quota de GetMySocial est JOURNALIERE et commune aux quatre cles (elles
-# appartiennent au meme compte). Le 03/10/2026 elle est tombee a zero : le
+# CORRIGE LE 06/10/2026 : la quota n'est PAS commune aux cles. La doc de
+# l'API v3 (getmysocial.com/docs) : « Per-API-key, per-tier, rolling window »,
+# 10 000 lectures par jour et par cle, les ecritures a part. Le releve de la
+# semaine du 29/09 le confirme : la cle principale a ~10 250 appels par jour
+# (au-dessus de 10 000), les quatre cles « dash » a ~1 860 chacune. Ce budget
+# est donc celui de la cle PRINCIPALE, celle de la paie ; les autres cles
+# prennent le relais (_choisir_cle) au lieu d'attendre avec elle.
+#
+# Ce qu'on en avait cru d'abord, une quota commune aux quatre cles, vient du
+# 03/10/2026 : elle est tombee a zero, et le
 # podium, qui paie, n'a plus rien pu relever de la soiree, pendant qu'un demon
 # de prechauffage continuait a servir un tableau que personne ne regardait.
 #
@@ -311,8 +319,11 @@ class api_tag:
 # vers 07h28, pas a minuit. Compter par jour calendaire aurait decale le
 # plafond appris d'un tiers de journee.
 _BUDGET_FICHIER = Path(__file__).resolve().parent / "data" / "gms_budget.json"
-_BUDGET = {"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0}
+_BUDGET = {"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0, "depuis": None}
 _BUDGET_LOCK = _threading.Lock()
+#: Les appels de CHAQUE cle par heure, en memoire : de quoi voir la charge se
+#: repartir (etat_quota). Seule la principale a un budget sur disque.
+_APPELS_CLE: Dict[str, Dict[str, int]] = {}
 
 #: Ce que vaut chaque etiquette d'appel quand le budget baisse. Les etiquettes
 #: sont celles d'api_tag, deja posees dans le depot.
@@ -345,12 +356,25 @@ def _budget_charger() -> None:
     if _BUDGET["lu"]:
         return
     _BUDGET["lu"] = True
+    # le compteur part de maintenant, sauf s'il est relu plus bas : tant qu'il
+    # ne couvre pas vingt-quatre heures, il ne sait pas ce que GetMySocial a
+    # deja compte (_budget_noter_plafond)
+    _BUDGET["depuis"] = time.time()
     try:
         d = json.loads(_BUDGET_FICHIER.read_text(encoding="utf-8"))
     except Exception:                                        # noqa: BLE001
         return
     if not isinstance(d, dict):
         return
+    if d.get("version") != 2:
+        # avant le 06/10/2026, toutes les cles comptaient ensemble (~17 000 par
+        # jour) : relues comme celles de la principale, elles lui auraient
+        # appris un plafond de 17 000 pour une limite de 10 000
+        return
+    try:
+        _BUDGET["depuis"] = float(d.get("depuis") or _BUDGET["depuis"])
+    except (TypeError, ValueError):
+        pass
     h = d.get("heures")
     if isinstance(h, dict):
         _BUDGET["heures"] = {str(k): int(v or 0) for k, v in h.items()
@@ -367,14 +391,16 @@ def _budget_ecrire(force: bool = False) -> None:
         return
     _BUDGET["ecrit"] = t
     try:
-        safe_json.write(_BUDGET_FICHIER, {"heures": _BUDGET["heures"],
+        safe_json.write(_BUDGET_FICHIER, {"version": 2, "depuis": _BUDGET.get("depuis"),
+                                          "heures": _BUDGET["heures"],
                                           "plafond": _BUDGET["plafond"]})
     except Exception:                                        # noqa: BLE001
         pass          # compter est un confort : ca ne doit jamais casser un appel
 
 
 def appels_24h() -> int:
-    """Nos appels des vingt-quatre dernieres heures (fenetre glissante)."""
+    """Nos appels des vingt-quatre dernieres heures (fenetre glissante), sur
+    la cle principale."""
     with _BUDGET_LOCK:
         _budget_charger()
         cles = {_heure_cle(time.time() - i * 3600) for i in range(24)}
@@ -408,6 +434,16 @@ def _budget_noter_plafond(faits: int) -> None:
         print(f"[gms] refus « today: 0 » apres seulement {faits} appel(s) comptes "
               f"(moins de {PLAFOND_MINI}) : notre compteur ne couvre pas la "
               "journee de GetMySocial, plafond NON appris", flush=True)
+        return
+    depuis = _BUDGET.get("depuis")
+    if depuis and time.time() - float(depuis) < 86400:
+        # Un compteur neuf (deploiement du 06/10/2026, fichier d'avant ecarte)
+        # ignore ce que GetMySocial avait deja compte : 6 000 appels vus
+        # seraient devenus un plafond, garde pour toujours (on garde le plus
+        # bas). Il n'apprend qu'une fois sa fenetre entiere couverte.
+        print(f"[gms] refus « today: 0 » a {faits} appels comptes, mais le compteur "
+              f"n'a que {int((time.time() - float(depuis)) // 3600)} h : plafond NON appris",
+              flush=True)
         return
     with _BUDGET_LOCK:
         _budget_charger()
@@ -453,11 +489,25 @@ def budget_ok(tag: Optional[str] = None) -> bool:
     return reste > b["reserve_paie"]
 
 
-def _api_note(status):
+def _api_note(status, genre: str = "lecture"):
+    cle = _effective_key()
     try:
         _API_LOG.append((time.time(), getattr(_API_LOCAL, "tag", None) or "autres", int(status or 0)))
     except Exception:
         pass
+    try:
+        with _BUDGET_LOCK:
+            h = _APPELS_CLE.setdefault(cle, {})
+            k = _heure_cle()
+            h[k] = h.get(k, 0) + 1
+            for vieux in sorted(h)[:-25]:
+                h.pop(vieux, None)
+    except Exception:
+        pass
+    if cle != get_api_key() or genre != "lecture":
+        # le budget est celui des LECTURES de la principale (voir plus haut) :
+        # les ecritures ont leurs paniers a elles chez GetMySocial
+        return
     try:
         with _BUDGET_LOCK:
             _budget_charger()
@@ -519,13 +569,10 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
     recrée et on réessaie UNE fois."""
     if not get_api_key():
         return {"ok": False, "error": "Clé API GetMySocial non configurée"}
-    if not budget_ok():
-        # Le budget du jour descend : seule la paie passe encore. Dit une fois
-        # par minute au plus, sinon le journal devient illisible.
-        _budget_dire_refus()
-        return {"ok": False, "error": "Budget GetMySocial du jour reserve a la "
-                                      "paie (podium, primes) — relance plus tard"}
-    _reste = pause_restante()
+    # La cle et le budget sont choisis par _call_tool (_choisir_cle) : la
+    # principale garde sa journee pour la paie, une cle en pause passe la main.
+    genre = genre_outil(tool_name)
+    _reste = pause_cle(_effective_key(), genre)
     if _reste > 0:
         # « Do not retry before then » : on n'ouvre meme pas la connexion.
         # Continuer a cogner sur une porte fermee a fait exactement ca toute
@@ -533,9 +580,7 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
         # appels, tous refuses, qui ne faisaient qu'entretenir le refus.
         return {"ok": False,
                 "error": "Quota GetMySocial epuise — reprise vers %s (%d min)"
-                         % (time.strftime("%H:%M",
-                                          time.localtime(time.time() + _reste)),
-                            _reste // 60)}
+                         % (heure_paris(time.time() + _reste), _reste // 60)}
     s = _get_session()
     if s is None:
         return {"ok": False, "error": "Impossible d'initialiser la session MCP"}
@@ -549,9 +594,9 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
     _gms_gate()
     try:
         r = s.post(MCP_URL, json=body, timeout=_to)
-        _api_note(r.status_code)
+        _api_note(r.status_code, genre)
     except Exception as e:
-        _api_note(0)
+        _api_note(0, genre)
         if _retry:  # session peut-être morte -> on la recrée et on réessaie
             _reset_session()
             return _call_tool_brut(tool_name, args, _retry=False, _429=_429)
@@ -561,10 +606,10 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
         # Depuis une PAGE : 1 seul retry court — une page qui attend 30 s par appel
         # gèle un thread du serveur web (cause du 524 « site down »).
         _gms_note_429()
-        _noter_refus(r.text or "")
-        if pause_restante() > 0:
-            # Budget du jour epuise : ni sommeil, ni reprise. Le message de
-            # l'API porte l'heure de retour, on la rend telle quelle.
+        _noter_refus(r.text or "", _effective_key(), genre)
+        if pause_cle(_effective_key(), genre) > 0:
+            # Budget du jour de CETTE cle epuise : ni sommeil, ni reprise ici.
+            # _call_tool passe a une autre cle libre, s'il y en a une.
             return {"ok": False, "error": (r.text or "")[:300]}
         _max, _sleeps = (3, (2.0, 5.0, 9.0)) if _gms_is_bulk() else (1, (1.0,))
         if _429 < _max:
@@ -680,16 +725,47 @@ _REPLIS = {"n": 0, "quand": 0.0}    # dashboard reparti sur la cle de paie
 # Cent dix-sept requetes disponibles cette minute-la, et ZERO pour la
 # journee. Ce n'est pas un pic a lisser, c'est un budget epuise pour sept
 # heures. Reessayer ne fait que garder la porte fermee : on obeit.
-_PAUSE = {"jusqu": 0.0, "raison": "", "restant_jour": None}
+#
+# PAR CLE, ET PAR GENRE D'APPEL (06/10/2026). La pause etait unique : la cle
+# principale, a 10 250 appels pour une limite de 10 000, fermait chaque matin
+# les quatre autres avec elle, qui avaient encore ~8 000 lectures chacune.
+# Et un refus de LECTURE fermait aussi les ECRITURES, que GetMySocial compte a
+# part : a 8h06, « Generer le lien » d'un VA Lola a echoue pour rien.
+_PAUSES: Dict[Any, Dict[str, Any]] = {}      # (cle, genre) -> {jusqu, raison, restant_jour}
 
 
-def _noter_refus(message: str) -> None:
-    """Lit « retry after N » et « today: N » dans un refus, et se tait jusque-la.
+def genre_outil(nom: str) -> str:
+    """« lecture » (list_*, get_*, _ping) ou « ecriture » : GetMySocial ne
+    les compte pas dans le meme panier."""
+    return "lecture" if str(nom or "").startswith(("list_", "get_", "search_", "_ping")) \
+        else "ecriture"
+
+
+def _cles_compte() -> list:
+    """Les cles du compte, la principale d'abord."""
+    out = []
+    for k in [get_api_key()] + get_dash_keys():
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
+def pause_cle(cle: str, genre: str = "lecture") -> int:
+    """Secondes avant de rappeler GetMySocial avec CETTE cle, pour ce genre."""
+    with _SANTE_LOCK:
+        j = (_PAUSES.get((str(cle or ""), genre)) or {}).get("jusqu") or 0.0
+    return max(0, int(j - time.time())) if j else 0
+
+
+def _noter_refus(message: str, cle: Optional[str] = None, genre: str = "lecture") -> None:
+    """Lit « retry after N » et « today: N » dans un refus, et se tait jusque-la
+    -- pour CETTE cle et ce genre d'appel, les autres continuent.
 
     Seules les longues pauses arment le disjoncteur : un « retry after 17s »
     est un pic de debit, que le backoff existant absorbe tres bien. Au-dela de
     deux minutes, c'est le budget du jour, et il n'y a rien a attendre.
     """
+    cle = str(cle if cle is not None else _effective_key())
     txt = str(message or "")
     m = _re_quota.search(txt)
     if not m:
@@ -708,32 +784,61 @@ def _noter_refus(message: str) -> None:
     if secondes < 120:
         return
     with _SANTE_LOCK:
-        _PAUSE["jusqu"] = time.time() + min(secondes, 86400)
-        _PAUSE["raison"] = txt[:200]
-        _PAUSE["restant_jour"] = reste
-    if reste == 0:
+        _PAUSES[(cle, genre)] = {"jusqu": time.time() + min(secondes, 86400),
+                                 "raison": txt[:200], "restant_jour": reste,
+                                 "depuis": time.time()}
+    print(f"[gms] cle {_masque(cle)} en pause ({genre}) pour {secondes // 60} min : "
+          f"{'la principale' if cle == get_api_key() else 'une cle du pool'}, "
+          "les autres prennent le relais", flush=True)
+    if reste == 0 and cle == get_api_key() and genre == "lecture":
         # « today: 0 » : ce qu'on avait consomme dans la fenetre glissante EST
         # le plafond. C'est la seule occasion de l'apprendre -- un appel qui
         # passe ne dit pas combien il en reste.
         _budget_noter_plafond(appels_24h())
 
 
-def pause_restante() -> int:
-    """Secondes avant de pouvoir rappeler. 0 = la voie est libre."""
-    with _SANTE_LOCK:
-        j = _PAUSE["jusqu"]
-    return max(0, int(j - time.time())) if j else 0
+def pause_restante(genre: str = "lecture") -> int:
+    """Secondes avant de pouvoir rappeler GetMySocial. 0 = une voie est libre.
+
+    Une lecture passe par n'importe quelle cle du compte : il suffit qu'UNE
+    soit libre. Une ecriture ne part que de la principale (_choisir_cle)."""
+    cles = [get_api_key()] if genre == "ecriture" else _cles_compte()
+    utiles = [k for k in cles if k == get_api_key() or not cle_ecartee(k)]
+    if not utiles:
+        return 0
+    return min(pause_cle(k, genre) for k in utiles)
+
+
+def heure_paris(ts: float) -> str:
+    """« 09:33 », l'heure de Paris d'un instant. Le VPS tourne en UTC :
+    time.localtime y disait « reprise vers 07:33 » d'une quota que le
+    propriétaire voit revenir à 09h33 (06/10/2026)."""
+    try:
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        return _dt.datetime.fromtimestamp(ts, ZoneInfo("Europe/Paris")).strftime("%H:%M")
+    except Exception:                                        # noqa: BLE001
+        return time.strftime("%H:%M", time.localtime(ts))
 
 
 def etat_quota() -> dict:
-    """De quoi l'AFFICHER : combien de temps encore, et ce qu'il restait."""
+    """De quoi l'AFFICHER : combien de temps encore (0 tant qu'une cle est
+    libre), ce qu'il restait, et la charge de chaque cle."""
     reste = pause_restante()
+    principale = get_api_key()
     with _SANTE_LOCK:
-        raison, jour = _PAUSE["raison"], _PAUSE["restant_jour"]
+        p = dict(_PAUSES.get((principale, "lecture")) or {})
+    heures = {_heure_cle(time.time() - i * 3600) for i in range(24)}
+    with _BUDGET_LOCK:
+        par_cle = {k: sum(v for h, v in (_APPELS_CLE.get(k) or {}).items() if h in heures)
+                   for k in _cles_compte()}
     out = {"pause_s": reste,
-           "reprise": time.strftime("%H:%M", time.localtime(time.time() + reste))
-                      if reste else "",
-           "restant_jour": jour, "raison": raison}
+           "reprise": heure_paris(time.time() + reste) if reste else "",
+           "restant_jour": p.get("restant_jour"), "raison": p.get("raison") or "",
+           "cles": [{"cle": _masque(k), "principale": k == principale,
+                     "lecture_s": pause_cle(k), "ecriture_s": pause_cle(k, "ecriture"),
+                     "appels_24h_memoire": par_cle.get(k, 0), "ecartee": cle_ecartee(k)}
+                    for k in _cles_compte()]}
     try:
         out["budget"] = budget()
     except Exception:                                        # noqa: BLE001
@@ -741,12 +846,73 @@ def etat_quota() -> dict:
     return out
 
 
-def _quota_libere() -> None:
-    """Un appel qui passe prouve que la pause est finie."""
+def _quota_libere(cle: Optional[str] = None, genre: str = "lecture",
+                  parti: Optional[float] = None) -> None:
+    """Un appel qui passe prouve que la pause de CETTE cle est finie -- si
+    elle a ete posee AVANT son depart (`parti`). Sinon, c'est un appel deja
+    en vol qui revient : la pause qu'un autre fil vient de poser tient."""
+    k = (str(cle if cle is not None else _effective_key()), genre)
     with _SANTE_LOCK:
-        if _PAUSE["jusqu"]:
-            _PAUSE["jusqu"] = 0.0
-            _PAUSE["raison"] = ""
+        e = _PAUSES.get(k)
+        if e and (parti is None or float(e.get("depuis") or 0) <= parti):
+            _PAUSES.pop(k, None)
+
+
+def _choisir_cle(genre: str = "lecture", tag: Optional[str] = None):
+    """(cle, "") pour cet appel, ou (None, pourquoi). Le 06/10/2026, la
+    principale portait seule ~10 250 appels par jour, sa limite etant de
+    10 000, quand les quatre « dash » en portaient ~1 860 chacune.
+
+    - Une ECRITURE part de la principale (les cles du pool n'ont jamais ecrit :
+      on ne decouvre pas leurs droits sur la page d'un VA), sans budget : seule
+      sa pause d'ecritures l'arrete.
+    - Une LECTURE de fond (dashboard, widget des VA, prechauffage) part du
+      pool : la principale garde sa journee pour la paie.
+    - Les autres lectures partent de la principale, ou d'une cle du pool
+      quand elle est en pause ou dans la reserve de la paie (budget_ok).
+    - La cle choisie par l'appelant (use_key) passe d'abord, si elle est libre.
+    """
+    principale = get_api_key()
+    if not principale:
+        return None, "Clé API GetMySocial non configurée"
+    tag = str(tag or getattr(_API_LOCAL, "tag", None) or "autres")
+    if genre == "ecriture":
+        # Les ecritures ont leurs propres paniers chez GetMySocial : le budget
+        # (des LECTURES de la principale) ne les retient pas. Sans ca, la
+        # generation du lien d'un VA restait refusee « pour la paie » quand
+        # les lectures de la principale approchaient de leur limite.
+        if pause_cle(principale, "ecriture"):
+            r = pause_cle(principale, "ecriture")
+            return None, ("Quota GetMySocial epuise (ecritures) — reprise vers %s (%d min)"
+                          % (heure_paris(time.time() + r), r // 60))
+        return principale, ""
+    pool = [k for k in get_dash_keys() if k != principale and not cle_ecartee(k)]
+    if pool:
+        with _GMS_GATE_LOCK:
+            i = _DASH_RR[0]
+            _DASH_RR[0] = (i + 1) % len(pool)
+        pool = pool[i % len(pool):] + pool[:i % len(pool)]
+    explicite = str(getattr(_KEY_LOCAL, "key", None) or "")
+    ordre = [explicite] if explicite else []
+    ordre += (pool + [principale]) if PRIORITES.get(tag) == "fond" else ([principale] + pool)
+    vus, budget_refuse = set(), False
+    for k in ordre:
+        if not k or k in vus:
+            continue
+        vus.add(k)
+        if pause_cle(k, "lecture"):
+            continue
+        if k == principale and not budget_ok(tag):
+            budget_refuse = True
+            continue
+        return k, ""
+    if budget_refuse and not pause_cle(principale, "lecture"):
+        _budget_dire_refus()
+        return None, ("Budget GetMySocial du jour reserve a la paie (podium, primes) "
+                      "— relance plus tard")
+    r = pause_restante("lecture")
+    return None, ("Quota GetMySocial epuise — reprise vers %s (%d min)"
+                  % (heure_paris(time.time() + r), r // 60))
 
 
 def replis_principale() -> dict:
@@ -791,19 +957,147 @@ def sante_cles() -> list:
     return out
 
 
+# ── Les liens d'un appel : jamais vides, jamais supprimes, jamais trop ──
+# Releve de la semaine du 29/09/2026 : ~1 830 appels list_recent_visitors par
+# jour echouaient et comptaient quand meme dans la quota -- ~1 395 en 400
+# invalid_request, ~437 en 404 link_not_found (liens supprimes). Le 400 n'etait
+# pas un identifiant vide : GetMySocial refuse PLUS DE 20 LIENS par appel de
+# statistiques (verifie le 06/10 : 20 passent, 21 rendent « link_id must
+# contain at least one value », malgre la doc qui dit 200), et le widget des VA
+# envoyait tout le groupe d'une model.
+_LIENS_SUPPRIMES: Dict[Any, float] = {}     # lnk_* ou frozenset(lnk_*) -> jusqu'a quand
+DUREE_LIEN_SUPPRIME = 6 * 3600              # un lien supprime ne revient pas ; un doute, 6 h
+MAX_LIENS_STATS = 20
+#: Les seuls appels ou un lien supprime est oublie : les STATISTIQUES. Une
+#: copie de lien toute neuve peut repondre « link_not_found » une seconde
+#: (get_link juste apres duplicate_link) : l'oublier six heures bloquerait la
+#: generation du lien d'un VA. Les identifiants VIDES, eux, ne partent jamais.
+_OUTILS_STATS = {"list_recent_visitors", "get_analytics_overview", "get_time_series",
+                 "get_link_metrics"}
+_RE_LNK = re.compile(r"\blnk_[0-9A-Za-z]+")
+_DIT_TROP = {}                              # outil -> dernier « plus de 20 liens » dit
+
+
+def _liens_a_lire(tool_name: str, args: Optional[dict]):
+    """(args nettoyes, "") ou (None, pourquoi ne PAS appeler).
+
+    - Un identifiant vide n'est jamais envoye ; s'il ne reste aucun lien, pas
+      d'appel (une liste vide voudrait dire « tout le compte »).
+    - Statistiques : plus de MAX_LIENS_STATS liens, pas d'appel (GetMySocial
+      refuse, et le refus compterait) ; un lien connu comme supprime est
+      RETIRE pour le travail de fond (widget, dashboard), mais REFUSE, nomme,
+      pour tout le reste : un total de paie calcule sans un lien serait un
+      chiffre faux rendu comme juste."""
+    if not isinstance(args, dict) or ("link_id" not in args and "link_ids" not in args):
+        return args, ""
+    a = dict(args)
+    seul = "link_ids" not in a
+    bruts: List[Any] = []
+    if "link_ids" in a:
+        v = a.pop("link_ids")
+        bruts += v.split(",") if isinstance(v, str) else list(v or [])
+    if "link_id" in a:
+        bruts.append(a.pop("link_id"))
+    stats = tool_name in _OUTILS_STATS
+    maintenant = time.time()
+    with _SANTE_LOCK:
+        for k in [k for k, t in _LIENS_SUPPRIMES.items() if t <= maintenant]:
+            _LIENS_SUPPRIMES.pop(k, None)
+        morts = set(_LIENS_SUPPRIMES) if stats else set()
+    ids: List[str] = []
+    for x in bruts:
+        x = str(x or "").strip()
+        if not x:
+            continue
+        if not x.startswith("lnk_") and re.fullmatch(r"[0-9a-f]{24}", x):
+            x = "lnk_" + x
+        if x not in ids:
+            ids.append(x)
+    if not ids:
+        return None, (f"{tool_name} : aucun lien à lire (identifiants vides) — pas d'appel")
+    if stats:
+        if frozenset(ids) in morts:
+            return None, (f"{tool_name} : lot de liens déjà refusé (link_not_found) — "
+                          "pas d'appel")
+        supprimes = [x for x in ids if x in morts]
+        if supprimes:
+            if PRIORITES.get(str(getattr(_API_LOCAL, "tag", None) or "")) != "fond":
+                return None, (f"{tool_name} : lien(s) supprimé(s) chez GetMySocial : "
+                              + ", ".join(supprimes[:5]) + " — pas d'appel, total incomplet")
+            ids = [x for x in ids if x not in morts]
+            if not ids:
+                return None, f"{tool_name} : tous ces liens sont supprimés — pas d'appel"
+        if len(ids) > MAX_LIENS_STATS:
+            if time.time() - _DIT_TROP.get(tool_name, 0.0) > 600:
+                _DIT_TROP[tool_name] = time.time()
+                print(f"[gms] {tool_name} : {len(ids)} liens dans un appel, GetMySocial en "
+                      f"refuse plus de {MAX_LIENS_STATS} (400) — pas d'appel "
+                      f"(etiquette « {getattr(_API_LOCAL, 'tag', None) or 'autres'} »)",
+                      flush=True)
+            return None, (f"{tool_name} : {len(ids)} liens, GetMySocial en refuse plus de "
+                          f"{MAX_LIENS_STATS} par appel — pas d'appel")
+    if seul and len(ids) == 1:
+        a["link_id"] = ids[0]
+    else:
+        a["link_ids"] = ids
+    return a, ""
+
+
+def _noter_liens_supprimes(tool_name: str, args: Optional[dict], res: Dict[str, Any]) -> None:
+    """Un 404 link_not_found sur une statistique : le lien nomme (ou, a
+    defaut, le lot entier) n'y sera plus demande pendant DUREE_LIEN_SUPPRIME."""
+    err = str(res.get("error") or "")
+    if (tool_name not in _OUTILS_STATS or res.get("ok") or "link_not_found" not in err
+            or not isinstance(args, dict)):
+        return
+    ids = ([args["link_id"]] if args.get("link_id") else []) + list(args.get("link_ids") or [])
+    nommes = [x for x in _RE_LNK.findall(err) if x in ids]
+    cibles = nommes or (ids if len(ids) == 1 else [frozenset(ids)])
+    jusqu = time.time() + DUREE_LIEN_SUPPRIME
+    with _SANTE_LOCK:
+        neufs = [c for c in cibles if c not in _LIENS_SUPPRIMES]
+        for c in cibles:
+            _LIENS_SUPPRIMES[c] = jusqu
+    if neufs:
+        print(f"[gms] lien(s) introuvable(s) chez GetMySocial, plus demandé(s) pendant "
+              f"{DUREE_LIEN_SUPPRIME // 3600} h : "
+              + ", ".join(sorted(str(c if isinstance(c, str) else f"lot de {len(c)}")
+                                 for c in neufs))[:300], flush=True)
+
+
 def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
                _429: int = 0) -> Dict[str, Any]:
-    """Le vrai appel, plus la tenue du registre de sante de la cle employee."""
-    cle = _effective_key()
-    res = _call_tool_brut(tool_name, args, _retry=_retry, _429=_429)
+    """Le vrai appel : la cle choisie (_choisir_cle), les liens nettoyes, et la
+    tenue du registre de sante de la cle employee. Une cle dont la journee
+    vient de finir passe la main a une autre cle libre du compte."""
+    genre = genre_outil(tool_name)
+    args, pourquoi = _liens_a_lire(tool_name, args)
+    if pourquoi:
+        return {"ok": False, "error": pourquoi}
+    res: Dict[str, Any] = {"ok": False, "error": "aucune cle"}
+    for _essai in range(max(1, len(_cles_compte()))):
+        cle, pourquoi = _choisir_cle(genre)
+        if not cle:
+            return {"ok": False, "error": pourquoi}
+        parti = time.time()
+        with use_key(cle):
+            res = _call_tool_brut(tool_name, args, _retry=_retry, _429=_429)
+        try:
+            if res.get("ok"):
+                _quota_libere(cle, genre, parti)
+            elif not pause_cle(cle, genre):
+                # deja notee par _call_tool_brut sur un HTTP 429 ; ici, le refus
+                # rendu dans la reponse (« Error 429 ... today: 0 »)
+                _noter_refus(res.get("error") or "", cle, genre)
+            noter_cle(cle, bool(res.get("ok")), res.get("error") or "")
+        except Exception:
+            pass                 # l'instrumentation ne doit jamais casser l'appel
+        if res.get("ok") or not pause_cle(cle, genre):
+            break
     try:
-        if res.get("ok"):
-            _quota_libere()
-        else:
-            _noter_refus(res.get("error") or "")
-        noter_cle(cle, bool(res.get("ok")), res.get("error") or "")
+        _noter_liens_supprimes(tool_name, args, res)
     except Exception:
-        pass                     # l'instrumentation ne doit jamais casser l'appel
+        pass
     return res
 
 
@@ -2068,22 +2362,24 @@ def reset_va_counter(team_id: Optional[str], folder: str):
 def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]:
     """List_all_links scopé à un team via API publique v3. Cache 2 min par team
     (mêmes liens re-demandés plusieurs fois par render de page sinon)."""
-    api_key = _effective_key()
-    if not api_key:
+    if not get_api_key():
         return {"ok": False, "error": "API key absente"}
-    if not budget_ok():
-        _budget_dire_refus()
-        return {"ok": False, "error": "Budget GetMySocial du jour reserve a la paie"}
     # LE SEUL CHEMIN QUI TAPAIT SUR UNE PORTE FERMEE. Tout le reste passe par
     # _call_tool_brut, qui refuse d'ouvrir la connexion pendant une pause ;
     # celui-ci, non — et comme il ne notait pas non plus le refus, un 429 de
     # quota journalier ne fermait jamais rien ici. Il entretenait le refus.
+    # (Depuis le 06/10/2026, la pause est par cle : celle-ci n'arrete tout que
+    # si AUCUNE cle du compte n'est libre.)
     _reste = pause_restante()
     if _reste > 0:
         return {"ok": False,
                 "error": "Quota GetMySocial epuise — reprise vers %s (%d min)"
-                         % (time.strftime("%H:%M", time.localtime(time.time() + _reste)),
-                            _reste // 60)}
+                         % (heure_paris(time.time() + _reste), _reste // 60)}
+    # la cle : la principale, ou une autre quand elle est en pause ou dans la
+    # reserve de la paie -- le budget est consulte la (_choisir_cle)
+    api_key, pourquoi = _choisir_cle("lecture")
+    if not api_key:
+        return {"ok": False, "error": pourquoi}
     tid = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
     c = _LINKS_TEAM_CACHE.get(tid)
     if (not force_refresh and c and c.get("data") is not None
@@ -2097,26 +2393,41 @@ def list_links_team(team_id: str, force_refresh: bool = False) -> Dict[str, Any]
             url += f"&cursor={cursor}"
         r = None
         _sleeps = (2.0, 6.0, 12.0) if _gms_is_bulk() else (1.0,)   # pages : 1 retry court
-        for _try in range(len(_sleeps) + 1):
-            _gms_gate()
-            try:
-                r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
-                _api_note(r.status_code)
-            except Exception as e:
-                _api_note(0)
-                return {"ok": False, "error": f"reseau: {e}"}
-            if r.status_code == 429:            # rate-limit -> on souffle puis on retente
-                _gms_note_429()
+        relais = 0
+        _try = 0
+        while _try <= len(_sleeps):
+            parti = time.time()
+            with use_key(api_key):
+                _gms_gate()
+                try:
+                    r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"},
+                                     timeout=20)
+                    _api_note(r.status_code)
+                except Exception as e:
+                    _api_note(0)
+                    return {"ok": False, "error": f"reseau: {e}"}
+                if r.status_code == 429:            # rate-limit -> on souffle puis on retente
+                    _gms_note_429()
+            if r.status_code == 429:
                 # Le corps porte « today: 0 » quand c'est le budget du JOUR qui
-                # est fini : le noter arme la pause pour tout le monde. Sans
-                # ca, cette fonction etait la seule a ne jamais la declencher.
-                _noter_refus(r.text or "")
-                if pause_restante() > 0:
+                # est fini : le noter arme la pause de CETTE cle. Sans ca, cette
+                # fonction etait la seule a ne jamais la declencher.
+                _noter_refus(r.text or "", api_key, "lecture")
+                if pause_cle(api_key, "lecture") > 0:
+                    # sa journee est finie : une autre cle du compte reprend la
+                    # meme page, sans attendre (une fois par cle au plus)
+                    autre, _ = _choisir_cle("lecture")
+                    if autre and autre != api_key and relais < len(_cles_compte()):
+                        api_key, relais = autre, relais + 1
+                        continue
                     return {"ok": False, "error": "Quota GetMySocial epuise "
                                                   "pour aujourd hui"}
                 if _try < len(_sleeps):
                     time.sleep(_sleeps[_try])
+                _try += 1
                 continue
+            if r.status_code == 200:
+                _quota_libere(api_key, "lecture", parti)
             break
         if r is None or r.status_code != 200:
             return {"ok": False, "error": f"HTTP {r.status_code if r is not None else '?'}"}

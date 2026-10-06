@@ -36273,8 +36273,10 @@ try:
               _rQ.get("ok") is False and "Quota" in str(_rQ.get("error")))
     finally:
         _gQ.pause_restante = _vraiP
+    # depuis le 06/10/2026 la pause est PAR CLE (tests_gms_cles.py)
     check("liste des liens : un 429 arme enfin le disjoncteur",
-          "_noter_refus(r.text or \"\")" in _srcG.split("def list_links_team")[1][:4000])
+          '_noter_refus(r.text or "", api_key, "lecture")'
+          in _srcG.split("def list_links_team")[1][:4000])
     # la liste des espaces : un cache, et un echec qui ne se met PAS en cache
     _gQ._TEAMS_CACHE.update({"ts": 0.0, "data": None})
     _vraiC = _gQ._call_tool
@@ -36437,7 +36439,9 @@ try:
     _vraiF = _gB._BUDGET_FICHIER
     _tmpB = _tpB.mkdtemp(prefix="gms_budget_")
     _gB._BUDGET_FICHIER = _plB.Path(_tmpB) / "gms_budget.json"
-    _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": True, "ecrit": 0.0})
+    # « depuis » None : un compteur sans date de depart, ce que ces controles
+    # ont toujours suppose ; la regle des 24 h a ses tests (tests_gms_cles.py)
+    _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": True, "ecrit": 0.0, "depuis": None})
     try:
         check("sans plafond connu, rien n est refuse (on ne devine pas un budget)",
               _gB.budget()["plafond"] is None and _gB.budget_ok("dashboard") is True
@@ -36495,12 +36499,17 @@ try:
         check("etat_quota montre le budget", "budget" in _gB.etat_quota())
     finally:
         _gB._BUDGET_FICHIER = _vraiF
-        _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0})
+        _gB._BUDGET.update({"heures": {}, "plafond": None, "lu": False, "ecrit": 0.0,
+                            "depuis": None})
         _shB.rmtree(_tmpB, ignore_errors=True)
 
     _srcB = _plB.Path("gms.py").read_text(encoding="utf-8")
+    # depuis le 06/10/2026 : la cle de chaque appel est choisie par
+    # _choisir_cle, qui consulte le budget de la principale (tests_gms_cles.py)
     check("les deux chemins qui partent vraiment consultent le budget",
-          _srcB.count("if not budget_ok():") == 2)
+          "if k == principale and not budget_ok(tag):" in _srcB
+          and "_choisir_cle(genre)" in _srcB.split("def _call_tool(")[1][:2000]
+          and '_choisir_cle("lecture")' in _srcB.split("def list_links_team")[1][:2000])
     check("le podium porte l etiquette qui lui garde une reserve",
           _plB.Path("podium_discord.py").read_text(encoding="utf-8")
           .count('_etiquette("podium")') >= 3

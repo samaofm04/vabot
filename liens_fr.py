@@ -83,23 +83,70 @@ def sans_limite(uid) -> bool:
         return False
 
 
-def _liens_equipe(force: bool = False) -> List[Dict[str, Any]]:
+class GmsIndisponible(RuntimeError):
+    """La liste de l'equipe n'a pas pu etre lue (pause de quota, budget,
+    reseau). Ce n'est PAS une equipe vide."""
+
+
+def _liens_equipe(force: bool = False, strict: bool = False) -> List[Dict[str, Any]]:
     """Les liens de l'equipe, gardes 10 min : le quota GetMySocial est
-    partage avec le reste du site."""
+    partage avec le reste du site.
+
+    UNE LISTE ILLISIBLE N'EST PAS UNE EQUIPE VIDE. Le 06/10/2026 a 8h06, la
+    quota du jour etait epuisee jusqu'a 9h33 : la liste revenait vide, elle
+    etait gardee dix minutes comme telle, et « Generer le lien » repondait
+    « pas de lien de base lola_bby » -- alors que quatre liens Lola en avaient
+    deja ete copies. Un echec n'est plus garde ; `strict` le fait lever
+    (GmsIndisponible), pour que l'appelant dise la vraie raison."""
     import gms
     if force or time.time() - _CACHE_LIENS["t"] > 600:
         r = gms.list_links_team(EQUIPE)
+        if not isinstance(r, (dict, list)) or (isinstance(r, dict) and r.get("ok") is False):
+            raison = str((r or {}).get("error") if isinstance(r, dict) else r or "") \
+                or "liste illisible"
+            print(f"[liens_fr] liste de l'equipe VA IG DISCORD illisible : {raison}", flush=True)
+            if strict:
+                raise GmsIndisponible(raison)
+            return []
         ls = r.get("links") if isinstance(r, dict) else r
         _CACHE_LIENS.update(t=time.time(), liens=list(ls or []))
     return _CACHE_LIENS["liens"]
 
 
+def gms_indisponible() -> str:
+    """Pourquoi GetMySocial ne peut pas servir MAINTENANT (« GetMySocial est
+    en pause (quota du jour épuisé) jusque vers 09h33 »), ou "".
+
+    Dit AVANT de commencer : une copie de lien coute une dizaine d'appels, et
+    un tracking MyPuls cree pour rien ne s'efface pas. La generation LIT (la
+    liste, le lien de base : n'importe quelle cle du compte) et ECRIT (la
+    copie, ses boutons : la cle principale, qui a ses quotas d'ecriture a
+    part) : les deux pauses comptent, pas le budget des lectures."""
+    try:
+        import gms
+        for genre, quoi in (("ecriture", "les créations de liens GetMySocial sont en pause"),
+                            ("lecture", "GetMySocial est en pause")):
+            try:
+                reste = int(gms.pause_restante(genre) or 0)
+            except TypeError:                # un gms d'avant la pause par cle
+                reste = int(gms.pause_restante() or 0) if genre == "lecture" else 0
+            if reste > 0:
+                return (f"{quoi} (quota du jour épuisé) jusque vers "
+                        + gms.heure_paris(time.time() + reste).replace(":", "h"))
+    except Exception:                                        # noqa: BLE001
+        return ""
+    return ""
+
+
 def lien_de_base(model: str) -> str:
     """L'id du lien de base de la model dans l'equipe : adresse « <model>_bby »
-    (ou qui commence ainsi), sinon nomme « <Model> 1 ». "" s'il n'y est pas."""
+    (ou qui commence ainsi), sinon nomme « <Model> 1 ». "" s'il n'y est pas ;
+    GmsIndisponible si la liste n'a pas pu etre lue."""
     nom = MODELS.get(model, {}).get("nom", model)
     for force in (False, True):
-        for l in _liens_equipe(force):
+        # relue pour de bon, une liste illisible leve GmsIndisponible : jamais
+        # « pas de lien de base » sur une panne
+        for l in _liens_equipe(force, strict=force):
             sc = str(l.get("shortcode") or "").lower()
             dn = str(l.get("display_name") or "").strip().lower()
             if sc == f"{model}_bby" or sc.startswith(f"{model}_bby") or dn == f"{nom.lower()} 1":
@@ -173,7 +220,8 @@ def model_du_nom(display_name: str) -> str:
     return next((k for k, c in MODELS.items() if c["nom"].lower() == m.group(1).lower()), "")
 
 
-def liens_gms_de(pseudo: str, model: str = "", force: bool = True) -> List[Dict[str, Any]]:
+def liens_gms_de(pseudo: str, model: str = "", force: bool = True,
+                 strict: bool = False) -> List[Dict[str, Any]]:
     """Les liens FR d'un VA retrouves A LEUR NOM dans l'equipe (« Amelia VA 3
     @pseudo ») : filet quand le registre ne les a pas. Le 03/10/2026,
     /resetlien n'y a pas trouve le lien de Mario cree une demi-heure plus tot
@@ -182,7 +230,7 @@ def liens_gms_de(pseudo: str, model: str = "", force: bool = True) -> List[Dict[
     if not pseudo:
         return []
     out = []
-    for l in _liens_equipe(force):
+    for l in _liens_equipe(force, strict=strict):
         dn = str(l.get("display_name") or "").strip()
         if not dn.lower().endswith(f" @{pseudo}"):
             continue
@@ -205,9 +253,13 @@ def _reparer(uid, model: str, entree: Dict[str, Any]):
     import gms
     cfg = MODELS.get(model) or {}
     urls = dict(entree.get("trackings") or {})
-    gabarit, base = lien_de_base(model), None
+    # le lien de base n'est lu que s'il sert : un lien complet ne doit rien
+    # demander a GetMySocial (pendant une pause de quota, « deja un lien »
+    # serait sinon venu avec un « reparation impossible » pour rien)
+    gabarit, base = "", None
     attendues = entree.get("plateformes")
     if attendues is None:
+        gabarit = lien_de_base(model)
         if not gabarit:
             return entree, False
         base = lire_lien(gabarit)
@@ -241,7 +293,7 @@ def _reparer(uid, model: str, entree: Dict[str, Any]):
     etaient_ok = boutons_ok = entree.get("boutons_a_jour")
     if nouveaux or boutons_ok is False:
         try:
-            base = base or lire_lien(gabarit)
+            base = base or lire_lien(gabarit or lien_de_base(model))
             copie = lire_lien(entree["link_id"])
             # la version de la COPIE quand elle a encore le bouton (ses images),
             # celle du lien de base pour un bouton qui avait ete retire
@@ -602,11 +654,25 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                 deja, change = {**deja, "soucis": [f"réparation impossible : {type(e).__name__}: {e}"]}, False
             if change or not sans_limite(uid):
                 return {"ok": True, "deja": True, "vient_d_etre_repare": change, **deja}
+        # Tout ce qui suit passe par GetMySocial : en pause, rien ne peut se
+        # faire, et le dire tel quel vaut mieux qu'une erreur qui accuse le
+        # lien de base (06/10/2026, 8h06 : « pas de lien de base lola_bby »)
+        pourquoi = gms_indisponible()
+        if pourquoi:
+            return {"ok": False, "reessayer": True,
+                    "erreur": f"{pourquoi} : rien n'a été créé, à refaire après cette heure-là."}
         if not sans_limite(uid):
             # absent du registre mais present dans GetMySocial a son nom : on le
             # reprend (et le registre est repare) au lieu d'un doublon -- avec
             # des trackings MyPuls en plus, qui ne s'effacent pas
-            trouve = next(iter(liens_gms_de(pseudo, model, force=False)), None)
+            # STRICT : une liste illisible n'est pas « aucun lien a son nom »,
+            # sinon un lien deja fait etait refait, trackings MyPuls compris
+            try:
+                trouve = next(iter(liens_gms_de(pseudo, model, force=False, strict=True)), None)
+            except GmsIndisponible as e:
+                return {"ok": False, "reessayer": True,
+                        "erreur": f"GetMySocial n'a pas rendu la liste des liens ({e}) : rien "
+                                  "n'a été créé, à refaire plus tard."}
             if trouve and trouve.get("shortcode"):
                 entree = {"pseudo": pseudo, "model": model, "link_id": str(trouve.get("id") or ""),
                           "shortcode": trouve["shortcode"], "display_name": trouve.get("display_name"),
@@ -626,7 +692,12 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                 except Exception as e:                       # noqa: BLE001
                     entree, change = {**entree, "soucis": [f"réparation impossible : {type(e).__name__}: {e}"]}, False
                 return {"ok": True, "deja": True, "vient_d_etre_repare": change, **entree}
-        gabarit = lien_de_base(model)
+        try:
+            gabarit = lien_de_base(model)
+        except GmsIndisponible as e:
+            return {"ok": False, "reessayer": True,
+                    "erreur": f"GetMySocial n'a pas rendu la liste des liens ({e}) : rien n'a été "
+                              "créé, à refaire plus tard."}
         if not gabarit:
             return {"ok": False, "erreur": f"pas de lien de base « {model}_bby » ({cfg['nom']} 1) "
                                            "dans l'équipe GetMySocial VA IG DISCORD"}
