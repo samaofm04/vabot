@@ -34,7 +34,26 @@ Ce qui est vérifié :
     message vide relu, puis dit (rôle du bot mentionné : dit) ; salon privé
     créé une fois, reconnu décoré, accentué ou suffixé ; droits du bot
     reposés ; serveur indisponible : rien créé ; ⏳ laissés par un
-    redémarrage repris.
+    redémarrage repris ;
+  - le groupe « TEMPLATES » (« stocker quelque part uniquement les templates
+    sur GMS ») : trouvé ou créé une fois (list_groups puis create_group),
+    gardé ; group_id dans le POST, sinon assign après ; refusé dans le POST
+    -> la même requête sans lui, retenu ; groupe supprimé à la main ->
+    retrouvé, groupe intact mais POST qui ne le résout pas -> retenu ; page
+    rejetée renommée SEULE puis sortie par remove ; refus de droits (403)
+    retenus un jour ; entretien au rang « fond » : les pages de base rangées,
+    seules les copies de VA connues et les pages rejetées sorties (le reste
+    dit, laissé), en un appel par sens, aucun si tout est en place ;
+  - le nom affiché : pré-rempli et gardé d'après la page que les VA copient,
+    même faite à la main ; une création par la fenêtre coupée par un
+    redémarrage dite dans le salon ; une page créée qui laisse quelque chose
+    à faire dans GetMySocial reste dans le salon ;
+  - le panneau du salon : ➖ puis ✅, 25 par menu, 5 menus au plus, compteur
+    « 🧱 n/N », un seul panneau, réédité seulement s'il change ; le choix
+    (admin seulement) ouvre une fenêtre 2 photos + nom pré-rempli ; la
+    soumission crée, poste l'adresse seule et passe l'identité en ✅ ; une
+    fenêtre validée après un redémarrage est reprise ; préfixe « bid: »
+    sans chevauchement.
 
 Hors réseau : GetMySocial (requests et gms) et Discord sont des doublures ;
 les fichiers du module pointent vers un dossier temporaire (data/ n'est pas
@@ -96,15 +115,19 @@ fg.notes, fg.refus, fg.desactives, fg.supprimes, fg.tags_budget = [], [], [], []
 
 fg.listes, fg.maj, fg.liste_suite = [], [], []
 fg.cache = {"liens": None}
+#: les groupes de l'equipe {id: nom}, et les appels aux outils de groupe
+fg.groupes, fg.outils, fg.n_groupes = {}, [], 0
 
 
 def _gms_remise():
     fg.etat.clear()
-    fg.etat.update(pause=0, budget=True, cle="cle-test", disable_ok=True, tag=None, maj_ok=True)
+    fg.etat.update(pause=0, budget=True, cle="cle-test", disable_ok=True, tag=None, maj_ok=True,
+                   list_ok=True, create_ok=True, assign_err=[], remove_ok=True, par_page=100)
     for lst in (fg.notes, fg.refus, fg.desactives, fg.supprimes, fg.tags_budget, fg.listes,
-                fg.maj, fg.liste_suite):
+                fg.maj, fg.liste_suite, fg.outils):
         lst.clear()
     fg.cache["liens"] = None
+    fg.groupes.clear()
 
 
 class _api_tag:
@@ -172,8 +195,64 @@ def _call_tool(nom, args=None, **k):
         l = FR.liens.get((args or {}).get("link_id"))
         if l is not None and "display_name" in args:
             l["display_name"] = args["display_name"]
+        if l is not None and "group_id" in args:
+            l["group_id"] = args["group_id"] or None
         return {"ok": True, "data": {"id": (args or {}).get("link_id")}}
+    if nom in ("list_groups", "create_group", "assign_links_to_group", "remove_links_from_group"):
+        fg.outils.append((nom, copy.deepcopy(dict(args or {})), fg.etat.get("tag")))
+        JOURNAL.append((nom,))
+        return _outil_groupe(nom, dict(args or {}))
     return _interdit(nom, args)
+
+
+def _outil_groupe(nom, args):
+    """Les outils MCP de groupe, comme leur doc les decrit (create_group
+    idempotent par nom, 100 ids au plus, group_not_found)."""
+    if args.get("team_id") != "tm_" + EQUIPE_SANS_TM:
+        return {"ok": False, "error": f"mauvaise équipe {args.get('team_id')}"}
+    if nom == "list_groups":
+        if not fg.etat["list_ok"]:
+            return {"ok": False, "error": "HTTP 503"}
+        items = [{"id": g, "object": "group", "name": n,
+                  "link_count": sum(1 for l in FR.liens.values() if l.get("group_id") == g)}
+                 for g, n in fg.groupes.items()]
+        par, debut = fg.etat["par_page"], int(args.get("cursor") or 0)
+        suite = debut + par < len(items)
+        # texte JSON, comme le rend parfois l'outil MCP
+        return {"ok": True, "data": json.dumps({"object": "list", "data": items[debut:debut + par],
+                                                "has_more": suite,
+                                                "next_cursor": str(debut + par) if suite else None})}
+    if nom == "create_group":
+        if not fg.etat["create_ok"]:
+            return {"ok": False, "error": "Error 403 (team_permission_denied)"}
+        for g, n in fg.groupes.items():
+            if n.lower() == args["name"].lower():
+                return {"ok": True, "data": {"id": g, "object": "group", "name": n}}
+        # un compteur qui ne repart pas : un groupe recree n'a jamais l'id
+        # de celui qu'on a supprime
+        fg.n_groupes += 1
+        gid = f"grp_{fg.n_groupes:024x}"
+        fg.groupes[gid] = args["name"]
+        return {"ok": True, "data": {"id": gid, "object": "group", "name": args["name"]}}
+    ids = list(args.get("link_ids") or [])
+    if not 1 <= len(ids) <= 100:
+        return {"ok": False, "error": "Error 400 (too_many_link_ids)"}
+    gid = args.get("group_id")
+    if nom == "assign_links_to_group":
+        if fg.etat["assign_err"]:
+            return {"ok": False, "error": fg.etat["assign_err"].pop(0)}
+        if gid not in fg.groupes:
+            return {"ok": False, "error": "Error 404 (group_not_found): Group not found"}
+        for lid in ids:
+            if lid in FR.liens:
+                FR.liens[lid]["group_id"] = gid
+        return {"ok": True, "data": {"group_id": gid, "assigned": len(ids)}}
+    if not fg.etat["remove_ok"]:
+        return {"ok": False, "error": "HTTP 500 : panne"}
+    for lid in ids:
+        if lid in FR.liens and FR.liens[lid].get("group_id") == gid:
+            FR.liens[lid]["group_id"] = None
+    return {"ok": True, "data": {"group_id": gid, "removed": len(ids)}}
 
 
 def _interdit(*a, **k):
@@ -204,6 +283,26 @@ from cogs import bases_identite as cb  # noqa: E402
 
 b.CONFIG = TMP / "bases_identite_us_config.json"
 b.REGISTRE = TMP / "bases_identite_us.json"
+b.GROUPE = TMP / "bases_identite_us_groupe.json"
+#: les creations par la fenetre en cours (le cog les ecrit) : jamais data/
+VRAI_EN_COURS = b.EN_COURS
+b.EN_COURS = TMP / "bases_identite_us_en_cours.json"
+#: le registre des copies de VA (ranger_templates n'en sort que celles-la) :
+#: celui d'un dossier temporaire, jamais le vrai data/
+import liens_identite_us as liu_mod     # noqa: E402
+VRAI_REG_LIU = liu_mod.REGISTRE
+liu_mod.REGISTRE = TMP / "liens_identite_us.json"
+
+
+def _etat_fichier(p):
+    try:
+        st = p.stat()
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
+VRAIS_AVANT = {p: _etat_fichier(p) for p in (VRAI_EN_COURS, VRAI_REG_LIU)}
 
 
 # ──────────────────────────────────────────────── doublure de requests ──
@@ -230,6 +329,8 @@ class FauxRequests:
         self.liens = {}            # les pages qui existent : {id: lien}
         self.n = 0
         self.surcharge = {}        # ce que la prochaine page creee rendra de travers
+        self.groupe_muet = False   # group_id accepte mais pas renvoye (ni applique)
+        self.refus_groupe = None   # (statut, code) : POST avec group_id refuse
 
     def get(self, url, headers=None, timeout=None):
         self.gets.append({"url": url, "headers": dict(headers or {}), "tag": fg.etat.get("tag")})
@@ -250,6 +351,9 @@ class FauxRequests:
 
     def creer(self, data, **surcharge):
         sc = data["shortcode"]
+        if data.get("group_id") and self.refus_groupe:
+            st, code = self.refus_groupe
+            return Rep(st, {"error": {"code": code, "message": "group refused"}})
         if sc in self.pris or any(l["shortcode"] == sc for l in self.liens.values()):
             return Rep(409, {"error": {"code": "shortcode_taken", "message": "Shortcode already taken"}})
         self.n += 1
@@ -260,17 +364,20 @@ class FauxRequests:
                 "profile_picture": f"https://images.getmysocial.com/68e4961d3abdf07547f50bd7/{ms}-{self.n:012x}.jpg",
                 "background_image": f"https://images.getmysocial.com/68e4961d3abdf07547f50bd7/{ms + 129}-{self.n + 4096:012x}.jpg",
                 "team_id": "tm_" + data["team_id"], "name_user": data.get("name_user"),
-                "buttons": json.loads(data.get("buttons") or "[]")}
+                "buttons": json.loads(data.get("buttons") or "[]"),
+                "group_id": (data.get("group_id") if data.get("group_id") in fg.groupes
+                             and not self.groupe_muet else None)}
         lien.update(self.surcharge)
         lien.update(surcharge)
         self.liens[lien["id"]] = copy.deepcopy(lien)
         return Rep(201, lien)
 
     def a_la_main(self, lid, nom, sc, status="active", created=1790000000, team="tm_" + EQUIPE_SANS_TM,
-                  type_="landing"):
+                  type_="landing", group_id=None, **plus):
         """Une page faite dans l'editeur GetMySocial (ou restee orpheline)."""
         self.liens[lid] = {"id": lid, "type": type_, "shortcode": sc, "display_name": nom,
-                           "status": status, "created": created, "team_id": team}
+                           "status": status, "created": created, "team_id": team, "group_id": group_id,
+                           **plus}
 
     def actives(self, identite):
         return sorted(l["id"] for l in self.liens.values()
@@ -289,6 +396,15 @@ def remise():
         p.unlink()
     b._CACHE_MODELE.update(id=None, t=0.0, modele=None)
     b._HEIF["pret"] = None
+    b._GROUPE_MEMOIRE.update(equipe="", id="")
+    b._GROUPE_ABSENT_DIT["fait"] = False
+    b._DROITS_MEMOIRE.clear()
+    b._DITS.clear()
+    liu_mod.REGISTRE.unlink(missing_ok=True)
+
+
+def outils(nom=None):
+    return [(n, a) for n, a, _ in fg.outils if nom is None or n == nom]
 
 
 # ─────────────────────────────────────────────────────────────── images ──
@@ -402,9 +518,23 @@ p = FR.posts[0] if FR.posts else {"data": {}, "files": {}, "headers": {}, "url":
 check("POST sur /v3/links avec la clé Bearer", p["url"] == f"{BASE}/links"
       and p["headers"].get("Authorization") == "Bearer cle-test", p["url"])
 attendu = champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup")
-check("champs texte EXACTEMENT ceux de l'essai réussi", p["data"] == attendu,
-      {k: (p["data"].get(k), attendu.get(k)) for k in set(p["data"]) ^ set(attendu)
-       or [k for k in attendu if p["data"].get(k) != attendu[k]]})
+GID = next(iter(fg.groupes), "")
+sans_groupe = {k: v for k, v in p["data"].items() if k != "group_id"}
+check("champs texte EXACTEMENT ceux de l'essai réussi (group_id à part)", sans_groupe == attendu,
+      {k: (sans_groupe.get(k), attendu.get(k)) for k in set(sans_groupe) ^ set(attendu)
+       or [k for k in attendu if sans_groupe.get(k) != attendu[k]]})
+check("seul champ ajouté : group_id = le groupe TEMPLATES de l'équipe (pas celui du modèle)",
+      set(p["data"]) - set(attendu) == {"group_id"} and p["data"]["group_id"] == GID
+      and fg.groupes.get(GID) == "TEMPLATES", (set(p["data"]) - set(attendu), p["data"].get("group_id"), fg.groupes))
+check("groupe cherché (list_groups) puis créé (create_group) dans JESSY LE RETOUR, étiqueté « bases-us »",
+      [n for n, _ in outils()] == ["list_groups", "create_group"]
+      and outils("create_group")[0][1] == {"name": "TEMPLATES", "team_id": "tm_" + EQUIPE_SANS_TM}
+      and all(t == "bases-us" for _, _, t in fg.outils), fg.outils)
+check("page créée DANS le groupe (réponse du POST) : aucun assign de plus",
+      FR.liens[r["link_id"]]["group_id"] == GID and not outils("assign_links_to_group")
+      and r.get("groupe") == {"ok": True, "appel": False, "erreur": "", "groupe": GID}, (r.get("groupe"), outils()))
+check("id du groupe gardé (safe_json, dossier temporaire)",
+      json.loads(b.GROUPE.read_text(encoding="utf-8")).get("id") == GID and b.groupe_connu() == GID)
 check("team_id sans « tm_ »", p["data"].get("team_id") == EQUIPE_SANS_TM, p["data"].get("team_id"))
 bt = json.loads(p["data"].get("buttons", "[]"))
 check("boutons : sans block_id ni valeur nulle ; le bouton OF vise Jessye, plus Emy (FR)",
@@ -417,7 +547,7 @@ check("booléens en JSON, nombres en texte, emoji intacts",
       p["data"].get("deeplink_enabled") == "true" and p["data"].get("font_family") == "3"
       and "😭" in p["data"].get("buttons", ""), {k: p["data"].get(k) for k in ("deeplink_enabled", "font_family")})
 check("aucun champ exclu ni nul envoyé (notes, status, profile_picture…)",
-      not ({"notes", "status", "profile_picture", "background_image", "user_id", "group_id",
+      not ({"notes", "status", "profile_picture", "background_image", "user_id",
             "selected_domain", "url", "id"} & set(p["data"])))
 check("fichiers : profilePicture et backgroundImage (jamais le snake_case refusé)",
       set(p["files"]) == {"profilePicture", "backgroundImage"}, sorted(p["files"]))
@@ -446,12 +576,17 @@ r = b.creer_base("@Ibenhaastrup", PP, FOND, nom_affiche="  Iben ♡ ", identites
 p = FR.posts[0]
 check("majuscule d'iPhone et @ : retrouve « ibenhaastrup »",
       r["ok"] and p["data"]["display_name"] == "TEMPLATE ibenhaastrup", p["data"].get("display_name"))
-check("2e ligne : name_user remplacé, le reste identique à l'essai",
-      p["data"] == champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup", "Iben ♡"),
+check("2e ligne : name_user remplacé, le reste identique à l'essai (group_id à part)",
+      {k: v for k, v in p["data"].items() if k != "group_id"}
+      == champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup", "Iben ♡"),
       p["data"].get("name_user"))
 check("registre : nom affiché retenu", b.base_de("ibenhaastrup")["nom_affiche"] == "Iben ♡")
+n_outils = len(fg.outils)
 r2 = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
 check("modèle en cache : pas de 2e GET dans les 10 min", r2["ok"] and len(FR.gets) == 1, len(FR.gets))
+check("groupe connu : aucun appel de groupe pour la 2e page, elle y est quand même",
+      len(fg.outils) == n_outils and FR.liens[r2["link_id"]]["group_id"] == b.groupe_connu() != "",
+      fg.outils[n_outils:])
 
 # ═════════════════════════════════════════════════════════════════════════
 print("3) Les photos")
@@ -518,9 +653,9 @@ check("image flottante 0..1 (0,5) : gris moyen, pas noire",
       err or (pa.getpixel((10, 10)) if pa else None))
 remise()
 r = b.creer_base("ibenhaastrup", b"pas une image", FOND, identites=IDENTITES)
-check("photo invalide : refusée AVANT tout appel (ni GET du modèle, ni liste, ni POST)",
-      not r["ok"] and not FR.posts and not FR.gets and not fg.listes and "photo de profil" in r["erreur"],
-      (r, len(FR.gets), fg.listes))
+check("photo invalide : refusée AVANT tout appel (ni GET du modèle, ni liste, ni groupe, ni POST)",
+      not r["ok"] and not FR.posts and not FR.gets and not fg.listes and not fg.outils
+      and "photo de profil" in r["erreur"], (r, len(FR.gets), fg.listes, fg.outils))
 
 # ═════════════════════════════════════════════════════════════════════════
 print("4) Adresses")
@@ -835,11 +970,293 @@ faux_liu.identite_de_base = lambda nom: "vu-par-liu" if "TEMPALTE" in str(nom) e
 sys.modules["liens_identite_us"] = faux_liu
 check("liens_identite_us présent : SA règle des noms de base est celle employée",
       b.identite_de_base("TEMPALTE x") == "vu-par-liu" and b.identite_de_base("TEMPLATE x") is None)
-del sys.modules["liens_identite_us"]
+# None : l'import echoue vraiment (sans quoi un liens_identite_us NEUF, qui
+# lit le vrai data/, revenait a sa place pour la suite du banc)
+sys.modules["liens_identite_us"] = None
 check("sans lui : « TEMPLATE Iben Haastrup » -> ibenhaastrup ; « REJET TEMPLATE x » et « Templeton » ne sont pas des bases",
-      b.identite_de_base("TEMPLATE Iben Haastrup") == "ibenhaastrup"
+      b._liu() is None and b.identite_de_base("TEMPLATE Iben Haastrup") == "ibenhaastrup"
       and b.identite_de_base("REJET TEMPLATE ibenhaastrup 06-10 14h05") is None
       and b.identite_de_base("Templeton bob") is None)
+check("sans lui : la base retenue suit la même règle (la page, active, puis la plus ancienne)",
+      b.base_retenue([{"id": "c", "display_name": "TEMPLATE x", "status": "active", "created": 30},
+                      {"id": "a", "display_name": "TEMPLATE x", "status": "inactive", "created": 10},
+                      {"id": "b", "display_name": "TEMPLATE x", "status": "active", "created": 20},
+                      {"id": "d", "display_name": "TEMPLATE x", "status": "active", "created": 5,
+                       "type": "directlink"}], "x")["id"] == "b")
+sys.modules["liens_identite_us"] = liu_mod
+check("… et avec lui, la même (liens_identite_us.bases)",
+      b._liu() is liu_mod
+      and b.base_retenue([{"id": "c", "display_name": "TEMPLATE x", "status": "active", "created": 30},
+                          {"id": "b", "display_name": "TEMPLATE x", "status": "active", "created": 20}],
+                         "x")["id"] == "b")
+
+# ═════════════════════════════════════════════════════════════════════════
+print("8b) Le groupe « TEMPLATES »")
+remise()
+fg.groupes.update({"grp_" + "a" * 24: "VA FR", "grp_" + "b" * 24: "Carter", "grp_" + "c" * 24: "Templates"})
+fg.etat["par_page"] = 1
+g, err = b.assurer_groupe()
+check("groupe existant « Templates » (autre casse, 3e page de list_groups) : retrouvé, rien créé",
+      g == "grp_" + "c" * 24 and not err and not outils("create_group")
+      and [n for n, _ in outils()] == ["list_groups"] * 3
+      and [a.get("cursor") for _, a in outils()] == [None, "1", "2"]
+      and all(a.get("team_id") == "tm_" + EQUIPE_SANS_TM for _, a in outils()), (g, err, outils()))
+n0 = len(fg.outils)
+check("… gardé : le besoin suivant ne coûte aucun appel", b.assurer_groupe() == (g, "") and len(fg.outils) == n0)
+b._GROUPE_MEMOIRE.update(equipe="", id="")
+check("… sur disque (le redémarrage ne le relit pas chez GetMySocial)",
+      b.groupe_connu() == g and len(fg.outils) == n0)
+check("meme_groupe : avec ou sans « grp_ », jamais vide = vide",
+      b.meme_groupe("grp_" + "c" * 24, "c" * 24) and not b.meme_groupe(None, "") and not b.meme_groupe("", None))
+
+remise()
+fg.etat["list_ok"] = False
+g, err = b.assurer_groupe()
+check("list_groups illisible : aucun groupe créé à l'aveugle", g == "" and "illisibles" in err
+      and not outils("create_group"), (g, err, outils()))
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("… la page se crée quand même, avec la requête EXACTE de l'essai (sans group_id)",
+      r["ok"] and FR.posts[-1]["data"] == champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup"), r)
+check("… sans second essai de groupe dans la même création ; le résultat le dit (l'entretien rangera)",
+      len(outils("list_groups")) == 2 and r["groupe"]["ok"] is False and r["groupe"]["appel"] is False,
+      (outils(), r["groupe"]))
+remise()
+fg.etat["create_ok"] = False
+g, err = b.assurer_groupe()
+check("create_group refusé (403) : dit, aucun id retenu", g == "" and "non créé" in err and not b.groupe_connu(), err)
+remise()
+fg.etat["pause"] = 600
+check("pause de quota : aucun appel de groupe", b.assurer_groupe()[0] == "" and not fg.outils)
+
+remise()
+FR.groupe_muet = True
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+gid = b.groupe_connu()
+check("réponse du POST sans le groupe : UN assign_links_to_group (l'id, l'équipe), la page y est",
+      r["ok"] and outils("assign_links_to_group") == [("assign_links_to_group", {
+          "group_id": gid, "link_ids": [r["link_id"]], "team_id": "tm_" + EQUIPE_SANS_TM})]
+      and FR.liens[r["link_id"]]["group_id"] == gid
+      and r["groupe"] == {"ok": True, "appel": True, "erreur": "", "groupe": gid},
+      (r["groupe"], outils()))
+check("… rangée APRÈS la création, avant le vidage du cache, un seul vidage",
+      [x[0] for x in JOURNAL if x[0] in ("post", "assign_links_to_group", "invalidate")]
+      == ["post", "assign_links_to_group", "invalidate"], JOURNAL)
+
+remise()
+FR.refus_groupe = (400, "invalid_group_id")
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+gid = b.groupe_connu()
+check("group_id refusé (400 invalid_group_id) : MÊME adresse refaite sans lui = l'essai exact, page créée",
+      r["ok"] and len(FR.posts) == 2 and FR.posts[0]["data"].get("group_id") == gid
+      and FR.posts[1]["data"] == champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup")
+      and r["url"].endswith("/tplibenhaastrup"), (r, [x["data"].get("group_id") for x in FR.posts]))
+check("… puis rangée par assign, et le refus retenu (plus de group_id dans les POST suivants)",
+      FR.liens[r["link_id"]]["group_id"] == gid and len(outils("assign_links_to_group")) == 1
+      and not b.post_avec_groupe() and b._etat_groupe()["post_refuse"]["code"] == "invalid_group_id")
+r2 = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
+check("… création suivante : 1 seul POST, sans group_id, rangée par assign",
+      r2["ok"] and len(FR.posts) == 3 and "group_id" not in FR.posts[2]["data"]
+      and FR.liens[r2["link_id"]]["group_id"] == gid, [x["data"].get("group_id") for x in FR.posts])
+
+remise()
+b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+ancien = b.groupe_connu()
+fg.groupes.clear()                              # supprimé à la main dans GetMySocial
+FR.refus_groupe = (404, "group_not_found")
+r = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
+neuf = b.groupe_connu()
+check("groupe supprimé à la main (404 group_not_found) : page créée sans lui, groupe recréé, page rangée",
+      r["ok"] and neuf and neuf != ancien and fg.groupes.get(neuf) == "TEMPLATES"
+      and FR.liens[r["link_id"]]["group_id"] == neuf and b._etat_groupe().get("oublie", None) is None,
+      (r, ancien, neuf, fg.groupes))
+check("… ce n'était pas le champ : group_id toujours envoyé ensuite", b.post_avec_groupe())
+
+remise()
+FR.rep_post = [Rep(403, {"error": {"code": "team_permission_denied", "message": "no create_links"}})] * 2
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("403 team_permission_denied (ambigu) : refait UNE fois sans group_id, puis dit — rien retenu",
+      not r["ok"] and len(FR.posts) == 2 and "group_id" in FR.posts[0]["data"]
+      and "group_id" not in FR.posts[1]["data"] and "JESSY LE RETOUR" in r["erreur"] and b.post_avec_groupe(),
+      (r, len(FR.posts)))
+check("refus_du_groupe : seuls les refus qui peuvent venir du groupe",
+      b.refus_du_groupe(400, "invalid_group_id", "") and b.refus_du_groupe(404, "group_not_found", "")
+      and b.refus_du_groupe(400, "invalid_request_error", "param: group_id")
+      and not b.refus_du_groupe(400, "invalid_url", "bad url") and not b.refus_du_groupe(409, "shortcode_taken", "")
+      and not b.refus_du_groupe(403, "plan_limit_reached", "") and not b.refus_du_groupe(404, "team_access_denied", "")
+      and not b.refus_du_groupe(500, "group", ""))
+
+remise()
+FR.rep_post = [lambda d: FR.creer(d, profile_picture=MODELE["profile_picture"])]
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+lid = "lnk_" + "0" * 23 + "1"
+check("page rejetée créée DANS le groupe : renommée SEULE (l'appel éprouvé, sans group_id), PUIS sortie par remove",
+      not r["ok"] and len(fg.maj) == 1 and "group_id" not in fg.maj[0]
+      and fg.maj[0]["display_name"].startswith("REJET TEMPLATE ibenhaastrup ")
+      and fg.maj[0].get("team_id") == "tm_" + EQUIPE_SANS_TM and FR.liens[lid]["group_id"] is None
+      and outils("remove_links_from_group") == [("remove_links_from_group", {
+          "group_id": b.groupe_connu(), "link_ids": [lid], "team_id": "tm_" + EQUIPE_SANS_TM})]
+      and not outils("assign_links_to_group")
+      and [x[0] for x in JOURNAL if x[0] in ("disable", "update", "remove_links_from_group")]
+      == ["disable", "update", "remove_links_from_group"], (fg.maj, outils()))
+check("… tout fait (coupée, renommée) : rien à faire à la main, l'erreur reste à l'admin",
+      r["manuel"] is False, r)
+
+remise()
+FR.groupe_muet = True
+fg.etat["assign_err"] = ["HTTP 500 : panne"]
+r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("rangement raté : la base est quand même ✅ (le groupe ne décide jamais), raison gardée",
+      r["ok"] and r["groupe"]["ok"] is False and "panne" in r["groupe"]["erreur"]
+      and b.base_de("ibenhaastrup") is not None, r)
+
+# l'entretien du groupe
+remise()
+gid, _ = b.assurer_groupe()
+FR.a_la_main("lnk_t1", "TEMPLATE ibenhaastrup", "tplibenhaastrup", group_id=gid)        # en place
+FR.a_la_main("lnk_t2", "TEMPLATE mini_caryn", "tplmini_caryn")                          # hors groupe
+FR.a_la_main("lnk_t3", "TEMPLATE ibenhaastrup", "tplibenhaastrup2", status="inactive")  # ancienne coupée
+FR.a_la_main("lnk_t4", "TEMPALTE inconnue", "tplinconnue", group_id="grp_" + "9" * 24)   # orpheline, ailleurs
+FR.a_la_main("lnk_va", "(Carter) ibenhaastrup", "ibenhaastrupcute", group_id=gid)       # copie de VA égarée
+FR.a_la_main("lnk_rej", "REJET TEMPLATE ema_bb0 06-10 14h05", "tplema_bb0", group_id=gid)
+FR.a_la_main("lnk_va2", "(Carter) mini_caryn", "carynbaby", group_id="grp_" + "8" * 24)  # son groupe à lui
+FR.a_la_main("lnk_va3", "( Carter ) 1", "crtejessye")                                    # sans groupe
+FR.a_la_main("lnk_nu", "TEMPLATE", "tplnu", group_id=gid)              # gabarit sans identité, rangé à la main
+FR.a_la_main("lnk_main", "(Carter) 2", "crtrjessye", group_id=gid)      # lien de VA rangé là À LA MAIN
+# lnk_va est une copie que liens_identite_us a faite (son registre) ; lnk_main n'en est pas une
+safe_json.write(liu_mod.REGISTRE, {"globaux": {}, "liens": {"111:ibenhaastrup": {"link_id": "lnk_va"},
+                                                            "111:mini_caryn": {"link_id": "lnk_va2"}}})
+fg.outils.clear()
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    bilan = b.ranger_templates()
+check("entretien : UN assign avec les seules pages de base hors du groupe (inactive et orpheline comprises)",
+      outils("assign_links_to_group") == [("assign_links_to_group", {
+          "group_id": gid, "link_ids": ["lnk_t2", "lnk_t3", "lnk_t4"], "team_id": "tm_" + EQUIPE_SANS_TM})]
+      and sorted(bilan["ranges"]) == ["lnk_t2", "lnk_t3", "lnk_t4"], (outils(), bilan))
+check("… UN remove avec ce qui est PROUVÉ hors de propos : une copie de VA connue, une page rejetée",
+      outils("remove_links_from_group") == [("remove_links_from_group", {
+          "group_id": gid, "link_ids": ["lnk_va", "lnk_rej"], "team_id": "tm_" + EQUIPE_SANS_TM})]
+      and FR.liens["lnk_va"]["group_id"] is None and FR.liens["lnk_rej"]["group_id"] is None, outils())
+check("… une page « TEMPLATE » sans identité (un gabarit pour le podium) et un lien de VA rangé À LA MAIN : "
+      "laissés en place, et dit au journal",
+      FR.liens["lnk_nu"]["group_id"] == gid and FR.liens["lnk_main"]["group_id"] == gid
+      and sorted(bilan["intrus_gardes"]) == ["(Carter) 2", "TEMPLATE"]
+      and "laissé(s) en place" in journal.getvalue() and "(Carter) 2" in journal.getvalue(),
+      (bilan, journal.getvalue()))
+check("… les autres liens des VA ne bougent pas (leur groupe à eux, ou aucun)",
+      FR.liens["lnk_va2"]["group_id"] == "grp_" + "8" * 24 and FR.liens["lnk_va3"]["group_id"] is None)
+check("… jamais de suppression ni de désactivation", not fg.supprimes and not fg.desactives)
+fg.outils.clear()
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    bilan = b.ranger_templates()
+check("2e passage, tout en place : AUCUN appel GetMySocial de groupe, ce qui est gardé n'est pas redit",
+      not fg.outils and bilan["ok"] and not bilan["ranges"] and not bilan["sortis"]
+      and "laissé" not in journal.getvalue(), (fg.outils, bilan, journal.getvalue()))
+check("est_rejet : « REJET TEMPLATE x … » oui ; « TEMPLATE x », « REJET », « (Carter) 1 » non",
+      b.est_rejet("REJET TEMPLATE ema_bb0 06-10 14h05") and b.est_rejet("rejet template x")
+      and not any(b.est_rejet(n) for n in ("TEMPLATE x", "REJET", "REJET ", "(Carter) 1", "REJETTEMPLATE x")))
+remise()
+gid, _ = b.assurer_groupe()
+FR.a_la_main("lnk_va", "(Carter) ibenhaastrup", "ibenhaastrupcute", group_id=gid)
+liu_mod.REGISTRE.write_text("{pas du json", encoding="utf-8")
+fg.outils.clear()
+with contextlib.redirect_stdout(io.StringIO()):
+    bilan = b.ranger_templates()
+check("registre des copies de VA illisible : rien n'est sorti sur un doute",
+      not outils("remove_links_from_group") and FR.liens["lnk_va"]["group_id"] == gid, (outils(), bilan))
+
+remise()
+FR.a_la_main("lnk_va", "(Carter) ibenhaastrup", "ibenhaastrupcute")
+check("aucune page de base, groupe inconnu : aucun appel (pas de groupe vide créé pour rien)",
+      b.ranger_templates()["ok"] and not fg.outils)
+
+remise()
+gid, _ = b.assurer_groupe()
+for i in range(b.INTRUS_MAX + 1):
+    FR.a_la_main(f"lnk_x{i}", f"(VA {i}) 1", f"vaun{i}", group_id=gid)
+safe_json.write(liu_mod.REGISTRE, {"globaux": {}, "liens": {f"{i}:x": {"link_id": f"lnk_x{i}"}
+                                                            for i in range(b.INTRUS_MAX + 1)}})
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+fg.outils.clear()
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    bilan = b.ranger_templates()
+check(f"plus de {b.INTRUS_MAX} copies de VA dans le groupe : RIEN n'est sorti, c'est dit ; les bases sont "
+      "quand même rangées",
+      not outils("remove_links_from_group") and len(bilan["intrus_gardes"]) == b.INTRUS_MAX + 1
+      and "rien n'est sorti" in journal.getvalue() and bilan["ranges"] == ["lnk_t"], (outils(), journal.getvalue()))
+remise()
+fg.groupes["grp_" + "d" * 24] = "TEMPLATES"                      # fait à la main AVANT nous
+for i in range(3):
+    FR.a_la_main(f"lnk_p{i}", f"(VA {i}) 1", f"vapre{i}", group_id="grp_" + "d" * 24)
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    bilan = b.ranger_templates()
+check("un « TEMPLATES » préexistant adopté : ce qu'il tenait est dit et reste en place, la base y est rangée",
+      bilan["groupe"] == "grp_" + "d" * 24 and not outils("remove_links_from_group")
+      and all(FR.liens[f"lnk_p{i}"]["group_id"] == "grp_" + "d" * 24 for i in range(3))
+      and "3 lien(s) déjà dedans" in journal.getvalue() and len(bilan["intrus_gardes"]) == 3
+      and FR.liens["lnk_t"]["group_id"] == "grp_" + "d" * 24, (bilan, journal.getvalue()))
+
+remise()
+for i in range(150):
+    FR.a_la_main(f"lnk_b{i:03d}", f"TEMPLATE identite{i:03d}", f"tplidentite{i:03d}")
+fg.outils.clear()
+bilan = b.ranger_templates()
+check("150 pages à ranger : 2 appels (100 + 50), la limite de l'outil",
+      [len(a["link_ids"]) for _, a in outils("assign_links_to_group")] == [100, 50] and len(bilan["ranges"]) == 150,
+      [len(a["link_ids"]) for _, a in outils("assign_links_to_group")])
+
+remise()
+gid, _ = b.assurer_groupe()
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+fg.groupes.clear()                              # supprimé à la main
+fg.outils.clear()
+bilan = b.ranger_templates()
+neuf = b.groupe_connu()
+check("groupe supprimé à la main : group_not_found -> retrouvé ou recréé, rangement refait une fois",
+      bilan["ok"] and neuf and neuf != gid and FR.liens["lnk_t"]["group_id"] == neuf
+      and [n for n, _ in outils()] == ["assign_links_to_group", "list_groups", "create_group",
+                                       "assign_links_to_group"], (outils(), bilan))
+
+remise()
+gid, _ = b.assurer_groupe()
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup", group_id=gid)
+for l in FR.liens.values():
+    l.pop("group_id", None)                     # une liste qui ne dirait pas les groupes
+fg.outils.clear()
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    bilan = b.ranger_templates()
+check("liste sans group_id : rangé quand même (idempotent), et dit au journal",
+      len(outils("assign_links_to_group")) == 1 and "group_id absent" in journal.getvalue(), journal.getvalue())
+
+remise()
+fg.liste_suite[:] = [False]
+bilan = b.ranger_templates()
+check("liste de l'équipe illisible : rien rangé, rien sorti, raison rendue", not bilan["ok"]
+      and not fg.outils and bilan["erreur"], bilan)
+remise()
+gid, _ = b.assurer_groupe()
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+fg.outils.clear()
+fg.etat["pause"] = 600
+bilan = b.ranger_templates()
+check("pause de quota (liste en cache) : aucune écriture tentée, raison rendue",
+      not bilan["ok"] and not fg.outils and "épuisé" in bilan["erreur"], bilan)
+remise()
+FR.refus_groupe = (400, "invalid_group_id")
+b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+d = b._etat_groupe()
+d["post_refuse"]["quand"] = int(time.time()) - b.REFUS_POST_S - 10
+safe_json.write(b.GROUPE, d)
+check("refus du group_id retenu un mois, puis réessayé (l'API a pu changer)",
+      b.post_avec_groupe() and not (lambda: (safe_json.write(b.GROUPE, {**d, "post_refuse": {
+          **d["post_refuse"], "quand": int(time.time())}}), b.post_avec_groupe())[1])())
+check("module : l'id du groupe écrit par safe_json, jamais write_text(json.dumps",
+      "safe_json.write(GROUPE" in src_mod and "write_text(json.dumps" not in (BOT / "bases_identite_us.py").read_text(encoding="utf-8"))
 
 # ═════════════════════════════════════════════════════════════════════════
 print("9) Le cog")
@@ -864,15 +1281,49 @@ class Piece:
         return self._d
 
 
+class Ligne:
+    """Une rangee de composants telle que Discord la rend (to_dict)."""
+    def __init__(self, d):
+        self._d = copy.deepcopy(d)
+
+    def to_dict(self):
+        return copy.deepcopy(self._d)
+
+
+class Envoye:
+    """Un message poste par le bot : relu ensuite par l'historique du salon."""
+    def __init__(self, mid, contenu, vue, canal):
+        self.id, self.content, self.canal = mid, contenu, canal
+        self.author = types.SimpleNamespace(id=YOSHI, bot=True)
+        self.components = [Ligne(d) for d in vue.to_components()] if vue is not None else []
+        self.reactions, self.edits, self.supprime = [], [], False
+
+    async def edit(self, **kw):
+        self.edits.append(kw)
+        if "content" in kw:
+            self.content = kw["content"]
+        if kw.get("view") is not None:
+            self.components = [Ligne(d) for d in kw["view"].to_components()]
+        return self
+
+    async def delete(self):
+        self.supprime = True
+        if self in self.canal.historique:
+            self.canal.historique.remove(self)
+
+
 class Canal:
     def __init__(self, nom, cid=77):
         self.name, self.id, self.envoyes, self.a_relire, self.category = nom, cid, [], None, None
         self.droits = {}          # {id de la cible: droits} ; sinon le bot a tout, @everyone rien
         self.poses, self.historique, self.refus_droits = [], [], None
+        self.guild = None
 
     async def send(self, content=None, **kw):
         self.envoyes.append({"content": content, **kw})
-        return types.SimpleNamespace(id=len(self.envoyes))
+        m = Envoye(10000 + len(self.envoyes), content, kw.get("view"), self)
+        self.historique.insert(0, m)           # l'historique va du plus recent au plus ancien
+        return m
 
     async def fetch_message(self, mid):
         if self.a_relire is None:
@@ -1181,8 +1632,10 @@ gus, gfr = Guilde(salons=[]), Guilde(gid=1505418484052394004, salons=[])
 BOT_FAUX.guilds = [gus, gfr]
 asyncio.run(cog._entretien.coro(cog))
 check("entretien : salon créé sur le serveur US seulement", len(gus.crees) == 1 and not gfr.crees)
-check("aucun message posté à la création du salon (ni notice ni épingle)",
-      not any(c.envoyes for c in gus.text_channels) and "pin(" not in src_cog)
+poste = [e for c in gus.text_channels for e in c.envoyes]
+check("à la création du salon : le panneau SEUL (compteur + menus), ni notice ni épingle",
+      len(poste) == 1 and str(poste[0]["content"]).startswith("## 🧱 ") and "\n" not in poste[0]["content"]
+      and poste[0].get("view") is not None and "pin(" not in src_cog, poste)
 
 
 class Ancien:
@@ -1209,15 +1662,18 @@ gr = Guilde(salons=[salon])
 cog.repris.clear()
 BOT_FAUX.guilds = [gr]
 asyncio.run(cog._entretien.coro(cog))
+lignes_ = [e for e in salon.envoyes if e.get("view") is None]
 check("redémarrage : le ⏳ du bot resté seul devient ❌, avec une ligne en réponse à ce message",
-      coupe_net.faits == [("-", "⏳"), ("+", "❌")] and len(salon.envoyes) == 1
-      and salon.envoyes[0].get("reference") is coupe_net
-      and "ibenhaastrup" in salon.envoyes[0]["content"] and "redémarrage" in salon.envoyes[0]["content"],
+      coupe_net.faits == [("-", "⏳"), ("+", "❌")] and len(lignes_) == 1
+      and lignes_[0].get("reference") is coupe_net
+      and "ibenhaastrup" in lignes_[0]["content"] and "redémarrage" in lignes_[0]["content"],
       (coupe_net.faits, salon.envoyes))
 check("… un ⏳ suivi de ✅, un ❌, un ⏳ d'un autre : pas touchés",
       not fini.faits and not rate.faits and not autrui.faits)
 asyncio.run(cog._entretien.coro(cog))
-check("… une seule fois (le tour suivant de l'entretien ne recommence pas)", len(salon.envoyes) == 1)
+check("… une seule fois (le tour suivant de l'entretien ne recommence pas), le panneau pas reposté",
+      len([e for e in salon.envoyes if e.get("view") is None]) == 1
+      and len([e for e in salon.envoyes if e.get("view") is not None]) == 1, salon.envoyes)
 # la creation tourne dans un fil de l'executor : le verrou y est tenu
 tenu, lacher = threading.Event(), threading.Event()
 
@@ -1239,6 +1695,401 @@ finally:
     lacher.set()
     fil.join()
 check("… une création en cours dans ce processus : rien n'est déclaré interrompu", not coupe_net.faits)
+BOT_FAUX.guilds = []
+
+# ═════════════════════════════════════════════════════════════════════════
+print("10) Le panneau du salon")
+import subprocess                       # noqa: E402
+
+DIX_HUIT = sorted(["ibenhaastrup", "mini_caryn", "ema_bb0", "nanas__nyspam", "alba", "bella", "cora",
+                   "dina", "elsa", "fiona", "gina", "hana", "iris", "jade", "kira", "lena", "maya",
+                   "nora"], key=str.lower)
+FAITES3 = {"ibenhaastrup", "mini_caryn", "nora"}
+E = cb.entrees_panneau(DIX_HUIT, FAITES3, {"ibenhaastrup": "🔥"})
+check("entrées : D'ABORD les 15 sans page (➖), PUIS les 3 faites (✅), chaque groupe alphabétique",
+      [x[0] for x in E] == [n for n in DIX_HUIT if n not in FAITES3] + [n for n in DIX_HUIT if n in FAITES3]
+      and all(x[1].endswith(" ➖") and not x[3] for x in E[:15]) and all(x[1].endswith(" ✅") and x[3] for x in E[15:]),
+      [x[1] for x in E])
+check("emoji id<nom> repris quand il existe, rien sinon",
+      next(x for x in E if x[0] == "ibenhaastrup")[2] == "🔥" and next(x for x in E if x[0] == "alba")[2] is None)
+check("compteur : « ## 🧱 3/18 », rien d'autre", cb.texte_compteur(3, 18) == "## 🧱 3/18")
+
+
+def menus(vue):
+    return [c for c in vue.children if isinstance(c, cb.BidMenu)]
+
+
+v = cb.vue_panneau(E)
+ms = menus(v)
+check("18 identités : UN menu, « 🧱 Choisis une identité… », custom_id bid:m:0, persistant",
+      len(ms) == 1 and ms[0].item.placeholder == cb.INTITULE and ms[0].item.custom_id == "bid:m:0"
+      and v.timeout is None and len(ms[0].item.options) == 18 and v.is_persistent(), [m.item.custom_id for m in ms])
+check("options : valeur = l'identité, libellé = nom + ➖/✅, ➖ d'abord",
+      [o.value for o in ms[0].item.options] == [x[0] for x in E]
+      and ms[0].item.options[0].label == "alba ➖" and ms[0].item.options[-1].label == "nora ✅")
+trente = [f"id{i:02d}" for i in range(30)]
+ms = menus(cb.vue_panneau(cb.entrees_panneau(trente, {"id00"})))
+check("30 identités : 2 menus (25 + 5), « 🧱 1–25… » puis « 🧱 26–30… »",
+      [len(m.item.options) for m in ms] == [25, 5] and [m.item.placeholder for m in ms] == ["🧱 1–25…", "🧱 26–30…"]
+      and [m.item.custom_id for m in ms] == ["bid:m:0", "bid:m:1"] and ms[1].item.options[-1].value == "id00", 
+      [m.item.placeholder for m in ms])
+cent30 = [f"identite{i:03d}" for i in range(130)]
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    v = cb.vue_panneau(cb.entrees_panneau(cent30, set()))
+check("130 identités : 5 menus au plus (5 rangées), les 5 de trop DITES au journal",
+      len(menus(v)) == 5 and all(len(m.item.options) == 25 for m in menus(v))
+      and "5 identité(s) au-delà de 5 menus" in journal.getvalue() and "identite129" in journal.getvalue(),
+      journal.getvalue())
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    E2 = cb.entrees_panneau(["bonne", "pas bonne", "x" * 90], set())
+check("nom inutilisable (espace, trop long pour la fenêtre) : non proposé, et dit",
+      [x[0] for x in E2] == ["bonne"] and journal.getvalue().count("inutilisable") == 2, journal.getvalue())
+ms = menus(cb.vue_panneau([]))
+check("aucune identité : un menu grisé « 🧱 Aucune identité US »",
+      len(ms) == 1 and ms[0].item.disabled and ms[0].item.placeholder == cb.INTITULE_VIDE)
+
+# le prefixe des custom_id : aucun chevauchement
+fichiers = subprocess.run(["git", "ls-files", "*.py", "*.js"], cwd=BOT, capture_output=True,
+                          text=True).stdout.split()
+motifs, litteraux, bid_ailleurs = [], set(), []
+for f in fichiers:
+    if f in ("cogs/bases_identite.py", "tests_bases_identite.py"):
+        continue
+    try:
+        t = (BOT / f).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        continue
+    motifs += re.findall(r'template\s*=\s*r?"([^"]+)"', t)
+    for lit in re.findall(r'custom_id\s*=\s*f?["\']([^"\']+)["\']', t):
+        litteraux.add(re.sub(r"\{[^}]*\}", "1", lit))
+    if re.search(r'["\']bid:', t):
+        bid_ailleurs.append(f)
+motifs += [r"annonce_post:(?P<tache>[a-z_]+)", r"annonce_comptes:(?P<jour>[0-9]{8})"]
+nos_ids = ["bid:m:0", "bid:m:4", "bid:f:ibenhaastrup:abcd1234", "bid:pp", "bid:fond", "bid:nom"]
+check(f"{len(motifs)} motifs dynamiques du dépôt : aucun ne prend un custom_id bid:",
+      len(motifs) >= 15 and not [(m, i) for m in motifs for i in nos_ids if re.fullmatch(m, i)])
+TPL = re.compile(cb.BidMenu.__discord_ui_compiled_template__.pattern)
+check(f"notre motif ne prend aucun des {len(litteraux)} custom_id littéraux du dépôt",
+      not [x for x in litteraux if TPL.fullmatch(x)])
+connus = ("jbus:", "jbg:", "jbmenu", "cmenu:", "cmenu2:", "genlink:", "spf:", "numgen:", "lien:",
+          "essai:", "usdc:", "copie:", "dl:", "sessions:", "annonce_",
+          "gdl" + ":")   # coupé : tests_generateur_lien veut « gdl: » chez lui seul
+check("préfixe bid: distinct de tous les préfixes publiés, employé nulle part ailleurs",
+      not any(p.startswith("bid") or "bid:".startswith(p) for p in connus)
+      and not any(x.startswith("bid:") for x in litteraux) and not bid_ailleurs, bid_ailleurs)
+check("toutes nos chaînes custom_id commencent par bid:",
+      all(v.startswith(cb.PREFIXE) for k, v in vars(cb).items() if k.startswith("CID_"))
+      and all(i.startswith(cb.PREFIXE) for i in nos_ids))
+check("une fenêtre au nom le plus long tient dans 100 signes",
+      len(cb.CID_FENETRE.format(ident="x" * 80, alea="abcd1234")) <= 100)
+
+
+class Reponse:
+    def __init__(self, inter):
+        self.inter, self.fait = inter, False
+
+    def is_done(self):
+        return self.fait
+
+    async def send_message(self, contenu=None, ephemeral=False, **kw):
+        self.fait = True
+        self.inter.dits.append((contenu, ephemeral))
+
+    async def send_modal(self, modal):
+        self.fait = True
+        self.inter.fenetres.append(modal)
+
+    async def defer(self, ephemeral=False, thinking=False):
+        self.fait = True
+        self.inter.attente = (ephemeral, thinking)
+
+
+class Suite:
+    def __init__(self, inter):
+        self.inter = inter
+
+    async def send(self, contenu=None, ephemeral=False, **kw):
+        self.inter.dits.append((contenu, ephemeral))
+
+
+class Inter:
+    def __init__(self, cog_, canal, admin=True, message=None, guilde=None):
+        self.dits, self.fenetres, self.attente, self.efface = [], [], None, False
+        self.response, self.followup = Reponse(self), Suite(self)
+        self.channel, self.message = canal, message
+        self.guild = guilde or canal.guild
+        self.user = Auteur(admin)
+        self.client = types.SimpleNamespace(get_cog=lambda nom: cog_ if nom == "BasesIdentite" else None)
+
+    async def delete_original_response(self):
+        self.efface = True
+
+
+def salon_us():
+    c = Canal("🧱・bases-identites")
+    g = Guilde(salons=[c])
+    c.guild = g
+    return c, g
+
+
+cog = cb.BasesIdentite(BOT_FAUX)
+cb.identites_us = lambda: list(DIX_HUIT)
+cb.emojis = lambda g, idents: {"ibenhaastrup": "🔥"} if "ibenhaastrup" in idents else {}
+remise()
+FR.a_la_main("lnk_t1", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+FR.a_la_main("lnk_t2", "TEMPLATE mini_caryn", "tplmini_caryn")
+FR.a_la_main("lnk_t3", "TEMPLATE nora", "tplnora")
+canal, gu = salon_us()
+BOT_FAUX.guilds = [gu]
+cog.repris.add(gu.id)
+asyncio.run(cog._entretien.coro(cog))
+poses = [e for e in canal.envoyes if e.get("view") is not None]
+pan = canal.historique[0] if canal.historique else None
+check("entretien : UN panneau posé, « ## 🧱 3/18 », sans autre texte, ni épinglé ni mentionnant",
+      len(canal.envoyes) == 1 and len(poses) == 1 and poses[0]["content"] == "## 🧱 3/18"
+      and poses[0].get("allowed_mentions") is not None and cb.est_panneau(pan, YOSHI), canal.envoyes)
+opts = [o for d in cb._dicts_a_plat(pan) for o in d.get("options") or []]
+check("… le menu : les 15 ➖ d'abord, puis ibenhaastrup ✅, mini_caryn ✅, nora ✅ ; emoji de l'identité",
+      [o["label"] for o in opts[-3:]] == ["ibenhaastrup ✅", "mini_caryn ✅", "nora ✅"]
+      and all(o["label"].endswith(" ➖") for o in opts[:15])
+      and next(o for o in opts if o["value"] == "ibenhaastrup").get("emoji", {}).get("name") == "🔥", opts[-4:])
+check("… les pages de base rangées dans TEMPLATES au passage (même liste, un appel)",
+      all(FR.liens[x]["group_id"] == b.groupe_connu() for x in ("lnk_t1", "lnk_t2", "lnk_t3"))
+      and len(outils("assign_links_to_group")) == 1, outils())
+n_listes = len(fg.listes)
+asyncio.run(cog._entretien.coro(cog))
+check("2e passage, rien de changé : ni reposté ni réédité, aucun appel de groupe de plus",
+      len(canal.envoyes) == 1 and not pan.edits and len(outils("assign_links_to_group")) == 1,
+      (canal.envoyes, pan.edits))
+FR.a_la_main("lnk_t4", "TEMPLATE alba", "tplalba")             # faite à la main entre-temps
+fg.cache["liens"] = None
+asyncio.run(cog._entretien.coro(cog))
+check("une page faite à la main : panneau RÉÉDITÉ (4/18, alba ✅), pas reposté",
+      len(canal.envoyes) == 1 and len(pan.edits) == 1 and pan.content == "## 🧱 4/18"
+      and "alba ✅" in [o["label"] for d in cb._dicts_a_plat(pan) for o in d.get("options") or []], pan.edits)
+double = Envoye(99999, "## 🧱 4/18", cb.vue_panneau(cb.entrees_panneau(DIX_HUIT, FAITES3)), canal)
+canal.historique.insert(0, double)                              # un 2e panneau, plus récent
+asyncio.run(cog.assurer_panneau(canal))
+check("deux panneaux (démarrages croisés) : le plus ANCIEN gardé, l'autre retiré",
+      double.supprime and not pan.supprime and len(canal.envoyes) == 1)
+fg.liste_suite[:] = [False]
+fg.cache["liens"] = None
+n_ed = len(pan.edits)
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    asyncio.run(cog._entretien.coro(cog))
+check("liste GetMySocial illisible : le panneau garde ce qu'il montre (pas de 0, pas de ➖ partout)",
+      len(pan.edits) == n_ed and pan.content == "## 🧱 4/18" and "laissé tel quel" in journal.getvalue(),
+      journal.getvalue())
+c2, g2 = salon_us()
+check("creer=False (création, « liste ») sans panneau : rien posté — c'est l'entretien qui le pose",
+      asyncio.run(cog.assurer_panneau(c2, creer=False)) == 0 and not c2.envoyes)
+
+# le choix d'une identite
+REPONSE.clear()
+REPONSE.update(ok=True, url="https://getmysocial.com/tplalba2", avertissement="")
+cb.bases.creer_base = faux_creer
+safe_json.write(b.REGISTRE, {"ibenhaastrup": {"link_id": "lnk_t1", "nom_affiche": "Iben ♡"}})
+i = Inter(cog, canal, admin=False, message=pan)
+asyncio.run(cog.choisir(i, "ibenhaastrup"))
+check("non-admin : refus éphémère, pas de fenêtre", not i.fenetres and i.dits == [("🔒 Réservé aux admins.", True)],
+      i.dits)
+autre = Canal("général")
+autre.guild = gu
+i = Inter(cog, autre, message=pan)
+asyncio.run(cog.choisir(i, "ibenhaastrup"))
+check("hors du salon : refus éphémère", not i.fenetres and i.dits and i.dits[0][1] is True, i.dits)
+i = Inter(cog, canal, message=pan, guilde=Guilde(gid=1505418484052394004, salons=[canal]))
+asyncio.run(cog.choisir(i, "ibenhaastrup"))
+check("hors du serveur US : refus éphémère", not i.fenetres and "US" in (i.dits or [("", 0)])[0][0], i.dits)
+i = Inter(cog, canal, message=pan)
+n_ed = len(pan.edits)
+
+
+async def _choisir_et_attendre(inter, ident):
+    await cog.choisir(inter, ident)
+    await asyncio.gather(*list(cog._taches))
+
+
+asyncio.run(_choisir_et_attendre(i, "ibenhaastrup"))
+f = i.fenetres[0] if i.fenetres else None
+kids = list(f.children) if f else []
+check("admin : la fenêtre est la PREMIÈRE réponse, titrée « 🧱 ibenhaastrup »",
+      f is not None and not i.dits and f.title == "🧱 ibenhaastrup" and f.custom_id.startswith("bid:f:ibenhaastrup:"),
+      (i.dits, f and f.title))
+check("… 2 envois de fichier OBLIGATOIRES (1 fichier chacun) : « Photo de profil », « Fond »",
+      len(kids) == 3 and [k.text for k in kids] == ["Photo de profil", "Fond", "Nom affiché"]
+      and all(isinstance(k.component, discord.ui.FileUpload) and k.component.required
+              and k.component.min_values == 1 and k.component.max_values == 1 for k in kids[:2])
+      and [k.component.custom_id for k in kids] == ["bid:pp", "bid:fond", "bid:nom"], [getattr(k, "text", k) for k in kids])
+check("… « Nom affiché » facultatif, pré-rempli avec le nom actuel (Iben ♡)",
+      isinstance(kids[2].component, discord.ui.TextInput) and kids[2].component.required is False
+      and kids[2].component.default == "Iben ♡", kids[2].component.default if len(kids) > 2 else None)
+check("… le menu reprend son intitulé (message réédité À L'IDENTIQUE, sans rien relire)",
+      len(pan.edits) == n_ed + 1 and cb.empreinte_message(pan)[1]
+      == cb.empreinte_vue("", cb.vue_du_message(pan))[1], pan.edits[-1:])
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.choisir(i, "alba"))
+check("identité sans page au registre : nom affiché vide", i.fenetres and i.fenetres[0].children[2].component.default is None)
+d = f.to_dict()
+check("fenêtre : 3 composants « label » (type 18), envois de fichier de type 19",
+      [c["type"] for c in d["components"]] == [18, 18, 18]
+      and [c["component"]["type"] for c in d["components"]] == [19, 19, 4], d["components"])
+
+# la soumission
+PP_D, FOND_D = Piece("pp.jpg", PP), Piece("fond.png", FOND, "image/png")
+canal.envoyes.clear()
+APPELS.clear()
+i = Inter(cog, canal, message=pan)
+res = asyncio.run(cog.soumettre(i, "alba", [PP_D], [FOND_D], "Alba ♡"))
+a0 = APPELS[0] if APPELS else {}
+check("soumission : creer_base hors de la boucle, 1re = photo de profil, 2e = fond, nom affiché, liste US",
+      a0.get("identite") == "alba" and a0.get("pp") == PP and a0.get("fond") == FOND
+      and a0.get("nom_affiche") == "Alba ♡" and a0.get("identites") == DIX_HUIT
+      and a0.get("thread") not in (None, threading.get_ident()) and "402069419393679370" in a0.get("par", ""),
+      {k: v for k, v in a0.items() if k not in ("pp", "fond")})
+check("… l'adresse SEULE dans le salon, sans aperçu ; l'attente éphémère effacée, aucun texte",
+      [e["content"] for e in canal.envoyes] == ["https://getmysocial.com/tplalba2"]
+      and canal.envoyes[0].get("suppress_embeds") is True and i.efface and not i.dits
+      and i.attente == (True, True), (canal.envoyes, i.dits))
+check("… le panneau rafraîchi sans relire GetMySocial (alba déjà ✅ : 4/18 inchangé)",
+      pan.content == "## 🧱 4/18")
+REPONSE.update(url="https://getmysocial.com/tplbella")
+n_l = len(fg.listes)
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "Bella", [PP_D], [FOND_D], ""))
+labels = [o["label"] for d in cb._dicts_a_plat(pan) for o in d.get("options") or []]
+check("nouvelle identité faite : le panneau passe à 5/18, bella ✅ (et quitte les ➖), sans relire la liste",
+      pan.content == "## 🧱 5/18" and "bella ✅" in labels and "bella ➖" not in labels
+      and labels.index("bella ✅") > max(k for k, x in enumerate(labels) if x.endswith(" ➖"))
+      and len(fg.listes) == n_l and APPELS[-1]["nom_affiche"] is None and APPELS[-1]["identite"] == "bella",
+      (pan.content, labels))
+REPONSE.update(ok=True, url="https://getmysocial.com/tplcora", avertissement="registre data/bases_identite_us.json non écrit")
+i = Inter(cog, canal, message=pan)
+canal.envoyes.clear()
+asyncio.run(cog.soumettre(i, "cora", [PP_D], [FOND_D], ""))
+check("avertissement : l'adresse seule dans le salon, ⚠️ à l'admin seul",
+      [e["content"] for e in canal.envoyes] == ["https://getmysocial.com/tplcora"]
+      and i.dits == [("⚠️ registre data/bases\\_identite\\_us.json non écrit", True)], i.dits)
+REPONSE.clear()
+REPONSE.update(ok=False, url="", erreur="limite du forfait GetMySocial atteinte : plus de page possible")
+canal.envoyes.clear()
+avant_c = pan.content
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "dina", [PP_D], [FOND_D], ""))
+check("échec : la raison en éphémère (❌ dina : …), rien dans le salon, panneau inchangé",
+      not canal.envoyes and i.dits == [("❌ dina : limite du forfait GetMySocial atteinte : plus de page possible", True)]
+      and pan.content == avant_c, i.dits)
+APPELS.clear()
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "dina", [PP_D], [Piece("contrat.pdf", b"%PDF", "application/pdf")], ""))
+check("fichier qui n'est pas une image : ❌ éphémère avec son nom, rien créé",
+      not APPELS and i.dits and "contrat.pdf" in i.dits[0][0] and i.dits[0][1] is True, i.dits)
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "dina", [], [FOND_D], ""))
+check("photo manquante : ❌ éphémère, rien créé", not APPELS and "1 photo de profil et 1 fond" in i.dits[0][0])
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "dinaa", [PP_D], [FOND_D], ""))
+check("identité retirée du menu US entre-temps : ❌ et les noms proches, rien créé",
+      not APPELS and "n'est plus une identité US" in i.dits[0][0] and "dina" in i.dits[0][0], i.dits)
+i = Inter(cog, canal, message=pan, admin=False)
+asyncio.run(cog.soumettre(i, "dina", [PP_D], [FOND_D], ""))
+check("soumise par un non-admin : refus, rien créé", not APPELS and i.dits == [("🔒 Réservé aux admins.", True)])
+cog.en_cours.add("dina")
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "dina", [PP_D], [FOND_D], ""))
+cog.en_cours.clear()
+check("même identité déjà en cours (fenêtre + message) : ❌, pas de 2e création",
+      not APPELS and "déjà en cours" in i.dits[0][0])
+
+# la fenetre elle-meme, puis reprise apres un redemarrage
+REPONSE.clear()
+REPONSE.update(ok=True, url="https://getmysocial.com/tpldina", avertissement="")
+fen = cb.FenetreBase("dina", "Dina")
+fen.pp.component._values = [PP_D]
+fen.fond.component._values = [FOND_D]
+fen.nom.component._value = "  Dina ♡ "
+canal.envoyes.clear()
+i = Inter(cog, canal, message=pan)
+asyncio.run(fen.on_submit(i))
+check("fenêtre validée : les 2 fichiers et le nom arrivent à la création",
+      APPELS and APPELS[-1]["identite"] == "dina" and APPELS[-1]["nom_affiche"] == "Dina ♡"
+      and APPELS[-1]["pp"] == PP and [e["content"] for e in canal.envoyes] == ["https://getmysocial.com/tpldina"],
+      APPELS[-1:])
+check("fenêtre ouverte par ce processus : retenue (discord.py s'en charge)", fen.custom_id in cb._OUVERTES)
+repris_ = []
+vrai_dispatch = cb.FenetreBase._dispatch_submit
+
+
+def faux_dispatch(self, interaction, components, resolved):
+    repris_.append((self.ident, self.custom_id, components, resolved))
+    return None
+
+
+cb.FenetreBase._dispatch_submit = faux_dispatch
+try:
+    def soumise(cid, typ=discord.InteractionType.modal_submit):
+        return types.SimpleNamespace(type=typ, data={"custom_id": cid, "components": [{"x": 1}],
+                                                      "resolved": {"attachments": {"1": {}}}})
+    asyncio.run(cog.on_interaction(soumise("bid:f:ema_bb0:abcd1234")))
+    check("fenêtre d'AVANT un redémarrage : reconstruite pour son identité, soumission rejouée",
+          repris_ == [("ema_bb0", "bid:f:ema_bb0:abcd1234", [{"x": 1}], {"attachments": {"1": {}}})], repris_)
+    repris_.clear()
+    asyncio.run(cog.on_interaction(soumise(fen.custom_id)))
+    asyncio.run(cog.on_interaction(soumise("gdl" + ":fen:1:abcd")))
+    asyncio.run(cog.on_interaction(soumise("bid:f:ema_bb0:abcd1234", discord.InteractionType.component)))
+    asyncio.run(cog.on_interaction(soumise("bid:f:pas bon:abcd")))
+    check("… pas une fenêtre de ce processus, ni d'un autre cog, ni un clic, ni un nom illisible",
+          repris_ == [], repris_)
+finally:
+    cb.FenetreBase._dispatch_submit = vrai_dispatch
+
+# le message « liste » et le message avec photos tiennent aussi le panneau a jour
+REPONSE.clear()
+REPONSE.update(ok=True, url="https://getmysocial.com/tplelsa", avertissement="")
+m = Message(f"<@{YOSHI}> elsa", DEUX, canal=canal, guilde=gu)
+APPELS.clear()
+asyncio.run(cog.on_message(m))
+check("par message (mention + 2 photos) : la page, puis le panneau à jour (elsa ✅)",
+      APPELS and "elsa ✅" in [o["label"] for d in cb._dicts_a_plat(pan) for o in d.get("options") or []],
+      pan.content)
+cog._etat = None
+FR.a_la_main("lnk_t9", "TEMPLATE fiona", "tplfiona")
+fg.cache["liens"] = None
+canal.envoyes.clear()
+asyncio.run(cog.on_message(Message("liste", [], canal=canal, guilde=gu)))
+check("« liste » : la liste postée, et le panneau suit le même état (fiona ✅), sans reposter",
+      canal.envoyes and canal.envoyes[0]["content"].startswith("✅ alba\n")
+      and all(e.get("view") is None for e in canal.envoyes)
+      and "fiona ✅" in [o["label"] for d in cb._dicts_a_plat(pan) for o in d.get("options") or []], canal.envoyes[:1])
+cb.bases.creer_base = vrai_creer
+
+# le cog se charge sans connexion, sans commande slash
+from discord.ext import commands as _cmds  # noqa: E402
+
+
+async def _charger():
+    bot_ = _cmds.Bot(command_prefix="!", intents=discord.Intents.none())
+    avant = len(bot_.tree.get_commands())
+    await bot_.load_extension("cogs.bases_identite")
+    c = bot_.get_cog("BasesIdentite")
+    dyn = list(getattr(bot_._connection, "_view_store")._dynamic_items.values())
+    out = (c is not None, len(bot_.tree.get_commands()) - avant, cb_mod_bidmenu(dyn))
+    await bot_.unload_extension("cogs.bases_identite")
+    await bot_.close()
+    return out
+
+
+def cb_mod_bidmenu(dyn):
+    return any(getattr(x, "__name__", "") == "BidMenu" for x in dyn)
+
+
+charge, ajoutees, rattache = asyncio.run(_charger())
+check("cog chargé par un vrai Bot sans connexion : 0 commande slash ajoutée, menu du panneau rattaché",
+      charge and ajoutees == 0 and rattache, (charge, ajoutees, rattache))
+cb.identites_us = lambda: list(IDENTITES)
 BOT_FAUX.guilds = []
 
 # la liste des identités : celle du menu US
@@ -1263,6 +2114,283 @@ if ancien_user is not None:
     sys.modules["cogs.user"] = ancien_user
 else:
     sys.modules.pop("cogs.user", None)
+
+# ═════════════════════════════════════════════════════════════════════════
+print("11) Corrections de la relecture du 06/10")
+import os                               # noqa: E402
+
+# --- le nom affiché d'une page faite à la main ---------------------------
+cb.bases.creer_base = vrai_creer
+remise()
+FR.a_la_main("lnk_main", "TEMPLATE ibenhaastrup", "ibenmain", name_user="Iben ♡ (main)", created=1790000000)
+FR.a_la_main("lnk_main2", "TEMPLATE ibenhaastrup", "ibenmain2", name_user="Autre", created=1790000500)
+faites, noms_aff, raison = b.etat_pages()
+check("etat_pages : le nom affiché de la page que les VA copient (la plus ancienne active), même faite à la main",
+      "ibenhaastrup" in faites and noms_aff.get("ibenhaastrup") == "Iben ♡ (main)" and not raison
+      and not b.REGISTRE.exists(), (faites, noms_aff, raison))
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+envoi = {k: v for k, v in FR.posts[-1]["data"].items() if k != "group_id"}
+check("photos refaites SANS nom : la page garde le nom de la base remplacée, pas « Emy ♡ » du modèle",
+      r["ok"] and FR.posts[-1]["data"]["name_user"] == "Iben ♡ (main)" and r["nom_affiche"] == "Iben ♡ (main)"
+      and b.base_de("ibenhaastrup")["nom_affiche"] == "Iben ♡ (main)" and "repris de la base" in journal.getvalue(),
+      (r, FR.posts[-1]["data"].get("name_user")))
+check("… seule cette valeur change dans la requête de l'essai",
+      envoi == champs_essai(MODELE, "tplibenhaastrup", "TEMPLATE ibenhaastrup", "Iben ♡ (main)"))
+r = b.creer_base("ibenhaastrup", PP, FOND, nom_affiche="Iben ✨", identites=IDENTITES)
+check("un nom donné l'emporte sur celui de la page", r["ok"] and FR.posts[-1]["data"]["name_user"] == "Iben ✨"
+      and r["nom_affiche"] == "Iben ✨", r)
+r = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
+check("aucune page avant : le nom du modèle, requête de l'essai inchangée",
+      r["ok"] and r["nom_affiche"] == MODELE["name_user"] and FR.posts[-1]["data"]["name_user"] == MODELE["name_user"])
+remise()
+safe_json.write(b.REGISTRE, {"mini_caryn": {"link_id": "lnk_c", "nom_affiche": "Caryn ♡"}})
+fg.liste_suite[:] = [False]
+faites, noms_aff, raison = b.etat_pages()
+check("liste illisible : faites ET noms affichés d'après le registre, raison dite",
+      faites == {"mini_caryn"} and noms_aff == {"mini_caryn": "Caryn ♡"} and raison, (faites, noms_aff, raison))
+
+cog = cb.BasesIdentite(BOT_FAUX)
+cb.identites_us = lambda: list(DIX_HUIT)
+remise()
+FR.a_la_main("lnk_alba", "TEMPLATE alba", "tplalba", name_user="Alba ♡")
+canal, gu = salon_us()
+BOT_FAUX.guilds = [gu]
+cog.repris.add(gu.id)
+asyncio.run(cog._entretien.coro(cog))
+pan = canal.historique[0]
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.choisir(i, "alba"))
+check("fenêtre d'une page faite À LA MAIN (absente du registre) : « Nom affiché » pré-rempli « Alba ♡ »",
+      not b.REGISTRE.exists() and i.fenetres and i.fenetres[0].children[2].component.default == "Alba ♡",
+      i.fenetres and i.fenetres[0].children[2].component.default)
+canal.envoyes.clear()
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "alba", [PP_D], [FOND_D], ""))
+check("validée sans nom : la page neuve garde « Alba ♡ », l'adresse seule dans le salon",
+      FR.posts and FR.posts[-1]["data"]["name_user"] == "Alba ♡"
+      and [e["content"] for e in canal.envoyes] == ["https://getmysocial.com/tplalba2"], canal.envoyes)
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "alba", [PP_D], [FOND_D], "Alba ✨"))
+n_l = len(fg.listes)
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.choisir(i, "alba"))
+check("renommée par la fenêtre : la suivante propose le NOUVEAU nom, sans relire la liste",
+      i.fenetres and i.fenetres[0].children[2].component.default == "Alba ✨"
+      and len(fg.listes) == n_l, fg.listes[n_l:])
+
+# --- une création par la fenêtre coupée par un redémarrage ----------------
+vu = {}
+
+
+def creer_espion(identite, pp, fond, nom_affiche=None, par="", identites=None):
+    vu["trace"] = json.loads(b.EN_COURS.read_text(encoding="utf-8"))
+    return {"ok": True, "url": "https://getmysocial.com/tplbella", "nom_affiche": ""}
+
+
+cb.bases.creer_base = creer_espion
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "bella", [PP_D], [FOND_D], ""))
+t = (vu.get("trace") or {}).get("bella") or {}
+check("pendant une création par la fenêtre : une trace sur disque (identité, salon, serveur, admin, processus)",
+      t.get("identite") == "bella" and t.get("channel_id") == canal.id and t.get("guild_id") == gu.id
+      and t.get("user_id") == 402069419393679370 and t.get("pid") == os.getpid(), vu)
+check("… effacée à la fin", "bella" not in cb._traces())
+cb.bases.creer_base = creer_casse
+with contextlib.redirect_stdout(io.StringIO()):
+    asyncio.run(cog.soumettre(Inter(cog, canal, message=pan), "bella", [PP_D], [FOND_D], ""))
+check("… effacée aussi après une exception", "bella" not in cb._traces())
+safe_json.write(b.EN_COURS, {
+    "cora": {"identite": "cora", "guild_id": gu.id, "channel_id": canal.id, "pid": os.getpid() + 1,
+             "quand": int(time.time()) - 30},
+    "dina": {"identite": "dina", "guild_id": gu.id, "pid": os.getpid()},           # ce processus : en cours
+    "elsa": {"identite": "elsa", "guild_id": 1505418484052394004, "pid": os.getpid() + 1}})
+cog2 = cb.BasesIdentite(BOT_FAUX)
+canal.envoyes.clear()
+asyncio.run(cog2._entretien.coro(cog2))
+lignes_ = [e["content"] for e in canal.envoyes if e.get("view") is None]
+check("redémarrage pendant une création par la fenêtre : la ligne du flux par message, dans le salon",
+      lignes_ == ["❌ cora : interrompu par un redémarrage du bot — refais-le (une page créée entre-temps "
+                  "sera coupée)"], lignes_)
+check("… sa trace retirée ; celle de CE processus (en cours) et celle d'un autre serveur gardées",
+      set(cb._traces()) == {"dina", "elsa"}, cb._traces())
+asyncio.run(cog2._entretien.coro(cog2))
+check("… dite une seule fois", len([e for e in canal.envoyes if e.get("view") is None]) == 1)
+b.EN_COURS.unlink()
+
+# --- page créée mais action à faire : dans le salon ----------------------
+cb.bases.creer_base = faux_creer
+REPONSE.clear()
+REPONSE.update(ok=False, url="https://getmysocial.com/tplnanas__nyspam2", manuel=True,
+               erreur="https://getmysocial.com/tplnanas__nyspam2 créée, mais tplnanas__nyspam pas désactivée "
+                      "(HTTP 500) : la nouvelle base ne sera PAS utilisée pour les VA tant que tplnanas__nyspam "
+                      "est active — la couper dans GetMySocial")
+canal.envoyes.clear()
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "nanas__nyspam", [PP_D], [FOND_D], ""))
+env = canal.envoyes[0] if canal.envoyes else {}
+check("page créée mais l'ancienne PAS coupée : adresse + consigne GARDÉES dans le salon (comme par message)",
+      len(canal.envoyes) == 1 and env["content"].startswith("❌ nanas\\_\\_nyspam : ")
+      and "https://getmysocial.com/tplnanas__nyspam2" in env["content"] and "la couper dans GetMySocial" in env["content"]
+      and env.get("suppress_embeds") is True and i.efface and not i.dits, (canal.envoyes, i.dits))
+check("… le panneau la marque ✅ (la page existe)",
+      "nanas__nyspam ✅" in [o["label"] for d in cb._dicts_a_plat(pan) for o in d.get("options") or []])
+REPONSE.clear()
+REPONSE.update(ok=False, url="", manuel=True,
+               erreur="page créée mais fond absent : désactivée, et elle s'appelle encore « TEMPLATE gina » "
+                      "(HTTP 500) : le module VA peut la copier — à renommer ou couper dans GetMySocial (lnk_x)")
+canal.envoyes.clear()
+i = Inter(cog, canal, message=pan)
+asyncio.run(cog.soumettre(i, "gina", [PP_D], [FOND_D], ""))
+check("page rejetée pas renommée (à faire à la main) : dans le salon aussi",
+      len(canal.envoyes) == 1 and "à renommer ou couper" in canal.envoyes[0]["content"] and not i.dits, i.dits)
+cb.bases.creer_base = vrai_creer               # cb.bases EST b : la doublure s'arrête ici
+remise()
+FR.a_la_main("lnk_old", "TEMPLATE ibenhaastrup", "tplold")
+fg.etat["disable_ok"] = False
+r = vrai_creer("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("creer_base : ancienne pas coupée -> url, ok faux, manuel", not r["ok"] and r["url"] and r["manuel"], r)
+remise()
+fg.etat["maj_ok"] = False
+FR.rep_post = [lambda d: FR.creer(d, profile_picture=MODELE["profile_picture"])]
+with contextlib.redirect_stdout(io.StringIO()):
+    r = vrai_creer("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("creer_base : page rejetée pas renommée -> manuel", not r["ok"] and r["manuel"] and "s'appelle encore" in r["erreur"], r)
+remise()
+with contextlib.redirect_stdout(io.StringIO()):
+    r = vrai_creer("ibenhaastrup", PP, b"pas une image", identites=IDENTITES)
+check("creer_base : photo illisible -> rien à faire à la main (éphémère)", not r["ok"] and not r["manuel"], r)
+
+# --- page rejetée : le renommage ne dépend plus du groupe -----------------
+remise()
+fg.etat["remove_ok"] = False
+FR.rep_post = [lambda d: FR.creer(d, profile_picture=MODELE["profile_picture"])]
+with contextlib.redirect_stdout(io.StringIO()):
+    r = vrai_creer("ibenhaastrup", PP, FOND, identites=IDENTITES)
+lid = "lnk_" + "0" * 23 + "1"
+check("page rejetée, sortie du groupe refusée : RENOMMÉE quand même (le module VA ne la copie plus)",
+      FR.liens[lid]["display_name"].startswith("REJET TEMPLATE ibenhaastrup ")
+      and FR.liens[lid]["status"] == "inactive" and "s'appelle encore" not in r["erreur"] and not r["manuel"], r)
+fg.etat["remove_ok"] = True
+fg.outils.clear()
+with contextlib.redirect_stdout(io.StringIO()):
+    bilan = b.ranger_templates()
+check("… et l'entretien la sort du groupe (page rejetée = preuve)",
+      bilan["sortis"] == [lid] and FR.liens[lid]["group_id"] is None, bilan)
+
+# --- POST refusé en group_not_found alors que le groupe existe ------------
+remise()
+b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+gid0 = b.groupe_connu()
+FR.refus_groupe = (404, "group_not_found")       # le POST ne résout pas le groupe ; il existe
+n_p = len(FR.posts)
+fg.outils.clear()
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    r = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
+check("POST refusé (group_not_found), groupe intact : rangée par assign dans le MÊME groupe, ni oublié ni "
+      "recherché",
+      r["ok"] and len(FR.posts) - n_p == 2 and [n for n, _ in outils()] == ["assign_links_to_group"]
+      and b.groupe_connu() == gid0 and FR.liens[r["link_id"]]["group_id"] == gid0
+      and "introuvable" not in journal.getvalue(), (outils(), journal.getvalue()))
+check("… le refus du champ retenu", not b.post_avec_groupe()
+      and b._etat_groupe().get("post_refuse", {}).get("code") == "group_not_found")
+n_p = len(FR.posts)
+fg.outils.clear()
+r = b.creer_base("ema_bb0", PP, FOND, identites=IDENTITES)
+check("création suivante : 1 POST sans group_id + 1 assign (2 appels au lieu de 4)",
+      r["ok"] and len(FR.posts) - n_p == 1 and "group_id" not in FR.posts[-1]["data"]
+      and [n for n, _ in outils()] == ["assign_links_to_group"], (len(FR.posts) - n_p, outils()))
+
+# --- refus de droits (403) retenus ----------------------------------------
+remise()
+fg.etat["create_ok"] = False
+with contextlib.redirect_stdout(io.StringIO()):
+    g1 = b.assurer_groupe()
+n1 = len(fg.outils)
+journal = io.StringIO()
+with contextlib.redirect_stdout(journal):
+    g2 = b.assurer_groupe()
+    for _ in range(2):
+        b.ranger_templates([{"id": "lnk_x1", "display_name": "TEMPLATE ibenhaastrup", "group_id": None}])
+check("create_group refusé (403) : retenu, entretiens et besoins suivants SANS appel, dit une fois",
+      n1 == 2 and len(fg.outils) == 2 and g2[0] == "" and "pas réessayé avant" in g2[1]
+      and journal.getvalue().count("plus essayé avant") == 1, (fg.outils, g2, journal.getvalue()))
+with contextlib.redirect_stdout(io.StringIO()):
+    r = b.creer_base("ibenhaastrup", PP, FOND, identites=IDENTITES)
+check("… une création non plus : page créée hors groupe (la requête de l'essai), aucun appel de groupe",
+      r["ok"] and len(fg.outils) == 2 and "group_id" not in FR.posts[-1]["data"], fg.outils)
+d = b._etat_groupe()
+d["droits_refuses"]["create_group"]["quand"] -= b.REFUS_DROITS_S + 10
+d["equipe"] = "tm_" + EQUIPE_SANS_TM          # le fichier garde ses autres clés en retenant l'id
+safe_json.write(b.GROUPE, d)
+b._DROITS_MEMOIRE.clear()
+fg.etat["create_ok"] = True
+with contextlib.redirect_stdout(io.StringIO()):
+    g3 = b.assurer_groupe()
+check("un jour après : réessayé ; passé, le refus est effacé",
+      g3[0] and not (b._etat_groupe().get("droits_refuses") or {}).get("create_group"), (g3, b._etat_groupe()))
+remise()
+gid, _ = b.assurer_groupe()
+fg.etat["assign_err"] = ["Error 403 (team_permission_denied): manage_groups required"]
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+fg.outils.clear()
+with contextlib.redirect_stdout(io.StringIO()):
+    b1 = b.ranger_templates()
+    b2 = b.ranger_templates()
+    FR.groupe_muet = True
+    r = b.creer_base("mini_caryn", PP, FOND, identites=IDENTITES)
+check("assign refusé (403) : retenu, un seul appel pour deux entretiens et une création",
+      len(outils("assign_links_to_group")) == 1 and not b2["ok"] and "pas réessayé" in b2["erreur"]
+      and r["ok"] and r["groupe"]["ok"] is False, (outils(), b2))
+remise()
+gid, _ = b.assurer_groupe()
+fg.etat["assign_err"] = ["HTTP 500 : panne"]
+FR.a_la_main("lnk_t", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+with contextlib.redirect_stdout(io.StringIO()):
+    b.ranger_templates()
+    b.ranger_templates()
+check("une panne (500) n'est PAS retenue : réessayée au passage suivant",
+      len(outils("assign_links_to_group")) == 2 and not b._etat_groupe().get("droits_refuses"))
+
+# --- l'entretien au rang « fond » ------------------------------------------
+prio = next((ast.literal_eval(n.value) for n in ast.parse((BOT / "gms.py").read_text(encoding="utf-8")).body
+             if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PRIORITES"
+                                                  for t in n.targets)), {})
+check("gms.PRIORITES : l'étiquette de l'entretien est « fond », celle d'une création reste « normal »",
+      prio.get(b.ETIQUETTE_FOND) == "fond" and prio.get(b.ETIQUETTE, "normal") == "normal", prio)
+remise()
+FR.a_la_main("lnk_t1", "TEMPLATE ibenhaastrup", "tplibenhaastrup")
+canal, gu = salon_us()
+BOT_FAUX.guilds = [gu]
+cog3 = cb.BasesIdentite(BOT_FAUX)
+cog3.repris.add(gu.id)
+asyncio.run(cog3._entretien.coro(cog3))
+tags = {x[2] for x in fg.listes} | {t for _, _, t in fg.outils} | set(fg.tags_budget)
+check("entretien : liste de l'équipe, groupe et budget lus sous « bases-us-fond »",
+      tags == {"bases-us-fond"} and outils("assign_links_to_group") and fg.listes, tags)
+check("… rien ne déborde du fil de l'entretien", b._etiquette() == "bases-us")
+fg.listes.clear()
+fg.outils.clear()
+fg.tags_budget.clear()
+cb.bases.creer_base = vrai_creer
+i = Inter(cog3, canal, message=canal.historique[0])
+asyncio.run(cog3.soumettre(i, "mini_caryn", [PP_D], [FOND_D], ""))
+check("une création reste au rang normal (« bases-us » : l'admin attend)",
+      {x[2] for x in fg.listes} | set(fg.tags_budget) | {t for _, _, t in fg.outils} == {"bases-us"}
+      and FR.posts[-1]["tag"] == "bases-us", ({x[2] for x in fg.listes}, set(fg.tags_budget)))
+canal.envoyes.clear()
+fg.listes.clear()
+asyncio.run(cog3.on_message(Message("liste", [], canal=canal, guilde=gu)))
+check("« liste » aussi (l'admin attend la réponse)", fg.listes and {x[2] for x in fg.listes} == {"bases-us"},
+      fg.listes)
+cb.identites_us = lambda: list(IDENTITES)
+BOT_FAUX.guilds = []
+
+check("isolation : le vrai data/ (créations en cours, registre des copies de VA) n'est pas touché",
+      all(_etat_fichier(p) == v for p, v in VRAIS_AVANT.items()),
+      {str(p): (_etat_fichier(p), v) for p, v in VRAIS_AVANT.items()})
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

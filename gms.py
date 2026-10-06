@@ -319,6 +319,9 @@ _BUDGET_LOCK = _threading.Lock()
 PRIORITES = {
     "podium": "paie", "paie": "paie", "prime": "paie", "report": "paie",
     "dashboard": "fond", "widget-vas": "fond", "warm": "fond",
+    # l'entretien du salon des bases US (compteur, groupe TEMPLATES) :
+    # cosmetique, personne n'attend -- bases_identite_us.ETIQUETTE_FOND
+    "bases-us-fond": "fond",
 }
 #: EN DESSOUS, ON NE CROIT PAS CE QU ON MESURE. Notre compteur ne vaut que
 #: s'il a tourne toute la fenetre. Au premier demarrage — ou apres une remise a

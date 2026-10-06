@@ -74,10 +74,16 @@ import clics_personnes as cp  # noqa: E402
 import podium_discord as pd  # noqa: E402
 import liens_identite_us as liu  # noqa: E402
 
+import bases_identite_us as biu  # noqa: E402
+
 gms._BUDGET_FICHIER = TMP / "gms_budget.json"
 gms.CONFIG_FILE = TMP / "gms_config.json"
 liu.REGISTRE = TMP / "liens_identite_us.json"
+# l'id du groupe TEMPLATES : le fichier de bases_identite_us, ici dans le
+# dossier temporaire (jamais celui de data/)
+biu.GROUPE = TMP / "bases_identite_us_groupe.json"
 EQ = liu.EQUIPE
+GTPL = "grp_" + "7e" * 12
 
 # ─── les 46 vrais liens de JESSY LE RETOUR (lus le 06/10/2026) ───────────
 # (nom, shortcode, id, code du suivi c<N>, created). Tous des liens DIRECTS
@@ -215,6 +221,13 @@ class FauxGMS:
         self.fige = None               # une liste « en cache », perimee
         self.lent = 0.0
         self.n = 0
+        self.dup_sans_groupe = False       # duplicate_link ne recopie PAS le groupe
+        self.update_ignore_groupe = 0      # update_link n'applique pas group_id
+        self.update_sans_groupe = 0        # reponse d'update_link sans la cle group_id
+        self.refus_remove = False
+        self.refus_groupe_vide = False     # update_link refuse group_id "" (jamais essaye en vrai)
+        self.update_hors_equipe = 0        # reponse lue hors de l'equipe : team_id et group_id null
+        self.refus_remove_403 = False      # cle sans manage_groups
 
     def _tag(self):
         self.tags.append(getattr(gms._API_LOCAL, "tag", None))
@@ -261,6 +274,8 @@ class FauxGMS:
             neuf = copy.deepcopy(src)
             neuf.update(id=f"lnk_copie{self.n:03d}", shortcode=sc, display_name=args["display_name"],
                         created=int(time.time()) + self.n, team_id=args.get("team_id") or src["team_id"])
+            if self.dup_sans_groupe:
+                neuf["group_id"] = None
             self.liens[neuf["id"]] = neuf
             if self.rejouer_dup:
                 # ce que voit _call_tool_brut quand il rejoue l'appel apres un
@@ -280,6 +295,8 @@ class FauxGMS:
             if self.refus_update:
                 self.refus_update -= 1
                 return {"ok": False, "error": "HTTP 500 : erreur interne"}
+            if self.refus_groupe_vide and args.get("group_id") == "":
+                return {"ok": False, "error": "Error 400 (invalid_group_id): group_id must be a grp_ id"}
             for k, v in args.items():
                 if k in ("link_id", "team_id"):
                     continue
@@ -288,13 +305,36 @@ class FauxGMS:
                 if k in ("typeLink", "type"):
                     l["_type_demande"] = v
                     continue
+                if k == "group_id":
+                    if self.update_ignore_groupe:
+                        continue
+                    l[k] = v or None              # null ou "" : degroupe (doc)
+                    continue
                 l[k] = copy.deepcopy(v)
             if self.update_ignore_boutons:
                 self.update_ignore_boutons -= 1
+            if self.update_ignore_groupe:
+                self.update_ignore_groupe -= 1
             if self.update_sans_corps:
                 self.update_sans_corps -= 1
                 return {"ok": True, "data": {"id": l["id"], "updated": True}}
+            if self.update_sans_groupe:
+                self.update_sans_groupe -= 1
+                return {"ok": True, "data": {k: copy.deepcopy(v) for k, v in l.items() if k != "group_id"}}
+            if self.update_hors_equipe:
+                self.update_hors_equipe -= 1
+                return {"ok": True, "data": {**copy.deepcopy(l), "team_id": None, "group_id": None}}
             return {"ok": True, "data": copy.deepcopy(l)}
+        if nom == "remove_links_from_group":
+            if self.refus_remove:
+                return {"ok": False, "error": "HTTP 500 : erreur interne"}
+            if self.refus_remove_403:
+                return {"ok": False, "error": "Error 403 (team_permission_denied): manage_groups required"}
+            for lid in args.get("link_ids") or []:
+                l = self.liens.get(lid)
+                if l is not None and l.get("group_id") == args.get("group_id"):
+                    l["group_id"] = None
+            return {"ok": True, "data": {"removed": len(args.get("link_ids") or [])}}
         if nom == "enable_link":
             l = self.liens.get(args.get("link_id"))
             if not l:
@@ -944,6 +984,186 @@ try:
           liu.est_base("TEMPLATE x") and liu.est_base("Tempalte x")
           and not any(liu.est_base(n) for n in ("Temple 1", "Templeton 2", "(Teamplayer) 1",
                                                 "Twitter VA 5 @teamplayer")))
+
+    # ═══ 7b. le groupe TEMPLATES : une copie de VA n'y reste pas ════════
+    print("\n— groupe TEMPLATES —")
+    neuf_gms()
+    for uid_, sc_ in ((111, "msgejessye"), (222, "crtejessye"), (333, "bertjessye"), (444, "moanjessye"),
+                      (555, "yzdjessye"), (888, "trsvjessye")):
+        assert liu.definir_global(uid_, sc_, "admin1")["ok"], uid_
+    check("sans id de groupe connu : groupe_templates() vide, sans appel",
+          liu.groupe_templates() == "" and not biu.GROUPE.exists())
+    for lid in ("lnk_base_arii", "lnk_base_iben", "lnk_base_zeza"):
+        F.liens[lid]["group_id"] = GTPL
+    safe_json.write(biu.GROUPE, {"equipe": EQ, "id": GTPL, "nom": "TEMPLATES"})
+    check("l'id du groupe : celui que bases_identite_us a gardé (un seul fichier, aucun appel)",
+          liu.groupe_templates() == GTPL)
+
+    def sequence():
+        return [a[0] for a in F.appels if a[0] != "list"]
+
+    # A. duplicate_link recopie le groupe de la page de base
+    F.appels.clear()
+    r = liu.creer_pour_identite(111, "ariiiann__", "111")
+    maj = F.outils("update_link")
+    check("A. copie héritée du groupe TEMPLATES : sortie DANS l'appel des boutons (group_id \"\", équipe)",
+          r["ok"] and len(maj) == 1 and maj[0][1].get("group_id") == "" and maj[0][1].get("team_id") == EQ
+          and "buttons" in maj[0][1] and not F.liens[r["link_id"]].get("group_id"), (r, maj))
+    check("A. … aucun appel de plus qu'une copie sans groupe (lecture base, copie, lecture, écriture)",
+          sequence() == ["get_link", "duplicate_link", "get_link", "update_link"], sequence())
+    check("A. … vérifié sur la réponse d'update_link, rien à signaler",
+          not [x for x in r["soucis"] if "TEMPLATES" in x], r["soucis"])
+    check("A. … la page de base, elle, reste dans le groupe", F.liens["lnk_base_arii"]["group_id"] == GTPL)
+    # B. duplicate_link ne recopie pas le groupe
+    F.appels.clear()
+    F.dup_sans_groupe = True
+    r = liu.creer_pour_identite(222, "ariiiann__", "222")
+    F.dup_sans_groupe = False
+    maj = F.outils("update_link")
+    check("B. copie hors groupe : group_id absent de l'écriture (son groupe n'est pas touché), mêmes appels",
+          r["ok"] and len(maj) == 1 and "group_id" not in maj[0][1]
+          and sequence() == ["get_link", "duplicate_link", "get_link", "update_link"]
+          and F.liens[r["link_id"]].get("group_id") is None, (sequence(), maj))
+    # C. la reponse d'update_link ne dit pas le groupe : UNE lecture pour verifier
+    F.appels.clear()
+    F.update_sans_groupe = 1
+    r = liu.creer_pour_identite(333, "ariiiann__", "333")
+    check("C. réponse sans group_id : une lecture de vérification, copie bien sortie",
+          r["ok"] and sequence() == ["get_link", "duplicate_link", "get_link", "update_link", "get_link"]
+          and not F.liens[r["link_id"]].get("group_id"), sequence())
+    # D. update_link n'a pas degroupe : remove_links_from_group
+    F.appels.clear()
+    F.update_ignore_groupe = 1
+    r = liu.creer_pour_identite(444, "ariiiann__", "444")
+    rem = F.outils("remove_links_from_group")
+    check("D. encore dans TEMPLATES après update_link : remove_links_from_group, puis dehors",
+          r["ok"] and rem == [("remove_links_from_group", {"group_id": GTPL, "link_ids": [r["link_id"]],
+                                                           "team_id": EQ})]
+          and F.liens[r["link_id"]].get("group_id") is None
+          and any("remove_links_from_group" in x for x in r["soucis"]), (rem, r["soucis"]))
+    # E. et si meme ca echoue : l'adresse est donnee (boutons branches), c'est dit
+    F.appels.clear()
+    F.update_ignore_groupe = 1
+    F.refus_remove = True
+    r = liu.creer_pour_identite(555, "ariiiann__", "555")
+    F.refus_remove = False
+    check("E. sortie impossible : l'adresse est quand même donnée (ses boutons visent SON suivi), souci dit",
+          r["ok"] and r["url"] and F.liens[r["link_id"]]["group_id"] == GTPL
+          and any("encore dans le groupe TEMPLATES" in x for x in r["soucis"])
+          and (reg()["liens"].get("555:ariiiann__") or {}).get("etat") == "ok", (r, r["soucis"]))
+    F.liens[r["link_id"]]["group_id"] = None
+    # F. une reparation d'un lien de VA rangé ailleurs : son groupe ne bouge pas
+    lid_f = (reg()["liens"].get("111:ariiiann__") or {}).get("link_id")
+    F.liens[lid_f]["group_id"] = "grp_" + "51" * 12
+    F.liens[lid_f]["buttons"][0]["url"] = OF % 999              # a rebrancher
+    F.appels.clear()
+    ok_f, err_f, _s = liu._brancher(lid_f, OF % 117, F.liens[lid_f]["display_name"])
+    maj = F.outils("update_link")
+    check("F. lien de VA dans SON groupe (pas TEMPLATES) : rebranché, groupe intact, group_id jamais écrit",
+          ok_f and len(maj) == 1 and "group_id" not in maj[0][1]
+          and F.liens[lid_f]["group_id"] == "grp_" + "51" * 12, (err_f, maj))
+    # G. une copie deja branchee mais restee dans TEMPLATES (avant ce correctif)
+    F.liens[lid_f]["group_id"] = GTPL
+    F.appels.clear()
+    ok_g, err_g, _s = liu._brancher(lid_f, OF % 117, F.liens[lid_f]["display_name"])
+    maj = F.outils("update_link")
+    check("G. copie déjà juste mais dans TEMPLATES : une écriture (nom + group_id \"\") la sort",
+          ok_g and len(maj) == 1 and maj[0][1].get("group_id") == "" and "buttons" not in maj[0][1]
+          and not F.liens[lid_f].get("group_id"), (err_g, maj))
+    F.appels.clear()
+    ok_g2, _e, _s = liu._brancher(lid_f, OF % 117, F.liens[lid_f]["display_name"])
+    check("G. … ensuite : une lecture seulement, rien écrit", ok_g2 and sequence() == ["get_link"], sequence())
+    # I. update_link REFUSE group_id "" : les boutons ne doivent pas en dependre
+    for uid_, sc_ in ((901, "secretjessye"), (902, "loveejessye"), (903, "lovejessye"), (904, "cutxjessye"),
+                      (905, "cutejessye"), (906, "crerjessye")):
+        assert liu.definir_global(uid_, sc_, "admin1")["ok"], uid_
+    F.appels.clear()
+    F.tags.clear()
+    F.refus_groupe_vide = True
+    r = liu.creer_pour_identite(901, "ariiiann__", "901")
+    maj = F.outils("update_link")
+    check("I. group_id \"\" REFUSÉ par update_link : l'écriture refaite SANS lui, l'adresse donnée, boutons branchés",
+          r["ok"] and r["url"] and len(maj) == 2 and maj[0][1].get("group_id") == "" and "group_id" not in maj[1][1]
+          and maj[0][1]["buttons"] == maj[1][1]["buttons"]
+          and (reg()["liens"].get("901:ariiiann__") or {}).get("etat") == "ok", (r, maj))
+    check("I. … la copie sortie par remove_links_from_group (1 appel), puis hors du groupe",
+          sequence() == ["get_link", "duplicate_link", "get_link", "update_link", "update_link",
+                         "remove_links_from_group"]
+          and F.liens[r["link_id"]].get("group_id") is None, sequence())
+    i_rem = next(k for k, a_ in enumerate(F.appels) if a_[0] == "remove_links_from_group")
+    check("I. … le remove garde l'étiquette du VA (rang normal, son clic attend)",
+          F.tags[i_rem] == liu.ETIQUETTE, F.tags)
+    check("I. … le refus retenu (bases_identite_us, même fichier que l'id du groupe)",
+          not biu.degrouper_par_maj() and "invalid_group_id" in biu._etat_groupe().get("maj_refuse", {}).get("erreur", ""))
+    # J. le refus retenu : plus de group_id dans l'ecriture, remove directement
+    F.appels.clear()
+    r = liu.creer_pour_identite(902, "ariiiann__", "902")
+    maj = F.outils("update_link")
+    check("J. refus retenu : une seule écriture (sans group_id) puis remove, aucun appel raté",
+          r["ok"] and len(maj) == 1 and "group_id" not in maj[0][1]
+          and sequence() == ["get_link", "duplicate_link", "get_link", "update_link", "remove_links_from_group"]
+          and F.liens[r["link_id"]].get("group_id") is None, sequence())
+    F.refus_groupe_vide = False
+    d_ = biu._etat_groupe()
+    d_.pop("maj_refuse", None)
+    safe_json.write(biu.GROUPE, d_)
+    # K. une panne passagere (500) avec group_id : refait sans lui, PAS retenue
+    F.appels.clear()
+    F.refus_update = 1
+    r = liu.creer_pour_identite(903, "ariiiann__", "903")
+    check("K. panne (500) sur l'écriture avec group_id : refaite sans lui, copie sortie, refus NON retenu",
+          r["ok"] and sequence() == ["get_link", "duplicate_link", "get_link", "update_link", "update_link",
+                                     "remove_links_from_group"]
+          and F.liens[r["link_id"]].get("group_id") is None and biu.degrouper_par_maj(), sequence())
+    # L. la reponse d'update_link lue hors de l'equipe (group_id null) alors que la copie y est encore
+    F.appels.clear()
+    F.update_ignore_groupe = 1
+    F.update_hors_equipe = 1
+    r = liu.creer_pour_identite(904, "ariiiann__", "904")
+    check("L. réponse hors du contexte de l'équipe (team_id null) : pas crue, relue dans l'équipe, puis remove",
+          r["ok"] and sequence() == ["get_link", "duplicate_link", "get_link", "update_link", "get_link",
+                                     "remove_links_from_group"]
+          and F.liens[r["link_id"]].get("group_id") is None, sequence())
+    # M. remove refuse pour droits (403) : retenu, la copie suivante ne le repaie pas
+    F.appels.clear()
+    F.update_ignore_groupe = 2
+    F.refus_remove_403 = True
+    r1 = liu.creer_pour_identite(905, "ariiiann__", "905")
+    r2 = liu.creer_pour_identite(906, "ariiiann__", "906")
+    F.refus_remove_403 = False
+    check("M. remove refusé (403) : l'adresse est donnée, le refus retenu, la copie suivante sans remove",
+          r1["ok"] and r2["ok"] and len(F.outils("remove_links_from_group")) == 1
+          and any("pas réessayé" in x for x in r2["soucis"]), (F.outils("remove_links_from_group"), r2["soucis"]))
+    biu._DROITS_MEMOIRE.clear()
+    d_ = biu._etat_groupe()
+    d_.pop("droits_refuses", None)
+    safe_json.write(biu.GROUPE, d_)
+    for lid_ in (r1["link_id"], r2["link_id"]):
+        F.liens[lid_]["group_id"] = None
+    # N. copie deja branchee, seul le groupe a changer, group_id "" refuse : pas de 2e ecriture vide
+    lid_n = (reg()["liens"].get("901:ariiiann__") or {}).get("link_id")
+    F.liens[lid_n]["group_id"] = GTPL
+    F.refus_groupe_vide = True
+    F.appels.clear()
+    ok_n, err_n, soucis_n = liu._brancher(lid_n, F.liens[lid_n]["buttons"][0]["url"], F.liens[lid_n]["display_name"])
+    F.refus_groupe_vide = False
+    check("N. seul le groupe à changer, group_id refusé : aucune écriture vide refaite, remove seul",
+          ok_n and sequence() == ["get_link", "update_link", "remove_links_from_group"]
+          and F.liens[lid_n].get("group_id") is None, (err_n, sequence()))
+    d_ = biu._etat_groupe()
+    d_.pop("maj_refuse", None)
+    safe_json.write(biu.GROUPE, d_)
+    # H. sans id de groupe connu : rien n'est decide ici (l'entretien des bases sort les intrus)
+    biu.GROUPE.unlink()
+    biu._GROUPE_MEMOIRE.update(equipe="", id="")
+    F.appels.clear()
+    r = liu.creer_pour_identite(888, "ariiiann__", "888")
+    maj = F.outils("update_link")
+    check("H. groupe TEMPLATES inconnu : la copie n'est pas dégroupée à l'aveugle",
+          r["ok"] and "group_id" not in maj[0][1], maj)
+    for lid in ("lnk_base_arii", "lnk_base_iben", "lnk_base_zeza"):
+        F.liens[lid]["group_id"] = None
+    check("aucune suppression pendant tout ça", not F.outils("delete_links"))
 
     # ═══ 8. gms : les deux aides ajoutées ═══════════════════════════════
     print("\n— gms.get_link / gms.update_link —")

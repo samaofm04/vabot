@@ -53,6 +53,19 @@ LE GLOBAL CHANGE
     d'un VA PARTI se reprend (definir_global(partis=...)) ; ses pages restent
     sur ce meme lien, donc chez son heritier.
 
+LE GROUPE « TEMPLATES »
+    Les pages de base sont rangees dans le groupe GetMySocial « TEMPLATES »
+    de l'equipe (bases_identite_us : « stocker quelque part uniquement les
+    templates »). Personne ne sait si duplicate_link recopie le groupe de la
+    page source : une copie qui se relit DANS ce groupe en sort, dans l'appel
+    update_link qui branche ses boutons (group_id "", aucun appel de plus),
+    et c'est verifie sur la reponse. Ce champ n'a jamais ete essaye en vrai :
+    s'il fait refuser l'ecriture, elle est refaite SANS lui (les boutons
+    d'abord : un refus du groupe bloquait sinon tout VA, a vie) et la copie
+    sort par remove_links_from_group ; le refus est retenu un mois
+    (bases_identite_us.degrouper_par_maj). Le groupe de tout autre lien
+    n'est jamais touche.
+
 RIEN N'EST SUPPRIME
     delete_links est definitif, sans corbeille. Une copie dont les boutons
     n'ont pas pu etre branches reste au registre « a_reparer » et se repare
@@ -145,6 +158,54 @@ _RELECTURES: Dict[str, float] = {}
 def _gms():
     import gms
     return gms
+
+
+_GROUPE_DIT = {"fait": False}
+
+
+def _biu():
+    """bases_identite_us (le groupe TEMPLATES, ses refus retenus), ou None."""
+    try:
+        import bases_identite_us as _b
+        return _b
+    except Exception as e:                                   # noqa: BLE001
+        if not _GROUPE_DIT["fait"]:
+            _GROUPE_DIT["fait"] = True
+            print(f"[liens_identite_us] bases_identite_us illisible ({type(e).__name__}: {e}) : "
+                  "les copies ne sont pas vérifiées hors du groupe", flush=True)
+        return None
+
+
+#: Un refus qui peut venir du champ group_id (et pas d'une panne, d'un quota).
+_REFUS_GROUPE = re.compile(r"group|\b4(?:00|04|22)\b", re.I)
+
+
+def groupe_templates() -> str:
+    """L'id du groupe TEMPLATES des pages de base, "" s'il n'est pas connu.
+    LE fichier de bases_identite_us (aucun appel) : un second endroit qui
+    retiendrait cet id finirait par en garder un autre."""
+    try:
+        import bases_identite_us as _b
+        return str(_b.groupe_connu() or "")
+    except Exception as e:                                   # noqa: BLE001
+        if not _GROUPE_DIT["fait"]:
+            _GROUPE_DIT["fait"] = True
+            print(f"[liens_identite_us] groupe TEMPLATES inconnu ({type(e).__name__}: {e}) : "
+                  "les copies ne sont pas vérifiées hors du groupe", flush=True)
+        return ""
+
+
+def _meme_groupe(a: Any, b: Any) -> bool:
+    """Avec ou sans « grp_ » (les outils MCP le mettent, l'API privee non)."""
+    def nu(x):
+        g = str(x or "").strip().lower()
+        return g[4:] if g.startswith("grp_") else g
+    return bool(nu(a)) and nu(a) == nu(b)
+
+
+def _avec_tm(equipe: Any) -> str:
+    e = str(equipe or "").strip()
+    return e if not e or e.startswith("tm_") else "tm_" + e
 
 
 def _maintenant() -> int:
@@ -879,11 +940,35 @@ def _brancher(link_id: str, tracking: str, nom: str,
                 maj[champ] = val
     if str(lien.get("display_name") or "") != nom:
         maj["display_name"] = nom
+    # get_link avec l'equipe rend le groupe DANS l'equipe. Une copie qui
+    # s'y lit dans TEMPLATES l'a herite de sa base : elle en sort dans
+    # l'appel qui branche ses boutons. "" et non null : le schema de l'outil
+    # dit texte, la doc dit que les deux degroupent.
+    gtpl = groupe_templates()
+    dans_tpl = bool(gtpl) and _meme_groupe(lien.get("group_id"), gtpl)
+    b = _biu() if dans_tpl else None
+    par_maj = dans_tpl and (b is None or b.degrouper_par_maj())
+    if par_maj:
+        maj["group_id"] = ""
     final = lien
+    groupe_envoye = False
     if maj:
         # une page exige son display_name a chaque modification (schema update_link)
         maj["display_name"] = nom
         r = gms.update_link(link_id, maj, team_id=EQUIPE)
+        groupe_envoye = "group_id" in maj
+        if not r.get("ok") and groupe_envoye:
+            # group_id "" n'a jamais ete prouve : son refus ne doit pas couter
+            # les boutons. La meme ecriture sans lui (l'appel eprouve), une fois
+            err1 = str(r.get("error") or "")
+            sans = {k: v for k, v in maj.items() if k != "group_id"}
+            groupe_envoye = False
+            if set(sans) == {"display_name"} and str(lien.get("display_name") or "") == nom:
+                r = {"ok": True, "link": lien}         # il n'y avait QUE le groupe a changer
+            else:
+                r = gms.update_link(link_id, sans, team_id=EQUIPE)
+            if r.get("ok") and b is not None and _REFUS_GROUPE.search(err1):
+                b.noter_maj_refuse(err1)
         if not r.get("ok"):
             return False, f"boutons non branchés ({r.get('error')})", soucis
         final = r.get("link") or {}
@@ -895,6 +980,8 @@ def _brancher(link_id: str, tracking: str, nom: str,
     ok, pourquoi = _verifier(final, tracking, nom)
     if not ok:
         return False, pourquoi, soucis
+    if dans_tpl:
+        soucis += _hors_templates(link_id, final, gtpl, verifier=groupe_envoye)
     if activer:
         statut = str(final.get("status") or lien.get("status") or "").strip().lower()
         if statut and statut != "active":
@@ -904,6 +991,45 @@ def _brancher(link_id: str, tracking: str, nom: str,
                 return False, f"lien désactivé, réactivation refusée ({r.get('error')})", soucis
             soucis.append("copie d'une page de base désactivée : lien réactivé")
     return True, "", soucis
+
+
+def _hors_templates(link_id: str, final: Dict[str, Any], gtpl: str,
+                    verifier: bool = True) -> List[str]:
+    """Verifie que la copie est sortie du groupe TEMPLATES ; sinon l'en sort
+    (remove_links_from_group). `verifier` faux : group_id n'est pas parti
+    dans l'ecriture (refuse), elle y est encore -- remove directement. Ne
+    bloque JAMAIS l'adresse : ses boutons sont branches, c'est du rangement.
+    Rend les soucis."""
+    gms = _gms()
+    if verifier:
+        if "group_id" in final and _avec_tm(final.get("team_id")) == EQUIPE:
+            groupe = final.get("group_id")
+        else:
+            # la reponse d'update_link ne dit pas le groupe, ou le dit hors du
+            # contexte de l'equipe (un group_id lu ailleurs vaut null : une
+            # copie restee dans TEMPLATES y aurait ete declaree sortie)
+            r = gms.get_link(link_id, EQUIPE)
+            if not r.get("ok"):
+                print(f"[liens_identite_us] {link_id} : sortie du groupe TEMPLATES non vérifiée "
+                      f"({r.get('error')})", flush=True)
+                return [f"sortie du groupe TEMPLATES non vérifiée ({r.get('error')})"]
+            groupe = (r.get("link") or {}).get("group_id")
+        if not _meme_groupe(groupe, gtpl):
+            print(f"[liens_identite_us] {link_id} : copie sortie du groupe TEMPLATES", flush=True)
+            return []
+    b = _biu()
+    if b is None:
+        return ["copie encore dans le groupe TEMPLATES (bases_identite_us absent)"]
+    # le remove de bases_identite_us : ses refus de droits retenus valent ici
+    # aussi ; l'etiquette reste celle du VA (etiquette=None)
+    r = b.sortir([link_id], gtpl, etiquette=None)
+    if r.get("ok") and r.get("sortis"):
+        print(f"[liens_identite_us] {link_id} : encore dans TEMPLATES après update_link, "
+              "sorti par remove_links_from_group", flush=True)
+        return ["copie restée dans TEMPLATES après update_link : sortie par remove_links_from_group"]
+    print(f"[liens_identite_us] {link_id} : copie ENCORE dans le groupe TEMPLATES "
+          f"({r.get('erreur')}) — l'entretien des bases l'en sortira", flush=True)
+    return [f"copie encore dans le groupe TEMPLATES ({r.get('erreur')})"]
 
 
 def _poser(cle: str, entree: Dict[str, Any]) -> str:

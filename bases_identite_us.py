@@ -41,6 +41,23 @@ QUELLE BASE LES VA RECOIVENT
     (« REJET TEMPLATE ... ») en plus d'etre coupee : le module VA prend aussi
     une page inactive quand c'est la seule.
 
+LE GROUPE « TEMPLATES » (proprietaire, 06/10/2026)
+    « Il faut stocker quelque part uniquement les templates sur GMS. » Les
+    pages de base vivaient au milieu des liens des VA de JESSY LE RETOUR :
+    elles sont rangees dans un groupe GetMySocial « TEMPLATES » de la meme
+    equipe, et RIEN D'AUTRE n'y reste. Ce qui y va : la regle des noms de
+    base (identite_de_base), celle du module VA -- une page est « une base »
+    au meme sens des deux cotes. L'id du groupe est garde dans
+    data/bases_identite_us_groupe.json (list_groups puis create_group une
+    seule fois) ; liens_identite_us le lit pour sortir du groupe une copie de
+    VA qui l'aurait herite de sa base (duplicate_link). Une page neuve y entre
+    a sa creation (group_id dans le POST, sinon assign_links_to_group) ;
+    l'entretien du cog (ranger_templates) y range celles qui n'y sont pas et
+    en sort les copies de VA connues et les pages rejetees -- rien d'autre,
+    sans preuve -- en un appel par sens, aucun si tout est en place. Ses
+    appels sont au rang « fond » (ETIQUETTE_FOND) ; un refus de droits (403)
+    est retenu un jour.
+
 CE QUI N'EST JAMAIS FAIT
     Supprimer une page (delete_links est definitif, GetMySocial n'a pas de
     corbeille). Une base remplacee est DESACTIVEE -- reversible dans
@@ -57,6 +74,7 @@ LE REGISTRE (data/bases_identite_us.json) : l'historique du bot
 """
 from __future__ import annotations
 
+import ast
 import copy
 import difflib
 import io
@@ -113,6 +131,32 @@ EXCLUS = frozenset({
 #: Surtout pas une etiquette « fond », qui s'efface la premiere quand le
 #: budget du jour baisse -- ici c'est le proprietaire qui attend.
 ETIQUETTE = "bases-us"
+#: L'etiquette de l'ENTRETIEN (compteur du panneau, rangement du groupe),
+#: rang « fond » dans gms.PRIORITES : personne n'attend derriere. Sous
+#: « bases-us », ce rangement cosmetique continuait de consommer la quota
+#: commune (podium, paie) quand le dashboard et le warm s'effacaient deja.
+ETIQUETTE_FOND = "bases-us-fond"
+_FIL = threading.local()
+
+
+def _etiquette() -> str:
+    """L'etiquette des appels de CE fil : « fond » dans au_fond(), sinon
+    celle d'une creation."""
+    return getattr(_FIL, "etiquette", None) or ETIQUETTE
+
+
+class au_fond:
+    """Contexte : les appels GetMySocial de ce fil passent au rang « fond »
+    (l'entretien du cog, lance dans un fil de l'executor)."""
+
+    def __enter__(self):
+        self.prev = getattr(_FIL, "etiquette", None)
+        _FIL.etiquette = ETIQUETTE_FOND
+        return self
+
+    def __exit__(self, *exc):
+        _FIL.etiquette = self.prev
+        return False
 
 TTL_MODELE = 600            # le modele bouge rarement ; dix minutes de cache
 #: POST au plus par creation, pour des adresses prises AILLEURS (une autre
@@ -126,8 +170,38 @@ COTE_MINI = 64                  # en dessous, ce n'est pas une photo
 #: Ecart toleré entre l'heure du serveur et l'horodatage d'une photo envoyee.
 MARGE_PHOTO = 600
 
+#: Le groupe GetMySocial des pages de base, et ou son id est garde.
+GROUPE = _RACINE / "data" / "bases_identite_us_groupe.json"
+NOM_GROUPE = "TEMPLATES"
+#: assign/remove_links_from_group refusent plus de 100 ids par appel.
+LOT_GROUPE = 100
+#: list_groups rend 100 groupes par page ; une equipe en tient 500 au plus.
+PAGES_GROUPES = 5
+#: Au-dela, ce ne sont plus des copies egarees : un « TEMPLATES » fait a la
+#: main pour autre chose, ou une liste mal lue. Le groupe n'est pas vide a
+#: l'aveugle : c'est dit, et rien ne bouge.
+INTRUS_MAX = 25
+#: Un refus de DROITS (403 team_permission_denied : la cle API sans
+#: manage_groups dans l'equipe) est retenu un jour. Sans ca, chaque entretien
+#: (donc chaque push, le cron redemarre le bot) et chaque creation repayaient
+#: list_groups + create_group, ou un assign, pour le meme refus.
+REFUS_DROITS_S = 86400
+_RE_DROITS = re.compile(r"permission_denied|\b403\b", re.I)
+
+#: Les creations par la fenetre du panneau EN COURS : {cle: {identite,
+#: user_id, channel_id, guild_id, pid, quand}}. Un redemarrage (un par push)
+#: pendant la creation ne laissait aucune trace dans le salon -- le flux par
+#: message, lui, garde son ⏳. Le cog relit ce fichier au demarrage.
+EN_COURS = _RACINE / "data" / "bases_identite_us_en_cours.json"
+
 _VERROU = threading.RLock()          # une creation a la fois (registre compris)
 _VERROU_CACHE = threading.Lock()
+_VERROU_GROUPE = threading.RLock()
+#: L'id du groupe quand le fichier ne s'ecrit pas : sans lui, chaque besoin
+#: repayait list_groups.
+_GROUPE_MEMOIRE: Dict[str, str] = {"equipe": "", "id": ""}
+#: Les refus de droits quand le fichier ne s'ecrit pas : {outil: {quand, erreur}}.
+_DROITS_MEMOIRE: Dict[str, Dict[str, Any]] = {}
 _CACHE_MODELE: Dict[str, Any] = {"id": None, "t": 0.0, "modele": None}
 _DITS: Set[str] = set()
 
@@ -277,7 +351,7 @@ def liens_equipe(force: bool = False) -> Tuple[Optional[List[Dict[str, Any]]], s
     """(liens de l'equipe, erreur). La liste que liens_identite_us lit (cache
     de 15 min de gms). Jamais d'exception."""
     try:
-        with gms.api_tag(ETIQUETTE):
+        with gms.api_tag(_etiquette()):
             r = gms.list_links_team(equipe(), force_refresh=force)
     except Exception as e:                                   # noqa: BLE001
         r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -297,19 +371,70 @@ def pages_de_base(liens: Iterable[Dict[str, Any]], identite) -> List[Dict[str, A
     return [l for l in liens or [] if cle(identite_de_base(l.get("display_name")) or "") == k and k]
 
 
+def _nombre(x) -> float:
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def base_retenue(liens: Iterable[Dict[str, Any]], identite) -> Optional[Dict[str, Any]]:
+    """La page « TEMPLATE <identite> » que le module VA COPIE : SA regle
+    (liens_identite_us.bases : la page, active, puis la plus ancienne), la
+    meme ici sans lui. None s'il n'y en a pas."""
+    pages = pages_de_base(liens, identite)
+    if not pages:
+        return None
+    m = _liu()
+    f = getattr(m, "bases", None) if m else None
+    if callable(f):
+        try:
+            choix = list((f(pages) or {}).values())
+            if choix:
+                return choix[0]
+        except Exception as e:                               # noqa: BLE001
+            _dire_une_fois("bases", f"[bases_us] liens_identite_us.bases : {type(e).__name__}: {e}")
+    return sorted(pages, key=lambda l: (str(l.get("type") or "") == "directlink", not _actif(l),
+                                        _nombre(l.get("created")), str(l.get("id"))))[0]
+
+
+def nom_affiche_de(liens: Iterable[Dict[str, Any]], identite) -> str:
+    """Le nom affiche (name_user) de la page que les VA copient, "" sans page."""
+    return str((base_retenue(liens, identite) or {}).get("name_user") or "").strip()[:80]
+
+
+def etat_pages() -> Tuple[Set[str], Dict[str, str], str]:
+    """(cles des identites qui ONT une base aux yeux du module VA, {cle: nom
+    affiche de cette base}, raison). Le nom vient de la MEME lecture : une
+    page faite a la main n'est pas au registre du bot, et la fenetre arrivait
+    vide -- refaire ses photos lui donnait le nom du modele (« Emy ♡ »).
+    raison non vide : la liste de l'equipe n'a pas pu etre lue, tout vient
+    alors du registre du bot."""
+    liens, err = liens_equipe()
+    if err:
+        reg = bases_registre()
+        return ({cle(k) for k in reg},
+                {cle(k): str(v.get("nom_affiche") or "")[:80] for k, v in reg.items() if v.get("nom_affiche")},
+                err)
+    faites: Set[str] = set()
+    for l in liens:
+        i = identite_de_base(l.get("display_name"))
+        if i:
+            faites.add(cle(i))
+    noms = {}
+    for k in faites:
+        n = nom_affiche_de(liens, k)
+        if n:
+            noms[k] = n
+    return faites, noms, ""
+
+
 def etat_liste() -> Tuple[Set[str], str]:
     """(cles des identites qui ONT une base aux yeux du module VA, raison).
     raison non vide : la liste de l'equipe n'a pas pu etre lue, l'ensemble
     vient alors du registre du bot."""
-    liens, err = liens_equipe()
-    if err:
-        return {cle(k) for k in bases_registre()}, err
-    out = set()
-    for l in liens:
-        i = identite_de_base(l.get("display_name"))
-        if i:
-            out.add(cle(i))
-    return out, ""
+    faites, _noms, raison = etat_pages()
+    return faites, raison
 
 
 # ─────────────────────────────────────────────────────────── identites ──
@@ -376,7 +501,7 @@ def _refus_quota() -> str:
         return ("quota GetMySocial épuisé — reprise vers "
                 + time.strftime("%H:%M", time.localtime(time.time() + reste)))
     try:
-        if not gms.budget_ok(ETIQUETTE):
+        if not gms.budget_ok(_etiquette()):
             return "budget GetMySocial du jour réservé à la paie (podium, primes) — relance plus tard"
     except Exception:                                        # noqa: BLE001
         pass
@@ -430,6 +555,493 @@ def _code_erreur(r) -> Tuple[str, str]:
     return code, (message or texte)[:300]
 
 
+# ─────────────────────────────────────────── le groupe « TEMPLATES » ──
+
+def _sans_grp(gid) -> str:
+    g = str(gid or "").strip().lower()
+    return g[4:] if g.startswith("grp_") else g
+
+
+def _avec_grp(gid) -> str:
+    g = str(gid or "").strip()
+    return g if not g or g.startswith("grp_") else "grp_" + g
+
+
+def meme_groupe(a, b) -> bool:
+    """Deux ids de groupe designent-ils le meme ? Avec ou sans « grp_ » : les
+    outils MCP le mettent, l'API privee non (gms._assign_via_v3)."""
+    x = _sans_grp(a)
+    return bool(x) and x == _sans_grp(b)
+
+
+def _etat_groupe() -> Dict[str, Any]:
+    d = safe_json.load(GROUPE, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def _ecrire_groupe(d: Dict[str, Any]) -> bool:
+    try:
+        GROUPE.parent.mkdir(parents=True, exist_ok=True)
+        return bool(safe_json.write(GROUPE, d, indent=1))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[bases_us] {GROUPE.name} non écrit : {type(e).__name__}: {e}", flush=True)
+        return False
+
+
+def groupe_connu() -> str:
+    """L'id du groupe TEMPLATES de l'equipe des bases (« grp_… »), "" s'il
+    n'est pas encore connu. AUCUN appel : liens_identite_us s'en sert a
+    chaque copie de VA."""
+    eq = equipe()
+    d = _etat_groupe()
+    if _avec_tm(d.get("equipe")) == eq and d.get("id"):
+        return _avec_grp(d["id"])
+    if _GROUPE_MEMOIRE["equipe"] == eq and _GROUPE_MEMOIRE["id"]:
+        return _GROUPE_MEMOIRE["id"]
+    return ""
+
+
+def _retenir_groupe(gid: str, **plus) -> None:
+    eq = equipe()
+    _GROUPE_MEMOIRE.update(equipe=eq, id=gid)
+    d = _etat_groupe()
+    if _avec_tm(d.get("equipe")) != eq:
+        d = {}
+    d.update(equipe=eq, id=gid, nom=NOM_GROUPE, quand=int(time.time()), **plus)
+    d.pop("oublie", None)
+    if not _ecrire_groupe(d):
+        print(f"[bases_us] id du groupe {NOM_GROUPE} gardé en mémoire seulement", flush=True)
+
+
+def _oublier_groupe(raison: str) -> None:
+    """Le groupe a ete supprime a la main (group_not_found) : son id ne sert
+    plus. Garde en trace, jamais efface sans un mot."""
+    d = _etat_groupe()
+    ancien = d.pop("id", None) or _GROUPE_MEMOIRE.get("id")
+    _GROUPE_MEMOIRE.update(equipe="", id="")
+    d["oublie"] = {"id": ancien, "raison": str(raison or "")[:200], "quand": int(time.time())}
+    _ecrire_groupe(d)
+    print(f"[bases_us] groupe {NOM_GROUPE} {ancien} introuvable ({str(raison)[:120]}) : il sera "
+          "recherché ou recréé", flush=True)
+
+
+def refus_du_groupe(statut: int, code: str, message: str) -> bool:
+    """Ce refus du POST peut-il venir du group_id, seul champ ajoute a la
+    requete de l'essai du 06/10 ? La doc de create_link en nomme trois :
+    400 invalid_group_id, 404 group_not_found, 403 team_permission_denied
+    (manage_groups manquant -- ou create_links : on ne sait pas, la requete
+    sans lui le dira). La creation est alors refaite UNE fois sans lui : le
+    groupe ne doit jamais couter une page. Tout autre refus (adresse,
+    forfait, invalid_url…) se repeterait a l'identique : un seul POST."""
+    c, m = str(code or "").lower(), str(message or "").lower()
+    if int(statut or 0) not in (400, 403, 404, 422):
+        return False
+    return "group" in c or "group" in m or (int(statut) == 403 and c == "team_permission_denied")
+
+
+#: Un refus du group_id dans le POST est retenu un mois : assez pour ne pas
+#: repayer un POST rate a chaque page, pas assez pour se priver pour toujours
+#: d'un champ que l'API aura pu se mettre a accepter.
+REFUS_POST_S = 30 * 86400
+
+
+def post_avec_groupe() -> bool:
+    """Le POST de creation porte-t-il group_id ? Oui, sauf si GetMySocial l'a
+    refuse ce mois-ci (la creation avait alors reussi sans lui) : chaque
+    page suivante aurait paye un POST rate de plus."""
+    refus = _etat_groupe().get("post_refuse")
+    if not isinstance(refus, dict):
+        return not refus
+    try:
+        return time.time() - float(refus.get("quand") or 0) > REFUS_POST_S
+    except (TypeError, ValueError):
+        return False
+
+
+def _noter_post_refuse(statut: int, code: str, message: str) -> None:
+    d = _etat_groupe()
+    d["post_refuse"] = {"statut": int(statut), "code": str(code or ""), "message": str(message or "")[:200],
+                        "quand": int(time.time())}
+    _ecrire_groupe(d)
+    print(f"[bases_us] group_id refusé dans le POST (HTTP {statut} {code}) : les pages seront "
+          f"rangées dans {NOM_GROUPE} après leur création", flush=True)
+
+
+def degrouper_par_maj() -> bool:
+    """Une copie de VA peut-elle sortir du groupe dans l'update_link de ses
+    boutons (group_id "") ? Oui, sauf si GetMySocial l'a refuse ce mois-ci :
+    la copie sort alors par remove_links_from_group (liens_identite_us)."""
+    refus = _etat_groupe().get("maj_refuse")
+    if not isinstance(refus, dict):
+        return not refus
+    try:
+        return time.time() - float(refus.get("quand") or 0) > REFUS_POST_S
+    except (TypeError, ValueError):
+        return False
+
+
+def noter_maj_refuse(erreur: str) -> None:
+    """group_id "" refuse dans update_link (la meme ecriture sans lui a
+    reussi) : retenu, pour ne pas repayer un appel rate a chaque copie."""
+    d = _etat_groupe()
+    d["maj_refuse"] = {"erreur": str(erreur or "")[:200], "quand": int(time.time())}
+    _ecrire_groupe(d)
+    print(f"[bases_us] group_id \"\" refusé par update_link ({str(erreur)[:120]}) : les copies de VA "
+          f"sortiront de {NOM_GROUPE} par remove_links_from_group", flush=True)
+
+
+def _refus_droits(outil: str) -> str:
+    """"" si l'outil peut partir ; sinon la phrase du refus de droits retenu
+    (aucun appel jusqu'a son echeance)."""
+    d = _etat_groupe().get("droits_refuses")
+    e = d.get(outil) if isinstance(d, dict) else None
+    if not isinstance(e, dict):
+        e = _DROITS_MEMOIRE.get(outil)
+    if not isinstance(e, dict):
+        return ""
+    fin = _nombre(e.get("quand")) + REFUS_DROITS_S
+    if time.time() > fin:
+        return ""
+    heure = time.strftime("%d/%m %H:%M", time.localtime(fin))
+    _dire_une_fois(f"droits:{outil}:{e.get('quand')}",
+                   f"[bases_us] {outil} refusé par GetMySocial ({str(e.get('erreur') or '')[:120]}) : "
+                   f"plus essayé avant {heure}")
+    return f"{outil} refusé par GetMySocial ({str(e.get('erreur') or '')[:120]}) — pas réessayé avant {heure}"
+
+
+def _noter_droits(outil: str, ok: bool, erreur: str = "") -> None:
+    """Retient un refus de droits de l'outil, ou l'efface quand il repasse."""
+    if ok:
+        _DROITS_MEMOIRE.pop(outil, None)
+        d = _etat_groupe()
+        refus = d.get("droits_refuses")
+        if isinstance(refus, dict) and outil in refus:
+            refus.pop(outil)
+            _ecrire_groupe(d)
+        return
+    if not _RE_DROITS.search(str(erreur or "")):
+        return                  # panne, quota : rien d'un refus durable
+    e = {"erreur": str(erreur or "")[:200], "quand": int(time.time())}
+    _DROITS_MEMOIRE[outil] = e
+    d = _etat_groupe()
+    refus = d.get("droits_refuses") if isinstance(d.get("droits_refuses"), dict) else {}
+    refus[outil] = e
+    d["droits_refuses"] = refus
+    _ecrire_groupe(d)
+    print(f"[bases_us] {outil} : droits refusés dans {NOM_EQUIPE} ({str(erreur)[:120]}) — "
+          f"plus essayé pendant {REFUS_DROITS_S // 3600} h", flush=True)
+
+
+def _appel(outil: str, args: Dict[str, Any], etiquette: Optional[str] = "") -> Dict[str, Any]:
+    """Un outil MCP par gms (budget, pause, compteur), etiquete ; jamais
+    d'exception. `etiquette` None : garder celle de l'appelant
+    (liens_identite_us, dont le VA attend derriere son clic)."""
+    import contextlib
+    try:
+        tag = (contextlib.nullcontext() if etiquette is None
+               else gms.api_tag(etiquette or _etiquette()))
+        with tag:
+            r = gms._call_tool(outil, args)
+    except Exception as e:                                   # noqa: BLE001
+        r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return r if isinstance(r, dict) else {"ok": False, "error": "réponse vide"}
+
+
+def _donnees(r: Dict[str, Any]) -> Any:
+    """Le corps d'une reponse MCP : dict, ou texte JSON / repr Python."""
+    d = r.get("data")
+    if isinstance(d, str):
+        for lire in (json.loads, ast.literal_eval):
+            try:
+                return lire(d)
+            except Exception:                                # noqa: BLE001
+                continue
+    return d
+
+
+def _lister_groupes(eq: str) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+    """(groupes de l'equipe, erreur). None : on ne SAIT PAS ce qui existe."""
+    out: List[Dict[str, Any]] = []
+    curseur = None
+    refus = _refus_droits("list_groups")
+    if refus:
+        return None, refus
+    for _ in range(PAGES_GROUPES):
+        args: Dict[str, Any] = {"team_id": eq, "limit": 100}
+        if curseur:
+            args["cursor"] = curseur
+        r = _appel("list_groups", args)
+        if not r.get("ok"):
+            err = str(r.get("error") or "list_groups refusé")[:200]
+            _noter_droits("list_groups", False, err)
+            return None, err
+        _noter_droits("list_groups", True)
+        d = _donnees(r)
+        items = d.get("data") if isinstance(d, dict) else d
+        out += [g for g in (items or []) if isinstance(g, dict)]
+        curseur = d.get("next_cursor") if isinstance(d, dict) and d.get("has_more") else None
+        if not curseur:
+            return out, ""
+    # create_group rend le groupe existant s'il porte deja ce nom : une liste
+    # incomplete ne fabrique pas de doublon, elle est seulement dite
+    print(f"[bases_us] list_groups : plus de {PAGES_GROUPES} pages, liste lue en partie", flush=True)
+    return out, ""
+
+
+def assurer_groupe(force: bool = False) -> Tuple[str, str]:
+    """(id du groupe TEMPLATES, erreur). Le cache d'abord, sans appel ;
+    sinon list_groups, puis create_group s'il manque (une fois pour toutes).
+    Jamais d'exception."""
+    if not force:
+        g = groupe_connu()
+        if g:
+            return g, ""
+    refus = _refus_quota() or _refus_droits("create_group")
+    if refus:
+        # create_group refuse (droits) : list_groups + create_group repayes a
+        # chaque entretien et chaque creation pour le meme refus
+        return "", refus
+    eq = equipe()
+    with _VERROU_GROUPE:
+        if not force:
+            g = groupe_connu()
+            if g:
+                return g, ""
+        groupes, err = _lister_groupes(eq)
+        if groupes is None:
+            # on ne sait pas ce qui existe : rien n'est cree a l'aveugle
+            return "", f"groupes de {NOM_EQUIPE} illisibles ({err})"
+        nommes = [g for g in groupes if g.get("id")
+                  and str(g.get("name") or "").strip().lower() == NOM_GROUPE.lower()]
+        if len(nommes) > 1:
+            print(f"[bases_us] {len(nommes)} groupes « {NOM_GROUPE} » dans {NOM_EQUIPE} : "
+                  f"{nommes[0].get('id')} retenu", flush=True)
+        contenu = ""
+        if nommes:
+            gid, cree = _avec_grp(nommes[0]["id"]), False
+            if nommes[0].get("link_count"):
+                # un « TEMPLATES » fait a la main avant nous : ce qu'il tient
+                # n'est jamais sorti sans preuve (ranger_templates), c'est dit
+                contenu = f" ({nommes[0].get('link_count')} lien(s) déjà dedans)"
+        else:
+            r = _appel("create_group", {"name": NOM_GROUPE, "team_id": eq})
+            if not r.get("ok"):
+                err = str(r.get("error") or "")[:150]
+                _noter_droits("create_group", False, err)
+                return "", f"groupe {NOM_GROUPE} non créé ({err})"
+            _noter_droits("create_group", True)
+            d = _donnees(r)
+            g = d.get("group") if isinstance(d, dict) and isinstance(d.get("group"), dict) else d
+            gid, cree = _avec_grp(g.get("id") if isinstance(g, dict) else ""), True
+            if not gid:
+                return "", f"groupe {NOM_GROUPE} : réponse de create_group sans id"
+        _retenir_groupe(gid)
+        print(f"[bases_us] groupe {NOM_GROUPE} {'créé' if cree else 'trouvé'} dans {NOM_EQUIPE} : {gid}"
+              + contenu, flush=True)
+        return gid, ""
+
+
+def _par_lots(outil: str, gid: str, ids: List[str], etiquette: Optional[str] = "") -> Tuple[List[str], str]:
+    """(ids traites, erreur) : l'outil de groupe sur `ids`, 100 par appel.
+    Un refus de droits retenu : aucun appel."""
+    faits: List[str] = []
+    refus = _refus_droits(outil)
+    if refus:
+        return faits, refus
+    for i in range(0, len(ids), LOT_GROUPE):
+        lot = ids[i:i + LOT_GROUPE]
+        r = _appel(outil, {"group_id": _avec_grp(gid), "link_ids": lot, "team_id": equipe()}, etiquette)
+        if not r.get("ok"):
+            err = str(r.get("error") or f"{outil} refusé")[:200]
+            _noter_droits(outil, False, err)
+            return faits, err
+        _noter_droits(outil, True)
+        d = _donnees(r)
+        rates = d.get("failed") if isinstance(d, dict) else None
+        if rates:
+            # un id refuse n'echoue pas l'appel : il part dans « failed »
+            mauvais = {str(x.get("id") if isinstance(x, dict) else x) for x in rates}
+            faits += [x for x in lot if x not in mauvais]
+            return faits, f"{len(mauvais)} lien(s) refusé(s) par {outil} : {str(rates)[:150]}"
+        faits += lot
+    return faits, ""
+
+
+def ranger(link_ids: Iterable[Any], gid: str = "", vider: bool = True) -> Dict[str, Any]:
+    """Range ces liens dans le groupe TEMPLATES (assign_links_to_group,
+    idempotent). Un groupe supprime a la main est retrouve ou recree, une
+    fois. `vider` : vider le cache de la liste apres (creer_base le vide
+    lui-meme, une fois, a la fin). Rend {ok, ranges, erreur, groupe}."""
+    ids = list(dict.fromkeys(str(x) for x in link_ids or () if x))
+    out: Dict[str, Any] = {"ok": True, "ranges": [], "erreur": "", "groupe": gid}
+    if not ids:
+        return out
+    if not gid:
+        gid, err = assurer_groupe()
+        if not gid:
+            out.update(ok=False, erreur=err)
+            return out
+    for essai in range(2):
+        faits, err = _par_lots("assign_links_to_group", gid, ids)
+        out["ranges"] += faits
+        if err and essai == 0 and "group_not_found" in err:
+            _oublier_groupe(err)
+            gid, err2 = assurer_groupe(force=True)
+            if not gid:
+                out.update(ok=False, erreur=err2)
+                return out
+            ids = [x for x in ids if x not in faits]
+            continue
+        if err:
+            out.update(ok=False, erreur=err)
+        break
+    out["groupe"] = gid
+    if out["ranges"] and vider:
+        _vider_cache()          # la liste de l'equipe porte les group_id
+    return out
+
+
+def _ranger_page(lien: Dict[str, Any], lid: str, gid: str, gerr: str = "") -> Dict[str, Any]:
+    """La page neuve dans le groupe TEMPLATES : rien a faire si la reponse
+    du POST l'y dit deja (group_id accepte), sinon un assign. {ok, appel,
+    erreur} ; un echec est dit au journal, l'entretien la rangera. `gerr` :
+    le groupe vient d'etre introuvable (quota, liste illisible) -- pas de
+    second essai dans la meme seconde. `groupe` : l'id ou la page a ete
+    rangee (un groupe supprime a la main en change)."""
+    if gid and meme_groupe((lien or {}).get("group_id"), gid):
+        return {"ok": True, "appel": False, "erreur": "", "groupe": gid}
+    if not gid and gerr:
+        return {"ok": False, "appel": False, "erreur": gerr, "groupe": ""}
+    r = ranger([lid], gid, vider=False)
+    if not r["ok"]:
+        print(f"[bases_us] {lid} hors du groupe {NOM_GROUPE} ({r['erreur']}) : "
+              "l'entretien la rangera", flush=True)
+    return {"ok": bool(r["ok"]), "appel": True, "erreur": r["erreur"], "groupe": r.get("groupe") or ""}
+
+
+def sortir(link_ids: Iterable[Any], gid: str, etiquette: Optional[str] = "") -> Dict[str, Any]:
+    """Sort ces liens du groupe (remove_links_from_group : ils restent
+    dans l'equipe, sans groupe). Rend {ok, sortis, erreur}. `etiquette`
+    None : celle de l'appelant (liens_identite_us)."""
+    ids = list(dict.fromkeys(str(x) for x in link_ids or () if x))
+    if not ids or not gid:
+        return {"ok": True, "sortis": [], "erreur": ""}
+    faits, err = _par_lots("remove_links_from_group", gid, ids, etiquette)
+    if faits:
+        _vider_cache()
+    return {"ok": not err, "sortis": faits, "erreur": err}
+
+
+_GROUPE_ABSENT_DIT = {"fait": False}
+
+
+def _copies_va() -> Set[str]:
+    """Les ids des copies de VA que liens_identite_us a faites (son
+    registre) : les SEULS liens de VA que l'entretien sort du groupe -- ceux
+    qui l'ont herite de leur base (duplicate_link). Registre illisible :
+    aucun, rien n'est sorti sur un doute."""
+    m = _liu()
+    f = getattr(m, "registre", None) if m else None
+    if not callable(f):
+        return set()
+    try:
+        liens = (f() or {}).get("liens") or {}
+    except Exception as e:                                   # noqa: BLE001
+        _dire_une_fois("copies", f"[bases_us] registre des copies de VA illisible ({type(e).__name__}: {e}) : "
+                                 "aucune copie sortie du groupe")
+        return set()
+    return {str(e.get("link_id")) for e in liens.values() if isinstance(e, dict) and e.get("link_id")}
+
+
+def est_rejet(nom) -> bool:
+    """« REJET TEMPLATE x 06-10 14h05 » : une page creee par le bot puis
+    rejetee (_rejeter). Elle n'est plus une base."""
+    n = str(nom or "").strip()
+    return n.upper().startswith(PREFIXE_REJET) and bool(identite_de_base(n[len(PREFIXE_REJET):]))
+
+
+def ranger_templates(liens: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """L'entretien du groupe : toute page de base de l'equipe dedans. N'en
+    sort QUE ce qui est prouve hors de propos : une copie de VA connue (le
+    registre de liens_identite_us) ou une page rejetee (« REJET … »). Tout
+    le reste deja dedans -- une page « TEMPLATE » sans identite que le podium
+    traite en gabarit, un lien range a la main dans un « TEMPLATES » adopte
+    -- y reste, dit au journal : deux regles pour decider « est un
+    gabarit » finissaient par sortir ce que le proprietaire y avait mis, a
+    chaque redemarrage. Aucun appel si tout est en place ; sinon un assign
+    et/ou un remove (par 100). Jamais d'exception.
+
+    Rend {ok, groupe, ranges, sortis, intrus_gardes, erreur}."""
+    out: Dict[str, Any] = {"ok": True, "groupe": "", "ranges": [], "sortis": [], "intrus_gardes": [],
+                           "erreur": ""}
+    try:
+        if liens is None:
+            liens, err = liens_equipe()
+            if err:
+                out.update(ok=False, erreur=err)
+                return out
+        liens = [l for l in liens or [] if isinstance(l, dict) and l.get("id")]
+        bases_ = [l for l in liens if identite_de_base(l.get("display_name"))]
+        gid = groupe_connu()
+        if not gid:
+            if not bases_:
+                return out              # rien a ranger : pas d'appel pour un groupe vide
+            gid, err = assurer_groupe()
+            if not gid:
+                out.update(ok=False, erreur=err)
+                return out
+        out["groupe"] = gid
+        if liens and not any("group_id" in l for l in liens) and not _GROUPE_ABSENT_DIT["fait"]:
+            _GROUPE_ABSENT_DIT["fait"] = True
+            print("[bases_us] la liste de l'équipe ne dit pas les groupes (group_id absent) : "
+                  "les pages de base sont re-rangées à chaque passage", flush=True)
+        hors = [str(l["id"]) for l in bases_ if not meme_groupe(l.get("group_id"), gid)]
+        dedans = [l for l in liens if meme_groupe(l.get("group_id"), gid)
+                  and not identite_de_base(l.get("display_name"))]
+        copies = _copies_va() if dedans else set()
+        intrus = [l for l in dedans if str(l["id"]) in copies or est_rejet(l.get("display_name"))]
+        gardes = [l for l in dedans if l not in intrus]
+
+        def nom_de(l):
+            return str(l.get("display_name") or l.get("shortcode") or l.get("id"))
+        if gardes:
+            out["intrus_gardes"] = [nom_de(l) for l in gardes]
+            _dire_une_fois("gardes:" + ",".join(sorted(str(l["id"]) for l in gardes)),
+                           f"[bases_us] groupe {NOM_GROUPE} : {len(gardes)} lien(s) qui ne sont pas des pages "
+                           f"de base laissé(s) en place, ni copie de VA connue ni page rejetée : "
+                           f"{', '.join(out['intrus_gardes'][:8])}{'…' if len(gardes) > 8 else ''}")
+        refus = _refus_quota() if (hors or intrus) else ""
+        if refus:
+            # la liste venait du cache : les ecritures, elles, seraient refusees
+            out.update(ok=False, erreur=refus)
+            return out
+        if hors:
+            r = ranger(hors, gid)
+            out["ranges"] = r["ranges"]
+            if not r["ok"]:
+                out.update(ok=False, erreur=r["erreur"])
+            gid = r.get("groupe") or gid
+        if intrus:
+            noms = [nom_de(l) for l in intrus]
+            if len(intrus) > INTRUS_MAX:
+                out["intrus_gardes"] += noms
+                print(f"[bases_us] groupe {NOM_GROUPE} : {len(intrus)} copies de VA ou pages rejetées "
+                      f"({', '.join(noms[:8])}…) — trop pour des copies égarées, rien n'est "
+                      "sorti : à vérifier dans GetMySocial", flush=True)
+            else:
+                r = sortir([l["id"] for l in intrus], gid)
+                out["sortis"] = r["sortis"]
+                if not r["ok"]:
+                    out.update(ok=False, erreur=(out["erreur"] + " ; " if out["erreur"] else "") + r["erreur"])
+        if out["ranges"] or out["sortis"] or out["erreur"]:
+            print(f"[bases_us] groupe {NOM_GROUPE} : {len(out['ranges'])} page(s) rangée(s), "
+                  f"{len(out['sortis'])} lien(s) sorti(s)"
+                  + (f" ; {out['erreur']}" if out["erreur"] else ""), flush=True)
+    except Exception as e:                                   # noqa: BLE001
+        out.update(ok=False, erreur=f"{type(e).__name__}: {e}")
+    return out
+
+
 # ───────────────────────────────────────────────────────── le modele ──
 
 def lire_modele(force: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -447,7 +1059,7 @@ def lire_modele(force: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
     cle_api = gms.get_api_key()
     if not cle_api:
         return None, "clé API GetMySocial absente"
-    with gms.api_tag(ETIQUETTE):
+    with gms.api_tag(_etiquette()):
         try:
             r = requests.get(f"{gms.PUBLIC_REST_BASE}/links/{lid}",
                              headers={"Authorization": f"Bearer {cle_api}"}, timeout=20)
@@ -625,12 +1237,14 @@ def _vers_of(obj: Any, cible: str) -> Any:
 
 def champs_creation(modele: Dict[str, Any], shortcode: str, display_name: str,
                     equipe: str, nom_affiche: Optional[str] = None,
-                    onlyfans: Optional[str] = None) -> Dict[str, str]:
+                    onlyfans: Optional[str] = None, groupe: str = "") -> Dict[str, str]:
     """Les champs texte du POST multipart : ceux du modele, encodes comme dans
     l'essai reussi (dict/list/bool en JSON, le reste en texte), plus l'adresse,
     le nom, le type et l'equipe (SANS « tm_ », comme le PATCH v3). `onlyfans` :
     l'adresse que visent les boutons OnlyFans (la forme de la requete ne
-    change pas, seule la valeur)."""
+    change pas, seule la valeur). `groupe` : le seul champ AJOUTE a l'essai
+    (group_id, « interprete dans le contexte de team_id » selon la doc de
+    create_link) ; refuse une fois, il n'est plus envoye (post_avec_groupe)."""
     m = copy.deepcopy(modele or {})
     if isinstance(m.get("buttons"), list):
         # block_id est l'identifiant du bouton DANS la page modele ; les cles a
@@ -647,6 +1261,8 @@ def champs_creation(modele: Dict[str, Any], shortcode: str, display_name: str,
               for k, v in m.items() if k not in EXCLUS and v is not None}
     champs.update(shortcode=shortcode, display_name=display_name, type="landing",
                   team_id=_sans_tm(equipe))
+    if groupe:
+        champs["group_id"] = _avec_grp(groupe)
     return champs
 
 
@@ -674,9 +1290,16 @@ def _retrouver(sc: str, display_name: str, quoi: str):
 
 
 def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
-            prises: Iterable[str] = (), onlyfans: Optional[str] = None):
+            prises: Iterable[str] = (), onlyfans: Optional[str] = None,
+            groupe: str = "", trace: Optional[Dict[str, Any]] = None):
     """(lien, shortcode, erreur, adresses refusees en 409). Saute sans appel
-    les adresses deja connues ; change d'adresse tant qu'elle est prise."""
+    les adresses deja connues ; change d'adresse tant qu'elle est prise.
+
+    `groupe` : group_id ajoute au POST. Un refus qui peut venir de lui
+    (refus_du_groupe) fait refaire la MEME adresse sans lui, une fois ;
+    `trace` recoit {groupe_envoye, groupe_refuse}."""
+    trace = trace if trace is not None else {}
+    trace.setdefault("groupe_envoye", False)
     prises = {str(x).lower() for x in prises or ()}
     rang = premier_essai(identite, prises)
     sc = shortcode_base(identite, rang)
@@ -693,11 +1316,12 @@ def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
         cle_api = gms.get_api_key()
         if not cle_api:
             return None, sc, "clé API GetMySocial absente", refusees
-        champs = champs_creation(modele, sc, display_name, equipe, nom_affiche, onlyfans)
+        champs = champs_creation(modele, sc, display_name, equipe, nom_affiche, onlyfans, groupe)
+        trace["groupe_envoye"] = bool(groupe)
         fichiers = {"profilePicture": ("pp.jpg", pp, "image/jpeg"),
                     "backgroundImage": ("fond.jpg", fond, "image/jpeg")}
         postes += 1
-        with gms.api_tag(ETIQUETTE):
+        with gms.api_tag(_etiquette()):
             try:
                 r = requests.post(f"{gms.PUBLIC_REST_BASE}/links",
                                   headers={"Authorization": f"Bearer {cle_api}"},
@@ -724,6 +1348,16 @@ def _poster(modele, identite, display_name, equipe, nom_affiche, pp, fond,
                                   "vérifie dans GetMySocial avant de renvoyer"), refusees
             return lien, sc, "", refusees
         code, msg = _code_erreur(r)
+        if groupe and refus_du_groupe(r.status_code, code, msg):
+            # le group_id est le seul champ ajoute a la requete prouvee : on
+            # la refait telle quelle, meme adresse, avant de conclure
+            print(f"[bases_us] {sc} : HTTP {r.status_code} {code} avec group_id — refait sans lui",
+                  flush=True)
+            trace["groupe_refuse"] = (r.status_code, code, msg)
+            groupe = ""
+            rang -= 1
+            postes -= 1
+            continue
         if r.status_code == 409 and code in _CODES_ADRESSE:
             print(f"[bases_us] {sc} : {code or 'adresse prise'} — adresse suivante", flush=True)
             refusees.append(sc)
@@ -796,7 +1430,7 @@ def verifier(lien: Dict[str, Any], modele: Dict[str, Any], display_name: str,
 def _desactiver(link_id: str) -> Dict[str, Any]:
     """Couper une page, jamais la supprimer : disable_link est reversible."""
     try:
-        with gms.api_tag(ETIQUETTE):
+        with gms.api_tag(_etiquette()):
             res = gms.disable_link(link_id)
         return res if isinstance(res, dict) else {"ok": False, "error": "réponse vide"}
     except Exception as e:                                   # noqa: BLE001
@@ -805,14 +1439,17 @@ def _desactiver(link_id: str) -> Dict[str, Any]:
 
 def _renommer(link_id: str, nom: str, team) -> Dict[str, Any]:
     """Changer le nom d'une page (update_link exige display_name pour une
-    page). gms.update_link quand il existe, sinon l'outil MCP directement."""
+    page). gms.update_link quand il existe, sinon l'outil MCP directement.
+    Le nom SEUL : c'est l'appel deja eprouve. Y joindre group_id "" (jamais
+    essaye en vrai) faisait dependre le renommage d'un rejet de ce champ."""
+    champs: Dict[str, Any] = {"display_name": nom}
     try:
-        with gms.api_tag(ETIQUETTE):
+        with gms.api_tag(_etiquette()):
             maj = getattr(gms, "update_link", None)
             if callable(maj):
-                res = maj(link_id, {"display_name": nom}, team_id=team or None)
+                res = maj(link_id, champs, team_id=team or None)
             else:
-                args = {"link_id": link_id, "display_name": nom}
+                args = {"link_id": link_id, **champs}
                 if team:
                     args["team_id"] = _avec_tm(team)
                 res = gms._call_tool("update_link", args)
@@ -828,15 +1465,27 @@ def _vider_cache() -> None:
         pass
 
 
-def _rejeter(lien, lid, sc, pb, display_name, eq, k, nom, par) -> str:
+def _rejeter(lien, lid, sc, pb, display_name, eq, k, nom, par, groupe_envoye: bool = False,
+             gid: str = "") -> Tuple[str, bool]:
     """Une page creee mais non conforme : coupee ET renommee. Coupee seule,
     elle gardait « TEMPLATE x » et le module VA, qui prend une page inactive
     quand c'est la seule, la copiait pour chaque VA (sans fond, ou avec la
-    mauvaise photo). Rend la phrase d'erreur."""
+    mauvaise photo). Creee DANS le groupe TEMPLATES, elle en sort APRES le
+    renommage, par son propre appel (rare : un appel de plus ne coute rien) :
+    le groupe ne garde que des bases. Rend (phrase d'erreur, manuel) --
+    manuel : coupure ou renommage rate, il reste a faire dans GetMySocial."""
+    sortie = {"ok": True}
     if lid.startswith("lnk_"):
         coupe = _desactiver(lid)
         nouveau = f"{PREFIXE_REJET}{display_name} {time.strftime('%d-%m %Hh%M')}"
         renomme = _renommer(lid, nouveau, lien.get("team_id") or eq)
+        # la reponse du POST la dit dans le groupe -- ou ne dit rien du groupe
+        # alors qu'on l'y a demandee
+        if gid and (meme_groupe(lien.get("group_id"), gid) or (groupe_envoye and "group_id" not in lien)):
+            sortie = sortir([lid], gid)
+            if not sortie["ok"]:
+                print(f"[bases_us] {lid} rejetée reste dans {NOM_GROUPE} ({sortie['erreur']}) : "
+                      "l'entretien la sortira", flush=True)
         _vider_cache()
     else:
         coupe = renomme = {"ok": False, "error": "id inconnu"}
@@ -856,7 +1505,8 @@ def _rejeter(lien, lid, sc, pb, display_name, eq, k, nom, par) -> str:
     if not renomme.get("ok"):
         phrase += (f", et elle s'appelle encore « {display_name} » ({str(renomme.get('error') or '')[:120]}) : "
                    "le module VA peut la copier — à renommer ou couper dans GetMySocial")
-    return phrase + f" ({lid or sc})"
+    manuel = lid.startswith("lnk_") and not (coupe.get("ok") and renomme.get("ok"))
+    return phrase + f" ({lid or sc})", manuel
 
 
 def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Optional[str] = None,
@@ -864,13 +1514,22 @@ def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Option
     """Cree (ou remplace) la base « TEMPLATE <identite> ».
 
     Rend {ok, url, link_id, shortcode, remplace, coupees, erreur,
-    avertissement}. coupees = les anciennes pages « TEMPLATE <identite> »
-    desactivees (remplace = la premiere). ok est FAUX si l'une d'elles n'a pas
-    pu etre coupee : la nouvelle existe (url) mais le module VA, qui prend la
-    plus ancienne active, ne s'en servirait pas.
+    avertissement, groupe, nom_affiche, manuel}. coupees = les anciennes
+    pages « TEMPLATE <identite> » desactivees (remplace = la premiere). ok est
+    FAUX si l'une d'elles n'a pas pu etre coupee : la nouvelle existe (url)
+    mais le module VA, qui prend la plus ancienne active, ne s'en servirait
+    pas. groupe = {ok, appel, erreur, groupe} du rangement dans TEMPLATES : il
+    ne decide jamais de ok. nom_affiche : celui de la page creee. manuel :
+    il reste quelque chose a faire a la main dans GetMySocial (une page a
+    couper ou a renommer) -- a garder dans le salon, pas en ephemere.
+
+    `nom_affiche` absent : celui de la base REMPLACEE (la page que les VA
+    copient, meme faite a la main), sinon celui du modele. Refaire les seules
+    photos donnait sinon « Emy ♡ » (le modele) a l'identite, sans un mot.
     Si `identites` est fourni, l'identite doit en faire partie."""
     out: Dict[str, Any] = {"ok": False, "url": "", "link_id": "", "shortcode": "",
-                           "remplace": None, "coupees": [], "erreur": "", "avertissement": ""}
+                           "remplace": None, "coupees": [], "erreur": "", "avertissement": "",
+                           "groupe": None, "nom_affiche": "", "manuel": False}
     nom = str(identite or "").strip().lstrip("@").strip()
     if not nom:
         out["erreur"] = "nom d'identité vide"
@@ -914,9 +1573,39 @@ def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Option
         precedente = _registre_brut().get(k)
         precedente = precedente if isinstance(precedente, dict) else {}
         prises = _adresses(precedente) | {str(l.get("shortcode") or "").lower() for l in liens}
+        if not nom_affiche:
+            nom_affiche = nom_affiche_de(liens, nom) or None
+            if nom_affiche:
+                print(f"[bases_us] {display_name} : nom affiché repris de la base actuelle "
+                      f"(« {nom_affiche} »)", flush=True)
+        out["nom_affiche"] = nom_affiche or str(modele.get("name_user") or "")
+        # le groupe TEMPLATES : connu une fois pour toutes (aucun appel), cree
+        # au premier besoin. Sans lui, la page se cree quand meme -- hors du
+        # groupe, que l'entretien rattrapera
+        gid, gerr = assurer_groupe()
+        if gerr:
+            print(f"[bases_us] {display_name} : groupe {NOM_GROUPE} indisponible ({gerr}) : "
+                  "page créée hors groupe", flush=True)
+        trace: Dict[str, Any] = {}
         debut = time.time()
         lien, sc, err, refusees = _poster(modele, nom, display_name, eq, nom_affiche, pp, fond,
-                                          prises, url_onlyfans())
+                                          prises, url_onlyfans(),
+                                          groupe=gid if gid and post_avec_groupe() else "",
+                                          trace=trace)
+        douteux = None
+        if trace.get("groupe_refuse"):
+            st, code_g, msg_g = trace["groupe_refuse"]
+            if "group_not_found" in f"{code_g} {msg_g}":
+                # deux causes : le groupe supprime a la main, ou le POST qui ne
+                # le resout pas (contexte de l'equipe). L'assign qui suit, avec
+                # le MEME id, tranche : groupe introuvable -> ranger() l'oublie
+                # et le retrouve ou le recree ; groupe trouve -> c'etait le
+                # champ du POST. Oublier d'emblee repayait POST rate + POST +
+                # list_groups + assign a chaque page, groupe intact.
+                douteux = (st, code_g, msg_g)
+            elif not err:
+                # sans group_id la meme requete a reussi : c'etait lui
+                _noter_post_refuse(st, code_g, msg_g)
         out["shortcode"] = sc
         if refusees:
             # retenues : le prochain envoi ne les repaiera pas
@@ -930,7 +1619,9 @@ def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Option
         pb = "réponse sans id de page" if not lid.startswith("lnk_") else \
             verifier(lien, modele, display_name, eq, sc, debut)
         if pb:
-            out["erreur"] = _rejeter(lien, lid, sc, pb, display_name, eq, k, nom, par)
+            out["erreur"], out["manuel"] = _rejeter(lien, lid, sc, pb, display_name, eq, k, nom, par,
+                                                    groupe_envoye=bool(trace.get("groupe_envoye")),
+                                                    gid=gid)
             return out
 
         if refusees:
@@ -970,6 +1661,13 @@ def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Option
         for l in a_couper:
             res = _desactiver(str(l.get("id")))
             (coupees if res.get("ok") else ratees).append((l, res))
+        # Le rangement apres ce qui compte (la page, les anciennes coupees) :
+        # un groupe rate ne coute jamais une base. Aucun appel si la reponse
+        # du POST la dit deja dans le groupe.
+        out["groupe"] = _ranger_page(lien, lid, gid, gerr)
+        if douteux and out["groupe"]["ok"] and meme_groupe(out["groupe"].get("groupe"), gid):
+            # rangee dans le MEME groupe : il existe, c'est le POST qui refuse
+            _noter_post_refuse(*douteux)
         # APRES les desactivations : vide avant, la liste relue entre-temps
         # par un VA montrait l'ancienne encore active, et restait 15 min en
         # cache -- les copies reprenaient les anciennes photos
@@ -987,6 +1685,7 @@ def creer_base(identite, pp_bytes: bytes, fond_bytes: bytes, nom_affiche: Option
                     e["non_desactives"] = nd
             _maj_registre(k, nom, noter_ratees)
             out["ok"] = False
+            out["manuel"] = True
             out["erreur"] = (f"{url} créée, mais {noms} pas désactivée ({raison}) : la nouvelle base "
                              f"ne sera PAS utilisée pour les VA tant que {noms} est active — "
                              "la couper dans GetMySocial")
