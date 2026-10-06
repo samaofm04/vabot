@@ -2463,12 +2463,25 @@ def demander_rattrapage(par: str = "") -> dict:
     return {"ok": True}
 
 
+#: Combien de bangers des models FR la derniere selection a laisses aux
+#: salons de Va IG (bangers.pour_les_favoris), par sorte de passage (le
+#: rattrapage relit les deux tour a tour) : dit au journal a chaque
+#: changement, pas a chaque passage.
+_HORS_FAVORIS: Dict[bool, int] = {False: 0, True: 0}
+
+
 def _a_traiter(reg: dict, tous: bool) -> List[str]:
     """Les bangers archives pas encore traites. Sans `tous` : seulement ceux
-    archives depuis la mise en service (le passe attend le rattrapage)."""
+    archives depuis la mise en service (le passe attend le rattrapage).
+
+    Pas les reels des models de Va IG sous le seuil reglable : depuis le
+    06/10/2026 ils sont des bangers a 1 000 vues pour LEURS salons
+    (bangers.SEUIL_FR), pas pour les favoris (bangers.pour_les_favoris).
+    Comptes et dits, jamais ecartes en silence."""
     import bangers as _bg
     depuis = int(reg.get("active_depuis") or 0)
     out = []
+    hors = 0
     for sc, f in (_bg.charger().get("reels") or {}).items():
         e = (reg.get("bangers") or {}).get(sc) or {}
         if e.get("etat") == "fait":
@@ -2489,7 +2502,16 @@ def _a_traiter(reg: dict, tous: bool) -> List[str]:
                     continue
             except OSError:
                 continue
+        # Compte seulement ce qui aurait ete analyse (video archivee, dans le
+        # perimetre du passage) ; une pose a reprendre a deja ete analysee.
+        if e.get("etat") != "a_reprendre" and not _bg.pour_les_favoris(f):
+            hors += 1
+            continue
         out.append(sc)
+    if hors != _HORS_FAVORIS.get(bool(tous), 0):
+        _HORS_FAVORIS[bool(tous)] = hors
+        print(f"[favoris-auto] {hors} banger(s) des models de Va IG sous {_bg.seuil()} vues "
+              f"(seuil des salons Va IG : {_bg.SEUIL_FR}) laisse(s) hors des favoris", flush=True)
     return sorted(out)
 
 

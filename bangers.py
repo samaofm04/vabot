@@ -32,6 +32,16 @@ SEUIL_DEFAUT = 10_000
 #: ne veut plus rien dire ; au-dessus d'un million, elle ne sonnera jamais.
 SEUIL_MIN, SEUIL_MAX = 1_000, 1_000_000
 
+#: LE SEUIL DES MODELS DU SERVEUR FR « Va IG » (MODELS_FR), fixe. Le
+#: propriétaire, 06/10/2026 : « pour le serveur IG mets 1000 ». Depuis le
+#: 03/10, ses salons 💥・banger-<model> ne disaient chaque matin que « Aucun
+#: reel au-dessus du seuil » : à 10 000 vues, ses comptes n'y arrivaient
+#: jamais. Il vaut À LA DÉTECTION (examiner, qui ouvre la fiche et lance le
+#: téléchargement all-banger) comme à la sélection du matin — un seul des
+#: deux, et un reel à 3 000 vues était soit jamais archivé, soit jamais posté.
+#: Jessye / Youl4b et les autres identités gardent le seuil réglable (seuil()).
+SEUIL_FR = 1_000
+
 #: Passé cet âge, on archive sans annoncer (cf. l'en-tête).
 AGE_MAX_ANNONCE_SEC = 30 * 86400
 
@@ -96,6 +106,29 @@ def _ecrire(d: dict) -> bool:
 def seuil() -> int:
     """Le nombre de vues à partir duquel un reel est un banger."""
     return _borner(charger().get("seuil"))
+
+
+def seuil_de(identite) -> int:
+    """Le seuil d'une identité : SEUIL_FR pour une model de Va IG, le seuil
+    réglable (seuil()) pour toutes les autres, Jessye comprise."""
+    return SEUIL_FR if str(identite or "").strip().lower() in MODELS_FR else seuil()
+
+
+def pour_les_favoris(f) -> bool:
+    """Les favoris automatiques (favoris_auto) analysent-ils ce banger ? Ce
+    qu'ils prenaient avant le 06/10/2026, rien de plus : une fiche d'une
+    model de Va IG sous le seuil réglable (seuil()) n'était pas un banger.
+
+    SEUIL_FR a été demandé pour les salons de Va IG, pas pour les favoris :
+    chaque banger reçu y est analysé (plusieurs secondes) et ce qu'il trouve
+    est proposé dans « À vérifier ». Sans cette règle, les reels FR de 1 000
+    à 9 999 vues — rattrapage FR compris, des centaines — l'auraient inondé.
+    UNE règle, lue par favoris_auto._a_traiter, là où il choisit son travail
+    (un garde-fou posé seulement sur l'appel après archivage ne voyait pas
+    son passage de tous les quarts d'heure, qui relit ce registre)."""
+    f = f if isinstance(f, dict) else {}
+    ident = str(f.get("identite") or "").strip().lower()
+    return not (ident in MODELS_FR and _entier(f.get("vues")) < seuil())
 
 
 def _borner(v) -> int:
@@ -170,11 +203,49 @@ def examiner(compte: str, reels, identite: str = "", va: str = "",
     `compte` est le pseudo Instagram propriétaire. `identite` et `va` peuvent
     être vides : on ne sait pas toujours à qui appartient un compte, et une
     fiche sans identité vaut mieux qu'un banger perdu.
+
+    Le seuil est celui de l'identité (seuil_de) : SEUIL_FR pour une model de
+    Va IG, le seuil réglable pour les autres.
     """
     now = float(maintenant or time.time())
-    s = seuil()
     d = charger()
-    reg = d["reels"]
+    nouveaux, montes, change = _examiner_dans(d["reels"], compte, reels, identite, va, now)
+    if change:
+        _ecrire(d)
+    return {"nouveaux": nouveaux, "montes": montes}
+
+
+def inscrire_comptes(lots, maintenant: float = 0.0) -> dict:
+    """examiner() pour PLUSIEURS comptes, en UNE lecture et UNE écriture du
+    registre. `lots` : [(compte, reels, identite, va)].
+
+    Sert au rattrapage FR (all_banger.rattrapage_fr), qui relit d'un coup les
+    relevés de tous les comptes des models : un examen par compte, c'était
+    autant de réécritures complètes de bangers.json, chacune pouvant écraser
+    celle d'un scrape parti en même temps (examiner n'a pas de verrou).
+    Rend {"nouvelles": fiches ouvertes, "par_identite": {identité: fiches
+    ouvertes}, "ecrit": registre enregistré ?} — le rattrapage FR fait son
+    bilan model par model."""
+    now = float(maintenant or time.time())
+    d = charger()
+    avant = len(d["reels"])
+    par_identite: dict = {}
+    change = False
+    for compte, reels, identite, va in (lots or []):
+        n0 = len(d["reels"])
+        _n, _m, c = _examiner_dans(d["reels"], compte, reels, identite, va, now)
+        cle = str(identite or "").strip().lower()
+        par_identite[cle] = par_identite.get(cle, 0) + len(d["reels"]) - n0
+        change = change or c
+    ecrit = _ecrire(d) if change else True
+    return {"nouvelles": len(d["reels"]) - avant, "par_identite": par_identite, "ecrit": bool(ecrit)}
+
+
+def _examiner_dans(reg: dict, compte: str, reels, identite: str, va: str,
+                   now: float) -> tuple:
+    """Le crible d'examiner, sur un registre DÉJÀ chargé : (nouveaux, montés,
+    changé ?). L'écriture reste à l'appelant."""
+    s = seuil_de(identite)
     nouveaux, montes = [], []
     change = False
     cpt = str(compte or "").strip().lstrip("@").lower()
@@ -241,9 +312,7 @@ def examiner(compte: str, reels, identite: str = "", va: str = "",
         if not f.get("compte") and cpt:
             f["compte"] = cpt
 
-    if change:
-        _ecrire(d)
-    return {"nouveaux": nouveaux, "montes": montes}
+    return nouveaux, montes, change
 
 
 def _entier(v) -> int:
@@ -556,8 +625,10 @@ def bilan() -> dict:
 """Sélection du matin : publications de la veille, un salon 💥・banger par marché.
 
 Youl4b (US) : Jessye seule, dans son salon fixe, comme avant. Serveur FR
-« Va IG » (03/10/2026) : un salon « 💥・banger-<model> » par model, et
-seulement les comptes des VA du Discord FR (cf. comptes_admis).
+« Va IG » (03/10/2026) : un salon « 💥・banger-<model> » par model. Depuis le
+06/10/2026, TOUS les comptes de l'identité de la model (« check juste les
+id : les comptes de Lola pour Lola »), plus seulement ceux des VA du Discord,
+au seuil SEUIL_FR, et les cartes y sont anonymes (le VA par son numéro).
 
 Le journal fige tous les reels éligibles une fois par jour. Une intention d'envoi est
 écrite AVANT Discord : un résultat incertain ne provoque jamais un doublon.
@@ -640,13 +711,24 @@ def salon_fr(model) -> dict:
 
     Son journal vit à part (DOSSIER_JOURNEES/fr/<model>) : celui de Jessye
     reste au premier niveau, là où passes_par_salon_banger le lit. Jamais
-    d'Apify (le propriétaire le refuse) : preparer_fiches_gratuit."""
+    d'Apify (le propriétaire le refuse) : preparer_fiches_gratuit.
+
+    PLUS DE FILTRE « VA DU DISCORD » (06/10/2026). Avec lui, la plupart des
+    comptes des models — tenus par des VA sans pseudo Discord sur leur fiche
+    — étaient écartés, et chaque matin le salon ne disait rien. Le
+    propriétaire : « check juste les id : les comptes de Lola pour Lola,
+    Amelia pour Amelia ». La sélection prend donc toute fiche dont l'identité
+    est la model (selection_jour), et rien d'une autre.
+
+    `anonyme` : sur Va IG, aucune mention ni nom de VA dans les cartes et le
+    récapitulatif (« j'ai peur qu'ils se volent, fais en mode anonyme »),
+    le VA par son numéro, « Amelia VA 3 » (anonymiser_fr)."""
     m = str(model or "").strip().lower()
     return {"cle": "fr:" + m, "marche": "fr:" + m, "identite": m,
             "libelle": LIBELLES_FR.get(m, m.capitalize()), "serveur": "Va IG",
             "guild_id": GUILD_FR, "channel_id": SALONS_FR.get(m, 0), "nom": "banger-" + m,
             "dossier": DOSSIER_JOURNEES / "fr" / m, "apify": False,
-            "discord_seulement": True}
+            "discord_seulement": False, "anonyme": True}
 
 
 def salons_fr() -> list:
@@ -1203,6 +1285,10 @@ def _handle(compte) -> str:
 def comptes_admis(identite, membres=None) -> set:
     """Les comptes Instagram d'une model tenus par un VA du Discord FR.
 
+    PLUS UTILISÉ PAR LES SALONS FR depuis le 06/10/2026 (salon_fr :
+    discord_seulement False, tous les comptes de l'identité). Gardé pour un
+    salon qui le redemanderait (publier_journee, `admis`).
+
     Le propriétaire (03/10/2026) : seuls comptent les comptes des VA Discord.
     Un compte est admis si son VA (jailbreak.json, sous CETTE model) porte un
     pseudo Discord — le bouton « 📷 Mes comptes » l'y écrit
@@ -1278,6 +1364,145 @@ def gerants_discord(vas, membres):
     return result
 
 
+# ------------------------------------------------ Va IG : le VA par son numéro --
+#
+# Le propriétaire, 06/10/2026 : « mets pas de @ de Discord pour Va IG, j'ai
+# peur qu'ils se volent, fais en mode anonyme », puis « mets le numéro du
+# VA ». Sur Va IG, un VA est « Amelia VA 3 » partout : ticket, lien
+# GetMySocial, podium (liens_fr.numero_va, data/numeros_va_fr.json). Les
+# cartes du matin et le récapitulatif disent CE numéro là où ils mettaient la
+# mention, jamais le pseudo ni le nom ; un VA sans numéro connu est « VA »,
+# compté au journal. La carte all-banger, elle, ne nomme aucun VA, comme sur
+# Youl4b (all_banger.NUMERO_VA_ALL_BANGER_FR, coupé).
+
+
+def gerants_fr(entree, membres) -> dict:
+    """{nom du VA : id Discord} pour une model FR (`entree` : son identité de
+    jailbreak.json, `membres` : ceux du serveur).
+
+    D'abord le pseudo Discord écrit sur la fiche (gerants_discord, comme
+    Jessye). Puis la règle de comptes_admis pour une fiche SANS pseudo, ou un
+    VA implicite (un nom porté par des comptes, absent de vas[]) : le membre
+    dont le pseudo EST le nom du VA. Le bouton « 📷 Mes comptes » nomme le VA
+    d'après son pseudo sans toujours pouvoir l'écrire (add_va refuse un nom
+    déjà pris) : sans ce repli, un VA bien présent sur Va IG restait « VA ».
+    Un pseudo renseigné et différent fait foi ; un nom porté par deux fiches,
+    ou par deux membres, ne désigne personne."""
+    entree = entree if isinstance(entree, dict) else {}
+    vas = [v for v in entree.get('vas') or [] if isinstance(v, dict)]
+    membres = list(membres or [])
+    out = gerants_discord(vas, membres)
+    par_pseudo = {}
+    for m in membres:
+        if not getattr(m, 'bot', False):
+            par_pseudo.setdefault(str(getattr(m, 'name', '') or '').casefold(), []).append(m)
+    noms = {}
+    for v in vas:
+        noms.setdefault(str(v.get('name') or '').strip(), []).append(v)
+    sans_pseudo = [n for n, rows in noms.items() if n and len(rows) == 1
+                   and not str(rows[0].get('discord_username') or '').strip().lstrip('@')]
+    declares = {n.casefold() for n in noms if n}
+    sans_pseudo += sorted({str(a.get('va') or '').strip() for a in entree.get('accounts') or []
+                           if isinstance(a, dict) and str(a.get('va') or '').strip()
+                           and str(a.get('va') or '').strip().casefold() not in declares})
+    for n in sans_pseudo:
+        trouves = par_pseudo.get(n.casefold(), [])
+        if n not in out and len(trouves) == 1:
+            out[n] = str(trouves[0].id)
+    return out
+
+
+def numero_va_fr(model, uid) -> int:
+    """Le numéro du VA (id Discord `uid`) dans cette model, 0 s'il n'en a pas.
+
+    LECTURE SEULE (creer=False) : un numéro se donne dans l'ordre des tickets
+    de la catégorie (cogs/outils.numeroter), une carte ne doit pas en
+    attribuer un au passage."""
+    if not str(uid or '').strip().isdigit():
+        return 0
+    try:
+        import liens_fr
+        return int(liens_fr.numero_va(int(uid), str(model or '').strip().lower(), creer=False) or 0)
+    except Exception as e:                                    # noqa: BLE001
+        _dire_une_fois(f"numero_fr|{type(e).__name__}",
+                       f"[bangers] numéros des VA FR illisibles ({type(e).__name__}: {e}) : "
+                       f"les cartes disent « VA »")
+        return 0
+
+
+def libelle_va_fr(model, numero) -> str:
+    """« Amelia VA 3 », écrit comme le podium et le lien GetMySocial
+    (liens_fr.MODELS) ; « VA » sans numéro."""
+    if not numero:
+        return 'VA'
+    m = str(model or '').strip().lower()
+    try:
+        import liens_fr
+        nom = liens_fr.MODELS[m]['nom']
+    except Exception:                                         # noqa: BLE001
+        nom = m.capitalize()
+    return f'{nom} VA {int(numero)}'
+
+
+def anonymiser_fr(fiches, model, gerants) -> dict:
+    """Va IG : chaque fiche préparée reçoit `va_libelle` (« Amelia VA 3 ») et
+    `va_numero`, et PERD `discord_id` : rien dans la carte ni le récapitulatif
+    ne peut plus mentionner ou nommer le VA. Rend `fiches` ({sc: fiche}).
+
+    Un VA sans numéro (inconnu du compte, absent du serveur, pas encore
+    numéroté) est affiché « VA » : COMPTÉ et dit au journal, avec la cause."""
+    par_nom = {str(k).strip().casefold(): str(v) for k, v in (gerants or {}).items()}
+    numeros, sans = {}, []
+    for sc, f in (fiches or {}).items():
+        va = str(f.get('va') or '').strip()
+        uid = par_nom.get(va.casefold(), '') if va else ''
+        if uid not in numeros:
+            numeros[uid] = numero_va_fr(model, uid)
+        n = numeros[uid]
+        f.pop('discord_id', None)
+        f['va_numero'] = n
+        f['va_libelle'] = libelle_va_fr(model, n)
+        if not n:
+            cause = ('compte sans VA' if not va else 'VA absent du serveur' if not uid
+                     else 'VA sans numéro')
+            sans.append(f"{f.get('shortcode') or sc} ({cause}{' : ' + va if va else ''})")
+    if sans:
+        log.info(f"[bangers] {model} : {len(sans)} fiche(s) sans numéro de VA, affichée(s) « VA » : "
+                 + ', '.join(sans[:10]) + (' …' if len(sans) > 10 else ''))
+    return fiches
+
+
+def gerant_fr(model, fiche, membres) -> tuple:
+    """(« Amelia VA 3 » ou « VA », numéro, cause) du VA qui tient AUJOURD'HUI
+    le compte de cette fiche (rattacher_proprietaires), pour le all-banger
+    quand all_banger.NUMERO_VA_ALL_BANGER_FR est allumé (coupé par défaut).
+    Le all-banger n'a pas la préparation du matin sous la main : même règle,
+    même table de numéros. `cause` dit pourquoi il n'y a pas de numéro ("" sinon)."""
+    import jailbreak
+    m = str(model or '').strip().lower()
+    entree = (jailbreak.list_all() or {}).get(m) or {}
+    f = rattacher_proprietaires([dict(fiche or {})], entree.get('accounts') or [])[0]
+    va = str(f.get('va') or '').strip()
+    uid = {k.casefold(): v for k, v in gerants_fr(entree, membres).items()}.get(va.casefold(), '') \
+        if va else ''
+    n = numero_va_fr(m, uid)
+    cause = ('' if n else 'compte sans VA' if not va else 'VA absent du serveur' if not uid
+             else 'VA sans numéro')
+    return libelle_va_fr(m, n), n, cause
+
+
+def rattacher_gerants(fiches, salon, gerants) -> dict:
+    """Après la préparation du matin : qui gère chaque fiche. Jessye : l'id
+    Discord du VA (`discord_id`, mention non notifiante), comme avant. Un
+    salon anonyme (Va IG) : son numéro, jamais son id (anonymiser_fr)."""
+    s = _salon(salon)
+    if s.get('anonyme'):
+        return anonymiser_fr(fiches, s['identite'], gerants)
+    for f in fiches.values():
+        f['discord_id'] = gerants.get(f.get('va'), '')
+    return fiches
+
+
 def _nombre(value):
     try:
         return f'{int(value):,}'.replace(',', ' ') if value is not None and int(value) >= 0 else '—'
@@ -1291,7 +1516,7 @@ def _mention_gerant(f):
     return ('<@' + uid + '> · ' if uid.isdigit() else '') + name
 
 
-def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye'):
+def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye', anonyme=False):
     """Une carte native Discord ; fichiers texte complets, mentions non notifiantes.
 
     La vidéo, la description et le bouton viennent des briques partagées avec
@@ -1299,13 +1524,18 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye'):
     seul l'en-tête (compte, VA, statistiques) est propre au message du matin.
     `libelle` : la model du salon (« Jessye » sur Youl4b, « Amélia »… sur le
     serveur FR).
+
+    `anonyme` (Va IG) : le VA par son numéro (`va_libelle`, anonymiser_fr),
+    jamais sa mention ni son nom — même pour une fiche préparée avant cette
+    règle, qui porte encore `discord_id` : elle dit alors « VA ».
     """
     import discord
     date = datetime.strptime(f['jour_bilan'], '%Y-%m-%d').strftime('%d/%m/%Y')
     vues = f.get('vues_actuelles') if f.get('vues_actuelles') is not None else f.get('vues')
     commentaires = f.get('commentaires')
     label = 'commentaire' if commentaires == 1 else 'commentaires'
-    header = (f"### @{f['compte']}\n**Géré par :** {_mention_gerant(f)}\n"
+    gerant = str(f.get('va_libelle') or 'VA') if anonyme else _mention_gerant(f)
+    header = (f"### @{f['compte']}\n**Géré par :** {gerant}\n"
               f"{libelle} · Bangers du {date}\n\n**{_nombre(vues)}** vues  ·  "
               f"**{_nombre(commentaires)}** {label}  ·  **{_nombre(f.get('likes'))}** likes")
     if f.get('vues_actuelles') is None:
@@ -1452,8 +1682,12 @@ def blocs_description_discord(shortcode, description, url, joindre_fichier=True)
 
 
 def textes_recap(record, salon=None):
-    """Pages sans plafond de reels ; une mention par personne sur l'ensemble du bilan."""
+    """Pages sans plafond de reels ; une mention par personne sur l'ensemble du bilan.
+
+    Salon anonyme (Va IG) : AUCUNE mention, le VA par son numéro
+    (`va_libelle`), « VA » à défaut — jamais son nom."""
     s = _salon(salon)
+    anonyme = bool(s.get('anonyme'))
     jour = datetime.strptime(record['jour'], '%Y-%m-%d').strftime('%d/%m/%Y')
     visibles = [(sc, it) for sc, it in record['reels'].items() if it['etat'] in ('envoye', 'doublon')]
     videos = sum(bool(it.get('fiche', {}).get('video_disponible')) for _, it in visibles if it['etat'] == 'envoye')
@@ -1464,8 +1698,11 @@ def textes_recap(record, salon=None):
     pages = []; texte = prefix; mentions = []; tagged = set()
     for sc, item in visibles:
         f = item['fiche']; uid = str(f.get('discord_id') or '')
-        nouveau = uid.isdigit() and uid not in tagged
-        who = '<@' + uid + '>' if nouveau else str(f.get('va') or 'VA non renseigné')
+        if anonyme:
+            nouveau, who = False, str(f.get('va_libelle') or 'VA')
+        else:
+            nouveau = uid.isdigit() and uid not in tagged
+            who = '<@' + uid + '>' if nouveau else str(f.get('va') or 'VA non renseigné')
         mid = item.get('message_id')
         if item['etat'] == 'doublon':
             mid = record['reels'][item['doublon_de']].get('message_id')
@@ -1502,9 +1739,11 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
     """Journal durable, reprise sans double envoi, bilan seulement après les fiches.
 
     `salon` (salon_us() par défaut) : l'identité, le salon et le dossier du
-    journal. `admis` : pour un salon FR, les comptes des VA du Discord FR
-    (comptes_admis), relevés AVANT que la journée ne soit figée ; un reel
-    d'un autre compte est écarté, compté et nommé dans le journal
+    journal. Le seuil de la sélection est celui de l'identité (seuil_de :
+    SEUIL_FR pour une model de Va IG). `admis` : pour un salon
+    `discord_seulement` (plus aucun depuis le 06/10/2026), les comptes des VA
+    du Discord (comptes_admis), relevés AVANT que la journée ne soit figée ;
+    un reel d'un autre compte est écarté, compté et nommé dans le journal
     (`hors_discord`), jamais en silence."""
     s = _salon(salon)
     dossier = Path(s['dossier'])
@@ -1530,10 +1769,15 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
             if record and record.get('termine') and record.get('format') == FORMAT_DISCORD:
                 return dict(bilan, termine=True, total=len(record['reels']))
             if record is None:
-                record = {'schema': 1, 'jour': jour, 'seuil': seuil(), 'reels': {}, 'cree_le': clock}
+                record = {'schema': 1, 'jour': jour, 'seuil': seuil_de(s['identite']), 'reels': {},
+                          'cree_le': clock}
                 if s['cle'] != 'us':
                     record['salon'] = s['cle']
             if record.get('format') != FORMAT_DISCORD:
+                if s['identite'] in MODELS_FR:
+                    # Une journée FR ouverte avant le 06/10 mais pas encore figée
+                    # porte l'ancien seuil (10 000) : la sélection prend SEUIL_FR.
+                    record['seuil'] = SEUIL_FR
                 if s.get('discord_seulement') and admis is None:
                     # Sans la liste, on ne sait pas quels comptes comptent : on
                     # ne fige rien plutôt que de tout prendre.
@@ -1761,9 +2005,13 @@ async def contexte_salon(client, salon=None):
         s['channel_id'] = channel.id
     guild = channel.guild
     membres = guild.members if guild.chunked else [m async for m in guild.fetch_members(limit=None)]
-    vas = (jailbreak.list_all().get(s['identite']) or {}).get('vas') or []
+    entree = jailbreak.list_all().get(s['identite']) or {}
+    vas = entree.get('vas') or []
     pseudos = {m.name for m in membres if not getattr(m, 'bot', False)}
-    return channel, gerants_discord(vas, membres), s, pseudos
+    # Va IG : les gérants servent au NUMÉRO du VA (anonymiser_fr), avec le
+    # repli par le nom ; Jessye garde exactement sa règle.
+    gerants = gerants_discord(vas, membres) if s['cle'] == 'us' else gerants_fr(entree, membres)
+    return channel, gerants, s, pseudos
 
 
 async def contexte_publication(client):
@@ -1816,7 +2064,7 @@ async def publier_fiche_discord(client, channel, f, item, salon=None):
         assert f['shortcode'] in data, 'Message différent du reel attendu'
     fichier = chemin_video(f['shortcode']) if video_presente(f['shortcode']) else None
     view, files = fiche_discord(f, fichier, getattr(channel.guild, 'filesize_limit', 25 * 1024 * 1024),
-                                libelle=s['libelle'])
+                                libelle=s['libelle'], anonyme=bool(s.get('anonyme')))
     try:
         if old:
             message = await old.edit(content=None, embeds=[], attachments=files, view=view,
@@ -1844,9 +2092,13 @@ async def publier_recap_discord(client, channel, jour, index, page, salon=None):
         return {'message_id': found.id, 'channel_id': channel.id} if found else {}
     view = discord.ui.LayoutView(timeout=None)
     view.add_item(discord.ui.Container(discord.ui.TextDisplay(page['texte']), accent_colour=0x5865F2))
-    users = [discord.Object(id=int(uid)) for uid in page['mentions']]
-    message = await channel.send(view=view, nonce=nonce,
-        allowed_mentions=discord.AllowedMentions(everyone=False, users=users, roles=False, replied_user=False))
+    if s.get('anonyme'):
+        # Va IG : personne n'est mentionné, même par un vieux récapitulatif.
+        mentions = discord.AllowedMentions.none()
+    else:
+        users = [discord.Object(id=int(uid)) for uid in page['mentions']]
+        mentions = discord.AllowedMentions(everyone=False, users=users, roles=False, replied_user=False)
+    message = await channel.send(view=view, nonce=nonce, allowed_mentions=mentions)
     verified = await channel.fetch_message(message.id)
     assert verified.components[0].to_dict()['components'][0]['content'] == page['texte']
     assert not verified.mention_everyone

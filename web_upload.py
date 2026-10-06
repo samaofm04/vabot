@@ -59923,7 +59923,11 @@ def _start_all_banger_daemon() -> bool:
         nettoyer=lambda sc, e: _ab.nettoyer_via_bot(_BOT_REF, sc, e),
         # Supprime, une fois, les 36 bangers postés à tort (hors 💥・banger),
         # avec l'accord du propriétaire (27/09/2026).
-        supprimer=lambda sc, e: _ab.supprimer_via_bot(_BOT_REF, sc, e))
+        supprimer=lambda sc, e: _ab.supprimer_via_bot(_BOT_REF, sc, e),
+        # Poste, une fois, les anciens bangers des models de Va IG dans leur
+        # 💥・all-banger-<model> (proprietaire, 06/10/2026) : rien de payant,
+        # videos du disque ou lien CDN du releve (all_banger.rattrapage_fr).
+        rattraper_fr=True)
 
 
 def _brancher_favoris_auto():
@@ -60393,17 +60397,18 @@ def _banger_cycle() -> dict:
         def attendre(coro, timeout=180):
             return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
         channel, gerants, s, membres = attendre(bg.contexte_salon(_BOT_REF, salon), timeout=60)
-        # FR : seuls les comptes des VA du Discord FR, relevés AVANT que la
-        # journée ne soit figée (publier_journee ne s'en sert qu'à ce moment-là).
+        # Un salon « discord_seulement » ne prendrait que les comptes des VA du
+        # Discord. Plus aucun depuis le 06/10/2026 : Va IG prend TOUS les
+        # comptes de l'identite de la model (« check juste les id »).
         admis = bg.comptes_admis(s["identite"], membres) if s["discord_seulement"] else None
         def preparer(fiches):
             # Jessye : Apify (statistiques et vidéo du jour). Le FR : rien de
             # payant, le propriétaire refuse Apify -- relevé du scrape et CDN.
             resultat = (bg.preparer_fiches(fiches) if s["apify"]
                         else bg.preparer_fiches_gratuit(fiches, s["identite"]))
-            for f in resultat.values():
-                f['discord_id'] = gerants.get(f.get('va'), '')
-            return resultat
+            # Jessye : l'id Discord du VA (mention non notifiante). Va IG :
+            # son numero (« Amelia VA 3 »), jamais son @ ni son nom.
+            return bg.rattacher_gerants(resultat, s, gerants)
         return bg.publier_journee(jour, preparer,
             lambda f, it: attendre(bg.publier_fiche_discord(_BOT_REF, channel, f, it, s)),
             lambda j, i, page: attendre(bg.publier_recap_discord(_BOT_REF, channel, j, i, page, s)),

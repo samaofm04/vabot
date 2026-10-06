@@ -44,6 +44,14 @@ Le chemin d'un banger :
   rattrapage → (disque, ou HikerAPI + CDN) → pret | trop_lourd | echec
             ↘ HikerAPI coupé : reste « rattrapage », reprise 6 h plus tard
             ↘ lien gratuit d'un scrape → video (chemin des nouveaux)
+  rattrapage_fr → (disque, ou CDN du relevé, RIEN de payant) → pret | echec
+
+Le rattrapage FR (06/10/2026, « Poster les anciens bangers ») : une fois par
+model, tous les reels passés des comptes des models de Va IG au-dessus de
+bangers.SEUIL_FR, dans le 💥・all-banger-<model> de chacune, du plus ancien
+au plus récent, par tranches (cf. rattrapage_fr). Un reel déjà posté dans le
+all-banger de Youl4b y reçoit une entrée JUMELLE (« <sc>@fr:<model> », cf.
+cle_jumeau) : une entrée n'a qu'un message, et le sien est déjà pris.
 """
 from __future__ import annotations
 
@@ -227,6 +235,23 @@ def nonce_de(shortcode: str) -> str:
     return hashlib.sha256(("all-banger:" + str(shortcode)).encode()).hexdigest()[:24]
 
 
+def cle_jumeau(shortcode: str, marche: str) -> str:
+    """La clé de l'entrée JUMELLE d'un reel pour un autre salon (« <sc>@fr:lola »).
+
+    Une entrée du registre ne porte qu'UN message : un reel déjà posté dans le
+    all-banger de Youl4b ne pouvait pas l'être aussi dans celui de sa model
+    sur Va IG (rattrapage FR). La jumelle a son état, son nonce et son message
+    à elle ; la vidéo reste celle de l'archive (<sc>.mp4). « @ » et « : »
+    n'existent dans aucun shortcode : jamais de collision, et le chemin des
+    nouveaux bangers (signaler, _SC_OK) ne la voit pas."""
+    return f"{shortcode}@{marche}"
+
+
+def vrai_shortcode(cle: str, e: Optional[dict] = None) -> str:
+    """Le shortcode du reel derrière une clé du registre (jumelle comprise)."""
+    return str((e or {}).get("reel") or str(cle or "").split("@", 1)[0])
+
+
 def _empreinte_lien(url: str) -> str:
     """De quoi reconnaître un lien DÉJÀ essayé, sans garder l'URL signée."""
     return hashlib.sha1(str(url or "").encode()).hexdigest()[:12] if url else ""
@@ -334,11 +359,16 @@ def signaler(nouveaux, reels, maintenant: float = 0.0) -> List[dict]:
 def _reprenable_par_scrape(e: dict) -> bool:
     """Un banger que le lien gratuit d'un scrape peut reprendre : encore en
     attente du rattrapage, ou écarté faute d'HikerAPI (réserve épuisée, accès
-    coupé) — jamais un échec propre au reel, ni un banger déjà posté."""
+    coupé) — jamais un échec propre au reel, ni un banger déjà posté.
+
+    Ni non plus un banger du rattrapage FR resté sans vidéo
+    (« rattrapage_fr:… ») : son lien du relevé avait expiré, un scrape en
+    apporte un neuf, et il garde son salon (`marche_fr`)."""
     etat = e.get("etat")
     raison = str(e.get("raison") or "")
     return etat == "rattrapage" or (etat == "echec" and (raison == "plafond_hiker"
-                                                         or raison.startswith("hiker_coupe:")))
+                                                         or raison.startswith("hiker_coupe:")
+                                                         or raison.startswith("rattrapage_fr:")))
 
 
 # ---------------------------------------------------------- téléchargement --
@@ -525,6 +555,8 @@ def traiter_job(job: dict, telecharger_octets: Optional[Callable] = None,
             _ecrire(d)
         if ok:
             log.info(f"[all-banger] {sc} : vidéo récupérée ({source}), prête à poster")
+            # Les favoris choisissent eux-mêmes ce qu'ils analysent
+            # (bangers.pour_les_favoris, lu par favoris_auto._a_traiter).
             _prevenir_archivage(sc)
         elif e.get("etat") == "echec":
             log.warning(f"[all-banger] {sc} : vidéo NON récupérée après {e['essais']} essais "
@@ -689,7 +721,19 @@ def ligne_vues(vues: int) -> str:
     return f"**{_bg._nombre(vues)}** vues"
 
 
-def vue_message(shortcode: str, fichier, description: str, url: str, vues: int = 0):
+#: LE NUMÉRO DU VA SUR LA CARTE ALL-BANGER DE VA IG (« Géré par : Amelia VA 3 »),
+#: coupé. Le propriétaire a demandé, pour Va IG, « pas de @ de Discord […]
+#: fais en mode anonyme », puis le numéro du VA À LA PLACE de la mention :
+#: c'est la carte du matin et son récapitulatif qui la portaient. La carte
+#: all-banger n'a jamais nommé personne, et sa règle à lui (26/09/2026) est
+#: écrite : « pas besoin du nom du VA », « réel, description et voir le reel
+#: sur Instagram. C'est tout. » Elle reste donc la même sur les deux
+#: serveurs. True : la ligne revient sous les vues (bangers.gerant_fr).
+NUMERO_VA_ALL_BANGER_FR = False
+
+
+def vue_message(shortcode: str, fichier, description: str, url: str, vues: int = 0,
+                gerant: Optional[str] = None):
     """La carte « all-banger » (Components V2). Rend (vue, fichiers).
 
     Dans l'ordre : la vidéo, ses vues juste dessous, puis — les mêmes blocs
@@ -698,6 +742,11 @@ def vue_message(shortcode: str, fichier, description: str, url: str, vues: int =
     du matin : le propriétaire n'en veut pas ici (26/09/2026). RIEN d'autre : ni compte, ni VA,
     ni likes, ni date (demande expresse). La vidéo n'a pas de texte
     alternatif : celui du matin nomme le compte.
+
+    `gerant` : le VA par son NUMÉRO, « Amelia VA 3 » (bangers.gerant_fr),
+    sous les vues — jamais sa mention ni son nom. Seulement sur Va IG, et
+    seulement si NUMERO_VA_ALL_BANGER_FR (coupé) ; None : la carte reste
+    exactement celle d'avant.
     """
     import discord
     sc = str(shortcode or "")
@@ -705,8 +754,11 @@ def vue_message(shortcode: str, fichier, description: str, url: str, vues: int =
     enfants = [galerie]
     fichiers = [video]
     try:
-        if vues:
-            enfants.append(discord.ui.TextDisplay(ligne_vues(vues)))
+        lignes = [ligne_vues(vues)] if vues else []
+        if gerant:
+            lignes.append("**Géré par :** " + str(gerant))
+        if lignes:
+            enfants.append(discord.ui.TextDisplay("\n".join(lignes)))
         enfants.append(discord.ui.Separator())
         blocs, joints = _bg.blocs_description_discord(sc, description, url,
                                                        joindre_fichier=False)
@@ -742,7 +794,7 @@ def _urls_composants(o) -> List[str]:
     return []
 
 
-def _porte_le_reel(m, shortcode: str) -> bool:
+def _porte_le_reel(m, shortcode: str, nonce: Optional[str] = None) -> bool:
     """Ce message du salon est-il celui de ce banger ?
 
     Trois marques, dont une suffit :
@@ -754,11 +806,14 @@ def _porte_le_reel(m, shortcode: str) -> bool:
         partiel). Le texte de la carte n'est jamais lu (cf. _urls_composants).
     Le shortcode est cherché ENTIER, adresse par adresse : « ABC12 » ne doit
     pas reconnaître le message de « ABC123 ».
+
+    `nonce` : celui de l'envoi quand il n'est pas nonce_de(sc) (entrée jumelle,
+    cf. cle_jumeau) ; les deux autres marques ne changent pas.
     """
     sc = str(shortcode or "")
     if not sc:
         return False
-    if str(getattr(m, "nonce", "") or "") == nonce_de(sc):
+    if str(getattr(m, "nonce", "") or "") == (nonce or nonce_de(sc)):
         return True
     noms = {f"{sc}.mp4", f"{sc}_description.txt"}
     if any(getattr(a, "filename", "") in noms for a in (getattr(m, "attachments", None) or [])):
@@ -776,7 +831,7 @@ def _porte_le_reel(m, shortcode: str) -> bool:
     return any(lien.search(u) or fichier.search(u) for u in urls)
 
 
-async def retrouver(client, salon, shortcode: str, depuis: float):
+async def retrouver(client, salon, shortcode: str, depuis: float, nonce: Optional[str] = None):
     """Le message de ce banger, s'il a été posté par le bot après `depuis`."""
     from datetime import datetime, timezone
     apres = datetime.fromtimestamp(max(0.0, float(depuis or 0) - 60), timezone.utc)
@@ -784,7 +839,7 @@ async def retrouver(client, salon, shortcode: str, depuis: float):
     async for m in salon.history(limit=200, after=apres):
         if getattr(getattr(m, "author", None), "id", None) != moi:
             continue
-        if _porte_le_reel(m, shortcode):
+        if _porte_le_reel(m, shortcode, nonce):
             return m
     return None
 
@@ -806,9 +861,16 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
     Le serveur : `guild_id` s'il est donné, sinon celui du marché de
     l'entrée (`e["marche"]`, écrit avec l'intention d'envoi) — une reprise
     après coupure revérifie dans LE salon où le message est peut-être parti.
+
+    `shortcode` est la CLÉ de l'entrée : celle d'une jumelle (cle_jumeau)
+    donne son propre nonce, la vidéo et la carte restent celles du reel.
+    Sur Va IG, aucune mention ; le numéro du VA seulement si
+    NUMERO_VA_ALL_BANGER_FR.
     """
     import discord
-    sc = str(shortcode or "")
+    cle = str(shortcode or "")
+    sc = vrai_shortcode(cle, e)
+    nonce = nonce_de(cle)
     marche = str((e or {}).get("marche") or "")
     gid = int(guild_id or 0) or guild_du_marche(marche)
     serveur = _serveur(gid)
@@ -838,7 +900,8 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
                                     f"fichier dans #{salon.name}"}
     if e.get("verifier"):
         try:
-            trouve = await retrouver(client, salon, sc, float(e.get("intention_le") or 0))
+            trouve = await retrouver(client, salon, sc, float(e.get("intention_le") or 0),
+                                     nonce=nonce)
         except discord.HTTPException as ex:
             # Sans l'historique, on ne peut pas savoir si le message est parti :
             # on ne renvoie PAS à l'aveugle, on attend (et on le dit une fois).
@@ -860,9 +923,23 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
         # change l'image (c'est son but), ce n'est plus la vidéo d'origine.
         return {"trop_lourd": True, "taille": taille, "limite": limite}
     fiche = _fiche(sc, None)
+    gerant, numero = None, 0
+    if gid == int(_bg.GUILD_FR) and NUMERO_VA_ALL_BANGER_FR:
+        # Va IG : « Amelia VA 3 », jamais la mention ni le nom. Une table
+        # illisible ne retient pas la vidéo : « VA », et on le dit une fois.
+        try:
+            gerant, numero, cause = _bg.gerant_fr(model_du_marche(marche), fiche,
+                                                  await _membres_du_serveur(guild))
+        except Exception as ex:                               # noqa: BLE001
+            gerant, numero, cause = "VA", 0, f"{type(ex).__name__}: {ex}"
+        if not numero:
+            # Compté sur l'entrée (`va_numero` 0) et dit une fois par compte.
+            _dire_une_fois(f"sans_numero:{marche}:{(fiche or {}).get('compte')}:{cause[:40]}",
+                           f"[all-banger] {cle} (@{(fiche or {}).get('compte') or '?'}, {marche}) : "
+                           f"pas de numéro de VA ({cause}) — la carte dit « VA »", logging.INFO)
     try:
         vue, fichiers = vue_message(sc, fichier, description_de(sc, fiche), url_de(sc, fiche),
-                                    vues_de(sc, e, fiche))
+                                    vues_de(sc, e, fiche), gerant=gerant)
     except Exception as ex:                                   # noqa: BLE001
         return {"refuse": f"carte:{type(ex).__name__}", "status": 0}
     try:
@@ -870,7 +947,7 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
         # composants V2 n'en porte pas), aucune mention ne notifie. Mêmes
         # paramètres que la fiche du matin (publier_fiche_discord), qui
         # tourne en production sous cette forme.
-        m = await salon.send(view=vue, files=fichiers, nonce=nonce_de(sc),
+        m = await salon.send(view=vue, files=fichiers, nonce=nonce,
                              allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException as ex:
         status = int(getattr(ex, "status", 0) or 0)
@@ -884,7 +961,28 @@ async def envoyer(client, shortcode: str, e: dict, guild_id: int = 0) -> dict:
     finally:
         for f in fichiers:
             f.close()
+    if gerant is not None:
+        return {"message_id": m.id, "channel_id": salon.id, "va_numero": int(numero or 0)}
     return {"message_id": m.id, "channel_id": salon.id}
+
+
+#: Les membres d'un serveur que discord.py n'a pas en cache (serveur non
+#: « chunked ») : relus au plus toutes les dix minutes. Les relire à chaque
+#: carte, c'était un appel par message d'une rafale de rattrapage.
+_MEMBRES: Dict[int, tuple] = {}
+MEMBRES_CACHE_SEC = 600.0
+
+
+async def _membres_du_serveur(guild) -> list:
+    if getattr(guild, "chunked", True):
+        return list(getattr(guild, "members", None) or [])
+    gid = int(getattr(guild, "id", 0) or 0)
+    quand, membres = _MEMBRES.get(gid, (0.0, []))
+    if time.time() - quand < MEMBRES_CACHE_SEC:
+        return membres
+    membres = [m async for m in guild.fetch_members(limit=None)]
+    _MEMBRES[gid] = (time.time(), membres)
+    return membres
 
 
 def poster_via_bot(bot, shortcode: str, e: dict, timeout: float = 300.0) -> dict:
@@ -1011,25 +1109,55 @@ def passes_par_salons_fr(force: bool = False) -> Dict[str, str]:
 def _marche_de(sc: str, e: dict, perim_us, perim_fr) -> Optional[str]:
     """Le marché d'un banger. Une intention d'envoi en cours garde LE sien
     (une reprise revérifie là où le message est peut-être parti) ; sinon le
-    serveur où il est paru le matin, Youl4b d'abord. None : jamais paru."""
+    serveur où il est paru le matin, Youl4b d'abord ; sinon le salon que lui
+    a donné le rattrapage FR (`marche_fr`, un ancien banger d'une model de
+    Va IG). None : jamais paru.
+
+    Quand il PART est une autre affaire : cf. _retenu_fr."""
     if e.get("etat") == "envoi" and e.get("marche") in MARCHES:
         return e["marche"]
     if sc in perim_us:
         return "us"
     if sc in perim_fr and "fr:" + perim_fr[sc] in MARCHES:
         return "fr:" + perim_fr[sc]
+    m = e.get("marche_fr")
+    if m in MARCHES and m != "us":
+        return m
     return None
+
+
+def _retenu_fr(sc: str, e: dict, marche: str, perim_fr, etats_fr: Dict[str, str]) -> bool:
+    """Ce banger attend-il la fin du rattrapage FR de SA model ?
+
+    L'ordre du plus ancien au plus récent ne tient que si rien ne part
+    pendant que la model récupère ses vidéos. Le banger d'hier, paru le matin
+    dans 💥・banger-<model> (perim_fr), partait sinon AVANT des mois
+    d'historique : il attend aussi, le temps que la model soit « faite »,
+    puis tout part ensemble, trié par date de publication. Un ancien banger
+    (`marche_fr` seul) attend que sa model soit faite. Une model jamais
+    commencée (pas encore de relevé) ne retient pas ses bangers du matin : elle
+    n'a rien à poster avant eux. Une intention d'envoi en cours n'attend
+    jamais (elle doit être vérifiée)."""
+    if not str(marche or "").startswith("fr:") or e.get("etat") == "envoi":
+        return False
+    etat = etats_fr.get(model_du_marche(marche), "attente")
+    if sc in perim_fr:
+        return etat == "en_cours"
+    return etat != "fait"
 
 
 def _a_poster_par_marche() -> Dict[str, List[str]]:
     """{marché: shortcodes à poster ou à vérifier}, chaque liste dans l'ordre
     chronologique (cf. a_poster). Un seul passage sur le registre."""
-    reg = charger().get("reels") or {}
+    d = charger()
+    reg = d.get("reels") or {}
     fiches = None
     out: Dict[str, list] = {m: [] for m in MARCHES}
     perim_us = passes_par_salon_banger()
     perim_fr = passes_par_salons_fr()
+    etats_fr = _etats_fr(d)
     hors = 0
+    retenus: Dict[str, int] = {}
     for sc, e in reg.items():
         if not isinstance(e, dict) or e.get("etat") not in ("pret", "envoi"):
             continue
@@ -1037,17 +1165,25 @@ def _a_poster_par_marche() -> Dict[str, List[str]]:
         if marche is None:
             hors += 1
             continue
+        if _retenu_fr(sc, e, marche, perim_fr, etats_fr):
+            retenus[marche] = retenus.get(marche, 0) + 1
+            continue
         poste = _bg._entier(e.get("poste_le"))
         if not poste:
             if fiches is None:
                 fiches = _bg.charger().get("reels") or {}
-            poste = _bg._entier((fiches.get(sc) or {}).get("poste_le"))
+            poste = _bg._entier((fiches.get(vrai_shortcode(sc, e)) or {}).get("poste_le"))
         detecte = _bg._entier(e.get("detecte_le"))
         out[marche].append((poste or detecte, detecte, sc))
     if hors:
         _dire_une_fois(f"hors_salon_banger:{hors}", f"[all-banger] {hors} banger(s) "
                        "prêt(s) mais jamais passé(s) dans un salon 💥・banger : ils attendent, "
                        "non postés", logging.INFO)
+    if retenus:
+        detail = ", ".join(f"{m} {n}" for m, n in sorted(retenus.items()))
+        _dire_une_fois(f"retenus_fr:{detail}", f"[all-banger] {sum(retenus.values())} banger(s) "
+                       f"de Va IG attendent la fin du rattrapage FR de leur model ({detail}) : "
+                       f"ils partiront ensuite, du plus ancien au plus récent", logging.INFO)
     return {m: [sc for _, _, sc in sorted(v)] for m, v in out.items()}
 
 
@@ -1229,6 +1365,9 @@ def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
             # RETROUVÉ peut dater d'avant ce changement : le nettoyage le lira.
             if not res.get("retrouve"):
                 e["sans_txt"] = True
+            if "va_numero" in res:
+                # Va IG : le numéro affiché (0 = « VA »), pour le bilan du rattrapage FR.
+                e["va_numero"] = int(res.get("va_numero") or 0)
             e.pop("raison_envoi", None)
             _ecrire(d)
             bilan["retrouves" if res.get("retrouve") else "envoyes"] += 1
@@ -1358,7 +1497,8 @@ def tour(poster: Callable, pret: Callable, attente: float = 0.0,
          telecharger_octets: Optional[Callable] = None,
          dormir: Callable = time.sleep, limite: Optional[Callable] = None,
          nettoyer: Optional[Callable] = None,
-         supprimer: Optional[Callable] = None) -> dict:
+         supprimer: Optional[Callable] = None,
+         rattraper_fr: bool = False) -> dict:
     """Un tour du fil : UN téléchargement s'il y en a, puis — file vide — le
     rattrapage s'il n'a jamais été fait, puis les envois.
 
@@ -1366,7 +1506,12 @@ def tour(poster: Callable, pret: Callable, attente: float = 0.0,
     fichier sur le disque attend sans rien perdre. Le rattrapage attend que
     le bot soit prêt : c'est le serveur qui dit quelle taille de vidéo il
     accepte, et une vidéo trop lourde doit être comptée comme telle dans son
-    bilan, pas découverte au moment de l'envoi."""
+    bilan, pas découverte au moment de l'envoi.
+
+    `rattraper_fr` : fait aussi le rattrapage FR (rattrapage_fr), une tranche
+    par tour, avant les envois — demandé par le site (web_upload), jamais par
+    défaut : il relit les relevés de tous les comptes des models. Les envois
+    de Youl4b passent ainsi entre deux tranches, au lieu d'attendre la fin."""
     try:
         job = FILE.get(timeout=attente) if attente else FILE.get_nowait()
     except queue.Empty:
@@ -1385,10 +1530,18 @@ def tour(poster: Callable, pret: Callable, attente: float = 0.0,
         rat = rattrapage(limite=(limite() if limite else 0) or LIMITE_DEFAUT,
                          telecharger_octets=telecharger_octets,
                          entre_deux=lambda: _un_job(telecharger_octets))
+    rat_fr = None
+    if rattraper_fr and not rattrapage_fr_fait():
+        rat_fr = rattrapage_fr(telecharger_octets=telecharger_octets,
+                               entre_deux=lambda: _un_job(telecharger_octets))
     b = traiter_envois(poster, dormir=dormir,
                        entre_envois=lambda: _un_job(telecharger_octets))
     if rat is not None:
         b["rattrapage"] = rat
+    if rat_fr is not None:
+        b["rattrapage_fr"] = rat_fr
+    if rattraper_fr:
+        suivre_rattrapage_fr(b)
     if supprimer is not None:
         r = retirer_hors_salon(supprimer, dormir=dormir)
         if r.get("supprimes") or r.get("echecs") or r.get("gardes"):
@@ -1667,7 +1820,8 @@ def demarrer(poster: Callable, pret: Callable,
              telecharger_octets: Optional[Callable] = None,
              limite: Optional[Callable] = None,
              nettoyer: Optional[Callable] = None,
-             supprimer: Optional[Callable] = None) -> bool:
+             supprimer: Optional[Callable] = None,
+             rattraper_fr: bool = False) -> bool:
     """Lance LE fil d'envoi (un seul par processus). Rend True s'il vient
     d'être lancé."""
     with _VERROU:
@@ -1685,8 +1839,13 @@ def demarrer(poster: Callable, pret: Callable,
                 try:
                     b = tour(poster, pret, attente=attente,
                              telecharger_octets=telecharger_octets, limite=limite,
-                             nettoyer=nettoyer, supprimer=supprimer)
+                             nettoyer=nettoyer, supprimer=supprimer,
+                             rattraper_fr=rattraper_fr)
                     attente = ATTENTE_BOT_SEC if b.get("attente") else PERIODE_SEC
+                    if attente == PERIODE_SEC and (b.get("rattrapage_fr") or {}).get("suite"):
+                        # Une tranche du rattrapage FR est faite et il en reste :
+                        # la suivante presque aussitôt, pas dans dix minutes.
+                        attente = RATTRAPAGE_FR_ENTRE_TRANCHES_SEC
                     if attente == ATTENTE_BOT_SEC:
                         time.sleep(ATTENTE_BOT_SEC)
                     if any(b.get(k) for k in ("envoyes", "retrouves", "trop_lourds",
@@ -1929,9 +2088,9 @@ def _inscrire(d: dict, fiches: dict, now: int) -> dict:
         if etat == "envoye":
             c["deja_postes"] += 1
             continue
-        if etat in ("video", "pret", "envoi", "rattrapage"):
-            # Déjà en file (un nouveau banger en cours) : il partira par son
-            # propre chemin, une fois — jamais deux.
+        if etat in ("video", "pret", "envoi", "rattrapage", "rattrapage_fr"):
+            # Déjà en file (un nouveau banger en cours, ou le rattrapage FR) :
+            # il partira par son propre chemin, une fois — jamais deux.
             c["deja_en_file"] += 1
             continue
         if etat == "trop_lourd":
@@ -2228,3 +2387,594 @@ def rattrapage(limite: int = 0, telecharger_octets: Optional[Callable] = None,
              f"{b['plafond_atteint']} au-delà du plafond HikerAPI, "
              f"{b['requetes_hiker']} requête(s) HikerAPI — {b['rafale']}")
     return b
+
+
+# ------------------------------------------------------------ rattrapage FR --
+#
+# Le propriétaire, 06/10/2026 : « Poster les anciens bangers » de Va IG.
+# Depuis le 03/10, les 💥・all-banger-<model> restaient vides : un banger FR
+# n'y entre qu'après son passage dans le 💥・banger-<model> du matin, que le
+# seuil de 10 000 vues et le filtre « VA du Discord » laissaient muet. UNE
+# fois PAR MODEL, tous les reels passés de ses comptes au-dessus de
+# bangers.SEUIL_FR partent dans SON all-banger, du plus ancien au plus
+# récent, au rythme ordinaire des envois. Le 💥・banger-<model> du matin n'en
+# reçoit RIEN : il garde une carte par banger de la veille.
+#
+# RIEN DE PAYANT, ni Apify ni la réserve du rattrapage de Youl4b : les reels
+# viennent des relevés du scrape déjà sur le disque (bangers.CACHE_SCRAPE,
+# ceux qu'examiner a lus), les vidéos de l'archive, du cache des Trends, ou du
+# lien CDN du relevé s'il vit encore. Une vidéo introuvable est comptée et
+# dite, le reel n'est pas posté (un scrape qui apporte un lien neuf le
+# reprend : _reprenable_par_scrape).
+#
+# MODEL PAR MODEL. Une model n'est inscrite qu'une fois lu au moins un
+# relevé d'un de SES comptes ; sans ça elle attend, et un tour suivant la
+# reprend. D'un seul passage pour les six, une model pas encore scrapée à ce
+# moment-là n'avait jamais son historique : « fait » valait pour toutes.
+# Pour chacune, la mécanique du rattrapage de Youl4b : l'INSCRIPTION en une
+# écriture (`commence_le`), la RÉCUPÉRATION reel par reel, chacun écrit dès
+# qu'il est tranché, puis `fait_le` et son bilan, et `clos_le` une fois tout
+# posté ou tranché. Un redémarrage reprend les « rattrapage_fr » restants
+# sans rien réinscrire. Ses envois n'ouvrent qu'à `fait_le` (_retenu_fr).
+#
+# PAR TRANCHES. Des centaines de vidéos d'un bloc, c'étaient des heures sans
+# un message dans le all-banger de Youl4b : la récupération passe avant les
+# envois du tour. RATTRAPAGE_FR_PAR_TOUR téléchargements, puis les envois,
+# puis la tranche suivante presque aussitôt (RATTRAPAGE_FR_ENTRE_TRANCHES_SEC).
+#
+# LA PLACE. data/bangers/ n'est jamais purgé (le site n'efface pas un média) :
+# sous RATTRAPAGE_FR_DISQUE_MIN libres, la récupération s'arrête et le dit ;
+# les reels restent à récupérer, elle reprend quand la place revient.
+
+#: Téléchargements (CDN, ou copie du cache des Trends) par tour. Une vidéo
+#: déjà dans l'archive ne compte pas : elle ne coûte rien.
+RATTRAPAGE_FR_PAR_TOUR = 30
+
+#: Le répit entre deux tranches quand il en reste (au lieu de PERIODE_SEC).
+RATTRAPAGE_FR_ENTRE_TRANCHES_SEC = 2.0
+
+#: Sous cette place libre, plus aucun téléchargement du rattrapage FR.
+RATTRAPAGE_FR_DISQUE_MIN = 3 * 1024 ** 3
+
+#: Les models dont CE processus a déjà vu le rattrapage (inscrit ou repris) :
+#: « repris après un arrêt » ne se dit qu'au redémarrage, pas à chaque tranche.
+_FR_VUS: set = set()
+
+#: Une model sans relevé est revue au plus toutes les cinq minutes : pendant
+#: les tranches d'une autre (un tour toutes les quelques secondes), relire
+#: jailbreak.json et ses relevés à chaque tour ne servait à rien.
+RATTRAPAGE_FR_REESSAI_SEC = 300.0
+_FR_ESSAI = {"quand": 0.0}
+
+
+def rattrapage_fr_etat() -> dict:
+    """Tout l'état du rattrapage FR : {"models": {model: …}}."""
+    r = charger().get("rattrapage_fr")
+    return dict(r) if isinstance(r, dict) else {}
+
+
+def _models_fr(r) -> Dict[str, dict]:
+    ms = r.get("models") if isinstance(r, dict) else None
+    return ms if isinstance(ms, dict) else {}
+
+
+def rattrapage_fr_model(model: str) -> dict:
+    """L'état du rattrapage d'UNE model ({} : pas encore commencé)."""
+    e = _models_fr(rattrapage_fr_etat()).get(str(model or ""))
+    return dict(e) if isinstance(e, dict) else {}
+
+
+def _etats_fr(d: dict) -> Dict[str, str]:
+    """{model : « attente » (pas encore commencé), « en_cours » ou « fait »}."""
+    ms = _models_fr(d.get("rattrapage_fr") if isinstance(d, dict) else None)
+    out: Dict[str, str] = {}
+    for m in _bg.MODELS_FR:
+        e = ms.get(m) if isinstance(ms.get(m), dict) else {}
+        out[m] = "fait" if e.get("fait_le") else "en_cours" if e.get("commence_le") else "attente"
+    return out
+
+
+def rattrapage_fr_fait() -> bool:
+    """Chaque model de Va IG a-t-elle eu son rattrapage ?"""
+    return all(v == "fait" for v in _etats_fr(charger()).values())
+
+
+def _comptes_fr() -> tuple:
+    """({model: [(compte, VA)]}, {compte: [identités]} des comptes portés par
+    PLUSIEURS identités de jailbreak.json).
+
+    Un compte à deux identités n'a pas de model sûre : le router au hasard,
+    c'était risquer un reel de Lola chez Amelia. Il est écarté et nommé."""
+    import jailbreak
+    tout = jailbreak.list_all() or {}
+    identites: Dict[str, set] = {}
+    for ident, data in tout.items():
+        for a in ((data or {}).get("accounts") or []) if isinstance(data, dict) else []:
+            h = _bg._handle(a.get("username")) if isinstance(a, dict) else ""
+            if h:
+                identites.setdefault(h, set()).add(str(ident or "").strip().lower())
+    par_model: Dict[str, list] = {}
+    for m in _bg.MODELS_FR:
+        data = tout.get(m) if isinstance(tout.get(m), dict) else {}
+        vus, lst = set(), []
+        for a in data.get("accounts") or []:
+            h = _bg._handle(a.get("username")) if isinstance(a, dict) else ""
+            if h and h not in vus:
+                vus.add(h)
+                lst.append((h, str(a.get("va") or "").strip()))
+        par_model[m] = lst
+    return par_model, {h: sorted(i) for h, i in identites.items() if len(i) > 1}
+
+
+def _releve_fr(compte: str):
+    """Les reels du dernier relevé du scrape de ce compte (lecture seule), ou
+    « absent » / « illisible »."""
+    h = _bg._handle(compte)
+    if not h or "/" in h or "\\" in h or h.startswith("."):
+        return "illisible"
+    p = pathlib.Path(_bg.CACHE_SCRAPE) / (h + ".json")
+    if not p.is_file():
+        return "absent"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "illisible"
+    if not isinstance(d, dict) or not isinstance(d.get("reels") or [], list):
+        return "illisible"
+    return [r for r in (d.get("reels") or []) if isinstance(r, dict)]
+
+
+def _stats_fr() -> dict:
+    return {"trouves": 0, "a_recuperer": 0, "jumeaux": 0, "deja_postes": 0,
+            "deja_en_file": 0, "deja_prets": 0, "en_telechargement": 0,
+            "repris_apres_echec": 0, "autre_model": 0}
+
+
+def _inscrire_fr(d: dict, candidats: list, perim_us, perim_fr, now: int,
+                 models: Optional[List[str]] = None) -> dict:
+    """Premier temps du rattrapage FR : chaque candidat (sc, model, fiche)
+    reçoit sa place. Rend le compte par model (`models`, toutes par défaut)
+    — chaque candidat a sa ligne.
+
+      aucune entrée                 → « rattrapage_fr » (vidéo à récupérer)
+      postée dans SON all-banger    → déjà posté, rien
+      postée / partie / à partir
+      vers Youl4b, retirée, trop
+      lourde, refusée par Discord   → une JUMELLE « rattrapage_fr » (cle_jumeau)
+      prête sans salon, ou en
+      téléchargement                → marquée pour son all-banger (`marche_fr`)
+      échec de vidéo                → « rattrapage_fr », nouvel essai gratuit
+    """
+    reg = d["reels"]
+    c: Dict[str, dict] = {m: _stats_fr() for m in (models or _bg.MODELS_FR)}
+    for sc, model, f in candidats:
+        cm = c[model]
+        cm["trouves"] += 1
+        marche = "fr:" + model
+        marque = {"rattrapage_fr": now, "marche_fr": marche}
+        neuve = {"etat": "rattrapage_fr", "essais": 0,
+                 "detecte_le": _bg._entier(f.get("detecte_le")) or now,
+                 "poste_le": _bg._entier(f.get("poste_le")), **marque}
+        e = reg.get(sc)
+        etat = e.get("etat") if isinstance(e, dict) else None
+        jumelle = False
+        if etat is None:
+            reg[sc] = neuve
+            cm["a_recuperer"] += 1
+        elif etat == "envoye":
+            parti = str(e.get("marche") or "us")
+            if parti == marche:
+                cm["deja_postes"] += 1
+            elif parti.startswith("fr:"):
+                cm["autre_model"] += 1
+            else:
+                jumelle = True
+        elif etat in ("pret", "envoi"):
+            vers = _marche_de(sc, e, perim_us, perim_fr)
+            if vers == "us":
+                jumelle = True
+            elif vers == marche:
+                cm["deja_en_file"] += 1
+            elif vers:
+                cm["autre_model"] += 1
+            else:
+                e.update(marque)
+                cm["deja_prets"] += 1
+        elif etat in ("video", "rattrapage"):
+            e.update(marque)
+            cm["en_telechargement"] += 1
+        elif etat == "echec":
+            raison = str(e.pop("raison", "") or "")
+            e.update(neuve, raison_avant=raison[:80], detecte_le=_bg._entier(e.get("detecte_le"))
+                     or neuve["detecte_le"])
+            cm["a_recuperer"] += 1
+            cm["repris_apres_echec"] += 1
+        elif etat == "rattrapage_fr":
+            e.update(marque)
+            cm["a_recuperer"] += 1
+        else:
+            # trop_lourd, echec_envoi, retire… : l'entrée garde son histoire
+            # (et son message éventuel) ; Va IG a sa propre chance.
+            jumelle = True
+        if jumelle:
+            cle = cle_jumeau(sc, marche)
+            j = reg.get(cle)
+            if isinstance(j, dict) and j.get("etat") == "envoye":
+                cm["deja_postes"] += 1
+            elif isinstance(j, dict):
+                j.update(marque)
+                cm["a_recuperer" if j.get("etat") == "rattrapage_fr" else "deja_en_file"] += 1
+            else:
+                reg[cle] = dict(neuve, reel=sc, sans_txt=True,
+                                jumelle_de={"etat": etat, "marche": str(e.get("marche") or "")})
+                cm["jumeaux"] += 1
+                cm["a_recuperer"] += 1
+    return c
+
+
+def _bilan_fr(d: dict, model: str, depuis: int) -> dict:
+    """Où en est le rattrapage d'une model, recalculé des entrées elles-mêmes
+    (juste après une reprise) : à récupérer, en file, postés, sans vidéo (et
+    pourquoi)…"""
+    x = {"a_recuperer": 0, "en_file": 0, "postes": 0, "sans_video": 0, "raisons_sans_video": {},
+         "en_telechargement": 0, "trop_lourds": 0, "refuses": 0, "sans_numero": 0,
+         "inacheves": 0}
+    for e in (d.get("reels") or {}).values():
+        if (not isinstance(e, dict) or e.get("rattrapage_fr") != depuis
+                or model_du_marche(e.get("marche_fr")) != model):
+            continue
+        etat = e.get("etat")
+        if etat == "envoye":
+            x["postes"] += 1
+            if "va_numero" in e and not int(e.get("va_numero") or 0):
+                x["sans_numero"] += 1
+        elif etat == "rattrapage_fr":
+            x["a_recuperer"] += 1
+        elif etat in ("pret", "envoi"):
+            x["en_file"] += 1
+        elif etat in ("video", "rattrapage"):
+            x["en_telechargement"] += 1
+        elif etat == "echec":
+            x["sans_video"] += 1
+            r = str(e.get("raison") or "?")
+            x["raisons_sans_video"][r] = x["raisons_sans_video"].get(r, 0) + 1
+        elif etat == "trop_lourd":
+            x["trop_lourds"] += 1
+        elif etat == "echec_envoi":
+            x["refuses"] += 1
+        else:
+            x["inacheves"] += 1
+    return x
+
+
+def _resume_fr(model: str, inscription: dict, x: dict) -> str:
+    """Une ligne pour une model : trouvés, en file, postés, sans vidéo…"""
+    i, x = inscription or {}, x or {}
+    txt = (f"{model} : {i.get('trouves', 0)} trouvé(s), {x.get('en_file', 0)} en file, "
+           f"{x.get('postes', 0)} posté(s), {x.get('sans_video', 0)} sans vidéo")
+    if x.get("raisons_sans_video"):
+        txt += f" {x['raisons_sans_video']}"
+    for cle, nom in (("deja_postes", "déjà posté(s) avant"), ("deja_en_file", "déjà en file"),
+                     ("autre_model", "dans une autre model (?)")):
+        if i.get(cle):
+            txt += f", {i[cle]} {nom}"
+    for cle, nom in (("a_recuperer", "à récupérer"), ("en_telechargement", "en téléchargement"),
+                     ("trop_lourds", "trop lourd(s)"), ("refuses", "refusé(s) par Discord"),
+                     ("sans_numero", "sans numéro de VA")):
+        if x.get(cle):
+            txt += f", {x[cle]} {nom}"
+    return txt
+
+
+def _place_libre() -> int:
+    """Les octets libres là où l'archive des bangers grossit ; -1 si on ne
+    sait pas (alors on ne bloque pas : on ne devine pas un disque plein)."""
+    try:
+        p = pathlib.Path(_bg.DOSSIER)
+        while not p.exists() and p != p.parent:
+            p = p.parent
+        return int(shutil.disk_usage(str(p)).free)
+    except OSError:
+        return -1
+
+
+def _inscrire_models_fr(models: List[str], now: int) -> dict:
+    """L'inscription des models `models` qui ont au moins un relevé lisible :
+    leurs relevés ouverts au registre des bangers (une écriture), puis leurs
+    candidats placés dans ce registre-ci (une écriture). Les autres attendent,
+    dit une fois. Rend {"inscrites", "en_attente": {model: cause}} ou, une
+    écriture ratée, {"erreur"} — rien n'est alors marqué, repris au tour suivant."""
+    # Hors du verrou : relire les relevés et ouvrir les fiches ne touche pas
+    # ce registre-ci, et les scrapes doivent pouvoir signaler pendant.
+    par_model, ambigus = _comptes_fr()
+    lots: list = []
+    lus_m: Dict[str, dict] = {}
+    prets: List[str] = []
+    en_attente: Dict[str, str] = {}
+    for m in models:
+        lus = {"comptes": 0, "releves_lus": 0, "comptes_sans_releve": 0, "releves_illisibles": 0,
+               "comptes_ambigus": 0, "reels_lus": 0}
+        lots_m = []
+        for h, va in par_model.get(m) or []:
+            lus["comptes"] += 1
+            if h in ambigus:
+                lus["comptes_ambigus"] += 1
+                continue
+            reels = _releve_fr(h)
+            if reels == "absent":
+                lus["comptes_sans_releve"] += 1
+            elif reels == "illisible":
+                lus["releves_illisibles"] += 1
+            else:
+                lus["releves_lus"] += 1
+                lus["reels_lus"] += len(reels)
+                lots_m.append((h, reels, m, va))
+        lus_m[m] = lus
+        if lus["releves_lus"]:
+            prets.append(m)
+            lots.extend(lots_m)
+            continue
+        cause = ("aucun compte dans jailbreak.json" if not lus["comptes"] else
+                 f"aucun relevé lisible sur {lus['comptes']} compte(s) ({lus['comptes_sans_releve']} "
+                 f"sans relevé, {lus['releves_illisibles']} illisible(s), {lus['comptes_ambigus']} "
+                 f"à plusieurs identités)")
+        en_attente[m] = cause
+        _dire_une_fois(f"rattrapage_fr:attente:{m}:{cause}",
+                       f"[all-banger] rattrapage FR de {m} différé : {cause} — il partira dès "
+                       f"qu'un relevé du scrape existe", logging.INFO)
+    noms = [f"@{h} ({'/'.join(i)})" for h, i in sorted(ambigus.items())
+            if any(x in models for x in i)]
+    if noms:
+        _dire_une_fois("rattrapage_fr:ambigus:" + ",".join(noms[:10]),
+                       f"[all-banger] rattrapage FR : {len(noms)} compte(s) à plusieurs "
+                       f"identités, écarté(s) (aucune model sûre) : " + ", ".join(noms[:10])
+                       + (" …" if len(noms) > 10 else ""))
+    if not prets:
+        return {"inscrites": [], "en_attente": en_attente}
+    ins = _bg.inscrire_comptes(lots, maintenant=now)
+    if not ins.get("ecrit"):
+        log.error("[all-banger] rattrapage FR : registre des bangers non enregistré, "
+                  "remis au tour suivant")
+        return {"erreur": "registre des bangers non enregistré", "en_attente": en_attente}
+    comptes_de = {m: {h for h, _va in par_model.get(m) or []} for m in prets}
+    exclus = {m: {"essais": 0, "shortcode": 0, "compte_ambigu": 0, "compte_hors_model": 0}
+              for m in prets}
+    hors_noms: Dict[str, list] = {m: [] for m in prets}
+    candidats = []
+    for sc, f in (_bg.charger().get("reels") or {}).items():
+        if not isinstance(f, dict):
+            continue
+        m = str(f.get("identite") or "").strip().lower()
+        if m not in comptes_de or _bg._entier(f.get("vues")) < _bg.SEUIL_FR:
+            continue
+        h = _bg._handle(f.get("compte"))
+        if f.get("essai"):
+            exclus[m]["essais"] += 1
+        elif not _SC_OK.match(str(sc)):
+            exclus[m]["shortcode"] += 1
+        elif h in ambigus:
+            exclus[m]["compte_ambigu"] += 1
+        elif h not in comptes_de[m]:
+            # « Les comptes de Lola pour Lola » : la fiche dit Lola (figée à la
+            # détection) mais le compte n'est plus à elle aujourd'hui — passé
+            # à une autre model, ou sorti de jailbreak.json. Router d'après la
+            # fiche, c'était poster chez Lola le reel d'un compte qu'elle n'a
+            # plus, avec le numéro de son ancien VA ; d'après le compte, poster
+            # chez l'autre model un reel tourné pour Lola. Ni l'un ni l'autre.
+            exclus[m]["compte_hors_model"] += 1
+            hors_noms[m].append(f"{sc} (@{h or '?'})")
+        else:
+            candidats.append((str(sc), m, f))
+    for m, lst in hors_noms.items():
+        if lst:
+            log.warning(f"[all-banger] rattrapage FR de {m} : {len(lst)} banger(s) d'un compte "
+                        f"qui n'est plus à {m} dans jailbreak.json, écarté(s) : "
+                        + ", ".join(lst[:10]) + (" …" if len(lst) > 10 else ""))
+    perim_us = passes_par_salon_banger(force=True)
+    perim_fr = passes_par_salons_fr(force=True)
+    with _VERROU:
+        d = charger()
+        r = d.get("rattrapage_fr") if isinstance(d.get("rattrapage_fr"), dict) else {}
+        ms = r.get("models") if isinstance(r.get("models"), dict) else {}
+        prets = [m for m in prets if not (isinstance(ms.get(m), dict) and ms[m].get("commence_le"))]
+        if not prets:
+            return {"inscrites": [], "en_attente": en_attente}
+        stats = _inscrire_fr(d, [c for c in candidats if c[1] in prets], perim_us, perim_fr, now,
+                             prets)
+        for m in prets:
+            ms[m] = {"commence_le": now, "inscription": stats[m],
+                     "lus": dict(lus_m[m], fiches_ouvertes=int((ins.get("par_identite") or {})
+                                                               .get(m, 0)), exclus=exclus[m])}
+        r["models"] = ms
+        d["rattrapage_fr"] = r
+        if not _ecrire(d):
+            log.error("[all-banger] rattrapage FR : registre non enregistré, remis au tour suivant")
+            return {"erreur": "registre non enregistré", "en_attente": en_attente}
+    for m in prets:
+        _FR_VUS.add(m)
+        x = ms[m]
+        log.info(f"[all-banger] rattrapage FR de {m} commencé : {x['inscription']['trouves']} "
+                 f"banger(s) au-dessus de {_bg.SEUIL_FR} vues, {x['inscription']['a_recuperer']} "
+                 f"vidéo(s) à récupérer sans rien payer — {x['lus']} — {x['inscription']}")
+    return {"inscrites": prets, "en_attente": en_attente}
+
+
+def rattrapage_fr(telecharger_octets: Optional[Callable] = None,
+                  entre_deux: Optional[Callable] = None, maintenant: float = 0.0,
+                  par_tour: int = 0) -> dict:
+    """Une tranche du rattrapage des anciens bangers des models de Va IG.
+
+    Inscrit d'abord les models pas encore commencées qui ont un relevé
+    lisible, puis récupère au plus `par_tour` vidéos (RATTRAPAGE_FR_PAR_TOUR)
+    des models en cours, model après model, du plus ancien au plus récent ;
+    une model sans plus rien à récupérer est « faite », son bilan au journal.
+    `entre_deux` : appelé avant chaque reel (les nouveaux bangers en file,
+    dont le lien expire). Rend le bilan de la tranche :
+
+      {"deja_fait": True}            toutes les models sont faites ;
+      "inscrites", "faites"          models commencées / finies ici ;
+      "en_attente": {model: cause}   pas encore de relevé lisible : retentée ;
+      "traites", "suite"             reels tranchés, et s'il en reste ;
+      "pause"                        plus assez de place sur le disque ;
+      "erreur"                       une écriture a échoué : repris au tour suivant.
+    """
+    now = int(maintenant or time.time())
+    par_tour = int(par_tour or RATTRAPAGE_FR_PAR_TOUR)
+    etats = _etats_fr(charger())
+    if all(v == "fait" for v in etats.values()):
+        return {"deja_fait": True}
+    out = {"inscrites": [], "en_attente": {}, "traites": 0, "suite": False, "faites": []}
+    a_inscrire = [m for m, v in etats.items() if v == "attente"]
+    if a_inscrire and time.time() - _FR_ESSAI["quand"] >= RATTRAPAGE_FR_REESSAI_SEC:
+        _FR_ESSAI["quand"] = time.time()
+        ins = _inscrire_models_fr(a_inscrire, now)
+        out["en_attente"] = ins.get("en_attente") or {}
+        if ins.get("erreur"):
+            return dict(out, erreur=ins["erreur"])
+        out["inscrites"] = ins.get("inscrites") or []
+    rang = {m: i for i, m in enumerate(_bg.MODELS_FR)}
+    with _VERROU:
+        d = charger()
+        ms = _models_fr(d.get("rattrapage_fr"))
+        en_cours = {m: int(ms[m].get("commence_le") or 0) for m in _bg.MODELS_FR
+                    if isinstance(ms.get(m), dict) and ms[m].get("commence_le")
+                    and not ms[m].get("fait_le")}
+        a_faire = []
+        for cle, e in d["reels"].items():
+            m = model_du_marche(e.get("marche_fr")) if isinstance(e, dict) else ""
+            if (m in en_cours and e.get("etat") == "rattrapage_fr"
+                    and e.get("rattrapage_fr") == en_cours[m]):
+                a_faire.append((rang[m], _bg._entier(e.get("poste_le")), cle))
+    if not en_cours:
+        return out
+    repris = [m for m in en_cours if m not in _FR_VUS]
+    if repris:
+        _FR_VUS.update(repris)
+        log.info(f"[all-banger] rattrapage FR repris après un arrêt : {', '.join(repris)}")
+    fiches = _bg.charger().get("reels") or {}
+    telecharges = 0
+    for _r, _p, cle in sorted(a_faire):
+        with _VERROU:
+            e = charger()["reels"].get(cle)
+            if not isinstance(e, dict) or e.get("etat") != "rattrapage_fr":
+                continue
+        sc = vrai_shortcode(cle, e)
+        neuf = not _bg.video_presente(sc)
+        if neuf:
+            if telecharges >= par_tour:
+                out["suite"] = True
+                break
+            libre = _place_libre()
+            if 0 <= libre < RATTRAPAGE_FR_DISQUE_MIN:
+                out["pause"] = (f"{libre // 2 ** 20} Mio libres sur le disque, "
+                                f"{RATTRAPAGE_FR_DISQUE_MIN // 2 ** 20} au moins")
+                _dire_une_fois("rattrapage_fr:disque",
+                               f"[all-banger] rattrapage FR en pause : {out['pause']} — les vidéos "
+                               f"restantes attendent la place, rien n'est perdu")
+                break
+            if "rattrapage_fr:disque" in _DITS:
+                _DITS.discard("rattrapage_fr:disque")
+                log.info("[all-banger] rattrapage FR : la place est revenue, la récupération reprend")
+        if entre_deux is not None:
+            try:
+                entre_deux()
+            except Exception as ex:                           # noqa: BLE001
+                log.warning(f"[all-banger] rattrapage FR, file des nouveaux : "
+                            f"{type(ex).__name__}: {ex}")
+        f = fiches.get(sc) if isinstance(fiches.get(sc), dict) else {}
+        reel, _releve_le = _bg._reel_du_scrape(f.get("compte"), sc)
+        url = str((reel or {}).get("video_url") or "").strip()
+        try:
+            ok, raison, source = telecharger(sc, url, telecharger_octets)
+        except Exception as ex:                               # noqa: BLE001
+            ok, raison, source = False, f"exception:{type(ex).__name__}", ""
+        if neuf:
+            telecharges += 1
+        if ok:
+            _ecrire_description(sc, str((reel or {}).get("caption") or f.get("description") or ""))
+            res = {"etat": "pret", "source": source, "taille": _taille(sc), "video_le": int(time.time())}
+        else:
+            # « pas_de_lien » : ni archive, ni cache, ni lien dans le relevé.
+            res = {"etat": "echec", "raison": "rattrapage_fr:" + (raison or "inconnue"),
+                   "source": source, "echec_le": int(time.time())}
+        with _VERROU:
+            d = charger()
+            e = d["reels"].get(cle)
+            if isinstance(e, dict) and e.get("etat") == "rattrapage_fr":
+                e.update(res, tranche_le=int(time.time()))
+                if _ecrire(d):
+                    out["traites"] += 1
+                else:
+                    log.error(f"[all-banger] rattrapage FR : {cle} non enregistré — repris au tour suivant")
+    faites: List[str] = []
+    with _VERROU:
+        d = charger()
+        r = d.get("rattrapage_fr") if isinstance(d.get("rattrapage_fr"), dict) else {}
+        ms = _models_fr(r)
+        for m, depuis in en_cours.items():
+            em = ms.get(m)
+            if not isinstance(em, dict) or em.get("fait_le"):
+                continue
+            x = _bilan_fr(d, m, depuis)
+            if x["a_recuperer"]:
+                continue          # pas fini : la tranche suivante
+            n = x["en_file"]
+            em.update(fait_le=int(time.time()), bilan=dict(
+                x, rafale=(f"{n} message(s) à poster dans 💥・all-banger-{m}, un par un, au moins "
+                           f"{n * DELAI_ENTRE_MESSAGES / 60:.0f} min de publication" if n
+                           else "rien à poster")))
+            faites.append(m)
+        if faites:
+            d["rattrapage_fr"] = r
+            if not _ecrire(d):
+                log.error("[all-banger] rattrapage FR : fin non enregistrée, reprise au tour suivant")
+                return dict(out, erreur="fin non enregistrée")
+    for m in faites:
+        em = ms[m]
+        log.info(f"[all-banger] rattrapage FR de {m} : vidéos récupérées — "
+                 f"{_resume_fr(m, em.get('inscription') or {}, em['bilan'])} — {em['bilan']['rafale']}")
+    out["faites"] = faites
+    if out["traites"] and out["suite"]:
+        reg = charger()["reels"]
+        restants = sum(1 for _r, _p, cle in a_faire
+                       if (reg.get(cle) or {}).get("etat") == "rattrapage_fr")
+        log.info(f"[all-banger] rattrapage FR : {out['traites']} vidéo(s) tranchée(s), "
+                 f"{restants} encore à récupérer")
+    return out
+
+
+def suivre_rattrapage_fr(passage: Optional[dict] = None) -> dict:
+    """Après chaque passage d'envois : où en est le rattrapage FR des models
+    déjà « faites ». Une ligne au journal quand des messages sont partis ; le
+    bilan FINAL d'une model (trouvés, postés, sans vidéo…) une seule fois,
+    quand plus rien d'elle n'attend (`clos_le`). Rend {model: bilan}."""
+    ms = _models_fr(rattrapage_fr_etat())
+    actifs = {m: e for m, e in ms.items()
+              if isinstance(e, dict) and e.get("fait_le") and not e.get("clos_le")}
+    if not actifs:
+        return {}
+    d = charger()
+    par_model = {m: _bilan_fr(d, m, int(e.get("commence_le") or 0)) for m, e in actifs.items()}
+    attente = {m: x["en_file"] + x["en_telechargement"] for m, x in par_model.items()}
+    if any(attente.values()) and any((passage or {}).get(k) for k in ("envoyes", "retrouves")):
+        log.info("[all-banger] rattrapage FR : " + ", ".join(
+            f"{m} {x['postes']}/{x['postes'] + attente[m]} posté(s)"
+            for m, x in par_model.items() if attente[m] or x["postes"]))
+    clos = [m for m, n in attente.items() if not n]
+    if clos:
+        with _VERROU:
+            d = charger()
+            rr = d.get("rattrapage_fr") if isinstance(d.get("rattrapage_fr"), dict) else {}
+            mm = _models_fr(rr)
+            fermes = []
+            for m in clos:
+                em = mm.get(m)
+                if isinstance(em, dict) and em.get("fait_le") and not em.get("clos_le"):
+                    em.update(clos_le=int(time.time()), bilan_final=par_model[m])
+                    fermes.append(m)
+            d["rattrapage_fr"] = rr
+            if fermes and _ecrire(d):
+                for m in fermes:
+                    log.info(f"[all-banger] rattrapage FR de {m} terminé : "
+                             f"{_resume_fr(m, mm[m].get('inscription') or {}, par_model[m])}")
+    return par_model
