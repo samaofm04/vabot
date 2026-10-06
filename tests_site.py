@@ -20871,10 +20871,16 @@ print()
 print("=" * 70)
 print("Podium de la semaine : chaque lundi, sur des chiffres qu on peut payer")
 print("=" * 70)
+_mesureP = None
 try:
     import datetime as _dtP
     import podium_discord as _pd
     from pathlib import Path as _plP
+    # la mecanique du podium sur les clics GetMySocial (Va IG, et Twitter
+    # jusqu au 06/10/2026) : Twitter y repasse le temps de ce bloc, sans quoi
+    # il lirait le vrai MyPuls. Le comptage par tracking a ses propres tests
+    # (tests_podium_tracking.py).
+    _mesureP = _pd.SERVEURS[_pd.TWITTER_ID].pop("mesure", None)
 
     # --- la semaine racontee est toujours CELLE QUI EST FINIE
     check("un lundi, on recapitule la semaine d avant",
@@ -21189,8 +21195,32 @@ try:
           _nomsP["( BO7 ) 1"] == "BO7" and _pd.personne("(PAMPAM) 1 SPAM") == ("PAMPAM", True))
     check("SPAM colle sans parentheses est retire du nom",
           _pd.personne("Gerome SPAM") == ("Gerome", True))
+    # le nom des trackings Infloww, que les liens peuvent porter depuis le
+    # 06/10/2026 : la personne est AVANT les parentheses (« normal » sinon)
+    check("un nom Infloww « X - ( normal ) » rend X, et « ( spam ) » le SPAM",
+          _pd.personne("Roucham - ( normal )") == ("Roucham", False)
+          and _pd.personne("Gaspacho  - ( Spam )") == ("Gaspacho", True)
+          and _pd.personne("Narovana  - ( normal )") == ("Narovana", False)
+          and _pd.personne("Tsiry ( normal )") == ("Tsiry", False)
+          and _pd.personne("(Roucham) - ( spam )") == ("Roucham", True)
+          and _pd.personne("Twitter VA 31 @abdoul_9684 - ( normal )") == ("abdoul_9684", False))
+    # DEUX MAPPINGS VALENT DEUX COMPORTEMENTS : le report des clics lit ces
+    # noms comme le podium, sinon tous les VA renommes y devenaient « normal »
+    import clics_personnes as _cpI
+    _nomsI = ["Roucham - ( normal )", "Roucham - ( spam )", "Narovana  - ( normal )",
+              "Gaspacho  - ( Spam )", "Kanto - (normal) 2"]
+    check("le report des clics lit les noms Infloww comme le podium",
+          [_cpI.etiquette(x) for x in _nomsI]
+          == ["Roucham", "Roucham SPAM", "Narovana", "Gaspacho SPAM", "Kanto"]
+          and all(_cpI.etiquette(x) == _pd.cle_entite(*_pd.personne(x)) for x in _nomsI),
+          [_cpI.etiquette(x) for x in _nomsI])
+    check("« (normal) » seul ne fait de personne une personne « normal »",
+          _cpI.nom_infloww("(normal)") is None and _cpI.nom_infloww("( BO7 ) 1") is None)
 except Exception as _eP:
     check("podium : testable", False, repr(_eP)[:200])
+finally:
+    if _mesureP is not None:
+        _pd.SERVEURS[_pd.TWITTER_ID]["mesure"] = _mesureP
 
 # ------------------------------------------- 33. YouLab THREADS, copie de Twitter
 print()

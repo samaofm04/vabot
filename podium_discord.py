@@ -3,8 +3,12 @@
 La semaine court du LUNDI au DIMANCHE, et le message part le lundi suivant :
 il récapitule la semaine qui vient de finir, jamais celle en cours.
 
-CE QU'ON COMPTE. « Subs » veut dire ici les clics venus des États-Unis sur les
-liens GetMySocial — la mesure que le tableau de bord appelle « Clics US ».
+CE QU'ON COMPTE. « Subs » veut dire ici des clics. Sur Twitter (VA US), depuis
+le 06/10/2026 : les clics des liens de tracking OnlyFans des VA, lus dans
+MyPuls, et chaque VA est reconnu à son tracking (clé « mesure », voir
+_classement_tracking). Ailleurs (Va IG) : les clics venus du marché du serveur
+sur les liens GetMySocial — la mesure que le tableau de bord appelle « Clics
+US » ou « Clics FR ».
 
 LA LISTE DES LIENS EST LUE EN DIRECT, jamais dans le cache du site. Le cache
 `gmsdash_links.json` avait treize liens quand GetMySocial en portait
@@ -157,7 +161,14 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {"equipes": None,                # podium_config, sinon EQUIPES_VA
                  "pays": ("US",), "marche": "US", "source": "Twitter 🐦",
                  "bot": "Luigi", "fr": False, "bonus": True, "minutes": None,
-                 "alltime": None},               # ALLTIME_FICHIER
+                 "alltime": None,                # ALLTIME_FICHIER
+                 # Propriétaire, 06/10/2026 : « compte uniquement que les clics
+                 # sur inflow », pour les seuls VA US. Les clics des liens de
+                 # tracking (MyPuls), plus ceux de GetMySocial ; « pays » ne sert
+                 # plus qu'au relevé GetMySocial que Va IG garde de ces VA. Voir
+                 # _classement_tracking. POUR REVENIR AUX CLICS GETMYSOCIAL :
+                 # retirer cette clé, rien d'autre.
+                 "mesure": "tracking"},
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
                "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",
@@ -659,8 +670,20 @@ def semaine_passee(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
 
 # ─── qui est qui ─────────────────────────────────────────────────────────
 def personne(nom_du_lien: str) -> Tuple[str, bool]:
-    """« (Gerome) SPAM » → (« Gerome », True). « ( BO7 ) 1 » → (« BO7 », False)."""
+    """« (Gerome) SPAM » → (« Gerome », True). « ( BO7 ) 1 » → (« BO7 », False).
+    « Roucham - ( spam ) » (nom Infloww) → (« Roucham », True)."""
     n = str(nom_du_lien or "").strip()
+    # Le nom des trackings Infloww, que le propriétaire veut aussi pour les
+    # liens GetMySocial (06/10/2026 : « mettre exactement le même nom que celle
+    # du inflow ») : la personne est AVANT les parenthèses, qui disent seulement
+    # normal ou spam. La règle des parenthèses aurait donné « normal » à tous.
+    # La même règle que le report des clics (clics_personnes.nom_infloww) : deux
+    # lectures d'un même nom finissent par dire deux personnes.
+    import clics_personnes as _cp
+    infloww = _cp.nom_infloww(n)
+    if infloww:
+        nom, spam = personne(infloww[0])
+        return nom, spam or infloww[1]
     # « Twitter VA 1 @abdoul », « va_@abdoul » : quand le nom porte une
     # arobase, c'est le pseudo qui suit qui designe la personne. Sans cette
     # regle, le nom entier devenait la cle — un numero de VA par libelle, et
@@ -834,11 +857,639 @@ def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
     return {k: int(v) for k, v in table.items()}
 
 
+# ─── Twitter : les clics des liens de tracking (clé « mesure ») ──────────
+# Propriétaire, 06/10/2026 : « compte uniquement que les clics sur inflow ».
+# Les liens de JESSY LE RETOUR venaient de passer sur des pages Emy, chacune
+# avec le tracking Infloww de son VA (« Roucham - ( normal ) », emy.brw/c42),
+# et il voulait nommer les liens GetMySocial exactement comme dans Infloww. Or
+# le podium reconnaissait chaque VA au nom du lien. Depuis, sur Twitter :
+#   - un VA est reconnu à son TRACKING : onlyfans.com/<créatrice>/cNN, l'url du
+#     lien direct ou celle d'un bouton de la page ;
+#   - le numéro d'un tracking est gravé à sa première lecture
+#     (podium_trackings.json) : renommer le lien ou le tracking ne le change
+#     plus, et plusieurs liens sur un même tracking ne le comptent qu'une fois ;
+#   - les clics sont les visites du tracking sur la période, lues dans MyPuls
+#     (Infloww ne donne qu'un total depuis la création). Tous pays : MyPuls ne
+#     les découpe pas ;
+#   - un tracking qui n'est plus derrière aucun lien actif (le VA est passé
+#     sur un autre, son lien est désactivé) compte jusqu'au jour où on l'a vu
+#     partir, pas après : la semaine du changement garde ses clics d'avant.
+# Le registre se tient avec la liste fraîche des liens. Sans elle (GetMySocial
+# en pause ou muet), on compte les trackings déjà connus : un lien tout neuf
+# attend son retour, et ses clics de la période ne sont pas perdus pour autant
+# (MyPuls les rend par période, une fois le tracking connu).
+# Va IG garde ses clics GetMySocial, y compris pour les VA US qu'il affiche :
+# ses primes mêlent les deux marchés, et les y mesurer autrement aurait changé
+# ce que touchent les VA FR (propriétaire : « Seulement les VA US »).
+MP_CACHE_S = 90
+#: Un tracking neuf que MyPuls ne connaît pas encore : on attend qu'il le
+#: connaisse (son nom peut seul départager certains VA), mais pas plus que ça.
+#: Au-delà, c'est le lien qui pointe vers un tracking qui n'existe pas.
+ATTENTE_MYPULS_J = 2
+#: Une liste de liens lue il y a moins que ça suffit : la pause nocturne de
+#: GetMySocial ne doit pas afficher « liste non rafraîchie » chaque nuit.
+FRAIS_REGISTRE_H = 24
+#: MyPuls met ses trackings à jour par paliers de plusieurs heures (06/10 : rien
+#: entre 02h53 et 08h04, puis rien jusqu'à 10h54 au moins). Une journée finie à
+#: minuit n'a donc tous ses clics que le lendemain matin : le bonus de la veille
+#: est complété jusqu'à cette heure-là, et la quinzaine attend pour se figer.
+RATTRAPAGE_MYPULS_H = 12
+_MP_LUS: Dict[Tuple[str, str], Tuple[float, Dict[str, Dict[str, Any]]]] = {}
+_URL_TRACKING = re.compile(r"onlyfans\.com/([A-Za-z0-9._-]+)/c(\d+)(?:[/?#]|$)", re.IGNORECASE)
+
+
+def _fichier_trackings() -> Path:
+    # relu à chaque appel, comme _fichier_releves : les tests déplacent DATA_DIR
+    return DATA_DIR / "podium_trackings.json"
+
+
+def _source(gid: Optional[str] = None, mesure: Optional[str] = None) -> str:
+    """Ce que valent les clics : « tracking » (MyPuls) ou « gms »."""
+    return str(mesure or _profil(gid).get("mesure") or "gms")
+
+
+def _service(gid: Optional[str] = None) -> str:
+    """Le service à nommer quand un relevé manque."""
+    return "MyPuls" if _source(gid) == "tracking" else "GetMySocial"
+
+
+def _pause_pour(gid: Optional[str]) -> bool:
+    """La pause de GetMySocial n'arrête que ce qui en dépend. Sur Twitter, la
+    liste des liens attend son retour ; le registre et MyPuls suffisent, et le
+    bonus du jour (payé) ne doit pas se figer pendant des heures."""
+    return _pause_gms() if _source(gid) == "gms" else False
+
+
+def _mesure_dite(pf: Dict[str, Any]) -> str:
+    """Ce que le message dit compter : « tracking OF », ou le marché (« US »)."""
+    return "tracking OF" if pf.get("mesure") == "tracking" else str(pf["marche"])
+
+
+def tracking_de(url: Any) -> str:
+    """« https://onlyfans.com/Emy.Brw/c042/ » → « emy.brw/c42 » ; "" si l'url
+    n'est pas un lien de tracking OnlyFans (« onlyfans.com/emy.brw » seul)."""
+    m = _URL_TRACKING.search(str(url or "").strip())
+    return f"{m.group(1).lower()}/c{int(m.group(2))}" if m else ""
+
+
+def trackings_du_lien(l: Dict[str, Any]) -> List[str]:
+    """Les trackings d'un lien : son url (lien direct), celles de ses boutons
+    (page). Un bouton éteint, s'il le dit, n'envoie personne."""
+    urls = [l.get("url")] + [
+        b.get("url") for b in (l.get("buttons") or [])
+        if isinstance(b, dict) and b.get("enabled") is not False and b.get("active") is not False
+        and b.get("hidden") is not True and b.get("visible") is not False]
+    out: List[str] = []
+    for u in urls:
+        t = tracking_de(u)
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+def _actif(l: Dict[str, Any]) -> bool:
+    # un lien désactivé ne reçoit plus personne
+    return str(l.get("status") or "active").strip().lower() == "active"
+
+
+def _norme(cle: str) -> str:
+    """« Gérôme », « GEROME », « gerome » : la même clé (MyPuls écrit « Gérôme »
+    et « Eud », les liens « (Gerome) » et « EUD »)."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(cle or ""))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", s).strip().casefold()
+
+
+def _base_nom(cle: str) -> str:
+    """« tsiry 1 SPAM » → « tsiry » ; « VA 2 Narovana » → « narovana » : ce qui
+    nomme la personne, sans SPAM, ni numéro de téléphone, ni « VA n » de tête."""
+    n = re.sub(r"\s+SPAM$", "", str(cle or "").strip(), flags=re.IGNORECASE)
+    n = re.sub(r"\s+\d+$", "", n)
+    n = re.sub(r"^va\s*\d+\s+", "", _norme(n))
+    return n.strip()
+
+
+def _meme_personne(a: str, b: str) -> bool:
+    """« tsiry 1 » et « tsiry 2 » (deux téléphones), « (VA 2 Narovana) » et
+    « Narovana - ( normal ) » (un renommage à moitié fait) : une personne.
+    « VA 1 Noum » et « VA 2 Noum » restent deux personnes."""
+    x, y = _base_nom(a), _base_nom(b)
+    if not x or not y:
+        return False
+    if x == y:
+        return _norme(a) == _norme(b) or not (re.match(r"^va\s*\d", _norme(a))
+                                              and re.match(r"^va\s*\d", _norme(b)))
+    return len(x) >= 3 and len(y) >= 3 and (x in y or y in x)
+
+
+def _personnes(cles: List[str]) -> List[List[str]]:
+    """Les clés regroupées par personne (voir _meme_personne)."""
+    groupes: List[List[str]] = []
+    for c in cles:
+        for g in groupes:
+            if any(_meme_personne(c, x) for x in g):
+                g.append(c)
+                break
+        else:
+            groupes.append([c])
+    return groupes
+
+
+def _proche(nom: str, cles: List[str]) -> bool:
+    """Le nom d'un tracking neuf ressemble-t-il à l'un des noms connus d'un
+    numéro ? « Ricrado » / « Ricardo », « Niavo » / « VA 1 Niavo » : oui.
+    Sert à ne pas donner à un VA neuf, sur un lien repris, le numéro de celui
+    qui l'avait avant lui."""
+    import difflib
+    x = _base_nom(nom)
+    for c in cles:
+        y = _base_nom(c)
+        if x and y and (x in y or y in x or difflib.SequenceMatcher(None, x, y).ratio() >= 0.6):
+            return True
+    return False
+
+
+def _lire_mypuls(du: str, au: str, forcer: bool = False
+                 ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], str]:
+    """{tracking: {visites, total, nom}} de TOUS les trackings MyPuls sur
+    [du, au] (jours de Paris, bornes comprises), ou (None, pourquoi).
+    visites : sur la période ; total : depuis la création, jusqu'à `au`.
+
+    L'API brute, pas mypuls.api_tracking_links : celle-ci rend [] (ou une
+    vieille liste) quand l'API tombe, et une panne serait passée pour des
+    zéros — de l'argent. Les bornes que MyPuls dit avoir comptées sont
+    vérifiées, et une liste tronquée est refusée."""
+    t0 = time.time()
+    deja = _MP_LUS.get((du, au))
+    if deja and not forcer and 0 <= t0 - deja[0] < MP_CACHE_S:
+        return deja[1], ""
+    try:
+        import mypuls
+        r = mypuls.api_get("tracking-links", {"per_page": 500, "from": du, "to": au})
+    except Exception as e:                                   # noqa: BLE001
+        return None, f"{type(e).__name__}: {e}"
+    if not isinstance(r, dict) or not r.get("ok"):
+        return None, (str((r or {}).get("error") if isinstance(r, dict) else r or "")[:200]
+                      or "pas de réponse")
+    d = r.get("data")
+    items = d.get("data") if isinstance(d, dict) else None
+    if not isinstance(items, list):
+        return None, "réponse MyPuls sans liste de trackings"
+    per = d.get("period") if isinstance(d.get("period"), dict) else {}
+    if str(per.get("from") or "")[:10] != du or str(per.get("to") or "")[:10] != au:
+        return None, (f'MyPuls a compté du {str(per.get("from") or "?")[:10]} au '
+                      f'{str(per.get("to") or "?")[:10]}, pas du {du} au {au}')
+    try:
+        compte = int(d.get("count"))
+    except (TypeError, ValueError):
+        compte = None
+    if compte is not None and compte > len(items):
+        # l'API rend tout d'un coup (vérifié le 06/10 : 654 sur 654, `page`
+        # ignoré). Si un jour elle découpe : les pages suivantes, et si le
+        # compte n'y est toujours pas, on le dit au lieu de compter zéro
+        vus_url = {str(it.get("url") or "").lower() for it in items if isinstance(it, dict)}
+        for page in range(2, 21):
+            try:
+                r2 = mypuls.api_get("tracking-links", {"per_page": 500, "from": du, "to": au,
+                                                       "page": page})
+            except Exception:                                # noqa: BLE001
+                break
+            d2 = r2.get("data") if isinstance(r2, dict) and r2.get("ok") else None
+            neufs = [it for it in ((d2 or {}).get("data") or []) if isinstance(it, dict)
+                     and str(it.get("url") or "").lower() not in vus_url]
+            if not neufs:
+                break
+            items = items + neufs
+            vus_url |= {str(it.get("url") or "").lower() for it in neufs}
+            if len(items) >= compte:
+                break
+        if compte > len(items):
+            return None, f"MyPuls annonce {compte} trackings et n'en rend que {len(items)}"
+    out: Dict[str, Dict[str, Any]] = {}
+    ecartes, doublons = 0, 0
+    for it in items:
+        t = tracking_de(it.get("url")) if isinstance(it, dict) else ""
+        if not t:
+            ecartes += 1
+            continue
+        if t in out:
+            # la première ligne fait foi, comme sur la page Liens Infloww
+            doublons += 1
+            continue
+
+        def _n(x):
+            try:
+                return int(x)
+            except (TypeError, ValueError):
+                return None
+        out[t] = {"visites": _n(it.get("visits_period")), "total": _n(it.get("visits_total")),
+                  "nom": str(it.get("name") or "").strip()}
+    if ecartes or doublons:
+        print(f"[podium] MyPuls {du} → {au} : {ecartes} ligne(s) sans url de tracking, "
+              f"{doublons} en double (la première gardée)", flush=True)
+    _MP_LUS[(du, au)] = (t0, out)
+    for k in [k for k, (t, _) in _MP_LUS.items() if not 0 <= t0 - t < MP_CACHE_S]:
+        _MP_LUS.pop(k, None)
+    return out, ""
+
+
+def _lire_registre() -> Dict[str, Any]:
+    """{trackings: {t: entrée}, attente: {t: …}, frais: dernière liste fraîche}."""
+    reg = _lire(_fichier_trackings(), {})
+    if not isinstance(reg, dict):
+        reg = {}
+    for k in ("trackings", "attente"):
+        if not isinstance(reg.get(k), dict):
+            reg[k] = {}
+
+    def jour_ok(x) -> bool:
+        try:
+            return len(str(x)) == 10 and bool(dt.date.fromisoformat(str(x)))
+        except ValueError:
+            return False
+    # Le registre se corrige à la main (un tracking passé à quelqu'un d'autre) :
+    # une entrée mal écrite est écartée et dite, jamais une exception qui
+    # arrêterait toute la boucle (Va IG, les liens, le Drive passent après)
+    for t, e in list(reg["trackings"].items()):
+        ok = isinstance(e, dict) and jour_ok(e.get("vu")) and jour_ok(e.get("premier"))
+        try:
+            ok = ok and int(e.get("numero")) > 0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            print(f"[podium] podium_trackings.json : entrée {t} illisible, écartée : "
+                  f"{str(e)[:160]}", flush=True)
+            reg["trackings"].pop(t)
+    for t, e in list(reg["attente"].items()):
+        if not isinstance(e, dict) or not jour_ok(e.get("premier")):
+            reg["attente"].pop(t)
+    return reg
+
+
+def _suivre_trackings(reg: Dict[str, Any], liens: List[Dict[str, Any]],
+                      noms_mp: Dict[str, str], jour: str, maintenant: str
+                      ) -> Dict[str, Any]:
+    """Tient le registre à jour sur la liste FRAÎCHE des liens et une lecture
+    MyPuls RÉUSSIE (sans elles, ne pas l'appeler : un numéro gravé sur une
+    information incomplète l'est pour toujours).
+
+    Un tracking neuf prend le numéro que donnent, ensemble :
+      a. ses liens, quand ils portaient déjà un tracking enregistré (le même
+         lien GetMySocial passé de jessyewdiference/c88 à emy.brw/c42 : même
+         VA, même normal ou spam) ;
+      b. le nom de ses liens (« (Roucham) 1 » → 12 ; « tsiry 1 » et « tsiry 2 »,
+         deux téléphones d'une même personne, → le plus petit) ;
+      c. son nom dans MyPuls (« Laboule ( X ) » → 34).
+    Un seul numéro : il le prend. Aucun : un numéro neuf, comme un VA neuf.
+    Plusieurs, ou des liens qui nomment plusieurs personnes : CONFLIT, il
+    n'est pas enregistré et les VA en cause passent « sans relevé » tant que
+    ça dure (le journal dit pourquoi) — jamais les clics d'un autre sur un VA
+    au hasard. Seul le lien le dit (a), et le nom ne ressemble à aucun de ceux
+    du numéro : un lien repris par un autre VA, conflit aussi.
+    Un tracking que MyPuls ne connaît pas encore attend son nom (au plus
+    ATTENTE_MYPULS_J jours) : « Ricrado » ou un bouton spam sur la page d'un
+    VA ne se départagent qu'avec lui. Ses VA probables passent sans relevé.
+    Son nom Infloww (« Ricrado - ( normal ) ») devient alias du numéro trouvé :
+    un lien renommé comme dans Infloww retrouve le même VA, ici comme dans le
+    relevé GetMySocial que garde Va IG.
+    Rend {sans_tracking, conflits: {tracking enregistré: VA en doute}}."""
+    import clics_personnes as _cp
+    regs: Dict[str, Dict[str, Any]] = reg["trackings"]
+    attente: Dict[str, Dict[str, Any]] = reg["attente"]
+    ratt = _cp.rattachements_identite()
+    noms = {str(l.get("id")): _nom_du_lien(l) for l in liens if l.get("id")}
+    derriere: Dict[str, List[Tuple[str, str]]] = {}
+    sans: List[str] = []
+    for l in liens:
+        lid = str(l.get("id") or "")
+        nom_l = _nom_du_lien(l)
+        if not _actif(l) or (_cp.commence_par_gabarit(nom_l) and lid not in ratt):
+            continue
+        # une page d'identité US est à la personne de son lien global (entites)
+        glob = ratt.get(lid, "")
+        if glob in noms and not _cp.commence_par_gabarit(noms[glob]):
+            nom_l = noms[glob]
+        ts = trackings_du_lien(l)
+        if not ts:
+            sans.append(nom_l)
+        for t in ts:
+            if (lid, nom_l) not in derriere.setdefault(t, []):
+                derriere[t].append((lid, nom_l))
+
+    table = dict(_lire(NUMEROS_FICHIER, {})) or dict(NUMEROS_HISTORIQUES)
+    index: Dict[str, set] = {}
+    for k, v in table.items():
+        index.setdefault(_norme(k), set()).add(int(v))
+
+    def num(cle: str) -> Optional[int]:
+        s = index.get(_norme(cle)) or set()
+        return next(iter(s)) if len(s) == 1 else None
+
+    def par_les_noms(liens_t: List[Tuple[str, str]], spam: bool) -> Tuple[set, int]:
+        """(numéros que donnent les noms des liens, nombre de personnes qu'ils
+        nomment). Le nom dit la personne ; normal ou spam, c'est le tracking
+        qui le dit (une page porte souvent les deux boutons)."""
+        cles = sorted({cle_entite(personne(nom)[0], spam) for _, nom in liens_t})
+        groupes = _personnes(cles)
+        nums: set = set()
+        for g in groupes:
+            # deux téléphones d'une personne, deux numéros : le plus petit
+            ng = {n for n in (num(c) for c in g) if n is not None}
+            if ng:
+                nums.add(min(ng))
+        return nums, len(groupes)
+
+    def par_le_nom_mypuls(nom_mp: str) -> str:
+        # seul un nom de VA en dit quelque chose : « Roucham - ( normal ) » ou
+        # « Twitter VA 31 @pseudo ». « Twitter », « VA 3 », « E » ou « SFS 06/10 »
+        # sont des libellés, qui rencontreraient par hasard une clé du tableau
+        if nom_mp and (_cp.nom_infloww(nom_mp) or "@" in nom_mp):
+            return cle_entite(*personne(nom_mp))
+        return ""
+
+    conflits: Dict[str, List[int]] = {}
+    for t, e in regs.items():
+        if t in derriere:
+            e.update(actif=True, vu=jour,
+                     ids=sorted({lid for lid, _ in derriere[t]} | set(e.get("ids") or []))[-12:],
+                     liens=sorted({nom for _, nom in derriere[t]})[:8])
+            # un tracking derrière les liens d'une autre personne aussi, ou
+            # dont les liens disent aujourd'hui un autre VA : il a peut-être
+            # changé de mains. Le numéro gravé reste, mais ses VA passent sans
+            # relevé tant que ça dure — pas de prime sur les clics d'un autre
+            nums, n_pers = par_les_noms(derriere[t], bool(e.get("spam")))
+            doute = sorted((nums | {int(e["numero"])}) if n_pers > 1 or nums - {int(e["numero"])}
+                           else [])
+            if doute:
+                conflits[t] = doute
+            if doute != (e.get("doute") or []):
+                print(f'[podium] tracking {t} (VA {e["numero"]}) : ses liens '
+                      f'{sorted({nom for _, nom in derriere[t]})[:6]} disent VA {doute} — '
+                      "sans relevé jusqu'à ce que GetMySocial ou podium_trackings.json soit "
+                      "corrigé" if doute else
+                      f"[podium] tracking {t} (VA {e['numero']}) : liens et numéro de nouveau "
+                      "d'accord", flush=True)
+                if doute:
+                    e["doute"] = doute
+                else:
+                    e.pop("doute", None)
+        elif e.get("actif"):
+            # parti aujourd'hui : il compte jusqu'à aujourd'hui compris
+            e.update(actif=False, vu=jour)
+            print(f'[podium] tracking {t} (VA {e["numero"]}) : plus derrière aucun lien actif, '
+                  f"compté jusqu'au {jour}", flush=True)
+
+    a_numeroter: List[Tuple[str, str]] = []
+    alias: Dict[str, int] = {}
+    for t in sorted(derriere):
+        if t in regs:
+            attente.pop(t, None)
+            continue
+        nom_mp = noms_mp.get(t, "")
+        att = attente.setdefault(t, {"premier": jour})
+        att.update(liens=sorted({nom for _, nom in derriere[t]})[:8],
+                   ids=sorted({lid for lid, _ in derriere[t]}))
+        cle_t = par_le_nom_mypuls(nom_mp)
+        if nom_mp and (_cp.nom_infloww(nom_mp) or "@" in nom_mp):
+            spam = personne(nom_mp)[1]
+        else:
+            spam = any(personne(nom)[1] for _, nom in derriere[t])
+        ids_t = {lid for lid, _ in derriere[t]}
+        # a : le même lien portait, avant, un tracking aujourd'hui quitté
+        quittes = {u: e for u, e in regs.items()
+                   if not e.get("actif") and ids_t & set(e.get("ids") or [])
+                   and bool(e.get("spam")) == spam}
+        a = {int(e["numero"]) for e in quittes.values()}
+        b, n_pers = par_les_noms(derriere[t], spam)
+        c = {num(cle_t)} - {None} if cle_t else set()
+        cands = a | b | c
+        trop_tot = (not nom_mp
+                    and (dt.date.fromisoformat(jour) - dt.date.fromisoformat(att["premier"])).days
+                    < ATTENTE_MYPULS_J)
+        pourquoi = ""
+        if trop_tot:
+            pourquoi = "pas encore dans MyPuls"
+        elif n_pers > 1:
+            pourquoi = f"derrière les liens de {n_pers} personnes"
+        elif len(cands) > 1:
+            pourquoi = f"liens et nom aux numéros {sorted(cands)}"
+        elif a and not (b | c):
+            # seul le lien le dit : renommé, ou repris par quelqu'un d'autre ?
+            # Le nom tranche, s'il ressemble à l'un de ceux du numéro
+            nom_neuf = cle_t or cle_entite(*personne(derriere[t][0][1]))
+            n_a = next(iter(a))
+            if not _proche(nom_neuf, [k for k, v in table.items() if int(v) == n_a]
+                           + [str(e.get("cle") or "") for e in quittes.values()]):
+                pourquoi = f"lien repris par quelqu'un d'autre ? (il était au VA {n_a})"
+        if pourquoi:
+            if att.get("pourquoi") != pourquoi:
+                print(f"[podium] tracking {t} ({nom_mp or '?'}) en attente : {pourquoi} — "
+                      f"liens {att['liens']}", flush=True)
+            att.update(pourquoi=pourquoi, numeros=sorted(cands),
+                       conflit=not trop_tot)
+            continue
+        cle = cle_t or cle_entite(personne(derriere[t][0][1])[0], spam)
+        n = next(iter(cands)) if cands else None
+        regs[t] = {"numero": n, "cle": cle, "spam": spam, "nom": nom_mp,
+                   "liens": att["liens"], "ids": att["ids"], "mp": bool(nom_mp),
+                   "premier": att["premier"], "vu": jour, "actif": True}
+        attente.pop(t, None)
+        # le lien passe au nouveau tracking : l'ancien n'en témoigne plus (un
+        # lien repris plus tard par quelqu'un d'autre n'hérite pas de ce VA)
+        for e in quittes.values():
+            e["ids"] = sorted(set(e.get("ids") or []) - ids_t)
+        if n is None:
+            a_numeroter.append((t, cle))
+        elif cle_t and _cp.nom_infloww(nom_mp) and num(cle_t) is None:
+            alias[cle_t] = n
+        print(f"[podium] tracking {t} ({nom_mp or 'inconnu de MyPuls'}) : "
+              + (f"VA {n}" if n is not None else "numéro neuf")
+              + f" (liens {att['liens'][:4]})", flush=True)
+    for t in [t for t in attente if t not in derriere]:
+        attente.pop(t, None)
+    if a_numeroter:
+        tab = numeros(sorted({c for _, c in a_numeroter}))
+        for t, c in a_numeroter:
+            regs[t]["numero"] = int(tab[c])
+            print(f"[podium] tracking {t} : VA {tab[c]} (neuf)", flush=True)
+            # Va IG compte encore ces VA par le nom de leurs liens (relevé
+            # GetMySocial) : le même numéro des deux côtés, pas « VA 46 » ici et
+            # « VA 47 » là-bas pour la même personne
+            for nom in regs[t]["liens"]:
+                k = cle_entite(personne(nom)[0], bool(regs[t]["spam"]))
+                if num(k) is None:
+                    alias.setdefault(k, int(tab[c]))
+    if alias:
+        tab = dict(_lire(NUMEROS_FICHIER, {})) or dict(NUMEROS_HISTORIQUES)
+        ajoute = {k: v for k, v in alias.items() if k not in tab}
+        if ajoute:
+            tab.update(ajoute)
+            safe_json.write_text(NUMEROS_FICHIER, json.dumps(tab, ensure_ascii=False,
+                                                             indent=2, sort_keys=True))
+    reg["frais"] = maintenant
+    return {"sans_tracking": sorted(sans), "conflits": conflits}
+
+
+def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None,
+                         cumul: bool = False) -> Dict[str, Any]:
+    """classement() sur les clics des liens de tracking : la même forme
+    {lignes, illisibles, frais, …}, pour que le reste (numéros affichés, gel,
+    primes) ne voie pas la différence. En plus : sans_tracking (liens actifs
+    sans tracking, pas comptés), introuvables (trackings que MyPuls n'a jamais
+    rendus, au-delà de l'attente : comptés zéro), en_attente (trackings neufs
+    sans numéro encore), source, erreur.
+    `cumul` : le total depuis la création (visits_total) au lieu des visites
+    de la période — MyPuls ne garde pas tout l'historique jour par jour.
+
+    UNE LECTURE RATÉE N'EST JAMAIS UN ZÉRO. MyPuls muet : aucun relevé (les
+    messages restent tels quels). Un tracking qu'il a déjà rendu et qu'il ne
+    rend plus (une clé qui ne voit pas cette créatrice) : relu une fois, puis
+    son VA passe sans relevé."""
+    d0, d1 = debut.isoformat(), fin.isoformat()
+    aujourd = _aujourdhui()
+    jour = aujourd.isoformat()
+    vide = {"lignes": [], "illisibles": [], "frais": False, "entites": 0, "liens": 0,
+            "sans_numero": [], "gabarits": [], "sans_tracking": [], "introuvables": [],
+            "en_attente": [], "conflits": [], "source": "tracking", "erreur": ""}
+    liens, frais_liste = liens_bruts(gid)
+    reg = _lire_registre()
+    avant = json.dumps(reg, sort_keys=True, ensure_ascii=False)
+    regs = reg["trackings"]
+    lus: Dict[Tuple[str, str], Tuple[Optional[Dict[str, Dict[str, Any]]], str]] = {}
+
+    def lire(du: str, au: str):
+        if (du, au) not in lus:
+            vus, raison = _lire_mypuls(du, au)
+            connus = {t for t, e in regs.items() if isinstance(e, dict) and e.get("mp")}
+            if vus is not None and connus - set(vus):
+                # les clés MyPuls ne voient pas toutes les mêmes créatrices,
+                # et l'appel tourne de l'une à l'autre : une seconde chance
+                vus2, raison2 = _lire_mypuls(du, au, forcer=True)
+                if vus2 is not None and len(connus - set(vus2)) < len(connus - set(vus)):
+                    vus = vus2
+            lus[(du, au)] = (vus, raison)
+        return lus[(du, au)]
+
+    principal, raison = lire(d0, d1)
+    if principal is None:
+        print(f"[podium] MyPuls {d0} → {d1} : {raison} — aucun relevé", flush=True)
+        return dict(vide, erreur=raison, liens=len(liens))
+    for t, e in regs.items():
+        if isinstance(e, dict) and t in principal:
+            e["mp"] = True          # MyPuls l'a rendu : son absence, un jour, sera une panne
+    import clics_personnes as _cp
+    info: Dict[str, Any] = {"sans_tracking": [], "conflits": {}}
+    if frais_liste:
+        info = _suivre_trackings(reg, liens, {t: v["nom"] for t, v in principal.items()},
+                                 jour, _maintenant().isoformat(timespec="minutes"))
+    gab = gabarits(liens, _cp.rattachements_identite())
+    # une liste lue il y a peu suffit : la pause de GetMySocial chaque nuit ne
+    # doit pas dire « des comptes peuvent manquer » à chaque passage
+    try:
+        recente = (_maintenant() - dt.datetime.fromisoformat(str(reg.get("frais") or ""))
+                   ).total_seconds() < FRAIS_REGISTRE_H * 3600
+    except ValueError:
+        recente = False
+    frais = bool(frais_liste or recente)
+
+    par_va: Dict[int, List[Tuple[str, str, Dict[str, Any]]]] = {}
+    for t, e in regs.items():
+        if not isinstance(e, dict) or e.get("numero") is None:
+            continue
+        fin_t = d1 if e.get("actif") else min(d1, str(e.get("vu") or ""))
+        if fin_t < d0:
+            continue
+        par_va.setdefault(int(e["numero"]), []).append((t, fin_t, e))
+
+    illisibles: set = set()
+    introuvables: List[str] = []
+    totaux: Dict[int, int] = {}
+    for n in sorted(par_va):
+        total = 0
+        for t, fin_t, e in par_va[n]:
+            garde = e.get("cumul") or {}
+            if cumul and not e.get("actif") and garde.get("au") == fin_t:
+                # un tracking quitté ne bouge plus : son total est gardé
+                total += int(garde.get("n") or 0)
+                continue
+            vus, _ = lire(d0, fin_t)
+            v = (vus or {}).get(t)
+            if vus is None:
+                illisibles.add(n)
+            elif v is None:
+                deja = bool(e.get("mp"))
+                jeune = (aujourd - dt.date.fromisoformat(str(e.get("premier") or jour))
+                         ).days < ATTENTE_MYPULS_J
+                if deja or jeune:
+                    illisibles.add(n)
+                else:
+                    # jamais rendu par MyPuls, bien au-delà de l'attente : le
+                    # lien pointe vers un tracking qui n'existe pas. Zéro, et dit
+                    introuvables.append(t)
+            else:
+                x = v["total"] if cumul else v["visites"]
+                if x is None:
+                    illisibles.add(n)
+                else:
+                    total += x
+                    if cumul and not e.get("actif"):
+                        e["cumul"] = {"au": fin_t, "n": x}
+        totaux[n] = total
+    en_attente: List[str] = []
+    conflits: List[str] = []
+    for t, e in regs.items():
+        if e.get("doute") and (e.get("actif") or str(e.get("vu") or "") >= d0):
+            # ses liens disent un autre VA, ou plusieurs : à corriger à la main
+            illisibles.update(int(x) for x in e["doute"])
+            conflits.append(t)
+    for t, att in reg["attente"].items():
+        if str(att.get("premier") or "") > d1:
+            continue            # vu après la période : il n'y était pour rien
+        nums = [int(x) for x in (att.get("numeros") or [])]
+        if att.get("conflit"):
+            conflits.append(t)
+        if nums:
+            # un VA dont un tracking attend : son compte n'est pas complet
+            illisibles.update(nums)
+        elif not att.get("conflit"):
+            en_attente.append(t)
+    lignes = [{"va": f"VA {n}", "numero": n, "clics": totaux[n],
+               "liens": len(par_va[n]),
+               "spam": any(bool(e.get("spam")) for _, _, e in par_va[n]), "model": ""}
+              for n in sorted(par_va) if n not in illisibles]
+    if json.dumps(reg, sort_keys=True, ensure_ascii=False) != avant:
+        safe_json.write(_fichier_trackings(), reg)
+    if not lignes:
+        # tout le monde sans relevé, c'est que la lecture n'a rien donné :
+        # « aucun relevé », et les messages restent comme ils sont
+        print(f"[podium] {d0} → {d1} : aucun VA lisible ({len(illisibles)} sans relevé)",
+              flush=True)
+        return dict(vide, erreur="aucun VA lisible", liens=len(liens), frais=frais)
+    if info["sans_tracking"]:
+        print(f'[podium] {len(info["sans_tracking"])} lien(s) actif(s) sans tracking OnlyFans, '
+              "pas comptés : " + ", ".join(info["sans_tracking"][:8]), flush=True)
+    if introuvables:
+        print(f"[podium] {len(introuvables)} tracking(s) que MyPuls n'a jamais rendus, comptés "
+              "à zéro (lien à vérifier) : " + ", ".join(sorted(introuvables)[:8]), flush=True)
+    lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
+    return {"lignes": lignes, "illisibles": sorted(f"VA {n}" for n in illisibles),
+            "frais": frais, "entites": len(par_va), "liens": len(liens), "sans_numero": [],
+            "gabarits": gab, "sans_tracking": info["sans_tracking"],
+            "introuvables": sorted(set(introuvables)), "en_attente": sorted(en_attente),
+            "conflits": sorted(set(conflits)), "source": "tracking", "erreur": ""}
+
+
 # ─── le classement ───────────────────────────────────────────────────────
 def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
-               gid: Optional[str] = None) -> Dict[str, Any]:
+               gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str, Any]:
     """{lignes, illisibles, frais} — les clics du marché du serveur (US pour
-    Twitter) par entité, du plus fort au plus faible."""
+    Twitter) par entité, du plus fort au plus faible. Twitter : les clics
+    des liens de tracking (_classement_tracking). `mesure="gms"` force les
+    clics GetMySocial (le relevé US que Va IG garde, voir _releve_us)."""
+    if _source(gid, mesure) == "tracking":
+        # pas gardé pour Va IG : il mêle des clics GetMySocial (_releve_us)
+        return _classement_tracking(debut, fin, gid)
     import gms
     profil = _profil(gid)
     d0, d1 = debut.isoformat(), fin.isoformat()
@@ -857,7 +1508,11 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         if gab:
             # ni numero, ni ligne, ni appel : mais dit, une fois par releve
             print(f"[podium] {len(gab)} gabarit(s) ecarte(s) : " + ", ".join(gab[:6]), flush=True)
-        table = numeros(list(ents.keys()), attribuer=frais)
+        # Twitter compte ses VA aux trackings : là, et là seulement, naissent
+        # les numéros. Le relevé GetMySocial que Va IG garde de ces VA n'en
+        # invente pas (un lien renommé avant que le registre ne le voie aurait
+        # pris un numéro neuf, puis disputé le sien à son tracking)
+        table = numeros(list(ents.keys()), attribuer=frais and _source(gid) == "gms")
     sans_numero = [c for c in ents if c not in table]
     if sans_numero:
         print(f"[podium] {len(sans_numero)} compte(s) sans numero, ecartes : "
@@ -893,7 +1548,17 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     return out
 
 
-def alltime(gid: Optional[str] = None) -> Dict[str, int]:
+def _fichier_alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Path:
+    """Un fichier par serveur, et par mesure : les totaux GetMySocial des VA US
+    (que Va IG affiche encore) et ceux de leurs trackings (Twitter, depuis le
+    06/10/2026) ne se mêlent jamais."""
+    profil = _profil(gid)
+    if _source(gid, mesure) == "tracking":
+        return DATA_DIR / "podium_alltime_tracking.json"
+    return DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
+
+
+def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str, int]:
     """Le total « depuis toujours » par entité, recalculé une fois par jour.
 
     Ce chiffre ne bouge presque pas d'une heure à l'autre : le redemander à
@@ -902,10 +1567,29 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
     et « Amelia VA 3 » de Va IG ne sont pas la même personne.
     """
     profil = _profil(gid)
-    fichier = DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
+    fichier = _fichier_alltime(gid, mesure)
     cache = _lire(fichier, {})
     if cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux"):
         return {k: int(v) for k, v in cache["totaux"].items()}
+    if _source(gid, mesure) == "tracking":
+        # le total cumulé de chaque tracking : MyPuls ne garde pas tout
+        # l'historique jour par jour (c47 : 20 378 visites rendues sur
+        # « 2024 → 2026 », 31 030 au compteur)
+        cl = _classement_tracking(dt.date.fromisoformat(ALLTIME_DEPUIS), _aujourdhui(), gid,
+                                  cumul=True)
+        totaux = dict(cache.get("totaux") or {})
+        for x in cl["lignes"]:
+            totaux[x["va"]] = int(x["clics"])
+        # un relevé troué garde l'ancien total de ceux qui manquent. Gravé pour
+        # la journée quand même : un conflit qui dure le referait à chaque
+        # passage (deux listes GetMySocial et MyPuls), pour un chiffre qui ne
+        # paie rien. Sans aucune ligne, il sera refait au prochain passage
+        jour = _aujourdhui().isoformat() if cl["lignes"] else str(cache.get("jour") or "")
+        if totaux:
+            safe_json.write_text(fichier, json.dumps({"jour": jour, "totaux": totaux},
+                                                     ensure_ascii=False, indent=2,
+                                                     sort_keys=True))
+        return {k: int(v) for k, v in totaux.items()}
     import gms
     liens, _ = liens_bruts(gid)
     if profil["fr"]:
@@ -913,10 +1597,12 @@ def alltime(gid: Optional[str] = None) -> Dict[str, int]:
         table = {c: e["numero"] for c, e in ents.items()}
     else:
         ents = entites(liens)
-        table = numeros(list(ents.keys()))
+        table = numeros(list(ents.keys()), attribuer=_source(gid) == "gms")
     fin = _aujourdhui().isoformat()
     totaux = dict(cache.get("totaux") or {})
     for cle, e in ents.items():
+        if cle not in table:
+            continue                # sans numéro (voir classement) : pas de « VA 0 »
         try:
             with _etiquette("podium"):
                 _, pays = gms.analytics_for_links(e["ids"], ALLTIME_DEPUIS, fin)
@@ -1068,7 +1754,9 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
         # montrer — le message reste alors celui des seuls VA FR
         return None
     try:
-        cl = classement(debut, fin, gid=TWITTER_ID)
+        # les clics GetMySocial, même quand Twitter compte ceux des trackings :
+        # Va IG les mêle à ses VA FR, mesurés ainsi, et les paie au rang
+        cl = classement(debut, fin, gid=TWITTER_ID, mesure="gms")
     except Exception as ex:
         print(f"[podium] relevé US pour Va IG : {type(ex).__name__}: {ex}", flush=True)
         cl = {}
@@ -1190,6 +1878,10 @@ def _instantane(cl: Dict[str, Any], fin: Optional[dt.date] = None) -> Dict[str, 
             "illisibles": list(cl.get("illisibles") or []),
             "frais": bool(cl.get("frais", True)),
             "sans_numero": list(cl.get("sans_numero") or []),
+            "sans_tracking": list(cl.get("sans_tracking") or []),
+            "introuvables": list(cl.get("introuvables") or []),
+            "en_attente": list(cl.get("en_attente") or []),
+            "conflits": list(cl.get("conflits") or []),
             "le": _horodatage(),
             "jusqu_au": fin.isoformat() if fin else "",
             "le_iso": _maintenant().isoformat(timespec="minutes")}
@@ -1264,9 +1956,37 @@ def _boutons(gid: Optional[str], vivant: bool) -> Dict[str, Any]:
         "emoji": {"name": "🔄"}, "custom_id": BOUTON_MAJ}]}]}
 
 
-def _avert_dernier_releve(snap: Dict[str, Any], periode: str) -> str:
+def _notes_tracking(cl: Dict[str, Any]) -> List[str]:
+    """Ce que le comptage par tracking (Twitter) laisse de côté, dit en
+    nombre seulement : le classement est anonyme, un nom de lien n'y a pas
+    sa place (le journal les nomme)."""
+    out: List[str] = []
+    n = len(cl.get("sans_tracking") or [])
+    if n:
+        out.append(f"ℹ️ _{n} lien{'s' if n > 1 else ''} sans tracking OnlyFans, "
+                   f"pas compté{'s' if n > 1 else ''}._")
+    n = len(cl.get("en_attente") or [])
+    if n:
+        # un VA neuf : pas encore de numéro, il paraîtra quand MyPuls le
+        # connaîtra, avec tous ses clics de la période
+        out.append(f"ℹ️ _{n} tracking{'s' if n > 1 else ''} neuf{'s' if n > 1 else ''} "
+                   f"pas encore dans MyPuls, pas encore classé{'s' if n > 1 else ''}._")
+    n = len(cl.get("conflits") or [])
+    if n:
+        # ne se règle pas tout seul : un lien GetMySocial à corriger
+        out.append(f"⚠️ _{n} tracking{'s' if n > 1 else ''} partagé{'s' if n > 1 else ''} entre "
+                   f"plusieurs VA ou changé{'s' if n > 1 else ''} de mains : leurs VA restent "
+                   "sans relevé jusqu'à correction des liens._")
+    n = len(cl.get("introuvables") or [])
+    if n:
+        out.append(f"⚠️ _{n} tracking{'s' if n > 1 else ''} introuvable{'s' if n > 1 else ''} "
+                   f"dans MyPuls, compté{'s' if n > 1 else ''} à zéro : lien à vérifier._")
+    return out
+
+
+def _avert_dernier_releve(snap: Dict[str, Any], periode: str, gid: Optional[str] = None) -> str:
     return (f'⚠️ _Chiffres du dernier relevé ({snap.get("le") or "date inconnue"}) : '
-            f"GetMySocial n'a pas rendu {periode} entière._")
+            f"{_service(gid)} n'a pas rendu {periode} entière._")
 
 
 def _avert_us(us: Optional[Dict[str, Any]], etat: str, liste_dite: bool = False,
@@ -1372,7 +2092,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     # mêlé, l'en-tête dit seulement que le classement couvre toute l'agence :
     # c'est vrai, et c'est le compromis annoncé au propriétaire (pas de VA US
     # rebaptisés en VA FR, pas de marché ligne à ligne)
-    abo = (f'Abonnements via {pf["source"]} — clics **{pf["marche"]}**' if mix is None
+    abo = (f'Abonnements via {pf["source"]} — clics **{_mesure_dite(pf)}**' if mix is None
            else "Abonnements de **toute l'agence**")
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
@@ -1437,6 +2157,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if cl.get("sans_numero"):
         c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
               "écarté(s) le temps que la liste revienne._"]
+    c += _notes_tracking(cl)
     if mix is not None:
         c += _avert_us(us, "en_cours" if en_cours else "termine" if termine else "paie",
                        liste_dite=not cl["frais"], pf=pf)
@@ -1527,7 +2248,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if mix is None:
         tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
                 f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
-                f'Clics **{p["marche"]}** · **{len(lignes)}** comptes classés\n')
+                f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n')
     else:
         # le même en-tête que le podium mêlé : toute l'agence, sans marché
         tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
@@ -1561,7 +2282,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
                          + " — à confirmer.")
         else:
-            pourquoi = _quota_dit()
+            # la quota GetMySocial n'explique rien quand les clics viennent
+            # de MyPuls (Twitter) : les noms, alors
+            pourquoi = _quota_dit() if _source(gid) == "gms" else ""
             if pourquoi:
                 # la raison, pas le mur de noms : vingt-trois lignes de VA
                 # prenaient la moitié du message sans rien expliquer
@@ -1572,6 +2295,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                              + " — ils remonteront au prochain passage.")
     if not cl["frais"]:
         queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
+    queue += ["\n" + x for x in _notes_tracking(cl)]
     if mix is not None:
         queue += ["\n" + x for x in _avert_us(us, "final" if final else "en_cours",
                                                liste_dite=not cl["frais"], pf=p) if x]
@@ -1634,17 +2358,16 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     return out
 
 
-def _alltime_lu(gid: Optional[str] = None) -> Dict[str, int]:
+def _alltime_lu(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str, int]:
     """Le dernier total « depuis toujours » connu, SANS appeler GetMySocial.
 
     Figer une quinzaine ne doit rien coûter de plus au quota, et doit marcher
     pendant une pause de GetMySocial : le total relevé le jour de la fin (ou
     la veille) est le bon chiffre pour une page qui ne bougera plus.
     """
-    profil = _profil(gid)
-    fichier = DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
     try:
-        return {k: int(v) for k, v in (_lire(fichier, {}).get("totaux") or {}).items()}
+        return {k: int(v) for k, v in
+                (_lire(_fichier_alltime(gid, mesure), {}).get("totaux") or {}).items()}
     except Exception:
         return {}
 
@@ -1718,7 +2441,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
         # changeait rien au classement
         return str((ids or [""])[0])
 
-    if _pause_gms():
+    if _pause_pour(gid):
         # on n'est passé que pour figer sans GetMySocial (48 h écoulées)
         print("[podium] GetMySocial en pause : classement de la quinzaine remis au prochain tour",
               flush=True)
@@ -1738,7 +2461,8 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     # le total « depuis toujours » des VA US : celui que Twitter relève chaque
     # jour pour lui-même, lu sans appeler GetMySocial
     pages = pages_subs(cl, debut, fin_saison, totaux, gid=gid, us=us,
-                       totaux_us=_alltime_lu(TWITTER_ID) if us else None)
+                       # les totaux GetMySocial des VA US, comme leurs clics ici
+                       totaux_us=alltime(TWITTER_ID, mesure="gms") if us else None)
 
     neufs: List[str] = []
     for i, page in enumerate(pages):
@@ -1899,13 +2623,19 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
     if abandon:
         rec["abandon"] = True
     debut, fin = dt.date.fromisoformat(saison), dt.date.fromisoformat(str(rec["fin"]))
+    if (not rec.get("pages") and not abandon and _source(gid) == "tracking"
+            and _maintenant() < dt.datetime.combine(fin + dt.timedelta(days=1),
+                                                    dt.time(RATTRAPAGE_MYPULS_H))):
+        # figée à 00h10, elle aurait gardé pour toujours les chiffres du
+        # dernier palier de MyPuls, sans les dernières heures de la période
+        return False
     if not rec.get("pages"):
         if (not premier_abandon and rec.get("essai")
                 and t - float(rec["essai"]) < ESSAI_FIGER_MIN * 60):
             return False
         cl: Optional[Dict[str, Any]] = None
         raison = ""
-        if _pause_gms():
+        if _pause_pour(gid):
             raison = "GetMySocial en pause"
         else:
             cl = classement(debut, fin, gid=gid)
@@ -1937,11 +2667,11 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
                 snap = rec.get("dernier") or {}
                 if snap.get("lignes"):
                     cl = snap
-                    avert = "" if _couvre(snap, fin) else _avert_dernier_releve(snap, "la période")
+                    avert = "" if _couvre(snap, fin) else _avert_dernier_releve(snap, "la période", gid)
                 else:
                     cl = {"lignes": [], "illisibles": list((cl or {}).get("illisibles") or []),
                           "frais": bool((cl or {}).get("frais", True))}
-                    avert = "⚠️ _GetMySocial n'a rendu aucun chiffre pour cette période._"
+                    avert = f"⚠️ _{_service(gid)} n'a rendu aucun chiffre pour cette période._"
             print(f"[podium] quinzaine {debut} → {fin} sur {gid} : {raison} depuis "
                   f"{ABANDON_FIGER_H} h, figée avec ce qu'on a", flush=True)
         # gardées AVANT d'écrire : un refus de Discord ou un redémarrage au
@@ -1954,7 +2684,8 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         tetes = _tetes_sures(gid)
         rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid), gid=gid, final=True,
                                   avertissement=avert, us=us,
-                                  totaux_us=_alltime_lu(TWITTER_ID) if us else None, tetes=tetes)
+                                  totaux_us=_alltime_lu(TWITTER_ID, mesure="gms") if us else None,
+                                  tetes=tetes)
         rec["complet_calc"] = not raison
         rec["comptes"] = len(cl["lignes"])
         rec["faites"] = 0
@@ -2069,7 +2800,9 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
 #: plus : marqueur change, donc format change — le message avait justement
 #: garde son rond vert apres la mise en ligne, faute d'avoir touche a cette
 #: ligne.
-FORMAT_AFFICHAGE = "2026-10-03-mario-karts"
+#: Le 06/10/2026 : Twitter compte les clics des trackings (« clics tracking
+#: OF » au lieu de « clics US »).
+FORMAT_AFFICHAGE = "2026-10-06-clics-tracking"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
@@ -2090,7 +2823,7 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     # se dit encore « mis à jour »
     if any(r.get("pages") for r in attente.values()):
         return True
-    if _pause_gms():
+    if _pause_pour(gid):
         return False
     return _subs_du(gid, (d.get("subs") or {}).get(gid) or {}, t)
 
@@ -2099,7 +2832,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
                 gid: Optional[str] = None) -> Dict[str, Any]:
     """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
     lignes = cl["lignes"]
-    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · clics **US** '
+    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · clics **{_mesure_dite(_profil(gid))}** '
          f'· **{len(lignes)}** comptes suivis', ""]
     for i in range(3):
         x = lignes[i] if i < len(lignes) else None
@@ -2122,6 +2855,8 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
                   + " — à confirmer avant de payer."]
     if not cl["frais"]:
         c += ["", "⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._"]
+    if _notes_tracking(cl):
+        c += [""] + _notes_tracking(cl)
     return {"title": f'💸 Bonus subs du jour — {jour.strftime("%d/%m/%Y")}',
             "color": 0x22C55E,
             "description": "\n".join(c)[:4096],
@@ -2141,6 +2876,8 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if not salon:
         print(f"[podium] salon {SALON_BONUS} introuvable sur {gid}", flush=True)
         return ""
+    if jour is None:
+        _bonus_veille(gid, d, salon, j)
     cl = classement(j, j, gid=gid)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
@@ -2160,14 +2897,45 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if code != 200 or not rep.get("id"):
         print(f"[podium] envoi bonus refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
+    if mid and str(garde.get("jour") or "") < j.isoformat() and _source(gid) == "tracking":
+        # le bonus d'hier, à compléter demain matin (voir _bonus_veille)
+        d.setdefault("bonus_veille", {})[gid] = {"jour": str(garde["jour"]), "message": mid}
     vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time()}
     _ecrire(d)
     print(f'[podium] bonus du jour {j} : {len(cl["lignes"])} comptes', flush=True)
     return str(rep["id"])
 
 
+def _bonus_veille(gid: str, d: Dict[str, Any], salon: str, j: dt.date) -> None:
+    """Le bonus d'HIER, complété le matin. Payé au rang du jour, il gardait
+    sinon les chiffres du dernier palier de MyPuls avant minuit, sans les
+    dernières heures de la journée. Réédité (Discord ne notifie pas une
+    édition) jusqu'à RATTRAPAGE_MYPULS_H, puis laissé tel quel."""
+    v = (d.get("bonus_veille") or {}).get(gid) or {}
+    if not v:
+        return
+    try:
+        jv = dt.date.fromisoformat(str(v.get("jour")))
+    except ValueError:
+        jv = None
+    if jv is None or (j - jv).days != 1 or _maintenant().hour >= RATTRAPAGE_MYPULS_H:
+        d["bonus_veille"].pop(gid, None)
+        _ecrire(d)
+        return
+    clv = classement(jv, jv, gid=gid)
+    if not clv["lignes"]:
+        return
+    code, _rep = _api("PATCH", f'/channels/{salon}/messages/{v["message"]}',
+                      json={"embeds": [embed_bonus(clv, jv, gid)]})
+    if code == 200:
+        print(f"[podium] bonus du {jv} complété : {len(clv['lignes'])} comptes", flush=True)
+    elif not _passager(code, _rep):
+        d["bonus_veille"].pop(gid, None)      # supprimé à la main : on n'insiste pas
+        _ecrire(d)
+
+
 def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
-    if _pause_gms() or not _profil(gid).get("bonus", True):
+    if _pause_pour(gid) or not _profil(gid).get("bonus", True):
         return False
     garde = (_etat().get("bonus") or {}).get(str(gid)) or {}
     if garde.get("jour") != _aujourdhui().isoformat():
@@ -2266,7 +3034,7 @@ def _semaine_terminee(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, 
         # un classement vide remplacerait des chiffres corrects par rien
         snap = garde.get("dernier") or {}
         cl = snap if snap.get("lignes") else None
-        avert = _avert_dernier_releve(snap, "la semaine") if cl else ""
+        avert = _avert_dernier_releve(snap, "la semaine", gid) if cl else ""
     if cl is None:
         # rien à montrer : le message garde ses chiffres, le podium de 09h le figera
         print(f"[podium] semaine {lundi} terminée sur {gid} : aucun relevé, message laissé "
@@ -2314,7 +3082,7 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
     if not embed:
         snap = garde.get("dernier") or {}
         avert = ""
-        if _pause_gms():
+        if _pause_pour(gid):
             # quota épuisé : on fige sur le relevé « terminée » du lundi, qui
             # compte déjà la semaine entière. Sans lui, on attend la fin de la
             # pause plutôt que de figer pour toujours des chiffres partiels.
@@ -2331,12 +3099,12 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
                 if snap.get("lignes"):
                     cl = snap
                     couvre = _couvre(snap, dimanche)
-                    avert = "" if couvre else _avert_dernier_releve(snap, "la semaine")
+                    avert = "" if couvre else _avert_dernier_releve(snap, "la semaine", gid)
                     complet = couvre and not snap.get("illisibles")
                 else:
                     cl = {"lignes": [], "illisibles": list(cl.get("illisibles") or []),
                           "frais": bool(cl.get("frais", True))}
-                    avert = "⚠️ _GetMySocial n'a rendu aucun chiffre pour cette semaine._"
+                    avert = f"⚠️ _{_service(gid)} n'a rendu aucun chiffre pour cette semaine._"
         us = _us_pour(gid, lundi, dimanche, cl)
         if _us_manquants(us):
             complet = False            # le message le dit : des VA US y manquent
@@ -2455,9 +3223,22 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     promis en privé.
     """
     snap = (fg.get("primes_attente") or {}).get("cl") or {}
-    us = _releve_us(debut, fin)
-    if not snap.get("lignes") or us is None or _us_manquants(us):
-        return
+    if _source(gid) == "tracking":
+        # Twitter : ses propres VA manquaient (pas de VA US mêlés ici). Le
+        # relevé de la semaine est refait, au plus une fois l'heure
+        t = time.time()
+        if 0 <= t - float(fg.get("essai_tw") or 0) < 3600:
+            return
+        fg["essai_tw"] = t
+        cl2 = classement(debut, fin, gid=gid)
+        if not cl2["lignes"] or cl2["illisibles"]:
+            _ecrire(d)
+            return
+        snap, us = _instantane(cl2, fin), None
+    else:
+        us = _releve_us(debut, fin)
+        if not snap.get("lignes") or us is None or _us_manquants(us):
+            return
     salon = _salon(gid)
     if not salon:
         return
@@ -2473,8 +3254,8 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     if code != 200:
         print(f"[podium] {gid} {debut} : podium {mid} ineditable (HTTP {code}, supprime a la "
               "main ?) -- primes annoncees sur le releve complet quand meme", flush=True)
-    print(f"[podium] {gid} {debut} : releve US complet -- podium corrige sur place, primes "
-          "annoncees", flush=True)
+    print(f"[podium] {gid} {debut} : releve {'des VA de Twitter' if us is None else 'US'} "
+          "complet -- podium corrige sur place, primes annoncees", flush=True)
     # annoncer AVANT d'oublier l'attente : un arrêt entre les deux refait le
     # tour suivant, et suivi_va ne redit jamais une prime déjà dite
     _payer(gid, debut, fin, snap, us)
@@ -2609,7 +3390,19 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     if reste:
         d["figes"][gid][debut.isoformat()]["ping_a_refaire"] = reste
     manque_us = _us_manquants(us)
-    if manque_us:
+    # Twitter sur les trackings : un VA sans relevé y dure (tracking que MyPuls
+    # ne rend pas encore, lien partagé à corriger) et a pu être dans le top 3.
+    # Les annonces privées attendent un relevé complet, relu toutes les heures
+    # ce lundi (_primes_retenues) ; le podium dit déjà « à confirmer ».
+    manque_tw = list(cl["illisibles"]) if _source(gid) == "tracking" else []
+    if manque_tw and not manque_us:
+        d["figes"][gid][debut.isoformat()]["primes_attente"] = {"cl": _instantane(cl, fin)}
+        d["figes"][gid][debut.isoformat()]["essai_tw"] = time.time()
+        print(f'[podium] {gid} {debut} : {len(manque_tw)} VA sans relevé '
+              f'({", ".join(manque_tw[:8])}) -- annonces privees des primes RETENUES, relevé '
+              "refait toutes les heures ce lundi ; des qu'il est complet, le podium est "
+              "corrige sur place et les primes annoncees.", flush=True)
+    elif manque_us:
         # Un VA US sans relevé a pu être dans le top 3 : les rangs payés
         # peuvent encore bouger. Le podium le dit (« à confirmer avant de
         # payer »), mais suivi_va, lui, promettait tout de suite en privé : un
@@ -2679,7 +3472,7 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
         print(f"[podium] {gid} : semaine du {debut} retenue jusqu'au podium "
               "de la semaine passée", flush=True)
         return ""
-    if _pause_gms():
+    if _pause_pour(gid):
         # on n'est passé que pour figer la semaine finie sur ses chiffres
         # gardés : la semaine neuve attend GetMySocial pour avoir les siens
         print(f"[podium] {gid} : GetMySocial en pause, semaine du {debut} lancée à son retour",
@@ -2755,7 +3548,7 @@ def _figeable_sans_gms(d: Dict[str, Any], gid: str, garde: Dict[str, Any]) -> bo
 def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
     """Vrai quand le message vivant a passé l'âge, ou n'existe pas encore."""
     gid = str(gid)
-    if _pause_gms():
+    if _pause_pour(gid):
         d = _etat()
         return _figeable_sans_gms(d, gid, (d.get("vivants") or {}).get(gid) or {})
     d = _etat()

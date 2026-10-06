@@ -52,6 +52,10 @@ _faux_suivi.annoncer_primes = lambda gid, cl, debut, fin: (
 sys.modules["suivi_va"] = _faux_suivi
 
 import podium_discord as pd            # noqa: E402
+# Cette suite verifie la mecanique du podium sur les clics GetMySocial (Va IG,
+# et Twitter jusqu au 06/10/2026) : Twitter y repasse, sans quoi il lirait le
+# vrai MyPuls. Le comptage par tracking a ses tests : tests_podium_tracking.py.
+pd.SERVEURS[pd.TWITTER_ID].pop("mesure", None)
 
 OKS, FAILS = [], []
 
@@ -108,7 +112,7 @@ pd._pause_gms = lambda: PAUSE["on"]
 pd._salon = lambda gid, voulu="": (f"{gid}-subs" if "subs" in (voulu or "")
                                    else f"{gid}-bonus" if "bonus" in (voulu or "")
                                    else f"{gid}-podium")
-pd.alltime = lambda gid=None: {}
+pd.alltime = lambda gid=None, mesure=None: {}
 
 
 # --- le faux Discord : un salon = {id: message}, chaque appel noté
@@ -184,7 +188,9 @@ GMS = []                               # (gid, debut, fin, moment, fonction appe
 RELEVES_SEMAINE = ("rafraichir", "_semaine_terminee", "_figer_semaine", "poster_podium")
 
 
-def faux_classement(debut, fin, pause=0.3, gid=None):
+# mesure : Va IG relève ses VA US en clics GetMySocial (mesure="gms") depuis
+# que Twitter compte ceux des trackings ; ici, une seule mesure
+def faux_classement(debut, fin, pause=0.3, gid=None, mesure=None):
     gid = str(gid)
     GMS.append((gid, debut, fin, CLOCK["now"], sys._getframe(1).f_code.co_name))
     cle = (gid, debut.isoformat())

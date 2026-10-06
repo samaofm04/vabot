@@ -34,6 +34,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import zlib
+from typing import Optional, Tuple
 
 # --- L'espace GetMySocial du classement -------------------------------------
 #
@@ -282,6 +283,30 @@ _PAREN_VIDE = re.compile(r"\(\s*\)")
 SUFFIXE_SPAM = " SPAM"
 
 
+#: Le nom des trackings Infloww, que les liens GetMySocial peuvent porter
+#: depuis le 06/10/2026 : « Roucham - ( normal ) », « Gaspacho  - ( Spam ) ».
+#: La parenthese ne dit que normal ou spam ; la personne est DEVANT.
+_TAG_INFLOWW = re.compile(r"\(\s*(normal|spam)\s*\)", re.IGNORECASE)
+
+
+def nom_infloww(nom) -> Optional[Tuple[str, bool]]:
+    """(ce qui precede la parenthese, spam) pour un nom a la Infloww, sinon None.
+
+    « Roucham - ( normal ) » -> (« Roucham », False) ; « (Roucham) - ( spam ) »
+    -> (« (Roucham) », True), a relire avec la regle habituelle. Sans ca, la
+    regle des parentheses donnait « normal » a tous les VA renommes : une seule
+    personne dans le report des clics, sur le podium et la page Infloww. Rien
+    devant la parenthese (« (normal) ») : None, on ne devine pas."""
+    n = str(nom or "")
+    m = _TAG_INFLOWW.search(n)
+    if not m:
+        return None
+    devant = re.sub(r"[\s\-\u2013\u2014]+$", "", n[:m.start()]).strip()
+    if not any(ch.isalpha() for ch in devant):
+        return None
+    return devant, (m.group(1).lower() == "spam" or est_spam(devant) or est_spam(n[m.end():]))
+
+
 def est_spam(nom) -> bool:
     """Ce nom de lien est-il un lien SPAM ? (« spam » n'importe ou, toute casse)"""
     return "spam" in str(nom or "").lower()
@@ -364,6 +389,12 @@ def etiquette(nom) -> str:
     n = propre(nom)
     if not n or est_gabarit(n):
         return ""
+    infloww = nom_infloww(n)
+    if infloww:
+        base = etiquette(sans_spam(infloww[0]))
+        if not base:
+            return ""
+        return base + SUFFIXE_SPAM if infloww[1] else base
     if est_spam(n):
         base = _etiquette_sans_spam(sans_spam(n))
         # « SPAM 1 », « (SPAM) 1 », « SPAM1 » : il ne reste qu'un numero de

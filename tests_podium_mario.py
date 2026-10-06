@@ -141,6 +141,10 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# Cette suite verifie la mecanique du podium sur les clics GetMySocial (Va IG,
+# et Twitter jusqu au 06/10/2026) : Twitter y repasse, sans quoi il lirait le
+# vrai MyPuls. Le comptage par tracking a ses tests : tests_podium_tracking.py.
+pd.SERVEURS[pd.TWITTER_ID].pop("mesure", None)
 import safe_json                       # noqa: E402
 import verif_discord as vd             # noqa: E402
 
