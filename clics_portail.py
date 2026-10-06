@@ -58,7 +58,9 @@ FICHIER = Path("data") / "clics_portail.json"
 #: 03/10/2026. Quatre minutes, c'etait jusqu'a 360 rendus par jour, soit
 #: 44 600 appels pour une page de lecture. La page affiche son heure de
 #: relevé : un lecteur voit tout de suite de quand datent les chiffres.
-TTL_RENDU = 900
+#: Puis UNE HEURE (propriétaire, 06/10/2026 : « pour les clics fais un
+#: refresh toutes les 1h, pas avant »).
+TTL_RENDU = 3600
 #: Un ECHEC se garde moins longtemps : la source revient, la page doit suivre.
 TTL_ECHEC = 240
 _CACHE: dict = {}

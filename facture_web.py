@@ -552,7 +552,8 @@ _VA_CLICKS_CACHE: dict = {}  # month -> (ts, clicks)
 def _va_clicks_month(month: str) -> int:
     """Clics éligibles (FR/BE/CH/LU/MC) des GROUPES marché FR (Lola/Amelia/Alicia/
     Julia/Emma/Sarah, JAMAIS les groupes jailbreak) sur le mois entier.
-    Mois clos figé en cache disque ; mois courant re-calculé toutes les 10 min.
+    Mois clos figé en cache disque ; mois courant re-calculé toutes les heures
+    (propriétaire, 06/10/2026 : « pour les clics fais un refresh toutes les 1h »).
     Si GMS indispo (cookie board expiré, etc.) on GARDE la dernière valeur connue
     au lieu d'afficher un faux 0."""
     cur = _cur_month()
@@ -562,7 +563,7 @@ def _va_clicks_month(month: str) -> int:
         if v is not None:
             return int(v)
     c = _VA_CLICKS_CACHE.get(month)
-    if c and (time.time() - c[0]) < 600:
+    if c and (time.time() - c[0]) < 3600:
         return int(c[1])
     try:
         import gms

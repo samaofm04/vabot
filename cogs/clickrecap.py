@@ -1311,6 +1311,49 @@ def _creneau_30(d: datetime.datetime) -> tuple:
     return (d.hour, 0 if d.minute < 30 else 30)
 
 
+def _creneau_60(d: datetime.datetime) -> tuple:
+    """Le creneau d'UNE HEURE de cet instant : (date, heure), a Paris.
+
+    Le report passe a l'heure pleine (proprietaire, 06/10/2026 : « pour les
+    clics fais un refresh toutes les 1h, pas avant ») : chaque publication
+    relit les clics de tous les liens chez GetMySocial, deux cents appels et
+    plus. La date entre dans le creneau : une heure d'hier n'est pas celle
+    d'aujourd'hui, meme au meme chiffre."""
+    return (d.date().isoformat(), d.hour)
+
+
+#: Le dernier creneau publie, SUR DISQUE : le bot redemarre a chaque
+#: deploiement (29 fois le 05/10/2026), et un creneau en memoire repartait
+#: vide -- chaque redemarrage republiait tout, hors cadence.
+_CRENEAU_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_click_creneau.json"
+
+
+def _creneau_lu():
+    try:
+        v = json.loads(_CRENEAU_FILE.read_text(encoding="utf-8")).get("creneau")
+        return (str(v[0]), int(v[1])) if isinstance(v, list) and len(v) == 2 else None
+    except Exception:
+        return None
+
+
+def _creneau_ecrit(creneau) -> None:
+    try:
+        import safe_json as _sj_cr
+        _CRENEAU_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _sj_cr.write(_CRENEAU_FILE, {"creneau": list(creneau)})
+    except Exception as e:
+        print(f"[reportclick] creneau non enregistre ({e}) : un redemarrage republiera",
+              flush=True)
+
+
+def _next_heure_unix() -> int:
+    """Timestamp Unix (UTC) de la prochaine heure pleine — pour le timer Discord
+    <t:…:R>. Les heures pleines de Paris et d'UTC coincident (decalage en
+    heures entieres), donc on calcule direct en UTC."""
+    u = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    return int(calendar.timegm((u + datetime.timedelta(hours=1)).timetuple()))
+
+
 def _next_demi_heure_unix() -> int:
     """Timestamp Unix (UTC) du prochain h:00 ou h:30 — pour le timer Discord
     dynamique <t:…:R> (« dans X min »). Les demi-heures Paris et UTC coincident
@@ -1348,7 +1391,10 @@ NO_LINK_MSG = (
 #: — un 429 la-bas coute bien plus cher qu'un report en retard de trente
 #: secondes.
 _REFRESH_DERNIER = {}
-_REFRESH_ATTENTE_S = 60
+#: Une heure, comme le report (proprietaire, 06/10/2026 : « pour les clics
+#: fais un refresh toutes les 1h, pas avant ») : un clic coute une
+#: publication entiere, deux cents appels et plus.
+_REFRESH_ATTENTE_S = 3600
 
 
 #: Noms de groupes GMS, pour l'autocompletion. Un cache est OBLIGATOIRE :
@@ -1478,8 +1524,8 @@ async def _rafraichir(interaction: discord.Interaction, cog=None):
         # On le DIT au lieu de faire semblant : un bouton qui ne repond
         # rien passe pour casse, et la personne reclique.
         await interaction.response.send_message(
-            f"⏳ Déjà rafraîchi il y a moins d'une minute. Réessaie dans "
-            f"{int(reste)} s — les chiffres viennent de GetMySocial, "
+            f"⏳ Déjà rafraîchi il y a moins d'une heure. Réessaie dans "
+            f"{max(1, int(reste) // 60)} min — les chiffres viennent de GetMySocial, "
             f"qui a un quota.", ephemeral=True)
         return
     _REFRESH_DERNIER[cid] = time.time()
@@ -1528,7 +1574,7 @@ class ClickRecap(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self._last_run = None  # date ISO du dernier récap auto (anti-doublon)
-        self._report_creneau = None  # dernier creneau de 30 min deja publie
+        self._report_creneau = _creneau_lu()  # dernier creneau d'une heure publie (disque)
         if _auto_enabled():
             self.daily_recap.start()
         self.hourly_report.start()
@@ -1615,17 +1661,19 @@ class ClickRecap(commands.Cog):
     @tasks.loop(minutes=5)
     async def hourly_report(self):
         """Met a jour (edite) le message de report de chaque serveur configure,
-        toutes les 30 minutes (aligne sur h:00 et h:30, survit aux redemarrages).
+        toutes les heures (aligne sur h:00, survit aux redemarrages : le
+        dernier creneau publie est garde sur disque).
 
         La boucle tourne toutes les 5 minutes mais ne fait rien tant que le
         creneau n'a pas change : c'est ce qui garde la cadence alignee sur
         l'horloge meme apres un redemarrage du bot.
         """
         now = _paris_now()
-        creneau = _creneau_30(now)
+        creneau = _creneau_60(now)
         if self._report_creneau == creneau:
             return
         self._report_creneau = creneau
+        _creneau_ecrit(creneau)
         # Un salon « ranking » ouvert entre deux cycles s'equipe tout seul.
         # On relit la config APRES : la pose vient d'y ajouter une entree.
         try:
@@ -2685,7 +2733,7 @@ class ClickRecap(commands.Cog):
         # toutes petites lettres, « 🇺🇸 US » se lisait « us US ».
         _quoi = (f"{libelle} vs global" if pays_marche else "all countries")
         emb.set_footer(
-            text=f"Updated {_paris_now().strftime('%H:%M')} · every 30 min · "
+            text=f"Updated {_paris_now().strftime('%H:%M')} · every hour · "
                  f"{_quoi} · GetMySocial")
         return emb
 
@@ -2738,7 +2786,7 @@ class ClickRecap(commands.Cog):
             return "GetMySocial n'a rien renvoye (module indisponible ou quota)"
         # Timer dynamique : Discord rend <t:…:R> en « dans X min » qui décompte
         # tout seul côté client (pas besoin d'éditer pour le voir bouger).
-        ts = _next_demi_heure_unix()
+        ts = _next_heure_unix()
         content = f"⏱️ **Prochaine mise à jour** <t:{ts}:R> (à <t:{ts}:t>)"
         mid = c.get("message_id")
         msg = None
@@ -3629,7 +3677,7 @@ class ClickRecap(commands.Cog):
 
     @app_commands.command(
         name="setreportclick",
-        description="[OWNER] Report des clics d'un groupe GMS dans CE salon (maj 30 min)",
+        description="[OWNER] Report des clics d'un groupe GMS dans CE salon (maj toutes les heures)",
     )
     @app_commands.describe(
         groupe="Workspace GetMySocial a suivre (choisis dans la liste)",
@@ -3704,7 +3752,8 @@ class ClickRecap(commands.Cog):
         cfg[cle] = new_c
         _save_report_cfg(cfg)
         gid = cle          # tout ce qui suit publie ce report-là
-        self._report_creneau = _creneau_30(_paris_now())  # evite un double post immediat par la boucle
+        self._report_creneau = _creneau_60(_paris_now())  # evite un double post immediat par la boucle
+        _creneau_ecrit(self._report_creneau)
         _souci = await self._post_or_update_report(gid)
         if _souci:
             # ON NE DIT PAS « active » QUAND RIEN N'EST PARTI.
@@ -3720,7 +3769,7 @@ class ClickRecap(commands.Cog):
             + ("\n🏆 **Classements seulement** — ce salon ne porte que « qui envoie » "
                "et « qui convertit », pas le tableau par lien.\n"
                if new_c["contenu"] == "classement" else "\n")
-            + f"Message **édité toutes les 30 min** (aujourd'hui / hier / semaine / période 1–15 / 16–fin), "
+            + f"Message **édité toutes les heures** (aujourd'hui / hier / semaine / période 1–15 / 16–fin), "
             f"et un bouton **Rafraîchir** que n'importe qui peut cliquer. "
             f"Snapshot à la demande : `/reportclicknow`. Désactive : `/reportclick_off`.{data['ambig']}",
             ephemeral=True)

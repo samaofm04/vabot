@@ -1348,16 +1348,10 @@ def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[in
     Retourne None si l'appel echoue, sinon un int (0 si pas de clics)."""
     if not link_id:
         return None
-    res = get_analytics_overview(start_date, end_date, link_ids=[link_id])
-    if not res.get("ok"):
-        return None
-    d = res.get("data")
-    if not isinstance(d, dict):
-        d = res
-    try:
-        return int(d.get("total_clicks") or 0)
-    except Exception:
-        return None  # payload illisible -> « indispo » (—), pas un faux 0 (sous-paie)
+    # par le cache commun d'une heure (_analytics_cachee) : le meme lien relu
+    # par le report, Mes clics ou la facture ne repart pas chez GetMySocial
+    total, _ = _analytics_cachee((link_id,), start_date, end_date)
+    return total  # None si illisible -> « indispo » (—), pas un faux 0 (sous-paie)
 
 
 def _lire_analytics(res):
@@ -1372,6 +1366,11 @@ def _lire_analytics(res):
         return None, None
     d = res.get("data")
     if not isinstance(d, dict):
+        if "total_clicks" not in res:
+            # une reponse qui n'est pas un releve (texte, forme inconnue) :
+            # illisible, pas « 0 clic » -- garde une heure, ce zero aurait pu
+            # finir sur un podium fige
+            return None, None
         d = res
     try:
         total = int(d.get("total_clicks") or 0)
@@ -1391,8 +1390,24 @@ def _lire_analytics(res):
 
 _ANA_CACHE = {}
 _ANA_LOCK = _threading.Lock()
-TTL_ANALYTICS = 180      # periode CLOSE : elle ne changera plus
-TTL_OUVERT = 90          # periode en cours : elle bouge encore
+# UNE HEURE (proprietaire, 06/10/2026 : « pour les clics fais un refresh
+# toutes les 1h, pas avant ») : le report, la page publique, le widget et la
+# facture relisaient les memes clics toutes les 90 s.
+TTL_ANALYTICS = 3600     # periode CLOSE : elle ne changera plus
+TTL_OUVERT = 3600        # periode en cours : elle bouge encore
+
+
+def _jour_paris() -> str:
+    """« 2026-10-06 », la date de Paris. Le VPS tourne en UTC : la date du
+    serveur change a 02h, et un releve d'« aujourd'hui » pris a 23h aurait
+    ete resservi jusqu'a 02h pour ce qui etait devenu « hier » -- puis fige
+    comme definitif par la paie et le report."""
+    try:
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        return _dt.datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d")
+    except Exception:                                        # noqa: BLE001
+        return time.strftime("%Y-%m-%d")
 
 
 def _analytics_cachee(ids, start_date: str, end_date: str):
@@ -1418,7 +1433,7 @@ def _analytics_cachee(ids, start_date: str, end_date: str):
     # 23h59 restait servi a 00h01 pour ce qui etait devenu « hier », ampute
     # de sa derniere minute et fige comme definitif. Changer de jour vide de
     # fait les entrees de la veille.
-    aujourdhui = time.strftime("%Y-%m-%d")
+    aujourdhui = _jour_paris()
     cle = (tuple(ids), str(start_date), str(end_date), aujourdhui)
     maintenant = time.time()
     # Une periode ENCORE OUVERTE (elle se termine aujourd hui ou plus tard)
@@ -1540,16 +1555,12 @@ def clicks_for_ids(link_ids: List[str], start_date: str, end_date: str) -> Optio
     total = 0
     for i in range(0, len(link_ids), 20):
         chunk = link_ids[i:i + 20]
-        res = get_analytics_overview(start_date, end_date, link_ids=chunk)
-        if not res.get("ok"):
-            return None  # batch echoue -> total non fiable
-        d = res.get("data")
-        if not isinstance(d, dict):
-            d = res
-        try:
-            total += int(d.get("total_clicks") or 0)
-        except Exception:
-            return None  # reponse illisible -> total non fiable
+        # par le cache commun d'une heure : le report en refaisait 15 a chaque
+        # publication, sans cache (environ 2 200 appels par jour)
+        t, _ = _analytics_cachee(tuple(chunk), start_date, end_date)
+        if t is None:
+            return None  # batch echoue ou illisible -> total non fiable
+        total += t
     return total
 
 

@@ -119,7 +119,10 @@ NOM_DISCORD_MAX = 80                 # un nom plus long est coupé (entier sur l
 # Clics US « depuis toujours » : un appel GetMySocial par personne, une
 # vingtaine en tout. Le chiffre bouge peu : relevé une fois par jour, gardé
 # sur disque. Un relevé raté est retenté, mais pas à chaque affichage.
-US_REESSAI_S = 600
+# Une heure entre deux essais (propriétaire, 06/10/2026 : « pour les clics
+# fais un refresh toutes les 1h, pas avant ») : deux personnes bloquées
+# coutaient trois appels toutes les dix minutes, toute la journée.
+US_REESSAI_S = 3600
 US_ATTENTE_S = 20                    # premier affichage sans aucun relevé : on attend ça, pas plus
 US_PAUSE_S = 0.3                     # entre deux appels, comme le podium
 # Faux dans les tests : le relevé se fait alors sur place, sans fil qui
@@ -209,7 +212,7 @@ def _aujourdhui() -> str:
 # Et relire GMS à chaque affichage usait ce quota partagé avec le tableau de
 # bord : la liste est reprise telle quelle pendant GMS_FRAIS_S.
 GMS_COPIE = DATA_DIR / "infloww_liens_gms.json"
-GMS_FRAIS_S = 600
+GMS_FRAIS_S = 3600                   # une heure (propriétaire, 06/10/2026)
 # created_at / createdAt : gardés s'ils viennent un jour (la liste v3 du 26/09
 # n'en a pas) — la date de création d'un lien GMS borne ses lignes (cree_gms)
 _CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt")

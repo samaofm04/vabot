@@ -21670,9 +21670,12 @@ def _set_links_for_va(user_id, link_ids: list):
     _save_va_links(data)
 
 
-# Cache simple pour les données quotidiennes GMS (TTL 5 min, module-level)
+# Cache des clics par jour du widget des VA. UNE HEURE (propriétaire,
+# 06/10/2026 : « pour les clics fais un refresh toutes les 1h, pas avant ») :
+# le préchauffage de l'accueil le relisait toutes les 5 minutes, jour et nuit,
+# sans personne devant la page.
 _VA_DAILY_CACHE: dict = {}
-_VA_DAILY_TTL = 300  # 5 minutes
+_VA_DAILY_TTL = 3600  # 1 heure
 
 
 def _get_links_clicks_period(link_ids: list, days: int = 7) -> dict:
