@@ -722,14 +722,56 @@ def liens_bruts(gid: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
     return tout, frais
 
 
-def entites(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """{clé: {nom, spam, ids}} — une personne, ou son lien SPAM, comptés à part."""
+def _nom_du_lien(l: Dict[str, Any]) -> str:
+    return str(l.get("display_name") or l.get("title") or l.get("shortcode") or "")
+
+
+def gabarits(liens: List[Dict[str, Any]],
+             rattachements: Optional[Dict[str, str]] = None) -> List[str]:
+    """Les noms des liens qu'entites() écarte comme gabarits, pour le dire.
+
+    Les pages de base des liens d'identité US (« TEMPLATE ibenhaastrup »)
+    vivent dans JESSY LE RETOUR, au milieu des liens des VA : un gabarit
+    écarté sans trace, c'est un lien que personne ne regarde plus."""
+    import clics_personnes as _cp
+    ratt = _cp.rattachements_identite() if rattachements is None else rattachements
+    return sorted(_nom_du_lien(l) for l in liens
+                  if _cp.commence_par_gabarit(_nom_du_lien(l)) and str(l.get("id") or "") not in ratt)
+
+
+def entites(liens: List[Dict[str, Any]],
+            rattachements: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+    """{clé: {nom, spam, ids}} — une personne, ou son lien SPAM, comptés à part.
+
+    DEUX EXCEPTIONS AU NOM DU LIEN, et ce sont les mêmes partout (podium,
+    page Infloww, paie : tous passent par ici) :
+      - un GABARIT n'est personne : la page de base « TEMPLATE ibenhaastrup »
+        prenait sinon un numéro de VA à vie dans podium_numeros.json, une
+        ligne de la page Infloww et des appels GetMySocial chaque jour. La
+        règle ÉTROITE (clics_personnes.commence_par_gabarit : le nom commence
+        par le mot), pas celle du report des clics : en sous-chaîne, « Twitter
+        VA 5 @teamplayer » sortait du podium, de la page Infloww et de la paie ;
+      - une PAGE D'IDENTITÉ US va à la personne de son lien global, par le
+        registre (clics_personnes.rattachements_identite), quel que soit son
+        nom — tant que le global est dans la même liste. Ses clics comptent
+        alors pour lui, et son lien de suivi est le sien.
+    `rattachements` : {id page: id global}, lu dans le registre si absent."""
+    import clics_personnes as _cp
+    ratt = _cp.rattachements_identite() if rattachements is None else rattachements
+    noms = {str(l.get("id")): _nom_du_lien(l) for l in liens if l.get("id")}
     out: Dict[str, Dict[str, Any]] = {}
     for l in liens:
-        nom, spam = personne(l.get("display_name") or l.get("title") or l.get("shortcode") or "")
+        lid = str(l["id"])
+        nom_l = _nom_du_lien(l)
+        if _cp.commence_par_gabarit(nom_l) and lid not in ratt:
+            continue
+        glob = ratt.get(lid, "")
+        if glob in noms and not _cp.commence_par_gabarit(noms[glob]):
+            nom_l = noms[glob]
+        nom, spam = personne(nom_l)
         c = cle_entite(nom, spam)
         e = out.setdefault(c, {"nom": nom, "spam": spam, "ids": []})
-        e["ids"].append(str(l["id"]))
+        e["ids"].append(lid)
     return out
 
 
@@ -801,13 +843,20 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     profil = _profil(gid)
     d0, d1 = debut.isoformat(), fin.isoformat()
     liens, frais = liens_bruts(gid)
+    gab: List[str] = []
     if profil["fr"]:
         ents = entites_fr(liens)
         # le numero vient du nom du lien : rien a attribuer ici, et la table
         # de Twitter (podium_numeros.json) n'est pas touchee
         table = {c: e["numero"] for c, e in ents.items()}
     else:
-        ents = entites(liens)
+        import clics_personnes as _cp
+        ratt = _cp.rattachements_identite()
+        ents = entites(liens, ratt)
+        gab = gabarits(liens, ratt)
+        if gab:
+            # ni numero, ni ligne, ni appel : mais dit, une fois par releve
+            print(f"[podium] {len(gab)} gabarit(s) ecarte(s) : " + ", ".join(gab[:6]), flush=True)
         table = numeros(list(ents.keys()), attribuer=frais)
     sans_numero = [c for c in ents if c not in table]
     if sans_numero:
@@ -837,7 +886,7 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
     out = {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
            "entites": len(ents), "liens": len(liens),
-           "sans_numero": sorted(sans_numero)}
+           "sans_numero": sorted(sans_numero), "gabarits": gab}
     # Twitter relève de toute façon ses VA pour ses propres messages : Va IG
     # reprend ce relevé au lieu d'en refaire un (voir _releve_us)
     _retenir(gid, debut, fin, out)

@@ -46,7 +46,15 @@ MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_remind
              "presenceshift",
              # Categorie « 🧰 Outils » du serveur FR (salons communs spoofer
              # et download) : ZERO commande slash, comme spoofer.
-             "outils"]
+             "outils",
+             # Salon -generateur-de-lien des VA US (un lien GetMySocial par
+             # identite) : ZERO commande slash, comme spoofer.
+             "generateur_lien",
+             # Salon admin « bases-identites » du serveur US : nom + 2 photos
+             # -> page TEMPLATE <identite> dans GetMySocial. ZERO commande
+             # slash ; sur le PRINCIPAL parce que le bot admin n'est pas sur
+             # le serveur US.
+             "bases_identite"]
 ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # Banc d'essai des menus. Sur le bot ADMIN et pas le
               # principal : celui-ci declare deja 101 commandes pour un

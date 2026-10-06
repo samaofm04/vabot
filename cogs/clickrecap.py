@@ -1743,7 +1743,59 @@ class ClickRecap(commands.Cog):
         # message valide (l'appelant voit None -> ne touche pas au message).
         if metas is None:
             return None
+        # LES PAGES DE BASE DES LIENS D'IDENTITE US (« TEMPLATE <identite> »,
+        # faites a la main dans JESSY LE RETOUR) ne sont personne : le
+        # classement les ecartait deja (clics_personnes.grouper), mais chacune
+        # coutait encore trois appels GetMySocial par heure, une ligne « zero
+        # clic » au tableau, et une place sous le plafond _MAX_PER_LIEN au-dela
+        # duquel le detail par lien disparait. Ecartees ici, pour cet espace
+        # seulement (les autres gardent leur report tel quel), et dites au
+        # journal comme dans les donnees de la page (« gabarits_ecartes »).
+        # La regle ETROITE (le nom commence par « TEMPLATE »), celle du podium :
+        # un lien « (Teamplayer) 1 » reste au tableau, comme avant.
+        #
+        # LES PAGES D'IDENTITE, elles, vont dans la ligne de leur lien global
+        # (`_pages_de`) : relevees AVEC lui, en un appel par periode
+        # (analytics_for_links), sans ligne a elles. Une ligne chacune coutait
+        # trois appels par passage (la reserve de la paie : « report ») et,
+        # des la quinzieme, faisait passer l'espace au-dela de _MAX_PER_LIEN :
+        # detail par lien et classements disparaissaient.
+        _gabarits_ecartes = []
+        _pages_de = {}                    # id du global -> [metas de ses pages]
+        try:
+            import clics_personnes as _cp_g
+            if str(team_id or "") == _cp_g.ESPACE_RANKING:
+                _ratt_g = _cp_g.rattachements_identite()
+                _garde = []
+                for m in metas:
+                    _nm = m.get("display_name") or m.get("shortcode") or ""
+                    if _cp_g.commence_par_gabarit(_nm) and str(m.get("id") or "") not in _ratt_g:
+                        _gabarits_ecartes.append(_nm)
+                    else:
+                        _garde.append(m)
+                metas = _garde
+                if _gabarits_ecartes:
+                    print("[reportclick] %s : %d gabarit(s) hors report : %s"
+                          % (name, len(_gabarits_ecartes), ", ".join(_gabarits_ecartes[:6])),
+                          flush=True)
+                _ids_g = {str(m.get("id")) for m in metas if m.get("id")}
+                for m in metas:
+                    _lid_g = str(m.get("id") or "")
+                    _glob_g = _ratt_g.get(_lid_g, "")
+                    # une page dont le global n'est pas dans cette liste garde
+                    # sa ligne : ses clics ne se perdent pas
+                    if _lid_g and _glob_g and _glob_g != _lid_g and _glob_g in _ids_g \
+                            and _glob_g not in _ratt_g:
+                        _pages_de.setdefault(_glob_g, []).append(m)
+        except Exception as _e_g:
+            print("[reportclick] gabarits non ecartes : %s: %s"
+                  % (type(_e_g).__name__, _e_g), flush=True)
+            _pages_de = {}
+        _ids_pages = {str(pm.get("id")) for _pl in _pages_de.values() for pm in _pl}
         ids = [m["id"] for m in metas if m.get("id")]
+        # le plafond du detail porte sur les LIGNES : une page d'identite n'en
+        # a pas, elle vit dans celle de son global
+        _n_lignes = len([i for i in ids if str(i) not in _ids_pages])
         today = _paris_now().date()
         yest = today - datetime.timedelta(days=1)
         week_start = today - datetime.timedelta(days=today.weekday())  # lundi
@@ -1794,7 +1846,7 @@ class ClickRecap(commands.Cog):
         # dernier (relecture du 29/09). La cle est la liste des periodes de
         # la ligne, vivante tant que `rows` l'est.
         _par_ligne = {}
-        if ids and not all_none and len(ids) <= _MAX_PER_LIEN:
+        if ids and not all_none and _n_lignes <= _MAX_PER_LIEN:
             # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
             # mais il rend aussi le detail par pays. Les clics du marche sortent
             # donc gratuitement — les demander a part aurait double la facture.
@@ -1807,7 +1859,17 @@ class ClickRecap(commands.Cog):
                 (yest, yest),            # yesterday
                 (cyc_s, cyc_e),          # current pay period
             ]
-            _avec_id = [m for m in metas if m.get("id")]
+            _avec_id = [m for m in metas if m.get("id") and str(m["id"]) not in _ids_pages]
+
+            def _lot_de(lid):
+                """Le global et ses pages d'identite : ce qui se releve ensemble."""
+                return [lid] + [pm["id"] for pm in _pages_de.get(str(lid), [])]
+
+            def _cle_lot(lid):
+                # la quinzaine precedente gardee sur disque suit le LOT : une
+                # page de plus, et le releve garde ne vaut plus
+                _l = _lot_de(lid)
+                return "+".join([str(_l[0])] + sorted(str(x) for x in _l[1:]))
 
             # DEPUIS QUAND CE LIEN EST-IL A LUI.
             #
@@ -1851,6 +1913,9 @@ class ClickRecap(commands.Cog):
                     # pas la meme qu'un echec.
                     return "NA"
                 async with _sem:
+                    if _pages_de.get(str(lid)):
+                        return await asyncio.to_thread(_lot_reparti, gms, _lot_de(lid),
+                                                       plage[0], plage[1])
                     return await asyncio.to_thread(_analytics_reparti, gms, lid,
                                                    plage[0], plage[1])
 
@@ -1880,7 +1945,7 @@ class ClickRecap(commands.Cog):
                 if plage is None:
                     _prec_bilan["na"] += 1
                     return "NA"
-                _g = _garde_prec.get(_cle_prec(lid, plage))
+                _g = _garde_prec.get(_cle_prec(_cle_lot(lid), plage))
                 if isinstance(_g, dict) and isinstance(_g.get("total"), int):
                     _prec_bilan["garde"] += 1
                     return _g["total"], dict(_g.get("pays") or {})
@@ -1890,7 +1955,7 @@ class ClickRecap(commands.Cog):
                     _r = (None, None)
                     _prec_raisons.append("%s: %s" % (type(_e_p).__name__, str(_e_p)[:80]))
                 if isinstance(_r, tuple) and isinstance(_r[0], int):
-                    _garde_prec[_cle_prec(lid, plage)] = {
+                    _garde_prec[_cle_prec(_cle_lot(lid), plage)] = {
                         "total": _r[0], "pays": dict(_r[1] or {}),
                         "lu": _paris_now().strftime("%Y-%m-%d %H:%M")}
                     _prec_bilan["lu"] += 1
@@ -1981,7 +2046,8 @@ class ClickRecap(commands.Cog):
             cumul = [None, None, None, None]
             _partiels = 0
             if pays_marche:
-                _ids_lot = [m["id"] for m in _avec_id]
+                # les totaux decrivent l'ESPACE : les pages d'identite en sont
+                _ids_lot = [i for m in _avec_id for i in _lot_de(m["id"])]
                 _paquets = [_ids_lot[i:i + 15]
                             for i in range(0, len(_ids_lot), 15)]
                 _plages_resume = [(today, today), (yest, yest),
@@ -2066,6 +2132,8 @@ class ClickRecap(commands.Cog):
                     "team_id": c.get("team_id") or "",
                     "group_id": c.get("group_id") or "",
                     "resume": [], "abonnes": [], "par_lien": []}
+        if _gabarits_ecartes:
+            _donnees["gabarits_ecartes"] = list(_gabarits_ecartes)
         if _echoues or _partiels:
             # La page en fera une banniere : « — » partout doit s'expliquer.
             try:
@@ -2261,13 +2329,31 @@ class ClickRecap(commands.Cog):
                         return _depuis.get(str(_m_l.get("id")), "")
                     return _dep_par_nom.get(_nom_propre(lab), "")
 
+                # L'identifiant GetMySocial voyage avec la ligne : c'est par
+                # lui qu'une page d'identite US rejoint la personne de son lien
+                # global dans le classement (clics_personnes.grouper). Par le
+                # nom, la page de « tsiry 1 » faisait une personne a part.
+                def _id_de(p):
+                    _m_i = (_par_ligne.get(id(p)) or (None,))[0]
+                    return str((_m_i or {}).get("id") or "")
+
                 _donnees["par_lien"] = [
                     {"lien": _nom_propre(lab),
                      "depuis": _dep_de(lab, p),
+                     "id": _id_de(p),
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
                                   for i in (0, 1, 2)]
                      + [dict(zip(("marche", "total"), _prec_de(p)))]}
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
+                # les pages d'identite comptees dans la ligne de leur global :
+                # nommees avec elle, pour que le chiffre s'explique
+                for _r_pl in _donnees["par_lien"]:
+                    _pg_pl = _pages_de.get(_r_pl.get("id") or "")
+                    if _pg_pl:
+                        _r_pl["pages"] = [_nom_propre(pm.get("display_name") or pm.get("shortcode") or "?")
+                                          for pm in _pg_pl]
+                if _ids_pages:
+                    _donnees["pages_identite"] = len(_ids_pages)
                 # CE QUI NE DIT RIEN SORT DU TABLEAU, MAIS EST NOMME.
                 #
                 # Sur la capture du proprietaire, quarante lignes sur
@@ -2577,10 +2663,10 @@ class ClickRecap(commands.Cog):
             if _lig_ec:
                 emb.add_field(name="\U0001F4A4 Out of the table",
                               value="\n".join(_lig_ec)[:1024], inline=False)
-        elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
+        elif ids and not all_none and _n_lignes > _MAX_PER_LIEN:
             emb.add_field(
                 name="📋 Per link",
-                value=f"_({len(ids)} links — too many to detail, totals above.)_",
+                value=f"_({_n_lignes} links — too many to detail, totals above.)_",
                 inline=False)
 
         # Le salon « ranking » ne garde que les classements. Le filtre passe

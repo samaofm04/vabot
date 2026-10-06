@@ -740,9 +740,10 @@ async def _push_content_menu(bot, channel, identity, member):
 # @pseudo-content (le contenu généré arrive là) et @pseudo-numero-mail,
 # privés, dans la catégorie TAFF. L'ordre du tuple = ordre de création
 # (menu juste au-dessus de content).
-#: Cinq salons par VA. "download" ajoute le 27/08 : le menu de
+#: Six salons par VA. "download" ajoute le 27/08 : le menu de
 #: telechargement Instagram y vit en permanence, comme le menu Jailbreak
-#: vit dans -menu. "spoofer" ajoute le 27/09 (cogs/spoofer.py).
+#: vit dans -menu. "spoofer" ajoute le 27/09 (cogs/spoofer.py),
+#: "generateur-de-lien" le 06/10 (cogs/generateur_lien.py).
 #:
 #: /ticketsall construit son expression a partir de US_TICKET_SUFFIXES : il
 #: l'avait ecrite en dur, et un suffixe oublie y comptait chaque salon comme
@@ -778,6 +779,22 @@ async def _ensure_dl_panel(bot, ch):
         print(f"[dl] panneaux non poses dans {getattr(ch, 'name', '?')} : {e}")
 
 
+async def _ensure_gdl_panel(bot, ch):
+    """Le panneau du generateur de lien dans un salon -generateur-de-lien
+    (cogs/generateur_lien.py). Un salon deja a jour n'est pas touche. Cog
+    absent : DIT, pas tu."""
+    if bot is None or ch is None or salon_de_service(getattr(ch, "name", "")):
+        return
+    cog = bot.get_cog("GenerateurLien")
+    if cog is None:
+        log.warning(f"[gdl] cog absent : pas de panneau dans {getattr(ch, 'name', '?')}")
+        return
+    try:
+        await cog.assurer_panneau(ch)
+    except Exception as e:
+        print(f"[gdl] panneau non pose dans {getattr(ch, 'name', '?')} : {e}")
+
+
 async def _ensure_spoof_panel(bot, ch):
     """Le panneau du spoofer dans un salon -spoofer (cogs/spoofer.py). Un
     salon deja a jour n'est pas touche. Cog absent : DIT, pas tu."""
@@ -795,7 +812,39 @@ async def _ensure_spoof_panel(bot, ch):
 
 #: L ORDRE DE CE TUPLE EST L ORDRE DES SALONS dans la categorie du VA :
 #: le reconciliateur les repositionne dans cet ordre exact.
-US_TICKET_SUFFIXES = ("menu", "spoofer", "download", "numero-mail", "content")
+#:
+#: "generateur-de-lien" ajoute le 06/10 (cogs/generateur_lien.py : un lien
+#: GetMySocial par identite). EN DERNIER expres : Discord cree un salon en
+#: fin de dossier, donc les ~35 dossiers existants le recoivent sans qu'un
+#: seul salon soit deplace ; place plus haut, _us_ranger aurait repositionne
+#: les six salons de chaque dossier. Jamais entre -menu et -spoofer :
+#: cogs/spoofer._bien_range veut -spoofer juste apres -menu.
+US_TICKET_SUFFIXES = ("menu", "spoofer", "download", "numero-mail", "content",
+                      "generateur-de-lien")
+
+#: Salons ou le VA ne fait que CLIQUER (les composants marchent sans le droit
+#: d'ecrire) : le bot y pose son panneau et ses messages, rien d'autre ne
+#: doit les recouvrir.
+US_LECTURE_SEULE = ("menu", "generateur-de-lien")
+
+
+def gdl_ouvert(base) -> bool:
+    """Le salon -generateur-de-lien a-t-il sa place dans ce dossier ? La regle
+    vit dans liens_identite_us.dossier_ouvert (mise en service par etapes).
+    Module absent ou en panne : NON, et dit -- un salon ouvert par erreur
+    dans les ~35 dossiers se voit, un salon pas encore ouvert non."""
+    try:
+        import liens_identite_us as _liu
+        return bool(_liu.dossier_ouvert(base))
+    except Exception as e:
+        print(f"[gdl] ouverture du salon dans {base} inconnue : {type(e).__name__}: {e}", flush=True)
+        return False
+
+
+def _salon_voulu(base, suffix) -> bool:
+    """Ce salon doit-il exister dans le dossier `base` ? Tous les suffixes
+    oui, sauf -generateur-de-lien tant qu'il n'est pas ouvert a ce dossier."""
+    return suffix != "generateur-de-lien" or gdl_ouvert(base)
 
 
 def _us_norm(nm):
@@ -1981,10 +2030,12 @@ async def ouvrir_numeros_au_bot_admin(principal, guild_id=None) -> dict:
 
 def _us_droits_ticket(guild, membres, suffix) -> dict:
     """Les droits d'un salon de VA : prive, le(s) VA voi(en)t tout, ecrivent
-    et joignent partout sauf dans -menu (lecture seule). Un seul endroit
+    et joignent partout sauf dans -menu et -generateur-de-lien
+    (US_LECTURE_SEULE : lecture seule). Un seul endroit
     pour la creation d'un dossier et pour le rattrapage des dossiers
     existants (completer_dossiers_us)."""
-    writable = suffix != "menu"  # -menu : lecture seule, rien n'y est écrit
+    # -menu et -generateur-de-lien : lecture seule, rien n'y est écrit
+    writable = suffix not in US_LECTURE_SEULE
     ow = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
     for m in membres:
         ow[m] = discord.PermissionOverwrite(
@@ -2046,7 +2097,8 @@ async def completer_dossiers_us(guild, suffixes=("spoofer",)) -> dict:
         if cat is None:
             continue
         base = nn[: -len("-content")]
-        manquants = [s for s in suffixes if f"{base}-{s}" not in noms]
+        manquants = [s for s in suffixes
+                     if f"{base}-{s}" not in noms and _salon_voulu(base, s)]
         if not manquants:
             continue
         vas = [t for t, ow in (getattr(content, "overwrites", None) or {}).items()
@@ -2097,6 +2149,8 @@ async def create_us_tickets(guild, member, bot=None):
         if existing:
             chans[suffix] = existing
             continue  # déjà là (commande re-lançable sans doublons)
+        if not _salon_voulu(_us_base(member), suffix):
+            continue  # -generateur-de-lien pas encore ouvert a ce dossier
         overwrites = _us_droits_ticket(guild, [member], suffix)
         try:
             ch = await guild.create_text_channel(
@@ -2120,6 +2174,9 @@ async def create_us_tickets(guild, member, bot=None):
     # Le panneau du spoofer vit dans -spoofer, en permanence.
     if chans.get("spoofer") is not None:
         await _ensure_spoof_panel(bot, chans["spoofer"])
+    # Le generateur de lien par identite vit dans -generateur-de-lien.
+    if chans.get("generateur-de-lien") is not None:
+        await _ensure_gdl_panel(bot, chans["generateur-de-lien"])
     # Migration : retirer l'ancien menu épinglé dans -content (version précédente).
     if content_ch is not None and bot is not None:
         try:

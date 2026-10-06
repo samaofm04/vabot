@@ -10,6 +10,10 @@ diverger d'un caractere, sauf que celle-ci decide de ce qu'on paie.
 Ce module ne connait ni Flask, ni Discord, ni GetMySocial, ni le disque : il
 prend des listes de dictionnaires et rend des listes de dictionnaires. C'est
 ce qui le rend testable, et importable par les trois sans le moindre cycle.
+UNE exception, rattachements_identite() : le registre des liens d'identite
+US (liens_identite_us), lu par import paresseux, parce que la question
+« a qui est ce lien » doit avoir sa reponse ICI, pour le podium, la page
+Infloww et la paie comme pour les clics.
 
 TROIS VALEURS, TROIS SENS -- et c'est tout l'enjeu du fichier :
 
@@ -147,8 +151,102 @@ def est_gabarit(nom) -> bool:
     Le filtre voyage AVEC la regle, et pas chez l'appelant : laisse dehors, un
     gabarit ressort comme une ligne anonyme au milieu du classement -- ce qui
     est arrive la premiere fois.
+
+    REGLE LARGE (un morceau du mot n'importe ou), propre au report des clics
+    qui l'applique depuis toujours. Le podium, la page Infloww et la paie
+    n'ecartent QUE commence_par_gabarit : en sous-chaine, « Twitter VA 5
+    @teamplayer » (le format des liens Twitter de liens_va) sortait du
+    podium, des lignes de la page Infloww et de la paie.
     """
     return any(g in str(nom or "").lower() for g in GABARITS)
+
+
+_MOT_DE_TETE = re.compile(r"^\s*([A-Za-z]+)")
+_LETTRES_GABARIT = sorted("template")
+
+
+def commence_par_gabarit(nom) -> bool:
+    """Le nom COMMENCE par le mot du gabarit : « TEMPLATE ibenhaastrup »,
+    « tempalte julia », « TEMPLATE » seul. C'est la regle des pages de base
+    des liens d'identite US (liens_identite_us.est_base la reprend) et la
+    seule que le podium (podium_discord.entites), la page Infloww et la paie
+    appliquent : ils n'ecartaient rien avant elles, et un vrai VA ne doit pas
+    en sortir parce que son pseudo contient « teampl » ou « templ ».
+
+    Le mot : les huit lettres de « template », dans n'importe quel ordre (les
+    fautes des vrais noms, temaplte, tempalte, teamplte, sont des lettres
+    echangees), un « s » final permis, et un gabarit au sens d'est_gabarit.
+    « Temple 1 », « Templeton », « (Teamplayer) 1 » n'en sont pas. Tout nom
+    qui y repond est aussi un gabarit pour est_gabarit : la regle etroite est
+    contenue dans la large, jamais l'inverse."""
+    m = _MOT_DE_TETE.match(str(nom or ""))
+    if not m:
+        return False
+    mot = m.group(1).lower()
+    if mot.endswith("s"):
+        mot = mot[:-1]
+    return sorted(mot) == _LETTRES_GABARIT and est_gabarit(mot)
+
+
+# --- Les liens d'identite US : a qui ils sont --------------------------------
+#
+# Un VA US cree lui-meme une page par identite (liens_identite_us) ; chaque
+# page pointe vers LE MEME lien de suivi OnlyFans que son lien « global ».
+# Proprietaire, 06/10 : ces pages ne sont pas des lignes payees, elles sont
+# rattachees a la ligne du global. Le rattachement est un fait ecrit dans le
+# registre (id de la page -> id du global), pas une deduction du nom : un nom
+# se renomme, et les regles de nom du podium et de ce module divergent deja
+# (« tsiry 1 » est « tsiry 1 » au podium, « tsiry » ici). Tous les ecrans le
+# lisent par cette fonction, et seulement par elle.
+_DEJA_DIT: set = set()
+
+
+def _dire_une_fois(texte: str) -> None:
+    """Le journal, une fois par processus : la fonction est appelee a chaque
+    regroupement, plusieurs fois par affichage."""
+    if texte not in _DEJA_DIT:
+        _DEJA_DIT.add(texte)
+        print(texte, flush=True)
+
+
+def rattachements_identite_ou_panne() -> tuple:
+    """({id du lien d'identite: id de son lien global}, panne).
+
+    `panne` est vide quand le registre est lu, ou quand le module n'existe
+    pas (fonction pas encore livree : aucun lien d'identite ne peut exister).
+    Elle dit pourquoi quand le module existe mais ne repond pas : les pages
+    d'identite redeviendraient alors des liens ordinaires -- des lignes
+    payees -- et l'appelant doit pouvoir le dire au lieu de payer en silence.
+    Ne leve jamais."""
+    try:
+        import liens_identite_us as _liu
+        brut = _liu.rattachements() or {}
+    except ModuleNotFoundError as e:
+        if getattr(e, "name", "") != "liens_identite_us":
+            # le module est la, c'est une de SES dependances qui manque :
+            # une panne, pas une fonction absente
+            raison = "%s : %s" % (type(e).__name__, e)
+            _dire_une_fois("[clics_personnes] liens d'identite US : registre illisible (%s)" % raison)
+            return {}, raison[:200]
+        _dire_une_fois("[clics_personnes] liens d'identite US : module absent, aucun rattachement")
+        return {}, ""
+    except Exception as e:                                   # noqa: BLE001
+        raison = "%s : %s" % (type(e).__name__, e)
+        _dire_une_fois("[clics_personnes] liens d'identite US : registre illisible (%s)" % raison)
+        return {}, raison[:200]
+    out = {}
+    for k, v in (brut.items() if isinstance(brut, dict) else ()):
+        k, v = str(k or "").strip(), str(v or "").strip()
+        # un lien rattache a lui-meme ne dirait rien, et ferait boucler qui
+        # chercherait le global du global
+        if k and v and k != v:
+            out[k] = v
+    return out, ""
+
+
+def rattachements_identite() -> dict:
+    """{id du lien d'identite: id de son lien global} ({} si inconnu)."""
+    return rattachements_identite_ou_panne()[0]
 
 
 def propre(nom) -> str:
@@ -562,14 +660,42 @@ def _ajouter(somme: dict, champ: str, v) -> None:
     somme[champ + "_lus"] += 1
 
 
-def grouper(entrees, annuaire=None) -> list:
+def _noms_des_globaux(entrees, rattachements) -> dict:
+    """{id d'un lien d'identite: nom propre de SON lien global}, pour les
+    liens d'identite dont le global est dans la MEME liste. Les entrees sans
+    "id" n'y sont pas : rien n'est rattache par le nom."""
+    noms = {}
+    for e in entrees:
+        lid = str((e or {}).get("id") or "")
+        if lid and lid not in noms:
+            noms[lid] = propre((e or {}).get("nom"))
+    out = {}
+    for lid in noms:
+        g = rattachements.get(lid)
+        # un global qui serait lui-meme un gabarit ne nomme personne : la page
+        # garde alors son propre nom
+        if g and noms.get(g) and not est_gabarit(noms[g]):
+            out[lid] = noms[g]
+    return out
+
+
+def grouper(entrees, annuaire=None, rattachements=None) -> list:
     """Regroupe des liens par personne.
 
     `entrees` : [{"nom": str, "clics": int|None|"NA",
-                  "abonnes": int|None|"NA", "depuis": "AAAA-MM-JJ"}]
+                  "abonnes": int|None|"NA", "depuis": "AAAA-MM-JJ",
+                  "id": id GetMySocial (facultatif)}]
 
     Rend, par personne : pseudo, titre, emoji, liens, clics, abonnes, taux,
     et les compteurs qui disent POURQUOI un total peut etre incomplet.
+
+    LES PAGES D'IDENTITE US vont a la personne de leur lien global, quel que
+    soit leur nom, quand les deux sont dans la liste avec leur "id"
+    (`rattachements`, par defaut rattachements_identite(), lu seulement si
+    une entree porte un "id") : leurs clics s'ajoutent a sa ligne, sans
+    ligne a part. Sans ca, la page de « tsiry 1 » faisait une personne
+    « tsiry 1 » a cote de « tsiry ». Une page rattachee n'est jamais prise
+    pour un gabarit, meme si le nom de son identite en a l'air.
 
     ATTENTION AU SENS DES CLICS : selon l'appelant, ils sont deja coupes a la
     date d'arrivee (le report Discord et sa page web le font dans le cog) ou
@@ -579,22 +705,32 @@ def grouper(entrees, annuaire=None) -> list:
     """
     annu = annuaire or {}
     idx = index_fiches(annu)
+    entrees = list(entrees or [])
+    if rattachements is None:
+        rattachements = (rattachements_identite()
+                         if any((e or {}).get("id") for e in entrees) else {})
+    ratt = rattachements or {}
+    globaux = _noms_des_globaux(entrees, ratt) if ratt else {}
     gens = {}
-    for e in entrees or []:
+    for e in entrees:
         nom = propre((e or {}).get("nom"))
-        if not nom or est_gabarit(nom):
+        lid = str((e or {}).get("id") or "")
+        if not nom or (est_gabarit(nom) and lid not in ratt):
             continue                      # un gabarit n'est pas quelqu'un
-        ps = pseudo(nom)
+        # Le nom qui DIT LA PERSONNE : celui du lien global pour une page
+        # d'identite, le sien pour tout autre lien. `nom` reste celui affiche.
+        nom_p = globaux.get(lid) or nom
+        ps = pseudo(nom_p)
         # Sans pseudo, CHAQUE lien garde sa ligne : « VA 5 » et « VA 9 » ne
         # sont pas la meme personne sous pretexte qu'aucun des deux n'est
         # nomme. Le \x00 rend la cle impossible a confondre avec un pseudo.
-        cle = ps or ("\x00" + nom.lower())
+        cle = ps or ("\x00" + nom_p.lower())
         g = gens.get(cle)
         if g is None:
             # Le titre garde la casse du LIEN : « .title() » rendait
             # « Va 2 Noum » la ou le lien dit « VA 2 Noum ».
             g = gens[cle] = {
-                "pseudo": ps, "titre": etiquette(nom) or nom, "discord": "",
+                "pseudo": ps, "titre": etiquette(nom_p) or nom_p, "discord": "",
                 "rattache": "",
                 # Les entrees telles quelles, dans l'ordre : les images du
                 # report y relisent le detail de chaque lien (quatre periodes,
@@ -614,7 +750,7 @@ def grouper(entrees, annuaire=None) -> list:
             # Sinon on cherche la fiche VA de cette personne, chez la MEME
             # creatrice, par fiche_de -- et on laisse vide au moindre doute.
             # « rattache » garde l'etape qui a trouve : le journal le dit.
-            if nom.lower().startswith("va_"):
+            if nom_p.lower().startswith("va_"):
                 # « va_@pseudo_spam » : le compte est le pseudo SANS spam.
                 base = personne_de_base(ps)
                 g["discord"], g["rattache"] = base, ("lien" if base else "")
@@ -641,14 +777,14 @@ def grouper(entrees, annuaire=None) -> list:
     return out
 
 
-def par_clics(entrees, annuaire=None) -> list:
+def par_clics(entrees, annuaire=None, rattachements=None) -> list:
     """Qui envoie du trafic. Les non-lus sortent en fin de liste, pas a zero."""
-    out = grouper(entrees, annuaire)
+    out = grouper(entrees, annuaire, rattachements)
     out.sort(key=lambda g: (g["clics_muets"], -(g["clics"] or 0), g["titre"]))
     return out
 
 
-def par_abonnes(entrees, annuaire=None) -> list:
+def par_abonnes(entrees, annuaire=None, rattachements=None) -> list:
     """Qui CONVERTIT ce trafic.
 
     Les clics disent qui envoie du monde, les abonnes disent qui en fait
@@ -660,7 +796,7 @@ def par_abonnes(entrees, annuaire=None) -> list:
     A egalite d'abonnes, celui qui a depense MOINS de clics passe devant :
     c'est lui qui convertit le mieux.
     """
-    out = grouper(entrees, annuaire)
+    out = grouper(entrees, annuaire, rattachements)
     out.sort(key=lambda g: (g["abonnes_muets"], -(g["abonnes"] or 0),
                             g["clics"] if g["clics"] is not None else 10 ** 9,
                             g["titre"]))
@@ -709,7 +845,12 @@ def depuis_report(donnees: dict, periode: str = "quinz") -> list:
         # quatre periodes de clics, les abonnes et le revenu du lien de
         # suivi, None quand le lien n'en a pas). grouper les garde dans
         # g["entrees"] ; les images du report les relisent de la.
-        entrees.append({"nom": nom, "clics": clics, "abonnes": abo,
-                        "depuis": str(r.get("depuis") or ""),
-                        "brut": r, "suivi": suivi})
+        e = {"nom": nom, "clics": clics, "abonnes": abo,
+             "depuis": str(r.get("depuis") or ""),
+             "brut": r, "suivi": suivi}
+        # l'identifiant GetMySocial du lien, quand le report le porte : c'est
+        # par lui qu'une page d'identite rejoint son lien global (grouper)
+        if r.get("id"):
+            e["id"] = str(r.get("id"))
+        entrees.append(e)
     return entrees

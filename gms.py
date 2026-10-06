@@ -1459,6 +1459,71 @@ def disable_link(link_id: str) -> Dict[str, Any]:
     return _call_tool("disable_link", {"link_id": link_id})
 
 
+# ============ Lire / modifier UN lien par MCP ============
+# liens_fr lisait et reecrivait ses pages en appelant _call_tool a la main,
+# avec son propre decodage de la reponse ; liens_identite_us en a besoin a son
+# tour. Une seule facon de lire un lien plutot qu'une copie par module : la
+# reponse arrive tantot en dict, tantot en texte JSON ou en repr Python, et
+# parfois enveloppee dans « data ».
+def _objet_lien(data: Any) -> Dict[str, Any]:
+    """L'objet lien d'une reponse MCP (dict, texte JSON ou repr), {} sinon."""
+    d = data
+    if isinstance(d, str):
+        import ast as _ast
+        for lire in (json.loads, _ast.literal_eval):
+            try:
+                d = lire(d)
+                break
+            except Exception:
+                continue
+    if isinstance(d, dict) and isinstance(d.get("data"), dict) and "buttons" not in d:
+        d = d["data"]
+    return d if isinstance(d, dict) else {}
+
+
+def get_link(link_id: str, team_id: Optional[str] = None) -> Dict[str, Any]:
+    """Un lien complet (boutons compris) par l'outil MCP get_link.
+
+    team_id : la portee de lecture (group_id / team_id rendus pour cette
+    equipe). Retourne {ok, link, error} ; `link` vaut {} si la reponse est
+    illisible -- ok reste vrai, a l'appelant de juger ce qui lui manque.
+    """
+    if not link_id:
+        return {"ok": False, "error": "link_id requis"}
+    args: Dict[str, Any] = {"link_id": link_id}
+    if team_id:
+        args["team_id"] = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
+    res = _call_tool("get_link", args)
+    if not res.get("ok"):
+        return res
+    return {"ok": True, "link": _objet_lien(res.get("data"))}
+
+
+def update_link(link_id: str, champs: Dict[str, Any],
+                team_id: Optional[str] = None) -> Dict[str, Any]:
+    """Modifie un lien par l'outil MCP update_link. Retourne {ok, link, error}.
+
+    ATTENTION : les tableaux (`buttons`, `geofilters`…) sont REMPLACES en
+    entier par GetMySocial. Lire le lien (get_link), copier, ne changer que
+    ce qu'il faut. Ne JAMAIS passer `typeLink: "directlink"` pour une page :
+    c'est ce que fait duplicate_link(new_url=…), pense pour un lien direct.
+    """
+    if not link_id:
+        return {"ok": False, "error": "link_id requis"}
+    args: Dict[str, Any] = dict(champs or {})
+    args["link_id"] = link_id
+    if team_id:
+        args["team_id"] = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
+    res = _call_tool("update_link", args)
+    if not res.get("ok"):
+        return res
+    try:
+        invalidate_grouping_cache()   # le nom a pu changer : la liste doit le revoir
+    except Exception:
+        pass
+    return {"ok": True, "link": _objet_lien(res.get("data"))}
+
+
 # ============ Groupes dashboard (API privée getmysocial.com/api) ============
 # L'API MCP publique n'expose pas la création/listage des groupes du dashboard.
 # On utilise l'API privée que le frontend GetMySocial appelle directement, avec

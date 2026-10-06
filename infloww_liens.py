@@ -81,6 +81,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import safe_json
 import infloww
 import podium_discord as pd
+import clics_personnes as _cp
 
 CREATRICE = "jessyewdiference"
 NOM_AFFICHE = "Jessye"
@@ -322,11 +323,17 @@ def _code_infloww(x: Mapping[str, Any]) -> str:
     return str(int(m.group(1))) if m else c
 
 
-def entites(liens: List[Any]) -> Tuple[Dict[str, Dict[str, Any]], int]:
+def entites(liens: List[Any], rattachements: Optional[Mapping[str, str]] = None
+            ) -> Tuple[Dict[str, Dict[str, Any]], int]:
     """({clé: {nom, spam, ids}}, liens sans identifiant). Le regroupement est
-    celui du podium, tel quel ; un lien sans identifiant est compté, pas avalé."""
+    celui du podium, tel quel (gabarits écartés, pages d'identité US chez la
+    personne de leur lien global) ; un lien sans identifiant est compté, pas
+    avalé. `rattachements` : {id page d'identité: id global}, lu dans le
+    registre si absent."""
     propres = [l for l in liens if isinstance(l, Mapping) and l.get("id")]
-    return pd.entites([dict(l) for l in propres]), len(liens) - len(propres)
+    return (pd.entites([dict(l) for l in propres],
+                       None if rattachements is None else dict(rattachements)),
+            len(liens) - len(propres))
 
 
 # ─── Clics US : GetMySocial, une fois par jour ───────────────────────────
@@ -1096,7 +1103,8 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
             par_code.setdefault(c, []).append(x)
     gms_propres = [l for l in liens_gms_ if isinstance(l, Mapping) and l.get("id")]
     par_id = {str(l["id"]): l for l in gms_propres}
-    ents, gms_sans_id = entites(liens_gms_)
+    ratt, ratt_panne = _cp.rattachements_identite_ou_panne()
+    ents, gms_sans_id = entites(liens_gms_, ratt)
 
     lignes: List[Dict[str, Any]] = []
     rattaches: Dict[str, Mapping[str, Any]] = {}    # id Infloww -> lien, une fois
@@ -1107,6 +1115,14 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         for gid in e["ids"]:
             l = par_id.get(str(gid)) or {}
             code, raison = code_de_l_url(l.get("url"))
+            glob = par_id.get(ratt.get(str(gid), ""))
+            if not code and glob:
+                # Une page d'identité US est une landing : pas d'adresse à elle,
+                # ses boutons visent le lien de suivi de son lien global. Sans
+                # ça, chacune sortait « sans lien de suivi », jusque dans le
+                # message Discord que les VA lisent. Même code que le global :
+                # ses subs ne comptent qu'une fois (siens, par lien Infloww).
+                code, raison = code_de_l_url(glob.get("url"))
             if code and not par_code.get(code):
                 raison = f"code c{code} absent des liens de suivi {_de(source)}"
             if raison:
@@ -1153,6 +1169,9 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                   for iid, x in rattaches.items()}
     return {
         "_paie_liens": paie_liens, "_gms": list(liens_gms_),
+        # le rattachement des pages d'identité lu pour CE tableau : la paie
+        # (avec_paie) reprend le même, pas une seconde lecture du registre
+        "_ratt": dict(ratt),
         "creatrice": CREATRICE, "equipe": EQUIPE_GMS, "equipe_nom": NOM_EQUIPE,
         "source": source, "periode": dict(periode or {}),
         "erreur": str(erreur or ""), "repli_gms": str(repli_gms or ""),
@@ -1163,6 +1182,12 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         "hors_gms": sorted(hors_lignes, key=_ordre_defaut),
         "partages": sorted(partages, key=lambda p: p["code"]),
         "nb_gms": len(liens_gms_), "gms_sans_id": gms_sans_id,
+        # les pages de base des liens d'identité (« TEMPLATE <identité> ») :
+        # ni personne ni ligne, mais nommées ; et les pages d'identité
+        # rangées chez leur lien global (pd.entites)
+        "gabarits": pd.gabarits([dict(l) for l in gms_propres], ratt),
+        "identites": sum(1 for i in par_id if ratt.get(i) in par_id),
+        "identites_panne": ratt_panne,
         "introuvables": sum(len(x["introuvables"]) for x in lignes),
         "nb_infloww": len(inf),
         # une ligne que l'API rend sous une autre forme qu'un objet : comptée,
@@ -2310,10 +2335,25 @@ def _figer_lignes(gels: Mapping[str, Mapping[str, Any]], maintenant: Optional[fl
             safe_json.write(LIGNES_FICHIER, dict(c, tranches=_elaguer_lignes(tr, maintenant), maj=maintenant))
 
 
+def _etat_avec_identites(st: Mapping[str, Any], sts_pages: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """L'état d'UNE ligne (un lien GMS « global ») et de ses pages d'identité
+    US sur une tranche. Proprietaire, 06/10 : une page d'identité n'est pas
+    une ligne payée, mais ses clics comptent pour rendre active la ligne de
+    son global. Donc : active si le global OU une de ses pages a fait au
+    moins un clic ; inactive si TOUS ont un zéro confirmé ; sinon l'état du
+    premier non tranché (le global d'abord) — jamais un zéro inventé."""
+    tous = [st] + list(sts_pages)
+    if any(e.get("etat") == "actif" for e in tous):
+        return {"etat": "actif"}
+    if all(e.get("etat") == "inactif" for e in tous):
+        return {"etat": "inactif"}
+    return dict(next(e for e in tous if e.get("etat") not in ("actif", "inactif")))
+
+
 def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
                     liens_now: List[Mapping[str, Any]], du: str, au: str, jour: str,
                     proprio: Mapping[str, str], noms: Mapping[str, str],
-                    crees: Mapping[str, str]) -> Dict[str, Any]:
+                    crees: Mapping[str, str], pages: Any = ()) -> Dict[str, Any]:
     """Les lignes de la personne `cle` sur la tranche [du, au] :
     {fige, sts: [(lien, état)], partis, exclus, pas_encore}.
 
@@ -2325,7 +2365,9 @@ def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
     Un lien créé après la fin de la tranche n'y est pas une ligne
     (« pas_encore ») : aucun appel GetMySocial pour lui.
     `partis` : liens comptés, qui ne sont plus à elle aujourd'hui ;
-    `exclus` : liens à elle aujourd'hui, pas comptés (à une autre sur la tranche)."""
+    `exclus` : liens à elle aujourd'hui, pas comptés (à une autre sur la tranche).
+    `pages` : les pages d'identité US (registre) — jamais des lignes, même
+    relevées à son nom pendant une panne du registre."""
     k = _cle_periode(du, au)
     bloc = tr.get(k) if isinstance(tr.get(k), Mapping) else {}
     fige = bloc.get("fige") if isinstance(bloc.get("fige"), Mapping) else {}
@@ -2369,7 +2411,7 @@ def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
         for lid, e in rel.items():
             lid = str(lid)
             if (lid not in siens and lid not in miens and lid not in a_autrui and isinstance(e, Mapping)
-                    and str(e.get("qui") or "") == cle):
+                    and lid not in pages and str(e.get("qui") or "") == cle):
                 siens[lid] = str(e.get("nom") or noms.get(lid) or lid)
         for lid, nom in siens.items():
             if cree(lid) and cree(lid) > au:
@@ -2526,11 +2568,29 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     # 1 bis. les lignes actives des types à fixe : chaque lien GMS de la
     # personne, sur chaque tranche de son fixe (quinzaine ou mois, partie
     # incluse dans la plage). Relevé lancé en arrière-plan pour ce qui manque.
-    ents_g, _sans = entites(gms)
+    #
+    # LES PAGES D'IDENTITÉ US NE SONT PAS DES LIGNES (proprietaire, 06/10 :
+    # « une ligne = un lien GMS […] chaque ligne c'est une paye », et les pages
+    # d'identité sont rattachées à la ligne du lien global, sans fixe en plus).
+    # Le registre dit de quel global chacune dépend (`ratt`, celui du tableau,
+    # pour que la page et la paie parlent du même rattachement) ; une page
+    # rend sa ligne active sur une tranche dès qu'elle y a fait un clic. Ses
+    # clics ne sont relevés que si le global a un zéro CONFIRMÉ sur la
+    # tranche : un global actif suffit, et le quota (LIGNES_APPELS_JOUR) ne
+    # paie pas pour savoir ce qu'on sait déjà.
+    ratt = t.get("_ratt")
+    ratt_panne = str(t.get("identites_panne") or "")
+    if not isinstance(ratt, Mapping):
+        ratt, ratt_panne = _cp.rattachements_identite_ou_panne()
+    ratt = {str(k): str(v) for k, v in ratt.items()}
+    ents_g, _sans = entites(gms, ratt)
     par_id_g = {str(l.get("id")): l for l in gms if isinstance(l, Mapping) and l.get("id")}
     proprio_g = {str(i): str(c) for c, e in ents_g.items() for i in e.get("ids") or []}
     noms_g = {i: nom_gms(l) or i for i, l in par_id_g.items()}
     crees_g = {i: cree_gms(l) for i, l in par_id_g.items()}
+    pages_de: Dict[str, List[str]] = {}          # id global -> ses pages d'identité
+    for pg, gl in sorted(ratt.items()):
+        pages_de.setdefault(gl, []).append(pg)
     jour = _aujourdhui()
     fixes: List[Dict[str, Any]] = []             # personne par personne, au compte GMS
     for x in sorted(actifs, key=lambda x: _cle_nom(x.get("cle"))):
@@ -2538,8 +2598,15 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
         if cfg["type"] not in TYPES_FIXE or not p.get("debut"):
             continue
         ids = sorted({str(i) for i in (ents_g.get(str(x.get("cle"))) or {}).get("ids") or []})
-        p["liens_gms"] = sorted(({"id": i, "nom": noms_g.get(i) or i} for i in ids),
+        p["liens_gms"] = sorted(({"id": i, "nom": noms_g.get(i) or i} for i in ids if i not in ratt),
                                 key=lambda l: (_cle_nom(l["nom"]), l["id"]))
+        lignes_ids = {l["id"] for l in p["liens_gms"]}
+        # ses pages d'identité, et celles dont le global n'est pas une de ses
+        # lignes aujourd'hui (global supprimé ou passé à quelqu'un d'autre) :
+        # pas comptées, mais dites sous le gain
+        p["pages_identite"] = sorted((noms_g.get(i) or i for i in ids if i in ratt), key=_cle_nom)
+        p["pages_sans_global"] = sorted((noms_g.get(i) or i for i in ids
+                                         if i in ratt and ratt[i] not in lignes_ids), key=_cle_nom)
         p["tranches_f"] = decouper(dt.date.fromisoformat(p["debut"]), dt.date.fromisoformat(p["fin"]),
                                    cfg["frequence"])
         premiers = [crees_g.get(l["id"]) or "" for l in p["liens_gms"]]
@@ -2551,11 +2618,29 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     tr_lg = _tranches_lg(_lignes_cache()) if fixes else {}
     idx_lg = _index_lg(tr_lg)
 
+    def pages_de_la_ligne(lid: str, du_q: str, au_q: str) -> List[str]:
+        """Les pages d'identité d'une ligne qui comptent sur [du_q, au_q] :
+        présentes dans GetMySocial aujourd'hui ou déjà relevées sur la
+        tranche (supprimées depuis), et pas créées après sa fin."""
+        bloc = tr_lg.get(_cle_periode(du_q, au_q))
+        rel = bloc.get("liens") if isinstance(bloc, Mapping) and isinstance(bloc.get("liens"), Mapping) else {}
+        out = []
+        for pg in pages_de.get(lid) or []:
+            if pg not in par_id_g and pg not in rel:
+                continue
+            cr = crees_g.get(pg) or cree_gms(pg)
+            if cr and cr > au_q:
+                continue
+            out.append(pg)
+        return out
+
     def etats_lignes() -> Tuple[Dict[Tuple[str, str, str], Dict[str, Any]],
                                 Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]]]:
         """({(personne, du, au): lignes de la tranche}, {(lien, du, au):
         (personne, nom, état)} des liens dont le compte sert) — une tranche
-        figée ne demande aucun relevé."""
+        figée ne demande aucun relevé. Une page d'identité à relever y est
+        sous la personne "" : son relevé ne note pas de « qui » (elle suit
+        son global, pas un nom)."""
         res: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         besoin: Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]] = {}
         for x in fixes:
@@ -2563,17 +2648,41 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
             for q in p["tranches_f"]:
                 du_q, au_q = _k_tranche(q)
                 r = _lignes_tranche(tr_lg, idx_lg, str(x["cle"]), p["liens_gms"], du_q, au_q, jour,
-                                    proprio_g, noms_g, crees_g)
+                                    proprio_g, noms_g, crees_g, pages=ratt)
                 res[(str(x["cle"]), du_q, au_q)] = r
-                if not r["fige"]:
-                    for l, st in r["sts"]:
+                if r["fige"]:
+                    continue
+                sts2 = []
+                for l, st in r["sts"]:
+                    pgs = pages_de_la_ligne(l["id"], du_q, au_q)
+                    if not pgs:
                         besoin[(l["id"], du_q, au_q)] = (str(x["cle"]), l["nom"], st)
+                        sts2.append((l, st))
+                        continue
+                    sts_p = [(pg, etat_lien(tr_lg, pg, du_q, au_q, jour, idx_lg)) for pg in pgs]
+                    st_c = _etat_avec_identites(st, [e for _pg, e in sts_p])
+                    if st_c["etat"] in ("actif", "inactif") or st.get("etat") not in ("actif", "inactif"):
+                        # tranché, ou le global d'abord
+                        besoin[(l["id"], du_q, au_q)] = (str(x["cle"]), l["nom"], st_c if st_c["etat"] in (
+                            "actif", "inactif") else st)
+                    else:
+                        # le global a un zéro confirmé : ses pages, maintenant
+                        besoin[(l["id"], du_q, au_q)] = (str(x["cle"]), l["nom"], st)
+                        for pg, e in sts_p:
+                            if e.get("etat") not in ("actif", "inactif"):
+                                besoin[(pg, du_q, au_q)] = ("", noms_g.get(pg) or pg, e)
+                    l2 = dict(l, pages=[noms_g.get(pg) or pg for pg in pgs], pages_ids=pgs)
+                    if st_c["etat"] == "actif" and st.get("etat") != "actif":
+                        # active PAR ses pages : le détail le dit
+                        l2["par_pages"] = [noms_g.get(pg) or pg for pg, e in sts_p if e.get("etat") == "actif"]
+                    sts2.append((l2, st_c))
+                r["sts"] = sts2
         return res, besoin
 
     res_lg, besoin_lg = etats_lignes()
     taches = [pr for pr, v in besoin_lg.items() if _a_relever(v[2], jour, time.time())]
     if taches:
-        _lignes_pour_la_page(taches, {pr: besoin_lg[pr][:2] for pr in taches})
+        _lignes_pour_la_page(taches, {pr: besoin_lg[pr][:2] for pr in taches if besoin_lg[pr][0]})
         tr_lg = _tranches_lg(_lignes_cache())   # relevé sur place (tests) ou déjà fait
         idx_lg = _index_lg(tr_lg)
         res_lg, besoin_lg = etats_lignes()
@@ -2585,7 +2694,19 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                 and all(s["etat"] in ("actif", "inactif") for _l, s in r["sts"])):
             gels.setdefault(_cle_periode(du_q, au_q), {})[c] = {
                 "quand": time.time(),
-                "liens": {l["id"]: {"nom": l["nom"], "actif": s["etat"] == "actif"} for l, s in r["sts"]}}
+                # les pages d'identité comptées avec la ligne sont gardées à
+                # côté d'elle (« pages ») : l'état figé est celui de l'ensemble
+                "liens": {l["id"]: dict({"nom": l["nom"], "actif": s["etat"] == "actif"},
+                                        **({"pages": list(l["pages_ids"])} if l.get("pages_ids") else {}))
+                          for l, s in r["sts"]}}
+    if gels and ratt_panne:
+        # Registre des pages d'identite illisible : elles comptent ici comme
+        # des lignes. Un gel ne se refait jamais -- le fixe en trop serait
+        # acquis pour de bon, meme registre repare. On attend qu'il reponde.
+        print(f"[infloww_liens] {sum(len(v) for v in gels.values())} ligne(s) de tranche(s) "
+              f"close(s) NON figee(s) : registre des pages d'identite illisible ({ratt_panne})",
+              flush=True)
+        gels = {}
     if gels:
         _figer_lignes(gels)
     if res_lg:
@@ -2694,6 +2815,9 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                                  "jours_periode": q["jours_periode"], "base": base, "total": len(sts),
                                  "lignes": n, "source": source, "fige": r["fige"],
                                  "sans_clic": sans_clic, "inconnus": inconnus,
+                                 # lignes actives grâce à leurs pages d'identité US
+                                 "par_pages": [f"{l['nom']} ({', '.join(l['par_pages'])})"
+                                               for l, s in sts if s["etat"] == "actif" and l.get("par_pages")],
                                  "pas_encore": [d["nom"] for d in r["pas_encore"]],
                                  "partis": r["partis"], "exclus": r["exclus"],
                                  # au centime : dans la devise, et en dollars
@@ -3489,6 +3613,10 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     if t.get("gms_sans_id"):
         h.append(f'<div class="avert">{_nb(t["gms_sans_id"])} lien(s) GetMySocial sans identifiant : '
                  "non comptés.</div>")
+    if t.get("identites_panne"):
+        h.append('<div class="avert">Registre des pages d\'identité US illisible '
+                 f'({_e(t["identites_panne"])}) : une page d\'identité y est comptée comme un lien '
+                 "ordinaire (une ligne de plus) tant qu'il ne répond pas.</div>")
     if t.get("introuvables"):
         h.append(f'<div class="avert">{_nb(t["introuvables"])} lien(s) GetMySocial sans lien de suivi '
                  f"{_e(source)} en face : la personne est affichée avec « — », pas avec un zéro "
@@ -3657,6 +3785,16 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                     f"{_nb(MYPULS_TTL_S // 60)} min au plus")
     if t.get("sans_clics"):
         note.append(f"{_nb(t['sans_clics'])} lien(s) sans nombre de clics chez {_e(source)}")
+    if t.get("identites"):
+        n = int(t["identites"])
+        s = "s" if n > 1 else ""
+        note.append(f"{_nb(n)} page{s} d'identité US comptée{s} chez la personne de son lien global "
+                    "(même lien de suivi : pas de ligne ni de sub en plus)")
+    if t.get("gabarits"):
+        g = list(t["gabarits"])
+        s = "s" if len(g) > 1 else ""
+        note.append(f"{_nb(len(g))} gabarit{s} GetMySocial hors tableau (une page de base n'est "
+                    "personne) : " + _e(", ".join(g[:8])) + ("…" if len(g) > 8 else ""))
     return note
 
 
@@ -3755,6 +3893,8 @@ def _notes_tranche(f: Mapping[str, Any]) -> List[str]:
     notes = []
     if f.get("sans_clic"):
         notes.append("Sans clic : " + ", ".join(f["sans_clic"]))
+    if f.get("par_pages"):
+        notes.append("Active par ses pages d'identité : " + ", ".join(f["par_pages"]))
     if f.get("pas_encore") and f.get("source") != "sans_lien":
         s = "s" if len(f["pas_encore"]) > 1 else ""
         notes.append(f"Pas encore créé{s} : " + ", ".join(f["pas_encore"]))
@@ -3894,6 +4034,11 @@ def etapes_calcul(p: Mapping[str, Any], tx: Optional[Mapping[str, Any]] = None, 
     saisis = _entier(cfg.get("telephones")) if typ in TYPES_FIXE else None
     if saisis and "liens_gms" in p and len(p["liens_gms"]) != saisis:
         notes_txt.append(_compte_gms([l["nom"] for l in p["liens_gms"]], saisis))
+    if typ in TYPES_FIXE and p.get("pages_sans_global"):
+        # rattachées à un global qui n'est plus une de ses lignes : leurs
+        # clics ne rendent rien actif, et ça se dit
+        notes_txt.append("Page(s) d'identité sans leur lien global, pas comptées : "
+                         + ", ".join(p["pages_sans_global"]))
     if eur and taux:
         notes_txt.append(f"1 EUR = {_dec(taux, 4)}\u00a0$ (BCE du {_jour_long(tx.get('date'))})")
 

@@ -381,6 +381,12 @@ def _gabarits(donnees, suivis_seulement: bool = False) -> list:
             if suivis_seulement and not isinstance(e.get("suivi"), dict):
                 continue
             out.append(nom)
+    if not suivis_seulement:
+        # les pages de base des liens d'identite US, ecartees du report avant
+        # tout releve (cogs/clickrecap, « gabarits_ecartes ») : hors tableau,
+        # mais toujours nommees dans le pied
+        out += [_cp.propre(n) for n in (donnees or {}).get("gabarits_ecartes") or []
+                if _cp.propre(n) not in out]
     return out
 
 

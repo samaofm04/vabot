@@ -47148,7 +47148,10 @@ def _clicrank_rangs(payload: dict) -> list:
         entrees.append({"nom": nom,
                         "clics": None if l.get("lu") is False else l.get("clicks"),
                         "abonnes": None,        # le releve gmsdash n'en porte pas
-                        "depuis": ""})
+                        "depuis": "",
+                        # une page d'identite US rejoint son lien global par
+                        # l'identifiant (clics_personnes.grouper), pas le nom
+                        "id": str(l.get("id") or "")})
         # Un lien repris d'un VA parti porte les clics de son predecesseur. La
         # date d'arrivee est le seul garde-fou, et elle est par lien.
         d = str(arrivees.get(str(l.get("id") or "")) or "")
@@ -71548,7 +71551,10 @@ def create_app():
             from cogs.welcome import US_TICKET_SUFFIXES, _us_norm, salon_de_service
             suffixes = tuple("-" + s for s in US_TICKET_SUFFIXES)
         except Exception:
-            suffixes = ("-menu", "-spoofer", "-numero-mail", "-content", "-download")
+            # meme liste que cogs.welcome.US_TICKET_SUFFIXES : un suffixe
+            # oublie ici laissait ce salon ferme au bot admin, sans un mot
+            suffixes = ("-menu", "-spoofer", "-numero-mail", "-content", "-download",
+                        "-generateur-de-lien")
 
             def _us_norm(n):
                 return str(n or "").strip().lower()

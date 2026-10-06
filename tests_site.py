@@ -11156,7 +11156,7 @@ try:
               _rSp["balai"] == (False, True), str(_rSp["balai"]))
         _srcW = _PSp("cogs/welcome.py").read_text(encoding="utf-8")
         check("spoofer : salon juste apres -menu ; /ticketsall lit la liste (plus d'expression en dur)",
-              _wlSp.US_TICKET_SUFFIXES == ("menu", "spoofer", "download", "numero-mail", "content")
+              _wlSp.US_TICKET_SUFFIXES[:5] == ("menu", "spoofer", "download", "numero-mail", "content")
               and "menu|content|numero-mail|download" not in _srcW
               and '"|".join(_re.escape(s) for s in US_TICKET_SUFFIXES)' in _srcW
               and "_ensure_spoof_panel(bot, chans[\"spoofer\"])" in _srcW)
