@@ -16950,10 +16950,13 @@ try:
           and _wG._gmsdash_definitif(None) is False)
 
     _srcG2 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    # Avec la periode demandee : sans elle, le releve « aujourd'hui » du
+    # 12/09 passait pour definitif et le tableau est reste fige au 12/09.
     check("gel : le demon ne remesure plus une quinzaine close",
-          "or _gmsdash_definitif(hit))):" in _srcG2)
+          "or _gmsdash_definitif(hit, per))):" in _srcG2)
     check("gel : la lecture sert le definitif sans relancer de calcul",
-          "or _gmsdash_definitif(hit)))" in _srcG2)
+          "definitif = courant and _gmsdash_definitif(hit, period)" in _srcG2
+          and "(age_s < _GMSDASH_TTL or definitif))" in _srcG2)
 
     # Ce que l ecran en DIT : les deux etats ne veulent pas dire la meme
     # chose, et le lecteur doit savoir lequel il a sous les yeux.
@@ -16967,18 +16970,25 @@ try:
     # ON REMPLACE LA SOURCE DU RELEVE, pas le cache global : les blocs de
     # test precedents posent leurs propres entrees sur la meme cle, et le
     # dernier ecrivain gagnait -- la carte relisait leur releve, pas le mien.
-    _vraiCacheG = _wG._clicrank_cache
+    # Ces releves portent leurs propres dates : on les declare « de la
+    # quinzaine du jour » pour lire la formule. Le cas d'un releve d'une AUTRE
+    # quinzaine (le 01/09 -> 12/09 affiche jusqu'au 06/10) est le dernier.
+    _vraiCacheG, _vraiCourG = _wG._clicrank_cache, _wG._gmsdash_courant
     try:
-        for _etat, _hitG, _attendu in (
-                ("close", _payG(_finG, _apresG), "définitifs"),
+        for _etat, _hitG, _attendu, _cour in (
+                ("close", _payG(_finG, _apresG), "définitifs", True),
                 ("en cours", _payG("2026-12-31", int(_tG.time())),
-                 "se met à jour")):
+                 "se met à jour", True),
+                ("pas la quinzaine en cours", _payG(_finG, _apresG),
+                 "pas la quinzaine en cours", False)):
             _wG._clicrank_cache = (lambda _h: (lambda _per: _h))(_hitG)
+            _wG._gmsdash_courant = (lambda _c: (lambda _h, _p: _c))(_cour)
             _hG = _wG._clicrank_carte_html()
-            check("gel : la carte dit « %s »" % _etat, _attendu in _hG,
+            check("gel : la carte dit « %s »" % _etat, _attendu in _hG
+                  and ("définitifs" not in _hG or _cour),
                   _hG[-200:] if _hG else "carte vide")
     finally:
-        _wG._clicrank_cache = _vraiCacheG
+        _wG._clicrank_cache, _wG._gmsdash_courant = _vraiCacheG, _vraiCourG
 
     from cogs import clickrecap as _crG
     _champsG = _crG._champs_classements({

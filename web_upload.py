@@ -46341,7 +46341,13 @@ def _gmsdash_links_fallback(team: str):
     except Exception:
         pass
     return GMSDASH_SEED_LINKS.get(team)
-_GMSDASH_TTL = 45 * 60          # 45 min : le démon rafraîchit toutes les 30 min
+#: Une heure. Propriétaire, 06/10/2026 : « pour les clics fais un refresh
+#: toutes les 1h, pas avant ». Un recalcul de la catégorie marché français
+#: coûte ~280 appels GetMySocial (un par lien, plus la courbe).
+_GMSDASH_TTL = 60 * 60
+#: Après un échec, on attend dix minutes avant de relancer : à 60 s, une page
+#: restée ouverte pendant une saturation relançait un calcul chaque minute.
+_GMSDASH_ECHEC_S = 10 * 60
 _GMSDASH_WARM_PERIODS = ("today", "yesterday", "7", "q1", "q2")   # pré-calculées (dont quinzaines de paie)
 _GMSDASH_LOCK = _threading_mod.Lock()
 _GMSDASH_MEM: dict = {}         # "team|period" -> {ts, payload}
@@ -46373,9 +46379,16 @@ def _gmsdash_save_disk():
 
 
 def _gmsdash_period_range(period: str):
-    """(date_debut, date_fin, libellé) pour une période du sélecteur."""
+    """(date_debut, date_fin, libellé) pour une période du sélecteur.
+
+    « Aujourd'hui » est celui de PARIS : le VPS tourne en UTC. Le 13/09 à
+    00h14 (Paris), il était encore le 12 pour lui ; le relevé « aujourd'hui »
+    a été pris sur le 12, APRÈS la fin du 12 à Paris -- donc jugé définitif
+    et plus jamais refait. Tout le tableau est resté sur le 12/09 trois
+    semaines durant.
+    """
     import datetime as _dt_p
-    today = _dt_p.date.today()
+    today = _paris_now_web().date()
     if period == "today":
         return today, today, "aujourd'hui"
     if period == "yesterday":
@@ -46410,6 +46423,10 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
     import time as _t_c
     start, end, label = _gmsdash_period_range(period)
     s_iso, e_iso = start.isoformat(), end.isoformat()
+    # L'heure du DEBUT des lectures : un calcul lance a 23h59 le 15 s'enregistre
+    # apres minuit ; date de son enregistrement, il passait pour lu apres la fin
+    # de la quinzaine -- donc definitif, sans les clics de la derniere minute.
+    debut_calcul = int(_t_c.time())
 
     def _prog(inc=0, total=None, total_add=None, stage=None):
         """Alimente la barre de progression de la page (si progress_key)."""
@@ -46593,6 +46610,7 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         except Exception:
             _avs[_m] = ""
     base = {"ok": True, "team": team, "label": label, "start": s_iso, "end": e_iso,
+            "debut_calcul": debut_calcul,
             "links": rows, "countries": countries, "model_avatars": _avs,
             "failed": failed, "partial": failed > 0}
     if store_cb and rows:
@@ -46857,7 +46875,24 @@ def _gmsdash_kick(team: str, period: str, force: bool = False) -> bool:
     return True
 
 
-def _gmsdash_definitif(hit) -> bool:
+def _gmsdash_courant(hit, period: str) -> bool:
+    """Ce releve decrit-il la periode `period` telle qu'elle est AUJOURD'HUI ?
+
+    « 7 derniers jours » releve le 12/09 et « 7 derniers jours » aujourd'hui
+    ne sont pas la meme periode. Sans cette comparaison, un releve du 12/09
+    passait pour celui du jour : du 13/09 au 06/10, le tableau a servi le 12
+    sous l'etiquette « aujourd'hui », parce qu'il etait « definitif ».
+    """
+    try:
+        pl = (hit or {}).get("payload") or {}
+        debut, fin, _lib = _gmsdash_period_range(period)
+        return (str(pl.get("start") or "") == debut.isoformat()
+                and str(pl.get("end") or "") == fin.isoformat())
+    except Exception:
+        return False
+
+
+def _gmsdash_definitif(hit, period: str = None) -> bool:
     """Ce releve porte-t-il une periode CLOSE, lue APRES sa fin ?
 
     « Quand la quinzaine est finie, elle ne bouge plus. » Une quinzaine
@@ -46870,8 +46905,14 @@ def _gmsdash_definitif(hit) -> bool:
     releve pris le 12 a 14 h decrit une quinzaine encore en cours ; le figer
     parce qu'on le regarde le 20 gelerait des chiffres incomplets. C'est
     exactement la regle de la paie (_pay_day_stats).
+
+    Avec `period`, une troisieme : le releve doit porter la periode du jour
+    (_gmsdash_courant). Une periode close qui n'est plus celle qu'on demande
+    n'est pas definitive, elle est perimee.
     """
     try:
+        if period is not None and not _gmsdash_courant(hit, period):
+            return False
         pl = (hit or {}).get("payload") or {}
         fin = str(pl.get("end") or "")
         if not fin:
@@ -46879,7 +46920,12 @@ def _gmsdash_definitif(hit) -> bool:
         fin_ts = _fin_journee_paris_ts(fin)
         if not fin_ts or time.time() < fin_ts:
             return False                      # la periode n'est pas finie
-        return int((hit or {}).get("ts") or 0) >= fin_ts
+        if pl.get("partial"):
+            return False                      # des liens non lus : rien a figer
+        lu = int((hit or {}).get("ts") or 0)
+        if pl.get("debut_calcul"):
+            lu = min(lu, int(pl.get("debut_calcul") or 0))
+        return lu >= fin_ts
     except Exception:
         return False
 
@@ -46894,34 +46940,56 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     with _GMSDASH_LOCK:
         hit = _GMSDASH_MEM.get(key)
     has = bool(hit and (hit.get("payload") or {}).get("links"))
-    # Un cache d'une ANCIENNE version de payload (déploiement) = périmé : on le
-    # sert quand même (instantané) mais on relance le calcul tout de suite au
-    # lieu d'attendre le cycle 30 min du démon.
-    fresh = (has and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
-             and ((int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
-                  or _gmsdash_definitif(hit)))
+    age_s = int(_t_g.time()) - int((hit or {}).get("ts", 0))
+    # Le relevé d'une AUTRE période (celle d'hier, d'une quinzaine passée) ou
+    # d'une ANCIENNE version de payload (déploiement) = périmé : on le sert
+    # quand même (instantané, et dit tel) mais on relance le calcul tout de
+    # suite au lieu d'attendre le démon.
+    courant = has and _gmsdash_courant(hit, period)
+    definitif = courant and _gmsdash_definitif(hit, period)
+    fresh = (courant and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
+             and (age_s < _GMSDASH_TTL or definitif))
+    # ↻ ne relit pas un relevé de moins d'une heure, ni une période close : il
+    # ne sert qu'à rattraper un relevé périmé (propriétaire : « toutes les 1h,
+    # pas avant »).
+    force = bool(force and not fresh)
     retry_in = 0
-    if force or not fresh:
+    if not fresh:
         # Cooldown après un échec : sans ça, chaque poll (2 s) relançait un calcul
         # qui re-échouait en boucle sur le 429 -> barre figée à « 0 / … » ET
-        # martèlement de l'API qui entretenait la saturation.
+        # martèlement de l'API qui entretenait la saturation. ↻ y est soumis
+        # aussi : chaque clic relançait un calcul complet sur une API saturée.
         with _GMSDASH_LOCK:
             lf = _GMSDASH_LASTFAIL.get(key)
-        if lf and not force:
-            retry_in = 60 - (int(_t_g.time()) - int(lf.get("ts", 0)))
-        if force or retry_in <= 0:
+        if lf:
+            retry_in = _GMSDASH_ECHEC_S - (int(_t_g.time()) - int(lf.get("ts", 0)))
+        if retry_in <= 0:
             retry_in = 0
             _gmsdash_kick(team, period, force=force)   # no-op si déjà en cours
     if has:
         out = dict(hit["payload"])
         out["cached_at"] = hit.get("ts")
-        out["age_min"] = int((_t_g.time() - int(hit.get("ts", 0))) // 60)
+        out["age_min"] = int(max(0, age_s) // 60)
+        out["definitif"] = bool(definitif)
+        # Quand le prochain relevé pourra partir : la page le dit sous ↻.
+        out["prochain_min"] = (0 if definitif or not fresh
+                               else (_GMSDASH_TTL - age_s + 59) // 60)
+        if retry_in > 0:
+            out["prochain_min"] = (retry_in + 59) // 60
         with _GMSDASH_LOCK:
             out["refreshing"] = key in _GMSDASH_INFLIGHT
             if out["refreshing"]:
                 _pr = dict(_GMSDASH_PROGRESS.get(key) or {})
                 _pr.pop("rows", None)
                 out["progress"] = _pr          # barre + ETA par-dessus les vieilles données
+        if not courant:
+            # Dit tel quel : c'est un relevé du 12/09 servi sous « aujourd'hui »
+            # qui a fait croire trois semaines que le tableau était à jour.
+            out["perime"] = True
+            out["label"] = "⚠ relevé du %s → %s, pas celui demandé%s" % (
+                _fr_jour_court(out.get("start")) or "?", _fr_jour_court(out.get("end")) or "?",
+                " — recalcul en cours" if out["refreshing"] or not out["prochain_min"]
+                else " — nouvel essai dans %d min" % out["prochain_min"])
         return out
     with _GMSDASH_LOCK:
         prog = dict(_GMSDASH_PROGRESS.get(key) or {})
@@ -47029,12 +47097,15 @@ def _gmsdash_warm_loop():
                         hit = _GMSDASH_MEM.get(key)
                     if (hit and (hit.get("payload") or {}).get("links")
                             and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
+                            and _gmsdash_courant(hit, per)
                             and ((_t_w.time() - int(hit.get("ts", 0)))
                                  < _GMSDASH_WARM_FENETRE_S
-                                 or _gmsdash_definitif(hit))):
-                        # Frais ET au bon format -> pas de recalcul. Ou bien
-                        # DEFINITIF : une quinzaine close ne se remesure pas,
-                        # et son quota n'a plus de raison d'etre depense.
+                                 or _gmsdash_definitif(hit, per))):
+                        # Frais, au bon format ET sur la periode du jour -> pas
+                        # de recalcul. Ou bien DEFINITIF : une quinzaine close
+                        # ne se remesure pas, et son quota n'a plus de raison
+                        # d'etre depense. Sans « periode du jour », le releve
+                        # « aujourd'hui » du 12/09 est reste fige jusqu'au 06/10.
                         continue
                     try:
                         _res_w = _gmsdash_compute(tid, per)
@@ -47052,8 +47123,10 @@ def _gmsdash_warm_loop():
         except Exception as e:
             had_fail = True
             print(f"[gmsdash-warm] crash: {e}", flush=True)
-        # Échec (IP rate-limitée) -> nouvel essai dans 3 min, sinon cycle 30 min.
-        _t_w.sleep(180 if had_fail else 30 * 60)
+        # Échec (IP rate-limitée) -> nouvel essai dans 10 min, sinon cycle 30 min.
+        # A 3 min, une saturation relancait les calculs en echec toutes les
+        # 3 min sur des cles deja refusees.
+        _t_w.sleep(_GMSDASH_ECHEC_S if had_fail else 30 * 60)
 
 
 def _start_gmsdash_warm():
@@ -47250,12 +47323,20 @@ def _render_clicrank_html() -> str:
     # quinzaine court, le classement se remesure et peut changer d'ordre ;
     # une fois close, c'est un constat qui ne bougera plus -- et c'est sur ce
     # constat-la que la paie se decide.
-    fige = _gmsdash_definitif(hit)
-    note = "%s \u00b7 clics GetMySocial \u00b7 %s" % (
-        html_escape(str(payload.get("label") or lib)),
-        ("quinzaine close \u2014 chiffres d\u00e9finitifs, ils ne bougeront plus"
-         if fige else
-         "quinzaine en cours \u2014 relev\u00e9 il y a %d min, se met \u00e0 jour tout seul" % age))
+    fige = _gmsdash_definitif(hit, per)
+    if not _gmsdash_courant(hit, per):
+        # Le releve d'une AUTRE quinzaine : jusqu'au 06/10, celui du 01/09 ->
+        # 12/09 s'affichait ici comme « chiffres definitifs ». On dit ce que c'est.
+        note = ("\u26a0 relev\u00e9 du %s \u2192 %s, pas la quinzaine en cours "
+                "\u2014 le nouveau se calcule quand le Dashboard clics est ouvert"
+                % (html_escape(_fr_jour_court(payload.get("start")) or "?"),
+                   html_escape(_fr_jour_court(payload.get("end")) or "?")))
+    else:
+        note = "%s \u00b7 clics GetMySocial \u00b7 %s" % (
+            html_escape(str(payload.get("label") or lib)),
+            ("quinzaine close \u2014 chiffres d\u00e9finitifs, ils ne bougeront plus"
+             if fige else
+             "quinzaine en cours \u2014 relev\u00e9 il y a %d min, se met \u00e0 jour tout seul" % age))
     if payload.get("partial") and not any(g["clics_non_lus"] for g in rangs):
         # Vieux relevé, d'avant le marquage par lien : on sait qu'il manque
         # des lectures, on ne sait pas lesquelles. On le dit quand meme.
@@ -47399,7 +47480,7 @@ def _render_gmsdash_html() -> str:
       <button data-k="normal" onclick="gdKind(this)">VA normaux</button>
       <button data-k="jb" onclick="gdKind(this)">🔓 Jailbreak</button>
     </div>
-    <button class="gd-sel" id="gd-refresh" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Recharger sans le cache (mise à jour des clics)">↻</button>
+    <button class="gd-sel" id="gd-refresh" style="min-width:auto;cursor:pointer" onclick="gdLoad(true)" title="Relire les clics (une fois par heure au plus)">↻</button>
     __GDKEY2__
 
   </div>
@@ -47946,6 +48027,14 @@ function gdChart(d){
     });
   }
 }
+function gdAge(m){
+  // « il y a 34 560 min » ne se lit pas : un relevé vieux de trois semaines
+  // doit sauter aux yeux.
+  if(m==null || m<1) return 'maintenant';
+  if(m<120) return 'il y a '+m+' min';
+  if(m<2880) return 'il y a '+Math.round(m/60)+' h';
+  return 'il y a '+Math.round(m/1440)+' j';
+}
 function gdRender(d){
   if(!d) return;
   var m = gdMode();
@@ -47973,11 +48062,13 @@ function gdRender(d){
     + '<div class="gd-card"><div class="lab">Meilleur lien</div><div class="val">'+gdNum(max)+'</div>'
     + '<div class="sub">'+gdEsc(links.length?(links[0].name||links[0].shortcode):'—')+'</div></div>'
     + '<div class="gd-card"><div class="lab">Mis à jour</div><div class="val" style="font-size:19px">'
-      + ((d.age_min==null || d.age_min<1) ? 'maintenant' : ('il y a '+d.age_min+' min'))
-      + '</div><div class="sub">'+(d.refreshing?'↻ mise à jour en cours…':'recalcul auto toutes les 30 min · ↻ pour forcer')+'</div></div>'
+      + gdAge(d.age_min)
+      + '</div><div class="sub">'+(d.refreshing?'↻ mise à jour en cours…'
+          : (d.definitif?'période close — chiffres définitifs'
+          : (d.prochain_min>0?('prochain relevé dans '+d.prochain_min+' min'):'relevé toutes les heures')))+'</div></div>'
     + (d.partial ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">Incomplet</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">'+d.failed+' lien(s)</div>'
-       + '<div class="sub">non lus — clique ↻</div></div>' : '')
+       + '<div class="sub">non lus — relus au prochain relevé</div></div>' : '')
     + (d.stale_api ? '<div class="gd-card" style="border-color:rgba(251,146,60,.4)"><div class="lab" style="color:#fb923c">API saturée</div>'
        + '<div class="val" style="font-size:16px;color:#fb923c">données gardées</div>'
        + '<div class="sub">dernier relevé il y a '+(d.age_min||0)+' min — réessaie ↻ dans quelques minutes</div></div>' : '');
@@ -48131,6 +48222,10 @@ def _jbanalyse_payload() -> dict:
             mem = json.loads(GMSDASH_CACHE_FILE.read_text(encoding="utf-8")) or {}
         for key, hit in mem.items():
             if not str(key).endswith("|7"):
+                continue
+            if not _gmsdash_courant(hit, "7"):
+                # les « 7 jours » d'une autre semaine : jusqu'au 06/10, ceux du
+                # 06/09 -> 12/09 passaient ici pour ceux de la semaine
                 continue
             for r in ((hit or {}).get("payload") or {}).get("links") or []:
                 m = str(r.get("model") or "").lower()
