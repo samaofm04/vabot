@@ -218,7 +218,7 @@ GMS_COPIE = DATA_DIR / "infloww_liens_gms.json"
 GMS_FRAIS_S = 3600                   # une heure (propriétaire, 06/10/2026)
 # created_at / createdAt : gardés s'ils viennent un jour (la liste v3 du 26/09
 # n'en a pas) — la date de création d'un lien GMS borne ses lignes (cree_gms)
-_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt")
+_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt", "status")
 
 
 def _url_boutons(l: Mapping[str, Any]) -> List[str]:
@@ -255,9 +255,24 @@ def _copie_gms() -> Dict[str, Any]:
     return {"t": float(d.get("t") or 0), "liens": L} if isinstance(L, list) and L else {}
 
 
+def _sans_desactives(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Les liens « inactive » sur GetMySocial (désactivés à la main : Micky,
+    TWITTER, (PAMPAM) 1 le 08/10/2026) ne sont plus affichés — demande du
+    propriétaire. Leur nombre reste dans `desactives`, que la page dit."""
+    liens = r.get("liens") or []
+    actifs = [l for l in liens if not (isinstance(l, Mapping)
+                                       and str(l.get("status") or "").lower() == "inactive")]
+    return dict(r, liens=actifs, desactives=len(liens) - len(actifs))
+
+
 def liens_gms(maintenant: Optional[float] = None) -> Dict[str, Any]:
-    """{liens, repli} de l'espace JESSY LE RETOUR. `repli` non vide = la
-    liste vient d'une copie (et dit pourquoi). Ne lève jamais."""
+    """{liens, repli, desactives} de l'espace JESSY LE RETOUR, sans les liens
+    désactivés. `repli` non vide = la liste vient d'une copie (et dit
+    pourquoi). Ne lève jamais."""
+    return _sans_desactives(_liens_gms_tous(maintenant))
+
+
+def _liens_gms_tous(maintenant: Optional[float] = None) -> Dict[str, Any]:
     maintenant = time.time() if maintenant is None else maintenant
     copie = _copie_gms()
     if copie and maintenant - copie["t"] < GMS_FRAIS_S:
@@ -1121,7 +1136,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                tronque: Optional[List[str]] = None, doublons: int = 0, depuis: str = "",
                repli_gms: str = "", erreur: str = "", us_pause: str = "",
                source: str = "Infloww", illisibles: int = 0,
-               periode: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+               periode: Optional[Mapping[str, Any]] = None, desactives: int = 0) -> Dict[str, Any]:
     """Le tableau par personne, à partir des liens normalisés d'infloww
     (_lien_norm), des liens GetMySocial de l'espace et des clics US relevés.
 
@@ -1210,6 +1225,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         "creatrice": CREATRICE, "equipe": EQUIPE_GMS, "equipe_nom": NOM_EQUIPE,
         "source": source, "periode": dict(periode or {}),
         "erreur": str(erreur or ""), "repli_gms": str(repli_gms or ""),
+        "desactives": int(desactives or 0),
         # GetMySocial a coupé pour la journée : les clics US attendent la reprise
         "us_pause": str(us_pause or ""),
         "lu_a": float(lu_a or time.time()),
@@ -1267,7 +1283,8 @@ def tableau(us: str = "page") -> Dict[str, Any]:
     return construire(i.get("liens") or [], g["liens"], us=us_depuis_cache(ents),
                       lu_a=i.get("lu_a"), tronque=i.get("tronque"), doublons=i.get("doublons") or 0,
                       depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
-                      us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "")
+                      us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "",
+                      desactives=int(g.get("desactives") or 0))
 
 
 def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
@@ -1290,7 +1307,8 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
                            # MyPuls n'a pas répondu dans le temps que la page lui laisse
                            "mypuls_en_cours": bool(m.get("en_cours"))}
     commun = dict(lu_a=m.get("lu_a"), tronque=m.get("tronque"), repli_gms=g["repli"], erreur=erreur,
-                  source="MyPuls", illisibles=int(m.get("illisibles") or 0))
+                  source="MyPuls", illisibles=int(m.get("illisibles") or 0),
+                  desactives=int(g.get("desactives") or 0))
     liens = m.get("liens") or []
     if not erreur:
         try:
@@ -3649,6 +3667,9 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     if t.get("gms_sans_id"):
         h.append(f'<div class="avert">{_nb(t["gms_sans_id"])} lien(s) GetMySocial sans identifiant : '
                  "non comptés.</div>")
+    if t.get("desactives"):
+        h.append(f'<div class="avert">{_nb(t["desactives"])} lien(s) désactivé(s) sur GetMySocial : '
+                 "non affiché(s).</div>")
     if t.get("identites_panne"):
         h.append('<div class="avert">Registre des pages d\'identité US illisible '
                  f'({_e(t["identites_panne"])}) : une page d\'identité y est comptée comme un lien '

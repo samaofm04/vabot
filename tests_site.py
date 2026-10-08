@@ -7111,6 +7111,28 @@ try:
                                         "https://onlyfans.com/emy.brw/c27", "https://instagram.com/x"]
           and _emE.url_du_lien({"url": "", "url_boutons": ["https://onlyfans.com/emy.brw/c40"]})
           == "https://onlyfans.com/emy.brw/c40")
+    # liens desactives sur GetMySocial (Micky, TWITTER, (PAMPAM) 1) : masques
+    _dsE = _ilE._sans_desactives({"liens": [{"id": "a", "status": "active"}, {"id": "b", "status": "inactive"},
+                                            {"id": "c"}], "repli": ""})
+    check("desactives : un lien « inactive » sur GetMySocial n est plus affiche, il est compte",
+          [l["id"] for l in _dsE["liens"]] == ["a", "c"] and _dsE["desactives"] == 1)
+    import json as _jsDE
+    import time as _tDE
+    import tempfile as _tfDE
+    import pathlib as _plDE
+    _savDE = _ilE.GMS_COPIE
+    _ilE.GMS_COPIE = _plDE.Path(_tfDE.mkdtemp()) / "gms.json"
+    _ilE.GMS_COPIE.write_text(_jsDE.dumps({"t": _tDE.time(), "liens": [
+        {"id": "lnk_1", "display_name": "ANDRY", "status": "active"},
+        {"id": "lnk_2", "display_name": "TWITTER", "status": "inactive"}]}))
+    _gDE = _ilE.liens_gms()
+    _ilE.GMS_COPIE = _savDE
+    check("desactives : la liste de la page (copie d une heure) les ecarte aussi",
+          [l["display_name"] for l in _gDE["liens"]] == ["ANDRY"] and _gDE["desactives"] == 1)
+    check("desactives : la copie garde le statut des liens", "status" in _ilE._CHAMPS_GMS)
+    check("desactives : la page dit seulement combien sont masques",
+          "3 lien(s) désactivé(s) sur GetMySocial : non affiché(s)"
+          in _ilE.page_html(_ilE.construire([], [], desactives=3)))
     check("profil : le lien de la page Emy porte c=emy",
           _emE.url_page().endswith("&c=emy") and "&c=" not in _ilE.url_page())
     _appE = _wE.create_app()
