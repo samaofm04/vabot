@@ -7070,6 +7070,53 @@ finally:
 
 print()
 print("=" * 70)
+print("24d) Liens Infloww : la page Emy (« fais un lien pour Emy », 08/10/2026)")
+print("=" * 70)
+try:
+    import infloww_liens as _ilE
+    import web_upload as _wE
+    _emE = _ilE.profil("emy")
+    check("profil : sans c -> Jessye (le module), « emy » -> une copie reglee sur Emy, inconnu -> None",
+          _ilE.profil("") is _ilE and _ilE.profil(None) is _ilE and _ilE.profil("zzz") is None
+          and _emE is not _ilE and _emE.CREATRICE == "emy.brw" and _emE.NOM_AFFICHE == "Emy"
+          and _ilE.CREATRICE == "jessyewdiference" and _ilE.profil("EMY") is _emE)
+    check("profil : la copie retrouve sa propre page (profil depuis la copie)",
+          _emE.profil("emy") is _emE)
+    check("profil : subs des quinzaines et lignes figees separes ; paie, cles et clics communs",
+          _emE.QUINZ_FICHIER != _ilE.QUINZ_FICHIER and _emE.LIGNES_FICHIER != _ilE.LIGNES_FICHIER
+          and _emE.PAIE_FICHIER == _ilE.PAIE_FICHIER and _emE.CLE_FICHIER == _ilE.CLE_FICHIER
+          and _emE.US_FICHIER == _ilE.US_FICHIER and _emE.US_PERIODES_FICHIER == _ilE.US_PERIODES_FICHIER)
+    check("profil : un lien de suivi Emy est compte sur la page Emy, pas sur celle de Jessye",
+          _emE.code_de_l_url("https://onlyfans.com/emy.brw/c47")[0] == "47"
+          and _ilE.code_de_l_url("https://onlyfans.com/emy.brw/c47")[0] == ""
+          and _emE.code_de_l_url("https://onlyfans.com/jessyewdiference/c47")[0] == "")
+    check("profil : trier, changer de periode, revenir du formulaire de paie restent sur Emy",
+          "c=emy" in _emE._requete_page("subs", "desc", "K", "2026-10-01", "2026-10-07")
+          and "c=emy" in _emE._adresse(("tri", "subs"), ("k", "K"))
+          and "c=" not in _ilE._requete_page("subs", "desc", "K") and "c=" not in _ilE._adresse(("k", "K"))
+          and 'name="c" value="emy"' in _emE._formulaire("", "", "nom", "asc", "K", "2026-10-08"))
+    check("profil : le lien de la page Emy porte c=emy",
+          _emE.url_page().endswith("&c=emy") and "&c=" not in _ilE.url_page())
+    _appE = _wE.create_app()
+    _appE.config["TESTING"] = True
+    _cE = _appE.test_client()
+    _savE = (_emE.acces_cle, _emE.page, _ilE.acces_cle, _ilE.page)
+    _emE.acces_cle = _ilE.acces_cle = lambda k: "page" if k == "BONNE" else ""
+    _emE.page = lambda args, cle="", paie=False, lien_perso=False: "PAGE-EMY"
+    _ilE.page = lambda args, cle="", paie=False, lien_perso=False: "PAGE-JESSYE"
+    check("route : ?c=emy -> la page Emy ; sans c -> Jessye ; profil inconnu -> 404",
+          _cE.get("/infloww/liens?k=BONNE&c=emy").get_data(as_text=True) == "PAGE-EMY"
+          and _cE.get("/infloww/liens?k=BONNE").get_data(as_text=True) == "PAGE-JESSYE"
+          and _cE.get("/infloww/liens?k=BONNE&c=zzz").status_code == 404)
+    check("route : la cle des VA reste exigee sur la page Emy",
+          _cE.get("/infloww/liens?k=FAUSSE&c=emy").status_code == 403)
+    (_emE.acces_cle, _emE.page, _ilE.acces_cle, _ilE.page) = _savE
+except Exception as _eE:
+    import traceback as _tbE
+    check("page Emy : testable", False, _tbE.format_exc()[-300:])
+
+print()
+print("=" * 70)
 print("Filtres etoile des galeries (portee + etat)")
 print("=" * 70)
 # F3 : deux defauts a l ecran, tous deux invisibles en lecture.

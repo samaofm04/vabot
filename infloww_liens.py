@@ -85,6 +85,9 @@ import clics_personnes as _cp
 
 CREATRICE = "jessyewdiference"
 NOM_AFFICHE = "Jessye"
+# Profil de la page : "" = Jessye (ce module) ; « emy » = une COPIE du module
+# réglée sur Emy (voir profil()). Il suit chaque adresse de la page (?c=).
+PROFIL = ""
 # L'espace GetMySocial « JESSY LE RETOUR », le seul compté : l'autre espace
 # des VA (EMY TWITTER) pointe vers Emy, pas vers Jessye.
 EQUIPE_GMS = "tm_6a0e4739bfa0c238f20a8bf5"
@@ -1652,7 +1655,7 @@ def _requete_page(tri: str, sens: str, cle: str, du: str = "", au: str = "") -> 
     from urllib.parse import quote
     defaut = (tri, sens) == ("nom", "asc")
     paires = (("tri", "" if defaut else tri), ("sens", "" if defaut else sens),
-              ("du", du), ("au", au), ("k", cle))
+              ("du", du), ("au", au), ("k", cle), ("c", PROFIL))
     return "?" + "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires if v)
 
 
@@ -3423,13 +3426,13 @@ def acces_cle(k: Any) -> str:
 def url_page() -> str:
     """Le lien du salon, celui des VA : la clé du salon, jamais celle du
     paiement."""
-    return f"{SITE}/infloww/liens?k={cle_page()}"
+    return f"{SITE}/infloww/liens?k={cle_page()}" + (f"&c={PROFIL}" if PROFIL else "")
 
 
 def url_paie() -> str:
     """Le lien personnel du propriétaire (page + paiement). Affiché à l'admin
     connecté seulement, jamais posté."""
-    return f"{SITE}/infloww/liens?k={cle_paie()}"
+    return f"{SITE}/infloww/liens?k={cle_paie()}" + (f"&c={PROFIL}" if PROFIL else "")
 
 
 def _e(s: Any) -> str:
@@ -3467,7 +3470,8 @@ def _adresse(*paires: Tuple[str, Any]) -> str:
     encodées (la clé vient de l'adresse : elle ne doit rien pouvoir casser),
     ordre fixe tri, sens, du, au, k. Rien du tout : « ? », la page nue."""
     from urllib.parse import quote
-    q = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires if v)
+    # le profil (« emy ») suit : trier ou changer de période reste sur Emy
+    q = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires + (("c", PROFIL),) if v)
     return _e("?" + q)
 
 
@@ -3726,7 +3730,7 @@ def _formulaire(du: str, au: str, tri: str, sens: str, cle: str, auj: str) -> st
     aussi la clé (sans elle, un VA sans compte perdait l'accès en validant)
     et le tri, plus des raccourcis en simples liens."""
     caches = "".join(f'<input type="hidden" name="{n}" value="{_e(v)}">'
-                     for n, v in (("k", cle), ("tri", tri), ("sens", sens)) if v)
+                     for n, v in (("k", cle), ("tri", tri), ("sens", sens), ("c", PROFIL)) if v)
     try:
         j = dt.date.fromisoformat(auj)
     except ValueError:
@@ -4071,7 +4075,7 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
     v = dict(PAIE_DEFAUT, **(cfg or {}))
     caches = "".join(f'<input type="hidden" name="{n}" value="{_e(val)}">'
                      for n, val in (("personne", x.get("cle")), ("k", cle), ("du", du), ("au", au),
-                                    ("tri", tri), ("sens", sens)) if val)
+                                    ("tri", tri), ("sens", sens), ("c", PROFIL)) if val)
 
     def choix(options, courant):
         return "".join(f'<option value="{_e(c)}"{" selected" if c == courant else ""}>{_e(lib)}</option>'
@@ -4478,3 +4482,48 @@ def page(args: Mapping[str, Any], cle: str = "", paie: bool = False, lien_perso:
         # la clé suit jusque dans la page de panne : le formulaire la porte
         return page_html(_vide(f"la page n'a pas pu être construite : {type(e).__name__} : {e}", per),
                          cle=cle)
+
+
+# ─── autre créatrice de l'équipe : une copie du module ───────────────────
+# Le 06/10/2026, les liens de l'équipe GMS sont passés de Jessye à Emy ; le
+# propriétaire a demandé le 08/10 « fais un lien pour Emy ». La page Jessye
+# reste (historique, paie des quinzaines d'avant). Plutôt que de faire courir
+# la créatrice à travers 4 500 lignes, le module est chargé une seconde fois
+# avec SES constantes : ses caches en mémoire, ses verrous et ses fils sont à
+# lui. Sur disque, seul ce qui dépend des codes de suivi est séparé (subs des
+# quinzaines, lignes figées : « c12 » n'est pas le même lien chez Jessye et
+# chez Emy) ; réglages de paie, clés, clics GetMySocial (par lien GMS, sans
+# créatrice) et taux de change restent communs.
+PROFILS: Dict[str, Tuple[str, str]] = {"emy": ("emy.brw", "Emy")}
+_COPIES: Dict[str, Any] = {}
+_VERROU_COPIES = threading.Lock()
+
+
+def profil(nom: Any) -> Any:
+    """Le module de la page pour `nom` : "" -> Jessye (ce module), « emy » ->
+    la copie réglée sur Emy (chargée une fois), autre chose -> None."""
+    import sys
+    nom = str(nom or "").strip().lower()
+    if not nom:
+        return sys.modules[__name__]
+    if nom == PROFIL:
+        return sys.modules[__name__]
+    if nom not in PROFILS:
+        return None
+    with _VERROU_COPIES:
+        m = _COPIES.get(nom)
+        if m is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(f"infloww_liens_{nom}", __file__)
+            m = importlib.util.module_from_spec(spec)
+            # inscrite comme tout module : profil() appelé DEPUIS la copie
+            # (sys.modules[__name__]) doit la retrouver
+            sys.modules[spec.name] = m
+            spec.loader.exec_module(m)
+            m.PROFIL = nom
+            m.CREATRICE, m.NOM_AFFICHE = PROFILS[nom]
+            m.QUINZ_FICHIER = DATA_DIR / f"infloww_liens_quinzaines_{nom}.json"
+            m.LIGNES_FICHIER = DATA_DIR / f"infloww_liens_lignes_{nom}.json"
+            m.ETAT_FICHIER = DATA_DIR / f"infloww_liens_discord_{nom}.json"
+            _COPIES[nom] = m
+    return m

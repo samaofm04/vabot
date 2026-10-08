@@ -69131,7 +69131,7 @@ def create_app():
         confond pas avec une absence de clé.
         """
         from flask import Response as _R
-        import infloww_liens as _il
+        import infloww_liens as _il_base
 
         def _entetes(r):
             r.headers["Cache-Control"] = "no-store"
@@ -69141,6 +69141,11 @@ def create_app():
             r.headers["Referrer-Policy"] = "no-referrer"
             return r
 
+        # ?c=emy : la même page pour Emy (les liens de l'équipe y sont passés
+        # le 06/10) ; sans c, Jessye comme avant
+        _il = _il_base.profil(request.args.get("c"))
+        if _il is None:
+            return _entetes(_R("Page inconnue.", status=404, mimetype="text/plain"))
         k = str(request.args.get("k") or "")
         if k:
             acces = _il.acces_cle(k)
@@ -69171,7 +69176,7 @@ def create_app():
         même à un admin. Valeurs revalidées par infloww_liens.enregistrer_paie ;
         retour 303 sur la même vue (tri, période, clé)."""
         from flask import Response as _R
-        import infloww_liens as _il
+        import infloww_liens as _il_base
 
         def _entetes(r):
             r.headers["Cache-Control"] = "no-store"
@@ -69185,6 +69190,11 @@ def create_app():
         if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
             return _entetes(_R("Envoi refusé : il ne vient pas de la page.", status=403,
                                mimetype="text/plain"))
+        # le formulaire de la page Emy porte c=emy : la paie s'enregistre
+        # pareil (réglages communs), le retour ramène sur la page Emy
+        _il = _il_base.profil(request.form.get("c"))
+        if _il is None:
+            return _entetes(_R("Page inconnue.", status=404, mimetype="text/plain"))
         k = str(request.form.get("k") or "")
         if k:
             acces = _il.acces_cle(k)
