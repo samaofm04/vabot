@@ -7095,6 +7095,22 @@ try:
           and "c=emy" in _emE._adresse(("tri", "subs"), ("k", "K"))
           and "c=" not in _ilE._requete_page("subs", "desc", "K") and "c=" not in _ilE._adresse(("k", "K"))
           and 'name="c" value="emy"' in _emE._formulaire("", "", "nom", "asc", "K", "2026-10-08"))
+    # landings « arthur template » (06/10) : l adresse est dans le bouton
+    _landE = {"id": "lnk_1", "display_name": "(ANDRY) 2", "url": None, "buttons": [
+        {"url": "https://onlyfans.com/jessyewdiference/c5"}, {"url": "https://onlyfans.com/emy.brw/c27"},
+        {"url": "https://instagram.com/x"}]}
+    check("landing : l adresse de suivi vient du bouton qui vise la creatrice de la page",
+          _emE.url_du_lien(_landE) == "https://onlyfans.com/emy.brw/c27"
+          and _ilE.url_du_lien(_landE) == "https://onlyfans.com/jessyewdiference/c5"
+          and _emE.code_de_l_url(_emE.url_du_lien(_landE))[0] == "27")
+    check("landing : un lien direct garde son adresse ; sans bouton OnlyFans, rien",
+          _emE.url_du_lien({"url": "https://onlyfans.com/emy.brw/c12"}) == "https://onlyfans.com/emy.brw/c12"
+          and _emE.url_du_lien({"url": "", "buttons": [{"url": "https://x.com/y"}]}) == "")
+    check("landing : la copie d une heure garde les adresses des boutons (et sait les relire)",
+          _emE._url_boutons(_landE) == ["https://onlyfans.com/jessyewdiference/c5",
+                                        "https://onlyfans.com/emy.brw/c27", "https://instagram.com/x"]
+          and _emE.url_du_lien({"url": "", "url_boutons": ["https://onlyfans.com/emy.brw/c40"]})
+          == "https://onlyfans.com/emy.brw/c40")
     check("profil : le lien de la page Emy porte c=emy",
           _emE.url_page().endswith("&c=emy") and "&c=" not in _ilE.url_page())
     _appE = _wE.create_app()

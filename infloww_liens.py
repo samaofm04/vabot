@@ -221,6 +221,34 @@ GMS_FRAIS_S = 3600                   # une heure (propriétaire, 06/10/2026)
 _CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt")
 
 
+def _url_boutons(l: Mapping[str, Any]) -> List[str]:
+    """Les adresses des boutons d'un lien GetMySocial (une landing n'a pas
+    d'adresse à elle : ses boutons en ont)."""
+    if isinstance(l.get("url_boutons"), list):          # copie déjà réduite
+        return [str(u) for u in l["url_boutons"] if u]
+    return [str(b.get("url")) for b in (l.get("buttons") or [])
+            if isinstance(b, Mapping) and b.get("url")]
+
+
+def url_du_lien(l: Any) -> str:
+    """L'adresse OnlyFans d'un lien GetMySocial : la sienne (lien direct),
+    sinon celle d'un de ses boutons qui vise la créatrice de la page (le
+    premier vers OnlyFans à défaut). Depuis le 06/10/2026, les liens de
+    l'équipe sont des landings « arthur template » : adresse vide, le lien de
+    suivi Emy est dans le bouton — la page sortait les 52 personnes « sans
+    adresse OnlyFans »."""
+    if not isinstance(l, Mapping):
+        return ""
+    u = str(l.get("url") or "").strip()
+    if u:
+        return u
+    boutons = [b.strip() for b in _url_boutons(l) if _URL_OF.match(b.strip())]
+    for b in boutons:
+        if _URL_OF.match(b).group(1).lower() == CREATRICE:
+            return b
+    return boutons[0] if boutons else ""
+
+
 def _copie_gms() -> Dict[str, Any]:
     d = _lire_json(GMS_COPIE)
     L = d.get("liens") if isinstance(d, dict) else None
@@ -244,7 +272,8 @@ def liens_gms(maintenant: Optional[float] = None) -> Dict[str, Any]:
         if r.get("ok") is not False and vivants:
             try:
                 safe_json.write_text(GMS_COPIE, json.dumps(
-                    {"t": maintenant, "liens": [{k: l.get(k) for k in _CHAMPS_GMS if l.get(k) is not None}
+                    {"t": maintenant, "liens": [dict({k: l.get(k) for k in _CHAMPS_GMS if l.get(k) is not None},
+                                                     url_boutons=_url_boutons(l))
                                                for l in vivants if isinstance(l, dict)]},
                     ensure_ascii=False))
             except Exception as e:
@@ -1120,7 +1149,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         introuvables: List[Dict[str, str]] = []
         for gid in e["ids"]:
             l = par_id.get(str(gid)) or {}
-            code, raison = code_de_l_url(l.get("url"))
+            code, raison = code_de_l_url(url_du_lien(l))
             glob = par_id.get(ratt.get(str(gid), ""))
             if not code and glob:
                 # Une page d'identité US est une landing : pas d'adresse à elle,
@@ -1128,7 +1157,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                 # ça, chacune sortait « sans lien de suivi », jusque dans le
                 # message Discord que les VA lisent. Même code que le global :
                 # ses subs ne comptent qu'une fois (siens, par lien Infloww).
-                code, raison = code_de_l_url(glob.get("url"))
+                code, raison = code_de_l_url(url_du_lien(glob))
             if code and not par_code.get(code):
                 raison = f"code c{code} absent des liens de suivi {_de(source)}"
             if raison:
