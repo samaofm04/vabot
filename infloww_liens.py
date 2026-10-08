@@ -3569,6 +3569,18 @@ def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
     return f'<div class="det">{"<br>".join(d)}</div>' if d else ""
 
 
+def _part_us(clics: Any, us: Any) -> str:
+    """Sous les clics du lien de suivi : leur part des clics US. Le
+    propriétaire (08/10) veut savoir « combien de personnes cliquent
+    réellement sur le lien et arrivent au bout » — cliqué sur GetMySocial,
+    arrivé sur OnlyFans. Les clics de suivi comptent tous les pays, les clics
+    US les seuls États-Unis : au-delà de 100 %, c'est du trafic d'ailleurs,
+    affiché tel quel."""
+    if clics is None or not us:
+        return ""
+    return f'<div class="det">{_dec(100 * int(clics) / int(us), 0)}\u00a0% des US</div>'
+
+
 def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri: str, sens: str,
                      cle: str, du: str = "", au: str = "", source: str = "Infloww",
                      paie: Optional[Mapping[str, Any]] = None) -> str:
@@ -3577,7 +3589,10 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     # Seulement sur la vue du propriétaire (paie non None : clé de paiement ou
     # admin) ; la vue des VA (clé du salon) n'a ni l'une ni l'autre.
     avec = paie is not None
-    cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", "Clics OF", "n"),
+    # « Clics Infloww » plutôt que « Clics OF » : le propriétaire (08/10) ne
+    # retrouvait pas les clics Infloww à côté des clics US, alors qu'ils y
+    # étaient. Sur une période, ces clics viennent de MyPuls : la colonne le dit.
+    cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", f"Clics\u00a0{_e(source)}", "n"),
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
@@ -3596,7 +3611,7 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         us_cl = "" if x.get("us_etat") == "ok" else " vieux"
         corps.append(f'<tr id="{ancre(x.get("cle"))}"><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
-                     f'<td class="n">{_nb(x.get("clics"))}</td>'
+                     f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}</td>'
                      f'<td class="n fort">{_nb(x.get("subs"))}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
@@ -3607,7 +3622,8 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         corps.append(f'<tr><td class="faible" colspan="{len(cols)}">Aucune personne.</td></tr>')
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
-            f'<td class="n">{_nb(T.get("clics"))}</td><td class="n">{_nb(T.get("subs"))}</td>'
+            f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}</td>'
+            f'<td class="n">{_nb(T.get("subs"))}</td>'
             f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
             f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
             f'</td>{_cellules_total_paie(P) if avec else ""}</tr>')
@@ -3629,7 +3645,7 @@ def _table_hors(lignes: List[Mapping[str, Any]], source: str = "Infloww") -> str
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
                      f'</td></tr>')
-    return (f'<div class="boite"><table><thead><tr><th class="nom">Lien {_e(source)}</th><th class="n">Clics OF</th>'
+    return (f'<div class="boite"><table><thead><tr><th class="nom">Lien {_e(source)}</th><th class="n">Clics\u00a0{_e(source)}</th>'
             '<th class="n">Subs</th><th class="n">CVR</th><th class="n">$\u00a0/\u00a0sub</th></tr></thead>'
             f'<tbody>{"".join(corps)}</tbody></table></div>')
 
@@ -3809,8 +3825,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 "compte à part ; une personne additionne ses liens Infloww distincts",
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours "
                 "(la mesure « Clics US » du tableau de bord et du podium), relevés une fois par jour",
-                "<b>Clics OF</b> : clics OnlyFans du lien de suivi, lus dans Infloww (pas dans MyPuls)",
-                "<b>CVR</b> = subs ÷ clics OF ; <b>$ / sub</b> = gains nets ÷ subs",
+                "<b>Clics Infloww</b> : personnes arrivées sur OnlyFans par le lien de suivi, lues dans "
+                "Infloww (pas dans MyPuls) ; dessous, leur part des clics US (arrivés au bout ÷ cliqués "
+                "sur GetMySocial — les clics Infloww comptent tous les pays)",
+                "<b>CVR</b> = subs ÷ clics Infloww ; <b>$ / sub</b> = gains nets ÷ subs",
                 "compteurs Infloww cumulés depuis la création de chaque lien, mis à jour toutes les 2 h",
                 f"lu le {_e(_heure(t.get('lu_a')))} (heure de Paris)"]
         if t.get("maj_infloww"):
@@ -3832,9 +3850,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 + (f" ({_nb(_budget_jour(len(t['lignes'])))} en tout)" if t.get("lignes") else "")
                 + ", le quota GetMySocial est partagé ; un 0 n'est affiché qu'une fois relu dans la réponse "
                 "brute de GetMySocial",
-                "<b>Clics OF</b> et <b>Subs</b> : visites et abonnés du lien de suivi sur la période, "
-                "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls)",
-                "<b>CVR</b> = subs ÷ clics OF ; <b>$ / sub</b> = gains nets que MyPuls attribue au lien "
+                "<b>Clics MyPuls</b> et <b>Subs</b> : visites et abonnés du lien de suivi sur la période, "
+                "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
+                "clics US",
+                "<b>CVR</b> = subs ÷ clics MyPuls ; <b>$ / sub</b> = gains nets que MyPuls attribue au lien "
                 "sur la période ÷ subs de la période"]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")

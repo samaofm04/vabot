@@ -28053,8 +28053,16 @@ try:
               "&lt;script&gt;x&lt;/script&gt; &amp; &#x27;Léa&#x27;" in _hP
               and "&lt;i&gt;Bo07&lt;/i&gt;" in _hP and "<i>Bo07" not in _hP)
         check("page : les colonnes demandees, et elles seules",
-              all(c in _hP for c in (">Personne", ">Clics US", ">Clics OF", ">Subs", ">CVR", "$\u00a0/\u00a0sub"))
+              all(c in _hP for c in (">Personne", ">Clics US", ">Clics\u00a0Infloww", ">Subs", ">CVR", "$\u00a0/\u00a0sub"))
               and ">Net" not in _hP and "Brut" not in _hP and "Gains" not in _hP)
+        # ANDRY, 08/10 : 395 clics US, 35 clics Infloww -> « 9 % des US » sous les 35
+        check("page : sous les clics Infloww, leur part des clics US (arrives au bout)",
+              _il._part_us(35, 395) == '<div class="det">9\u00a0% des US</div>'
+              and _il._part_us(None, 395) == "" and _il._part_us(35, 0) == ""
+              and _il._part_us(35, None) == ""
+              and _il._table_personnes([{"nom": "ANDRY", "us": 395, "clics": 35, "us_etat": "ok"}],
+                                       {"us": 395, "clics": 35}, "nom", "asc", "").count(
+                  "35" + '<div class="det">9\u00a0% des US</div>') == 2)
         check("page : sous le nom, le lien Infloww rattache, son code, et « desactive »",
               "VA 4 JB · c47" in _hP and "c85 · <span class=\"off\">désactivé</span>" in _hP
               and "« (Roucham) 1 » : lien Infloww introuvable" in _hP and "4 liens GetMySocial" in _hP)
