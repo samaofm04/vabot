@@ -47,8 +47,10 @@ ESPACE = "\u2800"
 try:
     # meme definition que le bot deploye : deux copies finiraient par diverger
     from copie_discord import bouton as BOUTON_COPIE
+    from copie_discord import IDENTIFIANT as ID_COPIE
 except Exception:
     BOUTON_COPIE = None
+    ID_COPIE = "copie"
 
 SERVEURS = ["1445108485090971710",       # YouLab TWITTER
             "1505418484052394004",       # Va IG (serveur FR) : Luigi y est, meme jeton
@@ -316,6 +318,9 @@ button:disabled{opacity:.5;cursor:default}
 .danger button{background:transparent;border:1px solid var(--rouge);color:var(--rouge);
                font-size:12px;padding:7px 13px;white-space:nowrap}
 .danger button:hover{background:var(--rouge);color:#fff}
+.outil{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.outil span{color:var(--faible);font-size:11px;line-height:1.45}
+.outil button{font-size:12px;padding:7px 13px;white-space:nowrap}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
 <p class="sous">Le message est posté par le bot du serveur (<b>Luigi</b>). Tout se passe sur ta machine — rien n'est déployé.
@@ -379,6 +384,10 @@ button:disabled{opacity:.5;cursor:default}
       <button class="envoyer" id="envoyer">Poster</button>
       <button class="gris" id="annuler" style="display:none">Nouveau message</button>
       <button class="rouge" id="supprimer" style="display:none">Supprimer</button>
+    </div>
+    <div class="outil">
+      <button class="gris" id="retirercopier">Retirer les boutons Copier</button>
+      <span>enleve le bouton sous les messages deja postes dans ce salon &mdash; le texte et les photos restent</span>
     </div>
     <div class="danger">
       <button class="rouge" id="vider">Vider ce salon</button>
@@ -851,6 +860,31 @@ E('vider').onclick = async function(){
   chargerMessages();
 };
 
+E('retirercopier').onclick = async function(){
+  var nom = E('salon').options[E('salon').selectedIndex];
+  nom = nom ? nom.textContent : '(ce salon)';
+  // premier appel : on compte seulement, comme pour Vider
+  etat('Je cherche les boutons Copier dans ' + nom + '…');
+  var q = await demander('/retirer_copier', {salon: E('salon').value});
+  if(!q.ok){ etat('✕ ' + (q.error || 'Erreur'), 'ko'); return; }
+  if(!q.compte){
+    etat('Aucun bouton Copier dans ' + nom
+         + (q.complet ? '.' : ' (sur les ' + q.lus + ' derniers messages).'), ''); return;
+  }
+  if(!confirm('Retirer le bouton Copier de ' + q.compte + ' message(s) dans ' + nom + ' ?\n\n'
+              + 'Le texte et les photos restent, rien n est efface.')) return;
+  this.disabled = true;
+  etat('Retrait en cours… environ ' + Math.ceil(q.compte * 0.8) + ' s, laisse la page ouverte.');
+  var j = await demander('/retirer_copier', {salon: E('salon').value, confirme: true});
+  this.disabled = false;
+  if(j.error && !j.retires){ etat('✕ ' + j.error, 'ko'); return; }
+  var txt = (j.retires || 0) + ' bouton(s) Copier retire(s)';
+  if(j.nb_echecs) txt += ' · ' + j.nb_echecs + ' rate(s) : ' + (j.echecs || []).join(' | ');
+  if(!j.complet) txt += ' · salon tres long : seuls les ' + j.lus + ' derniers messages ont ete lus, reclique';
+  etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
+  chargerMessages();
+};
+
 E('onglet-un').onclick  = function(){ basculer(false); };
 E('onglet-lot').onclick = function(){ basculer(true); };
 E('brut').oninput = function(){ rendreLot(); };
@@ -1021,6 +1055,8 @@ class Poste(BaseHTTPRequestHandler):
             return self._lot(d)
         if self.path == "/vider":
             return self._vider(d)
+        if self.path == "/retirer_copier":
+            return self._retirer_copier(d)
         if self.path != "/poster":
             return self._envoyer({"error": "inconnu"}, 404)
         texte = str(d.get("texte") or "")
@@ -1233,6 +1269,71 @@ class Poste(BaseHTTPRequestHandler):
         return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
                               "reste": len(msgs), "echecs": echecs[:10],
                               "arrete": tours >= 20 and bool(msgs)})
+
+    def _retirer_copier(self, d):
+        """Enlève le bouton Copier des messages déjà postés, sans toucher au reste.
+
+        Deux temps, comme Vider : sans `confirme`, on compte seulement. On
+        remonte le salon par pages de 100 : les boutons étaient posés sous
+        chaque caption depuis le début, les plus vieux messages en ont aussi.
+        Seul le bouton Copier part : un autre bouton de la même rangée reste,
+        et le texte, l'encadré, les photos ne sont pas renvoyés, donc gardés.
+        """
+        salon = str(d.get("salon") or "")
+        if not salon:
+            return self._envoyer({"ok": False, "error": "Aucun salon"})
+
+        a_nettoyer, lus, avant, complet = [], 0, None, False
+        for _ in range(50):                     # 5 000 messages au plus
+            params = {"limit": "100"}
+            if avant:
+                params["before"] = avant
+            code, msgs = api("GET", f"/channels/{salon}/messages", params=params)
+            if code != 200 or not isinstance(msgs, list):
+                if not lus:
+                    return self._envoyer({"ok": False, "error": str(
+                        (msgs or {}).get("message") or f"HTTP {code}")[:160]})
+                break                           # complet reste False : la page le dit
+            lus += len(msgs)
+            for m in msgs:
+                if not (m.get("author") or {}).get("bot"):
+                    continue
+                rangees = m.get("components") or []
+                gardees = []
+                for r in rangees:
+                    autres = [c for c in (r.get("components") or [])
+                              if c.get("custom_id") != ID_COPIE]
+                    if autres:
+                        gardees.append({**r, "components": autres})
+                if gardees != rangees:
+                    a_nettoyer.append((m["id"], gardees))
+            if len(msgs) < 100:
+                complet = True
+                break
+            avant = msgs[-1]["id"]
+            time.sleep(0.3)
+
+        if not d.get("confirme"):
+            return self._envoyer({"ok": True, "compte": len(a_nettoyer),
+                                  "lus": lus, "complet": complet})
+
+        retires, echecs = 0, []
+        for mid, gardees in a_nettoyer:
+            for _ in range(3):
+                c, rep = api("PATCH", f"/channels/{salon}/messages/{mid}",
+                             {"components": gardees})
+                if c == 429:
+                    time.sleep(float((rep or {}).get("retry_after") or 1) + 0.3)
+                    continue
+                break
+            if c == 200:
+                retires += 1
+            else:
+                echecs.append(f"{mid} : " + str((rep or {}).get("message") or f"HTTP {c}")[:80])
+            time.sleep(0.6)
+        return self._envoyer({"ok": not echecs and complet, "retires": retires,
+                              "nb_echecs": len(echecs), "echecs": echecs[:5],
+                              "lus": lus, "complet": complet})
 
     def log_message(self, *a):
         pass          # le terminal reste lisible

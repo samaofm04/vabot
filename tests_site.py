@@ -20563,6 +20563,60 @@ try:
             {"id": "1", "author": {"bot": True}, "content": "Emy 🌻"}])
         check("la liste des messages a reprendre saute les lignes vides",
               [m["id"] for m in _de.derniers("s1")] == ["3", "1"])
+
+        # retirer les boutons Copier deja poses, sans toucher au texte
+        _btnC = {"type": 2, "style": 2, "label": "Copier", "custom_id": _de.ID_COPIE}
+        _btnA = {"type": 2, "style": 1, "label": "Autre", "custom_id": "autre"}
+        _page1 = [{"id": str(500 - k), "author": {"bot": True}, "content": f"cap {k}",
+                   "components": [{"type": 1, "components": [_btnC]}]} for k in range(100)]
+        _page2 = [{"id": "9", "author": {"bot": True}, "content": "deux boutons",
+                   "components": [{"type": 1, "components": [_btnA, _btnC]}]},
+                  {"id": "8", "author": {"bot": True}, "content": "sans bouton"},
+                  {"id": "7", "author": {"bot": False}, "content": "un humain",
+                   "components": [{"type": 1, "components": [_btnC]}]}]
+        _rc = []
+
+        def _api_rc(me, ch, co=None, params=None):
+            _rc.append((me, ch, co, dict(params or {})))
+            if me == "GET":
+                return (200, _page2 if (params or {}).get("before") else _page1)
+            return (200, {"id": "x"})
+
+        _sauv_sleep2 = _de.time.sleep
+        _de.time.sleep = lambda s: None
+        try:
+            _de.api = _api_rc
+            _rc.clear(); _sorties.clear()
+            _h._retirer_copier({"salon": "s1"})
+            check("retirer Copier : sans confirmation, il compte et ne modifie rien",
+                  _sorties[-1]["compte"] == 101 and _sorties[-1]["complet"]
+                  and not any(a[0] == "PATCH" for a in _rc))
+            check("retirer Copier : il remonte le salon au-dela des 100 derniers",
+                  _sorties[-1]["lus"] == 103
+                  and any(a[3].get("before") == "401" for a in _rc))
+
+            _rc.clear(); _sorties.clear()
+            _h._retirer_copier({"salon": "s1", "confirme": True})
+            _patchs = {a[1].rsplit("/", 1)[1]: a[2] for a in _rc if a[0] == "PATCH"}
+            check("retirer Copier : chaque message a bouton est modifie, un par un",
+                  _sorties[-1]["retires"] == 101 and len(_patchs) == 101)
+            check("retirer Copier : seul le bouton Copier part, le texte n est pas renvoye",
+                  _patchs["500"] == {"components": []})
+            check("retirer Copier : un autre bouton de la meme rangee reste",
+                  _patchs["9"] == {"components": [{"type": 1, "components": [_btnA]}]})
+            check("retirer Copier : ni un message sans bouton, ni celui d un humain",
+                  "8" not in _patchs and "7" not in _patchs)
+
+            # un refus de Discord est compte et nomme, pas avale
+            _de.api = lambda me, ch, co=None, params=None: (
+                (200, _page2) if me == "GET" else (403, {"message": "Cannot edit"}))
+            _sorties.clear()
+            _h._retirer_copier({"salon": "s1", "confirme": True})
+            check("retirer Copier : un refus est compte et nomme",
+                  _sorties[-1]["ok"] is False and _sorties[-1]["nb_echecs"] == 1
+                  and "Cannot edit" in _sorties[-1]["echecs"][0])
+        finally:
+            _de.time.sleep = _sauv_sleep2
     finally:
         _de.api, _de.api_fichiers = _sauv_api2, _sauv_fic
 
@@ -20590,6 +20644,9 @@ try:
     check("la ligne vide entre chaque message est cochee par defaut",
           '<input type="checkbox" id="espace" checked>' in _srcE2
           and "espace: E('espace').checked" in _srcE2)
+    check("le bouton Retirer les boutons Copier est branche et demande confirmation",
+          'id="retirercopier"' in _srcE2 and "'/retirer_copier'" in _srcE2
+          and 'self.path == "/retirer_copier"' in _srcE2)
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 
