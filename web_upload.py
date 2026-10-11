@@ -50529,6 +50529,57 @@ def _menu_avec_equipe(page: str) -> str:
     return page[:j + 1] + _MENU_EQUIPE_BTN + page[j + 1:]
 
 
+def _menu_twitter(page: str) -> str:
+    """Ajoute, TOUT EN BAS du menu, un DOUBLON du groupe « Social Analytics »
+    appele « Twitter Analytics ».
+
+    Proprietaire (11/10/2026) : « fais un doublon de Social Analytics, en bas,
+    appelle-le Twitter Analytics, meme truc et tout ». On COPIE le groupe deja
+    rendu (avec l'entree Équipe — _menu_avec_equipe tourne AVANT) et on ne
+    change que le CONTENEUR : id du groupe, repli (toggleGroup), libelle, et
+    les id des boutons (un id ne peut pas exister deux fois dans une page). Les
+    ecrans ouverts sont les MEMES que Social Analytics ; seul le groupe passe a
+    showTab change : sans ca, cliquer en bas depliait Social Analytics en haut
+    du menu et rien ne s'allumait dans Twitter Analytics. AU RENDU, jamais dans
+    UPLOAD_HTML : le menu brut de Social Analytics est ancre par les patchs du
+    VPS.
+
+    Roles restreints : _role_gate_script ne revele que le bouton d'id
+    tab-<onglet>, donc l'original ; ce doublon reste masque pour eux.
+    """
+    if 'id="grp-twitter"' in page:
+        return page
+    i = page.find('<div class="group" id="grp-jailbreak">')
+    j = page.find("\n  </div>\n</div>", i) if i >= 0 else -1
+    if j < 0:
+        print("[twitter] groupe Social Analytics introuvable : doublon non ajoute",
+              flush=True)
+        return page
+    bloc = page[i:j + len("\n  </div>\n</div>")]
+    bloc = bloc.replace('id="grp-jailbreak"', 'id="grp-twitter"', 1)
+    bloc = bloc.replace("toggleGroup('jailbreak')", "toggleGroup('twitter')", 1)
+    bloc = bloc.replace('<span class="label">Social Analytics</span>',
+                        '<span class="label">Twitter Analytics</span>', 1)
+    # Tous les id de boutons, pas une liste : le VPS peut avoir patche ce
+    # groupe et y avoir ajoute une entree.
+    bloc = bloc.replace(' id="tab-', ' id="tw-tab-')
+    # Meme onglet, mais c'est CE groupe qui s'ouvre et CE bouton qui s'allume.
+    bloc = re.sub(r'''onclick="showTab\('jailbreak',(.*?)\)"''',
+                  r'''onclick="showTab('twitter',\1);this.classList.add('active')"''',
+                  bloc)
+    # Dernier groupe du menu. AVANT l'espaceur qui pousse Deconnexion en bas :
+    # apres lui, le groupe flottait seul contre le bouton, loin des autres.
+    ancre = '<a href="/logout" class="logout-btn">'
+    k = page.find(ancre)
+    if k < 0:
+        print("[twitter] bas du menu introuvable : doublon non ajoute", flush=True)
+        return page
+    esp = page.rfind('<div class="spacer"></div>', 0, k)
+    if esp >= 0 and not page[esp:k].replace('<div class="spacer"></div>', "").strip():
+        k = esp
+    return page[:k] + bloc + "\n\n" + page[k:]
+
+
 def _police_template_par_defaut(page: str) -> str:
     """Coche TEMPLATE_POLICE_DEFAUT dans la liste des polices de l'editeur de
     templates (#nx-m-font) au lieu de TikTokSans.
@@ -59323,7 +59374,7 @@ def _render_upload_inner(msg=None, error=None):
     html = (
         # EN PREMIER : seuls les jetons ecrits dans UPLOAD_HTML sont vises, pas
         # le contenu des galeries inserees plus bas.
-        _police_template_par_defaut(_menu_avec_equipe(_upload_html_marque()))
+        _police_template_par_defaut(_menu_twitter(_menu_avec_equipe(_upload_html_marque())))
         .replace("{theme_pre_class}", _pre)
         .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.
