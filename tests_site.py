@@ -36997,6 +36997,102 @@ except Exception as _eS:
     import traceback as _tbS
     check("types de story : testable", False, (repr(_eS) + _tbS.format_exc()[-400:])[:600])
 
+# ====================================================================
+# Twitter Analytic : copie de Social Analytics scopee au marche US
+# (Jessye). Le groupe est INJECTE AU RENDU (jamais dans UPLOAD_HTML, dont
+# le menu Social est entierement ancre par les patchs du VPS), et chaque
+# onglet ouvre le panneau force au marche US (iframe isolee).
+# ====================================================================
+try:
+    import re as _reTW
+    import shutil as _shTW
+    import subprocess as _spTW
+    import web_upload as _wTW
+    check("twitter : absent du menu brut UPLOAD_HTML (pose au rendu, hors zone patchee)",
+          "grp-twitter" not in _wTW.UPLOAD_HTML)
+    check("twitter : l injecteur de groupe au rendu existe",
+          callable(getattr(_wTW, "_menu_twitter", None)))
+    _appTW = _wTW.create_app()
+    _appTW.config["TESTING"] = True
+    _wTW._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    _cTW = _appTW.test_client()
+    with _cTW.session_transaction() as _sTW:
+        _sTW["auth"] = True
+        _sTW["username"] = "admin"
+        _sTW["role"] = "owner"
+        _sTW["legacy_owner"] = True
+    _hTW = _cTW.get("/?tab=remote").get_data(as_text=True)
+    check("twitter : le groupe est injecte au rendu, une seule fois",
+          _hTW.count('id="grp-twitter"') == 1)
+    check("twitter : Social Analytics reste intact (grp-jailbreak + Equipe)",
+          _hTW.count('<div class="group" id="grp-jailbreak">') == 1
+          and _hTW.count('id="tab-jbequipe"') == 1)
+    check("twitter : les 4 entrees ouvrent le marche Twitter (showTab 'twitter')",
+          set(_reTW.findall(r"showTab\(\s*'twitter'\s*,\s*'([a-z0-9_]+)'", _hTW))
+          == {"twjailbreak", "twanalyse", "twglobal", "twactivite"})
+    # Chaque panneau est une IFRAME isolee (pas de collision d'id avec Social)
+    _ifTW = _cTW.get("/?lazy=twanalyse&tab=twanalyse",
+                     headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    check("twitter : l onglet charge une iframe isolee vers /twitter-analytic/",
+          "twa-frame" in _ifTW and "/twitter-analytic/analyse" in _ifTW)
+    _docA = _cTW.get("/twitter-analytic/analyse").get_data(as_text=True)
+    check("twitter : Analyse vues interroge le marche US",
+          "/jbanalyse/data?marche=us" in _docA)
+    _docV = _cTW.get("/twitter-analytic/activite").get_data(as_text=True)
+    check("twitter : Activite VA interroge le marche US", "&marche=us" in _docV)
+    _docC = _cTW.get("/twitter-analytic/comptes").get_data(as_text=True)
+    check("twitter : Comptes garde la modale de lien portail VA, scope US",
+          "jb-lien-overlay" in _docC and "frag=1&marche=us" in _docC)
+    check("twitter : sous-onglet inconnu -> 404",
+          _cTW.get("/twitter-analytic/zzz").status_code == 404)
+    # Le marche force ne ramene QUE les identites US (Jessye) ; defaut inchange
+    import jailbreak as _jbTW
+    _savTW = (_wTW._marche_mod.de, _wTW._load_insta_3_stats_cache, _jbTW._load)
+    try:
+        _jbTW._load = lambda: {
+            "jessye": {"accounts": [{"username": "j1", "va": "VJ"}], "vas": [{"name": "VJ"}]},
+            "lola": {"accounts": [{"username": "l1", "va": "VL"}], "vas": [{"name": "VL"}]}}
+        _wTW._marche_mod.de = lambda i: "us" if str(i).lower() == "jessye" else "fr"
+        _wTW._load_insta_3_stats_cache = lambda: {
+            "j1": {"followers": 10, "posts_count": 1, "weekly": 5},
+            "l1": {"followers": 20, "posts_count": 1, "weekly": 7}}
+        check("twitter : Analyse globale US = la seule identite Jessye",
+              [x["identite"] for x in _wTW._jbglobal_donnees("us")["lignes"]] == ["jessye"])
+        check("twitter : Analyse vues US = la seule identite Jessye",
+              [r["name"] for r in _wTW._jbanalyse_payload("us")["idents"]] == ["jessye"])
+        check("social : marche par defaut = tout le parc (inchange)",
+              sorted(x["identite"] for x in _wTW._jbglobal_donnees("")["lignes"])
+              == ["jessye", "lola"])
+    finally:
+        (_wTW._marche_mod.de, _wTW._load_insta_3_stats_cache, _jbTW._load) = _savTW
+    # Le JS du menu injecte ET des panneaux iframe passe node --check (le JS
+    # vit dans des chaines Python : une apostrophe de trop casse tout en silence)
+    _nodeTW = _shTW.which("node")
+    if _nodeTW:
+        def _ckTW(h):
+            _b = _reTW.findall(r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", h, _reTW.S)
+            _code = [cc for a, cc in _b if "json" not in a.lower()]
+            _f = TMP / "tw_check.js"
+            _f.write_text((chr(10) + ";" + chr(10)).join(_code), encoding="utf-8")
+            return _spTW.run([_nodeTW, "--check", str(_f)],
+                             capture_output=True, text=True, timeout=90)
+        _rPg = _ckTW(_hTW)
+        check("twitter : le JS de la page (menu injecte) passe node --check",
+              _rPg.returncode == 0, (_rPg.stderr or "")[:200].replace(chr(10), " "))
+        _casTW = []
+        for _subTW in ("analyse", "activite", "global", "comptes"):
+            _rr = _ckTW(_cTW.get("/twitter-analytic/%s" % _subTW).get_data(as_text=True))
+            if _rr.returncode != 0:
+                _casTW.append("%s : %s" % (_subTW, (_rr.stderr or "")[:120]))
+        check("twitter : le JS des panneaux (iframe) passe aussi node --check",
+              not _casTW, " | ".join(_casTW))
+    else:
+        print("     (node absent : le JS Twitter Analytic n a pas ete verifie)")
+except Exception as _eTW:
+    import traceback as _tbTW
+    check("twitter analytic : testable", False,
+          (repr(_eTW) + _tbTW.format_exc()[-500:])[:700])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
