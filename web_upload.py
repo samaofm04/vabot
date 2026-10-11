@@ -50529,23 +50529,86 @@ def _menu_avec_equipe(page: str) -> str:
     return page[:j + 1] + _MENU_EQUIPE_BTN + page[j + 1:]
 
 
+#: Textes des ecrans vides de Twitter Analytics. Choisis au rendu selon la
+#: langue : les ajouter a i18n_en traduirait aussi « Vues », « Compte »… sur
+#: TOUT le site, ecrans Instagram compris.
+_TW_VIDE_TEXTES = {
+    "fr": {"compte": "Compte", "va": "VA", "statut": "Statut",
+           "abonnes": "Abonnés", "vues": "Vues", "clics": "Clics",
+           "posts": "Posts", "nom": "Nom", "role": "Rôle",
+           "aucun_compte": "Aucun compte Twitter pour l'instant",
+           "aucune_donnee": "Pas encore de données",
+           "personne": "Personne pour l'instant",
+           "rien": "Rien pour l'instant"},
+    "en": {"compte": "Account", "va": "VA", "statut": "Status",
+           "abonnes": "Followers", "vues": "Views", "clics": "Clicks",
+           "posts": "Posts", "nom": "Name", "role": "Role",
+           "aucun_compte": "No Twitter accounts yet",
+           "aucune_donnee": "No data yet",
+           "personne": "No one yet",
+           "rien": "Nothing yet"},
+}
+
+_TW_VIDE_CSS = (
+    "<style>"
+    ".twv{max-width:1100px}"
+    ".twv-tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));"
+    "gap:12px;margin-bottom:14px}"
+    ".twv-tuile,.twv-tbl{border:1px solid rgba(127,127,127,.25);border-radius:12px}"
+    ".twv-tuile{padding:14px 16px}"
+    ".twv-tuile .k{font-size:12px;opacity:.65}"
+    ".twv-tuile .v{font-size:22px;font-weight:700;margin-top:6px}"
+    ".twv-head{display:flex;gap:12px;padding:11px 16px;font-size:12px;font-weight:600;"
+    "opacity:.65;border-bottom:1px solid rgba(127,127,127,.25)}"
+    ".twv-head span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".twv-vide{padding:56px 16px;text-align:center;font-size:14px;opacity:.65}"
+    # Menu reduit : dernier groupe, son panneau s'ouvrait vers le bas et sortait
+    # de l'ecran (Team inatteignable en 1440x800). Ancre par le bas comme
+    # #grp-settings ; l'id l'emporte sur la regle generale .group:hover.
+    "html.rail .sidebar #grp-twitter:hover > .items{top:auto;bottom:-6px}"
+    "</style>"
+)
+
+
+def _tw_ecran_vide(nom: str, tx: dict) -> str:
+    """Contenu d'un ecran Twitter : la forme de l'ecran Instagram du meme nom,
+    SANS une donnee. Rien n'y lit ni n'ecrit jailbreak.json : aucun bouton,
+    aucun script, aucun chargement differe."""
+    e = lambda cle: html_escape(tx[cle])
+    def tableau(colonnes, message):
+        return ("<div class='twv-tbl'><div class='twv-head'>"
+                + "".join("<span>%s</span>" % e(c) for c in colonnes)
+                + "</div><div class='twv-vide'>%s</div></div>" % e(message))
+    if nom == "jailbreak":
+        return tableau(("compte", "va", "statut", "abonnes", "vues"), "aucun_compte")
+    if nom == "jbanalyse":
+        return ("<div class='twv-tuiles'>"
+                + "".join("<div class='twv-tuile'><div class='k'>%s</div>"
+                          "<div class='v'>—</div></div>" % e(c)
+                          for c in ("clics", "vues", "posts", "abonnes"))
+                + "</div><div class='twv-tbl'><div class='twv-vide'>%s</div></div>"
+                % e("aucune_donnee"))
+    if nom == "jbequipe":
+        return tableau(("nom", "role"), "personne")
+    return "<div class='twv-tbl'><div class='twv-vide'>%s</div></div>" % e("rien")
+
+
 def _menu_twitter(page: str) -> str:
-    """Ajoute, TOUT EN BAS du menu, un DOUBLON du groupe « Social Analytics »
-    appele « Twitter Analytics ».
+    """Ajoute, en dernier groupe du menu, « Twitter Analytics » : un DOUBLON
+    du groupe « Social Analytics » dont chaque entree ouvre un ecran VIDE.
 
     Proprietaire (11/10/2026) : « fais un doublon de Social Analytics, en bas,
-    appelle-le Twitter Analytics, meme truc et tout ». On COPIE le groupe deja
-    rendu (avec l'entree Équipe — _menu_avec_equipe tourne AVANT) et on ne
-    change que le CONTENEUR : id du groupe, repli (toggleGroup), libelle, et
-    les id des boutons (un id ne peut pas exister deux fois dans une page). Les
-    ecrans ouverts sont les MEMES que Social Analytics ; seul le groupe passe a
-    showTab change : sans ca, cliquer en bas depliait Social Analytics en haut
-    du menu et rien ne s'allumait dans Twitter Analytics. AU RENDU, jamais dans
-    UPLOAD_HTML : le menu brut de Social Analytics est ancre par les patchs du
-    VPS.
+    appelle-le Twitter Analytics », puis « qu'il soit vide, pas les comptes,
+    c'est Twitter — et ne rien supprimer sur l'autre ». On COPIE le groupe deja
+    rendu (Team comprise : _menu_avec_equipe tourne AVANT) pour en garder les
+    entrees telles que le VPS les a patchees, et chaque entree showTab('…',
+    '<onglet>') devient showTab('twitter', 'tw<onglet>') : un ecran a part,
+    pose ici, sans donnees. Social Analytics n'est pas touche — ni son menu,
+    ni ses ecrans, ni jailbreak.json. AU RENDU, jamais dans UPLOAD_HTML : le
+    menu brut de Social Analytics est ancre par les patchs du VPS.
 
-    Roles restreints : _role_gate_script ne revele que le bouton d'id
-    tab-<onglet>, donc l'original ; ce doublon reste masque pour eux.
+    Roles restreints : _role_gate_script ne revele que les onglets autorises,
+    et aucun tw<onglet> ne l'est ; ce groupe reste masque pour eux.
     """
     if 'id="grp-twitter"' in page:
         return page
@@ -50560,20 +50623,61 @@ def _menu_twitter(page: str) -> str:
     bloc = bloc.replace("toggleGroup('jailbreak')", "toggleGroup('twitter')", 1)
     bloc = bloc.replace('<span class="label">Social Analytics</span>',
                         '<span class="label">Twitter Analytics</span>', 1)
-    # Tous les id de boutons, pas une liste : le VPS peut avoir patche ce
-    # groupe et y avoir ajoute une entree.
-    bloc = bloc.replace(' id="tab-', ' id="tw-tab-')
-    # Meme onglet, mais c'est CE groupe qui s'ouvre et CE bouton qui s'allume.
-    bloc = re.sub(r'''onclick="showTab\('jailbreak',(.*?)\)"''',
-                  r'''onclick="showTab('twitter',\1);this.classList.add('active')"''',
-                  bloc)
-    # Dernier groupe du menu. AVANT l'espaceur qui pousse Deconnexion en bas :
-    # apres lui, le groupe flottait seul contre le bouton, loin des autres.
+
+    noms, ecartes = [], []
+
+    def _entree(m):
+        item = m.group(0)
+        oc = re.search(r'''onclick="showTab\('jailbreak',\s*'([A-Za-z0-9_]+)'(.*?)\)"''',
+                       item, re.S)
+        if not oc:
+            # Une entree qui n'ouvre pas un onglet (lien externe, autre
+            # fonction) menerait aux donnees Instagram : on la retire, et on
+            # le dit.
+            ecartes.append(re.sub(r"<[^>]+>|\s+", " ", item).strip()[:60])
+            return ""
+        nom, args = oc.group(1), oc.group(2)
+        args = (args.replace("Social Analytics", "Twitter Analytics")
+                    .replace("Instagram", "Twitter").replace("Insta", "Twitter"))
+        item = (item[:oc.start()]
+                + '''onclick="showTab('twitter','tw%s'%s)"''' % (nom, args)
+                + item[oc.end():])
+        if re.search(r'\sid="[^"]*"', item):
+            item = re.sub(r'\sid="[^"]*"', ' id="tab-tw%s"' % nom, item, count=1)
+        else:
+            item = item.replace(" class=", ' id="tab-tw%s" class=' % nom, 1)
+        noms.append(nom)
+        return item
+
+    bloc = re.sub(r'<(button|a)\b[^>]*\bclass="item\b[^"]*"[^>]*>.*?</\1>',
+                  _entree, bloc, flags=re.S)
+    if ecartes:
+        print("[twitter] %d entree(s) sans onglet retiree(s) du doublon : %s"
+              % (len(ecartes), " | ".join(ecartes)), flush=True)
+    if not noms:
+        print("[twitter] aucune entree a dupliquer : doublon non ajoute", flush=True)
+        return page
+
+    # Les ecrans : a cote des autres form-section, dans .main. Sans eux,
+    # showTab fabriquerait une section a chargement differe qui irait
+    # demander /?lazy=tw… au serveur, qui ne le connait pas.
+    m0 = page.find('<div class="main">')
+    s0 = page.find('<div class="form-section"', m0) if m0 >= 0 else -1
     ancre = '<a href="/logout" class="logout-btn">'
     k = page.find(ancre)
-    if k < 0:
-        print("[twitter] bas du menu introuvable : doublon non ajoute", flush=True)
+    if s0 < 0 or k < 0 or k > s0:
+        print("[twitter] ecrans ou bas du menu introuvables : doublon non ajoute",
+              flush=True)
         return page
+    tx = _TW_VIDE_TEXTES.get(_langue_courante(), _TW_VIDE_TEXTES["en"])
+    ecrans = _TW_VIDE_CSS + "".join(
+        '<div class="form-section" id="form-tw%s" style="display:none">'
+        '<div class="twv">%s</div></div>\n' % (nom, _tw_ecran_vide(nom, tx))
+        for nom in noms)
+    page = page[:s0] + ecrans + page[s0:]
+
+    # Dernier groupe du menu. AVANT l'espaceur qui pousse Deconnexion en bas :
+    # apres lui, le groupe flottait seul contre le bouton, loin des autres.
     esp = page.rfind('<div class="spacer"></div>', 0, k)
     if esp >= 0 and not page[esp:k].replace('<div class="spacer"></div>', "").strip():
         k = esp
