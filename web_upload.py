@@ -61666,6 +61666,9 @@ def create_app():
         # en pause ou un conteneur en quarantaine — ça pilote des téléphones.
         # Jamais un rôle restreint, même s'il a l'onglet en lecture.
         "/parc/",
+        # Coffre d'adresses Outlook du propriétaire (adresses + mots de passe +
+        # secret 2FA). Jamais un rôle restreint : ces comptes sont à lui seul.
+        "/outlook/",
     )
 
     def _live_role() -> str:
@@ -61745,6 +61748,9 @@ def create_app():
         # assets par extension avant d'arriver ici — d'où le .js obligatoire
         # dans le nom de cette route.
         "/parc/",
+        # Coffre d'adresses Outlook : la page /outlook montre les adresses du
+        # propriétaire. Réservée aux accès complets (pas de mapping d'onglet).
+        "/outlook",
     )
     # Prefixe de lecture -> onglet (showTab) qui le sert. Un rôle restreint à qui
     # on a EXPLICITEMENT accordé cet onglet peut lire ses données ; les autres
@@ -69207,6 +69213,159 @@ def create_app():
         if not ok:
             return _entetes(_R(_il.page_refus_paie(pourquoi, retour), status=400, mimetype="text/html"))
         return _entetes(redirect(retour, code=303))
+
+    # ==================================================================
+    # Coffre d'adresses Outlook du proprietaire (admin seulement).
+    # Une page À PART, comme /infloww : rien d'autre du site n'en depend.
+    # Le secret 2FA (le « code a 13 chiffres ») et le mot de passe sont
+    # MASQUES ici ; le secret ne sort jamais, le mot de passe ne se voit
+    # que dans le ticket du VA (cogs/outlook.py). Aucun JavaScript sur la
+    # page : des formulaires HTML simples, donc rien a casser cote script.
+    # ==================================================================
+    _OUTLOOK_CSS = (
+        ":root{color-scheme:dark}*{box-sizing:border-box}"
+        "body{margin:0;background:#0f1115;color:#e6e8eb;"
+        "font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:24px}"
+        ".wrap{max-width:900px;margin:0 auto}"
+        "h1{font-size:22px;margin:0 0 4px}"
+        ".sub{color:#8b93a1;margin:0 0 20px;font-size:13px}"
+        ".card{background:#171a21;border:1px solid #242934;border-radius:12px;"
+        "padding:18px;margin-bottom:20px}"
+        ".card h2{font-size:15px;margin:0 0 12px;color:#cdd3dc}"
+        "form.ajout{display:flex;flex-wrap:wrap;gap:10px}"
+        "form.ajout input{flex:1 1 180px;background:#0f1115;border:1px solid #2b3240;"
+        "color:#e6e8eb;border-radius:8px;padding:9px 11px;font-size:14px}"
+        "button{background:#3b82f6;border:0;color:#fff;border-radius:8px;"
+        "padding:9px 16px;font-size:14px;cursor:pointer}"
+        "form.del button{background:#7f1d1d}"
+        "table{width:100%;border-collapse:collapse;font-size:13px}"
+        "th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #242934}"
+        "th{color:#8b93a1;font-weight:600;font-size:12px;text-transform:uppercase}"
+        "td.mail{font-family:ui-monospace,Menlo,monospace}"
+        "td.masq{color:#5b6472;letter-spacing:2px}"
+        ".badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px}"
+        ".badge.libre{background:#14321f;color:#4ade80}"
+        ".badge.pris{background:#2a2333;color:#c4b5fd}"
+        ".vide{color:#5b6472;text-align:center;padding:18px}"
+        ".err{background:#3b1113;border:1px solid #7f1d1d;color:#fca5a5;"
+        "padding:10px 12px;border-radius:8px;margin:0 0 14px}"
+        ".note{color:#8b93a1;font-size:12px;margin-top:10px}"
+    )
+
+    def _outlook_page_html(liste, erreur=""):
+        """Rend la page du coffre. Seed ET mot de passe MASQUES (jamais dans le
+        HTML) ; les valeurs dynamiques sont echappees (html.escape)."""
+        import html as _h
+        import outlook_comptes as _oc
+        rangs = []
+        for c in liste:
+            attrib = (c.get("statut") or "libre") == "attribue"
+            badge = ("<span class='badge pris'>attribuée</span>" if attrib
+                     else "<span class='badge libre'>libre</span>")
+            va = _h.escape(c.get("va") or "—") if attrib else "—"
+            quand = _h.escape(c.get("attribue_le") or "—") if attrib else "—"
+            rangs.append(
+                "<tr><td class='mail'>" + _h.escape(c.get("email") or "") + "</td>"
+                "<td>" + badge + "</td>"
+                "<td>" + va + "</td>"
+                "<td>" + quand + "</td>"
+                "<td class='masq'>" + _oc.MASQUE + "</td>"
+                "<td class='masq'>" + _oc.MASQUE + "</td>"
+                "<td><form method='post' action='/outlook/supprimer' class='del'>"
+                "<input type='hidden' name='id' value='" + _h.escape(str(c.get("id") or "")) + "'>"
+                "<button type='submit'>Supprimer</button></form></td></tr>"
+            )
+        corps = "".join(rangs) or ("<tr><td colspan='7' class='vide'>Aucune "
+                                   "adresse pour le moment.</td></tr>")
+        err = ("<p class='err'>" + _h.escape(erreur) + "</p>") if erreur else ""
+        libres = _oc.nb_libres()
+        return (
+            "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<meta name='robots' content='noindex,nofollow'>"
+            "<title>Adresses Outlook</title><style>" + _OUTLOOK_CSS + "</style>"
+            "</head><body><div class='wrap'>"
+            "<h1>\U0001F4E7 Adresses Outlook</h1>"
+            "<p class='sub'>Tes comptes Outlook. Un VA en demande un dans "
+            "#adresse-outlook&nbsp;; le manager valide&nbsp;; le bot envoie "
+            "l'adresse et le mot de passe dans son ticket. Le code 2FA se tire "
+            "dans Discord, le secret 2FA ne sort jamais.</p>"
+            "<div class='card'><h2>Ajouter une adresse</h2>" + err +
+            # autocomplete='off' partout (et type='password' / spellcheck='false'
+            # sur les secrets) : sans ca le navigateur proposait de retenir le mot
+            # de passe Outlook du proprietaire et le secret 2FA dans son profil —
+            # justement ce que le coffre cote serveur doit eviter. Meme reglage
+            # que le coffre des comptes IG de ce fichier.
+            "<form class='ajout' method='post' action='/outlook/add' autocomplete='off'>"
+            "<input name='email' type='email' placeholder='adresse@outlook.com' autocomplete='off' required>"
+            "<input name='password' type='password' placeholder='mot de passe' autocomplete='off' required>"
+            "<input name='seed' type='text' placeholder='secret 2FA (base32)' autocomplete='off' spellcheck='false' required>"
+            "<button type='submit'>Ajouter</button></form>"
+            "<p class='note'>Le secret 2FA (le « code à 13 chiffres"
+            " ») est vérifié puis masqué : il ne sert "
+            "qu'à calculer le code du moment, côté serveur.</p></div>"
+            "<div class='card'><h2>Comptes (" + str(libres) + " libre(s) sur " +
+            str(len(liste)) + ")</h2>"
+            "<table><thead><tr><th>Adresse</th><th>Statut</th><th>VA</th>"
+            "<th>Attribuée le</th><th>Secret 2FA</th><th>Mot de passe</th>"
+            "<th></th></tr></thead><tbody>" + corps + "</tbody></table></div>"
+            "</div></body></html>"
+        )
+
+    def _outlook_entetes(r):
+        r.headers["Cache-Control"] = "no-store"
+        r.headers["X-Robots-Tag"] = "noindex, nofollow"
+        r.headers["Referrer-Policy"] = "no-referrer"
+        return r
+
+    @app.route("/outlook")
+    def outlook_page():
+        """Le coffre d'adresses Outlook : formulaire + tableau. Admin seulement
+        (auth ET acces complet) : ce sont les comptes du proprietaire."""
+        from flask import Response as _R
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _outlook_entetes(_R("Réservé à l'administration.",
+                                       status=403, mimetype="text/plain"))
+        import outlook_comptes as _oc
+        return _outlook_entetes(_R(_outlook_page_html(_oc.comptes()), mimetype="text/html"))
+
+    @app.route("/outlook/add", methods=["POST"])
+    def outlook_add():
+        """Ajoute un compte. Admin seulement. Le seed DOIT etre un base32
+        valide (sinon le code 2FA serait faux) : refuse et re-affiche l'erreur
+        SUR la page, rien n'est enregistre. Ecriture atomique (safe_json)."""
+        from flask import Response as _R
+        if not (is_auth() and _is_admin()):
+            return _outlook_entetes(_R("Réservé à l'administration.",
+                                       status=403, mimetype="text/plain"))
+        # Un formulaire forge sur un autre site n'emporte pas la session (cookie
+        # SameSite=Lax) ; un navigateur recent dit en plus d'ou vient l'envoi.
+        if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return _outlook_entetes(_R("Envoi refusé : il ne vient pas de la page.",
+                                       status=403, mimetype="text/plain"))
+        import outlook_comptes as _oc
+        ok, res = _oc.ajouter(request.form.get("email"), request.form.get("password"),
+                              request.form.get("seed"))
+        if not ok:
+            return _outlook_entetes(_R(_outlook_page_html(_oc.comptes(), erreur=res),
+                                       status=400, mimetype="text/html"))
+        return _outlook_entetes(redirect("/outlook", code=303))
+
+    @app.route("/outlook/supprimer", methods=["POST"])
+    def outlook_supprimer():
+        """Supprime un compte par id. Admin seulement. Ecriture atomique."""
+        from flask import Response as _R
+        if not (is_auth() and _is_admin()):
+            return _outlook_entetes(_R("Réservé à l'administration.",
+                                       status=403, mimetype="text/plain"))
+        if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return _outlook_entetes(_R("Envoi refusé : il ne vient pas de la page.",
+                                       status=403, mimetype="text/plain"))
+        import outlook_comptes as _oc
+        _oc.supprimer(request.form.get("id"))
+        return _outlook_entetes(redirect("/outlook", code=303))
 
     @app.route("/version")
     def version_du_site():

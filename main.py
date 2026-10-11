@@ -60,7 +60,11 @@ ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # principal : celui-ci declare deja 101 commandes pour un
               # plafond Discord de 100, une de plus ferait echouer la
               # synchronisation de tout son arbre. Ici il reste 22 places.
-              "menutest"]
+              "menutest",
+              # Coffre d'adresses Outlook (salon #adresse-outlook de Va IG) :
+              # ZERO commande slash, QUE des boutons. Sur le bot ADMIN comme
+              # numeros : c'est lui qui voit les salons VA de Va IG.
+              "outlook"]
 
 logging.basicConfig(
     level=logging.INFO,
