@@ -20518,6 +20518,51 @@ try:
                                     "b64": _b64.b64encode(b"x" * (10 * 1024 * 1024)).decode()}}]})
         check("une photo de plus de 9 Mo est refusee AVANT l envoi, et dite",
               not _envois and "9 Mo" in _sorties[-1]["echecs"][0]["erreur"])
+
+        # une ligne vide entre chaque nom, a la place du bouton Copier
+        _sauv_sleep = _de.time.sleep
+        _de.time.sleep = lambda s: None
+        try:
+            _envois.clear(); _sorties.clear()
+            _h._lot({"salon": "s1", "espace": True,
+                     "messages": ["Emy 🌻", "Emy 🎀", "Emy ❤️"]})
+            _contenus = [e[2].get("content") for e in _envois]
+            check("une ligne vide entre chaque message, pas avant le premier",
+                  _contenus == ["Emy 🌻", _de.ESPACE, "Emy 🎀", _de.ESPACE, "Emy ❤️"])
+            check("le texte copie reste le nom seul, sans caractere invisible",
+                  all(_de.ESPACE not in (c or "") for c in _contenus[::2]))
+            check("les lignes vides ne comptent pas comme des messages postes",
+                  _sorties[-1]["envoyes"] == 3 and _sorties[-1]["espaces_rates"] == 0)
+            check("sans case cochee, aucun bouton Copier",
+                  not any("components" in e[2] for e in _envois))
+
+            # deuxieme tranche : elle s ouvre sur une ligne vide, sinon le
+            # dernier de la tranche precedente et le premier se colleraient
+            _envois.clear(); _sorties.clear()
+            _h._lot({"salon": "s1", "espace": True, "depart": 25,
+                     "messages": ["Emy 🌙"]})
+            check("une tranche suivante commence par la ligne vide",
+                  [e[2].get("content") for e in _envois] == [_de.ESPACE, "Emy 🌙"])
+
+            # une ligne vide refusee est comptee, pas avalee
+            _de.api = lambda me, ch, co=None, pa=None: (
+                _envois.append(("json", ch, co))
+                or ((400, {"message": "vide"}) if co.get("content") == _de.ESPACE
+                    else (200, {"id": "1"})))
+            _envois.clear(); _sorties.clear()
+            _h._lot({"salon": "s1", "espace": True, "messages": ["a", "b"]})
+            check("une ligne vide refusee est comptee et le message part quand meme",
+                  _sorties[-1]["espaces_rates"] == 1 and _sorties[-1]["envoyes"] == 2)
+        finally:
+            _de.time.sleep = _sauv_sleep
+
+        # les lignes vides ne polluent pas la liste des messages a reprendre
+        _de.api = lambda me, ch, co=None, params=None: (200, [
+            {"id": "3", "author": {"bot": True}, "content": "Emy 🎀"},
+            {"id": "2", "author": {"bot": True}, "content": _de.ESPACE},
+            {"id": "1", "author": {"bot": True}, "content": "Emy 🌻"}])
+        check("la liste des messages a reprendre saute les lignes vides",
+              [m["id"] for m in _de.derniers("s1")] == ["3", "1"])
     finally:
         _de.api, _de.api_fichiers = _sauv_api2, _sauv_fic
 
@@ -20540,6 +20585,11 @@ try:
           _srcE2.count("if(!confirm(") >= 2 and "sera vide" in _srcE2)
     check("le bouton Vider est separe des autres boutons",
           'class="danger"' in _srcE2 and 'id="vider"' in _srcE2)
+    check("le bouton Copier n est plus pose par defaut",
+          '<input type="checkbox" id="copier">' in _srcE2)
+    check("la ligne vide entre chaque message est cochee par defaut",
+          '<input type="checkbox" id="espace" checked>' in _srcE2
+          and "espace: E('espace').checked" in _srcE2)
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 

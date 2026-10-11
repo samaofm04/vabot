@@ -38,6 +38,9 @@ PORT = 8787
 MAX_TEXTE = 2000            # limite Discord d'un message
 MAX_EMBED = 4096            # limite Discord d'une description d'encadré
 COULEUR_DEFAUT = 0x5865F2
+# Le blanc braille : Discord refuse un message vide ou fait d'espaces, pas
+# celui-là. Posté seul entre deux messages, il fait une ligne vide.
+ESPACE = "\u2800"
 
 # Les serveurs de l'agence. Repris de verif_discord.py ; on les met en dur
 # pour que cet outil marche même lancé hors du dépôt.
@@ -227,6 +230,10 @@ def derniers(salon: str, combien: int = 15):
     for m in rep:
         if not ((m.get("author") or {}).get("bot")):
             continue
+        # sans ça, la liste des messages à reprendre se remplissait de lignes vides
+        if (m.get("content") or "").strip() == ESPACE and not m.get("embeds") \
+                and not m.get("attachments"):
+            continue
         e = (m.get("embeds") or [{}])[0] if m.get("embeds") else {}
         out.append({"id": str(m.get("id")),
                     "date": str(m.get("timestamp") or "")[:16].replace("T", " "),
@@ -361,7 +368,9 @@ button:disabled{opacity:.5;cursor:default}
         <div style="margin-top:7px"><button type="button" id="dossier" class="lien">ou choisir un dossier entier</button></div></div>
       <input type="file" id="fichierslot" accept="image/*,video/*" multiple style="display:none">
       <input type="file" id="fichiersdoss" webkitdirectory directory multiple style="display:none">
-      <label class="case"><input type="checkbox" id="copier" checked>
+      <label class="case"><input type="checkbox" id="espace" checked>
+        <span>Laisser une <b>ligne vide</b> entre chaque message</span></label>
+      <label class="case"><input type="checkbox" id="copier">
         <span>Poser un bouton <b>Copier</b> sous chaque message</span></label>
       <div class="liste-bouts" id="bouts"></div>
     </div>
@@ -627,7 +636,9 @@ function rendreLot(recalculer){
   var avecPhoto = lot.filter(function(x){ return x.photo; }).length;
   var trop = lot.filter(function(x){ return x.texte.length > 2000; }).length;
   var lourdes = photos.filter(function(p){ return p.octets > 9 * 1024 * 1024; });
-  var secondes = Math.ceil(lot.length * 1.1 + avecPhoto * 0.4);
+  // chaque ligne vide est un message de plus, avec sa seconde d attente
+  var secondes = Math.ceil(lot.length * 1.1 + avecPhoto * 0.4
+                           + (E('espace').checked ? (lot.length - 1) * 1.1 : 0));
   var txt = lot.length + ' message' + (lot.length > 1 ? 's' : '');
   if(avecTexte){
     var m = E('sep').value === 'auto' ? detecter(E('brut').value) : E('sep').value;
@@ -751,11 +762,12 @@ async function envoyerLot(bouton){
               + (nbPhotos ? ' (dont ' + nbPhotos + ' avec photo)' : '')
               + ', un par un, dans ce salon ?')) return;
   bouton.disabled = true;
-  var paquets = tranches(lot), envoyes = 0, echecs = [], fait = 0;
+  var paquets = tranches(lot), envoyes = 0, echecs = [], fait = 0, espacesRates = 0;
   for(var t = 0; t < paquets.length; t++){
     etat('Envoi… ' + fait + ' / ' + lot.length + ' — laisse la page ouverte.');
     var j = await demander('/poster_lot', {
-      salon: E('salon').value, copier: E('copier').checked, depart: fait,
+      salon: E('salon').value, copier: E('copier').checked,
+      espace: E('espace').checked, depart: fait,
       messages: paquets[t].map(function(it){
         return {texte: it.texte,
                 image: it.photo ? {nom: it.photo.nom, b64: it.photo.b64} : null};
@@ -766,6 +778,7 @@ async function envoyerLot(bouton){
       bouton.disabled = false; chargerMessages(); return;
     }
     envoyes += (j.envoyes || 0);
+    espacesRates += (j.espaces_rates || 0);
     echecs = echecs.concat(j.echecs || []);
     fait += paquets[t].length;
   }
@@ -774,7 +787,13 @@ async function envoyerLot(bouton){
     // on nomme les rates : le reste est parti, il ne faut surtout pas tout reposter
     etat('⚠ ' + envoyes + ' / ' + lot.length + ' postes. Rates : '
          + echecs.slice(0, 8).map(function(x){ return '#' + x.n + ' (' + x.erreur + ')'; }).join(' · ')
-         + (echecs.length > 8 ? ' · et ' + (echecs.length - 8) + ' autre(s)' : ''), 'ko');
+         + (echecs.length > 8 ? ' · et ' + (echecs.length - 8) + ' autre(s)' : '')
+         + (espacesRates ? ' · ' + espacesRates + ' ligne(s) vide(s) refusee(s)' : ''), 'ko');
+  } else if(espacesRates){
+    // les messages sont tous partis : on vide quand meme, mais on dit le trou
+    etat('✓ ' + envoyes + ' messages postes · ⚠ ' + espacesRates
+         + ' ligne(s) vide(s) refusee(s) par Discord : certains se suivent sans espace.', 'ko');
+    E('brut').value = ''; photos = []; rendreLot();
   } else {
     etat('✓ ' + envoyes + ' messages postes.', 'ok');
     E('brut').value = ''; photos = []; rendreLot();
@@ -926,6 +945,7 @@ async function deposer(ev, versLot){
   if(versLot) ajouterLot(fichiers); else ajouter(fichiers);
 }
 E('sepperso').oninput = function(){ rendreLot(); };
+E('espace').onchange = function(){ rendreLot(); };
 E('sep').onchange = function(){
   E('sepperso').disabled = this.value !== 'perso';
   rendreLot();
@@ -1083,13 +1103,27 @@ class Poste(BaseHTTPRequestHandler):
             return self._envoyer({"ok": False,
                                   "error": f"{len(elements)} messages : trop d'un coup "
                                            "(300 au maximum). Coupe le collage en deux."})
+        espace = bool(d.get("espace"))
         copier = bool(d.get("copier")) and BOUTON_COPIE is not None
         if d.get("copier") and BOUTON_COPIE is None:
             return self._envoyer({"ok": False,
                                   "error": "copie_discord.py est introuvable : "
                                            "pas de bouton Copier possible."})
 
-        envoyes, echecs = 0, []
+        def poster(corps, fichier):
+            for _ in range(3):
+                if fichier:
+                    code, rep = api_fichiers("POST", f"/channels/{salon}/messages",
+                                             corps, fichier)
+                else:
+                    code, rep = api("POST", f"/channels/{salon}/messages", corps)
+                if code == 429:
+                    time.sleep(float(rep.get("retry_after") or 1) + 0.3)
+                    continue
+                break
+            return code, rep
+
+        envoyes, echecs, espaces_rates = 0, [], 0
         for i, (texte, image) in enumerate(elements):
             n = depart + i + 1
             apercu = texte[:60] or (str((image or {}).get("nom") or "")[:60])
@@ -1118,16 +1152,17 @@ class Poste(BaseHTTPRequestHandler):
             if fichier:
                 corps["attachments"] = [{"id": 0, "filename": fichier[0][0]}]
 
-            for essai in range(3):
-                if fichier:
-                    code, rep = api_fichiers("POST", f"/channels/{salon}/messages",
-                                             corps, fichier)
-                else:
-                    code, rep = api("POST", f"/channels/{salon}/messages", corps)
-                if code == 429:
-                    time.sleep(float(rep.get("retry_after") or 1) + 0.3)
-                    continue
-                break
+            # La ligne vide est un message À PART, jamais collée au texte : un VA
+            # qui fait « Copier le texte » sur un nom doit avoir le nom seul,
+            # pas un caractère invisible qui suivrait dans le pseudo du compte.
+            # Pas avant le tout premier du collage (depart compte les tranches).
+            if espace and depart + i > 0:
+                c_esp, _ = poster({"content": ESPACE}, None)
+                if c_esp != 200:
+                    espaces_rates += 1
+                time.sleep(1.0)
+
+            code, rep = poster(corps, fichier)
             if code == 200:
                 envoyes += 1
             else:
@@ -1136,7 +1171,8 @@ class Poste(BaseHTTPRequestHandler):
             # une photo met plus longtemps à monter : on laisse respirer davantage
             time.sleep(1.3 if fichier else 1.0)
         return self._envoyer({"ok": not echecs, "envoyes": envoyes,
-                              "total": len(elements), "echecs": echecs})
+                              "total": len(elements), "echecs": echecs,
+                              "espaces_rates": espaces_rates})
 
     def _vider(self, d):
         """Efface les messages d'un salon — en deux temps, jamais à l'aveugle.
