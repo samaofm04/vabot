@@ -39664,33 +39664,6 @@ def _render_jailbreak_html() -> str:
     # HTML produit -- voir _jb_option_discord, et pourquoi pas ici.
     identities, all_accounts, stats = _jb_dc_filtrer(identities, all_accounts, stats)
 
-    # Marche force (Twitter Analytic) : on restreint le panneau Comptes a un
-    # seul marche, AVANT tout calcul, pour que compteurs et sections ne portent
-    # que les identites visees. Pose par le ContextVar (voir _JB_MARCHE), car le
-    # decorateur appelle ce rendu sans argument. Sans marche -> rien ne change
-    # (Social Analytics intact). jb.list_all()/jb.stats() relisant le fichier,
-    # on filtre la copie locale sans jamais toucher au referentiel.
-    _m_forced = (_JB_MARCHE.get() or "").strip().lower()
-    if _m_forced in ("fr", "us"):
-        _garde = {str(i).lower() for i in identities
-                  if _marche_mod.de(i) == _m_forced}
-        identities = [i for i in identities if str(i).lower() in _garde]
-        # list_all() = {identite: entree} ; stats() = agregats GLOBAUX (non
-        # indexes par identite) : on les RECALCULE sur la copie reduite, sinon
-        # l'en-tete compterait tout le parc.
-        if isinstance(all_accounts, dict):
-            all_accounts = {k: v for k, v in all_accounts.items()
-                            if str(k).lower() in _garde}
-            _ta = _ia = _tv = 0
-            for _e in all_accounts.values():
-                _ac = (_e.get("accounts") if isinstance(_e, dict) else _e) or []
-                _ta += len(_ac)
-                if _ac:
-                    _ia += 1
-                _tv += len((_e.get("vas") if isinstance(_e, dict) else None) or [])
-            stats = {"total_accounts": _ta, "identities_with_accounts": _ia,
-                     "total_vas": _tv}
-
     # Accountability : on charge UNE fois les données d'activité, puis on compte
     # par (identité, VA) — surtout PAS par VA global : un même VA peut gérer des
     # comptes sous plusieurs identités (ex. 11 sous lola + 11 sous amelia), et la
@@ -39758,15 +39731,12 @@ def _render_jailbreak_html() -> str:
         return {"actif": n_actif, "ban": n_ban, "silent": n_silent,
                 "mois": n_mois, "fail": n_fail}
 
-    # Header. Le titre suit le marche force : dans le groupe « Twitter Analytic »
-    # (marche impose par ContextVar), afficher « Social Analytics » preterait a
-    # confusion -- on reprend donc le nom du groupe. Sans marche, rien ne change.
-    _titre_panneau = "📊 Twitter Analytic" if _m_forced in ("fr", "us") else "📊 Social Analytics"
+    # Header
     header = (
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
         "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
-        + _titre_panneau +
+        "📊 Social Analytics"
         "<span style='font-size:11px;background:var(--ui-accent);color:var(--ui-on-accent);padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>COMPTES MANUELS</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Les comptes Instagram par identité — pas d'automation, juste un référentiel sécurisé.</p>"
         "</div>"
@@ -42392,17 +42362,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    _html_jb = (css + header + datalist_html + toolbar + body + add_va_modal
-                + edit_va_modal + lien_va_modal + bulk_modal + create_id_modal
-                + edit_id_modal + modal + js)
-    # Comptes Twitter (marche force) : le rafraichissement doux doit rester
-    # scope. On ajoute &marche=<m> a SON url de refresh -- lue par la branche
-    # frag (?tab=jailbreak). Sans marche -> aucune modification (Social intact).
-    if _m_forced in ("fr", "us"):
-        _html_jb = _html_jb.replace(
-            "fetch('/?tab=jailbreak&frag=1'",
-            "fetch('/?tab=jailbreak&frag=1&marche=%s'" % _m_forced)
-    return _html_jb
+    return css + header + datalist_html + toolbar + body + add_va_modal + edit_va_modal + lien_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -43342,13 +43302,6 @@ def _noms_discord(uids, profils=None) -> dict:
 #: filtre a cache. ContextVar : chaque requete Flask a le sien, meme quand
 #: deux pages se rendent en meme temps dans deux fils.
 _JB_DC_ETAT = _cv_dc.ContextVar("jb_dc_etat", default=None)
-
-#: Marche force pour CE rendu du panneau Comptes (Social Analytics -> aucun ;
-#: Twitter Analytic -> "us", c.-a-d. la seule identite US du referentiel
-#: jailbreak, Jessye). Meme idiome que _JB_DC_ETAT : un ContextVar pose autour
-#: de l'appel au producteur, car le decorateur _jb_option_discord appelle le
-#: rendu SANS argument -- on ne peut donc pas passer le marche en parametre.
-_JB_MARCHE = _cv_dc.ContextVar("jb_marche", default="")
 
 
 def _jb_dc_comptes(entree) -> tuple:
@@ -48171,14 +48124,10 @@ setTimeout(function(){
     return css + body.replace("__GDKEY2__", key2_html).replace("__GDOPTS__", _opts)
 
 
-def _jbanalyse_payload(marche: str = "") -> dict:
+def _jbanalyse_payload() -> dict:
     """Onglet « Analyse vues » : agrège les vues Insta des comptes JB par
     identité et par VA. 100 % local (jailbreak.json + cache de scrape) — aucun
-    appel réseau, la fraîcheur = celle du scrape auto (00h/12h) ou manuel.
-
-    marche = "us"/"fr" : n'agrège que les identités de ce marché (Twitter
-    Analytic). Défaut vide -> tout le parc (Social Analytics inchangé)."""
-    _m = (marche or "").strip().lower()
+    appel réseau, la fraîcheur = celle du scrape auto (00h/12h) ou manuel."""
     import datetime as _dt_a
     import time as _t_a
     try:
@@ -48220,8 +48169,6 @@ def _jbanalyse_payload(marche: str = "") -> dict:
     cov = 0            # comptes actifs déjà re-scrapés AVEC post_days (couverture courbe)
     newest_scrape = 0
     for ident, entry in (data or {}).items():
-        if _m in ("fr", "us") and _marche_mod.de(ident) != _m:
-            continue
         for a in ((entry or {}).get("accounts") or []):
             # Même normalisation que le scrape (_all_tracked_handles) : un
             # username collé avec un caractère parasite doit matcher le cache.
@@ -48307,11 +48254,7 @@ def _jbanalyse_payload(marche: str = "") -> dict:
     fhist: dict = {}
     fh_first: dict = {}
     try:
-        # Historique PAR MARCHE quand on est filtre : sinon un rendu US
-        # ecraserait l'instantane du parc complet (idents absents => faux
-        # « nouveaux abonnes »). Defaut = le fichier historique du parc entier.
-        _hfile = DATA_DIR / (f"jbanalyse_history_{_m}.json" if _m in ("fr", "us")
-                             else "jbanalyse_history.json")
+        _hfile = DATA_DIR / "jbanalyse_history.json"
         try:
             fhist = json.loads(_hfile.read_text(encoding="utf-8")) or {}
         except Exception:
@@ -48368,7 +48311,7 @@ def _jbanalyse_payload(marche: str = "") -> dict:
 # ANALYSE GLOBALE : les totaux du parc, et qui pese quoi
 # ==============================================================================
 
-def _jbglobal_donnees(marche: str = "") -> dict:
+def _jbglobal_donnees() -> dict:
     """Ce qu'on sait du parc, agrege par identite.
 
     TOUT VIENT DU CACHE DE SCRAPE, donc d'une mesure, jamais d'une saisie. Un
@@ -48379,13 +48322,8 @@ def _jbglobal_donnees(marche: str = "") -> dict:
     import jailbreak as _jb_g
     cache = _load_insta_3_stats_cache() or {}
     ref = _jb_g._load() or {}
-    # Marche force (Twitter Analytic) : on ne garde que les identites du marche
-    # vise. Defaut vide -> tout le parc (Social Analytics inchange).
-    _m = (marche or "").strip().lower()
     lignes, vus = [], set()
     for ident in sorted(ref):
-        if _m in ("fr", "us") and _marche_mod.de(ident) != _m:
-            continue
         entree = ref.get(ident)
         comptes = entree.get("accounts") if isinstance(entree, dict) else entree
         n_comptes = n_mesures = n_bannis = n_verif = 0
@@ -48442,14 +48380,10 @@ def _jbglobal_donnees(marche: str = "") -> dict:
             "total_vues7": sum(x["vues7"] for x in lignes)}
 
 
-def _render_jbglobal_html(marche: str = "") -> str:
-    """Les totaux du parc et le comparatif par identite.
-
-    marche = "us"/"fr" : restreint au marche vise (Twitter Analytic). Panneau
-    100 % rendu serveur, sans <script> ni id -- aucune collision possible avec
-    sa version non filtree."""
+def _render_jbglobal_html() -> str:
+    """Les totaux du parc et le comparatif par identite."""
     import html as _hG
-    d = _jbglobal_donnees(marche)
+    d = _jbglobal_donnees()
     e = _hG.escape
 
     def _n(v):
@@ -48557,7 +48491,7 @@ body.light.claude .gl-k,body.light.claude .gl-tab{background:var(--c-surface)!im
 </style>"""
 
 
-def _render_jbanalyse_html(marche: str = "") -> str:
+def _render_jbanalyse_html() -> str:
     """Page « Analyse vues Instagram » : cartes de totaux, pilules par identité
     (avatar) / par VA, courbe 14 jours (vues par jour de publication) et tableau.
     Les données viennent de /jbanalyse/data (local, instantané)."""
@@ -49514,13 +49448,6 @@ function jaLoad(force){
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ jaLoad(0); }); } else { jaLoad(0); }
 </script>
 """
-    # Marche force (Twitter Analytic) : seule l'URL des DONNEES change ; le
-    # panneau reste identique (il est isole dans son iframe, donc aucun suffixe
-    # d'id n'est necessaire). Defaut vide -> fetch inchange (Social Analytics).
-    _m = (marche or "").strip().lower()
-    if _m in ("fr", "us"):
-        body = body.replace("fetch('/jbanalyse/data')",
-                            "fetch('/jbanalyse/data?marche=%s')" % _m)
     return css + body
 
 
@@ -49613,7 +49540,7 @@ def _vaact_days(period: str):
     return days, lab, payable, today
 
 
-def _vaact_payload(period: str = "14", marche: str = "") -> dict:
+def _vaact_payload(period: str = "14") -> dict:
     """Assiduité des VA jailbreak. Règles :
     - 1 reel / 48 h PAR COMPTE (en règle le jour J si reel le J ou J-1) ;
     - 1 oubli max par VA et par JOUR (même si plusieurs comptes ratés) ;
@@ -49638,14 +49565,9 @@ def _vaact_payload(period: str = "14", marche: str = "") -> dict:
     days, lab, payable, today = _vaact_days(period)
     day_iso = [d.isoformat() for d in days]
 
-    # Marche force (Twitter Analytic) : seules les identites de ce marche
-    # comptent. Defaut vide -> tout le parc (Social Analytics inchange).
-    _m = (marche or "").strip().lower()
     vas: dict = {}
     for ident, entry in (data or {}).items():
         if not isinstance(entry, dict):
-            continue
-        if _m in ("fr", "us") and _marche_mod.de(ident) != _m:
             continue
         for a in (entry.get("accounts") or []):
             va = str(a.get("va") or "").strip()
@@ -49876,7 +49798,7 @@ def _vaact_payload(period: str = "14", marche: str = "") -> dict:
                     "rebuild_days": rebuild_days, "expired": n_expired}}
 
 
-def _render_jbactivite_html(marche: str = "") -> str:
+def _render_jbactivite_html() -> str:
     """Page « Activité VA » (jailbreak) : heatmap d'assiduité 1 reel/48 h,
     warm-up, jours de repos, retenues sur paie. Données locales (cache scrape)."""
     css = """
@@ -50127,14 +50049,6 @@ function avLoad(){
 if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ avLoad(); }); } else { avLoad(); }
 </script>
 """
-    # Marche force (Twitter Analytic) : on ajoute &marche=<m> a l'URL des
-    # donnees. Panneau isole dans son iframe -> pas de suffixe d'id. Defaut
-    # vide -> fetch inchange (Social Analytics intact).
-    _m = (marche or "").strip().lower()
-    if _m in ("fr", "us"):
-        body = body.replace(
-            "fetch('/jbactivite/data?period=' + encodeURIComponent(window.__avPeriod))",
-            "fetch('/jbactivite/data?period=' + encodeURIComponent(window.__avPeriod) + '&marche=%s')" % _m)
     return css + body
 
 
@@ -50613,166 +50527,6 @@ def _menu_avec_equipe(page: str) -> str:
               "entree Equipe non ajoutee", flush=True)
         return page
     return page[:j + 1] + _MENU_EQUIPE_BTN + page[j + 1:]
-
-
-#: Groupe « Twitter Analytic » : une COPIE de Social Analytics dont les donnees
-#: sont celles du marche US (la seule identite jailbreak US = Jessye). Mêmes
-#: 4 entrees, memes panneaux -- mais chaque panneau est rendu DANS UNE IFRAME
-#: (document isole) scopee US, ce qui evite toute collision d'id/fonction avec
-#: les panneaux Social Analytics (qui partagent les memes ids). Les VA de Jessye
-#: ajoutent leurs comptes et voient leurs analytics par le portail /mes-comptes,
-#: deja expose dans le panneau Comptes.
-#:
-#: Pas d'apostrophe droite dans les arguments de showTab (elle fermerait la
-#: chaine JS de l'onclick) -> aucun des libelles n'en contient.
-_MENU_TWITTER_GROUP = """<div class="group" id="grp-twitter">
-  <button class="group-head" onclick="toggleGroup('twitter')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-    <span class="label">📊 Twitter Analytic</span>
-    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-  </button>
-  <div class="items">
-    <button class="item" id="tab-twjailbreak" onclick="showTab('twitter','twjailbreak','Twitter Analytic — Comptes par identité','Les comptes du marché US (Jessye) et le lien portail par VA')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Comptes par identité
-    </button>
-    <button class="item" id="tab-twanalyse" onclick="showTab('twitter','twanalyse','Twitter Analytic — Analyse vues','Vues des comptes du marché US (Jessye)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-      Analyse vues
-    </button>
-    <button class="item" id="tab-twglobal" onclick="showTab('twitter','twglobal','Twitter Analytic — Analyse globale','Les totaux du marché US (Jessye)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-      Analyse globale
-    </button>
-    <button class="item" id="tab-twactivite" onclick="showTab('twitter','twactivite','Twitter Analytic — Activité VA','Assiduité des VA du marché US (Jessye)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
-      Activité VA
-    </button>
-  </div>
-</div>"""
-
-
-def _menu_twitter(page: str) -> str:
-    """Injecte le groupe « 📊 Twitter Analytic » APRES grp-jailbreak2.
-
-    AU RENDU, jamais dans le menu brut de UPLOAD_HTML : le groupe Social
-    Analytics (grp-jailbreak) est entierement ancre par les patchs du VPS (voir
-    _menu_avec_equipe). On s'ancre donc sur la FERMETURE de grp-jailbreak2, hors
-    zone patchee. Idempotent ; ancre absente -> on le dit au journal au lieu de
-    perdre le groupe en silence."""
-    if 'id="grp-twitter"' in page:
-        return page
-    i = page.find('<div class="group" id="grp-jailbreak2">')
-    j = page.find("\n</div>", i) if i >= 0 else -1
-    if j < 0:
-        print("[twitter] groupe grp-jailbreak2 introuvable dans le menu : "
-              "groupe Twitter Analytic non ajoute", flush=True)
-        return page
-    k = j + len("\n</div>")
-    return page[:k] + "\n" + _MENU_TWITTER_GROUP + page[k:]
-
-
-#: La feuille de style de tete de la page principale (palette --c-*, variables
-#: de theme --ui-*, et TOUTES les regles .jb-/.gl-/.ja-/.av- avec leurs variantes
-#: par theme). L'iframe Twitter Analytic DOIT la porter : les panneaux reutilises
-#: appellent var(--ui-accent) & co. SANS repli, et leurs regles de theme clair
-#: sont calees sur la classe COMPLETE (body.light.claude .gl-k...). Sans cette
-#: feuille, le rendu reel montrait des boutons transparents et, en theme clair,
-#: des cartes noires (sombre sur noir). Calculee une fois ; suit UPLOAD_HTML
-#: s'il est recharge (test, rechargement a chaud).
-_TW_BASE_CSS = {"src": None, "css": ""}
-
-
-def _tw_panel_base_css() -> str:
-    src = _upload_html_marque()
-    if _TW_BASE_CSS["src"] is not src:
-        try:
-            # Le PREMIER <style> de UPLOAD_HTML = la feuille de tete. {marques_css}
-            # y est deja resolu par _upload_html_marque ; aucun autre jeton ne s'y
-            # trouve (verifie), donc le .replace du document ne la percute pas.
-            _TW_BASE_CSS["css"] = src.split("<style>", 1)[1].split("</style>", 1)[0]
-        except Exception:
-            _TW_BASE_CSS["css"] = ""
-        _TW_BASE_CSS["src"] = src
-    return _TW_BASE_CSS["css"]
-
-
-#: Document complet servi DANS chaque iframe Twitter Analytic. {base_css},
-#: {html_cls}, {body_cls} et {inner} sont poses par str.replace (jamais .format :
-#: les panneaux ET le socle portent des accolades CSS).
-#:
-#: - {base_css} : la feuille de tete (variables de theme + regles des panneaux).
-#: - {html_cls}/{body_cls} : la classe de theme COMPLETE (ex. « light claude »),
-#:   pas seulement « light » -- sinon les regles body.light.claude ... ne
-#:   matchent pas et le panneau reste sombre.
-#: - surcouche : on ANNULE le min-height:100vh du socle. En mode auto-hauteur, le
-#:   corps ne descendrait jamais sous la hauteur de l'iframe et la mesure
-#:   s'emballerait (l'iframe grandit de 6 px a chaque tic). On ne force PAS le
-#:   fond : les regles de theme peignent le corps comme sur la page.
-#:
-#: Le script de pied poste sa hauteur au parent (une hauteur, pas de donnee) :
-#: il ne sert qu'aux iframes marquees auto-hauteur (voir _tw_iframe_fragment).
-_TWITTER_PANEL_DOC = (
-    "<!doctype html><html lang='fr' class='{html_cls}'><head><meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-    "<base target='_parent'>"
-    "<style>{base_css}</style>"
-    "<style>html,body{min-height:0!important}"
-    "body{margin:0;padding:6px 16px 18px}*{box-sizing:border-box}</style></head>"
-    "<body class='{body_cls}'>{inner}"
-    "<script>(function(){"
-    "function h(){try{return Math.max(document.documentElement.scrollHeight,"
-    "document.body?document.body.scrollHeight:0);}catch(e){return 0;}}"
-    "function send(){try{parent.postMessage({__twa:'h',height:h()},'*');}catch(e){}}"
-    "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',send);}else{send();}"
-    "window.addEventListener('load',send);"
-    "try{new ResizeObserver(send).observe(document.documentElement);}catch(e){}"
-    "setInterval(send,1500);})();</script></body></html>"
-)
-
-
-def _tw_iframe_fragment(sub: str, titre: str, autosize: bool = False) -> str:
-    """Fragment paresseux d'un onglet Twitter Analytic : une IFRAME vers
-    /twitter-analytic/<sub>. Le document distant est ISOLE (son propre espace
-    global + son propre espace d'id), donc aucune collision avec les panneaux
-    Social Analytics, qui emploient les memes ids/fonctions (ja-/av-/jb-...).
-
-    Deux modes de hauteur, et c'est VOULU :
-    - autosize=True (Analyse globale, SANS modale) : l'iframe epouse la hauteur
-      du contenu via postMessage -- pas de cadre vide sous un panneau court.
-    - autosize=False (Comptes, Analyse vues, Activite) : ces panneaux portent des
-      modales position:fixed. Dans une iframe auto-hauteur, « fixed » se cale sur
-      la hauteur TOTALE du panneau (p. ex. 2000 px), pas sur la fenetre : la boite
-      de dialogue s'ouvrait a mi-panneau, hors ecran (rendu reel : « Ajouter un
-      VA » ouvrait un voile sombre sans dialogue visible). On borne donc l'iframe
-      a la fenetre avec defilement interne -> « fixed » retombe sur la zone
-      visible et la modale se centre."""
-    import html as _h
-    _as = "1" if autosize else "0"
-    if autosize:
-        _sz = "height:260px"          # grandit ensuite par postMessage
-        _scroll = "no"
-    else:
-        # Bornee a la fenetre (le parent defile peu : l'iframe tient a l'ecran),
-        # defilement interne. min-height : un petit ecran garde une modale centree.
-        _sz = "height:calc(100vh - 150px);min-height:480px"
-        _scroll = "auto"
-    return (
-        "<div class='twa-host' style='padding:0;margin:0'>"
-        "<iframe class='twa-frame' data-autosize='" + _as + "' "
-        "src='/twitter-analytic/" + _h.escape(sub, quote=True) + "' "
-        "title='" + _h.escape(titre, quote=True) + "' scrolling='" + _scroll + "' loading='lazy' "
-        "style='width:100%;border:0;display:block;" + _sz + ";background:transparent'>"
-        "</iframe></div>"
-        "<script>(function(){if(window.__twaResize)return;window.__twaResize=1;"
-        "window.addEventListener('message',function(ev){"
-        "var d=ev&&ev.data;if(!d||d.__twa!=='h')return;"
-        "var fr=document.querySelectorAll('iframe.twa-frame');"
-        "for(var i=0;i<fr.length;i++){"
-        "if(fr[i].getAttribute('data-autosize')==='1'&&fr[i].contentWindow===ev.source){"
-        "fr[i].style.height=(Math.max(200,(d.height|0))+6)+'px';break;}}"
-        "});})();</script>"
-    )
 
 
 def _police_template_par_defaut(page: str) -> str:
@@ -58396,18 +58150,6 @@ ROLE_MENU_STRUCTURE = [
         # _ADMIN_ONLY_WRITE) ; un rôle qui a la case voit l'onglet en lecture.
         {"key": "jbequipe", "name": "Social Analytics — Équipe (noms et rôles)", "perms": ["view", "edit"]},
     ]},
-    {"section": "Twitter Analytic", "items": [
-        # Copie de Social Analytics scopée au marché US (Jessye). Même modèle de
-        # droits que les cases IG ci-dessus : owner/admin voient tout ; un rôle
-        # restreint (le groupe VA) ne voit le groupe que si la case est cochée.
-        # Clé == nom d'onglet réel (showTab) -> rien à ajouter dans
-        # _PERM_KEY_TO_TABS. Les écritures du panneau Comptes passent par
-        # /jailbreak/* (identité jessye), déjà dans le garde POST.
-        {"key": "twjailbreak", "name": "Twitter Analytic — Comptes par identité", "perms": ["view", "edit"]},
-        {"key": "twanalyse", "name": "Twitter Analytic — Analyse vues", "perms": ["view"]},
-        {"key": "twglobal", "name": "Twitter Analytic — Analyse globale", "perms": ["view"]},
-        {"key": "twactivite", "name": "Twitter Analytic — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
-    ]},
     {"section": "Finances", "items": [
         # « Dépenses » ne correspondait à AUCUNE page : la case ne faisait rien.
         {"key": "facture", "name": "Facture (compta mensuelle)", "perms": ["view", "edit"]},
@@ -59443,44 +59185,6 @@ a,button{{padding:11px 18px;border-radius:8px;font-weight:600;cursor:pointer;tex
 </div></body></html>"""
 
 
-def _theme_classes(th: str):
-    """(classe du <html> pre-paint, classe du <body>) pour un cookie va_theme.
-
-    UN SEUL endroit decide la correspondance cookie -> classes de theme : la
-    page principale ET l'iframe Twitter Analytic doivent peindre EXACTEMENT le
-    meme theme. Deux tables separees = deux rendus (l'iframe repartait en
-    sombre quel que soit le theme choisi) -- le defaut du projet « quand deux
-    endroits decident la meme chose, les fusionner ».
-
-    LES TABLES CI-DESSOUS DOIVENT CONNAITRE TOUS LES THEMES. « infloww »
-    manquait autrefois : le serveur retombait sur « light » et envoyait
-    <body class="light"> -> ecran BLANC repeint ensuite en JS (« fond qui
-    devient blanc au rechargement »). Un theme ajoute cote client et oublie ici
-    repeint donc la page a l'envers. Retires du selecteur mais gardes dans la
-    feuille de style (obsidian/violet/gold) : un cookie qui les porte encore
-    bascule sur SOMBRE, pas sur le defaut clair."""
-    # Nom de variable _th CONSERVE a dessein : un test reconnait le defaut
-    # serveur dans la source a la ligne marquee plus bas. Le renommer cassait ce
-    # reperage (donc la verification serveur==navigateur), jamais le rendu.
-    _th = (th or "").strip().lower()
-    if _th in ("obsidian", "violet", "gold"):
-        _th = "dark"
-    if _th not in ("light", "apple", "claude", "dark", "infloww", "inflowwlight"):
-        # LE DEFAUT SUIT LE SELECTEUR : « clair » n'y est plus. Il doit valoir
-        # celui des deux scripts du navigateur, sinon le serveur peint une page
-        # et le JavaScript une autre.
-        _th = "inflowwlight"   # defaut du site
-    pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
-           "claude": "light-pre pre-claude",
-           "inflowwlight": "light-pre pre-inflowwlight",
-           "dark": "", "infloww": "pre-infloww"}[_th]
-    bod = {"light": "light", "apple": "light apple",
-           "claude": "light claude", "dark": "",
-           "inflowwlight": "light inflowwlight",
-           "infloww": "infloww"}[_th]
-    return pre, bod
-
-
 def _render_upload_inner(msg=None, error=None):
     # Si appelé sans msg, lire depuis session (flash)
     try:
@@ -59586,14 +59290,40 @@ def _render_upload_inner(msg=None, error=None):
         _th = (_rq.cookies.get("va_theme") or "").strip().lower()
     except Exception:
         _th = ""
-    # Table unique cookie -> classes (voir _theme_classes) : l'iframe Twitter
-    # Analytic s'en sert aussi, pour peindre le meme theme.
-    _pre, _bod = _theme_classes(_th)
+    # LES TROIS TABLES CI-DESSOUS DOIVENT CONNAITRE TOUS LES THEMES.
+    #
+    # « infloww » manquait a la liste des noms acceptes : le serveur retombait
+    # donc sur « light » et envoyait la page avec <body class="light">. Le
+    # navigateur peignait un ecran BLANC -- cartes blanches comprises -- puis
+    # le JavaScript remettait le bon theme apres coup. D'ou un fond qui
+    # « devient blanc de temps en temps au rechargement » : ca depend de ce
+    # qu'on regarde, avant ou apres que le script ait tourne.
+    #
+    # Un theme ajoute cote client et oublie ici repeint donc toute la page a
+    # l'envers. Un test refuse desormais que les deux listes divergent.
+    # Retires du selecteur, gardes dans la feuille de style : un cookie qui
+    # les porte encore bascule sur SOMBRE, pas sur le defaut clair.
+    if _th in ("obsidian", "violet", "gold"):
+        _th = "dark"
+    if _th not in ("light", "apple", "claude", "dark", "infloww", "inflowwlight"):
+        # LE DEFAUT A SUIVI LE SELECTEUR. « clair » n'y est plus : le laisser
+        # comme defaut donnait la seule apparence que personne ne peut plus
+        # choisir. Il doit valoir celui des deux scripts du navigateur, sinon
+        # le serveur peint une page et le JavaScript une autre.
+        _th = "inflowwlight"   # defaut du site
+    _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
+            "claude": "light-pre pre-claude",
+            "inflowwlight": "light-pre pre-inflowwlight",
+            "dark": "", "infloww": "pre-infloww"}[_th]
+    _bod = {"light": "light", "apple": "light apple",
+            "claude": "light claude", "dark": "",
+            "inflowwlight": "light inflowwlight",
+            "infloww": "infloww"}[_th]
 
     html = (
         # EN PREMIER : seuls les jetons ecrits dans UPLOAD_HTML sont vises, pas
         # le contenu des galeries inserees plus bas.
-        _police_template_par_defaut(_menu_twitter(_menu_avec_equipe(_upload_html_marque())))
+        _police_template_par_defaut(_menu_avec_equipe(_upload_html_marque()))
         .replace("{theme_pre_class}", _pre)
         .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.
@@ -62450,16 +62180,6 @@ def create_app():
                     return ("", 200)
             if _tab == "jailbreak":
                 try:
-                    # Rafraichissement doux du panneau Comptes. marche=us/fr :
-                    # vient du Comptes Twitter (son URL de refresh le porte),
-                    # pour que le soft-refresh reste scope au bon marche.
-                    _mkj = (request.args.get("marche") or "").strip().lower()
-                    if _mkj in ("fr", "us"):
-                        _jkj = _JB_MARCHE.set(_mkj)
-                        try:
-                            return (_render_jailbreak_html(portee="all"), 200)
-                        finally:
-                            _JB_MARCHE.reset(_jkj)
                     return (_render_jailbreak_html(), 200)
                 except Exception:
                     return ("", 200)
@@ -62504,20 +62224,6 @@ def create_app():
                 # Équipe : son script s'arme sur #eq-root sans attendre
                 # DOMContentLoaded -> réinjectable tel quel.
                 "jbequipe": _render_jbequipe_html,
-                # Twitter Analytic : mêmes 4 panneaux, mais chacun dans une
-                # IFRAME scopée US (/twitter-analytic/<sub>) -> isolation totale
-                # des ids/fonctions partagés avec Social Analytics. Le fragment
-                # n'est qu'une coquille <iframe> + un ajusteur de hauteur.
-                "twjailbreak": lambda: _tw_iframe_fragment(
-                    "comptes", "Twitter Analytic — Comptes par identité"),
-                "twanalyse": lambda: _tw_iframe_fragment(
-                    "analyse", "Twitter Analytic — Analyse vues"),
-                # Analyse globale : pas de modale -> auto-hauteur (pas de cadre
-                # vide sous un panneau court, surtout avec une seule identite US).
-                "twglobal": lambda: _tw_iframe_fragment(
-                    "global", "Twitter Analytic — Analyse globale", autosize=True),
-                "twactivite": lambda: _tw_iframe_fragment(
-                    "activite", "Twitter Analytic — Activité VA"),
                 "facture": _render_facture_html,
                 # Remote 2 : la coquille est inerte sans /parc/app.js, donc
                 # ré-injectable telle quelle par le chargeur paresseux (le JS
@@ -73749,12 +73455,8 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
-        # marche=us/fr : Twitter Analytic filtre les donnees par marche. Toute
-        # autre valeur -> parc complet (comportement Social Analytics).
-        _mk = (request.args.get("marche") or "").strip().lower()
-        _mk = _mk if _mk in ("fr", "us") else ""
         try:
-            return jsonify(_jbanalyse_payload(_mk))
+            return jsonify(_jbanalyse_payload())
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
 
@@ -73764,82 +73466,10 @@ def create_app():
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False}), 401
-        _mk = (request.args.get("marche") or "").strip().lower()
-        _mk = _mk if _mk in ("fr", "us") else ""
         try:
-            return jsonify(_vaact_payload((request.args.get("period") or "14").strip(), _mk))
+            return jsonify(_vaact_payload((request.args.get("period") or "14").strip()))
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:200]})
-
-    @app.route("/twitter-analytic/<sub>")
-    def twitter_analytic_panel(sub):
-        """Panneau « Twitter Analytic » rendu DANS UNE IFRAME (document isole).
-
-        Pourquoi une iframe : les 4 panneaux reutilisent les producteurs Social
-        Analytics, dont les ids/fonctions/globales sont FIXES (ja-/av-/jb-...).
-        Deux copies dans la meme page -> getElementById prend la premiere et le
-        panneau Twitter pilote en silence le DOM Social. L'iframe donne a chaque
-        panneau son propre document : zero collision, zero suffixe d'id, et les
-        producteurs restent intacts (juste scopes au marche US).
-
-        GET only -> non concerne par le garde d'ecriture. Gate par role comme le
-        chargeur paresseux : owner/admin = tout ; role restreint = la case
-        tw<sous-onglet> ou refus net."""
-        from flask import Response, redirect
-        if not is_auth():
-            return redirect("/")
-        sub = (sub or "").strip().lower()
-        # sous-onglet -> (nom d'onglet pour le gate de role, producteur US)
-        _subs = {
-            "analyse":  ("twanalyse",   lambda: _render_jbanalyse_html("us")),
-            "global":   ("twglobal",    lambda: _render_jbglobal_html("us")),
-            "activite": ("twactivite",  lambda: _render_jbactivite_html("us")),
-            "comptes":  ("twjailbreak", None),   # cas special : ContextVar
-        }
-        if sub not in _subs:
-            return Response("Panneau inconnu.", status=404, mimetype="text/html")
-        tab_name, prod = _subs[sub]
-        try:
-            _at = _role_allowed_tabs(_live_role())
-        except Exception:
-            _at = None
-        if _at is not None and tab_name not in _at:
-            inner = ("<div style='padding:40px;text-align:center;color:#6b7280'>"
-                     "Accès non autorisé.</div>")
-        else:
-            try:
-                if sub == "comptes":
-                    # Comptes Twitter : marche force par ContextVar (le
-                    # decorateur appelle le rendu sans argument) ; option Discord
-                    # coupee (portee="all") pour un rendu stable, independant de
-                    # la barre d'outils de Social Analytics. Le lien portail
-                    # /mes-comptes y est deja expose (modale d'edition VA).
-                    _jeton = _JB_MARCHE.set("us")
-                    try:
-                        inner = _render_jailbreak_html(portee="all")
-                    finally:
-                        _JB_MARCHE.reset(_jeton)
-                else:
-                    inner = prod()
-                if _langue_courante() == "en":
-                    inner = _traduire_html(inner)
-            except Exception as e:
-                log.warning("[twitter-analytic] rendu %s impossible : %s", sub, e)
-                inner = ("<div style='padding:40px;text-align:center;color:#f99'>"
-                         "Erreur de chargement.</div>")
-        # Theme : document isole -> on rejoue le theme du cookie EXACTEMENT comme
-        # la page principale (meme table, _theme_classes), classe COMPLETE sur
-        # <html> et <body> -- « light » seul laissait les regles body.light.claude
-        # sans cible et les variables --ui-*/--c-* indefinies (boutons
-        # transparents, cartes sombres en theme clair). On injecte aussi la
-        # feuille de tete, qui porte ces variables et les regles des panneaux.
-        _pre_cls, _body_cls = _theme_classes(request.cookies.get("va_theme"))
-        doc = (_TWITTER_PANEL_DOC
-               .replace("{base_css}", _tw_panel_base_css())
-               .replace("{html_cls}", _pre_cls)
-               .replace("{body_cls}", _body_cls)
-               .replace("{inner}", inner))
-        return Response(doc, mimetype="text/html")
 
     @app.route("/jbactivite/cfg", methods=["POST"])
     def jbactivite_cfg():
