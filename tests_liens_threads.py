@@ -294,6 +294,101 @@ try:
     check("synchro des groupes : Threads seulement, au plus toutes les 30 min",
           vus == [TH], vus)
     lv.synchroniser = _sync
+
+    # ── EMY THREADS : les groupes des managers, et rien d'autre ──────────
+    # Propriétaire, 13/10/2026 : « de base y avait 2 groupes et c'est tout,
+    # pourquoi y a Roucham, pourquoi y a un truc MANAGER », « automatique ».
+    class GMSGroupes(FauxGMS):
+        def __init__(self):
+            super().__init__()
+            self.grp = {"ABDOUL": "grp_a", "MOMOBY": "grp_m", "ROUCHAM": "grp_r",
+                        "MANAGER": "grp_x"}
+            self.dedans = {"grp_a": ["lnk_angel", "lnk_main"], "grp_m": [], "grp_r": [],
+                           "grp_x": ["lnk_v", "lnk_c", "lnk_starry"]}
+            self.statut = {"lnk_angel": "inactive", "lnk_starry": "inactive"}
+
+        def _ou(self, lid):
+            return next((g_ for g_, ls in self.dedans.items() if lid in ls), None)
+
+        def assign_link_to_group(self, link_id, gid_, team_id=None):
+            self.appels.append(("assign", link_id, gid_, team_id))
+            if self._ou(link_id):
+                self.dedans[self._ou(link_id)].remove(link_id)
+            self.dedans.setdefault(gid_, []).append(link_id)
+            return {"ok": True}
+
+        def _call_tool(self, outil, args):
+            self.appels.append((outil, dict(args)))
+            if outil == "list_groups":
+                return {"ok": True, "data": {"data": [{"name": n, "id": i}
+                                                      for n, i in self.grp.items()]}}
+            if outil == "create_group":
+                self.grp[args["name"]] = "grp_" + args["name"].lower()
+                self.dedans.setdefault(self.grp[args["name"]], [])
+                return {"ok": True, "data": {"id": self.grp[args["name"]]}}
+            if outil == "list_links":
+                return {"ok": True, "data": {"data": [
+                    {"id": l, "status": self.statut.get(l, "active")}
+                    for l in self.dedans.get(args["group_id"], [])], "has_more": False}}
+            if outil == "remove_links_from_group":
+                for l in args["link_ids"]:
+                    self.dedans[args["group_id"]].remove(l)
+                return {"ok": True, "data": {}}
+            if outil == "delete_group":
+                self.grp = {n: i for n, i in self.grp.items() if i != args["group_id"]}
+                self.dedans.pop(args["group_id"], None)
+                return {"ok": True, "data": {"deleted": True}}
+            return {"ok": True, "data": {}}
+
+    g, _ = monde(config={"gabarit": GABARIT_TW},
+                 tickets={f"{TH}:u1": {"salon": "s1"}, f"{TH}:u2": {"salon": "s2"}})
+    g = GMSGroupes()
+    sys.modules["gms"] = g
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+        f"{TH}:u1": {"pseudo": "momobtn", "shortcode": "velvetyy", "link_id": "lnk_v",
+                     "groupe": "MANAGER"},
+        f"{TH}:u2": {"pseudo": "steave0454", "shortcode": "cutieyy", "link_id": "lnk_c",
+                     "groupe": "MANAGER"}}}))
+    MGR = [{"user": {"id": "m1", "username": "abdoul_9684"}, "nick": "MANAGER | Abdoul"},
+           {"user": {"id": "m2", "username": "momobtn"}, "nick": "MANAGER | Momoby"}]
+    SAL = [{"id": "21", "type": 4, "name": "🔵┤ Manager ABDOUL ├🔵"},
+           {"id": "22", "type": 4, "name": "🔵┤ Manager MOMOBY ├🔵"},
+           {"id": "s1", "type": 0, "parent_id": "21"}, {"id": "s2", "type": 0, "parent_id": "21"}]
+    _sauve_m = (tk.managers, tk._managers_surs)
+    try:
+        tk.managers = lambda gid, force=False: list(MGR)
+        tk._managers_surs = lambda gid: (False, "rid", list(MGR))
+        tk._api = lambda m, c, **k: (200, json.loads(json.dumps(SAL))) if c.endswith("/channels") \
+            else (200, {})
+        b = lv.synchroniser(TH)
+        check("EMY THREADS rangé : deux groupes, ABDOUL et MOMOBY (ROUCHAM et MANAGER supprimés)",
+              sorted(g.grp) == ["ABDOUL", "MOMOBY"]
+              and sorted(b.get("groupes_supprimes", [])) == ["MANAGER", "ROUCHAM"], (g.grp, b))
+        check("… les liens des VA suivent leur catégorie (ABDOUL), le lien posé à la main reste",
+              sorted(g.dedans["grp_a"]) == ["lnk_c", "lnk_main", "lnk_v"]
+              and json.loads(lv.ETAT_FICHIER.read_text())["liens"][f"{TH}:u1"]["groupe"] == "ABDOUL",
+              g.dedans)
+        check("… les liens coupés qu'aucune fiche ne tient sortent des groupes (sans être "
+              "supprimés)", sorted(x.split()[0] for x in b.get("sortis", []))
+              == ["lnk_angel", "lnk_starry"]
+              and not [a for a in g.appels if a[0] in ("delete", "delete_links")], b)
+        n = len(g.appels)
+        b2 = lv.synchroniser(TH)
+        check("… un second passage ne touche plus à rien",
+              not b2.get("groupes_supprimes") and not b2.get("sortis") and not b2["deplaces"]
+              and not [a for a in g.appels[n:] if a[0] in ("remove_links_from_group",
+                                                           "delete_group", "assign")], b2)
+        g.grp["ANCIEN"] = "grp_z"
+        g.dedans["grp_z"] = []
+        tk._managers_surs = lambda gid: (False, "rid", None)
+        b3 = lv.synchroniser(TH)
+        check("managers indéterminables : aucun groupe supprimé, et c'est dit",
+              "ANCIEN" in g.grp and any("indéterminables" in r for r in b3["rates"]), b3)
+        check("Twitter n'a pas ce rangement (son espace a d'autres groupes, TEMPLATES…)",
+              not lv.espace(TW).get("groupes_managers_seuls")
+              and lv.espace(TH).get("groupes_managers_seuls") is True)
+    finally:
+        tk.managers, tk._managers_surs = _sauve_m
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

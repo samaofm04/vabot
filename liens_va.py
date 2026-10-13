@@ -45,7 +45,10 @@ THREADS_ID = "1498948161039896586"
 # « sans_prenom » : l'adresse du lien ne porte aucun prénom (mots_sans_prenom).
 ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
                   "gabarit": "lnk_6acdd0a53fb996c565a47e90",    # getmysocial.com/emythreads
-                  "sans_prenom": True, "plateforme": "Threads"}
+                  "sans_prenom": True, "plateforme": "Threads",
+                  # l'espace n'a QUE les groupes des managers (synchroniser,
+                  # étape 3) : « de base y avait 2 groupes et c'est tout »
+                  "groupes_managers_seuls": True}
 
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
 SERVEURS = {TWITTER_ID, THREADS_ID}
@@ -683,7 +686,81 @@ def synchroniser(gid: str) -> Dict[str, Any]:
             bilan["rates"].append(f'{l.get("pseudo")} : rangement refusé')
     if change:
         _ecrire(etat)
+    # 3. Threads : l'espace n'a que les groupes de ses managers
+    if espace(gid).get("groupes_managers_seuls"):
+        _seulement_les_managers(gid, equipe, categorie, parent, liens, fiches, bilan)
     return bilan
+
+
+def _seulement_les_managers(gid: str, equipe: str, categorie: Dict[str, str],
+                            parent: Dict[str, str], liens: Dict[str, Any],
+                            fiches: Dict[str, Any], bilan: Dict[str, Any]) -> None:
+    """Range l'espace : un groupe par manager, et rien d'autre.
+
+    Propriétaire, 13/10/2026, devant EMY THREADS (ABDOUL, MOMOBY, ROUCHAM,
+    MANAGER) : « de base y avait 2 groupes et c'est tout, pourquoi y a
+    Roucham, pourquoi y a un truc MANAGER », puis « je veux que ça soit
+    automatique ». Un groupe qui ne répond plus à aucun manager (Roucham passé
+    Helper, « MANAGER » né d'un surnom mal lu) est vidé de ce qu'aucune fiche
+    ne tient, puis supprimé — supprimer un groupe ne supprime aucun lien, ils
+    passent « sans groupe ». Dans le groupe d'un manager, un lien COUPÉ
+    qu'aucune fiche ne tient (refait à neuf) en sort. Un lien actif inconnu
+    reste où il est : posé à la main, peut-être. La liste des managers
+    indéterminable : rien n'est touché."""
+    import gms
+    import tickets_discord as tk
+    _fixe, _rid, liste = tk._managers_surs(gid)
+    if not liste:
+        bilan["rates"].append("managers indéterminables : groupes laissés tels quels")
+        return
+    voulus = {tk._nom_court(m).lower() for m in liste}
+    # un manager parti dont la catégorie tient encore des VA garde son groupe
+    # tant qu'ils n'en sont pas sortis
+    for cle, l in liens.items():
+        if cle.startswith(f"{gid}:") and l.get("shortcode"):
+            salon = str((fiches.get(cle) or {}).get("salon") or "")
+            v = categorie.get(parent.get(salon, ""), "")
+            if v:
+                voulus.add(v.lower())
+    tenus = {str(l.get("link_id")) for cle, l in liens.items()
+             if cle.startswith(f"{gid}:") and l.get("link_id")}
+    connus = groupes(equipe)
+    if connus is None:
+        bilan["rates"].append("groupes GetMySocial illisibles : rangement remis")
+        return
+    for nom, grp in sorted(connus.items()):
+        garde = nom in voulus
+        r = gms._call_tool("list_links", {"team_id": equipe, "group_id": grp, "limit": 100})
+        d = r.get("data") if r.get("ok") else None
+        items = d.get("data") if isinstance(d, dict) else d
+        if not isinstance(items, list):
+            bilan["rates"].append(f"groupe {nom.upper()} illisible : laissé")
+            continue
+        sortir = [str(x.get("id")) for x in items if isinstance(x, dict) and x.get("id")
+                  and str(x.get("id")) not in tenus
+                  and (not garde or str(x.get("status") or "active") != "active")]
+        if sortir:
+            rr = gms._call_tool("remove_links_from_group",
+                                {"group_id": grp, "link_ids": sortir, "team_id": equipe})
+            if not rr.get("ok"):
+                bilan["rates"].append(f"groupe {nom.upper()} : liens non sortis "
+                                      f"({str(rr.get('error'))[:80]})")
+                continue
+            bilan.setdefault("sortis", []).extend(f"{s_} ({nom.upper()})" for s_ in sortir)
+        if garde:
+            continue
+        restent = len(items) - len(sortir)
+        if restent or (isinstance(d, dict) and d.get("has_more")):
+            # un lien qu'une fiche tient encore dedans : l'étape 2 n'a pas pu
+            # le ranger ; le groupe attend, et c'est dit
+            bilan["rates"].append(f"groupe {nom.upper()} sans manager, gardé : "
+                                  f"{restent} lien(s) de VA encore dedans")
+            continue
+        rd = gms._call_tool("delete_group", {"group_id": grp, "team_id": equipe})
+        if rd.get("ok"):
+            bilan.setdefault("groupes_supprimes", []).append(nom.upper())
+        else:
+            bilan["rates"].append(f"groupe {nom.upper()} non supprimé ({str(rd.get('error'))[:80]})")
 
 
 def _id_du_lien(equipe: str, shortcode: str) -> str:

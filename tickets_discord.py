@@ -1751,7 +1751,8 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
         with sur_serveur(gid):
             redessiner_boutons(gid)
             b = liens_va.synchroniser(gid)
-        if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates")):
+        if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates", "groupes_supprimes",
+                                  "sortis")):
             print(f"[lien] synchro {gid} : {b}", flush=True)
     except Exception as e:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
