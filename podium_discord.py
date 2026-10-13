@@ -223,6 +223,11 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # « pour Threads tu ecris Threads, pour Twitter Twitter, anonyme
                  # toujours » : « Threads 12 », le numero du VA 12 de Twitter
                  "unite": "clics", "libelle": "Threads",
+                 # « je veux pas les trucs là » (13/10/2026, les ⚠️ sous la
+                 # quinzaine) : ni « sans relevé », ni « trackings partagés »,
+                 # ni « liste non rafraîchie » dans les messages de Threads.
+                 # Ils restent au journal (_taire_avert)
+                 "sans_avertissements": True,
                  # ni bonus du jour, ni synchro des liens, ni suivi des VA : ce
                  # serveur ne fait qu'afficher (vitrine)
                  "bonus": False, "vitrine": True,
@@ -2573,6 +2578,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
           "Un seul prix par personne · payé à la main après vérification",
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
 
+    debut_avert = len(c)
     if cl["illisibles"]:
         # « il remontera au prochain passage » n'est vrai que du message
         # vivant : un message figé n'a plus de prochain passage
@@ -2593,6 +2599,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                        liste_dite=not cl["frais"], pf=pf)
     if avertissement:
         c += ["", avertissement]
+    if pf.get("sans_avertissements"):
+        _taire_avert(gid, "le podium", c[debut_avert:])
+        c = c[:debut_avert]
 
     pied = (f'YOULAB • Marché {pf["marche"]} · comptes VA, sans pseudo' if mix is None
             else f'YOULAB • Marchés {pf["marche"]} + {tw["marche"]} · comptes VA, sans pseudo')
@@ -2734,6 +2743,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                                                liste_dite=not cl["frais"], pf=p) if x]
     if avertissement:
         queue.append("\n" + avertissement)
+    if p.get("sans_avertissements"):
+        _taire_avert(gid, "la quinzaine", queue[1:])
+        queue = queue[:1]
     bas = "\n".join(queue)
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
@@ -2939,7 +2951,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
         return ""
     vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time(),
                     "dernier": _instantane(cl, min(aujourd, fin_saison)),
-                    "format": FORMAT_AFFICHAGE}
+                    "format": _format_affiche(gid)}
     _ecrire(d)
     print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes, '
           f'{len(neufs)} page(s)', flush=True)
@@ -3222,7 +3234,7 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         return True
     if not (garde.get("messages") or garde.get("message")):
         return True
-    if garde.get("format") != FORMAT_AFFICHAGE:
+    if garde.get("format") != _format_affiche(gid):
         # presentation changee : refaire tout de suite. ICI, et pas seulement
         # dans a_rafraichir_subs : rafraichir_subs repose la meme question et
         # sortait sans rien faire (constate le 03/10 apres f6b44cf)
@@ -3235,6 +3247,29 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         return True
     minutes = _minutes_subs(gid)
     return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _format_affiche(gid: Optional[str]) -> str:
+    """Le format des messages vivants de CE serveur : FORMAT_AFFICHAGE, plus ce
+    que son profil change à l'affichage seul. Les avertissements retirés de
+    Threads le 13/10/2026 l'ont refait tout de suite, sans refaire (ni
+    relever) ceux de Twitter et de Va IG."""
+    return FORMAT_AFFICHAGE + ("+sans-avertissements"
+                               if _profil(gid).get("sans_avertissements") else "")
+
+
+_AVERT_DITS: Dict[str, str] = {}
+
+
+def _taire_avert(gid: Optional[str], quoi: str, lignes: List[str]) -> None:
+    """Les avertissements qu'un serveur n'affiche pas (« sans_avertissements »,
+    Threads) vont au journal, une fois tant qu'ils ne changent pas : retirés
+    du message, jamais écartés en silence."""
+    texte = " / ".join(str(x).strip() for x in lignes if str(x or "").strip())
+    cle = f"{gid}:{quoi}"
+    if texte and _AVERT_DITS.get(cle) != texte:
+        print(f"[podium] {gid} : non affiché dans {quoi} : {texte[:500]}", flush=True)
+    _AVERT_DITS[cle] = texte
 
 
 #: La presentation des messages vivants. A CHANGER a chaque modification de ce
@@ -4018,7 +4053,7 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
             garde["dernier"] = _instantane(cl, fin)
             # même sur une panne passagère : le passage compte (pas un relevé
             # GetMySocial toutes les 10 min pour un Discord en panne)
-            garde["format"] = FORMAT_AFFICHAGE
+            garde["format"] = _format_affiche(gid)
             vivants[gid] = garde
             _ecrire(d)
             return mid
@@ -4031,7 +4066,7 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
     vivants[gid] = {"semaine": debut.isoformat(), "message": str(rep["id"]), "vu": time.time(),
-                    "dernier": _instantane(cl, fin), "format": FORMAT_AFFICHAGE}
+                    "dernier": _instantane(cl, fin), "format": _format_affiche(gid)}
     _ecrire(d)
     print(f'[podium] message vivant {debut} → {fin} : {len(cl["lignes"])} entités', flush=True)
     return str(rep["id"])
@@ -4081,7 +4116,7 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
             ancienne = str(garde.get("semaine") or "")
             return ancienne < passee or (ancienne == passee and not garde.get("termine"))
         return True
-    if garde.get("message") and garde.get("format") != FORMAT_AFFICHAGE:
+    if garde.get("message") and garde.get("format") != _format_affiche(gid):
         return True                     # presentation changee : refaire tout de suite
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60

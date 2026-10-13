@@ -461,6 +461,20 @@ try:
           and cl_d["conflits"] == ["emy.brw/c42"]
           and any("tracking" in x and "sans relevé" in x for x in pd._notes_tracking(cl_d)),
           (cl_d["illisibles"], cl_d.get("conflits")))
+    import contextlib as _ctx
+    _sortie = io.StringIO()
+    with _ctx.redirect_stdout(_sortie):
+        e_d = pd.embed_podium(cl_d, lundi, auj, en_cours=True, gid=TH)
+        e_t = pd.embed_podium(cl_d, lundi, auj, en_cours=True, gid=TW)
+    check("… mais le message de Threads ne l'affiche pas, le journal le dit ; Twitter, lui, "
+          "garde ses avertissements",
+          "⚠️" not in e_d["description"] and "Threads 12" not in e_d["description"]
+          and "non affiché dans le podium" in _sortie.getvalue()
+          and "Threads 12" in _sortie.getvalue() and "⚠️" in e_t["description"],
+          (_sortie.getvalue()[-300:], e_d["description"][-200:]))
+    check("le format d'affichage : Threads à part, Twitter et Va IG inchangés",
+          pd._format_affiche(TW) == pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE
+          != pd._format_affiche(TH))
     reg_a = json.loads(json.dumps(REGISTRE))
     reg_a["attente"]["emy.brw/c99"] = {"premier": "2026-10-12", "conflit": True,
                                        "numeros": [43], "liens": ["x"], "ids": []}
@@ -534,8 +548,10 @@ try:
           and "🥉 **Threads 41** — **20** clics · 💰 **3$**" in desc
           and "4. Threads 31 — **7** clics" in desc and "5. Threads 30 — **3** clics" in desc,
           desc)
-    check("la prime se réclame à Bowser ; le compte sans numéro est dit",
-          "**@Bowser**" in desc and "ℹ️ _1 compte(s)" in desc)
+    check("la prime se réclame à Bowser",  "**@Bowser**" in desc)
+    # « je veux pas les trucs là » : aucun ⚠️ ni ℹ️ dans les messages de Threads
+    check("aucun avertissement affiché sur Threads (ni ⚠️ ni ℹ️)",
+          "⚠️" not in desc and "ℹ️" not in desc, desc[-300:])
     check("pied « Marché US + UK », sans bouton 🔄",
           e["footer"]["text"].startswith("YOULAB • Marché US + UK")
           and "components" not in p_th[0]["json"])
@@ -584,6 +600,7 @@ try:
           "**Threads 12** — **47** clics · 🌐 47 all-time" in dq
           and "4. Threads 31 — 7 clics · 🌐 7 all-time" in dq
           and "5. Threads 30 — 3 clics · 🌐 3 all-time" in dq, dq)
+    check("la quinzaine non plus : ni ⚠️ ni ℹ️", "⚠️" not in dq and "ℹ️" not in dq, dq[-300:])
     check("titre « Classement clics », en-tête « uniques US + UK », total en clics, anonyme",
           eq["title"] == "📊 Classement clics — la quinzaine"
           and "Clics **uniques US + UK**" in dq and "**108** clics" in dq

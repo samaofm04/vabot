@@ -409,6 +409,14 @@ def _prochain(gid: str, liste: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]
     return liste[i]
 
 
+#: Les mots de rôle qu'un surnom porte DEVANT le prénom. Constaté sur Threads
+#: le 13/10/2026 : « MANAGER | Momoby » et « MANAGER | Abdoul » donnaient tous
+#: deux « MANAGER » — une catégorie « Manager MANAGER », puis « deux managers
+#: au même nom », et plus rien ne bougeait. Seulement en tête, et seulement
+#: s'il reste un nom derrière : un surnom « Boss » tout court reste « BOSS ».
+MOTS_DE_ROLE = {"MANAGER", "MANAGERS", "HELPER", "BOSS", "ADMIN", "STAFF", "MODO"}
+
+
 def _nom_court(m: Dict[str, Any]) -> str:
     """Le nom porté par la catégorie, comme « Manager FANI ».
 
@@ -424,6 +432,9 @@ def _nom_court(m: Dict[str, Any]) -> str:
     morceaux = [x for x in re.split(r"[^0-9A-Za-zÀ-ÿ]+", plat) if x]
     # Un morceau purement numérique (« 0314 ») ne nomme personne.
     lettres = [x for x in morceaux if not x.isdigit()]
+    # ni un mot de rôle devant le prénom (« MANAGER | Abdoul » -> ABDOUL)
+    while len(lettres) > 1 and lettres[0].upper() in MOTS_DE_ROLE:
+        lettres = lettres[1:]
     court = (lettres or morceaux or [""])[0]
     return (court or str(u.get("id") or "?")).upper()[:24]
 

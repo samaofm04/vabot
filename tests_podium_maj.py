@@ -969,7 +969,11 @@ try:
               "non au format a jour dans la cadence",
               pd._subs_du(IG, _g_vieux, _t + 60) and not pd._subs_du(IG, _g_neuf, _t + 60))
         check("chaque ecriture du message vivant note le format (POST, PATCH, quinzaine)",
-              src.count('"format": FORMAT_AFFICHAGE') >= 2 and 'garde["format"] = FORMAT_AFFICHAGE' in src)
+              # le format de CE serveur depuis le 13/10/2026 (_format_affiche :
+              # FORMAT_AFFICHAGE, plus ce que son profil change à l'affichage)
+              src.count('"format": _format_affiche(gid)') >= 2
+              and 'garde["format"] = _format_affiche(gid)' in src
+              and pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE)
     finally:
         pd._etat, pd._pause_gms, pd.time.time = _etat_vrai, _pause_vrai, _maint
 

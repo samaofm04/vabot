@@ -939,6 +939,35 @@ try:
     check("sans fiche : un second tour ne refait rien (aucune écriture, rien de repris)",
           not f.ecritures() and not b2["adoptes"] and not b2["realignes"], (f.ecritures(), b2))
 
+    # ══ 15. surnoms « MANAGER | Prénom » (Threads, 13/10/2026) ════════════
+    print("\n— 15. un mot de rôle devant le prénom ne nomme personne")
+    check("_nom_court : « MANAGER | Momoby » → MOMOBY, « HELPER | Roucham » → ROUCHAM, "
+          "« Boss » seul reste BOSS",
+          tk._nom_court({"nick": "MANAGER | Momoby", "user": {"id": "1"}}) == "MOMOBY"
+          and tk._nom_court({"nick": "HELPER | Roucham", "user": {"id": "1"}}) == "ROUCHAM"
+          and tk._nom_court({"nick": "Boss", "user": {"id": "1"}}) == "BOSS"
+          and tk._nom_court({"nick": "🎯│𝑴𝑶𝑨𝑵", "user": {"id": "1"}}) == "MOAN")
+    f = monde(tickets={"201": ("301", "106")})
+    f.membre("105", "momobtn", "MANAGER | Momoby", manager=True)
+    f.membre("106", "abdoul_9684", "MANAGER | Abdoul", manager=True)
+    f.categorie("21", "🔵┤ Manager ABDOUL ├🔵", 1)
+    f.categorie("22", "🔵┤ Manager MANAGER ├🔵", 2)
+    f.ticket("301", "201", "21", "106", 1)
+    sortie = io.StringIO()
+    with contextlib.redirect_stdout(sortie):
+        b = tk.suivre_managers(G)
+    check("Threads : plus de « deux managers au même nom » ; « Manager MANAGER » devient "
+          "« Manager MOMOBY », ABDOUL ne bouge pas, son VA non plus",
+          not b["ignore"] and f.salons["22"]["name"] == "🔵┤ Manager MOMOBY ├🔵"
+          and f.salons["21"]["name"] == "🔵┤ Manager ABDOUL ├🔵"
+          and f.enfants("21") == ["301"] and fiche("201").get("manager") == "106"
+          and "même nom" not in sortie.getvalue(), (b, sortie.getvalue()[-400:]))
+    f.appels.clear()
+    with calme():
+        b2 = tk.suivre_managers(G)
+    check("… et un second tour ne touche plus à rien", not f.ecritures() and not b2["ignore"],
+          (f.ecritures(), b2))
+
     # ══ 13. branché dans la boucle du podium ══════════════════════════════
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")
     i0 = src.find("def _start_podium_semaine_daemon")
