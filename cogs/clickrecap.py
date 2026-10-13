@@ -630,6 +630,15 @@ def _tenir_dans_embed(emb, plafond: int = 5900) -> None:
 #: boucle et un clic sur « Rafraichir ») ne se melangent pas.
 _PREP_IMAGE = contextvars.ContextVar("clics_prep_image", default=None)
 
+#: La cle (« serveur:salon ») du report en train d'etre PUBLIE, posee par
+#: _post_or_update_report ; vide partout ailleurs. Va Twitter et Va Threads ne
+#: reprennent que les reports publies (recap_clics_rest.retenir) : la page
+#: publique des clics et l'essai du rig construisent le meme report sous un
+#: autre nom (« Jessy US », « Groupe »), et chacune de leurs vues renommait le
+#: recap des deux serveurs -- l'essai, qui promet de ne rien ecrire, ecrivait.
+#: Une variable de contexte, pour la meme raison que _PREP_IMAGE.
+_REPORT_PUBLIE = contextvars.ContextVar("clics_report_publie", default="")
+
 #: Les dernieres images dessinees, par report : /democlics (bot admin) montre
 #: celles REELLEMENT postees, sans relancer GetMySocial.
 _DERNIERS_CLASSEMENTS = {}
@@ -1689,6 +1698,18 @@ class ClickRecap(commands.Cog):
             except Exception as e:
                 print(f"[reportclick] update {cle} echoue : {e}", flush=True)
             await asyncio.sleep(1)
+        # Va Twitter et Va Threads reprennent le report de leur espace TOUT DE
+        # SUITE apres lui (recap_clics_rest, par le bot de chaque serveur) :
+        # sans attendre la boucle du podium (dix minutes), leur « prochaine
+        # mise a jour » dit la meme heure que le report d'origine. Sur la
+        # seule machine qui poste (VA_MACHINE_PROD), comme les demons du site.
+        try:
+            import os as _os_rc
+            if _os_rc.environ.get("VA_MACHINE_PROD") == "1":
+                import recap_clics_rest as _rcr
+                await asyncio.to_thread(_rcr.publier_tous)
+        except Exception as e:                   # noqa: BLE001
+            print(f"[recap-clics] apres le report : {type(e).__name__}: {e}", flush=True)
 
     async def _poser_ranking_auto(self) -> bool:
         """Installe le classement dans un salon « ranking », sans commande.
@@ -2735,6 +2756,19 @@ class ClickRecap(commands.Cog):
         emb.set_footer(
             text=f"Updated {_paris_now().strftime('%H:%M')} · every hour · "
                  f"{_quoi} · GetMySocial")
+        # Va Twitter et Va Threads reprennent ce report tel quel
+        # (recap_clics_rest) : l'embed COMPLET est garde ici, avant que l'image
+        # des classements ne l'allege, et aucun appel GetMySocial de plus ne
+        # sera fait pour eux. Un report vide (« No data ») n'est jamais garde,
+        # un report qui n'est pas publie non plus (_REPORT_PUBLIE).
+        _source_rcr = _REPORT_PUBLIE.get()
+        if _source_rcr and not all_none:
+            try:
+                import recap_clics_rest as _rcr
+                _rcr.retenir(c, emb.to_dict(), _source_rcr)
+            except Exception as _e_rcr:          # noqa: BLE001
+                print("[recap-clics] report non garde pour Twitter/Threads : %s: %s"
+                      % (type(_e_rcr).__name__, _e_rcr), flush=True)
         return emb
 
     async def _post_or_update_report(self, guild_id: str):
@@ -2762,6 +2796,9 @@ class ClickRecap(commands.Cog):
         # pour l'image des classements (voir _PREP_IMAGE).
         _prep_img = {}
         _PREP_IMAGE.set(_prep_img)
+        # Ce report-ci est publie : Va Twitter et Va Threads peuvent le
+        # reprendre (voir _REPORT_PUBLIE).
+        _REPORT_PUBLIE.set(str(guild_id))
         # LES PERMISSIONS, AVANT D'ESSAYER. Sans « Envoyer des messages » ou
         # « Liens integres », l'envoi leve une Forbidden qu'on attrapait plus
         # bas sans la montrer. Les nommer permet de corriger en dix secondes.

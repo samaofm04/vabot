@@ -82,6 +82,17 @@ leurs règles de gel restent maîtresses : un clic le lundi à 3h ne lance pas
 la semaine neuve avant le podium. Un seul passage à la fois (_exclusif) :
 un clic pendant le tour de la boucle, ou l'inverse, ne poste rien deux fois.
 
+VA THREADS MONTRE LE CLASSEMENT SUBS DE TWITTER, ET RIEN D'AUTRE (clés
+« reprend » et « subs_seul » de SERVEURS). Propriétaire, 13/10/2026 : « ici
+tu peux envoyer les récap des subs […] pour le Threads », les liens « comme
+d'hab ». Ce sont les VA de Twitter et LEURS chiffres : le même classement de
+la quinzaine, mêmes libellés « VA n », même pied « Marché US ». Il n'est pas
+recalculé : Threads reprend le relevé que Twitter vient de faire pour la même
+période (_classement_repris, gardé en mémoire et sur disque), et ne relit
+MyPuls que si Twitter n'a rien relevé depuis une heure. Pas de podium de la
+semaine, pas de bonus du jour, pas de primes ni de paliers sur Threads : rien
+n'y paie, et personne n'y réclamerait quoi que ce soit.
+
 LE THÈME MARIO (clé « theme », Va IG seulement). Propriétaire, 03/10/2026 :
 « tu penses y'a moyen de faire un theme Mario pour tout ca », puis « vas-y ».
 « Grand Prix des subs » pour la semaine, « Championnat des subs » pour la
@@ -137,6 +148,11 @@ LIENS_CACHE = DATA_DIR / "gmsdash_links.json"
 
 SALON_PODIUM = "─│🏆┤-podium"
 SALON_SUBS = "─│📊┤-subs"
+# Le salon du classement subs de Twitter et de Threads, tel qu'il s'appelle
+# depuis que le propriétaire l'a redécoré : sous l'ancien nom, il n'était
+# retrouvé que par son nom nu, et le journal le redisait à chaque passage
+# (« salon « ─│📊┤-subs » retrouvé sous le nom « ─│👤┤-subs » », 13/10/2026).
+SALON_SUBS_VA = "─│👤┤-subs"
 SALON_BONUS = "─│💸┤-bonus-journalier"
 PRIMES_JOUR = [7.50, 5.00, 3.50]
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
@@ -150,13 +166,17 @@ EQUIPES_VA = ["tm_6a0e4739bfa0c238f20a8bf5",   # JESSY LE RETOUR
 EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 
 # Les serveurs ou le podium, les subs et le bonus sont publies, et CE QUE
-# chacun compte. Les chiffres de Twitter affiches sur Threads seraient faux ;
+# chacun compte. Threads n'a longtemps rien eu (des chiffres de Twitter y
+# seraient passes pour ceux des VA Threads) ; depuis le 13/10/2026, a la
+# demande du proprietaire, il montre le classement subs de Twitter, tel que
+# Twitter l'affiche (« Marche US », les « VA n » de Twitter), et rien d'autre.
 # Va IG (serveur FR, proprietaire 03/10/2026 : « lance le truc des subs comme
 # pour Twitter avec le numero du VA », « fais aussi le podium », primes
 # « comme Twitter ») a SES liens, SES pays et ses numeros « Amelia VA 3 » --
 # les memes que le nom du ticket et le lien (liens_fr.numero_va).
 TWITTER_ID = "1445108485090971710"
 VA_IG_ID = "1505418484052394004"
+THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
 SERVEURS: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {"equipes": None,                # podium_config, sinon EQUIPES_VA
                  "pays": ("US",), "marche": "US", "source": "Twitter 🐦",
@@ -168,7 +188,18 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # plus qu'au relevé GetMySocial que Va IG garde de ces VA. Voir
                  # _classement_tracking. POUR REVENIR AUX CLICS GETMYSOCIAL :
                  # retirer cette clé, rien d'autre.
-                 "mesure": "tracking"},
+                 "mesure": "tracking",
+                 # le nom exact du salon du classement subs (voir _salon_subs)
+                 "salon_subs": SALON_SUBS_VA},
+    # Va Threads : le classement subs de Twitter, tel quel (voir l'en-tête,
+    # « VA THREADS MONTRE… »). « reprend » : tout ce que ce profil ne dit pas
+    # vient de Twitter, relu à chaque appel (_profil) — couper la clé
+    # « mesure » de Twitter change aussi Threads, les deux ne divergent
+    # jamais. « subs_seul » : ni podium, ni bonus, ni synchro des liens, ni
+    # suivi des VA (la boucle de web_upload ne fait que la quinzaine).
+    # POUR COUPER THREADS : retirer cette entrée, rien d'autre.
+    THREADS_ID: {"reprend": TWITTER_ID, "subs_seul": True,
+                 "bot": "Bowser", "bonus": False},
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
                "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",
@@ -226,8 +257,27 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
 
 def _profil(gid: Optional[str] = None) -> Dict[str, Any]:
     """Ce que compte ce serveur. Sans serveur (pages du site, anciens appels) :
-    Twitter, comme avant."""
-    return SERVEURS.get(str(gid or "")) or SERVEURS[TWITTER_ID]
+    Twitter, comme avant. Un profil qui « reprend » un autre serveur (Threads)
+    hérite de tout ce qu'il ne dit pas lui-même, relu à chaque appel."""
+    p = SERVEURS.get(str(gid or "")) or SERVEURS[TWITTER_ID]
+    src = p.get("reprend")
+    if src and src != str(gid or "") and src in SERVEURS:
+        return {**SERVEURS[src], **p}
+    return p
+
+
+def subs_seulement(gid: Optional[str]) -> bool:
+    """Ce serveur n'a que le classement de la quinzaine (Threads) : ni podium
+    de la semaine, ni bonus du jour, ni primes. La boucle de web_upload le
+    lit, et chaque entrée du podium et du bonus le vérifie aussi : un appel
+    venu d'ailleurs ne posterait pas un podium que personne n'a voulu."""
+    return bool((SERVEURS.get(str(gid or "")) or {}).get("subs_seul"))
+
+
+def _repris_de(gid: Optional[str]) -> str:
+    """Le serveur dont celui-ci reprend les chiffres, ou ""."""
+    src = str((SERVEURS.get(str(gid or "")) or {}).get("reprend") or "")
+    return src if src and src != str(gid or "") and src in SERVEURS else ""
 
 PRIMES = [10.0, 5.0, 3.0]
 # Le nom du bot que les membres voient change : « Siri » jusqu'au 03/10/2026,
@@ -1486,10 +1536,15 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     """{lignes, illisibles, frais} — les clics du marché du serveur (US pour
     Twitter) par entité, du plus fort au plus faible. Twitter : les clics
     des liens de tracking (_classement_tracking). `mesure="gms"` force les
-    clics GetMySocial (le relevé US que Va IG garde, voir _releve_us)."""
+    clics GetMySocial (le relevé US que Va IG garde, voir _releve_us).
+    Threads (clé « reprend ») : le relevé de Twitter, voir _classement_repris."""
+    if _repris_de(gid):
+        return _classement_repris(debut, fin, str(gid), mesure)
     if _source(gid, mesure) == "tracking":
         # pas gardé pour Va IG : il mêle des clics GetMySocial (_releve_us)
-        return _classement_tracking(debut, fin, gid)
+        cl_t = _classement_tracking(debut, fin, gid)
+        _garder_repris(gid, debut, fin, cl_t, "tracking")
+        return cl_t
     import gms
     profil = _profil(gid)
     d0, d1 = debut.isoformat(), fin.isoformat()
@@ -1545,6 +1600,7 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     # Twitter relève de toute façon ses VA pour ses propres messages : Va IG
     # reprend ce relevé au lieu d'en refaire un (voir _releve_us)
     _retenir(gid, debut, fin, out)
+    _garder_repris(gid, debut, fin, out, _source(gid, mesure))
     return out
 
 
@@ -1565,7 +1621,11 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
     chaque rafraîchissement doublait le nombre d'appels pour rien, et volait
     le quota du tableau de bord. Un fichier par serveur : « VA 3 » de Twitter
     et « Amelia VA 3 » de Va IG ne sont pas la même personne.
+    Threads (clé « reprend ») : les totaux de Twitter, son fichier et son
+    relevé du jour — jamais un second relevé pour les mêmes VA.
     """
+    if _repris_de(gid):
+        return alltime(_repris_de(gid), mesure)
     profil = _profil(gid)
     fichier = _fichier_alltime(gid, mesure)
     cache = _lire(fichier, {})
@@ -1857,6 +1917,142 @@ def _classement_paye(gid: Optional[str], cl: Dict[str, Any],
     return cl if mix is None else dict(cl, lignes=mix)
 
 
+# ─── Threads : le relevé de Twitter, repris (clé « reprend ») ────────────
+#: Les relevés complets d'un serveur que reprend un autre : {(gid, mesure,
+#: début, fin): {t, jour, le, iso, cl}}. Le classement de Threads est celui de
+#: Twitter : le refaire, c'était relire MyPuls et les listes GetMySocial que
+#: Twitter venait de lire, pour les mêmes chiffres. SUR DISQUE, comme
+#: _RELEVES : le bot redémarre à chaque déploiement, et chaque redémarrage
+#: aurait fait relire à Threads ce que Twitter avait lu une heure plus tôt.
+#: Quatre jours, comme _RELEVES : une quinzaine figée au bout de 48 h y
+#: trouve encore le relevé de sa période entière.
+_REPRIS: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+_REPRIS_LUS = False
+GARDE_REPRIS_S = 4 * 86400
+
+
+def _fichier_repris() -> Path:
+    # relu à chaque appel : les tests déplacent DATA_DIR
+    return DATA_DIR / "podium_repris.json"
+
+
+def _charger_repris() -> None:
+    """Reprend les relevés du disque, une fois par processus."""
+    global _REPRIS_LUS
+    if _REPRIS_LUS:
+        return
+    _REPRIS_LUS = True
+    d = _lire(_fichier_repris(), {})
+    if not isinstance(d, dict):
+        return
+    t = time.time()
+    ecartes = 0
+    for k, e in d.items():
+        bouts = str(k).split("|")
+        if len(bouts) != 4 or not isinstance(e, dict) or not isinstance(e.get("cl"), dict):
+            ecartes += 1
+            continue
+        if 0 <= t - float(e.get("t") or 0) <= GARDE_REPRIS_S:
+            _REPRIS[(bouts[0], bouts[1], bouts[2], bouts[3])] = e
+    if ecartes:
+        # une entrée abîmée n'arrête rien : Threads relira, et le journal le dit
+        print(f"[podium] podium_repris.json : {ecartes} entrée(s) illisible(s), écartée(s)",
+              flush=True)
+
+
+def _garder_repris(gid: Optional[str], debut: dt.date, fin: dt.date,
+                   cl: Dict[str, Any], source: str) -> None:
+    """Garde le relevé d'un serveur que d'autres reprennent (Twitter, pour
+    Threads). Un relevé raté est gardé aussi : Threads ne relit pas MyPuls
+    derrière Twitter qui vient d'échouer — il attend son prochain essai."""
+    gid = str(gid or "")
+    if not gid or not any(_repris_de(g) == gid for g in SERVEURS):
+        return
+    if debut != saison_en_cours(debut)[0]:
+        # Threads ne montre que la quinzaine : la semaine du podium et le jour
+        # du bonus de Twitter ne lui servent à rien (trois écritures de moins
+        # par heure)
+        return
+    _charger_repris()
+    t = time.time()
+    for k in [k for k, e in _REPRIS.items()
+              if not 0 <= t - float(e.get("t") or 0) <= GARDE_REPRIS_S]:
+        _REPRIS.pop(k, None)
+    _REPRIS[(gid, str(source), debut.isoformat(), fin.isoformat())] = {
+        "t": t, "jour": _aujourdhui().isoformat(), "le": _horodatage(),
+        "iso": _maintenant().isoformat(timespec="minutes"),
+        "cl": json.loads(json.dumps(cl, ensure_ascii=False))}
+    try:
+        safe_json.write(_fichier_repris(), {"|".join(k): v for k, v in _REPRIS.items()})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] relevé gardé pour les serveurs qui le reprennent, non enregistré "
+              f"({type(e).__name__}: {e}) — perdu au prochain redémarrage", flush=True)
+
+
+def _minutes_subs(gid: Optional[str]) -> int:
+    """Le rythme du classement vivant de la quinzaine, en minutes."""
+    return int(_profil(gid).get("minutes") or _config().get("minutes_subs")
+               or _config().get("minutes") or MINUTES_LIVE)
+
+
+def _repris_rendu(e: Dict[str, Any]) -> Dict[str, Any]:
+    """Une copie du relevé gardé, avec son heure : le pied du message dit
+    l'heure du RELEVÉ (celle que Twitter affiche), pas celle de l'envoi."""
+    cl = json.loads(json.dumps(e.get("cl") or {}, ensure_ascii=False))
+    cl["releve_le"] = str(e.get("le") or "")
+    cl["releve_iso"] = str(e.get("iso") or "")
+    return cl
+
+
+def _classement_repris(debut: dt.date, fin: dt.date, gid: str,
+                       mesure: Optional[str] = None) -> Dict[str, Any]:
+    """Le classement d'un serveur qui reprend un autre (Threads ← Twitter).
+
+    Le relevé de Twitter pour la MÊME période, s'il a moins d'un passage
+    (_minutes_subs), ou s'il a été pris après la fin de la période sans
+    personne de manquant : le même classement, aucun appel. Sinon (Twitter
+    n'a rien relevé depuis un passage : son salon introuvable, par exemple),
+    un relevé neuf avec les sources de Twitter (classement(gid=Twitter)),
+    gardé sous son nom : Threads ne le refait pas au tour suivant."""
+    src = _repris_de(gid)
+    cle = (src, _source(src, mesure), debut.isoformat(), fin.isoformat())
+    _charger_repris()
+    e = _REPRIS.get(cle)
+    if e:
+        cl_e = e.get("cl") or {}
+        age = time.time() - float(e.get("t") or 0)
+        entier = str(e.get("jour") or "") > fin.isoformat()
+        if (0 <= age < _minutes_subs(gid) * 60
+                or (entier and cl_e.get("lignes") and not cl_e.get("illisibles"))):
+            print(f"[podium] {gid} : relevé de {src} du {e.get('le')} repris "
+                  f"({debut} → {fin}), aucun appel", flush=True)
+            return _repris_rendu(e)
+    print(f"[podium] {gid} : aucun relevé récent de {src} pour {debut} → {fin} — "
+          f"relevé ici avec les sources de {src}", flush=True)
+    classement(debut, fin, gid=src, mesure=mesure)
+    e = _REPRIS.get(cle)
+    if e:
+        return _repris_rendu(e)
+    # classement() garde toujours ce qu'il rend : n'arrive que si l'écriture
+    # en mémoire a été défaite entre-temps. Aucun relevé, jamais des zéros.
+    print(f"[podium] {gid} : relevé de {src} introuvable après lecture — aucun relevé",
+          flush=True)
+    return {"lignes": [], "illisibles": [], "frais": False, "entites": 0, "liens": 0,
+            "sans_numero": [], "gabarits": [], "erreur": f"relevé de {src} indisponible"}
+
+
+def _repris_t(gid: Optional[str], jour: Optional[dt.date] = None) -> float:
+    """L'heure du dernier relevé repris pour la quinzaine en cours (0 sans)."""
+    src = _repris_de(gid)
+    if not src:
+        return 0.0
+    debut, fin = saison_en_cours(jour)
+    _charger_repris()
+    e = _REPRIS.get((src, _source(src), debut.isoformat(),
+                     min(jour or _aujourdhui(), fin).isoformat()))
+    return float((e or {}).get("t") or 0)
+
+
 # ─── le message ──────────────────────────────────────────────────────────
 def _heure_podium() -> int:
     return int(_config().get("heure") or HEURE_POST)
@@ -1882,9 +2078,11 @@ def _instantane(cl: Dict[str, Any], fin: Optional[dt.date] = None) -> Dict[str, 
             "introuvables": list(cl.get("introuvables") or []),
             "en_attente": list(cl.get("en_attente") or []),
             "conflits": list(cl.get("conflits") or []),
-            "le": _horodatage(),
+            # un relevé repris (Threads) date de quand Twitter l'a fait : figer
+            # dessus doit dire cette heure-là, et _couvre en juger sur elle
+            "le": cl.get("releve_le") or _horodatage(),
             "jusqu_au": fin.isoformat() if fin else "",
-            "le_iso": _maintenant().isoformat(timespec="minutes")}
+            "le_iso": cl.get("releve_iso") or _maintenant().isoformat(timespec="minutes")}
 
 
 def _couvre(snap: Dict[str, Any], fin: dt.date) -> bool:
@@ -2328,8 +2526,11 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             corps += "\n" + bas
         marches = (f'Marché {p["marche"]}' if mix is None
                    else f'Marchés {p["marche"]} + {tw["marche"]}')
+        # l'heure du relevé quand il est repris de Twitter (Threads) : celle
+        # que Twitter affiche pour les mêmes chiffres, pas celle de l'envoi
         pied = (f'YOULAB • {marches} · comptes VA, sans pseudo · '
-                + ("résultat final" if final else "mis à jour " + _horodatage()))
+                + ("résultat final" if final
+                   else "mis à jour " + (cl.get("releve_le") or _horodatage())))
         if len(pages) > 1:
             pied = f"page {n}/{len(pages)} · " + pied
         if len(corps) > 4096:
@@ -2365,6 +2566,8 @@ def _alltime_lu(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict
     pendant une pause de GetMySocial : le total relevé le jour de la fin (ou
     la veille) est le bon chiffre pour une page qui ne bougera plus.
     """
+    if _repris_de(gid):
+        return _alltime_lu(_repris_de(gid), mesure)
     try:
         return {k: int(v) for k, v in
                 (_lire(_fichier_alltime(gid, mesure), {}).get("totaux") or {}).items()}
@@ -2401,9 +2604,9 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     d = _etat()
     vivants = d.setdefault("subs", {})
     garde = vivants.get(gid) or {}
-    salon = _salon(gid, _config().get("salon_subs") or SALON_SUBS)
+    salon = _salon_subs(gid)
     if not salon:
-        print(f"[podium] salon {SALON_SUBS} introuvable sur {gid}", flush=True)
+        print(f"[podium] salon {_nom_salon_subs(gid)} introuvable sur {gid}", flush=True)
         return ""
     # les têtes du thème avant tout rendu (pages vivantes ET figées) : ici, où
     # l'on parle déjà à Discord, jamais dans pages_subs
@@ -2784,8 +2987,13 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         # dans a_rafraichir_subs : rafraichir_subs repose la meme question et
         # sortait sans rien faire (constate le 03/10 apres f6b44cf)
         return True
-    minutes = int(_profil(gid).get("minutes") or _config().get("minutes_subs")
-                  or _config().get("minutes") or MINUTES_LIVE)
+    if _repris_de(gid) and _repris_t(gid) > float(garde.get("vu") or 0):
+        # Threads suit Twitter : un relevé de Twitter plus récent que le
+        # message de Threads, et Threads se refait au même passage, sans
+        # relevé à lui. À son propre rythme, il pouvait garder une heure de
+        # retard sur Twitter, pour les mêmes VA
+        return True
+    minutes = _minutes_subs(gid)
     return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 
@@ -2868,6 +3076,9 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
 def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     """Met à jour (ou crée) le bonus du jour. Un message NEUF par journée."""
     gid = str(gid)
+    if subs_seulement(gid):
+        print(f"[podium] {gid} : pas de bonus du jour sur ce serveur", flush=True)
+        return ""
     j = jour or _aujourdhui()
     d = _etat()
     vivants = d.setdefault("bonus", {})
@@ -2973,7 +3184,10 @@ def _salon(gid: str, voulu: str = "") -> str:
     # 26/09) ; un « ─│🏁┤-podium » repeint en thème Mario aurait fait pareil au
     # podium. On retombe donc sur le nom NU, comme le reste du dépôt.
     cible = _nom_nu(voulu)
-    trouves = [x for x in rep if _nom_nu(x.get("name")) == cible] if cible else []
+    # un salon texte (ou d'annonces) seulement : une catégorie « SUBS » se lit
+    # « subs » elle aussi, et un message posté dans une catégorie n'arrive nulle part
+    trouves = [x for x in rep if _nom_nu(x.get("name")) == cible
+               and x.get("type", 0) in (0, 5)] if cible else []
     if len(trouves) == 1:
         print(f"[podium] {gid} : salon « {voulu} » retrouvé sous le nom "
               f"« {trouves[0].get('name')} » (même nom nu)", flush=True)
@@ -2982,6 +3196,49 @@ def _salon(gid: str, voulu: str = "") -> str:
         # choisir au hasard, ce serait poster le podium dans le mauvais salon
         print(f"[podium] {gid} : {len(trouves)} salons se lisent « {cible} » ("
               + ", ".join(str(x.get("name")) for x in trouves)
+              + ") — aucun choisi, il faut en renommer un", flush=True)
+    return ""
+
+
+def _nom_salon_subs(gid: Optional[str]) -> str:
+    """Le nom voulu du salon du classement subs : podium_config d'abord (il
+    vaut pour tous les serveurs, comme avant), puis le profil, puis le nom
+    d'origine."""
+    return str(_config().get("salon_subs") or _profil(gid).get("salon_subs") or SALON_SUBS)
+
+
+def _salon_subs(gid: str) -> str:
+    """Le salon du classement de la quinzaine.
+
+    Le nom voulu d'abord, exact puis nu (_salon). En dernier recours, LE salon
+    texte dont le nom finit par « subs » : le propriétaire redécore ses salons
+    à la main (« ─│📊┤-subs » est devenu « ─│👤┤-subs » sur Twitter), et un
+    nom changé ne doit pas faire disparaître le classement sans un mot. Jamais
+    « ─│🏆┤-paliers-subs », son voisin : un classement posté dans le salon des
+    paliers serait lu comme un barème. Plusieurs candidats : aucun, et dit.
+    """
+    voulu = _nom_salon_subs(gid)
+    trouve = _salon(gid, voulu)
+    if trouve:
+        return trouve
+    code, rep = _api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(rep, list):
+        return ""
+    # texte (0) ou annonces (5) : une catégorie « SUBS » n'est pas un salon
+    cands = [x for x in rep if isinstance(x, dict) and x.get("type", 0) in (0, 5)
+             and re.search(r"(?:^|-)subs$", _nom_nu(x.get("name")))
+             and "paliers" not in _nom_nu(x.get("name"))]
+    if len(cands) > 1:
+        nus = [x for x in cands if _nom_nu(x.get("name")) == "subs"]
+        if len(nus) == 1:
+            cands = nus
+    if len(cands) == 1:
+        print(f"[podium] {gid} : salon « {voulu} » introuvable, classement subs posté dans "
+              f"« {cands[0].get('name')} » (seul salon en « -subs », hors paliers)", flush=True)
+        return str(cands[0]["id"])
+    if cands:
+        print(f"[podium] {gid} : salon « {voulu} » introuvable et {len(cands)} salons en "
+              "« -subs » (" + ", ".join(str(x.get("name")) for x in cands)
               + ") — aucun choisi, il faut en renommer un", flush=True)
     return ""
 
@@ -3279,6 +3536,10 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     `forcer` : refait le podium sur le même message s'il existe.
     """
     gid = str(gid)
+    if subs_seulement(gid):
+        # Threads : le classement de la quinzaine seulement (voir l'en-tête)
+        print(f"[podium] {gid} : pas de podium de la semaine sur ce serveur", flush=True)
+        return ""
     # avant tout rendu, y compris la correction des primes retenues plus bas
     _assurer_emojis(gid)
     debut, fin = semaine_passee(jour)
@@ -3443,6 +3704,9 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     podium n'est jamais venu, l'ancien est figé ici, sans mention.
     """
     gid = str(gid)
+    if subs_seulement(gid):
+        print(f"[podium] {gid} : pas de message de la semaine sur ce serveur", flush=True)
+        return ""
     debut, fin = semaine_en_cours(jour)
     d = _etat()
     vivants = d.setdefault("vivants", {})
@@ -3548,6 +3812,8 @@ def _figeable_sans_gms(d: Dict[str, Any], gid: str, garde: Dict[str, Any]) -> bo
 def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
     """Vrai quand le message vivant a passé l'âge, ou n'existe pas encore."""
     gid = str(gid)
+    if subs_seulement(gid):
+        return False
     if _pause_pour(gid):
         d = _etat()
         return _figeable_sans_gms(d, gid, (d.get("vivants") or {}).get(gid) or {})

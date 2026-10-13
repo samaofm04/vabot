@@ -21347,9 +21347,14 @@ try:
     check("le nom du bot a mentionner n est pas ecrit en dur",
           '_profil(gid)["bot"]' in _srcNom
           and "**@Siri**" not in _srcNom and "**@SEVEN**" not in _srcNom)
+    # chaque serveur a SON bot : Luigi sur Twitter et Va IG, Bowser sur Threads
+    # (13/10/2026 : Threads recoit le classement subs de Twitter, par son bot)
+    _botsAct = {_pd.TWITTER_ID: "Luigi", _pd.VA_IG_ID: "Luigi",
+                getattr(_pd, "THREADS_ID", "1498948161039896586"): "Bowser"}
     check("chaque fiche de serveur porte le nom actuel du bot",
           bool(_pd.SERVEURS)
-          and all((f.get("bot") or "") == "Luigi" for f in _pd.SERVEURS.values()))
+          and all((f.get("bot") or "") == _botsAct.get(g) for g, f in _pd.SERVEURS.items()),
+          {g: f.get("bot") for g, f in _pd.SERVEURS.items()})
     # et le rendu, pas seulement la source : le message tel que Discord le recoit
     _clBon = {"lignes": [], "illisibles": [], "frais": True}
     _dscBon = _pd.embed_bonus(_clBon, _dtVtk.date(2026, 10, 3),
@@ -21443,9 +21448,15 @@ try:
           {_TWI, _THR} <= set(_tkT.SERVEURS_TICKETS))
 
     # le podium et les liens restent a Twitter : leurs chiffres viennent
-    # des liens VA de Twitter, et les liens sont crees dans EMY TWITTER
-    check("le podium n est PAS publie sur Threads",
-          _TWI in _pdT.SERVEURS and _THR not in _pdT.SERVEURS)
+    # des liens VA de Twitter, et les liens sont crees dans EMY TWITTER.
+    # Depuis le 13/10/2026 (proprietaire : « les recap des subs […] pour le
+    # Threads »), Threads montre le classement de la quinzaine de Twitter, et
+    # LUI SEUL : ni podium de la semaine, ni bonus, ni primes
+    # (tests_recaps_twitter_threads.py)
+    check("le podium n est PAS publie sur Threads (la quinzaine de Twitter seulement)",
+          _TWI in _pdT.SERVEURS and not _pdT.subs_seulement(_TWI)
+          and _pdT.subs_seulement(_THR) and _pdT._repris_de(_THR) == _TWI
+          and _pdT.a_rafraichir(_THR) is False and _pdT.a_rafraichir_bonus(_THR) is False)
     check("les liens GetMySocial ne sont PAS branches sur Threads",
           _TWI in _lvT.SERVEURS and _THR not in _lvT.SERVEURS)
     check("la synchro des groupes ne touche pas aux managers de Threads",

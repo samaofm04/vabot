@@ -60865,6 +60865,22 @@ def _ramasser_drive(minutes: int = 5) -> None:
         print(f"[drive] ramassage : {type(e).__name__}: {e}", flush=True)
 
 
+def _recap_clics_rest(gid: str) -> None:
+    """Le recap des clics de ce serveur, s'il en a un (recap_clics_rest).
+
+    Une panne ici ne doit pas priver le serveur de son podium : elle est dite
+    et la boucle continue."""
+    try:
+        import recap_clics_rest as _rcr
+        if gid not in _rcr.cibles():
+            return
+        import verif_discord as _vd_r
+        with _vd_r.sur_serveur(gid):
+            _rcr.publier(gid)
+    except Exception as e:
+        print(f"[recap-clics] {gid} : {type(e).__name__}: {e}", flush=True)
+
+
 def _start_podium_semaine_daemon() -> bool:
     """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
@@ -60892,11 +60908,19 @@ def _start_podium_semaine_daemon() -> bool:
                 import podium_discord as _p
                 import verif_discord as _vd_p
                 for gid in _vd_p.SERVEURS_EXTRA:
+                    # le recap des clics de Va Twitter et Va Threads : le
+                    # report de leur espace, repris tel quel par le bot du
+                    # serveur (recap_clics_rest). Rien ailleurs.
+                    _recap_clics_rest(gid)
                     # le podium ne vaut que la ou ses chiffres veulent dire
-                    # quelque chose : les liens VA de Twitter ne racontent
-                    # rien des VA Threads
+                    # quelque chose (podium_discord.SERVEURS)
                     if gid not in _p.SERVEURS:
                         continue
+                    # Va Threads (13/10/2026) : le classement subs de Twitter,
+                    # et rien d'autre -- ni podium, ni bonus, ni synchro des
+                    # liens GetMySocial, ni suivi des VA : ses chiffres sont
+                    # ceux des VA de Twitter (podium_discord.subs_seulement)
+                    seul = _p.subs_seulement(gid)
                     # tout ce qui suit agit sur CE serveur, avec son bot
                     with _vd_p.sur_serveur(gid):
                         # Un clic sur « 🔄 Mettre a jour » en cours : chaque appel
@@ -60904,22 +60928,23 @@ def _start_podium_semaine_daemon() -> bool:
                         # journal « passage saute ») plutot que de poster en double.
                         # le lundi : on fige la semaine ecoulee, une fois, avec
                         # @everyone. Le message vivant repart a neuf ensuite.
-                        if _p.a_poster():
+                        if not seul and _p.a_poster():
                             _p.poster_podium(gid)
                         # et le reste du temps : le classement en cours, reedite
                         # sur place (une edition ne notifie personne)
-                        if _p.a_rafraichir(gid):
+                        if not seul and _p.a_rafraichir(gid):
                             _p.rafraichir(gid)
                         # le classement de la quinzaine, TOUS les comptes
                         if _p.a_rafraichir_subs(gid):
                             _p.rafraichir_subs(gid)
                         # et le bonus du jour : les trois premiers de la journee
-                        if _p.a_rafraichir_bonus(gid):
+                        if not seul and _p.a_rafraichir_bonus(gid):
                             _p.rafraichir_bonus(gid)
                         # GetMySocial suit Discord : un manager neuf recoit son
                         # groupe, un VA deplace a la main voit son lien suivre
-                        _sync_liens_va(gid)
-                        _suivi_va(gid)
+                        if not seul:
+                            _sync_liens_va(gid)
+                            _suivi_va(gid)
                 # le salon « modele a suivre » suit la watchlist Instagram :
                 # il ne depend d'aucun serveur Discord en particulier
                 _sync_modeles_a_suivre()
