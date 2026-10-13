@@ -177,6 +177,11 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 TWITTER_ID = "1445108485090971710"
 VA_IG_ID = "1505418484052394004"
 THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
+#: Va Threads, HORS de SERVEURS depuis le 13/10/2026 (voir le commentaire dans
+#: SERVEURS) : ce que Threads montrait, gardé pour le jour où il le redemande.
+PROFIL_THREADS: Dict[str, Any] = {"reprend": TWITTER_ID, "subs_seul": True,
+                                  "bot": "Bowser", "bonus": False}
+
 SERVEURS: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {"equipes": None,                # podium_config, sinon EQUIPES_VA
                  "pays": ("US",), "marche": "US", "source": "Twitter 🐦",
@@ -197,9 +202,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
     # « mesure » de Twitter change aussi Threads, les deux ne divergent
     # jamais. « subs_seul » : ni podium, ni bonus, ni synchro des liens, ni
     # suivi des VA (la boucle de web_upload ne fait que la quinzaine).
-    # POUR COUPER THREADS : retirer cette entrée, rien d'autre.
-    THREADS_ID: {"reprend": TWITTER_ID, "subs_seul": True,
-                 "bot": "Bowser", "bonus": False},
+    # COUPÉ le 13/10/2026, le jour même, par le propriétaire : « pour Threads
+    # j'ai remove les subs, pas besoin » (le salon -subs de Threads est
+    # supprimé). Le profil reste écrit (PROFIL_THREADS) : le remettre ici, sous
+    # la clé THREADS_ID, suffit à le relancer.
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
                "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",

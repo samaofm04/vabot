@@ -178,6 +178,16 @@ def check(label, cond, detail=""):
 
 
 TW, TH, IG = pd.TWITTER_ID, pd.THREADS_ID, pd.VA_IG_ID
+
+# Le 13/10/2026, le propriétaire a retiré la quinzaine de Threads et le récap
+# des clics de Twitter (« pas besoin »). Les réglages livrés le disent ; les
+# mécanismes, eux, restent testés en remettant les deux le temps de ce fichier.
+check("livré : Threads n'a plus de classement subs (profil gardé hors de SERVEURS)",
+      TH not in pd.SERVEURS and pd.PROFIL_THREADS.get("subs_seul") is True)
+check("livré : le récap des clics part sur Threads seulement (Twitter retiré)",
+      set(rcr.CIBLES_DEFAUT) == {TH})
+pd.SERVEURS[TH] = dict(pd.PROFIL_THREADS)
+rcr.CIBLES_DEFAUT[TW] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 AUTRE = "1535758943324999711"          # Youl4b : le serveur du report d'origine
 NUMEROS = {"Roucham": 12, "Roucham SPAM": 24, "tsiry 1": 43, "Ricardo": 22, "abdoul_9684": 31}
 

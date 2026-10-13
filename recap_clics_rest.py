@@ -69,8 +69,10 @@ SALON_CLICS = "─│📊┤-l-clicks"
 #: Twitter, au marché US, des deux côtés.
 _REPORT_US = {"team_id": ESPACE_JESSY, "group_id": None, "identity": None,
               "group_name": "JESSY LE RETOUR", "marche": "us", "tout": True}
+#: Va Twitter RETIRÉ le 13/10/2026 par le propriétaire : « pour Twitter remove
+#: les clicks, pas besoin ». Le remettre : ajouter TWITTER_ID ici, ou
+#: {"cibles": {"1445108485090971710": {...}}} dans data/recap_clics_rest.json.
 CIBLES_DEFAUT: Dict[str, Dict[str, Any]] = {
-    TWITTER_ID: dict(_REPORT_US, salon=SALON_CLICS),
     THREADS_ID: dict(_REPORT_US, salon=SALON_CLICS),
 }
 
