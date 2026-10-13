@@ -23,11 +23,16 @@ sans toucher au reste.
 LA SAISON est la quinzaine, comme le classement des subs : 2026-09-A du 1er
 au 15, 2026-09-B du 16 à la fin du mois. Les gains repartent à zéro à chaque
 saison — c'est écrit dans le message, il ne faut pas que ce soit une surprise.
+
+EN PAUSE depuis le 13/10/2026 (QUETES_EN_PAUSE, plus bas) : plus de quête du
+jour, plus de nouvelle demande, les boutons déjà postés retirés une fois. Les
+demandes déjà parties chez un manager se tranchent toujours.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,6 +44,33 @@ ETAT_FICHIER = DATA_DIR / "quetes.json"
 CATALOGUE_FICHIER = DATA_DIR / "quetes_catalogue.json"
 
 SALON_QUETES = "─│🎯┤-quête-du-jour"
+
+# Propriétaire, 13/10/2026, sur la capture d'un ticket VA (« 🎯 Quête validée »,
+# « 🎯 Quête à valider » et ses boutons Valider/Refuser) : « pour tous les
+# trucs, pour le moment retire les quêtes ». « Pour le moment » : un
+# interrupteur, pas un retrait du code — False remet tout comme avant.
+# Pendant la pause, sur TOUS les serveurs :
+# - la quête du jour n'est plus postée ;
+# - le bouton « Valider ma quête » des anciens messages répond la pause et
+#   n'enregistre rien ;
+# - les demandes DÉJÀ parties chez un manager se tranchent toujours : c'est de
+#   l'argent gagné, on ne le perd ni ne le refuse d'office ;
+# - /quetes montre toujours le total de la saison, avec la ligne de pause ;
+# - une seule fois, les messages de quête déjà postés perdent leur bouton.
+QUETES_EN_PAUSE = True
+PAUSE_TEXTE = "⏸️ Les quêtes sont en pause pour le moment."
+# La ligne posée sur les messages de quête dont le bouton est retiré.
+PAUSE_LIGNE_MESSAGE = "⏸️ **Quêtes en pause** pour le moment."
+
+# Lire-modifier-écrire de data/quetes.json. Le retrait des boutons tourne dans
+# le fil du démon pendant qu'un manager tranche depuis la route Discord : sans
+# verrou, l'un relisait l'état, l'autre écrivait le sien, et le premier
+# réécrivait sa copie par-dessus — un verdict « validée » pouvait disparaître
+# alors que le message avait déjà perdu ses boutons.
+_VERROU_ETAT = threading.Lock()
+# « [quetes] en pause » une fois par serveur et par jour : le démon repasse
+# toutes les 10 minutes, la ligne noierait le journal.
+_PAUSE_DITE: set = set()
 
 # Le catalogue par défaut. data/quetes_catalogue.json le remplace entièrement
 # s'il existe : les missions et les montants se règlent sans toucher au code.
@@ -162,6 +194,9 @@ def _bouton_valider(jour: dt.date) -> List[Dict[str, Any]]:
 def poster_quete(gid: str, jour: Optional[dt.date] = None, mentionner: bool = True) -> str:
     """Poste la quête du jour. Ne la poste pas deux fois le même jour."""
     gid = str(gid)
+    if QUETES_EN_PAUSE:
+        _en_pause(gid, jour or dt.date.today())
+        return ""
     try:
         import verif_discord as _vd
         if (_vd.serveur(gid) or {}).get("quetes") is False:
@@ -191,6 +226,152 @@ def poster_quete(gid: str, jour: Optional[dt.date] = None, mentionner: bool = Tr
     _ecrire(d)
     print(f'[quetes] {j} « {q["titre"]} » postée dans {gid}', flush=True)
     return str(rep["id"])
+
+
+# ─── la pause ────────────────────────────────────────────────────────────
+def _en_pause(gid: str, j: dt.date) -> None:
+    """Ce que fait le passage du démon pendant la pause : ne rien poster, le
+    dire au journal, et retirer les boutons encore en place sur CE serveur.
+    Le démon appelle poster_quete serveur par serveur, chacun sous son bot
+    (sur_serveur) : c'est ce passage-là qui fait le retrait."""
+    try:
+        import verif_discord as _vd
+        sans_quetes = (_vd.serveur(gid) or {}).get("quetes") is False
+    except Exception:                                        # noqa: BLE001
+        sans_quetes = False
+    # Va IG n'a jamais eu de quête du jour : y annoncer la pause chaque jour
+    # serait du bruit. Son retrait tourne quand même (il ne trouve rien).
+    cle = f"{gid}:{j.isoformat()}"
+    if not sans_quetes and cle not in _PAUSE_DITE:
+        _PAUSE_DITE.add(cle)
+        print(f"[quetes] en pause (QUETES_EN_PAUSE) : aucune quête du jour postée "
+              f"le {j.isoformat()} sur {gid}", flush=True)
+        _signaler_hors_boucle()
+    retirer_boutons(gid)
+
+
+def _signaler_hors_boucle() -> None:
+    """Le démon ne passe que sur les serveurs de SERVEURS_EXTRA : une quête
+    postée ailleurs (à la main) garderait son bouton sans que personne le
+    sache. On le dit, une fois par serveur ; retirer_boutons(<gid>) s'appelle
+    à la main."""
+    try:
+        import verif_discord as _vd
+        visites = {str(g) for g in _vd.SERVEURS_EXTRA}
+    except Exception:                                        # noqa: BLE001
+        return
+    d = _etat()
+    faits = d.get("pause_boutons") or {}
+    restes: Dict[str, int] = {}
+    for cle in (d.get("postees") or {}):
+        g = str(cle).rpartition(":")[0]
+        if g not in visites and cle not in faits:
+            restes[g] = restes.get(g, 0) + 1
+    for g, n in restes.items():
+        if f"hors:{g}" not in _PAUSE_DITE:
+            _PAUSE_DITE.add(f"hors:{g}")
+            print(f"[quetes] pause : {n} quête(s) postée(s) sur {g}, serveur que le démon ne "
+                  f"visite pas — boutons laissés (quetes_discord.retirer_boutons('{g}'))", flush=True)
+
+
+def _noter_retraits(resultats: Dict[str, str]) -> None:
+    """La trace du retrait, relue juste avant d'écrire et sous verrou : un
+    manager peut avoir tranché pendant les appels à Discord (voir
+    _VERROU_ETAT)."""
+    if not resultats:
+        return
+    with _VERROU_ETAT:
+        d = _etat()
+        trace = d.setdefault("pause_boutons", {})
+        maintenant = int(time.time())
+        for cle, etat in resultats.items():
+            trace[cle] = {"etat": etat, "le": maintenant}
+        _ecrire(d)
+
+
+def retirer_boutons(gid: str) -> Dict[str, int]:
+    """Une seule fois par message : retire « ✅ Valider ma quête » des quêtes
+    déjà postées sur ce serveur et y pose la ligne de pause.
+
+    Pourquoi : un ancien message garde son bouton pour toujours, et un clic
+    sur la quête d'un jour passé ouvrait encore une demande. Le clic répond
+    déjà la pause (traiter), mais un bouton qui ne fait plus rien ne doit
+    pas rester sous les yeux des VA.
+
+    On MODIFIE, on n'efface jamais : le contenu passe à la ligne de pause,
+    les boutons disparaissent, l'embed (la quête et son montant) ne bouge
+    pas. Le message est modifié par le bot de son serveur (sur_serveur) :
+    Discord ne laisse modifier un message qu'à son auteur.
+
+    Trace dans data/quetes.json (« pause_boutons ») : un message retiré ne
+    l'est pas deux fois. Un échec passager (salon introuvable, réseau,
+    limite Discord) n'est PAS noté : le passage suivant du démon réessaie.
+    Deux refus définitifs sont notés, et dits : le message n'existe plus
+    (404), ou il a été posté par un autre bot (403, code 50005 — Siri, avant
+    que Threads ait le sien) ; un clic y répond la pause de toute façon.
+    """
+    gid = str(gid)
+    bilan = {"retires": 0, "absents": 0, "autre_bot": 0, "echecs": 0, "illisibles": 0}
+    d = _etat()
+    postees = d.get("postees") or {}
+    faits = d.get("pause_boutons") or {}
+    a_faire: List[tuple] = []
+    resultats: Dict[str, str] = {}
+    for cle, mid in postees.items():
+        if cle in faits:
+            continue
+        g, _, jour = str(cle).rpartition(":")
+        if g != gid:
+            continue
+        if not str(mid or "").strip():
+            # une entrée sans identifiant de message : rien à modifier, mais
+            # on le dit (une seule fois, elle est notée)
+            print(f"[quetes] pause : entrée {cle} sans message, rien à retirer", flush=True)
+            resultats[cle] = "illisible"
+            bilan["illisibles"] += 1
+            continue
+        a_faire.append((jour, cle, str(mid)))
+    if not a_faire:
+        _noter_retraits(resultats)
+        return bilan
+    # le plus récent d'abord : c'est celui sur lequel les VA cliquent
+    a_faire.sort(reverse=True)
+    from verif_discord import sur_serveur
+    with sur_serveur(gid):
+        salon = _salon_quetes(gid)
+        if not salon:
+            bilan["echecs"] += len(a_faire)
+            print(f"[quetes] pause : salon {SALON_QUETES} introuvable sur {gid} — "
+                  f"{len(a_faire)} bouton(s) à retirer, nouvel essai au prochain passage", flush=True)
+            _noter_retraits(resultats)
+            return bilan
+        for jour, cle, mid in a_faire:
+            code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                             json={"content": PAUSE_LIGNE_MESSAGE, "components": [],
+                                   "allowed_mentions": {"parse": []}})
+            code_d = (rep or {}).get("code") if isinstance(rep, dict) else None
+            if code == 200:
+                resultats[cle] = "retire"
+                bilan["retires"] += 1
+            elif code == 404:
+                resultats[cle] = "absent"
+                bilan["absents"] += 1
+                print(f"[quetes] pause : message de la quête du {jour} ({mid}) introuvable "
+                      f"sur {gid} — rien à retirer", flush=True)
+            elif code == 403 and code_d == 50005:
+                resultats[cle] = "autre_bot"
+                bilan["autre_bot"] += 1
+                print(f"[quetes] pause : la quête du {jour} ({mid}) sur {gid} a été postée par "
+                      f"un autre bot — bouton laissé, un clic y répond la pause", flush=True)
+            else:
+                bilan["echecs"] += 1
+                print(f"[quetes] pause : bouton de la quête du {jour} ({mid}) non retiré sur {gid} "
+                      f"(HTTP {code}) {str(rep)[:120]} — nouvel essai au prochain passage", flush=True)
+    _noter_retraits(resultats)
+    print(f'[quetes] pause sur {gid} : {bilan["retires"]} bouton(s) retiré(s), '
+          f'{bilan["absents"]} message(s) disparu(s), {bilan["autre_bot"]} d\'un autre bot, '
+          f'{bilan["echecs"]} à réessayer', flush=True)
+    return bilan
 
 
 # ─── gains ───────────────────────────────────────────────────────────────
@@ -232,6 +413,16 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             if ((p.get("data") or {}).get("name") or "") != "quetes":
                 return None
             g = gains(gid, uid)
+            if QUETES_EN_PAUSE:
+                # le total gagné reste visible : il est dû ; seul le conseil
+                # « clique Valider » disparaît, le bouton ne fait plus rien
+                if not g["quetes"]:
+                    return _ephemere(f'💰 Aucune quête validée pour la saison **{g["saison"]}**.\n'
+                                     + PAUSE_TEXTE)
+                return _ephemere(f'💰 Saison **{g["saison"]}** : **{g["montant"]:.2f}$** '
+                                 f'sur **{g["quetes"]}** quête(s) validée(s).\n'
+                                 "⚠️ Payé après validation de ta période d'essai.\n"
+                                 + PAUSE_TEXTE)
             if not g["quetes"]:
                 return _ephemere(f'💰 Aucune quête validée pour la saison **{g["saison"]}**.\n'
                                  "Clique ✅ **Valider ma quête** après l'avoir réussie.")
@@ -244,6 +435,10 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         cid = ((p.get("data") or {}).get("custom_id") or "")
         if not cid.startswith("quete:"):
             return None
+        if QUETES_EN_PAUSE and cid.split(":")[1:2] == ["go"]:
+            # un ancien message garde son bouton : le clic répond la pause et
+            # n'écrit RIEN (ni demande, ni message dans l'espace perso)
+            return _ephemere(PAUSE_TEXTE)
         if not gid or not uid:
             return _ephemere("Compte introuvable.")
         morceaux = cid.split(":")
@@ -316,20 +511,25 @@ def _demander(gid: str, uid: str, jour: str, p: Dict[str, Any]) -> Dict[str, Any
 
 def _trancher(gid: str, uid: str, jour: str, accepte: bool,
               par: str, p: Dict[str, Any]) -> Dict[str, Any]:
-    """Le manager valide ou refuse. Un seul verdict par demande."""
-    d = _etat()
-    demandes = d.setdefault("demandes", {})
-    cle = f"{gid}:{uid}:{jour}"
-    v = demandes.get(cle)
-    if not v:
-        return _ephemere("Demande introuvable (elle a peut-être été effacée).")
-    if v.get("etat") != "attente":
-        deja = "validée" if v["etat"] == "ok" else "refusée"
-        return _ephemere(f"Cette quête a déjà été {deja}.")
-    v["etat"] = "ok" if accepte else "non"
-    v["par"] = par
-    v["tranche"] = int(time.time())
-    _ecrire(d)
+    """Le manager valide ou refuse. Un seul verdict par demande.
+
+    Pendant la pause aussi : une demande déjà partie est de l'argent gagné."""
+    # sous verrou : le retrait des boutons de la pause écrit le même fichier
+    # depuis le fil du démon (voir _VERROU_ETAT)
+    with _VERROU_ETAT:
+        d = _etat()
+        demandes = d.setdefault("demandes", {})
+        cle = f"{gid}:{uid}:{jour}"
+        v = demandes.get(cle)
+        if not v:
+            return _ephemere("Demande introuvable (elle a peut-être été effacée).")
+        if v.get("etat") != "attente":
+            deja = "validée" if v["etat"] == "ok" else "refusée"
+            return _ephemere(f"Cette quête a déjà été {deja}.")
+        v["etat"] = "ok" if accepte else "non"
+        v["par"] = par
+        v["tranche"] = int(time.time())
+        _ecrire(d)
 
     # Le message perd ses boutons : impossible de revenir dessus par mégarde.
     couleur = 0x22C55E if accepte else 0x6B7280

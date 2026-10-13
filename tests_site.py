@@ -20279,9 +20279,17 @@ try:
     check("aucune quete ne revient tant qu il en reste d autres",
           len(set(_suite)) == len(_q.catalogue()), str(_suite))
     _dQ = _plQ.Path(_tfQ.mkdtemp())
-    _savQ = (_q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager)
+    _savQ = (_q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager, _q.QUETES_EN_PAUSE)
+    # La demande est datee d'AUJOURD'HUI : /quetes et gains() lisent la saison
+    # en cours, et une demande figee au 23/09 sortait de la saison des le
+    # 1er octobre (trois echecs qui ne disaient rien du code).
+    _jQ = _dtQ.date.today()
+    _jqs = _jQ.isoformat()
     try:
         _q.ETAT_FICHIER = _dQ / "quetes.json"
+        # Ce bloc verifie les quetes EN MARCHE (le jour ou la pause du
+        # 13/10/2026 sera levee). La pause a ses tests : tests_quetes_pause.py.
+        _q.QUETES_EN_PAUSE = False
         _envois = []
 
         def _fauxQ(methode, chemin, **kw):
@@ -20291,7 +20299,7 @@ try:
         _q._api = _fauxQ
         _tkQ.role_manager = lambda gid: "r-mgr"
         _tkQ.ticket_de = lambda gid, uid: ""
-        def _clic(uid, jour="2026-09-23", roles=None, cid=None):
+        def _clic(uid, jour=_jqs, roles=None, cid=None):
             return _q.traiter({"type": 3, "guild_id": "g1",
                                "member": {"user": {"id": uid}, "roles": roles or []},
                                "data": {"custom_id": cid or f"quete:go:{jour}"}})
@@ -20312,21 +20320,21 @@ try:
                          if m == "POST" and "components" in (k.get("json") or {})), [])
         _ids = [b["custom_id"] for r in _boutons for b in r["components"]]
         check("le manager a un Valider et un Refuser",
-              _ids == ["quete:ok:99:2026-09-23", "quete:no:99:2026-09-23"], str(_ids))
+              _ids == [f"quete:ok:99:{_jqs}", f"quete:no:99:{_jqs}"], str(_ids))
         _envois.clear()
         _r = _clic("99")
         check("deuxieme clic du membre : rien n est reposte, on lui rappelle",
               not _envois and "déjà partie" in (_r or {}).get("data", {}).get("content", ""))
-        _r = _clic("77", roles=[], cid="quete:ok:99:2026-09-23")
+        _r = _clic("77", roles=[], cid=f"quete:ok:99:{_jqs}")
         check("un non-manager ne peut pas valider",
               "Manager" in (_r or {}).get("data", {}).get("content", ""))
         check("gains a zero tant que rien n est valide", _q.gains("g1", "99")["montant"] == 0)
-        _montant = _q.quete_du_jour(_j)["montant"]
-        _r = _clic("10", roles=["r-mgr"], cid="quete:ok:99:2026-09-23")
+        _montant = _q.quete_du_jour(_jQ)["montant"]
+        _r = _clic("10", roles=["r-mgr"], cid=f"quete:ok:99:{_jqs}")
         _g = _q.gains("g1", "99")
         check("le manager valide : la recompense est creditee",
               _g["montant"] == round(_montant, 2) and _g["quetes"] == 1, str(_g))
-        _r = _clic("10", roles=["r-mgr"], cid="quete:ok:99:2026-09-23")
+        _r = _clic("10", roles=["r-mgr"], cid=f"quete:ok:99:{_jqs}")
         check("un second verdict est refuse : pas de double paiement",
               "déjà" in (_r or {}).get("data", {}).get("content", "")
               and _q.gains("g1", "99")["montant"] == round(_montant, 2))
@@ -20337,7 +20345,7 @@ try:
         check("les gains d une AUTRE saison ne comptent pas",
               _q.gains("g1", "99", "2026-08-A")["montant"] == 0)
     finally:
-        _q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager = _savQ
+        _q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager, _q.QUETES_EN_PAUSE = _savQ
     _srcQ = _plQ.Path("web_upload.py").read_text(encoding="utf-8")
     check("les quetes sont branchees sur la route Discord, avant verif_discord",
           _srcQ.find("_q.traiter(charge)") < _srcQ.find("_vd.traiter_interaction(charge)")
