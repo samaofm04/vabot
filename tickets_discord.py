@@ -1145,11 +1145,12 @@ def suivre_managers(gid: str) -> Dict[str, Any]:
     """Un tour : aligne les catégories « Manager X » sur les managers du jour.
 
     Rend le bilan : renommees, creees, deplaces, supprimees, realignes,
-    reportes, rates, gardees, et « ignore » (pourquoi rien n'a été fait)."""
+    reportes, rates, gardees, adoptes (tickets sans fiche, fiche refaite), et
+    « ignore » (pourquoi rien n'a été fait)."""
     gid = str(gid)
     bilan: Dict[str, Any] = {"renommees": [], "creees": [], "deplaces": [],
                              "supprimees": [], "realignes": [], "reportes": [],
-                             "rates": [], "gardees": [], "ignore": ""}
+                             "rates": [], "gardees": [], "adoptes": [], "ignore": ""}
     journal: List[Dict[str, Any]] = []
 
     def noter(quoi: str, texte: str) -> None:
@@ -1461,6 +1462,61 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
             noter("supprimees", f"« {o.get('name')} » supprimée (vide)")
         else:
             noter("rates", f"« {o.get('name')} » non supprimée (HTTP {code}) {str(rep)[:80]}")
+
+    def _gere(o: Dict[str, Any]) -> bool:
+        """La ligne d'un manager : « gérer les messages » (MANAGER), pas un VA."""
+        try:
+            return bool(int(str(o.get("allow") or "0")) & GERER_MSG)
+        except ValueError:
+            return False
+
+    # 3 bis. un ticket que tickets.json ne connaît pas, rangé chez un manager
+    #    du jour : sa fiche est refaite d'après ses droits, puis l'étape 4 le
+    #    traite comme les autres. Constaté le 13/10/2026 sur Va Twitter : deux
+    #    des trois tickets de « Manager SPECTRUM » (repris de Vector) n'avaient
+    #    pas de fiche — Vector y gardait sa ligne, Spectrum n'y avait pas la
+    #    sienne, et rien ne le disait. On ne devine rien : un salon au nom d'un
+    #    ticket, UN SEUL membre aux droits d'un VA (sans « gérer les
+    #    messages »), et ce membre sans autre ticket connu. Sinon, dit et laissé.
+    for cat in sorted(cats, key=_rang):
+        if not unique.get(_cle_categorie(cat.get("name"))):
+            continue
+        for c in enfants(str(cat["id"])):
+            cid = str(c.get("id"))
+            if (cid in salon_fiche or c.get("type", 0) != 0
+                    or f"-va-{AROBASE}" not in str(c.get("name") or "")):
+                continue
+            membres = [o for o in (c.get("permission_overwrites") or [])
+                       if str(o.get("type", "1")) in ("1", "member")]
+            vas = [str(o.get("id")) for o in membres if not _gere(o)]
+            chefs = [str(o.get("id")) for o in membres if _gere(o)]
+            if len(vas) != 1:
+                _dire(f"sansfiche:{gid}:{cid}",
+                      f"{gid} : « {c.get('name')} » sans fiche dans tickets.json et "
+                      f"{len(vas)} membre(s) aux droits d'un VA : à ranger à la main")
+                continue
+            cle = f"{gid}:{vas[0]}"
+            with _VERROU:
+                d = _etat()
+                tk = d.setdefault("tickets", {})
+                f = tk.get(cle) if isinstance(tk.get(cle), dict) else {}
+                if f.get("salon") and str(f.get("salon")) != cid:
+                    _dire(f"sansfiche:{gid}:{cid}",
+                          f"{gid} : « {c.get('name')} » sans fiche, mais {vas[0]} a déjà "
+                          f"le ticket {f.get('salon')} : à ranger à la main")
+                    continue
+                # l'ancien manager : la ligne « gérer les messages » que
+                # ouvrir_ticket avait posée, s'il n'y en a qu'une ; l'étape 4
+                # la retire en donnant le ticket au manager de la catégorie
+                f = dict(f, salon=cid, manager=chefs[0] if len(chefs) == 1 else "",
+                         adopte=int(time.time()))
+                tk[cle] = f
+                _ecrire_etat(d)
+            _dire(f"sansfiche:{gid}:{cid}", "")
+            fiches[cle] = dict(f)
+            salon_fiche[cid] = cle
+            noter("adoptes", f"« {c.get('name')} » : fiche refaite pour {vas[0]} "
+                             f"(manager d'avant : {f['manager'] or 'aucun'})")
 
     # 4. chaque VA rangé chez un manager a ce manager dans sa fiche et ses droits
     reste_r = int(cfg.get("managers_auto_realignes") or MAX_REALIGNES)

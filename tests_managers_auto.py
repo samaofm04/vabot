@@ -880,6 +880,65 @@ try:
     check("Spectrum🥷 : la synchro GetMySocial range le lien dans SPECTRUM, un seul groupe créé",
           ranges == [("L203", "SPECTRUM")] and crees == ["SPECTRUM"], (ranges, crees, bl))
 
+    # ══ 14. tickets sans fiche dans une catégorie de manager ══════════════
+    # Va Twitter, 13/10/2026 : « Manager SPECTRUM » (reprise de Vector) avait
+    # trois tickets, dont deux sans fiche dans tickets.json — l'un d'eux, le
+    # vieux ticket de VA de Spectrum lui-même. Vector y gardait sa ligne.
+    print("\n— 14. tickets sans fiche : fiche refaite d'après les droits, puis rangés")
+    f = monde(tickets={"203": ("303", VECTOR), "208": ("399", MOAN), SPECTRUM: (None, None)})
+    f.categorie("11", NOM[YAZID], 1)
+    f.categorie("12", NOM[MOAN], 2)
+    f.categorie("13", NOM[SPECTRUM], 3)
+    f.ticket("303", "203", "13", VECTOR, 1)          # avec fiche
+    f.ticket("305", "205", "13", VECTOR, 2)          # sans fiche
+    f.ticket("306", SPECTRUM, "13", VECTOR, 3)       # le vieux ticket de Spectrum
+    f.ticket("307", "206", "13", VECTOR, 4)          # deux membres aux droits de VA
+    f.salons["307"]["permission_overwrites"].append(
+        {"id": "207", "type": 1, "allow": str(tk.MEMBRE), "deny": "0"})
+    f.ticket("308", "208", "13", VECTOR, 5)          # 208 a déjà un autre ticket
+    f.salons["309"] = {"id": "309", "type": 0, "name": "─│📌┤-notes", "parent_id": "13",
+                       "position": 6, "guild_id": G, "permission_overwrites": [
+                           {"id": "209", "type": 1, "allow": str(tk.MEMBRE), "deny": "0"}]}
+    for u in (YAZID, MOAN, SPECTRUM):
+        f.role(u, True)
+    sortie = io.StringIO()
+    with contextlib.redirect_stdout(sortie):
+        b = tk.suivre_managers(G)
+    dit = sortie.getvalue()
+    check("sans fiche : deux tickets repris (305, et le vieux ticket de Spectrum), pas plus",
+          len(b["adoptes"]) == 2 and any("305" in x or "va205" in x for x in b["adoptes"])
+          and any(f"va{SPECTRUM}" in x for x in b["adoptes"]), b["adoptes"])
+    d305 = f.droits("305")
+    check("305 : fiche refaite, donnée à Spectrum (manager d'avant : Vector)",
+          fiche("205").get("salon") == "305" and fiche("205").get("manager") == SPECTRUM
+          and fiche("205").get("manager_avant") == VECTOR and fiche("205").get("adopte"),
+          fiche("205"))
+    check("305 : droits — Spectrum nommé, Vector retiré, le VA et le rôle intacts",
+          d305.get(SPECTRUM, {}).get("allow") == str(tk.MANAGER) and VECTOR not in d305
+          and d305.get("205", {}).get("allow") == str(tk.MEMBRE)
+          and d305.get(ROLE_MGR, {}).get("allow") == str(tk.MANAGER), d305)
+    d306 = f.droits("306")
+    check("306 (ticket de Spectrum) : sa fiche vide reprend le salon, Vector retiré, "
+          "sa ligne à lui inchangée",
+          fiche(SPECTRUM).get("salon") == "306" and fiche(SPECTRUM).get("manager") == SPECTRUM
+          and VECTOR not in d306 and d306.get(SPECTRUM, {}).get("allow") == str(tk.MEMBRE),
+          (fiche(SPECTRUM), d306))
+    check("303 (avec fiche) : rangé comme avant", fiche("203").get("manager") == SPECTRUM
+          and VECTOR not in f.droits("303"))
+    check("307 (deux membres aux droits de VA) : rien deviné, rien touché, et dit",
+          not fiche("206") and not fiche("207") and VECTOR in f.droits("307")
+          and "« ─│🔵┤-va-＠va206 » sans fiche" in dit and "2 membre(s)" in dit, dit[-600:])
+    check("308 (son VA a déjà un autre ticket) : rien touché, et dit",
+          fiche("208").get("salon") == "399" and VECTOR in f.droits("308")
+          and "a déjà le ticket 399" in dit, dit[-600:])
+    check("309 (pas un salon de ticket) : ignoré", not fiche("209")
+          and "─│📌┤-notes" not in dit)
+    f.appels.clear()
+    with calme():
+        b2 = tk.suivre_managers(G)
+    check("sans fiche : un second tour ne refait rien (aucune écriture, rien de repris)",
+          not f.ecritures() and not b2["adoptes"] and not b2["realignes"], (f.ecritures(), b2))
+
     # ══ 13. branché dans la boucle du podium ══════════════════════════════
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")
     i0 = src.find("def _start_podium_semaine_daemon")
