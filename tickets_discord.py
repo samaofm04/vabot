@@ -511,6 +511,75 @@ def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
     return _creer_categorie(gid, m)[1]
 
 
+#: Les serveurs dont les salons de VA portent le numéro du VA, comme Va IG
+#: (« 🔴-21-va-… ») : « ─│🔵┤-61-va-＠momobtn ». Propriétaire, 13/10/2026,
+#: devant les tickets de Threads : « faut mettre le numéro du VA ».
+NUMERO_DANS_SALON = {"1498948161039896586"}      # YouLab THREADS
+
+
+def numero_va(gid: str, uid: str, pseudo: str = "") -> int:
+    """Le numéro du VA sur ce serveur : celui de son lien (« Threads VA 61
+    @momobtn »), sinon celui que liens_va lui réserve — la même table : le
+    lien créé ensuite portera le même. 0 si on ne sait pas."""
+    try:
+        import liens_va as lv
+        n = int((lv.lien_de(gid, uid) or {}).get("numero") or 0)
+        if not n and pseudo:
+            n = int(lv.numero_de(pseudo) or 0)
+        return n
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] numéro de {uid} : {type(e).__name__}: {e}", flush=True)
+        return 0
+
+
+def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
+    """« ─│🔵┤-va-＠pseudo », et sur Threads « ─│🔵┤-61-va-＠pseudo »."""
+    n = numero_va(gid, uid, pseudo) if str(gid) in NUMERO_DANS_SALON else 0
+    return f'{PREFIXE}🔵{BARRE}' + (f"-{n}" if n else "") + f"-va-{AROBASE}{pseudo}"
+
+
+def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
+    """Met le numéro du VA dans le nom des salons de VA de ce serveur qui ne
+    l'ont pas encore (NUMERO_DANS_SALON). Une fois par salon : un nom déjà
+    numéroté n'est plus touché. Discord ne renomme un salon que deux fois par
+    dix minutes : au plus `max_par_tour` par passage, le reste au suivant."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"renommes": [], "rates": []}
+    if gid not in NUMERO_DANS_SALON:
+        return bilan
+    fiches = {k.split(":", 1)[1]: f for k, f in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(f, dict) and f.get("salon")}
+    if not fiches:
+        return bilan
+    code, salons = _api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        bilan["rates"].append(f"salons illisibles (HTTP {code})")
+        return bilan
+    par_id = {str(c.get("id")): c for c in salons if isinstance(c, dict)}
+    for uid, f in fiches.items():
+        if len(bilan["renommes"]) >= max_par_tour:
+            break
+        c = par_id.get(str(f["salon"]))
+        nom = str((c or {}).get("name") or "")
+        i = nom.find(f"-va-{AROBASE}")
+        if not c or i < 0 or re.search(r"-\d+$", nom[:i]):
+            continue                      # salon disparu, pas un ticket, ou déjà numéroté
+        pseudo = nom[i + len(f"-va-{AROBASE}"):]
+        voulu = nom_salon_va(gid, uid, pseudo)
+        if voulu == nom:
+            continue                      # pas de numéro connu : laissé tel quel
+        code, rep = _api("PATCH", f"/channels/{c['id']}", json={"name": voulu})
+        if code == 200:
+            bilan["renommes"].append(voulu)
+        else:
+            bilan["rates"].append(f"{nom} : HTTP {code}")
+            if code == 429:
+                break
+    if bilan["renommes"] or bilan["rates"]:
+        print(f"[ticket] {gid} : numéros dans les salons : {bilan}", flush=True)
+    return bilan
+
+
 def identifiant(gid: str, uid: str) -> str:
     """Le VRAI identifiant Discord : « abdoul_9684 », pas « Abdoul ».
 
@@ -1005,7 +1074,8 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                            "type": 1, "allow": str(MANAGER), "deny": "0"})
 
         corps: Dict[str, Any] = {
-            "name": f'{PREFIXE}🔵{BARRE}-va-{AROBASE}{identifiant(gid, uid)}',
+            # « ─│🔵┤-va-＠pseudo », le numéro du VA devant sur Threads
+            "name": nom_salon_va(gid, uid, identifiant(gid, uid)),
             "type": 0, "permission_overwrites": droits,
             "topic": "Ton espace perso : questions, preuves, bonus. "
                      "Ton manager te répond ici.",
@@ -1749,6 +1819,7 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
     try:
         import liens_va
         with sur_serveur(gid):
+            numeroter_salons(gid)
             redessiner_boutons(gid)
             b = liens_va.synchroniser(gid)
         if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates", "groupes_supprimes",

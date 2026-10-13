@@ -389,6 +389,46 @@ try:
               and lv.espace(TH).get("groupes_managers_seuls") is True)
     finally:
         tk.managers, tk._managers_surs = _sauve_m
+
+    # ── le numéro du VA dans le nom du salon (Threads) ───────────────────
+    # Propriétaire, 13/10/2026 : « faut mettre le numéro du VA », comme Va IG
+    # (« 🔴-21-va-… »).
+    g, _ = monde(config={"gabarit": GABARIT_TW},
+                 tickets={f"{TH}:u1": {"salon": "s1"}, f"{TH}:u2": {"salon": "s2"},
+                          f"{TH}:u9": {"salon": "s9"}, f"{TW}:u3": {"salon": "s3"}})
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+        f"{TH}:u1": {"pseudo": "momobtn", "shortcode": "velvetyy", "numero": 61}}}))
+    A = tk.AROBASE
+    SALONS_N = {"s1": f"─│🔵┤-va-{A}momobtn", "s2": f"─│🔵┤-va-{A}steave0454",
+                "s9": f"─│🔵┤-12-va-{A}deja", "s3": f"─│🔵┤-va-{A}yazid"}
+    patchs_n = []
+
+    def _api_n(m, c, **k):
+        if m == "GET" and c.endswith("/channels"):
+            gid_ = c.split("/")[2]
+            return 200, [{"id": i, "type": 0, "name": n} for i, n in SALONS_N.items()
+                         if (i == "s3") == (gid_ == TW)]
+        if m == "PATCH":
+            cid = c.split("/")[2]
+            patchs_n.append((cid, k["json"]["name"]))
+            SALONS_N[cid] = k["json"]["name"]
+            return 200, {}
+        return 200, {}
+    tk._api = _api_n
+    bn = tk.numeroter_salons(TH)
+    check("Threads : chaque salon de VA prend son numéro (celui de son lien, sinon celui "
+          "que la table lui réserve), devant « -va- »",
+          sorted(patchs_n) == [("s1", f"─│🔵┤-61-va-{A}momobtn"),
+                               ("s2", f"─│🔵┤-27-va-{A}steave0454")], (patchs_n, bn))
+    check("… un salon déjà numéroté n'est pas touché", "s9" not in [c for c, _n in patchs_n])
+    patchs_n.clear()
+    tk.numeroter_salons(TH)
+    check("… une fois : le passage suivant ne renomme plus rien", not patchs_n, patchs_n)
+    check("Twitter garde ses noms (« ─│🔵┤-va-＠yazid »), sans numéro",
+          not tk.numeroter_salons(TW)["renommes"] and SALONS_N["s3"] == f"─│🔵┤-va-{A}yazid"
+          and tk.nom_salon_va(TW, "u3", "yazid") == f"─│🔵┤-va-{A}yazid")
+    check("un ticket neuf sur Threads naît numéroté",
+          tk.nom_salon_va(TH, "u1", "momobtn") == f"─│🔵┤-61-va-{A}momobtn")
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

@@ -20024,8 +20024,12 @@ try:
     check("l arobase du nom de salon est le sosie pleine chasse",
           _tkP.AROBASE == "\uff20" and _tkP.AROBASE != "@")
     _srcT = _plT("tickets_discord.py").read_text(encoding="utf-8")
+    # depuis le 13/10/2026 le nom est fait par nom_salon_va (le numero du VA
+    # devant, sur Threads) : on verifie ce qu il rend, pas un bout de source
     check("le nom du salon porte bien l arobase et l identifiant Discord",
-          "-va-{AROBASE}{identifiant(gid, uid)}" in _srcT)
+          "nom_salon_va(gid, uid, identifiant(gid, uid))" in _srcT
+          and _tkP.nom_salon_va("1445108485090971710", "u", "abdoul_9684")
+          == "─│🔵┤-va-" + _tkP.AROBASE + "abdoul_9684")
     check("c est l identifiant unique qui nomme, pas le nom affiche",
           '(rep.get("user") or {}).get("username")' in _srcT)
 
