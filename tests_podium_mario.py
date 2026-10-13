@@ -408,7 +408,26 @@ def charger_ancien():
     spec = importlib.util.spec_from_file_location("podium_avant_theme", f)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    au_nom_actuel_du_bot(mod)
     return mod
+
+
+def au_nom_actuel_du_bot(mod):
+    """Le bot s'appelle « Luigi » depuis le soir du 03/10/2026 (4a9858f, après
+    REF) : le code d'avant envoyait encore les VA écrire à « @Siri », dans les
+    primes (fiche Twitter) et dans le bonus (écrit en dur). Sans ça, chaque
+    message de Twitter différait de ce seul mot et la comparaison échouait
+    entière. Seul ce nom est ramené au nom actuel ; tout le reste se compare
+    toujours à l'octet près. La règle du nom a ses tests (tests_site.py)."""
+    nom = pd.SERVEURS[pd.TWITTER_ID]["bot"]
+    mod.SERVEURS[mod.TWITTER_ID]["bot"] = nom
+    bonus_avant = mod.embed_bonus
+
+    def embed_bonus(*a, **k):
+        e = bonus_avant(*a, **k)
+        e["description"] = e["description"].replace("**@Siri**", f"**@{nom}**")
+        return e
+    mod.embed_bonus = embed_bonus
 
 
 # les données réalistes : Jessye VA 8 (US) devant, une VA FR 2e, des VA des
