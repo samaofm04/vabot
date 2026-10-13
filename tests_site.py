@@ -21878,8 +21878,10 @@ try:
         _iQ = _srcWB.find("def _start_quete_du_jour_daemon")
         _iP = _srcWB.find("def _start_podium_semaine_daemon")
         check("demons : quete du jour et podium travaillent serveur par serveur, chacun avec son bot",
-              "with _vd_q.sur_serveur(gid):" in _srcWB[_iQ:_iQ + 2500]
-              and "with _vd_p.sur_serveur(gid):" in _srcWB[_iP:_iP + 3000])
+              # tout le corps du demon, pas une fenetre de N caracteres : un
+              # appel ajoute dans la boucle (le tableau staff) la faisait deborder
+              "with _vd_q.sur_serveur(gid):" in _srcWB[_iQ:_srcWB.find("\ndef ", _iQ + 10)]
+              and "with _vd_p.sur_serveur(gid):" in _srcWB[_iP:_srcWB.find("\ndef ", _iP + 10)])
     finally:
         for _kS, _vS in _savB.items():
             setattr(_vdB, _kS, _vS)
