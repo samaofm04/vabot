@@ -82,22 +82,28 @@ leurs règles de gel restent maîtresses : un clic le lundi à 3h ne lance pas
 la semaine neuve avant le podium. Un seul passage à la fois (_exclusif) :
 un clic pendant le tour de la boucle, ou l'inverse, ne poste rien deux fois.
 
-VA THREADS A LE PODIUM DE LA SEMAINE, AUX CLICS, ET RIEN D'AUTRE (clés
-« reprend » et « podium_seul » de SERVEURS). Propriétaire, 13/10/2026 : le
-classement subs de la quinzaine d'abord (« subs_seul », PROFIL_THREADS),
-retiré le jour même (« pour Threads j'ai remove les subs, pas besoin »), puis
-« pour Threads le podium c'est avec des clicks », primes 10/5/3 $ comme
-Twitter. Ce sont les VA de Twitter (mêmes « VA n ») et leurs clics
-GetMySocial au marché US : les chiffres du récap « -l-clicks » de Threads
-(recap_clics_rest), pas les trackings MyPuls que Twitter appelle « subs ».
-Le message dit donc « clics », jamais « subs » (_unite). Le relevé n'est
-pas refait pour Threads : c'est celui que Va IG prend déjà pour ses VA US
-(classement(gid=Twitter, mesure="gms"), gardé par _retenir et
-_garder_repris) ; le premier des deux qui passe le fait pour l'autre. Ni
-quinzaine, ni bonus du jour, ni synchro des liens, ni suivi des VA sur
-Threads. Les gagnants n'y ont pas de lien GetMySocial rattaché à un ticket :
-suivi_va ne prévient personne en privé, la prime se réclame à la main à
-Bowser, comme le message le dit.
+VA THREADS : LES VA DE TWITTER, À LEURS CLICS UNIQUES US + UK (profil
+THREADS_ID de SERVEURS). Propriétaire, 13/10/2026, dans l'ordre : le
+classement subs de Twitter repris tel quel (« subs_seul », PROFIL_THREADS),
+retiré le jour même ; « pour Threads le podium c'est avec des clicks »,
+primes 10/5/3 $ comme Twitter ; puis « pour Threads tu écris Threads, pour
+Twitter Twitter, anonyme toujours, et pour le click uniquement les clicks
+USA UK, et ça unique ». D'où :
+  - les VA de Twitter, leurs liens (EQUIPES_VA), leurs numéros (registre
+    des trackings, _par_tracking), affichés « Threads 12 » (clé « libelle ») ;
+  - leurs clics vers OnlyFans, dédoublonnés (« button_clicks » de
+    GetMySocial, gms.boutons_par_pays), des seuls US et UK (mesure
+    « gms_bouton ») — ni les vues de la page, ni les trackings MyPuls ;
+  - le podium de la semaine dans « ─│🏆┤-podium », le classement de la
+    quinzaine, avec l'all-time, dans « ─│📊┤-l-clicks » (à la place du report
+    JESSY LE RETOUR, qui y montrait noms et pseudos) ;
+  - ni bonus du jour, ni synchro des liens, ni suivi des VA (clé
+    « vitrine ») : Threads ne fait qu'afficher. Les gagnants n'y ont pas de
+    lien rattaché à un ticket : suivi_va ne prévient personne en privé, la
+    prime se réclame à Bowser, comme le message le dit.
+Sa mesure n'étant pas celle de Twitter ni de Va IG, Threads relève lui-même :
+un appel GetMySocial par VA et par passage (deux heures pour la semaine, une
+heure pour la quinzaine, une fois par jour pour l'all-time).
 
 LE THÈME MARIO (clé « theme », Va IG seulement). Propriétaire, 03/10/2026 :
 « tu penses y'a moyen de faire un theme Mario pour tout ca », puis « vas-y ».
@@ -203,25 +209,28 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  "mesure": "tracking",
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
-    # Va Threads : le podium de la semaine aux clics des VA de Twitter (voir
-    # l'en-tête, « VA THREADS A LE PODIUM… »). Le classement subs de la
-    # quinzaine qu'il a eu le matin du 13/10/2026 est COUPÉ (« pour Threads
-    # j'ai remove les subs, pas besoin ») ; son profil reste écrit
-    # (PROFIL_THREADS). « reprend » : tout ce que ce profil ne dit pas vient
-    # de Twitter, relu à chaque appel (_profil) : mêmes liens, mêmes numéros,
-    # même marché US. Les clés écrites ici l'emportent :
-    THREADS_ID: {"reprend": TWITTER_ID,
-                 # le podium de la semaine seulement : ni quinzaine, ni bonus,
-                 # ni synchro des liens, ni suivi des VA (boucle de web_upload)
-                 "podium_seul": True,
-                 # « le podium c'est avec des clicks » : les clics GetMySocial
-                 # au marché US, ceux du récap -l-clicks — pas les trackings
-                 # MyPuls de Twitter
-                 "mesure": "gms", "unite": "clics",
-                 "bot": "Bowser", "bonus": False,
-                 # le rythme du relevé US de Va IG (CACHE_US_MIN) : un seul
-                 # relevé toutes les deux heures sert les deux serveurs
-                 "minutes": 120},
+    # Va Threads : les VA de Twitter (mêmes liens, mêmes numéros, ceux du
+    # registre des trackings), comptés à leurs clics uniques US + UK : le
+    # podium de la semaine dans « ─│🏆┤-podium », le classement de la
+    # quinzaine dans « ─│📊┤-l-clicks » (voir l'en-tête, « VA THREADS… »).
+    # Il ne reprend PLUS le relevé de Twitter : sa mesure n'est pas la même.
+    THREADS_ID: {"equipes": None,             # les espaces de Twitter (EQUIPES_VA)
+                 # Proprietaire, 13/10/2026 : « uniquement les clicks USA UK, et
+                 # ca unique » -- les clics vers la page de destination,
+                 # dedoublonnes (gms.boutons_par_pays), des seuls US et UK
+                 "pays": ("US", "GB"), "marche": "US + UK", "mesure": "gms_bouton",
+                 "source": "Threads 🧵", "bot": "Bowser", "fr": False,
+                 # « pour Threads tu ecris Threads, pour Twitter Twitter, anonyme
+                 # toujours » : « Threads 12 », le numero du VA 12 de Twitter
+                 "unite": "clics", "libelle": "Threads",
+                 # ni bonus du jour, ni synchro des liens, ni suivi des VA : ce
+                 # serveur ne fait qu'afficher (vitrine)
+                 "bonus": False, "vitrine": True,
+                 # le podium de la semaine toutes les deux heures, le classement
+                 # de la quinzaine (salon -l-clicks) toutes les heures
+                 "minutes": 120, "minutes_subs": 60,
+                 "alltime": "podium_alltime_threads.json",
+                 "salon_subs": "─│📊┤-l-clicks"},
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
                "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",
@@ -302,6 +311,14 @@ def podium_seulement(gid: Optional[str]) -> bool:
     suivi des VA. La boucle de web_upload le lit ; la quinzaine et le bonus
     le vérifient aussi à leur entrée."""
     return bool((SERVEURS.get(str(gid or "")) or {}).get("podium_seul"))
+
+
+def vitrine(gid: Optional[str]) -> bool:
+    """Ce serveur ne fait qu'afficher (Threads) : podium et quinzaine, mais ni
+    synchro des liens GetMySocial, ni suivi des VA -- ses VA sont ceux de
+    Twitter, leurs liens et leurs tickets vivent là-bas. Lu par la boucle de
+    web_upload."""
+    return bool((SERVEURS.get(str(gid or "")) or {}).get("vitrine"))
 
 
 def _unite(gid: Optional[str]) -> str:
@@ -793,7 +810,8 @@ def cle_entite(nom: str, spam: bool) -> str:
     return f"{nom} SPAM" if spam else nom
 
 
-def liens_bruts(gid: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
+def liens_bruts(gid: Optional[str] = None,
+                etiquette: str = "podium") -> Tuple[List[Dict[str, Any]], bool]:
     """(liens, frais) sur TOUS les espaces de VA du serveur.
 
     `frais` n'est vrai que si chaque espace a repondu. Un seul repli sur le
@@ -811,7 +829,7 @@ def liens_bruts(gid: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
             import gms
             # force_refresh : la liste est mise en cache deux minutes cote gms,
             # et un lien cree la veille doit apparaitre des le lendemain.
-            with _etiquette("podium"):
+            with _etiquette(etiquette):
                 r = gms.list_links_team(equipe, force_refresh=True) or {}
             vivants = r.get("links") or r.get("data") or []
             if r.get("ok") is not False and vivants:
@@ -989,7 +1007,9 @@ def _fichier_trackings() -> Path:
 
 
 def _source(gid: Optional[str] = None, mesure: Optional[str] = None) -> str:
-    """Ce que valent les clics : « tracking » (MyPuls) ou « gms »."""
+    """Ce que valent les clics : « tracking » (MyPuls), « gms » (vues de la
+    page GetMySocial) ou « gms_bouton » (clics vers la destination,
+    dédoublonnés, GetMySocial aussi : Threads)."""
     return str(mesure or _profil(gid).get("mesure") or "gms")
 
 
@@ -1002,12 +1022,17 @@ def _pause_pour(gid: Optional[str]) -> bool:
     """La pause de GetMySocial n'arrête que ce qui en dépend. Sur Twitter, la
     liste des liens attend son retour ; le registre et MyPuls suffisent, et le
     bonus du jour (payé) ne doit pas se figer pendant des heures."""
-    return _pause_gms() if _source(gid) == "gms" else False
+    return _pause_gms() if _source(gid) != "tracking" else False
 
 
 def _mesure_dite(pf: Dict[str, Any]) -> str:
-    """Ce que le message dit compter : « tracking OF », ou le marché (« US »)."""
-    return "tracking OF" if pf.get("mesure") == "tracking" else str(pf["marche"])
+    """Ce que le message dit compter : « tracking OF », « uniques US + UK »
+    (Threads), ou le marché (« US »)."""
+    if pf.get("mesure") == "tracking":
+        return "tracking OF"
+    if pf.get("mesure") == "gms_bouton":
+        return f'uniques {pf["marche"]}'
+    return str(pf["marche"])
 
 
 def tracking_de(url: Any) -> str:
@@ -1522,18 +1547,15 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
                         e["cumul"] = {"au": fin_t, "n": x}
         totaux[n] = total
     en_attente: List[str] = []
-    conflits: List[str] = []
-    for t, e in regs.items():
-        if e.get("doute") and (e.get("actif") or str(e.get("vu") or "") >= d0):
-            # ses liens disent un autre VA, ou plusieurs : à corriger à la main
-            illisibles.update(int(x) for x in e["doute"])
-            conflits.append(t)
+    # ses liens disent un autre VA, ou plusieurs, ou un tracking neuf en
+    # conflit : à corriger à la main (la même règle pour les relevés
+    # GetMySocial de Threads et de Va IG, voir _va_en_doute)
+    d_nums, conflits = _va_en_doute(reg, d0, d1)
+    illisibles.update(d_nums)
     for t, att in reg["attente"].items():
         if str(att.get("premier") or "") > d1:
             continue            # vu après la période : il n'y était pour rien
         nums = [int(x) for x in (att.get("numeros") or [])]
-        if att.get("conflit"):
-            conflits.append(t)
         if nums:
             # un VA dont un tracking attend : son compte n'est pas complet
             illisibles.update(nums)
@@ -1566,15 +1588,146 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
 
 
 # ─── le classement ───────────────────────────────────────────────────────
+def _va_en_doute(reg: Dict[str, Any], d0: str = "",
+                 d1: str = "9999-12-31") -> Tuple[set, List[str]]:
+    """(numéros de VA, trackings) que le registre met en doute sur la période :
+    un tracking dont les liens disent un autre VA, ou plusieurs (« doute »,
+    voir _suivre_trackings), ou un tracking neuf en conflit (« attente »).
+    Ces VA restent SANS RELEVÉ jusqu'à correction des liens : pas de prime
+    sur les clics d'un autre. UNE décision, pour Twitter (_classement_tracking)
+    comme pour les relevés GetMySocial (_par_tracking) : sans elle, le
+    13/10/2026, Threads et Va IG donnaient les clics d'un lien repris par un
+    autre VA au numéro gravé, que Twitter, lui, mettait sans relevé."""
+    nums: set = set()
+    ts: List[str] = []
+    for t, e in (reg.get("trackings") or {}).items():
+        if e.get("doute") and (e.get("actif") or str(e.get("vu") or "") >= d0):
+            nums.update(int(x) for x in e["doute"])
+            ts.append(t)
+    for t, att in (reg.get("attente") or {}).items():
+        if att.get("conflit") and str(att.get("premier") or "") <= d1:
+            nums.update(int(x) for x in (att.get("numeros") or []))
+            ts.append(t)
+    return nums, ts
+
+
+def _par_tracking(liens: List[Dict[str, Any]], ents: Dict[str, Dict[str, Any]],
+                  table: Dict[str, int], d0: str = "", d1: str = "9999-12-31"
+                  ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, int], set, List[str]]:
+    """Les entités GetMySocial des VA de Twitter, regroupées par NUMÉRO DE VA,
+    celui du registre des trackings — le même que Twitter affiche.
+
+    Constaté le 13/10/2026 : les liens renommés comme dans Infloww (« VA 3 -
+    Roucham 1 ( normal ) ») n'avaient plus de numéro dans podium_numeros.json,
+    qui va au NOM du lien. Dix-sept comptes, dont Roucham (VA 12) et Abdoul
+    (VA 10), sortaient du podium de Threads et des VA US de Va IG, quand
+    Twitter les comptait, à leur tracking. Et deux téléphones sur le même
+    tracking (« eddy 1 », « eddy 2 ») faisaient deux lignes ici, une là-bas.
+
+    Chaque LIEN suit ses trackings, ceux de ses boutons ou de son url ; sans
+    eux (liste de repli, qui ne garde pas les boutons), ceux sous lesquels le
+    registre l'a vu. Un seul numéro : c'est le sien. Plusieurs : une page
+    porte souvent les deux boutons d'une même personne, normal et spam (VA 12
+    et VA 24 pour Roucham) — le genre du lien tranche, puis le numéro de son
+    nom ; sinon, mis de côté (ses clics ne se partagent pas par bouton) et
+    ses VA sans relevé, comme Twitter le fait d'un tracking partagé. Sans
+    tracking du tout : le numéro de son nom (podium_numeros.json, jamais
+    attribué ici), sinon sans numéro, et dit.
+
+    Rend (entités, table, numéros sans relevé, trackings en cause) : une clé
+    « #12 » par numéro (ses liens réunis), les clés sans numéro telles
+    quelles ; les numéros en doute au registre (_va_en_doute) ou pris dans
+    un lien mis de côté ne sont pas à relever."""
+    try:
+        reg_tout = _lire_registre()
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] registre des trackings illisible ({type(e).__name__}: {e}) : "
+              "numéros au nom des liens", flush=True)
+        reg_tout = {"trackings": {}, "attente": {}}
+    reg = reg_tout["trackings"]
+    doute, en_cause = _va_en_doute(reg_tout, d0, d1)
+    par_id = {str(l.get("id")): l for l in liens if isinstance(l, dict)}
+    # les liens vus par le registre derrière chaque tracking actif : la liste
+    # de repli n'a pas les boutons, et sans ceci un passage sur elle rendait
+    # « eddy 2 » au VA 42 de son nom, puis au 41 de son tracking au suivant
+    vus: Dict[str, List[str]] = {}
+    for t, e in reg.items():
+        if e.get("actif"):
+            for lid in e.get("ids") or []:
+                vus.setdefault(str(lid), []).append(t)
+    out: Dict[str, Dict[str, Any]] = {}
+    num: Dict[str, int] = {}
+    for cle, e in ents.items():
+        for lid in e["ids"]:
+            ts = [t for t in (trackings_du_lien(par_id.get(lid) or {}) or vus.get(lid, []))
+                  if t in reg]
+            nums = {int(reg[t]["numero"]) for t in ts}
+            if len(nums) > 1:
+                meme = {int(reg[t]["numero"]) for t in ts
+                        if bool(reg[t].get("spam")) == bool(e["spam"])}
+                n_nom = table.get(cle)
+                nums = (meme if len(meme) == 1
+                        else {int(n_nom)} if n_nom is not None and int(n_nom) in nums
+                        else nums)
+            if len(nums) > 1:
+                c = f'{e["nom"]} (trackings de VA {", ".join(str(n) for n in sorted(nums))})'
+                out.setdefault(c, {"nom": e["nom"], "spam": e["spam"], "ids": []})["ids"].append(lid)
+                doute |= nums
+                en_cause += [t for t in ts if t not in en_cause]
+                continue
+            n = nums.pop() if nums else table.get(cle)
+            if n is None:
+                out.setdefault(cle, {"nom": e["nom"], "spam": e["spam"], "ids": []})["ids"].append(lid)
+                continue
+            c = f"#{int(n)}"
+            g = out.setdefault(c, {"nom": e["nom"], "spam": e["spam"], "ids": []})
+            g["spam"] = g["spam"] or e["spam"]
+            if lid not in g["ids"]:
+                g["ids"].append(lid)
+            num[c] = int(n)
+    return out, num, doute, sorted(set(en_cause))
+
+
+#: L'étiquette des relevés qui ne paient rien (la quinzaine, son all-time) :
+#: absente de gms.PRIORITES, donc rang « normal ». Elle s'efface devant la
+#: réserve gardée pour ce qui paie (« podium ») au lieu de la vider : la
+#: quinzaine de Threads, c'est un appel par VA chaque heure.
+ETIQUETTE_QUINZAINE = "quinzaine"
+
+
+def _releve_liens(gid: Optional[str], ids: List[str], d0: str, d1: str,
+                  mesure: Optional[str] = None, etiquette: str = "podium",
+                  directs: Optional[set] = None):
+    """(total, {pays: clics}) d'un lot de liens dans la mesure du serveur :
+    les vues de la page (« gms ») ou les passages vers la destination
+    (« gms_bouton », Threads : clics de bouton dédoublonnés d'une page, et
+    visites d'un lien direct, qui n'a pas de bouton). (None, None) si
+    GetMySocial n'a pas répondu."""
+    import gms
+    with _etiquette(etiquette):
+        if _source(gid, mesure) == "gms_bouton":
+            return gms.boutons_par_pays(ids, d0, d1,
+                                        directs=[i for i in ids if i in (directs or set())])
+        return gms.analytics_for_links(ids, d0, d1)
+
+
+def _directs(liens: List[Dict[str, Any]]) -> set:
+    """Les liens directs : sans page ni bouton, chaque visite part sur OnlyFans."""
+    return {str(l.get("id")) for l in liens
+            if isinstance(l, dict) and str(l.get("type") or "") == "directlink"}
+
+
 def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
-               gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str, Any]:
+               gid: Optional[str] = None, mesure: Optional[str] = None,
+               etiquette: str = "podium") -> Dict[str, Any]:
     """{lignes, illisibles, frais} — les clics du marché du serveur (US pour
     Twitter) par entité, du plus fort au plus faible. Twitter : les clics
     des liens de tracking (_classement_tracking). `mesure="gms"` force les
     clics GetMySocial (le relevé US que Va IG garde, voir _releve_us).
-    Threads (clé « reprend ») : le relevé de Twitter, voir _classement_repris,
-    dans SA mesure à lui (les clics GetMySocial, quand Twitter compte ses
-    trackings) : sans elle, Threads aurait repris les trackings de Twitter."""
+    Un serveur qui en reprend un autre (clé « reprend », PROFIL_THREADS) : le
+    relevé de celui-ci, voir _classement_repris, dans SA mesure à lui. Threads,
+    depuis le 13/10/2026, a son relevé à lui : les liens et les numéros de
+    Twitter, ses clics uniques US + UK (mesure « gms_bouton »)."""
     if _repris_de(gid):
         return _classement_repris(debut, fin, str(gid), _source(gid, mesure))
     if _source(gid, mesure) == "tracking":
@@ -1582,11 +1735,12 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         cl_t = _classement_tracking(debut, fin, gid)
         _garder_repris(gid, debut, fin, cl_t, "tracking")
         return cl_t
-    import gms
     profil = _profil(gid)
     d0, d1 = debut.isoformat(), fin.isoformat()
-    liens, frais = liens_bruts(gid)
+    liens, frais = liens_bruts(gid, etiquette)
     gab: List[str] = []
+    doute: set = set()
+    en_cause: List[str] = []
     if profil["fr"]:
         ents = entites_fr(liens)
         # le numero vient du nom du lien : rien a attribuer ici, et la table
@@ -1605,7 +1759,9 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         # invente pas (un lien renommé avant que le registre ne le voie aurait
         # pris un numéro neuf, puis disputé le sien à son tracking)
         table = numeros(list(ents.keys()), attribuer=frais and _source(gid) == "gms")
+        ents, table, doute, en_cause = _par_tracking(liens, ents, table, d0, d1)
     sans_numero = [c for c in ents if c not in table]
+    directs = _directs(liens)
     if sans_numero:
         print(f"[podium] {len(sans_numero)} compte(s) sans numero, ecartes : "
               + ", ".join(sorted(sans_numero)[:6]), flush=True)
@@ -1614,12 +1770,17 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     for cle, e in ents.items():
         if cle not in table:
             continue
+        # « Threads 12 » sur Threads (clé « libelle »), « VA 12 » ailleurs
+        va = (e["nom"] if profil["fr"]
+              else f'{profil.get("libelle") or "VA"} {table.get(cle, 0)}')
+        if not profil["fr"] and table[cle] in doute:
+            # tracking en doute ou partagé : sans relevé, comme sur Twitter
+            illisibles.append(va)
+            continue
         try:
-            with _etiquette("podium"):
-                _, pays = gms.analytics_for_links(e["ids"], d0, d1)
+            _, pays = _releve_liens(gid, e["ids"], d0, d1, mesure, etiquette, directs)
         except Exception:
             pays = None
-        va = e["nom"] if profil["fr"] else f'VA {table.get(cle, 0)}'
         if pays is None:
             illisibles.append(va)
         else:
@@ -1633,7 +1794,9 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
     out = {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
            "entites": len(ents), "liens": len(liens),
-           "sans_numero": sorted(sans_numero), "gabarits": gab}
+           "sans_numero": sorted(sans_numero), "gabarits": gab,
+           # dit par _notes_tracking, comme sur Twitter
+           "conflits": en_cause}
     # Twitter relève de toute façon ses VA pour ses propres messages : Va IG
     # reprend ce relevé au lieu d'en refaire un (voir _releve_us)
     _retenir(gid, debut, fin, out)
@@ -1666,7 +1829,10 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
     profil = _profil(gid)
     fichier = _fichier_alltime(gid, mesure)
     cache = _lire(fichier, {})
-    if cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux"):
+    # le format dans le cache : un total du jour compté autrement (numéros au
+    # nom des liens, avant le 13/10/2026) est refait, pas repris
+    if (cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux")
+            and cache.get("format") == FORMAT_AFFICHAGE):
         return {k: int(v) for k, v in cache["totaux"].items()}
     if _source(gid, mesure) == "tracking":
         # le total cumulé de chaque tracking : MyPuls ne garde pas tout
@@ -1683,34 +1849,43 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
         # paie rien. Sans aucune ligne, il sera refait au prochain passage
         jour = _aujourdhui().isoformat() if cl["lignes"] else str(cache.get("jour") or "")
         if totaux:
-            safe_json.write_text(fichier, json.dumps({"jour": jour, "totaux": totaux},
+            safe_json.write_text(fichier, json.dumps({"jour": jour, "totaux": totaux,
+                                                      "format": FORMAT_AFFICHAGE},
                                                      ensure_ascii=False, indent=2,
                                                      sort_keys=True))
         return {k: int(v) for k, v in totaux.items()}
-    import gms
-    liens, _ = liens_bruts(gid)
+    liens, _ = liens_bruts(gid, ETIQUETTE_QUINZAINE)
+    doute: set = set()
     if profil["fr"]:
         ents = entites_fr(liens)
         table = {c: e["numero"] for c, e in ents.items()}
     else:
         ents = entites(liens)
         table = numeros(list(ents.keys()), attribuer=_source(gid) == "gms")
+        # les mêmes numéros que le classement (registre des trackings) : un
+        # total « depuis toujours » au nom d'un autre VA serait faux en silence
+        ents, table, doute, _t = _par_tracking(liens, ents, table, ALLTIME_DEPUIS)
     fin = _aujourdhui().isoformat()
+    directs = _directs(liens)
     totaux = dict(cache.get("totaux") or {})
     for cle, e in ents.items():
-        if cle not in table:
-            continue                # sans numéro (voir classement) : pas de « VA 0 »
+        if cle not in table or table[cle] in doute:
+            # sans numéro (voir classement) : pas de « VA 0 » ; en doute : son
+            # ancien total reste, plutôt qu'un total au nom d'un autre
+            continue
         try:
-            with _etiquette("podium"):
-                _, pays = gms.analytics_for_links(e["ids"], ALLTIME_DEPUIS, fin)
+            _, pays = _releve_liens(gid, e["ids"], ALLTIME_DEPUIS, fin, mesure,
+                                    ETIQUETTE_QUINZAINE, directs)
         except Exception:
             pays = None
         if pays is not None:
             # un relevé raté garde l'ancien total plutôt que de l'effacer
-            totaux[e["nom"] if profil["fr"] else f'VA {table.get(cle, 0)}'] = _clics(pays, profil)
+            nom = (e["nom"] if profil["fr"]
+                   else f'{profil.get("libelle") or "VA"} {table.get(cle, 0)}')
+            totaux[nom] = _clics(pays, profil)
         time.sleep(0.3)
     safe_json.write_text(fichier,
-                         json.dumps({"jour": fin, "totaux": totaux},
+                         json.dumps({"jour": fin, "totaux": totaux, "format": FORMAT_AFFICHAGE},
                                     ensure_ascii=False, indent=2, sort_keys=True))
     return {k: int(v) for k, v in totaux.items()}
 
@@ -1767,7 +1942,7 @@ def _charger_releves() -> None:
             continue
         _RELEVES[(bouts[0], bouts[1], bouts[2])] = {
             "t": float(e.get("t") or 0), "essai": float(e.get("essai") or e.get("t") or 0),
-            "jour": str(e.get("jour") or ""), "cl": cl}
+            "jour": str(e.get("jour") or ""), "cl": cl, "format": str(e.get("format") or "")}
         repris += 1
     if repris:
         print(f"[podium] {repris} relevé(s) repris du disque (les VA de l'autre "
@@ -1811,6 +1986,7 @@ def _retenir(gid: Optional[str], debut: dt.date, fin: dt.date, cl: Dict[str, Any
             "frais": bool(cl.get("frais", True))}
     ancien = _RELEVES.get(cle)
     if (ancien and ancien["jour"] > fin.isoformat() and jour > fin.isoformat()
+            and ancien.get("format") == FORMAT_AFFICHAGE
             and _qualite(ancien["cl"]) > _qualite(neuf)):
         # la période est finie, ses clics ne bougent plus : le relevé complet
         # de 00h10 restait écrasé par celui du podium de 9h où un VA n'avait
@@ -1818,7 +1994,9 @@ def _retenir(gid: Optional[str], debut: dt.date, fin: dt.date, cl: Dict[str, Any
         ancien["essai"] = t
         _sauver_releves()
         return
-    _RELEVES[cle] = {"t": t, "essai": t, "jour": jour, "cl": neuf}
+    # la façon de compter (numéros, mesure) : un relevé d'un autre format
+    # n'est pas repris (_releve_us)
+    _RELEVES[cle] = {"t": t, "essai": t, "jour": jour, "cl": neuf, "format": FORMAT_AFFICHAGE}
     _sauver_releves()
 
 
@@ -1835,6 +2013,12 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     e = _RELEVES.get(cle)
     t = time.time()
     entier = bool(e) and e["jour"] > fin.isoformat()
+    if e and e.get("format") != FORMAT_AFFICHAGE:
+        # pris par un code qui comptait autrement (le 13/10/2026 : numéros au
+        # nom des liens, dix-sept VA US absents) : sans ça, le message refait
+        # tout de suite pour le nouveau format reprenait l'ancien relevé, et
+        # se croyait à jour pour deux heures
+        e, entier = None, False
     if e:
         if entier:
             if (not e["cl"]["illisibles"] or _pause_gms()
@@ -2033,8 +2217,8 @@ def _garder_repris(gid: Optional[str], debut: dt.date, fin: dt.date,
 
 def _minutes_subs(gid: Optional[str]) -> int:
     """Le rythme du classement vivant de la quinzaine, en minutes."""
-    return int(_profil(gid).get("minutes") or _config().get("minutes_subs")
-               or _config().get("minutes") or MINUTES_LIVE)
+    return int(_profil(gid).get("minutes_subs") or _profil(gid).get("minutes")
+               or _config().get("minutes_subs") or _config().get("minutes") or MINUTES_LIVE)
 
 
 def _repris_rendu(e: Dict[str, Any]) -> Dict[str, Any]:
@@ -2337,9 +2521,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
            else "Abonnements de **toute l'agence**")
     unite = _unite(gid)
     if unite != "subs":
-        # Threads : des clics, pas des abonnements, et ni « via Twitter » ni
-        # « tracking » (ce sont les clics GetMySocial de ses VA)
-        abo = f'Clics des liens des VA — marché **{pf["marche"]}**'
+        # Threads : des clics, pas des abonnements, ni « via Twitter » ni
+        # « tracking » : ses clics uniques vers OnlyFans, US + UK
+        abo = f'Clics **{_mesure_dite(pf)}** vers OnlyFans'
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
@@ -2487,6 +2671,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     lignes = cl["lignes"]
     mix = _melange(cl, us, p)
     tw = SERVEURS[TWITTER_ID]
+    # « clics » sur Threads (clé « unite »), « subs » ailleurs, comme avant
+    unite = _unite(gid)
     # le thème : titre, couleur, vignette, têtes au top 3 et 🏎️ ensuite. La
     # quinzaine ne paie rien : pas de 🪙 ici, comme pas de 💰 sans thème
     th = _theme(gid)
@@ -2514,16 +2700,16 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
         suffixe = f' · 🌐 {at} all-time' if at is not None else ""
         nom = x.get("affiche") or x["va"]
-        rangs.append(f'{med[i]} **{nom}** — **{x["clics"]}** subs{suffixe}'
+        rangs.append(f'{med[i]} **{nom}** — **{x["clics"]}** {unite}{suffixe}'
                      if i < 3 else
-                     f'{i + 1}. {suite}{nom} — {x["clics"]} subs{suffixe}')
+                     f'{i + 1}. {suite}{nom} — {x["clics"]} {unite}{suffixe}')
     if not rangs:
         rangs = ["_Aucun relevé pour cette période._"]
 
     # mêlé : un seul total, celui de toutes les lignes affichées — l'en-tête
     # annonce toute l'agence, un total par marché redirait ce qu'on ne dit plus
     total = sum(int(x["clics"]) for x in (lignes if mix is None else mix))
-    queue = [f'\n👥 **Total période**\n**{total}** subs']
+    queue = [f'\n👥 **Total période**\n**{total}** {unite}']
     if cl["illisibles"]:
         if final:
             queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
@@ -2531,7 +2717,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         else:
             # la quota GetMySocial n'explique rien quand les clics viennent
             # de MyPuls (Twitter) : les noms, alors
-            pourquoi = _quota_dit() if _source(gid) == "gms" else ""
+            pourquoi = _quota_dit() if _source(gid) != "tracking" else ""
             if pourquoi:
                 # la raison, pas le mur de noms : vingt-trois lignes de VA
                 # prenaient la moitié du message sans rien expliquer
@@ -2598,9 +2784,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                         "description": corps[:4096],
                         "footer": {"text": pied}})
             continue
-        titre = (f'📊 Classement subs — quinzaine du {debut.strftime("%d/%m")} '
+        titre = (f'📊 Classement {unite} — quinzaine du {debut.strftime("%d/%m")} '
                  f'au {fin.strftime("%d/%m")} (terminée)' if final
-                 else "📊 Classement subs — la quinzaine")
+                 else f"📊 Classement {unite} — la quinzaine")
         out.append({"title": titre + (f" ({n}/{len(pages)})" if len(pages) > 1 else ""),
                     "color": 0x64748B if final else 0x3B82F6,
                     "description": corps[:4096],
@@ -2704,7 +2890,8 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
         return ""
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
-    cl = classement(debut, min(aujourd, fin_saison), gid=gid)
+    # la quinzaine ne paie rien : elle cède la réserve de la paie au podium
+    cl = classement(debut, min(aujourd, fin_saison), gid=gid, etiquette=ETIQUETTE_QUINZAINE)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((ids or [""])[0])
@@ -2894,7 +3081,7 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         if _pause_pour(gid):
             raison = "GetMySocial en pause"
         else:
-            cl = classement(debut, fin, gid=gid)
+            cl = classement(debut, fin, gid=gid, etiquette=ETIQUETTE_QUINZAINE)
             rec["essais"] = int(rec.get("essais") or 0) + 1
             if not cl["lignes"]:
                 raison = "aucun relevé"
@@ -3063,7 +3250,10 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
 #: ligne.
 #: Le 06/10/2026 : Twitter compte les clics des trackings (« clics tracking
 #: OF » au lieu de « clics US »).
-FORMAT_AFFICHAGE = "2026-10-06-clics-tracking"
+#: Le 13/10/2026 : les VA de Twitter numérotés par le registre des trackings
+#: partout (_par_tracking : dix-sept VA US revenaient sur Va IG), et Threads
+#: en « Threads n », clics uniques US + UK.
+FORMAT_AFFICHAGE = "2026-10-13-numeros-registre"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:

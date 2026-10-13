@@ -179,19 +179,21 @@ def check(label, cond, detail=""):
 
 TW, TH, IG = pd.TWITTER_ID, pd.THREADS_ID, pd.VA_IG_ID
 
-# Le 13/10/2026, le propriétaire a retiré la quinzaine de Threads et le récap
-# des clics de Twitter (« pas besoin »), puis donné à Threads le podium de la
-# semaine aux clics (tests_podium_threads_clics.py). Les réglages livrés le
-# disent ; les mécanismes de la quinzaine reprise, eux, restent testés en
-# remettant les deux le temps de ce fichier.
-check("livré : Threads n'a plus de classement subs (profil gardé dans PROFIL_THREADS), "
-      "il a le podium aux clics",
-      not pd.subs_seulement(TH) and pd.podium_seulement(TH)
+# Le 13/10/2026, le propriétaire a retiré la quinzaine reprise de Threads et le
+# récap des clics de Twitter (« pas besoin »), puis celui de Threads (« je veux
+# pas ça » : il montrait noms et pseudos) ; Threads a désormais son propre
+# podium et sa quinzaine, aux clics uniques US + UK (tests_podium_threads_clics.py).
+# Les réglages livrés le disent ; les mécanismes de la quinzaine reprise et du
+# récap, eux, restent testés en remettant tout le temps de ce fichier.
+check("livré : Threads n'a plus de classement repris (profil gardé dans PROFIL_THREADS), "
+      "il a le sien",
+      not pd.subs_seulement(TH) and pd.vitrine(TH) and not pd._repris_de(TH)
       and pd.PROFIL_THREADS.get("subs_seul") is True)
-check("livré : le récap des clics part sur Threads seulement (Twitter retiré)",
-      set(rcr.CIBLES_DEFAUT) == {TH})
+check("livré : plus aucun récap des clics à reprendre (Twitter et Threads retirés)",
+      rcr.CIBLES_DEFAUT == {})
 pd.SERVEURS[TH] = dict(pd.PROFIL_THREADS)
 rcr.CIBLES_DEFAUT[TW] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
+rcr.CIBLES_DEFAUT[TH] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 AUTRE = "1535758943324999711"          # Youl4b : le serveur du report d'origine
 NUMEROS = {"Roucham": 12, "Roucham SPAM": 24, "tsiry 1": 43, "Ricardo": 22, "abdoul_9684": 31}
 
@@ -614,7 +616,7 @@ try:
         return lambda *a, **k: faits.append((nom, vd.serveur_courant(), a[0] if a else None))
     faux_p = types.SimpleNamespace(
         SERVEURS=pd.SERVEURS, subs_seulement=pd.subs_seulement,
-        podium_seulement=pd.podium_seulement,
+        podium_seulement=pd.podium_seulement, vitrine=pd.vitrine,
         a_poster=lambda: True, poster_podium=note("podium"),
         a_rafraichir=lambda g: True, rafraichir=note("semaine"),
         a_rafraichir_subs=lambda g: True, rafraichir_subs=note("subs"),

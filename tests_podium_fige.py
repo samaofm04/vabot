@@ -190,7 +190,8 @@ RELEVES_SEMAINE = ("rafraichir", "_semaine_terminee", "_figer_semaine", "poster_
 
 # mesure : Va IG relève ses VA US en clics GetMySocial (mesure="gms") depuis
 # que Twitter compte ceux des trackings ; ici, une seule mesure
-def faux_classement(debut, fin, pause=0.3, gid=None, mesure=None):
+def faux_classement(debut, fin, pause=0.3, gid=None, mesure=None, etiquette="podium"):
+    # etiquette : la priorite GetMySocial du releve (podium_discord.ETIQUETTE_QUINZAINE)
     gid = str(gid)
     GMS.append((gid, debut, fin, CLOCK["now"], sys._getframe(1).f_code.co_name))
     cle = (gid, debut.isoformat())

@@ -69,12 +69,15 @@ SALON_CLICS = "─│📊┤-l-clicks"
 #: Twitter, au marché US, des deux côtés.
 _REPORT_US = {"team_id": ESPACE_JESSY, "group_id": None, "identity": None,
               "group_name": "JESSY LE RETOUR", "marche": "us", "tout": True}
-#: Va Twitter RETIRÉ le 13/10/2026 par le propriétaire : « pour Twitter remove
-#: les clicks, pas besoin ». Le remettre : ajouter TWITTER_ID ici, ou
-#: {"cibles": {"1445108485090971710": {...}}} dans data/recap_clics_rest.json.
-CIBLES_DEFAUT: Dict[str, Dict[str, Any]] = {
-    THREADS_ID: dict(_REPORT_US, salon=SALON_CLICS),
-}
+#: AUCUN SERVEUR depuis le 13/10/2026. Va Twitter retiré par le propriétaire
+#: (« pour Twitter remove les clicks, pas besoin »), puis Va Threads (« pour
+#: les clicks pour Threads je veux pas ça » : le report montrait les noms et
+#: les pseudos des VA ; « anonyme toujours ») : son salon -l-clicks porte
+#: désormais le classement de la quinzaine du podium (podium_discord, profil
+#: de Threads). L'ancien récap d'un serveur retiré est vidé sur place
+#: (retirer), jamais supprimé. En remettre un : l'ajouter ici, ou
+#: {"cibles": {"<serveur>": {...}}} dans data/recap_clics_rest.json.
+CIBLES_DEFAUT: Dict[str, Dict[str, Any]] = {}
 
 #: Un relevé de plus de 75 minutes : la source a sauté son heure.
 FRAIS_S = 75 * 60
@@ -431,6 +434,57 @@ def publier_tous() -> Dict[str, str]:
             print(f"[recap-clics] {gid} : {type(e).__name__}: {e}", flush=True)
             out[gid] = ""
     return out
+
+
+#: Ce que devient le dernier récap d'un serveur retiré des cibles : le message
+#: est vidé sur place (plus de noms ni de pseudos), désépinglé, jamais
+#: supprimé. Sur Threads, le classement des clics part juste en dessous.
+RETRAIT = {THREADS_ID: "📊 Les clics des VA sont maintenant dans le classement juste en dessous."}
+RETRAIT_DEFAUT = "📊 Ce récap des clics n'est plus tenu."
+
+
+def retirer(gid: str) -> bool:
+    """Un serveur sorti des cibles : son dernier récap, s'il en reste un, est
+    vidé sur place, une fois. Rend True si le message vient d'être vidé.
+
+    Sans ça, le report retiré restait là pour toujours, figé, avec les noms
+    et les pseudos des VA que le propriétaire ne voulait plus montrer.
+    Discord en panne passagère (ou l'accès au salon retiré) : rien n'est
+    noté, le tour suivant réessaie. Message ou salon disparus (supprimés à
+    la main) : rien à vider, c'est noté pour ne plus redemander."""
+    gid = str(gid)
+    if gid in cibles():
+        return False
+    if not _VERROU.acquire(blocking=False):
+        return False
+    try:
+        etat = _etat()
+        e = etat.get(gid) if isinstance(etat.get(gid), dict) else None
+        if not e or not e.get("message") or not e.get("salon") or e.get("retire"):
+            return False
+        salon, mid = str(e["salon"]), str(e["message"])
+        code, rep = _patch(gid, salon, mid, {"content": RETRAIT.get(gid, RETRAIT_DEFAUT),
+                                             "embeds": [], "attachments": []})
+        if code != 200 and _passager(code, rep):
+            print(f"[recap-clics] {gid} : ancien récap {mid} pas encore vidé (HTTP {code}), "
+                  "nouvel essai au prochain tour", flush=True)
+            return False
+        if code == 200:
+            # désépinglé : un message vide n'a plus à être mis en avant (le
+            # message, lui, reste)
+            c_p, _r = _api("DELETE", f"/channels/{salon}/pins/{mid}", gid)
+            print(f"[recap-clics] {gid} : ancien récap {mid} vidé sur place"
+                  + ("" if c_p in (200, 204, 404) else f" (désépinglage refusé, HTTP {c_p})"),
+                  flush=True)
+        else:
+            print(f"[recap-clics] {gid} : ancien récap {mid} introuvable (HTTP {code}, supprimé "
+                  "à la main ?) : rien à vider", flush=True)
+        e["retire"] = int(time.time())
+        etat[gid] = e
+        _ecrire_etat(etat)
+        return code == 200
+    finally:
+        _VERROU.release()
 
 
 def _retirer_avis(gid: str, salon: str, mid: str) -> bool:

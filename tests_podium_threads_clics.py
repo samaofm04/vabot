@@ -1,32 +1,38 @@
-"""Va Threads : le podium de la semaine, aux clics.
+"""Va Threads : les VA de Twitter, à leurs clics uniques US + UK.
 
 Propriétaire, 13/10/2026 : « pour Threads le podium c'est avec des clicks »
-(salon « ─│🏆┤-podium » de Threads), primes 10/5/3 $ comme Twitter. Les VA
-de Twitter, leurs « VA n », leurs clics GetMySocial au marché US — les
-chiffres du récap « -l-clicks » de Threads, pas les trackings MyPuls que
-Twitter appelle « subs ».
+(primes 10/5/3 $ comme Twitter), puis, devant le récap -l-clicks : « pour
+Threads tu écris Threads, pour Twitter Twitter, anonyme toujours, et pour le
+click uniquement les clicks USA UK, et ça unique ». Choisi ensuite : les
+clics vers OnlyFans dédoublonnés (« button_clicks »), « Threads 12 » partout
+sur Threads (podium compris), et dans -l-clicks le classement de la
+quinzaine avec l'all-time, à la place du report JESSY LE RETOUR.
 
 Vérifié ici, sans réseau ni vrai data/ (GetMySocial, MyPuls, Discord et
 l'horloge sont faux ; DATA_DIR est un dossier temporaire) :
-  1. le profil livré : podium seul, mesure GetMySocial, mot « clics » ;
-     Twitter et Va IG inchangés ;
-  2. le relevé : les liens et numéros de Twitter, les clics US de
-     GetMySocial, jamais MyPuls ; un seul relevé sert Threads ET Va IG ;
-  3. le message vivant : posté par Bowser dans « ─│🏆┤-podium » de Threads,
-     « clics » partout, jamais « subs », primes 10/5/3 $ ; Twitter garde
-     son message d'avant ;
-  4. ni quinzaine, ni bonus du jour sur Threads ;
-  5. le lundi : « semaine terminée » sur les chiffres entiers, puis le podium
-     figé sur place, mention « Podium clics », primes passées à suivi_va ;
-     aucun relevé de plus pour le podium de 9h ;
-  6. la boucle du site : sur Threads, le récap des clics et le podium, rien
-     d'autre.
+  1. le profil livré : vitrine (ni bonus, ni synchro, ni suivi), mesure
+     « gms_bouton », pays US + GB, « Threads n » ; Twitter et Va IG inchangés ;
+  2. les numéros : ceux du registre des trackings (comme Twitter), pour
+     Threads ET pour les VA US de Va IG — un lien renommé façon Infloww garde
+     son VA, deux téléphones sur un tracking font une ligne, un lien sans
+     tracking garde le numéro de son nom, un lien sur deux trackings est mis
+     de côté et dit ;
+  3. la mesure : clics uniques US + UK pour Threads (jamais les vues, jamais
+     MyPuls) ; Va IG garde les vues US ;
+  4. le podium de la semaine : Bowser, « ─│🏆┤-podium », « Threads n »,
+     « clics », primes ; le lundi, figé et mentionné ;
+  5. la quinzaine dans « ─│📊┤-l-clicks », avec l'all-time « Threads n » ; une
+     page d'avant dans un salon disparu est reposée ;
+  6. l'ancien récap JESSY de -l-clicks est vidé sur place, une fois, jamais
+     supprimé ;
+  7. la boucle du site : sur Threads, podium et quinzaine, rien d'autre.
 
 Lancer depuis la racine du dépôt : python tests_podium_threads_clics.py
 """
 from __future__ import annotations
 
 import ast
+import contextlib
 import copy
 import datetime as dt
 import io
@@ -61,7 +67,7 @@ sys.modules["suivi_va"] = _faux_suivi
 # ------------------------------------------------- faux GetMySocial --------
 EQ_TW1, EQ_TW2 = "tm_6a0e4739bfa0c238f20a8bf5", "tm_6ab46ebb11a0232c11211b1a"
 OF = "https://onlyfans.com/"
-GMS = {"listes": [], "analytics": []}
+GMS = {"listes": [], "vues": [], "boutons": [], "muet": False, "tag": None, "repli": False}
 
 
 def _page(id_, nom, *urls):
@@ -69,30 +75,70 @@ def _page(id_, nom, *urls):
             "buttons": [{"url": u} for u in urls]}
 
 
-LIENS = {EQ_TW1: [_page("l1", "(Roucham) 1", OF + "emy.brw/c42"),
-                  _page("l2", "(Roucham) 1SPAM", OF + "emy.brw/c43"),
+# ce que GetMySocial portait le 13/10/2026, en petit
+LIENS = {EQ_TW1: [_page("l1", "VA 3 - Roucham 1 ( normal )", OF + "emy.brw/c42"),
+                  _page("l2", "VA 3 - Roucham 2 ( normal )", OF + "emy.brw/c42"),
                   _page("l3", "tsiry 1", OF + "emy.brw/c37"),
-                  _page("l4", "(Ricardo) 1", OF + "emy.brw/c44")],
-         EQ_TW2: [{"id": "l5", "display_name": "Twitter VA 31 @abdoul_9684", "type": "directlink",
+                  _page("l4", "eddy 2", OF + "Emy.Brw/c035/"),
+                  _page("l5", "test emy", OF + "emy.brw"),
+                  _page("l6", "Nouveau sans rien")],
+         EQ_TW2: [{"id": "l8", "display_name": "Twitter VA 31 @abdoul_9684", "type": "directlink",
                    "url": OF + "emy.brw/c6", "status": "active", "buttons": []}]}
-# les clics US de chaque lien sur la période ; le reste du monde à côté
-US = {"l1": 50, "l2": 20, "l3": 35, "l4": 5, "l5": 12}
+# clics vers OnlyFans, dédoublonnés, par pays (button_clicks)
+BOUTONS = {"l1": {"US": 40, "GB": 5, "FR": 9}, "l2": {"US": 2, "IN": 3},
+           "l3": {"US": 30, "GB": 1, "IN": 50}, "l4": {"US": 10, "GB": 10, "CA": 4},
+           "l5": {"US": 3}, "l6": {"US": 99}, "l7": {"US": 77}, "l8": {}}
+# vues de la page, par pays (ce que Va IG compte) : dix fois plus, US seul ;
+# le lien direct (l8) n'a que des visites : c'est elles qui comptent pour lui
+VUES = {k: {p: 10 * n for p, n in v.items()} for k, v in BOUTONS.items()}
+VUES["l8"] = {"US": 6, "GB": 1, "FR": 4}
 
 
 def _list_links_team(team, force_refresh=False):
     GMS["listes"].append(team)
+    if GMS["repli"]:
+        return {"ok": False, "error": "panne"}
     return {"ok": True, "links": copy.deepcopy(LIENS.get(team, []))}
 
 
+def _somme(table, ids):
+    out = {}
+    for i in ids:
+        for p, n in table.get(i, {}).items():
+            out[p] = out.get(p, 0) + n
+    return sum(out.values()), out
+
+
 def _analytics_for_links(ids, d0, d1):
-    GMS["analytics"].append((tuple(ids), d0, d1))
-    us = sum(US.get(i, 0) for i in ids)
-    return us + 9, {"US": us, "FR": 9}
+    GMS["vues"].append((tuple(ids), d0, d1))
+    return (None, None) if GMS["muet"] else _somme(VUES, ids)
+
+
+def _boutons_par_pays(ids, d0, d1, directs=()):
+    GMS["boutons"].append((tuple(ids), d0, d1))
+    GMS.setdefault("tags", []).append(GMS["tag"])
+    GMS.setdefault("directs", []).append(tuple(directs))
+    if GMS["muet"]:
+        return None, None
+    tp, pp = _somme(BOUTONS, [i for i in ids if i not in directs])
+    td, pdir = _somme(VUES, [i for i in ids if i in directs])
+    return tp + td, {k: pp.get(k, 0) + pdir.get(k, 0) for k in set(pp) | set(pdir)}
+
+
+@contextlib.contextmanager
+def _api_tag(nom):
+    avant, GMS["tag"] = GMS["tag"], nom
+    try:
+        yield
+    finally:
+        GMS["tag"] = avant
 
 
 _faux_gms = types.ModuleType("gms")
 _faux_gms.list_links_team = _list_links_team
 _faux_gms.analytics_for_links = _analytics_for_links
+_faux_gms.boutons_par_pays = _boutons_par_pays
+_faux_gms.api_tag = _api_tag
 _faux_gms.sante_cles = lambda: []
 _faux_gms.etat_quota = lambda: {}
 _faux_gms.pause_restante = lambda: 0
@@ -115,6 +161,7 @@ sys.modules["mypuls"] = _faux_mypuls
 import safe_json                       # noqa: E402
 import verif_discord as vd             # noqa: E402
 import podium_discord as pd            # noqa: E402
+import recap_clics_rest as rcr         # noqa: E402
 import clics_personnes as cp           # noqa: E402
 
 OKS, FAILS = [], []
@@ -127,13 +174,30 @@ def check(label, cond, detail=""):
 
 
 TW, TH, IG = pd.TWITTER_ID, pd.THREADS_ID, pd.VA_IG_ID
-NUMEROS = {"Roucham": 12, "Roucham SPAM": 24, "tsiry 1": 43, "Ricardo": 22, "abdoul_9684": 31}
+# la table au NOM des liens : les liens renommés façon Infloww n'y sont plus
+NUMEROS = {"tsiry 1": 43, "eddy 2": 42, "test emy": 30, "abdoul_9684": 31}
+
+
+def _trk(numero, nom, ids=(), spam=False):
+    return {"numero": numero, "cle": nom, "spam": spam, "nom": nom, "liens": [nom],
+            "ids": list(ids), "mp": True, "premier": "2026-10-06", "vu": "2026-10-13",
+            "actif": True}
+
+
+# « ids » : les liens que le registre a vus derrière chaque tracking (tenu par
+# le relevé de Twitter sur les listes fraîches)
+REGISTRE = {"trackings": {"emy.brw/c42": _trk(12, "Roucham", ["l1", "l2"]),
+                          "emy.brw/c43": _trk(24, "Roucham SPAM", [], spam=True),
+                          "emy.brw/c37": _trk(43, "tsiry", ["l3"]),
+                          "emy.brw/c35": _trk(41, "eddy", ["l4"]),
+                          "emy.brw/c6": _trk(31, "abdoul_9684", ["l8"])},
+            "attente": {}, "frais": "2026-10-13"}
 
 # ------------------------------------------------------------ faux Discord --
 SALONS = {
     TW: [{"id": "tw-podium", "name": "─│🏆┤-podium", "type": 0},
          {"id": "tw-subs", "name": "─│👤┤-subs", "type": 0},
-         {"id": "tw-bonus", "name": "─│💸┤-bonus-journalier", "type": 0}],
+         {"id": "tw-clics", "name": "─│📊┤-l-clicks", "type": 0}],
     # le vrai Threads du 13/10/2026 : plus de salon « -subs », un « paliers-subs »
     TH: [{"id": "th-cat", "name": "<<<🔔NOTIFICATION >>>", "type": 4},
          {"id": "th-podium", "name": "─│🏆┤-podium", "type": 0},
@@ -153,12 +217,17 @@ class FauxDiscord:
     def __init__(self):
         self.appels, self.n = [], 0
         self.messages = {}
+        self.pannes = []               # [(méthode, début du chemin, code)] une fois chacune
 
     def guilde_du_salon(self, cid):
         return next((g for g, xs in SALONS.items() if any(x["id"] == cid for x in xs)), "")
 
     def http(self, bot, methode, chemin, js):
         self.appels.append({"bot": bot["id"], "m": methode, "p": chemin, "json": copy.deepcopy(js)})
+        for i, (m, debut, code) in enumerate(self.pannes):
+            if m == methode and chemin.startswith(debut):
+                self.pannes.pop(i)
+                return code, {"message": "panne"}
         bouts = chemin.split("?")[0].strip("/").split("/")
         if chemin == "/users/@me":
             return 200, {"id": UTILISATEUR[bot["id"]]}
@@ -177,10 +246,16 @@ class FauxDiscord:
         if len(bouts) == 3 and bouts[2] == "messages" and methode == "POST":
             self.n += 1
             mid = f"M{self.n}"
-            self.messages[mid] = {"salon": cid, "auteur": moi,
+            self.messages[mid] = {"salon": cid, "auteur": moi, "epingle": False,
                                   "embeds": copy.deepcopy(js.get("embeds") or []),
                                   "content": js.get("content", "")}
             return 200, {"id": mid}
+        if len(bouts) == 4 and bouts[2] == "pins" and methode == "DELETE":
+            msg = self.messages.get(bouts[3])
+            if not msg:
+                return 404, {"code": 10008}
+            msg["epingle"] = False
+            return 204, {}
         if len(bouts) == 4 and bouts[2] == "messages":
             msg = self.messages.get(bouts[3])
             if not msg or msg["salon"] != cid:
@@ -189,6 +264,8 @@ class FauxDiscord:
                 return 403, {"code": 50005}
             if "embeds" in js:
                 msg["embeds"] = copy.deepcopy(js["embeds"])
+            if "content" in js:
+                msg["content"] = js["content"]
             return 200, {"id": bouts[3]}
         return 404, {"code": 0}
 
@@ -213,6 +290,7 @@ vd._http = lambda bot, methode, chemin, _sans_jeton=False, **kw: DISCORD.http(
 _SAUVE_PD = {k: getattr(pd, k) for k in (
     "DATA_DIR", "ETAT_FICHIER", "CONFIG_FICHIER", "NUMEROS_FICHIER", "LIENS_CACHE",
     "ALLTIME_FICHIER", "_maintenant", "_aujourdhui", "_pause_gms", "time")}
+_SAUVE_RCR = (rcr.DATA_DIR,)
 _SAUVE_CP = cp.rattachements_identite
 _NB = [0]
 PAUSE = {"gms": False}
@@ -224,12 +302,14 @@ def installer():
     d = TMP / f"bac{_NB[0]}"
     d.mkdir()
     safe_json.write_text(d / "podium_numeros.json", json.dumps(NUMEROS))
+    safe_json.write(d / "podium_trackings.json", REGISTRE)
     pd.DATA_DIR = d
     pd.ETAT_FICHIER = d / "podium.json"
     pd.CONFIG_FICHIER = d / "podium_config.json"
     pd.NUMEROS_FICHIER = d / "podium_numeros.json"
     pd.LIENS_CACHE = d / "gmsdash_links.json"
     pd.ALLTIME_FICHIER = d / "podium_alltime.json"
+    rcr.DATA_DIR = d
     CLOCK["now"] = dt.datetime(2026, 10, 13, 10, 0)
     pd._maintenant = lambda: CLOCK["now"]
     pd._aujourdhui = lambda: CLOCK["now"].date()
@@ -241,8 +321,10 @@ def installer():
     pd._RELEVES_LUS = False
     pd._REPRIS.clear()
     pd._REPRIS_LUS = False
-    GMS["listes"].clear()
-    GMS["analytics"].clear()
+    for k in ("listes", "vues", "boutons", "tags", "directs"):
+        GMS.setdefault(k, []).clear()
+    GMS["muet"] = GMS["repli"] = False
+    GMS["tag"] = None
     MP["appels"].clear()
     PRIMES_DITES.clear()
     return d
@@ -261,80 +343,168 @@ def avancer(**kw):
     CLOCK["now"] += dt.timedelta(**kw)
 
 
+ATTENDU = [("Threads 12", 47), ("Threads 43", 31), ("Threads 41", 20), ("Threads 31", 7),
+           ("Threads 30", 3)]
 RENDU = {}
 try:
     cp.rattachements_identite = lambda: {}
 
     # ------------------------------------------------------------------ 1
     print("\n— 1. le profil livré")
-    check("Threads : dans les serveurs du podium, podium SEUL, repris de Twitter",
-          TH in pd.SERVEURS and pd.podium_seulement(TH) and not pd.subs_seulement(TH)
-          and pd._repris_de(TH) == TW)
     p_th = pd._profil(TH)
-    check("… aux clics GetMySocial (pas les trackings de Twitter), mot « clics »",
-          pd._source(TH) == "gms" and pd._source(TW) == "tracking"
-          and pd._unite(TH) == "clics" and pd._service(TH) == "GetMySocial")
-    check("… marché US et numéros de Twitter, son bot Bowser, sans bonus ni bouton ni thème",
-          p_th["marche"] == "US" and p_th["pays"] == ("US",) and p_th["fr"] is False
-          and p_th["bot"] == "Bowser" and p_th["bonus"] is False
+    check("Threads : son profil à lui (il ne reprend plus Twitter), vitrine",
+          TH in pd.SERVEURS and not pd._repris_de(TH) and pd.vitrine(TH)
+          and not pd.subs_seulement(TH) and not pd.podium_seulement(TH))
+    check("… clics uniques vers OnlyFans (« gms_bouton »), US + UK seulement",
+          pd._source(TH) == "gms_bouton" and tuple(p_th["pays"]) == ("US", "GB")
+          and p_th["marche"] == "US + UK" and pd._service(TH) == "GetMySocial")
+    check("… « Threads n », « clics », Bowser, sans bonus ni bouton ni thème",
+          p_th["libelle"] == "Threads" and pd._unite(TH) == "clics" and p_th["bot"] == "Bowser"
+          and p_th["bonus"] is False and p_th["fr"] is False
           and not p_th.get("bouton_maj") and not p_th.get("theme") and not p_th.get("avec_us"))
-    check("Twitter et Va IG : profils inchangés, mot « subs », pas « podium seul »",
-          pd._unite(TW) == pd._unite(IG) == "subs"
-          and not pd.podium_seulement(TW) and not pd.podium_seulement(IG)
-          and "reprend" not in pd._profil(TW) and pd._profil(TW) is pd.SERVEURS[TW]
-          and pd._profil(IG) is pd.SERVEURS[IG])
-    check("mêmes primes que Twitter (10/5/3 $)", pd.PRIMES == [10.0, 5.0, 3.0])
-    check("le classement subs d'avant reste écrit à part (PROFIL_THREADS)",
-          pd.PROFIL_THREADS.get("subs_seul") is True and "podium_seul" not in pd.PROFIL_THREADS)
+    check("… les liens de Twitter (ses deux espaces), la quinzaine dans -l-clicks, "
+          "son propre all-time",
+          not p_th.get("equipes") and p_th["salon_subs"] == "─│📊┤-l-clicks"
+          and p_th["alltime"] == "podium_alltime_threads.json")
+    check("Twitter et Va IG : profils inchangés (« subs », pas vitrine, pas de libellé)",
+          pd._unite(TW) == pd._unite(IG) == "subs" and not pd.vitrine(TW) and not pd.vitrine(IG)
+          and "libelle" not in pd._profil(TW) and pd._source(TW) == "tracking"
+          and pd._profil(TW) is pd.SERVEURS[TW] and pd._profil(IG) is pd.SERVEURS[IG])
+    check("mêmes primes que Twitter (10/5/3 $), et plus aucun récap JESSY à poster",
+          pd.PRIMES == [10.0, 5.0, 3.0] and rcr.CIBLES_DEFAUT == {})
 
     # ------------------------------------------------------------------ 2
-    print("\n— 2. le relevé : GetMySocial, numéros de Twitter, un seul pour deux serveurs")
+    print("\n— 2. les numéros : le registre des trackings")
     installer()
     lundi, auj = pd.semaine_en_cours()
     cl = pd.classement(lundi, auj, gid=TH)
     vas = [(x["va"], x["clics"]) for x in cl["lignes"]]
-    check("les VA de Twitter, leurs numéros, leurs clics US (pas le reste du monde)",
-          vas == [("VA 12", 50), ("VA 43", 35), ("VA 24", 20), ("VA 31", 12), ("VA 22", 5)], vas)
-    check("… lus dans GetMySocial (les deux espaces de Twitter), jamais dans MyPuls",
-          set(GMS["listes"]) == {EQ_TW1, EQ_TW2} and len(GMS["analytics"]) == 5
-          and not MP["appels"], (GMS, MP["appels"]))
-    check("… sur la semaine en cours (lundi → aujourd'hui)",
-          {a[1:] for a in GMS["analytics"]} == {(lundi.isoformat(), auj.isoformat())})
-    n_a = len(GMS["analytics"])
+    check("Threads : les VA au numéro de leur tracking, « Threads n », clics uniques US + UK",
+          vas == ATTENDU, vas)
+    check("lien renommé façon Infloww (« VA 3 - Roucham 1 ( normal ) ») : son VA 12, par "
+          "son tracking", vas[0] == ("Threads 12", 47))
+    check("deux téléphones sur le même tracking (Roucham 1 et 2) : UNE ligne, un appel pour "
+          "les deux liens", ("l1", "l2") in [a[0] for a in GMS["boutons"]]
+          and sum(1 for v, _ in vas if v == "Threads 12") == 1)
+    check("le registre l'emporte sur le nom (« eddy 2 » : VA 41 comme sur Twitter, pas 42)",
+          ("Threads 41", 20) in vas and not any(v == "Threads 42" for v, _ in vas))
+    check("lien direct sans page (VA 31) : compté à ses visites US + UK (pas de bouton)",
+          ("Threads 31", 7) in vas and ("l8",) in GMS["directs"]
+          and all(d == () for i, d in zip([a[0] for a in GMS["boutons"]], GMS["directs"])
+                  if i != ("l8",)), (vas, GMS["directs"]))
+    check("sans tracking connu : le numéro de son nom (« test emy », 30)", ("Threads 30", 3) in vas)
+    check("sans tracking ni numéro : mis de côté ET dit, sans appel",
+          cl["sans_numero"] == ["Nouveau sans rien"]
+          and not any(a[0] == ("l6",) for a in GMS["boutons"]), cl["sans_numero"])
+    check("le podium relève sous l'étiquette qui paie (« podium »)",
+          set(GMS["tags"]) == {"podium"}, GMS["tags"])
+    check("aucun numéro attribué ici (la table au nom des liens n'a pas bougé)",
+          json.loads(pd.NUMEROS_FICHIER.read_text()) == NUMEROS)
+    check("un appel par VA, sur la semaine, jamais les vues ni MyPuls",
+          len(GMS["boutons"]) == 5 and not GMS["vues"] and not MP["appels"]
+          and {a[1:] for a in GMS["boutons"]} == {(lundi.isoformat(), auj.isoformat())})
+
+    # Va IG : les mêmes numéros pour ses VA US, mais ses vues US à lui
     us = pd._releve_us(lundi, auj)
-    check("Va IG reprend CE relevé pour ses VA US : aucun appel de plus",
-          us is not None and [x["va"] for x in us["lignes"]] == [v for v, _ in vas]
-          and len(GMS["analytics"]) == n_a, len(GMS["analytics"]) - n_a)
-    avancer(minutes=30)
-    cl2 = pd.classement(lundi, auj, gid=TH)
-    check("Threads, une demi-heure après : même relevé, aucun appel",
-          [x["va"] for x in cl2["lignes"]] == [v for v, _ in vas]
-          and len(GMS["analytics"]) == n_a)
-    check("le relevé gardé pour Threads est celui des clics (« gms »), pas les trackings",
-          any(k[0] == TW and k[1] == "gms" for k in pd._REPRIS)
-          and not any(k[1] == "tracking" for k in pd._REPRIS), list(pd._REPRIS))
+    vus_ig = [(x["va"], x["clics"]) for x in (us or {}).get("lignes") or []]
+    check("Va IG : ses VA US au numéro du registre (VA 12, 43, 41…), aux VUES US comme avant",
+          vus_ig == [("VA 12", 420), ("VA 43", 300), ("VA 41", 100), ("VA 30", 30),
+                     ("VA 31", 6)], vus_ig)
+    check("… Va IG ne relit pas les clics uniques de Threads (mesures séparées)",
+          len(GMS["boutons"]) == 5 and len(GMS["vues"]) == 5)
 
-    installer()
-    us = pd._releve_us(lundi, auj)          # Va IG passe le premier
-    n_a = len(GMS["analytics"])
-    cl3 = pd.classement(lundi, auj, gid=TH)
-    check("dans l'autre sens : Va IG relève, Threads reprend sans appel",
-          n_a == 5 and len(GMS["analytics"]) == n_a
-          and [x["va"] for x in cl3["lignes"]] == [x["va"] for x in us["lignes"]])
-    avancer(hours=2, minutes=1)
-    pd.classement(lundi, auj, gid=TH)
-    check("deux heures plus tard : relevé neuf (le rythme de Va IG, pas toutes les heures)",
-          len(GMS["analytics"]) == n_a + 5, len(GMS["analytics"]) - n_a)
+    # ------------------------------------------------------------------ 2 bis
+    print("\n— 2 bis. pages à deux boutons, doutes du registre, liste de repli")
+    reg0 = pd._lire_registre()
 
-    # le jour du bonus de Twitter et ses trackings ne sont plus gardés pour Threads
+    def regroupe(liens, ents, table=None, reg=None):
+        if reg is not None:
+            safe_json.write(pd.DATA_DIR / "podium_trackings.json", reg)
+        try:
+            return pd._par_tracking(liens, ents, table or {}, "2026-10-12", "2026-10-13")
+        finally:
+            safe_json.write(pd.DATA_DIR / "podium_trackings.json", REGISTRE)
+
+    double = _page("d1", "(Roucham) 1", OF + "emy.brw/c42", OF + "emy.brw/c43")
+    double_s = _page("d2", "(Roucham) SPAM", OF + "emy.brw/c42", OF + "emy.brw/c43")
+    o, t, dte, _c = regroupe([double, double_s],
+                             {"Roucham": {"nom": "Roucham", "spam": False, "ids": ["d1"]},
+                              "Roucham SPAM": {"nom": "Roucham", "spam": True, "ids": ["d2"]}})
+    check("une page aux deux boutons, normal et spam : au VA de son genre (12, et 24 pour "
+          "la page spam), rien mis de côté",
+          t == {"#12": 12, "#24": 24} and o["#12"]["ids"] == ["d1"] and o["#24"]["ids"] == ["d2"]
+          and not dte, (o, t, dte))
+    deux = _page("d3", "Conflit", OF + "emy.brw/c42", OF + "emy.brw/c37")
+    o, t, dte, en_c = regroupe([deux], {"Conflit": {"nom": "Conflit", "spam": False,
+                                                    "ids": ["d3"]}})
+    check("une page sur les trackings de deux personnes : mise de côté, ses deux VA sans "
+          "relevé (comme Twitter), les trackings en cause dits",
+          not t and list(o) == ["Conflit (trackings de VA 12, 43)"] and dte == {12, 43}
+          and en_c == ["emy.brw/c37", "emy.brw/c42"], (o, t, dte, en_c))
+    o, t, dte, _c = regroupe([deux], {"Conflit": {"nom": "Conflit", "spam": False,
+                                                  "ids": ["d3"]}}, {"Conflit": 43})
+    check("… sauf si son nom désigne l'un des deux : le sien", t == {"#43": 43} and not dte)
+    reg_d = json.loads(json.dumps(REGISTRE))
+    reg_d["trackings"]["emy.brw/c42"]["doute"] = [12, 47]
+    o, t, dte, en_c = regroupe(LIENS[EQ_TW1], pd.entites(LIENS[EQ_TW1], {}), NUMEROS, reg_d)
+    check("tracking en doute au registre : ses VA (12, 47) sont à mettre sans relevé",
+          dte == {12, 47} and en_c == ["emy.brw/c42"], (dte, en_c))
+    safe_json.write(pd.DATA_DIR / "podium_trackings.json", reg_d)
+    n_b = len(GMS["boutons"])
+    cl_d = pd.classement(lundi, auj, gid=TH)
+    safe_json.write(pd.DATA_DIR / "podium_trackings.json", REGISTRE)
+    check("… sur Threads : « Threads 12 » sans relevé (aucun appel, pas de prime sur les "
+          "clics d'un autre), et le message le dit",
+          "Threads 12" in cl_d["illisibles"]
+          and not any(x["va"] == "Threads 12" for x in cl_d["lignes"])
+          and not any(a[0] == ("l1", "l2") for a in GMS["boutons"][n_b:])
+          and cl_d["conflits"] == ["emy.brw/c42"]
+          and any("tracking" in x and "sans relevé" in x for x in pd._notes_tracking(cl_d)),
+          (cl_d["illisibles"], cl_d.get("conflits")))
+    reg_a = json.loads(json.dumps(REGISTRE))
+    reg_a["attente"]["emy.brw/c99"] = {"premier": "2026-10-12", "conflit": True,
+                                       "numeros": [43], "liens": ["x"], "ids": []}
+    o, t, dte, en_c = regroupe([], {}, {}, reg_a)
+    check("tracking neuf en conflit (« attente ») : son VA aussi sans relevé, comme Twitter",
+          dte == {43} and en_c == ["emy.brw/c99"], (dte, en_c))
+    # la liste de repli (gmsdash_links.json) n'a ni boutons ni url
+    safe_json.write(pd.LIENS_CACHE, {EQ_TW1: [{"id": l["id"], "display_name": l["display_name"]}
+                                              for l in LIENS[EQ_TW1]],
+                                     EQ_TW2: [{"id": "l8", "display_name": LIENS[EQ_TW2][0]
+                                               ["display_name"], "type": "directlink"}]})
+    GMS["repli"] = True
+    cl_r = pd.classement(lundi, auj, gid=TH)
+    GMS["repli"] = False
+    check("liste de repli sans boutons : les mêmes VA, par les liens que le registre a vus "
+          "(pas de « Threads 42 », Roucham reste 12), et le message dit la liste non fraîche",
+          [(x["va"], x["clics"]) for x in cl_r["lignes"]] == ATTENDU and not cl_r["frais"],
+          [(x["va"], x["clics"]) for x in cl_r["lignes"]])
+    check("le registre relu n'a pas été réécrit par ces lectures",
+          pd._lire_registre() == reg0)
+
+    # Va IG : un relevé US pris avant le changement de format n'est pas repris
     installer()
-    pd._garder_repris(TW, auj, auj, {"lignes": [{"va": "VA 1", "clics": 1}]}, "tracking")
-    pd._garder_repris(TW, auj, auj, {"lignes": [{"va": "VA 1", "clics": 1}]}, "gms")
-    check("rien de gardé hors de ce que Threads montre (trackings, jour non-lundi)",
-          not pd._REPRIS, list(pd._REPRIS))
-    pd._garder_repris(TW, lundi, auj, {"lignes": [{"va": "VA 1", "clics": 1}]}, "gms")
-    check("… la semaine du podium, aux clics : gardée",
-          (TW, "gms", lundi.isoformat(), auj.isoformat()) in pd._REPRIS)
+    pd._charger_releves()
+    pd._RELEVES[(TW, lundi.isoformat(), auj.isoformat())] = {
+        "t": CLOCK["now"].timestamp() - 60, "essai": CLOCK["now"].timestamp() - 60,
+        "jour": auj.isoformat(), "format": "2026-10-06-clics-tracking",
+        "cl": {"lignes": [{"va": "VA 42", "numero": 42, "clics": 1}], "illisibles": [],
+               "frais": True}}
+    us2 = pd._releve_us(lundi, auj)
+    check("Va IG : le relevé US d'avant le changement (autre format) est refait, pas repris",
+          len(GMS["vues"]) == 5 and [x["va"] for x in us2["lignes"]][0] == "VA 12"
+          and pd._RELEVES[(TW, lundi.isoformat(), auj.isoformat())]["format"]
+          == pd.FORMAT_AFFICHAGE, us2 and us2["lignes"][:2])
+    n_v = len(GMS["vues"])
+    pd._releve_us(lundi, auj)
+    check("… puis repris tel quel au passage suivant (même format, moins de deux heures)",
+          len(GMS["vues"]) == n_v)
+    safe_json.write_text(pd.ALLTIME_FICHIER, json.dumps(
+        {"jour": auj.isoformat(), "totaux": {"VA 42": 5}}))
+    at_tw = pd.alltime(TW, mesure="gms")
+    check("… et son all-time US du jour, écrit dans l'ancien format, est refait",
+          at_tw.get("VA 12") == 420 and json.loads(pd.ALLTIME_FICHIER.read_text())["format"]
+          == pd.FORMAT_AFFICHAGE, at_tw)
 
     # ------------------------------------------------------------------ 3
     print("\n— 3. le message vivant de la semaine")
@@ -348,29 +518,27 @@ try:
     check("posté dans « ─│🏆┤-podium » de Threads, par Bowser, un seul message",
           mid and len(p_th) == 1 and p_th[0]["bot"] == "threads" and len(posts(a)) == 1,
           [(x["bot"], x["p"]) for x in ecritures(a)])
-    check("… jamais dans « paliers-subs », « l-clicks » ni le bonus",
-          {x["p"].split("/")[2] for x in ecritures(a)} == {"th-podium"})
     e = p_th[0]["json"]["embeds"][0]
     RENDU["vivant"] = e
     desc = e["description"]
     check("titre « PODIUM CLICS — SEMAINE EN COURS »",
           e["title"] == "🔴 PODIUM CLICS — SEMAINE EN COURS", e["title"])
-    check("« clics » partout, jamais « subs » ni « abonnements »",
+    check("en-tête : clics uniques US + UK vers OnlyFans",
+          "Clics **uniques US + UK** vers OnlyFans" in desc, desc[:300])
+    check("« Threads n » et « clics » partout, jamais « VA 12 », « subs » ni un nom de lien",
           "subs" not in json.dumps(e, ensure_ascii=False).lower()
-          and "abonnement" not in desc.lower(), desc)
-    check("l'en-tête dit ce qui est compté : les clics des liens, marché US",
-          "Clics des liens des VA — marché **US**" in desc, desc[:300])
-    check("le top 3 avec ses primes 10/5/3 $, aux clics de GetMySocial",
-          "🥇 **VA 12** — **50** clics · 💰 **10$**" in desc
-          and "🥈 **VA 43** — **35** clics · 💰 **5$**" in desc
-          and "🥉 **VA 24** — **20** clics · 💰 **3$**" in desc
-          and "4. VA 31 — **12** clics" in desc, desc)
-    check("la prime se réclame à Bowser, le bot de Threads",
-          "**@Bowser**" in desc and "@Luigi" not in desc)
-    check("pied « Marché US », sans bouton 🔄",
-          e["footer"]["text"].startswith("YOULAB • Marché US")
+          and "**VA " not in desc and "Roucham" not in desc and "tsiry" not in desc, desc)
+    check("le top 3 avec ses primes 10/5/3 $",
+          "🥇 **Threads 12** — **47** clics · 💰 **10$**" in desc
+          and "🥈 **Threads 43** — **31** clics · 💰 **5$**" in desc
+          and "🥉 **Threads 41** — **20** clics · 💰 **3$**" in desc
+          and "4. Threads 31 — **7** clics" in desc and "5. Threads 30 — **3** clics" in desc,
+          desc)
+    check("la prime se réclame à Bowser ; le compte sans numéro est dit",
+          "**@Bowser**" in desc and "ℹ️ _1 compte(s)" in desc)
+    check("pied « Marché US + UK », sans bouton 🔄",
+          e["footer"]["text"].startswith("YOULAB • Marché US + UK")
           and "components" not in p_th[0]["json"])
-    check("aucune lecture MyPuls pour Threads", not MP["appels"])
     check("passage suivant dans deux heures, pas avant",
           not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 119 * 60)
           and pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 121 * 60))
@@ -378,138 +546,190 @@ try:
     check("GetMySocial en pause : Threads attend (sa mesure en dépend)",
           pd._pause_pour(TH) and not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 3 * 3600))
     PAUSE["gms"] = False
-    avancer(hours=2, minutes=5)
-    US["l4"] = 80                              # Ricardo passe devant
-    k1 = len(DISCORD.appels)
-    with vd.sur_serveur(TH):
-        mid2 = pd.rafraichir(TH)
-    a = DISCORD.depuis(k1)
-    check("deux heures après : le MÊME message réédité, rien de posté",
-          mid2 == mid and not posts(a) and [x["m"] for x in ecritures(a)] == ["PATCH"])
-    check("… avec les chiffres neufs",
-          "🥇 **VA 22** — **80** clics" in ecritures(a)[0]["json"]["embeds"][0]["description"])
-    US["l4"] = 5
-
-    # Twitter, lui, garde exactement son message (« subs », trackings)
     e_tw = pd.embed_podium({"lignes": [{"va": "VA 12", "clics": 7, "numero": 12}],
                             "illisibles": [], "frais": True}, lundi, auj, en_cours=True, gid=TW)
-    check("Twitter : « PODIUM SUBS », « subs », « Abonnements via Twitter », comme avant",
+    check("Twitter : « PODIUM SUBS », « VA 12 », « Abonnements via Twitter », comme avant",
           e_tw["title"] == "🔴 PODIUM SUBS — SEMAINE EN COURS"
-          and "**7** subs · 💰 **10$**" in e_tw["description"]
-          and "Abonnements via Twitter 🐦 — clics **tracking OF**" in e_tw["description"]
-          and "@Luigi" in e_tw["description"])
+          and "🥇 **VA 12** — **7** subs · 💰 **10$**" in e_tw["description"]
+          and "Abonnements via Twitter 🐦 — clics **tracking OF**" in e_tw["description"])
     check("la mention du lundi : « clics » sur Threads, l'ancienne ailleurs",
           pd._mention_podium(TH) == "@everyone 🏆 Podium clics de la semaine !"
           and pd._mention_podium(TW) == pd._mention_podium(IG) == pd.MENTION_PODIUM)
 
     # ------------------------------------------------------------------ 4
-    print("\n— 4. ni quinzaine, ni bonus sur Threads")
-    k2 = len(DISCORD.appels)
-    n_a = len(GMS["analytics"])
+    print("\n— 4. la quinzaine dans « ─│📊┤-l-clicks », avec l'all-time")
+    # ce matin, Threads avait une page dans son salon -subs, supprimé depuis
+    d0 = json.loads(pd.ETAT_FICHIER.read_text())
+    d0.setdefault("subs", {})[TH] = {"saison": "2026-10-01", "messages": ["1559432858823823432"],
+                                     "vu": 1, "format": "2026-10-06-clics-tracking"}
+    safe_json.write(pd.ETAT_FICHIER, d0)
+    check("la quinzaine est à faire (format d'affichage changé)", pd.a_rafraichir_subs(TH))
+    k1 = len(DISCORD.appels)
+    n_b = len(GMS["boutons"])
     with vd.sur_serveur(TH):
-        check("quinzaine : jamais à faire", not pd.a_rafraichir_subs(TH))
-        check("… et refusée si on l'appelle quand même", pd.rafraichir_subs(TH) == "")
-        check("bonus du jour : jamais à faire", not pd.a_rafraichir_bonus(TH))
-        check("… et refusé si on l'appelle quand même", pd.rafraichir_bonus(TH) == "")
-    check("… sans un appel à Discord ni à GetMySocial",
-          len(DISCORD.appels) == k2 and len(GMS["analytics"]) == n_a,
-          DISCORD.depuis(k2))
+        q = pd.rafraichir_subs(TH)
+    a = DISCORD.depuis(k1)
+    pq = posts(a, "th-clics")
+    check("posée dans « ─│📊┤-l-clicks » par Bowser (l'ancienne page, introuvable, reposée)",
+          q and len(pq) == 1 and pq[0]["bot"] == "threads"
+          and not posts(a, "th-paliers") and not posts(a, "th-podium"),
+          [(x["m"], x["p"]) for x in ecritures(a)])
+    eq = pq[0]["json"]["embeds"][0]
+    RENDU["quinzaine"] = eq
+    dq = eq["description"]
+    at = json.loads((pd.DATA_DIR / "podium_alltime_threads.json").read_text())["totaux"]
+    check("l'all-time de Threads : son fichier, « Threads n », clics uniques US + UK",
+          at.get("Threads 12") == 47 and at.get("Threads 43") == 31 and "VA 12" not in at, at)
+    check("le format voulu : « 🥇 **Threads 12** — **47** clics · 🌐 47 all-time »",
+          "**Threads 12** — **47** clics · 🌐 47 all-time" in dq
+          and "4. Threads 31 — 7 clics · 🌐 7 all-time" in dq
+          and "5. Threads 30 — 3 clics · 🌐 3 all-time" in dq, dq)
+    check("titre « Classement clics », en-tête « uniques US + UK », total en clics, anonyme",
+          eq["title"] == "📊 Classement clics — la quinzaine"
+          and "Clics **uniques US + UK**" in dq and "**108** clics" in dq
+          and "subs" not in json.dumps(eq, ensure_ascii=False).lower()
+          and "Roucham" not in dq, (eq["title"], dq))
+    check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours, clics uniques seulement",
+          {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-01", "2026-10-13"),
+                                                     (pd.ALLTIME_DEPUIS, "2026-10-13")}
+          and not GMS["vues"])
+    check("… sous l'étiquette « quinzaine » (elle ne paie rien : elle cède la réserve)",
+          set(GMS["tags"][n_b:]) == {pd.ETIQUETTE_QUINZAINE} != "podium", GMS["tags"][n_b:])
+    check("prochain passage de la quinzaine : dans une heure",
+          not pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 59 * 60)
+          and pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 61 * 60))
+    check("ni bonus du jour sur Threads", not pd.a_rafraichir_bonus(TH))
 
     # ------------------------------------------------------------------ 5
     print("\n— 5. le lundi : semaine terminée, puis le podium figé")
-    CLOCK["now"] = dt.datetime(2026, 10, 19, 0, 10)       # lundi 00h10
-    check("lundi 00h10 : à rafraîchir (dire « terminée »)", pd.a_rafraichir(TH))
+    CLOCK["now"] = dt.datetime(2026, 10, 19, 0, 10)
     k3 = len(DISCORD.appels)
-    n_a = len(GMS["analytics"])
     with vd.sur_serveur(TH):
         pd.rafraichir(TH)
-    a = DISCORD.depuis(k3)
-    w = ecritures(a)
-    check("le message de la semaine passe « terminée », sur place (aucun message neuf)",
+    w = ecritures(DISCORD.depuis(k3))
+    check("lundi 00h10 : « terminée », sur place",
           [x["m"] for x in w] == ["PATCH"] and w[0]["p"].endswith(f"/{mid}")
           and w[0]["json"]["embeds"][0]["title"] == "🏁 PODIUM CLICS — SEMAINE TERMINÉE",
           [(x["m"], x["p"]) for x in w])
-    check("… sur la semaine entière (12/10 → 18/10), un relevé",
-          len(GMS["analytics"]) == n_a + 5
-          and {x[1:] for x in GMS["analytics"][n_a:]} == {("2026-10-12", "2026-10-18")})
-    check("pas encore de podium (9h)", not pd.a_poster())
     CLOCK["now"] = dt.datetime(2026, 10, 19, 9, 2)
-    check("lundi 9h : le podium est dû", pd.a_poster())
     k4 = len(DISCORD.appels)
-    n_a = len(GMS["analytics"])
+    n_b = len(GMS["boutons"])
     with vd.sur_serveur(TH):
         fige = pd.poster_podium(TH)
-    a = DISCORD.depuis(k4)
-    w = ecritures(a)
-    check("le podium FIGE le message de la semaine sur place (le même id)",
-          fige == mid and w and w[0]["m"] == "PATCH" and w[0]["p"].endswith(f"/{mid}"))
-    ef = w[0]["json"]["embeds"][0]
+    w = ecritures(DISCORD.depuis(k4))
+    ef = w[0]["json"]["embeds"][0] if w else {}
     RENDU["podium"] = ef
-    check("… « 🏆 PODIUM CLICS DE LA SEMAINE », classement arrêté",
-          ef["title"] == "🏆 PODIUM CLICS DE LA SEMAINE"
-          and "il ne bougera plus" in ef["description"]
-          and ef["footer"]["text"].endswith("résultat final"))
+    check("9h : le podium FIGE le message de la semaine, « 🏆 PODIUM CLICS DE LA SEMAINE »",
+          fige == mid and w[0]["m"] == "PATCH" and ef.get("title") == "🏆 PODIUM CLICS DE LA SEMAINE"
+          and "🥇 **Threads 12**" in ef.get("description", ""))
     ment = [x for x in w if x["m"] == "POST"]
-    check("… puis « @everyone 🏆 Podium clics de la semaine ! » en réponse, par Bowser",
+    check("… « @everyone 🏆 Podium clics de la semaine ! » en réponse, par Bowser",
           len(ment) == 1 and ment[0]["bot"] == "threads"
-          and ment[0]["json"]["content"] == "@everyone 🏆 Podium clics de la semaine !"
-          and ment[0]["json"]["message_reference"]["message_id"] == mid,
-          [x["json"] for x in ment])
-    check("… sans relevé de plus (celui de 00h10 compte déjà la semaine entière)",
-          len(GMS["analytics"]) == n_a, len(GMS["analytics"]) - n_a)
-    check("les primes passent à suivi_va pour Threads, top 3 aux clics",
-          PRIMES_DITES == [(TH, ["VA 12", "VA 43", "VA 24"], dt.date(2026, 10, 12),
-                            dt.date(2026, 10, 18))], PRIMES_DITES)
-    k5 = len(DISCORD.appels)
-    with vd.sur_serveur(TH):
-        pd.poster_podium(TH)
-    check("un second passage le même lundi : rien (ni message, ni mention, ni prime)",
-          not ecritures(DISCORD.depuis(k5)) and len(PRIMES_DITES) == 1)
-    k6 = len(DISCORD.appels)
-    with vd.sur_serveur(TH):
-        neuf = pd.rafraichir(TH)
-    p_n = posts(DISCORD.depuis(k6), "th-podium")
-    check("la semaine neuve part en message NEUF, en dessous du podium",
-          neuf and neuf != mid and len(p_n) == 1
-          and p_n[0]["json"]["embeds"][0]["title"] == "🔴 PODIUM CLICS — SEMAINE EN COURS")
+          and ment[0]["json"]["content"] == "@everyone 🏆 Podium clics de la semaine !")
+    # comme Twitter et Va IG : le podium de 9h relit la semaine entière, lundi
+    # → dimanche (un appel par VA), en clics uniques
+    check("… sur la semaine entière (12/10 → 18/10), clics uniques, un appel par VA",
+          len(GMS["boutons"]) == n_b + 5
+          and {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-12", "2026-10-18")}
+          and not GMS["vues"], GMS["boutons"][n_b:])
+    check("les primes passent à suivi_va : top 3 « Threads n »",
+          PRIMES_DITES == [(TH, ["Threads 12", "Threads 43", "Threads 41"],
+                            dt.date(2026, 10, 12), dt.date(2026, 10, 18))], PRIMES_DITES)
 
     # ------------------------------------------------------------------ 6
-    print("\n— 6. la boucle du site (web_upload)")
+    print("\n— 6. l'ancien récap JESSY de -l-clicks : vidé sur place, jamais supprimé")
+    installer()
+    DISCORD.messages["R1"] = {"salon": "th-clics", "auteur": UTILISATEUR["threads"],
+                              "epingle": True, "content": "⏱️ Prochaine mise à jour",
+                              "embeds": [{"title": "🇺🇸 Clicks — JESSY LE RETOUR",
+                                          "description": "🥇 **Roucham** `@roucham_79944`"}]}
+    safe_json.write(rcr._fichier_etat(), {TH: {"salon": "th-clics", "nom": "─│📊┤-l-clicks",
+                                               "message": "R1", "t_releve": 1, "vu": 1}})
+    DISCORD.pannes.append(("PATCH", "/channels/th-clics/messages/R1", 503))
+    with vd.sur_serveur(TH):
+        r0 = rcr.retirer(TH)
+    check("Discord en panne : rien noté, le tour suivant réessaie",
+          r0 is False and not rcr._etat()[TH].get("retire")
+          and DISCORD.messages["R1"]["embeds"])
+    k5 = len(DISCORD.appels)
+    with vd.sur_serveur(TH):
+        r1 = rcr.retirer(TH)
+    m = DISCORD.messages.get("R1") or {}
+    check("vidé sur place par Bowser : plus de noms ni de pseudos, un renvoi au classement",
+          r1 is True and m.get("embeds") == [] and "classement juste en dessous" in m["content"]
+          and all(x["bot"] == "threads" for x in ecritures(DISCORD.depuis(k5))), m)
+    check("… désépinglé, jamais supprimé",
+          "R1" in DISCORD.messages and not m.get("epingle")
+          and not [x for x in ecritures(DISCORD.depuis(k5))
+                   if x["m"] == "DELETE" and "/messages/" in x["p"]])
+    k6 = len(DISCORD.appels)
+    with vd.sur_serveur(TH):
+        r2 = rcr.retirer(TH)
+    check("une fois : le passage suivant ne touche plus à rien",
+          r2 is False and not ecritures(DISCORD.depuis(k6)))
+    safe_json.write(rcr._fichier_etat(), {TW: {"salon": "tw-clics", "message": "R404"}})
+    with vd.sur_serveur(TW):
+        r3 = rcr.retirer(TW)
+    check("Twitter : son ancien récap supprimé à la main entre-temps (404) : noté, rien d'autre",
+          r3 is False and rcr._etat()[TW].get("retire"))
+    with vd.sur_serveur(IG):
+        check("un serveur sans ancien récap (Va IG) : rien", rcr.retirer(IG) is False)
+
+    # ------------------------------------------------------------------ 7
+    print("\n— 7. la boucle du site (web_upload)")
     src_w = (BOT / "web_upload.py").read_text(encoding="utf-8")
-    boucle = None
+    boucle = aide = None
     for n in ast.walk(ast.parse(src_w)):
+        if isinstance(n, ast.FunctionDef) and n.name == "_recap_clics_rest":
+            aide = n
         if (isinstance(n, ast.For) and isinstance(n.iter, ast.Attribute)
                 and n.iter.attr == "SERVEURS_EXTRA"
                 and "a_rafraichir_subs" in (ast.get_source_segment(src_w, n) or "")):
             boucle = n
-    check("la boucle du podium est trouvée", boucle is not None)
+    check("la boucle du podium et l'aide du récap sont trouvées", boucle and aide)
     faits = []
 
     def note(nom):
         return lambda *a, **k: faits.append((nom, vd.serveur_courant(), a[0] if a else None))
     faux_p = types.SimpleNamespace(
         SERVEURS=pd.SERVEURS, subs_seulement=pd.subs_seulement,
-        podium_seulement=pd.podium_seulement,
+        podium_seulement=pd.podium_seulement, vitrine=pd.vitrine,
         a_poster=lambda: True, poster_podium=note("podium"),
         a_rafraichir=lambda g: True, rafraichir=note("semaine"),
         a_rafraichir_subs=lambda g: True, rafraichir_subs=note("subs"),
-        a_rafraichir_bonus=lambda g: True, rafraichir_bonus=note("bonus"))
+        # le vrai pour Threads (son profil n'a pas de bonus), « à faire » ailleurs
+        a_rafraichir_bonus=lambda g: pd.a_rafraichir_bonus(g) if g == TH else True,
+        rafraichir_bonus=note("bonus"))
     ns = {"_p": faux_p, "_vd_p": vd, "_sync_liens_va": note("liens"), "_suivi_va": note("suivi"),
           "_recap_clics_rest": note("clics")}
     exec(compile(textwrap.dedent(ast.get_source_segment(src_w, boucle)), "boucle", "exec"), ns)
 
     def par(g):
         return [f for f, s, a in faits if a == g]
-    check("Threads : le récap des clics et le podium de la semaine, RIEN d'autre",
-          par(TH) == ["clics", "podium", "semaine"], par(TH))
+    check("Threads : podium et quinzaine, ni bonus, ni synchro des liens, ni suivi des VA",
+          par(TH) == ["clics", "podium", "semaine", "subs"], par(TH))
     check("… avec le bot de Threads (sur_serveur)",
           {s for f, s, a in faits if a == TH and f != "clics"} == {TH})
     check("Twitter et Va IG : tout comme avant",
           par(TW) == par(IG) == ["clics", "podium", "semaine", "subs", "bonus", "liens", "suivi"],
           (par(TW), par(IG)))
+    ns_a = {}
+    exec(compile(ast.get_source_segment(src_w, aide), "aide", "exec"), ns_a)
+    vus = []
+    _pub, _ret = rcr.publier, rcr.retirer
+    try:
+        rcr.publier = lambda g: vus.append(("publier", g)) or "M"
+        rcr.retirer = lambda g: vus.append(("retirer", g, vd.serveur_courant())) or False
+        for g in (TW, TH, IG):
+            ns_a["_recap_clics_rest"](g)
+    finally:
+        rcr.publier, rcr.retirer = _pub, _ret
+    check("l'aide ne publie plus rien ; elle vide l'ancien récap, chacun avec son bot",
+          vus == [("retirer", TW, TW), ("retirer", TH, TH), ("retirer", IG, IG)], vus)
 finally:
     for k, v in _SAUVE_PD.items():
         setattr(pd, k, v)
+    rcr.DATA_DIR, = _SAUVE_RCR
     cp.rattachements_identite = _SAUVE_CP
     vd.DATA_DIR, vd._http = _VD_AVANT
     for k, v in _ENV_AVANT.items():
@@ -519,11 +739,10 @@ finally:
             os.environ[k] = v
     shutil.rmtree(TMP, ignore_errors=True)
 
-if RENDU:
-    print("\n— rendu : le message vivant de Threads")
-    print(json.dumps(RENDU.get("vivant"), ensure_ascii=False, indent=2))
-    print("\n— rendu : le podium figé du lundi")
-    print(json.dumps(RENDU.get("podium"), ensure_ascii=False, indent=2))
+for k in ("vivant", "quinzaine", "podium"):
+    if RENDU.get(k):
+        print(f"\n— rendu : {k}")
+        print(json.dumps(RENDU[k], ensure_ascii=False, indent=2))
 
 print(f"\n{len(OKS)} OK, {len(FAILS)} FAIL")
 if FAILS:

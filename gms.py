@@ -985,7 +985,7 @@ MAX_LIENS_STATS = 20
 #: (get_link juste apres duplicate_link) : l'oublier six heures bloquerait la
 #: generation du lien d'un VA. Les identifiants VIDES, eux, ne partent jamais.
 _OUTILS_STATS = {"list_recent_visitors", "get_analytics_overview", "get_time_series",
-                 "get_link_metrics"}
+                 "get_link_metrics", "get_top_countries"}
 _RE_LNK = re.compile(r"\blnk_[0-9A-Za-z]+")
 _DIT_TROP = {}                              # outil -> dernier « plus de 20 liens » dit
 
@@ -1462,6 +1462,83 @@ def analytics_for_link(link_id: str, start_date: str, end_date: str):
     if not link_id:
         return None, None
     return _analytics_cachee((link_id,), start_date, end_date)
+
+
+def _pays_par_metrique(ids, metric: str, start_date: str, end_date: str):
+    """(total, {country_code: count}) d'un lot de liens pour UNE metrique de
+    get_top_countries (« button_clicks » ou « pageviews »), liste entiere des
+    pays (limite 200), en un appel. Meme memoire que _analytics_cachee (une
+    heure, le jour courant dans la cle, un echec jamais garde) ; (None, None)
+    si l'appel a echoue -- jamais (0, {}), qui se lirait « personne n'a clique »."""
+    ids = tuple(i for i in (ids or []) if i)
+    if not ids:
+        return 0, {}
+    aujourdhui = _jour_paris()
+    # la metrique dans la cle : les memes liens, la meme periode, deux chiffres
+    cle = ("pays", metric, ids, str(start_date), str(end_date), aujourdhui)
+    maintenant = time.time()
+    ttl = TTL_ANALYTICS if str(end_date) < aujourdhui else TTL_OUVERT
+    with _ANA_LOCK:
+        v = _ANA_CACHE.get(cle)
+        if v and (maintenant - v[0]) < ttl:
+            return v[1]
+    res = _call_tool("get_top_countries", {
+        "link_ids": list(ids), "metric": metric, "start_date": start_date,
+        "end_date": end_date, "timezone": "Europe/Paris", "limit": 200})
+    if not res.get("ok"):
+        return None, None
+    d = res.get("data")
+    lignes = d.get("data") if isinstance(d, dict) else d
+    if not isinstance(lignes, list):
+        # une reponse qui n'est pas une liste de pays : illisible, pas « 0 »
+        return None, None
+    total, pays = 0, {}
+    try:
+        for x in lignes:
+            n = int((x or {}).get("count") or 0)
+            total += n
+            code = str((x or {}).get("country_code") or "").upper()
+            if code:
+                pays[code] = pays.get(code, 0) + n
+    except Exception:
+        return None, None
+    out = (total, pays)
+    with _ANA_LOCK:
+        _ANA_CACHE[cle] = (maintenant, out)
+    return out
+
+
+def boutons_par_pays(link_ids, start_date: str, end_date: str, directs=()):
+    """(total, {country_code: count}) des PASSAGES vers la destination d'un
+    lot de liens, par pays.
+
+    Proprietaire, 13/10/2026, pour Va Threads : « uniquement les clicks USA UK,
+    et ca unique ». Une PAGE : ses visites qui ont clique un bouton,
+    dedoublonnees (« button_clicks » : une visite qui clique compte une fois).
+    Un LIEN DIRECT (`directs`) n'a ni page ni bouton : chaque visite y EST le
+    passage vers OnlyFans, il se compte a ses visites (« pageviews ») -- en
+    button_clicks il valait 0 pour toujours, et son VA ne pouvait jamais
+    gagner. analytics_for_links, lui, rend les VUES de la page et seulement
+    son top 10 de pays ; ici, la liste entiere : un pays hors du top n'est
+    jamais perdu. (None, None) si un des appels a echoue : jamais un total
+    partiel rendu comme entier."""
+    ids = [i for i in (link_ids or []) if i]
+    if not ids:
+        return None, None
+    d = {str(i) for i in (directs or ())}
+    pages = [i for i in ids if str(i) not in d]
+    dirs = [i for i in ids if str(i) in d]
+    total, pays = 0, {}
+    for lot, metric in ((pages, "button_clicks"), (dirs, "pageviews")):
+        if not lot:
+            continue
+        t, p = _pays_par_metrique(lot, metric, start_date, end_date)
+        if p is None:
+            return None, None
+        total += t
+        for code, n in p.items():
+            pays[code] = pays.get(code, 0) + n
+    return total, pays
 
 
 def analytics_for_links(link_ids, start_date: str, end_date: str):

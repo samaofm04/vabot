@@ -21462,16 +21462,17 @@ try:
     # LUI SEUL : ni podium de la semaine, ni bonus, ni primes
     # (tests_recaps_twitter_threads.py)
     # Puis, le meme jour : « pour Threads j'ai remove les subs, pas besoin »
-    # (profil garde dans PROFIL_THREADS), et « pour Threads le podium c'est
-    # avec des clicks » : le podium de la semaine seul, aux clics GetMySocial
-    # des VA de Twitter (tests_podium_threads_clics.py)
-    check("Threads : le podium de la semaine aux clics, et rien d autre (ni quinzaine, ni bonus)",
-          _TWI in _pdT.SERVEURS and not _pdT.subs_seulement(_TWI)
-          and not _pdT.podium_seulement(_TWI)
-          and _pdT.podium_seulement(_THR) and not _pdT.subs_seulement(_THR)
-          and _pdT._repris_de(_THR) == _TWI and _pdT._source(_THR) == "gms"
-          and _pdT._unite(_THR) == "clics" and _pdT._unite(_TWI) == "subs"
-          and not _pdT.a_rafraichir_subs(_THR) and not _pdT.a_rafraichir_bonus(_THR)
+    # (profil garde dans PROFIL_THREADS), « pour Threads le podium c'est avec
+    # des clicks », et enfin « Threads » au lieu de « VA », clics uniques US +
+    # UK : son profil a lui, les liens et numeros de Twitter, podium et
+    # quinzaine, ni bonus ni synchro (tests_podium_threads_clics.py)
+    check("Threads : podium et quinzaine aux clics uniques US + UK, « Threads n », vitrine",
+          _TWI in _pdT.SERVEURS and not _pdT.subs_seulement(_TWI) and not _pdT.vitrine(_TWI)
+          and _THR in _pdT.SERVEURS and _pdT.vitrine(_THR) and not _pdT._repris_de(_THR)
+          and not _pdT.subs_seulement(_THR) and not _pdT.podium_seulement(_THR)
+          and _pdT._source(_THR) == "gms_bouton" and _pdT._unite(_THR) == "clics"
+          and _pdT._profil(_THR).get("libelle") == "Threads" and _pdT._unite(_TWI) == "subs"
+          and _pdT._profil(_THR).get("bonus") is False
           and _pdT.PROFIL_THREADS.get("subs_seul") is True)
     # Proprietaire, 13/10/2026 : « pour Threads c'est pas avec un lien de
     # tracking, faut juste dupliquer le lien de VA Threads » — chaque VA
@@ -37193,10 +37194,24 @@ try:
           "if k == principale and not budget_ok(tag):" in _srcB
           and "_choisir_cle(genre)" in _srcB.split("def _call_tool(")[1][:2000]
           and '_choisir_cle("lecture")' in _srcB.split("def list_links_team")[1][:2000])
+    # depuis le 13/10/2026, les releves de clics (vues ou clics uniques)
+    # passent tous par _releve_liens : l etiquette y est, et classement comme
+    # alltime l appellent (plus d appel nu a gms.analytics_for_links)
+    _srcP = _plB.Path("podium_discord.py").read_text(encoding="utf-8")
+    _relP = _srcP.split("def _releve_liens(")[1].split("\ndef ")[0]
+    _clP = _srcP.split("\ndef classement(")[1].split("\ndef ")[0]
+    _atP = _srcP.split("\ndef alltime(")[1].split("\ndef ")[0]
+    # l etiquette est un parametre (« podium » par defaut ; la quinzaine, qui
+    # ne paie rien, passe ETIQUETTE_QUINZAINE) : on lit les signatures
+    _lbP = _srcP.split("\ndef liens_bruts(")[1].split("\ndef ")[0]
     check("le podium porte l etiquette qui lui garde une reserve",
-          _plB.Path("podium_discord.py").read_text(encoding="utf-8")
-          .count('_etiquette("podium")') >= 3
-          and _gB.PRIORITES.get("podium") == "paie")
+          "with _etiquette(etiquette):" in _relP and 'etiquette: str = "podium"' in _relP
+          and "with _etiquette(etiquette):" in _lbP and 'etiquette: str = "podium"' in _lbP
+          and 'etiquette: str = "podium"' in _clP
+          and "_releve_liens(" in _clP and "_releve_liens(" in _atP
+          and "gms.analytics_for_links(" not in _clP + _atP
+          and _gB.PRIORITES.get("podium") == "paie"
+          and _gB.PRIORITES.get("quinzaine") is None)
     # L ETIQUETTE NE DOIT JAMAIS FAIRE TOMBER UN RELEVE. Les suites de tests
     # remplacent gms par un faux module sans api_tag ; une comptabilite n a
     # pas a decider si le podium sort (constate : 0 OK / 2 echecs d un coup).

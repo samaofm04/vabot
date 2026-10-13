@@ -60872,9 +60872,14 @@ def _recap_clics_rest(gid: str) -> None:
     et la boucle continue."""
     try:
         import recap_clics_rest as _rcr
-        if gid not in _rcr.cibles():
-            return
         import verif_discord as _vd_r
+        if gid not in _rcr.cibles():
+            # un serveur retire des cibles (Twitter, Threads le 13/10/2026) :
+            # son dernier recap est vide sur place, une fois (noms et pseudos
+            # des VA) -- jamais supprime
+            with _vd_r.sur_serveur(gid):
+                _rcr.retirer(gid)
+            return
         with _vd_r.sur_serveur(gid):
             _rcr.publier(gid)
     except Exception as e:
@@ -60926,11 +60931,15 @@ def _start_podium_semaine_daemon() -> bool:
                     # podium, ni bonus, ni synchro des liens GetMySocial, ni
                     # suivi des VA -- ses chiffres sont ceux d'un autre serveur
                     seul = _p.subs_seulement(gid)
-                    # Va Threads (13/10/2026) : le podium de la semaine aux
-                    # clics des VA de Twitter, et rien d'autre -- ni quinzaine,
-                    # ni bonus, ni synchro des liens, ni suivi des VA
-                    # (podium_discord.podium_seulement)
+                    # un serveur qui n'a que le podium de la semaine
+                    # (podium_discord.podium_seulement) : ni quinzaine, ni
+                    # bonus, ni synchro des liens, ni suivi des VA
                     podium_seul = _p.podium_seulement(gid)
+                    # Va Threads (13/10/2026) : podium et quinzaine aux clics
+                    # uniques US + UK des VA de Twitter, mais ni synchro des
+                    # liens ni suivi des VA -- leurs liens et leurs tickets
+                    # vivent sur Twitter (podium_discord.vitrine)
+                    vitrine = _p.vitrine(gid)
                     # tout ce qui suit agit sur CE serveur, avec son bot
                     with _vd_p.sur_serveur(gid):
                         # Un clic sur « 🔄 Mettre a jour » en cours : chaque appel
@@ -60952,7 +60961,7 @@ def _start_podium_semaine_daemon() -> bool:
                             _p.rafraichir_bonus(gid)
                         # GetMySocial suit Discord : un manager neuf recoit son
                         # groupe, un VA deplace a la main voit son lien suivre
-                        if not seul and not podium_seul:
+                        if not seul and not podium_seul and not vitrine:
                             _sync_liens_va(gid)
                             _suivi_va(gid)
                 # le salon « modele a suivre » suit la watchlist Instagram :
