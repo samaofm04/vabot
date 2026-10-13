@@ -541,15 +541,15 @@ def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
 #: La pastille du salon d'un VA (le rond entre « ─│ » et « ┤ ») dit si son
 #: lien fait des clics. Propriétaire, 13/10/2026, pour Threads : « bleu il est
 #: là, vert il fait des clics, rouge il est là mais il fait pas de clics par
-#: rapport à son lien ». Sur les JOURS_CLICS_SALON derniers jours, aujourd'hui
+#: rapport à son lien », puis, le même jour : « au pire orange avec lien mais
+#: pas de visite ». Sur les JOURS_CLICS_SALON derniers jours, aujourd'hui
 #: compris — la fenêtre du ⚙️ « 0 clic sur J-2..J » du récap des clics.
-#:   🔵 pas encore de lien, ou un lien de moins de JOURS_CLICS_SALON jours (pas
-#:      encore jugé : un lien créé ce matin n'a pas eu le temps)
+#:   🔵 il est là, pas encore de lien
 #:   🟢 son lien a eu au moins une visite
-#:   🔴 son lien n'en a eu aucune, ou il est désactivé
+#:   🟠 il a un lien, mais aucune visite (neuf, coupé ou inactif)
 COULEUR_DANS_SALON = {"1498948161039896586"}     # YouLab THREADS
 JOURS_CLICS_SALON = 2
-ROND_LA, ROND_CLICS, ROND_RIEN = "🔵", "🟢", "🔴"
+ROND_LA, ROND_CLICS, ROND_RIEN = "🔵", "🟢", "🟠"
 
 
 def _clics_recents(gid: str) -> Optional[Dict[str, int]]:
@@ -600,8 +600,6 @@ def rond_du_va(gid: str, uid: str, clics: Optional[Dict[str, int]]) -> str:
         return ""
     if int(clics.get(lid) or 0) > 0:
         return ROND_CLICS
-    if time.time() - float(l.get("quand") or 0) < JOURS_CLICS_SALON * 86400:
-        return ROND_LA
     return ROND_RIEN
 
 

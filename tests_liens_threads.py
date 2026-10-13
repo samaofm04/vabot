@@ -465,11 +465,12 @@ try:
     patchs_n.clear()
     tk.numeroter_salons(TH)
     noms = dict(patchs_n)
-    check("🟢 son lien a des visites (2 derniers jours), 🔴 aucune, 🔵 lien neuf ou pas de lien, "
-          "🔴 lien désactivé — numéro et couleur en UN renommage",
-          noms == {"c1": f"─│🟢┤-61-va-{A}momobtn", "c2": f"─│🔴┤-62-va-{A}steave0454",
-                   "c3": f"─│🔵┤-63-va-{A}roucham_79944", "c4": f"─│🔵┤-64-va-{A}nouveau",
-                   "c5": f"─│🔴┤-65-va-{A}coupe"}
+    # « au pire orange avec lien mais pas de visite » : 🟠, plus de 🔴
+    check("🟢 son lien a des visites (2 derniers jours), 🟠 un lien sans visite (neuf ou "
+          "coupé compris), 🔵 pas de lien — numéro et couleur en UN renommage",
+          noms == {"c1": f"─│🟢┤-61-va-{A}momobtn", "c2": f"─│🟠┤-62-va-{A}steave0454",
+                   "c3": f"─│🟠┤-63-va-{A}roucham_79944", "c4": f"─│🔵┤-64-va-{A}nouveau",
+                   "c5": f"─│🟠┤-65-va-{A}coupe"}
           and len(patchs_n) == 5, (noms, patchs_n))
     check("… un seul appel GetMySocial pour tout l'espace, sur J-2..J",
           [a for a in g.appels if a[0] == "get_link_metrics"]
