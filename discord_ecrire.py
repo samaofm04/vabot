@@ -24,6 +24,7 @@ import base64
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -113,8 +114,12 @@ def _jeton_pour(chemin: str) -> str:
     return TOKEN
 
 
-def api(methode: str, chemin: str, corps=None, params=None):
-    """(code, données). Ne lève jamais : la page affiche l'erreur."""
+def api(methode: str, chemin: str, corps=None, params=None, entetes=None):
+    """(code, données). Ne lève jamais : la page affiche l'erreur.
+
+    `entetes` s'ajoute aux en-têtes habituels : la suppression d'une
+    catégorie y met sa raison, pour qu'elle se lise dans le journal d'audit.
+    """
     url = API + chemin
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -123,9 +128,11 @@ def api(methode: str, chemin: str, corps=None, params=None):
         # annonce en JSON sans contenu : Discord repond « invalid JSON » (vu en
         # faisant quitter un serveur a Siri). Un corps vide passe partout.
         data = b"{}"
-    req = urllib.request.Request(url, data=data, method=methode, headers={
-        "Authorization": "Bot " + _jeton_pour(chemin), "Content-Type": "application/json",
-        "User-Agent": "DiscordBot (youl4b-local, 1.0)"})
+    en_tetes = {"Authorization": "Bot " + _jeton_pour(chemin),
+                "Content-Type": "application/json",
+                "User-Agent": "DiscordBot (youl4b-local, 1.0)"}
+    en_tetes.update(entetes or {})
+    req = urllib.request.Request(url, data=data, method=methode, headers=en_tetes)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             brut = r.read()
@@ -253,6 +260,173 @@ def derniers(salon: str, combien: int = 15):
     return out
 
 
+# ------------------------------------------------ supprimer une catégorie
+# Supprimer un salon est définitif : Discord n'a pas de corbeille. Ce n'est
+# donc jamais le bot qui décide : le propriétaire choisit la catégorie, voit
+# la liste, tape son nom à la main, puis clique.
+RAISON_SUPPRESSION = "Suppression demandée par le propriétaire depuis l'outil local"
+GENRES = {0: "texte", 2: "vocal", 4: "catégorie", 5: "annonces",
+          13: "conférence", 15: "forum", 16: "média"}
+# ThreadingHTTPServer : un double clic lancerait deux suppressions en même
+# temps, chacune comptant des échecs sur les salons déjà partis.
+_VERROU_CATEGORIE = threading.Lock()
+
+
+def _place(c):
+    return (c.get("position") or 0, str(c.get("id") or ""))
+
+
+def _tous_les_salons(gid: str):
+    """(liste, erreur) : tous les salons du serveur, relus chez Discord."""
+    code, rep = api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(rep, list):
+        return None, "lecture des salons refusée : " + _raison(code, rep)
+    for c in rep:
+        # sans ça, le DELETE d'un salon de Threads partirait avec le jeton de
+        # Siri, qui n'y est plus, et serait refusé
+        _SALON_SERVEUR[str(c.get("id"))] = str(gid)
+    return rep, ""
+
+
+def _raison(code, rep) -> str:
+    """Le refus de Discord tel qu'il le dit : message, puis code."""
+    rep = rep if isinstance(rep, dict) else {}
+    msg = str(rep.get("message") or "").strip()
+    if code == 0:
+        return "Discord injoignable" + (f" : {msg}" if msg else "")
+    detail = f"HTTP {code}" + (f", code {rep.get('code')}" if rep.get("code") else "")
+    return f"{msg} ({detail})" if msg else detail
+
+
+def categories(gid: str):
+    """Les catégories d'un serveur de l'outil, avec le nom de leurs salons."""
+    gid = str(gid or "").strip()
+    if gid not in SERVEURS:
+        return {"ok": False, "error": "Ce serveur n'est pas un serveur de l'outil."}
+    rep, err = _tous_les_salons(gid)
+    if rep is None:
+        return {"ok": False, "error": err}
+    out = []
+    for cat in sorted((c for c in rep if c.get("type") == 4), key=_place):
+        cid = str(cat.get("id"))
+        enfants = sorted((c for c in rep if str(c.get("parent_id") or "") == cid),
+                         key=_place)
+        out.append({"id": cid, "nom": cat.get("name") or "", "compte": len(enfants),
+                    "salons": [c.get("name") or "" for c in enfants]})
+    return {"ok": True, "categories": out}
+
+
+def _trouver_categorie(cid, gid=""):
+    """(serveur, catégorie, enfants, erreur), relus chez Discord à l'instant.
+
+    On ne croit jamais la liste envoyée par la page : entre la préparation et
+    le clic, un salon a pu être ajouté ou déplacé.
+    """
+    cid, gid = str(cid or "").strip(), str(gid or "").strip()
+    if not cid.isdigit():
+        return None, None, None, "Aucune catégorie choisie."
+    if gid and gid not in SERVEURS:
+        return None, None, None, ("Ce serveur n'est pas un serveur de l'outil : "
+                                  "rien n'est supprimé.")
+    lectures = []
+    for g in ([gid] if gid else SERVEURS):
+        rep, err = _tous_les_salons(g)
+        if rep is None:
+            lectures.append(err)
+            continue
+        for c in rep:
+            if str(c.get("id")) != cid:
+                continue
+            if c.get("type") != 4:
+                return None, None, None, ("Ce n'est pas une catégorie, c'est un salon : "
+                                          "rien n'est supprimé.")
+            enfants = sorted((x for x in rep if str(x.get("parent_id") or "") == cid),
+                             key=_place)
+            return g, c, enfants, ""
+    ou = "n'est pas sur ce serveur" if gid else "n'est sur aucun serveur de l'outil"
+    return None, None, None, (f"Cette catégorie {ou} : rien n'est supprimé."
+                              + (" (" + " ; ".join(lectures) + ")" if lectures else ""))
+
+
+def _effacer(sid: str, entetes):
+    """DELETE d'un salon, en respectant le délai que Discord demande (3 essais)."""
+    code, rep = 0, {}
+    for essai in range(3):
+        code, rep = api("DELETE", f"/channels/{sid}", entetes=entetes)
+        if code == 429 and essai < 2:
+            attente = float((rep if isinstance(rep, dict) else {}).get("retry_after") or 1)
+            time.sleep(min(attente, 30.0) + 0.3)
+            continue
+        break
+    return code, rep
+
+
+def _journal(ligne: str):
+    """Une ligne par suppression dans le terminal, sans jamais tout arrêter.
+
+    Un terminal qui n'accepte pas l'emoji d'un nom de salon lèverait une
+    erreur d'encodage AU MILIEU de la boucle : la moitié des salons partis,
+    et la page sans compte rendu.
+    """
+    try:
+        print(ligne, flush=True)
+    except Exception:
+        try:
+            print(ligne.encode("ascii", "replace").decode("ascii"), flush=True)
+        except Exception:
+            pass
+
+
+def supprimer_salons_puis_categorie(gid: str, cid: str, nom: str, liste):
+    """Supprime chaque salon de `liste`, puis la catégorie si elle est vide.
+
+    La catégorie ne part qu'une fois vide, relue chez Discord : supprimée
+    avec un salon dedans, Discord laisse ce salon en vrac en haut du serveur,
+    visible de tous. Un salon raté est nommé, avec la raison que Discord donne.
+    """
+    entetes = {"X-Audit-Log-Reason": urllib.parse.quote(RAISON_SUPPRESSION, safe="")}
+    supprimes, echecs = [], []
+    for s in liste:
+        code, rep = _effacer(s["id"], entetes)
+        if code in (200, 204):
+            supprimes.append(s["nom"])
+            _journal(f"[supprimer catégorie] « {nom} » : salon #{s['nom']} ({s['id']}) supprimé")
+        else:
+            raison = _raison(code, rep)
+            echecs.append({"nom": s["nom"], "id": s["id"], "raison": raison})
+            _journal(f"[supprimer catégorie] « {nom} » : salon #{s['nom']} ({s['id']}) "
+                     f"PAS supprimé — {raison}")
+        time.sleep(0.6)       # Discord coupe vite une rafale de suppressions
+
+    out = {"categorie": nom, "id": cid, "total": len(liste), "supprimes": supprimes,
+           "echecs": echecs, "categorie_supprimee": False, "reste": [], "motif": ""}
+    if echecs:
+        out["reste"] = [e["nom"] for e in echecs]
+        out["motif"] = (f"catégorie gardée : {len(echecs)} salon(s) n'ont pas pu "
+                        "être supprimés")
+    else:
+        rep, err = _tous_les_salons(gid)
+        if rep is None:
+            out["motif"] = "catégorie gardée : impossible de vérifier qu'elle est vide (" + err + ")"
+        else:
+            out["reste"] = [c.get("name") or "" for c in sorted(rep, key=_place)
+                            if str(c.get("parent_id") or "") == cid]
+            if out["reste"]:
+                out["motif"] = (f"catégorie gardée : il y reste {len(out['reste'])} "
+                                "salon(s), arrivés entre-temps — prépare à nouveau")
+            else:
+                code, rep = _effacer(cid, entetes)
+                if code in (200, 204):
+                    out["categorie_supprimee"] = True
+                    _journal(f"[supprimer catégorie] catégorie « {nom} » ({cid}) supprimée")
+                else:
+                    out["motif"] = "catégorie gardée : " + _raison(code, rep)
+                    _journal(f"[supprimer catégorie] catégorie « {nom} » ({cid}) "
+                             f"PAS supprimée — {_raison(code, rep)}")
+    out["ok"] = not echecs and out["categorie_supprimee"]
+    return out
+
+
 PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Écrire dans un salon Discord</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -321,6 +495,16 @@ button:disabled{opacity:.5;cursor:default}
 .outil{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
 .outil span{color:var(--faible);font-size:11px;line-height:1.45}
 .outil button{font-size:12px;padding:7px 13px;white-space:nowrap}
+.zone-cat{max-width:1180px;margin-top:20px;border-color:rgba(239,68,68,.45)}
+.zone-cat h2{font-size:16px;margin:0 0 4px;color:var(--rouge)}
+.zone-cat .ligne>.bouton-seul{flex:none;min-width:0}
+.catliste{margin-top:12px;background:#0f0f18;border:1px solid var(--bord);border-radius:9px;
+          padding:10px 12px;font-size:13px}
+.catliste ol{margin:8px 0 0;padding-left:26px;max-height:260px;overflow:auto}
+.catliste li{padding:1px 0;word-break:break-word}
+.catliste .g{color:var(--faible);font-size:11.5px;margin-left:6px}
+.nomattendu{font-weight:700;user-select:all;-webkit-user-select:all}
+.echecs{margin:6px 0 0;padding-left:20px;font-size:13px;color:var(--rouge)}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
 <p class="sous">Le message est posté par le bot du serveur (<b>Luigi</b>). Tout se passe sur ta machine — rien n'est déployé.
@@ -400,6 +584,27 @@ button:disabled{opacity:.5;cursor:default}
     <p class="sous" style="margin:0 0 10px">Clique pour le reprendre et le corriger.</p>
     <div id="liste"></div>
   </div>
+</div>
+<div class="carte zone-cat" id="zone-cat">
+  <h2>Supprimer une catégorie</h2>
+  <p class="sous" style="margin:0">Supprime la catégorie <b>et tous ses salons</b>. C'est définitif : Discord n'a pas de corbeille.
+    Rien ne part tant que tu n'as pas tapé son nom.</p>
+  <div class="ligne">
+    <div><label>Serveur</label><select id="catserveur"></select></div>
+    <div style="flex:2;min-width:200px"><label>Catégorie</label><select id="categorie"></select></div>
+    <div class="bouton-seul"><button class="gris" id="preparer">Préparer</button></div>
+  </div>
+  <div id="catliste"></div>
+  <div id="catconfirm" style="display:none">
+    <label for="nomtape">Tape le nom exact de la catégorie</label>
+    <input id="nomtape" placeholder="tape le nom exact de la catégorie" autocomplete="off" spellcheck="false">
+    <div class="compte" id="catindice" style="text-align:left"></div>
+    <div class="ligne" style="margin-top:12px">
+      <div class="bouton-seul"><button class="rouge" id="supprimercat" disabled>Supprimer définitivement</button></div>
+    </div>
+  </div>
+  <div class="etat" id="catetat"></div>
+  <div id="catresultat"></div>
 </div>
 <script>
 var E = function(i){ return document.getElementById(i); };
@@ -984,6 +1189,151 @@ E('sep').onchange = function(){
   E('sepperso').disabled = this.value !== 'perso';
   rendreLot();
 };
+// ---- Supprimer une categorie. Deux temps, comme Vider : « Preparer » relit la
+// categorie chez Discord et ne touche a rien ; le bouton rouge ne s allume que
+// si le nom tape est EXACTEMENT celui de la categorie preparee. Les deux
+// poubelles ne different que d un « 2 » : un choix de menu ne suffit pas.
+// Les ids montres repartent avec la confirmation : l outil refuse si la
+// categorie a change entre-temps, au lieu de supprimer un salon jamais vu.
+var pret = null;     // la categorie preparee : {serveur, id, nom, compte, ids}
+var tourCat = 0;     // une liste demandee avant la derniere arrive parfois apres
+
+function etatCat(txt, classe){ var e = E('catetat'); e.textContent = txt; e.className = 'etat ' + (classe || ''); }
+
+function nomCorrespond(){
+  return !!pret && E('nomtape').value.trim() === pret.nom.trim();
+}
+
+function verifierNom(){
+  var ok = nomCorrespond(), i = E('catindice');
+  E('supprimercat').disabled = !ok;
+  if(!pret){ i.textContent = ''; return; }
+  if(ok){ i.textContent = '✓ Le nom correspond.'; i.style.color = 'var(--vert)'; }
+  else if(E('nomtape').value.trim()){
+    i.textContent = 'Pas encore le même nom : le bouton reste éteint.'; i.style.color = 'var(--rouge)';
+  } else {
+    i.textContent = 'Le bouton s’allume quand le nom est exactement le même.'; i.style.color = '';
+  }
+}
+
+function oublierPreparation(){
+  pret = null;
+  E('catliste').innerHTML = ''; E('catliste').className = '';
+  E('catconfirm').style.display = 'none';
+  E('nomtape').value = '';
+  verifierNom();
+}
+
+// `garder` : la categorie a laisser choisie apres un rechargement. Apres un
+// echec partiel, le menu retombait sur la premiere categorie du serveur.
+// `apres` : rechargement qui suit une suppression. Le compte rendu est dans
+// #catresultat, que ce rechargement ne touche pas ; une lecture refusee le
+// remplacait, et on ne savait plus si la categorie etait partie.
+async function chargerCategories(garder, apres){
+  var tour = ++tourCat;
+  oublierPreparation();
+  E('categorie').innerHTML = '<option value="">…</option>';
+  var j = await demander('/categories?g=' + encodeURIComponent(E('catserveur').value));
+  if(tour !== tourCat) return;
+  E('categorie').innerHTML = '';
+  if(!j.ok){
+    etatCat((apres ? 'Liste des catégories pas relue : ' : '✕ ') + (j.error || 'Erreur'), 'ko');
+    return;
+  }
+  (j.categories || []).forEach(function(c){
+    var o = document.createElement('option'); o.value = c.id;
+    o.textContent = c.nom + ' — ' + c.compte + ' salon' + (c.compte > 1 ? 's' : '');
+    E('categorie').appendChild(o);
+    if(garder && c.id === garder) o.selected = true;
+  });
+  if(!(j.categories || []).length) etatCat('Aucune catégorie sur ce serveur.', '');
+}
+
+E('preparer').onclick = async function(){
+  oublierPreparation(); E('catresultat').innerHTML = '';
+  var cid = E('categorie').value, bouton = this;
+  if(!cid){ etatCat('Choisis une catégorie.', 'ko'); return; }
+  bouton.disabled = true;
+  etatCat('Je relis la catégorie chez Discord…');
+  var q = await demander('/supprimer_categorie', {serveur: E('catserveur').value, categorie: cid});
+  bouton.disabled = false;
+  if(!q.ok){ etatCat('✕ ' + (q.error || 'Erreur'), 'ko'); return; }
+  // le menu a pu changer pendant la lecture : on ne prepare que ce qui est choisi
+  if(q.id !== E('categorie').value){ etatCat('Le choix a changé pendant la lecture : reclique sur Préparer.', 'ko'); return; }
+  pret = {serveur: q.serveur, id: q.id, nom: q.nom, compte: q.compte,
+          ids: (q.salons || []).map(function(s){ return s.id; })};
+  var z = E('catliste'); z.className = 'catliste'; z.innerHTML = '';
+  var t = document.createElement('div');
+  t.appendChild(document.createTextNode(q.compte
+    ? (q.compte + ' salon' + (q.compte > 1 ? 's' : '') + ' dans ') : 'Aucun salon dans '));
+  var b = document.createElement('span'); b.className = 'nomattendu'; b.textContent = q.nom;
+  t.appendChild(b);
+  t.appendChild(document.createTextNode(q.compte
+    ? ' : ils partiront tous, puis la catégorie.' : ' : seule la catégorie partira.'));
+  z.appendChild(t);
+  if(q.compte){
+    var ol = document.createElement('ol');
+    (q.salons || []).forEach(function(s){
+      var li = document.createElement('li'); li.textContent = s.nom;
+      var g = document.createElement('span'); g.className = 'g'; g.textContent = s.genre;
+      li.appendChild(g); ol.appendChild(li);
+    });
+    z.appendChild(ol);
+  }
+  E('catconfirm').style.display = '';
+  verifierNom();
+  etatCat('Rien n’est supprimé pour l’instant.', '');
+  E('nomtape').focus();
+};
+
+// Le compte rendu va dans #catresultat, pas dans #catetat : le rechargement
+// des categories qui suit ecrit dans #catetat et l effacait.
+function montrerResultat(j){
+  var z = E('catresultat'); z.innerHTML = '';
+  etatCat('');
+  var ligne = document.createElement('div');
+  z.appendChild(ligne);
+  if(j.error && !j.supprimes){ ligne.className = 'etat ko'; ligne.textContent = '✕ ' + j.error; return; }
+  var txt = (j.supprimes || []).length + ' / ' + (j.total || 0) + ' salon(s) supprimé(s)';
+  txt += j.categorie_supprimee ? ' · catégorie « ' + j.categorie + ' » supprimée.'
+                               : ' · ' + (j.motif || 'catégorie gardée.');
+  ligne.className = 'etat ' + (j.ok ? 'ok' : 'ko');
+  ligne.textContent = (j.ok ? '✓ ' : '⚠ ') + txt;
+  if((j.echecs || []).length){
+    // on nomme les rates, avec la raison de Discord : le reste est deja parti
+    var ul = document.createElement('ul'); ul.className = 'echecs';
+    j.echecs.forEach(function(x){
+      var li = document.createElement('li'); li.textContent = x.nom + ' — ' + x.raison;
+      ul.appendChild(li);
+    });
+    z.appendChild(ul);
+  }
+}
+
+E('nomtape').oninput = verifierNom;
+E('supprimercat').onclick = async function(){
+  if(!nomCorrespond()) return;
+  var p = pret, bouton = this;
+  if(!confirm('Supprimer définitivement ' + p.compte + ' salon(s) et la catégorie « ' + p.nom + ' » ?\n\n'
+              + 'Discord n’a pas de corbeille : c’est sans retour.')) return;
+  var champs = ['supprimercat', 'preparer', 'catserveur', 'categorie', 'nomtape'];
+  champs.forEach(function(i){ E(i).disabled = true; });
+  etatCat('Suppression en cours… environ ' + Math.ceil(p.compte * 0.9 + 2) + ' s, laisse la page ouverte.');
+  var j;
+  try {
+    j = await demander('/supprimer_categorie', {serveur: p.serveur, categorie: p.id,
+                                                confirme: true, nom_tape: E('nomtape').value,
+                                                ids_vus: p.ids});
+  } catch(e){
+    j = {ok: false, error: 'Pas de réponse de l’outil : regarde le terminal avant de recliquer.'};
+  }
+  champs.forEach(function(i){ E(i).disabled = false; });
+  montrerResultat(j);
+  chargerCategories(p.id, true);
+};
+E('catserveur').onchange = function(){ etatCat(''); E('catresultat').innerHTML = ''; chargerCategories(''); };
+E('categorie').onchange = function(){ oublierPreparation(); etatCat(''); E('catresultat').innerHTML = ''; };
+
 E('annuler').onclick = nouveau;
 E('serveur').onchange = chargerSalons;
 E('salon').onchange = chargerMessages;
@@ -994,9 +1344,10 @@ E('salon').onchange = chargerMessages;
   (j.serveurs || []).forEach(function(s){
     var o = document.createElement('option'); o.value = s.id; o.textContent = s.nom;
     E('serveur').appendChild(o);
+    E('catserveur').appendChild(o.cloneNode(true));
   });
   if(!(j.serveurs || []).length){ etat('Aucun serveur joignable — le jeton du bot est-il en place ?', 'ko'); return; }
-  chargerSalons(); apercu();
+  chargerSalons(); apercu(); chargerCategories();
 })();
 </script></body></html>"""
 
@@ -1017,7 +1368,38 @@ class Poste(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _venu_d_ailleurs(self, ecriture: bool) -> str:
+        """Le refus si la requête ne vient pas de la page de l'outil, sinon "".
+
+        Écouter 127.0.0.1 ne suffit pas : n'importe quel site ouvert dans le
+        navigateur du propriétaire peut viser 127.0.0.1:8787. Un POST en
+        text/plain part sans contrôle préalable du navigateur, et l'outil
+        lisait le JSON quand même : la suppression d'une catégorie passait
+        depuis une page étrangère (vu à la revue). Avec un nom de domaine qui
+        pointe vers 127.0.0.1, cette page pouvait même lire /categories.
+        """
+        try:
+            port = self.server.server_address[1]
+        except Exception:
+            port = PORT
+        locaux = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if (self.headers.get("Host") or "").strip().lower() not in locaux:
+            return "Requête refusée : elle ne vient pas de la page de l'outil."
+        origine = self.headers.get("Origin")
+        if origine is not None and origine.strip().lower() not in {"http://" + h for h in locaux}:
+            return "Requête refusée : elle vient d'un autre site que l'outil."
+        if ecriture:
+            # application/json oblige le navigateur à demander la permission
+            # avant d'envoyer depuis un autre site ; l'outil ne la donne pas
+            genre = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if genre != "application/json":
+                return "Requête refusée : l'outil n'accepte que du JSON."
+        return ""
+
     def do_GET(self):
+        refus = self._venu_d_ailleurs(False)
+        if refus:
+            return self._envoyer({"ok": False, "error": refus}, 403)
         chemin, _, requete = self.path.partition("?")
         q = urllib.parse.parse_qs(requete)
         if chemin == "/":
@@ -1042,9 +1424,14 @@ class Poste(BaseHTTPRequestHandler):
             return self._envoyer({"salons": salons((q.get("g") or [""])[0])})
         if chemin == "/messages":
             return self._envoyer({"messages": derniers((q.get("c") or [""])[0])})
+        if chemin == "/categories":
+            return self._envoyer(categories((q.get("g") or [""])[0]))
         self._envoyer({"error": "inconnu"}, 404)
 
     def do_POST(self):
+        refus = self._venu_d_ailleurs(True)
+        if refus:
+            return self._envoyer({"ok": False, "error": refus}, 403)
         d = self._lire()
         salon = str(d.get("salon") or "")
         if self.path == "/supprimer":
@@ -1057,6 +1444,8 @@ class Poste(BaseHTTPRequestHandler):
             return self._vider(d)
         if self.path == "/retirer_copier":
             return self._retirer_copier(d)
+        if self.path == "/supprimer_categorie":
+            return self._supprimer_categorie(d)
         if self.path != "/poster":
             return self._envoyer({"error": "inconnu"}, 404)
         texte = str(d.get("texte") or "")
@@ -1334,6 +1723,57 @@ class Poste(BaseHTTPRequestHandler):
         return self._envoyer({"ok": not echecs and complet, "retires": retires,
                               "nb_echecs": len(echecs), "echecs": echecs[:5],
                               "lus": lus, "complet": complet})
+
+    def _supprimer_categorie(self, d):
+        """Supprime une catégorie et tous ses salons — en deux temps.
+
+        Sans `confirme`, rien ne part : on rend la liste relue chez Discord,
+        pour que la page la montre avant. Avec `confirme`, il faut AUSSI le nom
+        exact de la catégorie, tapé à la main : une mauvaise ligne choisie
+        dans le menu ne suffit pas à vider « 🗑️ POUBELLE 2 » à la place de
+        « 🗑️ POUBELLE ». Tout est relu à ce moment-là : la page ne dit ni
+        quels salons partent, ni sur quel serveur.
+
+        La page renvoie seulement les ids qu'elle a montrés (`ids_vus`). Ils ne
+        choisissent rien : ils servent à refuser si la catégorie a changé.
+        Sans ce contrôle, un salon glissé dedans après « Préparer » partait
+        sans avoir été vu, et la boîte de confirmation annonçait l'ancien
+        nombre.
+        """
+        gid, cat, enfants, err = _trouver_categorie(d.get("categorie"), d.get("serveur"))
+        if err:
+            return self._envoyer({"ok": False, "error": err})
+        cid, nom = str(cat.get("id")), cat.get("name") or ""
+        liste = [{"nom": c.get("name") or "", "id": str(c.get("id")), "type": c.get("type"),
+                  "genre": GENRES.get(c.get("type"), f"type {c.get('type')}")}
+                 for c in enfants]
+        if not d.get("confirme"):
+            return self._envoyer({"ok": True, "serveur": gid, "id": cid, "nom": nom,
+                                  "salons": liste, "compte": len(liste)})
+        if str(d.get("nom_tape") or "").strip() != nom.strip():
+            return self._envoyer({"ok": False, "refuse": True,
+                                  "error": f"Le nom tapé n'est pas « {nom} » : "
+                                           "rien n'est supprimé."})
+        vus = d.get("ids_vus")
+        if not isinstance(vus, list):
+            return self._envoyer({"ok": False, "refuse": True,
+                                  "error": "La page n'a pas dit quels salons elle a montrés : "
+                                           "reclique sur Préparer. Rien n'est supprimé."})
+        if {str(x) for x in vus} != {s["id"] for s in liste}:
+            return self._envoyer({"ok": False, "refuse": True, "change": True,
+                                  "error": f"La catégorie a changé depuis « Préparer » "
+                                           f"({len(vus)} salon(s) montrés, {len(liste)} "
+                                           "maintenant) : reclique sur Préparer. "
+                                           "Rien n'est supprimé."})
+        if not _VERROU_CATEGORIE.acquire(blocking=False):
+            return self._envoyer({"ok": False, "error": "Une suppression est déjà en "
+                                                        "cours : attends qu'elle finisse."})
+        try:
+            _journal(f"[supprimer catégorie] « {nom} » ({cid}) : {len(liste)} salon(s) "
+                     "à supprimer, à la demande du propriétaire")
+            return self._envoyer(supprimer_salons_puis_categorie(gid, cid, nom, liste))
+        finally:
+            _VERROU_CATEGORIE.release()
 
     def log_message(self, *a):
         pass          # le terminal reste lisible

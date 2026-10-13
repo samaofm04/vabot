@@ -21921,6 +21921,414 @@ try:
 except Exception as _eJ:
     check("outil local jarvis : testable", False, repr(_eJ)[:200])
 
+# ------------------------------- 36 bis. Outil local : supprimer une categorie
+print()
+print("=" * 70)
+print("Outil local : supprimer une categorie, en deux temps et nom tape")
+print("=" * 70)
+try:
+    import importlib.util as _iuK, re as _reK, io as _ioK, contextlib as _clK
+    _spK = _iuK.spec_from_file_location("_de_categorie", "discord_ecrire.py")
+    _deK = _iuK.module_from_spec(_spK); _spK.loader.exec_module(_deK)
+    _TW, _VA = "1445108485090971710", "1505418484052394004"
+    _ETR = "999999999999999999"           # un serveur qui n est pas dans l outil
+
+    def _salK(i, nom, typ=0, parent=None, pos=0):
+        return {"id": i, "name": nom, "type": typ, "parent_id": parent, "position": pos}
+
+    def _etatK0():
+        return {
+            _TW: [_salK("300", "📢 INFOS", 4, pos=0), _salK("301", "annonces", 0, "300"),
+                  _salK("100", "🗑️ POUBELLE", 4, pos=5),
+                  _salK("103", "vieilles-annonces", 5, "100", 2),
+                  _salK("101", "a-jeter", 0, "100", 0),
+                  _salK("102", "vieux-vocal", 2, "100", 1),
+                  _salK("200", "🗑️ POUBELLE 2", 4, pos=6), _salK("201", "trash-1", 0, "200"),
+                  _salK("500", "🗑️ POUBELLE 3", 4, pos=7),
+                  _salK("501", "protege", 0, "500", 0), _salK("502", "libre", 0, "500", 1),
+                  _salK("400", "general", 0)],
+            _VA: [],
+            _ETR: [_salK("900", "🗑️ POUBELLE", 4), _salK("901", "ailleurs", 0, "900")]}
+
+    _etK, _appK, _quotaK, _refusK = {}, [], {}, set()
+
+    def _apiK(methode, chemin, corps=None, params=None, entetes=None):
+        _appK.append((methode, chemin, dict(entetes or {})))
+        m = _reK.match(r"^/guilds/(\d+)/channels$", chemin)
+        if methode == "GET" and m:
+            if m.group(1) not in _etK:
+                return (403, {"message": "Missing Access", "code": 50001})
+            return (200, [dict(c) for c in _etK[m.group(1)]])
+        m = _reK.match(r"^/channels/(\d+)$", chemin)
+        if methode == "DELETE" and m:
+            sid = m.group(1)
+            if _quotaK.get(sid):
+                _quotaK[sid] -= 1
+                return (429, {"message": "You are being rate limited.", "retry_after": 0.01})
+            if sid in _refusK:
+                return (403, {"message": "Missing Permissions", "code": 50013})
+            for lst in _etK.values():
+                for c in lst:
+                    if c["id"] == sid:
+                        lst.remove(c)
+                        return (200, c)
+            return (404, {"message": "Unknown Channel", "code": 10003})
+        return (404, {})
+
+    def _supprK():
+        return [c for (me, c, _e) in _appK if me == "DELETE"]
+
+    _hK = _deK.Poste.__new__(_deK.Poste)
+    _sortK = []
+    _hK._envoyer = lambda data, code=200: _sortK.append(data)
+
+    def _vusK(cid):
+        # les ids que « Preparer » a montres : la page les renvoie avec le clic
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": cid})
+        return [s["id"] for s in _sortK[-1]["salons"]]
+    _sauvK = (_deK.api, _deK.time.sleep)
+    try:
+        _deK.api = _apiK
+        _deK.time.sleep = lambda s: None
+
+        def _remettreK():
+            _etK.clear(); _etK.update(_etatK0())
+            _appK.clear(); _sortK.clear(); _quotaK.clear(); _refusK.clear()
+
+        # 1. la liste des categories, avec leur nombre de salons
+        _remettreK()
+        _lK = _deK.categories(_TW)
+        _parK = {c["nom"]: c for c in _lK.get("categories") or []}
+        check("supprimer categorie : la liste donne chaque categorie et son nombre de salons",
+              _lK["ok"] and [c["nom"] for c in _lK["categories"]]
+              == ["📢 INFOS", "🗑️ POUBELLE", "🗑️ POUBELLE 2", "🗑️ POUBELLE 3"]
+              and _parK["🗑️ POUBELLE"]["compte"] == 3 and _parK["🗑️ POUBELLE 2"]["compte"] == 1,
+              str(_lK)[:200])
+        check("supprimer categorie : la liste nomme les salons, dans l ordre du serveur",
+              _parK["🗑️ POUBELLE"]["salons"] == ["a-jeter", "vieux-vocal", "vieilles-annonces"])
+        _appK.clear()
+        check("supprimer categorie : un serveur hors de l outil n est meme pas lu",
+              _deK.categories(_ETR)["ok"] is False and not _appK)
+        _r0 = _deK.Poste.__new__(_deK.Poste); _o0 = []
+        _r0._envoyer = lambda data, code=200: _o0.append(data)
+        _r0.path = "/categories?g=" + _TW
+        _r0.headers = {"Host": "127.0.0.1:8787"}
+        _r0.do_GET()
+        check("supprimer categorie : la route GET /categories rend la liste",
+              _o0 and _o0[-1].get("ok") and len(_o0[-1]["categories"]) == 4)
+
+        # 2. preparer : la liste relue, et rien ne part
+        _remettreK()
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "100"})
+        _pK = _sortK[-1]
+        check("supprimer categorie : preparer rend le nom, les salons et leur nombre",
+              _pK["ok"] and _pK["nom"] == "🗑️ POUBELLE" and _pK["compte"] == 3
+              and [(s["nom"], s["id"], s["type"]) for s in _pK["salons"]]
+              == [("a-jeter", "101", 0), ("vieux-vocal", "102", 2), ("vieilles-annonces", "103", 5)],
+              str(_pK)[:200])
+        check("supprimer categorie : preparer ne supprime RIEN", not _supprK())
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "100", "nom_tape": "🗑️ POUBELLE"})
+        check("supprimer categorie : le nom tape sans confirmation ne supprime rien non plus",
+              not _supprK() and _sortK[-1].get("compte") == 3)
+
+        # 3. le mauvais nom tape est refuse
+        for _tapeK in ("🗑️ POUBELLE 2", "", "🗑️ poubelle", "POUBELLE"):
+            _sortK.clear()
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "100",
+                                      "confirme": True, "nom_tape": _tapeK})
+            check(f"supprimer categorie : le nom tape « {_tapeK} » est refuse",
+                  _sortK[-1]["ok"] is False and _sortK[-1].get("refuse")
+                  and "rien n'est supprimé" in _sortK[-1]["error"] and not _supprK())
+
+        # 4. le bon nom : les salons de la categorie, puis elle, et rien d autre
+        _bufK = _ioK.StringIO()
+        with _clK.redirect_stdout(_bufK):
+            _sortK.clear()
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "100", "confirme": True,
+                                      "nom_tape": "  🗑️ POUBELLE  ", "ids_vus": _vusK("100")})
+        _rK = _sortK[-1]
+        check("supprimer categorie : supprime exactement ses salons, PUIS la categorie",
+              _supprK() == ["/channels/101", "/channels/102", "/channels/103", "/channels/100"],
+              str(_supprK()))
+        check("supprimer categorie : le compte rendu dit tout supprime",
+              _rK["ok"] and _rK["categorie_supprimee"] and _rK["total"] == 3
+              and _rK["supprimes"] == ["a-jeter", "vieux-vocal", "vieilles-annonces"]
+              and not _rK["echecs"], str(_rK)[:200])
+        check("supprimer categorie : les autres categories et salons restent",
+              {c["id"] for c in _etK[_TW]} == {"300", "301", "200", "201", "500", "501", "502", "400"})
+        _raisK = _deK.urllib.parse.quote(_deK.RAISON_SUPPRESSION, safe="")
+        check("supprimer categorie : chaque suppression porte la raison du journal d audit",
+              all(e.get("X-Audit-Log-Reason") == _raisK for (me, _c, e) in _appK if me == "DELETE")
+              and "%C3%A9" in _raisK and " " not in _raisK)
+        _lignesK = [l for l in _bufK.getvalue().splitlines() if "supprim" in l]
+        check("supprimer categorie : une ligne au terminal par suppression",
+              sum(1 for l in _lignesK if "salon #" in l and l.endswith("supprimé")) == 3
+              and any("catégorie « 🗑️ POUBELLE » (100) supprimée" in l for l in _lignesK),
+              _bufK.getvalue()[-300:])
+
+        # 5. un 429 : on attend ce que Discord demande, puis on reessaie
+        _remettreK(); _quotaK["201"] = 2
+        with _clK.redirect_stdout(_ioK.StringIO()):
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "200", "confirme": True,
+                                      "nom_tape": "🗑️ POUBELLE 2", "ids_vus": _vusK("200")})
+        check("supprimer categorie : un 429 est reessaye, le salon finit par partir",
+              _supprK().count("/channels/201") == 3 and _sortK[-1]["ok"]
+              and _sortK[-1]["categorie_supprimee"], str(_supprK()))
+        _remettreK(); _quotaK["201"] = 9
+        with _clK.redirect_stdout(_ioK.StringIO()):
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "200", "confirme": True,
+                                      "nom_tape": "🗑️ POUBELLE 2", "ids_vus": _vusK("200")})
+        check("supprimer categorie : trois 429 de suite, on s arrete et on le dit",
+              _supprK() == ["/channels/201"] * 3 and not _sortK[-1]["categorie_supprimee"]
+              and "429" in _sortK[-1]["echecs"][0]["raison"])
+
+        # 6. un salon refuse : il est nomme, et la categorie reste
+        _remettreK(); _refusK.add("501")
+        with _clK.redirect_stdout(_ioK.StringIO()):
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "500", "confirme": True,
+                                      "nom_tape": "🗑️ POUBELLE 3", "ids_vus": _vusK("500")})
+        _rK = _sortK[-1]
+        check("supprimer categorie : un refus n arrete pas les suivants",
+              _rK["supprimes"] == ["libre"] and "/channels/502" in _supprK())
+        check("supprimer categorie : le refus est nomme avec la raison de Discord",
+              len(_rK["echecs"]) == 1 and _rK["echecs"][0]["nom"] == "protege"
+              and "Missing Permissions" in _rK["echecs"][0]["raison"]
+              and "50013" in _rK["echecs"][0]["raison"], str(_rK)[:200])
+        check("supprimer categorie : une categorie pas vide n est PAS supprimee",
+              "/channels/500" not in _supprK() and _rK["ok"] is False
+              and not _rK["categorie_supprimee"] and "gardée" in _rK["motif"]
+              and any(c["id"] == "500" for c in _etK[_TW]))
+
+        # 7. ce qui n est pas une categorie d un serveur de l outil est refuse
+        _remettreK()
+        _cas = [({"categorie": "900", "confirme": True, "nom_tape": "🗑️ POUBELLE"},
+                 "aucun serveur de l'outil"),
+                ({"serveur": _ETR, "categorie": "900", "confirme": True,
+                  "nom_tape": "🗑️ POUBELLE"}, "pas un serveur de l'outil"),
+                ({"serveur": _VA, "categorie": "100", "confirme": True,
+                  "nom_tape": "🗑️ POUBELLE"}, "pas sur ce serveur"),
+                ({"serveur": _TW, "categorie": "301", "confirme": True,
+                  "nom_tape": "annonces"}, "pas une catégorie"),
+                ({"serveur": _TW, "categorie": "", "confirme": True}, "Aucune catégorie")]
+        for _dK, _motK in _cas:
+            _sortK.clear()
+            _hK._supprimer_categorie(_dK)
+            check(f"supprimer categorie : refuse ({_motK})",
+                  _sortK[-1]["ok"] is False and _motK in _sortK[-1]["error"],
+                  str(_sortK[-1])[:160])
+        check("supprimer categorie : aucun de ces refus n a supprime quoi que ce soit",
+              not _supprK() and len(_etK[_ETR]) == 2)
+        check("supprimer categorie : le serveur etranger n est jamais lu",
+              not any(_ETR in c for (_m, c, _e) in _appK))
+
+        # la liste est relue au moment de supprimer. Un salon glisse dans la
+        # categorie apres « Preparer » partait sans avoir ete vu : refuse.
+        _remettreK()
+        _vuK = _vusK("200")
+        _etK[_TW].append(_salK("202", "arrive-apres", 0, "200"))
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "200", "confirme": True,
+                                  "nom_tape": "🗑️ POUBELLE 2", "ids_vus": _vuK})
+        check("supprimer categorie : un salon arrive apres Preparer -> refuse, rien ne part",
+              _sortK[-1]["ok"] is False and _sortK[-1].get("change")
+              and "a changé depuis « Préparer »" in _sortK[-1]["error"]
+              and "rien n'est supprimé" in _sortK[-1]["error"].lower()
+              and not _supprK(), str(_sortK[-1])[:200])
+        _remettreK()
+        _vuK = _vusK("200")
+        _etK[_TW][[c["id"] for c in _etK[_TW]].index("201")]["parent_id"] = None
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "200", "confirme": True,
+                                  "nom_tape": "🗑️ POUBELLE 2", "ids_vus": _vuK})
+        check("supprimer categorie : un salon sorti de la categorie apres Preparer -> refuse",
+              _sortK[-1]["ok"] is False and _sortK[-1].get("change") and not _supprK())
+        _remettreK()
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "100", "confirme": True,
+                                  "nom_tape": "🗑️ POUBELLE"})
+        check("supprimer categorie : sans la liste montree, refuse",
+              _sortK[-1]["ok"] is False and "reclique sur Préparer" in _sortK[-1]["error"]
+              and not _supprK())
+        _hK._supprimer_categorie({"serveur": _TW, "categorie": "100", "confirme": True,
+                                  "nom_tape": "🗑️ POUBELLE", "ids_vus": ["301", "400"]})
+        check("supprimer categorie : des ids hors de la categorie -> refuse, rien ne part",
+              _sortK[-1]["ok"] is False and _sortK[-1].get("change") and not _supprK())
+        # les ids de la page ne servent qu au controle : l ordre et la liste
+        # supprimee restent ceux de Discord
+        with _clK.redirect_stdout(_ioK.StringIO()):
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "100", "confirme": True,
+                                      "nom_tape": "🗑️ POUBELLE",
+                                      "ids_vus": ["103", 101, "102", "103"],
+                                      "salons": [{"id": "301"}, {"id": "400"}]})
+        check("supprimer categorie : la liste de Discord fait foi, pas celle de la page",
+              _sortK[-1]["ok"] and _supprK()
+              == ["/channels/101", "/channels/102", "/channels/103", "/channels/100"]
+              and {"301", "400"} <= {c["id"] for c in _etK[_TW]}, str(_supprK()))
+
+        # deux clics a la fois : le second est refuse, pas lance en parallele
+        _remettreK()
+        _vuK = _vusK("200")
+        _appK.clear()
+        _deK._VERROU_CATEGORIE.acquire()
+        try:
+            _hK._supprimer_categorie({"serveur": _TW, "categorie": "200", "confirme": True,
+                                      "nom_tape": "🗑️ POUBELLE 2", "ids_vus": _vuK})
+        finally:
+            _deK._VERROU_CATEGORIE.release()
+        check("supprimer categorie : une seconde suppression en meme temps est refusee",
+              _sortK[-1]["ok"] is False and "déjà en cours" in _sortK[-1]["error"]
+              and not _supprK())
+
+        # seule la page de l outil lit ou ecrit. Un site quelconque ouvert dans
+        # le navigateur pouvait poster en text/plain vers 127.0.0.1:8787 et
+        # supprimer la categorie ; par un nom de domaine pointe sur 127.0.0.1,
+        # il lisait meme /categories.
+        def _reqK(methode, chemin, entetes, corps=None):
+            _hq = _deK.Poste.__new__(_deK.Poste); _oq = []
+            _hq._envoyer = lambda data, code=200: _oq.append((code, data))
+            _hq.path = chemin
+            _bq = json.dumps(corps).encode() if corps is not None else b""
+            _hq.headers = dict(entetes, **{"Content-Length": str(len(_bq))})
+            _hq.rfile = _ioK.BytesIO(_bq)
+            try:
+                with _clK.redirect_stdout(_ioK.StringIO()):
+                    (_hq.do_POST if methode == "POST" else _hq.do_GET)()
+            except Exception as _xq:
+                # la page « / » s ecrit sans _envoyer : servie, elle leve ici
+                return (None, {"ok": None, "error": "servie : " + repr(_xq)[:80]})
+            return _oq[-1] if _oq else (None, {"ok": None, "error": "aucune reponse"})
+
+        _LOCK = {"Host": "127.0.0.1:8787"}
+        _JSK = {"Host": "127.0.0.1:8787", "Content-Type": "application/json"}
+        _confK = {"serveur": _TW, "categorie": "200", "confirme": True,
+                  "nom_tape": "🗑️ POUBELLE 2", "ids_vus": ["201"]}
+        _remettreK()
+        _qK = [_reqK("GET", "/categories?g=" + _TW, {"Host": "attaquant.example:8787"}),
+               _reqK("GET", "/categories?g=" + _TW,
+                     dict(_LOCK, Origin="http://attaquant.example:8787")),
+               _reqK("GET", "/", {"Host": "attaquant.example:8787"})]
+        check("supprimer categorie : une lecture venue d un autre site est refusee (403)",
+              all(c == 403 and d["ok"] is False and "refusée" in d["error"] for c, d in _qK)
+              and not _appK, str(_qK)[:200])
+        _qK = [_reqK("POST", "/supprimer_categorie",
+                     dict(_LOCK, **{"Content-Type": "text/plain;charset=UTF-8"}), _confK),
+               _reqK("POST", "/supprimer_categorie", _LOCK, _confK),
+               _reqK("POST", "/supprimer_categorie",
+                     dict(_JSK, Origin="http://attaquant.example:8787"), _confK),
+               _reqK("POST", "/supprimer_categorie", dict(_JSK, Origin="null"), _confK),
+               _reqK("POST", "/supprimer_categorie",
+                     dict(_JSK, Host="attaquant.example:8787"), _confK)]
+        check("supprimer categorie : text/plain, autre Origin ou autre Host -> refuse (403)",
+              all(c == 403 and d["ok"] is False for c, d in _qK)
+              and "que du JSON" in _qK[0][1]["error"] and not _appK, str(_qK)[:200])
+        check("supprimer categorie : apres ces refus, rien n est supprime",
+              any(c["id"] == "200" for c in _etK[_TW]) and not _supprK())
+        _cK, _dK2 = _reqK("GET", "/categories?g=" + _TW, {"Host": "localhost:8787"})
+        check("supprimer categorie : la page ouverte sur localhost lit toujours",
+              _cK == 200 and _dK2.get("ok"), str(_dK2)[:160])
+        _cK, _dK2 = _reqK("POST", "/supprimer_categorie",
+                          dict(_JSK, Origin="http://127.0.0.1:8787",
+                               **{"Content-Type": "application/json; charset=utf-8"}), _confK)
+        check("supprimer categorie : la page de l outil supprime toujours",
+              _cK == 200 and _dK2.get("ok") and _supprK() == ["/channels/201", "/channels/200"],
+              str(_dK2)[:200])
+    finally:
+        _deK.api, _deK.time.sleep = _sauvK
+
+    # la page : le bloc, le bouton eteint au depart, et un script qui se lit
+    _pgK = _deK.PAGE
+    check("supprimer categorie : le bloc est sur la page, a part",
+          'id="zone-cat"' in _pgK and "<h2>Supprimer une catégorie</h2>" in _pgK
+          and 'id="catserveur"' in _pgK and 'id="categorie"' in _pgK
+          and '>Préparer</button>' in _pgK)
+    check("supprimer categorie : le bouton rouge est eteint tant que le nom ne correspond pas",
+          '<button class="rouge" id="supprimercat" disabled>Supprimer définitivement</button>' in _pgK
+          and "E('nomtape').value.trim() === pret.nom.trim()" in _pgK
+          and 'placeholder="tape le nom exact de la catégorie"' in _pgK)
+    check("supprimer categorie : les routes sont branchees",
+          'chemin == "/categories"' in pathlib.Path("discord_ecrire.py").read_text(encoding="utf-8")
+          and 'self.path == "/supprimer_categorie"' in pathlib.Path("discord_ecrire.py").read_text(encoding="utf-8"))
+    _scrK = _reK.findall(r"<script>(.*?)</script>", _pgK, _reK.S)
+    _nodeK = shutil.which("node")
+    if _nodeK and _scrK:
+        import subprocess as _spKn
+        _fK = pathlib.Path(tempfile.mkdtemp()) / "discord_ecrire_page.js"
+        _fK.write_text(_scrK[0], encoding="utf-8")
+        _nK = _spKn.run([_nodeK, "--check", str(_fK)], capture_output=True, text=True, timeout=60)
+        check("supprimer categorie : le script de la page passe node --check",
+              _nK.returncode == 0, (_nK.stderr or "")[:200])
+    else:
+        check("supprimer categorie : le script de la page passe node --check",
+              False, "node introuvable ou pas de <script>")
+
+    # la page, jouee dans node avec un faux DOM : les ids montres repartent
+    # avec le clic, et le compte rendu reste quand la liste ne se relit pas
+    _blocK = _scrK[0] if _scrK else ""
+    _iK = _blocK.find("// ---- Supprimer une categorie")
+    _jK = _blocK.find("E('annuler').onclick")
+    if _nodeK and _iK >= 0 and _jK > _iK:
+        import subprocess as _spKn
+        _dirK = pathlib.Path(tempfile.mkdtemp())
+        (_dirK / "bloc.js").write_text(_blocK[_iK:_jK], encoding="utf-8")
+        (_dirK / "sim.js").write_text(r"""
+const fs = require('fs');
+function el(){
+  const o = {className: '', style: {}, disabled: false, kids: [], value: '', textContent: '',
+             appendChild(c){ this.kids.push(c); return c; }, focus(){}};
+  Object.defineProperty(o, 'innerHTML', {get(){ return ''; }, set(v){ this.kids = []; }});
+  return o;
+}
+const els = {};
+['catetat','catresultat','catliste','catconfirm','nomtape','catindice','supprimercat',
+ 'preparer','catserveur','categorie'].forEach(function(i){ els[i] = el(); });
+els.catserveur.value = 'TW';
+global.E = function(i){ return els[i]; };
+global.document = {createElement: function(){ return el(); },
+                   createTextNode: function(t){ return {textContent: t}; }};
+const file = [], envois = [];
+global.demander = async function(ch, corps){ envois.push([ch, corps || null]); return file.shift(); };
+global.confirm = function(){ return true; };
+eval(fs.readFileSync(process.argv[2], 'utf8'));
+(async function(){
+  file.push({ok: true, categories: [{id: '200', nom: '🗑️ POUBELLE 2', compte: 1}]});
+  await chargerCategories('');
+  els.categorie.value = '200';
+  file.push({ok: true, serveur: 'TW', id: '200', nom: '🗑️ POUBELLE 2', compte: 1,
+             salons: [{id: '201', nom: 't1', genre: 'texte'}]});
+  await els.preparer.onclick.call(els.preparer);
+  els.nomtape.value = '🗑️ POUBELLE'; els.nomtape.oninput();
+  const eteintFaux = els.supprimercat.disabled;
+  els.nomtape.value = '🗑️ POUBELLE 2'; els.nomtape.oninput();
+  const eteintBon = els.supprimercat.disabled;
+  file.push({ok: true, categorie: '🗑️ POUBELLE 2', total: 1, supprimes: ['t1'], echecs: [],
+             categorie_supprimee: true, motif: ''});
+  file.push({ok: false, error: 'lecture des salons refusée : rate limited (HTTP 429)'});
+  await els.supprimercat.onclick.call(els.supprimercat);
+  await new Promise(function(r){ setTimeout(r, 20); });
+  console.log(JSON.stringify({eteintFaux: eteintFaux, eteintBon: eteintBon,
+    envoi: envois[2], resultat: els.catresultat.kids.map(function(k){ return k.textContent; }),
+    etat: els.catetat.textContent}));
+})();
+""", encoding="utf-8")
+        _sK = _spKn.run([_nodeK, str(_dirK / "sim.js"), str(_dirK / "bloc.js")],
+                        capture_output=True, text=True, timeout=60)
+        try:
+            _vK = json.loads(_sK.stdout.strip().splitlines()[-1])
+        except Exception:
+            _vK = {}
+        check("supprimer categorie (page) : le bouton s allume seulement au nom exact",
+              _vK.get("eteintFaux") is True and _vK.get("eteintBon") is False,
+              (_sK.stdout + _sK.stderr)[-300:])
+        check("supprimer categorie (page) : le clic renvoie les ids montres",
+              (_vK.get("envoi") or [None, {}])[1].get("ids_vus") == ["201"]
+              and _vK["envoi"][1].get("nom_tape") == "🗑️ POUBELLE 2", str(_vK)[:200])
+        check("supprimer categorie (page) : le compte rendu reste si la liste ne se relit pas",
+              any("✓ 1 / 1" in t and "supprimée" in t for t in _vK.get("resultat") or [])
+              and "pas relue" in (_vK.get("etat") or ""), str(_vK)[:300])
+    else:
+        check("supprimer categorie (page) : simulation du bloc dans node", False,
+              "node introuvable ou bloc absent")
+except Exception as _eK:
+    import traceback as _tbK
+    check("supprimer categorie : testable", False, repr(_eK)[:200] + _tbK.format_exc()[-300:])
+
 # ------------------------------------------ 37. Dossier du vault branché sur un TikTok
 print()
 print("=" * 70)
