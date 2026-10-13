@@ -1472,8 +1472,19 @@ def _est_manager(membre: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None) -
     p = _permissions(membre)
     if p & 0x8 or p & 0x10000000:              # administrateur ou gestion des roles
         return True
-    role = (cfg or serveur())["role_manager"]
-    return bool(role and role in (membre.get("roles") or []))
+    cfg = cfg or serveur()
+    roles = membre.get("roles") or []
+    role = cfg["role_manager"]
+    if role and role in roles:
+        return True
+    # Le Helper est au même niveau qu'un manager (tickets_discord) : mêmes
+    # boutons. role_helper rend « » hors des serveurs à tickets, sans appel.
+    try:
+        import tickets_discord
+        hid = tickets_discord.role_helper(str(cfg.get("id") or ""))
+    except Exception:
+        hid = ""
+    return bool(hid and hid in roles)
 
 
 def _ephemere(texte: str, composants: Optional[list] = None) -> Dict[str, Any]:

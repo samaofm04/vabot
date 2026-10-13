@@ -395,7 +395,13 @@ def _est_manager(p: Dict[str, Any], gid: str) -> bool:
     except Exception:
         rid = ""
     roles = ((p.get("member") or {}).get("roles") or [])
-    return bool(rid) and rid in roles
+    if rid and rid in roles:
+        return True
+    try:
+        hid = tickets_discord.role_helper(gid)     # même niveau qu'un manager
+    except Exception:
+        hid = ""
+    return bool(hid) and hid in roles
 
 
 # ─── interactions ────────────────────────────────────────────────────────

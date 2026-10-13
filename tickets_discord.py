@@ -81,6 +81,21 @@ ROLE_ESSAI_NOM = "🧪 Essai"
 ROLE_CONFIRME_NOM = "⭐ Confirmé"      # « ─│ » : Discord retire « -| » d'un nom de salon texte
 BARRE = "┤"              # « ┤ »
 
+# Helper : « au même niveau que les managers » (propriétaire, 13/10/2026) —
+# mêmes salons, mêmes boutons — mais sans être manager : aucun VA ne lui est
+# confié, il n'a pas de catégorie et le suivi des managers l'ignore. Son nom
+# ne doit pas contenir « manager » : role_manager() prend le premier rôle qui
+# le contient, et un « Helper manager » serait devenu LE rôle Manager.
+ROLE_HELPER_NOM = "🤝 Helper"
+COULEUR_HELPER = 0x2DD4BF
+# Le rôle est relu à chaque bouton cliqué (comme role_manager) : 10 minutes de
+# cache suffisent, un helper nommé attend au pire ce délai.
+CACHE_HELPER_S = 600
+_CACHE_HELPER: Dict[str, Dict[str, Any]] = {}
+# Droits recopiés par tour : ~200 salons de VA au premier passage, sans
+# monopoliser le débit de Discord ; le reste attend le tour suivant.
+MAX_HELPER_PAR_TOUR = 40
+
 
 def _api(methode: str, chemin: str, **kw):
     """Le client REST de verif_discord : un seul endroit qui connaît le jeton."""
@@ -130,6 +145,119 @@ def _role_manager_sur(gid: str) -> Optional[str]:
 def role_manager(gid: str) -> str:
     """L'identifiant du rôle Manager du serveur, ou « »."""
     return _role_manager_sur(gid) or ""
+
+
+def _est_helper(r: Dict[str, Any]) -> bool:
+    nom = str(r.get("name", "")).lower()
+    return "helper" in nom and "manager" not in nom
+
+
+def role_helper(gid: str) -> str:
+    """L'identifiant du rôle Helper, ou « ». Hors des serveurs à tickets : « »
+    sans rien demander à Discord (verif_discord l'appelle pour tout serveur)."""
+    gid = str(gid or "")
+    if gid not in set(str(s) for s in (_config().get("serveurs") or SERVEURS_TICKETS)):
+        return ""
+    hit = _CACHE_HELPER.get(gid)
+    if hit and time.time() - hit["ts"] < CACHE_HELPER_S:
+        return hit["v"]
+    code, rep = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(rep, list):
+        return hit["v"] if hit else ""
+    v = next((str(r.get("id")) for r in rep if _est_helper(r)), "")
+    _CACHE_HELPER[gid] = {"ts": time.time(), "v": v}
+    return v
+
+
+def _droits_staff(rid: str, hid: str) -> List[Dict[str, Any]]:
+    """Les lignes de rôle d'un salon de VA : Manager, et Helper au même niveau."""
+    return [{"id": r, "type": 0, "allow": str(MANAGER), "deny": "0"} for r in (rid, hid) if r]
+
+
+def _helper_ignore(gid: str, bilan: Dict[str, Any], raison: str) -> Dict[str, Any]:
+    """Rien n'a pu être fait : dit une fois (pas toutes les 10 minutes)."""
+    bilan["ignore"] = raison
+    _dire(f"helper-ignore:{gid}", f"{gid} : helper — {raison}, rien touché")
+    return bilan
+
+
+def aligner_helper(gid: str) -> Dict[str, Any]:
+    """Crée le rôle Helper s'il manque, puis lui donne, salon par salon, les
+    mêmes droits que le rôle Manager (catégories, tickets, salons du staff).
+
+    N'enlève rien : un salon où le Manager n'a pas de ligne garde celle du
+    Helper, posée à la main. Rend le bilan, et le dit quand il a agi ou raté."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"cree": False, "copies": 0, "deja": 0, "reportes": 0,
+                             "rates": [], "ignore": ""}
+    code, roles = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(roles, list):
+        return _helper_ignore(gid, bilan, f"rôles illisibles (HTTP {code})")
+    mgr = next((r for r in roles if "manager" in str(r.get("name", "")).lower()), None)
+    if not mgr:
+        return _helper_ignore(gid, bilan, "pas de rôle Manager à recopier")
+    hlp = next((r for r in roles if _est_helper(r)), None)
+    if not hlp:
+        corps = {"name": ROLE_HELPER_NOM, "color": COULEUR_HELPER,
+                 "permissions": str(mgr.get("permissions") or "0"),
+                 "hoist": bool(mgr.get("hoist")), "mentionable": bool(mgr.get("mentionable"))}
+        code, rep = _api("POST", f"/guilds/{gid}/roles", json=corps)
+        if code in (400, 403):
+            # Discord refuse de donner un droit que le bot n'a pas lui-même :
+            # le rôle naît sans droits de serveur, les salons font le reste.
+            corps["permissions"] = "0"
+            bilan["rates"].append(f"droits de serveur du Manager non recopiés (HTTP {code})")
+            code, rep = _api("POST", f"/guilds/{gid}/roles", json=corps)
+        if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
+            return _helper_ignore(gid, bilan, f"rôle Helper non créé (HTTP {code}) {str(rep)[:80]}")
+        hlp = rep
+        bilan["cree"] = True
+        # juste sous Manager dans la liste des membres ; un refus ne change
+        # que l'affichage, les droits sont les mêmes
+        c2, r2 = _api("PATCH", f"/guilds/{gid}/roles",
+                      json=[{"id": str(hlp["id"]), "position": int(mgr.get("position") or 1)}])
+        if c2 != 200:
+            bilan["rates"].append(f"rôle non remonté sous Manager (HTTP {c2})")
+    mid, hid = str(mgr["id"]), str(hlp["id"])
+    _CACHE_HELPER[gid] = {"ts": time.time(), "v": hid}
+
+    code, salons = _api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        return _helper_ignore(gid, bilan, f"salons illisibles (HTTP {code})")
+    _dire(f"helper-ignore:{gid}", "")
+    for c in salons:
+        lignes = {str(o.get("id")): o for o in (c.get("permission_overwrites") or [])}
+        m = lignes.get(mid)
+        if not m:
+            continue
+        voulu = (str(m.get("allow") or "0"), str(m.get("deny") or "0"))
+        h = lignes.get(hid)
+        if h and (str(h.get("allow") or "0"), str(h.get("deny") or "0")) == voulu:
+            bilan["deja"] += 1
+            continue
+        if bilan["copies"] >= MAX_HELPER_PAR_TOUR:
+            bilan["reportes"] += 1
+            continue
+        code, rep = _api("PUT", f"/channels/{c['id']}/permissions/{hid}",
+                         json={"type": 0, "allow": voulu[0], "deny": voulu[1]})
+        if code in (200, 204):
+            bilan["copies"] += 1
+        else:
+            bilan["rates"].append(f"{c.get('name')} (HTTP {code})")
+            if code == 429:
+                break
+    texte = (("rôle créé · " if bilan["cree"] else "")
+             + f"{bilan['copies']} salon(s) alignés, {bilan['deja']} déjà bons, "
+             f"{bilan['reportes']} au prochain tour"
+             + (" · ratés : " + ", ".join(bilan["rates"][:6]) if bilan["rates"] else ""))
+    if bilan["cree"] or bilan["copies"] or bilan["reportes"]:
+        print(f"[helper] {gid} : {texte}", flush=True)
+        _dire(f"helper:{gid}", "")
+    else:
+        # un refus qui dure (droit manquant dans un salon du staff) se dit
+        # une fois, pas toutes les 10 minutes ; « » efface sans bruit
+        _dire(f"helper:{gid}", f"{gid} : helper — {texte}" if bilan["rates"] else "")
+    return bilan
 
 
 PAGE_MEMBRES = 1000         # le maximum que Discord rend par page
@@ -350,8 +478,7 @@ def _creer_categorie(gid: str, m: Dict[str, Any], rid: Optional[str] = None):
     if rid is None:
         rid = role_manager(gid)
     droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)}]
-    if rid:
-        droits.append({"id": rid, "type": 0, "allow": str(MANAGER), "deny": "0"})
+    droits += _droits_staff(rid, role_helper(gid))
     code, rep = _api("POST", f"/guilds/{gid}/channels",
                      json={"name": nom_categorie(m), "type": 4,
                            "permission_overwrites": droits})
@@ -582,11 +709,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return _ephemere("Seul ce VA peut renseigner son adresse.")
         return _fenetre_adresse(gid, uid)
 
-    rid = role_manager(gid)
-    permissions = int(str(membre.get("permissions") or "0") or 0)
-    admin = bool(permissions & 0x8)
-    if not (admin or (rid and rid in (membre.get("roles") or []))):
-        return _ephemere("Seuls les managers peuvent se servir de ces boutons.")
+    if not _est_manager_brut(gid, membre):
+        return _ephemere("Seuls les managers et les helpers peuvent se servir de ces boutons.")
 
     if cid.startswith("lien:new:"):
         return _creer_lien(gid, uid, qui, p)
@@ -623,9 +747,16 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _est_manager_brut(gid: str, membre: Dict[str, Any]) -> bool:
-    rid = role_manager(gid)
+    """Administrateur, Manager ou Helper : le Helper a les mêmes boutons."""
     perms = int(str(membre.get("permissions") or "0") or 0)
-    return bool(perms & 0x8) or bool(rid and rid in (membre.get("roles") or []))
+    if perms & 0x8:
+        return True
+    roles = membre.get("roles") or []
+    rid = role_manager(gid)
+    if rid and rid in roles:
+        return True
+    hid = role_helper(gid)
+    return bool(hid and hid in roles)
 
 
 def _fenetre_adresse(gid: str, uid: str) -> Dict[str, Any]:
@@ -853,8 +984,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         parent = categorie_du_manager(gid, choisi) if choisi else ""
         droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)},
                   {"id": uid, "type": 1, "allow": str(MEMBRE), "deny": "0"}]
-        if rid:
-            droits.append({"id": rid, "type": 0, "allow": str(MANAGER), "deny": "0"})
+        droits += _droits_staff(rid, role_helper(gid))
         if choisi:
             droits.append({"id": str((choisi.get("user") or {}).get("id")),
                            "type": 1, "allow": str(MANAGER), "deny": "0"})
@@ -1572,4 +1702,11 @@ def suivre_partout() -> Dict[str, Any]:
                 out[gid] = suivre_managers(gid)
         except Exception as e:
             print(f"[managers] {gid} : {type(e).__name__}: {e}", flush=True)
+        # À part : un Helper sans ses salons ne doit pas attendre qu'un tour
+        # des managers réussisse, ni le faire échouer.
+        try:
+            with sur_serveur(gid):
+                aligner_helper(gid)
+        except Exception as e:
+            print(f"[helper] {gid} : {type(e).__name__}: {e}", flush=True)
     return out
