@@ -61641,6 +61641,12 @@ def create_app():
         # Sans ca, un appel vers /channels/... partait avec le bot par defaut,
         # quel que soit le serveur du clic.
         _vd.noter_interaction(charge)
+        # un clic d'un VA compte pour son activité (pastille 🔴 de Threads)
+        try:
+            import tickets_discord as _tk_act
+            _tk_act.noter_clic(charge)
+        except Exception:
+            pass
         with _vd.sur_serveur(str(charge.get("guild_id") or "")):
             return _discord_repondre(charge)
 

@@ -2719,6 +2719,12 @@ class Welcome(commands.Cog):
         try:
             if getattr(interaction.user, "bot", True):
                 return
+            try:
+                # Threads : la pastille 🔴 du salon (tickets_discord.noter_activite)
+                import tickets_discord as _tk_act
+                _tk_act.noter_activite(str(interaction.guild_id or ""), str(interaction.user.id))
+            except Exception:                                # noqa: BLE001
+                pass
             adm = _bot_admin()
             if adm is None or adm is self.bot:               # meme bot : il compte deja
                 return

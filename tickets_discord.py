@@ -547,9 +547,103 @@ def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
 #:   🔵 il est là, pas encore de lien
 #:   🟢 son lien a eu au moins une visite
 #:   🟠 il a un lien, mais aucune visite (neuf, coupé ou inactif)
+#:   🔴 pas de lien, et plus rien sur le serveur depuis JOURS_CLICS_SALON jours
+#:      (ni message dans un salon, ni clic sur un bouton du bot), ticket ouvert
+#:      depuis au moins autant. Propriétaire, même jour : « le VA il est là mais
+#:      répond pas, inactif dans le serveur de partout, en rouge depuis 2 j »,
+#:      « sans lien »
 COULEUR_DANS_SALON = {"1498948161039896586"}     # YouLab THREADS
 JOURS_CLICS_SALON = 2
-ROND_LA, ROND_CLICS, ROND_RIEN = "🔵", "🟢", "🟠"
+ROND_LA, ROND_CLICS, ROND_RIEN, ROND_ABSENT = "🔵", "🟢", "🟠", "🔴"
+
+
+_ACTIVITE: Dict[str, float] = {}
+_ACTIVITE_LUE = [False]
+_ACTIVITE_ECRITE = [0.0]
+
+
+def _fichier_activite() -> Path:
+    # relu à chaque appel : les tests déplacent ETAT_FICHIER
+    return ETAT_FICHIER.parent / "activite_va.json"
+
+
+def noter_activite(gid: str, uid: str, quand: Optional[float] = None) -> None:
+    """Le VA `uid` a fait quelque chose sur ce serveur (COULEUR_DANS_SALON) :
+    un clic sur un bouton du bot, ou un message relu à la synchro. Gardé sur
+    disque, une écriture par minute au plus : un redémarrage ne le fait pas
+    passer au rouge."""
+    gid, uid = str(gid or ""), str(uid or "")
+    if gid not in COULEUR_DANS_SALON or not uid.isdigit():
+        return
+    t = float(quand or time.time())
+    with _VERROU:
+        _charger_activite()
+        cle = f"{gid}:{uid}"
+        if t <= _ACTIVITE.get(cle, 0):
+            return
+        _ACTIVITE[cle] = t
+        if time.time() - _ACTIVITE_ECRITE[0] >= 60:
+            _ACTIVITE_ECRITE[0] = time.time()
+            try:
+                safe_json.write(_fichier_activite(), dict(_ACTIVITE))
+            except Exception as e:                           # noqa: BLE001
+                print(f"[ticket] activité non enregistrée : {type(e).__name__}: {e}", flush=True)
+
+
+def noter_clic(charge: Dict[str, Any]) -> None:
+    """Un clic reçu par la route des interactions (Bowser sur Threads)."""
+    try:
+        u = ((charge.get("member") or {}).get("user") or charge.get("user") or {})
+        if not u.get("bot"):
+            noter_activite(str(charge.get("guild_id") or ""), str(u.get("id") or ""))
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
+def _charger_activite() -> None:
+    if _ACTIVITE_LUE[0]:
+        return
+    _ACTIVITE_LUE[0] = True
+    d = safe_json.load(_fichier_activite(), default={}) or {}
+    if isinstance(d, dict):
+        for k, v in d.items():
+            try:
+                _ACTIVITE[str(k)] = max(float(v), _ACTIVITE.get(str(k), 0))
+            except (TypeError, ValueError):
+                pass
+
+
+def derniere_activite(gid: str, uid: str) -> float:
+    with _VERROU:
+        _charger_activite()
+        return float(_ACTIVITE.get(f"{gid}:{uid}", 0))
+
+
+def _relire_messages(gid: str, salons: List[Dict[str, Any]]) -> int:
+    """Note l'activité de chaque auteur des messages récents du serveur : les
+    cent derniers messages de chaque salon texte que le bot lit. Rend le
+    nombre de salons lus."""
+    import datetime as dt
+    depuis = time.time() - JOURS_CLICS_SALON * 86400
+    lus = 0
+    for c in salons:
+        if not isinstance(c, dict) or c.get("type", 0) not in (0, 5):
+            continue
+        code, msgs = _api("GET", f'/channels/{c.get("id")}/messages', params={"limit": "100"})
+        if code != 200 or not isinstance(msgs, list):
+            continue                       # salon fermé au bot : rien à en dire
+        lus += 1
+        for m in msgs:
+            a = (m or {}).get("author") or {}
+            if a.get("bot") or not a.get("id"):
+                continue
+            try:
+                t = dt.datetime.fromisoformat(str(m.get("timestamp"))).timestamp()
+            except (TypeError, ValueError):
+                continue
+            if t >= depuis:
+                noter_activite(gid, str(a["id"]), t)
+    return lus
 
 
 def _clics_recents(gid: str) -> Optional[Dict[str, int]]:
@@ -586,13 +680,19 @@ def _clics_recents(gid: str) -> Optional[Dict[str, int]]:
     return out
 
 
-def rond_du_va(gid: str, uid: str, clics: Optional[Dict[str, int]]) -> str:
+def rond_du_va(gid: str, uid: str, clics: Optional[Dict[str, int]],
+               fiche: Optional[Dict[str, Any]] = None) -> str:
     """La pastille du salon de ce VA (voir COULEUR_DANS_SALON). « » : on ne sait
     pas (visites illisibles), le salon garde la sienne."""
     import liens_va as lv
     l = lv.lien_de(gid, uid) or {}
     lid = str(l.get("link_id") or "")
     if not lid:
+        delai = JOURS_CLICS_SALON * 86400
+        ouvert = float((fiche or {}).get("ouvert") or 0)
+        if (time.time() - ouvert >= delai
+                and time.time() - derniere_activite(gid, uid) >= delai):
+            return ROND_ABSENT
         return ROND_LA
     if l.get("actif") is False:
         return ROND_RIEN
@@ -624,6 +724,11 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
         return bilan
     par_id = {str(c.get("id")): c for c in salons if isinstance(c, dict)}
     clics = _clics_recents(gid) if colorer else None
+    if colorer:
+        import liens_va as lv
+        if any(not (lv.lien_de(gid, u) or {}).get("link_id") for u in fiches):
+            # un VA sans lien peut passer au rouge : qui a écrit, et où
+            _relire_messages(gid, salons)
     for uid, f in fiches.items():
         if len(bilan["renommes"]) >= max_par_tour:
             break
@@ -639,7 +744,7 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
         deja = re.search(r"-(\d+)$", tete)
         n = int(deja.group(1)) if deja else (numero_va(gid, uid, pseudo) if numeroter else 0)
         if colorer:
-            rond = rond_du_va(gid, uid, clics) or rond
+            rond = rond_du_va(gid, uid, clics, f) or rond
         voulu = (f"{PREFIXE}{rond}{BARRE}" + (f"-{n}" if n else "")
                  + f"-va-{AROBASE}{pseudo}")
         if voulu == nom:
@@ -661,7 +766,7 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
 #: « propose-moi quelque chose pour trier tout le monde » — choisi : 🟢 en
 #: haut, puis 🟠, puis 🔵, et à couleur égale le numéro du VA.
 TRI_SALONS = {"1498948161039896586"}             # YouLab THREADS
-ORDRE_RONDS = (ROND_CLICS, ROND_RIEN, ROND_LA)
+ORDRE_RONDS = (ROND_CLICS, ROND_RIEN, ROND_LA, ROND_ABSENT)
 
 
 def _cle_tri(nom: str):

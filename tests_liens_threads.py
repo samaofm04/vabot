@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import time
 import pathlib
 import shutil
 import sys
@@ -394,8 +395,12 @@ try:
     # Propriétaire, 13/10/2026 : « faut mettre le numéro du VA », comme Va IG
     # (« 🔴-21-va-… »).
     g, _ = monde(config={"gabarit": GABARIT_TW},
-                 tickets={f"{TH}:u1": {"salon": "s1"}, f"{TH}:u2": {"salon": "s2"},
-                          f"{TH}:u9": {"salon": "s9"}, f"{TW}:u3": {"salon": "s3"}})
+                 # ouverts à l'instant : ce passage-ci ne juge que les numéros
+                 # (la pastille 🔴 d'un VA sans lien attend deux jours)
+                 tickets={f"{TH}:u1": {"salon": "s1", "ouvert": time.time()},
+                          f"{TH}:u2": {"salon": "s2", "ouvert": time.time()},
+                          f"{TH}:u9": {"salon": "s9", "ouvert": time.time()},
+                          f"{TW}:u3": {"salon": "s3"}})
     lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
         f"{TH}:u1": {"pseudo": "momobtn", "shortcode": "velvetyy", "numero": 61}}}))
     A = tk.AROBASE
@@ -403,7 +408,11 @@ try:
                 "s9": f"─│🔵┤-12-va-{A}deja", "s3": f"─│🔵┤-va-{A}yazid"}
     patchs_n = []
 
+    MESSAGES_N = {}
+
     def _api_n(m, c, **k):
+        if m == "GET" and c.endswith("/messages"):
+            return 200, list(MESSAGES_N.get(c.split("/")[2], []))
         if m == "GET" and c.endswith("/channels"):
             gid_ = c.split("/")[2]
             return 200, [{"id": i, "type": 0, "name": n} for i, n in SALONS_N.items()
@@ -448,7 +457,11 @@ try:
     import time as _tm
     vieux, neuf = _tm.time() - 5 * 86400, _tm.time() - 3600
     g, _ = monde(config={"gabarit": GABARIT_TW},
-                 tickets={f"{TH}:u{i}": {"salon": f"c{i}"} for i in range(1, 6)})
+                 tickets=dict({f"{TH}:u{i}": {"salon": f"c{i}"} for i in range(1, 6)},
+                              **{f"{TH}:66": {"salon": "c6"}, f"{TH}:77": {"salon": "c7"},
+                                 f"{TH}:88": {"salon": "c8", "ouvert": _tm.time() - 3600}}))
+    tk._ACTIVITE.clear()
+    tk._ACTIVITE_LUE[0] = False
     lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
         f"{TH}:u1": {"shortcode": "a", "link_id": "lnk_a", "numero": 61, "quand": vieux},
         f"{TH}:u2": {"shortcode": "b", "link_id": "lnk_b", "numero": 62, "quand": vieux},
@@ -460,7 +473,20 @@ try:
     SALONS_N.clear()
     SALONS_N.update({"c1": f"─│🔵┤-61-va-{A}momobtn", "c2": f"─│🔵┤-62-va-{A}steave0454",
                      "c3": f"─│🔵┤-va-{A}roucham_79944", "c4": f"─│🔵┤-va-{A}nouveau",
-                     "c5": f"─│🔵┤-65-va-{A}coupe", "s3": f"─│🔵┤-va-{A}yazid"})
+                     "c5": f"─│🔵┤-65-va-{A}coupe", "s3": f"─│🔵┤-va-{A}yazid",
+                     "c6": f"─│🔵┤-66-va-{A}parle", "c7": f"─│🔵┤-77-va-{A}clique",
+                     "c8": f"─│🔵┤-88-va-{A}arrive"})
+    # « le VA il est là mais répond pas, inactif dans le serveur de partout, en
+    # rouge depuis 2 j », « sans lien » : 66 a écrit dans un salon il y a une
+    # heure, 77 a cliqué un bouton, 88 vient d'arriver, 4 (« nouveau ») rien
+    import datetime as _dtm
+    _iso = _dtm.datetime.fromtimestamp(_tm.time() - 3600, _dtm.timezone.utc).isoformat()
+    _vieil = _dtm.datetime.fromtimestamp(_tm.time() - 4 * 86400, _dtm.timezone.utc).isoformat()
+    MESSAGES_N["s3"] = []
+    MESSAGES_N["c1"] = [{"author": {"id": "66"}, "timestamp": _iso},
+                        {"author": {"id": "4"}, "timestamp": _vieil},
+                        {"author": {"id": "999", "bot": True}, "timestamp": _iso}]
+    tk.noter_clic({"guild_id": TH, "member": {"user": {"id": "77"}}})
     lv.numero_de = lambda pseudo: 64
     patchs_n.clear()
     tk.numeroter_salons(TH)
@@ -469,9 +495,17 @@ try:
     check("🟢 son lien a des visites (2 derniers jours), 🟠 un lien sans visite (neuf ou "
           "coupé compris), 🔵 pas de lien — numéro et couleur en UN renommage",
           noms == {"c1": f"─│🟢┤-61-va-{A}momobtn", "c2": f"─│🟠┤-62-va-{A}steave0454",
-                   "c3": f"─│🟠┤-63-va-{A}roucham_79944", "c4": f"─│🔵┤-64-va-{A}nouveau",
+                   "c3": f"─│🟠┤-63-va-{A}roucham_79944", "c4": f"─│🔴┤-64-va-{A}nouveau",
                    "c5": f"─│🟠┤-65-va-{A}coupe"}
           and len(patchs_n) == 5, (noms, patchs_n))
+    check("🔴 sans lien et plus rien depuis 2 jours (son dernier message a 4 jours) ; 🔵 s'il "
+          "a écrit (relu dans les salons), cliqué un bouton, ou s'il vient d'arriver",
+          SALONS_N["c4"].startswith("─│🔴┤") and SALONS_N["c6"].startswith("─│🔵┤")
+          and SALONS_N["c7"].startswith("─│🔵┤") and SALONS_N["c8"].startswith("─│🔵┤")
+          and tk.derniere_activite(TH, "66") > _tm.time() - 7200
+          and tk.derniere_activite(TH, "999") == 0, {k: SALONS_N[k] for k in ("c4", "c6", "c7", "c8")})
+    check("… et Twitter ne note rien (pastille de Threads seulement)",
+          (tk.noter_activite(TW, "5"), tk.derniere_activite(TW, "5"))[1] == 0)
     check("… un seul appel GetMySocial pour tout l'espace, sur J-2..J",
           [a for a in g.appels if a[0] == "get_link_metrics"]
           and all(a[1]["team_id"] == EMY_THREADS and a[1]["limit"] == 100
