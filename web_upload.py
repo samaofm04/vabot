@@ -60886,22 +60886,6 @@ def _recap_clics_rest(gid: str) -> None:
         print(f"[recap-clics] {gid} : {type(e).__name__}: {e}", flush=True)
 
 
-def _tableau_staff(gid: str) -> None:
-    """Le tableau staff de ce serveur (tableau_staff), une fois l'heure, avec
-    le bot du serveur. Une panne ici ne prive le serveur de rien d'autre."""
-    try:
-        import tableau_staff as _ts
-        if not _ts.a_publier(gid):
-            return
-        import verif_discord as _vd_t
-        with _vd_t.sur_serveur(gid):
-            b = _ts.publier(gid)
-        if b.get("erreur"):
-            print(f"[tableau] {gid} : {b['erreur']}", flush=True)
-    except Exception as e:
-        print(f"[tableau] {gid} : {type(e).__name__}: {e}", flush=True)
-
-
 def _start_podium_semaine_daemon() -> bool:
     """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
@@ -60938,9 +60922,6 @@ def _start_podium_semaine_daemon() -> bool:
                     # report de leur espace, repris tel quel par le bot du
                     # serveur (recap_clics_rest). Rien ailleurs.
                     _recap_clics_rest(gid)
-                    # le tableau staff (Twitter, Threads, Va IG) : l'etat de
-                    # chaque VA pour les managers, une fois l'heure
-                    _tableau_staff(gid)
                     # le podium ne vaut que la ou ses chiffres veulent dire
                     # quelque chose (podium_discord.SERVEURS)
                     if gid not in _p.SERVEURS:

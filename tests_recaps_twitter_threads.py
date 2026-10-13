@@ -622,9 +622,7 @@ try:
         a_rafraichir_subs=lambda g: True, rafraichir_subs=note("subs"),
         a_rafraichir_bonus=lambda g: True, rafraichir_bonus=note("bonus"))
     ns = {"_p": faux_p, "_vd_p": vd, "_sync_liens_va": note("liens"), "_suivi_va": note("suivi"),
-          "_recap_clics_rest": note("clics"),
-          # le tableau staff (tableau_staff, tests_tableau_staff.py) : hors sujet ici
-          "_tableau_staff": lambda g: None}
+          "_recap_clics_rest": note("clics")}
     exec(compile(textwrap.dedent(ast.get_source_segment(src_w, boucle)), "boucle", "exec"), ns)
 
     def par(g):
