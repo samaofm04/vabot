@@ -102,6 +102,11 @@ class FauxDiscord:
     def __init__(self):
         self.appels, self.n, self.messages = [], 0, {}
         self.panne = 0                     # un code HTTP : Discord en panne
+        self.panne_sur = set()             # ces messages-là seulement : 503
+        self.panne_2e = set()              # 503 à la 2e édition seulement
+        self.patchs = {}
+        self.post_perdu = False            # posté chez Discord, réponse perdue
+        self.salon_de = {}
 
     def __call__(self, m, chemin, **kw):
         self.appels.append((m, chemin, copy.deepcopy(kw.get("json"))))
@@ -115,15 +120,23 @@ class FauxDiscord:
             c = dict(kw["json"], id=f"neuf{self.n}")
             SALONS[b[1]].append(c)
             return 201, {"id": c["id"]}
+        if b[0] == "channels" and len(b) == 3 and b[2].startswith("messages?") and m == "GET":
+            return 200, [{"id": i, "author": {"id": "bot1"}, "embeds": j.get("embeds")}
+                         for i, j in self.messages.items() if self.salon_de.get(i) == b[1]]
         if b[0] == "channels" and b[2:] == ["messages"] and m == "POST":
             if self.panne:
                 return self.panne, {}
             self.n += 1
             self.messages[str(1000 + self.n)] = kw["json"]
+            self.salon_de[str(1000 + self.n)] = b[1]
+            if self.post_perdu:
+                return 0, None
             return 200, {"id": str(1000 + self.n)}
         if b[0] == "channels" and len(b) == 4 and m == "PATCH":
-            if self.panne:
-                return self.panne, {}
+            self.patchs[b[3]] = self.patchs.get(b[3], 0) + 1
+            if self.panne or b[3] in self.panne_sur or (
+                    b[3] in self.panne_2e and self.patchs[b[3]] == 2):
+                return self.panne or 503, {}
             if b[3] not in self.messages:
                 return 404, {}
             self.messages[b[3]] = kw["json"]
@@ -264,6 +277,17 @@ try:
         l_d = ts._lignes_twitter(SALONS[TW])
     finally:
         pd._par_tracking = _pt
+    vus_pt = []
+    try:
+        pd._par_tracking = lambda liens, ents, table, d0="", d1="9999-12-31": (
+            vus_pt.append((sorted(str(l["id"]) for l in liens), d0, d1)) or _pt(liens, ents, table, d0, d1))
+        ts._lignes_twitter(SALONS[TW])
+    finally:
+        pd._par_tracking = _pt
+    auj = ts._maintenant_paris().date()
+    check("le doute se lit sur la fenêtre du tableau, pages en service seulement",
+          vus_pt == [(["p1", "p2", "p4"], (auj - ts.dt.timedelta(days=ts.JOURS)).isoformat(),
+                      auj.isoformat())], vus_pt)
     check("un numéro que le registre met en doute est signalé",
           any(x["n"] == 43 and "⚠️ numéro en doute" in x["texte"] for x in l_d)
           and not any(x["n"] == 12 and "doute" in x["texte"] for x in l_d))
@@ -351,6 +375,49 @@ try:
           and D.messages[ordre[0]]["embeds"][0]["title"].endswith(f"(1/{nb})")
           and D.messages[ordre[-1]]["embeds"][0]["title"].endswith(f"({nb}/{nb})"),
           (nb, b_s, [D.messages[i]["embeds"][0]["title"] for i in ordre]))
+
+    def titres(ids_):
+        return [D.messages[i]["embeds"][0]["title"] for i in sorted(ids_, key=int)]
+
+    ts.TAILLE_PAGE = 150
+    try:
+        avant = ts.publier(TH)["messages"]
+        nb = len(avant)
+        # page 1 supprimée ET Discord en panne sur la page 2, dans le même passage
+        del D.messages[avant[0]]
+        D.panne_sur = {avant[1]}
+        b_a = ts.publier(TH)
+        D.panne_sur = set()
+        b_b = ts.publier(TH)
+        t_b = titres(b_b["messages"])
+        # une panne pendant la remise en ordre elle-même (2e édition du passage)
+        del D.messages[b_b["messages"][0]]
+        D.patchs, D.panne_2e = {}, {b_b["messages"][2]}
+        b_c = ts.publier(TH)
+        D.panne_2e = set()
+        b_d = ts.publier(TH)
+        t_d = titres(b_d["messages"])
+        # l'envoi d'une page aboutit chez Discord mais la réponse se perd
+        del D.messages[b_d["messages"][-1]]
+        D.post_perdu = True
+        b_e = ts.publier(TH)
+        D.post_perdu = False
+        b_f = ts.publier(TH)
+    finally:
+        ts.TAILLE_PAGE = _t
+    attendus = [f"📊 Suivi des VA — Threads ({k}/{nb})" for k in range(1, nb + 1)]
+    check("page supprimée puis panne dans le même passage : l'ordre revient au passage suivant",
+          "503" in b_a["erreur"] and not b_b["erreur"] and t_b == attendus, (b_a["erreur"], t_b))
+    check("une panne pendant la remise en ordre : dite, nouvel essai, puis l'ordre",
+          "remise en ordre" in b_c["erreur"] and not b_d["erreur"] and t_d == attendus,
+          (b_c["erreur"], t_d))
+    pages_salon = [i for i, j in D.messages.items()
+                   if j["embeds"][0]["title"].startswith("📊 Suivi des VA — Threads")]
+    check("réponse perdue : la page postée est reprise, pas reposée à côté ni figée",
+          b_e["erreur"] and not b_f["erreur"] and len(b_f["messages"]) == nb
+          and sorted(pages_salon, key=int) == b_f["messages"]
+          and titres(b_f["messages"]) == attendus,
+          (b_e, b_f, len(pages_salon), titres(b_f["messages"])))
     GMS["panne"] = True
     k2 = len(D.appels)
     b3 = ts.publier(TH)

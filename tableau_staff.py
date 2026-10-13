@@ -186,9 +186,16 @@ def _lignes_twitter(salons: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any
         return None
     actifs = {str(l.get("id")) for l in liens if pd._actif(l)}
     sc = {str(l.get("id")): str(l.get("shortcode") or "") for l in liens}
-    ents = pd.entites(liens, cp.rattachements_identite())
+    # les pages EN SERVICE, et le doute sur la fenêtre du tableau : sans d0,
+    # un tracking quitté en août gardait son « doute » dans le registre et
+    # « ⚠️ numéro en doute » restait à vie, quand le podium avait cessé de le
+    # dire ; une page coupée « mise de côté » mettait aussi ses VA en doute
+    vivants = [l for l in liens if pd._actif(l)]
+    auj = _maintenant_paris().date()
+    ents = pd.entites(vivants, cp.rattachements_identite())
     table = pd.numeros(list(ents.keys()), attribuer=False)
-    groupes, num, doute, _cause = pd._par_tracking(liens, ents, table)
+    groupes, num, doute, _cause = pd._par_tracking(
+        vivants, ents, table, (auj - dt.timedelta(days=JOURS)).isoformat(), auj.isoformat())
     out = []
     sans_num = 0
     for cle, g in groupes.items():
@@ -417,6 +424,27 @@ def _salon(gid: str, salons: List[Dict[str, Any]], connu: str = "") -> str:
     return str(rep["id"])
 
 
+def _cle_message(mid: str) -> int:
+    return int(mid) if str(mid).isdigit() else 0
+
+
+def _reprendre(salon: str, ids: List[str]) -> Optional[List[str]]:
+    """Les pages du tableau postées par le bot mais absentes de l'état : un
+    envoi sur un délai dépassé (code 0) ou un 5xx a souvent abouti chez
+    Discord. Sans cette reprise, la page était reposée au passage suivant et
+    la première restait dans le salon, figée. None si le salon est illisible."""
+    c1, moi = _api("GET", "/users/@me")
+    c2, msgs = _api("GET", f"/channels/{salon}/messages?limit=50")
+    if c1 != 200 or c2 != 200 or not isinstance(moi, dict) or not isinstance(msgs, list):
+        return None
+    plus = [str(m["id"]) for m in msgs
+            if isinstance(m, dict) and m.get("id") and str(m["id"]) not in ids
+            and str((m.get("author") or {}).get("id")) == str(moi.get("id"))
+            and any(str((x or {}).get("title") or "").startswith("📊 Suivi des VA")
+                    for x in m.get("embeds") or [])]
+    return ids + plus
+
+
 def a_publier(gid: str, maintenant: Optional[float] = None) -> bool:
     gid = str(gid)
     if gid not in SALONS:
@@ -460,6 +488,11 @@ def publier(gid: str) -> Dict[str, Any]:
         if str(e.get("salon") or "") != salon:
             e = {"salon": salon, "messages": []}
         ids = [str(x) for x in e.get("messages") or []]
+        if e.get("orphelins"):
+            repris = _reprendre(salon, ids)
+            if repris is not None:
+                ids = repris
+                e.pop("orphelins", None)
         lesp = pages(gid, lignes)
         neufs: List[str] = []
         reposte = False
@@ -492,21 +525,33 @@ def publier(gid: str) -> Dict[str, Any]:
             if c == 200 and isinstance(rep, dict) and rep.get("id"):
                 neufs.append(str(rep["id"]))
             else:
+                # posté quand même ? repris au passage suivant (_reprendre)
+                e["orphelins"] = True
                 return _arret(f"page {k + 1} refusée (HTTP {c})", ids[k + 1:])
         # une page en trop (le tableau a raccourci) : vidée, jamais supprimée
         tous = neufs + ids[len(lesp):]
         vide = {"description": "_(page vide)_", "color": 0x64748B}
-        if reposte:
-            # une page reposée arrive en bas du salon : sans ce tri, « (1/7) »
-            # restait pour de bon sous « (7/7) ». Les messages, dans l'ordre
-            # où Discord les montre, reçoivent les pages dans l'ordre.
-            tous.sort(key=lambda x: int(x) if x.isdigit() else 0)
+        if reposte or tous != sorted(tous, key=_cle_message):
+            # une page reposée (ou reprise) arrive en bas du salon : sans ce
+            # tri, « (1/7) » restait pour de bon sous « (7/7) ». Les messages,
+            # dans l'ordre où Discord les montre, reçoivent les pages dans
+            # l'ordre. Le désordre laissé par un arrêt se répare ici aussi.
+            tous.sort(key=_cle_message)
             for k, mid in enumerate(tous):
-                _api("PATCH", f"/channels/{salon}/messages/{mid}",
-                     json={"embeds": [lesp[k] if k < len(lesp) else vide]})
+                c, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                              json={"embeds": [lesp[k] if k < len(lesp) else vide]})
+                if c != 200:
+                    # une page sautée, une autre en double : pas un succès
+                    neufs.clear()
+                    return _arret(f"page {k + 1} non remise en ordre (HTTP {c})", tous)
         else:
             for mid in ids[len(lesp):]:
-                _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"embeds": [vide]})
+                c, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"embeds": [vide]})
+                if c == 404:
+                    tous.remove(mid)       # supprimée à la main : oubliée
+                elif c != 200:
+                    neufs.clear()
+                    return _arret(f"page en trop non vidée (HTTP {c})", tous)
         e.update(salon=salon, messages=tous, vu=time.time())
         etat[gid] = e
         safe_json.write(_fichier_etat(), etat)
