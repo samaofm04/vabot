@@ -171,11 +171,38 @@ try:
           r.get("provisoire") is False and r.get("plateforme") == "Threads", r)
     fiche = lv.lien_de(TH, "u1")
     check("… fiche gardée (lien, numéro, groupe, sans tracking)",
-          fiche.get("public_url", "").startswith("https://getmysocial.com/emy")
+          fiche.get("public_url", "").startswith("https://getmysocial.com/")
           and fiche.get("numero") == 27 and fiche.get("tracking") == ""
           and fiche.get("link_id", "").startswith("lnk_"), fiche)
     r2 = lv.creer_pour(TH, "u1", "abdoul_9684")
     check("un second clic ne double pas le lien", not r2.get("ok") and r2.get("deja"), r2)
+    # Propriétaire, 13/10/2026 : « pour Threads il ne doit pas y avoir de emy,
+    # ça doit être sans nom », « genre angel, vraiment sans prénom », « mets
+    # genre deux y à la fin »
+    sc0 = dup[0][2] if dup else ""
+    check("… adresse SANS prénom : un mot doux et deux y (« angelyy »), jamais « emy »",
+          sc0 == lv.mots_sans_prenom("Threads VA 27 @abdoul_9684", 0)
+          and sc0.endswith("yy") and "emy" not in sc0
+          and any(sc0 in (m + "yy", m + "y") for m in lv.MOTS_THREADS)
+          and fiche.get("public_url") == f"https://getmysocial.com/{sc0}", (sc0, fiche))
+    g, _s = monde(config={"gabarit": GABARIT_TW})
+    g.pris.update(lv.mots_sans_prenom("Threads VA 27 @abdoul_9684", i) for i in range(3))
+    r3 = lv.creer_pour(TH, "u9", "abdoul_9684")
+    scs = [a[2] for a in g.appels if a[0] == "duplicate"]
+    check("déjà pris (adresses communes à tout GetMySocial) : un autre mot doux, toujours "
+          "deux y, toujours sans prénom",
+          r3.get("ok") and len(scs) == 4 and all("emy" not in x and x.endswith("yy") for x in scs)
+          and scs == [lv.mots_sans_prenom("Threads VA 27 @abdoul_9684", i) for i in range(4)],
+          (r3, scs))
+    _n = len(lv.MOTS_THREADS)
+    _tous = [lv.mots_sans_prenom("Threads VA 27 @abdoul_9684", i) for i in range(_n + 12)]
+    check("chaque mot une fois, puis deux mots doux : jamais deux fois le même nom, et un "
+          "autre VA commence ailleurs",
+          len(set(_tous)) == len(_tous) and all(x.endswith("yy") for x in _tous)
+          and lv.mots_sans_prenom("Threads VA 31 @x", 0) != _tous[0]
+          and all(sum(x.startswith(m) for m in lv.MOTS_THREADS) >= 1 for x in _tous)
+          and not any(m in x for x in _tous for m in ("lovee", "kisses", "princess", "sweetie")),
+          _tous[:6])
 
     # ── Twitter inchangé ─────────────────────────────────────────────────
     g, suivis = monde(config={"gabarit": GABARIT_TW, "equipe": EMY_TWITTER,
@@ -185,6 +212,8 @@ try:
     check("Twitter : gabarit et espace Twitter, tracking MyPuls d'abord",
           r.get("ok") and dup[0][1] == GABARIT_TW and dup[0][5] == EMY_TWITTER
           and dup[0][4] == "https://of/c9" and suivis == ["Twitter VA 27 @yazid"], (r, dup, suivis))
+    check("… et son adresse garde « emy » (« emycute »), comme avant",
+          dup and dup[0][2] == lv.mots_doux("emy", 0) == "emycute", dup)
     g, suivis = monde()
     r = lv.creer_pour(TW, "u3", "moan")
     check("Twitter interrupteur fermé : provisoire, comme avant",

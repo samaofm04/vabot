@@ -21,6 +21,7 @@ refus net quand la configuration manque, plutôt que de deviner une modèle.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -41,9 +42,10 @@ THREADS_ID = "1498948161039896586"
 # tracking, faut juste dupliquer le lien de VA Threads » — emythreads, l'A/B
 # seren/emy 50/50. Le duplicata garde l'A/B (verifie : 13 seren / 17 emy sur
 # 30 visiteurs). Surchargeable par la cle « threads » de liens_va_config.json.
+# « sans_prenom » : l'adresse du lien ne porte aucun prénom (mots_sans_prenom).
 ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
                   "gabarit": "lnk_6acdd0a53fb996c565a47e90",    # getmysocial.com/emythreads
-                  "base_shortcode": "emy", "plateforme": "Threads"}
+                  "sans_prenom": True, "plateforme": "Threads"}
 
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
 SERVEURS = {TWITTER_ID, THREADS_ID}
@@ -67,6 +69,48 @@ def mots_doux(base: str, essai: int = 0) -> str:
     mot = MOTS_DOUX[essai % len(MOTS_DOUX)]
     tour = essai // len(MOTS_DOUX)
     return f"{base}{mot}" + (str(tour + 1) if tour else "")
+
+
+#: Les mots doux de Threads : ceux qui se lisent bien avec deux y (« angelyy »,
+#: « cherryy »). Pas « lovee », « sweetie », « kisses », « princess » :
+#: « loveeyy », « kissesyy » ne ressemblent plus à un compte. Une longueur
+#: (25) première avec les pas de mots_sans_prenom (7 et 37).
+MOTS_THREADS = ("angel", "cute", "baby", "honey", "sweet", "doll", "cherry", "peachy",
+                "bunny", "kitty", "candy", "lovely", "sugar", "dreamy", "starr", "pearl",
+                "babe", "lil", "berry", "bloom", "glow", "velvet", "coco", "bby", "cutie")
+
+
+def _deux_y(mot: str) -> str:
+    """« angel » → « angelyy », « honey » → « honeyy » : deux y à la fin."""
+    return mot + ("y" if mot.endswith("y") else "yy")
+
+
+def mots_sans_prenom(graine: str, essai: int = 0) -> str:
+    """« angelyy », « cuteyy », « bunnyy »… Une adresse SANS prénom (Threads).
+
+    Propriétaire, 13/10/2026, pour Threads : « il ne doit pas y avoir de emy,
+    ça doit être sans nom », « genre angel, vraiment sans prénom » — le
+    premier lien créé était sorti « emyangel » —, puis « tu peux mettre genre
+    deux y à la fin ». Un mot doux et deux y. Les adresses GetMySocial sont
+    communes à tous les comptes : un mot seul est presque toujours pris
+    (« cute », « baby » : 403), avec deux y bien moins (« angelyy »,
+    « cuteyy », « bunnyy » libres le 13/10 ; « honeyy », « dollyy » pris).
+    Chaque mot de MOTS_THREADS une fois, puis deux mots doux et deux y, jamais le
+    même deux fois. Le point de départ dépend du lien (`graine`, son nom) :
+    deux VA qui créent leur lien n'usent pas leurs essais sur les mêmes noms.
+    """
+    n = len(MOTS_THREADS)
+    h = int(hashlib.md5(str(graine or "").encode("utf-8")).hexdigest(), 16)
+    if essai < n:
+        # 7 est premier avec la longueur de la liste : chaque mot passe une fois
+        return _deux_y(MOTS_THREADS[(h + essai * 7) % n])
+    # puis les paires (a, b), a != b ; un pas premier avec leur nombre les
+    # parcourt sans retomber deux fois sur la même
+    i = (h + (essai - n) * 37) % (n * (n - 1))
+    a, b = divmod(i, n - 1)
+    if b >= a:
+        b += 1
+    return _deux_y(MOTS_THREADS[a] + MOTS_THREADS[b])
 
 
 def _lire(chemin: Path, defaut):
@@ -267,7 +311,8 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     if not gabarit:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
     for essai in range(12):
-        sc = mots_doux(base, essai)
+        # Threads : aucune base, aucun prénom (voir mots_sans_prenom)
+        sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
         r = gms.duplicate_link(gabarit, sc, nom, url, equipe)
         if r.get("ok"):
             lien = r.get("link") or {}
