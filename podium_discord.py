@@ -2084,22 +2084,93 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     return None
 
 
+#: « Instagram VA n » (Va IG) : les VA US ont LEUR numéro, celui du registre
+#: des trackings ; les VA FR n'en ont qu'un PAR MODEL (Amelia VA 2, Lola VA
+#: 2…), et deux lignes se lisaient « Instagram VA 2 ». Propriétaire, 13/10/2026 :
+#: « donne-leur un numéro exprès pour que personne n'ait le même ». Chaque VA
+#: FR (sa model, son numéro) reçoit un numéro Instagram à lui, fixe, à partir
+#: d'ici : loin des numéros US (1 à 59 ce jour-là), qui ne grandissent que
+#: d'un par nouveau VA de Twitter. Un numéro déjà pris par le registre est sauté.
+DEBUT_INSTAGRAM = 100
+_VERROU_INSTAGRAM = threading.Lock()
+
+
+def _fichier_instagram() -> Path:
+    return DATA_DIR / "numeros_instagram.json"
+
+
+def numeros_instagram(vues=()) -> Dict[str, int]:
+    """{« amelia:3 » : 104, …} : le numéro Instagram de chaque VA FR.
+
+    Complétée de tous les VA FR connus (numeros_va_fr.json, model → VA →
+    numéro) et des clés `vues`, dans l'ordre (model, numéro) pour qu'un même
+    lot donne toujours le même résultat. Un numéro donné ne change plus."""
+    with _VERROU_INSTAGRAM:
+        table = _lire(_fichier_instagram(), {})
+        table = {str(k): int(v) for k, v in table.items()
+                 if isinstance(v, int) or str(v).isdigit()} if isinstance(table, dict) else {}
+        neuves = set(vues)
+        fr = _lire(DATA_DIR / "numeros_va_fr.json", {})
+        for model, par_va in (fr.items() if isinstance(fr, dict) else []):
+            for n in (par_va.values() if isinstance(par_va, dict) else []):
+                if str(n).isdigit():
+                    neuves.add(f"{model}:{int(n)}")
+        neuves -= set(table)
+        if neuves:
+            pris = set(table.values())
+            for e in (_lire_registre().get("trackings") or {}).values():
+                if isinstance(e, dict) and str(e.get("numero") or "").isdigit():
+                    pris.add(int(e["numero"]))
+            n = DEBUT_INSTAGRAM
+            for cle in sorted(neuves, key=lambda c: (c.split(":")[0], int(c.split(":")[1]))):
+                while n in pris:
+                    n += 1
+                table[cle] = n
+                pris.add(n)
+            safe_json.write_text(_fichier_instagram(),
+                                 json.dumps(table, ensure_ascii=False, indent=2, sort_keys=True))
+            print(f"[podium] numéros Instagram : {len(neuves)} VA FR numérotés "
+                  f"({', '.join(f'{c} -> {table[c]}' for c in sorted(neuves)[:8])}"
+                  f"{'…' if len(neuves) > 8 else ''})", flush=True)
+        return table
+
+
 def _marque(gid: Optional[str], texte: str) -> str:
     """« Amelia VA 43 », « Jessye VA 28 » tels que ce serveur les montre : sous
-    sa marque (clé « marque » : « Instagram VA 43 ») s'il en a une, sinon tels
-    quels. Appliqué au texte assemblé, lignes ET avertissements (« Sans relevé
-    : Jessye VA 5 ») : un nom de model oublié dans un coin la trahirait."""
+    sa marque (clé « marque ») s'il en a une, sinon tels quels. Appliqué au
+    texte assemblé, lignes ET avertissements (« Sans relevé : Jessye VA 5 ») :
+    un nom de model oublié dans un coin la trahirait.
+
+    Un VA US garde son numéro (« Instagram VA 28 ») ; un VA FR prend le sien
+    (numeros_instagram), pour que deux lignes ne disent jamais la même chose."""
     pf = _profil(gid)
     marque = pf.get("marque")
     if not marque or not texte:
         return texte
     import liens_fr
-    noms = {str(m.get("nom") or "") for m in liens_fr.MODELS.values()}
-    noms |= {"Amélia", str(pf.get("nom_us") or "")}
-    noms.discard("")
-    motif = (r"(?<![\w-])(?:" + "|".join(re.escape(n) for n in sorted(noms, key=len, reverse=True))
-             + r") VA (\d+)")
-    return re.sub(motif, lambda m: f"{marque} VA {m.group(1)}", texte)
+    fr = {str(m.get("nom") or ""): k for k, m in liens_fr.MODELS.items()}
+    fr["Amélia"] = "amelia"
+    fr.pop("", None)
+    us = str(pf.get("nom_us") or "")
+    noms = set(fr) | ({us} if us else set())
+    motif = re.compile(r"(?<![\w-])(" + "|".join(re.escape(n) for n in sorted(noms, key=len, reverse=True))
+                       + r") VA (\d+)")
+    vues = {f"{fr[m.group(1)]}:{int(m.group(2))}" for m in motif.finditer(texte) if m.group(1) in fr}
+    table = numeros_instagram(vues) if vues else {}
+
+    def nom(m) -> str:
+        if m.group(1) in fr:
+            return f"{marque} VA {table[f'{fr[m.group(1)]}:{int(m.group(2))}']}"
+        return f"{marque} VA {m.group(2)}"
+    return motif.sub(nom, texte)
+
+
+def _marque_lignes(gid: Optional[str], lignes: List[str]) -> List[str]:
+    """_marque sur une liste de lignes, en une fois (une seule lecture de la
+    table pour tout un classement)."""
+    if not _profil(gid).get("marque") or not lignes:
+        return lignes
+    return _marque(gid, "\n".join(lignes)).split("\n")
 
 
 def _nom_us(pf: Dict[str, Any], va: str) -> str:
@@ -2794,7 +2865,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     bas = _marque(gid, "\n".join(queue))
     # sous la marque du serveur AVANT le découpage : « Instagram » est plus
     # long que « Amelia », les pages se mesurent telles qu'elles partiront
-    rangs = [_marque(gid, r) for r in rangs]
+    rangs = _marque_lignes(gid, rangs)
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
     # dernière doit aussi loger le total, d'où la marge plus large. Les
