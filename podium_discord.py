@@ -223,6 +223,17 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # « pour Threads tu ecris Threads, pour Twitter Twitter, anonyme
                  # toujours » : « Threads 12 », le numero du VA 12 de Twitter
                  "unite": "clics", "libelle": "Threads",
+                 # les numéros du registre des trackings (_par_tracking) et sa
+                 # règle du doute : Threads SEUL. « Ne touche pas [Va IG], on ne
+                 # parle que de Threads » (propriétaire, 13/10/2026) : les VA US
+                 # de Va IG gardent leurs numéros au nom du lien, comme avant
+                 "numeros_registre": True,
+                 # mais AU CLIC, sans jugement de tracking : « y a pas de
+                 # tracking pour Threads », « c'est un lien dupliqué », « c'est
+                 # au click pour Threads ». Un tracking en doute au registre
+                 # (liens dupliqués qui le partagent) ne met personne « sans
+                 # relevé » ici : chaque lien compte ses clics pour son VA
+                 "clics_seuls": True,
                  # « je veux pas les trucs là » (13/10/2026, les ⚠️ sous la
                  # quinzaine) : ni « sans relevé », ni « trackings partagés »,
                  # ni « liste non rafraîchie » dans les messages de Threads.
@@ -1764,7 +1775,10 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         # invente pas (un lien renommé avant que le registre ne le voie aurait
         # pris un numéro neuf, puis disputé le sien à son tracking)
         table = numeros(list(ents.keys()), attribuer=frais and _source(gid) == "gms")
-        ents, table, doute, en_cause = _par_tracking(liens, ents, table, d0, d1)
+        if profil.get("numeros_registre"):
+            ents, table, doute, en_cause = _par_tracking(liens, ents, table, d0, d1)
+            if profil.get("clics_seuls"):
+                doute, en_cause = set(), []
     sans_numero = [c for c in ents if c not in table]
     directs = _directs(liens)
     if sans_numero:
@@ -1859,7 +1873,9 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
                                                      ensure_ascii=False, indent=2,
                                                      sort_keys=True))
         return {k: int(v) for k, v in totaux.items()}
-    liens, _ = liens_bruts(gid, ETIQUETTE_QUINZAINE)
+    # l'étiquette qui cède la réserve de la paie : Threads seul (Va IG garde la sienne)
+    etiq = ETIQUETTE_QUINZAINE if profil.get("vitrine") else "podium"
+    liens, _ = liens_bruts(gid, etiq)
     doute: set = set()
     if profil["fr"]:
         ents = entites_fr(liens)
@@ -1869,7 +1885,10 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
         table = numeros(list(ents.keys()), attribuer=_source(gid) == "gms")
         # les mêmes numéros que le classement (registre des trackings) : un
         # total « depuis toujours » au nom d'un autre VA serait faux en silence
-        ents, table, doute, _t = _par_tracking(liens, ents, table, ALLTIME_DEPUIS)
+        if profil.get("numeros_registre"):
+            ents, table, doute, _t = _par_tracking(liens, ents, table, ALLTIME_DEPUIS)
+            if profil.get("clics_seuls"):
+                doute = set()
     fin = _aujourdhui().isoformat()
     directs = _directs(liens)
     totaux = dict(cache.get("totaux") or {})
@@ -1880,7 +1899,7 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
             continue
         try:
             _, pays = _releve_liens(gid, e["ids"], ALLTIME_DEPUIS, fin, mesure,
-                                    ETIQUETTE_QUINZAINE, directs)
+                                    etiq, directs)
         except Exception:
             pays = None
         if pays is not None:
@@ -2903,7 +2922,8 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
     # la quinzaine ne paie rien : elle cède la réserve de la paie au podium
-    cl = classement(debut, min(aujourd, fin_saison), gid=gid, etiquette=ETIQUETTE_QUINZAINE)
+    cl = classement(debut, min(aujourd, fin_saison), gid=gid,
+                    etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine") else "podium")
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((ids or [""])[0])
@@ -3093,7 +3113,9 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         if _pause_pour(gid):
             raison = "GetMySocial en pause"
         else:
-            cl = classement(debut, fin, gid=gid, etiquette=ETIQUETTE_QUINZAINE)
+            cl = classement(debut, fin, gid=gid,
+                            etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine")
+                            else "podium")
             rec["essais"] = int(rec.get("essais") or 0) + 1
             if not cl["lignes"]:
                 raison = "aucun relevé"
@@ -3288,7 +3310,9 @@ def _taire_avert(gid: Optional[str], quoi: str, lignes: List[str]) -> None:
 #: Le 13/10/2026 : les VA de Twitter numérotés par le registre des trackings
 #: partout (_par_tracking : dix-sept VA US revenaient sur Va IG), et Threads
 #: en « Threads n », clics uniques US + UK.
-FORMAT_AFFICHAGE = "2026-10-13-numeros-registre"
+#: Puis le même jour : le registre réservé à Threads, Va IG revenu à ses numéros
+#: au nom du lien (« ne touche pas Va IG »).
+FORMAT_AFFICHAGE = "2026-10-13-registre-threads-seul"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:

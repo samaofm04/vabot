@@ -404,14 +404,16 @@ try:
           len(GMS["boutons"]) == 5 and not GMS["vues"] and not MP["appels"]
           and {a[1:] for a in GMS["boutons"]} == {(lundi.isoformat(), auj.isoformat())})
 
-    # Va IG : les mêmes numéros pour ses VA US, mais ses vues US à lui
+    # Va IG : « ne touche pas [Va IG], on ne parle que de Threads » — ses VA US
+    # gardent leurs numéros au nom du lien et leurs vues US, comme avant
     us = pd._releve_us(lundi, auj)
     vus_ig = [(x["va"], x["clics"]) for x in (us or {}).get("lignes") or []]
-    check("Va IG : ses VA US au numéro du registre (VA 12, 43, 41…), aux VUES US comme avant",
-          vus_ig == [("VA 12", 420), ("VA 43", 300), ("VA 41", 100), ("VA 30", 30),
-                     ("VA 31", 6)], vus_ig)
-    check("… Va IG ne relit pas les clics uniques de Threads (mesures séparées)",
-          len(GMS["boutons"]) == 5 and len(GMS["vues"]) == 5)
+    check("Va IG inchangé : ses VA US au numéro du NOM de leur lien (pas le registre), "
+          "à leurs vues US",
+          vus_ig == [("VA 43", 300), ("VA 42", 100), ("VA 30", 30), ("VA 31", 6)], vus_ig)
+    check("… Va IG ne relit pas les clics uniques de Threads (mesures séparées) : un "
+          "appel par VA numéroté au nom (4)",
+          len(GMS["boutons"]) == 5 and len(GMS["vues"]) == 4, (len(GMS["boutons"]), len(GMS["vues"])))
 
     # ------------------------------------------------------------------ 2 bis
     print("\n— 2 bis. pages à deux boutons, doutes du registre, liste de repli")
@@ -450,27 +452,26 @@ try:
     check("tracking en doute au registre : ses VA (12, 47) sont à mettre sans relevé",
           dte == {12, 47} and en_c == ["emy.brw/c42"], (dte, en_c))
     safe_json.write(pd.DATA_DIR / "podium_trackings.json", reg_d)
-    n_b = len(GMS["boutons"])
     cl_d = pd.classement(lundi, auj, gid=TH)
     safe_json.write(pd.DATA_DIR / "podium_trackings.json", REGISTRE)
-    check("… sur Threads : « Threads 12 » sans relevé (aucun appel, pas de prime sur les "
-          "clics d'un autre), et le message le dit",
-          "Threads 12" in cl_d["illisibles"]
-          and not any(x["va"] == "Threads 12" for x in cl_d["lignes"])
-          and not any(a[0] == ("l1", "l2") for a in GMS["boutons"][n_b:])
-          and cl_d["conflits"] == ["emy.brw/c42"]
-          and any("tracking" in x and "sans relevé" in x for x in pd._notes_tracking(cl_d)),
-          (cl_d["illisibles"], cl_d.get("conflits")))
+    # « y a pas de tracking pour Threads », « c'est un lien dupliqué », « c'est au
+    # click pour Threads » : le doute du registre ne retire personne ici
+    check("… mais sur Threads, au clic : « Threads 12 » compte ses clics, personne « sans "
+          "relevé », aucune note de tracking",
+          ("Threads 12", 47) in [(x["va"], x["clics"]) for x in cl_d["lignes"]]
+          and not cl_d["illisibles"] and not cl_d["conflits"]
+          and not pd._notes_tracking(cl_d), (cl_d["illisibles"], cl_d.get("conflits")))
     import contextlib as _ctx
     _sortie = io.StringIO()
+    cl_x = dict(cl_d, illisibles=["Threads 99"], frais=False)
     with _ctx.redirect_stdout(_sortie):
-        e_d = pd.embed_podium(cl_d, lundi, auj, en_cours=True, gid=TH)
-        e_t = pd.embed_podium(cl_d, lundi, auj, en_cours=True, gid=TW)
-    check("… mais le message de Threads ne l'affiche pas, le journal le dit ; Twitter, lui, "
-          "garde ses avertissements",
-          "⚠️" not in e_d["description"] and "Threads 12" not in e_d["description"]
+        e_d = pd.embed_podium(cl_x, lundi, auj, en_cours=True, gid=TH)
+        e_t = pd.embed_podium(dict(cl_x, illisibles=["VA 99"]), lundi, auj, en_cours=True, gid=TW)
+    check("un avertissement de Threads (un relevé raté) : pas dans le message, au journal ; "
+          "Twitter, lui, garde les siens",
+          "⚠️" not in e_d["description"] and "Threads 99" not in e_d["description"]
           and "non affiché dans le podium" in _sortie.getvalue()
-          and "Threads 12" in _sortie.getvalue() and "⚠️" in e_t["description"],
+          and "Threads 99" in _sortie.getvalue() and "⚠️" in e_t["description"],
           (_sortie.getvalue()[-300:], e_d["description"][-200:]))
     check("le format d'affichage : Threads à part, Twitter et Va IG inchangés",
           pd._format_affiche(TW) == pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE
@@ -506,7 +507,7 @@ try:
                "frais": True}}
     us2 = pd._releve_us(lundi, auj)
     check("Va IG : le relevé US d'avant le changement (autre format) est refait, pas repris",
-          len(GMS["vues"]) == 5 and [x["va"] for x in us2["lignes"]][0] == "VA 12"
+          len(GMS["vues"]) == 4 and [x["va"] for x in us2["lignes"]][0] == "VA 43"
           and pd._RELEVES[(TW, lundi.isoformat(), auj.isoformat())]["format"]
           == pd.FORMAT_AFFICHAGE, us2 and us2["lignes"][:2])
     n_v = len(GMS["vues"])
@@ -517,7 +518,8 @@ try:
         {"jour": auj.isoformat(), "totaux": {"VA 42": 5}}))
     at_tw = pd.alltime(TW, mesure="gms")
     check("… et son all-time US du jour, écrit dans l'ancien format, est refait",
-          at_tw.get("VA 12") == 420 and json.loads(pd.ALLTIME_FICHIER.read_text())["format"]
+          at_tw.get("VA 43") == 300 and "VA 12" not in at_tw
+          and json.loads(pd.ALLTIME_FICHIER.read_text())["format"]
           == pd.FORMAT_AFFICHAGE, at_tw)
 
     # ------------------------------------------------------------------ 3
