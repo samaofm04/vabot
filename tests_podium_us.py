@@ -163,6 +163,9 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# « Instagram VA n » sur Va IG (clé « marque ») a son test,
+# tests_podium_marque.py ; ici, les libellés d'origine, mot pour mot
+pd.SERVEURS["1505418484052394004"].pop("marque", None)
 # Cette suite verifie la mecanique du podium sur les clics GetMySocial (Va IG,
 # et Twitter jusqu au 06/10/2026) : Twitter y repasse, sans quoi il lirait le
 # vrai MyPuls. Le comptage par tracking a ses tests : tests_podium_tracking.py.

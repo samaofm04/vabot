@@ -279,6 +279,14 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # et pas « Amelia VA 12 » : Amelia a ses propres numeros FR, un
                # vrai « Amelia VA 12 » se serait cru sur le podium.
                "nom_us": "Jessye",
+               # Ce que les VA lisent : « Instagram VA 43 », plus « Amelia VA
+               # 43 » ni « Jessye VA 28 » (proprietaire, 13/10/2026 : « tu peux
+               # ecrire Instagram a la place de Jessye etc. », comme « Threads n »
+               # sur Threads). Les numeros restent ceux des liens, quitte a ce
+               # que deux models aient chacune leur « VA 2 » (son choix).
+               # L'AFFICHAGE seul (_marque) : totaux all-time et primes gardent
+               # leurs cles. POUR COUPER : retirer cette cle.
+               "marque": "Instagram",
                # Le bouton « 🔄 Mettre à jour » sous les messages VIVANTS (proprietaire,
                # 03/10/2026 : « mets un truc pour reload a la main », « le bouton
                # refresh ») : deux heures entre deux releves, le staff veut voir les
@@ -2076,6 +2084,24 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _marque(gid: Optional[str], texte: str) -> str:
+    """« Amelia VA 43 », « Jessye VA 28 » tels que ce serveur les montre : sous
+    sa marque (clé « marque » : « Instagram VA 43 ») s'il en a une, sinon tels
+    quels. Appliqué au texte assemblé, lignes ET avertissements (« Sans relevé
+    : Jessye VA 5 ») : un nom de model oublié dans un coin la trahirait."""
+    pf = _profil(gid)
+    marque = pf.get("marque")
+    if not marque or not texte:
+        return texte
+    import liens_fr
+    noms = {str(m.get("nom") or "") for m in liens_fr.MODELS.values()}
+    noms |= {"Amélia", str(pf.get("nom_us") or "")}
+    noms.discard("")
+    motif = (r"(?<![\w-])(?:" + "|".join(re.escape(n) for n in sorted(noms, key=len, reverse=True))
+             + r") VA (\d+)")
+    return re.sub(motif, lambda m: f"{marque} VA {m.group(1)}", texte)
+
+
 def _nom_us(pf: Dict[str, Any], va: str) -> str:
     """« VA 12 » de Twitter tel qu'il s'affiche sur ce serveur (« Jessye VA 12 »)."""
     return f'{pf["nom_us"]} {va}' if pf.get("nom_us") else str(va)
@@ -2630,7 +2656,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         pied += " · semaine terminée · relevé du " + _horodatage()
     else:
         pied += " · résultat final"
-    texte = "\n".join(c)
+    texte = _marque(gid, "\n".join(c))
     if len(texte) > 4096 and th:
         # L'habillage rallonge le message. Une tête de personnage s'écrit
         # « <:kart_mario:1234…> », 33 caractères contre un pour 👑, et il y en
@@ -2765,7 +2791,10 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if p.get("sans_avertissements"):
         _taire_avert(gid, "la quinzaine", queue[1:])
         queue = queue[:1]
-    bas = "\n".join(queue)
+    bas = _marque(gid, "\n".join(queue))
+    # sous la marque du serveur AVANT le découpage : « Instagram » est plus
+    # long que « Amelia », les pages se mesurent telles qu'elles partiront
+    rangs = [_marque(gid, r) for r in rangs]
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
     # dernière doit aussi loger le total, d'où la marge plus large. Les
