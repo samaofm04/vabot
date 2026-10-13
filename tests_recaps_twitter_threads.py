@@ -1045,6 +1045,26 @@ finally:
             os.environ[k] = v
     shutil.rmtree(TMP, ignore_errors=True)
 
+# ---- l'avis « … a épinglé un message » du récap est retiré, et rien d'autre
+_appels_avis = []
+def _faux_api(m, chemin, gid, **kw):
+    _appels_avis.append((m, chemin))
+    if m == "GET":
+        return 200, [{"id": "900", "type": 6, "message_reference": {"message_id": "555"}},
+                     {"id": "901", "type": 6, "message_reference": {"message_id": "777"}},
+                     {"id": "902", "type": 0, "message_reference": {"message_id": "555"}},
+                     {"id": "555", "type": 0}]
+    return 204, None
+_vrai_api = rcr._api
+rcr._api = _faux_api
+try:
+    _ok = rcr._retirer_avis("1445108485090971710", "42", "555")
+finally:
+    rcr._api = _vrai_api
+check("avis d'épinglage : seul l'avis (type 6) qui pointe le récap est supprimé",
+      _ok and [c for c in _appels_avis if c[0] == "DELETE"] == [("DELETE", "/channels/42/messages/900")],
+      _appels_avis)
+
 if RENDU:
     print("\n— rendu : le classement subs de Threads (premier envoi)")
     print(json.dumps(RENDU.get("subs_threads"), ensure_ascii=False, indent=2))

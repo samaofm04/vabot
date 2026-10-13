@@ -431,6 +431,30 @@ def publier_tous() -> Dict[str, str]:
     return out
 
 
+def _retirer_avis(gid: str, salon: str, mid: str) -> bool:
+    """Retire l'avis « … a épinglé un message » laissé par l'épinglage du récap.
+
+    Le propriétaire ne veut pas de ces avis (même règle que les menus et les
+    tickets) : le 13/10/2026, le premier récap de Va Twitter en avait laissé
+    un juste au-dessus de lui. Seulement les avis (type 6) qui pointent CE
+    message ; rien d'autre n'est touché. Rend True si plus aucun ne reste."""
+    code, rep = _api("GET", f"/channels/{salon}/messages", gid, params={"limit": "15"})
+    if code != 200 or not isinstance(rep, list):
+        return False
+    ok = True
+    for m in rep:
+        ref = str(((m.get("message_reference") or {}).get("message_id")) or "")
+        if m.get("type") == 6 and ref == str(mid):
+            c, _r = _api("DELETE", f"/channels/{salon}/messages/{m.get('id')}", gid)
+            if c in (200, 204):
+                print(f"[recap-clics] {gid} : avis d'épinglage retiré ({m.get('id')})", flush=True)
+            else:
+                ok = False
+                print(f"[recap-clics] {gid} : avis d'épinglage {m.get('id')} non retiré "
+                      f"(HTTP {c})", flush=True)
+    return ok
+
+
 def _publier(gid: str, cib: Dict[str, Any]) -> str:
     sig = signature(cib)
     rel = _releve(sig, cib)
@@ -448,12 +472,16 @@ def _publier(gid: str, cib: Dict[str, Any]) -> str:
     # nouveau salon n'est pas trouvé, pour le chercher encore au relevé suivant
     nom_note = voulu
 
-    def noter(s: str, m: str, fait: bool) -> str:
+    def noter(s: str, m: str, fait: bool, avis: Optional[bool] = None) -> str:
         et = _etat()
+        avant = et.get(gid) if isinstance(et.get(gid), dict) else {}
         et[gid] = {"salon": s, "nom": nom_note, "message": m,
                    # pas « fait » (Discord en panne) : le même relevé repartira
                    "t_releve": float(rel.get("t") or 0) if fait else float(e.get("t_releve") or 0),
-                   "vu": time.time()}
+                   "vu": time.time(),
+                   # l'avis « a épinglé » de CE message est retiré (une fois)
+                   "avis_retire": (bool(avis) if avis is not None
+                                   else bool(avant.get("avis_retire")) and avant.get("message") == m)}
         _ecrire_etat(et)
         return m
 
@@ -477,6 +505,12 @@ def _publier(gid: str, cib: Dict[str, Any]) -> str:
     if salon and mid:
         code, rep = _patch(gid, salon, mid, corps)
         if code == 200:
+            # un récap posté avant ce correctif garde son avis : retiré une fois
+            if not e.get("avis_retire"):
+                # un seul essai, réussi ou non (dit au journal) : pas un appel
+                # de plus à chaque relevé si Discord refuse
+                _retirer_avis(gid, salon, mid)
+                return noter(salon, mid, True, True)
             return noter(salon, mid, True)
         if _passager(code, rep):
             print(f"[recap-clics] {gid} : Discord indisponible (HTTP {code}), message gardé, "
@@ -493,7 +527,9 @@ def _publier(gid: str, cib: Dict[str, Any]) -> str:
     if mid2:
         code, rep = _patch(gid, salon2, mid2, corps)
         if code == 200:
-            return noter(salon2, mid2, True)
+            # retrouvé (état perdu ou salon changé) : son avis aussi, une fois
+            _retirer_avis(gid, salon2, mid2)
+            return noter(salon2, mid2, True, True)
         if _passager(code, rep):
             noter(salon2, mid2, False)
             return mid2
@@ -511,5 +547,9 @@ def _publier(gid: str, cib: Dict[str, Any]) -> str:
     if c_pin not in (200, 204):
         print(f"[recap-clics] {gid} : récap non épinglé (HTTP {c_pin}) {str(r_pin)[:120]}",
               flush=True)
+    else:
+        time.sleep(1)                  # l'avis met un instant à apparaître
+        _retirer_avis(gid, salon2, neuf)
+    noter(salon2, neuf, True, True)
     print(f"[recap-clics] {gid} : récap des clics posté ({neuf}) dans {salon2}", flush=True)
     return neuf
