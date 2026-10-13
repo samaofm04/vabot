@@ -21,12 +21,17 @@ rôle Manager — 36 requêtes, gardées une heure en mémoire. Mesure du
 Le jour où l'autorisation sera activée, `_par_la_liste` répondra et le
 balayage ne servira plus. Une liste posée à la main dans
 data/tickets_config.json l'emporte toujours sur les deux.
+
+LES CATÉGORIES SUIVENT LE RÔLE (13/10/2026) : toutes les 10 minutes,
+suivre_partout() relit les managers en mode strict et aligne les catégories
+« Manager X » sur eux — voir la section du même nom, en bas du fichier.
 """
 from __future__ import annotations
 
 import json
 import re
 import string
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,6 +41,12 @@ import safe_json
 DATA_DIR = Path(__file__).resolve().parent / "data"
 ETAT_FICHIER = DATA_DIR / "tickets.json"
 CONFIG_FICHIER = DATA_DIR / "tickets_config.json"
+# Une seule main à la fois sur tickets.json : un ticket s'ouvre (fil de la
+# vérification) pendant que le suivi des managers (boucle du podium) réécrit
+# des fiches. Chaque lecture-modification-écriture se fait sous ce verrou, et
+# relit le fichier juste avant d'écrire — sinon le dernier écrivain efface
+# l'autre sans un mot.
+_VERROU = threading.RLock()
 
 # Une heure : un manager nommé aujourd'hui doit pouvoir recevoir quelqu'un
 # dans la journée, sans qu'on relance 36 requêtes à chaque arrivée.
@@ -101,38 +112,133 @@ def _config() -> Dict[str, Any]:
         return {}
 
 
-def role_manager(gid: str) -> str:
-    """L'identifiant du rôle Manager du serveur, ou « »."""
+def _role_manager_sur(gid: str) -> Optional[str]:
+    """Comme role_manager, mais None quand Discord n'a pas répondu.
+
+    « Ce serveur n'a pas de rôle Manager » et « je n'ai pas pu lire les rôles »
+    ne mènent pas au même geste : le suivi automatique des catégories ne doit
+    rien toucher sur une panne."""
     code, rep = _api("GET", f"/guilds/{gid}/roles")
     if code != 200 or not isinstance(rep, list):
-        return ""
+        return None
     for r in rep:
         if "manager" in str(r.get("name", "")).lower():
             return str(r.get("id"))
     return ""
 
 
-def _par_la_liste(gid: str, rid: str) -> Optional[List[Dict[str, Any]]]:
-    """Les membres via /guilds/{id}/members. None si Discord refuse (403)."""
-    code, rep = _api("GET", f"/guilds/{gid}/members", params={"limit": 1000})
+def role_manager(gid: str) -> str:
+    """L'identifiant du rôle Manager du serveur, ou « »."""
+    return _role_manager_sur(gid) or ""
+
+
+PAGE_MEMBRES = 1000         # le maximum que Discord rend par page
+PAGES_MAX = 50              # 50 000 membres : au-delà, on ne prétend plus savoir
+
+
+def _par_la_liste(gid: str, rid: str, strict: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """Les membres via /guilds/{id}/members. None si Discord refuse (403).
+
+    strict=True (suivi des catégories) lit TOUTES les pages : une seule page
+    de 1000, c'était un manager au-delà pris pour parti, sa catégorie vidée.
+    Une page refusée, ou qui n'avance plus, rend None — la recherche prend
+    alors le relais, plutôt qu'une liste tronquée qui passerait pour sûre."""
+    code, rep = _api("GET", f"/guilds/{gid}/members", params={"limit": PAGE_MEMBRES})
     if code != 200 or not isinstance(rep, list):
         return None
-    return [m for m in rep if rid in (m.get("roles") or [])]
-
-
-def _par_la_recherche(gid: str, rid: str) -> List[Dict[str, Any]]:
-    """Les membres via la recherche, balayée sur a-z et 0-9 (voir l'en-tête)."""
-    trouves: Dict[str, Dict[str, Any]] = {}
-    for q in string.ascii_lowercase + string.digits:
-        code, rep = _api("GET", f"/guilds/{gid}/members/search",
-                         params={"query": q, "limit": 100})
+    tous = list(rep)
+    pages = 1
+    while strict and len(rep) >= PAGE_MEMBRES:
+        ids = [int(i) for i in (str((m.get("user") or {}).get("id") or "") for m in rep)
+               if i.isdigit()]
+        apres = max(ids) if ids else 0
+        if pages >= PAGES_MAX or not ids:
+            _dire(f"pages:{gid}", f"{gid} : liste des membres trop longue "
+                                         f"({len(tous)} lus) — on passe par la recherche")
+            return None
+        code, rep = _api("GET", f"/guilds/{gid}/members",
+                         params={"limit": PAGE_MEMBRES, "after": str(apres)})
         if code != 200 or not isinstance(rep, list):
+            _dire(f"pages:{gid}", f"{gid} : page {pages + 1} des membres refusée "
+                                         f"(HTTP {code}) — on passe par la recherche")
+            return None
+        neufs = [m for m in rep
+                 if str((m.get("user") or {}).get("id") or "").isdigit()
+                 and int((m.get("user") or {}).get("id")) > apres]
+        if rep and not neufs:
+            # Discord ignorerait « after » : la même page reviendrait sans fin
+            _dire(f"pages:{gid}", f"{gid} : la liste des membres ne pagine pas "
+                                         "— on passe par la recherche")
+            return None
+        tous.extend(neufs)
+        pages += 1
+    if strict:
+        # « pages » n'est pas effacé par un tour réussi (la recherche qui prend
+        # le relais réussit) : sinon la même phrase reviendrait toutes les 10 min
+        _dire(f"pages:{gid}", "")
+    return [m for m in tous if rid in (m.get("roles") or [])]
+
+
+# Pause entre deux recherches de membres (les tests la mettent à zéro).
+PAUSE_RECHERCHE_S = 0.25
+LIMITE_RECHERCHE = 100
+
+
+def _par_la_recherche(gid: str, rid: str, strict: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """Les membres via la recherche, balayée sur a-z et 0-9 (voir l'en-tête).
+
+    strict=True sert au suivi automatique des catégories, où un manager
+    MANQUÉ passerait pour un manager PARTI — et ses VA seraient redistribués.
+    On y rend donc None dès qu'une requête échoue, on balaye aussi « _ » et
+    « . » (un identifiant Discord peut commencer par eux), et une lettre qui
+    remplit la page (100 réponses, la limite de Discord) est reprise sur deux
+    lettres plutôt que tronquée en silence."""
+    trouves: Dict[str, Dict[str, Any]] = {}
+    lettres = string.ascii_lowercase + string.digits + ("_." if strict else "")
+    file = list(lettres)
+    while file:
+        q = file.pop(0)
+        code, rep = _api("GET", f"/guilds/{gid}/members/search",
+                         params={"query": q, "limit": LIMITE_RECHERCHE})
+        if code != 200 or not isinstance(rep, list):
+            if strict:
+                _dire(f"liste-detail:{gid}", f"{gid} : recherche « {q} » refusée "
+                                             f"(HTTP {code}) — liste des managers incomplète")
+                return None
             continue
         for m in rep:
             if rid in (m.get("roles") or []):
                 trouves[str(((m.get("user") or {}).get("id")))] = m
-        time.sleep(0.25)
+        if strict and len(rep) >= LIMITE_RECHERCHE:
+            if len(q) >= 3:
+                _dire(f"liste-detail:{gid}", f"{gid} : plus de {LIMITE_RECHERCHE} membres "
+                                             f"en « {q} » — liste des managers incomplète")
+                return None
+            file.extend(q + c for c in lettres)
+        if PAUSE_RECHERCHE_S:
+            time.sleep(PAUSE_RECHERCHE_S)
     return list(trouves.values())
+
+
+def _membres_poses(gid: str, poses: List[Any], strict: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """Les managers de la liste fixe (tickets_config.json), relus chez Discord.
+
+    Sans leur surnom, _nom_court rendait l'identifiant : la catégorie devenait
+    « Manager 1445… » alors que nom_manager (lien GetMySocial) disait
+    « YAZID » — deux noms pour le même manager. Relu une fois, le même nom
+    sert partout. Strict : un manager illisible rend None (on ne sait pas)."""
+    out: List[Dict[str, Any]] = []
+    for u in poses:
+        code, m = _api("GET", f"/guilds/{gid}/members/{u}")
+        if code == 200 and isinstance(m, dict) and (m.get("user") or {}).get("id"):
+            out.append(m)
+        elif strict:
+            _dire(f"liste-detail:{gid}", f"{gid} : manager {u} de la liste fixe illisible "
+                                         f"(HTTP {code}) — data/tickets_config.json à vérifier")
+            return None
+        else:
+            out.append({"user": {"id": str(u)}})
+    return out
 
 
 def managers(gid: str, force: bool = False) -> List[Dict[str, Any]]:
@@ -146,14 +252,14 @@ def managers(gid: str, force: bool = False) -> List[Dict[str, Any]]:
         return hit["v"]
     poses = (_config().get("managers") or {}).get(gid) or []
     if poses:
-        out = [{"user": {"id": str(u)}} for u in poses]
+        out = _membres_poses(gid, poses) or []
     else:
         rid = role_manager(gid)
         if not rid:
             return []
         out = _par_la_liste(gid, rid)
         if out is None:                       # 403 : l'autorisation manque
-            out = _par_la_recherche(gid, rid)
+            out = _par_la_recherche(gid, rid) or []
     # Tri par identifiant : l'ordre du tour de rôle ne dépend pas de celui,
     # arbitraire, dans lequel Discord a répondu.
     out.sort(key=lambda m: str((m.get("user") or {}).get("id")))
@@ -166,11 +272,12 @@ def _prochain(gid: str, liste: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]
     """Le manager suivant dans le tour de rôle, et avance le compteur."""
     if not liste:
         return None
-    d = _etat()
-    tours = d.setdefault("tours", {})
-    i = int(tours.get(str(gid)) or 0) % len(liste)
-    tours[str(gid)] = (i + 1) % len(liste)
-    _ecrire_etat(d)
+    with _VERROU:
+        d = _etat()
+        tours = d.setdefault("tours", {})
+        i = int(tours.get(str(gid)) or 0) % len(liste)
+        tours[str(gid)] = (i + 1) % len(liste)
+        _ecrire_etat(d)
     return liste[i]
 
 
@@ -197,21 +304,73 @@ def _salon_existe(cid: str) -> bool:
     return bool(cid) and _api("GET", f"/channels/{cid}")[0] == 200
 
 
-def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
-    """La catégorie « 🔵┤ Manager X ├🔵 », créée si elle manque."""
-    nom = f"🔵{BARRE} Manager {_nom_court(m)} ├🔵"
-    code, rep = _api("GET", f"/guilds/{gid}/channels")
-    if code == 200 and isinstance(rep, list):
-        for c in rep:
-            if c.get("type") == 4 and c.get("name") == nom:
-                return str(c["id"])
-    rid = role_manager(gid)
+def nom_categorie(m: Dict[str, Any]) -> str:
+    """« 🔵┤ Manager YAZID ├🔵 » — le seul endroit qui fabrique ce nom."""
+    return f"🔵{BARRE} Manager {_nom_court(m)} ├🔵"
+
+
+def _cle_categorie(nom: Any) -> str:
+    """Le manager que nomme une catégorie, réduit comme _nom_court : « YAZID ».
+
+    La lecture du nom est CELLE de liens_va (nom_dans_categorie) : deux
+    lectures différentes auraient donné deux rangements, l'un pour les
+    salons, l'autre pour les liens GetMySocial. On la réduit ensuite comme un
+    surnom : une catégorie renommée à la main « Manager Spectrum🥷 » désigne
+    bien SPECTRUM, au lieu d'en faire recréer une seconde. « » : ce n'est pas
+    une catégorie de manager."""
+    import liens_va
+    x = liens_va.nom_dans_categorie(str(nom or ""))
+    if not x:
+        return ""
+    court = _nom_court({"nick": x, "user": {"id": ""}})
+    return "" if court == "?" else court
+
+
+def _rang(c: Dict[str, Any]):
+    """L'ordre d'affichage Discord : position, puis identifiant."""
+    i = str(c.get("id") or "")
+    return (int(c.get("position") or 0), int(i) if i.isdigit() else 0, i)
+
+
+def _categorie_de(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> str:
+    """La catégorie existante de ce manager parmi `salons`, ou « »."""
+    nom, cle = nom_categorie(m), _nom_court(m)
+    cats = sorted((c for c in salons if c.get("type") == 4), key=_rang)
+    for c in cats:
+        if c.get("name") == nom:
+            return str(c["id"])
+    for c in cats:
+        if _cle_categorie(c.get("name")) == cle:
+            return str(c["id"])
+    return ""
+
+
+def _creer_categorie(gid: str, m: Dict[str, Any], rid: Optional[str] = None):
+    """Crée la catégorie du manager. Rend (code HTTP, identifiant ou « »)."""
+    if rid is None:
+        rid = role_manager(gid)
     droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)}]
     if rid:
         droits.append({"id": rid, "type": 0, "allow": str(MANAGER), "deny": "0"})
     code, rep = _api("POST", f"/guilds/{gid}/channels",
-                     json={"name": nom, "type": 4, "permission_overwrites": droits})
-    return str(rep.get("id")) if code == 201 and rep.get("id") else ""
+                     json={"name": nom_categorie(m), "type": 4,
+                           "permission_overwrites": droits})
+    ok = code == 201 and isinstance(rep, dict) and rep.get("id")
+    return code, (str(rep["id"]) if ok else "")
+
+
+def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
+    """La catégorie « 🔵┤ Manager X ├🔵 », créée si elle manque.
+
+    Trouvée aussi quand son nom a été retapé à la main (casse, emoji) : le
+    13/10 le propriétaire a renommé « Manager VECTOR » en « Manager SPECTRUM »
+    lui-même ; une comparaison au caractère près en aurait recréé une."""
+    code, rep = _api("GET", f"/guilds/{gid}/channels")
+    if code == 200 and isinstance(rep, list):
+        deja = _categorie_de(rep, m)
+        if deja:
+            return deja
+    return _creer_categorie(gid, m)[1]
 
 
 def identifiant(gid: str, uid: str) -> str:
@@ -386,11 +545,12 @@ def confirmer(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
         if reste_essai:
             print(f"[ticket] {uid} confirmé mais l'essai n'a pas pu être retiré "
                   f"(HTTP {c2})", flush=True)
-    etat = _etat()
-    fiche = (etat.setdefault("tickets", {})).setdefault(f"{gid}:{uid}", {})
-    fiche["essai"] = False
-    fiche["confirme"] = {"par": str(par), "quand": int(time.time())}
-    _ecrire_etat(etat)
+    with _VERROU:
+        etat = _etat()
+        fiche = (etat.setdefault("tickets", {})).setdefault(f"{gid}:{uid}", {})
+        fiche["essai"] = False
+        fiche["confirme"] = {"par": str(par), "quand": int(time.time())}
+        _ecrire_etat(etat)
     return {"ok": True, "erreur": "", "reste_essai": reste_essai}
 
 
@@ -678,10 +838,8 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
 
         # Déjà un ticket ouvert : on ne le double pas (une deuxième
         # vérification du même membre ne doit pas créer un second salon).
-        etat = _etat()
-        fiches = etat.setdefault("tickets", {})
         cle = f"{gid}:{uid}"
-        deja = fiches.get(cle) or {}
+        deja = (_etat().get("tickets") or {}).get(cle) or {}
         if deja.get("salon") and _salon_existe(deja["salon"]):
             return str(deja["salon"])
 
@@ -749,13 +907,21 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                 print(f"[ticket] accueil non épinglé dans {salon} (HTTP {code_p}) "
                       f"{str(rep_p)[:100]}", flush=True)
 
-        fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),
-                       "essai": bool(en_essai),
-                       # l'identifiant de l'accueil epingle : c'est LUI qu'on
-                       # completera avec le lien, pour que le VA l'ait toujours
-                       # sous les yeux au lieu de le chercher dans l'historique
-                       "accueil": str(rep_m.get("id") or "")}
-        _ecrire_etat(etat)
+        # Relu ICI, pas repris de la lecture du début : entre les deux,
+        # _prochain a avancé le tour de rôle et le suivi des managers a pu
+        # réécrire une fiche. Réécrire la vieille copie annulait les deux —
+        # le compteur ne bougeait jamais et tous les nouveaux VA tombaient sur
+        # le même manager (constaté à la revue du 13/10/2026).
+        with _VERROU:
+            etat = _etat()
+            fiches = etat.setdefault("tickets", {})
+            fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),
+                           "essai": bool(en_essai),
+                           # l'identifiant de l'accueil epingle : c'est LUI qu'on
+                           # completera avec le lien, pour que le VA l'ait toujours
+                           # sous les yeux au lieu de le chercher dans l'historique
+                           "accueil": str(rep_m.get("id") or "")}
+            _ecrire_etat(etat)
         print(f"[ticket] {uid} -> salon {salon}"
               + (f", manager {mid}" if mid else ", aucun manager trouvé"), flush=True)
         return salon
@@ -767,3 +933,587 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
 def ticket_de(gid: str, uid: str) -> str:
     """Le salon perso d'un membre, ou « » — utilisé par les quêtes."""
     return str(((_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}).get("salon") or "")
+
+
+# ─── les catégories suivent le rôle Manager ──────────────────────────────
+# Une catégorie « Manager X » ne naissait qu'à l'ouverture d'un ticket, et rien
+# ne réagissait à un changement de rôle. Le 13/10/2026, Vector a perdu le rôle
+# Manager et Spectrum l'a reçu : il a fallu renommer « Manager VECTOR » en
+# « Manager SPECTRUM » à la main, et les fiches des VA nommaient encore Vector
+# (c'est lui que les alertes « ce VA dort » et la paie auraient mentionné).
+# Désormais, toutes les 10 minutes (boucle du podium, web_upload.py) :
+#   - un manager parti ET un arrivé : la catégorie du parti est RENOMMÉE au
+#     nom de l'arrivé, ses VA restent dedans et passent à lui ;
+#   - un arrivé seul : sa catégorie est créée, vide ; le tour de rôle le sert ;
+#   - un parti seul : ses VA sont répartis au tour de rôle chez les autres,
+#     puis sa catégorie est supprimée — SEULEMENT si elle est vide. Deux
+#     exceptions : un VA dont le manager est toujours là (deux catégories
+#     pour la même personne) retourne chez lui, et un arrivé qui a déjà sa
+#     catégorie reçoit les VA du parti qu'il relève ;
+#   - un VA dont le salon est dans la catégorie d'un manager voit sa fiche
+#     (tickets.json) et ses droits suivre ce manager — comme son lien
+#     GetMySocial le fait déjà (liens_va.synchroniser).
+# Aucun salon n'est jamais supprimé. Dans le doute (Discord muet, liste
+# incomplète, deux managers au même nom), on ne touche à rien et on le dit.
+
+JOURNAL_FICHIER = DATA_DIR / "managers_auto.json"
+# Gestes par tour (renommer, créer, déplacer, supprimer) : un rôle retiré par
+# erreur ne doit pas vider une catégorie de 30 VA en une fois. Le reste attend
+# le tour suivant, 10 minutes plus tard, et c'est écrit dans le journal.
+MAX_CHANGEMENTS = 5
+# Fiches remises au manager de leur catégorie, par tour (deux appels de droits
+# chacune, sans la limite des renommages).
+MAX_REALIGNES = 10
+# Après un 429, on laisse Discord tranquille : un renommage de catégorie est
+# limité à 2 par 10 minutes, et _http a déjà réessayé plusieurs fois.
+PAUSE_LIMITE_S = 600
+TOUR_MIN_S = 540
+_DITS: Dict[str, str] = {}
+_RATES_DITS: Dict[str, float] = {}
+REDIRE_RATE_S = 6 * 3600
+_PAUSE: Dict[str, float] = {}
+_VU_TOUR: Dict[str, float] = {}
+
+
+class _Limite(Exception):
+    """Discord a répondu 429 : la suite du tour attend le suivant."""
+
+
+def _dire(sujet: str, texte: str) -> None:
+    """Un état qui dure se dit UNE fois (sinon toutes les 10 minutes, et plus
+    personne ne lit le journal) ; « » l'efface sans bruit, pour qu'une
+    rechute se redise."""
+    if _DITS.get(sujet, "") != texte:
+        _DITS[sujet] = texte
+        if texte:
+            print(f"[managers] {texte}", flush=True)
+
+
+def _uid(m: Dict[str, Any]) -> str:
+    return str((m.get("user") or {}).get("id") or "")
+
+
+def _managers_surs(gid: str):
+    """(liste_fixe, rid, managers) — managers à None quand on ne SAIT pas.
+
+    managers() rend [] sur une panne, et un balayage à moitié raté y passe
+    pour une liste : c'est assez pour confier un ticket, pas pour décider
+    qu'un manager est parti. Ici, le moindre doute rend None. Une liste sûre
+    remplace aussi le cache d'une heure : le tour de rôle des nouveaux tickets
+    ne sert plus un manager parti au-delà du tour suivant."""
+    poses = (_config().get("managers") or {}).get(gid) or []
+    if poses:
+        out = _membres_poses(gid, poses, strict=True)
+        rid = ""
+    else:
+        rid = _role_manager_sur(gid)
+        if rid is None:
+            _dire(f"liste-detail:{gid}", f"{gid} : rôles illisibles")
+            return False, "", None
+        if not rid:
+            return False, "", []
+        out = _par_la_liste(gid, rid, strict=True)
+        if out is None:
+            out = _par_la_recherche(gid, rid, strict=True)
+    if out is None:
+        return bool(poses), rid, None
+    out.sort(key=lambda m: _uid(m))
+    if out:
+        _CACHE[gid] = {"ts": time.time(), "v": list(out)}
+    return bool(poses), rid, out
+
+
+def _au_tour(gid: str, liste: List[Dict[str, Any]]):
+    """Le manager dont c'est le tour, SANS avancer : on n'avance qu'une fois
+    le salon réellement déplacé (_tour_fait), sinon un échec sautait quelqu'un."""
+    i = int((_etat().get("tours") or {}).get(str(gid)) or 0) % len(liste)
+    return i, liste[i]
+
+
+def _tour_fait(gid: str, i: int, n: int) -> None:
+    with _VERROU:
+        d = _etat()
+        d.setdefault("tours", {})[str(gid)] = (i + 1) % n
+        _ecrire_etat(d)
+
+
+def _journaliser(lignes: List[Dict[str, Any]]) -> None:
+    """Chaque geste, gardé sur disque : « pourquoi mon VA a changé de
+    catégorie ? » doit avoir sa réponse après un redémarrage."""
+    try:
+        d = safe_json.load(JOURNAL_FICHIER, default={}) or {}
+        if not isinstance(d, dict):
+            d = {}
+        d["journal"] = ((d.get("journal") or []) + lignes)[-300:]
+        safe_json.write(JOURNAL_FICHIER, d)
+    except Exception as e:
+        print(f"[managers] journal non écrit : {type(e).__name__}: {e}", flush=True)
+
+
+def _connus(gid: str) -> Optional[set]:
+    """Les managers du dernier tour où tout était rangé, ou None (premier tour).
+
+    « Arrivé » ne veut pas dire « sans catégorie » : un VA vérifié entre le
+    changement de rôle et le tour suivant (au redémarrage, la boucle dort
+    90 s) crée « Manager SPECTRUM » — Spectrum n'était alors plus un arrivé, et
+    les VA de Vector partaient chez tout le monde au lieu de passer à lui.
+    C'est la liste d'avant, gardée sur disque, qui dit qui vient d'arriver."""
+    try:
+        d = safe_json.load(JOURNAL_FICHIER, default={}) or {}
+        v = ((d.get("connus") or {}) if isinstance(d, dict) else {}).get(str(gid))
+        return set(str(x) for x in v) if isinstance(v, list) else None
+    except Exception as e:
+        print(f"[managers] liste d'avant illisible : {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def _retenir(gid: str, liste: List[Dict[str, Any]]) -> None:
+    """Retient les managers d'un tour où plus aucun VA n'attend chez un parti.
+
+    Pas avant : tant que les VA de Vector passent à Spectrum (5 gestes par
+    tour), Spectrum doit rester l'arrivé d'un tour à l'autre."""
+    ids = sorted(_uid(m) for m in liste)
+    try:
+        d = safe_json.load(JOURNAL_FICHIER, default={}) or {}
+        if not isinstance(d, dict):
+            d = {}
+        if (d.get("connus") or {}).get(str(gid)) == ids:
+            return
+        d.setdefault("connus", {})[str(gid)] = ids
+        safe_json.write(JOURNAL_FICHIER, d)
+    except Exception as e:
+        print(f"[managers] liste des managers non retenue : {type(e).__name__}: {e}",
+              flush=True)
+
+
+def _donner_ticket(gid: str, salon: Dict[str, Any], cle: str, m: Dict[str, Any],
+                   fiches: Dict[str, Any]) -> str:
+    """Le ticket passe au manager m. Rend « » si c'est fait, sinon pourquoi.
+
+    Les droits redeviennent ceux d'un ticket neuf (ouvrir_ticket) : le
+    manager du VA nommé dans le salon. L'ancien perd SA ligne — celle que
+    ouvrir_ticket avait posée (droit de gérer les messages), jamais celle du
+    VA ni une autre ; le rôle Manager, lui, garde la sienne. La fiche n'est
+    écrite qu'une fois Discord d'accord : un échec se reprend au tour suivant
+    au lieu de laisser une fiche qui ment."""
+    cid = str(salon.get("id"))
+    mid = _uid(m)
+    avant = str((fiches.get(cle) or {}).get("manager") or "")
+    va = cle.split(":", 1)[1]
+    lignes = {str(o.get("id")): o for o in (salon.get("permission_overwrites") or [])}
+    if mid not in lignes:
+        code, rep = _api("PUT", f"/channels/{cid}/permissions/{mid}",
+                         json={"type": 1, "allow": str(MANAGER), "deny": "0"})
+        if code == 429:
+            raise _Limite(f"droits du salon {cid}")
+        if code not in (200, 204):
+            return f"droits refusés (HTTP {code}) {str(rep)[:80]}"
+        salon.setdefault("permission_overwrites", []).append(
+            {"id": mid, "type": 1, "allow": str(MANAGER), "deny": "0"})
+    if avant == mid:
+        # même manager (VA regroupé chez lui) : sa fiche dit déjà vrai, la
+        # réécrire aurait laissé un « manager_avant » qui ment
+        return ""
+    o = lignes.get(avant) or {}
+    membre = str(o.get("type", "1")) in ("1", "member")     # pas une ligne de rôle
+    try:
+        gere = bool(int(str(o.get("allow") or "0")) & GERER_MSG)
+    except ValueError:
+        gere = False
+    if avant and avant not in (mid, va) and o and membre and gere:
+        code, rep = _api("DELETE", f"/channels/{cid}/permissions/{avant}")
+        if code == 429:
+            raise _Limite(f"droits du salon {cid}")
+        if code not in (200, 204, 404):
+            return f"ancien manager non retiré (HTTP {code}) {str(rep)[:80]}"
+        salon["permission_overwrites"] = [x for x in salon.get("permission_overwrites") or []
+                                          if str(x.get("id")) != avant]
+    with _VERROU:
+        d = _etat()
+        f = (d.setdefault("tickets", {})).get(cle)
+        if not isinstance(f, dict):
+            return "fiche disparue de tickets.json"
+        f["manager"] = mid
+        f["manager_avant"] = avant
+        f["reassigne"] = int(time.time())
+        _ecrire_etat(d)
+    fiches[cle] = dict(f)
+    return ""
+
+
+def suivre_managers(gid: str) -> Dict[str, Any]:
+    """Un tour : aligne les catégories « Manager X » sur les managers du jour.
+
+    Rend le bilan : renommees, creees, deplaces, supprimees, realignes,
+    reportes, rates, gardees, et « ignore » (pourquoi rien n'a été fait)."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"renommees": [], "creees": [], "deplaces": [],
+                             "supprimees": [], "realignes": [], "reportes": [],
+                             "rates": [], "gardees": [], "ignore": ""}
+    journal: List[Dict[str, Any]] = []
+
+    def noter(quoi: str, texte: str) -> None:
+        bilan[quoi].append(texte)
+        if quoi == "reportes":
+            return                        # dit en une ligne à la fin du tour
+        if quoi == "rates":
+            # un refus qui dure (droit manquant…) se redirait toutes les 10 min
+            if time.time() - _RATES_DITS.get(texte, 0) < REDIRE_RATE_S:
+                return
+            _RATES_DITS[texte] = time.time()
+        journal.append({"quand": int(time.time()), "serveur": gid,
+                        "quoi": quoi, "texte": texte})
+        print(f"[managers] {gid} : {texte}", flush=True)
+
+    def ignorer(raison: str, sujet: str) -> Dict[str, Any]:
+        bilan["ignore"] = raison
+        _dire(f"{sujet}:{gid}", f"{gid} : {raison}")
+        return bilan
+
+    cfg = _config()
+    if cfg.get("managers_auto") is False:
+        return ignorer("suivi des managers coupé (tickets_config.json : managers_auto)",
+                       "coupe")
+    if gid not in set(str(s) for s in (cfg.get("serveurs") or SERVEURS_TICKETS)):
+        bilan["ignore"] = "hors périmètre des tickets"
+        return bilan
+    code, salons = _api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        return ignorer(f"salons illisibles (HTTP {code}) : rien touché", "salons")
+    _dire(f"salons:{gid}", "")
+    cats = [c for c in salons if c.get("type") == 4 and _cle_categorie(c.get("name"))]
+    if not cats:
+        # ce serveur ne range pas ses VA par manager : rien à suivre, et pas
+        # 38 recherches de membres pour rien
+        bilan["ignore"] = "aucune catégorie « Manager X » sur ce serveur"
+        return bilan
+
+    fixe, rid, liste = _managers_surs(gid)
+    if liste is None:
+        return ignorer("managers indéterminables (Discord muet ou liste incomplète) : "
+                       "rien touché", "liste")
+    if not liste:
+        return ignorer("aucun manager trouvé : rien touché", "liste")
+    _dire(f"liste:{gid}", "")
+    _dire(f"liste-detail:{gid}", "")
+
+    try:
+        return _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer)
+    except _Limite as e:
+        _PAUSE[gid] = time.time() + PAUSE_LIMITE_S
+        noter("rates", f"Discord limite le débit ({e}) : la suite attend le prochain tour")
+        return bilan
+    finally:
+        if bilan["reportes"]:
+            print(f"[managers] {gid} : {len(bilan['reportes'])} geste(s) reporté(s) "
+                  f"au prochain tour : " + " · ".join(bilan["reportes"][:8]), flush=True)
+        if journal:
+            _journaliser(journal)
+
+
+def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict)}
+    salon_fiche = {str(f.get("salon")): k for k, f in fiches.items() if f.get("salon")}
+
+    def enfants(cat_id: str) -> List[Dict[str, Any]]:
+        return sorted((c for c in salons if str(c.get("parent_id") or "") == str(cat_id)),
+                      key=_rang)
+
+    def suivis(cat_id: str) -> List[Dict[str, Any]]:
+        return [c for c in enfants(cat_id) if str(c.get("id")) in salon_fiche]
+
+    def candidats(cat: Dict[str, Any]) -> set:
+        """Les managers que les fiches donnent aux VA de cette catégorie."""
+        return {str(fiches[salon_fiche[str(c["id"])]].get("manager") or "")
+                for c in suivis(str(cat["id"]))} - {""}
+
+    def a_nous(c: Dict[str, Any]) -> bool:
+        """Au format exact des tickets, ou des VA dedans. Une catégorie qui
+        dit « Manager » sans être l'une des nôtres (« 🛡️┤ Manager STAFF ├🛡️ »,
+        salons d'équipe) ne doit être ni renommée ni supprimée."""
+        n = str(c.get("name") or "")
+        return ((n.startswith(f"🔵{BARRE} Manager ") and n.endswith(" ├🔵"))
+                or bool(suivis(str(c["id"]))))
+
+    def analyser():
+        noms: Dict[str, List[Dict[str, Any]]] = {}
+        for m in liste:
+            noms.setdefault(_nom_court(m), []).append(m)
+        prises = {_cle_categorie(c.get("name")) for c in cats}
+        orphelines = []
+        for c in sorted(cats, key=_rang):
+            if _cle_categorie(c.get("name")) in noms:
+                continue
+            if a_nous(c):
+                orphelines.append(c)
+            else:
+                _dire(f"etrangere:{gid}:{c.get('id')}",
+                      f"{gid} : « {c.get('name')} » ignorée — ni au format des tickets "
+                      "ni de VA dedans")
+        nouveaux = [m for m in liste if _nom_court(m) not in prises]
+        return noms, orphelines, nouveaux
+
+    noms, orphelines, nouveaux = analyser()
+
+    # Un manager porte encore le rôle mais la recherche l'a manqué ? Les fiches
+    # des VA de sa catégorie le nomment : on le vérifie par son identifiant
+    # AVANT de le croire parti. Une liste fixe, elle, fait foi telle quelle.
+    if orphelines and not fixe:
+        connus = {_uid(m) for m in liste}
+        retrouves = False
+        for o in orphelines:
+            for mid in sorted(candidats(o) - connus):
+                code, m = _api("GET", f"/guilds/{gid}/members/{mid}")
+                if code == 200 and isinstance(m, dict):
+                    if rid in (m.get("roles") or []):
+                        _dire(f"manque:{gid}:{mid}", f"{gid} : {mid} porte le rôle Manager "
+                                                     "mais la recherche l'avait manqué — gardé")
+                        liste.append(m)
+                        connus.add(mid)
+                        retrouves = True
+                elif code != 404:
+                    return ignorer(f"manager {mid} de « {o.get('name')} » illisible "
+                                   f"(HTTP {code}) : rien touché", "verif")
+        if retrouves:
+            liste.sort(key=lambda m: _uid(m))
+            _CACHE[gid] = {"ts": time.time(), "v": list(liste)}
+            noms, orphelines, nouveaux = analyser()
+    _dire(f"verif:{gid}", "")
+
+    doubles = {n: ms for n, ms in noms.items() if len(ms) > 1}
+    if doubles:
+        # Deux managers, un seul nom de catégorie : à qui iraient les VA ? On
+        # ne devine pas — un surnom qui les distingue débloque tout.
+        txt = " ; ".join(f"{n} ({', '.join(_uid(m) for m in ms)})"
+                         for n, ms in sorted(doubles.items()))
+        return ignorer(f"deux managers au même nom : {txt} — rien touché", "doubles")
+    _dire(f"doubles:{gid}", "")
+    unique = {n: ms[0] for n, ms in noms.items()}
+
+    # Les paires parti -> arrivé. D'abord par la personne : une catégorie dont
+    # les fiches nomment l'arrivé est la sienne (il a changé de surnom). Puis
+    # dans l'ordre : catégories par position, managers par identifiant.
+    paires = []
+    restent_o, restent_n = list(orphelines), list(nouveaux)
+    for o in list(restent_o):
+        c = candidats(o)
+        n = next((m for m in restent_n if _uid(m) in c), None)
+        if n is not None:
+            paires.append((o, n))
+            restent_o.remove(o)
+            restent_n.remove(n)
+    while restent_o and restent_n:
+        paires.append((restent_o.pop(0), restent_n.pop(0)))
+
+    # Un arrivé qui a DÉJÀ sa catégorie (un ticket l'a créée avant ce tour) :
+    # pas de renommage possible, mais les VA du parti passent quand même à
+    # lui — déplacés dans sa catégorie — au lieu d'aller au tour de rôle.
+    deja_vus = _connus(gid)
+    prises = {_cle_categorie(c.get("name")) for c in cats}
+    arrives = [m for m in liste if deja_vus is not None and _uid(m) not in deja_vus
+               and _nom_court(m) in prises]
+    releve: Dict[str, Dict[str, Any]] = {}
+    for o in restent_o:
+        if not arrives:
+            break
+        if suivis(str(o["id"])):
+            releve[str(o["id"])] = arrives.pop(0)
+
+    reste = int(cfg.get("managers_auto_max") or MAX_CHANGEMENTS)
+
+    def ajouter_categorie(m: Dict[str, Any]) -> str:
+        code, cid = _creer_categorie(gid, m, rid if rid else None)
+        if code == 429:
+            raise _Limite(f"création de « {nom_categorie(m)} »")
+        if not cid:
+            noter("rates", f"« {nom_categorie(m)} » non créée (HTTP {code})")
+            return ""
+        c = {"id": cid, "type": 4, "name": nom_categorie(m), "position": 10 ** 6}
+        salons.append(c)
+        cats.append(c)
+        noter("creees", f"« {c['name']} » créée pour {_uid(m)}")
+        return cid
+
+    # 1. parti + arrivé : on renomme, les VA restent dedans
+    for o, m in paires:
+        avant, voulu = str(o.get("name")), nom_categorie(m)
+        if reste <= 0:
+            noter("reportes", f"renommer « {avant} » en « {voulu} »")
+            continue
+        code, rep = _api("PATCH", f"/channels/{o['id']}", json={"name": voulu})
+        if code == 429:
+            raise _Limite(f"renommage de « {avant} »")
+        if code != 200:
+            noter("rates", f"renommage de « {avant} » refusé (HTTP {code}) {str(rep)[:80]}")
+            continue
+        o["name"] = voulu
+        reste -= 1
+        noter("renommees", f"« {avant} » → « {voulu} » : ses {len(suivis(str(o['id'])))} "
+                           f"VA passent à {_uid(m)}")
+
+    # 2. arrivé sans catégorie à reprendre : la sienne, vide
+    for m in restent_n:
+        if reste <= 0:
+            noter("reportes", f"créer « {nom_categorie(m)} »")
+            continue
+        if ajouter_categorie(m):
+            reste -= 1
+
+    # 3. parti sans catégorie à reprendre : chaque VA s'en va, puis la
+    #    catégorie vide. Où il va, dans cet ordre :
+    #    a. son manager (sa fiche) est toujours là, avec SA catégorie : chez
+    #       lui. Sans ça (revue du 13/10) : Yazid devient « Zed », le
+    #       renommage prend un 429, un ticket ouvert pendant la pause crée
+    #       « Manager ZED » — et au tour suivant les VA de Yazid, toujours
+    #       manager, partaient chez Moan et Spectrum ;
+    #    b. un arrivé qui avait déjà sa catégorie relève ce parti : chez lui ;
+    #    c. sinon le tour de rôle.
+    cibles = list(liste)
+    par_uid = {_uid(m): m for m in liste}
+    for o in restent_o:
+        oid = str(o["id"])
+        for c in suivis(oid):
+            if reste <= 0:
+                noter("reportes", f"déplacer « {c.get('name')} » hors de « {o.get('name')} »")
+                continue
+            cle = salon_fiche[str(c["id"])]
+            i = None
+            m = par_uid.get(str(fiches[cle].get("manager") or ""))
+            if m is not None:
+                dest = _categorie_de(cats, m)
+                if not dest or dest == oid:
+                    # sa catégorie est à créer (reportée, ou refusée) : on
+                    # attend qu'elle existe plutôt que de le confier à un autre
+                    noter("reportes", f"« {c.get('name')} » attend « {nom_categorie(m)} »")
+                    continue
+                pourquoi = "son manager, sous son nom du jour"
+            elif oid in releve:
+                m = releve[oid]
+                dest = _categorie_de(cats, m)
+                pourquoi = "l'arrivé qui relève ce manager"
+            else:
+                i, m = _au_tour(gid, cibles)
+                dest = _categorie_de(cats, m)
+                pourquoi = "tour de rôle"
+            if not dest:
+                if reste < 2:
+                    noter("reportes", f"créer « {nom_categorie(m)} » puis y déplacer "
+                                      f"« {c.get('name')} »")
+                    continue
+                dest = ajouter_categorie(m)
+                if not dest:
+                    continue
+                reste -= 1
+            # parent seul, sans lock_permissions : le salon garde SES droits,
+            # comme un ticket neuf (ouvrir_ticket ne les synchronise pas sur
+            # la catégorie) ; _donner_ticket y change ensuite le manager
+            code, rep = _api("PATCH", f"/channels/{c['id']}", json={"parent_id": dest})
+            if code == 429:
+                raise _Limite(f"déplacement de « {c.get('name')} »")
+            if code != 200:
+                noter("rates", f"« {c.get('name')} » non déplacé (HTTP {code}) {str(rep)[:80]}")
+                continue
+            c["parent_id"] = dest
+            reste -= 1
+            if i is not None:
+                # le tour de rôle n'avance que s'il a servi, et une fois le
+                # salon réellement déplacé
+                _tour_fait(gid, i, len(cibles))
+            noter("deplaces", f"« {c.get('name')} » : « {o.get('name')} » → "
+                              f"« {nom_categorie(m)} » ({pourquoi})")
+            pb = _donner_ticket(gid, c, cle, m, fiches)
+            if pb:
+                noter("rates", f"« {c.get('name')} » déplacé, mais {pb} — repris au prochain tour")
+
+        restants = enfants(oid)
+        if restants:
+            if not suivis(oid):
+                # des salons que tickets.json ne connaît pas : on ne devine
+                # pas à qui ils vont, la catégorie reste et on le dit
+                txt = ", ".join(str(c.get("name")) for c in restants[:6])
+                _dire(f"gardee:{gid}:{oid}",
+                      f"{gid} : « {o.get('name')} » gardée — {len(restants)} salon(s) "
+                      f"hors tickets dedans ({txt}) : à ranger à la main")
+                bilan["gardees"].append(str(o.get("name")))
+            continue
+        if reste <= 0:
+            noter("reportes", f"supprimer « {o.get('name')} », vide")
+            continue
+        # relu juste avant : un ticket ouvert entre-temps dedans la sauve
+        code, frais = _api("GET", f"/guilds/{gid}/channels")
+        if code != 200 or not isinstance(frais, list):
+            noter("rates", f"« {o.get('name')} » non supprimée : salons illisibles (HTTP {code})")
+            continue
+        dedans = [c for c in frais if str(c.get("parent_id") or "") == oid]
+        if dedans:
+            noter("rates", f"« {o.get('name')} » non supprimée : {len(dedans)} salon(s) "
+                           "arrivé(s) dedans entre-temps")
+            continue
+        code, rep = _api("DELETE", f"/channels/{oid}")
+        if code == 429:
+            raise _Limite(f"suppression de « {o.get('name')} »")
+        if code in (200, 204):
+            reste -= 1
+            salons[:] = [c for c in salons if str(c.get("id")) != oid]
+            cats[:] = [c for c in cats if str(c.get("id")) != oid]
+            _dire(f"gardee:{gid}:{oid}", "")
+            noter("supprimees", f"« {o.get('name')} » supprimée (vide)")
+        else:
+            noter("rates", f"« {o.get('name')} » non supprimée (HTTP {code}) {str(rep)[:80]}")
+
+    # 4. chaque VA rangé chez un manager a ce manager dans sa fiche et ses droits
+    reste_r = int(cfg.get("managers_auto_realignes") or MAX_REALIGNES)
+    for cat in sorted(cats, key=_rang):
+        m = unique.get(_cle_categorie(cat.get("name")))
+        if not m:
+            continue
+        for c in suivis(str(cat["id"])):
+            cle = salon_fiche[str(c["id"])]
+            if str(fiches[cle].get("manager") or "") == _uid(m):
+                continue
+            if reste_r <= 0:
+                noter("reportes", f"fiche de « {c.get('name')} » → {_uid(m)}")
+                continue
+            avant = str(fiches[cle].get("manager") or "") or "personne"
+            pb = _donner_ticket(gid, c, cle, m, fiches)
+            reste_r -= 1
+            if pb:
+                noter("rates", f"« {c.get('name')} » : {pb}")
+            else:
+                noter("realignes", f"« {c.get('name')} » : manager {avant} → {_uid(m)} "
+                                   f"(catégorie « {cat.get('name')} »)")
+
+    # 5. plus un VA chez un parti : cette liste devient « celle d'avant » du
+    #    prochain changement de rôle (voir _connus)
+    _n, orph_fin, _a = analyser()
+    if not any(suivis(str(o["id"])) for o in orph_fin):
+        _retenir(gid, liste)
+    return bilan
+
+
+def suivre_partout() -> Dict[str, Any]:
+    """Un tour sur chaque serveur à tickets, chacun sous SON bot.
+
+    Ne lève jamais : l'appelant est la boucle du podium, qu'une erreur ici ne
+    doit pas arrêter."""
+    out: Dict[str, Any] = {}
+    try:
+        from verif_discord import sur_serveur
+        permis = sorted(set(str(s) for s in (_config().get("serveurs") or SERVEURS_TICKETS)))
+    except Exception as e:
+        _dire("partout", f"suivi des managers indisponible : {type(e).__name__}: {e}")
+        return out
+    for gid in permis:
+        maintenant = time.time()
+        if maintenant < _PAUSE.get(gid, 0):
+            continue
+        if maintenant - _VU_TOUR.get(gid, 0) < TOUR_MIN_S:
+            continue
+        _VU_TOUR[gid] = maintenant
+        try:
+            with sur_serveur(gid):
+                out[gid] = suivre_managers(gid)
+        except Exception as e:
+            print(f"[managers] {gid} : {type(e).__name__}: {e}", flush=True)
+    return out

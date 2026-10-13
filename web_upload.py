@@ -60907,6 +60907,11 @@ def _start_podium_semaine_daemon() -> bool:
             try:
                 import podium_discord as _p
                 import verif_discord as _vd_p
+                import tickets_discord as _tk_p
+                # les categories « Manager X » suivent le role Manager (chaque
+                # serveur a tickets, sous son bot) — AVANT la synchro
+                # GetMySocial ci-dessous, qui lit ces categories
+                _tk_p.suivre_partout()
                 for gid in _vd_p.SERVEURS_EXTRA:
                     # le recap des clics de Va Twitter et Va Threads : le
                     # report de leur espace, repris tel quel par le bot du

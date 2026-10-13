@@ -561,7 +561,11 @@ def synchroniser(gid: str) -> Dict[str, Any]:
     if code != 200 or not isinstance(salons, list):
         bilan["rates"].append(f"salons Discord illisibles (HTTP {code})")
         return bilan
-    categorie = {str(c["id"]): nom_dans_categorie(c.get("name"))
+    # Le nom réduit comme le lit le suivi des managers (tickets_discord) :
+    # « Manager Spectrum🥷 », retapée à la main, y est la catégorie de
+    # SPECTRUM — lue brute ici, elle rangeait les liens dans un groupe
+    # « Spectrum🥷 », à côté du « SPECTRUM » créé à l'étape 1.
+    categorie = {str(c["id"]): tk._cle_categorie(c.get("name"))
                  for c in salons if c.get("type") == 4}
     parent = {str(c["id"]): str(c.get("parent_id") or "")
               for c in salons if c.get("type") == 0}
