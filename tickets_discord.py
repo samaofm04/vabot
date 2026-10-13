@@ -571,9 +571,9 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
     if not confirme:
         rang.append({"type": 2, "style": 3, "label": "Confirmer le VA",
                      "custom_id": f"essai:ok:{uid}", "emoji": {"name": "⭐"}})
-    # Le lien GetMySocial vise l'espace EMY TWITTER : sur un autre serveur, le
-    # bouton creerait un lien Twitter pour un VA Threads. Pas de bouton, pas
-    # de lien au mauvais endroit.
+    # Chaque serveur a son espace GetMySocial (liens_va.espace) : Twitter dans
+    # EMY TWITTER, Threads dans EMY THREADS. Un serveur sans espace n'a pas de
+    # bouton, plutot qu'un lien au mauvais endroit.
     try:
         import liens_va as _lv
         lien_possible = (not gid) or str(gid) in _lv.SERVEURS
@@ -854,9 +854,10 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
     if deja.get("public_url"):
         return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
                          f'(destination : {deja.get("tracking") or "?"})')
-    empeche = liens_va.manque()
+    empeche = liens_va.manque(gid)
     if empeche:
         return _ephemere("Rien n'a été créé — " + empeche)
+    plateforme = liens_va.espace(gid)["plateforme"]
 
     jeton = str(p.get("token") or "")
     salon = str(p.get("channel_id") or "")
@@ -876,8 +877,9 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
                      json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
-                                      "C'est celui-là que tu postes sur Twitter — il compte "
-                                      "tes subs pour le podium.",
+                                      + ("C'est celui-là que tu postes sur Twitter — il compte "
+                                         "tes subs pour le podium." if plateforme == "Twitter"
+                                         else f"C'est celui-là que tu mets sur {plateforme}."),
                            "allowed_mentions": {"users": [uid]}})
         else:
             sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
@@ -934,8 +936,10 @@ def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) 
     i = d.find("🔗 **Ton lien**")
     if i >= 0:
         d = d[:i].rstrip()
-    bas = (f'\n\n🔗 **Ton lien** — celui que tu postes sur Twitter :\n'
-           f'{r["public_url"]}\n_Il compte tes subs pour le podium._')
+    plateforme = str(r.get("plateforme") or "Twitter")
+    bas = (f'\n\n🔗 **Ton lien** — celui que tu postes sur {plateforme} :\n'
+           f'{r["public_url"]}'
+           + ("\n_Il compte tes subs pour le podium._" if plateforme == "Twitter" else ""))
     if r.get("provisoire"):
         bas += "\n_(destination provisoire, à rattacher côté MyPuls)_"
     embeds[0]["description"] = (d.rstrip() + bas)[:4096]
@@ -1050,7 +1054,9 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                            # l'identifiant de l'accueil epingle : c'est LUI qu'on
                            # completera avec le lien, pour que le VA l'ait toujours
                            # sous les yeux au lieu de le chercher dans l'historique
-                           "accueil": str(rep_m.get("id") or "")}
+                           "accueil": str(rep_m.get("id") or ""),
+                           # ses boutons sont déjà ceux du jour (redessiner_boutons)
+                           "boutons": BOUTONS_VERSION}
             _ecrire_etat(etat)
         print(f"[ticket] {uid} -> salon {salon}"
               + (f", manager {mid}" if mid else ", aucun manager trouvé"), flush=True)
@@ -1709,4 +1715,88 @@ def suivre_partout() -> Dict[str, Any]:
                 aligner_helper(gid)
         except Exception as e:
             print(f"[helper] {gid} : {type(e).__name__}: {e}", flush=True)
+        _synchro_liens(gid, sur_serveur)
     return out
+
+
+# Les liens GetMySocial suivent les catégories (liens_va.synchroniser) : pour
+# Twitter, la boucle du podium s'en charge (web_upload._sync_liens_va) ; Threads
+# n'y passe pas (podium seul), alors c'est ici, juste après le rangement des VA
+# qu'elle doit suivre. Pas les deux pour un même serveur : l'outil GetMySocial
+# est limité en débit.
+SYNCHRO_LIENS_ICI = {"1498948161039896586"}      # YouLab THREADS
+SYNCHRO_LIENS_S = 1800
+_SYNCHRO_VUE: Dict[str, float] = {}
+
+
+def _synchro_liens(gid: str, sur_serveur) -> None:
+    if gid not in SYNCHRO_LIENS_ICI:
+        return
+    if time.time() - _SYNCHRO_VUE.get(gid, 0) < SYNCHRO_LIENS_S:
+        return
+    _SYNCHRO_VUE[gid] = time.time()
+    try:
+        import liens_va
+        with sur_serveur(gid):
+            redessiner_boutons(gid)
+            b = liens_va.synchroniser(gid)
+        if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates")):
+            print(f"[lien] synchro {gid} : {b}", flush=True)
+    except Exception as e:
+        print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
+
+
+# Les accueils ouverts AVANT que Threads ait ses liens (13/10/2026) n'ont pas
+# « Créer son lien » : boutons_va ne le mettait pas hors de Twitter. Sans ce
+# rattrapage, ces VA restaient sans bouton pour toujours. Une fois par accueil
+# (« boutons » dans la fiche), pas à chaque tour.
+BOUTONS_VERSION = 2
+
+
+def redessiner_boutons(gid: str) -> Dict[str, Any]:
+    """Remet la rangée de boutons à jour sous chaque accueil de ce serveur."""
+    import liens_va as lv
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"faits": [], "sans_accueil": [], "rates": []}
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict)}
+    finis = []
+    for cle, f in fiches.items():
+        if int(f.get("boutons") or 0) >= BOUTONS_VERSION:
+            continue
+        uid = cle.split(":", 1)[1]
+        salon, mid = str(f.get("salon") or ""), str(f.get("accueil") or "")
+        if not (salon and mid):
+            bilan["sans_accueil"].append(uid)       # dit une fois, pas à chaque tour
+            finis.append(cle)
+            continue
+        lien = lv.lien_de(gid, uid)
+        rang = boutons_va(uid, confirme=bool(f.get("confirme")),
+                          a_un_lien=bool(lien.get("public_url")), gid=gid,
+                          lien_actif=lv.est_actif(gid, uid))
+        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                         json={"components": rang})
+        if code == 200:
+            bilan["faits"].append(uid)
+            finis.append(cle)
+        elif code == 404:
+            # accueil supprimé à la main : rien à redessiner, on ne réessaie pas
+            bilan["sans_accueil"].append(uid)
+            finis.append(cle)
+        else:
+            bilan["rates"].append(f"{uid} (HTTP {code})")
+            if code == 429:
+                break
+    if finis:
+        with _VERROU:
+            d = _etat()
+            for cle in finis:
+                f = (d.get("tickets") or {}).get(cle)
+                if isinstance(f, dict):
+                    f["boutons"] = BOUTONS_VERSION
+            _ecrire_etat(d)
+    if bilan["faits"] or bilan["sans_accueil"] or bilan["rates"]:
+        print(f"[ticket] boutons {gid} : {len(bilan['faits'])} accueil(s) redessiné(s)"
+              + (f", sans accueil : {bilan['sans_accueil']}" if bilan["sans_accueil"] else "")
+              + (f", ratés : {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan

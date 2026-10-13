@@ -21025,7 +21025,7 @@ try:
         try:
             _lv.creer_tracking = lambda *a, **k: (_faits.append("mypuls")
                                                   or {"ok": True, "url": "u", "code": "c9"})
-            _lv.creer_gms = lambda nom, url: (_faits.append(("gms", nom, url))
+            _lv.creer_gms = lambda nom, url, gid="": (_faits.append(("gms", nom, url))
                                               or {"ok": True, "shortcode": "emycute",
                                                   "url": "https://getmysocial.com/emycute"})
             _lv.numero_de = lambda ps: 1
@@ -21430,7 +21430,7 @@ finally:
 # ------------------------------------------- 33. YouLab THREADS, copie de Twitter
 print()
 print("=" * 70)
-print("YouLab THREADS : meme verification, mais ni podium ni liens Twitter")
+print("YouLab THREADS : meme verification, ses liens a lui (EMY THREADS)")
 print("=" * 70)
 try:
     import verif_discord as _vdT
@@ -21473,19 +21473,27 @@ try:
           and _pdT._unite(_THR) == "clics" and _pdT._unite(_TWI) == "subs"
           and not _pdT.a_rafraichir_subs(_THR) and not _pdT.a_rafraichir_bonus(_THR)
           and _pdT.PROFIL_THREADS.get("subs_seul") is True)
-    check("les liens GetMySocial ne sont PAS branches sur Threads",
-          _TWI in _lvT.SERVEURS and _THR not in _lvT.SERVEURS)
-    check("la synchro des groupes ne touche pas aux managers de Threads",
-          _lvT.synchroniser(_THR) == {"groupes_crees": [], "deplaces": [],
-                                      "sans_categorie": [], "rates": []})
+    # Proprietaire, 13/10/2026 : « pour Threads c'est pas avec un lien de
+    # tracking, faut juste dupliquer le lien de VA Threads » — chaque VA
+    # Threads a sa copie de emythreads, dans SON espace (tests_liens_threads.py)
+    _eTh = _lvT.espace(_THR)
+    check("les liens GetMySocial de Threads vivent dans EMY THREADS, copie de emythreads, sans tracking",
+          _TWI in _lvT.SERVEURS and _THR in _lvT.SERVEURS
+          and _eTh["equipe"] == "tm_6ab51e03b299b7e3ba6ff7bf"
+          and _eTh["gabarit"] == "lnk_6acdd0a53fb996c565a47e90"
+          and _eTh["tracking"] is False and _lvT.espace(_TWI)["equipe"] != _eTh["equipe"])
+    check("la synchro des groupes de Threads passe par le suivi des managers, pas par le podium",
+          _THR in _tkT.SYNCHRO_LIENS_ICI and _TWI not in _tkT.SYNCHRO_LIENS_ICI)
     _bT = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_THR) for b in r["components"]]
     _bW = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_TWI) for b in r["components"]]
-    check("sur Threads, pas de bouton « Creer son lien »",
-          not [x for x in _bT if x.startswith("lien:")] and "essai:ok:99" in _bT)
+    check("sur Threads, « Confirmer le VA » et « Creer son lien »",
+          "lien:new:99" in _bT and "essai:ok:99" in _bT)
     check("sur Twitter, le bouton est toujours la",
           "lien:new:99" in _bW)
-    _refus = _tkT._creer_lien(_THR, "99", "mgr", {})
-    check("un clic force sur Threads est refuse, rien n est cree",
+    # un serveur SANS espace de liens (Entretien) : surtout pas Threads ici,
+    # le clic y creerait maintenant un vrai lien GetMySocial
+    _refus = _tkT._creer_lien("1552152470464110703", "99", "mgr", {})
+    check("un clic force sur un serveur sans liens est refuse, rien n est cree",
           _refus["data"]["flags"] == 64 and "pas encore branch" in _refus["data"]["content"])
     _srcWT = _plP("web_upload.py").read_text(encoding="utf-8")
     check("la boucle du podium saute les serveurs sans podium",

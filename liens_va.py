@@ -32,11 +32,21 @@ CONFIG_FICHIER = DATA_DIR / "liens_va_config.json"
 ETAT_FICHIER = DATA_DIR / "liens_va.json"
 
 EQUIPE_VA = "tm_6ab46ebb11a0232c11211b1a"     # EMY TWITTER
+TWITTER_ID = "1445108485090971710"
+THREADS_ID = "1498948161039896586"
 
-# Les serveurs Discord dont les VA ont un lien dans cet espace. YouLab THREADS
-# n'y est pas : ses liens vivront ailleurs, et les ranger ici les melangerait
-# aux liens Twitter — dans le podium comme dans la paie.
-SERVEURS = {"1445108485090971710"}             # YouLab TWITTER
+# YouLab THREADS a SON espace : ranger ses liens dans EMY TWITTER les
+# melangerait aux liens Twitter, dans le podium comme dans la paie.
+# Proprietaire, 13/10/2026 : « pour Threads c'est pas avec un lien de
+# tracking, faut juste dupliquer le lien de VA Threads » — emythreads, l'A/B
+# seren/emy 50/50. Le duplicata garde l'A/B (verifie : 13 seren / 17 emy sur
+# 30 visiteurs). Surchargeable par la cle « threads » de liens_va_config.json.
+ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
+                  "gabarit": "lnk_6acdd0a53fb996c565a47e90",    # getmysocial.com/emythreads
+                  "base_shortcode": "emy", "plateforme": "Threads"}
+
+# Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
+SERVEURS = {TWITTER_ID, THREADS_ID}
 
 # Un lien GetMySocial est lu par des gens sur Twitter : il doit ressembler au
 # compte, pas a une reference interne. D'ou des mots doux plutot qu'un tirage
@@ -89,14 +99,36 @@ def mypuls_actif() -> bool:
     return bool(config().get("mypuls_actif"))
 
 
-def manque() -> str:
+def espace(gid: str = "") -> Dict[str, Any]:
+    """Où vivent les liens des VA de ce serveur, et comment on les fabrique :
+    {equipe, gabarit, base_shortcode, plateforme, tracking}.
+
+    Un seul endroit qui le décide : créer, couper, supprimer et ranger lisent
+    tous ici — deux tables auraient fini par envoyer un lien Threads chez
+    Twitter. « tracking » : un tracking link MyPuls avant le lien (Twitter,
+    quand l'interrupteur est ouvert) ; jamais sur Threads.
+    """
+    c = config()
+    if str(gid) == THREADS_ID:
+        sur = c.get("threads") if isinstance(c.get("threads"), dict) else {}
+        e = dict(ESPACE_THREADS, **{k: v for k, v in sur.items() if v})
+        e["tracking"] = False
+        return e
+    return {"equipe": str(c.get("equipe") or EQUIPE_VA),
+            "gabarit": str(c.get("gabarit") or ""),
+            "base_shortcode": str(c.get("base_shortcode") or c.get("modele") or "emy"),
+            "plateforme": "Twitter", "tracking": mypuls_actif()}
+
+
+def manque(gid: str = "") -> str:
     """Ce qui empêche de créer un lien aujourd'hui, en une phrase. « » si tout va."""
     c = config()
-    if mypuls_actif() and not c.get("creator_id"):
+    e = espace(gid)
+    if e["tracking"] and not c.get("creator_id"):
         return ("aucune créatrice choisie : le tracking link serait créé chez "
                 "n'importe qui. À poser dans data/liens_va_config.json "
                 "(creator_id, modele).")
-    if not c.get("gabarit"):
+    if not e.get("gabarit"):
         return ("aucun lien gabarit GetMySocial pour l'espace des VA : la "
                 "création copie un lien existant (boutons, pixels, design). "
                 "À poser dans data/liens_va_config.json (gabarit).")
@@ -220,17 +252,18 @@ def _tracking_de(session, html: str):
 
 
 # ─── GetMySocial : le lien court ─────────────────────────────────────────
-def creer_gms(nom: str, url: str) -> Dict[str, Any]:
-    """Duplique le gabarit vers un lien neuf pointant sur `url`.
+def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
+    """Duplique le gabarit de l'espace du serveur vers un lien neuf.
 
-    Le duplicata garde les boutons, les pixels et le design du gabarit, et
-    reste dans le meme espace : seules la destination et le nom changent.
+    Le duplicata garde les boutons, les pixels, l'A/B et le design du gabarit,
+    et reste dans le meme espace : seul le nom change, et la destination
+    quand `url` est donnee (« » : celle du gabarit, voulu sur Threads).
     """
     import gms
-    c = config()
-    gabarit = str(c.get("gabarit") or "")
-    equipe = str(c.get("equipe") or EQUIPE_VA)
-    base = str(c.get("base_shortcode") or c.get("modele") or "emy")
+    e = espace(gid)
+    gabarit = str(e.get("gabarit") or "")
+    equipe = str(e.get("equipe") or EQUIPE_VA)
+    base = str(e.get("base_shortcode") or "emy")
     if not gabarit:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
     for essai in range(12):
@@ -368,9 +401,10 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
     if deja.get("public_url"):
         return {"ok": False, "deja": True, "erreur": "ce VA a déjà un lien",
                 "public_url": deja["public_url"], "tracking": deja.get("tracking", "")}
-    empeche = manque()
+    empeche = manque(gid)
     if empeche:
         return {"ok": False, "erreur": empeche}
+    e = espace(gid)
 
     n = numero_de(pseudo)
     if not n:
@@ -378,15 +412,18 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
 
     # Le meme nom des deux cotes : « Twitter VA 1 @abdoul ». Le podium
     # retrouve la personne derriere l'arobase, donc rien a reconcilier.
+    # Threads : « Threads VA 1 @abdoul », le meme numero (une seule table).
+    nom = f'{e["plateforme"]} VA {n} @{pseudo}'[:60]
     t = {"ok": True, "url": "", "code": ""}
-    if mypuls_actif():
-        t = creer_tracking(f"Twitter VA {n} @{pseudo}"[:60])
+    if e["tracking"]:
+        t = creer_tracking(nom)
         if not t.get("ok"):
             return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
-    # sans URL, le duplicata garde la destination du gabarit : le lien marche
-    # et ses clics sont comptes a part, mais l'abonne n'est pas encore
-    # rattache a CE VA chez MyPuls. C'est dit au manager, pas cache.
-    g = creer_gms(f"Twitter VA {n} @{pseudo}"[:60], t["url"])
+    # sans URL, le duplicata garde la destination du gabarit. Sur Twitter :
+    # le lien marche et ses clics sont comptes a part, mais l'abonne n'est pas
+    # encore rattache a CE VA chez MyPuls — dit au manager, pas cache. Sur
+    # Threads, c'est le but : la copie de emythreads, A/B compris.
+    g = creer_gms(nom, t["url"], gid)
     if not g.get("ok"):
         if t.get("url"):
             # le tracking link est créé et ne peut pas être défait : on le DIT,
@@ -396,7 +433,7 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
                               f'{t["code"]} existe déjà chez MyPuls, à réutiliser.'}
         return {"ok": False, "erreur": "GetMySocial : " + str(g.get("erreur") or "")}
     # rangé au nom du manager : un lien perdu dans « Ungrouped » n'apprend rien
-    groupe = ranger(str(config().get("equipe") or EQUIPE_VA), g.get("id", ""), manager)
+    groupe = ranger(str(e["equipe"]), g.get("id", ""), manager)
 
     d = _etat()
     (d.setdefault("liens", {}))[f"{gid}:{uid}"] = {
@@ -410,7 +447,9 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
     _ecrire(d)
     return {"ok": True, "numero": n, "public_url": g["url"], "groupe": groupe,
             "shortcode": g["shortcode"], "tracking": t["url"],
-            "provisoire": not mypuls_actif(), "erreur": ""}
+            # Threads n'a pas de tracking link a venir : rien de provisoire
+            "provisoire": e["plateforme"] == "Twitter" and not e["tracking"],
+            "plateforme": e["plateforme"], "erreur": ""}
 
 
 def rebrancher(gid: str, uid: str) -> Dict[str, Any]:
@@ -428,9 +467,12 @@ def rebrancher(gid: str, uid: str) -> Dict[str, Any]:
     if l.get("tracking"):
         return {"ok": False, "erreur": "ce VA a déjà son tracking link : "
                                        + str(l["tracking"])}
+    if str(gid) == THREADS_ID:
+        return {"ok": False, "erreur": "Threads n'a pas de tracking link : son lien "
+                                       "est une copie de emythreads"}
     if not mypuls_actif():
         return {"ok": False, "erreur": "la création MyPuls est fermée"}
-    equipe = str(config().get("equipe") or EQUIPE_VA)
+    equipe = str(espace(gid)["equipe"])
     lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
     if not lid:
         return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
@@ -465,7 +507,7 @@ def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:
     l = lien_de(gid, uid)
     if not l.get("shortcode"):
         return {"ok": False, "erreur": "ce VA n'a pas de lien"}
-    equipe = str(config().get("equipe") or EQUIPE_VA)
+    equipe = str(espace(gid)["equipe"])
     lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
     if not lid:
         return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
@@ -499,7 +541,7 @@ def supprimer(gid: str, uid: str) -> Dict[str, Any]:
     l = lien_de(gid, uid)
     if not l.get("shortcode"):
         return {"ok": False, "erreur": "ce VA n'a pas de lien"}
-    equipe = str(config().get("equipe") or EQUIPE_VA)
+    equipe = str(espace(gid)["equipe"])
     lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
     if not lid:
         return {"ok": False, "erreur": "lien introuvable chez GetMySocial — "
@@ -537,7 +579,7 @@ def synchroniser(gid: str) -> Dict[str, Any]:
     """
     import tickets_discord as tk
     gid = str(gid)
-    equipe = str(config().get("equipe") or EQUIPE_VA)
+    equipe = str(espace(gid)["equipe"])
     bilan = {"groupes_crees": [], "deplaces": [], "sans_categorie": [], "rates": []}
     if gid not in SERVEURS:
         return bilan      # les managers de ce serveur n'ont rien a faire ici
