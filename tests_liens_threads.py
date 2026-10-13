@@ -429,6 +429,64 @@ try:
           and tk.nom_salon_va(TW, "u3", "yazid") == f"─│🔵┤-va-{A}yazid")
     check("un ticket neuf sur Threads naît numéroté",
           tk.nom_salon_va(TH, "u1", "momobtn") == f"─│🔵┤-61-va-{A}momobtn")
+
+    # ── la pastille : bleu il est là, vert il fait des clics, rouge non ───
+    class GMSClics(FauxGMS):
+        def __init__(self, visites, panne=False):
+            super().__init__()
+            self.visites, self.panne = visites, panne
+
+        def _call_tool(self, outil, args):
+            self.appels.append((outil, dict(args)))
+            if outil == "get_link_metrics":
+                if self.panne:
+                    return {"ok": False, "error": "503"}
+                return {"ok": True, "data": {"object": "list", "has_more": False, "data": [
+                    {"key": k, "pageviews": v} for k, v in self.visites.items()]}}
+            return {"ok": True, "data": {}}
+
+    import time as _tm
+    vieux, neuf = _tm.time() - 5 * 86400, _tm.time() - 3600
+    g, _ = monde(config={"gabarit": GABARIT_TW},
+                 tickets={f"{TH}:u{i}": {"salon": f"c{i}"} for i in range(1, 6)})
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+        f"{TH}:u1": {"shortcode": "a", "link_id": "lnk_a", "numero": 61, "quand": vieux},
+        f"{TH}:u2": {"shortcode": "b", "link_id": "lnk_b", "numero": 62, "quand": vieux},
+        f"{TH}:u3": {"shortcode": "c", "link_id": "lnk_c", "numero": 63, "quand": neuf},
+        f"{TH}:u5": {"shortcode": "e", "link_id": "lnk_e", "numero": 65, "quand": vieux,
+                     "actif": False}}}))
+    g = GMSClics({"lnk_a": 5, "lnk_b": 0, "lnk_c": 0, "lnk_e": 0})
+    sys.modules["gms"] = g
+    SALONS_N.clear()
+    SALONS_N.update({"c1": f"─│🔵┤-61-va-{A}momobtn", "c2": f"─│🔵┤-62-va-{A}steave0454",
+                     "c3": f"─│🔵┤-va-{A}roucham_79944", "c4": f"─│🔵┤-va-{A}nouveau",
+                     "c5": f"─│🔵┤-65-va-{A}coupe", "s3": f"─│🔵┤-va-{A}yazid"})
+    lv.numero_de = lambda pseudo: 64
+    patchs_n.clear()
+    tk.numeroter_salons(TH)
+    noms = dict(patchs_n)
+    check("🟢 son lien a des visites (2 derniers jours), 🔴 aucune, 🔵 lien neuf ou pas de lien, "
+          "🔴 lien désactivé — numéro et couleur en UN renommage",
+          noms == {"c1": f"─│🟢┤-61-va-{A}momobtn", "c2": f"─│🔴┤-62-va-{A}steave0454",
+                   "c3": f"─│🔵┤-63-va-{A}roucham_79944", "c4": f"─│🔵┤-64-va-{A}nouveau",
+                   "c5": f"─│🔴┤-65-va-{A}coupe"}
+          and len(patchs_n) == 5, (noms, patchs_n))
+    check("… un seul appel GetMySocial pour tout l'espace, sur J-2..J",
+          [a for a in g.appels if a[0] == "get_link_metrics"]
+          and all(a[1]["team_id"] == EMY_THREADS and a[1]["limit"] == 100
+                  for a in g.appels if a[0] == "get_link_metrics"))
+    patchs_n.clear()
+    tk.numeroter_salons(TH)
+    check("… le passage suivant, rien n'ayant bougé, ne renomme rien", not patchs_n, patchs_n)
+    g.visites["lnk_b"] = 3
+    tk.numeroter_salons(TH)
+    check("… un VA qui se remet à faire des clics repasse au vert",
+          patchs_n == [("c2", f"─│🟢┤-62-va-{A}steave0454")], patchs_n)
+    patchs_n.clear()
+    sys.modules["gms"] = GMSClics({}, panne=True)
+    tk.numeroter_salons(TH)
+    check("GetMySocial muet : aucune pastille ne change (pas de rouge sur une panne)",
+          not patchs_n and SALONS_N["c1"].startswith("─│🟢┤"), patchs_n)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

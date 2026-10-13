@@ -538,14 +538,83 @@ def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
     return f'{PREFIXE}🔵{BARRE}' + (f"-{n}" if n else "") + f"-va-{AROBASE}{pseudo}"
 
 
+#: La pastille du salon d'un VA (le rond entre « ─│ » et « ┤ ») dit si son
+#: lien fait des clics. Propriétaire, 13/10/2026, pour Threads : « bleu il est
+#: là, vert il fait des clics, rouge il est là mais il fait pas de clics par
+#: rapport à son lien ». Sur les JOURS_CLICS_SALON derniers jours, aujourd'hui
+#: compris — la fenêtre du ⚙️ « 0 clic sur J-2..J » du récap des clics.
+#:   🔵 pas encore de lien, ou un lien de moins de JOURS_CLICS_SALON jours (pas
+#:      encore jugé : un lien créé ce matin n'a pas eu le temps)
+#:   🟢 son lien a eu au moins une visite
+#:   🔴 son lien n'en a eu aucune, ou il est désactivé
+COULEUR_DANS_SALON = {"1498948161039896586"}     # YouLab THREADS
+JOURS_CLICS_SALON = 2
+ROND_LA, ROND_CLICS, ROND_RIEN = "🔵", "🟢", "🔴"
+
+
+def _clics_recents(gid: str) -> Optional[Dict[str, int]]:
+    """{identifiant du lien: visites sur les derniers jours} pour TOUS les liens
+    de l'espace GetMySocial du serveur, en un appel (get_link_metrics, par
+    page de cent). None si GetMySocial ne répond pas : la pastille reste alors
+    ce qu'elle est, plutôt que de passer au rouge sur une panne."""
+    import datetime as dt
+    import gms
+    import liens_va as lv
+    try:
+        from zoneinfo import ZoneInfo
+        auj = dt.datetime.now(ZoneInfo("Europe/Paris")).date()
+    except Exception:                                        # noqa: BLE001
+        auj = dt.date.today()
+    args: Dict[str, Any] = {"team_id": str(lv.espace(gid)["equipe"]), "limit": 100,
+                            "start_date": (auj - dt.timedelta(days=JOURS_CLICS_SALON)).isoformat(),
+                            "end_date": auj.isoformat(), "timezone": "Europe/Paris"}
+    out: Dict[str, int] = {}
+    for _page in range(20):
+        r = gms._call_tool("get_link_metrics", args)
+        d = r.get("data") if r.get("ok") else None
+        lignes = d.get("data") if isinstance(d, dict) else None
+        if not isinstance(lignes, list):
+            print(f"[ticket] {gid} : visites des liens illisibles ({str(r.get('error'))[:80]}) "
+                  "— pastilles laissées telles quelles", flush=True)
+            return None
+        for x in lignes:
+            if isinstance(x, dict) and x.get("key"):
+                out[str(x["key"])] = int(x.get("pageviews") or 0)
+        if not d.get("has_more") or not d.get("next_cursor"):
+            return out
+        args["cursor"] = d["next_cursor"]
+    return out
+
+
+def rond_du_va(gid: str, uid: str, clics: Optional[Dict[str, int]]) -> str:
+    """La pastille du salon de ce VA (voir COULEUR_DANS_SALON). « » : on ne sait
+    pas (visites illisibles), le salon garde la sienne."""
+    import liens_va as lv
+    l = lv.lien_de(gid, uid) or {}
+    lid = str(l.get("link_id") or "")
+    if not lid:
+        return ROND_LA
+    if l.get("actif") is False:
+        return ROND_RIEN
+    if clics is None:
+        return ""
+    if int(clics.get(lid) or 0) > 0:
+        return ROND_CLICS
+    if time.time() - float(l.get("quand") or 0) < JOURS_CLICS_SALON * 86400:
+        return ROND_LA
+    return ROND_RIEN
+
+
 def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
-    """Met le numéro du VA dans le nom des salons de VA de ce serveur qui ne
-    l'ont pas encore (NUMERO_DANS_SALON). Une fois par salon : un nom déjà
-    numéroté n'est plus touché. Discord ne renomme un salon que deux fois par
-    dix minutes : au plus `max_par_tour` par passage, le reste au suivant."""
+    """Le nom des salons de VA de ce serveur : le numéro du VA
+    (NUMERO_DANS_SALON) et la pastille de ses clics (COULEUR_DANS_SALON),
+    « ─│🟢┤-61-va-＠momobtn ». Les deux en UN renommage : Discord ne renomme un
+    salon que deux fois par dix minutes. Un nom déjà juste n'est pas touché ;
+    au plus `max_par_tour` renommages par passage, le reste au suivant."""
     gid = str(gid)
     bilan: Dict[str, Any] = {"renommes": [], "rates": []}
-    if gid not in NUMERO_DANS_SALON:
+    numeroter, colorer = gid in NUMERO_DANS_SALON, gid in COULEUR_DANS_SALON
+    if not (numeroter or colorer):
         return bilan
     fiches = {k.split(":", 1)[1]: f for k, f in (_etat().get("tickets") or {}).items()
               if str(k).startswith(f"{gid}:") and isinstance(f, dict) and f.get("salon")}
@@ -556,18 +625,27 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
         bilan["rates"].append(f"salons illisibles (HTTP {code})")
         return bilan
     par_id = {str(c.get("id")): c for c in salons if isinstance(c, dict)}
+    clics = _clics_recents(gid) if colorer else None
     for uid, f in fiches.items():
         if len(bilan["renommes"]) >= max_par_tour:
             break
         c = par_id.get(str(f["salon"]))
         nom = str((c or {}).get("name") or "")
         i = nom.find(f"-va-{AROBASE}")
-        if not c or i < 0 or re.search(r"-\d+$", nom[:i]):
-            continue                      # salon disparu, pas un ticket, ou déjà numéroté
+        if not c or i < 0 or not nom.startswith(PREFIXE) or BARRE not in nom[:i]:
+            continue                      # salon disparu, ou pas un ticket au format
         pseudo = nom[i + len(f"-va-{AROBASE}"):]
-        voulu = nom_salon_va(gid, uid, pseudo)
+        tete = nom[:i]
+        j = tete.find(BARRE)
+        rond = tete[len(PREFIXE):j]
+        deja = re.search(r"-(\d+)$", tete)
+        n = int(deja.group(1)) if deja else (numero_va(gid, uid, pseudo) if numeroter else 0)
+        if colorer:
+            rond = rond_du_va(gid, uid, clics) or rond
+        voulu = (f"{PREFIXE}{rond}{BARRE}" + (f"-{n}" if n else "")
+                 + f"-va-{AROBASE}{pseudo}")
         if voulu == nom:
-            continue                      # pas de numéro connu : laissé tel quel
+            continue
         code, rep = _api("PATCH", f"/channels/{c['id']}", json={"name": voulu})
         if code == 200:
             bilan["renommes"].append(voulu)
@@ -576,7 +654,7 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
             if code == 429:
                 break
     if bilan["renommes"] or bilan["rates"]:
-        print(f"[ticket] {gid} : numéros dans les salons : {bilan}", flush=True)
+        print(f"[ticket] {gid} : noms des salons : {bilan}", flush=True)
     return bilan
 
 
