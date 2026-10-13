@@ -532,6 +532,95 @@ def _salon_archive(ch) -> bool:
     return cat is not None and "archives" in str(getattr(cat, "name", "")).lower()
 
 
+#: Ce qu'un salon banger refuse a tout le monde (bots exceptes).
+SANS_ECRIRE = dict(send_messages=False, send_messages_in_threads=False,
+                   create_public_threads=False, create_private_threads=False,
+                   attach_files=False)
+
+
+def salon_banger(nom) -> bool:
+    """« 💥・banger », « 💣・all-banger », « 💥・banger-<model> » et
+    « 💥・all-banger-<model> » : des vitrines, seul le bot y poste.
+
+    Le proprietaire, 13/10/2026 : « faut que personne puisse ecrire ». Sur Va
+    IG le role de la model refusait deja l'ecriture, mais chaque VA recevait
+    « voir + ecrire » a SON nom (sync_general_channel_access, l'entretien des
+    10 minutes) : un droit au nom du membre passe devant celui du role. Sur
+    Youl4b, aucun reglage : @everyone y ecrivait."""
+    import re as _re
+    return bool(_re.match(r"(all-)?banger(-[a-z0-9]+)?$", nom_sans_decor(nom)))
+
+
+def droits_va_salon(ch) -> dict:
+    """Les droits d'un VA sur un salon de son identite : il ecrit dans
+    general-/exemple-compte-, il ne fait que lire dans les bangers."""
+    if salon_banger(getattr(ch, "name", "")):
+        return dict(view_channel=True, read_message_history=True, **SANS_ECRIRE)
+    return dict(view_channel=True, send_messages=True,
+                read_message_history=True, attach_files=True)
+
+
+async def verrouiller_bangers(guild) -> dict:
+    """Ferme l'ecriture des salons banger du serveur (hors archives).
+
+    @everyone, chaque role et chaque membre perdent le droit d'ecrire ; leur
+    droit de voir ne bouge pas. Restent libres : le bot lui-meme (il poste les
+    bangers ; son droit est pose noir sur blanc, au cas ou il perdrait un jour
+    son role admin), les autres bots et les roles d'integration (un bot). Les
+    administrateurs du serveur passent outre, Discord ne permet pas mieux.
+
+    UNE modification par salon (edit(overwrites=...)), pas une par membre :
+    sur Va IG, environ 30 VA par salon avaient « ecrire » a leur nom, soit
+    420 appels au premier passage. Un salon deja ferme ne coute rien."""
+    bilan = {"salons": 0, "corriges": 0, "droits": 0, "rates": []}
+    moi = getattr(guild, "me", None)
+    for ch in getattr(guild, "text_channels", None) or []:
+        if not salon_banger(ch.name) or _salon_archive(ch):
+            continue
+        bilan["salons"] += 1
+        avant = dict(ch.overwrites)
+        apres = dict(avant)
+        cibles = list(avant)
+        if guild.default_role not in avant:
+            cibles.append(guild.default_role)
+        n = 0
+        for cible in cibles:
+            if cible == moi or getattr(cible, "bot", False):
+                continue
+            if getattr(cible, "managed", False):
+                continue                 # role d'integration : un bot
+            ow = avant.get(cible) or discord.PermissionOverwrite()
+            if not any(getattr(ow, k) is not False for k in SANS_ECRIRE):
+                continue
+            ow = discord.PermissionOverwrite(**dict(ow))
+            for k, v in SANS_ECRIRE.items():
+                setattr(ow, k, v)
+            apres[cible] = ow
+            n += 1
+        if moi is not None:
+            ow = avant.get(moi) or discord.PermissionOverwrite()
+            voulu = dict(view_channel=True, send_messages=True, attach_files=True,
+                         embed_links=True, read_message_history=True)
+            if any(getattr(ow, k) is not True for k in voulu):
+                ow = discord.PermissionOverwrite(**dict(ow))
+                for k, v in voulu.items():
+                    setattr(ow, k, v)
+                apres[moi] = ow
+                n += 1
+        if not n:
+            continue
+        try:
+            await ch.edit(overwrites=apres, reason="Banger : personne n'y ecrit")
+            bilan["corriges"] += 1
+            bilan["droits"] += n
+        except Exception as e:                               # noqa: BLE001
+            bilan["rates"].append(f"{ch.name}: {type(e).__name__}")
+    if bilan["corriges"] or bilan["rates"]:
+        log.info("bangers : %d salon(s) fermes a l'ecriture (%d droit(s)), %d echec(s) %s",
+                 bilan["corriges"], bilan["droits"], len(bilan["rates"]), bilan["rates"][:5])
+    return bilan
+
+
 def find_identity_channels(guild, identity):
     """Tous les salons par-identité (general/banger/exemple-compte) d'une identité."""
     target = (identity or "").strip().lower()
@@ -588,14 +677,13 @@ async def sync_general_channel_access(guild, member, identity):
         try:
             cur = ch.overwrites_for(member)
             if idents and suffix in idents:
-                # Son identite -> acces garanti (skip si deja accorde)
+                # Son identite -> acces garanti (skip si deja accorde) ; en
+                # lecture seule dans les bangers (salon_banger). Un droit
+                # d'ecrire qui y traine est retire par verrouiller_bangers.
                 if cur.view_channel is not True:
                     await ch.set_permissions(
                         member,
-                        view_channel=True,
-                        send_messages=True,
-                        read_message_history=True,
-                        attach_files=True,
+                        **droits_va_salon(ch),
                         reason=f"VA assignee a {suffix} - acces salons identite",
                     )
                     granted += 1
@@ -3188,14 +3276,12 @@ class Welcome(commands.Cog):
                     # 2) Grant view aux VAs de cette identite
                     expected = identity_to_members.get(suffix, set())
                     for member in expected:
-                        if ch.overwrites_for(member).view_channel is not True:
+                        cur = ch.overwrites_for(member)
+                        if cur.view_channel is not True:
                             try:
                                 await ch.set_permissions(
                                     member,
-                                    view_channel=True,
-                                    send_messages=True,
-                                    read_message_history=True,
-                                    attach_files=True,
+                                    **droits_va_salon(ch),
                                     reason=f"Auto-secure: VA assignee a {suffix}",
                                 )
                             except Exception:
@@ -3248,6 +3334,13 @@ class Welcome(commands.Cog):
                                 pass
         except Exception as e:
             log.error(f"auto_secure_general_channels erreur: {e}")
+        # les bangers : personne n'y ecrit (salon_banger), sur chaque serveur,
+        # Youl4b compris, ou aucun VA n'a de droit a son nom
+        for guild in self.bot.guilds:
+            try:
+                await verrouiller_bangers(guild)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("bangers %s : %s: %s", guild.id, type(e).__name__, e)
 
     @auto_secure_general_channels.before_loop
     async def before_auto_secure(self):
