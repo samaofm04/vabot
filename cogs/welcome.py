@@ -1032,6 +1032,14 @@ async def _us_member_category(guild, member):
 # « hoist » : Discord regroupe alors les membres par role dans la liste de
 # droite — c'est tout l'interet, voir qui bosse sur quoi d'un coup d'oeil.
 ROLES_MARCHE = {"fr": "Jailbreak FR", "us": "Jailbreak US"}
+#: Les serveurs SANS role Jailbreak, et leur marche. Va IG (proprietaire,
+#: 13/10/2026 : « y a des mecs avec un role jailbreak, faut leur remove ») :
+#: 151 VA l'avaient, pose a chaque ticket. Le menu ne s'y ouvre plus par le
+#: role (cogs/user._jb_can_use : ses models), et le marche d'un VA est celui
+#: du serveur (cogs/user.marche_du_membre) : sans ca, un VA sans role passait
+#: en menu US.
+SANS_ROLE_JAILBREAK = {1505418484052394004: "fr"}
+NOMS_ROLES_JAILBREAK = ("jailbreak", "jailbreak fr", "jailbreak us")
 
 
 async def _role_marche(guild, marche):
@@ -1056,7 +1064,8 @@ async def appliquer_roles_marche(guild, membre=None):
 
     `membre` : ne traiter que celui-la (a l'assignation d'une identite).
     Retourne (poses, retires, sans_identite)."""
-    if guild is None:
+    if guild is None or getattr(guild, "id", None) in SANS_ROLE_JAILBREAK:
+        # pas de role de marche ici : ni pose, ni creation du role
         return (0, 0, 0)
     try:
         import marche as mk
@@ -1098,6 +1107,32 @@ async def appliquer_roles_marche(guild, membre=None):
             log.warning(f"roles marche {m}: {e}")
         await asyncio.sleep(0.4)          # on menage l'API
     return (poses, retires, sans)
+
+
+async def retirer_roles_jailbreak(guild) -> dict:
+    """Retire les roles Jailbreak a tous ceux qui les ont, sur un serveur de
+    SANS_ROLE_JAILBREAK. Les roles eux-memes restent (rien n'est supprime) ;
+    un role remis a la main repart au passage suivant. Bots epargnes."""
+    bilan = {"retires": 0, "rates": []}
+    if getattr(guild, "id", None) not in SANS_ROLE_JAILBREAK:
+        return bilan
+    for m in list(getattr(guild, "members", None) or []):
+        if getattr(m, "bot", False):
+            continue
+        jb = [r for r in getattr(m, "roles", []) or []
+              if (getattr(r, "name", "") or "").strip().lower() in NOMS_ROLES_JAILBREAK]
+        if not jb:
+            continue
+        try:
+            await m.remove_roles(*jb, reason="Plus de role Jailbreak sur ce serveur")
+            bilan["retires"] += 1
+        except Exception as e:                               # noqa: BLE001
+            bilan["rates"].append(f"{m.id}: {type(e).__name__}")
+        await asyncio.sleep(0.4)          # on menage l'API
+    if bilan["retires"] or bilan["rates"]:
+        log.info("roles Jailbreak retires sur %s : %d membre(s), %d echec(s) %s",
+                 guild.id, bilan["retires"], len(bilan["rates"]), bilan["rates"][:5])
+    return bilan
 
 
 def _proprio_du_salon(channel):
@@ -3341,6 +3376,11 @@ class Welcome(commands.Cog):
                 await verrouiller_bangers(guild)
             except Exception as e:                           # noqa: BLE001
                 log.warning("bangers %s : %s: %s", guild.id, type(e).__name__, e)
+            # Va IG : plus aucun role Jailbreak (SANS_ROLE_JAILBREAK)
+            try:
+                await retirer_roles_jailbreak(guild)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("roles Jailbreak %s : %s: %s", guild.id, type(e).__name__, e)
 
     @auto_secure_general_channels.before_loop
     async def before_auto_secure(self):

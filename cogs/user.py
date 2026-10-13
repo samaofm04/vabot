@@ -10220,7 +10220,17 @@ def _source_pseudo_name(identity: str) -> str:
 
 def marche_du_membre(member) -> str:
     """Marche d'une personne d'apres ses roles @Jailbreak FR / @Jailbreak US.
-    Par defaut « us » : c'est le marche du serveur ou vit ce menu."""
+    Par defaut « us » : c'est le marche du serveur ou vit ce menu.
+
+    Un serveur sans role Jailbreak (Va IG, cogs/welcome.SANS_ROLE_JAILBREAK)
+    a SON marche : les roles y ont ete retires, un VA FR n'y passe pas US."""
+    try:
+        from cogs.welcome import SANS_ROLE_JAILBREAK
+        gid = getattr(getattr(member, "guild", None), "id", None)
+        if gid in SANS_ROLE_JAILBREAK:
+            return SANS_ROLE_JAILBREAK[gid]
+    except Exception:                                        # noqa: BLE001
+        pass
     try:
         for r in getattr(member, "roles", []) or []:
             n = (getattr(r, "name", "") or "").strip().lower()
