@@ -2691,7 +2691,28 @@ class Welcome(commands.Cog):
             return
         porte = _verif_porte(after.guild)
         if not porte:
-            return
+            # Porte FERMÉE (Va IG) : l'arrivée crée le ticket et pose ✅ d'office.
+            # Mais un ✅ posé À LA MAIN plus tard, sur quelqu'un SANS ticket
+            # (arrivé pendant une panne, ticket perdu), ne donnait rien.
+            # Propriétaire, 13/10/2026 : « quand je mets quelqu'un en vérifié ça
+            # doit lui ouvrir un ticket », « pour IG ça envoie à une des models
+            # aléatoire » (setup_va_ticket -> identite_pour_serveur : la model
+            # qui a le moins de VA, au hasard entre les ex æquo). Pas dans les
+            # dix minutes qui suivent l'arrivée : c'est alors la pose d'office,
+            # et _accueillir crée déjà le ticket — deux tickets sinon. Les
+            # serveurs à tickets_discord (Twitter, Threads) ont le leur.
+            vcfg = _verif_config(after.guild)
+            try:
+                import tickets_discord as _tk
+                a_part = str(after.guild.id) in _tk.SERVEURS_TICKETS
+            except Exception:                                # noqa: BLE001
+                a_part = True
+            arrive = getattr(after, "joined_at", None)
+            if (not vcfg or not vcfg.get("role_verifie") or a_part
+                    or (arrive is not None
+                        and datetime.now(timezone.utc) - arrive < timedelta(minutes=10))):
+                return
+            porte = vcfg
         rid = porte["role_verifie"]
         if _a_le_role(before, rid) or not _a_le_role(after, rid):
             return

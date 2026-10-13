@@ -2010,6 +2010,91 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
     return bilan
 
 
+#: Au plus tant de tickets ouverts par passage pour des Vérifiés posés à la
+#: main : une erreur de rôle sur cinquante membres ne doit pas ouvrir
+#: cinquante salons d'un coup — le reste attend le passage suivant.
+MAX_TICKETS_VERIFIES = 5
+
+
+def _fichier_verifies() -> Path:
+    # relu à chaque appel : les tests déplacent ETAT_FICHIER
+    return ETAT_FICHIER.parent / "verifies_connus.json"
+
+
+def ouvrir_tickets_verifies(gid: str) -> Dict[str, Any]:
+    """Un ticket pour chaque NOUVEAU Vérifié du serveur, même posé à la main.
+
+    Propriétaire, 13/10/2026 : « quand je mets quelqu'un en Vérifié, ça doit
+    lui ouvrir un ticket automatiquement ». Jusque-là, seul le parcours de
+    vérification du bot ouvrait le salon (verif_discord._ouvrir) : un rôle posé
+    à la main dans Discord ne donnait rien. Bowser et Luigi ne reçoivent pas
+    les événements de Discord : la liste des Vérifiés est relue à chaque tour.
+
+    « Nouveau » : absent de la liste du passage précédent. Au tout premier
+    passage, les Vérifiés déjà là sont NOTÉS, pas servis — sans ça, chaque
+    ancien membre aurait reçu un ticket d'un coup. Un staff (Manager, Helper)
+    n'en reçoit pas. Un Vérifié qui a déjà son ticket n'en reçoit pas un
+    second (ouvrir_ticket le rend tel quel). Liste illisible : rien n'est
+    touché, et c'est dit."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"ouverts": [], "deja": [], "staff": [], "rates": [], "ignore": ""}
+    try:
+        from verif_discord import serveur
+        cfg = serveur(gid)
+    except Exception:                                        # noqa: BLE001
+        cfg = None
+    rid = str((cfg or {}).get("role_verifie") or "")
+    if not cfg or not rid:
+        bilan["ignore"] = "pas de rôle Vérifié connu"
+        return bilan
+    membres = _par_la_liste(gid, rid, strict=True)
+    if membres is None:
+        bilan["ignore"] = "liste des membres illisible"
+        _dire(f"verifies:{gid}", f"{gid} : liste des Vérifiés illisible — pas de ticket "
+                                  "automatique ce tour-ci")
+        return bilan
+    _dire(f"verifies:{gid}", "")
+    actuels = {str((m.get("user") or {}).get("id")): m for m in membres
+               if not (m.get("user") or {}).get("bot") and (m.get("user") or {}).get("id")}
+    with _VERROU:
+        tout = safe_json.load(_fichier_verifies(), default={}) or {}
+    if not isinstance(tout, dict):
+        tout = {}
+    if gid not in tout:
+        tout[gid] = sorted(actuels)
+        safe_json.write(_fichier_verifies(), tout)
+        print(f"[ticket] {gid} : {len(actuels)} Vérifié(s) déjà là, notés — les "
+              "suivants auront leur ticket tout seuls", flush=True)
+        bilan["ignore"] = "premier passage : liste notée"
+        return bilan
+    connus = set(str(x) for x in tout.get(gid) or [])
+    staff = {str(r) for r in (cfg.get("role_manager"), role_helper(gid)) if r}
+    traites = set()
+    for uid in sorted(set(actuels) - connus):
+        m = actuels[uid]
+        if staff & set(str(r) for r in (m.get("roles") or [])):
+            bilan["staff"].append(uid)
+            traites.add(uid)
+            continue
+        if len(bilan["ouverts"]) >= MAX_TICKETS_VERIFIES:
+            break                          # la suite au passage suivant
+        fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+        avait = str(fiche.get("salon") or "")
+        salon = ouvrir_ticket(uid, cfg)
+        if not salon:
+            bilan["rates"].append(uid)     # retenté au passage suivant
+            continue
+        traites.add(uid)
+        (bilan["deja"] if salon == avait else bilan["ouverts"]).append(uid)
+    # ceux qui ne sont plus Vérifiés sortent de la liste : reposé plus tard, le
+    # rôle leur rouvrira (ou leur rendra) leur salon
+    tout[gid] = sorted((connus & set(actuels)) | traites)
+    safe_json.write(_fichier_verifies(), tout)
+    if bilan["ouverts"] or bilan["rates"]:
+        print(f"[ticket] {gid} : Vérifiés posés à la main : {bilan}", flush=True)
+    return bilan
+
+
 def suivre_partout() -> Dict[str, Any]:
     """Un tour sur chaque serveur à tickets, chacun sous SON bot.
 
@@ -2041,6 +2126,12 @@ def suivre_partout() -> Dict[str, Any]:
                 aligner_helper(gid)
         except Exception as e:
             print(f"[helper] {gid} : {type(e).__name__}: {e}", flush=True)
+        # Un Vérifié posé à la main reçoit son ticket, comme au bout du parcours
+        try:
+            with sur_serveur(gid):
+                ouvrir_tickets_verifies(gid)
+        except Exception as e:
+            print(f"[ticket] {gid} : Vérifiés : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
     return out
 

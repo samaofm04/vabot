@@ -968,6 +968,67 @@ try:
     check("… et un second tour ne touche plus à rien", not f.ecritures() and not b2["ignore"],
           (f.ecritures(), b2))
 
+    # ══ 16. un Vérifié posé à la main reçoit son ticket ════════════════════
+    # Propriétaire, 13/10/2026 : « quand je mets quelqu'un en Vérifié, ça doit
+    # lui ouvrir un ticket automatiquement ».
+    print("\n— 16. Vérifié posé à la main : ticket ouvert tout seul")
+    import verif_discord as _vd16
+    f = monde()
+    f.liste_ouverte = True
+    for u in (YAZID, MOAN):
+        f.role(u, True)
+    for u in ("201", "202"):
+        f.membres[u]["roles"].append("700")          # déjà Vérifiés avant
+    ouverts16 = []
+    _sauve16 = (_vd16.serveur, tk.ouvrir_ticket)
+    try:
+        _vd16.serveur = lambda gid=None: {"id": G, "role_verifie": "700",
+                                          "role_manager": ROLE_MGR}
+        tk.ouvrir_ticket = lambda uid, cfg=None: (ouverts16.append(uid) or f"salon-{uid}")
+        with calme():
+            b1 = tk.ouvrir_tickets_verifies(G)
+        check("premier passage : les Vérifiés déjà là sont notés, aucun ticket",
+              not ouverts16 and b1["ignore"].startswith("premier passage"), b1)
+        f.membres["203"]["roles"].append("700")      # posé à la main
+        f.membres[MOAN]["roles"].append("700")       # un manager vérifié : pas de ticket
+        with calme():
+            b2 = tk.ouvrir_tickets_verifies(G)
+        check("un nouveau Vérifié reçoit son ticket ; un manager vérifié non",
+              ouverts16 == ["203"] and b2["ouverts"] == ["203"] and b2["staff"] == [MOAN], b2)
+        with calme():
+            b3 = tk.ouvrir_tickets_verifies(G)
+        check("… une seule fois", ouverts16 == ["203"] and not b3["ouverts"], (ouverts16, b3))
+        for u in [str(i) for i in range(204, 212)]:
+            f.membres[u]["roles"].append("700")
+        with calme():
+            b4 = tk.ouvrir_tickets_verifies(G)
+        check(f"au plus {tk.MAX_TICKETS_VERIFIES} tickets par passage, le reste au suivant",
+              len(b4["ouverts"]) == tk.MAX_TICKETS_VERIFIES, b4)
+        with calme():
+            tk.ouvrir_tickets_verifies(G)
+        check("… et le suivant finit le travail", len(ouverts16) == 1 + 8, ouverts16)
+        tk.ouvrir_ticket = lambda uid, cfg=None: ""
+        f.membres["212"]["roles"].append("700")
+        with calme():
+            b5 = tk.ouvrir_tickets_verifies(G)
+        tk.ouvrir_ticket = lambda uid, cfg=None: (ouverts16.append(uid) or f"salon-{uid}")
+        with calme():
+            tk.ouvrir_tickets_verifies(G)
+        check("un ticket raté est retenté au passage suivant",
+              b5["rates"] == ["212"] and ouverts16[-1] == "212", (b5, ouverts16[-2:]))
+        f.liste_ouverte = False
+        sortie16 = io.StringIO()
+        with contextlib.redirect_stdout(sortie16):
+            b6 = tk.ouvrir_tickets_verifies(G)
+        check("liste des membres illisible : rien d'ouvert, et c'est dit",
+              b6["ignore"] == "liste des membres illisible"
+              and "Vérifiés illisible" in sortie16.getvalue(), (b6, sortie16.getvalue()))
+    finally:
+        _vd16.serveur, tk.ouvrir_ticket = _sauve16
+    src16 = (BOT / "tickets_discord.py").read_text(encoding="utf-8")
+    check("branché dans le tour de chaque serveur à tickets (suivre_partout)",
+          "ouvrir_tickets_verifies(gid)" in src16.split("def suivre_partout")[1])
+
     # ══ 13. branché dans la boucle du podium ══════════════════════════════
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")
     i0 = src.find("def _start_podium_semaine_daemon")
