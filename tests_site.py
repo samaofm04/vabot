@@ -21461,11 +21461,18 @@ try:
     # Threads »), Threads montre le classement de la quinzaine de Twitter, et
     # LUI SEUL : ni podium de la semaine, ni bonus, ni primes
     # (tests_recaps_twitter_threads.py)
-    # Puis, le meme jour : « pour Threads j'ai remove les subs, pas besoin » :
-    # Threads est retire de SERVEURS, son profil reste ecrit (PROFIL_THREADS)
-    check("le podium n est PAS publie sur Threads (ni la quinzaine, retiree le 13/10)",
+    # Puis, le meme jour : « pour Threads j'ai remove les subs, pas besoin »
+    # (profil garde dans PROFIL_THREADS), et « pour Threads le podium c'est
+    # avec des clicks » : le podium de la semaine seul, aux clics GetMySocial
+    # des VA de Twitter (tests_podium_threads_clics.py)
+    check("Threads : le podium de la semaine aux clics, et rien d autre (ni quinzaine, ni bonus)",
           _TWI in _pdT.SERVEURS and not _pdT.subs_seulement(_TWI)
-          and _THR not in _pdT.SERVEURS and _pdT.PROFIL_THREADS.get("subs_seul") is True)
+          and not _pdT.podium_seulement(_TWI)
+          and _pdT.podium_seulement(_THR) and not _pdT.subs_seulement(_THR)
+          and _pdT._repris_de(_THR) == _TWI and _pdT._source(_THR) == "gms"
+          and _pdT._unite(_THR) == "clics" and _pdT._unite(_TWI) == "subs"
+          and not _pdT.a_rafraichir_subs(_THR) and not _pdT.a_rafraichir_bonus(_THR)
+          and _pdT.PROFIL_THREADS.get("subs_seul") is True)
     check("les liens GetMySocial ne sont PAS branches sur Threads",
           _TWI in _lvT.SERVEURS and _THR not in _lvT.SERVEURS)
     check("la synchro des groupes ne touche pas aux managers de Threads",

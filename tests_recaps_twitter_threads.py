@@ -180,10 +180,14 @@ def check(label, cond, detail=""):
 TW, TH, IG = pd.TWITTER_ID, pd.THREADS_ID, pd.VA_IG_ID
 
 # Le 13/10/2026, le propriétaire a retiré la quinzaine de Threads et le récap
-# des clics de Twitter (« pas besoin »). Les réglages livrés le disent ; les
-# mécanismes, eux, restent testés en remettant les deux le temps de ce fichier.
-check("livré : Threads n'a plus de classement subs (profil gardé hors de SERVEURS)",
-      TH not in pd.SERVEURS and pd.PROFIL_THREADS.get("subs_seul") is True)
+# des clics de Twitter (« pas besoin »), puis donné à Threads le podium de la
+# semaine aux clics (tests_podium_threads_clics.py). Les réglages livrés le
+# disent ; les mécanismes de la quinzaine reprise, eux, restent testés en
+# remettant les deux le temps de ce fichier.
+check("livré : Threads n'a plus de classement subs (profil gardé dans PROFIL_THREADS), "
+      "il a le podium aux clics",
+      not pd.subs_seulement(TH) and pd.podium_seulement(TH)
+      and pd.PROFIL_THREADS.get("subs_seul") is True)
 check("livré : le récap des clics part sur Threads seulement (Twitter retiré)",
       set(rcr.CIBLES_DEFAUT) == {TH})
 pd.SERVEURS[TH] = dict(pd.PROFIL_THREADS)
@@ -610,6 +614,7 @@ try:
         return lambda *a, **k: faits.append((nom, vd.serveur_courant(), a[0] if a else None))
     faux_p = types.SimpleNamespace(
         SERVEURS=pd.SERVEURS, subs_seulement=pd.subs_seulement,
+        podium_seulement=pd.podium_seulement,
         a_poster=lambda: True, poster_podium=note("podium"),
         a_rafraichir=lambda g: True, rafraichir=note("semaine"),
         a_rafraichir_subs=lambda g: True, rafraichir_subs=note("subs"),

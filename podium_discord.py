@@ -82,16 +82,22 @@ leurs règles de gel restent maîtresses : un clic le lundi à 3h ne lance pas
 la semaine neuve avant le podium. Un seul passage à la fois (_exclusif) :
 un clic pendant le tour de la boucle, ou l'inverse, ne poste rien deux fois.
 
-VA THREADS MONTRE LE CLASSEMENT SUBS DE TWITTER, ET RIEN D'AUTRE (clés
-« reprend » et « subs_seul » de SERVEURS). Propriétaire, 13/10/2026 : « ici
-tu peux envoyer les récap des subs […] pour le Threads », les liens « comme
-d'hab ». Ce sont les VA de Twitter et LEURS chiffres : le même classement de
-la quinzaine, mêmes libellés « VA n », même pied « Marché US ». Il n'est pas
-recalculé : Threads reprend le relevé que Twitter vient de faire pour la même
-période (_classement_repris, gardé en mémoire et sur disque), et ne relit
-MyPuls que si Twitter n'a rien relevé depuis une heure. Pas de podium de la
-semaine, pas de bonus du jour, pas de primes ni de paliers sur Threads : rien
-n'y paie, et personne n'y réclamerait quoi que ce soit.
+VA THREADS A LE PODIUM DE LA SEMAINE, AUX CLICS, ET RIEN D'AUTRE (clés
+« reprend » et « podium_seul » de SERVEURS). Propriétaire, 13/10/2026 : le
+classement subs de la quinzaine d'abord (« subs_seul », PROFIL_THREADS),
+retiré le jour même (« pour Threads j'ai remove les subs, pas besoin »), puis
+« pour Threads le podium c'est avec des clicks », primes 10/5/3 $ comme
+Twitter. Ce sont les VA de Twitter (mêmes « VA n ») et leurs clics
+GetMySocial au marché US : les chiffres du récap « -l-clicks » de Threads
+(recap_clics_rest), pas les trackings MyPuls que Twitter appelle « subs ».
+Le message dit donc « clics », jamais « subs » (_unite). Le relevé n'est
+pas refait pour Threads : c'est celui que Va IG prend déjà pour ses VA US
+(classement(gid=Twitter, mesure="gms"), gardé par _retenir et
+_garder_repris) ; le premier des deux qui passe le fait pour l'autre. Ni
+quinzaine, ni bonus du jour, ni synchro des liens, ni suivi des VA sur
+Threads. Les gagnants n'y ont pas de lien GetMySocial rattaché à un ticket :
+suivi_va ne prévient personne en privé, la prime se réclame à la main à
+Bowser, comme le message le dit.
 
 LE THÈME MARIO (clé « theme », Va IG seulement). Propriétaire, 03/10/2026 :
 « tu penses y'a moyen de faire un theme Mario pour tout ca », puis « vas-y ».
@@ -168,8 +174,8 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 # Les serveurs ou le podium, les subs et le bonus sont publies, et CE QUE
 # chacun compte. Threads n'a longtemps rien eu (des chiffres de Twitter y
 # seraient passes pour ceux des VA Threads) ; depuis le 13/10/2026, a la
-# demande du proprietaire, il montre le classement subs de Twitter, tel que
-# Twitter l'affiche (« Marche US », les « VA n » de Twitter), et rien d'autre.
+# demande du proprietaire, il a le podium de la semaine aux clics des VA de
+# Twitter (« Marche US », les « VA n » de Twitter), et rien d'autre.
 # Va IG (serveur FR, proprietaire 03/10/2026 : « lance le truc des subs comme
 # pour Twitter avec le numero du VA », « fais aussi le podium », primes
 # « comme Twitter ») a SES liens, SES pays et ses numeros « Amelia VA 3 » --
@@ -177,8 +183,9 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 TWITTER_ID = "1445108485090971710"
 VA_IG_ID = "1505418484052394004"
 THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
-#: Va Threads, HORS de SERVEURS depuis le 13/10/2026 (voir le commentaire dans
-#: SERVEURS) : ce que Threads montrait, gardé pour le jour où il le redemande.
+#: Le classement subs de la quinzaine que Threads a montré le 13/10/2026 au
+#: matin, avant son podium aux clics (voir le commentaire dans SERVEURS) :
+#: gardé pour le jour où il le redemande.
 PROFIL_THREADS: Dict[str, Any] = {"reprend": TWITTER_ID, "subs_seul": True,
                                   "bot": "Bowser", "bonus": False}
 
@@ -196,16 +203,25 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  "mesure": "tracking",
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
-    # Va Threads : le classement subs de Twitter, tel quel (voir l'en-tête,
-    # « VA THREADS MONTRE… »). « reprend » : tout ce que ce profil ne dit pas
-    # vient de Twitter, relu à chaque appel (_profil) — couper la clé
-    # « mesure » de Twitter change aussi Threads, les deux ne divergent
-    # jamais. « subs_seul » : ni podium, ni bonus, ni synchro des liens, ni
-    # suivi des VA (la boucle de web_upload ne fait que la quinzaine).
-    # COUPÉ le 13/10/2026, le jour même, par le propriétaire : « pour Threads
-    # j'ai remove les subs, pas besoin » (le salon -subs de Threads est
-    # supprimé). Le profil reste écrit (PROFIL_THREADS) : le remettre ici, sous
-    # la clé THREADS_ID, suffit à le relancer.
+    # Va Threads : le podium de la semaine aux clics des VA de Twitter (voir
+    # l'en-tête, « VA THREADS A LE PODIUM… »). Le classement subs de la
+    # quinzaine qu'il a eu le matin du 13/10/2026 est COUPÉ (« pour Threads
+    # j'ai remove les subs, pas besoin ») ; son profil reste écrit
+    # (PROFIL_THREADS). « reprend » : tout ce que ce profil ne dit pas vient
+    # de Twitter, relu à chaque appel (_profil) : mêmes liens, mêmes numéros,
+    # même marché US. Les clés écrites ici l'emportent :
+    THREADS_ID: {"reprend": TWITTER_ID,
+                 # le podium de la semaine seulement : ni quinzaine, ni bonus,
+                 # ni synchro des liens, ni suivi des VA (boucle de web_upload)
+                 "podium_seul": True,
+                 # « le podium c'est avec des clicks » : les clics GetMySocial
+                 # au marché US, ceux du récap -l-clicks — pas les trackings
+                 # MyPuls de Twitter
+                 "mesure": "gms", "unite": "clics",
+                 "bot": "Bowser", "bonus": False,
+                 # le rythme du relevé US de Va IG (CACHE_US_MIN) : un seul
+                 # relevé toutes les deux heures sert les deux serveurs
+                 "minutes": 120},
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
                "pays": ("FR", "BE", "CH", "LU", "MC"), "marche": "FR",
@@ -278,6 +294,19 @@ def subs_seulement(gid: Optional[str]) -> bool:
     lit, et chaque entrée du podium et du bonus le vérifie aussi : un appel
     venu d'ailleurs ne posterait pas un podium que personne n'a voulu."""
     return bool((SERVEURS.get(str(gid or "")) or {}).get("subs_seul"))
+
+
+def podium_seulement(gid: Optional[str]) -> bool:
+    """Ce serveur n'a que le podium de la semaine (Threads, aux clics) : ni
+    classement de la quinzaine, ni bonus du jour, ni synchro des liens, ni
+    suivi des VA. La boucle de web_upload le lit ; la quinzaine et le bonus
+    le vérifient aussi à leur entrée."""
+    return bool((SERVEURS.get(str(gid or "")) or {}).get("podium_seul"))
+
+
+def _unite(gid: Optional[str]) -> str:
+    """Le mot du podium : « subs » (Twitter, Va IG) ou « clics » (Threads)."""
+    return str(_profil(gid).get("unite") or "subs")
 
 
 def _repris_de(gid: Optional[str]) -> str:
@@ -1543,9 +1572,11 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     Twitter) par entité, du plus fort au plus faible. Twitter : les clics
     des liens de tracking (_classement_tracking). `mesure="gms"` force les
     clics GetMySocial (le relevé US que Va IG garde, voir _releve_us).
-    Threads (clé « reprend ») : le relevé de Twitter, voir _classement_repris."""
+    Threads (clé « reprend ») : le relevé de Twitter, voir _classement_repris,
+    dans SA mesure à lui (les clics GetMySocial, quand Twitter compte ses
+    trackings) : sans elle, Threads aurait repris les trackings de Twitter."""
     if _repris_de(gid):
-        return _classement_repris(debut, fin, str(gid), mesure)
+        return _classement_repris(debut, fin, str(gid), _source(gid, mesure))
     if _source(gid, mesure) == "tracking":
         # pas gardé pour Va IG : il mêle des clics GetMySocial (_releve_us)
         cl_t = _classement_tracking(debut, fin, gid)
@@ -1969,15 +2000,20 @@ def _charger_repris() -> None:
 def _garder_repris(gid: Optional[str], debut: dt.date, fin: dt.date,
                    cl: Dict[str, Any], source: str) -> None:
     """Garde le relevé d'un serveur que d'autres reprennent (Twitter, pour
-    Threads). Un relevé raté est gardé aussi : Threads ne relit pas MyPuls
+    Threads). Un relevé raté est gardé aussi : Threads ne relit pas la source
     derrière Twitter qui vient d'échouer — il attend son prochain essai."""
     gid = str(gid or "")
-    if not gid or not any(_repris_de(g) == gid for g in SERVEURS):
+    if not gid:
         return
-    if debut != saison_en_cours(debut)[0]:
-        # Threads ne montre que la quinzaine : la semaine du podium et le jour
-        # du bonus de Twitter ne lui servent à rien (trois écritures de moins
-        # par heure)
+    # Seulement ce qu'un serveur qui reprend celui-ci montrera : SA mesure, et
+    # SA période — la quinzaine (« subs_seul ») ou la semaine du podium
+    # (« podium_seul », qui commence un lundi). Les trackings de Twitter
+    # quand Threads compte des clics, le jour du bonus : rien à garder (autant
+    # d'écritures de moins par heure).
+    if not any(_repris_de(g) == gid and _source(g) == str(source)
+               and (debut == saison_en_cours(debut)[0] if subs_seulement(g)
+                    else debut.weekday() == 0 if podium_seulement(g) else True)
+               for g in SERVEURS):
         return
     _charger_repris()
     t = time.time()
@@ -2054,7 +2090,8 @@ def _repris_t(gid: Optional[str], jour: Optional[dt.date] = None) -> float:
         return 0.0
     debut, fin = saison_en_cours(jour)
     _charger_repris()
-    e = _REPRIS.get((src, _source(src), debut.isoformat(),
+    # la mesure de CE serveur (classement la passe à _classement_repris)
+    e = _REPRIS.get((src, _source(gid), debut.isoformat(),
                      min(jour or _aujourdhui(), fin).isoformat()))
     return float((e or {}).get("t") or 0)
 
@@ -2298,6 +2335,11 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     # rebaptisés en VA FR, pas de marché ligne à ligne)
     abo = (f'Abonnements via {pf["source"]} — clics **{_mesure_dite(pf)}**' if mix is None
            else "Abonnements de **toute l'agence**")
+    unite = _unite(gid)
+    if unite != "subs":
+        # Threads : des clics, pas des abonnements, et ni « via Twitter » ni
+        # « tracking » (ce sont les clics GetMySocial de ses VA)
+        abo = f'Clics des liens des VA — marché **{pf["marche"]}**'
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
@@ -2324,10 +2366,10 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         suite = f'{th["suite"]} ' if th else ""
         for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
             if i < 3:
-                c.append(f'{med[i]} **{x["va"]}** — **{x["clics"]}** subs '
+                c.append(f'{med[i]} **{x["va"]}** — **{x["clics"]}** {unite} '
                          f'· {piece} **{PRIMES[i]:.0f}$**')
             else:
-                c.append(f'{i + 1}. {suite}{x["va"]} — **{x["clics"]}** subs')
+                c.append(f'{i + 1}. {suite}{x["va"]} — **{x["clics"]}** {unite}')
         reste = len(lignes) - COMBIEN_AFFICHES
         if reste > 0:
             c.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
@@ -2411,9 +2453,10 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                 "thumbnail": _vignette(th, "podium"),
                 "description": texte[:4096],
                 "footer": {"text": pied}}
-    return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
-                      else "🏁 PODIUM SUBS — SEMAINE TERMINÉE" if termine
-                      else "🏆 PODIUM SUBS DE LA SEMAINE"),
+    mot = unite.upper()
+    return {"title": (f"🔴 PODIUM {mot} — SEMAINE EN COURS" if en_cours
+                      else f"🏁 PODIUM {mot} — SEMAINE TERMINÉE" if termine
+                      else f"🏆 PODIUM {mot} DE LA SEMAINE"),
             "color": 0xE67E22 if en_cours else 0x95A5A6 if termine else 0xF1C40F,
             "description": texte[:4096],
             "footer": {"text": pied}}
@@ -2605,6 +2648,10 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     n'en est pas changé (ses essais gardent leur espacement).
     """
     gid = str(gid)
+    if podium_seulement(gid):
+        # Threads : le podium de la semaine seulement (voir l'en-tête)
+        print(f"[podium] {gid} : pas de classement de la quinzaine sur ce serveur", flush=True)
+        return ""
     debut, fin_saison = saison_en_cours(jour)
     aujourd = jour or _aujourdhui()
     d = _etat()
@@ -3021,6 +3068,8 @@ FORMAT_AFFICHAGE = "2026-10-06-clics-tracking"
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     gid = str(gid)
+    if podium_seulement(gid):
+        return False
     t = maintenant or time.time()
     d = _etat()
     # une quinzaine finie qui attend depuis 48 h se fige MAINTENANT, sans
@@ -3082,7 +3131,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
 def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     """Met à jour (ou crée) le bonus du jour. Un message NEUF par journée."""
     gid = str(gid)
-    if subs_seulement(gid):
+    if subs_seulement(gid) or podium_seulement(gid):
         print(f"[podium] {gid} : pas de bonus du jour sur ce serveur", flush=True)
         return ""
     j = jour or _aujourdhui()
@@ -3152,7 +3201,7 @@ def _bonus_veille(gid: str, d: Dict[str, Any], salon: str, j: dt.date) -> None:
 
 
 def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
-    if _pause_pour(gid) or not _profil(gid).get("bonus", True):
+    if podium_seulement(gid) or _pause_pour(gid) or not _profil(gid).get("bonus", True):
         return False
     garde = (_etat().get("bonus") or {}).get(str(gid)) or {}
     if garde.get("jour") != _aujourdhui().isoformat():
@@ -3251,6 +3300,11 @@ def _salon_subs(gid: str) -> str:
 
 # ─── la semaine finie : figée sur place ──────────────────────────────────
 MENTION_PODIUM = "@everyone 🏆 Podium subs de la semaine !"
+
+
+def _mention_podium(gid: Optional[str]) -> str:
+    """La mention du lundi, avec le mot du serveur (« clics » sur Threads)."""
+    return MENTION_PODIUM.replace(" subs ", f" {_unite(gid)} ")
 
 
 def _serveur_connu(d: Dict[str, Any], gid: str) -> bool:
@@ -3409,7 +3463,7 @@ def _mentionner(gid: str, salon: str, mid: str, reponse: bool = True) -> Tuple[s
     0) a pu passer quand même : pas de second essai, un @everyone en double
     dérangerait tout le serveur.
     """
-    base = {"content": MENTION_PODIUM, "allowed_mentions": {"parse": ["everyone"]}}
+    base = {"content": _mention_podium(gid), "allowed_mentions": {"parse": ["everyone"]}}
     if reponse:
         code, rep = _api("POST", f"/channels/{salon}/messages", json=dict(
             base, message_reference={"message_id": mid, "fail_if_not_exists": False}))
@@ -3423,7 +3477,7 @@ def _mentionner(gid: str, salon: str, mid: str, reponse: bool = True) -> Tuple[s
             return "", "reponse"
     lien = f"https://discord.com/channels/{gid}/{salon}/{mid}"
     code, rep = _api("POST", f"/channels/{salon}/messages",
-                     json=dict(base, content=f"{MENTION_PODIUM}\n➡️ {lien}"))
+                     json=dict(base, content=f"{_mention_podium(gid)}\n➡️ {lien}"))
     if code == 200 and isinstance(rep, dict) and rep.get("id"):
         return str(rep["id"]), ""
     print(f"[podium] mention @everyone simple refusée (HTTP {code}) {str(rep)[:140]}", flush=True)
@@ -3641,7 +3695,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     else:
         corps: Dict[str, Any] = {"embeds": [embed], **_boutons(gid, False)}
         if mentionner:
-            corps["content"] = MENTION_PODIUM
+            corps["content"] = _mention_podium(gid)
             corps["allowed_mentions"] = {"parse": ["everyone"]}
         code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
         if code != 200 or not rep.get("id"):

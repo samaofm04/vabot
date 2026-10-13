@@ -60921,11 +60921,16 @@ def _start_podium_semaine_daemon() -> bool:
                     # quelque chose (podium_discord.SERVEURS)
                     if gid not in _p.SERVEURS:
                         continue
-                    # Va Threads (13/10/2026) : le classement subs de Twitter,
-                    # et rien d'autre -- ni podium, ni bonus, ni synchro des
-                    # liens GetMySocial, ni suivi des VA : ses chiffres sont
-                    # ceux des VA de Twitter (podium_discord.subs_seulement)
+                    # un serveur qui ne montre que la quinzaine
+                    # (podium_discord.subs_seulement, PROFIL_THREADS) : ni
+                    # podium, ni bonus, ni synchro des liens GetMySocial, ni
+                    # suivi des VA -- ses chiffres sont ceux d'un autre serveur
                     seul = _p.subs_seulement(gid)
+                    # Va Threads (13/10/2026) : le podium de la semaine aux
+                    # clics des VA de Twitter, et rien d'autre -- ni quinzaine,
+                    # ni bonus, ni synchro des liens, ni suivi des VA
+                    # (podium_discord.podium_seulement)
+                    podium_seul = _p.podium_seulement(gid)
                     # tout ce qui suit agit sur CE serveur, avec son bot
                     with _vd_p.sur_serveur(gid):
                         # Un clic sur « 🔄 Mettre a jour » en cours : chaque appel
@@ -60940,14 +60945,14 @@ def _start_podium_semaine_daemon() -> bool:
                         if not seul and _p.a_rafraichir(gid):
                             _p.rafraichir(gid)
                         # le classement de la quinzaine, TOUS les comptes
-                        if _p.a_rafraichir_subs(gid):
+                        if not podium_seul and _p.a_rafraichir_subs(gid):
                             _p.rafraichir_subs(gid)
                         # et le bonus du jour : les trois premiers de la journee
-                        if not seul and _p.a_rafraichir_bonus(gid):
+                        if not seul and not podium_seul and _p.a_rafraichir_bonus(gid):
                             _p.rafraichir_bonus(gid)
                         # GetMySocial suit Discord : un manager neuf recoit son
                         # groupe, un VA deplace a la main voit son lien suivre
-                        if not seul:
+                        if not seul and not podium_seul:
                             _sync_liens_va(gid)
                             _suivi_va(gid)
                 # le salon « modele a suivre » suit la watchlist Instagram :
