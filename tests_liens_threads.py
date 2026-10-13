@@ -488,6 +488,48 @@ try:
     tk.numeroter_salons(TH)
     check("GetMySocial muet : aucune pastille ne change (pas de rouge sur une panne)",
           not patchs_n and SALONS_N["c1"].startswith("─│🟢┤"), patchs_n)
+
+    # ── le tri : 🟢, puis 🟠, puis 🔵, et le numéro à couleur égale ─────────
+    # « propose-moi quelque chose pour trier tout le monde » (13/10/2026)
+    POS = [{"id": "k1", "type": 4, "name": "🔵┤ Manager ABDOUL ├🔵", "position": 5},
+           {"id": "x1", "type": 0, "parent_id": "k1", "position": 10, "name": "─│📌┤-regles"},
+           {"id": "t1", "type": 0, "parent_id": "k1", "position": 11, "name": f"─│🔵┤-72-va-{A}n2"},
+           {"id": "t2", "type": 0, "parent_id": "k1", "position": 12, "name": f"─│🟠┤-70-va-{A}n1"},
+           {"id": "t3", "type": 0, "parent_id": "k1", "position": 13, "name": f"─│🟢┤-63-va-{A}r"},
+           {"id": "t4", "type": 0, "parent_id": "k1", "position": 14, "name": f"─│🟢┤-31-va-{A}a"},
+           {"id": "k2", "type": 4, "name": "🔵┤ Manager MOMOBY ├🔵", "position": 6},
+           {"id": "t5", "type": 0, "parent_id": "k2", "position": 20, "name": f"─│🟢┤-61-va-{A}m"},
+           {"id": "t6", "type": 0, "parent_id": "k2", "position": 21, "name": f"─│🟠┤-62-va-{A}s"}]
+    lots = []
+
+    def _api_tri(m, c, **k):
+        if m == "GET" and c.endswith("/channels"):
+            return 200, json.loads(json.dumps(POS)) if c.split("/")[2] == TH else []
+        if m == "PATCH" and c == f"/guilds/{TH}/channels":
+            lots.append(k["json"])
+            for ch in k["json"]:
+                next(x for x in POS if x["id"] == ch["id"])["position"] = ch["position"]
+            return 204, {}
+        return 404, {}
+    tk._api = _api_tri
+    bt = tk.trier_salons(TH)
+
+    def ordre(cat):
+        return [x["name"].split("-va-")[0] for x in sorted(
+            (x for x in POS if x.get("parent_id") == cat and "-va-" in x["name"]),
+            key=lambda x: (x["position"], x["id"]))]
+    check("ABDOUL rangé : 🟢 31, 🟢 63, 🟠 70, 🔵 72 ; MOMOBY déjà en ordre, pas touché",
+          ordre("k1") == ["─│🟢┤-31", "─│🟢┤-63", "─│🟠┤-70", "─│🔵┤-72"]
+          and ordre("k2") == ["─│🟢┤-61", "─│🟠┤-62"]
+          and bt["categories"] == ["🔵┤ Manager ABDOUL ├🔵"], (ordre("k1"), bt))
+    check("… en UN appel, sur les places des salons de VA (le salon « regles » ne bouge pas)",
+          len(lots) == 1 and {c["id"] for c in lots[0]} == {"t1", "t2", "t3", "t4"}
+          and next(x for x in POS if x["id"] == "x1")["position"] == 10
+          and sorted(c["position"] for c in lots[0]) == [11, 12, 13, 14], lots)
+    lots.clear()
+    tk.trier_salons(TH)
+    check("… et rien au passage suivant (l'ordre est déjà le bon)", not lots, lots)
+    check("Twitter n'est pas trié", tk.trier_salons(TW) == {"categories": [], "rates": []})
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

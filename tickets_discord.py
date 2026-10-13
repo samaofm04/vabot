@@ -656,6 +656,70 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
     return bilan
 
 
+#: Les serveurs dont les salons de VA sont rangés par pastille, puis par
+#: numéro, dans chaque catégorie de manager. Propriétaire, 13/10/2026 :
+#: « propose-moi quelque chose pour trier tout le monde » — choisi : 🟢 en
+#: haut, puis 🟠, puis 🔵, et à couleur égale le numéro du VA.
+TRI_SALONS = {"1498948161039896586"}             # YouLab THREADS
+ORDRE_RONDS = (ROND_CLICS, ROND_RIEN, ROND_LA)
+
+
+def _cle_tri(nom: str):
+    """(rang de la pastille, numéro, nom) d'un salon de VA « ─│🟢┤-61-va-＠x »."""
+    i = nom.find(f"-va-{AROBASE}")
+    tete = nom[:i] if i >= 0 else nom
+    j = tete.find(BARRE)
+    rond = tete[len(PREFIXE):j] if tete.startswith(PREFIXE) and j > 0 else ""
+    rang = ORDRE_RONDS.index(rond) if rond in ORDRE_RONDS else len(ORDRE_RONDS)
+    m = re.search(r"-(\d+)$", tete)
+    return (rang, int(m.group(1)) if m else 10 ** 6, nom)
+
+
+def trier_salons(gid: str) -> Dict[str, Any]:
+    """Range les salons de VA de chaque catégorie (TRI_SALONS) : pastille,
+    puis numéro. Les places déjà occupées par ces salons sont redistribuées
+    entre eux (les autres salons ne bougent pas), en UN appel pour tout le
+    serveur, et seulement si l'ordre a changé — les positions ne comptent
+    pas dans la limite des renommages."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"categories": [], "rates": []}
+    if gid not in TRI_SALONS:
+        return bilan
+    code, salons = _api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        bilan["rates"].append(f"salons illisibles (HTTP {code})")
+        return bilan
+    cats = {str(c.get("id")): str(c.get("name") or "") for c in salons
+            if isinstance(c, dict) and c.get("type") == 4}
+    groupes: Dict[str, List[Dict[str, Any]]] = {}
+    for c in salons:
+        if (isinstance(c, dict) and c.get("type", 0) == 0
+                and str(c.get("parent_id") or "") in cats
+                and f"-va-{AROBASE}" in str(c.get("name") or "")
+                and str(c.get("name") or "").startswith(PREFIXE)):
+            groupes.setdefault(str(c["parent_id"]), []).append(c)
+    changes: List[Dict[str, Any]] = []
+    for cid, enfants in groupes.items():
+        actuel = sorted(enfants, key=_rang)
+        voulu = sorted(enfants, key=lambda c: _cle_tri(str(c.get("name") or "")))
+        if [str(c["id"]) for c in actuel] == [str(c["id"]) for c in voulu]:
+            continue
+        places = sorted(int(c.get("position") or 0) for c in enfants)
+        if len(set(places)) < len(places):
+            # des positions en double (Discord en laisse) : des places neuves,
+            # à la suite de la plus basse, plutôt qu'un ordre au hasard
+            places = [places[0] + k for k in range(len(places))]
+        changes += [{"id": str(c["id"]), "position": pos} for c, pos in zip(voulu, places)]
+        bilan["categories"].append(cats[cid])
+    if not changes:
+        return bilan
+    code, rep = _api("PATCH", f"/guilds/{gid}/channels", json=changes)
+    if code not in (200, 204):
+        bilan["rates"].append(f"ordre refusé (HTTP {code}) {str(rep)[:80]}")
+    print(f"[ticket] {gid} : salons triés (pastille, numéro) : {bilan}", flush=True)
+    return bilan
+
+
 def identifiant(gid: str, uid: str) -> str:
     """Le VRAI identifiant Discord : « abdoul_9684 », pas « Abdoul ».
 
@@ -1896,6 +1960,7 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
         import liens_va
         with sur_serveur(gid):
             numeroter_salons(gid)
+            trier_salons(gid)
             redessiner_boutons(gid)
             b = liens_va.synchroniser(gid)
         if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates", "groupes_supprimes",
