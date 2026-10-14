@@ -97,6 +97,14 @@ def _deux_y(mot: str) -> str:
     return mot + ("y" if mot.endswith("y") else "yy")
 
 
+#: Essais d'adresse avant d'abandonner. Les adresses GetMySocial sont communes
+#: à tous les comptes : le 15/10/2026, pour le VA 71, les douze premiers mots
+#: seuls (« velvetyy », « honeyy », « candyy »…) étaient TOUS pris, et la
+#: création comme le renommage abandonnaient. Après les 25 mots seuls viennent
+#: les paires (« angelpearlyy »), presque toujours libres.
+ESSAIS_ADRESSE = 60
+
+
 def mots_sans_prenom(graine: str, essai: int = 0) -> str:
     """« angelyy », « cuteyy », « bunnyy »… Une adresse SANS prénom (Threads).
 
@@ -336,7 +344,7 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     base = str(e.get("base_shortcode") or "emy")
     if not gabarit:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
-    for essai in range(12):
+    for essai in range(ESSAIS_ADRESSE):
         # Threads et Twitter : aucune base, aucun prénom (voir mots_sans_prenom)
         sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
         r = gms.duplicate_link(gabarit, sc, nom, url, equipe)
@@ -349,7 +357,7 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
         # reste (droits, gabarit absent) se repeterait a l'identique
         if "shortcode" not in str(r.get("error") or "").lower():
             return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
-    return {"ok": False, "erreur": "douze noms essayés, tous pris"}
+    return {"ok": False, "erreur": f"{ESSAIS_ADRESSE} noms essayés, tous pris"}
 
 
 def groupes(equipe: str, essais: int = 3) -> Optional[Dict[str, str]]:
@@ -835,7 +843,7 @@ def changer_adresse(gid: str, uid: str) -> Dict[str, Any]:
     lid = str(l.get("link_id") or "") or _id_du_lien(equipe, ancienne)
     if not lid:
         return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
-    for essai in range(12):
+    for essai in range(ESSAIS_ADRESSE):
         sc = mots_sans_prenom(nom, essai)
         r = gms._call_tool("update_link", {"link_id": lid, "shortcode": sc, "team_id": equipe})
         if r.get("ok"):
@@ -855,7 +863,7 @@ def changer_adresse(gid: str, uid: str) -> Dict[str, Any]:
         # adresse prise (elles sont communes à tout GetMySocial) : la suivante
         if "shortcode" not in str(r.get("error") or "").lower():
             return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
-    return {"ok": False, "erreur": "douze adresses essayées, toutes prises"}
+    return {"ok": False, "erreur": f"{ESSAIS_ADRESSE} adresses essayées, toutes prises"}
 
 
 def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:

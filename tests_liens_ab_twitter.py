@@ -382,6 +382,28 @@ try:
     n = len(g.appels)
     r = lv.changer_adresse(TW, "a")
     check("… un second passage ne renomme plus rien", r.get("deja") and len(g.appels) == n, r)
+    # 15/10/2026, VA 71 : les douze premiers mots seuls étaient TOUS pris
+    g, _s = monde(etat={"liens": {f"{TW}:b": {"pseudo": "john088612", "numero": 71,
+                                               "shortcode": "emycute", "link_id": "lnk_71"}}})
+    nom71 = "Twitter VA 71 @john088612"
+    g.pris_sc = tuple(lv.mots_sans_prenom(nom71, i) for i in range(len(lv.MOTS_THREADS) + 2))
+    r = lv.changer_adresse(TW, "b")
+    check("tous les mots seuls pris : une paire de mots (« angelpearlyy »), pas un abandon",
+          r.get("ok") and r["public_url"].endswith("/" + lv.mots_sans_prenom(nom71, len(lv.MOTS_THREADS) + 2)),
+          r)
+    g, _s = monde()
+    g.pris = set(lv.mots_sans_prenom("Twitter VA 27 @yazid", i) for i in range(20))
+    _dup = g.duplicate_link
+
+    def _dup_pris(source, sc, nom, url, equipe):
+        if sc in g.pris:
+            g.appels.append(("duplicate", source, sc, nom, url, equipe))
+            return {"ok": False, "error": "409 shortcode_taken"}
+        return _dup(source, sc, nom, url, equipe)
+    g.duplicate_link = _dup_pris
+    r = lv.creer_pour(TW, "u20", "yazid")
+    check("… et pareil à la création : plus de douze essais",
+          r.get("ok") and r.get("shortcode") == lv.mots_sans_prenom("Twitter VA 27 @yazid", 20), r)
     g, _s = monde(config=dict(CONFIG, sans_prenom=False),
                   etat={"liens": {f"{TW}:a": {"pseudo": "x", "numero": 1, "shortcode": "emycute",
                                                "link_id": "lnk_1"}}})
