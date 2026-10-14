@@ -20816,6 +20816,10 @@ try:
     check("le bouton Supprimer tout ce qui est au-dessus est branche",
           'id="audessus"' in _srcE2 and "'/au_dessus'" in _srcE2
           and 'self.path == "/au_dessus"' in _srcE2)
+    _hAD = _srcE2[_srcE2.find("E('audessus').onclick"):_srcE2.find("E('retirercopier').onclick")]
+    check("au-dessus : la confirmation est DANS la page, jamais un confirm() que Chrome peut bloquer",
+          "E('audessus-oui').onclick" in _hAD and 'id="audessus-ok"' in _srcE2
+          and "confirm(" not in _hAD)
     check("le bouton Copier n est plus pose par defaut",
           '<input type="checkbox" id="copier">' in _srcE2)
     check("la ligne vide entre chaque message est cochee par defaut",

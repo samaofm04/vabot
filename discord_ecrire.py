@@ -547,6 +547,11 @@ button{padding:11px 18px;border:0;border-radius:9px;font-weight:700;cursor:point
 .envoyer{background:var(--bleu);color:#fff}
 .gris{background:#26263a;color:var(--texte)}
 .rouge{background:var(--rouge);color:#fff}
+.confirme-zone{margin-top:14px;padding:12px 14px;border:1px solid var(--rouge);border-radius:10px;
+               font-size:13.5px;line-height:1.55}
+.confirme-zone #audessus-texte{white-space:pre-line}
+.confirme-boutons{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.confirme-boutons button{font-size:13px;padding:8px 14px}
 button:disabled{opacity:.5;cursor:default}
 .etat{margin-top:12px;font-size:13.5px;min-height:20px}
 .ok{color:var(--vert)}.ko{color:var(--rouge)}
@@ -682,6 +687,17 @@ button:disabled{opacity:.5;cursor:default}
       <button class="rouge" id="audessus">Supprimer tout ce qui est au-dessus</button>
       <span>garde ce message et tout ce qui suit &mdash; sur Discord : clic droit sur le message
         &gt; Copier le lien du message. Il te dit combien avant.</span>
+    </div>
+    <!-- Confirmation DANS la page, pas confirm() : Chrome peut bloquer les
+         boites de dialogue d'une page (case « Empecher cette page… »), et
+         confirm() rend alors faux sans rien montrer -- vu en vrai : un clic,
+         et rien. -->
+    <div id="audessus-ok" class="confirme-zone" style="display:none">
+      <div id="audessus-texte"></div>
+      <div class="confirme-boutons">
+        <button class="rouge" id="audessus-oui">Oui, supprimer</button>
+        <button class="gris" id="audessus-non">Annuler</button>
+      </div>
     </div>
     <div class="etat" id="etat"></div>
   </div>
@@ -1171,24 +1187,50 @@ E('vider').onclick = async function(){
   chargerMessages();
 };
 
+// Le comptage en attente de confirmation : c'est CE lien-la qui sera traite,
+// meme si le champ change entre-temps -- celui que la question a montre.
+var auDessus = null;
+function cacherAuDessus(){ E('audessus-ok').style.display = 'none'; auDessus = null; }
+
 E('audessus').onclick = async function(){
+  cacherAuDessus();
   var lien = (E('lienhaut').value || '').trim();
   if(!lien){ etat('Colle d abord le lien du premier message a garder.', 'ko'); return; }
+  etat('Je compte les messages au-dessus…');
   // premier appel : on ne fait que compter. Rien n est efface a l aveugle.
-  var q = await demander('/au_dessus', {lien: lien});
+  var q;
+  try { q = await demander('/au_dessus', {lien: lien}); }
+  catch(e){ etat('✕ L outil ne repond pas : relance-le, puis recharge la page.', 'ko'); return; }
   if(!q.ok){ etat('✕ ' + (q.error || 'Erreur'), 'ko'); return; }
-  if(!q.compte){ etat('Rien au-dessus de ce message dans ' + q.salon + '.', ''); return; }
+  if(!q.compte){ etat('Rien au-dessus de ce message dans ' + q.salon + ' : rien a supprimer.', ''); return; }
   var combien = q.compte + (q.encore ? ' (au moins : reclique ensuite pour la suite)' : '');
-  if(!confirm('Supprimer ' + combien + ' message(s) AU-DESSUS dans ' + q.salon + ' ?\n'
-              + 'Du ' + q.du + ' au ' + q.au + '. Juste au-dessus :\n'
-              + (q.apercu || []).map(function(x){ return '  • ' + x; }).join('\n')
-              + '\n\nRESTE : « ' + q.garde + ' » et tout ce qui suit.'
-              + '\n\nC est definitif : Discord n a pas de corbeille.')) return;
-  this.disabled = true;
-  etat('Suppression en cours… jusqu a ' + Math.ceil(q.compte * 1.2) + ' s, laisse la page ouverte.');
-  var j = await demander('/au_dessus', {lien: lien, confirme: true});
-  this.disabled = false;
-  var txt = (j.efface || 0) + ' message(s) supprime(s) dans ' + q.salon
+  E('audessus-texte').textContent = 'Supprimer ' + combien + ' message(s) AU-DESSUS dans ' + q.salon + ' ?\n'
+    + 'Du ' + q.du + ' au ' + q.au + '. Juste au-dessus :\n'
+    + (q.apercu || []).map(function(x){ return '  • ' + x; }).join('\n')
+    + '\nRESTE : « ' + q.garde + ' » et tout ce qui suit.'
+    + '\nC est definitif : Discord n a pas de corbeille.';
+  E('audessus-oui').textContent = 'Oui, supprimer ' + q.compte + ' message(s)';
+  auDessus = {lien: lien, q: q};
+  E('audessus-ok').style.display = 'block';
+  etat('', '');
+};
+
+E('audessus-non').onclick = function(){
+  cacherAuDessus();
+  etat('Annule : rien n a ete supprime.', '');
+};
+
+E('audessus-oui').onclick = async function(){
+  if(!auDessus) return;
+  var a = auDessus;
+  cacherAuDessus();
+  E('audessus').disabled = true;
+  etat('Suppression en cours… jusqu a ' + Math.ceil(a.q.compte * 1.2) + ' s, laisse la page ouverte.');
+  var j;
+  try { j = await demander('/au_dessus', {lien: a.lien, confirme: true}); }
+  catch(e){ j = {ok: false, error: 'l outil ne repond plus : recharge la page et reclique pour voir ce qui reste'}; }
+  E('audessus').disabled = false;
+  var txt = (j.efface || 0) + ' message(s) supprime(s) dans ' + a.q.salon
           + (j.un_par_un ? ' (dont ' + j.un_par_un + ' un par un, trop vieux pour le lot)' : '');
   if(j.reste) txt += ' · il en reste ' + j.reste + (j.encore ? ' (au moins)' : '') + ' au-dessus : reclique';
   if(j.reste === null) txt += ' · le recomptage a echoue : reclique pour verifier';
@@ -1811,6 +1853,8 @@ class Poste(BaseHTTPRequestHandler):
         if erreur:
             return self._envoyer({"ok": False, "error": "Lecture du salon : " + erreur})
         if not d.get("confirme"):
+            print(f"[au-dessus] comptage {salon} : {len(anciens)} message(s) au-dessus "
+                  f"de {garde}", flush=True)
             c, info = _api_patient("GET", f"/channels/{salon}")
             return self._envoyer({
                 "ok": True, "compte": len(anciens), "encore": encore,
@@ -1820,6 +1864,8 @@ class Poste(BaseHTTPRequestHandler):
                 "au": _date_id(anciens[0]["id"]) if anciens else ""})
         efface, un_par_un, echecs = _effacer_messages(salon, [x["id"] for x in anciens])
         reste, encore, erreur = _messages_avant(salon, garde)
+        print(f"[au-dessus] {salon} : {efface} supprime(s), {len(echecs)} echec(s), "
+              f"reste {'?' if erreur else len(reste)}", flush=True)
         if erreur:
             # sans ca, une relecture refusee rendait « reste 0 » : la page
             # annoncait le travail fini et effacait le lien
