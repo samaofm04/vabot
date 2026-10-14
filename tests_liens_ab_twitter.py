@@ -159,6 +159,9 @@ def monde(config=None, etat=None, mypuls_ok=True):
 
 
 SEREN = "https://onlyfans.com/seren.vale/c201"
+# l'adresse du premier lien : sans prénom (« pour les noms des liens GMS ca
+# doit pas avoir de nom », 14/10/2026)
+SC1 = lv.mots_sans_prenom("Twitter VA 27 @yazid", 0)
 
 try:
     # ── espace ───────────────────────────────────────────────────────────
@@ -182,6 +185,8 @@ try:
     g, suivis = monde()
     r = lv.creer_pour(TW, "u1", "yazid", manager="YAZID")
     check("lien créé, 50/50 posé", r.get("ok") and (r.get("variante") or {}).get("ok"), r)
+    check("… à une adresse SANS prénom (« angelyy », pas « emycute »)",
+          r.get("shortcode") == SC1 and "emy" not in SC1, r.get("shortcode"))
     check("deux trackings au même nom : Emy (créatrice de la config) puis Seren (3867)",
           suivis == [("Twitter VA 27 @yazid", None), ("Twitter VA 27 @yazid", 3867)], suivis)
     check("… dans cet ordre : tracking Emy, lien du VA, PUIS tracking Seren",
@@ -192,7 +197,7 @@ try:
           and dup[1][5] == EMY_TWITTER and dup[1][2].startswith("abtmp"), dup)
     ab = g.de("ab")
     check("A/B posé sur le lien du VA, source = la copie, 50 %, « Seren »",
-          ab == [("ab", "lnk_emycute", f"lnk_{dup[1][2]}", EMY_TWITTER, 50, "Seren")], ab)
+          ab == [("ab", f"lnk_{SC1}", f"lnk_{dup[1][2]}", EMY_TWITTER, 50, "Seren")], ab)
     check("… et la copie temporaire supprimée", g.de("delete") == [("delete", f"lnk_{dup[1][2]}")],
           g.de("delete"))
     fv = lv.lien_de(TW, "u1").get("variante") or {}
@@ -206,8 +211,8 @@ try:
 
     # ── le podium voit la moitié Seren ───────────────────────────────────
     tv = lv.trackings_variantes()
-    check("trackings des variantes : par identifiant SANS « lnk_ »", tv == {"emycute": [SEREN]}, tv)
-    ts = pod.trackings_du_lien({"id": "lnk_emycute", "url": "https://onlyfans.com/emy.brw/c55"})
+    check("trackings des variantes : par identifiant SANS « lnk_ »", tv == {SC1: [SEREN]}, tv)
+    ts = pod.trackings_du_lien({"id": f"lnk_{SC1}", "url": "https://onlyfans.com/emy.brw/c55"})
     check("podium : le lien porte ses deux trackings, Emy et Seren",
           ts == ["emy.brw/c55", "seren.vale/c201"], ts)
     ts2 = pod.trackings_du_lien({"id": "lnk_autre", "url": "https://onlyfans.com/emy.brw/c9"})

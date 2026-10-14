@@ -180,6 +180,13 @@ def espace(gid: str = "") -> Dict[str, Any]:
             "gabarit": str(c.get("gabarit") or ""),
             "base_shortcode": str(c.get("base_shortcode") or c.get("modele") or "emy"),
             "plateforme": "Twitter", "tracking": mypuls_actif(),
+            # Proprietaire, 14/10/2026, une fois le 50/50 Emy / Seren pose :
+            # « pour les noms des liens GMS ca doit pas avoir de nom ». Comme
+            # Threads : « angelyy », plus « emycute » — le lien mene aussi chez
+            # Seren. Les liens deja postes gardent leur adresse (la changer
+            # casserait ce que le VA a mis sur Twitter). Cle « sans_prenom » :
+            # false pour revenir a « emy » + mot doux.
+            "sans_prenom": bool(c.get("sans_prenom", True)),
             "variante": v if mypuls_actif() else None}
 
 
@@ -330,7 +337,7 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     if not gabarit:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
     for essai in range(12):
-        # Threads : aucune base, aucun prénom (voir mots_sans_prenom)
+        # Threads et Twitter : aucune base, aucun prénom (voir mots_sans_prenom)
         sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
         r = gms.duplicate_link(gabarit, sc, nom, url, equipe)
         if r.get("ok"):

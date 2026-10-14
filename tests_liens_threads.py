@@ -216,7 +216,15 @@ try:
     check("Twitter : gabarit et espace Twitter, tracking MyPuls d'abord",
           r.get("ok") and dup[0][1] == GABARIT_TW and dup[0][5] == EMY_TWITTER
           and dup[0][4] == "https://of/c9" and suivis == ["Twitter VA 27 @yazid"], (r, dup, suivis))
-    check("… et son adresse garde « emy » (« emycute »), comme avant",
+    # 14/10/2026 : « pour les noms des liens GMS ca doit pas avoir de nom »
+    check("… et son adresse n'a plus de prénom non plus (« angelyy », jamais « emy »)",
+          dup and dup[0][2] == lv.mots_sans_prenom("Twitter VA 27 @yazid", 0)
+          and "emy" not in dup[0][2] and dup[0][2].endswith("y"), dup)
+    g, suivis = monde(config={"gabarit": GABARIT_TW, "equipe": EMY_TWITTER, "mypuls_actif": True,
+                              "creator_id": 3352, "variante": {}, "sans_prenom": False})
+    lv.creer_pour(TW, "u2b", "yazid", manager="YAZID")
+    dup = [a for a in g.appels if a[0] == "duplicate"]
+    check("… « sans_prenom » : false dans la config rend « emy » + mot doux (« emycute »)",
           dup and dup[0][2] == lv.mots_doux("emy", 0) == "emycute", dup)
     g, suivis = monde()
     r = lv.creer_pour(TW, "u3", "moan")
