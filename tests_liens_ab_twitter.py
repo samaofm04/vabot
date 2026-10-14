@@ -389,6 +389,47 @@ try:
     check("règle éteinte (« sans_prenom » : false) : rien n'est renommé",
           not r.get("ok") and not g.appels, (r, g.appels))
 
+    # ── le menu du VA donne l'adresse de SA fiche ────────────────────────
+    # Le bouton « Demander un lien » avait son propre registre : après le
+    # renommage du 14/10, il aurait redonné l'ancienne adresse, morte.
+    import asyncio
+    import cogs.user as cu
+    g, _s = monde(etat={"liens": {f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31,
+                                                "shortcode": "bbyy", "link_id": "lnk_31",
+                                                "public_url": "https://getmysocial.com/bbyy"}}})
+    envoyes = []
+
+    class _Rep:
+        async def defer(self, **k):
+            pass
+
+        async def send_message(self, *a, **k):
+            envoyes.append(("rep", a, k))
+
+    class _Suite:
+        async def send(self, *a, **k):
+            envoyes.append(("suite", a, k))
+
+    class _Inter:
+        guild = types.SimpleNamespace(id=int(TW), roles=[])
+        user = types.SimpleNamespace(id=42, name="abdoul_9684")
+        response = _Rep()
+        followup = _Suite()
+    _sauve_cu = {k: getattr(cu, k) for k in ("_menu_feature_check", "_link_identity",
+                                             "_menu_outils_ici", "_lr_existing")}
+    try:
+        cu._menu_feature_check = lambda i, f: True
+        cu._link_identity = lambda g_, u: "emy"
+        cu._menu_outils_ici = lambda g_: False
+        cu._lr_existing = lambda u: {"g": 1, "url": "https://getmysocial.com/emycute"}
+        asyncio.run(cu.UserCog.request_link(None, _Inter()))
+    finally:
+        for _k, _v in _sauve_cu.items():
+            setattr(cu, _k, _v)
+    txt = " ".join(str(x[1]) for x in envoyes)
+    check("menu VA : « Demander un lien » donne l'adresse de la fiche, pas l'ancienne du registre",
+          "getmysocial.com/bbyy" in txt and "emycute" not in txt, envoyes)
+
     # ── gms.poser_ab_testing ─────────────────────────────────────────────
     envois = []
 

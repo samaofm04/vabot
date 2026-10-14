@@ -5789,6 +5789,23 @@ class UserCog(commands.Cog):
             await self._demande_lien_fr(interaction, uid, identity)
             return
 
+        # 0) Twitter et Threads : le lien du VA vit dans SA fiche (liens_va,
+        #    bouton « Créer son lien »), pas dans le registre ci-dessous. Le
+        #    14/10/2026 les adresses ont été renommées (« emycute » → « bbyy ») :
+        #    le registre et la recherche par pseudo auraient redonné l'ancienne,
+        #    morte — ou celle qu'un autre VA venait de reprendre.
+        try:
+            import liens_va as _lv
+            _gid = str(getattr(interaction.guild, "id", "") or "")
+            _fiche = _lv.lien_de(_gid, str(uid)) if _gid in _lv.SERVEURS else {}
+            if _fiche.get("public_url"):
+                await interaction.followup.send(
+                    _link_message(_fiche["public_url"], interaction.guild), ephemeral=True,
+                )
+                return
+        except Exception as e:
+            print(f"[lien] fiche liens_va illisible pour {uid} : {type(e).__name__}: {e}")
+
         # 1) Lien déjà connu en local -> on l'affiche (sauf s'il est d'une autre
         #    identité que celle dédiée au serveur : alors on le considère périmé).
         _ex = _lr_existing(uid)
