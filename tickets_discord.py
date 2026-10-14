@@ -2267,7 +2267,10 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # « Créer son lien » : boutons_va ne le mettait pas hors de Twitter. Sans ce
 # rattrapage, ces VA restaient sans bouton pour toujours. Une fois par accueil
 # (« boutons » dans la fiche), pas à chaque tour.
-BOUTONS_VERSION = 2
+# 3 (15/10/2026) : « 📈 Mes subs » rejoint la rangée sur Twitter et Threads
+# (bouton posé par un patch local du VPS, 99-z-tickets-subs-total) : les
+# accueils déjà postés sont redessinés une fois pour le montrer.
+BOUTONS_VERSION = 3
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:

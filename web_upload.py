@@ -60882,6 +60882,13 @@ def _sync_liens_va(gid: str, minutes: int = 30) -> None:
         b = _lv.synchroniser(gid)
         if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates")):
             print(f"[lien] synchro {gid} : {b}", flush=True)
+        # les accueils des tickets suivent la rangée de boutons du jour
+        # (« 📈 Mes subs », 15/10/2026) : une fois par accueil, comme Threads
+        try:
+            import tickets_discord as _tk_b
+            _tk_b.redessiner_boutons(gid)
+        except Exception as e:
+            print(f"[ticket] boutons {gid} : {type(e).__name__}: {e}", flush=True)
         # les 50/50 Emy / Seren qui manquent, anciens liens compris : en fond,
         # une soixantaine de VA a quelques secondes chacun bloquerait le podium
         if _lv.espace(gid).get("variante") and _lv.en_attente(gid):

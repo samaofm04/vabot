@@ -593,6 +593,15 @@ try:
         for _k, _v in _sauve_lf.items():
             setattr(lf, _k, _v)
 
+    # ── l'accueil du ticket : redessiné pour montrer « 📈 Mes subs » ─────
+    # (le bouton lui-même vient d'un patch local du VPS, 99-z-tickets-subs-total)
+    check("les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 3)",
+          tk.BOUTONS_VERSION == 3)
+    _src_w = (BOT / "web_upload.py").read_text(encoding="utf-8")
+    _sync = _src_w[_src_w.index("def _sync_liens_va("):_src_w.index("_MODELES_VU = {")]
+    check("… Twitter compris : la boucle du podium appelle redessiner_boutons",
+          "redessiner_boutons(gid)" in _sync)
+
     # le menu se construit vraiment : 5 boutons au plus par rangée (un 6e
     # fait tomber TOUT le menu), 40 composants au plus par message
     import discord as _discord
