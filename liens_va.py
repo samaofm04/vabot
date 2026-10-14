@@ -289,6 +289,43 @@ def creer_tracking(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]
         return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
 
 
+def _tracking_existant(nom: str, creator_id: int) -> Optional[Dict[str, Any]]:
+    """{url, code} du tracking déjà nommé `nom` chez cette créatrice (API
+    MyPuls, toutes ses pages), None s'il n'y en a pas ou si l'API se tait."""
+    try:
+        import mypuls
+        for page in range(1, 6):
+            res = mypuls.api_get("tracking-links", {"per_page": 500, "page": page})
+            if not res.get("ok"):
+                return None
+            d = res.get("data")
+            items = d.get("data") if isinstance(d, dict) else d
+            items = [it for it in (items or []) if isinstance(it, dict)]
+            for it in items:
+                if (str(it.get("creator_id")) == str(int(creator_id))
+                        and str(it.get("name") or "").strip() == nom and it.get("url")):
+                    return {"url": str(it["url"]), "code": str(it.get("code") or "")}
+            if len(items) < 500:
+                break
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] recherche du tracking « {nom} » : {type(e).__name__}: {e}", flush=True)
+    return None
+
+
+def _creer_ou_reprendre(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]:
+    """Le tracking `nom` chez cette créatrice : celui qui existe déjà, sinon un
+    neuf. MyPuls ne supprime rien : un essai raté après la création (VA 75 et
+    76, 15/10/2026 : « créé, mais introuvable à la relecture ») laissait un
+    tracking au nom du VA ; le clic suivant en créait un second, à vie."""
+    cid = int(creator_id or config().get("creator_id") or 0)
+    if cid:
+        ex = _tracking_existant(nom, cid)
+        if ex:
+            print(f"[lien] tracking « {nom} » déjà chez MyPuls ({ex['url']}) : repris", flush=True)
+            return {"ok": True, "url": ex["url"], "code": ex["code"], "repris": True, "erreur": ""}
+    return creer_tracking(nom, creator_id) if creator_id else creer_tracking(nom)
+
+
 def _raison_refus(r) -> str:
     """Le message d'une reponse MyPuls en erreur (JSON Laravel : message +
     errors par champ), sinon le debut du texte brut."""
@@ -324,6 +361,29 @@ def _tracking_de(session, html: str):
     relecture » : seules les adresses OnlyFans etaient lues) -- leur code est
     l'adresse entiere, la comparaison avant/apres ne garde que la nouvelle."""
     out, vus = [], set()
+    # LE NOM DE CHAQUE TRACKING, lu sur sa ligne du tableau
+    # (<tr id="row-link-N"> … <div class="fw-bold">NOM</div> … l'adresse).
+    # Il restait vide : depuis la garde du 15/10/2026 (patch local du VPS,
+    # 99-z-tracking-creator-guard), qui ne retient plus que le tracking AU BON
+    # NOM, chaque création « créé, mais introuvable à la relecture » — le
+    # tracking existait chez MyPuls (VA 75 c83, VA 76 c84), le lien jamais.
+    import html as _html
+    for r in re.finditer(r'<tr id="row-link-\d+"(.*?)</tr>', html or "", re.S):
+        ligne = r.group(1)
+        n = re.search(r'<div class="fw-bold">\s*(.*?)\s*</div>', ligne, re.S)
+        nom = _html.unescape(re.sub(r"<[^>]+>", "", n.group(1))).strip() if n else ""
+        o = re.search(r'https://onlyfans\.com/([A-Za-z0-9._-]+)/(c\d+)', ligne)
+        if o and o.group(2) not in vus:
+            vus.add(o.group(2))
+            out.append({"code": o.group(2), "nom": nom, "url": o.group(0)})
+            continue
+        y = re.search(r'https?://(?:www\.)?mym\.(?:fans|me)/[A-Za-z0-9._~/?=&%-]+', ligne)
+        if y:
+            url = y.group(0).rstrip("/.&?")
+            if url not in vus:
+                vus.add(url)
+                out.append({"code": url, "nom": nom, "url": url})
+    # ce que le tableau n'a pas donné (page d'une autre forme) : par l'adresse
     for m in re.finditer(r'https://onlyfans\.com/([A-Za-z0-9._-]+)/(c\d+)', html):
         code = m.group(2)
         if code in vus:
@@ -532,7 +592,7 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
     nom = f'{e["plateforme"]} VA {n} @{pseudo}'[:60]
     t = {"ok": True, "url": "", "code": ""}
     if e["tracking"]:
-        t = creer_tracking(nom)
+        t = _creer_ou_reprendre(nom)
         if not t.get("ok"):
             return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
     # sans URL, le duplicata garde la destination du gabarit. Sur Twitter :
@@ -632,7 +692,7 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
     if not fv.get("tracking"):
         # le meme nom que le tracking Emy : le podium (registre, nom MyPuls)
         # y retrouve le meme VA
-        t = creer_tracking(nom, int(v["creator_id"]))
+        t = _creer_ou_reprendre(nom, int(v["creator_id"]))
         if not t.get("ok"):
             err = f'MyPuls ({v["modele"]}) : {t.get("erreur", "")}'
             # un refus net n'a rien créé : on pourra réessayer. Le reste

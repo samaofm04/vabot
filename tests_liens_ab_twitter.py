@@ -593,6 +593,35 @@ try:
         for _k, _v in _sauve_lf.items():
             setattr(lf, _k, _v)
 
+    # ── la relecture MyPuls lit le NOM de chaque tracking ────────────────
+    # 15/10/2026 : la garde du VPS ne retient que le tracking au bon nom ; le
+    # nom restait vide, et chaque création finissait « introuvable » (VA 75, 76)
+    PAGE = ('<tr id="row-link-8924"> <td class="ps-4"> <div class="fw-bold">Twitter VA 76 @ghost_me0436</div>'
+            '<div class="small text-muted">Créé le 15/10/2026</div> </td> <td> <span class="url-pill">'
+            '<span class="text-truncate url-text">https://onlyfans.com/emy.brw/c84</span></span></td></tr>'
+            '<tr id="row-link-9"> <td> <div class="fw-bold">Amelia_VA_46_x</div></td><td>'
+            '<button data-url="https://mym.fans/app/t/hn0d"></button></td></tr>'
+            '<p>https://onlyfans.com/emy.brw/c9</p>')
+    lus = lv._tracking_de(None, PAGE)
+    check("relecture : le nom de chaque tracking, OF comme MYM, depuis sa ligne du tableau",
+          {"code": "c84", "nom": "Twitter VA 76 @ghost_me0436", "url": "https://onlyfans.com/emy.brw/c84"} in lus
+          and any(x["nom"] == "Amelia_VA_46_x" and x["url"] == "https://mym.fans/app/t/hn0d" for x in lus)
+          and any(x["code"] == "c9" and x["nom"] == "" for x in lus), lus)
+
+    # ── un tracking déjà créé au nom du VA est repris, pas doublé ────────────
+    g, suivis = monde()
+    _sauve_ex = lv._tracking_existant
+    try:
+        lv._tracking_existant = lambda nom, cid: ({"url": "https://onlyfans.com/emy.brw/c84", "code": "c84"}
+                                                  if (nom, cid) == ("Twitter VA 27 @yazid", 3352) else None)
+        r = lv.creer_pour(TW, "u30", "yazid", manager="YAZID")
+        check("création : le tracking Emy déjà chez MyPuls au nom du VA est repris (aucun doublon)",
+              r.get("ok") and r.get("tracking") == "https://onlyfans.com/emy.brw/c84"
+              and ("Twitter VA 27 @yazid", None) not in suivis and ("Twitter VA 27 @yazid", 3867) in suivis,
+              (r, suivis))
+    finally:
+        lv._tracking_existant = _sauve_ex
+
     # ── l'accueil du ticket : redessiné pour montrer « 📈 Mes subs » ─────
     # (le bouton lui-même vient d'un patch local du VPS, 99-z-tickets-subs-total)
     check("les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 3)",
