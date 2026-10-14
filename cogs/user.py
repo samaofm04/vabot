@@ -5799,8 +5799,13 @@ class UserCog(commands.Cog):
             _gid = str(getattr(interaction.guild, "id", "") or "")
             _fiche = _lv.lien_de(_gid, str(uid)) if _gid in _lv.SERVEURS else {}
             if _fiche.get("public_url"):
+                # le même texte que dans le ticket (tickets_discord.message_lien_va) :
+                # « juste dire voilà ton lien avec le tracking de sub » (15/10/2026)
                 await interaction.followup.send(
-                    _link_message(_fiche["public_url"], interaction.guild), ephemeral=True,
+                    f"🔗 Voilà ton lien avec ton tracking de subs : {_fiche['public_url']}"
+                    if _lv.espace(_gid)["plateforme"] == "Twitter"
+                    else _link_message(_fiche["public_url"], interaction.guild),
+                    ephemeral=True,
                 )
                 return
         except Exception as e:

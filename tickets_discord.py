@@ -1198,25 +1198,22 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
                     if r.get("provisoire") else "")
             rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
             v = r.get("variante") or {}
-            if v.get("ok"):
-                ab = f' · {100 - v["poids"]}/{v["poids"]} avec {v["modele"]} ✓'
-            elif v:
-                # le lien marche, tout chez la première modèle : dit, pas caché
-                ab = (f'\n⚠️ {v["modele"]} pas encore branché ({v.get("erreur") or "?"}) : '
-                      f'tout part sur le tracking principal en attendant.'
-                      + (" Recolle le cookie GetMySocial (Tableau GMS › 🔑 Clés) : le "
-                         f'{100 - v["poids"]}/{v["poids"]} se posera tout seul.'
-                         if v.get("cookie") else ""))
+            # Propriétaire, 15/10/2026 : « arrête de dire tracking pour elle et
+            # elle » — ni Emy ni Seren dans les messages. Un 50/50 posé ne se
+            # dit plus ; un 50/50 en plan se dit encore, sans nom de modèle
+            # (le lien marche, tout part sur un seul tracking en attendant).
+            if v and not v.get("ok"):
+                ab = ("\n⚠️ Partage 50/50 pas encore posé : tout part sur un seul tracking "
+                      "en attendant."
+                      + (" Recolle le cookie GetMySocial (Settings › Intégrations) : il se "
+                         "posera tout seul." if v.get("cookie") else " Il sera repris tout seul."))
             else:
                 ab = ""
             _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
                           f'{r["public_url"]}{rang}{ab}{note}', p)
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
-                     json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
-                                      + ("C'est celui-là que tu postes sur Twitter — il compte "
-                                         "tes subs pour le podium." if plateforme == "Twitter"
-                                         else f"C'est celui-là que tu mets sur {plateforme}."),
+                     json={"content": message_lien_va(uid, r["public_url"], plateforme),
                            "allowed_mentions": {"users": [uid]}})
         else:
             sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
@@ -1224,6 +1221,80 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
 
     _EN_FOND(travail)
     return _differer()
+
+
+def message_lien_va(uid: str, url: str, plateforme: str = "Twitter") -> str:
+    """Le message qui donne son lien au VA, dans son ticket. Un seul endroit :
+    la création et le nettoyage des vieux messages écrivent le même.
+
+    Propriétaire, 15/10/2026 : « juste dire voilà ton lien avec le tracking de
+    sub » — ni modèle, ni consigne en plus."""
+    if plateforme == "Twitter":
+        return f"🔗 <@{uid}>, voilà ton lien avec ton tracking de subs : {url}"
+    return f"🔗 <@{uid}>, voici **ton lien** : {url}\nC'est celui-là que tu mets sur {plateforme}."
+
+
+def _est_message_de_lien(texte: str) -> bool:
+    """Un message du bot qui donnait son lien au VA (tous les libellés qu'il a
+    eus : « voici ton lien », « voilà ton lien »)."""
+    t = str(texte or "").lower()
+    return "getmysocial.com/" in t and ("ton lien" in t or "**ton lien**" in t)
+
+
+def nettoyer_messages_lien(gid: str, pages: int = 5) -> Dict[str, Any]:
+    """Remet le BON lien dans les messages du bot qui en donnaient un, ticket
+    par ticket. Rend {corriges, a_jour, rates}.
+
+    Propriétaire, 15/10/2026 : « tu peux clean les liens dans les conv ». Les
+    adresses ont été renommées (« emycute » → « bbyy ») : les anciens
+    messages menaient à une page morte, ou chez un autre VA. Corrigés plutôt
+    que supprimés : le fil du ticket garde sa forme, et rien ne se perd.
+    Seuls les messages DU BOT sont touchés — Discord refuse de toute façon
+    d'éditer ceux des autres."""
+    import liens_va
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"corriges": [], "a_jour": 0, "rates": []}
+    code, moi = _api("GET", "/users/@me")
+    bot_id = str((moi or {}).get("id") or "") if code == 200 and isinstance(moi, dict) else ""
+    if not bot_id:
+        bilan["rates"].append(f"identité du bot illisible (HTTP {code})")
+        return bilan
+    plateforme = liens_va.espace(gid)["plateforme"]
+    tickets = _etat().get("tickets") or {}
+    for cle, l in sorted((liens_va._etat().get("liens") or {}).items()):
+        if not cle.startswith(f"{gid}:") or not l.get("public_url"):
+            continue
+        uid = cle.split(":", 1)[1]
+        salon = str((tickets.get(cle) or {}).get("salon") or "")
+        if not salon:
+            bilan["rates"].append(f'{l.get("pseudo")} : pas de salon connu')
+            continue
+        voulu = message_lien_va(uid, l["public_url"], plateforme)
+        avant = ""
+        for _ in range(max(1, pages)):
+            chemin = f"/channels/{salon}/messages?limit=100" + (f"&before={avant}" if avant else "")
+            code, msgs = _api("GET", chemin)
+            if code != 200 or not isinstance(msgs, list):
+                bilan["rates"].append(f'{l.get("pseudo")} : salon illisible (HTTP {code})')
+                break
+            for m in msgs:
+                if str((m.get("author") or {}).get("id") or "") != bot_id:
+                    continue
+                if not _est_message_de_lien(m.get("content")):
+                    continue
+                if m.get("content") == voulu:
+                    bilan["a_jour"] += 1
+                    continue
+                c2, _r = _api("PATCH", f'/channels/{salon}/messages/{m["id"]}',
+                              json={"content": voulu, "allowed_mentions": {"parse": []}})
+                if c2 == 200:
+                    bilan["corriges"].append(f'{l.get("pseudo")} ({m["id"]})')
+                else:
+                    bilan["rates"].append(f'{l.get("pseudo")} : message {m["id"]} non corrigé (HTTP {c2})')
+            if len(msgs) < 100:
+                break
+            avant = str(msgs[-1].get("id") or "")
+    return bilan
 
 
 def nom_manager(gid: str, uid: str) -> str:

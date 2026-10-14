@@ -525,14 +525,59 @@ try:
     tk._api = faux_api
     g, _s = monde()
     tk._creer_lien(TW, "u6", "m1", {"token": "t", "channel_id": "s6"})
-    check("manager : « 50/50 avec Seren ✓ »", suites and "50/50 avec Seren ✓" in suites[0], suites)
+    # « arrête de dire tracking pour elle et elle », « juste dire voilà ton
+    # lien avec le tracking de sub » (15/10/2026)
+    vu = " ".join(suites) + " " + json.dumps([x[2] for x in postes], ensure_ascii=False)
+    check("manager : le lien, sans nom de modèle",
+          suites and "getmysocial.com/" in suites[0] and "Seren" not in vu and "Emy" not in vu, suites)
+    msg_va = [x[2]["content"] for x in postes if x[0] == "POST" and x[1] == "/channels/s6/messages"]
+    check("VA : « voilà ton lien avec ton tracking de subs : … », rien d'autre",
+          msg_va and msg_va[0].startswith("🔗 <@u6>, voilà ton lien avec ton tracking de subs : https://getmysocial.com/")
+          and "\n" not in msg_va[0], msg_va)
     suites.clear()
+    postes.clear()
     g, _s = monde()
     g.ab = {"ok": False, "cookie": True, "error": "cookie de session GetMySocial refusé"}
     tk._creer_lien(TW, "u7", "m1", {"token": "t", "channel_id": "s7"})
-    check("cookie refusé : le manager sait que tout part sur Emy, et quoi faire",
-          suites and "Seren pas encore branché" in suites[0] and "Recolle le cookie" in suites[0]
-          and "getmysocial.com/" in suites[0], suites)
+    check("cookie refusé : le manager sait que le partage attend, et quoi faire, sans nom de modèle",
+          suites and "pas encore posé" in suites[0] and "Recolle le cookie" in suites[0]
+          and "getmysocial.com/" in suites[0] and "Seren" not in suites[0] and "Emy" not in suites[0],
+          suites)
+
+    # ── nettoyer les vieux messages de lien dans les tickets ─────────────
+    # « tu peux clean les liens dans les conv » (15/10/2026)
+    g, _s = monde(etat={"liens": {f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31,
+                                                "shortcode": "bbyy",
+                                                "public_url": "https://getmysocial.com/bbyy"}}})
+    tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {f"{TW}:42": {"salon": "s42"}}}))
+    MSGS = [
+        {"id": "m1", "author": {"id": "BOT"}, "content": "🔗 <@42>, voici **ton lien** : "
+         "https://getmysocial.com/emycute\nC'est celui-là que tu postes sur Twitter — il compte tes subs pour le podium."},
+        {"id": "m2", "author": {"id": "BOT"}, "content": "Bienvenue ! Lis les règles."},
+        {"id": "m3", "author": {"id": "42"}, "content": "mon lien c'est getmysocial.com/emycute ?"},
+        {"id": "m4", "author": {"id": "BOT"},
+         "content": "🔗 <@42>, voilà ton lien avec ton tracking de subs : https://getmysocial.com/bbyy"},
+    ]
+    patchs = []
+
+    def api_salon(methode, chemin, **kw):
+        if chemin == "/users/@me":
+            return 200, {"id": "BOT"}
+        if methode == "GET" and chemin.startswith("/channels/s42/messages"):
+            return 200, json.loads(json.dumps(MSGS))
+        if methode == "PATCH":
+            patchs.append((chemin, kw.get("json")))
+            return 200, {}
+        return 404, {}
+    tk._api = api_salon
+    b = tk.nettoyer_messages_lien(TW)
+    check("nettoyage : le vieux message de lien du bot porte le BON lien",
+          patchs == [("/channels/s42/messages/m1",
+                      {"content": "🔗 <@42>, voilà ton lien avec ton tracking de subs : "
+                                  "https://getmysocial.com/bbyy", "allowed_mentions": {"parse": []}})]
+          and len(b["corriges"]) == 1 and b["a_jour"] == 1 and not b["rates"], (patchs, b))
+    check("… ni les autres messages du bot, ni ceux du VA ne sont touchés",
+          all("/m2" not in c and "/m3" not in c for c, _ in patchs), patchs)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)
