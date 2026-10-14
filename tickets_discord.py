@@ -1197,8 +1197,20 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
                     "link MyPuls reste à créer et à rattacher."
                     if r.get("provisoire") else "")
             rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
+            v = r.get("variante") or {}
+            if v.get("ok"):
+                ab = f' · {100 - v["poids"]}/{v["poids"]} avec {v["modele"]} ✓'
+            elif v:
+                # le lien marche, tout chez la première modèle : dit, pas caché
+                ab = (f'\n⚠️ {v["modele"]} pas encore branché ({v.get("erreur") or "?"}) : '
+                      f'tout part sur le tracking principal en attendant.'
+                      + (" Recolle le cookie GetMySocial (Tableau GMS › 🔑 Clés) : le "
+                         f'{100 - v["poids"]}/{v["poids"]} se posera tout seul.'
+                         if v.get("cookie") else ""))
+            else:
+                ab = ""
             _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
-                          f'{r["public_url"]}{rang}{note}', p)
+                          f'{r["public_url"]}{rang}{ab}{note}', p)
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
                      json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'

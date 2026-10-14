@@ -1097,13 +1097,31 @@ def tracking_de(url: Any) -> str:
     return f"{m.group(1).lower()}/c{int(m.group(2))}" if m else ""
 
 
+def _trackings_variante(l: Dict[str, Any]) -> List[str]:
+    """Le tracking de la variante A/B d'un lien de VA Twitter (liens_va) :
+    la moitié Seren de ses visiteurs. La liste des liens ne le montre nulle
+    part — sans lui, cette moitié des clics n'irait à personne."""
+    lid = str(l.get("id") or "")
+    if not lid:
+        return []
+    try:
+        import liens_va
+        return list(liens_va.trackings_variantes().get(liens_va._sans_prefixe(lid)) or [])
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] trackings des variantes illisibles : {type(e).__name__}: {e}",
+              flush=True)
+        return []
+
+
 def trackings_du_lien(l: Dict[str, Any]) -> List[str]:
     """Les trackings d'un lien : son url (lien direct), celles de ses boutons
-    (page). Un bouton éteint, s'il le dit, n'envoie personne."""
+    (page), celui de sa variante A/B. Un bouton éteint, s'il le dit,
+    n'envoie personne."""
     urls = [l.get("url")] + [
         b.get("url") for b in (l.get("buttons") or [])
         if isinstance(b, dict) and b.get("enabled") is not False and b.get("active") is not False
-        and b.get("hidden") is not True and b.get("visible") is not False]
+        and b.get("hidden") is not True and b.get("visible") is not False
+    ] + _trackings_variante(l)
     out: List[str] = []
     for u in urls:
         t = tracking_de(u)

@@ -50,6 +50,15 @@ ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
                   # étape 3) : « de base y avait 2 groupes et c'est tout »
                   "groupes_managers_seuls": True}
 
+# Twitter, 14/10/2026 : le meme 50/50 que emythreads, mais chaque moitie au
+# tracking du VA. Proprietaire : « exactement le meme lien juste pour Twitter,
+# le mec il a son tracking link », puis « avec 2 tracking links, un pour Emy et
+# un pour Seren ». Le lien garde son tracking Emy (creator_id de la config) ;
+# `poids` % des visiteurs partent sur SON tracking Seren (poser_variante).
+# Surchargeable par la cle « variante » de liens_va_config.json ; {} ou false
+# l'eteint pour les liens a venir.
+VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
+
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
 SERVEURS = {TWITTER_ID, THREADS_ID}
 
@@ -153,18 +162,25 @@ def espace(gid: str = "") -> Dict[str, Any]:
     Un seul endroit qui le décide : créer, couper, supprimer et ranger lisent
     tous ici — deux tables auraient fini par envoyer un lien Threads chez
     Twitter. « tracking » : un tracking link MyPuls avant le lien (Twitter,
-    quand l'interrupteur est ouvert) ; jamais sur Threads.
+    quand l'interrupteur est ouvert) ; jamais sur Threads. « variante » : le
+    50/50 vers une autre modèle, chacune à son tracking (Twitter) ; None sans
+    tracking — une moitié sans tracking ne serait rattachée à personne.
     """
     c = config()
     if str(gid) == THREADS_ID:
         sur = c.get("threads") if isinstance(c.get("threads"), dict) else {}
         e = dict(ESPACE_THREADS, **{k: v for k, v in sur.items() if v})
         e["tracking"] = False
+        e["variante"] = None
         return e
+    v = c.get("variante", VARIANTE_TWITTER)
+    v = dict(VARIANTE_TWITTER, **v) if isinstance(v, dict) and v else (
+        dict(VARIANTE_TWITTER) if v is True else None)
     return {"equipe": str(c.get("equipe") or EQUIPE_VA),
             "gabarit": str(c.get("gabarit") or ""),
             "base_shortcode": str(c.get("base_shortcode") or c.get("modele") or "emy"),
-            "plateforme": "Twitter", "tracking": mypuls_actif()}
+            "plateforme": "Twitter", "tracking": mypuls_actif(),
+            "variante": v if mypuls_actif() else None}
 
 
 def manque(gid: str = "") -> str:
@@ -493,11 +509,174 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         "tracking": t["url"], "code": t["code"], "par": str(par),
         "quand": int(_t.time())}
     _ecrire(d)
+    # le 50/50 APRES le lien : un echec ici laisse un lien qui marche (tout
+    # chez la premiere modele), note dans la fiche et repris par
+    # reprendre_variantes ; dans l'autre ordre, un echec GetMySocial aurait
+    # laisse deux trackings MyPuls orphelins au lieu d'un
+    var = None
+    if e.get("variante"):
+        try:
+            rv = poser_variante(gid, uid)
+        except Exception as ex:                              # noqa: BLE001
+            # le lien est cree et note : une exception ici ne doit pas faire
+            # croire au manager que rien n'a marche
+            rv = {"ok": False, "erreur": f"{type(ex).__name__}: {str(ex)[:120]}"}
+        var = {"ok": bool(rv.get("ok")), "modele": e["variante"]["modele"],
+               "poids": int(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
+               "cookie": bool(rv.get("cookie")), "erreur": rv.get("erreur", "")}
     return {"ok": True, "numero": n, "public_url": g["url"], "groupe": groupe,
             "shortcode": g["shortcode"], "tracking": t["url"],
             # Threads n'a pas de tracking link a venir : rien de provisoire
             "provisoire": e["plateforme"] == "Twitter" and not e["tracking"],
-            "plateforme": e["plateforme"], "erreur": ""}
+            "plateforme": e["plateforme"], "variante": var, "erreur": ""}
+
+
+# ─── le 50/50 de Twitter : la moitié des visiteurs chez une autre modèle ─────
+def _sans_prefixe(lid: Any) -> str:
+    s = str(lid or "").strip()
+    return s[4:] if s.startswith("lnk_") else s
+
+
+def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
+    """Branche le 50/50 sur le lien d'un VA : `poids` % de ses visiteurs
+    partent sur SON tracking chez la modèle de la variante (Seren).
+    Rend {ok, tracking, cookie, erreur}.
+
+    GetMySocial ne prend pas d'URL pour une variante : elle COPIE un autre
+    lien, à l'enregistrement. D'où un lien temporaire vers le tracking Seren,
+    copié dans l'A/B puis supprimé. Vérifié le 14/10/2026 sur un lien d'essai
+    d'EMY TWITTER : 24 / 16 sur 40 visiteurs, et toujours 24 / 16 une fois la
+    source modifiée puis supprimée — la copie est figée.
+
+    Reprenable : le tracking Seren est noté dans la fiche DÈS sa création.
+    MyPuls ne sait pas le supprimer ; un second essai (cookie recollé) le
+    réutilise au lieu d'en créer un autre.
+    """
+    import secrets
+    import time as _t
+    import gms
+    e = espace(gid)
+    v = e.get("variante")
+    if not v:
+        return {"ok": False, "erreur": "pas de 50/50 sur ce serveur"}
+    l = lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    fv = dict(l.get("variante") or {})
+    if fv.get("posee"):
+        return {"ok": True, "deja": True, "tracking": fv.get("tracking", ""), "erreur": ""}
+    equipe = str(e["equipe"])
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
+    if not lid:
+        return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
+    nom = f'Twitter VA {l.get("numero") or "?"} @{l.get("pseudo") or uid}'[:60]
+
+    def noter(**kw) -> None:
+        d = _etat()
+        f = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+        f["variante"] = dict(f.get("variante") or {}, **kw)
+        _ecrire(d)
+
+    if not fv.get("tracking"):
+        # le meme nom que le tracking Emy : le podium (registre, nom MyPuls)
+        # y retrouve le meme VA
+        t = creer_tracking(nom, int(v["creator_id"]))
+        if not t.get("ok"):
+            err = f'MyPuls ({v["modele"]}) : {t.get("erreur", "")}'
+            noter(modele=v["modele"], posee=False, erreur=err)
+            return {"ok": False, "erreur": err}
+        fv = {"modele": v["modele"], "creator_id": int(v["creator_id"]),
+              "tracking": t["url"], "code": t["code"]}
+        noter(posee=False, erreur="", **fv)
+
+    def rate(err: str, cookie: bool = False) -> Dict[str, Any]:
+        noter(posee=False, erreur=err)
+        return {"ok": False, "cookie": cookie, "tracking": fv["tracking"], "erreur": err}
+
+    sc = "abtmp" + secrets.token_hex(5)
+    r = gms.duplicate_link(e["gabarit"], sc, f'variante {v["modele"]} - {nom}'[:60],
+                           fv["tracking"], equipe)
+    if not r.get("ok"):
+        return rate(f'GetMySocial : copie temporaire refusée ({str(r.get("error"))[:100]})')
+    tmp = r.get("link") if isinstance(r.get("link"), dict) else {}
+    tmp_id = str(tmp.get("id") or "")
+    try:
+        if not tmp_id:
+            return rate("GetMySocial : copie temporaire sans identifiant")
+        # duplicate_link avale un échec de sa mise à jour d'adresse : la copie
+        # garderait celle du gabarit, et la « variante » repartirait chez Emy
+        if str(tmp.get("url") or "").strip().rstrip("/").lower() != \
+                str(fv["tracking"]).strip().rstrip("/").lower():
+            return rate(f'GetMySocial : la copie temporaire pointe sur '
+                        f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}')
+        ab = gms.poser_ab_testing(lid, tmp_id, equipe, int(v["poids"]), v["modele"])
+    finally:
+        if tmp_id:
+            rd = gms.delete_link(tmp_id)
+            if not rd.get("ok"):
+                # resté dans EMY TWITTER : à effacer à la main, et c'est dit
+                print(f"[lien] copie temporaire {sc} ({tmp_id}) non supprimée : "
+                      f"{str(rd.get('error'))[:100]}", flush=True)
+    if not ab.get("ok"):
+        return rate("GetMySocial : " + str(ab.get("error") or "A/B refusé"),
+                    cookie=bool(ab.get("cookie")))
+    noter(posee=True, erreur="", quand=int(_t.time()))
+    return {"ok": True, "tracking": fv["tracking"], "erreur": ""}
+
+
+def reprendre_variantes(gid: str = TWITTER_ID) -> Dict[str, Any]:
+    """Repose les 50/50 restés en plan (cookie périmé, MyPuls muet).
+
+    Seulement les liens qui l'attendent : une fiche marquée « variante » non
+    posée. Les liens d'avant le 50/50 n'en ont pas et ne bougent pas. S'arrête
+    au premier refus de cookie : le suivant échouerait pareil."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    if not espace(gid).get("variante"):
+        return bilan
+    for cle, l in sorted((_etat().get("liens") or {}).items()):
+        if not cle.startswith(f"{gid}:") or not l.get("shortcode"):
+            continue
+        fv = l.get("variante")
+        if not isinstance(fv, dict) or fv.get("posee"):
+            continue
+        r = poser_variante(gid, cle.split(":", 1)[1])
+        qui = l.get("pseudo") or cle
+        if r.get("ok"):
+            bilan["poses"].append(qui)
+        else:
+            bilan["rates"].append(f'{qui} : {r.get("erreur")}')
+            if r.get("cookie"):
+                bilan["cookie"] = True
+                break
+    return bilan
+
+
+_VARIANTES_LUES: Dict[str, Any] = {}
+
+
+def trackings_variantes() -> Dict[str, list]:
+    """{identifiant du lien (sans « lnk_ ») : [tracking de sa variante]}.
+
+    Le podium de Twitter reconnaît un VA à ses trackings, lus dans l'adresse
+    du lien et de ses boutons. Celui de la variante n'y est nulle part (la
+    liste des liens ne donne que l'identifiant de la variante) : sans ceci,
+    la moitié Seren des clics de chaque VA n'irait à personne. Relu quand le
+    fichier change seulement — le podium le demande pour chaque lien."""
+    try:
+        mt = ETAT_FICHIER.stat().st_mtime
+    except OSError:
+        return {}
+    cle = f"{ETAT_FICHIER}:{mt}"
+    if _VARIANTES_LUES.get("cle") != cle:
+        out: Dict[str, list] = {}
+        for l in (_etat().get("liens") or {}).values():
+            fv = l.get("variante") if isinstance(l, dict) else None
+            if isinstance(fv, dict) and fv.get("posee") and fv.get("tracking") and l.get("link_id"):
+                out.setdefault(_sans_prefixe(l["link_id"]), []).append(str(fv["tracking"]))
+        _VARIANTES_LUES.clear()
+        _VARIANTES_LUES.update(cle=cle, out=out)
+    return _VARIANTES_LUES["out"]
 
 
 def rebrancher(gid: str, uid: str) -> Dict[str, Any]:

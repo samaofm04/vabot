@@ -47564,6 +47564,21 @@ function gdChangeKey(){
     for(var i = 1; i <= 8; i++){
       rows += gdKeyRow('k' + i, '↓ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
     }
+    var ck = d.cookie || {};
+    var ckEtat = !ck.present ? 'absent : le 50/50 Emy / Seren des liens Twitter ne se pose pas'
+      : (ck.jours == null ? 'présent, échéance illisible'
+      : (ck.jours < 0 ? 'ÉCHU depuis le ' + gdEsc(ck.expire) + ' : à recoller'
+      : 'valide jusqu’au ' + gdEsc(ck.expire) + ' (' + ck.jours + ' j)'));
+    var ckBloc = '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #23262f">'
+      + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🍪 Cookie de session — 50/50 Emy / Seren des liens Twitter</div>'
+      + '<div style="font-size:11px;color:' + (ck.jours != null && ck.jours > 3 ? '#6b7280' : '#f59e0b') + ';margin-bottom:8px">'
+      + ckEtat + ' · il dure 30 jours. Sur getmysocial.com : F12 › Application › Cookies › authToken, copie sa valeur.</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      + '<input id="gd-kf-cookie" class="gd-sel" type="text" autocomplete="off" spellcheck="false" '
+      + 'style="min-width:300px;flex:1;-webkit-text-security:disc" placeholder="valeur d’authToken (ou l’en-tête Cookie entier)">'
+      + '<button class="gd-sel" style="min-width:auto;cursor:pointer;color:#4ade80;font-weight:700" onclick="gdSaveCookie()">🍪 Enregistrer le cookie</button>'
+      + '</div></div>';
+    rows += ckBloc;
     panel.innerHTML = '<div style="background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:14px">'
       + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🔑 Clés API GetMySocial</div>'
       + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Champ vide = conserver la clé actuelle · tape « - » dans une clé dédiée pour vider ce slot.</div>'
@@ -47601,6 +47616,23 @@ function gdSaveKeys(){
         setTimeout(function(){ location.reload(); }, 1300);
       } else {
         if(typeof showToast === 'function') showToast('✕ ' + ((d && d.error) || '?'), 'error', 7000);
+      }
+    }).catch(function(e){ if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); });
+}
+function gdSaveCookie(){
+  var el = document.getElementById('gd-kf-cookie');
+  var v = (el && el.value || '').trim();
+  if(!v){ if(typeof showToast === 'function') showToast('Colle d’abord la valeur d’authToken', 'error'); return; }
+  var fd = new FormData(); fd.append('cookie', v);
+  fetch('/gms/set_session_cookie', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if(d && d.ok){
+        var msg = '🍪 Cookie enregistré' + (d.expire ? ', valide jusqu’au ' + d.expire : '');
+        if(d.reprise) msg += ' · ' + d.reprise + ' lien(s) en attente du 50/50 : reprise lancée';
+        if(typeof showToast === 'function') showToast(msg, 'success', 7000);
+        gdChangeKey();
+      } else {
+        if(typeof showToast === 'function') showToast('✕ ' + ((d && d.error) || '?'), 'error', 8000);
       }
     }).catch(function(e){ if(typeof showToast === 'function') showToast('Erreur : ' + e, 'error'); });
 }
@@ -64636,7 +64668,21 @@ def create_app():
         import gms
         return jsonify({"ok": True,
                         "main": _gd_mask(gms.get_api_key()),
-                        "pool": [_gd_mask(k) for k in gms.get_dash_keys()]})
+                        "pool": [_gd_mask(k) for k in gms.get_dash_keys()],
+                        "cookie": _gd_cookie_etat()})
+
+    def _gd_cookie_etat():
+        """{present, expire « JJ/MM/AAAA », jours restants} du cookie de session
+        GetMySocial — jamais sa valeur. Il dure 30 jours, et sans lui le
+        50/50 Emy / Seren des liens Twitter ne se pose pas : l'échéance se
+        voit dans le panneau avant de manquer."""
+        import time as _t
+        import gms
+        ck = gms.get_session_cookie()
+        exp = gms.cookie_expiration(ck) if ck else None
+        return {"present": bool(ck),
+                "expire": _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else "",
+                "jours": int((exp - _t.time()) // 86400) if exp else None}
 
     @app.route("/gmsdash/set_keys", methods=["POST"])
     def gmsdash_set_keys():
@@ -70928,11 +70974,41 @@ def create_app():
             import gms
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
-        cookie = (request.form.get("cookie") or "").strip()
+        import time as _t
+        cookie = gms.normaliser_cookie(request.form.get("cookie") or "")
         if not cookie or len(cookie) < 50:
             return jsonify({"ok": False, "error": "cookie trop court ou vide"})
+        exp = gms.cookie_expiration(cookie)
+        if exp and exp < _t.time():
+            # refusé plutôt qu'enregistré : il remplacerait un cookie peut-être
+            # encore bon, et chaque 50/50 échouerait en silence ensuite
+            return jsonify({"ok": False, "error": "ce cookie est déjà échu (le "
+                            + _t.strftime("%d/%m/%Y", _t.localtime(exp))
+                            + ") : reconnecte-toi à GetMySocial et recopie authToken"})
         gms.save_session_cookie(cookie)
-        return jsonify({"ok": True, "len": len(cookie)})
+        # les liens Twitter dont le 50/50 attendait un cookie : repris en fond,
+        # le panneau n'attend pas une minute de MyPuls et de GetMySocial
+        reprise = 0
+        try:
+            import liens_va
+            reprise = sum(1 for k, l in (liens_va._etat().get("liens") or {}).items()
+                          if k.startswith(f"{liens_va.TWITTER_ID}:")
+                          and isinstance(l.get("variante"), dict)
+                          and not l["variante"].get("posee"))
+            if reprise:
+                def _reprendre():
+                    try:
+                        b = liens_va.reprendre_variantes()
+                        print(f"[lien] 50/50 repris apres le cookie : {len(b['poses'])} pose(s), "
+                              f"{len(b['rates'])} rate(s) {b['rates'][:3]}", flush=True)
+                    except Exception as e:
+                        print(f"[lien] reprise des 50/50 : {type(e).__name__}: {e}", flush=True)
+                import threading as _th
+                _th.Thread(target=_reprendre, daemon=True).start()
+        except Exception as e:
+            print(f"[lien] reprise des 50/50 non lancee : {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": True, "len": len(cookie), "reprise": reprise,
+                        "expire": _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else ""})
 
     @app.route("/gms/set_group_mapping", methods=["POST"])
     def gms_set_group_mapping():

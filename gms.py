@@ -2011,6 +2011,110 @@ def get_session_cookie() -> str:
     return load_config().get("session_cookie", "")
 
 
+def normaliser_cookie(saisie: str) -> str:
+    """Le cookie tel qu'on l'envoie. Accepte l'en-tête entier copié des
+    DevTools, ou la seule valeur d'authToken : c'est elle qui authentifie, et
+    la copier seule (Application › Cookies) est bien plus simple."""
+    s = (saisie or "").strip()
+    if s.lower().startswith("cookie:"):
+        s = s[7:].strip()
+    if "=" not in s and s.count(".") == 2:
+        return f"authToken={s}"
+    return s
+
+
+def cookie_expiration(cookie: Optional[str] = None) -> Optional[int]:
+    """L'échéance (epoch) du jeton authToken du cookie, None si illisible.
+
+    Le jeton GetMySocial dure 30 jours (iat 21/06 → exp 21/07 sur l'ancien
+    cookie du site). Passé ce délai l'API privée renvoie vers la connexion :
+    le dire AVANT, plutôt que de découvrir un A/B non posé."""
+    import base64
+    ck = get_session_cookie() if cookie is None else cookie
+    m = re.search(r"(?:^|;\s*)authToken=([^;]+)", ck or "")
+    if not m:
+        return None
+    morceaux = m.group(1).strip().split(".")
+    if len(morceaux) != 3:
+        return None
+    try:
+        charge = morceaux[1] + "=" * (-len(morceaux[1]) % 4)
+        return int(json.loads(base64.urlsafe_b64decode(charge)).get("exp"))
+    except Exception:
+        return None
+
+
+def _entetes_privees(cookie: str) -> Dict[str, str]:
+    return {"Cookie": cookie, "Content-Type": "application/json",
+            "Origin": "https://getmysocial.com",
+            "Referer": "https://getmysocial.com/dashboard",
+            "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; vabot/1.0)"}
+
+
+def poser_ab_testing(link_id: str, source_link_id: str, team_id: str = "",
+                     poids: int = 50, nom: str = "Variante") -> Dict[str, Any]:
+    """Active l'A/B d'un lien : `poids` % vers une copie de `source_link_id`,
+    le reste vers sa propre destination. Rend {ok, config, error, cookie}.
+
+    L'API publique (update_link, create_link) répond 200 à un ab_testing et
+    n'enregistre RIEN (constaté le 13/10/2026). Seule l'API privée du
+    tableau de bord le fait, celle de l'écran A/B Testing : POST
+    /api/links/ab-testing/<id>/save, cookie de session obligatoire (la clé API
+    y est renvoyée vers la connexion, 14/10).
+
+    Une variante ne prend pas d'URL : elle COPIE un autre lien à
+    l'enregistrement. Copie figée (14/10) : changer ou supprimer le lien
+    source ensuite ne change plus rien à la variante.
+
+    « cookie » vaut True quand l'échec vient du cookie : absent ou périmé, il
+    faut le recoller (GetMySocial › 🔑 Clés) — réessayer ne changera rien.
+    """
+    cookie = get_session_cookie()
+    if not cookie:
+        return {"ok": False, "cookie": True, "error": "cookie de session GetMySocial absent"}
+    lid = str(link_id or "").strip()
+    src = str(source_link_id or "").strip()
+    lid, src = lid[4:] if lid.startswith("lnk_") else lid, src[4:] if src.startswith("lnk_") else src
+    tid = str(team_id or "").strip()
+    tid = tid[3:] if tid.startswith("tm_") else tid
+    poids = int(poids)
+    if not (lid and src) or not 0 < poids < 100:
+        return {"ok": False, "error": "lien, source ou poids invalide"}
+    corps: Dict[str, Any] = {
+        "enabled": True, "controlWeight": 100 - poids,
+        "variants": [{"variantId": None, "sourceLinkId": src, "sourceTemplateId": None,
+                      "name": str(nom or "Variante")[:40], "weight": poids,
+                      "description": "Variant based on another link"}]}
+    if tid:
+        corps["teamId"] = tid
+    try:
+        r = requests.post(f"{PRIVATE_API_BASE}/links/ab-testing/{lid}/save",
+                          headers=_entetes_privees(cookie), json=corps,
+                          timeout=25, allow_redirects=False)
+    except Exception as e:
+        return {"ok": False, "error": f"réseau : {type(e).__name__}: {str(e)[:100]}"}
+    if r.status_code in (301, 302, 303, 307, 401, 403):
+        exp = cookie_expiration(cookie)
+        quand = time.strftime(" (échu le %d/%m)", time.localtime(exp)) if exp and exp < time.time() else ""
+        return {"ok": False, "cookie": True,
+                "error": f"cookie de session GetMySocial refusé{quand} : à recoller"}
+    try:
+        rep = r.json()
+    except Exception:
+        # une page HTML à la place du JSON : la connexion, donc le cookie
+        return {"ok": False, "cookie": True,
+                "error": f"GetMySocial a répondu une page (HTTP {r.status_code}) : cookie périmé ?"}
+    if r.status_code != 200 or not rep.get("success"):
+        return {"ok": False, "error": f'HTTP {r.status_code} : {str(rep.get("error") or rep)[:160]}'}
+    cfg = rep.get("config") or {}
+    # relu dans la réponse : un enregistrement « réussi » sans variante active
+    # ne doit pas passer pour un 50/50
+    vs = cfg.get("variants") or []
+    if not cfg.get("enabled") or len(vs) != 1 or int(vs[0].get("weight") or 0) != poids:
+        return {"ok": False, "error": f"enregistré mais relu autrement : {str(cfg)[:160]}"}
+    return {"ok": True, "config": cfg}
+
+
 PUBLIC_REST_BASE = "https://api.getmysocial.com/v3"
 
 

@@ -206,8 +206,11 @@ try:
           _tous[:6])
 
     # ── Twitter inchangé ─────────────────────────────────────────────────
+    # sans le 50/50 Emy / Seren (14/10/2026) : il a ses tests à lui
+    # (tests_liens_ab_twitter.py) ; ici, seul compte que Threads n'a rien
+    # changé à Twitter
     g, suivis = monde(config={"gabarit": GABARIT_TW, "equipe": EMY_TWITTER,
-                              "mypuls_actif": True, "creator_id": 3352})
+                              "mypuls_actif": True, "creator_id": 3352, "variante": {}})
     r = lv.creer_pour(TW, "u2", "yazid", manager="YAZID")
     dup = [a for a in g.appels if a[0] == "duplicate"]
     check("Twitter : gabarit et espace Twitter, tracking MyPuls d'abord",
