@@ -26,6 +26,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import contextlib as _contextlib
+
 import safe_json
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -46,6 +48,10 @@ THREADS_ID = "1498948161039896586"
 ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
                   "gabarit": "lnk_6acdd0a53fb996c565a47e90",    # getmysocial.com/emythreads
                   "sans_prenom": True, "plateforme": "Threads",
+                  # la copie temporaire d'une variante part d'ici, pas du
+                  # gabarit : emythreads porte lui-même un A/B, emythreadsb
+                  # (Emy, deeplink Threads) n'en a pas
+                  "source_variante": "lnk_6acdd2c93fb996c565a48982",
                   # l'espace n'a QUE les groupes des managers (synchroniser,
                   # étape 3) : « de base y avait 2 groupes et c'est tout »
                   "groupes_managers_seuls": True}
@@ -175,6 +181,10 @@ def espace(gid: str = "") -> Dict[str, Any]:
     tracking — une moitié sans tracking ne serait rattachée à personne.
     """
     c = config()
+    # Threads : ses trackings par VA (Emy + Seren, comme Twitter) s'ouvrent
+    # par la clé « threads » : {"tracking": true} de la config. La logique vit
+    # dans un patch local du VPS (99-threads-mypuls-20261015, 15/10/2026) :
+    # ces lignes restent telles quelles pour qu'il s'applique encore.
     if str(gid) == THREADS_ID:
         sur = c.get("threads") if isinstance(c.get("threads"), dict) else {}
         e = dict(ESPACE_THREADS, **{k: v for k, v in sur.items() if v})
@@ -327,6 +337,33 @@ def _tracking_de(session, html: str):
         vus.add(url)
         out.append({"code": url, "nom": "", "url": url})
     return out
+
+
+def _sous_bascule(creer):
+    """creer_tracking sous mypuls._OF_SWITCH_LOCK.
+
+    MyPuls ne retient QU'UNE créatrice par session : une bascule d'un autre
+    relevé (files OF, pushs MYM, subs MYM de subs_va) entre la nôtre et la
+    création poserait le tracking chez elle — et il ne s'efface jamais.
+    Posé en enveloppe, pas dans le corps : les patchs locaux du VPS
+    (99-z-tracking-creator-guard) réécrivent ce corps, une ligne de plus
+    dedans les ferait tomber en silence."""
+    import functools
+
+    @functools.wraps(creer)
+    def enveloppe(*a, **kw):
+        try:
+            import mypuls
+            verrou = getattr(mypuls, "_OF_SWITCH_LOCK", None) or _contextlib.nullcontext()
+        except Exception:                                    # noqa: BLE001
+            verrou = _contextlib.nullcontext()
+        with verrou:
+            return creer(*a, **kw)
+    enveloppe.brut = creer
+    return enveloppe
+
+
+creer_tracking = _sous_bascule(creer_tracking)
 
 
 # ─── GetMySocial : le lien court ─────────────────────────────────────────
@@ -620,8 +657,8 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
         return {"ok": False, "cookie": cookie, "tracking": fv["tracking"], "erreur": err}
 
     sc = "abtmp" + secrets.token_hex(5)
-    r = gms.duplicate_link(e["gabarit"], sc, f'variante {v["modele"]} - {nom}'[:60],
-                           fv["tracking"], equipe)
+    r = gms.duplicate_link(e.get("source_variante") or e["gabarit"], sc,
+                           f'variante {v["modele"]} - {nom}'[:60], fv["tracking"], equipe)
     if not r.get("ok"):
         return rate(f'GetMySocial : copie temporaire refusée ({str(r.get("error"))[:100]})')
     tmp = r.get("link") if isinstance(r.get("link"), dict) else {}

@@ -266,8 +266,10 @@ try:
     tk._api = faux_api
     tk._creer_lien(TH, "u4", "m1", {"token": "t", "channel_id": "s4"})
     msg = [j for (m, c, j) in postes if m == "POST" and c == "/channels/s4/messages"]
-    check("message au VA : « tu mets sur Threads », sans promettre les subs",
-          msg and "Threads" in msg[0]["content"] and "subs" not in msg[0]["content"], msg)
+    # Threads a ses trackings par VA (15/10/2026) : le même message que Twitter
+    check("message au VA : « voilà ton lien avec ton tracking de subs » (Threads aussi)",
+          msg and msg[0]["content"].startswith("🔗 <@u4>, voilà ton lien avec ton tracking de subs : "),
+          msg)
     acc = [j for (m, c, j) in postes if m == "PATCH" and c == "/channels/s4/messages/a4"]
     desc = acc[0]["embeds"][0]["description"] if acc else ""
     check("accueil épinglé : « celui que tu postes sur Threads », pas de mention MyPuls",

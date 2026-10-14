@@ -184,7 +184,9 @@ try:
     check("… ou change le poids, le reste par défaut",
           lv.espace(TW)["variante"] == {"modele": "Seren", "creator_id": 3867, "poids": 30})
     monde()
-    check("Threads : jamais de variante (son 50/50 vient de emythreads)",
+    # Threads : ses trackings s'ouvrent par un patch local du VPS
+    # (99-threads-mypuls-20261015) ; le dépôt, lui, n'en a pas
+    check("Threads : pas de variante dans le dépôt (le patch du VPS l'ouvre)",
           lv.espace(TH).get("variante") is None)
 
     # ── créer : tout se passe bien ───────────────────────────────────────
@@ -453,92 +455,178 @@ try:
           "getmysocial.com/bbyy" in txt and "emycute" not in txt, envoyes)
 
     # ── « Mes subs » : aujourd'hui, la période, la précédente ────────────
-    # « il check son nombre de subs : today, période et période précédente »
+    # « il check son nombre de subs : today, période et période précédente »,
+    # « pour Twitter, IG et Threads ; pour IG MYM et OF ; pour Threads Emy et
+    # Seren », « le VA reçoit direct le truc additionné » (15/10/2026)
     import datetime as _dt
-    REG = {"trackings": {
-        "emy.brw/c6": {"numero": 31, "actif": True, "vu": "2026-10-15"},
-        "seren.vale/c196": {"numero": 31, "actif": True, "vu": "2026-10-15"},
-        # quitté le 05/10 : compté jusque-là, plus après
-        "emy.brw/c1": {"numero": 31, "actif": False, "vu": "2026-10-05"},
-        "emy.brw/c9": {"numero": 9, "actif": True, "vu": "2026-10-15"}}, "attente": {}}
-    V = {("2026-10-15", "2026-10-15"): {"emy.brw/c6": 2, "seren.vale/c196": 1, "emy.brw/c9": 50},
-         ("2026-10-01", "2026-10-15"): {"emy.brw/c6": 10, "seren.vale/c196": 5, "emy.brw/c9": 99},
-         ("2026-10-01", "2026-10-05"): {"emy.brw/c1": 4},
-         ("2026-09-16", "2026-09-30"): {"emy.brw/c6": 20, "emy.brw/c1": 6, "emy.brw/c9": 77}}
-    lus = []
+    import subs_va as sv
+    V = {("2026-10-15", "2026-10-15"): {"emy.brw/c6": 2, "seren.vale/c196": 1, "amelia/c3": 4},
+         ("2026-10-01", "2026-10-15"): {"emy.brw/c6": 10, "seren.vale/c196": 5, "amelia/c3": 7},
+         ("2026-09-16", "2026-09-30"): {"emy.brw/c6": 20, "amelia/c3": 1}}
     panne = {"oui": False}
 
     def faux_mp(du, au, forcer=False):
-        lus.append((du, au))
         if panne["oui"]:
             return None, "MyPuls muet"
-        return {t: {"visites": n, "total": n, "nom": ""} for t, n in V.get((du, au), {}).items()}, ""
-    _sauve_pod = {k: getattr(pod, k) for k in ("_lire_registre", "_lire_mypuls", "_aujourdhui")}
+        # des visites dix fois plus nombreuses : on compte les ABONNÉS
+        return {t: {"visites": n * 10, "total": n * 10, "subs": n, "nom": ""}
+                for t, n in V.get((du, au), {}).items()}, ""
+    _sauve_pod = {k: getattr(pod, k) for k in ("_lire_mypuls", "_aujourdhui")}
+    _sauve_sv = {k: getattr(sv, k) for k in ("MYM_FICHIER",)}
+    import liens_fr as lf
+    _sauve_lf = {k: getattr(lf, k) for k in ("ETAT",)}
     try:
-        pod._lire_registre = lambda: json.loads(json.dumps(REG))
         pod._lire_mypuls = faux_mp
         pod._aujourdhui = lambda: _dt.date(2026, 10, 15)
-        r = pod.subs_du_va(31)
-        check("subs du VA 31 : aujourd'hui 3 (Emy 2 + Seren 1)", r["aujourdhui"]["n"] == 3, r)
-        check("… cette période 19 (Emy 10 + Seren 5 + l'ancien tracking jusqu'au 05/10 : 4)",
-              r["periode"] == {"du": "2026-10-01", "au": "2026-10-15", "n": 19}, r)
-        check("… période précédente 26 (16 → 30/09 ; Seren n'existait pas encore : 0)",
-              r["precedente"] == {"du": "2026-09-16", "au": "2026-09-30", "n": 26}, r)
-        check("… jamais les trackings d'un autre VA", r["trackings"] == 3, r)
+        sv.MYM_FICHIER = TMP / "mym_conversions.json"
+        lf.ETAT = TMP / "liens_va_fr.json"
+        J = _dt.date(2026, 10, 15)
+        # Twitter (et Threads) : le tracking Emy du lien + celui de sa variante
+        g, _s = monde(etat={"liens": {
+            f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31, "shortcode": "bbyy",
+                         "tracking": "https://onlyfans.com/emy.brw/c6",
+                         "variante": {"tracking": "https://onlyfans.com/seren.vale/c196", "posee": True}},
+            f"{TH}:43": {"pseudo": "x", "numero": 61, "shortcode": "angelyy",
+                         "tracking": "https://onlyfans.com/emy.brw/c6"}}})
+        check("trackings d'un VA Twitter : Emy et sa variante Seren",
+              sv.trackings_du_va(TW, 42) == [("of", "https://onlyfans.com/emy.brw/c6"),
+                                            ("of", "https://onlyfans.com/seren.vale/c196")],
+              sv.trackings_du_va(TW, 42))
+        r = sv.subs_du_va(TW, 42, J)
+        check("Twitter : Emy + Seren ADDITIONNÉS, des abonnés pas des visites (3 · 15 · 20)",
+              (r["aujourdhui"]["n"], r["periode"]["n"], r["precedente"]["n"]) == (3, 15, 20), r)
+        check("… périodes : la quinzaine en cours, la précédente",
+              (r["periode"]["du"], r["periode"]["au"], r["precedente"]["du"], r["precedente"]["au"])
+              == ("2026-10-01", "2026-10-15", "2026-09-16", "2026-09-30"), r)
+        check("Threads : le même compte, sur sa fiche à lui",
+              sv.subs_du_va(TH, 43, J)["periode"]["n"] == 10 and sv.subs_du_va(TH, 42, J)["trackings"] == 0)
+        # Va IG : OF à l'API, MYM au relevé de la page
+        lf.ETAT.write_text(json.dumps({"liens": {
+            "44:amelia": {"public_url": "https://getmysocial.com/ameliabby",
+                          "trackings": {"of": "https://onlyfans.com/amelia/c3",
+                                        "mym": "https://mym.fans/app/t/AAA"}},
+            "45:amelia": {"trackings": {"mym": "https://mym.fans/app/t/BBB"}}}}))
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time(), "trackings": {
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1, "2026-10-03": 2, "2026-09-20": 5}}}}))
+        r = sv.subs_du_va(sv.VA_IG_ID, 44, J)
+        check("Va IG : OF + MYM additionnés (5 · 10 · 6)",
+              (r["aujourdhui"]["n"], r["periode"]["n"], r["precedente"]["n"]) == (5, 10, 6), r)
+        r = sv.subs_du_va(sv.VA_IG_ID, 45, J)
+        check("… un tracking MYM pas encore relevé : « pas lisible », pas un zéro",
+              r["periode"]["n"] is None, r)
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time() - 7 * 3600, "trackings": {
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
+        check("… un relevé MYM de plus de six heures : « pas lisible » non plus",
+              sv.subs_du_va(sv.VA_IG_ID, 44, J)["aujourdhui"]["n"] is None)
         panne["oui"] = True
-        r = pod.subs_du_va(31)
         check("MyPuls muet : « pas lisible », jamais un zéro inventé",
-              r["aujourdhui"]["n"] is None and r["periode"]["n"] is None, r)
+              sv.subs_du_va(TW, 42, J)["periode"]["n"] is None)
         panne["oui"] = False
-        g, _s = monde(etat={"liens": {f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31,
-                                                    "shortcode": "bbyy"}}})
-        txt = cu._mes_subs_texte(types.SimpleNamespace(id=int(TW)),
-                                 types.SimpleNamespace(id=42, name="abdoul_9684"))
-        check("message du VA : ses trois chiffres, avec les dates des périodes",
-              "VA 31" in txt and "Aujourd'hui : **3**" in txt
-              and "Cette période (du 01/10 au 15/10) : **19**" in txt
-              and "Période précédente (du 16/09 au 30/09) : **26**" in txt
-              and "$" not in txt and "€" not in txt, txt)
-        txt = cu._mes_subs_texte(types.SimpleNamespace(id=1505418484052394004),
-                                 types.SimpleNamespace(id=42, name="x"))
-        check("hors Twitter (Va IG compte aux clics GetMySocial) : le bouton ne s'y montre pas",
-              not cu._subs_ici(types.SimpleNamespace(id=1505418484052394004))
-              and cu._subs_ici(types.SimpleNamespace(id=int(TW))) and "pas comptés" in txt, txt)
-        check("le bouton est dans le menu, à côté de « Mes clics »",
-              any(b.cle == "subs" for _t, bs in cu._MENU_VA_DISPOSITION if isinstance(bs, tuple) for b in bs
-                  if hasattr(b, "cle")) and hasattr(cu.ContentMenuView, "_clic_subs")
-              and cu._MENU_BTN_FEATURE.get("cmenu:subs") == "clics")
-        # le menu se construit vraiment : 5 boutons au plus par rangée (un 6e
-        # fait tomber TOUT le menu), 40 composants au plus par message
-        import discord as _discord
+        txt = cu._mes_subs_texte(types.SimpleNamespace(id=int(TW)), types.SimpleNamespace(id=42))
+        check("message du VA : trois totaux avec les dates, sans détail ni montant",
+              txt.startswith("📈 **Tes subs**") and "Aujourd'hui : **" in txt
+              and "Cette période (du 01/10 au 15/10) : **15**" in txt
+              and "Période précédente (du 16/09 au 30/09) : **20**" in txt
+              and "Emy" not in txt and "Seren" not in txt and "$" not in txt and "€" not in txt, txt)
+        check("les trois serveurs, et eux seuls",
+              all(cu._subs_ici(types.SimpleNamespace(id=int(x))) for x in (TW, TH, sv.VA_IG_ID))
+              and not cu._subs_ici(types.SimpleNamespace(id=123)))
+        check("le bouton : menu complet, menu Threads, ligne épinglée de Va IG",
+              any(b.cle == "subs" for _t, bs in cu._MENU_VA_DISPOSITION if isinstance(bs, tuple)
+                  for b in bs if hasattr(b, "cle")) and "cmenu:subs" in cu._THREADS_MENU
+              and "subs" in cu._LIGNE_SUIVI_CLES and hasattr(cu.ContentMenuView, "_clic_subs")
+              and cu.LIGNE_DISPOSITION == "2026-10-15-mes-subs")
 
-        def _compte(v):
-            n, pire = 0, 0
-            pile = list(getattr(v, "children", []) or [])
-            while pile:
-                c = pile.pop()
-                n += 1
-                if isinstance(c, _discord.ui.ActionRow):
-                    pire = max(pire, len(c.children))
-                pile.extend(getattr(c, "children", []) or [])
-            return n, pire
+        # ── le relevé MYM : la page MyPuls, sous le verrou de bascule ───
+        import mypuls as _mp
+        verrou_tenu = []
 
-        async def _menus():
-            out = {}
-            v = cu.ContentMenuView(types.SimpleNamespace(bot=None), identite="emy", mention=42)
-            out["tous"] = _compte(v)
-            v.construire(types.SimpleNamespace(id=int(TW), name="Twitter", roles=[], emojis=[]),
-                         filtrer=True)
-            out["twitter"] = _compte(v) + ("cmenu:subs" in [getattr(c, "custom_id", "")
-                                                            for c in v.walk_children()],)
-            return out
-        m = asyncio.run(_menus())
-        check("menu VA : 5 boutons au plus par rangée, 40 composants au plus, « Mes subs » sur Twitter",
-              m["tous"][1] <= 5 and m["tous"][0] <= 40 and m["twitter"][1] <= 5
-              and m["twitter"][0] <= 40 and m["twitter"][2], m)
+        class _Rep:
+            def __init__(self, texte="", js=None):
+                self.text, self._js = texte, js
+
+            def json(self):
+                return self._js
+
+        class _Sess:
+            def get(self, url, **kw):
+                verrou_tenu.append(_mp._OF_SWITCH_LOCK._is_owned())
+                if "/tracking-stats/data" in url:
+                    return _Rep(js={"labels": ["2026-10-14", "2026-10-15"], "daily": {
+                        "0": {"label": "Amelia_VA_46_x", "linkId": 8924,
+                              "data": [{"conversions": 2, "clicks": 9}, {"conversions": 1}]},
+                        "1": {"label": "Instagram", "linkId": 137, "data": [None, {"conversions": 5}]}}})
+                if "/tracking-stats/" in url:
+                    return _Rep(texte='<tr id="row-link-8924"> <td>Amelia_VA_46_x</td> '
+                                      '<button data-url="https://mym.fans/app/t/hn0d"></button></tr>')
+                return _Rep()
+        _sauve_mp = {k: getattr(_mp, k) for k in ("_make_session", "_save_rotated_cookies")}
+        try:
+            _mp._make_session = lambda: _Sess()
+            _mp._save_rotated_cookies = lambda s: None
+            b = sv.releve_mym([769])
+        finally:
+            for _k, _v in _sauve_mp.items():
+                setattr(_mp, _k, _v)
+        cache = json.loads(sv.MYM_FICHIER.read_text())
+        check("relevé MYM : chaque tracking du tableau, ses conversions jour par jour",
+              b.get("ok") and cache["trackings"]["https://mym.fans/app/t/hn0d"]["jours"]
+              == {"2026-10-14": 2, "2026-10-15": 1}, (b, cache))
+        check("… une série sans ligne au tableau (pas un tracking connu) est laissée",
+              not any("Instagram" == v.get("nom") for v in cache["trackings"].values()), cache)
+        check("… l'ancien relevé d'un tracking non relu cette fois est gardé",
+              "https://mym.fans/app/t/AAA" in cache["trackings"], list(cache["trackings"]))
+        check("… et TOUT se fait sous le verrou de bascule de MyPuls",
+              verrou_tenu and all(verrou_tenu), verrou_tenu)
+        # la création de tracking aussi, enveloppée sans toucher son corps
+        # (les patchs du VPS le réécrivent)
+        tenu = []
+        _env = lv._sous_bascule(lambda *a, **k: tenu.append(_mp._OF_SWITCH_LOCK._is_owned()) or {"ok": True})
+        _env("x", 1)
+        check("création de tracking sous le même verrou (enveloppe _sous_bascule)",
+              tenu == [True] and hasattr(_SAUVE_LV["creer_tracking"], "brut"), tenu)
     finally:
         for _k, _v in _sauve_pod.items():
             setattr(pod, _k, _v)
+        for _k, _v in _sauve_sv.items():
+            setattr(sv, _k, _v)
+        for _k, _v in _sauve_lf.items():
+            setattr(lf, _k, _v)
+
+    # le menu se construit vraiment : 5 boutons au plus par rangée (un 6e
+    # fait tomber TOUT le menu), 40 composants au plus par message
+    import discord as _discord
+
+    def _compte(v):
+        n, pire = 0, 0
+        pile = list(getattr(v, "children", []) or [])
+        while pile:
+            c = pile.pop()
+            n += 1
+            if isinstance(c, _discord.ui.ActionRow):
+                pire = max(pire, len(c.children))
+            pile.extend(getattr(c, "children", []) or [])
+        return n, pire
+
+    async def _menus():
+        out = {}
+        v = cu.ContentMenuView(types.SimpleNamespace(bot=None), identite="emy", mention=42)
+        out["tous"] = _compte(v)
+        for nom, gid_ in (("twitter", int(TW)), ("threads", int(TH))):
+            v.construire(types.SimpleNamespace(id=gid_, name=nom, roles=[], emojis=[]), filtrer=True)
+            out[nom] = _compte(v) + ("cmenu:subs" in [getattr(c, "custom_id", "")
+                                                      for c in v.walk_children()],)
+        lg = cu.MenuLigneVA(types.SimpleNamespace(bot=None), identite="amelia", mention=42,
+                            guild=types.SimpleNamespace(id=int(sv.VA_IG_ID), name="Va IG", roles=[],
+                                                        emojis=[]), filtrer=True)
+        # les boutons de la ligne portent « cmenu:l: » (_BoutonLigneVA)
+        out["ligne"] = _compte(lg) + ("cmenu:l:subs" in [getattr(c, "custom_id", "")
+                                                         for c in lg.walk_children()],)
+        return out
+    m = asyncio.run(_menus())
+    check("menus VA : 5 boutons au plus par rangée, 40 composants au plus, « Mes subs » partout",
+          all(m[k][1] <= 5 and m[k][0] <= 40 for k in m)
+          and m["twitter"][2] and m["threads"][2] and m["ligne"][2], m)
 
     # ── gms.poser_ab_testing ─────────────────────────────────────────────
     envois = []

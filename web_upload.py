@@ -57906,8 +57906,8 @@ def _render_gms_cookie_settings() -> str:
         ck, exp = "", None
     try:
         import liens_va
-        attente = (len(liens_va.en_attente())
-                   if liens_va.espace(liens_va.TWITTER_ID).get("variante") else 0)
+        attente = sum(len(liens_va.en_attente(g)) for g in (liens_va.TWITTER_ID, liens_va.THREADS_ID)
+                      if liens_va.espace(g).get("variante"))
     except Exception:
         attente = 0
     jours = int((exp - _t_c.time()) // 86400) if exp else None
@@ -57933,7 +57933,7 @@ def _render_gms_cookie_settings() -> str:
                       + ". Colle un nouveau cookie ci-dessous pour le remplacer.")
     if attente:
         etat += _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
-                       f"{attente} lien(s) Twitter en attente du 50/50 : ils se posent dès "
+                       f"{attente} lien(s) Twitter / Threads en attente du 50/50 : ils se posent dès "
                        "qu’un cookie valide est enregistré.")
     return (
         etat
@@ -60900,6 +60900,19 @@ def _sync_liens_va(gid: str, minutes: int = 30) -> None:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
 
 
+def _releve_mym_subs() -> None:
+    """Le relevé horaire des conversions MYM (subs_va.releve_mym_si_du), dit
+    dans le journal quand il rate -- jamais une exception dans la boucle."""
+    try:
+        import subs_va as _sv
+        b = _sv.releve_mym_si_du()
+        if b is not None and (b.get("rates") or not b.get("ok")):
+            print(f"[subs] relevé MYM : {b.get('trackings')} tracking(s), rates {b.get('rates')}",
+                  flush=True)
+    except Exception as e:
+        print(f"[subs] relevé MYM : {type(e).__name__}: {e}", flush=True)
+
+
 _MODELES_VU = {"t": 0}
 
 
@@ -61094,6 +61107,9 @@ def _start_podium_semaine_daemon() -> bool:
                 # le salon « modele a suivre » suit la watchlist Instagram :
                 # il ne depend d'aucun serveur Discord en particulier
                 _sync_modeles_a_suivre()
+                # les subs MYM des trackings Va IG (« 📈 Mes subs ») : l'API
+                # MyPuls ne les rend pas, la page oui -- une fois par heure
+                _releve_mym_subs()
                 # les videos deposees sur Drive rejoignent leur etape
                 _ramasser_drive()
             except Exception as e:
@@ -71094,15 +71110,19 @@ def create_app():
         reprise = 0
         try:
             import liens_va
-            reprise = len(liens_va.en_attente()) if liens_va.espace(liens_va.TWITTER_ID).get("variante") else 0
+            # Twitter ET Threads (trackings par VA depuis le 15/10/2026)
+            _serveurs = [g for g in (liens_va.TWITTER_ID, liens_va.THREADS_ID)
+                         if liens_va.espace(g).get("variante")]
+            reprise = sum(len(liens_va.en_attente(g)) for g in _serveurs)
             if reprise:
                 def _reprendre():
-                    try:
-                        b = liens_va.reprendre_variantes()
-                        print(f"[lien] 50/50 repris apres le cookie : {len(b['poses'])} pose(s), "
-                              f"{len(b['rates'])} rate(s) {b['rates'][:3]}", flush=True)
-                    except Exception as e:
-                        print(f"[lien] reprise des 50/50 : {type(e).__name__}: {e}", flush=True)
+                    for g in _serveurs:
+                        try:
+                            b = liens_va.reprendre_variantes(g)
+                            print(f"[lien] 50/50 {g} repris apres le cookie : {len(b['poses'])} "
+                                  f"pose(s), {len(b['rates'])} rate(s) {b['rates'][:3]}", flush=True)
+                        except Exception as e:
+                            print(f"[lien] reprise des 50/50 {g} : {type(e).__name__}: {e}", flush=True)
                 import threading as _th
                 _th.Thread(target=_reprendre, daemon=True).start()
         except Exception as e:
@@ -71110,7 +71130,7 @@ def create_app():
         quand = _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else ""
         return _rep(True, "✓ Cookie GetMySocial enregistré"
                     + (f", valide jusqu’au {quand}" if quand else "")
-                    + (f" · {reprise} lien(s) Twitter en attente du 50/50 : reprise lancée"
+                    + (f" · {reprise} lien(s) Twitter / Threads en attente du 50/50 : reprise lancée"
                        if reprise else ""),
                     len=len(cookie), reprise=reprise, expire=quand)
 

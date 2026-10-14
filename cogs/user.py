@@ -73,7 +73,9 @@ _MENU_BTN_FEATURE = {
 
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
 # Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
-_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay", "cmenu:tuto"}
+_THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay", "cmenu:tuto",
+                 # « Mes subs » : Threads a ses trackings par VA (15/10/2026)
+                 "cmenu:subs"}
 
 
 # ---------------------------------------------------------------------------
@@ -368,52 +370,20 @@ def _variantes_menu_va(famille, feats, threads) -> list:
 
 
 def _subs_ici(guild) -> bool:
-    """Ce serveur compte-t-il ses VA aux subs des trackings (le classement de
-    Twitter) ? C'est la seule mesure que « Mes subs » sait relire."""
+    """« Mes subs » sait-il compter les VA de ce serveur ? Twitter, Threads et
+    Va IG (subs_va.SERVEURS) : leurs trackings sont dans les fiches du site."""
     try:
-        import podium_discord as pod
-        return pod._source(str(getattr(guild, "id", "") or "")) == "tracking"
+        import subs_va
+        return subs_va.disponible(getattr(guild, "id", ""))
     except Exception:                                        # noqa: BLE001
         return False
 
 
 def _mes_subs_texte(guild, user) -> str:
-    """Le message prive de « 📈 Mes subs » : aujourd'hui, la periode en cours,
-    la precedente -- les chiffres du classement, jamais un montant."""
-    import podium_discord as pod
-    gid = str(getattr(guild, "id", "") or "")
-    if not _subs_ici(guild):
-        return "⚠️ Les subs ne sont pas comptés sur ce serveur."
-    numero = 0
-    try:
-        import liens_va
-        numero = int(liens_va.lien_de(gid, str(user.id)).get("numero") or 0)
-    except Exception:                                        # noqa: BLE001
-        numero = 0
-    if not numero:
-        nom = str(getattr(user, "name", "") or "")
-        numero = int((pod.numeros([nom], attribuer=False) or {}).get(nom) or 0)
-    if not numero:
-        return "⚠️ Tu n'as pas encore de lien : il n'y a pas de subs à compter."
-    r = pod.subs_du_va(numero)
-    if not r.get("trackings"):
-        return (f"📈 **Tes subs** (VA {numero})\nTon lien vient d'être créé : tes subs "
-                "apparaîtront ici dès les premiers.")
-
-    def ligne(titre, p, avec_dates=True):
-        n = p.get("n")
-        val = f"**{n}**" if n is not None else "pas lisible pour l'instant"
-        if not avec_dates:
-            return f"{titre} : {val}"
-        du, au = p["du"], p["au"]
-        return f"{titre} (du {du[8:10]}/{du[5:7]} au {au[8:10]}/{au[5:7]}) : {val}"
-    return "\n".join([
-        f"📈 **Tes subs** (VA {numero})",
-        ligne("Aujourd'hui", r["aujourdhui"], avec_dates=False),
-        ligne("Cette période", r["periode"]),
-        ligne("Période précédente", r["precedente"]),
-        "-# MyPuls se met à jour toutes les quelques heures.",
-    ])
+    """Le message prive de « 📈 Mes subs » (subs_va.texte) : aujourd'hui, la
+    periode, la precedente, additionnes -- jamais un montant."""
+    import subs_va
+    return subs_va.texte(getattr(guild, "id", ""), getattr(user, "id", ""))
 
 
 def _bouton_va_permis(cid, feats, threads) -> bool:
@@ -8977,6 +8947,9 @@ class _BoutonLigneVA(discord.ui.Button):
 _LIGNE_SUIVI = (("lien", "Demander un lien", "🔗", discord.ButtonStyle.success),
                 ("help", "Assistance", "🆘", discord.ButtonStyle.danger),
                 ("clics", "Mes clics", "📊", discord.ButtonStyle.success),
+                # « il check son nombre de subs » (15/10/2026) : sur la ligne
+                # aussi, Va IG ouvre rarement le menu complet
+                ("subs", "Mes subs", "📈", discord.ButtonStyle.success),
                 ("pay", "Mon paiement", "💸", discord.ButtonStyle.secondary),
                 # « mets un truc renseigner mes comptes actifs » (03/10) : la
                 # fenetre des 3 comptes Insta, pre-remplie, comptes verifies
@@ -8997,7 +8970,8 @@ _LIGNE_OUTILS = (("spoofer", "Spoofer", "📤"),)
 #: 14/10/2026 : le thème Mario retiré de Va IG (« mets les trucs et tout comme
 #: les autres ») : les lignes déjà épinglées gardaient leur titre et leur cadre
 #: Mario jusqu'à leur prochain redessin.
-LIGNE_DISPOSITION = "2026-10-14-sans-mario"
+#: 15/10/2026 : « 📈 Mes subs » rejoint la ligne de suivi.
+LIGNE_DISPOSITION = "2026-10-15-mes-subs"
 
 
 class MenuLigneVA(discord.ui.LayoutView):

@@ -1229,7 +1229,8 @@ def message_lien_va(uid: str, url: str, plateforme: str = "Twitter") -> str:
 
     Propriétaire, 15/10/2026 : « juste dire voilà ton lien avec le tracking de
     sub » — ni modèle, ni consigne en plus."""
-    if plateforme == "Twitter":
+    # Threads a ses trackings par VA depuis le 15/10/2026 : même message
+    if plateforme in ("Twitter", "Threads"):
         return f"🔗 <@{uid}>, voilà ton lien avec ton tracking de subs : {url}"
     return f"🔗 <@{uid}>, voici **ton lien** : {url}\nC'est celui-là que tu mets sur {plateforme}."
 
@@ -2245,6 +2246,19 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
         if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates", "groupes_supprimes",
                                   "sortis")):
             print(f"[lien] synchro {gid} : {b}", flush=True)
+        # Threads a ses trackings par VA depuis le 15/10/2026 : les liens d'avant
+        # reçoivent les leurs (Emy, puis Seren et le 50/50), en fond comme sur
+        # Twitter (web_upload._sync_liens_va)
+        if liens_va.espace(gid).get("variante") and liens_va.en_attente(gid):
+            def _variantes():
+                try:
+                    bv = liens_va.reprendre_variantes(gid)
+                    if bv.get("poses") or bv.get("rates") or bv.get("a_verifier"):
+                        print(f"[lien] 50/50 {gid} : {len(bv['poses'])} pose(s), rates "
+                              f"{bv['rates'][:5]}, a verifier {bv['a_verifier'][:5]}", flush=True)
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[lien] 50/50 {gid} : {type(e).__name__}: {e}", flush=True)
+            threading.Thread(target=_variantes, daemon=True).start()
     except Exception as e:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
 
