@@ -71,6 +71,7 @@ MENU = {
     "Token bot admin": "Admin bot token",
     "Cookies Instagram": "Instagram cookies",
     "Cookies MyPuls": "MyPuls cookies",
+    "Cookies GetMySocial": "GetMySocial cookies",
     "Veille Telegram": "Telegram watch",
     "Déconnexion": "Log out",
 }

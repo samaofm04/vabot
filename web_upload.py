@@ -14246,6 +14246,7 @@ document.addEventListener('click',function(e){
         <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-telegram"/></svg>Veille Telegram</span></button>
         <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-sms"/></svg>Générateurs SMS</span></button>
         <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</span></button>
+        <button class="item" id="tab-sgms" onclick="showTab('settings','sgms','Cookies GetMySocial','Session getmysocial.com — 50/50 Emy / Seren des liens Twitter')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</span></button>
       </div>
     </div>
   </div>
@@ -16667,6 +16668,16 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0"><svg class="lgi"><use href="#lg-mypuls"/></svg>Cookies MyPuls</h3>
 <small>Session mypuls.app — utilisée pour la sync des revenus chatteurs et le push planning</small>
 <div style="margin-top:14px">{mypuls_cookies_html}</div>
+</div>
+</div>
+
+<!-- SETTINGS - COOKIES GETMYSOCIAL : le meme cookie que le panneau 🔑 Cles du
+     Dashboard clics ; le proprietaire le cherchait ici, a cote de MyPuls -->
+<div class="form-section" id="form-sgms" style="display:none">
+<div class="box">
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</h3>
+<small>Session getmysocial.com — sert au 50/50 Emy / Seren des liens Twitter (l’API GetMySocial ne sait pas le poser)</small>
+<div style="margin-top:14px">{gms_cookie_html}</div>
 </div>
 </div>
 
@@ -57879,6 +57890,74 @@ def _render_numgen_settings() -> str:
         "par cette page. Ici on ne règle que le pays et le service.</small>")
 
 
+def _render_gms_cookie_settings() -> str:
+    """Section Settings : le cookie de session GetMySocial (statut + formulaire).
+
+    Le meme cookie que le panneau « 🔑 Cles » du Dashboard clics ; le
+    proprietaire le cherchait dans Integrations, a cote de MyPuls (14/10/2026 :
+    « tu peux mettre un truc gms comme pour les autres dans integration »).
+    L'echeance seule ressort, jamais la valeur."""
+    import time as _t_c
+    try:
+        import gms
+        ck = gms.get_session_cookie()
+        exp = gms.cookie_expiration(ck) if ck else None
+    except Exception:
+        ck, exp = "", None
+    try:
+        import liens_va
+        attente = (len(liens_va.en_attente())
+                   if liens_va.espace(liens_va.TWITTER_ID).get("variante") else 0)
+    except Exception:
+        attente = 0
+    jours = int((exp - _t_c.time()) // 86400) if exp else None
+    quand = _t_c.strftime("%d/%m/%Y", _t_c.localtime(exp)) if exp else ""
+
+    def _boite(fond, bord, couleur, texte):
+        return ("<div style='padding:12px 16px;background:%s;border:1px solid %s;"
+                "border-radius:8px;margin-bottom:14px;font-size:13px;color:%s'>%s</div>"
+                % (fond, bord, couleur, texte))
+    if not ck:
+        etat = _boite("rgba(148,163,184,.08)", "rgba(148,163,184,.25)", "#94a3b8",
+                      "Aucun cookie : le 50/50 Emy / Seren des liens Twitter ne se pose pas. "
+                      "Les liens sont quand même créés, tout part sur Emy.")
+    elif jours is not None and jours < 0:
+        etat = _boite("rgba(239,68,68,.08)", "rgba(239,68,68,.35)", "#f87171",
+                      f"✕ Cookie échu depuis le {quand} : recolle-le ci-dessous.")
+    elif jours is not None and jours <= 3:
+        etat = _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
+                      f"⚠ Cookie valide jusqu’au {quand} ({jours} j) : pense à le recoller.")
+    else:
+        etat = _boite("rgba(16,185,129,.08)", "rgba(16,185,129,.3)", "#34d399",
+                      "✓ Cookie enregistré" + (f", valide jusqu’au {quand} ({jours} j)" if quand else "")
+                      + ". Colle un nouveau cookie ci-dessous pour le remplacer.")
+    if attente:
+        etat += _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
+                       f"{attente} lien(s) Twitter en attente du 50/50 : ils se posent dès "
+                       "qu’un cookie valide est enregistré.")
+    return (
+        etat
+        + "<form method='POST' action='/gms/set_session_cookie' style='display:flex;flex-direction:column;gap:8px'>"
+        "<input type='hidden' name='retour' value='settings'>"
+        "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Valeur d’authToken (commence par eyJ)</label>"
+        "<input type='password' name='cookie' placeholder='eyJhbGciOi…' autocomplete='off' "
+        "style='font-family:monospace;font-size:12px' required minlength='50'>"
+        "<button type='submit' style='width:100%;margin-top:8px'>Enregistrer le cookie</button>"
+        "</form>"
+        "<details style='font-size:12px;color:#888;margin-top:14px'>"
+        "<summary style='cursor:pointer;color:#3b82f6;font-weight:600'>Où trouver le cookie ?</summary>"
+        "<ol style='margin:8px 0 0 18px;line-height:1.7'>"
+        "<li>Ouvre <a href='https://getmysocial.com/dashboard' target='_blank' style='color:#3b82f6'>getmysocial.com</a> (connecté)</li>"
+        "<li>F12 › onglet <b>Application</b> (derrière » si caché)</li>"
+        "<li>À gauche : <b>Cookies</b> › <b>https://getmysocial.com</b></li>"
+        "<li>Ligne <b>authToken</b> : double-clic sur sa valeur, Cmd+A, Cmd+C, puis colle ici</li>"
+        "</ol>"
+        "<p style='margin-top:8px;color:#666'>Il dure 30 jours. Ne clique jamais « Clear site data » : "
+        "ça te déconnecterait de GetMySocial.</p>"
+        "</details>"
+    )
+
+
 def _render_mypuls_cookies_settings() -> str:
     """Section Settings : cookies MyPuls (statut + formulaire + effacer).
 
@@ -58351,6 +58430,7 @@ ROLE_MENU_STRUCTURE = [
         {"key": "stoken", "name": "Token bot admin", "perms": ["view", "edit"]},
         {"key": "sinsta", "name": "Cookies Instagram", "perms": ["view", "edit"]},
         {"key": "smypuls", "name": "Cookies MyPuls", "perms": ["view", "edit"]},
+        {"key": "sgms", "name": "Cookies GetMySocial", "perms": ["view", "edit"]},
         {"key": "snumgen", "name": "Générateurs SMS", "perms": ["view", "edit"]},
         {"key": "saikey", "name": "Clé IA", "perms": ["view", "edit"]},
         {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
@@ -59614,6 +59694,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
+        .replace("{gms_cookie_html}", _g("sgms", _render_gms_cookie_settings))
         .replace("{numgen_html}", _g("snumgen", _render_numgen_settings))
         .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
         .replace("{video_manager_html}", _g("svideo", _render_video_manager))
@@ -70989,16 +71070,24 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         import time as _t
+        # depuis Settings › Integrations › Cookies GetMySocial : un formulaire
+        # classique, qui doit revenir sur sa page avec un message (pas du JSON)
+        page = request.form.get("retour") == "settings"
+
+        def _rep(ok, msg, **plus):
+            if page:
+                return _success(msg, "sgms") if ok else _error(msg, "sgms")
+            return jsonify(dict({"ok": ok} if ok else {"ok": ok, "error": msg}, **plus))
         cookie = gms.normaliser_cookie(request.form.get("cookie") or "")
         if not cookie or len(cookie) < 50:
-            return jsonify({"ok": False, "error": "cookie trop court ou vide"})
+            return _rep(False, "cookie trop court ou vide")
         exp = gms.cookie_expiration(cookie)
         if exp and exp < _t.time():
             # refusé plutôt qu'enregistré : il remplacerait un cookie peut-être
             # encore bon, et chaque 50/50 échouerait en silence ensuite
-            return jsonify({"ok": False, "error": "ce cookie est déjà échu (le "
-                            + _t.strftime("%d/%m/%Y", _t.localtime(exp))
-                            + ") : reconnecte-toi à GetMySocial et recopie authToken"})
+            return _rep(False, "ce cookie est déjà échu (le "
+                        + _t.strftime("%d/%m/%Y", _t.localtime(exp))
+                        + ") : reconnecte-toi à GetMySocial et recopie authToken")
         gms.save_session_cookie(cookie)
         # les liens Twitter dont le 50/50 attendait un cookie : repris en fond,
         # le panneau n'attend pas une minute de MyPuls et de GetMySocial
@@ -71018,8 +71107,12 @@ def create_app():
                 _th.Thread(target=_reprendre, daemon=True).start()
         except Exception as e:
             print(f"[lien] reprise des 50/50 non lancee : {type(e).__name__}: {e}", flush=True)
-        return jsonify({"ok": True, "len": len(cookie), "reprise": reprise,
-                        "expire": _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else ""})
+        quand = _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else ""
+        return _rep(True, "✓ Cookie GetMySocial enregistré"
+                    + (f", valide jusqu’au {quand}" if quand else "")
+                    + (f" · {reprise} lien(s) Twitter en attente du 50/50 : reprise lancée"
+                       if reprise else ""),
+                    len=len(cookie), reprise=reprise, expire=quand)
 
     @app.route("/gms/set_group_mapping", methods=["POST"])
     def gms_set_group_mapping():

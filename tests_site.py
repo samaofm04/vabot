@@ -12663,7 +12663,9 @@ print("=" * 70)
 try:
     import pathlib as _plG
     _srcG = _plG.Path("web_upload.py").read_text(encoding="utf-8")
-    _SIX = ("stoken", "sinsta", "smypuls", "vtg", "snumgen", "saikey")
+    # + sgms (14/10/2026) : le cookie GetMySocial du 50/50 Twitter, que le
+    # proprietaire cherchait ici, a cote de MyPuls
+    _SIX = ("stoken", "sinsta", "smypuls", "sgms", "vtg", "snumgen", "saikey")
 
     _dG = _srcG.index('<div class="sidebar')
     _fG = _srcG.index('<div class="spacer">', _dG)
@@ -12690,7 +12692,7 @@ try:
           not _dehors, "hors du sous-menu : " + ", ".join(_dehors))
     # Et chacune porte le logo de son service.
     check("integrations : chaque entree porte un logo",
-          _sous.count('<use href="#lg-') == 6,
+          _sous.count('<use href="#lg-') == len(_SIX),
           "%d logo(s)" % _sous.count('<use href="#lg-'))
 
     # ELLES N'INVENTENT PAS D'ONGLET. Un id « tab-xxx » suffit a faire
@@ -12728,18 +12730,21 @@ try:
 
     # Le logo GetMySocial sur le report des clics : sa marque est decoupee
     # dans le logotype fourni (le mot ecrit en toutes lettres est jete), et
-    # elle vit dans le meme sprite que les autres.
+    # elle vit dans le meme sprite que les autres. Posee aussi, depuis le
+    # 14/10/2026, sur l'entree et la page « Cookies GetMySocial ».
     check("integrations : le logo GetMySocial est declare et pose",
-          '<symbol id="lg-gms"' in _srcG and _srcG.count("#lg-gms") == 1,
+          '<symbol id="lg-gms"' in _srcG and _srcG.count("#lg-gms") >= 1
+          and 'id="tab-sgms"' in _srcG and "#lg-gms" in _srcG.split('id="tab-sgms"')[1][:400],
           "%d rappel(s)" % _srcG.count("#lg-gms"))
 
     # La traduction : l anglais est la langue par DEFAUT du site.
     import i18n_en as _i18G
     _nonTrad = [m for m in ("Int\u00e9grations", "G\u00e9n\u00e9rateurs SMS",
                             "Cl\u00e9 IA", "Token bot admin", "Cookies MyPuls",
-                            "Veille Telegram", "Cookies Instagram")
+                            "Veille Telegram", "Cookies Instagram",
+                            "Cookies GetMySocial")
                 if m not in _i18G.TRADUCTIONS]
-    check("integrations : les sept libelles ont leur anglais",
+    check("integrations : les huit libelles ont leur anglais",
           not _nonTrad, "sans traduction : " + ", ".join(_nonTrad))
 except Exception as _eG:
     check("integrations : testable", False, repr(_eG)[:200])
