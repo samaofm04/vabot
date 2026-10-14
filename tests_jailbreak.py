@@ -20445,8 +20445,12 @@ try:
     check("ligne FR : la vue enregistree au demarrage ne porte plus Download",
           "cmenu:l:download" not in _idsDl(_uDl.MenuLigneVA(None))
           and "cmenu:download" not in _idsDl(_uDl.ContentMenuView(None)))
-    check("ligne FR : le theme Mario reste (champignon du Menu, titre)",
-          str(_r1Dl.children[0].emoji) == "🍄" and "## 🍄 Ton menu" in _txtDl(_vDl), _txtDl(_vDl))
+    # le theme Mario a ete retire de Va IG le 14/10/2026 (« fais plus le theme
+    # Mario, mets les trucs et tout comme les autres ») : la ligne FR est celle
+    # des autres serveurs
+    check("ligne FR : sans le theme Mario (ni champignon, ni « 🍄 Ton menu »)",
+          str(_r1Dl.children[0].emoji) != "🍄" and "## ☀️ Ton menu" in _txtDl(_vDl)
+          and "🍄" not in _txtDl(_vDl), (_r1Dl.children[0].emoji, _txtDl(_vDl)))
     _plein = _uDl._menu_va(None, "julia", _gFRDl)
     check("menu complet FR : la rangee Outils garde Spoofer, sans Download",
           "cmenu:spoofer" in _idsDl(_plein) and "cmenu:download" not in _idsDl(_plein)
