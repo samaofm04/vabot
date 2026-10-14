@@ -8917,7 +8917,10 @@ _LIGNE_OUTILS = (("spoofer", "Spoofer", "📤"),)
 #: 05/10/2026 restait a l'ecran dans ~160 tickets. Changer cette valeur a
 #: chaque changement de disposition : Welcome.lignes_redessin redessine alors
 #: UNE fois, sur place et sans notification, toutes les lignes du serveur FR.
-LIGNE_DISPOSITION = "2026-10-05-sans-download"
+#: 14/10/2026 : le thème Mario retiré de Va IG (« mets les trucs et tout comme
+#: les autres ») : les lignes déjà épinglées gardaient leur titre et leur cadre
+#: Mario jusqu'à leur prochain redessin.
+LIGNE_DISPOSITION = "2026-10-14-sans-mario"
 
 
 class MenuLigneVA(discord.ui.LayoutView):
