@@ -20614,6 +20614,28 @@ try:
             _h._au_dessus({"lien": _lienD(_garde)})
             check("au-dessus : un 429 a la lecture est attendu puis retente",
                   _sorties[-1].get("compte") == 2 and not _premier[0], str(_sorties[-1])[:120])
+            # k. le 429 tombe sur la TOUTE PREMIERE lecture (le message garde) :
+            # vu en vrai, l outil repondait « Message introuvable »
+            _premierM = [True]
+
+            def _apiD_429m(methode, chemin, corps=None, params=None):
+                if methode == "GET" and chemin.startswith("/channels/99/messages/") and _premierM[0]:
+                    _premierM[0] = False
+                    return 429, {"message": "You are being rate limited.", "retry_after": 0}
+                return _apiD(methode, chemin, corps, params)
+            _de.api = _apiD_429m
+            _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde)})
+            check("au-dessus : un 429 sur le message garde est attendu puis retente",
+                  _sorties[-1].get("compte") == 2 and not _premierM[0], str(_sorties[-1])[:120])
+            # l. un 429 qui dure : on le dit, sans « Message introuvable »
+            _de.api = lambda me, ch, co=None, pa=None: (429, {"message": "You are being rate limited.",
+                                                             "retry_after": 0})
+            _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+            check("au-dessus : un 429 persistant dit d attendre, rien n est supprime",
+                  _sorties[-1]["ok"] is False and "attendre" in _sorties[-1]["error"]
+                  and "introuvable" not in _sorties[-1]["error"], str(_sorties[-1])[:120])
             _de.api = _apiD
         finally:
             _de.time.sleep = _sauv_sleepD

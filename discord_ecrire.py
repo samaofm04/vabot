@@ -384,17 +384,31 @@ def _resume(m: dict) -> str:
     return f"[{n} photo(s)]" if n else "[message sans texte]"
 
 
+def _api_patient(methode: str, chemin: str, corps=None, params=None):
+    """api(), mais un 429 (« You are being rate limited ») attend le délai que
+    Discord donne puis retente, trois fois au plus.
+
+    Le bot partage son jeton avec le site : un 429 tombe sans prévenir, même
+    sur la toute première lecture. « Supprimer tout ce qui est au-dessus »
+    répondait alors « Message introuvable » sur un message bien là.
+    """
+    code, rep = 0, {}
+    for essai in range(4):
+        code, rep = api(methode, chemin, corps, params)
+        if code != 429 or essai == 3:
+            break
+        attente = float((rep if isinstance(rep, dict) else {}).get("retry_after") or 1)
+        time.sleep(min(attente, 30.0) + 0.3)
+    return code, rep
+
+
 def _messages_avant(salon: str, mid: str, plafond: int = 500):
     """Les messages du salon plus ANCIENS que `mid` (lui exclu), du plus récent
     au plus ancien. (liste, encore, erreur) — `encore` : le plafond est atteint."""
     out, avant = [], str(mid)
     while len(out) < plafond:
-        for _ in range(3):
-            code, lot = api("GET", f"/channels/{salon}/messages",
-                            params={"limit": "100", "before": avant})
-            if code != 429:
-                break
-            time.sleep(float((lot or {}).get("retry_after") or 1) + 0.3)
+        code, lot = _api_patient("GET", f"/channels/{salon}/messages",
+                                 params={"limit": "100", "before": avant})
         if code != 200:
             return out, False, str((lot or {}).get("message") or f"HTTP {code}")[:120]
         if not lot:
@@ -426,19 +440,14 @@ def _effacer_messages(salon: str, ids):
         if len(lot) < 2:                 # le lot exige au moins deux messages
             vieux = lot + vieux
             continue
-        c, rep = api("POST", f"/channels/{salon}/messages/bulk-delete", {"messages": lot})
+        c, rep = _api_patient("POST", f"/channels/{salon}/messages/bulk-delete", {"messages": lot})
         if c in (200, 204):
             efface += len(lot)
         else:
             echecs.append(str((rep or {}).get("message") or f"lot : HTTP {c}")[:120])
             vieux = lot + vieux          # le lot a echoue : un par un
     for mid in vieux:
-        for _ in range(3):
-            c, rep = api("DELETE", f"/channels/{salon}/messages/{mid}")
-            if c == 429:
-                time.sleep(float((rep or {}).get("retry_after") or 1) + 0.3)
-                continue
-            break
+        c, rep = _api_patient("DELETE", f"/channels/{salon}/messages/{mid}")
         if c in (200, 204):
             efface += 1
             un_par_un += 1
@@ -1781,7 +1790,10 @@ class Poste(BaseHTTPRequestHandler):
         # THREADS collé avant d'avoir ouvert ce serveur dans un menu partait
         # avec le jeton de Siri, qui n'y est plus : « Missing Access ».
         _SALON_SERVEUR[salon] = gid
-        code, msg = api("GET", f"/channels/{salon}/messages/{garde}")
+        code, msg = _api_patient("GET", f"/channels/{salon}/messages/{garde}")
+        if code == 429:
+            return self._envoyer({"ok": False, "error": "Discord demande d'attendre un peu : "
+                                  "reclique dans quelques secondes. Rien n'est supprimé."})
         if code != 200:
             return self._envoyer({"ok": False, "error": "Message introuvable : "
                                   + str((msg or {}).get("message") or f"HTTP {code}")[:120]})
@@ -1789,7 +1801,7 @@ class Poste(BaseHTTPRequestHandler):
         if erreur:
             return self._envoyer({"ok": False, "error": "Lecture du salon : " + erreur})
         if not d.get("confirme"):
-            c, info = api("GET", f"/channels/{salon}")
+            c, info = _api_patient("GET", f"/channels/{salon}")
             return self._envoyer({
                 "ok": True, "compte": len(anciens), "encore": encore,
                 "salon": (info or {}).get("name") if c == 200 else salon,
