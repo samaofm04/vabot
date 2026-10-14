@@ -635,6 +635,32 @@ try:
         _s["role"] = "owner"
     _r = _c2.post("/jailbreak/remove_va", data={"identity": "zzz", "va_name": "nope"})
     check("owner : accès complet conservé", _r.status_code != 403, f"HTTP {_r.status_code}")
+    # L outil Discord en ligne (youl4b.com/outil-discord/) : ADMIN seulement
+    import os as _osA, tempfile as _tfA
+    _secA = _osA.path.join(_tfA.mkdtemp(), "gate.secret")
+    with open(_secA, "w") as _fA:
+        _fA.write("abc123")
+    _osA.environ["OUTIL_DISCORD_GATE_FICHIER"] = _secA
+    try:
+        _rA = _app.test_client().get("/auth/outil-discord")
+        check("outil discord en ligne : sans session -> 401", _rA.status_code == 401,
+              f"HTTP {_rA.status_code}")
+        _w._load_web_users = lambda: {"chatteur1": {"role": "chatter", "password": "x"}}
+        _rA = _c.get("/auth/outil-discord")
+        check("outil discord en ligne : role restreint -> 403, pas de porte",
+              _rA.status_code == 403 and not _rA.headers.get("X-Outil-Gate"),
+              f"HTTP {_rA.status_code}")
+        _w._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+        _rA = _c2.get("/auth/outil-discord")
+        check("outil discord en ligne : admin -> 204 avec la porte",
+              _rA.status_code == 204 and _rA.headers.get("X-Outil-Gate") == "abc123",
+              f"HTTP {_rA.status_code}")
+        _osA.remove(_secA)
+        _rA = _c2.get("/auth/outil-discord")
+        check("outil discord en ligne : secret illisible -> 503, jamais ouvert",
+              _rA.status_code == 503, f"HTTP {_rA.status_code}")
+    finally:
+        _osA.environ.pop("OUTIL_DISCORD_GATE_FICHIER", None)
     _w._load_web_users = _orig_users
 except Exception as _e:
     check("sécurité : testable", False, repr(_e)[:90])
@@ -20643,6 +20669,44 @@ try:
             check("au-dessus : un 429 persistant dit d attendre, rien n est supprime",
                   _sorties[-1]["ok"] is False and "attendre" in _sorties[-1]["error"]
                   and "introuvable" not in _sorties[-1]["error"], str(_sorties[-1])[:120])
+            # m. en ligne, une tranche ne doit pas depasser BUDGET_S : avec un budget
+            # nul, chaque appel fait UNE action, dit « suite », et la page enchaine
+            _de.api = _apiD
+            _sauvB = _de.BUDGET_S
+            _de.BUDGET_S = 0.0
+            try:
+                _msgsD[:] = _salonD(4, jours=30) + _salonD(2)
+                _garde = _msgsD[4]["id"]
+                _nb_appels, _suite = 0, True
+                while _suite and _nb_appels < 20:
+                    _sorties.clear()
+                    _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+                    _nb_appels += 1
+                    _suite = _sorties[-1].get("suite")
+                check("tranches : au-dessus avance d une action par appel et finit",
+                      _nb_appels == 4 and len(_msgsD) == 2
+                      and {x["id"] for x in _msgsD} >= {_garde}, "%d appels, %d restants"
+                      % (_nb_appels, len(_msgsD)))
+                _etat_vider = [[x for x in _salonD(3, jours=30)]]
+                _msgsD[:] = _etat_vider[0]
+                _appD.clear()
+
+                def _apiV(methode, chemin, corps=None, params=None):
+                    if methode == "GET" and chemin == "/channels/99/messages":
+                        return 200, sorted(_msgsD, key=lambda x: -int(x["id"]))[:100]
+                    return _apiD(methode, chemin, corps, params)
+                _de.api = _apiV
+                _nb_appels, _suite = 0, True
+                while _suite and _nb_appels < 20:
+                    _sorties.clear()
+                    _h._vider({"salon": "99", "confirme": True})
+                    _nb_appels += 1
+                    _suite = _sorties[-1].get("suite")
+                check("tranches : Vider enchaine et finit le salon",
+                      _nb_appels == 3 and not _msgsD, "%d appels" % _nb_appels)
+            finally:
+                _de.BUDGET_S = _sauvB
+                _de.api = _apiD
             _de.api = _apiD
         finally:
             _de.time.sleep = _sauv_sleepD
@@ -20813,6 +20877,54 @@ try:
           _srcE2.count("if(!confirm(") >= 2 and "sera vide" in _srcE2)
     check("le bouton Vider est separe des autres boutons",
           'class="danger"' in _srcE2 and 'id="vider"' in _srcE2)
+    # --- l outil publie sur youl4b.com/outil-discord/ : la porte et les origines
+    import types as _tyG, tempfile as _tfG, pathlib as _plG
+    _hG = _de.Poste.__new__(_de.Poste)
+    _hG.server = _tyG.SimpleNamespace(server_address=("127.0.0.1", 8787))
+    _secG = _plG.Path(_tfG.mkdtemp()) / "gate.secret"
+    _secG.write_text("s3cret\n")
+    _sauvG = (_de.PORTE_FICHIER, _de.ORIGINES_SITE, _de.SERVICE)
+
+    def _reqG(**h):
+        _b = {"Host": "127.0.0.1:8787", "Content-Type": "application/json"}
+        _b.update(h)
+        _hG.headers = _b
+        return _hG._venu_d_ailleurs(True)
+    try:
+        _de.PORTE_FICHIER, _de.ORIGINES_SITE = str(_secG), {"https://youl4b.com"}
+        check("service : sans la porte de youl4b.com, refuse",
+              _reqG(Origin="https://youl4b.com") != "")
+        check("service : une fausse porte est refusee",
+              _reqG(Origin="https://youl4b.com", **{"X-Outil-Gate": "faux"}) != "")
+        check("service : porte + origine du site, accepte",
+              _reqG(Origin="https://youl4b.com", **{"X-Outil-Gate": "s3cret"}) == "")
+        check("service : la bonne porte depuis un autre site reste refusee",
+              _reqG(Origin="https://evil.example", **{"X-Outil-Gate": "s3cret"}) != "")
+        _secG.write_text("")
+        check("service : secret vide -> tout est refuse",
+              _reqG(Origin="https://youl4b.com", **{"X-Outil-Gate": ""}) != "")
+        _de.PORTE_FICHIER, _de.ORIGINES_SITE, _de.SERVICE = "", set(), True
+        check("service sans porte configuree : il refuse de demarrer", _de.main() == 1)
+        _de.SERVICE = False
+        check("local : inchange, la page de 127.0.0.1 passe sans porte",
+              _reqG(Origin="http://127.0.0.1:8787") == "")
+    finally:
+        _de.PORTE_FICHIER, _de.ORIGINES_SITE, _de.SERVICE = _sauvG
+    check("la page appelle l outil en relatif (marche sous /outil-discord/)",
+          "chemin = String(chemin).replace(" in _srcE2)
+    check("une reponse coupee (524 Cloudflare) ne fige plus la page",
+          "JSON.parse(t)" in _srcE2 and "Reponse illisible" in _srcE2)
+    check("Vider, au-dessus et Retirer Copier enchainent les tranches",
+          _srcE2.count("} while(j.suite);") >= 3)
+    _sauvCal = (_de._EN_COURS[0], _de._DERNIERE_ACTIVITE[0])
+    try:
+        _de._EN_COURS[0], _de._DERNIERE_ACTIVITE[0] = 0, 1000.0
+        check("redemarrage : pas avant une minute de calme",
+              not _de._calme(1030.0) and _de._calme(1061.0))
+        _de._EN_COURS[0] = 1
+        check("redemarrage : jamais pendant une requete", not _de._calme(5000.0))
+    finally:
+        _de._EN_COURS[0], _de._DERNIERE_ACTIVITE[0] = _sauvCal
     check("le bouton Supprimer tout ce qui est au-dessus est branche",
           'id="audessus"' in _srcE2 and "'/au_dessus'" in _srcE2
           and 'self.path == "/au_dessus"' in _srcE2)

@@ -63651,6 +63651,34 @@ def create_app():
         out["ok"] = True
         return jsonify(out)
 
+    @app.route("/auth/outil-discord")
+    def auth_outil_discord():
+        """Sous-requete nginx (auth_request) devant l'outil Discord
+        (discord_ecrire.py) publie sur youl4b.com/outil-discord/.
+
+        ADMIN seulement : l'outil poste avec les bots, vide des salons et
+        supprime des categories — /auth/jb2 laisse passer quiconque a la case
+        « Jailbreak 2 ». 204 + X-Outil-Gate (secret partage, que nginx recopie
+        vers l'outil et qui n'atteint jamais le navigateur) ; 401 / 403 sinon ;
+        503 si le secret est illisible plutot que d'ouvrir sans preuve.
+        """
+        from flask import Response
+        if not is_auth():
+            return ("", 401)
+        if not _is_admin():
+            return ("", 403)
+        try:
+            with open(os.environ.get("OUTIL_DISCORD_GATE_FICHIER")
+                      or "/etc/outil-discord/gate.secret") as _f:
+                secret = _f.read().strip()
+        except Exception:
+            secret = ""
+        if not secret:
+            return ("", 503)
+        r = Response("", status=204)
+        r.headers["X-Outil-Gate"] = secret
+        return r
+
     @app.route("/auth/ping")
     def auth_ping():
         """Contrôle léger de session : le wrapper fetch du front l'appelle

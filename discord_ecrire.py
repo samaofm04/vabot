@@ -21,6 +21,7 @@ Rien d'autre que la bibliothèque standard : pas d'installation.
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import os
 import sys
@@ -36,6 +37,23 @@ from pathlib import Path
 
 API = "https://discord.com/api/v10"
 PORT = 8787
+# Publié sur youl4b.com/outil-discord/ par le service du VPS, derrière nginx.
+# OUTIL_DISCORD_SERVICE=1 : pas de navigateur à ouvrir, et le code se recharge
+# seul après un déploiement. OUTIL_DISCORD_GATE_FICHIER : le secret que nginx
+# recopie APRÈS le contrôle de session admin de youl4b.com — sans lui, tout
+# programme du VPS pouvait piloter les bots. OUTIL_DISCORD_ORIGINES : les
+# adresses du site, seules origines admises en plus de 127.0.0.1. Sur le Mac,
+# rien de tout ça : l'outil reste local, comme avant.
+SERVICE = os.environ.get("OUTIL_DISCORD_SERVICE") == "1"
+PORTE_FICHIER = (os.environ.get("OUTIL_DISCORD_GATE_FICHIER") or "").strip()
+ORIGINES_SITE = {o.strip().lower().rstrip("/")
+                 for o in (os.environ.get("OUTIL_DISCORD_ORIGINES") or "").split(",")
+                 if o.strip()}
+# Travail maximal par requête. En ligne, Cloudflare coupe une réponse qui
+# tarde plus de 100 s : la page se figeait pendant que le serveur continuait.
+# Les longues suppressions avancent donc par tranches, que la page enchaîne
+# tant que la réponse dit « suite ».
+BUDGET_S = 45.0
 MAX_TEXTE = 2000            # limite Discord d'un message
 MAX_EMBED = 4096            # limite Discord d'une description d'encadré
 COULEUR_DEFAUT = 0x5865F2
@@ -425,8 +443,11 @@ def _messages_avant(salon: str, mid: str, plafond: int = 500):
     return out[:plafond], len(out) >= plafond, ""
 
 
-def _effacer_messages(salon: str, ids):
+def _effacer_messages(salon: str, ids, fin: float = 0.0):
     """Efface ces messages. (efface, un_par_un, echecs)
+
+    `fin` : heure au-delà de laquelle on s'arrête (voir BUDGET_S) — après au
+    moins une action, pour que chaque tranche avance.
 
     Discord refuse d'effacer en lot un message de plus de 14 jours : ceux-là
     partent un par un, plus lentement, et sont comptés à part pour que le
@@ -438,7 +459,11 @@ def _effacer_messages(salon: str, ids):
     recents = [i for i in ids
                if (int(i) >> 22) + 1420070400000 > (time.time() - 13.5 * 86400) * 1000]
     vieux = [i for i in ids if i not in set(recents)]
+    def _assez():
+        return bool(fin) and time.time() > fin and bool(efface or echecs)
     for k in range(0, len(recents), 100):
+        if _assez():
+            return efface, un_par_un, echecs
         lot = recents[k:k + 100]
         if len(lot) < 2:                 # le lot exige au moins deux messages
             vieux = lot + vieux
@@ -450,6 +475,8 @@ def _effacer_messages(salon: str, ids):
             echecs.append(str((rep or {}).get("message") or f"lot : HTTP {c}")[:120])
             vieux = lot + vieux          # le lot a echoue : un par un
     for mid in vieux:
+        if _assez():
+            break
         c, rep = _api_patient("DELETE", f"/channels/{salon}/messages/{mid}")
         if c in (200, 204):
             efface += 1
@@ -1008,8 +1035,20 @@ function basculer(versLot){
 }
 
 async function demander(chemin, corps){
-  var r = await fetch(chemin, corps ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(corps)} : undefined);
-  return await r.json();
+  // relatif : sous youl4b.com/outil-discord/, « /salons » partait vers le
+  // site lui-meme au lieu de l outil
+  chemin = String(chemin).replace(/^\//, '');
+  var r, t;
+  try {
+    r = await fetch(chemin, corps ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(corps)} : undefined);
+    t = await r.text();
+  } catch(e){
+    return {ok: false, error: 'L outil ne repond pas (connexion coupee). Le travail continue peut-etre : verifie le salon avant de relancer.'};
+  }
+  // En ligne, Cloudflare renvoie une page HTML (524) si l outil tarde : r.json()
+  // levait une erreur et la page restait figee sur « en cours ».
+  try { return JSON.parse(t); }
+  catch(e){ return {ok: false, error: 'Reponse illisible (HTTP ' + r.status + ') : le travail continue peut-etre sur le serveur, verifie le salon avant de relancer.'}; }
 }
 
 async function chargerSalons(){
@@ -1071,7 +1110,7 @@ function tranches(items){
   var out = [], cour = [], poids = 0;
   items.forEach(function(it){
     var p = it.photo ? it.photo.b64.length : it.texte.length;
-    if(cour.length && (poids + p > 20 * 1024 * 1024 || cour.length >= 25)){
+    if(cour.length && (poids + p > 20 * 1024 * 1024 || cour.length >= 10)){
       out.push(cour); cour = []; poids = 0;
     }
     cour.push(it); poids += p;
@@ -1177,13 +1216,21 @@ E('vider').onclick = async function(){
   if(!confirm('Vraiment ? ' + nom + ' sera vide.')) return;
   this.disabled = true;
   etat('Effacement en cours… laisse la page ouverte.');
-  var j = await demander('/vider', {salon: E('salon').value, confirme: true});
+  // l outil travaille par tranches (BUDGET_S) : on enchaine tant qu il dit « suite »
+  var j, eff = 0, upu = 0, rates = [];
+  do {
+    j = await demander('/vider', {salon: E('salon').value, confirme: true});
+    eff += j.efface || 0; upu += j.un_par_un || 0; rates = rates.concat(j.echecs || []);
+    if(j.suite) etat('Effacement en cours… ' + eff + ' efface(s), je continue. Laisse la page ouverte.');
+  } while(j.suite);
   this.disabled = false;
-  var txt = (j.efface || 0) + ' message(s) efface(s)'
-          + (j.un_par_un ? ' (dont ' + j.un_par_un + ' un par un, trop vieux pour le lot)' : '');
+  var txt = eff + ' message(s) efface(s)'
+          + (upu ? ' (dont ' + upu + ' un par un, trop vieux pour le lot)' : '');
   if(j.arrete) txt += ' · arrete par securite, il en reste : reclique';
-  if((j.echecs || []).length) txt += ' · rates : ' + j.echecs.join(' | ');
-  etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
+  if(j.error) txt += ' · ' + j.error;
+  if(rates.length) txt += ' · rates : ' + rates.slice(0, 10).join(' | ');
+  var bon = j.ok && !rates.length;
+  etat((bon ? '✓ ' : '⚠ ') + txt, bon ? 'ok' : 'ko');
   chargerMessages();
 };
 
@@ -1226,18 +1273,23 @@ E('audessus-oui').onclick = async function(){
   cacherAuDessus();
   E('audessus').disabled = true;
   etat('Suppression en cours… jusqu a ' + Math.ceil(a.q.compte * 1.2) + ' s, laisse la page ouverte.');
-  var j;
-  try { j = await demander('/au_dessus', {lien: a.lien, confirme: true}); }
-  catch(e){ j = {ok: false, error: 'l outil ne repond plus : recharge la page et reclique pour voir ce qui reste'}; }
+  // l outil travaille par tranches (BUDGET_S) : on enchaine tant qu il dit « suite »
+  var j, eff = 0, upu = 0, rates = [];
+  do {
+    j = await demander('/au_dessus', {lien: a.lien, confirme: true});
+    eff += j.efface || 0; upu += j.un_par_un || 0; rates = rates.concat(j.echecs || []);
+    if(j.suite) etat('Suppression en cours… ' + eff + ' supprime(s), il en reste ' + j.reste + ', je continue.');
+  } while(j.suite);
   E('audessus').disabled = false;
-  var txt = (j.efface || 0) + ' message(s) supprime(s) dans ' + a.q.salon
-          + (j.un_par_un ? ' (dont ' + j.un_par_un + ' un par un, trop vieux pour le lot)' : '');
+  var txt = eff + ' message(s) supprime(s) dans ' + a.q.salon
+          + (upu ? ' (dont ' + upu + ' un par un, trop vieux pour le lot)' : '');
   if(j.reste) txt += ' · il en reste ' + j.reste + (j.encore ? ' (au moins)' : '') + ' au-dessus : reclique';
   if(j.reste === null) txt += ' · le recomptage a echoue : reclique pour verifier';
   if(j.error) txt += ' · ' + j.error;
-  if((j.echecs || []).length) txt += ' · rates : ' + j.echecs.join(' | ');
-  etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
-  if(j.ok && j.reste === 0) E('lienhaut').value = '';
+  if(rates.length) txt += ' · rates : ' + rates.slice(0, 10).join(' | ');
+  var bon = j.ok && !rates.length;
+  etat((bon ? '✓ ' : '⚠ ') + txt, bon ? 'ok' : 'ko');
+  if(bon && j.reste === 0) E('lienhaut').value = '';
   chargerMessages();
 };
 
@@ -1256,10 +1308,15 @@ E('retirercopier').onclick = async function(){
               + 'Le texte et les photos restent, rien n est efface.')) return;
   this.disabled = true;
   etat('Retrait en cours… environ ' + Math.ceil(q.compte * 0.8) + ' s, laisse la page ouverte.');
-  var j = await demander('/retirer_copier', {salon: E('salon').value, confirme: true});
+  var j, ret = 0;
+  do {
+    j = await demander('/retirer_copier', {salon: E('salon').value, confirme: true});
+    ret += j.retires || 0;
+    if(j.suite) etat('Retrait en cours… ' + ret + ' retire(s), je continue.');
+  } while(j.suite);
   this.disabled = false;
-  if(j.error && !j.retires){ etat('✕ ' + j.error, 'ko'); return; }
-  var txt = (j.retires || 0) + ' bouton(s) Copier retire(s)';
+  if(j.error && !ret){ etat('✕ ' + j.error, 'ko'); return; }
+  var txt = ret + ' bouton(s) Copier retire(s)';
   if(j.nb_echecs) txt += ' · ' + j.nb_echecs + ' rate(s) : ' + (j.echecs || []).join(' | ');
   if(!j.complet) txt += ' · salon tres long : seuls les ' + j.lus + ' derniers messages ont ete lus, reclique';
   etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
@@ -1561,8 +1618,18 @@ class Poste(BaseHTTPRequestHandler):
         locaux = {f"127.0.0.1:{port}", f"localhost:{port}"}
         if (self.headers.get("Host") or "").strip().lower() not in locaux:
             return "Requête refusée : elle ne vient pas de la page de l'outil."
+        if PORTE_FICHIER:
+            try:
+                attendu = Path(PORTE_FICHIER).read_text(encoding="utf-8").strip()
+            except Exception:
+                attendu = ""
+            recu = (self.headers.get("X-Outil-Gate") or "").strip()
+            # secret illisible : on refuse plutôt que d'ouvrir sans preuve
+            if not attendu or not hmac.compare_digest(recu.encode(), attendu.encode()):
+                return "Requête refusée : elle n'est pas passée par youl4b.com."
         origine = self.headers.get("Origin")
-        if origine is not None and origine.strip().lower() not in {"http://" + h for h in locaux}:
+        admises = {"http://" + h for h in locaux} | ORIGINES_SITE
+        if origine is not None and origine.strip().lower().rstrip("/") not in admises:
             return "Requête refusée : elle vient d'un autre site que l'outil."
         if ecriture:
             # application/json oblige le navigateur à demander la permission
@@ -1573,6 +1640,7 @@ class Poste(BaseHTTPRequestHandler):
         return ""
 
     def do_GET(self):
+        _DERNIERE_ACTIVITE[0] = time.time()
         refus = self._venu_d_ailleurs(False)
         if refus:
             return self._envoyer({"ok": False, "error": refus}, 403)
@@ -1605,6 +1673,19 @@ class Poste(BaseHTTPRequestHandler):
         self._envoyer({"error": "inconnu"}, 404)
 
     def do_POST(self):
+        # Compté : le redémarrage après un déploiement attend qu'aucun envoi
+        # ni aucune suppression ne soit en cours.
+        with _VERROU_EN_COURS:
+            _EN_COURS[0] += 1
+            _DERNIERE_ACTIVITE[0] = time.time()
+        try:
+            return self._do_post()
+        finally:
+            with _VERROU_EN_COURS:
+                _EN_COURS[0] -= 1
+                _DERNIERE_ACTIVITE[0] = time.time()
+
+    def _do_post(self):
         refus = self._venu_d_ailleurs(True)
         if refus:
             return self._envoyer({"ok": False, "error": refus}, 403)
@@ -1799,9 +1880,10 @@ class Poste(BaseHTTPRequestHandler):
                                   "encore": len(msgs) == 100})
 
         efface, un_par_un, echecs, tours = 0, 0, [], 0
-        while msgs and tours < 20:
+        fin = time.time() + BUDGET_S
+        while msgs and tours < 20 and (tours == 0 or time.time() < fin):
             tours += 1
-            e, u, ech = _effacer_messages(salon, [x["id"] for x in msgs])
+            e, u, ech = _effacer_messages(salon, [x["id"] for x in msgs], fin)
             efface += e
             un_par_un += u
             echecs += ech
@@ -1812,7 +1894,9 @@ class Poste(BaseHTTPRequestHandler):
                 break
         return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
                               "reste": len(msgs), "echecs": echecs[:10],
-                              "arrete": tours >= 20 and bool(msgs)})
+                              "arrete": tours >= 20 and bool(msgs),
+                              # tranche finie, salon pas vide : la page relance
+                              "suite": bool(msgs) and efface > 0 and tours < 20})
 
     def _au_dessus(self, d):
         """Efface tout ce qui est AU-DESSUS d'un message : ce message et tout ce
@@ -1862,7 +1946,8 @@ class Poste(BaseHTTPRequestHandler):
                 "garde": _resume(msg), "apercu": [_resume(x) for x in anciens[:3]],
                 "du": _date_id(anciens[-1]["id"]) if anciens else "",
                 "au": _date_id(anciens[0]["id"]) if anciens else ""})
-        efface, un_par_un, echecs = _effacer_messages(salon, [x["id"] for x in anciens])
+        efface, un_par_un, echecs = _effacer_messages(salon, [x["id"] for x in anciens],
+                                                      time.time() + BUDGET_S)
         reste, encore, erreur = _messages_avant(salon, garde)
         print(f"[au-dessus] {salon} : {efface} supprime(s), {len(echecs)} echec(s), "
               f"reste {'?' if erreur else len(reste)}", flush=True)
@@ -1872,7 +1957,8 @@ class Poste(BaseHTTPRequestHandler):
             echecs.append("relecture : " + erreur)
         return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
                               "reste": None if erreur else len(reste), "encore": encore,
-                              "echecs": echecs[:10]})
+                              "echecs": echecs[:10],
+                              "suite": not erreur and bool(reste) and efface > 0})
 
     def _retirer_copier(self, d):
         """Enlève le bouton Copier des messages déjà postés, sans toucher au reste.
@@ -1921,8 +2007,12 @@ class Poste(BaseHTTPRequestHandler):
             return self._envoyer({"ok": True, "compte": len(a_nettoyer),
                                   "lus": lus, "complet": complet})
 
-        retires, echecs = 0, []
+        retires, echecs, traites = 0, [], 0
+        fin = time.time() + BUDGET_S
         for mid, gardees in a_nettoyer:
+            if traites and time.time() > fin:
+                break
+            traites += 1
             for _ in range(3):
                 c, rep = api("PATCH", f"/channels/{salon}/messages/{mid}",
                              {"components": gardees})
@@ -1937,7 +2027,8 @@ class Poste(BaseHTTPRequestHandler):
             time.sleep(0.6)
         return self._envoyer({"ok": not echecs and complet, "retires": retires,
                               "nb_echecs": len(echecs), "echecs": echecs[:5],
-                              "lus": lus, "complet": complet})
+                              "lus": lus, "complet": complet,
+                              "suite": traites < len(a_nettoyer) and retires > 0})
 
     def _supprimer_categorie(self, d):
         """Supprime une catégorie et tous ses salons — en deux temps.
@@ -1994,7 +2085,44 @@ class Poste(BaseHTTPRequestHandler):
         pass          # le terminal reste lisible
 
 
+_EN_COURS = [0]
+_VERROU_EN_COURS = threading.Lock()
+_DERNIERE_ACTIVITE = [0.0]
+
+
+def _calme(maintenant: float) -> bool:
+    """Rien en cours ET rien depuis une minute. Un compteur à zéro ne suffit
+    pas : entre deux tranches d'un envoi en lot, il retombe à zéro, et un
+    redémarrage à ce moment coupait le lot en silence."""
+    return _EN_COURS[0] == 0 and maintenant - _DERNIERE_ACTIVITE[0] > 60
+
+
+def _relancer_si_modifie(intervalle: float = 20.0):
+    """Service du VPS : quitte quand le fichier change (déploiement), systemd
+    relance le nouveau code. Sans ça, l'outil en ligne gardait l'ancienne
+    version jusqu'au prochain redémarrage du serveur."""
+    try:
+        depart = Path(__file__).stat().st_mtime
+    except Exception:
+        return
+    while True:
+        time.sleep(intervalle)
+        try:
+            if Path(__file__).stat().st_mtime == depart:
+                continue
+        except Exception:
+            continue
+        while not _calme(time.time()):
+            time.sleep(2)
+        print("[service] nouveau code déployé : redémarrage", flush=True)
+        os._exit(0)
+
+
 def main():
+    if SERVICE and (not PORTE_FICHIER or not ORIGINES_SITE):
+        print("Service sans OUTIL_DISCORD_GATE_FICHIER ou OUTIL_DISCORD_ORIGINES : "
+              "refusé, l'outil serait ouvert à tout le VPS.", file=sys.stderr)
+        return 1
     if not TOKEN:
         print("Jeton du bot introuvable.\n"
               "Attendu dans ~/.config/seven_bot_token, data/seven_bot_token, "
@@ -2014,11 +2142,14 @@ def main():
               file=sys.stderr)
         return 1
     url = f"http://127.0.0.1:{PORT}"
-    print(f"Écrire dans un salon Discord : {url}\nCtrl+C pour arrêter.")
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    print(f"Écrire dans un salon Discord : {url}\nCtrl+C pour arrêter.", flush=True)
+    if SERVICE:
+        threading.Thread(target=_relancer_si_modifie, daemon=True).start()
+    else:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
