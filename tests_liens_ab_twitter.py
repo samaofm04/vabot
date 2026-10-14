@@ -462,14 +462,20 @@ try:
     import subs_va as sv
     V = {("2026-10-15", "2026-10-15"): {"emy.brw/c6": 2, "seren.vale/c196": 1, "amelia/c3": 4},
          ("2026-10-01", "2026-10-15"): {"emy.brw/c6": 10, "seren.vale/c196": 5, "amelia/c3": 7},
-         ("2026-09-16", "2026-09-30"): {"emy.brw/c6": 20, "amelia/c3": 1}}
+         # MyPuls rend TOUS les trackings pour une période, même ceux créés
+         # après (à 0) : Seren y est, à 0
+         ("2026-09-16", "2026-09-30"): {"emy.brw/c6": 20, "seren.vale/c196": 0, "amelia/c3": 1}}
     panne = {"oui": False}
 
     def faux_mp(du, au, forcer=False):
         if panne["oui"]:
             return None, "MyPuls muet"
-        # des visites dix fois plus nombreuses : on compte les ABONNÉS
-        return {t: {"visites": n * 10, "total": n * 10, "subs": n, "nom": ""}
+        # des visites dix fois plus nombreuses : on compte les ABONNÉS ; les
+        # noms MyPuls portent le pseudo du VA (« uniquement son tracking avec
+        # son nom »)
+        NOMS = {"emy.brw/c6": "Twitter VA 31 @abdoul_9684",
+                "seren.vale/c196": "Twitter VA 31 @abdoul_9684", "amelia/c3": "Lola_VA_2_adh040"}
+        return {t: {"visites": n * 10, "total": n * 10, "subs": n, "nom": NOMS.get(t, "")}
                 for t, n in V.get((du, au), {}).items()}, ""
     _sauve_pod = {k: getattr(pod, k) for k in ("_lire_mypuls", "_aujourdhui")}
     _sauve_sv = {k: getattr(sv, k) for k in ("MYM_FICHIER",)}
@@ -486,7 +492,7 @@ try:
             f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31, "shortcode": "bbyy",
                          "tracking": "https://onlyfans.com/emy.brw/c6",
                          "variante": {"tracking": "https://onlyfans.com/seren.vale/c196", "posee": True}},
-            f"{TH}:43": {"pseudo": "x", "numero": 61, "shortcode": "angelyy",
+            f"{TH}:43": {"pseudo": "abdoul_9684", "numero": 31, "shortcode": "angelyy",
                          "tracking": "https://onlyfans.com/emy.brw/c6"}}})
         check("trackings d'un VA Twitter : Emy et sa variante Seren",
               sv.trackings_du_va(TW, 42) == [("of", "https://onlyfans.com/emy.brw/c6"),
@@ -518,6 +524,25 @@ try:
             "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
         check("… un relevé MYM de plus de six heures : « pas lisible » non plus",
               sv.subs_du_va(sv.VA_IG_ID, 44, J)["aujourdhui"]["n"] is None)
+        # adh040 : son bouton MYM resté sur le tracking COMMUN « VA_MARKETING »
+        # (« avant j'avais pas de tracking link, c'est juste un truc en
+        # général ; faut juste prendre le tracking link actuel », 15/10/2026)
+        lf.ETAT.write_text(json.dumps({"liens": {"46:lola": {
+            "pseudo": "adh040", "trackings": {"of": "https://onlyfans.com/amelia/c3",
+                                              "mym": "https://mym.fans/app/t/COMMUN"}}}}))
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time(), "trackings": {
+            "https://mym.fans/app/t/COMMUN": {"nom": "VA_MARKETING",
+                                              "jours": {"2026-10-03": 9, "2026-09-20": 45}},
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
+        r = sv.subs_du_va(sv.VA_IG_ID, 46, J)
+        check("tracking commun (nom sans le pseudo du VA) : pas compté, seul le sien l'est (7 · 1)",
+              (r["periode"]["n"], r["precedente"]["n"]) == (7, 1)
+              and r["communs"] == ["https://mym.fans/app/t/COMMUN"], r)
+        check("… et le message le dit, en une ligne",
+              "tracking commun" in sv.texte(sv.VA_IG_ID, 46, J))
+        check("UNIQUEMENT son tracking avec son nom : « Lola_VA_2_adh040 » oui, « VA_MARKETING » ou sans nom non",
+              sv._a_lui("Lola_VA_2_adh040", "adh040") and sv._a_lui("Twitter VA 31 @abdoul_9684", "abdoul_9684")
+              and not sv._a_lui("VA_MARKETING", "adh040") and not sv._a_lui("", "adh040"))
         panne["oui"] = True
         check("MyPuls muet : « pas lisible », jamais un zéro inventé",
               sv.subs_du_va(TW, 42, J)["periode"]["n"] is None)

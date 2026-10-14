@@ -86,6 +86,38 @@ def trackings_du_va(gid: Any, uid: Any) -> List[Tuple[str, str]]:
     return uniques
 
 
+def pseudo_du_va(gid: Any, uid: Any) -> str:
+    """Le pseudo du VA tel que ses fiches le donnent (« adh040 »)."""
+    gid, uid = str(gid or ""), str(uid or "")
+    if gid in (TWITTER_ID, THREADS_ID):
+        import liens_va
+        return str(liens_va.lien_de(gid, uid).get("pseudo") or "")
+    if gid == VA_IG_ID:
+        import liens_fr
+        for cle, f in (liens_fr._etat().get("liens") or {}).items():
+            if cle.startswith(uid + ":") and isinstance(f, dict) and f.get("pseudo"):
+                return str(f["pseudo"])
+    return ""
+
+
+def _norme(x: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(x or "").lower())
+
+
+def _a_lui(nom: str, pseudo: str) -> bool:
+    """Ce tracking est-il au VA ? Son nom MyPuls porte son pseudo
+    (« Lola_VA_2_adh040 », « Twitter VA 31 @abdoul_9684 »). Propriétaire,
+    15/10/2026, devant 45 subs en septembre pour adh040 : « avant j'avais
+    pas de tracking link, c'est juste un truc en général ; faut juste prendre
+    le tracking link actuel » -- son bouton MYM était resté sur le tracking
+    COMMUN « VA_MARKETING » (création MYM refusée, HTTP 500), aux subs de
+    tout le monde depuis juin ; puis « UNIQUEMENT son tracking avec son nom ».
+    Sans nom, pas à lui."""
+    if not pseudo:
+        return True
+    return bool(nom) and _norme(pseudo) in _norme(nom)
+
+
 # ─── OnlyFans : l'API ────────────────────────────────────────────────────
 def _subs_of(urls: List[str], d0: str, d1: str) -> Optional[int]:
     """Abonnés OF de ces trackings sur [d0, d1] (API MyPuls), None si MyPuls
@@ -229,9 +261,10 @@ def subs_du_va(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> Dict[str, 
     """{trackings, aujourdhui|periode|precedente : {du, au, n}} — n additionne
     OF et MYM, Emy et Seren ; None si une partie est illisible."""
     ts = trackings_du_va(gid, uid)
-    of = [u for p, u in ts if p == "of"]
-    mym = [u for p, u in ts if p == "mym"]
-    out: Dict[str, Any] = {"trackings": len(ts)}
+    communs = _communs(ts, pseudo_du_va(gid, uid), jour)
+    of = [u for p, u in ts if p == "of" and u not in communs]
+    mym = [u for p, u in ts if p == "mym" and u not in communs]
+    out: Dict[str, Any] = {"trackings": len(ts), "communs": sorted(communs)}
     for cle, a, b in periodes(jour):
         d0, d1 = a.isoformat(), b.isoformat()
         n_of = _subs_of(of, d0, d1)
@@ -239,6 +272,28 @@ def subs_du_va(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> Dict[str, 
         n = None if n_of is None or n_mym is None else n_of + n_mym
         out[cle] = {"du": d0, "au": d1, "n": n}
     return out
+
+
+def _communs(ts: List[Tuple[str, str]], pseudo: str, jour: Optional[dt.date] = None) -> set:
+    """Les trackings de ce VA qui ne sont PAS à lui : MyPuls les connaît, et
+    leur nom ne porte pas son pseudo (voir _a_lui). MyPuls muet ou relevé MYM
+    absent : rien n'est écarté, la lecture dira « pas lisible »."""
+    if not pseudo or not ts:
+        return set()
+    noms: Dict[str, str] = {}
+    if any(p == "of" for p, _u in ts):
+        import podium_discord as pod
+        j = (jour or pod._aujourdhui()).isoformat()
+        vus, _raison = pod._lire_mypuls(j, j)
+        for p, u in ts:
+            if p == "of" and vus and pod.tracking_de(u) in vus:
+                noms[u] = str(vus[pod.tracking_de(u)].get("nom") or "")
+    if any(p == "mym" for p, _u in ts):
+        cache = _lire_cache().get("trackings") or {}
+        for p, u in ts:
+            if p == "mym" and u.rstrip("/") in cache:
+                noms[u] = str(cache[u.rstrip("/")].get("nom") or "")
+    return {u for u, nom in noms.items() if not _a_lui(nom, pseudo)}
 
 
 def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
@@ -262,5 +317,6 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
         ligne("Aujourd'hui", r["aujourdhui"], dates=False),
         ligne("Cette période", r["periode"]),
         ligne("Période précédente", r["precedente"]),
-        "-# MyPuls se met à jour toutes les quelques heures.",
+        "-# MyPuls se met à jour toutes les quelques heures."
+        + (" Un tracking commun à plusieurs VA n'est pas compté." if r.get("communs") else ""),
     ])
