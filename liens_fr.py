@@ -283,6 +283,12 @@ def _reparer(uid, model: str, entree: Dict[str, Any]):
             url = ""
             print(f"[liens_fr] reparation : relecture API impossible ({e})", flush=True)
         if not url:
+            # l'API ne rend pas les trackings MYM : le relevé horaire de la page
+            # MyPuls (subs_va) les connaît, nom compris. Sans lui, un tracking
+            # MYM créé mais jamais relu restait invisible, et MYM refusait d'en
+            # recréer un au même nom (HTTP 500) : adh040 et priscah, 15/10/2026
+            url = _releve_mym_au_nom(nomt, cid)
+        if not url:
             t = creer_tracking(nomt, cid)
             url = t.get("url") if t.get("ok") else ""
             if not url:
@@ -612,6 +618,20 @@ def _relire_api(nom: str, creator_id: int):
         if len(items) < 500:
             break
     return "", None
+
+
+def _releve_mym_au_nom(nom: str, creator_id: int) -> str:
+    """L'adresse du tracking `nom` de cette créatrice dans le dernier relevé de
+    la page MyPuls (subs_va.MYM_FICHIER), « » sinon."""
+    try:
+        import subs_va
+        for url, t in (subs_va._lire_cache().get("trackings") or {}).items():
+            if (isinstance(t, dict) and str(t.get("createur")) == str(int(creator_id))
+                    and str(t.get("nom") or "").strip() == nom):
+                return str(url)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[liens_fr] relevé MYM illisible ({type(e).__name__}: {e})", flush=True)
+    return ""
 
 
 def _verifie_createrice(r: Dict[str, Any], creator_id: int) -> Dict[str, Any]:

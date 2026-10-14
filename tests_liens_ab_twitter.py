@@ -543,6 +543,15 @@ try:
         check("UNIQUEMENT son tracking avec son nom : « Lola_VA_2_adh040 » oui, « VA_MARKETING » ou sans nom non",
               sv._a_lui("Lola_VA_2_adh040", "adh040") and sv._a_lui("Twitter VA 31 @abdoul_9684", "abdoul_9684")
               and not sv._a_lui("VA_MARKETING", "adh040") and not sv._a_lui("", "adh040"))
+        # la réparation d'un lien Va IG retrouve un tracking MYM déjà créé à
+        # son nom (l'API ne rend pas MYM ; MYM refuse un 2e au même nom, HTTP 500)
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time(), "trackings": {
+            "https://mym.fans/app/t/hmyayn": {"createur": 1116, "nom": "Lola_VA_2_adh040", "jours": {}},
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
+        check("réparation Va IG : tracking MYM déjà créé au nom du VA, retrouvé dans le relevé",
+              lf._releve_mym_au_nom("Lola_VA_2_adh040", 1116) == "https://mym.fans/app/t/hmyayn"
+              and lf._releve_mym_au_nom("Lola_VA_2_adh040", 769) == ""
+              and lf._releve_mym_au_nom("Lola_VA_3_autre", 1116) == "")
         panne["oui"] = True
         check("MyPuls muet : « pas lisible », jamais un zéro inventé",
               sv.subs_du_va(TW, 42, J)["periode"]["n"] is None)
