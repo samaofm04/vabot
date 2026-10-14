@@ -631,6 +631,32 @@ try:
     check("… Twitter compris : la boucle du podium appelle redessiner_boutons",
           "redessiner_boutons(gid)" in _sync)
 
+    # ── « Mes subs » dans le salon d'un VA : SES subs, pas ceux du cliqueur ─
+    # « pk ça me dit 0 sub pour lui et pour lui aussi » (15/10/2026)
+    vus_subs = []
+    _sauve_cu = {k: getattr(cu, k) for k in ("_mes_subs_texte", "_va_du_salon")}
+
+    class _RepS:
+        async def defer(self, **k):
+            pass
+
+    class _SuiteS:
+        async def send(self, txt, **k):
+            vus_subs.append(txt)
+    try:
+        cu._mes_subs_texte = lambda g_, u_: f"subs de {u_.id}"
+        cu._va_du_salon = lambda ch: 4242 if getattr(ch, "id", None) == 9 else None
+        inter = types.SimpleNamespace(guild=types.SimpleNamespace(id=1), user=types.SimpleNamespace(id=7),
+                                      channel=types.SimpleNamespace(id=9), response=_RepS(), followup=_SuiteS())
+        asyncio.run(cu.ContentMenuView._clic_subs(None, inter))
+        inter.channel = types.SimpleNamespace(id=10)
+        asyncio.run(cu.ContentMenuView._clic_subs(None, inter))
+    finally:
+        for _k, _v in _sauve_cu.items():
+            setattr(cu, _k, _v)
+    check("Mes subs dans le ticket d'un VA : les subs DE CE VA (pas du manager qui clique) ; ailleurs, les siens",
+          vus_subs == ["subs de 4242", "subs de 7"], vus_subs)
+
     # le menu se construit vraiment : 5 boutons au plus par rangée (un 6e
     # fait tomber TOUT le menu), 40 composants au plus par message
     import discord as _discord

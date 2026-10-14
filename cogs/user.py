@@ -9456,8 +9456,14 @@ class ContentMenuView(discord.ui.LayoutView):
 
     async def _clic_subs(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
+        # LES SUBS DU VA DE CE SALON, pas de celui qui clique. Proprietaire,
+        # 15/10/2026, en cliquant dans les tickets de deux VA : « pk ca me dit
+        # 0 sub pour lui et pour lui aussi » -- c'etaient les siens (13 et 3
+        # pour eux). Hors d'un ticket : le cliqueur lui-meme.
+        va = _va_du_salon(getattr(interaction, "channel", None))
+        qui = discord.Object(id=va) if va else interaction.user
         try:
-            txt = await asyncio.to_thread(_mes_subs_texte, interaction.guild, interaction.user)
+            txt = await asyncio.to_thread(_mes_subs_texte, interaction.guild, qui)
         except Exception as e:                               # noqa: BLE001
             log.warning("Mes subs : %s: %s", type(e).__name__, e)
             txt = "⚠️ Tes subs ne sont pas lisibles pour l'instant, réessaie dans un moment."
