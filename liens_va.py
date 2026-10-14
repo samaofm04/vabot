@@ -810,6 +810,54 @@ def rebrancher(gid: str, uid: str) -> Dict[str, Any]:
             "code": t["code"], "erreur": ""}
 
 
+def changer_adresse(gid: str, uid: str) -> Dict[str, Any]:
+    """Donne au lien d'un VA une adresse sans prénom (« angelyy »). Rend
+    {ok, public_url, ancienne, erreur}.
+
+    Propriétaire, 14/10/2026 : « change le lien pour ceux qui sont déjà et
+    remets le bon ». Le MÊME lien GetMySocial est renommé : son A/B, ses
+    trackings et ses clics restent. L'ancienne adresse cesse de marcher —
+    c'est voulu, et elle est gardée dans la fiche (« anciennes_adresses »)
+    pour qu'on sache d'où venait un clic perdu."""
+    import gms
+    e = espace(gid)
+    l = lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    if not e.get("sans_prenom"):
+        return {"ok": False, "erreur": "adresses sans prénom désactivées (sans_prenom)"}
+    nom = f'{e["plateforme"]} VA {l.get("numero") or "?"} @{l.get("pseudo") or uid}'[:60]
+    ancienne = str(l["shortcode"])
+    if ancienne in {mots_sans_prenom(nom, i) for i in range(40)}:
+        return {"ok": True, "deja": True, "public_url": l.get("public_url", ""),
+                "ancienne": "", "erreur": ""}
+    equipe = str(e["equipe"])
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, ancienne)
+    if not lid:
+        return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
+    for essai in range(12):
+        sc = mots_sans_prenom(nom, essai)
+        r = gms._call_tool("update_link", {"link_id": lid, "shortcode": sc, "team_id": equipe})
+        if r.get("ok"):
+            d = r.get("data") if isinstance(r.get("data"), dict) else {}
+            # relu : un « ok » qui aurait gardé l'ancienne adresse ne doit pas
+            # faire afficher au VA un lien qui n'existe pas
+            if d and str(d.get("shortcode") or "") != sc:
+                return {"ok": False, "erreur": f"GetMySocial a gardé « {d.get('shortcode')} »"}
+            etat = _etat()
+            f = (etat.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+            f["anciennes_adresses"] = list(f.get("anciennes_adresses") or []) + [ancienne]
+            f["shortcode"] = sc
+            f["public_url"] = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
+            f["link_id"] = lid
+            _ecrire(etat)
+            return {"ok": True, "public_url": f["public_url"], "ancienne": ancienne, "erreur": ""}
+        # adresse prise (elles sont communes à tout GetMySocial) : la suivante
+        if "shortcode" not in str(r.get("error") or "").lower():
+            return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
+    return {"ok": False, "erreur": "douze adresses essayées, toutes prises"}
+
+
 def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:
     """Coupe ou remet en service le lien d'un VA. Rend {ok, url, actif, erreur}.
 

@@ -91,8 +91,14 @@ class FauxGMS(types.ModuleType):
     def cookie_expiration(self, ck=None):
         return self.echeance
 
+    pris_sc = ()
+
     def _call_tool(self, outil, args):
         self.appels.append((outil, args))
+        if outil == "update_link" and "shortcode" in args:
+            if args["shortcode"] in self.pris_sc:
+                return {"ok": False, "error": "409 shortcode_taken"}
+            return {"ok": True, "data": {"id": args["link_id"], "shortcode": args["shortcode"]}}
         if outil == "list_groups":
             return {"ok": True, "data": {"data": [{"name": "YAZID", "id": "grp_y"}]}}
         return {"ok": True, "data": {}}
@@ -354,6 +360,34 @@ try:
     check("variante éteinte : un seul tracking, aucun A/B, pas de clé « variante »",
           r.get("ok") and r.get("variante") is None and len(suivis) == 1 and not g.de("ab")
           and "variante" not in lv.lien_de(TW, "u5"), (r, suivis))
+
+    # ── changer l'adresse des liens déjà donnés ──────────────────────────
+    # « change le lien pour ceux qui sont déjà et remets le bon » (14/10/2026)
+    g, _s = monde(etat={"liens": {f"{TW}:a": {"pseudo": "abdoul_9684", "numero": 31,
+                                               "shortcode": "emycute", "link_id": "lnk_31",
+                                               "public_url": "https://getmysocial.com/emycute"}}})
+    nom31 = "Twitter VA 31 @abdoul_9684"
+    g.pris_sc = (lv.mots_sans_prenom(nom31, 0),)
+    r = lv.changer_adresse(TW, "a")
+    neuf = lv.mots_sans_prenom(nom31, 1)
+    upd = [x for x in g.appels if x[0] == "update_link"]
+    check("adresse changée : le MÊME lien renommé, la suivante si la première est prise",
+          r.get("ok") and r.get("public_url") == f"https://getmysocial.com/{neuf}"
+          and len(upd) == 2 and all(x[1]["link_id"] == "lnk_31" and x[1]["team_id"] == EMY_TWITTER
+                                    for x in upd) and "emy" not in neuf, (r, upd))
+    f = lv.lien_de(TW, "a")
+    check("… fiche à jour, l'ancienne adresse gardée",
+          f.get("shortcode") == neuf and f.get("public_url").endswith("/" + neuf)
+          and f.get("anciennes_adresses") == ["emycute"] and f.get("link_id") == "lnk_31", f)
+    n = len(g.appels)
+    r = lv.changer_adresse(TW, "a")
+    check("… un second passage ne renomme plus rien", r.get("deja") and len(g.appels) == n, r)
+    g, _s = monde(config=dict(CONFIG, sans_prenom=False),
+                  etat={"liens": {f"{TW}:a": {"pseudo": "x", "numero": 1, "shortcode": "emycute",
+                                               "link_id": "lnk_1"}}})
+    r = lv.changer_adresse(TW, "a")
+    check("règle éteinte (« sans_prenom » : false) : rien n'est renommé",
+          not r.get("ok") and not g.appels, (r, g.appels))
 
     # ── gms.poser_ab_testing ─────────────────────────────────────────────
     envois = []
