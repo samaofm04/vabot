@@ -20484,6 +20484,139 @@ try:
         _h._vider({"salon": "s1"})
         check("un salon illisible est signale, pas ecarte en silence",
               _sorties[-1]["ok"] is False and "Missing Access" in _sorties[-1]["error"])
+
+        # --- Supprimer tout ce qui est AU-DESSUS d'un message (le reste demeure)
+        import re as _reD
+        _sauv_sleepD = _de.time.sleep
+        _de.time.sleep = lambda s: None
+        _appD, _msgsD = [], []
+
+        def _salonD(n, jours=0):
+            ms = int((_tm.time() - jours * 86400) * 1000) - 1420070400000
+            return [{"id": str((ms << 22) + i), "content": "msg %d" % i} for i in range(n)]
+
+        def _apiD(methode, chemin, corps=None, params=None):
+            _appD.append((methode, chemin, corps, dict(params or {})))
+            if methode == "GET" and chemin == "/channels/99":
+                return 200, {"name": "-bio"}
+            m1 = _reD.match(r"/channels/99/messages/(\d+)$", chemin)
+            if methode == "GET" and m1:
+                x = next((x for x in _msgsD if x["id"] == m1.group(1)), None)
+                return (200, x) if x else (404, {"message": "Unknown Message"})
+            if methode == "GET" and chemin == "/channels/99/messages":
+                b = int(params["before"])
+                vieux = sorted((x for x in _msgsD if int(x["id"]) < b), key=lambda x: -int(x["id"]))
+                return 200, vieux[:int(params["limit"])]
+            if methode == "POST" and chemin.endswith("/bulk-delete"):
+                _msgsD[:] = [x for x in _msgsD if x["id"] not in set(corps["messages"])]
+                return 204, {}
+            if methode == "DELETE" and m1:
+                _msgsD[:] = [x for x in _msgsD if x["id"] != m1.group(1)]
+                return 204, {}
+            return 404, {"message": "inattendu"}
+
+        def _lienD(mid):
+            return "https://discord.com/channels/1445108485090971710/99/" + mid
+
+        try:
+            _de.api = _apiD
+            # a. un lien qui n en est pas un : rien n est appele
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": "pas un lien", "confirme": True})
+            check("au-dessus : un lien non reconnu est refuse, rien n est appele",
+                  _sorties[-1]["ok"] is False and not _appD)
+            # b. sans confirmation : on compte, rien n est efface
+            _msgsD[:] = _salonD(5)
+            _garde = _msgsD[2]["id"]
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde)})
+            check("au-dessus : sans confirmation il compte les plus anciens et n efface rien",
+                  _sorties[-1]["compte"] == 2 and _sorties[-1]["salon"] == "-bio"
+                  and _sorties[-1]["garde"] == "msg 2"
+                  and not any(a[0] in ("DELETE", "POST") for a in _appD), str(_sorties[-1])[:160])
+            # c. avec confirmation : seuls les plus anciens partent
+            _avant = {x["id"] for x in _msgsD}
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+            _restants = {x["id"] for x in _msgsD}
+            check("au-dessus : le message garde et tout ce qui suit restent",
+                  _restants == {x for x in _avant if int(x) >= int(_garde)}
+                  and _sorties[-1]["efface"] == 2 and _sorties[-1]["reste"] == 0
+                  and _sorties[-1]["ok"], str(_sorties[-1])[:160])
+            # d. un salon long : lecture par pages de 100, lots de 100 au plus
+            _msgsD[:] = _salonD(160)
+            _garde = _msgsD[150]["id"]
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+            _lots = [a for a in _appD if a[0] == "POST"]
+            check("au-dessus : 150 anciens partent en lots de 100 au plus, les 10 derniers restent",
+                  len(_msgsD) == 10 and _sorties[-1]["efface"] == 150
+                  and len(_lots) == 2 and all(len(a[2]["messages"]) <= 100 for a in _lots),
+                  "%d restants, %s" % (len(_msgsD), str(_sorties[-1])[:120]))
+            # e. plus de 14 jours : un par un, jamais en lot
+            _msgsD[:] = _salonD(3, jours=30) + _salonD(2)
+            _garde = _msgsD[3]["id"]
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+            check("au-dessus : les vieux messages partent un par un",
+                  _sorties[-1]["un_par_un"] == 3 and len(_msgsD) == 2
+                  and not any(a[0] == "POST" for a in _appD), str(_sorties[-1])[:160])
+            # f. un message introuvable : rien n est efface
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD("123"), "confirme": True})
+            check("au-dessus : un message introuvable arrete tout",
+                  _sorties[-1]["ok"] is False
+                  and not any(a[0] in ("DELETE", "POST") for a in _appD))
+            # g. un lien d un serveur hors outil : refuse avant tout appel
+            _msgsD[:] = _salonD(3)
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": "https://discord.com/channels/111/99/" + _msgsD[2]["id"],
+                           "confirme": True})
+            check("au-dessus : un lien hors des serveurs de l outil est refuse, rien n est appele",
+                  _sorties[-1]["ok"] is False and not _appD)
+            # h. un lien de THREADS : le salon est rattache a THREADS, donc au bon bot
+            _de._SALON_SERVEUR.pop("99", None)
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": "https://discord.com/channels/%s/99/%s"
+                                   % (_de.THREADS_ID, _msgsD[1]["id"])})
+            check("au-dessus : le serveur du lien choisit le bot (THREADS -> Jarvis)",
+                  _de._SALON_SERVEUR.get("99") == _de.THREADS_ID
+                  and _sorties[-1].get("compte") == 1, str(_sorties[-1])[:120])
+            _de._SALON_SERVEUR.pop("99", None)
+            # i. un recomptage rate apres effacement est dit, jamais lu comme « plus rien »
+            _msgsD[:] = _salonD(4)
+            _garde = _msgsD[2]["id"]
+
+            def _apiD_relecture_ko(methode, chemin, corps=None, params=None):
+                if (methode == "GET" and chemin == "/channels/99/messages"
+                        and any(a[0] == "POST" for a in _appD)):
+                    _appD.append((methode, chemin, corps, dict(params or {})))
+                    return 500, {"message": "Internal Server Error"}
+                return _apiD(methode, chemin, corps, params)
+            _de.api = _apiD_relecture_ko
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde), "confirme": True})
+            check("au-dessus : recomptage rate -> ok faux, reste inconnu, le lien est garde",
+                  _sorties[-1]["ok"] is False and _sorties[-1]["reste"] is None
+                  and any("relecture" in e for e in _sorties[-1]["echecs"]), str(_sorties[-1])[:160])
+            # j. Discord demande d attendre (429) a la lecture : on attend et on retente
+            _msgsD[:] = _salonD(3)
+            _garde = _msgsD[2]["id"]
+            _premier = [True]
+
+            def _apiD_429(methode, chemin, corps=None, params=None):
+                if methode == "GET" and chemin == "/channels/99/messages" and _premier[0]:
+                    _premier[0] = False
+                    return 429, {"message": "You are being rate limited.", "retry_after": 0}
+                return _apiD(methode, chemin, corps, params)
+            _de.api = _apiD_429
+            _sorties.clear()
+            _h._au_dessus({"lien": _lienD(_garde)})
+            check("au-dessus : un 429 a la lecture est attendu puis retente",
+                  _sorties[-1].get("compte") == 2 and not _premier[0], str(_sorties[-1])[:120])
+            _de.api = _apiD
+        finally:
+            _de.time.sleep = _sauv_sleepD
     finally:
         _de.api = _sauv_api
 
@@ -20651,6 +20784,9 @@ try:
           _srcE2.count("if(!confirm(") >= 2 and "sera vide" in _srcE2)
     check("le bouton Vider est separe des autres boutons",
           'class="danger"' in _srcE2 and 'id="vider"' in _srcE2)
+    check("le bouton Supprimer tout ce qui est au-dessus est branche",
+          'id="audessus"' in _srcE2 and "'/au_dessus'" in _srcE2
+          and 'self.path == "/au_dessus"' in _srcE2)
     check("le bouton Copier n est plus pose par defaut",
           '<input type="checkbox" id="copier">' in _srcE2)
     check("la ligne vide entre chaque message est cochee par defaut",

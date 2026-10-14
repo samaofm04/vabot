@@ -361,6 +361,93 @@ def _effacer(sid: str, entetes):
     return code, rep
 
 
+# Un lien de message Discord : clic droit sur le message > « Copier le lien du
+# message ». Les variantes ptb./canary. et l'ancien discordapp.com y passent.
+_LIEN_MESSAGE = _re_salons.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
+
+
+def _date_id(mid) -> str:
+    """L'heure de création d'un message, lue dans son identifiant."""
+    try:
+        return datetime.fromtimestamp(((int(mid) >> 22) + 1420070400000) / 1000).strftime("%d/%m %Hh%M")
+    except Exception:
+        return "?"
+
+
+def _resume(m: dict) -> str:
+    """Une ligne pour reconnaître un message dans une question de confirmation."""
+    e = (m.get("embeds") or [{}])[0] or {}
+    t = " ".join((m.get("content") or e.get("title") or e.get("description") or "").split())[:60]
+    if t:
+        return t
+    n = len(m.get("attachments") or [])
+    return f"[{n} photo(s)]" if n else "[message sans texte]"
+
+
+def _messages_avant(salon: str, mid: str, plafond: int = 500):
+    """Les messages du salon plus ANCIENS que `mid` (lui exclu), du plus récent
+    au plus ancien. (liste, encore, erreur) — `encore` : le plafond est atteint."""
+    out, avant = [], str(mid)
+    while len(out) < plafond:
+        for _ in range(3):
+            code, lot = api("GET", f"/channels/{salon}/messages",
+                            params={"limit": "100", "before": avant})
+            if code != 429:
+                break
+            time.sleep(float((lot or {}).get("retry_after") or 1) + 0.3)
+        if code != 200:
+            return out, False, str((lot or {}).get("message") or f"HTTP {code}")[:120]
+        if not lot:
+            break
+        out += lot
+        avant = lot[-1]["id"]
+        if len(lot) < 100:
+            break
+    # garde-fou : jamais le message gardé ni un plus récent, quoi que l'API rende
+    out = [x for x in out if int(x["id"]) < int(mid)]
+    return out[:plafond], len(out) >= plafond, ""
+
+
+def _effacer_messages(salon: str, ids):
+    """Efface ces messages. (efface, un_par_un, echecs)
+
+    Discord refuse d'effacer en lot un message de plus de 14 jours : ceux-là
+    partent un par un, plus lentement, et sont comptés à part pour que le
+    compte rendu colle à ce qui s'est vraiment passé. Un lot refusé retombe en
+    un par un plutôt que d'être perdu.
+    """
+    efface, un_par_un, echecs = 0, 0, []
+    # l'heure de création est dans l'identifiant lui-même
+    recents = [i for i in ids
+               if (int(i) >> 22) + 1420070400000 > (time.time() - 13.5 * 86400) * 1000]
+    vieux = [i for i in ids if i not in set(recents)]
+    for k in range(0, len(recents), 100):
+        lot = recents[k:k + 100]
+        if len(lot) < 2:                 # le lot exige au moins deux messages
+            vieux = lot + vieux
+            continue
+        c, rep = api("POST", f"/channels/{salon}/messages/bulk-delete", {"messages": lot})
+        if c in (200, 204):
+            efface += len(lot)
+        else:
+            echecs.append(str((rep or {}).get("message") or f"lot : HTTP {c}")[:120])
+            vieux = lot + vieux          # le lot a echoue : un par un
+    for mid in vieux:
+        for _ in range(3):
+            c, rep = api("DELETE", f"/channels/{salon}/messages/{mid}")
+            if c == 429:
+                time.sleep(float((rep or {}).get("retry_after") or 1) + 0.3)
+                continue
+            break
+        if c in (200, 204):
+            efface += 1
+            un_par_un += 1
+        else:
+            echecs.append(f"{mid} : " + str((rep or {}).get("message") or f"HTTP {c}")[:80])
+        time.sleep(1.1)
+    return efface, un_par_un, echecs
+
+
 def _journal(ligne: str):
     """Une ligne par suppression dans le terminal, sans jamais tout arrêter.
 
@@ -576,6 +663,13 @@ button:disabled{opacity:.5;cursor:default}
     <div class="danger">
       <button class="rouge" id="vider">Vider ce salon</button>
       <span>efface TOUS les messages du salon choisi — il te dit combien avant</span>
+    </div>
+    <div class="danger">
+      <input id="lienhaut" placeholder="lien du premier message a garder" autocomplete="off"
+             spellcheck="false" style="flex:1;min-width:240px">
+      <button class="rouge" id="audessus">Supprimer tout ce qui est au-dessus</button>
+      <span>garde ce message et tout ce qui suit &mdash; sur Discord : clic droit sur le message
+        &gt; Copier le lien du message. Il te dit combien avant.</span>
     </div>
     <div class="etat" id="etat"></div>
   </div>
@@ -1065,6 +1159,34 @@ E('vider').onclick = async function(){
   chargerMessages();
 };
 
+E('audessus').onclick = async function(){
+  var lien = (E('lienhaut').value || '').trim();
+  if(!lien){ etat('Colle d abord le lien du premier message a garder.', 'ko'); return; }
+  // premier appel : on ne fait que compter. Rien n est efface a l aveugle.
+  var q = await demander('/au_dessus', {lien: lien});
+  if(!q.ok){ etat('✕ ' + (q.error || 'Erreur'), 'ko'); return; }
+  if(!q.compte){ etat('Rien au-dessus de ce message dans ' + q.salon + '.', ''); return; }
+  var combien = q.compte + (q.encore ? ' (au moins : reclique ensuite pour la suite)' : '');
+  if(!confirm('Supprimer ' + combien + ' message(s) AU-DESSUS dans ' + q.salon + ' ?\n'
+              + 'Du ' + q.du + ' au ' + q.au + '. Juste au-dessus :\n'
+              + (q.apercu || []).map(function(x){ return '  • ' + x; }).join('\n')
+              + '\n\nRESTE : « ' + q.garde + ' » et tout ce qui suit.'
+              + '\n\nC est definitif : Discord n a pas de corbeille.')) return;
+  this.disabled = true;
+  etat('Suppression en cours… jusqu a ' + Math.ceil(q.compte * 1.2) + ' s, laisse la page ouverte.');
+  var j = await demander('/au_dessus', {lien: lien, confirme: true});
+  this.disabled = false;
+  var txt = (j.efface || 0) + ' message(s) supprime(s) dans ' + q.salon
+          + (j.un_par_un ? ' (dont ' + j.un_par_un + ' un par un, trop vieux pour le lot)' : '');
+  if(j.reste) txt += ' · il en reste ' + j.reste + (j.encore ? ' (au moins)' : '') + ' au-dessus : reclique';
+  if(j.reste === null) txt += ' · le recomptage a echoue : reclique pour verifier';
+  if(j.error) txt += ' · ' + j.error;
+  if((j.echecs || []).length) txt += ' · rates : ' + j.echecs.join(' | ');
+  etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
+  if(j.ok && j.reste === 0) E('lienhaut').value = '';
+  chargerMessages();
+};
+
 E('retirercopier').onclick = async function(){
   var nom = E('salon').options[E('salon').selectedIndex];
   nom = nom ? nom.textContent : '(ce salon)';
@@ -1442,6 +1564,8 @@ class Poste(BaseHTTPRequestHandler):
             return self._lot(d)
         if self.path == "/vider":
             return self._vider(d)
+        if self.path == "/au_dessus":
+            return self._au_dessus(d)
         if self.path == "/retirer_copier":
             return self._retirer_copier(d)
         if self.path == "/supprimer_categorie":
@@ -1623,33 +1747,10 @@ class Poste(BaseHTTPRequestHandler):
         efface, un_par_un, echecs, tours = 0, 0, [], 0
         while msgs and tours < 20:
             tours += 1
-            # l'heure de création est dans l'identifiant lui-même
-            recents = [x["id"] for x in msgs
-                       if (int(x["id"]) >> 22) + 1420070400000 > (time.time() - 13.5 * 86400) * 1000]
-            vieux = [x["id"] for x in msgs if x["id"] not in set(recents)]
-            if len(recents) >= 2:
-                c, rep = api("POST", f"/channels/{salon}/messages/bulk-delete",
-                             {"messages": recents[:100]})
-                if c in (200, 204):
-                    efface += len(recents[:100])
-                else:
-                    echecs.append(str((rep or {}).get("message") or f"lot : HTTP {c}")[:120])
-                    vieux = recents + vieux        # le lot a echoue : un par un
-            elif recents:
-                vieux = recents + vieux
-            for mid in vieux:
-                for _ in range(3):
-                    c, rep = api("DELETE", f"/channels/{salon}/messages/{mid}")
-                    if c == 429:
-                        time.sleep(float((rep or {}).get("retry_after") or 1) + 0.3)
-                        continue
-                    break
-                if c in (200, 204):
-                    efface += 1
-                    un_par_un += 1
-                else:
-                    echecs.append(f"{mid} : " + str((rep or {}).get("message") or f"HTTP {c}")[:80])
-                time.sleep(1.1)
+            e, u, ech = _effacer_messages(salon, [x["id"] for x in msgs])
+            efface += e
+            un_par_un += u
+            echecs += ech
             time.sleep(0.6)
             code, msgs = api("GET", f"/channels/{salon}/messages", params={"limit": "100"})
             if code != 200:
@@ -1658,6 +1759,52 @@ class Poste(BaseHTTPRequestHandler):
         return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
                               "reste": len(msgs), "echecs": echecs[:10],
                               "arrete": tours >= 20 and bool(msgs)})
+
+    def _au_dessus(self, d):
+        """Efface tout ce qui est AU-DESSUS d'un message : ce message et tout ce
+        qui le suit restent.
+
+        Pour un salon reposté en dessous de l'ancien contenu : « Vider »
+        emportait aussi le nouveau. Le salon est celui du LIEN, pas celui du
+        menu — c'est lui qui est montré dans la question. Deux temps, comme
+        Vider : sans `confirme`, on compte seulement.
+        """
+        m = _LIEN_MESSAGE.search(str(d.get("lien") or ""))
+        if not m:
+            return self._envoyer({"ok": False, "error": "Lien non reconnu : sur Discord, "
+                                  "clic droit sur le message > Copier le lien du message."})
+        gid, salon, garde = m.groups()
+        if gid not in SERVEURS:
+            return self._envoyer({"ok": False, "error": "Ce lien n'est pas sur un serveur "
+                                  "de l'outil : rien n'est supprimé."})
+        # Le bot se choisit d'apres le serveur du salon. Sans ca, un lien de
+        # THREADS collé avant d'avoir ouvert ce serveur dans un menu partait
+        # avec le jeton de Siri, qui n'y est plus : « Missing Access ».
+        _SALON_SERVEUR[salon] = gid
+        code, msg = api("GET", f"/channels/{salon}/messages/{garde}")
+        if code != 200:
+            return self._envoyer({"ok": False, "error": "Message introuvable : "
+                                  + str((msg or {}).get("message") or f"HTTP {code}")[:120]})
+        anciens, encore, erreur = _messages_avant(salon, garde)
+        if erreur:
+            return self._envoyer({"ok": False, "error": "Lecture du salon : " + erreur})
+        if not d.get("confirme"):
+            c, info = api("GET", f"/channels/{salon}")
+            return self._envoyer({
+                "ok": True, "compte": len(anciens), "encore": encore,
+                "salon": (info or {}).get("name") if c == 200 else salon,
+                "garde": _resume(msg), "apercu": [_resume(x) for x in anciens[:3]],
+                "du": _date_id(anciens[-1]["id"]) if anciens else "",
+                "au": _date_id(anciens[0]["id"]) if anciens else ""})
+        efface, un_par_un, echecs = _effacer_messages(salon, [x["id"] for x in anciens])
+        reste, encore, erreur = _messages_avant(salon, garde)
+        if erreur:
+            # sans ca, une relecture refusee rendait « reste 0 » : la page
+            # annoncait le travail fini et effacait le lien
+            echecs.append("relecture : " + erreur)
+        return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
+                              "reste": None if erreur else len(reste), "encore": encore,
+                              "echecs": echecs[:10]})
 
     def _retirer_copier(self, d):
         """Enlève le bouton Copier des messages déjà postés, sans toucher au reste.
