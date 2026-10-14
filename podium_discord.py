@@ -209,12 +209,13 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  "mesure": "tracking",
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
-    # Va Threads : les VA de Twitter (mêmes liens, mêmes numéros, ceux du
-    # registre des trackings), comptés à leurs clics uniques US + UK : le
-    # podium de la semaine dans « ─│🏆┤-podium », le classement de la
-    # quinzaine dans « ─│📊┤-l-clicks » (voir l'en-tête, « VA THREADS… »).
-    # Il ne reprend PLUS le relevé de Twitter : sa mesure n'est pas la même.
-    THREADS_ID: {"equipes": None,             # les espaces de Twitter (EQUIPES_VA)
+    # Va Threads : SES VA, à leurs liens Threads (EMY THREADS, « Threads VA 61
+    # @pseudo », le numéro du ticket), comptés à leurs clics uniques US + UK :
+    # le podium de la semaine dans « ─│🏆┤-podium », le classement de la
+    # quinzaine dans « ─│📊┤-l-clicks ». Jusqu'au 14/10/2026 il comptait les
+    # liens de Twitter sous les numéros du registre ; le propriétaire : « garde
+    # que ceux du même groupe », « genre le truc simple de base ».
+    THREADS_ID: {"equipes": ["tm_6ab51e03b299b7e3ba6ff7bf"],   # EMY THREADS (liens_va)
                  # Proprietaire, 13/10/2026 : « uniquement les clicks USA UK, et
                  # ca unique » -- les clics vers la page de destination,
                  # dedoublonnes (gms.boutons_par_pays), des seuls US et UK
@@ -223,17 +224,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # « pour Threads tu ecris Threads, pour Twitter Twitter, anonyme
                  # toujours » : « Threads 12 », le numero du VA 12 de Twitter
                  "unite": "clics", "libelle": "Threads",
-                 # les numéros du registre des trackings (_par_tracking) et sa
-                 # règle du doute : Threads SEUL. « Ne touche pas [Va IG], on ne
-                 # parle que de Threads » (propriétaire, 13/10/2026) : les VA US
-                 # de Va IG gardent leurs numéros au nom du lien, comme avant
-                 "numeros_registre": True,
-                 # mais AU CLIC, sans jugement de tracking : « y a pas de
-                 # tracking pour Threads », « c'est un lien dupliqué », « c'est
-                 # au click pour Threads ». Un tracking en doute au registre
-                 # (liens dupliqués qui le partagent) ne met personne « sans
-                 # relevé » ici : chaque lien compte ses clics pour son VA
-                 "clics_seuls": True,
+                 # le numéro dans le nom du lien (entites_liens_va), celui du
+                 # ticket : ni registre des trackings, ni table au nom du lien
+                 "numeros_liens": True,
                  # « je veux pas les trucs là » (13/10/2026, les ⚠️ sous la
                  # quinzaine) : ni « sans relevé », ni « trackings partagés »,
                  # ni « liste non rafraîchie » dans les messages de Threads.
@@ -245,7 +238,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # le podium de la semaine toutes les deux heures, le classement
                  # de la quinzaine (salon -l-clicks) toutes les heures
                  "minutes": 120, "minutes_subs": 60,
-                 "alltime": "podium_alltime_threads.json",
+                 # un fichier neuf : l'ancien (podium_alltime_threads.json) range
+                 # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
+                 # repris, ils seraient passés au VA Threads n° 12
+                 "alltime": "podium_alltime_threads_liens.json",
                  "salon_subs": "─│📊┤-l-clicks"},
     VA_IG_ID: {"equipes": ["tm_6ac06401e06eabe3b9ef45f6"],   # VA IG DISCORD (liens_fr.EQUIPE)
                # le marche FR : les memes pays que le report des clics (clickrecap.MARCHES)
@@ -272,7 +268,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # ligne a ligne. POUR COUPER : retirer cette cle, rien d'autre (sans
                # elle, chaque message redevient exactement celui d'avant, et les
                # primes celles des seuls VA FR).
-               "avec_us": True,
+               # COUPÉ le 14/10/2026 (propriétaire : « pour le podium et les
+               # clics, garde que ceux du même groupe », « pour les 3 groupes ») :
+               # Va IG ne classe plus que ses VA. Remettre « "avec_us": True »
+               # pour les ravoir.
                # Le nom des VA US sur Va IG : ils travaillent Jessye, et Amelia
                # EST Jessye sur le marche FR (proprietaire, 03/10/2026 : « c'est
                # la meme personne », « ou sinon ecris Jessye »). « Jessye VA 12 »
@@ -947,6 +946,34 @@ def entites_fr(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
                                  "ids": [], "model": model, "numero": n})
         e["ids"].append(str(l["id"]))
     return out
+
+
+def entites_liens_va(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Threads : {« 61 » : {nom, numero 61, ids}}, d'après le nom que liens_va
+    donne à chaque lien (« Threads VA 61 @pseudo », le numéro du ticket). Le
+    lien de base (emythreads) et tout lien sans « VA n @ » sont écartés, et
+    dits : un lien de VA renommé à la main ne disparaît pas sans trace."""
+    out: Dict[str, Dict[str, Any]] = {}
+    ecartes = []
+    for l in liens:
+        dn = str(l.get("display_name") or "").strip()
+        m = re.search(r"\bVA (\d+)(?:-\d+)? @", dn)
+        if not m:
+            ecartes.append(dn or str(l.get("shortcode") or l.get("id")))
+            continue
+        n = int(m.group(1))
+        e = out.setdefault(str(n), {"nom": f"VA {n}", "spam": False, "ids": [], "numero": n})
+        e["ids"].append(str(l["id"]))
+    dit = "|".join(sorted(ecartes))
+    if ecartes and dit not in _ECARTES_DITS:
+        # une fois par liste : le relevé repasse toutes les heures
+        _ECARTES_DITS.add(dit)
+        print(f"[podium] {len(ecartes)} lien(s) sans numéro de VA dans leur nom, pas "
+              f"comptés : {', '.join(sorted(ecartes)[:6])}", flush=True)
+    return out
+
+
+_ECARTES_DITS: set = set()
 
 
 def _clics(pays: Optional[Dict[str, Any]], profil: Dict[str, Any]) -> int:
@@ -1770,6 +1797,9 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         # le numero vient du nom du lien : rien a attribuer ici, et la table
         # de Twitter (podium_numeros.json) n'est pas touchee
         table = {c: e["numero"] for c, e in ents.items()}
+    elif profil.get("numeros_liens"):
+        ents = entites_liens_va(liens)
+        table = {c: e["numero"] for c, e in ents.items()}
     else:
         import clics_personnes as _cp
         ratt = _cp.rattachements_identite()
@@ -1887,6 +1917,9 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
     doute: set = set()
     if profil["fr"]:
         ents = entites_fr(liens)
+        table = {c: e["numero"] for c, e in ents.items()}
+    elif profil.get("numeros_liens"):
+        ents = entites_liens_va(liens)
         table = {c: e["numero"] for c, e in ents.items()}
     else:
         ents = entites(liens)
@@ -3412,7 +3445,9 @@ def _taire_avert(gid: Optional[str], quoi: str, lignes: List[str]) -> None:
 #: en « Threads n », clics uniques US + UK.
 #: Puis le même jour : le registre réservé à Threads, Va IG revenu à ses numéros
 #: au nom du lien (« ne touche pas Va IG »).
-FORMAT_AFFICHAGE = "2026-10-13-registre-threads-seul"
+#: Le 14/10/2026 : chaque serveur ses VA (« garde que ceux du même groupe ») :
+#: Va IG sans les VA US, Threads à ses propres liens, numéros de ses tickets.
+FORMAT_AFFICHAGE = "2026-10-14-chacun-son-groupe"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:

@@ -136,6 +136,9 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# les VA US mêlés à Va IG (« avec_us ») : coupés en production le 14/10/2026,
+# l'interrupteur reste — rallumé ici pour qu'il reste testé
+pd.SERVEURS["1505418484052394004"]["avec_us"] = True
 # Cette suite verifie la mecanique du podium sur les clics GetMySocial (Va IG,
 # et Twitter jusqu au 06/10/2026) : Twitter y repasse, sans quoi il lirait le
 # vrai MyPuls. Le comptage par tracking a ses tests : tests_podium_tracking.py.

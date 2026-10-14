@@ -1,4 +1,13 @@
-"""Va Threads : les VA de Twitter, à leurs clics uniques US + UK.
+"""Va Threads : SES VA, à leurs liens Threads, clics uniques US + UK.
+
+Propriétaire, 14/10/2026 : « pour le podium et les clics, garde que ceux du
+même groupe », « genre le truc simple de base », « pour les 3 groupes ».
+Threads compte ses propres liens (EMY THREADS, « Threads VA 61 @pseudo »),
+numérotés comme leurs tickets (section 1 bis). Le mode d'avant (les liens de
+Twitter sous les numéros du registre, sections 2 à 6) reste dans le code,
+coupé : il est rallumé ici pour rester testé.
+
+Historique :
 
 Propriétaire, 13/10/2026 : « pour Threads le podium c'est avec des clicks »
 (primes 10/5/3 $ comme Twitter), puis, devant le récap -l-clicks : « pour
@@ -84,6 +93,20 @@ LIENS = {EQ_TW1: [_page("l1", "VA 3 - Roucham 1 ( normal )", OF + "emy.brw/c42")
                   _page("l6", "Nouveau sans rien")],
          EQ_TW2: [{"id": "l8", "display_name": "Twitter VA 31 @abdoul_9684", "type": "directlink",
                    "url": OF + "emy.brw/c6", "status": "active", "buttons": []}]}
+# EMY THREADS le 14/10/2026, en petit : des liens directs nommés par liens_va,
+# un ancien coupé (angelyy, même VA 61), et les liens de base de l'espace
+
+
+def _direct(id_, nom, statut="active"):
+    return {"id": id_, "display_name": nom, "type": "directlink", "status": statut,
+            "url": OF + "seren.vale/c193", "buttons": None}
+
+
+EQ_TH = "tm_6ab51e03b299b7e3ba6ff7bf"
+LIENS[EQ_TH] = [_direct("t1", "Threads VA 61 @momobtn"), _direct("t1b", "Threads VA 61 @momobtn", "inactive"),
+                _direct("t2", "Threads VA 62 @steave0454"), _direct("t3", "Threads VA 31 @abdoul_9684"),
+                _direct("t9", "Emy Threads A/B"), _direct("t8", "TEST duplicata Threads (a supprimer)",
+                                                          "inactive")]
 # clics vers OnlyFans, dédoublonnés, par pays (button_clicks)
 BOUTONS = {"l1": {"US": 40, "GB": 5, "FR": 9}, "l2": {"US": 2, "IN": 3},
            "l3": {"US": 30, "GB": 1, "IN": 50}, "l4": {"US": 10, "GB": 10, "CA": 4},
@@ -92,6 +115,9 @@ BOUTONS = {"l1": {"US": 40, "GB": 5, "FR": 9}, "l2": {"US": 2, "IN": 3},
 # le lien direct (l8) n'a que des visites : c'est elles qui comptent pour lui
 VUES = {k: {p: 10 * n for p, n in v.items()} for k, v in BOUTONS.items()}
 VUES["l8"] = {"US": 6, "GB": 1, "FR": 4}
+# les liens Threads sont directs : leurs visites par pays
+VUES.update({"t1": {"US": 20, "GB": 3, "FR": 9}, "t1b": {"US": 4}, "t2": {"US": 7, "IN": 30},
+             "t3": {"GB": 1, "IN": 5}, "t9": {"US": 500}, "t8": {"US": 50}})
 
 
 def _list_links_team(team, force_refresh=False):
@@ -362,10 +388,14 @@ try:
           p_th["libelle"] == "Threads" and pd._unite(TH) == "clics" and p_th["bot"] == "Bowser"
           and p_th["bonus"] is False and p_th["fr"] is False
           and not p_th.get("bouton_maj") and not p_th.get("theme") and not p_th.get("avec_us"))
-    check("… les liens de Twitter (ses deux espaces), la quinzaine dans -l-clicks, "
-          "son propre all-time",
-          not p_th.get("equipes") and p_th["salon_subs"] == "─│📊┤-l-clicks"
-          and p_th["alltime"] == "podium_alltime_threads.json")
+    check("… SES liens (EMY THREADS), numérotés par leur nom, la quinzaine dans -l-clicks, "
+          "un all-time neuf (l'ancien range les totaux des liens de Twitter)",
+          p_th.get("equipes") == [EQ_TH] and p_th.get("numeros_liens")
+          and not p_th.get("numeros_registre") and not p_th.get("clics_seuls")
+          and p_th["salon_subs"] == "─│📊┤-l-clicks"
+          and p_th["alltime"] == "podium_alltime_threads_liens.json", p_th)
+    check("Va IG : ses VA seulement (plus de VA US mêlés)", not pd._profil(IG).get("avec_us")
+          and not pd._mele(IG))
     check("Twitter et Va IG : profils inchangés (« subs », pas vitrine, pas de libellé)",
           pd._unite(TW) == pd._unite(IG) == "subs" and not pd.vitrine(TW) and not pd.vitrine(IG)
           and "libelle" not in pd._profil(TW) and pd._source(TW) == "tracking"
@@ -373,8 +403,36 @@ try:
     check("mêmes primes que Twitter (10/5/3 $), et plus aucun récap JESSY à poster",
           pd.PRIMES == [10.0, 5.0, 3.0] and rcr.CIBLES_DEFAUT == {})
 
+    # ------------------------------------------------------------------ 1 bis
+    print("\n— 1 bis. le profil livré : ses liens à lui, ses numéros de ticket")
+    installer()
+    lundi, auj = pd.semaine_en_cours()
+    cl = pd.classement(lundi, auj, gid=TH)
+    vas = [(x["va"], x["clics"]) for x in cl["lignes"]]
+    check("Threads 61 (lien actif + l'ancien coupé), 62, 31 : visites US + UK de leurs liens",
+          vas == [("Threads 61", 27), ("Threads 62", 7), ("Threads 31", 1)], vas)
+    check("seul l'espace EMY THREADS est lu : aucun lien de Twitter", GMS["listes"] == [EQ_TH],
+          GMS["listes"])
+    check("les liens de base (Emy Threads A/B, le test) ne comptent pour personne, sans appel",
+          not any(set(a[0]) & {"t8", "t9"} for a in GMS["boutons"]) and cl["entites"] == 3,
+          GMS["boutons"])
+    check("liens directs : comptés à leurs visites", all(set(d) == set(i) for i, d in
+                                                          zip([a[0] for a in GMS["boutons"]],
+                                                              GMS["directs"])), GMS["directs"])
+    tot = pd.alltime(TH)
+    check("l'all-time sous les mêmes noms, dans son fichier neuf",
+          tot.get("Threads 61") == 27 and (pd.DATA_DIR / "podium_alltime_threads_liens.json").exists()
+          and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), tot)
+
+    # Le mode d'avant (liens de Twitter, numéros du registre) reste un
+    # interrupteur : rallumé pour la suite de ce test
+    _LIVRE = copy.deepcopy(pd.SERVEURS[TH])
+    pd.SERVEURS[TH].update(equipes=None, numeros_registre=True, clics_seuls=True,
+                           alltime="podium_alltime_threads.json")
+    pd.SERVEURS[TH].pop("numeros_liens", None)
+
     # ------------------------------------------------------------------ 2
-    print("\n— 2. les numéros : le registre des trackings")
+    print("\n— 2. (mode d'avant) les numéros : le registre des trackings")
     installer()
     lundi, auj = pd.semaine_en_cours()
     cl = pd.classement(lundi, auj, gid=TH)
@@ -746,6 +804,8 @@ try:
     check("l'aide ne publie plus rien ; elle vide l'ancien récap, chacun avec son bot",
           vus == [("retirer", TW, TW), ("retirer", TH, TH), ("retirer", IG, IG)], vus)
 finally:
+    if "_LIVRE" in globals():
+        pd.SERVEURS[TH] = _LIVRE
     for k, v in _SAUVE_PD.items():
         setattr(pd, k, v)
     rcr.DATA_DIR, = _SAUVE_RCR

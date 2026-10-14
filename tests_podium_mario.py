@@ -141,6 +141,9 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# les VA US mêlés à Va IG (« avec_us ») : coupés en production le 14/10/2026,
+# l'interrupteur reste — rallumé ici pour qu'il reste testé
+pd.SERVEURS["1505418484052394004"]["avec_us"] = True
 # « Instagram VA n » sur Va IG (clé « marque ») a son test,
 # tests_podium_marque.py ; ici, les libellés d'origine, mot pour mot
 pd.SERVEURS["1505418484052394004"].pop("marque", None)
