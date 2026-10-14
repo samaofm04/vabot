@@ -67,6 +67,8 @@ _MENU_BTN_FEATURE = {
     "cmenu:templatetrashbrut": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
+    # « Mes subs » : la meme fonction que « Mes clics » (le suivi du VA)
+    "cmenu:subs": "clics",
 }
 
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
@@ -363,6 +365,55 @@ def _variantes_menu_va(famille, feats, threads) -> list:
             continue
         out.append(cle)
     return out
+
+
+def _subs_ici(guild) -> bool:
+    """Ce serveur compte-t-il ses VA aux subs des trackings (le classement de
+    Twitter) ? C'est la seule mesure que « Mes subs » sait relire."""
+    try:
+        import podium_discord as pod
+        return pod._source(str(getattr(guild, "id", "") or "")) == "tracking"
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _mes_subs_texte(guild, user) -> str:
+    """Le message prive de « 📈 Mes subs » : aujourd'hui, la periode en cours,
+    la precedente -- les chiffres du classement, jamais un montant."""
+    import podium_discord as pod
+    gid = str(getattr(guild, "id", "") or "")
+    if not _subs_ici(guild):
+        return "⚠️ Les subs ne sont pas comptés sur ce serveur."
+    numero = 0
+    try:
+        import liens_va
+        numero = int(liens_va.lien_de(gid, str(user.id)).get("numero") or 0)
+    except Exception:                                        # noqa: BLE001
+        numero = 0
+    if not numero:
+        nom = str(getattr(user, "name", "") or "")
+        numero = int((pod.numeros([nom], attribuer=False) or {}).get(nom) or 0)
+    if not numero:
+        return "⚠️ Tu n'as pas encore de lien : il n'y a pas de subs à compter."
+    r = pod.subs_du_va(numero)
+    if not r.get("trackings"):
+        return (f"📈 **Tes subs** (VA {numero})\nTon lien vient d'être créé : tes subs "
+                "apparaîtront ici dès les premiers.")
+
+    def ligne(titre, p, avec_dates=True):
+        n = p.get("n")
+        val = f"**{n}**" if n is not None else "pas lisible pour l'instant"
+        if not avec_dates:
+            return f"{titre} : {val}"
+        du, au = p["du"], p["au"]
+        return f"{titre} (du {du[8:10]}/{du[5:7]} au {au[8:10]}/{au[5:7]}) : {val}"
+    return "\n".join([
+        f"📈 **Tes subs** (VA {numero})",
+        ligne("Aujourd'hui", r["aujourdhui"], avec_dates=False),
+        ligne("Cette période", r["periode"]),
+        ligne("Période précédente", r["precedente"]),
+        "-# MyPuls se met à jour toutes les quelques heures.",
+    ])
 
 
 def _bouton_va_permis(cid, feats, threads) -> bool:
@@ -8667,6 +8718,10 @@ _MENU_VA_DISPOSITION = (
     ("Suivi et aide", (
         _BoutonVA("clics", "Mes clics", "📊", _BS.success,
                   "tes clics en direct (jour, hier, semaine, quinzaine)"),
+        # proprietaire, 15/10/2026 : « il check son nombre de subs : today,
+        # periode et periode precedente » -- le compte du classement (Twitter)
+        _BoutonVA("subs", "Mes subs", "📈", _BS.success,
+                  "tes subs : aujourd'hui, cette période, la précédente"),
         _BoutonVA("help", "Assistance", "🆘", _BS.danger,
                   "un souci ? un manager ou le boss vient t'aider"),
         _BoutonVA("lien", "Demander un lien", "🔗", _BS.success,
@@ -9346,9 +9401,17 @@ class ContentMenuView(discord.ui.LayoutView):
             if titre == _MENU_VA_OUTILS and (getattr(self, "sans_outils", False) or (
                     filtrer and not (_menu_outils_ici(guild) and _outils_pour(self.identite)))):
                 continue
-            rangee, morceaux = ui.ActionRow(), []
+            # UNE RANGEE DISCORD PORTE CINQ BOUTONS. « Suivi et aide » en a six
+            # depuis « Mes subs » (15/10/2026) : un sixieme dans la meme rangee
+            # faisait tomber tout le menu (« maximum number of children
+            # exceeded », deja vu le 03/10 sur la ligne). On deborde.
+            rangees, morceaux = [ui.ActionRow()], []
             for b in boutons:
                 if not _bouton_va_permis("cmenu:" + b.cle, feats, threads):
+                    continue
+                if b.cle == "subs" and filtrer and not _subs_ici(guild):
+                    # les subs du classement sont ceux des trackings (Twitter) :
+                    # ailleurs, le bouton n'aurait rien de juste a dire
                     continue
                 if not hasattr(self, "_clic_" + b.cle):
                     # Une ligne de table sans methode : le bouton ne ferait
@@ -9362,12 +9425,16 @@ class ContentMenuView(discord.ui.LayoutView):
                     libelle, expli = _MENU_VA_THREADS[b.cle]
                 cle_ic = _ICONE_PAR_ACTION_MENU.get(b.cle)
                 icone = icones.get(cle_ic) if cle_ic else None
-                rangee.add_item(_BoutonMenuVA(
+                if len(rangees[-1].children) >= 5:
+                    rangees.append(ui.ActionRow())
+                rangees[-1].add_item(_BoutonMenuVA(
                     self, b, libelle, icone if icone is not None else b.emoji))
                 self.nb_elements += 1
                 morceaux.append(f"{b.emoji + ' ' if b.emoji else ''}**{libelle}** : {expli}")
             if morceaux:
-                boite.add_item(rangee)
+                for rangee in rangees:
+                    if rangee.children:
+                        boite.add_item(rangee)
                 aide.append(f"**{titre}** — " + " · ".join(morceaux))
         texte.content = _menu_va_texte(aide, threads, avec_menus, self.identite,
                                        self.mention, self.inconnues, guild=guild)
@@ -9412,6 +9479,15 @@ class ContentMenuView(discord.ui.LayoutView):
 
     async def _clic_brutbanger(self, interaction: discord.Interaction):
         await self.cog._send_brutes_bangers(interaction)
+
+    async def _clic_subs(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            txt = await asyncio.to_thread(_mes_subs_texte, interaction.guild, interaction.user)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("Mes subs : %s: %s", type(e).__name__, e)
+            txt = "⚠️ Tes subs ne sont pas lisibles pour l'instant, réessaie dans un moment."
+        await interaction.followup.send(txt, ephemeral=True)
 
     async def _clic_clics(self, interaction: discord.Interaction):
         # Délègue au cog clickrecap (logique des clics centralisée là-bas)

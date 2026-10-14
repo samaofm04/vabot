@@ -1514,6 +1514,49 @@ def _suivre_trackings(reg: Dict[str, Any], liens: List[Dict[str, Any]],
     return {"sans_tracking": sorted(sans), "conflits": conflits}
 
 
+def subs_du_va(numero: int, jour: Optional[dt.date] = None) -> Dict[str, Any]:
+    """Les subs d'UN VA, mesurés comme le classement de Twitter (ses trackings
+    au registre — Emy ET Seren —, leurs visites MyPuls) : aujourd'hui, la
+    quinzaine en cours, la quinzaine d'avant.
+    Rend {aujourdhui, periode, precedente : {du, au, n}, trackings} ; n vaut
+    None quand MyPuls n'a pas répondu — jamais un zéro inventé.
+
+    Propriétaire, 15/10/2026 : « un truc pour le VA, il check son nombre de
+    subs sur la période ou celle précédente : subs today, période et période
+    précédente ». Lu au registre et dans MyPuls seulement : pas un appel
+    GetMySocial par clic de VA (le quota est compté par clé)."""
+    j = jour or _aujourdhui()
+    d_deb, _d_fin = saison_en_cours(j)
+    p_deb, p_fin = saison_en_cours(d_deb - dt.timedelta(days=1))
+    regs = _lire_registre()["trackings"]
+    ts = [(t, e) for t, e in regs.items() if isinstance(e, dict)
+          and e.get("numero") is not None and int(e["numero"]) == int(numero)]
+    out: Dict[str, Any] = {"trackings": len(ts)}
+    for cle, (a, b) in (("aujourdhui", (j, j)), ("periode", (d_deb, j)),
+                        ("precedente", (p_deb, p_fin))):
+        d0, d1 = a.isoformat(), b.isoformat()
+        n: Optional[int] = 0
+        for t, e in ts:
+            # un tracking quitté compte jusqu'au jour où on l'a vu partir
+            fin_t = d1 if e.get("actif") else min(d1, str(e.get("vu") or ""))
+            if fin_t < d0:
+                continue
+            vus, _raison = _lire_mypuls(d0, fin_t)
+            if vus is None:
+                n = None
+                break
+            v = vus.get(t)
+            # un tracking tout neuf que MyPuls ne rend pas encore : rien à
+            # compter, pas une panne
+            x = (v or {}).get("visites")
+            if v is not None and x is None:
+                n = None
+                break
+            n += int(x or 0)
+        out[cle] = {"du": d0, "au": d1, "n": n}
+    return out
+
+
 def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None,
                          cumul: bool = False) -> Dict[str, Any]:
     """classement() sur les clics des liens de tracking : la même forme

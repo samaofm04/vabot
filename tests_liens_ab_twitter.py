@@ -452,6 +452,94 @@ try:
     check("menu VA : « Demander un lien » donne l'adresse de la fiche, pas l'ancienne du registre",
           "getmysocial.com/bbyy" in txt and "emycute" not in txt, envoyes)
 
+    # ── « Mes subs » : aujourd'hui, la période, la précédente ────────────
+    # « il check son nombre de subs : today, période et période précédente »
+    import datetime as _dt
+    REG = {"trackings": {
+        "emy.brw/c6": {"numero": 31, "actif": True, "vu": "2026-10-15"},
+        "seren.vale/c196": {"numero": 31, "actif": True, "vu": "2026-10-15"},
+        # quitté le 05/10 : compté jusque-là, plus après
+        "emy.brw/c1": {"numero": 31, "actif": False, "vu": "2026-10-05"},
+        "emy.brw/c9": {"numero": 9, "actif": True, "vu": "2026-10-15"}}, "attente": {}}
+    V = {("2026-10-15", "2026-10-15"): {"emy.brw/c6": 2, "seren.vale/c196": 1, "emy.brw/c9": 50},
+         ("2026-10-01", "2026-10-15"): {"emy.brw/c6": 10, "seren.vale/c196": 5, "emy.brw/c9": 99},
+         ("2026-10-01", "2026-10-05"): {"emy.brw/c1": 4},
+         ("2026-09-16", "2026-09-30"): {"emy.brw/c6": 20, "emy.brw/c1": 6, "emy.brw/c9": 77}}
+    lus = []
+    panne = {"oui": False}
+
+    def faux_mp(du, au, forcer=False):
+        lus.append((du, au))
+        if panne["oui"]:
+            return None, "MyPuls muet"
+        return {t: {"visites": n, "total": n, "nom": ""} for t, n in V.get((du, au), {}).items()}, ""
+    _sauve_pod = {k: getattr(pod, k) for k in ("_lire_registre", "_lire_mypuls", "_aujourdhui")}
+    try:
+        pod._lire_registre = lambda: json.loads(json.dumps(REG))
+        pod._lire_mypuls = faux_mp
+        pod._aujourdhui = lambda: _dt.date(2026, 10, 15)
+        r = pod.subs_du_va(31)
+        check("subs du VA 31 : aujourd'hui 3 (Emy 2 + Seren 1)", r["aujourdhui"]["n"] == 3, r)
+        check("… cette période 19 (Emy 10 + Seren 5 + l'ancien tracking jusqu'au 05/10 : 4)",
+              r["periode"] == {"du": "2026-10-01", "au": "2026-10-15", "n": 19}, r)
+        check("… période précédente 26 (16 → 30/09 ; Seren n'existait pas encore : 0)",
+              r["precedente"] == {"du": "2026-09-16", "au": "2026-09-30", "n": 26}, r)
+        check("… jamais les trackings d'un autre VA", r["trackings"] == 3, r)
+        panne["oui"] = True
+        r = pod.subs_du_va(31)
+        check("MyPuls muet : « pas lisible », jamais un zéro inventé",
+              r["aujourdhui"]["n"] is None and r["periode"]["n"] is None, r)
+        panne["oui"] = False
+        g, _s = monde(etat={"liens": {f"{TW}:42": {"pseudo": "abdoul_9684", "numero": 31,
+                                                    "shortcode": "bbyy"}}})
+        txt = cu._mes_subs_texte(types.SimpleNamespace(id=int(TW)),
+                                 types.SimpleNamespace(id=42, name="abdoul_9684"))
+        check("message du VA : ses trois chiffres, avec les dates des périodes",
+              "VA 31" in txt and "Aujourd'hui : **3**" in txt
+              and "Cette période (du 01/10 au 15/10) : **19**" in txt
+              and "Période précédente (du 16/09 au 30/09) : **26**" in txt
+              and "$" not in txt and "€" not in txt, txt)
+        txt = cu._mes_subs_texte(types.SimpleNamespace(id=1505418484052394004),
+                                 types.SimpleNamespace(id=42, name="x"))
+        check("hors Twitter (Va IG compte aux clics GetMySocial) : le bouton ne s'y montre pas",
+              not cu._subs_ici(types.SimpleNamespace(id=1505418484052394004))
+              and cu._subs_ici(types.SimpleNamespace(id=int(TW))) and "pas comptés" in txt, txt)
+        check("le bouton est dans le menu, à côté de « Mes clics »",
+              any(b.cle == "subs" for _t, bs in cu._MENU_VA_DISPOSITION if isinstance(bs, tuple) for b in bs
+                  if hasattr(b, "cle")) and hasattr(cu.ContentMenuView, "_clic_subs")
+              and cu._MENU_BTN_FEATURE.get("cmenu:subs") == "clics")
+        # le menu se construit vraiment : 5 boutons au plus par rangée (un 6e
+        # fait tomber TOUT le menu), 40 composants au plus par message
+        import discord as _discord
+
+        def _compte(v):
+            n, pire = 0, 0
+            pile = list(getattr(v, "children", []) or [])
+            while pile:
+                c = pile.pop()
+                n += 1
+                if isinstance(c, _discord.ui.ActionRow):
+                    pire = max(pire, len(c.children))
+                pile.extend(getattr(c, "children", []) or [])
+            return n, pire
+
+        async def _menus():
+            out = {}
+            v = cu.ContentMenuView(types.SimpleNamespace(bot=None), identite="emy", mention=42)
+            out["tous"] = _compte(v)
+            v.construire(types.SimpleNamespace(id=int(TW), name="Twitter", roles=[], emojis=[]),
+                         filtrer=True)
+            out["twitter"] = _compte(v) + ("cmenu:subs" in [getattr(c, "custom_id", "")
+                                                            for c in v.walk_children()],)
+            return out
+        m = asyncio.run(_menus())
+        check("menu VA : 5 boutons au plus par rangée, 40 composants au plus, « Mes subs » sur Twitter",
+              m["tous"][1] <= 5 and m["tous"][0] <= 40 and m["twitter"][1] <= 5
+              and m["twitter"][0] <= 40 and m["twitter"][2], m)
+    finally:
+        for _k, _v in _sauve_pod.items():
+            setattr(pod, _k, _v)
+
     # ── gms.poser_ab_testing ─────────────────────────────────────────────
     envois = []
 
