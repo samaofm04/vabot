@@ -82,6 +82,15 @@ class FauxGMS(types.ModuleType):
         self.appels.append(("ab", lid, source, equipe, poids, nom))
         return dict(self.ab)
 
+    cookie = "authToken=a.b.c"
+    echeance = None
+
+    def get_session_cookie(self):
+        return self.cookie
+
+    def cookie_expiration(self, ck=None):
+        return self.echeance
+
     def _call_tool(self, outil, args):
         self.appels.append((outil, args))
         if outil == "list_groups":
@@ -218,31 +227,101 @@ try:
           fv.get("tracking") == SEREN and fv.get("posee") is False and fv.get("erreur"), fv)
     check("… et rien au podium tant qu'il n'est pas posé", lv.trackings_variantes() == {})
 
-    # ── reprise ──────────────────────────────────────────────────────────
+    # ── reprise, anciens liens compris ───────────────────────────────────
+    lv.PAUSE_VARIANTE_S = 0
     etat = json.loads(lv.ETAT_FICHIER.read_text())
     etat["liens"][f"{TW}:u0"] = {"pseudo": "ancien", "numero": 3, "shortcode": "emyold",
                                  "link_id": "lnk_emyold", "tracking": "https://onlyfans.com/emy.brw/c3"}
+    etat["liens"][f"{TW}:u8"] = {"pseudo": "sanstracking", "numero": 8, "shortcode": "emyprov",
+                                 "link_id": "lnk_emyprov", "tracking": ""}
+    etat["liens"][f"{TW}:u9"] = {"pseudo": "coupe", "numero": 9, "shortcode": "emycoupe",
+                                 "link_id": "lnk_emycoupe", "tracking": "https://onlyfans.com/emy.brw/c4",
+                                 "actif": False}
+    etat["liens"][f"{TH}:t1"] = {"pseudo": "threads", "numero": 61, "shortcode": "angelyy",
+                                 "link_id": "lnk_angelyy", "tracking": ""}
     lv.ETAT_FICHIER.write_text(json.dumps(etat))
+    check("en attente : le 50/50 en plan ET les anciens liens, pas le lien coupé ni Threads",
+          lv.en_attente() == [f"{TW}:u0", f"{TW}:u2", f"{TW}:u8"], lv.en_attente())
     suivis.clear()
     g.appels.clear()
     g.ab = {"ok": True, "config": {}}
     b = lv.reprendre_variantes()
-    check("reprise : le 50/50 en plan est posé", b["poses"] == ["bryan"] and not b["rates"], b)
-    check("… avec le tracking Seren noté, aucun nouveau chez MyPuls", suivis == [], suivis)
-    check("… le lien d'avant le 50/50 n'est pas touché",
-          all(a[1] != "lnk_emyold" for a in g.de("ab")) and "variante" not in lv.lien_de(TW, "u0"),
-          (g.de("ab"), lv.lien_de(TW, "u0")))
-    check("… posé, noté", (lv.lien_de(TW, "u2").get("variante") or {}).get("posee") is True)
+    check("reprise : les trois posés", sorted(b["poses"]) == ["ancien", "bryan", "sanstracking"]
+          and not b["rates"], b)
+    check("… le 50/50 en plan reprend SON tracking Seren noté (aucun nouveau pour lui)",
+          ("Twitter VA 27 @bryan", 3867) not in suivis, suivis)
+    check("… l'ancien lien reçoit son tracking Seren, à son nom",
+          ("Twitter VA 3 @ancien", 3867) in suivis
+          and (lv.lien_de(TW, "u0").get("variante") or {}).get("posee") is True, suivis)
+    upd = [a for a in g.appels if a[0] == "update_link"]
+    check("… le lien sans tracking reçoit d'abord son tracking Emy (rebranché), puis Seren",
+          suivis.count(("Twitter VA 8 @sanstracking", None)) == 1
+          and ("Twitter VA 8 @sanstracking", 3867) in suivis
+          and upd and upd[0][1]["link_id"] == "lnk_emyprov"
+          and lv.lien_de(TW, "u8").get("tracking") == "https://onlyfans.com/emy.brw/c55", (suivis, upd))
+    check("… le lien coupé n'est pas touché", "variante" not in lv.lien_de(TW, "u9"))
+    check("… posé, noté, et plus rien en attente",
+          (lv.lien_de(TW, "u2").get("variante") or {}).get("posee") is True and lv.en_attente() == [],
+          lv.en_attente())
 
     g, _s = monde(etat={"liens": {
         f"{TW}:a": {"pseudo": "a", "numero": 1, "shortcode": "x1", "link_id": "lnk_x1",
+                    "tracking": "https://onlyfans.com/emy.brw/c1",
                     "variante": {"tracking": SEREN, "posee": False}},
         f"{TW}:b": {"pseudo": "b", "numero": 2, "shortcode": "x2", "link_id": "lnk_x2",
+                    "tracking": "https://onlyfans.com/emy.brw/c2",
                     "variante": {"tracking": SEREN, "posee": False}}}})
     g.ab = {"ok": False, "cookie": True, "error": "cookie refusé"}
     b = lv.reprendre_variantes()
     check("reprise : arrêt au premier refus de cookie (le suivant échouerait pareil)",
           len(g.de("ab")) == 1 and b.get("cookie") and len(b["rates"]) == 1, (g.de("ab"), b))
+    b = lv.reprendre_variantes()
+    check("… et ce cookie-là n'est plus essayé (rien d'envoyé au passage suivant)",
+          len(g.de("ab")) == 1 and b.get("cookie"), (g.de("ab"), b))
+    g.cookie = "authToken=d.e.f"
+    g.ab = {"ok": True, "config": {}}
+    b = lv.reprendre_variantes()
+    check("… un nouveau cookie collé relance tout", sorted(b["poses"]) == ["a", "b"], b)
+    g, _s = monde(etat={"liens": {f"{TW}:a": {"pseudo": "a", "numero": 1, "shortcode": "x1",
+                                               "link_id": "lnk_x1", "tracking": "https://onlyfans.com/emy.brw/c1"}}})
+    g.echeance = time.time() - 60
+    b = lv.reprendre_variantes()
+    check("cookie échu : rien n'est tenté", b.get("cookie") and not g.appels and not _s, (b, g.appels))
+    g.cookie = ""
+    g.echeance = None
+    b = lv.reprendre_variantes()
+    check("pas de cookie : rien non plus", b.get("cookie") and not g.appels, b)
+
+    # ── garde-fous MyPuls ────────────────────────────────────────────────
+    g, suivis = monde(etat={"liens": {f"{TW}:a": {"pseudo": "a", "numero": 1, "shortcode": "x1",
+                                                   "link_id": "lnk_x1",
+                                                   "tracking": "https://onlyfans.com/emy.brw/c1"}}})
+    lv.creer_tracking = lambda nom, creator_id=None: (suivis.append((nom, creator_id)) or
+                                                      {"ok": False, "erreur": "créé, mais introuvable à la relecture"})
+    b = lv.reprendre_variantes()
+    fv = lv.lien_de(TW, "a").get("variante") or {}
+    check("MyPuls ambigu (peut-être créé) : à vérifier à la main",
+          fv.get("a_verifier") is True and b["a_verifier"] and not b["poses"], (fv, b))
+    lv.reprendre_variantes()
+    check("… et jamais réessayé (un second tracking resterait à vie)", len(suivis) == 1, suivis)
+    g, suivis = monde(etat={"liens": {f"{TW}:a": {"pseudo": "a", "numero": 1, "shortcode": "x1",
+                                                   "link_id": "lnk_x1",
+                                                   "tracking": "https://onlyfans.com/emy.brw/c1"}}})
+    lv.creer_tracking = lambda nom, creator_id=None: (suivis.append(nom) or
+                                                      {"ok": False, "refuse": True, "erreur": "MyPuls a refusé (HTTP 422)"})
+    lv.reprendre_variantes()
+    lv.reprendre_variantes()
+    check("MyPuls refuse net : rien de créé, réessayé ensuite",
+          len(suivis) == 2 and not (lv.lien_de(TW, "a").get("variante") or {}).get("a_verifier"), suivis)
+    g, _s = monde(etat={"liens": {f"{TW}:a": {"pseudo": "a", "numero": 1, "shortcode": "x1",
+                                               "link_id": "lnk_x1", "tracking": "https://onlyfans.com/emy.brw/c1",
+                                               "variante": {"tracking": SEREN, "posee": False}}}})
+    g.ab = {"ok": False, "error": "HTTP 404 : link not found"}
+    for _ in range(4):
+        lv.reprendre_variantes()
+    check("un échec qui n'est pas le cookie : trois essais, puis la main",
+          len(g.de("ab")) == lv.ESSAIS_VARIANTE
+          and (lv.lien_de(TW, "a").get("variante") or {}).get("a_verifier") is True, g.de("ab"))
 
     # ── copie temporaire mal adressée ────────────────────────────────────
     g, _s = monde()

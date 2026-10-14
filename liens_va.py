@@ -583,14 +583,25 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
         t = creer_tracking(nom, int(v["creator_id"]))
         if not t.get("ok"):
             err = f'MyPuls ({v["modele"]}) : {t.get("erreur", "")}'
-            noter(modele=v["modele"], posee=False, erreur=err)
-            return {"ok": False, "erreur": err}
+            # un refus net n'a rien créé : on pourra réessayer. Le reste
+            # (créé mais introuvable, réponse illisible, coupure) a PEUT-ÊTRE
+            # créé un tracking qu'on ne connaît pas : un second essai en
+            # ferait un deuxième, à vie. À vérifier à la main dans MyPuls.
+            noter(modele=v["modele"], posee=False, erreur=err,
+                  a_verifier=not t.get("refuse"))
+            return {"ok": False, "erreur": err, "mypuls": True}
         fv = {"modele": v["modele"], "creator_id": int(v["creator_id"]),
               "tracking": t["url"], "code": t["code"]}
         noter(posee=False, erreur="", **fv)
 
     def rate(err: str, cookie: bool = False) -> Dict[str, Any]:
-        noter(posee=False, erreur=err)
+        # un cookie refusé ne dit rien du lien : il ne compte pas comme essai.
+        # Le reste (lien disparu, refus GetMySocial) se répéterait à chaque
+        # reprise, une copie temporaire à chaque fois : au bout de
+        # ESSAIS_VARIANTE, la main
+        essais = int((lien_de(gid, uid).get("variante") or {}).get("essais") or 0) \
+            + (0 if cookie else 1)
+        noter(posee=False, erreur=err, essais=essais, a_verifier=essais >= ESSAIS_VARIANTE)
         return {"ok": False, "cookie": cookie, "tracking": fv["tracking"], "erreur": err}
 
     sc = "abtmp" + secrets.token_hex(5)
@@ -624,31 +635,100 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
     return {"ok": True, "tracking": fv["tracking"], "erreur": ""}
 
 
-def reprendre_variantes(gid: str = TWITTER_ID) -> Dict[str, Any]:
-    """Repose les 50/50 restés en plan (cookie périmé, MyPuls muet).
+#: Au-delà, une variante qui échoue pour autre chose que le cookie attend la main.
+ESSAIS_VARIANTE = 3
+#: Entre deux VA : MyPuls crée un tracking en trois pages, on ne l'enchaîne pas.
+PAUSE_VARIANTE_S = 2.0
+_REPRISE = __import__("threading").Lock()
 
-    Seulement les liens qui l'attendent : une fiche marquée « variante » non
-    posée. Les liens d'avant le 50/50 n'en ont pas et ne bougent pas. S'arrête
-    au premier refus de cookie : le suivant échouerait pareil."""
+
+def _empreinte(cookie: str) -> str:
+    return hashlib.sha1(str(cookie or "").encode("utf-8")).hexdigest()[:12]
+
+
+def en_attente(gid: str = TWITTER_ID) -> list:
+    """Les fiches dont le 50/50 reste à poser : celles créées avec et restées
+    en plan, ET les liens d'avant le 50/50 (propriétaire, 14/10/2026, à « tu
+    veux passer les anciens en 50/50 ? » : « yes avec un tracking link »).
+    Pas un lien coupé (le VA ne bosse plus : deux trackings pour rien), ni
+    une variante à vérifier à la main."""
     gid = str(gid)
-    bilan: Dict[str, Any] = {"poses": [], "rates": []}
-    if not espace(gid).get("variante"):
-        return bilan
+    out = []
     for cle, l in sorted((_etat().get("liens") or {}).items()):
-        if not cle.startswith(f"{gid}:") or not l.get("shortcode"):
+        if not cle.startswith(f"{gid}:") or not l.get("shortcode") or l.get("actif") is False:
             continue
         fv = l.get("variante")
-        if not isinstance(fv, dict) or fv.get("posee"):
+        if isinstance(fv, dict) and (fv.get("posee") or fv.get("a_verifier")):
             continue
-        r = poser_variante(gid, cle.split(":", 1)[1])
-        qui = l.get("pseudo") or cle
-        if r.get("ok"):
-            bilan["poses"].append(qui)
-        else:
-            bilan["rates"].append(f'{qui} : {r.get("erreur")}')
+        out.append(cle)
+    return out
+
+
+def reprendre_variantes(gid: str = TWITTER_ID) -> Dict[str, Any]:
+    """Pose les 50/50 qui manquent, anciens liens compris. Un VA sans son
+    propre tracking Emy (lien d'avant MyPuls) le reçoit d'abord (rebrancher).
+
+    Ne fait rien sans cookie utilisable : absent, échu, ou déjà refusé (son
+    empreinte est notée — un nouveau cookie collé relance tout). S'arrête au
+    premier refus de cookie, ou quand MyPuls n'a pas de session : le suivant
+    échouerait pareil. Un seul passage à la fois (boucle du podium et cookie
+    collé peuvent se croiser)."""
+    import time as _t
+    import gms
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": [], "a_verifier": []}
+    if not espace(gid).get("variante"):
+        return bilan
+    ck = gms.get_session_cookie()
+    exp = gms.cookie_expiration(ck) if ck else None
+    if not ck or (exp and exp < _t.time()) or _etat().get("cookie_refuse") == _empreinte(ck):
+        bilan["cookie"] = True
+        return bilan
+    if not _REPRISE.acquire(blocking=False):
+        bilan["occupe"] = True
+        return bilan
+    try:
+        for i, cle in enumerate(en_attente(gid)):
+            if i:
+                _t.sleep(PAUSE_VARIANTE_S)
+            uid = cle.split(":", 1)[1]
+            l = lien_de(gid, uid)
+            qui = l.get("pseudo") or cle
+            if not l.get("tracking"):
+                rb = rebrancher(gid, uid)
+                if not rb.get("ok"):
+                    if rb.get("tracking"):
+                        # le tracking Emy existe, la destination n'a pas suivi :
+                        # le refaire en créerait un second, à vie
+                        d = _etat()
+                        f = (d.setdefault("liens", {})).setdefault(cle, {})
+                        f["variante"] = dict(f.get("variante") or {}, posee=False, a_verifier=True,
+                                             erreur=f'tracking Emy {rb["tracking"]} créé, '
+                                                    f'lien non rebranché : {rb.get("erreur")}')
+                        _ecrire(d)
+                        bilan["a_verifier"].append(qui)
+                    else:
+                        bilan["rates"].append(f'{qui} : {rb.get("erreur")}')
+                    if "session MyPuls" in str(rb.get("erreur")):
+                        break
+                    continue
+            r = poser_variante(gid, uid)
+            if r.get("ok"):
+                bilan["poses"].append(qui)
+                continue
+            fv = lien_de(gid, uid).get("variante") or {}
+            (bilan["a_verifier"] if fv.get("a_verifier") else bilan["rates"]).append(
+                f'{qui} : {r.get("erreur")}')
             if r.get("cookie"):
+                d = _etat()
+                d["cookie_refuse"] = _empreinte(ck)
+                _ecrire(d)
                 bilan["cookie"] = True
                 break
+            if "session MyPuls" in str(r.get("erreur")):
+                break
+    finally:
+        _REPRISE.release()
     return bilan
 
 

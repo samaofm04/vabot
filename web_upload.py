@@ -60801,6 +60801,20 @@ def _sync_liens_va(gid: str, minutes: int = 30) -> None:
         b = _lv.synchroniser(gid)
         if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates")):
             print(f"[lien] synchro {gid} : {b}", flush=True)
+        # les 50/50 Emy / Seren qui manquent, anciens liens compris : en fond,
+        # une soixantaine de VA a quelques secondes chacun bloquerait le podium
+        if _lv.espace(gid).get("variante") and _lv.en_attente(gid):
+            import threading as _th_v
+
+            def _variantes():
+                try:
+                    bv = _lv.reprendre_variantes(gid)
+                    if bv.get("poses") or bv.get("rates") or bv.get("a_verifier"):
+                        print(f"[lien] 50/50 {gid} : {len(bv['poses'])} pose(s), rates "
+                              f"{bv['rates'][:5]}, a verifier {bv['a_verifier'][:5]}", flush=True)
+                except Exception as e:
+                    print(f"[lien] 50/50 {gid} : {type(e).__name__}: {e}", flush=True)
+            _th_v.Thread(target=_variantes, daemon=True).start()
     except Exception as e:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
 
@@ -70991,10 +71005,7 @@ def create_app():
         reprise = 0
         try:
             import liens_va
-            reprise = sum(1 for k, l in (liens_va._etat().get("liens") or {}).items()
-                          if k.startswith(f"{liens_va.TWITTER_ID}:")
-                          and isinstance(l.get("variante"), dict)
-                          and not l["variante"].get("posee"))
+            reprise = len(liens_va.en_attente()) if liens_va.espace(liens_va.TWITTER_ID).get("variante") else 0
             if reprise:
                 def _reprendre():
                     try:
