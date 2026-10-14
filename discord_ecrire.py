@@ -364,6 +364,9 @@ def _effacer(sid: str, entetes):
 # Un lien de message Discord : clic droit sur le message > « Copier le lien du
 # message ». Les variantes ptb./canary. et l'ancien discordapp.com y passent.
 _LIEN_MESSAGE = _re_salons.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
+# Le lien d'un SALON (la barre d'adresse) : deux numeros, pas trois. Colle par
+# erreur, il etait refuse d'un « Lien non reconnu » qui n'expliquait rien.
+_LIEN_SALON = _re_salons.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/?(?:[^\d/]|$)")
 
 
 def _date_id(mid) -> str:
@@ -1778,10 +1781,17 @@ class Poste(BaseHTTPRequestHandler):
         menu — c'est lui qui est montré dans la question. Deux temps, comme
         Vider : sans `confirme`, on compte seulement.
         """
-        m = _LIEN_MESSAGE.search(str(d.get("lien") or ""))
+        brut = str(d.get("lien") or "")
+        m = _LIEN_MESSAGE.search(brut)
         if not m:
-            return self._envoyer({"ok": False, "error": "Lien non reconnu : sur Discord, "
-                                  "clic droit sur le message > Copier le lien du message."})
+            if _LIEN_SALON.search(brut):
+                return self._envoyer({"ok": False, "error": "C'est le lien du SALON, pas d'un "
+                                      "message (il lui manque le 3e numéro). Sur Discord : clic "
+                                      "droit sur le message à garder > Copier le lien du message."})
+            vu = " ".join(brut.split())[:80]
+            return self._envoyer({"ok": False, "error": "Lien non reconnu (reçu : « " + vu
+                                  + " »). Sur Discord : clic droit sur le message > Copier le "
+                                  "lien du message."})
         gid, salon, garde = m.groups()
         if gid not in SERVEURS:
             return self._envoyer({"ok": False, "error": "Ce lien n'est pas sur un serveur "

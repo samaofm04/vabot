@@ -20525,6 +20525,13 @@ try:
             _h._au_dessus({"lien": "pas un lien", "confirme": True})
             check("au-dessus : un lien non reconnu est refuse, rien n est appele",
                   _sorties[-1]["ok"] is False and not _appD)
+            # a'. le lien du SALON (barre d adresse) : dit tel quel, rien n est appele
+            _appD.clear(); _sorties.clear()
+            _h._au_dessus({"lien": "https://discord.com/channels/1445108485090971710/99",
+                           "confirme": True})
+            check("au-dessus : un lien de salon est reconnu comme tel et refuse",
+                  _sorties[-1]["ok"] is False and "SALON" in _sorties[-1]["error"] and not _appD,
+                  str(_sorties[-1])[:120])
             # b. sans confirmation : on compte, rien n est efface
             _msgsD[:] = _salonD(5)
             _garde = _msgsD[2]["id"]
