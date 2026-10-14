@@ -305,7 +305,11 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # changent pas. POUR LE RETIRER : enlever cette cle ; chaque message
                # redevient celui d'avant, a l'octet pres, au passage suivant (les
                # messages deja figes gardent leur habillage).
-               "theme": "mario"},
+               # RETIRÉ le 14/10/2026 (propriétaire : « pour Va IG fais plus le
+               # thème Mario, mets les trucs et tout comme les autres ») : la clé
+               # éteint aussi le menu des VA (theme_mario.actif). Pour le
+               # rallumer : « "theme": "mario" ».
+               },
 }
 
 
@@ -2117,43 +2121,39 @@ def _releve_us(debut: dt.date, fin: dt.date) -> Optional[Dict[str, Any]]:
     return None
 
 
-#: « Instagram VA n » (Va IG) : les VA US ont LEUR numéro, celui du registre
-#: des trackings ; les VA FR n'en ont qu'un PAR MODEL (Amelia VA 2, Lola VA
-#: 2…), et deux lignes se lisaient « Instagram VA 2 ». Propriétaire, 13/10/2026 :
-#: « donne-leur un numéro exprès pour que personne n'ait le même ». Chaque VA
-#: FR (sa model, son numéro) reçoit un numéro Instagram à lui, fixe, à partir
-#: d'ici : loin des numéros US (1 à 59 ce jour-là), qui ne grandissent que
-#: d'un par nouveau VA de Twitter. Un numéro déjà pris par le registre est sauté.
-DEBUT_INSTAGRAM = 100
+#: « Instagram VA n » (Va IG) : les VA FR n'ont qu'un numéro PAR MODEL
+#: (Amelia VA 2, Lola VA 2…), et deux lignes se lisaient « Instagram VA 2 ».
+#: Propriétaire, 13/10/2026 : « donne-leur un numéro exprès pour que personne
+#: n'ait le même ». Chaque VA FR (sa model, son numéro) reçoit un numéro
+#: Instagram à lui, fixe. D'abord à partir de 100, loin des VA US alors mêlés ;
+#: le 14/10, les VA US partis, « Instagram VA 236 » : « y a pas de VA comme
+#: ça, c'est faux ». Depuis : à partir de 1, et seulement les VA qui
+#: paraissent au classement. Si les VA US revenaient (« avec_us »), leurs
+#: numéros du registre seraient sautés.
+DEBUT_INSTAGRAM = 1
 _VERROU_INSTAGRAM = threading.Lock()
 
 
 def _fichier_instagram() -> Path:
-    return DATA_DIR / "numeros_instagram.json"
+    # une table neuve le 14/10/2026 : l'ancienne (numeros_instagram.json, à
+    # partir de 100, tous les VA FR connus) reste sur disque, plus lue
+    return DATA_DIR / "numeros_va_instagram.json"
 
 
-def numeros_instagram(vues=()) -> Dict[str, int]:
-    """{« amelia:3 » : 104, …} : le numéro Instagram de chaque VA FR.
+def numeros_instagram(vues=(), eviter=()) -> Dict[str, int]:
+    """{« amelia:3 » : 4, …} : le numéro Instagram de chaque VA FR vu.
 
-    Complétée de tous les VA FR connus (numeros_va_fr.json, model → VA →
-    numéro) et des clés `vues`, dans l'ordre (model, numéro) pour qu'un même
-    lot donne toujours le même résultat. Un numéro donné ne change plus."""
+    Les clés `vues` encore sans numéro en reçoivent un, dans l'ordre (model,
+    numéro) pour qu'un même lot donne toujours le même résultat, en sautant
+    `eviter` (les numéros des VA US quand ils sont mêlés). Un numéro donné ne
+    change plus."""
     with _VERROU_INSTAGRAM:
         table = _lire(_fichier_instagram(), {})
         table = {str(k): int(v) for k, v in table.items()
                  if isinstance(v, int) or str(v).isdigit()} if isinstance(table, dict) else {}
-        neuves = set(vues)
-        fr = _lire(DATA_DIR / "numeros_va_fr.json", {})
-        for model, par_va in (fr.items() if isinstance(fr, dict) else []):
-            for n in (par_va.values() if isinstance(par_va, dict) else []):
-                if str(n).isdigit():
-                    neuves.add(f"{model}:{int(n)}")
-        neuves -= set(table)
+        neuves = set(vues) - set(table)
         if neuves:
-            pris = set(table.values())
-            for e in (_lire_registre().get("trackings") or {}).values():
-                if isinstance(e, dict) and str(e.get("numero") or "").isdigit():
-                    pris.add(int(e["numero"]))
+            pris = set(table.values()) | {int(x) for x in eviter}
             n = DEBUT_INSTAGRAM
             for cle in sorted(neuves, key=lambda c: (c.split(":")[0], int(c.split(":")[1]))):
                 while n in pris:
@@ -2189,7 +2189,12 @@ def _marque(gid: Optional[str], texte: str) -> str:
     motif = re.compile(r"(?<![\w-])(" + "|".join(re.escape(n) for n in sorted(noms, key=len, reverse=True))
                        + r") VA (\d+)")
     vues = {f"{fr[m.group(1)]}:{int(m.group(2))}" for m in motif.finditer(texte) if m.group(1) in fr}
-    table = numeros_instagram(vues) if vues else {}
+    eviter = set()
+    if vues and _mele(gid):
+        # VA US mêlés : leurs numéros (registre) ne sont donnés à aucun VA FR
+        eviter = {int(e["numero"]) for e in (_lire_registre().get("trackings") or {}).values()
+                  if isinstance(e, dict) and str(e.get("numero") or "").isdigit()}
+    table = numeros_instagram(vues, eviter) if vues else {}
 
     def nom(m) -> str:
         if m.group(1) in fr:
@@ -2895,10 +2900,11 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if p.get("sans_avertissements"):
         _taire_avert(gid, "la quinzaine", queue[1:])
         queue = queue[:1]
-    bas = _marque(gid, "\n".join(queue))
     # sous la marque du serveur AVANT le découpage : « Instagram » est plus
-    # long que « Amelia », les pages se mesurent telles qu'elles partiront
+    # long que « Amelia », les pages se mesurent telles qu'elles partiront.
+    # Les lignes d'abord : un VA classé prend son numéro avant un absent
     rangs = _marque_lignes(gid, rangs)
+    bas = _marque(gid, "\n".join(queue))
 
     # on remplit page par page, en gardant de la place pour l'en-tête ; la
     # dernière doit aussi loger le total, d'où la marge plus large. Les
@@ -3447,7 +3453,8 @@ def _taire_avert(gid: Optional[str], quoi: str, lignes: List[str]) -> None:
 #: au nom du lien (« ne touche pas Va IG »).
 #: Le 14/10/2026 : chaque serveur ses VA (« garde que ceux du même groupe ») :
 #: Va IG sans les VA US, Threads à ses propres liens, numéros de ses tickets.
-FORMAT_AFFICHAGE = "2026-10-14-chacun-son-groupe"
+#: Puis : Va IG sans le thème Mario, numéros Instagram à partir de 1.
+FORMAT_AFFICHAGE = "2026-10-14-va-ig-sans-mario"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:

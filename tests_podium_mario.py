@@ -141,6 +141,10 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# le thème Mario de Va IG : retiré en production le 14/10/2026 (« fais plus le
+# thème Mario »), la clé reste un interrupteur — rallumée ici pour rester testée
+THEME_LIVRE = pd.SERVEURS["1505418484052394004"].get("theme")
+pd.SERVEURS["1505418484052394004"]["theme"] = "mario"
 # les VA US mêlés à Va IG (« avec_us ») : coupés en production le 14/10/2026,
 # l'interrupteur reste — rallumé ici pour qu'il reste testé
 pd.SERVEURS["1505418484052394004"]["avec_us"] = True
@@ -514,12 +518,12 @@ try:
     print("1. La clé, les images, le format")
     print("=" * 70)
     src = (BOT / "podium_discord.py").read_text(encoding="utf-8")
-    check("Va IG porte « theme »: « mario », Twitter non",
-          pd.SERVEURS[IG].get("theme") == "mario" and "theme" not in pd.SERVEURS[TW])
-    _i = src.find('"theme": "mario"')
-    check("la clé cite le propriétaire et dit comment la retirer",
-          _i > 0 and "theme Mario pour tout ca" in src[_i - 900:_i] and "vas-y" in src[_i - 900:_i]
-          and "POUR LE RETIRER" in src[_i - 900:_i])
+    check("Va IG livré SANS thème (retiré le 14/10/2026), Twitter non plus",
+          THEME_LIVRE is None and "theme" not in pd.SERVEURS[TW])
+    _i = src.find('« "theme": "mario" »')
+    check("la clé retirée cite le propriétaire et dit comment la rallumer",
+          _i > 0 and "theme Mario pour tout ca" in src[_i - 1500:_i]
+          and "fais plus le" in src[_i - 400:_i] and "rallumer" in src[_i - 100:_i + 30])
     check("la clé n'est lue qu'à un seul endroit (_theme)",
           src.count('.get("theme")') == 1 and "def _theme(" in src)
     for n in NOMS:

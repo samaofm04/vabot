@@ -36708,6 +36708,11 @@ try:
             self.id = int(i)
 
     _IG, _TW = _pdTm.VA_IG_ID, _pdTm.TWITTER_ID
+    # Le theme a ete retire de Va IG le 14/10/2026 (« fais plus le theme
+    # Mario ») ; la cle reste un interrupteur : rallumee le temps de ces tests
+    _livreTm = _pdTm.SERVEURS[_IG].get("theme")
+    check("Va IG livre sans le theme Mario", _livreTm is None and not _tm.actif(_IG))
+    _pdTm.SERVEURS[_IG]["theme"] = _tm.NOM
 
     # UN SEUL endroit decide qu un serveur est Mario : la cle « theme » du
     # podium. Si ce module en tenait une seconde liste, on finirait avec un
@@ -36784,6 +36789,11 @@ try:
           and _srcTm.count("accent_colour=discord.Colour.blurple()") == 0)
 except Exception as _eTm:
     check("theme mario : testable", False, repr(_eTm)[:200])
+finally:
+    try:
+        _pdTm.SERVEURS[_IG].pop("theme", None)
+    except Exception:
+        pass
 
 # ------------------- 96. Le podium retrouve son salon meme redecore (Mario)
 print()
