@@ -552,6 +552,70 @@ try:
               lf._releve_mym_au_nom("Lola_VA_2_adh040", 1116) == "https://mym.fans/app/t/hmyayn"
               and lf._releve_mym_au_nom("Lola_VA_2_adh040", 769) == ""
               and lf._releve_mym_au_nom("Lola_VA_3_autre", 1116) == "")
+        # ── le classement de la quinzaine de Va IG, aux vrais abonnés ──────
+        # « les vrais abonnés » ; « eux ils voient pas les pseudos, moi si »
+        lf.ETAT.write_text(json.dumps({"liens": {
+            "46:lola": {"pseudo": "adh040", "numero": 2,
+                        "trackings": {"of": "https://onlyfans.com/amelia/c3",
+                                      "mym": "https://mym.fans/app/t/COMMUN"}},
+            "47:amelia": {"pseudo": "york", "numero": 43,
+                          "trackings": {"mym": "https://mym.fans/app/t/YORK"}}}}))
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time(), "trackings": {
+            "https://mym.fans/app/t/COMMUN": {"nom": "VA_MARKETING", "jours": {"2026-10-03": 9}},
+            "https://mym.fans/app/t/YORK": {"nom": "Amelia_VA_43_york", "createur": 769,
+                                            "jours": {"2026-10-02": 11, "2026-09-01": 4}},
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
+        cl = pod.classement(_dt.date(2026, 10, 1), J, gid=sv.VA_IG_ID, mesure="abonnes")
+        check("quinzaine Va IG : les ABONNÉS (MYM 11, OF 7), le tracking commun écarté, du plus fort",
+              [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Amelia VA 43", 11), ("Lola VA 2", 7)]
+              and cl["source"] == "abonnes" and not cl["illisibles"], cl)
+        check("… le profil de Va IG la demande pour sa quinzaine (le podium de la semaine non)",
+              pod.SERVEURS[pod.VA_IG_ID].get("mesure_subs") == "abonnes"
+              and pod.SERVEURS[pod.VA_IG_ID].get("mesure") != "abonnes")
+        pages = pod.pages_subs(cl, _dt.date(2026, 10, 1), _dt.date(2026, 10, 15), {}, gid=sv.VA_IG_ID)
+        desc = pages[0]["description"]
+        check("… en-tête « Abonnés OF + MYM », numéros Instagram, aucun pseudo",
+              "Abonnés **OF + MYM**" in desc and "Instagram VA" in desc
+              and "adh040" not in desc and "york" not in desc and "Clics" not in desc, desc[:300])
+        _vus_tot = {}
+        _fa = lambda du, au, forcer=False: ({"amelia/c3": {"visites": 1, "total": 1, "subs": 1,
+                                                          "subs_total": 40, "nom": "Lola_VA_2_adh040"}}, "")
+        pod._lire_mypuls = _fa
+        tot = sv.totaux_va_ig()
+        pod._lire_mypuls = faux_mp
+        check("… all-time : OF au compteur MyPuls (40), MYM tous les jours relevés (15), commun écarté",
+              tot == {"Lola VA 2": 40, "Amelia VA 43": 15}, tot)
+        b = pod._boutons(sv.VA_IG_ID, True, pseudos=True)["components"][0]["components"]
+        check("bouton « 👀 Pseudos » sous la quinzaine de Va IG, à côté de « 🔄 »",
+              [c["custom_id"] for c in b] == [pod.BOUTON_MAJ, pod.BOUTON_PSEUDOS]
+              and [c["custom_id"] for c in pod._boutons(sv.VA_IG_ID, True)["components"][0]["components"]]
+              == [pod.BOUTON_MAJ] and pod._boutons(TW, True, pseudos=True) == {}, b)
+        txt = pod.texte_pseudos(sv.VA_IG_ID, J)
+        check("… réponse au staff : numéro Instagram, PSEUDO, model, abonnés",
+              "**york** (Amelia VA 43) — 11 subs" in txt and "**adh040** (Lola VA 2) — 7 subs" in txt
+              and "Instagram VA" in txt, txt)
+        suites3 = []
+        _sauve_pt = {k: getattr(pod, k) for k in ("_staff", "_en_fond")}
+        _sauve_tk3 = tk._suite
+        try:
+            pod._en_fond = lambda f: f()
+            tk._suite = lambda jeton_, texte, p=None: suites3.append(texte)
+            clic = {"type": 3, "guild_id": sv.VA_IG_ID, "token": "t",
+                    "data": {"custom_id": pod.BOUTON_PSEUDOS}, "member": {"user": {"id": "1"}}}
+            pod._staff = lambda p_: False
+            r = pod.traiter(clic)
+            check("… un VA qui clique : refusé, rien calculé",
+                  r.get("type") == 4 and "staff" in r["data"]["content"] and not suites3, r)
+            pod._staff = lambda p_: True
+            r = pod.traiter(clic)
+            check("… le staff : réponse privée différée, avec les pseudos",
+                  r == {"type": 5, "data": {"flags": 64}} and suites3 and "york" in suites3[0], (r, suites3))
+        finally:
+            for _k, _v in _sauve_pt.items():
+                setattr(pod, _k, _v)
+            tk._suite = _sauve_tk3
+        sv.MYM_FICHIER.write_text(json.dumps({"releve": time.time(), "trackings": {
+            "https://mym.fans/app/t/AAA": {"jours": {"2026-10-15": 1}}}}))
         panne["oui"] = True
         check("MyPuls muet : « pas lisible », jamais un zéro inventé",
               sv.subs_du_va(TW, 42, J)["periode"]["n"] is None)

@@ -286,6 +286,16 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # L'AFFICHAGE seul (_marque) : totaux all-time et primes gardent
                # leurs cles. POUR COUPER : retirer cette cle.
                "marque": "Instagram",
+               # Le classement de la QUINZAINE en vrais abonnés (OF + MYM des
+               # trackings au nom du VA, subs_va), plus en clics FR.
+               # Propriétaire, 15/10/2026, devant « Instagram VA 11 — 181 subs »
+               # quand « Mes subs » disait 2 : « les vrais abonnés ». Le podium
+               # de la semaine garde sa mesure. POUR REVENIR : retirer la clé.
+               "mesure_subs": "abonnes",
+               # « 👀 Pseudos » sous le classement de la quinzaine : le staff y
+               # lit, en privé, le pseudo derrière chaque « Instagram VA n »
+               # (« eux ils voient pas les pseudos, moi si »).
+               "bouton_pseudos": True,
                # Le bouton « 🔄 Mettre à jour » sous les messages VIVANTS (proprietaire,
                # 03/10/2026 : « mets un truc pour reload a la main », « le bouton
                # refresh ») : deux heures entre deux releves, le staff veut voir les
@@ -1271,6 +1281,7 @@ def _lire_mypuls(du: str, au: str, forcer: bool = False
         # lui, compte toujours les visites (15/10/2026 : VA 60, 2 visites, 0 sub)
         out[t] = {"visites": _n(it.get("visits_period")), "total": _n(it.get("visits_total")),
                   "subs": _n(it.get("subscribers_period")),
+                  "subs_total": _n(it.get("subscribers_total")),
                   "nom": str(it.get("name") or "").strip()}
     if ecartes or doublons:
         print(f"[podium] MyPuls {du} → {au} : {ecartes} ligne(s) sans url de tracking, "
@@ -1807,6 +1818,10 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     Twitter, ses clics uniques US + UK (mesure « gms_bouton »)."""
     if _repris_de(gid):
         return _classement_repris(debut, fin, str(gid), _source(gid, mesure))
+    if _source(gid, mesure) == "abonnes":
+        # Va IG, quinzaine : les vrais abonnés de ses trackings (subs_va)
+        import subs_va
+        return subs_va.classement_va_ig(debut, fin)
     if _source(gid, mesure) == "tracking":
         # pas gardé pour Va IG : il mêle des clics GetMySocial (_releve_us)
         cl_t = _classement_tracking(debut, fin, gid)
@@ -1894,6 +1909,8 @@ def _fichier_alltime(gid: Optional[str] = None, mesure: Optional[str] = None) ->
     profil = _profil(gid)
     if _source(gid, mesure) == "tracking":
         return DATA_DIR / "podium_alltime_tracking.json"
+    if _source(gid, mesure) == "abonnes":
+        return DATA_DIR / "podium_alltime_va_ig_abonnes.json"
     return DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
 
 
@@ -1917,6 +1934,16 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
     if (cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux")
             and cache.get("format") == FORMAT_AFFICHAGE):
         return {k: int(v) for k, v in cache["totaux"].items()}
+    if _source(gid, mesure) == "abonnes":
+        import subs_va
+        totaux = dict(cache.get("totaux") or {})
+        neufs = subs_va.totaux_va_ig()
+        totaux.update(neufs)
+        if totaux:
+            safe_json.write_text(fichier, json.dumps(
+                {"jour": _aujourdhui().isoformat() if neufs else str(cache.get("jour") or ""),
+                 "totaux": totaux, "format": FORMAT_AFFICHAGE}, ensure_ascii=False, indent=2))
+        return {k: int(v) for k, v in totaux.items()}
     if _source(gid, mesure) == "tracking":
         # le total cumulé de chaque tracking : MyPuls ne garde pas tout
         # l'historique jour par jour (c47 : 20 378 visites rendues sur
@@ -2538,9 +2565,11 @@ def _passager(code: Any, rep: Any = None) -> bool:
 
 
 BOUTON_MAJ = "podium:maj"
+#: « 👀 Pseudos » sous le classement de la quinzaine (clé « bouton_pseudos »).
+BOUTON_PSEUDOS = "podium:pseudos"
 
 
-def _boutons(gid: Optional[str], vivant: bool) -> Dict[str, Any]:
+def _boutons(gid: Optional[str], vivant: bool, pseudos: bool = False) -> Dict[str, Any]:
     """Ce qu'un message envoyé à Discord porte en plus de son embed.
 
     Vivant, sur un serveur à bouton : le bouton « 🔄 Mettre à jour ». Figé :
@@ -2557,9 +2586,14 @@ def _boutons(gid: Optional[str], vivant: bool) -> Dict[str, Any]:
     if not (vivant and pf["bouton_maj"]):
         return {"components": []}
     th = _theme(gid)
-    return {"components": [{"type": 1, "components": [{
-        "type": 2, "style": 2, "label": th["bouton"] if th else "Mettre à jour",
-        "emoji": {"name": "🔄"}, "custom_id": BOUTON_MAJ}]}]}
+    rang = [{"type": 2, "style": 2, "label": th["bouton"] if th else "Mettre à jour",
+             "emoji": {"name": "🔄"}, "custom_id": BOUTON_MAJ}]
+    # `pseudos` : le classement de la quinzaine seulement, sur un serveur qui
+    # le veut (le staff y lit qui est derrière chaque numéro, en privé)
+    if pseudos and pf.get("bouton_pseudos"):
+        rang.append({"type": 2, "style": 2, "label": "Pseudos",
+                     "emoji": {"name": "👀"}, "custom_id": BOUTON_PSEUDOS})
+    return {"components": [{"type": 1, "components": rang}]}
 
 
 def _notes_tracking(cl: Dict[str, Any]) -> List[str]:
@@ -2866,7 +2900,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if mix is None:
         tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
                 f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
-                f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n')
+                + (f'Abonnés **OF + MYM** · **{len(lignes)}** comptes classés\n'
+                   if p.get("mesure_subs") == "abonnes" else
+                   f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n'))
     else:
         # le même en-tête que le podium mêlé : toute l'agence, sans marché
         tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
@@ -3083,13 +3119,14 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
     # la quinzaine ne paie rien : elle cède la réserve de la paie au podium
-    cl = classement(debut, min(aujourd, fin_saison), gid=gid,
+    # Va IG : la quinzaine aux vrais abonnés (clé « mesure_subs »)
+    cl = classement(debut, min(aujourd, fin_saison), gid=gid, mesure=_profil(gid).get("mesure_subs"),
                     etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine") else "podium")
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((ids or [""])[0])
     try:
-        totaux = alltime(gid)
+        totaux = alltime(gid, _profil(gid).get("mesure_subs"))
     except Exception as e:
         print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
         totaux = {}
@@ -3102,7 +3139,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
 
     neufs: List[str] = []
     for i, page in enumerate(pages):
-        corps = {"embeds": [page], **_boutons(gid, True)}
+        corps = {"embeds": [page], **_boutons(gid, True, pseudos=True)}
         if i < len(ids):
             code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
             if code == 200:
@@ -3274,7 +3311,7 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         if _pause_pour(gid):
             raison = "GetMySocial en pause"
         else:
-            cl = classement(debut, fin, gid=gid,
+            cl = classement(debut, fin, gid=gid, mesure=_profil(gid).get("mesure_subs"),
                             etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine")
                             else "podium")
             rec["essais"] = int(rec.get("essais") or 0) + 1
@@ -3320,7 +3357,8 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
             us = _us_pour(gid, debut, fin, cl)
         # figées pour toujours : les têtes du thème relues juste avant
         tetes = _tetes_sures(gid)
-        rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid), gid=gid, final=True,
+        rec["pages"] = pages_subs(cl, debut, fin, _alltime_lu(gid, _profil(gid).get("mesure_subs")),
+                                  gid=gid, final=True,
                                   avertissement=avert, us=us,
                                   totaux_us=_alltime_lu(TWITTER_ID, mesure="gms") if us else None,
                                   tetes=tetes)
@@ -4377,6 +4415,48 @@ ATTENTE_MAJ_S = 120
 _DERNIER_CLIC: Dict[str, float] = {}
 
 
+def texte_pseudos(gid: str, jour: Optional[dt.date] = None) -> str:
+    """Le classement de la quinzaine, pseudos compris — pour le staff, en privé.
+    Propriétaire, 15/10/2026 : « eux ils voient pas les pseudos, même moi si »
+    (un texte grisé, un spoiler, se dévoile pour TOUT le monde dans Discord)."""
+    import subs_va
+    j = jour or _aujourdhui()
+    debut, fin = saison_en_cours(j)
+    lignes = subs_va.pseudos_va_ig(debut, min(j, fin))
+    unite = _unite(gid)
+    out = [f"👀 **Pseudos** — quinzaine du {debut.strftime('%d/%m')} au {fin.strftime('%d/%m')} "
+           f"(visible par toi seul)"]
+    med = ["🥇", "🥈", "🥉"]
+    for i, x in enumerate(lignes):
+        rang = med[i] if i < 3 and x["subs"] is not None else f"{i + 1}."
+        val = f'{x["subs"]} {unite}' if x["subs"] is not None else "pas lisible"
+        out.append(f'{rang} Instagram VA {x["instagram"] or "?"} — **{x["pseudo"] or "?"}** '
+                   f'({x["nom"]}) — {val}')
+    txt = "\n".join(out)
+    return txt if len(txt) <= 1990 else txt[:1985] + "\n…"
+
+
+def _voir_pseudos(p: Dict[str, Any]) -> Dict[str, Any]:
+    """« 👀 Pseudos » : staff seulement, réponse privée et différée (MyPuls)."""
+    gid = str(p.get("guild_id") or "")
+    if not _staff(p):
+        return _ephemere("🔒 Réservé au staff.")
+    if not (SERVEURS.get(gid) or {}).get("bouton_pseudos"):
+        return _ephemere("ℹ️ Pas de pseudos à montrer sur ce serveur.")
+    import tickets_discord as tk
+    jeton = str(p.get("token") or "")
+
+    def travail():
+        try:
+            txt = texte_pseudos(gid)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[podium] pseudos {gid} : {type(e).__name__}: {e}", flush=True)
+            txt = "⚠️ Classement illisible pour le moment, réessaie dans un instant."
+        tk._suite(jeton, txt, p)
+    _en_fond(travail)
+    return tk._differer()
+
+
 def _ephemere(texte: str) -> Dict[str, Any]:
     return {"type": 4, "data": {"content": texte[:2000], "flags": 64,
                                 "allowed_mentions": {"parse": []}}}
@@ -4436,6 +4516,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Toujours une réponse éphémère, tout de suite (3 s au plus pour Discord) ;
     le relevé, lui, prend une minute et part en fond."""
     p = p or {}
+    if p.get("type") == 3 and str((p.get("data") or {}).get("custom_id") or "") == BOUTON_PSEUDOS:
+        return _voir_pseudos(p)
     if p.get("type") != 3 or str((p.get("data") or {}).get("custom_id") or "") != BOUTON_MAJ:
         return None
     gid = str(p.get("guild_id") or "")

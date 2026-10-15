@@ -320,3 +320,116 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
         "-# MyPuls se met à jour toutes les quelques heures."
         + (" Un tracking commun à plusieurs VA n'est pas compté." if r.get("communs") else ""),
     ])
+
+
+# ─── Va IG : le classement de la quinzaine aux abonnés ───────────────────
+# Propriétaire, 15/10/2026, devant « Instagram VA 11 — 181 subs » (des clics
+# FR) quand « Mes subs » disait 2 : le classement de Va IG compte maintenant
+# les VRAIS abonnés, comme le bouton — mêmes trackings, même règle (« à son
+# nom »). Une entité = un VA dans une model (« Amelia VA 3 »), celle que
+# podium_discord._marque affiche « Instagram VA n ».
+def entites_va_ig() -> Dict[str, Dict[str, Any]]:
+    """{« amelia:3 » : {nom « Amelia VA 3 », model, numero, pseudo, uids,
+    trackings [(plateforme, adresse)]}} d'après les fiches liens_fr."""
+    import liens_fr
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle, f in sorted((liens_fr._etat().get("liens") or {}).items()):
+        if not isinstance(f, dict) or ":" not in cle:
+            continue
+        uid, model = cle.split(":", 1)
+        n = f.get("numero")
+        if model not in liens_fr.MODELS or not str(n or "").isdigit():
+            continue
+        k = f"{model}:{int(n)}"
+        e = out.setdefault(k, {"nom": f'{liens_fr.MODELS[model]["nom"]} VA {int(n)}',
+                               "model": model, "numero": int(n),
+                               "pseudo": str(f.get("pseudo") or ""), "uids": [], "trackings": []})
+        e["uids"].append(uid)
+        for plat, url in sorted((f.get("trackings") or {}).items()):
+            t = ("mym" if "mym" in str(plat).lower() else "of", str(url or ""))
+            if t[1] and t not in e["trackings"]:
+                e["trackings"].append(t)
+    return out
+
+
+def _subs_entite(e: Dict[str, Any], d0: str, d1: str) -> Optional[int]:
+    communs = _communs(e["trackings"], e["pseudo"])
+    of = [u for p, u in e["trackings"] if p == "of" and u not in communs]
+    mym = [u for p, u in e["trackings"] if p == "mym" and u not in communs]
+    n_of, n_mym = _subs_of(of, d0, d1), _subs_mym(mym, d0, d1)
+    return None if n_of is None or n_mym is None else n_of + n_mym
+
+
+def classement_va_ig(debut: dt.date, fin: dt.date) -> Dict[str, Any]:
+    """La forme de podium_discord.classement() — {lignes, illisibles, frais,
+    …} — en abonnés : « clics » y porte le nombre d'abonnés de la période.
+    Un VA illisible (MyPuls muet) est dit, jamais compté zéro."""
+    d0, d1 = debut.isoformat(), fin.isoformat()
+    ents = entites_va_ig()
+    lignes, illisibles = [], []
+    for _k, e in sorted(ents.items()):
+        n = _subs_entite(e, d0, d1)
+        if n is None:
+            illisibles.append(e["nom"])
+            continue
+        lignes.append({"va": e["nom"], "numero": e["numero"], "clics": n,
+                       "liens": len(e["trackings"]), "spam": False, "model": e["model"]})
+    lignes.sort(key=lambda x: (-x["clics"], x["model"], x["numero"]))
+    return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": True,
+            "entites": len(ents), "liens": sum(len(e["trackings"]) for e in ents.values()),
+            "sans_numero": [], "gabarits": [], "source": "abonnes", "erreur": ""}
+
+
+def totaux_va_ig() -> Dict[str, int]:
+    """{« Amelia VA 3 » : abonnés depuis la création de ses trackings} : OF au
+    compteur de MyPuls (subscribers_total), MYM à la somme de tous les jours
+    relevés. Un VA illisible est laissé de côté (l'ancien total reste)."""
+    import podium_discord as pod
+    j = pod._aujourdhui().isoformat()
+    vus, _raison = pod._lire_mypuls(j, j)
+    cache = _lire_cache()
+    mym_ok = time.time() - float(cache.get("releve") or 0) <= MYM_FRAIS_S
+    jours = cache.get("trackings") or {}
+    out: Dict[str, int] = {}
+    for _k, e in sorted(entites_va_ig().items()):
+        communs = _communs(e["trackings"], e["pseudo"])
+        total, lisible = 0, True
+        for p, u in e["trackings"]:
+            if u in communs:
+                continue
+            if p == "of":
+                v = (vus or {}).get(pod.tracking_de(u)) if vus is not None else None
+                if vus is None or (v is not None and v.get("subs_total") is None):
+                    lisible = False
+                    break
+                total += int((v or {}).get("subs_total") or 0)
+            else:
+                t = jours.get(u.rstrip("/"))
+                if not mym_ok or t is None:
+                    lisible = False
+                    break
+                total += sum(int(x or 0) for x in (t.get("jours") or {}).values())
+        if lisible:
+            out[e["nom"]] = total
+    return out
+
+
+def pseudos_va_ig(debut: dt.date, fin: dt.date) -> List[Dict[str, Any]]:
+    """Le classement de la quinzaine avec, pour le STAFF seulement, le numéro
+    Instagram et le pseudo de chaque ligne (« 👀 Pseudos »). Les VA, eux, ne
+    lisent que « Instagram VA n »."""
+    import podium_discord as pod
+    cl = classement_va_ig(debut, fin)
+    ents = entites_va_ig()
+    par_nom = {e["nom"]: (k, e) for k, e in ents.items()}
+    table = pod.numeros_instagram({k for k, _e in par_nom.values()})
+    out = []
+    for x in cl["lignes"]:
+        k, e = par_nom.get(x["va"], ("", {}))
+        out.append({"instagram": table.get(k), "pseudo": e.get("pseudo", ""), "nom": x["va"],
+                    "subs": x["clics"]})
+    for nom in cl["illisibles"]:
+        k, e = par_nom.get(nom, ("", {}))
+        out.append({"instagram": table.get(k), "pseudo": e.get("pseudo", ""), "nom": nom,
+                    "subs": None})
+    return out

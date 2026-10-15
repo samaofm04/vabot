@@ -141,6 +141,13 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# La quinzaine de Va IG compte les vrais abonnés depuis le 15/10/2026 (clé
+# « mesure_subs », subs_va ; ses tests : tests_liens_ab_twitter.py). Ici ses
+# messages se testent sur les clics GetMySocial simulés, comme avant.
+pd.SERVEURS[pd.VA_IG_ID].pop("mesure_subs", None)
+# … et sans « 👀 Pseudos » (même date, mêmes tests) : les boutons se
+# comparent ici à l'octet près à ceux d'avant
+pd.SERVEURS[pd.VA_IG_ID].pop("bouton_pseudos", None)
 # le thème Mario de Va IG : retiré en production le 14/10/2026 (« fais plus le
 # thème Mario »), la clé reste un interrupteur — rallumée ici pour rester testée
 THEME_LIVRE = pd.SERVEURS["1505418484052394004"].get("theme")
