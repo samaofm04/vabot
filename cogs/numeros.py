@@ -3080,7 +3080,7 @@ class NumerosCog(commands.Cog):
 
     @app_commands.command(
         name="soldes",
-        description="Solde des générateurs (GetAText, SMSBower, SMSPool)")
+        description="Solde des générateurs (GetAText, SMSBower, SMSPool, HeroSMS)")
     async def soldes(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         b = await asyncio.to_thread(numgen.balances)
@@ -3088,7 +3088,8 @@ class NumerosCog(commands.Cog):
             "💰 **Soldes**\n"
             f"• 📱 Numéros (GetAText) : **{b['sms']}**\n"
             f"• 📧 Mails (SMSBower) : **{b['mail']}**\n"
-            f"• 🏊 SMSPool : **{b.get('smspool', '—')}**", ephemeral=True)
+            f"• 🏊 SMSPool : **{b.get('smspool', '—')}**\n"
+            f"• 𝕏 HeroSMS (numéros X) : **{b.get('herosms', '—')}**", ephemeral=True)
 
 
 class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
@@ -3100,6 +3101,11 @@ class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
         placeholder="laisse vide pour ne pas changer")
     smspool = discord.ui.TextInput(
         label="Clé SMSPool (solde seul)", required=False, max_length=120,
+        placeholder="laisse vide pour ne pas changer")
+    # Les numéros X de YouLab TWITTER (numeros_x_discord). Cinquième et
+    # dernier champ : Discord n'en permet pas plus dans une fenêtre.
+    herosms = discord.ui.TextInput(
+        label="Clé HeroSMS (numéros X)", required=False, max_length=120,
         placeholder="laisse vide pour ne pas changer")
     pays = discord.ui.TextInput(
         label="Pays par défaut (0 = RU, 187 = USA)", required=False, max_length=6,
@@ -3113,13 +3119,15 @@ class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
                 str(self.getatext.value).strip() or None,
                 str(self.smsbower.value).strip() or None,
                 str(self.pays.value).strip() or None,
-                smspool=str(self.smspool.value).strip() or None))
+                smspool=str(self.smspool.value).strip() or None,
+                herosms=str(self.herosms.value).strip() or None))
         b = await asyncio.to_thread(numgen.balances)
         await interaction.followup.send(
             f"✅ **Enregistré**\n"
             f"• 📱 GetAText : {s['getatext'] or '❌ absente'} — solde **{b['sms']}**\n"
             f"• 📧 SMSBower : {s['smsbower'] or '❌ absente'} — solde **{b['mail']}**\n"
             f"• 🏊 SMSPool : {s.get('smspool') or '❌ absente'} — solde **{b.get('smspool', '—')}**\n"
+            f"• 𝕏 HeroSMS : {s.get('herosms') or '❌ absente'} — solde **{b.get('herosms', '—')}**\n"
             f"• 🌍 Pays par défaut : `{s['country']}`", ephemeral=True)
 
 

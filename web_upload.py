@@ -61850,6 +61850,18 @@ def create_app():
                 return jsonify(_rep_pdm)
         except Exception as _e_pdm:
             print(f"[podium] route : {type(_e_pdm).__name__}: {_e_pdm}", flush=True)
+        # Le panneau « Numéro X » de 📱・numéro-usa (numeros_x_discord) : un
+        # numéro HeroSMS et son code, visibles du seul VA qui a cliqué.
+        try:
+            import numeros_x_discord as _nx
+            _rep_nx = _nx.traiter(charge)
+            if _rep_nx is not None:
+                return jsonify(_rep_nx)
+        except Exception as _e_nx:
+            print(f"[numx] route : {type(_e_nx).__name__}: {_e_nx}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("numx:"):
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])

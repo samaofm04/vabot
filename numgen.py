@@ -1,13 +1,17 @@
-"""Numéros SMS et adresses mail temporaires (GetAText + SMSBower).
+"""Numéros SMS et adresses mail temporaires (GetAText + SMSBower, HeroSMS).
 
 Repris du projet test de l'user (sms_api/main.py) :
   - SMS  : GetAText, protocole « stubs handler_api » (ACCESS_NUMBER:id:phone,
            STATUS_OK:code…) ; fallback SMSBower stubs si GetAText n'a pas de
            numéro (même protocole, autre clé).
   - Mail : SMSBower, API JSON /api/mail/getActivation + getCode.
+  - HeroSMS : numéros X du serveur YouLab TWITTER (numeros_x_discord), même
+           protocole « stubs » (HeroSMS se dit compatible SMS-Activate). À part
+           de get_number : un clic sur Instagram ne doit pas acheter chez lui,
+           ni un clic X chez GetAText.
 
-Clés : .env (GETATEXT_API_KEY / SMSBOWER_API_KEY) ou data/numgen.json (posé par
-`/smskey`). Jamais de clé dans le code.
+Clés : .env (GETATEXT_API_KEY / SMSBOWER_API_KEY / HEROSMS_API_KEY) ou
+data/numgen.json (posé par `/smskey`). Jamais de clé dans le code.
 """
 import os
 import pathlib
@@ -20,6 +24,7 @@ _FILE = pathlib.Path(__file__).resolve().parent / "data" / "numgen.json"
 
 GETATEXT_URL = "https://getatext.com/stubs/handler_api.php"
 SMSBOWER_STUBS_URL = "https://smsbower.app/stubs/handler_api.php"
+HEROSMS_URL = "https://hero-sms.com/stubs/handler_api.php"
 MAIL_BASE = "https://smsbower.page/api/mail"
 # SMSPool ne parle pas « stubs » : son API est du JSON, la cle dans
 # l'URL. Seul le solde est branche ici -- voir l'en-tete du module.
@@ -80,8 +85,12 @@ def smspool_key() -> str:
     return _key("smspool_api_key")
 
 
+def herosms_key() -> str:
+    return _key("herosms_api_key")
+
+
 def set_keys(getatext=None, smsbower=None, country=None, service=None,
-             smspool=None) -> dict:
+             smspool=None, herosms=None) -> dict:
     c = _cfg()
     if getatext is not None:
         c["getatext_api_key"] = str(getatext).strip()
@@ -93,6 +102,8 @@ def set_keys(getatext=None, smsbower=None, country=None, service=None,
         c["service"] = str(service).strip().lower()
     if smspool is not None:
         c["smspool_api_key"] = str(smspool).strip()
+    if herosms is not None:
+        c["herosms_api_key"] = str(herosms).strip()
     try:
         _FILE.parent.mkdir(parents=True, exist_ok=True)
         safe_json.write(_FILE, c, indent=2)
@@ -110,6 +121,7 @@ def status() -> dict:
         "getatext": _m(getatext_key()),
         "smsbower": _m(smsbower_key()),
         "smspool": _m(smspool_key()),
+        "herosms": _m(herosms_key()),
         "country": str(c.get("country") or PAYS_DEFAUT),
         "service": str(c.get("service") or "ig"),
         "sms_ok": bool(getatext_key() or smsbower_key()),
@@ -117,6 +129,8 @@ def status() -> dict:
         # Volontairement HORS de sms_ok : celui-la allume le bouton
         # « Obtenir un numero », et SMSPool ne sait pas acheter d'ici.
         "smspool_ok": bool(smspool_key()),
+        # Hors de sms_ok aussi : HeroSMS ne sert que les numéros X.
+        "herosms_ok": bool(herosms_key()),
     }
 
 
@@ -147,8 +161,8 @@ def stock(service="ig") -> dict:
 
 
 def balances() -> dict:
-    """Soldes des 3 fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
-    out = {"sms": "—", "mail": "—", "smspool": "—"}
+    """Soldes des fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
+    out = {"sms": "—", "mail": "—", "smspool": "—", "herosms": "—"}
     if getatext_key():
         t = _get(GETATEXT_URL, {"api_key": getatext_key(), "action": "getBalance"})
         if t.startswith("ACCESS_BALANCE:"):
@@ -164,6 +178,10 @@ def balances() -> dict:
     if smspool_key():
         out["smspool"] = _solde_smspool(
             _get(SMSPOOL_BALANCE_URL, {"key": smspool_key()}))
+    if herosms_key():
+        t = _stubs("herosms", "getBalance")
+        out["herosms"] = (t.split(":", 1)[1].strip() + " $"
+                          if t.startswith("ACCESS_BALANCE:") else _human(t))
     return out
 
 
@@ -205,11 +223,35 @@ def _get(url, params, timeout=20):
 def _stubs(provider, action, **params):
     if provider == "smsbower":
         key, url = smsbower_key(), SMSBOWER_STUBS_URL
+    elif provider == "herosms":
+        key, url = herosms_key(), HEROSMS_URL
     else:
         key, url = getatext_key(), GETATEXT_URL
     if not key:
         return "NO_KEY"
-    return _get(url, {"api_key": key, "action": action, **params})
+    txt = _get(url, {"api_key": key, "action": action, **params})
+    if provider == "herosms":
+        return _texte_herosms(txt)
+    return txt
+
+
+def _texte_herosms(txt):
+    """HeroSMS répond « ACCESS_NUMBER:… » quand tout va bien, mais ses refus
+    arrivent en JSON : {"title":"BAD_KEY","details":"Unauthorized"}, relevé le
+    17/10/2026. Lu tel quel, ce JSON n'était reconnu par rien (ni _human, ni
+    get_code) : on le ramène au mot du protocole, le détail derrière."""
+    t = (txt or "").strip()
+    if not t.startswith("{"):
+        return t
+    import json as _js
+    try:
+        j = _js.loads(t)
+    except Exception:
+        return t
+    if isinstance(j, dict) and j.get("title"):
+        d = str(j.get("details") or "").strip()
+        return str(j["title"]).strip() + (":" + d if d else "")
+    return t
 
 
 def _commander(service, country):
@@ -274,6 +316,20 @@ def get_number(service="ig", country=None):
         if not any("NO_NUMBERS" in (t or "") for t in brut2):
             return False, res2
     return False, f"{res} — aucun pays n'a de numéro pour ce service"
+
+
+def get_number_herosms(service="tw", country="187"):
+    """Un numéro HeroSMS, dans CE pays seulement : le propriétaire a choisi
+    les États-Unis pour X (17/10/2026), et un repli silencieux vers un autre
+    pays donnerait un numéro qu'il n'a pas voulu.
+    -> (True, {id, phone, provider, country}) ou (False, message)."""
+    txt = _stubs("herosms", "getNumber", service=service, country=str(country))
+    if txt.startswith("ACCESS_NUMBER"):
+        p = txt.split(":")
+        if len(p) >= 3 and p[1] and p[2]:
+            return True, {"id": p[1], "phone": "+" + p[2].lstrip("+"),
+                          "provider": "herosms", "country": str(country)}
+    return False, _human(txt)
 
 
 def get_code(activation_id, provider="getatext"):
@@ -369,6 +425,10 @@ _MSG = {
     "WRONG_SERVICE": "service inconnu chez ce fournisseur",
     "BANNED": "compte bloqué par le fournisseur",
     "EARLY_CANCEL_DENIED": "annulation trop tôt — attends ~2 min",
+    # Les mots de HeroSMS (relevés le 17/10/2026)
+    "BAD_API_KEY": "clé API refusée",
+    "NOT_FOUND": "activation inconnue (déjà terminée ?)",
+    "SERVICE_NOT_AVAILABLE": "service indisponible chez ce fournisseur",
 }
 
 
