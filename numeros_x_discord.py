@@ -23,6 +23,13 @@ seconde table qui finirait par dire autre chose.
 
 L'état de chaque numéro vit dans data/numeros_x.json, pas dans le message :
 un bouton cliqué après un redémarrage retrouve son numéro.
+
+UN message par personne. Propriétaire, 17/10/2026, capture à l'appui : « quand
+je prends un autre num je veux qu'il remplace l'autre, histoire d'avoir
+toujours le même truc ». Chaque clic sur le panneau du salon ouvrait un
+message éphémère de plus, avec le même numéro. Le nouveau message efface
+désormais le précédent (son jeton d'interaction, gardé 15 min, le permet) ;
+les boutons d'un message le changent sur place.
 """
 import threading
 import time
@@ -87,6 +94,8 @@ def _lire() -> Dict[str, Any]:
         d = {}
     if not isinstance(d.get("actifs"), dict):
         d["actifs"] = {}
+    if not isinstance(d.get("messages"), dict):
+        d["messages"] = {}
     return d
 
 
@@ -112,6 +121,36 @@ def _maj(cle: str, act_id: str, **champs) -> Optional[Dict[str, Any]]:
         a.update(champs)
         _ecrire(d)
         return a
+
+
+def _message(cle: str) -> Optional[Dict[str, Any]]:
+    """Le message éphémère que la personne a sous les yeux : {jeton, app, le}.
+    Repli sur le jeton rangé dans l'activation (format du premier jour)."""
+    d = _lire()
+    m = d["messages"].get(cle)
+    if isinstance(m, dict) and m.get("jeton"):
+        return m
+    a = d["actifs"].get(cle)
+    if isinstance(a, dict) and a.get("jeton"):
+        return {"jeton": a["jeton"], "app": a.get("app") or "", "le": a.get("jeton_le") or 0}
+    return None
+
+
+def _retenir(cle: str, jeton: str, app: str) -> Optional[Dict[str, Any]]:
+    """Ce message devient LE message de la personne ; rend le précédent."""
+    with _VERROU:
+        avant = _message(cle)
+        d = _lire()
+        d["messages"][cle] = {"jeton": jeton, "app": app, "le": time.time()}
+        _ecrire(d)
+    return avant
+
+
+def _effacer(m: Dict[str, Any]) -> None:
+    code, corps = vd.api("DELETE", f"/webhooks/{m.get('app') or ''}/{m['jeton']}/messages/@original")
+    # 404 : déjà fermé par la personne (« Rejeter le message ») ; rien à dire.
+    if code not in (204, 404):
+        _log(f"ancien message non effacé : HTTP {code} {str(corps)[:160]}")
 
 
 def _vivant(a: Optional[Dict[str, Any]]) -> bool:
@@ -199,12 +238,21 @@ def _texte(texte: str) -> Dict[str, Any]:
     return {"type": 4, "data": {"content": texte, "flags": EPHEMERE}}
 
 
-def _repondre(p: Dict[str, Any], comps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Sur le panneau du salon : un NOUVEAU message, visible du seul cliqueur.
-    Sur ce message éphémère lui-même : on le remplace sur place."""
+def _repondre(p: Dict[str, Any], cle: str, comps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Sur ce message éphémère lui-même : on le change sur place. Sur le
+    panneau du salon : un NOUVEAU message, visible du seul cliqueur, qui
+    efface le précédent — jamais deux messages pour un même numéro."""
+    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p)
     source = int(((p.get("message") or {}).get("flags")) or 0)
+    avant = _retenir(cle, jeton, app)
     if source & EPHEMERE:
         return {"type": 7, "data": {"components": comps}}
+    if avant and avant.get("jeton") != jeton and \
+            time.time() - float(avant.get("le") or 0) < JETON_SEC:
+        try:
+            _fond(lambda: _effacer(avant))
+        except Exception as e:
+            _log(f"effacement de l'ancien message non lancé ({type(e).__name__}: {e})")
     return {"type": 4, "data": {"flags": V2 | EPHEMERE, "components": comps}}
 
 
@@ -217,15 +265,15 @@ def _editer(app: str, jeton: str, comps: List[Dict[str, Any]]) -> int:
 
 
 def _redessiner(cle: str, conf: Dict[str, Any], comps: Optional[List[Dict[str, Any]]] = None) -> int:
-    a = _actif(cle)
-    if not a or not a.get("jeton"):
+    a, m = _actif(cle), _message(cle)
+    if not m or (comps is None and not a):
         return 0
-    if time.time() - float(a.get("jeton_le") or 0) > JETON_SEC:
+    if time.time() - float(m.get("le") or 0) > JETON_SEC:
         # Le message ne s'édite plus (jeton de 15 min) : le prochain clic du
         # VA le redessine avec ce qui est arrivé entre-temps.
-        _log(f"{a.get('valeur')} : jeton expiré, affichage au prochain clic")
+        _log(f"{(a or {}).get('valeur', cle)} : jeton expiré, affichage au prochain clic")
         return 0
-    return _editer(a.get("app") or "", a["jeton"], comps or vue_actif(a, conf))
+    return _editer(m.get("app") or "", m["jeton"], comps or vue_actif(a, conf))
 
 
 # ─── Clics ────────────────────────────────────────────────────────────────
@@ -289,49 +337,54 @@ def _nom(user: Dict[str, Any]) -> str:
 def _prendre(p, gid, uid, cle, membre, user, conf):
     if not numgen.herosms_key():
         _log("clic « Prendre un numéro » : clé HeroSMS absente")
-        return _texte("❌ Numéros indisponibles : la clé HeroSMS n'est pas posée. Préviens un admin.")
-    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
+        return _repondre(p, cle, vue_close(
+            "❌ Numéros indisponibles : la clé HeroSMS n'est pas posée. Préviens un admin."))
     with _VERROU:
+        if cle in _ACHATS:
+            # Le message « Recherche d'un numéro… » va recevoir le numéro : en
+            # ouvrir un autre l'effacerait, et le numéro payé ne s'afficherait
+            # nulle part. Le clic est seulement accusé.
+            return {"type": 6}
         a = _actif(cle)
         if _vivant(a):
             # Un numéro déjà payé : on le remontre, on n'en rachète pas.
-            a = _maj(cle, a["id"], jeton=jeton, jeton_le=time.time(), app=app) or a
+            rep = _repondre(p, cle, vue_actif(a, conf))
             _assurer_ecoute(cle, a, conf)
-            return _repondre(p, vue_actif(a, conf))
-        if cle in _ACHATS:
-            return _texte("⏳ Ton numéro arrive…")
+            return rep
         refus = _quota_refus(uid, gid, membre, conf)
         if refus:
-            return _texte(refus)
+            return _repondre(p, cle, vue_close(refus))
         _ACHATS.add(cle)
     salon = str(p.get("channel_id") or conf["salon"])
+    # Le message d'abord, l'achat ensuite : l'achat écrit le numéro dans LE
+    # message courant, qui doit déjà être celui-ci.
+    rep = _repondre(p, cle, vue_attente("⏳ Recherche d'un numéro…"))
     try:
-        _fond(lambda: _acheter(cle, gid, uid, _nom(user), conf, jeton, app, salon))
+        _fond(lambda: _acheter(cle, gid, uid, _nom(user), conf, salon))
     except Exception as e:
         with _VERROU:
             _ACHATS.discard(cle)
         _log(f"achat non lancé pour {uid} ({type(e).__name__}: {e})")
-        return _texte("❌ Impossible pour le moment : réessaie dans un instant.")
-    return _repondre(p, vue_attente("⏳ Recherche d'un numéro…"))
+        return _repondre(p, cle, vue_close("❌ Impossible pour le moment : réessaie dans un instant."))
+    return rep
 
 
-def _acheter(cle, gid, uid, nom, conf, jeton, app, salon):
+def _acheter(cle, gid, uid, nom, conf, salon):
     try:
         ok, res = numgen.get_number_herosms(conf["service"], conf["pays"])
         if not ok:
             _log(f"achat refusé pour {uid} : {res}")
-            _editer(app, jeton, vue_close("❌ " + str(res)))
+            _redessiner(cle, conf, vue_close("❌ " + str(res)))
             return
         a = {"id": str(res["id"]), "provider": "herosms", "service": conf["service"],
-             "valeur": res["phone"], "par": uid, "pris_le": int(time.time()),
-             "salon": salon, "jeton": jeton, "jeton_le": time.time(), "app": app}
+             "valeur": res["phone"], "par": uid, "pris_le": int(time.time()), "salon": salon}
         with _VERROU:
             d = _lire()
             d["actifs"][cle] = a
             _ecrire(d)
         _log(f"{a['valeur']} pris par {uid} ({nom})")
         _histo_prise(a, gid, nom)
-        _editer(app, jeton, vue_actif(a, conf))
+        _redessiner(cle, conf)
         _assurer_ecoute(cle, a, conf)
     finally:
         with _VERROU:
@@ -339,33 +392,35 @@ def _acheter(cle, gid, uid, nom, conf, jeton, app, salon):
 
 
 def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
-    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
     with _VERROU:
+        if cle in _ACHATS:
+            return {"type": 6}                    # un numéro arrive dans le message courant
         a = _actif(cle)
         if not a or str(a.get("id")) != act_id:
             # Un bouton d'un ancien message : on montre ce qui est vrai maintenant.
             if _vivant(a):
-                a = _maj(cle, a["id"], jeton=jeton, jeton_le=time.time(), app=app) or a
-                return _repondre(p, vue_actif(a, conf))
-            return _repondre(p, vue_close("Ce numéro n'est plus actif."))
+                return _repondre(p, cle, vue_actif(a, conf))
+            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif."))
         if a.get("clos"):
-            return _repondre(p, vue_close("Ce numéro n'est plus actif."))
-        a = _maj(cle, act_id, jeton=jeton, jeton_le=time.time(), app=app, souci="") or a
+            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif."))
+        a = _maj(cle, act_id, souci="") or a
         if action == "fini":
             if not a.get("code") and _vivant(a):
                 # « C'est bon » sans code abandonnerait un numéro payé : ce
                 # bouton n'existe pas dans cet état, un clic croisé peut l'envoyer.
-                return _repondre(p, vue_actif(a, conf))
+                return _repondre(p, cle, vue_actif(a, conf))
             _maj(cle, act_id, clos="fini")
     if action == "fini":
         _histo(act_id, "fini")
         _fond(lambda: numgen.finish(act_id, "herosms"))
-        return _repondre(p, vue_close("✅ C'est bon."))
+        return _repondre(p, cle, vue_close("✅ C'est bon."))
     if action == "retry":
+        rep = _repondre(p, cle, vue_attente("⏳ Nouveau code demandé…"))
         _fond(lambda: _redemander(cle, act_id, conf))
-        return _repondre(p, vue_attente("⏳ Nouveau code demandé…"))
+        return rep
+    rep = _repondre(p, cle, vue_attente("⏳ Annulation…" if action == "annuler" else "⏳ Autre numéro…"))
     _fond(lambda: _rendre(cle, gid, uid, membre, user, conf, act_id, action))
-    return _repondre(p, vue_attente("⏳ Annulation…" if action == "annuler" else "⏳ Autre numéro…"))
+    return rep
 
 
 def _redemander(cle, act_id, conf):
@@ -412,7 +467,7 @@ def _rendre(cle, gid, uid, membre, user, conf, act_id, action):
         if cle in _ACHATS:
             return
         _ACHATS.add(cle)
-    _acheter(cle, gid, uid, _nom(user), conf, a["jeton"], a.get("app") or "", a.get("salon") or conf["salon"])
+    _acheter(cle, gid, uid, _nom(user), conf, a.get("salon") or conf["salon"])
 
 
 # ─── Écoute du code ───────────────────────────────────────────────────────

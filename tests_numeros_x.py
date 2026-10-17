@@ -161,7 +161,8 @@ try:
     numgen.herosms_key = lambda: ""
     r = nx.traiter(clic("numx:prendre"))
     check("sans clé HeroSMS : refus éphémère qui le dit, rien d'acheté",
-          r["type"] == 4 and "clé HeroSMS" in r["data"]["content"] and not ACHATS, r)
+          r["type"] == 4 and any("clé HeroSMS" in t for t in textes(r["data"]["components"]))
+          and not ACHATS, r)
     numgen.herosms_key = lambda: "cle-de-test"
 
     # 3. le parcours : prendre, attendre, code
@@ -200,7 +201,13 @@ try:
     r = nx.traiter(clic("numx:prendre", jeton="tok2"))
     check("second clic : le même numéro, avec son code, sans nouvel achat",
           len(ACHATS) == 1 and "🇺🇸 🔑 **Code : `482913`**" in textes(r["data"]["components"]), r)
-    check("second clic : le jeton retenu est le nouveau", nx._actif(f"{GID}:{VA}")["jeton"] == "tok2")
+    check("second clic : le message retenu est le nouveau", nx._message(f"{GID}:{VA}")["jeton"] == "tok2")
+    check("second clic : l'ancien message est effacé (un seul message à l'écran)",
+          ("DELETE", f"/webhooks/{APP}/tok/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
+    n_del = len([1 for m, *_ in APPELS if m == "DELETE"])
+    r = nx.traiter(clic("numx:prendre", jeton="tok3", ephemere=True))
+    check("clic depuis le message lui-même : changé sur place, rien d'effacé",
+          r["type"] == 7 and len([1 for m, *_ in APPELS if m == "DELETE"]) == n_del, r)
 
     # 5. C'est bon
     n_patch = len([1 for m, *_ in APPELS if m == "PATCH"])
@@ -255,7 +262,8 @@ try:
         nx.traiter(clic("numx:annuler:act%d" % len(ACHATS), ephemere=True))
     r = nx.traiter(clic("numx:prendre"))
     check("4e numéro du jour : refus « 3 numéros aujourd'hui », rien d'acheté",
-          r["type"] == 4 and "3 numéros aujourd'hui" in r["data"]["content"] and len(ACHATS) == 3, r)
+          r["type"] == 4 and any("3 numéros aujourd'hui" in t for t in textes(r["data"]["components"]))
+          and len(ACHATS) == 3, r)
     r = nx.traiter(clic("numx:prendre", uid=VA2))
     check("un autre VA a son propre compte", len(ACHATS) == 4, ACHATS)
     for _ in range(3):
@@ -270,7 +278,7 @@ try:
     with mock.patch.object(num, "numeros_du_jour", side_effect=ValueError("illisible")):
         r = nx.traiter(clic("numx:prendre"))
     check("historique illisible : refus, rien d'acheté",
-          "historique" in r["data"]["content"] and not ACHATS, r)
+          any("historique" in t for t in textes(r["data"]["components"])) and not ACHATS, r)
 
     # 11. achat refusé par HeroSMS
     remise_a_zero()
@@ -281,6 +289,25 @@ try:
           and boutons(dernier_patch()) == ["numx:prendre"], dernier_patch())
     check("achat refusé : rien au registre ni à l'historique",
           nx._actif(f"{GID}:{VA}") is None and num._histo_lire() == [])
+
+    # 11 bis. un clic pendant l'achat ne crée ni n'efface aucun message
+    remise_a_zero()
+    nx._ACHATS.add(f"{GID}:{VA}")
+    r = nx.traiter(clic("numx:prendre", jeton="tokB"))
+    check("clic pendant l'achat : simplement accusé (type 6), rien d'acheté ni d'effacé",
+          r == {"type": 6} and not ACHATS and not any(m == "DELETE" for m, *_ in APPELS), r)
+    nx._ACHATS.clear()
+
+    # 11 ter. un numéro du premier jour (jeton rangé dans l'activation)
+    remise_a_zero()
+    nx._ecrire({"actifs": {f"{GID}:{VA}": {"id": "vieux", "provider": "herosms", "valeur": "+15559990000",
+                                           "par": VA, "pris_le": int(time.time()), "jeton": "tokV",
+                                           "jeton_le": time.time(), "app": APP}}})
+    CODES.append(("code", "135790"))
+    nx._ecouter(f"{GID}:{VA}", "vieux", nx.SERVEURS[GID])
+    check("ancien format : le code s'affiche dans le message de son jeton",
+          any(m == "PATCH" and ch == f"/webhooks/{APP}/tokV/messages/@original" for m, ch, kw in APPELS)
+          and "🇺🇸 🔑 **Code : `135790`**" in textes(dernier_patch()), APPELS)
 
     # 12. Nouveau code
     remise_a_zero()
@@ -296,7 +323,6 @@ try:
     nx.traiter(clic("numx:prendre"))
     d = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
     d["actifs"][f"{GID}:{VA}"]["pris_le"] = int(time.time()) - nx.DUREE_NUMERO_SEC - 5
-    d["actifs"][f"{GID}:{VA}"]["jeton_le"] = time.time()
     nx.FICHIER.write_text(json.dumps(d), encoding="utf-8")
     nx._ecouter(f"{GID}:{VA}", "act1", nx.SERVEURS[GID])
     check("20 min sans code : numéro rendu et clos, le VA le lit",
@@ -304,12 +330,14 @@ try:
           and any("Aucun code" in t for t in textes(dernier_patch())), dernier_patch())
     r = nx.traiter(clic("numx:prendre"))
     check("après expiration : un nouveau numéro est acheté", len(ACHATS) == 2, ACHATS)
+    check("nouvelle activation : aucun jeton rangé dedans (un seul message, ailleurs)",
+          "jeton" not in nx._actif(f"{GID}:{VA}"), nx._actif(f"{GID}:{VA}"))
 
     # 14. jeton périmé : pas d'édition (Discord la refuserait)
     remise_a_zero()
     nx.traiter(clic("numx:prendre"))
     d = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
-    d["actifs"][f"{GID}:{VA}"]["jeton_le"] = time.time() - 16 * 60
+    d["messages"][f"{GID}:{VA}"]["le"] = time.time() - 16 * 60
     nx.FICHIER.write_text(json.dumps(d), encoding="utf-8")
     n_av = len(APPELS)
     check("jeton de plus de 15 min : aucune édition tentée",
