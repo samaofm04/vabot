@@ -166,6 +166,10 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "porte": False, "quetes": False,
     },
 }
+# Va IG : 🛡️ Manager (17/10/2026). Le role ci-dessus est BOSS, qui passe de
+# toute facon (administrateur) : un vrai manager de Va IG etait refuse. Pose
+# ici et pas dans le dictionnaire : un patch du serveur s'appuie sur sa ligne.
+SERVEURS_EXTRA[VA_IG_ID]["role_manager"] = "1555968604032213102"
 
 PAYS_AUTORISES = {"BJ": "Bénin", "MG": "Madagascar"}
 # Fuseaux attendus pour ces deux pays. Un telephone beninois peut annoncer
@@ -1560,12 +1564,14 @@ def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
     _charger_config()
     if p.get("type") == 1:                                  # PING de validation de Discord
         return {"type": 1}
-    if p.get("type") != 3:
+    if p.get("type") not in (2, 3):
         return _ephemere("Action inconnue.")
     gid = str(p.get("guild_id") or "")
     cfg = serveur(gid) if gid else None
     if not cfg:
         return _ephemere("Ce bouton ne fonctionne que sur les serveurs YouLab.")
+    if p.get("type") == 2:                                  # « Vérifier » et /verifier
+        return _commande_verifier(p, cfg)
     membre = p.get("member") or {}
     user = membre.get("user") or {}
     cid = ((p.get("data") or {}).get("custom_id") or "")
@@ -1625,6 +1631,166 @@ def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         return {"type": 6}                                  # « je m'en occupe » : le message sera mis a jour
 
     return _ephemere("Action inconnue.")
+
+
+# ─── Verifier a la main (commande des managers) ───────────────────────────
+# Proprietaire, 17/10/2026 : « le role manager peut verifier des personnes ou
+# les bouger du en attente ». Les boutons Accepter ne servent qu'a qui a une
+# alerte : ce jour-la, 218 membres de Twitter n'avaient AUCUN role (jamais
+# passes par la page), donc rien a accepter. Et donner ✅ Verifie dans
+# Discord demanderait « Gerer les roles » au Manager, qui pourrait alors
+# poser Helper ou les rangs du podium. La commande fait ce que fait
+# « Accepter » (_ouvrir : role, ⏳ / 🚩 retires, bienvenue, ticket), et rien
+# d'autre.
+COMMANDE_MEMBRE = "Vérifier"        # clic droit sur un membre > Applications
+COMMANDE_SLASH = "verifier"         # /verifier membre:@…
+# Seuls ceux qui peuvent expulser la voient : Manager, Helper, BOSS,
+# administrateurs. Un VA ne la voit pas, et _est_manager la lui refuse
+# quand meme (la liste de Discord se regle a la main, serveur par serveur).
+DROIT_COMMANDE = str(0x2)
+
+
+def _muet(texte: str) -> Dict[str, Any]:
+    """Reponse ephemere qui nomme un membre sans le notifier."""
+    return {"type": 4, "data": {"content": texte[:2000], "flags": 64, "allowed_mentions": {"parse": []}}}
+
+
+def _cible_de_commande(p: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
+    """(id, membre, utilisateur) de la personne visee. Discord joint son
+    membre dans « resolved » ; pas de membre = il n'est pas sur le serveur."""
+    data = p.get("data") or {}
+    if data.get("type") == 2:
+        cible = str(data.get("target_id") or "")
+    else:
+        cible = str(next((o.get("value") for o in data.get("options") or []
+                          if o.get("name") == "membre"), "") or "")
+    res = data.get("resolved") or {}
+    return cible, (res.get("members") or {}).get(cible), (res.get("users") or {}).get(cible) or {}
+
+
+def _commande_verifier(p: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    data = p.get("data") or {}
+    if (data.get("name") or "") not in (COMMANDE_MEMBRE, COMMANDE_SLASH):
+        return _ephemere("Action inconnue.")
+    membre = p.get("member") or {}
+    if not _est_manager(membre, cfg):
+        return _ephemere("Réservé aux managers.")
+    cible, m_cible, u_cible = _cible_de_commande(p)
+    if not cible.isdigit():
+        return _ephemere("Membre introuvable.")
+    if u_cible.get("bot"):
+        return _muet(f"<@{cible}> est un bot : rien à vérifier.")
+    if m_cible is None:
+        return _muet(f"<@{cible}> n'est pas sur ce serveur.")
+    roles = m_cible.get("roles") or []
+    if cfg["role_verifie"] in roles and not any(r and r in roles for r in (cfg["role_attente"], cfg["role_suspect"])):
+        # sans ce garde, un second « Vérifier » reposterait la bienvenue
+        return _muet(f"✅ <@{cible}> est déjà vérifié.")
+    qui = _propre((membre.get("user") or {}).get("username") or "?", 40)
+    pseudo = _propre(u_cible.get("global_name") or u_cible.get("username") or "", 40)
+    verrou = f"{cfg['id']}:{cible}"
+    with _VERROU:                       # le meme verrou que les boutons Accepter
+        if verrou in _DECISIONS_EN_COURS:
+            return _ephemere("⏳ Une décision est déjà en cours pour ce membre.")
+        _DECISIONS_EN_COURS.add(verrou)
+    app, jeton = app_de_reponse(p, cfg["id"]), str(p.get("token") or "")
+
+    def tache():
+        try:
+            texte = verifier_a_la_main(cible, qui, cfg, pseudo)
+        except Exception as e:
+            print(f"[verif] verification a la main de {cible} par {qui} : {type(e).__name__}: {e}", flush=True)
+            texte = f"❌ Échec ({type(e).__name__}) — réessaie."
+        finally:
+            _DECISIONS_EN_COURS.discard(verrou)
+        code, _ = api("PATCH", f"/webhooks/{app}/{jeton}/messages/@original",
+                      json={"content": texte, "allowed_mentions": {"parse": []}})
+        if code != 200:
+            print(f"[verif] reponse a « Vérifier » {cible} non affichee : HTTP {code}", flush=True)
+    # quatre appels REST et plus (bienvenue, ticket) : apres la reponse
+    _EN_FOND(tache)
+    return {"type": 5, "data": {"flags": 64}}
+
+
+def verifier_a_la_main(cible: str, qui: str, cfg: Dict[str, Any], pseudo: str = "") -> str:
+    """Ce que fait « Accepter », pour un membre avec ou sans alerte. Rend le
+    texte montre au manager."""
+    code = _ouvrir(cible, cfg)
+    if code == 404:
+        return f"<@{cible}> a quitté le serveur : rien à vérifier."
+    if code not in (200, 204):
+        print(f"[verif] verification a la main de {cible} par {qui} : role refuse (HTTP {code})", flush=True)
+        return f"❌ Échec (HTTP {code}) — réessaie."
+    fait = f"✅ vérifié par {qui}"
+    with _VERROU:
+        toutes = _fiches()
+        cle = _cle(cfg["id"], cible)
+        if cle in toutes:
+            toutes[cle]["etat"] = "ok"
+            toutes[cle]["decision_manager"] = fait
+            _ecrire_fiches(toutes)
+    closes = _clore_alertes(cible, fait, cfg)
+    # la trace du staff : #entrees montre chaque entree, celle-ci comprise
+    if cfg.get("salon_entrees"):
+        c, _ = api("POST", f"/channels/{cfg['salon_entrees']}/messages", json={
+            "embeds": [{"title": "✅ Vérifié par un manager", "color": _COULEUR["ok"],
+                        "description": f"<@{cible}>" + (f" · `{pseudo}`" if pseudo else "") + f" — par **{qui}**",
+                        "footer": {"text": "YouLab • Vérification à la main"},
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}],
+            "allowed_mentions": {"parse": []}})
+        if c != 200:
+            print(f"[verif] trace de {cible} non postee dans #entrees : HTTP {c}", flush=True)
+    print(f"[verif] {cible} verifie a la main par {qui} sur {cfg['id']} ({closes} alerte(s) close(s))", flush=True)
+    return f"✅ <@{cible}> est vérifié." + (" Son alerte est close." if closes else "")
+
+
+def _clore_alertes(cible: str, fait: str, cfg: Dict[str, Any]) -> int:
+    """Retire les boutons des alertes du membre (⏳ en-attente, 🚩 suspicions) :
+    un « Accepter » clique plus tard reposterait la bienvenue. Rend le nombre
+    d'alertes closes."""
+    n = 0
+    for salon in {cfg.get("salon_attente"), cfg.get("salon_suspicions")} - {None, ""}:
+        code, msgs = api("GET", f"/channels/{salon}/messages?limit=100")
+        if code != 200 or not isinstance(msgs, list):
+            print(f"[verif] alertes de {cible} non relues dans {salon} : HTTP {code}", flush=True)
+            continue
+        for m in msgs:
+            ids = {c.get("custom_id") for r in (m.get("components") or []) for c in (r.get("components") or [])}
+            if f"verif:ok:{cible}" not in ids:
+                continue
+            embeds = m.get("embeds") or []
+            if embeds:
+                embeds[0]["footer"] = {"text": f"YouLab • Vérification — {fait}"}
+            c, _ = api("PATCH", f"/channels/{salon}/messages/{m.get('id')}",
+                       json={"embeds": embeds, "components": [], "allowed_mentions": {"parse": []}})
+            if c == 200:
+                n += 1
+            else:
+                # posee par un autre bot (Siri sur Threads, avant Bowser) : Discord refuse
+                print(f"[verif] alerte {m.get('id')} de {cible} non close : HTTP {c}", flush=True)
+    return n
+
+
+def enregistrer_commandes(gid: str) -> Dict[str, int]:
+    """Declare « Vérifier » (menu du membre) et /verifier sur le serveur, sous
+    l'application du bot de CE serveur. POST remplace la commande du meme
+    nom sans toucher aux autres (/quetes, /annonce). A relancer seulement si
+    elles changent : Discord les garde."""
+    app = bot_du_serveur(gid)["app_id"]
+    definitions = [
+        {"name": COMMANDE_MEMBRE, "type": 2, "default_member_permissions": DROIT_COMMANDE},
+        {"name": COMMANDE_SLASH, "type": 1, "default_member_permissions": DROIT_COMMANDE,
+         "description": "Vérifier un membre : ✅ Vérifié, et il sort de ⏳ En attente",
+         "options": [{"type": 6, "name": "membre", "description": "La personne à vérifier", "required": True}]},
+    ]
+    bilan = {}
+    with sur_serveur(gid):
+        for d in definitions:
+            code, rep = api("POST", f"/applications/{app}/guilds/{gid}/commands", json=d)
+            bilan[d["name"]] = code
+            print(f"[verif] commande {d['name']} sur {gid} : HTTP {code}"
+                  + ("" if code in (200, 201) else f" {str(rep)[:160]}"), flush=True)
+    return bilan
 
 
 # ─── La page web ──────────────────────────────────────────────────────────
