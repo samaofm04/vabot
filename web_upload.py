@@ -61624,6 +61624,13 @@ def create_app():
         _start_podium_semaine_daemon()
     except Exception as _e:
         log.warning(f"podium de la semaine non démarré: {_e}")
+    # Numéro X (numeros_x_discord) : les numéros encore en attente de leur
+    # code sont réécoutés dès le démarrage, pas au premier clic venu.
+    try:
+        import numeros_x_discord as _nx_boot
+        _nx_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"numéros X non repris: {_e}")
     # Les liens de suivi de Jessye par personne : clics US relevés une fois
     # par jour ; le salon « inflow-resultat » (Bixby) reste coupé tant que
     # data/infloww_liens_config.json ne l'active pas.

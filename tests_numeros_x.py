@@ -353,6 +353,32 @@ try:
     check("après un redémarrage, le code d'un numéro en attente s'affiche",
           nx._actif(f"{GID}:{VA}").get("code") == "777777", nx._actif(f"{GID}:{VA}"))
 
+    # 15 bis. ... et dès le démarrage du site, sans attendre un clic
+    remise_a_zero()
+    nx.traiter(clic("numx:prendre"))
+    nx._ECOUTES.clear()
+    nx._REPRIS[0] = False
+    CODES.append(("code", "246802"))
+    _sav_dormir, _sav_thread = nx._dormir, nx.threading.Thread
+    nx._dormir = lambda s: None
+
+    class _FilDirect:
+        def __init__(self, target, daemon=None):
+            self.t = target
+
+        def start(self):
+            self.t()
+    nx.threading.Thread = _FilDirect
+    try:
+        nx.demarrer()
+    finally:
+        nx._dormir, nx.threading.Thread = _sav_dormir, _sav_thread
+    check("démarrage du site : le code d'un numéro en attente s'affiche sans clic",
+          nx._actif(f"{GID}:{VA}").get("code") == "246802", nx._actif(f"{GID}:{VA}"))
+    src_w = (Path(__file__).resolve().parent / "web_upload.py").read_text(encoding="utf-8")
+    check("démarrage du site : branché à côté des autres démons",
+          "_nx_boot.demarrer()" in src_w)
+
     # 16. le panneau du salon
     remise_a_zero()
     print(nx.poser_panneau(GID))

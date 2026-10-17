@@ -542,10 +542,27 @@ def _reprendre_ecoutes() -> None:
     except Exception as e:
         _log(f"reprise des écoutes impossible ({type(e).__name__}: {e})")
         return
+    n = 0
     for cle, a in list(actifs.items()):
         conf = SERVEURS.get(cle.split(":", 1)[0])
         if conf and isinstance(a, dict) and _vivant(a) and not a.get("code"):
             _assurer_ecoute(cle, a, conf)
+            n += 1
+    if n:
+        _log(f"reprise : {n} numéro(s) en attente réécouté(s)")
+
+
+def demarrer() -> None:
+    """Au démarrage du site. Sans ça, un redémarrage (plusieurs par jour)
+    laissait les numéros en attente sans écoute jusqu'au premier clic sur le
+    panneau : le 17/10/2026, quatre numéros attendaient leur code pendant le
+    redémarrage de 21:01."""
+    def _go():
+        _dormir(20)                          # laisser le site se lever
+        for gid in SERVEURS:
+            with vd.sur_serveur(gid):
+                _reprendre_ecoutes()
+    threading.Thread(target=_go, daemon=True).start()
 
 
 # ─── Pose du panneau ──────────────────────────────────────────────────────
