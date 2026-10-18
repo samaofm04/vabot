@@ -19,6 +19,12 @@ un seul jeu à l'écran, comme les numéros.
 
 La clé 2FA (« seed ») ne sort jamais du serveur : elle ne sert qu'à calculer
 le code du moment (outlook_comptes.texte_2fa / totp).
+
+Propriétaire, 18/10/2026 : « juste pour le mail et mot de passe tu peux leur
+envoyer dans leur salon aussi, juste otp qui reste dans adresse outlook ».
+Une adresse NEUVE part donc aussi dans le salon perso du VA
+(tickets_discord.ticket_de), l'adresse puis le mot de passe, chacun seul : les
+éphémères disparaissent, le salon garde. Le code du moment, jamais là-bas.
 """
 import threading
 import time
@@ -213,7 +219,39 @@ def _prendre(p, gid, uid, membre, user, conf):
     if not c:
         return nx._texte("❌ Plus d'adresse disponible pour le moment. Préviens un admin.")
     _log(f"adresse n°{c.get('id')} donnée à {uid} ({c.get('va')})")
-    return _envoyer(p, gid, uid, c)
+    rep = _envoyer(p, gid, uid, c)
+    try:
+        _fond(lambda: deposer_au_salon(gid, uid, c))
+    except Exception as e:
+        _log(f"dépôt au salon perso non lancé pour {uid} ({type(e).__name__}: {e})")
+    return rep
+
+
+def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
+    """L'adresse et le mot de passe dans le salon perso du VA — jamais le code
+    ni la clé 2FA. Sans salon perso, le journal le dit : le VA a quand même
+    tout reçu en éphémère."""
+    try:
+        import tickets_discord
+        salon = tickets_discord.ticket_de(gid, uid)
+    except Exception as e:
+        _log(f"salon perso de {uid} illisible ({type(e).__name__}: {e}) : adresse n°{c.get('id')} non déposée")
+        return False
+    if not salon:
+        _log(f"{uid} n'a pas de salon perso : adresse n°{c.get('id')} non déposée")
+        return False
+    ok = True
+    for texte, nom in ((str(c.get("email") or ""), "📧 Adresse Outlook"),
+                       (str(c.get("password") or ""), "🔑 Mot de passe")):
+        m = _msg(texte, [_rangee(_nom(PREFIXE + "n:" + ("s1" if "Adresse" in nom else "s2"), nom))])
+        m["flags"] = 4                            # dans le salon : pas éphémère, sans aperçu
+        code, corps = vd.api("POST", f"/channels/{salon}/messages", json=m)
+        if code != 200:
+            ok = False
+            _log(f"dépôt au salon {salon} refusé : HTTP {code} {str(corps)[:120]}")
+    if ok:
+        _log(f"adresse n°{c.get('id')} déposée dans le salon perso de {uid}")
+    return ok
 
 
 def _envoyer(p, gid, uid, c):

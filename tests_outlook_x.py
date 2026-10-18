@@ -72,13 +72,16 @@ def remise_a_zero(n_comptes=0):
         oc.ajouter(f"compte{i + 1}@outlook.com", f"MotDePasse{i + 1}!", SEED)
 
 
-SAV = (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper)
+SAV = (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper,
+       tickets_discord.ticket_de)
+TICKET = "900000000000000001"
 try:
     vd._charger_config()
     vd.api = faux_api
     vd._EN_FOND = lambda f: f()
     ox._dormir = lambda s: None
     tickets_discord.role_helper = lambda gid: ""
+    tickets_discord.ticket_de = lambda gid, uid: TICKET if uid == VA else ""
 
     # 1. ce qui n'est pas pour nous
     check("autre bouton : rendu au module suivant", ox.traiter({"type": 3, "data": {"custom_id": "numx:prendre"}}) is None)
@@ -110,6 +113,15 @@ try:
     tout = json.dumps([REPONSES, [kw for *_, kw in APPELS]], ensure_ascii=False)
     check("la clé 2FA n'apparaît dans AUCUN envoi", SEED not in tout and SEED.lower() not in tout)
 
+    # 3 bis. adresse et mot de passe AUSSI dans le salon perso, jamais le code
+    au_salon = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == f"/channels/{TICKET}/messages"]
+    check("salon perso : l'adresse puis le mot de passe, chacun seul",
+          [m["content"] for m in au_salon] == ["compte1@outlook.com", "MotDePasse1!"], au_salon)
+    check("salon perso : messages ordinaires (pas éphémères), nommés par un bouton gris",
+          all(m["flags"] == 4 and m["components"][0]["components"][0]["disabled"] for m in au_salon), au_salon)
+    check("salon perso : ni le code du moment ni la clé 2FA",
+          code_attendu not in json.dumps(au_salon) and SEED not in json.dumps(au_salon), au_salon)
+
     # 4. une seconde : le jeu précédent est effacé
     r2 = clic("mailx:prendre", jeton="tok2")
     effaces = [ch for m, ch, kw in APPELS if m == "DELETE"]
@@ -132,9 +144,14 @@ try:
     r = clic("mailx:prendre", uid=VA2)
     check("coffre épuisé : refus clair", "Plus d'adresse" in r["data"]["content"], r)
 
+    check("salon perso : un VA sans salon perso ne bloque rien (rien de posté, il a reçu son éphémère)",
+          not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/") and ch != f"/channels/{TICKET}/messages"])
+
     # 6. Code 2FA depuis le panneau : la dernière adresse, avec les autres proposées
     APPELS.clear()
     r = clic("mailx:2fa", jeton="tok5")
+    check("Code 2FA : rien de reposté dans le salon perso",
+          not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/")], APPELS)
     s = suivis("tok5")
     check("Code 2FA : la plus récente des adresses du VA", r["data"]["content"] == "compte3@outlook.com", r)
     check("Code 2FA : les deux autres adresses proposées sous le code",
@@ -184,7 +201,8 @@ try:
     i_ox, i_vd = src.find("import outlook_x_discord as _ox"), src.find("return jsonify(_vd.traiter_interaction(charge))")
     check("route /discord/interactions : « mailx: » traité avant la vérification", 0 < i_ox < i_vd)
 finally:
-    vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper = SAV
+    (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper,
+     tickets_discord.ticket_de) = SAV
 
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 sys.exit(1 if KO else 0)
