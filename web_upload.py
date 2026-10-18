@@ -61869,6 +61869,18 @@ def create_app():
             if str((charge.get("data") or {}).get("custom_id") or "").startswith("numx:"):
                 return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
                                                     "flags": 64}})
+        # Les adresses Outlook de 📧・adresse-outlook (outlook_x_discord) : le
+        # coffre de /outlook, 3 par jour, la clé 2FA jamais montrée.
+        try:
+            import outlook_x_discord as _ox
+            _rep_ox = _ox.traiter(charge)
+            if _rep_ox is not None:
+                return jsonify(_rep_ox)
+        except Exception as _e_ox:
+            print(f"[mailx] route : {type(_e_ox).__name__}: {_e_ox}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("mailx:"):
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])
@@ -69702,10 +69714,10 @@ def create_app():
             "<title>Adresses Outlook</title><style>" + _OUTLOOK_CSS + "</style>"
             "</head><body><div class='wrap'>"
             "<h1>\U0001F4E7 Adresses Outlook</h1>"
-            "<p class='sub'>Tes comptes Outlook. Un VA en demande un dans "
-            "#adresse-outlook&nbsp;; le manager valide&nbsp;; le bot envoie "
-            "l'adresse et le mot de passe dans son ticket. Le code 2FA se tire "
-            "dans Discord, le secret 2FA ne sort jamais.</p>"
+            "<p class='sub'>Tes comptes Outlook. Sur YouLab TWITTER, un VA en "
+            "prend un dans 📧・adresse-outlook (3 par jour)&nbsp;; sur Va IG, "
+            "il le demande et le manager valide. Le code 2FA se tire dans "
+            "Discord, le secret 2FA ne sort jamais.</p>"
             "<div class='card'><h2>Ajouter une adresse</h2>" + err +
             # autocomplete='off' partout (et type='password' / spellcheck='false'
             # sur les secrets) : sans ca le navigateur proposait de retenir le mot

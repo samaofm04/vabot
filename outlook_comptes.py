@@ -18,7 +18,9 @@ sinon un JSON tronque et le proprietaire perdait des comptes.
 """
 from __future__ import annotations
 
+import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import safe_json
@@ -33,6 +35,13 @@ MASQUE = "••••••"   # ••••••
 
 #: Le salon ou tirer le code 2FA (nom affiche dans la livraison).
 SALON_2FA = "adresse-outlook"
+
+#: Une attribution a la fois : deux clics au meme instant (le site sert les
+#: clics de Twitter sur plusieurs fils) lisaient le meme compte « libre » et le
+#: donnaient deux fois.
+VERROU = threading.RLock()
+#: L'heure des VA (UTC+1, sans heure d'ete), comme le quota des numeros.
+BENIN = timezone(timedelta(hours=1), "Bénin")
 
 
 def charger() -> dict:
@@ -117,11 +126,18 @@ def supprimer(cid) -> bool:
     return True
 
 
+def _de_va_ig(c: dict) -> bool:
+    """Un compte du parcours Va IG (un seul par VA, valide par le manager).
+    Ceux de YouLab TWITTER portent leur serveur : un VA present sur les deux
+    serveurs ne doit pas voir son adresse Twitter tenir lieu de celle de Va IG."""
+    return not c.get("serveur")
+
+
 def compte_de_uid(uid):
-    """Le compte attribue a ce VA (uid Discord), ou None."""
+    """Le compte attribue a ce VA (uid Discord) sur Va IG, ou None."""
     uid = str(uid)
     for c in comptes():
-        if c.get("statut") == "attribue" and str(c.get("uid")) == uid:
+        if c.get("statut") == "attribue" and str(c.get("uid")) == uid and _de_va_ig(c):
             return c
     return None
 
@@ -135,22 +151,86 @@ def attribuer(uid, va_nom: str, maintenant=None):
       - (compte, "neuf") : un compte libre vient de lui etre attribue ;
       - (None,   "vide") : plus aucun compte libre.
     """
-    d = charger()
-    uid = str(uid)
-    # Deja une adresse pour ce VA : ne pas en bruler une seconde (double clic,
-    # deux managers, demande repetee avant validation).
-    for c in d["comptes"]:
-        if c.get("statut") == "attribue" and str(c.get("uid")) == uid:
-            return c, "deja"
-    for c in d["comptes"]:
-        if c.get("statut") == "libre":
-            c["statut"] = "attribue"
-            c["uid"] = uid
-            c["va"] = va_nom or ""
-            c["attribue_le"] = _horodatage(maintenant)
-            _ecrire(d)
-            return c, "neuf"
-    return None, "vide"
+    with VERROU:
+        d = charger()
+        uid = str(uid)
+        # Deja une adresse pour ce VA : ne pas en bruler une seconde (double clic,
+        # deux managers, demande repetee avant validation).
+        for c in d["comptes"]:
+            if c.get("statut") == "attribue" and str(c.get("uid")) == uid and _de_va_ig(c):
+                return c, "deja"
+        for c in d["comptes"]:
+            if c.get("statut") == "libre":
+                c["statut"] = "attribue"
+                c["uid"] = uid
+                c["va"] = va_nom or ""
+                c["attribue_le"] = _horodatage(maintenant)
+                _ecrire(d)
+                return c, "neuf"
+        return None, "vide"
+
+
+# ---- YouLab TWITTER : plusieurs adresses par VA, 3 par jour -----------------
+# Proprietaire, 18/10/2026 : « un truc qui leur donne aussi des mail […] des
+# mail que j'ai deja », « 3 mail jour max », sans validation du manager. Le
+# meme coffre (la page /outlook) : une adresse donnee sur un serveur n'est
+# jamais redonnee sur l'autre.
+
+def _ts(c: dict) -> float:
+    try:
+        return float(c.get("attribue_ts") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def jour_benin(ts: float):
+    return datetime.fromtimestamp(ts, BENIN).date()
+
+
+def comptes_du_va(uid, serveur) -> list:
+    """Les adresses donnees a ce VA sur ce serveur, la plus recente d'abord."""
+    uid, serveur = str(uid), str(serveur)
+    l = [c for c in comptes() if c.get("statut") == "attribue"
+         and str(c.get("uid")) == uid and str(c.get("serveur") or "") == serveur]
+    # L'id ensuite : deux adresses données dans la même seconde (un staff qui
+    # enchaîne) gardaient l'ordre du fichier, et « la plus récente » était la
+    # première donnée.
+    return sorted(l, key=lambda c: (_ts(c), _num_id(c)), reverse=True)
+
+
+def _num_id(c: dict) -> int:
+    try:
+        return int(c.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def nb_du_jour(uid, serveur, maintenant=None) -> int:
+    """Adresses donnees aujourd'hui (heure du Benin) a ce VA sur ce serveur."""
+    jour = jour_benin(time.time() if maintenant is None else maintenant)
+    return sum(1 for c in comptes_du_va(uid, serveur) if _ts(c) and jour_benin(_ts(c)) == jour)
+
+
+def attribuer_une_de_plus(uid, va_nom: str, serveur, maintenant=None):
+    """Une adresse LIBRE de plus pour ce VA, sur ce serveur — le quota est a
+    l'appelant. Rend (compte, "neuf") ou (None, "vide")."""
+    t = time.time() if maintenant is None else maintenant
+    with VERROU:
+        d = charger()
+        for c in d["comptes"]:
+            if c.get("statut") == "libre":
+                c.update(statut="attribue", uid=str(uid), va=va_nom or "",
+                         attribue_le=_horodatage(t), attribue_ts=int(t), serveur=str(serveur))
+                _ecrire(d)
+                return c, "neuf"
+        return None, "vide"
+
+
+def compte_par_id(cid):
+    for c in comptes():
+        if str(c.get("id")) == str(cid):
+            return c
+    return None
 
 
 def nb_libres() -> int:
