@@ -179,12 +179,12 @@ try:
           len(patches) == 2, patches)
     t1 = textes(patches[0]) if patches else []
     check("1re édition : le numéro collé et « En attente du code… »",
-          "## `+15550000001`" in t1 and any("En attente du code" in t for t in t1), t1)
+          "🇺🇸 `+15550000001`" in t1 and any("En attente du code" in t for t in t1), t1)
     check("1re édition : Redemander / Autre / Annuler, liés au numéro",
           boutons(patches[0]) == ["numx:retry:act1", "numx:autre:act1", "numx:annuler:act1"]
           if patches else False, patches)
     t2 = textes(patches[1]) if len(patches) > 1 else []
-    check("2e édition : 🇺🇸 🔑 Code : `482913`", "🇺🇸 🔑 **Code : `482913`**" in t2, t2)
+    check("2e édition : 🇺🇸 🔑 Code : `482913`", "🔐 **482913**" in t2, t2)
     check("2e édition : C'est bon / Nouveau code / Autre",
           boutons(patches[1]) == ["numx:fini:act1", "numx:retry:act1", "numx:autre:act1"]
           if len(patches) > 1 else False, patches)
@@ -200,7 +200,7 @@ try:
     # 4. un second clic ne rachète pas
     r = nx.traiter(clic("numx:prendre", jeton="tok2"))
     check("second clic : le même numéro, avec son code, sans nouvel achat",
-          len(ACHATS) == 1 and "🇺🇸 🔑 **Code : `482913`**" in textes(r["data"]["components"]), r)
+          len(ACHATS) == 1 and "🔐 **482913**" in textes(r["data"]["components"]), r)
     check("second clic : le message retenu est le nouveau", nx._message(f"{GID}:{VA}")["jeton"] == "tok2")
     check("second clic : l'ancien message est effacé (un seul message à l'écran)",
           ("DELETE", f"/webhooks/{APP}/tok/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
@@ -235,7 +235,7 @@ try:
     nx.traiter(clic("numx:autre:act1", ephemere=True))
     check("Autre : l'ancien est rendu, un nouveau est acheté",
           ANNULES == ["act1"] and len(ACHATS) == 2, (ANNULES, ACHATS))
-    check("Autre : le nouveau numéro s'affiche", "## `+15550000002`" in textes(dernier_patch()),
+    check("Autre : le nouveau numéro s'affiche", "🇺🇸 `+15550000002`" in textes(dernier_patch()),
           dernier_patch())
     check("Autre : l'ancien bouton ne touche plus le nouveau numéro",
           nx.traiter(clic("numx:annuler:act1", ephemere=True))["type"] == 7 and len(ANNULES) == 1, ANNULES)
@@ -307,7 +307,7 @@ try:
     nx._ecouter(f"{GID}:{VA}", "vieux", nx.SERVEURS[GID])
     check("ancien format : le code s'affiche dans le message de son jeton",
           any(m == "PATCH" and ch == f"/webhooks/{APP}/tokV/messages/@original" for m, ch, kw in APPELS)
-          and "🇺🇸 🔑 **Code : `135790`**" in textes(dernier_patch()), APPELS)
+          and "🔐 **135790**" in textes(dernier_patch()), APPELS)
 
     # 12. Nouveau code
     remise_a_zero()
@@ -315,7 +315,7 @@ try:
     nx.traiter(clic("numx:prendre"))
     r = nx.traiter(clic("numx:retry:act1", ephemere=True))
     check("Nouveau code : demandé à HeroSMS", RETRY == ["act1"], RETRY)
-    check("Nouveau code : le nouveau code s'affiche", "🇺🇸 🔑 **Code : `222222`**" in textes(dernier_patch()),
+    check("Nouveau code : le nouveau code s'affiche", "🔐 **222222**" in textes(dernier_patch()),
           dernier_patch())
 
     # 13. expiration : 20 min sans code
@@ -385,7 +385,10 @@ try:
     posts = [kw["json"] for m, ch, kw in APPELS if m == "POST"]
     check("panneau absent : posé en V2, un seul bouton « Prendre un numéro »",
           len(posts) == 1 and posts[0]["flags"] == nx.V2 and boutons(posts[0]["components"]) == ["numx:prendre"]
-          and textes(posts[0]["components"]) == ["## Numéro X"], posts)
+          and textes(posts[0]["components"])[0] == "## Numéro X"
+          and all(t.endswith("\u00a0`") for t in textes(posts[0]["components"])[1:]), posts)
+    check("panneau : les cases numéro et code sont vides, aucun texte",
+          textes(posts[0]["components"]) == ["## Numéro X", "🇺🇸 " + nx.BLANC, "🔐 " + nx.BLANC_CODE], posts)
     REGLE["messages"] = [{"id": "42", "author": {"id": vd.bot_du_serveur(GID)["app_id"]},
                           "components": nx.vue_panneau()}]
     APPELS.clear()

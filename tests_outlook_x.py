@@ -91,22 +91,22 @@ try:
     r = clic("mailx:prendre")
     check("coffre vide : refus éphémère qui le dit", r["type"] == 4 and "Plus d'adresse" in r["data"]["content"], r)
 
-    # 3. une adresse : trois messages, chacun seul
+    # 3. une adresse : le formulaire rempli, pour lui seul
     remise_a_zero(5)
     r = clic("mailx:prendre")
-    check("1er message (réponse au clic) : l'adresse SEULE, éphémère, sans aperçu",
-          r["type"] == 4 and r["data"]["content"] == "compte1@outlook.com" and r["data"]["flags"] == 64 | 4, r)
-    check("1er message : nommé par un bouton gris désactivé « 📧 Adresse »",
-          r["data"]["components"][0]["components"][0].get("disabled") is True
-          and r["data"]["components"][0]["components"][0]["label"] == "📧 Adresse", r)
-    s = suivis()
-    check("deux suivis : le mot de passe seul, puis le code seul", len(s) == 2, s)
-    check("2e message : le mot de passe SEUL", s and s[0]["content"] == "MotDePasse1!", s)
     code_attendu, _ = totp.code_totp(SEED)
-    check("3e message : le code à 6 chiffres du moment, SEUL",
-          len(s) > 1 and s[1]["content"] == code_attendu and len(code_attendu) == 6, s)
-    check("3e message : « Nouveau code » lié à l'adresse",
-          len(s) > 1 and "mailx:code:1" in ids(s[1]["components"]), s)
+
+    def lignes(rep):
+        blocs = rep["data"]["components"][0]["components"]
+        return [b.get("content") or b.get("components", [{}])[0].get("content")
+                for b in blocs if b["type"] in (9, 10)]
+    check("Prendre : un seul message éphémère en V2, sans suivi",
+          r["type"] == 4 and r["data"]["flags"] == ox.nx.V2 | 64 and not suivis(), r)
+    check("Prendre : sous le titre, le mail, le mot de passe, puis le code du moment",
+          lignes(r) == ["## Adresses Outlook", "📧 `compte1@outlook.com`", "🔑 `MotDePasse1!`",
+                        lignes(r)[3]] and lignes(r)[3].startswith("🔐 **%s** · " % code_attendu), lignes(r))
+    check("Prendre : un 🔄 pour le code, « Prendre une adresse » en bas",
+          ids(r["data"]["components"]) == ["mailx:maj:1", "mailx:prendre"], ids(r["data"]["components"]))
     c1 = oc.compte_par_id("1")
     check("coffre : l'adresse est donnée à ce VA, sur Twitter, horodatée",
           c1["statut"] == "attribue" and c1["uid"] == VA and c1["serveur"] == GID and c1.get("attribue_ts"), c1)
@@ -115,26 +115,26 @@ try:
 
     # 3 bis. adresse et mot de passe AUSSI dans le salon perso, jamais le code
     au_salon = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == f"/channels/{TICKET}/messages"]
-    check("salon perso : l'adresse puis le mot de passe, chacun seul",
+    check("salon perso : l'adresse puis le mot de passe, chacun SEUL",
           [m["content"] for m in au_salon] == ["compte1@outlook.com", "MotDePasse1!"], au_salon)
     check("salon perso : messages ordinaires (pas éphémères), nommés par un bouton gris",
           all(m["flags"] == 4 and m["components"][0]["components"][0]["disabled"] for m in au_salon), au_salon)
     check("salon perso : ni le code du moment ni la clé 2FA",
           code_attendu not in json.dumps(au_salon) and SEED not in json.dumps(au_salon), au_salon)
 
-    # 4. une seconde : le jeu précédent est effacé
+    # 4. une seconde : le formulaire d'avant est effacé, les deux adresses montrées
     r2 = clic("mailx:prendre", jeton="tok2")
     effaces = [ch for m, ch, kw in APPELS if m == "DELETE"]
-    check("2e adresse : la suivante du coffre", r2["data"]["content"] == "compte2@outlook.com", r2)
-    check("2e adresse : les trois messages d'avant sont effacés",
-          len(effaces) == 3 and effaces[0] == f"/webhooks/{APP}/tok/messages/@original"
-          and all(e.startswith(f"/webhooks/{APP}/tok/messages/suivi") for e in effaces[1:]), effaces)
-    s2 = suivis("tok2")
-    check("2e adresse : son code propose l'autre adresse du VA",
-          len(s2) > 1 and "mailx:voir:1" in ids(s2[1]["components"]), s2)
+    check("2e adresse : la plus récente en haut, la première dessous",
+          [t for t in lignes(r2) if t.startswith("📧")] == ["📧 `compte2@outlook.com`", "📧 `compte1@outlook.com`"],
+          lignes(r2))
+    check("2e adresse : le formulaire d'avant est effacé",
+          effaces == [f"/webhooks/{APP}/tok/messages/@original"], effaces)
+    r3 = clic("mailx:prendre", jeton="tok2b", ephemere=True)
+    check("Prendre depuis le formulaire lui-même : changé sur place (type 7)",
+          r3["type"] == 7 and len([t for t in lignes(r3) if t.startswith("📧")]) == 3, r3)
 
     # 5. quota : 3 par jour pour un VA, pas pour le staff
-    clic("mailx:prendre", jeton="tok3")
     r = clic("mailx:prendre", jeton="tok4")
     check("4e adresse du jour : refus « 3 adresses aujourd'hui »",
           r["type"] == 4 and "3 adresses aujourd'hui" in r["data"]["content"] and oc.nb_libres() == 2, r)
@@ -143,48 +143,49 @@ try:
     check("le staff n'est pas bridé", oc.nb_libres() == 0, oc.nb_libres())
     r = clic("mailx:prendre", uid=VA2)
     check("coffre épuisé : refus clair", "Plus d'adresse" in r["data"]["content"], r)
-
-    check("salon perso : un VA sans salon perso ne bloque rien (rien de posté, il a reçu son éphémère)",
+    check("salon perso : un VA sans salon perso ne bloque rien (rien de posté ailleurs)",
           not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/") and ch != f"/channels/{TICKET}/messages"])
 
-    # 6. Code 2FA depuis le panneau : TOUTES ses adresses, chacune avec son code (déjà déroulé)
+    # 6. Code 2FA depuis le panneau : le même formulaire rempli, déjà déroulé
     APPELS.clear()
     r = clic("mailx:2fa", jeton="tok5")
     check("Code 2FA : rien de reposté dans le salon perso",
           not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/")], APPELS)
-    check("Code 2FA : un seul message éphémère en V2, sans suivi",
-          r["type"] == 4 and r["data"]["flags"] == ox.nx.V2 | 64 and not suivis("tok5"), r)
     blocs = r["data"]["components"][0]["components"]
-    textes = [b["components"][0]["content"] for b in blocs]
-    code_now = totp.code_totp(SEED)[0]
-    check("Code 2FA : les 3 adresses du VA, la plus récente d'abord, chacune avec son code",
-          [t.split("\n")[0] for t in textes] == ["compte3@outlook.com", "compte2@outlook.com", "compte1@outlook.com"]
-          and all(("🔐 **%s**" % code_now) in t for t in textes), textes)
-    check("Code 2FA : un 🔄 par adresse", [b["accessory"]["custom_id"] for b in blocs]
-          == ["mailx:maj:3", "mailx:maj:2", "mailx:maj:1"], blocs)
-    check("Code 2FA : ni mot de passe ni clé 2FA dans la liste",
-          "MotDePasse" not in json.dumps(r) and SEED not in json.dumps(r), r)
-    check("Code 2FA : le jeu d'avant est effacé",
-          any(m == "DELETE" and "/tok4/" not in ch for m, ch, kw in APPELS), APPELS)
+    attendu = ["## Adresses Outlook"]
+    for n in (3, 2, 1):
+        attendu += ["📧 `compte%d@outlook.com`" % n, "🔑 `MotDePasse%d!`" % n, None]
+    check("Code 2FA : pour chaque adresse (récente d'abord) : mail, mot de passe, code",
+          [t if not str(t).startswith("🔐") else None for t in lignes(r)] == attendu
+          and sum(1 for t in lignes(r) if str(t).startswith("🔐 **%s**" % code_attendu)) == 3, lignes(r))
+    check("Code 2FA : un 🔄 par adresse, séparateur entre deux adresses",
+          [b["accessory"]["custom_id"] for b in blocs if b["type"] == 9] == ["mailx:maj:3", "mailx:maj:2", "mailx:maj:1"]
+          and sum(1 for b in blocs if b["type"] == 14) == 2, blocs)
+    check("Code 2FA : jamais la clé 2FA", SEED not in json.dumps(r), r)
+    check("Code 2FA : le formulaire d'avant est effacé", any(m == "DELETE" for m, ch, kw in APPELS), APPELS)
     r = clic("mailx:maj:2", ephemere=True)
-    check("🔄 : la liste entière redessinée sur place (type 7)",
-          r["type"] == 7 and len(r["data"]["components"][0]["components"]) == 3, r)
+    check("🔄 : le formulaire entier redessiné sur place (type 7)",
+          r["type"] == 7 and sum(1 for b in r["data"]["components"][0]["components"] if b["type"] == 9) == 3, r)
     r = clic("mailx:2fa", uid=VA2)
-    check("Code 2FA sans adresse : il est invité à en prendre une",
-          "pas encore d'adresse" in r["data"]["content"], r)
-    check("adresse avec « _ » : tirets bas gardés à l'affichage",
-          ox._sans_md("jean_dupont@outlook.com") == "jean\\_dupont@outlook.com")
+    check("Code 2FA sans adresse : le formulaire vide, aucun texte",
+          r["type"] == 4 and lignes(r) == ["## Adresses Outlook", "📧 " + ox.BLANC, "🔑 " + ox.BLANC,
+                                           "🔐 " + ox.BLANC_CODE], r)
 
-    # 7. Nouveau code / voir
-    r = clic("mailx:code:1", ephemere=True)
-    check("Nouveau code : le message du code changé sur place (type 7), code seul",
-          r["type"] == 7 and r["data"]["content"] == totp.code_totp(SEED)[0], r)
-    r = clic("mailx:code:1", uid=VA2, ephemere=True)
-    check("le code d'une adresse d'un autre : refusé", r["type"] == 4 and "pas à toi" in r["data"]["content"], r)
-    r = clic("mailx:voir:2", ephemere=True, jeton="tok6")
-    check("voir une autre adresse : son jeu complet", r["data"]["content"] == "compte2@outlook.com", r)
-    tout = json.dumps([REPONSES, [kw for *_, kw in APPELS]], ensure_ascii=False)
-    check("toujours aucune clé 2FA dans les envois", SEED not in tout)
+    # 7. la limite des 40 composants, avec le maximum d'adresses
+    remise_a_zero(ox.LISTE_MAX + 2)
+    for i in range(ox.LISTE_MAX + 2):
+        clic("mailx:prendre", uid=CHEF, perms=str(0x8), jeton="m%d" % i)
+
+    def compter(cs):
+        n = 0
+        for c in cs or []:
+            n += 1 + compter(c.get("components")) + (1 if isinstance(c.get("accessory"), dict) else 0)
+        return n
+    r = clic("mailx:2fa", uid=CHEF, perms=str(0x8), jeton="mmax")
+    check("formulaire plein : 40 composants au plus (Discord refuse au-delà)",
+          compter(r["data"]["components"]) <= 40, compter(r["data"]["components"]))
+    check("adresse avec « _ » : tirets bas gardés si elle n'est pas en code",
+          ox._sans_md("jean_dupont@outlook.com") == "jean\\_dupont@outlook.com")
 
     # 8. Va IG n'est pas touché
     remise_a_zero(3)
@@ -203,6 +204,9 @@ try:
     check("panneau : V2, « Prendre une adresse » et « Code 2FA »",
           len(posts) == 1 and posts[0]["flags"] == ox.nx.V2
           and ids(posts[0]["components"]) == ["mailx:prendre", "mailx:2fa"], posts)
+    check("panneau : déjà déroulé, les cases mail / mot de passe / code VIDES, aucun texte",
+          [c["content"] for c in posts[0]["components"][0]["components"] if c["type"] == 10]
+          == ["## Adresses Outlook", "📧 " + ox.BLANC, "🔑 " + ox.BLANC, "🔐 " + ox.BLANC_CODE], posts)
     REGLE["messages"] = [{"id": "77", "author": {"id": vd.bot_du_serveur(GID)["app_id"]},
                           "components": ox.vue_panneau()}]
     APPELS.clear()

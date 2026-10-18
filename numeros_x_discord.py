@@ -11,12 +11,15 @@ Le serveur est servi par Luigi SANS gateway : le panneau est posé par REST
 /discord/interactions (web_upload). Tout ce qui suit le clic est ÉPHÉMÈRE : le
 numéro et le code ne se voient que de celui qui a cliqué.
 
-Même dessin que le panneau Numéro de Va IG (cogs/numeros.py, validé le
-27/09/2026) :
-  en attente  le numéro, collé (+15550142294), « ⏳ En attente du code… »
+Un formulaire déjà déroulé (propriétaire, 18/10/2026, comme le panneau
+Outlook) : sous « Numéro X », la case du numéro (🇺🇸) puis celle du code (🔐),
+VIDES dans le salon — aucun texte —, remplies dans le message privé :
+  en attente  🇺🇸 +15550142294 · 🔐 ⏳ En attente du code…
               🔄 Redemander un code · 🔁 Autre · ❌ Annuler
-  code reçu   le même numéro, « 🔑 Code : 482913 »
+  code reçu   🇺🇸 +15550142294 · 🔐 482913
               ✅ C'est bon · 🔄 Nouveau code · 🔁 Autre
+Les boutons et leur ordre sont ceux du panneau Numéro de Va IG
+(cogs/numeros.py, validé le 27/09/2026).
 Même historique (data/numgen_historique.json) et même compte du jour
 (numeros_du_jour) que Va IG : le quota se lit au même endroit, pas dans une
 seconde table qui finirait par dire autre chose.
@@ -203,25 +206,49 @@ def _prendre_bouton() -> Dict[str, Any]:
     return _bouton("prendre", "Prendre un numéro", "📱", 3)
 
 
-def vue_panneau() -> List[Dict[str, Any]]:
-    return _vue(["## Numéro X"], [_prendre_bouton()])
+#: Le panneau est un formulaire DÉJÀ DÉROULÉ, ses cases vides avant le clic
+#: (propriétaire, 18/10/2026 : « pareil pour les numéros », comme le panneau
+#: Outlook, et « juste des blancs avant la commande », aucun texte). Un code
+#: fait d'espaces insécables s'affiche comme une case grise vide.
+BLANC = "`" + "\u00a0" * 16 + "`"
+BLANC_CODE = "`" + "\u00a0" * 8 + "`"
 
 
-def vue_attente(texte: str) -> List[Dict[str, Any]]:
-    return _vue(["## Numéro X", texte])
+def _drapeau(conf: Optional[Dict[str, Any]] = None) -> str:
+    return (conf or SERVEURS[vd.TWITTER_ID]).get("drapeau", "📱")
 
 
-def vue_close(texte: str) -> List[Dict[str, Any]]:
-    return _vue(["## Numéro X", texte], [_prendre_bouton()])
+def _numero(a: Dict[str, Any]) -> str:
+    # Le numéro COLLÉ, sans espaces : demande expresse du propriétaire (Va IG).
+    return "`%s`" % "".join(str(a.get("valeur") or "?").split())
+
+
+def vue_panneau(conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    return _vue(["## Numéro X", _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE],
+                [_prendre_bouton()])
+
+
+def vue_attente(texte: str, a: Optional[Dict[str, Any]] = None,
+                conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Le formulaire pendant un appel à HeroSMS : le numéro en cours s'il y
+    en a un, l'attente dans la case du code ; sinon l'attente dans la case du
+    numéro."""
+    if a:
+        return _vue(["## Numéro X", _drapeau(conf) + " " + _numero(a), "🔐 " + texte])
+    return _vue(["## Numéro X", _drapeau(conf) + " " + texte, "🔐 " + BLANC_CODE])
+
+
+def vue_close(texte: str, conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    return _vue(["## Numéro X", _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE, texte],
+                [_prendre_bouton()])
 
 
 def vue_actif(a: Dict[str, Any], conf: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Le formulaire rempli : le numéro, puis le code (ou son attente)."""
     act_id = str(a.get("id") or "")
-    # Le numéro COLLÉ, sans espaces : demande expresse du propriétaire (Va IG).
-    valeur = "".join(str(a.get("valeur") or "?").split())
     code = a.get("code")
     if code:
-        ligne = "🔑 **Code : `%s`**" % code
+        ligne = "**%s**" % code
         boutons = [_bouton("fini", "C'est bon", "✅", 3, act_id),
                    _bouton("retry", "Nouveau code", "🔄", 1, act_id),
                    _bouton("autre", "Autre", "🔁", 2, act_id)]
@@ -230,7 +257,7 @@ def vue_actif(a: Dict[str, Any], conf: Dict[str, Any]) -> List[Dict[str, Any]]:
         boutons = [_bouton("retry", "Redemander un code", "🔄", 1, act_id),
                    _bouton("autre", "Autre", "🔁", 2, act_id),
                    _bouton("annuler", "Annuler", "❌", 4, act_id)]
-    return _vue(["## `%s`" % valeur, conf.get("drapeau", "📱") + " " + ligne,
+    return _vue(["## Numéro X", _drapeau(conf) + " " + _numero(a), "🔐 " + ligne,
                  a.get("souci") or ""], boutons)
 
 
@@ -415,10 +442,11 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
         _fond(lambda: numgen.finish(act_id, "herosms"))
         return _repondre(p, cle, vue_close("✅ C'est bon."))
     if action == "retry":
-        rep = _repondre(p, cle, vue_attente("⏳ Nouveau code demandé…"))
+        rep = _repondre(p, cle, vue_attente("⏳ Nouveau code demandé…", a, conf))
         _fond(lambda: _redemander(cle, act_id, conf))
         return rep
-    rep = _repondre(p, cle, vue_attente("⏳ Annulation…" if action == "annuler" else "⏳ Autre numéro…"))
+    rep = _repondre(p, cle, vue_attente("⏳ Annulation…" if action == "annuler" else "⏳ Autre numéro…",
+                                        a, conf))
     _fond(lambda: _rendre(cle, gid, uid, membre, user, conf, act_id, action))
     return rep
 

@@ -11,24 +11,24 @@ Comme le panneau « Numéro X » (numeros_x_discord) : Luigi sans gateway, le
 panneau posé par REST (`python outlook_x_discord.py poser`), chaque clic sur
 /discord/interactions, et tout ce qui suit est éphémère.
 
-L'adresse, le mot de passe et le code partent chacun SEUL dans son message :
-sur téléphone, l'appui long copie le message entier (mémoire « copie sur
-téléphone », cogs/user._envoyer_a_copier). Un bouton gris désactivé nomme
-chacun sans être copié. Un nouveau clic efface les trois messages d'avant :
-un seul jeu à l'écran, comme les numéros.
+Le panneau est un formulaire DÉJÀ DÉROULÉ (propriétaire, 18/10/2026, sur
+maquette puis : « en bas mail, en bas mot de passe et après code 2FA », « je
+veux pas qu'il y ait des infos, juste des blancs avant la commande du mail ») :
+sous le titre, les cases mail, mot de passe et code 2FA, vides. Au clic, le
+VA reçoit le même formulaire rempli, pour lui seul : chacune de ses adresses
+(la plus récente d'abord) avec son mail, son mot de passe et le code du
+moment, un 🔄 pour le renouveler. Un nouveau clic sur le panneau efface le
+formulaire d'avant : un seul à l'écran, comme les numéros.
 
 La clé 2FA (« seed ») ne sort jamais du serveur : elle ne sert qu'à calculer
 le code du moment (outlook_comptes.texte_2fa / totp).
 
-Propriétaire, 18/10/2026 : « juste pour le mail et mot de passe tu peux leur
-envoyer dans leur salon aussi, juste otp qui reste dans adresse outlook ».
-Une adresse NEUVE part donc aussi dans le salon perso du VA
-(tickets_discord.ticket_de), l'adresse puis le mot de passe, chacun seul : les
-éphémères disparaissent, le salon garde. Le code du moment, jamais là-bas.
-
-« 🔐 Code 2FA » montre TOUT d'un coup (choix du propriétaire sur maquette,
-18/10/2026, « déjà déroulé ») : chaque adresse du VA avec son code du moment
-et un 🔄, dans un seul message — sans clic de plus pour choisir l'adresse.
+« juste pour le mail et mot de passe tu peux leur envoyer dans leur salon
+aussi, juste otp qui reste dans adresse outlook » : une adresse NEUVE part
+aussi dans le salon perso du VA (tickets_discord.ticket_de), l'adresse puis
+le mot de passe, chacun SEUL dans son message — sur téléphone, l'appui long
+copie le message entier (mémoire « copie sur téléphone »). Le salon garde ce
+que l'éphémère perd. Le code du moment, jamais là-bas.
 """
 import threading
 import time
@@ -50,13 +50,12 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "quota": 3,                               # par jour et par VA ; le staff n'est pas bridé
     },
 }
-#: Autres adresses du VA proposées sous le code (une rangée de boutons).
-AUTRES_MAX = 4
-#: Adresses montrées par « Code 2FA » (les plus récentes) : un message V2
-#: porte 40 composants au plus, et chaque adresse en prend trois.
-LISTE_MAX = 10
-#: Les suivis partent APRÈS la réponse au clic : Discord refuse un suivi
-#: d'une interaction à laquelle il n'a pas encore reçu de réponse.
+#: Adresses montrées (les plus récentes) : un message V2 porte 40 composants
+#: au plus, imbriqués compris ; chaque adresse en prend six (mail, mot de
+#: passe, section, son texte, son 🔄, séparateur), plus le cadre, le titre et
+#: la rangée « Prendre » : 3 + 6 x 6 = 39.
+LISTE_MAX = 6
+#: L'ancien message s'efface APRÈS la réponse au clic.
 ATTENTE_SUIVI_SEC = 1.0
 
 _VERROU = threading.RLock()
@@ -101,15 +100,6 @@ def _retenir(cle: str, jeton: str, app: str) -> Optional[Dict[str, Any]]:
     return avant if isinstance(avant, dict) else None
 
 
-def _noter_suivi(cle: str, jeton: str, mid: str) -> None:
-    with _VERROU:
-        d = _lire()
-        m = d["messages"].get(cle)
-        if isinstance(m, dict) and m.get("jeton") == jeton:
-            m.setdefault("suivis", []).append(mid)
-            _ecrire(d)
-
-
 def _effacer_jeu(m: Dict[str, Any]) -> None:
     if not m or not m.get("jeton") or time.time() - float(m.get("le") or 0) > nx.JETON_SEC:
         return                                    # jeton mort : Discord refuserait
@@ -121,14 +111,16 @@ def _effacer_jeu(m: Dict[str, Any]) -> None:
 
 
 # ─── Dessin ───────────────────────────────────────────────────────────────
+#: Les cases vides du panneau : « je veux pas qu'il y ait des infos, juste des
+#: blancs avant la commande du mail » (propriétaire, 18/10/2026). Un code fait
+#: d'espaces insécables s'affiche comme une case grise vide.
+BLANC = "`" + "\u00a0" * 24 + "`"
+BLANC_CODE = "`" + "\u00a0" * 8 + "`"
+
+
 def _nom(cid: str, label: str) -> Dict[str, Any]:
     """Le bouton gris qui nomme un texte : désactivé, il n'est pas copié."""
     return {"type": 2, "style": 2, "label": label, "custom_id": cid, "disabled": True}
-
-
-def _msg(texte: str, rangees: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return {"content": texte, "components": rangees, "allowed_mentions": {"parse": []},
-            "flags": nx.EPHEMERE | 4}             # 4 : aucun aperçu de lien
 
 
 def _bouton(action: str, label: str, emoji: str, style: int, arg: str = "") -> Dict[str, Any]:
@@ -140,46 +132,52 @@ def _rangee(*boutons) -> Dict[str, Any]:
     return {"type": 1, "components": list(boutons)}
 
 
-def msg_code(c: Dict[str, Any], uid: str, gid: str, maintenant=None) -> Dict[str, Any]:
-    _texte, code, reste = oc.texte_2fa(c, maintenant)
-    rangees = [_rangee(_nom(PREFIXE + "n:3", "🔐 Code 2FA · encore %d s" % reste),
-                       _bouton("code", "Nouveau code", "🔄", 1, str(c.get("id"))))]
-    autres = [a for a in oc.comptes_du_va(uid, gid) if str(a.get("id")) != str(c.get("id"))]
-    if autres:
-        rangees.append(_rangee(*[
-            {"type": 2, "style": 2, "label": str(a.get("email") or "?")[:80],
-             "custom_id": PREFIXE + "voir:" + str(a.get("id"))} for a in autres[:AUTRES_MAX]]))
-    return _msg(code, rangees)
-
-
-def jeu(c: Dict[str, Any], uid: str, gid: str) -> List[Dict[str, Any]]:
-    """Les trois messages d'une adresse : adresse, mot de passe, code. Jamais la clé."""
-    return [_msg(str(c.get("email") or ""), [_rangee(_nom(PREFIXE + "n:1", "📧 Adresse"))]),
-            _msg(str(c.get("password") or ""), [_rangee(_nom(PREFIXE + "n:2", "🔑 Mot de passe"))]),
-            msg_code(c, uid, gid)]
-
-
 def _sans_md(t: str) -> str:
     """Une adresse avec « _ » passait en italique et perdait ses tirets bas."""
-    return "".join("\\" + ch if ch in "_*~`|" else ch for ch in str(t))
+    return "".join("\\" + ch if ch in "_*~`|\\" else ch for ch in str(t))
 
 
-def vue_mes_adresses(uid: str, gid: str, maintenant=None) -> List[Dict[str, Any]]:
-    """Toutes les adresses du VA, chacune avec son code du moment et un 🔄."""
-    blocs = []
-    for c in oc.comptes_du_va(uid, gid)[:LISTE_MAX]:
-        _t, code, reste = oc.texte_2fa(c, maintenant)
-        blocs.append({"type": 9,
-                      "components": [{"type": 10, "content": "%s\n🔐 **%s** · %d s"
-                                      % (_sans_md(c.get("email") or "?"), code, reste)}],
-                      "accessory": {"type": 2, "style": 2, "emoji": {"name": "🔄"},
-                                    "custom_id": PREFIXE + "maj:" + str(c.get("id"))}})
-    return [{"type": 17, "accent_color": nx.BLEU, "components": blocs}]
+def _litteral(t: str) -> str:
+    """Tel quel à l'écran : un mot de passe avec « * » ou « _ » passait en
+    gras ou en italique. En code, sauf s'il contient lui-même un accent grave."""
+    t = str(t)
+    return "`%s`" % t if "`" not in t else _sans_md(t)
+
+
+def _prendre_bouton() -> Dict[str, Any]:
+    return _bouton("prendre", "Prendre une adresse", "📧", 3)
 
 
 def vue_panneau() -> List[Dict[str, Any]]:
-    return nx._vue(["## Adresses Outlook"], [_bouton("prendre", "Prendre une adresse", "📧", 3),
-                                             _bouton("2fa", "Code 2FA", "🔐", 2)])
+    """Le panneau du salon : le formulaire déjà déroulé, ses cases vides."""
+    return [{"type": 17, "accent_color": nx.BLEU, "components": [
+        {"type": 10, "content": "## Adresses Outlook"},
+        {"type": 10, "content": "📧 " + BLANC},
+        {"type": 10, "content": "🔑 " + BLANC},
+        {"type": 10, "content": "🔐 " + BLANC_CODE},
+        _rangee(_prendre_bouton(), _bouton("2fa", "Code 2FA", "🔐", 2))]}]
+
+
+def vue_mes_adresses(uid: str, gid: str, maintenant=None) -> List[Dict[str, Any]]:
+    """Le même formulaire, rempli pour le VA : sous le titre, chaque adresse
+    (la plus récente d'abord) avec son mail, son mot de passe, puis le code du
+    moment et un 🔄. Jamais la clé 2FA. Sans adresse : les cases vides."""
+    l = oc.comptes_du_va(uid, gid)[:LISTE_MAX]
+    if not l:
+        return vue_panneau()
+    blocs: List[Dict[str, Any]] = [{"type": 10, "content": "## Adresses Outlook"}]
+    for i, c in enumerate(l):
+        _t, code, reste = oc.texte_2fa(c, maintenant)
+        if i:
+            blocs.append({"type": 14, "divider": True, "spacing": 1})
+        blocs += [{"type": 10, "content": "📧 " + _litteral(c.get("email") or "?")},
+                  {"type": 10, "content": "🔑 " + _litteral(c.get("password") or "?")},
+                  {"type": 9,
+                   "components": [{"type": 10, "content": "🔐 **%s** · %d s" % (code, reste)}],
+                   "accessory": {"type": 2, "style": 2, "emoji": {"name": "🔄"},
+                                 "custom_id": PREFIXE + "maj:" + str(c.get("id"))}}]
+    blocs.append(_rangee(_prendre_bouton()))
+    return [{"type": 17, "accent_color": nx.BLEU, "components": blocs}]
 
 
 # ─── Clics ────────────────────────────────────────────────────────────────
@@ -200,29 +198,37 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     uid = str(user.get("id") or "")
     if not uid.isdigit():
         return nx._texte("Compte introuvable.")
-    morceaux = cid[len(PREFIXE):].split(":")
-    action, arg = morceaux[0], (morceaux[1] if len(morceaux) > 1 else "")
+    action = cid[len(PREFIXE):].split(":")[0]
     if action == "prendre":
         return _prendre(p, gid, uid, membre, user, conf)
     if action == "2fa":
-        if not oc.comptes_du_va(uid, gid):
-            return nx._texte("Tu n'as pas encore d'adresse : clique « 📧 Prendre une adresse ».")
-        return _liste(p, gid, uid)
+        return _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     if action == "maj":
         # Les codes changent tous ensemble (toutes les 30 s) : n'importe quel 🔄
-        # redessine la liste entière, sur place.
+        # redessine le formulaire entier, sur place.
         return {"type": 7, "data": {"components": vue_mes_adresses(uid, gid)}}
-    if action in ("code", "voir"):
-        c = oc.compte_par_id(arg)
-        if not c or c.get("statut") != "attribue" or str(c.get("uid")) != uid \
-                or str(c.get("serveur") or "") != gid:
-            # Le bouton d'une adresse qui n'est pas (ou plus) la sienne.
-            return nx._texte("Cette adresse n'est pas à toi.")
-        if action == "code":
-            m = msg_code(c, uid, gid)
-            return {"type": 7, "data": {"content": m["content"], "components": m["components"]}}
-        return _envoyer(p, gid, uid, c)
     return nx._texte("Action inconnue.")
+
+
+def _repondre(p, gid, uid, comps):
+    """Sur le message privé lui-même : changé sur place. Sur le panneau du
+    salon : un NOUVEAU message privé, qui efface le précédent — un seul
+    formulaire à l'écran, comme les numéros."""
+    cle = f"{gid}:{uid}"
+    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
+    avant = _retenir(cle, jeton, app)
+    if int(((p.get("message") or {}).get("flags")) or 0) & nx.EPHEMERE:
+        return {"type": 7, "data": {"components": comps}}
+    if avant and avant.get("jeton") != jeton:
+        def effacer():
+            _dormir(ATTENTE_SUIVI_SEC)
+            _effacer_jeu(avant)
+        try:
+            _fond(effacer)
+        except Exception as e:
+            _log(f"effacement de l'ancien message non lancé pour {uid} ({type(e).__name__}: {e})")
+    return {"type": 4, "data": {"flags": nx.V2 | nx.EPHEMERE, "components": comps,
+                                "allowed_mentions": {"parse": []}}}
 
 
 def _prendre(p, gid, uid, membre, user, conf):
@@ -247,7 +253,7 @@ def _prendre(p, gid, uid, membre, user, conf):
     if not c:
         return nx._texte("❌ Plus d'adresse disponible pour le moment. Préviens un admin.")
     _log(f"adresse n°{c.get('id')} donnée à {uid} ({c.get('va')})")
-    rep = _envoyer(p, gid, uid, c)
+    rep = _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     try:
         _fond(lambda: deposer_au_salon(gid, uid, c))
     except Exception as e:
@@ -256,9 +262,9 @@ def _prendre(p, gid, uid, membre, user, conf):
 
 
 def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
-    """L'adresse et le mot de passe dans le salon perso du VA — jamais le code
-    ni la clé 2FA. Sans salon perso, le journal le dit : le VA a quand même
-    tout reçu en éphémère."""
+    """L'adresse et le mot de passe dans le salon perso du VA, chacun SEUL
+    pour la copie sur téléphone — jamais le code ni la clé 2FA. Sans salon
+    perso, le journal le dit : le VA a quand même son formulaire privé."""
     try:
         import tickets_discord
         salon = tickets_discord.ticket_de(gid, uid)
@@ -269,10 +275,10 @@ def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
         _log(f"{uid} n'a pas de salon perso : adresse n°{c.get('id')} non déposée")
         return False
     ok = True
-    for texte, nom in ((str(c.get("email") or ""), "📧 Adresse Outlook"),
-                       (str(c.get("password") or ""), "🔑 Mot de passe")):
-        m = _msg(texte, [_rangee(_nom(PREFIXE + "n:" + ("s1" if "Adresse" in nom else "s2"), nom))])
-        m["flags"] = 4                            # dans le salon : pas éphémère, sans aperçu
+    for texte, nom, n in ((str(c.get("email") or ""), "📧 Adresse Outlook", "s1"),
+                          (str(c.get("password") or ""), "🔑 Mot de passe", "s2")):
+        m = {"content": texte, "components": [_rangee(_nom(PREFIXE + "n:" + n, nom))],
+             "allowed_mentions": {"parse": []}, "flags": 4}   # 4 : aucun aperçu de lien
         code, corps = vd.api("POST", f"/channels/{salon}/messages", json=m)
         if code != 200:
             ok = False
@@ -280,51 +286,6 @@ def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
     if ok:
         _log(f"adresse n°{c.get('id')} déposée dans le salon perso de {uid}")
     return ok
-
-
-def _envoyer(p, gid, uid, c):
-    """Le jeu de l'adresse : le 1er message en réponse au clic, les deux autres
-    en suivis ; le jeu précédent de la personne est effacé."""
-    cle = f"{gid}:{uid}"
-    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
-    messages = jeu(c, uid, gid)
-    avant = _retenir(cle, jeton, app)
-
-    def suite():
-        _dormir(ATTENTE_SUIVI_SEC)
-        if avant and avant.get("jeton") != jeton:
-            _effacer_jeu(avant)
-        for m in messages[1:]:
-            code, corps = vd.api("POST", f"/webhooks/{app}/{jeton}?wait=true", json=m)
-            if code == 404:                       # la réponse n'était pas encore enregistrée
-                _dormir(2)
-                code, corps = vd.api("POST", f"/webhooks/{app}/{jeton}?wait=true", json=m)
-            if code == 200 and isinstance(corps, dict) and corps.get("id"):
-                _noter_suivi(cle, jeton, str(corps["id"]))
-            else:
-                _log(f"suivi non envoyé à {uid} : HTTP {code} {str(corps)[:120]}")
-    try:
-        _fond(suite)
-    except Exception as e:
-        _log(f"suivis non lancés pour {uid} ({type(e).__name__}: {e})")
-    return {"type": 4, "data": messages[0]}
-
-
-def _liste(p, gid, uid):
-    """La liste « déjà déroulée » : un seul message, qui remplace le jeu d'avant."""
-    cle = f"{gid}:{uid}"
-    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
-    avant = _retenir(cle, jeton, app)
-    if avant and avant.get("jeton") != jeton:
-        def effacer():
-            _dormir(ATTENTE_SUIVI_SEC)
-            _effacer_jeu(avant)
-        try:
-            _fond(effacer)
-        except Exception as e:
-            _log(f"effacement de l'ancien jeu non lancé pour {uid} ({type(e).__name__}: {e})")
-    return {"type": 4, "data": {"flags": nx.V2 | nx.EPHEMERE, "components": vue_mes_adresses(uid, gid),
-                                "allowed_mentions": {"parse": []}}}
 
 
 # ─── Pose du panneau ──────────────────────────────────────────────────────
