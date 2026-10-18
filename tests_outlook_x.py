@@ -147,18 +147,33 @@ try:
     check("salon perso : un VA sans salon perso ne bloque rien (rien de posté, il a reçu son éphémère)",
           not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/") and ch != f"/channels/{TICKET}/messages"])
 
-    # 6. Code 2FA depuis le panneau : la dernière adresse, avec les autres proposées
+    # 6. Code 2FA depuis le panneau : TOUTES ses adresses, chacune avec son code (déjà déroulé)
     APPELS.clear()
     r = clic("mailx:2fa", jeton="tok5")
     check("Code 2FA : rien de reposté dans le salon perso",
           not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/")], APPELS)
-    s = suivis("tok5")
-    check("Code 2FA : la plus récente des adresses du VA", r["data"]["content"] == "compte3@outlook.com", r)
-    check("Code 2FA : les deux autres adresses proposées sous le code",
-          len(s) > 1 and {"mailx:voir:1", "mailx:voir:2"} <= set(ids(s[1]["components"])), s)
+    check("Code 2FA : un seul message éphémère en V2, sans suivi",
+          r["type"] == 4 and r["data"]["flags"] == ox.nx.V2 | 64 and not suivis("tok5"), r)
+    blocs = r["data"]["components"][0]["components"]
+    textes = [b["components"][0]["content"] for b in blocs]
+    code_now = totp.code_totp(SEED)[0]
+    check("Code 2FA : les 3 adresses du VA, la plus récente d'abord, chacune avec son code",
+          [t.split("\n")[0] for t in textes] == ["compte3@outlook.com", "compte2@outlook.com", "compte1@outlook.com"]
+          and all(("🔐 **%s**" % code_now) in t for t in textes), textes)
+    check("Code 2FA : un 🔄 par adresse", [b["accessory"]["custom_id"] for b in blocs]
+          == ["mailx:maj:3", "mailx:maj:2", "mailx:maj:1"], blocs)
+    check("Code 2FA : ni mot de passe ni clé 2FA dans la liste",
+          "MotDePasse" not in json.dumps(r) and SEED not in json.dumps(r), r)
+    check("Code 2FA : le jeu d'avant est effacé",
+          any(m == "DELETE" and "/tok4/" not in ch for m, ch, kw in APPELS), APPELS)
+    r = clic("mailx:maj:2", ephemere=True)
+    check("🔄 : la liste entière redessinée sur place (type 7)",
+          r["type"] == 7 and len(r["data"]["components"][0]["components"]) == 3, r)
     r = clic("mailx:2fa", uid=VA2)
     check("Code 2FA sans adresse : il est invité à en prendre une",
           "pas encore d'adresse" in r["data"]["content"], r)
+    check("adresse avec « _ » : tirets bas gardés à l'affichage",
+          ox._sans_md("jean_dupont@outlook.com") == "jean\\_dupont@outlook.com")
 
     # 7. Nouveau code / voir
     r = clic("mailx:code:1", ephemere=True)

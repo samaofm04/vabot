@@ -25,6 +25,10 @@ envoyer dans leur salon aussi, juste otp qui reste dans adresse outlook ».
 Une adresse NEUVE part donc aussi dans le salon perso du VA
 (tickets_discord.ticket_de), l'adresse puis le mot de passe, chacun seul : les
 éphémères disparaissent, le salon garde. Le code du moment, jamais là-bas.
+
+« 🔐 Code 2FA » montre TOUT d'un coup (choix du propriétaire sur maquette,
+18/10/2026, « déjà déroulé ») : chaque adresse du VA avec son code du moment
+et un 🔄, dans un seul message — sans clic de plus pour choisir l'adresse.
 """
 import threading
 import time
@@ -48,6 +52,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
 }
 #: Autres adresses du VA proposées sous le code (une rangée de boutons).
 AUTRES_MAX = 4
+#: Adresses montrées par « Code 2FA » (les plus récentes) : un message V2
+#: porte 40 composants au plus, et chaque adresse en prend trois.
+LISTE_MAX = 10
 #: Les suivis partent APRÈS la réponse au clic : Discord refuse un suivi
 #: d'une interaction à laquelle il n'a pas encore reçu de réponse.
 ATTENTE_SUIVI_SEC = 1.0
@@ -152,6 +159,24 @@ def jeu(c: Dict[str, Any], uid: str, gid: str) -> List[Dict[str, Any]]:
             msg_code(c, uid, gid)]
 
 
+def _sans_md(t: str) -> str:
+    """Une adresse avec « _ » passait en italique et perdait ses tirets bas."""
+    return "".join("\\" + ch if ch in "_*~`|" else ch for ch in str(t))
+
+
+def vue_mes_adresses(uid: str, gid: str, maintenant=None) -> List[Dict[str, Any]]:
+    """Toutes les adresses du VA, chacune avec son code du moment et un 🔄."""
+    blocs = []
+    for c in oc.comptes_du_va(uid, gid)[:LISTE_MAX]:
+        _t, code, reste = oc.texte_2fa(c, maintenant)
+        blocs.append({"type": 9,
+                      "components": [{"type": 10, "content": "%s\n🔐 **%s** · %d s"
+                                      % (_sans_md(c.get("email") or "?"), code, reste)}],
+                      "accessory": {"type": 2, "style": 2, "emoji": {"name": "🔄"},
+                                    "custom_id": PREFIXE + "maj:" + str(c.get("id"))}})
+    return [{"type": 17, "accent_color": nx.BLEU, "components": blocs}]
+
+
 def vue_panneau() -> List[Dict[str, Any]]:
     return nx._vue(["## Adresses Outlook"], [_bouton("prendre", "Prendre une adresse", "📧", 3),
                                              _bouton("2fa", "Code 2FA", "🔐", 2)])
@@ -180,10 +205,13 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if action == "prendre":
         return _prendre(p, gid, uid, membre, user, conf)
     if action == "2fa":
-        l = oc.comptes_du_va(uid, gid)
-        if not l:
+        if not oc.comptes_du_va(uid, gid):
             return nx._texte("Tu n'as pas encore d'adresse : clique « 📧 Prendre une adresse ».")
-        return _envoyer(p, gid, uid, l[0])
+        return _liste(p, gid, uid)
+    if action == "maj":
+        # Les codes changent tous ensemble (toutes les 30 s) : n'importe quel 🔄
+        # redessine la liste entière, sur place.
+        return {"type": 7, "data": {"components": vue_mes_adresses(uid, gid)}}
     if action in ("code", "voir"):
         c = oc.compte_par_id(arg)
         if not c or c.get("statut") != "attribue" or str(c.get("uid")) != uid \
@@ -280,6 +308,23 @@ def _envoyer(p, gid, uid, c):
     except Exception as e:
         _log(f"suivis non lancés pour {uid} ({type(e).__name__}: {e})")
     return {"type": 4, "data": messages[0]}
+
+
+def _liste(p, gid, uid):
+    """La liste « déjà déroulée » : un seul message, qui remplace le jeu d'avant."""
+    cle = f"{gid}:{uid}"
+    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p, gid)
+    avant = _retenir(cle, jeton, app)
+    if avant and avant.get("jeton") != jeton:
+        def effacer():
+            _dormir(ATTENTE_SUIVI_SEC)
+            _effacer_jeu(avant)
+        try:
+            _fond(effacer)
+        except Exception as e:
+            _log(f"effacement de l'ancien jeu non lancé pour {uid} ({type(e).__name__}: {e})")
+    return {"type": 4, "data": {"flags": nx.V2 | nx.EPHEMERE, "components": vue_mes_adresses(uid, gid),
+                                "allowed_mentions": {"parse": []}}}
 
 
 # ─── Pose du panneau ──────────────────────────────────────────────────────
