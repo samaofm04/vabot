@@ -676,6 +676,35 @@ try:
           not pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 59 * 60)
           and pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 61 * 60))
     check("ni bonus du jour sur Threads", not pd.a_rafraichir_bonus(TH))
+    # « aussi threads refais » (19/10/2026) : « 👀 Pseudos », comme Twitter
+    comp = pq[0]["json"].get("components") or []
+    check("sous la quinzaine : « 👀 Pseudos » seul ; rien sous le podium",
+          [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS]
+          and pd._boutons(TH, True) == {}, comp)
+    import liens_va as _lv
+    _etat_lv = _lv._etat
+    _lv._etat = lambda: {"liens": {f"{TH}:1": {"numero": 12, "pseudo": "momobtn"},
+                                   f"{TH}:2": {"numero": 43, "pseudo": "steave0454"},
+                                   f"{pd.TWITTER_ID}:3": {"numero": 31, "pseudo": "pas_threads"}}}
+    _nl = pd.SERVEURS[TH].get("numeros_liens")
+    try:
+        # ici, le mode d'avant (numéros du registre) : le nom du registre
+        txt_reg = pd.texte_pseudos(TH)
+        # livré : le numéro du ticket, dans le nom du lien (« numeros_liens »)
+        pd.SERVEURS[TH]["numeros_liens"] = True
+        txt_th = pd.texte_pseudos(TH)
+    finally:
+        _lv._etat = _etat_lv
+        pd.SERVEURS[TH].pop("numeros_liens", None)
+        if _nl is not None:
+            pd.SERVEURS[TH]["numeros_liens"] = _nl
+    check("« 👀 Pseudos » de Threads, livré : « Threads n » → le pseudo de sa fiche liens_va, "
+          "jamais celle d'un autre serveur",
+          "🥇 Threads 12 · **momobtn** · 47 clics" in txt_th
+          and "🥈 Threads 43 · **steave0454** · 31 clics" in txt_th
+          and "Threads 31 · **?**" in txt_th and "pas_threads" not in txt_th, txt_th)
+    check("… numéros du registre (mode d'avant) : le nom du registre",
+          "🥇 Threads 12 · **Roucham** · 47 clics" in txt_reg, txt_reg)
 
     # ------------------------------------------------------------------ 5
     print("\n— 5. le lundi : semaine terminée, puis le podium figé")

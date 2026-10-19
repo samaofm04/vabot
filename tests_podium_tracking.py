@@ -801,8 +801,9 @@ try:
     comp = [x for x in DISCORD.appels if x["m"] == "POST"][-1]["json"].get("components") or []
     check("sous le classement : « 👀 Pseudos » seul (pas de 🔄 sur Twitter)",
           [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS], comp)
-    check("… ni sous le podium ni sous le bonus, et retiré d'une quinzaine figée",
-          pd._boutons(TW, True) == {"components": []}
+    check("… ni sous le podium ni sous le bonus (rien d'envoyé, comme avant), et retiré "
+          "d'une quinzaine figée",
+          pd._boutons(TW, True) == {} and pd._boutons(TW, False) == {}
           and pd._boutons(TW, False, pseudos=True) == {"components": []})
     n = len(MP["appels"])
     txt13 = pd.texte_pseudos(TW)

@@ -260,6 +260,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # le podium de la semaine toutes les deux heures, le classement
                  # de la quinzaine (salon -l-clicks) toutes les heures
                  "minutes": 120, "minutes_subs": 60,
+                 # « 👀 Pseudos » sous la quinzaine, comme Twitter (propriétaire,
+                 # 19/10/2026 : « aussi threads refais ») : « Threads n » →
+                 # le pseudo de sa fiche liens_va, pour le staff, en privé
+                 "bouton_pseudos": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -2632,18 +2636,20 @@ def _boutons(gid: Optional[str], vivant: bool, pseudos: bool = False) -> Dict[st
     composants les GARDE : le message figé aurait encore proposé de mettre à
     jour une période finie. Serveur sans aucune des deux clés (« bouton_maj »,
     « bouton_pseudos ») : rien du tout, le message est celui d'avant, à
-    l'octet près. Twitter : « 👀 Pseudos » seul, sous la quinzaine vivante.
+    l'octet près. Twitter, Threads : « 👀 Pseudos » seul, sous la quinzaine
+    vivante ; `pseudos` et non vivant (ses pages figées) : retiré.
     Avec un thème, seul le libellé change (« Relancer la course ») : l'emoji
     et le custom_id restent, un bouton déjà posé continue de marcher.
     """
     pf = _profil(gid)
     if "bouton_maj" not in pf:
-        # Twitter : pas de 🔄, seulement « 👀 Pseudos » sous la quinzaine
-        # vivante. Partout ailleurs (figée comprise : il montre la quinzaine
-        # EN COURS) « components » vide, qui le retire s'il y était
-        if "bouton_pseudos" not in pf:
+        # Twitter, Threads : pas de 🔄, seulement « 👀 Pseudos » sous la
+        # quinzaine vivante. Ses pages figées (`pseudos`, non vivant) le
+        # perdent : il montre la quinzaine EN COURS. Podium et bonus : rien,
+        # comme avant
+        if not (pseudos and "bouton_pseudos" in pf):
             return {}
-        if vivant and pseudos and pf["bouton_pseudos"]:
+        if vivant and pf["bouton_pseudos"]:
             return {"components": [{"type": 1, "components": [_bouton_yeux()]}]}
         return {"components": []}
     if not (vivant and pf["bouton_maj"]):
@@ -3274,9 +3280,9 @@ def _quinzaine_sans_bouton(gid: str, d: Dict[str, Any], salon: str, saison: str)
     renvoie pas, les derniers chiffres restent affichés jusqu'au gel.
     Une fois par quinzaine (« sans_bouton ») ; Discord en panne passagère :
     nouvel essai au passage suivant. Un serveur sans aucun bouton : rien,
-    aucun appel. Twitter retire ainsi son « 👀 Pseudos ».
+    aucun appel. Twitter et Threads retirent ainsi leur « 👀 Pseudos ».
     """
-    retrait = _boutons(gid, False)
+    retrait = _boutons(gid, False, pseudos=True)
     rec = (((d.get("subs_a_figer") or {}).get(gid) or {}).get(saison))
     if not retrait or not isinstance(rec, dict) or rec.get("sans_bouton"):
         return
@@ -3447,8 +3453,8 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         return False
 
     for i in range(int(rec.get("faites") or 0), len(pages)):
-        # figée : le bouton 🔄 de la page vivante s'en va avec elle
-        corps = {"embeds": [pages[i]], **_boutons(gid, False)}
+        # figée : le bouton 🔄 (ou 👀) de la page vivante s'en va avec elle
+        corps = {"embeds": [pages[i]], **_boutons(gid, False, pseudos=True)}
         mid = ""
         if i < len(ids) and ids[i]:
             code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
@@ -4501,9 +4507,11 @@ def _noms_registre() -> Dict[int, str]:
             for n in set(actifs) | set(anciens)}
 
 
-#: Une ligne de classement telle qu'une page l'affiche : « 🥇 **VA 41** —
-#: **367** subs · 🌐 395 all-time », « 4. VA 50 — 293 subs ».
-_LIGNE_AFFICHEE = re.compile(r"(VA \d+)\*{0,2} — \*{0,2}(\d+)\*{0,2} (?:subs|clics)\b")
+def _ligne_affichee(libelle: str) -> "re.Pattern[str]":
+    """Une ligne de classement telle qu'une page l'affiche : « 🥇 **VA 41** —
+    **367** subs · 🌐 395 all-time », « 4. Threads 92 — 9 clics »."""
+    return re.compile(rf"({re.escape(libelle)} \d+)\*{{0,2}} — \*{{0,2}}(\d+)\*{{0,2}} "
+                      r"(?:subs|clics)\b")
 
 
 def _bloc_pseudos(titre: str, lignes: List[Tuple[str, int]], sans: List[str], unite: str,
@@ -4531,11 +4539,32 @@ def _bloc_pseudos(titre: str, lignes: List[Tuple[str, int]], sans: List[str], un
     return txt if len(txt) <= 1900 else txt[:1895] + "\n…"
 
 
-def _texte_pseudos_tracking(gid: str, jour: Optional[dt.date] = None) -> str:
-    """« 👀 Pseudos » sur Twitter, la quinzaine en cours : le classement que
-    le salon affiche (son dernier relevé, gardé dans l'état : les mêmes
-    chiffres, aucun appel MyPuls ni GetMySocial) avec, devant chaque
-    « VA n », la personne du registre des trackings."""
+def _noms_va(gid: str) -> Dict[int, str]:
+    """{numéro : qui c'est} pour ce serveur. Threads (numéro dans le nom du
+    lien, « numeros_liens ») : le pseudo de la fiche liens_va du VA, celui
+    de « Threads VA 87 @drick_engel ». Twitter : le registre des trackings."""
+    if not _profil(gid).get("numeros_liens"):
+        return _noms_registre()
+    import liens_va
+    out: Dict[int, str] = {}
+    for cle, f in sorted((liens_va._etat().get("liens") or {}).items()):
+        if not cle.startswith(f"{gid}:") or not isinstance(f, dict):
+            continue
+        try:
+            n = int(f.get("numero"))
+        except (TypeError, ValueError):
+            continue
+        nom = str(f.get("pseudo") or "").strip()
+        if nom and nom not in (out.get(n) or "").split(" / "):
+            out[n] = f"{out[n]} / {nom}" if out.get(n) else nom
+    return out
+
+
+def _texte_pseudos_releve(gid: str, jour: Optional[dt.date] = None) -> str:
+    """« 👀 Pseudos » sur Twitter et Threads, la quinzaine en cours : le
+    classement que le salon affiche (son dernier relevé, gardé dans l'état :
+    les mêmes chiffres, aucun appel MyPuls ni GetMySocial) avec, devant
+    chaque numéro, la personne (_noms_va)."""
     j = jour or _aujourdhui()
     debut, fin = saison_en_cours(j)
     rec = (_etat().get("subs") or {}).get(str(gid)) or {}
@@ -4547,7 +4576,7 @@ def _texte_pseudos_tracking(gid: str, jour: Optional[dt.date] = None) -> str:
         f"👀 **Pseudos — quinzaine en cours, du {debut.strftime('%d/%m')} au "
         f"{fin.strftime('%d/%m')}** (visible par toi seul)",
         [(str(x["va"]), int(x.get("clics") or 0)) for x in snap["lignes"]],
-        list(snap.get("illisibles") or []), _unite(gid), _noms_registre())
+        list(snap.get("illisibles") or []), _unite(gid), _noms_va(gid))
 
 
 def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], List[str], str, str]:
@@ -4569,15 +4598,17 @@ def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], L
         code, m = _api("GET", f"/channels/{salon}/messages/{mid}")
         emb = (m.get("embeds") or [None])[0] if code == 200 and isinstance(m, dict) else None
         if not isinstance(emb, dict):
-            soucis.append(f"page {k + 1} illisible (HTTP {code})")
+            soucis.append(f"page {k + 1} introuvable sur Discord (HTTP {code})"
+                          if code == 404 else f"page {k + 1} illisible (HTTP {code})")
             continue
         textes.append(str(emb.get("description") or ""))
     txt = "\n".join(textes)
-    lignes = [(va, int(n)) for va, n in _LIGNE_AFFICHEE.findall(txt)]
+    lib = str(_profil(gid).get("libelle") or "VA")
+    lignes = [(va, int(n)) for va, n in _ligne_affichee(lib).findall(txt)]
     sans: List[str] = []
     for ligne in txt.splitlines():
         if "Relevé indisponible" in ligne or "Sans relevé" in ligne:
-            sans += [v for v in re.findall(r"VA \d+", ligne) if v not in sans]
+            sans += [v for v in re.findall(rf"{re.escape(lib)} \d+", ligne) if v not in sans]
     if textes and not lignes:
         soucis.append("aucune ligne de classement reconnue sur ses pages")
     return lignes, sans, ("subs" if "Abonnés **" in txt else "clics"), " ; ".join(soucis)
@@ -4594,15 +4625,15 @@ def _texte_pseudos_avant(gid: str, jour: Optional[dt.date] = None) -> str:
     txt = _bloc_pseudos(
         f"👀 **Quinzaine d'avant, du {p_deb.strftime('%d/%m')} au {p_fin.strftime('%d/%m')}** "
         f"— telle qu'affichée" + (" (en clics)" if unite == "clics" else ""),
-        lignes, sans, unite, _noms_registre())
+        lignes, sans, unite, _noms_va(gid))
     return txt if not souci else (txt + f"\n⚠️ _{souci}_")[:1900]
 
 
 def textes_pseudos(gid: str, jour: Optional[dt.date] = None) -> List[str]:
     """Les messages privés de « 👀 Pseudos » : la quinzaine en cours, et sur
-    Twitter la quinzaine d'avant en second message."""
+    Twitter et Threads la quinzaine d'avant en second message."""
     out = [texte_pseudos(gid, jour)]
-    if _source(gid) == "tracking":
+    if _source_subs(gid) != "abonnes":
         out.append(_texte_pseudos_avant(gid, jour))
     return out
 
@@ -4620,9 +4651,10 @@ def texte_pseudos(gid: str, jour: Optional[dt.date] = None) -> str:
     """Le classement de la quinzaine, pseudos compris — pour le staff, en privé.
     Propriétaire, 15/10/2026 : « eux ils voient pas les pseudos, même moi si »
     (un texte grisé, un spoiler, se dévoile pour TOUT le monde dans Discord).
-    Twitter (clics des trackings) : _texte_pseudos_tracking."""
-    if _source(gid) == "tracking":
-        return _texte_pseudos_tracking(gid, jour)
+    Twitter et Threads : _texte_pseudos_releve. Va IG (abonnés OF + MYM) :
+    son classement relu ici, subs_va."""
+    if _source_subs(gid) != "abonnes":
+        return _texte_pseudos_releve(gid, jour)
     import subs_va
     j = jour or _aujourdhui()
     debut, fin = saison_en_cours(j)
