@@ -197,6 +197,7 @@ pd.SERVEURS[TH] = dict(pd.PROFIL_THREADS)
 # tests_podium_tracking.py). La reprise par Threads se teste ici sur les clics.
 pd.SERVEURS[TW].pop("mesure_subs", None)
 pd.SERVEURS[TW].pop("alltime_subs", None)
+pd.SERVEURS[TW].pop("bouton_pseudos", None)
 rcr.CIBLES_DEFAUT[TW] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 rcr.CIBLES_DEFAUT[TH] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 AUTRE = "1535758943324999711"          # Youl4b : le serveur du report d'origine

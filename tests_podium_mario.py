@@ -165,6 +165,7 @@ pd.SERVEURS[pd.TWITTER_ID].pop("mesure", None)
 # … de même sa quinzaine aux abonnés, sans all-time (19/10/2026, mêmes tests)
 pd.SERVEURS[pd.TWITTER_ID].pop("mesure_subs", None)
 pd.SERVEURS[pd.TWITTER_ID].pop("alltime_subs", None)
+pd.SERVEURS[pd.TWITTER_ID].pop("bouton_pseudos", None)
 import safe_json                       # noqa: E402
 import verif_discord as vd             # noqa: E402
 

@@ -21372,7 +21372,8 @@ try:
     # (tests_podium_tracking.py).
     _mesureP = _pd.SERVEURS[_pd.TWITTER_ID].pop("mesure", None)
     # … de même sa quinzaine aux abonnés sans all-time (19/10/2026, mêmes tests)
-    _subsP = {k: _pd.SERVEURS[_pd.TWITTER_ID].pop(k) for k in ("mesure_subs", "alltime_subs")
+    _subsP = {k: _pd.SERVEURS[_pd.TWITTER_ID].pop(k) for k in ("mesure_subs", "alltime_subs",
+                                                                "bouton_pseudos")
               if k in _pd.SERVEURS[_pd.TWITTER_ID]}
 
     # --- la semaine racontee est toujours CELLE QUI EST FINIE

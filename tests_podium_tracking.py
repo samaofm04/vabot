@@ -797,6 +797,71 @@ try:
           "**VA 43** — **90** subs" in post["description"] and "all-time" not in post["description"]
           and not [a for a in MP["appels"][n:] if a[1] == pd.ALLTIME_DEPUIS],
           (post["description"][:400], MP["appels"][n:]))
+    # « mets des yeux pour que je check les pseudos de qui est qui » (19/10/2026)
+    comp = [x for x in DISCORD.appels if x["m"] == "POST"][-1]["json"].get("components") or []
+    check("sous le classement : « 👀 Pseudos » seul (pas de 🔄 sur Twitter)",
+          [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS], comp)
+    check("… ni sous le podium ni sous le bonus, et retiré d'une quinzaine figée",
+          pd._boutons(TW, True) == {"components": []}
+          and pd._boutons(TW, False, pseudos=True) == {"components": []})
+    n = len(MP["appels"])
+    txt13 = pd.texte_pseudos(TW)
+    check("« 👀 Pseudos » : chaque « VA n » avec la personne du registre, les chiffres du salon",
+          "🥇 VA 43 · **Tsiry** · 90 subs" in txt13 and "VA 12 · **Roucham** · 51 subs" in txt13
+          and "**0 subs** : " in txt13 and len(txt13) <= 1900, txt13)
+    # « pour cette période et même celle d'avant » : la quinzaine figée, relue
+    # sur sa page Discord (l'état ne garde pas son classement)
+    FIGEE = ("🗓️ Période **01/10 → 15/10/2026** · depuis le 01/10 à 00h00\n"
+             "Clics **tracking OF** · **2** comptes classés\n"
+             "🔒 _Période terminée : classement arrêté, il ne bougera plus._\n\n"
+             "🥇 **VA 43** — **302** subs · 🌐 687 all-time\n"
+             "🥈 **VA 31** — **0** subs\n\n👥 **Total période**\n**302** subs\n\n"
+             "⚠️ Relevé indisponible : VA 12, VA 22 — à confirmer.")
+    etat = pd._etat()
+    etat.setdefault("subs_figes", {})[TW] = {"2026-10-01": {"fin": "2026-10-15", "messages": ["F1"]}}
+    pd._ecrire(etat)
+    api_vrai = pd._api
+    pages_lues = []
+
+    def api_figee(methode, chemin, **kw):
+        if methode == "GET" and chemin.endswith("/messages/F1"):
+            pages_lues.append(chemin)
+            return 200, {"id": "F1", "embeds": [{"description": FIGEE}]}
+        return api_vrai(methode, chemin, **kw)
+    pd._api = api_figee
+    import tickets_discord as tk
+    suites13, plus13 = [], []
+    sauve13 = (pd._staff, pd._en_fond, tk._suite, pd._prive_en_plus)
+    try:
+        avant13 = pd._texte_pseudos_avant(TW)
+        pd._en_fond = lambda f: f()
+        tk._suite = lambda jeton_, texte, p=None: suites13.append(texte)
+        pd._prive_en_plus = lambda jeton_, texte, p=None: plus13.append(texte)
+        clic = {"type": 3, "guild_id": TW, "token": "t", "data": {"custom_id": pd.BOUTON_PSEUDOS},
+                "member": {"user": {"id": "1"}}}
+        pd._staff = lambda p_: False
+        r_va = pd.traiter(clic)
+        pd._staff = lambda p_: True
+        r_staff = pd.traiter(clic)
+    finally:
+        pd._staff, pd._en_fond, tk._suite, pd._prive_en_plus = sauve13
+        pd._api = api_vrai
+    check("la quinzaine d'avant : sa page figée relue, pseudos compris, l'unité de l'époque",
+          "01/10 au 15/10" in avant13 and "(en clics)" in avant13
+          and "🥇 VA 43 · **Tsiry** · 302 clics" in avant13 and "**0 clics** : VA 31 " in avant13
+          and "**Sans relevé** : VA 12 Roucham · VA 22 " in avant13, avant13)
+    check("le clic : un VA est refusé, le staff reçoit en privé la quinzaine en cours PUIS "
+          "celle d'avant",
+          "staff" in r_va["data"]["content"] and r_staff == {"type": 5, "data": {"flags": 64}}
+          and suites13 == [txt13] and plus13 == [avant13], (r_va, r_staff, suites13, plus13))
+    check("… sans relire MyPuls (le dernier relevé du salon, la page figée)",
+          len(MP["appels"]) == n, MP["appels"][n:])
+    etat = pd._etat()
+    etat["subs_figes"][TW]["2026-10-01"]["messages"] = ["F404"]
+    pd._ecrire(etat)
+    check("une page figée illisible est dite, jamais une liste vide en silence",
+          pd._texte_pseudos_avant(TW).startswith("ℹ️ Quinzaine d'avant : page 1 illisible"),
+          pd._texte_pseudos_avant(TW))
     frais()
     MP["sans_abonnes"] = True
     clm = pd.classement(Q0, Q1, gid=TW, mesure="tracking_abonnes")

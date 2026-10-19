@@ -586,10 +586,14 @@ try:
         check("… all-time : OF au compteur MyPuls (40), MYM tous les jours relevés (15), commun écarté",
               tot == {"Lola VA 2": 40, "Amelia VA 43": 15}, tot)
         b = pod._boutons(sv.VA_IG_ID, True, pseudos=True)["components"][0]["components"]
-        check("bouton « 👀 Pseudos » sous la quinzaine de Va IG, à côté de « 🔄 »",
+        b_tw = pod._boutons(TW, True, pseudos=True)
+        check("bouton « 👀 Pseudos » sous la quinzaine de Va IG, à côté de « 🔄 » ; "
+              "Twitter : « 👀 » seul (depuis le 19/10/2026)",
               [c["custom_id"] for c in b] == [pod.BOUTON_MAJ, pod.BOUTON_PSEUDOS]
               and [c["custom_id"] for c in pod._boutons(sv.VA_IG_ID, True)["components"][0]["components"]]
-              == [pod.BOUTON_MAJ] and pod._boutons(TW, True, pseudos=True) == {}, b)
+              == [pod.BOUTON_MAJ]
+              and [c["custom_id"] for c in b_tw["components"][0]["components"]]
+              == [pod.BOUTON_PSEUDOS], (b, b_tw))
         txt = pod.texte_pseudos(sv.VA_IG_ID, J)
         check("… réponse au staff : numéro Instagram, PSEUDO, model, abonnés",
               "**york** (Amelia VA 43) — 11 subs" in txt and "**adh040** (Lola VA 2) — 7 subs" in txt
