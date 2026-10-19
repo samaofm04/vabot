@@ -21371,6 +21371,9 @@ try:
     # il lirait le vrai MyPuls. Le comptage par tracking a ses propres tests
     # (tests_podium_tracking.py).
     _mesureP = _pd.SERVEURS[_pd.TWITTER_ID].pop("mesure", None)
+    # … de même sa quinzaine aux abonnés sans all-time (19/10/2026, mêmes tests)
+    _subsP = {k: _pd.SERVEURS[_pd.TWITTER_ID].pop(k) for k in ("mesure_subs", "alltime_subs")
+              if k in _pd.SERVEURS[_pd.TWITTER_ID]}
 
     # --- la semaine racontee est toujours CELLE QUI EST FINIE
     check("un lundi, on recapitule la semaine d avant",
@@ -21716,6 +21719,7 @@ except Exception as _eP:
 finally:
     if _mesureP is not None:
         _pd.SERVEURS[_pd.TWITTER_ID]["mesure"] = _mesureP
+    _pd.SERVEURS[_pd.TWITTER_ID].update(_subsP)
 
 # ------------------------------------------- 33. YouLab THREADS, copie de Twitter
 print()

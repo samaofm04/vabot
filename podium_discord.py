@@ -207,6 +207,21 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # _classement_tracking. POUR REVENIR AUX CLICS GETMYSOCIAL :
                  # retirer cette clé, rien d'autre.
                  "mesure": "tracking",
+                 # Le classement de la QUINZAINE en vrais abonnés OF (MyPuls,
+                 # subscribers_period), plus en visites. Propriétaire, 19/10/2026,
+                 # devant « VA 43 — 711 subs » (711 clics, 84 abonnés) : « là
+                 # c'est un classement de subs pas de clics tu vois », puis
+                 # « faut additionner les subs du même tracking de Solen et
+                 # Emy » : les trackings du registre, Emy et sa variante Seren,
+                 # comme pour les clics. Le podium de la semaine et le bonus du
+                 # jour gardent les clics. POUR REVENIR : retirer la clé.
+                 "mesure_subs": "tracking_abonnes",
+                 # … et sans « 🌐 all-time » : MyPuls ne voit plus le compte de
+                 # Jessye, et les abonnés d'avant le passage sur Emy (06/10)
+                 # manquent à 26 VA sur 62 (leurs clics, eux, étaient gardés
+                 # au registre). Un total « depuis toujours » serait faux pour
+                 # eux. Lu par pages_subs et rafraichir_subs.
+                 "alltime_subs": False,
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
     # Va Threads : SES VA, à leurs liens Threads (EMY THREADS, « Threads VA 61
@@ -1074,8 +1089,16 @@ def _fichier_trackings() -> Path:
 def _source(gid: Optional[str] = None, mesure: Optional[str] = None) -> str:
     """Ce que valent les clics : « tracking » (MyPuls), « gms » (vues de la
     page GetMySocial) ou « gms_bouton » (clics vers la destination,
-    dédoublonnés, GetMySocial aussi : Threads)."""
+    dédoublonnés, GetMySocial aussi : Threads). Pour une quinzaine (clé
+    « mesure_subs ») : « tracking_abonnes » (Twitter, les abonnés OF des
+    mêmes trackings) ou « abonnes » (Va IG, OF + MYM, subs_va)."""
     return str(mesure or _profil(gid).get("mesure") or "gms")
+
+
+def _source_subs(gid: Optional[str] = None) -> str:
+    """La mesure du classement de la quinzaine : « mesure_subs », sinon celle
+    du podium."""
+    return _source(gid, _profil(gid).get("mesure_subs"))
 
 
 def _service(gid: Optional[str] = None) -> str:
@@ -1530,7 +1553,7 @@ def _suivre_trackings(reg: Dict[str, Any], liens: List[Dict[str, Any]],
 
 
 def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None,
-                         cumul: bool = False) -> Dict[str, Any]:
+                         cumul: bool = False, abonnes: bool = False) -> Dict[str, Any]:
     """classement() sur les clics des liens de tracking : la même forme
     {lignes, illisibles, frais, …}, pour que le reste (numéros affichés, gel,
     primes) ne voie pas la différence. En plus : sans_tracking (liens actifs
@@ -1539,6 +1562,9 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
     sans numéro encore), source, erreur.
     `cumul` : le total depuis la création (visits_total) au lieu des visites
     de la période — MyPuls ne garde pas tout l'historique jour par jour.
+    `abonnes` : les abonnés des mêmes trackings (subscribers_period, ou
+    subscribers_total avec `cumul`) au lieu des visites — la quinzaine de
+    Twitter (« tracking_abonnes »). « clics » porte alors des abonnés.
 
     UNE LECTURE RATÉE N'EST JAMAIS UN ZÉRO. MyPuls muet : aucun relevé (les
     messages restent tels quels). Un tracking qu'il a déjà rendu et qu'il ne
@@ -1603,10 +1629,13 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
     illisibles: set = set()
     introuvables: List[str] = []
     totaux: Dict[int, int] = {}
+    # le total gardé d'un tracking quitté : un par mesure, les visites et les
+    # abonnés d'un même tracking ne se remplacent pas l'un l'autre
+    cle_garde = "cumul_abonnes" if abonnes else "cumul"
     for n in sorted(par_va):
         total = 0
         for t, fin_t, e in par_va[n]:
-            garde = e.get("cumul") or {}
+            garde = e.get(cle_garde) or {}
             if cumul and not e.get("actif") and garde.get("au") == fin_t:
                 # un tracking quitté ne bouge plus : son total est gardé
                 total += int(garde.get("n") or 0)
@@ -1626,13 +1655,16 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
                     # lien pointe vers un tracking qui n'existe pas. Zéro, et dit
                     introuvables.append(t)
             else:
-                x = v["total"] if cumul else v["visites"]
+                if abonnes:
+                    x = v.get("subs_total") if cumul else v.get("subs")
+                else:
+                    x = v["total"] if cumul else v["visites"]
                 if x is None:
                     illisibles.add(n)
                 else:
                     total += x
                     if cumul and not e.get("actif"):
-                        e["cumul"] = {"au": fin_t, "n": x}
+                        e[cle_garde] = {"au": fin_t, "n": x}
         totaux[n] = total
     en_attente: List[str] = []
     # ses liens disent un autre VA, ou plusieurs, ou un tracking neuf en
@@ -1822,6 +1854,12 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         # Va IG, quinzaine : les vrais abonnés de ses trackings (subs_va)
         import subs_va
         return subs_va.classement_va_ig(debut, fin)
+    if _source(gid, mesure) == "tracking_abonnes":
+        # Twitter, quinzaine : les abonnés OF des trackings du registre (Emy
+        # et sa variante Seren additionnées), plus leurs visites
+        cl_t = _classement_tracking(debut, fin, gid, abonnes=True)
+        _garder_repris(gid, debut, fin, cl_t, "tracking_abonnes")
+        return cl_t
     if _source(gid, mesure) == "tracking":
         # pas gardé pour Va IG : il mêle des clics GetMySocial (_releve_us)
         cl_t = _classement_tracking(debut, fin, gid)
@@ -1909,6 +1947,8 @@ def _fichier_alltime(gid: Optional[str] = None, mesure: Optional[str] = None) ->
     profil = _profil(gid)
     if _source(gid, mesure) == "tracking":
         return DATA_DIR / "podium_alltime_tracking.json"
+    if _source(gid, mesure) == "tracking_abonnes":
+        return DATA_DIR / "podium_alltime_tracking_abonnes.json"
     if _source(gid, mesure) == "abonnes":
         return DATA_DIR / "podium_alltime_va_ig_abonnes.json"
     return DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
@@ -1944,12 +1984,14 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
                 {"jour": _aujourdhui().isoformat() if neufs else str(cache.get("jour") or ""),
                  "totaux": totaux, "format": FORMAT_AFFICHAGE}, ensure_ascii=False, indent=2))
         return {k: int(v) for k, v in totaux.items()}
-    if _source(gid, mesure) == "tracking":
+    if _source(gid, mesure) in ("tracking", "tracking_abonnes"):
         # le total cumulé de chaque tracking : MyPuls ne garde pas tout
         # l'historique jour par jour (c47 : 20 378 visites rendues sur
-        # « 2024 → 2026 », 31 030 au compteur)
+        # « 2024 → 2026 », 31 030 au compteur). En abonnés pour la quinzaine
+        # de Twitter : son 🌐 all-time compte la même chose que sa colonne
         cl = _classement_tracking(dt.date.fromisoformat(ALLTIME_DEPUIS), _aujourdhui(), gid,
-                                  cumul=True)
+                                  cumul=True,
+                                  abonnes=_source(gid, mesure) == "tracking_abonnes")
         totaux = dict(cache.get("totaux") or {})
         for x in cl["lignes"]:
             totaux[x["va"]] = int(x["clics"])
@@ -2402,7 +2444,8 @@ def _garder_repris(gid: Optional[str], debut: dt.date, fin: dt.date,
     # (« podium_seul », qui commence un lundi). Les trackings de Twitter
     # quand Threads compte des clics, le jour du bonus : rien à garder (autant
     # d'écritures de moins par heure).
-    if not any(_repris_de(g) == gid and _source(g) == str(source)
+    if not any(_repris_de(g) == gid
+               and (_source_subs(g) if subs_seulement(g) else _source(g)) == str(source)
                and (debut == saison_en_cours(debut)[0] if subs_seulement(g)
                     else debut.weekday() == 0 if podium_seulement(g) else True)
                for g in SERVEURS):
@@ -2483,7 +2526,7 @@ def _repris_t(gid: Optional[str], jour: Optional[dt.date] = None) -> float:
     debut, fin = saison_en_cours(jour)
     _charger_repris()
     # la mesure de CE serveur (classement la passe à _classement_repris)
-    e = _REPRIS.get((src, _source(gid), debut.isoformat(),
+    e = _REPRIS.get((src, _source_subs(gid), debut.isoformat(),
                      min(jour or _aujourdhui(), fin).isoformat()))
     return float((e or {}).get("t") or 0)
 
@@ -2902,6 +2945,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                 f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
                 + (f'Abonnés **OF + MYM** · **{len(lignes)}** comptes classés\n'
                    if p.get("mesure_subs") == "abonnes" else
+                   f'Abonnés **tracking OF** · **{len(lignes)}** comptes classés\n'
+                   if p.get("mesure_subs") == "tracking_abonnes" else
                    f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n'))
     else:
         # le même en-tête que le podium mêlé : toute l'agence, sans marché
@@ -2919,7 +2964,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             # « VA 3 » de Twitter et « Amelia VA 3 » ne sont pas la même
             # personne : chaque total vient du fichier de son serveur
             at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
-        suffixe = f' · 🌐 {at} all-time' if at is not None else ""
+        suffixe = (f' · 🌐 {at} all-time'
+                   if at is not None and p.get("alltime_subs", True) else "")
         nom = x.get("affiche") or x["va"]
         rangs.append(f'{med[i]} **{nom}** — **{x["clics"]}** {unite}{suffixe}'
                      if i < 3 else
@@ -3119,14 +3165,16 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
     # la quinzaine ne paie rien : elle cède la réserve de la paie au podium
-    # Va IG : la quinzaine aux vrais abonnés (clé « mesure_subs »)
+    # Va IG et Twitter : la quinzaine aux vrais abonnés (clé « mesure_subs »)
     cl = classement(debut, min(aujourd, fin_saison), gid=gid, mesure=_profil(gid).get("mesure_subs"),
                     etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine") else "podium")
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((ids or [""])[0])
     try:
-        totaux = alltime(gid, _profil(gid).get("mesure_subs"))
+        # pas affiché (clé « alltime_subs ») : pas relevé non plus
+        totaux = (alltime(gid, _profil(gid).get("mesure_subs"))
+                  if _profil(gid).get("alltime_subs", True) else {})
     except Exception as e:
         print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
         totaux = {}

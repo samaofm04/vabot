@@ -192,6 +192,11 @@ check("livré : Threads n'a plus de classement repris (profil gardé dans PROFIL
 check("livré : plus aucun récap des clics à reprendre (Twitter et Threads retirés)",
       rcr.CIBLES_DEFAUT == {})
 pd.SERVEURS[TH] = dict(pd.PROFIL_THREADS)
+# La quinzaine de Twitter compte les abonnés, sans all-time, depuis le
+# 19/10/2026 (clés « mesure_subs », « alltime_subs » ; leurs tests :
+# tests_podium_tracking.py). La reprise par Threads se teste ici sur les clics.
+pd.SERVEURS[TW].pop("mesure_subs", None)
+pd.SERVEURS[TW].pop("alltime_subs", None)
 rcr.CIBLES_DEFAUT[TW] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 rcr.CIBLES_DEFAUT[TH] = dict(rcr._REPORT_US, salon=rcr.SALON_CLICS)
 AUTRE = "1535758943324999711"          # Youl4b : le serveur du report d'origine

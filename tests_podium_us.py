@@ -180,6 +180,9 @@ pd.SERVEURS["1505418484052394004"].pop("marque", None)
 # et Twitter jusqu au 06/10/2026) : Twitter y repasse, sans quoi il lirait le
 # vrai MyPuls. Le comptage par tracking a ses tests : tests_podium_tracking.py.
 pd.SERVEURS[pd.TWITTER_ID].pop("mesure", None)
+# … de même sa quinzaine aux abonnés, sans all-time (19/10/2026, mêmes tests)
+pd.SERVEURS[pd.TWITTER_ID].pop("mesure_subs", None)
+pd.SERVEURS[pd.TWITTER_ID].pop("alltime_subs", None)
 import safe_json                       # noqa: E402
 
 OKS, FAILS = [], []

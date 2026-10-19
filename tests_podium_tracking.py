@@ -119,7 +119,9 @@ NOMS_BASE = {
 }
 NOMS_MP = {}                           # le nom de chaque tracking que MyPuls connaît
 VISITES = {}                           # tracking → {jour iso: visites}
-MP = {"panne": False, "tronque": False, "decale": False, "sans_emy": 0, "appels": []}
+ABONNES = {}                           # tracking → {jour iso: abonnés}
+MP = {"panne": False, "tronque": False, "decale": False, "sans_emy": 0, "sans_abonnes": False,
+      "appels": []}
 
 
 def _mp_api_get(path, params=None, _essai=0):
@@ -136,12 +138,17 @@ def _mp_api_get(path, params=None, _essai=0):
         if sans_emy and pseudo == "emy.brw":
             continue
         jours = VISITES.get(t, {})
+        ab = ABONNES.get(t, {})
         items.append({"creator_id": 1, "code": code, "name": nom,
                       "url": f"https://onlyfans.com/{pseudo}/{code}", "active": True,
                       # la période, et le compteur depuis la création jusqu'à `au`
                       "visits_period": sum(v for j, v in jours.items() if du <= j <= au),
                       "visits_total": sum(v for j, v in jours.items() if j <= au),
-                      "subscribers_period": 0, "subscribers_total": 0, "new_subscribers": 0,
+                      "subscribers_period": (None if MP["sans_abonnes"] else
+                                             sum(v for j, v in ab.items() if du <= j <= au)),
+                      "subscribers_total": (None if MP["sans_abonnes"] else
+                                            sum(v for j, v in ab.items() if j <= au)),
+                      "new_subscribers": 0,
                       "revenue": {"total": 0}, "group_ids": []})
     debut = (dt.date.fromisoformat(du) + dt.timedelta(days=1)).isoformat() if MP["decale"] else du
     return {"ok": True, "data": {
@@ -217,9 +224,10 @@ def installer():
     pd._RELEVES_LUS = False
     pd._MP_LUS.clear()
     ANALYTICS.clear()
-    MP.update(panne=False, tronque=False, decale=False, sans_emy=0)
+    MP.update(panne=False, tronque=False, decale=False, sans_emy=0, sans_abonnes=False)
     MP["appels"].clear()
     VISITES.clear()
+    ABONNES.clear()
     NOMS_MP.clear()
     NOMS_MP.update(NOMS_BASE)
     LISTE_MUETTE.clear()
@@ -611,7 +619,8 @@ try:
           and "1 tracking neuf pas encore dans MyPuls" in e["description"]
           and "Quelqu" not in e["description"], e["description"][-500:])
     pages = pd.pages_subs(cl7, LUN, MAR, {}, gid=TW)
-    check("classement subs : « Clics tracking OF »", "Clics **tracking OF**" in pages[0]["description"])
+    check("classement subs : « Abonnés tracking OF » (la quinzaine compte les abonnés)",
+          "Abonnés **tracking OF**" in pages[0]["description"])
     frais()
     b = pd.embed_bonus(pd.classement(MAR, MAR, gid=TW), MAR, gid=TW)
     check("bonus du jour : « clics tracking OF »", "clics **tracking OF**" in b["description"])
@@ -750,6 +759,69 @@ try:
     pd.classement(LUN, MAR, gid=TW, mesure="gms")
     check("le relevé GetMySocial des VA US (Va IG) ne crée aucun numéro Twitter",
           table() == avant_num, set(table()) ^ set(avant_num))
+
+    # ------------------------------------------------------------------ 13
+    # Propriétaire, 19/10/2026, devant « VA 43 — 711 subs » (711 clics, 84
+    # abonnés) : « là c'est un classement de subs pas de clics », « faut
+    # additionner les subs du même tracking de Solen et Emy »
+    print("\n— 13. la quinzaine de Twitter aux abonnés, Emy et Seren additionnés")
+    installer()
+    CLOCK["now"] = dt.datetime(2026, 10, 19, 12, 0)
+    Q0, Q1, QF = dt.date(2026, 10, 16), dt.date(2026, 10, 19), dt.date(2026, 10, 31)
+    NOMS_MP["seren.vale/c201"] = "Tsiry - ( normal )"
+    LIENS[EQ_TW1][6]["buttons"].append({"url": OF + "seren.vale/c201"})   # sa moitié Seren
+    VISITES.update({"emy.brw/c37": {"2026-10-16": 385, "2026-10-17": 137, "2026-10-18": 188,
+                                    "2026-10-19": 1},
+                    "seren.vale/c201": {"2026-10-17": 50}, "emy.brw/c42": {"2026-10-16": 362}})
+    ABONNES.update({"emy.brw/c37": {"2026-10-15": 39, "2026-10-16": 38, "2026-10-17": 15,
+                                    "2026-10-18": 31},
+                    "seren.vale/c201": {"2026-10-17": 6}, "emy.brw/c42": {"2026-10-16": 51}})
+    check("Twitter : la quinzaine en abonnés, le podium et le bonus en clics",
+          pd._source_subs(TW) == "tracking_abonnes" and pd._source(TW) == "tracking"
+          and pd._source_subs(IG) == "abonnes")
+    cl13 = pd.classement(Q0, Q1, gid=TW, mesure=pd._profil(TW)["mesure_subs"])
+    check("VA 43 : les abonnés de la période, Emy + Seren (84 + 6), ni ses clics ni ceux du 15",
+          par_va(cl13).get("VA 43") == 90 and par_va(cl13).get("VA 12") == 51, par_va(cl13))
+    frais()
+    check("le podium compte toujours les clics, Emy + Seren",
+          par_va(pd.classement(Q0, Q1, gid=TW)).get("VA 43") == 761)
+    d13 = pd.pages_subs(cl13, Q0, QF, {"VA 43": 1012}, gid=TW)[0]["description"]
+    check("en-tête « Abonnés tracking OF », « 90 subs », et pas d'all-time (clé « alltime_subs »)",
+          "Abonnés **tracking OF**" in d13 and "**VA 43** — **90** subs" in d13
+          and "all-time" not in d13, d13[:400])
+    frais()
+    n = len(MP["appels"])
+    check("classement de la quinzaine posté", bool(pd.rafraichir_subs(TW, forcer=True)))
+    post = [x for x in DISCORD.appels if x["m"] == "POST"][-1]["json"]["embeds"][0]
+    check("… aux abonnés, sans relever le « depuis toujours » qu'il n'affiche pas",
+          "**VA 43** — **90** subs" in post["description"] and "all-time" not in post["description"]
+          and not [a for a in MP["appels"][n:] if a[1] == pd.ALLTIME_DEPUIS],
+          (post["description"][:400], MP["appels"][n:]))
+    frais()
+    MP["sans_abonnes"] = True
+    clm = pd.classement(Q0, Q1, gid=TW, mesure="tracking_abonnes")
+    check("MyPuls sans les abonnés : aucun relevé, jamais des zéros",
+          not clm["lignes"] and clm["erreur"], clm.get("erreur"))
+    MP["sans_abonnes"] = False
+    # le tracking de Jessye du VA 12, quitté le 06/10 : MyPuls ne le rend plus,
+    # ses visites sont gardées au registre, ses abonnés ne l'ont jamais été
+    brut = safe_json.load(pd._fichier_trackings(), default={})
+    brut["trackings"]["jessyewdiference/c88"] = {
+        "numero": 12, "cle": "Roucham", "spam": False, "nom": "Roucham", "liens": ["(Roucham) 1"],
+        "ids": [], "mp": True, "premier": "2026-10-01", "vu": "2026-10-06", "actif": False,
+        "cumul": {"au": "2026-10-06", "n": 10722}}
+    safe_json.write(pd._fichier_trackings(), brut)
+    NOMS_MP.pop("jessyewdiference/c88", None)
+    frais()
+    at13 = pd.alltime(TW, "tracking_abonnes")
+    check("le « depuis toujours » en abonnés : son propre fichier, Emy + Seren ; le VA 12 sans "
+          "relevé (pas 10 722 visites, pas zéro)",
+          at13.get("VA 43") == 129 and "VA 12" not in at13
+          and (pd.DATA_DIR / "podium_alltime_tracking_abonnes.json").exists()
+          and not (pd.DATA_DIR / "podium_alltime_tracking.json").exists(), at13)
+    frais()
+    check("… celui des clics garde les 10 722 visites d'avant Emy",
+          pd.alltime(TW).get("VA 12") == 10722 + 362)
 
     # ------------------------------------------------------------------ 12
     print("\n— 12. l'écriture du registre")
