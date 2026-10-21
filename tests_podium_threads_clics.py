@@ -700,15 +700,19 @@ try:
     check("plus d'all-time : ni 🌐 ni relevé « depuis toujours »",
           "🌐" not in dq and "all-time" not in dq
           and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), dq)
-    # Threads 12 : l1 + l2, US + UK + CA = 47, tous pays 59 ; Instagram VA 1
-    # (amelia:3, i1) : US + CA = 3, tous pays 33 ; Instagram VA 2 (lola:2, i2)
+    # Threads 12 : l1 + l2, US + UK + CA = 47, tous pays 59 ; Threads 01
+    # (Va IG amelia:3, i1) : US + CA = 3, tous pays 33 ; Threads 02 (lola:2, i2).
+    # Propriétaire, 21/10/2026 : « écrit pas Instagram », « Threads 01 »
     check("le format voulu : « 🥇 **Threads 12** — US : **47** · GBL : **59** », les VA de Va IG "
-          "en « Instagram VA n », le Canada compté",
+          "en « Threads 01 », « Threads 02 », le Canada compté",
           "🥇 **Threads 12** — US : **47** · GBL : **59**" in dq
           and "Threads 31 — US : 7 · GBL : 11" in dq
-          and "Instagram VA 1 — US : 3 · GBL : 33" in dq
-          and "Instagram VA 2 — US : 4 · GBL : 10" in dq
-          and "Instagram VA 3" not in dq and "Amelia" not in dq and "seven" not in dq, dq)
+          and "Threads 01 — US : 3 · GBL : 33" in dq
+          and "Threads 02 — US : 4 · GBL : 10" in dq
+          and "Instagram" not in dq and "Amelia" not in dq and "seven" not in dq, dq)
+    tab_ig = json.loads((pd.DATA_DIR / "numeros_va_ig_threads.json").read_text())
+    check("… leur table à eux (numeros_va_ig_threads.json), le lien coupé n'y entre pas",
+          tab_ig == {"amelia:3": 1, "lola:2": 2}, tab_ig)
     check("… US + UK + CA pour tous : Threads 41 (l4, 4 du Canada) compte 24",
           "Threads 41** — US : **24** · GBL : **24**" in dq or "Threads 41 — US : 24 · GBL : 24" in dq, dq)
     check("la quinzaine non plus : ni ⚠️ ni ℹ️", "⚠️" not in dq and "ℹ️" not in dq, dq[-300:])
@@ -762,10 +766,24 @@ try:
           and "Threads 31 · **?**" in txt_th and "pas_threads" not in txt_th, txt_th)
     check("… numéros du registre (mode d'avant) : le nom du registre",
           "🥇 Threads 12 · **Roucham** · 47 clics" in txt_reg, txt_reg)
-    check("… et les VA de Va IG : « Instagram VA n » → pseudo (model VA n), jamais le "
-          "« Threads n » au même numéro",
-          "Instagram VA 1 · **seven (Amelia VA 3)** · 3 clics" in txt_th
-          and "Instagram VA 2 · **lolafan (Lola VA 2)** · 4 clics" in txt_th, txt_th)
+    check("… et les VA de Va IG : « Threads 01 » → pseudo (model VA n · Va IG)",
+          "Threads 01 · **seven (Amelia VA 3 · Va IG)** · 3 clics" in txt_th
+          and "Threads 02 · **lolafan (Lola VA 2 · Va IG)** · 4 clics" in txt_th, txt_th)
+    # un numéro Va IG que prend un jour un VA de Threads (un VA de Twitter qui
+    # rejoint Threads y garde le sien) : le VA IG change, pas celui de Threads
+    safe_json.write_text(pd.DATA_DIR / "numeros_va_ig_threads.json",
+                         json.dumps({"amelia:3": 1, "lola:2": 2, "emma:9": 4}))
+    _sortie_ig = io.StringIO()
+    with contextlib.redirect_stdout(_sortie_ig):
+        t_ig = pd.numeros_ig_threads({"amelia:3", "lola:2", "emma:9", "julia:1"}, {2, 3, 31})
+    check("numéros des VA de Va IG : jamais celui d'un VA de Threads ; celui qu'un ticket "
+          "Threads prend (2) passe au premier libre, c'est dit ; les autres ne bougent pas",
+          t_ig == {"amelia:3": 1, "emma:9": 4, "julia:1": 5, "lola:2": 6}
+          and "renuméroté" in _sortie_ig.getvalue()
+          and json.loads((pd.DATA_DIR / "numeros_va_ig_threads.json").read_text()) == t_ig,
+          (t_ig, _sortie_ig.getvalue()))
+    check("… et sur deux chiffres : « Threads 01 »",
+          pd._libelle_ig_threads(1) == "Threads 01" and pd._libelle_ig_threads(42) == "Threads 42")
     _lfr.ETAT = _etat_fr
 
     # ------------------------------------------------------------------ 5
