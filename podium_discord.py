@@ -306,6 +306,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # sont pas : « mets pas les subs, uniquement dans leur ticket
                  # perso quand il tape Mes stats ». Voir _alltime_clics.
                  "alltime_clics": True,
+                 # les VA de Twitter aussi, lus dans JESSY LE RETOUR (leurs liens
+                 # rattachés à leur numéro par leur tracking, comme au podium de
+                 # Twitter) : « Threads VA 1nn ». Voir _entites_jessye.
+                 "quinzaine_jessye": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -2446,7 +2450,16 @@ def numeros_instagram(vues=(), eviter=()) -> Dict[str, int]:
 #: « Threads VA » et trois chiffres ne croisent jamais un « Threads 92 » de
 #: Threads.
 def _libelle_va_ig(n: int) -> str:
-    return f"Threads VA {int(n):03d}"
+    return f"Threads VA 0{int(n):02d}"
+
+
+#: … et ceux de Twitter lus dans JESSY LE RETOUR : « Threads VA 112 », un 1
+#: devant leur numéro de Twitter (registre des trackings). Propriétaire,
+#: 21/10/2026 : « lis aussi Jessye pour les liens, pour les clics, toujours
+#: avec le truc pour différencier ». Le premier chiffre dit d'où vient le VA :
+#: 0 Va IG, 1 Twitter ; un VA de Threads n'a pas de « VA ».
+def _libelle_va_jessye(n: int) -> str:
+    return f"Threads VA 1{int(n):02d}"
 
 
 def _marque(gid: Optional[str], texte: str) -> str:
@@ -3750,7 +3763,7 @@ def _format_subs(gid: Optional[str]) -> str:
     """Le format des pages de la quinzaine : celui des messages vivants, plus
     « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
     passage, sans toucher au podium de la semaine."""
-    return _format_affiche(gid) + ("+us-gbl-va-at" if _profil(gid).get("us_gbl") else "")
+    return _format_affiche(gid) + ("+us-gbl-va-at-j" if _profil(gid).get("us_gbl") else "")
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4283,6 +4296,50 @@ def _entites_va_ig() -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _liens_equipe(equipe: str, etiquette: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """(liens, frais) d'UN espace GetMySocial, comme liens_bruts pour un serveur
+    (repli sur le cache s'il ne répond pas, et c'est dit)."""
+    try:
+        import gms
+        with _etiquette(etiquette):
+            r = gms.list_links_team(equipe, force_refresh=True) or {}
+        liens = r.get("links") or r.get("data") or []
+        if r.get("ok") is not False and liens:
+            return [l for l in liens if isinstance(l, dict) and l.get("id")], True
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] liste {equipe} : {type(e).__name__}: {e}", flush=True)
+    liens = _lire(LIENS_CACHE, {}).get(equipe) or []
+    print(f"[podium] espace {equipe} : repli sur le cache ({len(liens)} lien(s))", flush=True)
+    return [l for l in liens if isinstance(l, dict) and l.get("id")], False
+
+
+_JESSYE_ECARTES_DITS: set = set()
+
+
+def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+    """{numéro de VA de Twitter : ids de ses liens} pour les liens de JESSY LE
+    RETOUR, rattachés par leur tracking au registre de Twitter (« VA 3 -
+    Roucham 1 ( normal ) » → emy.brw/c42 → VA 12), comme le podium de
+    Twitter. Un lien sans tracking connu, ou dont les trackings disent deux
+    VA, n'est pas compté ; c'est dit au journal, une fois par liste."""
+    regs = _lire_registre().get("trackings") or {}
+    out: Dict[int, List[str]] = {}
+    ecartes: List[str] = []
+    for l in liens:
+        nums = {int(regs[t]["numero"]) for t in trackings_du_lien(l)
+                if isinstance(regs.get(t), dict) and str(regs[t].get("numero") or "").isdigit()}
+        if len(nums) != 1:
+            ecartes.append(f'{_nom_du_lien(l)} ({"aucun VA" if not nums else "VA " + "/".join(map(str, sorted(nums)))})')
+            continue
+        out.setdefault(nums.pop(), []).append(str(l["id"]))
+    dit = "|".join(sorted(ecartes))
+    if ecartes and dit not in _JESSYE_ECARTES_DITS:
+        _JESSYE_ECARTES_DITS.add(dit)
+        print(f"[podium] quinzaine de Threads : {len(ecartes)} lien(s) de JESSY LE RETOUR pas "
+              f"comptés : {', '.join(sorted(ecartes)[:8])}", flush=True)
+    return out
+
+
 def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                       etiquette: str) -> Dict[str, Any]:
     """La quinzaine de Threads (clés « pays_subs », « quinzaine_va_ig »,
@@ -4324,6 +4381,31 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                                "liens": len(e["ids"]), "spam": False, "model": e["model"],
                                "cle_ig": k})
             time.sleep(0.3)
+    if pf.get("quinzaine_jessye"):
+        liens_j, frais_j = _liens_equipe(EQUIPE_VA, etiquette)
+        frais = frais and frais_j
+        directs_j = _directs(liens_j)
+        # un VA parti de Twitter n'y est pas non plus (_sans_partis de Twitter)
+        partis_tw = {k for k, jour in _partis(TWITTER_ID).items() if jour <= fin.isoformat()}
+        for n, ids in sorted(_entites_jessye(liens_j).items()):
+            if f"VA {n}" in partis_tw:
+                continue
+            va = _libelle_va_jessye(n)
+            n_ig += 1
+            try:
+                total, pays = _releve_liens(gid, ids, d0, d1, "gms_bouton", etiquette, directs_j)
+            except Exception:                                # noqa: BLE001
+                total, pays = None, None
+            if pays is None:
+                illisibles.append(va)
+            else:
+                lignes.append({"va": va, "numero": n,
+                               "clics": sum(int(pays.get(p) or 0) for p in pays_q),
+                               "gbl": int(total if total is not None
+                                          else sum(int(v or 0) for v in pays.values())),
+                               "liens": len(ids), "spam": False, "model": "",
+                               "jessye": n, "ids": ids})
+            time.sleep(0.3)
     lignes.sort(key=lambda x: (-x["clics"], -int(x.get("gbl") or 0), x["va"]))
     out = dict(cl, lignes=lignes, illisibles=sorted(illisibles), frais=frais,
                entites=int(cl.get("entites") or 0) + n_ig)
@@ -4357,8 +4439,10 @@ def _alltime_clics(gid: str, cl: Dict[str, Any], etiquette: str) -> None:
         if not lus:
             liens, _f = liens_bruts(gid, etiquette)
             liens_ig, _f2 = liens_bruts(VA_IG_ID, etiquette)
-            lus.update(ents=entites_liens_va(liens),
-                       directs=_directs(liens) | _directs(liens_ig))
+            directs = _directs(liens) | _directs(liens_ig)
+            if _profil(gid).get("quinzaine_jessye"):
+                directs |= _directs(_liens_equipe(EQUIPE_VA, etiquette)[0])
+            lus.update(ents=entites_liens_va(liens), directs=directs)
         return lus
     ig_ids = {k: e["ids"] for k, e in _entites_va_ig().items()}
     change = False
@@ -4367,8 +4451,8 @@ def _alltime_clics(gid: str, cl: Dict[str, Any], etiquette: str) -> None:
         if isinstance(at, dict):
             at = at.get("clics")          # le format du 21/10 midi : {subs, clics}
         if str(x["va"]) not in totaux:
-            ids = (ig_ids.get(x["cle_ig"]) if x.get("cle_ig") else
-                   (listes()["ents"].get(str(int(x.get("numero") or -1))) or {}).get("ids")) or []
+            ids = (x.get("ids") or (ig_ids.get(x["cle_ig"]) if x.get("cle_ig") else
+                   (listes()["ents"].get(str(int(x.get("numero") or -1))) or {}).get("ids"))) or []
             at = None
             if ids:
                 try:
@@ -5078,6 +5162,9 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
     for k, e in ig.items():
         if k in table:
             out[_libelle_va_ig(table[k])] = f'{e["pseudo"] or "?"} ({e["nom"]} · Va IG)'
+    if pf.get("quinzaine_jessye"):
+        for n, nom in _noms_registre().items():
+            out[_libelle_va_jessye(n)] = f"{nom or '?'} (VA {n} · Twitter)"
     return out
 
 

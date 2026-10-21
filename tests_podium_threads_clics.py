@@ -714,12 +714,23 @@ try:
     check("l'all-time des clics sur chaque ligne, sur la même ligne : « · 🌐 n all-time click », "
           "tous pays depuis la création du lien ; jamais l'ancien fichier all-time",
           "🥇 **Threads 12** — US : **47** · GBL : **59** · 🌐 — all-time click\n" in dq
-          and "4. Threads 31 — US : 7 · GBL : 11 · 🌐 11 all-time click\n" in dq
+          and ". Threads 31 — US : 7 · GBL : 11 · 🌐 11 all-time click\n" in dq
           and "Threads VA 001 — US : 3 · GBL : 33 · 🌐 33 all-time click\n" in dq
           and "Threads VA 002 — US : 4 · GBL : 10 · 🌐 10 all-time click\n" in dq
           and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), dq)
     # propriétaire, 21/10/2026 : « mets pas les subs, uniquement dans leur ticket
     # perso quand il tape Mes stats »
+    # Propriétaire, 21/10/2026 : « lis aussi Jessye pour les liens, pour les
+    # clics, toujours avec le truc pour différencier » : les VA de Twitter de
+    # JESSY LE RETOUR, rattachés par leur tracking (c42 → VA 12), en
+    # « Threads VA 1nn » ; deux liens sans VA (« test emy ») pas comptés
+    check("VA de Twitter (JESSY LE RETOUR) : « Threads VA 112 » (Roucham, VA 12), « 143 », "
+          "« 141 », leurs clics et leur all-time ; 0 = Va IG, 1 = Twitter",
+          "🥈 **Threads VA 112** — US : **47** · GBL : **59** · 🌐 59 all-time click" in dq
+          and "Threads VA 143 — US : 31 · GBL : 81 · 🌐 81 all-time click" in dq
+          and "Threads VA 141 — US : 24 · GBL : 24 · 🌐 24 all-time click" in dq
+          and pd._libelle_va_jessye(12) == "Threads VA 112"
+          and pd._libelle_va_ig(23) == "Threads VA 023", dq)
     check("… et aucun abonné dans le classement public : ni « Subs », ni « all-time sub »",
           "Subs" not in dq and "all-time sub" not in dq and "abonnés" not in dq, dq)
     check("la quinzaine non plus : ni ⚠️ ni ℹ️", "⚠️" not in dq and "ℹ️" not in dq, dq[-300:])
@@ -729,7 +740,7 @@ try:
           eq["title"] == "📊 Classement clics — la quinzaine"
           and "Clics **uniques US + UK + CA** · **" + str(n_lignes) + "** comptes classés" in dq
           and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_" in dq
-          and dq.rstrip().endswith("\nUS : **119** · GBL : **221**")
+          and dq.rstrip().endswith("\nUS : **221** · GBL : **385**")
           and "Roucham" not in dq and "roucham" not in dq, (eq["title"], dq))
     check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours (une fois par jour), clics "
           "uniques, un relevé par VA dont les deux de Va IG",
@@ -769,10 +780,13 @@ try:
     check("« 👀 Pseudos » de Threads, livré : « Threads n » → le pseudo de sa fiche liens_va, "
           "jamais celle d'un autre serveur",
           "🥇 Threads 12 · **momobtn** · 47 clics" in txt_th
-          and "🥈 Threads 43 · **steave0454** · 31 clics" in txt_th
+          and " Threads 43 · **steave0454** · 31 clics" in txt_th
           and "Threads 31 · **?**" in txt_th and "pas_threads" not in txt_th, txt_th)
     check("… numéros du registre (mode d'avant) : le nom du registre",
           "🥇 Threads 12 · **Roucham** · 47 clics" in txt_reg, txt_reg)
+    check("… et les VA de Twitter (JESSY LE RETOUR) : « Threads VA 112 » → son nom au registre "
+          "(VA 12 · Twitter)",
+          "Threads VA 112 · **Roucham (VA 12 · Twitter)** · 47 clics" in txt_th, txt_th)
     check("… et les VA de Va IG : « Threads VA 001 » → pseudo (model VA n · Va IG)",
           "Threads VA 001 · **seven (Amelia VA 3 · Va IG)** · 3 clics" in txt_th
           and "Threads VA 002 · **lolafan (Lola VA 2 · Va IG)** · 4 clics" in txt_th, txt_th)
