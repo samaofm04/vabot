@@ -301,11 +301,11 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # Lu par subs_va.texte et tickets_discord (libellé). POUR LE
                  # DONNER À TWITTER : la même clé dans son profil.
                  "mes_stats": True,
-                 # sur chaque ligne de la quinzaine, après US / GBL : ses abonnés
-                 # de la période, puis l'all-time des abonnés et des clics
-                 # (propriétaire, 21/10/2026 : « mets les subs à côté aussi »,
-                 # « 🌐 all-time sub et 🌐 all-time click »). Voir _subs_et_alltime.
-                 "subs_et_alltime": True,
+                 # sur chaque ligne de la quinzaine, après US / GBL : « 🌐 n
+                 # all-time click » (propriétaire, 21/10/2026). Ses abonnés n'y
+                 # sont pas : « mets pas les subs, uniquement dans leur ticket
+                 # perso quand il tape Mes stats ». Voir _alltime_clics.
+                 "alltime_clics": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -3150,9 +3150,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                    f'Abonnés **tracking OF** · **{len(lignes)}** comptes classés\n'
                    if p.get("mesure_subs") == "tracking_abonnes" else
                    f'Clics **uniques {p["marche_subs"]}** · **{len(lignes)}** comptes classés\n'
-                   "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays"
-                   + (" · Subs : abonnés de la période" if p.get("subs_et_alltime") else "")
-                   + "_\n"
+                   "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_\n"
                    if p.get("us_gbl") and p.get("marche_subs") else
                    f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n'))
     else:
@@ -3181,18 +3179,14 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         nom = x.get("affiche") or x["va"]
         if p.get("us_gbl") and "gbl" in x:
             # Threads (propriétaire, 21/10/2026 : « je veux avoir us : et le
-            # gbl : ») : ce qui classe, puis tous pays ; ses abonnés et les
-            # all-time s'il y en a (_subs_et_alltime), « — » quand illisibles
+            # gbl : ») : ce qui classe, puis tous pays, puis l'all-time des
+            # clics (_alltime_clics), « — » quand illisible
             g = "**" if i < 3 else ""
             def v(n):
                 return "—" if n is None else n
-            reste = (f' · Subs : {g}{v(x["subs"])}{g}' if "subs" in x else "")
-            # les deux all-time sur une seconde ligne, sous la sienne : sur
-            # téléphone, cinq chiffres et deux 🌐 sur une ligne se coupaient
-            # n'importe où (propriétaire, 21/10/2026 : « fais au mieux »).
-            # Dans la même entrée : une page ne les sépare jamais
-            reste += (f'\n↳ 🌐 {v(x.get("at_subs"))} all-time sub'
-                      f' · 🌐 {v(x.get("at_clics"))} all-time click' if "at_subs" in x else "")
+            # sur une ligne (propriétaire, 21/10/2026 : « pas possible de faire
+            # en une ligne ? ») ; les abonnés restent dans « 📈 Mes stats »
+            reste = (f' · 🌐 {v(x["at_clics"])} all-time click' if "at_clics" in x else "")
             rangs.append(f'{med[i]} **{nom}** — US : **{x["clics"]}** · GBL : **{x["gbl"]}**{reste}'
                          if i < 3 else
                          f'{i + 1}. {suite}{nom} — US : {x["clics"]} · GBL : {x["gbl"]}{reste}')
@@ -3210,10 +3204,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if p.get("us_gbl") and mix is None and all("gbl" in x for x in lignes):
         queue = [f'\n👥 **Total période**\nUS : **{total}** · GBL : '
                  f'**{sum(int(x["gbl"]) for x in lignes)}**']
-        if any("subs" in x for x in lignes):
-            sans = sum(1 for x in lignes if x.get("subs") is None)
-            queue[0] += (f' · Subs : **{sum(int(x.get("subs") or 0) for x in lignes)}**'
-                         + (f" ({sans} sans relevé)" if sans else ""))
+
     if cl["illisibles"]:
         if final:
             queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
@@ -3759,7 +3750,7 @@ def _format_subs(gid: Optional[str]) -> str:
     """Le format des pages de la quinzaine : celui des messages vivants, plus
     « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
     passage, sans toucher au podium de la semaine."""
-    return _format_affiche(gid) + ("+us-gbl-va" if _profil(gid).get("us_gbl") else "")
+    return _format_affiche(gid) + ("+us-gbl-va-at" if _profil(gid).get("us_gbl") else "")
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4336,43 +4327,29 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
     lignes.sort(key=lambda x: (-x["clics"], -int(x.get("gbl") or 0), x["va"]))
     out = dict(cl, lignes=lignes, illisibles=sorted(illisibles), frais=frais,
                entites=int(cl.get("entites") or 0) + n_ig)
-    if pf.get("subs_et_alltime"):
-        _subs_et_alltime(gid, out, debut, fin, etiquette)
+    if pf.get("alltime_clics"):
+        _alltime_clics(gid, out, etiquette)
     return out
 
 
-#: L'all-time de la quinzaine de Threads (clics tous pays, abonnés), relevé une
+#: L'all-time de la quinzaine de Threads (clics tous pays), relevé une
 #: fois par jour : un appel GetMySocial par VA depuis toujours ne vaut pas
 #: d'être refait à chaque heure, comme alltime() pour les autres serveurs.
 def _fichier_alltime_quinzaine() -> Path:
     return DATA_DIR / "podium_alltime_threads_quinzaine.json"
 
 
-def _subs_et_alltime(gid: str, cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-                     etiquette: str) -> None:
-    """Complète chaque ligne de la quinzaine de Threads (clé « subs_et_alltime »)
-    — propriétaire, 21/10/2026 : « mets les subs à côté aussi », puis « 🌐 all-time
-    sub et 🌐 all-time click » :
-      - « subs » : ses abonnés de la période, la règle de « Mes subs » (ses
-        trackings à son nom : Emy et Seren pour un VA Threads, OF et MYM pour
-        un VA de Va IG) ; None si un tracking est illisible, écrit « — » ;
-      - « at_subs », « at_clics » : depuis toujours (abonnés ; clics tous pays
-        depuis la création du lien), jamais plus petits que la période (c181d7b :
-        « 43 all-time pour 66 clics »).
-    Les subs ne classent rien : le tri reste sur US. « subs_manquants » : les
-    lignes à « — », dites au journal."""
-    import liens_va
-    import subs_va
-    d0, d1 = debut.isoformat(), fin.isoformat()
+def _alltime_clics(gid: str, cl: Dict[str, Any], etiquette: str) -> None:
+    """« at_clics » sur chaque ligne de la quinzaine de Threads (clé
+    « alltime_clics ») : ses clics tous pays depuis la création de son lien,
+    jamais plus petits que la période (c181d7b : « 43 all-time pour 66
+    clics »). Propriétaire, 21/10/2026 : « 🌐 all-time click » ; les abonnés,
+    eux, ne s'affichent pas ici (« mets pas les subs, uniquement dans leur
+    ticket perso quand il tape Mes stats »)."""
     auj = _aujourdhui().isoformat()
-    uid_de = {int(f["numero"]): c.split(":", 1)[1]
-              for c, f in (liens_va._etat().get("liens") or {}).items()
-              if str(c).startswith(f"{gid}:") and isinstance(f, dict)
-              and str(f.get("numero") or "").isdigit()}
-    ig = subs_va.entites_va_ig()
     cache = _lire(_fichier_alltime_quinzaine(), {})
     neuf = cache.get("jour") != auj
-    totaux: Dict[str, Dict[str, Any]] = {} if neuf else dict(cache.get("totaux") or {})
+    totaux: Dict[str, Any] = {} if neuf else dict(cache.get("totaux") or {})
     lus: Dict[str, Any] = {}
 
     def listes() -> Dict[str, Any]:
@@ -4384,55 +4361,30 @@ def _subs_et_alltime(gid: str, cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                        directs=_directs(liens) | _directs(liens_ig))
         return lus
     ig_ids = {k: e["ids"] for k, e in _entites_va_ig().items()}
-    change = neuf
-    manquants: List[str] = []
+    change = False
     for x in cl.get("lignes") or []:
-        if x.get("cle_ig"):
-            e = ig.get(x["cle_ig"]) or {}
-            ts, pseudo, ids = e.get("trackings") or [], str(e.get("pseudo") or ""), ig_ids.get(x["cle_ig"]) or []
-        else:
-            uid = uid_de.get(int(x.get("numero") or -1))
-            ts = subs_va.trackings_du_va(gid, uid) if uid else []
-            pseudo = subs_va.pseudo_du_va(gid, uid) if uid else ""
-            ids = None                    # lus avec la liste, s'il faut
-        try:
-            x["subs"] = subs_va.subs_periode(ts, pseudo, d0, d1)
-        except Exception as ex:                              # noqa: BLE001
-            print(f"[podium] subs de {x['va']} : {type(ex).__name__}: {ex}", flush=True)
-            x["subs"] = None
-        if x["subs"] is None:
-            manquants.append(str(x["va"]))
         at = totaux.get(str(x["va"]))
-        if at is None:
-            at = {"subs": None, "clics": None}
-            try:
-                at["subs"] = subs_va.subs_depuis_toujours(ts, pseudo)
-            except Exception as ex:                          # noqa: BLE001
-                print(f"[podium] all-time subs de {x['va']} : {type(ex).__name__}: {ex}", flush=True)
-            if ids is None:
-                ids = (listes()["ents"].get(str(int(x.get("numero") or -1))) or {}).get("ids") or []
+        if isinstance(at, dict):
+            at = at.get("clics")          # le format du 21/10 midi : {subs, clics}
+        if str(x["va"]) not in totaux:
+            ids = (ig_ids.get(x["cle_ig"]) if x.get("cle_ig") else
+                   (listes()["ents"].get(str(int(x.get("numero") or -1))) or {}).get("ids")) or []
+            at = None
             if ids:
                 try:
                     tot, _p = _releve_liens(gid, ids, ALLTIME_DEPUIS, auj, "gms_bouton",
                                             etiquette, listes()["directs"])
-                    at["clics"] = int(tot) if tot is not None else None
+                    at = int(tot) if tot is not None else None
                 except Exception:                            # noqa: BLE001
-                    pass
+                    at = None
                 time.sleep(0.3)
             totaux[str(x["va"])] = at
             change = True
-        x["at_subs"] = (None if at.get("subs") is None
-                        else max(int(at["subs"]), int(x["subs"] or 0)))
-        x["at_clics"] = (None if at.get("clics") is None
-                         else max(int(at["clics"]), int(x.get("gbl") or 0)))
-    cl["subs_manquants"] = manquants
-    if change and totaux:
+        x["at_clics"] = None if at is None else max(int(at), int(x.get("gbl") or 0))
+    if change:
         safe_json.write_text(_fichier_alltime_quinzaine(),
                              json.dumps({"jour": auj, "totaux": totaux}, ensure_ascii=False,
                                         indent=1, sort_keys=True))
-    if manquants:
-        print(f"[podium] quinzaine {gid} : subs sans relevé pour {len(manquants)} VA "
-              f"({', '.join(manquants[:10])}) — écrits « — »", flush=True)
 
 
 def clics_du_va(gid: str, uid: str,

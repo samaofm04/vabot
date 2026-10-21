@@ -467,18 +467,6 @@ def subs_depuis_toujours(trackings: List[Tuple[str, str]], pseudo: str) -> Optio
     return total
 
 
-def subs_periode(trackings: List[Tuple[str, str]], pseudo: str, d0: str, d1: str) -> Optional[int]:
-    """Les abonnés de ces trackings sur [d0, d1], ceux à son nom seulement —
-    la règle de « Mes subs » (subs_du_va) pour une période. None si une
-    partie est illisible, ou s'il n'a aucun tracking."""
-    if not trackings:
-        return None
-    communs = _communs(trackings, pseudo)
-    of = [u for p, u in trackings if p == "of" and u not in communs]
-    mym = [u for p, u in trackings if p == "mym" and u not in communs]
-    n_of, n_mym = _subs_of(of, d0, d1), _subs_mym(mym, d0, d1)
-    return None if n_of is None or n_mym is None else n_of + n_mym
-
 
 def pseudos_va_ig(debut: dt.date, fin: dt.date) -> List[Dict[str, Any]]:
     """Le classement de la quinzaine avec, pour le STAFF seulement, le numéro

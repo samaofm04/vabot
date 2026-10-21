@@ -711,45 +711,25 @@ try:
     RENDU["quinzaine"] = eq
     dq = eq["description"]
     _lv4._etat, pd._lire_mypuls = _etat_lv4, _mp4
-    check("abonnés de la période et all-time sur chaque ligne : « · Subs : 5 · 🌐 40 all-time "
-          "sub · 🌐 n all-time click », jamais l'ancien fichier all-time",
-          "🥇 **Threads 12** — US : **47** · GBL : **59** · Subs : **5**\n↳ 🌐 40 all-time sub" in dq
-          and "Threads 31 — US : 7 · GBL : 11 · Subs : —\n↳ 🌐 — all-time sub · 🌐 11 all-time click"
-          in dq
+    check("l'all-time des clics sur chaque ligne, sur la même ligne : « · 🌐 n all-time click », "
+          "tous pays depuis la création du lien ; jamais l'ancien fichier all-time",
+          "🥇 **Threads 12** — US : **47** · GBL : **59** · 🌐 — all-time click\n" in dq
+          and "4. Threads 31 — US : 7 · GBL : 11 · 🌐 11 all-time click\n" in dq
+          and "Threads VA 001 — US : 3 · GBL : 33 · 🌐 33 all-time click\n" in dq
+          and "Threads VA 002 — US : 4 · GBL : 10 · 🌐 10 all-time click\n" in dq
           and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), dq)
-    check("… l'all-time jamais sous la période (1 au compteur, 2 sur la période : 🌐 2), les "
-          "clics depuis toujours tous pays (33)",
-          "Threads VA 001 — US : 3 · GBL : 33 · Subs : 2\n↳ 🌐 2 all-time sub · 🌐 33 all-time click"
-          in dq, dq)
-    check("… sans tracking : « — », pas 0",
-          "Threads VA 002 — US : 4 · GBL : 10 · Subs : —\n↳ 🌐 — all-time sub" in dq, dq)
-    # Threads 12 : l1 + l2, US + UK + CA = 47, tous pays 59 ; Threads VA 001
-    # (Va IG amelia:3, i1, son numéro Instagram 1) : US + CA = 3, tous pays
-    # 33 ; Threads VA 002 (lola:2, i2). Propriétaire, 21/10/2026 : « écris
-    # Threads VA 023 » pour l'Instagram VA 23
-    check("le format voulu : « 🥇 **Threads 12** — US : **47** · GBL : **59** », les VA de Va IG "
-          "en « Threads VA 0nn » (leur numéro Instagram), le Canada compté",
-          "🥇 **Threads 12** — US : **47** · GBL : **59**" in dq
-          and "Threads 31 — US : 7 · GBL : 11" in dq
-          and "Threads VA 001 — US : 3 · GBL : 33" in dq
-          and "Threads VA 002 — US : 4 · GBL : 10" in dq
-          and "Instagram" not in dq and "Amelia" not in dq and "seven" not in dq, dq)
-    tab_ig = json.loads((pd.DATA_DIR / "numeros_va_instagram.json").read_text())
-    check("… le numéro Instagram de Va IG (numeros_va_instagram.json), le lien coupé n'y "
-          "entre pas, pas de table à part",
-          tab_ig == {"amelia:3": 1, "lola:2": 2}
-          and not (pd.DATA_DIR / "numeros_va_ig_threads.json").exists(), tab_ig)
-    check("… US + UK + CA pour tous : Threads 41 (l4, 4 du Canada) compte 24",
-          "Threads 41** — US : **24** · GBL : **24**" in dq or "Threads 41 — US : 24 · GBL : 24" in dq, dq)
+    # propriétaire, 21/10/2026 : « mets pas les subs, uniquement dans leur ticket
+    # perso quand il tape Mes stats »
+    check("… et aucun abonné dans le classement public : ni « Subs », ni « all-time sub »",
+          "Subs" not in dq and "all-time sub" not in dq and "abonnés" not in dq, dq)
     check("la quinzaine non plus : ni ⚠️ ni ℹ️", "⚠️" not in dq and "ℹ️" not in dq, dq[-300:])
     n_lignes = len(re.findall(r" — US : ", dq))
     check("titre « Classement clics », en-tête « uniques US + UK + CA » et sa légende, total US / "
           "GBL, comptes classés Threads + Va IG, anonyme",
           eq["title"] == "📊 Classement clics — la quinzaine"
           and "Clics **uniques US + UK + CA** · **" + str(n_lignes) + "** comptes classés" in dq
-          and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays · Subs : abonnés "
-              "de la période_" in dq
-          and "\nUS : **119** · GBL : **221** · Subs : **7** (5 sans relevé)" in dq
+          and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_" in dq
+          and dq.rstrip().endswith("\nUS : **119** · GBL : **221**")
           and "Roucham" not in dq and "roucham" not in dq, (eq["title"], dq))
     check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours (une fois par jour), clics "
           "uniques, un relevé par VA dont les deux de Va IG",
