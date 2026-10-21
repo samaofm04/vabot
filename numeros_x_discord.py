@@ -1119,6 +1119,7 @@ CARTES_PAS_SEC = 600
 #: Une carte connue est revérifiée (supprimée à la main ?) une fois par jour.
 CARTE_REVOIR_SEC = 86400
 TEXTE_RENVOI = "📱 Ton numéro est maintenant dans ton salon perso."
+_CARTES_DITS: set = set()
 
 
 def _cartes_auto(gid: str) -> bool:
@@ -1178,7 +1179,8 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
     ce salon-là). Rend le bilan {posees, retrouvees, deja, echecs}."""
     conf = SERVEURS[gid]
     now = float(time.time() if maintenant is None else maintenant)
-    bilan: Dict[str, Any] = {"posees": [], "retrouvees": [], "deja": 0, "echecs": []}
+    bilan: Dict[str, Any] = {"posees": [], "retrouvees": [], "deja": 0, "echecs": [],
+                             "partis": []}
     with vd.sur_serveur(gid):
         moi = vd.bot_du_serveur(gid)["app_id"]
         for salon, uid in sorted(_tickets_du_serveur(gid).items()):
@@ -1201,6 +1203,12 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
                     bilan["echecs"].append((salon, f"relecture HTTP {code}"))
                     continue
             cle = f"{gid}:{uid}"
+            code, _m = vd.api("GET", f"/guilds/{gid}/members/{uid}")
+            if code == 404:
+                # Parti du serveur (VA 83 de Threads, 21/10/2026) : son ticket
+                # reste, une carte n'y servirait à personne.
+                bilan["partis"].append(salon)
+                continue
             mid = _carte_dans(salon, moi)
             if mid:
                 bilan["retrouvees"].append(salon)
@@ -1225,6 +1233,10 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
             _log(f"cartes {conf['nom']} : {quoi} dans {', '.join(bilan[quoi])}")
     for salon, pourquoi in bilan["echecs"]:
         _log(f"carte du salon {salon} non posée : {pourquoi}")
+    for salon in bilan["partis"]:
+        if ("parti", salon) not in _CARTES_DITS:
+            _CARTES_DITS.add(("parti", salon))
+            _log(f"pas de carte dans le salon {salon} : son VA a quitté le serveur")
     return bilan
 
 
@@ -1251,7 +1263,8 @@ def generaliser_cartes(gid: str) -> str:
         _ecrire(d)
     b = poser_cartes(gid)
     return (f"cartes : {len(b['posees'])} posée(s), {len(b['retrouvees'])} retrouvée(s), "
-            f"{b['deja']} déjà là, {len(b['echecs'])} échec(s) ; " + poser_panneau(gid))
+            f"{b['deja']} déjà là, {len(b['partis'])} VA parti(s), {len(b['echecs'])} échec(s) ; "
+            + poser_panneau(gid))
 
 
 # ─── Pose du panneau ──────────────────────────────────────────────────────

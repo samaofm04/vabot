@@ -652,6 +652,7 @@ try:
     tickets_discord.ETAT_FICHIER = dt / "tickets.json"
     tickets_discord.ETAT_FICHIER.write_text(json.dumps({"tickets": {
         f"{TH}:{VA}": {"salon": "T1", "manager": CHEF}, f"{TH}:{VA2}": {"salon": "T2"},
+        f"{TH}:444444444444444444": {"salon": "T3"},
         f"{GID}:{VA}": {"salon": "TW1"}}}), encoding="utf-8")
 
     def api_cartes(methode, chemin, **kw):
@@ -660,6 +661,8 @@ try:
             return 200, {"id": "carte-" + chemin.split("/")[2]}
         if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
             return 200, []
+        if methode == "GET" and chemin == f"/guilds/{TH}/members/444444444444444444":
+            return 404, {"message": "Unknown Member"}
         return faux_api(methode, chemin, **kw)
     vd.api = api_cartes
 
@@ -684,7 +687,7 @@ try:
     APPELS.clear()
     b = nx.poser_cartes(TH)
     check("ticket : les autres tickets de Threads reçoivent la leur, jamais une seconde, Twitter non",
-          b["posees"] == ["T2"] and b["deja"] == 1
+          b["posees"] == ["T2"] and b["deja"] == 1 and b["partis"] == ["T3"]
           and [ch for m, ch, kw in APPELS if m == "POST"] == ["/channels/T2/messages"], (b, APPELS))
     APPELS.clear()
     r = nx.traiter(clic_carte("numx:prendre"))
