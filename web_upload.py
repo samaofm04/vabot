@@ -20228,6 +20228,20 @@ def _classify_scrape_error(msg: str) -> str:
     """Traduit un message d'erreur de scrape en motif LISIBLE (et actionnable).
     Sert au récap « pourquoi ça a échoué » du dashboard."""
     m = (msg or "").lower()
+    # HikerAPI d'abord : son plafond (« plafond mensuel du poste suivi »)
+    # contient « mensuel », et du 17 au 20/10 le récap accusait RapidAPI.
+    if "hikerapi" in m:
+        if "plafond" in m or "mensuel" in m:
+            poste = re.search(r"poste\s+(\w+)", m)
+            return f"Plafond HikerAPI ({poste.group(1) if poste else 'suivi'}) atteint"
+        if "limite" in m and "jour" in m:
+            return "Limite du jour HikerAPI atteinte — reprise demain"
+        if "budget" in m:
+            return "Budget HikerAPI illisible — appels bloqués"
+    # « Débit RapidAPI dépassé … Le quota mensuel, lui, a encore N appels » :
+    # c'est le débit, pas le mois.
+    if "debit rapidapi" in m or "débit rapidapi" in m:
+        return "Collecte limitée par le fournisseur — réessai différé"
     if "mensuel" in m:
         return "Quota mensuel RapidAPI épuisé — collecte en pause"
     if "429" in m or "quota" in m or "rate" in m or "too many" in m:
@@ -21712,14 +21726,28 @@ def _get_links_clicks_period(link_ids: list, days: int = 7) -> dict:
         # fiablement sur cette API, on filtre côté client).
         today = _dt3.date.today()
         start_date = today - _dt3.timedelta(days=days - 1)
-        with gms.api_tag("widget-vas"):
-            res = gms._call_tool("list_recent_visitors", {
-            "link_ids": link_ids,
-            "limit": 100,
-        })
-        if res.get("ok"):
+        # GetMySocial refuse plus de 20 liens par statistique, et gms ne les
+        # envoie même plus (MAX_LIENS_STATS) : le widget des VA et des models
+        # à plus de 20 liens restait à 0. Lots de 20, additionnés, comme
+        # clicks_for_ids. Un lot illisible : pas de total partiel affiché
+        # comme complet.
+        lot = int(getattr(gms, "MAX_LIENS_STATS", 20) or 20)
+        ids = list(dict.fromkeys(str(x) for x in link_ids if x))
+        visitors = []
+        res = {"ok": bool(ids)}
+        for i in range(0, len(ids), lot):
+            with gms.api_tag("widget-vas"):
+                res = gms._call_tool("list_recent_visitors", {
+                "link_ids": ids[i:i + lot],
+                "limit": 100,
+            })
+            if not res.get("ok"):
+                print(f"[widget-vas] {len(ids)} liens : lot {i // lot + 1} illisible "
+                      f"({str(res.get('error') or '')[:120]}) — pas de total", flush=True)
+                break
             data = res.get("data") or {}
-            visitors = data.get("data", []) if isinstance(data, dict) else []
+            visitors += data.get("data", []) if isinstance(data, dict) else []
+        if res.get("ok"):
             # Bucketer par jour
             buckets = {}  # iso_date -> count
             for v in visitors:
@@ -69854,6 +69882,9 @@ def create_app():
             # cette ligne, on ne peut que deviner — et on a deviné trois fois.
             f"<p><b>bot</b> : {_diag_bot()}</p>"
             f"<p><b>bot admin</b> : {_diag_bot(_BOT_ADMIN_REF)}</p>"
+            # Les fils hors git (accueil, départs) : du 17 au 19/10, celui des
+            # départs ne tournait plus et rien ne le disait. Voir _FILS_DISCORD.
+            f"<p><b>fils Discord</b> : {_diag_fils_discord()}</p>"
             "<p style='color:#666;font-size:13px'>Si le code affiche ici n'est pas "
             "le dernier publie, le serveur n'a pas redemarre. Si c'est bien le "
             "dernier mais que la page reste ancienne, c'est le cache du "
@@ -79880,3 +79911,319 @@ def start_in_thread():
     except Exception as e:
         print(f"[start_in_thread] warmup thread failed: {e}", flush=True)
     return thread
+
+
+# ── Fils Discord hors git : démarrage protégé, puis surveillé ────────────────
+# Des patchs du VPS font démarrer par create_app, à la suite et sans try, six
+# modules hors git (threads_accueil, entretien_parrainage, twitter_accueil,
+# membres_evenements, annonces_entretiens, instagram_accueil). Une seule
+# exception y arrêtait create_app AVANT la route /discord/interactions : tout
+# youl4b.com tombait, avec la vérification, les tickets et les boutons de
+# Luigi et Bowser — et run_web_app ne relance rien. Ces lignes appartiennent
+# aux patchs (les réécrire les ferait tomber) : on agit autour, au moment où
+# create_app est appelé.
+#
+# Et du 17/10 17:54 au 19/10 16:27, aucun départ n'a été annoncé sur aucun
+# serveur, sans un message : le fil de membres_evenements ne tournait plus
+# (patch IGNORE au déploiement) et rien ne le surveillait. Chaque passage de
+# ces fils est maintenant horodaté ; au-delà de trois périodes sans passage,
+# alerte (journal, /version, health.json, Telegram).
+
+# module -> (nom du fil, ce qu'il fait, fonctions appelées à chaque tour,
+# période en secondes = le sleep de sa boucle)
+_FILS_DISCORD = {
+    "threads_accueil": ("threads-accueil", "arrivées et vérifiés de Va Threads",
+                        ("surveiller",), 60),
+    "twitter_accueil": ("twitter-affiliation", "arrivées et affiliation de Va Twitter",
+                        ("surveiller",), 60),
+    "membres_evenements": ("membres-evenements", "départs, exclusions et bans des serveurs",
+                           ("observer",), 45),
+    "instagram_accueil": ("instagram-affiliation", "arrivées et affiliation de Va IG",
+                          ("surveiller",), 60),
+    "annonces_entretiens": ("annonces-entretiens", "annonces des entretiens",
+                            ("tour",), 30),
+    "entretien_parrainage": ("entretien-invitations", "invitations du serveur Entretien",
+                             ("surveiller", "rapports"), 15),
+}
+# Un appel Discord peut attendre la fin d'un 429 : trois périodes de 15 s
+# donneraient de fausses alertes. Jamais moins de 3 minutes.
+_FILS_DISCORD_SEUIL_MIN = 180
+_FILS_DISCORD_FICHIER = DATA_DIR / "fils_discord.json"   # facultatif : {"telegram_chat_id": ...}
+_FILS_DISCORD_ETAT: dict = {}        # module -> {passage, succes, erreur, erreur_le}
+_FILS_DISCORD_VEILLE: dict = {}      # {depuis, attendus} une fois la veille lancée
+_FILS_DISCORD_LOCK = threading.Lock()
+
+
+def _fil_noter(module: str, **champs) -> None:
+    with _FILS_DISCORD_LOCK:
+        _FILS_DISCORD_ETAT.setdefault(module, {}).update(champs)
+
+
+def _fil_horodater(module: str, nom: str, fn):
+    """fn, qui note l'heure de chaque passage. À l'entrée ET à la sortie : un
+    appel bloqué (requête sans réponse) se voit, l'horloge ne bouge plus."""
+    import functools
+    if getattr(fn, "_fil_discord", None):
+        return fn
+
+    @functools.wraps(fn)
+    def tour(*a, **k):
+        _fil_noter(module, passage=time.time())
+        try:
+            r = fn(*a, **k)
+        except Exception as e:
+            _fil_noter(module, passage=time.time(), erreur=f"{nom} : {type(e).__name__}",
+                       erreur_le=time.time())
+            raise
+        _fil_noter(module, passage=time.time(), succes=time.time())
+        return r
+
+    tour._fil_discord = module
+    return tour
+
+
+def _module_present(nom: str) -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec(nom) is not None
+    except Exception:
+        return False
+
+
+def _demarrages_proteges() -> dict:
+    """Prépare les modules que create_app démarre sans try : leur demarrer()
+    ne peut plus lever, leurs tours sont horodatés. Un module dont l'import
+    échoue est remplacé, le temps de create_app, par un module vide : rend
+    {nom: remplaçant}."""
+    import importlib
+    import traceback
+    import types
+    remplacants = {}
+    for nom, (_fil, _role, fonctions, _p) in _FILS_DISCORD.items():
+        # absent de ce poste (copie locale) : create_app ne l'appelle pas non plus
+        if nom not in sys.modules and not _module_present(nom):
+            continue
+        try:
+            mod = importlib.import_module(nom)
+        except Exception as e:
+            print(f"[demarrage] {nom} : import impossible ({type(e).__name__}: {e}) "
+                  "— module sauté, le site démarre sans lui", flush=True)
+            traceback.print_exc()
+            _fil_noter(nom, erreur=f"import : {type(e).__name__}", erreur_le=time.time())
+            r = types.ModuleType(nom)
+            r.demarrer = lambda: None
+            remplacants[nom] = sys.modules[nom] = r
+            continue
+        for f in fonctions:
+            orig = getattr(mod, f, None)
+            if callable(orig):
+                setattr(mod, f, _fil_horodater(nom, f, orig))
+        demarrer = getattr(mod, "demarrer", None)
+        if getattr(demarrer, "_fil_discord", None):
+            continue
+
+        def demarrer_protege(*a, _nom=nom, _orig=demarrer, **k):
+            if not callable(_orig):
+                print(f"[demarrage] {_nom} : pas de fonction demarrer — sauté", flush=True)
+                return None
+            try:
+                return _orig(*a, **k)
+            except Exception as e:
+                print(f"[demarrage] {_nom}.demarrer : {type(e).__name__}: {e} "
+                      "— fil non lancé, le site démarre sans lui", flush=True)
+                traceback.print_exc()
+                _fil_noter(_nom, erreur=f"demarrer : {type(e).__name__}", erreur_le=time.time())
+                return None
+
+        demarrer_protege._fil_discord = nom
+        mod.demarrer = demarrer_protege
+    return remplacants
+
+
+_create_app_sans_protection = create_app
+
+
+def create_app():
+    remplacants = _demarrages_proteges()
+    try:
+        app = _create_app_sans_protection()
+    finally:
+        # Le remplaçant ne sert qu'à franchir create_app : au premier clic, la
+        # route retente le vrai module (son try y répond « indisponible »).
+        for nom, r in remplacants.items():
+            if sys.modules.get(nom) is r:
+                del sys.modules[nom]
+    _fils_discord_veiller()
+    return app
+
+
+def _fils_discord_etat(now: float = None) -> dict:
+    """{module: {fil, role, periode_s, seuil_s, dernier_passage, dernier_succes,
+    age_s, vivant, erreur, ok}} — que des types JSON (health.json)."""
+    now = now or time.time()
+    depuis = _FILS_DISCORD_VEILLE.get("depuis") or now
+    vivants = {t.name for t in threading.enumerate() if t.is_alive()}
+    with _FILS_DISCORD_LOCK:
+        etat = {k: dict(v) for k, v in _FILS_DISCORD_ETAT.items()}
+    out = {}
+    for nom in _FILS_DISCORD_VEILLE.get("attendus") or []:
+        fil, role, _f, periode = _FILS_DISCORD[nom]
+        seuil = max(3 * periode, _FILS_DISCORD_SEUIL_MIN)
+        e = etat.get(nom) or {}
+        passage = e.get("passage")
+        # jamais passé : compté depuis le lancement de la veille, pour qu'un
+        # fil que personne n'a démarré (patch tombé) finisse par se voir
+        age = max(0, int(now - (passage or depuis)))
+        out[nom] = {"fil": fil, "role": role, "periode_s": periode, "seuil_s": seuil,
+                    "dernier_passage": round(float(passage), 1) if passage else None,
+                    "dernier_succes": round(float(e["succes"]), 1) if e.get("succes") else None,
+                    "age_s": age, "vivant": fil in vivants,
+                    "erreur": str(e.get("erreur") or ""), "ok": age <= seuil}
+    return out
+
+
+def _fils_duree(s: int) -> str:
+    return f"{s} s" if s < 120 else f"{s // 60} min" if s < 7200 else f"{s // 3600} h"
+
+
+def _fils_discord_alerter(texte: str) -> bool:
+    """Telegram, de 9 h à 22 h comme les alertes SFS, dans le groupe des
+    alertes SFS — ou celui de data/fils_discord.json (« telegram_chat_id »,
+    vide = pas de Telegram). False = pas parti : la veille réessaiera."""
+    import datetime as _dt
+    cfg = safe_json.load(_FILS_DISCORD_FICHIER, None)
+    cfg = cfg if isinstance(cfg, dict) else {}
+    if "telegram_chat_id" in cfg:
+        chat = str(cfg.get("telegram_chat_id") or "").strip()
+    else:
+        chat = str((_sfs_alertes_cfg().get("telegram") or {}).get("chat_id") or "").strip()
+    if not chat:
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        h = _dt.datetime.now(ZoneInfo("Europe/Paris")).hour
+    except Exception:
+        h = _dt.datetime.now().hour
+    if not (SFS_ALERTES_HEURES[0] <= h < SFS_ALERTES_HEURES[1]):
+        return False
+    r = _telegram_envoyer(chat, texte)
+    if not r.get("ok"):
+        print(f"[fils-discord] Telegram : {r.get('error')}", flush=True)
+    return bool(r.get("ok"))
+
+
+def _fils_discord_verifier(alertes: dict, now: float = None, envoyer=None) -> list:
+    """Un tour de veille : chaque fil contre son seuil. `alertes` garde les
+    incidents ouverts d'un tour à l'autre. Rend les messages partis."""
+    now = now or time.time()
+    envoyer = envoyer or _fils_discord_alerter
+    partis = []
+    for nom, e in _fils_discord_etat(now).items():
+        a = alertes.get(nom)
+        if not e["ok"]:
+            if a is None:
+                a = alertes[nom] = {"depuis": now, "envoyee": False, "essai": 0.0}
+                print(f"[fils-discord] ALERTE {e['fil']} ({nom}) : aucun passage depuis "
+                      f"{e['age_s']} s (seuil {e['seuil_s']} s), fil "
+                      f"{'vivant' if e['vivant'] else 'absent du processus'}"
+                      + (f", dernière erreur {e['erreur']}" if e["erreur"] else ""), flush=True)
+            a["retabli"], a["essai_retabli"] = False, 0.0
+            if not a["envoyee"] and now - a["essai"] >= 600:
+                a["essai"] = now
+                txt = (f"⚠ Fil Discord arrêté : {e['fil']} ({e['role']})\n"
+                       f"Aucun passage depuis {_fils_duree(e['age_s'])}, "
+                       f"attendu toutes les {e['periode_s']} s.\n"
+                       + ("Le fil tourne mais ne passe plus (bloqué)."
+                          if e["vivant"] else "Le fil n'existe pas dans le processus.")
+                       + (f"\nDernière erreur : {e['erreur']}" if e["erreur"] else "")
+                       + "\nyoul4b.com/version")
+                if envoyer(txt):
+                    a["envoyee"] = True
+                    partis.append(txt)
+        elif a is not None:
+            if not a.get("retabli"):
+                a["retabli"] = True
+                print(f"[fils-discord] {e['fil']} ({nom}) repart", flush=True)
+            if not a["envoyee"]:
+                del alertes[nom]          # personne n'a été prévenu : rien à dire
+            elif now - a.get("essai_retabli", 0.0) >= 600:
+                a["essai_retabli"] = now
+                txt = f"✅ Fil Discord reparti : {e['fil']} ({e['role']})"
+                if envoyer(txt):
+                    del alertes[nom]
+                    partis.append(txt)
+    return partis
+
+
+def _fils_discord_boucle() -> None:
+    alertes: dict = {}
+    while True:
+        time.sleep(30)
+        try:
+            _fils_discord_verifier(alertes)
+        except Exception as e:
+            print(f"[fils-discord] veille : {type(e).__name__}: {e}", flush=True)
+
+
+def _sante_avec_fils() -> None:
+    """health.json (process_health, réécrit toutes les 10 s par main.py)
+    porte aussi l'horodatage de chaque fil. Sans toucher à healthy ni à
+    watchdog_ok : systemd redémarre le bot sur ces deux-là."""
+    try:
+        import process_health as _ph
+    except Exception:
+        return
+    orig = getattr(_ph, "snapshot", None)
+    if not callable(orig) or getattr(orig, "_fil_discord", None):
+        return
+
+    def snapshot(*a, **k):
+        data = orig(*a, **k)
+        try:
+            fils = _fils_discord_etat()
+            # health.json passe par json.dump, et une exception dans
+            # watch_health couperait le battement systemd : on vérifie ici.
+            json.dumps(fils)
+            data["fils_discord"] = fils
+        except Exception:
+            pass
+        return data
+
+    snapshot._fil_discord = True
+    _ph.snapshot = snapshot
+
+
+def _fils_discord_veiller() -> None:
+    """Lance la veille, une seule fois (create_app est appelé deux fois au
+    démarrage : le serveur, puis le préchauffage)."""
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        return
+    with _FILS_DISCORD_LOCK:
+        if _FILS_DISCORD_VEILLE:
+            return
+        attendus = [n for n in _FILS_DISCORD if _module_present(n)]
+        if not attendus:
+            return
+        # les modules copiés sur un poste de dev n'y tournent pas : pas
+        # d'alerte Telegram depuis le Mac
+        if not _machine_proprietaire("fils-discord"):
+            _FILS_DISCORD_VEILLE.update(depuis=0, attendus=[])
+            return
+        _FILS_DISCORD_VEILLE.update(depuis=time.time(), attendus=attendus)
+    _sante_avec_fils()
+    threading.Thread(target=_fils_discord_boucle, daemon=True, name="fils-discord-veille").start()
+
+
+def _diag_fils_discord() -> str:
+    """La ligne « fils Discord » de /version."""
+    etat = _fils_discord_etat()
+    if not etat:
+        return "non surveillés (modules absents de ce poste)"
+    morceaux = []
+    for e in etat.values():
+        if e["ok"]:
+            morceaux.append(f"{html_escape(e['fil'])} il y a {_fils_duree(e['age_s'])}")
+        else:
+            morceaux.append(f"<b style='color:#c00'>⚠ {html_escape(e['fil'])} : aucun passage "
+                            f"depuis {_fils_duree(e['age_s'])}</b>")
+    return " · ".join(morceaux)
