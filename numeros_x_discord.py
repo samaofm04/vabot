@@ -127,6 +127,8 @@ def _lire() -> Dict[str, Any]:
         d["actifs"] = {}
     if not isinstance(d.get("messages"), dict):
         d["messages"] = {}
+    if not isinstance(d.get("cartes"), dict):
+        d["cartes"] = {}
     return d
 
 
@@ -159,7 +161,7 @@ def _message(cle: str) -> Optional[Dict[str, Any]]:
     Repli sur le jeton rangé dans l'activation (format du premier jour)."""
     d = _lire()
     m = d["messages"].get(cle)
-    if isinstance(m, dict) and m.get("jeton"):
+    if isinstance(m, dict) and (m.get("jeton") or m.get("carte")):
         return m
     a = d["actifs"].get(cle)
     if isinstance(a, dict) and a.get("jeton"):
@@ -175,6 +177,16 @@ def _retenir(cle: str, jeton: str, app: str) -> Optional[Dict[str, Any]]:
         d["messages"][cle] = {"jeton": jeton, "app": app, "le": time.time()}
         _ecrire(d)
     return avant
+
+
+def _retenir_carte(cle: str, salon: str, mid: str) -> None:
+    """La carte du ticket devient LE message de la personne : la suite s'y
+    écrit par le bot, sans jeton d'interaction (ni ses 15 minutes)."""
+    with _VERROU:
+        d = _lire()
+        d["messages"][cle] = {"carte": True, "salon": str(salon), "message": str(mid),
+                              "le": time.time()}
+        _ecrire(d)
 
 
 def _effacer(m: Dict[str, Any]) -> None:
@@ -359,12 +371,17 @@ def _repondre(p: Dict[str, Any], cle: str, comps: List[Dict[str, Any]]) -> Dict[
     """Sur ce message éphémère lui-même : on le change sur place. Sur le
     panneau du salon : un NOUVEAU message, visible du seul cliqueur, qui
     efface le précédent — jamais deux messages pour un même numéro."""
+    carte = p.get("_carte")
+    if carte:
+        # La carte du ticket : changée sur place, jamais un autre message.
+        _retenir_carte(cle, carte["salon"], carte["message"])
+        return {"type": 7, "data": {"components": comps}}
     jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p)
     source = int(((p.get("message") or {}).get("flags")) or 0)
     avant = _retenir(cle, jeton, app)
     if source & EPHEMERE:
         return {"type": 7, "data": {"components": comps}}
-    if avant and avant.get("jeton") != jeton and \
+    if avant and avant.get("jeton") and avant.get("jeton") != jeton and \
             time.time() - float(avant.get("le") or 0) < JETON_SEC:
         try:
             _fond(lambda: _effacer(avant))
@@ -385,6 +402,13 @@ def _redessiner(cle: str, conf: Dict[str, Any], comps: Optional[List[Dict[str, A
     a, m = _actif(cle), _message(cle)
     if not m or (comps is None and not a):
         return 0
+    if m.get("carte"):
+        code, corps = vd.api("PATCH", f"/channels/{m['salon']}/messages/{m['message']}",
+                             json={"components": comps or vue_actif(a, conf),
+                                   "allowed_mentions": {"parse": []}})
+        if code != 200:
+            _log(f"carte du salon {m['salon']} non mise à jour : HTTP {code} {str(corps)[:160]}")
+        return code
     if time.time() - float(m.get("le") or 0) > JETON_SEC:
         # Le message ne s'édite plus (jeton de 15 min) : le prochain clic du
         # VA le redessine avec ce qui est arrivé entre-temps.
@@ -415,6 +439,13 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     _reprendre_ecoutes()
     morceaux = cid[len(PREFIXE):].split(":")
     action, act_id = morceaux[0], (morceaux[1] if len(morceaux) > 1 else "")
+    carte = _carte_du_clic(p)
+    if carte:
+        # Une carte de ticket : le numéro et le quota sont ceux du VA du
+        # ticket, même quand son manager clique pour lui (staff : non bridé).
+        p = dict(p, _carte=carte)
+        if carte["uid"] != uid:
+            uid, user = carte["uid"], {}
     cle = f"{gid}:{uid}"
     if action == "prendre":
         return _prendre(p, gid, uid, cle, membre, user, conf)
@@ -749,6 +780,7 @@ def demarrer() -> None:
     # posterait des chiffres d'essai dans le vrai salon.
     if os.environ.get("VA_MACHINE_PROD") == "1":
         threading.Thread(target=_boucle_recap, daemon=True).start()
+        threading.Thread(target=_boucle_cartes, daemon=True).start()
 
 
 # ─── Récap du jour (« debrief-day ») ──────────────────────────────────────
@@ -1075,6 +1107,153 @@ def _boucle_recap() -> None:
         time.sleep(RECAP_PAS_SEC)
 
 
+# ─── Une carte dans le ticket de chaque VA (Threads) ──────────────────────
+# Propriétaire, 21/10/2026, devant la carte privée : « ça recrée un message tu
+# vois », puis « met le dans leur truc alors c'est bon ? » sur la capture d'un
+# ticket : comme les salons -numero-mail de Youl4b, UNE carte par VA, dans son
+# salon perso (tickets_discord), postée par le bot du serveur, qui change sur
+# place — jamais de message éphémère ni de nouveau message. La carte vit dans
+# data/numeros_x.json (« cartes » : {salon: {message, uid, gid}}) ; le salon
+# 📱・numéro-usa ne garde qu'une ligne qui y renvoie (vue_renvoi).
+CARTES_PAS_SEC = 600
+#: Une carte connue est revérifiée (supprimée à la main ?) une fois par jour.
+CARTE_REVOIR_SEC = 86400
+TEXTE_RENVOI = "📱 Ton numéro est maintenant dans ton salon perso."
+
+
+def _cartes_auto(gid: str) -> bool:
+    return bool((_lire().get("cartes_auto") or {}).get(str(gid)))
+
+
+def _carte_du_clic(p: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """{salon, message, uid} si le clic vient de la carte d'un ticket."""
+    salon = str(p.get("channel_id") or "")
+    mid = str((p.get("message") or {}).get("id") or "")
+    c = _lire()["cartes"].get(salon)
+    if isinstance(c, dict) and mid and str(c.get("message")) == mid and c.get("uid"):
+        return {"salon": salon, "message": mid, "uid": str(c["uid"])}
+    return None
+
+
+def vue_renvoi(conf: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [{"type": 17, "accent_color": ROSE if _insta(conf) else BLEU,
+             "components": [{"type": 10, "content": TEXTE_RENVOI}]}]
+
+
+def _vue_carte(cle: str, conf: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """La carte telle qu'elle doit être : le numéro en cours, ou vide."""
+    a = _actif(cle)
+    return vue_actif(a, conf) if _vivant(a) or (a and a.get("code") and not a.get("clos")) \
+        else vue_panneau(conf)
+
+
+def _tickets_du_serveur(gid: str) -> Dict[str, str]:
+    """{salon perso: VA} des tickets de ce serveur, lus dans data/tickets.json
+    (tickets_discord) sans y écrire."""
+    import tickets_discord
+    t = (safe_json.load(tickets_discord.ETAT_FICHIER, default={}) or {}).get("tickets") or {}
+    out: Dict[str, str] = {}
+    for k, v in t.items():
+        g, _sep, uid = str(k).partition(":")
+        if g == str(gid) and uid.isdigit() and isinstance(v, dict) and v.get("salon"):
+            out[str(v["salon"])] = uid
+    return out
+
+
+def _carte_dans(salon: str, moi: str) -> str:
+    """La carte de ce bot déjà dans le salon (registre perdu), ou « »."""
+    code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
+    if code != 200 or not isinstance(ms, list):
+        return ""
+    for m in ms:
+        if str((m.get("author") or {}).get("id")) == str(moi) and \
+                any(c.startswith(PREFIXE) for c in _ids(m.get("components"))):
+            return str(m["id"])
+    return ""
+
+
+def poser_cartes(gid: str, seulement: Optional[str] = None,
+                 maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """Une carte dans chaque ticket du serveur qui n'en a pas (`seulement` :
+    ce salon-là). Rend le bilan {posees, retrouvees, deja, echecs}."""
+    conf = SERVEURS[gid]
+    now = float(time.time() if maintenant is None else maintenant)
+    bilan: Dict[str, Any] = {"posees": [], "retrouvees": [], "deja": 0, "echecs": []}
+    with vd.sur_serveur(gid):
+        moi = vd.bot_du_serveur(gid)["app_id"]
+        for salon, uid in sorted(_tickets_du_serveur(gid).items()):
+            if seulement and salon != str(seulement):
+                continue
+            c = _lire()["cartes"].get(salon)
+            if isinstance(c, dict) and c.get("uid") == uid:
+                if now - float(c.get("vu_le") or 0) < CARTE_REVOIR_SEC:
+                    bilan["deja"] += 1
+                    continue
+                code, _m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
+                if code == 200:
+                    with _VERROU:
+                        d = _lire()
+                        d["cartes"][salon] = dict(c, vu_le=now)
+                        _ecrire(d)
+                    bilan["deja"] += 1
+                    continue
+                if code != 404:
+                    bilan["echecs"].append((salon, f"relecture HTTP {code}"))
+                    continue
+            cle = f"{gid}:{uid}"
+            mid = _carte_dans(salon, moi)
+            if mid:
+                bilan["retrouvees"].append(salon)
+            else:
+                code, rep = vd.api("POST", f"/channels/{salon}/messages",
+                                   json={"flags": V2, "components": _vue_carte(cle, conf),
+                                         "allowed_mentions": {"parse": []}})
+                if code != 200 or not isinstance(rep, dict) or not rep.get("id"):
+                    bilan["echecs"].append((salon, f"HTTP {code} {str(rep)[:120]}"))
+                    continue
+                mid = str(rep["id"])
+                bilan["posees"].append(salon)
+            with _VERROU:
+                d = _lire()
+                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now}
+                _ecrire(d)
+            # Un numéro déjà en cours (carte privée d'avant) : la suite, son
+            # code compris, s'écrit désormais dans la carte du ticket.
+            _retenir_carte(cle, salon, mid)
+    for quoi in ("posees", "retrouvees"):
+        if bilan[quoi]:
+            _log(f"cartes {conf['nom']} : {quoi} dans {', '.join(bilan[quoi])}")
+    for salon, pourquoi in bilan["echecs"]:
+        _log(f"carte du salon {salon} non posée : {pourquoi}")
+    return bilan
+
+
+def _boucle_cartes() -> None:
+    """Les nouveaux tickets reçoivent leur carte (sans toucher à
+    tickets_discord : une boucle à part, toutes les 10 minutes)."""
+    time.sleep(90)
+    while True:
+        for gid in SERVEURS:
+            if _cartes_auto(gid):
+                try:
+                    poser_cartes(gid)
+                except Exception as e:
+                    _log(f"cartes de {gid} : tour en échec ({type(e).__name__}: {e})")
+        time.sleep(CARTES_PAS_SEC)
+
+
+def generaliser_cartes(gid: str) -> str:
+    """Toutes les cartes, la boucle des nouveaux tickets, et le panneau du
+    salon commun réduit à une ligne qui renvoie au salon perso."""
+    with _VERROU:
+        d = _lire()
+        d.setdefault("cartes_auto", {})[str(gid)] = True
+        _ecrire(d)
+    b = poser_cartes(gid)
+    return (f"cartes : {len(b['posees'])} posée(s), {len(b['retrouvees'])} retrouvée(s), "
+            f"{b['deja']} déjà là, {len(b['echecs'])} échec(s) ; " + poser_panneau(gid))
+
+
 # ─── Pose du panneau ──────────────────────────────────────────────────────
 def _ids(composants) -> List[str]:
     out: List[str] = []
@@ -1100,7 +1279,8 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
             return f"salon illisible : HTTP {code} {str(ms)[:160]}"
         miens = [m for m in ms if str((m.get("author") or {}).get("id")) == str(moi)
                  and PREFIXE + "prendre" in _ids(m.get("components"))]
-        corps = {"flags": V2, "components": vue_panneau(conf), "allowed_mentions": {"parse": []}}
+        vue = vue_renvoi(conf) if _cartes_auto(gid) else vue_panneau(conf)
+        corps = {"flags": V2, "components": vue, "allowed_mentions": {"parse": []}}
         if miens:
             code, rep = vd.api("PATCH", f"/channels/{salon}/messages/{miens[0]['id']}",
                                json={"components": corps["components"]})
@@ -1111,10 +1291,23 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
 
 if __name__ == "__main__":
     import sys
+    noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID}
     if sys.argv[1:2] == ["poser"] and len(sys.argv) <= 3:
         vd._charger_config()
         quel = (sys.argv[2:] or ["twitter"])[0].lower()
-        gid = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID}.get(quel, quel)
+        gid = noms.get(quel, quel)
         print(poser_panneau(gid) if gid in SERVEURS else f"serveur inconnu : {quel}")
+    elif sys.argv[1:2] == ["cartes"] and len(sys.argv) == 4:
+        # cartes threads <salon> : une seule carte (essai) ; cartes threads tous :
+        # toutes, la boucle des nouveaux tickets, et le panneau commun en renvoi.
+        vd._charger_config()
+        gid = noms.get(sys.argv[2].lower(), sys.argv[2])
+        if gid not in SERVEURS:
+            print(f"serveur inconnu : {sys.argv[2]}")
+        elif sys.argv[3] == "tous":
+            print(generaliser_cartes(gid))
+        else:
+            print(poser_cartes(gid, seulement=sys.argv[3]))
     else:
-        print("usage : python numeros_x_discord.py poser [twitter|threads]")
+        print("usage : python numeros_x_discord.py poser [twitter|threads]\n"
+              "        python numeros_x_discord.py cartes threads <salon>|tous")

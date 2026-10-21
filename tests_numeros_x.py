@@ -642,6 +642,82 @@ try:
           and boutons(dernier_patch()) == ["numx:prendre"], dernier_patch())
     numgen.get_number, numgen.getatext_key = _sav_gn, _sav_gk
 
+    # 22. Threads : UNE carte dans le ticket de chaque VA, changée sur place
+    remise_a_zero()
+    numgen.get_number, numgen.getatext_key = faux_numero_getatext, (lambda: "cle-ga")
+    numgen.get_code = faux_code
+    TH = vd.THREADS_ID
+    dt = Path(tempfile.mkdtemp(prefix="numx_tickets_"))
+    _sav_tk = tickets_discord.ETAT_FICHIER
+    tickets_discord.ETAT_FICHIER = dt / "tickets.json"
+    tickets_discord.ETAT_FICHIER.write_text(json.dumps({"tickets": {
+        f"{TH}:{VA}": {"salon": "T1", "manager": CHEF}, f"{TH}:{VA2}": {"salon": "T2"},
+        f"{GID}:{VA}": {"salon": "TW1"}}}), encoding="utf-8")
+
+    def api_cartes(methode, chemin, **kw):
+        APPELS.append((methode, chemin, kw))
+        if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages"):
+            return 200, {"id": "carte-" + chemin.split("/")[2]}
+        if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
+            return 200, []
+        return faux_api(methode, chemin, **kw)
+    vd.api = api_cartes
+
+    def clic_carte(cid, salon="T1", uid=VA, perms="0"):
+        p = clic(cid, uid=uid, gid=TH, perms=perms)
+        p["channel_id"] = salon
+        p["message"] = {"id": "carte-" + salon, "flags": nx.V2}
+        return p
+
+    def patch_carte(salon="T1"):
+        for m, ch, kw in reversed(APPELS):
+            if m == "PATCH" and ch == f"/channels/{salon}/messages/carte-{salon}":
+                return kw["json"]["components"]
+        return []
+
+    b = nx.poser_cartes(TH, seulement="T1")
+    posts = [(ch, kw["json"]) for m, ch, kw in APPELS if m == "POST"]
+    check("ticket : essai sur UN ticket — sa carte vide « …. », « Prendre un numéro », rien ailleurs",
+          b["posees"] == ["T1"] and len(posts) == 1 and posts[0][0] == "/channels/T1/messages"
+          and textes(posts[0][1]["components"]) == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and boutons(posts[0][1]["components"]) == ["numx:prendre"], (b, posts))
+    APPELS.clear()
+    b = nx.poser_cartes(TH)
+    check("ticket : les autres tickets de Threads reçoivent la leur, jamais une seconde, Twitter non",
+          b["posees"] == ["T2"] and b["deja"] == 1
+          and [ch for m, ch, kw in APPELS if m == "POST"] == ["/channels/T2/messages"], (b, APPELS))
+    APPELS.clear()
+    r = nx.traiter(clic_carte("numx:prendre"))
+    check("ticket : le clic change la carte SUR PLACE (type 7), aucun message éphémère",
+          r["type"] == 7 and textes(r["data"]["components"])[:2] == ["## `….`", "🇺🇸 ⏳ Recherche d'un numéro…"]
+          and not any("/webhooks/" in ch for m, ch, kw in APPELS), (r, APPELS))
+    check("ticket : le numéro s'écrit dans la MÊME carte, par le bot",
+          textes(patch_carte())[:2] == ["## `+15551110001`", "🇺🇸 ⏳ En attente du code…"]
+          and not [1 for m, ch, kw in APPELS if m == "POST"], (patch_carte(), APPELS))
+    CODES.append(("code", "975310"))
+    direct(lambda: nx._ecouter(f"{TH}:{VA}", "ga1", nx.SERVEURS[TH]))
+    check("ticket : le code arrive dans la carte",
+          textes(patch_carte())[:2] == ["## `+15551110001`", "🇺🇸 🔑 **Code : `975310`**"], patch_carte())
+    r = nx.traiter(clic_carte("numx:fini:ga1", uid=CHEF, perms=str(0x8)))
+    check("ticket : le manager clique « C'est bon » pour son VA : c'est le numéro du VA qui se clôt",
+          r["type"] == 7 and nx._actif(f"{TH}:{VA}").get("clos") == "fini"
+          and boutons(r["data"]["components"]) == ["numx:prendre"], r)
+    nx.traiter(clic_carte("numx:prendre", salon="T2", uid=CHEF, perms=str(0x8)))
+    check("ticket : un numéro pris par le manager dans le ticket d'un VA est au VA (quota, historique)",
+          nx._actif(f"{TH}:{VA2}") is not None and nx._actif(f"{TH}:{CHEF}") is None
+          and num._histo_lire()[-1]["par"] == VA2, num._histo_lire()[-1])
+    APPELS.clear()
+    print(nx.generaliser_cartes(TH))
+    panneau = [kw["json"] for m, ch, kw in APPELS
+               if ch.startswith("/channels/%s/messages" % nx.SERVEURS[TH]["salon"]) and m in ("POST", "PATCH")]
+    check("ticket : généralisé — le panneau de 📱・numéro-usa n'est plus qu'une ligne qui renvoie au salon perso",
+          nx._cartes_auto(TH) and panneau and textes(panneau[-1]["components"]) == [nx.TEXTE_RENVOI]
+          and not boutons(panneau[-1]["components"]), panneau)
+    check("ticket : Twitter garde son panneau commun", not nx._cartes_auto(GID))
+    tickets_discord.ETAT_FICHIER = _sav_tk
+    numgen.get_number, numgen.getatext_key = _sav_gn, _sav_gk
+    vd.api = faux_api
+
     # 20. le récap du bot admin ne garde plus Twitter (Luigi le poste)
     check("cog : Twitter fait partie des serveurs du récap REST", GID in num._serveurs_rest())
     check("cog : les chiffres de Twitter sont écartés de son bilan",
