@@ -1675,6 +1675,9 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
     illisibles: set = set()
     introuvables: List[str] = []
     totaux: Dict[int, int] = {}
+    # ce que MyPuls a rendu, tracking par tracking : le plafond d'un VA sans
+    # relevé s'en sert (_plafonds_illisibles)
+    lus_t: Dict[str, int] = {}
     # le total gardé d'un tracking quitté : un par mesure, les visites et les
     # abonnés d'un même tracking ne se remplacent pas l'un l'autre
     cle_garde = "cumul_abonnes" if abonnes else "cumul"
@@ -1709,6 +1712,7 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
                     illisibles.add(n)
                 else:
                     total += x
+                    lus_t[t] = int(x)
                     if cumul and not e.get("actif"):
                         e[cle_garde] = {"au": fin_t, "n": x}
         totaux[n] = total
@@ -1750,7 +1754,8 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
             "frais": frais, "entites": len(par_va), "liens": len(liens), "sans_numero": [],
             "gabarits": gab, "sans_tracking": info["sans_tracking"],
             "introuvables": sorted(set(introuvables)), "en_attente": sorted(en_attente),
-            "conflits": sorted(set(conflits)), "source": "tracking", "erreur": ""}
+            "conflits": sorted(set(conflits)), "source": "tracking", "erreur": "",
+            "par_tracking": lus_t}
 
 
 # ─── le classement ───────────────────────────────────────────────────────
@@ -1984,6 +1989,61 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     _retenir(gid, debut, fin, out)
     _garder_repris(gid, debut, fin, out, _source(gid, mesure))
     return out
+
+
+def _numeros_partis(gid: Optional[str]) -> Dict[int, str]:
+    """{numéro de VA : jour où son départ a été constaté} pour ce serveur :
+    les fiches « parti » de tickets_discord, au numéro de leur lien
+    (liens_va). Un VA sans lien du registre n'a pas de numéro ici : il reste."""
+    try:
+        import liens_va as lv
+        import tickets_discord as tk
+        out: Dict[int, str] = {}
+        for uid, quand in tk.partis(str(gid or "")).items():
+            n = lv.lien_de(str(gid or ""), uid).get("numero")
+            if n:
+                out[int(n)] = dt.date.fromtimestamp(quand).isoformat()
+        return out
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] VA partis illisibles : {type(e).__name__}: {e}", flush=True)
+        return {}
+
+
+def _sans_partis(gid: Optional[str], cl: Dict[str, Any], fin: dt.date) -> Dict[str, Any]:
+    """Le classement sans les VA partis du serveur, pour toute période qui va
+    jusqu'à leur départ ou au-delà : semaine et quinzaine en cours, bonus du
+    jour (propriétaire, 21/10/2026 : « sorti des classements »). Une période
+    finie avant leur départ les garde — leurs clics y étaient vrais ; leur
+    prime, elle, n'est pas annoncée (suivi_va). Ceux qu'on retire sont notés
+    dans « partis », pas avalés."""
+    partis = {n for n, jour in _numeros_partis(gid).items() if jour <= fin.isoformat()}
+    if not partis or not isinstance(cl, dict):
+        return cl
+
+    def num(x: Any) -> Optional[int]:
+        m = re.search(r"(\d+)\s*$", str(x or ""))
+        return int(m.group(1)) if m else None
+    out = dict(cl)
+    out["lignes"] = [x for x in cl.get("lignes") or []
+                     if int(x.get("numero") or num(x.get("va")) or -1) not in partis]
+    out["illisibles"] = [v for v in cl.get("illisibles") or [] if num(v) not in partis]
+    out["partis"] = sorted({str(x.get("va")) for x in cl.get("lignes") or []
+                            if x not in out["lignes"]}
+                           | {str(v) for v in cl.get("illisibles") or []
+                              if v not in out["illisibles"]})
+    return out
+
+
+_classement_avec_partis = classement
+
+
+def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
+               gid: Optional[str] = None, mesure: Optional[str] = None,
+               etiquette: str = "podium") -> Dict[str, Any]:
+    """Le classement du serveur (voir _classement_avec_partis), sans ses VA
+    partis (_sans_partis)."""
+    return _sans_partis(gid, _classement_avec_partis(debut, fin, pause=pause, gid=gid,
+                                                     mesure=mesure, etiquette=etiquette), fin)
 
 
 def _fichier_alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Path:
@@ -4088,6 +4148,62 @@ def _payer(gid: str, debut: dt.date, fin: dt.date, cl: Dict[str, Any],
         print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
 
 
+def _plafonds_illisibles(cl: Dict[str, Any], debut: dt.date,
+                         fin: dt.date) -> Optional[Dict[str, int]]:
+    """{« VA n » : le plus de clics qu'il a pu faire sur la période} pour chaque
+    VA de Twitter sans relevé, ou None si l'un d'eux n'a pas de plafond sûr.
+
+    Le plafond additionne, pour chaque tracking du VA ou disputé avec lui
+    (registre : son numéro ou « doute » ; trackings en attente qui le nomment)
+    et vivant pendant la période : les clics que MyPuls en a rendus
+    (cl["par_tracking"]), et sinon les visites GetMySocial, tous pays, des
+    liens de ce tracking — un clic de tracking passe par l'un d'eux. VA 11 et
+    VA 21 sont sur des trackings du compte de Jessye, que MyPuls ne voit plus :
+    sans ce plafond, leur semaine restait illisible à vie, et les primes de
+    Twitter avec (semaines du 05/10 et du 12/10, audit du 20/10/2026)."""
+    reg = _lire_registre()
+    lus = cl.get("par_tracking") or {}
+    d0, d1 = debut.isoformat(), fin.isoformat()
+    out: Dict[str, int] = {}
+    for va in cl.get("illisibles") or []:
+        m = re.search(r"(\d+)\s*$", str(va))
+        if not m:
+            return None
+        n = int(m.group(1))
+        borne, ids = 0, set()
+        vivants = [(t, e) for t, e in reg["trackings"].items()
+                   if (int(e.get("numero") or -1) == n
+                       or n in [int(x) for x in e.get("doute") or []])
+                   and str(e.get("premier") or "") <= d1
+                   and (e.get("actif") or str(e.get("vu") or "") >= d0)]
+        vivants += [(t, a) for t, a in reg["attente"].items()
+                    if n in [int(x) for x in a.get("numeros") or []]
+                    and str(a.get("premier") or "") <= d1]
+        if not vivants:
+            return None
+        for t, e in vivants:
+            if t in lus:
+                borne += int(lus[t])
+            elif e.get("ids"):
+                ids.update(str(i) for i in e["ids"])
+            else:
+                return None                       # ni lu, ni lien : rien ne le borne
+        if ids:
+            if _pause_gms():
+                return None
+            try:
+                import gms
+                total, _pays = gms.analytics_for_links(sorted(ids), d0, d1)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[podium] plafond de {va} illisible : {type(e).__name__}: {e}", flush=True)
+                return None
+            if total is None:
+                return None
+            borne += int(total)
+        out[str(va)] = borne
+    return out
+
+
 def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
                      fg: Dict[str, Any], mid: str) -> None:
     """Les annonces privées d'un podium mêlé parti sans tous ses VA US.
@@ -4102,6 +4218,7 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     promis en privé.
     """
     snap = (fg.get("primes_attente") or {}).get("cl") or {}
+    note = ""
     if _source(gid) == "tracking":
         # Twitter : ses propres VA manquaient (pas de VA US mêlés ici). Le
         # relevé de la semaine est refait, au plus une fois l'heure
@@ -4110,9 +4227,28 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
             return
         fg["essai_tw"] = t
         cl2 = classement(debut, fin, gid=gid)
-        if not cl2["lignes"] or cl2["illisibles"]:
+        if not cl2["lignes"]:
             _ecrire(d)
             return
+        if cl2["illisibles"]:
+            # libérées quand aucun VA sans relevé ne peut entrer dans le top 3
+            # (propriétaire, 21/10/2026 : « garder le pool US », libérer dès
+            # que c'est sûr) : son plafond sous le 3e, strictement
+            plafonds = _plafonds_illisibles(cl2, debut, fin)
+            seuil = (int(cl2["lignes"][len(PRIMES) - 1]["clics"])
+                     if len(cl2["lignes"]) >= len(PRIMES) else 0)
+            if plafonds is None or not seuil or max(plafonds.values()) >= seuil:
+                print(f"[podium] {gid} {debut} : primes toujours retenues -- sans relevé "
+                      f"{cl2['illisibles']}, plafonds {plafonds if plafonds is not None else 'illisibles'}"
+                      f", 3e à {seuil}", flush=True)
+                _ecrire(d)
+                return
+            fg["primes_liberees"] = {"le": _maintenant().isoformat(timespec="minutes"),
+                                     "seuil": seuil, "plafonds": plafonds}
+            note = ("✅ _Primes confirmées le " + _maintenant().strftime("%d/%m") + " : sans relevé, "
+                    + ", ".join(f"{va} ({p} au plus)" for va, p in sorted(plafonds.items()))
+                    + f" ne pouvai{'en' if len(plafonds) > 1 else ''}t pas atteindre le 3e "
+                    f"({seuil} clics)._")
         snap, us = _instantane(cl2, fin), None
     else:
         us = _releve_us(debut, fin)
@@ -4124,7 +4260,8 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     # le podium figé est réécrit : ses têtes relues juste avant, comme à 9h
     tetes = _tetes_sures(gid)
     code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}",
-                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us, tetes=tetes)],
+                     json={"embeds": [embed_podium(snap, debut, fin, gid=gid, us=us, tetes=tetes,
+                                                   avertissement=note)],
                            **_boutons(gid, False)})
     if code != 200 and _passager(code, rep):
         print(f"[podium] {gid} {debut} : podium a corriger, Discord indisponible (HTTP {code}) -- "
@@ -4142,6 +4279,37 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     fg["complet"] = code == 200 and not snap.get("illisibles")
     fg["corrige"] = _maintenant().isoformat(timespec="minutes")
     _ecrire(d)
+
+
+#: entre deux relances des primes retenues (propriétaire, 21/10/2026 : un
+#: essai chaque jour, plus seulement le lundi de la semaine suivante)
+RELANCE_PRIMES_S = 86400
+
+
+def relancer_primes_retenues(gid: str) -> None:
+    """Les primes de TOUTE semaine figée sans tous ses relevés (« primes_attente
+    »), retentées une fois par jour. Avant, seul le podium du lundi relançait
+    celles de la semaine passée : la semaine du 05/10 n'avait plus personne
+    pour la relancer, et celle du 12/10 attendait un lundi qui ne la regardait
+    plus. Appelé par rafraichir, AVANT qu'il ne lise l'état."""
+    gid = str(gid)
+    d = _etat()
+    vus = d.setdefault("primes_relance", {})
+    if time.time() - float(vus.get(gid) or 0) < RELANCE_PRIMES_S:
+        return
+    vus[gid] = time.time()
+    _ecrire(d)
+    postes = d.get("postes") or {}
+    for debut_s, fg in sorted(((d.get("figes") or {}).get(gid) or {}).items()):
+        mid = postes.get(f"{gid}:{debut_s}")
+        if not (isinstance(fg, dict) and fg.get("primes_attente") and mid and fg.get("fin")):
+            continue
+        try:
+            _primes_retenues(gid, d, dt.date.fromisoformat(debut_s),
+                             dt.date.fromisoformat(str(fg["fin"])), fg, str(mid))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[podium] {gid} {debut_s} : primes retenues : {type(e).__name__}: {e}",
+                  flush=True)
 
 
 @_exclusif
@@ -4329,6 +4497,8 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
     if subs_seulement(gid):
         print(f"[podium] {gid} : pas de message de la semaine sur ce serveur", flush=True)
         return ""
+    # avant de lire l'état : elle l'écrit elle-même
+    relancer_primes_retenues(gid)
     debut, fin = semaine_en_cours(jour)
     d = _etat()
     vivants = d.setdefault("vivants", {})

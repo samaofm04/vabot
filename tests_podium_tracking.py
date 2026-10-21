@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import contextlib
 import io
 import json
 import pathlib
@@ -711,6 +712,75 @@ try:
     check("relevé complet : primes annoncées sur le podium corrigé, X compris",
           _PRIMES and paye[0] == "VA 34" and not fg.get("primes_attente") and fg.get("complet"),
           (paye, fg))
+
+    # ------------------------------------------------------------------ 10c
+    print("\n— 10c. des VA sans relevé qui ne peuvent pas entrer dans le top 3")
+    # Audit du 20/10/2026 : les primes des semaines du 05/10 et du 12/10
+    # restaient retenues à vie (VA 11 et 21 sur des trackings de Jessye, que
+    # MyPuls ne voit plus), et seul le lundi suivant les relançait.
+    # Propriétaire, 21/10/2026 : libérer dès qu'aucun VA sans relevé ne peut
+    # entrer dans le top 3, un essai chaque jour.
+    installer()
+    NOMS_MP["emy.brw/c55"] = "Donald - ( normal )"
+    VISITES.update({"emy.brw/c42": {"2026-10-06": 40}, "emy.brw/c43": {"2026-10-06": 25},
+                    "emy.brw/c44": {"2026-10-07": 30}, "emy.brw/c37": {"2026-10-06": 20},
+                    "jessyewdiference/c126": {"2026-10-06": 5}})
+    pd.classement(LUN, MAR, gid=TW)                          # tout lu, c126 gravé au VA 34 (X)
+    LIENS[EQ_TW1][4]["status"] = "active"                  # Micky passe sur c126 : 34 et 40 disputés
+    del NOMS_MP["emy.brw/c44"]                             # MyPuls ne rend plus c44 : VA 22 illisible
+    BORNE = {"v": 25}
+    _vraie_analytics = _faux_gms.analytics_for_links
+    _faux_gms.analytics_for_links = lambda ids, d0, d1: (
+        ANALYTICS.append((tuple(ids), d0, d1)) or (BORNE["v"], {"US": 1}))
+    try:
+        CLOCK["now"] = dt.datetime(2026, 10, 12, 9, 5)
+        frais()
+        pd.poster_podium(TW, jour=dt.date(2026, 10, 12))
+        fg = pd._etat()["figes"][TW]["2026-10-05"]
+        check("lundi 9h : VA 22 (c44 plus rendu), VA 34 et VA 40 (c126 disputé) sans relevé, "
+              "primes retenues",
+              fg.get("primes_attente") and _PRIMES == []
+              and set(fg["primes_attente"]["cl"]["illisibles"]) == {"VA 22", "VA 34", "VA 40"}, fg)
+        CLOCK["now"] = dt.datetime(2026, 10, 12, 10, 10)
+        frais()
+        sortie = io.StringIO()
+        with contextlib.redirect_stdout(sortie):
+            pd.poster_podium(TW, jour=dt.date(2026, 10, 12))
+        check("VA 22 plafonné à 25 visites sur ses liens, 3e à 20 clics : retenues, et c'est dit",
+              _PRIMES == [] and pd._etat()["figes"][TW]["2026-10-05"].get("primes_attente")
+              and "primes toujours retenues" in sortie.getvalue(), sortie.getvalue()[-400:])
+        # le lendemain, le podium vivant relance — plus seulement le lundi
+        CLOCK["now"] = dt.datetime(2026, 10, 13, 10, 0)
+        frais()
+        n_an = len(ANALYTICS)
+        pd.rafraichir(TW)
+        check("mardi : relancées par le podium vivant ; GetMySocial lu pour le seul VA que "
+              "MyPuls ne borne pas (VA 22 ; c126, disputé mais lu, borne VA 34 et 40)",
+              len(ANALYTICS) - n_an == 1 and ANALYTICS[-1][0] == ("l8",) and _PRIMES == [],
+              ANALYTICS[n_an:])
+        CLOCK["now"] = dt.datetime(2026, 10, 13, 15, 0)
+        frais()
+        n_an = len(ANALYTICS)
+        pd.rafraichir(TW)
+        check("… une fois par jour, pas à chaque passage", len(ANALYTICS) == n_an)
+        BORNE["v"] = 10
+        CLOCK["now"] = dt.datetime(2026, 10, 14, 10, 0)
+        frais()
+        pd.rafraichir(TW)
+        fg = pd._etat()["figes"][TW]["2026-10-05"]
+        paye = [x["va"] for x in (_PRIMES[-1][2]["lignes"] if _PRIMES else [])][:3]
+        check("mercredi, plafonds 10 et 5 sous le 3e (20) : primes libérées, top 3 inchangé",
+              _PRIMES and _PRIMES[-1][1] == "2026-10-05" and paye == ["VA 12", "VA 24", "VA 43"]
+              and not fg.get("primes_attente") and fg.get("primes_liberees", {}).get("seuil") == 20,
+              (paye, fg))
+        corr = [a_["json"]["embeds"][0]["description"] for a_ in DISCORD.appels
+                if a_["m"] == "PATCH" and (a_["json"] or {}).get("embeds")
+                and "Primes confirmées" in a_["json"]["embeds"][0]["description"]]
+        check("… le podium corrigé le dit, plafonds compris",
+              corr and "VA 22 (10 au plus), VA 34 (5 au plus), VA 40 (5 au plus)" in corr[-1]
+              and "pas atteindre le 3e (20 clics)" in corr[-1], corr[-1:] or DISCORD.appels[-3:])
+    finally:
+        _faux_gms.analytics_for_links = _vraie_analytics
 
     # ------------------------------------------------------------------ 10b
     print("\n— 10b. MyPuls se met à jour par paliers : la veille complétée le matin")

@@ -849,3 +849,27 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
             soucis.append("registre data/liens_va_fr.json non écrit : un 2e clic recréerait")
         print(f"[liens_fr] {nom} -> {public} (trackings {sorted(urls)}, soucis {len(soucis)})", flush=True)
         return {"ok": True, "deja": False, **entree}
+
+
+# ─── Le VA parti ──────────────────────────────────────────────────────────
+# Audit du 20/10/2026 : 3usg avait quitté Va IG et gardait ses liens en
+# service — aligner ne traite que les membres qu'il voit. cogs/welcome.py note
+# chaque départ dans data/pending_deletions.json (on_member_remove) et l'en
+# retire s'il revient (on_member_join). Propriétaire, 21/10/2026 : au départ,
+# « son lien est disable, si il revient je peux le renable ».
+PARTIS = _RACINE / "data" / "pending_deletions.json"
+VA_IG = "1505418484052394004"
+
+
+def couper_partis() -> List[Dict[str, Any]]:
+    """Les liens des VA partis de Va IG coupés comme un rôle retiré (aligner,
+    sans aucun model) : notés dans « coupes_role », ils reviennent en service
+    tout seuls si le VA revient avec ses rôles. Rend les bascules faites."""
+    d = safe_json.load(PARTIS, default={}) or {}
+    membres = [(uid, str(e.get("user_name") or ""), []) for uid, e in d.items()
+               if isinstance(e, dict) and str(e.get("guild_id")) == VA_IG]
+    faits = aligner(membres) if membres else []
+    if faits:
+        print(f"[liens_fr] VA partis de Va IG : {len(faits)} lien(s) coupé(s) "
+              f"({', '.join(f['nom'] for f in faits)[:200]})", flush=True)
+    return faits

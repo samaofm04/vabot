@@ -123,8 +123,8 @@ def _vas(gid: str) -> List[Dict[str, Any]]:
             continue
         uid = cle.split(":", 1)[1]
         f = fiches.get(cle) or {}
-        if not f.get("salon"):
-            continue
+        if not f.get("salon") or f.get("parti"):
+            continue                      # parti du serveur : plus d'alerte ni d'essai
         out.append({"uid": uid, "cle": cle, "lien": l, "fiche": f})
     return out
 
@@ -321,6 +321,11 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
         fiche = (tk._etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
         salon = str(fiche.get("salon") or "")
         if not salon:
+            continue
+        if fiche.get("parti"):
+            # parti du serveur : sa prime est annulée, pas reportée au suivant
+            # (propriétaire, 21/10/2026, pour fabiano.18_, 3e de Threads)
+            bilan.setdefault("partis", []).append(l.get("pseudo"))
             continue
         mid = str(fiche.get("manager") or "")
         adr = adresse_de(gid, uid)

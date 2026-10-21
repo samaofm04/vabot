@@ -18,6 +18,15 @@ Ce qui est vérifié (tickets_discord.entretenir_accueils, _donner_ticket) :
   - la réaffectation (_donner_ticket) met l'accueil à jour tout de suite ;
   - le tour quotidien est branché dans suivre_partout.
 
+Et le départ d'un VA (tickets_discord.suivre_departs, une fois l'heure) :
+  - absent du serveur (404 « Unknown Member ») : fiche « parti », son lien
+    coupé (pas supprimé, ✅ Réactiver sur l'accueil), ses doublons au même nom
+    aussi, et seulement eux ; le ticket le dit, sans mentionner personne ;
+  - un autre refus ne conclut rien ; un second passage ne refait rien ;
+  - revenu : il rentre, son lien reste coupé ;
+  - le podium le sort des périodes qui vont jusqu'à son départ, pas des
+    semaines d'avant ; sa prime n'est pas annoncée (suivi_va).
+
 Faux Discord, dossier temporaire : aucun appel réseau, rien dans data/.
 Lancement : python tests_accueils_tickets.py
 """
@@ -188,6 +197,167 @@ try:
     src = inspect.getsource(tk.suivre_partout)
     check("branché dans suivre_partout, une fois par jour et par serveur",
           "entretenir_accueils(gid)" in src and "ENTRETIEN_S" in src)
+
+    # ── le départ d'un VA ────────────────────────────────────────────────
+    import types
+    import datetime as dt
+    import liens_va as lv
+    import podium_discord as pd
+    import suivi_va as sv
+    _SAUVE_LV = {k: getattr(lv, k) for k in ("ETAT_FICHIER", "espace")}
+    _SAUVE_GMS = sys.modules.get("gms")
+    _SAUVE_SV = sv.ETAT_FICHIER
+    try:
+        lv.ETAT_FICHIER = TMP / "liens_va.json"
+        lv.espace = lambda gid="": {"equipe": "tm_th", "plateforme": "Threads"}
+        nom83 = "Threads VA 83 @fabiano.18_"
+        lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+            f"{G}:83": {"pseudo": "fabiano.18_", "numero": 83, "link_id": "lnk_b",
+                        "shortcode": "babebbyy", "public_url": "https://getmysocial.com/babebbyy"},
+            f"{G}:80": {"pseudo": "2xdeux", "numero": 80, "link_id": "lnk_o",
+                        "shortcode": "otheryy", "public_url": "https://getmysocial.com/otheryy"}}}),
+            encoding="utf-8")
+        g = types.ModuleType("gms")
+        g.liens = [{"id": "lnk_b", "display_name": nom83, "status": "active", "shortcode": "babebbyy"},
+                   {"id": "lnk_p", "display_name": nom83, "status": "active", "shortcode": "pearlkittyy"},
+                   {"id": "lnk_o", "display_name": "Threads VA 80 @2xdeux", "status": "active",
+                    "shortcode": "otheryy"}]
+        g.coupes = []
+
+        def _statut(lid, actif):
+            g.coupes.append((lid, actif))
+            for x in g.liens:
+                if x["id"] == lid:
+                    x["status"] = "active" if actif else "inactive"
+            return {"ok": True}
+        g.disable_link = lambda lid: _statut(lid, False)
+        g.enable_link = lambda lid: _statut(lid, True)
+        g.list_links_team = lambda team, force_refresh=False: {"ok": True, "links": copy.deepcopy(g.liens)}
+        sys.modules["gms"] = g
+        tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {
+            f"{G}:83": {"salon": "s83", "manager": "999", "accueil": "a83", "confirme": True},
+            f"{G}:80": {"salon": "s80", "manager": "999", "accueil": "a80"},
+            f"{G}:81": {"salon": "s81", "manager": "999", "accueil": "a81"}}}), encoding="utf-8")
+        membres = {"83": 404, "80": 200, "81": 500}
+        d2 = FauxDiscord()
+        d2.msgs = {"s83": {"a83": accueil("a83", "83", "999", True)}, "s80": {}, "s81": {}}
+        d2.salons.update({"s83": 200, "s80": 200, "s81": 200})
+        _vrai_api = d2.api
+
+        def api2(methode, chemin, **kw):
+            p_ = chemin.strip("/").split("/")
+            if p_[0] == "guilds" and p_[2] == "members":
+                d2.appels.append((methode, chemin, None))
+                c = membres[p_[3]]
+                return c, ({"code": 10007, "message": "Unknown Member"} if c == 404 else
+                           {"user": {"id": p_[3]}} if c == 200 else {"message": "panne"})
+            if methode == "POST" and p_[2] == "messages":
+                d2.appels.append((methode, chemin, kw.get("json")))
+                return 200, {"id": "m"}
+            return _vrai_api(methode, chemin, **kw)
+        tk._api = api2
+        b3 = tk.suivre_departs(G)
+        etat = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))
+        f83 = etat["tickets"][f"{G}:83"]
+        check("départ (404 Unknown Member) : fiche marquée « parti », les autres non",
+              b3["partis"] == ["83"] and isinstance(f83.get("parti"), dict)
+              and not etat["tickets"][f"{G}:80"].get("parti")
+              and "81 (HTTP 500)" in b3["illisibles"] and not etat["tickets"][f"{G}:81"].get("parti"), b3)
+        check("… son lien coupé, pas supprimé, et son doublon au même nom (pearlkittyy) aussi",
+              ("lnk_b", False) in g.coupes and ("lnk_p", False) in g.coupes
+              and not [c for c in g.coupes if c[0] == "lnk_o"]
+              and not lv.est_actif(G, "83"), g.coupes)
+        msg = [j for (m_, c_, j) in d2.appels if m_ == "POST" and c_ == "/channels/s83/messages"]
+        check("… le ticket le dit, sans mentionner personne : parti, lien réactivable, salon gardé",
+              msg and "a quitté le serveur" in msg[0]["content"] and "Réactiver le lien" in msg[0]["content"]
+              and msg[0]["allowed_mentions"] == {"parse": []}, msg)
+        a83 = d2.msgs["s83"]["a83"]
+        boutons = [b_["custom_id"] for r_ in a83.get("components") or [] for b_ in r_["components"]]
+        check("… l'accueil marqué « 👋 Parti », bouton ✅ Réactiver à la place de 🚫",
+              tk.MARQUE_PARTI in a83["embeds"][0]["description"]
+              and "lien:on:83" in boutons and "lien:off:83" not in boutons, (a83, boutons))
+        n = len(g.coupes)
+        n_post = len([a_ for a_ in d2.appels if a_[0] == "POST"])
+        tk.suivre_departs(G)
+        check("un second passage ne refait rien",
+              len(g.coupes) == n and len([a_ for a_ in d2.appels if a_[0] == "POST"]) == n_post)
+
+        # le podium : sorti des périodes qui vont jusqu'à son départ
+        auj = dt.date.today()
+        cl = {"lignes": [{"va": "Threads 83", "numero": 83, "clics": 54},
+                         {"va": "Threads 80", "numero": 80, "clics": 15}],
+              "illisibles": ["Threads 83"], "frais": True}
+        cl_v = pd._sans_partis(G, cl, auj)
+        cl_p = pd._sans_partis(G, cl, auj - dt.timedelta(days=3))
+        check("podium en cours : VA 83 retiré des lignes et des sans-relevé, et noté",
+              [x["va"] for x in cl_v["lignes"]] == ["Threads 80"] and cl_v["illisibles"] == []
+              and cl_v["partis"] == ["Threads 83"], cl_v)
+        check("… une semaine finie avant son départ le garde", cl_p == cl, cl_p)
+        check("… Twitter, sans VA parti, n'est pas touché",
+              pd._sans_partis("1445108485090971710", cl, auj) == cl)
+
+        # sa prime : pas annoncée
+        sv.ETAT_FICHIER = TMP / "suivi_va.json"
+        n_post = len([a_ for a_ in d2.appels if a_[0] == "POST"])
+        bp = sv.annoncer_primes(G, {"lignes": [{"va": "Threads 83", "clics": 54},
+                                               {"va": "Threads 80", "clics": 15}]},
+                                auj - dt.timedelta(days=9), auj - dt.timedelta(days=3))
+        posts = [a_ for a_ in d2.appels if a_[0] == "POST"][n_post:]
+        check("prime d'un VA parti : annulée, pas annoncée ; le 2e garde la sienne",
+              bp.get("partis") == ["fabiano.18_"] and [c_ for (_m, c_, _j) in posts] == ["/channels/s80/messages"]
+              and "5.00$" in str(posts[0][2]), (bp, posts))
+
+        # il revient
+        membres["83"] = 200
+        b4 = tk.suivre_departs(G)
+        etat = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))
+        a83 = d2.msgs["s83"]["a83"]
+        check("revenu : plus « parti », marque retirée de l'accueil, son lien reste coupé",
+              b4["revenus"] == ["83"] and not etat["tickets"][f"{G}:83"].get("parti")
+              and etat["tickets"][f"{G}:83"].get("revenu")
+              and tk.MARQUE_PARTI not in a83["embeds"][0]["description"]
+              and not lv.est_actif(G, "83") and ("lnk_b", True) not in g.coupes, (b4, g.coupes))
+        check("… et il rentre au classement", pd._sans_partis(G, cl, auj) == cl)
+        src = inspect.getsource(tk.suivre_partout)
+        check("branché dans suivre_partout, une fois l'heure",
+              "suivre_departs(gid)" in src and "DEPARTS_S" in src)
+
+        # Va IG : ses VA partis (cogs/welcome.py les note dans
+        # pending_deletions.json) ont leurs liens coupés comme un rôle retiré
+        import liens_fr
+        _sauve_fr = {k: getattr(liens_fr, k) for k in ("PARTIS", "ETAT", "_liens_equipe")}
+        try:
+            liens_fr.PARTIS = TMP / "pending_deletions.json"
+            liens_fr.ETAT = TMP / "liens_va_fr.json"
+            liens_fr.PARTIS.write_text(json.dumps({
+                "881568604557037628": {"channel_id": 1, "guild_id": int(liens_fr.VA_IG),
+                                       "delete_at": "2026-10-21T20:12:05+00:00", "user_name": "3usg"},
+                "42": {"channel_id": 2, "guild_id": 999, "user_name": "ailleurs"}}), encoding="utf-8")
+            fr = [{"id": "lnk_fr1", "display_name": "Amelia VA 3 @3usg", "status": "active"},
+                  {"id": "lnk_fr2", "display_name": "Amelia VA 5 @ailleurs", "status": "active"},
+                  {"id": "lnk_fr3", "display_name": "Lola VA 7 @quelquun", "status": "active"}]
+            liens_fr._liens_equipe = lambda force=False, strict=False: fr
+            g.coupes.clear()
+            faits = liens_fr.couper_partis()
+            check("Va IG : le lien du VA parti (3usg) coupé, pas ceux des autres ni d'un autre serveur",
+                  [(f_["nom"], f_["actif"], f_["ok"]) for f_ in faits] == [("Amelia VA 3 @3usg", False, True)]
+                  and g.coupes == [("lnk_fr1", False)], (faits, g.coupes))
+            reg_fr = json.loads(liens_fr.ETAT.read_text(encoding="utf-8"))
+            check("… noté dans « coupes_role » : rendu tout seul s'il revient avec ses rôles",
+                  "lnk_fr1" in (reg_fr.get("coupes_role") or {}), reg_fr)
+            check("branché dans suivre_partout, une fois l'heure",
+                  "liens_fr.couper_partis()" in inspect.getsource(tk.suivre_partout))
+        finally:
+            for _k, _v in _sauve_fr.items():
+                setattr(liens_fr, _k, _v)
+    finally:
+        for _k, _v in _SAUVE_LV.items():
+            setattr(lv, _k, _v)
+        sv.ETAT_FICHIER = _SAUVE_SV
+        if _SAUVE_GMS is not None:
+            sys.modules["gms"] = _SAUVE_GMS
+        else:
+            sys.modules.pop("gms", None)
 except Exception as _e:
     import traceback
     check("accueils : testable", False, repr(_e)[:200] + " " + traceback.format_exc()[-1500:])

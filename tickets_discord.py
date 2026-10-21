@@ -2281,6 +2281,14 @@ def suivre_partout() -> Dict[str, Any]:
                 ouvrir_tickets_verifies(gid)
         except Exception as e:
             print(f"[ticket] {gid} : Vérifiés : {type(e).__name__}: {e}", flush=True)
+        # une fois l'heure : qui est parti, qui est revenu
+        if maintenant - _DEPARTS_VU.get(gid, 0) >= DEPARTS_S:
+            _DEPARTS_VU[gid] = maintenant
+            try:
+                with sur_serveur(gid):
+                    suivre_departs(gid)
+            except Exception as e:
+                print(f"[ticket] {gid} : départs : {type(e).__name__}: {e}", flush=True)
         # une fois par jour : salons supprimés, manager et épingle des accueils
         if maintenant - _ENTRETIEN_VU.get(gid, 0) >= ENTRETIEN_S:
             _ENTRETIEN_VU[gid] = maintenant
@@ -2290,6 +2298,15 @@ def suivre_partout() -> Dict[str, Any]:
             except Exception as e:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
+    # Va IG n'a pas de tickets ici (bot principal), mais ses VA partis gardaient
+    # leurs liens en service : coupés une fois l'heure (liens_fr.couper_partis)
+    if time.time() - _DEPARTS_VU.get("va_ig", 0) >= DEPARTS_S:
+        _DEPARTS_VU["va_ig"] = time.time()
+        try:
+            import liens_fr
+            liens_fr.couper_partis()
+        except Exception as e:
+            print(f"[liens_fr] VA partis de Va IG : {type(e).__name__}: {e}", flush=True)
     return out
 
 
@@ -2509,4 +2526,166 @@ def entretenir_accueils(gid: str) -> Dict[str, Any]:
             _ecrire_etat(d)
     if any(bilan.values()):
         print(f"[ticket] accueils {gid} : {bilan}", flush=True)
+    return bilan
+
+
+# ─── le départ d'un VA ──────────────────────────────────────────────────
+# Audit du 20/10/2026 : fabiano.18_ (VA 83 de Threads) avait quitté le serveur
+# le 19/10 et gardait tout — ticket, fiches, deux liens GetMySocial actifs,
+# sa ligne au classement. Bowser et Luigi ne reçoivent pas les événements de
+# Discord : chaque fiche est relue, une fois l'heure. Propriétaire, 21/10/2026 :
+# le ticket « marqué 👋 parti », le salon tel quel, le VA sorti des classements,
+# « son lien est disable, si il revient je peux le renable » — désactivé,
+# jamais supprimé ; le bouton ✅ Réactiver le lien de l'accueil le rallume.
+DEPARTS_S = 3600
+_DEPARTS_VU: Dict[str, float] = {}
+MARQUE_PARTI = "\n👋 _Parti du serveur — son lien est désactivé, réactivable ici._"
+
+
+def partis(gid: str) -> Dict[str, float]:
+    """{uid : heure où son départ a été constaté} des VA partis de ce serveur.
+    Lu par le podium (sortis des classements) et par suivi_va (ni alerte, ni
+    prime)."""
+    out: Dict[str, float] = {}
+    for cle, f in (_etat().get("tickets") or {}).items():
+        if (str(cle).startswith(f"{gid}:") and isinstance(f, dict)
+                and isinstance(f.get("parti"), dict)):
+            out[str(cle).split(":", 1)[1]] = float(f["parti"].get("quand") or 0)
+    return out
+
+
+def _couper_liens_du_va(gid: str, uid: str) -> Dict[str, Any]:
+    """Son lien coupé par liens_va.basculer (c'est lui que « ✅ Réactiver le
+    lien » rallume), et les autres liens actifs au MÊME nom dans l'espace
+    GetMySocial du serveur — le double clic du 17/10 avait laissé pearlkittyy
+    hors registre. Désactivés, jamais supprimés. Rend {coupe, doublons, erreur}."""
+    import liens_va as lv
+    out: Dict[str, Any] = {"coupe": False, "doublons": [], "erreur": ""}
+    l = lv.lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return out
+    if lv.est_actif(gid, uid):
+        r = lv.basculer(gid, uid, False)
+        out["coupe"] = bool(r.get("ok"))
+        if not r.get("ok"):
+            out["erreur"] = str(r.get("erreur") or "refus")[:120]
+    try:
+        import gms
+        lid = str(lv.lien_de(gid, uid).get("link_id") or l.get("link_id") or "")
+        rep = gms.list_links_team(str(lv.espace(gid)["equipe"]), force_refresh=True)
+        liens = rep.get("links") or [] if isinstance(rep, dict) else []
+        nom = next((str(x.get("display_name") or "") for x in liens
+                    if str(x.get("id")) == lid), "")
+        for x in liens:
+            if (nom and str(x.get("display_name") or "") == nom and str(x.get("id")) != lid
+                    and str(x.get("status") or "active").lower() == "active"):
+                r = gms.disable_link(str(x["id"]))
+                if r.get("ok"):
+                    out["doublons"].append(str(x.get("shortcode") or x["id"]))
+                else:
+                    out["erreur"] += f' doublon {x.get("shortcode")} : {str(r.get("error"))[:60]}'
+    except Exception as e:                                   # noqa: BLE001
+        out["erreur"] += f" doublons : {type(e).__name__}: {str(e)[:80]}"
+    return out
+
+
+def _marquer_accueil(gid: str, uid: str, f: Dict[str, Any], parti: bool) -> None:
+    """La ligne « 👋 Parti » dans l'accueil, posée ou retirée, et les boutons
+    du lien tel qu'il est (coupé : ✅ Réactiver)."""
+    import liens_va as lv
+    salon, mid = str(f.get("salon") or ""), str(f.get("accueil") or "")
+    if not (salon and mid):
+        return
+    code, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
+    if code != 200 or not isinstance(msg, dict):
+        return
+    embeds = msg.get("embeds") or [{}]
+    d = str(embeds[0].get("description") or "").replace(MARQUE_PARTI, "")
+    embeds[0]["description"] = ((d.rstrip() + MARQUE_PARTI) if parti else d)[:4096]
+    a_un_lien = bool(lv.lien_de(gid, uid).get("public_url"))
+    _api("PATCH", f"/channels/{salon}/messages/{mid}",
+         json={"embeds": embeds,
+               "components": boutons_va(uid, confirme=bool(f.get("confirme")),
+                                        a_un_lien=a_un_lien, gid=gid,
+                                        lien_actif=lv.est_actif(gid, uid))})
+
+
+def marquer_parti(gid: str, uid: str) -> Dict[str, Any]:
+    """Le VA a quitté le serveur : fiche marquée, lien coupé, ticket prévenu.
+    Le salon reste tel quel. Rend le bilan."""
+    gid, uid = str(gid), str(uid)
+    cle = f"{gid}:{uid}"
+    with _VERROU:
+        d = _etat()
+        f = (d.get("tickets") or {}).get(cle)
+        if not isinstance(f, dict) or f.get("parti"):
+            return {"ok": False}
+        f["parti"] = {"quand": int(time.time())}
+        f.pop("revenu", None)
+        _ecrire_etat(d)
+        f = dict(f)
+    liens = _couper_liens_du_va(gid, uid)
+    jour = time.strftime("%d/%m/%Y")
+    lien = ""
+    if liens["coupe"] or liens["doublons"]:
+        lien = ("🚫 Son lien est désactivé, pas supprimé : **✅ Réactiver le lien**, sur "
+                "l'accueil, le remet en service s'il revient.\n")
+    salon = str(f.get("salon") or "")
+    if salon:
+        _api("POST", f"/channels/{salon}/messages",
+             json={"content": f"👋 <@{uid}> a quitté le serveur (constaté le **{jour}**).\n"
+                              + lien + "Ce salon reste tel quel. Il ne compte plus dans les "
+                              "classements.", "allowed_mentions": {"parse": []}})
+        _marquer_accueil(gid, uid, f, parti=True)
+    print(f"[ticket] {gid} : {uid} parti — lien coupé : {liens['coupe']}, doublons coupés : "
+          f"{liens['doublons']}" + (f", souci : {liens['erreur']}" if liens["erreur"] else ""),
+          flush=True)
+    return {"ok": True, **liens}
+
+
+def marquer_revenu(gid: str, uid: str) -> None:
+    """Revenu sur le serveur : il rentre dans les classements. Son lien reste
+    coupé — le rallumer est une décision (bouton ✅ Réactiver le lien)."""
+    gid, uid = str(gid), str(uid)
+    with _VERROU:
+        d = _etat()
+        f = (d.get("tickets") or {}).get(f"{gid}:{uid}")
+        if not isinstance(f, dict) or not f.get("parti"):
+            return
+        f.pop("parti", None)
+        f["revenu"] = int(time.time())
+        _ecrire_etat(d)
+        f = dict(f)
+    salon = str(f.get("salon") or "")
+    if salon:
+        _api("POST", f"/channels/{salon}/messages",
+             json={"content": f"👋 <@{uid}> est de retour sur le serveur. Son lien reste "
+                              "désactivé : **✅ Réactiver le lien**, sur l'accueil, le remet "
+                              "en service.", "allowed_mentions": {"parse": []}})
+        _marquer_accueil(gid, uid, f, parti=False)
+    print(f"[ticket] {gid} : {uid} revenu sur le serveur (lien toujours coupé)", flush=True)
+
+
+def suivre_departs(gid: str) -> Dict[str, Any]:
+    """Chaque VA à ticket de ce serveur : encore là ? Absent (404 « Unknown
+    Member », code 10007) : marquer_parti. Revenu : marquer_revenu. Tout autre
+    refus ne conclut rien, et c'est dit. Rend le bilan."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"partis": [], "revenus": [], "illisibles": []}
+    fiches = {k: v for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict)}
+    for cle, f in sorted(fiches.items()):
+        uid = cle.split(":", 1)[1]
+        code, m = _api("GET", f"/guilds/{gid}/members/{uid}")
+        if code == 404 and isinstance(m, dict) and int(m.get("code") or 0) == 10007:
+            if not f.get("parti") and marquer_parti(gid, uid).get("ok"):
+                bilan["partis"].append(uid)
+        elif code == 200:
+            if f.get("parti"):
+                marquer_revenu(gid, uid)
+                bilan["revenus"].append(uid)
+        else:
+            bilan["illisibles"].append(f"{uid} (HTTP {code})")
+    if any(bilan.values()):
+        print(f"[ticket] départs {gid} : {bilan}", flush=True)
     return bilan
