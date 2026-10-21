@@ -172,7 +172,11 @@ staff2 = Salon(20, "📢・annonces-entretiens", voit=False, overwrites={
 verif = Salon(21, "🔐・vérification", voit=False, overwrites={va: [("view_channel", True)]})
 spoofer = Salon(22, "spoofer", voit=False, overwrites={va: [("view_channel", True)]},
                 categorie="🧰 Outils")
-g2 = Guilde([staff2, verif, spoofer, accueil], [verifie, manager, boss, alicia])
+aide = Salon(23, "🆘・help", voit=False, categorie="📚 RESSOURCES", overwrites={
+    vecto: [("view_channel", False)], va: [("view_channel", False)], luigi: [("view_channel", False)]})
+muet = Salon(24, "💬・discussions", voit=True, overwrites={
+    vecto: [("view_channel", False), ("send_messages", False)]})
+g2 = Guilde([staff2, verif, spoofer, aide, muet, accueil], [verifie, manager, boss, alicia])
 cfg.clear()
 cfg.update({"extra_visible_channel_ids": [11, 20, 21, 22, 777]})
 orig_sleep = asyncio.sleep
@@ -195,8 +199,16 @@ check("propriétaire et bot gardent leur accès", proprio in staff2._ow and luig
 check("le 🛡️ Manager garde son entrée", vecto in staff2._ow, staff2._ow)
 check("bilan compté", bilan["acces_retires"] == 2 and sorted(bilan["retires"]) ==
       sorted(["📢・annonces-entretiens", "🔐・vérification"]), bilan)
-bilan2 = run(o.nettoyer_salons_staff(g2))
-check("le nettoyage est sans effet la 2e fois", not bilan2["retires"] and not bilan2["acces_retires"], bilan2)
+check("le refus d'isolation du 🛡️ Manager est levé", vecto not in aide._ow and bilan["staff_desisole"] == 1, bilan)
+check("le VA et le bot gardent leur refus", va in aide._ow and luigi in aide._ow, aide._ow)
+check("un refus qui n'est pas celui de l'isolation reste", vecto in muet._ow, muet._ow)
+o.asyncio.sleep = _sans_attente
+try:
+    bilan2 = run(o.nettoyer_salons_staff(g2))
+finally:
+    o.asyncio.sleep = orig_sleep
+check("le nettoyage est sans effet la 2e fois", not bilan2["retires"] and not bilan2["acces_retires"]
+      and not bilan2["staff_desisole"], bilan2)
 
 # 5. déblocage d'un salon qui entre dans la liste (comme /showsalon)
 heure3 = Salon(30, "🕒・heure-de-post", voit=True, overwrites={

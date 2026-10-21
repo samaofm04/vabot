@@ -338,7 +338,8 @@ CATEGORIES_INFO = ("accueil", "notification")
 async def nettoyer_salons_staff(guilde) -> dict:
     """Retire de la liste blanche les salons d'accueil de ce serveur qu'un VA
     ne voit pas par son role, puis les acces poses au nom des VA sur ces
-    salons (pas le staff, ni les bots). Rend un bilan."""
+    salons (pas le staff, ni les bots), puis les refus d'isolation poses au
+    staff. Rend un bilan."""
     from cogs.welcome import est_encadrant, load_welcome_config, save_welcome_config
     role = _role_des_va(guilde)
     cfg = load_welcome_config()
@@ -363,6 +364,30 @@ async def nettoyer_salons_staff(guilde) -> dict:
                                             reason="Salon staff : pas pour les VA")
                 bilan["acces_retires"] += 1
                 await asyncio.sleep(0.5)
+            except Exception as e:                           # noqa: BLE001
+                bilan["rates"].append(f"{salon.name}/{cible.name} ({type(e).__name__})")
+    # Le staff isole avant le 21/10 : vectorofm (🛡️ Manager) portait 186 refus
+    # a son nom ; ceux de 🔗・demande-de-lien et 🆘・help l'auraient laisse
+    # aveugle meme avec « Voir le salon » coche sur son role. Seule l'empreinte
+    # de l'isolation est levee (un refus de vue, rien d'autre) ; un bot garde
+    # les siens.
+    bilan["staff_desisole"] = 0
+    vue = discord.Permissions(view_channel=True).value
+    for salon in list(getattr(guilde, "channels", None) or []):
+        if isinstance(salon, discord.CategoryChannel):
+            continue
+        for cible, ow in list(salon.overwrites.items()):
+            if (not isinstance(cible, discord.Member) or getattr(cible, "bot", False)
+                    or not est_encadrant(cible)):
+                continue
+            allow, deny = ow.pair()
+            if allow.value or deny.value != vue:
+                continue
+            try:
+                await salon.set_permissions(cible, overwrite=None,
+                                            reason="Staff : pas isole comme un VA")
+                bilan["staff_desisole"] += 1
+                await asyncio.sleep(0.3)
             except Exception as e:                           # noqa: BLE001
                 bilan["rates"].append(f"{salon.name}/{cible.name} ({type(e).__name__})")
     return bilan
