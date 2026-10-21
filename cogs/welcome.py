@@ -201,6 +201,44 @@ def save_pending(pending):
     safe_json.write_text(PENDING_DELETIONS_FILE, json.dumps(pending, indent=2, ensure_ascii=False))
 
 
+#: Ce qui a deja ete dit une fois dans ce processus (fiche ignoree par
+#: auto_sort, salon general que personne ne reclame) : le meme avertissement
+#: toutes les 10 min noyait le journal (389 « général-va » en 3 jours).
+_DEJA_SIGNALE = set()
+
+
+def _signaler_une_fois(cle, niveau, msg, *args) -> None:
+    if cle not in _DEJA_SIGNALE:
+        _DEJA_SIGNALE.add(cle)
+        log.log(niveau, msg, *args)
+
+
+def _fiches_a_ranger(bot, users) -> dict:
+    """Les fiches dont auto_sort range le ticket : sans les VA partis. 3usg,
+    suppression de son ticket planifiee, faisait 144 « roles indisponibles …
+    NotFound » par jour (on_member_remove l'avait vu partir, pas auto_sort).
+    Un membre absent du serveur de son ticket, sans suppression planifiee
+    (parti pendant un redemarrage), est signale une fois, puis ignore."""
+    pending = load_pending() or {}
+    garde = {}
+    for uid, data in (users or {}).items():
+        if str(uid) in pending:
+            _signaler_une_fois(("parti", str(uid)), logging.INFO,
+                               "auto_sort : fiche %s ignoree, VA parti (suppression du ticket le %s)",
+                               uid, str((pending.get(str(uid)) or {}).get("delete_at", "?"))[:16])
+            continue
+        cid = data.get("channel_id") if isinstance(data, dict) else None
+        ch = bot.get_channel(int(cid)) if (bot is not None and str(cid or "").isdigit()) else None
+        g = getattr(ch, "guild", None)
+        if g is not None and str(uid).isdigit() and g.get_member(int(uid)) is None:
+            _signaler_une_fois(("absent", str(uid)), logging.WARNING,
+                               "auto_sort : fiche %s ignoree, membre absent de %s (ticket %s, "
+                               "aucune suppression planifiee)", uid, g.name, getattr(ch, "name", "?"))
+            continue
+        garde[uid] = data
+    return garde
+
+
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
 
 
@@ -1921,8 +1959,22 @@ async def lignes_suivent_roles(guild, membre, ch, bot, garder_sans_role=False) -
     models = models_du_membre(membre)
     if not models and garder_sans_role:
         return bilan
-    lignes, avis = {}, []
-    async for m in ch.history(limit=100):                    # du plus recent au plus ancien
+    lignes, avis, vus = {}, [], set()
+
+    async def _messages():
+        # Les epingles d'abord : une ligne epinglee plus haut que les 100
+        # derniers messages n'etait pas vue, une autre etait posee et
+        # epinglee a chaque passage (6 tickets de Va IG avec 2 a 4 lignes de
+        # la meme model, 20/10/2026).
+        async for m in ch.pins(limit=None):
+            yield m
+        async for m in ch.history(limit=100):                # du plus recent au plus ancien
+            yield m
+
+    async for m in _messages():
+        if m.id in vus:
+            continue
+        vus.add(m.id)
         if getattr(getattr(m, "author", None), "id", None) != moi:
             continue
         if m.type == discord.MessageType.pins_add:
@@ -1980,7 +2032,9 @@ async def lignes_suivent_roles(guild, membre, ch, bot, garder_sans_role=False) -
 
 
 #: Passage unique de Welcome.lignes_rattrapage (une cle par demande).
-LIGNES_DEMANDE = "2026-10-03"
+#: 2026-10-21 : relu par les epingles, il retire les lignes en double de 6
+#: tickets (simule avant : aucune ligne posee ni retiree ailleurs).
+LIGNES_DEMANDE = "2026-10-21"
 LIGNES_FAIT = Path(__file__).resolve().parent.parent / "data" / "lignes_roles_fr.json"
 #: Trace de Welcome.lignes_redessin : {"version": cogs.user.LIGNE_DISPOSITION
 #: appliquee, "faits": [uid...] (reprise apres un redemarrage), "fin": ts}.
@@ -3238,7 +3292,7 @@ class Welcome(commands.Cog):
         d'identite (si l'admin les a deplaces, ou s'ils ont ete crees sans
         categorie). Silencieux : aucun message envoye, juste les moves."""
         try:
-            users = load_users()
+            users = _fiches_a_ranger(self.bot, load_users())
             if not users:
                 return
             for guild in self.bot.guilds:
@@ -3376,9 +3430,10 @@ class Welcome(commands.Cog):
                     # celui d'une purge oubliee (un ancien VA qui voit encore
                     # un salon).
                     if not expected:
-                        log.warning("[auto-secure] %s : aucune fiche VA ne "
-                                    "reclame « %s » — purge ignoree.",
-                                    ch.name, suffix)
+                        _signaler_une_fois(("auto-secure", ch.id), logging.WARNING,
+                                           "[auto-secure] %s : aucune fiche VA ne "
+                                           "reclame « %s » — purge ignoree (signale "
+                                           "une fois par demarrage).", ch.name, suffix)
                         continue
                     for target, ow in list(ch.overwrites.items()):
                         if not isinstance(target, discord.Member):

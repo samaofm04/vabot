@@ -176,9 +176,11 @@ aide = Salon(23, "🆘・help", voit=False, categorie="📚 RESSOURCES", overwri
     vecto: [("view_channel", False)], va: [("view_channel", False)], luigi: [("view_channel", False)]})
 muet = Salon(24, "💬・discussions", voit=True, overwrites={
     vecto: [("view_channel", False), ("send_messages", False)]})
-g2 = Guilde([staff2, verif, spoofer, aide, muet, accueil], [verifie, manager, boss, alicia])
+archive = Salon(25, "ancien-all-banger-global", voit=False, categorie="🗃️ ARCHIVES",
+                overwrites={va: [("view_channel", True)], vecto: [("view_channel", True)]})
+g2 = Guilde([staff2, verif, spoofer, aide, muet, archive, accueil], [verifie, manager, boss, alicia])
 cfg.clear()
-cfg.update({"extra_visible_channel_ids": [11, 20, 21, 22, 777]})
+cfg.update({"extra_visible_channel_ids": [11, 20, 21, 22, 25, 777]})
 orig_sleep = asyncio.sleep
 
 
@@ -197,8 +199,11 @@ check("l'accès du VA est retiré des deux salons staff",
       va not in staff2._ow and va not in verif._ow, bilan)
 check("propriétaire et bot gardent leur accès", proprio in staff2._ow and luigi in staff2._ow)
 check("le 🛡️ Manager garde son entrée", vecto in staff2._ow, staff2._ow)
-check("bilan compté", bilan["acces_retires"] == 2 and sorted(bilan["retires"]) ==
-      sorted(["📢・annonces-entretiens", "🔐・vérification"]), bilan)
+check("bilan compté", bilan["acces_retires"] == 3 and sorted(bilan["retires"]) ==
+      sorted(["📢・annonces-entretiens", "🔐・vérification", "ancien-all-banger-global"]), bilan)
+check("un salon d'archives sort de la liste, le VA n'y a plus accès, le staff garde le sien",
+      25 not in cfg["extra_visible_channel_ids"] and va not in archive._ow and vecto in archive._ow,
+      archive._ow)
 check("le refus d'isolation du 🛡️ Manager est levé", vecto not in aide._ow and bilan["staff_desisole"] == 1, bilan)
 check("le VA et le bot gardent leur refus", va in aide._ow and luigi in aide._ow, aide._ow)
 check("un refus qui n'est pas celui de l'isolation reste", vecto in muet._ow, muet._ow)
@@ -251,6 +256,103 @@ check("/hidesalon retire de la liste et mémorise", cfg["extra_visible_channel_i
 run(w.Welcome.showsalon.callback(cog, interaction(), salon))
 check("/showsalon remet dans la liste et oublie le cache", cfg["extra_visible_channel_ids"] == [12]
       and cfg["hidden_from_va_channel_ids"] == [], cfg)
+
+# 7. ids de salons supprimés : 404 retiré, 403 gardé, vivant gardé
+class Rep:
+    status, reason = 404, "Not Found"
+
+
+class FauxBot:
+    def get_channel(self, i):
+        return accueil if i == 11 else None
+
+    async def fetch_channel(self, i):
+        if i == 404404:
+            raise discord.NotFound(Rep(), "Unknown Channel")
+        r = Rep(); r.status, r.reason = 403, "Forbidden"
+        raise discord.Forbidden(r, "Missing Access")
+
+
+cfg.clear()
+cfg.update({"extra_visible_channel_ids": [11, 404404, 403403]})
+g3 = Guilde([accueil], [verifie])
+o.asyncio.sleep = _sans_attente
+try:
+    b3 = run(o.nettoyer_salons_staff(g3, FauxBot()))
+finally:
+    o.asyncio.sleep = orig_sleep
+check("un id supprimé (404) sort de la liste, un salon d'un autre serveur (403) reste",
+      cfg["extra_visible_channel_ids"] == [11, 403403] and b3["morts"] == [404404], (cfg, b3))
+
+# 8. auto_sort : VA parti ignoré, signalé une fois
+import logging                          # noqa: E402
+vus_log = []
+
+
+class Capte(logging.Handler):
+    def emit(self, rec):
+        vus_log.append(rec.getMessage())
+
+
+w.log.addHandler(Capte())
+w.log.setLevel(logging.INFO)
+w.load_pending = lambda: {"881568604557037628": {"delete_at": "2026-10-21T20:12:05+00:00"}}
+present = Membre(7, "present", [verifie], guilde=None)
+ticket = types.SimpleNamespace(name="🔴-1-va-x", guild=types.SimpleNamespace(
+    name="Va IG", get_member=lambda i: present if i == 7 else None))
+bot_t = types.SimpleNamespace(get_channel=lambda i: ticket)
+fiches = {"881568604557037628": {"identity": "lola", "channel_id": 1},
+          "7": {"identity": "lola", "channel_id": 2},
+          "8": {"identity": "lola", "channel_id": 3}}
+r1 = w._fiches_a_ranger(bot_t, fiches)
+r2 = w._fiches_a_ranger(bot_t, fiches)
+check("auto_sort ignore le VA parti et le membre absent", list(r1) == ["7"] and list(r2) == ["7"], r1)
+check("chacun n'est signalé qu'une fois", len([l for l in vus_log if "auto_sort" in l]) == 2, vus_log)
+w._signaler_une_fois(("auto-secure", 5), logging.WARNING, "[auto-secure] x")
+w._signaler_une_fois(("auto-secure", 5), logging.WARNING, "[auto-secure] x")
+check("[auto-secure] dit une fois", vus_log.count("[auto-secure] x") == 1, vus_log)
+
+# 9. lignes de menu : les épingles hors des 100 derniers messages sont vues
+MOI = 555
+
+
+class Msg:
+    def __init__(self, mid, ident, pinned):
+        self.id, self.pinned = mid, pinned
+        self.author = types.SimpleNamespace(id=MOI)
+        self.type = discord.MessageType.default
+        self.components = [types.SimpleNamespace(
+            type=discord.ComponentType.text_display,
+            content=f"-# Identité : `{ident}`\n-# menu-contenu-va")]
+        self.supprime = False
+
+    async def delete(self):
+        self.supprime = True
+
+
+class Ticket:
+    name = "🔴-22-va-moneymaker0842"
+
+    def __init__(self, epingles, recents):
+        self.epingles, self.recents = epingles, recents
+
+    async def pins(self, limit=50):
+        for m in self.epingles:
+            yield m
+
+    async def history(self, limit=100):
+        for m in self.recents[:limit]:
+            yield m
+
+
+neuve, vieille, plus_vieille = Msg(3, "lola", True), Msg(2, "lola", True), Msg(1, "lola", True)
+tk = Ticket([neuve, vieille, plus_vieille], [neuve])
+w.models_du_membre = lambda m: ["lola"]
+gl = types.SimpleNamespace(me=types.SimpleNamespace(id=MOI))
+bl = run(w.lignes_suivent_roles(gl, va, tk, None))
+check("les lignes en double épinglées hors des 100 derniers messages sont retirées",
+      bl["doublons"] == 2 and vieille.supprime and plus_vieille.supprime and not neuve.supprime, bl)
+check("aucune ligne posée ni épinglée en plus", not bl["posees"] and not bl["epinglees"], bl)
 
 print(f"\n{len(OKS)} OK, {len(FAILS)} échec(s)")
 sys.exit(1 if FAILS else 0)

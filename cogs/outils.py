@@ -326,8 +326,9 @@ def _rendre_visible_aux_futurs_va(ids) -> list:
 #: Nettoyage des salons staff de Va IG, fait UNE fois (trace ecrite a la fin :
 #: coupe par un redemarrage, il reprend -- il est sans effet la 2e fois).
 #: Apres le 21/10/2026, un salon staff remis dans la liste blanche (/showsalon)
-#: est un choix de l'admin : l'entretien n'y touche plus.
-NETTOYAGE_STAFF = "2026-10-21"
+#: est un choix de l'admin : l'entretien n'y touche plus. « -2 » : le meme
+#: passage retire aussi les salons d'archives et les ids de salons supprimes.
+NETTOYAGE_STAFF = "2026-10-21-2"
 _NETTOYAGE_FAIT = Path(__file__).resolve().parent.parent / "data" / "salons_staff_fr.json"
 #: Les categories que l'ancienne regle versait entieres dans la liste blanche.
 #: Le nettoyage s'y limite : spoofer, download... (🧰 Outils) sont fermes a
@@ -335,23 +336,47 @@ _NETTOYAGE_FAIT = Path(__file__).resolve().parent.parent / "data" / "salons_staf
 CATEGORIES_INFO = ("accueil", "notification")
 
 
-async def nettoyer_salons_staff(guilde) -> dict:
+async def _salons_supprimes(bot, ids) -> list:
+    """Les ids que Discord dit supprimes (404). Un salon d'un serveur que ce
+    bot ne voit pas (403) ou une erreur passagere : garde."""
+    morts = []
+    for i in ids:
+        if bot is None or bot.get_channel(i) is not None:
+            continue
+        try:
+            await bot.fetch_channel(i)
+        except discord.NotFound:
+            morts.append(i)
+        except Exception:                                    # noqa: BLE001
+            pass
+        await asyncio.sleep(0.3)
+    return morts
+
+
+async def nettoyer_salons_staff(guilde, bot=None) -> dict:
     """Retire de la liste blanche les salons d'accueil de ce serveur qu'un VA
-    ne voit pas par son role, puis les acces poses au nom des VA sur ces
-    salons (pas le staff, ni les bots), puis les refus d'isolation poses au
-    staff. Rend un bilan."""
-    from cogs.welcome import est_encadrant, load_welcome_config, save_welcome_config
+    ne voit pas par son role et les salons d'archives, puis les acces poses
+    au nom des VA sur ces salons (pas le staff, ni les bots), puis les refus
+    d'isolation poses au staff. Retire aussi de la liste les salons
+    supprimes (5 au 21/10/2026). Rend un bilan."""
+    from cogs.welcome import (_salon_archive, est_encadrant, load_welcome_config,
+                              save_welcome_config)
     role = _role_des_va(guilde)
     cfg = load_welcome_config()
     ids = [int(x) for x in cfg.get("extra_visible_channel_ids", []) or []]
     staff = [guilde.get_channel(i) for i in ids]
     staff = [c for c in staff if c is not None and not isinstance(c, discord.CategoryChannel)
-             and any(k in str(getattr(getattr(c, "category", None), "name", "")).lower()
-                     for k in CATEGORIES_INFO)
-             and not pour_tous_les_va(c, role)]
-    bilan = {"retires": [c.name for c in staff], "acces_retires": 0, "rates": []}
-    if staff:
-        cfg["extra_visible_channel_ids"] = [i for i in ids if i not in {c.id for c in staff}]
+             and (_salon_archive(c)
+                  or (any(k in str(getattr(getattr(c, "category", None), "name", "")).lower()
+                          for k in CATEGORIES_INFO)
+                      and not pour_tous_les_va(c, role)))]
+    morts = await _salons_supprimes(bot, ids)
+    bilan = {"retires": [c.name for c in staff], "morts": morts, "acces_retires": 0, "rates": []}
+    if staff or morts:
+        cfg = load_welcome_config()                          # relu : les fetch ont pris du temps
+        enlever = {c.id for c in staff} | set(morts)
+        cfg["extra_visible_channel_ids"] = [i for i in cfg.get("extra_visible_channel_ids", []) or []
+                                            if int(i) not in enlever]
         save_welcome_config(cfg)
     for salon in staff:
         for cible, ow in list(salon.overwrites.items()):
@@ -596,7 +621,7 @@ class Outils(commands.Cog):
                 print(f"[outils] salons d'information : {type(e).__name__}: {e}")
             try:
                 if (safe_json.load(_NETTOYAGE_FAIT, default={}) or {}).get("date") != NETTOYAGE_STAFF:
-                    bilan = await nettoyer_salons_staff(guilde)
+                    bilan = await nettoyer_salons_staff(guilde, self.bot)
                     print(f"[outils] salons staff : {bilan}", flush=True)
                     if not bilan["rates"]:
                         safe_json.write(_NETTOYAGE_FAIT, {"date": NETTOYAGE_STAFF,
