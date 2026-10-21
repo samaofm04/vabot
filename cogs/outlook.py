@@ -32,7 +32,6 @@ from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
-import numgen
 import outlook_comptes as oc
 import safe_json
 
@@ -490,7 +489,11 @@ class OutlookCog(commands.Cog):
                         "(manager %s)", uid, getattr(itx.user, "id", "?"))
             await self._coffre_vide(uid)
             return
-        await asyncio.to_thread(numgen.fin_alerte, "outlook:vide")
+        try:
+            import outlook_x_discord
+            await asyncio.to_thread(outlook_x_discord.suivre_coffre, str(uid))
+        except Exception as e:                               # noqa: BLE001
+            log.warning("outlook: suivi du coffre en echec (%s: %s)", type(e).__name__, e)
         livre, pourquoi = await self._livrer(uid, compte)
         manager = getattr(itx.user, "display_name", "?")
         txt = "✅ Attribuée à %s · validé par %s" % (va, manager)

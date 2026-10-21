@@ -104,9 +104,13 @@ try:
           len(ALERTES) == 1 and "aucune adresse enregistrée" in ALERTES[0]
           and SEED not in ALERTES[0], ALERTES)
     oc.ajouter("revenu@outlook.com", "MotDePasseR!", SEED)
+    oc.ajouter("revenu2@outlook.com", "MotDePasseR2!", SEED)
     clic("mailx:prendre", uid=CHEF, perms=str(0x8))
     check("coffre rempli : l'alerte est levée, la prochaine panne sera redite",
-          "outlook:vide" not in numgen._alertes(), numgen._alertes())
+          "outlook:vide" not in numgen._alertes() and len(ALERTES) == 1, (numgen._alertes(), ALERTES))
+    clic("mailx:prendre", uid=CHEF, perms=str(0x8), jeton="tokZ")
+    check("la DERNIÈRE adresse partie : le staff est prévenu tout de suite, avant tout refus",
+          len(ALERTES) == 2 and "toutes déjà données" in ALERTES[1], ALERTES)
 
     # 3. une adresse : le formulaire rempli, pour lui seul
     remise_a_zero(5)

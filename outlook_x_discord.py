@@ -236,11 +236,13 @@ def _repondre(p, gid, uid, comps):
 TEXTE_COFFRE_VIDE = oc.TEXTE_COFFRE_VIDE + " Reviens plus tard."
 
 
-def coffre_vide(qui: str) -> None:
+def coffre_vide(qui: str, refus: bool = True) -> None:
     """Dit au journal POURQUOI le coffre ne donne rien, et prévient le staff
     UNE fois (numgen.alerter_staff, le debrief-day du Spam) — partagé avec
     Va IG (cogs/outlook.py) : c'est le même coffre. Le remplir reste au
-    propriétaire (youl4b.com/outlook). Jamais d'adresse ni de secret ici."""
+    propriétaire (youl4b.com/outlook). Jamais d'adresse ni de secret ici.
+    `refus` faux : la dernière adresse vient de partir, personne n'est encore
+    refusé — le staff le sait AVANT le premier VA éconduit."""
     try:
         n = len(oc.comptes())
     except Exception as e:
@@ -248,12 +250,23 @@ def coffre_vide(qui: str) -> None:
         _log(f"coffre illisible ({type(e).__name__}: {e})")
     pourquoi = ("aucune adresse enregistrée" if n == 0 else
                 "coffre illisible" if n < 0 else f"{n} adresse(s), toutes déjà données")
-    _log(f"coffre vide ({pourquoi}) : demande de {qui} refusée")
+    _log(f"coffre vide ({pourquoi}) : " + (f"demande de {qui} refusée" if refus
+                                            else f"dernière adresse donnée à {qui}"))
     etat = numgen.alerter_staff(
         "outlook:vide", "⚠️ **Coffre Outlook vide** (%s) : les VA de Twitter et de Va IG ne "
                         "reçoivent plus d'adresse. À remplir sur youl4b.com/outlook." % pourquoi)
     if etat not in ("envoye", "deja", "hors production"):
         _log(f"alerte « coffre vide » non envoyée au staff : {etat}")
+
+
+def suivre_coffre(qui: str) -> None:
+    """Après une adresse donnée (Twitter ou Va IG) : la dernière partie, le
+    staff est prévenu tout de suite ; sinon une alerte en cours est levée (le
+    coffre a été rempli), la prochaine panne sera redite."""
+    if oc.nb_libres():
+        numgen.fin_alerte("outlook:vide")
+    else:
+        coffre_vide(qui, refus=False)
 
 
 def _prendre(p, gid, uid, membre, user, conf):
@@ -263,10 +276,6 @@ def _prendre(p, gid, uid, membre, user, conf):
         except Exception as e:
             _log(f"coffre vide : alerte non lancée ({type(e).__name__}: {e})")
         return nx._texte(TEXTE_COFFRE_VIDE)
-    try:
-        _fond(lambda: numgen.fin_alerte("outlook:vide"))
-    except Exception as e:
-        _log(f"fin d'alerte « coffre vide » non lancée ({type(e).__name__}: {e})")
     if not nx._staff(membre, gid):
         try:
             n = oc.nb_du_jour(uid, gid)
@@ -291,6 +300,10 @@ def _prendre(p, gid, uid, membre, user, conf):
         return nx._texte(TEXTE_COFFRE_VIDE)
     _log(f"adresse n°{c.get('id')} donnée à {uid} ({c.get('va')})")
     rep = _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
+    try:
+        _fond(lambda: suivre_coffre(uid))
+    except Exception as e:
+        _log(f"suivi du coffre non lancé ({type(e).__name__}: {e})")
     try:
         _fond(lambda: deposer_au_salon(gid, uid, c))
     except Exception as e:
