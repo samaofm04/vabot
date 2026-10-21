@@ -657,7 +657,8 @@ try:
 
     def api_cartes(methode, chemin, **kw):
         APPELS.append((methode, chemin, kw))
-        if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages"):
+        if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages",
+                                            "/channels/TW1/messages"):
             return 200, {"id": "carte-" + chemin.split("/")[2]}
         if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
             return 200, []
@@ -709,6 +710,36 @@ try:
     check("ticket : un numéro pris par le manager dans le ticket d'un VA est au VA (quota, historique)",
           nx._actif(f"{TH}:{VA2}") is not None and nx._actif(f"{TH}:{CHEF}") is None
           and num._histo_lire()[-1]["par"] == VA2, num._histo_lire()[-1])
+    # 20 min : la carte redevient vide, code reçu ou non
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["actifs"][f"{TH}:{VA2}"]["pris_le"] = int(time.time()) - nx.DUREE_NUMERO_SEC - 120
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    vides = nx.vider_cartes_echues()
+    check("ticket : sans code au bout de 20 min, le numéro est rendu et la carte redevient vide",
+          vides == [f"{TH}:{VA2}"] and nx._actif(f"{TH}:{VA2}").get("clos") == "expire"
+          and textes(patch_carte("T2"))[:2] == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and boutons(patch_carte("T2")) == ["numx:prendre"], (vides, patch_carte("T2")))
+    nx.traiter(clic_carte("numx:prendre"))
+    a1 = nx._actif(f"{TH}:{VA}")
+    CODES.append(("code", "112233"))
+    direct(lambda: nx._ecouter(f"{TH}:{VA}", a1["id"], nx.SERVEURS[TH]))
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["actifs"][f"{TH}:{VA}"]["pris_le"] = int(time.time()) - nx.DUREE_NUMERO_SEC - 5
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    FINIS.clear()
+    APPELS.clear()
+    vides = nx.vider_cartes_echues()
+    check("ticket : code reçu, au bout de 20 min le numéro est terminé et la carte est vide (sans texte)",
+          vides == [f"{TH}:{VA}"] and FINIS == [a1["id"]]
+          and textes(patch_carte("T1")) == ["## `….`", "🇺🇸 ⏳ En attente"], (vides, FINIS, patch_carte("T1")))
+    check("ticket : avant 20 min, rien n'est vidé", nx.vider_cartes_echues() == [])
+    APPELS.clear()
+    b = nx.poser_cartes(GID)
+    tw = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/TW1/messages"]
+    check("Twitter : la carte du ticket garde le formulaire « Numéro X »",
+          b["posees"] == ["TW1"] and tw and textes(tw[0]["components"])[0] == "## Numéro X"
+          and boutons(tw[0]["components"]) == ["numx:prendre"], (b, tw))
     APPELS.clear()
     print(nx.generaliser_cartes(TH))
     panneau = [kw["json"] for m, ch, kw in APPELS

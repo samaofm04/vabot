@@ -1240,18 +1240,62 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
     return bilan
 
 
+def vider_cartes_echues(maintenant: Optional[float] = None) -> List[str]:
+    """Une carte de ticket redevient vide quand son numéro a fait ses 20 min
+    (propriétaire, 21/10/2026 : « après les 20 pour un num tu effaces ») :
+    code reçu, il est terminé ; sans code, rendu (l'écoute l'a manqué : bot
+    redémarré entre-temps). Rend les clés vidées."""
+    now = float(time.time() if maintenant is None else maintenant)
+    vides: List[str] = []
+    d = _lire()
+    for cle, m in list(d["messages"].items()):
+        a = d["actifs"].get(cle)
+        if not (isinstance(m, dict) and m.get("carte")) or not isinstance(a, dict) or a.get("clos"):
+            continue
+        age = now - float(a.get("pris_le") or 0)
+        # Sans code, l'écoute rend le numéro à 20 min pile : une minute de
+        # marge pour ne pas la doubler.
+        if age < DUREE_NUMERO_SEC + (0 if a.get("code") else 60):
+            continue
+        gid, act_id = cle.split(":", 1)[0], str(a.get("id") or "")
+        conf = SERVEURS.get(gid)
+        if not conf or _maj(cle, act_id, clos="fini" if a.get("code") else "expire") is None:
+            continue
+        with vd.sur_serveur(gid):
+            if a.get("code"):
+                _histo(act_id, "fini")
+                numgen.finish(act_id, _prov(a))
+                _redessiner(cle, conf, vue_panneau(conf))
+            else:
+                numgen.cancel(act_id, _prov(a))
+                _redessiner(cle, conf, vue_close(
+                    "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes %d du jour."
+                    % conf["quota"], conf))
+        vides.append(cle)
+        _log(f"carte de {cle} vidée : numéro {a.get('valeur')} au bout de 20 min")
+    return vides
+
+
 def _boucle_cartes() -> None:
-    """Les nouveaux tickets reçoivent leur carte (sans toucher à
-    tickets_discord : une boucle à part, toutes les 10 minutes)."""
+    """Chaque minute, les cartes dont le numéro a fait ses 20 min redeviennent
+    vides ; toutes les 10 minutes, les nouveaux tickets reçoivent leur carte
+    (sans toucher à tickets_discord : une boucle à part)."""
     time.sleep(90)
+    tour = 0
     while True:
-        for gid in SERVEURS:
-            if _cartes_auto(gid):
-                try:
-                    poser_cartes(gid)
-                except Exception as e:
-                    _log(f"cartes de {gid} : tour en échec ({type(e).__name__}: {e})")
-        time.sleep(CARTES_PAS_SEC)
+        try:
+            vider_cartes_echues()
+        except Exception as e:
+            _log(f"cartes : nettoyage en échec ({type(e).__name__}: {e})")
+        if tour % max(1, CARTES_PAS_SEC // 60) == 0:
+            for gid in SERVEURS:
+                if _cartes_auto(gid):
+                    try:
+                        poser_cartes(gid)
+                    except Exception as e:
+                        _log(f"cartes de {gid} : tour en échec ({type(e).__name__}: {e})")
+        tour += 1
+        time.sleep(60)
 
 
 def generaliser_cartes(gid: str) -> str:
