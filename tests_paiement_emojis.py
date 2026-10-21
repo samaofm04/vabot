@@ -9,8 +9,10 @@ Audit du 20/10/2026 :
   vide du salon est relu par l'API (comme cogs/bases_identite.py) ;
 - le serveur Spam a 50 emojis sur 50, tous utiles : chaque redessin
   redemandait les 4 photos manquantes, refusées (30008), et Discord a fini par
-  imposer une heure d'attente. Un serveur plein n'est plus redemandé tant
-  qu'il ne change pas.
+  imposer une heure d'attente. Les emojis se créent maintenant sur
+  l'APPLICATION du bot (2 000 places, tous ses serveurs) ; ceux du serveur ne
+  servent qu'en repli, et un serveur plein n'y est plus redemandé tant qu'il
+  ne change pas.
 
 Vérifié ici sans réseau ni data/ : le vrai discord.py lit le formulaire tel
 que Discord l'envoie ; le reste passe par de faux objets.
@@ -380,6 +382,152 @@ try:
 finally:
     U._identity_pp_file, U._emojis_utiles_noms = _orig
     U.log.removeHandler(_jl)
+
+
+# ───────────────────────────── emojis d'application ─────────────────────────────
+print()
+print("=" * 70)
+print("4) Emojis d'application : créés une fois, pour tous les serveurs du bot")
+print("=" * 70)
+# Accord du propriétaire le 21/10/2026 : 2 000 places par application, au lieu
+# de 50 par serveur.
+
+
+class FauxClientAppli:
+    def __init__(self, existants=(), lent=False, refus=None, lecture_ko=False):
+        self.appli = {n: FauxEmoji(n) for n in existants}
+        self.lectures, self.creations = 0, []
+        self.lent, self.refus, self.lecture_ko = lent, refus, lecture_ko
+
+    async def fetch_application_emojis(self):
+        self.lectures += 1
+        if self.lecture_ko:
+            raise _http_exc(0, "panne")
+        return list(self.appli.values())
+
+    async def create_application_emoji(self, name, image):
+        self.creations.append(name)
+        await asyncio.sleep(0)               # laisse passer l'autre redessin
+        if self.lent:
+            await asyncio.sleep(3600)        # limite Discord : discord.py attend
+        if self.refus:
+            raise self.refus
+        e = FauxEmoji(name)
+        self.appli[name] = e
+        return e
+
+
+def serveur_appli(client, noms=None, gid=1535758943324999711, bot=_MOI):
+    s = FauxServeur(_noms if noms is None else noms)
+    s.id = gid
+    s.me = types.SimpleNamespace(id=bot)
+    s._state = types.SimpleNamespace(_get_client=lambda: client)
+    return s
+
+
+def remise_a_zero():
+    U._EMOJIS_APPLI.clear()
+    U._APPLI_PAUSE.clear()
+    U._APPLI_VERROUS.clear()
+    U._SERVEURS_PLEINS.clear()
+    U._EMOJIS_CREES.clear()
+
+
+_tous_noms = sorted({U._identity_emoji_name(m) for m in _models} | set(U._ICONES_ACTIONS.values()))
+_jl = Journal()
+U.log.addHandler(_jl)
+_orig_delai = U._APPLI_DELAI_S
+U._identity_pp_file = lambda m: _PNG
+try:
+    remise_a_zero()
+    cli = FauxClientAppli()
+    spam = serveur_appli(cli)                          # 50/50 : le cas du Spam
+    out = asyncio.run(U.ensure_identity_emojis(spam, _models))
+    act = asyncio.run(U.ensure_action_emojis(spam))
+    check("Spam plein : les 29 photos et les 21 icônes créées sur l'APPLICATION, rien sur le serveur",
+          sorted(cli.creations) == _tous_noms and spam.creations == [] and spam.lectures == 0,
+          (len(cli.creations), spam.creations))
+    check("les 4 models sans photo l'ont maintenant",
+          all(out.get(m) is cli.appli[U._identity_emoji_name(m)] for m in _MANQUANTES), out)
+    check("menus et icônes : l'emoji de l'application passe devant celui du serveur",
+          all(out[m] is cli.appli[U._identity_emoji_name(m)] for m in _models)
+          and all(act[c] is cli.appli[n] for c, n in U._ICONES_ACTIONS.items()), "")
+    check("lecture au clic (icones_actions, _jb_emojis_presents) : emojis de l'application",
+          all(v is cli.appli[U._ICONES_ACTIONS[c]] for c, v in U.icones_actions(spam).items())
+          and len(U.icones_actions(spam)) == len(U._ICONES_ACTIONS)
+          and all(U._jb_emojis_presents(spam, _models)[m] is cli.appli[U._identity_emoji_name(m)]
+                  for m in _models), "")
+    check("liste de l'application lue une seule fois", cli.lectures == 1, cli.lectures)
+
+    fr = serveur_appli(cli, noms=[], gid=42)            # un autre serveur, aucun emoji à lui
+    n = len(cli.creations)
+    out_fr = asyncio.run(U.ensure_identity_emojis(fr, _models))
+    asyncio.run(U.ensure_action_emojis(fr))
+    check("autre serveur du même bot : tout est déjà là, aucune création, aucune lecture",
+          len(cli.creations) == n and cli.lectures == 1 and fr.creations == []
+          and len(out_fr) == len(_models), (cli.creations[n:], cli.lectures))
+
+    peach = FauxServeur(_noms)                          # bot admin : ne lit que le serveur
+    peach.me = types.SimpleNamespace(id=999)
+    _pp = U._jb_emojis_presents(peach, _PRESENTES)
+    check("Peach (maquettes /demo) : emojis du serveur, jamais ceux de Yoshi",
+          len(_pp) == len(_PRESENTES) and all(e in peach.emojis for e in _pp.values()), _pp)
+
+    # Deux redessins en même temps (menu puis ✨ General) : une seule création par nom.
+    remise_a_zero()
+    cli = FauxClientAppli()
+    spam = serveur_appli(cli)
+
+    async def deux():
+        await asyncio.gather(U.ensure_identity_emojis(spam, _MANQUANTES),
+                             U.ensure_identity_emojis(spam, _MANQUANTES))
+    asyncio.run(deux())
+    check("deux redessins simultanés : liste lue une fois, chaque emoji créé une fois",
+          sorted(cli.creations) == sorted(U._identity_emoji_name(m) for m in _MANQUANTES)
+          and cli.lectures == 1, (cli.creations, cli.lectures))
+
+    # Création trop lente (limite Discord) : on n'attend pas une heure.
+    remise_a_zero()
+    U._APPLI_DELAI_S = 0.05
+    cli = FauxClientAppli(lent=True)
+    spam = serveur_appli(cli)
+    t0 = time.monotonic()
+    out = asyncio.run(U.ensure_identity_emojis(spam, _models))
+    duree = time.monotonic() - t0
+    check("création trop lente : abandon après le délai, pause d'1 h, le reste n'est pas tenté",
+          len(cli.creations) == 1 and duree < 2 and any("trop lent" in l for l in _jl.lignes),
+          (cli.creations, duree))
+    check("… et le menu garde les photos du serveur", all(m in out for m in _PRESENTES)
+          and not any(m in out for m in _MANQUANTES), sorted(out))
+    asyncio.run(U.ensure_identity_emojis(spam, _models))
+    check("… redessin suivant : aucune tentative pendant la pause", len(cli.creations) == 1,
+          cli.creations)
+    U._APPLI_DELAI_S = _orig_delai
+
+    # Refus de Discord : dit, pause de 10 min, liste relue ensuite.
+    remise_a_zero()
+    cli = FauxClientAppli(refus=_http_exc(50035, "Invalid Form Body"))
+    spam = serveur_appli(cli)
+    asyncio.run(U.ensure_identity_emojis(spam, _MANQUANTES))
+    asyncio.run(U.ensure_identity_emojis(spam, _MANQUANTES))
+    check("refus : dit au journal, un seul essai, la liste sera relue",
+          len(cli.creations) == 1 and any("refuse" in l for l in _jl.lignes)
+          and cli.lectures == 2 and 500 < U._APPLI_PAUSE[_MOI] - time.monotonic() <= 600,
+          (cli.creations, cli.lectures))
+
+    # Liste de l'application illisible : comme avant, sur le serveur.
+    remise_a_zero()
+    cli = FauxClientAppli(lecture_ko=True)
+    srv = serveur_appli(cli, noms=[])
+    out = asyncio.run(U.ensure_identity_emojis(srv, _MANQUANTES))
+    check("liste illisible : repli sur le serveur (création serveur), dit au journal",
+          cli.creations == [] and len(srv.creations) == len(_MANQUANTES)
+          and any("illisibles" in l for l in _jl.lignes), (cli.creations, srv.creations))
+finally:
+    U._APPLI_DELAI_S = _orig_delai
+    U._identity_pp_file = _orig[0]
+    U.log.removeHandler(_jl)
+    remise_a_zero()
 
 
 print()

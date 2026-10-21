@@ -3393,14 +3393,14 @@ class UserCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         attendus = dict(_ICONES_ACTIONS)
-        avant = {e.name for e in guild.emojis}
+        avant = set(_emojis_du_serveur(guild))
         try:
             await ensure_action_emojis(guild)
         except Exception as e:
             await interaction.followup.send(f"❌ Envoi impossible : `{e}`", ephemeral=True)
             return
 
-        apres = {e.name for e in guild.emojis}
+        apres = set(_emojis_du_serveur(guild))
         crees = sorted((apres - avant) & set(attendus.values()))
         presents = sorted(set(attendus.values()) & apres)
         manquants = sorted(set(attendus.values()) - apres)
@@ -3421,7 +3421,7 @@ class UserCog(commands.Cog):
             cause = []
             if absents:
                 cause.append(f"fichier absent du serveur : {', '.join(absents[:4])}")
-            if libre <= 0:
+            if libre <= 0 and _client_de(guild) is None:
                 cause.append("plus aucun emplacement d'emoji libre")
             if not perms.manage_emojis_and_stickers:
                 cause.append("le bot n'a pas la permission « Gérer les emojis »")
@@ -11228,14 +11228,14 @@ def icones_actions(guild) -> dict:
     """
     if guild is None:
         return {}
-    presents = {e.name: e for e in getattr(guild, "emojis", [])}
+    presents = _emojis_du_serveur(guild)
     return {cle: presents[nom] for cle, nom in _ICONES_ACTIONS.items()
             if nom in presents}
 
 
 async def ensure_action_emojis(guild) -> dict:
-    """Televerse une fois les icones manquantes. Appelee quand on POSTE un
-    menu, jamais au clic.
+    """Televerse une fois les icones manquantes, sur l'application du bot
+    (_EMOJIS_APPLI). Appelee quand on POSTE un menu, jamais au clic.
 
     Best-effort : serveur plein, permission retiree, fichier absent — on
     renvoie ce qu on a, et les boutons gardent leur emoji standard. Un menu
@@ -11244,8 +11244,21 @@ async def ensure_action_emojis(guild) -> dict:
     out = {}
     if guild is None:
         return out
-    presents = {e.name: e for e in getattr(guild, "emojis", [])}
     dossier = Path(__file__).resolve().parent.parent / "emojis"
+    appli = await _emojis_appli(guild)
+    if appli is not None:
+        # Sur l'application (voir _EMOJIS_APPLI) ; celle du serveur en repli.
+        repli = _emojis_du_serveur(guild)
+        for cle, nom in _ICONES_ACTIONS.items():
+            e = appli.get(nom)
+            f = dossier / f"{nom}.png"
+            if e is None and f.exists() and f.stat().st_size <= 256000:
+                e = await _creer_emoji_appli(guild, nom, f.read_bytes())
+            e = e or repli.get(nom)
+            if e is not None:
+                out[cle] = e
+        return out
+    presents = {e.name: e for e in getattr(guild, "emojis", [])}
     plein = _serveur_plein(guild)
     for cle, nom in _ICONES_ACTIONS.items():
         if nom in presents:
@@ -11317,6 +11330,110 @@ def _libelle_sans_emoji(label: str):
 _EMOJIS_CREES = {}
 _EMOJIS_CREES_TTL_S = 300
 
+#: Emojis d'APPLICATION (21/10/2026, accord du proprietaire). Un serveur sans
+#: boost n'a que 50 places, partagees entre les icones d'actions et la photo
+#: de chaque model : le Spam etait plein (50/50, tous utiles) et 4 models
+#: n'avaient plus de photo dans les menus. Une application en a 2000, valables
+#: sur TOUS les serveurs ou son bot poste : chaque emoji s'y cree une fois pour
+#: tous les serveurs. Ceux d'un serveur ne servent plus que de repli (liste de
+#: l'application illisible, creation en pause). Un emoji d'application ne sert
+#: qu'a SON bot : Peach (maquettes /demo) lit toujours ceux du serveur.
+#: {id du bot: {nom: Emoji}}, lu une fois par processus.
+_EMOJIS_APPLI = {}
+_APPLI_VERROUS = {}
+#: {id du bot: monotonic} : plus d'essai de creation avant cette heure-la.
+#: Une creation trop lente, c'est une limite Discord : discord.py attendait
+#: jusqu'a une heure DANS le redessin (vu le 20/10 sur le Spam, 3 533 s).
+_APPLI_PAUSE = {}
+_APPLI_DELAI_S = 20
+
+
+def _client_de(guild):
+    """Le client discord.py du bot qui voit ce serveur ; None pour un faux
+    serveur (bancs d'essai) : on cree alors sur le serveur, comme avant."""
+    try:
+        client = guild._state._get_client()
+    except Exception:                                        # noqa: BLE001
+        return None
+    return client if hasattr(client, "create_application_emoji") else None
+
+
+def _bot_de(guild):
+    return getattr(getattr(guild, "me", None), "id", None)
+
+
+async def _emojis_appli(guild):
+    """{nom: emoji} de l'application du bot de ce serveur, lus une fois.
+    None s'il n'y a pas d'application a interroger, ou si la liste est
+    illisible : les menus prennent alors les emojis du serveur."""
+    client, bot = _client_de(guild), _bot_de(guild)
+    if client is None or bot is None:
+        return None
+    if bot in _EMOJIS_APPLI:
+        return _EMOJIS_APPLI[bot]
+    async with _APPLI_VERROUS.setdefault(bot, asyncio.Lock()):
+        if bot not in _EMOJIS_APPLI:        # lue par un autre redessin pendant l'attente
+            try:
+                tous = await asyncio.wait_for(client.fetch_application_emojis(), _APPLI_DELAI_S)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("emojis d'application illisibles (%s: %s) : ceux du serveur servent",
+                            type(e).__name__, e)
+                return None
+            _EMOJIS_APPLI[bot] = {e.name: e for e in tous}
+            log.info("emojis d'application : %d lus", len(tous))
+        return _EMOJIS_APPLI[bot]
+
+
+async def _creer_emoji_appli(guild, nom, data):
+    """L'emoji `nom` de l'application, cree s'il manque. None si Discord
+    refuse ou si la creation est en pause : le menu garde l'emoji du
+    serveur, ou son emoji standard."""
+    client, bot = _client_de(guild), _bot_de(guild)
+    appli = _EMOJIS_APPLI.get(bot)
+    if client is None or appli is None:
+        return None
+    if nom in appli:
+        return appli[nom]
+    if time.monotonic() < _APPLI_PAUSE.get(bot, 0):
+        return None
+    async with _APPLI_VERROUS.setdefault(bot, asyncio.Lock()):
+        if nom in appli:            # cree par un autre redessin pendant l'attente
+            return appli[nom]
+        if time.monotonic() < _APPLI_PAUSE.get(bot, 0):
+            return None
+        try:
+            e = await asyncio.wait_for(
+                client.create_application_emoji(name=nom, image=data), _APPLI_DELAI_S)
+        except asyncio.TimeoutError:
+            _APPLI_PAUSE[bot] = time.monotonic() + 3600
+            log.warning("emojis d'application : %s trop lent (limite Discord), "
+                        "plus d'essai pendant 1 h", nom)
+            return None
+        except Exception as ex:                              # noqa: BLE001
+            # Un nom deja pris (emoji cree hors de ce processus) : la liste
+            # sera relue au prochain passage. 10 min de pause : un refus
+            # durable ne doit pas se repeter a chaque redessin.
+            _APPLI_PAUSE[bot] = time.monotonic() + 600
+            _EMOJIS_APPLI.pop(bot, None)
+            log.warning("emoji d'application %s refuse (%s: %s)", nom, type(ex).__name__, ex)
+            return None
+        appli[nom] = e
+        log.info("emoji d'application cree : %s", nom)
+        return e
+
+
+def _vignette_emoji(src):
+    """L'image d'un emoji (PNG 128 px) a partir d'une photo ; None si elle
+    depasse la limite Discord (256 Ko)."""
+    from PIL import Image
+    import io as _io
+    im = Image.open(src).convert("RGBA")
+    im.thumbnail((128, 128))
+    buf = _io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    data = buf.getvalue()
+    return data if len(data) <= 256000 else None
+
 
 #: Serveurs ou Discord refuse les creations faute de place (30008) et ou
 #: _liberer_emojis n'a rien trouve a supprimer : {serveur: (limite, nombre
@@ -11366,7 +11483,8 @@ def _noter_plein(guild, sans_icone) -> None:
 
 def _emojis_du_serveur(guild) -> dict:
     """{nom: emoji} : ceux du serveur, plus ceux que ce processus vient d'y
-    creer et que guild.emojis ne montre pas encore. Lecture seule."""
+    creer et que guild.emojis ne montre pas encore, et par-dessus ceux de
+    l'application du bot. Lecture seule."""
     have = {e.name: e for e in (getattr(guild, "emojis", None) or [])}
     gid = getattr(guild, "id", None)
     maintenant = time.monotonic()
@@ -11375,6 +11493,8 @@ def _emojis_du_serveur(guild) -> dict:
             _EMOJIS_CREES.pop((g, nom), None)
         elif g == gid and nom not in have:
             have[nom] = e
+    # Ceux de l'application passent devant (voir _EMOJIS_APPLI).
+    have.update(_EMOJIS_APPLI.get(_bot_de(guild)) or {})
     return have
 
 
@@ -11511,8 +11631,9 @@ async def _liberer_emojis(guild, combien: int) -> int:
 
 
 async def ensure_identity_emojis(guild, models, raison="PP de la model dans le menu"):
-    """Crée (une seule fois) un emoji serveur par identite a partir de sa PP
-    (avatar.*, sinon sa 1re profile_pic), pour l'afficher dans les menus.
+    """Crée (une seule fois) un emoji par identite a partir de sa PP
+    (avatar.*, sinon sa 1re profile_pic), pour l'afficher dans les menus :
+    sur l'application du bot (_EMOJIS_APPLI), sur le serveur faute de client.
     -> {identité: PartialEmoji}. Best-effort : une identite sans PP (ou
     serveur plein) garde simplement son option sans image.
 
@@ -11520,6 +11641,26 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
     ensure_reserve_emojis) : meme nom d'emoji, meme source d'image."""
     out = {}
     if guild is None:
+        return out
+    appli = await _emojis_appli(guild)
+    if appli is not None:
+        # Sur l'application (voir _EMOJIS_APPLI) ; celui du serveur en repli.
+        repli = _emojis_du_serveur(guild)
+        for m in models:
+            name = _identity_emoji_name(m)
+            e = appli.get(name)
+            if e is None:
+                src = _identity_pp_file(m)
+                try:
+                    data = _vignette_emoji(src) if src else None
+                except Exception as ex:                      # noqa: BLE001
+                    log.warning(f"emoji PP {m}: photo illisible ({ex})")
+                    data = None
+                if data:
+                    e = await _creer_emoji_appli(guild, name, data)
+            e = e or repli.get(name)
+            if e is not None:
+                out[m] = e
         return out
     have = _emojis_du_serveur(guild)
     # PLACE D'ABORD : un serveur plein refusait chaque creation, a chaque
@@ -11548,14 +11689,8 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
         if not src or plein:
             continue
         try:
-            from PIL import Image
-            import io as _io
-            im = Image.open(src).convert("RGBA")
-            im.thumbnail((128, 128))
-            buf = _io.BytesIO()
-            im.save(buf, format="PNG", optimize=True)
-            data = buf.getvalue()
-            if len(data) > 256000:            # limite Discord
+            data = _vignette_emoji(src)
+            if not data:                      # limite Discord
                 continue
             try:
                 out[m] = await guild.create_custom_emoji(
