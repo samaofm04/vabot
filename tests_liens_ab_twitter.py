@@ -726,8 +726,10 @@ try:
 
     # ── l'accueil du ticket : redessiné pour montrer « 📈 Mes subs » ─────
     # (le bouton lui-même vient d'un patch local du VPS, 99-z-tickets-subs-total)
-    check("les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 3)",
-          tk.BOUTONS_VERSION == 3)
+    # (4 depuis le 21/10/2026 : « 📈 Mes stats » sur Threads ; Twitter, lui,
+    # garde « Mes subs » et ses accueils sont seulement redessinés à l'identique)
+    check("les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 3, puis 4)",
+          tk.BOUTONS_VERSION >= 3)
     _src_w = (BOT / "web_upload.py").read_text(encoding="utf-8")
     _sync = _src_w[_src_w.index("def _sync_liens_va("):_src_w.index("_MODELES_VU = {")]
     check("… Twitter compris : la boucle du podium appelle redessiner_boutons",

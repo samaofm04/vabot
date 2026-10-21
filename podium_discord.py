@@ -288,8 +288,8 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # ligne dit « US : n · GBL : n » (GBL : tous pays), et plus de
                  # 🌐 all-time (« 43 all-time » pour 66 clics). Le podium de la
                  # semaine et ses primes gardent US + UK et les seuls VA Threads.
-                 # Le même jour : « Threads 01 » plutôt qu'« Instagram VA n »
-                 # (numeros_ig_threads).
+                 # Le même jour : « Threads VA 023 » plutôt qu'« Instagram VA
+                 # 23 » (_libelle_va_ig).
                  # Voir _quinzaine_us_gbl. POUR REVENIR : retirer ces cinq clés.
                  "quinzaine_va_ig": True, "pays_subs": ("US", "GB", "CA"),
                  "marche_subs": "US + UK + CA", "us_gbl": True, "alltime_subs": False,
@@ -2067,8 +2067,8 @@ def _partis(gid: Optional[str]) -> Dict[str, str]:
 
 def _cle_ligne(gid: Optional[str], va: Any, x: Optional[Dict[str, Any]] = None) -> str:
     """La clé de _partis d'une ligne (ou d'un « sans relevé ») de ce serveur.
-    Le libellé entier compte : « Threads 05 », un VA de Va IG mêlé à la
-    quinzaine de Threads, n'est jamais un « Threads 5 » parti."""
+    Le libellé entier compte : « Threads VA 023 », un VA de Va IG mêlé à la
+    quinzaine de Threads, n'est jamais un « Threads 23 » parti."""
     if not _profil(gid).get("fr"):
         return str(va or "").strip()
     import liens_fr
@@ -2433,70 +2433,15 @@ def numeros_instagram(vues=(), eviter=()) -> Dict[str, int]:
         return table
 
 
-#: Les VA de Va IG dans la quinzaine de Threads : « Threads 01 », « Threads
-#: 02 »… Propriétaire, 21/10/2026 : « écrit pas Instagram, ça fait bizarre,
-#: pour les VA IG écrit Threads 01 […] mets toujours le mot Threads ». Un
-#: numéro à eux (« model:n » → n), fixe d'une quinzaine à l'autre, à partir de
-#: 01, qui ne tombe jamais sur celui d'un VA de Threads. Ceux-là viennent de
-#: la table commune au pseudo (liens_va.numero_de) : un VA de Twitter qui
-#: rejoint Threads y garde le sien (abdoul_9684, 31 des deux côtés), si bien
-#: que n'importe quel numéro peut un jour devenir celui d'un ticket Threads.
-#: Ce jour-là, c'est le VA IG qui passe au numéro libre suivant, et c'est dit ;
-#: un VA de Threads ne change jamais de numéro.
-_VERROU_IG_THREADS = threading.Lock()
-
-
-def _fichier_ig_threads() -> Path:
-    return DATA_DIR / "numeros_va_ig_threads.json"
-
-
-def numeros_ig_threads(cles, pris_threads) -> Dict[str, int]:
-    """{« amelia:3 » : 1, …} : le numéro « Threads nn » de chaque VA de Va IG
-    vu. `pris_threads` : les numéros des VA de Threads (même partis). Un numéro
-    déjà donné ne change que s'il croise l'un d'eux."""
-    pris_th = {int(x) for x in pris_threads}
-    with _VERROU_IG_THREADS:
-        table = _lire(_fichier_ig_threads(), {})
-        table = {str(k): int(v) for k, v in table.items()
-                 if isinstance(v, int) or str(v).isdigit()} if isinstance(table, dict) else {}
-        croises = sorted(k for k, v in table.items() if v in pris_th)
-        for k in croises:
-            print(f"[podium] Threads {table[k]:02d} ({k}, VA de Va IG) est devenu le numéro "
-                  "d'un VA de Threads : renuméroté", flush=True)
-            table.pop(k)
-        neuves = set(cles) - set(table)
-        if neuves:
-            pris = set(table.values()) | pris_th
-            n = 1
-            for cle in sorted(neuves, key=lambda c: (c.split(":")[0], int(c.split(":")[1]))):
-                while n in pris:
-                    n += 1
-                table[cle] = n
-                pris.add(n)
-            print(f"[podium] numéros « Threads » des VA de Va IG : "
-                  + ", ".join(f"{c} -> {table[c]:02d}" for c in sorted(neuves)[:10])
-                  + ("…" if len(neuves) > 10 else ""), flush=True)
-        if neuves or croises:
-            safe_json.write_text(_fichier_ig_threads(),
-                                 json.dumps(table, ensure_ascii=False, indent=2, sort_keys=True))
-        return table
-
-
-def _numeros_threads(gid: str, cl: Optional[Dict[str, Any]] = None) -> set:
-    """Les numéros des VA de Threads : leurs fiches liens_va (partis compris)
-    et les lignes de son classement."""
-    import liens_va
-    out = {int(f["numero"]) for c, f in (liens_va._etat().get("liens") or {}).items()
-           if str(c).startswith(f"{gid}:") and isinstance(f, dict)
-           and str(f.get("numero") or "").isdigit()}
-    for x in (cl or {}).get("lignes") or []:
-        if str(x.get("numero") or "").isdigit():
-            out.add(int(x["numero"]))
-    return out
-
-
-def _libelle_ig_threads(n: int) -> str:
-    return f"Threads {int(n):02d}"
+#: Les VA de Va IG dans la quinzaine de Threads : « Threads VA 023 », leur
+#: numéro Instagram (numeros_instagram, celui que Va IG affiche) sur trois
+#: chiffres. Propriétaire, 21/10/2026 : « écris Threads VA 023 pour que ce soit
+#: courant qui c'est » (Instagram VA 23). Ni « Instagram VA n » (« ça fait
+#: bizarre »), ni une numérotation à part (« Threads 01 », 84f42ad, une heure) :
+#: « Threads VA » et trois chiffres ne croisent jamais un « Threads 92 » de
+#: Threads.
+def _libelle_va_ig(n: int) -> str:
+    return f"Threads VA {int(n):03d}"
 
 
 def _marque(gid: Optional[str], texte: str) -> str:
@@ -3792,7 +3737,7 @@ def _format_subs(gid: Optional[str]) -> str:
     """Le format des pages de la quinzaine : celui des messages vivants, plus
     « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
     passage, sans toucher au podium de la semaine."""
-    return _format_affiche(gid) + ("+us-gbl" if _profil(gid).get("us_gbl") else "")
+    return _format_affiche(gid) + ("+us-gbl-va" if _profil(gid).get("us_gbl") else "")
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4329,7 +4274,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                       etiquette: str) -> Dict[str, Any]:
     """La quinzaine de Threads (clés « pays_subs », « quinzaine_va_ig »,
     « us_gbl ») : ses VA (classement(), « Threads n ») et ceux de Va IG
-    (« Threads 01 », numeros_ig_threads), à leurs clics uniques vers la destination
+    (« Threads VA 023 », _libelle_va_ig), à leurs clics uniques vers la destination
     (gms_bouton). « clics » : US + UK + Canada, ce qui classe ; « gbl » :
     tous pays. La forme de classement()."""
     pf = _profil(gid)
@@ -4342,7 +4287,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
     n_ig = 0
     if pf.get("quinzaine_va_ig"):
         ig = _entites_va_ig()
-        table = numeros_ig_threads(set(ig), _numeros_threads(gid, cl))
+        table = numeros_instagram(set(ig))
         # un lien direct de Va IG se compte à ses visites, comme ceux de Threads
         liens_ig, frais_ig = liens_bruts(VA_IG_ID, etiquette)
         directs = _directs(liens_ig)
@@ -4350,7 +4295,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
         for k, e in sorted(ig.items(), key=lambda kv: table.get(kv[0], 0)):
             if k not in table:
                 continue
-            va = _libelle_ig_threads(table[k])
+            va = _libelle_va_ig(table[k])
             n_ig += 1
             try:
                 total, pays = _releve_liens(gid, e["ids"], d0, d1, "gms_bouton", etiquette, directs)
@@ -4988,9 +4933,9 @@ def _ligne_affichee(libelle: str) -> "re.Pattern[str]":
     """Une ligne de classement telle qu'une page l'affiche : « 🥇 **VA 41** —
     **367** subs · 🌐 395 all-time », « 4. Threads 92 — 9 clics », et sur la
     quinzaine de Threads depuis le 21/10/2026 « 🥇 **Threads 92** — US : **54**
-    · GBL : **71** », « 5. Threads 01 — US : 2 · GBL : 40 » (un VA de Va IG ;
-    « Instagram VA n » l'a précédé une heure, le 21/10)."""
-    return re.compile(rf"((?:{re.escape(libelle)}|Instagram VA) \d+)\*{{0,2}} — "
+    · GBL : **71** », « 5. Threads VA 023 — US : 2 · GBL : 40 » (un VA de Va
+    IG ; « Instagram VA n » puis « Threads 01 » l'ont précédé, le 21/10)."""
+    return re.compile(rf"((?:{re.escape(libelle)} VA|{re.escape(libelle)}|Instagram VA) \d+)\*{{0,2}} — "
                       r"(?:US : )?\*{0,2}(\d+)\*{0,2}(?: (?:subs|clics)\b| · GBL)")
 
 
@@ -5001,8 +4946,8 @@ def _bloc_pseudos(titre: str, lignes: List[Tuple[str, int]], sans: List[str], un
     message (tickets_discord._suite coupe à 1900)."""
     def qui(va: str) -> str:
         if any(isinstance(k, str) for k in noms):
-            # au libellé entier : « Threads 5 » d'un VA de Threads et
-            # « Threads 05 » d'un VA de Va IG ne sont jamais confondus
+            # au libellé entier : « Threads 23 » d'un VA de Threads et
+            # « Threads VA 023 » d'un VA de Va IG ne sont jamais confondus
             # (quinzaine de Threads, _noms_libelles)
             return noms.get(va) or "?"
         m = re.search(r"\d+", va)
@@ -5048,7 +4993,7 @@ def _noms_va(gid: str) -> Dict[int, str]:
 def _noms_libelles(gid: str) -> Dict[Any, str]:
     """Les noms de « 👀 Pseudos ». Threads, dont la quinzaine mêle les VA de
     Va IG (« quinzaine_va_ig ») : au libellé entier, « Threads 61 » →
-    pseudo, « Threads 05 » → « pseudo (Amelia VA 3 · Va IG) ». Ailleurs :
+    pseudo, « Threads VA 023 » → « pseudo (Amelia VA 44 · Va IG) ». Ailleurs :
     _noms_va, au numéro."""
     noms = _noms_va(gid)
     pf = _profil(gid)
@@ -5057,10 +5002,10 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
     lib = str(pf.get("libelle") or "VA")
     out: Dict[Any, str] = {f"{lib} {n}": p for n, p in noms.items()}
     ig = _entites_va_ig()
-    table = numeros_ig_threads(set(ig), _numeros_threads(gid))
+    table = numeros_instagram(set(ig))
     for k, e in ig.items():
         if k in table:
-            out[_libelle_ig_threads(table[k])] = f'{e["pseudo"] or "?"} ({e["nom"]} · Va IG)'
+            out[_libelle_va_ig(table[k])] = f'{e["pseudo"] or "?"} ({e["nom"]} · Va IG)'
     return out
 
 
@@ -5112,7 +5057,8 @@ def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], L
     sans: List[str] = []
     for ligne in txt.splitlines():
         if "Relevé indisponible" in ligne or "Sans relevé" in ligne:
-            sans += [v for v in re.findall(rf"(?:{re.escape(lib)}|Instagram VA) \d+", ligne)
+            sans += [v for v in re.findall(rf"(?:{re.escape(lib)} VA|{re.escape(lib)}|Instagram VA) \d+",
+                                           ligne)
                      if v not in sans]
     if textes and not lignes:
         soucis.append("aucune ligne de classement reconnue sur ses pages")
