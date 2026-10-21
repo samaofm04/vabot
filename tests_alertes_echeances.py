@@ -13,8 +13,7 @@ Verifie, chaque fois avec un etat simule :
   - serveur Spam : rien a 449, une alerte a 450, pas de rearmement a 445,
     rearme a 440, le rythme calcule depuis le releve de l'audit ;
   - categories de Va IG : alerte a 48, rearme a 45, categorie supprimee ;
-  - coffre Outlook : alerte a 0 libre, une seule fois, rearme quand on en
-    rajoute ; illisible ≠ vide ;
+  - le coffre Outlook n'est PAS surveille ici (numgen le dit deja au staff) ;
   - rien la nuit (garde pour 9 h), un envoi refuse se retente ;
   - AUCUN doublon apres redemarrage (module recharge, meme fichier d'etat) ;
   - le cog : arme seulement avec VA_MACHINE_PROD=1, zero commande slash,
@@ -70,9 +69,8 @@ class Telegram:
         return {"ok": self.ok, "error": "" if self.ok else "Bad Request: chat not found"}
 
 
-def hors(exp=None, libres=5, total=5):
-    return {"gms_exp": exp, "outlook": None if libres is None else {"libres": libres, "total": total},
-            "avertissements": []}
+def hors(exp=None):
+    return {"gms_exp": exp, "avertissements": []}
 
 
 def spam(n):
@@ -92,10 +90,10 @@ def reset():
             f.unlink()
 
 
-def tour(serveurs=None, exp=None, libres=5, total=5, quand="2026-10-21 12:00", tg=None):
+def tour(serveurs=None, exp=None, quand="2026-10-21 12:00", tg=None):
     tg = tg or Telegram()
     b = ae.tour(serveurs or {}, maintenant=ts(quand), envoyer=tg, fichier=ETAT,
-                hors_discord=hors(exp, libres, total))
+                hors_discord=hors(exp))
     return b, tg
 
 
@@ -214,36 +212,6 @@ def test_categories():
     check("dernier tour : Amelia 44 en tête", d["categories_max"][0] == ["👤 Amelia", 44], d)
 
 
-# ---- coffre Outlook ----------------------------------------------------------------
-
-def test_outlook():
-    print("Coffre Outlook")
-    reset()
-    b, tg = tour(libres=3, total=10)
-    check("3 libres : rien", not tg.envois, tg.envois)
-    b, tg = tour(libres=0, total=10)
-    t = (tg.envois or [""])[0]
-    check("0 libre : une alerte", b["envoyees"] == ["outlook:vide"] and "0 adresse libre (10 déjà données)" in t, t)
-    check("texte : qui est touché, où remplir", "Va IG et Twitter" in t and "youl4b.com/outlook" in t, t)
-    b, tg = tour(libres=0, total=10)
-    check("toujours vide : pas une deuxième", not tg.envois, tg.envois)
-    b, tg = tour(libres=None)
-    check("coffre illisible : ni alerte ni rearmement", not tg.envois and not b["rearmees"], b)
-    b, tg = tour(libres=4, total=14)
-    check("rempli : rearmée", b["rearmees"] == ["outlook:vide"], b)
-    b, tg = tour(libres=0, total=14)
-    check("vidé à nouveau : nouvelle alerte", len(tg.envois) == 1, tg.envois)
-    reset()
-    b, tg = tour(libres=0, total=0)
-    check("jamais rempli : le dit", "aucune adresse enregistrée" in (tg.envois or [""])[0], tg.envois)
-
-    # la vraie lecture : fichier absent = coffre vide, pas une erreur
-    import outlook_comptes as oc
-    oc.DATA_DIR, oc.FICHIER = _TMP, _TMP / "outlook_comptes_absent.json"
-    m = ae.mesurer_hors_discord()
-    check("mesure : fichier absent = 0 libre sur 0", m["outlook"] == {"libres": 0, "total": 0}, m)
-
-
 # ---- nuit, échec d'envoi, redémarrage -------------------------------------------------
 
 def test_nuit_echec_redemarrage():
@@ -257,28 +225,25 @@ def test_nuit_echec_redemarrage():
 
     reset()
     refus = Telegram(ok=False)
-    b, _ = tour(spam(460), libres=0, total=3, tg=refus)
+    b, _ = tour({**spam(460), **vaig([("1", "👤 Amelia", 48)])}, tg=refus)
     check("envoi refusé : rien de noté, l'erreur est gardée",
           len(refus.envois) == 2 and not ae.charger(ETAT)["envoyees"] and len(b["erreurs"]) == 2, b)
-    b, tg = tour(spam(460), libres=0, total=3)
+    b, tg = tour({**spam(460), **vaig([("1", "👤 Amelia", 48)])})
     check("tour suivant : les deux repartent", len(tg.envois) == 2, tg.envois)
 
     # redémarrage : le module est rechargé (comme un nouveau processus), même data/
     reset()
-    b, tg = tour({**spam(470), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, libres=0, total=2,
-                 quand="2026-11-06 18:30")
-    check("avant redémarrage : 4 alertes (cookie, Spam, Amelia, Outlook)", len(tg.envois) == 4, tg.envois)
+    b, tg = tour({**spam(470), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, quand="2026-11-06 18:30")
+    check("avant redémarrage : 3 alertes (cookie, Spam, Amelia)", len(tg.envois) == 3, tg.envois)
     importlib.reload(ae)
     ae.FICHIER = ETAT
     for quand in ("2026-11-06 18:45", "2026-11-06 19:00"):
-        b, tg = tour({**spam(471), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, libres=0, total=2,
-                     quand=quand)
+        b, tg = tour({**spam(471), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, quand=quand)
         check(f"après redémarrage ({quand}) : aucun doublon", not tg.envois, tg.envois)
 
     # fichier d'état perdu (coupure en pleine écriture) : la copie .prev suffit
     ETAT.unlink()
-    b, tg = tour({**spam(471), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, libres=0, total=2,
-                 quand="2026-11-06 19:15")
+    b, tg = tour({**spam(471), **vaig([("1", "👤 Amelia", 49)])}, exp=EXP, quand="2026-11-06 19:15")
     check("état effacé, .prev présent : aucun doublon", not tg.envois, tg.envois)
 
     # un plantage APRÈS le premier envoi : il est déjà noté
@@ -291,7 +256,7 @@ def test_nuit_echec_redemarrage():
             return super().__call__(texte)
     p = Plante()
     try:
-        tour({**spam(470)}, libres=0, total=2, tg=p)
+        tour({**spam(470), **vaig([("1", "👤 Amelia", 49)])}, tg=p)
     except KeyboardInterrupt:
         pass
     check("plantage au 2e envoi : le 1er est déjà noté", len(ae.charger(ETAT)["envoyees"]) == 1,
@@ -315,6 +280,10 @@ def test_canal():
           and len(vu) == 1, r)
     src = pathlib.Path(ae.__file__).read_text(encoding="utf-8")
     check("jamais getUpdates", "getUpdates" not in src.replace("getUpdates appartient", ""))
+    # numgen.alerter_staff (« outlook:vide ») le dit déjà dans le debrief-day du
+    # Spam : d'ici, le même événement partirait deux fois, sur deux canaux
+    check("coffre Outlook : pas surveillé ici (numgen s'en charge)",
+          "import outlook_comptes" not in src and "outlook:vide\"" not in src.replace("« outlook:vide »", ""))
     del sys.modules["web_upload"]
 
 
@@ -404,7 +373,6 @@ def main():
     test_gms()
     test_serveur()
     test_categories()
-    test_outlook()
     test_nuit_echec_redemarrage()
     test_canal()
     test_cog()

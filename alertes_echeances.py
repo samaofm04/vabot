@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """alertes_echeances.py — prevenir le staff AVANT qu'une limite casse quelque chose.
 
-POURQUOI (audit des serveurs du 20/10/2026) : quatre choses allaient lacher
+POURQUOI (audit des serveurs du 20/10/2026) : trois choses allaient lacher
 sans un mot, chacune decouverte trop tard la fois d'avant :
 
 - le cookie GetMySocial (authToken) dure 30 jours. Echu, le 50/50 Seren ne se
@@ -11,9 +11,11 @@ sans un mot, chacune decouverte trop tard la fois d'avant :
   500 le 20/10). Discord refuse le 501e salon, et la creation d'un espace VA
   echoue alors au moment ou un VA arrive ;
 - une categorie Discord ne prend que 50 salons. Sur Va IG, « 👤 Amelia » en
-  avait 44 le 20/10 : le 51e ticket ne s'ouvrirait plus ;
-- le coffre Outlook vide : le VA qui demande une adresse n'en recoit pas
-  (un message lui est fait ailleurs ; ici, seulement le staff).
+  avait 44 le 20/10 : le 51e ticket ne s'ouvrirait plus.
+
+Le coffre Outlook vide N'EST PAS ici : numgen.alerter_staff (« outlook:vide »)
+le dit deja une fois au staff, dans le debrief-day du serveur Spam. Le dire
+aussi d'ici aurait envoye le meme evenement deux fois, sur deux canaux.
 
 Les alertes partent dans le groupe Telegram des alertes SFS, par le bot de la
 veille (@va_auto_dl_bot), avec la MEME fonction que les alertes SFS
@@ -73,7 +75,6 @@ AMORCE_SALONS = {SERVEUR_SPAM: ("2026-10-20", 381)}
 HISTORIQUE_JOURS = 60
 
 LIEN_COOKIE = "https://youl4b.com/?tab=sgms"
-LIEN_OUTLOOK = "https://youl4b.com/outlook"
 
 
 # ---- Etat ------------------------------------------------------------------
@@ -114,11 +115,11 @@ def _jour(ts: float) -> str:
 # ---- Mesures qui ne passent pas par Discord ----------------------------------
 
 def mesurer_hors_discord() -> Dict[str, Any]:
-    """Echeance du cookie GetMySocial et etat du coffre Outlook.
+    """Echeance du cookie GetMySocial.
 
     Lecture seule. Le cookie ne sort jamais : seule son echeance (le champ exp
     du jeton) est lue, par la fonction qu'emploie deja la page de reglages."""
-    m: Dict[str, Any] = {"gms_exp": None, "outlook": None, "avertissements": []}
+    m: Dict[str, Any] = {"gms_exp": None, "avertissements": []}
     try:
         import gms
         ck = gms.get_session_cookie()
@@ -129,13 +130,6 @@ def mesurer_hors_discord() -> Dict[str, Any]:
             m["avertissements"].append("cookie GetMySocial illisible (pas d'échéance)")
     except Exception as e:
         m["avertissements"].append(f"cookie GetMySocial : {type(e).__name__}: {e}"[:200])
-    try:
-        import outlook_comptes
-        m["outlook"] = {"libres": int(outlook_comptes.nb_libres()),
-                        "total": len(outlook_comptes.comptes())}
-    except Exception as e:
-        # « je n'ai pas pu lire » n'est PAS « le coffre est vide » : pas d'alerte
-        m["avertissements"].append(f"coffre Outlook : {type(e).__name__}: {e}"[:200])
     return m
 
 
@@ -214,16 +208,6 @@ def texte_categorie(serveur: str, categorie: str, n: int) -> str:
             "À faire : y faire de la place (tickets des VA partis).")
 
 
-def texte_outlook(total: int) -> str:
-    if total:
-        tete = f"📭 Coffre Outlook vide : 0 adresse libre ({total} déjà données)"
-    else:
-        tete = "📭 Coffre Outlook vide : aucune adresse enregistrée"
-    return (tete + "\n"
-            "Les VA qui demandent une adresse Outlook (Va IG et Twitter) n'en reçoivent plus.\n"
-            "À faire : ajouter des adresses.\n" + LIEN_OUTLOOK)
-
-
 # ---- Decision ----------------------------------------------------------------
 
 def _noter_historique(etat: Dict[str, Any], serveurs: Dict[str, Any], maintenant: float) -> None:
@@ -294,14 +278,6 @@ def evaluer(mesures: Dict[str, Any], etat: Dict[str, Any],
                 rearmer.append(cle)
         # categorie supprimee depuis l'alerte : plus rien a surveiller
         rearmer += [k for k in deja if k.startswith(f"categorie:{gid}:") and k not in vues]
-
-    ol = mesures.get("outlook")
-    if isinstance(ol, dict):
-        if int(ol.get("libres") or 0) == 0:
-            if "outlook:vide" not in deja:
-                neuves.append(("outlook:vide", texte_outlook(int(ol.get("total") or 0))))
-        elif "outlook:vide" in deja:
-            rearmer.append("outlook:vide")
     return neuves, sorted(set(rearmer))
 
 
@@ -368,7 +344,6 @@ def tour(serveurs: Dict[str, Any], avertissements: List[str] = (),
     etat["dernier_tour"] = {
         "quand": datetime.fromtimestamp(maintenant, timezone.utc).isoformat(timespec="seconds"),
         "gms_exp": mesures.get("gms_exp"),
-        "outlook": mesures.get("outlook"),
         "serveurs": {g: {"nom": s.get("nom"), "salons": s.get("salons"),
                          # les plus remplies : « Amelia 44/50 » se lit sans ouvrir Discord
                          "categories_max": sorted(
