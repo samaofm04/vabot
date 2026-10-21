@@ -302,6 +302,9 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
     if not disponible(gid):
         return "⚠️ Les subs ne sont pas comptés sur ce serveur."
     r = subs_du_va(gid, uid, jour)
+    import podium_discord as pod
+    if pod._profil(gid).get("mes_stats"):
+        return _texte_stats(gid, uid, r)
     if not r["trackings"]:
         return ("📈 **Tes subs**\nTu n'as pas encore de tracking : tes subs apparaîtront ici "
                 "dès que ton lien sera prêt.")
@@ -320,6 +323,46 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
         "-# MyPuls se met à jour toutes les quelques heures."
         + (" Un tracking commun à plusieurs VA n'est pas compté." if r.get("communs") else ""),
     ])
+
+
+def _texte_stats(gid: Any, uid: Any, r: Dict[str, Any]) -> str:
+    """« 📈 Mes stats » (Threads, clé « mes_stats » du profil du podium) : les
+    abonnés, comme « Mes subs », puis les clics de son lien sur les mêmes
+    périodes, écrits comme la quinzaine du salon statistiques (« US : n · GBL :
+    n », US = US + UK + Canada). Jamais un montant."""
+    import podium_discord as pod
+    cles = ("aujourdhui", "periode", "precedente")
+    titres = {"aujourdhui": "Aujourd'hui", "periode": "Cette période",
+              "precedente": "Période précédente"}
+
+    def quand(p: Dict[str, Any], cle: str) -> str:
+        if cle == "aujourdhui":
+            return titres[cle]
+        du, au = p["du"], p["au"]
+        return f"{titres[cle]} (du {du[8:10]}/{du[5:7]} au {au[8:10]}/{au[5:7]})"
+    out = ["📈 **Tes stats**", "**Subs**"]
+    if r["trackings"]:
+        for cle in cles:
+            n = r[cle]["n"]
+            out.append(f"{quand(r[cle], cle)} : "
+                       + (f"**{n}**" if n is not None else "pas lisible pour l'instant"))
+    else:
+        out.append("Tu n'as pas encore de tracking : tes subs apparaîtront ici dès que ton "
+                   "lien sera prêt.")
+    clics = pod.clics_du_va(str(gid), str(uid),
+                            [(dt.date.fromisoformat(r[c]["du"]), dt.date.fromisoformat(r[c]["au"]))
+                             for c in cles])
+    out.append("**Clics de ton lien** (US = US + UK + Canada · GBL = tous pays)")
+    if clics is None:
+        out.append("Pas encore de lien : tes clics apparaîtront ici dès qu'il sera créé.")
+    else:
+        for cle, v in zip(cles, clics):
+            out.append(f"{quand(r[cle], cle)} : "
+                       + (f"US : **{v[0]}** · GBL : **{v[1]}**" if v is not None
+                          else "pas lisible pour l'instant"))
+    out.append("-# MyPuls et GetMySocial se mettent à jour toutes les quelques heures."
+               + (" Un tracking commun à plusieurs VA n'est pas compté." if r.get("communs") else ""))
+    return "\n".join(out)
 
 
 # ─── Va IG : le classement de la quinzaine aux abonnés ───────────────────

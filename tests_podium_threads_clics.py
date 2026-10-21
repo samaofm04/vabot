@@ -786,6 +786,52 @@ try:
           pd._libelle_ig_threads(1) == "Threads 01" and pd._libelle_ig_threads(42) == "Threads 42")
     _lfr.ETAT = _etat_fr
 
+    # ------------------------------------------------------------------ 4 bis
+    print("\n— 4 bis. « 📈 Mes stats » : les subs ET les clics du lien")
+    # Propriétaire, 21/10/2026 : « pour mes sub change et mets mes stats, ça
+    # montre les sub et click ». Le VA 61 (momobtn) : ses liens t1 et t1b
+    # (coupé), directs, comptés à leurs visites
+    import subs_va as _sva
+    import tickets_discord as _tkd
+    _sv_ms = (_lv._etat, pd.liens_bruts, _sva.subs_du_va, _tkd._boutons_va_avant_stats)
+    try:
+        _lv._etat = lambda: {"liens": {f"{TH}:u61": {"numero": 61, "pseudo": "momobtn",
+                                                     "link_id": "t1"}}}
+        pd.liens_bruts = lambda gid=None, etiquette="podium": (copy.deepcopy(LIENS[EQ_TH]), True)
+        _sva.subs_du_va = lambda gid, uid, jour=None: {
+            "trackings": 2, "communs": [],
+            "aujourdhui": {"du": "2026-10-13", "au": "2026-10-13", "n": 1},
+            "periode": {"du": "2026-10-01", "au": "2026-10-13", "n": 4},
+            "precedente": {"du": "2026-09-16", "au": "2026-09-30", "n": None}}
+        n_b = len(GMS["boutons"])
+        c61 = pd.clics_du_va(TH, "u61", [(dt.date(2026, 10, 13), dt.date(2026, 10, 13))])
+        # t1 : US 20, GB 3, FR 9 ; t1b (coupé) : US 4 -> US+UK+CA 27, tous pays 36
+        check("ses clics : ses deux liens (le coupé compris), US + UK + CA et tous pays",
+              c61 == [(27, 36)] and GMS["boutons"][n_b][0] == ("t1", "t1b"), (c61, GMS["boutons"][n_b:]))
+        txt_ms = _sva.texte(TH, "u61")
+        check("le texte : « Tes stats », les subs (une période illisible le dit), puis les clics "
+              "« US : n · GBL : n » sur les mêmes périodes, aucun montant",
+              txt_ms.startswith("📈 **Tes stats**\n**Subs**\nAujourd'hui : **1**\n")
+              and "Cette période (du 01/10 au 13/10) : **4**" in txt_ms
+              and "Période précédente (du 16/09 au 30/09) : pas lisible pour l'instant" in txt_ms
+              and "**Clics de ton lien** (US = US + UK + Canada · GBL = tous pays)" in txt_ms
+              and "Cette période (du 01/10 au 13/10) : US : **27** · GBL : **36**" in txt_ms
+              and "$" not in txt_ms, txt_ms)
+        check("un VA sans lien : ses subs, et « pas encore de lien » pour les clics",
+              "Pas encore de lien" in _sva.texte(TH, "u_sans_lien"))
+        _tkd._boutons_va_avant_stats = lambda uid, **k: [{"type": 1, "components": [
+            {"type": 2, "label": "Mes subs", "custom_id": f"subs:total:{uid}"},
+            {"type": 2, "label": "Mon adresse USDC", "custom_id": f"usdc:set:{uid}"}]}]
+        lab = lambda g: [b["label"] for r in _tkd.boutons_va("u61", gid=g) for b in r["components"]]
+        check("le bouton (posé par le patch du VPS) : « Mes stats » sur Threads, « Mes subs » "
+              "ailleurs tant que le propriétaire ne l'a pas demandé",
+              lab(TH) == ["Mes stats", "Mon adresse USDC"]
+              and lab(TW) == ["Mes subs", "Mon adresse USDC"], (lab(TH), lab(TW)))
+        check("… et les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 4)",
+              _tkd.BOUTONS_VERSION == 4)
+    finally:
+        _lv._etat, pd.liens_bruts, _sva.subs_du_va, _tkd._boutons_va_avant_stats = _sv_ms
+
     # ------------------------------------------------------------------ 5
     print("\n— 5. le lundi : semaine terminée, puis le podium figé")
     CLOCK["now"] = dt.datetime(2026, 10, 19, 0, 10)

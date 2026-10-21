@@ -2360,7 +2360,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # 3 (15/10/2026) : « 📈 Mes subs » rejoint la rangée sur Twitter et Threads
 # (bouton posé par un patch local du VPS, 99-z-tickets-subs-total) : les
 # accueils déjà postés sont redessinés une fois pour le montrer.
-BOUTONS_VERSION = 3
+# 4 (21/10/2026) : « 📈 Mes subs » devient « 📈 Mes stats » sur Threads
+# (_avec_mes_stats) : ses accueils déjà postés sont redessinés une fois.
+BOUTONS_VERSION = 4
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -2689,3 +2691,35 @@ def suivre_departs(gid: str) -> Dict[str, Any]:
     if any(bilan.values()):
         print(f"[ticket] départs {gid} : {bilan}", flush=True)
     return bilan
+
+
+# ─── « 📈 Mes stats » ───────────────────────────────────────────────────
+# Le bouton « 📈 Mes subs » (subs:total:) est posé par un patch local du VPS
+# (99-z-tickets-subs-total) dans boutons_va ; son libellé change ici, APRÈS
+# coup, sans toucher aux lignes du patch. Propriétaire, 21/10/2026 : « pour
+# mes sub change et mets mes stats, ça montre les sub et click ». La réponse,
+# elle, est subs_va.texte (abonnés + clics). Par serveur : clé « mes_stats »
+# du profil du podium (Threads).
+_boutons_va_avant_stats = boutons_va
+
+
+def _avec_mes_stats(gid: str) -> bool:
+    try:
+        import podium_discord as pod
+        return bool(pod._profil(str(gid or "")).get("mes_stats")) if gid else False
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
+               gid: str = "", lien_actif: bool = True):
+    """boutons_va (voir plus haut), « 📈 Mes stats » au lieu de « 📈 Mes subs »
+    sur un serveur à clé « mes_stats »."""
+    rangs = _boutons_va_avant_stats(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                    gid=gid, lien_actif=lien_actif)
+    if _avec_mes_stats(gid):
+        for r in rangs:
+            for b in r.get("components") or []:
+                if str(b.get("custom_id") or "").startswith("subs:total:"):
+                    b["label"] = "Mes stats"
+    return rangs

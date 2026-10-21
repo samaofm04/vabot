@@ -293,6 +293,14 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # Voir _quinzaine_us_gbl. POUR REVENIR : retirer ces cinq clés.
                  "quinzaine_va_ig": True, "pays_subs": ("US", "GB", "CA"),
                  "marche_subs": "US + UK + CA", "us_gbl": True, "alltime_subs": False,
+                 # « 📈 Mes stats » à la place de « 📈 Mes subs » dans les
+                 # tickets (propriétaire, 21/10/2026 : « pour mes sub change
+                 # et mets mes stats, ça montre les sub et click ») : les
+                 # abonnés de subs_va ET les clics de son lien, sur les mêmes
+                 # périodes, comptés comme la quinzaine (« US : n · GBL : n »).
+                 # Lu par subs_va.texte et tickets_discord (libellé). POUR LE
+                 # DONNER À TWITTER : la même clé dans son profil.
+                 "mes_stats": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -4360,6 +4368,42 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
     lignes.sort(key=lambda x: (-x["clics"], -int(x.get("gbl") or 0), x["va"]))
     return dict(cl, lignes=lignes, illisibles=sorted(illisibles), frais=frais,
                 entites=int(cl.get("entites") or 0) + n_ig)
+
+
+def clics_du_va(gid: str, uid: str,
+                periodes: List[Tuple[dt.date, dt.date]]) -> Optional[List[Optional[Tuple[int, int]]]]:
+    """« 📈 Mes stats » : (US, GBL) des clics uniques des liens de ce VA, pour
+    chaque période, comptés comme sa ligne de la quinzaine (gms_bouton,
+    « pays_subs » : US + UK + CA ; GBL : tous pays). Ses liens : ceux de son
+    numéro dans l'espace du serveur (entites_liens_va), coupés compris — leurs
+    clics d'avant comptent. None s'il n'a pas de lien ; un None dans la liste
+    pour une période que GetMySocial n'a pas rendue (jamais un faux zéro)."""
+    import liens_va
+    pf = _profil(gid)
+    n = liens_va.lien_de(str(gid), str(uid)).get("numero")
+    if not str(n or "").isdigit():
+        return None
+    liens, _frais = liens_bruts(gid, ETIQUETTE_QUINZAINE)
+    e = entites_liens_va(liens).get(str(int(n)))
+    ids = list((e or {}).get("ids") or [])
+    lid = str(liens_va.lien_de(str(gid), str(uid)).get("link_id") or "")
+    if lid and lid not in ids:
+        ids.append(lid)
+    if not ids:
+        return None
+    pays_q = tuple(pf.get("pays_subs") or pf["pays"])
+    directs = _directs(liens)
+    out: List[Optional[Tuple[int, int]]] = []
+    for d0, d1 in periodes:
+        try:
+            total, pays = _releve_liens(gid, ids, d0.isoformat(), d1.isoformat(), "gms_bouton",
+                                        ETIQUETTE_QUINZAINE, directs)
+        except Exception:                                    # noqa: BLE001
+            total, pays = None, None
+        out.append(None if pays is None else
+                   (sum(int(pays.get(p) or 0) for p in pays_q),
+                    int(total if total is not None else sum(int(v or 0) for v in pays.values()))))
+    return out
 
 
 def _classement_quinzaine(debut: dt.date, fin: dt.date, gid: str) -> Dict[str, Any]:
