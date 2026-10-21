@@ -762,6 +762,44 @@ def _gere_par_role(ch, guild) -> bool:
         return False
 
 
+def est_encadrant(member) -> bool:
+    """Bot, proprietaire, admin ou porteur d'un role Manager / BOSS : jamais
+    isole comme un VA. vectorofm, 🛡️ Manager de Va IG ET VA d'Alicia, avait
+    perdu heure-de-post, modele-a-suivre et les vocaux (audit du 20/10/2026)."""
+    if getattr(member, "bot", False):
+        return True
+    guild = getattr(member, "guild", None)
+    if guild is not None and getattr(guild, "owner_id", None) == getattr(member, "id", None):
+        return True
+    try:
+        gp = member.guild_permissions
+        if gp.administrator or gp.manage_guild or gp.manage_channels:
+            return True
+    except Exception:                                        # noqa: BLE001
+        pass
+    return any(k in nom_sans_decor(getattr(r, "name", ""))
+               for r in (getattr(member, "roles", None) or []) for k in ("manager", "boss"))
+
+
+async def debloquer_pour_les_va(salon, raison) -> int:
+    """Retire les refus de vue poses au nom des membres (isolation) : /showsalon
+    et l'entretien des salons de Va IG (cogs/outils). Un vocal : voir ET
+    rejoindre. Rend le nombre de membres debloques."""
+    is_voice = isinstance(salon, (discord.VoiceChannel, discord.StageChannel))
+    fixed = 0
+    for target, ow in list(salon.overwrites.items()):
+        if isinstance(target, discord.Member) and ow.view_channel is False:
+            try:
+                if is_voice:
+                    await salon.set_permissions(target, view_channel=True, connect=True, reason=raison)
+                else:
+                    await salon.set_permissions(target, view_channel=True, reason=raison)
+                fixed += 1
+            except Exception:                                # noqa: BLE001
+                pass
+    return fixed
+
+
 async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
     """Isole un VA (anonymat) ET lui (re)donne ses accès.
 
@@ -777,7 +815,8 @@ async def _isolate_va_and_grant(guild, member, identity, ticket_channel_id):
     skip_ids = {ticket_channel_id, *extra_visible}
     for ch in find_identity_channels(guild, identity):
         skip_ids.add(ch.id)
-    for ch in guild.channels:
+    # le staff n'est pas cache : il recoit seulement les salons d'aide
+    for ch in ([] if est_encadrant(member) else guild.channels):
         if ch.id in skip_ids or isinstance(ch, discord.CategoryChannel):
             continue
         if _gere_par_role(ch, guild):
@@ -3523,31 +3562,16 @@ class Welcome(commands.Cog):
         cfg = load_welcome_config()
         ids = list(cfg.get("extra_visible_channel_ids", []))
         already = salon.id in ids
-        if not already:
-            ids.append(salon.id)
-            cfg["extra_visible_channel_ids"] = ids
+        caches = list(cfg.get("hidden_from_va_channel_ids", []))
+        if not already or salon.id in caches:
+            cfg["extra_visible_channel_ids"] = ids + ([] if already else [salon.id])
+            cfg["hidden_from_va_channel_ids"] = [i for i in caches if i != salon.id]
             save_welcome_config(cfg)
         # 2) Debloque les VAs EXISTANTS : retire l'overwrite view_channel=False
         #    pose par l'isolation. Pour un VOCAL : on autorise aussi a REJOINDRE
         #    (connect), pas juste a voir.
         is_voice = isinstance(salon, (discord.VoiceChannel, discord.StageChannel))
-        fixed = 0
-        for target, ow in list(salon.overwrites.items()):
-            if isinstance(target, discord.Member) and ow.view_channel is False:
-                try:
-                    if is_voice:
-                        await salon.set_permissions(
-                            target, view_channel=True, connect=True,
-                            reason="showsalon - vocal visible aux VAs",
-                        )
-                    else:
-                        await salon.set_permissions(
-                            target, view_channel=True,
-                            reason="showsalon - rendre visible aux VAs",
-                        )
-                    fixed += 1
-                except Exception:
-                    pass
+        fixed = await debloquer_pour_les_va(salon, "showsalon - rendre visible aux VAs")
         kind = "vocal" if is_voice else "salon"
         extra = " (voir + rejoindre)" if is_voice else ""
         await interaction.followup.send(
@@ -3578,9 +3602,13 @@ class Welcome(commands.Cog):
         # 1) Retire de la liste blanche -> les futurs VAs seront isoles de ce salon
         cfg = load_welcome_config()
         ids = list(cfg.get("extra_visible_channel_ids", []))
-        if salon.id in ids:
-            ids.remove(salon.id)
-            cfg["extra_visible_channel_ids"] = ids
+        # garde la trace : l'entretien de Va IG (cogs/outils) remettrait sinon
+        # dans la liste blanche un salon que tout ✅ Verifie voit par son role
+        caches = list(cfg.get("hidden_from_va_channel_ids", []))
+        if salon.id in ids or salon.id not in caches:
+            cfg["extra_visible_channel_ids"] = [i for i in ids if i != salon.id]
+            if salon.id not in caches:
+                cfg["hidden_from_va_channel_ids"] = caches + [salon.id]
             save_welcome_config(cfg)
         # 2) Cache pour chaque VA EXISTANT (membre dans users.json). On ne touche
         #    JAMAIS au staff (boss / admins) pour ne pas leur cacher le salon.

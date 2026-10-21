@@ -230,16 +230,47 @@ def _droits(guilde, moi):
     return droits
 
 
-#: Les categories d'information du serveur FR, copiees de Twitter le
-#: 03/10/2026 (« |<<<<< ACCUEIL >>>>>| », « <<<🔔NOTIFICATION >>> ») : leurs
-#: salons sont pour tous les VA (✅ Verifie).
-CATEGORIES_INFO = ("accueil", "notification")
+def _role_des_va(guilde):
+    """✅ Verifie, porte de verification ouverte ou non : tous les VA de Va IG
+    l'ont. Sans lui, @everyone."""
+    try:
+        import verif_discord as vd
+        rid = (vd.serveur(str(guilde.id)) or {}).get("role_verifie")
+        role = guilde.get_role(int(rid)) if rid else None
+        if role is not None:
+            return role
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils] role des VA illisible : {type(e).__name__}: {e}")
+    return guilde.default_role
+
+
+def pour_tous_les_va(salon, role) -> bool:
+    """Un membre qui n'a que ce role voit-il le salon ?"""
+    try:
+        return bool(salon.permissions_for(role).view_channel)
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 def salons_info(guilde) -> list:
-    return [c for c in (getattr(guilde, "text_channels", None) or [])
-            if getattr(c, "category", None) is not None
-            and any(k in str(c.category.name).lower() for k in CATEGORIES_INFO)]
+    """Les salons que tout VA voit par son role, quelle que soit la categorie.
+
+    Jusqu'au 21/10/2026 : tous les salons de 🏠 ACCUEIL et 🔔 NOTIFICATION. Les
+    salons staff ajoutes ensuite a l'accueil (arrivees, departs, annonces
+    d'entretiens : @everyone refuse, BOSS seul) partaient dans la liste
+    blanche, et chaque arrivant y recevait un acces a son nom ; a l'inverse,
+    heure-de-post, modele-a-suivre et les vocaux, hors de ces categories,
+    etaient caches aux 13 derniers arrives. Un salon cache par /hidesalon
+    n'est pas repris."""
+    role = _role_des_va(guilde)
+    try:
+        from cogs.welcome import load_welcome_config
+        caches = {int(x) for x in load_welcome_config().get("hidden_from_va_channel_ids", []) or []}
+    except Exception:                                        # noqa: BLE001
+        caches = set()
+    return [c for c in (getattr(guilde, "channels", None) or [])
+            if not isinstance(c, discord.CategoryChannel) and c.id not in caches
+            and pour_tous_les_va(c, role)]
 
 
 #: Le reglage du site « identites scrapees » (web_upload.SCRAPE_IDENTS_FILE) et
@@ -273,10 +304,10 @@ def activer_scrape_models_fr(models) -> list:
     return ajoutees
 
 
-def _rendre_visible_aux_futurs_va(ids) -> None:
+def _rendre_visible_aux_futurs_va(ids) -> list:
     """Les salons s'ajoutent aux « salons d'aide » de l'isolation : sinon un
     VA qui arrive est masque de TOUS les salons (anonymat) et ne verrait
-    jamais les outils."""
+    jamais les outils. Rend les ids ajoutes."""
     try:
         from cogs.welcome import load_welcome_config, save_welcome_config
         cfg = load_welcome_config()
@@ -286,8 +317,55 @@ def _rendre_visible_aux_futurs_va(ids) -> None:
             cfg["extra_visible_channel_ids"] = deja + manquants
             save_welcome_config(cfg)
             print(f"[outils] {len(manquants)} salon(s) ajoute(s) aux salons visibles des VA")
+        return manquants
     except Exception as e:                                   # noqa: BLE001
         print(f"[outils] salons non ajoutes a l'isolation : {type(e).__name__}: {e}")
+        return []
+
+
+#: Nettoyage des salons staff de Va IG, fait UNE fois (trace ecrite a la fin :
+#: coupe par un redemarrage, il reprend -- il est sans effet la 2e fois).
+#: Apres le 21/10/2026, un salon staff remis dans la liste blanche (/showsalon)
+#: est un choix de l'admin : l'entretien n'y touche plus.
+NETTOYAGE_STAFF = "2026-10-21"
+_NETTOYAGE_FAIT = Path(__file__).resolve().parent.parent / "data" / "salons_staff_fr.json"
+#: Les categories que l'ancienne regle versait entieres dans la liste blanche.
+#: Le nettoyage s'y limite : spoofer, download... (🧰 Outils) sont fermes a
+#: @everyone et ouverts aux VA par la liste blanche, exprès.
+CATEGORIES_INFO = ("accueil", "notification")
+
+
+async def nettoyer_salons_staff(guilde) -> dict:
+    """Retire de la liste blanche les salons d'accueil de ce serveur qu'un VA
+    ne voit pas par son role, puis les acces poses au nom des VA sur ces
+    salons (pas le staff, ni les bots). Rend un bilan."""
+    from cogs.welcome import est_encadrant, load_welcome_config, save_welcome_config
+    role = _role_des_va(guilde)
+    cfg = load_welcome_config()
+    ids = [int(x) for x in cfg.get("extra_visible_channel_ids", []) or []]
+    staff = [guilde.get_channel(i) for i in ids]
+    staff = [c for c in staff if c is not None and not isinstance(c, discord.CategoryChannel)
+             and any(k in str(getattr(getattr(c, "category", None), "name", "")).lower()
+                     for k in CATEGORIES_INFO)
+             and not pour_tous_les_va(c, role)]
+    bilan = {"retires": [c.name for c in staff], "acces_retires": 0, "rates": []}
+    if staff:
+        cfg["extra_visible_channel_ids"] = [i for i in ids if i not in {c.id for c in staff}]
+        save_welcome_config(cfg)
+    for salon in staff:
+        for cible, ow in list(salon.overwrites.items()):
+            if (not isinstance(cible, discord.Member) or ow.view_channel is not True
+                    or est_encadrant(cible)):
+                continue
+            ow.view_channel = None
+            try:
+                await salon.set_permissions(cible, overwrite=None if ow.is_empty() else ow,
+                                            reason="Salon staff : pas pour les VA")
+                bilan["acces_retires"] += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:                           # noqa: BLE001
+                bilan["rates"].append(f"{salon.name}/{cible.name} ({type(e).__name__})")
+    return bilan
 
 
 #: Reset des tickets du serveur FR demande au bot (proprietaire, 03/10/2026 :
@@ -477,12 +555,30 @@ class Outils(commands.Cog):
                 await self._liens_demandes(guilde)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] liens demandes : {type(e).__name__}: {e}")
-            # les salons d'information : l'isolation d'un VA qui arrive les
-            # lui cacherait (un refus par salon), sauf ceux de cette liste
+            # les salons que tout VA voit : l'isolation d'un VA qui arrive les
+            # lui cacherait (un refus par salon), sauf ceux de cette liste. Un
+            # salon qui y entre est debloque pour les VA deja isoles, comme le
+            # fait /showsalon.
             try:
-                _rendre_visible_aux_futurs_va([c.id for c in salons_info(guilde)])
+                from cogs.welcome import debloquer_pour_les_va
+                salons = salons_info(guilde)
+                ajoutes = set(_rendre_visible_aux_futurs_va([c.id for c in salons]))
+                for c in salons:
+                    if c.id in ajoutes:
+                        n = await debloquer_pour_les_va(c, "Salon de tous les VA")
+                        print(f"[outils] {c.name} : {n} VA debloque(s)", flush=True)
             except Exception as e:                           # noqa: BLE001
                 print(f"[outils] salons d'information : {type(e).__name__}: {e}")
+            try:
+                if (safe_json.load(_NETTOYAGE_FAIT, default={}) or {}).get("date") != NETTOYAGE_STAFF:
+                    bilan = await nettoyer_salons_staff(guilde)
+                    print(f"[outils] salons staff : {bilan}", flush=True)
+                    if not bilan["rates"]:
+                        safe_json.write(_NETTOYAGE_FAIT, {"date": NETTOYAGE_STAFF,
+                                                          "fait": int(__import__("time").time()),
+                                                          **bilan}, indent=1)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils] salons staff : {type(e).__name__}: {e}")
             try:
                 from cogs.welcome import models_du_serveur
                 activer_scrape_models_fr(models_du_serveur(guilde))
