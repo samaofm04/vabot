@@ -64,7 +64,12 @@ ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # Coffre d'adresses Outlook (salon #adresse-outlook de Va IG) :
               # ZERO commande slash, QUE des boutons. Sur le bot ADMIN comme
               # numeros : c'est lui qui voit les salons VA de Va IG.
-              "outlook"]
+              "outlook",
+              # Alertes Telegram au staff (cookie GetMySocial, salons du
+              # serveur Spam, categories de Va IG, coffre Outlook vide) :
+              # ZERO commande slash. Il lit aussi les serveurs que seul le
+              # principal voit (cogs/alertes.py).
+              "alertes"]
 
 logging.basicConfig(
     level=logging.INFO,
