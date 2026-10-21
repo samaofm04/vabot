@@ -1139,19 +1139,62 @@ def preparer_fiches(fiches):
 CACHE_SCRAPE = _ICI / 'data' / 'insta' / 'cache'
 #: Le cache vidéo des Trends : une copie s'y prend, jamais un déplacement.
 CACHE_VIDEOS = _ICI / 'data' / 'insta' / 'videos'
+#: Les statistiques du site (web_upload.VA_INSTA_3_STATS_FILE) : le seul
+#: endroit où un compte est marqué banni.
+STATS_SCRAPE = _ICI / 'data' / 'va_insta_3_stats_cache.json'
+
+
+def _releve(compte) -> dict:
+    """Le dernier relevé réussi de @compte (CACHE_SCRAPE), ou {} : compte jamais
+    scrapé, relevé illisible. insta_scraper n'écrit ce fichier qu'en cas de
+    succès : son `scraped_at` est la date du dernier relevé qui a marché."""
+    h = _handle(compte)
+    if not h or '/' in h or '\\' in h or h.startswith('.'):
+        return {}
+    try:
+        d = json.loads((CACHE_SCRAPE / (h + '.json')).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def couverture_releves(identite, jour) -> dict:
+    """Les comptes de `identite` relevés APRÈS la fin de `jour`, et les autres.
+
+    Du 17 au 20/10/2026, le relevé du matin a rendu ok=0 sur 1 040 comptes
+    (plafond HikerAPI) : chaque salon disait « Aucun reel au-dessus du
+    seuil », alors que personne n'avait regardé. Un reel de la journée ne se
+    voit qu'à un relevé fait après elle — celui de 6 h, avant l'envoi de
+    9 h ; un relevé d'avant minuit l'a vu trop tôt, ou pas du tout.
+
+    Un compte banni (statistiques du site) n'a plus de reels : compté à part,
+    jamais parmi les non relevés. Rend {'comptes', 'releves', 'non_releves':
+    [pseudos], 'bannis': [pseudos], 'apres'}."""
+    import jailbreak
+    date = datetime.strptime(jour, '%Y-%m-%d').date()
+    fin = datetime.combine(date + timedelta(days=1), dt_time.min, TZ).timestamp()
+    comptes = sorted({_handle(a.get('username')) for a in jailbreak.list_accounts(identite)
+                      if isinstance(a, dict)} - {''})
+    stats = safe_json.load(STATS_SCRAPE, None) if comptes else None
+    stats = stats if isinstance(stats, dict) else {}
+    releves, non_releves, bannis = 0, [], []
+    for h in comptes:
+        st = stats.get(h)
+        if _entier(_releve(h).get('scraped_at')) >= fin:
+            releves += 1
+        elif isinstance(st, dict) and st.get('banned'):
+            bannis.append(h)
+        else:
+            non_releves.append(h)
+    return {'comptes': len(comptes), 'releves': releves, 'non_releves': non_releves,
+            'bannis': bannis, 'apres': int(fin)}
 
 
 def _reel_du_scrape(compte, sc):
     """(le reel `sc` tel que le dernier scrape de @compte l'a vu, date du relevé),
     ou ({}, 0) : compte jamais scrapé, relevé illisible, reel sorti de la liste."""
-    h = str(compte or '').strip().lower().lstrip('@')
-    if not h or '/' in h or '\\' in h or h.startswith('.'):
-        return {}, 0
-    try:
-        d = json.loads((CACHE_SCRAPE / (h + '.json')).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return {}, 0
-    if not isinstance(d, dict):
+    d = _releve(compte)
+    if not d:
         return {}, 0
     for r in d.get('reels') or []:
         if isinstance(r, dict) and str(r.get('shortcode') or '') == sc:
@@ -1717,13 +1760,33 @@ def textes_recap(record, salon=None):
         if nouveau:
             tagged.add(uid); mentions.append(uid)
     hors = len(record.get('hors_discord') or [])
+    # Qui a été relevé après la journée (couverture_releves, posée quand la
+    # journée se fige). Un journal plus ancien n'en a pas : texte inchangé.
+    collecte = record.get('collecte') or {}
+    non_releves = len(collecte.get('non_releves') or [])
+    actifs = non_releves + _entier(collecte.get('releves'))
+    en_pause = bool(non_releves) and not _entier(collecte.get('releves'))
+    personne = (f"aucun des {actifs} comptes n'a été relevé" if actifs > 1
+                else "le seul compte n'a pas été relevé")
     if not visibles:
         # FR : des reels au-dessus du seuil ont pu être écartés (comptes sans VA
         # du Discord). Dire « aucun reel au-dessus du seuil » était faux, et la
         # journée figée ne les rendait plus jamais.
+        # Collecte en pause : c'est que personne n'a regardé, pas qu'il n'y a
+        # rien (17 au 20/10/2026, plafond HikerAPI).
         texte = titre + ('\nAucun reel des comptes de VA du Discord au-dessus du seuil pour cette journée.'
                          if hors else
+                         f"\n**Collecte en pause** : {personne} depuis la fin de cette journée. "
+                         "Ses bangers ne sont pas connus."
+                         if en_pause else
                          '\nAucun reel au-dessus du seuil repéré dans les données disponibles pour cette journée.')
+    if en_pause and visibles:
+        texte += (f"\n-# Collecte en pause : {personne} depuis la fin de cette journée, "
+                  "la liste peut être incomplète.")
+    elif non_releves and not en_pause:
+        texte += (f"\n-# {non_releves} compte{'s' if non_releves > 1 else ''} sur {actifs} "
+                  f"non relevé{'s' if non_releves > 1 else ''} depuis la fin de cette journée : "
+                  f"{'leurs' if non_releves > 1 else 'ses'} reels n'ont pas été vus.")
     if any(it['etat'] == 'ignore' for it in record['reels'].values()):
         texte += '\n-# Certaines anciennes publications supprimées ont été conservées hors du récapitulatif.'
     if hors:
@@ -1732,6 +1795,28 @@ def textes_recap(record, salon=None):
                   "(bouton « 📷 Mes comptes »).")
     pages.append({'texte': texte.rstrip(), 'mentions': mentions})
     return pages
+
+
+def _collecte_de(s, jour) -> dict:
+    """couverture_releves pour le journal d'un salon, dite dans le journal du
+    bot : les comptes non relevés y sont nommés, jamais écartés en silence.
+    Une lecture ratée ne retient pas la journée : elle est notée et dite."""
+    try:
+        c = couverture_releves(s['identite'], jour)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning(f"[bangers] {s['libelle']} {jour} : relevés des comptes illisibles "
+                    f"({type(e).__name__}: {str(e)[:120]})")
+        return {'erreur': type(e).__name__}
+    nr = c['non_releves']
+    if nr:
+        log.log(logging.WARNING if not c['releves'] else logging.INFO,
+                f"[bangers] {s['libelle']} {jour} : "
+                + ('collecte en pause, ' if not c['releves'] else '')
+                + f"{len(nr)} compte(s) sur {len(nr) + c['releves']} non relevé(s) depuis la fin "
+                f"de la journée : " + ', '.join('@' + h for h in nr[:10])
+                + (' …' if len(nr) > 10 else '')
+                + (f" ; {len(c['bannis'])} banni(s) à part" if c['bannis'] else ''))
+    return c
 
 
 def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, strict_veille=False,
@@ -1744,7 +1829,9 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
     `discord_seulement` (plus aucun depuis le 06/10/2026), les comptes des VA
     du Discord (comptes_admis), relevés AVANT que la journée ne soit figée ;
     un reel d'un autre compte est écarté, compté et nommé dans le journal
-    (`hors_discord`), jamais en silence."""
+    (`hors_discord`), jamais en silence. De même, les comptes de l'identité
+    que personne n'a relevés après la journée (`collecte`) : un salon sans
+    aucun relevé dit « Collecte en pause », pas « aucun reel »."""
     s = _salon(salon)
     dossier = Path(s['dossier'])
     canal = int(s['channel_id'] or 0)
@@ -1804,6 +1891,7 @@ def publier_journee(jour, preparer, publier, recapituler, *, maintenant=None, st
                                  f"comptes sans VA du Discord FR : "
                                  + ', '.join('@' + h['compte'] for h in hors[:10])
                                  + (' …' if len(hors) > 10 else ''))
+                record['collecte'] = _collecte_de(s, jour)
                 record.update(format=FORMAT_DISCORD, selection_complete=True)
                 _sauver_journee(record, dossier)
             if record.get('preparation_apres', 0) > clock:
