@@ -525,8 +525,8 @@ try:
     check("journal : pull annulé écrit au journal", "annulé" in _l and "annule" in _l,
           _l.strip() or "(rien)")
 
-    # Anti-noyade : le poller tourne toutes les 2 min. Un état qui DURE ne doit
-    # pas écrire 720 lignes/jour (un journal noyé cache autant que le silence),
+    # Anti-noyade : le poller tourne toutes les 5 min. Un état qui DURE ne doit
+    # pas écrire 288 lignes/jour (un journal noyé cache autant que le silence),
     # mais un pull demandé À LA MAIN garde toujours sa ligne.
     _c = _FauxCog()
     _un = _journal(_annule, cog=_c)
@@ -537,6 +537,191 @@ try:
           _journal(_annule, cog=_c, toujours=True) != "")
 except Exception as _e:                                # pragma: no cover
     check("journal du poller : testable", False, repr(_e)[:120])
+
+
+print()
+print("=" * 70)
+print("7) Lecture des classeurs : en lot, et jamais sur un classeur en retard")
+print("=" * 70)
+# 14 au 21/10/2026 : chaque pull finissait en 429 (« Read requests per minute
+# per user ») : ~86 lectures par cycle pour une limite de 60. Puis, faute de
+# lecture, le push prenait un 429 pour un classeur disparu et tentait d'en
+# CRÉER un, refusé (« Drive storage quota exceeded », le compte de service n'a
+# aucun stockage).
+
+
+class _Err429(Exception):
+    def __init__(self):
+        super().__init__("APIError: [429]: Quota exceeded for quota metric 'Read requests'")
+        self.response = types.SimpleNamespace(status_code=429)
+
+
+class _FauxHttp:
+    """Le client HTTP de gspread : compte les lectures, sert des onglets."""
+
+    def __init__(self, livres, erreurs=None):
+        self.livres = livres            # sid -> {titre: values}
+        self.erreurs = erreurs or {}    # sid -> exception levée à la 1re lecture
+        self.lectures = []
+
+    def fetch_sheet_metadata(self, sid, params=None):
+        self.lectures.append(("meta", sid))
+        if sid in self.erreurs:
+            raise self.erreurs[sid]
+        return {"sheets": [{"properties": {"title": t}} for t in self.livres[sid]]}
+
+    def values_batch_get(self, sid, ranges, params=None):
+        self.lectures.append(("valeurs", sid, tuple(ranges)))
+        vals = self.livres[sid]
+        return {"valueRanges": [{"range": r, **({"values": vals[t]} if vals[t] else {})}
+                                for r, t in zip(ranges, vals)]}
+
+
+_ENT = ["username", "password", "email", "two_fa", "va", "notes"]
+_LIVRES = {
+    "S_LOLA": {"lola": [_ENT, ["u1", "MDP1", "a@x.io", "2FA1", "Andry", "n1"],
+                        ["u2", "MDP2"]],                      # ligne courte : l'API rogne
+               "lola Andry": [_ENT[:4] + ["notes"], ["u1", "MDP1", "a@x.io", "2FA1", "n1"]],
+               "Feuille 3": []},
+    "S_EMMA": {"emma": [_ENT, ["e1", "P"]]},
+}
+_orig = (ss.load_config, ss._client, dict(ss._last_hash))
+try:
+    _JB.state = etat_depart()
+    _JB.state["emma"] = {"vas": [], "accounts": [{"id": 9, "username": "e1", "va": "", "password": "P"}]}
+    ss.load_config = lambda: {"folder_id": "F", "sheets": {"lola": "S_LOLA", "emma": "S_EMMA"}}
+    for _i, _e in _JB.state.items():                   # les deux classeurs sont à jour
+        ss._last_hash[_i] = ss._entry_hash(_e)
+    _http = _FauxHttp(_LIVRES)
+    ss._client = lambda: types.SimpleNamespace(http_client=_http)
+    _lu = ss._pull_all_folder()
+    check("lot : deux lectures par classeur, quel que soit le nombre d'onglets",
+          len(_http.lectures) == 4 and [x[0] for x in _http.lectures] == ["meta", "valeurs"] * 2,
+          _http.lectures)
+    check("lot : chaque onglet lu sous son titre exact, guillemets compris",
+          ("valeurs", "S_LOLA", ("'lola'", "'lola Andry'", "'Feuille 3'")) in _http.lectures,
+          _http.lectures)
+    check("lot : même résultat que la lecture onglet par onglet",
+          [r["username"] for r in _lu.get("lola", [])] == ["u1", "u2"]
+          and _lu["lola"][1]["password"] == "MDP2" and _lu["lola"][1]["va"] == ""
+          and _lu["lola Andry"][0]["password"] == "MDP1" and _lu["Feuille 3"] == []
+          and _lu["lola"][0]["__cols__"] == _ENT and [r["username"] for r in _lu["emma"]] == ["e1"],
+          _lu)
+    _ref = ss._parse_ws(type("W", (), {"get_all_values": lambda s: _LIVRES["S_LOLA"]["lola"]})())
+    check("lot : _parse_ws (restauration) rend toujours la même chose",
+          _ref == _lu["lola"], _ref)
+
+    # Un 429 : pas de photo partielle, tout le pull attend (le poller recule).
+    _http = _FauxHttp(_LIVRES, erreurs={"S_EMMA": _Err429()})
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        _lu = ss._pull_all_folder()
+    check("429 : le pull rend None (Sheet indisponible), jamais une photo partielle",
+          _lu is None and "429" in _buf.getvalue(), (_lu, _buf.getvalue()))
+
+    # Un classeur fermé au compte de service : ignoré, MAIS dit.
+    _http = _FauxHttp(_LIVRES, erreurs={"S_EMMA": PermissionError()})
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        _lu = ss._pull_all_folder()
+    check("classeur inaccessible : les autres sont lus, et le journal le nomme",
+          _lu is not None and "lola" in _lu and "emma" not in _lu
+          and "illisible" in _buf.getvalue() and "emma" in _buf.getvalue(), (_lu, _buf.getvalue()))
+
+    # Le site a changé depuis le dernier push réussi de lola : son classeur est
+    # périmé, ses vieilles valeurs ne doivent pas revenir sur le site.
+    _JB.state["lola"]["accounts"][0]["password"] = "CORRIGE_SUR_LE_SITE"
+    check("en retard : lola détectée, emma non", ss.classeurs_en_retard() == ["lola"],
+          ss.classeurs_en_retard())
+    _http = _FauxHttp(_LIVRES)
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        _lu = ss._pull_all_folder()
+    check("en retard : classeur sauté (aucune lecture), dit au journal",
+          "lola" not in _lu and "emma" in _lu
+          and not [x for x in _http.lectures if x[1] == "S_LOLA"]
+          and "push en retard : lola" in _buf.getvalue(), (_lu, _http.lectures, _buf.getvalue()))
+    ss.pull_all = ss._pull_all_folder
+    with contextlib.redirect_stdout(io.StringIO()):
+        ss.pull_and_merge()
+    check("en retard : le mot de passe corrigé sur le site n'est pas écrasé",
+          comptes(_JB)["u1"]["password"] == "CORRIGE_SUR_LE_SITE", comptes(_JB)["u1"])
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        ss._pull_all_folder()
+    check("en retard : la ligne ne se répète pas à chaque passage", _buf.getvalue() == "",
+          _buf.getvalue())
+
+    # Push : un 429 à l'ouverture n'est PAS un classeur disparu.
+    _appels = []
+
+    def _ouvre_429(k):
+        _appels.append("open_by_key")
+        raise _Err429()
+
+    _gc = types.SimpleNamespace(
+        open_by_key=_ouvre_429,
+        open=lambda t: _appels.append("open") or (_ for _ in ()).throw(Exception("introuvable")),
+        list_spreadsheet_files=lambda folder_id=None: _appels.append("list") or [],
+        create=lambda *a, **k: _appels.append("create") or (_ for _ in ()).throw(
+            Exception("[403]: The user's Drive storage quota has been exceeded.")))
+    _cfg = {"folder_id": "F", "sheets": {"lola": "S_LOLA"}}
+    try:
+        ss._ensure_identity_sheet(_gc, "lola", _cfg)
+        _leve = None
+    except Exception as _x:
+        _leve = _x
+    check("push : 429 à l'ouverture -> l'erreur remonte, aucune création tentée",
+          isinstance(_leve, _Err429) and _appels == ["open_by_key"]
+          and _cfg["sheets"]["lola"] == "S_LOLA", (_leve, _appels))
+    _appels.clear()
+    _gc.open_by_key = lambda k: _appels.append("open_by_key") or (_ for _ in ()).throw(
+        PermissionError())
+    try:
+        ss._ensure_identity_sheet(_gc, "lola", _cfg)
+    except Exception:
+        pass
+    check("push : classeur vraiment inaccessible -> on le cherche encore (comportement gardé)",
+          _appels[:1] == ["open_by_key"] and "list" in _appels, _appels)
+    check("_erreur_passagere : 429, 503, coupure oui ; 403/404 non",
+          ss._erreur_passagere(_Err429())
+          and ss._erreur_passagere(types.SimpleNamespace(response=types.SimpleNamespace(status_code=503)))
+          and ss._erreur_passagere(ConnectionError("reset"))
+          and not ss._erreur_passagere(PermissionError())
+          and not ss._erreur_passagere(types.SimpleNamespace(response=types.SimpleNamespace(status_code=404))))
+finally:
+    ss.load_config, ss._client = _orig[0], _orig[1]
+    ss._last_hash.clear()
+    ss._last_hash.update(_orig[2])
+
+# Le poller : 5 min, et il recule après un Sheet indisponible.
+try:
+    from cogs.sheetssync import SheetsSync as _Cog2    # noqa: E402
+    check("poller : toutes les 5 min", _Cog2.poll.minutes == 5, _Cog2.poll.minutes)
+    _r = types.SimpleNamespace(_echecs=0, _a_sauter=0, _RECUL_MAX=_Cog2._RECUL_MAX)
+    _suite = []
+    for _ in range(6):
+        _Cog2._reculer(_r, True)
+        _suite.append(_r._a_sauter)
+    check("poller : recule 1, 2, 4, 8 passages puis plafonne à 1 h",
+          _suite == [1, 2, 4, 8, 12, 12], _suite)
+    _Cog2._reculer(_r, False)
+    check("poller : une lecture réussie remet le compteur à zéro", _r._echecs == 0)
+
+    # Un passage : les classeurs en retard sont repoussés AVANT la lecture.
+    _ordre = []
+    _o = (ss.classeurs_en_retard, ss.push_all, ss.pull_and_merge)
+    ss.classeurs_en_retard = lambda: ["lola"]
+    ss.push_all = lambda d, force=False: _ordre.append(("push", force)) or True
+    ss.pull_and_merge = lambda *a: _ordre.append("pull") or "res"
+    _rc = _Cog2._cycle()
+    ss.classeurs_en_retard = lambda: []
+    _Cog2._cycle()
+    ss.classeurs_en_retard, ss.push_all, ss.pull_and_merge = _o
+    check("passage : push des classeurs en retard (sans forcer) puis lecture ; rien à repousser = lecture seule",
+          _rc == "res" and _ordre == [("push", False), "pull", "pull"], _ordre)
+except Exception as _e:                                # pragma: no cover
+    check("poller : testable", False, repr(_e)[:160])
 
 
 print()

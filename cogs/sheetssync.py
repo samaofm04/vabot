@@ -1,7 +1,7 @@
 """cogs/sheetssync.py — Poller Sheet->site + commande /sheetsync (config/test).
 
 Le push site->Sheet est declenche par jailbreak._save (voir sheets_sync.push_all_async).
-Ici : un poller lit le Sheet toutes les 2 min et applique les changements dans
+Ici : un poller lit le Sheet toutes les 5 min et applique les changements dans
 jailbreak.json (pull_and_merge), + une commande OWNER pour configurer/tester.
 """
 import asyncio
@@ -15,17 +15,24 @@ import sheets_sync
 
 
 class SheetsSync(commands.Cog):
-    # Anti-noyade du journal : le poller tourne toutes les 2 min, donc un état
-    # QUI DURE (pause, Sheet illisible, état local illisible) écrirait 720
+    # Anti-noyade du journal : le poller tourne toutes les 5 min, donc un état
+    # QUI DURE (pause, Sheet illisible, état local illisible) écrirait 288
     # lignes par jour et noierait tout le reste — un journal illisible cache
     # aussi bien que le silence. Un message identique n'est réécrit qu'au bout
     # de 30 min ; un cycle qui CHANGE quelque chose est toujours écrit.
     _RELOG_S = 1800
+    # Après un Sheet indisponible (un 429 presque toujours), le poller saute
+    # 1, 2, 4, 8 puis 12 passages : jusqu'à une heure. Google compte les
+    # lectures à la minute ; relire aussitôt prolongeait le refus — 720 refus
+    # par jour, un par passage, du 14 au 21/10/2026.
+    _RECUL_MAX = 12
 
     def __init__(self, bot):
         self.bot = bot
         self._owner_id = None
         self._dernier_log = ("", 0.0)   # (message, horodatage) — cf. _RELOG_S
+        self._echecs = 0                # pulls indisponibles d'affilée
+        self._a_sauter = 0              # passages à sauter avant de relire
         if sheets_sync.is_configured():
             self.poll.start()
 
@@ -64,15 +71,42 @@ class SheetsSync(commands.Cog):
         self._dernier_log = (ligne, maintenant)
         print(ligne, flush=True)
 
-    @tasks.loop(minutes=2)
+    # 5 min, plus 2 : une édition faite dans le Sheet arrive un peu plus tard,
+    # et la limite Google (60 lectures/min) garde de la marge pour le push.
+    @tasks.loop(minutes=5)
     async def poll(self):
         if not sheets_sync.is_configured():
             return
+        if self._a_sauter > 0:
+            self._a_sauter -= 1
+            return
         try:
-            res = await asyncio.to_thread(sheets_sync.pull_and_merge)
+            res = await asyncio.to_thread(self._cycle)
             self._journal(res)
+            self._reculer(getattr(res, "outcome", "") == sheets_sync.PULL_INDISPO)
         except Exception as e:
             print(f"[sheetssync] poll: {e}", flush=True)
+
+    @staticmethod
+    def _cycle():
+        """Un passage, dans un fil : repousser d'abord les classeurs en retard
+        (push raté, ou redémarrage), puis lire. Le pull les saute tant qu'ils
+        le sont (sheets_sync.classeurs_en_retard) ; sans cette relance, un
+        classeur dont le push a échoué restait en retard jusqu'à la prochaine
+        sauvegarde du site, et ses éditions dans le Sheet n'arrivaient plus."""
+        if sheets_sync.classeurs_en_retard() and not sheets_sync.is_paused():
+            import jailbreak as jb
+            with jb.transaction():
+                frais = jb._load()
+            sheets_sync.push_all(frais, False)
+        return sheets_sync.pull_and_merge()
+
+    def _reculer(self, indispo: bool) -> None:
+        if not indispo:
+            self._echecs = 0
+            return
+        self._echecs += 1
+        self._a_sauter = min(2 ** (self._echecs - 1), self._RECUL_MAX)
 
     @poll.before_loop
     async def _before(self):
@@ -334,7 +368,7 @@ class SheetsSync(commands.Cog):
                 backup.write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
-            # Tombstones AVANT filtrage : sans elles le poller (2 min) ré-importait
+            # Tombstones AVANT filtrage : sans elles le poller ré-importait
             # depuis le Sheet tout ce que le reset venait de supprimer.
             for identity, entry in data.items():
                 if not isinstance(entry, dict):

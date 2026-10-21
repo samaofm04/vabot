@@ -459,19 +459,40 @@ try:
           and all(a["gid"] == ENT for a in f.appels[n_avant:])
           and f.appels[-1]["p"] == f"/channels/{SALONS[ENT]}/messages/e-h", f.appels[n_avant:])
 
-    # salon des quêtes introuvable : rien n'est noté, on réessaie
+    # salons illisibles (panne Discord) : rien n'est noté, on réessaie
     f = installer(Q, "p5b", pause=True)
     poser_etat(Q, {"postees": {f"{TW}:{AUJ}": "t-auj"}})
     f.reponses[("GET", f"/guilds/{TW}/channels")] = [(503, {"message": "panne"})]
     with journal() as j5c:
         Q.poster_quete(TW, AUJ)
-    check("salon introuvable : dit, rien noté, aucune modification",
-          "introuvable" in j5c.getvalue() and not f.de("PATCH") and not (etat(Q).get("pause_boutons")),
+    check("salons illisibles : dit, rien noté, aucune modification",
+          "illisibles" in j5c.getvalue() and not f.de("PATCH") and not (etat(Q).get("pause_boutons")),
           j5c.getvalue())
     with journal():
         Q.poster_quete(TW, AUJ)
     check("… et réessayé au passage suivant", len(f.de("PATCH")) == 1
           and ((etat(Q).get("pause_boutons") or {}).get(f"{TW}:{AUJ}") or {}).get("etat") == "retire")
+
+    # salon des quêtes SUPPRIMÉ (Threads, 13/10/2026) : la liste se lit, il n'y
+    # est plus. Noté une fois, puis plus aucun appel — avant, le démon
+    # réessayait toutes les 10 min, sans fin.
+    f = installer(Q, "p5d", pause=True)
+    poser_etat(Q, {"postees": {f"{TH}:{AUJ}": "h-auj", f"{TH}:{HIER}": "h-h"}})
+    f.reponses[("GET", f"/guilds/{TH}/channels")] = [(200, [{"id": "1", "name": "général"}])]
+    with journal() as j5d:
+        b = Q.retirer_boutons(TH)
+    tr = etat(Q).get("pause_boutons") or {}
+    check("salon supprimé : dit une fois, les deux quêtes notées « salon_absent », aucun PATCH",
+          "absent de" in j5d.getvalue() and "plus d'essai" in j5d.getvalue() and not f.de("PATCH")
+          and {k: v["etat"] for k, v in tr.items()} == {f"{TH}:{AUJ}": "salon_absent",
+                                                        f"{TH}:{HIER}": "salon_absent"}
+          and b["absents"] == 2 and b["echecs"] == 0, (j5d.getvalue(), tr, b))
+    n_avant = len(f.appels)
+    with journal() as j5e:
+        Q.retirer_boutons(TH)
+        Q.retirer_boutons(TH)
+    check("… puis plus aucun appel à Discord ni ligne au journal",
+          len(f.appels) == n_avant and not j5e.getvalue().strip(), (f.appels[n_avant:], j5e.getvalue()))
 
     # un manager tranche PENDANT que le démon modifie les messages
     f = installer(Q, "p5c", pause=True)

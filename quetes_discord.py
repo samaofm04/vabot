@@ -160,9 +160,16 @@ def _verifiable(q: Dict[str, Any]) -> bool:
 
 # ─── poster la quête ─────────────────────────────────────────────────────
 def _salon_quetes(gid: str) -> str:
+    return _chercher_salon_quetes(gid) or ""
+
+
+def _chercher_salon_quetes(gid: str) -> Optional[str]:
+    """L'id du salon des quêtes ; "" s'il n'existe pas, None si la liste des
+    salons n'a pas pu être lue. Le retrait des boutons a besoin de la
+    différence : un salon supprimé ne reviendra pas, une lecture ratée si."""
     code, rep = _api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(rep, list):
-        return ""
+        return None
     for c in rep:
         if c.get("name") == SALON_QUETES:
             return str(c["id"])
@@ -304,11 +311,12 @@ def retirer_boutons(gid: str) -> Dict[str, int]:
     Discord ne laisse modifier un message qu'à son auteur.
 
     Trace dans data/quetes.json (« pause_boutons ») : un message retiré ne
-    l'est pas deux fois. Un échec passager (salon introuvable, réseau,
+    l'est pas deux fois. Un échec passager (salons illisibles, réseau,
     limite Discord) n'est PAS noté : le passage suivant du démon réessaie.
-    Deux refus définitifs sont notés, et dits : le message n'existe plus
-    (404), ou il a été posté par un autre bot (403, code 50005 — Siri, avant
-    que Threads ait le sien) ; un clic y répond la pause de toute façon.
+    Trois refus définitifs sont notés, et dits : le salon des quêtes a été
+    supprimé, le message n'existe plus (404), ou il a été posté par un autre
+    bot (403, code 50005 — Siri, avant que Threads ait le sien) ; un clic y
+    répond la pause de toute façon.
     """
     gid = str(gid)
     bilan = {"retires": 0, "absents": 0, "autre_bot": 0, "echecs": 0, "illisibles": 0}
@@ -338,11 +346,22 @@ def retirer_boutons(gid: str) -> Dict[str, int]:
     a_faire.sort(reverse=True)
     from verif_discord import sur_serveur
     with sur_serveur(gid):
-        salon = _salon_quetes(gid)
-        if not salon:
+        salon = _chercher_salon_quetes(gid)
+        if salon is None:
             bilan["echecs"] += len(a_faire)
-            print(f"[quetes] pause : salon {SALON_QUETES} introuvable sur {gid} — "
+            print(f"[quetes] pause : salons de {gid} illisibles — "
                   f"{len(a_faire)} bouton(s) à retirer, nouvel essai au prochain passage", flush=True)
+            _noter_retraits(resultats)
+            return bilan
+        if not salon:
+            # Le salon a été supprimé (Threads, 13/10/2026) : ses messages et
+            # leurs boutons sont partis avec lui. Sans cette trace, le démon
+            # réessayait toutes les 10 min — 1 114 lignes en une semaine.
+            for _jour, cle, _mid in a_faire:
+                resultats[cle] = "salon_absent"
+            bilan["absents"] += len(a_faire)
+            print(f"[quetes] pause : salon {SALON_QUETES} absent de {gid} — "
+                  f"{len(a_faire)} quête(s) notée(s) sans bouton, plus d'essai", flush=True)
             _noter_retraits(resultats)
             return bilan
         for jour, cle, mid in a_faire:

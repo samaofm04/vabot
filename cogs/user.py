@@ -6210,12 +6210,36 @@ class UserCog(commands.Cog):
             ephemeral=True)
         await self._notify_payment(interaction, info, None)
 
-    async def _save_crypto_and_ask_screenshot(self, interaction, info):
-        """Enregistre l'adresse USDC puis demande au VA de DEPOSER une capture d'ecran
-        dans le salon (les modals Discord n'acceptent pas d'image) ; l'attache ensuite
-        au moyen de paiement + notif."""
+    async def _relire_message(self, msg):
+        """(texte, pieces jointes) d'un message du salon.
+
+        Sans l'intention Message Content (main.py ne la demande pas), Discord
+        livre les messages d'un salon SANS texte ni pieces jointes. On relit
+        donc un message vide une fois par l'API, comme cogs/bases_identite.py :
+        elle les rend si l'intention est cochee dans le portail."""
+        texte = msg.content or ""
+        pieces = list(getattr(msg, "attachments", None) or [])
+        if texte.strip() or pieces:
+            return texte, pieces
+        try:
+            m2 = await msg.channel.fetch_message(msg.id)
+            return (m2.content or ""), list(getattr(m2, "attachments", None) or [])
+        except Exception as e:
+            print(f"[paiement] message {getattr(msg, 'id', '?')} non relu : "
+                  f"{type(e).__name__}: {e}", flush=True)
+            return "", []
+
+    async def _save_crypto_and_ask_screenshot(self, interaction, info, capture=None):
+        """Enregistre l'adresse USDC et sa capture d'ecran.
+
+        La capture vient du formulaire (`capture`). Sinon, on la demande dans
+        le salon et on attend 5 min ; un message que Discord livre vide est
+        relu par l'API, et s'il reste vide le bot le DIT au lieu d'attendre
+        pour rien. L'attache ensuite au moyen de paiement + notif."""
         import asyncio as _a
         uid = str(interaction.user.id)
+        if capture is not None:
+            info["screenshot"] = capture.url
         if not self._store_payment(uid, info):
             await interaction.response.send_message(
                 "❌ **Échec de l'enregistrement** de ton adresse — rien n'a été "
@@ -6223,6 +6247,13 @@ class UserCog(commands.Cog):
                 ephemeral=True)
             return
         chain = info.get("chain", "")
+        if capture is not None:
+            await interaction.response.send_message(
+                f"✅ Adresse enregistrée : **USDC · {chain}**\n`{info.get('address', '')}`\n\n"
+                "📸 Capture reçue, merci ! Ton moyen de paiement est **complet**. 💸",
+                ephemeral=True)
+            await self._notify_payment(interaction, info, screenshot_att=capture)
+            return
         await interaction.response.send_message(
             f"✅ Adresse enregistrée : **USDC · {chain}**\n`{info.get('address', '')}`\n\n"
             "📸 **Dernière étape : envoie une CAPTURE D'ÉCRAN de ton wallet dans ce salon** "
@@ -6230,12 +6261,24 @@ class UserCog(commands.Cog):
             ephemeral=True)
 
         def _check(m):
+            # Pas de filtre sur le contenu : sans l'intention Message Content
+            # il arrive vide, et le filtre « image ou skip » ne laissait rien
+            # passer. On trie apres relecture.
             return (m.author.id == interaction.user.id
-                    and getattr(m.channel, "id", None) == getattr(interaction.channel, "id", None)
-                    and (bool(m.attachments) or (m.content or "").strip().lower() == "skip"))
+                    and getattr(m.channel, "id", None) == getattr(interaction.channel, "id", None))
 
+        boucle = _a.get_running_loop()
+        fin = boucle.time() + 300
+        msg, pieces, texte = None, [], ""
         try:
-            msg = await interaction.client.wait_for("message", check=_check, timeout=300)
+            while True:
+                reste = fin - boucle.time()
+                if reste <= 0:
+                    raise _a.TimeoutError
+                msg = await interaction.client.wait_for("message", check=_check, timeout=reste)
+                texte, pieces = await self._relire_message(msg)
+                if pieces or texte.strip().lower() == "skip" or not texte.strip():
+                    break
         except _a.TimeoutError:
             try:
                 await interaction.followup.send(
@@ -6246,8 +6289,23 @@ class UserCog(commands.Cog):
                 pass
             await self._notify_payment(interaction, info, None)
             return
-        if msg.attachments:
-            att = msg.attachments[0]
+        if not pieces and not texte.strip():
+            # Le VA a bien envoye quelque chose, mais Discord le cache au bot,
+            # meme relu. Attendre encore ne servirait a rien : le dire.
+            print(f"[paiement] capture de {uid} illisible (message {getattr(msg, 'id', '?')} "
+                  f"vide meme relu : intention Message Content absente)", flush=True)
+            try:
+                await interaction.followup.send(
+                    "⚠️ Je ne vois pas ton image : Discord me la cache dans ce salon. "
+                    "Ton adresse est **enregistrée**. Pour la capture, refais 💸 Mon paiement "
+                    "et dépose-la dans le formulaire (champ 📸).",
+                    ephemeral=True)
+            except Exception:
+                pass
+            await self._notify_payment(interaction, info, None)
+            return
+        if pieces:
+            att = pieces[0]
             info["screenshot"] = att.url
             self._store_payment(uid, info)  # re-ecrit avec le lien de la capture
             try:
@@ -9740,7 +9798,7 @@ class AssistanceModal(discord.ui.Modal, title="🆘 Demande d'aide"):
 # ============ Moyen de paiement du VA ============
 # Le VA declare comment il veut etre paye : crypto (USDC/ETH/SOL -> adresse) ou
 # TapTap mobile money (reseau + numero). Stocke dans users.json[uid]["payment"].
-# Flux : bouton -> select methode -> (crypto: modal adresse) / (taptap: select
+# Flux : bouton -> select methode -> (crypto: modal adresse + capture) / (taptap: select
 # reseau -> modal numero) -> _save_payment.
 # Reseaux (chaines) sur lesquels le VA peut recevoir de l'USDC.
 _USDC_CHAINS = [
@@ -9820,15 +9878,25 @@ class _CryptoAddressModal(discord.ui.Modal):
         self.cog = cog
         self.chain = chain
         self.addr = discord.ui.TextInput(
-            label=f"Ton adresse USDC ({chain})",
             placeholder="Colle ici ton adresse de wallet",
             required=True, max_length=200)
-        self.add_item(self.addr)
+        self.add_item(discord.ui.Label(text=f"Ton adresse USDC ({chain})",
+                                       component=self.addr))
+        # La capture se depose DANS le formulaire. Demandee ensuite dans le
+        # salon, elle n'arrivait jamais : sans l'intention Message Content,
+        # Discord livre au bot les messages du salon sans pieces jointes, et
+        # l'attente finissait toujours en « Pas de capture reçue ».
+        self.capture = discord.ui.FileUpload(required=False, max_values=1)
+        self.add_item(discord.ui.Label(
+            text="📸 Capture de ton wallet",
+            description="Une capture d'écran de ton wallet (facultatif)",
+            component=self.capture))
 
     async def on_submit(self, interaction: discord.Interaction):
         await self.cog._save_crypto_and_ask_screenshot(interaction, {
             "method": "USDC", "chain": self.chain,
-            "address": str(self.addr.value or "").strip()})
+            "address": str(self.addr.value or "").strip()},
+            capture=(list(self.capture.values or []) or [None])[0])
 
 
 class _MobileNumberModal(discord.ui.Modal):
@@ -11178,12 +11246,13 @@ async def ensure_action_emojis(guild) -> dict:
         return out
     presents = {e.name: e for e in getattr(guild, "emojis", [])}
     dossier = Path(__file__).resolve().parent.parent / "emojis"
+    plein = _serveur_plein(guild)
     for cle, nom in _ICONES_ACTIONS.items():
         if nom in presents:
             out[cle] = presents[nom]
             continue
         f = dossier / f"{nom}.png"
-        if not f.exists():
+        if not f.exists() or plein:
             continue
         try:
             data = f.read_bytes()
@@ -11196,6 +11265,13 @@ async def ensure_action_emojis(guild) -> dict:
             # les doublons de nom -- quatre emplacements pour une image.
             presents[nom] = out[cle]
         except Exception as e:
+            if getattr(e, "code", None) == 30008:
+                # Les icones suivantes seraient refusees pareil (voir
+                # _SERVEURS_PLEINS) : on s'arrete et on le retient.
+                plein = True
+                _noter_plein(guild, sorted({n for n in _ICONES_ACTIONS.values()
+                                            if n not in presents}))
+                continue
             log.warning(f"emoji action {nom}: {e}")
     return out
 
@@ -11240,6 +11316,52 @@ def _libelle_sans_emoji(label: str):
 #: doit pouvoir etre recree.
 _EMOJIS_CREES = {}
 _EMOJIS_CREES_TTL_S = 300
+
+
+#: Serveurs ou Discord refuse les creations faute de place (30008) et ou
+#: _liberer_emojis n'a rien trouve a supprimer : {serveur: (limite, nombre
+#: d'emojis statiques, quand)}. Sans ca, chaque redessin redemandait les
+#: memes emojis : sur le Spam (50/50, tous utiles), 4 refus par passage, et
+#: Discord a fini par imposer une heure d'attente a la creation suivante --
+#: le redessin restait bloque. On reessaie quand le serveur change (une
+#: place liberee, un boost) ou au bout de _SERVEUR_PLEIN_TTL_S : une model
+#: sortie des menus libere une place, mais seul _liberer_emojis la reprend.
+_SERVEURS_PLEINS = {}
+_SERVEUR_PLEIN_TTL_S = 6 * 3600
+
+
+def _compte_emojis(guild) -> tuple:
+    """(limite, emojis statiques) d'apres le cache de la passerelle."""
+    limite = int(getattr(guild, "emoji_limit", 50) or 50)
+    statiques = sum(1 for e in (getattr(guild, "emojis", None) or [])
+                    if not getattr(e, "animated", False))
+    return limite, statiques
+
+
+def _serveur_plein(guild) -> bool:
+    """Vrai si le serveur a deja refuse faute de place et que rien n'a bouge
+    depuis. Lecture seule, aucun appel reseau."""
+    gid = getattr(guild, "id", None)
+    vu = _SERVEURS_PLEINS.get(gid)
+    if vu is None:
+        return False
+    if (vu[:2] != _compte_emojis(guild)
+            or time.monotonic() - vu[2] > _SERVEUR_PLEIN_TTL_S):
+        _SERVEURS_PLEINS.pop(gid, None)
+        return False
+    return True
+
+
+def _noter_plein(guild, sans_icone) -> None:
+    """Retient le refus, et le dit UNE fois par etat du serveur."""
+    gid = getattr(guild, "id", None)
+    limite, statiques = _compte_emojis(guild)
+    if gid not in _SERVEURS_PLEINS:
+        log.warning("emojis : %s plein (%d/%d), rien a liberer -- %d icone(s) "
+                    "absente(s) : %s. Plus d'essai tant que le serveur ne change pas.",
+                    getattr(guild, "name", "?"), statiques, limite, len(sans_icone),
+                    ", ".join(str(x) for x in sans_icone))
+    _SERVEURS_PLEINS[gid] = (limite, statiques, time.monotonic())
 
 
 def _emojis_du_serveur(guild) -> dict:
@@ -11406,21 +11528,24 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
     manquants = [m for m in models
                  if _identity_emoji_name(m) not in have and _identity_pp_file(m)]
     try:
-        limite = int(getattr(guild, "emoji_limit", 50) or 50)
-        statiques = sum(1 for e in (getattr(guild, "emojis", None) or [])
-                        if not getattr(e, "animated", False))
+        limite, statiques = _compte_emojis(guild)
         manque_place = len(manquants) - max(0, limite - statiques)
     except Exception:                                        # noqa: BLE001
         manque_place = 0
-    if manquants and manque_place > 0:
-        await _liberer_emojis(guild, manque_place)
+    plein = bool(manquants) and _serveur_plein(guild)
+    if manquants and manque_place > 0 and not plein:
+        liberees = await _liberer_emojis(guild, manque_place)
+        if not liberees and manque_place >= len(manquants):
+            # Aucune place, et aucune a faire : chaque creation serait refusee.
+            plein = True
+            _noter_plein(guild, manquants)
     for m in models:
         name = _identity_emoji_name(m)
         if name in have:
             out[m] = have[name]
             continue
         src = _identity_pp_file(m)
-        if not src:
+        if not src or plein:
             continue
         try:
             from PIL import Image
@@ -11438,8 +11563,12 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
             except discord.HTTPException as e:
                 # 30008 = serveur plein alors que notre compte disait le
                 # contraire (cache en retard) : une place, un second essai.
-                if getattr(e, "code", None) != 30008 or not await _liberer_emojis(guild, 1):
+                if getattr(e, "code", None) != 30008:
                     raise
+                if not await _liberer_emojis(guild, 1):
+                    plein = True
+                    _noter_plein(guild, [x for x in manquants if x not in out])
+                    continue
                 out[m] = await guild.create_custom_emoji(
                     name=name, image=data, reason=raison)
             _EMOJIS_CREES[(getattr(guild, "id", None), name)] = (out[m], time.monotonic())

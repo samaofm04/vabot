@@ -324,8 +324,15 @@ def _ensure_identity_sheet(gc, identity: str, cfg: dict):
     if sid:
         try:
             return gc.open_by_key(sid)
-        except Exception:
-            pass  # supprimé / inaccessible -> on retente
+        except Exception as e:
+            # Un 429 ne dit pas que le classeur a disparu. Le prendre pour une
+            # disparition menait à gc.create(), refusé : le compte de service
+            # n'a aucun stockage Drive (limite 0). D'où les 428 « Drive storage
+            # quota exceeded » relevés en 41 h sur les 7 classeurs, alors
+            # qu'aucun Drive n'est plein.
+            if _erreur_passagere(e):
+                raise
+            # supprimé / inaccessible -> on retente
     title = f"VA JB — {identity}"
     # 1) RÉUTILISE un classeur EXISTANT (créé par l'user dans le dossier partagé) ->
     #    AUCUNE création, donc pas de blocage "quota compte de service". Tolérant sur
@@ -924,7 +931,10 @@ def pull_all() -> dict | None:
 
 
 def _parse_ws(ws) -> list:
-    values = ws.get_all_values()
+    return _parse_values(ws.get_all_values())
+
+
+def _parse_values(values) -> list:
     if not values:
         return []
     header = [str(h).strip().lower() for h in values[0]]
@@ -942,24 +952,102 @@ def _parse_ws(ws) -> list:
     return accts
 
 
+def _erreur_passagere(e) -> bool:
+    """429, 5xx, réseau : le classeur existe toujours, Google refuse pour
+    l'instant. Le distinguer d'un classeur supprimé ou fermé au compte de
+    service, qui, lui, ne reviendra pas tout seul."""
+    if isinstance(e, PermissionError):      # gspread : 403 sur open_by_key
+        return False
+    code = getattr(getattr(e, "response", None), "status_code", None)
+    if isinstance(code, int):
+        return code == 429 or code >= 500
+    s = str(e)
+    return ("429" in s or "Quota exceeded" in s or "RESOURCE_EXHAUSTED" in s
+            or isinstance(e, OSError))       # requests : coupure, délai
+
+
+def classeurs_en_retard() -> list:
+    """Les identités (minuscules) dont le site a changé depuis le dernier push
+    réussi : leur classeur décrit un état PLUS VIEUX que le site.
+
+    Le pull les saute. Sans ça, un push raté (quota Google) laissait un
+    classeur périmé, et le pull suivant y lisait les anciennes valeurs comme
+    des éditions faites dans le Sheet : un mot de passe ou une 2FA corrigés
+    sur le site revenaient en arrière. Après un redémarrage, tant que le push
+    initial n'a pas abouti, tout est en retard : c'est voulu (push d'abord)."""
+    try:
+        import jailbreak as jb
+        data = jb._load()
+    except Exception:
+        return []
+    classeurs = {str(k).strip().lower() for k in (load_config().get("sheets") or {})}
+    return [str(i).strip().lower() for i, e in (data or {}).items()
+            if isinstance(e, dict) and str(i).strip().lower() in classeurs
+            and _last_hash.get(i) != _entry_hash(e)]
+
+
 def _pull_all_folder() -> dict | None:
     """Lit chaque classeur par identité -> {titre_onglet: rows}. Les titres restent
-    le nom de l'identité (compat pull_and_merge)."""
+    le nom de l'identité (compat pull_and_merge).
+
+    DEUX lectures par classeur, quel que soit le nombre d'onglets : la liste
+    des onglets, puis toutes leurs valeurs d'un coup (values:batchGet). Avant,
+    open_by_key + worksheets() + une lecture PAR onglet : ~86 lectures par
+    cycle (jessye a un onglet par VA, 42), pour une limite Google de 60 par
+    minute — chaque pull de la journée finissait en 429, 720 par jour, et le
+    sens Sheet -> site ne passait plus du tout."""
+    from gspread.utils import absolute_range_name
     cfg = load_config()
     try:
         gc = _client()
         out = {}
+        en_retard = set(classeurs_en_retard())
+        sautes, illisibles = [], []
         for key, sid in (cfg.get("sheets") or {}).items():
+            if str(key).strip().lower() in en_retard:
+                sautes.append(key)
+                continue
             try:
-                sh = gc.open_by_key(sid)
-            except Exception:
+                meta = gc.http_client.fetch_sheet_metadata(
+                    sid, params={"fields": "sheets.properties.title"})
+            except Exception as e:
+                if _erreur_passagere(e):
+                    raise           # un quota : tout le pull attend, pas une photo partielle
+                illisibles.append(f"{key} ({type(e).__name__})")
                 continue  # classeur supprimé / inaccessible -> ignoré (pas de wipe)
-            for ws in sh.worksheets():
-                out[ws.title.strip()] = _parse_ws(ws)
+            titres = [s["properties"]["title"] for s in (meta.get("sheets") or [])]
+            if not titres:
+                continue
+            rep = gc.http_client.values_batch_get(
+                sid, [absolute_range_name(t) for t in titres])
+            plages = rep.get("valueRanges") or []
+            for i, t in enumerate(titres):
+                vals = plages[i].get("values") if i < len(plages) else None
+                out[t.strip()] = _parse_values(vals or [])
+        if sautes or illisibles:
+            msg = []
+            if sautes:
+                msg.append(f"{len(sautes)} classeur(s) sauté(s), push en retard : {', '.join(sorted(sautes))}")
+            if illisibles:
+                msg.append(f"{len(illisibles)} illisible(s) : {', '.join(illisibles)}")
+            _dire_une_fois("[sheets_sync] pull : " + " ; ".join(msg))
         return out
     except Exception as e:
         print(f"[sheets_sync] pull_all_folder: {e}", flush=True)
         return None
+
+
+#: Dernière ligne « classeurs sautés » écrite, et quand : le poller repasse
+#: toutes les 5 min, un état qui dure ne réécrit sa ligne que toutes les 30 min.
+_DIT = {"ligne": "", "quand": 0.0}
+
+
+def _dire_une_fois(ligne: str) -> None:
+    maintenant = time.time()
+    if ligne == _DIT["ligne"] and maintenant - _DIT["quand"] < 1800:
+        return
+    _DIT.update(ligne=ligne, quand=maintenant)
+    print(ligne, flush=True)
 
 
 def _pull_all_single() -> dict | None:
