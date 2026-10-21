@@ -223,9 +223,11 @@ def _fiches_a_ranger(bot, users) -> dict:
     garde = {}
     for uid, data in (users or {}).items():
         if str(uid) in pending:
+            e = pending.get(str(uid)) or {}
             _signaler_une_fois(("parti", str(uid)), logging.INFO,
-                               "auto_sort : fiche %s ignoree, VA parti (suppression du ticket le %s)",
-                               uid, str((pending.get(str(uid)) or {}).get("delete_at", "?"))[:16])
+                               "auto_sort : fiche %s ignoree, VA parti (%s)", uid,
+                               "salon garde" if e.get("garder") else
+                               f"suppression du ticket le {str(e.get('delete_at', '?'))[:16]}")
             continue
         cid = data.get("channel_id") if isinstance(data, dict) else None
         ch = bot.get_channel(int(cid)) if (bot is not None and str(cid or "").isdigit()) else None
@@ -237,6 +239,113 @@ def _fiches_a_ranger(bot, users) -> dict:
             continue
         garde[uid] = data
     return garde
+
+
+# ─── Le VA parti de Va IG ─────────────────────────────────────────────────
+# Proprietaire, 21/10/2026 : « Oui, garder le salon ». Sur Va IG, le salon
+# d'un VA parti n'est plus supprime 7 jours apres : sa fiche est marquee
+# « parti » (comme les tickets Twitter / Threads, tickets_discord.marquer_parti),
+# le salon reste tel quel et un message le dit. Son entree de
+# pending_deletions.json reste, sans date (« garder ») : liens_fr.couper_partis
+# y lit les partis de Va IG pour couper leur lien -- desactive, jamais
+# supprime, rendu s'il revient avec son role de model.
+
+def partis_fr() -> dict:
+    """{uid : heure ou son depart a ete constate} des VA partis de Va IG."""
+    return {str(u): float(e.get("parti") or 0) for u, e in (load_pending() or {}).items()
+            if isinstance(e, dict) and e.get("garder")}
+
+
+async def marquer_parti_fr(guild, uid, nom, channel_id) -> bool:
+    """Le VA a quitte Va IG : fiche marquee, entree gardee pour couper son
+    lien, ticket prevenu (sans mention). Rien n'est supprime. Faux s'il
+    etait deja marque."""
+    uid = str(uid)
+    pending = load_pending() or {}
+    if (pending.get(uid) or {}).get("garder"):
+        return False
+    quand = int(time.time())
+    pending[uid] = {"channel_id": int(channel_id), "guild_id": guild.id,
+                    "user_name": str(nom or uid), "parti": quand, "garder": True}
+    save_pending(pending)
+    users = load_users()
+    if isinstance(users.get(uid), dict):
+        users[uid]["parti"] = {"quand": quand}
+        users[uid].pop("revenu", None)
+        save_users(users)
+    ch = guild.get_channel(int(channel_id))
+    if ch is not None:
+        try:
+            await ch.send(f"👋 <@{uid}> a quitté le serveur (constaté le **{time.strftime('%d/%m/%Y')}**).\n"
+                          "🚫 Son lien est désactivé, pas supprimé : il est réactivable s'il revient.\n"
+                          "Ce salon reste tel quel.",
+                          allowed_mentions=discord.AllowedMentions.none())
+        except Exception as e:                               # noqa: BLE001
+            log.warning("depart de %s : message non poste dans son ticket (%s)", uid, type(e).__name__)
+    log.info("VA %s (%s) parti de %s : salon %s garde, fiche marquee", uid, nom, guild.name, channel_id)
+    return True
+
+
+async def marquer_revenu_fr(guild, member) -> bool:
+    """Revenu sur Va IG : la marque « parti » tombe ; son lien revient en
+    service avec son role de model (liens_fr.aligner). Faux s'il n'etait pas
+    marque parti."""
+    uid = str(member.id)
+    pending = load_pending() or {}
+    e = pending.get(uid)
+    if not (isinstance(e, dict) and e.get("garder")):
+        return False
+    pending.pop(uid, None)
+    save_pending(pending)
+    users = load_users()
+    if isinstance(users.get(uid), dict):
+        users[uid].pop("parti", None)
+        users[uid]["revenu"] = int(time.time())
+        save_users(users)
+    ch = guild.get_channel(int(e.get("channel_id") or 0))
+    if ch is not None:
+        try:
+            await ch.send(f"👋 <@{uid}> est de retour sur le serveur. Son lien revient en service "
+                          "avec son rôle de model.", allowed_mentions=discord.AllowedMentions.none())
+        except Exception as x:                               # noqa: BLE001
+            log.warning("retour de %s : message non poste dans son ticket (%s)", uid, type(x).__name__)
+    log.info("VA %s revenu sur %s", uid, guild.name)
+    return True
+
+
+async def suivre_departs_fr(bot, guild) -> list:
+    """Les VA de Va IG partis sans que on_member_remove le voie (bot arrete,
+    ou 3usg, dont l'entree a ete retiree a la main le 21/10/2026) : absents du
+    cache, confirmes par Discord (10007 Unknown Member), marques partis. Rend
+    les uid marques."""
+    deja = partis_fr()
+    marques = []
+    for uid, f in list((load_users() or {}).items()):
+        if not (str(uid).isdigit() and isinstance(f, dict) and f.get("channel_id")):
+            continue
+        if uid in deja or guild.get_channel(int(f["channel_id"])) is None:
+            continue
+        if guild.get_member(int(uid)) is not None:
+            continue
+        try:
+            await guild.fetch_member(int(uid))
+            continue                  # le cache n'etait pas a jour : il est la
+        except discord.NotFound as e:
+            if getattr(e, "code", 0) != 10007:
+                continue
+        except Exception as e:                               # noqa: BLE001
+            log.warning("depart de %s non verifie (%s)", uid, type(e).__name__)
+            continue
+        # son pseudo : liens_fr.aligner retrouve par lui un lien hors registre
+        nom = f.get("discord_username")
+        if not nom and bot is not None:
+            try:
+                nom = (bot.get_user(int(uid)) or await bot.fetch_user(int(uid))).name
+            except Exception:                                # noqa: BLE001
+                nom = None
+        if await marquer_parti_fr(guild, uid, nom or uid, f["channel_id"]):
+            marques.append(uid)
+    return marques
 
 
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
@@ -2722,6 +2831,11 @@ class Welcome(commands.Cog):
         if member.bot:
             return
         # Si l'user avait une suppression planifiee, l'annuler (il est revenu)
+        if _serveur_fr(member.guild):
+            try:
+                await marquer_revenu_fr(member.guild, member)
+            except Exception as e:                           # noqa: BLE001
+                log.warning(f"on_member_join : retour de {member.id} non note ({type(e).__name__}: {e})")
         pending = load_pending()
         if str(member.id) in pending:
             del pending[str(member.id)]
@@ -3069,6 +3183,10 @@ class Welcome(commands.Cog):
             log.info(f"on_member_remove: {member.id} quitte {member.guild.id} mais son salon "
                      "est sur un autre serveur -> pas de suppression planifiee")
             return
+        if _serveur_fr(member.guild):
+            # Va IG : le salon reste, la fiche est marquee « parti »
+            await marquer_parti_fr(member.guild, member.id, member.name, data["channel_id"])
+            return
         cfg = load_welcome_config()
         days = cfg.get("cleanup_days_after_leave", 7)
         delete_at = datetime.now(timezone.utc) + timedelta(days=days)
@@ -3084,13 +3202,24 @@ class Welcome(commands.Cog):
 
     @tasks.loop(hours=1)
     async def check_pending_deletions(self):
-        """Verifie chaque heure les suppressions a effectuer."""
+        """Verifie chaque heure les suppressions a effectuer. Va IG : aucune,
+        les departs y sont marques (suivre_departs_fr), le salon reste."""
+        for guild in list(self.bot.guilds):
+            if _serveur_fr(guild):
+                try:
+                    marques = await suivre_departs_fr(self.bot, guild)
+                    if marques:
+                        log.info(f"departs constates sur {guild.name} : {marques}")
+                except Exception as e:                       # noqa: BLE001
+                    log.warning(f"departs de {guild.name} : {type(e).__name__}: {e}")
         pending = load_pending()
         if not pending:
             return
         now = datetime.now(timezone.utc)
         to_remove = []
         for user_id, data in list(pending.items()):
+            if isinstance(data, dict) and data.get("garder"):
+                continue      # VA parti de Va IG : salon et fiche gardes
             try:
                 delete_at = datetime.fromisoformat(data["delete_at"])
             except Exception:
@@ -3744,6 +3873,9 @@ class Welcome(commands.Cog):
             return
         lines = []
         for uid, data in pending.items():
+            if isinstance(data, dict) and data.get("garder"):
+                lines.append(f"• `{data.get('user_name', uid)}` (id: {uid}) → parti, **salon gardé**")
+                continue
             try:
                 delete_at = datetime.fromisoformat(data["delete_at"])
                 delta = delete_at - datetime.now(timezone.utc)
