@@ -39,6 +39,8 @@ message éphémère de plus, avec le même numéro. Le nouveau message efface
 désormais le précédent (son jeton d'interaction, gardé 15 min, le permet) ;
 les boutons d'un message le changent sur place.
 """
+import functools
+import hashlib
 import os
 import threading
 import time
@@ -76,6 +78,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "pays": "187", "drapeau": "🇺🇸",
         "quota": 3,
         "titre": "Numéro Instagram",
+        # Propriétaire, 21/10/2026, captures à l'appui : « comme ça », la carte
+        # numéro des salons -numero-mail d'Instagram (cogs/numeros.PanneauNumero).
+        "style": "insta",
+        "icone": "numeros/numero_instagram.png",  # sous static/ (copie de emojis/)
     },
 }
 
@@ -224,8 +230,9 @@ def _vue(lignes: List[str], boutons: Optional[List[Dict[str, Any]]] = None) -> L
     return [{"type": 17, "accent_color": BLEU, "components": corps}]
 
 
-def _prendre_bouton() -> Dict[str, Any]:
-    return _bouton("prendre", "Prendre un numéro", "📱", 3)
+def _prendre_bouton(conf: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    # Bleu sur la carte Instagram : la place du « Redemander un code ».
+    return _bouton("prendre", "Prendre un numéro", "📱", 1 if _insta(conf) else 3)
 
 
 #: Le panneau est un formulaire DÉJÀ DÉROULÉ, ses cases vides avant le clic
@@ -249,7 +256,57 @@ def _numero(a: Dict[str, Any]) -> str:
     return "`%s`" % "".join(str(a.get("valeur") or "?").split())
 
 
+# ─── La carte Instagram (Threads) ─────────────────────────────────────────
+# Propriétaire, 21/10/2026, sur deux captures de la carte des salons
+# -numero-mail : « comme ça de base, si y a pas de num ça met …. en attente »,
+# et « ça doit tenir en 1 truc ». UNE carte, rose, le numéro en gros, le
+# drapeau et l'état dessous, l'icône à droite, une rangée de boutons ; elle
+# change d'état sur place. Dans le salon, la carte vide ; au clic, la carte du
+# VA, privée, identique, qui se remplit (un nouveau clic remplace l'ancienne).
+ROSE = 0xE1306C                 # le rose de cogs/numeros (_ROSE)
+VIDE = "…."
+STATIC = Path(__file__).resolve().parent / "static"
+
+
+def _insta(conf: Optional[Dict[str, Any]]) -> bool:
+    return (conf or {}).get("style") == "insta"
+
+
+@functools.lru_cache(maxsize=None)
+def _icone_url(rel: str) -> str:
+    """L'adresse publique de l'icône : une réponse à un clic ne porte pas de
+    fichier, la vignette vient donc du site (static/, comme les vignettes du
+    podium). Versionnée : le site sert static/ en « immutable », un 404 lu
+    avant la mise en ligne resterait sept jours chez Cloudflare. "" si le
+    fichier manque : la carte part sans icône plutôt que pas du tout."""
+    try:
+        v = hashlib.md5((STATIC / rel).read_bytes()).hexdigest()[:8]
+    except OSError as e:
+        _log(f"icône static/{rel} illisible ({type(e).__name__}) : carte sans icône")
+        return ""
+    return f"{vd.SITE.rstrip('/')}/static/{rel}?v={v}"
+
+
+def _carte(conf: Dict[str, Any], numero: str, etat: str,
+           boutons: Optional[List[Dict[str, Any]]], souci: str = "") -> List[Dict[str, Any]]:
+    lignes = ["## `%s`" % numero, _drapeau(conf) + " " + etat] + ([souci] if souci else [])
+    textes = [{"type": 10, "content": t} for t in lignes]
+    url = _icone_url(conf["icone"]) if conf.get("icone") else ""
+    corps: List[Dict[str, Any]] = (
+        [{"type": 9, "components": textes, "accessory": {"type": 11, "media": {"url": url}}}]
+        if url else textes)
+    if boutons:
+        corps.append({"type": 1, "components": boutons})
+    return [{"type": 17, "accent_color": ROSE, "components": corps}]
+
+
+def _valeur(a: Dict[str, Any]) -> str:
+    return "".join(str(a.get("valeur") or "?").split())
+
+
 def vue_panneau(conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    if _insta(conf):
+        return _carte(conf, VIDE, "⏳ En attente", [_prendre_bouton(conf)])
     return _vue([_titre(conf), _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE],
                 [_prendre_bouton()])
 
@@ -259,12 +316,16 @@ def vue_attente(texte: str, a: Optional[Dict[str, Any]] = None,
     """Le formulaire pendant un appel à HeroSMS : le numéro en cours s'il y
     en a un, l'attente dans la case du code ; sinon l'attente dans la case du
     numéro."""
+    if _insta(conf):
+        return _carte(conf, _valeur(a) if a else VIDE, texte, None)
     if a:
         return _vue([_titre(conf), _drapeau(conf) + " " + _numero(a), "🔐 " + texte])
     return _vue([_titre(conf), _drapeau(conf) + " " + texte, "🔐 " + BLANC_CODE])
 
 
 def vue_close(texte: str, conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    if _insta(conf):
+        return _carte(conf, VIDE, "⏳ En attente", [_prendre_bouton(conf)], souci=texte)
     return _vue([_titre(conf), _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE, texte],
                 [_prendre_bouton()])
 
@@ -283,6 +344,9 @@ def vue_actif(a: Dict[str, Any], conf: Dict[str, Any]) -> List[Dict[str, Any]]:
         boutons = [_bouton("retry", "Redemander un code", "🔄", 1, act_id),
                    _bouton("autre", "Autre", "🔁", 2, act_id),
                    _bouton("annuler", "Annuler", "❌", 4, act_id)]
+    if _insta(conf):
+        etat = ("🔑 **Code : `%s`**" % code) if code else "⏳ En attente du code…"
+        return _carte(conf, _valeur(a), etat, boutons, souci=a.get("souci") or "")
     return _vue([_titre(conf), _drapeau(conf) + " " + _numero(a), "🔐 " + ligne,
                  a.get("souci") or ""], boutons)
 

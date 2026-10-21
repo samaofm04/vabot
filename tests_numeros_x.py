@@ -591,27 +591,42 @@ try:
     r = nx.traiter(clic("numx:prendre", gid=TH))
     check("Threads : le numéro est pris chez GetAText (comme Instagram), service Instagram, États-Unis",
           ACHATS == [("getatext", "ig", "187")], ACHATS)
-    check("Threads : le formulaire s'appelle « Numéro Instagram »",
-          textes(r["data"]["components"])[0] == "## Numéro Instagram"
-          and textes(dernier_patch())[0] == "## Numéro Instagram", (r, dernier_patch()))
+    check("Threads : la carte Instagram, « …. » pendant la recherche, puis le numéro en gros",
+          textes(r["data"]["components"])[:2] == ["## `….`", "🇺🇸 ⏳ Recherche d'un numéro…"]
+          and textes(dernier_patch())[:2] == ["## `+15551110001`", "🇺🇸 ⏳ En attente du code…"],
+          (r, dernier_patch()))
+    check("Threads : en attente, « Redemander un code » (bleu) · « Autre » · « Annuler » (rouge)",
+          boutons(dernier_patch()) == ["numx:retry:ga1", "numx:autre:ga1", "numx:annuler:ga1"]
+          and [b["style"] for b in dernier_patch()[0]["components"][1]["components"]] == [1, 2, 4],
+          dernier_patch())
+    carte = dernier_patch()[0]
+    vignette = (carte["components"][0].get("accessory") or {}).get("media", {}).get("url", "")
+    check("Threads : carte rose, l'icône Instagram en vignette, servie par le site (versionnée)",
+          carte["accent_color"] == nx.ROSE and carte["components"][0]["type"] == 9
+          and vignette.startswith(vd.SITE.rstrip("/") + "/static/numeros/numero_instagram.png?v="),
+          carte)
+    check("Threads : l'icône existe dans static/ (sinon 404 gardé 7 jours par Cloudflare)",
+          (Path(__file__).resolve().parent / "static/numeros/numero_instagram.png").is_file())
     a = nx._actif(f"{TH}:{VA}")
     check("Threads : noté à l'historique sur le serveur Threads",
           a and num._histo_lire()[0]["serveur"] == TH and num._histo_lire()[0]["service"] == "ig",
           num._histo_lire())
     CODES.append(("code", "135790"))
     direct(lambda: nx._ecouter(f"{TH}:{VA}", a["id"], nx.SERVEURS[TH]))
-    check("Threads : le code s'affiche sous « Numéro Instagram »",
-          any("135790" in t for t in textes(dernier_patch()))
-          and textes(dernier_patch())[0] == "## Numéro Instagram", dernier_patch())
+    check("Threads : le code arrive dans LA MÊME carte, sous le numéro",
+          textes(dernier_patch())[:2] == ["## `+15551110001`", "🇺🇸 🔑 **Code : `135790`**"]
+          and boutons(dernier_patch()) == ["numx:fini:ga1", "numx:retry:ga1", "numx:autre:ga1"],
+          dernier_patch())
     check("Threads : le quota de Twitter n'est pas touché",
           num.numeros_du_jour(VA, TH) == 1 and num.numeros_du_jour(VA, GID) == 0)
     APPELS.clear()
     print(nx.poser_panneau(TH))
     posts = [(ch, kw["json"]) for m, ch, kw in APPELS if m == "POST"]
-    check("Threads : panneau posé dans 📱・numéro-usa de Threads, titre « Numéro Instagram »",
+    check("Threads : dans 📱・numéro-usa, la carte vide « …. » · en attente · « Prendre un numéro » bleu",
           len(posts) == 1 and posts[0][0] == "/channels/%s/messages" % nx.SERVEURS[TH]["salon"]
-          and textes(posts[0][1]["components"])[0] == "## Numéro Instagram"
-          and boutons(posts[0][1]["components"]) == ["numx:prendre"], posts)
+          and textes(posts[0][1]["components"]) == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and boutons(posts[0][1]["components"]) == ["numx:prendre"]
+          and posts[0][1]["components"][0]["components"][1]["components"][0]["style"] == 1, posts)
     check("Twitter : toujours « Numéro X »", textes(nx.vue_panneau(nx.SERVEURS[GID]))[0] == "## Numéro X")
     check("Threads : le code est lu chez GetAText, pas chez HeroSMS",
           FOURNIS and FOURNIS[-1] == ("code", "getatext"), FOURNIS[-3:])
@@ -622,6 +637,9 @@ try:
     check("Threads : Annuler rend le numéro (chez GetAText) et il ne compte pas",
           ANNULES[FIN:] == [a2["id"]] and num.numeros_du_jour(VA2, TH) == 0
           and any("ne compte pas" in t for t in textes(dernier_patch())), (ANNULES, dernier_patch()))
+    check("Threads : après Annuler, la carte redevient vide, prête pour un autre numéro",
+          textes(dernier_patch())[:2] == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and boutons(dernier_patch()) == ["numx:prendre"], dernier_patch())
     numgen.get_number, numgen.getatext_key = _sav_gn, _sav_gk
 
     # 20. le récap du bot admin ne garde plus Twitter (Luigi le poste)
