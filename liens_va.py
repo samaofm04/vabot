@@ -1332,6 +1332,13 @@ def couper_seren(gid: str) -> Dict[str, Any]:
                 _t.sleep(0.5)
             lid = _sans_prefixe(l["id"])
             qui = str(l.get("shortcode") or lid)
+            if "seren" in str(l.get("url") or "").lower():
+                # emythreads, 21/10/2026 : sa destination était Seren et sa
+                # variante Emy ; l'A/B éteint, il est parti à 100 % chez Seren
+                # (remis sur emy.brw/c66 à la main). Sa destination passe chez
+                # Emy d'abord : on ne devine pas laquelle.
+                bilan["rates"].append(f"{qui} : destination Seren ({l.get('url')}), A/B laissé")
+                continue
             rc = _couper_lien(gid, equipe, lid, qui, str(l.get("display_name") or ""),
                               fiches.get(lid, ""))
             if rc.get("ok"):

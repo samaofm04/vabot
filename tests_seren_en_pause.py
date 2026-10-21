@@ -231,6 +231,17 @@ try:
           lv.reprendre_variantes(TW) == {"poses": [], "rates": [], "a_verifier": []}
           and not g.de("ab"))
 
+    # emythreads : destination Seren, variante Emy — l'éteindre l'enverrait
+    # à 100 % chez Seren (arrivé le 21/10/2026)
+    g, _ = monde(etat)
+    g.liste = {EMY_THREADS: [{"id": "lnk_emt", "shortcode": "emythreads",
+                              "url": "https://onlyfans.com/seren.vale/c193"}]}
+    g.ab["emt"] = json.loads(json.dumps(AB_SEREN))
+    b5 = lv.couper_seren(TH)
+    check("destination Seren : l'A/B n'est pas éteint (il partirait à 100 % chez Seren), c'est dit",
+          not b5["coupes"] and "destination Seren" in b5["rates"][0]
+          and not g.de("allumer") and g.ab["emt"]["enabled"], b5)
+
     # bloomyy, éteint à la main (essai du 21/10) : sa fiche est marquée quand même
     g, _ = monde(etat)
     g.liste = {EMY_TWITTER: [{"id": "lnk_a31", "shortcode": "bbyy"}]}
