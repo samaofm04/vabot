@@ -79919,9 +79919,10 @@ def start_in_thread():
 # membres_evenements, annonces_entretiens, instagram_accueil). Une seule
 # exception y arrêtait create_app AVANT la route /discord/interactions : tout
 # youl4b.com tombait, avec la vérification, les tickets et les boutons de
-# Luigi et Bowser — et run_web_app ne relance rien. Ces lignes appartiennent
-# aux patchs (les réécrire les ferait tomber) : on agit autour, au moment où
-# create_app est appelé.
+# Luigi et Bowser — et run_web_app ne relance rien. Même chose pour
+# caption_store, caption_backups, affiliation_site et reels_auto, branchés
+# plus bas sans try. Ces lignes appartiennent aux patchs (les réécrire les
+# ferait tomber) : on agit autour, au moment où create_app est appelé.
 #
 # Et du 17/10 17:54 au 19/10 16:27, aucun départ n'a été annoncé sur aucun
 # serveur, sans un message : le fil de membres_evenements ne tournait plus
@@ -79990,16 +79991,57 @@ def _module_present(nom: str) -> bool:
         return False
 
 
+# Les autres modules hors git que create_app branche sans try (patchs du
+# VPS) : les fonctions qu'il leur appelle, et les classes qu'il leur emprunte
+# — un remplaçant doit les fournir (@app.errorhandler(CaptionStorageError)).
+_BRANCHEMENTS_HORS_GIT = {
+    "caption_store": ((), ("CaptionStorageError",)),
+    "caption_backups": (("register",), ()),
+    "affiliation_site": (("installer",), ()),
+    "reels_auto": (("register",), ()),
+}
+
+
+def _appel_protege(module: str, nom: str, fn):
+    """fn (ou son absence) qui ne lève plus : la panne s'imprime, create_app
+    continue sans ce module."""
+    import functools
+    import traceback
+    if getattr(fn, "_protege", None):
+        return fn
+
+    def protege(*a, **k):
+        if not callable(fn):
+            print(f"[demarrage] {module} : pas de fonction {nom} — sauté", flush=True)
+            return None
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            print(f"[demarrage] {module}.{nom} : {type(e).__name__}: {e} "
+                  "— sauté, le site démarre sans lui", flush=True)
+            traceback.print_exc()
+            if module in _FILS_DISCORD:
+                _fil_noter(module, erreur=f"{nom} : {type(e).__name__}", erreur_le=time.time())
+            return None
+
+    if callable(fn):
+        functools.update_wrapper(protege, fn)
+    protege._protege = module
+    return protege
+
+
 def _demarrages_proteges() -> dict:
-    """Prépare les modules que create_app démarre sans try : leur demarrer()
-    ne peut plus lever, leurs tours sont horodatés. Un module dont l'import
-    échoue est remplacé, le temps de create_app, par un module vide : rend
-    {nom: remplaçant}."""
+    """Prépare les modules hors git que create_app appelle sans try : ce qu'il
+    leur appelle ne peut plus lever, les tours des fils sont horodatés. Un
+    module dont l'import échoue est remplacé, le temps de create_app, par un
+    module vide : rend {nom: remplaçant}."""
     import importlib
     import traceback
     import types
+    a_proteger = {nom: (("demarrer",), ()) for nom in _FILS_DISCORD}
+    a_proteger.update(_BRANCHEMENTS_HORS_GIT)
     remplacants = {}
-    for nom, (_fil, _role, fonctions, _p) in _FILS_DISCORD.items():
+    for nom, (appels, classes) in a_proteger.items():
         # absent de ce poste (copie locale) : create_app ne l'appelle pas non plus
         if nom not in sys.modules and not _module_present(nom):
             continue
@@ -80009,34 +80051,26 @@ def _demarrages_proteges() -> dict:
             print(f"[demarrage] {nom} : import impossible ({type(e).__name__}: {e}) "
                   "— module sauté, le site démarre sans lui", flush=True)
             traceback.print_exc()
-            _fil_noter(nom, erreur=f"import : {type(e).__name__}", erreur_le=time.time())
+            if nom in _FILS_DISCORD:
+                _fil_noter(nom, erreur=f"import : {type(e).__name__}", erreur_le=time.time())
             r = types.ModuleType(nom)
-            r.demarrer = lambda: None
+            for f in appels:
+                setattr(r, f, lambda *a, **k: None)
+            for c in classes:
+                setattr(r, c, type(c, (Exception,), {}))
             remplacants[nom] = sys.modules[nom] = r
             continue
-        for f in fonctions:
-            orig = getattr(mod, f, None)
-            if callable(orig):
-                setattr(mod, f, _fil_horodater(nom, f, orig))
-        demarrer = getattr(mod, "demarrer", None)
-        if getattr(demarrer, "_fil_discord", None):
-            continue
-
-        def demarrer_protege(*a, _nom=nom, _orig=demarrer, **k):
-            if not callable(_orig):
-                print(f"[demarrage] {_nom} : pas de fonction demarrer — sauté", flush=True)
-                return None
-            try:
-                return _orig(*a, **k)
-            except Exception as e:
-                print(f"[demarrage] {_nom}.demarrer : {type(e).__name__}: {e} "
-                      "— fil non lancé, le site démarre sans lui", flush=True)
-                traceback.print_exc()
-                _fil_noter(_nom, erreur=f"demarrer : {type(e).__name__}", erreur_le=time.time())
-                return None
-
-        demarrer_protege._fil_discord = nom
-        mod.demarrer = demarrer_protege
+        if nom in _FILS_DISCORD:
+            for f in _FILS_DISCORD[nom][2]:
+                orig = getattr(mod, f, None)
+                if callable(orig):
+                    setattr(mod, f, _fil_horodater(nom, f, orig))
+        for f in appels:
+            setattr(mod, f, _appel_protege(nom, f, getattr(mod, f, None)))
+        for c in classes:
+            if not isinstance(getattr(mod, c, None), type):
+                print(f"[demarrage] {nom} : pas de classe {c} — remplacée", flush=True)
+                setattr(mod, c, type(c, (Exception,), {}))
     return remplacants
 
 
