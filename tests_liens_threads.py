@@ -17,6 +17,7 @@ Ce qui est vérifié :
   - rebrancher (tracking) refusé sur Threads ;
   - le bouton « Créer son lien » apparaît sur Threads ;
   - le message au VA dit Threads, sans promettre les subs du podium ;
+  - deux clics simultanés sur « Créer son lien » ne créent qu'un lien ;
   - les accueils déjà ouverts sont redessinés une fois, pas à chaque tour ;
   - la synchro des groupes tourne pour Threads (et pas pour Twitter, déjà
     faite par la boucle du podium), au plus toutes les 30 minutes.
@@ -105,7 +106,7 @@ class FauxGMS(types.ModuleType):
 
 TMP = pathlib.Path(tempfile.mkdtemp())
 _SAUVE_LV = {k: getattr(lv, k) for k in ("CONFIG_FICHIER", "ETAT_FICHIER", "numero_de",
-                                         "creer_tracking")}
+                                         "creer_tracking", "creer_pour")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("ETAT_FICHIER", "CONFIG_FICHIER", "_api", "_EN_FOND",
                                          "_suite", "identifiant", "nom_manager")}
 _SAUVE_GMS = sys.modules.get("gms")
@@ -276,6 +277,50 @@ try:
           "sur Threads" in desc and "MyPuls" not in desc and "subs" not in desc, desc)
     check("réponse au manager : lien donné, pas de « destination provisoire »",
           bool(suites) and "getmysocial.com/" in suites[0] and "provisoire" not in suites[0], suites)
+
+    # ── double clic sur « Créer son lien » ───────────────────────────────
+    # 17/10/2026 02:01 : deux clics du manager, deux chaînes, deux liens
+    # GetMySocial pour le VA 83 (pearlkittyy hors registre, babebbyy au
+    # registre). Les deux clics arrivent ensemble, la chaîne prend son temps.
+    import threading
+    g, _ = monde(tickets={f"{TH}:u83": {"salon": "s83", "manager": "m1"}})
+    porte, lancees, fils, reps = threading.Event(), [], [], []
+    _vrai_creer = lv.creer_pour
+
+    def creer_lent(gid, uid, pseudo, **kw):
+        porte.wait(5)
+        lancees.append(uid)
+        return _vrai_creer(gid, uid, pseudo, **kw)
+
+    def en_fond(f):
+        fils.append(threading.Thread(target=f))
+        fils[-1].start()
+
+    def clic(depart):
+        depart.wait()
+        reps.append(tk._creer_lien(TH, "u83", "m1", {"token": "t", "channel_id": "s83"}))
+
+    lv.creer_pour, tk._EN_FOND = creer_lent, en_fond
+    depart = threading.Barrier(2)
+    clics = [threading.Thread(target=clic, args=(depart,)) for _ in range(2)]
+    for c in clics:
+        c.start()
+    for c in clics:
+        c.join()
+    porte.set()
+    for f in fils:
+        f.join()
+    dups = [a for a in g.appels if a[0] == "duplicate"]
+    check("double clic : une seule chaîne, un seul duplicata GetMySocial",
+          lancees == ["u83"] and len(dups) == 1, (lancees, dups))
+    check("… le second clic répond « déjà en cours de création »",
+          sorted(r["type"] for r in reps) == [4, 5]
+          and any("déjà en cours" in str((r.get("data") or {}).get("content")) for r in reps), reps)
+    r3 = tk._creer_lien(TH, "u83", "m1", {"token": "t", "channel_id": "s83"})
+    check("… la chaîne finie, un troisième clic voit le lien et ne crée rien",
+          r3["type"] == 4 and "déjà son lien" in r3["data"]["content"] and lancees == ["u83"], r3)
+    check("… et la réservation est rendue", not tk._CREATIONS, tk._CREATIONS)
+    lv.creer_pour, tk._EN_FOND = _vrai_creer, (lambda f: f())
 
     # ── accueils déjà ouverts ────────────────────────────────────────────
     g, _ = monde(tickets={f"{TH}:u5": {"salon": "s5", "accueil": "a5"},

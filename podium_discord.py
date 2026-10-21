@@ -98,9 +98,10 @@ USA UK, et ça unique ». D'où :
     quinzaine, avec l'all-time, dans « ─│📊┤-l-clicks » (à la place du report
     JESSY LE RETOUR, qui y montrait noms et pseudos) ;
   - ni bonus du jour, ni synchro des liens, ni suivi des VA (clé
-    « vitrine ») : Threads ne fait qu'afficher. Les gagnants n'y ont pas de
-    lien rattaché à un ticket : suivi_va ne prévient personne en privé, la
-    prime se réclame à Bowser, comme le message le dit.
+    « vitrine ») : Threads ne fait qu'afficher. Ses VA ont depuis leurs liens
+    et leurs tickets : suivi_va annonce la prime dans le ticket du gagnant,
+    avec l'adresse donnée au bouton 💳 du ticket (clé « bouton_usdc ») --
+    Bowser ne lit aucun message.
 Sa mesure n'étant pas celle de Twitter ni de Va IG, Threads relève lui-même :
 un appel GetMySocial par VA et par passage (deux heures pour la semaine, une
 heure pour la quinzaine, une fois par jour pour l'all-time).
@@ -229,6 +230,14 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # RETIRER : False (pas la clé retirée : le bouton déjà posé
                  # s'en va alors à la prochaine édition).
                  "bouton_pseudos": True,
+                 # L'adresse USDC se donne au bouton « 💳 Mon adresse USDC » du
+                 # ticket (tickets_discord.boutons_va), et non plus par message :
+                 # Luigi et Bowser ne lisent aucun message (REST seul, sans
+                 # Message Content). Audit du 20/10/2026 : « envoie un message
+                 # à @Bowser avec ton adresse » n'avait rien enregistré, les
+                 # primes Threads du 12-18/10 sont parties « sans adresse ». Lu
+                 # par _reclamer_prime (podium et bonus).
+                 "bouton_usdc": True,
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
     # Va Threads : SES VA, à leurs liens Threads (EMY THREADS, « Threads VA 61
@@ -264,6 +273,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # 19/10/2026 : « aussi threads refais ») : « Threads n » →
                  # le pseudo de sa fiche liens_va, pour le staff, en privé
                  "bouton_pseudos": True,
+                 # l'adresse USDC au bouton du ticket, comme Twitter (Bowser ne
+                 # lit pas les messages non plus)
+                 "bouton_usdc": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -393,6 +405,21 @@ def _repris_de(gid: Optional[str]) -> str:
     """Le serveur dont celui-ci reprend les chiffres, ou ""."""
     src = str((SERVEURS.get(str(gid or "")) or {}).get("reprend") or "")
     return src if src and src != str(gid or "") and src in SERVEURS else ""
+
+
+def _reclamer_prime(pf: Dict[str, Any], tete: str, rang: str) -> str:
+    """La consigne « Pour recevoir ta prime / ton bonus ». Twitter et Threads
+    (clé « bouton_usdc ») : l'adresse au bouton du ticket, que suivi_va met
+    sous l'annonce privée de la prime, et le rang écrit dans le ticket pour
+    qui paie à la main. Va IG (tickets du bot principal, sans ce bouton) : la
+    phrase d'avant, mot pour mot."""
+    if pf.get("bouton_usdc"):
+        return (f"{tete} enregistre **ton adresse USDC (réseau Solana)** avec le bouton "
+                "**💳 Mon adresse USDC** du message épinglé de **ton espace perso** "
+                f"(une fois suffit, elle est gardée), puis écris-y **{rang}**.")
+    return (f'{tete} envoie un message à **@{pf["bot"]}** dans **ton espace perso** '
+            f"avec **{rang}** et **ton adresse USDC (réseau Solana)**.")
+
 
 PRIMES = [10.0, 5.0, 3.0]
 # Le nom du bot que les membres voient change : « Siri » jusqu'au 03/10/2026,
@@ -2850,9 +2877,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     c += ["", th["primes"] if th else "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
     for i, p in enumerate(PRIMES):
         c.append(f'{med[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
-    c += ["", f'💸 **Pour recevoir ta prime :** envoie un message à **@{pf["bot"]}** dans '
-              "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
-              "USDC (réseau Solana)**.",
+    c += ["", _reclamer_prime(pf, "💸 **Pour recevoir ta prime :**", "ton rang de la semaine"),
           "Un seul prix par personne · payé à la main après vérification",
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
 
@@ -3634,9 +3659,8 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
         c += ["", "_Personne n'a encore de sub aujourd'hui — le classement bouge "
                   "dès le premier._"]
     c += ["", "————————————",
-          f'🎁 **Pour recevoir ton bonus :** envoie un message à **@{_profil(gid)["bot"]}** dans '
-          "**ton espace perso** avec **ton rang du jour (top 1, 2 ou 3)** et "
-          "**ton adresse USDC (réseau Solana)**.",
+          _reclamer_prime(_profil(gid), "🎁 **Pour recevoir ton bonus :**",
+                          "ton rang du jour (top 1, 2 ou 3)"),
           "Un seul prix par personne · payé à la main après vérification"]
     if cl["illisibles"]:
         c += ["", "⚠️ Sans relevé aujourd'hui : " + ", ".join(cl["illisibles"])

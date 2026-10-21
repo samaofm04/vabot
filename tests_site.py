@@ -21142,9 +21142,23 @@ try:
                       for c, j in _env))
         check("un numero de VA qu on ne relie a personne est compte, pas avale",
               _bp["inconnus"] == ["VA 99"])
+        check("le mot du podium de Twitter dans l annonce : « 900 subs » (question ouverte, inchange)",
+              any(c == "/channels/sal99/messages" and "**900** subs." in str(j) for c, j in _env))
         _env.clear()
         _bp2 = _sv.annoncer_primes("g1", _cl, _dtS.date(2026, 9, 21), _dtS.date(2026, 9, 27))
         check("la meme semaine n est pas annoncee deux fois", not _bp2["dits"] and not _env)
+        # Threads compte des clics : l annonce dit « clics », comme son podium
+        # (audit du 20/10/2026 : « 47 subs » en prive, « 47 clics » au podium)
+        import podium_discord as _pdS2
+        _gTh = _pdS2.THREADS_ID
+        _lvS._etat = lambda: {"liens": {f"{_gTh}:77": {"pseudo": "th", "numero": 12}}}
+        _tkS2._etat = lambda: {"tickets": {f"{_gTh}:77": {"salon": "sal77"}}}
+        _env.clear()
+        _sv.annoncer_primes(_gTh, {"lignes": [{"va": "Threads 12", "clics": 47}]},
+                            _dtS.date(2026, 10, 12), _dtS.date(2026, 10, 18))
+        _dTh = str(_env[0][1]) if _env else ""
+        check("prime Threads : « 47 clics », le mot de son podium, plus « subs »",
+              "**47** clics." in _dTh and "subs" not in _dTh, _dTh[:300])
     finally:
         (_sv.ETAT_FICHIER, _tkS2._api, _tkS2._etat, _lvS._etat) = _savP2
 
@@ -21647,7 +21661,7 @@ try:
     # renommage, parce que le nom y etait ecrit en dur.
     _srcNom = _plP("podium_discord.py").read_text(encoding="utf-8")
     check("le nom du bot a mentionner n est pas ecrit en dur",
-          '_profil(gid)["bot"]' in _srcNom
+          'pf["bot"]' in _srcNom
           and "**@Siri**" not in _srcNom and "**@SEVEN**" not in _srcNom)
     # chaque serveur a SON bot : Luigi sur Twitter et Va IG, Bowser sur Threads
     # (13/10/2026 : Threads recoit le classement subs de Twitter, par son bot)
@@ -21661,12 +21675,18 @@ try:
     _clBon = {"lignes": [], "illisibles": [], "frais": True}
     _dscBon = _pd.embed_bonus(_clBon, _dtVtk.date(2026, 10, 3),
                               _pd.TWITTER_ID)["description"]
-    check("le bonus du jour renvoie vers le bot tel qu il s appelle aujourd hui",
-          "**@Luigi**" in _dscBon and "Siri" not in _dscBon)
+    # Luigi ne lit aucun message (audit du 20/10/2026) : le bonus de Twitter
+    # renvoie au bouton 💳 du ticket, plus vers un bot
+    check("le bonus du jour renvoie au bouton 💳 du ticket, plus vers un bot qui ne lit pas",
+          "**💳 Mon adresse USDC**" in _dscBon and "@Luigi" not in _dscBon
+          and "Siri" not in _dscBon)
     # sans serveur (anciens appels), le repli Twitter doit rester lisible
-    check("le bonus sans serveur nomme quand meme un bot",
-          "**@Luigi**" in _pd.embed_bonus(_clBon,
-                                          _dtVtk.date(2026, 10, 3))["description"])
+    check("le bonus sans serveur donne la meme consigne (repli Twitter)",
+          "**💳 Mon adresse USDC**" in _pd.embed_bonus(_clBon,
+                                                      _dtVtk.date(2026, 10, 3))["description"])
+    # la ou la consigne nomme encore un bot (Va IG), c est son nom d aujourd hui
+    check("Va IG : la consigne nomme le bot tel qu il s appelle aujourd hui",
+          "**@Luigi**" in _pd._reclamer_prime(_pd._profil(_pd.VA_IG_ID), "x", "y"))
 
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")

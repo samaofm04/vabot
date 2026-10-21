@@ -331,6 +331,8 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
             ligne_adr = ("⚠️ **Aucune adresse enregistrée** — clique "
                          "💳 **Mon adresse USDC** sur le message épinglé.")
             bilan["sans_adresse"].append(l.get("pseudo"))
+        # le mot du podium de CE serveur : Threads compte des clics, et le
+        # gagnant lisait « 47 subs » quand son podium disait « 47 clics »
         code, _r = tk._api("POST", f"/channels/{salon}/messages", json={
             "content": (f"<@{uid}> " + (f"<@{mid}>" if mid else "")).strip(),
             "allowed_mentions": {"users": [uid] + ([mid] if mid else [])},
@@ -339,7 +341,8 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
                         "color": 0xF1C40F,
                         "description": f'Semaine du **{debut.strftime("%d/%m")}** au '
                                        f'**{fin.strftime("%d/%m")}** · '
-                                       f'**{ligne.get("clics")}** subs.\n{ligne_adr}'}]})
+                                       f'**{ligne.get("clics")}** {pod._unite(gid)}.\n'
+                                       f'{ligne_adr}'}]})
         if code == 200:
             faits[cle_p] = int(time.time())
             bilan["dits"].append(f'{l.get("pseudo")} : {montant:.2f}$')

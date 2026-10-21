@@ -1165,62 +1165,118 @@ def _marquer_lien_dans_accueil(gid: str, uid: str, salon: str, actif: bool) -> N
                                         a_un_lien=True, gid=gid, lien_actif=actif)})
 
 
+# Les créations de lien en cours, par VA (« gid:uid » -> heure du clic). Le
+# 17/10/2026 à 02:01, un double clic sur « Créer son lien » (VA 83 de Threads)
+# a lancé deux chaînes : « déjà un lien ? » passait deux fois avant que la
+# première n'écrive le registre, et GetMySocial a reçu deux liens
+# (pearlkittyy, hors registre, dans l'accueil ; babebbyy au registre).
+_CREATIONS: Dict[str, float] = {}
+_CREATIONS_VERROU = threading.Lock()
+# au-delà, une chaîne restée bloquée (réseau) ne prive plus le VA du bouton
+CREATION_MAX_S = 600
+
+
+def _prendre_creation(cle: str) -> float:
+    """Réserve la création du lien de ce VA. 0.0 si une autre est en cours."""
+    with _CREATIONS_VERROU:
+        t0 = _CREATIONS.get(cle)
+        if t0 and time.time() - t0 < CREATION_MAX_S:
+            return 0.0
+        t = time.time()
+        _CREATIONS[cle] = t
+        return t
+
+
+def _rendre_creation(cle: str, t: float) -> None:
+    # seulement la SIENNE : une réservation expirée puis reprise par un autre
+    # clic ne doit pas être libérée par la première chaîne qui finit
+    with _CREATIONS_VERROU:
+        if _CREATIONS.get(cle) == t:
+            _CREATIONS.pop(cle, None)
+
+
 def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:
     """Le bouton « Créer son lien » : MyPuls puis GetMySocial, en différé.
 
     Rien n'est créé tant que la configuration manque : MyPuls ne sait pas
     supprimer un tracking link, un lien posé chez la mauvaise modèle resterait
     là pour toujours.
+
+    Une seule création à la fois par VA (_prendre_creation), réservée AVANT
+    « déjà un lien ? » et rendue après l'écriture du registre : un second clic
+    voit soit la réservation, soit le lien.
     """
     import liens_va
     if str(gid) not in liens_va.SERVEURS:
         return _ephemere("Les liens GetMySocial ne sont pas encore branchés sur ce serveur.")
-    deja = liens_va.lien_de(gid, uid)
-    if deja.get("public_url"):
-        return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
-                         f'(destination : {deja.get("tracking") or "?"})')
-    empeche = liens_va.manque(gid)
-    if empeche:
-        return _ephemere("Rien n'a été créé — " + empeche)
-    plateforme = liens_va.espace(gid)["plateforme"]
+    cle = f"{gid}:{uid}"
+    t = _prendre_creation(cle)
+    if not t:
+        return _ephemere("⏳ Le lien de ce VA est déjà en cours de création — "
+                         "un seul clic suffit, la réponse arrive.")
+    lance = False
+    try:
+        deja = liens_va.lien_de(gid, uid)
+        if deja.get("public_url"):
+            return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
+                             f'(destination : {deja.get("tracking") or "?"})')
+        empeche = liens_va.manque(gid)
+        if empeche:
+            return _ephemere("Rien n'a été créé — " + empeche)
+        plateforme = liens_va.espace(gid)["plateforme"]
 
-    jeton = str(p.get("token") or "")
-    salon = str(p.get("channel_id") or "")
-    pseudo = identifiant(gid, uid)
+        jeton = str(p.get("token") or "")
+        salon = str(p.get("channel_id") or "")
+        pseudo = identifiant(gid, uid)
 
-    def travail():
-        r = liens_va.creer_pour(gid, uid, pseudo, par=par,
-                                manager=nom_manager(gid, uid))
-        if r.get("ok"):
-            _poser_lien_dans_accueil(gid, uid, salon, r)
-            note = ("\n⚠️ Destination provisoire (celle du gabarit) : le tracking "
-                    "link MyPuls reste à créer et à rattacher."
-                    if r.get("provisoire") else "")
-            rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
-            v = r.get("variante") or {}
-            # Propriétaire, 15/10/2026 : « arrête de dire tracking pour elle et
-            # elle » — ni Emy ni Seren dans les messages. Un 50/50 posé ne se
-            # dit plus ; un 50/50 en plan se dit encore, sans nom de modèle
-            # (le lien marche, tout part sur un seul tracking en attendant).
-            if v and not v.get("ok"):
-                ab = ("\n⚠️ Partage 50/50 pas encore posé : tout part sur un seul tracking "
-                      "en attendant."
-                      + (" Recolle le cookie GetMySocial (Settings › Intégrations) : il se "
-                         "posera tout seul." if v.get("cookie") else " Il sera repris tout seul."))
-            else:
-                ab = ""
-            _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
-                          f'{r["public_url"]}{rang}{ab}{note}', p)
-            if salon:
-                _api("POST", f"/channels/{salon}/messages",
-                     json={"content": message_lien_va(uid, r["public_url"], plateforme),
-                           "allowed_mentions": {"users": [uid]}})
+        def travail():
+            try:
+                _travail_lien(gid, uid, par, p, jeton, salon, pseudo, plateforme)
+            finally:
+                _rendre_creation(cle, t)
+
+        _EN_FOND(travail)
+        lance = True
+        return _differer()
+    finally:
+        if not lance:
+            _rendre_creation(cle, t)
+
+
+def _travail_lien(gid: str, uid: str, par: str, p: Dict[str, Any], jeton: str,
+                  salon: str, pseudo: str, plateforme: str) -> None:
+    """La chaîne de « Créer son lien », en fond : le lien, puis la réponse au
+    manager et le message au VA."""
+    import liens_va
+    r = liens_va.creer_pour(gid, uid, pseudo, par=par,
+                            manager=nom_manager(gid, uid))
+    if r.get("ok"):
+        _poser_lien_dans_accueil(gid, uid, salon, r)
+        note = ("\n⚠️ Destination provisoire (celle du gabarit) : le tracking "
+                "link MyPuls reste à créer et à rattacher."
+                if r.get("provisoire") else "")
+        rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
+        v = r.get("variante") or {}
+        # Propriétaire, 15/10/2026 : « arrête de dire tracking pour elle et
+        # elle » — ni Emy ni Seren dans les messages. Un 50/50 posé ne se
+        # dit plus ; un 50/50 en plan se dit encore, sans nom de modèle
+        # (le lien marche, tout part sur un seul tracking en attendant).
+        if v and not v.get("ok"):
+            ab = ("\n⚠️ Partage 50/50 pas encore posé : tout part sur un seul tracking "
+                  "en attendant."
+                  + (" Recolle le cookie GetMySocial (Settings › Intégrations) : il se "
+                     "posera tout seul." if v.get("cookie") else " Il sera repris tout seul."))
         else:
-            sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
-            _suite(jeton, "✕ " + str(r.get("erreur") or "échec") + sup, p)
-
-    _EN_FOND(travail)
-    return _differer()
+            ab = ""
+        _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
+                      f'{r["public_url"]}{rang}{ab}{note}', p)
+        if salon:
+            _api("POST", f"/channels/{salon}/messages",
+                 json={"content": message_lien_va(uid, r["public_url"], plateforme),
+                       "allowed_mentions": {"users": [uid]}})
+    else:
+        sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
+        _suite(jeton, "✕ " + str(r.get("erreur") or "échec") + sup, p)
 
 
 def message_lien_va(uid: str, url: str, plateforme: str = "Twitter") -> str:

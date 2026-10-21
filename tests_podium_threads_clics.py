@@ -608,7 +608,10 @@ try:
           and "🥉 **Threads 41** — **20** clics · 💰 **3$**" in desc
           and "4. Threads 31 — **7** clics" in desc and "5. Threads 30 — **3** clics" in desc,
           desc)
-    check("la prime se réclame à Bowser",  "**@Bowser**" in desc)
+    # Bowser ne lit aucun message : « envoie un message à @Bowser » n'avait
+    # enregistré aucune adresse (audit du 20/10/2026)
+    check("l'adresse de la prime se donne au bouton 💳 du ticket, plus à Bowser",
+          "**💳 Mon adresse USDC**" in desc and "@Bowser" not in desc, desc[-400:])
     # « je veux pas les trucs là » : aucun ⚠️ ni ℹ️ dans les messages de Threads
     check("aucun avertissement affiché sur Threads (ni ⚠️ ni ℹ️)",
           "⚠️" not in desc and "ℹ️" not in desc, desc[-300:])
@@ -628,6 +631,23 @@ try:
           e_tw["title"] == "🔴 PODIUM SUBS — SEMAINE EN COURS"
           and "🥇 **VA 12** — **7** subs · 💰 **10$**" in e_tw["description"]
           and "Abonnements via Twitter 🐦 — clics **tracking OF**" in e_tw["description"])
+    # Luigi et Bowser ne lisent aucun message (audit du 20/10/2026) : la
+    # consigne renvoie au bouton 💳 du ticket, sur le podium comme au bonus
+    bouton = ("enregistre **ton adresse USDC (réseau Solana)** avec le bouton "
+              "**💳 Mon adresse USDC** du message épinglé de **ton espace perso**")
+    e_b = pd.embed_bonus({"lignes": [{"va": "VA 12", "clics": 7}], "illisibles": [], "frais": True},
+                         auj, TW)
+    check("primes de Threads et de Twitter, bonus de Twitter : l'adresse au bouton 💳, plus "
+          "« envoie un message à @Bowser / @Luigi »",
+          all(bouton in d and "envoie un message" not in d
+              for d in (e_d["description"], e_tw["description"], e_b["description"]))
+          and "puis écris-y **ton rang de la semaine**." in e_d["description"]
+          and "puis écris-y **ton rang du jour (top 1, 2 ou 3)**." in e_b["description"],
+          (e_d["description"][-400:], e_b["description"][-300:]))
+    check("Va IG (pas de bouton 💳 sur ses tickets) : la consigne d'avant, mot pour mot",
+          pd._reclamer_prime(pd._profil(IG), "💸 **Pour recevoir ta prime :**", "ton rang de la semaine")
+          == "💸 **Pour recevoir ta prime :** envoie un message à **@Luigi** dans **ton espace perso** "
+             "avec **ton rang de la semaine** et **ton adresse USDC (réseau Solana)**.")
     check("la mention du lundi : « clics » sur Threads, l'ancienne ailleurs",
           pd._mention_podium(TH) == "@everyone 🏆 Podium clics de la semaine !"
           and pd._mention_podium(TW) == pd._mention_podium(IG) == pd.MENTION_PODIUM)
