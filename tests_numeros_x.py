@@ -30,6 +30,7 @@ def check(nom, cond, detail=""):
 GID, SALON, APP = vd.TWITTER_ID, "1552392915622436874", "1552153790701117480"
 VA, VA2, CHEF = "111111111111111111", "222222222222222222", "333333333333333333"
 APPELS, ACHATS, ANNULES, FINIS, RETRY = [], [], [], [], []
+ALERTES = []                # alertes au staff (numgen.alerter_staff), rien ne part
 CODES = []                  # réponses successives de get_code
 REGLE = {"achat": True, "annuler": (True, "ACCESS_CANCEL"), "messages": []}
 
@@ -45,6 +46,8 @@ def faux_api(methode, chemin, **kw):
 
 def faux_numero(service="tw", country="187"):
     ACHATS.append((service, country))
+    if REGLE["achat"] == "NO_NUMBERS":
+        return False, numgen._human("NO_NUMBERS")
     if not REGLE["achat"]:
         return False, "solde insuffisant"
     n = len(ACHATS)
@@ -107,7 +110,7 @@ def dernier_patch():
 def remise_a_zero():
     """Un dossier NEUF à chaque fois : effacer le fichier ne suffit pas,
     safe_json le restaure depuis sa copie .prev."""
-    for l in (APPELS, ACHATS, ANNULES, FINIS, RETRY, CODES):
+    for l in (APPELS, ACHATS, ANNULES, FINIS, RETRY, CODES, ALERTES):
         l.clear()
     REGLE.update(achat=True, annuler=(True, "ACCESS_CANCEL"), messages=[])
     nx._ACHATS.clear()
@@ -116,6 +119,7 @@ def remise_a_zero():
     d = Path(tempfile.mkdtemp(prefix="numx_"))
     nx.FICHIER = d / "numeros_x.json"
     num.HISTO_FILE = d / "numgen_historique.json"
+    numgen.ALERTES_FICHIER = d / "numgen_alertes.json"
 
 
 class _Stop(Exception):
@@ -135,7 +139,7 @@ def direct(f):
 
 SAV = (vd.api, vd._EN_FOND, nx.FICHIER, num.HISTO_FILE, nx._dormir, tickets_discord.role_helper,
        numgen.get_number_herosms, numgen.get_code, numgen.cancel, numgen.finish, numgen.retry,
-       numgen.herosms_key)
+       numgen.herosms_key, numgen.ALERTES_FICHIER, numgen._en_production, numgen._poster_alerte)
 try:
     vd._charger_config()
     vd.api = faux_api
@@ -149,6 +153,8 @@ try:
     numgen.finish = faux_finir
     numgen.retry = faux_retry
     numgen.herosms_key = lambda: "cle-de-test"
+    numgen._en_production = lambda: True
+    numgen._poster_alerte = lambda texte: (ALERTES.append(("?", texte)) or (True, ""))
 
     # 1. ce qui n'est pas pour nous
     check("autre bouton : rendu au module suivant", nx.traiter(clic("copie")) is None)
@@ -255,22 +261,43 @@ try:
     check("C'est bon sans code : rien n'est clos", not FINIS and not nx._actif(f"{GID}:{VA}").get("clos"),
           FINIS)
 
-    # 9. quota : 3 par jour pour un VA, pas pour le staff
+    # 9. quota : 3 codes par jour pour un VA, pas pour le staff
     remise_a_zero()
     for _ in range(3):
         nx.traiter(clic("numx:prendre"))
         nx.traiter(clic("numx:annuler:act%d" % len(ACHATS), ephemere=True))
     r = nx.traiter(clic("numx:prendre"))
-    check("4e numéro du jour : refus « 3 numéros aujourd'hui », rien d'acheté",
-          r["type"] == 4 and any("3 numéros aujourd'hui" in t for t in textes(r["data"]["components"]))
+    check("3 numéros annulés sans code ne comptent pas : le 4e est acheté",
+          len(ACHATS) == 4 and r["type"] == 4, (ACHATS, r))
+    nx.traiter(clic("numx:annuler:act4", ephemere=True))
+    check("Annuler sans code : « il ne compte pas » affiché",
+          any("ne compte pas" in t for t in textes(dernier_patch())), dernier_patch())
+    remise_a_zero()
+    for i in range(1, 4):
+        nx.traiter(clic("numx:prendre"))
+        CODES.append(("code", "11111%d" % i))
+        direct(lambda: nx._ecouter(f"{GID}:{VA}", "act%d" % i, nx.SERVEURS[GID]))
+        nx.traiter(clic("numx:fini:act%d" % i, ephemere=True))
+    r = nx.traiter(clic("numx:prendre"))
+    check("4e numéro après 3 codes reçus : refus « 3 codes reçus aujourd'hui », rien d'acheté",
+          r["type"] == 4 and any("3 codes reçus aujourd'hui" in t for t in textes(r["data"]["components"]))
           and len(ACHATS) == 3, r)
     r = nx.traiter(clic("numx:prendre", uid=VA2))
     check("un autre VA a son propre compte", len(ACHATS) == 4, ACHATS)
-    for _ in range(3):
+    for i in range(5, 8):
         nx.traiter(clic("numx:prendre", uid=CHEF, perms=str(0x8)))
-        nx.traiter(clic("numx:annuler:act%d" % len(ACHATS), uid=CHEF, perms=str(0x8), ephemere=True))
+        CODES.append(("code", "22222%d" % i))
+        direct(lambda: nx._ecouter(f"{GID}:{CHEF}", "act%d" % i, nx.SERVEURS[GID]))
+        nx.traiter(clic("numx:fini:act%d" % i, uid=CHEF, perms=str(0x8), ephemere=True))
     nx.traiter(clic("numx:prendre", uid=CHEF, perms=str(0x8)))
-    check("le staff n'est pas bridé (4e numéro accepté)", len(ACHATS) == 8, ACHATS)
+    check("le staff n'est pas bridé (4e numéro accepté après 3 codes)", len(ACHATS) == 8, ACHATS)
+    check("quota : un numéro en attente de code compte", num.numeros_du_jour(VA2, GID) == 1)
+    h = num._histo_lire()
+    h[-1]["fournisseur"] = "getatext"
+    h[-1]["annule_le"] = int(time.time())
+    num._histo_ecrire(h)
+    check("quota : chez un autre fournisseur, un numéro annulé sans code compte encore",
+          num.numeros_du_jour(CHEF, GID) == 4, num.numeros_du_jour(CHEF, GID))
 
     # 10. historique illisible : aucun achat
     remise_a_zero()
@@ -284,11 +311,23 @@ try:
     remise_a_zero()
     REGLE["achat"] = False
     nx.traiter(clic("numx:prendre"))
-    check("achat refusé : la raison s'affiche, avec le bouton pour réessayer",
-          any("solde insuffisant" in t for t in textes(dernier_patch()))
+    nx.traiter(clic("numx:prendre"))
+    check("achat refusé, solde vide : le VA lit « sans crédit, le staff est prévenu », avec le bouton",
+          any("sans crédit" in t and "staff est prévenu" in t for t in textes(dernier_patch()))
           and boutons(dernier_patch()) == ["numx:prendre"], dernier_patch())
+    check("solde vide : le staff est prévenu une fois, pas à chaque clic (2 clics, 1 alerte)",
+          len(ALERTES) == 1 and "HeroSMS sans crédit" in ALERTES[0][1]
+          and "credit:herosms" in numgen._alertes(), ALERTES)
     check("achat refusé : rien au registre ni à l'historique",
           nx._actif(f"{GID}:{VA}") is None and num._histo_lire() == [])
+    REGLE["achat"] = "NO_NUMBERS"
+    nx.traiter(clic("numx:prendre"))
+    check("achat refusé pour une autre raison : la raison telle quelle",
+          any("aucun numéro" in t for t in textes(dernier_patch())), dernier_patch())
+    REGLE["achat"] = True
+    nx.traiter(clic("numx:prendre"))
+    check("le service revient : l'alerte est levée, la prochaine panne sera redite",
+          "credit:herosms" not in numgen._alertes(), numgen._alertes())
 
     # 11 bis. un clic pendant l'achat ne crée ni n'efface aucun message
     remise_a_zero()
@@ -418,10 +457,145 @@ try:
     src = (Path(__file__).resolve().parent / "web_upload.py").read_text(encoding="utf-8")
     i_nx, i_vd = src.find("import numeros_x_discord as _nx"), src.find("return jsonify(_vd.traiter_interaction(charge))")
     check("route /discord/interactions : « numx: » traité avant la vérification", 0 < i_nx < i_vd)
+
+    # 19. le récap « debrief-day » de Twitter, posté par REST (Luigi)
+    remise_a_zero()
+    d = Path(tempfile.mkdtemp(prefix="numx_recap_"))
+    _sav_recap = nx.RECAP_FICHIER
+    nx.RECAP_FICHIER = d / "numeros_x_recap.json"
+    MOI = vd.bot_du_serveur(GID)["app_id"]
+    DEBRIEF = "777000000000000001"
+    ETAT = {"salons": [{"id": "1", "type": 0, "name": "📱・numéro-usa", "position": 1}],
+            "messages": [], "n": 0}
+
+    def api_recap(methode, chemin, **kw):
+        APPELS.append((methode, chemin, kw))
+        if methode == "GET" and chemin == f"/guilds/{GID}/channels":
+            return 200, ETAT["salons"]
+        if methode == "GET" and chemin.startswith(f"/guilds/{GID}/members/"):
+            return 200, {"nick": "Freezy", "user": {"id": chemin.rsplit("/", 1)[1], "username": "fz"}}
+        if methode == "GET" and chemin.startswith(f"/channels/{DEBRIEF}/messages"):
+            return 200, ETAT["messages"]
+        if methode == "POST" and chemin == f"/channels/{DEBRIEF}/messages":
+            ETAT["n"] += 1
+            return 200, {"id": "9%d" % ETAT["n"]}
+        if methode == "PATCH" and chemin.startswith(f"/channels/{DEBRIEF}/messages/"):
+            return 200, {"id": chemin.rsplit("/", 1)[1]}
+        return 404, {"message": "inconnu"}
+
+    def ecrits():
+        return [(m, ch) for m, ch, kw in APPELS if m in ("POST", "PATCH")]
+
+    def corps(kw):
+        if "json" in kw:
+            return kw["json"]
+        return json.loads(kw["data"]["payload_json"])
+
+    vd.api = api_recap
+    numgen.get_number_herosms, numgen.get_code = faux_numero, faux_code
+    _sav_mp = num.machine_prod
+    num.machine_prod = lambda: True
+    nx._SALONS.clear()
+    nx._NOMS.clear()
+    nx._RECAP.update(gen=None, jour=None, reveil=0.0)
+    maintenant = time.time()
+    hier = maintenant - 86400
+    # un numéro d'hier (code reçu), pris avant que le salon existe
+    num.histo_prise({"id": "h1", "kind": "sms", "provider": "herosms", "service": "tw",
+                     "valeur": "+15550001111", "par": VA, "pris_le": int(hier)},
+                    channel=nx.SimpleNamespace(id=SALON, guild=nx.SimpleNamespace(id=GID)),
+                    user=nx.SimpleNamespace(id=VA, display_name="Freezy"), maintenant=hier)
+    num.histo_evenement("sms", "h1", "code", maintenant=hier + 60)
+    b = nx.recap_tour(maintenant, forcer=True)
+    nx._SALONS.clear()
+    b2 = nx.recap_tour(maintenant + 61, forcer=True)
+    reg = json.loads(nx.RECAP_FICHIER.read_text(encoding="utf-8"))
+    check("récap Twitter : sans salon « debrief-day », rien n'est posté",
+          b["sans_salon"] == [GID] and not ecrits(), ecrits())
+    check("récap Twitter : l'absence du salon est retenue (dite une fois, même après un redémarrage)",
+          reg["dits"].get(f"salon:{GID}") == "absent" and b2["sans_salon"] == [GID], reg)
+
+    ETAT["salons"].append({"id": DEBRIEF, "type": 0, "name": "📊・debrief-day", "position": 5})
+    nx._SALONS.clear()
+    APPELS.clear()
+    b = nx.recap_tour(maintenant + 120, forcer=True)
+    posts = [kw for m, ch, kw in APPELS if m == "POST"]
+    check("récap Twitter : le salon créé, la veille (avec ses numéros) puis le jour sont postés",
+          len(b["postes"]) == 2 and len(posts) == 2
+          and [c for c, g in b["postes"]] == sorted(c for c, g in b["postes"]), (b, ecrits()))
+    check("récap Twitter : messages V2, sans mention",
+          all(corps(kw).get("flags") == nx.V2 and corps(kw)["allowed_mentions"] == {"parse": []}
+              for kw in posts), [corps(kw) for kw in posts])
+    titres = [t for kw in posts for t in textes(corps(kw)["components"]) if t.startswith("## ")]
+    check("récap Twitter : le même titre que le récap d'origine",
+          any(t.startswith("## " + num.titre_recap(num.jour_benin(hier), False)) for t in titres), titres)
+    APPELS.clear()
+    b = nx.recap_tour(maintenant + 180, forcer=True)
+    check("récap Twitter : sans nouveau chiffre, aucune écriture", not ecrits(), ecrits())
+    nx.traiter(clic("numx:prendre", uid=VA2))
+    APPELS.clear()
+    b = nx.recap_tour(maintenant + 240)
+    check("récap Twitter : un numéro de plus ÉDITE le message du jour (jamais un second)",
+          b["edites"] and not b["postes"]
+          and [m for m, ch in ecrits()] == ["PATCH"], (b, ecrits()))
+    reg = json.loads(nx.RECAP_FICHIER.read_text(encoding="utf-8"))
+    cle_hier = num.jour_benin(hier).isoformat()
+    check("récap Twitter : la veille est figée au registre", reg["jours"][cle_hier][GID].get("fige"), reg)
+    # registre perdu : le message est retrouvé dans le salon, pas reposté
+    nx.RECAP_FICHIER.unlink()
+    for suffixe in (".prev",):
+        p_prev = nx.RECAP_FICHIER.with_name(nx.RECAP_FICHIER.name + suffixe)
+        if p_prev.exists():
+            p_prev.unlink()
+    ETAT["messages"] = [{"id": "92", "author": {"id": MOI},
+                         "attachments": [{"filename": num.NOM_IMAGE_RECAP % num.jour_benin(maintenant).isoformat()}],
+                         "components": [{"type": 10, "content": "## " + num.titre_recap(num.jour_benin(maintenant), False)}]},
+                        {"id": "91", "author": {"id": MOI},
+                         "attachments": [{"filename": num.NOM_IMAGE_RECAP % cle_hier}],
+                         "components": [{"type": 10, "content": "## " + num.titre_recap(num.jour_benin(hier), False)}]}]
+    APPELS.clear()
+    nx._RECAP.update(gen=None)
+    b = nx.recap_tour(maintenant + 300, forcer=True)
+    check("récap Twitter : registre perdu, les messages sont retrouvés et édités, aucun reposté",
+          not [1 for m, ch in ecrits() if m == "POST"] and ecrits(), ecrits())
+    APPELS.clear()
+    b = nx.recap_tour(maintenant + 360)
+    check("récap Twitter : un tour sans événement ne relit rien et n'écrit rien",
+          not APPELS or all(m == "GET" for m, ch, kw in APPELS), APPELS)
+    num.machine_prod = lambda: False
+    APPELS.clear()
+    nx.traiter(clic("numx:prendre", uid=CHEF, perms=str(0x8)))
+    APPELS.clear()
+    b = nx.recap_tour(maintenant + 420)
+    check("récap Twitter : hors du VPS, rien ne part", not ecrits(), ecrits())
+    num.machine_prod = _sav_mp
+    nx.RECAP_FICHIER = _sav_recap
+    vd.api = faux_api
+
+    # 20. le récap du bot admin ne garde plus Twitter (Luigi le poste)
+    check("cog : Twitter fait partie des serveurs du récap REST", GID in num._serveurs_rest())
+    check("cog : les chiffres de Twitter sont écartés de son bilan",
+          num._sans_rest({GID: 1, "1535758943324999711": 2}) == {"1535758943324999711": 2})
+
+    class _Bot:
+        guilds = []
+    cog = num.NumerosCog.__new__(num.NumerosCog)
+    cog._recap_postes = {}
+    regc = {"jours": {"2026-10-17": {GID: {"finalise": False, "sans_salon": True, "numeros": 4},
+                                     "1535758943324999711": {"finalise": True}}}}
+    _sav_ecr = num._recap_ecrire
+    num._recap_ecrire = lambda r: None
+    try:
+        cog._retirer_rest(regc)
+    finally:
+        num._recap_ecrire = _sav_ecr
+    check("cog : les vieilles fiches « sans_salon » de Twitter sortent du registre, la journée se clôt",
+          GID not in regc["jours"]["2026-10-17"] and num._jour_fini(regc["jours"]["2026-10-17"]), regc)
 finally:
     (vd.api, vd._EN_FOND, nx.FICHIER, num.HISTO_FILE, nx._dormir, tickets_discord.role_helper,
      numgen.get_number_herosms, numgen.get_code, numgen.cancel, numgen.finish, numgen.retry,
-     numgen.herosms_key) = SAV
+     numgen.herosms_key, numgen.ALERTES_FICHIER, numgen._en_production,
+     numgen._poster_alerte) = SAV
 
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 sys.exit(1 if KO else 0)

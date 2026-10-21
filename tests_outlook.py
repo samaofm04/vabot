@@ -41,6 +41,13 @@ ck.PANNEAUX_FILE = _TMP / "outlook_panneaux.json"
 ck.DEMANDES_FILE = _TMP / "outlook_demandes.json"
 ck.USERS_FILE = _TMP / "users.json"
 
+# Les alertes au staff : rien ne part, on les garde ici.
+import numgen
+ALERTES = []
+numgen.ALERTES_FICHIER = _TMP / "numgen_alertes.json"
+numgen._en_production = lambda: True
+numgen._poster_alerte = lambda texte: (ALERTES.append(texte) or (True, ""))
+
 SEED = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"   # secret ASCII « 12345678901234567890 »
 
 FAILS, OKS = [], []
@@ -57,6 +64,7 @@ def _reset(comptes=None, users=None):
     safe_json.write(oc.FICHIER, {"comptes": comptes or []})
     safe_json.write(ck.DEMANDES_FILE, {})
     safe_json.write(ck.PANNEAUX_FILE, {})
+    safe_json.write(numgen.ALERTES_FICHIER, {})
     ck.USERS_FILE.write_text(json.dumps(users or {}), encoding="utf-8")
 
 
@@ -328,35 +336,47 @@ def test_repli_ticket():
 # ---- 7) Pool vide a la validation -------------------------------------------
 
 def test_validation_vide():
-    _reset(users={"111": {"channel_id": 999}, "222": {"channel_id": 998}})
+    _reset(users={"111": {"channel_id": 999}, "333": {"channel_id": 998}})
     oc.ajouter("seul@outlook.com", "PW", SEED)
     salon = FChannel(1, "adresse-outlook")
     bot = FBot({999: FChannel(999), 998: FChannel(998)})
     cog = ck.OutlookCog(bot)
+    ALERTES.clear()
 
     async def run():
         import safe_json
-        # VA A prend le seul compte.
-        a = FUser(111, "A")
-        ia = FInteraction(a, salon, bot)
-        await cog.demander(ia)
-        mid_a = int([k for k, v in safe_json.load(ck.DEMANDES_FILE).items()
-                     if v["uid"] == "111"][0])
+        # A et B demandent tant qu'il reste une adresse ; A est valide le premier.
+        a, b = FUser(111, "A"), FUser(333, "B")
+        await cog.demander(FInteraction(a, salon, bot))
+        await cog.demander(FInteraction(b, salon, bot))
+        dem = safe_json.load(ck.DEMANDES_FILE)
+        mid_a = int([k for k, v in dem.items() if v["uid"] == "111"][0])
+        mid_b = int([k for k, v in dem.items() if v["uid"] == "333"][0])
         mgr = FUser(222, "Mgr", perms=FPerms(administrator=True))
         await cog.valider(FInteraction(mgr, salon, bot, message=FMessage(mid=mid_a)))
-        # VA B demande alors qu'il n'y a plus rien.
-        b = FUser(333, "B")
-        ib = FInteraction(b, salon, bot)
-        await cog.demander(ib)
-        mid_b = int([k for k, v in safe_json.load(ck.DEMANDES_FILE).items()
-                     if v["uid"] == "333"][0])
         itx_b = FInteraction(mgr, salon, bot, message=FMessage(mid=mid_b))
         await cog.valider(itx_b)
-        check("validation vide : manager averti 'aucune libre'",
-              itx_b.response.sends and "libre" in itx_b.response.sends[0][0].lower())
+        check("validation vide : manager averti que le coffre est vide et le staff prevenu",
+              itx_b.response.sends and "vide" in itx_b.response.sends[0][0].lower()
+              and "staff" in itx_b.response.sends[0][0].lower(), itx_b.response.sends)
         check("validation vide : rien d'edite (pas d'attribution)",
               not itx_b.response.edits)
         check("validation vide : B n'a pas de compte", oc.compte_de_uid("333") is None)
+        check("validation vide : la demande de B reste en attente",
+              safe_json.load(ck.DEMANDES_FILE)[str(mid_b)]["statut"] == "attente")
+        # C demande alors que le coffre est vide : refus tout de suite, sans carte.
+        cartes = len(salon.sent)
+        ic = FInteraction(FUser(444, "C"), salon, bot)
+        await cog.demander(ic)
+        check("coffre vide : le VA lit pourquoi, tout de suite",
+              ic.response.sends and "vide" in ic.response.sends[0][0].lower()
+              and "staff" in ic.response.sends[0][0].lower(), ic.response.sends)
+        check("coffre vide : aucune carte ne sonne le manager", len(salon.sent) == cartes)
+        check("coffre vide : le staff est prevenu UNE fois (2 refus), sans secret",
+              len(ALERTES) == 1 and "Coffre Outlook vide" in ALERTES[0] and SEED not in ALERTES[0]
+              and "PW" not in ALERTES[0], ALERTES)
+        check("role manager de Va IG : celui de verif_discord (🛡️ Manager)",
+              ck.ROLE_MANAGER == 1555968604032213102, ck.ROLE_MANAGER)
 
     asyncio.run(run())
 

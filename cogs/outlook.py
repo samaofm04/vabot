@@ -32,14 +32,31 @@ from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 
+import numgen
 import outlook_comptes as oc
 import safe_json
 
 log = logging.getLogger("vabot.outlook")
 
-#: Va IG (serveur FR) et son role manager — repris de verif_discord.py.
+#: Va IG (serveur FR) et son role manager : LU dans verif_discord.py, pas
+#: recopie. La copie d'ici etait restee sur BOSS (1505821464375328798) quand
+#: verif_discord est passe a 🛡️ Manager le 17/10/2026 : un vrai manager de
+#: Va IG ne pouvait pas valider, et la carte sonnait le mauvais role. BOSS
+#: passe toujours, par ses droits d'administrateur (_est_manager).
 VA_IG_ID = 1505418484052394004
-ROLE_MANAGER = 1505821464375328798
+
+
+def _role_manager() -> int:
+    try:
+        import verif_discord
+        return int(verif_discord.SERVEURS_EXTRA[verif_discord.VA_IG_ID]["role_manager"])
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("outlook: role manager de verif_discord illisible (%s: %s) — "
+                    "🛡️ Manager par defaut", type(e).__name__, e)
+        return 1555968604032213102
+
+
+ROLE_MANAGER = _role_manager()
 #: Le salon est repere par son nom nettoye finissant ainsi (renommable a la main).
 SUFFIXE_SALON = "adresse-outlook"
 #: Fenetre d'historique balayee pour retrouver/deduire les panneaux, comme
@@ -391,6 +408,13 @@ class OutlookCog(commands.Cog):
                 "« \U0001F510 Code 2FA » pour ton code.",
                 ephemeral=True, allowed_mentions=SANS_MENTION)
             return
+        if not oc.nb_libres():
+            # Coffre vide : la carte sonnait un manager qui ne pouvait rien
+            # valider, et le VA attendait sans savoir pourquoi.
+            await itx.response.send_message(oc.TEXTE_COFFRE_VIDE + " Reviens plus tard.",
+                                            ephemeral=True, allowed_mentions=SANS_MENTION)
+            await self._coffre_vide(uid)
+            return
         # Une demande de ce VA attend deja un manager : ne pas reposter de
         # carte. Sans ca, 5 clics = 5 cartes = 5 pings du role manager (le
         # proprietaire ne veut pas de bruit dans les salons).
@@ -459,11 +483,14 @@ class OutlookCog(commands.Cog):
             # « attente » pour qu'un manager puisse reessayer quand une se libere.
             _demande_ecrire(itx.message.id, {**rec, "statut": "attente"})
             await itx.response.send_message(
-                "Aucune adresse Outlook libre.",
+                oc.TEXTE_COFFRE_VIDE + " La demande reste en attente : valide-la quand "
+                "une adresse aura été ajoutée.",
                 ephemeral=True, allowed_mentions=SANS_MENTION)
             log.warning("outlook: validation de %s refusee — aucune adresse libre "
                         "(manager %s)", uid, getattr(itx.user, "id", "?"))
+            await self._coffre_vide(uid)
             return
+        await asyncio.to_thread(numgen.fin_alerte, "outlook:vide")
         livre, pourquoi = await self._livrer(uid, compte)
         manager = getattr(itx.user, "display_name", "?")
         txt = "✅ Attribuée à %s · validé par %s" % (va, manager)
@@ -503,6 +530,16 @@ class OutlookCog(commands.Cog):
                                         allowed_mentions=SANS_MENTION)
         log.info("outlook: code 2FA fourni à %s pour le compte %s",
                  getattr(itx.user, "id", "?"), compte.get("id"))
+
+    async def _coffre_vide(self, uid):
+        """Journal + staff prevenu une fois : la meme alerte que Twitter
+        (outlook_x_discord.coffre_vide), c'est le meme coffre."""
+        try:
+            import outlook_x_discord
+            await asyncio.to_thread(outlook_x_discord.coffre_vide, str(uid))
+        except Exception as e:                               # noqa: BLE001
+            log.warning("outlook: coffre vide, alerte au staff en echec (%s: %s)",
+                        type(e).__name__, e)
 
     async def _livrer(self, uid, compte):
         """Depose adresse + mot de passe (JAMAIS le seed) dans le ticket du VA.

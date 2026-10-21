@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numgen
 import outlook_comptes as oc
 import safe_json
 import verif_discord as vd
@@ -231,10 +232,41 @@ def _repondre(p, gid, uid, comps):
                                 "allowed_mentions": {"parse": []}}}
 
 
+#: Ce que le VA lit quand le coffre est vide (le même texte sur Va IG).
+TEXTE_COFFRE_VIDE = oc.TEXTE_COFFRE_VIDE + " Reviens plus tard."
+
+
+def coffre_vide(qui: str) -> None:
+    """Dit au journal POURQUOI le coffre ne donne rien, et prévient le staff
+    UNE fois (numgen.alerter_staff, le debrief-day du Spam) — partagé avec
+    Va IG (cogs/outlook.py) : c'est le même coffre. Le remplir reste au
+    propriétaire (youl4b.com/outlook). Jamais d'adresse ni de secret ici."""
+    try:
+        n = len(oc.comptes())
+    except Exception as e:
+        n = -1
+        _log(f"coffre illisible ({type(e).__name__}: {e})")
+    pourquoi = ("aucune adresse enregistrée" if n == 0 else
+                "coffre illisible" if n < 0 else f"{n} adresse(s), toutes déjà données")
+    _log(f"coffre vide ({pourquoi}) : demande de {qui} refusée")
+    etat = numgen.alerter_staff(
+        "outlook:vide", "⚠️ **Coffre Outlook vide** (%s) : les VA de Twitter et de Va IG ne "
+                        "reçoivent plus d'adresse. À remplir sur youl4b.com/outlook." % pourquoi)
+    if etat not in ("envoye", "deja", "hors production"):
+        _log(f"alerte « coffre vide » non envoyée au staff : {etat}")
+
+
 def _prendre(p, gid, uid, membre, user, conf):
     if not oc.nb_libres():
-        _log(f"plus aucune adresse libre (demande de {uid})")
-        return nx._texte("❌ Plus d'adresse disponible pour le moment. Préviens un admin.")
+        try:
+            _fond(lambda: coffre_vide(uid))
+        except Exception as e:
+            _log(f"coffre vide : alerte non lancée ({type(e).__name__}: {e})")
+        return nx._texte(TEXTE_COFFRE_VIDE)
+    try:
+        _fond(lambda: numgen.fin_alerte("outlook:vide"))
+    except Exception as e:
+        _log(f"fin d'alerte « coffre vide » non lancée ({type(e).__name__}: {e})")
     if not nx._staff(membre, gid):
         try:
             n = oc.nb_du_jour(uid, gid)
@@ -251,7 +283,12 @@ def _prendre(p, gid, uid, membre, user, conf):
         _log(f"attribution impossible pour {uid} ({type(e).__name__}: {e})")
         return nx._texte("❌ Le coffre ne s'écrit plus : rien n'a été donné. Préviens un admin.")
     if not c:
-        return nx._texte("❌ Plus d'adresse disponible pour le moment. Préviens un admin.")
+        # La dernière adresse libre partie entre-temps (deux clics à la fois).
+        try:
+            _fond(lambda: coffre_vide(uid))
+        except Exception as e:
+            _log(f"coffre vide : alerte non lancée ({type(e).__name__}: {e})")
+        return nx._texte(TEXTE_COFFRE_VIDE)
     _log(f"adresse n°{c.get('id')} donnée à {uid} ({c.get('va')})")
     rep = _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     try:

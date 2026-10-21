@@ -15,6 +15,8 @@ data/numgen.json (posé par `/smskey`). Jamais de clé dans le code.
 """
 import os
 import pathlib
+import threading
+import time
 
 import requests
 
@@ -435,3 +437,99 @@ _MSG = {
 def _human(txt):
     t = (txt or "").strip()
     return _MSG.get(t.split(":")[0], t or "réponse vide")
+
+
+# ------------------------------------------------------- ALERTE AU STAFF
+# Un service à sec ne se lisait que dans le panneau du VA : du 16 au 20/10/2026,
+# huit VA du serveur Spam ont reçu « Insufficient balance » de SMSBower, et
+# aucun mail n'est parti depuis le 13/10 sans que personne ne le sache. Le
+# staff est désormais prévenu UNE fois par panne, dans le 📊・debrief-day du
+# serveur Spam -- là où part déjà le récap des numéros (choix du propriétaire,
+# 21/10/2026). Recharger ou remplir reste à lui.
+
+ALERTES_FICHIER = pathlib.Path(__file__).resolve().parent / "data" / "numgen_alertes.json"
+#: Serveur Spam > 📊・debrief-day, posté par le bot admin (le même que le récap).
+ALERTES_SALON = "1553627411680338153"
+_VERROU_ALERTES = threading.Lock()
+
+#: Les mots d'un solde vide : SMSBower (mail, en JSON) écrit « Insufficient
+#: balance », le protocole stubs NO_BALANCE, que _human traduit.
+_MOTS_CREDIT = ("insufficient balance", "no_balance", "solde insuffisant",
+                "not enough balance", "low balance")
+
+
+def sans_credit(msg) -> bool:
+    """Le refus vient-il d'un solde vide ? Avec deux fournisseurs essayés
+    (« GetAText : … | SMSBower : … »), TOUS doivent l'être : l'un à sec et
+    l'autre en rupture de stock, recharger ne suffirait pas."""
+    parts = [p for p in str(msg or "").lower().split("|") if p.strip()]
+    return bool(parts) and all(any(k in p for k in _MOTS_CREDIT) for p in parts)
+
+
+def _alertes() -> dict:
+    d = safe_json.load(ALERTES_FICHIER, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def _poster_alerte(texte: str):
+    """Un message texte dans ALERTES_SALON, par REST : appelable depuis les
+    fils du site (Twitter) comme depuis le bot. -> (ok, raison)."""
+    tok = (os.getenv("DISCORD_ADMIN_TOKEN") or "").strip()
+    if not tok:
+        return False, "DISCORD_ADMIN_TOKEN absent"
+    try:
+        r = requests.post(
+            f"https://discord.com/api/v10/channels/{ALERTES_SALON}/messages",
+            headers={"Authorization": "Bot " + tok, "User-Agent": "DiscordBot (youl4b, 1.0)"},
+            json={"content": texte[:1900], "allowed_mentions": {"parse": []}}, timeout=20)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:160]}"
+    if r.status_code in (200, 201):
+        return True, ""
+    return False, f"HTTP {r.status_code} {r.text[:160]}"
+
+
+def _en_production() -> bool:
+    """La machine qui poste sur Discord : VA_MACHINE_PROD n'est posé que dans
+    le .env du VPS. Remplacé dans les tests."""
+    return os.environ.get("VA_MACHINE_PROD") == "1"
+
+
+def alerter_staff(cle: str, texte: str) -> str:
+    """Prévient le staff UNE fois par panne (`cle` : « credit:mail »,
+    « outlook:vide »…), retenu dans data/numgen_alertes.json : un redémarrage
+    ne le redit pas. Rend « envoye », « deja », ou la raison de l'échec -- rien
+    n'est alors retenu, le refus suivant réessaie.
+
+    Hors de la machine de production (VA_MACHINE_PROD absent), rien ne part :
+    les suites de tests passent par ici avec le vrai data/."""
+    with _VERROU_ALERTES:
+        if cle in _alertes():
+            return "deja"
+        if not _en_production():
+            return "hors production"
+        ok, pourquoi = _poster_alerte(texte)
+        if not ok:
+            print(f"[numgen] alerte staff « {cle} » NON envoyée : {pourquoi}", flush=True)
+            return pourquoi or "refus"
+        d = _alertes()
+        d[cle] = {"le": int(time.time()), "texte": texte[:300]}
+        if not safe_json.write(ALERTES_FICHIER, d):
+            print(f"[numgen] alerte staff « {cle} » envoyée mais non retenue : "
+                  f"elle repartira au prochain refus", flush=True)
+        else:
+            print(f"[numgen] alerte staff « {cle} » envoyée", flush=True)
+        return "envoye"
+
+
+def fin_alerte(cle: str) -> bool:
+    """Le service est revenu (un mail livré, une adresse donnée) : la
+    prochaine panne sera redite. Rend True si une alerte était en cours."""
+    with _VERROU_ALERTES:
+        d = _alertes()
+        if cle not in d:
+            return False
+        d.pop(cle, None)
+        safe_json.write(ALERTES_FICHIER, d)
+    print(f"[numgen] « {cle} » : service revenu, la prochaine panne sera redite", flush=True)
+    return True

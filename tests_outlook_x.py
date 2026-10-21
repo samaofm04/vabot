@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import numgen
 import outlook_comptes as oc
 import outlook_x_discord as ox
 import tickets_discord
@@ -30,6 +31,7 @@ GID, SALON, APP = vd.TWITTER_ID, "1552392906340565114", "1552153790701117480"
 VA, VA2, CHEF = "111111111111111111", "222222222222222222", "333333333333333333"
 SEED = "JBSWY3DPEHPK3PXP"
 APPELS, REPONSES = [], []
+ALERTES = []                # alertes au staff (numgen.alerter_staff), rien ne part
 REGLE = {"messages": []}
 
 
@@ -68,12 +70,15 @@ def remise_a_zero(n_comptes=0):
     d = Path(tempfile.mkdtemp(prefix="mailx_"))
     oc.FICHIER = d / "outlook_comptes.json"
     ox.FICHIER = d / "outlook_x.json"
+    numgen.ALERTES_FICHIER = d / "numgen_alertes.json"
+    ALERTES.clear()
     for i in range(n_comptes):
         oc.ajouter(f"compte{i + 1}@outlook.com", f"MotDePasse{i + 1}!", SEED)
 
 
 SAV = (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper,
-       tickets_discord.ticket_de)
+       tickets_discord.ticket_de, numgen.ALERTES_FICHIER, numgen._en_production,
+       numgen._poster_alerte)
 TICKET = "900000000000000001"
 try:
     vd._charger_config()
@@ -82,6 +87,8 @@ try:
     ox._dormir = lambda s: None
     tickets_discord.role_helper = lambda gid: ""
     tickets_discord.ticket_de = lambda gid, uid: TICKET if uid == VA else ""
+    numgen._en_production = lambda: True
+    numgen._poster_alerte = lambda texte: (ALERTES.append(texte) or (True, ""))
 
     # 1. ce qui n'est pas pour nous
     check("autre bouton : rendu au module suivant", ox.traiter({"type": 3, "data": {"custom_id": "numx:prendre"}}) is None)
@@ -89,7 +96,17 @@ try:
     # 2. coffre vide
     remise_a_zero(0)
     r = clic("mailx:prendre")
-    check("coffre vide : refus éphémère qui le dit", r["type"] == 4 and "Plus d'adresse" in r["data"]["content"], r)
+    check("coffre vide : le VA lit que le coffre est vide et que le staff est prévenu",
+          r["type"] == 4 and "coffre d'adresses Outlook est vide" in r["data"]["content"]
+          and "staff est prévenu" in r["data"]["content"], r)
+    clic("mailx:prendre", uid=VA2)
+    check("coffre vide : le staff est prévenu UNE fois (2 refus, 1 alerte), sans adresse ni secret",
+          len(ALERTES) == 1 and "aucune adresse enregistrée" in ALERTES[0]
+          and SEED not in ALERTES[0], ALERTES)
+    oc.ajouter("revenu@outlook.com", "MotDePasseR!", SEED)
+    clic("mailx:prendre", uid=CHEF, perms=str(0x8))
+    check("coffre rempli : l'alerte est levée, la prochaine panne sera redite",
+          "outlook:vide" not in numgen._alertes(), numgen._alertes())
 
     # 3. une adresse : le formulaire rempli, pour lui seul
     remise_a_zero(5)
@@ -142,7 +159,9 @@ try:
         clic("mailx:prendre", uid=CHEF, perms=str(0x8), jeton="chef%d" % i)
     check("le staff n'est pas bridé", oc.nb_libres() == 0, oc.nb_libres())
     r = clic("mailx:prendre", uid=VA2)
-    check("coffre épuisé : refus clair", "Plus d'adresse" in r["data"]["content"], r)
+    check("coffre épuisé : refus clair, staff prévenu",
+          "coffre d'adresses Outlook est vide" in r["data"]["content"]
+          and len(ALERTES) == 1 and "toutes déjà données" in ALERTES[0], (r, ALERTES))
     check("salon perso : un VA sans salon perso ne bloque rien (rien de posté ailleurs)",
           not [1 for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/") and ch != f"/channels/{TICKET}/messages"])
 
@@ -221,7 +240,8 @@ try:
     check("route /discord/interactions : « mailx: » traité avant la vérification", 0 < i_ox < i_vd)
 finally:
     (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper,
-     tickets_discord.ticket_de) = SAV
+     tickets_discord.ticket_de, numgen.ALERTES_FICHIER, numgen._en_production,
+     numgen._poster_alerte) = SAV
 
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 sys.exit(1 if KO else 0)

@@ -721,8 +721,9 @@ class NumerosCog(commands.Cog):
                         getattr(ch, "name", "?"), str(res)[:300])
             # Un solde vide ou un fournisseur a sec se DIT dans le panneau,
             # sur une ligne : le reste ne bouge pas.
-            await maj_panneau(self.bot, ch, cog=self, souci="❌ %s" % res)
+            await maj_panneau(self.bot, ch, cog=self, souci=await _souci_fournisseur(kind, res))
             return
+        numgen.fin_alerte("credit:%s" % kind)
         log.info("numgen: %s obtenu (%s, %s) pour #%s", kind,
                  (res or {}).get("provider"), (res or {}).get("country"),
                  getattr(ch, "name", "?"))
@@ -1497,6 +1498,7 @@ class NumerosCog(commands.Cog):
         reg = _recap_lire()
         if reg is None:
             return bilan
+        self._retirer_rest(reg)
         premiere = "jours" not in reg
         jours_reg = reg.setdefault("jours", {})
         aujourdhui = jour_benin(now)
@@ -1671,7 +1673,7 @@ class NumerosCog(commands.Cog):
             if jour in a_finir or (vif_histo and jour in a_corriger):
                 agg_j = self._agg_fini(jour, gen) if entrees is None else None
                 if agg_j is None:
-                    agg_j = agreger(entrees, jour, now)
+                    agg_j = _sans_rest(agreger(entrees, jour, now))
                     self._figer_aggs[jour.isoformat()] = (gen, agg_j)
                 corrige |= await self._figer_jour(jour, agg_j, reg, bilan, now)
         if not vif:
@@ -1681,7 +1683,7 @@ class NumerosCog(commands.Cog):
         zero_echec = False
         if direct:
             if agg is None:
-                agg = agreger(entrees, aujourdhui, now)
+                agg = _sans_rest(agreger(entrees, aujourdhui, now))
             self._direct_agg = (cle_auj, gen, agg)
             fiches_auj = reg["jours"].get(cle_auj)
             fiches_auj = fiches_auj if isinstance(fiches_auj, dict) else {}
@@ -2630,6 +2632,24 @@ class NumerosCog(commands.Cog):
         if change:
             self._recap_sauver(reg)
 
+    def _retirer_rest(self, reg):
+        """Les fiches des serveurs du recap REST (_serveurs_rest) n'ont rien a
+        faire ici : leur recap a son propre registre (numeros_x_discord). Les
+        anciennes, « sans_salon » et jamais closes, tenaient leurs journees
+        ouvertes -- chaque tour les refigeait -- et finissaient « abandonnees »."""
+        rest = _serveurs_rest()
+        retire = []
+        for cle, jr in list((reg.get("jours") or {}).items()):
+            if isinstance(jr, dict):
+                for gid in [g for g in jr if g in rest]:
+                    jr.pop(gid, None)
+                    retire.append(cle)
+        if retire:
+            log.info("numgen: recap : %d fiche(s) des serveurs %s retiree(s) du registre (%s) "
+                     "-- leur recap part par REST (numeros_x_discord)", len(retire),
+                     ", ".join(sorted(rest)), ", ".join(sorted(set(retire))))
+            self._recap_sauver(reg)
+
     def _recap_sauver(self, reg):
         try:
             _recap_ecrire(reg)
@@ -2645,7 +2665,7 @@ class NumerosCog(commands.Cog):
     async def start_sms(self, interaction, service):
         ok, res = await asyncio.to_thread(numgen.get_number, service)
         if not ok:
-            await interaction.followup.send(f"❌ {res}", ephemeral=True)
+            await interaction.followup.send(await _souci_fournisseur("sms", res), ephemeral=True)
             return
         # Ce parcours (« Autre service » des anciens panneaux) achete aussi :
         # hors de l'historique, ses numeros manquaient au recap sans un mot.
@@ -2673,7 +2693,7 @@ class NumerosCog(commands.Cog):
     async def start_mail(self, interaction, service):
         ok, res = await asyncio.to_thread(numgen.get_mail, service)
         if not ok:
-            await interaction.followup.send(f"❌ {res}", ephemeral=True)
+            await interaction.followup.send(await _souci_fournisseur("mail", res), ephemeral=True)
             return
         histo_prise(_actif_ephemere("mail", res, service, interaction),
                     getattr(interaction, "channel", None),
@@ -5065,21 +5085,84 @@ def _pays(channel):
     return PAYS_FR if _serveur_fr(channel) else None
 
 
+#: Les fournisseurs qui remboursent TOUT numero clos sans code (annule,
+#: « Autre », expire au bout de 20 min) : chez eux seul un code coute, et seul
+#: un code compte au quota. HeroSMS (Numero X de Twitter) : du 17 au 19/10/2026,
+#: 26 numeros pris pour 4 codes -- les VA atteignaient « 3 numéros aujourd'hui »
+#: avec des numeros rendus, gratuits, sans avoir pu creer un seul compte.
+REMBOURSE_SANS_CODE = {"herosms"}
+
+
 def numeros_du_jour(uid, gid, maintenant=None) -> int:
     """Les numeros (SMS) pris aujourd'hui (heure du Benin) par `uid` sur le
     serveur `gid`. Un numero rendu -- rembourse -- ne compte pas : « Autre »
-    sur un numero sans code ne doit pas manger le quota. Leve si
-    l'historique est illisible."""
-    jour = jour_benin(time.time() if maintenant is None else maintenant)
+    sur un numero sans code ne doit pas manger le quota. Chez un fournisseur
+    de REMBOURSE_SANS_CODE, un numero clos sans code non plus (il attend
+    encore : il compte). Leve si l'historique est illisible."""
+    now = time.time() if maintenant is None else maintenant
+    jour = jour_benin(now)
     n = 0
     for a in _histo_lire():
         if (a.get("type") or "sms") != "sms" or a.get("rendu_le"):
             continue
         if str(a.get("par")) != str(uid) or str(a.get("serveur")) != str(gid):
             continue
+        if (a.get("fournisseur") in REMBOURSE_SANS_CODE
+                and _issue(a, now) not in ("code", "attente")):
+            continue
         if jour_benin(a.get("pris_le")) == jour:
             n += 1
     return n
+
+
+async def _souci_fournisseur(kind, res) -> str:
+    """Ce que le VA lit quand le fournisseur refuse. Un solde vide se dit en
+    clair, et le staff en est prevenu UNE fois (numgen.alerter_staff) :
+    « ❌ Insufficient balance » ne disait ni pourquoi ni que quelqu'un etait
+    au courant (8 refus du 16 au 20/10/2026, salons -numero-mail du Spam).
+    Recharger reste au proprietaire."""
+    if not numgen.sans_credit(res):
+        return "❌ %s" % res
+    if kind == "mail":
+        quoi = "mail"
+        alerte = ("⚠️ **Mail SMSBower sans crédit** (« %s ») : les VA ne peuvent plus "
+                  "prendre de mail. À recharger sur SMSBower." % str(res)[:120])
+    else:
+        quoi = "de numéros"
+        alerte = ("⚠️ **Numéros SMS sans crédit** (« %s ») : les VA ne peuvent plus "
+                  "prendre de numéro. À recharger." % str(res)[:160])
+    try:
+        etat = await asyncio.to_thread(numgen.alerter_staff, "credit:%s" % kind, alerte)
+        if etat not in ("envoye", "deja", "hors production"):
+            log.warning("numgen: alerte « credit:%s » non envoyee au staff (%s)", kind, etat)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("numgen: alerte « credit:%s » en echec (%s: %s)", kind, type(e).__name__, e)
+    return "❌ Service %s sans crédit : le staff est prévenu." % quoi
+
+
+def _serveurs_rest() -> set:
+    """Les serveurs dont le recap « debrief-day » part par REST, avec le bot
+    du serveur (numeros_x_discord : Luigi sur YouLab TWITTER). Ce bot n'y est
+    pas : sans cette liste, chacun de leurs jours restait « en attente de
+    salon » -- 53 WARNING du 17 au 20/10/2026, 4 a chaque redemarrage, et une
+    journee jamais close relue a chaque tour."""
+    try:
+        import numeros_x_discord
+        return {str(g) for g in numeros_x_discord.SERVEURS}
+    except Exception as e:                                   # noqa: BLE001
+        if not _REST_DIT:
+            _REST_DIT.append(1)
+            log.warning("numgen: serveurs du recap REST illisibles (%s: %s)", type(e).__name__, e)
+        return set()
+
+
+_REST_DIT = []
+
+
+def _sans_rest(agg):
+    """Le bilan d'agreger sans les serveurs du recap REST."""
+    rest = _serveurs_rest()
+    return {g: v for g, v in agg.items() if g not in rest}
 
 
 async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:

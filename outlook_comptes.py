@@ -239,6 +239,12 @@ def nb_libres() -> int:
 
 # ---- Textes livres (PURS) : le seed n'y figure jamais -----------------------
 
+#: Le refus d'un coffre vide, sur Twitter comme sur Va IG. Du 18 au 20/10/2026,
+#: sept VA de Twitter ont lu « Préviens un admin » sans que personne ne sache
+#: que le coffre du VPS n'avait jamais été rempli.
+TEXTE_COFFRE_VIDE = "❌ Le coffre d'adresses Outlook est vide : le staff est prévenu."
+
+
 def texte_livraison(compte: dict) -> str:
     """Le message depose dans le ticket du VA : adresse + mot de passe, et OU
     tirer le code. JAMAIS le seed."""

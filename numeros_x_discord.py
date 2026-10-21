@@ -34,6 +34,7 @@ message éphémère de plus, avec le même numéro. Le nouveau message efface
 désormais le précédent (son jeton d'interaction, gardé 15 min, le permet) ;
 les boutons d'un message le changent sur place.
 """
+import os
 import threading
 import time
 from pathlib import Path
@@ -353,8 +354,25 @@ def _quota_refus(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any
         return "❌ L'historique des numéros ne se lit plus : rien n'a été acheté. Préviens un admin."
     if n >= conf["quota"]:
         _log(f"quota atteint pour {uid} ({n}/{conf['quota']})")
-        return "📵 %d numéros aujourd'hui : c'est le maximum. Reviens demain." % conf["quota"]
+        # Seuls les numéros qui ont reçu leur code comptent (HeroSMS rembourse
+        # les autres : cogs.numeros.REMBOURSE_SANS_CODE).
+        return "📵 %d codes reçus aujourd'hui : c'est le maximum. Reviens demain." % conf["quota"]
     return ""
+
+
+def _souci_achat(res: Any) -> str:
+    """Le refus d'achat tel que le VA le lit. Un solde HeroSMS vide se dit en
+    clair et prévient le staff une fois (numgen.alerter_staff) ; recharger
+    reste au propriétaire."""
+    if not numgen.sans_credit(res):
+        return "❌ " + str(res)
+    etat = numgen.alerter_staff(
+        "credit:herosms", "⚠️ **HeroSMS sans crédit** (« %s ») : les VA de YouLab TWITTER ne "
+                          "peuvent plus prendre de Numéro X. À recharger sur hero-sms.com."
+                          % str(res)[:120])
+    if etat not in ("envoye", "deja", "hors production"):
+        _log(f"alerte « credit:herosms » non envoyée au staff : {etat}")
+    return "❌ Service de numéros sans crédit : le staff est prévenu."
 
 
 def _nom(user: Dict[str, Any]) -> str:
@@ -401,8 +419,9 @@ def _acheter(cle, gid, uid, nom, conf, salon):
         ok, res = numgen.get_number_herosms(conf["service"], conf["pays"])
         if not ok:
             _log(f"achat refusé pour {uid} : {res}")
-            _redessiner(cle, conf, vue_close("❌ " + str(res)))
+            _redessiner(cle, conf, vue_close(_souci_achat(res)))
             return
+        numgen.fin_alerte("credit:herosms")
         a = {"id": str(res["id"]), "provider": "herosms", "service": conf["service"],
              "valeur": res["phone"], "par": uid, "pris_le": int(time.time()), "salon": salon}
         with _VERROU:
@@ -485,7 +504,8 @@ def _rendre(cle, gid, uid, membre, user, conf, act_id, action):
     _histo(act_id, "remplace" if action == "autre" else "annule")
     _log(f"{a.get('valeur')} : {action} par {uid}")
     if action == "annuler":
-        _redessiner(cle, conf, vue_close("❌ Numéro annulé."))
+        _redessiner(cle, conf, vue_close("❌ Numéro annulé." if a.get("code")
+                                         else "❌ Numéro annulé : il ne compte pas dans tes 3 du jour."))
         return
     refus = _quota_refus(uid, gid, membre, conf)
     if refus:
@@ -525,7 +545,8 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
                 numgen.cancel(act_id, "herosms")      # rendu s'il peut encore l'être
                 _maj(cle, act_id, clos="expire")
                 _log(f"{a.get('valeur')} : aucun code en {DUREE_NUMERO_SEC // 60} min")
-                _redessiner(cle, conf, vue_close("⌛ Aucun code en 20 min : numéro rendu."))
+                _redessiner(cle, conf, vue_close(
+                    "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes 3 du jour."))
                 return
             etat, val = numgen.get_code(act_id, "herosms")
             if etat == "code" and val:
@@ -591,6 +612,328 @@ def demarrer() -> None:
             with vd.sur_serveur(gid):
                 _reprendre_ecoutes()
     threading.Thread(target=_go, daemon=True).start()
+    # Le récap ne tourne que sur le VPS : ailleurs (Mac, suites de tests), il
+    # posterait des chiffres d'essai dans le vrai salon.
+    if os.environ.get("VA_MACHINE_PROD") == "1":
+        threading.Thread(target=_boucle_recap, daemon=True).start()
+
+
+# ─── Récap du jour (« debrief-day ») ──────────────────────────────────────
+# Le récap des numéros (cogs/numeros.py) est tenu par le bot admin, qui n'est
+# pas sur YouLab TWITTER : du 17 au 20/10/2026, ses 26 numéros sont restés
+# « en attente de salon », 53 WARNING au journal. Propriétaire, 21/10/2026 :
+# le récap, oui, dans un « 📊・debrief-day » qu'il crée lui-même dans 🔒 STAFF.
+# Même règle que le récap d'origine — UN message par jour, créé au premier
+# tour (même à 0), édité quand un chiffre change, figé à minuit (heure du
+# Bénin) puis corrigé tant qu'un numéro de la journée attend son code —, mais
+# posté par REST avec Luigi, comme recap_clics_rest. Les mêmes chiffres
+# (cogs.numeros.agreger) et la même image (numeros_image) : un seul récap.
+# Le cog écarte ces serveurs du sien (cogs.numeros._serveurs_rest).
+
+RECAP_FICHIER = Path(__file__).resolve().parent / "data" / "numeros_x_recap.json"
+RECAP_PAS_SEC = 60
+#: Un salon absent est recherché de nouveau au plus toutes les 10 minutes.
+SALON_ABSENT_SEC = 600
+#: Sans nouvel événement, le message est quand même revu (salon recréé, image
+#: refaite) une fois par heure.
+RECAP_REVOIR_SEC = 3600
+#: Un envoi refusé (droits, panne Discord) est retenté au bout de 5 minutes.
+RECAP_ECHEC_SEC = 300
+#: Les photos de profil : quelques secondes en tout, au-delà des initiales.
+PHOTOS_DELAI_SEC = 8.0
+
+_RECAP: Dict[str, Any] = {"gen": None, "jour": None, "reveil": 0.0}
+_SALONS: Dict[str, Any] = {}        # serveur -> (salon ou None, lu le)
+_NOMS: Dict[str, Any] = {}          # « gid:uid » -> (nom, url de la photo, lu le)
+_PHOTOS: Dict[str, bytes] = {}      # url -> octets
+
+
+def _recap_lire() -> Dict[str, Any]:
+    d = safe_json.load(RECAP_FICHIER, default={}) or {}
+    if not isinstance(d, dict):
+        _log(f"{RECAP_FICHIER.name} n'est pas un objet JSON : repart à vide")
+        d = {}
+    for k in ("jours", "dits"):
+        if not isinstance(d.get(k), dict):
+            d[k] = {}
+    return d
+
+
+def _recap_ecrire(d: Dict[str, Any]) -> None:
+    RECAP_FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    if not safe_json.write(RECAP_FICHIER, d, indent=1):
+        _log(f"écriture de {RECAP_FICHIER.name} refusée : le récap pourrait être reposté")
+
+
+def _dire_une_fois(d: Dict[str, Any], sujet: str, etat: str, texte: str) -> bool:
+    """Un souci du récap se dit UNE fois, même après un redémarrage (retenu
+    dans le registre) : le récap d'origine redisait le sien quatre fois à
+    chaque démarrage. Il se redit quand son état change. Rend True si dit."""
+    if d["dits"].get(sujet) == etat:
+        return False
+    d["dits"][sujet] = etat
+    _log(texte)
+    return True
+
+
+def _salon_debrief(gid: str) -> Optional[str]:
+    """Le salon « debrief-day » du serveur, quel que soit son décor (même règle
+    que cogs.numeros._salons_debrief), lu par REST."""
+    vu = _SALONS.get(gid)
+    if vu and time.time() - vu[1] < (RECAP_REVOIR_SEC if vu[0] else SALON_ABSENT_SEC):
+        return vu[0]
+    from cogs.welcome import nom_sans_decor
+    with vd.sur_serveur(gid):
+        code, salons = vd.api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        _log(f"récap : salons de {gid} illisibles (HTTP {code})")
+        return vu[0] if vu else None
+    trouve = [str(c["id"]) for c in sorted(salons, key=lambda c: c.get("position") or 0)
+              if c.get("type") == 0
+              and nom_sans_decor(str(c.get("name") or "")).lstrip("-_") == _num().RECAP_SALON]
+    _SALONS[gid] = (trouve[0] if trouve else None, time.time())
+    return _SALONS[gid][0]
+
+
+def _membre(gid: str, uid: str, note: str = ""):
+    """(nom affiché, adresse de la photo ou "") du VA, lus par REST et gardés
+    une heure. Parti du serveur : le nom noté à la prise."""
+    cle = f"{gid}:{uid}"
+    vu = _NOMS.get(cle)
+    if vu and time.time() - vu[2] < 3600:
+        return vu[0], vu[1]
+    with vd.sur_serveur(gid):
+        code, m = vd.api("GET", f"/guilds/{gid}/members/{uid}")
+    if code != 200 or not isinstance(m, dict):
+        _NOMS[cle] = (str(note or uid), "", time.time())
+        return _NOMS[cle][0], ""
+    u = m.get("user") or {}
+    nom = str(m.get("nick") or u.get("global_name") or u.get("username") or note or uid)
+    url = ""
+    if m.get("avatar"):
+        url = f"https://cdn.discordapp.com/guilds/{gid}/users/{uid}/avatars/{m['avatar']}.png?size=128"
+    elif u.get("avatar"):
+        url = f"https://cdn.discordapp.com/avatars/{uid}/{u['avatar']}.png?size=128"
+    _NOMS[cle] = (nom, url, time.time())
+    return nom, url
+
+
+def _photos(urls: Dict[str, str]) -> Dict[str, bytes]:
+    """{uid: PNG} ; une photo absente donne des initiales sur l'image."""
+    import requests
+    out: Dict[str, bytes] = {}
+    fin = time.time() + PHOTOS_DELAI_SEC
+    for uid, url in urls.items():
+        if not url:
+            continue
+        if url not in _PHOTOS and time.time() < fin:
+            try:
+                r = requests.get(url, timeout=max(1.0, fin - time.time()))
+                if r.status_code == 200 and r.content:
+                    if len(_PHOTOS) > 200:
+                        _PHOTOS.clear()
+                    _PHOTOS[url] = r.content
+            except Exception as e:
+                _log(f"récap : photo de {uid} non lue ({type(e).__name__})")
+        if url in _PHOTOS:
+            out[uid] = _PHOTOS[url]
+    return out
+
+
+def _textes(composants) -> List[str]:
+    out: List[str] = []
+    for c in composants or []:
+        if isinstance(c, dict):
+            if isinstance(c.get("content"), str):
+                out.append(c["content"])
+            out += _textes(c.get("components"))
+    return out
+
+
+def _retrouver(salon: str, jour, moi: str) -> Optional[str]:
+    """Le récap de `jour` déjà posté par ce bot dans le salon (registre perdu,
+    réponse d'envoi perdue) : à éditer, pas à reposter."""
+    N = _num()
+    nom = N.NOM_IMAGE_RECAP % jour.isoformat()
+    titre = "## " + N.titre_recap(jour, False)
+    code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
+    if code != 200 or not isinstance(ms, list):
+        return None
+    for m in ms:
+        if str((m.get("author") or {}).get("id")) != str(moi):
+            continue
+        if any(a.get("filename") == nom for a in m.get("attachments") or []) or \
+                any(t.startswith(titre) for t in _textes(m.get("components"))):
+            return str(m["id"])
+    return None
+
+
+def _corps_recap(jour, agg: Dict[str, Any], noms: Dict[str, str], photos: Dict[str, bytes],
+                 final: bool, now: float) -> Dict[str, Any]:
+    """Les arguments de vd.api : l'image (Components V2, une galerie) comme
+    le récap d'origine, sinon son texte. Sans « flags » : un PATCH n'a pas le
+    droit d'y toucher, le POST l'ajoute."""
+    import json
+    import numeros_image
+    N = _num()
+    try:
+        png = numeros_image.dessiner_recap(
+            jour, agg, noms, photos, not final, None, now, seuil_loupe=N.RECAP_SEUIL_LOUPE,
+            zero_direct=N.RECAP_ZERO_DIRECT, zero_final=N.RECAP_ZERO_FINAL, tz=N.BENIN,
+            cle_nom=N._cle_nom_recap(noms))
+    except Exception as e:
+        png = None
+        _log(f"récap du {jour.isoformat()} : image impossible ({type(e).__name__}: "
+             f"{str(e)[:120]}) -- en texte")
+    if png:
+        nom = N.NOM_IMAGE_RECAP % jour.isoformat()
+        titre_alt, desc_alt = N.alt_recap(jour, agg, final, now)
+        corps = {"components": [
+            {"type": 10, "content": "## " + N.titre_recap(jour, False)},
+            {"type": 12, "items": [{"media": {"url": "attachment://" + nom},
+                                    "description": ("%s\n%s" % (titre_alt, desc_alt))[:N.RECAP_ALT_MAX]}]}],
+            "attachments": [{"id": 0, "filename": nom}], "allowed_mentions": {"parse": []}}
+        return {"data": {"payload_json": json.dumps(corps)},
+                "files": {"files[0]": (nom, png, "image/png")}}
+    titre, morceaux = N.texte_recap(jour, agg, noms, limite=N.RECAP_TEXTE_V2_MAX,
+                                    en_direct=None if final else now)
+    return {"json": {"components": [{"type": 10, "content": ("## %s\n%s" % (titre, morceaux[0]))
+                                     [:N.RECAP_V2_BLOC_MAX]}],
+                     "attachments": [], "allowed_mentions": {"parse": []}}}
+
+
+def _ecrire_recap(gid: str, salon: str, moi: str, jour, fiche: Dict[str, Any],
+                  kw: Dict[str, Any]):
+    """Édite le message du jour, le retrouve, ou le poste. Rend (id, "") ou
+    (None, le refus) : retenté plus tard, dit une fois par l'appelant."""
+    import json
+    mid = str(fiche.get("message") or "") if str(fiche.get("salon") or "") == salon else ""
+    if not mid:
+        mid = _retrouver(salon, jour, moi) or ""
+    if mid:
+        code, rep = vd.api("PATCH", f"/channels/{salon}/messages/{mid}", **kw)
+        if code == 200:
+            return mid, ""
+        if code != 404:
+            return None, f"édition refusée : HTTP {code} {str(rep)[:120]}"
+        # Supprimé à la main : on le repose.
+    if "json" in kw:
+        kw = {"json": dict(kw["json"], flags=V2)}
+    else:
+        corps = json.loads(kw["data"]["payload_json"])
+        kw = {"data": {"payload_json": json.dumps(dict(corps, flags=V2))}, "files": kw["files"]}
+    code, rep = vd.api("POST", f"/channels/{salon}/messages", **kw)
+    if code == 200 and isinstance(rep, dict) and rep.get("id"):
+        return str(rep["id"]), ""
+    if code == 404:
+        _SALONS.pop(gid, None)              # salon supprimé : relu au tour suivant
+    return None, f"envoi refusé : HTTP {code} {str(rep)[:120]}"
+
+
+def recap_tour(maintenant: Optional[float] = None, forcer: bool = False) -> Dict[str, Any]:
+    """Un tour du récap des serveurs de SERVEURS. Rend le bilan du tour."""
+    import json
+    N = _num()
+    now = float(time.time() if maintenant is None else maintenant)
+    bilan: Dict[str, Any] = {"postes": [], "edites": [], "sans_salon": [], "echecs": []}
+    if not forcer and not N.machine_prod():
+        return bilan
+    gen, auj = N._HISTO_GEN[0], N.jour_benin(now)
+    reg = _recap_lire()
+    salons: Dict[str, Optional[str]] = {}
+    dit = False
+    for gid, conf in SERVEURS.items():
+        salons[gid] = _salon_debrief(gid)
+        if not salons[gid]:
+            dit |= _dire_une_fois(reg, f"salon:{gid}", "absent",
+                                  f"récap : aucun salon « {N.RECAP_SALON} » sur {conf['nom']} -- "
+                                  f"les numéros attendent, ils partiront dès qu'il existera "
+                                  f"(dit une fois)")
+            bilan["sans_salon"].append(gid)
+        else:
+            dit |= _dire_une_fois(reg, f"salon:{gid}", salons[gid],
+                                  f"récap : salon {salons[gid]} trouvé sur {conf['nom']}")
+    vu = _RECAP
+    if not any(salons.values()) or (
+            not forcer and vu["gen"] == gen and vu["jour"] == auj.isoformat()
+            and now < vu["reveil"]):
+        if dit:
+            _recap_ecrire(reg)
+        return bilan
+    try:
+        entrees = N._histo_lire()
+    except Exception as e:
+        _log(f"récap : historique illisible ({type(e).__name__}: {e})")
+        return bilan
+    jours = N.jours_a_recapituler(now) + [auj]
+    for k in [k for k in reg["jours"] if k < jours[0].isoformat()]:
+        reg["jours"].pop(k, None)
+    a_refaire = False
+    for gid, conf in SERVEURS.items():
+        salon = salons[gid]
+        if not salon:
+            continue
+        moi = vd.bot_du_serveur(gid)["app_id"]
+        for jour in jours:
+            cle = jour.isoformat()
+            fiche = dict((reg["jours"].get(cle) or {}).get(gid) or {})
+            if fiche.get("fige"):
+                continue                    # salon changé depuis : l'ancien message reste
+            final = jour < auj
+            agg = N.agreger(entrees, jour, now).get(gid) or N._agg_zero()
+            if final and not fiche.get("message") and N._agg_vide(agg):
+                # Aucun jour vide posté après coup, comme le récap d'origine.
+                reg["jours"].setdefault(cle, {})[gid] = {"fige": True, "salon": salon, "vide": True}
+                continue
+            infos = {u: _membre(gid, u, v.get("nom") or "") for u, v in agg["vas"].items()}
+            noms = {u: i[0] for u, i in infos.items()}
+            signature = json.dumps([final, agg, noms], sort_keys=True, default=str)
+            if fiche.get("signature") == signature and fiche.get("message") \
+                    and fiche.get("salon") == salon:
+                if final and not agg.get("attente"):
+                    fiche["fige"] = True
+                    reg["jours"].setdefault(cle, {})[gid] = fiche
+                continue
+            with vd.sur_serveur(gid):
+                kw = _corps_recap(jour, agg, noms, _photos({u: i[1] for u, i in infos.items()}),
+                                  final, now)
+                mid, refus = _ecrire_recap(gid, salon, moi, jour, fiche, kw)
+            if not mid:
+                # Droits ou panne : retenté dans RECAP_ECHEC_SEC, sans redire
+                # la même raison à chaque essai.
+                a_refaire = True
+                bilan["echecs"].append((cle, gid))
+                # « envoi refusé : HTTP 403 » : la raison, sans le détail qui varie.
+                _dire_une_fois(reg, f"envoi:{gid}", " ".join(refus.split(" ")[:5]),
+                               f"récap du {cle} sur {conf['nom']} : {refus} -- nouvel essai "
+                               f"dans {RECAP_ECHEC_SEC // 60} min (dit une fois)")
+                break
+            reg["dits"].pop(f"envoi:{gid}", None)
+            (bilan["edites"] if mid == str(fiche.get("message") or "") else bilan["postes"]).append((cle, gid))
+            fiche.update(salon=salon, message=mid, signature=signature, final=final,
+                         fige=bool(final and not agg.get("attente")))
+            reg["jours"].setdefault(cle, {})[gid] = fiche
+            _recap_ecrire(reg)              # au fil de l'eau : pas de doublon après un arrêt
+    attentes = [N._ts(e.get("pris_le")) + N.DUREE_NUMERO_SEC for e in entrees
+                if str(e.get("serveur")) in SERVEURS and N._issue(e, now) == "attente"]
+    vu.update(gen=gen, jour=auj.isoformat(),
+              reveil=min(attentes + [now + (RECAP_ECHEC_SEC if a_refaire else RECAP_REVOIR_SEC)]))
+    _recap_ecrire(reg)
+    for quoi in ("postes", "edites"):
+        if bilan[quoi]:
+            _log(f"récap : {quoi} {', '.join(f'{c} ({g})' for c, g in bilan[quoi])}")
+    return bilan
+
+
+def _boucle_recap() -> None:
+    # time.sleep et pas _dormir : les tests remplacent _dormir par rien.
+    time.sleep(60)                           # le bot charge cogs.numeros entre-temps
+    while True:
+        try:
+            recap_tour()
+        except Exception as e:
+            _log(f"tour du récap en échec ({type(e).__name__}: {e})")
+        time.sleep(RECAP_PAS_SEC)
 
 
 # ─── Pose du panneau ──────────────────────────────────────────────────────
