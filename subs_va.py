@@ -427,34 +427,57 @@ def totaux_va_ig() -> Dict[str, int]:
     """{« Amelia VA 3 » : abonnés depuis la création de ses trackings} : OF au
     compteur de MyPuls (subscribers_total), MYM à la somme de tous les jours
     relevés. Un VA illisible est laissé de côté (l'ancien total reste)."""
+    out: Dict[str, int] = {}
+    for _k, e in sorted(entites_va_ig().items()):
+        # sans tracking : 0 ici, comme avant (le classement de Va IG l'affiche)
+        total = subs_depuis_toujours(e["trackings"], e["pseudo"]) if e["trackings"] else 0
+        if total is not None:
+            out[e["nom"]] = total
+    return out
+
+
+def subs_depuis_toujours(trackings: List[Tuple[str, str]], pseudo: str) -> Optional[int]:
+    """Les abonnés de ces trackings depuis leur création, ceux à son nom
+    seulement : OF au compteur de MyPuls (subscribers_total), MYM à la somme
+    de tous les jours relevés. None si une partie est illisible — l'all-time
+    de Va IG (totaux_va_ig) et celui de la quinzaine de Threads."""
+    if not trackings:
+        return None                     # pas de tracking : rien à compter, pas zéro
     import podium_discord as pod
     j = pod._aujourdhui().isoformat()
     vus, _raison = pod._lire_mypuls(j, j)
     cache = _lire_cache()
     mym_ok = time.time() - float(cache.get("releve") or 0) <= MYM_FRAIS_S
     jours = cache.get("trackings") or {}
-    out: Dict[str, int] = {}
-    for _k, e in sorted(entites_va_ig().items()):
-        communs = _communs(e["trackings"], e["pseudo"])
-        total, lisible = 0, True
-        for p, u in e["trackings"]:
-            if u in communs:
-                continue
-            if p == "of":
-                v = (vus or {}).get(pod.tracking_de(u)) if vus is not None else None
-                if vus is None or (v is not None and v.get("subs_total") is None):
-                    lisible = False
-                    break
-                total += int((v or {}).get("subs_total") or 0)
-            else:
-                t = jours.get(u.rstrip("/"))
-                if not mym_ok or t is None:
-                    lisible = False
-                    break
-                total += sum(int(x or 0) for x in (t.get("jours") or {}).values())
-        if lisible:
-            out[e["nom"]] = total
-    return out
+    communs = _communs(trackings, pseudo)
+    total = 0
+    for p, u in trackings:
+        if u in communs:
+            continue
+        if p == "of":
+            v = (vus or {}).get(pod.tracking_de(u)) if vus is not None else None
+            if vus is None or (v is not None and v.get("subs_total") is None):
+                return None
+            total += int((v or {}).get("subs_total") or 0)
+        else:
+            t = jours.get(u.rstrip("/"))
+            if not mym_ok or t is None:
+                return None
+            total += sum(int(x or 0) for x in (t.get("jours") or {}).values())
+    return total
+
+
+def subs_periode(trackings: List[Tuple[str, str]], pseudo: str, d0: str, d1: str) -> Optional[int]:
+    """Les abonnés de ces trackings sur [d0, d1], ceux à son nom seulement —
+    la règle de « Mes subs » (subs_du_va) pour une période. None si une
+    partie est illisible, ou s'il n'a aucun tracking."""
+    if not trackings:
+        return None
+    communs = _communs(trackings, pseudo)
+    of = [u for p, u in trackings if p == "of" and u not in communs]
+    mym = [u for p, u in trackings if p == "mym" and u not in communs]
+    n_of, n_mym = _subs_of(of, d0, d1), _subs_mym(mym, d0, d1)
+    return None if n_of is None or n_mym is None else n_of + n_mym
 
 
 def pseudos_va_ig(debut: dt.date, fin: dt.date) -> List[Dict[str, Any]]:

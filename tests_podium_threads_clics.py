@@ -673,11 +673,24 @@ try:
     _etat_fr = _lfr.ETAT
     _lfr.ETAT = pd.DATA_DIR / "liens_va_fr.json"
     safe_json.write(_lfr.ETAT, {"liens": {
-        "u7:amelia": {"numero": 3, "pseudo": "seven", "link_id": "i1"},
+        "u7:amelia": {"numero": 3, "pseudo": "seven", "link_id": "i1",
+                      "trackings": {"OF": "https://onlyfans.com/amelia.mrn/c3"}},
         "u8:lola": {"numero": 2, "pseudo": "lolafan", "link_id": "i2"},
         "u9:emma": {"numero": 4, "pseudo": "parti", "link_id": "i3", "actif": False}}})
     BOUTONS.update({"i1": {"US": 2, "FR": 30, "CA": 1}, "i2": {"GB": 4, "BE": 6},
                     "i3": {"US": 99}})
+    # les abonnés (propriétaire, 21/10/2026 : « mets les subs à côté », « 🌐
+    # all-time sub et 🌐 all-time click ») : Threads 12 (roucham) a son
+    # tracking Emy, Threads VA 001 (seven) le sien ; Threads VA 002 n'en a pas.
+    # amelia.mrn/c3 : 1 abonné « depuis toujours » au compteur, 2 sur la
+    # période — l'all-time affiché ne descend jamais sous la période
+    import liens_va as _lv4
+    _etat_lv4, _mp4 = _lv4._etat, pd._lire_mypuls
+    _lv4._etat = lambda: {"liens": {f"{TH}:u12": {"numero": 12, "pseudo": "roucham",
+                                                  "tracking": "https://onlyfans.com/emy.brw/c42"}}}
+    pd._lire_mypuls = lambda d0, d1, forcer=False: ({
+        "emy.brw/c42": {"nom": "Threads VA 12 @roucham", "subs": 5, "subs_total": 40},
+        "amelia.mrn/c3": {"nom": "Amelia VA 3 @seven", "subs": 2, "subs_total": 1}}, "")
     # ce matin, Threads avait une page dans son salon -subs, supprimé depuis
     d0 = json.loads(pd.ETAT_FICHIER.read_text())
     d0.setdefault("subs", {})[TH] = {"saison": "2026-10-01", "messages": ["1559432858823823432"],
@@ -697,9 +710,19 @@ try:
     eq = pq[0]["json"]["embeds"][0]
     RENDU["quinzaine"] = eq
     dq = eq["description"]
-    check("plus d'all-time : ni 🌐 ni relevé « depuis toujours »",
-          "🌐" not in dq and "all-time" not in dq
+    _lv4._etat, pd._lire_mypuls = _etat_lv4, _mp4
+    check("abonnés de la période et all-time sur chaque ligne : « · Subs : 5 · 🌐 40 all-time "
+          "sub · 🌐 n all-time click », jamais l'ancien fichier all-time",
+          "🥇 **Threads 12** — US : **47** · GBL : **59** · Subs : **5**\n↳ 🌐 40 all-time sub" in dq
+          and "Threads 31 — US : 7 · GBL : 11 · Subs : —\n↳ 🌐 — all-time sub · 🌐 11 all-time click"
+          in dq
           and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), dq)
+    check("… l'all-time jamais sous la période (1 au compteur, 2 sur la période : 🌐 2), les "
+          "clics depuis toujours tous pays (33)",
+          "Threads VA 001 — US : 3 · GBL : 33 · Subs : 2\n↳ 🌐 2 all-time sub · 🌐 33 all-time click"
+          in dq, dq)
+    check("… sans tracking : « — », pas 0",
+          "Threads VA 002 — US : 4 · GBL : 10 · Subs : —\n↳ 🌐 — all-time sub" in dq, dq)
     # Threads 12 : l1 + l2, US + UK + CA = 47, tous pays 59 ; Threads VA 001
     # (Va IG amelia:3, i1, son numéro Instagram 1) : US + CA = 3, tous pays
     # 33 ; Threads VA 002 (lola:2, i2). Propriétaire, 21/10/2026 : « écris
@@ -724,13 +747,14 @@ try:
           "GBL, comptes classés Threads + Va IG, anonyme",
           eq["title"] == "📊 Classement clics — la quinzaine"
           and "Clics **uniques US + UK + CA** · **" + str(n_lignes) + "** comptes classés" in dq
-          and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_" in dq
-          and "\nUS : **119** · GBL : " in dq
-          and "subs" not in json.dumps(eq, ensure_ascii=False).lower()
-          and "Roucham" not in dq, (eq["title"], dq))
-    check("… sur la quinzaine seulement (01/10 → aujourd'hui), clics uniques, un relevé par VA "
-          "dont les deux de Va IG",
-          {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-01", "2026-10-13")}
+          and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays · Subs : abonnés "
+              "de la période_" in dq
+          and "\nUS : **119** · GBL : **221** · Subs : **7** (5 sans relevé)" in dq
+          and "Roucham" not in dq and "roucham" not in dq, (eq["title"], dq))
+    check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours (une fois par jour), clics "
+          "uniques, un relevé par VA dont les deux de Va IG",
+          {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-01", "2026-10-13"),
+                                                     (pd.ALLTIME_DEPUIS, "2026-10-13")}
           and ("i1",) in [a[0] for a in GMS["boutons"][n_b:]]
           and ("i3",) not in [a[0] for a in GMS["boutons"][n_b:]]
           and not GMS["vues"])
