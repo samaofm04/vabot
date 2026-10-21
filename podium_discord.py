@@ -230,6 +230,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # RETIRER : False (pas la clé retirée : le bouton déjà posé
                  # s'en va alors à la prochaine édition).
                  "bouton_pseudos": True,
+                 # « 📈 Mes stats » dans les tickets, comme Threads : en privé les
+                 # clics de ses liens ET ses abonnés (propriétaire, 21/10/2026 :
+                 # « en privé les clics et subs »). Clics au marché du serveur (US).
+                 "mes_stats": True,
                  # L'adresse USDC se donne au bouton « 💳 Mon adresse USDC » du
                  # ticket (tickets_discord.boutons_va), et non plus par message :
                  # Luigi et Bowser ne lisent aucun message (REST seul, sans
@@ -306,9 +310,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # sont pas : « mets pas les subs, uniquement dans leur ticket
                  # perso quand il tape Mes stats ». Voir _alltime_clics.
                  "alltime_clics": True,
-                 # les VA de Twitter aussi, lus dans JESSY LE RETOUR (leurs liens
-                 # rattachés à leur numéro par leur tracking, comme au podium de
-                 # Twitter) : « Threads VA 1nn ». Voir _entites_jessye.
+                 # les VA de Twitter aussi, lus dans JESSY LE RETOUR et EMY TWITTER
+                 # (leurs liens rattachés à leur numéro par leur tracking, comme au
+                 # podium de Twitter) : « Threads VA 1nn ». Voir _entites_jessye.
                  "quinzaine_jessye": True,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
@@ -2453,7 +2457,8 @@ def _libelle_va_ig(n: int) -> str:
     return f"Threads VA 0{int(n):02d}"
 
 
-#: … et ceux de Twitter lus dans JESSY LE RETOUR : « Threads VA 112 », un 1
+#: … et ceux de Twitter lus dans JESSY LE RETOUR et EMY TWITTER (_liens_twitter) :
+#: « Threads VA 112 », un 1
 #: devant leur numéro de Twitter (registre des trackings). Propriétaire,
 #: 21/10/2026 : « lis aussi Jessye pour les liens, pour les clics, toujours
 #: avec le truc pour différencier ». Le premier chiffre dit d'où vient le VA :
@@ -3763,7 +3768,7 @@ def _format_subs(gid: Optional[str]) -> str:
     """Le format des pages de la quinzaine : celui des messages vivants, plus
     « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
     passage, sans toucher au podium de la semaine."""
-    return _format_affiche(gid) + ("+us-gbl-va-at-j" if _profil(gid).get("us_gbl") else "")
+    return _format_affiche(gid) + ("+us-gbl-va-at-j2" if _profil(gid).get("us_gbl") else "")
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4313,12 +4318,30 @@ def _liens_equipe(equipe: str, etiquette: str) -> Tuple[List[Dict[str, Any]], bo
     return [l for l in liens if isinstance(l, dict) and l.get("id")], False
 
 
+def _liens_twitter(etiquette: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """(liens, frais) des VA de Twitter dans ses DEUX espaces : JESSY LE RETOUR
+    (les anciens, au nom Infloww) et EMY TWITTER (ceux de « Créer son lien »
+    depuis le 15/10, « Twitter VA 31 @pseudo »). Propriétaire, 21/10/2026 :
+    « ajoute aussi Emy Twitter »."""
+    tout: List[Dict[str, Any]] = []
+    vus: set = set()
+    frais = True
+    for equipe in EQUIPES_VA:
+        liens, ok = _liens_equipe(equipe, etiquette)
+        frais = frais and ok
+        for l in liens:
+            if l["id"] not in vus:
+                vus.add(l["id"])
+                tout.append(l)
+    return tout, frais
+
+
 _JESSYE_ECARTES_DITS: set = set()
 
 
 def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:
-    """{numéro de VA de Twitter : ids de ses liens} pour les liens de JESSY LE
-    RETOUR, rattachés par leur tracking au registre de Twitter (« VA 3 -
+    """{numéro de VA de Twitter : ids de ses liens} pour les liens de ses deux
+    espaces (_liens_twitter), rattachés par leur tracking au registre de Twitter (« VA 3 -
     Roucham 1 ( normal ) » → emy.brw/c42 → VA 12), comme le podium de
     Twitter. Un lien sans tracking connu, ou dont les trackings disent deux
     VA, n'est pas compté ; c'est dit au journal, une fois par liste."""
@@ -4335,8 +4358,8 @@ def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:
     dit = "|".join(sorted(ecartes))
     if ecartes and dit not in _JESSYE_ECARTES_DITS:
         _JESSYE_ECARTES_DITS.add(dit)
-        print(f"[podium] quinzaine de Threads : {len(ecartes)} lien(s) de JESSY LE RETOUR pas "
-              f"comptés : {', '.join(sorted(ecartes)[:8])}", flush=True)
+        print(f"[podium] {len(ecartes)} lien(s) des VA de Twitter (JESSY LE RETOUR, EMY TWITTER) "
+              f"sans VA au registre, pas comptés : {', '.join(sorted(ecartes)[:8])}", flush=True)
     return out
 
 
@@ -4382,7 +4405,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                                "cle_ig": k})
             time.sleep(0.3)
     if pf.get("quinzaine_jessye"):
-        liens_j, frais_j = _liens_equipe(EQUIPE_VA, etiquette)
+        liens_j, frais_j = _liens_twitter(etiquette)
         frais = frais and frais_j
         directs_j = _directs(liens_j)
         # un VA parti de Twitter n'y est pas non plus (_sans_partis de Twitter)
@@ -4441,7 +4464,7 @@ def _alltime_clics(gid: str, cl: Dict[str, Any], etiquette: str) -> None:
             liens_ig, _f2 = liens_bruts(VA_IG_ID, etiquette)
             directs = _directs(liens) | _directs(liens_ig)
             if _profil(gid).get("quinzaine_jessye"):
-                directs |= _directs(_liens_equipe(EQUIPE_VA, etiquette)[0])
+                directs |= _directs(_liens_twitter(etiquette)[0])
             lus.update(ents=entites_liens_va(liens), directs=directs)
         return lus
     ig_ids = {k: e["ids"] for k, e in _entites_va_ig().items()}
@@ -4484,9 +4507,14 @@ def clics_du_va(gid: str, uid: str,
     n = liens_va.lien_de(str(gid), str(uid)).get("numero")
     if not str(n or "").isdigit():
         return None
-    liens, _frais = liens_bruts(gid, ETIQUETTE_QUINZAINE)
-    e = entites_liens_va(liens).get(str(int(n)))
-    ids = list((e or {}).get("ids") or [])
+    if _source(gid) == "tracking":
+        # Twitter : ses liens, anciens (JESSY LE RETOUR, nom Infloww sans
+        # « @ ») comme récents, rattachés à son numéro par leur tracking
+        liens, _frais = _liens_twitter(ETIQUETTE_QUINZAINE)
+        ids = list(_entites_jessye(liens).get(int(n)) or [])
+    else:
+        liens, _frais = liens_bruts(gid, ETIQUETTE_QUINZAINE)
+        ids = list((entites_liens_va(liens).get(str(int(n))) or {}).get("ids") or [])
     lid = str(liens_va.lien_de(str(gid), str(uid)).get("link_id") or "")
     if lid and lid not in ids:
         ids.append(lid)

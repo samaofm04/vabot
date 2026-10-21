@@ -326,10 +326,11 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
 
 
 def _texte_stats(gid: Any, uid: Any, r: Dict[str, Any]) -> str:
-    """« 📈 Mes stats » (Threads, clé « mes_stats » du profil du podium) : les
+    """« 📈 Mes stats » (Threads, Twitter : clé « mes_stats » du profil du podium) : les
     abonnés, comme « Mes subs », puis les clics de son lien sur les mêmes
     périodes, écrits comme la quinzaine du salon statistiques (« US : n · GBL :
-    n », US = US + UK + Canada). Jamais un montant."""
+    n », US = les pays du serveur : US + UK + Canada sur Threads, US sur
+    Twitter). Jamais un montant."""
     import podium_discord as pod
     cles = ("aujourdhui", "periode", "precedente")
     titres = {"aujourdhui": "Aujourd'hui", "periode": "Cette période",
@@ -352,7 +353,11 @@ def _texte_stats(gid: Any, uid: Any, r: Dict[str, Any]) -> str:
     clics = pod.clics_du_va(str(gid), str(uid),
                             [(dt.date.fromisoformat(r[c]["du"]), dt.date.fromisoformat(r[c]["au"]))
                              for c in cles])
-    out.append("**Clics de ton lien** (US = US + UK + Canada · GBL = tous pays)")
+    pf = pod._profil(gid)
+    noms = {"US": "US", "GB": "UK", "CA": "Canada"}
+    pays = " + ".join(noms.get(p, p) for p in (pf.get("pays_subs") or pf.get("pays") or ("US",)))
+    out.append(f"**Clics de ton lien** (US = {pays} · GBL = tous pays)"
+               if pays != "US" else "**Clics de ton lien** (US · GBL = tous pays)")
     if clics is None:
         out.append("Pas encore de lien : tes clics apparaîtront ici dès qu'il sera créé.")
     else:

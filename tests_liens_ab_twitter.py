@@ -624,11 +624,20 @@ try:
         check("MyPuls muet : « pas lisible », jamais un zéro inventé",
               sv.subs_du_va(TW, 42, J)["periode"]["n"] is None)
         panne["oui"] = False
-        txt = cu._mes_subs_texte(types.SimpleNamespace(id=int(TW)), types.SimpleNamespace(id=42))
-        check("message du VA : trois totaux avec les dates, sans détail ni montant",
-              txt.startswith("📈 **Tes subs**") and "Aujourd'hui : **" in txt
+        # Depuis le 21/10/2026 (« en privé les clics et subs ») : Twitter répond
+        # « 📈 Mes stats », les abonnés puis les clics de son lien.
+        _sauve_cdv = pod.clics_du_va
+        pod.clics_du_va = lambda g_, u_, per: [(3, 5), (40, 71), (52, 90)]
+        try:
+            txt = cu._mes_subs_texte(types.SimpleNamespace(id=int(TW)), types.SimpleNamespace(id=42))
+        finally:
+            pod.clics_du_va = _sauve_cdv
+        check("message du VA : trois totaux de subs avec les dates, puis ses clics, sans montant",
+              txt.startswith("📈 **Tes stats**") and "**Subs**" in txt and "Aujourd'hui : **" in txt
               and "Cette période (du 01/10 au 15/10) : **15**" in txt
               and "Période précédente (du 16/09 au 30/09) : **20**" in txt
+              and "**Clics de ton lien** (US · GBL = tous pays)" in txt
+              and "Cette période (du 01/10 au 15/10) : US : **40** · GBL : **71**" in txt
               and "Emy" not in txt and "Seren" not in txt and "$" not in txt and "€" not in txt, txt)
         check("les trois serveurs, et eux seuls",
               all(cu._subs_ici(types.SimpleNamespace(id=int(x))) for x in (TW, TH, sv.VA_IG_ID))

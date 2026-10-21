@@ -2362,7 +2362,8 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # accueils déjà postés sont redessinés une fois pour le montrer.
 # 4 (21/10/2026) : « 📈 Mes subs » devient « 📈 Mes stats » sur Threads
 # (_avec_mes_stats) : ses accueils déjà postés sont redessinés une fois.
-BOUTONS_VERSION = 4
+# 5 (21/10/2026) : sur Twitter aussi.
+BOUTONS_VERSION = 5
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -2699,7 +2700,7 @@ def suivre_departs(gid: str) -> Dict[str, Any]:
 # coup, sans toucher aux lignes du patch. Propriétaire, 21/10/2026 : « pour
 # mes sub change et mets mes stats, ça montre les sub et click ». La réponse,
 # elle, est subs_va.texte (abonnés + clics). Par serveur : clé « mes_stats »
-# du profil du podium (Threads).
+# du profil du podium (Threads, Twitter).
 _boutons_va_avant_stats = boutons_va
 
 

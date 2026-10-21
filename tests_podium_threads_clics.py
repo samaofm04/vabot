@@ -729,6 +729,7 @@ try:
           "🥈 **Threads VA 112** — US : **47** · GBL : **59** · 🌐 59 all-time click" in dq
           and "Threads VA 143 — US : 31 · GBL : 81 · 🌐 81 all-time click" in dq
           and "Threads VA 141 — US : 24 · GBL : 24 · 🌐 24 all-time click" in dq
+          and "Threads VA 131 — US : 7 · GBL : 11" in dq     # son lien EMY TWITTER
           and pd._libelle_va_jessye(12) == "Threads VA 112"
           and pd._libelle_va_ig(23) == "Threads VA 023", dq)
     check("… et aucun abonné dans le classement public : ni « Subs », ni « all-time sub »",
@@ -740,7 +741,7 @@ try:
           eq["title"] == "📊 Classement clics — la quinzaine"
           and "Clics **uniques US + UK + CA** · **" + str(n_lignes) + "** comptes classés" in dq
           and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_" in dq
-          and dq.rstrip().endswith("\nUS : **221** · GBL : **385**")
+          and dq.rstrip().endswith("\nUS : **228** · GBL : **396**")
           and "Roucham" not in dq and "roucham" not in dq, (eq["title"], dq))
     check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours (une fois par jour), clics "
           "uniques, un relevé par VA dont les deux de Va IG",
@@ -835,12 +836,25 @@ try:
             {"type": 2, "label": "Mes subs", "custom_id": f"subs:total:{uid}"},
             {"type": 2, "label": "Mon adresse USDC", "custom_id": f"usdc:set:{uid}"}]}]
         lab = lambda g: [b["label"] for r in _tkd.boutons_va("u61", gid=g) for b in r["components"]]
-        check("le bouton (posé par le patch du VPS) : « Mes stats » sur Threads, « Mes subs » "
-              "ailleurs tant que le propriétaire ne l'a pas demandé",
+        check("le bouton (posé par le patch du VPS) : « Mes stats » sur Threads et Twitter "
+              "(« en privé les clics et subs »), « Mes subs » ailleurs",
               lab(TH) == ["Mes stats", "Mon adresse USDC"]
-              and lab(TW) == ["Mes subs", "Mon adresse USDC"], (lab(TH), lab(TW)))
-        check("… et les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 4)",
-              _tkd.BOUTONS_VERSION == 4)
+              and lab(TW) == ["Mes stats", "Mon adresse USDC"]
+              and lab(IG) == ["Mes subs", "Mon adresse USDC"], (lab(TH), lab(TW), lab(IG)))
+        check("… et les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 5)",
+              _tkd.BOUTONS_VERSION == 5)
+        # Twitter : ses liens par son tracking, dans ses deux espaces (les anciens
+        # de JESSY LE RETOUR n'ont pas « @pseudo »), au marché du serveur (US)
+        _lv._etat = lambda: {"liens": {f"{TW}:u12": {"numero": 12, "pseudo": "roucham"}}}
+        pd.liens_bruts = _sv_ms[1]
+        c12 = pd.clics_du_va(TW, "u12", [(dt.date(2026, 10, 13), dt.date(2026, 10, 13))])
+        # l1 : US 40, GB 5, FR 9 ; l2 : US 2, IN 3 -> US 42, tous pays 59
+        check("« Mes stats » sur Twitter : ses deux liens Roucham (c42), US seul, tous pays",
+              c12 == [(42, 59)], c12)
+        txt_tw = _sva.texte(TW, "u12")
+        check("… et la légende dit « US », pas « US + UK + Canada »",
+              "**Clics de ton lien** (US · GBL = tous pays)" in txt_tw
+              and "Canada" not in txt_tw, txt_tw)
     finally:
         _lv._etat, pd.liens_bruts, _sva.subs_du_va, _tkd._boutons_va_avant_stats = _sv_ms
 
