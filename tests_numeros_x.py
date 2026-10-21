@@ -37,7 +37,7 @@ REGLE = {"achat": True, "annuler": (True, "ACCESS_CANCEL"), "messages": []}
 
 def faux_api(methode, chemin, **kw):
     APPELS.append((methode, chemin, kw))
-    if methode == "GET" and chemin.startswith(f"/channels/{SALON}/messages"):
+    if methode == "GET" and chemin.startswith("/channels/") and "/messages" in chemin:
         return 200, REGLE["messages"]
     if methode == "POST" and chemin == f"/channels/{SALON}/messages":
         return 200, {"id": "999"}
@@ -511,9 +511,9 @@ try:
     b2 = nx.recap_tour(maintenant + 61, forcer=True)
     reg = json.loads(nx.RECAP_FICHIER.read_text(encoding="utf-8"))
     check("récap Twitter : sans salon « debrief-day », rien n'est posté",
-          b["sans_salon"] == [GID] and not ecrits(), ecrits())
+          GID in b["sans_salon"] and not ecrits(), ecrits())
     check("récap Twitter : l'absence du salon est retenue (dite une fois, même après un redémarrage)",
-          reg["dits"].get(f"salon:{GID}") == "absent" and b2["sans_salon"] == [GID], reg)
+          reg["dits"].get(f"salon:{GID}") == "absent" and GID in b2["sans_salon"], reg)
 
     ETAT["salons"].append({"id": DEBRIEF, "type": 0, "name": "📊・debrief-day", "position": 5})
     nx._SALONS.clear()
@@ -571,6 +571,36 @@ try:
     num.machine_prod = _sav_mp
     nx.RECAP_FICHIER = _sav_recap
     vd.api = faux_api
+
+    # 21. le même panneau sur YouLab THREADS : Instagram, son propre quota
+    remise_a_zero()
+    numgen.get_number_herosms, numgen.get_code = faux_numero, faux_code
+    TH = vd.THREADS_ID
+    r = nx.traiter(clic("numx:prendre", gid=TH))
+    check("Threads : le numéro est pris au service Instagram de HeroSMS, aux États-Unis",
+          ACHATS == [("ig", "187")], ACHATS)
+    check("Threads : le formulaire s'appelle « Numéro Instagram »",
+          textes(r["data"]["components"])[0] == "## Numéro Instagram"
+          and textes(dernier_patch())[0] == "## Numéro Instagram", (r, dernier_patch()))
+    a = nx._actif(f"{TH}:{VA}")
+    check("Threads : noté à l'historique sur le serveur Threads",
+          a and num._histo_lire()[0]["serveur"] == TH and num._histo_lire()[0]["service"] == "ig",
+          num._histo_lire())
+    CODES.append(("code", "135790"))
+    direct(lambda: nx._ecouter(f"{TH}:{VA}", a["id"], nx.SERVEURS[TH]))
+    check("Threads : le code s'affiche sous « Numéro Instagram »",
+          any("135790" in t for t in textes(dernier_patch()))
+          and textes(dernier_patch())[0] == "## Numéro Instagram", dernier_patch())
+    check("Threads : le quota de Twitter n'est pas touché",
+          num.numeros_du_jour(VA, TH) == 1 and num.numeros_du_jour(VA, GID) == 0)
+    APPELS.clear()
+    print(nx.poser_panneau(TH))
+    posts = [(ch, kw["json"]) for m, ch, kw in APPELS if m == "POST"]
+    check("Threads : panneau posé dans 📱・numéro-usa de Threads, titre « Numéro Instagram »",
+          len(posts) == 1 and posts[0][0] == "/channels/%s/messages" % nx.SERVEURS[TH]["salon"]
+          and textes(posts[0][1]["components"])[0] == "## Numéro Instagram"
+          and boutons(posts[0][1]["components"]) == ["numx:prendre"], posts)
+    check("Twitter : toujours « Numéro X »", textes(nx.vue_panneau(nx.SERVEURS[GID]))[0] == "## Numéro X")
 
     # 20. le récap du bot admin ne garde plus Twitter (Luigi le poste)
     check("cog : Twitter fait partie des serveurs du récap REST", GID in num._serveurs_rest())

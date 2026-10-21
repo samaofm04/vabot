@@ -1,5 +1,9 @@
 """« Numéro X » sur YouLab TWITTER : un numéro US loué chez HeroSMS, et son code.
 
+Le même panneau sur YouLab THREADS depuis le 21/10/2026 (« Numéro Instagram »,
+service Instagram de HeroSMS, posé par Bowser) : tout ce qui change d'un
+serveur à l'autre est dans SERVEURS (`poser threads`).
+
 Propriétaire, 17/10/2026 : « mes numéros et tout j'en ai plus, me créer un
 bot qui puisse me générer des numéros […] sur Hero SMS, pour me donner des
 numéros de compte X ». Ses réponses : chaque VA, numéros des États-Unis, 3 par
@@ -55,6 +59,18 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "service": "tw",                          # Twitter/X chez HeroSMS
         "pays": "187", "drapeau": "🇺🇸",           # États-Unis : 0,06 $ le 17/10/2026
         "quota": 3,                               # par jour et par VA ; le staff n'est pas bridé
+        "titre": "Numéro X",
+    },
+    # Propriétaire, 21/10/2026, sur Threads : « je veux le truc des num ». Un
+    # compte Threads est un compte Instagram : le même panneau, pour le service
+    # Instagram de HeroSMS (0,0924 $ un numéro US ce jour-là), posé par Bowser.
+    vd.THREADS_ID: {
+        "nom": "YouLab THREADS",
+        "salon": "1562393803887747122",          # 📚 RESSOURCES > 📱・numéro-usa
+        "service": "ig",                          # Instagram (et donc Threads) chez HeroSMS
+        "pays": "187", "drapeau": "🇺🇸",
+        "quota": 3,
+        "titre": "Numéro Instagram",
     },
 }
 
@@ -219,13 +235,17 @@ def _drapeau(conf: Optional[Dict[str, Any]] = None) -> str:
     return (conf or SERVEURS[vd.TWITTER_ID]).get("drapeau", "📱")
 
 
+def _titre(conf: Optional[Dict[str, Any]] = None) -> str:
+    return "## " + (conf or SERVEURS[vd.TWITTER_ID]).get("titre", "Numéro X")
+
+
 def _numero(a: Dict[str, Any]) -> str:
     # Le numéro COLLÉ, sans espaces : demande expresse du propriétaire (Va IG).
     return "`%s`" % "".join(str(a.get("valeur") or "?").split())
 
 
 def vue_panneau(conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    return _vue(["## Numéro X", _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE],
+    return _vue([_titre(conf), _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE],
                 [_prendre_bouton()])
 
 
@@ -235,12 +255,12 @@ def vue_attente(texte: str, a: Optional[Dict[str, Any]] = None,
     en a un, l'attente dans la case du code ; sinon l'attente dans la case du
     numéro."""
     if a:
-        return _vue(["## Numéro X", _drapeau(conf) + " " + _numero(a), "🔐 " + texte])
-    return _vue(["## Numéro X", _drapeau(conf) + " " + texte, "🔐 " + BLANC_CODE])
+        return _vue([_titre(conf), _drapeau(conf) + " " + _numero(a), "🔐 " + texte])
+    return _vue([_titre(conf), _drapeau(conf) + " " + texte, "🔐 " + BLANC_CODE])
 
 
 def vue_close(texte: str, conf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    return _vue(["## Numéro X", _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE, texte],
+    return _vue([_titre(conf), _drapeau(conf) + " " + BLANC, "🔐 " + BLANC_CODE, texte],
                 [_prendre_bouton()])
 
 
@@ -258,7 +278,7 @@ def vue_actif(a: Dict[str, Any], conf: Dict[str, Any]) -> List[Dict[str, Any]]:
         boutons = [_bouton("retry", "Redemander un code", "🔄", 1, act_id),
                    _bouton("autre", "Autre", "🔁", 2, act_id),
                    _bouton("annuler", "Annuler", "❌", 4, act_id)]
-    return _vue(["## Numéro X", _drapeau(conf) + " " + _numero(a), "🔐 " + ligne,
+    return _vue([_titre(conf), _drapeau(conf) + " " + _numero(a), "🔐 " + ligne,
                  a.get("souci") or ""], boutons)
 
 
@@ -317,7 +337,7 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     gid = str(p.get("guild_id") or "")
     conf = SERVEURS.get(gid)
     if not conf:
-        return _texte("Ce bouton ne sert que sur YouLab TWITTER.")
+        return _texte("Ce bouton ne sert pas sur ce serveur.")
     membre = p.get("member") or {}
     user = membre.get("user") or {}
     uid = str(user.get("id") or "")
@@ -367,8 +387,8 @@ def _souci_achat(res: Any) -> str:
     if not numgen.sans_credit(res):
         return "❌ " + str(res)
     etat = numgen.alerter_staff(
-        "credit:herosms", "⚠️ **HeroSMS sans crédit** (« %s ») : les VA de YouLab TWITTER ne "
-                          "peuvent plus prendre de Numéro X. À recharger sur hero-sms.com."
+        "credit:herosms", "⚠️ **HeroSMS sans crédit** (« %s ») : les VA de Twitter et de Threads "
+                          "ne peuvent plus prendre de numéro. À recharger sur hero-sms.com."
                           % str(res)[:120])
     if etat not in ("envoye", "deja", "hors production"):
         _log(f"alerte « credit:herosms » non envoyée au staff : {etat}")
@@ -383,7 +403,7 @@ def _prendre(p, gid, uid, cle, membre, user, conf):
     if not numgen.herosms_key():
         _log("clic « Prendre un numéro » : clé HeroSMS absente")
         return _repondre(p, cle, vue_close(
-            "❌ Numéros indisponibles : la clé HeroSMS n'est pas posée. Préviens un admin."))
+            "❌ Numéros indisponibles : la clé HeroSMS n'est pas posée. Préviens un admin.", conf))
     with _VERROU:
         if cle in _ACHATS:
             # Le message « Recherche d'un numéro… » va recevoir le numéro : en
@@ -398,19 +418,20 @@ def _prendre(p, gid, uid, cle, membre, user, conf):
             return rep
         refus = _quota_refus(uid, gid, membre, conf)
         if refus:
-            return _repondre(p, cle, vue_close(refus))
+            return _repondre(p, cle, vue_close(refus, conf))
         _ACHATS.add(cle)
     salon = str(p.get("channel_id") or conf["salon"])
     # Le message d'abord, l'achat ensuite : l'achat écrit le numéro dans LE
     # message courant, qui doit déjà être celui-ci.
-    rep = _repondre(p, cle, vue_attente("⏳ Recherche d'un numéro…"))
+    rep = _repondre(p, cle, vue_attente("⏳ Recherche d'un numéro…", None, conf))
     try:
         _fond(lambda: _acheter(cle, gid, uid, _nom(user), conf, salon))
     except Exception as e:
         with _VERROU:
             _ACHATS.discard(cle)
         _log(f"achat non lancé pour {uid} ({type(e).__name__}: {e})")
-        return _repondre(p, cle, vue_close("❌ Impossible pour le moment : réessaie dans un instant."))
+        return _repondre(p, cle, vue_close("❌ Impossible pour le moment : réessaie dans un instant.",
+                                           conf))
     return rep
 
 
@@ -419,7 +440,7 @@ def _acheter(cle, gid, uid, nom, conf, salon):
         ok, res = numgen.get_number_herosms(conf["service"], conf["pays"])
         if not ok:
             _log(f"achat refusé pour {uid} : {res}")
-            _redessiner(cle, conf, vue_close(_souci_achat(res)))
+            _redessiner(cle, conf, vue_close(_souci_achat(res), conf))
             return
         numgen.fin_alerte("credit:herosms")
         a = {"id": str(res["id"]), "provider": "herosms", "service": conf["service"],
@@ -446,9 +467,9 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
             # Un bouton d'un ancien message : on montre ce qui est vrai maintenant.
             if _vivant(a):
                 return _repondre(p, cle, vue_actif(a, conf))
-            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif."))
+            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif.", conf))
         if a.get("clos"):
-            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif."))
+            return _repondre(p, cle, vue_close("Ce numéro n'est plus actif.", conf))
         a = _maj(cle, act_id, souci="") or a
         if action == "fini":
             if not a.get("code") and _vivant(a):
@@ -459,7 +480,7 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
     if action == "fini":
         _histo(act_id, "fini")
         _fond(lambda: numgen.finish(act_id, "herosms"))
-        return _repondre(p, cle, vue_close("✅ C'est bon."))
+        return _repondre(p, cle, vue_close("✅ C'est bon.", conf))
     if action == "retry":
         rep = _repondre(p, cle, vue_attente("⏳ Nouveau code demandé…", a, conf))
         _fond(lambda: _redemander(cle, act_id, conf))
@@ -504,12 +525,13 @@ def _rendre(cle, gid, uid, membre, user, conf, act_id, action):
     _histo(act_id, "remplace" if action == "autre" else "annule")
     _log(f"{a.get('valeur')} : {action} par {uid}")
     if action == "annuler":
-        _redessiner(cle, conf, vue_close("❌ Numéro annulé." if a.get("code")
-                                         else "❌ Numéro annulé : il ne compte pas dans tes 3 du jour."))
+        _redessiner(cle, conf, vue_close(
+            "❌ Numéro annulé." if a.get("code")
+            else "❌ Numéro annulé : il ne compte pas dans tes %d du jour." % conf["quota"], conf))
         return
     refus = _quota_refus(uid, gid, membre, conf)
     if refus:
-        _redessiner(cle, conf, vue_close(refus))
+        _redessiner(cle, conf, vue_close(refus, conf))
         return
     with _VERROU:
         if cle in _ACHATS:
@@ -546,7 +568,8 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
                 _maj(cle, act_id, clos="expire")
                 _log(f"{a.get('valeur')} : aucun code en {DUREE_NUMERO_SEC // 60} min")
                 _redessiner(cle, conf, vue_close(
-                    "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes 3 du jour."))
+                    "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes %d du jour."
+                    % conf["quota"], conf))
                 return
             etat, val = numgen.get_code(act_id, "herosms")
             if etat == "code" and val:
@@ -559,7 +582,8 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
                 _maj(cle, act_id, clos="annule")
                 _histo(act_id, "souci")
                 _log(f"{a.get('valeur')} : fermé par HeroSMS")
-                _redessiner(cle, conf, vue_close("❌ HeroSMS a fermé ce numéro. Prends-en un autre."))
+                _redessiner(cle, conf, vue_close("❌ HeroSMS a fermé ce numéro. Prends-en un autre.",
+                                                 conf))
                 return
             if etat == "error":
                 erreurs += 1
@@ -644,6 +668,7 @@ PHOTOS_DELAI_SEC = 8.0
 
 _RECAP: Dict[str, Any] = {"gen": None, "jour": None, "reveil": 0.0}
 _SALONS: Dict[str, Any] = {}        # serveur -> (salon ou None, lu le)
+_SALONS_REFUS: set = set()          # (serveur, code HTTP) déjà dits
 _NOMS: Dict[str, Any] = {}          # « gid:uid » -> (nom, url de la photo, lu le)
 _PHOTOS: Dict[str, bytes] = {}      # url -> octets
 
@@ -686,8 +711,13 @@ def _salon_debrief(gid: str) -> Optional[str]:
     with vd.sur_serveur(gid):
         code, salons = vd.api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(salons, list):
-        _log(f"récap : salons de {gid} illisibles (HTTP {code})")
-        return vu[0] if vu else None
+        # Relu dans SALON_ABSENT_SEC, et dit une fois par refus : sans ça, un
+        # bot privé de lecture l'aurait écrit à chaque tour.
+        if (gid, code) not in _SALONS_REFUS:
+            _SALONS_REFUS.add((gid, code))
+            _log(f"récap : salons de {gid} illisibles (HTTP {code})")
+        _SALONS[gid] = (vu[0] if vu else None, time.time())
+        return _SALONS[gid][0]
     trouve = [str(c["id"]) for c in sorted(salons, key=lambda c: c.get("position") or 0)
               if c.get("type") == 0
               and nom_sans_decor(str(c.get("name") or "")).lstrip("-_") == _num().RECAP_SALON]
@@ -961,7 +991,7 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
             return f"salon illisible : HTTP {code} {str(ms)[:160]}"
         miens = [m for m in ms if str((m.get("author") or {}).get("id")) == str(moi)
                  and PREFIXE + "prendre" in _ids(m.get("components"))]
-        corps = {"flags": V2, "components": vue_panneau(), "allowed_mentions": {"parse": []}}
+        corps = {"flags": V2, "components": vue_panneau(conf), "allowed_mentions": {"parse": []}}
         if miens:
             code, rep = vd.api("PATCH", f"/channels/{salon}/messages/{miens[0]['id']}",
                                json={"components": corps["components"]})
@@ -972,8 +1002,10 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
 
 if __name__ == "__main__":
     import sys
-    if sys.argv[1:] == ["poser"]:
+    if sys.argv[1:2] == ["poser"] and len(sys.argv) <= 3:
         vd._charger_config()
-        print(poser_panneau())
+        quel = (sys.argv[2:] or ["twitter"])[0].lower()
+        gid = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID}.get(quel, quel)
+        print(poser_panneau(gid) if gid in SERVEURS else f"serveur inconnu : {quel}")
     else:
-        print("usage : python numeros_x_discord.py poser")
+        print("usage : python numeros_x_discord.py poser [twitter|threads]")
