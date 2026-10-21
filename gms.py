@@ -2115,6 +2115,92 @@ def poser_ab_testing(link_id: str, source_link_id: str, team_id: str = "",
     return {"ok": True, "config": cfg}
 
 
+def _ab_prive(methode: str, link_id: str, team_id: str = "",
+              corps: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Un appel à l'écran A/B Testing de l'API privée : GET (lire) ou POST
+    …/save (enregistrer). Rend {ok, config, error, cookie} comme
+    poser_ab_testing."""
+    cookie = get_session_cookie()
+    if not cookie:
+        return {"ok": False, "cookie": True, "error": "cookie de session GetMySocial absent"}
+    lid = str(link_id or "").strip()
+    lid = lid[4:] if lid.startswith("lnk_") else lid
+    tid = str(team_id or "").strip()
+    tid = tid[3:] if tid.startswith("tm_") else tid
+    if not lid:
+        return {"ok": False, "error": "lien manquant"}
+    try:
+        if methode == "GET":
+            r = requests.get(f"{PRIVATE_API_BASE}/links/ab-testing/{lid}",
+                             params={"teamId": tid} if tid else None,
+                             headers=_entetes_privees(cookie), timeout=25, allow_redirects=False)
+        else:
+            r = requests.post(f"{PRIVATE_API_BASE}/links/ab-testing/{lid}/save",
+                              headers=_entetes_privees(cookie),
+                              json=dict(corps or {}, **({"teamId": tid} if tid else {})),
+                              timeout=25, allow_redirects=False)
+    except Exception as e:
+        return {"ok": False, "error": f"réseau : {type(e).__name__}: {str(e)[:100]}"}
+    if r.status_code in (301, 302, 303, 307, 401, 403):
+        return {"ok": False, "cookie": True, "error": "cookie de session GetMySocial refusé : à recoller"}
+    try:
+        rep = r.json()
+    except Exception:
+        return {"ok": False, "cookie": True,
+                "error": f"GetMySocial a répondu une page (HTTP {r.status_code}) : cookie périmé ?"}
+    if r.status_code != 200 or not rep.get("success") or not isinstance(rep.get("config"), dict):
+        return {"ok": False, "error": f'HTTP {r.status_code} : {str(rep.get("error") or rep)[:160]}'}
+    return {"ok": True, "config": rep["config"]}
+
+
+def lire_ab_testing(link_id: str, team_id: str = "") -> Dict[str, Any]:
+    """L'A/B d'un lien tel que l'écran A/B Testing le montre :
+    {enabled, controlWeight, variants:[{variantId, sourceLinkId, weight, name…}]}."""
+    return _ab_prive("GET", link_id, team_id)
+
+
+def allumer_ab_testing(link_id: str, team_id: str = "", actif: bool = True,
+                       variantes: Optional[list] = None) -> Dict[str, Any]:
+    """Éteint (actif=False) ou rallume un A/B DÉJÀ posé, en renvoyant ses
+    variantes telles quelles, avec leur variantId.
+
+    Propriétaire, 21/10/2026 : « tout envoyé que sur Emy, plus de Seren pour
+    le moment ». Une variante est une copie figée (voir poser_ab_testing).
+    Éteint, l'A/B ne montre plus ses variantes à la relecture (constaté le
+    21/10) : pour rallumer, `variantes` = celles lues AVANT de l'éteindre
+    (« avant » du résultat, à garder). Relu après l'enregistrement : un
+    « succès » qui laisse l'A/B dans l'autre état est un échec."""
+    lu = lire_ab_testing(link_id, team_id)
+    if not lu.get("ok"):
+        return lu
+    cfg = lu["config"]
+    vs = [v for v in (cfg.get("variants") or []) if isinstance(v, dict)] \
+        or [v for v in (variantes or []) if isinstance(v, dict)]
+    if bool(cfg.get("enabled")) == bool(actif):
+        return {"ok": True, "deja": True, "config": cfg, "avant": cfg}
+    if not vs:
+        return {"ok": False, "error": "aucune variante à " + ("rallumer" if actif else "éteindre"),
+                "avant": cfg}
+    corps = {"enabled": bool(actif), "controlWeight": cfg.get("controlWeight", 50),
+             "variants": [{"variantId": v.get("variantId"), "sourceLinkId": v.get("sourceLinkId"),
+                           "sourceTemplateId": v.get("sourceTemplateId"), "name": v.get("name"),
+                           "weight": v.get("weight"), "description": v.get("description") or ""}
+                          for v in vs]}
+    r = _ab_prive("POST", link_id, team_id, corps)
+    if not r.get("ok"):
+        return dict(r, avant=cfg)
+    relu = lire_ab_testing(link_id, team_id)
+    apres = relu.get("config") if relu.get("ok") else r["config"]
+    ids = {v.get("variantId") for v in vs}
+    gardees = {v.get("variantId") for v in (apres.get("variants") or []) if isinstance(v, dict)}
+    if bool(apres.get("enabled")) != bool(actif):
+        return {"ok": False, "error": f"enregistré mais relu autrement : {str(apres)[:160]}",
+                "avant": cfg, "config": apres}
+    return {"ok": True, "config": apres, "avant": cfg,
+            # dit, pas caché : sans elles, remettre le 50/50 refera les copies
+            "variantes_perdues": sorted(i for i in ids - gardees if i)}
+
+
 PUBLIC_REST_BASE = "https://api.getmysocial.com/v3"
 
 

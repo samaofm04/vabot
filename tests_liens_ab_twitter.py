@@ -52,6 +52,10 @@ import tickets_discord as tk           # noqa: E402
 
 OKS, FAILS = [], []
 
+# Depuis le 21/10/2026, Seren est en pause (liens_va.SEREN_EN_PAUSE, voir
+# tests_seren_en_pause.py) ; ce qui suit vérifie le 50/50 tel qu'il reviendra.
+lv.SEREN_EN_PAUSE = False
+
 
 def check(label, cond, detail=""):
     (OKS if cond else FAILS).append(label)

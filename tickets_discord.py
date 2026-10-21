@@ -2298,6 +2298,7 @@ def suivre_partout() -> Dict[str, Any]:
             except Exception as e:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
+        _couper_seren(gid)
     # Va IG n'a pas de tickets ici (bot principal), mais ses VA partis gardaient
     # leurs liens en service : coupés une fois l'heure (liens_fr.couper_partis)
     if time.time() - _DEPARTS_VU.get("va_ig", 0) >= DEPARTS_S:
@@ -2318,6 +2319,34 @@ def suivre_partout() -> Dict[str, Any]:
 SYNCHRO_LIENS_ICI = {"1498948161039896586"}      # YouLab THREADS
 SYNCHRO_LIENS_S = 1800
 _SYNCHRO_VUE: Dict[str, float] = {}
+_SEREN_VUE: Dict[str, float] = {}
+
+
+def _couper_seren(gid: str) -> None:
+    """Seren en pause (liens_va.SEREN_EN_PAUSE, 21/10/2026) : les 50/50 encore
+    allumés de Twitter ET de Threads s'éteignent, toutes les 30 minutes. Pas
+    dans _synchro_liens : Twitter n'y passe pas (web_upload._sync_liens_va, que
+    des patchs du VPS réécrivent). En fond : une liste de liens et quelques
+    appels par lien ne doivent pas retenir le tour des tickets."""
+    try:
+        import liens_va
+        if not getattr(liens_va, "SEREN_EN_PAUSE", False) or str(gid) not in liens_va.SERVEURS:
+            return
+    except Exception:                                        # noqa: BLE001
+        return
+    if time.time() - _SEREN_VUE.get(gid, 0) < SYNCHRO_LIENS_S:
+        return
+    _SEREN_VUE[gid] = time.time()
+
+    def _fond():
+        try:
+            b = liens_va.couper_seren(gid)
+            if b.get("coupes") or b.get("rates"):
+                print(f"[lien] Seren en pause {gid} : {len(b['coupes'])} 50/50 éteint(s) "
+                      f"{b['coupes'][:40]}, ratés {b['rates'][:5]}", flush=True)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[lien] Seren en pause {gid} : {type(e).__name__}: {e}", flush=True)
+    threading.Thread(target=_fond, daemon=True).start()
 
 
 def _synchro_liens(gid: str, sur_serveur) -> None:

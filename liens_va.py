@@ -636,6 +636,16 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         var = {"ok": bool(rv.get("ok")), "modele": e["variante"]["modele"],
                "poids": int(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
                "cookie": bool(rv.get("cookie")), "erreur": rv.get("erreur", "")}
+    elif SEREN_EN_PAUSE and g.get("id"):
+        # Threads : le lien neuf est une copie de emythreads, 50/50 Seren
+        # compris. Éteint tout de suite ; raté (cookie), couper_seren le
+        # reprend à la synchro suivante.
+        try:
+            _couper_lien(str(gid), str(e["equipe"]), g["id"], g.get("shortcode", ""),
+                         nom, f"{gid}:{uid}")
+        except Exception as ex:                              # noqa: BLE001
+            print(f"[lien] Seren en pause : {g.get('shortcode')} : {type(ex).__name__}: {ex}",
+                  flush=True)
     return {"ok": True, "numero": n, "public_url": g["url"], "groupe": groupe,
             "shortcode": g["shortcode"], "tracking": t["url"],
             # Threads n'a pas de tracking link a venir : rien de provisoire
@@ -1193,3 +1203,166 @@ def _id_du_lien(equipe: str, shortcode: str) -> str:
     except Exception as e:
         print(f"[lien] recherche de {shortcode} : {type(e).__name__}: {e}", flush=True)
     return ""
+
+
+# ─── Seren en pause : tout chez Emy ──────────────────────────────────────
+# Propriétaire, 21/10/2026 : « tout envoyé que sur Emy, plus de Seren pour le
+# moment, pour Threads et Twitter, et même pour les prochaines créations »,
+# puis « ok, tout sur Emy ». Tant que SEREN_EN_PAUSE est vrai :
+# - un lien neuf ne reçoit pas de variante (espace() la rend à None) ;
+# - un lien neuf de Threads perd le 50/50 hérité de emythreads (creer_pour) ;
+# - couper_seren éteint, à chaque passage, les A/B encore allumés de l'espace
+#   du serveur, liens de VA comme liens de base (emythreads).
+# Éteindre un A/B EFFACE sa variante chez GetMySocial (constaté le 21/10 :
+# « Variant … not found » en la rallumant). Rien d'autre ne part : le
+# tracking Seren du VA reste chez MyPuls et dans sa fiche. Pour remettre le
+# 50/50 : SEREN_EN_PAUSE = False, puis remettre_seren(gid) — reprendre_variantes
+# refait chaque variante vers LE MÊME tracking Seren (aucun nouveau tracking).
+# COUPES_FICHIER garde chaque A/B éteint et sa config d'avant.
+SEREN_EN_PAUSE = True
+COUPES_FICHIER = DATA_DIR / "liens_seren_coupes.json"
+_COUPE = __import__("threading").Lock()
+
+_espace_avec_seren = espace
+
+
+def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
+    """espace() (plus haut), sans variante tant que Seren est en pause.
+    Enveloppe : le corps d'origine est touché par un patch local du VPS
+    (99-threads-mypuls) pour Threads."""
+    e = _espace_avec_seren(gid)
+    if SEREN_EN_PAUSE:
+        e["variante"] = None
+    return e
+
+
+def _noter_coupe(lid: str, **kw) -> None:
+    d = _lire(COUPES_FICHIER, {})
+    d = d if isinstance(d, dict) else {}
+    f = (d.setdefault("liens", {})).setdefault(_sans_prefixe(lid), {})
+    f.update(kw)
+    safe_json.write_text(COUPES_FICHIER, json.dumps(d, ensure_ascii=False, indent=2))
+
+
+def _couper_lien(gid: str, equipe: str, lid: str, shortcode: str = "", nom: str = "",
+                 cle: str = "") -> Dict[str, Any]:
+    """Éteint l'A/B d'un lien, noté AVANT dans COUPES_FICHIER (config d'avant,
+    tracking Seren de la fiche) puis marqué dans la fiche du VA (variante.coupee).
+    La fiche garde « posee » : en_attente ne la reprend pas, et le podium
+    reconnaît encore les clics Seren d'avant la coupure."""
+    import time as _t
+    import gms
+    lid = _sans_prefixe(lid)
+    av = gms.lire_ab_testing(lid, equipe)
+    if not av.get("ok"):
+        return av
+    if not av["config"].get("enabled"):
+        return {"ok": True, "deja": True}
+    fiche = (_etat().get("liens") or {}).get(cle) or {} if cle else {}
+    _noter_coupe(lid, serveur=str(gid), equipe=equipe, shortcode=shortcode, nom=nom,
+                 fiche=cle if fiche else "",
+                 tracking_seren=str((fiche.get("variante") or {}).get("tracking") or ""),
+                 avant=av["config"], quand=int(_t.time()), fait=False)
+    r = gms.allumer_ab_testing(lid, equipe, actif=False)
+    if not r.get("ok"):
+        _noter_coupe(lid, erreur=str(r.get("error") or "")[:200])
+        return r
+    _noter_coupe(lid, fait=True, erreur="")
+    if fiche:
+        d = _etat()
+        f = (d.get("liens") or {}).get(cle)
+        if isinstance(f, dict):
+            f["variante"] = dict(f.get("variante") or {}, coupee=int(_t.time()))
+            _ecrire(d)
+    return {"ok": True}
+
+
+def _noter_eteints(gid: str, equipe: str, eteints: set) -> None:
+    """Une fiche « posee » dont l'A/B est DÉJÀ éteint (à la main dans
+    GetMySocial, ou bloomyy, l'essai du 21/10/2026) est marquée « coupee » elle
+    aussi : sans ça, remettre_seren l'oublierait."""
+    import time as _t
+    d = _etat()
+    vus = []
+    for cle, f in (d.get("liens") or {}).items():
+        fv = f.get("variante") if isinstance(f, dict) else None
+        if (cle.startswith(f"{gid}:") and isinstance(fv, dict) and fv.get("posee")
+                and not fv.get("coupee") and _sans_prefixe(f.get("link_id")) in eteints):
+            f["variante"] = dict(fv, coupee=int(_t.time()))
+            vus.append((cle, f))
+    if not vus:
+        return
+    _ecrire(d)
+    for cle, f in vus:
+        _noter_coupe(f.get("link_id"), serveur=str(gid), equipe=equipe,
+                     shortcode=str(f.get("shortcode") or ""), nom="", fiche=cle,
+                     tracking_seren=str(f["variante"].get("tracking") or ""),
+                     deja_eteint=True, quand=int(_t.time()), fait=True)
+
+
+def couper_seren(gid: str) -> Dict[str, Any]:
+    """Éteint les A/B encore allumés de l'espace GetMySocial de ce serveur.
+    {coupes, rates, cookie?}. Lus dans la liste des liens (« ab_testing »),
+    donc rien n'est appelé quand tout est déjà éteint. S'arrête au premier
+    refus de cookie : le suivant échouerait pareil."""
+    import time as _t
+    import gms
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"coupes": [], "rates": []}
+    if not SEREN_EN_PAUSE or gid not in SERVEURS:
+        return bilan
+    equipe = str(espace(gid)["equipe"])
+    r = gms.list_links_team(equipe, force_refresh=True) or {}
+    liens = [l for l in (r.get("links") or r.get("data") or [])
+             if isinstance(l, dict) and l.get("id") and isinstance(l.get("ab_testing"), dict)]
+    allumes = [l for l in liens if l["ab_testing"].get("enabled")]
+    _noter_eteints(gid, equipe, {_sans_prefixe(l["id"]) for l in liens
+                                 if not l["ab_testing"].get("enabled")})
+    if not allumes:
+        return bilan
+    if not _COUPE.acquire(blocking=False):
+        bilan["occupe"] = True
+        return bilan
+    try:
+        fiches = {_sans_prefixe(f.get("link_id")): cle
+                  for cle, f in (_etat().get("liens") or {}).items()
+                  if isinstance(f, dict) and f.get("link_id") and cle.startswith(f"{gid}:")}
+        for i, l in enumerate(allumes):
+            if i:
+                _t.sleep(0.5)
+            lid = _sans_prefixe(l["id"])
+            qui = str(l.get("shortcode") or lid)
+            rc = _couper_lien(gid, equipe, lid, qui, str(l.get("display_name") or ""),
+                              fiches.get(lid, ""))
+            if rc.get("ok"):
+                bilan["coupes"].append(qui)
+                continue
+            bilan["rates"].append(f'{qui} : {rc.get("error")}')
+            if rc.get("cookie"):
+                bilan["cookie"] = True
+                break
+    finally:
+        _COUPE.release()
+    return bilan
+
+
+def remettre_seren(gid: str) -> Dict[str, Any]:
+    """Le chemin du retour au 50/50, SEREN_EN_PAUSE remis à False : les fiches
+    coupées repassent « à poser », et reprendre_variantes refait leur variante
+    vers leur tracking Seren déjà créé. Les liens sans fiche (emythreads, les
+    premiers liens de Threads) se refont à la main : leur config d'avant est
+    dans COUPES_FICHIER."""
+    if SEREN_EN_PAUSE:
+        return {"ok": False, "erreur": "SEREN_EN_PAUSE est encore vrai"}
+    gid = str(gid)
+    d = _etat()
+    n = 0
+    for cle, f in (d.get("liens") or {}).items():
+        fv = f.get("variante") if isinstance(f, dict) else None
+        if cle.startswith(f"{gid}:") and isinstance(fv, dict) and fv.get("coupee"):
+            f["variante"] = dict({k: v for k, v in fv.items() if k != "coupee"},
+                                 posee=False, essais=0, a_verifier=False)
+            n += 1
+    if n:
+        _ecrire(d)
+    return {"ok": True, "a_reposer": n}
