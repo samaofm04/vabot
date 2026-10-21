@@ -1189,11 +1189,45 @@ def donner_role(uid: str, cfg: Optional[Dict[str, Any]] = None) -> bool:
 
 
 def _apres_validation(cfg: Optional[Dict[str, Any]]) -> str:
-    """Ce qui arrive au membre une fois valide. Sans salon de bienvenue (Va
-    IG), personne ne le mentionne dans #bienvenue : c'est son salon qui s'ouvre."""
-    if (cfg or {}).get("salon_bienvenue"):
-        return "Tu seras mentionné dans #bienvenue dès que c'est fait."
-    return "Ton salon s'ouvrira dès que c'est fait."
+    """Ce qui arrive au membre une fois valide, sans lui promettre un salon
+    qu'il ne voit pas. On lui disait « tu seras mentionné dans #bienvenue » ;
+    or le 21/10/2026, le salon de bienvenue de Twitter, Threads et Entretien
+    (✅・membres-vérifiés) n'etait ouvert qu'au staff : la mention restait
+    invisible pour lui. Ce qu'il voit vraiment : son salon perso (ticket de
+    tickets_discord, ou de cogs/welcome sur Va IG), ou Entretien qui s'ouvre."""
+    if str((cfg or {}).get("id") or "") == GUILD_ID:
+        return "Tout le serveur s'ouvrira dès que c'est fait."
+    return "Ton salon perso s'ouvrira dès que c'est fait : tu y seras mentionné."
+
+
+def embed_panneau(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Le panneau « Se vérifier » de Twitter et Threads (salon 🔐・vérification,
+    le seul que voit un membre sans rôle). Le texte n'existait plus que dans
+    Discord : celui de Twitter disait encore « Bienvenue sur YouLab THREADS »
+    (copie du 24/09) et promettait #bienvenue. Les deux rôles d'attente
+    ouvrent le vocal Entretiens et #annonces-entretiens (constaté le 21/10)."""
+    return {"title": "🔐 Vérification obligatoire", "color": 0x5865F2,
+            "description": (
+                f"Bienvenue sur **{cfg['nom']}** ! Avant d'accéder au serveur, une vérification "
+                "est obligatoire (anti-bot, anti-fraude, anti-double compte).\n\n"
+                "👉 Clique sur **« Se vérifier »**, ouvre ton lien personnel sur ton téléphone "
+                "ou ton ordinateur habituel.\n\n"
+                "🎙️ En attendant, le vocal **Entretiens** et **📢・annonces-entretiens** "
+                "s'ouvrent à toi : c'est là que tu passes ton entretien.\n\n"
+                "🛡️ Un responsable valide ensuite ta demande **à la main**. Dès que c'est fait, "
+                "le serveur s'ouvre et **ton salon perso** est créé : tu y seras mentionné, "
+                "ton manager te répond là."),
+            "footer": {"text": "YouLab • Vérification"}}
+
+
+def reediter_panneau(gid: str, salon: str, message: str) -> int:
+    """Réécrit sur place le panneau `message` (posé par le bot du serveur :
+    Discord refuse d'éditer le message d'un autre). Le bouton n'est pas
+    envoyé, donc pas touché. Rend le code HTTP du PATCH."""
+    with sur_serveur(gid):
+        code, _ = api("PATCH", f"/channels/{salon}/messages/{message}",
+                      json={"embeds": [embed_panneau(serveur(gid))], "allowed_mentions": {"parse": []}})
+        return code
 
 
 def assurer_message_verif(gid: str) -> str:
@@ -1793,6 +1827,169 @@ def enregistrer_commandes(gid: str) -> Dict[str, int]:
     return bilan
 
 
+# ─── Relance des alertes jamais tranchées ─────────────────────────────────
+# Audit du 20/10/2026 : sur Twitter, deux alertes de ⏳┃en-attente (14 et
+# 15/10) et une de 🚩┃suspicions (15/10) avaient encore leurs boutons cinq
+# jours plus tard. Personne n'avait tranché et rien ne le rappelait : le
+# membre restait enfermé avec son rôle d'attente. Au-delà de 48 h, le bot
+# répond UNE fois sous l'alerte en mentionnant le rôle manager. Il ne décide
+# rien : Accepter, Refuser et Bannir restent aux managers.
+# Pas Entretien : ses alertes attendent l'entretien en vocal.
+RELANCE_APRES_S = 48 * 3600
+RELANCE_SERVEURS = (TWITTER_ID, THREADS_ID, VA_IG_ID)
+RELANCES = DATA_DIR / "verif_relances.json"   # alerte -> sa relance, ou pourquoi aucune
+RELANCE_TOUR_S = 30 * 60
+# Un test ou un contrôle lancé sur le VPS (même .env) meurt avant le premier tour.
+RELANCE_DEPART_S = 10 * 60
+_VERROU_RELANCE = threading.Lock()
+_FICHIER_RELANCEUR = None     # verrouillé tant que CE processus fait les relances
+
+
+def _date_message(mid: str) -> float:
+    """Heure de création d'un message Discord, lue dans son identifiant."""
+    return ((int(mid) >> 22) + 1420070400000) / 1000
+
+
+def _relances() -> Dict[str, Any]:
+    d = safe_json.load(RELANCES, default={}) or {}
+    if not isinstance(d, dict):
+        return {}
+    limite = time.time() - CONSERVATION_S
+    return {k: v for k, v in d.items() if isinstance(v, dict) and float(v.get("ts") or 0) >= limite}
+
+
+def _ecrire_relances(d: Dict[str, Any]) -> bool:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ok = bool(safe_json.write(RELANCES, d, indent=1))
+    if not ok:
+        print("[verif] ECHEC d'ecriture de data/verif_relances.json : relances suspendues", flush=True)
+    return ok
+
+
+def texte_relance(cfg: Dict[str, Any], uid: str, age_s: float, fraude: bool) -> str:
+    quoi = "Alerte fraude" if fraude else "Demande d'accès"
+    return (f"<@&{cfg['role_manager']}> ⏰ **{quoi} sans décision depuis {int(age_s // 86400)} jours** : "
+            f"<@{uid}> attend toujours. Les boutons sont sur l'alerte citée (clic sur la citation) : "
+            "✅ Accepter, ⛔ Refuser ou 🔨 Bannir.")
+
+
+def relancer_alertes(gid: str, maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """Relance une fois chaque alerte de `gid` restée plus de RELANCE_APRES_S
+    sans décision, c'est-à-dire avec encore son bouton Accepter
+    (_action_manager et _clore_alertes le retirent quand un manager tranche).
+    Rend le bilan du passage."""
+    now = maintenant if maintenant is not None else time.time()
+    cfg = serveur(gid)
+    bilan: Dict[str, Any] = {"relancees": [], "recentes": 0, "deja": 0, "sans_relance": {}, "echecs": []}
+    if not cfg or not cfg.get("role_manager"):
+        return bilan
+    with _VERROU_RELANCE, sur_serveur(cfg["id"]):
+        faites = _relances()
+        for salon, fraude in ((cfg.get("salon_attente"), False), (cfg.get("salon_suspicions"), True)):
+            if not salon:
+                continue
+            code, msgs = api("GET", f"/channels/{salon}/messages?limit=100")
+            if code != 200 or not isinstance(msgs, list):
+                bilan["echecs"].append(f"salon {salon} illisible (HTTP {code})")
+                continue
+            for m in msgs:
+                mid = str(m.get("id") or "")
+                ids = {str(c.get("custom_id") or "") for r in (m.get("components") or [])
+                       for c in (r.get("components") or [])}
+                uid = next((i.split(":", 2)[2] for i in ids if i.startswith("verif:ok:")), "")
+                if not uid or not mid.isdigit():
+                    continue                              # tranchée, ou pas une alerte
+                if mid in faites:
+                    bilan["deja"] += 1
+                    continue
+                age = now - _date_message(mid)
+                if age < RELANCE_APRES_S:
+                    bilan["recentes"] += 1
+                    continue
+                code_m, membre = api("GET", f"/guilds/{cfg['id']}/members/{uid}")
+                roles = (membre.get("roles") or []) if code_m == 200 and isinstance(membre, dict) else []
+                if code_m not in (200, 404):
+                    bilan["echecs"].append(f"membre {uid} illisible (HTTP {code_m})")
+                    continue                              # retentée au tour suivant
+                pourquoi = ""
+                if code_m == 404:
+                    pourquoi = "parti du serveur"
+                elif cfg["role_verifie"] in roles and not any(r and r in roles for r in (cfg["role_attente"], cfg["role_suspect"])):
+                    pourquoi = "déjà vérifié à la main dans Discord"
+                faites[mid] = {"ts": int(now), "salon": salon, "uid": uid,
+                               **({"sans_relance": pourquoi} if pourquoi else {"relance": ""})}
+                # noté AVANT de poster : un fichier qu'on ne peut pas écrire
+                # relancerait la même alerte à chaque tour
+                if not _ecrire_relances(faites):
+                    bilan["echecs"].append("data/verif_relances.json non écrit")
+                    return bilan
+                if pourquoi:
+                    bilan["sans_relance"][uid] = pourquoi
+                    continue
+                code_p, rep = api("POST", f"/channels/{salon}/messages", json={
+                    "content": texte_relance(cfg, uid, age, fraude),
+                    "message_reference": {"message_id": mid, "fail_if_not_exists": False},
+                    "allowed_mentions": {"roles": [cfg["role_manager"]]}})
+                if code_p == 200:
+                    faites[mid]["relance"] = str((rep or {}).get("id") or "")
+                    bilan["relancees"].append(mid)
+                else:
+                    del faites[mid]                       # retentée au tour suivant
+                    bilan["echecs"].append(f"relance de {mid} refusée (HTTP {code_p})")
+                _ecrire_relances(faites)
+    if bilan["relancees"] or bilan["sans_relance"] or bilan["echecs"]:
+        print(f"[verif] relances {cfg['nom']} : {len(bilan['relancees'])} relancée(s), "
+              f"{len(bilan['sans_relance'])} sans relance {bilan['sans_relance']}, "
+              f"échecs {bilan['echecs']}", flush=True)
+    return bilan
+
+
+def _seul_relanceur() -> bool:
+    """Un seul processus relance : le bot et un script lancé sur le VPS avec
+    le même .env auraient posté chacun la sienne."""
+    global _FICHIER_RELANCEUR
+    if _FICHIER_RELANCEUR is not None:
+        return True
+    import fcntl
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        f = open(DATA_DIR / "verif_relances.lock", "w")
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _FICHIER_RELANCEUR = f
+    return True
+
+
+def _boucle_relances() -> None:
+    time.sleep(RELANCE_DEPART_S)
+    while True:
+        if _seul_relanceur():
+            for gid in RELANCE_SERVEURS:
+                try:
+                    relancer_alertes(gid)
+                except Exception as e:
+                    print(f"[verif] relances {gid} : {type(e).__name__}: {e}", flush=True)
+        time.sleep(RELANCE_TOUR_S)
+
+
+def armer_relances() -> bool:
+    """Sur la machine qui poste seulement (VA_MACHINE_PROD, comme les démons
+    du site) : le poste de dev a son propre data/ et aurait relancé une
+    seconde fois."""
+    if os.environ.get("VA_MACHINE_PROD") != "1":
+        return False
+    if any(t.name == "verif-relances" for t in threading.enumerate()):
+        return False
+    threading.Thread(target=_boucle_relances, daemon=True, name="verif-relances").start()
+    print("[verif] relances armées : une fois par alerte sans décision depuis 48 h", flush=True)
+    return True
+
+
 # ─── La page web ──────────────────────────────────────────────────────────
 PAGE_HTML = """<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
@@ -1859,3 +2056,8 @@ button:disabled{opacity:.6}.res{margin-top:16px;padding:12px;border-radius:10px;
   };
 })();
 </script></body></html>"""
+
+
+# À l'import : aucun démon du site n'appelle ce module à heure fixe, et le
+# processus du bot l'importe dès le premier clic ou le premier tour du podium.
+armer_relances()
