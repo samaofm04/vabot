@@ -56,8 +56,18 @@ def faux_numero(service="tw", country="187"):
 
 
 def faux_code(act_id, provider="getatext"):
-    assert provider == "herosms", provider
+    FOURNIS.append(("code", provider))
     return CODES.pop(0) if CODES else ("wait", "")
+
+
+FOURNIS = []                # (appel, fournisseur) vus par les faux de numgen
+
+
+def faux_numero_getatext(service="ig", country=None):
+    ACHATS.append(("getatext", service, country))
+    n = len(ACHATS)
+    return True, {"id": f"ga{n}", "phone": f"+1555111{n:04d}", "provider": "getatext",
+                  "country": country}
 
 
 def faux_annuler(act_id, provider="getatext"):
@@ -293,11 +303,11 @@ try:
     check("le staff n'est pas bridé (4e numéro accepté après 3 codes)", len(ACHATS) == 8, ACHATS)
     check("quota : un numéro en attente de code compte", num.numeros_du_jour(VA2, GID) == 1)
     h = num._histo_lire()
-    h[-1]["fournisseur"] = "getatext"
-    h[-1]["annule_le"] = int(time.time())
+    h[-1].update(fournisseur="getatext", serveur="1505418484052394004", annule_le=int(time.time()))
     num._histo_ecrire(h)
-    check("quota : chez un autre fournisseur, un numéro annulé sans code compte encore",
-          num.numeros_du_jour(CHEF, GID) == 4, num.numeros_du_jour(CHEF, GID))
+    check("quota : hors des panneaux REST (Va IG FR), un numéro GetAText annulé sans code compte encore",
+          num.numeros_du_jour(CHEF, "1505418484052394004") == 1,
+          num.numeros_du_jour(CHEF, "1505418484052394004"))
 
     # 10. historique illisible : aucun achat
     remise_a_zero()
@@ -572,13 +582,15 @@ try:
     nx.RECAP_FICHIER = _sav_recap
     vd.api = faux_api
 
-    # 21. le même panneau sur YouLab THREADS : Instagram, son propre quota
+    # 21. le même panneau sur YouLab THREADS : Instagram chez GetAText, son propre quota
     remise_a_zero()
     numgen.get_number_herosms, numgen.get_code = faux_numero, faux_code
+    _sav_gn, _sav_gk = numgen.get_number, numgen.getatext_key
+    numgen.get_number, numgen.getatext_key = faux_numero_getatext, (lambda: "cle-ga")
     TH = vd.THREADS_ID
     r = nx.traiter(clic("numx:prendre", gid=TH))
-    check("Threads : le numéro est pris au service Instagram de HeroSMS, aux États-Unis",
-          ACHATS == [("ig", "187")], ACHATS)
+    check("Threads : le numéro est pris chez GetAText (comme Instagram), service Instagram, États-Unis",
+          ACHATS == [("getatext", "ig", "187")], ACHATS)
     check("Threads : le formulaire s'appelle « Numéro Instagram »",
           textes(r["data"]["components"])[0] == "## Numéro Instagram"
           and textes(dernier_patch())[0] == "## Numéro Instagram", (r, dernier_patch()))
@@ -601,6 +613,16 @@ try:
           and textes(posts[0][1]["components"])[0] == "## Numéro Instagram"
           and boutons(posts[0][1]["components"]) == ["numx:prendre"], posts)
     check("Twitter : toujours « Numéro X »", textes(nx.vue_panneau(nx.SERVEURS[GID]))[0] == "## Numéro X")
+    check("Threads : le code est lu chez GetAText, pas chez HeroSMS",
+          FOURNIS and FOURNIS[-1] == ("code", "getatext"), FOURNIS[-3:])
+    FIN = len(ANNULES)
+    nx.traiter(clic("numx:prendre", gid=TH, uid=VA2))
+    a2 = nx._actif(f"{TH}:{VA2}")
+    nx.traiter(clic("numx:annuler:%s" % a2["id"], gid=TH, uid=VA2, ephemere=True))
+    check("Threads : Annuler rend le numéro (chez GetAText) et il ne compte pas",
+          ANNULES[FIN:] == [a2["id"]] and num.numeros_du_jour(VA2, TH) == 0
+          and any("ne compte pas" in t for t in textes(dernier_patch())), (ANNULES, dernier_patch()))
+    numgen.get_number, numgen.getatext_key = _sav_gn, _sav_gk
 
     # 20. le récap du bot admin ne garde plus Twitter (Luigi le poste)
     check("cog : Twitter fait partie des serveurs du récap REST", GID in num._serveurs_rest())

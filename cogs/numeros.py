@@ -5097,17 +5097,20 @@ def numeros_du_jour(uid, gid, maintenant=None) -> int:
     """Les numeros (SMS) pris aujourd'hui (heure du Benin) par `uid` sur le
     serveur `gid`. Un numero rendu -- rembourse -- ne compte pas : « Autre »
     sur un numero sans code ne doit pas manger le quota. Chez un fournisseur
-    de REMBOURSE_SANS_CODE, un numero clos sans code non plus (il attend
-    encore : il compte). Leve si l'historique est illisible."""
+    de REMBOURSE_SANS_CODE, ou sur un panneau de numeros_x_discord (Twitter,
+    Threads : « mêmes règles », proprietaire, 21/10/2026), un numero clos sans
+    code non plus (il attend encore : il compte). Leve si l'historique est
+    illisible."""
     now = time.time() if maintenant is None else maintenant
     jour = jour_benin(now)
+    rest = _serveurs_rest()
     n = 0
     for a in _histo_lire():
         if (a.get("type") or "sms") != "sms" or a.get("rendu_le"):
             continue
         if str(a.get("par")) != str(uid) or str(a.get("serveur")) != str(gid):
             continue
-        if (a.get("fournisseur") in REMBOURSE_SANS_CODE
+        if ((a.get("fournisseur") in REMBOURSE_SANS_CODE or str(gid) in rest)
                 and _issue(a, now) not in ("code", "attente")):
             continue
         if jour_benin(a.get("pris_le")) == jour:

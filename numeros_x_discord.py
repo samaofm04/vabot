@@ -1,8 +1,9 @@
 """« Numéro X » sur YouLab TWITTER : un numéro US loué chez HeroSMS, et son code.
 
 Le même panneau sur YouLab THREADS depuis le 21/10/2026 (« Numéro Instagram »,
-service Instagram de HeroSMS, posé par Bowser) : tout ce qui change d'un
-serveur à l'autre est dans SERVEURS (`poser threads`).
+posé par Bowser), mais chez GetAText, le fournisseur des numéros Instagram de
+cogs/numeros : tout ce qui change d'un serveur à l'autre est dans SERVEURS
+(`poser threads`).
 
 Propriétaire, 17/10/2026 : « mes numéros et tout j'en ai plus, me créer un
 bot qui puisse me générer des numéros […] sur Hero SMS, pour me donner des
@@ -56,18 +57,22 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
     vd.TWITTER_ID: {
         "nom": "YouLab TWITTER",
         "salon": "1552392915622436874",          # 📚 RESSOURCES > 📱・numéro-usa
+        "fournisseur": "herosms",
         "service": "tw",                          # Twitter/X chez HeroSMS
         "pays": "187", "drapeau": "🇺🇸",           # États-Unis : 0,06 $ le 17/10/2026
         "quota": 3,                               # par jour et par VA ; le staff n'est pas bridé
         "titre": "Numéro X",
     },
-    # Propriétaire, 21/10/2026, sur Threads : « je veux le truc des num ». Un
-    # compte Threads est un compte Instagram : le même panneau, pour le service
-    # Instagram de HeroSMS (0,0924 $ un numéro US ce jour-là), posé par Bowser.
+    # Propriétaire, 21/10/2026, sur Threads : « je veux le truc des num »,
+    # « comme pour twitter mais pour threads », puis « get atexte le meme que
+    # insta ». Un compte Threads est un compte Instagram : le même panneau,
+    # acheté comme les numéros Instagram (GetAText, repli SMSBower ; 0,25 $ un
+    # numéro US ce jour-là), posé par Bowser.
     vd.THREADS_ID: {
         "nom": "YouLab THREADS",
         "salon": "1562393803887747122",          # 📚 RESSOURCES > 📱・numéro-usa
-        "service": "ig",                          # Instagram (et donc Threads) chez HeroSMS
+        "fournisseur": "getatext",
+        "service": "ig",                          # « instagram/threads » chez GetAText
         "pays": "187", "drapeau": "🇺🇸",
         "quota": 3,
         "titre": "Numéro Instagram",
@@ -374,24 +379,61 @@ def _quota_refus(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any
         return "❌ L'historique des numéros ne se lit plus : rien n'a été acheté. Préviens un admin."
     if n >= conf["quota"]:
         _log(f"quota atteint pour {uid} ({n}/{conf['quota']})")
-        # Seuls les numéros qui ont reçu leur code comptent (HeroSMS rembourse
-        # les autres : cogs.numeros.REMBOURSE_SANS_CODE).
+        # Seuls les numéros qui ont reçu leur code comptent : les autres sont
+        # rendus, donc remboursés (cogs.numeros.numeros_du_jour).
         return "📵 %d codes reçus aujourd'hui : c'est le maximum. Reviens demain." % conf["quota"]
     return ""
 
 
-def _souci_achat(res: Any) -> str:
-    """Le refus d'achat tel que le VA le lit. Un solde HeroSMS vide se dit en
-    clair et prévient le staff une fois (numgen.alerter_staff) ; recharger
-    reste au propriétaire."""
+NOMS_FOURNISSEURS = {"herosms": "HeroSMS", "getatext": "GetAText", "smsbower": "SMSBower"}
+
+
+def _fournisseur(conf: Dict[str, Any]) -> str:
+    return str(conf.get("fournisseur") or "herosms")
+
+
+def _prov(a: Optional[Dict[str, Any]]) -> str:
+    """Le fournisseur d'UNE activation : avec GetAText, le repli SMSBower peut
+    avoir servi ; les premières (17/10) ne portaient que HeroSMS."""
+    return str((a or {}).get("provider") or "herosms")
+
+
+def _cle_posee(conf: Dict[str, Any]) -> bool:
+    if _fournisseur(conf) == "herosms":
+        return bool(numgen.herosms_key())
+    return bool(numgen.getatext_key() or numgen.smsbower_key())
+
+
+def _cle_credit(conf: Dict[str, Any]) -> str:
+    """La clé de l'alerte « sans crédit » : GetAText a la même que les
+    panneaux Instagram (cogs/numeros) — c'est le même compte."""
+    return "credit:herosms" if _fournisseur(conf) == "herosms" else "credit:sms"
+
+
+def _acheter_chez(conf: Dict[str, Any]):
+    if _fournisseur(conf) == "herosms":
+        return numgen.get_number_herosms(conf["service"], conf["pays"])
+    # Le même achat que les numéros Instagram (GetAText, repli SMSBower), mais
+    # dans CE pays : le drapeau du panneau ne doit pas mentir.
+    return numgen.get_number(conf["service"], conf["pays"])
+
+
+def _souci_achat(res: Any, conf: Dict[str, Any]) -> str:
+    """Le refus d'achat tel que le VA le lit. Un solde vide se dit en clair et
+    prévient le staff une fois (numgen.alerter_staff) ; recharger reste au
+    propriétaire."""
     if not numgen.sans_credit(res):
         return "❌ " + str(res)
-    etat = numgen.alerter_staff(
-        "credit:herosms", "⚠️ **HeroSMS sans crédit** (« %s ») : les VA de Twitter et de Threads "
-                          "ne peuvent plus prendre de numéro. À recharger sur hero-sms.com."
-                          % str(res)[:120])
+    cle = _cle_credit(conf)
+    if cle == "credit:herosms":
+        alerte = ("⚠️ **HeroSMS sans crédit** (« %s ») : les VA de Twitter ne peuvent plus "
+                  "prendre de Numéro X. À recharger sur hero-sms.com." % str(res)[:120])
+    else:
+        alerte = ("⚠️ **Numéros SMS sans crédit** (« %s ») : les VA ne peuvent plus prendre "
+                  "de numéro (Instagram, Threads). À recharger." % str(res)[:160])
+    etat = numgen.alerter_staff(cle, alerte)
     if etat not in ("envoye", "deja", "hors production"):
-        _log(f"alerte « credit:herosms » non envoyée au staff : {etat}")
+        _log(f"alerte « {cle} » non envoyée au staff : {etat}")
     return "❌ Service de numéros sans crédit : le staff est prévenu."
 
 
@@ -400,10 +442,11 @@ def _nom(user: Dict[str, Any]) -> str:
 
 
 def _prendre(p, gid, uid, cle, membre, user, conf):
-    if not numgen.herosms_key():
-        _log("clic « Prendre un numéro » : clé HeroSMS absente")
+    if not _cle_posee(conf):
+        nom = NOMS_FOURNISSEURS.get(_fournisseur(conf), _fournisseur(conf))
+        _log(f"clic « Prendre un numéro » : clé {nom} absente")
         return _repondre(p, cle, vue_close(
-            "❌ Numéros indisponibles : la clé HeroSMS n'est pas posée. Préviens un admin.", conf))
+            "❌ Numéros indisponibles : la clé %s n'est pas posée. Préviens un admin." % nom, conf))
     with _VERROU:
         if cle in _ACHATS:
             # Le message « Recherche d'un numéro… » va recevoir le numéro : en
@@ -437,13 +480,14 @@ def _prendre(p, gid, uid, cle, membre, user, conf):
 
 def _acheter(cle, gid, uid, nom, conf, salon):
     try:
-        ok, res = numgen.get_number_herosms(conf["service"], conf["pays"])
+        ok, res = _acheter_chez(conf)
         if not ok:
             _log(f"achat refusé pour {uid} : {res}")
-            _redessiner(cle, conf, vue_close(_souci_achat(res), conf))
+            _redessiner(cle, conf, vue_close(_souci_achat(res, conf), conf))
             return
-        numgen.fin_alerte("credit:herosms")
-        a = {"id": str(res["id"]), "provider": "herosms", "service": conf["service"],
+        numgen.fin_alerte(_cle_credit(conf))
+        a = {"id": str(res["id"]), "provider": res.get("provider") or _fournisseur(conf),
+             "service": conf["service"],
              "valeur": res["phone"], "par": uid, "pris_le": int(time.time()), "salon": salon}
         with _VERROU:
             d = _lire()
@@ -479,7 +523,7 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
             _maj(cle, act_id, clos="fini")
     if action == "fini":
         _histo(act_id, "fini")
-        _fond(lambda: numgen.finish(act_id, "herosms"))
+        _fond(lambda: numgen.finish(act_id, _prov(a)))
         return _repondre(p, cle, vue_close("✅ C'est bon.", conf))
     if action == "retry":
         rep = _repondre(p, cle, vue_attente("⏳ Nouveau code demandé…", a, conf))
@@ -492,7 +536,7 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
 
 
 def _redemander(cle, act_id, conf):
-    ok, txt = numgen.retry(act_id, "herosms")
+    ok, txt = numgen.retry(act_id, _prov(_actif(cle)))
     if ok:
         a = _maj(cle, act_id, code=None, souci="")
         _log(f"nouveau code demandé sur {act_id}")
@@ -510,14 +554,15 @@ def _rendre(cle, gid, uid, membre, user, conf, act_id, action):
         return
     if a.get("code"):
         # Code reçu : le numéro a servi, on le clôt (rien à rembourser).
-        numgen.finish(act_id, "herosms")
+        numgen.finish(act_id, _prov(a))
         ok, raison = True, ""
     else:
-        ok, raison = numgen.cancel(act_id, "herosms")
+        ok, raison = numgen.cancel(act_id, _prov(a))
     if not ok and _vivant(a) and "inconnue" not in raison:
         # Refusé, vivant, sans code (« annulation trop tôt — attends ~2 min ») :
         # le numéro reste affiché, avec la raison.
-        _log(f"{action} de {a.get('valeur')} refusé par HeroSMS : {raison}")
+        _log(f"{action} de {a.get('valeur')} refusé par "
+             f"{NOMS_FOURNISSEURS.get(_prov(a), _prov(a))} : {raison}")
         _maj(cle, act_id, souci="❌ " + raison)
         _redessiner(cle, conf)
         return
@@ -564,14 +609,14 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
                 return
             age = time.time() - float(a.get("pris_le") or 0)
             if age >= DUREE_NUMERO_SEC:
-                numgen.cancel(act_id, "herosms")      # rendu s'il peut encore l'être
+                numgen.cancel(act_id, _prov(a))       # rendu s'il peut encore l'être
                 _maj(cle, act_id, clos="expire")
                 _log(f"{a.get('valeur')} : aucun code en {DUREE_NUMERO_SEC // 60} min")
                 _redessiner(cle, conf, vue_close(
                     "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes %d du jour."
                     % conf["quota"], conf))
                 return
-            etat, val = numgen.get_code(act_id, "herosms")
+            etat, val = numgen.get_code(act_id, _prov(a))
             if etat == "code" and val:
                 if _maj(cle, act_id, code=val, code_le=int(time.time()), souci=""):
                     _histo(act_id, "code")
@@ -581,8 +626,8 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
             if etat == "cancel":
                 _maj(cle, act_id, clos="annule")
                 _histo(act_id, "souci")
-                _log(f"{a.get('valeur')} : fermé par HeroSMS")
-                _redessiner(cle, conf, vue_close("❌ HeroSMS a fermé ce numéro. Prends-en un autre.",
+                _log(f"{a.get('valeur')} : fermé par {NOMS_FOURNISSEURS.get(_prov(a), _prov(a))}")
+                _redessiner(cle, conf, vue_close("❌ Le fournisseur a fermé ce numéro. Prends-en un autre.",
                                                  conf))
                 return
             if etat == "error":
