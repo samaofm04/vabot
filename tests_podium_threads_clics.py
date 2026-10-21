@@ -48,6 +48,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -645,15 +646,16 @@ try:
           and "puis écris-y **ton rang du jour (top 1, 2 ou 3)**." in e_b["description"],
           (e_d["description"][-400:], e_b["description"][-300:]))
     # le 🌐 all-time est relevé une fois par jour, la période en direct : il
-    # se lisait plus petit qu'elle (audit du 20/10/2026)
-    cl_at = {"lignes": [{"va": "Threads 12", "numero": 12, "clics": 47},
-                        {"va": "Threads 43", "numero": 43, "clics": 31}],
+    # se lisait plus petit qu'elle (audit du 20/10/2026). Va IG le garde
+    # (Threads ne l'affiche plus depuis le 21/10/2026, section 4)
+    cl_at = {"lignes": [{"va": "VA 12", "numero": 12, "clics": 47},
+                        {"va": "VA 43", "numero": 43, "clics": 31}],
              "illisibles": [], "frais": True}
-    d_at = pd.pages_subs(cl_at, lundi, auj, {"Threads 12": 41, "Threads 43": 900},
-                         gid=TH)[0]["description"]
+    d_at = pd.pages_subs(cl_at, lundi, auj, {"VA 12": 41, "VA 43": 900},
+                         gid=IG)[0]["description"]
     check("🌐 all-time jamais plus petit que la période (47 et non 41), le plus grand gardé (900)",
-          "**Threads 12** — **47** clics · 🌐 47 all-time" in d_at
-          and "**Threads 43** — **31** clics · 🌐 900 all-time" in d_at, d_at[:500])
+          "**VA 12** — **47** subs · 🌐 47 all-time" in d_at
+          and "**VA 43** — **31** subs · 🌐 900 all-time" in d_at, d_at[:500])
     check("Va IG (pas de bouton 💳 sur ses tickets) : la consigne d'avant, mot pour mot",
           pd._reclamer_prime(pd._profil(IG), "💸 **Pour recevoir ta prime :**", "ton rang de la semaine")
           == "💸 **Pour recevoir ta prime :** envoie un message à **@Luigi** dans **ton espace perso** "
@@ -663,7 +665,19 @@ try:
           and pd._mention_podium(TW) == pd._mention_podium(IG) == pd.MENTION_PODIUM)
 
     # ------------------------------------------------------------------ 4
-    print("\n— 4. la quinzaine dans « ─│📊┤-l-clicks », avec l'all-time")
+    print("\n— 4. la quinzaine dans « ─│📊┤-l-clicks » : VA de Threads et de Va IG, US / GBL")
+    # Propriétaire, 21/10/2026 : les VA de Va IG à leurs clics, « US + UK +
+    # Canada pour tous », « us : » et « gbl : », plus d'all-time. Deux VA de
+    # Va IG (fiches liens_fr), un troisième au lien coupé, pas compté.
+    import liens_fr as _lfr
+    _etat_fr = _lfr.ETAT
+    _lfr.ETAT = pd.DATA_DIR / "liens_va_fr.json"
+    safe_json.write(_lfr.ETAT, {"liens": {
+        "u7:amelia": {"numero": 3, "pseudo": "seven", "link_id": "i1"},
+        "u8:lola": {"numero": 2, "pseudo": "lolafan", "link_id": "i2"},
+        "u9:emma": {"numero": 4, "pseudo": "parti", "link_id": "i3", "actif": False}}})
+    BOUTONS.update({"i1": {"US": 2, "FR": 30, "CA": 1}, "i2": {"GB": 4, "BE": 6},
+                    "i3": {"US": 99}})
     # ce matin, Threads avait une page dans son salon -subs, supprimé depuis
     d0 = json.loads(pd.ETAT_FICHIER.read_text())
     d0.setdefault("subs", {})[TH] = {"saison": "2026-10-01", "messages": ["1559432858823823432"],
@@ -683,22 +697,35 @@ try:
     eq = pq[0]["json"]["embeds"][0]
     RENDU["quinzaine"] = eq
     dq = eq["description"]
-    at = json.loads((pd.DATA_DIR / "podium_alltime_threads.json").read_text())["totaux"]
-    check("l'all-time de Threads : son fichier, « Threads n », clics uniques US + UK",
-          at.get("Threads 12") == 47 and at.get("Threads 43") == 31 and "VA 12" not in at, at)
-    check("le format voulu : « 🥇 **Threads 12** — **47** clics · 🌐 47 all-time »",
-          "**Threads 12** — **47** clics · 🌐 47 all-time" in dq
-          and "4. Threads 31 — 7 clics · 🌐 7 all-time" in dq
-          and "5. Threads 30 — 3 clics · 🌐 3 all-time" in dq, dq)
+    check("plus d'all-time : ni 🌐 ni relevé « depuis toujours »",
+          "🌐" not in dq and "all-time" not in dq
+          and not (pd.DATA_DIR / "podium_alltime_threads.json").exists(), dq)
+    # Threads 12 : l1 + l2, US + UK + CA = 47, tous pays 59 ; Instagram VA 1
+    # (amelia:3, i1) : US + CA = 3, tous pays 33 ; Instagram VA 2 (lola:2, i2)
+    check("le format voulu : « 🥇 **Threads 12** — US : **47** · GBL : **59** », les VA de Va IG "
+          "en « Instagram VA n », le Canada compté",
+          "🥇 **Threads 12** — US : **47** · GBL : **59**" in dq
+          and "Threads 31 — US : 7 · GBL : 11" in dq
+          and "Instagram VA 1 — US : 3 · GBL : 33" in dq
+          and "Instagram VA 2 — US : 4 · GBL : 10" in dq
+          and "Instagram VA 3" not in dq and "Amelia" not in dq and "seven" not in dq, dq)
+    check("… US + UK + CA pour tous : Threads 41 (l4, 4 du Canada) compte 24",
+          "Threads 41** — US : **24** · GBL : **24**" in dq or "Threads 41 — US : 24 · GBL : 24" in dq, dq)
     check("la quinzaine non plus : ni ⚠️ ni ℹ️", "⚠️" not in dq and "ℹ️" not in dq, dq[-300:])
-    check("titre « Classement clics », en-tête « uniques US + UK », total en clics, anonyme",
+    n_lignes = len(re.findall(r" — US : ", dq))
+    check("titre « Classement clics », en-tête « uniques US + UK + CA » et sa légende, total US / "
+          "GBL, comptes classés Threads + Va IG, anonyme",
           eq["title"] == "📊 Classement clics — la quinzaine"
-          and "Clics **uniques US + UK**" in dq and "**108** clics" in dq
+          and "Clics **uniques US + UK + CA** · **" + str(n_lignes) + "** comptes classés" in dq
+          and "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_" in dq
+          and "\nUS : **119** · GBL : " in dq
           and "subs" not in json.dumps(eq, ensure_ascii=False).lower()
           and "Roucham" not in dq, (eq["title"], dq))
-    check("… sur la quinzaine (01/10 → aujourd'hui) et depuis toujours, clics uniques seulement",
-          {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-01", "2026-10-13"),
-                                                     (pd.ALLTIME_DEPUIS, "2026-10-13")}
+    check("… sur la quinzaine seulement (01/10 → aujourd'hui), clics uniques, un relevé par VA "
+          "dont les deux de Va IG",
+          {a[1:] for a in GMS["boutons"][n_b:]} == {("2026-10-01", "2026-10-13")}
+          and ("i1",) in [a[0] for a in GMS["boutons"][n_b:]]
+          and ("i3",) not in [a[0] for a in GMS["boutons"][n_b:]]
           and not GMS["vues"])
     check("… sous l'étiquette « quinzaine » (elle ne paie rien : elle cède la réserve)",
           set(GMS["tags"][n_b:]) == {pd.ETIQUETTE_QUINZAINE} != "podium", GMS["tags"][n_b:])
@@ -735,6 +762,11 @@ try:
           and "Threads 31 · **?**" in txt_th and "pas_threads" not in txt_th, txt_th)
     check("… numéros du registre (mode d'avant) : le nom du registre",
           "🥇 Threads 12 · **Roucham** · 47 clics" in txt_reg, txt_reg)
+    check("… et les VA de Va IG : « Instagram VA n » → pseudo (model VA n), jamais le "
+          "« Threads n » au même numéro",
+          "Instagram VA 1 · **seven (Amelia VA 3)** · 3 clics" in txt_th
+          and "Instagram VA 2 · **lolafan (Lola VA 2)** · 4 clics" in txt_th, txt_th)
+    _lfr.ETAT = _etat_fr
 
     # ------------------------------------------------------------------ 5
     print("\n— 5. le lundi : semaine terminée, puis le podium figé")

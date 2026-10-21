@@ -985,9 +985,12 @@ try:
         check("chaque ecriture du message vivant note le format (POST, PATCH, quinzaine)",
               # le format de CE serveur depuis le 13/10/2026 (_format_affiche :
               # FORMAT_AFFICHAGE, plus ce que son profil change à l'affichage)
-              src.count('"format": _format_affiche(gid)') >= 2
+              # (la quinzaine : _format_subs, le même plus « US / GBL » sur
+              # Threads depuis le 21/10/2026)
+              src.count('"format": _format_affiche(gid)') >= 1
+              and '"format": _format_subs(gid)' in src
               and 'garde["format"] = _format_affiche(gid)' in src
-              and pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE)
+              and pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE == pd._format_subs(IG))
     finally:
         pd._etat, pd._pause_gms, pd.time.time = _etat_vrai, _pause_vrai, _maint
 

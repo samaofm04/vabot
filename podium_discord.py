@@ -276,6 +276,21 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # l'adresse USDC au bouton du ticket, comme Twitter (Bowser ne
                  # lit pas les messages non plus)
                  "bouton_usdc": True,
+                 # LA QUINZAINE (salon -l-clicks) seulement, propriétaire
+                 # 21/10/2026 : « add ici les va ig aussi uniquement les click
+                 # threads = ig pour le moment c'est meta, prend leur click et
+                 # aussi met à côté le globale, et c'est compté USA, United
+                 # Kingdom et Canada », puis « je veux avoir us : et le gbl : »,
+                 # « US + UK + Canada pour tous ». Les VA de Va IG (« Instagram
+                 # VA n », leurs liens de liens_va_fr.json) rejoignent ce
+                 # classement-là, à leurs clics, pas à leurs abonnés : une
+                 # exception voulue à « chaque serveur ses VA » (14/10). Chaque
+                 # ligne dit « US : n · GBL : n » (GBL : tous pays), et plus de
+                 # 🌐 all-time (« 43 all-time » pour 66 clics). Le podium de la
+                 # semaine et ses primes gardent US + UK et les seuls VA Threads.
+                 # Voir _quinzaine_us_gbl. POUR REVENIR : retirer ces cinq clés.
+                 "quinzaine_va_ig": True, "pays_subs": ("US", "GB", "CA"),
+                 "marche_subs": "US + UK + CA", "us_gbl": True, "alltime_subs": False,
                  # un fichier neuf : l'ancien (podium_alltime_threads.json) range
                  # sous « Threads 12 » les totaux des liens de Twitter du VA 12 ;
                  # repris, ils seraient passés au VA Threads n° 12
@@ -1965,16 +1980,24 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
             illisibles.append(va)
             continue
         try:
-            _, pays = _releve_liens(gid, e["ids"], d0, d1, mesure, etiquette, directs)
+            total, pays = _releve_liens(gid, e["ids"], d0, d1, mesure, etiquette, directs)
         except Exception:
-            pays = None
+            total, pays = None, None
         if pays is None:
             illisibles.append(va)
         else:
-            lignes.append({"va": va, "numero": table.get(cle, 999),
-                           "clics": _clics(pays, profil),
-                           "liens": len(e["ids"]), "spam": e["spam"],
-                           "model": e.get("model", "")})
+            ligne = {"va": va, "numero": table.get(cle, 999),
+                     "clics": _clics(pays, profil),
+                     "liens": len(e["ids"]), "spam": e["spam"],
+                     "model": e.get("model", "")}
+            if profil.get("us_gbl"):
+                # la quinzaine de Threads (_quinzaine_us_gbl) : ses pays à
+                # elle, et tous pays ; le podium de la semaine lit « clics »
+                ligne["clics_subs"] = _clics(pays, {"pays": profil.get("pays_subs")
+                                                    or profil["pays"]})
+                ligne["gbl"] = int(total if total is not None
+                                   else sum(int(v or 0) for v in pays.values()))
+            lignes.append(ligne)
         time.sleep(pause)
     # à égalité, le numéro départage : deux relevés de la même semaine doivent
     # rendre le même ordre, sinon le podium changerait tout seul d'un appel à l'autre
@@ -1991,22 +2014,60 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
     return out
 
 
-def _numeros_partis(gid: Optional[str]) -> Dict[int, str]:
-    """{numéro de VA : jour où son départ a été constaté} pour ce serveur :
-    les fiches « parti » de tickets_discord, au numéro de leur lien
-    (liens_va). Un VA sans lien du registre n'a pas de numéro ici : il reste."""
+def _partis_va_ig() -> Dict[str, float]:
+    """{uid : heure du départ} des VA partis de Va IG, tels que cogs/welcome.py
+    les tient (partis_fr : data/pending_deletions.json, entrées « garder »)."""
     try:
+        from cogs.welcome import partis_fr
+        return {str(k): float(v or 0) for k, v in (partis_fr() or {}).items()}
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] VA partis de Va IG illisibles : {type(e).__name__}: {e}", flush=True)
+        return {}
+
+
+def _partis(gid: Optional[str]) -> Dict[str, str]:
+    """{clé de ligne : jour où son départ a été constaté} pour ce serveur.
+    Twitter et Threads : « VA n » / « Threads n », la fiche « parti » de
+    tickets_discord au numéro de son lien (liens_va) — un VA sans lien du
+    registre n'a pas de numéro ici, il reste. Va IG : « model:n », un numéro
+    n'y étant unique que dans sa model (cogs.welcome.partis_fr, numéros des
+    fiches liens_fr)."""
+    g = str(gid or "")
+    out: Dict[str, str] = {}
+    try:
+        if _profil(gid).get("fr"):
+            import liens_fr
+            partis = _partis_va_ig()
+            for cle, f in (liens_fr._etat().get("liens") or {}).items():
+                uid, _, model = str(cle).partition(":")
+                if uid in partis and isinstance(f, dict) and str(f.get("numero") or "").isdigit():
+                    out[f"{model}:{int(f['numero'])}"] = dt.date.fromtimestamp(partis[uid]).isoformat()
+            return out
         import liens_va as lv
         import tickets_discord as tk
-        out: Dict[int, str] = {}
-        for uid, quand in tk.partis(str(gid or "")).items():
-            n = lv.lien_de(str(gid or ""), uid).get("numero")
+        lib = str(_profil(gid).get("libelle") or "VA")
+        for uid, quand in tk.partis(g).items():
+            n = lv.lien_de(g, uid).get("numero")
             if n:
-                out[int(n)] = dt.date.fromtimestamp(quand).isoformat()
-        return out
+                out[f"{lib} {int(n)}"] = dt.date.fromtimestamp(quand).isoformat()
     except Exception as e:                                   # noqa: BLE001
         print(f"[podium] VA partis illisibles : {type(e).__name__}: {e}", flush=True)
-        return {}
+    return out
+
+
+def _cle_ligne(gid: Optional[str], va: Any, x: Optional[Dict[str, Any]] = None) -> str:
+    """La clé de _partis d'une ligne (ou d'un « sans relevé ») de ce serveur.
+    « Instagram VA 12 », mêlé à la quinzaine de Threads, n'est jamais le
+    « Threads 12 » parti : le libellé entier compte."""
+    if not _profil(gid).get("fr"):
+        return str(va or "").strip()
+    import liens_fr
+    if x and x.get("model") and str(x.get("numero") or "").isdigit():
+        return f'{x["model"]}:{int(x["numero"])}'
+    m = re.fullmatch(r"(\S+) VA (\d+)", str(va or "").strip())
+    noms = {str(v.get("nom") or ""): k for k, v in liens_fr.MODELS.items()}
+    noms["Amélia"] = "amelia"
+    return f"{noms[m.group(1)]}:{int(m.group(2))}" if m and m.group(1) in noms else ""
 
 
 def _sans_partis(gid: Optional[str], cl: Dict[str, Any], fin: dt.date) -> Dict[str, Any]:
@@ -2016,17 +2077,14 @@ def _sans_partis(gid: Optional[str], cl: Dict[str, Any], fin: dt.date) -> Dict[s
     finie avant leur départ les garde — leurs clics y étaient vrais ; leur
     prime, elle, n'est pas annoncée (suivi_va). Ceux qu'on retire sont notés
     dans « partis », pas avalés."""
-    partis = {n for n, jour in _numeros_partis(gid).items() if jour <= fin.isoformat()}
+    partis = {k for k, jour in _partis(gid).items() if jour <= fin.isoformat()}
     if not partis or not isinstance(cl, dict):
         return cl
-
-    def num(x: Any) -> Optional[int]:
-        m = re.search(r"(\d+)\s*$", str(x or ""))
-        return int(m.group(1)) if m else None
     out = dict(cl)
     out["lignes"] = [x for x in cl.get("lignes") or []
-                     if int(x.get("numero") or num(x.get("va")) or -1) not in partis]
-    out["illisibles"] = [v for v in cl.get("illisibles") or [] if num(v) not in partis]
+                     if _cle_ligne(gid, x.get("va"), x) not in partis]
+    out["illisibles"] = [v for v in cl.get("illisibles") or []
+                         if _cle_ligne(gid, v) not in partis]
     out["partis"] = sorted({str(x.get("va")) for x in cl.get("lignes") or []
                             if x not in out["lignes"]}
                            | {str(v) for v in cl.get("illisibles") or []
@@ -3065,6 +3123,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                    if p.get("mesure_subs") == "abonnes" else
                    f'Abonnés **tracking OF** · **{len(lignes)}** comptes classés\n'
                    if p.get("mesure_subs") == "tracking_abonnes" else
+                   f'Clics **uniques {p["marche_subs"]}** · **{len(lignes)}** comptes classés\n'
+                   "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_\n"
+                   if p.get("us_gbl") and p.get("marche_subs") else
                    f'Clics **{_mesure_dite(p)}** · **{len(lignes)}** comptes classés\n'))
     else:
         # le même en-tête que le podium mêlé : toute l'agence, sans marché
@@ -3090,6 +3151,13 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         suffixe = (f' · 🌐 {at} all-time'
                    if at is not None and p.get("alltime_subs", True) else "")
         nom = x.get("affiche") or x["va"]
+        if p.get("us_gbl") and "gbl" in x:
+            # Threads (propriétaire, 21/10/2026 : « je veux avoir us : et le
+            # gbl : ») : ce qui classe, puis tous pays
+            rangs.append(f'{med[i]} **{nom}** — US : **{x["clics"]}** · GBL : **{x["gbl"]}**'
+                         if i < 3 else
+                         f'{i + 1}. {suite}{nom} — US : {x["clics"]} · GBL : {x["gbl"]}')
+            continue
         rangs.append(f'{med[i]} **{nom}** — **{x["clics"]}** {unite}{suffixe}'
                      if i < 3 else
                      f'{i + 1}. {suite}{nom} — {x["clics"]} {unite}{suffixe}')
@@ -3100,6 +3168,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     # annonce toute l'agence, un total par marché redirait ce qu'on ne dit plus
     total = sum(int(x["clics"]) for x in (lignes if mix is None else mix))
     queue = [f'\n👥 **Total période**\n**{total}** {unite}']
+    if p.get("us_gbl") and mix is None and all("gbl" in x for x in lignes):
+        queue = [f'\n👥 **Total période**\nUS : **{total}** · GBL : '
+                 f'**{sum(int(x["gbl"]) for x in lignes)}**']
     if cl["illisibles"]:
         if final:
             queue.append("\n⚠️ Relevé indisponible : " + ", ".join(cl["illisibles"])
@@ -3156,7 +3227,9 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         corps = tete + "\n" + "\n".join(page)
         if n == len(pages):
             corps += "\n" + bas
-        marches = (f'Marché {p["marche"]}' if mix is None
+        # la quinzaine de Threads compte aussi le Canada (« marche_subs »)
+        marche = (p.get("us_gbl") and p.get("marche_subs")) or p["marche"]
+        marches = (f'Marché {marche}' if mix is None
                    else f'Marchés {p["marche"]} + {tw["marche"]}')
         # l'heure du relevé quand il est repris de Twitter (Threads) : celle
         # que Twitter affiche pour les mêmes chiffres, pas celle de l'envoi
@@ -3289,8 +3362,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
     # ne rend rien de plus, et laisserait croire que la quinzaine est finie
     # la quinzaine ne paie rien : elle cède la réserve de la paie au podium
     # Va IG et Twitter : la quinzaine aux vrais abonnés (clé « mesure_subs »)
-    cl = classement(debut, min(aujourd, fin_saison), gid=gid, mesure=_profil(gid).get("mesure_subs"),
-                    etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine") else "podium")
+    cl = _classement_quinzaine(debut, min(aujourd, fin_saison), gid)
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
         return str((ids or [""])[0])
@@ -3340,7 +3412,7 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None, forcer: bool = Fal
         return ""
     vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time(),
                     "dernier": _instantane(cl, min(aujourd, fin_saison)),
-                    "format": _format_affiche(gid)}
+                    "format": _format_subs(gid)}
     _ecrire(d)
     print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes, '
           f'{len(neufs)} page(s)', flush=True)
@@ -3483,9 +3555,7 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
         if _pause_pour(gid):
             raison = "GetMySocial en pause"
         else:
-            cl = classement(debut, fin, gid=gid, mesure=_profil(gid).get("mesure_subs"),
-                            etiquette=ETIQUETTE_QUINZAINE if _profil(gid).get("vitrine")
-                            else "podium")
+            cl = _classement_quinzaine(debut, fin, gid)
             rec["essais"] = int(rec.get("essais") or 0) + 1
             if not cl["lignes"]:
                 raison = "aucun relevé"
@@ -3627,7 +3697,7 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         return True
     if not (garde.get("messages") or garde.get("message")):
         return True
-    if garde.get("format") != _format_affiche(gid):
+    if garde.get("format") != _format_subs(gid):
         # presentation changee : refaire tout de suite. ICI, et pas seulement
         # dans a_rafraichir_subs : rafraichir_subs repose la meme question et
         # sortait sans rien faire (constate le 03/10 apres f6b44cf)
@@ -3640,6 +3710,13 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         return True
     minutes = _minutes_subs(gid)
     return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _format_subs(gid: Optional[str]) -> str:
+    """Le format des pages de la quinzaine : celui des messages vivants, plus
+    « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
+    passage, sans toucher au podium de la semaine."""
+    return _format_affiche(gid) + ("+us-gbl" if _profil(gid).get("us_gbl") else "")
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4146,6 +4223,87 @@ def _payer(gid: str, debut: dt.date, fin: dt.date, cl: Dict[str, Any],
             print(f"[podium] primes annoncees : {b}", flush=True)
     except Exception as e:
         print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
+
+
+def _entites_va_ig() -> Dict[str, Dict[str, Any]]:
+    """Les VA de Va IG pour la quinzaine de Threads : {« amelia:3 » : {ids,
+    pseudo, nom « Amelia VA 3 », model}} d'après leurs fiches (liens_fr,
+    data/liens_va_fr.json). Un lien coupé (rôle retiré) ou un VA parti de Va
+    IG (cogs.welcome.partis_fr) n'y est pas."""
+    import liens_fr
+    partis = _partis_va_ig()
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle, f in sorted((liens_fr._etat().get("liens") or {}).items()):
+        if (not isinstance(f, dict) or ":" not in cle or f.get("actif") is False
+                or cle.split(":", 1)[0] in partis):
+            continue
+        model = cle.split(":", 1)[1]
+        n, lid = f.get("numero"), str(f.get("link_id") or "")
+        if model not in liens_fr.MODELS or not str(n or "").isdigit() or not lid:
+            continue
+        e = out.setdefault(f"{model}:{int(n)}", {
+            "ids": [], "pseudo": str(f.get("pseudo") or ""), "model": model,
+            "nom": f'{liens_fr.MODELS[model]["nom"]} VA {int(n)}'})
+        if lid not in e["ids"]:
+            e["ids"].append(lid)
+    return out
+
+
+def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
+                      etiquette: str) -> Dict[str, Any]:
+    """La quinzaine de Threads (clés « pays_subs », « quinzaine_va_ig »,
+    « us_gbl ») : ses VA (classement(), « Threads n ») et ceux de Va IG
+    (« Instagram VA n »), à leurs clics uniques vers la destination
+    (gms_bouton). « clics » : US + UK + Canada, ce qui classe ; « gbl » :
+    tous pays. La forme de classement()."""
+    pf = _profil(gid)
+    d0, d1 = debut.isoformat(), fin.isoformat()
+    pays_q = tuple(pf.get("pays_subs") or pf["pays"])
+    cl = classement(debut, fin, gid=gid, mesure=pf.get("mesure_subs"), etiquette=etiquette)
+    lignes = [dict(x, clics=int(x.get("clics_subs", x["clics"]))) for x in cl.get("lignes") or []]
+    illisibles = list(cl.get("illisibles") or [])
+    frais = bool(cl.get("frais", True))
+    n_ig = 0
+    if pf.get("quinzaine_va_ig"):
+        ig = _entites_va_ig()
+        table = numeros_instagram(set(ig))
+        # un lien direct de Va IG se compte à ses visites, comme ceux de Threads
+        liens_ig, frais_ig = liens_bruts(VA_IG_ID, etiquette)
+        directs = _directs(liens_ig)
+        frais = frais and frais_ig
+        for k, e in sorted(ig.items(), key=lambda kv: table.get(kv[0], 0)):
+            if k not in table:
+                continue
+            va = f"Instagram VA {table[k]}"
+            n_ig += 1
+            try:
+                total, pays = _releve_liens(gid, e["ids"], d0, d1, "gms_bouton", etiquette, directs)
+            except Exception:                                # noqa: BLE001
+                total, pays = None, None
+            if pays is None:
+                illisibles.append(va)
+            else:
+                lignes.append({"va": va, "numero": int(table[k]),
+                               "clics": sum(int(pays.get(p) or 0) for p in pays_q),
+                               "gbl": int(total if total is not None
+                                          else sum(int(v or 0) for v in pays.values())),
+                               "liens": len(e["ids"]), "spam": False, "model": e["model"]})
+            time.sleep(0.3)
+    lignes.sort(key=lambda x: (-x["clics"], -int(x.get("gbl") or 0), x["va"]))
+    return dict(cl, lignes=lignes, illisibles=sorted(illisibles), frais=frais,
+                entites=int(cl.get("entites") or 0) + n_ig)
+
+
+def _classement_quinzaine(debut: dt.date, fin: dt.date, gid: str) -> Dict[str, Any]:
+    """Le classement de la quinzaine de ce serveur, vivant comme figé : sa
+    mesure (« mesure_subs »), et pour Threads ses VA et ceux de Va IG en US /
+    GBL (_quinzaine_us_gbl). La quinzaine ne paie rien : elle cède la réserve
+    de la paie au podium (étiquette « quinzaine » sur un serveur vitrine)."""
+    pf = _profil(gid)
+    etiq = ETIQUETTE_QUINZAINE if pf.get("vitrine") else "podium"
+    if pf.get("us_gbl"):
+        return _quinzaine_us_gbl(debut, fin, str(gid), etiq)
+    return classement(debut, fin, gid=gid, mesure=pf.get("mesure_subs"), etiquette=etiq)
 
 
 def _plafonds_illisibles(cl: Dict[str, Any], debut: dt.date,
@@ -4716,17 +4874,23 @@ def _noms_registre() -> Dict[int, str]:
 
 def _ligne_affichee(libelle: str) -> "re.Pattern[str]":
     """Une ligne de classement telle qu'une page l'affiche : « 🥇 **VA 41** —
-    **367** subs · 🌐 395 all-time », « 4. Threads 92 — 9 clics »."""
-    return re.compile(rf"({re.escape(libelle)} \d+)\*{{0,2}} — \*{{0,2}}(\d+)\*{{0,2}} "
-                      r"(?:subs|clics)\b")
+    **367** subs · 🌐 395 all-time », « 4. Threads 92 — 9 clics », et sur la
+    quinzaine de Threads depuis le 21/10/2026 « 🥇 **Threads 92** — US : **54**
+    · GBL : **71** », « 5. Instagram VA 3 — US : 2 · GBL : 40 »."""
+    return re.compile(rf"((?:{re.escape(libelle)}|Instagram VA) \d+)\*{{0,2}} — "
+                      r"(?:US : )?\*{0,2}(\d+)\*{0,2}(?: (?:subs|clics)\b| · GBL)")
 
 
 def _bloc_pseudos(titre: str, lignes: List[Tuple[str, int]], sans: List[str], unite: str,
-                  noms: Dict[int, str]) -> str:
+                  noms: Dict[Any, str]) -> str:
     """Un classement, la personne devant chaque « VA n ». Les VA à zéro sur
     une seule ligne : soixante VA, une ligne chacun, ne tenaient pas dans un
     message (tickets_discord._suite coupe à 1900)."""
     def qui(va: str) -> str:
+        if any(isinstance(k, str) for k in noms):
+            # au libellé entier : « Threads 12 » et « Instagram VA 12 » sont
+            # deux personnes (quinzaine de Threads, _noms_libelles)
+            return noms.get(va) or "?"
         m = re.search(r"\d+", va)
         return (noms.get(int(m.group())) if m else None) or "?"
     out = [titre]
@@ -4767,6 +4931,25 @@ def _noms_va(gid: str) -> Dict[int, str]:
     return out
 
 
+def _noms_libelles(gid: str) -> Dict[Any, str]:
+    """Les noms de « 👀 Pseudos ». Threads, dont la quinzaine mêle les VA de
+    Va IG (« quinzaine_va_ig ») : au libellé entier, « Threads 12 » →
+    pseudo, « Instagram VA 3 » → « pseudo (Amelia VA 3) ». Ailleurs :
+    _noms_va, au numéro."""
+    noms = _noms_va(gid)
+    pf = _profil(gid)
+    if not pf.get("quinzaine_va_ig"):
+        return noms
+    lib = str(pf.get("libelle") or "VA")
+    out: Dict[Any, str] = {f"{lib} {n}": p for n, p in noms.items()}
+    ig = _entites_va_ig()
+    table = numeros_instagram(set(ig))
+    for k, e in ig.items():
+        if k in table:
+            out[f"Instagram VA {table[k]}"] = f'{e["pseudo"] or "?"} ({e["nom"]})'
+    return out
+
+
 def _texte_pseudos_releve(gid: str, jour: Optional[dt.date] = None) -> str:
     """« 👀 Pseudos » sur Twitter et Threads, la quinzaine en cours : le
     classement que le salon affiche (son dernier relevé, gardé dans l'état :
@@ -4783,7 +4966,7 @@ def _texte_pseudos_releve(gid: str, jour: Optional[dt.date] = None) -> str:
         f"👀 **Pseudos — quinzaine en cours, du {debut.strftime('%d/%m')} au "
         f"{fin.strftime('%d/%m')}** (visible par toi seul)",
         [(str(x["va"]), int(x.get("clics") or 0)) for x in snap["lignes"]],
-        list(snap.get("illisibles") or []), _unite(gid), _noms_va(gid))
+        list(snap.get("illisibles") or []), _unite(gid), _noms_libelles(gid))
 
 
 def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], List[str], str, str]:
@@ -4815,7 +4998,8 @@ def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], L
     sans: List[str] = []
     for ligne in txt.splitlines():
         if "Relevé indisponible" in ligne or "Sans relevé" in ligne:
-            sans += [v for v in re.findall(rf"{re.escape(lib)} \d+", ligne) if v not in sans]
+            sans += [v for v in re.findall(rf"(?:{re.escape(lib)}|Instagram VA) \d+", ligne)
+                     if v not in sans]
     if textes and not lignes:
         soucis.append("aucune ligne de classement reconnue sur ses pages")
     return lignes, sans, ("subs" if "Abonnés **" in txt else "clics"), " ; ".join(soucis)
@@ -4832,7 +5016,7 @@ def _texte_pseudos_avant(gid: str, jour: Optional[dt.date] = None) -> str:
     txt = _bloc_pseudos(
         f"👀 **Quinzaine d'avant, du {p_deb.strftime('%d/%m')} au {p_fin.strftime('%d/%m')}** "
         f"— telle qu'affichée" + (" (en clics)" if unite == "clics" else ""),
-        lignes, sans, unite, _noms_va(gid))
+        lignes, sans, unite, _noms_libelles(gid))
     return txt if not souci else (txt + f"\n⚠️ _{souci}_")[:1900]
 
 

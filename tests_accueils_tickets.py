@@ -318,6 +318,32 @@ try:
               and tk.MARQUE_PARTI not in a83["embeds"][0]["description"]
               and not lv.est_actif(G, "83") and ("lnk_b", True) not in g.coupes, (b4, g.coupes))
         check("… et il rentre au classement", pd._sans_partis(G, cl, auj) == cl)
+
+        # Va IG : un numéro n'y est unique que dans sa model (« amelia:3 »).
+        # Les partis viennent de cogs/welcome.py (partis_fr)
+        import liens_fr as _lfr
+        _sv_fr = (_lfr.ETAT, pd._partis_va_ig)
+        try:
+            _lfr.ETAT = TMP / "liens_va_fr_podium.json"
+            _lfr.ETAT.write_text(json.dumps({"liens": {
+                "u7:amelia": {"numero": 3, "pseudo": "parti_fr", "link_id": "i7"},
+                "u8:lola": {"numero": 3, "pseudo": "reste_fr", "link_id": "i8"}}}), encoding="utf-8")
+            hier = (dt.datetime.now() - dt.timedelta(days=1)).timestamp()
+            pd._partis_va_ig = lambda: {"u7": hier}
+            IG = pd.VA_IG_ID
+            cl_ig = {"lignes": [{"va": "Amelia VA 3", "numero": 3, "model": "amelia", "clics": 9},
+                                {"va": "Lola VA 3", "numero": 3, "model": "lola", "clics": 4}],
+                     "illisibles": ["Amelia VA 3"], "frais": True}
+            r_ig = pd._sans_partis(IG, cl_ig, auj)
+            check("Va IG : Amelia VA 3 (parti) sort, Lola VA 3 (même numéro, autre model) reste",
+                  [x["va"] for x in r_ig["lignes"]] == ["Lola VA 3"] and r_ig["illisibles"] == []
+                  and r_ig["partis"] == ["Amelia VA 3"], r_ig)
+            check("… une semaine finie avant son départ le garde",
+                  pd._sans_partis(IG, cl_ig, auj - dt.timedelta(days=5)) == cl_ig)
+            check("… et la quinzaine de Threads ne le reprend pas parmi ses « Instagram VA »",
+                  sorted(pd._entites_va_ig()) == ["lola:3"], pd._entites_va_ig())
+        finally:
+            _lfr.ETAT, pd._partis_va_ig = _sv_fr
         src = inspect.getsource(tk.suivre_partout)
         check("branché dans suivre_partout, une fois l'heure",
               "suivre_departs(gid)" in src and "DEPARTS_S" in src)

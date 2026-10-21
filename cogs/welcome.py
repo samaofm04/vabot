@@ -278,7 +278,7 @@ async def marquer_parti_fr(guild, uid, nom, channel_id) -> bool:
         try:
             await ch.send(f"👋 <@{uid}> a quitté le serveur (constaté le **{time.strftime('%d/%m/%Y')}**).\n"
                           "🚫 Son lien est désactivé, pas supprimé : il est réactivable s'il revient.\n"
-                          "Ce salon reste tel quel.",
+                          "Ce salon reste tel quel. Il ne compte plus dans les classements.",
                           allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:                               # noqa: BLE001
             log.warning("depart de %s : message non poste dans son ticket (%s)", uid, type(e).__name__)
