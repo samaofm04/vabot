@@ -13,10 +13,18 @@ même dossier `data/` :
 git push origin main
 ```
 
-Il n'y a rien d'autre à faire : le VPS a un cron qui tire la branche `main` et
-redémarre `va-bot` en moins d'une minute. `youl4b.com/version` dit quel commit
-tourne et depuis quand — à consulter avant de conclure qu'un correctif « ne
-marche pas ».
+Chaque minute, le cron du VPS (`/usr/local/sbin/vabot-guarded-deploy`, hors
+dépôt) tire `main` : `git reset --hard`, puis les patchs locaux
+`/root/vabot-patches/*.patch` (un patch qui ne s'applique plus est ignoré en
+silence, fichier `.DROPPED`), puis `/usr/local/lib/vabot/check_transfer_deploy.py
+check`, les tests des transferts Telegram. **Si ce contrôle échoue, le bot n'est
+pas redémarré** : la « version sûre » des fichiers de transfert est remise, et
+le journal dit `PIPELINE REGRESSION … bot restart cancelled`. Du 13 au 21/10,
+c'était le cas à chaque push, et quelqu'un redémarrait à la main.
+
+Le journal `/var/log/va-bot-deploy.log` dit `Bot restarte` quand ça a marché.
+`youl4b.com/version` lit le commit *sur le disque* mais l'heure de démarrage *du
+processus* : c'est « Serveur démarré » qui prouve que le correctif tourne.
 
 ## Tester
 
