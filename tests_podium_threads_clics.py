@@ -644,6 +644,16 @@ try:
           and "puis écris-y **ton rang de la semaine**." in e_d["description"]
           and "puis écris-y **ton rang du jour (top 1, 2 ou 3)**." in e_b["description"],
           (e_d["description"][-400:], e_b["description"][-300:]))
+    # le 🌐 all-time est relevé une fois par jour, la période en direct : il
+    # se lisait plus petit qu'elle (audit du 20/10/2026)
+    cl_at = {"lignes": [{"va": "Threads 12", "numero": 12, "clics": 47},
+                        {"va": "Threads 43", "numero": 43, "clics": 31}],
+             "illisibles": [], "frais": True}
+    d_at = pd.pages_subs(cl_at, lundi, auj, {"Threads 12": 41, "Threads 43": 900},
+                         gid=TH)[0]["description"]
+    check("🌐 all-time jamais plus petit que la période (47 et non 41), le plus grand gardé (900)",
+          "**Threads 12** — **47** clics · 🌐 47 all-time" in d_at
+          and "**Threads 43** — **31** clics · 🌐 900 all-time" in d_at, d_at[:500])
     check("Va IG (pas de bouton 💳 sur ses tickets) : la consigne d'avant, mot pour mot",
           pd._reclamer_prime(pd._profil(IG), "💸 **Pour recevoir ta prime :**", "ton rang de la semaine")
           == "💸 **Pour recevoir ta prime :** envoie un message à **@Luigi** dans **ton espace perso** "

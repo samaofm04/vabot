@@ -1437,12 +1437,20 @@ def _suivre_trackings(reg: Dict[str, Any], liens: List[Dict[str, Any]],
                 derriere[t].append((lid, nom_l))
 
     table = dict(_lire(NUMEROS_FICHIER, {})) or dict(NUMEROS_HISTORIQUES)
+
+    def bord(cle: str) -> str:
+        # la table est au pseudo exact (liens_va.numero_de : « steve230_ »),
+        # personne() le rend sans « ._- » au bord (« steve230 ») : la
+        # recherche ratait, et « Twitter VA 75 @steve230_ » a reçu un numéro
+        # neuf, VA 79 au podium (audit du 20/10/2026)
+        return re.sub(r"[._-]+(?=( spam)?$)", "", _norme(cle))
+
     index: Dict[str, set] = {}
     for k, v in table.items():
-        index.setdefault(_norme(k), set()).add(int(v))
+        index.setdefault(bord(k), set()).add(int(v))
 
     def num(cle: str) -> Optional[int]:
-        s = index.get(_norme(cle)) or set()
+        s = index.get(bord(cle)) or set()
         return next(iter(s)) if len(s) == 1 else None
 
     def par_les_noms(liens_t: List[Tuple[str, str]], spam: bool) -> Tuple[set, int]:
@@ -3014,6 +3022,11 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             # « VA 3 » de Twitter et « Amelia VA 3 » ne sont pas la même
             # personne : chaque total vient du fichier de son serveur
             at = (totaux if x["marche"] == p["marche"] else (totaux_us or {})).get(x["va"])
+        # le total « depuis toujours » est relevé une fois par jour, la période
+        # en direct : « 47 clics · 🌐 41 all-time » se lisait sur Threads et Va IG
+        # (audit du 20/10/2026). Il contient la période : jamais moins qu'elle.
+        if at is not None:
+            at = max(int(at), int(x["clics"] or 0))
         suffixe = (f' · 🌐 {at} all-time'
                    if at is not None and p.get("alltime_subs", True) else "")
         nom = x.get("affiche") or x["va"]

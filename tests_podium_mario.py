@@ -430,6 +430,7 @@ def charger_ancien():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     au_nom_actuel_du_bot(mod)
+    aux_regles_du_21_10(mod)
     return mod
 
 
@@ -449,6 +450,50 @@ def au_nom_actuel_du_bot(mod):
         e["description"] = e["description"].replace("**@Siri**", f"**@{nom}**")
         return e
     mod.embed_bonus = embed_bonus
+
+
+def aux_regles_du_21_10(mod):
+    """Deux règles du 21/10/2026 (après REF), ramenées dans le code d'avant
+    comme le nom du bot : sur Twitter et Threads (clé « bouton_usdc »), la
+    prime et le bonus se réclament au bouton 💳 du ticket, plus par un message
+    à un bot qui ne lit pas (pd._reclamer_prime) ; et le 🌐 all-time de la
+    quinzaine n'est jamais plus petit que la période. Elles ont leurs tests
+    (tests_podium_threads_clics.py, tests_site.py) ; tout le reste se compare
+    toujours à l'octet près."""
+    import inspect
+
+    def consigne(avant, tete, rang):
+        sig = inspect.signature(avant)
+
+        def f(*a, **k):
+            e = avant(*a, **k)
+            pf = pd._profil(sig.bind(*a, **k).arguments.get("gid"))
+            vieux = pd._reclamer_prime({"bot": pf["bot"]}, tete, rang)
+            e["description"] = e["description"].replace(vieux, pd._reclamer_prime(pf, tete, rang))
+            return e
+        return f
+    mod.embed_podium = consigne(mod.embed_podium, "💸 **Pour recevoir ta prime :**",
+                                "ton rang de la semaine")
+    mod.embed_bonus = consigne(mod.embed_bonus, "🎁 **Pour recevoir ton bonus :**",
+                               "ton rang du jour (top 1, 2 ou 3)")
+    pages_avant = mod.pages_subs
+    sig_p = inspect.signature(pages_avant)
+
+    def plancher(totaux, lignes):
+        tot = dict(totaux or {})
+        for x in lignes or []:
+            if x.get("va") in tot:
+                tot[x["va"]] = max(int(tot[x["va"]]), int(x.get("clics") or 0))
+        return tot
+
+    def pages_subs(*a, **k):
+        b = sig_p.bind(*a, **k)
+        b.arguments["totaux"] = plancher(b.arguments["totaux"], b.arguments["cl"].get("lignes"))
+        if b.arguments.get("totaux_us") is not None and b.arguments.get("us"):
+            b.arguments["totaux_us"] = plancher(b.arguments["totaux_us"],
+                                                b.arguments["us"].get("lignes"))
+        return pages_avant(*b.args, **b.kwargs)
+    mod.pages_subs = pages_subs
 
 
 # les données réalistes : Jessye VA 8 (US) devant, une VA FR 2e, des VA des

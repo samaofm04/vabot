@@ -1740,6 +1740,15 @@ def _donner_ticket(gid: str, salon: Dict[str, Any], cle: str, m: Dict[str, Any],
         f["reassigne"] = int(time.time())
         _ecrire_etat(d)
     fiches[cle] = dict(f)
+    # l'accueil épinglé nomme le manager : sans ça il gardait l'ancien
+    # (steave0454 lisait « Roucham », son manager était MOMOBY). Un échec ici
+    # ne défait pas la réaffectation : entretenir_accueils le reprend
+    try:
+        r = corriger_manager_accueil(cid, mid, str(f.get("accueil") or ""))
+        if r not in ("fait", "deja"):
+            print(f"[managers] {gid} : accueil de {va} pas mis à jour ({r})", flush=True)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[managers] {gid} : accueil de {va} : {type(e).__name__}: {e}", flush=True)
     return ""
 
 
@@ -2272,6 +2281,14 @@ def suivre_partout() -> Dict[str, Any]:
                 ouvrir_tickets_verifies(gid)
         except Exception as e:
             print(f"[ticket] {gid} : Vérifiés : {type(e).__name__}: {e}", flush=True)
+        # une fois par jour : salons supprimés, manager et épingle des accueils
+        if maintenant - _ENTRETIEN_VU.get(gid, 0) >= ENTRETIEN_S:
+            _ENTRETIEN_VU[gid] = maintenant
+            try:
+                with sur_serveur(gid):
+                    entretenir_accueils(gid)
+            except Exception as e:
+                print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
     return out
 
@@ -2375,4 +2392,121 @@ def redessiner_boutons(gid: str) -> Dict[str, Any]:
         print(f"[ticket] boutons {gid} : {len(bilan['faits'])} accueil(s) redessiné(s)"
               + (f", sans accueil : {bilan['sans_accueil']}" if bilan["sans_accueil"] else "")
               + (f", ratés : {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
+
+
+# ─── l'entretien des accueils ───────────────────────────────────────────
+# Audit du 20/10/2026 : une fiche de Twitter pointait vers un salon supprimé à
+# la main (septofm, 404), quatre accueils de Threads reposés le 13/10 n'étaient
+# pas épinglés (l'ancien l'était encore, ou rien), et neuf accueils nommaient
+# le manager d'avant une réaffectation (steave0454 : « Roucham » au lieu de
+# MOMOBY). Le VA cherche son bouton 💳 et son manager dans l'accueil épinglé :
+# ce qu'il y lit doit être vrai. Une fois par jour et par serveur.
+ENTRETIEN_S = 86400
+_ENTRETIEN_VU: Dict[str, float] = {}
+_RE_CONFIE = re.compile(r"(tu es confié à )(<@&?\d+>|un manager)")
+
+
+def corriger_manager_accueil(salon: str, mid: str, accueil: str,
+                             msg: Optional[Dict[str, Any]] = None) -> str:
+    """« tu es confié à <@ancien> » → le manager du jour, dans l'accueil.
+    Rend « fait », « deja » (rien à changer) ou ce qui a empêché."""
+    if not (salon and mid and accueil):
+        return "deja"
+    if msg is None:
+        code, msg = _api("GET", f"/channels/{salon}/messages/{accueil}")
+        if code != 200 or not isinstance(msg, dict):
+            return f"accueil illisible (HTTP {code})"
+    embeds = msg.get("embeds") or []
+    d = str((embeds[0] if embeds else {}).get("description") or "")
+    m = _RE_CONFIE.search(d)
+    if not m or m.group(2) == f"<@{mid}>":
+        return "deja"
+    embeds[0]["description"] = _RE_CONFIE.sub(rf"\g<1><@{mid}>", d, count=1)
+    corps: Dict[str, Any] = {"embeds": embeds, "allowed_mentions": {"parse": []}}
+    contenu = str(msg.get("content") or "")
+    if m.group(2) in contenu:
+        corps["content"] = contenu.replace(m.group(2), f"<@{mid}>", 1)
+    code, rep = _api("PATCH", f"/channels/{salon}/messages/{accueil}", json=corps)
+    return "fait" if code == 200 else f"HTTP {code} {str(rep)[:80]}"
+
+
+def _epingler_accueil(salon: str, accueil: str, bot_id: str) -> str:
+    """Épingle l'accueil du jour, et retire l'épingle des anciens accueils
+    « 👋 Bienvenue » postés par un bot (Siri avant Bowser sur Threads), jamais
+    d'un message de membre : un seul « message épinglé » à lire.
+    Rend « fait » ou ce qui a empêché."""
+    code, rep = _api("PUT", f"/channels/{salon}/pins/{accueil}")
+    if code not in (200, 204):
+        return f"épinglage refusé (HTTP {code}) {str(rep)[:80]}"
+    code, pins = _api("GET", f"/channels/{salon}/pins")
+    items = pins.get("items") if isinstance(pins, dict) else pins
+    for x in (items if code == 200 and isinstance(items, list) else []):
+        m = x.get("message") if isinstance(x, dict) and "message" in x else x
+        if not isinstance(m, dict) or str(m.get("id")) == accueil:
+            continue
+        titre = str(((m.get("embeds") or [{}])[0].get("title")) or "")
+        auteur = m.get("author") or {}
+        if titre.startswith("👋 Bienvenue") and (auteur.get("bot") or str(auteur.get("id")) == bot_id):
+            _api("DELETE", f"/channels/{salon}/pins/{m['id']}")
+    return "fait"
+
+
+def entretenir_accueils(gid: str) -> Dict[str, Any]:
+    """Chaque fiche de ticket de ce serveur, face à Discord :
+
+    - salon supprimé (404 « Unknown Channel », code 10003) : la fiche sort de
+      « tickets » et passe dans « tickets_disparus », datée — jamais effacée ;
+      un autre refus (403, 429, panne) ne touche à rien ;
+    - accueil qui nomme l'ancien manager : corrigé ;
+    - accueil pas épinglé : épinglé, l'ancien accueil 👋 désépinglé.
+
+    Rend le bilan, dit au journal quand il y a quelque chose."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"disparus": [], "managers": [], "epingles": [],
+                             "rates": [], "illisibles": []}
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict)}
+    code, moi = _api("GET", "/users/@me")
+    bot_id = str((moi or {}).get("id") or "") if code == 200 and isinstance(moi, dict) else ""
+    disparus: Dict[str, Dict[str, Any]] = {}
+    for cle, f in sorted(fiches.items()):
+        uid = cle.split(":", 1)[1]
+        salon, accueil = str(f.get("salon") or ""), str(f.get("accueil") or "")
+        if not salon:
+            continue
+        code, ch = _api("GET", f"/channels/{salon}")
+        if code == 404 and isinstance(ch, dict) and int(ch.get("code") or 0) == 10003:
+            disparus[cle] = f
+            bilan["disparus"].append(f"{uid} (salon {salon})")
+            continue
+        if code != 200:
+            bilan["illisibles"].append(f"{uid} (HTTP {code})")
+            continue
+        if not accueil:
+            continue
+        code, msg = _api("GET", f"/channels/{salon}/messages/{accueil}")
+        if code != 200 or not isinstance(msg, dict):
+            bilan["illisibles"].append(f"{uid} : accueil (HTTP {code})")
+            continue
+        r = corriger_manager_accueil(salon, str(f.get("manager") or ""), accueil, msg)
+        if r == "fait":
+            bilan["managers"].append(uid)
+        elif r != "deja":
+            bilan["rates"].append(f"{uid} : manager, {r}")
+        if not msg.get("pinned") and bot_id:
+            r = _epingler_accueil(salon, accueil, bot_id)
+            (bilan["epingles"].append(uid) if r == "fait"
+             else bilan["rates"].append(f"{uid} : {r}"))
+    if disparus:
+        with _VERROU:
+            d = _etat()
+            fs = d.setdefault("tickets", {})
+            garde = d.setdefault("tickets_disparus", {})
+            for cle, f in disparus.items():
+                if cle in fs:
+                    garde[cle] = dict(fs.pop(cle), disparu=int(time.time()))
+            _ecrire_etat(d)
+    if any(bilan.values()):
+        print(f"[ticket] accueils {gid} : {bilan}", flush=True)
     return bilan

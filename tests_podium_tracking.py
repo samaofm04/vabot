@@ -513,6 +513,20 @@ try:
     check("MyPuls nomme un tracking « Twitter » : pas le VA « TWITTER » (26), un numéro neuf",
           registre()["emy.brw/c4"]["numero"] not in (26, None), registre().get("emy.brw/c4"))
 
+    # un pseudo à tiret bas : la table le garde tel quel (« steve230_ »,
+    # liens_va.numero_de), personne() le rend sans (« steve230 »). Le
+    # 15/10/2026, « Twitter VA 75 @steve230_ » a reçu un numéro neuf (VA 79)
+    installer()
+    safe_json.write_text(pd.NUMEROS_FICHIER, json.dumps(dict(table(), steve230_=75)))
+    LIENS[EQ_TW1].append(direct("l33", "Twitter VA 75 @steve230_", OF + "emy.brw/c83"))
+    NOMS_MP["emy.brw/c83"] = "Twitter VA 75 @steve230_"
+    VISITES["emy.brw/c83"] = {"2026-10-06": 12}
+    cl_st = pd.classement(LUN, MAR, gid=TW)
+    check("« Twitter VA 75 @steve230_ » : VA 75, son numéro de la table, pas un numéro neuf",
+          (registre().get("emy.brw/c83") or {}).get("numero") == 75 and "steve230" not in table()
+          and par_va(cl_st).get("VA 75") == 12,
+          (registre().get("emy.brw/c83"), {k: v for k, v in table().items() if "steve" in k}))
+
     # un tracking vu après la période ne la trouble pas
     installer()
     cl_av = pd.classement(dt.date(2026, 9, 28), dt.date(2026, 10, 4), gid=TW)
