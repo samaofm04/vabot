@@ -67,13 +67,17 @@ VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
 
 # Agency VA INSTAGRAM (22/10/2026), « comme Twitter » : espace EMY IG (« MIG »
 # à l'oral), tracking MyPuls chez Emy au nom du VA, 100 % Emy, jamais de
-# variante. Pas de gabarit pour l'instant : propriétaire, « pour le moment
-# mets juste le lien direct » — un directlink vers le tracking. « gabarit »
-# rempli un jour (template de base), la création repasse par la copie, comme
-# Twitter. Surchargeable par la clé « agency_ig » de liens_va_config.json.
+# variante. D'abord un lien direct (« pour le moment mets juste le lien
+# direct »), puis, le 23/10 : « mets la landing de base, comme dans Youl4b le
+# retour de Jessye » — la page « Emy ♡ » de JESSY LE RETOUR (template arthur),
+# copiée, son bouton OnlyFans vers le tracking du VA (_poser_tracking). Sans
+# gabarit, le lien direct revient. Surchargeable par la clé « agency_ig » de
+# liens_va_config.json.
 AGENCY_IG_ID = "1488331963575177247"
 ESPACE_AGENCY_IG = {"equipe": "tm_6ada83b07218da6450e65862",      # EMY IG
-                    "gabarit": "", "direct": True,
+                    # « emyvelvet », une landing de JESSY LE RETOUR (page Emy ♡)
+                    "gabarit": "lnk_6ad868dd1f59a2659b845e93", "landing": True,
+                    "direct": True,
                     "sans_prenom": True, "plateforme": "Instagram",
                     # le lien est ouvert depuis Instagram : sortir de son
                     # navigateur intégré dès la page chargée, comme les liens
@@ -466,19 +470,72 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     for essai in range(ESSAIS_ADRESSE):
         # Threads et Twitter : aucune base, aucun prénom (voir mots_sans_prenom)
         sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
+        landing = bool(e.get("landing") and gabarit)
         r = (gms.create_directlink(sc, url, nom, team_id=equipe,
                                    deeplink_mode=str(e.get("deeplink") or "")) if direct
-             else gms.duplicate_link(gabarit, sc, nom, url, equipe))
+             # une landing ne prend pas d'URL : son bouton, plus bas
+             else gms.duplicate_link(gabarit, sc, nom, "" if landing else url, equipe))
         if r.get("ok"):
             lien = r.get("link") or {}
+            lid = str(lien.get("id") or "")
+            if landing:
+                pose = _poser_tracking(lid, url, nom, equipe)
+                if not pose.get("ok"):
+                    # la copie garde le tracking d'un autre VA (celui du
+                    # gabarit) : coupée, jamais donnée — ni supprimée
+                    gms.disable_link(lid)
+                    return {"ok": False, "erreur": f"landing {sc} copiée mais bouton non posé "
+                                                   f"({pose.get('erreur')}) : copie coupée"}
             return {"ok": True, "shortcode": sc,
                     "url": f"{gms.PUBLIC_LINK_DOMAIN}/{sc}",
-                    "id": str(lien.get("id") or ""), "erreur": ""}
+                    "id": lid, "erreur": ""}
         # « shortcode deja pris » est le seul echec qu'on repasse : tout le
         # reste (droits, gabarit absent) se repeterait a l'identique
         if "shortcode" not in str(r.get("error") or "").lower():
             return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
     return {"ok": False, "erreur": f"{ESSAIS_ADRESSE} noms essayés, tous pris"}
+
+
+#: Un bouton de la landing qui mène chez OnlyFans : celui qui reçoit le
+#: tracking du VA (la page de JESSY LE RETOUR n'en a qu'un).
+_RE_OF = re.compile(r"https?://(?:www\.)?onlyfans\.com/", re.I)
+
+
+def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str, Any]:
+    """Le bouton OnlyFans d'une landing copiée vers `tracking`, relu ensuite.
+    Les boutons sont renvoyés tels quels (update_link remplace tout le
+    tableau), seule leur adresse change. Rend {ok, erreur}."""
+    import gms
+    if not (lid and tracking):
+        return {"ok": False, "erreur": "lien ou tracking manquant"}
+    lu = gms._call_tool("get_link", {"link_id": lid, "team_id": equipe})
+    copie = lu.get("data") if lu.get("ok") else None
+    if isinstance(copie, dict) and isinstance(copie.get("data"), dict) and "buttons" not in copie:
+        copie = copie["data"]
+    boutons = (copie or {}).get("buttons") if isinstance(copie, dict) else None
+    if not boutons:
+        return {"ok": False, "erreur": "copie illisible ou sans bouton"}
+    neufs = []
+    for b in boutons:
+        b2 = dict(b)
+        if _RE_OF.match(str(b2.get("url") or "")):
+            b2["url"] = tracking
+        neufs.append(b2)
+    if not any(b.get("url") == tracking for b in neufs):
+        return {"ok": False, "erreur": "aucun bouton OnlyFans sur la landing"}
+    r = gms._call_tool("update_link", {"link_id": lid, "team_id": equipe,
+                                       "display_name": nom[:60], "buttons": neufs})
+    if not r.get("ok"):
+        return {"ok": False, "erreur": str(r.get("error") or "update_link refusé")[:120]}
+    relu = gms._call_tool("get_link", {"link_id": lid, "team_id": equipe})
+    d = relu.get("data") if relu.get("ok") else None
+    if isinstance(d, dict) and isinstance(d.get("data"), dict) and "buttons" not in d:
+        d = d["data"]
+    restes = [b.get("url") for b in ((d or {}).get("buttons") or []) if isinstance(d, dict)
+              and _RE_OF.match(str(b.get("url") or "")) and b.get("url") != tracking]
+    if not isinstance(d, dict) or restes:
+        return {"ok": False, "erreur": f"relu : bouton(s) encore ailleurs {restes[:2]}"}
+    return {"ok": True}
 
 
 def groupes(equipe: str, essais: int = 3) -> Optional[Dict[str, str]]:
