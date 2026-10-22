@@ -21666,7 +21666,9 @@ try:
     # chaque serveur a SON bot : Luigi sur Twitter et Va IG, Bowser sur Threads
     # (13/10/2026 : Threads recoit le classement subs de Twitter, par son bot)
     _botsAct = {_pd.TWITTER_ID: "Luigi", _pd.VA_IG_ID: "Luigi",
-                getattr(_pd, "THREADS_ID", "1498948161039896586"): "Bowser"}
+                getattr(_pd, "THREADS_ID", "1498948161039896586"): "Bowser",
+                # Agency VA INSTAGRAM (22/10/2026) : Wario, seul bot du serveur
+                getattr(_pd, "AGENCY_IG_ID", "1488331963575177247"): "Wario"}
     check("chaque fiche de serveur porte le nom actuel du bot",
           bool(_pd.SERVEURS)
           and all((f.get("bot") or "") == _botsAct.get(g) for g, f in _pd.SERVEURS.items()),

@@ -314,7 +314,13 @@ try:
           and [x["va"] for x in pod.classement(J1, J2, gid=AG)["lignes"]] == [], pod._partis(AG))
     tk.partis = _sauve_partis
     check("les salons d'Agency : les siens, pas ceux de Twitter",
-          pod._profil(AG)["salon_podium"] != pod.SALON_PODIUM and pod._nom_salon_subs(AG) == "📊-mes-stats")
+          pod._profil(AG)["salon_podium"] == "🏆・classement" and pod._nom_salon_subs(AG) == "📈・subs"
+          and pod._profil(AG)["salon_bonus"] == "💰・bonus-journalier")
+    import verif_discord as vd
+    cfg = vd.serveur(AG)
+    check("Agency dans la boucle (SERVEURS_EXTRA) : ses rôles, sans quête, sans vérification branchée",
+          cfg and cfg["role_verifie"] == "1562953421508837426" and cfg["quetes"] is False
+          and not cfg.get("salon_verification") and not cfg["salon_entrees"], cfg)
     for k, v in _sauve_sv.items():
         setattr(sv, k, v)
     for k, v in _sauve_pd.items():

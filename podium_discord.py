@@ -417,11 +417,13 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                    "mesure": "agency_abonnes", "mesure_subs": "agency_quinzaine",
                    "bonus": True, "minutes": None,
                    "alltime": "podium_alltime_agency_ig.json",
-                   # ses salons (le serveur a les siens, pas ceux de Twitter) ;
-                   # proposés au propriétaire le 23/10/2026, à confirmer
-                   "salon_podium": "📈⎜ᴘᴇʀꜰᴏʀᴍᴀɴᴄᴇꜱ-ᴠᴀ",
-                   "salon_bonus": "📈⎜ᴘᴇʀꜰᴏʀᴍᴀɴᴄᴇꜱ-ᴠᴀ",
-                   "salon_subs": "📊-mes-stats",
+                   # ses salons, les noms de Twitter (créés le 23/10/2026 dans
+                   # 📣 ANNONCES ET SUIVI, droits de « 📈 performances-va » :
+                   # lecture seule pour les VA). Propriétaire : « range les
+                   # nouveaux trucs »
+                   "salon_podium": "🏆・classement",
+                   "salon_bonus": "💰・bonus-journalier",
+                   "salon_subs": "📈・subs",
                    "bouton_pseudos": True, "bouton_usdc": True,
                    # « 📈 Mes stats » : ses abonnés (subs_va) et les clics de
                    # son lien, en privé, comme Twitter et Threads
