@@ -21917,7 +21917,7 @@ try:
         check("le repli est DIT dans le journal, une seule fois (pas a chaque appel)",
               _outB.getvalue().count("reste servi par Siri") == 1, _outB.getvalue()[:200])
         check("le registre est lisible tel quel : verif_discord.BOTS",
-              [b["id"] for b in _vdB.BOTS] == ["siri", "threads"]
+              [b["id"] for b in _vdB.BOTS] == ["siri", "threads", "agency_ig"]
               and all({"nom", "app_id", "cle_publique", "fichier_jeton", "variable_env", "serveurs"} <= set(b)
                       for b in _vdB.BOTS))
         _vdB.api("POST", f"/guilds/{_THR_B}/roles")
@@ -21958,6 +21958,30 @@ try:
               "propre bot" in _outB.getvalue())
         check("jeton_de lit le bon fichier pour chaque bot",
               _vdB.jeton_de(_bsB[0]) == "jeton-siri" and _vdB.jeton_de(_bsB[1]) == "jeton-threads")
+        # Wario (Agency VA INSTAGRAM, 22/10/2026) : sans jeton, pas pret, et
+        # Siri ne prend PAS ce serveur (il n'y est pas) ; avec, il le sert seul
+        _AGC_B = _vdB.AGENCY_IG_ID
+        os.environ.pop("BIXBY_BOT_TOKEN", None)
+        _vdB._ANNONCES.pop("agency_ig", None)     # dit une fois par état : on repart de zéro
+        _outB = _ioB.StringIO()
+        with _clB.redirect_stdout(_outB):
+            _bsB = _vdB.bots()
+        check("Wario sans jeton : pas pret, Agency n'est pas rendu a Siri, et c'est dit",
+              _bsB[2]["manque"] == ["jeton"] and _vdB.bot_du_serveur(_AGC_B)["id"] == "agency_ig"
+              and _AGC_B not in _bsB[0]["serveurs"] and "Wario pas pret" in _outB.getvalue())
+        (_dB / "bixby_bot_token").write_text("jeton-wario")
+        _bsB = _vdB.bots()
+        _vdB.api("GET", f"/guilds/{_AGC_B}/members/5")
+        _tAgc = _dernier()[2]
+        _vdB.api("GET", f"/guilds/{_TWI_B}/members/5")
+        check("Wario pret : il sert Agency (jeton data/bixby_bot_token, celui d'Infloww), "
+              "Twitter et Threads ne bougent pas",
+              _bsB[2]["pret"] and _tAgc == "jeton-wario" and _dernier()[2] == "jeton-siri"
+              and _vdB.bot_du_serveur(_THR_B)["id"] == "threads"
+              and _bsB[2]["app_id"] == "1552785601051365516"
+              and _bsB[2]["cle_publique"] in _vdB.cles_publiques())
+        (_dB / "bixby_bot_token").unlink()
+        _bsB = _vdB.bots()
         # routage par le chemin
         _vdB.api("GET", f"/guilds/{_THR_B}/members/5")
         _tThr = _dernier()[2]

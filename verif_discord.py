@@ -119,6 +119,9 @@ THREADS_ID = "1498948161039896586"
 # le ticket, c'est ✅ Verifie qui le cree (cogs/welcome.py). « quetes » faux :
 # pas de quete du jour ici.
 VA_IG_ID = "1505418484052394004"
+# Agency VA INSTAGRAM (22/10/2026) : monté « comme Twitter », servi par Wario
+# seul (voir bots()).
+AGENCY_IG_ID = "1488331963575177247"
 SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
     TWITTER_ID: {
         "nom": "YouLab TWITTER", "auto": False,
@@ -268,6 +271,12 @@ def _charger_config():
 THREADS_APP_ID = ""
 THREADS_CLE_PUBLIQUE = ""
 BOTS_CONFIG = "bots_config.json"          # dans DATA_DIR
+# Wario (ex-Bixby) : le bot d'Agency VA INSTAGRAM, et lui seul y agit (22/10/2026).
+# Il poste aussi les résultats Infloww sur le serveur Spam (infloww_liens, par
+# REST, sans bouton) : ce registre ne change rien à ces envois. Surchargeable
+# par « agency_ig_app_id » / « agency_ig_cle_publique » de data/bots_config.json.
+WARIO_APP_ID = "1552785601051365516"
+WARIO_CLE_PUBLIQUE = "17e9e77fcfbafa571926f506d410fedf75d36b9d534bc54c3f560c7f8ed2d2fc"
 
 # Le serveur pour lequel on travaille : pose par la route des interactions,
 # la page /verif et les demons (sur_serveur). Une ContextVar et pas une
@@ -354,17 +363,31 @@ def bots() -> List[Dict[str, Any]]:
               "cle_publique": str(c.get("threads_cle_publique") or THREADS_CLE_PUBLIQUE or "").strip().lower(),
               "fichier_jeton": DATA_DIR / "threads_bot_token", "variable_env": "THREADS_BOT_TOKEN",
               "serveurs": {THREADS_ID}}
-    for b in (siri, second):
+    wario = {"id": "agency_ig", "nom": "Wario",
+             "app_id": str(c.get("agency_ig_app_id") or WARIO_APP_ID or "").strip(),
+             "cle_publique": str(c.get("agency_ig_cle_publique") or WARIO_CLE_PUBLIQUE or "").strip().lower(),
+             # le fichier d'infloww_liens : un seul jeton pour ses deux usages
+             "fichier_jeton": DATA_DIR / "bixby_bot_token", "variable_env": "BIXBY_BOT_TOKEN",
+             "serveurs": {AGENCY_IG_ID}}
+    tous = (siri, second, wario)
+    for b in tous:
         b["manque"] = _manque(b)
     # Les deux garde-fous qui comptent : la meme application ou le meme jeton
     # des deux cotes, et « deux bots » n'en ferait qu'un — sans le dire.
-    if second["app_id"] and second["app_id"] == siri["app_id"]:
-        second["manque"].append("app_id identique a celui de Siri")
-    jeton_second = jeton_de(second)
-    if jeton_second and jeton_second == jeton_de(siri):
-        second["manque"].append("jeton identique a celui de Siri")
-    for b in (siri, second):
+    for b in (second, wario):
+        if b["app_id"] and b["app_id"] == siri["app_id"]:
+            b["manque"].append("app_id identique a celui de Siri")
+        jeton_b = jeton_de(b)
+        if jeton_b and jeton_b == jeton_de(siri):
+            b["manque"].append("jeton identique a celui de Siri")
+    for b in tous:
         b["pret"] = not b["manque"]
+    # Pas de repli sur Siri pour Agency : il n'est pas sur ce serveur. Wario
+    # pas pret, ses appels rendent « jeton absent » et c'est dit une fois.
+    _annoncer("agency_ig", "pret" if wario["pret"] else "manque:" + ",".join(wario["manque"]),
+              "[discord] Agency VA INSTAGRAM servi par Wario" if wario["pret"] else
+              "[discord] Wario pas pret (manque : " + ", ".join(wario["manque"])
+              + ") : rien n'agit sur Agency VA INSTAGRAM")
     if second["pret"]:
         _annoncer("threads", "separe", f"[discord] YouLab THREADS servi par son propre bot "
                                        f"(application {second['app_id']}) : Siri n'y agit plus")
@@ -374,7 +397,7 @@ def bots() -> List[Dict[str, Any]]:
         _annoncer("threads", "repli:" + ",".join(second["manque"]),
                   "[discord] second bot pas pret (manque : " + ", ".join(second["manque"])
                   + ") : YouLab THREADS reste servi par Siri")
-    return [siri, second]
+    return [siri, second, wario]
 
 
 def __getattr__(nom: str):
