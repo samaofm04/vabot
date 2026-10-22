@@ -74,7 +74,8 @@ except Exception:
 SERVEURS = ["1445108485090971710",       # YouLab TWITTER
             "1505418484052394004",       # Va IG (serveur FR) : Luigi y est, meme jeton
             "1498948161039896586",       # YouLab THREADS
-            "1552152470464110703"]       # YouLab - Entretien
+            "1552152470464110703",       # YouLab - Entretien
+            "1488331963575177247"]       # Agency VA INSTAGRAM : Wario seul
 
 
 def jeton() -> str:
@@ -116,6 +117,28 @@ def jeton_jarvis() -> str:
 
 
 TOKEN_JARVIS = jeton_jarvis()
+
+# Agency VA INSTAGRAM n'a que Wario (22/10) : sans son jeton, le serveur
+# manquait à la liste de l'outil (« c'est où Instagram ici ? »).
+AGENCY_IG_ID = "1488331963575177247"
+
+
+def jeton_wario() -> str:
+    t = (os.environ.get("WARIO_BOT_TOKEN") or "").strip()
+    if t:
+        return t
+    for p in (Path.home() / ".config" / "bixby_bot_token",
+              Path(__file__).resolve().parent / "data" / "bixby_bot_token"):
+        try:
+            v = p.read_text(encoding="utf-8").strip()
+            if v:
+                return v
+        except Exception:
+            pass
+    return ""
+
+
+TOKEN_WARIO = jeton_wario()
 _SALON_SERVEUR = {}          # salon -> serveur, appris en listant les salons
 
 
@@ -129,6 +152,8 @@ def _jeton_pour(chemin: str) -> str:
         gid = _SALON_SERVEUR.get(m.group(1), "") if m else ""
     if gid == THREADS_ID and TOKEN_JARVIS:
         return TOKEN_JARVIS
+    if gid == AGENCY_IG_ID and TOKEN_WARIO:
+        return TOKEN_WARIO
     return TOKEN
 
 
@@ -638,7 +663,7 @@ button:disabled{opacity:.5;cursor:default}
 .echecs{margin:6px 0 0;padding-left:20px;font-size:13px;color:var(--rouge)}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
-<p class="sous">Le message est posté par le bot du serveur (<b>Luigi</b>). Tout se passe sur ta machine — rien n'est déployé.
+<p class="sous">Le message est posté par le bot du serveur (<b>Luigi</b>, <b>Bowser</b> ou <b>Wario</b>). Tout se passe sur ta machine — rien n'est déployé.
 <span style="opacity:.55">· outil du __DATE__</span></p>
 <div class="grille">
   <div class="carte">

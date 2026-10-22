@@ -22291,10 +22291,17 @@ try:
           and _deJ._jeton_pour("/guilds/1552152470464110703") == "jeton-siri")
     check("un salon inconnu retombe sur Siri, pas sur Jarvis",
           _deJ._jeton_pour("/channels/999/messages") == "jeton-siri")
-    # Va IG y est depuis c7974e0 (Luigi y est, meme jeton que Twitter)
-    check("l outil liste bien les quatre serveurs (Va IG compris)",
+    # Va IG y est depuis c7974e0 (Luigi y est, meme jeton que Twitter) ;
+    # Agency VA INSTAGRAM depuis le 23/10, avec Wario
+    check("l outil liste bien les cinq serveurs (Va IG et Agency VA INSTAGRAM compris)",
           _deJ.THREADS_ID in _deJ.SERVEURS and "1505418484052394004" in _deJ.SERVEURS
-          and len(_deJ.SERVEURS) == 4)
+          and _deJ.AGENCY_IG_ID in _deJ.SERVEURS and len(_deJ.SERVEURS) == 5)
+    _deJ.TOKEN_WARIO = "jeton-wario"
+    _deJ._SALON_SERVEUR["888"] = _deJ.AGENCY_IG_ID
+    check("Agency VA INSTAGRAM parle avec Wario (chemin et salon), Threads garde Jarvis",
+          _deJ._jeton_pour(f"/guilds/{_deJ.AGENCY_IG_ID}/channels") == "jeton-wario"
+          and _deJ._jeton_pour("/channels/888/messages") == "jeton-wario"
+          and _deJ._jeton_pour(f"/guilds/{_deJ.THREADS_ID}") == "jeton-jarvis")
 except Exception as _eJ:
     check("outil local jarvis : testable", False, repr(_eJ)[:200])
 
