@@ -65,8 +65,19 @@ ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
 # l'eteint pour les liens a venir.
 VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
 
+# Agency VA INSTAGRAM (22/10/2026), « comme Twitter » : espace EMY IG (« MIG »
+# à l'oral), tracking MyPuls chez Emy au nom du VA, 100 % Emy, jamais de
+# variante. Pas de gabarit pour l'instant : propriétaire, « pour le moment
+# mets juste le lien direct » — un directlink vers le tracking. « gabarit »
+# rempli un jour (template de base), la création repasse par la copie, comme
+# Twitter. Surchargeable par la clé « agency_ig » de liens_va_config.json.
+AGENCY_IG_ID = "1488331963575177247"
+ESPACE_AGENCY_IG = {"equipe": "tm_6ada83b07218da6450e65862",      # EMY IG
+                    "gabarit": "", "direct": True,
+                    "sans_prenom": True, "plateforme": "Instagram"}
+
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
-SERVEURS = {TWITTER_ID, THREADS_ID}
+SERVEURS = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
 
 # Un lien GetMySocial est lu par des gens sur Twitter : il doit ressembler au
 # compte, pas a une reference interne. D'ou des mots doux plutot qu'un tirage
@@ -216,6 +227,10 @@ def manque(gid: str = "") -> str:
         return ("aucune créatrice choisie : le tracking link serait créé chez "
                 "n'importe qui. À poser dans data/liens_va_config.json "
                 "(creator_id, modele).")
+    if e.get("direct") and not e.get("gabarit"):
+        # lien direct (Agency) : il n'a de sens que vers SON tracking
+        return "" if e["tracking"] else ("suivi MyPuls fermé : un lien direct sans "
+                                         "tracking ne serait rattaché à personne.")
     if not e.get("gabarit"):
         return ("aucun lien gabarit GetMySocial pour l'espace des VA : la "
                 "création copie un lien existant (boutons, pixels, design). "
@@ -439,12 +454,16 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     gabarit = str(e.get("gabarit") or "")
     equipe = str(e.get("equipe") or EQUIPE_VA)
     base = str(e.get("base_shortcode") or "emy")
-    if not gabarit:
+    direct = bool(e.get("direct") and not gabarit)
+    if direct and not url:
+        return {"ok": False, "erreur": "lien direct sans destination"}
+    if not gabarit and not direct:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
     for essai in range(ESSAIS_ADRESSE):
         # Threads et Twitter : aucune base, aucun prénom (voir mots_sans_prenom)
         sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
-        r = gms.duplicate_link(gabarit, sc, nom, url, equipe)
+        r = (gms.create_directlink(sc, url, nom, team_id=equipe) if direct
+             else gms.duplicate_link(gabarit, sc, nom, url, equipe))
         if r.get("ok"):
             lien = r.get("link") or {}
             return {"ok": True, "shortcode": sc,
@@ -1227,9 +1246,17 @@ _espace_avec_seren = espace
 
 
 def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
-    """espace() (plus haut), sans variante tant que Seren est en pause.
-    Enveloppe : le corps d'origine est touché par un patch local du VPS
-    (99-threads-mypuls) pour Threads."""
+    """espace() (plus haut), sans variante tant que Seren est en pause, et
+    Agency VA INSTAGRAM. Enveloppe : le corps d'origine est touché par un patch
+    local du VPS (99-threads-mypuls) pour Threads."""
+    if str(gid) == AGENCY_IG_ID:
+        c = config()
+        sur = c.get("agency_ig") if isinstance(c.get("agency_ig"), dict) else {}
+        e = dict(ESPACE_AGENCY_IG, **{k: v for k, v in sur.items() if v not in (None, "")})
+        # Emy seule, toujours : le 50/50 n'a jamais existé ici
+        e.update(tracking=mypuls_actif(), variante=None,
+                 base_shortcode=str(c.get("base_shortcode") or c.get("modele") or "emy"))
+        return e
     e = _espace_avec_seren(gid)
     if SEREN_EN_PAUSE:
         e["variante"] = None

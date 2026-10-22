@@ -73,6 +73,11 @@ AROBASE = "\uff20"
 # serveur Entretien doit rester tel qu'il était : on n'y ouvre aucun ticket.
 SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
                     "1498948161039896586"}    # YouLab THREADS
+# Agency VA INSTAGRAM (22/10/2026), servi par Wario : ses accueils ont les
+# boutons de Twitter (boutons_va). PAS ENCORE dans SERVEURS_TICKETS : le suivi
+# des managers y alignerait les droits des 29 salons faits à la main, et le
+# propriétaire veut voir un ticket rendu avant.
+AGENCY_IG_ID = "1488331963575177247"
 
 # Tout nouveau arrivant est en essai, sans exception : le role est pose en
 # meme temps que son salon. Ce qui le fera passer « confirme » viendra plus
@@ -2744,9 +2749,17 @@ def _avec_mes_stats(gid: str) -> bool:
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
                gid: str = "", lien_actif: bool = True):
     """boutons_va (voir plus haut), « 📈 Mes stats » au lieu de « 📈 Mes subs »
-    sur un serveur à clé « mes_stats »."""
+    sur un serveur à clé « mes_stats ». Agency VA INSTAGRAM (22/10/2026) : le
+    patch du VPS ne pose « Mes subs » que sur Twitter et Threads, le bouton
+    est ajouté ici."""
     rangs = _boutons_va_avant_stats(uid, confirme=confirme, a_un_lien=a_un_lien,
                                     gid=gid, lien_actif=lien_actif)
+    if str(gid) == AGENCY_IG_ID and rangs and not any(
+            str(b.get("custom_id") or "").startswith("subs:total:")
+            for r in rangs for b in r.get("components") or []):
+        rangs[-1].setdefault("components", []).append(
+            {"type": 2, "style": 3, "label": "Mes stats",
+             "custom_id": f"subs:total:{uid}", "emoji": {"name": "📈"}})
     if _avec_mes_stats(gid):
         for r in rangs:
             for b in r.get("components") or []:

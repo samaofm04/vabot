@@ -190,6 +190,7 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 TWITTER_ID = "1445108485090971710"
 VA_IG_ID = "1505418484052394004"
 THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
+AGENCY_IG_ID = "1488331963575177247"       # verif_discord.AGENCY_IG_ID
 #: Le classement subs de la quinzaine que Threads a montré le 13/10/2026 au
 #: matin, avant son podium aux clics (voir le commentaire dans SERVEURS) :
 #: gardé pour le jour où il le redemande.
@@ -396,6 +397,23 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # éteint aussi le menu des VA (theme_mario.actif). Pour le
                # rallumer : « "theme": "mario" ».
                },
+    # Agency VA INSTAGRAM (22/10/2026), « comme Twitter », servi par Wario.
+    # Propriétaire : podium, bonus, quinzaine et primes « oui, tout de suite »,
+    # AUX SUBS (« Instagram VA 12 — 56 subs · 🌐 56 all-time ») ; les liens de
+    # ses VA dans EMY IG, chacun direct vers son tracking Emy (liens_va). Rien
+    # n'y est posté tant que le serveur n'est pas dans verif_discord.
+    # SERVEURS_EXTRA (la boucle du podium ne parcourt qu'eux) : « 📈 Mes stats »
+    # des tickets marche avant.
+    AGENCY_IG_ID: {"equipes": ["tm_6ada83b07218da6450e65862"],   # EMY IG (liens_va)
+                   "pays": ("US",), "marche": "US", "source": "Instagram 📸",
+                   "bot": "Wario", "fr": False, "unite": "subs", "libelle": "Instagram",
+                   "mesure": "agency_abonnes", "mesure_subs": "agency_abonnes",
+                   "bonus": True, "minutes": None,
+                   "alltime": "podium_alltime_agency_ig.json",
+                   "bouton_pseudos": True, "bouton_usdc": True,
+                   # « 📈 Mes stats » : ses abonnés (subs_va) et les clics de
+                   # son lien, en privé, comme Twitter et Threads
+                   "mes_stats": True},
 }
 
 
@@ -4512,6 +4530,11 @@ def clics_du_va(gid: str, uid: str,
         # « @ ») comme récents, rattachés à son numéro par leur tracking
         liens, _frais = _liens_twitter(ETIQUETTE_QUINZAINE)
         ids = list(_entites_jessye(liens).get(int(n)) or [])
+    elif str(gid) == AGENCY_IG_ID:
+        # Agency : SON lien, celui de sa fiche (ajouté plus bas) ; la liste de
+        # l'espace ne sert qu'à savoir qu'il est direct
+        liens, _frais = liens_bruts(gid, ETIQUETTE_QUINZAINE)
+        ids = []
     else:
         liens, _frais = liens_bruts(gid, ETIQUETTE_QUINZAINE)
         ids = list((entites_liens_va(liens).get(str(int(n))) or {}).get("ids") or [])

@@ -36,7 +36,10 @@ MYM_FICHIER = DATA_DIR / "mym_conversions.json"
 TWITTER_ID = "1445108485090971710"
 THREADS_ID = "1498948161039896586"
 VA_IG_ID = "1505418484052394004"
-SERVEURS = {TWITTER_ID, THREADS_ID, VA_IG_ID}
+# Agency VA INSTAGRAM (22/10/2026) : ses VA ont leur fiche liens_va, comme
+# Twitter et Threads (un tracking Emy chacun, lien direct)
+AGENCY_IG_ID = "1488331963575177247"
+SERVEURS = {TWITTER_ID, THREADS_ID, VA_IG_ID, AGENCY_IG_ID}
 
 #: Un relevé MYM plus vieux que ça ne dit plus « aujourd'hui » : illisible.
 MYM_FRAIS_S = 6 * 3600
@@ -64,7 +67,7 @@ def trackings_du_va(gid: Any, uid: Any) -> List[Tuple[str, str]]:
     serveur, sans doublon."""
     gid, uid = str(gid or ""), str(uid or "")
     out: List[Tuple[str, str]] = []
-    if gid in (TWITTER_ID, THREADS_ID):
+    if gid in (TWITTER_ID, THREADS_ID, AGENCY_IG_ID):
         import liens_va
         f = liens_va.lien_de(gid, uid)
         for url in (f.get("tracking"), (f.get("variante") or {}).get("tracking")):
@@ -89,7 +92,7 @@ def trackings_du_va(gid: Any, uid: Any) -> List[Tuple[str, str]]:
 def pseudo_du_va(gid: Any, uid: Any) -> str:
     """Le pseudo du VA tel que ses fiches le donnent (« adh040 »)."""
     gid, uid = str(gid or ""), str(uid or "")
-    if gid in (TWITTER_ID, THREADS_ID):
+    if gid in (TWITTER_ID, THREADS_ID, AGENCY_IG_ID):
         import liens_va
         return str(liens_va.lien_de(gid, uid).get("pseudo") or "")
     if gid == VA_IG_ID:

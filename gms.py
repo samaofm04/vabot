@@ -1306,15 +1306,19 @@ def categorize_link(link: dict) -> str:
     return "Autre"
 
 
-def create_directlink(shortcode: str, url: str, display_name: str = "") -> Dict[str, Any]:
-    """Crée un directlink (redirect simple). Retourne {ok, link, error}."""
+def create_directlink(shortcode: str, url: str, display_name: str = "",
+                      team_id: Optional[str] = None) -> Dict[str, Any]:
+    """Crée un directlink (redirect simple). Retourne {ok, link, error}.
+    team_id : dans cet espace (liens d'Agency VA INSTAGRAM, EMY IG)."""
     args = {
         "shortcode": shortcode.strip(),
         "type": "directlink",
         "url": url.strip(),
     }
     if display_name.strip():
-        args["display_name"] = display_name.strip()
+        args["display_name"] = display_name.strip()[:60]
+    if team_id:
+        args["team_id"] = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
     res = _call_tool("create_link", args)
     if not res["ok"]:
         return res
