@@ -3801,12 +3801,29 @@ def _formulaire(du: str, au: str, tri: str, sens: str, cle: str, auj: str) -> st
         j = dt.date.fromisoformat(auj)
     except ValueError:
         j = dt.date.today()
+    # Les quinzaines de paie, toujours du 1 au 15 et du 16 à la fin du mois
+    # (propriétaire, 22/10 : « cette quinzaine, quinzaine précédente, tjr du 1
+    # au 15 et 16 fin du mois »). La quinzaine en cours s'arrête à aujourd'hui.
+    if j.day <= 15:
+        quinz = j.replace(day=1)
+        prec_fin = quinz - dt.timedelta(days=1)
+        prec = (prec_fin.replace(day=16), prec_fin)
+    else:
+        quinz = j.replace(day=16)
+        prec = (j.replace(day=1), j.replace(day=15))
     raccourcis = (("Depuis toujours", "", ""), ("Aujourd'hui", auj, auj),
+                  ("Cette quinzaine", quinz.isoformat(), auj),
+                  ("Quinzaine précédente", prec[0].isoformat(), prec[1].isoformat()),
                   ("7 derniers jours", (j - dt.timedelta(days=6)).isoformat(), auj),
                   ("30 derniers jours", (j - dt.timedelta(days=29)).isoformat(), auj))
     liens = []
+    deja = False
     for lib, d, a in raccourcis:
-        on = ' class="on" aria-current="page"' if (d, a) == (du, au) else ""
+        # deux raccourcis peuvent tomber sur les mêmes jours (le 22, « cette
+        # quinzaine » = « 7 derniers jours ») : seul le premier est allumé
+        on = ""
+        if (d, a) == (du, au) and not deja:
+            on, deja = ' class="on" aria-current="page"', True
         liens.append(f'<a href="{_lien_page(tri, sens, cle, d, a)}"{on}>{_e(lib)}</a>')
     bornes = f'min="{_e(PLANCHER.isoformat())}" max="{_e(auj)}"'
     return (f'<form class="periode" method="get">{caches}'

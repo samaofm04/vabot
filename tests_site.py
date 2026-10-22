@@ -29534,6 +29534,18 @@ try:
               and 'du=2026-09-20&amp;au=2026-09-26&amp;k=K1">7 derniers jours' in _hPg
               and 'du=2026-08-28&amp;au=2026-09-26&amp;k=K1">30 derniers jours' in _hPg
               and 'class="on" aria-current="page">Depuis toujours' in _hP)
+        _fQ1 = _il._formulaire("", "", "nom", "asc", "K", "2026-10-08")
+        _fQ2 = _il._formulaire("2026-10-16", "2026-10-22", "nom", "asc", "K", "2026-10-22")
+        _fQ3 = _il._formulaire("", "", "nom", "asc", "K", "2026-01-05")
+        check("page periode : quinzaines de paie, du 1 au 15 et du 16 a la fin du mois (en cours jusqu'a aujourd'hui)",
+              'du=2026-09-16&amp;au=2026-09-26&amp;k=K1">Cette quinzaine' in _hPg
+              and 'du=2026-09-01&amp;au=2026-09-15&amp;k=K1">Quinzaine précédente' in _hPg
+              and 'du=2026-10-01&amp;au=2026-10-08&amp;k=K">Cette quinzaine' in _fQ1
+              and 'du=2026-09-16&amp;au=2026-09-30&amp;k=K">Quinzaine précédente' in _fQ1
+              and 'du=2025-12-16&amp;au=2025-12-31&amp;k=K">Quinzaine précédente' in _fQ3)
+        check("page periode : deux raccourcis sur les memes jours, seul le premier est allume",
+              'class="on" aria-current="page">Cette quinzaine' in _fQ2
+              and _fQ2.count('aria-current="page"') == 1)
         _hSp = _il.page_html(_tPg, cle='a&b"<\'')
         check("page periode : une cle bizarre est echappee dans le formulaire et encodee dans les liens",
               'value="a&amp;b&quot;&lt;&#x27;"' in _hSp and "k=a%26b%22%3C%27" in _hSp and 'a&b"' not in _hSp)
@@ -29804,10 +29816,13 @@ try:
         _hVaL = _il.page({"du": _DU, "au": _AU, "tri": "gain", "sens": "desc"}, cle="K1")
         _hPrL = _il.page({"du": _DU, "au": _AU}, cle="K2", paie=True)
         _hAdL = _il.page({"du": _DU, "au": _AU}, paie=True, lien_perso=True)
+        # « quinzaine » servait de temoin du detail de paie : les raccourcis de
+        # periode (« Cette quinzaine », 22/10) le portent aussi, d ou le nav retire
         check("page() : la vue des VA n a ni Paiement, ni Gain / perte, ni formulaire, ni detail du calcul",
               ">Paiement<" not in _hVaL and "Gain" not in _hVaL and 'class="fpaie"' not in _hVaL
               and "/infloww/liens/paie" not in _hVaL and "revenu" not in _hVaL and "prime" not in _hVaL
-              and "quinzaine" not in _hVaL and ">VA 1 Noum<" in _hVaL and 'colspan="8"' not in _hVaL
+              and "quinzaine" not in _reL.sub(r'(?s)<nav class="raccourcis".*?</nav>', "", _hVaL)
+              and ">VA 1 Noum<" in _hVaL and 'colspan="8"' not in _hVaL
               and "Votre lien personnel" not in _hVaL
               and _hVaL.index(">ANDRY<") < _hVaL.index(">VA 1 Noum<"), "tri gain sur la vue des VA")
         _thVaL = _reL.findall(r"<th\b[^>]*>", _hVaL[_hVaL.find("<thead>"):_hVaL.find("</thead>")])
@@ -31223,7 +31238,8 @@ try:
                   and "<script" not in _hPgR and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPgR))
             _hPgS = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26").get_data(as_text=True)
             check("route paie : ... et la meme vue par la cle du salon ne montre ni le reglage ni le gain",
-                  "81\u00a0$" not in _hPgS and "quinzaine" not in _hPgS and ">Paiement<" not in _hPgS
+                  "81\u00a0$" not in _hPgS
+                  and "quinzaine" not in _reL.sub(r'(?s)<nav class="raccourcis".*?</nav>', "", _hPgS) and ">Paiement<" not in _hPgS
                   and "Du 21/09 au 26/09 · MyPuls" in _hPgS)
             _razL(_il.PAIE_FICHIER)
         finally:
