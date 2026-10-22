@@ -70,13 +70,16 @@ VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
 # variante. D'abord un lien direct (« pour le moment mets juste le lien
 # direct »), puis, le 23/10 : « mets la landing de base, comme dans Youl4b le
 # retour de Jessye » — la page « Emy ♡ » de JESSY LE RETOUR (template arthur),
-# copiée, son bouton OnlyFans vers le tracking du VA (_poser_tracking). Sans
-# gabarit, le lien direct revient. Surchargeable par la clé « agency_ig » de
-# liens_va_config.json.
+# copiée, son bouton OnlyFans vers le tracking du VA (_poser_tracking). Le
+# gabarit vit DANS EMY IG (« emyigbase », recopie à l'identique d'une landing
+# de JESSY LE RETOUR, bouton vers le profil d'Emy) : GetMySocial refuse de
+# copier un lien d'une autre équipe (« link_not_in_team », constaté le 23/10).
+# Sans gabarit, le lien direct revient. Surchargeable par la clé « agency_ig »
+# de liens_va_config.json.
 AGENCY_IG_ID = "1488331963575177247"
 ESPACE_AGENCY_IG = {"equipe": "tm_6ada83b07218da6450e65862",      # EMY IG
-                    # « emyvelvet », une landing de JESSY LE RETOUR (page Emy ♡)
-                    "gabarit": "lnk_6ad868dd1f59a2659b845e93", "landing": True,
+                    # « emyigbase » : la page Emy ♡ de JESSY LE RETOUR, dans EMY IG
+                    "gabarit": "lnk_6ada9ed9cf84f313d19d14ae", "landing": True,
                     "direct": True,
                     "sans_prenom": True, "plateforme": "Instagram",
                     # le lien est ouvert depuis Instagram : sortir de son

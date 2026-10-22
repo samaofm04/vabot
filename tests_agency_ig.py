@@ -143,7 +143,7 @@ try:
         e = lv.espace(AG)
         check(f"espace Agency (pause Seren {pause}) : EMY IG, landing de JESSY LE RETOUR, Instagram, "
               "tracking, sans variante",
-              e["equipe"] == EMY_IG and e["landing"] and e["gabarit"] == "lnk_6ad868dd1f59a2659b845e93"
+              e["equipe"] == EMY_IG and e["landing"] and e["gabarit"] == "lnk_6ada9ed9cf84f313d19d14ae"
               and e["plateforme"] == "Instagram" and e["tracking"] is True
               and e["variante"] is None, e)
     lv.SEREN_EN_PAUSE = True
@@ -166,7 +166,7 @@ try:
     r = lv.creer_pour(AG, "u1", "zaid014787", manager="GONE")
     dup = g.de("duplicate")
     check("landing : copie de la page de JESSY LE RETOUR dans EMY IG, SANS adresse (une landing n'en a pas)",
-          r.get("ok") and len(dup) == 1 and dup[0][1] == "lnk_6ad868dd1f59a2659b845e93"
+          r.get("ok") and len(dup) == 1 and dup[0][1] == "lnk_6ada9ed9cf84f313d19d14ae"
           and dup[0][4] == "" and dup[0][5] == EMY_IG and not g.de("direct"), g.appels)
     b0 = g.liens[f'lnk_{r["shortcode"]}']["buttons"][0]
     check("… son bouton OnlyFans mène au tracking DU VA, le reste du bouton intact",
