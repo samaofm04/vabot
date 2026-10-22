@@ -290,6 +290,17 @@ try:
           and fiche["manager"] == "m1" and fiche["adopte"]
           and [(a[0], a[1]) for a in appels if a[0] != "GET"]
           == [("POST", "/channels/c1/messages"), ("PUT", "/channels/c1/pins/msg1")], appels)
+    SALONS["c4"] = {"id": "c4", "name": "israel", "type": 0, "parent_id": "cat",
+                    "permission_overwrites": [{"type": 1, "id": "v2"}, {"type": 1, "id": "lead"}]}
+    MEMBRES["v2"] = {"user": {"id": "v2", "username": "israelfdn"}, "roles": ["r_att"]}
+    MEMBRES["lead"] = {"user": {"id": "lead", "username": "aboubakar6260"}, "roles": []}
+    check("deux membres sans rôle de manager : refusé sans VA désigné",
+          not tk.adopter_salon(AG, "c4")["ok"])
+    r4 = tk.adopter_salon(AG, "c4", uid_va="v2")
+    check("… le VA désigné (en attente) : adopté, en essai, le leader laissé tel quel",
+          r4["ok"] and r4["uid"] == "v2" and r4["essai"], r4)
+    check("… un VA désigné qui n'est pas membre du salon : refusé",
+          not tk.adopter_salon(AG, "c4", uid_va="v1")["ok"])
     appels.clear()
     r = tk.adopter_salon(AG, "c1", poster=True, renommer=True)
     check("déjà adopté + renommer : PAS de second accueil, le nom d'un ticket avec le numéro du VA",

@@ -2782,14 +2782,18 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
 # ce sera son accord, à part. Sans mention : 29 notifications d'un coup pour
 # un salon que le VA connaît déjà n'apprendraient rien.
 def adopter_salon(gid: str, cid: str, manager_id: str = "",
-                  poster: bool = False, renommer: bool = False) -> Dict[str, Any]:
+                  poster: bool = False, renommer: bool = False,
+                  uid_va: str = "") -> Dict[str, Any]:
     """Ce que l'adoption du salon `cid` ferait ({ok, uid, manager, essai,
     nom, corps, erreur}), et le fait si `poster`. Refuse ce qui n'est pas sûr :
     un salon hors des catégories de managers, zéro ou plusieurs VA en membres,
     un VA qui a déjà son ticket. `renommer` : le salon prend le nom d'un
     ticket, numéro du VA compris (nom_salon_va) — propriétaire, 23/10/2026,
     « tu donnes des numéros aux VA ». Un salon déjà adopté (même salon dans
-    sa fiche) n'a pas de second accueil : seul le nom est refait."""
+    sa fiche) n'a pas de second accueil : seul le nom est refait. `uid_va` :
+    le VA désigné à la main quand le salon a plusieurs membres (« israel » :
+    le VA et son leader, 23/10/2026) ; il doit en être membre, et il est en
+    essai s'il n'est pas confirmé (⏳ En attente compris)."""
     gid, cid = str(gid), str(cid)
     code, c = _api("GET", f"/channels/{cid}")
     if code != 200 or not isinstance(c, dict):
@@ -2810,6 +2814,10 @@ def adopter_salon(gid: str, cid: str, manager_id: str = "",
         if any("manager" in r.lower() for r in rs):
             continue                          # le salon d'un manager, pas d'un VA
         vas.append((str(o["id"]), m, rs))
+    if uid_va:
+        vas = [v for v in vas if v[0] == str(uid_va)]
+        if not vas:
+            return {"ok": False, "erreur": f"« {c.get('name')} » : {uid_va} n'en est pas membre"}
     if len(vas) != 1:
         return {"ok": False, "erreur": f"« {c.get('name')} » : {len(vas)} VA en membres, "
                                        f"à voir à la main"}
@@ -2832,7 +2840,8 @@ def adopter_salon(gid: str, cid: str, manager_id: str = "",
             if code_n != 200:
                 return dict(out, ok=False, erreur=f"renommage refusé (HTTP {code_n}) {str(rep_n)[:100]}")
         return out
-    essai = any(r in (ROLE_ESSAI_NOM, "VA débutant") for r in rs)
+    essai = any(r in (ROLE_ESSAI_NOM, "VA débutant") for r in rs) or (
+        bool(uid_va) and ROLE_CONFIRME_NOM not in rs)
     if not manager_id:
         voulu = _cle_categorie(cat.get("name"))
         trouves = [m for m in managers(gid) if _nom_court(m) == voulu]
