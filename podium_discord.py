@@ -411,9 +411,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                    # la lecture des pages figées (_ligne_affichee)
                    "libelle": "Instagram VA",
                    # la semaine et le bonus (qui paient) : ses VA ; la
-                   # quinzaine : ses VA ET ceux de Va IG en « Instagram VA
-                   # 0nn » (propriétaire, « avec le 0 devant »). Voir
-                   # subs_va.classement_agency
+                   # quinzaine : ses VA ET ceux de Youl4b (Twitter) en
+                   # « Instagram VA 0nn » (propriétaire, « avec le 0 devant »,
+                   # « je parle de VA de Youl4b »). Voir subs_va.classement_agency
                    "mesure": "agency_abonnes", "mesure_subs": "agency_quinzaine",
                    "bonus": True, "minutes": None,
                    "alltime": "podium_alltime_agency_ig.json",
@@ -1982,10 +1982,10 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         return subs_va.classement_va_ig(debut, fin)
     if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
         # Agency VA INSTAGRAM : les abonnés du tracking de chaque VA ; la
-        # quinzaine y mêle ceux de Va IG en « Instagram VA 0nn » (subs_va)
+        # quinzaine y mêle ceux de Youl4b (Twitter) en « Instagram VA 0nn »
         import subs_va
         return subs_va.classement_agency(
-            debut, fin, avec_va_ig=_source(gid, mesure) == "agency_quinzaine")
+            debut, fin, avec_youl4b=_source(gid, mesure) == "agency_quinzaine")
     if _source(gid, mesure) == "tracking_abonnes":
         # Twitter, quinzaine : les abonnés OF des trackings du registre (Emy
         # et sa variante Seren additionnées), plus leurs visites
@@ -2207,11 +2207,11 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
             and cache.get("format") == FORMAT_AFFICHAGE):
         return {k: int(v) for k, v in cache["totaux"].items()}
     if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
-        # un seul fichier : « Instagram VA 12 » (Agency) et « Instagram VA
-        # 023 » (Va IG, quinzaine) ne se croisent jamais
+        # les VA d'Agency seuls : ceux de Youl4b (« Instagram VA 012 ») n'ont
+        # pas de 🌐 all-time, comme à Twitter (voir subs_va.totaux_agency)
         import subs_va
         totaux = dict(cache.get("totaux") or {})
-        neufs = subs_va.totaux_agency(avec_va_ig=True)
+        neufs = subs_va.totaux_agency()
         totaux.update(neufs)
         if totaux:
             safe_json.write_text(fichier, json.dumps(
@@ -3226,9 +3226,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                 + (f'Abonnés **OF + MYM** · **{len(lignes)}** comptes classés\n'
                    if p.get("mesure_subs") == "abonnes" else
                    f'Abonnés **tracking OF** · **{len(lignes)}** comptes classés\n'
-                   if p.get("mesure_subs") == "tracking_abonnes" else
-                   f'Abonnés **OF + MYM** · **{len(lignes)}** comptes classés\n'
-                   if p.get("mesure_subs") == "agency_quinzaine" else
+                   if p.get("mesure_subs") in ("tracking_abonnes", "agency_quinzaine") else
                    f'Clics **uniques {p["marche_subs"]}** · **{len(lignes)}** comptes classés\n'
                    "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_\n"
                    if p.get("us_gbl") and p.get("marche_subs") else
@@ -5253,7 +5251,7 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
     pseudo, « Threads VA 023 » → « pseudo (Amelia VA 44 · Va IG) ». Ailleurs :
     _noms_va, au numéro."""
     if str(gid) == AGENCY_IG_ID:
-        # Agency : au libellé entier, ses VA et ceux de Va IG (« 0nn »)
+        # Agency : au libellé entier, ses VA et ceux de Youl4b (« 0nn »)
         import subs_va
         return subs_va.noms_agency()
     noms = _noms_va(gid)

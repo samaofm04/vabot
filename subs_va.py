@@ -500,17 +500,19 @@ def pseudos_va_ig(debut: dt.date, fin: dt.date) -> List[Dict[str, Any]]:
 # ─── Agency VA INSTAGRAM : ses classements aux abonnés ───────────────────
 # Propriétaire, 22/10/2026 : podium, bonus, quinzaine et primes « comme
 # Twitter », AUX SUBS (« Instagram VA 12 — 56 subs · 🌐 56 all-time »), puis
-# « mettre les stats de Instagram aussi avec le 0 devant » : les VA de Va IG
-# (FR) rejoignent la QUINZAINE d'Agency en « Instagram VA 023 » (leur numéro
-# Instagram sur trois chiffres, comme « Threads VA 023 » à Threads), à leurs
-# abonnés OF + MYM. La semaine et le bonus, qui paient, restent aux VA
-# d'Agency (question des primes posée au propriétaire, défaut : rien pour
-# eux). Deux chiffres = Agency, trois avec un 0 devant = Va IG.
+# « mettre les stats de Instagram aussi avec le 0 devant », précisé le
+# 23/10 : « je parle de VA de Youl4b » — les VA de Twitter (JESSY LE RETOUR,
+# registre des trackings), ceux de « Threads VA 1nn » à Threads. Ils
+# rejoignent la QUINZAINE d'Agency en « Instagram VA 012 » (leur numéro du
+# registre, un 0 devant, trois chiffres), à leurs abonnés comptés comme la
+# quinzaine de Twitter (Emy et Seren de leurs trackings). La semaine et le
+# bonus, qui paient, restent aux VA d'Agency (question des primes posée,
+# défaut : rien pour eux). Deux chiffres = Agency, un 0 devant = Youl4b.
 def libelle_agency(n: Any) -> str:
     return f"Instagram VA {int(n)}"
 
 
-def libelle_va_ig_agency(n: Any) -> str:
+def libelle_youl4b_agency(n: Any) -> str:
     return f"Instagram VA 0{int(n):02d}"
 
 
@@ -532,23 +534,18 @@ def entites_agency() -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _va_ig_pour_agency() -> Dict[str, Tuple[str, Dict[str, Any]]]:
-    """{« Amelia VA 3 » : (« Instagram VA 023 », entité)} : les VA de Va IG
-    présents (pas partis, lien en service : podium_discord._entites_va_ig),
-    numérotés comme à Threads (numeros_instagram)."""
-    import podium_discord as pod
-    presents = set(pod._entites_va_ig())
-    ents = {k: e for k, e in entites_va_ig().items() if k in presents}
-    table = pod.numeros_instagram(set(ents))
-    return {e["nom"]: (libelle_va_ig_agency(table[k]), dict(e, cle=k))
-            for k, e in ents.items() if k in table}
+def _youl4b_relabel(va: Any) -> str:
+    """« VA 12 » (Twitter) → « Instagram VA 012 » ; « » si ce n'est pas un VA
+    numéroté."""
+    m = re.fullmatch(r"VA (\d+)", str(va or "").strip())
+    return libelle_youl4b_agency(m.group(1)) if m else ""
 
 
-def classement_agency(debut: dt.date, fin: dt.date, avec_va_ig: bool = False) -> Dict[str, Any]:
+def classement_agency(debut: dt.date, fin: dt.date, avec_youl4b: bool = False) -> Dict[str, Any]:
     """La forme de podium_discord.classement(), en abonnés (« clics » porte les
-    abonnés de la période) : les VA d'Agency, et avec `avec_va_ig` ceux de Va
-    IG en « Instagram VA 0nn » (marqués « va_ig »). Un VA illisible est dit,
-    jamais compté zéro."""
+    abonnés de la période) : les VA d'Agency, et avec `avec_youl4b` ceux de
+    Youl4b (Twitter, partis exclus) en « Instagram VA 0nn », marqués
+    « youl4b ». Un VA illisible est dit, jamais compté zéro."""
     d0, d1 = debut.isoformat(), fin.isoformat()
     ents = entites_agency()
     lignes: List[Dict[str, Any]] = []
@@ -560,45 +557,45 @@ def classement_agency(debut: dt.date, fin: dt.date, avec_va_ig: bool = False) ->
             continue
         lignes.append({"va": e["nom"], "numero": e["numero"], "clics": n,
                        "liens": len(e["trackings"]), "spam": False, "model": ""})
-    nb_ig = 0
-    if avec_va_ig:
-        ig = _va_ig_pour_agency()
-        nb_ig = len(ig)
-        for _nom, (lib, e) in sorted(ig.items()):
-            n = _subs_entite(e, d0, d1)
-            if n is None:
-                illisibles.append(lib)
-                continue
-            lignes.append({"va": lib, "numero": int(lib.rsplit(" ", 1)[1]), "clics": n,
-                           "liens": len(e["trackings"]), "spam": False, "model": e["model"],
-                           "va_ig": True})
+    nb_y, frais, erreur = 0, True, ""
+    if avec_youl4b:
+        import podium_discord as pod
+        tw = pod.classement(debut, fin, gid=pod.TWITTER_ID, mesure="tracking_abonnes",
+                            etiquette=pod.ETIQUETTE_QUINZAINE)
+        frais, erreur = bool(tw.get("frais")), str(tw.get("erreur") or "")
+        for x in tw["lignes"]:
+            lib = _youl4b_relabel(x["va"])
+            if lib:
+                nb_y += 1
+                lignes.append({"va": lib, "numero": int(x["numero"]), "clics": int(x["clics"]),
+                               "liens": int(x.get("liens") or 0), "spam": False, "model": "",
+                               "youl4b": True})
+        illisibles += [lib for lib in map(_youl4b_relabel, tw.get("illisibles") or []) if lib]
     lignes.sort(key=lambda x: (-x["clics"], x["va"]))
-    return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": True,
-            "entites": len(ents) + nb_ig, "liens": len(ents), "sans_numero": [],
-            "gabarits": [], "source": "agency_abonnes", "erreur": ""}
+    return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
+            "entites": len(ents) + nb_y, "liens": len(ents), "sans_numero": [],
+            "gabarits": [], "source": "agency_abonnes", "erreur": erreur}
 
 
-def totaux_agency(avec_va_ig: bool = False) -> Dict[str, int]:
-    """{« Instagram VA 12 » : abonnés depuis la création de son tracking}, et
-    ceux de Va IG avec `avec_va_ig` (« Instagram VA 023 »). Un illisible est
-    laissé de côté : l'ancien total reste (podium_discord.alltime)."""
+def totaux_agency() -> Dict[str, int]:
+    """{« Instagram VA 12 » : abonnés depuis la création de son tracking}, VA
+    d'Agency seuls. Ceux de Youl4b n'ont pas de 🌐 all-time, comme à Twitter
+    (alltime_subs faux) : leurs abonnés d'avant le passage sur Emy manquent,
+    un total « depuis toujours » serait faux. Un illisible est laissé de côté
+    (l'ancien total reste, podium_discord.alltime)."""
     out: Dict[str, int] = {}
     for _uid, e in sorted(entites_agency().items()):
         total = subs_depuis_toujours(e["trackings"], e["pseudo"])
         if total is not None:
             out[e["nom"]] = total
-    if avec_va_ig:
-        for _nom, (lib, e) in sorted(_va_ig_pour_agency().items()):
-            total = subs_depuis_toujours(e["trackings"], e["pseudo"]) if e["trackings"] else 0
-            if total is not None:
-                out[lib] = total
     return out
 
 
 def noms_agency() -> Dict[str, str]:
     """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 12 » → son
-    pseudo ; « Instagram VA 023 » → « pseudo (Amelia VA 3 · Va IG) »."""
+    pseudo ; « Instagram VA 012 » → « Nom (VA 12 · Twitter) »."""
+    import podium_discord as pod
     out = {e["nom"]: e["pseudo"] or "?" for e in entites_agency().values()}
-    for nom, (lib, e) in _va_ig_pour_agency().items():
-        out[lib] = f'{e.get("pseudo") or "?"} ({nom} · Va IG)'
+    for n, nom in pod._noms_registre().items():
+        out[libelle_youl4b_agency(n)] = f"{nom or '?'} (VA {n} · Twitter)"
     return out
