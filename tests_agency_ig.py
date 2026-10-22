@@ -63,8 +63,9 @@ class FauxGMS(types.ModuleType):
     def de(self, genre):
         return [a for a in self.appels if a[0] == genre]
 
-    def create_directlink(self, sc, url, nom="", team_id=None):
+    def create_directlink(self, sc, url, nom="", team_id=None, deeplink_mode=""):
         self.appels.append(("direct", sc, url, nom, team_id))
+        self.deeplink = deeplink_mode
         return {"ok": True, "link": {"id": f"lnk_{sc}", "url": url}}
 
     def duplicate_link(self, source, sc, nom, url, equipe):
@@ -147,6 +148,8 @@ try:
           len(d) == 1 and d[0][2] == "https://onlyfans.com/emy.brw/c300"
           and d[0][3] == "Instagram VA 27 @zaid014787" and d[0][4] == EMY_IG
           and not g.de("duplicate"), g.appels)
+    check("… avec le deeplink « pageload » (sortir du navigateur d'Instagram)",
+          getattr(g, "deeplink", "") == "pageload")
     f = lv.lien_de(AG, "u1")
     check("… la fiche : numéro, tracking, lien", f.get("numero") == 27
           and f.get("tracking", "").endswith("/c300") and f.get("link_id", "").startswith("lnk_"), f)

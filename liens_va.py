@@ -74,7 +74,11 @@ VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
 AGENCY_IG_ID = "1488331963575177247"
 ESPACE_AGENCY_IG = {"equipe": "tm_6ada83b07218da6450e65862",      # EMY IG
                     "gabarit": "", "direct": True,
-                    "sans_prenom": True, "plateforme": "Instagram"}
+                    "sans_prenom": True, "plateforme": "Instagram",
+                    # le lien est ouvert depuis Instagram : sortir de son
+                    # navigateur intégré dès la page chargée, comme les liens
+                    # de Threads (propriétaire, 23/10/2026 : « active le deeplink »)
+                    "deeplink": "pageload"}
 
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
 SERVEURS = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
@@ -462,7 +466,8 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
     for essai in range(ESSAIS_ADRESSE):
         # Threads et Twitter : aucune base, aucun prénom (voir mots_sans_prenom)
         sc = mots_sans_prenom(nom, essai) if e.get("sans_prenom") else mots_doux(base, essai)
-        r = (gms.create_directlink(sc, url, nom, team_id=equipe) if direct
+        r = (gms.create_directlink(sc, url, nom, team_id=equipe,
+                                   deeplink_mode=str(e.get("deeplink") or "")) if direct
              else gms.duplicate_link(gabarit, sc, nom, url, equipe))
         if r.get("ok"):
             lien = r.get("link") or {}

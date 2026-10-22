@@ -1307,9 +1307,11 @@ def categorize_link(link: dict) -> str:
 
 
 def create_directlink(shortcode: str, url: str, display_name: str = "",
-                      team_id: Optional[str] = None) -> Dict[str, Any]:
+                      team_id: Optional[str] = None, deeplink_mode: str = "") -> Dict[str, Any]:
     """Crée un directlink (redirect simple). Retourne {ok, link, error}.
-    team_id : dans cet espace (liens d'Agency VA INSTAGRAM, EMY IG)."""
+    team_id : dans cet espace (liens d'Agency VA INSTAGRAM, EMY IG).
+    deeplink_mode : « pageload » fait sortir du navigateur intégré
+    (Instagram, Threads) dès l'ouverture de la page."""
     args = {
         "shortcode": shortcode.strip(),
         "type": "directlink",
@@ -1319,6 +1321,8 @@ def create_directlink(shortcode: str, url: str, display_name: str = "",
         args["display_name"] = display_name.strip()[:60]
     if team_id:
         args["team_id"] = team_id if team_id.startswith("tm_") else f"tm_{team_id}"
+    if deeplink_mode:
+        args["deeplink_mode"] = deeplink_mode
     res = _call_tool("create_link", args)
     if not res["ok"]:
         return res
