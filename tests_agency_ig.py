@@ -186,6 +186,64 @@ try:
     check("profil Agency : subs, Wario, Mes stats, USDC",
           pod._profil(AG)["unite"] == "subs" and pod._profil(AG)["bot"] == "Wario"
           and pod._profil(AG)["mes_stats"] and pod._profil(AG)["bouton_usdc"])
+
+    # ── adopter un salon fait à la main ──────────────────────────────────
+    _sauve_tk = {k: getattr(tk, k) for k in ("_api", "ETAT_FICHIER", "managers")}
+    tk.ETAT_FICHIER = TMP / "tickets.json"
+    tk.ETAT_FICHIER.write_text("{}")
+    monde()
+    appels = []
+    SALONS = {
+        "c1": {"id": "c1", "name": "zaid", "type": 0, "parent_id": "cat",
+               "permission_overwrites": [{"type": 0, "id": "rm", "allow": "1024", "deny": "0"},
+                                         {"type": 1, "id": "v1", "allow": "1024", "deny": "0"}]},
+        "c2": {"id": "c2", "name": "gone", "type": 0, "parent_id": "cat",
+               "permission_overwrites": [{"type": 1, "id": "m1", "allow": "1024", "deny": "0"}]},
+        "c3": {"id": "c3", "name": "general", "type": 0, "parent_id": "autre",
+               "permission_overwrites": [{"type": 1, "id": "v1", "allow": "1024", "deny": "0"}]},
+        "cat": {"id": "cat", "name": "🔵┤ Manager GONE ├🔵", "type": 4},
+        "autre": {"id": "autre", "name": "💬 DISCUSSION", "type": 4}}
+    MEMBRES = {"v1": {"user": {"id": "v1", "username": "zaid014787"}, "roles": ["r_deb"]},
+               "m1": {"user": {"id": "m1", "username": "jrm_12."}, "roles": ["rm"]}}
+
+    def faux_api(methode, chemin, **kw):
+        appels.append((methode, chemin, kw.get("json")))
+        if methode == "GET" and chemin.startswith("/channels/"):
+            c_ = SALONS.get(chemin.split("/")[2])
+            return (200, c_) if c_ else (404, {})
+        if methode == "GET" and chemin.endswith("/roles"):
+            return 200, [{"id": "rm", "name": "MANAGER VA"}, {"id": "r_deb", "name": "VA débutant"}]
+        if methode == "GET" and "/members/" in chemin:
+            m_ = MEMBRES.get(chemin.rsplit("/", 1)[1])
+            return (200, m_) if m_ else (404, {})
+        if methode == "POST" and chemin.endswith("/messages"):
+            return 200, {"id": "msg1"}
+        if methode == "PUT" and "/pins/" in chemin:
+            return 204, {}
+        return 200, {}
+    tk._api = faux_api
+    tk.managers = lambda gid, force=False: [{"user": {"id": "m1", "username": "jrm_12."},
+                                             "nick": "MANAGER | Gone"}]
+    r = tk.adopter_salon(AG, "c1")
+    check("adopter à blanc : le VA du salon, son manager (catégorie GONE), en essai (VA débutant)",
+          r["ok"] and r["uid"] == "v1" and r["manager"] == "m1" and r["essai"]
+          and not [a for a in appels if a[0] != "GET"], r)
+    labels = [b["label"] for rg in r["corps"]["components"] for b in rg["components"]]
+    check("… l'accueil : Confirmer, Créer son lien, USDC, Mes stats, et aucune mention",
+          labels == ["Confirmer le VA", "Créer son lien", "Mon adresse USDC", "Mes stats"]
+          and r["corps"]["allowed_mentions"] == {"parse": []}, labels)
+    check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])
+    check("salon hors des catégories de managers : refusé", not tk.adopter_salon(AG, "c3")["ok"])
+    appels.clear()
+    r = tk.adopter_salon(AG, "c1", poster=True)
+    fiche = json.loads(tk.ETAT_FICHIER.read_text())["tickets"][f"{AG}:v1"]
+    check("adopter pour de vrai : accueil posté et épinglé, fiche écrite, rien d'autre",
+          r["ok"] and fiche["salon"] == "c1" and fiche["accueil"] == "msg1"
+          and fiche["manager"] == "m1" and fiche["adopte"]
+          and [(a[0], a[1]) for a in appels if a[0] != "GET"]
+          == [("POST", "/channels/c1/messages"), ("PUT", "/channels/c1/pins/msg1")], appels)
+    for k, v in _sauve_tk.items():
+        setattr(tk, k, v)
 finally:
     for k, v in _SAUVE_LV.items():
         setattr(lv, k, v)

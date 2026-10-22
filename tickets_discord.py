@@ -2766,3 +2766,95 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
                 if str(b.get("custom_id") or "").startswith("subs:total:"):
                     b["label"] = "Mes stats"
     return rangs
+
+
+# ─── Agency VA INSTAGRAM : adopter les salons faits à la main ────────────
+# 22/10/2026 : 29 salons perso existaient déjà, nommés au prénom (« zaid »),
+# rangés dans « 🔵┤ Manager GONE ├🔵 » et « 🔵┤ Manager YOSHIKI ├🔵 », le VA
+# en membre du salon. Le propriétaire veut les adopter comme tickets, sans en
+# recréer, et voir d'abord un ticket rendu. Adopter = la fiche de
+# tickets.json + l'accueil épinglé avec les boutons (Créer son lien, Mon
+# adresse USDC, Mes stats). NI les droits du salon NI son nom ne changent :
+# ce sera son accord, à part. Sans mention : 29 notifications d'un coup pour
+# un salon que le VA connaît déjà n'apprendraient rien.
+def adopter_salon(gid: str, cid: str, manager_id: str = "",
+                  poster: bool = False) -> Dict[str, Any]:
+    """Ce que l'adoption du salon `cid` ferait ({ok, uid, manager, essai,
+    corps, erreur}), et le fait si `poster`. Refuse ce qui n'est pas sûr : un
+    salon hors des catégories de managers, zéro ou plusieurs VA en membres,
+    un VA qui a déjà son ticket."""
+    gid, cid = str(gid), str(cid)
+    code, c = _api("GET", f"/channels/{cid}")
+    if code != 200 or not isinstance(c, dict):
+        return {"ok": False, "erreur": f"salon illisible (HTTP {code})"}
+    code_p, cat = _api("GET", f"/channels/{c.get('parent_id')}") if c.get("parent_id") else (0, {})
+    if not (code_p == 200 and _cle_categorie((cat or {}).get("name"))):
+        return {"ok": False, "erreur": f"« {c.get('name')} » n'est pas dans une catégorie de manager"}
+    code_r, roles = _api("GET", f"/guilds/{gid}/roles")
+    noms = {str(r.get("id")): str(r.get("name") or "") for r in roles} if code_r == 200 else {}
+    vas = []
+    for o in c.get("permission_overwrites") or []:
+        if str(o.get("type", "1")) not in ("1", "member"):
+            continue
+        code_m, m = _api("GET", f"/guilds/{gid}/members/{o['id']}")
+        if code_m != 200:
+            continue
+        rs = [noms.get(str(x), "") for x in m.get("roles") or []]
+        if any("manager" in r.lower() for r in rs):
+            continue                          # le salon d'un manager, pas d'un VA
+        vas.append((str(o["id"]), m, rs))
+    if len(vas) != 1:
+        return {"ok": False, "erreur": f"« {c.get('name')} » : {len(vas)} VA en membres, "
+                                       f"à voir à la main"}
+    uid, membre, rs = vas[0]
+    cle = f"{gid}:{uid}"
+    deja = (_etat().get("tickets") or {}).get(cle) or {}
+    if deja.get("salon") and str(deja["salon"]) != cid:
+        return {"ok": False, "erreur": f"{uid} a déjà le ticket {deja['salon']}"}
+    essai = any(r in (ROLE_ESSAI_NOM, "VA débutant") for r in rs)
+    if not manager_id:
+        voulu = _cle_categorie(cat.get("name"))
+        trouves = [m for m in managers(gid) if _nom_court(m) == voulu]
+        manager_id = str((trouves[0].get("user") or {}).get("id")) if len(trouves) == 1 else ""
+    import liens_va
+    lien = liens_va.lien_de(gid, uid)
+    qui = f"<@{manager_id}>" if manager_id else "ton manager"
+    embed = {
+        "title": "👋 Ton espace perso",
+        "color": 0x3B82F6,
+        "description": (
+            f"<@{uid}>, tu es suivi par {qui}.\n\n"
+            "**C'est ici que ça se passe :**\n"
+            "• tes questions,\n"
+            "• tes preuves et tes captures,\n"
+            "• ton lien, tes stats et ton adresse de paiement (boutons ci-dessous).\n\n"
+            "Personne d'autre que toi et les managers ne voit ce salon."),
+        "footer": {"text": "YouLab • Ton manager te répond ici"},
+    }
+    corps = {"content": "", "embeds": [embed],
+             "components": boutons_va(uid, confirme=not essai,
+                                      a_un_lien=bool(lien.get("public_url")), gid=gid,
+                                      lien_actif=liens_va.est_actif(gid, uid)),
+             "allowed_mentions": {"parse": []}}
+    out = {"ok": True, "uid": uid, "pseudo": (membre.get("user") or {}).get("username"),
+           "manager": manager_id, "essai": essai, "salon": cid, "corps": corps, "erreur": ""}
+    if not poster:
+        return out
+    code_m, rep_m = _api("POST", f"/channels/{cid}/messages", json=corps)
+    if code_m != 200 or not rep_m.get("id"):
+        return dict(out, ok=False, erreur=f"accueil refusé (HTTP {code_m}) {str(rep_m)[:120]}")
+    code_e, rep_e = _api("PUT", f'/channels/{cid}/pins/{rep_m["id"]}')
+    if code_e not in (200, 204):
+        print(f"[ticket] accueil non épinglé dans {cid} (HTTP {code_e}) {str(rep_e)[:100]}",
+              flush=True)
+    with _VERROU:
+        d = _etat()
+        tk = d.setdefault("tickets", {})
+        tk[cle] = dict(tk.get(cle) or {}, salon=cid, manager=manager_id, essai=essai,
+                       accueil=str(rep_m["id"]), boutons=BOUTONS_VERSION,
+                       adopte=int(time.time()), ouvert=int((tk.get(cle) or {}).get("ouvert")
+                                                           or time.time()))
+        _ecrire_etat(d)
+    print(f"[ticket] {gid} : « {c.get('name')} » adopté pour {uid} (manager {manager_id or '?'})",
+          flush=True)
+    return dict(out, accueil=str(rep_m["id"]))
