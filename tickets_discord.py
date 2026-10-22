@@ -519,7 +519,11 @@ def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
 #: Les serveurs dont les salons de VA portent le numéro du VA, comme Va IG
 #: (« 🔴-21-va-… ») : « ─│🔵┤-61-va-＠momobtn ». Propriétaire, 13/10/2026,
 #: devant les tickets de Threads : « faut mettre le numéro du VA ».
-NUMERO_DANS_SALON = {"1498948161039896586"}      # YouLab THREADS
+NUMERO_DANS_SALON = {"1498948161039896586",     # YouLab THREADS
+                     # Agency VA INSTAGRAM, propriétaire 23/10/2026 : « après
+                     # tu donnes des numéros aux VA » — « ─│🔵┤-12-va-＠pseudo »,
+                     # le numéro de « Instagram VA 12 » (table commune)
+                     "1488331963575177247"}
 
 
 def numero_va(gid: str, uid: str, pseudo: str = "") -> int:
@@ -2778,11 +2782,14 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
 # ce sera son accord, à part. Sans mention : 29 notifications d'un coup pour
 # un salon que le VA connaît déjà n'apprendraient rien.
 def adopter_salon(gid: str, cid: str, manager_id: str = "",
-                  poster: bool = False) -> Dict[str, Any]:
+                  poster: bool = False, renommer: bool = False) -> Dict[str, Any]:
     """Ce que l'adoption du salon `cid` ferait ({ok, uid, manager, essai,
-    corps, erreur}), et le fait si `poster`. Refuse ce qui n'est pas sûr : un
-    salon hors des catégories de managers, zéro ou plusieurs VA en membres,
-    un VA qui a déjà son ticket."""
+    nom, corps, erreur}), et le fait si `poster`. Refuse ce qui n'est pas sûr :
+    un salon hors des catégories de managers, zéro ou plusieurs VA en membres,
+    un VA qui a déjà son ticket. `renommer` : le salon prend le nom d'un
+    ticket, numéro du VA compris (nom_salon_va) — propriétaire, 23/10/2026,
+    « tu donnes des numéros aux VA ». Un salon déjà adopté (même salon dans
+    sa fiche) n'a pas de second accueil : seul le nom est refait."""
     gid, cid = str(gid), str(cid)
     code, c = _api("GET", f"/channels/{cid}")
     if code != 200 or not isinstance(c, dict):
@@ -2811,6 +2818,20 @@ def adopter_salon(gid: str, cid: str, manager_id: str = "",
     deja = (_etat().get("tickets") or {}).get(cle) or {}
     if deja.get("salon") and str(deja["salon"]) != cid:
         return {"ok": False, "erreur": f"{uid} a déjà le ticket {deja['salon']}"}
+    pseudo = re.sub(r"[^a-z0-9._-]+", "-", str((membre.get("user") or {}).get("username")
+                                                  or "").lower()).strip("-")[:60] \
+        or _pseudo(gid, uid)
+    nom = nom_salon_va(gid, uid, pseudo)
+    if deja.get("accueil") and str(deja.get("salon")) == cid:
+        # déjà adopté : le nom seulement
+        out = {"ok": True, "uid": uid, "pseudo": pseudo, "manager": deja.get("manager", ""),
+               "essai": bool(deja.get("essai")), "salon": cid, "nom": nom, "corps": None,
+               "deja": True, "erreur": ""}
+        if poster and renommer and c.get("name") != nom:
+            code_n, rep_n = _api("PATCH", f"/channels/{cid}", json={"name": nom})
+            if code_n != 200:
+                return dict(out, ok=False, erreur=f"renommage refusé (HTTP {code_n}) {str(rep_n)[:100]}")
+        return out
     essai = any(r in (ROLE_ESSAI_NOM, "VA débutant") for r in rs)
     if not manager_id:
         voulu = _cle_categorie(cat.get("name"))
@@ -2836,10 +2857,14 @@ def adopter_salon(gid: str, cid: str, manager_id: str = "",
                                       a_un_lien=bool(lien.get("public_url")), gid=gid,
                                       lien_actif=liens_va.est_actif(gid, uid)),
              "allowed_mentions": {"parse": []}}
-    out = {"ok": True, "uid": uid, "pseudo": (membre.get("user") or {}).get("username"),
-           "manager": manager_id, "essai": essai, "salon": cid, "corps": corps, "erreur": ""}
+    out = {"ok": True, "uid": uid, "pseudo": pseudo, "manager": manager_id, "essai": essai,
+           "salon": cid, "nom": nom, "corps": corps, "erreur": ""}
     if not poster:
         return out
+    if renommer and c.get("name") != nom:
+        code_n, rep_n = _api("PATCH", f"/channels/{cid}", json={"name": nom})
+        if code_n != 200:
+            return dict(out, ok=False, erreur=f"renommage refusé (HTTP {code_n}) {str(rep_n)[:100]}")
     code_m, rep_m = _api("POST", f"/channels/{cid}/messages", json=corps)
     if code_m != 200 or not rep_m.get("id"):
         return dict(out, ok=False, erreur=f"accueil refusé (HTTP {code_m}) {str(rep_m)[:120]}")

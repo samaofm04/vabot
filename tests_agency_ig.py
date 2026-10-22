@@ -242,6 +242,12 @@ try:
           and fiche["manager"] == "m1" and fiche["adopte"]
           and [(a[0], a[1]) for a in appels if a[0] != "GET"]
           == [("POST", "/channels/c1/messages"), ("PUT", "/channels/c1/pins/msg1")], appels)
+    appels.clear()
+    r = tk.adopter_salon(AG, "c1", poster=True, renommer=True)
+    check("déjà adopté + renommer : PAS de second accueil, le nom d'un ticket avec le numéro du VA",
+          r["ok"] and r.get("deja") and r["nom"] == "─│🔵┤-27-va-＠zaid014787"
+          and [(a[0], a[1], a[2]) for a in appels if a[0] != "GET"]
+          == [("PATCH", "/channels/c1", {"name": "─│🔵┤-27-va-＠zaid014787"})], appels)
     for k, v in _sauve_tk.items():
         setattr(tk, k, v)
 
