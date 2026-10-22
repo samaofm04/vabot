@@ -406,10 +406,22 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
     # des tickets marche avant.
     AGENCY_IG_ID: {"equipes": ["tm_6ada83b07218da6450e65862"],   # EMY IG (liens_va)
                    "pays": ("US",), "marche": "US", "source": "Instagram 📸",
-                   "bot": "Wario", "fr": False, "unite": "subs", "libelle": "Instagram",
-                   "mesure": "agency_abonnes", "mesure_subs": "agency_abonnes",
+                   "bot": "Wario", "fr": False, "unite": "subs",
+                   # « Instagram VA 12 » : la clé des VA partis (_partis) et
+                   # la lecture des pages figées (_ligne_affichee)
+                   "libelle": "Instagram VA",
+                   # la semaine et le bonus (qui paient) : ses VA ; la
+                   # quinzaine : ses VA ET ceux de Va IG en « Instagram VA
+                   # 0nn » (propriétaire, « avec le 0 devant »). Voir
+                   # subs_va.classement_agency
+                   "mesure": "agency_abonnes", "mesure_subs": "agency_quinzaine",
                    "bonus": True, "minutes": None,
                    "alltime": "podium_alltime_agency_ig.json",
+                   # ses salons (le serveur a les siens, pas ceux de Twitter) ;
+                   # proposés au propriétaire le 23/10/2026, à confirmer
+                   "salon_podium": "📈⎜ᴘᴇʀꜰᴏʀᴍᴀɴᴄᴇꜱ-ᴠᴀ",
+                   "salon_bonus": "📈⎜ᴘᴇʀꜰᴏʀᴍᴀɴᴄᴇꜱ-ᴠᴀ",
+                   "salon_subs": "📊-mes-stats",
                    "bouton_pseudos": True, "bouton_usdc": True,
                    # « 📈 Mes stats » : ses abonnés (subs_va) et les clics de
                    # son lien, en privé, comme Twitter et Threads
@@ -1195,16 +1207,23 @@ def _source_subs(gid: Optional[str] = None) -> str:
     return _source(gid, _profil(gid).get("mesure_subs"))
 
 
+#: Les mesures lues chez MyPuls : Twitter (« tracking ») et Agency VA
+#: INSTAGRAM (« agency_abonnes », ses abonnés). Ce qui vaut pour MyPuls (son
+#: retard d'affichage, la pause GetMySocial sans effet, les primes retenues
+#: d'un VA sans relevé) vaut pour les deux.
+MESURES_MYPULS = ("tracking", "agency_abonnes")
+
+
 def _service(gid: Optional[str] = None) -> str:
     """Le service à nommer quand un relevé manque."""
-    return "MyPuls" if _source(gid) == "tracking" else "GetMySocial"
+    return "MyPuls" if _source(gid) in MESURES_MYPULS else "GetMySocial"
 
 
 def _pause_pour(gid: Optional[str]) -> bool:
     """La pause de GetMySocial n'arrête que ce qui en dépend. Sur Twitter, la
     liste des liens attend son retour ; le registre et MyPuls suffisent, et le
     bonus du jour (payé) ne doit pas se figer pendant des heures."""
-    return _pause_gms() if _source(gid) != "tracking" else False
+    return _pause_gms() if _source(gid) not in MESURES_MYPULS else False
 
 
 def _mesure_dite(pf: Dict[str, Any]) -> str:
@@ -1961,6 +1980,12 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         # Va IG, quinzaine : les vrais abonnés de ses trackings (subs_va)
         import subs_va
         return subs_va.classement_va_ig(debut, fin)
+    if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
+        # Agency VA INSTAGRAM : les abonnés du tracking de chaque VA ; la
+        # quinzaine y mêle ceux de Va IG en « Instagram VA 0nn » (subs_va)
+        import subs_va
+        return subs_va.classement_agency(
+            debut, fin, avec_va_ig=_source(gid, mesure) == "agency_quinzaine")
     if _source(gid, mesure) == "tracking_abonnes":
         # Twitter, quinzaine : les abonnés OF des trackings du registre (Emy
         # et sa variante Seren additionnées), plus leurs visites
@@ -2156,6 +2181,8 @@ def _fichier_alltime(gid: Optional[str] = None, mesure: Optional[str] = None) ->
         return DATA_DIR / "podium_alltime_tracking_abonnes.json"
     if _source(gid, mesure) == "abonnes":
         return DATA_DIR / "podium_alltime_va_ig_abonnes.json"
+    if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
+        return DATA_DIR / "podium_alltime_agency_ig.json"
     return DATA_DIR / profil["alltime"] if profil.get("alltime") else ALLTIME_FICHIER
 
 
@@ -2179,6 +2206,18 @@ def alltime(gid: Optional[str] = None, mesure: Optional[str] = None) -> Dict[str
     if (cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux")
             and cache.get("format") == FORMAT_AFFICHAGE):
         return {k: int(v) for k, v in cache["totaux"].items()}
+    if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
+        # un seul fichier : « Instagram VA 12 » (Agency) et « Instagram VA
+        # 023 » (Va IG, quinzaine) ne se croisent jamais
+        import subs_va
+        totaux = dict(cache.get("totaux") or {})
+        neufs = subs_va.totaux_agency(avec_va_ig=True)
+        totaux.update(neufs)
+        if totaux:
+            safe_json.write_text(fichier, json.dumps(
+                {"jour": _aujourdhui().isoformat() if neufs else str(cache.get("jour") or ""),
+                 "totaux": totaux, "format": FORMAT_AFFICHAGE}, ensure_ascii=False, indent=2))
+        return {k: int(v) for k, v in totaux.items()}
     if _source(gid, mesure) == "abonnes":
         import subs_va
         totaux = dict(cache.get("totaux") or {})
@@ -3022,6 +3061,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         # Threads : des clics, pas des abonnements, ni « via Twitter » ni
         # « tracking » : ses clics uniques vers OnlyFans, US + UK
         abo = f'Clics **{_mesure_dite(pf)}** vers OnlyFans'
+    elif pf.get("mesure") == "agency_abonnes":
+        # Agency : des abonnés, pas des clics (« comme Twitter, aux subs »)
+        abo = f'Abonnés **tracking OF** via {pf["source"]}'
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
@@ -3185,6 +3227,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                    if p.get("mesure_subs") == "abonnes" else
                    f'Abonnés **tracking OF** · **{len(lignes)}** comptes classés\n'
                    if p.get("mesure_subs") == "tracking_abonnes" else
+                   f'Abonnés **OF + MYM** · **{len(lignes)}** comptes classés\n'
+                   if p.get("mesure_subs") == "agency_quinzaine" else
                    f'Clics **uniques {p["marche_subs"]}** · **{len(lignes)}** comptes classés\n'
                    "_US : clics uniques US + UK + Canada · GBL : clics de tous les pays_\n"
                    if p.get("us_gbl") and p.get("marche_subs") else
@@ -3248,7 +3292,7 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         else:
             # la quota GetMySocial n'explique rien quand les clics viennent
             # de MyPuls (Twitter) : les noms, alors
-            pourquoi = _quota_dit() if _source(gid) != "tracking" else ""
+            pourquoi = _quota_dit() if _source(gid) not in MESURES_MYPULS else ""
             if pourquoi:
                 # la raison, pas le mur de noms : vingt-trois lignes de VA
                 # prenaient la moitié du message sans rien expliquer
@@ -3610,7 +3654,7 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
     if abandon:
         rec["abandon"] = True
     debut, fin = dt.date.fromisoformat(saison), dt.date.fromisoformat(str(rec["fin"]))
-    if (not rec.get("pages") and not abandon and _source(gid) == "tracking"
+    if (not rec.get("pages") and not abandon and _source(gid) in MESURES_MYPULS
             and _maintenant() < dt.datetime.combine(fin + dt.timedelta(days=1),
                                                     dt.time(RATTRAPAGE_MYPULS_H))):
         # figée à 00h10, elle aurait gardé pour toujours les chiffres du
@@ -3865,7 +3909,9 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
                 gid: Optional[str] = None) -> Dict[str, Any]:
     """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
     lignes = cl["lignes"]
-    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · clics **{_mesure_dite(_profil(gid))}** '
+    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · '
+         + ("abonnés **tracking OF**" if _profil(gid).get("mesure") == "agency_abonnes"
+            else f'clics **{_mesure_dite(_profil(gid))}**') + ' '
          f'· **{len(lignes)}** comptes suivis', ""]
     for i in range(3):
         x = lignes[i] if i < len(lignes) else None
@@ -3907,7 +3953,8 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     d = _etat()
     vivants = d.setdefault("bonus", {})
     garde = vivants.get(gid) or {}
-    salon = _salon(gid, _config().get("salon_bonus") or SALON_BONUS)
+    salon = _salon(gid, _config().get("salon_bonus") or _profil(gid).get("salon_bonus")
+                   or SALON_BONUS)
     if not salon:
         print(f"[podium] salon {SALON_BONUS} introuvable sur {gid}", flush=True)
         return ""
@@ -3932,7 +3979,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if code != 200 or not rep.get("id"):
         print(f"[podium] envoi bonus refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
-    if mid and str(garde.get("jour") or "") < j.isoformat() and _source(gid) == "tracking":
+    if mid and str(garde.get("jour") or "") < j.isoformat() and _source(gid) in MESURES_MYPULS:
         # le bonus d'hier, à compléter demain matin (voir _bonus_veille)
         d.setdefault("bonus_veille", {})[gid] = {"jour": str(garde["jour"]), "message": mid}
     vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time()}
@@ -3999,7 +4046,7 @@ def _salon(gid: str, voulu: str = "") -> str:
     code, rep = _api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(rep, list):
         return ""
-    voulu = voulu or _config().get("salon") or SALON_PODIUM
+    voulu = voulu or _config().get("salon") or _profil(gid).get("salon_podium") or SALON_PODIUM
     for x in rep:
         if x.get("name") == voulu:
             return str(x["id"])
@@ -4641,9 +4688,11 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
     """
     snap = (fg.get("primes_attente") or {}).get("cl") or {}
     note = ""
-    if _source(gid) == "tracking":
+    if _source(gid) in MESURES_MYPULS:
         # Twitter : ses propres VA manquaient (pas de VA US mêlés ici). Le
-        # relevé de la semaine est refait, au plus une fois l'heure
+        # relevé de la semaine est refait, au plus une fois l'heure. Agency
+        # pareil, sans plafond : ses VA sont comptés en abonnés, et le
+        # plafond se lit au registre de Twitter (_plafonds_illisibles)
         t = time.time()
         if 0 <= t - float(fg.get("essai_tw") or 0) < 3600:
             return
@@ -4656,7 +4705,8 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
             # libérées quand aucun VA sans relevé ne peut entrer dans le top 3
             # (propriétaire, 21/10/2026 : « garder le pool US », libérer dès
             # que c'est sûr) : son plafond sous le 3e, strictement
-            plafonds = _plafonds_illisibles(cl2, debut, fin)
+            plafonds = (_plafonds_illisibles(cl2, debut, fin)
+                        if _source(gid) == "tracking" else None)
             seuil = (int(cl2["lignes"][len(PRIMES) - 1]["clics"])
                      if len(cl2["lignes"]) >= len(PRIMES) else 0)
             if plafonds is None or not seuil or max(plafonds.values()) >= seuil:
@@ -4867,7 +4917,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     # ne rend pas encore, lien partagé à corriger) et a pu être dans le top 3.
     # Les annonces privées attendent un relevé complet, relu toutes les heures
     # ce lundi (_primes_retenues) ; le podium dit déjà « à confirmer ».
-    manque_tw = list(cl["illisibles"]) if _source(gid) == "tracking" else []
+    manque_tw = list(cl["illisibles"]) if _source(gid) in MESURES_MYPULS else []
     if manque_tw and not manque_us:
         d["figes"][gid][debut.isoformat()]["primes_attente"] = {"cl": _instantane(cl, fin)}
         d["figes"][gid][debut.isoformat()]["essai_tw"] = time.time()
@@ -5202,6 +5252,10 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
     Va IG (« quinzaine_va_ig ») : au libellé entier, « Threads 61 » →
     pseudo, « Threads VA 023 » → « pseudo (Amelia VA 44 · Va IG) ». Ailleurs :
     _noms_va, au numéro."""
+    if str(gid) == AGENCY_IG_ID:
+        # Agency : au libellé entier, ses VA et ceux de Va IG (« 0nn »)
+        import subs_va
+        return subs_va.noms_agency()
     noms = _noms_va(gid)
     pf = _profil(gid)
     if not pf.get("quinzaine_va_ig"):

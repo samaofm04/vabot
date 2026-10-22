@@ -495,3 +495,110 @@ def pseudos_va_ig(debut: dt.date, fin: dt.date) -> List[Dict[str, Any]]:
         out.append({"instagram": table.get(k), "pseudo": e.get("pseudo", ""), "nom": nom,
                     "subs": None})
     return out
+
+
+# ─── Agency VA INSTAGRAM : ses classements aux abonnés ───────────────────
+# Propriétaire, 22/10/2026 : podium, bonus, quinzaine et primes « comme
+# Twitter », AUX SUBS (« Instagram VA 12 — 56 subs · 🌐 56 all-time »), puis
+# « mettre les stats de Instagram aussi avec le 0 devant » : les VA de Va IG
+# (FR) rejoignent la QUINZAINE d'Agency en « Instagram VA 023 » (leur numéro
+# Instagram sur trois chiffres, comme « Threads VA 023 » à Threads), à leurs
+# abonnés OF + MYM. La semaine et le bonus, qui paient, restent aux VA
+# d'Agency (question des primes posée au propriétaire, défaut : rien pour
+# eux). Deux chiffres = Agency, trois avec un 0 devant = Va IG.
+def libelle_agency(n: Any) -> str:
+    return f"Instagram VA {int(n)}"
+
+
+def libelle_va_ig_agency(n: Any) -> str:
+    return f"Instagram VA 0{int(n):02d}"
+
+
+def entites_agency() -> Dict[str, Dict[str, Any]]:
+    """{uid : {nom « Instagram VA 12 », numero, pseudo, uid, trackings}} d'après
+    les fiches liens_va d'Agency. Un lien coupé (VA parti) n'y est pas ; un VA
+    sans tracking non plus (rien à compter, et pas un zéro inventé)."""
+    import liens_va
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle, f in sorted((liens_va._etat().get("liens") or {}).items()):
+        if not cle.startswith(AGENCY_IG_ID + ":") or not isinstance(f, dict):
+            continue
+        n, t = f.get("numero"), str(f.get("tracking") or "")
+        if f.get("actif") is False or not str(n or "").isdigit() or not t:
+            continue
+        uid = cle.split(":", 1)[1]
+        out[uid] = {"nom": libelle_agency(n), "numero": int(n), "uid": uid,
+                    "pseudo": str(f.get("pseudo") or ""), "trackings": [("of", t)]}
+    return out
+
+
+def _va_ig_pour_agency() -> Dict[str, Tuple[str, Dict[str, Any]]]:
+    """{« Amelia VA 3 » : (« Instagram VA 023 », entité)} : les VA de Va IG
+    présents (pas partis, lien en service : podium_discord._entites_va_ig),
+    numérotés comme à Threads (numeros_instagram)."""
+    import podium_discord as pod
+    presents = set(pod._entites_va_ig())
+    ents = {k: e for k, e in entites_va_ig().items() if k in presents}
+    table = pod.numeros_instagram(set(ents))
+    return {e["nom"]: (libelle_va_ig_agency(table[k]), dict(e, cle=k))
+            for k, e in ents.items() if k in table}
+
+
+def classement_agency(debut: dt.date, fin: dt.date, avec_va_ig: bool = False) -> Dict[str, Any]:
+    """La forme de podium_discord.classement(), en abonnés (« clics » porte les
+    abonnés de la période) : les VA d'Agency, et avec `avec_va_ig` ceux de Va
+    IG en « Instagram VA 0nn » (marqués « va_ig »). Un VA illisible est dit,
+    jamais compté zéro."""
+    d0, d1 = debut.isoformat(), fin.isoformat()
+    ents = entites_agency()
+    lignes: List[Dict[str, Any]] = []
+    illisibles: List[str] = []
+    for _uid, e in sorted(ents.items(), key=lambda kv: kv[1]["numero"]):
+        n = _subs_entite(e, d0, d1)
+        if n is None:
+            illisibles.append(e["nom"])
+            continue
+        lignes.append({"va": e["nom"], "numero": e["numero"], "clics": n,
+                       "liens": len(e["trackings"]), "spam": False, "model": ""})
+    nb_ig = 0
+    if avec_va_ig:
+        ig = _va_ig_pour_agency()
+        nb_ig = len(ig)
+        for _nom, (lib, e) in sorted(ig.items()):
+            n = _subs_entite(e, d0, d1)
+            if n is None:
+                illisibles.append(lib)
+                continue
+            lignes.append({"va": lib, "numero": int(lib.rsplit(" ", 1)[1]), "clics": n,
+                           "liens": len(e["trackings"]), "spam": False, "model": e["model"],
+                           "va_ig": True})
+    lignes.sort(key=lambda x: (-x["clics"], x["va"]))
+    return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": True,
+            "entites": len(ents) + nb_ig, "liens": len(ents), "sans_numero": [],
+            "gabarits": [], "source": "agency_abonnes", "erreur": ""}
+
+
+def totaux_agency(avec_va_ig: bool = False) -> Dict[str, int]:
+    """{« Instagram VA 12 » : abonnés depuis la création de son tracking}, et
+    ceux de Va IG avec `avec_va_ig` (« Instagram VA 023 »). Un illisible est
+    laissé de côté : l'ancien total reste (podium_discord.alltime)."""
+    out: Dict[str, int] = {}
+    for _uid, e in sorted(entites_agency().items()):
+        total = subs_depuis_toujours(e["trackings"], e["pseudo"])
+        if total is not None:
+            out[e["nom"]] = total
+    if avec_va_ig:
+        for _nom, (lib, e) in sorted(_va_ig_pour_agency().items()):
+            total = subs_depuis_toujours(e["trackings"], e["pseudo"]) if e["trackings"] else 0
+            if total is not None:
+                out[lib] = total
+    return out
+
+
+def noms_agency() -> Dict[str, str]:
+    """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 12 » → son
+    pseudo ; « Instagram VA 023 » → « pseudo (Amelia VA 3 · Va IG) »."""
+    out = {e["nom"]: e["pseudo"] or "?" for e in entites_agency().values()}
+    for nom, (lib, e) in _va_ig_pour_agency().items():
+        out[lib] = f'{e.get("pseudo") or "?"} ({nom} · Va IG)'
+    return out

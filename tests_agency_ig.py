@@ -244,6 +244,66 @@ try:
           == [("POST", "/channels/c1/messages"), ("PUT", "/channels/c1/pins/msg1")], appels)
     for k, v in _sauve_tk.items():
         setattr(tk, k, v)
+
+    # ── classements aux abonnés ──────────────────────────────────────────
+    _sauve_sv = {k: getattr(sv, k) for k in ("_subs_entite", "entites_va_ig", "subs_depuis_toujours")}
+    _sauve_pd = {k: getattr(pod, k) for k in ("_entites_va_ig", "numeros_instagram")}
+    monde(etat={"liens": {
+        f"{AG}:u1": {"pseudo": "zaid014787", "numero": 12, "link_id": "lnk_a",
+                     "tracking": "https://onlyfans.com/emy.brw/c300"},
+        f"{AG}:u2": {"pseudo": "mike047639", "numero": 7, "link_id": "lnk_b",
+                     "tracking": "https://onlyfans.com/emy.brw/c301"},
+        f"{AG}:u3": {"pseudo": "parti", "numero": 9, "link_id": "lnk_c", "actif": False,
+                     "tracking": "https://onlyfans.com/emy.brw/c302"},
+        f"{AG}:u4": {"pseudo": "sanslien", "numero": 5}}})
+    SUBS = {"https://onlyfans.com/emy.brw/c300": 56, "https://onlyfans.com/emy.brw/c301": None,
+            "https://onlyfans.com/amelia/c9": 4}
+    sv._subs_entite = lambda e, d0, d1: SUBS.get(e["trackings"][0][1])
+    sv.entites_va_ig = lambda: {"amelia:3": {"nom": "Amelia VA 3", "model": "amelia", "numero": 3,
+                                             "pseudo": "priscah",
+                                             "trackings": [("of", "https://onlyfans.com/amelia/c9")]}}
+    pod._entites_va_ig = lambda: {"amelia:3": {"ids": ["l"], "pseudo": "priscah"}}
+    pod.numeros_instagram = lambda vues=(), eviter=(): {"amelia:3": 23}
+    J1, J2 = dt.date(2026, 10, 19), dt.date(2026, 10, 25)
+    cl = pod.classement(J1, J2, gid=AG)
+    check("semaine Agency : ses VA en « Instagram VA n », aux abonnés ; lien coupé et sans lien absents",
+          [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Instagram VA 12", 56)]
+          and cl["illisibles"] == ["Instagram VA 7"], cl)
+    clq = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
+    check("quinzaine Agency : + les VA de Va IG en « Instagram VA 023 » (0 devant, 3 chiffres)",
+          [(x["va"], x["clics"]) for x in clq["lignes"]]
+          == [("Instagram VA 12", 56), ("Instagram VA 023", 4)]
+          and clq["lignes"][1].get("va_ig"), clq)
+    pages = pod.pages_subs(clq, J1, J2, {"Instagram VA 12": 70, "Instagram VA 023": 2}, gid=AG)
+    desc = pages[0]["description"]
+    check("quinzaine : « Instagram VA 12 — 56 subs · 🌐 70 all-time », abonnés OF + MYM",
+          "**Instagram VA 12** — **56** subs · 🌐 70 all-time" in desc
+          and "**Instagram VA 023** — **4** subs · 🌐 4 all-time" in desc
+          and "Abonnés **OF + MYM**" in desc and "$" not in desc, desc[:600])
+    emb = pod.embed_podium(cl, J1, J2, gid=AG, en_cours=True)
+    check("podium de la semaine : « Abonnés tracking OF via Instagram », en subs",
+          "Abonnés **tracking OF** via Instagram" in emb["description"]
+          and "**Instagram VA 12**" in emb["description"] and "clics **" not in emb["description"],
+          emb["description"][:500])
+    bon = pod.embed_bonus(cl, J2, AG)
+    check("bonus du jour : « abonnés tracking OF »", "abonnés **tracking OF**" in bon["description"],
+          bon["description"][:300])
+    noms = pod._noms_libelles(AG)
+    check("👀 Pseudos : les VA d'Agency au pseudo, ceux de Va IG avec leur model",
+          noms.get("Instagram VA 12") == "zaid014787"
+          and noms.get("Instagram VA 023") == "priscah (Amelia VA 3 · Va IG)", noms)
+    _sauve_partis = tk.partis
+    tk.partis = lambda g: {"u1": 1792000000} if str(g) == AG else {}
+    check("un VA d'Agency parti sort du classement (clé « Instagram VA 12 »)",
+          "Instagram VA 12" in pod._partis(AG)
+          and [x["va"] for x in pod.classement(J1, J2, gid=AG)["lignes"]] == [], pod._partis(AG))
+    tk.partis = _sauve_partis
+    check("les salons d'Agency : les siens, pas ceux de Twitter",
+          pod._profil(AG)["salon_podium"] != pod.SALON_PODIUM and pod._nom_salon_subs(AG) == "📊-mes-stats")
+    for k, v in _sauve_sv.items():
+        setattr(sv, k, v)
+    for k, v in _sauve_pd.items():
+        setattr(pod, k, v)
 finally:
     for k, v in _SAUVE_LV.items():
         setattr(lv, k, v)
