@@ -28,6 +28,7 @@ GID = "1488331963575177247"                      # Agency VA INSTAGRAM
 SALON_ARRIVEES = "1562974536662523954"           # 🚪・arrivées-sur-le-serveur
 SALON_DEPARTS = "1562974549157351474"            # 👋・départs-et-sanctions
 SALON_VERIF = "1562974555423776848"              # 🔐・vérification
+SALON_VERIFIES = "1562974542953975978"           # ✅・membres-vérifiés
 DATA_DIR = Path(__file__).resolve().parent / "data"
 FICHIER = DATA_DIR / "agency_accueil.json"
 #: au plus autant d'annonces par tour : un afflux (ou une liste à moitié
@@ -35,6 +36,9 @@ FICHIER = DATA_DIR / "agency_accueil.json"
 MAX_ANNONCES = 20
 #: le panneau est revérifié au plus une fois l'heure (un GET de 20 messages)
 PANNEAU_S = 3600
+#: l'historique (rattraper) : au plus autant de messages par tour, pour ne
+#: pas retenir le tour des tickets plusieurs minutes d'affilée
+RATTRAPAGE_PAR_TOUR = 40
 
 
 def _api(methode: str, chemin: str, **kw):
@@ -85,6 +89,56 @@ def _nom(m: Dict[str, Any]) -> str:
     return str(m.get("nick") or u.get("global_name") or u.get("username") or "?")
 
 
+def _date(iso: str) -> str:
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(str(iso or "")) >= 10 else "?"
+
+
+def rattraper(d: Dict[str, Any], actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
+    """L'historique, une fois : propriétaire, 23/10/2026, devant la première
+    arrivée annoncée : « remets les mecs ici et tout » — comme sur Twitter, où
+    chaque membre a sa ligne. Chaque membre déjà là reçoit la sienne dans
+    🚪・arrivées (date d'arrivée, vérifié ou non), dans l'ordre d'arrivée, et
+    chaque vérifié sa bienvenue dans ✅・membres-vérifiés. Sans mention : ces
+    gens sont là depuis des semaines. RATTRAPAGE_PAR_TOUR messages par tour ;
+    rend le nombre posté. Fini quand il n'y a plus rien à poster (« rattrape »)."""
+    connus = d.setdefault("membres", {})
+    n = 0
+    for uid, m in sorted(actuels.items(), key=lambda kv: str(kv[1].get("joined_at") or "")):
+        if n >= RATTRAPAGE_PAR_TOUR:
+            return n
+        f = connus.setdefault(uid, {"joined_at": m.get("joined_at") or ""})
+        verifie = bool(role_verifie and role_verifie in (m.get("roles") or []))
+        if not f.get("arrivee"):
+            embed = {"title": "🚪 Arrivée sur Agency VA INSTAGRAM",
+                     "description": (f"<@{uid}> a rejoint le serveur le {_date(m.get('joined_at'))}.\n"
+                                     + ("✅ Vérification validée." if verifie else
+                                        f"⏳ **Pas encore vérifié.** La vérification se fait dans "
+                                        f"<#{SALON_VERIF}>.")),
+                     "color": 0x5865F2,
+                     "footer": {"text": "Agency VA INSTAGRAM • Arrivées sur le serveur"}}
+            mid = _poster(SALON_ARRIVEES, embed, f"{GID}:{uid}:{m.get('joined_at')}:arrivee")
+            if not mid:
+                return n
+            f["arrivee"] = mid
+            n += 1
+            _ecrire(d)
+        if verifie and not f.get("bienvenue"):
+            if n >= RATTRAPAGE_PAR_TOUR:
+                return n
+            embed = {"title": "Bienvenue sur Agency VA INSTAGRAM !",
+                     "description": f"<@{uid}>, ta vérification est validée.",
+                     "color": 0x22C55E}
+            mid = _poster(SALON_VERIFIES, embed, f"{GID}:{uid}:{m.get('joined_at')}:verifie")
+            if not mid:
+                return n
+            f["bienvenue"] = mid
+            n += 1
+            _ecrire(d)
+    d["rattrape"] = int(time.time())
+    _ecrire(d)
+    return n
+
+
 def surveiller() -> Dict[str, Any]:
     """Un tour : le panneau, puis les arrivées et les départs. Rend le bilan."""
     bilan: Dict[str, Any] = {"arrivees": 0, "departs": 0, "panneau": ""}
@@ -111,6 +165,11 @@ def surveiller() -> Dict[str, Any]:
     import verif_discord as vd
     role_verifie = (vd.serveur(GID) or {}).get("role_verifie")
     neufs = [u for u in actuels if u not in connus]
+    if not d.get("rattrape"):
+        bilan["rattrapage"] = rattraper(d, {u: m for u, m in actuels.items() if u in connus},
+                                        role_verifie)
+        if bilan["rattrapage"]:
+            print(f"[agency] historique : {bilan['rattrapage']} message(s) posté(s)", flush=True)
     partis = [u for u in connus if u not in actuels]
     for uid in neufs[:MAX_ANNONCES]:
         m = actuels[uid]

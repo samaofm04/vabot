@@ -406,6 +406,24 @@ try:
     b1 = aa.surveiller()
     check("premier passage : les membres déjà là sont notés SANS annonce, le panneau est posé",
           b1.get("initialise") == 2 and not postes and panneaux == [AG], (b1, postes))
+    # l'historique (« remets les mecs ici ») : une ligne par membre déjà là, dans
+    # l'ordre d'arrivée, et la bienvenue des vérifiés ; par paquets, une seule fois
+    LISTE["m"][1]["roles"] = [vd2.serveur(AG)["role_verifie"]]
+    _paquet = aa.RATTRAPAGE_PAR_TOUR
+    aa.RATTRAPAGE_PAR_TOUR = 2
+    bh = aa.surveiller()
+    check("historique, 1er paquet (2 messages) : arrivée de 1 puis de 2, dans l'ordre d'arrivée",
+          bh.get("rattrapage") == 2 and [p_[1] for p_ in postes] == ["🚪 Arrivée sur Agency VA INSTAGRAM"] * 2
+          and not json.loads(aa.FICHIER.read_text()).get("rattrape"), postes)
+    bh2 = aa.surveiller()
+    check("… 2e paquet : la bienvenue du vérifié dans ✅ membres-vérifiés, puis c'est fini",
+          bh2.get("rattrapage") == 1 and postes[2][0].endswith(f"/{aa.SALON_VERIFIES}/messages")
+          and json.loads(aa.FICHIER.read_text()).get("rattrape"), postes)
+    aa.RATTRAPAGE_PAR_TOUR = _paquet
+    postes.clear()
+    LISTE["m"][1]["roles"] = []
+    aa.surveiller()
+    check("… ensuite plus rien n'est reposté", not postes, postes)
     LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "2"] + [
         {"user": {"id": "3"}, "joined_at": "c", "roles": []}]
     b2 = aa.surveiller()
