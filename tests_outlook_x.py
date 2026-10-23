@@ -244,10 +244,20 @@ try:
     tickets_discord.ETAT_FICHIER.write_text(json.dumps({"tickets": {
         f"{GID}:{VA}": {"salon": "T1"}, f"{GID}:{VA2}": {"salon": "T2"}}}), encoding="utf-8")
 
+    MOI_TW = vd.bot_du_serveur(GID)["app_id"]
+
     def api_carte(methode, chemin, **kw):
         APPELS.append((methode, chemin, kw))
         if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages"):
             return 200, {"id": "carte-" + chemin.split("/")[2]}
+        morceaux = chemin.split("/")
+        if methode == "GET" and len(morceaux) == 5 and morceaux[1] == "channels" \
+                and morceaux[3] == "messages" and "?" not in chemin:
+            if morceaux[4].startswith("accueil"):
+                return 200, {"id": morceaux[4], "flags": 0, "author": {"id": MOI_TW},
+                             "components": [{"type": 1, "components": [{"type": 2, "custom_id": "mailx:menu"}]}]}
+            return 200, {"id": morceaux[4], "flags": ox.nx.V2, "author": {"id": MOI_TW},
+                         "components": ox.vue_carte(VA, GID)}
         if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
             return 200, []
         return faux_api(methode, chemin, **kw)
@@ -331,6 +341,16 @@ try:
                                         "permissions": str(0x8)}, message={"flags": 64}))
     check("menu : le « 📧 Outlook » du menu privé (message classique) ouvre ses adresses à part",
           r["type"] == 4 and r["data"]["flags"] == ox.nx.V2 | ox.nx.EPHEMERE, r)
+    check("carte Outlook : l'accueil du ticket (« mailx:menu ») n'est pas une carte",
+          not ox.est_carte({"flags": 0, "author": {"id": MOI_TW},
+                            "components": [{"type": 1, "components": [{"type": 2, "custom_id": "mailx:menu"}]}]}))
+    h = json.loads(ox.FICHIER.read_text(encoding="utf-8"))
+    h["cartes"]["T1"]["message"] = "accueil-T1"
+    ox.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    ox.ramener_carte(GID, VA, "T1")
+    check("carte Outlook : registre faux — l'accueil n'est JAMAIS effacé",
+          not [1 for m, ch, kw in APPELS if m == "DELETE" and "accueil" in ch], APPELS)
     APPELS.clear()
     print(ox.generaliser_cartes(GID))
     pan = [kw["json"] for m, ch, kw in APPELS if ch.startswith(f"/channels/{SALON}/messages")

@@ -1188,16 +1188,16 @@ def ramener_carte(gid: str, uid: str, salon: str) -> str:
         mid = str(rep["id"])
         with _VERROU:
             d = _lire()
-            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time()}
+            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time(),
+                                  "controle": CONTROLE_CARTE}
             _ecrire(d)
         _retenir_carte(cle, salon, mid)
         # Un code arrivé pendant le déplacement est allé sur l'ancienne carte :
         # la nouvelle est redessinée une fois, à jour.
         _redessiner(cle, conf, _vue_carte(cle, conf))
         if ancien and ancien != mid:
-            code, rep = vd.api("DELETE", f"/channels/{salon}/messages/{ancien}")
-            if code not in (204, 404):
-                _log(f"menu : ancienne carte {ancien} non retirée de {salon} : HTTP {code}")
+            moi = vd.bot_du_serveur(gid)["app_id"]
+            _retirer_ancienne(salon, ancien, lambda m: est_carte(m, moi))
     _log(f"menu : carte de {uid} ramenée en bas de {salon}")
     return "ramenee"
 
@@ -1306,16 +1306,47 @@ def _tickets_du_serveur(gid: str) -> Dict[str, str]:
     return out
 
 
+#: Version du contrôle des cartes au registre : une entrée qui ne l'a pas est
+#: relue au tour suivant. Le 23/10/2026, l'accueil d'un ticket — qui porte
+#: désormais le bouton « 📱 Numéro » (numx:menu) — avait été pris pour la
+#: carte : un clic aurait SUPPRIMÉ l'accueil en « déplaçant la carte ».
+CONTROLE_CARTE = 2
+
+
+def est_carte(m: Any, moi: Optional[str] = None) -> bool:
+    """Ce message est-il une carte numéro ? Un message V2 de ce bot, avec un
+    bouton de carte — jamais un message classique (l'accueil du ticket, le
+    menu reposé) ni le seul « numx:menu »."""
+    if not isinstance(m, dict) or not int(m.get("flags") or 0) & V2:
+        return False
+    if moi is not None and str((m.get("author") or {}).get("id")) != str(moi):
+        return False
+    return any(c.startswith(PREFIXE) and c != PREFIXE + "menu" for c in _ids(m.get("components")))
+
+
 def _carte_dans(salon: str, moi: str) -> str:
     """La carte de ce bot déjà dans le salon (registre perdu), ou « »."""
     code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
     if code != 200 or not isinstance(ms, list):
         return ""
     for m in ms:
-        if str((m.get("author") or {}).get("id")) == str(moi) and \
-                any(c.startswith(PREFIXE) for c in _ids(m.get("components"))):
+        if est_carte(m, moi):
             return str(m["id"])
     return ""
+
+
+def _retirer_ancienne(salon: str, ancien: str, est) -> None:
+    """Retire l'ancienne carte — seulement si c'est BIEN une carte : un
+    registre faux ne doit jamais faire effacer l'accueil d'un ticket."""
+    code, m = vd.api("GET", f"/channels/{salon}/messages/{ancien}")
+    if code == 404:
+        return
+    if code != 200 or not est(m):
+        _log(f"menu : le message {ancien} de {salon} n'est pas une carte (HTTP {code}) : laissé")
+        return
+    code, _r = vd.api("DELETE", f"/channels/{salon}/messages/{ancien}")
+    if code not in (204, 404):
+        _log(f"menu : ancienne carte {ancien} non retirée de {salon} : HTTP {code}")
 
 
 def poser_cartes(gid: str, seulement: Optional[str] = None,
@@ -1333,18 +1364,22 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
                 continue
             c = _lire()["cartes"].get(salon)
             if isinstance(c, dict) and c.get("uid") == uid:
-                if now - float(c.get("vu_le") or 0) < CARTE_REVOIR_SEC:
+                if now - float(c.get("vu_le") or 0) < CARTE_REVOIR_SEC and \
+                        c.get("controle") == CONTROLE_CARTE:
                     bilan["deja"] += 1
                     continue
-                code, _m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
-                if code == 200:
+                code, m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
+                if code == 200 and est_carte(m, moi):
                     with _VERROU:
                         d = _lire()
-                        d["cartes"][salon] = dict(c, vu_le=now)
+                        d["cartes"][salon] = dict(c, vu_le=now, controle=CONTROLE_CARTE)
                         _ecrire(d)
                     bilan["deja"] += 1
                     continue
-                if code != 404:
+                if code == 200:
+                    _log(f"registre : le message {c.get('message')} de {salon} n'est pas une "
+                         f"carte (accueil ?) — une vraie carte va être posée")
+                elif code != 404:
                     bilan["echecs"].append((salon, f"relecture HTTP {code}"))
                     continue
             cle = f"{gid}:{uid}"
@@ -1368,7 +1403,8 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
                 bilan["posees"].append(salon)
             with _VERROU:
                 d = _lire()
-                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now}
+                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now,
+                                      "controle": CONTROLE_CARTE}
                 _ecrire(d)
             # Un numéro déjà en cours (carte privée d'avant) : la suite, son
             # code compris, s'écrit désormais dans la carte du ticket.

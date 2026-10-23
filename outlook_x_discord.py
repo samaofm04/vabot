@@ -300,10 +300,19 @@ def _carte_dans(salon: str, moi: str) -> str:
     if code != 200 or not isinstance(ms, list):
         return ""
     for m in ms:
-        if str((m.get("author") or {}).get("id")) == str(moi) and \
-                PREFIXE + "prendre" in nx._ids(m.get("components")):
+        if est_carte(m, moi):
             return str(m["id"])
     return ""
+
+
+def est_carte(m: Any, moi: Optional[str] = None) -> bool:
+    """Une carte Outlook : V2, de ce bot, avec « Prendre une adresse » — pas
+    l'accueil du ticket (« mailx:menu »), ni un dépôt adresse / mot de passe."""
+    if not isinstance(m, dict) or not int(m.get("flags") or 0) & nx.V2:
+        return False
+    if moi is not None and str((m.get("author") or {}).get("id")) != str(moi):
+        return False
+    return PREFIXE + "prendre" in nx._ids(m.get("components"))
 
 
 def poser_cartes(gid: str, seulement: Optional[str] = None,
@@ -318,18 +327,22 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
                 continue
             c = _lire()["cartes"].get(salon)
             if isinstance(c, dict) and c.get("uid") == uid:
-                if now - float(c.get("vu_le") or 0) < nx.CARTE_REVOIR_SEC:
+                if now - float(c.get("vu_le") or 0) < nx.CARTE_REVOIR_SEC and \
+                        c.get("controle") == nx.CONTROLE_CARTE:
                     bilan["deja"] += 1
                     continue
-                code, _m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
-                if code == 200:
+                code, m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
+                if code == 200 and est_carte(m, moi):
                     with _VERROU:
                         d = _lire()
-                        d["cartes"][salon] = dict(c, vu_le=now)
+                        d["cartes"][salon] = dict(c, vu_le=now, controle=nx.CONTROLE_CARTE)
                         _ecrire(d)
                     bilan["deja"] += 1
                     continue
-                if code != 404:
+                if code == 200:
+                    _log(f"registre : le message {c.get('message')} de {salon} n'est pas une "
+                         f"carte Outlook — une vraie carte va être posée")
+                elif code != 404:
                     bilan["echecs"].append((salon, f"relecture HTTP {code}"))
                     continue
             code, _m = vd.api("GET", f"/guilds/{gid}/members/{uid}")
@@ -350,7 +363,8 @@ def poser_cartes(gid: str, seulement: Optional[str] = None,
                 bilan["posees"].append(salon)
             with _VERROU:
                 d = _lire()
-                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now}
+                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now,
+                                      "controle": nx.CONTROLE_CARTE}
                 _ecrire(d)
     for quoi in ("posees", "retrouvees"):
         if bilan[quoi]:
@@ -377,12 +391,12 @@ def ramener_carte(gid: str, uid: str, salon: str) -> str:
         mid = str(rep["id"])
         with _VERROU:
             d = _lire()
-            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time()}
+            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time(),
+                                  "controle": nx.CONTROLE_CARTE}
             _ecrire(d)
         if ancien and ancien != mid:
-            code, _r = vd.api("DELETE", f"/channels/{salon}/messages/{ancien}")
-            if code not in (204, 404):
-                _log(f"menu : ancienne carte Outlook {ancien} non retirée de {salon} : HTTP {code}")
+            moi = vd.bot_du_serveur(gid)["app_id"]
+            nx._retirer_ancienne(salon, ancien, lambda m: est_carte(m, moi))
     _log(f"menu : carte Outlook de {uid} ramenée en bas de {salon}")
     return "ramenee"
 

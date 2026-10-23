@@ -655,11 +655,23 @@ try:
         f"{TH}:444444444444444444": {"salon": "T3"},
         f"{GID}:{VA}": {"salon": "TW1"}}}), encoding="utf-8")
 
+    MOI_TH = vd.bot_du_serveur(TH)["app_id"]
+
     def api_cartes(methode, chemin, **kw):
         APPELS.append((methode, chemin, kw))
         if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages",
                                             "/channels/TW1/messages"):
             return 200, {"id": "carte-" + chemin.split("/")[2]}
+        morceaux = chemin.split("/")
+        if methode == "GET" and len(morceaux) == 5 and morceaux[1] == "channels" \
+                and morceaux[3] == "messages" and "?" not in chemin:
+            mid = morceaux[4]
+            if mid.startswith("accueil"):          # l'accueil du ticket : message classique
+                return 200, {"id": mid, "flags": 0, "author": {"id": MOI_TH},
+                             "components": [{"type": 1, "components": [
+                                 {"type": 2, "custom_id": "numx:menu"}]}]}
+            return 200, {"id": mid, "flags": nx.V2, "author": {"id": MOI_TH},
+                         "components": nx.vue_panneau(nx.SERVEURS[TH])}
         if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
             return 200, []
         if methode == "GET" and chemin == f"/guilds/{TH}/members/444444444444444444":
@@ -710,6 +722,29 @@ try:
     check("ticket : un numéro pris par le manager dans le ticket d'un VA est au VA (quota, historique)",
           nx._actif(f"{TH}:{VA2}") is not None and nx._actif(f"{TH}:{CHEF}") is None
           and num._histo_lire()[-1]["par"] == VA2, num._histo_lire()[-1])
+    # Régression du 23/10/2026 : l'accueil du ticket (bouton « 📱 Numéro » =
+    # numx:menu) pris pour la carte. Il n'est jamais retrouvé, jamais effacé.
+    check("carte : l'accueil d'un ticket (classique, « numx:menu ») n'est pas une carte",
+          not nx.est_carte({"id": "a", "flags": 0, "author": {"id": MOI_TH},
+                            "components": [{"type": 1, "components": [{"type": 2, "custom_id": "numx:menu"}]}]})
+          and nx.est_carte({"id": "c", "flags": nx.V2, "author": {"id": MOI_TH},
+                            "components": nx.vue_panneau(nx.SERVEURS[TH])}, MOI_TH))
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["cartes"]["T2"] = {"message": "accueil-T2", "uid": VA2, "gid": TH, "vu_le": time.time()}
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    b = nx.poser_cartes(TH, seulement="T2")
+    check("registre faux (l'accueil) : relu, une vraie carte est posée, l'accueil n'est pas touché",
+          b["posees"] == ["T2"] and nx._lire()["cartes"]["T2"]["message"] == "carte-T2"
+          and not [1 for m, ch, kw in APPELS if m in ("DELETE", "PATCH") and "accueil" in ch], (b, APPELS))
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["cartes"]["T2"]["message"] = "accueil-T2"
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    nx.ramener_carte(TH, VA2, "T2")
+    check("ramener_carte avec un registre faux : l'accueil n'est JAMAIS effacé",
+          not [1 for m, ch, kw in APPELS if m == "DELETE" and "accueil" in ch], APPELS)
+
     # 20 min : la carte redevient vide, code reçu ou non
     h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
     h["actifs"][f"{TH}:{VA2}"]["pris_le"] = int(time.time()) - nx.DUREE_NUMERO_SEC - 120
