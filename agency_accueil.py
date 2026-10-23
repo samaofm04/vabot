@@ -50,6 +50,11 @@ SALON_DEPARTS = "1562974549157351474"            # 👋・départs-et-sanctions
 SALON_VERIF = "1562974555423776848"              # 🔐・vérification
 SALON_VERIFIES = "1562974542953975978"           # ✅・membres-vérifiés
 SALON_PARRAINAGE = "1531696385420820540"         # 🤝・parrainage
+# la carte de bienvenue : les premiers pas, comme celle de Twitter
+# (entretien_visuel.EQUIPES, fichier du VPS hors git)
+SALON_FORMATION = "1531698896454287390"          # 🎓・formation
+SALON_PAIEMENTS = "1531696033116065963"          # 💳・paiements
+SALON_DISCUSSIONS = "1531703501296504962"        # 💬・discussions
 DATA_DIR = Path(__file__).resolve().parent / "data"
 FICHIER = DATA_DIR / "agency_accueil.json"
 #: au plus autant d'annonces par tour : un afflux (ou une liste à moitié
@@ -179,11 +184,14 @@ def parrain_de(uid: str) -> str:
     return str(f.get("parrain") or "")
 
 
-def _poster(salon: str, embed: Dict[str, Any], cle: str) -> str:
+def _poster(salon: str, embed: Dict[str, Any], cle: str, mention: str = "") -> str:
+    """Sans mention, sauf `mention` (le membre accueilli, comme Twitter)."""
     nonce = hashlib.sha256(cle.encode()).hexdigest()[:24]
-    code, rep = _api("POST", f"/channels/{salon}/messages",
-                     json={"embeds": [embed], "allowed_mentions": {"parse": []},
-                           "nonce": nonce, "enforce_nonce": True})
+    corps = {"embeds": [embed], "allowed_mentions": {"parse": []}, "nonce": nonce, "enforce_nonce": True}
+    if mention:
+        corps["content"] = f"<@{mention}>"
+        corps["allowed_mentions"]["users"] = [mention]
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
     return str(rep.get("id") or "") if code in (200, 201) and isinstance(rep, dict) else ""
 
 
@@ -195,6 +203,109 @@ def _nom(m: Dict[str, Any]) -> str:
 
 def _date(iso: str) -> str:
     return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(str(iso or "")) >= 10 else "?"
+
+
+# ─── les cartes, comme Twitter (entretien_visuel.appliquer) ──────────────
+# Propriétaire, 23/10/2026, devant l'historique posté : « il n'y a pas les
+# cartes et tout comme dans Twitter » — le nom et la photo du membre en tête,
+# et pour la bienvenue ses premiers pas.
+def _avatar(uid: str, m: Dict[str, Any]) -> str:
+    u = m.get("user") or {}
+    if m.get("avatar"):
+        a = str(m["avatar"])
+        return (f"https://cdn.discordapp.com/guilds/{GID}/users/{uid}/avatars/{a}."
+                f"{'gif' if a.startswith('a_') else 'png'}?size=256")
+    if u.get("avatar"):
+        a = str(u["avatar"])
+        return f"https://cdn.discordapp.com/avatars/{uid}/{a}.{'gif' if a.startswith('a_') else 'png'}?size=256"
+    return f"https://cdn.discordapp.com/embed/avatars/{(int(uid) >> 22) % 6}.png"
+
+
+def _carte(embed: Dict[str, Any], uid: str, m: Dict[str, Any], verifie: bool) -> Dict[str, Any]:
+    # le nom affiché sur le serveur, comme la carte de Twitter (le pseudo de
+    # _nom sert à retrouver quelqu'un, pas à l'accueillir)
+    u = (m or {}).get("user") or {}
+    nom = str((m or {}).get("nick") or u.get("global_name") or u.get("username") or "Nouveau membre")
+    url = _avatar(uid, m or {})
+    embed["author"] = {"name": nom + (" • Membre vérifié" if verifie else " • Nouvelle arrivée"),
+                       "icon_url": url, "url": f"https://discord.com/users/{uid}"}
+    embed["thumbnail"] = {"url": url}
+    return embed
+
+
+def embed_arrivee(uid: str, m: Dict[str, Any], verifie: bool, historique: bool,
+                  parrain: Optional[str] = None) -> Dict[str, Any]:
+    quand = (f"a rejoint le serveur le {_date(m.get('joined_at'))}." if historique
+             else "vient de rejoindre le serveur.")
+    etat = ("✅ Vérification validée." if verifie else
+            f"⏳ **Pas encore vérifié.** La vérification se fait dans <#{SALON_VERIF}>.")
+    return _carte({"title": "🚪 " + ("Arrivée" if historique else "Nouvelle arrivée")
+                            + " sur Agency VA INSTAGRAM",
+                   "description": f"<@{uid}> {quand}\n{etat}" + (f"\nInvité par <@{parrain}>." if parrain else ""),
+                   "color": 0x5865F2,
+                   "footer": {"text": "Agency VA INSTAGRAM • Arrivées sur le serveur"}},
+                  uid, m, verifie)
+
+
+def embed_bienvenue(uid: str, m: Dict[str, Any], parrain: str = "") -> Dict[str, Any]:
+    return _carte({
+        "title": "✨ Bienvenue dans l’équipe YouLab Agency !",
+        "description": (f"<@{uid}>, ta vérification est validée.\n**Tu peux commencer avec ton équipe.**"
+                        + (f"\n\n🙏 Merci <@{parrain}> de l’avoir invité !" if parrain else "")),
+        "color": 0x34C759,
+        "fields": [
+            {"name": "🧭 TES PREMIERS PAS",
+             "value": (f"**01** · Ta formation → <#{SALON_FORMATION}>\n"
+                       f"**02** · Ta rémunération → <#{SALON_PAIEMENTS}>\n"
+                       f"**03** · Échanger avec l’équipe → <#{SALON_DISCUSSIONS}>"), "inline": False},
+            {"name": "🔒 TON ESPACE PERSONNEL",
+             "value": ("Ton lien de parrainage et le suivi de tes filleuls sont accessibles depuis "
+                       f"**Mon espace personnel** dans <#{SALON_PARRAINAGE}>."), "inline": False}],
+        "footer": {"text": "YouLab Agency • Vérification validée ✓"}}, uid, m, True)
+
+
+def _bienvenue_faite(d: Dict[str, Any], uid: str, joined_at: str) -> str:
+    """Le message de bienvenue déjà posté pour ce passage de `uid` (« »
+    sinon). Deux registres : le membre noté par le relevé, et les bienvenues
+    postées avant que le relevé ne l'ait vu — la vérification d'un arrivé de
+    la minute passe avant lui, et sans ce second registre sa note d'arrivée
+    effaçait la bienvenue (puis le tour la reposait)."""
+    f = (d.get("membres") or {}).get(uid) or {}
+    if f.get("bienvenue") and (f.get("joined_at") or "") in ("", joined_at or ""):
+        return str(f["bienvenue"])
+    b = (d.get("bienvenues") or {}).get(uid) or {}
+    return str(b.get("message") or "") if (b.get("joined_at") or "") == (joined_at or "") else ""
+
+
+def bienvenue(uid: str, m: Optional[Dict[str, Any]] = None) -> str:
+    """La carte de bienvenue d'un membre qui vient d'être vérifié, dans
+    ✅・membres-vérifiés, le membre mentionné et son parrain remercié (comme
+    Twitter). Une fois par passage sur le serveur ; rend l'identifiant du
+    message (« » si déjà faite ou refusée). Appelée par la vérification
+    (verif_discord.poster_bienvenue) et par le relevé, pour un ✅ Vérifié
+    posé à la main."""
+    uid = str(uid)
+    if m is None:
+        code, m = _api("GET", f"/guilds/{GID}/members/{uid}")
+        m = m if code == 200 and isinstance(m, dict) else {}
+    ja = str(m.get("joined_at") or "")
+    with LOCK:
+        if _bienvenue_faite(_etat(), uid, ja):
+            return ""
+    # le message hors du verrou (un clic sur « Mon espace » n'attend pas
+    # Discord) ; deux appels en même temps : le nonce n'en garde qu'un
+    mid = _poster(SALON_VERIFIES, embed_bienvenue(uid, m, parrain_de(uid)),
+                  f"{GID}:{uid}:{ja}:verifie", mention=uid)
+    if mid:
+        with LOCK:
+            d = _etat()
+            d.setdefault("bienvenues", {})[uid] = {"message": mid, "joined_at": ja, "date": int(time.time())}
+            f = (d.get("membres") or {}).get(uid)
+            if f is not None and (f.get("joined_at") or "") == ja:
+                f["bienvenue"] = mid
+                f["carte"] = 1
+            _ecrire(d)
+    return mid
 
 
 def rattraper(actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
@@ -220,24 +331,16 @@ def rattraper(actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
             verifie = bool(role_verifie and role_verifie in (m.get("roles") or []))
             if not f.get("arrivee"):
                 a_faire.append((uid, m, "arrivee", verifie))
-            if verifie and not f.get("bienvenue"):
+            if verifie and not _bienvenue_faite(d, uid, m.get("joined_at") or ""):
                 a_faire.append((uid, m, "bienvenue", verifie))
     n = 0
     for uid, m, quoi, verifie in a_faire[:RATTRAPAGE_PAR_TOUR]:
         if quoi == "arrivee":
             salon, cle = SALON_ARRIVEES, f"{GID}:{uid}:{m.get('joined_at')}:arrivee"
-            embed = {"title": "🚪 Arrivée sur Agency VA INSTAGRAM",
-                     "description": (f"<@{uid}> a rejoint le serveur le {_date(m.get('joined_at'))}.\n"
-                                     + ("✅ Vérification validée." if verifie else
-                                        f"⏳ **Pas encore vérifié.** La vérification se fait dans "
-                                        f"<#{SALON_VERIF}>.")),
-                     "color": 0x5865F2,
-                     "footer": {"text": "Agency VA INSTAGRAM • Arrivées sur le serveur"}}
+            embed = embed_arrivee(uid, m, verifie, historique=True)
         else:
             salon, cle = SALON_VERIFIES, f"{GID}:{uid}:{m.get('joined_at')}:verifie"
-            embed = {"title": "Bienvenue sur Agency VA INSTAGRAM !",
-                     "description": f"<@{uid}>, ta vérification est validée.",
-                     "color": 0x22C55E}
+            embed = embed_bienvenue(uid, m)
         mid = _poster(salon, embed, cle)
         if not mid:
             return n
@@ -246,6 +349,7 @@ def rattraper(actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
             g = (d.get("membres") or {}).get(uid)
             if g is not None:
                 g[quoi] = mid
+                g["carte"] = 1
                 _ecrire(d)
         n += 1
     if len(a_faire) <= RATTRAPAGE_PAR_TOUR:
@@ -253,6 +357,48 @@ def rattraper(actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
             d = _etat()
             d["rattrape"] = int(time.time())
             _ecrire(d)
+    return n
+
+
+def habiller(actuels: Dict[str, Dict[str, Any]], role_verifie: str) -> int:
+    """L'historique posté sans carte (le 23/10/2026, avant elles) est réécrit
+    sur place, une fois : la carte d'arrivée, la carte de bienvenue. Une
+    édition ne notifie personne. RATTRAPAGE_PAR_TOUR éditions par tour ;
+    fini : « habille »."""
+    with LOCK:
+        d = _etat()
+        if d.get("habille"):
+            return 0
+        a_faire = [(uid, dict(f)) for uid, f in
+                   sorted((d.get("membres") or {}).items(), key=lambda kv: str(kv[1].get("joined_at") or ""))
+                   if uid in actuels and not f.get("carte") and (f.get("arrivee") or f.get("bienvenue"))]
+        filleuls = d.get("filleuls") or {}
+    n = 0
+    for uid, f in a_faire:
+        if n >= RATTRAPAGE_PAR_TOUR:
+            return n
+        m = actuels[uid]
+        verifie = bool(role_verifie and role_verifie in (m.get("roles") or []))
+        p = (filleuls.get(uid) or {}).get("parrain")
+        for cle, salon, embed in (("arrivee", SALON_ARRIVEES,
+                                   embed_arrivee(uid, m, verifie, historique=not f.get("neuf"), parrain=p)),
+                                  ("bienvenue", SALON_VERIFIES, embed_bienvenue(uid, m, p or ""))):
+            if f.get(cle):
+                code, _r = _api("PATCH", f"/channels/{salon}/messages/{f[cle]}",
+                                json={"embeds": [embed], "allowed_mentions": {"parse": []}})
+                if code not in (200, 404):
+                    return n                     # Discord refuse : le tour suivant reprend
+                n += 1
+        with LOCK:
+            d = _etat()
+            g = (d.get("membres") or {}).get(uid)
+            if g is not None:
+                g["carte"] = 1
+                _ecrire(d)
+    with LOCK:
+        d = _etat()
+        d["habille"] = int(time.time())
+        _ecrire(d)
     return n
 
 
@@ -328,7 +474,10 @@ def _surveiller() -> Dict[str, Any]:
                                  "date": int(time.time())}
                 bilan["parraines"] += bool(p)
             connus[uid] = {"joined_at": m.get("joined_at") or "", "nom": _nom(m),
-                           "a_annoncer": True, "neuf": True}
+                           "a_annoncer": True, "neuf": True, "carte": 1}
+            b = _bienvenue_faite(d, uid, m.get("joined_at") or "")
+            if b:
+                connus[uid]["bienvenue"] = b
         for uid in [u for u in connus if u not in actuels]:
             d.setdefault("partis", {})[uid] = dict(connus.pop(uid), a_annoncer=True,
                                                    quand=int(time.time()))
@@ -344,24 +493,29 @@ def _surveiller() -> Dict[str, Any]:
         departs = [(u, dict(f)) for u, f in (d.get("partis") or {}).items()
                    if f.get("a_annoncer")][:MAX_ANNONCES]
         rattrape = bool(d.get("rattrape"))
+        habille = bool(d.get("habille"))
+        # ✅ Vérifié posé à la main (sans passer par la vérification) : sa
+        # carte de bienvenue quand même, comme Twitter (verified_sent). Après
+        # l'historique, qui poste celles des anciens
+        sans_bienvenue = ([u for u, m in actuels.items()
+                           if role_verifie and role_verifie in (m.get("roles") or [])
+                           and not _bienvenue_faite(d, u, m.get("joined_at") or "")][:MAX_ANNONCES]
+                          if rattrape else [])
     # Les annonces hors du verrou : un clic sur « Mon espace » n'attend pas
     # vingt messages Discord. L'historique d'abord, dans l'ordre d'arrivée.
     if not rattrape:
         bilan["rattrapage"] = rattraper(actuels, role_verifie)
         if bilan["rattrapage"]:
             print(f"[agency] historique : {bilan['rattrapage']} message(s) posté(s)", flush=True)
+    elif not habille:
+        bilan["habillage"] = habiller(actuels, role_verifie)
+        if bilan["habillage"]:
+            print(f"[agency] cartes : {bilan['habillage']} message(s) réécrit(s)", flush=True)
     for uid, f, p in arrivees:
         m = actuels.get(uid) or {}
-        deja = role_verifie and role_verifie in (m.get("roles") or [])
-        embed = {"title": "🚪 Nouvelle arrivée sur Agency VA INSTAGRAM",
-                 "description": (f"<@{uid}> vient de rejoindre le serveur.\n"
-                                 + ("✅ Vérification déjà validée." if deja else
-                                    f"⏳ **Pas encore vérifié.** La vérification se fait dans "
-                                    f"<#{SALON_VERIF}>.")
-                                 + (f"\nInvité par <@{p}>." if p else "")),
-                 "color": 0x5865F2,
-                 "footer": {"text": "Agency VA INSTAGRAM • Arrivées sur le serveur"}}
-        mid = _poster(SALON_ARRIVEES, embed, f"{GID}:{uid}:{f.get('joined_at')}:arrivee")
+        deja = bool(role_verifie and role_verifie in (m.get("roles") or []))
+        mid = _poster(SALON_ARRIVEES, embed_arrivee(uid, m, deja, historique=False, parrain=p),
+                      f"{GID}:{uid}:{f.get('joined_at')}:arrivee")
         if not mid:
             break                                   # Discord refuse : le tour suivant reprend
         with LOCK:
@@ -388,6 +542,7 @@ def _surveiller() -> Dict[str, Any]:
                 g["depart"] = mid
                 _ecrire(d)
         bilan["departs"] += 1
+    bilan["bienvenues"] = sum(bool(bienvenue(u, actuels[u])) for u in sans_bienvenue)
     if bilan["arrivees"] or bilan["departs"]:
         print(f"[agency] {bilan['arrivees']} arrivée(s) ({bilan['parraines']} parrainée(s)), "
               f"{bilan['departs']} départ(s) annoncé(s)", flush=True)

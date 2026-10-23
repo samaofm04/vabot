@@ -396,8 +396,14 @@ try:
     INVITES = {"ok": True, "usages": {"vanity": 4}}
     postes, panneaux, appels_aa = [], [], []
 
+    edits = []
+
     def faux_api_aa(methode, chemin, **kw):
         appels_aa.append((methode, chemin, kw.get("json")))
+        if methode == "GET" and "/members/" in chemin:
+            uid_ = chemin.rsplit("/", 1)[1]
+            m_ = next((x for x in LISTE["m"] if x["user"]["id"] == uid_), None)
+            return (200, m_) if m_ else (404, {})
         if methode == "GET" and "/members" in chemin:
             return (200, list(LISTE["m"])) if LISTE["ok"] else (403, {"message": "Missing Access"})
         if methode == "GET" and chemin.endswith("/invites"):
@@ -410,8 +416,11 @@ try:
             return 200, {"code": code}
         if methode == "POST":
             postes.append((chemin, kw["json"]["embeds"][0]["title"], kw["json"]["allowed_mentions"],
-                           kw["json"]["embeds"][0].get("description", "")))
+                           kw["json"]["embeds"][0]))
             return 200, {"id": f"m{len(postes)}"}
+        if methode == "PATCH":
+            edits.append((chemin, kw["json"]["embeds"][0]))
+            return 200, {}
         return 200, {}
     aa._api = faux_api_aa
     vd2.assurer_message_verif = lambda gid: panneaux.append(gid) or "pose"
@@ -424,13 +433,24 @@ try:
     _paquet = aa.RATTRAPAGE_PAR_TOUR
     aa.RATTRAPAGE_PAR_TOUR = 2
     bh = aa.surveiller()
-    check("historique, 1er paquet (2 messages) : arrivée de 1 puis de 2, dans l'ordre d'arrivée",
+    check("historique, 1er paquet (2 messages) : arrivée de 1 puis de 2, dans l'ordre d'arrivée, en carte",
           bh.get("rattrapage") == 2 and [p_[1] for p_ in postes] == ["🚪 Arrivée sur Agency VA INSTAGRAM"] * 2
+          and all(p_[3].get("author") and p_[3].get("thumbnail") for p_ in postes)
           and not json.loads(aa.FICHIER.read_text()).get("rattrape"), postes)
     bh2 = aa.surveiller()
-    check("… 2e paquet : la bienvenue du vérifié dans ✅ membres-vérifiés, puis c'est fini",
+    check("… 2e paquet : la carte de bienvenue du vérifié dans ✅ membres-vérifiés, puis c'est fini",
           bh2.get("rattrapage") == 1 and postes[2][0].endswith(f"/{aa.SALON_VERIFIES}/messages")
+          and postes[2][3]["title"].startswith("✨ Bienvenue") and len(postes[2][3]["fields"]) == 2
           and json.loads(aa.FICHIER.read_text()).get("rattrape"), postes)
+    # l'historique posté AVANT les cartes : réécrit sur place, une fois
+    etat_aa = json.loads(aa.FICHIER.read_text())
+    etat_aa["membres"]["1"].pop("carte", None)
+    etat_aa.pop("habille", None)
+    aa.FICHIER.write_text(json.dumps(etat_aa))
+    aa.surveiller()
+    check("historique sans carte : réécrit sur place (édition, aucune notification), une fois",
+          [e_[0] for e_ in edits] == [f"/channels/{aa.SALON_ARRIVEES}/messages/m1"]
+          and edits[0][1].get("thumbnail") and json.loads(aa.FICHIER.read_text()).get("habille"), edits)
     aa.RATTRAPAGE_PAR_TOUR = _paquet
     postes.clear()
     LISTE["m"][1]["roles"] = []
@@ -443,7 +463,7 @@ try:
           b2["arrivees"] == 1 and b2["departs"] == 1
           and postes[0][0].endswith(f"/{aa.SALON_ARRIVEES}/messages")
           and postes[1][0].endswith(f"/{aa.SALON_DEPARTS}/messages")
-          and all(x[2] == {"parse": []} for x in postes), postes)
+          and all(x[2].get("parse") == [] and not x[2].get("users") for x in postes), postes)
     check("… le panneau n'est pas revérifié à chaque tour (une fois l'heure)", panneaux == [AG])
     n = len(postes)
     b3 = aa.surveiller()
@@ -478,7 +498,8 @@ try:
     check("arrivé par le lien de 1 : 1 est son parrain, et l'annonce le dit (sans mention)",
           b5["arrivees"] == 1 and b5["parraines"] == 1 and f4.get("parrain") == "1"
           and f4.get("source") == "invitation_unique" and len(postes) == n + 1
-          and "Invité par <@1>." in postes[n][3] and postes[n][2] == {"parse": []}, (b5, f4, postes[n:]))
+          and "Invité par <@1>." in postes[n][3]["description"] and postes[n][3].get("thumbnail")
+          and postes[n][2] == {"parse": []}, (b5, f4, postes[n:]))
     check("… parrain_de le rend (le « Merci » de la bienvenue)",
           aa.parrain_de("4") == "1" and aa.parrain_de("3") == "")
     check("… et la bienvenue des vérifiés d'Agency remercie le parrain, pas celle de Twitter",
@@ -523,7 +544,8 @@ try:
     nr = aa.rattraper({u: {"user": {"id": u}, "joined_at": j, "roles": []}
                        for u, j in (("50", "2026-01-01"), ("51", "2026-02-01"), ("52", "2026-03-01"))}, "")
     check("historique : les arrivés du relevé (annoncés ou en attente) n'y repassent pas",
-          nr == 1 and len(postes) == n + 1 and "<@50>" in postes[-1][3] and "01/01/2026" in postes[-1][3]
+          nr == 1 and len(postes) == n + 1 and "<@50>" in postes[-1][3]["description"]
+          and "01/01/2026" in postes[-1][3]["description"]
           and etat_aa().get("rattrape"), postes[n:])
     aa.FICHIER.write_text(_vrai_etat)
     LISTE["m"] = LISTE["m"] + [{"user": {"id": str(100 + i)}, "joined_at": "x", "roles": []} for i in range(30)]
@@ -595,6 +617,39 @@ try:
     check("… reposé : remis au texte du jour sur place, pas de doublon",
           r2 == "mis a jour" and len([a for a in appels_aa if a[0] == "POST"
                                       and a[1] == f"/channels/{aa.SALON_PARRAINAGE}/messages"]) == 1)
+    # la validation (verif_discord.poster_bienvenue) : la carte d'Agency, une fois
+    postes.clear()
+    LISTE["m"].append({"user": {"id": "60", "username": "neuf"}, "joined_at": "j", "roles": []})
+    aa.surveiller()
+    postes.clear()
+    r_b = vd2.poster_bienvenue("60", vd2.serveur(AG))
+    check("validation : carte de bienvenue d'Agency, le membre mentionné",
+          r_b and postes[0][0].endswith(f"/{aa.SALON_VERIFIES}/messages")
+          and postes[0][2] == {"parse": [], "users": ["60"]} and postes[0][3]["title"].startswith("✨"), postes)
+    check("… et pas deux fois", vd2.poster_bienvenue("60", vd2.serveur(AG)) == "" and len(postes) == 1)
+    # ✅ Vérifié posé à la main : sa carte au tour suivant
+    postes.clear()
+    LISTE["m"].append({"user": {"id": "61", "username": "main"}, "joined_at": "k", "roles": []})
+    aa.surveiller()
+    postes.clear()
+    LISTE["m"][-1]["roles"] = [vd2.serveur(AG)["role_verifie"]]
+    b61 = aa.surveiller()
+    check("✅ Vérifié posé à la main : sa carte de bienvenue au tour suivant",
+          b61.get("bienvenues") == 1 and postes and postes[-1][3]["title"].startswith("✨"), (b61, postes))
+    # validé dans la minute de son arrivée, avant que le relevé ne l'ait vu :
+    # sa note d'arrivée garde la bienvenue, rien de reposté
+    postes.clear()
+    LISTE["m"].append({"user": {"id": "62", "username": "rapide"}, "joined_at": "l",
+                       "roles": [vd2.serveur(AG)["role_verifie"]]})
+    r62 = vd2.poster_bienvenue("62", vd2.serveur(AG))
+    b62 = aa.surveiller()
+    check("validé avant le relevé : son arrivée annoncée, sa bienvenue pas reposée",
+          r62 and b62["arrivees"] == 1 and not b62.get("bienvenues")
+          and [p_[0].rsplit("/", 2)[1] for p_ in postes] == [aa.SALON_VERIFIES, aa.SALON_ARRIVEES]
+          and etat_aa()["membres"]["62"].get("bienvenue") == r62, (b62, postes))
+    e4 = aa.embed_bienvenue("4", {"user": {"id": "4"}}, aa.parrain_de("4"))
+    check("la bienvenue d'un filleul remercie son parrain (comme Twitter)",
+          "🙏 Merci <@1>" in e4["description"] and "Merci" not in aa.embed_bienvenue("3", {})["description"])
     aa.FICHIER, aa._api, vd2.assurer_message_verif = _sauve_aa
     src_wu = (BOT / "web_upload.py").read_text(encoding="utf-8")
     check("un seul relevé des membres : plus dans le tour des tickets, le fil d'agency_accueil",

@@ -2123,3 +2123,18 @@ button:disabled{opacity:.6}.res{margin-top:16px;padding:12px;border-radius:10px;
 # À l'import : aucun démon du site n'appelle ce module à heure fixe, et le
 # processus du bot l'importe dès le premier clic ou le premier tour du podium.
 armer_relances()
+
+
+# Agency VA INSTAGRAM (23/10/2026) : la bienvenue d'un membre validé est la
+# carte de Twitter (photo, premiers pas, espace personnel), postée par
+# agency_accueil — comme Twitter et Threads passent par leur module d'accueil.
+# Enveloppe : le corps de poster_bienvenue est réécrit par des patchs du VPS.
+_poster_bienvenue_commun = poster_bienvenue
+
+
+def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:   # noqa: F811
+    cfg = cfg or serveur()
+    if str((cfg or {}).get("id") or "") == AGENCY_IG_ID:
+        import agency_accueil
+        return agency_accueil.bienvenue(str(uid))
+    return _poster_bienvenue_commun(uid, cfg)
