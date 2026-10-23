@@ -2423,7 +2423,8 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # 5 (21/10/2026) : sur Twitter aussi.
 # 6 (23/10/2026) : « 📱 Numéro » en dernier, sur les trois serveurs
 # (NUMERO_DANS_MENU).
-BOUTONS_VERSION = 6
+# 7 (23/10/2026) : « 📧 Outlook » juste après, sur Twitter seulement.
+BOUTONS_VERSION = 7
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -2779,6 +2780,11 @@ def _avec_mes_stats(gid: str) -> bool:
 NUMERO_DANS_MENU = {"1445108485090971710",    # YouLab TWITTER
                     "1498948161039896586",    # YouLab THREADS
                     AGENCY_IG_ID}
+# « 📧 Outlook » juste après (propriétaire, 23/10/2026 : « pour twitter mets ça
+# aussi dans leur ticket comme sur threads ») : la carte Outlook du VA
+# redescend (outlook_x_discord._menu). Twitter seulement : Agency n'a pas de
+# coffre Outlook, Va IG a son propre parcours.
+OUTLOOK_DANS_MENU = {"1445108485090971710"}   # YouLab TWITTER
 
 
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
@@ -2800,10 +2806,13 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
             for b in r.get("components") or []:
                 if str(b.get("custom_id") or "").startswith("subs:total:"):
                     b["label"] = "Mes stats"
-    if str(gid) in NUMERO_DANS_MENU and not any(
-            b.get("custom_id") == "numx:menu" for r in rangs for b in r.get("components") or []):
-        bouton = {"type": 2, "style": 2, "label": "Numéro", "emoji": {"name": "📱"},
-                  "custom_id": "numx:menu"}
+    for serveurs, bouton in ((NUMERO_DANS_MENU, {"type": 2, "style": 2, "label": "Numéro",
+                                                  "emoji": {"name": "📱"}, "custom_id": "numx:menu"}),
+                             (OUTLOOK_DANS_MENU, {"type": 2, "style": 2, "label": "Outlook",
+                                                  "emoji": {"name": "📧"}, "custom_id": "mailx:menu"})):
+        if str(gid) not in serveurs or any(b.get("custom_id") == bouton["custom_id"]
+                                           for r in rangs for b in r.get("components") or []):
+            continue
         if rangs and len(rangs[-1].get("components") or []) < 5:
             rangs[-1].setdefault("components", []).append(bouton)
         else:                                   # rangée pleine : Discord en refuse un 6e
