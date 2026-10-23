@@ -15,7 +15,11 @@ Ce qui est vérifié :
   - la copie suit l'accueil : un PATCH de ses boutons est recopié sur elle ;
     la réponse type 7 de « Confirmer le VA » passe à l'autre message ;
   - menu_prive (staff sans salon) : la rangée du VA pour lui seul, sans
-    bouton de manager.
+    bouton de manager ;
+  - le lien du VA sous « 📋 Menu » quand il en a un en service (sans aperçu) ;
+    coupé, VA parti, pas de lien : rien ; il suit les changements (accueil
+    redessiné, ou rafraichir_menus au tour des liens), sans appel à Discord
+    tant que rien n'a bougé.
 
 Faux Discord, dossier temporaire : aucun appel réseau, rien dans data/.
 Lancement : python tests_menu_ticket.py
@@ -36,6 +40,7 @@ try:                                   # console Windows en cp1252
 except Exception:
     pass
 
+import liens_va as lv                  # noqa: E402
 import tickets_discord as tk           # noqa: E402
 
 OKS, FAILS = [], []
@@ -49,6 +54,8 @@ def check(label, cond, detail=""):
 G, U, S, ACC = "1445108485090971710", "777", "5000", "9001"
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="menu_ticket_"))
 _SAUVE = {k: getattr(tk, k) for k in ("ETAT_FICHIER", "_api_reseau", "_en_fond", "_traiter_sans_copie")}
+_SAUVE_LV = lv.lien_de
+LIEN = {}                              # la fiche liens_va du VA, changée par les tests
 RANGS_ACCUEIL = [
     {"type": 1, "id": 1, "components": [
         {"type": 2, "id": 2, "style": 2, "label": "Mon adresse USDC", "custom_id": f"usdc:set:{U}"},
@@ -91,6 +98,7 @@ class FauxDiscord:
             self.n += 1
             mid = f"c{self.n}"
             self._ajouter({"id": mid, "type": 0, "author": {"id": "bot", "bot": True},
+                           "content": kw["json"].get("content"),
                            "components": kw["json"]["components"]})
             return 200, {"id": mid}
         if methode == "PUT" and "/pins/" in chemin:
@@ -107,8 +115,11 @@ class FauxDiscord:
             return (204, {}) if self.messages.pop(mid, None) else (404, {})
         if methode == "PATCH":
             mid = chemin.rsplit("/", 1)[1]
-            if mid in self.messages and "components" in (kw.get("json") or {}):
-                self.messages[mid]["components"] = kw["json"]["components"]
+            if mid not in self.messages:
+                return 404, {"message": "Unknown Message", "code": 10008}
+            for k in ("components", "content"):
+                if mid in self.messages and k in (kw.get("json") or {}):
+                    self.messages[mid][k] = kw["json"][k]
             return 200, {}
         return 200, {}
 
@@ -128,6 +139,7 @@ try:
     d = FauxDiscord()
     tk._api_reseau = d.api
     tk._en_fond = lambda f: f()
+    lv.lien_de = lambda gid, uid: dict(LIEN) if (gid, uid) == (G, U) else {}
 
     check("accueil tout juste posé, rien dessous : déjà en bas", tk.ramener_menu(G, U, S) == "deja"
           and not [a for a in d.appels if a[0] in ("POST", "DELETE", "PUT")], d.appels)
@@ -187,12 +199,53 @@ try:
     check("… un clic qui n'est pas à nous : None, comme avant", tk.traiter({"type": 3}) is None)
     tk._traiter_sans_copie = _SAUVE["_traiter_sans_copie"]
 
+    # le lien sous « 📋 Menu »
+    check("pas de lien : « 📋 Menu » seul", d.messages[c2]["content"] == "📋 **Menu**", d.messages[c2])
+    LIEN.update(public_url="https://getmysocial.com/emy-va-12", actif=True)
+    tk._api("PATCH", f"/channels/{S}/messages/{ACC}", json={"components": RANGS_ACCUEIL})
+    check("lien créé (accueil redessiné) : le menu du bas l'affiche, sans aperçu",
+          d.messages[c2]["content"] == "📋 **Menu**\n🔗 <https://getmysocial.com/emy-va-12>", d.messages[c2])
+    n = len(d.appels)
+    b0 = tk.rafraichir_menus(G)
+    check("tour des liens sans changement : aucun appel à Discord", len(d.appels) == n and not b0["faits"],
+          d.appels[n:])
+    LIEN.update(public_url="https://getmysocial.com/emy-neuve")
+    b1 = tk.rafraichir_menus(G)
+    check("nouvelle adresse (sans toucher l'accueil) : le menu suit au tour des liens",
+          b1["faits"] == [U] and d.messages[c2]["content"].endswith("<https://getmysocial.com/emy-neuve>"), b1)
+    LIEN.update(actif=False)
+    tk.rafraichir_menus(G)
+    check("lien coupé : plus de lien dans le menu", d.messages[c2]["content"] == "📋 **Menu**", d.messages[c2])
+    LIEN.update(actif=True)
+    e_ = etat(); e_["tickets"][f"{G}:{U}"]["parti"] = {"quand": 1}; tk.ETAT_FICHIER.write_text(json.dumps(e_))
+    check("VA parti : pas de lien", tk._texte_menu(G, U) == "📋 **Menu**")
+    e_ = etat(); e_["tickets"][f"{G}:{U}"].pop("parti"); tk.ETAT_FICHIER.write_text(json.dumps(e_))
+    d.humain()
+    tk.ramener_menu(G, U, S)
+    c3 = etat()["tickets"][f"{G}:{U}"]["menu"]
+    check("menu reposé : avec son lien", d.messages[c3]["content"].endswith("<https://getmysocial.com/emy-neuve>"),
+          d.messages[c3])
+    d.messages[c3]["content"] = "📋 **Menu**"
+    check("menu déjà en bas mais texte d'avant : remis à jour sur place",
+          tk.ramener_menu(G, U, S) == "deja" and d.messages[c3]["content"].endswith("emy-neuve>"))
+    del d.messages[c3]; d.fil.remove(c3)
+    e_ = etat(); e_["tickets"][f"{G}:{U}"]["menu_texte"] = "vieux"; tk.ETAT_FICHIER.write_text(json.dumps(e_))
+    b2 = tk.rafraichir_menus(G)
+    check("menu retiré à la main (404) : oublié, rien ne casse",
+          b2["partis"] == [U] and "menu" not in etat()["tickets"][f"{G}:{U}"], b2)
+    check("redessiner_boutons passe aussi par les menus",
+          "menus" in tk.redessiner_boutons(G))
+    LIEN.clear()
+
     check("pas son ticket : echec", tk.ramener_menu(G, U, "4242") == "echec")
     check("pas de fiche : echec", tk.ramener_menu(G, "888", S) == "echec")
+    d.humain()
+    tk.ramener_menu(G, U, S)
+    c4 = etat()["tickets"][f"{G}:{U}"]["menu"]
     d.humain(); d.refus_post = True
     check("Discord refuse le menu : echec, l'ancien gardé",
-          tk.ramener_menu(G, U, S) == "echec" and c2 in d.messages
-          and etat()["tickets"][f"{G}:{U}"]["menu"] == c2)
+          tk.ramener_menu(G, U, S) == "echec" and c4 in d.messages
+          and etat()["tickets"][f"{G}:{U}"]["menu"] == c4)
     tk._api_reseau = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("réseau"))
     check("une panne : echec, sans exception", tk.ramener_menu(G, U, S) == "echec")
 
@@ -211,6 +264,7 @@ except Exception as _e:
 finally:
     for _k, _v in _SAUVE.items():
         setattr(tk, _k, _v)
+    lv.lien_de = _SAUVE_LV
     shutil.rmtree(TMP, ignore_errors=True)
 
 print()

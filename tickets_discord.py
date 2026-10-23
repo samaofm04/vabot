@@ -2996,6 +2996,33 @@ def _rangs_du_menu(gid: str, uid: str, f: Dict[str, Any], salon: str) -> List[Di
                       gid=gid, lien_actif=lv.est_actif(gid, uid))
 
 
+def _texte_menu(gid: str, uid: str) -> str:
+    """« 📋 Menu », et le lien du VA dessous quand il en a un en service
+    (propriétaire, 23/10/2026 : « mets aussi leur lien s'il a un lien »,
+    comme la ligne de menu de Va IG). Coupé, ou VA parti : rien. Entre
+    chevrons : sans eux, Discord poserait l'aperçu de la page sous le menu."""
+    texte = "📋 **Menu**"
+    try:
+        import liens_va as lv
+        l = lv.lien_de(gid, uid)
+        url = str(l.get("public_url") or "")
+        parti = ((_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}).get("parti")
+        if url and l.get("actif", True) is not False and not parti:
+            texte += f"\n🔗 <{url}>"
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menu : lien de {uid} illisible ({type(e).__name__}: {e})", flush=True)
+    return texte
+
+
+def _noter_texte_menu(cle: str, texte: str) -> None:
+    with _VERROU:
+        d = _etat()
+        g = (d.get("tickets") or {}).get(cle)
+        if isinstance(g, dict) and g.get("menu_texte") != texte:
+            g["menu_texte"] = texte
+            _ecrire_etat(d)
+
+
 def _epingler_sans_avis(salon: str, mid: str) -> None:
     """Épingle `mid`, puis retire l'avis « … a épinglé un message » que
     Discord pose dessous : à chaque clic, il aurait poussé le menu d'un cran
@@ -3027,17 +3054,21 @@ def ramener_menu(gid: str, uid: str, salon: str) -> str:
             rangs = _rangs_du_menu(gid, uid, f, salon)
             if not rangs:
                 return "echec"
+            texte = _texte_menu(gid, uid)
             copie, accueil = str(f.get("menu") or ""), str(f.get("accueil") or "")
             code, ms = _api("GET", f"/channels/{salon}/messages?limit=10")
             for m in (ms if code == 200 and isinstance(ms, list) else []):
                 if str(m.get("id")) in {copie, accueil} - {""}:
-                    if str(m["id"]) == copie and _sans_ids(m.get("components")) != rangs:
-                        _api("PATCH", f"/channels/{salon}/messages/{copie}", json={"components": rangs})
+                    if str(m["id"]) == copie and (_sans_ids(m.get("components")) != rangs
+                                                  or m.get("content") != texte):
+                        _api("PATCH", f"/channels/{salon}/messages/{copie}",
+                             json={"content": texte, "components": rangs})
+                        _noter_texte_menu(cle, texte)
                     return "deja"
                 if not (m.get("author") or {}).get("bot") or m.get("type") == 6:
                     break
             code, rep = _api("POST", f"/channels/{salon}/messages",
-                             json={"content": "📋 **Menu**", "components": rangs,
+                             json={"content": texte, "components": rangs,
                                    "allowed_mentions": {"parse": []}})
             if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
                 print(f"[ticket] menu de {uid} non reposé (HTTP {code}) {str(rep)[:120]}", flush=True)
@@ -3048,6 +3079,7 @@ def ramener_menu(gid: str, uid: str, salon: str) -> str:
                 g = (d.get("tickets") or {}).get(cle)
                 if isinstance(g, dict):
                     g["menu"] = neuf
+                    g["menu_texte"] = texte
                     _ecrire_etat(d)
             _epingler_sans_avis(salon, neuf)
             if copie:
@@ -3067,7 +3099,8 @@ def menu_prive(gid: str, uid: str) -> Dict[str, Any]:
              for b in (r.get("components") or [])
              if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
     rangs = [{"type": 1, "components": siens[i:i + 5]} for i in range(0, len(siens), 5)]
-    return {"type": 4, "data": {"content": "📋 **Menu**", "components": rangs, "flags": 64,
+    return {"type": 4, "data": {"content": _texte_menu(str(gid), str(uid)), "components": rangs,
+                                "flags": 64,
                                 "allowed_mentions": {"parse": []}}}
 
 
@@ -3085,11 +3118,15 @@ def _miroir(chemin: str, rangs: Any) -> None:
     if len(morceaux) != 4 or morceaux[0] != "channels" or morceaux[2] != "messages":
         return
     salon, mid = morceaux[1], morceaux[3]
-    for f in (_etat().get("tickets") or {}).values():
+    for cle, f in (_etat().get("tickets") or {}).items():
         if (isinstance(f, dict) and str(f.get("accueil") or "") == mid and f.get("menu")
                 and str(f.get("salon") or "") == salon):
-            _api("PATCH", f"/channels/{salon}/messages/{f['menu']}",
-                 json={"components": _sans_ids(rangs)})
+            gid, _sep, uid = str(cle).partition(":")
+            texte = _texte_menu(gid, uid)
+            code, _r = _api("PATCH", f"/channels/{salon}/messages/{f['menu']}",
+                            json={"content": texte, "components": _sans_ids(rangs)})
+            if code == 200:
+                _noter_texte_menu(cle, texte)
             return
 
 
@@ -3131,3 +3168,55 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
         rangs = rep["data"]["components"]
         _en_fond(lambda: _jumeau(salon, mid, rangs))
     return rep
+
+
+# Le lien change aussi sans toucher l'accueil (nouvelle adresse,
+# liens_va.changer_adresse) : à chaque passage de redessiner_boutons (le tour
+# des liens, une demi-heure), le texte attendu est comparé à celui posé — sur
+# place, sans appel à Discord tant que rien n'a bougé. Les menus posés avant
+# le lien (23/10/2026) le reçoivent au premier passage.
+_redessiner_boutons_sans_menus = redessiner_boutons
+
+
+def rafraichir_menus(gid: str) -> Dict[str, Any]:
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"faits": [], "partis": [], "rates": []}
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict) and v.get("menu")}
+    for cle, f in fiches.items():
+        uid = cle.split(":", 1)[1]
+        texte = _texte_menu(gid, uid)
+        if f.get("menu_texte") == texte:
+            continue
+        code, _r = _api("PATCH", f"/channels/{f.get('salon')}/messages/{f['menu']}",
+                        json={"content": texte})
+        if code == 200:
+            _noter_texte_menu(cle, texte)
+            bilan["faits"].append(uid)
+        elif code == 404:
+            # retiré à la main : oublié, le prochain clic en repose un
+            with _VERROU:
+                d = _etat()
+                g = (d.get("tickets") or {}).get(cle)
+                if isinstance(g, dict) and str(g.get("menu") or "") == str(f["menu"]):
+                    g.pop("menu", None)
+                    g.pop("menu_texte", None)
+                    _ecrire_etat(d)
+            bilan["partis"].append(uid)
+        else:
+            bilan["rates"].append(f"{uid} (HTTP {code})")
+            if code == 429:
+                break
+    if bilan["faits"] or bilan["rates"]:
+        print(f"[ticket] menus {gid} : {len(bilan['faits'])} lien(s) mis à jour"
+              + (f", ratés : {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
+
+
+def redessiner_boutons(gid: str) -> Dict[str, Any]:   # noqa: F811
+    bilan = _redessiner_boutons_sans_menus(gid)
+    try:
+        bilan["menus"] = rafraichir_menus(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menus {gid} : {type(e).__name__}: {e}", flush=True)
+    return bilan
