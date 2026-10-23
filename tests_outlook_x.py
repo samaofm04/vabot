@@ -327,6 +327,11 @@ try:
     r = ox.traiter(dict(p_menu, channel_id="T1"))
     check("menu : le bouton « 📧 Outlook » du menu épinglé — la carte descend, sans message",
           r == {"type": 6}, r)
+    r = ox.traiter(dict(p_menu, member={"user": {"id": CHEF, "username": "chef"}, "roles": [],
+                                        "permissions": str(0x8)}))
+    check("menu : sans salon perso (le staff), ses adresses s'ouvrent en privé",
+          r["type"] == 4 and r["data"]["flags"] == ox.nx.V2 | ox.nx.EPHEMERE
+          and textes_v2(r["data"]["components"])[0] == "## Adresses Outlook", r)
     APPELS.clear()
     print(ox.generaliser_cartes(GID))
     pan = [kw["json"] for m, ch, kw in APPELS if ch.startswith(f"/channels/{SALON}/messages")

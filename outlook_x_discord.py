@@ -398,7 +398,9 @@ def _menu(p: Dict[str, Any], gid: str, uid: str) -> Dict[str, Any]:
         return {"type": 6}
     salon = next((s for s, u in tickets.items() if u == uid), "")
     if not salon:
-        return nx._texte("Tu n'as pas encore de salon perso : ton manager le crée à ton arrivée.")
+        # Sans salon perso (le staff, un VA pas encore servi) : ses adresses
+        # s'ouvrent en privé, comme la carte numéro.
+        return _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     try:
         _fond(lambda: ramener_carte(gid, uid, salon))
     except Exception as e:

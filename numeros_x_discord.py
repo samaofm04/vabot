@@ -1217,8 +1217,12 @@ def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[s
         return {"type": 6}
     salon = next((s for s, u in tickets.items() if u == uid), "")
     if not salon:
-        _log(f"menu : {uid} n'a pas de salon perso sur {conf['nom']}")
-        return _texte("Tu n'as pas encore de salon perso : ton manager le crée à ton arrivée.")
+        # Sans salon perso — le staff (propriétaire, 23/10/2026 : « un menu pour
+        # les boss, les managers, pour tout le monde », il lisait « pas de
+        # salon » sur Agency), ou un VA pas encore servi : SA carte s'ouvre en
+        # privé, rien n'est écrit dans le ticket d'un VA.
+        cle = f"{gid}:{uid}"
+        return _repondre(p, cle, _vue_carte(cle, conf))
     try:
         _fond(lambda: ramener_carte(gid, uid, salon))
     except Exception as e:

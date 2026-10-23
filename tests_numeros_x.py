@@ -804,9 +804,14 @@ try:
     check("menu épinglé du ticket : le clic (même du manager) fait descendre la carte du VA, sans message",
           r == {"type": 6} and ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
           and nx._lire()["cartes"]["T1"]["uid"] == VA, (r, APPELS))
-    r = nx.traiter(clic("numx:menu", gid=TH, uid="555555555555555555"))
-    check("menu : sans salon perso, le VA lit pourquoi",
-          r["type"] == 4 and "salon perso" in r["data"]["content"], r)
+    APPELS.clear()
+    r = nx.traiter(clic("numx:menu", gid=TH, uid="555555555555555555", perms=str(0x8)))
+    check("menu : sans salon perso (le staff), SA carte s'ouvre en privé, rien dans un ticket",
+          r["type"] == 4 and r["data"]["flags"] == nx.V2 | nx.EPHEMERE
+          and textes(r["data"]["components"])[:2] == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and boutons(r["data"]["components"]) == ["numx:prendre"]
+          and not [1 for m, ch, kw in APPELS if m in ("POST", "PATCH", "DELETE") and ch.startswith("/channels/T")],
+          (r, APPELS))
     vd.api = api_cartes
     check("ticket : Twitter garde son panneau commun", not nx._cartes_auto(GID))
     tickets_discord.ETAT_FICHIER = _sav_tk
