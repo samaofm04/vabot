@@ -857,11 +857,28 @@ try:
           r["type"] == 4 and r["data"]["flags"] == 64 and "<#T1>" in r["data"]["content"], r)
     check("menu : ce renvoi s'efface tout seul (réponse d'origine du clic)",
           ("DELETE", f"/webhooks/{APP}/tok/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
+    check("menu : une fois effacé, le renvoi n'est plus au registre", not nx._lire().get("renvois"),
+          nx._lire().get("renvois"))
     check("menu : la carte est reposée en bas, l'ancienne retirée, la suite écrit dans la nouvelle",
           ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
           and ("DELETE", "/channels/T1/messages/carte-T1") in [(m, ch) for m, ch, kw in APPELS]
           and nx._lire()["cartes"]["T1"]["message"] == "nouvelle-T1"
           and nx._message(f"{TH}:{VA}").get("message") == "nouvelle-T1", APPELS)
+    # redémarrage pendant l'attente : repris s'il en est encore temps, oublié sinon
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["renvois"] = {"jeton-frais": {"app": APP, "gid": TH, "le": time.time() - 5, "du": time.time() + 10},
+                    "jeton-vieux": {"app": APP, "gid": TH, "le": time.time() - 20 * 60, "du": time.time() - 19 * 60}}
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    _sav_dormir3 = nx._dormir
+    nx._dormir = lambda s: None
+    n_repris = nx._reprendre_renvois()
+    nx._dormir = _sav_dormir3
+    effaces = [ch for m, ch, kw in APPELS if m == "DELETE"]
+    check("redémarrage : le renvoi encore frais est effacé, le trop vieux oublié sans appel",
+          n_repris == 1 and f"/webhooks/{APP}/jeton-frais/messages/@original" in effaces
+          and not any("jeton-vieux" in ch for ch in effaces) and not nx._lire().get("renvois"),
+          (n_repris, effaces, nx._lire().get("renvois")))
     MENU_DERNIER[0] = "nouvelle-T1"
     APPELS.clear()
     nx.traiter(clic("numx:menu", gid=TH))

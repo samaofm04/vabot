@@ -792,6 +792,7 @@ def demarrer() -> None:
         for gid in SERVEURS:
             with vd.sur_serveur(gid):
                 _reprendre_ecoutes()
+        _reprendre_renvois()
     threading.Thread(target=_go, daemon=True).start()
     # Le récap ne tourne que sur le VPS : ailleurs (Mac, suites de tests), il
     # posterait des chiffres d'essai dans le vrai salon. UNE fois par
@@ -1217,20 +1218,55 @@ RENVOI_SEC = 15
 
 def _effacer_apres(p: Dict[str, Any], dormir=None, delai: int = RENVOI_SEC) -> None:
     """Efface la réponse d'origine de ce clic (le jeton vit 15 min) après
-    `delai` secondes. Le menu posé dans le salon perso, lui, reste."""
+    `delai` secondes. Le menu posé dans le salon perso, lui, reste. Noté dans
+    data/ : un redémarrage pendant l'attente le perdait (Threads, 23/10/2026,
+    message de 12:45 resté) ; demarrer() le termine s'il en est encore temps."""
     jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p)
     if not jeton:
         return
-
-    def effacer():
-        (dormir or _dormir)(delai)
-        code, corps = vd.api("DELETE", f"/webhooks/{app}/{jeton}/messages/@original")
-        if code not in (204, 404):
-            _log(f"renvoi non effacé : HTTP {code} {str(corps)[:120]}")
+    maintenant = time.time()
+    with _VERROU:
+        d = _lire()
+        d.setdefault("renvois", {})[jeton] = {"app": app, "gid": str(p.get("guild_id") or ""),
+                                              "le": maintenant, "du": maintenant + delai}
+        _ecrire(d)
     try:
-        _fond(effacer)
+        _fond(lambda: ((dormir or _dormir)(delai), _effacer_renvoi(jeton)))
     except Exception as e:
         _log(f"effacement du renvoi non lancé ({type(e).__name__}: {e})")
+
+
+def _effacer_renvoi(jeton: str) -> None:
+    with _VERROU:
+        d = _lire()
+        r = (d.get("renvois") or {}).pop(jeton, None)
+        if r is not None:
+            _ecrire(d)
+    if not isinstance(r, dict) or time.time() - float(r.get("le") or 0) > JETON_SEC:
+        return                                    # déjà fait, ou trop tard pour Discord
+    with vd.sur_serveur(r.get("gid") or None):
+        code, corps = vd.api("DELETE", f"/webhooks/{r.get('app') or ''}/{jeton}/messages/@original")
+    if code not in (204, 404):
+        _log(f"renvoi non effacé : HTTP {code} {str(corps)[:120]}")
+
+
+def _reprendre_renvois() -> int:
+    """Après un redémarrage : les renvois encore effaçables le sont, à leur
+    heure ; les autres sont oubliés (Discord refuse au-delà de 15 min)."""
+    n = 0
+    for jeton, r in list((_lire().get("renvois") or {}).items()):
+        if not isinstance(r, dict) or time.time() - float(r.get("le") or 0) > JETON_SEC:
+            _effacer_renvoi(jeton)                # le retire du registre, sans appel
+            continue
+        attente = max(0.0, float(r.get("du") or 0) - time.time())
+        try:
+            _fond(lambda j=jeton, w=attente: (_dormir(w), _effacer_renvoi(j)))
+            n += 1
+        except Exception as e:
+            _log(f"renvoi {jeton[:8]}… non repris ({type(e).__name__}: {e})")
+    if n:
+        _log(f"reprise : {n} message(s) de renvoi à effacer")
+    return n
 
 
 def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:
