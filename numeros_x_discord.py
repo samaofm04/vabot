@@ -1201,7 +1201,21 @@ def ramener_carte(gid: str, uid: str, salon: str) -> str:
 
 
 def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:
-    salon = next((s for s, u in _tickets_du_serveur(gid).items() if u == uid), "")
+    tickets = _tickets_du_serveur(gid)
+    ici = str(p.get("channel_id") or "")
+    if ici in tickets:
+        # Le bouton « 📱 Numéro » du menu épinglé du ticket (propriétaire,
+        # 23/10/2026 : « je veux que ça soit une option dans le menu pin ») :
+        # la carte du VA de CE ticket descend en bas — même si c'est son
+        # manager qui clique —, sans aucun message de plus.
+        vau = tickets[ici]
+        try:
+            _fond(lambda: ramener_carte(gid, vau, ici))
+        except Exception as e:
+            _log(f"menu : déplacement non lancé dans {ici} ({type(e).__name__}: {e})")
+            return _texte("❌ Impossible pour le moment : réessaie dans un instant.")
+        return {"type": 6}
+    salon = next((s for s, u in tickets.items() if u == uid), "")
     if not salon:
         _log(f"menu : {uid} n'a pas de salon perso sur {conf['nom']}")
         return _texte("Tu n'as pas encore de salon perso : ton manager le crée à ton arrivée.")

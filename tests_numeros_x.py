@@ -796,6 +796,14 @@ try:
     nx.traiter(clic("numx:menu", gid=TH))
     check("menu : carte déjà en bas, rien n'est reposté ni retiré",
           not [1 for m, ch, kw in APPELS if m in ("POST", "DELETE")], APPELS)
+    MENU_DERNIER[0] = "un-autre-message"
+    APPELS.clear()
+    p_ticket = clic("numx:menu", gid=TH, uid=CHEF, perms=str(0x8))
+    p_ticket["channel_id"] = "T1"
+    r = nx.traiter(p_ticket)
+    check("menu épinglé du ticket : le clic (même du manager) fait descendre la carte du VA, sans message",
+          r == {"type": 6} and ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
+          and nx._lire()["cartes"]["T1"]["uid"] == VA, (r, APPELS))
     r = nx.traiter(clic("numx:menu", gid=TH, uid="555555555555555555"))
     check("menu : sans salon perso, le VA lit pourquoi",
           r["type"] == 4 and "salon perso" in r["data"]["content"], r)
