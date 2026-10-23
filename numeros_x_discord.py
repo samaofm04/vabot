@@ -83,6 +83,20 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "style": "insta",
         "icone": "numeros/numero_instagram.png",  # sous static/ (copie de emojis/)
     },
+    # Propriétaire, 23/10/2026, sur 📱・numéro-usa d'Agency VA INSTAGRAM :
+    # « remplace le truc num » (le panneau d'un autre bot, « Numéro US »).
+    # Exactement comme Threads : la carte Instagram dans chaque ticket, par Wario.
+    vd.AGENCY_IG_ID: {
+        "nom": "Agency VA INSTAGRAM",
+        "salon": "1548399504527466656",          # 🧰 OUTILS INSTAGRAM > 📱・numéro-usa
+        "fournisseur": "getatext",
+        "service": "ig",
+        "pays": "187", "drapeau": "🇺🇸",
+        "quota": 3,
+        "titre": "Numéro Instagram",
+        "style": "insta",
+        "icone": "numeros/numero_instagram.png",
+    },
 }
 
 #: Durée de vie d'un numéro chez le fournisseur (comme cogs/numeros.py).
@@ -1348,7 +1362,7 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
 
 if __name__ == "__main__":
     import sys
-    noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID}
+    noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID, "agency": vd.AGENCY_IG_ID}
     if sys.argv[1:2] == ["poser"] and len(sys.argv) <= 3:
         vd._charger_config()
         quel = (sys.argv[2:] or ["twitter"])[0].lower()
@@ -1366,5 +1380,5 @@ if __name__ == "__main__":
         else:
             print(poser_cartes(gid, seulement=sys.argv[3]))
     else:
-        print("usage : python numeros_x_discord.py poser [twitter|threads]\n"
-              "        python numeros_x_discord.py cartes threads <salon>|tous")
+        print("usage : python numeros_x_discord.py poser [twitter|threads|agency]\n"
+              "        python numeros_x_discord.py cartes <twitter|threads|agency> <salon>|tous")

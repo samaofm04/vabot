@@ -737,6 +737,20 @@ try:
     APPELS.clear()
     b = nx.poser_cartes(GID)
     tw = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/TW1/messages"]
+    AG = vd.AGENCY_IG_ID
+    tk = json.loads(tickets_discord.ETAT_FICHIER.read_text(encoding="utf-8"))
+    tk["tickets"][f"{AG}:{VA}"] = {"salon": "T2"}
+    tickets_discord.ETAT_FICHIER.write_text(json.dumps(tk), encoding="utf-8")
+    h = json.loads(nx.FICHIER.read_text(encoding="utf-8"))
+    h["cartes"].pop("T2", None)
+    nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
+    APPELS.clear()
+    ba = nx.poser_cartes(AG)
+    ag = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/T2/messages"]
+    check("Agency : comme Threads — carte Instagram dans le ticket, chez GetAText, 3 par jour",
+          ba["posees"] == ["T2"] and ag and textes(ag[0]["components"]) == ["## `….`", "🇺🇸 ⏳ En attente"]
+          and nx.SERVEURS[AG]["fournisseur"] == "getatext" and nx.SERVEURS[AG]["quota"] == 3
+          and AG in num._serveurs_rest(), (ba, ag))
     check("Twitter : la carte du ticket garde le formulaire « Numéro X »",
           b["posees"] == ["TW1"] and tw and textes(tw[0]["components"])[0] == "## Numéro X"
           and boutons(tw[0]["components"]) == ["numx:prendre"], (b, tw))
