@@ -315,8 +315,10 @@ try:
               "member": {"user": {"id": VA, "username": "va"}, "roles": [], "permissions": "0"},
               "message": {"flags": ox.nx.V2}}
     r = ox.traiter(p_menu)
-    check("menu : depuis 📧・adresse-outlook, une ligne privée avec le lien du salon perso",
+    check("menu : depuis le salon commun, une ligne privée avec le lien du salon perso",
           r["type"] == 4 and "<#T1>" in r["data"]["content"], r)
+    check("menu : ce renvoi s'efface tout seul",
+          ("DELETE", f"/webhooks/{APP}/tm/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
     r = ox.traiter(dict(p_menu, channel_id="T1"))
     check("menu : le bouton « 📧 Outlook » du menu épinglé — la carte descend, sans message",
           r == {"type": 6}, r)

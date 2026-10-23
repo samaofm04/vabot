@@ -1202,6 +1202,29 @@ def ramener_carte(gid: str, uid: str, salon: str) -> str:
     return "ramenee"
 
 
+#: Le message privé de renvoi s'efface tout seul au bout de RENVOI_SEC
+#: (propriétaire, 23/10/2026 : « il peut s'effacer auto le message à la fin »).
+RENVOI_SEC = 15
+
+
+def _effacer_apres(p: Dict[str, Any], dormir=None, delai: int = RENVOI_SEC) -> None:
+    """Efface la réponse d'origine de ce clic (le jeton vit 15 min) après
+    `delai` secondes. Le menu posé dans le salon perso, lui, reste."""
+    jeton, app = str(p.get("token") or ""), vd.app_de_reponse(p)
+    if not jeton:
+        return
+
+    def effacer():
+        (dormir or _dormir)(delai)
+        code, corps = vd.api("DELETE", f"/webhooks/{app}/{jeton}/messages/@original")
+        if code not in (204, 404):
+            _log(f"renvoi non effacé : HTTP {code} {str(corps)[:120]}")
+    try:
+        _fond(effacer)
+    except Exception as e:
+        _log(f"effacement du renvoi non lancé ({type(e).__name__}: {e})")
+
+
 def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:
     tickets = _tickets_du_serveur(gid)
     ici = str(p.get("channel_id") or "")
@@ -1259,6 +1282,7 @@ def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[s
     except Exception as e:
         _log(f"menu : déplacement non lancé pour {uid} ({type(e).__name__}: {e})")
         return _texte("❌ Impossible pour le moment : réessaie dans un instant.")
+    _effacer_apres(p)
     return _texte(f"📋 Ton menu est en bas de <#{salon}>.")
 
 

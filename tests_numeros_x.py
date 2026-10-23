@@ -791,9 +791,14 @@ try:
                                                                   "components": [{"type": 1, "components": [
                                                                       {"type": 2, "custom_id": "numx:menu"}]}]}}
     APPELS.clear()
+    _sav_dormir2 = nx._dormir
+    nx._dormir = lambda s: None
     r = nx.traiter(clic("numx:menu", gid=TH))
+    nx._dormir = _sav_dormir2
     check("menu : réponse privée d'UNE ligne avec le lien du salon perso",
           r["type"] == 4 and r["data"]["flags"] == 64 and "<#T1>" in r["data"]["content"], r)
+    check("menu : ce renvoi s'efface tout seul (réponse d'origine du clic)",
+          ("DELETE", f"/webhooks/{APP}/tok/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
     check("menu : la carte est reposée en bas, l'ancienne retirée, la suite écrit dans la nouvelle",
           ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
           and ("DELETE", "/channels/T1/messages/carte-T1") in [(m, ch) for m, ch, kw in APPELS]

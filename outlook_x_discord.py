@@ -414,6 +414,7 @@ def _menu(p: Dict[str, Any], gid: str, uid: str) -> Dict[str, Any]:
     except Exception as e:
         _log(f"menu : déplacement non lancé pour {uid} ({type(e).__name__}: {e})")
         return nx._texte("❌ Impossible pour le moment : réessaie dans un instant.")
+    nx._effacer_apres(p, dormir=_dormir)           # le renvoi s'efface seul
     return nx._texte(f"📋 Ton menu est en bas de <#{salon}>.")
 
 
