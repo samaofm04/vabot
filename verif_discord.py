@@ -164,9 +164,11 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "etapes": {}, "parcours": [],
         # Proprietaire, 03/10/2026 : « laisse pour le moment tout le monde en
         # verifie ». Porte FERMEE = l'arrivee cree le ticket comme avant et pose
-        # ✅ Verifie d'office (cogs/welcome.py) ; True la rouvre (et il faudra
-        # montrer 🔐┃verification a @everyone).
-        "porte": False, "quetes": False,
+        # ✅ Verifie d'office (cogs/welcome.py). Rouverte le 23/10/2026
+        # (« ouvre aussi la porte de va ig ») : l'arrivant se vérifie dans
+        # 🔐・vérification, montré à @everyone (caché à ✅ Vérifié), attend en
+        # ⏳ dans 👋・salle-d-attente, et son ticket vient avec ✅ Vérifié.
+        "porte": True, "quetes": False,
     },
     # Agency VA INSTAGRAM (22-23/10/2026), « comme Twitter », servi par Wario.
     # Vérification branchée le 23/10/2026 (propriétaire : « oui branche la
