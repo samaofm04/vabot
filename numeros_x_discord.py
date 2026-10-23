@@ -1380,6 +1380,11 @@ def _boucle_cartes() -> None:
                         poser_cartes(gid)
                     except Exception as e:
                         _log(f"cartes de {gid} : tour en échec ({type(e).__name__}: {e})")
+            try:
+                import outlook_x_discord        # ses cartes : même rythme, même boucle
+                outlook_x_discord.tour_cartes()
+            except Exception as e:
+                _log(f"cartes Outlook : tour en échec ({type(e).__name__}: {e})")
         tour += 1
         time.sleep(60)
 

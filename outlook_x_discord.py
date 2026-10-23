@@ -82,6 +82,8 @@ def _lire() -> Dict[str, Any]:
         d = {}
     if not isinstance(d.get("messages"), dict):
         d["messages"] = {}
+    if not isinstance(d.get("cartes"), dict):
+        d["cartes"] = {}
     return d
 
 
@@ -181,6 +183,252 @@ def vue_mes_adresses(uid: str, gid: str, maintenant=None) -> List[Dict[str, Any]
     return [{"type": 17, "accent_color": nx.BLEU, "components": blocs}]
 
 
+# ─── La carte du ticket ───────────────────────────────────────────────────
+# Propriétaire, 23/10/2026 : « pour twitter mets ça aussi dans leur ticket comme
+# sur threads » — comme la carte numéro (numeros_x_discord) : UNE carte par VA
+# dans son salon perso, changée sur place, et un bouton « 📧 Outlook » dans le
+# menu épinglé du ticket (tickets_discord). Les codes 2FA ne s'affichent qu'au
+# clic, et repartent au bout de CODE_VISIBLE_SEC : un code laissé dans un
+# message qui dure aurait été faux trente secondes plus tard.
+CODE_VISIBLE_SEC = 60
+TEXTE_RENVOI = "📧 Ton adresse est maintenant dans ton salon perso."
+
+
+def vue_carte(uid: str, gid: str, codes: bool = False, souci: str = "",
+              maintenant=None) -> List[Dict[str, Any]]:
+    l = oc.comptes_du_va(uid, gid)[:LISTE_MAX]
+    blocs: List[Dict[str, Any]] = [{"type": 10, "content": "## Adresses Outlook"}]
+    if not l:
+        blocs += [{"type": 10, "content": "📧 " + BLANC}, {"type": 10, "content": "🔑 " + BLANC},
+                  {"type": 10, "content": "🔐 " + BLANC_CODE}]
+    for i, c in enumerate(l):
+        if i:
+            blocs.append({"type": 14, "divider": True, "spacing": 1})
+        if codes:
+            _t, code, reste = oc.texte_2fa(c, maintenant)
+            ligne = "🔐 **%s** · %d s" % (code, reste)
+        else:
+            ligne = "🔐 " + BLANC_CODE
+        blocs += [{"type": 10, "content": "📧 " + _litteral(c.get("email") or "?")},
+                  {"type": 10, "content": "🔑 " + _litteral(c.get("password") or "?")},
+                  {"type": 9, "components": [{"type": 10, "content": ligne}],
+                   "accessory": {"type": 2, "style": 2, "emoji": {"name": "🔄"},
+                                 "custom_id": PREFIXE + "maj:" + str(c.get("id"))}}]
+    if souci:
+        blocs.append({"type": 10, "content": souci})
+    boutons = [_prendre_bouton()] + ([_bouton("2fa", "Code 2FA", "🔐", 2)] if l else [])
+    blocs.append(_rangee(*boutons))
+    return [{"type": 17, "accent_color": nx.BLEU, "components": blocs}]
+
+
+def vue_menu() -> List[Dict[str, Any]]:
+    """📧・adresse-outlook une fois les cartes en place : la ligne de renvoi et
+    le bouton qui ramène la carte du VA en bas de SON salon perso."""
+    return [{"type": 17, "accent_color": nx.BLEU, "components": [
+        {"type": 10, "content": TEXTE_RENVOI},
+        _rangee(_bouton("menu", "Afficher le menu", "📋", 1))]}]
+
+
+def _cartes_auto(gid: str) -> bool:
+    return bool((_lire().get("cartes_auto") or {}).get(str(gid)))
+
+
+def _carte_du_clic(p: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    salon = str(p.get("channel_id") or "")
+    mid = str((p.get("message") or {}).get("id") or "")
+    c = _lire()["cartes"].get(salon)
+    if isinstance(c, dict) and mid and str(c.get("message")) == mid and c.get("uid"):
+        return {"salon": salon, "message": mid, "uid": str(c["uid"])}
+    return None
+
+
+def _cacher_codes_plus_tard(gid: str, uid: str, salon: str, le: float) -> None:
+    """Les codes affichés repartent au bout de CODE_VISIBLE_SEC, sauf si un
+    clic plus récent les a réaffichés entre-temps."""
+    def cacher():
+        _dormir(CODE_VISIBLE_SEC)
+        c = _lire()["cartes"].get(salon) or {}
+        if float(c.get("codes_le") or 0) != le or not c.get("message"):
+            return
+        with vd.sur_serveur(gid):
+            code, corps = vd.api("PATCH", f"/channels/{salon}/messages/{c['message']}",
+                                 json={"components": vue_carte(uid, gid),
+                                       "allowed_mentions": {"parse": []}})
+        if code != 200:
+            _log(f"codes non cachés dans {salon} : HTTP {code} {str(corps)[:120]}")
+    try:
+        _fond(cacher)
+    except Exception as e:
+        _log(f"codes : effacement différé non lancé ({type(e).__name__}: {e})")
+
+
+def _sur_la_carte(p: Dict[str, Any], gid: str, uid: str, codes: bool = False,
+                  souci: str = "") -> Dict[str, Any]:
+    """La carte du ticket, changée sur place (type 7). Codes affichés : ils
+    repartent d'eux-mêmes un peu plus tard."""
+    carte = p["_carte"]
+    if codes:
+        le = time.time()
+        with _VERROU:
+            d = _lire()
+            if isinstance(d["cartes"].get(carte["salon"]), dict):
+                d["cartes"][carte["salon"]]["codes_le"] = le
+                _ecrire(d)
+        _cacher_codes_plus_tard(gid, uid, carte["salon"], le)
+    return {"type": 7, "data": {"components": vue_carte(uid, gid, codes=codes, souci=souci)}}
+
+
+def _refus(p: Dict[str, Any], gid: str, uid: str, texte: str) -> Dict[str, Any]:
+    """Un refus : dans la carte du ticket s'il vient d'elle, sinon en privé."""
+    if p.get("_carte"):
+        return _sur_la_carte(p, gid, uid, souci=texte)
+    return nx._texte(texte)
+
+
+def _tickets(gid: str) -> Dict[str, str]:
+    return nx._tickets_du_serveur(gid)
+
+
+def _carte_dans(salon: str, moi: str) -> str:
+    """La carte de ce bot déjà dans le salon (registre perdu), ou « ». Les
+    dépôts adresse / mot de passe (boutons « mailx:n: ») n'en sont pas."""
+    code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
+    if code != 200 or not isinstance(ms, list):
+        return ""
+    for m in ms:
+        if str((m.get("author") or {}).get("id")) == str(moi) and \
+                PREFIXE + "prendre" in nx._ids(m.get("components")):
+            return str(m["id"])
+    return ""
+
+
+def poser_cartes(gid: str, seulement: Optional[str] = None,
+                 maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """Une carte Outlook dans chaque ticket du serveur qui n'en a pas."""
+    now = float(time.time() if maintenant is None else maintenant)
+    bilan: Dict[str, Any] = {"posees": [], "retrouvees": [], "deja": 0, "echecs": [], "partis": []}
+    with vd.sur_serveur(gid):
+        moi = vd.bot_du_serveur(gid)["app_id"]
+        for salon, uid in sorted(_tickets(gid).items()):
+            if seulement and salon != str(seulement):
+                continue
+            c = _lire()["cartes"].get(salon)
+            if isinstance(c, dict) and c.get("uid") == uid:
+                if now - float(c.get("vu_le") or 0) < nx.CARTE_REVOIR_SEC:
+                    bilan["deja"] += 1
+                    continue
+                code, _m = vd.api("GET", f"/channels/{salon}/messages/{c.get('message')}")
+                if code == 200:
+                    with _VERROU:
+                        d = _lire()
+                        d["cartes"][salon] = dict(c, vu_le=now)
+                        _ecrire(d)
+                    bilan["deja"] += 1
+                    continue
+                if code != 404:
+                    bilan["echecs"].append((salon, f"relecture HTTP {code}"))
+                    continue
+            code, _m = vd.api("GET", f"/guilds/{gid}/members/{uid}")
+            if code == 404:
+                bilan["partis"].append(salon)
+                continue
+            mid = _carte_dans(salon, moi)
+            if mid:
+                bilan["retrouvees"].append(salon)
+            else:
+                code, rep = vd.api("POST", f"/channels/{salon}/messages",
+                                   json={"flags": nx.V2, "components": vue_carte(uid, gid),
+                                         "allowed_mentions": {"parse": []}})
+                if code != 200 or not isinstance(rep, dict) or not rep.get("id"):
+                    bilan["echecs"].append((salon, f"HTTP {code} {str(rep)[:120]}"))
+                    continue
+                mid = str(rep["id"])
+                bilan["posees"].append(salon)
+            with _VERROU:
+                d = _lire()
+                d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": now}
+                _ecrire(d)
+    for quoi in ("posees", "retrouvees"):
+        if bilan[quoi]:
+            _log(f"cartes Outlook : {quoi} dans {', '.join(bilan[quoi])}")
+    for salon, pourquoi in bilan["echecs"]:
+        _log(f"carte Outlook du salon {salon} non posée : {pourquoi}")
+    return bilan
+
+
+def ramener_carte(gid: str, uid: str, salon: str) -> str:
+    """La carte Outlook du VA revient en dernier dans son salon perso (le bot
+    ne retire que SA carte). « deja », « ramenee » ou « echec »."""
+    with vd.sur_serveur(gid):
+        ancien = str((_lire()["cartes"].get(salon) or {}).get("message") or "")
+        code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=1")
+        if ancien and code == 200 and isinstance(ms, list) and ms and str(ms[0].get("id")) == ancien:
+            return "deja"
+        code, rep = vd.api("POST", f"/channels/{salon}/messages",
+                           json={"flags": nx.V2, "components": vue_carte(uid, gid),
+                                 "allowed_mentions": {"parse": []}})
+        if code != 200 or not isinstance(rep, dict) or not rep.get("id"):
+            _log(f"menu : carte Outlook non reposée dans {salon} : HTTP {code} {str(rep)[:120]}")
+            return "echec"
+        mid = str(rep["id"])
+        with _VERROU:
+            d = _lire()
+            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time()}
+            _ecrire(d)
+        if ancien and ancien != mid:
+            code, _r = vd.api("DELETE", f"/channels/{salon}/messages/{ancien}")
+            if code not in (204, 404):
+                _log(f"menu : ancienne carte Outlook {ancien} non retirée de {salon} : HTTP {code}")
+    _log(f"menu : carte Outlook de {uid} ramenée en bas de {salon}")
+    return "ramenee"
+
+
+def _menu(p: Dict[str, Any], gid: str, uid: str) -> Dict[str, Any]:
+    """« 📋 Afficher le menu » (📧・adresse-outlook) ou « 📧 Outlook » (menu
+    épinglé du ticket) : la carte descend en bas du salon perso."""
+    tickets = _tickets(gid)
+    ici = str(p.get("channel_id") or "")
+    if ici in tickets:
+        vau = tickets[ici]
+        try:
+            _fond(lambda: ramener_carte(gid, vau, ici))
+        except Exception as e:
+            _log(f"menu : déplacement non lancé dans {ici} ({type(e).__name__}: {e})")
+            return nx._texte("❌ Impossible pour le moment : réessaie dans un instant.")
+        return {"type": 6}
+    salon = next((s for s, u in tickets.items() if u == uid), "")
+    if not salon:
+        return nx._texte("Tu n'as pas encore de salon perso : ton manager le crée à ton arrivée.")
+    try:
+        _fond(lambda: ramener_carte(gid, uid, salon))
+    except Exception as e:
+        _log(f"menu : déplacement non lancé pour {uid} ({type(e).__name__}: {e})")
+        return nx._texte("❌ Impossible pour le moment : réessaie dans un instant.")
+    return nx._texte(f"📋 Ton menu est en bas de <#{salon}>.")
+
+
+def generaliser_cartes(gid: str) -> str:
+    with _VERROU:
+        d = _lire()
+        d.setdefault("cartes_auto", {})[str(gid)] = True
+        _ecrire(d)
+    b = poser_cartes(gid)
+    return (f"cartes Outlook : {len(b['posees'])} posée(s), {len(b['retrouvees'])} retrouvée(s), "
+            f"{b['deja']} déjà là, {len(b['partis'])} VA parti(s), {len(b['echecs'])} échec(s) ; "
+            + poser_panneau(gid))
+
+
+def tour_cartes() -> None:
+    """Appelé par la boucle des cartes numéro (numeros_x_discord) toutes les
+    10 minutes : les nouveaux tickets reçoivent aussi leur carte Outlook."""
+    for gid in SERVEURS:
+        if _cartes_auto(gid):
+            try:
+                poser_cartes(gid)
+            except Exception as e:
+                _log(f"cartes Outlook de {gid} : tour en échec ({type(e).__name__}: {e})")
+
+
 # ─── Clics ────────────────────────────────────────────────────────────────
 def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """La réponse à un clic « mailx: », ou None si ce n'est pas le nôtre."""
@@ -200,8 +448,19 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not uid.isdigit():
         return nx._texte("Compte introuvable.")
     action = cid[len(PREFIXE):].split(":")[0]
+    if action == "menu":
+        return _menu(p, gid, uid)
+    carte = _carte_du_clic(p)
+    if carte:
+        # La carte d'un ticket : les adresses et le quota sont ceux du VA du
+        # ticket, même quand son manager clique pour lui (staff : non bridé).
+        p = dict(p, _carte=carte)
+        if carte["uid"] != uid:
+            uid, user = carte["uid"], {}
     if action == "prendre":
         return _prendre(p, gid, uid, membre, user, conf)
+    if action in ("2fa", "maj") and carte:
+        return _sur_la_carte(p, gid, uid, codes=True)
     if action == "2fa":
         return _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     if action == "maj":
@@ -275,31 +534,34 @@ def _prendre(p, gid, uid, membre, user, conf):
             _fond(lambda: coffre_vide(uid))
         except Exception as e:
             _log(f"coffre vide : alerte non lancée ({type(e).__name__}: {e})")
-        return nx._texte(TEXTE_COFFRE_VIDE)
+        return _refus(p, gid, uid, TEXTE_COFFRE_VIDE)
     if not nx._staff(membre, gid):
         try:
             n = oc.nb_du_jour(uid, gid)
         except Exception as e:
             _log(f"quota illisible pour {uid} ({type(e).__name__}: {e}) : rien n'est donné")
-            return nx._texte("❌ Le coffre ne se lit plus : rien n'a été donné. Préviens un admin.")
+            return _refus(p, gid, uid, "❌ Le coffre ne se lit plus : rien n'a été donné. "
+                                       "Préviens un admin.")
         if n >= conf["quota"]:
             _log(f"quota atteint pour {uid} ({n}/{conf['quota']})")
-            return nx._texte("📵 %d adresses aujourd'hui : c'est le maximum. Reviens demain."
-                             % conf["quota"])
+            return _refus(p, gid, uid, "📵 %d adresses aujourd'hui : c'est le maximum. "
+                                       "Reviens demain." % conf["quota"])
     try:
         c, etat = oc.attribuer_une_de_plus(uid, str(user.get("global_name") or user.get("username") or ""), gid)
     except Exception as e:
         _log(f"attribution impossible pour {uid} ({type(e).__name__}: {e})")
-        return nx._texte("❌ Le coffre ne s'écrit plus : rien n'a été donné. Préviens un admin.")
+        return _refus(p, gid, uid, "❌ Le coffre ne s'écrit plus : rien n'a été donné. "
+                                   "Préviens un admin.")
     if not c:
         # La dernière adresse libre partie entre-temps (deux clics à la fois).
         try:
             _fond(lambda: coffre_vide(uid))
         except Exception as e:
             _log(f"coffre vide : alerte non lancée ({type(e).__name__}: {e})")
-        return nx._texte(TEXTE_COFFRE_VIDE)
+        return _refus(p, gid, uid, TEXTE_COFFRE_VIDE)
     _log(f"adresse n°{c.get('id')} donnée à {uid} ({c.get('va')})")
-    rep = _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
+    rep = (_sur_la_carte(p, gid, uid, codes=True) if p.get("_carte")
+           else _repondre(p, gid, uid, vue_mes_adresses(uid, gid)))
     try:
         _fond(lambda: suivre_coffre(uid))
     except Exception as e:
@@ -347,9 +609,10 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
         code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
         if code != 200 or not isinstance(ms, list):
             return f"salon illisible : HTTP {code} {str(ms)[:160]}"
+        # Le panneau, ou le menu qui l'a remplacé : sinon un second message.
         miens = [m for m in ms if str((m.get("author") or {}).get("id")) == str(moi)
-                 and PREFIXE + "prendre" in nx._ids(m.get("components"))]
-        comps = vue_panneau()
+                 and ({PREFIXE + "prendre", PREFIXE + "menu"} & set(nx._ids(m.get("components"))))]
+        comps = vue_menu() if _cartes_auto(gid) else vue_panneau()
         if miens:
             code, rep = vd.api("PATCH", f"/channels/{salon}/messages/{miens[0]['id']}",
                                json={"components": comps})
@@ -364,5 +627,11 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["poser"]:
         vd._charger_config()
         print(poser_panneau())
+    elif sys.argv[1:2] == ["cartes"] and len(sys.argv) == 3:
+        # cartes <salon> : une seule carte (essai) ; cartes tous : toutes, les
+        # nouveaux tickets ensuite, et le panneau du salon commun en menu.
+        vd._charger_config()
+        print(generaliser_cartes(vd.TWITTER_ID) if sys.argv[2] == "tous"
+              else poser_cartes(vd.TWITTER_ID, seulement=sys.argv[2]))
     else:
-        print("usage : python outlook_x_discord.py poser")
+        print("usage : python outlook_x_discord.py poser | cartes <salon>|tous")

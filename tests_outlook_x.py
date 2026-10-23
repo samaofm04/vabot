@@ -242,6 +242,100 @@ try:
     src = (Path(__file__).resolve().parent / "web_upload.py").read_text(encoding="utf-8")
     i_ox, i_vd = src.find("import outlook_x_discord as _ox"), src.find("return jsonify(_vd.traiter_interaction(charge))")
     check("route /discord/interactions : « mailx: » traité avant la vérification", 0 < i_ox < i_vd)
+
+    # 11. la carte Outlook dans le ticket de chaque VA (comme la carte numéro)
+    remise_a_zero(0)
+    _sav_tk = tickets_discord.ETAT_FICHIER
+    dt = Path(tempfile.mkdtemp(prefix="mailx_tickets_"))
+    tickets_discord.ETAT_FICHIER = dt / "tickets.json"
+    tickets_discord.ETAT_FICHIER.write_text(json.dumps({"tickets": {
+        f"{GID}:{VA}": {"salon": "T1"}, f"{GID}:{VA2}": {"salon": "T2"}}}), encoding="utf-8")
+
+    def api_carte(methode, chemin, **kw):
+        APPELS.append((methode, chemin, kw))
+        if methode == "POST" and chemin in ("/channels/T1/messages", "/channels/T2/messages"):
+            return 200, {"id": "carte-" + chemin.split("/")[2]}
+        if methode == "GET" and chemin.startswith("/channels/T") and "?limit" in chemin:
+            return 200, []
+        return faux_api(methode, chemin, **kw)
+    vd.api = api_carte
+
+    def clic_carte(cid, salon="T1", uid=VA, perms="0"):
+        p = {"type": 3, "guild_id": GID, "channel_id": salon, "application_id": APP, "token": "tk",
+             "data": {"custom_id": cid},
+             "member": {"user": {"id": uid, "username": "va" + uid[:2]}, "roles": [], "permissions": perms},
+             "message": {"id": "carte-" + salon, "flags": ox.nx.V2}}
+        r = ox.traiter(p)
+        REPONSES.append(r)
+        return r
+
+    def textes_v2(comps):
+        out = []
+        for c in comps or []:
+            if c.get("type") == 10:
+                out.append(c["content"])
+            out += textes_v2(c.get("components"))
+        return out
+
+    b = ox.poser_cartes(GID, seulement="T1")
+    posts = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/T1/messages"]
+    check("carte : essai sur UN ticket — le formulaire vide, « Prendre une adresse » seul",
+          b["posees"] == ["T1"] and len(posts) == 1
+          and textes_v2(posts[0]["components"]) == ["## Adresses Outlook", "📧 " + ox.BLANC,
+                                                    "🔑 " + ox.BLANC, "🔐 " + ox.BLANC_CODE]
+          and ids(posts[0]["components"]) == ["mailx:prendre"], (b, posts))
+    r = clic_carte("mailx:prendre")
+    check("carte : coffre vide — dit DANS la carte (type 7), staff prévenu, aucun message privé",
+          r["type"] == 7 and any("coffre d'adresses Outlook est vide" in t for t in textes_v2(r["data"]["components"]))
+          and len(ALERTES) == 1, (r, ALERTES))
+    for i in range(5):
+        oc.ajouter(f"carte{i + 1}@outlook.com", f"MdpCarte{i + 1}!", SEED)
+    APPELS.clear()
+    r = clic_carte("mailx:prendre")
+    code_attendu, _ = totp.code_totp(SEED)
+    tx = textes_v2(r["data"]["components"])
+    check("carte : une adresse — changée sur place, adresse, mot de passe et code du moment",
+          r["type"] == 7 and "📧 `carte1@outlook.com`" in tx and "🔑 `MdpCarte1!`" in tx
+          and any(code_attendu in t for t in tx) and SEED not in json.dumps(r), tx)
+    caches = [kw["json"] for m, ch, kw in APPELS if m == "PATCH" and ch == "/channels/T1/messages/carte-T1"]
+    check("carte : le code repart de lui-même (case vide), l'adresse reste",
+          caches and "🔐 " + ox.BLANC_CODE in textes_v2(caches[-1]["components"])
+          and "📧 `carte1@outlook.com`" in textes_v2(caches[-1]["components"]), caches)
+    depots = [kw["json"]["content"] for m, ch, kw in APPELS
+              if m == "POST" and ch == f"/channels/{TICKET}/messages"]
+    check("carte : l'adresse et le mot de passe partent aussi seuls dans le salon perso (copie sur téléphone)",
+          list(dict.fromkeys(depots)) == ["carte1@outlook.com", "MdpCarte1!"], depots)  # faux : journal en double
+    r = clic_carte("mailx:2fa")
+    check("carte : « Code 2FA » montre les codes sur place", r["type"] == 7
+          and any(code_attendu in t for t in textes_v2(r["data"]["components"])), r)
+    clic_carte("mailx:prendre")
+    clic_carte("mailx:prendre")
+    r = clic_carte("mailx:prendre")
+    check("carte : 4e adresse du jour — le refus est écrit dans la carte",
+          r["type"] == 7 and any("3 adresses aujourd'hui" in t for t in textes_v2(r["data"]["components"])), r)
+    ox.poser_cartes(GID, seulement="T2")
+    r = clic_carte("mailx:prendre", salon="T2", uid=CHEF, perms=str(0x8))
+    check("carte : le manager clique dans le ticket d'un VA — l'adresse est au VA, pas au manager",
+          oc.comptes_du_va(VA2, GID) and not oc.comptes_du_va(CHEF, GID), oc.comptes())
+    p_menu = {"type": 3, "guild_id": GID, "channel_id": SALON, "application_id": APP, "token": "tm",
+              "data": {"custom_id": "mailx:menu"},
+              "member": {"user": {"id": VA, "username": "va"}, "roles": [], "permissions": "0"},
+              "message": {"flags": ox.nx.V2}}
+    r = ox.traiter(p_menu)
+    check("menu : depuis 📧・adresse-outlook, une ligne privée avec le lien du salon perso",
+          r["type"] == 4 and "<#T1>" in r["data"]["content"], r)
+    r = ox.traiter(dict(p_menu, channel_id="T1"))
+    check("menu : le bouton « 📧 Outlook » du menu épinglé — la carte descend, sans message",
+          r == {"type": 6}, r)
+    APPELS.clear()
+    print(ox.generaliser_cartes(GID))
+    pan = [kw["json"] for m, ch, kw in APPELS if ch.startswith(f"/channels/{SALON}/messages")
+           and m in ("POST", "PATCH")]
+    check("généralisé : 📧・adresse-outlook devient la ligne + « 📋 Afficher le menu »",
+          pan and textes_v2(pan[-1]["components"]) == [ox.TEXTE_RENVOI]
+          and ids(pan[-1]["components"]) == ["mailx:menu"], pan)
+    tickets_discord.ETAT_FICHIER = _sav_tk
+    vd.api = faux_api
 finally:
     (vd.api, vd._EN_FOND, oc.FICHIER, ox.FICHIER, ox._dormir, tickets_discord.role_helper,
      tickets_discord.ticket_de, numgen.ALERTES_FICHIER, numgen._en_production,
