@@ -2324,15 +2324,10 @@ def suivre_partout() -> Dict[str, Any]:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
         _couper_seren(gid)
-        # Agency VA INSTAGRAM : arrivées, départs, panneau « Se vérifier »
-        # (agency_accueil) — à part, une panne n'arrête pas le tour
-        if gid == AGENCY_IG_ID:
-            try:
-                import agency_accueil
-                with sur_serveur(gid):
-                    agency_accueil.surveiller()
-            except Exception as e:
-                print(f"[agency] accueil : {type(e).__name__}: {e}", flush=True)
+        # Agency VA INSTAGRAM : arrivées, départs et parrainage ne passent
+        # plus ici mais par le fil d'agency_accueil, chaque minute — le
+        # parrain se lit à la différence d'usage des invitations, et dix
+        # minutes entre deux relevés mélangeaient les arrivées.
     # Va IG n'a pas de tickets ici (bot principal), mais ses VA partis gardaient
     # leurs liens en service : coupés une fois l'heure (liens_fr.couper_partis)
     if time.time() - _DEPARTS_VU.get("va_ig", 0) >= DEPARTS_S:

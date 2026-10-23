@@ -20,6 +20,7 @@ Lancement : python tests_agency_ig.py
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import io
 import json
 import pathlib
@@ -392,13 +393,24 @@ try:
     LISTE = {"ok": True, "m": [{"user": {"id": "1"}, "joined_at": "a", "roles": []},
                                {"user": {"id": "2"}, "joined_at": "b", "roles": []},
                                {"user": {"id": "9", "bot": True}, "roles": []}]}
-    postes, panneaux = [], []
+    INVITES = {"ok": True, "usages": {"vanity": 4}}
+    postes, panneaux, appels_aa = [], [], []
 
     def faux_api_aa(methode, chemin, **kw):
+        appels_aa.append((methode, chemin, kw.get("json")))
         if methode == "GET" and "/members" in chemin:
             return (200, list(LISTE["m"])) if LISTE["ok"] else (403, {"message": "Missing Access"})
+        if methode == "GET" and chemin.endswith("/invites"):
+            if not INVITES["ok"]:
+                return 403, {"message": "Missing Permissions"}
+            return 200, [{"code": c, "uses": n} for c, n in INVITES["usages"].items()]
+        if methode == "POST" and chemin.endswith("/invites"):
+            code = f"inv{len(INVITES['usages'])}"
+            INVITES["usages"][code] = 0
+            return 200, {"code": code}
         if methode == "POST":
-            postes.append((chemin, kw["json"]["embeds"][0]["title"], kw["json"]["allowed_mentions"]))
+            postes.append((chemin, kw["json"]["embeds"][0]["title"], kw["json"]["allowed_mentions"],
+                           kw["json"]["embeds"][0].get("description", "")))
             return 200, {"id": f"m{len(postes)}"}
         return 200, {}
     aa._api = faux_api_aa
@@ -442,7 +454,155 @@ try:
     check("liste illisible (403) : rien d'annoncé ni d'oublié",
           b4["arrivees"] == b4["departs"] == 0 and len(postes) == n
           and "3" in json.loads(aa.FICHIER.read_text())["membres"])
+    LISTE["ok"] = True
+
+    # ── parrainage (23/10 : « il manque parrainage ») ────────────────────
+    def etat_aa():
+        return json.loads(aa.FICHIER.read_text())
+
+    def invites_creees():
+        return [a for a in appels_aa if a[0] == "POST" and a[1].endswith("/invites")]
+    lien1 = aa.lien_pour("1")
+    check("lien personnel : une invitation permanente et unique sur 🔐・vérification",
+          lien1.startswith("https://discord.gg/inv") and len(invites_creees()) == 1
+          and invites_creees()[0][1] == f"/channels/{aa.SALON_VERIF}/invites"
+          and invites_creees()[0][2] == {"max_age": 0, "max_uses": 0, "unique": True}, appels_aa[-3:])
+    check("… créée une seule fois (le même lien au clic suivant)",
+          aa.lien_pour("1") == lien1 and len(invites_creees()) == 1)
+    code1 = lien1.rsplit("/", 1)[1]
+    INVITES["usages"][code1] += 1
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": "4", "username": "nouveau4"}, "joined_at": "d", "roles": []}]
+    n = len(postes)
+    b5 = aa.surveiller()
+    f4 = etat_aa()["filleuls"].get("4") or {}
+    check("arrivé par le lien de 1 : 1 est son parrain, et l'annonce le dit (sans mention)",
+          b5["arrivees"] == 1 and b5["parraines"] == 1 and f4.get("parrain") == "1"
+          and f4.get("source") == "invitation_unique" and len(postes) == n + 1
+          and "Invité par <@1>." in postes[n][3] and postes[n][2] == {"parse": []}, (b5, f4, postes[n:]))
+    check("… parrain_de le rend (le « Merci » de la bienvenue)",
+          aa.parrain_de("4") == "1" and aa.parrain_de("3") == "")
+    check("… et la bienvenue des vérifiés d'Agency remercie le parrain, pas celle de Twitter",
+          "Merci <@1>" in vd2._merci_parrain("4", vd2.serveur(AG))
+          and vd2._merci_parrain("4", {"id": "1445108485090971710"}) == ""
+          and vd2._merci_parrain("3", vd2.serveur(AG)) == "")
+    code3 = aa.lien_pour("3").rsplit("/", 1)[1]
+    INVITES["usages"][code1] += 1
+    INVITES["usages"][code3] += 1
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": "5"}, "joined_at": "e", "roles": []},
+                               {"user": {"id": "6"}, "joined_at": "f", "roles": []}]
+    b6 = aa.surveiller()
+    e6 = etat_aa()["filleuls"]
+    check("deux arrivés par deux liens dans le même relevé : origine à confirmer, rien deviné",
+          b6["arrivees"] == 2 and b6["parraines"] == 0
+          and e6["5"]["parrain"] is None and e6["6"]["source"] == "a_confirmer", (b6, e6))
+    INVITES["usages"]["vanity"] += 1
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": "7"}, "joined_at": "g", "roles": []}]
+    aa.surveiller()
+    check("arrivé par une invitation qui n'est à personne : sans parrain",
+          etat_aa()["filleuls"]["7"]["parrain"] is None)
+    LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "4"]
+    b7 = aa.surveiller()
+    INVITES["usages"][code3] += 1
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": "4", "username": "nouveau4"}, "joined_at": "h", "roles": []}]
+    b8 = aa.surveiller()
+    check("parti puis revenu par un autre lien : départ et retour annoncés, premier parrain gardé",
+          b7["departs"] == 1 and b8["arrivees"] == 1 and aa.parrain_de("4") == "1", (b7, b8))
+    INVITES["ok"] = False
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": "8"}, "joined_at": "i", "roles": []}]
+    n = len(postes)
+    b9 = aa.surveiller()
+    check("invitations illisibles : le tour attend, rien d'annoncé ni d'attribué",
+          b9["arrivees"] == 0 and len(postes) == n and "8" not in etat_aa()["membres"])
+    INVITES["ok"] = True
+    check("… et le tour suivant reprend l'arrivée", aa.surveiller()["arrivees"] == 1)
+    _vrai_etat = aa.FICHIER.read_text()
+    aa._ecrire({"initialise": 1, "membres": {"50": {"joined_at": "2026-01-01"},
+                                             "51": {"joined_at": "2026-02-01", "neuf": True, "arrivee": "m"},
+                                             "52": {"joined_at": "2026-03-01", "a_annoncer": True, "neuf": True}}})
+    n = len(postes)
+    nr = aa.rattraper({u: {"user": {"id": u}, "joined_at": j, "roles": []}
+                       for u, j in (("50", "2026-01-01"), ("51", "2026-02-01"), ("52", "2026-03-01"))}, "")
+    check("historique : les arrivés du relevé (annoncés ou en attente) n'y repassent pas",
+          nr == 1 and len(postes) == n + 1 and "<@50>" in postes[-1][3] and "01/01/2026" in postes[-1][3]
+          and etat_aa().get("rattrape"), postes[n:])
+    aa.FICHIER.write_text(_vrai_etat)
+    LISTE["m"] = LISTE["m"] + [{"user": {"id": str(100 + i)}, "joined_at": "x", "roles": []} for i in range(30)]
+    n = len(postes)
+    b10 = aa.surveiller()
+    check("état perdu (la moitié du serveur « arrivée » d'un coup) : nouvelle référence, rien d'annoncé",
+          b10.get("reference") == 30 and b10["arrivees"] == 0 and len(postes) == n
+          and "130" not in etat_aa().get("filleuls", {}), b10)
+    aa.FICHIER.write_text(_vrai_etat)
+    LISTE["m"] = LISTE["m"][:-30]
+
+    # ── l'espace personnel, le bouton, le panneau ─────────────────────────
+    _sauve_mods = {k: sys.modules.get(k) for k in ("affiliation_privee", "affiliation_site")}
+    _sauve_lien_de = lv.lien_de
+    try:
+        sys.modules["affiliation_privee"] = types.SimpleNamespace(
+            compteurs=lambda: {"https://onlyfans.com/emy.brw/c1": 12})
+        sys.modules["affiliation_site"] = types.SimpleNamespace(
+            lien_personnel=lambda uid, p: f"https://youl4b.com/affiliation/mon-espace?t={p}-{uid}")
+        lv.lien_de = lambda gid, uid: ({"tracking": "https://onlyfans.com/emy.brw/c1/"}
+                                       if (gid, uid) == (AG, "4") else {})
+        p1 = aa.panneau("1")
+        t1 = json.dumps(p1, ensure_ascii=False)
+        check("espace de 1 : son lien, pas de parrain, son filleul et ses subs aux deux paliers",
+              p1["fields"][0]["value"] == lien1 and "lien personnel" in p1["fields"][0]["name"]
+              and "Aucun parrain" in p1["fields"][1]["value"] and "1 filleul(s)" in p1["fields"][2]["value"]
+              and "@nouveau4" in t1 and "12 vrais subs" in t1 and "Objectif 10 : 100 %" in t1
+              and "Objectif 200 : 6 %" in t1 and "0,50 $ à 10 subs" in t1, t1)
+        p4 = aa.panneau("4")
+        check("espace de 4 : son parrain est 1, son propre lien créé à l'ouverture",
+              p4["fields"][1]["value"] == "@1" and p4["fields"][0]["value"].startswith("https://discord.gg/")
+              and p4["fields"][0]["value"] != lien1, p4)
+        check("subs d'une fiche : son tracking ; sans tracking ni compteurs, inconnu",
+              aa.subs_fiche({"tracking": "https://onlyfans.com/emy.brw/c1"}, {"https://onlyfans.com/emy.brw/c1": 3}) == 3
+              and aa.subs_fiche({}, {"x": 1}) is None
+              and aa.subs_fiche({"tracking": "https://onlyfans.com/emy.brw/c1"}, None) is None
+              and aa.subs_fiche({"tracking": "https://onlyfans.com/emy.brw/c9"}, {"x": 1}) is None)
+        charge = {"type": 3, "guild_id": AG, "application_id": str(vd2.bot_du_serveur(AG).get("app_id")),
+                  "member": {"user": {"id": "4"}}, "data": {"custom_id": "agency-aff:mes"}}
+        r = aa.traiter(charge)
+        check("bouton « Mon espace personnel » : l'adresse de SON espace Agency, en privé",
+              r["type"] == 4 and r["data"]["flags"] == 64 and "t=agency-4" in r["data"]["content"], r)
+        check("… d'un autre serveur ou d'une autre application : refusé",
+              "ne correspond pas" in aa.traiter(dict(charge, guild_id="1"))["data"]["content"]
+              and "ne correspond pas" in aa.traiter(dict(charge, application_id="1"))["data"]["content"])
+        check("… un autre bouton ne le concerne pas",
+              aa.traiter({"data": {"custom_id": "twitter-aff:mes"}}) is None)
+        sys.modules["affiliation_site"] = types.SimpleNamespace(
+            lien_personnel=lambda uid, p: (_ for _ in ()).throw(ValueError("Plateforme inconnue")))
+        check("… espace indisponible (site pas prêt) : il le dit, en privé",
+              "indisponible" in aa.traiter(charge)["data"]["content"])
+    finally:
+        lv.lien_de = _sauve_lien_de
+        for k, v in _sauve_mods.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+    r1 = aa.poser_panneau_parrainage()
+    posts_p = [a for a in appels_aa if a[0] == "POST" and a[1] == f"/channels/{aa.SALON_PARRAINAGE}/messages"]
+    pins = [a for a in appels_aa if a[0] == "PUT" and a[1].startswith(f"/channels/{aa.SALON_PARRAINAGE}/pins/")]
+    corps = posts_p[-1][2] if posts_p else {}
+    check("panneau du parrainage : posé dans 🤝・parrainage, épinglé, bouton agency-aff, paliers",
+          r1 == "pose" and len(posts_p) == 1 and len(pins) == 1
+          and corps["components"][0]["components"][0]["custom_id"] == "agency-aff:mes"
+          and "0,50 $ à 10 subs" in corps["embeds"][0]["description"]
+          and corps["allowed_mentions"] == {"parse": []}, (r1, corps))
+    r2 = aa.poser_panneau_parrainage()
+    check("… reposé : remis au texte du jour sur place, pas de doublon",
+          r2 == "mis a jour" and len([a for a in appels_aa if a[0] == "POST"
+                                      and a[1] == f"/channels/{aa.SALON_PARRAINAGE}/messages"]) == 1)
     aa.FICHIER, aa._api, vd2.assurer_message_verif = _sauve_aa
+    src_wu = (BOT / "web_upload.py").read_text(encoding="utf-8")
+    check("un seul relevé des membres : plus dans le tour des tickets, le fil d'agency_accueil",
+          ".surveiller()" not in inspect.getsource(tk.suivre_partout)
+          and '"agency_accueil": ("agency-accueil"' in src_wu and "_ag_boot.demarrer()" in src_wu
+          and 'not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("agency-accueil")' in src_wu)
+    check("route Discord : le bouton agency-aff va à agency_accueil.traiter",
+          "_rep_ag = _ag.traiter(charge)" in src_wu)
     check("Agency dans le périmètre des tickets, managers fixes Gone et Yoshiki",
           AG in tk.SERVEURS_TICKETS
           and tk.MANAGERS_POSES[AG] == ["1392192812073615391", "1502081637591289877"])

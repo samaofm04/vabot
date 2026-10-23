@@ -1338,6 +1338,20 @@ def ouvrir(uid: str, cfg: Optional[Dict[str, Any]] = None) -> bool:
     return _ouvrir(uid, cfg) in (200, 204)
 
 
+def _merci_parrain(uid: str, cfg: Dict[str, Any]) -> str:
+    """« 🙏 Merci @parrain de l'avoir invité ! » sous la bienvenue, comme sur
+    Twitter — pour Agency, dont le parrain est relevé dans git
+    (agency_accueil). Une panne du registre ne retient pas la bienvenue."""
+    if str(cfg.get("id")) != AGENCY_IG_ID:
+        return ""
+    try:
+        import agency_accueil
+        p = agency_accueil.parrain_de(uid)
+    except Exception:                                        # noqa: BLE001
+        return ""
+    return f"\n\n🙏 Merci <@{p}> de l’avoir invité !" if p else ""
+
+
 def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
     """Le nouveau est MENTIONNE : Discord le notifie et l'amene dans
     #bienvenue, avec les etapes et le choix de sa plateforme (quand le
@@ -1353,6 +1367,7 @@ def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                          for i, (txt, cid) in enumerate((cfg.get("parcours") or [])[:6]))
         e = {"title": f"👋 Bienvenue sur {cfg['nom']} !", "color": 0x5865F2,
              "description": f"<@{uid}> vient d'arriver — validé ✅"
+                            + _merci_parrain(uid, cfg)
                             + (f"\n\n**📋 Par où commencer :**{etapes}" if etapes else ""),
              "footer": {"text": "YouLab • Bienvenue dans l'équipe !"}}
         code, rep = api("POST", f"/channels/{salon}/messages",

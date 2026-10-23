@@ -61659,6 +61659,16 @@ def create_app():
         _nx_boot.demarrer()
     except Exception as _e:
         log.warning(f"numéros X non repris: {_e}")
+    # Agency VA INSTAGRAM : arrivées, départs et parrains, relevés chaque
+    # minute dans le fil d'agency_accueil (surveillé : _FILS_DISCORD). Pas
+    # sous le banc d'essai : un rendu de page sur le VPS aurait lancé un
+    # second relevé à côté de celui du bot.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("agency-accueil"):
+            import agency_accueil as _ag_boot
+            _ag_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"accueil d'Agency non démarré: {_e}")
     # Les liens de suivi de Jessye par personne : clics US relevés une fois
     # par jour ; le salon « inflow-resultat » (Bixby) reste coupé tant que
     # data/infloww_liens_config.json ne l'active pas.
@@ -61908,6 +61918,18 @@ def create_app():
             print(f"[mailx] route : {type(_e_ox).__name__}: {_e_ox}", flush=True)
             if str((charge.get("data") or {}).get("custom_id") or "").startswith("mailx:"):
                 return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
+        # « 🔒 Mon espace personnel » de 🤝・parrainage d'Agency
+        # (agency_accueil) : l'adresse de son espace, en privé.
+        try:
+            import agency_accueil as _ag
+            _rep_ag = _ag.traiter(charge)
+            if _rep_ag is not None:
+                return jsonify(_rep_ag)
+        except Exception as _e_ag:
+            print(f"[agency] route : {type(_e_ag).__name__}: {_e_ag}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("agency-aff:"):
+                return jsonify({"type": 4, "data": {"content": "Service temporairement indisponible.",
                                                     "flags": 64}})
         return jsonify(_vd.traiter_interaction(charge))
 
@@ -79945,6 +79967,9 @@ _FILS_DISCORD = {
                             ("tour",), 30),
     "entretien_parrainage": ("entretien-invitations", "invitations du serveur Entretien",
                              ("surveiller", "rapports"), 15),
+    # celui-là est dans git, démarré plus haut dans create_app
+    "agency_accueil": ("agency-accueil", "arrivées et parrainage d'Agency VA INSTAGRAM",
+                       ("surveiller",), 60),
 }
 # Un appel Discord peut attendre la fin d'un 429 : trois périodes de 15 s
 # donneraient de fausses alertes. Jamais moins de 3 minutes.
