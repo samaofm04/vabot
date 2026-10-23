@@ -49,6 +49,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "nom": "YouLab TWITTER",
         "salon": "1552392906340565114",          # 📚 RESSOURCES > 📧・adresse-outlook
         "quota": 3,                               # par jour et par VA ; le staff n'est pas bridé
+        # Propriétaire, 23/10/2026 : « retire outlook » du salon, « garde outlook
+        # pour twitter dans leur menu » — la carte du ticket et le bouton
+        # « 📧 Outlook » du menu épinglé suffisent. Plus de panneau ici.
+        "panneau": False,
     },
 }
 #: Adresses montrées (les plus récentes) : un message V2 porte 40 composants
@@ -609,6 +613,8 @@ def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
 # ─── Pose du panneau ──────────────────────────────────────────────────────
 def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
     conf = SERVEURS[gid]
+    if conf.get("panneau") is False:
+        return "pas de panneau dans ce salon (retiré à la demande du propriétaire)"
     salon = conf["salon"]
     with vd.sur_serveur(gid):
         moi = vd.bot_du_serveur(gid)["app_id"]

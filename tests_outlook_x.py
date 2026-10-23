@@ -220,23 +220,16 @@ try:
     c, etat = oc.attribuer(VA, "va")
     check("Va IG : toujours une seule par VA", etat == "deja" and c["id"] == "2", (c, etat))
 
-    # 9. panneau
+    # 9. panneau : retiré du salon (propriétaire, 23/10/2026), jamais reposté ;
+    # la mise en page du formulaire vide reste celle des cartes.
     remise_a_zero(0)
     print(ox.poser_panneau(GID))
-    posts = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch.startswith("/channels/")]
-    check("panneau : V2, « Prendre une adresse » et « Code 2FA »",
-          len(posts) == 1 and posts[0]["flags"] == ox.nx.V2
-          and ids(posts[0]["components"]) == ["mailx:prendre", "mailx:2fa"], posts)
-    check("panneau : déjà déroulé, les cases mail / mot de passe / code VIDES, aucun texte",
-          [c["content"] for c in posts[0]["components"][0]["components"] if c["type"] == 10]
-          == ["## Adresses Outlook", "📧 " + ox.BLANC, "🔑 " + ox.BLANC, "🔐 " + ox.BLANC_CODE], posts)
-    REGLE["messages"] = [{"id": "77", "author": {"id": vd.bot_du_serveur(GID)["app_id"]},
-                          "components": ox.vue_panneau()}]
-    APPELS.clear()
-    ox.poser_panneau(GID)
-    check("panneau présent : remis à neuf, jamais un second",
-          [(m, ch) for m, ch, kw in APPELS if m in ("POST", "PATCH")] == [("PATCH", f"/channels/{SALON}/messages/77")],
-          APPELS)
+    check("panneau retiré : poser_panneau ne poste ni ne modifie rien",
+          not [1 for m, ch, kw in APPELS if m in ("POST", "PATCH")], APPELS)
+    vide = ox.vue_panneau()
+    check("formulaire vide : cases mail / mot de passe / code VIDES, aucun texte",
+          [c["content"] for c in vide[0]["components"] if c["type"] == 10]
+          == ["## Adresses Outlook", "📧 " + ox.BLANC, "🔑 " + ox.BLANC, "🔐 " + ox.BLANC_CODE], vide)
 
     # 10. la route
     src = (Path(__file__).resolve().parent / "web_upload.py").read_text(encoding="utf-8")
@@ -340,9 +333,8 @@ try:
     print(ox.generaliser_cartes(GID))
     pan = [kw["json"] for m, ch, kw in APPELS if ch.startswith(f"/channels/{SALON}/messages")
            and m in ("POST", "PATCH")]
-    check("généralisé : 📧・adresse-outlook devient la ligne + « 📋 Afficher le menu »",
-          pan and textes_v2(pan[-1]["components"]) == [ox.TEXTE_RENVOI]
-          and ids(pan[-1]["components"]) == ["mailx:menu"], pan)
+    check("généralisé : plus de panneau dans 📧・adresse-outlook (retiré), rien n'y est posté",
+          not pan, pan)
     tickets_discord.ETAT_FICHIER = _sav_tk
     vd.api = faux_api
 finally:

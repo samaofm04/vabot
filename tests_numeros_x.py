@@ -758,8 +758,8 @@ try:
     print(nx.generaliser_cartes(TH))
     panneau = [kw["json"] for m, ch, kw in APPELS
                if ch.startswith("/channels/%s/messages" % nx.SERVEURS[TH]["salon"]) and m in ("POST", "PATCH")]
-    check("ticket : généralisé — 📱・numéro-usa devient la ligne + « 📋 Afficher le menu »",
-          nx._cartes_auto(TH) and panneau and textes(panneau[-1]["components"]) == [nx.TEXTE_RENVOI]
+    check("ticket : généralisé — le salon devient 📋・menu : la ligne + « 📋 Afficher le menu »",
+          nx._cartes_auto(TH) and panneau and textes(panneau[-1]["components"]) == [nx.TEXTE_MENU]
           and boutons(panneau[-1]["components"]) == ["numx:menu"], panneau)
     # la ligne de renvoi déjà dans le salon (sans bouton) est REMPLACÉE, pas doublée
     REGLE["messages"] = [{"id": "77", "author": {"id": vd.bot_du_serveur(TH)["app_id"]},

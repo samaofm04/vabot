@@ -1135,6 +1135,8 @@ CARTES_PAS_SEC = 600
 #: Une carte connue est revérifiée (supprimée à la main ?) une fois par jour.
 CARTE_REVOIR_SEC = 86400
 TEXTE_RENVOI = "📱 Ton numéro est maintenant dans ton salon perso."
+#: Le salon est devenu « 📋・menu » (propriétaire, 23/10/2026, mêmes ids).
+TEXTE_MENU = "📋 Ton menu s'affiche dans ton salon perso."
 _CARTES_DITS: set = set()
 
 
@@ -1163,7 +1165,7 @@ def vue_menu(conf: Dict[str, Any]) -> List[Dict[str, Any]]:
     pas — « remplacer numéro-usa par un menu qui crée le menu dans leur
     salon ». Un clic ramène la carte du VA tout en bas de SON salon perso."""
     return [{"type": 17, "accent_color": ROSE if _insta(conf) else BLEU, "components": [
-        {"type": 10, "content": TEXTE_RENVOI},
+        {"type": 10, "content": TEXTE_MENU},
         {"type": 1, "components": [_bouton("menu", "Afficher le menu", "📋", 1)]}]}]
 
 
