@@ -278,8 +278,8 @@ try:
           r["ok"] and r["uid"] == "v1" and r["manager"] == "m1" and r["essai"]
           and not [a for a in appels if a[0] != "GET"], r)
     labels = [b["label"] for rg in r["corps"]["components"] for b in rg["components"]]
-    check("… l'accueil : Confirmer, Créer son lien, USDC, Mes stats, et aucune mention",
-          labels == ["Confirmer le VA", "Créer son lien", "Mon adresse USDC", "Mes stats"]
+    check("… l'accueil : Confirmer, Créer son lien, USDC, Mes stats, Numéro, et aucune mention",
+          labels == ["Confirmer le VA", "Créer son lien", "Mon adresse USDC", "Mes stats", "Numéro"]
           and r["corps"]["allowed_mentions"] == {"parse": []}, labels)
     check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])
     check("salon hors des catégories de managers : refusé", not tk.adopter_salon(AG, "c3")["ok"])

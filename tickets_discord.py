@@ -2421,7 +2421,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # 4 (21/10/2026) : « 📈 Mes subs » devient « 📈 Mes stats » sur Threads
 # (_avec_mes_stats) : ses accueils déjà postés sont redessinés une fois.
 # 5 (21/10/2026) : sur Twitter aussi.
-BOUTONS_VERSION = 5
+# 6 (23/10/2026) : « 📱 Numéro » en dernier, sur les trois serveurs
+# (NUMERO_DANS_MENU).
+BOUTONS_VERSION = 6
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -2770,6 +2772,15 @@ def _avec_mes_stats(gid: str) -> bool:
         return False
 
 
+# « 📱 Numéro » (propriétaire, 23/10/2026, sur le menu épinglé d'un ticket :
+# « je veux que ça soit une option dans le menu pin ») : la carte numéro du VA
+# de ce ticket redescend tout en bas. Le clic est à numeros_x_discord._menu
+# (traiter, plus haut, rend None pour « numx: » : la route le lui passe).
+NUMERO_DANS_MENU = {"1445108485090971710",    # YouLab TWITTER
+                    "1498948161039896586",    # YouLab THREADS
+                    AGENCY_IG_ID}
+
+
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
                gid: str = "", lien_actif: bool = True):
     """boutons_va (voir plus haut), « 📈 Mes stats » au lieu de « 📈 Mes subs »
@@ -2789,6 +2800,14 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
             for b in r.get("components") or []:
                 if str(b.get("custom_id") or "").startswith("subs:total:"):
                     b["label"] = "Mes stats"
+    if str(gid) in NUMERO_DANS_MENU and not any(
+            b.get("custom_id") == "numx:menu" for r in rangs for b in r.get("components") or []):
+        bouton = {"type": 2, "style": 2, "label": "Numéro", "emoji": {"name": "📱"},
+                  "custom_id": "numx:menu"}
+        if rangs and len(rangs[-1].get("components") or []) < 5:
+            rangs[-1].setdefault("components", []).append(bouton)
+        else:                                   # rangée pleine : Discord en refuse un 6e
+            rangs.append({"type": 1, "components": [bouton]})
     return rangs
 
 
