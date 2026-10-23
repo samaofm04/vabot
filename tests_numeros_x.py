@@ -758,9 +758,48 @@ try:
     print(nx.generaliser_cartes(TH))
     panneau = [kw["json"] for m, ch, kw in APPELS
                if ch.startswith("/channels/%s/messages" % nx.SERVEURS[TH]["salon"]) and m in ("POST", "PATCH")]
-    check("ticket : généralisé — le panneau de 📱・numéro-usa n'est plus qu'une ligne qui renvoie au salon perso",
+    check("ticket : généralisé — 📱・numéro-usa devient la ligne + « 📋 Afficher le menu »",
           nx._cartes_auto(TH) and panneau and textes(panneau[-1]["components"]) == [nx.TEXTE_RENVOI]
-          and not boutons(panneau[-1]["components"]), panneau)
+          and boutons(panneau[-1]["components"]) == ["numx:menu"], panneau)
+    # la ligne de renvoi déjà dans le salon (sans bouton) est REMPLACÉE, pas doublée
+    REGLE["messages"] = [{"id": "77", "author": {"id": vd.bot_du_serveur(TH)["app_id"]},
+                          "components": nx.vue_renvoi(nx.SERVEURS[TH])}]
+    APPELS.clear()
+    nx.poser_panneau(TH)
+    check("menu : l'ancienne ligne de renvoi est remise à neuf en menu, aucun second message",
+          {(m, ch) for m, ch, kw in APPELS if m in ("POST", "PATCH")}   # le faux journalise deux fois
+          == {("PATCH", "/channels/%s/messages/77" % nx.SERVEURS[TH]["salon"])}, APPELS)
+    REGLE["messages"] = []
+
+    # « Afficher le menu » : la carte revient en bas du salon perso
+    def api_menu(methode, chemin, **kw):
+        if methode == "POST" and chemin == "/channels/T1/messages":
+            APPELS.append((methode, chemin, kw))
+            return 200, {"id": "nouvelle-T1"}
+        if methode == "GET" and chemin == "/channels/T1/messages?limit=1":
+            APPELS.append((methode, chemin, kw))
+            return 200, [{"id": MENU_DERNIER[0]}]
+        return api_cartes(methode, chemin, **kw)
+    MENU_DERNIER = ["un-message-du-va"]
+    vd.api = api_menu
+    APPELS.clear()
+    r = nx.traiter(clic("numx:menu", gid=TH))
+    check("menu : réponse privée d'UNE ligne avec le lien du salon perso",
+          r["type"] == 4 and r["data"]["flags"] == 64 and "<#T1>" in r["data"]["content"], r)
+    check("menu : la carte est reposée en bas, l'ancienne retirée, la suite écrit dans la nouvelle",
+          ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
+          and ("DELETE", "/channels/T1/messages/carte-T1") in [(m, ch) for m, ch, kw in APPELS]
+          and nx._lire()["cartes"]["T1"]["message"] == "nouvelle-T1"
+          and nx._message(f"{TH}:{VA}").get("message") == "nouvelle-T1", APPELS)
+    MENU_DERNIER[0] = "nouvelle-T1"
+    APPELS.clear()
+    nx.traiter(clic("numx:menu", gid=TH))
+    check("menu : carte déjà en bas, rien n'est reposté ni retiré",
+          not [1 for m, ch, kw in APPELS if m in ("POST", "DELETE")], APPELS)
+    r = nx.traiter(clic("numx:menu", gid=TH, uid="555555555555555555"))
+    check("menu : sans salon perso, le VA lit pourquoi",
+          r["type"] == 4 and "salon perso" in r["data"]["content"], r)
+    vd.api = api_cartes
     check("ticket : Twitter garde son panneau commun", not nx._cartes_auto(GID))
     tickets_discord.ETAT_FICHIER = _sav_tk
     numgen.get_number, numgen.getatext_key = _sav_gn, _sav_gk

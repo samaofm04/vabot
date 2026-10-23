@@ -463,6 +463,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     cle = f"{gid}:{uid}"
     if action == "prendre":
         return _prendre(p, gid, uid, cle, membre, user, conf)
+    if action == "menu":
+        return _menu(p, gid, uid, conf)
     if action in ("retry", "autre", "annuler", "fini"):
         return _agir(p, gid, uid, cle, membre, user, conf, action, act_id)
     return _texte("Action inconnue.")
@@ -1155,6 +1157,62 @@ def vue_renvoi(conf: Dict[str, Any]) -> List[Dict[str, Any]]:
              "components": [{"type": 10, "content": TEXTE_RENVOI}]}]
 
 
+def vue_menu(conf: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Le salon 📱・numéro-usa une fois les cartes en place. Propriétaire,
+    23/10/2026 : la carte remonte dans un ticket qui vit, l'épingler ne suffit
+    pas — « remplacer numéro-usa par un menu qui crée le menu dans leur
+    salon ». Un clic ramène la carte du VA tout en bas de SON salon perso."""
+    return [{"type": 17, "accent_color": ROSE if _insta(conf) else BLEU, "components": [
+        {"type": 10, "content": TEXTE_RENVOI},
+        {"type": 1, "components": [_bouton("menu", "Afficher le menu", "📋", 1)]}]}]
+
+
+def ramener_carte(gid: str, uid: str, salon: str) -> str:
+    """La carte du VA revient en dernier dans son salon perso : reposée en
+    bas dans son état du moment, l'ancienne retirée (le bot ne retire que SA
+    carte). Rend « deja » (déjà en bas), « ramenee » ou « echec »."""
+    conf, cle = SERVEURS[gid], f"{gid}:{uid}"
+    with vd.sur_serveur(gid):
+        ancien = str((_lire()["cartes"].get(salon) or {}).get("message") or "")
+        code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=1")
+        if ancien and code == 200 and isinstance(ms, list) and ms and str(ms[0].get("id")) == ancien:
+            return "deja"
+        code, rep = vd.api("POST", f"/channels/{salon}/messages",
+                           json={"flags": V2, "components": _vue_carte(cle, conf),
+                                 "allowed_mentions": {"parse": []}})
+        if code != 200 or not isinstance(rep, dict) or not rep.get("id"):
+            _log(f"menu : carte non reposée dans {salon} : HTTP {code} {str(rep)[:120]}")
+            return "echec"
+        mid = str(rep["id"])
+        with _VERROU:
+            d = _lire()
+            d["cartes"][salon] = {"message": mid, "uid": uid, "gid": gid, "vu_le": time.time()}
+            _ecrire(d)
+        _retenir_carte(cle, salon, mid)
+        # Un code arrivé pendant le déplacement est allé sur l'ancienne carte :
+        # la nouvelle est redessinée une fois, à jour.
+        _redessiner(cle, conf, _vue_carte(cle, conf))
+        if ancien and ancien != mid:
+            code, rep = vd.api("DELETE", f"/channels/{salon}/messages/{ancien}")
+            if code not in (204, 404):
+                _log(f"menu : ancienne carte {ancien} non retirée de {salon} : HTTP {code}")
+    _log(f"menu : carte de {uid} ramenée en bas de {salon}")
+    return "ramenee"
+
+
+def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:
+    salon = next((s for s, u in _tickets_du_serveur(gid).items() if u == uid), "")
+    if not salon:
+        _log(f"menu : {uid} n'a pas de salon perso sur {conf['nom']}")
+        return _texte("Tu n'as pas encore de salon perso : ton manager le crée à ton arrivée.")
+    try:
+        _fond(lambda: ramener_carte(gid, uid, salon))
+    except Exception as e:
+        _log(f"menu : déplacement non lancé pour {uid} ({type(e).__name__}: {e})")
+        return _texte("❌ Impossible pour le moment : réessaie dans un instant.")
+    return _texte(f"📋 Ton menu est en bas de <#{salon}>.")
+
+
 def _vue_carte(cle: str, conf: Dict[str, Any]) -> List[Dict[str, Any]]:
     """La carte telle qu'elle doit être : le numéro en cours, ou vide."""
     a = _actif(cle)
@@ -1348,9 +1406,12 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
         code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=50")
         if code != 200 or not isinstance(ms, list):
             return f"salon illisible : HTTP {code} {str(ms)[:160]}"
+        # Le panneau, ou la ligne de renvoi qui l'a remplacé (sans bouton) :
+        # sans elle, le menu aurait été posé EN PLUS de la ligne.
         miens = [m for m in ms if str((m.get("author") or {}).get("id")) == str(moi)
-                 and PREFIXE + "prendre" in _ids(m.get("components"))]
-        vue = vue_renvoi(conf) if _cartes_auto(gid) else vue_panneau(conf)
+                 and (any(c.startswith(PREFIXE) for c in _ids(m.get("components")))
+                      or TEXTE_RENVOI in str(m.get("components")))]
+        vue = vue_menu(conf) if _cartes_auto(gid) else vue_panneau(conf)
         corps = {"flags": V2, "components": vue, "allowed_mentions": {"parse": []}}
         if miens:
             code, rep = vd.api("PATCH", f"/channels/{salon}/messages/{miens[0]['id']}",
