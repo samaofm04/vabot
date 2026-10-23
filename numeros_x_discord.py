@@ -115,6 +115,7 @@ _VERROU = threading.RLock()
 _ACHATS: set = set()            # « gid:uid » dont l'achat est en cours
 _ECOUTES: Dict[str, str] = {}   # « gid:uid » -> id d'activation écoutée
 _REPRIS = [False]
+_BOUCLES = [False]              # boucles du récap et des cartes : lancées une fois par processus
 
 
 def _fond(f):
@@ -793,7 +794,14 @@ def demarrer() -> None:
                 _reprendre_ecoutes()
     threading.Thread(target=_go, daemon=True).start()
     # Le récap ne tourne que sur le VPS : ailleurs (Mac, suites de tests), il
-    # posterait des chiffres d'essai dans le vrai salon.
+    # posterait des chiffres d'essai dans le vrai salon. UNE fois par
+    # processus : le préchauffage du site rappelle create_app() 8 s après le
+    # démarrage, et deux boucles de cartes ont posé deux cartes dans le même
+    # ticket le 23/10/2026 (le récap aurait été doublé de même).
+    with _VERROU:
+        if _BOUCLES[0]:
+            return
+        _BOUCLES[0] = True
     if os.environ.get("VA_MACHINE_PROD") == "1":
         threading.Thread(target=_boucle_recap, daemon=True).start()
         threading.Thread(target=_boucle_cartes, daemon=True).start()

@@ -422,6 +422,29 @@ try:
         nx.demarrer()
     finally:
         nx._dormir, nx.threading.Thread = _sav_dormir, _sav_thread
+    _vus = []
+    _sav_thread2, _sav_env = nx.threading.Thread, nx.os.environ.get("VA_MACHINE_PROD")
+
+    class _FilCompte:
+        def __init__(self, target, daemon=None):
+            self.t = target
+
+        def start(self):
+            _vus.append(getattr(self.t, "__name__", "?"))
+    nx.threading.Thread = _FilCompte
+    nx.os.environ["VA_MACHINE_PROD"] = "1"
+    nx._BOUCLES[0] = False
+    try:
+        nx.demarrer()
+        nx.demarrer()                        # le préchauffage rappelle create_app()
+    finally:
+        nx.threading.Thread = _sav_thread2
+        if _sav_env is None:
+            nx.os.environ.pop("VA_MACHINE_PROD", None)
+        else:
+            nx.os.environ["VA_MACHINE_PROD"] = _sav_env
+    check("démarrage appelé deux fois : une seule boucle de récap et une seule de cartes",
+          _vus.count("_boucle_recap") == 1 and _vus.count("_boucle_cartes") == 1, _vus)
     check("démarrage du site : le code d'un numéro en attente s'affiche sans clic",
           nx._actif(f"{GID}:{VA}").get("code") == "246802", nx._actif(f"{GID}:{VA}"))
     src_w = (Path(__file__).resolve().parent / "web_upload.py").read_text(encoding="utf-8")
