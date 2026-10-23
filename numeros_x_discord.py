@@ -1216,15 +1216,44 @@ def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[s
             return _texte("❌ Impossible pour le moment : réessaie dans un instant.")
         return {"type": 6}
     salon = next((s for s, u in tickets.items() if u == uid), "")
+    source = int(((p.get("message") or {}).get("flags")) or 0)
     if not salon:
         # Sans salon perso — le staff (propriétaire, 23/10/2026 : « un menu pour
         # les boss, les managers, pour tout le monde », il lisait « pas de
-        # salon » sur Agency), ou un VA pas encore servi : SA carte s'ouvre en
-        # privé, rien n'est écrit dans le ticket d'un VA.
+        # salon » sur Agency), ou un VA pas encore servi. Rien n'est écrit
+        # dans le ticket d'un VA.
         cle = f"{gid}:{uid}"
+        if source & EPHEMERE:
+            if source & V2:
+                return _repondre(p, cle, _vue_carte(cle, conf))     # sa carte, sur place
+            # Le « 📱 Numéro » du menu privé (tickets_discord.menu_prive, un
+            # message classique) : la carte s'ouvre à part, en privé — un
+            # message classique ne se change pas en carte V2.
+            return _repondre(dict(p, message={"flags": 0}), cle, _vue_carte(cle, conf))
+        try:
+            import tickets_discord
+            rep = tickets_discord.menu_prive(gid, uid)
+            if isinstance(rep, dict) and rep.get("type"):
+                return rep
+        except Exception as e:
+            _log(f"menu privé indisponible ({type(e).__name__}: {e}) : la carte à la place")
         return _repondre(p, cle, _vue_carte(cle, conf))
+    # Depuis le panneau du salon commun : le MENU du ticket redescend
+    # (tickets_discord.ramener_menu, avec son bouton « 📱 Numéro ») ; la carte,
+    # elle, descend au clic sur ce bouton. Sans cette fonction (version
+    # d'avant), c'est la carte qui descend.
+    def descendre():
+        try:
+            import tickets_discord
+            if hasattr(tickets_discord, "ramener_menu"):
+                if tickets_discord.ramener_menu(gid, uid, salon) != "echec":
+                    return
+                _log(f"menu : menu du ticket {salon} non reposé, la carte à la place")
+        except Exception as e:
+            _log(f"menu : ramener_menu en échec ({type(e).__name__}: {e}), la carte à la place")
+        ramener_carte(gid, uid, salon)
     try:
-        _fond(lambda: ramener_carte(gid, uid, salon))
+        _fond(descendre)
     except Exception as e:
         _log(f"menu : déplacement non lancé pour {uid} ({type(e).__name__}: {e})")
         return _texte("❌ Impossible pour le moment : réessaie dans un instant.")

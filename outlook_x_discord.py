@@ -399,7 +399,11 @@ def _menu(p: Dict[str, Any], gid: str, uid: str) -> Dict[str, Any]:
     salon = next((s for s, u in tickets.items() if u == uid), "")
     if not salon:
         # Sans salon perso (le staff, un VA pas encore servi) : ses adresses
-        # s'ouvrent en privé, comme la carte numéro.
+        # s'ouvrent en privé, comme la carte numéro. Depuis le menu privé
+        # (tickets_discord.menu_prive, message classique) : à part, pas sur place.
+        source = int(((p.get("message") or {}).get("flags")) or 0)
+        if source & nx.EPHEMERE and not source & nx.V2:
+            p = dict(p, message={"flags": 0})
         return _repondre(p, gid, uid, vue_mes_adresses(uid, gid))
     try:
         _fond(lambda: ramener_carte(gid, uid, salon))

@@ -782,6 +782,14 @@ try:
         return api_cartes(methode, chemin, **kw)
     MENU_DERNIER = ["un-message-du-va"]
     vd.api = api_menu
+    MENUS = []
+    _sav_rm = getattr(tickets_discord, "ramener_menu", None)
+    _sav_mp2 = getattr(tickets_discord, "menu_prive", None)
+    REPONSE_MENU = ["echec"]                 # ramener_menu en échec : la carte descend à la place
+    tickets_discord.ramener_menu = lambda g, u, s: (MENUS.append((g, u, s)) or REPONSE_MENU[0])
+    tickets_discord.menu_prive = lambda g, u: {"type": 4, "data": {"content": "📋 **Menu**", "flags": 64,
+                                                                  "components": [{"type": 1, "components": [
+                                                                      {"type": 2, "custom_id": "numx:menu"}]}]}}
     APPELS.clear()
     r = nx.traiter(clic("numx:menu", gid=TH))
     check("menu : réponse privée d'UNE ligne avec le lien du salon perso",
@@ -804,14 +812,32 @@ try:
     check("menu épinglé du ticket : le clic (même du manager) fait descendre la carte du VA, sans message",
           r == {"type": 6} and ("POST", "/channels/T1/messages") in [(m, ch) for m, ch, kw in APPELS]
           and nx._lire()["cartes"]["T1"]["uid"] == VA, (r, APPELS))
+    check("menu : ramener_menu en échec, la carte descend quand même", MENUS[-1:] == [(TH, VA, "T1")], MENUS)
+    REPONSE_MENU[0] = "ramene"
+    MENU_DERNIER[0] = "encore-un-message"
     APPELS.clear()
-    r = nx.traiter(clic("numx:menu", gid=TH, uid="555555555555555555", perms=str(0x8)))
-    check("menu : sans salon perso (le staff), SA carte s'ouvre en privé, rien dans un ticket",
+    r = nx.traiter(clic("numx:menu", gid=TH))
+    check("menu : depuis le panneau, le MENU du ticket redescend (ramener_menu), la carte reste",
+          "<#T1>" in r["data"]["content"] and MENUS[-1] == (TH, VA, "T1")
+          and not [1 for m, ch, kw in APPELS if m == "POST" and ch == "/channels/T1/messages"], (MENUS, APPELS))
+    APPELS.clear()
+    STAFF = "555555555555555555"
+    r = nx.traiter(clic("numx:menu", gid=TH, uid=STAFF, perms=str(0x8)))
+    check("menu : sans salon perso (le staff), depuis le panneau, le menu privé de tickets_discord",
+          r["type"] == 4 and r["data"]["content"] == "📋 **Menu**", r)
+    p_prive = clic("numx:menu", gid=TH, uid=STAFF, perms=str(0x8))
+    p_prive["message"] = {"flags": 64}
+    r = nx.traiter(p_prive)
+    check("menu : son « 📱 Numéro » ouvre SA carte, en privé, à part, rien dans un ticket",
           r["type"] == 4 and r["data"]["flags"] == nx.V2 | nx.EPHEMERE
           and textes(r["data"]["components"])[:2] == ["## `….`", "🇺🇸 ⏳ En attente"]
           and boutons(r["data"]["components"]) == ["numx:prendre"]
           and not [1 for m, ch, kw in APPELS if m in ("POST", "PATCH", "DELETE") and ch.startswith("/channels/T")],
           (r, APPELS))
+    p_carte = clic("numx:menu", gid=TH, uid=STAFF, perms=str(0x8), ephemere=True)
+    r = nx.traiter(p_carte)
+    check("menu : depuis sa propre carte privée, elle change sur place", r["type"] == 7, r)
+    tickets_discord.ramener_menu, tickets_discord.menu_prive = _sav_rm, _sav_mp2
     vd.api = api_cartes
     check("ticket : Twitter garde son panneau commun", not nx._cartes_auto(GID))
     tickets_discord.ETAT_FICHIER = _sav_tk
