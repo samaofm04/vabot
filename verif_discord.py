@@ -169,18 +169,28 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "porte": False, "quetes": False,
     },
     # Agency VA INSTAGRAM (22-23/10/2026), « comme Twitter », servi par Wario.
-    # Ici d'abord pour que la boucle du podium le parcoure (web_upload : ses
-    # classements, la synchro de ses liens, le suivi de ses VA). La
-    # vérification elle-même n'est PAS branchée : ni salon « Se vérifier »,
-    # ni salon des entrées — la poser change les droits de tout le serveur,
-    # à faire avec le propriétaire. Pas de quête du jour.
+    # Vérification branchée le 23/10/2026 (propriétaire : « oui branche la
+    # vérification ») sur les salons copiés de Twitter : le panneau « Se
+    # vérifier » de 🔐・vérification (posé par Wario, agency_accueil), décision
+    # des managers dans ✅┃entrées, bienvenue dans ✅・membres-vérifiés, puis le
+    # ticket (tickets_discord). Le serveur était déjà fermé aux nouveaux (seul
+    # l'accueil leur est ouvert) : aucun droit de salon n'est touché. Pas de
+    # quête du jour.
     AGENCY_IG_ID: {
         "nom": "Agency VA INSTAGRAM", "auto": False,
         "role_verifie": "1562953421508837426", "role_manager": "1531694421379383356",
         "role_attente": "1531695510547861744", "role_suspect": "1562953425371537468",
-        "salon_entrees": "", "salon_attente": "1488331964330020969",
-        "salon_suspicions": "", "salon_bienvenue": "",
-        "etapes": {}, "parcours": [], "quetes": False,
+        "salon_entrees": "1562974587585699960",       # ✅┃entrées (staff)
+        "salon_attente": "1562974593944264754",       # ⏳┃en-attente (staff)
+        "salon_suspicions": "1562974600520925294",    # 🚩┃suspicions (staff)
+        "salon_bienvenue": "1562974542953975978",     # ✅・membres-vérifiés
+        "salon_verification": "1562974555423776848",  # 🔐・vérification
+        "etapes": {},
+        "parcours": [("📋 Lis les infos", "1531696186522734746"),        # ℹ️・informations
+                     ("💰 Comment tu es payé", "1531696033116065963"),   # 💳・paiements
+                     ("📚 Les formations", "1531698896454287390"),       # 🎓・formation
+                     ("❓ Tes questions", "1531703501296504962")],       # 💬・général
+        "quetes": False,
     },
 }
 # Va IG : 🛡️ Manager (17/10/2026). Le role ci-dessus est BOSS, qui passe de

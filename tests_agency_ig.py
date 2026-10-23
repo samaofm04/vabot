@@ -377,13 +377,62 @@ try:
           and pod._profil(AG)["salon_bonus"] == "💰・bonus-journalier")
     import verif_discord as vd
     cfg = vd.serveur(AG)
-    check("Agency dans la boucle (SERVEURS_EXTRA) : ses rôles, sans quête, sans vérification branchée",
-          cfg and cfg["role_verifie"] == "1562953421508837426" and cfg["quetes"] is False
-          and not cfg.get("salon_verification") and not cfg["salon_entrees"], cfg)
+    check("Agency dans la boucle (SERVEURS_EXTRA) : ses rôles, sans quête",
+          cfg and cfg["role_verifie"] == "1562953421508837426" and cfg["quetes"] is False, cfg)
     for k, v in _sauve_sv.items():
         setattr(sv, k, v)
     for k, v in _sauve_pd.items():
         setattr(pod, k, v)
+
+    # ── arrivées, départs, panneau (agency_accueil) ──────────────────────
+    import agency_accueil as aa
+    import verif_discord as vd2
+    _sauve_aa = (aa.FICHIER, aa._api, vd2.assurer_message_verif)
+    aa.FICHIER = TMP / "agency_accueil.json"
+    LISTE = {"ok": True, "m": [{"user": {"id": "1"}, "joined_at": "a", "roles": []},
+                               {"user": {"id": "2"}, "joined_at": "b", "roles": []},
+                               {"user": {"id": "9", "bot": True}, "roles": []}]}
+    postes, panneaux = [], []
+
+    def faux_api_aa(methode, chemin, **kw):
+        if methode == "GET" and "/members" in chemin:
+            return (200, list(LISTE["m"])) if LISTE["ok"] else (403, {"message": "Missing Access"})
+        if methode == "POST":
+            postes.append((chemin, kw["json"]["embeds"][0]["title"], kw["json"]["allowed_mentions"]))
+            return 200, {"id": f"m{len(postes)}"}
+        return 200, {}
+    aa._api = faux_api_aa
+    vd2.assurer_message_verif = lambda gid: panneaux.append(gid) or "pose"
+    b1 = aa.surveiller()
+    check("premier passage : les membres déjà là sont notés SANS annonce, le panneau est posé",
+          b1.get("initialise") == 2 and not postes and panneaux == [AG], (b1, postes))
+    LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "2"] + [
+        {"user": {"id": "3"}, "joined_at": "c", "roles": []}]
+    b2 = aa.surveiller()
+    check("un arrivé dans 🚪 arrivées, un parti dans 👋 départs, sans mention ni bot",
+          b2["arrivees"] == 1 and b2["departs"] == 1
+          and postes[0][0].endswith(f"/{aa.SALON_ARRIVEES}/messages")
+          and postes[1][0].endswith(f"/{aa.SALON_DEPARTS}/messages")
+          and all(x[2] == {"parse": []} for x in postes), postes)
+    check("… le panneau n'est pas revérifié à chaque tour (une fois l'heure)", panneaux == [AG])
+    n = len(postes)
+    b3 = aa.surveiller()
+    check("tour suivant sans changement : rien de reposté", b3["arrivees"] == b3["departs"] == 0
+          and len(postes) == n)
+    LISTE["ok"] = False
+    b4 = aa.surveiller()
+    check("liste illisible (403) : rien d'annoncé ni d'oublié",
+          b4["arrivees"] == b4["departs"] == 0 and len(postes) == n
+          and "3" in json.loads(aa.FICHIER.read_text())["membres"])
+    aa.FICHIER, aa._api, vd2.assurer_message_verif = _sauve_aa
+    check("Agency dans le périmètre des tickets, managers fixes Gone et Yoshiki",
+          AG in tk.SERVEURS_TICKETS
+          and tk.MANAGERS_POSES[AG] == ["1392192812073615391", "1502081637591289877"])
+    cfg2 = vd2.serveur(AG)
+    check("vérification d'Agency : panneau, entrées, suspicions, bienvenue, parcours",
+          cfg2["salon_verification"] == "1562974555423776848"
+          and cfg2["salon_entrees"] == "1562974587585699960" and cfg2["salon_suspicions"]
+          and cfg2["salon_bienvenue"] and len(cfg2["parcours"]) == 4 and cfg2["auto"] is False, cfg2)
 finally:
     for k, v in _SAUVE_LV.items():
         setattr(lv, k, v)

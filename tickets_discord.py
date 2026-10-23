@@ -71,13 +71,29 @@ AROBASE = "\uff20"
 
 # Le parcours à manager + salon perso ne vaut que pour YouLab TWITTER. Le
 # serveur Entretien doit rester tel qu'il était : on n'y ouvre aucun ticket.
-SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
-                    "1498948161039896586"}    # YouLab THREADS
 # Agency VA INSTAGRAM (22/10/2026), servi par Wario : ses accueils ont les
-# boutons de Twitter (boutons_va). PAS ENCORE dans SERVEURS_TICKETS : le suivi
-# des managers y alignerait les droits des 29 salons faits à la main, et le
-# propriétaire veut voir un ticket rendu avant.
+# boutons de Twitter (boutons_va). Dans le périmètre depuis le 23/10/2026
+# (propriétaire : « branche les arrivées et la vérification ») : ticket à la
+# vérification, suivi des managers, départs — comme Twitter.
 AGENCY_IG_ID = "1488331963575177247"
+SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
+                    "1498948161039896586",    # YouLab THREADS
+                    AGENCY_IG_ID}             # Agency VA INSTAGRAM
+
+#: Les managers d'un serveur quand data/tickets_config.json n'en pose pas.
+#: Agency, 23/10/2026 : Gone et Yoshiki reçoivent les VA ; le propriétaire
+#: (vectorofm) et septofm ont 🛡️ Manager sans en recevoir — sans cette liste,
+#: le tour de rôle leur aurait donné des VA et une catégorie chacun.
+MANAGERS_POSES: Dict[str, List[str]] = {
+    AGENCY_IG_ID: ["1392192812073615391",     # Gone (jrm_12.)
+                   "1502081637591289877"],    # Yoshiki (yo_ofm)
+}
+
+
+def _poses(gid: str) -> List[Any]:
+    """La liste fixe des managers : tickets_config.json, sinon MANAGERS_POSES."""
+    return ((_config().get("managers") or {}).get(str(gid))
+            or MANAGERS_POSES.get(str(gid)) or [])
 
 # Tout nouveau arrivant est en essai, sans exception : le role est pose en
 # meme temps que son salon. Ce qui le fera passer « confirme » viendra plus
@@ -383,7 +399,7 @@ def managers(gid: str, force: bool = False) -> List[Dict[str, Any]]:
     hit = _CACHE.get(gid)
     if hit and not force and time.time() - hit["ts"] < CACHE_MANAGERS_S:
         return hit["v"]
-    poses = (_config().get("managers") or {}).get(gid) or []
+    poses = _poses(gid)
     if poses:
         out = _membres_poses(gid, poses) or []
     else:
@@ -1612,7 +1628,7 @@ def _managers_surs(gid: str):
     qu'un manager est parti. Ici, le moindre doute rend None. Une liste sûre
     remplace aussi le cache d'une heure : le tour de rôle des nouveaux tickets
     ne sert plus un manager parti au-delà du tour suivant."""
-    poses = (_config().get("managers") or {}).get(gid) or []
+    poses = _poses(gid)
     if poses:
         out = _membres_poses(gid, poses, strict=True)
         rid = ""
@@ -2308,6 +2324,15 @@ def suivre_partout() -> Dict[str, Any]:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
         _couper_seren(gid)
+        # Agency VA INSTAGRAM : arrivées, départs, panneau « Se vérifier »
+        # (agency_accueil) — à part, une panne n'arrête pas le tour
+        if gid == AGENCY_IG_ID:
+            try:
+                import agency_accueil
+                with sur_serveur(gid):
+                    agency_accueil.surveiller()
+            except Exception as e:
+                print(f"[agency] accueil : {type(e).__name__}: {e}", flush=True)
     # Va IG n'a pas de tickets ici (bot principal), mais ses VA partis gardaient
     # leurs liens en service : coupés une fois l'heure (liens_fr.couper_partis)
     if time.time() - _DEPARTS_VU.get("va_ig", 0) >= DEPARTS_S:
