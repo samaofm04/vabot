@@ -2424,7 +2424,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # 6 (23/10/2026) : « 📱 Numéro » en dernier, sur les trois serveurs
 # (NUMERO_DANS_MENU).
 # 7 (23/10/2026) : « 📧 Outlook » juste après, sur Twitter seulement.
-BOUTONS_VERSION = 7
+# 8 (23/10/2026) : deux rangées, celle du VA puis celle des managers
+# (_deux_rangees, maquette validée).
+BOUTONS_VERSION = 8
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -2817,7 +2819,27 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
             rangs[-1].setdefault("components", []).append(bouton)
         else:                                   # rangée pleine : Discord en refuse un 6e
             rangs.append({"type": 1, "components": [bouton]})
+    if str(gid) in NUMERO_DANS_MENU:
+        rangs = _deux_rangees(rangs)
     return rangs
+
+
+#: Les boutons que seuls les managers peuvent utiliser (traiter les refuse au
+#: VA) : leur propre rangée, sous celle du VA.
+_BOUTONS_MANAGERS = ("essai:ok:", "lien:new:", "lien:off:", "lien:on:")
+
+
+def _deux_rangees(rangs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """La rangée du VA (USDC, Mes stats, Numéro, Outlook), puis celle des
+    managers (Confirmer, le lien). Maquette validée par le propriétaire le
+    23/10/2026 (« Oui, vas-y ») : mélangés sur une rangée, le VA cliquait des
+    boutons qui lui répondaient « seuls les managers ». Cinq par rangée au
+    plus : Discord refuse le menu entier au sixième."""
+    boutons = [b for r in rangs for b in (r.get("components") or [])]
+    va = [b for b in boutons if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    chefs = [b for b in boutons if str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    return [{"type": 1, "components": groupe[i:i + 5]}
+            for groupe in (va, chefs) for i in range(0, len(groupe), 5)]
 
 
 # ─── Agency VA INSTAGRAM : adopter les salons faits à la main ────────────
@@ -2940,3 +2962,172 @@ def adopter_salon(gid: str, cid: str, manager_id: str = "",
     print(f"[ticket] {gid} : « {c.get('name')} » adopté pour {uid} (manager {manager_id or '?'})",
           flush=True)
     return dict(out, accueil=str(rep_m["id"]))
+
+
+# ─── le menu reposé en bas du ticket ────────────────────────────────────
+# Propriétaire, 23/10/2026 : « 📱・numéro-usa devient un salon menu avec un
+# bouton qui active leur menu dans leur propre salon ». Dans un ticket où la
+# conversation continue, le menu épinglé remonte et le VA ne le trouve plus.
+# Le bouton du salon (numeros_x_discord._menu) appelle ramener_menu : une
+# COPIE des boutons de l'accueil (« menu » dans la fiche) est posée en bas et
+# épinglée, l'ancienne copie retirée ; l'accueil épinglé ne bouge pas. Sans
+# salon perso (le staff), menu_prive : la rangée du VA, pour lui seul.
+def _sans_ids(x: Any) -> Any:
+    """Les composants tels que Discord les rend portent un « id » propre au
+    message : reposés ailleurs, sans lui."""
+    if isinstance(x, list):
+        return [_sans_ids(y) for y in x]
+    if isinstance(x, dict):
+        return {k: _sans_ids(v) for k, v in x.items() if k != "id"}
+    return x
+
+
+def _rangs_du_menu(gid: str, uid: str, f: Dict[str, Any], salon: str) -> List[Dict[str, Any]]:
+    """Les boutons de l'accueil tels qu'ils sont affichés (un patch du VPS y
+    ajoute les siens) ; accueil illisible : refaits comme redessiner_boutons."""
+    mid = str(f.get("accueil") or "")
+    if mid:
+        code, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
+        if code == 200 and isinstance(msg, dict) and msg.get("components"):
+            return _sans_ids(msg["components"])
+    import liens_va as lv
+    return boutons_va(uid, confirme=bool(f.get("confirme")),
+                      a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
+                      gid=gid, lien_actif=lv.est_actif(gid, uid))
+
+
+def _epingler_sans_avis(salon: str, mid: str) -> None:
+    """Épingle `mid`, puis retire l'avis « … a épinglé un message » que
+    Discord pose dessous : à chaque clic, il aurait poussé le menu d'un cran
+    et encombré le ticket (l'avis exaspère le propriétaire)."""
+    code, _r = _api("PUT", f"/channels/{salon}/pins/{mid}")
+    if code not in (200, 204):
+        print(f"[ticket] menu {mid} non épinglé dans {salon} (HTTP {code})", flush=True)
+        return
+    code, ms = _api("GET", f"/channels/{salon}/messages?limit=5")
+    for m in (ms if code == 200 and isinstance(ms, list) else []):
+        # type 6 : CHANNEL_PINNED_MESSAGE, qui renvoie au message épinglé
+        if m.get("type") == 6 and str((m.get("message_reference") or {}).get("message_id")) == mid:
+            _api("DELETE", f"/channels/{salon}/messages/{m['id']}")
+
+
+def ramener_menu(gid: str, uid: str, salon: str) -> str:
+    """Le menu du ticket de `uid` en bas de `salon`, épinglé : « deja » (il y
+    est, rien que des messages de bots dessous — la carte numéro), « ramene »,
+    ou « echec ». Ne lève jamais."""
+    try:
+        import verif_discord as vd
+        gid, uid, salon = str(gid), str(uid), str(salon)
+        cle = f"{gid}:{uid}"
+        f = (_etat().get("tickets") or {}).get(cle) or {}
+        if not salon or str(f.get("salon") or "") != salon:
+            print(f"[ticket] menu : {salon} n'est pas le ticket de {uid}", flush=True)
+            return "echec"
+        with vd.sur_serveur(gid):
+            rangs = _rangs_du_menu(gid, uid, f, salon)
+            if not rangs:
+                return "echec"
+            copie, accueil = str(f.get("menu") or ""), str(f.get("accueil") or "")
+            code, ms = _api("GET", f"/channels/{salon}/messages?limit=10")
+            for m in (ms if code == 200 and isinstance(ms, list) else []):
+                if str(m.get("id")) in {copie, accueil} - {""}:
+                    if str(m["id"]) == copie and _sans_ids(m.get("components")) != rangs:
+                        _api("PATCH", f"/channels/{salon}/messages/{copie}", json={"components": rangs})
+                    return "deja"
+                if not (m.get("author") or {}).get("bot") or m.get("type") == 6:
+                    break
+            code, rep = _api("POST", f"/channels/{salon}/messages",
+                             json={"content": "📋 **Menu**", "components": rangs,
+                                   "allowed_mentions": {"parse": []}})
+            if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
+                print(f"[ticket] menu de {uid} non reposé (HTTP {code}) {str(rep)[:120]}", flush=True)
+                return "echec"
+            neuf = str(rep["id"])
+            with _VERROU:
+                d = _etat()
+                g = (d.get("tickets") or {}).get(cle)
+                if isinstance(g, dict):
+                    g["menu"] = neuf
+                    _ecrire_etat(d)
+            _epingler_sans_avis(salon, neuf)
+            if copie:
+                # retirée : son épingle part avec elle (404 : retirée à la main)
+                _api("DELETE", f"/channels/{salon}/messages/{copie}")
+        return "ramene"
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menu de {uid} : {type(e).__name__}: {e}", flush=True)
+        return "echec"
+
+
+def menu_prive(gid: str, uid: str) -> Dict[str, Any]:
+    """Sans salon perso (le staff, ou un VA pas encore servi) : la rangée du
+    VA (USDC, Mes stats, Numéro, Outlook) pour lui seul, comme la carte
+    numéro privée (01eed36). Rien n'est écrit dans un ticket."""
+    siens = [b for r in boutons_va(str(uid), confirme=True, a_un_lien=False, gid=str(gid))
+             for b in (r.get("components") or [])
+             if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    rangs = [{"type": 1, "components": siens[i:i + 5]} for i in range(0, len(siens), 5)]
+    return {"type": 4, "data": {"content": "📋 **Menu**", "components": rangs, "flags": 64,
+                                "allowed_mentions": {"parse": []}}}
+
+
+# La copie suit l'accueil : toute rangée de boutons posée sur un accueil (lien
+# créé, coupé, VA parti, redessin…) l'est aussi sur sa copie. Un seul point de
+# passage plutôt qu'un appel dans chacune des fonctions qui le font — une
+# copie restée « Désactiver le lien » sous un lien déjà coupé tromperait. (La
+# copie elle-même repasse par ici : aucun accueil ne porte son id, ça
+# s'arrête là.)
+_api_reseau = _api
+
+
+def _miroir(chemin: str, rangs: Any) -> None:
+    morceaux = chemin.strip("/").split("/")
+    if len(morceaux) != 4 or morceaux[0] != "channels" or morceaux[2] != "messages":
+        return
+    salon, mid = morceaux[1], morceaux[3]
+    for f in (_etat().get("tickets") or {}).values():
+        if (isinstance(f, dict) and str(f.get("accueil") or "") == mid and f.get("menu")
+                and str(f.get("salon") or "") == salon):
+            _api("PATCH", f"/channels/{salon}/messages/{f['menu']}",
+                 json={"components": _sans_ids(rangs)})
+            return
+
+
+def _api(methode: str, chemin: str, **kw):   # noqa: F811
+    rep = _api_reseau(methode, chemin, **kw)
+    corps = kw.get("json")
+    if methode == "PATCH" and isinstance(corps, dict) and "components" in corps and rep[0] == 200:
+        try:
+            _miroir(chemin, corps["components"])
+        except Exception as e:                               # noqa: BLE001
+            print(f"[ticket] copie du menu non suivie : {type(e).__name__}: {e}", flush=True)
+    return rep
+
+
+# « Confirmer le VA » répond en réécrivant le message cliqué (type 7) : pas
+# d'appel PATCH à suivre. Cliqué sur l'accueil, la copie reçoit la nouvelle
+# rangée ; cliqué sur la copie, c'est l'accueil (son encart garde l'ancien
+# texte d'essai : « ⭐ VA confirmé » s'écrit quand on clique l'accueil).
+_traiter_sans_copie = traiter
+
+
+def _jumeau(salon: str, mid: str, rangs: Any) -> None:
+    for f in (_etat().get("tickets") or {}).values():
+        if not isinstance(f, dict) or str(f.get("salon") or "") != salon:
+            continue
+        if str(f.get("accueil") or "") == mid:
+            _miroir(f"/channels/{salon}/messages/{mid}", rangs)
+        elif str(f.get("menu") or "") == mid and f.get("accueil"):
+            _api_reseau("PATCH", f"/channels/{salon}/messages/{f['accueil']}",
+                        json={"components": _sans_ids(rangs)})
+        return
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    rep = _traiter_sans_copie(p)
+    if isinstance(rep, dict) and rep.get("type") == 7 and "components" in (rep.get("data") or {}):
+        salon = str((p or {}).get("channel_id") or "")
+        mid = str(((p or {}).get("message") or {}).get("id") or "")
+        rangs = rep["data"]["components"]
+        _en_fond(lambda: _jumeau(salon, mid, rangs))
+    return rep

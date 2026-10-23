@@ -249,7 +249,8 @@ try:
 
     # ── Discord : bouton, message ────────────────────────────────────────
     rang = tk.boutons_va("u9", gid=TH)
-    ids = [b["custom_id"] for b in rang[0]["components"]]
+    # toutes les rangées : le lien est dans celle des managers (23/10/2026)
+    ids = [b["custom_id"] for r in rang for b in r["components"]]
     check("Threads : « Créer son lien » sous l'accueil", "lien:new:u9" in ids, ids)
 
     g, _ = monde(tickets={f"{TH}:u4": {"salon": "s4", "manager": "m1", "accueil": "a4"}})

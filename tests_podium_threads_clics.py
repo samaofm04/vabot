@@ -835,14 +835,16 @@ try:
         _tkd._boutons_va_avant_stats = lambda uid, **k: [{"type": 1, "components": [
             {"type": 2, "label": "Mes subs", "custom_id": f"subs:total:{uid}"},
             {"type": 2, "label": "Mon adresse USDC", "custom_id": f"usdc:set:{uid}"}]}]
-        lab = lambda g: [b["label"] for r in _tkd.boutons_va("u61", gid=g) for b in r["components"]]
+        # sans « 📱 Numéro » ni « 📧 Outlook », ajoutés après (23/10/2026)
+        lab = lambda g: [b["label"] for r in _tkd.boutons_va("u61", gid=g) for b in r["components"]
+                         if b["label"] not in ("Numéro", "Outlook")]
         check("le bouton (posé par le patch du VPS) : « Mes stats » sur Threads et Twitter "
               "(« en privé les clics et subs »), « Mes subs » ailleurs",
               lab(TH) == ["Mes stats", "Mon adresse USDC"]
               and lab(TW) == ["Mes stats", "Mon adresse USDC"]
               and lab(IG) == ["Mes subs", "Mon adresse USDC"], (lab(TH), lab(TW), lab(IG)))
-        check("… et les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 5)",
-              _tkd.BOUTONS_VERSION == 5)
+        check("… et les accueils déjà postés sont redessinés une fois (BOUTONS_VERSION 5 ou plus)",
+              _tkd.BOUTONS_VERSION >= 5)
         # Twitter : ses liens par son tracking, dans ses deux espaces (les anciens
         # de JESSY LE RETOUR n'ont pas « @pseudo »), au marché du serveur (US)
         _lv._etat = lambda: {"liens": {f"{TW}:u12": {"numero": 12, "pseudo": "roucham"}}}
