@@ -620,8 +620,9 @@ try:
     # « je veux pas les trucs là » : aucun ⚠️ ni ℹ️ dans les messages de Threads
     check("aucun avertissement affiché sur Threads (ni ⚠️ ni ℹ️)",
           "⚠️" not in desc and "ℹ️" not in desc, desc[-300:])
-    check("pied « Marché US + UK », sans bouton 🔄",
-          e["footer"]["text"].startswith("YOULAB • Marché US + UK")
+    # Threads s'appelle TRUST THREADS depuis le 24/10/2026 (tests_trust.py)
+    check("pied « TRUST • Marché US + UK », sans bouton 🔄",
+          e["footer"]["text"].startswith("TRUST • Marché US + UK")
           and "components" not in p_th[0]["json"])
     check("passage suivant dans deux heures, pas avant",
           not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 119 * 60)

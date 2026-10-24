@@ -2140,3 +2140,57 @@ def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:   #
         import agency_accueil
         return agency_accueil.bienvenue(str(uid))
     return _poster_bienvenue_commun(uid, cfg)
+
+
+# ─── TRUST (24/10/2026) ───────────────────────────────────────────────────
+# Le propriétaire a renommé les trois serveurs : TRUST TWITTER, TRUST
+# THREADS, TRUST INSTAGRAM (« oui, passe en TRUST partout »). Les textes du
+# bot y disaient encore « YouLab Twitter », « Agency VA INSTAGRAM », « YouLab
+# Agency », « YouLab • … » — dans git ET dans les fichiers du VPS hors git
+# (twitter_accueil, threads_accueil, entretien_visuel), sous des patchs qu'on
+# ne réécrit pas. Un seul point de passage : tout ce que Luigi, Bowser et
+# Wario ÉCRIVENT sur ces trois serveurs passe ici et prend le nom TRUST. Les
+# autres serveurs (Entretien, Va IG) gardent YouLab.
+SERVEURS_TRUST = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
+_TRUST = (("YouLab Agency", "TRUST Instagram"), ("Agency VA INSTAGRAM", "TRUST INSTAGRAM"),
+          ("YOULAB", "TRUST"), ("YouLab", "TRUST"))
+
+
+def en_trust(x: Any) -> Any:
+    """`x` (texte, ou JSON d'un message) aux noms TRUST."""
+    if isinstance(x, str):
+        for avant, apres in _TRUST:
+            x = x.replace(avant, apres)
+        return x
+    if isinstance(x, list):
+        return [en_trust(y) for y in x]
+    if isinstance(x, dict):
+        return {k: en_trust(v) for k, v in x.items()}
+    return x
+
+
+def _serveur_vise(chemin: str, gid: Optional[str]) -> str:
+    """Le serveur où l'appel écrit : donné, courant, dans le chemin, ou celui
+    du salon (cache seulement : aucun appel de plus)."""
+    if gid:
+        return str(gid)
+    if _SERVEUR_COURANT.get():
+        return str(_SERVEUR_COURANT.get())
+    m = _RE_GUILDE.match(chemin)
+    if m:
+        return m.group(1)
+    m = re.match(r"/channels/(\d+)", chemin)
+    return str(_SALON_SERVEUR.get(m.group(1)) or "") if m else ""
+
+
+_api_sans_trust = api
+
+
+def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:   # noqa: F811
+    if methode in ("POST", "PATCH", "PUT") and _serveur_vise(chemin, kw.get("gid")) in SERVEURS_TRUST:
+        if isinstance(kw.get("json"), (dict, list)):
+            kw["json"] = en_trust(kw["json"])
+        data = kw.get("data")
+        if isinstance(data, dict) and isinstance(data.get("payload_json"), str):
+            kw["data"] = dict(data, payload_json=en_trust(data["payload_json"]))
+    return _api_sans_trust(methode, chemin, **kw)
