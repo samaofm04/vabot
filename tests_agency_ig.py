@@ -377,8 +377,8 @@ try:
           and "**Instagram VA 12**" in emb["description"] and "clics **" not in emb["description"],
           emb["description"][:500])
     bon = pod.embed_bonus(cl, J2, AG)
-    check("bonus du jour : « abonnés tracking OF »", "abonnés **tracking OF**" in bon["description"],
-          bon["description"][:300])
+    check("bonus du jour : « Instagram VA n — N subs → 5.00$ » (format du 25/10/2026)",
+          "**Instagram VA 12** — **56 subs** → **5.00$**" in bon["description"], bon["description"][:300])
     noms = pod._noms_libelles(AG)
     check("👀 Pseudos : les VA d'Agency au pseudo, les trois lignes de YouLab à leur part",
           noms.get("Instagram VA 12") == "zaid014787"

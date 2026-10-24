@@ -167,7 +167,9 @@ SALON_SUBS = "─│📊┤-subs"
 # (« salon « ─│📊┤-subs » retrouvé sous le nom « ─│👤┤-subs » », 13/10/2026).
 SALON_SUBS_VA = "─│👤┤-subs"
 SALON_BONUS = "─│💸┤-bonus-journalier"
-PRIMES_JOUR = [7.50, 5.00, 3.50]
+# Propriétaire, 25/10/2026, devant le bonus d'une autre agence : « comme
+# ça », 5 / 3 / 2 $ (avant : 7,50 / 5 / 3,50)
+PRIMES_JOUR = [5.00, 3.00, 2.00]
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
 ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
 # Les espaces GetMySocial qui portent des liens de VA. Il y en a DEUX : les
@@ -3946,40 +3948,32 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
 
 def embed_bonus(cl: Dict[str, Any], jour: dt.date,
                 gid: Optional[str] = None) -> Dict[str, Any]:
-    """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
+    """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent.
+
+    Propriétaire, 25/10/2026, devant le bonus d'une autre agence : « il faut
+    vraiment que ce soit comme ça » — le titre, les trois lignes, la consigne
+    pour réclamer, rien d'autre. Ni « Journée du … · N comptes suivis », ni
+    « personne n'a encore de sub », ni les ⚠️ / ℹ️ du relevé (le staff lit
+    les VA derrière chaque numéro au bouton 👀). La journée reste lisible :
+    l'horodatage de l'embed, à côté du pied. Anonyme : « VA n ».
+
+    Une place à 0 sub reste vide (« — ») : « VA 1 — 0 subs → 5.00$ » se
+    réclamerait, et le message n'explique plus un jour sans sub."""
     lignes = cl["lignes"]
-    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · '
-         + ("abonnés **tracking OF**" if (_profil(gid).get("mesure") == "agency_abonnes"
-                                          or _profil(gid).get("mesure_podium") == "tracking_abonnes")
-            else f'clics **{_mesure_dite(_profil(gid))}**') + ' '
-         f'· **{len(lignes)}** comptes suivis', ""]
+    c = []
     for i in range(3):
         x = lignes[i] if i < len(lignes) else None
-        if x is None:
-            c.append(f'{MEDAILLES[i]} **—** · **{PRIMES_JOUR[i]:.2f}$**')
-        else:
-            c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
-                     f'→ **{PRIMES_JOUR[i]:.2f}$**')
-    # tout le monde a zéro : le dire, sinon un podium de zéros ressemble à un bug
-    if lignes and not any(x["clics"] for x in lignes[:3]):
-        c += ["", "_Personne n'a encore de sub aujourd'hui — le classement bouge "
-                  "dès le premier._"]
-    c += ["", "————————————",
+        c.append(f'{MEDAILLES[i]} **—** → **{PRIMES_JOUR[i]:.2f}$**' if not (x and x["clics"]) else
+                 f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]} subs** → **{PRIMES_JOUR[i]:.2f}$**')
+    c += ["", "——————————",
           _reclamer_prime(_profil(gid), "🎁 **Pour recevoir ton bonus :**",
-                          "ton rang du jour (top 1, 2 ou 3)"),
-          "Un seul prix par personne · payé à la main après vérification"]
-    if cl["illisibles"]:
-        c += ["", "⚠️ Sans relevé aujourd'hui : " + ", ".join(cl["illisibles"])
-                  + " — à confirmer avant de payer."]
-    if not cl["frais"]:
-        c += ["", "⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._"]
-    if _notes_tracking(cl):
-        c += [""] + _notes_tracking(cl)
-    return {"title": f'💸 Bonus subs du jour — {jour.strftime("%d/%m/%Y")}',
+                          "ton rang du jour (top 1, 2 ou 3)")]
+    return {"title": "💸 Bonus subs du jour",
             "color": 0x22C55E,
             "description": "\n".join(c)[:4096],
-            "footer": {"text": "YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
-                               + _maintenant().strftime("%d/%m à %Hh%M")}}
+            "footer": {"text": "Un seul prix par personne · payé à la main après vérification"},
+            # midi du jour, à Paris : Discord l'affiche à côté du pied (« 25/10/2026 »)
+            "timestamp": dt.datetime(jour.year, jour.month, jour.day, 10, 0).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 @_exclusif                      # il écrit lui aussi dans podium.json

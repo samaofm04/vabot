@@ -70,6 +70,12 @@ try:
           r["type"] == 4 and r["data"]["flags"] == 64 and "Bonus subs du jour — 24/10/2026" in t
           and "🥇 VA 41 · **Eddy** · 12 subs" in t and "🥈 VA 43 · **Tsiry** · 9 subs" in t
           and "VA 12 Roucham" in t and "**Sans relevé** : VA 11 Kylmich" in t, t)
+    neuf = dict(p, message={"embeds": [pd.embed_bonus(
+        {"lignes": [{"va": "VA 41", "clics": 12}, {"va": "VA 43", "clics": 9}], "illisibles": [],
+         "frais": True}, __import__("datetime").date(2026, 10, 25), pd.TWITTER_ID)]})
+    t2 = pd.traiter(neuf)["data"]["content"]
+    check("le bonus au format du 25/10/2026 se lit aussi (titre, « 12 subs » en gras)",
+          "🥇 VA 41 · **Eddy** · 12 subs" in t2 and "🥈 VA 43 · **Tsiry** · 9 subs" in t2, t2)
     va = dict(p, member={"user": {"id": "va"}})
     check("clic d'un VA : refusé, aucun pseudo", "Réservé au staff" in pd.traiter(va)["data"]["content"])
     vide = dict(p, message={"embeds": [{"title": "x", "description": "rien"}]})

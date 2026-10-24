@@ -435,6 +435,7 @@ def charger_ancien():
     spec.loader.exec_module(mod)
     au_nom_actuel_du_bot(mod)
     aux_regles_du_21_10(mod)
+    au_bonus_du_25_10(mod)
     return mod
 
 
@@ -454,6 +455,14 @@ def au_nom_actuel_du_bot(mod):
         e["description"] = e["description"].replace("**@Siri**", f"**@{nom}**")
         return e
     mod.embed_bonus = embed_bonus
+
+
+def au_bonus_du_25_10(mod):
+    """Le bonus du jour au format du 25/10/2026 (titre, trois lignes, la
+    consigne ; 5 / 3 / 2 $), ramené dans le code d'avant comme le nom du bot :
+    il a ses tests (tests_podium_tracking.py, tests_pseudos_bonus.py) ; tout le
+    reste se compare toujours à l'octet près."""
+    mod.embed_bonus = pd.embed_bonus
 
 
 def aux_regles_du_21_10(mod):

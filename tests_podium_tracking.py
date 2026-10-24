@@ -642,7 +642,11 @@ try:
           "Abonnés **tracking OF**" in pages[0]["description"])
     frais()
     b = pd.embed_bonus(pd.classement(MAR, MAR, gid=TW), MAR, gid=TW)
-    check("bonus du jour : « clics tracking OF »", "clics **tracking OF**" in b["description"])
+    # depuis le 25/10/2026 : le titre, les trois lignes, la consigne, rien d'autre
+    check("bonus du jour : trois lignes « VA n — N subs → 5.00$ », sans en-tête de relevé",
+          b["title"] == "💸 Bonus subs du jour" and "→ **5.00$**" in b["description"]
+          and "tracking OF" not in b["description"] and "comptes suivis" not in b["description"],
+          b["description"][:300])
     check("Va IG garde « clics FR »",
           "clics **FR**" in pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
                                             LUN, MAR, en_cours=True, gid=IG)["description"])
@@ -805,7 +809,7 @@ try:
     pd.rafraichir_bonus(TW)
     patch = [x for x in DISCORD.appels[n:] if x["m"] == "PATCH" and x["p"].endswith(m1)]
     check("le matin, le bonus d'hier est réédité avec les clics arrivés depuis",
-          patch and "**VA 12** — **31** subs" in patch[0]["json"]["embeds"][0]["description"],
+          patch and "**VA 12** — **31 subs**" in patch[0]["json"]["embeds"][0]["description"],
           [x["p"] for x in DISCORD.appels[n:]])
     CLOCK["now"] = dt.datetime(2026, 10, 7, 12, 30)
     frais()
