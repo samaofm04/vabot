@@ -218,6 +218,14 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # comme pour les clics. Le podium de la semaine et le bonus du
                  # jour gardent les clics. POUR REVENIR : retirer la clé.
                  "mesure_subs": "tracking_abonnes",
+                 # … et le podium de la SEMAINE et le bonus du jour aussi.
+                 # Propriétaire, 24/10/2026, devant « VA 41 — 1469 subs »
+                 # (des clics, affichés « subs ») : « j'ai l'impression que
+                 # c'est faux pour le calcul de la semaine ». Les primes de la
+                 # semaine et du jour vont donc aux abonnés. Lu par
+                 # _mesure_podium (podium, bonus, primes retenues). POUR REVENIR AUX CLICS :
+                 # retirer la clé.
+                 "mesure_podium": "tracking_abonnes",
                  # … et sans « 🌐 all-time » : MyPuls ne voit plus le compte de
                  # Jessye, et les abonnés d'avant le passage sur Emy (06/10)
                  # manquent à 26 VA sur 62 (leurs clics, eux, étaient gardés
@@ -1201,6 +1209,12 @@ def _source(gid: Optional[str] = None, mesure: Optional[str] = None) -> str:
     « mesure_subs ») : « tracking_abonnes » (Twitter, les abonnés OF des
     mêmes trackings) ou « abonnes » (Va IG, OF + MYM, subs_va)."""
     return str(mesure or _profil(gid).get("mesure") or "gms")
+
+
+def _mesure_podium(gid: Optional[str] = None) -> Optional[str]:
+    """La mesure du podium de la semaine et du bonus du jour : « mesure_podium »
+    du profil (Twitter : les abonnés), sinon celle du serveur (None)."""
+    return _profil(gid).get("mesure_podium") or None
 
 
 def _source_subs(gid: Optional[str] = None) -> str:
@@ -3063,8 +3077,8 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         # Threads : des clics, pas des abonnements, ni « via Twitter » ni
         # « tracking » : ses clics uniques vers OnlyFans, US + UK
         abo = f'Clics **{_mesure_dite(pf)}** vers OnlyFans'
-    elif pf.get("mesure") == "agency_abonnes":
-        # Agency : des abonnés, pas des clics (« comme Twitter, aux subs »)
+    elif pf.get("mesure") == "agency_abonnes" or pf.get("mesure_podium") == "tracking_abonnes":
+        # Agency, et Twitter depuis le 24/10/2026 : des abonnés, pas des clics
         abo = f'Abonnés **tracking OF** via {pf["source"]}'
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
@@ -3877,7 +3891,10 @@ def _taire_avert(gid: Optional[str], quoi: str, lignes: List[str]) -> None:
 #: Le 14/10/2026 : chaque serveur ses VA (« garde que ceux du même groupe ») :
 #: Va IG sans les VA US, Threads à ses propres liens, numéros de ses tickets.
 #: Puis : Va IG sans le thème Mario, numéros Instagram à partir de 1.
-FORMAT_AFFICHAGE = "2026-10-14-va-ig-sans-mario"
+#: Le 24/10/2026 : la semaine et le bonus du jour de Twitter aux abonnés
+#: (« mesure_podium ») : sans ce changement, le podium en cours aurait gardé
+#: ses clics affichés « subs » jusqu'à son prochain relevé.
+FORMAT_AFFICHAGE = "2026-10-24-twitter-semaine-aux-subs"
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
@@ -3910,7 +3927,8 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
     """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
     lignes = cl["lignes"]
     c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · '
-         + ("abonnés **tracking OF**" if _profil(gid).get("mesure") == "agency_abonnes"
+         + ("abonnés **tracking OF**" if (_profil(gid).get("mesure") == "agency_abonnes"
+                                          or _profil(gid).get("mesure_podium") == "tracking_abonnes")
             else f'clics **{_mesure_dite(_profil(gid))}**') + ' '
          f'· **{len(lignes)}** comptes suivis', ""]
     for i in range(3):
@@ -3960,7 +3978,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
         return ""
     if jour is None:
         _bonus_veille(gid, d, salon, j)
-    cl = classement(j, j, gid=gid)
+    cl = classement(j, j, gid=gid, mesure=_mesure_podium(gid))
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
         return str(garde.get("message") or "")
@@ -4004,7 +4022,7 @@ def _bonus_veille(gid: str, d: Dict[str, Any], salon: str, j: dt.date) -> None:
         d["bonus_veille"].pop(gid, None)
         _ecrire(d)
         return
-    clv = classement(jv, jv, gid=gid)
+    clv = classement(jv, jv, gid=gid, mesure=_mesure_podium(gid))
     if not clv["lignes"]:
         return
     code, _rep = _api("PATCH", f'/channels/{salon}/messages/{v["message"]}',
@@ -4159,7 +4177,7 @@ def _semaine_terminee(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, 
     """
     lundi = dt.date.fromisoformat(str(garde["semaine"]))
     dimanche = lundi + dt.timedelta(days=6)
-    cl: Optional[Dict[str, Any]] = classement(lundi, dimanche, gid=gid)
+    cl: Optional[Dict[str, Any]] = classement(lundi, dimanche, gid=gid, mesure=_mesure_podium(gid))
     avert = ""
     if cl["lignes"]:
         garde["dernier"] = _instantane(cl, dimanche)
@@ -4226,7 +4244,7 @@ def _figer_semaine(gid: str, d: Dict[str, Any], salon: str, garde: Dict[str, Any
             cl = snap
             complet = not snap.get("illisibles")
         else:
-            cl = classement(lundi, dimanche, gid=gid)
+            cl = classement(lundi, dimanche, gid=gid, mesure=_mesure_podium(gid))
             complet = bool(cl["lignes"]) and not cl["illisibles"]
             if not cl["lignes"]:
                 if snap.get("lignes"):
@@ -4697,7 +4715,7 @@ def _primes_retenues(gid: str, d: Dict[str, Any], debut: dt.date, fin: dt.date,
         if 0 <= t - float(fg.get("essai_tw") or 0) < 3600:
             return
         fg["essai_tw"] = t
-        cl2 = classement(debut, fin, gid=gid)
+        cl2 = classement(debut, fin, gid=gid, mesure=_mesure_podium(gid))
         if not cl2["lignes"]:
             _ecrire(d)
             return
@@ -4834,7 +4852,7 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
     if not salon:
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
-    cl = classement(debut, fin, gid=gid)
+    cl = classement(debut, fin, gid=gid, mesure=_mesure_podium(gid))
     if not cl["lignes"]:
         # GetMySocial muet un lundi matin : sans cela on publiait un podium VIDE
         # avec @everyone, et la semaine etait marquee comme faite POUR TOUJOURS.
@@ -5007,7 +5025,7 @@ def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
               flush=True)
         return ""
 
-    cl = classement(debut, fin, gid=gid)
+    cl = classement(debut, fin, gid=gid, mesure=_mesure_podium(gid))
     if not cl["lignes"] and not cl["illisibles"]:
         # aucun relevé du tout : on ne remplace pas un classement correct par du vide
         print("[podium] aucun relevé, message vivant laissé tel quel", flush=True)

@@ -136,6 +136,10 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
+# AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
+# (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.
+pd.SERVEURS[pd.TWITTER_ID].pop("mesure_podium", None)
 # La quinzaine de Va IG compte les vrais abonnés depuis le 15/10/2026 (clé
 # « mesure_subs », subs_va ; ses tests : tests_liens_ab_twitter.py). Ici ses
 # messages se testent sur les clics GetMySocial simulés, comme avant.

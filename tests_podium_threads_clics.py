@@ -188,6 +188,10 @@ sys.modules["mypuls"] = _faux_mypuls
 import safe_json                       # noqa: E402
 import verif_discord as vd             # noqa: E402
 import podium_discord as pd            # noqa: E402
+# Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
+# AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
+# (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.
+pd.SERVEURS[pd.TWITTER_ID].pop("mesure_podium", None)
 import recap_clics_rest as rcr         # noqa: E402
 import clics_personnes as cp           # noqa: E402
 

@@ -21385,9 +21385,10 @@ try:
     # il lirait le vrai MyPuls. Le comptage par tracking a ses propres tests
     # (tests_podium_tracking.py).
     _mesureP = _pd.SERVEURS[_pd.TWITTER_ID].pop("mesure", None)
-    # … de même sa quinzaine aux abonnés sans all-time (19/10/2026, mêmes tests)
+    # … de même sa quinzaine aux abonnés sans all-time (19/10/2026, mêmes tests),
+    # et sa semaine aux abonnés (24/10/2026, tests_podium_semaine_subs.py)
     _subsP = {k: _pd.SERVEURS[_pd.TWITTER_ID].pop(k) for k in ("mesure_subs", "alltime_subs",
-                                                                "bouton_pseudos")
+                                                                "bouton_pseudos", "mesure_podium")
               if k in _pd.SERVEURS[_pd.TWITTER_ID]}
 
     # --- la semaine racontee est toujours CELLE QUI EST FINIE
