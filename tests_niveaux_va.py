@@ -15,7 +15,10 @@ Ce qui est vérifié :
     d'essai ; refusé à un VA, sans rôle 🌱 sur le serveur : dit ;
   - un vieux « Confirmer » cliqué sur un VA en essai le fait passer débutant ;
     sur un débutant : le chemin de confirmation d'avant ;
-  - confirmer retire aussi 🌱 Débutant.
+  - confirmer retire aussi 🌱 Débutant ;
+  - un niveau posé À LA MAIN (synchroniser_niveaux, au tour des tickets) :
+    le plus haut porté décide, ceux du dessous sont retirés, la fiche suit et
+    le menu est redessiné ; rien sans rôle de niveau, ni liste illisible.
 
 Faux Discord, dossier temporaire : aucun appel réseau, rien dans data/.
 Lancement : python tests_niveaux_va.py
@@ -56,11 +59,24 @@ ROLES = [{"id": "r_essai", "name": "🧪 Essai"}, {"id": "r_deb", "name": "🌱 
 appels = []
 
 
+MEMBRES = {"ok": True, "m": []}
+
+
 def faux_api(methode, chemin, **kw):
     appels.append((methode, chemin))
     if methode == "GET" and chemin.endswith("/roles"):
         return 200, list(ROLES)
+    if methode == "GET" and chemin.endswith("/members"):
+        return (200, list(MEMBRES["m"])) if MEMBRES["ok"] else (403, {})
     if methode in ("PUT", "DELETE") and "/roles/" in chemin:
+        _g, _sep, reste = chemin.partition("/members/")
+        uid, _r, rid = reste.partition("/roles/")
+        for m in MEMBRES["m"]:
+            if m["user"]["id"] == uid:
+                if methode == "DELETE" and rid in m["roles"]:
+                    m["roles"].remove(rid)
+                elif methode == "PUT" and rid not in m["roles"]:
+                    m["roles"].append(rid)
         return 204, {}
     return 200, {}
 
@@ -155,6 +171,43 @@ try:
           and ("DELETE", f"/guilds/{TW}/members/1/roles/r_deb") in appels
           and fiche(f"{TW}:1").get("confirme"), appels)
     check("BOUTONS_VERSION à 9 : les menus postés sont redessinés", tk.BOUTONS_VERSION >= 9)
+
+    # ── le rôle posé à la main ────────────────────────────────────────────
+    ecrire({f"{TW}:5": {"salon": "s5", "accueil": "a5", "essai": True},
+            f"{TW}:6": {"salon": "s6", "accueil": "a6", "confirme": {"par": "m"}},
+            f"{TW}:7": {"salon": "s7", "accueil": "a7", "essai": True},
+            f"{TW}:8": {"salon": "s8", "accueil": "a8", "debutant": {"par": "m"}},
+            f"{TW}:9": {"salon": "s9", "accueil": "a9", "essai": True}})
+    MEMBRES["m"] = [{"user": {"id": "5"}, "roles": ["r_essai", "r_conf"]},     # deux niveaux à la main
+                    {"user": {"id": "6"}, "roles": ["r_deb"]},                # rétrogradé à la main
+                    {"user": {"id": "7"}, "roles": ["r_essai"]},              # rien n'a changé
+                    {"user": {"id": "8"}, "roles": []}]                       # aucun rôle de niveau
+    appels.clear()
+    bn = tk.synchroniser_niveaux(TW)
+    suivis = {u: (a, n) for u, a, n in bn["suivis"]}
+    check("Essai + Confirmé posés à la main : confirmé, 🧪 retiré, fiche et menu suivent",
+          suivis.get("5") == ("essai", "confirme") and ("5", "essai") in bn["nettoyes"]
+          and ("DELETE", f"/guilds/{TW}/members/5/roles/r_essai") in appels
+          and fiche(f"{TW}:5").get("confirme") and fiche(f"{TW}:5").get("essai") is False
+          and ("PATCH", "/channels/s5/messages/a5") in appels, (bn, appels))
+    check("Confirmé remplacé par 🌱 à la main : débutant, la fiche perd « confirme », menu « Confirmer »",
+          suivis.get("6") == ("confirme", "debutant") and not fiche(f"{TW}:6").get("confirme")
+          and fiche(f"{TW}:6").get("debutant"), bn)
+    check("rien de changé, ou aucun rôle de niveau, ou parti : rien touché",
+          "7" not in suivis and "8" not in suivis and "9" not in suivis
+          and fiche(f"{TW}:8").get("debutant") and ("PATCH", "/channels/s7/messages/a7") not in appels, bn)
+    n = len(appels)
+    check("second passage : plus rien à faire", not tk.synchroniser_niveaux(TW)["suivis"]
+          and not [a for a in appels[n:] if a[0] in ("PATCH", "DELETE", "PUT")], appels[n:])
+    MEMBRES["ok"] = False
+    check("liste des membres illisible : rien touché", tk.synchroniser_niveaux(TW)["ignore"])
+    MEMBRES["ok"] = True
+    ROLES[1] = {"id": "r_deb", "name": "autre"}
+    check("un rôle de niveau introuvable : rien touché, dit", tk.synchroniser_niveaux(TW)["ignore"])
+    ROLES[1] = {"id": "r_deb", "name": "🌱 Débutant"}
+    import inspect
+    check("branché au tour des tickets (Twitter, Threads, Agency)",
+          "synchroniser_niveaux(gid)" in inspect.getsource(tk.suivre_partout))
 except Exception as _e:
     import traceback
     check("niveaux : testable", False, repr(_e)[:200] + " " + traceback.format_exc()[-1500:])

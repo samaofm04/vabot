@@ -2324,6 +2324,13 @@ def suivre_partout() -> Dict[str, Any]:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
         _couper_seren(gid)
+        # 🧪 / 🌱 / ⭐ posés à la main dans Discord : la fiche et le menu suivent
+        if gid in NIVEAUX_ICI:
+            try:
+                with sur_serveur(gid):
+                    synchroniser_niveaux(gid)
+            except Exception as e:
+                print(f"[ticket] {gid} : niveaux : {type(e).__name__}: {e}", flush=True)
         # Agency VA INSTAGRAM : arrivées, départs et parrainage ne passent
         # plus ici mais par le fil d'agency_accueil, chaque minute — le
         # parrain se lit à la différence d'usage des invitations, et dix
@@ -3381,3 +3388,114 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
         rangs = rep["data"]["components"]
         _en_fond(lambda: _jumeau(salon, mid, rangs))
     return rep
+
+
+# Le niveau posé À LA MAIN (clic droit › Rôles dans Discord) vaut le bouton :
+# propriétaire, 24/10/2026, « soit par rôle, soit dans le ticket, le manager
+# peut faire ça ». Luigi, Bowser et Wario ne reçoivent pas les événements de
+# Discord : les rôles sont relus à chaque tour des tickets. Le plus haut niveau
+# porté décide (⭐ > 🌱 > 🧪) ; ceux du dessous, posés en trop, sont retirés
+# comme le ferait le bouton ; la fiche suit, et le menu (accueil, et sa copie
+# par le miroir) est redessiné. Un VA sans aucun rôle de niveau : rien ne
+# bouge (on ne devine pas). Audit du 20/10/2026 : « rôles, tickets.json et
+# accueils désaccordés après des gestes faits à la main ».
+_ORDRE_NIVEAUX = ("confirme", "debutant", "essai")
+
+
+def _ids_niveaux(gid: str) -> Dict[str, str]:
+    """{niveau : id du rôle} en une lecture des rôles ; {} si l'un manque."""
+    code, rep = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(rep, list):
+        return {}
+    cfg = _config()
+    noms = {"confirme": str(cfg.get("role_confirme") or ROLE_CONFIRME_NOM),
+            "debutant": str(cfg.get("role_debutant") or ROLE_DEBUTANT_NOM),
+            "essai": str(cfg.get("role_essai") or ROLE_ESSAI_NOM)}
+    par_nom = {str(r.get("name") or "").strip(): str(r.get("id")) for r in rep}
+    ids = {n: par_nom.get(nom, "") for n, nom in noms.items()}
+    return ids if all(ids.values()) else {}
+
+
+def _niveau_fiche(f: Dict[str, Any]) -> str:
+    if f.get("confirme"):
+        return "confirme"
+    if f.get("debutant"):
+        return "debutant"
+    return "essai" if f.get("essai") else ""
+
+
+def synchroniser_niveaux(gid: str) -> Dict[str, Any]:
+    """Un passage : chaque ticket du serveur prend le niveau de ses rôles.
+    Rend {suivis: [(uid, avant, après)], nettoyes: [(uid, niveau retiré)],
+    rates, ignore}. Liste ou rôles illisibles : rien n'est touché, et dit."""
+    import liens_va as lv
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"suivis": [], "nettoyes": [], "rates": [], "ignore": ""}
+    ids = _ids_niveaux(gid)
+    if not ids:
+        bilan["ignore"] = "rôles de niveau introuvables"
+        _dire(f"niveaux:{gid}", f"{gid} : rôles 🧪 / 🌱 / ⭐ introuvables — niveaux non suivis")
+        return bilan
+    # les porteurs de chaque niveau (la liste filtre par rôle) : un VA sans
+    # aucun rôle de niveau n'y est pas, et c'est voulu
+    roles_de: Dict[str, set] = {}
+    for n in _ORDRE_NIVEAUX:
+        membres = _par_la_liste(gid, ids[n], strict=True)
+        if membres is None:
+            bilan["ignore"] = "liste des membres illisible"
+            return bilan
+        for m in membres:
+            if (m.get("user") or {}).get("id"):
+                roles_de[str(m["user"]["id"])] = set(str(r) for r in (m.get("roles") or []))
+    _dire(f"niveaux:{gid}", "")
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict) and not v.get("parti")}
+    for cle, f in sorted(fiches.items()):
+        uid = cle.split(":", 1)[1]
+        rs = roles_de.get(uid)
+        if rs is None:
+            continue                       # parti : suivre_departs s'en occupe
+        niveau = next((n for n in _ORDRE_NIVEAUX if ids[n] in rs), "")
+        if not niveau:
+            continue
+        for n in _ORDRE_NIVEAUX[_ORDRE_NIVEAUX.index(niveau) + 1:]:
+            if ids[n] in rs:
+                c, _r = _api("DELETE", f"/guilds/{gid}/members/{uid}/roles/{ids[n]}")
+                if c in (200, 204, 404):
+                    bilan["nettoyes"].append((uid, n))
+                else:
+                    bilan["rates"].append(f"{uid} : {n} non retiré (HTTP {c})")
+        avant = _niveau_fiche(f)
+        if niveau == avant:
+            continue
+        maintenant = int(time.time())
+        with _VERROU:
+            d = _etat()
+            g = (d.get("tickets") or {}).get(cle)
+            if not isinstance(g, dict):
+                continue
+            if niveau == "confirme":
+                g["confirme"] = g.get("confirme") or {"par": "role", "quand": maintenant}
+                g["essai"] = False
+            elif niveau == "debutant":
+                g.pop("confirme", None)
+                g["debutant"] = g.get("debutant") or {"par": "role", "quand": maintenant}
+                g["essai"] = False
+            else:
+                g.pop("confirme", None)
+                g.pop("debutant", None)
+                g["essai"] = True
+            _ecrire_etat(d)
+        bilan["suivis"].append((uid, avant, niveau))
+        salon, mid = str(f.get("salon") or ""), str(f.get("accueil") or "")
+        if salon and mid:
+            rangs = boutons_va(uid, confirme=niveau == "confirme",
+                               a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
+                               gid=gid, lien_actif=lv.est_actif(gid, uid))
+            c, _r = _api("PATCH", f"/channels/{salon}/messages/{mid}", json={"components": rangs})
+            if c not in (200, 404):
+                bilan["rates"].append(f"{uid} : menu non redessiné (HTTP {c})")
+    if bilan["suivis"] or bilan["nettoyes"] or bilan["rates"]:
+        print(f"[ticket] niveaux {gid} : {bilan['suivis']} ; retirés {bilan['nettoyes']}"
+              + (f" ; ratés {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
