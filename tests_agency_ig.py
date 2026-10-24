@@ -142,11 +142,23 @@ try:
     for pause in (True, False):
         lv.SEREN_EN_PAUSE = pause
         e = lv.espace(AG)
+        # 24/10/2026 : « Instagram aussi sur Seren » — le 50/50, sauf en pause
         check(f"espace Agency (pause Seren {pause}) : EMY IG, landing de JESSY LE RETOUR, Instagram, "
-              "tracking, sans variante",
+              "tracking, " + ("sans variante" if pause else "variante Seren 50 % depuis un lien direct"),
               e["equipe"] == EMY_IG and e["landing"] and e["gabarit"] == "lnk_6ada9ed9cf84f313d19d14ae"
               and e["plateforme"] == "Instagram" and e["tracking"] is True
-              and e["variante"] is None, e)
+              and (e["variante"] is None if pause else
+                   (e["variante"] == lv.VARIANTE_TWITTER
+                    and e["source_variante"] == "lnk_6adc91b2c2f08bda9012135f")), e)
+    _src = lv.ESPACE_AGENCY_IG.pop("source_variante")
+    check("… sans lien direct source : Emy seule (une copie de landing finirait chez Emy)",
+          lv.espace(AG)["variante"] is None)
+    lv.ESPACE_AGENCY_IG["source_variante"] = _src
+    import inspect as _insp
+    _patche = 'e["plateforme"]} VA' in _insp.getsource(lv._poser_variante_sans_garde)
+    rv = lv.poser_variante(AG, "u_inconnu")
+    check("poser_variante (Agency) : sans le nommage par plateforme (patch du VPS), rien créé",
+          _patche or ("Twitter VA" in rv.get("erreur", "") and rv["ok"] is False), rv)
     lv.SEREN_EN_PAUSE = True
     check("Agency fait partie des serveurs à liens", AG in lv.SERVEURS)
     check("manque() : rien ne manque (gabarit landing)", lv.manque(AG) == "", lv.manque(AG))

@@ -85,7 +85,11 @@ ESPACE_AGENCY_IG = {"equipe": "tm_6ada83b07218da6450e65862",      # EMY IG
                     # le lien est ouvert depuis Instagram : sortir de son
                     # navigateur intégré dès la page chargée, comme les liens
                     # de Threads (propriétaire, 23/10/2026 : « active le deeplink »)
-                    "deeplink": "pageload"}
+                    "deeplink": "pageload",
+                    # la moitié Seren (24/10/2026) : copie de « emyigserenbase »,
+                    # lien direct d'EMY IG vers onlyfans.com/seren.vale, sa
+                    # destination remplacée par le tracking Seren du VA
+                    "source_variante": "lnk_6adc91b2c2f08bda9012135f"}
 
 # Les serveurs Discord dont les VA ont un lien GetMySocial (voir espace()).
 SERVEURS = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
@@ -1322,8 +1326,14 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
         c = config()
         sur = c.get("agency_ig") if isinstance(c.get("agency_ig"), dict) else {}
         e = dict(ESPACE_AGENCY_IG, **{k: v for k, v in sur.items() if v not in (None, "")})
-        # Emy seule, toujours : le 50/50 n'a jamais existé ici
-        e.update(tracking=mypuls_actif(), variante=None,
+        # Propriétaire, 24/10/2026 : « Threads, Instagram, Twitter : faut
+        # envoyer aussi sur Seren ». Le 50/50 comme Twitter, mais sa variante
+        # copie un lien DIRECT d'EMY IG (source_variante) : une copie de la
+        # landing garderait son bouton chez Emy, et la moitié Seren finirait
+        # chez Emy. Sans source : Emy seule, comme avant.
+        var = (dict(VARIANTE_TWITTER)
+               if mypuls_actif() and not SEREN_EN_PAUSE and e.get("source_variante") else None)
+        e.update(tracking=mypuls_actif(), variante=var,
                  base_shortcode=str(c.get("base_shortcode") or c.get("modele") or "emy"))
         return e
     e = _espace_avec_seren(gid)
@@ -1481,3 +1491,24 @@ def _remettre_seren(gid: str) -> Dict[str, Any]:
     if n:
         _ecrire(d)
     return {"ok": True, "a_reposer": n}
+
+
+# Le tracking Seren d'un VA d'Agency doit s'appeler « Instagram VA n @pseudo » :
+# _creer_ou_reprendre REPREND un tracking existant du même nom chez la même
+# créatrice, et « Twitter VA n » (le nom du corps d'origine) donnerait au VA
+# d'Agency le tracking du VA n de Twitter. Le patch du VPS 99-threads-mypuls
+# nomme par la plateforme ; s'il venait à tomber, rien n'est créé pour Agency.
+_poser_variante_sans_garde = poser_variante
+
+
+def poser_variante(gid: str, uid: str) -> Dict[str, Any]:   # noqa: F811
+    if str(gid) == AGENCY_IG_ID:
+        import inspect
+        try:
+            source = inspect.getsource(_poser_variante_sans_garde)
+        except (OSError, TypeError):
+            source = ""
+        if 'e["plateforme"]} VA' not in source:
+            return {"ok": False, "erreur": "trackings Seren d'Agency nommés « Twitter VA » "
+                                          "(patch 99-threads-mypuls absent) : rien créé"}
+    return _poser_variante_sans_garde(gid, uid)
