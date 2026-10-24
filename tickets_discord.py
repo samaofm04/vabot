@@ -2440,7 +2440,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # 7 (23/10/2026) : « 📧 Outlook » juste après, sur Twitter seulement.
 # 8 (23/10/2026) : deux rangées, celle du VA puis celle des managers
 # (_deux_rangees, maquette validée).
-BOUTONS_VERSION = 8
+# 9 (24/10/2026) : « 🌱 Passer Débutant » à la place de « Confirmer » pour un VA
+# encore en essai (NIVEAUX_ICI).
+BOUTONS_VERSION = 9
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -3234,3 +3236,148 @@ def redessiner_boutons(gid: str) -> Dict[str, Any]:   # noqa: F811
     except Exception as e:                                   # noqa: BLE001
         print(f"[ticket] menus {gid} : {type(e).__name__}: {e}", flush=True)
     return bilan
+
+
+# ─── trois niveaux : 🧪 Essai › 🌱 Débutant › ⭐ Confirmé ────────────────
+# Propriétaire, 24/10/2026 : « de base il est en essai ; à la place de passer
+# direct confirmé, passe débutant, et quand il est débutant il y a le bouton
+# confirmer ». Le rôle 🌱 Débutant existe sur les trois serveurs (créé à la
+# main, entre ⭐ Confirmé et 🧪 Essai). La rangée des managers porte donc
+# « 🌱 Passer Débutant » pour un VA en essai, « ⭐ Confirmer le VA » pour un
+# débutant, et plus rien une fois confirmé. Un vieux « Confirmer » (menu pas
+# encore redessiné) cliqué sur un VA en essai le fait passer débutant : une
+# étape à la fois.
+ROLE_DEBUTANT_NOM = "🌱 Débutant"
+NIVEAUX_ICI = NUMERO_DANS_MENU
+_BOUTONS_MANAGERS = _BOUTONS_MANAGERS + ("essai:deb:",)
+
+
+def role_debutant(gid: str) -> str:
+    return _role_nomme(gid, str(_config().get("role_debutant") or ROLE_DEBUTANT_NOM))
+
+
+def _fiche(gid: str, uid: str) -> Dict[str, Any]:
+    return (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+
+
+def passer_debutant(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
+    """D'essai à débutant. Rend {ok, erreur, reste_essai}. Comme confirmer :
+    on POSE d'abord, on RETIRE ensuite — un badge d'essai en trop se voit,
+    un VA sans aucun rôle de niveau, non."""
+    rd = role_debutant(gid)
+    if not rd:
+        return {"ok": False, "erreur": f"rôle « {ROLE_DEBUTANT_NOM} » introuvable sur ce serveur"}
+    code, rep = _api("PUT", f"/guilds/{gid}/members/{uid}/roles/{rd}")
+    if code not in (200, 204):
+        return {"ok": False, "erreur": f"Discord a refusé le rôle (HTTP {code}) "
+                                       f"{str((rep or {}).get('message') or '')[:80]}"}
+    re_ = role_essai(gid)
+    reste_essai = False
+    if re_:
+        c2, _r = _api("DELETE", f"/guilds/{gid}/members/{uid}/roles/{re_}")
+        reste_essai = c2 not in (200, 204)
+        if reste_essai:
+            print(f"[ticket] {uid} débutant mais l'essai n'a pas pu être retiré (HTTP {c2})",
+                  flush=True)
+    with _VERROU:
+        etat = _etat()
+        fiche = (etat.setdefault("tickets", {})).setdefault(f"{gid}:{uid}", {})
+        fiche["essai"] = False
+        fiche["debutant"] = {"par": str(par), "quand": int(time.time())}
+        _ecrire_etat(etat)
+    return {"ok": True, "erreur": "", "reste_essai": reste_essai}
+
+
+_confirmer_sans_debutant = confirmer
+
+
+def confirmer(gid: str, uid: str, par: str = "") -> Dict[str, Any]:   # noqa: F811
+    """confirmer (plus haut), et le 🌱 Débutant retiré : un confirmé ne garde
+    pas le badge de l'étape d'avant."""
+    r = _confirmer_sans_debutant(gid, uid, par)
+    if r.get("ok") and str(gid) in NIVEAUX_ICI:
+        rd = role_debutant(gid)
+        if rd:
+            c, _r = _api("DELETE", f"/guilds/{gid}/members/{uid}/roles/{rd}")
+            if c not in (200, 204, 404):
+                print(f"[ticket] {uid} confirmé, 🌱 Débutant non retiré (HTTP {c})", flush=True)
+    return r
+
+
+_boutons_va_sans_niveaux = boutons_va
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # noqa: F811
+               gid: str = "", lien_actif: bool = True):
+    """boutons_va (plus haut) ; un VA encore en essai voit « 🌱 Passer
+    Débutant » à la place de « Confirmer le VA » (NIVEAUX_ICI)."""
+    rangs = _boutons_va_sans_niveaux(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                     gid=gid, lien_actif=lien_actif)
+    if str(gid) not in NIVEAUX_ICI or confirme or _fiche(str(gid), str(uid)).get("debutant"):
+        return rangs
+    for r in rangs:
+        for i, b in enumerate(r.get("components") or []):
+            if str(b.get("custom_id") or "") == f"essai:ok:{uid}":
+                r["components"][i] = {"type": 2, "style": 3, "label": "Passer Débutant",
+                                      "custom_id": f"essai:deb:{uid}", "emoji": {"name": "🌱"}}
+    return rangs
+
+
+def _clic_debutant(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """« 🌱 Passer Débutant » (ou un vieux « Confirmer » sur un VA en essai) ;
+    None quand ce n'est pas ce clic-là."""
+    cid = str(((p or {}).get("data") or {}).get("custom_id") or "")
+    gid = str((p or {}).get("guild_id") or "")
+    if (p or {}).get("type") != 3 or gid not in NIVEAUX_ICI:
+        return None
+    if not (cid.startswith("essai:deb:") or cid.startswith("essai:ok:")):
+        return None
+    uid = cid.split(":", 2)[2]
+    fiche = _fiche(gid, uid)
+    if cid.startswith("essai:ok:") and (fiche.get("debutant") or fiche.get("confirme")):
+        return None                        # « Confirmer » d'un débutant : le chemin d'avant
+    membre = p.get("member") or {}
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+    if not _est_manager_brut(gid, membre):
+        return _ephemere("Seuls les managers et les helpers peuvent se servir de ces boutons.")
+    if fiche.get("confirme"):
+        return _ephemere("Ce VA est déjà confirmé.")
+    if fiche.get("debutant"):
+        return _ephemere("Ce VA est déjà débutant.")
+    res = passer_debutant(gid, uid, par=qui)
+    if not res["ok"]:
+        return _ephemere("✕ " + res["erreur"])
+    import liens_va as _lv
+    rangs = boutons_va(uid, confirme=False, a_un_lien=bool(_lv.lien_de(gid, uid).get("public_url")),
+                       gid=gid, lien_actif=_lv.est_actif(gid, uid))
+    msg = p.get("message") or {}
+    alerte = ("\n⚠️ Le badge 🧪 Essai n'a pas pu être retiré — à enlever à la main."
+              if res.get("reste_essai") else "")
+    if str(msg.get("id") or "") == str(fiche.get("menu") or ""):
+        # le menu reposé en bas du ticket : son texte reste le sien
+        data = {"content": _texte_menu(gid, uid) + alerte, "components": rangs}
+    else:
+        embeds = msg.get("embeds") or []
+        if embeds:
+            d = embeds[0].get("description") or ""
+            d = "\n".join(l for l in d.split("\n") if "démarres en essai" not in l)
+            embeds[0]["description"] = d.rstrip() + f"\n\n🌱 **VA débutant** — par <@{qui}>."
+        data = {"embeds": embeds, "components": rangs,
+                "content": (msg.get("content") or "") + f"\n🌱 Débutant par <@{qui}>." + alerte}
+    data["allowed_mentions"] = {"parse": []}
+    return {"type": 7, "data": data}
+
+
+_traiter_sans_niveaux = traiter
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    rep = _clic_debutant(p)
+    if rep is None:
+        return _traiter_sans_niveaux(p)
+    if rep.get("type") == 7:
+        salon = str((p or {}).get("channel_id") or "")
+        mid = str(((p or {}).get("message") or {}).get("id") or "")
+        rangs = rep["data"]["components"]
+        _en_fond(lambda: _jumeau(salon, mid, rangs))
+    return rep

@@ -21805,8 +21805,10 @@ try:
           _THR in _tkT.SYNCHRO_LIENS_ICI and _TWI not in _tkT.SYNCHRO_LIENS_ICI)
     _bT = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_THR) for b in r["components"]]
     _bW = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_TWI) for b in r["components"]]
-    check("sur Threads, « Confirmer le VA » et « Creer son lien »",
-          "lien:new:99" in _bT and "essai:ok:99" in _bT)
+    # un VA en essai y voit « 🌱 Passer Debutant » depuis le 24/10/2026
+    # (tests_niveaux_va.py), un debutant « Confirmer le VA »
+    check("sur Threads, le bouton de niveau et « Creer son lien »",
+          "lien:new:99" in _bT and ("essai:ok:99" in _bT or "essai:deb:99" in _bT))
     check("sur Twitter, le bouton est toujours la",
           "lien:new:99" in _bW)
     # un serveur SANS espace de liens (Entretien) : surtout pas Threads ici,

@@ -8,7 +8,7 @@ rangée du VA, puis celle des managers.
 
 Ce qui est vérifié (tickets_discord.boutons_va, traiter, BOUTONS_VERSION) :
   - rangée 1, le VA : 💳 USDC · 📈 Mes stats · 📱 Numéro (· 📧 Outlook sur
-    Twitter) ; rangée 2, les managers : ⭐ Confirmer · le lien ;
+    Twitter) ; rangée 2, les managers : le niveau (🌱 / ⭐) · le lien ;
   - « 📱 Numéro » sur les trois serveurs, « 📧 Outlook » sur Twitter seulement,
     une fois chacun ;
   - jamais plus de 5 boutons par rangée (Discord refuserait tout le menu) ;
@@ -33,6 +33,11 @@ except Exception:
     pass
 
 import tickets_discord as tk           # noqa: E402
+import tempfile                        # noqa: E402
+
+# un registre des tickets vide : le niveau du VA (🧪 / 🌱, tests_niveaux_va.py)
+# se lit dans sa fiche, jamais dans le vrai data/
+tk.ETAT_FICHIER = pathlib.Path(tempfile.mkdtemp(prefix="menu_numero_")) / "tickets.json"
 
 OKS, FAILS = [], []
 
@@ -51,9 +56,9 @@ for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), 
     r = ids(tk.boutons_va("7", confirme=False, a_un_lien=True, gid=gid))
     va, chefs = r[0], r[-1]
     check(f"{nom} : rangée du VA (USDC, stats, Numéro{', Outlook' if outlook else ''}), "
-          "puis celle des managers (Confirmer, lien)",
+          "puis celle des managers (🌱 Passer Débutant pour un VA en essai, lien)",
           len(r) == 2 and va[0] == "usdc:set:7" and va[-1 - len(outlook)] == "numx:menu"
-          and va[len(va) - len(outlook):] == outlook and chefs == ["essai:ok:7", "lien:off:7"]
+          and va[len(va) - len(outlook):] == outlook and chefs == ["essai:deb:7", "lien:off:7"]
           and all(len(x) <= 5 for x in r), r)
     r2 = ids(tk.boutons_va("7", confirme=True, a_un_lien=False, gid=gid))
     plats = [c for x in r2 for c in x]
