@@ -541,11 +541,26 @@ def _youl4b_relabel(va: Any) -> str:
     return libelle_youl4b_agency(m.group(1)) if m else ""
 
 
+#: Propriétaire, 24/10/2026, devant la quinzaine d'Agency : « il y a beaucoup
+#: trop de personnes ». Les VA venus de YouLab (Twitter) n'y sont plus listés
+#: un par un : trois lignes, « Instagram VA 001 / 002 / 003 », se partagent
+#: leurs abonnés — « pas équitablement, en genre 44, 32 et le reste le 3 ».
+#: Les % des deux premières ; la troisième prend le reste.
+PARTS_YOULAB = (44, 32)
+
+
+def _parts_youlab(total: int) -> List[int]:
+    a = int(total * PARTS_YOULAB[0] / 100 + 0.5)
+    b = min(total - a, int(total * PARTS_YOULAB[1] / 100 + 0.5))
+    return [a, b, total - a - b]
+
+
 def classement_agency(debut: dt.date, fin: dt.date, avec_youl4b: bool = False) -> Dict[str, Any]:
     """La forme de podium_discord.classement(), en abonnés (« clics » porte les
-    abonnés de la période) : les VA d'Agency, et avec `avec_youl4b` ceux de
-    Youl4b (Twitter, partis exclus) en « Instagram VA 0nn », marqués
-    « youl4b ». Un VA illisible est dit, jamais compté zéro."""
+    abonnés de la période) : les VA d'Agency, et avec `avec_youl4b` les
+    abonnés de ceux de Youl4b (Twitter, partis exclus), en trois lignes
+    « Instagram VA 001/002/003 » marquées « youl4b » (PARTS_YOULAB). Un VA
+    illisible est dit, jamais compté zéro."""
     d0, d1 = debut.isoformat(), fin.isoformat()
     ents = entites_agency()
     lignes: List[Dict[str, Any]] = []
@@ -563,14 +578,17 @@ def classement_agency(debut: dt.date, fin: dt.date, avec_youl4b: bool = False) -
         tw = pod.classement(debut, fin, gid=pod.TWITTER_ID, mesure="tracking_abonnes",
                             etiquette=pod.ETIQUETTE_QUINZAINE)
         frais, erreur = bool(tw.get("frais")), str(tw.get("erreur") or "")
-        for x in tw["lignes"]:
-            lib = _youl4b_relabel(x["va"])
-            if lib:
+        les_leurs = [x for x in tw["lignes"] if _youl4b_relabel(x["va"])]
+        if les_leurs:
+            total = sum(int(x["clics"]) for x in les_leurs)
+            for i, n in enumerate(_parts_youlab(total), 1):
                 nb_y += 1
-                lignes.append({"va": lib, "numero": int(x["numero"]), "clics": int(x["clics"]),
-                               "liens": int(x.get("liens") or 0), "spam": False, "model": "",
-                               "youl4b": True})
-        illisibles += [lib for lib in map(_youl4b_relabel, tw.get("illisibles") or []) if lib]
+                lignes.append({"va": libelle_youl4b_agency(i), "numero": i, "clics": n,
+                               "liens": 0, "spam": False, "model": "", "youl4b": True})
+        sans = [x for x in (tw.get("illisibles") or []) if _youl4b_relabel(x)]
+        if sans:
+            # leurs abonnés manquent au partage : dit une fois, pas VA par VA
+            illisibles.append(f"YouLab Twitter ({len(sans)} VA sans relevé)")
     lignes.sort(key=lambda x: (-x["clics"], x["va"]))
     return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
             "entites": len(ents) + nb_y, "liens": len(ents), "sans_numero": [],
@@ -593,9 +611,9 @@ def totaux_agency() -> Dict[str, int]:
 
 def noms_agency() -> Dict[str, str]:
     """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 12 » → son
-    pseudo ; « Instagram VA 012 » → « Nom (VA 12 · Twitter) »."""
-    import podium_discord as pod
+    pseudo ; « Instagram VA 001/002/003 » → la part des VA de YouLab
+    (PARTS_YOULAB) : ce ne sont pas des personnes."""
     out = {e["nom"]: e["pseudo"] or "?" for e in entites_agency().values()}
-    for n, nom in pod._noms_registre().items():
-        out[libelle_youl4b_agency(n)] = f"{nom or '?'} (VA {n} · Twitter)"
+    for i, part in enumerate((f"{PARTS_YOULAB[0]} %", f"{PARTS_YOULAB[1]} %", "le reste"), 1):
+        out[libelle_youl4b_agency(i)] = f"YouLab Twitter · {part} de leurs abonnés"
     return out

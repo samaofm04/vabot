@@ -353,18 +353,22 @@ try:
           [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Instagram VA 12", 56)]
           and cl["illisibles"] == ["Instagram VA 7"], cl)
     clq = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
-    check("quinzaine Agency : + les VA de Youl4b (Twitter, quinzaine aux abonnés) en "
-          "« Instagram VA 012 » (0 devant, 3 chiffres) ; leurs sans relevé aussi",
+    check("quinzaine Agency : + les abonnés des VA de Youl4b (Twitter) en trois lignes "
+          "« Instagram VA 001/002/003 », 44 % / 32 % / le reste ; leurs sans relevé en une ligne",
           [(x["va"], x["clics"]) for x in clq["lignes"]]
-          == [("Instagram VA 12", 56), ("Instagram VA 012", 4)]
-          and clq["lignes"][1].get("youl4b") and tw_appels == ["tracking_abonnes"]
-          and clq["illisibles"] == ["Instagram VA 040", "Instagram VA 7"], clq)
+          == [("Instagram VA 12", 56), ("Instagram VA 001", 2), ("Instagram VA 002", 1),
+              ("Instagram VA 003", 1)]
+          and all(x.get("youl4b") for x in clq["lignes"][1:]) and tw_appels == ["tracking_abonnes"]
+          and clq["illisibles"] == ["Instagram VA 7", "YouLab Twitter (1 VA sans relevé)"], clq)
+    check("partage 44 / 32 / reste : la somme ne bouge pas",
+          sv._parts_youlab(100) == [44, 32, 24] and sv._parts_youlab(1) == [0, 0, 1]
+          and sum(sv._parts_youlab(1469)) == 1469 and sv._parts_youlab(0) == [0, 0, 0])
     pages = pod.pages_subs(clq, J1, J2, {"Instagram VA 12": 70}, gid=AG)
     desc = pages[0]["description"]
     check("quinzaine : « Instagram VA 12 — 56 subs · 🌐 70 all-time » ; Youl4b sans all-time "
           "(faux depuis le passage sur Emy, comme à Twitter)",
           "**Instagram VA 12** — **56** subs · 🌐 70 all-time" in desc
-          and "**Instagram VA 012** — **4** subs\n" in desc + "\n"
+          and "**Instagram VA 001** — **2** subs\n" in desc + "\n"
           and "Abonnés **tracking OF**" in desc and "$" not in desc, desc[:600])
     emb = pod.embed_podium(cl, J1, J2, gid=AG, en_cours=True)
     check("podium de la semaine : « Abonnés tracking OF via Instagram », en subs",
@@ -375,9 +379,11 @@ try:
     check("bonus du jour : « abonnés tracking OF »", "abonnés **tracking OF**" in bon["description"],
           bon["description"][:300])
     noms = pod._noms_libelles(AG)
-    check("👀 Pseudos : les VA d'Agency au pseudo, ceux de Youl4b au nom du registre",
+    check("👀 Pseudos : les VA d'Agency au pseudo, les trois lignes de YouLab à leur part",
           noms.get("Instagram VA 12") == "zaid014787"
-          and noms.get("Instagram VA 012") == "Roucham (VA 12 · Twitter)", noms)
+          and noms.get("Instagram VA 001") == "YouLab Twitter · 44 % de leurs abonnés"
+          and noms.get("Instagram VA 003") == "YouLab Twitter · le reste de leurs abonnés"
+          and "Instagram VA 012" not in noms, noms)
     check("la semaine (qui paie) n'a pas les VA de Youl4b", tw_appels == ["tracking_abonnes"])
     _sauve_partis = tk.partis
     tk.partis = lambda g: {"u1": 1792000000} if str(g) == AG else {}
