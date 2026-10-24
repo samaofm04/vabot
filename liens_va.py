@@ -1303,7 +1303,11 @@ def _id_du_lien(equipe: str, shortcode: str) -> str:
 # 50/50 : SEREN_EN_PAUSE = False, puis remettre_seren(gid) — reprendre_variantes
 # refait chaque variante vers LE MÊME tracking Seren (aucun nouveau tracking).
 # COUPES_FICHIER garde chaque A/B éteint et sa config d'avant.
-SEREN_EN_PAUSE = True
+# Propriétaire, 24/10/2026 : « c'est fini, faut envoyer aussi sur Seren, à
+# nouveau » : la pause est levée. tickets_discord._couper_seren appelle alors
+# remettre_seren (sous _REPRISE), et la boucle du podium (reprendre_variantes)
+# refait les variantes.
+SEREN_EN_PAUSE = False
 COUPES_FICHIER = DATA_DIR / "liens_seren_coupes.json"
 _COUPE = __import__("threading").Lock()
 
@@ -1454,6 +1458,18 @@ def remettre_seren(gid: str) -> Dict[str, Any]:
     if SEREN_EN_PAUSE:
         return {"ok": False, "erreur": "SEREN_EN_PAUSE est encore vrai"}
     gid = str(gid)
+    # sous le verrou de reprendre_variantes : réécrire l'état pendant qu'elle
+    # note un tracking Seren tout juste créé l'effacerait, et le passage
+    # suivant en créerait un second chez MyPuls, à vie
+    if not _REPRISE.acquire(blocking=False):
+        return {"ok": False, "occupe": True, "erreur": "reprise des variantes en cours"}
+    try:
+        return _remettre_seren(gid)
+    finally:
+        _REPRISE.release()
+
+
+def _remettre_seren(gid: str) -> Dict[str, Any]:
     d = _etat()
     n = 0
     for cle, f in (d.get("liens") or {}).items():

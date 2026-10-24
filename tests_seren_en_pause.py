@@ -280,6 +280,30 @@ try:
           and f"{TW}:u31" in lv.en_attente(TW), f31)
     check("… et seulement celles de ce serveur (Threads non touché)",
           lv.lien_de(TH, "u89")["variante"].get("posee") is True)
+    lv._REPRISE.acquire()
+    try:
+        check("une reprise des variantes en cours : remettre_seren attend (rien réécrit)",
+              lv.remettre_seren(TH).get("occupe") is True
+              and lv.lien_de(TH, "u89")["variante"].get("posee") is True)
+    finally:
+        lv._REPRISE.release()
+    check("pause levée par défaut (propriétaire, 24/10/2026 : « faut envoyer aussi sur Seren »)",
+          _SAUVE_LV["SEREN_EN_PAUSE"] is False)
+    # le tour des tickets : pause levée, il remet les fiches coupées à poser
+    import tickets_discord as tk
+    appels_rm = []
+    _vrai_rm, _vrai_th = lv.remettre_seren, tk.threading.Thread
+    try:
+        lv.remettre_seren = lambda gid: appels_rm.append(gid) or {"ok": True, "a_reposer": 0}
+        tk.threading.Thread = lambda target, daemon=None: type("T", (), {"start": lambda self: target()})()
+        tk._SEREN_VUE.clear()
+        avant = len(g.de("allumer"))
+        tk._couper_seren(TW)
+        check("tickets_discord._couper_seren, pause levée : remettre_seren, pas couper_seren",
+              appels_rm == [TW] and len(g.de("allumer")) == avant, appels_rm)
+    finally:
+        lv.remettre_seren, tk.threading.Thread = _vrai_rm, _vrai_th
+        tk._SEREN_VUE.clear()
     lv.SEREN_EN_PAUSE = True
 
     # ── gms.allumer_ab_testing, l'appel réel (requests simulé) ───────────

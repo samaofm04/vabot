@@ -2359,8 +2359,9 @@ def _couper_seren(gid: str) -> None:
     appels par lien ne doivent pas retenir le tour des tickets."""
     try:
         import liens_va
-        if not getattr(liens_va, "SEREN_EN_PAUSE", False) or str(gid) not in liens_va.SERVEURS:
+        if str(gid) not in liens_va.SERVEURS:
             return
+        en_pause = bool(getattr(liens_va, "SEREN_EN_PAUSE", False))
     except Exception:                                        # noqa: BLE001
         return
     if time.time() - _SEREN_VUE.get(gid, 0) < SYNCHRO_LIENS_S:
@@ -2368,6 +2369,19 @@ def _couper_seren(gid: str) -> None:
     _SEREN_VUE[gid] = time.time()
 
     def _fond():
+        if not en_pause:
+            # Pause levée (24/10/2026) : les fiches coupées repassent « à
+            # poser » ; reprendre_variantes (boucle du podium) refait leur
+            # 50/50 vers leur tracking Seren d'avant. Rien à faire une fois
+            # toutes reprises. Occupé (une reprise tourne) : au tour suivant.
+            try:
+                r = liens_va.remettre_seren(gid)
+                if r.get("a_reposer") or r.get("occupe"):
+                    _SEREN_VUE[gid] = 0 if r.get("occupe") else _SEREN_VUE[gid]
+                    print(f"[lien] Seren revient {gid} : {r}", flush=True)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[lien] Seren revient {gid} : {type(e).__name__}: {e}", flush=True)
+            return
         try:
             b = liens_va.couper_seren(gid)
             if b.get("coupes") or b.get("rates"):
