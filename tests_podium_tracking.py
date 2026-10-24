@@ -889,9 +889,11 @@ try:
     comp = [x for x in DISCORD.appels if x["m"] == "POST"][-1]["json"].get("components") or []
     check("sous le classement : « 👀 Pseudos » seul (pas de 🔄 sur Twitter)",
           [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS], comp)
-    check("… ni sous le podium ni sous le bonus (rien d'envoyé, comme avant), et retiré "
-          "d'une quinzaine figée",
-          pd._boutons(TW, True) == {} and pd._boutons(TW, False) == {}
+    # depuis le 24/10/2026 : « 👀 Pseudos » sous le podium (vivant ou figé) et le
+    # bonus, qui lit le message cliqué (BOUTON_PSEUDOS_MSG)
+    check("… sous le podium, vivant ou figé, celui qui lit le message ; retiré d'une "
+          "quinzaine figée",
+          pd._boutons(TW, True) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]} and pd._boutons(TW, False) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]}
           and pd._boutons(TW, False, pseudos=True) == {"components": []})
     n = len(MP["appels"])
     txt13 = pd.texte_pseudos(TW)

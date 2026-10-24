@@ -621,9 +621,11 @@ try:
     check("aucun avertissement affiché sur Threads (ni ⚠️ ni ℹ️)",
           "⚠️" not in desc and "ℹ️" not in desc, desc[-300:])
     # Threads s'appelle TRUST THREADS depuis le 24/10/2026 (tests_trust.py)
-    check("pied « TRUST • Marché US + UK », sans bouton 🔄",
+    # « 👀 Pseudos » sous le podium depuis le 24/10/2026 (il lit le message)
+    check("pied « TRUST • Marché US + UK », sans bouton 🔄, « 👀 Pseudos » du message",
           e["footer"]["text"].startswith("TRUST • Marché US + UK")
-          and "components" not in p_th[0]["json"])
+          and [c["custom_id"] for r in p_th[0]["json"].get("components") or [] for c in r["components"]]
+          == [pd.BOUTON_PSEUDOS_MSG])
     check("passage suivant dans deux heures, pas avant",
           not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 119 * 60)
           and pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 121 * 60))
@@ -763,9 +765,9 @@ try:
     check("ni bonus du jour sur Threads", not pd.a_rafraichir_bonus(TH))
     # « aussi threads refais » (19/10/2026) : « 👀 Pseudos », comme Twitter
     comp = pq[0]["json"].get("components") or []
-    check("sous la quinzaine : « 👀 Pseudos » seul ; rien sous le podium",
+    check("sous la quinzaine : « 👀 Pseudos » seul ; sous le podium, celui qui lit le message",
           [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS]
-          and pd._boutons(TH, True) == {}, comp)
+          and pd._boutons(TH, True) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]}, comp)
     import liens_va as _lv
     _etat_lv = _lv._etat
     _lv._etat = lambda: {"liens": {f"{TH}:1": {"numero": 12, "pseudo": "momobtn"},

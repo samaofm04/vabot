@@ -2893,6 +2893,25 @@ BOUTON_MAJ = "podium:maj"
 BOUTON_PSEUDOS = "podium:pseudos"
 
 
+#: « 👀 Pseudos » sous le bonus du jour et le podium de la semaine
+#: (propriétaire, 24/10/2026, devant le bonus du jour de TRUST TWITTER : « tu
+#: peux me mettre les yeux pour mettre les pseudos »). La réponse lit le
+#: message cliqué lui-même : le bonus d'un jour passé, ou une semaine figée,
+#: montrent leurs propres VA, sans relevé ni état à garder.
+BOUTON_PSEUDOS_MSG = "podium:pseudos:msg"
+YEUX_SOUS_PODIUM = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
+
+
+def _rangee_yeux_message(gid: Optional[str]) -> Dict[str, Any]:
+    """La rangée « 👀 Pseudos » d'un podium ou d'un bonus, sur un serveur qui
+    la veut ; {} ailleurs (le message reste celui d'avant)."""
+    if str(gid or "") not in YEUX_SOUS_PODIUM or not _profil(gid).get("bouton_pseudos"):
+        return {}
+    return {"components": [{"type": 1, "components": [
+        {"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"},
+         "custom_id": BOUTON_PSEUDOS_MSG}]}]}
+
+
 def _bouton_yeux() -> Dict[str, Any]:
     return {"type": 2, "style": 2, "label": "Pseudos",
             "emoji": {"name": "👀"}, "custom_id": BOUTON_PSEUDOS}
@@ -2915,9 +2934,12 @@ def _boutons(gid: Optional[str], vivant: bool, pseudos: bool = False) -> Dict[st
     if "bouton_maj" not in pf:
         # Twitter, Threads : pas de 🔄, seulement « 👀 Pseudos » sous la
         # quinzaine vivante. Ses pages figées (`pseudos`, non vivant) le
-        # perdent : il montre la quinzaine EN COURS. Podium et bonus : rien,
-        # comme avant
-        if not (pseudos and "bouton_pseudos" in pf):
+        # perdent : il montre la quinzaine EN COURS. Le podium de la semaine,
+        # vivant ou figé : « 👀 Pseudos » qui lit le message lui-même
+        # (_rangee_yeux_message, 24/10/2026)
+        if not pseudos:
+            return _rangee_yeux_message(gid)
+        if "bouton_pseudos" not in pf:
             return {}
         if vivant and pf["bouton_pseudos"]:
             return {"components": [{"type": 1, "components": [_bouton_yeux()]}]}
@@ -3982,7 +4004,7 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
         return str(garde.get("message") or "")
-    corps = {"embeds": [embed_bonus(cl, j, gid)]}
+    corps = {"embeds": [embed_bonus(cl, j, gid)], **_rangee_yeux_message(gid)}
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("jour") == j.isoformat():
@@ -4026,7 +4048,7 @@ def _bonus_veille(gid: str, d: Dict[str, Any], salon: str, j: dt.date) -> None:
     if not clv["lignes"]:
         return
     code, _rep = _api("PATCH", f'/channels/{salon}/messages/{v["message"]}',
-                      json={"embeds": [embed_bonus(clv, jv, gid)]})
+                      json={"embeds": [embed_bonus(clv, jv, gid)], **_rangee_yeux_message(gid)})
     if code == 200:
         print(f"[podium] bonus du {jv} complété : {len(clv['lignes'])} comptes", flush=True)
     elif not _passager(code, _rep):
@@ -5435,6 +5457,31 @@ def _voir_pseudos(p: Dict[str, Any]) -> Dict[str, Any]:
     return tk._differer()
 
 
+def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
+    """« 👀 Pseudos » sous un bonus du jour ou un podium de la semaine : staff
+    seulement, en privé. Les VA du message cliqué (ses lignes, ses « sans
+    relevé »), la personne devant chaque numéro — aucun appel, tout de suite."""
+    gid = str(p.get("guild_id") or "")
+    if not _staff(p):
+        return _ephemere("🔒 Réservé au staff.")
+    emb = ((p.get("message") or {}).get("embeds") or [None])[0]
+    if not isinstance(emb, dict):
+        return _ephemere("ℹ️ Rien à montrer sur ce message.")
+    txt = str(emb.get("description") or "")
+    lib = str(_profil(gid).get("libelle") or "VA")
+    lignes = [(va, int(n)) for va, n in _ligne_affichee(lib).findall(txt)]
+    sans: List[str] = []
+    for ligne in txt.splitlines():
+        if "Sans relevé" in ligne or "Relevé indisponible" in ligne:
+            sans += [v for v in re.findall(rf"(?:{re.escape(lib)} VA|{re.escape(lib)}|Instagram VA) \d+",
+                                           ligne) if v not in sans]
+    if not lignes and not sans:
+        return _ephemere("ℹ️ Personne au classement sur ce message.")
+    titre = f"👀 **Pseudos — {str(emb.get('title') or 'classement').strip()}** (visible par toi seul)"
+    return _ephemere(_bloc_pseudos(titre, lignes, sans, "subs" if " subs" in txt else _unite(gid),
+                                   _noms_libelles(gid)))
+
+
 def _ephemere(texte: str) -> Dict[str, Any]:
     return {"type": 4, "data": {"content": texte[:2000], "flags": 64,
                                 "allowed_mentions": {"parse": []}}}
@@ -5496,6 +5543,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     p = p or {}
     if p.get("type") == 3 and str((p.get("data") or {}).get("custom_id") or "") == BOUTON_PSEUDOS:
         return _voir_pseudos(p)
+    if p.get("type") == 3 and str((p.get("data") or {}).get("custom_id") or "") == BOUTON_PSEUDOS_MSG:
+        return _voir_pseudos_message(p)
     if p.get("type") != 3 or str((p.get("data") or {}).get("custom_id") or "") != BOUTON_MAJ:
         return None
     gid = str(p.get("guild_id") or "")
