@@ -2331,6 +2331,12 @@ def suivre_partout() -> Dict[str, Any]:
                     synchroniser_niveaux(gid)
             except Exception as e:
                 print(f"[ticket] {gid} : niveaux : {type(e).__name__}: {e}", flush=True)
+        # une fois l'heure, le menu en bas de chaque ticket — en fond : plus
+        # de soixante tickets espacés d'une seconde arrêteraient le podium
+        if gid in MENUS_HEURE_ICI and maintenant - _MENUS_VU.get(gid, 0) >= MENUS_HEURE_S:
+            _MENUS_VU[gid] = maintenant
+            with sur_serveur(gid):
+                _en_fond(lambda g=gid: ramener_menus(g))
         # Agency VA INSTAGRAM : arrivées, départs et parrainage ne passent
         # plus ici mais par le fil d'agency_accueil, chaque minute — le
         # parrain se lit à la différence d'usage des invitations, et dix
@@ -3498,4 +3504,165 @@ def synchroniser_niveaux(gid: str) -> Dict[str, Any]:
     if bilan["suivis"] or bilan["nettoyes"] or bilan["rates"]:
         print(f"[ticket] niveaux {gid} : {bilan['suivis']} ; retirés {bilan['nettoyes']}"
               + (f" ; ratés {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
+
+
+# ─── le menu ramené en bas, chaque heure ────────────────────────────────
+# Propriétaire, 25/10/2026 : « un truc qui renvoie le menu, toujours le menu
+# d'accueil, généré toutes les heures, et remove les autres ». La nuit
+# d'avant, ramener_menu lancé à la main avait posé les 35 copies d'Agency ;
+# Twitter (25 tickets) et Threads (12) n'en avaient presque aucune. Chaque
+# heure, chaque ticket en service passe par ramener_menu : déjà en bas, rien
+# n'est écrit (pas de bruit) ; sinon, copie neuve en bas, l'ancienne retirée.
+# Avant lui, le ménage : les copies du menu que la fiche ne connaît pas, et
+# les avis « … a épinglé un message » de NOS bots — au relevé du 25/10, un
+# sous chaque accueil épinglé (25 sur Twitter, 16 sur Threads, 35 sur
+# Agency), et aucune copie orpheline. L'accueil, la copie de la fiche, les
+# messages des membres, la carte numéro et les avis posés par un humain ne
+# sont jamais touchés.
+MENUS_HEURE_ICI = NUMERO_DANS_MENU
+MENUS_HEURE_S = 3600
+#: une fois par jour, le ménage relit tout le ticket (les avis du 22/10 sont
+#: loin au-dessus) ; les autres heures, les derniers messages suffisent
+MENAGE_PROFOND_S = 86400
+MENAGE_DERNIERS = 50
+#: nos bots : Yoshi (principal) et Peach (admin) manquent à
+#: verif_discord.bots(), qui ne tient que les bots REST ; Bowser y vient de la
+#: config (absente, son id manquait). verif_discord.bots() s'y ajoute : un bot
+#: remplacé est reconnu sans toucher ici.
+BOTS_CONNUS = {"1505416430840189041",     # Yoshi
+               "1509505792666108074",     # Peach
+               "1552153790701117480",     # Luigi (Twitter)
+               "1552789379574145126",     # Bowser (Threads)
+               "1552785601051365516"}     # Wario (Agency)
+#: ramener_menu poste PUIS écrit la fiche : une copie de moins de 5 min n'est
+#: jamais prise pour une orpheline (un clic peut être en train de la poser)
+COPIE_JEUNE_S = 300
+_PAS_TICKET_S = 1.0
+_PAS_SUPPRESSION_S = 0.5
+_MENUS_VU: Dict[str, float] = {}
+_PROFOND_VU: Dict[str, float] = {}
+_MENUS_EN_COURS: set = set()
+
+
+def _nos_bots() -> set:
+    import verif_discord as vd
+    return ({str(b.get("app_id") or "") for b in vd.bots()} | BOTS_CONNUS) - {""}
+
+
+def _age_message_s(mid: Any, maintenant: Optional[float] = None) -> float:
+    """L'âge d'un message, lu dans son id (l'heure Discord y est écrite)."""
+    try:
+        return (maintenant or time.time()) - ((int(mid) >> 22) + 1420070400000) / 1000
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def est_copie_du_menu(m: Dict[str, Any], bots: set) -> bool:
+    """Une copie du menu : de nos bots, « 📋 Menu » en tête, des boutons. La
+    carte numéro (composants v2, sans texte) et l'accueil (un encart) n'en
+    sont pas."""
+    return (str((m.get("author") or {}).get("id") or "") in bots
+            and m.get("type") in (0, 19) and bool(m.get("components"))
+            and str(m.get("content") or "").startswith("📋 **Menu**"))
+
+
+def _menage_ticket(gid: str, uid: str, salon: str, bots: set,
+                   profond: bool = False) -> Dict[str, int]:
+    """Retire de `salon` les copies du menu que la fiche ne connaît pas et les
+    avis d'épingle de nos bots. Rend {copies, avis, rates, absent}."""
+    out = {"copies": 0, "avis": 0, "rates": 0, "absent": 0}
+    avant, pages = "", 0
+    while True:
+        lim = 100 if profond else MENAGE_DERNIERS
+        code, ms = _api("GET", f"/channels/{salon}/messages?limit={lim}"
+                               + (f"&before={avant}" if avant else ""))
+        if code != 200 or not isinstance(ms, list):
+            # 404 : salon supprimé (entretenir_accueils s'en charge, une fois
+            # par jour) — rien à y reposer
+            out["absent" if code == 404 else "rates"] += 1
+            if code != 404:
+                print(f"[ticket] ménage du ticket de {uid} : lecture refusée (HTTP {code})",
+                      flush=True)
+            return out
+        # relue à chaque page : une copie posée par un clic entre-temps
+        f = _fiche(gid, uid)
+        garder = {str(f.get("menu") or ""), str(f.get("accueil") or "")} - {""}
+        for m in ms:
+            mid = str(m.get("id") or "")
+            if not mid or mid in garder or _age_message_s(mid) < COPIE_JEUNE_S:
+                continue
+            if m.get("type") == 6 and str((m.get("author") or {}).get("id") or "") in bots:
+                quoi = "avis"
+            elif est_copie_du_menu(m, bots):
+                quoi = "copies"
+            else:
+                continue
+            c, _r = _api("DELETE", f"/channels/{salon}/messages/{mid}")
+            if c in (200, 204, 404):
+                out[quoi] += 1
+            else:
+                out["rates"] += 1
+                print(f"[ticket] ménage du ticket de {uid} : {mid} non retiré (HTTP {c})", flush=True)
+            time.sleep(_PAS_SUPPRESSION_S)
+        pages += 1
+        if not profond or len(ms) < 100 or pages >= 50:
+            return out
+        avant = str(ms[-1].get("id") or "")
+        time.sleep(_PAS_SUPPRESSION_S)
+
+
+def ramener_menus(gid: str, profond: Optional[bool] = None) -> Dict[str, Any]:
+    """Le tour de l'heure sur un serveur : ménage, puis ramener_menu, ticket
+    par ticket. Un bilan court au journal, à chaque tour. Ne lève jamais."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"tickets": 0, "ramene": 0, "deja": 0, "echec": [],
+                             "sans_accueil": [], "copies": 0, "avis": 0, "rates": 0}
+    if gid in _MENUS_EN_COURS:
+        return bilan
+    _MENUS_EN_COURS.add(gid)
+    try:
+        if profond is None:
+            profond = time.time() - _PROFOND_VU.get(gid, 0) >= MENAGE_PROFOND_S
+        if profond:
+            _PROFOND_VU[gid] = time.time()
+        bots = _nos_bots()
+        fiches = sorted((k, dict(v)) for k, v in (_etat().get("tickets") or {}).items()
+                        if str(k).startswith(f"{gid}:") and isinstance(v, dict)
+                        and v.get("salon") and not v.get("parti"))
+        for cle, f in fiches:
+            uid = cle.split(":", 1)[1]
+            if not f.get("accueil"):
+                # pas d'accueil, pas de menu à recopier : dit, pas écarté
+                bilan["sans_accueil"].append(uid)
+                continue
+            bilan["tickets"] += 1
+            try:
+                m = _menage_ticket(gid, uid, str(f["salon"]), bots, profond=profond)
+                for k in ("copies", "avis", "rates"):
+                    bilan[k] += m[k]
+                if m["absent"]:
+                    bilan["echec"].append(f"{uid} (salon introuvable)")
+                    continue
+            except Exception as e:                           # noqa: BLE001
+                bilan["rates"] += 1
+                print(f"[ticket] ménage du ticket de {uid} : {type(e).__name__}: {e}", flush=True)
+            r = ramener_menu(gid, uid, str(f["salon"]))
+            if r in ("ramene", "deja"):
+                bilan[r] += 1
+            else:
+                bilan["echec"].append(uid)
+            time.sleep(_PAS_TICKET_S)
+        print(f"[ticket] menus de l'heure {gid} : {bilan['tickets']} ticket(s), "
+              f"{bilan['ramene']} ramené(s) en bas, {bilan['deja']} déjà en bas"
+              + (f", échecs {bilan['echec']}" if bilan["echec"] else "")
+              + f" ; ménage{' complet' if profond else ''} : {bilan['copies']} copie(s) "
+                f"orpheline(s), {bilan['avis']} avis d'épingle retiré(s)"
+              + (f", {bilan['rates']} raté(s)" if bilan["rates"] else "")
+              + (f" ; sans accueil : {bilan['sans_accueil']}" if bilan["sans_accueil"] else ""),
+              flush=True)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menus de l'heure {gid} : {type(e).__name__}: {e}", flush=True)
+    finally:
+        _MENUS_EN_COURS.discard(gid)
     return bilan
