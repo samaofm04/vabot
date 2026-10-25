@@ -3997,7 +3997,10 @@ def _format_subs(gid: Optional[str]) -> str:
     """Le format des pages de la quinzaine : celui des messages vivants, plus
     « US / GBL » sur Threads (21/10/2026) — la quinzaine se refait au premier
     passage, sans toucher au podium de la semaine."""
-    return _format_affiche(gid) + ("+us-gbl-va-at-j2" if _profil(gid).get("us_gbl") else "")
+    return (_format_affiche(gid) + ("+us-gbl-va-at-j2" if _profil(gid).get("us_gbl") else "")
+            # les VA de Twitter retirés (25/10/2026) : refaite au premier passage
+            + ("+sans-va-twitter" if _profil(gid).get("quinzaine_jessye")
+               and not VA_TWITTER_SUR_THREADS else ""))
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -6016,6 +6019,25 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
     return cl
 
 
+# Propriétaire, 25/10/2026, devant la quinzaine de Threads : « sur Threads je
+# vois les mecs de Twitter, ils ne doivent pas être là ». Les VA Discord de
+# Twitter (« Threads VA 1nn », leurs liens de JESSY LE RETOUR / EMY TWITTER)
+# en sortent ; restent les VA de Threads, ceux de Va IG et la ligne des comptes
+# internes (Threads 142). Ils ne sont plus relevés du tout : autant d'appels
+# GetMySocial en moins. POUR LES REMETTRE : True.
+VA_TWITTER_SUR_THREADS = False
+
+_entites_jessye_toutes = _entites_jessye
+
+
+def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:   # noqa: F811
+    ents = _entites_jessye_toutes(liens)
+    if _EN_QUINZAINE_THREADS.get() and not VA_TWITTER_SUR_THREADS:
+        internes = numeros_internes()
+        return {n: ids for n, ids in ents.items() if n in internes}
+    return ents
+
+
 _quinzaine_sans_internes = _quinzaine_us_gbl
 
 
@@ -6029,7 +6051,16 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,   # noqa: F811
         cl = _quinzaine_sans_internes(debut, fin, gid, etiquette)
     finally:
         _EN_QUINZAINE_THREADS.reset(jeton)
-    if str(gid) != THREADS_ID or not INTERNES_REUNIS:
+    if str(gid) != THREADS_ID:
+        return cl
+    if not VA_TWITTER_SUR_THREADS:
+        # une ligne de Twitter qui resterait (relevé gardé d'avant) : pas affichée
+        internes = {_libelle_va_jessye(n) for n in numeros_internes()}
+        cl = dict(cl, lignes=[x for x in cl.get("lignes") or []
+                              if "jessye" not in x or str(x.get("va")) in internes],
+                  illisibles=[v for v in cl.get("illisibles") or []
+                              if not re.fullmatch(r"Threads VA 1\d{2,}", str(v)) or str(v) in internes])
+    if not INTERNES_REUNIS:
         return cl
     try:
         return _reunir(cl, str(gid), {_libelle_va_jessye(n): n for n in numeros_internes()},

@@ -191,6 +191,10 @@ import podium_discord as pd            # noqa: E402
 # le calcul VA par VA : le registre de ces tests n'a pas de fiche liens_va,
 # tout y serait « compte interne » réuni en VA 41 (tests_va_interne.py)
 pd.INTERNES_REUNIS = False
+# le mécanisme des lignes de Twitter (« Threads VA 1nn ») dans la quinzaine :
+# retirées depuis le 25/10/2026 (« les mecs de Twitter ne doivent pas être
+# là »), ce retrait est vérifié dans tests_va_interne.py
+pd.VA_TWITTER_SUR_THREADS = True
 # Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
 # AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
 # (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.

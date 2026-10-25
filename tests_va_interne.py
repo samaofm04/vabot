@@ -125,6 +125,7 @@ TWITTER = {"lignes": [ligne("VA 41", 41, 194), ligne("VA 124", 124, 48), ligne("
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="va_interne_"))
 _SAUVE = {k: getattr(pd, k) for k in ("_lire_registre", "_classement_sans_internes", "_noms_registre",
+                                      "_entites_jessye_toutes", "VA_TWITTER_SUR_THREADS",
                                       "_liens_twitter", "_entites_jessye", "_releve_liens",
                                       "_quinzaine_sans_internes", "_noms_libelles_sans_internes",
                                       "_staff", "INTERNES_REUNIS")}
@@ -300,10 +301,35 @@ try:
         cq = pd._quinzaine_us_gbl(L, J, TH, "quinzaine")
     q = [(x["va"], x["clics"], x.get("gbl"), x.get("at_clics")) for x in cq["lignes"]]
     check("Threads, la quinzaine : les « Threads VA 1nn » internes en « Threads 142 » "
-          "(US, GBL, all-time additionnés) ; Va IG, Threads n, VA Discord de Twitter intacts",
-          q == [("Threads 142", 150, 400, 1200), ("Threads VA 1124", 60, 70, 70),
-                ("Threads VA 023", 40, 90, 95), ("Threads 92", 30, 31, 40)]
+          "(US, GBL, all-time additionnés) ; Va IG et Threads n intacts",
+          q[0] == ("Threads 142", 150, 400, 1200)
+          and ("Threads VA 023", 40, 90, 95) in q and ("Threads 92", 30, 31, 40) in q
           and cq["lignes"][0]["ids"] == ["a", "b"] and vus_ctx == [True], q)
+    # « sur Threads je vois les mecs de Twitter, ils ne doivent pas être là »
+    check("… les VA Discord de Twitter (Threads VA 1124) n'y sont plus",
+          "Threads VA 1124" not in [x[0] for x in q], q)
+    ENTS_J = {41: ["a"], 12: ["b"], 124: ["c"]}
+    pd._entites_jessye_toutes = lambda liens: {n: list(v) for n, v in ENTS_J.items()}
+    jeton = pd._EN_QUINZAINE_THREADS.set(True)
+    try:
+        dans_q = _SAUVE["_entites_jessye"]([])
+    finally:
+        pd._EN_QUINZAINE_THREADS.reset(jeton)
+    check("… ni relevés : dans la quinzaine, seuls les comptes internes sont lus (pas un appel "
+          "GetMySocial pour un VA de Twitter) ; ailleurs, tous",
+          sorted(dans_q) == [12, 41] and sorted(_SAUVE["_entites_jessye"]([])) == [12, 41, 124], dans_q)
+    pd.VA_TWITTER_SUR_THREADS = True
+    jeton = pd._EN_QUINZAINE_THREADS.set(True)
+    try:
+        remis = _SAUVE["_entites_jessye"]([])
+    finally:
+        pd._EN_QUINZAINE_THREADS.reset(jeton)
+    with contextlib.redirect_stdout(io.StringIO()):
+        cq3 = pd._quinzaine_us_gbl(L, J, TH, "quinzaine")
+    pd.VA_TWITTER_SUR_THREADS = False
+    check("… VA_TWITTER_SUR_THREADS = True : ils reviennent",
+          sorted(remis) == [12, 41, 124]
+          and "Threads VA 1124" in [x["va"] for x in cq3["lignes"]], cq3["lignes"])
     pd._quinzaine_sans_internes = lambda *a: {"lignes": [
         ligne("Threads VA 141", 41, 100, gbl=300, at_clics=None, jessye=41),
         ligne("Threads VA 112", 12, 50, gbl=100, at_clics=200, jessye=12)], "illisibles": []}
