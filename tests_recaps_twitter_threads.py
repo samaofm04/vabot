@@ -163,6 +163,10 @@ sys.modules["mypuls"] = _faux_mypuls
 import safe_json                       # noqa: E402
 import verif_discord as vd             # noqa: E402
 import podium_discord as pd            # noqa: E402
+# Threads qui reprend Twitter, à l'octet : le registre de ces tests n'a pas de
+# fiche liens_va, tout y serait « compte interne » réuni en VA 41 d'un côté
+# seulement (tests_va_interne.py)
+pd.INTERNES_REUNIS = False
 import recap_clics_rest as rcr         # noqa: E402
 import cogs.clickrecap as cr           # noqa: E402
 import clics_personnes as cp           # noqa: E402

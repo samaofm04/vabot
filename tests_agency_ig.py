@@ -37,6 +37,9 @@ except Exception:
 
 import liens_va as lv                  # noqa: E402
 import podium_discord as pod           # noqa: E402
+# le calcul VA par VA : le registre de ces tests n'a pas de fiche liens_va,
+# tout y serait « compte interne » réuni en VA 41 (tests_va_interne.py)
+pod.INTERNES_REUNIS = False
 import subs_va as sv                   # noqa: E402
 import tickets_discord as tk           # noqa: E402
 

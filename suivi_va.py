@@ -306,6 +306,12 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
     for rang, ligne in enumerate(cl.get("lignes") or []):
         if rang >= len(pod.PRIMES):
             break
+        if ligne.get("interne"):
+            # VA 41, les comptes internes (podium_discord.VA_INTERNE) : il
+            # prend sa place, personne ne se paie à son nom — et « Threads VA
+            # 141 » aurait pu tomber sur le ticket d'un VA de Threads n° 141
+            bilan.setdefault("internes", []).append(ligne.get("va"))
+            continue
         try:
             num = int(str(ligne.get("va", "")).split()[-1])
         except Exception:

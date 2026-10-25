@@ -5581,3 +5581,290 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         # d'autre ne rendrait le verrou, et le podium resterait bloqué pour de bon
         if not suivi["parti"]:
             _VERROU.release()
+
+
+# ─── VA 41 : les comptes internes, une seule ligne ───────────────────────
+# Propriétaire, 25/10/2026, devant le bonus de Twitter du 24/10 : « mets tous
+# les mecs de JESSY LE RETOUR pour le VA 41, il prend tout », « tu prends un
+# VA pour Twitter, idem pour Threads, c'est lui qui est le VA 41 », puis
+# « tous les comptes internes » ; « les subs pour Twitter et pour Instagram,
+# et pour Threads les clics ». Un compte interne : un numéro du registre des
+# trackings qui n'est pas un VA Discord — aucun de ses trackings dans une
+# fiche liens_va (Twitter, Threads, Agency), aucun de ses liens en « Twitter
+# VA n @pseudo ». Au 25/10 : 59 numéros (Eddy c35, le VA 41 d'origine,
+# « VA 3 - Roucham ( normal / spam ) », « (Carter) », Jerry, Tiger, Robot…),
+# 25 VA Discord. Pas une liste de prénoms : un compte interne neuf rejoint
+# VA 41 tout seul, un VA qui crée son lien en sort.
+#  - Twitter : ces lignes réunies en « VA 41 » (bonus, semaine, quinzaine) ;
+#  - Agency : « Instagram VA 41 », les abonnés des mêmes trackings, au bonus
+#    et à la semaine (sa quinzaine les compte déjà, dans les trois lignes
+#    YouLab : les y ajouter serait les compter deux fois) ;
+#  - Threads : « Threads VA 141 », le libellé que sa quinzaine donnait déjà
+#    aux liens d'Eddy : leurs clics uniques US + UK à la semaine ; à la
+#    quinzaine, à la place des « Threads VA 1nn » qui en viennent.
+# VA 41 prend sa place au classement, mais personne ne se paie à son nom
+# (« interne » : suivi_va.annoncer_primes le saute). « 👀 Pseudos » :
+# « comptes internes (N comptes) » et leurs noms, au staff, en privé.
+VA_INTERNE = 41
+#: POUR REVENIR AUX COMPTES INTERNES CHACUN SUR SA LIGNE : False. Les suites
+#: qui vérifient le calcul VA par VA (registre sans fiches liens_va : tout y
+#: serait interne) le coupent aussi.
+INTERNES_REUNIS = True
+_LIEN_VA_DISCORD = re.compile(r"^\s*(?:Twitter|Threads|Instagram) VA \d+ @", re.IGNORECASE)
+#: le relevé de Twitter réuni, gardé un quart d'heure : Agency reprend sa
+#: ligne VA 41 sans relire MyPuls ni les listes GetMySocial
+TW_INTERNES_S = 900
+#: GetMySocial refuse plus de 20 liens par appel (get_top_countries, 400) :
+#: les 58 liens internes de Threads, le 25/10, sont relevés par lots
+LOT_GMS = 20
+_TW_INTERNES: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
+_INTERNES_DITS: set = set()
+_EN_QUINZAINE_THREADS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "podium_quinzaine_threads", default=False)
+
+
+def numeros_internes(reg: Optional[Dict[str, Any]] = None) -> set:
+    """Les numéros du registre des trackings qui ne sont pas des VA Discord."""
+    reg = reg if reg is not None else _lire_registre()
+    import liens_va as lv
+    leurs, discord = set(), set()
+    for cle, f in (lv._etat().get("liens") or {}).items():
+        if not isinstance(f, dict):
+            continue
+        for url in (f.get("tracking"), (f.get("variante") or {}).get("tracking")):
+            if tracking_de(url):
+                leurs.add(tracking_de(url))
+        if str(cle).startswith(f"{TWITTER_ID}:") and str(f.get("numero") or "").isdigit():
+            discord.add(int(f["numero"]))
+    tous = set()
+    for t, e in (reg.get("trackings") or {}).items():
+        if not isinstance(e, dict) or not str(e.get("numero") or "").isdigit():
+            continue
+        n = int(e["numero"])
+        tous.add(n)
+        if t in leurs or any(_LIEN_VA_DISCORD.match(str(x)) for x in e.get("liens") or []):
+            discord.add(n)
+    return tous - discord
+
+
+def libelle_interne(gid: Optional[str]) -> str:
+    g = str(gid or "")
+    if g == THREADS_ID:
+        return _libelle_va_jessye(VA_INTERNE)
+    if g == AGENCY_IG_ID:
+        import subs_va
+        return subs_va.libelle_agency(VA_INTERNE)
+    return f"VA {VA_INTERNE}"
+
+
+def texte_internes() -> str:
+    """Ce que « 👀 Pseudos » dit de VA 41 : les comptes réunis, par leur nom au
+    registre (ceux qui ont un tracking en service)."""
+    reg = _lire_registre()
+    actifs = {int(e["numero"]) for e in (reg.get("trackings") or {}).values()
+              if isinstance(e, dict) and e.get("actif") and str(e.get("numero") or "").isdigit()}
+    noms = _noms_registre()
+    qui = [noms.get(n) or f"VA {n}" for n in sorted(numeros_internes(reg) & actifs)]
+    return f"comptes internes ({len(qui)} comptes) : " + ", ".join(qui)
+
+
+def _dire_internes(gid: str, n: int, sans: List[str]) -> None:
+    dit = f"{gid}|{n}|{','.join(sorted(sans))}"
+    if dit in _INTERNES_DITS:
+        return
+    _INTERNES_DITS.add(dit)
+    print(f"[podium] {gid} : {n} compte(s) interne(s) réuni(s) en {libelle_interne(gid)}"
+          + (f", sans relevé (pas comptés) : {', '.join(sorted(sans))}" if sans else ""),
+          flush=True)
+
+
+def _reunir(cl: Dict[str, Any], gid: str, libs: Dict[str, int], tri) -> Dict[str, Any]:
+    """Les lignes de `libs` (libellé → numéro du registre) réunies en une
+    seule, libelle_interne(gid), à sa place (`tri` : la clé de tri de ce
+    classement, les autres lignes gardent leur ordre). Un compte interne sans
+    relevé n'est pas compté, et c'est dit ; tous sans relevé : VA 41 aussi."""
+    if not isinstance(cl, dict):
+        return cl
+    lignes = list(cl.get("lignes") or [])
+    dedans = [x for x in lignes if str(x.get("va")) in libs]
+    sans = [str(v) for v in cl.get("illisibles") or [] if str(v) in libs]
+    if not dedans and not sans:
+        return cl
+    cible = libelle_interne(gid)
+    reste = [x for x in lignes if str(x.get("va")) not in libs]
+    illis = [v for v in cl.get("illisibles") or [] if str(v) not in libs]
+    if dedans:
+        f: Dict[str, Any] = {"va": cible, "numero": VA_INTERNE,
+                             "clics": sum(int(x.get("clics") or 0) for x in dedans),
+                             "liens": sum(int(x.get("liens") or 0) for x in dedans),
+                             "spam": False, "model": "", "interne": True,
+                             "comptes": len(dedans) + len(sans), "sans_releve": sorted(sans)}
+        for k in ("clics_subs", "gbl"):
+            if any(k in x for x in dedans):
+                f[k] = sum(int(x.get(k) or 0) for x in dedans)
+        if any("at_clics" in x for x in dedans):
+            # un all-time manquant : rien plutôt qu'un total trop petit
+            f["at_clics"] = (None if any(x.get("at_clics") is None for x in dedans)
+                             else sum(int(x["at_clics"]) for x in dedans))
+        if any(x.get("ids") for x in dedans):
+            f["ids"] = sorted({str(i) for x in dedans for i in x.get("ids") or []})
+        if any("jessye" in x for x in dedans):
+            f["jessye"] = VA_INTERNE
+        reste.append(f)
+        reste.sort(key=tri)
+    elif cible not in illis:
+        illis.append(cible)
+    _dire_internes(gid, len(dedans), sans)
+    return dict(cl, lignes=reste, illisibles=sorted(illis))
+
+
+def _tri_tracking(x: Dict[str, Any]):
+    return (-int(x.get("clics") or 0), str(x.get("model") or ""), int(x.get("numero") or 0))
+
+
+def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
+                          etiquette: str) -> Dict[str, Any]:
+    """Agency, bonus et semaine : « Instagram VA 41 », les abonnés des comptes
+    internes, tels que Twitter vient de les compter."""
+    import subs_va
+    k = (debut.isoformat(), fin.isoformat())
+    deja = _TW_INTERNES.get(k)
+    if deja and 0 <= time.time() - deja[0] < TW_INTERNES_S:
+        tw = deja[1]
+    else:
+        tw = classement(debut, fin, gid=TWITTER_ID, mesure="tracking_abonnes", etiquette=etiquette)
+    lib = subs_va.libelle_agency(VA_INTERNE)
+    x = next((x for x in tw.get("lignes") or [] if x.get("interne")), None)
+    lignes = [y for y in cl.get("lignes") or [] if str(y.get("va")) != lib]
+    illis = [v for v in cl.get("illisibles") or [] if str(v) != lib]
+    if x is not None:
+        lignes.append({"va": lib, "numero": VA_INTERNE, "clics": int(x["clics"]),
+                       "liens": int(x.get("liens") or 0), "spam": False, "model": "",
+                       "interne": True, "comptes": x.get("comptes"),
+                       "sans_releve": list(x.get("sans_releve") or [])})
+        lignes.sort(key=lambda y: (-int(y.get("clics") or 0), str(y.get("va"))))
+    elif tw.get("erreur") or f"VA {VA_INTERNE}" in (tw.get("illisibles") or []):
+        illis.append(lib)
+    return dict(cl, lignes=lignes, illisibles=sorted(illis),
+                entites=int(cl.get("entites") or 0) + (x is not None))
+
+
+def _avec_internes_threads(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
+                           etiquette: str) -> Dict[str, Any]:
+    """Threads, la semaine : « Threads VA 141 », les clics uniques US + UK de
+    tous les liens des comptes internes, par lots de LOT_GMS. Un lot sans
+    réponse : la ligne entière sans relevé, jamais un total partiel."""
+    pf = _profil(THREADS_ID)
+    liens_j, frais_j = _liens_twitter(etiquette)
+    internes = numeros_internes()
+    ents = {n: ids for n, ids in _entites_jessye(liens_j).items() if n in internes}
+    ids = sorted({str(i) for l in ents.values() for i in l})
+    if not ids:
+        return cl
+    lib = libelle_interne(THREADS_ID)
+    lignes = [y for y in cl.get("lignes") or [] if str(y.get("va")) != lib]
+    illis = [v for v in cl.get("illisibles") or [] if str(v) != lib]
+    directs = _directs(liens_j)
+    total, pays = 0, {}
+    for i in range(0, len(ids), LOT_GMS):
+        try:
+            t, p = _releve_liens(THREADS_ID, ids[i:i + LOT_GMS], debut.isoformat(),
+                                 fin.isoformat(), "gms_bouton", etiquette, directs)
+        except Exception:                                    # noqa: BLE001
+            t, p = None, None
+        if p is None:
+            total, pays = None, None
+            break
+        total = None if t is None or total is None else total + int(t)
+        for code, n in p.items():
+            pays[code] = int(pays.get(code) or 0) + int(n or 0)
+    if pays is None:
+        illis.append(lib)
+    else:
+        lignes.append({"va": lib, "numero": VA_INTERNE, "clics": _clics(pays, pf),
+                       "clics_subs": sum(int(pays.get(p) or 0)
+                                         for p in (pf.get("pays_subs") or pf["pays"])),
+                       "gbl": int(total if total is not None
+                                  else sum(int(v or 0) for v in pays.values())),
+                       "liens": len(ids), "spam": False, "model": "", "interne": True,
+                       "jessye": VA_INTERNE, "ids": ids, "comptes": len(ents),
+                       "sans_releve": []})
+        lignes.sort(key=_tri_tracking)
+    _dire_internes(THREADS_ID, len(ents), [])
+    return dict(cl, lignes=lignes, illisibles=sorted(illis),
+                frais=bool(cl.get("frais", True)) and frais_j,
+                entites=int(cl.get("entites") or 0) + 1)
+
+
+_classement_sans_internes = classement
+
+
+def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
+               gid: Optional[str] = None, mesure: Optional[str] = None,
+               etiquette: str = "podium") -> Dict[str, Any]:
+    """Le classement du serveur, ses comptes internes en une ligne (VA 41)."""
+    cl = _classement_sans_internes(debut, fin, pause=pause, gid=gid, mesure=mesure,
+                                   etiquette=etiquette)
+    g, src = str(gid or ""), _source(gid, mesure)
+    if not INTERNES_REUNIS:
+        return cl
+    try:
+        if g == TWITTER_ID and src in ("tracking", "tracking_abonnes"):
+            out = _reunir(cl, g, {f"VA {n}": n for n in numeros_internes()}, _tri_tracking)
+            if src == "tracking_abonnes":
+                _TW_INTERNES[(debut.isoformat(), fin.isoformat())] = (time.time(), out)
+            return out
+        if g == AGENCY_IG_ID and src == "agency_abonnes" and (cl.get("lignes") or cl.get("illisibles")):
+            return _avec_internes_agency(cl, debut, fin, etiquette)
+        if (g == THREADS_ID and src == "gms_bouton" and not _EN_QUINZAINE_THREADS.get()
+                and (cl.get("lignes") or cl.get("illisibles"))):
+            return _avec_internes_threads(cl, debut, fin, etiquette)
+    except Exception as e:                                   # noqa: BLE001
+        # le classement d'avant plutôt que rien : les comptes internes y
+        # restent chacun sur sa ligne, et c'est dit
+        print(f"[podium] {g} : comptes internes non réunis ({type(e).__name__}: {e})", flush=True)
+    return cl
+
+
+_quinzaine_sans_internes = _quinzaine_us_gbl
+
+
+def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,   # noqa: F811
+                      etiquette: str) -> Dict[str, Any]:
+    """La quinzaine de Threads, les « Threads VA 1nn » des comptes internes en
+    une ligne (Threads VA 141). Les VA de Threads y sont relevés par
+    classement() : pas de ligne interne de la semaine en plus."""
+    jeton = _EN_QUINZAINE_THREADS.set(True)
+    try:
+        cl = _quinzaine_sans_internes(debut, fin, gid, etiquette)
+    finally:
+        _EN_QUINZAINE_THREADS.reset(jeton)
+    if str(gid) != THREADS_ID or not INTERNES_REUNIS:
+        return cl
+    try:
+        return _reunir(cl, str(gid), {_libelle_va_jessye(n): n for n in numeros_internes()},
+                       lambda x: (-int(x.get("clics") or 0), -int(x.get("gbl") or 0), str(x["va"])))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] {gid} : comptes internes non réunis ({type(e).__name__}: {e})", flush=True)
+        return cl
+
+
+_noms_libelles_sans_internes = _noms_libelles
+
+
+def _noms_libelles(gid: str) -> Dict[Any, str]:   # noqa: F811
+    noms = _noms_libelles_sans_internes(gid)
+    g = str(gid or "")
+    if g not in (TWITTER_ID, THREADS_ID, AGENCY_IG_ID) or not INTERNES_REUNIS:
+        return noms
+    try:
+        out = dict(noms)
+        # au libellé si ce serveur nomme au libellé (Threads, Agency), au
+        # numéro sinon (Twitter, _bloc_pseudos)
+        cle: Any = (libelle_interne(g) if any(isinstance(k, str) for k in out) or g != TWITTER_ID
+                    else VA_INTERNE)
+        out[cle] = texte_internes()
+        return out
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] pseudos {g} : comptes internes : {type(e).__name__}: {e}", flush=True)
+        return noms
