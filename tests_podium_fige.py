@@ -52,6 +52,14 @@ _faux_suivi.annoncer_primes = lambda gid, cl, debut, fin: (
 sys.modules["suivi_va"] = _faux_suivi
 
 import podium_discord as pd            # noqa: E402
+# la mécanique d'avant le 25/10/2026 au soir : rythme « N minutes après le
+# dernier passage », textes sans minuteur, podium long, quinzaine de Va IG aux
+# deux heures. Le nouveau (heure fixe, minuteur, podium court) a ses tests :
+# tests_minuteur.py
+pd.HEURE_FIXE = False
+pd.MINUTEUR = False
+pd.PODIUM_COURT = set()
+pd.SERVEURS[pd.VA_IG_ID].pop("minutes_subs", None)
 # « Instagram VA n » sur Va IG (clé « marque ») a son test,
 # tests_podium_marque.py ; ici, les libellés d'origine, mot pour mot
 pd.SERVEURS["1505418484052394004"].pop("marque", None)

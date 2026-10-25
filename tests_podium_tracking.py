@@ -165,6 +165,23 @@ import podium_discord as pd            # noqa: E402
 # le calcul VA par VA : le registre de ces tests n'a pas de fiche liens_va,
 # tout y serait « compte interne » réuni en VA 41 (tests_va_interne.py)
 pd.INTERNES_REUNIS = False
+# le podium court (25/10/2026) ne dit plus ses avertissements : il les passe au
+# journal (_taire_avert). Gardés ici pour les vérifier tels quels
+TUS = []
+_taire_vrai = pd._taire_avert
+
+
+def _taire_note(gid, quoi, lignes):
+    TUS.extend(str(x) for x in lignes)
+    return _taire_vrai(gid, quoi, lignes)
+
+
+pd._taire_avert = _taire_note
+
+
+def tu(texte):
+    """Ce que le podium a passé au journal plutôt que d'afficher."""
+    return any(texte in x for x in TUS)
 # Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
 # AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
 # (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.
@@ -452,8 +469,9 @@ try:
           and attente()["jessyewdiference/c126"]["numeros"] == [34, 40]
           and attente()["jessyewdiference/c126"]["conflit"] is True, attente())
     e4 = pd.embed_podium(cl4, LUN, MAR, en_cours=True, gid=TW)
-    check("… le message dit qu'un tracking est partagé, à corriger",
-          "1 tracking partagé entre plusieurs VA" in e4["description"], e4["description"][-400:])
+    check("… un tracking partagé entre plusieurs VA est dit (au journal : le podium court)",
+          tu("1 tracking partagé entre plusieurs VA") and "partagé" not in e4["description"],
+          TUS[-3:])
     check("… X et Micky passent sans relevé, personne ne touche les clics de l'autre",
           {"VA 34", "VA 40"} <= set(cl4["illisibles"]) and "VA 34" not in par_va(cl4))
     LIENS[EQ_TW1][4]["status"] = "inactive"
@@ -597,7 +615,8 @@ try:
           registre()["emy.brw/c777"]["numero"] == 22 and par_va(cl5).get("VA 22") == 9
           and cl5["introuvables"] == ["emy.brw/c777"], (par_va(cl5), cl5["illisibles"]))
     e = pd.embed_podium(cl5, LUN, dt.date(2026, 10, 9), en_cours=True, gid=TW)
-    check("… et le message le dit", "1 tracking introuvable dans MyPuls" in e["description"])
+    check("… et c'est dit (au journal)", tu("1 tracking introuvable dans MyPuls")
+          and "introuvable" not in e["description"])
 
     # ------------------------------------------------------------------ 6
     print("\n— 6. GetMySocial muet ou en pause : on compte les trackings connus")
@@ -618,8 +637,8 @@ try:
     frais()
     clm2 = pd.classement(LUN, dt.date(2026, 10, 7), gid=TW)
     e = pd.embed_podium(clm2, LUN, dt.date(2026, 10, 7), en_cours=True, gid=TW)
-    check("liste muette depuis plus d'un jour : le message dit qu'elle n'est pas fraîche",
-          clm2["frais"] is False and "non rafraîchie" in e["description"])
+    check("liste muette depuis plus d'un jour : c'est dit (au journal), pas fraîche",
+          clm2["frais"] is False and tu("non rafraîchie") and "non rafraîchie" not in e["description"])
     installer()
     PAUSE["on"] = True
     check("pause de GetMySocial : Twitter ne s'arrête pas (le bonus du jour est payé)",
@@ -634,12 +653,11 @@ try:
     LIENS[EQ_TW1].append(page("l21", "Quelqu un", OF + "emy.brw/c71"))   # VA neuf, pas dans MyPuls
     cl7 = pd.classement(LUN, MAR, gid=TW)
     e = pd.embed_podium(cl7, LUN, MAR, en_cours=True, gid=TW)
-    check("podium Twitter : « clics tracking OF », plus « clics US »",
-          "clics **tracking OF**" in e["description"] and "clics **US**" not in e["description"])
+    check("podium Twitter : au format du bonus, « subs », plus « clics US »",
+          " subs** → **10$**" in e["description"] and "clics **US**" not in e["description"])
     check("podium : lien sans tracking et tracking neuf en attente dits, en nombre seulement",
-          "1 lien sans tracking OnlyFans" in e["description"]
-          and "1 tracking neuf pas encore dans MyPuls" in e["description"]
-          and "Quelqu" not in e["description"], e["description"][-500:])
+          tu("1 lien sans tracking OnlyFans") and tu("1 tracking neuf pas encore dans MyPuls")
+          and not any("Quelqu" in x for x in TUS) and "Quelqu" not in e["description"], TUS[-4:])
     pages = pd.pages_subs(cl7, LUN, MAR, {}, gid=TW)
     check("classement subs : « Abonnés tracking OF » (la quinzaine compte les abonnés)",
           "Abonnés **tracking OF**" in pages[0]["description"])
@@ -684,7 +702,7 @@ try:
                     "emy.brw/c6": {"2026-10-06": 3}})
     check("message vivant de Twitter posté", pd.rafraichir(TW) == "M1")
     post = [x for x in DISCORD.appels if x["m"] == "POST"][-1]["json"]["embeds"][0]
-    check("… avec les clics des trackings", "**VA 12** — **42** subs" in post["description"],
+    check("… avec les clics des trackings", "**VA 12** — **42 subs**" in post["description"],
           post["description"][:600])
     check("bonus du jour posté", bool(pd.rafraichir_bonus(TW)))
     check("classement de la quinzaine posté", bool(pd.rafraichir_subs(TW, forcer=True)))
@@ -784,12 +802,10 @@ try:
               _PRIMES and _PRIMES[-1][1] == "2026-10-05" and paye == ["VA 12", "VA 24", "VA 43"]
               and not fg.get("primes_attente") and fg.get("primes_liberees", {}).get("seuil") == 20,
               (paye, fg))
-        corr = [a_["json"]["embeds"][0]["description"] for a_ in DISCORD.appels
-                if a_["m"] == "PATCH" and (a_["json"] or {}).get("embeds")
-                and "Primes confirmées" in a_["json"]["embeds"][0]["description"]]
-        check("… le podium corrigé le dit, plafonds compris",
+        corr = [x for x in TUS if "Primes confirmées" in x]
+        check("… la correction est dite (au journal : le podium court), plafonds compris",
               corr and "VA 22 (10 au plus), VA 34 (5 au plus), VA 40 (5 au plus)" in corr[-1]
-              and "pas atteindre le 3e (20 clics)" in corr[-1], corr[-1:] or DISCORD.appels[-3:])
+              and "pas atteindre le 3e (20 clics)" in corr[-1], corr[-1:] or TUS[-3:])
     finally:
         _faux_gms.analytics_for_links = _vraie_analytics
 

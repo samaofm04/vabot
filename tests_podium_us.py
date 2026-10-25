@@ -163,6 +163,14 @@ _faux_gms.pause_restante = lambda: 0
 sys.modules["gms"] = _faux_gms
 
 import podium_discord as pd            # noqa: E402
+# la mécanique d'avant le 25/10/2026 au soir : rythme « N minutes après le
+# dernier passage », textes sans minuteur, podium long, quinzaine de Va IG aux
+# deux heures. Le nouveau (heure fixe, minuteur, podium court) a ses tests :
+# tests_minuteur.py
+pd.HEURE_FIXE = False
+pd.MINUTEUR = False
+pd.PODIUM_COURT = set()
+pd.SERVEURS[pd.VA_IG_ID].pop("minutes_subs", None)
 # Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
 # AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
 # (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.

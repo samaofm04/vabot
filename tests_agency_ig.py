@@ -375,9 +375,10 @@ try:
           and "**Instagram VA 001** — **2** subs\n" in desc + "\n"
           and "Abonnés **tracking OF**" in desc and "$" not in desc, desc[:600])
     emb = pod.embed_podium(cl, J1, J2, gid=AG, en_cours=True)
-    check("podium de la semaine : « Abonnés tracking OF via Instagram », en subs",
-          "Abonnés **tracking OF** via Instagram" in emb["description"]
-          and "**Instagram VA 12**" in emb["description"] and "clics **" not in emb["description"],
+    # au format du bonus du jour depuis le 25/10/2026 : plus d'en-tête
+    check("podium de la semaine : en subs, « Instagram VA n », le top 3 et sa prime",
+          "**Instagram VA 12** — **" in emb["description"] and " subs** → **10$**" in emb["description"]
+          and "clics" not in emb["description"],
           emb["description"][:500])
     bon = pod.embed_bonus(cl, J2, AG)
     check("bonus du jour : « Instagram VA n — N subs → 5.00$ » (format du 25/10/2026)",

@@ -535,11 +535,13 @@ try:
     with _ctx.redirect_stdout(_sortie):
         e_d = pd.embed_podium(cl_x, lundi, auj, en_cours=True, gid=TH)
         e_t = pd.embed_podium(dict(cl_x, illisibles=["VA 99"]), lundi, auj, en_cours=True, gid=TW)
-    check("un avertissement de Threads (un relevé raté) : pas dans le message, au journal ; "
-          "Twitter, lui, garde les siens",
+    # le podium court (25/10/2026) : Twitter non plus ne les affiche plus
+    check("un avertissement (un relevé raté) : pas dans le message, au journal — Threads, "
+          "et Twitter depuis le podium court",
           "⚠️" not in e_d["description"] and "Threads 99" not in e_d["description"]
           and "non affiché dans le podium" in _sortie.getvalue()
-          and "Threads 99" in _sortie.getvalue() and "⚠️" in e_t["description"],
+          and "Threads 99" in _sortie.getvalue() and "VA 99" in _sortie.getvalue()
+          and "⚠️" not in e_t["description"] and "VA 99" not in e_t["description"],
           (_sortie.getvalue()[-300:], e_d["description"][-200:]))
     check("le format d'affichage : Threads à part, Twitter et Va IG inchangés",
           pd._format_affiche(TW) == pd._format_affiche(IG) == pd.FORMAT_AFFICHAGE
@@ -605,19 +607,20 @@ try:
     e = p_th[0]["json"]["embeds"][0]
     RENDU["vivant"] = e
     desc = e["description"]
-    check("titre « PODIUM CLICS — SEMAINE EN COURS »",
-          e["title"] == "🔴 PODIUM CLICS — SEMAINE EN COURS", e["title"])
-    check("en-tête : clics uniques US + UK vers OnlyFans",
-          "Clics **uniques US + UK** vers OnlyFans" in desc, desc[:300])
+    # au format du bonus du jour depuis le 25/10/2026 (tests_minuteur.py)
+    check("titre « Podium clics de la semaine », la semaine",
+          e["title"].startswith("🔴 Podium clics de la semaine · "), e["title"])
+    check("ni en-tête, ni places 4 et plus : le top 3, puis le minuteur",
+          "Clics **uniques" not in desc and "\n4. " not in desc
+          and "🔄 Prochaine mise à jour <t:" in desc, desc[:300])
     check("« Threads n » et « clics » partout, jamais « VA 12 », « subs » ni un nom de lien",
           "subs" not in json.dumps(e, ensure_ascii=False).lower()
           and "**VA " not in desc and "Roucham" not in desc and "tsiry" not in desc, desc)
     check("le top 3 avec ses primes 10/5/3 $",
-          "🥇 **Threads 12** — **47** clics · 💰 **10$**" in desc
-          and "🥈 **Threads 43** — **31** clics · 💰 **5$**" in desc
-          and "🥉 **Threads 41** — **20** clics · 💰 **3$**" in desc
-          and "4. Threads 31 — **7** clics" in desc and "5. Threads 30 — **3** clics" in desc,
-          desc)
+          "🥇 **Threads 12** — **47 clics** → **10$**" in desc
+          and "🥈 **Threads 43** — **31 clics** → **5$**" in desc
+          and "🥉 **Threads 41** — **20 clics** → **3$**" in desc
+          and "Threads 31" not in desc and "Threads 30" not in desc, desc)
     # Bowser ne lit aucun message : « envoie un message à @Bowser » n'avait
     # enregistré aucune adresse (audit du 20/10/2026)
     check("l'adresse de la prime se donne au bouton 💳 du ticket, plus à Bowser",
@@ -627,23 +630,26 @@ try:
           "⚠️" not in desc and "ℹ️" not in desc, desc[-300:])
     # Threads s'appelle TRUST THREADS depuis le 24/10/2026 (tests_trust.py)
     # « 👀 Pseudos » sous le podium depuis le 24/10/2026 (il lit le message)
-    check("pied « TRUST • Marché US + UK », sans bouton 🔄, « 👀 Pseudos » du message",
-          e["footer"]["text"].startswith("TRUST • Marché US + UK")
+    check("pied « Un seul prix par personne », sans bouton 🔄, « 👀 Pseudos » du message",
+          e["footer"]["text"].startswith("Un seul prix par personne")
           and [c["custom_id"] for r in p_th[0]["json"].get("components") or [] for c in r["components"]]
           == [pd.BOUTON_PSEUDOS_MSG])
-    check("passage suivant dans deux heures, pas avant",
-          not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 119 * 60)
-          and pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 121 * 60))
+    # chaque heure à heure fixe depuis le 25/10/2026 (avant : deux heures)
+    _vu = float(json.loads((pd.DATA_DIR / "podium.json").read_text(encoding="utf-8"))
+                ["vivants"][TH]["vu"])
+    _pile = pd.debut_creneau(60, _vu) + 3600
+    check("passage suivant à l'heure pile, pas avant",
+          not pd.a_rafraichir(TH, _pile - 60) and pd.a_rafraichir(TH, _pile + 1), (_vu, _pile))
     PAUSE["gms"] = True
     check("GetMySocial en pause : Threads attend (sa mesure en dépend)",
           pd._pause_pour(TH) and not pd.a_rafraichir(TH, CLOCK["now"].timestamp() + 3 * 3600))
     PAUSE["gms"] = False
     e_tw = pd.embed_podium({"lignes": [{"va": "VA 12", "clics": 7, "numero": 12}],
                             "illisibles": [], "frais": True}, lundi, auj, en_cours=True, gid=TW)
-    check("Twitter : « PODIUM SUBS », « VA 12 », « Abonnements via Twitter », comme avant",
-          e_tw["title"] == "🔴 PODIUM SUBS — SEMAINE EN COURS"
-          and "🥇 **VA 12** — **7** subs · 💰 **10$**" in e_tw["description"]
-          and "Abonnements via Twitter 🐦 — clics **tracking OF**" in e_tw["description"])
+    check("Twitter : « Podium subs », « VA 12 », au format du bonus lui aussi",
+          e_tw["title"].startswith("🔴 Podium subs de la semaine · ")
+          and "🥇 **VA 12** — **7 subs** → **10$**" in e_tw["description"]
+          and "Abonnements" not in e_tw["description"])
     # Luigi et Bowser ne lisent aucun message (audit du 20/10/2026) : la
     # consigne renvoie au bouton 💳 du ticket, sur le podium comme au bonus
     bouton = ("enregistre **ton adresse USDC (réseau Solana)** avec le bouton "
@@ -881,7 +887,8 @@ try:
     w = ecritures(DISCORD.depuis(k3))
     check("lundi 00h10 : « terminée », sur place",
           [x["m"] for x in w] == ["PATCH"] and w[0]["p"].endswith(f"/{mid}")
-          and w[0]["json"]["embeds"][0]["title"] == "🏁 PODIUM CLICS — SEMAINE TERMINÉE",
+          and w[0]["json"]["embeds"][0]["title"].startswith("🏁 Podium clics · semaine du ")
+          and w[0]["json"]["embeds"][0]["title"].endswith(" terminée"),
           [(x["m"], x["p"]) for x in w])
     CLOCK["now"] = dt.datetime(2026, 10, 19, 9, 2)
     k4 = len(DISCORD.appels)
@@ -891,8 +898,9 @@ try:
     w = ecritures(DISCORD.depuis(k4))
     ef = w[0]["json"]["embeds"][0] if w else {}
     RENDU["podium"] = ef
-    check("9h : le podium FIGE le message de la semaine, « 🏆 PODIUM CLICS DE LA SEMAINE »",
-          fige == mid and w[0]["m"] == "PATCH" and ef.get("title") == "🏆 PODIUM CLICS DE LA SEMAINE"
+    check("9h : le podium FIGE le message de la semaine, « 🏆 Podium clics de la semaine »",
+          fige == mid and w[0]["m"] == "PATCH"
+          and str(ef.get("title")).startswith("🏆 Podium clics de la semaine · ")
           and "🥇 **Threads 12**" in ef.get("description", ""))
     ment = [x for x in w if x["m"] == "POST"]
     check("… « @everyone 🏆 Podium clics de la semaine ! » en réponse, par Bowser",

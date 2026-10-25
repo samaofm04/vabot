@@ -296,7 +296,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  "bonus": True, "vitrine": True,
                  # le podium de la semaine toutes les deux heures, le classement
                  # de la quinzaine (salon -l-clicks) toutes les heures
-                 "minutes": 120, "minutes_subs": 60,
+                 # toutes les heures depuis le 25/10/2026 (podium au format du
+                 # bonus, minuteur horaire) : avant, deux heures pour le quota
+                 # GetMySocial (un appel par VA, les liens internes par 20)
+                 "minutes": 60, "minutes_subs": 60,
                  # « 👀 Pseudos » sous la quinzaine, comme Twitter (propriétaire,
                  # 19/10/2026 : « aussi threads refais ») : « Threads n » →
                  # le pseudo de sa fiche liens_va, pour le staff, en privé
@@ -349,7 +352,11 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                "source": "Instagram 📸", "bot": "Luigi", "fr": True,
                # pas de salon bonus sur Va IG ; deux heures entre deux releves :
                # un appel GetMySocial par VA, et le quota est partage avec le site
-               "bonus": False, "minutes": 120, "alltime": "podium_alltime_va_ig.json",
+               # le podium (clics GetMySocial, un appel par VA) toutes les deux
+               # heures, la quinzaine (vrais abonnés, MyPuls) chaque heure :
+               # « chaque heure les subs », propriétaire, 25/10/2026
+               "bonus": False, "minutes": 120, "minutes_subs": 60,
+               "alltime": "podium_alltime_va_ig.json",
                # TEMPORAIRE. Avec trois VA, le podium et les subs de Va IG avaient
                # l'air vides. Proprietaire, 03/10/2026 : « pour les subs mais aussi
                # le mec du US, comme ca ca fait comme si y'a des vrais mecs », « mets
@@ -524,6 +531,57 @@ MEDAILLES = ["🥇", "🥈", "🥉"]
 COMBIEN_AFFICHES = 15
 HEURE_POST = 9          # lundi, heure française
 MINUTES_LIVE = 60       # entre deux rafraîchissements du message vivant
+# À HEURE FIXE (propriétaire, 25/10/2026 : « il faut que chaque heure les subs
+# se mettent à jour, avec un timer », « pour tous les classements subs ») : un
+# message est à refaire dès que son dernier passage est d'avant le début du
+# créneau en cours, calé sur l'horloge de Paris (hh:00 pour une heure, les
+# heures paires pour deux). « 60 min après le dernier passage » dérivait d'un
+# passage à l'autre, et le minuteur affiché (ligne_minuteur) aurait menti. La
+# boucle du site se réveille aux dizaines de minutes de l'horloge.
+# POUR REVENIR : HEURE_FIXE = False (rythme d'avant), MINUTEUR = False (textes
+# d'avant, « mis à jour plusieurs fois par jour »). Les suites qui vérifient
+# la mécanique d'avant (gel, lundi, Va IG mêlé) les coupent ; la nouvelle a
+# les siennes (tests_minuteur.py).
+HEURE_FIXE = True
+MINUTEUR = True
+
+
+def _decalage_paris(t: float) -> float:
+    try:
+        from zoneinfo import ZoneInfo
+        off = dt.datetime.fromtimestamp(t, ZoneInfo("Europe/Paris")).utcoffset()
+        return off.total_seconds() if off else 0.0
+    except Exception:                                        # noqa: BLE001
+        return 0.0
+
+
+def debut_creneau(minutes: int, t: Optional[float] = None) -> float:
+    """L'heure (epoch) où a commencé le créneau de `minutes` en cours."""
+    t = time.time() if t is None else float(t)
+    m = max(1, int(minutes)) * 60
+    off = _decalage_paris(t)
+    return ((t + off) // m) * m - off
+
+
+def a_refaire(vu: Any, minutes: int, t: Optional[float] = None) -> bool:
+    """Le message passé à `vu` (epoch) est-il d'avant le créneau en cours ?"""
+    if not HEURE_FIXE:
+        return (t or time.time()) - float(vu or 0) >= int(minutes) * 60
+    return float(vu or 0) < debut_creneau(minutes, t)
+
+
+def ligne_minuteur(minutes: int) -> str:
+    """« 🔄 Prochaine mise à jour dans 42 minutes · mis à jour à 14:00 » : les
+    deux heures en horodatage Discord, que chacun lit dans son fuseau et que
+    Discord fait vivre tout seul. À l'heure du module (_maintenant) : les
+    suites de tests qui figent l'horloge le figent aussi."""
+    try:
+        from zoneinfo import ZoneInfo
+        t = _maintenant().replace(tzinfo=ZoneInfo("Europe/Paris")).timestamp()
+    except Exception:                                        # noqa: BLE001
+        t = time.time()
+    suivant = debut_creneau(minutes, t) + max(1, int(minutes)) * 60
+    return f"🔄 Prochaine mise à jour <t:{int(suivant)}:R> · mis à jour à <t:{int(t)}:t>"
 
 # Les numéros que GetMySocial portait avant d'être renommé. Ils sont repris
 # tels quels : quelqu'un qui était VA 12 reste VA 12.
@@ -3083,6 +3141,52 @@ def _lignes_podium_mix(mix: List[Dict[str, Any]], pf: Dict[str, Any],
     return out
 
 
+#: Le podium de la semaine au format du bonus du jour (propriétaire,
+#: 25/10/2026, devant le podium de Twitter : « prime pour le classement sur la
+#: semaine, que les 3 premiers, comme bonus journalier, pour les 3 serveurs »).
+PODIUM_COURT = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
+
+
+def _embed_podium_court(cl: Dict[str, Any], debut: dt.date, fin: dt.date, en_cours: bool,
+                        gid: Optional[str], termine: bool, avertissement: str) -> Dict[str, Any]:
+    """Le podium de la semaine comme le bonus du jour : les trois premiers et
+    leur prime (PRIMES), le minuteur tant que la semaine court, la consigne,
+    « Un seul prix par personne ». Ni places 4 et plus, ni « … et N autres »,
+    ni bloc des primes en double, ni « 🔢 ton numéro », ni avertissements :
+    ceux-là vont au journal (_taire_avert), et le staff lit les « sans
+    relevé » au bouton 👀. Une place à 0 reste affichée avec sa prime :
+    suivi_va l'annonce au VA (une place vide trahirait ce qu'il reçoit)."""
+    pf = _profil(gid)
+    unite = _unite(gid)
+    lignes = cl["lignes"]
+    c = []
+    for i in range(len(PRIMES)):
+        x = lignes[i] if i < len(lignes) else None
+        c.append(f'{MEDAILLES[i]} **—** → **{PRIMES[i]:.0f}$**' if x is None else
+                 f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]} {unite}** → **{PRIMES[i]:.0f}$**')
+    if en_cours and MINUTEUR:
+        c += ["", ligne_minuteur(_minutes_podium(gid))]
+    c += ["", "——————————",
+          _reclamer_prime(pf, "💸 **Pour recevoir ta prime :**", "ton rang de la semaine")]
+    taire = []
+    if cl["illisibles"]:
+        taire.append("Sans relevé : " + ", ".join(cl["illisibles"]))
+    if not cl["frais"]:
+        taire.append("Liste des liens non rafraîchie : des comptes peuvent manquer.")
+    taire += _notes_tracking(cl) + ([avertissement] if avertissement else [])
+    if taire:
+        _taire_avert(gid, "le podium", taire)
+    semaine = f'{debut.strftime("%d/%m")} → {(debut + dt.timedelta(days=6)).strftime("%d/%m")}'
+    return {"title": (f"🔴 Podium {unite} de la semaine · {semaine}" if en_cours
+                      else f"🏁 Podium {unite} · semaine du {semaine} terminée" if termine
+                      else f"🏆 Podium {unite} de la semaine · {semaine}"),
+            "color": 0xE67E22 if en_cours else 0x95A5A6 if termine else 0xF1C40F,
+            "description": _marque(gid, "\n".join(c))[:4096],
+            "footer": {"text": "Un seul prix par personne · payé à la main après vérification"
+                               + ("" if en_cours else " · semaine terminée" if termine
+                                  else " · résultat final")}}
+
+
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                  en_cours: bool = False, gid: Optional[str] = None,
                  termine: bool = False, avertissement: str = "",
@@ -3104,6 +3208,8 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     pf = _profil(gid)
     lignes = cl["lignes"]
     mix = _melange(cl, us, pf)
+    if str(gid or "") in PODIUM_COURT and mix is None:
+        return _embed_podium_court(cl, debut, fin, en_cours, gid, termine, avertissement)
     tw = SERVEURS[TWITTER_ID]
     # le thème ne change que l'habillage (voir THEMES) ; sans lui, chaque
     # chaîne ci-dessous est celle d'avant
@@ -3127,7 +3233,10 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
              abo,
+             # le minuteur (25/10/2026) à la place de « mis à jour plusieurs
+             # fois par jour » : il dit quand
              (th["lignes"]["en_cours"] if th
+              else ligne_minuteur(_minutes_podium(gid)) if MINUTEUR
               else "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._"), ""]
     else:
         # passé l'heure (bot redémarré pendant que le podium échoue), « à 9h »
@@ -3297,6 +3406,8 @@ def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                 f"Subs de **toute l'agence** · **{len(mix)}** comptes classés\n")
     if final:
         tete += "🔒 _Période terminée : classement arrêté, il ne bougera plus._\n"
+    elif MINUTEUR:
+        tete += ligne_minuteur(_minutes_subs(gid)) + "\n"
 
     rangs = []
     for i, x in enumerate(lignes if mix is None else mix):
@@ -3879,8 +3990,7 @@ def _subs_du(gid: str, garde: Dict[str, Any], t: Optional[float] = None) -> bool
         # relevé à lui. À son propre rythme, il pouvait garder une heure de
         # retard sur Twitter, pour les mêmes VA
         return True
-    minutes = _minutes_subs(gid)
-    return (t or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+    return a_refaire(garde.get("vu"), _minutes_subs(gid), t)
 
 
 def _format_subs(gid: Optional[str]) -> str:
@@ -4007,6 +4117,10 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
         c.append(f'{MEDAILLES[i]} **{x["va"]}** — {chiffre} → {prime}')
     if mini:
         c += ["", f'Minimum {mini} {"clics US" if clics else "subs"} dans la journée pour toucher la prime.']
+    if MINUTEUR and jour == _aujourdhui():
+        # le jour en cours seulement : un bonus d'hier (complété le matin,
+        # réécrit) ne bouge plus
+        c += ([] if mini else [""]) + [ligne_minuteur(_minutes_bonus())]
     c += ["", "——————————",
           _reclamer_prime(_profil(gid), "🎁 **Pour recevoir ton bonus :**",
                           "ton rang du jour (top 1, 2 ou 3)")]
@@ -4041,12 +4155,15 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
         print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
         return str(garde.get("message") or "")
     corps = {"embeds": [embed_bonus(cl, j, gid)], **_rangee_yeux_message(gid)}
+    # le message ne les dit plus (25/10/2026) : 👀 Pseudos les lit ici
+    sans = list(cl.get("illisibles") or [])
 
     mid = str(garde.get("message") or "")
     if mid and garde.get("jour") == j.isoformat():
         code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
         if code == 200:
             garde["vu"] = time.time()
+            garde["sans_releve"] = sans
             vivants[gid] = garde
             _ecrire(d)
             return mid
@@ -4060,7 +4177,8 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
         # le bonus d'hier, à compléter demain matin (voir _bonus_veille) —
         # Threads aussi : ses clics de la dernière heure manquaient pareil
         d.setdefault("bonus_veille", {})[gid] = {"jour": str(garde["jour"]), "message": mid}
-    vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time(),
+                    "sans_releve": sans}
     _ecrire(d)
     print(f'[podium] bonus du jour {j} : {len(cl["lignes"])} comptes', flush=True)
     return str(rep["id"])
@@ -4100,8 +4218,7 @@ def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
     garde = (_etat().get("bonus") or {}).get(str(gid)) or {}
     if garde.get("jour") != _aujourdhui().isoformat():
         return True
-    minutes = int(_config().get("minutes_bonus") or _config().get("minutes") or MINUTES_LIVE)
-    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+    return a_refaire(garde.get("vu"), _minutes_bonus(), maintenant)
 
 
 def _nom_nu(nom) -> str:
@@ -5176,7 +5293,15 @@ def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
     if garde.get("message") and garde.get("format") != _format_affiche(gid):
         return True                     # presentation changee : refaire tout de suite
     minutes = int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
-    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+    return a_refaire(garde.get("vu"), minutes, maintenant)
+
+
+def _minutes_podium(gid: Optional[str]) -> int:
+    return int(_profil(gid).get("minutes") or _config().get("minutes") or MINUTES_LIVE)
+
+
+def _minutes_bonus() -> int:
+    return int(_config().get("minutes_bonus") or _config().get("minutes") or MINUTES_LIVE)
 
 
 def _etiquette(nom: str):
@@ -5516,6 +5641,16 @@ def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
         if "Sans relevé" in ligne or "Relevé indisponible" in ligne:
             sans += [v for v in re.findall(rf"(?:{re.escape(lib)} VA|{re.escape(lib)}|Instagram VA) \d+",
                                            ligne) if v not in sans]
+    # le bonus du jour et le podium court ne disent plus leurs « sans relevé »
+    # (25/10/2026) : l'état les garde pour le staff
+    mid = str((p.get("message") or {}).get("id") or "")
+    if mid:
+        d = _etat()
+        for rec, cle in (((d.get("bonus") or {}).get(gid), "sans_releve"),
+                         ((d.get("vivants") or {}).get(gid), None)):
+            if isinstance(rec, dict) and str(rec.get("message") or "") == mid:
+                vus = rec.get(cle) if cle else (rec.get("dernier") or {}).get("illisibles")
+                sans += [str(v) for v in vus or [] if str(v) not in sans]
     if not lignes and not sans:
         return _ephemere("ℹ️ Personne au classement sur ce message.")
     titre = f"👀 **Pseudos — {str(emb.get('title') or 'classement').strip()}** (visible par toi seul)"

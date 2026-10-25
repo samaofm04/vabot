@@ -61149,7 +61149,7 @@ def _start_podium_semaine_daemon() -> bool:
                 _ramasser_drive()
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
-            _t_p.sleep(600)
+            _t_p.sleep(600 - _t_p.time() % 600 + 5)   # aux dizaines de minutes : hh:00 tombe juste
 
     _th_p.Thread(target=_boucle, daemon=True, name="podium-semaine").start()
     print("[podium] podium de la semaine armé (lundi 09h, vérifié toutes les 10 min)",

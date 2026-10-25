@@ -76,9 +76,10 @@ cl = {"lignes": [{"va": "VA 41", "clics": 152, "entite": "41"},
                  {"va": "VA 43", "clics": 84, "entite": "43"}],
       "illisibles": [], "frais": True}
 e = pd.embed_podium(cl, dt.date(2026, 10, 19), dt.date(2026, 10, 24), en_cours=True, gid=TW)
-check("podium de Twitter : « Abonnés tracking OF via Twitter », plus « clics »",
-      "Abonnés **tracking OF** via Twitter" in e["description"]
-      and "clics **tracking OF**" not in e["description"], e["description"][:300])
+# au format du bonus du jour depuis le 25/10/2026 (tests_minuteur.py) : plus d'en-tête
+check("podium de Twitter : des subs, plus des « clics »",
+      "**VA 41** — **152 subs** → **10$**" in e["description"]
+      and "clics" not in e["description"], e["description"][:300])
 b = pd.embed_bonus(cl, dt.date(2026, 10, 25), TW)
 # le bonus du jour au format du 25/10/2026 : les abonnés en ligne, sans en-tête
 check("bonus du jour de Twitter : les abonnés de chaque ligne, sans « clics »",
