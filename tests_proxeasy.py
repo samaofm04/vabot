@@ -199,6 +199,20 @@ def principal():
     proxeasy.synchroniser()
     verifier("tous : chaque salon a ses logins", all(len(contenus(f, s)) == 4 for s in ("101", "102", "103", "110")))
 
+    # lien de rotation relevé : cinquième message, aperçu coupé
+    lien = "https://i.fxdx.in/actionlinks/do/changeip/AbCdEf123"
+    d = proxeasy._charger()
+    d["rotation"] = {"2528": lien, "2529": "pas un lien"}
+    proxeasy._sauver(d)
+    f.ecritures.clear()
+    proxeasy.synchroniser()
+    verifier("rotation : cinq messages, le lien en dernier",
+             contenus(f, "101") == [c["host"], str(c["socks"]), c["user"], "nouveau", lien])
+    verifier("rotation : un lien invalide est ignoré", len(contenus(f, "102")) == 4)
+    f.ecritures.clear()
+    proxeasy.synchroniser()
+    verifier("rotation : le tour suivant ne réécrit rien", f.ecritures == [])
+
     # expiré : dit une fois, puis levé
     f.services[2529]["status"] = "terminated"
     f.ecritures.clear()

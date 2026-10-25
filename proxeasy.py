@@ -7,6 +7,11 @@ chaque valeur est donc seule dans son message, sans titre ni libellé — hôte,
 port, utilisateur, mot de passe, dans cet ordre, comme les logins postés à la
 main avant. « pe-XXXX » est le numéro du service chez ProxEasy.
 
+En cinquième message, le lien de rotation (« changer d'IP ») s'il est connu :
+l'API ne le donne pas, il est relevé dans l'espace client et gardé dans l'état
+(clé « rotation », par numéro de service). Jamais ouvert ici : l'ouvrir change
+l'IP — d'où l'aperçu de lien coupé sur chaque message.
+
 Port SOCKS5, pas HTTP : les logins que l'équipe s'échangeait (salons 3, 5, 6,
 et l'exemple du propriétaire) portent le port SOCKS5 ; ProxEasy donne le même
 hôte et les mêmes identifiants pour les deux, seul le port change.
@@ -290,6 +295,12 @@ def choisir_mode(mode: str) -> tuple[bool, str]:
                   "tous": "Les logins partent dans tous les salons proxy."}[mode]
 
 
+def rotation(etat: dict, sid: int) -> str:
+    """Le lien de rotation de ce proxy, s'il a été relevé (https, sans blanc)."""
+    lien = str((etat.get("rotation") or {}).get(str(sid)) or "").strip()
+    return lien if re.fullmatch(r"https://\S{8,500}", lien) else ""
+
+
 def _alerter(etat: dict, cle_a: str, texte: str) -> None:
     """Dit le problème UNE fois dans suivi-proxy (pas à chaque tour)."""
     if cle_a in etat["alertes"]:
@@ -335,8 +346,9 @@ def _tenir(etat: dict, salon: str, sid: int, valeurs: list) -> str:
         changes = 0
         for mid, avant, v in zip(ids, actuels, valeurs):
             if avant != v:
+                # flags : l'aperçu reste coupé (Discord ouvrirait le lien de rotation)
                 _discord("PATCH", f"/channels/{salon}/messages/{mid}",
-                         {"content": v, "allowed_mentions": {"parse": []}})
+                         {"content": v, "allowed_mentions": {"parse": []}, "flags": 1 << 2})
                 changes += 1
         fiche.update(service=sid, verifie_le=maintenant)
         if changes:
@@ -469,6 +481,9 @@ def _parcourir(d: dict, bilan: dict, servs: dict, k: str) -> None:
             continue
         try:
             valeurs = identifiants(sid, k)
+            lien = rotation(d, sid)
+            if lien:
+                valeurs.append(lien)
             if not all(valeurs) or any(len(v) > 2000 for v in valeurs):
                 raise Erreur("une valeur des identifiants est vide ou trop longue")
             ligne["action"] = _tenir(d, cid, sid, valeurs)
@@ -571,8 +586,8 @@ def panneau_html() -> str:
     b = d.get("bilan") or {}
     h += "<h4 style='margin:22px 0 6px'>Logins dans les salons proxy (Youl4b Spam)</h4>"
     h += ("<small style='color:#888;display:block;margin-bottom:10px'>Ryuk poste dans chaque salon "
-          "« proxyeasy-N-pe-XXXX » quatre messages : hôte, port SOCKS5, utilisateur, mot de passe — "
-          "un par message, pour que l'appui long copie une seule valeur. Relu toutes les 10 min : "
+          "« proxyeasy-N-pe-XXXX » un message par valeur : hôte, port SOCKS5, utilisateur, mot de passe, "
+          "puis le lien de rotation s'il est connu — l'appui long copie une seule valeur. Relu toutes les 10 min : "
           "un identifiant changé chez ProxEasy est édité en place ; un proxy introuvable ou expiré "
           "est dit dans suivi-proxy.</small>")
     libelle = {"arret": "arrêté (lecture seule, rien n'est posté)",
