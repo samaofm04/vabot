@@ -14247,6 +14247,7 @@ document.addEventListener('click',function(e){
         <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-sms"/></svg>Générateurs SMS</span></button>
         <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</span></button>
         <button class="item" id="tab-sgms" onclick="showTab('settings','sgms','Cookies GetMySocial','Session getmysocial.com — 50/50 Emy / Seren des liens Twitter')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</span></button>
+        <button class="item" id="tab-sproxeasy" onclick="showTab('settings','sproxeasy','Clé ProxEasy','Clé API des proxys — logins postés dans les salons proxy')"><span class="left" style="display:inline-flex;align-items:center;gap:8px">🌐 Clé ProxEasy</span></button>
       </div>
     </div>
   </div>
@@ -16678,6 +16679,16 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</h3>
 <small>Session getmysocial.com — sert au 50/50 Emy / Seren des liens Twitter (l’API GetMySocial ne sait pas le poser)</small>
 <div style="margin-top:14px">{gms_cookie_html}</div>
+</div>
+</div>
+
+<!-- SETTINGS - CLÉ PROXEASY : collée ici par le propriétaire (25/10/2026), jamais
+     réaffichée ; sert aux logins que Ryuk tient dans les salons proxy -->
+<div class="form-section" id="form-sproxeasy" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">🌐 Clé ProxEasy</h3>
+<small>API REST ProxEasy — lit l’hôte, le port, l’utilisateur et le mot de passe de chaque proxy pour les salons « proxyeasy-N-pe-XXXX »</small>
+<div style="margin-top:14px">{proxeasy_html}</div>
 </div>
 </div>
 
@@ -57986,6 +57997,13 @@ def _render_gms_cookie_settings() -> str:
     )
 
 
+def _render_proxeasy_settings() -> str:
+    """Section Settings : la clé API ProxEasy (fin de la clé seulement) et
+    l'état des salons proxy, tout entier dans proxeasy.py."""
+    import proxeasy
+    return proxeasy.panneau_html()
+
+
 def _render_mypuls_cookies_settings() -> str:
     """Section Settings : cookies MyPuls (statut + formulaire + effacer).
 
@@ -58462,6 +58480,9 @@ ROLE_MENU_STRUCTURE = [
         {"key": "snumgen", "name": "Générateurs SMS", "perms": ["view", "edit"]},
         {"key": "saikey", "name": "Clé IA", "perms": ["view", "edit"]},
         {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
+        # « view » montre la fin de la clé et l'état des salons ; l'écriture
+        # reste admin seule (/settings/ dans _ADMIN_ONLY_WRITE)
+        {"key": "sproxeasy", "name": "Clé ProxEasy", "perms": ["view"]},
     ]},
     {"section": "Remote — iPhone", "items": [
         {"key": "remote", "name": "Drop, Console et Editeur de scenarios",
@@ -59723,6 +59744,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
         .replace("{gms_cookie_html}", _g("sgms", _render_gms_cookie_settings))
+        .replace("{proxeasy_html}", _g("sproxeasy", _render_proxeasy_settings))
         .replace("{numgen_html}", _g("snumgen", _render_numgen_settings))
         .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
         .replace("{video_manager_html}", _g("svideo", _render_video_manager))
@@ -61669,6 +61691,15 @@ def create_app():
             _ag_boot.demarrer()
     except Exception as _e:
         log.warning(f"accueil d'Agency non démarré: {_e}")
+    # Salons proxy de Youl4b (Spam) : les logins ProxEasy relus toutes les
+    # 10 minutes et tenus par Ryuk (proxeasy.py). Même garde que l'accueil
+    # d'Agency : un rendu de page hors du VPS ne doit rien poster.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("proxeasy"):
+            import proxeasy as _pe_boot
+            _pe_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"salons ProxEasy non démarrés: {_e}")
     # Les liens de suivi de Jessye par personne : clics US relevés une fois
     # par jour ; le salon « inflow-resultat » (Bixby) reste coupé tant que
     # data/infloww_liens_config.json ne l'active pas.
@@ -78674,6 +78705,54 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         _schedule_restart(2.0)
         return _success("✓ Clé IA enregistrée — l'OCR des vidéos et les bios IA sont activés. "
                         "Le site redémarre dans 2 s.", tab="saikey")
+
+    # Clé ProxEasy (Settings › Intégrations). Sous /settings/ : le garde-fou
+    # la refuse déjà aux rôles restreints (_ADMIN_ONLY_WRITE, et rien dans
+    # _RESTRICTED_WRITE_ALLOW) ; revérifié ici, la clé lit des mots de passe.
+    @app.route("/settings/proxeasy/cle", methods=["POST"])
+    def settings_proxeasy_cle():
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _error("✕ Réservé aux administrateurs", tab="sproxeasy")
+        import proxeasy
+        ok, msg = proxeasy.enregistrer_cle(request.form.get("cle") or "",
+                                           session.get("username") or "")
+        if not ok:
+            return _error("✕ " + msg, tab="sproxeasy")
+        proxeasy.lancer()
+        return _success("✓ " + msg + " Relevé des salons lancé : recharge dans une minute.",
+                        tab="sproxeasy")
+
+    @app.route("/settings/proxeasy/tester", methods=["POST"])
+    def settings_proxeasy_tester():
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _error("✕ Réservé aux administrateurs", tab="sproxeasy")
+        import proxeasy
+        ok, msg, _statut = proxeasy.tester()
+        proxeasy.noter_test(ok, msg)
+        return (_success("✓ OK — " + msg, tab="sproxeasy") if ok
+                else _error("✕ " + msg, tab="sproxeasy"))
+
+    @app.route("/settings/proxeasy/salons", methods=["POST"])
+    def settings_proxeasy_salons():
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _error("✕ Réservé aux administrateurs", tab="sproxeasy")
+        import proxeasy
+        mode = (request.form.get("mode") or "").strip()
+        if mode == "maintenant":
+            proxeasy.lancer()
+            return _success("✓ Relevé lancé : recharge dans une minute.", tab="sproxeasy")
+        ok, msg = proxeasy.choisir_mode(mode)
+        if not ok:
+            return _error("✕ " + msg, tab="sproxeasy")
+        proxeasy.lancer()
+        return _success("✓ " + msg + " Recharge dans une minute pour voir le résultat.",
+                        tab="sproxeasy")
 
     @app.route("/settings/apify_token", methods=["POST"])
     def settings_apify_token():

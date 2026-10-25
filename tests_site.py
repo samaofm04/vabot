@@ -607,7 +607,10 @@ try:
             # _guard_write_routes refuse tout POST par defaut — et ce test
             # verifie justement que personne ne l a « ouverte » par megarde.
             ("etoiler une brute", "/reel/toggle_fav_brute",
-             {"file_id": "x|brutes|y.mp4"})):
+             {"file_id": "x|brutes|y.mp4"}),
+            # la clé ProxEasy lit les mots de passe des proxys : admin seul
+            ("poser la clé ProxEasy", "/settings/proxeasy/cle", {"cle": "x" * 30}),
+            ("lancer les logins proxy", "/settings/proxeasy/salons", {"mode": "tous"})):
         _r = _c.post(_path, data=_data)
         check(f"rôle restreint bloqué : {_label}", _r.status_code == 403, f"HTTP {_r.status_code}")
     _r = _c.post("/chatting/update_cell", data={"edt": "x", "row": "0", "col": "0", "value": "v"})
