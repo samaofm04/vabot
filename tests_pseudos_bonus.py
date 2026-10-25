@@ -71,11 +71,14 @@ try:
           and "🥇 VA 41 · **Eddy** · 12 subs" in t and "🥈 VA 43 · **Tsiry** · 9 subs" in t
           and "VA 12 Roucham" in t and "**Sans relevé** : VA 11 Kylmich" in t, t)
     neuf = dict(p, message={"embeds": [pd.embed_bonus(
-        {"lignes": [{"va": "VA 41", "clics": 12}, {"va": "VA 43", "clics": 9}], "illisibles": [],
+        {"lignes": [{"va": "VA 41", "clics": 52}, {"va": "VA 43", "clics": 41},
+                    {"va": "VA 12", "clics": 9}], "illisibles": [],
          "frais": True}, __import__("datetime").date(2026, 10, 25), pd.TWITTER_ID)]})
     t2 = pd.traiter(neuf)["data"]["content"]
-    check("le bonus au format du 25/10/2026 se lit aussi (titre, « 12 subs » en gras)",
-          "🥇 VA 41 · **Eddy** · 12 subs" in t2 and "🥈 VA 43 · **Tsiry** · 9 subs" in t2, t2)
+    check("le bonus au format du 25/10/2026 se lit aussi (titre, « 52 subs » en gras)",
+          "🥇 VA 41 · **Eddy** · 52 subs" in t2 and "🥈 VA 43 · **Tsiry** · 41 subs" in t2, t2)
+    check("… les places payées seulement : sous le minimum (VA 12, 9 subs), pas à vérifier",
+          "VA 12" not in t2 and "Roucham" not in t2, t2)
     va = dict(p, member={"user": {"id": "va"}})
     check("clic d'un VA : refusé, aucun pseudo", "Réservé au staff" in pd.traiter(va)["data"]["content"])
     vide = dict(p, message={"embeds": [{"title": "x", "description": "rien"}]})

@@ -79,7 +79,7 @@ e = pd.embed_podium(cl, dt.date(2026, 10, 19), dt.date(2026, 10, 24), en_cours=T
 check("podium de Twitter : « Abonnés tracking OF via Twitter », plus « clics »",
       "Abonnés **tracking OF** via Twitter" in e["description"]
       and "clics **tracking OF**" not in e["description"], e["description"][:300])
-b = pd.embed_bonus(cl, dt.date(2026, 10, 24), TW)
+b = pd.embed_bonus(cl, dt.date(2026, 10, 25), TW)
 # le bonus du jour au format du 25/10/2026 : les abonnés en ligne, sans en-tête
 check("bonus du jour de Twitter : les abonnés de chaque ligne, sans « clics »",
       "**VA 41** — **152 subs** → **5.00$**" in b["description"] and "clics" not in b["description"],

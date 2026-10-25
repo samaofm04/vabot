@@ -392,9 +392,11 @@ try:
     check("… clics uniques vers OnlyFans (« gms_bouton »), US + UK seulement",
           pd._source(TH) == "gms_bouton" and tuple(p_th["pays"]) == ("US", "GB")
           and p_th["marche"] == "US + UK" and pd._service(TH) == "GetMySocial")
-    check("… « Threads n », « clics », Bowser, sans bonus ni bouton ni thème",
+    # le bonus du jour depuis le 25/10/2026 (« mets le truc quotidien pour
+    # Threads, IG et Twitter »), en clics : tests_va_interne.py
+    check("… « Threads n », « clics », Bowser, le bonus du jour, ni bouton ni thème",
           p_th["libelle"] == "Threads" and pd._unite(TH) == "clics" and p_th["bot"] == "Bowser"
-          and p_th["bonus"] is False and p_th["fr"] is False
+          and p_th["bonus"] is True and p_th["fr"] is False
           and not p_th.get("bouton_maj") and not p_th.get("theme") and not p_th.get("avec_us"))
     check("… SES liens (EMY THREADS), numérotés par leur nom, la quinzaine dans -l-clicks, "
           "un all-time neuf (l'ancien range les totaux des liens de Twitter)",
@@ -765,7 +767,7 @@ try:
     check("prochain passage de la quinzaine : dans une heure",
           not pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 59 * 60)
           and pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 61 * 60))
-    check("ni bonus du jour sur Threads", not pd.a_rafraichir_bonus(TH))
+    check("le bonus du jour sur Threads (depuis le 25/10/2026)", pd.a_rafraichir_bonus(TH))
     # « aussi threads refais » (19/10/2026) : « 👀 Pseudos », comme Twitter
     comp = pq[0]["json"].get("components") or []
     check("sous la quinzaine : « 👀 Pseudos » seul ; sous le podium, celui qui lit le message",
@@ -976,8 +978,8 @@ try:
 
     def par(g):
         return [f for f, s, a in faits if a == g]
-    check("Threads : podium et quinzaine, ni bonus, ni synchro des liens, ni suivi des VA",
-          par(TH) == ["clics", "podium", "semaine", "subs"], par(TH))
+    check("Threads : podium, quinzaine et bonus du jour, ni synchro des liens, ni suivi des VA",
+          par(TH) == ["clics", "podium", "semaine", "subs", "bonus"], par(TH))
     check("… avec le bot de Threads (sur_serveur)",
           {s for f, s, a in faits if a == TH and f != "clics"} == {TH})
     check("Twitter et Va IG : tout comme avant",

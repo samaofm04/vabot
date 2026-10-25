@@ -21582,8 +21582,12 @@ try:
                        {"va": "VA 11", "numero": 11, "clics": 4, "liens": 1, "spam": False}],
             "illisibles": [], "frais": True, "entites": 3, "liens": 3}
     _eB = _pd.embed_bonus(_clB, _dtP.date(2026, 9, 24))
-    check("le bonus du jour porte les trois primes 5.00 / 3.00 / 2.00",
-          all(f"{m:.2f}$" in _eB["description"] for m in _pd.PRIMES_JOUR))
+    # le barème du JOUR : 7.50 / 5.00 / 3.50 avant le 25/10/2026, 5 / 3 / 2 depuis
+    check("le bonus du jour porte les trois primes de sa journée (7.50 / 5.00 / 3.50 le 24/09)",
+          all(f"{m:.2f}$" in _eB["description"] for m in _pd.PRIMES_JOUR_AVANT))
+    check("… et 5.00 / 3.00 / 2.00 depuis le 25/10/2026",
+          all(f"{m:.2f}$" in _pd.embed_bonus(_clB, _dtP.date(2026, 10, 25))["description"]
+              for m in _pd.PRIMES_JOUR))
     check("le bonus nomme les trois premiers du JOUR",
           "VA 2" in _eB["description"] and "VA 11" in _eB["description"])
 
@@ -21785,14 +21789,15 @@ try:
     # (profil garde dans PROFIL_THREADS), « pour Threads le podium c'est avec
     # des clicks », et enfin « Threads » au lieu de « VA », clics uniques US +
     # UK : son profil a lui, les liens et numeros de Twitter, podium et
-    # quinzaine, ni bonus ni synchro (tests_podium_threads_clics.py)
-    check("Threads : podium et quinzaine aux clics uniques US + UK, « Threads n », vitrine",
+    # quinzaine, ni synchro (tests_podium_threads_clics.py) ; le bonus du jour
+    # depuis le 25/10/2026, en clics (tests_va_interne.py)
+    check("Threads : podium, quinzaine et bonus aux clics, « Threads n », vitrine",
           _TWI in _pdT.SERVEURS and not _pdT.subs_seulement(_TWI) and not _pdT.vitrine(_TWI)
           and _THR in _pdT.SERVEURS and _pdT.vitrine(_THR) and not _pdT._repris_de(_THR)
           and not _pdT.subs_seulement(_THR) and not _pdT.podium_seulement(_THR)
           and _pdT._source(_THR) == "gms_bouton" and _pdT._unite(_THR) == "clics"
           and _pdT._profil(_THR).get("libelle") == "Threads" and _pdT._unite(_TWI) == "subs"
-          and _pdT._profil(_THR).get("bonus") is False
+          and _pdT._profil(_THR).get("bonus") is True
           and _pdT.PROFIL_THREADS.get("subs_seul") is True)
     # Proprietaire, 13/10/2026 : « pour Threads c'est pas avec un lien de
     # tracking, faut juste dupliquer le lien de VA Threads » — chaque VA

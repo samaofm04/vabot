@@ -170,6 +170,16 @@ SALON_BONUS = "─│💸┤-bonus-journalier"
 # Propriétaire, 25/10/2026, devant le bonus d'une autre agence : « comme
 # ça », 5 / 3 / 2 $ (avant : 7,50 / 5 / 3,50)
 PRIMES_JOUR = [5.00, 3.00, 2.00]
+#: le barème d'une journée d'avant le 25/10 : un bonus réécrit (les bonus du
+#: 20 au 24/10 passés en abonnés) garde ce qu'il promettait ce jour-là
+PRIMES_JOUR_AVANT = [7.50, 5.00, 3.50]
+DEBUT_BAREME_JOUR = dt.date(2026, 10, 25)
+#: le minimum pour toucher la prime du jour, depuis le 25/10/2026 —
+#: propriétaire : « il faut faire au moins 40 subs pour la prime
+#: quotidienne » (Twitter, Instagram), « au moins 400 clics US » (Threads,
+#: le « US » de ses lignes). Une place en dessous reste affichée, sans prime.
+MINIMUM_JOUR = {"1445108485090971710": 40, "1488331963575177247": 40,
+                "1498948161039896586": 400}
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
 ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
 # Les espaces GetMySocial qui portent des liens de VA. Il y en a DEUX : les
@@ -280,7 +290,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  "sans_avertissements": True,
                  # ni bonus du jour, ni synchro des liens, ni suivi des VA : ce
                  # serveur ne fait qu'afficher (vitrine)
-                 "bonus": False, "vitrine": True,
+                 # le bonus du jour depuis le 25/10/2026 (propriétaire : « mets
+                 # le truc quotidien pour Threads, IG et Twitter »), en clics :
+                 # embed_bonus. Toujours vitrine : ni synchro, ni suivi des VA
+                 "bonus": True, "vitrine": True,
                  # le podium de la semaine toutes les deux heures, le classement
                  # de la quinzaine (salon -l-clicks) toutes les heures
                  "minutes": 120, "minutes_subs": 60,
@@ -1127,6 +1140,12 @@ def _clics(pays: Optional[Dict[str, Any]], profil: Dict[str, Any]) -> int:
     return sum(int((pays or {}).get(p) or 0) for p in profil["pays"])
 
 
+#: Jamais donnés à un VA : les lignes des comptes internes (fin du module),
+#: « Instagram VA 141 » et « Threads 142 ». Les 140 premiers numéros étaient
+#: tous pris au 25/10/2026 : les deux suivants, l'air de deux VA récents.
+NUMEROS_RESERVES = frozenset({141, 142})
+
+
 def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
     """La table clé → numéro de VA, complétée et gardée sur disque.
 
@@ -1136,7 +1155,7 @@ def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
     table = dict(_lire(NUMEROS_FICHIER, {}))
     if not table:
         table = {k: v for k, v in NUMEROS_HISTORIQUES.items()}
-    pris = set(int(v) for v in table.values())
+    pris = set(int(v) for v in table.values()) | set(NUMEROS_RESERVES)
     neuf = False
     if not attribuer:
         # Liste non rafraichie : les noms viennent du cache, qui porte l'ANCIENNE
@@ -3958,17 +3977,40 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
     l'horodatage de l'embed, à côté du pied. Anonyme : « VA n ».
 
     Une place à 0 sub reste vide (« — ») : « VA 1 — 0 subs → 5.00$ » se
-    réclamerait, et le message n'explique plus un jour sans sub."""
-    lignes = cl["lignes"]
+    réclamerait, et le message n'explique plus un jour sans sub.
+
+    Depuis le 25/10/2026, un minimum (MINIMUM_JOUR) : une place en dessous
+    reste affichée, « → pas de prime (min. 40) », et une ligne le dit. Le
+    barème et le minimum sont ceux du JOUR du bonus : un bonus d'avant,
+    réécrit, garde 7,50 / 5 / 3,50 $ et pas de minimum. Threads compte des
+    clics, rangés comme sa quinzaine : « US : n · GBL : n », le US (US + UK +
+    Canada) range et fait le minimum."""
+    clics = _unite(gid) == "clics"
+    primes = PRIMES_JOUR if jour >= DEBUT_BAREME_JOUR else PRIMES_JOUR_AVANT
+    mini = int(MINIMUM_JOUR.get(str(gid or ""), 0)) if jour >= DEBUT_BAREME_JOUR else 0
+
+    def us(x: Dict[str, Any]) -> int:
+        return int(x.get("clics_subs", x.get("clics")) or 0) if clics else int(x.get("clics") or 0)
+    lignes = list(cl["lignes"])
+    if clics:
+        lignes.sort(key=lambda x: (-us(x), -int(x.get("gbl") or 0), str(x.get("va"))))
     c = []
     for i in range(3):
         x = lignes[i] if i < len(lignes) else None
-        c.append(f'{MEDAILLES[i]} **—** → **{PRIMES_JOUR[i]:.2f}$**' if not (x and x["clics"]) else
-                 f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]} subs** → **{PRIMES_JOUR[i]:.2f}$**')
+        if not (x and us(x)):
+            c.append(f'{MEDAILLES[i]} **—** → **{primes[i]:.2f}$**')
+            continue
+        chiffre = (f'US : **{us(x)}** · GBL : **{int(x.get("gbl") or 0)}**' if clics
+                   else f'**{us(x)} subs**')
+        prime = (f'**{primes[i]:.2f}$**' if us(x) >= mini
+                 else f'pas de prime (min. {mini}{" US" if clics else ""})')
+        c.append(f'{MEDAILLES[i]} **{x["va"]}** — {chiffre} → {prime}')
+    if mini:
+        c += ["", f'Minimum {mini} {"clics US" if clics else "subs"} dans la journée pour toucher la prime.']
     c += ["", "——————————",
           _reclamer_prime(_profil(gid), "🎁 **Pour recevoir ton bonus :**",
                           "ton rang du jour (top 1, 2 ou 3)")]
-    return {"title": "💸 Bonus subs du jour",
+    return {"title": f'💸 Bonus {"clics" if clics else "subs"} du jour',
             "color": 0x22C55E,
             "description": "\n".join(c)[:4096],
             "footer": {"text": "Un seul prix par personne · payé à la main après vérification"},
@@ -4013,8 +4055,10 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
     if code != 200 or not rep.get("id"):
         print(f"[podium] envoi bonus refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
-    if mid and str(garde.get("jour") or "") < j.isoformat() and _source(gid) in MESURES_MYPULS:
-        # le bonus d'hier, à compléter demain matin (voir _bonus_veille)
+    if mid and str(garde.get("jour") or "") < j.isoformat() and (
+            _source(gid) in MESURES_MYPULS or gid == THREADS_ID):
+        # le bonus d'hier, à compléter demain matin (voir _bonus_veille) —
+        # Threads aussi : ses clics de la dernière heure manquaient pareil
         d.setdefault("bonus_veille", {})[gid] = {"jour": str(garde["jour"]), "message": mid}
     vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time()}
     _ecrire(d)
@@ -5461,7 +5505,10 @@ def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
     emb = ((p.get("message") or {}).get("embeds") or [None])[0]
     if not isinstance(emb, dict):
         return _ephemere("ℹ️ Rien à montrer sur ce message.")
-    txt = str(emb.get("description") or "")
+    # les places payées seulement (propriétaire, 25/10/2026) : une place sous
+    # le minimum du bonus (« pas de prime ») n'est à vérifier pour personne
+    txt = "\n".join(l for l in str(emb.get("description") or "").splitlines()
+                    if "pas de prime" not in l)
     lib = str(_profil(gid).get("libelle") or "VA")
     lignes = [(va, int(n)) for va, n in _ligne_affichee(lib).findall(txt)]
     sans: List[str] = []
@@ -5596,16 +5643,21 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # 25 VA Discord. Pas une liste de prénoms : un compte interne neuf rejoint
 # VA 41 tout seul, un VA qui crée son lien en sort.
 #  - Twitter : ces lignes réunies en « VA 41 » (bonus, semaine, quinzaine) ;
-#  - Agency : « Instagram VA 41 », les abonnés des mêmes trackings, au bonus
-#    et à la semaine (sa quinzaine les compte déjà, dans les trois lignes
-#    YouLab : les y ajouter serait les compter deux fois) ;
-#  - Threads : « Threads VA 141 », le libellé que sa quinzaine donnait déjà
-#    aux liens d'Eddy : leurs clics uniques US + UK à la semaine ; à la
+#  - Agency : les abonnés des mêmes trackings, au bonus et à la semaine (sa
+#    quinzaine les compte déjà, dans les trois lignes YouLab : les y ajouter
+#    serait les compter deux fois) ;
+#  - Threads : leurs clics (US + UK à la semaine, US · GBL au bonus), et à la
 #    quinzaine, à la place des « Threads VA 1nn » qui en viennent.
+# Sur Agency et Threads, un autre numéro, au format du serveur (propriétaire :
+# « pour Instagram aussi tu mets un autre numéro de VA, et pour Threads
+# aussi ») : « Instagram VA 141 », « Threads 142 », réservés (NUMEROS_RESERVES).
 # VA 41 prend sa place au classement, mais personne ne se paie à son nom
 # (« interne » : suivi_va.annoncer_primes le saute). « 👀 Pseudos » :
 # « comptes internes (N comptes) » et leurs noms, au staff, en privé.
 VA_INTERNE = 41
+VA_INTERNE_AGENCY = 141
+VA_INTERNE_THREADS = 142
+assert {VA_INTERNE_AGENCY, VA_INTERNE_THREADS} <= NUMEROS_RESERVES
 #: POUR REVENIR AUX COMPTES INTERNES CHACUN SUR SA LIGNE : False. Les suites
 #: qui vérifient le calcul VA par VA (registre sans fiches liens_va : tout y
 #: serait interne) le coupent aussi.
@@ -5647,13 +5699,18 @@ def numeros_internes(reg: Optional[Dict[str, Any]] = None) -> set:
     return tous - discord
 
 
+def numero_interne(gid: Optional[str]) -> int:
+    g = str(gid or "")
+    return {THREADS_ID: VA_INTERNE_THREADS, AGENCY_IG_ID: VA_INTERNE_AGENCY}.get(g, VA_INTERNE)
+
+
 def libelle_interne(gid: Optional[str]) -> str:
     g = str(gid or "")
     if g == THREADS_ID:
-        return _libelle_va_jessye(VA_INTERNE)
+        return f'{_profil(g).get("libelle") or "Threads"} {VA_INTERNE_THREADS}'
     if g == AGENCY_IG_ID:
         import subs_va
-        return subs_va.libelle_agency(VA_INTERNE)
+        return subs_va.libelle_agency(VA_INTERNE_AGENCY)
     return f"VA {VA_INTERNE}"
 
 
@@ -5694,7 +5751,7 @@ def _reunir(cl: Dict[str, Any], gid: str, libs: Dict[str, int], tri) -> Dict[str
     reste = [x for x in lignes if str(x.get("va")) not in libs]
     illis = [v for v in cl.get("illisibles") or [] if str(v) not in libs]
     if dedans:
-        f: Dict[str, Any] = {"va": cible, "numero": VA_INTERNE,
+        f: Dict[str, Any] = {"va": cible, "numero": numero_interne(gid),
                              "clics": sum(int(x.get("clics") or 0) for x in dedans),
                              "liens": sum(int(x.get("liens") or 0) for x in dedans),
                              "spam": False, "model": "", "interne": True,
@@ -5708,8 +5765,6 @@ def _reunir(cl: Dict[str, Any], gid: str, libs: Dict[str, int], tri) -> Dict[str
                              else sum(int(x["at_clics"]) for x in dedans))
         if any(x.get("ids") for x in dedans):
             f["ids"] = sorted({str(i) for x in dedans for i in x.get("ids") or []})
-        if any("jessye" in x for x in dedans):
-            f["jessye"] = VA_INTERNE
         reste.append(f)
         reste.sort(key=tri)
     elif cible not in illis:
@@ -5724,7 +5779,7 @@ def _tri_tracking(x: Dict[str, Any]):
 
 def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                           etiquette: str) -> Dict[str, Any]:
-    """Agency, bonus et semaine : « Instagram VA 41 », les abonnés des comptes
+    """Agency, bonus et semaine : « Instagram VA 141 », les abonnés des comptes
     internes, tels que Twitter vient de les compter."""
     import subs_va
     k = (debut.isoformat(), fin.isoformat())
@@ -5733,12 +5788,12 @@ def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
         tw = deja[1]
     else:
         tw = classement(debut, fin, gid=TWITTER_ID, mesure="tracking_abonnes", etiquette=etiquette)
-    lib = subs_va.libelle_agency(VA_INTERNE)
+    lib = libelle_interne(AGENCY_IG_ID)
     x = next((x for x in tw.get("lignes") or [] if x.get("interne")), None)
     lignes = [y for y in cl.get("lignes") or [] if str(y.get("va")) != lib]
     illis = [v for v in cl.get("illisibles") or [] if str(v) != lib]
     if x is not None:
-        lignes.append({"va": lib, "numero": VA_INTERNE, "clics": int(x["clics"]),
+        lignes.append({"va": lib, "numero": VA_INTERNE_AGENCY, "clics": int(x["clics"]),
                        "liens": int(x.get("liens") or 0), "spam": False, "model": "",
                        "interne": True, "comptes": x.get("comptes"),
                        "sans_releve": list(x.get("sans_releve") or [])})
@@ -5751,7 +5806,7 @@ def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
 
 def _avec_internes_threads(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                            etiquette: str) -> Dict[str, Any]:
-    """Threads, la semaine : « Threads VA 141 », les clics uniques US + UK de
+    """Threads, la semaine et le bonus : « Threads 142 », les clics uniques de
     tous les liens des comptes internes, par lots de LOT_GMS. Un lot sans
     réponse : la ligne entière sans relevé, jamais un total partiel."""
     pf = _profil(THREADS_ID)
@@ -5781,13 +5836,13 @@ def _avec_internes_threads(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if pays is None:
         illis.append(lib)
     else:
-        lignes.append({"va": lib, "numero": VA_INTERNE, "clics": _clics(pays, pf),
+        lignes.append({"va": lib, "numero": VA_INTERNE_THREADS, "clics": _clics(pays, pf),
                        "clics_subs": sum(int(pays.get(p) or 0)
                                          for p in (pf.get("pays_subs") or pf["pays"])),
                        "gbl": int(total if total is not None
                                   else sum(int(v or 0) for v in pays.values())),
                        "liens": len(ids), "spam": False, "model": "", "interne": True,
-                       "jessye": VA_INTERNE, "ids": ids, "comptes": len(ents),
+                       "ids": ids, "comptes": len(ents),
                        "sans_releve": []})
         lignes.sort(key=_tri_tracking)
     _dire_internes(THREADS_ID, len(ents), [])
@@ -5832,7 +5887,7 @@ _quinzaine_sans_internes = _quinzaine_us_gbl
 def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,   # noqa: F811
                       etiquette: str) -> Dict[str, Any]:
     """La quinzaine de Threads, les « Threads VA 1nn » des comptes internes en
-    une ligne (Threads VA 141). Les VA de Threads y sont relevés par
+    une ligne (Threads 142). Les VA de Threads y sont relevés par
     classement() : pas de ligne interne de la semaine en plus."""
     jeton = _EN_QUINZAINE_THREADS.set(True)
     try:
