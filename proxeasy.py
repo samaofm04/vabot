@@ -530,9 +530,12 @@ def _boite(fond, bord, couleur, texte):
 
 
 def _date(ts) -> str:
+    # le VPS est en UTC ; le propriétaire lit l'heure de Paris
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     try:
-        return time.strftime("%d/%m/%Y à %H:%M", time.localtime(float(ts)))
-    except (TypeError, ValueError):
+        return datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y à %H:%M")
+    except (TypeError, ValueError, OSError):
         return ""
 
 
@@ -551,7 +554,7 @@ def panneau_html() -> str:
         h = _boite("rgba(16,185,129,.08)", "rgba(16,185,129,.3)", "#34d399",
                    f"✓ Clé enregistrée, se termine par …{e(ck['fin'])} — le {e(_date(ck['le']))}"
                    + (f" par {e(ck['par'])}" if ck["par"] else "")
-                   + (f". Dernier test : {e(str(test.get('texte') or ''))}" if test else "")
+                   + (f". Dernier test : {e(str(test.get('texte') or '').rstrip('.'))}" if test else "")
                    + ". Colle une nouvelle clé ci-dessous pour la remplacer.")
     champ = ("font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em")
     h += ("<form method='POST' action='/settings/proxeasy/cle' style='display:flex;flex-direction:column;gap:8px'>"
