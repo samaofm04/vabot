@@ -654,7 +654,7 @@ try:
     cl7 = pd.classement(LUN, MAR, gid=TW)
     e = pd.embed_podium(cl7, LUN, MAR, en_cours=True, gid=TW)
     check("podium Twitter : au format du bonus, « subs », plus « clics US »",
-          " subs** → **10$**" in e["description"] and "clics **US**" not in e["description"])
+          " subs** → " in e["description"] and "clics **US**" not in e["description"])
     check("podium : lien sans tracking et tracking neuf en attente dits, en nombre seulement",
           tu("1 lien sans tracking OnlyFans") and tu("1 tracking neuf pas encore dans MyPuls")
           and not any("Quelqu" in x for x in TUS) and "Quelqu" not in e["description"], TUS[-4:])

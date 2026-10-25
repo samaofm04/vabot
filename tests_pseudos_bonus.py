@@ -50,7 +50,7 @@ for g, nom in ((pd.TWITTER_ID, "Twitter"), (pd.THREADS_ID, "Threads"), (pd.AGENC
 check("Va IG : son 🔄 seul, rien de neuf", pd.BOUTON_PSEUDOS_MSG not in cids(pd._boutons(VA_IG, True))
       and pd._rangee_yeux_message(VA_IG) == {})
 check("bonus du jour : posé et complété avec la rangée",
-      "**_rangee_yeux_message(gid)" in inspect.getsource(pd.rafraichir_bonus)
+      "**_rangee_yeux_message(gid)" in inspect.getsource(pd._rafraichir_bonus_mypuls)
       and "**_rangee_yeux_message(gid)" in inspect.getsource(pd._bonus_veille))
 
 _sauve = (pd._staff, pd._noms_libelles)

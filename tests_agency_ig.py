@@ -377,7 +377,7 @@ try:
     emb = pod.embed_podium(cl, J1, J2, gid=AG, en_cours=True)
     # au format du bonus du jour depuis le 25/10/2026 : plus d'en-tête
     check("podium de la semaine : en subs, « Instagram VA n », le top 3 et sa prime",
-          "**Instagram VA 12** — **" in emb["description"] and " subs** → **10$**" in emb["description"]
+          "**Instagram VA 12** — **56 subs** → pas de prime (min. 100)" in emb["description"]
           and "clics" not in emb["description"],
           emb["description"][:500])
     bon = pod.embed_bonus(cl, J2, AG)

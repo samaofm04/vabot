@@ -148,10 +148,13 @@ try:
     d = e["description"]
     check("podium court de Twitter : « 🔴 Podium subs de la semaine · 19/10 → 25/10 »",
           e["title"] == "🔴 Podium subs de la semaine · 19/10 → 25/10", e["title"])
-    check("… trois lignes et leur prime 10 / 5 / 3 $, rien au-delà",
-          "🥇 **VA 41** — **120 subs** → **10$**" in d and "🥈 **VA 124** — **48 subs** → **5$**" in d
-          and "🥉 **VA 74** — **18 subs** → **3$**" in d and "VA 95" not in d and "4." not in d
-          and "autres" not in d, d)
+    # L3 : VA 41 120, VA 124 48, VA 74 18 — sous le minimum de la semaine (100)
+    check("… trois lignes, rien au-delà ; sous 100 subs : « pas de prime (min. 100) »",
+          "🥇 **VA 41** — **120 subs** → **10$**" in d
+          and "🥈 **VA 124** — **48 subs** → pas de prime (min. 100)" in d
+          and "🥉 **VA 74** — **18 subs** → pas de prime (min. 100)" in d and "VA 95" not in d
+          and "4." not in d and "autres" not in d
+          and "Minimum 100 subs dans la semaine pour toucher la prime.\n" + MIN in d, d)
     check("… le minuteur, le trait, la consigne « ton rang de la semaine »",
           MIN in d and "——————————" in d and "ton rang de la semaine" in d
           and d.index(MIN) < d.index("——————————"), d)
@@ -174,16 +177,22 @@ try:
     with contextlib.redirect_stdout(io.StringIO()):
         e1 = pd.embed_podium({"lignes": L3[:1] + [dict(L3[1], clics=0)], "illisibles": [],
                               "frais": True}, lundi, auj, en_cours=True, gid=AG)
-    check("une place à 0 garde sa prime (suivi_va l'annonce) ; une place vide « — »",
-          "🥈 **VA 124** — **0 subs** → **5$**" in e1["description"]
+    check("Instagram : une place à 0 sans prime (min. 100) ; une place vide « — »",
+          "🥈 **VA 124** — **0 subs** → pas de prime (min. 100)" in e1["description"]
           and "🥉 **—** → **3$**" in e1["description"], e1["description"])
     LTH = [dict(x, va=f"Threads {x['numero']}") for x in L3]
     with contextlib.redirect_stdout(io.StringIO()):
         eth = pd.embed_podium({"lignes": LTH, "illisibles": [], "frais": True}, lundi, auj,
                               en_cours=True, gid=TH)
-    check("Threads : en clics, « Podium clics de la semaine »",
+    check("Threads : en clics, « Podium clics de la semaine », pas de minimum affiché",
           eth["title"].startswith("🔴 Podium clics de la semaine")
-          and "🥇 **Threads 41** — **120 clics** → **10$**" in eth["description"], eth["description"])
+          and "🥇 **Threads 41** — **120 clics** → **10$**" in eth["description"]
+          and "Minimum" not in eth["description"], eth["description"])
+    with contextlib.redirect_stdout(io.StringIO()):
+        eth0 = pd.embed_podium({"lignes": [dict(LTH[0], clics=0)], "illisibles": [], "frais": True},
+                               lundi, auj, en_cours=True, gid=TH)
+    check("… à 0 clic : pas de prime", "**0 clics** → pas de prime\n" in eth0["description"] + "\n",
+          eth0["description"])
     check("le 👀 lit les lignes du podium court",
           [v for v, _n in pd._ligne_affichee("VA").findall(d)] == ["VA 41", "VA 124", "VA 74"])
     with contextlib.redirect_stdout(io.StringIO()):

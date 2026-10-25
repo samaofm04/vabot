@@ -312,6 +312,11 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
             # 141 » aurait pu tomber sur le ticket d'un VA de Threads n° 141
             bilan.setdefault("internes", []).append(ligne.get("va"))
             continue
+        if not pod.prime_semaine_due(gid, ligne):
+            # sous le minimum de la semaine (propriétaire, 25/10/2026 : « minimum
+            # 100 subs / semaine ») : ni annonce, ni adresse demandée
+            bilan.setdefault("sous_minimum", []).append(f'{ligne.get("va")} ({ligne.get("clics")})')
+            continue
         try:
             num = int(str(ligne.get("va", "")).split()[-1])
         except Exception:

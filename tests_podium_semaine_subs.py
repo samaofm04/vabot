@@ -65,7 +65,7 @@ finally:
     pd._garder_repris = _g
 
 for f in (pd.poster_podium, pd.rafraichir, pd._figer_semaine, pd._semaine_terminee,
-          pd._primes_retenues, pd.rafraichir_bonus, pd._bonus_veille):
+          pd._primes_retenues, pd._rafraichir_bonus_mypuls, pd._bonus_veille):
     src = inspect.getsource(f)
     appels = [l for l in src.splitlines() if "classement(" in l and "def " not in l
               and "_classement" not in l.split("classement(")[0][-1:]]

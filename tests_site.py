@@ -26558,11 +26558,20 @@ try:
         if (_reI.search(r"^\s*(import infloww\b|from infloww import)", _src, _reI.M)
                 or "import infloww as" in _src):
             _importeurs.append(_f)
-    check("seuls le site et infloww_liens importent le module (rien d autre n en depend)",
-          sorted(_importeurs) == ["infloww_liens.py", "web_upload.py"], str(sorted(_importeurs)))
-    check("ni le podium ni la paie ne lisent Infloww",
-          not any(("podium" in _f or "paie" in _f or "revenus" in _f) for _f in _importeurs),
-          str(_importeurs))
+    # le 25/10/2026, le proprietaire a voulu les abonnes d Emy du BONUS DU JOUR
+    # lus chez Infloww (« Oui, Infloww pour Emy ») : podium_discord l importe,
+    # dans subs_infloww seulement (tests_bonus_infloww.py)
+    check("seuls le site, infloww_liens et le bonus du jour importent le module",
+          sorted(_importeurs) == ["infloww_liens.py", "podium_discord.py", "web_upload.py"],
+          str(sorted(_importeurs)))
+    _srcP = open("podium_discord.py", encoding="utf-8").read()
+    _defs = [m.group(1) for m in _reI.finditer(r"^def (\w+)", _srcP, _reI.M)]
+    _ou = [n for n in _defs
+           if _reI.search(r"import infloww\b", _srcP.split(f"\ndef {n}(", 1)[1].split("\ndef ", 1)[0])]
+    check("… dans le podium, la seule lecture d Infloww est celle du bonus du jour (subs_infloww)",
+          _ou == ["subs_infloww"], str(_ou))
+    check("la paie ne lit pas Infloww",
+          not any(("paie" in _f or "revenus" in _f) for _f in _importeurs), str(_importeurs))
 except Exception as _eI:
     check("infloww : testable", False, repr(_eI)[:200])
 

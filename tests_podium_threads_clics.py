@@ -652,7 +652,7 @@ try:
                             "illisibles": [], "frais": True}, lundi, auj, en_cours=True, gid=TW)
     check("Twitter : « Podium subs », « VA 12 », au format du bonus lui aussi",
           e_tw["title"].startswith("🔴 Podium subs de la semaine · ")
-          and "🥇 **VA 12** — **7 subs** → **10$**" in e_tw["description"]
+          and "🥇 **VA 12** — **7 subs** → pas de prime (min. 100)" in e_tw["description"]
           and "Abonnements" not in e_tw["description"])
     # Luigi et Bowser ne lisent aucun message (audit du 20/10/2026) : la
     # consigne renvoie au bouton 💳 du ticket, sur le podium comme au bonus

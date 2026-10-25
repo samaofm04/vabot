@@ -522,6 +522,20 @@ def _reclamer_prime(pf: Dict[str, Any], tete: str, rang: str) -> str:
 
 
 PRIMES = [10.0, 5.0, 3.0]
+#: le minimum pour toucher la prime de la SEMAINE (propriétaire, 25/10/2026 :
+#: « minimum 100 subs / semaine », Twitter et Instagram) ; Threads, en clics,
+#: sans seuil fixé : pas de prime à 0 clic. Une place en dessous reste
+#: affichée, sans prime, et suivi_va ne l'annonce pas (prime_semaine_due).
+MINIMUM_SEMAINE = {"1445108485090971710": 100, "1488331963575177247": 100,
+                   "1498948161039896586": 1}
+
+
+def prime_semaine_due(gid: Optional[str], ligne: Dict[str, Any]) -> bool:
+    """La place de `ligne` est-elle payée cette semaine ? Pas la ligne des
+    comptes internes, pas sous le minimum de la semaine du serveur."""
+    if ligne.get("interne"):
+        return False
+    return int(ligne.get("clics") or 0) >= int(MINIMUM_SEMAINE.get(str(gid or ""), 0))
 # Le nom du bot que les membres voient change : « Siri » jusqu'au 03/10/2026,
 # « Luigi » depuis (son application s'appelle SEVEN dans le portail Discord, un
 # nom que personne ne peut mentionner). Un VA envoye chercher « @Siri » ne
@@ -3154,18 +3168,29 @@ def _embed_podium_court(cl: Dict[str, Any], debut: dt.date, fin: dt.date, en_cou
     « Un seul prix par personne ». Ni places 4 et plus, ni « … et N autres »,
     ni bloc des primes en double, ni « 🔢 ton numéro », ni avertissements :
     ceux-là vont au journal (_taire_avert), et le staff lit les « sans
-    relevé » au bouton 👀. Une place à 0 reste affichée avec sa prime :
-    suivi_va l'annonce au VA (une place vide trahirait ce qu'il reçoit)."""
+    relevé » au bouton 👀. Sous le minimum de la semaine (MINIMUM_SEMAINE),
+    la place reste affichée, « → pas de prime (min. 100) », et suivi_va ne
+    l'annonce pas (prime_semaine_due)."""
     pf = _profil(gid)
     unite = _unite(gid)
     lignes = cl["lignes"]
+    mini = int(MINIMUM_SEMAINE.get(str(gid or ""), 0))
     c = []
     for i in range(len(PRIMES)):
         x = lignes[i] if i < len(lignes) else None
-        c.append(f'{MEDAILLES[i]} **—** → **{PRIMES[i]:.0f}$**' if x is None else
-                 f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]} {unite}** → **{PRIMES[i]:.0f}$**')
+        if x is None:
+            c.append(f'{MEDAILLES[i]} **—** → **{PRIMES[i]:.0f}$**')
+            continue
+        # la ligne interne (VA 41) garde l'affichage de sa prime, comme au
+        # bonus du jour : personne ne la touche (prime_semaine_due)
+        paye = x.get("interne") or int(x.get("clics") or 0) >= mini
+        c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]} {unite}** → '
+                 + (f'**{PRIMES[i]:.0f}$**' if paye
+                    else f'pas de prime (min. {mini})' if mini > 1 else "pas de prime"))
+    if mini > 1:
+        c += ["", f"Minimum {mini} {unite} dans la semaine pour toucher la prime."]
     if en_cours and MINUTEUR:
-        c += ["", ligne_minuteur(_minutes_podium(gid))]
+        c += ([] if mini > 1 else [""]) + [ligne_minuteur(_minutes_podium(gid))]
     c += ["", "——————————",
           _reclamer_prime(pf, "💸 **Pour recevoir ta prime :**", "ton rang de la semaine")]
     taire = []
@@ -5807,7 +5832,7 @@ TW_INTERNES_S = 900
 #: GetMySocial refuse plus de 20 liens par appel (get_top_countries, 400) :
 #: les 58 liens internes de Threads, le 25/10, sont relevés par lots
 LOT_GMS = 20
-_TW_INTERNES: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
+_TW_INTERNES: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
 _INTERNES_DITS: set = set()
 _EN_QUINZAINE_THREADS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "podium_quinzaine_threads", default=False)
@@ -5920,7 +5945,7 @@ def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     """Agency, bonus et semaine : « Instagram VA 141 », les abonnés des comptes
     internes, tels que Twitter vient de les compter."""
     import subs_va
-    k = (debut.isoformat(), fin.isoformat())
+    k = (debut.isoformat(), fin.isoformat(), bool(_BONUS_EN_COURS.get()))
     deja = _TW_INTERNES.get(k)
     if deja and 0 <= time.time() - deja[0] < TW_INTERNES_S:
         tw = deja[1]
@@ -6005,7 +6030,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
         if g == TWITTER_ID and src in ("tracking", "tracking_abonnes"):
             out = _reunir(cl, g, {f"VA {n}": n for n in numeros_internes()}, _tri_tracking)
             if src == "tracking_abonnes":
-                _TW_INTERNES[(debut.isoformat(), fin.isoformat())] = (time.time(), out)
+                _TW_INTERNES[(debut.isoformat(), fin.isoformat(), bool(_BONUS_EN_COURS.get()))] = (
+                    time.time(), out)
             return out
         if g == AGENCY_IG_ID and src == "agency_abonnes" and (cl.get("lignes") or cl.get("illisibles")):
             return _avec_internes_agency(cl, debut, fin, etiquette)
@@ -6089,3 +6115,130 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:   # noqa: F811
     except Exception as e:                                   # noqa: BLE001
         print(f"[podium] pseudos {g} : comptes internes : {type(e).__name__}: {e}", flush=True)
         return noms
+
+
+# ─── le bonus du jour : les abonnés d'Emy lus chez Infloww ───────────────
+# Propriétaire, 25/10/2026 : « Oui, Infloww pour Emy ». MyPuls range des
+# abonnés sur un jour plus tardif et ne publie que par paliers (Eddy c35 :
+# 147 et 194 les 23 et 24/10 chez MyPuls, 87 et 122 chez Infloww à leur
+# vraie heure, cumuls égaux ; à 02h18 le 25/10, 15 abonnés du jour chez
+# Infloww pour 4 chez MyPuls). Infloww date chaque abonné (/v1/linkfans).
+# Le BONUS DU JOUR seulement : sur une semaine ou une quinzaine, les deux se
+# rejoignent. Seren (seren.vale) n'est pas chez Infloww : MyPuls. Infloww
+# muet : MyPuls, et c'est dit au journal. POUR REVENIR : INFLOWW_BONUS = False.
+INFLOWW_BONUS = True
+CREATRICE_INFLOWW = "emy.brw"
+#: la liste des fans d'un lien est relue quand son compteur d'abonnés bouge,
+#: ou au plus tard après ça
+INFLOWW_FANS_S = 1800
+_INFLOWW_FANS: Dict[str, Tuple[float, int, Dict[str, int]]] = {}
+_INFLOWW_DITS: set = set()
+_BONUS_EN_COURS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "podium_bonus_en_cours", default=False)
+
+
+def _dire_infloww(cle: str, texte: str) -> None:
+    if cle not in _INFLOWW_DITS:
+        _INFLOWW_DITS.add(cle)
+        print(f"[podium] {texte}", flush=True)
+
+
+def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str) -> Dict[str, int]:
+    """{jour de Paris : abonnés} d'un lien de suivi Infloww. TOUTES les pages de
+    /v1/linkfans : ses lignes ne sont pas rangées par date (s'arrêter aux
+    vieilles donnait 57 abonnés à c35 le 24/10 au lieu de 122). Les lignes en
+    double (même id) comptent une fois ; le curseur, comme infloww.fans_lien."""
+    from zoneinfo import ZoneInfo
+    paris = ZoneInfo("Europe/Paris")
+    lignes: Dict[str, Dict[str, Any]] = {}
+    cur: Optional[str] = None
+    for _ in range(int(getattr(iw, "PAGES_FANS_MAX", 150))):
+        p = {"creatorId": cid, "platformCode": iw.PLATEFORME, "linkType": "TRACKING",
+             "linkId": lien_id, "limit": 100}
+        if cur is not None:
+            p["cursor"] = cur
+        d = iw._get("/v1/linkfans", p)
+        lot = iw._liste(d)
+        for y in lot:
+            lignes[str(y.get("id"))] = y
+        if not (isinstance(d, dict) and d.get("hasMore")) or not lot:
+            break
+        ids = [int(i) for i in (str(y.get("id") or "") for y in lot) if i.isdigit()]
+        suivant = str(min(ids) + 1) if ids else None
+        if suivant == cur and ids:
+            suivant = str(min(ids))
+        if suivant is None or suivant == cur:
+            raise RuntimeError(f"lien {lien_id} : pages de fans qui n'avancent plus")
+        cur = suivant
+    else:
+        raise RuntimeError(f"lien {lien_id} : plus de pages de fans que le garde-fou")
+    out: Dict[str, int] = {}
+    for y in lignes.values():
+        ms = int(y.get("subscribedTime") or 0)
+        if ms:
+            j = dt.datetime.fromtimestamp(ms / 1000, paris).date().isoformat()
+            out[j] = out.get(j, 0) + 1
+    return out
+
+
+def subs_infloww(jour: str, trackings: set) -> Optional[Dict[str, int]]:
+    """{« emy.brw/cNN » : abonnés du jour} chez Infloww, pour ceux de
+    `trackings` qu'Infloww connaît ; None s'il ne répond pas."""
+    try:
+        import infloww as iw
+        c = iw.creatrice(CREATRICE_INFLOWW)
+        if not c:
+            raise RuntimeError(f"créatrice {CREATRICE_INFLOWW} inconnue d'Infloww")
+        cid = str(c["id"])
+        liens = {str(l.get("code")): l for l in iw.liens(cid, "TRACKING")["liens"]}
+        out: Dict[str, int] = {}
+        for t in sorted(trackings):
+            l = liens.get(t.rsplit("/c", 1)[-1])
+            if not l:
+                continue                     # inconnu d'Infloww : MyPuls pour lui
+            g = _INFLOWW_FANS.get(str(l["id"]))
+            if not (g and g[1] == int(l.get("abonnes") or 0) and time.time() - g[0] < INFLOWW_FANS_S):
+                g = (time.time(), int(l.get("abonnes") or 0),
+                     _abonnes_par_jour_infloww(iw, cid, str(l["id"])))
+                _INFLOWW_FANS[str(l["id"])] = g
+            out[t] = int(g[2].get(jour, 0))
+        return out
+    except Exception as e:                                   # noqa: BLE001
+        _dire_infloww(f"muet:{jour}:{type(e).__name__}",
+                      f"Infloww muet pour le bonus du {jour} ({type(e).__name__}: {str(e)[:120]}) : "
+                      "les abonnés d'Emy restent ceux de MyPuls")
+        return None
+
+
+_lire_mypuls_seul = _lire_mypuls
+
+
+def _lire_mypuls(du: str, au: str, forcer: bool = False   # noqa: F811
+                 ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], str]:
+    vus, raison = _lire_mypuls_seul(du, au, forcer)
+    if vus is None or du != au or not INFLOWW_BONUS or not _BONUS_EN_COURS.get():
+        return vus, raison
+    # les trackings d'Emy du registre qui comptent ce jour-là
+    regs = _lire_registre().get("trackings") or {}
+    emy = {t for t, e in regs.items() if t.startswith(CREATRICE_INFLOWW + "/") and t in vus
+           and isinstance(e, dict) and (e.get("actif") or str(e.get("vu") or "") >= du)}
+    inf = subs_infloww(du, emy)
+    if inf is None:
+        return vus, raison
+    out = {t: dict(v) for t, v in vus.items()}      # le cache de MyPuls reste intact
+    for t, n in inf.items():
+        out[t]["subs"] = n
+    _dire_infloww(f"ok:{du}:{len(inf)}", f"bonus du {du} : abonnés d'Emy lus chez Infloww "
+                  f"({len(inf)} tracking(s) sur {len(emy)}), le reste chez MyPuls")
+    return out, raison
+
+
+_rafraichir_bonus_mypuls = rafraichir_bonus
+
+
+def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:   # noqa: F811
+    jeton = _BONUS_EN_COURS.set(True)
+    try:
+        return _rafraichir_bonus_mypuls(gid, jour)
+    finally:
+        _BONUS_EN_COURS.reset(jeton)

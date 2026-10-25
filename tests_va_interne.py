@@ -396,12 +396,20 @@ try:
     tk._etat = lambda: {"tickets": {f"{TW}:u124": {"salon": "S124", "manager": "M"}}}
     posts = []
     tk._api = lambda m, chemin, **kw: (posts.append((m, chemin, kw.get("json"))) or (200, {"id": "1"}))
-    paye = {"lignes": [dict(ligne("VA 41", 41, 1478), interne=True), ligne("VA 124", 124, 51),
+    paye = {"lignes": [dict(ligne("VA 41", 41, 1478), interne=True), ligne("VA 124", 124, 151),
                        ligne("VA 95", 95, 15)]}
     bilan = suivi_va.annoncer_primes(TW, paye, L, dt.date(2026, 10, 25))
     check("prime de la semaine : VA 41 sauté (« internes »), le 2e annoncé à 5$, personne d'autre",
           bilan.get("internes") == ["VA 41"] and len(posts) == 1 and posts[0][1] == "/channels/S124/messages"
           and "2e de la semaine — 5.00$" in posts[0][2]["embeds"][0]["title"], (bilan, posts))
+    # « minimum 100 subs / semaine » (propriétaire, 25/10/2026)
+    check("… le 3e sous 100 subs (VA 95, 15) : ni annonce, ni adresse demandée",
+          bilan.get("sous_minimum") == ["VA 95 (15)"], bilan)
+    check("prime_semaine_due : 100 subs sur Twitter et Instagram, 1 clic sur Threads, jamais l'interne",
+          pd.prime_semaine_due(TW, {"clics": 100}) and not pd.prime_semaine_due(TW, {"clics": 99})
+          and not pd.prime_semaine_due(AG, {"clics": 51}) and pd.prime_semaine_due(TH, {"clics": 1})
+          and not pd.prime_semaine_due(TH, {"clics": 0})
+          and not pd.prime_semaine_due(TW, {"clics": 1478, "interne": True}))
 
     # ── l'interrupteur ──
     pd.INTERNES_REUNIS = False
