@@ -731,6 +731,18 @@ def _complement_infloww(creators, date_from: str, date_to: str, segment: str = "
                 "manquantes": [], "a_classer": [], "a_rattacher": []}
 
 
+def ventes_infloww_hors_mypuls(creator_id, date_from: str, date_to: str) -> Optional[dict]:
+    """Pour la Facture : les ventes Infloww d'une créatrice que MyPuls ne compte
+    plus, sinon None. Même règle et même banc d'essai que _complement_infloww.
+    Lève infloww.ErreurInfloww si Infloww ne répond pas."""
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        return None
+    import revenus_infloww
+    vus = [c.get("id") for c in api_creators_cached() if c.get("active")]
+    return revenus_infloww.net_hors_mypuls(creator_id, date.fromisoformat(date_from),
+                                           date.fromisoformat(date_to), vus)
+
+
 def _relancer_overview(key, date_from, date_to, eur_usd, exclude, segment="all"):
     """Recalcule un agregat perime en tache de fond, une seule fois a la fois.
 

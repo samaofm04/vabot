@@ -239,6 +239,7 @@ ETATS = {
     "Ventes lues chez Infloww (MyPuls ne les voit pas) :": "Sales read from Infloww (MyPuls doesn't see them):",
     ": présente(s) chez MyPuls et chez Infloww, comptée(s) une seule fois (MyPuls).":
         ": present in both MyPuls and Infloww, counted once (MyPuls).",
+    "MyM : net · OnlyFans : brut": "MyM: net · OnlyFans: gross",
     "Non classé": "Unclassified",
     "Top modèles": "Top models",
     "toutes créatrices": "all creators",

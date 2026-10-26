@@ -8590,6 +8590,76 @@ try:
     _nbRI = _mpRI.ca_chatteur_net_brut({"ca_total": 185.0, "ca_eur": 100.0, "ca_usd": 85.0}, 1.2)
     check("classement : chatteur MyM net, OF ramene au net (85 $ brut -> 68 $), brut a part",
           _nbRI == (188.0, round(120 / 0.74 + 85, 2)), str(_nbRI))
+
+    # LA FACTURE, MEME REGLE. Jessye et Khloe y valaient 0 $ en octobre.
+    import facture_web as _fwRI, tempfile as _tfRI, pathlib as _plRI
+    _svFw = (_fwRI.FACTURE_FILE, _mpRI.api_configured, _mpRI.api_creators_cached,
+             _mpRI.api_creator_stats_cached, _mpRI.ventes_infloww_hors_mypuls)
+    try:
+        _statsLus = []
+        _mpRI.api_configured = lambda: True
+        _mpRI.api_creators_cached = lambda force=False: [
+            {"id": 3352, "pseudo": "Emy ♡", "active": True, "platform": "onlyfans", "currency": "USD"}]
+        _mpRI.api_creator_stats_cached = lambda cid, a, b: (_statsLus.append(cid) or {
+            "ok": True, "data": {"revenue": {"total": 50.0, "currency": "USD"}}})
+        _mpRI.ventes_infloww_hors_mypuls = lambda cid, a, b: (
+            {"net": 123.45} if int(cid) in (3107, 3108) else None)
+        _rJ = _fwRI._mypuls_month_amount("Jessye", "2026-09", 3107)
+        check("facture : Jessye, que MyPuls ne voit plus, vient d Infloww, deja nette",
+              _rJ[:3] == (123.45, "USD", True) and _rJ[3].get("source") == "infloww"
+              and 3107 not in _statsLus, str(_rJ))
+        _rE = _fwRI._mypuls_month_amount("Emy", "2026-09", 3352)
+        check("facture : Emy reste a MyPuls", _rE[:3] == (50.0, "USD", True) and _statsLus == [3352],
+              str(_rE))
+
+        _fwRI.FACTURE_FILE = _plRI.Path(_tfRI.mkdtemp()) / "facture.json"
+        _fwRI._save({"settings": {}, "months": {
+            "2026-08": {"lines": [{"id": "a8", "label": "OF Lola (compte 2)", "type": "rev",
+                                   "form": "fixed", "amount": 2286.12}]},
+            "2026-09": {"lines": [{"id": "a9", "label": "OF Lola", "type": "rev", "form": "fixed",
+                                   "amount": 2286.12},
+                                  {"id": "p9", "label": "Paye Lola (35%)", "type": "exp",
+                                   "form": "pct", "pct": 35.0, "pct_of": "line:a9"}]},
+            "2026-10": {"lines": [{"id": "a10", "label": "OF Lola (compte 2)", "type": "rev",
+                                   "form": "fixed", "amount": 2500.0}]}}})
+        _chF = _fwRI._migrer_lola_seren_20261026()
+        _dF = _fwRI._load()
+        _lF = {l["id"]: l for m in _dF["months"].values() for l in m["lines"]}
+        check("facture : OF Lola (2 286,12 $ fixes) passe au net MyPuls #3673, ancien montant garde",
+              _lF["a9"]["form"] == "mypuls" and _lF["a9"]["mypuls_creator_id"] == 3673
+              and _lF["a9"]["amount"] == 2286.12, str(_lF["a9"]))
+        check("facture : un montant retouche a la main n est pas touche",
+              _lF["a10"]["form"] == "fixed" and _lF["a10"]["amount"] == 2500.0)
+        check("facture : aout (avant Lola chez MyPuls) reste tel quel", _lF["a8"]["form"] == "fixed")
+        check("facture : la paye de Lola suit toujours sa ligne", _lF["p9"]["pct_of"] == "line:a9")
+        _seren = [(m, l) for m, mm in _dF["months"].items() for l in mm["lines"]
+                  if l.get("mypuls_creator_id") == 3867]
+        check("facture : Seren (OF US) a sa ligne MyPuls en septembre et octobre, pas avant",
+              sorted(m for m, _ in _seren) == ["2026-09", "2026-10"]
+              and all(l["market"] == "us" and l["form"] == "mypuls" for _, l in _seren), str(_seren))
+        _fwRI._migrer_lola_seren_20261026()
+        check("facture : la migration ne passe qu une fois",
+              len([1 for mm in _fwRI._load()["months"].values() for l in mm["lines"]
+                   if l.get("mypuls_creator_id") == 3867]) == 2 and set(_chF) == {"2026-09", "2026-10"})
+    finally:
+        (_fwRI.FACTURE_FILE, _mpRI.api_configured, _mpRI.api_creators_cached,
+         _mpRI.api_creator_stats_cached, _mpRI.ventes_infloww_hors_mypuls) = _svFw
+
+    # REVENUS CHATTEURS : plus un euro ecrit en dur derriere une somme qui
+    # melange euros MyM et dollars OnlyFans (serveur ET navigateur).
+    _srcRC = open("web_upload.py", encoding="utf-8").read()
+    _dRC = _srcRC.index("def _render_mypuls_section_html")
+    _secRC = _srcRC[_dRC:_srcRC.index(chr(10) + "def ", _dRC + 40)]
+    check("revenus chatteurs : CA, PPV, Tips ne sont plus suffixes d un euro (serveur)",
+          not re.search(r"\{c\['ca_(total|ppv|tips)'\]:\.2f\}€|\{totals\['ca_[a-z]+'\]:\.0f\}€", _secRC))
+    _jsRC = _srcRC[_srcRC.index("function mpRecompute(){"):]
+    _jsRC = _jsRC[:_jsRC.index("function mpPayUsd")]
+    check("revenus chatteurs : le recalcul du navigateur convertit aussi",
+          "var v = t.u ? t.a : t.a * rate;" in _jsRC and "data.ca_total.toFixed(2) + '€'" not in _jsRC
+          and "Math.round(totals.ca_total) + '€'" not in _jsRC)
+    _chRC = open("revenus_chart.js", encoding="utf-8").read()
+    check("revenus chatteurs : le graphique par modele est en dollars, devise par devise",
+          "' €'" not in _chRC and "ds.devise === 'EUR'" in _chRC)
 except Exception as _eRI:
     import traceback as _tbRI
     check("revenus infloww : testable", False, _tbRI.format_exc()[-300:])

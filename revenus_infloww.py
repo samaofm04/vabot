@@ -169,6 +169,26 @@ def ventes_paris(creator_id: str, debut: dt.date, fin: dt.date) -> Dict[str, Any
             "nb": nb, "exclues": exclues, "ecartees": ecartees}
 
 
+def net_hors_mypuls(cid: Any, debut: dt.date, fin: dt.date, vus: Iterable[Any]
+                    ) -> Optional[Dict[str, Any]]:
+    """Les ventes (ventes_paris) d'UNE créatrice de la table que MyPuls ne compte
+    pas — la Facture, avec la même règle que le dashboard, donc les mêmes
+    chiffres. None si MyPuls la compte, si la table ne la rattache pas ou si
+    Infloww ne l'a pas ; lève infloww.ErreurInfloww si la lecture rate."""
+    try:
+        cid = int(cid)
+    except (TypeError, ValueError):
+        return None
+    if cid not in COMPTES_OF or cid in {int(v) for v in vus if str(v).lstrip("-").isdigit()}:
+        return None
+    if not infloww.configure():
+        return None
+    pseudo = COMPTES_OF[cid][1]
+    c = next((x for x in infloww.creatrices()
+              if str(x.get("userName") or "").strip().lower() == pseudo), None)
+    return ventes_paris(str(c.get("id")), debut, fin) if c else None
+
+
 def _attendue(c: Dict[str, Any]) -> Optional[str]:
     """La clé d'ATTENDUES_INFLOWW qui désigne cette créatrice Infloww, s'il y en a une."""
     noms = [_norm(c.get(k)) for k in ("name", "nickName", "userName")]

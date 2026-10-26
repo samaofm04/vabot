@@ -28,7 +28,12 @@
     if (!canvas) return;
     var card = canvas.closest('.mp-revenue-chart'), chart = null, attempts = 0;
     var singleDay = source.days.length === 1;
-    var money = new Intl.NumberFormat('fr-FR', {maximumFractionDigits:2});
+    // MyM vend en euros, OnlyFans en dollars : chaque courbe est ramenee en
+    // dollars au taux de la paie, sinon tout s'affichait suivi d'un « € ».
+    var usd = new Intl.NumberFormat('en-US', {style:'currency', currency:'USD', maximumFractionDigits:2});
+    function enUsd(ds, v) {
+      return v == null ? null : Number(v) * (ds.devise === 'EUR' ? (window.__mpEurToUsd || 1) : 1);
+    }
     var status = card.querySelector('.mp-revenue-chart-status');
     var note = card.querySelector('.mp-revenue-chart-note');
     var buttons = Array.from(card.querySelectorAll('[data-mp-legend]'));
@@ -53,7 +58,7 @@
         var line = document.createElement('div'); line.className = 'mp-revenue-chart-tooltip-model';
         if (avatarMap[point.dataset.label]) { var photo = modelPhoto(point.dataset.label); photo.style.border = '2px solid ' + point.dataset.borderColor; line.appendChild(photo); }
         var name = document.createElement('span'); name.textContent = point.dataset.label; line.appendChild(name);
-        var amount = document.createElement('strong'); amount.textContent = money.format(point.parsed.y) + ' €'; line.appendChild(amount);
+        var amount = document.createElement('strong'); amount.textContent = usd.format(point.parsed.y); line.appendChild(amount);
         tooltip.appendChild(line);
       });
       tooltip.hidden = false;
@@ -74,7 +79,7 @@
       var total = 0, active = 0;
       if (headerAvatars) headerAvatars.replaceChildren();
       chart.data.datasets.forEach(function (ds, i) {
-        ds.data = series.values[i];
+        ds.data = series.values[i].map(function (v) { return enUsd(ds, v); });
         var visible = !excluded.has(ds.label);
         chart.setDatasetVisibility(i, visible);
         var amount = ds.data.reduce(function (sum, n) { return sum + Number(n || 0); }, 0);
@@ -95,7 +100,7 @@
           button.hidden = typeof window.mpRevenueInSegment === 'function' && !window.mpRevenueInSegment(ds.label);
           button.setAttribute('aria-pressed', String(visible));
           button.classList.toggle('mp-creator-excluded', !visible);
-          button.querySelector('.mp-revenue-model-total').textContent = money.format(amount) + ' €';
+          button.querySelector('.mp-revenue-model-total').textContent = usd.format(amount);
         }
       });
       status.textContent = active + ' modèle' + (active > 1 ? 's' : '') + ' affiché' + (active > 1 ? 's' : '');
@@ -105,7 +110,7 @@
       card.dataset.chartTotal = total.toFixed(2);
       card.dataset.chartKind = 'line';
       card.dataset.chartGranularity = singleDay ? 'hour' : 'day';
-      canvas.setAttribute('aria-label', note.textContent + '. Total affiché : ' + money.format(total) + ' euros.');
+      canvas.setAttribute('aria-label', note.textContent + '. Total affiché : ' + usd.format(total) + '.');
       var colors = theme(), opt = chart.options;
       opt.scales.y.grid.color = colors.border;
       opt.scales.y.ticks.color = opt.scales.x.ticks.color = colors.muted;
@@ -127,7 +132,7 @@
       chart = window.__mypulsChart = new Chart(canvas, {
         type:'line',
         data:{labels:source.labels.slice(), datasets:source.datasets.map(function (ds) {
-          return {label:ds.label, data:ds.data.slice(), borderColor:ds.borderColor,
+          return {label:ds.label, devise:ds.devise, data:ds.data.map(function (v) { return enUsd(ds, v); }), borderColor:ds.borderColor,
             backgroundColor:ds.backgroundColor,
             borderWidth:2, borderCapStyle:'round', borderJoinStyle:'round', fill:false,
             tension:.4, cubicInterpolationMode:'monotone', pointRadius:2.5, pointHoverRadius:5};
@@ -135,8 +140,8 @@
         options:{responsive:true, maintainAspectRatio:false, animation:false,
           interaction:{mode:'index',intersect:false},
           plugins:{legend:{display:false}, tooltip:{enabled:false,external:externalTooltip,borderWidth:1,padding:12,
-            callbacks:{label:function (ctx) { return ctx.dataset.label + ' : ' + money.format(ctx.parsed.y) + ' €'; }}}},
-          scales:{y:{beginAtZero:true,border:{display:false},ticks:{maxTicksLimit:5,callback:function (v) { return money.format(v) + ' €'; }}},
+            callbacks:{label:function (ctx) { return ctx.dataset.label + ' : ' + usd.format(ctx.parsed.y); }}}},
+          scales:{y:{beginAtZero:true,border:{display:false},ticks:{maxTicksLimit:5,callback:function (v) { return usd.format(v); }}},
             x:{grid:{display:false},border:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:8}}}
         }
       });

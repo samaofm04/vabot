@@ -35884,13 +35884,50 @@ body.light .mypuls-bar{background:#e5e7eb}
         + "</div>"
     )
 
+    # LES DEUX DEVISES, SÉPARÉES. MyPuls rend le MyM en euros (déjà nets) et
+    # l'OnlyFans en dollars (bruts) ; CA, PPV et pourboires les additionnaient
+    # sous un « € » écrit en dur : le 25/10/2026, 1 003,34 € + 909,15 $
+    # s'affichaient « 1 912 € » pour 2 032,19 $ (≈ 1 815,60 €). Tout est
+    # ramené en dollars au taux de la paie, l'équivalent en euros à côté, comme
+    # « À payer » qui convertissait déjà devise par devise. La base reste celle
+    # de la commission : MyM net, OnlyFans brut.
+    _taux_ca = float(mypuls.get_eur_usd_rate()["rate"])
+
+    def _usd_ca(t):
+        a = float(t.get("amount") or 0)
+        cs = str(t.get("currency") or "").upper()
+        return a if ("USD" in cs or "$" in cs) else a * _taux_ca
+
+    _ca_usd = {"ca_total": 0.0, "ca_ppv": 0.0, "ca_tips": 0.0}
+    for _t_ca in transactions:
+        _v_ca, _y_ca = _usd_ca(_t_ca), str(_t_ca.get("type") or "")
+        _ca_usd["ca_total"] += _v_ca
+        # même règle que le recalcul du navigateur (mpRecompute)
+        if _y_ca == "Média privé" or "PPV" in _y_ca:
+            _ca_usd["ca_ppv"] += _v_ca
+        elif _y_ca == "Pourboires" or "Tip" in _y_ca:
+            _ca_usd["ca_tips"] += _v_ca
+
+    def _facteur_usd(c):
+        """Dollars par unité de « CA » MyPuls pour ce chatteur : sa ventilation
+        par devise (ca_usd_chatteur, la base de « À payer »), appliquée à ses
+        PPV et pourboires. Exacte pour un chatteur d'une seule plateforme."""
+        tot = float(c.get("ca_total") or 0)
+        return (mypuls.ca_usd_chatteur(c, _taux_ca) / tot) if tot else _taux_ca
+
+    def _stat_usd(cle, valeur, couleur, libelle, plus=""):
+        return (f"<div class='mypuls-stat' title='MyM : net · OnlyFans : brut'>"
+                f"<div class='v' data-mp-stat='{cle}' style='color:{couleur}'>{plus}${valeur:,.0f}</div>"
+                f"<div class='l'>{libelle} <span data-mp-stat-eur='{cle}'>"
+                f"≈ {round(valeur / _taux_ca):,} €</span></div></div>")
+
     # Stats grid (avec data-attributes pour update JS)
     stats_html = (
         "<div class='mypuls-stats-grid'>"
-        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_total' style='color:#22c55e'>+{totals['ca_total']:.0f}€</div><div class='l'>CA Total</div></div>"
-        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_ppv' style='color:#3b82f6'>{totals['ca_ppv']:.0f}€</div><div class='l'>CA PPV</div></div>"
-        f"<div class='mypuls-stat'><div class='v' data-mp-stat='ca_tips' style='color:#a855f7'>{totals['ca_tips']:.0f}€</div><div class='l'>CA Tips</div></div>"
-        f"<div class='mypuls-stat'><div class='v' data-mp-stat='nb_tx'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
+        + _stat_usd("ca_total", _ca_usd["ca_total"], "#22c55e", "CA Total", "+")
+        + _stat_usd("ca_ppv", _ca_usd["ca_ppv"], "#3b82f6", "CA PPV")
+        + _stat_usd("ca_tips", _ca_usd["ca_tips"], "#a855f7", "CA Tips")
+        + f"<div class='mypuls-stat'><div class='v' data-mp-stat='nb_tx'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
         # Registre verifiable : une vente contestee se retrouve ici, avec
         # son heure, la creatrice et le fan concernes.
         + f"<a href='/chatters/ventes.xlsx?start={start_str}&end={end_str}' "
@@ -35938,10 +35975,18 @@ body.light .mypuls-bar{background:#e5e7eb}
     chartjs_datasets = []
     legend_items = []
     avatars_header = []
+    # Chaque modèle vend dans UNE devise (MyM en euros, OnlyFans en dollars) :
+    # le graphique les ramène en dollars pour qu'elles se comparent, au lieu
+    # de tout étiqueter « € ».
+    _devise_modele = {}
+    for _t_dv in transactions:
+        _cs_dv = str(_t_dv.get("currency") or "").upper()
+        _devise_modele.setdefault(_t_dv.get("creator"), "USD" if ("USD" in _cs_dv or "$" in _cs_dv) else "EUR")
     for i, ds in enumerate(chart_datasets):
         color = palette[i % len(palette)]
         chartjs_datasets.append({
             "label": ds["label"],
+            "devise": _devise_modele.get(ds["label"], "EUR"),
             "data": ds["data"],
             "borderColor": color,
             "backgroundColor": color + "20",
@@ -35974,7 +36019,8 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"data-mp-legend='{ds_label}' aria-pressed='true' class='mp-revenue-model-filter' "
             f"style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600;color:inherit;cursor:pointer;font-family:inherit;transition:all .2s'>"
             f"{avatar_legend}"
-            f"{ds['label']} <span class='mp-revenue-model-total'>{ds['total']:.0f} €</span>"
+            f"{ds['label']} <span class='mp-revenue-model-total'>"
+            f"${ds['total'] * (1 if _devise_modele.get(ds['label']) == 'USD' else _taux_ca):,.0f}</span>"
             f"</button>"
         )
 
@@ -36045,9 +36091,9 @@ body.light .mypuls-bar{background:#e5e7eb}
                 f"<tr class='mp-chatter-row mp-row-orphelin' data-chatter='{name_esc}'>"
                 f"<td><div style='font-weight:600;color:#f87171'>{name_esc}</div>"
                 f"<div style='font-size:11px;color:#888;margin-top:2px'>ventes non attribuées</div></td>"
-                f"<td class='mp-cell-ca-total' style='font-weight:700;color:#f87171'>{c['ca_total']:.2f}€</td>"
-                f"<td style='color:#9a9a9a'>{c['ca_ppv']:.2f}€</td>"
-                f"<td style='color:#9a9a9a'>{c['ca_tips']:.2f}€</td>"
+                f"<td class='mp-cell-ca-total' style='font-weight:700;color:#f87171'>${c['ca_total'] * _facteur_usd(c):,.2f}</td>"
+                f"<td style='color:#9a9a9a'>${c['ca_ppv'] * _facteur_usd(c):,.2f}</td>"
+                f"<td style='color:#9a9a9a'>${c['ca_tips'] * _facteur_usd(c):,.2f}</td>"
                 f"<td colspan='6' style='color:#f87171;font-size:12px'>"
                 f"Aucun chatteur associé — non payé. À rattacher dans MyPuls."
                 f"</td></tr>"
@@ -36205,9 +36251,9 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<tr data-chatter-row='{i}' data-chatter='{name_esc}' class='mp-chatter-row'>"
             f"<td><div style='font-weight:600'>{name_esc}</div>"
             f"<div class='mypuls-bar' style='width:140px'><div class='mp-bar-fill mypuls-bar-fill' data-max='{max_ca}' style='width:{bar_pct:.1f}%'></div></div></td>"
-            f"<td class='mp-cell-ca-total' style='font-weight:700;color:#22c55e'>{c['ca_total']:.2f}€</td>"
-            f"<td class='mp-cell-ca-ppv' style='color:#3b82f6'>{c['ca_ppv']:.2f}€</td>"
-            f"<td class='mp-cell-ca-tips' style='color:#a855f7'>{c['ca_tips']:.2f}€</td>"
+            f"<td class='mp-cell-ca-total' style='font-weight:700;color:#22c55e'>${c['ca_total'] * _facteur_usd(c):,.2f}</td>"
+            f"<td class='mp-cell-ca-ppv' style='color:#3b82f6'>${c['ca_ppv'] * _facteur_usd(c):,.2f}</td>"
+            f"<td class='mp-cell-ca-tips' style='color:#a855f7'>${c['ca_tips'] * _facteur_usd(c):,.2f}</td>"
             f"<td><span class='mypuls-pill' style='background:rgba(255,255,255,.05);color:#aaa'>{c['conv_rate']}</span></td>"
             f"<td>"
             f"<form method='POST' action='/mypuls/chatter/set_pct' style='display:inline-flex;align-items:center;gap:4px;margin:0' onchange='this.submit()'>"
@@ -36516,29 +36562,37 @@ function mpRecompute(){
   });
   // Agréger par chatteur
   var byChat = {};
+  // Montants ramenes en dollars devise par devise (MyM en euros, OnlyFans en
+  // dollars), comme le rendu serveur : avant, euros et dollars s'additionnaient
+  // sous un « € ». ca_eur / ca_usd restent bruts de devise pour mpPayUsd.
   var totals = {ca_total: 0, ca_ppv: 0, ca_tips: 0, nb_tx: filtered.length};
   filtered.forEach(function(t){
-    totals.ca_total += t.a;
-    if(t.y === 'Média privé' || (t.y && t.y.indexOf('PPV') >= 0)) totals.ca_ppv += t.a;
-    else if(t.y === 'Pourboires' || (t.y && t.y.indexOf('Tip') >= 0)) totals.ca_tips += t.a;
+    var v = t.u ? t.a : t.a * rate;
+    totals.ca_total += v;
+    if(t.y === 'Média privé' || (t.y && t.y.indexOf('PPV') >= 0)) totals.ca_ppv += v;
+    else if(t.y === 'Pourboires' || (t.y && t.y.indexOf('Tip') >= 0)) totals.ca_tips += v;
     var n = t.h || '?';
-    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0, ca_eur:0, ca_usd:0};
+    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0, ca_eur:0, ca_usd:0, usd_total:0, usd_ppv:0, usd_tips:0};
     byChat[n].ca_total += t.a;
+    byChat[n].usd_total += v;
     if(t.u) byChat[n].ca_usd += t.a; else byChat[n].ca_eur += t.a;
-    if(t.y === 'Média privé') byChat[n].ca_ppv += t.a;
-    else if(t.y === 'Pourboires') byChat[n].ca_tips += t.a;
+    if(t.y === 'Média privé'){ byChat[n].ca_ppv += t.a; byChat[n].usd_ppv += v; }
+    else if(t.y === 'Pourboires'){ byChat[n].ca_tips += t.a; byChat[n].usd_tips += v; }
   });
+  var fmtUsd = function(v, dec){
+    return '$' + v.toLocaleString('en-US', {minimumFractionDigits:dec, maximumFractionDigits:dec});
+  };
   // Update stat cards
   var setStat = function(key, val){
     var el = document.querySelector('[data-mp-stat="'+key+'"]');
     if(el) el.firstChild ? el.firstChild.nodeValue = val : el.textContent = val;
   };
-  var statCa = document.querySelector('[data-mp-stat="ca_total"]');
-  if(statCa) statCa.textContent = '+' + Math.round(totals.ca_total) + '€';
-  var statPpv = document.querySelector('[data-mp-stat="ca_ppv"]');
-  if(statPpv) statPpv.textContent = Math.round(totals.ca_ppv) + '€';
-  var statTips = document.querySelector('[data-mp-stat="ca_tips"]');
-  if(statTips) statTips.textContent = Math.round(totals.ca_tips) + '€';
+  ['ca_total', 'ca_ppv', 'ca_tips'].forEach(function(k){
+    var el = document.querySelector('[data-mp-stat="'+k+'"]');
+    if(el) el.textContent = (k === 'ca_total' ? '+' : '') + fmtUsd(totals[k], 0);
+    var eu = document.querySelector('[data-mp-stat-eur="'+k+'"]');
+    if(eu) eu.textContent = '≈ ' + Math.round(totals[k] / rate).toLocaleString('en-US') + ' €';
+  });
   var statTx = document.querySelector('[data-mp-stat="nb_tx"]');
   if(statTx) statTx.textContent = totals.nb_tx;
 
@@ -36583,11 +36637,11 @@ function mpRecompute(){
     if(!row.classList.contains('mp-row-orphelin')) activeCount++;
     row.style.display = '';
     var cellTotal = row.querySelector('.mp-cell-ca-total');
-    if(cellTotal) cellTotal.textContent = data.ca_total.toFixed(2) + '€';
+    if(cellTotal) cellTotal.textContent = fmtUsd(data.usd_total, 2);
     var cellPpv = row.querySelector('.mp-cell-ca-ppv');
-    if(cellPpv) cellPpv.textContent = data.ca_ppv.toFixed(2) + '€';
+    if(cellPpv) cellPpv.textContent = fmtUsd(data.usd_ppv, 2);
     var cellTips = row.querySelector('.mp-cell-ca-tips');
-    if(cellTips) cellTips.textContent = data.ca_tips.toFixed(2) + '€';
+    if(cellTips) cellTips.textContent = fmtUsd(data.usd_tips, 2);
     // Bar
     var bar = row.querySelector('.mp-bar-fill');
     if(bar) bar.style.width = (data.ca_total / newMax * 100).toFixed(1) + '%';

@@ -18,6 +18,7 @@ facture_web.register(app, is_auth).
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
@@ -429,6 +430,21 @@ def _mypuls_month_amount(model: str, month: str, creator_id=None):
                 info["why"] = f"« {model} » : {why_res}"
             else:
                 info["creator_id"] = match.get("id")
+                # MYPULS NE LA COMPTE PLUS (Jessye et Khloé, hors de portée de
+                # toutes les clés depuis le 11/10/2026) : ses ventes viennent
+                # d'Infloww, avec la règle du dashboard — mêmes chiffres des
+                # deux côtés. Avant : 0 $ en octobre, et septembre tenu par un
+                # relevé périmé, purgé au bout de 45 jours.
+                try:
+                    _ifw = mypuls.ventes_infloww_hors_mypuls(match["id"], d_from, d_to)
+                except Exception as e:                       # noqa: BLE001
+                    _ifw = None
+                    info["why"] = f"Infloww injoignable ({str(e)[:80]})"
+                    print(f"[facture] Infloww « {model} » ({month}) : {e}", flush=True)
+                if _ifw is not None:
+                    return (float(_ifw["net"]), "USD", True,
+                            dict(info, api=True, source="infloww",
+                                 why="ventes lues chez Infloww : MyPuls ne voit plus cette créatrice"))
                 r = mypuls.api_creator_stats_cached(match["id"], d_from, d_to)
                 if not r.get("ok") and d_to != f"{month}-{last:02d}":
                     # 2e chance avec la borne pleine du mois
@@ -1497,6 +1513,66 @@ def _seed_of_fee_amelia_mypuls():
         pass
 
 
+_LOLA_FIXE = 2286.12       # « compte 2 » saisi à la main le 09/07/2026
+_LOLA_ID, _SEREN_ID = 3673, 3867
+_MIGR_LOLA_SEREN = "migr_lola_seren_20261026"
+
+
+def _migrer_lola_seren_20261026() -> dict:
+    """Une fois (propriétaire, 26/10/2026 : « ok vas-y fais tout »), à partir de
+    septembre 2026 :
+
+    - « OF Lola » portait encore le montant FIXE saisi le 09/07 (2 286,12 $),
+      reporté de mois en mois, alors que MyPuls la lit depuis le 21/09 (#3673) :
+      3 916,24 $ nets en septembre. La ligne passe en source MyPuls, mais
+      SEULEMENT si elle porte toujours exactement ce montant — un montant
+      retouché à la main est un choix, on n'y touche pas. L'ancien montant
+      reste dans `amount` : repasser la ligne en « fixe » le ramène.
+    - Seren (#3867, compte OF US, moitié Twitter d'Emy) n'avait aucune ligne :
+      1 240,77 $ de septembre absents du mois. Ajoutée en source MyPuls, sans
+      ligne de paye (aucune règle de part n'est connue pour elle).
+
+    Rend {mois: [ce qui a changé]}. Ne s'exécute plus une fois son drapeau posé.
+    """
+    fait: dict = {}
+    d = _load()
+    if d["settings"].get(_MIGR_LOLA_SEREN):
+        return fait
+    for month, m in (d.get("months") or {}).items():
+        if month < "2026-09":
+            continue
+        lines = m.setdefault("lines", [])
+        revs = [l for l in lines if l.get("type") == "rev"]
+        if not any(int(l.get("mypuls_creator_id") or 0) == _LOLA_ID for l in revs):
+            for l in revs:
+                if ((l.get("form") or "fixed") == "fixed"
+                        and _squash(l.get("label")).startswith("oflola")
+                        and abs(float(l.get("amount") or 0) - _LOLA_FIXE) < 0.005
+                        and not l.get("mypuls_creator_id")):
+                    l["form"] = "mypuls"
+                    l["mypuls_creator_id"] = _LOLA_ID
+                    l["mypuls_model"] = "Lola ღ"
+                    l["notes"] = ((l.get("notes") or "") + " · 26/10/2026 : net MyPuls #3673 au lieu du "
+                                  "montant fixe 2 286,12 $ (gardé dans le montant : repasser en "
+                                  "« fixe » le ramène)").strip(" ·")
+                    fait.setdefault(month, []).append(f"{l.get('label')} : fixe -> MyPuls #{_LOLA_ID}")
+                    break
+        if not any(int(l.get("mypuls_creator_id") or 0) == _SEREN_ID
+                   or "seren" in _squash(l.get("label")) for l in revs):
+            lines.append({
+                "id": uuid.uuid4().hex[:12], "label": "OF Seren (auto)", "type": "rev",
+                "cat": "rev_of", "form": "mypuls", "mypuls_model": "Seren ♡",
+                "mypuls_creator_id": _SEREN_ID, "market": "us", "currency": "USD",
+                "freq": "monthly", "start": "", "end": "", "link": "", "next_pay": "",
+                "paid": False, "paid_at": "", "phases": [], "amount": 0.0, "pct": 0.0,
+                "pct_of": "rev_total", "fee_pct": 0.0,
+                "notes": "ajoutée le 26/10/2026 : compte OF US de Seren, net MyPuls du mois"})
+            fait.setdefault(month, []).append(f"OF Seren (auto) ajoutée (MyPuls #{_SEREN_ID})")
+    d["settings"][_MIGR_LOLA_SEREN] = True
+    _save(d)
+    return fait
+
+
 # ---------- routes ----------
 def register(app, is_auth):
     from flask import request, jsonify, send_file
@@ -1529,6 +1605,14 @@ def register(app, is_auth):
             _save(_d2_seed)
     except Exception as _e_seed:
         print(f"[facture] graines : {_e_seed}", flush=True)
+
+    # Le banc d'essai ne retouche jamais la vraie facture du poste.
+    if not os.environ.get("VABOT_BANC_ESSAI"):
+        try:
+            for _m_mig, _ch_mig in _migrer_lola_seren_20261026().items():
+                print(f"[facture] {_m_mig} : " + " ; ".join(_ch_mig), flush=True)
+        except Exception as _e_mig:
+            print(f"[facture] migration Lola / Seren : {_e_mig}", flush=True)
 
     @app.route("/facture/app.js")
     def facture_app_js():
