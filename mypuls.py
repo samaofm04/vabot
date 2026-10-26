@@ -674,7 +674,61 @@ _API_OVERVIEW_LOCK = _th.Lock()
 _API_OVERVIEW_PERIME_MAX = 3600
 
 # OnlyFans marché US (ids MyPuls). Le reste des comptes OnlyFans = marché FR.
-OF_US_CREATOR_IDS = {3107, 3108, 3352}   # Jessye, Khloe, Emy
+# UNE seule liste, celle de revenus_segments : la copie d'ici avait oublié
+# Seren, que l'autre table aurait dû porter aussi — deux tables, deux réponses.
+from revenus_segments import OF_US_IDS as OF_US_CREATOR_IDS
+
+
+def _creatrices_recentes(jours: int = 45) -> Dict[int, str]:
+    """{id: nom} des créatrices relevées avec du chiffre ces `jours` derniers jours.
+
+    C'est la liste des ATTENDUES : une créatrice qui disparaît de /creators en
+    sortait du total sans un mot — Jessye et Khloé, le 11/10/2026, et le
+    relevé restait marqué « complet ». Le nom vient du dernier cache de
+    scraping ; à défaut, l'id.
+    """
+    import time as _t
+    with _LASTGOOD_LOCK:
+        _lastgood_load()
+        items = list(_LASTGOOD_MEM.items())
+    seuil = _t.time() - jours * 86400
+    ids = set()
+    for k, v in items:
+        try:
+            if (v or {}).get("ts", 0) >= seuil and float(((v or {}).get("revenue") or {}).get("total") or 0) > 0:
+                ids.add(int(str(k).split("|", 1)[0]))
+        except (TypeError, ValueError):
+            continue
+    try:
+        noms = {int(i): str(n) for n, i in (load_config().get("creators_cache") or {}).items()}
+    except Exception:
+        noms = {}
+    return {i: noms.get(i) or f"créatrice MyPuls n°{i}" for i in ids}
+
+
+def _complement_infloww(creators, date_from: str, date_to: str, segment: str = "all",
+                        exclude=()) -> Optional[dict]:
+    """Infloww pour les créatrices OnlyFans que MyPuls ne voit pas (revenus_infloww).
+
+    Le banc d'essai ne lit jamais Infloww : la clé du poste est réelle, et un
+    test qui bouche MyPuls verrait sinon s'ajouter les vraies ventes du jour.
+    """
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        return None
+    try:
+        import revenus_infloww
+        # « vue » = COMPTÉE par MyPuls : une créatrice listée mais inactive n'y
+        # entre dans aucun total, Infloww doit pouvoir la reprendre
+        return revenus_infloww.complement(
+            [c.get("id") for c in creators if c.get("active")], date.fromisoformat(date_from),
+            date.fromisoformat(date_to), segment, exclude,
+            [(c.get("id"), c.get("pseudo")) for c in creators if c.get("platform") == "onlyfans"],
+            _creatrices_recentes())
+    except Exception as e:                       # noqa: BLE001
+        # Une panne ici ne doit pas emporter MyPuls : on la DIT, comme une
+        # créatrice en erreur.
+        return {"creatrices": [], "erreurs": [f"Infloww : {type(e).__name__} {str(e)[:60]}"],
+                "manquantes": [], "a_classer": [], "a_rattacher": []}
 
 
 def _relancer_overview(key, date_from, date_to, eur_usd, exclude, segment="all"):
@@ -833,7 +887,27 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
             (types_of if c.get("platform") == "onlyfans" else types_mym)[bucket] += _amt
         if total_usd:
             per_creator.append({"pseudo": c.get("pseudo"), "usd": round(total_usd, 2),
-                                "platform": c.get("platform")})
+                                "platform": c.get("platform"), "id": c.get("id"),
+                                "source": "mypuls"})
+    # CE QUE MYPULS NE VOIT PAS. Depuis le 11/10/2026, Jessye et Khloé sortaient
+    # de toutes les périodes sans un mot. Infloww les apporte, une créatrice
+    # entière à la fois (jamais une vente des deux côtés), et celles que
+    # personne ne voit sont NOMMÉES : le bandeau « Total PARTIEL » les cite.
+    _cpl = _complement_infloww(creators, date_from, date_to, segment, _excl) or {}
+    for x in _cpl.get("creatrices") or []:
+        seg[x["segment"]] += x["net"]
+        for k, v in x["types"].items():
+            types[k] += v
+            types_of[k] += v
+        if x["hors"]["montant"]:
+            hors_type["montant"] += x["hors"]["montant"]
+            for lib in x["hors"]["libelles"]:
+                _hors_libelle(lib)
+        if x["net"]:
+            per_creator.append({"pseudo": x["nom"], "usd": round(x["net"], 2),
+                                "platform": "onlyfans", "id": x["id_mypuls"],
+                                "source": "infloww"})
+    errors += _cpl.get("erreurs") or []
     per_creator.sort(key=lambda x: -x["usd"])
     out = {"ok": True, "total_usd": round(sum(seg.values()), 2),
            "segments": {k: round(v, 2) for k, v in seg.items()},
@@ -843,7 +917,13 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
            # Tant que "montant" vaut 0, la somme des cartes recoupe total_usd.
            "types_hors": {"montant": round(hors_type["montant"], 2),
                           "libelles": hors_type["libelles"]},
-           "creators": per_creator, "errors": errors, "stale": stale}
+           "creators": per_creator, "errors": errors, "stale": stale,
+           # absences DURABLES (pas une lecture ratée) : le relevé reste
+           # valable pour ce qui est lisible, mais le total est partiel
+           "manquantes": _cpl.get("manquantes") or [],
+           "infloww": [x["nom"] for x in _cpl.get("creatrices") or []],
+           "a_classer": _cpl.get("a_classer") or [],
+           "a_rattacher": _cpl.get("a_rattacher") or []}
     # UN AGRÉGAT AMPUTÉ EST GARDÉ, MAIS BRIÈVEMENT (45 s au lieu de 5 min).
     # Ne rien garder du tout relançait les trente-trois requêtes au rendu
     # suivant, sur la même minute saturée : la panne se réalimentait. Le
@@ -913,6 +993,16 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14, segm
                 bucket[d_i] = bucket.get(d_i, 0.0) + amt
             except Exception:
                 pass
+    # Les mêmes créatrices qu'api_overview prend chez Infloww, jour de Paris
+    # par jour de Paris : sans elles, la courbe ne recoupait plus le total.
+    _cpl = _complement_infloww(creators, date_from, date_to, segment) or {}
+    _par_iso = {str(d)[:10]: d for d in sums}
+    for x in _cpl.get("creatrices") or []:
+        for jour, usd in (x.get("jours") or {}).items():
+            d_i = _par_iso.setdefault(jour, jour)
+            sums[d_i] = sums.get(d_i, 0.0) + usd
+            sums_of[d_i] = sums_of.get(d_i, 0.0) + usd
+    errors += _cpl.get("erreurs") or []
     days = [d for d in order if d in sums] + sorted(k for k in sums if k not in order)
     if not days and hit:
         # API en vrac (429, timeout) -> on ressert la dernière bonne série
@@ -1454,6 +1544,26 @@ def ca_usd_chatteur(c: dict, eur_usd: float) -> float:
             return round(eur * eur_usd + usd, 2)
     # Pas de ventilation exploitable : on retombe sur l'hypothese MyM (EUR).
     return round(total * eur_usd, 2)
+
+
+def ca_chatteur_net_brut(c: dict, eur_usd: float, of_fee: float = 0.20,
+                         mym_fee: float = 0.26) -> Tuple[float, float]:
+    """(net, brut) en dollars d'un chatteur, pour un classement qui compare.
+
+    ca_usd_chatteur additionne le MyM tel que MyPuls le rend (déjà NET) et le
+    BRUT OnlyFans : au classement, un chatteur OF passait 25 % devant un
+    chatteur MyM à vente égale (25/10/2026 : 85,00 $ affichés pour 68,00 $
+    nets). Ici chaque devise est ramenée à la même base. La paie, elle, garde
+    ca_usd_chatteur : sa base est une décision du propriétaire.
+    """
+    total = float(c.get("ca_total") or 0)
+    eur, usd = c.get("ca_eur"), c.get("ca_usd")
+    if eur is not None and usd is not None and (eur + usd) > 0:
+        if abs((eur + usd) - total) <= max(1.0, 0.05 * total):
+            net = eur * eur_usd + usd * (1 - of_fee)
+            return round(net, 2), round(eur * eur_usd / (1 - mym_fee) + usd, 2)
+    # même repli que ca_usd_chatteur : l'hypothèse MyM
+    return round(total * eur_usd, 2), round(total * eur_usd / (1 - mym_fee), 2)
 
 
 def _ca_by_currency(transactions) -> dict:

@@ -35103,6 +35103,17 @@ def _render_home_dashboard_html() -> str:
         _eur_usd = float((_fx.get("settings") or {}).get("eur_usd") or 0) or _eur_usd
     except Exception:
         pass
+    # UN MOIS CLOS SE CONVERTIT AU TAUX DE SA FIN, comme dans la Facture. Au
+    # taux du jour, « Mois dernier » donnait le MyM de septembre à 31 332,07 $
+    # quand la Facture, figée à 1,1355 (BCE du 30/09), en comptait 31 785,55 :
+    # 453,48 $ d'écart pour le même mois, et un chiffre qui bougeait chaque
+    # jour avec le marché. Même fonction que la Facture, donc même taux.
+    if period == "trente":
+        try:
+            import facture_web as _fw_taux
+            _eur_usd = float(_fw_taux._month_rate(_fw_taux._load(), start.strftime("%Y-%m"))) or _eur_usd
+        except Exception as _e_taux:
+            log.warning("dashboard : taux du mois clos indisponible (%s), taux du jour", _e_taux)
 
     def _tx_usd(amount, currency):
         """Montant d'une transaction ramené en USD NET."""
@@ -35113,10 +35124,12 @@ def _render_home_dashboard_html() -> str:
         c = (currency or "").strip().upper()
         if "USD" in c or "$" in c:
             return a * (1 - OF_FEE)      # OnlyFans : brut -> net
-        # MyM aussi est du BRUT scrapé : mêmes règles que OnlyFans, sinon la
-        # carte MyM affichait un « net » jamais déduit des 26 % (et le mode
-        # Brut le re-gonflait par-dessus)
-        return a * (1 - MYM_FEE) * _eur_usd
+        # MyM, lui, est DÉJÀ NET chez MyPuls (team/money : amount = net =
+        # total des stats, au centime, le 25/10/2026 ; les ventes valent un
+        # prix rond × 0,766 pour un pourboire, × 0,733 pour un média). Lui
+        # retirer 26 % de plus faisait passer Emmabrn de 626,78 $ à 463,81 $
+        # au Top modèles du 25/10 — deuxième derrière Emy au lieu de première.
+        return a * _eur_usd
 
     # Modèles qu'on ne suit plus : leurs transactions sont IGNORÉES partout
     # (total, cartes par type, segments). Pour en retirer une : l'ajouter ici.
@@ -35133,7 +35146,48 @@ def _render_home_dashboard_html() -> str:
         return False
 
 
-    # Top créateurs (depuis le chart datasets)
+    def _top_modeles_html(classement, tous):
+        """La carte « Top modèles » : cinq lignes {label, total (net $), brut, id}.
+
+        `id` est un id MyPuls (avatar) ; une créatrice lue chez Infloww n'en
+        porte pas, elle a l'initiale.
+        """
+        items = []
+        for ds in classement[:5]:
+            cid = ds.get("id")
+            _lbl = html_escape(str(ds["label"]))
+            avatar = (
+                f"<img src='/mypuls/avatar/{cid}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+                if cid else
+                f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{_lbl[:1].upper()}</div>"
+            )
+            # La part se calcule sur le meme ensemble que le classement,
+            # en dollars : « all_creators_total » etait, lui aussi, une somme
+            # de devises melangees.
+            pct = (ds["total"] / tous * 100) if tous else 0
+            _brut = f" data-brut='{ds['brut']:.2f}'" if ds.get("brut") is not None else ""
+            items.append(
+                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
+                f"{avatar}"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='font-weight:600;font-size:14px'>{_lbl}</div>"
+                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
+                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#3b82f6)'></div></div>"
+                f"<div class='fx-amt' data-usd='{ds['total']:.2f}'{_brut} style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>${ds['total']:,.0f}</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+            )
+        return (
+            "<div class='home-card'>"
+            "<div class='home-card-header'>Top modèles</div>"
+            "<div style='display:flex;flex-direction:column;gap:8px'>"
+            + "".join(items)
+            + "</div></div>"
+        )
+
+    # Top créateurs (depuis les ventes) : REPLI seulement. Quand l'API répond,
+    # la carte est refaite plus bas sur les mêmes montants que le total.
     top_creators_html = ""
     if chart_data.get("datasets"):
         creators_map = {}
@@ -35143,7 +35197,6 @@ def _render_home_dashboard_html() -> str:
                 creators_map = cr_res.get("creators") or {}
         except Exception:
             pass
-        items = []
         # LE CLASSEMENT ADDITIONNAIT DES EUROS ET DES DOLLARS.
         # chart["datasets"][i]["total"] est une somme BRUTE de tx["amount"],
         # sans conversion : MyM rend des euros, OnlyFans des dollars, et le
@@ -35152,47 +35205,23 @@ def _render_home_dashboard_html() -> str:
         # applique la meme exclusion de modeles, qui manquait ici : une
         # creatrice ecartee du total pouvait encore figurer au classement.
         _tot_usd_par_createur = {}
+        _brut_par_createur = {}
         for _t_c in (mp_data.get("transactions", []) or []):
             _nom_c = _t_c.get("creator") or "?"
             if _model_match(_nom_c, EXCLUDED_MODELS):
                 continue
-            _tot_usd_par_createur[_nom_c] = (_tot_usd_par_createur.get(_nom_c, 0.0)
-                                             + _tx_usd(_t_c.get("amount", 0), _t_c.get("currency")))
+            _net_c = _tx_usd(_t_c.get("amount", 0), _t_c.get("currency"))
+            _tot_usd_par_createur[_nom_c] = _tot_usd_par_createur.get(_nom_c, 0.0) + _net_c
+            _of_c = "USD" in (_t_c.get("currency") or "").upper() or "$" in (_t_c.get("currency") or "")
+            _brut_par_createur[_nom_c] = (_brut_par_createur.get(_nom_c, 0.0)
+                                          + _net_c / (1 - (OF_FEE if _of_c else MYM_FEE)))
         _classement = sorted(
-            ({"label": _n, "total": _v} for _n, _v in _tot_usd_par_createur.items() if _v > 0),
+            ({"label": _n, "total": _v, "brut": _brut_par_createur.get(_n), "id": creators_map.get(_n)}
+             for _n, _v in _tot_usd_par_createur.items() if _v > 0),
             key=lambda d: -d["total"])[:5]
         _somme_visible = sum(d["total"] for d in _classement) or 1.0
         _tous = sum(_tot_usd_par_createur.values()) or _somme_visible
-        for i, ds in enumerate(_classement):
-            cid = creators_map.get(ds["label"])
-            avatar = (
-                f"<img src='/mypuls/avatar/{cid}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
-                if cid else
-                f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{ds['label'][:1].upper()}</div>"
-            )
-            # La part se calcule sur le meme ensemble que le classement,
-            # en dollars : « all_creators_total » etait, lui aussi, une somme
-            # de devises melangees.
-            pct = (ds["total"] / _tous * 100) if _tous else 0
-            items.append(
-                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
-                f"{avatar}"
-                f"<div style='flex:1;min-width:0'>"
-                f"<div style='font-weight:600;font-size:14px'>{ds['label']}</div>"
-                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
-                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#3b82f6)'></div></div>"
-                f"<div class='fx-amt' data-usd='{ds['total']:.2f}' style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>${ds['total']:,.0f}</div>"
-                f"</div>"
-                f"</div>"
-                f"</div>"
-            )
-        top_creators_html = (
-            "<div class='home-card'>"
-            "<div class='home-card-header'>Top modèles</div>"
-            "<div style='display:flex;flex-direction:column;gap:8px'>"
-            + "".join(items)
-            + "</div></div>"
-        )
+        top_creators_html = _top_modeles_html(_classement, _tous)
 
     # Sales ranking chatteurs (façon Infloww) : filtre les lignes à 0€, badges 1/2/3
     top_chatters_html = ""
@@ -35204,14 +35233,17 @@ def _render_home_dashboard_html() -> str:
     # MyM et les dollars OnlyFans. L afficher suivi d un « € » surevalue la
     # part OnlyFans d environ 6,5 % -- et le montant ne bougeait pas quand on
     # basculait en dollars, puisqu il n avait jamais ete converti.
-    # ca_usd_chatteur() convertit chatteur par chatteur, avec SA propre
-    # ventilation par devise. C est le montant que mypuls.py designe comme
-    # « celui qui peut etre affiche avec un symbole ».
+    # ca_chatteur_net_brut() convertit chatteur par chatteur, avec SA propre
+    # ventilation par devise, et ramene les deux plateformes au meme net :
+    # ca_usd_chatteur, lui, mettait le MyM en net et l OnlyFans en brut, si
+    # bien qu un chatteur OF passait 25 % devant a vente egale -- et le bouton
+    # Net/Brut ne changeait rien au classement, faute de data-brut.
     for _c_r in chatters:
         try:
-            _c_r["_usd"] = mypuls.ca_usd_chatteur(_c_r, _eur_usd)
+            _c_r["_usd"], _c_r["_brut"] = mypuls.ca_chatteur_net_brut(_c_r, _eur_usd, OF_FEE, MYM_FEE)
         except Exception:
             _c_r["_usd"] = float(_c_r.get("ca_total") or 0) * _eur_usd
+            _c_r["_brut"] = None
     ranked = [c for c in chatters
               if float(c.get("_usd", 0) or 0) > 0 and not c.get("non_attribue")]
     ranked.sort(key=lambda c: -float(c.get("_usd") or 0))
@@ -35236,7 +35268,9 @@ def _render_home_dashboard_html() -> str:
                 f"<div class='rank-row'>"
                 f"{badge}"
                 f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{display_name}</div>"
-                f"<div class='rank-amount fx-amt' data-usd='{c['_usd']:.2f}'>${c['_usd']:,.2f}</div>"
+                f"<div class='rank-amount fx-amt' data-usd='{c['_usd']:.2f}'"
+                + (f" data-brut='{c['_brut']:.2f}'" if c.get("_brut") is not None else "")
+                + f">${c['_usd']:,.2f}</div>"
                 f"</div>"
             )
         top_chatters_html = (
@@ -35414,19 +35448,42 @@ def _render_home_dashboard_html() -> str:
                 _en_rafraichissement = bool(_ov.get("rafraichissement"))
                 _seg = {k: float(_ov["segments"].get(k, 0.0)) for k in _seg}
                 _total_usd = float(_ov.get("total_usd") or 0) + _manual_usd
-                _of_unknown = set()      # l'API donne la plateforme : plus d'inconnue
+                # L'API donne la plateforme : plus d'inconnue chez MyPuls. Une
+                # créatrice lue chez Infloww sans marché connu (Luna, à son
+                # arrivée) est comptée en FR, et le bandeau le demande.
+                _of_unknown = set(_ov.get("a_classer") or [])
                 _api_src = True
                 # l'API a répondu : le bandeau « cookies expirés » n'a plus de sens
                 warning = ""
                 _n_err = len(_ov.get("errors") or [])
                 _n_stale = len(_ov.get("stale") or [])
-                if _n_err:
+                _manquantes = _ov.get("manquantes") or []
+                if _n_err or _manquantes:
+                    # LES NOMS, PAS UN COMPTE. Jessye et Khloé sont sorties du
+                    # total le 11/10/2026 sans le moindre bandeau : la liste
+                    # des créatrices de MyPuls ne les contenait plus, donc
+                    # aucune n'était « en erreur ». Une absence durable est
+                    # désormais nommée, avec sa raison ; une lecture ratée
+                    # aussi. Morceaux séparés : _traduire_html traduit texte
+                    # par texte, un nom au milieu d'une phrase la bloquerait.
+                    _morceaux = ["<b>⚠ Total PARTIEL</b>"]
+                    if _manquantes:
+                        _morceaux.append("<span> — il manque : </span>")
+                        _morceaux.append("<span>, </span>".join(
+                            f"<b>{html_escape(str(m.get('nom')))}</b>"
+                            f"<span> ({html_escape(str(m.get('raison')))})</span>"
+                            for m in _manquantes))
+                    if _n_err:
+                        _sans = sorted({str(e).split(":", 1)[0].strip() for e in _ov.get("errors") or []})
+                        _morceaux.append("<span> — sans donnée pour l'instant : </span>")
+                        _morceaux.append(f"<b title='{html_escape('; '.join(map(str, _ov.get('errors') or []))[:400])}'>"
+                                         f"{html_escape(', '.join(_sans))}</b>")
+                        _morceaux.append("<span> — recharge dans une minute pour le chiffre complet.</span>")
                     warning = (
-                        "<div style='padding:10px 14px;background:rgba(251,191,36,.08);"
+                        "<div class='home-partiel' style='padding:10px 14px;background:rgba(251,191,36,.08);"
                         "border:1px solid rgba(251,191,36,.3);border-radius:10px;"
                         "margin-bottom:18px;font-size:12.5px;color:#fbbf24'>"
-                        f"⚠ Total PARTIEL : {_n_err} créatrice(s) sans AUCUNE donnée "
-                        "— recharge dans une minute pour le chiffre complet.</div>")
+                        + "".join(_morceaux) + "</div>")
                 elif _n_stale:
                     # rien de perdu : ces créatrices affichent leur DERNIER relevé
                     warning = (
@@ -35441,6 +35498,31 @@ def _render_home_dashboard_html() -> str:
                 _types_brut = {k: (float(_t_of.get(k, 0.0)) / (1 - OF_FEE)
                                    + float(_t_mym.get(k, 0.0)) / (1 - MYM_FEE))
                                for k in type_totals}
+                # LA SOURCE EST DITE. Un chiffre lu chez Infloww n'est pas un
+                # chiffre MyPuls : le propriétaire doit savoir d'où il vient.
+                _inf = [html_escape(str(n)) for n in _ov.get("infloww") or []]
+                _ratt = [html_escape(str(n)) for n in _ov.get("a_rattacher") or []]
+                if _inf or _ratt:
+                    warning += (
+                        "<div class='home-source-note' style='padding:8px 13px;margin-bottom:14px;"
+                        "border-radius:8px;background:rgba(96,165,250,.08);font-size:12px;color:#93c5fd'>"
+                        + (f"<span>Ventes lues chez Infloww (MyPuls ne les voit pas) :</span> <b>{', '.join(_inf)}</b>"
+                           if _inf else "")
+                        + ("<span> · </span>" if _inf and _ratt else "")
+                        + (f"<b>{', '.join(_ratt)}</b><span> : présente(s) chez MyPuls et chez Infloww, "
+                           "comptée(s) une seule fois (MyPuls).</span>" if _ratt else "")
+                        + "</div>")
+                # TOP MODÈLES SUR LA MÊME BASE QUE LE TOTAL. Les ventes
+                # (team/money) n'ont ni Jessye ni Khloé, et le repli retirait
+                # 26 % de plus au MyM : le classement se lit désormais ici.
+                _par_api = [{"label": x.get("pseudo") or "?", "total": float(x.get("usd") or 0),
+                             "id": x.get("id") if x.get("source") != "infloww" else None,
+                             "brut": float(x.get("usd") or 0)
+                                     / (1 - (OF_FEE if x.get("platform") == "onlyfans" else MYM_FEE))}
+                            for x in _ov.get("creators") or [] if float(x.get("usd") or 0) > 0]
+                if _par_api:
+                    _par_api.sort(key=lambda d: -d["total"])
+                    top_creators_html = _top_modeles_html(_par_api, sum(d["total"] for d in _par_api))
     except Exception as _e:
         log.warning(f"MyPuls API overview: {_e}")
 

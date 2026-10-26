@@ -1,6 +1,27 @@
 """Explicit revenue groups: stable account IDs, never similar model names."""
-OF_US_IDS = frozenset({3107, 3108, 3352})  # Jessye, Khloe, Emy
+# Seren (3867) est la moitie Twitter d'Emy (liens_va.VARIANTE_TWITTER), un
+# compte US : absente d'ici, elle tombait en OF FR par la regle de plateforme
+# ci-dessous (1 240,77 $ de septembre ranges du mauvais cote, audit du 26/10).
+OF_US_IDS = frozenset({3107, 3108, 3352, 3867})  # Jessye, Khloe, Emy, Seren
 OF_FR_IDS = frozenset({3106, 3109})        # Amelia, Julia
+
+# LE PSEUDO ONLYFANS EST LE SEUL LIEN ENTRE MYPULS ET INFLOWW. MyPuls ne donne
+# pas le pseudo OF de ses creatrices, Infloww ne connait pas leur id MyPuls :
+# sans cette table, une creatrice des deux cotes serait comptee deux fois.
+# Le nom sert au bandeau « Total PARTIEL » quand le compte manque partout.
+COMPTES_OF = {
+    3107: ("Jessye", "jessyewdiference"),
+    3108: ("Khloé", "khloecute"),
+    3352: ("Emy", "emy.brw"),
+    3867: ("Seren", "seren.vale"),
+}
+
+# Creatrices annoncees chez Infloww mais pas encore lisibles par la cle du
+# site : tant qu'elles manquent, le total est PARTIEL et le bandeau le dit.
+# Valeur : leur marche ('of_us' / 'of_fr'), None tant qu'il n'est pas confirme
+# (elles sont alors comptees en OF FR, comme toute OnlyFans non classee, et
+# l'ecran le signale). Proprietaire, 26/10/2026 : « maintenant il y a aussi Luna ».
+ATTENDUES_INFLOWW = {"luna": None}
 # Last verified MYM accounts; API metadata also covers newly added accounts.
 KNOWN_MYM_IDS = frozenset({679, 769, 1116, 1121, 1141, 1317, 1469, 1733, 2896})
 

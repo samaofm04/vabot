@@ -227,6 +227,18 @@ ETATS = {
         "⚠ MyPuls unavailable — live figures not loaded (this is NOT a real "
         "$0). Check/refresh your cookies in",
     "Settings → Cookies MyPuls": "Settings → MyPuls cookies",
+    # Le bandeau « Total PARTIEL » nomme les créatrices absentes : chaque
+    # morceau fixe est un noeud de texte à part, les noms restent tels quels.
+    "⚠ Total PARTIEL": "⚠ PARTIAL total",
+    "— il manque :": "— missing:",
+    "(pas encore visible par la clé Infloww du site)": "(not yet visible to the site's Infloww key)",
+    "(plus vue par MyPuls, ni par Infloww)": "(no longer seen by MyPuls, nor by Infloww)",
+    "(plus vue par MyPuls)": "(no longer seen by MyPuls)",
+    "— sans donnée pour l'instant :": "— no data for now:",
+    "— recharge dans une minute pour le chiffre complet.": "— reload in a minute for the full figure.",
+    "Ventes lues chez Infloww (MyPuls ne les voit pas) :": "Sales read from Infloww (MyPuls doesn't see them):",
+    ": présente(s) chez MyPuls et chez Infloww, comptée(s) une seule fois (MyPuls).":
+        ": present in both MyPuls and Infloww, counted once (MyPuls).",
     "Non classé": "Unclassified",
     "Top modèles": "Top models",
     "toutes créatrices": "all creators",

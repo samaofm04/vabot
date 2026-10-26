@@ -245,14 +245,18 @@ def snapshot_revision(root):
     """Unrelated pages/comments must not invalidate every financial snapshot."""
     relevant = {
         'web_upload.py': {'_render_home_dashboard_html', '_home_sales_svg', '_clicrank_carte_html'},
-        'mypuls.py': {'api_overview', 'api_revenue_series', 'famille_api', '_assembler_stats'},
+        'mypuls.py': {'api_overview', 'api_revenue_series', 'famille_api', '_assembler_stats',
+                      '_complement_infloww', '_creatrices_recentes', 'ca_chatteur_net_brut'},
     }
     parts = ['dashboard-snapshot-v2']
     for name, names in relevant.items():
         tree = ast.parse((root / name).read_text())
         parts.extend(ast.dump(node, include_attributes=False) for node in tree.body
                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names)
-    for name in ('dashboard_platforms.py', 'dashboard_layout.py'):
+    # Les créatrices lues chez Infloww et la table qui les rattache font le
+    # total, au même titre qu'api_overview : les changer doit périmer les relevés.
+    for name in ('dashboard_platforms.py', 'dashboard_layout.py', 'revenus_infloww.py',
+                 'revenus_segments.py'):
         parts.append(ast.dump(ast.parse((root / name).read_text()), include_attributes=False))
     parts.append(ast.dump(ast.parse(__import__('inspect').getsource(period_bounds)), include_attributes=False))
     return sha256('\n'.join(parts).encode()).hexdigest()

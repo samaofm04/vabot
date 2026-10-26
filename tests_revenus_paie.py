@@ -54,8 +54,12 @@ class _ApiBouchon:
 
     def __enter__(self):
         self._sauve = (mypuls.api_configured, mypuls.api_creators_cached,
-                       mypuls.api_creator_stats_cached)
+                       mypuls.api_creator_stats_cached, mypuls._complement_infloww)
         mypuls.api_configured = lambda: True
+        # la quatrieme porte (26/10/2026) : Infloww pour les creatrices que
+        # MyPuls ne voit pas. La cle du poste est reelle : sans ce bouchon,
+        # les vraies ventes du jour de Jessye et Khloe s'ajoutaient au cas.
+        mypuls._complement_infloww = lambda *a, **k: None
         mypuls.api_creators_cached = lambda force=False: [
             {"id": 1, "pseudo": "lola", "active": True,
              "platform": self.platform, "currency": self.currency}]
@@ -68,7 +72,7 @@ class _ApiBouchon:
 
     def __exit__(self, *a):
         (mypuls.api_configured, mypuls.api_creators_cached,
-         mypuls.api_creator_stats_cached) = self._sauve
+         mypuls.api_creator_stats_cached, mypuls._complement_infloww) = self._sauve
         mypuls._API_OVERVIEW_CACHE.clear()
         return False
 

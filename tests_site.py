@@ -7988,7 +7988,18 @@ try:
     check("revenus : le classement des chatteurs bascule avec la devise",
           not _figes and "rank-amount fx-amt" in _dash)
     check("revenus : le classement des modeles bascule aussi",
-          "_tot_usd_par_createur" in _dash and "ca_usd_chatteur" in _dash)
+          "_tot_usd_par_createur" in _dash and "ca_chatteur_net_brut" in _dash)
+    # 26/10/2026 : le classement des chatteurs mettait le MyM en net et l OF en
+    # brut, et ignorait le bouton Net/Brut ; le Top modeles retirait 26 % de
+    # plus au MyM, deja net chez MyPuls.
+    check("revenus : le classement des chatteurs a son brut (bouton Net/Brut)",
+          "data-brut='{c['_brut']:.2f}'" in _dash)
+    check("revenus : le repli du Top modeles ne retire plus 26 % au MyM deja net",
+          "return a * (1 - MYM_FEE) * _eur_usd" not in _dash and "return a * _eur_usd" in _dash)
+    check("revenus : le Top modeles se lit sur l agregat quand l API repond",
+          "_top_modeles_html(_par_api" in _dash)
+    check("revenus : « Mois dernier » prend le taux fige du mois, comme la Facture",
+          'if period == "trente":' in _dash and "_month_rate(" in _dash)
     check("revenus : les modeles ecartees le sont AUSSI dans le classement",
           "_model_match(_nom_c, EXCLUDED_MODELS)" in _dash)
     # LA JOURNEE EST CELLE DU PROPRIETAIRE. Le serveur tourne en UTC : entre
@@ -8389,6 +8400,199 @@ try:
         _mpP._API_OVERVIEW_CACHE.update(_svOv)
 except Exception as _eP:
     check("revenus : prechargement testable", False, repr(_eP)[:160])
+
+print()
+print("=" * 70)
+print("REVENUS : Infloww pour les creatrices que MyPuls ne voit pas")
+print("=" * 70)
+# Depuis le 11/10/2026, aucune cle MyPuls ne voit Jessye (3107) ni Khloe
+# (3108) : le dashboard les retirait de toutes les periodes, sans bandeau.
+# Infloww les a. Ce qui est verrouille : une creatrice ne vient JAMAIS des
+# deux sources, MyPuls reprend la main des qu il la revoit, les jours sont
+# ceux de Paris, undo / pending_return sont exclus, et une absente est
+# NOMMEE. Rien ne touche le reseau : infloww et MyPuls sont bouches.
+try:
+    import datetime as _dtRI
+    import infloww as _ifRI
+    import mypuls as _mpRI
+    import revenus_infloww as _riRI
+
+    check("infloww : des demi-mois cales sur le calendrier (octobre fait 31 j + 1 h a Paris)",
+          list(_riRI._demi_mois(_dtRI.date(2026, 10, 3), _dtRI.date(2026, 11, 2))) == [
+              (_dtRI.date(2026, 10, 1), _dtRI.date(2026, 10, 15)),
+              (_dtRI.date(2026, 10, 16), _dtRI.date(2026, 10, 31)),
+              (_dtRI.date(2026, 11, 1), _dtRI.date(2026, 11, 15))])
+
+    def _msRI(iso):
+        return int(_dtRI.datetime.fromisoformat(iso).timestamp() * 1000)
+    _LIGNES_RI = [
+        # 24/10 23:30 UTC = 25/10 01:30 a Paris (heure d ete) : journee du 25
+        {"id": "a", "t": _msRI("2026-10-24T23:30:00+00:00"), "type": "Messages",
+         "statut": "loading", "brut": 2000, "frais": 400, "net": 1600, "devise": "USD"},
+        {"id": "b", "t": _msRI("2026-10-25T12:00:00+00:00"), "type": "Tips",
+         "statut": "done", "brut": 1000, "frais": 200, "net": 800, "devise": "USD"},
+        {"id": "b", "t": _msRI("2026-10-25T12:00:00+00:00"), "type": "Tips",
+         "statut": "done", "brut": 1000, "frais": 200, "net": 800, "devise": "USD"},
+        {"id": "c", "t": _msRI("2026-10-25T13:00:00+00:00"), "type": "Posts",
+         "statut": "undo", "brut": 5000, "frais": 1000, "net": 4000, "devise": "USD"},
+        {"id": "d", "t": _msRI("2026-10-25T14:00:00+00:00"), "type": "Messages",
+         "statut": "pending_return", "brut": 900, "frais": 180, "net": 720, "devise": "USD"},
+        {"id": "e", "t": _msRI("2026-10-25T15:00:00+00:00"), "type": "Bundle",
+         "statut": "done", "brut": 500, "frais": 100, "net": 400, "devise": "USD"},
+        # 25/10 23:30 UTC = 26/10 00:30 a Paris (heure d hiver) : hors periode
+        {"id": "f", "t": _msRI("2026-10-25T23:30:00+00:00"), "type": "Messages",
+         "statut": "done", "brut": 3000, "frais": 600, "net": 2400, "devise": "USD"},
+    ]
+    _savRI = (_riRI._tranche, _ifRI.configure, _ifRI.creatrices, _riRI.ventes_paris)
+    try:
+        _riRI._tranche = lambda cid, a, b: ({"l": _LIGNES_RI, "tronque": False}
+                                           if a.day == 16 else {"l": [], "tronque": False})
+        _vRI = _riRI.ventes_paris("x", _dtRI.date(2026, 10, 25), _dtRI.date(2026, 10, 25))
+        check("infloww : une vente compte au jour de PARIS, pas au jour UTC",
+              _vRI["jours"] == {"2026-10-25": 28.0}, str(_vRI["jours"]))
+        check("infloww : undo et pending_return exclus, comptes a part",
+              _vRI["exclues"] == 2 and abs(_vRI["net"] - 28.0) < 1e-9, str(_vRI))
+        check("infloww : une vente rendue deux fois ne compte qu une fois",
+              _vRI["nb"] == 3, _vRI["nb"])
+        check("infloww : les types vont dans les cartes de MyPuls (famille_api)",
+              _vRI["types"] == {"Messages": 16.0, "Tips": 8.0}, str(_vRI["types"]))
+        check("infloww : un type inconnu est garde avec son libelle, jamais jete",
+              _vRI["hors"] == {"montant": 4.0, "libelles": ["Bundle"]}, str(_vRI["hors"]))
+        check("infloww : le brut est celui d Infloww",
+              abs(_vRI["brut"] - 35.0) < 1e-9, _vRI["brut"])
+
+        _CO_RI = [{"id": "e1", "userName": "emy.brw", "name": "Emy", "nickName": "Emy ♡"},
+                  {"id": "k1", "userName": "khloecute", "name": "Khloe", "nickName": "Khloe 💕"},
+                  {"id": "j1", "userName": "jessyewdiference", "name": "Jessye", "nickName": "Jessye"}]
+        _NET_RI = {"e1": 100.0, "k1": 40.0, "j1": 60.0}
+        _lus = []
+
+        def _ventesRI(cid, d1, d2):
+            _lus.append(cid)
+            if cid == "boom":
+                raise _ifRI.ErreurInfloww("HTTP 500")
+            n = _NET_RI.get(cid, 7.0)
+            return {"net": n, "brut": n / 0.8, "types": {"Messages": n},
+                    "hors": {"montant": 0.0, "libelles": []}, "jours": {"2026-10-25": n},
+                    "nb": 1, "exclues": 0, "ecartees": 0}
+        _ifRI.configure = lambda: True
+        _ifRI.creatrices = lambda: list(_CO_RI)
+        _riRI.ventes_paris = _ventesRI
+        _J = _dtRI.date(2026, 10, 25)
+        _VUS = [3352, 3106, 3867, 1116]
+        _c1 = _riRI.complement(_VUS, _J, _J)
+        check("infloww : Jessye et Khloe viennent d Infloww, en OF US",
+              sorted((x["nom"], x["segment"], x["net"]) for x in _c1["creatrices"])
+              == [("Jessye", "of_us", 60.0), ("Khloé", "of_us", 40.0)], str(_c1["creatrices"]))
+        check("infloww : Emy, visible chez MyPuls, n est JAMAIS lue chez Infloww",
+              "e1" not in _lus, _lus)
+        check("infloww : Luna, annoncee mais invisible, est nommee (pas tue)",
+              [m["nom"] for m in _c1["manquantes"]] == ["Luna"]
+              and "Infloww" in _c1["manquantes"][0]["raison"], str(_c1["manquantes"]))
+        _lus.clear()
+        _c2 = _riRI.complement(_VUS + [3107], _J, _J)
+        check("infloww : MyPuls revoit Jessye -> elle repasse a MyPuls tout seul",
+              [x["nom"] for x in _c2["creatrices"]] == ["Khloé"] and "j1" not in _lus,
+              str(_c2["creatrices"]))
+        check("infloww : le filtre MYM n ajoute aucune OnlyFans",
+              _riRI.complement(_VUS, _J, _J, "mym")["creatrices"] == [])
+        _CO_RI.append({"id": "l1", "userName": "lunaa", "name": "Luna", "nickName": "Luna ♡"})
+        _c3 = _riRI.complement(_VUS, _J, _J)
+        check("infloww : Luna, des qu elle apparait, est comptee toute seule",
+              "Luna" in [x["nom"] for x in _c3["creatrices"]] and not _c3["manquantes"],
+              str(_c3))
+        check("infloww : son marche inconnu est DIT (comptee en OF FR en attendant)",
+              _c3["a_classer"] == ["Luna"]
+              and [x["segment"] for x in _c3["creatrices"] if x["nom"] == "Luna"] == ["of_fr"])
+        _c4 = _riRI.complement(_VUS + [4000], _J, _J, of_mypuls=[(4000, "Luna ♡")])
+        check("infloww : une creatrice deja chez MyPuls sous un autre id n est pas doublee",
+              "Luna" not in [x["nom"] for x in _c4["creatrices"]] and _c4["a_rattacher"] == ["Luna"],
+              str(_c4["a_rattacher"]))
+        _CO_RI.pop()
+        _CO_RI[2] = dict(_CO_RI[2], id="boom")
+        _c5 = _riRI.complement(_VUS, _J, _J)
+        check("infloww : une lecture ratee est une ERREUR nommee, pas une absence",
+              any(e.startswith("Jessye") for e in _c5["erreurs"])
+              and "Jessye" not in [m["nom"] for m in _c5["manquantes"]], str(_c5))
+        _ifRI.creatrices = lambda: (_ for _ in ()).throw(_ifRI.ErreurInfloww("réseau"))
+        _c6 = _riRI.complement(_VUS, _J, _J)
+        check("infloww : Infloww injoignable -> Jessye et Khloe en erreur, pas en zero muet",
+              sorted(e.split(":")[0] for e in _c6["erreurs"]) == ["Jessye", "Khloé", "Luna"],
+              str(_c6["erreurs"]))
+        _ifRI.creatrices = lambda: list(_CO_RI)
+        _CO_RI[2] = dict(_CO_RI[2], id="j1")
+        _c7 = _riRI.complement(_VUS, _J, _J, recentes={1121: "Talittlechloe", 1116: "Lolatacrush"})
+        check("infloww : une creatrice relevee ces 45 jours puis disparue est nommee",
+              "Talittlechloe" in [m["nom"] for m in _c7["manquantes"]]
+              and "Lolatacrush" not in [m["nom"] for m in _c7["manquantes"]], str(_c7["manquantes"]))
+        check("infloww : une modele ecartee (bella) n est ni lue ni reclamee",
+              _riRI.complement(_VUS, _J, _J, exclure={"khloe"})["creatrices"][0]["nom"] == "Jessye")
+    finally:
+        _riRI._tranche, _ifRI.configure, _ifRI.creatrices, _riRI.ventes_paris = _savRI
+
+    # L agregat : une creatrice Infloww entre dans le total, son segment, ses
+    # cartes, le Top modeles -- et le banc d essai ne lit jamais Infloww.
+    check("infloww : le banc d essai ne lit jamais Infloww (cle reelle du poste)",
+          _mpRI._complement_infloww([], "2026-10-25", "2026-10-25") is None)
+    _svA = (_mpRI.api_creators_cached, _mpRI.api_creator_stats_cached, _mpRI.api_configured,
+            _mpRI._complement_infloww, _mpRI.api_revenue_by_day)
+    _svOvRI = dict(_mpRI._API_OVERVIEW_CACHE)
+    _svSeRI = dict(_mpRI._API_SERIES_CACHE)
+    try:
+        _mpRI.api_configured = lambda: True
+        _mpRI.api_creators_cached = lambda force=False: [
+            {"id": 3352, "pseudo": "Emy ♡", "active": True, "platform": "onlyfans", "currency": "USD"},
+            {"id": 3867, "pseudo": "Seren ♡", "active": True, "platform": "onlyfans", "currency": "USD"},
+            {"id": 1733, "pseudo": "Emmabrn", "active": True, "platform": "mym", "currency": "EUR"}]
+        _mpRI.api_creator_stats_cached = lambda cid, d1, d2: {"ok": True, "data": {"revenue": {
+            "total": {3352: 100.0, 3867: 7.2, 1733: 50.0}[cid],
+            "currency": "EUR" if cid == 1733 else "USD",
+            "by_type": {"message": {3352: 100.0, 3867: 7.2, 1733: 50.0}[cid]}}}}
+        _mpRI.api_revenue_by_day = lambda cid, d1, d2: {"ok": True, "data": {
+            "labels": ["2026-10-25"], "revenue_by_day": [{3352: 100.0, 3867: 7.2, 1733: 50.0}[cid]],
+            "currency": "EUR" if cid == 1733 else "USD"}}
+        _CPL_RI = {"creatrices": [{"nom": "Jessye", "id_mypuls": 3107, "pseudo_of": "jessyewdiference",
+                                   "segment": "of_us", "net": 60.0, "brut": 75.0,
+                                   "types": {"Messages": 50.0, "Tips": 10.0},
+                                   "hors": {"montant": 0.0, "libelles": []},
+                                   "jours": {"2026-10-25": 60.0}, "nb": 2}],
+                   "erreurs": [], "manquantes": [{"nom": "Luna", "segment": "of_fr",
+                                                  "raison": "pas encore visible par la clé Infloww du site"}],
+                   "a_classer": [], "a_rattacher": []}
+        _mpRI._complement_infloww = lambda *a, **k: _CPL_RI
+        _mpRI._API_OVERVIEW_CACHE.clear()
+        _mpRI._API_SERIES_CACHE.clear()
+        _ovRI = _mpRI.api_overview("2026-10-25", "2026-10-25", eur_usd=2.0)
+        check("infloww : le total = MyPuls + Infloww (100 + 7,20 + 50 EUR x 2 + 60)",
+              abs(_ovRI["total_usd"] - 267.2) < 0.001, _ovRI["total_usd"])
+        check("infloww : OF US = Emy + Seren + Jessye (Seren n est plus en OF FR)",
+              _ovRI["segments"] == {"mym": 100.0, "of_fr": 0.0, "of_us": 167.2}, str(_ovRI["segments"]))
+        check("infloww : ses ventes vont dans les cartes, cote OnlyFans (brut a 20 %)",
+              _ovRI["types"]["Tips"] == 10.0 and _ovRI["types_of"]["Messages"] == 157.2,
+              str(_ovRI["types_of"]))
+        check("infloww : elle figure au Top modeles, source dite",
+              {"pseudo": "Jessye", "usd": 60.0, "platform": "onlyfans", "id": 3107, "source": "infloww"}
+              in _ovRI["creators"], str(_ovRI["creators"]))
+        check("infloww : l absente durable remonte sans passer pour une erreur passagere",
+              _ovRI["manquantes"][0]["nom"] == "Luna" and _ovRI["errors"] == []
+              and _ovRI["infloww"] == ["Jessye"])
+        _seRI = _mpRI.api_revenue_series("2026-10-25", "2026-10-25", eur_usd=2.0)
+        check("infloww : la courbe recoupe le total, jour de Paris par jour de Paris",
+              _seRI["days"] == ["2026-10-25"] and _seRI["usd"] == [267.2]
+              and _seRI["usd_of"] == [167.2], str(_seRI))
+    finally:
+        (_mpRI.api_creators_cached, _mpRI.api_creator_stats_cached, _mpRI.api_configured,
+         _mpRI._complement_infloww, _mpRI.api_revenue_by_day) = _svA
+        _mpRI._API_OVERVIEW_CACHE.clear()
+        _mpRI._API_OVERVIEW_CACHE.update(_svOvRI)
+        _mpRI._API_SERIES_CACHE.clear()
+        _mpRI._API_SERIES_CACHE.update(_svSeRI)
+    _nbRI = _mpRI.ca_chatteur_net_brut({"ca_total": 185.0, "ca_eur": 100.0, "ca_usd": 85.0}, 1.2)
+    check("classement : chatteur MyM net, OF ramene au net (85 $ brut -> 68 $), brut a part",
+          _nbRI == (188.0, round(120 / 0.74 + 85, 2)), str(_nbRI))
+except Exception as _eRI:
+    import traceback as _tbRI
+    check("revenus infloww : testable", False, _tbRI.format_exc()[-300:])
 
 print()
 print("=" * 70)
@@ -26564,9 +26768,22 @@ try:
     # le 25/10/2026, le proprietaire a voulu les abonnes d Emy du BONUS DU JOUR
     # lus chez Infloww (« Oui, Infloww pour Emy ») : podium_discord l importe,
     # dans subs_infloww seulement (tests_bonus_infloww.py)
-    check("seuls le site, infloww_liens et le bonus du jour importent le module",
-          sorted(_importeurs) == ["infloww_liens.py", "podium_discord.py", "web_upload.py"],
+    # le 26/10/2026, il a voulu Jessye, Khloe et Luna au dashboard des revenus
+    # (« mets-les stp ») : revenus_infloww l importe, pour les seules
+    # creatrices que MyPuls ne voit pas (mypuls._complement_infloww).
+    check("seuls le site, infloww_liens, le bonus du jour et le complement des revenus importent le module",
+          sorted(_importeurs) == ["infloww_liens.py", "podium_discord.py", "revenus_infloww.py",
+                                  "web_upload.py"],
           str(sorted(_importeurs)))
+    _impRI = []
+    for _f in _gI.glob("*.py") + _gI.glob("cogs/*.py"):
+        if _f in ("revenus_infloww.py", "tests_site.py"):
+            continue
+        if _reI.search(r"^\s*(import revenus_infloww\b|from revenus_infloww import)",
+                       open(_f, encoding="utf-8", errors="replace").read(), _reI.M):
+            _impRI.append(_f)
+    check("… et le complement n est lu que par l agregat du dashboard (mypuls)",
+          _impRI == ["mypuls.py"], str(_impRI))
     _srcP = open("podium_discord.py", encoding="utf-8").read()
     _defs = [m.group(1) for m in _reI.finditer(r"^def (\w+)", _srcP, _reI.M)]
     _ou = [n for n in _defs
@@ -26574,7 +26791,8 @@ try:
     check("… dans le podium, la seule lecture d Infloww est celle du bonus du jour (subs_infloww)",
           _ou == ["subs_infloww"], str(_ou))
     check("la paie ne lit pas Infloww",
-          not any(("paie" in _f or "revenus" in _f) for _f in _importeurs), str(_importeurs))
+          not any(("paie" in _f or "revenus" in _f) for _f in _importeurs
+                  if _f != "revenus_infloww.py"), str(_importeurs))
 except Exception as _eI:
     check("infloww : testable", False, repr(_eI)[:200])
 
