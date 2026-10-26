@@ -8501,9 +8501,20 @@ try:
         check("infloww : Luna, des qu elle apparait, est comptee toute seule",
               "Luna" in [x["nom"] for x in _c3["creatrices"]] and not _c3["manquantes"],
               str(_c3))
-        check("infloww : son marche inconnu est DIT (comptee en OF FR en attendant)",
-              _c3["a_classer"] == ["Luna"]
-              and [x["segment"] for x in _c3["creatrices"] if x["nom"] == "Luna"] == ["of_fr"])
+        check("infloww : Luna en OF US (proprietaire, 26/10), sans avertissement de marche",
+              _c3["a_classer"] == []
+              and [x["segment"] for x in _c3["creatrices"] if x["nom"] == "Luna"] == ["of_us"])
+        _svAtt = dict(_riRI.ATTENDUES_INFLOWW)
+        try:
+            _riRI.ATTENDUES_INFLOWW.clear()
+            _riRI.ATTENDUES_INFLOWW["luna"] = None
+            _c3b = _riRI.complement(_VUS, _J, _J)
+        finally:
+            _riRI.ATTENDUES_INFLOWW.clear()
+            _riRI.ATTENDUES_INFLOWW.update(_svAtt)
+        check("infloww : un marche inconnu est DIT (comptee en OF FR en attendant)",
+              _c3b["a_classer"] == ["Luna"]
+              and [x["segment"] for x in _c3b["creatrices"] if x["nom"] == "Luna"] == ["of_fr"])
         _c4 = _riRI.complement(_VUS + [4000], _J, _J, of_mypuls=[(4000, "Luna ♡")])
         check("infloww : une creatrice deja chez MyPuls sous un autre id n est pas doublee",
               "Luna" not in [x["nom"] for x in _c4["creatrices"]] and _c4["a_rattacher"] == ["Luna"],

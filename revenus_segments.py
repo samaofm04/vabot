@@ -20,8 +20,9 @@ COMPTES_OF = {
 # site : tant qu'elles manquent, le total est PARTIEL et le bandeau le dit.
 # Valeur : leur marche ('of_us' / 'of_fr'), None tant qu'il n'est pas confirme
 # (elles sont alors comptees en OF FR, comme toute OnlyFans non classee, et
-# l'ecran le signale). Proprietaire, 26/10/2026 : « maintenant il y a aussi Luna ».
-ATTENDUES_INFLOWW = {"luna": None}
+# l'ecran le signale). Proprietaire, 26/10/2026 : « maintenant il y a aussi Luna »,
+# puis « OF US ».
+ATTENDUES_INFLOWW = {"luna": "of_us"}
 # Last verified MYM accounts; API metadata also covers newly added accounts.
 KNOWN_MYM_IDS = frozenset({679, 769, 1116, 1121, 1141, 1317, 1469, 1733, 2896})
 
