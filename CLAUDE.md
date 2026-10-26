@@ -15,12 +15,18 @@ git push origin main
 
 Chaque minute, le cron du VPS (`/usr/local/sbin/vabot-guarded-deploy`, hors
 dépôt) tire `main` : `git reset --hard`, puis les patchs locaux
-`/root/vabot-patches/*.patch` (un patch qui ne s'applique plus est ignoré en
-silence, fichier `.DROPPED`), puis `/usr/local/lib/vabot/check_transfer_deploy.py
+`/root/vabot-patches/*.patch` (chacun noté « applique », « deja integre » ou
+« CONFLIT » au journal), puis `/usr/local/lib/vabot/check_transfer_deploy.py
 check`, les tests des transferts Telegram. **Si ce contrôle échoue, le bot n'est
-pas redémarré** : la « version sûre » des fichiers de transfert est remise, et
-le journal dit `PIPELINE REGRESSION … bot restart cancelled`. Du 13 au 21/10,
-c'était le cas à chaque push, et quelqu'un redémarrait à la main.
+pas redémarré** : la « version sûre » est remise, et le journal dit
+`PIPELINE REGRESSION … bot restart cancelled`. Du 13 au 21/10, puis du 25 au
+26/10, c'était le cas à chaque push.
+
+Cette « version sûre » comprend `tg_router.py`, `gdrive_sync.py` et
+**`web_upload.py`**. Après un échec, le disque garde donc l'ancien dashboard :
+le redémarrer à la main ne met pas un commit du dashboard en ligne (le 26/10,
+le dashboard Infloww est resté absent ainsi). Avant un tel redémarrage,
+chercher une ligne du commit dans `/opt/va-bot/web_upload.py`.
 
 Le journal `/var/log/va-bot-deploy.log` dit `Bot restarte` quand ça a marché.
 `youl4b.com/version` lit le commit *sur le disque* mais l'heure de démarrage *du
