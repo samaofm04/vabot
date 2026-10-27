@@ -54,6 +54,9 @@ def check(label, cond, detail=""):
 
 
 IG, TW, TH = "1505418484052394004", pd.TWITTER_ID, "1498948161039896586"
+# les noms seulement : ses chiffres d'exemple sont sous le minimum de la semaine
+# de Va IG (100 subs depuis le 27/10/2026, tests_podium_va_ig_subs.py)
+pd.MINIMUM_SEMAINE = {k: v for k, v in pd.MINIMUM_SEMAINE.items() if k != IG}
 MODELE = re.compile(r"\b(?:Amelia|Amélia|Emma|Sarah|Julia|Lola|Alicia|Jessye) VA \d")
 LIBELLE = re.compile(r"Instagram VA (\d+)")
 

@@ -113,10 +113,10 @@ try:
           pd.a_rafraichir(TW, t15) and pd.a_rafraichir_bonus(TW, t15) and pd._subs_du(TW, ETAT["subs"][TW], t15)
           and not pd.a_rafraichir(TW, t1459) and not pd.a_rafraichir_bonus(TW, t1459)
           and not pd._subs_du(TW, ETAT["subs"][TW], t1459))
-    check("les rythmes : Threads chaque heure, la quinzaine de Va IG chaque heure, son podium "
-          "(GetMySocial) toutes les deux heures",
+    check("les rythmes : chaque heure partout (Va IG compris : son podium est aux vrais "
+          "abonnés depuis le 27/10/2026, plus un appel GetMySocial par VA)",
           pd._minutes_podium(TH) == 60 and pd._minutes_subs(TH) == 60
-          and pd._minutes_subs(IG) == 60 and pd._minutes_podium(IG) == 120
+          and pd._minutes_subs(IG) == 60 and pd._minutes_podium(IG) == 60
           and pd._minutes_podium(TW) == 60 and pd._minutes_bonus() == 60)
 
     # ── le minuteur ──

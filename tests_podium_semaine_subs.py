@@ -45,8 +45,9 @@ def check(label, cond, detail=""):
 
 TW = pd.TWITTER_ID
 check("Twitter : la semaine et le bonus aux abonnés", pd._mesure_podium(TW) == "tracking_abonnes")
-check("… les autres serveurs gardent leur mesure",
-      all(pd._mesure_podium(g) is None for g in pd.SERVEURS if g != TW))
+check("… Va IG aux vrais abonnés (27/10/2026), les autres gardent leur mesure",
+      pd._mesure_podium(pd.VA_IG_ID) == "abonnes"
+      and all(pd._mesure_podium(g) is None for g in pd.SERVEURS if g not in (TW, pd.VA_IG_ID)))
 
 vus = []
 _vrai = pd._classement_tracking

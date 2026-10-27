@@ -239,14 +239,24 @@ def _annoncer_primes_fr(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, A
     numeros = safe_json.load(liens_fr.NUMEROS, default={}) or {}
     users = safe_json.load(Path(__file__).resolve().parent / "data" / "users.json", default={}) or {}
     jeton = os.environ.get("DISCORD_TOKEN", "")
-    for rang, ligne in enumerate(cl.get("lignes") or []):
-        if rang >= len(pod.PRIMES):
-            break
-        if not int(ligne.get("clics") or 0):
-            # sur le podium sans un seul sub : pas de prime a annoncer (signale
-            # le 03/10 : « Amelia VA 3 — 0 subs · 💰 3$ »)
-            bilan.setdefault("zero_sub", []).append(ligne.get("va"))
+    lignes = list(cl.get("lignes") or [])
+    # la prime de chaque ligne, comme le podium l'affiche (pod.primes_semaine) :
+    # minimum de la semaine (100 subs depuis le 27/10/2026, 0 sub jamais), un
+    # seul prix par personne, le prix suivant à la personne suivante
+    primes = pod.primes_semaine(gid, lignes)
+    for i, ligne in enumerate(lignes):
+        pr = primes[i]
+        if not pr["prime"]:
+            if pr["raison"] == "minimum" and i < len(pod.PRIMES):
+                if not int(ligne.get("clics") or 0):
+                    # sans un seul sub (signale le 03/10 : « Amelia VA 3 — 0 subs · 💰 3$ »)
+                    bilan.setdefault("zero_sub", []).append(ligne.get("va"))
+                else:
+                    bilan.setdefault("sous_minimum", []).append(f'{ligne.get("va")} ({ligne.get("clics")})')
+            elif pr["raison"] == "un_seul_prix":
+                bilan["un_seul_prix"].append(ligne.get("va"))
             continue
+        rang = int(pr["rang"])
         model, n = str(ligne.get("model") or ""), int(ligne.get("numero") or 0)
         uid = next((u for u, v in (numeros.get(model) or {}).items() if int(v) == n), None)
         fiche = users.get(str(uid)) if uid else None
@@ -260,7 +270,7 @@ def _annoncer_primes_fr(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, A
             # prix par personne, comme le dit le podium -- note, pas tu
             bilan["un_seul_prix"].append(ligne.get("va"))
             continue
-        montant = pod.PRIMES[rang]
+        montant = float(pr["prime"])
         # le nom que le podium public montre (« Instagram VA 4 ») : Lumiere
         # lisait « Amelia VA 46 » en prive et « Instagram VA 4 » au podium, et
         # le proprietaire a cru que les subs du 1er etaient partis chez une

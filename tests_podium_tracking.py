@@ -668,9 +668,11 @@ try:
           b["title"] == "💸 Bonus subs du jour" and "→ **5.00$**" in b["description"]
           and "tracking OF" not in b["description"] and "comptes suivis" not in b["description"],
           b["description"][:300])
-    check("Va IG garde « clics FR »",
-          "clics **FR**" in pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
-                                            LUN, MAR, en_cours=True, gid=IG)["description"])
+    # Va IG aux vrais abonnés depuis le 27/10/2026 (tests_podium_va_ig_subs.py)
+    _eig = pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
+                           LUN, MAR, en_cours=True, gid=IG)["description"]
+    check("Va IG : ses vrais abonnés (OF + MYM), plus « clics FR »",
+          "Abonnés **OF + MYM**" in _eig and "clics **FR**" not in _eig, _eig[:200])
     check("un relevé manquant nomme MyPuls sur Twitter, GetMySocial sur Va IG",
           "MyPuls n'a pas rendu" in pd._avert_dernier_releve({}, "la semaine", TW)
           and "GetMySocial n'a pas rendu" in pd._avert_dernier_releve({}, "la semaine", IG))

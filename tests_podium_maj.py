@@ -144,6 +144,12 @@ pd.HEURE_FIXE = False
 pd.MINUTEUR = False
 pd.PODIUM_COURT = set()
 pd.SERVEURS[pd.VA_IG_ID].pop("minutes_subs", None)
+# et le podium de Va IG d'avant le 27/10/2026 : clics GetMySocial, deux heures,
+# sans minimum ni « un seul prix par personne » (tests_podium_va_ig_subs.py)
+pd.SERVEURS[pd.VA_IG_ID].pop("mesure_podium", None)
+pd.SERVEURS[pd.VA_IG_ID].pop("un_prix_par_personne", None)
+pd.SERVEURS[pd.VA_IG_ID]["minutes"] = 120
+pd.MINIMUM_SEMAINE = {}
 # Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
 # AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
 # (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.

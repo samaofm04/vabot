@@ -355,7 +355,17 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                # le podium (clics GetMySocial, un appel par VA) toutes les deux
                # heures, la quinzaine (vrais abonnés, MyPuls) chaque heure :
                # « chaque heure les subs », propriétaire, 25/10/2026
-               "bonus": False, "minutes": 120, "minutes_subs": 60,
+               # le podium de la semaine aux VRAIS abonnés (OF + MYM, subs_va),
+               # comme la quinzaine : propriétaire, 27/10/2026, devant « 208
+               # subs » pour un lien d'environ 200 clics, « c'est impossible » ;
+               # « Oui, vrais subs », minimum « 100 comme les autres ». Avant :
+               # les clics FR de GetMySocial, affichés « subs ». Un VA tient
+               # une ligne par model : un seul prix par personne, le suivant
+               # passe au VA suivant (primes_semaine). Chaque heure : plus
+               # d'appel GetMySocial par VA. POUR REVENIR : retirer
+               # « mesure_podium » et « un_prix_par_personne », minutes 120.
+               "mesure_podium": "abonnes", "un_prix_par_personne": True,
+               "bonus": False, "minutes": 60, "minutes_subs": 60,
                "alltime": "podium_alltime_va_ig.json",
                # TEMPORAIRE. Avec trois VA, le podium et les subs de Va IG avaient
                # l'air vides. Proprietaire, 03/10/2026 : « pour les subs mais aussi
@@ -527,7 +537,9 @@ PRIMES = [10.0, 5.0, 3.0]
 #: sans seuil fixé : pas de prime à 0 clic. Une place en dessous reste
 #: affichée, sans prime, et suivi_va ne l'annonce pas (prime_semaine_due).
 MINIMUM_SEMAINE = {"1445108485090971710": 100, "1488331963575177247": 100,
-                   "1498948161039896586": 1}
+                   "1498948161039896586": 1,
+                   # Va IG, depuis le 27/10/2026 : « 100 comme les autres »
+                   "1505418484052394004": 100}
 
 
 def prime_semaine_due(gid: Optional[str], ligne: Dict[str, Any]) -> bool:
@@ -535,7 +547,45 @@ def prime_semaine_due(gid: Optional[str], ligne: Dict[str, Any]) -> bool:
     comptes internes, pas sous le minimum de la semaine du serveur."""
     if ligne.get("interne"):
         return False
-    return int(ligne.get("clics") or 0) >= int(MINIMUM_SEMAINE.get(str(gid or ""), 0))
+    # jamais à 0, minimum ou pas (Va IG le disait déjà le 03/10 : « Amelia VA 3
+    # — 0 subs · 💰 3$ »)
+    n = int(ligne.get("clics") or 0)
+    return n > 0 and n >= int(MINIMUM_SEMAINE.get(str(gid or ""), 0))
+
+
+def _personne_fr(ligne: Dict[str, Any]) -> str:
+    """Qui tient cette ligne de Va IG : l'uid porté par son numéro dans sa model
+    (liens_fr.NUMEROS, le même fichier que suivi_va._annoncer_primes_fr)."""
+    import liens_fr
+    numeros = safe_json.load(liens_fr.NUMEROS, default={}) or {}
+    model, n = str(ligne.get("model") or ""), int(ligne.get("numero") or 0)
+    uid = next((u for u, v in (numeros.get(model) or {}).items() if int(v) == n), None)
+    return str(uid) if uid else f"{model}:{n}"
+
+
+def primes_semaine(gid: Optional[str], lignes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """La prime de chaque ligne, dans l'ordre du classement : {prime, rang,
+    raison}. Les PRIMES vont aux premiers qui y ont droit (prime_semaine_due) ;
+    sur un serveur « un_prix_par_personne » (Va IG : une ligne par model), une
+    personne déjà primée laisse le prix suivant à la personne suivante
+    (propriétaire, 27/10/2026 : fahnih 1re et 2e ligne → priscah 5 $, Lumière
+    3 $). raison : « minimum », « un_seul_prix », « » (hors des prix)."""
+    par_personne = bool(_profil(gid).get("un_prix_par_personne"))
+    out: List[Dict[str, Any]] = []
+    donnes: set = set()
+    for x in lignes:
+        k = sum(1 for y in out if y["prime"])
+        if k >= len(PRIMES):
+            out.append({"prime": None, "rang": None, "raison": ""})
+        elif not prime_semaine_due(gid, x):
+            out.append({"prime": None, "rang": None, "raison": "minimum"})
+        elif par_personne and _personne_fr(x) in donnes:
+            out.append({"prime": None, "rang": None, "raison": "un_seul_prix"})
+        else:
+            if par_personne:
+                donnes.add(_personne_fr(x))
+            out.append({"prime": PRIMES[k], "rang": k, "raison": ""})
+    return out
 # Le nom du bot que les membres voient change : « Siri » jusqu'au 03/10/2026,
 # « Luigi » depuis (son application s'appelle SEVEN dans le portail Discord, un
 # nom que personne ne peut mentionner). Un VA envoye chercher « @Siri » ne
@@ -3254,6 +3304,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     elif pf.get("mesure") == "agency_abonnes" or pf.get("mesure_podium") == "tracking_abonnes":
         # Agency, et Twitter depuis le 24/10/2026 : des abonnés, pas des clics
         abo = f'Abonnés **tracking OF** via {pf["source"]}'
+    elif pf.get("mesure_podium") == "abonnes":
+        # Va IG depuis le 27/10/2026 : ses vrais abonnés, plus « clics FR »
+        abo = f'Abonnés **OF + MYM** via {pf["source"]}'
     if en_cours:
         c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
              f'arrêté au **{fin.strftime("%d/%m")}**',
@@ -3281,12 +3334,23 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     else:
         piece = th["piece"] if th else "💰"
         suite = f'{th["suite"]} ' if th else ""
+        # la prime de chaque ligne : celle de son rang tant qu'aucun minimum
+        # ni « un seul prix par personne » ne s'en mêle (Twitter d'avant, à
+        # l'octet près), sinon primes_semaine — ce que suivi_va paiera
+        mini = int(MINIMUM_SEMAINE.get(str(gid or ""), 0))
+        primes = (primes_semaine(gid, lignes) if mini or pf.get("un_prix_par_personne")
+                  else [{"prime": PRIMES[i] if i < len(PRIMES) else None, "raison": ""}
+                        for i in range(len(lignes))])
         for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
+            pr = primes[i]
+            gain = (f' · {piece} **{pr["prime"]:.0f}$**' if pr["prime"]
+                    else f' · pas de prime (min. {mini})' if pr["raison"] == "minimum" and i < 3
+                    else " · déjà primé (un seul prix par personne)" if pr["raison"] == "un_seul_prix"
+                    else "")
             if i < 3:
-                c.append(f'{med[i]} **{x["va"]}** — **{x["clics"]}** {unite} '
-                         f'· {piece} **{PRIMES[i]:.0f}$**')
+                c.append(f'{med[i]} **{x["va"]}** — **{x["clics"]}** {unite}{gain}')
             else:
-                c.append(f'{i + 1}. {suite}{x["va"]} — **{x["clics"]}** {unite}')
+                c.append(f'{i + 1}. {suite}{x["va"]} — **{x["clics"]}** {unite}{gain}')
         reste = len(lignes) - COMBIEN_AFFICHES
         if reste > 0:
             c.append(f'… _et {reste} autre{"s" if reste > 1 else ""}_ 👏')
@@ -3300,6 +3364,8 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     c += ["", th["primes"] if th else "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
     for i, p in enumerate(PRIMES):
         c.append(f'{med[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
+    if int(MINIMUM_SEMAINE.get(str(gid or ""), 0)) > 1 and mix is None:
+        c.append(f'Minimum {int(MINIMUM_SEMAINE[str(gid)])} {unite} dans la semaine pour toucher la prime.')
     c += ["", _reclamer_prime(pf, "💸 **Pour recevoir ta prime :**", "ton rang de la semaine"),
           "Un seul prix par personne · payé à la main après vérification",
           "", "🔢 _Ton numéro de VA ne change jamais : c'est le même chaque semaine._"]
