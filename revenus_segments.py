@@ -2,7 +2,9 @@
 # Seren (3867) est la moitie Twitter d'Emy (liens_va.VARIANTE_TWITTER), un
 # compte US : absente d'ici, elle tombait en OF FR par la regle de plateforme
 # ci-dessous (1 240,77 $ de septembre ranges du mauvais cote, audit du 26/10).
-OF_US_IDS = frozenset({3107, 3108, 3352, 3867})  # Jessye, Khloe, Emy, Seren
+# Lia (3992, ex-« Emma 💗 » chez MyPuls) remplace Emy dans ce 50/50 depuis le
+# 28/10/2026 : absente d'ici, la regle de plateforme la rangeait en OF FR.
+OF_US_IDS = frozenset({3107, 3108, 3352, 3867, 3992})  # Jessye, Khloe, Emy, Seren, Lia
 OF_FR_IDS = frozenset({3106, 3109})        # Amelia, Julia
 
 # LE PSEUDO ONLYFANS EST LE SEUL LIEN ENTRE MYPULS ET INFLOWW. MyPuls ne donne
@@ -14,6 +16,7 @@ COMPTES_OF = {
     3108: ("Khloé", "khloecute"),
     3352: ("Emy", "emy.brw"),
     3867: ("Seren", "seren.vale"),
+    3992: ("Lia", "liasxcret"),
 }
 
 # Creatrices annoncees chez Infloww mais pas encore lisibles par la cle du

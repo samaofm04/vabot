@@ -1622,3 +1622,75 @@ def passer_sur(gid: str, uid: str, creator_id: int, profil_of: str) -> Dict[str,
         return {"ok": False, "tracking": t["url"], "ancien": ancien,
                 "erreur": "A/B perdu à la mise à jour : moitié Seren à reposer"}
     return {"ok": True, "tracking": t["url"], "ancien": ancien, "deja": False, "erreur": ""}
+
+
+# ─── La créatrice d'un tracking neuf, vérifiée avant de le créer ─────────
+# La garde du patch local 99-z-tracking-creator-guard (VPS) ne connaît
+# qu'Emy et Seren. Depuis que les liens partent sur Lia (28/10/2026), la
+# créatrice principale n'était donc plus vérifiée : une bascule MyPuls ratée
+# (switch-creator renvoyé vers /souscription, vu pour Seren le 24/10) faisait
+# naître le tracking du VA chez la créatrice d'avant, à vie, et chaque nouvel
+# essai en semait un autre. Posée en enveloppe : ce patch réécrit le corps de
+# creer_tracking, une ligne de plus dedans le ferait tomber.
+
+
+def profil_of(creator_id: Any) -> str:
+    """« https://onlyfans.com/liasxcret » pour 3992, d'après la table des
+    comptes OnlyFans du site (revenus_segments.COMPTES_OF) ; "" si elle ne le
+    connaît pas. Une seule table : deux auraient fini par se contredire."""
+    try:
+        from revenus_segments import COMPTES_OF
+        ps = (COMPTES_OF.get(int(creator_id or 0)) or ("", ""))[1]
+    except Exception:                                        # noqa: BLE001
+        return ""
+    return f"https://onlyfans.com/{ps}" if ps else ""
+
+
+def _garde_creatrice(creer):
+    import functools
+
+    @functools.wraps(creer)
+    def enveloppe(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]:
+        cid = int(creator_id or config().get("creator_id") or 0)
+        profil = profil_of(cid)
+        if not profil:
+            return creer(nom, creator_id) if creator_id else creer(nom)
+        import mypuls
+        verrou = getattr(mypuls, "_OF_SWITCH_LOCK", None) or _contextlib.nullcontext()
+        # le même verrou (réentrant) que creer_tracking : personne ne bascule
+        # MyPuls entre notre vérification et la création
+        with verrou:
+            s = mypuls._make_session()
+            if s is None:
+                return {"ok": False, "refuse": True, "erreur": "session MyPuls indisponible (cookies)"}
+            try:
+                b = s.get(f"{mypuls.BASE_URL}/switch-creator/{cid}?from=app_pushs",
+                          timeout=mypuls.TIMEOUT, allow_redirects=True)
+                page = s.get(f"{mypuls.BASE_URL}/tracking-stats/", timeout=mypuls.TIMEOUT)
+            except Exception as e:                           # noqa: BLE001
+                return {"ok": False, "refuse": True,
+                        "erreur": f"bascule MyPuls : {type(e).__name__}: {str(e)[:100]}"}
+            finally:
+                # REMEMBERME tourne à chaque requête : creer_tracking relit
+                # les cookies du fichier, ils doivent être les derniers
+                try:
+                    mypuls._save_rotated_cookies(s)
+                except Exception:                            # noqa: BLE001
+                    pass
+            profils = {p.lower() for p in re.findall(r"https?://onlyfans\.com/[a-zA-Z0-9_.]+",
+                                                     page.text or "")}
+            if b.status_code != 200 or page.status_code != 200 or profils != {profil.lower()}:
+                return {"ok": False, "refuse": True,
+                        "erreur": f"MyPuls n'a pas confirmé la créatrice {cid} ({profil}) : "
+                                  f"page de {sorted(profils)[:3] or 'personne'}, rien créé"}
+            r = creer(nom, creator_id) if creator_id else creer(nom)
+        url = str((r or {}).get("url") or "")
+        if r.get("ok") and url and not url.lower().startswith(profil.lower() + "/"):
+            return {"ok": False, "arreter": True, "tracking": url,
+                    "erreur": f"tracking {url} créé hors de {profil} : à vérifier dans MyPuls"}
+        return r
+    enveloppe.brut = getattr(creer, "brut", creer)
+    return enveloppe
+
+
+creer_tracking = _garde_creatrice(creer_tracking)

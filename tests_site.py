@@ -8479,7 +8479,8 @@ try:
         _ifRI.creatrices = lambda: list(_CO_RI)
         _riRI.ventes_paris = _ventesRI
         _J = _dtRI.date(2026, 10, 25)
-        _VUS = [3352, 3106, 3867, 1116]
+        # Lia (3992) : active chez MyPuls depuis le 27/10, comme en production
+        _VUS = [3352, 3106, 3867, 1116, 3992]
         _c1 = _riRI.complement(_VUS, _J, _J)
         check("infloww : Jessye et Khloe viennent d Infloww, en OF US",
               sorted((x["nom"], x["segment"], x["net"]) for x in _c1["creatrices"])

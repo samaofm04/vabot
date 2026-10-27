@@ -551,15 +551,16 @@ def _surveiller() -> Dict[str, Any]:
 
 # ── l'espace personnel (youl4b.com/affiliation/mon-espace) ─────────────────
 def subs_fiche(fiche: Dict[str, Any], metrics: Optional[Dict[str, Any]]) -> Optional[int]:
-    """Les vrais subs cumulés d'un lien d'Agency : le tracking Emy du VA (et
-    celui d'une variante s'il y en avait une — mêmes adresses que
-    subs_va.trackings_du_va). None = inconnu : pas de lien, ou MyPuls ne rend
-    pas toutes ses adresses. Lu aussi par la page d'administration."""
+    """Les vrais subs cumulés d'un lien d'Agency : tous les trackings du VA,
+    son tracking, celui de sa variante (Seren) et ceux d'avant une bascule de
+    modèle — mêmes adresses que subs_va.trackings_du_va. Sans les anciens, le
+    passage d'Emy à Lia (28/10/2026) effaçait du cumul tous les subs Emy d'un
+    filleul. None = inconnu : pas de lien, ou MyPuls ne rend pas toutes ses
+    adresses. Lu aussi par la page d'administration."""
     if metrics is None:
         return None
-    urls = {str(u).strip().rstrip("/").lower()
-            for u in ((fiche or {}).get("tracking"), ((fiche or {}).get("variante") or {}).get("tracking"))
-            if u}
+    import liens_va
+    urls = {str(u).strip().rstrip("/").lower() for u in liens_va.trackings_de_fiche(fiche or {})}
     if not urls:
         return None
     ns = [metrics.get(u) for u in urls]
