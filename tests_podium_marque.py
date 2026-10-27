@@ -176,6 +176,51 @@ try:
         pd.SERVEURS[IG]["marque"] = _m
     check("clé retirée : « Amelia VA 3 », comme avant, rien d'écrit",
           "**Amelia VA 3**" in d and "Instagram VA" not in d and table() == {}, d)
+
+    # -------------------------------------------------------------- 7
+    # Propriétaire, 27/10/2026 : Lumière, 1re (« Instagram VA 4 » au podium),
+    # lisait « Amelia VA 46 » dans son avis de prime -- il a cru que les subs
+    # du 1er étaient allés chez une autre.
+    print("\n— 7. l'avis de prime dit le nom du podium")
+    nouveau_bac()
+    import types
+    import liens_fr
+    import requests
+    import safe_json
+    import suivi_va as sv
+    d = pd.embed_podium(cl, dt.date(2026, 10, 12), dt.date(2026, 10, 18), en_cours=False,
+                        gid=IG, tetes=False)["description"]
+    publics = re.findall(r"^\S+ \*\*(Instagram VA \d+)\*\* — \*\*(\d+)\*\* subs · 💰", d, re.M)
+    (TMP / "numeros_va_fr.json").write_text(json.dumps(
+        {"amelia": {"u3": 3, "u2": 2}, "lola": {"u5": 2}}), encoding="utf-8")
+    users = {u: {"channel_id": f"salon-{u}"} for u in ("u2", "u3", "u5")}
+    annonces = []
+    vrai_load = safe_json.load
+    sauve = (liens_fr.NUMEROS, safe_json.load, requests.post, sv.ETAT_FICHIER,
+             os.environ.get("DISCORD_TOKEN"))
+    try:
+        liens_fr.NUMEROS = TMP / "numeros_va_fr.json"
+        sv.ETAT_FICHIER = TMP / "suivi_va.json"
+        safe_json.load = lambda chemin, default=None: (
+            users if pathlib.Path(chemin).name == "users.json" else vrai_load(chemin, default=default))
+        requests.post = lambda url, timeout=None, headers=None, json=None: (
+            annonces.append(json) or types.SimpleNamespace(status_code=200))
+        os.environ["DISCORD_TOKEN"] = "faux-jeton"
+        b = sv._annoncer_primes_fr(IG, cl, dt.date(2026, 10, 12), dt.date(2026, 10, 18))
+    finally:
+        liens_fr.NUMEROS, safe_json.load, requests.post, sv.ETAT_FICHIER = sauve[:4]
+        if sauve[4] is None:
+            os.environ.pop("DISCORD_TOKEN", None)
+        else:
+            os.environ["DISCORD_TOKEN"] = sauve[4]
+    prives = [re.search(r"· \*\*(.+?)\*\* · \*\*(\d+)\*\* subs", a["embeds"][0]["description"]).groups()
+              for a in annonces]
+    textes = " ".join(a["embeds"][0]["description"] for a in annonces)
+    check("chaque gagnant lit en privé le nom et les subs de SA ligne du podium",
+          len(publics) == 3 and prives == publics, (prives, publics))
+    check("aucun nom de model dans l'avis privé", not MODELE.search(textes), textes)
+    check("le bilan (journal du propriétaire) garde le nom interne",
+          b["dits"] == ["Amelia VA 3 : 10.00$", "Lola VA 2 : 5.00$", "Amelia VA 2 : 3.00$"], b)
 finally:
     pd.DATA_DIR = _DATA
     for b in BACS:

@@ -261,13 +261,18 @@ def _annoncer_primes_fr(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, A
             bilan["un_seul_prix"].append(ligne.get("va"))
             continue
         montant = pod.PRIMES[rang]
+        # le nom que le podium public montre (« Instagram VA 4 ») : Lumiere
+        # lisait « Amelia VA 46 » en prive et « Instagram VA 4 » au podium, et
+        # le proprietaire a cru que les subs du 1er etaient partis chez une
+        # autre (27/10/2026). Le bilan garde le nom interne, pour le journal.
+        nom_public = pod._marque(gid, str(ligne.get("va") or ""))
         r = requests.post(f"https://discord.com/api/v10/channels/{salon}/messages", timeout=20,
                           headers={"Authorization": f"Bot {jeton}"}, json={
             "content": f"<@{uid}>", "allowed_mentions": {"users": [str(uid)]},
             "embeds": [{"title": f'{pod.MEDAILLES[rang]} {rang + 1}e de la semaine — {montant:.2f}$',
                         "color": 0xF1C40F,
                         "description": (f'Semaine du **{debut.strftime("%d/%m")}** au '
-                                        f'**{fin.strftime("%d/%m")}** · **{ligne.get("va")}** · '
+                                        f'**{fin.strftime("%d/%m")}** · **{nom_public}** · '
                                         f'**{ligne.get("clics")}** subs.\n'
                                         f'💸 Envoie ton **adresse USDC (réseau Solana)** à '
                                         f'**@{pod._profil(gid)["bot"]}** ici pour recevoir ta prime.')}]})
