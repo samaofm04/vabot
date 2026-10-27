@@ -405,10 +405,12 @@ try:
     # « minimum 100 subs / semaine » (propriétaire, 25/10/2026)
     check("… le 3e sous 100 subs (VA 95, 15) : ni annonce, ni adresse demandée",
           bilan.get("sous_minimum") == ["VA 95 (15)"], bilan)
-    check("prime_semaine_due : 100 subs sur Twitter et Instagram, 1 clic sur Threads, jamais l'interne",
+    check("prime_semaine_due : 100 subs sur Twitter et Instagram, 1000 clics sur Threads, jamais l'interne",
           pd.prime_semaine_due(TW, {"clics": 100}) and not pd.prime_semaine_due(TW, {"clics": 99})
-          and not pd.prime_semaine_due(AG, {"clics": 51}) and pd.prime_semaine_due(TH, {"clics": 1})
+          and not pd.prime_semaine_due(AG, {"clics": 51}) and pd.prime_semaine_due(TH, {"clics": 1000})
+          and not pd.prime_semaine_due(TH, {"clics": 999}) and not pd.prime_semaine_due(TH, {"clics": 1})
           and not pd.prime_semaine_due(TH, {"clics": 0})
+          and not pd.prime_semaine_due(TH, {"clics": 1478, "interne": True})
           and not pd.prime_semaine_due(TW, {"clics": 1478, "interne": True}))
 
     # ── l'interrupteur ──

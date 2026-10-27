@@ -21442,11 +21442,18 @@ try:
         _lvS._etat = lambda: {"liens": {f"{_gTh}:77": {"pseudo": "th", "numero": 12}}}
         _tkS2._etat = lambda: {"tickets": {f"{_gTh}:77": {"salon": "sal77"}}}
         _env.clear()
-        _sv.annoncer_primes(_gTh, {"lignes": [{"va": "Threads 12", "clics": 47}]},
+        # 1047 : au-dessus du minimum de la semaine (« 1000 clics US »,
+        # proprietaire, 27/10/2026) ; 47 seuls ne sont plus annonces
+        _sv.annoncer_primes(_gTh, {"lignes": [{"va": "Threads 12", "clics": 1047}]},
                             _dtS.date(2026, 10, 12), _dtS.date(2026, 10, 18))
         _dTh = str(_env[0][1]) if _env else ""
-        check("prime Threads : « 47 clics », le mot de son podium, plus « subs »",
-              "**47** clics." in _dTh and "subs" not in _dTh, _dTh[:300])
+        check("prime Threads : « 1047 clics », le mot de son podium, plus « subs »",
+              "**1047** clics." in _dTh and "subs" not in _dTh, _dTh[:300])
+        _env.clear()
+        _bTh = _sv.annoncer_primes(_gTh, {"lignes": [{"va": "Threads 12", "clics": 47}]},
+                                   _dtS.date(2026, 10, 19), _dtS.date(2026, 10, 25))
+        check("prime Threads sous 1000 clics : ni annonce, ni adresse demandee",
+              not _env and _bTh.get("sous_minimum") == ["Threads 12 (47)"], _bTh)
     finally:
         (_sv.ETAT_FICHIER, _tkS2._api, _tkS2._etat, _lvS._etat) = _savP2
 

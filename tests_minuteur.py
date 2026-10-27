@@ -184,15 +184,29 @@ try:
     with contextlib.redirect_stdout(io.StringIO()):
         eth = pd.embed_podium({"lignes": LTH, "illisibles": [], "frais": True}, lundi, auj,
                               en_cours=True, gid=TH)
-    check("Threads : en clics, « Podium clics de la semaine », pas de minimum affiché",
+    # « 1000 clics US » par semaine (propriétaire, 27/10/2026)
+    check("Threads : en clics, « Podium clics de la semaine », sous 1000 clics pas de prime",
           eth["title"].startswith("🔴 Podium clics de la semaine")
-          and "🥇 **Threads 41** — **120 clics** → **10$**" in eth["description"]
-          and "Minimum" not in eth["description"], eth["description"])
+          and "🥇 **Threads 41** — **120 clics** → pas de prime (min. 1000)" in eth["description"]
+          and "Minimum 1000 clics dans la semaine pour toucher la prime." in eth["description"],
+          eth["description"])
     with contextlib.redirect_stdout(io.StringIO()):
-        eth0 = pd.embed_podium({"lignes": [dict(LTH[0], clics=0)], "illisibles": [], "frais": True},
+        eth0 = pd.embed_podium({"lignes": [dict(LTH[0], clics=1000), dict(LTH[1], clics=999),
+                                           dict(LTH[2], clics=0)], "illisibles": [], "frais": True},
                                lundi, auj, en_cours=True, gid=TH)
-    check("… à 0 clic : pas de prime", "**0 clics** → pas de prime\n" in eth0["description"] + "\n",
-          eth0["description"])
+    check("… 1000 clics : payé ; 999 ou 0 : pas de prime",
+          "🥇 **Threads 41** — **1000 clics** → **10$**" in eth0["description"]
+          and "**999 clics** → pas de prime (min. 1000)" in eth0["description"]
+          and "**0 clics** → pas de prime (min. 1000)" in eth0["description"], eth0["description"])
+    # la ligne interne : « Rien ne change » (propriétaire, 27/10/2026) — sa place,
+    # l'affichage de son prix, et personne ne le touche
+    with contextlib.redirect_stdout(io.StringIO()):
+        ethi = pd.embed_podium({"lignes": [dict(LTH[0], va="Threads 142", numero=142, clics=300,
+                                                interne=True)], "illisibles": [], "frais": True},
+                               lundi, auj, en_cours=True, gid=TH)
+    check("… la ligne interne sous 1000 clics garde l'affichage de son prix, jamais due",
+          "🥇 **Threads 142** — **300 clics** → **10$**" in ethi["description"]
+          and not pd.prime_semaine_due(TH, {"clics": 3000, "interne": True}), ethi["description"])
     check("le 👀 lit les lignes du podium court",
           [v for v, _n in pd._ligne_affichee("VA").findall(d)] == ["VA 41", "VA 124", "VA 74"])
     with contextlib.redirect_stdout(io.StringIO()):

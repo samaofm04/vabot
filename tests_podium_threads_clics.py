@@ -620,10 +620,13 @@ try:
     check("« Threads n » et « clics » partout, jamais « VA 12 », « subs » ni un nom de lien",
           "subs" not in json.dumps(e, ensure_ascii=False).lower()
           and "**VA " not in desc and "Roucham" not in desc and "tsiry" not in desc, desc)
-    check("le top 3 avec ses primes 10/5/3 $",
-          "🥇 **Threads 12** — **47 clics** → **10$**" in desc
-          and "🥈 **Threads 43** — **31 clics** → **5$**" in desc
-          and "🥉 **Threads 41** — **20 clics** → **3$**" in desc
+    # « 1000 clics US » par semaine (propriétaire, 27/10/2026) : sous ce
+    # minimum, la place reste, sans prime (tests_minuteur.py : 1000 → 10 $)
+    check("le top 3, sous 1000 clics : pas de prime, et le minimum dit",
+          "🥇 **Threads 12** — **47 clics** → pas de prime (min. 1000)" in desc
+          and "🥈 **Threads 43** — **31 clics** → pas de prime (min. 1000)" in desc
+          and "🥉 **Threads 41** — **20 clics** → pas de prime (min. 1000)" in desc
+          and "Minimum 1000 clics dans la semaine pour toucher la prime." in desc
           and "Threads 31" not in desc and "Threads 30" not in desc, desc)
     # Bowser ne lit aucun message : « envoie un message à @Bowser » n'avait
     # enregistré aucune adresse (audit du 20/10/2026)

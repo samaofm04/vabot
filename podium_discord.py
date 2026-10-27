@@ -533,11 +533,13 @@ def _reclamer_prime(pf: Dict[str, Any], tete: str, rang: str) -> str:
 
 PRIMES = [10.0, 5.0, 3.0]
 #: le minimum pour toucher la prime de la SEMAINE (propriétaire, 25/10/2026 :
-#: « minimum 100 subs / semaine », Twitter et Instagram) ; Threads, en clics,
-#: sans seuil fixé : pas de prime à 0 clic. Une place en dessous reste
-#: affichée, sans prime, et suivi_va ne l'annonce pas (prime_semaine_due).
+#: « minimum 100 subs / semaine », Twitter et Instagram). Une place en dessous
+#: reste affichée, sans prime, et suivi_va ne l'annonce pas (prime_semaine_due).
 MINIMUM_SEMAINE = {"1445108485090971710": 100, "1488331963575177247": 100,
-                   "1498948161039896586": 1,
+                   # Threads, depuis le 27/10/2026 : « 1000 clics US » — comparés
+                   # aux clics que son podium affiche (US + UK). Avant : 1, et
+                   # « Threads 92 — 1 clics → 5$ » aurait été payé.
+                   "1498948161039896586": 1000,
                    # Va IG, depuis le 27/10/2026 : « 100 comme les autres »
                    "1505418484052394004": 100}
 
