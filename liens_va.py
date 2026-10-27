@@ -946,13 +946,16 @@ _VARIANTES_LUES: Dict[str, Any] = {}
 
 
 def trackings_variantes() -> Dict[str, list]:
-    """{identifiant du lien (sans « lnk_ ») : [tracking de sa variante]}.
+    """{identifiant du lien (sans « lnk_ ») : [tracking de sa variante, puis
+    ses anciens trackings]}.
 
     Le podium de Twitter reconnaît un VA à ses trackings, lus dans l'adresse
     du lien et de ses boutons. Celui de la variante n'y est nulle part (la
     liste des liens ne donne que l'identifiant de la variante) : sans ceci,
-    la moitié Seren des clics de chaque VA n'irait à personne. Relu quand le
-    fichier change seulement — le podium le demande pour chaque lien."""
+    la moitié Seren des clics de chaque VA n'irait à personne. Les anciens
+    (passer_sur) non plus : sans eux, le tracking Emy d'un lien passé sur Lia
+    cessait de compter le jour de la bascule. Relu quand le fichier change
+    seulement — le podium le demande pour chaque lien."""
     try:
         mt = ETAT_FICHIER.stat().st_mtime
     except OSError:
@@ -964,6 +967,9 @@ def trackings_variantes() -> Dict[str, list]:
             fv = l.get("variante") if isinstance(l, dict) else None
             if isinstance(fv, dict) and fv.get("posee") and fv.get("tracking") and l.get("link_id"):
                 out.setdefault(_sans_prefixe(l["link_id"]), []).append(str(fv["tracking"]))
+            if isinstance(l, dict) and l.get("link_id"):
+                for t in anciens_trackings(l):
+                    out.setdefault(_sans_prefixe(l["link_id"]), []).append(t)
         _VARIANTES_LUES.clear()
         _VARIANTES_LUES.update(cle=cle, out=out)
     return _VARIANTES_LUES["out"]
@@ -1512,3 +1518,107 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:   # noqa: F811
             return {"ok": False, "erreur": "trackings Seren d'Agency nommés « Twitter VA » "
                                           "(patch 99-threads-mypuls absent) : rien créé"}
     return _poser_variante_sans_garde(gid, uid)
+
+
+# ─── Passer le lien d'un VA sur une autre modèle ─────────────────────────
+# Propriétaire, 28/10/2026 : « pour Twitter tu peux basculer sur l'autre,
+# Instagram aussi et sur Threads aussi en 50/50 avec Seren, crée les trackings
+# et tout », puis « il faut additionner les subs de Emy, Lia et Seren ». Le
+# lien GARDE son adresse (ce que le VA a déjà posté marche encore) et sa
+# moitié Seren ; seule sa destination passe sur un tracking neuf chez la
+# nouvelle modèle, au MÊME nom que l'ancien (« Twitter VA 32 @bid_a » : le
+# podium y lit le numéro du VA). L'ancien tracking reste dans la fiche
+# (« anciens_trackings ») : ses abonnés, ceux d'avant la bascule et ceux qui
+# arrivent encore, comptent toujours pour le VA. JESSY LE RETOUR (les comptes
+# internes, VA 41) n'a pas de fiche ici : la bascule ne le touche pas.
+
+
+def anciens_trackings(f: Dict[str, Any]) -> list:
+    """Les trackings qu'un lien portait avant de passer sur une autre modèle."""
+    return [str(t) for t in ((f or {}).get("anciens_trackings") or []) if t]
+
+
+def trackings_de_fiche(f: Dict[str, Any]) -> list:
+    """Tous les trackings d'une fiche, sans doublon : le sien, celui de sa
+    variante, ses anciens. Ce qu'on additionne pour connaître ses abonnés."""
+    f = f or {}
+    out: list = []
+    for t in [f.get("tracking"), (f.get("variante") or {}).get("tracking")] + anciens_trackings(f):
+        if t and str(t) not in out:
+            out.append(str(t))
+    return out
+
+
+def _lire_lien(lid: str, equipe: str) -> Optional[Dict[str, Any]]:
+    """Le lien tel que GetMySocial le rend (get_link), None s'il se tait."""
+    import gms
+    lu = gms._call_tool("get_link", {"link_id": lid, "team_id": equipe})
+    d = lu.get("data") if lu.get("ok") else None
+    if isinstance(d, dict) and isinstance(d.get("data"), dict) and "type" not in d:
+        d = d["data"]
+    return d if isinstance(d, dict) else None
+
+
+def passer_sur(gid: str, uid: str, creator_id: int, profil_of: str) -> Dict[str, Any]:
+    """Le lien de ce VA passe sur la modèle `creator_id` (MyPuls), dont le
+    profil OnlyFans est `profil_of` (« https://onlyfans.com/liasxcret »).
+    Rend {ok, tracking, ancien, deja, arreter, erreur}.
+
+    `arreter` : un tracking est apparu hors de ce profil — MyPuls l'a créé
+    chez une autre créatrice, et ne sait pas le supprimer. On s'arrête là
+    plutôt que d'en semer d'autres."""
+    import time as _t
+    import gms
+    gid, uid = str(gid), str(uid)
+    l = lien_de(gid, uid)
+    profil = str(profil_of or "").rstrip("/").lower() + "/"
+    if not l.get("shortcode") or not l.get("link_id"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    if l.get("actif") is False:
+        return {"ok": False, "erreur": "lien coupé : rien à basculer"}
+    ancien = str(l.get("tracking") or "")
+    if ancien.lower().startswith(profil):
+        return {"ok": True, "deja": True, "tracking": ancien, "ancien": "", "erreur": ""}
+    e = espace(gid)
+    equipe, lid = str(e["equipe"]), str(l["link_id"])
+    avant = _lire_lien(lid, equipe)
+    if not avant:
+        return {"ok": False, "erreur": "lien illisible chez GetMySocial"}
+    nom = f'{e["plateforme"]} VA {l.get("numero") or "?"} @{l.get("pseudo") or uid}'[:60]
+    t = _creer_ou_reprendre(nom, int(creator_id))
+    if not t.get("ok"):
+        return {"ok": False, "erreur": "MyPuls : " + str(t.get("erreur") or "")}
+    if not str(t.get("url") or "").lower().startswith(profil):
+        return {"ok": False, "arreter": True, "tracking": str(t.get("url") or ""),
+                "erreur": f"tracking {t.get('url')} hors de {profil} : à vérifier dans MyPuls"}
+    if avant.get("type") == "landing":
+        r = _poser_tracking(lid, t["url"], str(avant.get("display_name") or nom), equipe)
+    else:
+        r = gms._call_tool("update_link", {"link_id": lid, "team_id": equipe, "url": t["url"]})
+        r = {"ok": bool(r.get("ok")), "erreur": str(r.get("error") or "")[:120]}
+    apres = _lire_lien(lid, equipe) if r.get("ok") else None
+    if not apres:
+        return {"ok": False, "tracking": t["url"],
+                "erreur": f"GetMySocial : {r.get('erreur') or 'relecture impossible'} — "
+                          f"le tracking {t['url']} existe, le lien n'a pas bougé"}
+    dest = [apres.get("url")] + [b.get("url") for b in (apres.get("buttons") or [])
+                                 if isinstance(b, dict)]
+    if t["url"] not in dest or ancien in dest:
+        return {"ok": False, "tracking": t["url"],
+                "erreur": f"relu : destination {[u for u in dest if u][:2]}"}
+    # l'A/B survit à update_link (vu le 13/10) ; s'il manquait, la moitié Seren
+    # serait perdue sans un mot
+    ab_avant = bool((avant.get("ab_testing") or {}).get("enabled"))
+    ab_apres = bool((apres.get("ab_testing") or {}).get("enabled"))
+    d = _etat()
+    fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+    anc = anciens_trackings(fiche)
+    if ancien and ancien not in anc:
+        anc.append(ancien)
+    fiche.update(tracking=t["url"], code=str(t.get("code") or ""), anciens_trackings=anc,
+                 bascule={"vers": int(creator_id), "de": ancien, "quand": int(_t.time())})
+    _ecrire(d)
+    if ab_avant and not ab_apres:
+        return {"ok": False, "tracking": t["url"], "ancien": ancien,
+                "erreur": "A/B perdu à la mise à jour : moitié Seren à reposer"}
+    return {"ok": True, "tracking": t["url"], "ancien": ancien, "deja": False, "erreur": ""}

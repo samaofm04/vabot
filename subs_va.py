@@ -69,10 +69,10 @@ def trackings_du_va(gid: Any, uid: Any) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
     if gid in (TWITTER_ID, THREADS_ID, AGENCY_IG_ID):
         import liens_va
-        f = liens_va.lien_de(gid, uid)
-        for url in (f.get("tracking"), (f.get("variante") or {}).get("tracking")):
-            if url:
-                out.append(("of", str(url)))
+        # le sien, celui de sa variante (Seren) et ceux d'avant une bascule
+        # de modèle (Emy, passée sur Lia le 28/10/2026) : additionnés
+        for url in liens_va.trackings_de_fiche(liens_va.lien_de(gid, uid)):
+            out.append(("of", str(url)))
     elif gid == VA_IG_ID:
         import liens_fr
         for cle, f in sorted((liens_fr._etat().get("liens") or {}).items()):
@@ -529,8 +529,13 @@ def entites_agency() -> Dict[str, Dict[str, Any]]:
         if f.get("actif") is False or not str(n or "").isdigit() or not t:
             continue
         uid = cle.split(":", 1)[1]
+        # tous ses trackings, pas le seul premier : depuis le 50/50 (24/10/2026)
+        # la moitié Seren de chaque VA n'était comptée nulle part, et un lien
+        # passé sur Lia aurait perdu ses abonnés Emy (« il faut additionner les
+        # subs de Emy, Lia et Seren », propriétaire, 28/10/2026)
         out[uid] = {"nom": libelle_agency(n), "numero": int(n), "uid": uid,
-                    "pseudo": str(f.get("pseudo") or ""), "trackings": [("of", t)]}
+                    "pseudo": str(f.get("pseudo") or ""),
+                    "trackings": [("of", u) for u in liens_va.trackings_de_fiche(f)]}
     return out
 
 
