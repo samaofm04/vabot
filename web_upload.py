@@ -62098,6 +62098,18 @@ def create_app():
             if str((charge.get("data") or {}).get("custom_id") or "").startswith("agency-aff:"):
                 return jsonify({"type": 4, "data": {"content": "Service temporairement indisponible.",
                                                     "flags": 64}})
+        # ▶️ Lever la suspension, sous les cartes ⏸️ de 👋・départs-et-sanctions
+        # (suspensions_discord). Même principe, None quand ce n'est pas le sien.
+        try:
+            import suspensions_discord as _su
+            _rep_su = _su.traiter(charge)
+            if _rep_su is not None:
+                return jsonify(_rep_su)
+        except Exception as _e_su:
+            print(f"[suspension] route : {type(_e_su).__name__}: {_e_su}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("susp:"):
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])
@@ -80317,8 +80329,20 @@ def _demarrages_proteges() -> dict:
 _create_app_sans_protection = create_app
 
 
+def _brancher_suspensions() -> None:
+    # La raison et le bouton ▶️ Lever sous les cartes ⏸️ de membres_evenements
+    # (hors git) : voir suspensions_discord.brancher. Avant create_app, qui
+    # lance son fil : sa première carte part déjà complétée.
+    try:
+        import suspensions_discord
+        suspensions_discord.brancher()
+    except Exception as e:
+        print(f"[suspension] branchement impossible : {type(e).__name__}: {e}", flush=True)
+
+
 def create_app():
     remplacants = _demarrages_proteges()
+    _brancher_suspensions()
     try:
         app = _create_app_sans_protection()
     finally:
