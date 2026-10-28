@@ -6280,11 +6280,17 @@ def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str, plancher_ms: int = 0) 
 
 
 def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
-                 creatrice: str = CREATRICE_INFLOWW) -> Optional[Dict[str, int]]:
+                 creatrice: str = CREATRICE_INFLOWW, pause: bool = True) -> Optional[Dict[str, int]]:
     """{« emy.brw/cNN » : abonnés du jour} chez Infloww, pour ceux de
     `trackings` qu'Infloww connaît ; None s'il ne répond pas. Avec `au` et
     `creatrice` : du `jour` au `au` compris, chez elle (les trackings Jessye
-    des comptes internes, voir INTERNES_JESSYE)."""
+    des comptes internes, voir INTERNES_JESSYE).
+
+    `pause` faux : un échec ne met pas la créatrice au repos (_INFLOWW_MUET).
+    La page /infloww/liens?c=emy lit les mêmes trackings Jessye ; sans ça, une
+    erreur de la page coupait la part Jessye de VA 41 / 141 / 142 au
+    classement horaire suivant (10 min de pause, ligne « partiel »). Une
+    pause posée par le podium est respectée quand même."""
     au = au or jour
     if time.time() < _INFLOWW_MUET.get(creatrice, 0):
         return None                          # muet il y a peu : dit au journal à ce moment-là
@@ -6315,7 +6321,8 @@ def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
         return out
     except Exception as e:                                   # noqa: BLE001
         if creatrice != CREATRICE_INFLOWW:
-            _INFLOWW_MUET[creatrice] = time.time() + INFLOWW_MUET_S
+            if pause:
+                _INFLOWW_MUET[creatrice] = time.time() + INFLOWW_MUET_S
             _dire_infloww(f"muet:{creatrice}:{jour}:{au}:{type(e).__name__}",
                           f"Infloww muet pour {creatrice} du {jour} au {au} "
                           f"({type(e).__name__}: {str(e)[:120]})")

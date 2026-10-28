@@ -54,6 +54,10 @@ Jessye sur GMS qui sont comptés, chaque personne c'est un truc ». Donc :
   (type « au_sub » : 0,40 $ jusqu'à 200 subs par quinzaine, 0,50 $ au-delà,
   au marginal), sans fixe.
 
+- LA PAGE EMY ADDITIONNE JESSYE (28/10/2026, voir PARTENAIRE) : un lien
+  passé de son lien de suivi Emy à un lien de suivi Jessye compte les deux,
+  chacun une fois, Jessye lu chez Infloww.
+
 Deux sorties : la page /infloww/liens, sans JavaScript (clé ?k= pour les VA
 sans compte), et des messages Discord de Bixby dans « inflow-resultat ».
 L'ENVOI DISCORD EST COUPÉ tant que data/infloww_liens_config.json ne porte pas
@@ -156,6 +160,66 @@ _MYPULS_ECHECS: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _MYPULS_FILS: Dict[Tuple[str, str], Dict[str, Any]] = {}
 # à part de _VERROU, que l'envoi Discord garde pendant tout un relevé
 _VERROU_MP = threading.Lock()
+
+# ─── la page Emy additionne Jessye (28/10/2026) ──────────────────────────
+# Le 27/10 vers 16h40, 31 liens de JESSY LE RETOUR sont passés de leurs liens
+# de suivi Emy (emy.brw/c17…c111) à des liens de suivi Jessye
+# (jessyewdiference/c132…c158). La page Emy rejetait ces liens (« pointe vers
+# @jessyewdiference ») et rangeait leurs anciens liens Emy « hors
+# GetMySocial, non comptés » : du 16 au 28/10, 27 personnes à « — » et 590
+# subs affichés sur plus de 3 000. Le propriétaire, 28/10 : « pour Jessye faut
+# que ça additionne les subs de Emy et de Jessye » — mêmes personnes, mêmes
+# liens. Sur la page Emy SEULEMENT (profil() pose PARTENAIRE) :
+# - un lien qui vise Jessye compte ce lien de suivi, lu chez Infloww (MyPuls
+#   ne voit plus Jessye depuis le 11/10), abonné par abonné
+#   (podium_discord.subs_infloww : jours de Paris, abonnés datés de la
+#   création du lien exclus, comme au podium), sur une période comme depuis
+#   toujours (là, de PLANCHER à aujourd'hui) ;
+# - un lien compte aussi les liens de suivi Emy qu'il a quittés, d'après le
+#   registre du podium (_anciens_trackings), sur une période jusqu'au dernier
+#   jour où il les visait (« vu »), comme le podium (fin_t = min(au, vu)) ;
+# - chaque lien de suivi UNE fois, à sa source : Emy chez MyPuls (période) ou
+#   Infloww (depuis toujours), Jessye chez Infloww.
+# Infloww ne date ni les clics ni les gains d'un lien (compteurs cumulés depuis
+# sa création) : ceux d'un lien Jessye ne comptent que sur une période qui
+# couvre toute sa vie (du ≤ jour de création, au = aujourd'hui), sinon la page
+# le dit au lieu d'inventer. Un lien Jessye créé APRÈS la fin de la période
+# n'y a rien fait : 0 partout, connu, sans lecture. Infloww muet : la part Emy
+# reste, la part Jessye manquante est dite, et aucune prime ne se calcule sur
+# un compte à trou. La page Jessye (sans c) ne change pas ; les liens
+# GetMySocial ne sont jamais touchés. POUR REVENIR : retirer « emy » de
+# PARTENAIRES.
+PARTENAIRE = ""
+NOM_PARTENAIRE = ""
+# Une lecture neuve coûte une page /v1/linkfans par centaine d'abonnés et par
+# lien (27 pour les 26 liens du 28/10) : elle part dans un fil, comme MyPuls,
+# et la page ne l'attend que PARTENAIRE_ATTENTE_S (compté depuis le départ du
+# fil, lancé avant la lecture MyPuls ou celle d'Infloww pour Emy). La vue
+# depuis toujours passe par le même fil (clé ("", "")) : lue sur place, un
+# trou réseau la bloquait ~94 s par appel (3 essais de 30 s, podium_discord).
+# Les abonnés de chaque lien sont gardés 30 min par podium_discord (le même
+# cache que la ligne interne du podium).
+PARTENAIRE_ATTENTE_S = 8.0
+PARTENAIRE_TTL_S = 600
+PARTENAIRE_ECHEC_S = 90
+_PARTENAIRE_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_PARTENAIRE_ECHECS: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_PARTENAIRE_FILS: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_VERROU_PART = threading.Lock()
+# une lecture Infloww à la fois : les quinzaines de la paie ne relisent pas
+# en parallèle les mêmes fans, la seconde trouve le cache de la première
+_VERROU_PART_LECTURE = threading.Lock()
+# {code Jessye : jour de création (Paris)}, noté à chaque lecture Infloww de
+# la liste de ses liens : une période qui finit avant n'a rien à lire. Le
+# 28/10, une quinzaine du 01 au 15/10 attendait Infloww pour 26 liens créés
+# le 27 — Infloww muet, toutes ses primes passées tombaient à « — ».
+_PARTENAIRE_CREES: Dict[str, str] = {}
+# La part Jessye d'une quinzaine close est gardée (QUINZ_FICHIER,
+# « partenaire ») comme la part MyPuls, mais seulement d'une lecture faite
+# au moins ce délai après minuit, le lendemain du dernier jour : OnlyFans
+# transmet ses abonnés à Infloww avec 2 à 4 h de retard (infloww.py) et une
+# valeur gardée ne change plus.
+PARTENAIRE_GEL_RETARD_S = 4 * 3600
 # Clics US d'une période : un appel GetMySocial par personne, comme depuis
 # toujours, mais sur un quota serré et partagé avec le tableau de bord (épuisé
 # le 26/09 au petit matin). D'où un cache disque par (personne, période) et un
@@ -373,6 +437,45 @@ def _code_infloww(x: Mapping[str, Any]) -> str:
     return str(int(m.group(1))) if m else c
 
 
+def _suivi_de(url: Any) -> str:
+    """« emy.brw/c40 » pour https://onlyfans.com/Emy.Brw/c040 : la clé des
+    liens de suivi du registre du podium (podium_discord.tracking_de)."""
+    m = _URL_OF.match(str(url or "").strip())
+    return f"{m.group(1).lower()}/c{int(m.group(2))}" if m else ""
+
+
+def code_partenaire(url: Any) -> str:
+    """« 144 » pour https://onlyfans.com/jessyewdiference/c144 sur la page
+    Emy (PARTENAIRE), "" sinon — et toujours "" sur la page Jessye."""
+    if not PARTENAIRE:
+        return ""
+    t = _suivi_de(url)
+    return t.split("/c", 1)[1] if t.startswith(PARTENAIRE + "/c") else ""
+
+
+def _codes_partenaire(liens_gms_: List[Any]) -> List[str]:
+    """Les codes Jessye que visent les liens GMS de l'espace (page Emy) :
+    ceux qu'il faut lire chez Infloww, pour le tableau comme pour la paie."""
+    if not PARTENAIRE:
+        return []
+    cs = {code_partenaire(url_du_lien(l)) for l in liens_gms_ if isinstance(l, Mapping)}
+    return sorted((c for c in cs if c), key=lambda c: (len(c), c))
+
+
+def _lib_code(c: Any) -> str:
+    """« c83 » pour un code de la créatrice de la page, « Jessye c144 » pour
+    un code de l'autre (« jessyewdiference/c144 », voir _subs_par_personne),
+    « c40 jusqu'au 27/10 » pour un lien de suivi quitté (« 40@2026-10-27 »)."""
+    c = str(c)
+    if "@" in c:
+        n, vu = c.split("@", 1)
+        return f"c{n} jusqu'au {_jour_court(vu)}"
+    if "/c" in c:
+        crea, n = c.split("/c", 1)
+        return f"{NOM_PARTENAIRE if crea == PARTENAIRE else crea} c{n}"
+    return f"c{c}"
+
+
 def entites(liens: List[Any], rattachements: Optional[Mapping[str, str]] = None
             ) -> Tuple[Dict[str, Dict[str, Any]], int]:
     """({clé: {nom, spam, ids}}, liens sans identifiant). Le regroupement est
@@ -384,6 +487,140 @@ def entites(liens: List[Any], rattachements: Optional[Mapping[str, str]] = None
     return (pd.entites([dict(l) for l in propres],
                        None if rattachements is None else dict(rattachements)),
             len(liens) - len(propres))
+
+
+def _anciens_trackings(liens_gms_: List[Any], bornes: Optional[Tuple[str, str]] = None
+                       ) -> Tuple[Dict[str, List[Dict[str, str]]], str]:
+    """({id du lien GMS: [{code, vu}]}, panne) : les liens de suivi de la
+    créatrice de la page que chaque lien GMS a QUITTÉS, d'après le registre du
+    podium (data/podium_trackings.json, une entrée par lien de suivi : ids et
+    noms des liens GMS qui l'ont visé, numéro du VA, premier et dernier jour).
+    Seulement ceux qu'aucun lien ne vise plus (« actif » faux, absents des
+    adresses de l'espace) : un lien de suivi encore visé compte chez le lien
+    qui le vise. `bornes` (du, au) : ceux qu'un lien visait encore pendant la
+    période (quittés le `du` ou après, vus dès le `au` ou avant) ; None :
+    tous (la vue depuis toujours). « vu » : le dernier jour où il était visé.
+
+    Règle vérifiée sur le registre du 28/10 (31 liens passés sur Jessye la
+    veille, 4 autres sans aucun lien de suivi) : on garde une entrée si le NOM
+    du lien est dans ses « liens », ou si son id est dans ses « ids » ET que
+    son numéro est le numéro unique du lien de suivi actuel. 33 liens
+    retrouvent ainsi leur lien de suivi Emy (Robot en a deux : c72 jusqu'au
+    16/10, puis c91), tous par le nom sauf DONLAD ; Jerry, Eddy 1 et Carter 1
+    n'en ont pas besoin (c69, c35, c33 sont encore visés par JERRY N, Eddy 2,
+    Carter 2). L'id seul ramenait de faux candidats (Mihkim → c37, JERRY N →
+    c55 : leurs ids traînent dans les entrées d'autres personnes). DONLAD
+    (renommé de DOLAD) n'est retrouvé que par l'id et le numéro — et le podium
+    retire l'id des entrées quittées le jour où le lien de suivi Jessye prend
+    son numéro (_suivre_trackings) : DONLAD retombera alors « hors
+    GetMySocial », compté nulle part mais affiché (simulé sur le registre)."""
+    if not PARTENAIRE:
+        return {}, ""
+    try:
+        reg = pd._lire_registre()
+    except Exception as e:  # le registre ne fait pas tomber la page : la panne est dite
+        return {}, f"{type(e).__name__} : {e}"[:200]
+    regs = reg.get("trackings") or {}
+    attente = reg.get("attente") or {}
+    if not regs:
+        # podium_discord._lire rend {} sur un fichier illisible : un registre
+        # vide n'est pas « aucun lien quitté », c'est une panne, et elle est dite
+        return {}, "registre vide ou illisible (data/podium_trackings.json)"
+    propres = [l for l in liens_gms_ if isinstance(l, Mapping) and l.get("id")]
+    courants: Dict[str, set] = {}
+    for l in propres:
+        courants[str(l["id"])] = {t for t in (_suivi_de(u) for u in [l.get("url")] + _url_boutons(l)) if t}
+    vises = set().union(*courants.values()) if courants else set()
+    prefixe = CREATRICE + "/c"
+    du, au = bornes if bornes else ("", "")
+    out: Dict[str, List[Dict[str, str]]] = {}
+    for l in propres:
+        lid, nom = str(l["id"]), nom_gms(l)
+        # le numéro du lien de suivi actuel : gravé au registre, ou ses
+        # numéros possibles tant qu'il attend (un seul, sinon rien)
+        nums: set = set()
+        for c in courants[lid]:
+            e = regs.get(c)
+            if isinstance(e, Mapping) and str(e.get("numero") or "").isdigit():
+                nums.add(int(e["numero"]))
+            elif isinstance(attente.get(c), Mapping):
+                nums |= {int(x) for x in attente[c].get("numeros") or [] if str(x).isdigit()}
+        seul = next(iter(nums)) if len(nums) == 1 else None
+        for t, e in regs.items():
+            if (not isinstance(e, Mapping) or not t.startswith(prefixe) or e.get("actif")
+                    or t in vises or not t[len(prefixe):].isdigit()):
+                continue
+            vu, premier = str(e.get("vu") or ""), str(e.get("premier") or "")
+            if du and (vu < du or premier > au):
+                continue
+            par_nom = bool(nom) and nom in (e.get("liens") or [])
+            par_num = (seul is not None and lid in (e.get("ids") or [])
+                       and str(e.get("numero")) == str(seul))
+            if par_nom or par_num:
+                out.setdefault(lid, []).append({"code": str(int(t[len(prefixe):])), "vu": vu})
+    for v in out.values():
+        v.sort(key=lambda a: (a["vu"], len(a["code"]), a["code"]))
+    return out, ""
+
+
+# Un lien de suivi Emy quitté avant la fin de la période ne compte que
+# jusqu'à son dernier jour visé (« vu » au registre), comme au podium
+# (fin_t = min(au, vu)) : MyPuls continue d'y ranger des abonnés après que le
+# lien GetMySocial est parti ailleurs — le 28/10, 3 subs datés du 28 sur des
+# liens quittés le 27 (ANDRY, Ricardo 1, Mihkim : 152 / 1 183 / 205 au lieu de
+# 151 / 1 182 / 204). D'où une lecture MyPuls de plus par dernier jour
+# distinct (du → vu), même fil et même attente que celle de la période.
+# Depuis toujours, non : les liens Emy y viennent des compteurs cumulés
+# d'Infloww, qui ne datent rien ; les arrêter au dernier jour demanderait les
+# abonnés un par un de chaque lien quitté (/v1/linkfans, une page par
+# centaine, des milliers d'abonnés sur c35 ou c47), et la note de la page le
+# dit.
+def _fins_quittes(liens_gms_: List[Any], du: str, au: str) -> Dict[str, List[str]]:
+    """{dernier jour visé : codes} des liens de suivi Emy quittés PENDANT la
+    période (avant son dernier jour) : ceux qu'une lecture MyPuls [du, vu]
+    doit compter. Rien sans PARTENAIRE ni période."""
+    if not PARTENAIRE or not du or not au:
+        return {}
+    anciens, _panne = _anciens_trackings([l for l in liens_gms_ if isinstance(l, Mapping) and l.get("id")],
+                                         (du, au))
+    out: Dict[str, set] = {}
+    for v in anciens.values():
+        for a in v:
+            if a["vu"] and a["vu"] < au:
+                out.setdefault(a["vu"], set()).add(a["code"])
+    return {vu: sorted(cs, key=lambda c: (len(c), c)) for vu, cs in sorted(out.items())}
+
+
+def _raison_fin(f: Optional[Mapping[str, Any]], du: str, vu: str) -> str:
+    """Pourquoi un lien de suivi quitté est compté sur toute la période : la
+    lecture MyPuls jusqu'à son dernier jour manque (`f` : celle du tableau,
+    _mypuls_periode, ou une tranche de la paie, _etat_tranche)."""
+    lib = f"du {_jour_court(du)} au {_jour_court(vu)}"
+    if not f or f.get("a_lire"):
+        return f"lecture MyPuls {lib} pas encore faite"
+    if f.get("en_cours"):
+        return f"lecture MyPuls {lib} en cours"
+    if f.get("erreur"):
+        return f"MyPuls n'a pas répondu {lib} ({str(f['erreur'])[:120]})"
+    return f"lien absent de la lecture MyPuls {lib}"
+
+
+def _jusqu_a_vu(xs: List[Mapping[str, Any]], a: Mapping[str, str], du: str,
+                f: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Le lien de suivi quitté `a` ({code, vu}) compté jusqu'à son dernier
+    jour : clics et subs de la lecture [du, vu] (`f`) ; le gain reste celui
+    de la période (`xs`) — l'argent que ses abonnés dépensent après le départ
+    du lien, personne d'autre ne le compte, et le $ / sub de la page est déjà
+    « gains de la période ÷ subs de la période ». Sans lecture [du, vu] :
+    toute la période, marqué « fin_manque » (dit sous le nom ; trou pour les
+    primes, qui attendent la lecture)."""
+    fx = [x for x in (f or {}).get("liens") or [] if isinstance(x, Mapping) and _code_infloww(x) == a["code"]]
+    if fx and _entier(fx[0].get("abonnes")) is not None:
+        b = fx[0]
+        return [dict(x, clics=b.get("clics"), abonnes=b.get("abonnes"), fin=a["vu"]) for x in xs]
+    raison = (f"lien sans nombre de subs dans la lecture MyPuls du {_jour_court(du)} au "
+              f"{_jour_court(a['vu'])}" if fx else _raison_fin(f, du, a["vu"]))
+    return [dict(x, fin=a["vu"], fin_manque=raison) for x in xs]
 
 
 # ─── Clics US : GetMySocial, une fois par jour ───────────────────────────
@@ -593,18 +830,19 @@ def rafraichir_us() -> str:
 
 
 # ─── Infloww ─────────────────────────────────────────────────────────────
-def _infloww() -> Dict[str, Any]:
-    """Les liens de suivi de Jessye, lus dans Infloww. Ne lève jamais : une
-    panne est rendue dans « erreur »."""
+def _infloww(creatrice: str = "") -> Dict[str, Any]:
+    """Les liens de suivi de la créatrice de la page (ou de `creatrice`),
+    lus dans Infloww. Ne lève jamais : une panne est rendue dans « erreur »."""
+    creatrice = creatrice or CREATRICE
     suivi: Dict[str, Any] = {"appels": 0, "caches": 0, "plus_ancien": None}
     # le suivi d'infloww dit de quand date la plus vieille lecture servie par
     # son cache : « lu à » est l'âge réel des chiffres, pas l'heure d'affichage
     jeton_ctx = infloww._SUIVI.set(suivi)
     try:
-        c, _toutes = infloww._creatrice_ou_erreur(CREATRICE)
+        c, _toutes = infloww._creatrice_ou_erreur(creatrice)
         cid = str(c.get("id") or "")
         if not cid:
-            return {"erreur": f"« {CREATRICE} » est rendue par Infloww sans identifiant"}
+            return {"erreur": f"« {creatrice} » est rendue par Infloww sans identifiant"}
         r = infloww.liens(cid, "TRACKING")
     except infloww.ErreurInfloww as e:
         return {"erreur": _texte_erreur(e)}
@@ -825,6 +1063,289 @@ def _mypuls_periode(du: str, au: str, attente: Optional[float] = None) -> Dict[s
         return _sans_mypuls(hit, (ech or {}).get("raison") or "lecture terminée sans résultat")
     return _sans_mypuls(hit, f"MyPuls ne répond pas encore (plus de {attente:g} s) : la lecture continue "
                              "en arrière-plan, rechargez la page dans une minute", en_cours=True)
+
+
+# ─── la part Jessye de la page Emy : Infloww (voir PARTENAIRE) ───────────
+def _entree_partenaire(l: Mapping[str, Any], code: str, abonnes: Optional[int], entier: bool
+                       ) -> Dict[str, Any]:
+    """Un lien de suivi Jessye à la forme des autres (infloww._lien_norm),
+    plus « creatrice ». `entier` faux : ses clics et son gain ne sont pas
+    connus sur la période (None ; « net_absent » le sort du $ / sub et du
+    revenu de la paie) — ses subs, eux, sont datés."""
+    return {"id": f"{PARTENAIRE}/c{code}", "nom": str(l.get("nom") or "").strip(), "code": code,
+            "creatrice": PARTENAIRE, "abonnes": abonnes,
+            "clics": _entier(l.get("clics")) if entier else None,
+            "net": _entier(l.get("net")) if entier else None, "net_absent": not entier,
+            "cree": str(l.get("cree") or ""), "devise": str(l.get("devise") or ""),
+            "termine": bool(l.get("termine"))}
+
+
+def _manque_partenaire(code: str, raison: str) -> Dict[str, Any]:
+    """Un lien de suivi Jessye pas lu (Infloww muet, ou lecture en cours) : il
+    reste dans la ligne, subs INCONNUS — la personne garde sa part Emy, la
+    page dit ce qui manque, la paie n'en tire aucune prime."""
+    return {"id": f"{PARTENAIRE}/c{code}", "nom": "", "code": code, "creatrice": PARTENAIRE,
+            "abonnes": None, "clics": None, "net": None, "net_absent": True, "manque": str(raison)[:200]}
+
+
+def _nul_partenaire(code: str, cree: str, nom: str = "") -> Dict[str, Any]:
+    """Un lien de suivi Jessye créé APRÈS la fin de la période : il n'y a rien
+    fait, ni abonné, ni clic, ni gain — connu, sans rien demander à Infloww.
+    « apres » (son jour de création) : la page le dit, la part Jessye de la
+    ligne ne le compte pas."""
+    return {"id": f"{PARTENAIRE}/c{code}", "nom": str(nom or "").strip(), "code": code,
+            "creatrice": PARTENAIRE, "abonnes": 0, "clics": 0, "net": 0, "net_absent": False,
+            "cree": cree, "devise": "", "termine": False, "apres": cree}
+
+
+def _crees_partenaire(codes: Any) -> Dict[str, str]:
+    """{code : jour de création, heure de Paris} des liens Jessye dont on le
+    sait SANS appel : la dernière liste lue chez Infloww (cree_ms,
+    _PARTENAIRE_CREES), sinon le « premier » jour du registre du podium
+    (trackings ou attente) — le jour où un lien GetMySocial l'a visé pour la
+    première fois, que le podium tient déjà pour son début (une attente « vue
+    après la période » n'y compte pas). Sauf le premier jour du registre
+    lui-même (06/10/2026, son amorce) : un lien de suivi vu ce jour-là peut
+    être bien plus vieux (c86, Kylmich), le croire créé ce jour-là effacerait
+    ses abonnés de septembre. Inconnu : absent (il faudra lire Infloww)."""
+    codes = [str(c) for c in codes]
+    with _VERROU_PART:
+        out = {c: _PARTENAIRE_CREES[c] for c in codes if _PARTENAIRE_CREES.get(c)}
+    reste = [c for c in codes if c not in out]
+    if not reste:
+        return out
+    try:
+        reg = pd._lire_registre()
+    except Exception:  # registre illisible : la date reste inconnue, Infloww est lu
+        return out
+    entrees = [e for nom in ("trackings", "attente") for e in (reg.get(nom) or {}).values()
+               if isinstance(e, Mapping)]
+    premiers = [str(e.get("premier") or "") for e in entrees if _date_arg(e.get("premier"))]
+    amorce = min(premiers) if premiers else ""
+    for c in reste:
+        t = f"{PARTENAIRE}/c{c}"
+        e = (reg.get("trackings") or {}).get(t) or (reg.get("attente") or {}).get(t)
+        p = str(e.get("premier") or "") if isinstance(e, Mapping) else ""
+        if _date_arg(p) and p > amorce:
+            out[c] = p
+    return out
+
+
+def _lire_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> Tuple[Dict[str, Any], str]:
+    """La part Jessye de [du, au] (bornes incluses, jours de Paris ; du = au =
+    "" : depuis toujours) : ({liens, lu_a, tronque}, "") ou ({}, pourquoi). Un
+    code qu'Infloww ne connaît pas n'est pas rendu : construire() le dit
+    introuvable."""
+    with _VERROU_PART_LECTURE:
+        i = _infloww(PARTENAIRE)
+        if i.get("erreur"):
+            return {}, str(i["erreur"])
+        par = {_code_infloww(l): l for l in i.get("liens") or [] if isinstance(l, Mapping) and _code_infloww(l)}
+        crees = {c: _jour_de(int(l["cree_ms"]) / 1000.0) for c, l in par.items() if _entier(l.get("cree_ms"))}
+        crees = {c: j for c, j in crees.items() if j}
+        with _VERROU_PART:
+            _PARTENAIRE_CREES.update(crees)
+        connus = [c for c in codes if c in par]
+        # créé après la période (date apprise par cette lecture-ci) : rien à lire
+        apres = {c for c in connus if au and crees.get(c, "") > au}
+        lire = [c for c in connus if c not in apres]
+        # depuis toujours : abonné par abonné aussi, de PLANCHER à aujourd'hui
+        # — le compteur cumulé (subCount) comptait les abonnés datés de la
+        # création du lien (5 sur c135 le 27/10), que la vue par période et le
+        # podium retirent ; mêmes fans, même cache de 30 min, aucun appel de plus
+        d0, d1 = (du, au) if du else (PLANCHER.isoformat(), _aujourdhui())
+        # pause=False : un échec ici ne coupe pas la part Jessye de la ligne
+        # interne du podium pendant 10 min (podium_discord._INFLOWW_MUET)
+        subs = (pd.subs_infloww(d0, {f"{PARTENAIRE}/c{c}" for c in lire}, au=d1, creatrice=PARTENAIRE,
+                                pause=False) if lire else {})
+    if subs is None:
+        return {}, ("Infloww n'a pas rendu les abonnés de ses liens (linkfans), ou le podium l'a trouvé "
+                    "muet il y a moins de 10 min : nouvel essai ensuite")
+    auj = _aujourdhui()
+    liens = []
+    for c in connus:
+        l = par[c]
+        if c in apres:
+            liens.append(_nul_partenaire(c, crees[c], str(l.get("nom") or "")))
+            continue
+        cree = crees.get(c, "")
+        # les compteurs cumulés d'Infloww SONT ceux de la période quand elle
+        # couvre toute la vie du lien et finit aujourd'hui (depuis toujours :
+        # toujours) ; sinon inconnus
+        entier = not du or (bool(cree) and du <= cree and au >= auj)
+        n = subs.get(f"{PARTENAIRE}/c{c}")
+        liens.append(_entree_partenaire(l, c, None if n is None else int(n), entier))
+    return {"liens": liens, "lu_a": i.get("lu_a"), "tronque": list(i.get("tronque") or [])}, ""
+
+
+def _releve_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> None:
+    """Le fil de la part Jessye d'une période (du = au = "" : depuis
+    toujours) : lit, range la lecture ou l'échec, puis se retire. Ne lève
+    jamais."""
+    cle = (du, au)
+    try:
+        v, raison = _lire_partenaire(du, au, codes)
+    except Exception as e:  # par ceinture : un fil qui meurt sans rien ranger ne dirait rien
+        v, raison = {}, f"{type(e).__name__} : {e}"
+    t = time.time()
+    with _VERROU_PART:
+        if raison:
+            _PARTENAIRE_ECHECS[cle] = {"t": t, "raison": raison[:300]}
+        else:
+            _PARTENAIRE_CACHE[cle] = {"t": t, "v": dict(v, lu_a=float(v.get("lu_a") or t), codes=list(codes))}
+            _PARTENAIRE_ECHECS.pop(cle, None)
+        for d in (_PARTENAIRE_CACHE, _PARTENAIRE_ECHECS):
+            if len(d) > _MYPULS_CACHE_MAX:
+                for k in sorted(d, key=lambda k: d[k]["t"])[:10]:
+                    d.pop(k, None)
+        if (_PARTENAIRE_FILS.get(cle) or {}).get("fil") is threading.current_thread():
+            _PARTENAIRE_FILS.pop(cle, None)
+
+
+def _sans_partenaire(hit: Optional[Mapping[str, Any]], raison: str, en_cours: bool = False) -> Dict[str, Any]:
+    """Pas de lecture neuve : la dernière réussie de CETTE période si elle
+    existe (« perime » dit pourquoi et de quand), sinon « erreur »."""
+    if hit:
+        return dict(hit["v"], perime=f"{raison[:240]} — chiffres lus le {_heure(hit['t'])}")
+    return {"erreur": raison[:400], "en_cours": True} if en_cours else {"erreur": raison[:400]}
+
+
+def _partenaire_lu(du: str, au: str, codes_t: Tuple[str, ...], attente: float) -> Dict[str, Any]:
+    """La lecture Infloww de `codes_t` sur la période, dans son fil, attendue
+    au plus `attente` s depuis son départ (voir _partenaire_periode)."""
+    cle = (du, au)
+    with _VERROU_PART:
+        maintenant = time.time()
+        hit = _PARTENAIRE_CACHE.get(cle)
+        if hit and not set(codes_t) <= set(hit["v"].get("codes") or []):
+            # lue pour d'autres liens : relue pour tous, l'ancienne ne sert plus
+            codes_t = tuple(sorted(set(codes_t) | set(hit["v"].get("codes") or []), key=lambda c: (len(c), c)))
+            hit = None
+        if hit and 0 <= maintenant - hit["t"] < PARTENAIRE_TTL_S:
+            return dict(hit["v"])
+        ech = _PARTENAIRE_ECHECS.get(cle)
+        if ech and 0 <= maintenant - ech["t"] < PARTENAIRE_ECHEC_S:
+            return _sans_partenaire(hit, f"{ech['raison']} (essai du {_heure(ech['t'])})")
+        vol = _PARTENAIRE_FILS.get(cle)
+        if not vol or not vol["fil"].is_alive():
+            f = threading.Thread(target=_releve_partenaire, args=(du, au, codes_t), daemon=True,
+                                 name="infloww-liens-partenaire")
+            vol = {"fil": f, "debut": maintenant}
+            _PARTENAIRE_FILS[cle] = vol
+            f.start()
+    f = vol["fil"]
+    f.join(max(0.0, vol["debut"] + attente - time.time()))
+    with _VERROU_PART:
+        neuf = _PARTENAIRE_CACHE.get(cle)
+        ech = _PARTENAIRE_ECHECS.get(cle)
+        fini = not f.is_alive()
+    if neuf is not None and neuf is not hit and set(codes_t) <= set(neuf["v"].get("codes") or []):
+        return dict(neuf["v"])
+    if fini:
+        return _sans_partenaire(hit, (ech or {}).get("raison") or "lecture terminée sans résultat")
+    return _sans_partenaire(hit, f"Infloww ne répond pas encore (plus de {attente:g} s) : la lecture continue "
+                                 "en arrière-plan, rechargez la page dans une minute", en_cours=True)
+
+
+def _partenaire_periode(du: str, au: str, codes: List[str], attente: Optional[float] = None
+                        ) -> Dict[str, Any]:
+    """La part Jessye de la période (du = au = "" : depuis toujours) :
+    {liens, lu_a}, ou {erreur} (+ en_cours si la lecture continue dans son
+    fil ; « liens » garde alors ceux créés après la période). Ne lève jamais,
+    et n'attend pas plus de `attente` s depuis le départ du fil (0 : le lance
+    seulement). Un lien créé après `au` vaut 0 sans lecture (_nul_partenaire) :
+    si c'est le cas de tous, Infloww n'est pas appelé."""
+    codes_t = tuple(sorted(set(str(c) for c in codes), key=lambda c: (len(c), c)))
+    if not PARTENAIRE or not codes_t:
+        return {"liens": []}
+    attente = PARTENAIRE_ATTENTE_S if attente is None else float(attente)
+    apres = {c: j for c, j in (_crees_partenaire(codes_t) if au else {}).items() if j > au}
+    nuls = [_nul_partenaire(c, apres[c]) for c in codes_t if c in apres]
+    codes_t = tuple(c for c in codes_t if c not in apres)
+    if not codes_t:
+        # « sans_lecture » : aucun chiffre lu, aucune heure de lecture à dire ;
+        # une tranche close peut garder ces zéros (_garder_partenaire)
+        return {"liens": nuls, "sans_lecture": True}
+    r = _partenaire_lu(du, au, codes_t, attente)
+    return dict(r, liens=list(r.get("liens") or []) + nuls) if nuls else r
+
+
+def _partenaire_toujours(codes: List[str], attente: Optional[float] = None) -> Dict[str, Any]:
+    """La part Jessye depuis toujours : abonnés comptés un par un, sans ceux
+    datés de la création du lien (comme la vue par période et le podium),
+    clics et gains = les compteurs cumulés d'Infloww. Même fil, même attente
+    bornée que la vue par période. Ne lève jamais."""
+    return _partenaire_periode("", "", codes, attente)
+
+
+# La part Jessye d'une tranche close de la paie, gardée dans QUINZ_FICHIER à
+# côté de la part MyPuls (« partenaire » : {creatrice, lu, relu, subs}), avec
+# les mêmes règles : seulement une lecture faite APRÈS le dernier jour (ici
+# PARTENAIRE_GEL_RETARD_S après minuit, le retard d'OnlyFans), complète (ni
+# panne ni pagination coupée), subs CONNUS lien par lien (un lien pas lu reste
+# un trou, relu), une valeur gardée ne change plus, sans gain (la paie n'en a
+# pas besoin). Le propriétaire paie la quinzaine du 16 au 31 le 1er : sans ça,
+# ses primes relisaient Infloww à chaque affichage et tombaient à « — » au
+# premier silence.
+def _fin_du_jour(iso: str) -> float:
+    """Minuit (Paris) qui suit le jour `iso`."""
+    from zoneinfo import ZoneInfo
+    d = dt.date.fromisoformat(iso) + dt.timedelta(days=1)
+    return dt.datetime.combine(d, dt.time(0), ZoneInfo("Europe/Paris")).timestamp()
+
+
+def _gel_partenaire(e: Any, codes: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """(liens gardés, codes à lire) de la part Jessye d'une tranche (entrée
+    de QUINZ_FICHIER). Lien par lien : un code absent du disque (lien Jessye
+    neuf, ou qu'Infloww ne connaissait pas) n'oblige pas à relire ceux qui y
+    sont — sinon un seul trou rendait toute la quinzaine à Infloww, et ses
+    primes à « — » au premier silence. Seuls leurs subs servent (la paie)."""
+    p = e.get("partenaire") if isinstance(e, Mapping) else None
+    gardes = _connus(p) if isinstance(p, Mapping) and p.get("creatrice") == PARTENAIRE else {}
+    liens = [{"id": f"{PARTENAIRE}/c{c}", "nom": "", "code": c, "creatrice": PARTENAIRE,
+              "abonnes": gardes[c], "clics": None, "net": None, "net_absent": True}
+             for c in codes if c in gardes]
+    return liens, [c for c in codes if c not in gardes]
+
+
+def _garder_partenaire(du: str, au: str, v: Mapping[str, Any],
+                       maintenant: Optional[float] = None) -> bool:
+    """Garde la part Jessye d'une tranche close (voir plus haut). Vrai si le
+    disque a ces subs-là (écrits ici ou déjà là). Ne lève pas sur une lecture
+    pas gardable : rend faux."""
+    if not PARTENAIRE or not isinstance(v, Mapping) or v.get("erreur") or v.get("tronque"):
+        return False
+    # que des liens créés après la tranche : leurs zéros sont sûrs dès maintenant
+    lu = _f_ou_none(v.get("lu_a")) or (time.time() if v.get("sans_lecture") else None)
+    try:
+        assez_tard = bool(lu) and lu >= _fin_du_jour(au) + PARTENAIRE_GEL_RETARD_S
+    except ValueError:
+        return False
+    if not assez_tard:
+        return False
+    connus = {str(x["code"]): int(x["abonnes"]) for x in v.get("liens") or []
+              if isinstance(x, Mapping) and x.get("creatrice") == PARTENAIRE and x.get("code")
+              and not x.get("manque") and _entier(x.get("abonnes")) is not None}
+    if not connus:
+        return False
+    maintenant = time.time() if maintenant is None else maintenant
+    with _VERROU_Q:
+        c = _lire_json(QUINZ_FICHIER)
+        tr = dict(c.get("tranches") or {}) if isinstance(c.get("tranches"), Mapping) else {}
+        k = _cle_periode(du, au)
+        e = dict(tr[k]) if isinstance(tr.get(k), Mapping) else {}
+        p = e.get("partenaire") if isinstance(e.get("partenaire"), Mapping) else {}
+        gardes = _connus(p)
+        neuf = dict(connus, **gardes)       # une valeur déjà gardée ne change plus
+        if gardes and neuf == gardes:
+            return True
+        e["partenaire"] = {"creatrice": PARTENAIRE, "lu": _t_entree(p, "lu") or lu, "relu": lu, "subs": neuf}
+        # une entrée neuve (part MyPuls pas encore gardée) : « vu » la garde
+        # de l'élagage comme les autres
+        e.setdefault("vu", maintenant)
+        tr[k] = e
+        safe_json.write(QUINZ_FICHIER, {"tranches": _elaguer_tranches(tr, maintenant), "maj": maintenant})
+    return True
 
 
 # ─── une période : les clics US (GetMySocial) ────────────────────────────
@@ -1099,7 +1620,12 @@ def _somme(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
     connus = [x for x in liens if x.get("clics") is not None]
     clics = sum(int(x["clics"]) for x in connus) if connus else None
     subs = sum(int(x.get("abonnes") or 0) for x in liens)
-    net = sum(int(x.get("net") or 0) for x in liens)
+    # le $ / sub sur les liens dont le gain de la période est connu : un lien
+    # Jessye de la page Emy hors de sa vie entière (« net_absent ») n'a pas de
+    # gain daté — compter ses subs sans son gain ferait un $ / sub inventé
+    au_net = [x for x in liens if not x.get("net_absent")]
+    net = sum(int(x.get("net") or 0) for x in au_net)
+    subs_net = sum(int(x.get("abonnes") or 0) for x in au_net)
     # le CVR sur les seuls liens dont Infloww donne les clics : les subs d'un
     # lien sans clics connus, divisés par les clics des autres, le gonflaient
     subs_connus = sum(int(x.get("abonnes") or 0) for x in connus)
@@ -1108,12 +1634,45 @@ def _somme(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
             # « aucun des clics n'a converti »)
             "cvr": (subs_connus * 100.0 / clics) if clics else None,
             # 0 sub : un sub ne « revient » à rien, ce n'est pas 0 $
-            "par_sub": (net / 100.0 / subs) if subs else None}
+            "par_sub": (net / 100.0 / subs_net) if subs_net else None}
 
 
 def _resume_infloww(x: Mapping[str, Any]) -> Dict[str, Any]:
-    return {"id": str(x.get("id") or ""), "nom": str(x.get("nom") or ""), "code": _code_infloww(x),
-            "desactive": bool(x.get("termine"))}
+    r = {"id": str(x.get("id") or ""), "nom": str(x.get("nom") or ""), "code": _code_infloww(x),
+         "desactive": bool(x.get("termine"))}
+    if x.get("creatrice"):
+        # un lien de suivi de l'autre créatrice (page Emy : Jessye, chez Infloww)
+        r["creatrice"] = str(x["creatrice"])
+        if x.get("manque"):
+            r["manque"] = str(x["manque"])
+        if x.get("apres"):
+            r["apres"] = str(x["apres"])
+    if x.get("fin"):
+        # un lien de suivi quitté, compté jusqu'à son dernier jour (« fin »),
+        # ou sur toute la période faute de lecture (« fin_manque »)
+        r["fin"] = str(x["fin"])
+        if x.get("fin_manque"):
+            r["fin_manque"] = str(x["fin_manque"])
+    return r
+
+
+def _part_partenaire(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Ce qui, dans ces liens, vient de l'autre créatrice (page Emy :
+    Jessye) : ses subs lus, ses liens pas lus, ceux dont les clics ou le gain
+    ne sont pas connus sur la période. Rien si elle n'y est pas — ni pour
+    un lien créé après la période (« apres ») : il n'y a rien fait, « dont 0
+    Jessye » sous chaque ligne d'une quinzaine d'avant le 27/10 ne dirait
+    rien."""
+    p = [x for x in liens if x.get("creatrice") and not x.get("apres")]
+    if not p:
+        return {}
+    lus = [x for x in p if x.get("abonnes") is not None]
+    return {"liens": len(p), "subs": sum(int(x["abonnes"]) for x in lus),
+            "manque": len(p) - len(lus),
+            "clics_hors": sum(1 for x in lus if x.get("clics") is None),
+            # le $ / sub ne bouge que pour un lien qui a des subs
+            "avec_subs": sum(1 for x in lus if int(x.get("abonnes") or 0)),
+            "net_hors": sum(1 for x in lus if x.get("net_absent") and int(x.get("abonnes") or 0))}
 
 
 def _cle_nom(nom: Any) -> Tuple[Tuple[int, Any], ...]:
@@ -1136,14 +1695,25 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                tronque: Optional[List[str]] = None, doublons: int = 0, depuis: str = "",
                repli_gms: str = "", erreur: str = "", us_pause: str = "",
                source: str = "Infloww", illisibles: int = 0,
-               periode: Optional[Mapping[str, Any]] = None, desactives: int = 0) -> Dict[str, Any]:
+               periode: Optional[Mapping[str, Any]] = None, desactives: int = 0,
+               partenaire: Optional[Mapping[str, Any]] = None,
+               bornes: Optional[Tuple[str, str]] = None,
+               fins: Optional[Mapping[str, Mapping[str, Any]]] = None) -> Dict[str, Any]:
     """Le tableau par personne, à partir des liens normalisés d'infloww
     (_lien_norm), des liens GetMySocial de l'espace et des clics US relevés.
 
     `source` = « MyPuls » pour une période : mêmes règles (liens DISTINCTS
     par personne, un code partagé compté une fois au total), les liens étant
     ceux que _lire_mypuls a mis à la même forme. `periode` : ce que la page
-    doit en dire (bornes, lecture MyPuls, clics US)."""
+    doit en dire (bornes, lecture MyPuls, clics US).
+
+    Page Emy (PARTENAIRE) : `partenaire` = la part Jessye lue chez Infloww
+    ({liens} à la forme de _entree_partenaire, ou {erreur[, en_cours]} : ses
+    liens sont alors là, subs inconnus) ; `bornes` (du, au) borne les liens de
+    suivi Emy quittés que chaque lien compte en plus (_anciens_trackings),
+    None = tous (depuis toujours) ; `fins` {dernier jour visé : lecture
+    MyPuls du `du` à ce jour} (_fins_quittes) : un lien de suivi quitté avant
+    `au` y prend ses clics et ses subs."""
     us = us or {}
     inf = [x for x in liens_infloww if isinstance(x, Mapping)]
     par_code: Dict[str, List[Mapping[str, Any]]] = {}
@@ -1155,6 +1725,11 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     par_id = {str(l["id"]): l for l in gms_propres}
     ratt, ratt_panne = _cp.rattachements_identite_ou_panne()
     ents, gms_sans_id = entites(liens_gms_, ratt)
+    # la page Emy : la part Jessye (Infloww) et les liens de suivi Emy quittés
+    part = dict(partenaire or {"erreur": "part non lue"}) if PARTENAIRE else {}
+    par_code_p = {str(x.get("code")): x for x in part.get("liens") or [] if isinstance(x, Mapping)}
+    manque_p = str(part.get("erreur") or "")
+    anciens, anciens_panne = _anciens_trackings(gms_propres, bornes) if PARTENAIRE else ({}, "")
 
     lignes: List[Dict[str, Any]] = []
     rattaches: Dict[str, Mapping[str, Any]] = {}    # id Infloww -> lien, une fois
@@ -1162,17 +1737,47 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     for cle, e in ents.items():
         siens: Dict[str, Mapping[str, Any]] = {}    # DISTINCTS : 4 liens GMS -> c85 une fois
         introuvables: List[Dict[str, str]] = []
+        quittes: Dict[str, str] = {}                # id -> dernier jour visé (lien de suivi quitté)
+        actuels: set = set()                        # ids visés aujourd'hui par un de ses liens
         for gid in e["ids"]:
             l = par_id.get(str(gid)) or {}
-            code, raison = code_de_l_url(url_du_lien(l))
+            u = url_du_lien(l)
+            code, raison = code_de_l_url(u)
             glob = par_id.get(ratt.get(str(gid), ""))
-            if not code and glob:
+            if not code and glob and not code_partenaire(u):
                 # Une page d'identité US est une landing : pas d'adresse à elle,
                 # ses boutons visent le lien de suivi de son lien global. Sans
                 # ça, chacune sortait « sans lien de suivi », jusque dans le
                 # message Discord que les VA lisent. Même code que le global :
                 # ses subs ne comptent qu'une fois (siens, par lien Infloww).
-                code, raison = code_de_l_url(url_du_lien(glob))
+                u = url_du_lien(glob)
+                code, raison = code_de_l_url(u)
+            # les liens de suivi Emy que ce lien a quittés (page Emy) : comptés
+            # chez lui, quelle que soit son adresse d'aujourd'hui
+            for a in anciens.get(str(gid)) or []:
+                xs = list(par_code.get(a["code"]) or [])
+                if not xs:
+                    introuvables.append({"nom": nom_gms(l), "code": a["code"],
+                                         "raison": f"lien de suivi c{a['code']}, visé jusqu'au "
+                                                   f"{_jour_court(a['vu'])}, absent des liens de suivi {_de(source)}"})
+                elif bornes and a["vu"] < bornes[1]:
+                    xs = _jusqu_a_vu(xs, a, bornes[0], (fins or {}).get(a["vu"]))
+                for x in xs:
+                    iid = str(x.get("id") or "")
+                    siens[iid] = x
+                    quittes[iid] = max(quittes.get(iid, ""), a["vu"])
+            cp = "" if code else code_partenaire(u)
+            if cp:
+                # un lien de suivi Jessye (page Emy), lu chez Infloww
+                x = par_code_p.get(cp) or (_manque_partenaire(cp, manque_p) if manque_p else None)
+                if x is None:
+                    introuvables.append({"nom": nom_gms(l), "code": cp, "creatrice": PARTENAIRE,
+                                         "raison": f"code c{cp} absent des liens de suivi de "
+                                                   f"{NOM_PARTENAIRE} chez Infloww"})
+                    continue
+                siens[str(x["id"])] = x
+                actuels.add(str(x["id"]))
+                continue
             if code and not par_code.get(code):
                 raison = f"code c{code} absent des liens de suivi {_de(source)}"
             if raison:
@@ -1180,18 +1785,28 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                 continue
             for x in par_code[code]:
                 siens[str(x.get("id") or "")] = x
+                actuels.add(str(x.get("id") or ""))
         for iid, x in siens.items():
             rattaches[iid] = x
             qui.setdefault(iid, []).append(cle)
         u = us.get(cle) or {}
+        resumes = []
+        for iid, x in siens.items():
+            r = _resume_infloww(x)
+            if iid in quittes and iid not in actuels:
+                r["quitte"] = quittes[iid]
+            resumes.append(r)
         ligne = {"cle": cle, "nom": cle, "spam": bool(e.get("spam")), "nb_gms": len(e["ids"]),
-                 "infloww": sorted((_resume_infloww(x) for x in siens.values()),
-                                   key=lambda r: (len(r["code"]), r["code"])),
+                 # ceux de la créatrice de la page d'abord, l'autre ensuite
+                 "infloww": sorted(resumes, key=lambda r: (bool(r.get("creatrice")), len(r["code"]), r["code"])),
                  "introuvables": introuvables,
                  "us": u.get("us"), "us_etat": u.get("etat") or "absent",
                  "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or "",
                  "us_note": u.get("note") or ""}
         ligne.update(_somme(list(siens.values())))
+        pp = _part_partenaire(list(siens.values()))
+        if pp:
+            ligne["part_p"] = pp
         lignes.append(ligne)
 
     comptes = list(rattaches.values())
@@ -1201,23 +1816,53 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     T.update(personnes=len(lignes), liens_infloww=len(comptes),
              us=sum(us_connus) if us_connus else None,
              us_manquants=len(lignes) - len(us_connus))
+    pp_t = _part_partenaire(comptes)
+    if pp_t:
+        T["part_p"] = pp_t
     hors = [x for x in inf if str(x.get("id") or "") not in rattaches]
     hors_lignes = []
     for x in hors:
         r = _resume_infloww(x)
         r.update(_somme([x]))
         hors_lignes.append(r)
-    partages = [{"code": _code_infloww(rattaches[i]), "nom": str(rattaches[i].get("nom") or ""),
-                 "personnes": sorted(p)} for i, p in qui.items() if len(p) > 1]
+    # Un lien de suivi visé par plusieurs lignes est compté chez chacune
+    # (règle d'avant). Gerome (c141) et Yazid (c139, depuis le 28/10 12h30
+    # UTC) l'ont sur leur ligne normale ET leur ligne SPAM : qui en prend les
+    # subs reste au propriétaire ; la page le dit sous CHAQUE ligne, là où il
+    # regarde avant de payer, sans toucher aux montants. Page Emy seulement :
+    # la page Jessye ne change pas.
+    for x in lignes if PARTENAIRE else []:
+        for r in x["infloww"]:
+            autres = sorted((c for c in qui.get(str(r.get("id")), []) if c != x["cle"]), key=_cle_nom)
+            if autres:
+                r["partage_avec"] = autres
+    partages = [dict({"code": _code_infloww(rattaches[i]), "nom": str(rattaches[i].get("nom") or ""),
+                      "personnes": sorted(p)},
+                     **({"creatrice": str(rattaches[i]["creatrice"])} if rattaches[i].get("creatrice") else {}))
+                for i, p in qui.items() if len(p) > 1]
     maj = max([int(x.get("maj") or 0) for x in inf] or [0])
     # Pour le paiement (avec_paie, la page seulement) : le revenu et la date de
     # création de chaque lien rattaché, À PART des lignes — une ligne qui ne
     # porte pas de montant ne peut pas en afficher un par mégarde (Discord lit
     # les lignes, jamais ceci).
-    paie_liens = {iid: {"net": _entier(x.get("net")), "cree": str(x.get("cree") or "")[:10],
-                        "devise": str(x.get("devise") or "")}
+    paie_liens = {iid: dict({"net": _entier(x.get("net")), "cree": str(x.get("cree") or "")[:10],
+                             "devise": str(x.get("devise") or "")},
+                            **({"net_absent": True} if x.get("net_absent") else {}),
+                            **({"manque": True} if x.get("manque") else {}))
                   for iid, x in rattaches.items()}
     return {
+        # la part Jessye de la page Emy : ce que la page en dit (rien ailleurs)
+        "partenaire": ({"creatrice": PARTENAIRE, "nom": NOM_PARTENAIRE, "erreur": manque_p,
+                        "en_cours": bool(part.get("en_cours")), "perime": str(part.get("perime") or ""),
+                        "tronque": list(part.get("tronque") or []), "lu_a": part.get("lu_a"),
+                        "anciens_panne": anciens_panne,
+                        "quittes": sum(1 for x in lignes for r in x["infloww"] if r.get("quitte")),
+                        # liens de suivi quittés comptés sur toute la période,
+                        # faute de lecture jusqu'à leur dernier jour
+                        "fins_manque": sorted({str(r["fin_manque"]) for x in lignes for r in x["infloww"]
+                                               if r.get("fin_manque")}),
+                        "n_fins_manque": sum(1 for x in lignes for r in x["infloww"] if r.get("fin_manque"))}
+                       if PARTENAIRE else {}),
         "_paie_liens": paie_liens, "_gms": list(liens_gms_),
         # le rattachement des pages d'identité lu pour CE tableau : la paie
         # (avec_paie) reprend le même, pas une seconde lecture du registre
@@ -1244,7 +1889,8 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         # une ligne que l'API rend sous une autre forme qu'un objet : comptée,
         # jamais avalée sans trace
         "illisibles": len(liens_infloww) - len(inf) + int(illisibles or 0),
-        "sans_clics": sum(1 for x in comptes if x.get("clics") is None),
+        # ceux de la source de la page ; la part Jessye dit les siens (part_p)
+        "sans_clics": sum(1 for x in comptes if x.get("clics") is None and not x.get("creatrice")),
         "tronque": list(tronque or []), "doublons": int(doublons or 0), "depuis": depuis,
         # quand Infloww a rafraîchi ses compteurs pour la dernière fois
         "maj_infloww": (maj / 1000.0) if maj else None,
@@ -1253,6 +1899,11 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
 
 def _de(source: str) -> str:
     return "d'Infloww" if source == "Infloww" else f"de {source}"
+
+
+def _de_nom(nom: str) -> str:
+    """« de Jessye », « d'Emy »."""
+    return ("d'" if str(nom)[:1].lower() in "aeiouyéèêàâîô" else "de ") + str(nom)
 
 
 def _vide(erreur: str, periode: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
@@ -1267,6 +1918,12 @@ def tableau(us: str = "page") -> Dict[str, Any]:
     arrière-plan), « calcul » (relevé sur place, pour le démon), « cache »
     (aucun appel GetMySocial d'analyse). Ne lève jamais."""
     g = liens_gms()
+    # page Emy : la part Jessye part dans son fil AVANT la lecture Infloww
+    # d'Emy ; les deux courent en même temps, la page n'attend la première que
+    # PARTENAIRE_ATTENTE_S
+    codes_p = _codes_partenaire(g["liens"])
+    if codes_p:
+        _partenaire_toujours(codes_p, attente=0)
     i = _infloww()
     ents, _ = entites(g["liens"])
     erreur = i.get("erreur") or ""
@@ -1280,11 +1937,14 @@ def tableau(us: str = "page") -> Dict[str, Any]:
             _us_pour_la_page(ents)
     except Exception as e:  # les clics US ne font pas tomber la page
         print(f"[infloww-liens] clics US : {type(e).__name__}: {e}", flush=True)
+    # page Emy : les liens Jessye, abonnés comptés un par un (sans ceux datés
+    # de la création du lien), clics et gains cumulés
+    part = _partenaire_toujours(codes_p) if PARTENAIRE and not erreur else None
     return construire(i.get("liens") or [], g["liens"], us=us_depuis_cache(ents),
                       lu_a=i.get("lu_a"), tronque=i.get("tronque"), doublons=i.get("doublons") or 0,
                       depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
                       us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "",
-                      desactives=int(g.get("desactives") or 0))
+                      desactives=int(g.get("desactives") or 0), partenaire=part)
 
 
 def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
@@ -1294,6 +1954,16 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     arrière-plan), « calcul » (sur place), « cache » (aucun appel). Ne lève
     jamais."""
     g = liens_gms()
+    # page Emy : la lecture Infloww de la part Jessye part AVANT celle de
+    # MyPuls, dans son fil ; les deux attentes courent en même temps
+    codes_p = _codes_partenaire(g["liens"])
+    if codes_p:
+        _partenaire_periode(du, au, codes_p, attente=0)
+    # les liens de suivi quittés pendant la période : une lecture MyPuls
+    # jusqu'à chaque dernier jour, lancée tout de suite elle aussi
+    fins_q = _fins_quittes(g["liens"], du, au)
+    for vu in fins_q:
+        _mypuls_periode(du, vu, attente=0)
     m = _mypuls_periode(du, au)
     ents, _ = entites(g["liens"])
     erreur = m.get("erreur") or ""
@@ -1326,7 +1996,10 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     info = per.get("us_info") or {}
     if _pause_gms() and not info.get("plafond") and not info.get("budget"):
         per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
-    return construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per, **commun)
+    part = _partenaire_periode(du, au, codes_p) if PARTENAIRE and not erreur else None
+    fins = {vu: _mypuls_periode(du, vu) for vu in fins_q} if not erreur else {}
+    return construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per,
+                      partenaire=part, bornes=(du, au), fins=fins, **commun)
 
 
 # ─── le paiement des VA, et ce qu'ils rapportent ─────────────────────────
@@ -1915,6 +2588,9 @@ def _garder_tranche(du: str, au: str, v: Mapping[str, Any],
                                 "subs": dict(connus, **_connus(e)), "vu": max(_t_entree(e, "vu"), lu)}
         if e.get("debut"):
             neuf["debut"] = True
+        if isinstance(e.get("partenaire"), Mapping):
+            # la part Jessye gardée de la page Emy (_garder_partenaire) reste
+            neuf["partenaire"] = dict(e["partenaire"])
         tr[k] = neuf
         safe_json.write(QUINZ_FICHIER, {"tranches": _elaguer_tranches(tr, maintenant), "maj": maintenant})
         return dict(neuf)
@@ -2049,27 +2725,51 @@ def _lancer_tranches(cles: List[Tuple[str, str]]) -> Optional[threading.Thread]:
 def _codes_personne(x: Mapping[str, Any]) -> set:
     """Les codes de suivi d'une personne : ceux rattachés dans le tableau, et
     ceux de ses liens GMS que la source ne connaît pas (introuvables avec un
-    code). Un lien GMS sans adresse de suivi n'en a pas."""
-    return ({str(r.get("code")) for r in x.get("infloww") or [] if r.get("code")}
-            | {str(r.get("code")) for r in x.get("introuvables") or [] if r.get("code")})
+    code). Un lien GMS sans adresse de suivi n'en a pas. Ceux de MyPuls
+    seulement : un lien Jessye de la page Emy (« creatrice ») est lu chez
+    Infloww, l'attendre dans une tranche MyPuls la ferait relire sans fin."""
+    return ({str(r.get("code")) for r in x.get("infloww") or [] if r.get("code") and not r.get("creatrice")}
+            | {str(r.get("code")) for r in x.get("introuvables") or []
+               if r.get("code") and not r.get("creatrice")})
 
 
-def _subs_par_personne(liens: List[Any], gms: List[Any]
+def _code_q(r: Mapping[str, Any]) -> str:
+    """Le code d'un lien de suivi dans un trou : « 83 » chez la créatrice de
+    la page, « jessyewdiference/c144 » chez l'autre, « 40@2026-10-27 » pour un
+    lien quitté dont la lecture jusqu'à son dernier jour manque (_lib_code
+    les dit)."""
+    if r.get("creatrice"):
+        return f"{r['creatrice']}/c{r.get('code')}"
+    if r.get("fin_manque"):
+        return f"{r.get('code')}@{r.get('fin')}"
+    return str(r.get("code"))
+
+
+def _subs_par_personne(liens: List[Any], gms: List[Any], bornes: Optional[Tuple[str, str]] = None,
+                       partenaire: Optional[Mapping[str, Any]] = None,
+                       fins: Optional[Mapping[str, Mapping[str, Any]]] = None
                        ) -> Tuple[Dict[str, Optional[int]], Dict[str, List[str]]]:
     """Les subs de chaque personne dans une lecture MyPuls, par la règle du
     tableau (construire : liens DISTINCTS, rattachés par l'adresse), et ses
     codes à trou. None : aucun lien rattaché, un lien dont MyPuls ne donne
     pas les subs, ou un de ses liens absent de la lecture — une prime ne se
     calcule pas sur un compte à trou (une tranche gardée n'a que les subs
-    connus : sans ce dernier cas, un lien manquant y serait compté zéro)."""
-    t = construire(liens, gms)
-    sans = {str(x.get("id")) for x in liens if isinstance(x, Mapping) and x.get("abonnes") is None}
+    connus : sans ce dernier cas, un lien manquant y serait compté zéro).
+    Page Emy : `partenaire` = la part Jessye de la même tranche (Infloww),
+    `bornes` = la tranche (liens de suivi Emy quittés), `fins` = ses
+    lectures jusqu'au dernier jour de ceux quittés avant sa fin ; un lien
+    Jessye pas lu, ou un lien quitté sans sa lecture, est un trou comme un
+    autre."""
+    t = construire(liens, gms, partenaire=partenaire, bornes=bornes, fins=fins)
+    sans = {str(x.get("id")) for x in list(liens) + list((partenaire or {}).get("liens") or [])
+            if isinstance(x, Mapping) and x.get("abonnes") is None}
     out: Dict[str, Optional[int]] = {}
     trous: Dict[str, List[str]] = {}
     for x in t["lignes"]:
         ids = {str(r.get("id")) for r in x.get("infloww") or []}
-        tr = ({str(r.get("code")) for r in x.get("infloww") or [] if str(r.get("id")) in sans}
-              | {str(r.get("code")) for r in x.get("introuvables") or [] if r.get("code")})
+        tr = ({_code_q(r) for r in x.get("infloww") or []
+               if str(r.get("id")) in sans or r.get("manque") or r.get("fin_manque")}
+              | {_code_q(r) for r in x.get("introuvables") or [] if r.get("code")})
         trous[x["cle"]] = sorted(tr, key=lambda c: (len(c), c))
         out[x["cle"]] = None if (not ids or tr) else _entier(x.get("subs"))
     return out, trous
@@ -2513,6 +3213,17 @@ def _revenu(x: Mapping[str, Any], liens_p: Mapping[str, Any], devise_periode: st
     if devise_periode and devise_periode != "USD":
         return (None, f"revenu MyPuls en {devise_periode}, pas en dollars",
                 (f"Revenu donné en {devise_periode} par MyPuls", "pas de calcul en dollars", False))
+    if any((liens_p.get(i) or {}).get("manque") for i in ids):
+        return (None, f"gains {NOM_PARTENAIRE} inconnus : Infloww n'a pas rendu ses liens",
+                (f"Part {NOM_PARTENAIRE} pas lue chez Infloww", "rechargez dans quelques minutes", False))
+    if any((liens_p.get(i) or {}).get("net_absent") for i in ids):
+        # page Emy : Infloww ne date pas le gain d'un lien Jessye (cumul depuis
+        # sa création) ; un revenu sans lui serait un revenu inventé
+        return (None, f"gains {NOM_PARTENAIRE} inconnus sur cette période : Infloww ne donne que le cumul "
+                      "depuis la création du lien, juste seulement pour une période qui commence au plus "
+                      "tard ce jour-là et finit aujourd'hui",
+                (f"Gains {NOM_PARTENAIRE} inconnus sur cette période",
+                 "Infloww ne les date pas : période jusqu'à aujourd'hui", False))
     nets = [(liens_p.get(i) or {}).get("net") for i in ids]
     if any(n is None for n in nets):
         return (None, "revenu illisible pour un de ses liens",
@@ -2594,7 +3305,29 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
         if (q0 and not q0["complete"] and q0["au"] == q0["p_au"]
                 and (not per or a.isoformat() == cfg.get("depuis"))):
             debuts.add(_k_tranche(q0))
-    besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_q.items()}
+    # page Emy : un lien de suivi quitté avant la fin d'une tranche ne compte
+    # que jusqu'à son dernier jour visé, comme dans le tableau (_fins_quittes) :
+    # sa lecture (début de la tranche → ce jour) est une tranche de plus, lue,
+    # gardée et attendue comme les autres. Elle resservira à chaque affichage
+    # de sa quinzaine : gardée pour toujours, comme les morceaux de début.
+    codes_l: Dict[Tuple[str, str], set] = {k: set(c) for k, c in codes_q.items()}
+    sous_q: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+    for k in sorted(codes_q) if PARTENAIRE else []:
+        for vu, cs in _fins_quittes(gms, k[0], k[1]).items():
+            sous_q.setdefault(k, []).append((k[0], vu))
+            codes_l.setdefault((k[0], vu), set()).update(cs)
+            debuts.add((k[0], vu))
+    # page Emy : la part Jessye de chaque tranche, lue chez Infloww PENDANT que
+    # MyPuls lit les siennes (fils lancés ici, attendus plus bas) — sauf celle
+    # d'une tranche close déjà gardée (_gel_partenaire) : aucune lecture. Les
+    # primes se calculent sur les mêmes subs additionnés que le tableau.
+    codes_p = _codes_partenaire(gms) if PARTENAIRE else []
+    gele_p: Dict[Tuple[str, str], Tuple[List[Dict[str, Any]], List[str]]] = {}
+    for k in sorted(codes_q) if codes_p else []:
+        gele_p[k] = _gel_partenaire(disque.get(_cle_periode(*k)), codes_p)
+        if gele_p[k][1]:
+            _partenaire_periode(k[0], k[1], gele_p[k][1], attente=0)
+    besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_l.items()}
     # d'abord les tranches sans aucune lecture, puis les relectures (tranches
     # ouvertes dont la lecture a plus de 10 min, tranches closes à trou)
     a_lire = sorted((k for k, e in besoins.items() if e.get("a_lire")),
@@ -2605,17 +3338,37 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
             f.join(attente)
         maintenant = time.time()
         disque = _q_disque()
-        besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_q.items()}
+        besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_l.items()}
     if time.time() < float(_FIL_Q.get("pause") or 0):
         P["pause"] = str(_FIL_Q.get("raison") or "")
     _toucher_tranches(besoins, debuts, maintenant)
+    # attendue au plus `attente` depuis le départ de son fil (le même délai
+    # que MyPuls, qui courait en même temps) ; une tranche close lue assez
+    # tard est gardée (_garder_partenaire), la suivante ne lira plus Infloww
+    jes_q: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for k in sorted(codes_q) if codes_p else []:
+        gardes, a_lire_p = gele_p[k]
+        if not a_lire_p:
+            jes_q[k] = {"liens": gardes, "gele": True}
+            continue
+        r_p = _partenaire_periode(k[0], k[1], a_lire_p, attente=attente)
+        _garder_partenaire(k[0], k[1], r_p)
+        # le cache de la période rend TOUS les codes lus par le tableau, gardés
+        # compris : sans ce tri, c144 gardé à 27 repassait à sa valeur vive
+        # (99 dans la sonde de la relecture) et la quinzaine close bougeait
+        deja = {str(g.get("code")) for g in gardes}
+        jes_q[k] = dict(r_p, liens=gardes + [x for x in r_p.get("liens") or []
+                                             if str(x.get("code")) not in deja])
     subs_q: Dict[Tuple[str, str], Dict[str, Optional[int]]] = {}
     trous_q: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
     for k, e in besoins.items():
-        if "liens" in e:
-            subs_q[k], trous_q[k] = _subs_par_personne(e["liens"], gms)
-        elif e.get("erreur"):
+        if e.get("erreur") and "liens" not in e:
             P["erreurs"][k] = e["erreur"]
+        if k not in codes_q or "liens" not in e:
+            continue                       # une lecture jusqu'au dernier jour d'un lien quitté
+        fins = {k2[1]: besoins.get(k2) or {} for k2 in sous_q.get(k, [])}
+        subs_q[k], trous_q[k] = _subs_par_personne(e["liens"], gms, bornes=k, partenaire=jes_q.get(k),
+                                                   fins=fins)
     attente_k: set = set()
 
     # 1 bis. les lignes actives des types à fixe : chaque lien GMS de la
@@ -2786,14 +3539,35 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
             detail_q.append({"du": k[0], "au": k[1], "complete": q["complete"], "subs": s})
             if k in subs_q and s is not None:
                 continue
-            if e.get("a_lire") or e.get("en_cours"):
+            tr = (trous_q.get(k) or {}).get(str(x["cle"])) or []
+            # page Emy : ses liens Jessye à trou (Infloww), à part des siens
+            tr_p = [c for c in tr if "/" in c]
+            jq = jes_q.get(k) or {}
+            # et ses liens quittés dont la lecture jusqu'au dernier jour manque
+            k_f = [(k[0], c.split("@", 1)[1]) for c in tr if "@" in c]
+            f_vol = [k2 for k2 in k_f if (besoins.get(k2) or {}).get("a_lire")
+                     or (besoins.get(k2) or {}).get("en_cours")]
+            if e.get("a_lire") or e.get("en_cours") or f_vol or (tr_p and jq.get("en_cours")):
                 attente_q += 1             # (re)lecture demandée ou en vol
                 attente_k.add(k)
+                attente_k.update(f_vol)
+            elif k in subs_q and any(k2 in P["erreurs"] for k2 in k_f):
+                k2 = next(k2 for k2 in k_f if k2 in P["erreurs"])
+                manque_q = manque_q or (f"MyPuls n'a pas répondu pour le {_libelle_periode(*k2)} (liens de "
+                                        f"suivi quittés, comptés jusqu'à leur dernier jour) "
+                                        f"({P['erreurs'][k2][:160]})")
+                court_q = court_q or ("MyPuls n'a pas répondu", "rechargez dans quelques minutes", False)
+            elif k in subs_q and tr_p and len(tr_p) == len(tr):
+                manque_q = manque_q or (
+                    f"subs {NOM_PARTENAIRE} du {_libelle_periode(*k)} inconnus chez Infloww pour "
+                    f"{', '.join(_lib_code(c) for c in tr_p)} ("
+                    + (str(jq["erreur"])[:160] if jq.get("erreur") else "lien absent d'Infloww") + ")")
+                court_q = court_q or (f"Subs {NOM_PARTENAIRE} du {_tranche_lib(*k)} absents d'Infloww",
+                                      "rechargez dans quelques minutes", False)
             elif k in subs_q:
-                tr = (trous_q.get(k) or {}).get(str(x["cle"])) or []
                 manque_q = manque_q or (
                     f"subs du {_libelle_periode(*k)} inconnus chez MyPuls"
-                    + (f" pour {', '.join('c' + c for c in tr)}" if tr else "")
+                    + (f" pour {', '.join(_lib_code(c) for c in tr)}" if tr else "")
                     + " (lien absent ou sans nombre de subs"
                     + (f" ; relu le {_heure(e['trou_relu'])}, relu au plus une fois par heure"
                        if e.get("trou_relu") else "") + ")")
@@ -3543,13 +4317,35 @@ def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
     """Sous le nom, en petit : les liens de suivi comptés, et ce qui manque."""
     d: List[str] = []
     for r in x.get("infloww") or []:
-        s = f'{_e(r.get("nom")) or "(sans nom)"} · c{_e(r.get("code"))}'
+        # page Emy : le même lien de suivi sur une autre ligne (Gerome c141,
+        # normal et SPAM) — compté chez chacune, à trancher avant de payer
+        partage = (f' · <span class="manque">tracking partagé avec {_e(", ".join(r["partage_avec"]))}</span>'
+                   if r.get("partage_avec") else "")
+        if r.get("creatrice") and r.get("manque"):
+            # page Emy : un lien Jessye qu'Infloww n'a pas (encore) rendu
+            d.append(f'<span class="manque">{_e(_lib_code(_code_q(r)))} : pas lu chez Infloww, '
+                     f'ses subs manquent ({_e(r["manque"])})</span>{partage}')
+            continue
+        if r.get("creatrice") and r.get("apres"):
+            # page Emy : un lien Jessye créé après la fin de la période
+            d.append(f'<span>{_e(_lib_code(_code_q(r)))} · créé le {_e(_jour_court(r["apres"]))}, '
+                     f'après la période : 0{partage}</span>')
+            continue
+        lib = _lib_code(_code_q(r)) if r.get("creatrice") else f"c{r.get('code')}"
+        s = f'{_e(r.get("nom")) or "(sans nom)"} · {_e(lib)}'
+        if r.get("quitte"):
+            # un lien de suivi Emy que son lien GMS a quitté (registre du podium)
+            s += f' · visé jusqu\'au {_e(_jour_court(r["quitte"]))}'
+        if r.get("fin_manque"):
+            # compté sur toute la période faute de lecture jusqu'à ce jour-là
+            s += f' · <span class="manque">compté sur toute la période ({_e(r["fin_manque"])})</span>'
         if r.get("desactive"):
             s += ' · <span class="off">désactivé</span>'
-        d.append(f"<span>{s}</span>")
+        d.append(f"<span>{s}{partage}</span>")
     for r in x.get("introuvables") or []:
         nom = f"« {_e(r.get('nom'))} » : " if r.get("nom") else ""
-        d.append(f'<span class="manque">{nom}lien {_e(source)} introuvable — {_e(r.get("raison"))}</span>')
+        d.append(f'<span class="manque">{nom}lien {_e("Infloww" if r.get("creatrice") else source)} '
+                 f'introuvable — {_e(r.get("raison"))}</span>')
     if int(x.get("nb_gms") or 0) > 1:
         d.append(f"<span>{_nb(x['nb_gms'])} liens GetMySocial</span>")
     # Clics US : la date seulement quand elle n'est pas celle du jour. « Pas
@@ -3581,6 +4377,35 @@ def _part_us(clics: Any, us: Any) -> str:
     return f'<div class="det">{_dec(100 * int(clics) / int(us), 0)}\u00a0% des US</div>'
 
 
+def _dets_partenaire(x: Mapping[str, Any]) -> Tuple[str, str, str]:
+    """Sous Clics, Subs et $ / sub (page Emy) : ce que la part Jessye y met,
+    et ce qui en manque \u2014 un chiffre partiel ne passe pas pour entier. Rien
+    sans part Jessye."""
+    pp = x.get("part_p") or {}
+    if not pp:
+        return "", "", ""
+    nom = _e(NOM_PARTENAIRE)
+    n = int(pp.get("liens") or 0)
+
+    def sans(k: int, tous: int, lib_tous: str) -> str:
+        # « hors Jessye » quand tous ses liens manquent ; sinon combien (le
+        # total en mêle des connus et des inconnus : « Emy seule » y mentirait)
+        return lib_tous if k >= tous else f"sans {_nb(k)} lien{'s' if k > 1 else ''} {nom}"
+
+    if pp.get("manque") and pp["manque"] >= n:
+        subs = f'<div class="det"><span class="manque">sans {nom}</span></div>'
+    elif pp.get("manque"):
+        subs = f'<div class="det"><span class="manque">dont {_nb(pp.get("subs"))} {nom}, incomplet</span></div>'
+    else:
+        subs = f'<div class="det">dont {_nb(pp.get("subs"))} {nom}</div>'
+    k_clics = int(pp.get("clics_hors") or 0) + int(pp.get("manque") or 0)
+    clics = f'<div class="det">{sans(k_clics, n, "hors " + nom)}</div>' if k_clics else ""
+    k_net = int(pp.get("net_hors") or 0)
+    par_sub = (f'<div class="det">{sans(k_net, int(pp.get("avec_subs") or 0), _e(NOM_AFFICHE) + " seule")}</div>'
+               if k_net and x.get("par_sub") is not None else "")
+    return clics, subs, par_sub
+
+
 def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri: str, sens: str,
                      cle: str, du: str = "", au: str = "", source: str = "Infloww",
                      paie: Optional[Mapping[str, Any]] = None) -> str:
@@ -3592,7 +4417,10 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     # « Clics Infloww » plutôt que « Clics OF » : le propriétaire (08/10) ne
     # retrouvait pas les clics Infloww à côté des clics US, alors qu'ils y
     # étaient. Sur une période, ces clics viennent de MyPuls : la colonne le dit.
-    cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", f"Clics\u00a0{_e(source)}", "n"),
+    # Page Emy sur une p\u00e9riode : les clics viennent de MyPuls (Emy) ET
+    # d'Infloww (Jessye) \u2014 \u00ab Clics MyPuls \u00bb mentirait, \u00ab Clics OF \u00bb non.
+    lib_clics = "OF" if T.get("part_p") and source != "Infloww" else _e(source)
+    cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", f"Clics\u00a0{lib_clics}", "n"),
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
@@ -3609,24 +4437,26 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     for x in lignes:
         nom = _e(x.get("nom")) or '<span class="faible">(sans nom)</span>'
         us_cl = "" if x.get("us_etat") == "ok" else " vieux"
+        d_clics, d_subs, d_par_sub = _dets_partenaire(x)
         corps.append(f'<tr id="{ancre(x.get("cle"))}"><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
-                     f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}</td>'
-                     f'<td class="n fort">{_nb(x.get("subs"))}</td>'
+                     f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}{d_clics}</td>'
+                     f'<td class="n fort">{_nb(x.get("subs"))}{d_subs}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
-                     f'</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
+                     f'{d_par_sub}</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
                      # le détail du gain : sa propre ligne, pleine largeur, juste dessous
                      + (_ligne_detail(x, P.get("taux"), len(cols)) if avec else ""))
     if not corps:
         corps.append(f'<tr><td class="faible" colspan="{len(cols)}">Aucune personne.</td></tr>')
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
+    t_clics, t_subs, t_par_sub = _dets_partenaire(T)
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
-            f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}</td>'
-            f'<td class="n">{_nb(T.get("subs"))}</td>'
+            f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}{t_clics}</td>'
+            f'<td class="n">{_nb(T.get("subs"))}{t_subs}</td>'
             f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
             f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
-            f'</td>{_cellules_total_paie(P) if avec else ""}</tr>')
+            f'{t_par_sub}</td>{_cellules_total_paie(P) if avec else ""}</tr>')
     return (f'<div class="boite"><table><thead><tr>{"".join(th)}</tr></thead>'
             f'<tbody>{"".join(corps)}</tbody><tfoot>{pied}</tfoot></table></div>')
 
@@ -3657,6 +4487,34 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     per = t.get("periode") or {}
     if per.get("perime"):
         h.append(f'<div class="avert"><b>MyPuls n\'a pas répondu</b> ({_e(per["perime"])}).</div>')
+    # page Emy : la part Jessye (Infloww). Muette ou en cours : la part Emy
+    # reste affichée, et la page dit qui n'a qu'elle
+    pt = t.get("partenaire") or {}
+    if pt:
+        nom_p = _e(pt.get("nom") or NOM_PARTENAIRE)
+        n_sans = sum(1 for x in lignes if (x.get("part_p") or {}).get("manque"))
+        if pt.get("erreur") and n_sans:
+            h.append(f'<div class="avert"><b>Part {nom_p} '
+                     + ("en cours de lecture" if pt.get("en_cours") else "manquante") + "</b> ("
+                     + _e(pt["erreur"]) + f") : pour {_nb(n_sans)} personne{'s' if n_sans > 1 else ''}, les subs "
+                     f"affichés sont ceux d'{_e(NOM_AFFICHE)} seuls (« sans {nom_p} » ou « incomplet » sous "
+                     "les subs).</div>")
+        if pt.get("perime"):
+            h.append(f'<div class="avert"><b>Infloww n\'a pas répondu pour la part {nom_p}</b> '
+                     f'({_e(pt["perime"])}).</div>')
+        if pt.get("tronque"):
+            h.append(f'<div class="avert">Liste Infloww des liens de {nom_p} INCOMPLÈTE : la pagination '
+                     "s'est arrêtée sur " + _e(", ".join(str(x) for x in pt["tronque"])) + ".</div>")
+        if pt.get("anciens_panne"):
+            h.append('<div class="avert">Registre des liens de suivi du podium illisible '
+                     f'({_e(pt["anciens_panne"])}) : les liens de suivi {_e(NOM_AFFICHE)} que les liens '
+                     "GetMySocial ont quittés ne sont comptés chez personne (liste « hors GetMySocial »).</div>")
+        if pt.get("n_fins_manque"):
+            n_f = int(pt["n_fins_manque"])
+            h.append(f'<div class="avert"><b>{_nb(n_f)} lien{"s" if n_f > 1 else ""} de suivi quitté'
+                     f'{"s" if n_f > 1 else ""} compté{"s" if n_f > 1 else ""} sur toute la période</b> '
+                     f'({_e("; ".join(pt.get("fins_manque") or [])[:300])}) : le podium ne les compte que '
+                     "jusqu'à leur dernier jour visé.</div>")
     if t.get("repli_gms"):
         h.append(f'<div class="avert"><b>GetMySocial n\'a pas répondu</b> ({_e(t["repli_gms"])}) : '
                  f'liste des liens reprise du cache du site ({_nb(t.get("nb_gms"))} liens), '
@@ -3693,9 +4551,12 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     if t.get("introuvables"):
         h.append(f'<div class="avert">{_nb(t["introuvables"])} lien(s) GetMySocial sans lien de suivi '
                  f"{_e(source)} en face : la personne est affichée avec « — », pas avec un zéro "
-                 "(détail sous son nom).</div>")
+                 + ("(sauf ce que comptent ses autres liens de suivi ; " if t.get("partenaire") else "(")
+                 + "détail sous son nom).</div>")
     for p in t.get("partages") or []:
-        h.append(f'<div class="avert">Le lien {_e(source)} « {_e(p["nom"])} » (c{_e(p["code"])}) est visé par '
+        de = (f"Infloww de {_e(NOM_PARTENAIRE)}" if p.get("creatrice") else _e(source))
+        nm = f"« {_e(p['nom'])} » " if p.get("nom") or not p.get("creatrice") else ""
+        h.append(f'<div class="avert">Le lien {de} {nm}(c{_e(p["code"])}) est visé par '
                  f'plusieurs personnes ({_e(", ".join(p["personnes"]))}) : compté chez chacune, '
                  "UNE seule fois dans le total.</div>")
     if per:
@@ -3771,11 +4632,51 @@ def _avert_us_periode(per: Mapping[str, Any], lignes: List[Mapping[str, Any]], c
 
 def _titre_periode(du: str, au: str, auj: str) -> str:
     """« Du 21/09 au 26/09 · MyPuls », « Le 26/09 · MyPuls » ou « Depuis
-    toujours · Infloww » : d'où viennent les chiffres, avant tout le reste."""
+    toujours · Infloww » : d'où viennent les chiffres, avant tout le reste.
+    Page Emy : « · MyPuls + Infloww » (la part Jessye vient d'Infloww)."""
     if not du:
         return "Depuis toujours · Infloww"
     f = _jour_long if (du[:4] != auj[:4] or au[:4] != auj[:4]) else _jour_court
-    return (f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · MyPuls"
+    return ((f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · MyPuls"
+            + (" + Infloww" if PARTENAIRE else ""))
+
+
+def _note_partenaire(t: Mapping[str, Any], du: str) -> List[str]:
+    """Ce que la note de la page Emy dit de la part Jessye et des liens de
+    suivi quittés. Rien sur la page Jessye."""
+    pt = t.get("partenaire") or {}
+    if not pt:
+        return []
+    np, nc = _e(pt.get("nom") or NOM_PARTENAIRE), _e(NOM_AFFICHE)
+    n_q = int(pt.get("quittes") or 0)
+    if not du:
+        out = [f"<b>{np}</b> : un lien qui vise {np} compte ce lien de suivi, lu chez Infloww : abonnés "
+               "comptés un par un depuis sa création, sans ceux datés de la création du lien (comme la vue "
+               f"par période et le podium), clics et gains cumulés ; « dont … {np} » sous les subs. Les "
+               f"liens {nc}, eux, gardent les compteurs cumulés d'Infloww",
+               f"<b>Liens de suivi quittés</b> : un lien de suivi {nc} qu'un lien GetMySocial visait avant "
+               f"(registre du podium) compte chez la personne de ce lien, compteurs cumulés (abonnés venus "
+               f"après son départ compris : seule une période les arrête au dernier jour visé) — {_nb(n_q)} "
+               "ici, « visé jusqu'au » sous son nom"]
+    else:
+        out = [f"<b>{np}</b> : un lien qui vise {np} (la plupart depuis le 27/10/2026) compte ce lien de suivi, "
+               f"lu chez Infloww — MyPuls ne voit plus {np} — abonné par abonné, par jour de Paris, les "
+               f"abonnés datés de la création du lien retirés comme au podium ; « dont … {np} » sous les subs ; "
+               "un lien créé après la période y vaut 0, sans lecture",
+               f"<b>Liens de suivi quittés</b> : un lien de suivi {nc} qu'un lien GetMySocial visait encore "
+               "pendant la période (registre du podium) compte chez la personne de ce lien jusqu'au dernier "
+               "jour où il était visé, comme au podium (clics et subs lus dans MyPuls jusqu'à ce jour ; gains "
+               f"de toute la période) — {_nb(n_q)} ici, « visé jusqu'au » sous son nom",
+               f"<b>Clics OF</b> = clics MyPuls des liens {nc} + clics Infloww des liens {np}. Infloww ne date "
+               f"ni les clics ni les gains : ceux d'un lien {np} ne comptent que si la période commence au "
+               "plus tard le jour de sa création et finit aujourd'hui ; sinon « hors " + np + " » sous les "
+               f"clics (CVR sans eux) et « {nc} seule » sous le $ / sub"]
+    if any(r.get("partage_avec") for x in t.get("lignes") or [] for r in x.get("infloww") or []):
+        out.append("« tracking partagé avec » sous un nom : le même lien de suivi compte sur chacune de ces "
+                   "lignes (une fois au total) ; à qui il revient n'est pas tranché ici")
+    if pt.get("lu_a"):
+        out.append(f"Infloww ({np}) lu le {_e(_heure(pt['lu_a']))} (heure de Paris)")
+    return out
 
 
 def _bornes_mypuls(pm: Mapping[str, Any]) -> str:
@@ -3867,15 +4768,20 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 + (f" ({_nb(_budget_jour(len(t['lignes'])))} en tout)" if t.get("lignes") else "")
                 + ", le quota GetMySocial est partagé ; un 0 n'est affiché qu'une fois relu dans la réponse "
                 "brute de GetMySocial",
-                "<b>Clics MyPuls</b> et <b>Subs</b> : visites et abonnés du lien de suivi sur la période, "
+                # page Emy : ces deux phrases parlent de ses liens Emy (la part
+                # Jessye a les siennes, _note_partenaire)
+                f"<b>Clics {'OF' if PARTENAIRE else 'MyPuls'}</b> et <b>Subs</b>"
+                + (f" des liens {_e(NOM_AFFICHE)}" if PARTENAIRE else "")
+                + " : visites et abonnés du lien de suivi sur la période, "
                 "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
                 "clics US",
-                "<b>CVR</b> = subs ÷ clics MyPuls ; <b>$ / sub</b> = gains nets que MyPuls attribue au lien "
-                "sur la période ÷ subs de la période"]
+                f"<b>CVR</b> = subs ÷ clics {'OF' if PARTENAIRE else 'MyPuls'} ; <b>$ / sub</b> = gains nets "
+                "que MyPuls attribue au lien sur la période ÷ subs de la période"]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")
         note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
                     f"{_nb(MYPULS_TTL_S // 60)} min au plus")
+    note += _note_partenaire(t, du)
     if t.get("sans_clics"):
         note.append(f"{_nb(t['sans_clics'])} lien(s) sans nombre de clics chez {_e(source)}")
     if t.get("identites"):
@@ -4341,11 +5247,16 @@ def _note_paie(t: Mapping[str, Any], du: str) -> List[str]:
     P = t.get("paie") or {}
     primes = ", ".join(f"{_nb(b)}{'–' + _nb(PALIERS_PRIMES[i - 1][0] - 1) if i else ' et plus'} +{_montant_court(v)} $"
                        for i, (b, v) in reversed(list(enumerate(PALIERS_PRIMES))))
+    # page Emy : les subs des primes sont ceux du tableau, Emy (MyPuls) + Jessye (Infloww)
+    lus = (f"lus dans MyPuls ({_e(NOM_AFFICHE)}) et Infloww ({_e(NOM_PARTENAIRE)}), comme le tableau"
+           if PARTENAIRE else "lus dans MyPuls")
     note = ["<b>Paiement</b> : réglé par personne (« modifier ») ; <b>Gain / perte</b> = revenu net de la "
             "personne sur la plage − coût (fixe × lignes actives + primes, ou paie au sub), en dollars (vert "
             "si ≥ 0, rouge sinon) ; « — » sans réglage ou quand un élément manque",
             ("<b>Plage</b> : la période affichée, à partir de « payé depuis » s'il tombe dedans ; revenu = "
-             "gains nets MyPuls de la période" if du else
+             "gains nets MyPuls de la période"
+             + (f", plus ceux des liens {_e(NOM_PARTENAIRE)} chez Infloww quand ils sont connus (période "
+                "jusqu'à aujourd'hui, depuis leur création ; sinon « — »)" if PARTENAIRE else "") if du else
              "<b>Plage</b> : de « payé depuis » (sinon de la création du plus ancien lien Infloww de la "
              "personne) à aujourd'hui ; revenu = gains nets Infloww cumulés"),
             "<b>Fixe</b> au prorata des jours : quinzaines du 1er au 15 et du 16 à la fin du mois (paie le 16 "
@@ -4362,10 +5273,10 @@ def _note_paie(t: Mapping[str, Any], du: str) -> List[str]:
             "manque : « — ». « Téléphones » saisi (« modifier ») : ce nombre sur toutes les tranches, quoi "
             "que GetMySocial compte, sans aucun relevé, dit « mis à la main » ; vide : automatique",
             f"<b>Primes</b> par quinzaine, une fois par personne (pas par ligne), sur les subs de la personne "
-            f"lus dans MyPuls, non cumulables (seul le palier atteint compte) : {_e(primes)} ; une quinzaine "
+            f"{lus}, non cumulables (seul le palier atteint compte) : {_e(primes)} ; une quinzaine "
             "coupée par la plage est comptée sur ses seuls jours (« quinzaine incomplète »)",
             "<b>Au sub</b> (sans fixe) : un prix par sub jusqu'au seuil, un autre au-delà, par quinzaine sur "
-            "les subs de la personne lus dans MyPuls, au marginal (0,40 $ jusqu'à 200 puis 0,50 $ : 250 subs = "
+            f"les subs de la personne {lus}, au marginal (0,40 $ jusqu'à 200 puis 0,50 $ : 250 subs = "
             "200 × 0,40 + 50 × 0,50 = 105 $) ; une quinzaine coupée par la plage compte les subs de ses seuls "
             "jours, avec le seuil entier (« quinzaine incomplète »)",
             "Top Performer, Bonus Agence, Bonus Elite et malus : décidés à la main, non comptés"]
@@ -4419,13 +5330,18 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
                     'qu\'il coûte, <span class="nv gn">rouge</span> sinon.' if paie else "") + '</p>')
         if hors:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
-                     f'liens de suivi de Jessye qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
-                     f'</summary>{_table_hors(hors, source)}</details>')
+                     # la créatrice de la page : « de Jessye » s'écrivait aussi sur la page Emy
+                     f'liens de suivi {_e(_de_nom(NOM_AFFICHE))} qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
+                     + (" ni n'a visé pendant la période" if (t.get("partenaire") and du) else
+                        " ni n'a visé" if t.get("partenaire") else "")
+                     + f'</summary>{_table_hors(hors, source)}</details>')
     note = _note(t, du, au, auj)
     if paie and not t.get("erreur"):
         note += _note_paie(t, du)
-    sous = (f"<b>{_e(_titre_periode(du, au, auj))}</b> · @{_e(t.get('creatrice') or CREATRICE)} · "
-            f"GetMySocial « {_e(NOM_EQUIPE)} »")
+    pt = t.get("partenaire") or {}
+    sous = (f"<b>{_e(_titre_periode(du, au, auj))}</b> · @{_e(t.get('creatrice') or CREATRICE)}"
+            + (f" + @{_e(pt.get('creatrice'))}" if pt.get("creatrice") else "")
+            + f" · GetMySocial « {_e(NOM_EQUIPE)} »")
     if not t.get("erreur"):
         sous += f" · {_nb(len(lignes))} personnes"
     perso = ""
@@ -4581,6 +5497,9 @@ def page(args: Mapping[str, Any], cle: str = "", paie: bool = False, lien_perso:
 # chez Emy) ; réglages de paie, clés, clics GetMySocial (par lien GMS, sans
 # créatrice) et taux de change restent communs.
 PROFILS: Dict[str, Tuple[str, str]] = {"emy": ("emy.brw", "Emy")}
+# la créatrice dont la page additionne la part (voir PARTENAIRE) : le 27/10,
+# les liens de la page Emy sont passés sur Jessye
+PARTENAIRES: Dict[str, Tuple[str, str]] = {"emy": (pd.CREATRICE_JESSYE, "Jessye")}
 _COPIES: Dict[str, Any] = {}
 _VERROU_COPIES = threading.Lock()
 
@@ -4608,6 +5527,7 @@ def profil(nom: Any) -> Any:
             spec.loader.exec_module(m)
             m.PROFIL = nom
             m.CREATRICE, m.NOM_AFFICHE = PROFILS[nom]
+            m.PARTENAIRE, m.NOM_PARTENAIRE = PARTENAIRES.get(nom, ("", ""))
             m.QUINZ_FICHIER = DATA_DIR / f"infloww_liens_quinzaines_{nom}.json"
             m.LIGNES_FICHIER = DATA_DIR / f"infloww_liens_lignes_{nom}.json"
             m.ETAT_FICHIER = DATA_DIR / f"infloww_liens_discord_{nom}.json"
