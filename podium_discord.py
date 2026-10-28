@@ -4700,13 +4700,23 @@ def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:
     espaces (_liens_twitter), rattachés par leur tracking au registre de Twitter (« VA 3 -
     Roucham 1 ( normal ) » → emy.brw/c42 → VA 12), comme le podium de
     Twitter. Un lien sans tracking connu, ou dont les trackings disent deux
-    VA, n'est pas compté ; c'est dit au journal, une fois par liste."""
-    regs = _lire_registre().get("trackings") or {}
+    VA, n'est pas compté ; c'est dit au journal, une fois par liste. Un lien
+    dont le tracking attend encore son numéro compte aux comptes internes si
+    tous ses numéros possibles en sont (_internes_en_attente)."""
+    reg = _lire_registre()
+    regs = reg.get("trackings") or {}
+    attente = _internes_en_attente(reg)
     out: Dict[int, List[str]] = {}
     ecartes: List[str] = []
     for l in liens:
-        nums = {int(regs[t]["numero"]) for t in trackings_du_lien(l)
+        ts = trackings_du_lien(l)
+        nums = {int(regs[t]["numero"]) for t in ts
                 if isinstance(regs.get(t), dict) and str(regs[t].get("numero") or "").isdigit()}
+        if not nums:
+            # 27/10/2026 : les liens de JESSY LE RETOUR passés sur Jessye
+            # sortaient de Threads 142 pour toute la période, clics d'avant
+            # compris, le temps que leur tracking prenne son numéro
+            nums = {attente[t] for t in ts if t in attente}
         if len(nums) != 1:
             ecartes.append(f'{_nom_du_lien(l)} ({"aucun VA" if not nums else "VA " + "/".join(map(str, sorted(nums)))})')
             continue
@@ -5951,6 +5961,7 @@ def texte_internes() -> str:
     reg = _lire_registre()
     actifs = {int(e["numero"]) for e in (reg.get("trackings") or {}).values()
               if isinstance(e, dict) and e.get("actif") and str(e.get("numero") or "").isdigit()}
+    actifs |= set(_internes_en_attente(reg).values())     # comptés eux aussi
     noms = _noms_registre()
     qui = [noms.get(n) or f"VA {n}" for n in sorted(numeros_internes(reg) & actifs)]
     return f"comptes internes ({len(qui)} comptes) : " + ", ".join(qui)
@@ -5986,7 +5997,10 @@ def _reunir(cl: Dict[str, Any], gid: str, libs: Dict[str, int], tri) -> Dict[str
                              "clics": sum(int(x.get("clics") or 0) for x in dedans),
                              "liens": sum(int(x.get("liens") or 0) for x in dedans),
                              "spam": False, "model": "", "interne": True,
-                             "comptes": len(dedans) + len(sans), "sans_releve": sorted(sans)}
+                             "comptes": len(dedans) + len(sans),
+                             # « partiel » : Infloww muet, sa part Jessye manque (_avec_jessye)
+                             "sans_releve": sorted(sans + [str(x["va"]) for x in dedans
+                                                           if x.get("partiel")])}
         for k in ("clics_subs", "gbl"):
             if any(k in x for x in dedans):
                 f[k] = sum(int(x.get(k) or 0) for x in dedans)
@@ -6096,6 +6110,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
         return cl
     try:
         if g == TWITTER_ID and src in ("tracking", "tracking_abonnes"):
+            if src == "tracking_abonnes":
+                cl = _avec_jessye(cl, debut, fin)       # voir INTERNES_JESSYE
             out = _reunir(cl, g, {f"VA {n}": n for n in numeros_internes()}, _tri_tracking)
             if src == "tracking_abonnes":
                 _TW_INTERNES[(debut.isoformat(), fin.isoformat(), bool(_BONUS_EN_COURS.get()))] = (
@@ -6201,6 +6217,11 @@ CREATRICE_INFLOWW = "emy.brw"
 INFLOWW_FANS_S = 1800
 _INFLOWW_FANS: Dict[str, Tuple[float, int, Dict[str, int]]] = {}
 _INFLOWW_DITS: set = set()
+#: une créatrice qu'Infloww n'a pas rendue n'est pas relue avant ça : un trou
+#: réseau coûte ~94 s par appel (3 essais de 30 s), et chaque passage horaire
+#: la demande 3 ou 4 fois (semaine, quinzaine, Agency, bonus)
+INFLOWW_MUET_S = 600
+_INFLOWW_MUET: Dict[str, float] = {}
 _BONUS_EN_COURS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "podium_bonus_en_cours", default=False)
 
@@ -6211,11 +6232,13 @@ def _dire_infloww(cle: str, texte: str) -> None:
         print(f"[podium] {texte}", flush=True)
 
 
-def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str) -> Dict[str, int]:
+def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str, plancher_ms: int = 0) -> Dict[str, int]:
     """{jour de Paris : abonnés} d'un lien de suivi Infloww. TOUTES les pages de
     /v1/linkfans : ses lignes ne sont pas rangées par date (s'arrêter aux
     vieilles donnait 57 abonnés à c35 le 24/10 au lieu de 122). Les lignes en
-    double (même id) comptent une fois ; le curseur, comme infloww.fans_lien."""
+    double (même id) comptent une fois ; le curseur, comme infloww.fans_lien.
+    Les lignes datées de `plancher_ms` ou avant ne comptent pas (subs_infloww :
+    la création du lien), et c'est dit au journal."""
     from zoneinfo import ZoneInfo
     paris = ZoneInfo("Europe/Paris")
     lignes: Dict[str, Dict[str, Any]] = {}
@@ -6241,22 +6264,35 @@ def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str) -> Dict[str, int]:
     else:
         raise RuntimeError(f"lien {lien_id} : plus de pages de fans que le garde-fou")
     out: Dict[str, int] = {}
+    ecartes = 0
     for y in lignes.values():
         ms = int(y.get("subscribedTime") or 0)
-        if ms:
+        if ms and ms <= plancher_ms:
+            ecartes += 1
+        elif ms:
             j = dt.datetime.fromtimestamp(ms / 1000, paris).date().isoformat()
             out[j] = out.get(j, 0) + 1
+    if ecartes:
+        _dire_infloww(f"creation:{lien_id}:{ecartes}",
+                      f"lien Infloww {lien_id} : {ecartes} abonné(s) datés de sa création, "
+                      "avant que GetMySocial ne l'envoie, pas comptés")
     return out
 
 
-def subs_infloww(jour: str, trackings: set) -> Optional[Dict[str, int]]:
+def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
+                 creatrice: str = CREATRICE_INFLOWW) -> Optional[Dict[str, int]]:
     """{« emy.brw/cNN » : abonnés du jour} chez Infloww, pour ceux de
-    `trackings` qu'Infloww connaît ; None s'il ne répond pas."""
+    `trackings` qu'Infloww connaît ; None s'il ne répond pas. Avec `au` et
+    `creatrice` : du `jour` au `au` compris, chez elle (les trackings Jessye
+    des comptes internes, voir INTERNES_JESSYE)."""
+    au = au or jour
+    if time.time() < _INFLOWW_MUET.get(creatrice, 0):
+        return None                          # muet il y a peu : dit au journal à ce moment-là
     try:
         import infloww as iw
-        c = iw.creatrice(CREATRICE_INFLOWW)
+        c = iw.creatrice(creatrice)
         if not c:
-            raise RuntimeError(f"créatrice {CREATRICE_INFLOWW} inconnue d'Infloww")
+            raise RuntimeError(f"créatrice {creatrice} inconnue d'Infloww")
         cid = str(c["id"])
         liens = {str(l.get("code")): l for l in iw.liens(cid, "TRACKING")["liens"]}
         out: Dict[str, int] = {}
@@ -6266,12 +6302,24 @@ def subs_infloww(jour: str, trackings: set) -> Optional[Dict[str, int]]:
                 continue                     # inconnu d'Infloww : MyPuls pour lui
             g = _INFLOWW_FANS.get(str(l["id"]))
             if not (g and g[1] == int(l.get("abonnes") or 0) and time.time() - g[0] < INFLOWW_FANS_S):
+                # Jessye, 27/10 : 5 « abonnés » de c135 et 1 de c144 datés à la
+                # seconde de la création du lien, 50 min avant que GetMySocial
+                # n'y envoie personne (les vrais arrivent vers 16h41). Le bonus
+                # d'Emy garde sa règle : ses liens ont des semaines.
+                plancher = (int(l.get("cree_ms") or 0) + 60_000
+                            if creatrice != CREATRICE_INFLOWW and l.get("cree_ms") else 0)
                 g = (time.time(), int(l.get("abonnes") or 0),
-                     _abonnes_par_jour_infloww(iw, cid, str(l["id"])))
+                     _abonnes_par_jour_infloww(iw, cid, str(l["id"]), plancher))
                 _INFLOWW_FANS[str(l["id"])] = g
-            out[t] = int(g[2].get(jour, 0))
+            out[t] = sum(int(n) for j, n in g[2].items() if jour <= j <= au)
         return out
     except Exception as e:                                   # noqa: BLE001
+        if creatrice != CREATRICE_INFLOWW:
+            _INFLOWW_MUET[creatrice] = time.time() + INFLOWW_MUET_S
+            _dire_infloww(f"muet:{creatrice}:{jour}:{au}:{type(e).__name__}",
+                          f"Infloww muet pour {creatrice} du {jour} au {au} "
+                          f"({type(e).__name__}: {str(e)[:120]})")
+            return None
         _dire_infloww(f"muet:{jour}:{type(e).__name__}",
                       f"Infloww muet pour le bonus du {jour} ({type(e).__name__}: {str(e)[:120]}) : "
                       "les abonnés d'Emy restent ceux de MyPuls")
@@ -6310,3 +6358,139 @@ def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:   # noqa:
         return _rafraichir_bonus_mypuls(gid, jour)
     finally:
         _BONUS_EN_COURS.reset(jeton)
+
+
+# ─── comptes internes : leurs trackings Jessye, lus chez Infloww ─────────
+# Le 27/10/2026 vers 16h40, 31 liens de JESSY LE RETOUR sont passés de leurs
+# trackings Emy (emy.brw/c17…c111) aux trackings Jessye (jessyewdiference/
+# c132…c158). MyPuls ne voit plus Jessye depuis le 11/10 ; Infloww, si. Le
+# relevé de 17h a mis ces 25 trackings « en attente » et les 27 numéros qu'ils
+# citent « sans relevé » : VA 41 est passé de 398 subs (bonus du 26/10) à 3 le
+# 27, 0 le 28, la semaine à 13, et Instagram VA 141 avec lui ; Threads 142
+# perdait ces liens sur toute la période. Propriétaire, 28/10 : « il faut bien
+# additionner de chez Jesse plus de chez Emy », « c'est toujours les mêmes
+# personnes au même lien ». Pour les comptes internes seulement (les VA
+# Discord n'ont pas de tracking Jessye), chaque tracking compté UNE fois, à
+# sa source : Emy, Lia, Seren chez MyPuls (Emy chez Infloww pendant le bonus
+# du jour, enveloppe de _lire_mypuls), Jessye chez Infloww. Un tracking en
+# attente dont tous les numéros possibles sont internes compte tout de suite
+# (c133 : VA 27 ou 137 ; c136 : 43 ou 58 — la ligne réunie est la même). Le
+# registre et les liens ne sont pas touchés. Infloww muet : la part MyPuls
+# reste comptée, ces comptes passent « sans relevé » dans la ligne et c'est
+# dit au journal. POUR REVENIR : INTERNES_JESSYE = False.
+INTERNES_JESSYE = True
+CREATRICE_JESSYE = "jessyewdiference"
+
+
+def _internes_en_attente(reg: Dict[str, Any], internes: Optional[set] = None) -> Dict[str, int]:
+    """{tracking en attente au registre : numéro sous lequel le compter} quand
+    TOUS ses numéros possibles sont des comptes internes : le plus petit. Un VA
+    Discord parmi eux : rien, il reste sans relevé (_va_en_doute)."""
+    if not (INTERNES_JESSYE and INTERNES_REUNIS):
+        return {}
+    internes = numeros_internes(reg) if internes is None else internes
+    out: Dict[str, int] = {}
+    for t, a in (reg.get("attente") or {}).items():
+        if not t.startswith(CREATRICE_JESSYE + "/"):
+            continue                        # Emy, Lia, Seren : MyPuls les numérote seul, en 2 jours
+        nums = {int(x) for x in a.get("numeros") or [] if str(x).isdigit()}
+        if nums and nums <= internes and t not in (reg.get("trackings") or {}):
+            out[t] = min(nums)
+    return out
+
+
+def _avec_jessye(cl: Dict[str, Any], debut: dt.date, fin: dt.date) -> Dict[str, Any]:
+    """Twitter, en abonnés, avant _reunir : les lignes « VA n » des comptes
+    internes qui ont un tracking Jessye (au registre ou en attente), refaites
+    avec ses abonnés lus chez Infloww. Leur part MyPuls est celle que le
+    classement vient de lire (par_tracking) : aucun appel MyPuls de plus.
+    Sans par_tracking (un classement qui ne sort pas de _classement_tracking),
+    rien n'est refait : sa part MyPuls ne se connaîtrait pas."""
+    if (not INTERNES_JESSYE or not isinstance(cl, dict) or cl.get("erreur")
+            or "par_tracking" not in cl):
+        return cl
+    try:
+        d0, d1 = debut.isoformat(), fin.isoformat()
+        reg = _lire_registre()
+        internes = numeros_internes(reg)
+        jessye = CREATRICE_JESSYE + "/"
+        # les trackings vivants sur la période, comme _classement_tracking
+        par_n: Dict[int, List[Tuple[str, str]]] = {}
+        for t, e in reg["trackings"].items():
+            if str(e.get("numero") or "").isdigit() and int(e["numero"]) in internes:
+                fin_t = d1 if e.get("actif") else min(d1, str(e.get("vu") or ""))
+                if fin_t >= d0:
+                    par_n.setdefault(int(e["numero"]), []).append((t, fin_t))
+        pris = {t: n for t, n in _internes_en_attente(reg, internes).items()
+                if t.startswith(jessye) and str(reg["attente"][t].get("premier") or "") <= d1}
+        for t, n in pris.items():
+            par_n.setdefault(n, []).append((t, d1))
+        a_lire: Dict[str, set] = {}
+        for t, fin_t in (x for ts in par_n.values() for x in ts):
+            if t.startswith(jessye):
+                a_lire.setdefault(fin_t, set()).add(t)
+        if not a_lire:
+            return cl
+        jes: Optional[Dict[str, int]] = {}
+        for fin_t, ts in sorted(a_lire.items()):
+            r = subs_infloww(d0, ts, au=fin_t, creatrice=CREATRICE_JESSYE)
+            if r is None:
+                jes = None
+                break
+            jes.update(r)
+        # restent sans relevé : un tracking en doute, ou en attente sans être
+        # pris ici (la règle de _classement_tracking et de _va_en_doute)
+        bloques, _ = _va_en_doute({"trackings": reg["trackings"], "attente": {}}, d0, d1)
+        for t, a in reg["attente"].items():
+            if t not in pris and str(a.get("premier") or "") <= d1:
+                bloques.update(int(x) for x in a.get("numeros") or [] if str(x).isdigit())
+        lus, zeros = cl.get("par_tracking") or {}, set(cl.get("introuvables") or [])
+        illis = set(cl.get("illisibles") or [])
+        lignes = {str(x.get("va")): x for x in cl.get("lignes") or []}
+        liberes = set(par_n) | {int(x) for t in pris for x in reg["attente"][t].get("numeros") or []
+                                if str(x).isdigit()}
+        partiels: List[str] = []
+        inconnus: List[str] = []
+        for n in sorted(liberes - bloques):
+            va, ts = f"VA {n}", par_n.get(n, [])
+            if va not in illis and (va not in lignes or not any(t.startswith(jessye) for t, _ in ts)):
+                continue                    # inconnu du classement, ou sans Jessye et déjà lu
+            total, partiel = 0, False
+            for t, _f in ts:
+                if not t.startswith(jessye):
+                    if t not in lus and t not in zeros:
+                        break               # MyPuls ne l'a pas rendu : sans relevé, comme avant
+                    total += int(lus.get(t) or 0)
+                elif jes is None:
+                    partiel = True          # sa part MyPuls seule, et c'est dit
+                else:
+                    total += int(jes.get(t) or 0)
+                    if t not in jes:
+                        inconnus.append(t)
+            else:
+                illis.discard(va)
+                if ts:
+                    lignes[va] = dict(lignes.get(va) or {"va": va, "numero": n, "spam": False,
+                                                         "model": ""},
+                                      clics=total, liens=len(ts), partiel=partiel)
+                if partiel:
+                    partiels.append(va)
+        if jes is not None:
+            _dire_infloww(f"jessye:{d0}:{d1}:{len(jes)}",
+                          f"comptes internes du {d0} au {d1} : {len(jes)} tracking(s) Jessye lus "
+                          f"chez Infloww ({sum(jes.values())} abonnés), dans {libelle_interne(TWITTER_ID)}")
+        if partiels:
+            _dire_infloww(f"jessye-muet:{d0}:{d1}:{','.join(partiels)}",
+                          f"comptes internes du {d0} au {d1} : Infloww muet, la part Jessye de "
+                          f"{', '.join(partiels)} manque à {libelle_interne(TWITTER_ID)} "
+                          "(leur part MyPuls y est)")
+        if inconnus:
+            _dire_infloww(f"jessye-inconnus:{','.join(sorted(inconnus))}",
+                          f"{len(inconnus)} tracking(s) Jessye des comptes internes inconnus "
+                          f"d'Infloww, comptés zéro : {', '.join(sorted(inconnus)[:8])}")
+        return dict(cl, lignes=sorted(lignes.values(), key=_tri_tracking),
+                    illisibles=sorted(illis))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] comptes internes : part Jessye non comptée ({type(e).__name__}: {e})",
+              flush=True)
+        return cl

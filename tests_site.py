@@ -26877,7 +26877,7 @@ try:
     _defs = [m.group(1) for m in _reI.finditer(r"^def (\w+)", _srcP, _reI.M)]
     _ou = [n for n in _defs
            if _reI.search(r"import infloww\b", _srcP.split(f"\ndef {n}(", 1)[1].split("\ndef ", 1)[0])]
-    check("… dans le podium, la seule lecture d Infloww est celle du bonus du jour (subs_infloww)",
+    check("… dans le podium, Infloww n est lu que par subs_infloww (bonus du jour, Jessye des comptes internes)",
           _ou == ["subs_infloww"], str(_ou))
     check("la paie ne lit pas Infloww",
           not any(("paie" in _f or "revenus" in _f) for _f in _importeurs
