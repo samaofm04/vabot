@@ -86,6 +86,21 @@ class FauxGMS(types.ModuleType):
             return {"ok": True, "data": copy.deepcopy(l)}
         return {"ok": False, "error": f"outil {outil} inattendu"}
 
+    # la règle des pays (liens_va.poser_pays) passe par gms.get_link / update_link
+    def get_link(self, lid, team_id=None):
+        r = self._call_tool("get_link", {"link_id": lid})
+        return {"ok": r["ok"], "link": r.get("data"), "error": r.get("error")}
+
+    def update_link(self, lid, champs, team_id=None):
+        self.appels.append(("pays", lid))
+        l = self.liens.get(lid)
+        if l is None:
+            return {"ok": False, "error": "link_not_found"}
+        for k in ("geofilters", "buttons"):
+            if k in champs:
+                l[k] = copy.deepcopy(champs[k])
+        return {"ok": True, "link": copy.deepcopy(l)}
+
 
 def direct(lid, url):
     return {"id": lid, "type": "directlink", "url": url, "buttons": None,
@@ -179,6 +194,18 @@ try:
     check("Agency (landing) : seul le bouton OnlyFans change, le nom de la page reste",
           r.get("ok") and b[0]["url"] == f"{PROFIL}/c64" and b[1]["url"] == "https://instagram.com/x"
           and LIENS["lnk_ag63"]["display_name"] == "Instagram VA 63 @roucham", (r, b))
+
+    # ── la règle des pays suit la model (29/10/2026) ──
+    geo = LIENS["lnk_tw32"].get("geofilters") or []
+    f = lv.lien_de(TW, "u32")
+    check("pays : les autres pays partent sur le compte de la NOUVELLE model, plus l'ancienne",
+          len(geo) == 250 and {x["destination_url"] for x in geo} == {PROFIL}
+          and f.get("pays") is True, ({x["destination_url"] for x in geo}, f.get("pays_erreur")))
+    check("… sa variante Seren (copie figée) est notée à recopier : « variante.pays » : false",
+          (f.get("variante") or {}).get("pays") is False and f["variante"].get("posee") is True, f)
+    check("… landing : la liste sur le bouton OnlyFans, vers la nouvelle model",
+          {x["destination_url"] for x in (b[0].get("geofilters") or [])} == {PROFIL}
+          and len(b[0]["geofilters"]) == 250 and "geofilters" not in b[1], b)
 
     # ── lien coupé ──
     r = lv.passer_sur(TW, "u31", LIA, PROFIL)

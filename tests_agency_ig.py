@@ -70,6 +70,8 @@ class FauxGMS(types.ModuleType):
     def create_directlink(self, sc, url, nom="", team_id=None, deeplink_mode=""):
         self.appels.append(("direct", sc, url, nom, team_id))
         self.deeplink = deeplink_mode
+        self.liens = getattr(self, "liens", {})
+        self.liens[f"lnk_{sc}"] = {"type": "directlink", "url": url}
         return {"ok": True, "link": {"id": f"lnk_{sc}", "url": url}}
 
     refus_maj = False
@@ -79,10 +81,21 @@ class FauxGMS(types.ModuleType):
         # la copie d'une landing de JESSY LE RETOUR : la page Emy, son bouton
         # vers le tracking d'un AUTRE VA (celui du gabarit)
         self.liens = getattr(self, "liens", {})
-        self.liens[f"lnk_{sc}"] = {"buttons": [
+        self.liens[f"lnk_{sc}"] = {"type": "landing", "buttons": [
             {"label": "“exclusive” stuff lol ", "url": "https://onlyfans.com/emy.brw/c27",
              "button_effect": "2", "container_color": "#d99be3"}]}
         return {"ok": True, "link": {"id": f"lnk_{sc}", "url": url}}
+
+    # la règle des pays (liens_va.poser_pays) passe par gms.get_link / update_link
+    def get_link(self, lid, team_id=None):
+        l = getattr(self, "liens", {}).get(lid)
+        return {"ok": l is not None, "link": json.loads(json.dumps(l)) if l else None,
+                "error": "" if l else "link_not_found"}
+
+    def update_link(self, lid, champs, team_id=None):
+        self.appels.append(("pays", lid))
+        self.liens[lid].update(json.loads(json.dumps(champs)))
+        return {"ok": True, "link": self.liens[lid]}
 
     def disable_link(self, lid):
         self.appels.append(("disable", lid))
@@ -190,6 +203,12 @@ try:
           and b0["label"].startswith("“exclusive”"), b0)
     check("… un tracking chez Emy, au nom « Instagram VA 27 @zaid014787 » (landing)",
           suivis == [("Instagram VA 27 @zaid014787", None)], suivis)
+    page = g.liens[f'lnk_{r["shortcode"]}']
+    check("… pays (29/10/2026) : hors US/CA/AU/GB/NZ/IE, le bouton OnlyFans mène au compte de base, "
+          "rien sur la page",
+          len(b0.get("geofilters") or []) == 250 and "geofilters" not in page
+          and {x["destination_url"] for x in b0["geofilters"]} == {"https://onlyfans.com/emy.brw"}
+          and lv.lien_de(AG, "u1").get("pays") is True, (len(b0.get("geofilters") or []), page.keys()))
     g, suivis = monde()
     g.refus_maj = True
     r = lv.creer_pour(AG, "u3", "refus")
@@ -210,6 +229,10 @@ try:
           and not g.de("duplicate"), g.appels)
     check("… avec le deeplink « pageload » (sortir du navigateur d'Instagram)",
           getattr(g, "deeplink", "") == "pageload")
+    geo = g.liens[f'lnk_{r["shortcode"]}'].get("geofilters") or []
+    check("… et la liste des pays sur le lien direct, vers le compte de base",
+          len(geo) == 250 and {x["destination_url"] for x in geo} == {"https://onlyfans.com/emy.brw"},
+          len(geo))
     f = lv.lien_de(AG, "u1")
     check("… la fiche : numéro, tracking, lien", f.get("numero") == 27
           and f.get("tracking", "").endswith("/c300") and f.get("link_id", "").startswith("lnk_"), f)

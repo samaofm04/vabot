@@ -552,8 +552,10 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
 # Propriétaire, 29/10/2026 : « dès que les mecs ne sont pas des USA,
 # Australie, Canada, les pays en gros anglophones qui ont de l'argent, il faut
 # que tu les renvoies vers le lien qui n'a pas de tracking link, juste le lien
-# du compte de base ». Un visiteur d'ailleurs part sur le profil OnlyFans de
-# la model, sans tracking : son abonnement ne compte pour aucun VA.
+# du compte de base ». Un visiteur d'ailleurs part sur le compte OnlyFans de
+# la model, sans tracking : son abonnement ne compte pour aucun VA. La part
+# Seren aussi : ses autres pays partent sur le compte de base de la model du
+# LIEN (« juste le lien du compte de base de Lia »).
 # GetMySocial n'a pas de « sinon » : on liste tous les AUTRES pays, la
 # destination du lien (le tracking) reste celle des pays cibles. Vérifié le
 # 29/10 sur un lien d'essai : un pays absent de la liste va à la destination,
@@ -574,18 +576,47 @@ TOUS_LES_PAYS = (
     "PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN "
     "SO SR SS ST SV SX SY SZ TA TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY "
     "UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW").split()
+#: Au-delà, un lien dont la règle des pays échoue encore attend la main.
+ESSAIS_PAYS = 5
+
+_RE_COMPTE_OF = re.compile(r"^(https?://(?:www\.)?onlyfans\.com/[^/?#]+)/?(?:[/?#]|$)", re.I)
 
 
-def regles_pays() -> list:
-    """Les geofilters d'un lien de VA : chaque pays hors des cibles vers le
-    profil OnlyFans de la model, sans tracking. [] quand la règle est coupée."""
-    p = config().get("pays", {"cibles": list(PAYS_CIBLES)})
-    if not isinstance(p, dict) or not p:
+def base_de(url: Any) -> str:
+    """Le compte de base d'un tracking OnlyFans, sans son code :
+    « https://onlyfans.com/liasxcret » pour « …/liasxcret/c63 ». "" ailleurs."""
+    m = _RE_COMPTE_OF.match(str(url or "").strip())
+    return m.group(1) if m else ""
+
+
+def cibles_pays() -> Optional[set]:
+    """Les pays qui gardent le tracking ; None quand la règle est coupée
+    (clé « pays » : {}). Une clé mal écrite lève ValueError plutôt que de
+    deviner : {"cibles": "US"} lu lettre par lettre, ou « UK » au lieu de
+    « GB », enverrait des pays cibles sur le compte de base sans un mot."""
+    c = config()
+    if "pays" not in c:
+        return set(PAYS_CIBLES)
+    p = c["pays"]
+    if isinstance(p, dict) and not p:
+        return None
+    if not isinstance(p, dict) or not isinstance(p.get("cibles"), list) or not p["cibles"]:
+        raise ValueError('clé « pays » illisible : {} ou {"cibles": ["US", …]}')
+    cibles = {str(x).strip().upper() for x in p["cibles"]}
+    inconnus = sorted(cibles - set(TOUS_LES_PAYS))
+    if inconnus:
+        raise ValueError(f"pays cibles inconnus {inconnus} (codes ISO : GB, pas UK)")
+    return cibles
+
+
+def regles_pays(base: str) -> list:
+    """Les geofilters d'un lien de VA : chaque pays hors des cibles vers `base`,
+    le compte de base de la model. [] quand la règle est coupée."""
+    cibles = cibles_pays()
+    if cibles is None:
         return []
-    base = profil_of(config().get("creator_id"))
-    if not base:
-        raise ValueError(f"profil OnlyFans inconnu pour la model {config().get('creator_id')}")
-    cibles = {str(c).upper() for c in (p.get("cibles") or PAYS_CIBLES)}
+    if not base or base_de(base) != base:
+        raise ValueError(f"compte de base illisible : {base!r}")
     try:
         from babel import Locale
         noms = Locale("en").territories
@@ -595,39 +626,52 @@ def regles_pays() -> list:
             for c in TOUS_LES_PAYS if c not in cibles]
 
 
-def poser_pays(lid: str, equipe: str) -> Dict[str, Any]:
+def poser_pays(lid: str, equipe: str, base: Optional[str] = None) -> Dict[str, Any]:
     """Pose regles_pays() sur un lien : le lien lui-même s'il est direct, son
     bouton OnlyFans si c'est une landing ; relu ensuite. Rend {ok, erreur}.
 
-    Jamais bloquant pour l'appelant : un lien sans la règle marche quand même
-    (tous les pays sur le tracking), et l'échec est dit dans le journal."""
+    `base` : le compte vers lequel partent les autres pays. Par défaut celui
+    de la destination du lien : la model du lien fait foi, pas la config — un
+    lien passé sur une autre model (passer_sur) suit sans rien changer
+    ailleurs. Une copie de variante le reçoit du lien principal.
+
+    N'interrompt jamais l'appelant : toute erreur revient dans `erreur`."""
     import gms
     try:
-        regles = regles_pays()
-        if not regles:
-            return {"ok": True, "erreur": ""}
+        if cibles_pays() is None:
+            return {"ok": True, "coupe": True, "erreur": ""}
         lu = gms.get_link(lid, equipe)
         l = lu.get("link") if lu.get("ok") else None
         if not l:
             return {"ok": False, "erreur": f"lien illisible ({str(lu.get('error'))[:80]})"}
-        if l.get("type") == "landing":
-            if not any(_RE_OF.match(str(b.get("url") or "")) for b in l.get("buttons") or []):
-                return {"ok": False, "erreur": "aucun bouton OnlyFans sur la landing"}
-            boutons = [dict(b, geofilters=regles) if _RE_OF.match(str(b.get("url") or "")) else b
-                       for b in l.get("buttons") or []]
-            r = gms.update_link(lid, {"buttons": boutons}, equipe)
+        landing = l.get("type") == "landing"
+        of = [b for b in l.get("buttons") or [] if _RE_OF.match(str(b.get("url") or ""))]
+        if landing and not of:
+            return {"ok": False, "erreur": "aucun bouton OnlyFans sur la landing"}
+        if base is None:
+            base = base_de(of[0].get("url") if landing else l.get("url"))
+        if not base:
+            return {"ok": False, "erreur": "compte de base inconnu : destination hors OnlyFans"}
+        regles = regles_pays(base)
+        if landing:
+            r = gms.update_link(lid, {"buttons": [
+                dict(b, geofilters=regles) if _RE_OF.match(str(b.get("url") or "")) else b
+                for b in l.get("buttons") or []]}, equipe)
         else:
             r = gms.update_link(lid, {"geofilters": regles}, equipe)
         if not r.get("ok"):
             return {"ok": False, "erreur": str(r.get("error") or "update_link refusé")[:120]}
         lu = gms.get_link(lid, equipe)
-        l = (lu.get("link") if lu.get("ok") else None) or {}
+        l = lu.get("link") if lu.get("ok") else None
+        if not l:
+            return {"ok": False, "erreur": "écrit, mais relecture impossible"}
         poses = [b.get("geofilters") for b in l.get("buttons") or []
-                 if _RE_OF.match(str(b.get("url") or ""))] if l.get("type") == "landing" \
-            else [l.get("geofilters")]
-        if not poses or any(len(g or []) != len(regles) for g in poses):
-            return {"ok": False, "erreur": "relu sans la liste des pays"}
-        return {"ok": True, "erreur": ""}
+                 if _RE_OF.match(str(b.get("url") or ""))] if landing else [l.get("geofilters")]
+        voulu = {(x["country_code"], x["destination_url"]) for x in regles}
+        if not poses or any({(x.get("country_code"), x.get("destination_url"))
+                             for x in (g or [])} != voulu for g in poses):
+            return {"ok": False, "erreur": "relu sans la bonne liste des pays"}
+        return {"ok": True, "base": base, "erreur": ""}
     except Exception as ex:                                  # noqa: BLE001
         return {"ok": False, "erreur": f"{type(ex).__name__}: {str(ex)[:100]}"}
 
@@ -785,7 +829,9 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         return {"ok": False, "erreur": "GetMySocial : " + str(g.get("erreur") or "")}
     # rangé au nom du manager : un lien perdu dans « Ungrouped » n'apprend rien
     groupe = ranger(str(e["equipe"]), g.get("id", ""), manager)
-    # hors des pays cibles : le profil de base de la model (voir PAYS_CIBLES)
+    # hors des pays cibles : le compte de base de la model (voir PAYS_CIBLES).
+    # Raté, le lien marche quand même (tous les pays sur le tracking) : la
+    # fiche le dit (« pays » : false) et reprendre_pays le repose
     pays = poser_pays(g.get("id", ""), str(e["equipe"]))
     if not pays.get("ok"):
         print(f"[lien] {g.get('shortcode')} : pays non filtrés ({pays.get('erreur')})", flush=True)
@@ -798,7 +844,8 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         "link_id": g.get("id", ""),
         "public_url": g["url"], "shortcode": g["shortcode"],
         "tracking": t["url"], "code": t["code"], "par": str(par),
-        "pays": bool(pays.get("ok")), "quand": int(_t.time())}
+        "pays": bool(pays.get("ok")), "pays_erreur": str(pays.get("erreur") or ""),
+        "quand": int(_t.time())}
     _ecrire(d)
     # le 50/50 APRES le lien : un echec ici laisse un lien qui marche (tout
     # chez la premiere modele), note dans la fiche et repris par
@@ -829,7 +876,8 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
             "shortcode": g["shortcode"], "tracking": t["url"],
             # Threads n'a pas de tracking link a venir : rien de provisoire
             "provisoire": e["plateforme"] == "Twitter" and not e["tracking"],
-            "plateforme": e["plateforme"], "variante": var, "erreur": ""}
+            "plateforme": e["plateforme"], "variante": var, "pays": bool(pays.get("ok")),
+            "erreur": ""}
 
 
 # ─── le 50/50 de Twitter : la moitié des visiteurs chez une autre modèle ─────
@@ -922,11 +970,13 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
             return rate(f'GetMySocial : la copie temporaire pointe sur '
                         f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}')
         # la variante est une copie FIGÉE : sa règle de pays se pose sur la
-        # copie temporaire, avant l'A/B, ou jamais
-        pays = poser_pays(tmp_id, equipe)
+        # copie temporaire, avant l'A/B, ou jamais. Ratée, pas d'A/B : le lien
+        # reste à 100 % sur la model (filtré) et reprendre_variantes refait
+        # tout au passage suivant. Les autres pays partent sur le compte de
+        # base de la model du LIEN, pas de la variante (voir PAYS_CIBLES)
+        pays = poser_pays(tmp_id, equipe, base_de(l.get("tracking")))
         if not pays.get("ok"):
-            print(f"[lien] variante de {l['shortcode']} : pays non filtrés "
-                  f"({pays.get('erreur')})", flush=True)
+            return rate(f'GetMySocial : pays non filtrés sur la copie ({pays.get("erreur")})')
         ab = gms.poser_ab_testing(lid, tmp_id, equipe, float(v["poids"]), v["modele"])
     finally:
         if tmp_id:
@@ -1036,6 +1086,133 @@ def reprendre_variantes(gid: str = TWITTER_ID) -> Dict[str, Any]:
                 break
     finally:
         _REPRISE.release()
+    return bilan
+
+
+def refiltrer_variante(gid: str, uid: str) -> Dict[str, Any]:
+    """La variante Seren d'un lien reprend la règle des pays, vers le compte de
+    base de la model du lien. Copie figée : recopiée au MÊME variantId depuis
+    une copie temporaire filtrée, supprimée ensuite — la méthode des 48 liens
+    du 29/10/2026. Le partage ne bouge pas. Rend {ok, cookie, erreur}."""
+    import secrets
+    import gms
+    e = espace(gid)
+    l = lien_de(gid, uid)
+    fv = l.get("variante") or {}
+    equipe, lid = str(e["equipe"]), str(l.get("link_id") or "")
+    base = base_de(l.get("tracking"))
+    if not (lid and fv.get("tracking") and base):
+        return {"ok": False, "erreur": "lien, tracking ou variante manquant"}
+    lu = gms.lire_ab_testing(lid, equipe)
+    if not lu.get("ok"):
+        return {"ok": False, "cookie": bool(lu.get("cookie")),
+                "erreur": "A/B illisible : " + str(lu.get("error") or "")[:100]}
+    cfg = lu.get("config") or {}
+    vs = [v for v in cfg.get("variants") or [] if isinstance(v, dict)]
+    if not cfg.get("enabled") or len(vs) != 1 or not vs[0].get("variantId"):
+        return {"ok": False, "erreur": f"A/B inattendu, rien touché : {str(cfg)[:120]}"}
+    v = vs[0]
+    r = gms.duplicate_link(e.get("source_variante") or e["gabarit"], "abtmp" + secrets.token_hex(5),
+                           f'variante pays - {l.get("shortcode")}'[:60], fv["tracking"], equipe)
+    tmp = r.get("link") if isinstance(r.get("link"), dict) else {}
+    tmp_id = str(tmp.get("id") or "")
+    try:
+        if not (r.get("ok") and tmp_id):
+            return {"ok": False, "erreur": f'copie temporaire refusée ({str(r.get("error"))[:100]})'}
+        if str(tmp.get("url") or "").strip().rstrip("/").lower() != \
+                str(fv["tracking"]).strip().rstrip("/").lower():
+            return {"ok": False, "erreur": f'la copie temporaire pointe sur {tmp.get("url") or "?"}'}
+        pays = poser_pays(tmp_id, equipe, base)
+        if not pays.get("ok"):
+            return {"ok": False, "erreur": f'pays non filtrés sur la copie ({pays.get("erreur")})'}
+        p = gms._ab_prive("POST", lid, equipe, {
+            "enabled": True, "controlWeight": cfg.get("controlWeight"),
+            "variants": [{"variantId": v["variantId"], "sourceLinkId": _sans_prefixe(tmp_id),
+                          "sourceTemplateId": None, "name": v.get("name"),
+                          "weight": v.get("weight"), "description": v.get("description") or ""}]})
+    finally:
+        if tmp_id:
+            rd = gms.delete_link(tmp_id)
+            if not rd.get("ok"):
+                print(f"[lien] copie temporaire {tmp_id} non supprimée : "
+                      f"{str(rd.get('error'))[:100]}", flush=True)
+    if not p.get("ok"):
+        return {"ok": False, "cookie": bool(p.get("cookie")),
+                "erreur": "A/B non recopié : " + str(p.get("error") or "")[:100]}
+    relu = (gms.lire_ab_testing(lid, equipe).get("config") or {})
+    rv = [x for x in relu.get("variants") or [] if isinstance(x, dict)]
+    if not (relu.get("enabled") and len(rv) == 1 and rv[0].get("variantId") == v["variantId"]
+            and rv[0].get("weight") == v.get("weight")
+            and relu.get("controlWeight") == cfg.get("controlWeight")):
+        return {"ok": False, "erreur": f"A/B relu autrement : {str(relu)[:120]}"}
+    return {"ok": True, "erreur": ""}
+
+
+#: Entre deux liens repris : GetMySocial limite le débit.
+PAUSE_PAYS_S = 1.0
+
+
+def reprendre_pays(gid: str) -> Dict[str, Any]:
+    """Repose la règle des pays là où elle a raté (« pays » : false dans la
+    fiche) : sur le lien, et sur sa variante Seren (« variante.pays » : false,
+    après un changement de model). Liens coupés exclus : basculer la pose au
+    rallumage. ESSAIS_PAYS essais, puis la main (« pays_a_verifier »).
+    Tourne avec la synchro des liens (synchroniser, toutes les 30 min).
+    Rend {poses, rates}."""
+    import time as _t
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    fiches = {c: f for c, f in (_etat().get("liens") or {}).items()
+              if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
+              and f.get("actif") is not False}
+    a_faire = [c for c, f in fiches.items()
+               if (f.get("pays") is False and int(f.get("pays_essais") or 0) < ESSAIS_PAYS)
+               or ((f.get("variante") or {}).get("posee") and (f.get("variante") or {}).get("pays") is False
+                   and int((f.get("variante") or {}).get("pays_essais") or 0) < ESSAIS_PAYS)]
+    if not a_faire:
+        return bilan
+    # la recopie d'une variante passe par l'écran A/B : pas en même temps
+    # qu'une reprise des 50/50
+    if not _REPRISE.acquire(blocking=False):
+        bilan["occupe"] = True
+        return bilan
+    try:
+        equipe = str(espace(gid)["equipe"])
+        for i, cle in enumerate(a_faire):
+            if i:
+                _t.sleep(PAUSE_PAYS_S)
+            uid = cle.split(":", 1)[1]
+            f = lien_de(gid, uid)
+            qui = f.get("shortcode") or cle
+            if f.get("pays") is False:
+                r = poser_pays(str(f["link_id"]), equipe)
+                d = _etat()
+                x = d["liens"][cle]
+                n = int(x.get("pays_essais") or 0) + 1
+                x.update(pays=bool(r.get("ok")), pays_erreur=str(r.get("erreur") or ""),
+                         pays_essais=n, pays_a_verifier=not r.get("ok") and n >= ESSAIS_PAYS)
+                _ecrire(d)
+                (bilan["poses"] if r.get("ok") else bilan["rates"]).append(
+                    f'{qui}' + ("" if r.get("ok") else f' : {r.get("erreur")}'))
+            fv = lien_de(gid, uid).get("variante") or {}
+            if fv.get("posee") and fv.get("pays") is False:
+                r = refiltrer_variante(gid, uid)
+                d = _etat()
+                x = d["liens"][cle]
+                n = int(fv.get("pays_essais") or 0) + (0 if r.get("cookie") else 1)
+                x["variante"] = dict(x.get("variante") or {}, pays=bool(r.get("ok")),
+                                     pays_erreur=str(r.get("erreur") or ""), pays_essais=n,
+                                     pays_a_verifier=not r.get("ok") and n >= ESSAIS_PAYS)
+                _ecrire(d)
+                (bilan["poses"] if r.get("ok") else bilan["rates"]).append(
+                    f'{qui} (Seren)' + ("" if r.get("ok") else f' : {r.get("erreur")}'))
+                if r.get("cookie"):
+                    break           # le suivant échouerait pareil
+    finally:
+        _REPRISE.release()
+    if bilan["poses"] or bilan["rates"]:
+        print(f"[lien] pays {gid} : posés {bilan['poses'][:10]}, ratés {bilan['rates'][:5]}",
+              flush=True)
     return bilan
 
 
@@ -1185,10 +1362,15 @@ def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:
         return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:100]}"}
     if not r.get("ok"):
         return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
+    # un lien rallumé sans la règle des pays (coupé avant le 29/10/2026, ou
+    # raté) la reçoit avant de recompter pour le VA
+    pays = poser_pays(lid, equipe) if actif and l.get("pays") is not True else None
     d = _etat()
     fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
     fiche["actif"] = bool(actif)
     fiche["link_id"] = lid
+    if pays is not None:
+        fiche.update(pays=bool(pays.get("ok")), pays_erreur=str(pays.get("erreur") or ""))
     _ecrire(d)
     return {"ok": True, "url": l.get("public_url", ""), "actif": bool(actif), "erreur": ""}
 
@@ -1251,6 +1433,12 @@ def synchroniser(gid: str) -> Dict[str, Any]:
     bilan = {"groupes_crees": [], "deplaces": [], "sans_categorie": [], "rates": []}
     if gid not in SERVEURS:
         return bilan      # les managers de ce serveur n'ont rien a faire ici
+    # la règle des pays ratée quelque part (création, model changée) : reposée
+    # ici, à chaque synchro, avant tout ce qui peut s'arrêter plus bas
+    try:
+        reprendre_pays(gid)
+    except Exception as ex:                                  # noqa: BLE001
+        print(f"[lien] pays {gid} : {type(ex).__name__}: {ex}", flush=True)
 
     connus = groupes(equipe)
     if connus is None:
@@ -1707,13 +1895,22 @@ def passer_sur(gid: str, uid: str, creator_id: int, profil_of: str) -> Dict[str,
     # serait perdue sans un mot
     ab_avant = bool((avant.get("ab_testing") or {}).get("enabled"))
     ab_apres = bool((apres.get("ab_testing") or {}).get("enabled"))
+    # la règle des pays suit la model : ses autres pays partent maintenant sur
+    # le compte de base de la nouvelle (lu dans la destination). La variante,
+    # copie figée, garde l'ancienne base jusqu'à sa recopie : « pays » : false
+    # dans sa fiche, reprendre_pays la refait
+    pays = poser_pays(lid, equipe)
     d = _etat()
     fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
     anc = anciens_trackings(fiche)
     if ancien and ancien not in anc:
         anc.append(ancien)
     fiche.update(tracking=t["url"], code=str(t.get("code") or ""), anciens_trackings=anc,
-                 bascule={"vers": int(creator_id), "de": ancien, "quand": int(_t.time())})
+                 bascule={"vers": int(creator_id), "de": ancien, "quand": int(_t.time())},
+                 pays=bool(pays.get("ok")), pays_erreur=str(pays.get("erreur") or ""),
+                 pays_essais=0)
+    if ab_apres and (fiche.get("variante") or {}).get("posee") and not pays.get("coupe"):
+        fiche["variante"] = dict(fiche["variante"], pays=False, pays_essais=0)
     _ecrire(d)
     if ab_avant and not ab_apres:
         return {"ok": False, "tracking": t["url"], "ancien": ancien,
