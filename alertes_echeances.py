@@ -4,8 +4,9 @@
 POURQUOI (audit des serveurs du 20/10/2026) : trois choses allaient lacher
 sans un mot, chacune decouverte trop tard la fois d'avant :
 
-- le cookie GetMySocial (authToken) dure 30 jours. Echu, le 50/50 Seren ne se
-  pose plus sur les nouveaux liens Twitter et Threads : tout part sur Emy, et
+- le cookie GetMySocial (authToken) dure 30 jours. Echu, la part Seren ne se
+  pose plus sur les nouveaux liens VA (Twitter, Threads, Agency) : tout part sur
+  la model principale, et
   rien ne le dit ailleurs que sur une page de reglages que personne n'ouvre ;
 - le serveur Spam grossit d'environ 7 espaces VA par semaine (381 salons sur
   500 le 20/10). Discord refuse le 501e salon, et la creation d'un espace VA
@@ -159,7 +160,8 @@ def texte_gms(exp: int, palier: int, maintenant: float) -> str:
     if palier == 0:
         return ("❌ Cookie GetMySocial échu\n"
                 f"Il a expiré le {quand} (heure de Paris).\n"
-                "Les nouveaux liens Twitter et Threads partent tous sur Emy, sans le 50/50 Seren. "
+                "Les nouveaux liens Twitter, Threads et Agency partent à 100 % sur la model "
+                "principale, sans la part Seren. "
                 "Ils se rattrapent dès qu'un cookie valide est collé.\n"
                 + faire)
     if palier == 1:
@@ -170,8 +172,8 @@ def texte_gms(exp: int, palier: int, maintenant: float) -> str:
         dans = f"dans {j} jours"
     return (f"🔑 Cookie GetMySocial : fin {dans}\n"
             f"Il expire le {quand} (heure de Paris).\n"
-            "Sans lui, les nouveaux liens Twitter et Threads n'ont plus le 50/50 Seren : "
-            "tout part sur Emy.\n"
+            "Sans lui, les nouveaux liens Twitter, Threads et Agency n'ont plus leur part "
+            "Seren : tout part sur la model principale.\n"
             + faire)
 
 

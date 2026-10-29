@@ -110,7 +110,8 @@ def test_gms():
     check("J-7 : « dans 7 jours », date et heure de Paris",
           "fin dans 7 jours" in t7 and "07/11 à 19:25" in t7, t7)
     check("J-7 : dit ce que coûte la panne et où recoller",
-          "50/50 Seren" in t7 and "Twitter et Threads" in t7 and "?tab=sgms" in t7, t7)
+          "part " in t7 and "Seren" in t7 and "Twitter, Threads et Agency" in t7
+          and "50/50" not in t7 and "Emy" not in t7 and "?tab=sgms" in t7, t7)
     b, tg = tour(exp=EXP, quand="2026-11-02 12:00")
     check("entre J-7 et J-1 : rien de plus", not tg.envois, tg.envois)
     b, tg = tour(exp=EXP, quand="2026-11-06 18:30")

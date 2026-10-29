@@ -14246,7 +14246,7 @@ document.addEventListener('click',function(e){
         <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-telegram"/></svg>Veille Telegram</span></button>
         <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-sms"/></svg>Générateurs SMS</span></button>
         <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</span></button>
-        <button class="item" id="tab-sgms" onclick="showTab('settings','sgms','Cookies GetMySocial','Session getmysocial.com — 50/50 Emy / Seren des liens Twitter')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</span></button>
+        <button class="item" id="tab-sgms" onclick="showTab('settings','sgms','Cookies GetMySocial','Session getmysocial.com — part Seren des liens VA')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</span></button>
         <button class="item" id="tab-sproxeasy" onclick="showTab('settings','sproxeasy','Clé ProxEasy','Clé API des proxys — logins postés dans les salons proxy')"><span class="left" style="display:inline-flex;align-items:center;gap:8px">🌐 Clé ProxEasy</span></button>
       </div>
     </div>
@@ -16677,7 +16677,7 @@ document.addEventListener('keydown', function(e){
 <div class="form-section" id="form-sgms" style="display:none">
 <div class="box">
 <h3 style="margin-top:0"><svg class="lgi"><use href="#lg-gms"/></svg>Cookies GetMySocial</h3>
-<small>Session getmysocial.com — sert au 50/50 Emy / Seren des liens Twitter (l’API GetMySocial ne sait pas le poser)</small>
+<small>Session getmysocial.com — sert à poser la part Seren des liens VA (l’API GetMySocial ne sait pas le faire)</small>
 <div style="margin-top:14px">{gms_cookie_html}</div>
 </div>
 </div>
@@ -47751,12 +47751,12 @@ function gdChangeKey(){
       rows += gdKeyRow('k' + i, '↓ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
     }
     var ck = d.cookie || {};
-    var ckEtat = !ck.present ? 'absent : le 50/50 Emy / Seren des liens Twitter ne se pose pas'
+    var ckEtat = !ck.present ? 'absent : la part Seren des liens VA ne se pose pas'
       : (ck.jours == null ? 'présent, échéance illisible'
       : (ck.jours < 0 ? 'ÉCHU depuis le ' + gdEsc(ck.expire) + ' : à recoller'
       : 'valide jusqu’au ' + gdEsc(ck.expire) + ' (' + ck.jours + ' j)'));
     var ckBloc = '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #23262f">'
-      + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🍪 Cookie de session — 50/50 Emy / Seren des liens Twitter</div>'
+      + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">🍪 Cookie de session — part Seren des liens VA</div>'
       + '<div style="font-size:11px;color:' + (ck.jours != null && ck.jours > 3 ? '#6b7280' : '#f59e0b') + ';margin-bottom:8px">'
       + ckEtat + ' · il dure 30 jours. Sur getmysocial.com : F12 › Application › Cookies › authToken, copie sa valeur.</div>'
       + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -47814,7 +47814,7 @@ function gdSaveCookie(){
     .then(function(r){ return r.json(); }).then(function(d){
       if(d && d.ok){
         var msg = '🍪 Cookie enregistré' + (d.expire ? ', valide jusqu’au ' + d.expire : '');
-        if(d.reprise) msg += ' · ' + d.reprise + ' lien(s) en attente du 50/50 : reprise lancée';
+        if(d.reprise) msg += ' · ' + d.reprise + ' lien(s) en attente de leur part Seren : reprise lancée';
         if(typeof showToast === 'function') showToast(msg, 'success', 7000);
         gdChangeKey();
       } else {
@@ -58094,8 +58094,8 @@ def _render_gms_cookie_settings() -> str:
                 % (fond, bord, couleur, texte))
     if not ck:
         etat = _boite("rgba(148,163,184,.08)", "rgba(148,163,184,.25)", "#94a3b8",
-                      "Aucun cookie : le 50/50 Emy / Seren des liens Twitter ne se pose pas. "
-                      "Les liens sont quand même créés, tout part sur Emy.")
+                      "Aucun cookie : la part Seren des liens VA ne se pose pas. "
+                      "Les liens sont quand même créés, tout part sur la model principale.")
     elif jours is not None and jours < 0:
         etat = _boite("rgba(239,68,68,.08)", "rgba(239,68,68,.35)", "#f87171",
                       f"✕ Cookie échu depuis le {quand} : recolle-le ci-dessous.")
@@ -58108,7 +58108,7 @@ def _render_gms_cookie_settings() -> str:
                       + ". Colle un nouveau cookie ci-dessous pour le remplacer.")
     if attente:
         etat += _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
-                       f"{attente} lien(s) Twitter / Threads en attente du 50/50 : ils se posent dès "
+                       f"{attente} lien(s) VA en attente de leur part Seren : ils se posent dès "
                        "qu’un cookie valide est enregistré.")
     return (
         etat
@@ -71400,7 +71400,7 @@ def create_app():
         quand = _t.strftime("%d/%m/%Y", _t.localtime(exp)) if exp else ""
         return _rep(True, "✓ Cookie GetMySocial enregistré"
                     + (f", valide jusqu’au {quand}" if quand else "")
-                    + (f" · {reprise} lien(s) Twitter / Threads en attente du 50/50 : reprise lancée"
+                    + (f" · {reprise} lien(s) VA en attente de leur part Seren : reprise lancée"
                        if reprise else ""),
                     len=len(cookie), reprise=reprise, expire=quand)
 

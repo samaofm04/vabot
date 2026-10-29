@@ -1287,7 +1287,7 @@ def _travail_lien(gid: str, uid: str, par: str, p: Dict[str, Any], jeton: str,
         # dit plus ; un 50/50 en plan se dit encore, sans nom de modèle
         # (le lien marche, tout part sur un seul tracking en attendant).
         if v and not v.get("ok"):
-            ab = ("\n⚠️ Partage 50/50 pas encore posé : tout part sur un seul tracking "
+            ab = ("\n⚠️ Partage A/B pas encore posé : tout part sur un seul tracking "
                   "en attendant."
                   + (" Recolle le cookie GetMySocial (Settings › Intégrations) : il se "
                      "posera tout seul." if v.get("cookie") else " Il sera repris tout seul."))
