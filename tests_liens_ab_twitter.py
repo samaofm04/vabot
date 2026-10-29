@@ -178,7 +178,7 @@ try:
     monde()
     v = lv.espace(TW).get("variante")
     check("Twitter, MyPuls ouvert : variante Seren (3867) à 50 %",
-          v == {"modele": "Seren", "creator_id": 3867, "poids": 50}, v)
+          v == {"modele": "Seren", "creator_id": 3867, "poids": 33.3}, v)
     monde(config=dict(CONFIG, mypuls_actif=False))
     check("… MyPuls fermé : pas de variante (une moitié rattachée à personne)",
           lv.espace(TW).get("variante") is None)
@@ -209,7 +209,7 @@ try:
           and dup[1][5] == EMY_TWITTER and dup[1][2].startswith("abtmp"), dup)
     ab = g.de("ab")
     check("A/B posé sur le lien du VA, source = la copie, 50 %, « Seren »",
-          ab == [("ab", f"lnk_{SC1}", f"lnk_{dup[1][2]}", EMY_TWITTER, 50, "Seren")], ab)
+          ab == [("ab", f"lnk_{SC1}", f"lnk_{dup[1][2]}", EMY_TWITTER, 33.3, "Seren")], ab)
     check("… et la copie temporaire supprimée", g.de("delete") == [("delete", f"lnk_{dup[1][2]}")],
           g.de("delete"))
     fv = lv.lien_de(TW, "u1").get("variante") or {}
@@ -841,6 +841,13 @@ try:
           corps.get("controlWeight") == 50 and corps["variants"][0]["weight"] == 50
           and corps.get("enabled") is True and kw["headers"].get("Cookie") == "authToken=a.b.c"
           and kw.get("allow_redirects") is False, kw)
+    reponse["r"] = Rep(200, {"success": True, "config": {
+        "enabled": True, "controlWeight": 66.7, "variants": [{"variantId": "v1", "weight": 33.3}]}})
+    rr = vrai_gms.poser_ab_testing("lnk_6acf00", "lnk_6acf01", "tm_6ab46e", 33.3, "Seren")
+    corps = (envois[-1][1].get("json") or {})
+    check("2/3 Lia (29/10/2026) : 66.7 / 33.3 envoyés au dixième, relus sans arrondi",
+          rr.get("ok") and corps.get("controlWeight") == 66.7
+          and corps["variants"][0]["weight"] == 33.3, (rr, corps))
     reponse["r"] = Rep(302, {}, json_ok=False)
     rr = vrai_gms.poser_ab_testing("lnk_a", "lnk_b", "tm_c")
     check("redirection vers la connexion : cookie à recoller", not rr.get("ok") and rr.get("cookie"), rr)

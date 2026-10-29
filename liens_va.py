@@ -63,7 +63,10 @@ ESPACE_THREADS = {"equipe": "tm_6ab51e03b299b7e3ba6ff7bf",      # EMY THREADS
 # `poids` % des visiteurs partent sur SON tracking Seren (poser_variante).
 # Surchargeable par la cle « variante » de liens_va_config.json ; {} ou false
 # l'eteint pour les liens a venir.
-VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 50}
+# Proprietaire, 29/10/2026 : « on m'a demande que ce soit 2/3 […] 66.7 pour
+# Lia, et le reste Seren ». GetMySocial prend les decimales (relu 66.7 / 33.3) :
+# le poids n'est plus arrondi en entier.
+VARIANTE_TWITTER = {"modele": "Seren", "creator_id": 3867, "poids": 33.3}
 
 # Agency VA INSTAGRAM (22/10/2026), « comme Twitter » : espace EMY IG (« MIG »
 # à l'oral), tracking MyPuls chez Emy au nom du VA, 100 % Emy, jamais de
@@ -722,7 +725,7 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
             # croire au manager que rien n'a marche
             rv = {"ok": False, "erreur": f"{type(ex).__name__}: {str(ex)[:120]}"}
         var = {"ok": bool(rv.get("ok")), "modele": e["variante"]["modele"],
-               "poids": int(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
+               "poids": float(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
                "cookie": bool(rv.get("cookie")), "erreur": rv.get("erreur", "")}
     elif SEREN_EN_PAUSE and g.get("id"):
         # Threads : le lien neuf est une copie de emythreads, 50/50 Seren
@@ -830,7 +833,7 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
                 str(fv["tracking"]).strip().rstrip("/").lower():
             return rate(f'GetMySocial : la copie temporaire pointe sur '
                         f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}')
-        ab = gms.poser_ab_testing(lid, tmp_id, equipe, int(v["poids"]), v["modele"])
+        ab = gms.poser_ab_testing(lid, tmp_id, equipe, float(v["poids"]), v["modele"])
     finally:
         if tmp_id:
             rd = gms.delete_link(tmp_id)

@@ -2060,7 +2060,7 @@ def _entetes_privees(cookie: str) -> Dict[str, str]:
 
 
 def poser_ab_testing(link_id: str, source_link_id: str, team_id: str = "",
-                     poids: int = 50, nom: str = "Variante") -> Dict[str, Any]:
+                     poids: float = 50, nom: str = "Variante") -> Dict[str, Any]:
     """Active l'A/B d'un lien : `poids` % vers une copie de `source_link_id`,
     le reste vers sa propre destination. Rend {ok, config, error, cookie}.
 
@@ -2085,11 +2085,13 @@ def poser_ab_testing(link_id: str, source_link_id: str, team_id: str = "",
     lid, src = lid[4:] if lid.startswith("lnk_") else lid, src[4:] if src.startswith("lnk_") else src
     tid = str(team_id or "").strip()
     tid = tid[3:] if tid.startswith("tm_") else tid
-    poids = int(poids)
+    # au dixième : 66.7 / 33.3 (29/10/2026) ; 50 reste 50 dans le corps
+    poids = round(float(poids), 1)
+    poids = int(poids) if poids.is_integer() else poids
     if not (lid and src) or not 0 < poids < 100:
         return {"ok": False, "error": "lien, source ou poids invalide"}
     corps: Dict[str, Any] = {
-        "enabled": True, "controlWeight": 100 - poids,
+        "enabled": True, "controlWeight": round(100 - poids, 1),
         "variants": [{"variantId": None, "sourceLinkId": src, "sourceTemplateId": None,
                       "name": str(nom or "Variante")[:40], "weight": poids,
                       "description": "Variant based on another link"}]}
@@ -2118,7 +2120,7 @@ def poser_ab_testing(link_id: str, source_link_id: str, team_id: str = "",
     # relu dans la réponse : un enregistrement « réussi » sans variante active
     # ne doit pas passer pour un 50/50
     vs = cfg.get("variants") or []
-    if not cfg.get("enabled") or len(vs) != 1 or int(vs[0].get("weight") or 0) != poids:
+    if not cfg.get("enabled") or len(vs) != 1 or abs(float(vs[0].get("weight") or 0) - poids) > 0.05:
         return {"ok": False, "error": f"enregistré mais relu autrement : {str(cfg)[:160]}"}
     return {"ok": True, "config": cfg}
 
