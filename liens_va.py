@@ -548,6 +548,90 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
     return {"ok": True}
 
 
+# ─── Les pays qui comptent ───────────────────────────────────────────────
+# Propriétaire, 29/10/2026 : « dès que les mecs ne sont pas des USA,
+# Australie, Canada, les pays en gros anglophones qui ont de l'argent, il faut
+# que tu les renvoies vers le lien qui n'a pas de tracking link, juste le lien
+# du compte de base ». Un visiteur d'ailleurs part sur le profil OnlyFans de
+# la model, sans tracking : son abonnement ne compte pour aucun VA.
+# GetMySocial n'a pas de « sinon » : on liste tous les AUTRES pays, la
+# destination du lien (le tracking) reste celle des pays cibles. Vérifié le
+# 29/10 sur un lien d'essai : un pays absent de la liste va à la destination,
+# des deux côtés de l'A/B, et la variante copiée garde la liste de sa source.
+# Sur une landing, la liste tient sur le bouton OnlyFans : posée sur la page,
+# GetMySocial l'efface sans erreur. Clé « pays » de liens_va_config.json :
+# {"cibles": [...]} change la liste, {} coupe la règle pour les liens à venir.
+PAYS_CIBLES = ("US", "CA", "AU", "GB", "NZ", "IE")
+# les territoires du CLDR (babel), relevés le 29/10/2026 : la même liste que
+# celle posée à la main sur les liens existants ce jour-là
+TOUS_LES_PAYS = (
+    "AC AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO "
+    "BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CP CR CU CV CW CX CY CZ DE DG "
+    "DJ DK DM DO DZ EA EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN "
+    "GP GQ GR GS GT GU GW GY HK HM HN HR HT HU IC ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE "
+    "KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML "
+    "MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF "
+    "PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN "
+    "SO SR SS ST SV SX SY SZ TA TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY "
+    "UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW").split()
+
+
+def regles_pays() -> list:
+    """Les geofilters d'un lien de VA : chaque pays hors des cibles vers le
+    profil OnlyFans de la model, sans tracking. [] quand la règle est coupée."""
+    p = config().get("pays", {"cibles": list(PAYS_CIBLES)})
+    if not isinstance(p, dict) or not p:
+        return []
+    base = profil_of(config().get("creator_id"))
+    if not base:
+        raise ValueError(f"profil OnlyFans inconnu pour la model {config().get('creator_id')}")
+    cibles = {str(c).upper() for c in (p.get("cibles") or PAYS_CIBLES)}
+    try:
+        from babel import Locale
+        noms = Locale("en").territories
+    except Exception:                                        # noqa: BLE001
+        noms = {}       # le nom n'est qu'un libellé de l'éditeur GetMySocial
+    return [{"country_code": c, "country_name": noms.get(c, c), "destination_url": base}
+            for c in TOUS_LES_PAYS if c not in cibles]
+
+
+def poser_pays(lid: str, equipe: str) -> Dict[str, Any]:
+    """Pose regles_pays() sur un lien : le lien lui-même s'il est direct, son
+    bouton OnlyFans si c'est une landing ; relu ensuite. Rend {ok, erreur}.
+
+    Jamais bloquant pour l'appelant : un lien sans la règle marche quand même
+    (tous les pays sur le tracking), et l'échec est dit dans le journal."""
+    import gms
+    try:
+        regles = regles_pays()
+        if not regles:
+            return {"ok": True, "erreur": ""}
+        lu = gms.get_link(lid, equipe)
+        l = lu.get("link") if lu.get("ok") else None
+        if not l:
+            return {"ok": False, "erreur": f"lien illisible ({str(lu.get('error'))[:80]})"}
+        if l.get("type") == "landing":
+            if not any(_RE_OF.match(str(b.get("url") or "")) for b in l.get("buttons") or []):
+                return {"ok": False, "erreur": "aucun bouton OnlyFans sur la landing"}
+            boutons = [dict(b, geofilters=regles) if _RE_OF.match(str(b.get("url") or "")) else b
+                       for b in l.get("buttons") or []]
+            r = gms.update_link(lid, {"buttons": boutons}, equipe)
+        else:
+            r = gms.update_link(lid, {"geofilters": regles}, equipe)
+        if not r.get("ok"):
+            return {"ok": False, "erreur": str(r.get("error") or "update_link refusé")[:120]}
+        lu = gms.get_link(lid, equipe)
+        l = (lu.get("link") if lu.get("ok") else None) or {}
+        poses = [b.get("geofilters") for b in l.get("buttons") or []
+                 if _RE_OF.match(str(b.get("url") or ""))] if l.get("type") == "landing" \
+            else [l.get("geofilters")]
+        if not poses or any(len(g or []) != len(regles) for g in poses):
+            return {"ok": False, "erreur": "relu sans la liste des pays"}
+        return {"ok": True, "erreur": ""}
+    except Exception as ex:                                  # noqa: BLE001
+        return {"ok": False, "erreur": f"{type(ex).__name__}: {str(ex)[:100]}"}
+
+
 def groupes(equipe: str, essais: int = 3) -> Optional[Dict[str, str]]:
     """{nom en minuscules: identifiant} des groupes d'un espace. None si on ne sait pas.
 
@@ -701,6 +785,10 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         return {"ok": False, "erreur": "GetMySocial : " + str(g.get("erreur") or "")}
     # rangé au nom du manager : un lien perdu dans « Ungrouped » n'apprend rien
     groupe = ranger(str(e["equipe"]), g.get("id", ""), manager)
+    # hors des pays cibles : le profil de base de la model (voir PAYS_CIBLES)
+    pays = poser_pays(g.get("id", ""), str(e["equipe"]))
+    if not pays.get("ok"):
+        print(f"[lien] {g.get('shortcode')} : pays non filtrés ({pays.get('erreur')})", flush=True)
 
     d = _etat()
     (d.setdefault("liens", {}))[f"{gid}:{uid}"] = {
@@ -710,7 +798,7 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         "link_id": g.get("id", ""),
         "public_url": g["url"], "shortcode": g["shortcode"],
         "tracking": t["url"], "code": t["code"], "par": str(par),
-        "quand": int(_t.time())}
+        "pays": bool(pays.get("ok")), "quand": int(_t.time())}
     _ecrire(d)
     # le 50/50 APRES le lien : un echec ici laisse un lien qui marche (tout
     # chez la premiere modele), note dans la fiche et repris par
@@ -833,6 +921,12 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
                 str(fv["tracking"]).strip().rstrip("/").lower():
             return rate(f'GetMySocial : la copie temporaire pointe sur '
                         f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}')
+        # la variante est une copie FIGÉE : sa règle de pays se pose sur la
+        # copie temporaire, avant l'A/B, ou jamais
+        pays = poser_pays(tmp_id, equipe)
+        if not pays.get("ok"):
+            print(f"[lien] variante de {l['shortcode']} : pays non filtrés "
+                  f"({pays.get('erreur')})", flush=True)
         ab = gms.poser_ab_testing(lid, tmp_id, equipe, float(v["poids"]), v["modele"])
     finally:
         if tmp_id:
@@ -844,7 +938,7 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
     if not ab.get("ok"):
         return rate("GetMySocial : " + str(ab.get("error") or "A/B refusé"),
                     cookie=bool(ab.get("cookie")))
-    noter(posee=True, erreur="", quand=int(_t.time()))
+    noter(posee=True, erreur="", quand=int(_t.time()), pays=bool(pays.get("ok")))
     return {"ok": True, "tracking": fv["tracking"], "erreur": ""}
 
 

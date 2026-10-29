@@ -942,6 +942,57 @@ try:
           and len(b["corriges"]) == 1 and b["a_jour"] == 1 and not b["rates"], (patchs, b))
     check("… ni les autres messages du bot, ni ceux du VA ne sont touchés",
           all("/m2" not in c and "/m3" not in c for c, _ in patchs), patchs)
+
+    # ── les pays qui comptent (29/10/2026) ───────────────────────────────
+    # « dès que les mecs ne sont pas des USA, Australie, Canada […] renvoie-les
+    # vers le lien qui n'a pas de tracking link, juste le compte de base »
+    g, _s = monde(config=dict(CONFIG, creator_id=3992))
+    liens = {}      # ce que GetMySocial garde de chaque lien
+
+    def get_link(lid, equipe=None):
+        return {"ok": True, "link": json.loads(json.dumps(
+            liens.get(lid) or {"id": lid, "type": "directlink", "url": "https://onlyfans.com/x"}))}
+
+    def update_link(lid, champs, equipe=None):
+        g.appels.append(("pays", lid))
+        liens.setdefault(lid, {"id": lid, "type": "directlink"}).update(json.loads(json.dumps(champs)))
+        return {"ok": True, "link": liens[lid]}
+    g.get_link, g.update_link = get_link, update_link
+    r = lv.creer_pour(TW, "p1", "paysva", manager="YAZID")
+    lid = f'lnk_{r.get("shortcode")}'
+    geo = (liens.get(lid) or {}).get("geofilters") or []
+    codes = {x["country_code"] for x in geo}
+    check("lien neuf : tout pays hors US/CA/AU/GB/NZ/IE va au profil de base de la model, sans tracking",
+          r.get("ok") and len(geo) == len(lv.TOUS_LES_PAYS) - 6 and not codes & set(lv.PAYS_CIBLES)
+          and {"FR", "DE", "MX"} <= codes
+          and all(x["destination_url"] == "https://onlyfans.com/liasxcret" for x in geo), (r, len(geo)))
+    check("… noté dans la fiche", lv.lien_de(TW, "p1").get("pays") is True)
+    dup = g.de("duplicate")
+    tmp = f"lnk_{dup[1][2]}" if len(dup) == 2 else "?"
+    ordre = [a[:2] if a[0] == "pays" else a[0] for a in g.appels if a[0] in ("pays", "ab")]
+    check("… la part Seren aussi : sa copie temporaire a la liste AVANT l'A/B (la variante est figée)",
+          ordre == [("pays", lid), ("pays", tmp), "ab"]
+          and len((liens.get(tmp) or {}).get("geofilters") or []) == len(geo), ordre)
+    liens["lnk_page"] = {"id": "lnk_page", "type": "landing", "buttons": [
+        {"label": "Insta", "url": "https://instagram.com/x"},
+        {"label": "OF", "url": "https://onlyfans.com/liasxcret/c98"}]}
+    rp = lv.poser_pays("lnk_page", "tm_x")
+    bts = liens["lnk_page"]["buttons"]
+    check("landing (Agency) : la liste sur son bouton OnlyFans seulement (sur la page, GMS l'efface)",
+          rp.get("ok") and len(bts[1].get("geofilters") or []) == len(geo)
+          and "geofilters" not in bts[0] and "geofilters" not in liens["lnk_page"], (rp, bts))
+    liens["lnk_sans"] = {"id": "lnk_sans", "type": "landing", "buttons": [{"label": "a", "url": "https://x.com"}]}
+    check("… sans bouton OnlyFans : refusé, rien envoyé",
+          lv.poser_pays("lnk_sans", "tm_x").get("ok") is False and "geofilters" not in str(liens["lnk_sans"]))
+    monde(config=dict(CONFIG, creator_id=3992, pays={}))
+    check("clé « pays » : {} coupe la règle pour les liens à venir", lv.regles_pays() == [])
+    monde(config=dict(CONFIG, creator_id=3992, pays={"cibles": ["us"]}))
+    codes = {x["country_code"] for x in lv.regles_pays()}
+    check("… {\"cibles\": [...]} change la liste", "US" not in codes and {"CA", "GB"} <= codes, codes)
+    g, _s = monde(config=dict(CONFIG, creator_id=1))
+    r = lv.creer_pour(TW, "p2", "inconnue", manager="YAZID")
+    check("model sans profil OnlyFans connu : le lien est créé quand même, la fiche le dit",
+          r.get("ok") and lv.lien_de(TW, "p2").get("pays") is False, r)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)
