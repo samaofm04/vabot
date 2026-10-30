@@ -560,9 +560,10 @@ class NumerosCog(commands.Cog):
         dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement.
 
         Le 📱・numéro de YouCham (outils communs) suit la meme regle, son
-        « salon a lui » est son -content (outils_communs.content_de) : la carte
-        du numero y est posee par ce bot (Rem), puis le code l'edite sur
-        place. Memes fournisseurs et memes regles que -numero-mail de Youl4b :
+        « salon a lui » est son -content (outils_communs.content_de), cree au
+        clic s'il n'en a pas (outils_communs.perso_ou_creer) : la carte du
+        numero y est posee par ce bot (Rem), puis le code l'edite sur place.
+        Memes fournisseurs et memes regles que -numero-mail de Youl4b :
         ni +33 ni quota (_pays, _quota_fr_ok : serveur FR seulement)."""
         if action not in ("sms", "mail"):
             await _ephemere(itx, "📱 La suite se passe dans ton salon.")
@@ -570,6 +571,16 @@ class NumerosCog(commands.Cog):
         if _clic_us(itx.channel):
             import outils_communs as oc
             perso = oc.cible_du_clic(itx.channel, getattr(itx, "user", None))
+            if perso is None:
+                # Arrive avant les outils communs (le proprietaire, Roucham) :
+                # son -content est cree ici, comme a l'arrivee -- par Ryuk,
+                # pour que les deux bots y aient leur regle ; rendu tel que
+                # Rem le voit (outils_communs.perso_ou_creer). Clic acquitte
+                # d'abord : la creation peut depasser les 3 s ; la suite part
+                # en ephemere de suivi (_ephemere).
+                await itx.response.defer()
+                perso = await oc.perso_ou_creer(getattr(itx, "guild", None),
+                                                getattr(itx, "user", None))
             non = "" if perso is not None else oc.REFUS
         else:
             from cogs.outils import ou_livrer, refus
@@ -581,7 +592,8 @@ class NumerosCog(commands.Cog):
         if action == "sms" and not numgen.status()["sms_ok"]:
             await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
             return
-        await itx.response.defer()
+        if not itx.response.is_done():      # deja acquitte si le -content vient d'etre cree
+            await itx.response.defer()
         await self._panneau_en_bas(perso)
         achete = await self.nouvelle_activation(itx, action, "ig", canal=perso)
         actif = _salon(perso.id).get("actif") or {}

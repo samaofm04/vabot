@@ -14,16 +14,22 @@ d'écrit dans le vrai data/) :
      posés une fois (bouton du menu persistant).
   4. Chaque outil livre dans le -content du CLIQUEUR, jamais dans le salon
      commun ; deux VA reçoivent chacun chez eux ; l'identité est portée par
-     le clic ; le staff sans -content est refusé en éphémère.
+     le clic ; le staff sans -content dont Discord refuse le salon est
+     refusé en éphémère.
   5. /ticketsall sur YouCham : ni les outils ni l'archive ne sont supprimés,
      l'ancien dossier d'essai est rangé.
   6. Aucun texte ne contient « YouLab ».
+  8. Un clic sans -content (membre arrivé avant les outils communs) le crée
+     dans 📁 SALONS PERSO puis livre dedans, pour les quatre outils ; la
+     fenêtre (📤, 👤) reste la première réponse ; deux clics simultanés = un
+     salon ; Discord qui refuse = REFUS ; un bot n'en a jamais.
 
 Lancer depuis la racine du dépôt : python tests_youcham_outils.py
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import pathlib
@@ -74,6 +80,15 @@ TMP = pathlib.Path(tempfile.mkdtemp(prefix="yc_outils_"))
 
 class _Rep404:
     status, reason = 404, "Not Found"
+
+
+class _Rep403:
+    status, reason = 403, "Forbidden"
+
+
+def _interdit():
+    """Ce que Discord rend quand le bot n'a plus le droit de creer un salon."""
+    return discord.Forbidden(_Rep403(), "Missing Permissions")
 
 
 def _ns_composant(d):
@@ -292,6 +307,12 @@ class Guilde:
         self._cats, self._salons = [], []
         self.crees, self.supprimes, self.deplaces = [], [], []
         self.filesize_limit = 10 * 1024 * 1024
+        #: une exception a lever a toute creation (Discord qui refuse)
+        self.bloque = None
+
+    def _refuser(self):
+        if self.bloque is not None:
+            raise self.bloque
 
     @property
     def categories(self):
@@ -312,7 +333,14 @@ class Guilde:
     def get_channel(self, cid):
         return next((c for c in self._salons if c.id == cid), None)
 
+    async def fetch_channel(self, cid):
+        c = self.get_channel(cid)
+        if c is None:
+            raise discord.NotFound(_Rep404(), "Unknown Channel")
+        return c
+
     async def create_category(self, name, overwrites=None, reason="", **kw):
+        self._refuser()
         c = Categorie(self, name)
         c.overwrites = overwrites or {}
         self._cats.append(c)
@@ -320,6 +348,7 @@ class Guilde:
         return c
 
     async def create_text_channel(self, name, category=None, overwrites=None, reason="", **kw):
+        self._refuser()
         if category is not None and len(category.channels) >= 50:
             raise discord.HTTPException(types.SimpleNamespace(status=400, reason="Bad Request"),
                                         "Maximum number of channels in category reached (50)")
@@ -817,6 +846,18 @@ async def _prepa():
                         va: discord.PermissionOverwrite(view_channel=True)}
 courir(_prepa())
 VA1, VA2, STAFF = g.vas[0], g.vas[1], g.staff
+# Le staff n'a pas de -content et Discord refuse de lui en creer un : c'est
+# le seul cas ou le REFUS reste (un clic sans salon le cree, voir 8.).
+g.bloque = _interdit()
+
+
+async def _avec_creation(coro):
+    """Le clic, puis la creation qu'il a lancee en tache de fond : asyncio.run
+    l'annulerait sinon a la fin du clic."""
+    r = await coro
+    for t in list(oc._CREATIONS.values()):
+        await t
+    return r
 CT1, CT2 = oc.content_de(g, VA1), oc.content_de(g, VA2)
 S = g.outils
 check("chaque VA a SON -content (pas le premier de la catégorie)",
@@ -857,8 +898,11 @@ COGS = {"UserCog": UC}
 try:
     itx = Itx(g, S["menu"], STAFF, COGS)
     courir(u.ouvrir_menu_commun(itx))
-    check("📋 Ouvrir mon menu, staff sans -content : refus court en éphémère",
-          itx.response.envois == [(oc.REFUS, {"ephemeral": True})], itx.response.envois)
+    check("📋 Ouvrir mon menu, staff dont Discord refuse le salon : clic acquitté, puis refus "
+          "court en éphémère (une réponse)",
+          not itx.response.envois and itx.response.is_done()
+          and itx.followup.envois == [(oc.REFUS, {"ephemeral": True})],
+          (itx.response.envois, itx.followup.envois))
     itx = Itx(g, S["menu"], VA1, COGS)
     courir(u.ouvrir_menu_commun(itx))
     env = itx.response.envois
@@ -910,9 +954,11 @@ try:
                                      if c not in (CT1, CT2)))
     UC.appels.clear()
     it = _clic_action(STAFF, "lola", "pp", 1)
-    check("staff sans -content qui clique une action : refus en éphémère, rien de généré",
-          not UC.appels and it.response.envois == [(oc.REFUS, {"ephemeral": True})]
-          and _commun_vide(), (UC.appels, it.response.envois))
+    check("staff dont Discord refuse le salon, qui clique une action : refus en éphémère, "
+          "rien de généré",
+          not UC.appels and not it.response.envois
+          and it.followup.envois == [(oc.REFUS, {"ephemeral": True})]
+          and _commun_vide(), (UC.appels, it.response.envois, it.followup.envois))
     # le -content ressort du clic, jamais par catégorie ; un clic DANS un -content y reste
     t = types.SimpleNamespace(channel=S["menu"], guild=g, user=VA2)
     check("_us_content_target : depuis le salon commun, le -content du cliqueur",
@@ -942,9 +988,11 @@ check("📤・spoofer : salon spoofer (panneaux) et commun YouCham ; pas un salo
       spf._est_salon_spoofer(S["spoofer"]) and spf._commun_us(S["spoofer"])
       and not spf._commun_us(CT1))
 it = Itx(g, S["spoofer"], STAFF, CSPF)
-courir(spf.SpfGo(3).callback(it))
-check("📤 Spoofer, staff sans -content : refus éphémère AVANT la fenêtre",
-      not it.response.modales and it.response.envois == [(oc.REFUS, {"ephemeral": True})])
+courir(_avec_creation(spf.SpfGo(3).callback(it)))
+check("📤 Spoofer, staff sans -content : la fenêtre d'abord (la création suit, refusée ici)",
+      len(it.response.modales) == 1 and not it.response.envois
+      and oc.content_de(g, STAFF) is None and not oc._CREATIONS,
+      (it.response.modales, it.response.envois))
 it = Itx(g, S["spoofer"], VA1, CSPF)
 courir(spf.SpfGo(3).callback(it))
 check("📤 Spoofer, VA : la fenêtre, avec le nombre du bouton cliqué (custom_id)",
@@ -984,7 +1032,7 @@ check("spoofer : un refus (format) est dit dans SON -content, pas au commun",
       and "format non pris" in (CT1.messages[-1].content or "") and _commun_vide(), b)
 it = Itx(g, S["spoofer"], STAFF, CSPF)
 b = courir(spf.Spoofer.traiter(SPF, it, types.SimpleNamespace(filename="a.jpg", size=10), 3))
-check("spoofer : staff (fenêtre déjà ouverte) : refus éphémère, rien livré",
+check("spoofer : staff dont Discord refuse le salon, à la validation : refus éphémère, rien livré",
       b["refus"] == "salon" and it.response.envois == [(oc.REFUS, {"ephemeral": True})]
       and _commun_vide(), (b, it.response.envois))
 _crees = len(g.crees)
@@ -1004,9 +1052,16 @@ check("download : livraison dans le -content du cliqueur, staff nulle part",
       and tl.salon_de_livraison(S["download"], STAFF) is None)
 P = tl.PanneauTelechargement(DL)
 it = Itx(g, S["download"], STAFF, CDL)
-courir(P._compte(it))
-check("👤 compte, staff sans -content : refus éphémère, pas de fenêtre",
-      not it.response.modales and it.response.envois == [(oc.REFUS, {"ephemeral": True})])
+courir(_avec_creation(P._compte(it)))
+check("👤 compte, staff sans -content : la fenêtre d'abord (la création suit, refusée ici)",
+      len(it.response.modales) == 1 and not it.response.envois
+      and oc.content_de(g, STAFF) is None)
+it = Itx(g, S["download"], STAFF, CDL)
+m = tl.ModalCompte(DL)
+m.pseudo._value, m.combien._value = "sky.ards", "3"
+courir(m.on_submit(it))
+check("👤 validé, staff dont Discord a refusé le salon : refus éphémère, pas d'options",
+      it.response.envois == [(oc.REFUS, {"ephemeral": True})], it.response.envois)
 
 
 async def _compte(user, eph=False):
@@ -1037,8 +1092,10 @@ DL.choix[STAFF.id] = ("x", 1)
 it = Itx(g, S["download"], STAFF, CDL)
 n_av = len(DL.livrees)
 courir(P._lancer(it, "tout"))
-check("Tout, staff sans -content : refus éphémère, rien livré",
-      len(DL.livrees) == n_av and it.response.envois == [(oc.REFUS, {"ephemeral": True})])
+check("Tout, staff dont Discord refuse le salon : clic acquitté, refus éphémère, rien livré",
+      len(DL.livrees) == n_av and not it.response.envois and it.response.is_done()
+      and it.followup.envois == [(oc.REFUS, {"ephemeral": True})],
+      (it.response.envois, it.followup.envois))
 dem = tl._Demande("sky.ards", "Reels", VA1, CT1)
 check("download : la copie part dans le ⬇️・all-download de YouCham",
       dem.archive is g.archive)
@@ -1085,9 +1142,11 @@ try:
     n_av = len(FN.achats)
     it = Itx(g, S["numero"], STAFF)
     courir(nm.NumerosCog.clic_commun(FN, it, "sms"))
-    check("📱 staff sans -content : refus éphémère, rien acheté",
-          len(FN.achats) == n_av and it.response.envois[0][0] == oc.REFUS
-          and it.response.envois[0][1].get("ephemeral") is True)
+    check("📱 staff dont Discord refuse le salon : clic acquitté, refus éphémère, rien acheté",
+          len(FN.achats) == n_av and not it.response.envois and it.response.is_done()
+          and [e[0] for e in it.followup.envois] == [oc.REFUS]
+          and it.followup.envois[0][1].get("ephemeral") is True,
+          (it.response.envois, it.followup.envois))
     check("pas de quota ni de +33 sur YouCham (règles de -numero-mail de Youl4b)",
           not nm._serveur_fr(CT1) and nm._pays(CT1) is None)
 finally:
@@ -1229,6 +1288,7 @@ class GuildeLente(Guilde):
 
     async def create_category(self, name, overwrites=None, reason="", **kw):
         await _sleep(0.005)
+        self._refuser()
         c = Categorie(self, name)
         c.overwrites = overwrites or {}
         self.crees.append(("categorie", name))
@@ -1237,6 +1297,7 @@ class GuildeLente(Guilde):
 
     async def create_text_channel(self, name, category=None, overwrites=None, reason="", **kw):
         await _sleep(0.005)
+        self._refuser()
         if category is not None:
             n = self.vrais.get(category.id, len(category.channels))
             if n >= 50:
@@ -1482,6 +1543,8 @@ try:
     b = courir(oc.assurer(g, bot7))
     check("renommés : l'entretien ne recrée ni catégorie ni salon, ne repose aucun panneau",
           len(g.crees) == n_crees and not b["panneaux"] and not b["rates"], (b, g.crees[n_crees:]))
+    # le staff reste sans -content : Discord refuse de lui en creer un
+    g.bloque = _interdit()
     # numéro : la carte chez le cliqueur, jamais dans le salon renommé
     nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
 
@@ -1516,10 +1579,14 @@ try:
           it.response.envois and it.response.envois[0][1].get("ephemeral") is True
           and not R["download"].edites)
     it = Itx(g, R["spoofer"], ST, CSPF)
-    courir(spf.SpfGo(3).callback(it))
-    check("📤 renommé : staff refusé avant la fenêtre ; ses versions n'iraient nulle part",
-          not it.response.modales and it.response.envois == [(oc.REFUS, {"ephemeral": True})]
-          and spf._cible_content(Itx(g, R["spoofer"], ST, CSPF)) is None)
+    courir(_avec_creation(spf.SpfGo(3).callback(it)))
+    b = courir(spf.Spoofer.traiter(SPF, Itx(g, R["spoofer"], ST, CSPF),
+                                   types.SimpleNamespace(filename="a.jpg", size=10), 3))
+    check("📤 renommé : staff sans salon (refusé par Discord) : fenêtre, puis rien livré, "
+          "ni au commun",
+          len(it.response.modales) == 1 and b["refus"] == "salon"
+          and spf._cible_content(Itx(g, R["spoofer"], ST, CSPF)) is None
+          and not [m for m in R["spoofer"].messages if m.content], b)
     it = Itx(g, R["spoofer"], V1, CSPF)
     fq = spf.FenetreQuantite(5)
     fq.nombre._value = "2"
@@ -1600,6 +1667,379 @@ finally:
     u._jb_models_marche = _sauve_7["marche"]
     u.ensure_identity_emojis, u.ensure_reserve_emojis, u.ensure_action_emojis = _sauve_7["emojis"]
     nm.numgen.status = _sauve_7["status"]
+    asyncio.sleep = _sleep
+
+
+# ═══════════════════════ 8. clic sans -content : le salon est créé au clic ══
+# Propriétaire, 30/10 : « 📋 Ouvrir mon menu » lui répondait REFUS -- arrivé
+# avant les outils communs, il n'avait pas de -content --, puis « met ça aussi
+# stp ». Un clic sans salon le crée, comme à l'arrivée, puis livre dedans.
+print("8. Clic sans -content : le salon perso est créé au clic")
+_sauve_8 = {"adm": w._membre_bot_admin, "marche": u._jb_models_marche,
+            "status": nm.numgen.status, "principal": w._bot_principal}
+
+
+def _perso_de(gg, m):
+    """Le -content de `m`, s'il vit dans une 📁 SALONS PERSO."""
+    c = oc.content_de(gg, m)
+    return c if c is not None and oc.est_categorie_perso(c.category) else None
+
+
+def _droits_ok(gg, c, m):
+    """Les droits de create_us_tickets : privé ; le VA, Ryuk et Rem."""
+    ow = getattr(c, "overwrites", None) or {}
+    return (set(ow) == {gg.default_role, m, gg.me, gg.rem}
+            and ow[gg.default_role].view_channel is False
+            and ow[m].view_channel is True and ow[m].send_messages is True
+            and ow[gg.me].view_channel is True and ow[gg.rem].view_channel is True)
+
+
+def _outils_lents(gg):
+    cat = gg.ajoute_cat(oc.CATEGORIE)
+    return {cle: gg.ajoute(nom, cat) for cle, nom in oc.SALONS}
+
+
+try:
+    w._membre_bot_admin = lambda gg: getattr(gg, "rem", None)
+    u._jb_models_marche = lambda marche="us": ["lola", "julia"]
+    nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
+    asyncio.sleep = _instant
+
+    # ── 8a. menu
+    print("  8a. menu")
+    g = youcham(n_va=0)
+    proprio, roucham = Membre(1, "proprio", g), Membre(7100, "roucham_79944", g)
+    g.members += [proprio, roucham]
+    S8 = g.outils
+    itx = Itx(g, S8["menu"], proprio, COGS)
+    courir(u.ouvrir_menu_commun(itx))
+    c_p = _perso_de(g, proprio)
+    check("📋 Ouvrir mon menu sans -content : salon créé dans 📁 SALONS PERSO, nom de l'arrivée",
+          c_p is not None and c_p.name == w._us_ticket_name(proprio, "content")
+          and ("categorie", "📁 SALONS PERSO") in g.crees, g.crees)
+    check("… avec les droits de l'arrivée (privé : lui, Ryuk et Rem)",
+          c_p is not None and _droits_ok(g, c_p, proprio),
+          {getattr(k, "name", k): v.view_channel for k, v in getattr(c_p, "overwrites", {}).items()})
+    env = itx.followup.envois
+    check("… clic acquitté d'abord, puis le menu des models en suivi éphémère (une réponse)",
+          itx.response.is_done() and not itx.response.envois and len(env) == 1
+          and env[0][1].get("ephemeral") is True
+          and any(i.startswith("jbus:ms:us:") for i in _ids(env[0][1]["view"])),
+          (itx.response.envois, env))
+    check("… et ce menu est retenu (effacé à la prochaine ouverture)",
+          u._DERNIER_MENU_COMMUN.get(proprio.id) is not None)
+    check("… rien dans le salon commun",
+          not [m for m in S8["menu"].messages if m.content or m.vue])
+    n = len(g.crees)
+    itx = Itx(g, S8["menu"], proprio, COGS)
+    courir(u.ouvrir_menu_commun(itx))
+    check("rouvrir : rien de recréé, le menu en réponse directe comme avant",
+          len(g.crees) == n and len(itx.response.envois) == 1 and not itx.followup.envois)
+    UC.appels.clear()
+    it = Itx(g, S8["menu"], roucham, COGS, ephemere=True)
+    courir(u.JBActionButton("lola", "pp", 2).callback(it))
+    c_r = _perso_de(g, roucham)
+    check("action du panneau sans -content : salon créé, contenu livré DEDANS",
+          c_r is not None and _droits_ok(g, c_r, roucham)
+          and [m.content for m in c_r.messages] == ["profilepic pour lola"]
+          and UC.appels == [("profilepic", roucham.id, "lola", 2)],
+          (getattr(c_r, "name", None), UC.appels))
+    check("… rien au commun ni chez un autre, aucun refus",
+          not [m for m in S8["menu"].messages if m.content] and not c_p.messages
+          and oc.REFUS not in [e[0] for e in it.response.envois + it.followup.envois])
+
+    # ── 8b. spoofer : la fenêtre d'abord, la création derrière
+    print("  8b. spoofer")
+    sp_m = Membre(7101, "spoof_sans", g)
+    g.members.append(sp_m)
+    vu8 = {}
+
+    async def _spf_clic():
+        it = Itx(g, S8["spoofer"], sp_m, CSPF)
+        await spf.SpfGo(2).callback(it)
+        vu8["en_cours"] = oc.creation_en_cours(g, sp_m)
+        vu8["salon_avant"] = oc.content_de(g, sp_m)
+        for t in list(oc._CREATIONS.values()):
+            await t
+        return it
+    it = courir(_spf_clic())
+    check("📤 sans -content : la fenêtre est la PREMIÈRE réponse, la création tourne derrière",
+          len(it.response.modales) == 1 and it.response.modales[0].q == 2
+          and not it.response.envois and vu8["en_cours"] and vu8["salon_avant"] is None,
+          (vu8, it.response.envois))
+    c_s = _perso_de(g, sp_m)
+    check("… puis le salon existe, droits de l'arrivée", c_s is not None and _droits_ok(g, c_s, sp_m))
+    it = Itx(g, S8["spoofer"], sp_m, CSPF)
+    b = courir(spf.Spoofer.traiter(SPF, it, types.SimpleNamespace(filename="doc.pdf", size=10), 2))
+    check("… à la validation, cible_du_clic le retrouve : ce qui est dit part DEDANS",
+          b["refus"] == "format" and c_s.messages
+          and "format non pris" in (c_s.messages[-1].content or "") and not it.response.envois, b)
+
+    gl8 = _youcham_lent()
+    O8 = _outils_lents(gl8)
+    vite = Membre(7102, "vite", gl8)
+    gl8.members.append(vite)
+
+    async def _valide_vite():
+        it = Itx(gl8, O8["spoofer"], vite, CSPF)
+        await spf.SpfGo(1).callback(it)
+        en_cours = oc.creation_en_cours(gl8, vite)
+        it2 = Itx(gl8, O8["spoofer"], vite, CSPF)
+        await it2.response.defer()          # FenetreFichier.on_submit acquitte d'abord
+        b = await spf.Spoofer.traiter(SPF, it2, types.SimpleNamespace(filename="doc.pdf", size=10), 1)
+        await _sleep(0.12)                  # les événements de Discord arrivent
+        return it, it2, en_cours, b
+    it, it2, en_cours, b = courir(_valide_vite())
+    c_v = oc.content_de(gl8, vite)
+    check("📤 validée pendant la création : attendue, puis dite DANS le salon (pas de refus)",
+          en_cours and b["refus"] == "format" and c_v is not None
+          and any("format non pris" in (m.content or "") for m in c_v.messages)
+          and oc.REFUS not in [e[0] for e in it2.response.envois + it2.followup.envois]
+          and sum(1 for x in gl8.crees if x[0] == "salon") == 1, (b, gl8.crees))
+
+    # ── 8c. download
+    print("  8c. download")
+    dl_m = Membre(7103, "dl_sans", g)
+    g.members.append(dl_m)
+    DL8 = _FauxDlCog(_FauxBot())
+    CDL8 = {"Telechargement": DL8}
+    P8 = tl.PanneauTelechargement(DL8)
+
+    async def _dl_clic():
+        it = Itx(g, S8["download"], dl_m, CDL8)
+        await P8._compte(it)
+        vu = (oc.creation_en_cours(g, dl_m), oc.content_de(g, dl_m))
+        for t in list(oc._CREATIONS.values()):
+            await t
+        return it, vu
+    it, vu = courir(_dl_clic())
+    c_d = _perso_de(g, dl_m)
+    check("👤 sans -content : la fenêtre est la PREMIÈRE réponse, la création tourne derrière",
+          len(it.response.modales) == 1 and not it.response.envois and vu[0] and vu[1] is None, vu)
+    check("… puis le salon existe, droits de l'arrivée", c_d is not None and _droits_ok(g, c_d, dl_m))
+    it = Itx(g, S8["download"], dl_m, CDL8)
+    m = tl.ModalCompte(DL8)
+    m.pseudo._value, m.combien._value = "sky.ards", "4"
+    courir(m.on_submit(it))
+    check("… validée : ses options en éphémère",
+          it.response.envois and it.response.envois[0][1].get("ephemeral") is True
+          and "dl:tout" in _ids(it.response.envois[0][1]["view"]), it.response.envois)
+    it = Itx(g, S8["download"], dl_m, CDL8)
+    courir(P8._lancer(it, "reels"))
+    check("… Reels : livré dans SON nouveau -content, confirmation en réponse directe",
+          DL8.livrees and DL8.livrees[-1][0] is c_d
+          and it.response.envois and it.response.envois[0][1].get("ephemeral") is True)
+
+    vite2 = Membre(7104, "vite_dl", gl8)
+    gl8.members.append(vite2)
+
+    async def _dl_vite():
+        it = Itx(gl8, O8["download"], vite2, CDL8)
+        await P8._compte(it)
+        it2 = Itx(gl8, O8["download"], vite2, CDL8)
+        m = tl.ModalCompte(DL8)
+        m.pseudo._value, m.combien._value = "sky.ards", "4"
+        await m.on_submit(it2)              # création encore en cours
+        it3 = Itx(gl8, O8["download"], vite2, CDL8)
+        await P8._lancer(it3, "tout")       # l'attend
+        await _sleep(0.12)
+        return it2, it3
+    it2, it3 = courir(_dl_vite())
+    c_v2 = oc.content_de(gl8, vite2)
+    check("👤 validée pendant la création : ses options, pas de refus",
+          it2.response.envois and it2.response.envois[0][1].get("view") is not None
+          and oc.REFUS not in [e[0] for e in it2.response.envois], it2.response.envois)
+    check("… Tout : clic acquitté, création attendue, livré DEDANS, confirmation en suivi",
+          c_v2 is not None and DL8.livrees[-1][0] is c_v2 and it3.response.is_done()
+          and not it3.response.envois and it3.followup.envois
+          and it3.followup.envois[0][1].get("ephemeral") is True
+          and c_v2.mention in (it3.followup.envois[0][0] or ""),
+          (it3.response.envois, it3.followup.envois))
+
+    # ── 8d. numéro
+    print("  8d. numéro")
+    nu_m = Membre(7105, "num_sans", g)
+    g.members.append(nu_m)
+    FN8 = _FauxNum()
+    it = Itx(g, S8["numero"], nu_m)
+    courir(nm.NumerosCog.clic_commun(FN8, it, "sms"))
+    c_n = _perso_de(g, nu_m)
+    check("📱 sans -content : salon créé, la carte y est posée et le numéro pris DEDANS",
+          c_n is not None and _droits_ok(g, c_n, nu_m)
+          and FN8.bas == [c_n] and FN8.achats == [("sms", c_n, nu_m.id)], (FN8.bas, FN8.achats))
+    check("… clic acquitté d'abord, confirmation en suivi éphémère (une seule réponse)",
+          it.response.is_done() and not it.response.envois and it.followup.envois
+          and it.followup.envois[-1][1].get("ephemeral") is True
+          and c_n.mention in it.followup.envois[-1][0], (it.response.envois, it.followup.envois))
+
+    class GuildeVueRem(Guilde):
+        """YouCham tel que le voit Rem : son propre cache, où le salon que
+        Ryuk vient de créer n'est pas encore (l'événement suit)."""
+
+        def __init__(self, vue_ryuk):
+            super().__init__(YOUCHAM, "YouCham")
+            self.me = Membre(REM, "Rem", self, bot=True)
+            self.members = [self.me]
+            self.vue_ryuk = vue_ryuk
+            self.lus = []
+
+        async def fetch_channel(self, cid):
+            c = self.vue_ryuk.get_channel(cid)
+            if c is None:
+                raise discord.NotFound(_Rep404(), "Unknown Channel")
+            copie = Salon(self, c.name)
+            copie.id, copie.overwrites = c.id, dict(c.overwrites)
+            self._salons.append(copie)
+            self.lus.append(cid)
+            return copie
+
+    gR = GuildeVueRem(g)
+    catR = gR.ajoute_cat(oc.CATEGORIE)
+    numR = gR.ajoute("📱・numéro", catR)
+    clic_R, clic_g = Membre(7106, "rem_clic", gR), Membre(7106, "rem_clic", g)
+    gR.members.append(clic_R)
+    g.members.append(clic_g)
+    w._bot_principal = lambda: types.SimpleNamespace(
+        get_guild=lambda gid: g if gid == YOUCHAM else None)
+    FNR = _FauxNum()
+    it = Itx(gR, numR, clic_R)
+    it.client.user = types.SimpleNamespace(id=REM)
+    courir(nm.NumerosCog.clic_commun(FNR, it, "sms"))
+    c_ry = _perso_de(g, clic_g)
+    check("📱 cliqué chez Rem : le salon est créé par Ryuk, avec la règle de Ryuk ET de Rem",
+          c_ry is not None and _droits_ok(g, c_ry, clic_g) and not gR.crees, (g.crees[-2:], gR.crees))
+    check("… et Rem pose la carte dans le salon tel que LUI le voit (relu, pas l'objet de Ryuk)",
+          FNR.bas and FNR.bas[0].guild is gR and FNR.bas[0].id == c_ry.id
+          and FNR.achats == [("sms", FNR.bas[0], clic_R.id)] and gR.lus == [c_ry.id],
+          (FNR.bas, FNR.achats, gR.lus))
+
+    # Relecture du 30/10 : Ryuk pas encore pret (sa reference existe des avant
+    # bot.start) ou en reconnexion, Rem en ligne. Le repli sur Rem creait un
+    # salon SANS la regle de Ryuk, que rien ne repose ensuite.
+    av_R, av_g = Membre(7110, "rem_aveugle", gR), Membre(7110, "rem_aveugle", g)
+    gR.members.append(av_R)
+    g.members.append(av_g)
+    n_g, n_R = len(g.crees), len(gR.crees)
+    for etat, principal in (
+            ("hors ligne", types.SimpleNamespace(get_guild=lambda gid: None)),
+            ("serveur unavailable", types.SimpleNamespace(
+                get_guild=lambda gid: types.SimpleNamespace(id=gid, unavailable=True)))):
+        w._bot_principal = lambda principal=principal: principal
+        FNA = _FauxNum()
+        it = Itx(gR, numR, av_R)
+        it.client.user = types.SimpleNamespace(id=REM)
+        tampon = io.StringIO()
+        with contextlib.redirect_stdout(tampon):
+            courir(nm.NumerosCog.clic_commun(FNA, it, "sms"))
+        journal = tampon.getvalue()
+        check(f"📱 chez Rem, Ryuk {etat} : rien n'est créé (ni par Rem, ni par Ryuk)",
+              len(gR.crees) == n_R and len(g.crees) == n_g and not FNA.bas and not FNA.achats
+              and oc.content_de(gR, av_R) is None and oc.content_de(g, av_g) is None,
+              (gR.crees[n_R:], g.crees[n_g:], FNA.bas))
+        check(f"… REFUS en suivi (une réponse), la cause au journal ({etat})",
+              it.response.is_done() and not it.response.envois
+              and [e[0] for e in it.followup.envois] == [oc.REFUS]
+              and "non cree au clic" in journal and "ne voit pas ce serveur" in journal,
+              (it.response.envois, it.followup.envois, journal[-300:]))
+    w._bot_principal = lambda: types.SimpleNamespace(
+        get_guild=lambda gid: g if gid == YOUCHAM else None)
+    FNA = _FauxNum()
+    it = Itx(gR, numR, av_R)
+    it.client.user = types.SimpleNamespace(id=REM)
+    courir(nm.NumerosCog.clic_commun(FNA, it, "sms"))
+    c_av = _perso_de(g, av_g)
+    check("… Ryuk revenu, le clic suivant crée le salon (par Ryuk) : rien n'est resté bloqué",
+          c_av is not None and _droits_ok(g, c_av, av_g) and len(gR.crees) == n_R
+          and FNA.bas and FNA.bas[0].guild is gR and FNA.bas[0].id == c_av.id
+          and oc.REFUS not in [e[0] for e in it.followup.envois], (g.crees[n_g:], FNA.bas))
+    w._bot_principal = _sauve_8["principal"]
+
+    # ── 8e. clics simultanés
+    print("  8e. clics simultanés")
+    gl9 = _youcham_lent()
+    O9 = _outils_lents(gl9)
+    dbl = Membre(7107, "double_clic", gl9)
+    gl9.members.append(dbl)
+    FN9 = _FauxNum()
+
+    async def _ensemble_clics():
+        i1 = Itx(gl9, O9["menu"], dbl, COGS)
+        i2 = Itx(gl9, O9["numero"], dbl)
+        i3 = Itx(gl9, O9["spoofer"], dbl, CSPF)
+        i4 = Itx(gl9, O9["menu"], dbl, COGS)
+        await asyncio.gather(u.ouvrir_menu_commun(i1), nm.NumerosCog.clic_commun(FN9, i2, "sms"),
+                             spf.SpfGo(1).callback(i3), u.ouvrir_menu_commun(i4))
+        for t in list(oc._CREATIONS.values()):
+            await t
+        await _sleep(0.12)
+        return i1, i2, i3, i4
+    i1, i2, i3, i4 = courir(_ensemble_clics())
+    c9 = oc.content_de(gl9, dbl)
+    check("quatre clics dans la même seconde (📋 ×2, 📱, 📤) : UN salon, UNE catégorie",
+          sum(1 for x in gl9.crees if x[0] == "salon") == 1
+          and [x for x in gl9.crees if x[0] == "categorie"] == [("categorie", "📁 SALONS PERSO")]
+          and c9 is not None, gl9.crees)
+    check("… et chacun s'en sert : menus ouverts, carte posée dedans, fenêtre ouverte",
+          all(i.followup.envois and i.followup.envois[0][1].get("view") is not None for i in (i1, i4))
+          and FN9.bas == [c9] and len(i3.response.modales) == 1
+          and not [i for i in (i1, i2, i3, i4) if oc.REFUS in [e[0] for e in
+                                                             i.response.envois + i.followup.envois]])
+
+    # ── 8f. Discord refuse la création : REFUS, cause au journal
+    print("  8f. création refusée")
+    gf8 = youcham(n_va=0)
+    gf8.bloque = _interdit()
+    ref = Membre(7108, "refuse", gf8)
+    gf8.members.append(ref)
+    tampon = io.StringIO()
+    with contextlib.redirect_stdout(tampon):
+        itx = Itx(gf8, gf8.outils["menu"], ref, COGS)
+        courir(u.ouvrir_menu_commun(itx))
+    journal = tampon.getvalue()
+    check("Discord refuse : REFUS au cliqueur (une seule réponse), ni salon ni catégorie",
+          itx.followup.envois == [(oc.REFUS, {"ephemeral": True})] and not itx.response.envois
+          and oc.content_de(gf8, ref) is None and not gf8.crees, (itx.followup.envois, gf8.crees))
+    check("… et la cause au journal", "non cree au clic" in journal and "Forbidden" in journal,
+          journal[-300:])
+
+    # ── 8g. un bot n'a jamais de salon ; Youl4b inchangé
+    print("  8g. bots, autres serveurs")
+    gb = youcham(n_va=0)
+    robot = Membre(424242, "un_bot", gb, bot=True)
+    gb.members.append(robot)
+    it_m = Itx(gb, gb.outils["menu"], robot, COGS)
+    courir(u.ouvrir_menu_commun(it_m))
+    it_s = Itx(gb, gb.outils["spoofer"], robot, CSPF)
+    courir(spf.SpfGo(1).callback(it_s))
+    it_d = Itx(gb, gb.outils["download"], robot, CDL8)
+    courir(P8._compte(it_d))
+    it_n = Itx(gb, gb.outils["numero"], robot)
+    courir(nm.NumerosCog.clic_commun(FN8, it_n, "sms"))
+    check("un bot qui clique : aucun salon, refus avant toute fenêtre",
+          not gb.crees and not it_s.response.modales and not it_d.response.modales
+          and it_s.response.envois == [(oc.REFUS, {"ephemeral": True})]
+          and it_d.response.envois == [(oc.REFUS, {"ephemeral": True})]
+          and oc.REFUS in [e[0] for e in it_m.followup.envois]
+          and oc.REFUS in [e[0] for e in it_n.followup.envois], gb.crees)
+
+    async def _bot_direct():
+        return oc.lancer_perso(gb, robot), await oc.perso_ou_creer(gb, robot)
+    check("lancer_perso / perso_ou_creer d'un bot : rien", courir(_bot_direct()) == (None, None)
+          and not gb.crees)
+    gy = Guilde(YOUL4B, "l")
+    vy = Membre(9300, "vy", gy)
+    gy.members.append(vy)
+
+    async def _youl4b():
+        return oc.lancer_perso(gy, vy), await oc.perso_ou_creer(gy, vy)
+    check("Youl4b : ce chemin ne crée rien (ses dossiers ne changent pas)",
+          courir(_youl4b()) == (None, None) and not gy.crees)
+    check("aucune création laissée en cours", not oc._CREATIONS, list(oc._CREATIONS))
+finally:
+    w._membre_bot_admin = _sauve_8["adm"]
+    u._jb_models_marche = _sauve_8["marche"]
+    nm.numgen.status = _sauve_8["status"]
+    w._bot_principal = _sauve_8["principal"]
     asyncio.sleep = _sleep
 
 

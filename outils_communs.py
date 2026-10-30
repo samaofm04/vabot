@@ -28,10 +28,14 @@ CE QUI VIT OU
 LA REGLE DE LIVRAISON
     Un clic dans un salon commun livre dans le -content DU CLIQUEUR
     (content_de), jamais dans le salon commun : tout le monde y verrait ses
-    fichiers. Quelqu'un sans -content (le staff) recoit un refus court, en
-    ephemere (REFUS). Seuls les refus et les confirmations courtes sont
-    ephemeres ; ce qui est livre vit dans le -content, qui survit a un
-    rechargement de Discord.
+    fichiers. Quelqu'un sans -content (arrive avant les outils communs : le
+    proprietaire, Roucham) en recoit un au clic (perso_ou_creer,
+    lancer_perso), comme a l'arrivee ; refuser l'obligeait a attendre un
+    /ticketsall (proprietaire, 30/10 : « met ca aussi stp »). Le refus court,
+    en ephemere (REFUS), ne reste que si la creation echoue (Discord la
+    refuse, ou Ryuk ne voit pas encore le serveur). Seuls les
+    refus et les confirmations courtes sont ephemeres ; ce qui est livre vit
+    dans le -content, qui survit a un rechargement de Discord.
 
     Sur ces serveurs, la regle tient PAR SERVEUR, pas par nom de salon
     (cible_du_clic, clic_commun) : rien n'y est livre ailleurs que dans un
@@ -90,7 +94,9 @@ MENU_ID = "ocm:menu"
 #: passage relisait l'historique. Les ids des salons : voir « RECONNAITRE ».
 ETAT = Path(__file__).resolve().parent / "data" / "outils_communs.json"
 
-#: Le refus, le meme pour les quatre outils. Court, sans notice.
+#: Le refus, le meme pour les quatre outils. Court, sans notice. Dit
+#: seulement quand le -content n'a pas pu etre cree (perso_ou_creer) : un
+#: membre sans salon en recoit un au clic.
 REFUS = "Tu n'as pas de salon perso ici : rien ne peut t'être livré."
 
 #: L'etat lu, et ce qui dit s'il est encore frais (chemin, date, taille).
@@ -539,6 +545,166 @@ async def salon_perso(guilde, membre, droits) -> tuple:
         _retenir(guilde, "salon", salon, cat.id)
         await ranger_content(salon)
         return salon, True
+
+
+# ─────────────────────────────────────────── salon perso cree au clic ──
+#
+# Proprietaire, 30/10 : il clique « 📋 Ouvrir mon menu » et lit REFUS, puis
+# « met ca aussi stp ». Le -content naissait a l'arrivee (create_us_tickets)
+# ou par /ticketsall : ceux qui etaient la avant les outils communs (lui,
+# Roucham) n'en avaient pas, et chacun des quatre outils les renvoyait. Un
+# clic sans salon le cree donc, ici, une fois pour les quatre.
+
+#: Les creations lancees par un clic, par (serveur, membre) : la tache en
+#: cours. 📤 puis 📋 dans la meme seconde attendent la MEME creation au lieu
+#: d'en empiler une seconde derriere le verrou ; le verrou de salon_perso
+#: garde de toute facon un seul salon (une arrivee, /ticketsall).
+_CREATIONS = {}
+
+
+def _guilde_createur(guilde):
+    """Le serveur tel que le voit le bot PRINCIPAL (Ryuk) ; `guilde` s'il n'y
+    a pas de bot principal du tout (web_upload pas charge) ; None si Ryuk est
+    connu mais ne voit pas (ou pas encore) ce serveur.
+
+    create_us_tickets tourne sur Ryuk : guild.me (Ryuk) et le bot admin (Rem)
+    recoivent chacun leur regle dans le -content (_us_droits_ticket). Cree
+    depuis le 📱・numéro, que sert Rem, le salon n'aurait porte que celle de
+    Rem : Ryuk n'y aurait rien livre, ni menu, ni spoofer, ni download.
+
+    Pas de repli sur le bot du clic quand Ryuk ne voit pas le serveur : la
+    reference de Ryuk existe des avant bot.start() (main.py), et get_guild
+    rend None tant qu'il n'est pas pret, ou pendant une reconnexion, alors
+    que Rem sert deja le 📱. Le salon naissait alors sans la regle de Ryuk,
+    et ni salon_perso ni /ticketsall ne la reposent ensuite : chaque
+    livraison de Ryuk y aurait echoue, ou Ryuk, aveugle, en aurait cree un
+    second au meme nom."""
+    try:
+        from cogs.welcome import _bot_principal
+        bot = _bot_principal()
+    except Exception:                                        # noqa: BLE001
+        bot = None
+    if bot is None:
+        return guilde
+    try:
+        vu = bot.get_guild(guilde.id)
+    except Exception:                                        # noqa: BLE001
+        vu = None
+    # Un serveur « unavailable » (panne Discord, READY pas fini) n'a ni roles
+    # ni membres : @everyone y est None, les droits seraient faux.
+    if vu is None or getattr(vu, "unavailable", False):
+        return None
+    return vu
+
+
+async def _creer_perso(guilde, membre):
+    """Le -content de `membre`, cree comme a son arrivee (create_us_tickets) :
+    memes droits, meme salon_perso, donc meme verrou. Rend le salon, ou None
+    si Discord refuse, ou si le bot principal ne voit pas le serveur -- la
+    cause au journal : le VA ne lit que REFUS, et son prochain clic
+    reessaie (la tache finie quitte _CREATIONS)."""
+    cg = _guilde_createur(guilde)
+    uid = int(getattr(membre, "id", 0) or 0)
+    qui = f"{getattr(membre, 'name', '?')} ({uid})"
+    if cg is None:
+        print(f"[outils-communs] {getattr(guilde, 'name', '?')} : -content de {qui} non cree "
+              f"au clic : le bot principal ne voit pas ce serveur (pas encore pret, ou "
+              f"deconnecte), rien n'est cree", flush=True)
+        return None
+    cm = (cg.get_member(uid) if cg is not guilde else None) or membre
+    try:
+        from cogs.welcome import _us_droits_ticket
+        salon, cree = await salon_perso(cg, cm, _us_droits_ticket(cg, [cm], "content"))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils-communs] {getattr(guilde, 'name', '?')} : -content de {qui} non cree "
+              f"au clic : {type(e).__name__}: {e}", flush=True)
+        return None
+    if cree:
+        print(f"[outils-communs] {getattr(guilde, 'name', '?')} : #{salon.name} cree au clic "
+              f"de {qui} (sans salon perso jusque-la)", flush=True)
+    return salon
+
+
+def lancer_perso(guilde, membre):
+    """Lance la creation du -content de `membre` SANS l'attendre ; rend sa
+    tache, ou None si personne ne doit en avoir ici (un bot, un serveur sans
+    outils communs).
+
+    Pour un clic qui ouvre une FENETRE (📤, 👤) : elle doit etre la premiere
+    reponse, dans les 3 s, et categorie + salon + rangement peuvent les
+    depasser. La creation court pendant que le VA remplit la fenetre ; a la
+    validation, content_de retrouve le salon (_recents) ou perso_ou_creer
+    attend la fin. La tache tourne sur la boucle du clic : celle du bot."""
+    if (guilde is None or membre is None or getattr(membre, "bot", False)
+            or not serveur(guilde)):
+        return None
+    try:
+        boucle = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    cle = (getattr(guilde, "id", 0), getattr(membre, "id", 0))
+    t = _CREATIONS.get(cle)
+    if t is not None and not t.done() and t.get_loop() is boucle:
+        return t
+    t = boucle.create_task(_creer_perso(guilde, membre), name=f"salon-perso-{cle[1]}")
+    _CREATIONS[cle] = t     # aussi la reference forte : asyncio n'en garde qu'une faible
+
+    def _finie(fin, cle=cle):
+        if _CREATIONS.get(cle) is fin:
+            _CREATIONS.pop(cle, None)
+    t.add_done_callback(_finie)
+    return t
+
+
+def creation_en_cours(guilde, membre) -> bool:
+    """Une creation lancee par un clic tourne-t-elle encore pour ce membre ?
+    Une fenetre validee tres vite la trouve en cours : ce n'est pas un echec."""
+    t = _CREATIONS.get((getattr(guilde, "id", 0), getattr(membre, "id", 0)))
+    return t is not None and not t.done()
+
+
+async def _vu_par(guilde, salon):
+    """`salon` tel que le voit le bot de `guilde`. Cree par Ryuk, l'objet
+    parle au nom de Ryuk : Rem y aurait pose la carte du numero sous le nom
+    de Ryuk, et ses boutons, que Rem seul sert, seraient restes muets. Pas
+    encore dans le cache de Rem (l'evenement de Discord suit) : relu."""
+    if salon is None or getattr(salon, "guild", None) is guilde:
+        return salon
+    vu = guilde.get_channel(salon.id)
+    if vu is not None:
+        return vu
+    try:
+        return await guilde.fetch_channel(salon.id)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils-communs] #{getattr(salon, 'name', '?')} cree mais illisible pour ce "
+              f"bot : {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+async def perso_ou_creer(guilde, membre):
+    """Le -content de `membre` sur un serveur aux outils communs, CREE s'il
+    n'en a pas -- ce que font les quatre outils d'un clic sans salon perso.
+
+    A appeler une fois le clic acquitte (defer) ou dans une fenetre deja
+    acquittee : la creation peut depasser les 3 s. Une creation deja lancee
+    (lancer_perso) est attendue, jamais doublee ; si elle a echoue, un nouvel
+    essai est fait (une fenetre rouverte apres un redemarrage n'a rien lance).
+
+    Rend le salon tel que le voit le bot du clic ; None pour un bot, un
+    serveur sans outils communs, ou si la creation echoue -- Discord la
+    refuse, ou le bot principal ne voit pas le serveur (cause au journal) --
+    l'appelant dit alors REFUS."""
+    if not serveur(guilde):
+        return None
+    deja = content_de(guilde, membre)
+    if deja is not None:
+        return deja
+    t = lancer_perso(guilde, membre)
+    if t is None:
+        return None
+    # shield : un clic abandonne n'interrompt pas la creation que d'autres
+    # clics du meme membre attendent peut-etre.
+    return await _vu_par(guilde, await asyncio.shield(t))
 
 
 # ──────────────────────────────────────────────────────── salons communs ──

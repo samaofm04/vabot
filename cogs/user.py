@@ -6084,9 +6084,10 @@ class UserCog(commands.Cog):
                 if target is not None and target.id != getattr(interaction.channel, "id", None):
                     itx = _JBRedirect(interaction, target)
                 elif _salon_outil_commun(getattr(interaction, "channel", None)):
-                    # Salon commun (YouCham) sans -content a soi : rien n'est
-                    # genere -- ni dans le salon que tout le monde voit, ni
-                    # en ephemere, qui disparait au rechargement.
+                    # Salon commun (YouCham) sans -content a soi : jamais
+                    # dans le salon que tout le monde voit, ni en ephemere,
+                    # qui disparait au rechargement. Le -content est cree
+                    # plus bas (outils_communs.perso_ou_creer).
                     sans_salon = True
                 elif _est_salon_menu(getattr(interaction, "channel", None)):
                     # salon -menu sans -content identifiable : on n'y publie
@@ -6103,9 +6104,19 @@ class UserCog(commands.Cog):
         except Exception:
             itx, target = interaction, None
         if sans_salon:
+            # Arrive avant les outils communs (le proprietaire, Roucham) : son
+            # -content nait ici, comme a l'arrivee, au lieu d'un refus qui
+            # attendait un /ticketsall. Clic acquitte d'abord : categorie,
+            # salon et rangement peuvent depasser les 3 s. Le REFUS ne reste
+            # que si Discord refuse la creation (cause au journal).
             import outils_communs as _oc
-            await _jb_dire(interaction, _oc.REFUS, "outils communs")
-            return
+            await _jb_accuser(interaction, "outils communs")
+            target = await _oc.perso_ou_creer(getattr(interaction, "guild", None),
+                                              getattr(interaction, "user", None))
+            if target is None:
+                await _jb_dire(interaction, _oc.REFUS, "outils communs")
+                return
+            itx = _JBRedirect(interaction, target)
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
         token_m = _MODEL_REELLE.set((brute_de or "").strip().lower() or None)
         try:
@@ -12073,26 +12084,41 @@ async def _effacer_ephemere(registre, user_id):
 
 async def ouvrir_menu_commun(interaction):
     """« 📋 Ouvrir mon menu » (salon 📋・menu commun) : le menu des models de
-    SON marche, en ephemere. Sans -content a soi (le staff) : refus court.
-    Le menu precedent de la personne, son panneau et son General sont
-    effaces : un seul jeu a l'ecran."""
+    SON marche, en ephemere. Sans -content a soi (arrive avant les outils
+    communs : le proprietaire, Roucham), il est cree d'abord
+    (outils_communs.perso_ou_creer) ; refus court seulement si Discord le
+    refuse. Le menu precedent de la personne, son panneau et son General
+    sont effaces : un seul jeu a l'ecran."""
     import outils_communs as _oc
     guild = getattr(interaction, "guild", None)
     user = getattr(interaction, "user", None)
-    if _oc.content_de(guild, user) is None:
-        await interaction.response.send_message(_oc.REFUS, ephemeral=True)
-        return
     if interaction.client.get_cog("UserCog") is None:
         await interaction.response.send_message("Indisponible.", ephemeral=True)
         return
+    differe = False
+    if _oc.content_de(guild, user) is None:
+        # Clic acquitte AVANT la creation (categorie, salon, rangement :
+        # plus de 3 s possibles) ; le menu suit alors en message de suivi,
+        # jamais en seconde reponse. Accuse silencieux, comme les autres
+        # clics du menu : le menu part en suivi ephemere neuf, comme le
+        # ✨ General (_jb_model_panneau_commun).
+        differe = True
+        await _jb_accuser(interaction, "📋・menu")
+        if await _oc.perso_ou_creer(guild, user) is None:
+            await interaction.followup.send(_oc.REFUS, ephemeral=True)
+            return
     vue = _vue_sans_suivi(_jb_menu_models_vue(marche_du_membre(user), guild))
-    await interaction.response.send_message(view=vue, ephemeral=True)
+    msg = None
+    if differe:
+        msg = await interaction.followup.send(view=vue, ephemeral=True, wait=True)
+    else:
+        await interaction.response.send_message(view=vue, ephemeral=True)
     uid = int(getattr(user, "id", 0) or 0)
     await _effacer_ephemere(_DERNIER_MENU_COMMUN, uid)
     await _fermer_panneau_jb(uid)
     await _effacer_ephemere(_DERNIER_GENERAL_COMMUN, uid)
     try:
-        _DERNIER_MENU_COMMUN[uid] = await interaction.original_response()
+        _DERNIER_MENU_COMMUN[uid] = msg or await interaction.original_response()
     except Exception as e:                                   # noqa: BLE001
         log.info("📋・menu : menu de %s ouvert sans handle (%s: %s)", uid,
                  type(e).__name__, e)

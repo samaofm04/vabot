@@ -254,6 +254,16 @@ def _clic_us(canal) -> bool:
         return False
 
 
+async def _au_cliqueur(inter, texte: str) -> None:
+    """Un mot ephemere au cliqueur : la reponse au clic, ou un suivi s'il est
+    deja acquitte (_lancer sur YouCham, qui attend la creation du -content).
+    Une seconde reponse a la meme interaction leverait. Leve comme avant."""
+    if inter.response.is_done():
+        await inter.followup.send(texte, ephemeral=True)
+    else:
+        await inter.response.send_message(texte, ephemeral=True)
+
+
 def _refus_livraison(canal, membre) -> str:
     """La phrase d'un clic qui n'a nulle part ou livrer : celle des outils
     communs de YouCham, sinon celle de Va IG (cogs/outils.refus)."""
@@ -282,7 +292,8 @@ def salon_de_livraison(canal, membre=None):
 
     Sur un serveur aux outils communs (YouCham) : le -content du clic, sinon
     celui de `membre`, sinon None -- jamais « sur place », meme depuis un
-    salon commun renomme que plus rien ne reconnait a son nom.
+    salon commun renomme que plus rien ne reconnait a son nom. None : le
+    clic le fait creer (_lancer, outils_communs.perso_ou_creer).
     """
     try:
         import guild_features as gf
@@ -926,6 +937,15 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
             # memes custom_id (dl:…) : la vue persistante enregistree au
             # demarrage les sert, avec le compte retenu POUR LUI. Vue ARRETEE,
             # jamais rangee par discord.py (cogs/user._vue_sans_suivi).
+            import outils_communs as oc
+            if (oc.cible_du_clic(inter.channel, inter.user) is None
+                    and not oc.creation_en_cours(getattr(inter, "guild", None), inter.user)):
+                # Le -content que 👤 a fait creer n'existe pas, et plus rien
+                # ne le cree : Discord l'a refuse (cause au journal). Encore
+                # en cours (fenetre validee vite) : les options partent, le
+                # clic sur l'une d'elles l'attend (_lancer).
+                await inter.response.send_message(oc.REFUS, ephemeral=True)
+                return
             vue = PanneauTelechargement(self.cog, username, n)
             vue.stop()
             msg = getattr(inter, "message", None)
@@ -999,9 +1019,14 @@ class PanneauTelechargement(discord.ui.LayoutView):
 
     async def _compte(self, inter):
         if _clic_us(getattr(inter, "channel", None)):
-            # refuse AVANT la fenetre : un compte saisi pour rien
+            # YouCham. Sans -content (arrive avant les outils communs), il est
+            # cree EN TACHE DE FOND : la fenetre doit etre la premiere
+            # reponse, dans les 3 s, et la creation peut les depasser. Elle
+            # court pendant la saisie du compte. Refus avant la fenetre pour
+            # qui ne peut pas en avoir (un bot) : un compte saisi pour rien.
             import outils_communs as oc
-            if oc.cible_du_clic(inter.channel, inter.user) is None:
+            if (oc.cible_du_clic(inter.channel, inter.user) is None
+                    and oc.lancer_perso(getattr(inter, "guild", None), inter.user) is None):
                 await inter.response.send_message(oc.REFUS, ephemeral=True)
                 return
         await inter.response.send_modal(ModalCompte(self.cog))
@@ -1015,18 +1040,24 @@ class PanneauTelechargement(discord.ui.LayoutView):
             return
         username, n = garde
         cible = salon_de_livraison(inter.channel, inter.user)
+        if cible is None and _clic_us(getattr(inter, "channel", None)):
+            # YouCham : le -content dont 👤 a lance la creation, attendu --
+            # ou cree maintenant. Clic acquitte d'abord (3 s) ; tout ce qui
+            # suit part alors en message de suivi (_au_cliqueur).
+            import outils_communs as oc
+            await inter.response.defer()
+            cible = await oc.perso_ou_creer(getattr(inter, "guild", None), inter.user)
         if cible is None:
-            await inter.response.send_message(
-                _refus_livraison(inter.channel, inter.user), ephemeral=True)
+            await _au_cliqueur(inter, _refus_livraison(inter.channel, inter.user))
             return
         occupe = self.cog.reserver(inter.user.id, username)
         if occupe:
-            await inter.response.send_message(occupe, ephemeral=True)
+            await _au_cliqueur(inter, occupe)
             return
         try:
-            await inter.response.send_message(
-                f"**@{username}** - {long_} : ca part dans "
-                f"{getattr(cible, 'mention', '#?')}.", ephemeral=True)
+            await _au_cliqueur(
+                inter, f"**@{username}** - {long_} : ca part dans "
+                       f"{getattr(cible, 'mention', '#?')}.")
             await self.cog.livrer(
                 cible, username, n,
                 avatar=quoi in ("tout", "pp"),

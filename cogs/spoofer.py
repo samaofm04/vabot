@@ -238,11 +238,17 @@ class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[
             return
         q = self.q
         if _clic_us(interaction.channel):
-            # Salon commun de YouCham : refuse AVANT la fenetre -- un fichier
-            # envoye pour rien, c'est un televersement perdu. Le nombre est
-            # celui du bouton clique (custom_id), jamais une valeur du salon.
+            # Salon commun de YouCham. Sans -content (arrive avant les outils
+            # communs), il est cree EN TACHE DE FOND : la fenetre doit etre la
+            # premiere reponse, dans les 3 s, et la creation peut les
+            # depasser. Elle court pendant que le VA choisit son fichier ;
+            # traiter la retrouve ou l'attend. Refus avant la fenetre pour
+            # qui ne peut pas en avoir (un bot) : un fichier envoye pour rien,
+            # c'est un televersement perdu. Le nombre est celui du bouton
+            # clique (custom_id), jamais une valeur du salon.
             import outils_communs as oc
-            if oc.cible_du_clic(interaction.channel, interaction.user) is None:
+            if (oc.cible_du_clic(interaction.channel, interaction.user) is None
+                    and oc.lancer_perso(interaction.guild, interaction.user) is None):
                 await interaction.response.send_message(oc.REFUS, ephemeral=True)
                 return
         elif _commun(interaction.channel):
@@ -546,7 +552,8 @@ def _cible_content(interaction):
 
     Dans le salon commun des Outils : le salon va- du VA, ou None -- jamais
     le salon commun, ou tout le monde verrait ses fichiers. Sur YouCham
-    (outils communs) : le -content du cliqueur, ou None."""
+    (outils communs) : le -content du cliqueur, ou None -- traiter le cree
+    alors (outils_communs.perso_ou_creer) ; ici, rien d'asynchrone."""
     canal = getattr(interaction, "channel", None)
     if _clic_us(canal):
         # Jamais le salon du clic : le repli « le salon ou l'on a clique »
@@ -716,12 +723,21 @@ class Spoofer(commands.Cog):
         Rend un bilan (utile aux tests et au journal)."""
         q = _borne(q)
         cible = _cible_content(interaction)
+        if cible is None and _clic_us(getattr(interaction, "channel", None)):
+            # YouCham : le -content dont 📤 a lance la creation (encore en
+            # cours si la fenetre a ete validee vite), ou cree maintenant --
+            # une fenetre rouverte apres un redemarrage n'a rien lance. La
+            # fenetre est deja acquittee : attendre ne coute pas les 3 s.
+            import outils_communs as oc
+            cible = await oc.perso_ou_creer(getattr(interaction, "guild", None),
+                                            interaction.user)
         nom = str(getattr(piece, "filename", "") or "fichier")
         ext = Path(nom).suffix.lower()
         bilan = {"q": q, "livrees": 0, "ratees": 0, "lourdes": 0, "refus": ""}
         if cible is None:
             # salon commun sans salon va- (le bouton l'a deja refuse ; une
-            # fenetre ouverte avant que le salon disparaisse arrive ici)
+            # fenetre ouverte avant que le salon disparaisse arrive ici), ou
+            # -content que Discord a refuse de creer (YouCham, cause au journal)
             bilan["refus"] = "salon"
             await _dire(interaction, _refus_salon(interaction))
             return bilan
