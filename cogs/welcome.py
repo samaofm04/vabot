@@ -4238,7 +4238,12 @@ class Welcome(commands.Cog):
         pat = _re.compile(r"-(" + "|".join(_re.escape(s) for s in US_TICKET_SUFFIXES) + r")$")
         voulus = suffixes_us(guild)
         commun = voulus != US_TICKET_SUFFIXES
-        members = [m for m in guild.members if not m.bot and m.id != interaction.user.id]
+        # Celui qui lance la commande n'a pas de dossier sur Youl4b. Sur YouCham
+        # (propriétaire, 30/10/2026 : « génère le truc pour Roucham et pour
+        # moi aussi »), il a son -content comme tout le monde : sans ça, le
+        # sien était listé comme orphelin à supprimer.
+        members = [m for m in guild.members
+                   if not m.bot and (commun or m.id != interaction.user.id)]
         expected = {}
         for m in members:
             for s in voulus:

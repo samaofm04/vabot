@@ -1175,8 +1175,8 @@ try:
                                         "#ancien_nom-content", "#va_a-content")), texte)
     check("plan : un -content par personne dans 📁 SALONS PERSO ; outils et archive pas touchés",
           "salon `-content` par personne" in texte and "pas touchés" in texte, texte)
-    check("plan : les manquants -- le staff et va_b (le renommé a le sien)",
-          "**2** salon(s) manquant(s)" in texte, texte)
+    check("plan : les manquants -- le staff, va_b et celui qui lance (le renommé a le sien)",
+          "**3** salon(s) manquant(s)" in texte, texte)
 
     async def _confirmer():
         it2 = Itx(g, g.archive, admin)
@@ -1202,6 +1202,9 @@ try:
           [(m.name, getattr(oc.content_de(g, m), "name", None),
             getattr(getattr(oc.content_de(g, m), "category", None), "name", None))
            for m in (va3, g.staff)] + [c.name for c in g.text_channels])
+    check("après : celui qui lance /ticketsall a aussi son -content (« et pour moi aussi »)",
+          oc.content_de(g, admin) is not None
+          and oc.est_categorie_perso(oc.content_de(g, admin).category))
     recap = it2.followup.envois[-1][0] if it2.followup.envois else ""
     check("récap : 1/1 par personne", "`va_b` — 1/1" in recap and "🛠" not in recap, recap)
 finally:
