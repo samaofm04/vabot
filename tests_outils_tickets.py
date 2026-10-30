@@ -23,6 +23,9 @@ Ce qui est vérifié (outils_tickets, tickets_discord, cogs/telechargement) :
     tenu jusqu'au bout, dossier rangé après sa fin réelle) ;
   - ticket supprimé : rien encodé après l'attente, livraison arrêtée au
     premier 404 (spoof comme téléchargement), verrous rendus ;
+  - une livraison à la fois par ticket, 🎬 comprise (verrou_livraison) : le
+    spoof prêt et le téléchargement attendent leur tour pour poster ;
+    l'attente bornée du spoof ne garde jamais le ticket ;
   - la rangée ne dépend pas d'outils_tickets (module absent : 📤 et ⬇️ quand
     même, BOUTONS_VERSION n'est pas consommé sur une rangée sans eux) ;
   - la limite lue au niveau de boost (10 / 50 / 100 Mio), en cache ;
@@ -202,7 +205,7 @@ _SAUVE_TK = {k: getattr(tk, k) for k in ("ETAT_FICHIER", "DATA_DIR", "role_manag
                                          "_api_reseau")}
 _SAUVE_OT = {k: getattr(ot, k) for k in ("_api", "_fond", "_dormir", "_bot_principal", "_telecharger",
                                          "ETAT", "LIMITES_BOOST", "FILE_MAX_S", "GARDE_FABRICATION_S",
-                                         "RESERVATION_MAX_S", "_log")}
+                                         "RESERVATION_MAX_S", "_log", "ATTENTE_TICKET_S")}
 _SAUVE_SPF = {k: getattr(spf, k) for k in ("versions_photo", "versions_video", "_trop_longue")}
 _SAUVE_HM = {k: getattr(hm, k) for k in ("profil", "profil_en_cache", "pp_locale", "pk_connu",
                                          "photo_de_profil", "publications", "reels", "top_reels",
@@ -226,6 +229,9 @@ try:
     ot._fond = lambda f: f()
     ot._dormir = lambda s: None
     ot.ETAT = TMP / "outils_tickets.json"
+    # un ticket resté tenu par erreur fait échouer vite, au lieu de suspendre
+    # la suite 30 minutes par spoof
+    ot.ATTENTE_TICKET_S = 5
     ot._LIMITES.clear()
     bot = FauxBot()
     # le cog Spoofer de Yoshi : son module porte LE verrou _FILE
@@ -560,6 +566,78 @@ try:
           "bilan, menu non reposé",
           posts == [f"/channels/{S}/messages"] and not MENUS and S not in ot._SPOOFS, (posts, MENUS))
 
+    # le ticket tenu par une autre livraison (une 🎬 contenu_tickets, un ⬇️) :
+    # le spoof prêt attend son tour — sinon ses fichiers tombaient entre une
+    # carte 🎬 et son texte à copier, dans le même ticket
+    async def _tenir():
+        v_ = ot.verrou_livraison(S)
+        await v_.acquire()
+        return v_
+    tenu = sur_la_boucle(_tenir())
+    MENUS.clear()
+    FAB["fil"] = None
+    n0 = len(rest.messages)
+    fil_spoof = threading.Thread(target=lambda: soumettre_spoof(q="2"), daemon=True)
+    fil_spoof.start()
+    attendre(lambda: FAB["fil"] is not None)
+    time.sleep(0.4)
+    pendant, en_attente = len(rest.messages) - n0, fil_spoof.is_alive()
+    bot.loop.call_soon_threadsafe(tenu.release)
+    fil_spoof.join(10)
+    neufs = rest.messages[n0:]
+    check("le ticket tenu par une autre livraison (🎬, ⬇️) : le spoof, fabriqué sans attendre, attend son "
+          "tour pour POSTER — rien tant qu'elle le tient —, puis livré, menu reposé, ticket rendu",
+          FAB["fil"] is bot.fil and pendant == 0 and en_attente and len(neufs) == 1
+          and len(neufs[0]["fichiers"]) == 2 and MENUS and MENUS[-1] == (AG, VA, S, True)
+          and not ot.ticket_occupe(S) and S not in ot._SPOOFS, (pendant, en_attente, neufs, MENUS))
+    _attente_sauvee = ot.ATTENTE_TICKET_S
+    ot.ATTENTE_TICKET_S = 0.2
+    tenu = sur_la_boucle(_tenir())
+    LOGS_T = []
+    ot._log = LOGS_T.append
+    n0 = len(rest.messages)
+    try:
+        soumettre_spoof(q="1")
+    finally:
+        ot._log = _SAUVE_OT["_log"]
+        ot.ATTENTE_TICKET_S = _attente_sauvee
+    tenu_apres = ot.ticket_occupe(S)
+    bot.loop.call_soon_threadsafe(tenu.release)
+    libre = attendre(lambda: not ot.ticket_occupe(S), 2)
+    check("… tenu au-delà de l'attente permise : le spoof part quand même (jamais perdu), c'est dit au "
+          "journal, et l'attente abandonnée ne garde pas le ticket",
+          len(rest.messages) - n0 == 1 and any("envoi sans attendre" in l_ for l_ in LOGS_T)
+          and tenu_apres and libre, (len(rest.messages) - n0, LOGS_T))
+    # la course : le ticket se libère PENDANT que le fil abandonne son attente
+    # — la prise arrive sur la boucle après l'abandon. Sans la garde, ce tour
+    # restait tenu par personne : plus rien n'arrivait dans le ticket.
+
+    class GardeLente:
+        """La garde de _prendre_ticket, tenue un moment par le fil du site."""
+
+        def __init__(self):
+            self._l = threading.Lock()
+
+        def __enter__(self):
+            self._l.acquire()
+            if threading.current_thread() is not bot.fil:
+                time.sleep(0.3)
+            return self
+
+        def __exit__(self, *a):
+            self._l.release()
+    tenu = sur_la_boucle(_tenir())
+    bot.loop.call_soon_threadsafe(bot.loop.call_later, 0.15, tenu.release)
+    _threading_ot = ot.threading
+    ot.threading = SimpleNamespace(Lock=GardeLente)
+    try:
+        pris = ot._prendre_ticket(bot.loop, S, attente_max=0.1)
+    finally:
+        ot.threading = _threading_ot
+    check("… le ticket libéré pendant l'abandon : la prise tardive est rendue aussitôt, le ticket reste "
+          "libre (jamais tenu par personne)",
+          pris is None and attendre(lambda: not ot.ticket_occupe(S), 2), pris)
+
     # ── 6. le VRAI moteur photo de cogs/spoofer (métadonnées US, md5) ────
     spf.versions_photo = _SAUVE_SPF["versions_photo"]
     try:
@@ -644,6 +722,8 @@ try:
 
     def faux_profil(u, cpt=None, *a, **k):
         compter(cpt)
+        # le ticket est-il tenu pendant la livraison ? (verrou_livraison)
+        HM.setdefault("occupe", []).append(ot.ticket_occupe(S))
         return {"nom": "Sky", "posts": 2, "abonnes": 10, "bio": "Ma bio", "prive": False}
     hm.profil = faux_profil
     hm.photo_de_profil = lambda u, fiche, cpt: (MEDIAS / "pp.jpg", "")
@@ -692,6 +772,20 @@ try:
           and any(e["fichiers"] == ["V1.mp4"] for e in arch)
           and all(e["am"] is not None and e["am"].users is False for e in arch), arch[:3])
     check("… puis le menu redevient le dernier message du ticket", MENUS[-1] == (AG, VA, S, True), MENUS)
+    check("… le ticket TENU pendant toute la livraison (une 🎬 ou un 📤 attend son tour), rendu après",
+          HM.get("occupe") and all(HM["occupe"]) and not ot.ticket_occupe(S), HM.get("occupe"))
+    # une 🎬 tient le ticket : le téléchargement attend la fin pour poster
+    tenu = sur_la_boucle(_tenir())
+    MENUS.clear()
+    n0 = len(rest.messages)
+    r = ot.traiter(clic("outk:dlo:bio:5:sky.ards"))
+    time.sleep(0.4)
+    pendant = len(rest.messages) - n0
+    bot.loop.call_soon_threadsafe(tenu.release)
+    attendre(lambda: MENUS and not cog._en_cours_va)
+    check("une 🎬 tient le ticket : le téléchargement attend son tour (rien posté), puis livré, menu reposé",
+          r == {"type": 6} and pendant == 0 and "Ma bio" in [m["content"] for m in rest.messages[n0:]]
+          and MENUS == [(AG, VA, S, True)] and not ot.ticket_occupe(S), (pendant, MENUS))
 
     # le manager, dans le ticket du VA : livré là, réservé au nom du VA du ticket
     MENUS.clear()

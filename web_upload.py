@@ -62058,6 +62058,22 @@ def create_app():
             if str((charge.get("data") or {}).get("custom_id") or "").startswith("outk:"):
                 return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
                                                     "flags": 64}})
+        # « 🎬 Contenu » du menu des tickets TRUST INSTAGRAM (contenu_tickets) :
+        # le menu des identités US, son panneau et son ✨ General, en privé ;
+        # le contenu part dans le ticket. Même principe, None quand ce n'est
+        # pas le sien. Importé pour SES clics seulement : un module manquant
+        # (fichier oublié au commit) refaisait l'import, raté, à chaque
+        # interaction des trois serveurs, une ligne au journal à chaque fois.
+        if str((charge.get("data") or {}).get("custom_id") or "").startswith(("cnt:", "cng:")):
+            try:
+                import contenu_tickets as _ct
+                _rep_ct = _ct.traiter(charge)
+                if _rep_ct is not None:
+                    return jsonify(_rep_ct)
+            except Exception as _e_ct:
+                print(f"[contenu] route : {type(_e_ct).__name__}: {_e_ct}", flush=True)
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         # Le bouton « Copier » posé sous les captions : même principe, il rend
         # None quand ce n'est pas son bouton.
         try:

@@ -1768,8 +1768,14 @@ def _recette_montage(template, rapport, fiche_reserve, famille, label):
 def _livraison_a_noter(interaction) -> bool:
     """Seules les livraisons faites dans un VRAI serveur sont notees : les
     essais (interactions factices des tests, client de test) n'ecrivent
-    rien dans data/livraisons."""
-    return isinstance(getattr(interaction, "guild", None), discord.Guild)
+    rien dans data/livraisons.
+
+    `livraison_reelle` : le ticket de TRUST INSTAGRAM (contenu_tickets), ou
+    Wario livre en REST pour une interaction factice -- mais a un vrai VA,
+    dans un vrai serveur : un banger ne de cette video doit retrouver sa
+    recette comme sur Youl4b."""
+    g = getattr(interaction, "guild", None)
+    return isinstance(g, discord.Guild) or getattr(g, "livraison_reelle", False) is True
 
 
 async def _noter_livraison(interaction, identite, medias, recette, quoi):
@@ -11989,7 +11995,7 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
         await _jb_model_ouvrir(interaction, self.ident)
 
 
-def _jb_model_refus(interaction, ident, marche=None) -> str:
+def _jb_model_refus(interaction, ident, marche=None, acces=None) -> str:
     """Pourquoi le choix de `ident` est refuse, ou "". LES gardes du choix
     d'une model, communes au bouton-photo (JBModelButton), au menu deroulant
     (JBModelsMenu) et a l'ancien menu unique (JBMenuModelsAncien) : deux
@@ -12001,8 +12007,13 @@ def _jb_model_refus(interaction, ident, marche=None) -> str:
     desactivee depuis que le menu a ete poste -- ouvrirait son panneau. Le
     bouton n'en a pas besoin : son identite est dans SON custom_id, pose
     par le bot (et un ancien bouton doit continuer de faire ce qu'il
-    faisait)."""
-    if not _jb_can_use(interaction):
+    faisait).
+
+    `acces` (contenu_tickets, ticket de TRUST INSTAGRAM) : le droit est deja
+    tranche par l'appelant -- le VA du ticket ou un manager, comme 📤 et
+    ⬇️. Le role Jailbreak n'existe pas sur ce serveur : sans ce passage, ses
+    VA auraient lu « Reserve aux VA Jailbreak » a chaque choix."""
+    if not (_jb_can_use(interaction) if acces is None else acces):
         return _JB_REFUS_ROLE
     idl = (ident or "").strip().lower()
     # Une grille DEJA postee peut encore porter le bouton d'une entree
@@ -14653,7 +14664,7 @@ def _jb_general(cog, model, qty=_JB_QTE_DEFAUT, reserve=None, guild=None):
     return _vue(_jb_entete(active, guild), rangees)
 
 
-def _jb_gen_controle(interaction, model, res, key):
+def _jb_gen_controle(interaction, model, res, key, acces=None):
     """(refus, cmd, supports_count) d'un clic du ✨ General, bouton OU menu.
 
     `refus` vaut "" quand l'action peut partir. Les memes gardes, dans le
@@ -14666,8 +14677,12 @@ def _jb_gen_controle(interaction, model, res, key):
 
     Ne repond pas : l'appelant choisit comment dire le refus (ephemere pour
     un bouton ; pour un menu, le message redessine -- le menu reprend son
-    intitule -- et la raison en suivi)."""
-    if not _jb_can_use(interaction):
+    intitule -- et la raison en suivi).
+
+    `acces` : comme pour _jb_model_refus, le droit deja tranche par
+    l'appelant (le ticket de TRUST INSTAGRAM, contenu_tickets) ; toutes les
+    AUTRES gardes restent les memes."""
+    if not (_jb_can_use(interaction) if acces is None else acces):
         return _JB_REFUS_ROLE, None, False
     if key not in _JB_GENERAL_RANGEES:
         return f"Action `{key}` absente du ✨ General.", None, False

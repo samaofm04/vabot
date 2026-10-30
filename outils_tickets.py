@@ -30,7 +30,9 @@ OÙ PARTENT LES FICHIERS
     du staff), on refuse plutôt que de livrer dans un salon que d'autres
     voient. Après chaque livraison, le menu est reposé en dernier
     (tickets_discord.ramener_menu, en_dernier) : sans ça, les fichiers
-    l'enterraient jusqu'au tour de l'heure.
+    l'enterraient jusqu'au tour de l'heure. Une livraison à la fois par
+    ticket, 🎬 Contenu compris (verrou_livraison) : ce que Youl4b rangeait
+    dans deux salons tombe ici dans le même.
 
 LE MÊME MOTEUR QUE YOUL4B
     Spoofer : cogs/spoofer.versions_photo / versions_video (métadonnées US,
@@ -136,6 +138,17 @@ _VERROU = threading.RLock()
 _SPOOFS: set = set()
 _LIMITES: Dict[str, Tuple[int, float]] = {}
 _DEMARRE = [False]
+#: {ticket: asyncio.Lock}, sur la boucle de Yoshi : UNE livraison à la fois
+#: par ticket, tous outils confondus (🎬 contenu_tickets, ⬇️, 📤). Sur Youl4b,
+#: contenu et téléchargements partaient dans deux salons (-content,
+#: -download) ; ici tout tombe dans le même ticket, et un reel téléchargé
+#: s'intercalait entre une carte 🎬 et sa description — collée ensuite sous
+#: le mauvais média, sur téléphone.
+_LIVRAISONS: Dict[str, asyncio.Lock] = {}
+#: Ce qu'un spoof prêt attend son tour dans le ticket (fil du site). Au-delà,
+#: il est posté quand même — une livraison bloquée ne doit pas le perdre — et
+#: le journal le dit.
+ATTENTE_TICKET_S = 30 * 60
 
 
 def _log(texte: str) -> None:
@@ -185,12 +198,15 @@ def _tickets(gid: str) -> Dict[str, str]:
     return out
 
 
-def _ticket_du_clic(p: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], str]:
+def _ticket_du_clic(p: Dict[str, Any], serveurs=None) -> Tuple[Optional[Dict[str, str]], str]:
     """({gid, salon, uid (le VA du ticket), qui (le cliqueur)}, "") ou (None,
     le refus). Le VA du ticket ou un manager/helper, comme 💳 et 📈 : un autre
-    VA ne se sert pas des outils d'un ticket qui n'est pas le sien."""
+    VA ne se sert pas des outils d'un ticket qui n'est pas le sien.
+    `serveurs` : ceux du bouton cliqué (🎬 Contenu a les siens,
+    contenu_tickets) ; SERVEURS par défaut. Une seule règle pour tous les
+    boutons du ticket : deux copies divergeraient au premier correctif."""
     gid = str(p.get("guild_id") or "")
-    if gid not in SERVEURS:
+    if gid not in (SERVEURS if serveurs is None else serveurs):
         return None, "Ce bouton ne sert pas sur ce serveur."
     salon = str(p.get("channel_id") or "")
     vau = _tickets(gid).get(salon)
@@ -247,6 +263,86 @@ def _boucle(bot) -> Optional[asyncio.AbstractEventLoop]:
         return boucle
     except Exception:                                        # noqa: BLE001
         return None
+
+
+def verrou_livraison(salon: str) -> asyncio.Lock:
+    """Le verrou de livraison du ticket (_LIVRAISONS). SUR la boucle de Yoshi
+    seulement : un asyncio.Lock appartient à la boucle qui l'attend."""
+    return _LIVRAISONS.setdefault(str(salon), asyncio.Lock())
+
+
+def ticket_occupe(salon: str) -> bool:
+    """Une livraison tient-elle le ticket ? Lecture seule, depuis le site."""
+    v = _LIVRAISONS.get(str(salon))
+    return bool(v is not None and v.locked())
+
+
+def _prendre_ticket(boucle, salon: str, attente_max: Optional[float] = None):
+    """Depuis un fil du site : attend que le ticket soit libre et le prend
+    (verrou_livraison, sur la boucle de Yoshi). Rend le verrou, à rendre par
+    _rendre_ticket, ou None : boucle arrêtée, ou attente dépassée — on poste
+    alors sans lui, et le journal le dit.
+
+    Comme _reserver : sous `garde`, un abandon (attente dépassée) et la prise
+    ne se croisent pas. Sans ça, une prise arrivée juste après l'abandon
+    restait tenue sans personne pour la rendre, et le ticket ne recevait plus
+    rien jusqu'au redémarrage."""
+    etat: Dict[str, Any] = {"abandon": False, "pris": None}
+    garde = threading.Lock()
+
+    async def _prendre():
+        v = verrou_livraison(salon)
+        await v.acquire()
+        with garde:
+            if etat["abandon"]:
+                v.release()
+                return
+            etat["pris"] = v
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_prendre(), boucle)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"ticket {salon} : tour de livraison non pris ({type(e).__name__}: {e}), envoi direct")
+        return None
+    try:
+        fut.result(timeout=ATTENTE_TICKET_S if attente_max is None else attente_max)
+    except Exception:                                        # noqa: BLE001
+        pass                    # délai, boucle arrêtée : tranché ci-dessous
+    with garde:
+        if etat["pris"] is None:
+            etat["abandon"] = True
+            fut.cancel()
+            _log(f"ticket {salon} : toujours occupé par une autre livraison, envoi sans attendre")
+        return etat["pris"]
+
+
+def _rendre_ticket(boucle, verrou) -> None:
+    if verrou is None:
+        return
+    try:
+        boucle.call_soon_threadsafe(verrou.release)
+    except RuntimeError:
+        pass                    # boucle fermée : plus personne ne l'attend
+
+
+class _TourDuTicket:
+    """Le tour de livraison d'un travail du site (le spoofer) : pris au
+    PREMIER message, rendu à la fin. Jamais pendant la fabrication : un spoof
+    en file derrière le verrou de tous aurait bloqué les 🎬 du ticket."""
+
+    def __init__(self, boucle, salon: str):
+        self.boucle, self.salon = boucle, str(salon)
+        self.verrou = None
+        self.demande = False
+
+    def prendre(self) -> None:
+        if not self.demande and self.boucle is not None:
+            self.demande = True
+            self.verrou = _prendre_ticket(self.boucle, self.salon)
+
+    def rendre(self) -> None:
+        _rendre_ticket(self.boucle, self.verrou)
+        self.verrou = None
 
 
 def _journaliser_fin(quoi: str):
@@ -355,11 +451,14 @@ def _lire_etat() -> Dict[str, Any]:
     return d
 
 
-def _noter(salon: str, quoi: str, info: Optional[Dict[str, Any]]) -> None:
+def _noter(salon: str, quoi: str, info: Optional[Dict[str, Any]], numero: str = "") -> None:
     """Marque (ou efface) le travail `quoi` du ticket `salon`. Une marque par
     outil : un spoof et un téléchargement tournent ensemble dans un ticket, la
-    fin de l'un effaçait sinon la marque de l'autre."""
-    cle = f"{salon}:{quoi}"
+    fin de l'un effaçait sinon la marque de l'autre. `numero` : une marque
+    par livraison quand l'outil en met plusieurs en file (🎬) — une seule
+    clé n'en gardait qu'une, les autres se perdaient sans un mot au
+    redémarrage."""
+    cle = f"{salon}:{quoi}" + (f":{numero}" if numero else "")
     with _VERROU:
         d = _lire_etat()
         if info is None:
@@ -390,20 +489,37 @@ def prevenir_interrompus() -> int:
             _log(f"{ETAT.name} non écrit : {len(coupes)} annonce(s) de redémarrage "
                  "remise(s) au prochain démarrage")
             return 0
-    n = 0
+    annonces: List[Tuple[str, str, str, str]] = []          # (gid, salon, uid, texte)
+    contenus: Dict[str, List[Dict[str, Any]]] = {}
     for cle, i in coupes.items():
         salon = str(i.get("salon") or cle.split(":", 1)[0])
         gid, uid = str(i.get("gid") or AGENCY_IG_ID), str(i.get("uid") or "")
+        if i.get("quoi") == "contenu":
+            # 🎬 (contenu_tickets) : regroupées par ticket, ci-dessous
+            contenus.setdefault(salon, []).append(dict(i, salon=salon, gid=gid, uid=uid))
+            continue
         if i.get("quoi") == "download":
             texte = f"⬇️ @{i.get('nom') or '?'} : interrompu par un redémarrage, relance-le."
         else:
             texte = f"🎭 {i.get('nom') or 'fichier'} : interrompu par un redémarrage, renvoie-le."
+        annonces.append((gid, salon, uid, texte))
+    for salon, liste in contenus.items():
+        # Celle en cours ET celles en file derrière elle, dans l'ordre des
+        # clics, en un message : le VA sait tout ce qu'il doit relancer.
+        liste.sort(key=lambda x: (float(x.get("ordre") or x.get("t") or 0), str(x.get("nom") or "")))
+        noms = ", ".join(str(x.get("nom") or "Contenu") for x in liste)
+        texte = (f"🎬 {noms} : interrompu par un redémarrage, relance-le." if len(liste) == 1
+                 else f"🎬 {noms} : interrompus par un redémarrage, relance-les.")
+        annonces.append((liste[0]["gid"], salon, liste[0]["uid"], texte[:2000]))
+    n = 0
+    for gid, salon, uid, texte in annonces:
         if _dire(gid, salon, texte):
             n += 1
             if uid:
                 _ramener_menu(gid, uid, salon)
     if coupes:
-        _log(f"reprise : {n}/{len(coupes)} ticket(s) prévenu(s) d'un travail interrompu")
+        _log(f"reprise : {n}/{len(annonces)} annonce(s) postée(s) pour {len(coupes)} travail(s) "
+             "interrompu(s)")
     return n
 
 
@@ -611,6 +727,13 @@ def _travail_spoof(t: Dict[str, str], piece: Dict[str, Any], q: int, boucle,
     video = ext in spf.VIDEOS
     bilan: Dict[str, Any] = {"q": q, "livrees": 0, "ratees": 0, "lourdes": 0, "refus": ""}
     limite, complet, dit, fut = 0, None, False, None
+    # Les messages attendent leur tour dans le ticket (une 🎬 ou un ⬇️ en
+    # cours) : jamais entre une carte et le texte à copier qui la suit.
+    tour = _TourDuTicket(boucle, salon)
+
+    def dire(texte: str) -> bool:
+        tour.prendre()
+        return _dire(gid, salon, texte)
     # « spoof_ » : le préfixe que cogs/spoofer balaie au démarrage si un
     # redémarrage laisse un dossier derrière lui. Pas de TemporaryDirectory :
     # il s'effaçait à la sortie du fil du site, même fabrication en route.
@@ -620,7 +743,7 @@ def _travail_spoof(t: Dict[str, str], piece: Dict[str, Any], q: int, boucle,
         err = _telecharger(str(piece.get("url") or ""), src, spf.TAILLE_MAX)
         if err:
             bilan["refus"] = "telechargement"
-            dit = _dire(gid, salon, f"📎 {nom} : {err}")
+            dit = dire(f"📎 {nom} : {err}")
             return bilan
         taille = src.stat().st_size
         limite = limite_fichiers(gid)
@@ -643,17 +766,17 @@ def _travail_spoof(t: Dict[str, str], piece: Dict[str, Any], q: int, boucle,
             bilan.update(refus="bloque", ratees=q)
             _log(f"spoofer {nom} dans {salon} : toujours en fabrication après "
                  f"{(FILE_MAX_S + GARDE_FABRICATION_S) // 60} min, on cesse d'attendre")
-            dit = _dire(gid, salon, f"🎭 {nom} : bloqué, renvoie-le plus tard.")
+            dit = dire(f"🎭 {nom} : bloqué, renvoie-le plus tard.")
             return bilan
         if refus == "duree":
             bilan.update(refus="duree", lourdes=q)
-            dit = _dire(gid, salon, f"📎 {nom} : trop longue pour tenir sur Discord une "
+            dit = dire(f"📎 {nom} : trop longue pour tenir sur Discord une "
                                     "fois re-encodée — envoie-la plus courte.")
             return bilan
         if refus == "file":
             # rien n'a raté : c'est la file qui était trop longue
             bilan["refus"] = "file"
-            dit = _dire(gid, salon, f"⏳ {nom} : trop de spoofs en attente, renvoie-le plus tard.")
+            dit = dire(f"⏳ {nom} : trop de spoofs en attente, renvoie-le plus tard.")
             return bilan
         if refus == "disparu":
             bilan["refus"] = "disparu"
@@ -663,6 +786,7 @@ def _travail_spoof(t: Dict[str, str], piece: Dict[str, Any], q: int, boucle,
         lots, lourds = tl.repartir(sorties, limite)
         bilan["lourdes"] = len(lourds)
         for i, lot in enumerate(lots):
+            tour.prendre()
             code, rep = poster(gid, salon, "", [(Path(x).name, Path(x).read_bytes()) for x in lot])
             if _ticket_disparu(code, rep):
                 # ticket supprimé : les lots suivants iraient tous au même 404
@@ -691,11 +815,12 @@ def _travail_spoof(t: Dict[str, str], piece: Dict[str, Any], q: int, boucle,
                     morceaux.append(f"{bilan['ratees']} ratée(s)")
                 if bilan["lourdes"]:
                     morceaux.append(f"{bilan['lourdes']} trop lourde(s) pour Discord")
-                dit = _dire(gid, salon, f"🎭 {nom} : {bilan['livrees']}/{q}"
-                            + (" — " + ", ".join(morceaux) if morceaux else "")) or dit
+                dit = dire(f"🎭 {nom} : {bilan['livrees']}/{q}"
+                           + (" — " + ", ".join(morceaux) if morceaux else "")) or dit
             if dit and bilan["refus"] != "disparu":
                 _ramener_menu(gid, vau, salon)
         finally:
+            tour.rendre()
             _ranger_dossier(d, fut)
             with _VERROU:
                 _SPOOFS.discard(salon)
@@ -869,6 +994,7 @@ async def _travail_download(bot, cog, t: Dict[str, str], pseudo: str, n: int, cl
     from cogs import telechargement as tl
     gid, salon, vau = t["gid"], t["salon"], t["uid"]
     ticket: Optional[_SalonTicket] = None
+    menu_pose = False
     try:
         await asyncio.to_thread(_noter, salon, "download", {"gid": gid, "uid": vau, "nom": pseudo})
         limite = await asyncio.to_thread(limite_fichiers, gid)
@@ -876,20 +1002,28 @@ async def _travail_download(bot, cog, t: Dict[str, str], pseudo: str, n: int, cl
                                         if hasattr(bot, "get_guild") else None)
         court = tl.OPTIONS[cle][0]
         ticket = _SalonTicket(gid, salon, limite)
-        ticket.tache = asyncio.ensure_future(cog.livrer(
-            ticket, pseudo, n,
-            avatar=cle in ("tout", "pp"), bio=cle in ("tout", "bio"),
-            photos=cle in ("tout", "photos"), reels=cle in ("tout", "reels", "top"),
-            par_vues=(cle == "top"), demandeur=SimpleNamespace(id=int(t["qui"])),
-            # l'archive de Youl4b dit d'où vient la demande
-            option=f"{court} · TRUST INSTAGRAM", archive=archive))
-        try:
-            await ticket.tache
-        except asyncio.CancelledError:
+        # Son tour dans le ticket (verrou_livraison) : une 🎬 en cours y
+        # aurait vu ses textes à copier séparés de leur carte par nos reels.
+        async with verrou_livraison(salon):
+            ticket.tache = asyncio.ensure_future(cog.livrer(
+                ticket, pseudo, n,
+                avatar=cle in ("tout", "pp"), bio=cle in ("tout", "bio"),
+                photos=cle in ("tout", "photos"), reels=cle in ("tout", "reels", "top"),
+                par_vues=(cle == "top"), demandeur=SimpleNamespace(id=int(t["qui"])),
+                # l'archive de Youl4b dit d'où vient la demande
+                option=f"{court} · TRUST INSTAGRAM", archive=archive))
+            try:
+                await ticket.tache
+            except asyncio.CancelledError:
+                if not ticket.disparu:
+                    raise                   # c'est nous qui sommes annulés (arrêt du bot)
+            # le menu en dernier AVANT de rendre le ticket : la livraison
+            # suivante ne le verra pas s'intercaler entre ses messages
             if not ticket.disparu:
-                raise                       # c'est nous qui sommes annulés (arrêt du bot)
+                await asyncio.to_thread(_ramener_menu, gid, vau, salon)
+                menu_pose = True
     finally:
         cog.liberer(int(vau), pseudo)
         await asyncio.to_thread(_noter, salon, "download", None)
-        if ticket is None or not ticket.disparu:
+        if not menu_pose and (ticket is None or not ticket.disparu):
             await asyncio.to_thread(_ramener_menu, gid, vau, salon)

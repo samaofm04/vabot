@@ -317,12 +317,15 @@ try:
           and not [a for a in appels if a[0] != "GET"], r)
     labels = [b["label"] for rg in r["corps"]["components"] for b in rg["components"]]
     # 30/10/2026 : 📤 Spoofer et ⬇️ Download avant le Numéro (outils_tickets,
-    # « vas-y ajoute dans trust agency »)
-    check("… l'accueil : USDC, Mes stats, Spoofer, Download, Numéro, puis 🌱 Passer Débutant "
-          "(en essai), Créer son lien, et aucune mention",
+    # « vas-y ajoute dans trust agency ») ; puis 🎬 Contenu, seul sur la 2e
+    # rangée du VA (contenu_tickets)
+    rangees = [[b["label"] for b in rg["components"]] for rg in r["corps"]["components"]]
+    check("… l'accueil : USDC, Mes stats, Spoofer, Download, Numéro, puis 🎬 Contenu sur sa "
+          "rangée, puis 🌱 Passer Débutant (en essai), Créer son lien, et aucune mention",
           labels == ["Mon adresse USDC", "Mes stats", "Spoofer", "Download", "Numéro",
-                     "Passer Débutant", "Créer son lien"]
-          and r["corps"]["allowed_mentions"] == {"parse": []}, labels)
+                     "Contenu", "Passer Débutant", "Créer son lien"]
+          and rangees[1] == ["Contenu"]
+          and r["corps"]["allowed_mentions"] == {"parse": []}, (labels, rangees))
     check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])
     check("salon hors des catégories de managers : refusé", not tk.adopter_salon(AG, "c3")["ok"])
     appels.clear()

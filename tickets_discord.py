@@ -2457,7 +2457,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # encore en essai (NIVEAUX_ICI).
 # 10 (30/10/2026) : « 📤 Spoofer » et « ⬇️ Download » dans la rangée du VA, sur
 # TRUST INSTAGRAM seulement (OUTILS_DANS_MENU, outils_tickets).
-BOUTONS_VERSION = 10
+# 11 (30/10/2026) : « 🎬 Contenu » sur une 2e rangée du VA, TRUST INSTAGRAM
+# seulement (CONTENU_DANS_MENU, contenu_tickets).
+BOUTONS_VERSION = 11
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -3747,3 +3749,50 @@ def ramener_menu(gid: str, uid: str, salon: str, en_dernier: bool = False) -> st
 
 
 ramener_menu.__doc__ = _ramener_menu_sans_verrou.__doc__
+
+
+# ─── 🎬 Contenu (TRUST INSTAGRAM, 30/10/2026) ───────────────────────────
+# Propriétaire : le menu des identités US dans le ticket des VA de TRUST
+# INSTAGRAM, le contenu livré « dans leur ticket de base » (« je trouve que
+# c'est plutôt pas mal »). La rangée du VA est pleine (💳 · 📈 · 📤 · ⬇️ · 📱 :
+# cinq, un sixième ferait refuser le menu entier) : le bouton a SA rangée,
+# la 2e du VA, au-dessus de celle des managers. Toujours la sienne, même
+# quand la première a de la place : le VA le retrouve au même endroit d'un
+# ticket à l'autre. Enveloppe en fin de fichier, comme les outils : le patch
+# du VPS 99-z-tickets-subs-total réécrit le corps d'origine. Le clic est à
+# contenu_tickets (préfixes hors _BOUTONS_MANAGERS : traiter, plus haut, rend
+# None pour eux). Twitter et Threads ne changent pas.
+CONTENU_DANS_MENU = {AGENCY_IG_ID}
+#: Les préfixes des clics servis par contenu_tickets (il les lit ici) : le
+#: panneau et ses menus, puis le ✨ General.
+CONTENU_PREFIXE = "cnt:"
+CONTENU_GENERAL_PREFIXE = "cng:"
+_boutons_va_sans_contenu = boutons_va
+
+
+def bouton_contenu(uid: str) -> Dict[str, Any]:
+    """« 🎬 Contenu ». Décrit ICI, comme 📤 et ⬇️ : la rangée ne dépend pas
+    du module qui sert les clics (absent un instant, un clic répond
+    « réessaie », et le menu, marqué à jour par BOUTONS_VERSION, garde son
+    bouton)."""
+    return {"type": 2, "style": 1, "label": "Contenu", "emoji": {"name": "🎬"},
+            "custom_id": f"{CONTENU_PREFIXE}o:{uid}"}
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # noqa: F811
+               gid: str = "", lien_actif: bool = True):
+    rangs = _boutons_va_sans_contenu(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                     gid=gid, lien_actif=lien_actif)
+    if str(gid) not in CONTENU_DANS_MENU:
+        return rangs
+    bouton = bouton_contenu(str(uid))
+    plats = [b for r in rangs for b in (r.get("components") or [])]
+    if any(b.get("custom_id") == bouton["custom_id"] for b in plats):
+        return rangs
+    va = [b for b in plats if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    chefs = [b for b in plats if str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    # Cinq par rangée, cinq rangées au plus : Discord refuse le menu ENTIER
+    # au-delà (VA, 🎬, managers : trois aujourd'hui).
+    lignes = ([va[i:i + 5] for i in range(0, len(va), 5)] + [[bouton]]
+              + [chefs[i:i + 5] for i in range(0, len(chefs), 5)])
+    return [{"type": 1, "components": l} for l in lignes if l]

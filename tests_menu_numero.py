@@ -55,9 +55,14 @@ TW, TH, AG = "1445108485090971710", "1498948161039896586", tk.AGENCY_IG_ID
 for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), (AG, "Agency", [])):
     r = ids(tk.boutons_va("7", confirme=False, a_un_lien=True, gid=gid))
     va, chefs = r[0], r[-1]
+    # Agency : « 🎬 Contenu » sur SA rangée, entre celle du VA et celle des
+    # managers (contenu_tickets, 30/10/2026)
+    milieu = [["cnt:o:7"]] if gid == AG else []
     check(f"{nom} : rangée du VA (USDC, stats, Numéro{', Outlook' if outlook else ''}), "
+          f"{'puis 🎬 Contenu, ' if milieu else ''}"
           "puis celle des managers (🌱 Passer Débutant pour un VA en essai, lien)",
-          len(r) == 2 and va[0] == "usdc:set:7" and va[-1 - len(outlook)] == "numx:menu"
+          len(r) == 2 + len(milieu) and r[1:-1] == milieu
+          and va[0] == "usdc:set:7" and va[-1 - len(outlook)] == "numx:menu"
           and va[len(va) - len(outlook):] == outlook and chefs == ["essai:deb:7", "lien:off:7"]
           and all(len(x) <= 5 for x in r), r)
     r2 = ids(tk.boutons_va("7", confirme=True, a_un_lien=False, gid=gid))
