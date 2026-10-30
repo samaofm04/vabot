@@ -1101,6 +1101,26 @@ US_TICKET_SUFFIXES = ("menu", "spoofer", "download", "numero-mail", "content",
 #: doit les recouvrir.
 US_LECTURE_SEULE = ("menu", "generateur-de-lien")
 
+#: Le salon perso d'un VA sur un serveur aux OUTILS COMMUNS (YouCham,
+#: guild_features.OUTILS_COMMUNS) : le -content seul. Menu, spoofer, download
+#: et numéro y sont des salons communs (outils_communs.py).
+SUFFIXES_OUTILS_COMMUNS = ("content",)
+
+
+def suffixes_us(guild) -> tuple:
+    """Les salons qu'un VA doit avoir sur ce serveur US : le dossier complet
+    (US_TICKET_SUFFIXES) sur Youl4b, le -content seul sur un serveur aux
+    outils communs. /ticketsall et completer_dossiers_us la lisent : sans elle,
+    ils recreaient sur YouCham les quatre salons d'outils de chaque VA."""
+    try:
+        import guild_features as _gf
+        if _gf.outils_communs(guild):
+            return SUFFIXES_OUTILS_COMMUNS
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("suffixes_us : serveur illisible (%s: %s), dossier complet",
+                    type(e).__name__, e)
+    return US_TICKET_SUFFIXES
+
 
 def gdl_ouvert(base) -> bool:
     """Le salon -generateur-de-lien a-t-il sa place dans ce dossier ? La regle
@@ -2411,8 +2431,16 @@ async def completer_dossiers_us(guild, suffixes=("spoofer",)) -> dict:
     categorie, et de SES droits : ses VA sont les membres humains du serveur
     qui y voient. Un VA parti n'est plus un membre (Discord le rend en
     simple identifiant) : son dossier est saute, et compte. Idempotent.
-    Rend {"crees": [...], "sans_va": [...], "erreurs": [...]}."""
+    Rend {"crees": [...], "sans_va": [...], "erreurs": [...]}.
+
+    Serveur aux outils communs (YouCham) : seuls les suffixes de
+    suffixes_us -- le -content --, que ce rattrapage ne cree jamais. Sans ce
+    filtre, l'entretien du spoofer y aurait ajoute un -spoofer a chaque VA."""
     bilan = {"crees": [], "sans_va": [], "erreurs": []}
+    _voulus = suffixes_us(guild)
+    suffixes = tuple(s for s in suffixes if s in _voulus)
+    if not suffixes:
+        return bilan
     noms = {nom_sans_decor(c.name) for c in guild.text_channels}
     for content in list(guild.text_channels):
         nn = nom_sans_decor(content.name)
@@ -2460,8 +2488,23 @@ async def create_us_tickets(guild, member, bot=None):
     """Garantit l'état cible d'un membre : UN dossier (catégorie) à son pseudo
     contenant ses salons dans l'ordre de US_TICKET_SUFFIXES, le menu
     Jailbreak US épinglé dans -menu (lecture seule). Idempotent.
-    Retourne (créés, erreurs)."""
+    Retourne (créés, erreurs).
+
+    Serveur aux outils communs (YouCham) : UN salon <pseudo>-content dans
+    « 📁 SALONS PERSO » (outils_communs.salon_perso), aucun dossier, aucun
+    panneau -- les outils vivent dans les salons communs de 🧰 OUTILS."""
     created, errors = [], []
+    import guild_features as _gf
+    if _gf.outils_communs(guild):
+        try:
+            import outils_communs as _oc
+            salon, cree = await _oc.salon_perso(
+                guild, member, _us_droits_ticket(guild, [member], "content"))
+            if cree:
+                created.append(salon)
+        except Exception as e:                               # noqa: BLE001
+            errors.append(f"{_us_ticket_name(member, 'content')}: {type(e).__name__}: {e}")
+        return created, errors
     try:
         cat = await _us_member_category(guild, member)
     except Exception as e:
@@ -4187,13 +4230,33 @@ class Welcome(commands.Cog):
         # RÉCONCILIATEUR : l'objectif est « les salons de US_TICKET_SUFFIXES, c'est tout » —
         # menu → content → numero-mail → download, groupés par personne,
         # sans doublon ni orphelin.
+        # Serveur aux outils communs (YouCham) : le -content seul par personne
+        # (suffixes_us). Le MOTIF, lui, reste celui de tous les suffixes : un
+        # -menu, -spoofer… d'avant (le dossier d'essai de roucham_79944) y est
+        # un salon de trop, listé avant confirmation comme les orphelins.
         import re as _re
         pat = _re.compile(r"-(" + "|".join(_re.escape(s) for s in US_TICKET_SUFFIXES) + r")$")
+        voulus = suffixes_us(guild)
+        commun = voulus != US_TICKET_SUFFIXES
         members = [m for m in guild.members if not m.bot and m.id != interaction.user.id]
         expected = {}
         for m in members:
-            for s in US_TICKET_SUFFIXES:
+            for s in voulus:
                 expected[_us_ticket_name(m, s)] = m
+        _oc = None
+        if commun:
+            # Importe sur YouCham seulement : avant le test, un module absent
+            # du deploiement bloquait aussi /ticketsall sur Youl4b.
+            try:
+                import outils_communs as _oc
+            except Exception as e:                           # noqa: BLE001
+                # Sans le module, on ne sait plus reconnaitre les salons
+                # communs : mieux vaut ne rien ranger que risquer de les
+                # supprimer.
+                await interaction.response.send_message(
+                    f"⚠️ outils_communs illisible ({type(e).__name__}) : rien n'est rangé.",
+                    ephemeral=True)
+                return
         # Clé = nom NORMALISÉ (tirets sosies inclus) : les salons créés à la main
         # qui RESSEMBLENT aux nôtres comptent comme le même salon.
         by_name = {}
@@ -4201,15 +4264,42 @@ class Welcome(commands.Cog):
             nn = nom_sans_decor(c.name)
             # « all-download » finit comme un ticket : sans cette exclusion il
             # passait pour l'orphelin d'un membre « all » et partait à la
-            # suppression, archive des téléchargements comprise.
-            if pat.search(nn) and not salon_de_service(nn):
+            # suppression, archive des téléchargements comprise. Les salons
+            # communs de 🧰 OUTILS non plus, quel que soit leur nom un jour.
+            if (pat.search(nn) and not salon_de_service(nn)
+                    and not (_oc is not None and _oc.est_salon_outil(c))):
                 by_name.setdefault(nn, []).append(c)
         n_create = sum(1 for n in expected if n not in by_name)
+        # Outils communs : le -content d'un VA qui a changé de pseudo garde son
+        # ancien nom. Il est à lui (seul membre nommé dans ses droits :
+        # outils_communs.content_de) -- ni orphelin à supprimer avec ce qu'il
+        # a reçu, ni salon manquant à recréer. Youl4b n'a pas ce rattrapage.
+        a_soi = {}
+        warn = []
+        if commun:
+            for m in members:
+                c = _oc.content_de(guild, m)
+                if c is not None:
+                    a_soi[c.id] = m
+            n_create = sum(1 for m in members if m not in a_soi.values())
+            # Un -content au nom d'un membre qui n'est PAS a lui (« lea.m » et
+            # « leam » ont le meme nom de salon ; un pseudo libere repris) :
+            # garde -- il est peut-etre a un VA parti, avec ce qu'il a recu --
+            # mais dit, pour qu'un humain tranche.
+            for n, chans in sorted(by_name.items()):
+                if n in expected and n.endswith("-content"):
+                    for c in chans:
+                        if c.id not in a_soi:
+                            warn.append(f"#{c.name} porte le nom de {_us_base(expected[n])} "
+                                        "sans être à lui : gardé, à vérifier")
         # Doublons : MÊME pseudo+type -> ON N'EN GARDE QU'UN (demande user :
         # « même pseudo direct sup »). On garde le plus ancien AVEC messages
         # (le contenu généré vit dans -content), sinon le plus ancien tout court.
         # Les -menu en trop partent direct (le menu se reposte tout seul).
-        del_dups, warn = [], []
+        # Outils communs : jamais le -content d'un membre (a_soi), meme au
+        # meme nom qu'un autre -- deux VA dont les pseudos ne different que
+        # d'un point ont des salons du meme nom, et l'un des deux partait.
+        del_dups = []
         for n, chans in sorted(by_name.items()):
             if len(chans) < 2:
                 continue
@@ -4219,7 +4309,7 @@ class Welcome(commands.Cog):
                 continue
             with_msgs = [c for c in chans if c.last_message_id]
             keep = with_msgs[0] if with_msgs else chans[0]
-            del_dups += [c for c in chans if c.id != keep.id]
+            del_dups += [c for c in chans if c.id != keep.id and c.id not in a_soi]
         # Orphelins : le nom (même normalisé) ne correspond à aucun membre actuel
         # (membre parti, salon créé à la main avec des lettres sosies…). Demande
         # user : on SUPPRIME tout ce qui est au format ticket sans propriétaire —
@@ -4228,7 +4318,7 @@ class Welcome(commands.Cog):
         for n, chans in sorted(by_name.items()):
             if n in expected:
                 continue
-            del_orph.extend(chans)
+            del_orph.extend(c for c in chans if c.id not in a_soi)
 
         cog = self
         inv_id = interaction.user.id
@@ -4244,9 +4334,13 @@ class Welcome(commands.Cog):
             plan.append("🗑 rien à supprimer (aucun doublon ni orphelin détecté)")
         # derive du tuple : ce texte annoncait encore « 3 salons, menu ->
         # content -> numero-mail » alors qu'il y en a 5 (download, spoofer)
-        plan.append("📁 un **dossier par personne** (catégorie à son pseudo) avec ses "
-                    f"{len(US_TICKET_SUFFIXES)} salons dans l'ordre "
-                    + " → ".join(f"`{s}`" for s in US_TICKET_SUFFIXES))
+        if commun:
+            plan.append(f"📁 un salon `-content` par personne, dans « {_oc.CATEGORIE_PERSO} » ; "
+                        f"les salons communs de {_oc.CATEGORIE} et l'archive ne sont pas touchés")
+        else:
+            plan.append("📁 un **dossier par personne** (catégorie à son pseudo) avec ses "
+                        f"{len(US_TICKET_SUFFIXES)} salons dans l'ordre "
+                        + " → ".join(f"`{s}`" for s in US_TICKET_SUFFIXES))
         warn_txt = ("\n⚠️ " + "\n⚠️ ".join(warn[:5])) if warn else ""
 
         class _ConfirmAll(discord.ui.View):
@@ -4320,14 +4414,36 @@ class Welcome(commands.Cog):
                             failed += 1
                             log.error(f"ticketsall exception: {e} (member={m.id})")
                         await asyncio.sleep(0.5)
+                    # 2b) Outils communs : un ancien dossier dont le -content
+                    # vient de rejoindre 📁 SALONS PERSO reste vide. Son nom est
+                    # celui d'un membre, 1b le gardait donc : on le retire ici,
+                    # VIDE seulement (le cache de Discord suit les deplacements).
+                    if commun:
+                        await asyncio.sleep(2.0)
+                        for cat2 in list(guild.categories):
+                            nn = nom_sans_decor(cat2.name)
+                            if (nn in (orph_bases | member_bases) and not cat2.channels
+                                    and not _oc.est_categorie_outils(cat2)
+                                    and not _oc.est_categorie_perso(cat2)):
+                                try:
+                                    await cat2.delete(reason="ticketsall : ancien dossier vide")
+                                    removed += 1
+                                except Exception as e:               # noqa: BLE001
+                                    log.warning(f"ticketsall : dossier vide {cat2.name} "
+                                                f"non supprime ({type(e).__name__}: {e})")
+                                await asyncio.sleep(0.5)
                     # 3) Récap par personne : « lui c'est good, lui aussi »
                     lines = []
                     for m in sorted(members, key=_us_base):
-                        have = sum(1 for s in US_TICKET_SUFFIXES
-                                   if discord.utils.find(
-                                       lambda c, n=_us_ticket_name(m, s): nom_sans_decor(c.name) == n,
-                                       guild.text_channels))
-                        _n = len(US_TICKET_SUFFIXES)
+                        if commun:
+                            have = 1 if _oc.content_de(guild, m) is not None else 0
+                            _n = 1
+                        else:
+                            have = sum(1 for s in US_TICKET_SUFFIXES
+                                       if discord.utils.find(
+                                           lambda c, n=_us_ticket_name(m, s): nom_sans_decor(c.name) == n,
+                                           guild.text_channels))
+                            _n = len(US_TICKET_SUFFIXES)
                         lines.append(("✅" if have == _n else "🛠") + f" `{_us_base(m)}` — {have}/{_n}")
                     msg = (f"✅ <@{inv_id}> Rangement terminé : {removed} supprimé(s), "
                            f"{ok} créé(s)"

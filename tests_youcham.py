@@ -11,7 +11,8 @@ d'écrit dans data/) :
   1. YouCham est un serveur US ; Youl4b l'est toujours ; les autres non.
   2. Un membre qui arrive sur YouCham passe par create_us_tickets, jamais par
      le parcours classique -- même s'il est déjà VA ailleurs (fiche users.json).
-  3. create_us_tickets crée son dossier sur YouCham comme sur Youl4b.
+  3. create_us_tickets crée le dossier de Youl4b ; sur YouCham (outils
+     communs, 30/10/2026), un seul salon -content (tests_youcham_outils.py).
   4. Chaque module étendu accepte YouCham : générateur de lien,
      téléchargement (entretien + /menudownload), spoofer, menu Jailbreak,
      alerte des 500 salons.
@@ -283,25 +284,34 @@ try:
         cr, err = courir(w.create_us_tickets(g, m, bot=None))
         return g, cr, err
 
+    # Youl4b : le dossier de 5 salons, comme avant le branchement de YouCham.
+    gL, crL, errL = dossier(YOUL4B)
+    noms_l = [c.name for c in gL.text_channels]
+    attendus = ["roucham_79944-" + s for s in ("menu", "spoofer", "download", "numero-mail", "content")]
+    check("Youl4b : un dossier (catégorie) au pseudo", gL.crees[0] == ("categorie", "roucham_79944"),
+          gL.crees)
+    check("Youl4b : les 5 salons du dossier, dans l'ordre", noms_l == attendus, noms_l)
+    check("Youl4b : aucun -generateur-de-lien (essai fermé)",
+          not any(n.endswith("generateur-de-lien") for n in noms_l), noms_l)
+    check("Youl4b : aucune erreur", not errL, errL)
+    check("Youl4b : menu, numéro, download et spoofer posés",
+          sorted(p[0] for p in poses) == ["download", "menu", "numero", "spoofer"], poses)
+    menu = gL.text_channels[0]
+    ow = menu.overwrites
+    check("Youl4b : -menu privé (@everyone ne voit pas) et en lecture seule pour le VA",
+          ow[gL.default_role].view_channel is False
+          and ow[gL.members[0]].view_channel is True and ow[gL.members[0]].send_messages is False)
+    # YouCham (30/10/2026, outils communs) : plus de dossier. UN salon
+    # <pseudo>-content dans 📁 SALONS PERSO ; menu, spoofer, download et
+    # numéro sont des salons communs (tests_youcham_outils.py le détaille).
     gY, crY, errY = dossier(YOUCHAM)
     noms_y = [c.name for c in gY.text_channels]
-    attendus = ["roucham_79944-" + s for s in ("menu", "spoofer", "download", "numero-mail", "content")]
-    check("YouCham : un dossier (catégorie) au pseudo", gY.crees[0] == ("categorie", "roucham_79944"),
+    check("YouCham : UN salon -content, aucun dossier",
+          noms_y == ["roucham_79944-content"]
+          and gY.crees == [("categorie", "📁 SALONS PERSO"), ("salon", "roucham_79944-content")],
           gY.crees)
-    check("YouCham : les 5 salons du dossier, dans l'ordre", noms_y == attendus, noms_y)
-    check("YouCham : aucun -generateur-de-lien (essai fermé)",
-          not any(n.endswith("generateur-de-lien") for n in noms_y), noms_y)
     check("YouCham : aucune erreur", not errY, errY)
-    check("YouCham : menu, numéro, download et spoofer posés",
-          sorted(p[0] for p in poses) == ["download", "menu", "numero", "spoofer"], poses)
-    menu = gY.text_channels[0]
-    ow = menu.overwrites
-    check("YouCham : -menu privé (@everyone ne voit pas) et en lecture seule pour le VA",
-          ow[gY.default_role].view_channel is False
-          and ow[gY.members[0]].view_channel is True and ow[gY.members[0]].send_messages is False)
-    gL, crL, errL = dossier(YOUL4B)
-    check("Youl4b : le même dossier, salon pour salon",
-          [c.name for c in gL.text_channels] == noms_y and gL.crees == gY.crees)
+    check("YouCham : aucun panneau posé dans un salon perso", not poses, poses)
 finally:
     for k, v in _sauve_d.items():
         setattr(w, k, v)

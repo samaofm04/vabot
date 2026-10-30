@@ -107,7 +107,50 @@ def _est_salon_spoofer(canal) -> bool:
             return False
     except Exception:
         pass
-    return _norm(nom).endswith("-spoofer") or _commun(canal)
+    return _norm(nom).endswith("-spoofer") or _commun(canal) or _commun_us(canal)
+
+
+def _commun_us(canal) -> bool:
+    """Le salon 📤・spoofer COMMUN d'un serveur US aux outils communs (YouCham,
+    outils_communs.py). Comme le -spoofer d'un VA, a deux differences : le
+    nombre voyage dans le custom_id d'un panneau ephemere (FenetreQuantite),
+    et les versions partent dans le -content DU CLIQUEUR."""
+    try:
+        import outils_communs as oc
+        return oc.est_salon_outil(canal, "spoofer")
+    except Exception:
+        return False
+
+
+def _clic_us(canal) -> bool:
+    """Un clic a servir au seul cliqueur sur un serveur aux outils communs
+    (YouCham) : partout sauf dans un -content (outils_communs.clic_commun).
+    _commun_us reconnait LE salon commun, pour y poser le panneau ; celle-ci
+    decide de la reponse a un clic. Au seul nom du salon, un 📤・spoofer
+    renomme redevenait un salon ordinaire : le 🔢 y redessinait le panneau
+    de tous, et les versions du staff s'y deversaient."""
+    try:
+        import guild_features as gf
+        if not gf.outils_communs(getattr(canal, "guild", None)):
+            return False
+        import outils_communs as oc
+        return oc.clic_commun(canal)
+    except Exception:
+        return False
+
+
+def _refus_salon(interaction) -> str:
+    """La phrase d'un clic qui n'a nulle part ou livrer : celle des outils
+    communs de YouCham, sinon celle de Va IG (cogs/outils.refus)."""
+    canal = getattr(interaction, "channel", None)
+    if _clic_us(canal):
+        import outils_communs as oc
+        return oc.REFUS
+    try:
+        from cogs.outils import refus
+        return refus(canal, interaction.user) or "Rien ne peut t'être livré ici."
+    except Exception:
+        return "Rien ne peut t'être livré ici."
 
 
 def _commun(canal) -> bool:
@@ -194,7 +237,15 @@ class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[
             await _dire(interaction, "⏳ Ton spoof précédent n'est pas fini.")
             return
         q = self.q
-        if _commun(interaction.channel):
+        if _clic_us(interaction.channel):
+            # Salon commun de YouCham : refuse AVANT la fenetre -- un fichier
+            # envoye pour rien, c'est un televersement perdu. Le nombre est
+            # celui du bouton clique (custom_id), jamais une valeur du salon.
+            import outils_communs as oc
+            if oc.cible_du_clic(interaction.channel, interaction.user) is None:
+                await interaction.response.send_message(oc.REFUS, ephemeral=True)
+                return
+        elif _commun(interaction.channel):
             from cogs.outils import refus
             non = refus(interaction.channel, interaction.user)
             if non:
@@ -325,6 +376,33 @@ class FenetreQuantite(discord.ui.Modal, title="🔢"):
         if _commun(getattr(interaction, "channel", None)):
             retenir_qte(interaction.user.id, q)
             await interaction.response.send_message(f"🔢 {q}", ephemeral=True)
+            return
+        if _clic_us(getattr(interaction, "channel", None)):
+            # Salon commun de YouCham : le panneau du salon reste a 5 pour
+            # tous. Le cliqueur recoit SON panneau, en ephemere, avec son
+            # nombre dans les custom_id (spf:go:<q>) : rien a retenir, et deux
+            # VA ne s'ecrasent pas leur reglage. Vue ARRETEE : servie par les
+            # motifs enregistres (cog_load), jamais rangee par discord.py
+            # (voir cogs/user._vue_sans_suivi).
+            msg = getattr(interaction, "message", None)
+            try:
+                if getattr(getattr(msg, "flags", None), "ephemeral", False):
+                    # deja son panneau a lui : redessine sur place
+                    vue = panneau(q, icone=_porte_icone(msg))
+                    vue.stop()
+                    await interaction.response.edit_message(view=vue)
+                else:
+                    f = fichier_icone()
+                    vue = panneau(q, icone=f is not None)
+                    vue.stop()
+                    if f is not None:
+                        await interaction.response.send_message(view=vue, file=f, ephemeral=True)
+                    else:
+                        await interaction.response.send_message(view=vue, ephemeral=True)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[spoofer] panneau ephemere non envoye : {type(e).__name__}: {e}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"🔢 {q} : réessaie.", ephemeral=True)
             return
         try:
             # la vignette pointe sur la piece jointe DU message : un
@@ -467,8 +545,14 @@ def _cible_content(interaction):
     categorie d'abord). A defaut, le salon ou l'on a clique.
 
     Dans le salon commun des Outils : le salon va- du VA, ou None -- jamais
-    le salon commun, ou tout le monde verrait ses fichiers."""
+    le salon commun, ou tout le monde verrait ses fichiers. Sur YouCham
+    (outils communs) : le -content du cliqueur, ou None."""
     canal = getattr(interaction, "channel", None)
+    if _clic_us(canal):
+        # Jamais le salon du clic : le repli « le salon ou l'on a clique »
+        # du dessous y deversait les versions du staff, devant tous.
+        import outils_communs as oc
+        return oc.cible_du_clic(canal, interaction.user)
     try:
         from cogs import outils
         if outils.serveur_outils(getattr(canal, "guild", None)):
@@ -638,10 +722,8 @@ class Spoofer(commands.Cog):
         if cible is None:
             # salon commun sans salon va- (le bouton l'a deja refuse ; une
             # fenetre ouverte avant que le salon disparaisse arrive ici)
-            from cogs.outils import refus
             bilan["refus"] = "salon"
-            await _dire(interaction, refus(interaction.channel, interaction.user)
-                        or "Rien ne peut t'être livré ici.")
+            await _dire(interaction, _refus_salon(interaction))
             return bilan
         if ext not in VIDEOS and ext not in PHOTOS:
             bilan["refus"] = "format"
@@ -767,7 +849,19 @@ class Spoofer(commands.Cog):
     async def _provisionner(self, guilde) -> int:
         """Les VA deja la recoivent leur -spoofer par le chemin normal de
         creation (create_us_tickets : droits, ordre, panneau). JAMAIS par
-        /ticketsall, qui supprimerait les dossiers des VA renommes."""
+        /ticketsall, qui supprimerait les dossiers des VA renommes.
+
+        Serveur aux outils communs (YouCham) : rien. Un VA n'y a pas de
+        -spoofer, le salon 📤・spoofer est commun ; sans ce retour, chaque
+        entretien relancait create_us_tickets pour le reste d'un ancien
+        dossier."""
+        try:
+            import guild_features as gf
+            if gf.outils_communs(guilde):
+                return 0
+        except Exception as e:                               # noqa: BLE001
+            print(f"[spoofer] serveur illisible ({type(e).__name__}: {e}) : rien provisionne")
+            return 0
         from cogs.welcome import _us_ticket_name, create_us_tickets
         # LA cle de welcome (nom_sans_decor) ; le PREMIER du nom, comme
         # discord.utils.find dans create_us_tickets
@@ -855,7 +949,10 @@ class Spoofer(commands.Cog):
                     print(f"[spoofer] dossiers renommes : {type(e).__name__}: {e}")
                 poses = 0
                 for canal in list(guilde.text_channels):
-                    if _est_salon_spoofer(canal):
+                    # le salon commun de YouCham : son panneau est pose par
+                    # cogs/outils (outils_communs.assurer) ; deux entretiens au
+                    # meme demarrage y en posaient deux
+                    if _est_salon_spoofer(canal) and not _commun_us(canal):
                         poses += await self.assurer_panneau(canal)
                 if poses:
                     print(f"[spoofer] {poses} panneau(x) pose(s)")

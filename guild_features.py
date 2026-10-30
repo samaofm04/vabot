@@ -152,6 +152,26 @@ def noms_us() -> str:
     return ", ".join(US_GUILDS[g] for g in US_GUILDS if g in US_GUILD_IDS)
 
 
+#: Serveurs US aux outils COMMUNS (outils_communs.py) : quatre salons pour
+#: tous dans « 🧰 OUTILS » (menu, spoofer, download, numéro) et UN salon
+#: <pseudo>-content par VA, au lieu du dossier de cinq salons de Youl4b.
+#: Propriétaire, 30/10/2026 : « sur YouCham, un salon où tout le monde voit
+#: un menu en commun, un spoofer en commun, un download en commun, un numéro
+#: en commun, et un content qui est leur ticket à eux ». A 5 salons par VA,
+#: Discord (500 salons par serveur) arrête un serveur vers 100 VA. LA liste :
+#: arrivée, /ticketsall, rattrapage des dossiers (completer_dossiers_us),
+#: entretien du spoofer, menu, spoofer, download et numéro la lisent --
+#: jamais l'id recopié.
+OUTILS_COMMUNS = {YOUCHAM_GUILD_ID}
+
+
+def outils_communs(guild_or_id) -> bool:
+    """True si ce serveur a les outils communs (YouCham). Toujours un serveur
+    US : hors US_GUILD_IDS, le menu Jailbreak US n'y serait pas servi."""
+    g = _gid(guild_or_id)
+    return g in OUTILS_COMMUNS and g in US_GUILD_IDS
+
+
 def set_features(guild_or_id, features) -> set:
     """Définit la liste des fonctions d'un serveur (le bride). Retourne le set."""
     gid = _gid(guild_or_id)

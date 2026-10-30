@@ -219,9 +219,52 @@ def _commun(canal) -> bool:
     cogs/outils.py) : un panneau pour tous les VA."""
     try:
         from cogs.outils import est_salon_outils
-        return est_salon_outils(canal, "download")
+        if est_salon_outils(canal, "download"):
+            return True
+    except Exception:
+        pass
+    return _commun_us(canal)
+
+
+def _commun_us(canal) -> bool:
+    """Le salon ⬇️・download COMMUN d'un serveur US aux outils communs
+    (YouCham, outils_communs.py) : le panneau du -download, les options du
+    cliqueur en ephemere, les fichiers dans SON -content."""
+    try:
+        import outils_communs as oc
+        return oc.est_salon_outil(canal, "download")
     except Exception:
         return False
+
+
+def _clic_us(canal) -> bool:
+    """Un clic a servir au seul cliqueur sur un serveur aux outils communs
+    (YouCham) : partout sauf dans un -content (outils_communs.clic_commun).
+    _commun_us reconnait LE salon commun ; celle-ci decide de la reponse a
+    un clic. Au seul nom du salon, un ⬇️・download renomme redevenait un
+    salon ordinaire : salon_de_livraison y livrait (« on reste sur place »)
+    et le panneau de tous affichait le compte du dernier VA."""
+    try:
+        import guild_features as gf
+        if not gf.outils_communs(getattr(canal, "guild", None)):
+            return False
+        import outils_communs as oc
+        return oc.clic_commun(canal)
+    except Exception:
+        return False
+
+
+def _refus_livraison(canal, membre) -> str:
+    """La phrase d'un clic qui n'a nulle part ou livrer : celle des outils
+    communs de YouCham, sinon celle de Va IG (cogs/outils.refus)."""
+    if _clic_us(canal):
+        import outils_communs as oc
+        return oc.REFUS
+    try:
+        from cogs.outils import refus
+        return refus(canal, membre) or "Rien ne peut t'être livré ici."
+    except Exception:
+        return "Rien ne peut t'être livré ici."
 
 
 def salon_de_livraison(canal, membre=None):
@@ -236,7 +279,23 @@ def salon_de_livraison(canal, membre=None):
 
     Si le salon jumeau n existe pas, on reste sur place plutot que de perdre
     les fichiers.
+
+    Sur un serveur aux outils communs (YouCham) : le -content du clic, sinon
+    celui de `membre`, sinon None -- jamais « sur place », meme depuis un
+    salon commun renomme que plus rien ne reconnait a son nom.
     """
+    try:
+        import guild_features as gf
+        commun = gf.outils_communs(getattr(canal, "guild", None))
+    except Exception:
+        commun = False
+    if commun:
+        try:
+            import outils_communs as oc
+            return oc.cible_du_clic(canal, membre)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[telechargement] outils communs illisibles : {type(e).__name__}: {e}")
+            return None
     try:
         from cogs import outils
         if outils.serveur_outils(getattr(canal, "guild", None)):
@@ -860,6 +919,21 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
             return
         self.cog.retenir(inter.user.id, username, n)
 
+        if _clic_us(getattr(inter, "channel", None)):
+            # Salon commun de YouCham : le panneau du salon reste celui de
+            # tous (« 👤 Choisir un compte »). Le cliqueur recoit le SIEN, en
+            # ephemere : son compte et les options. Ses boutons portent les
+            # memes custom_id (dl:…) : la vue persistante enregistree au
+            # demarrage les sert, avec le compte retenu POUR LUI. Vue ARRETEE,
+            # jamais rangee par discord.py (cogs/user._vue_sans_suivi).
+            vue = PanneauTelechargement(self.cog, username, n)
+            vue.stop()
+            msg = getattr(inter, "message", None)
+            if getattr(getattr(msg, "flags", None), "ephemeral", False):
+                await inter.response.edit_message(view=vue)
+            else:
+                await inter.response.send_message(view=vue, ephemeral=True)
+            return
         # Le panneau AFFICHE le compte actif. Chaque VA a son propre salon
         # -download : il n y a donc qu une personne par panneau, et l afficher
         # ne revele rien a personne d autre.
@@ -924,6 +998,12 @@ class PanneauTelechargement(discord.ui.LayoutView):
         return _clic
 
     async def _compte(self, inter):
+        if _clic_us(getattr(inter, "channel", None)):
+            # refuse AVANT la fenetre : un compte saisi pour rien
+            import outils_communs as oc
+            if oc.cible_du_clic(inter.channel, inter.user) is None:
+                await inter.response.send_message(oc.REFUS, ephemeral=True)
+                return
         await inter.response.send_modal(ModalCompte(self.cog))
 
     async def _lancer(self, inter, quoi):
@@ -936,10 +1016,8 @@ class PanneauTelechargement(discord.ui.LayoutView):
         username, n = garde
         cible = salon_de_livraison(inter.channel, inter.user)
         if cible is None:
-            from cogs.outils import refus
             await inter.response.send_message(
-                refus(inter.channel, inter.user) or "Rien ne peut t'être livré ici.",
-                ephemeral=True)
+                _refus_livraison(inter.channel, inter.user), ephemeral=True)
             return
         occupe = self.cog.reserver(inter.user.id, username)
         if occupe:

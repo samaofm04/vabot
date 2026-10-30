@@ -526,7 +526,7 @@ class NumerosCog(commands.Cog):
         if ch is None:
             await itx.response.send_message("À utiliser dans un salon.", ephemeral=True)
             return
-        if _salon_commun(ch):
+        if _clic_commun(ch):
             await self.clic_commun(itx, action)
             return
         if action == "sms" and not numgen.status()["sms_ok"]:
@@ -557,16 +557,27 @@ class NumerosCog(commands.Cog):
         code y seraient lus par tout le monde, et deux VA s'y ecraseraient
         (le registre est par salon). Le clic ouvre donc LE panneau du VA dans
         SON salon va- ; le code, Autre, Annuler et C'est bon s'y passent comme
-        dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement."""
-        from cogs.outils import ou_livrer, refus
+        dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement.
+
+        Le 📱・numéro de YouCham (outils communs) suit la meme regle, son
+        « salon a lui » est son -content (outils_communs.content_de) : la carte
+        du numero y est posee par ce bot (Rem), puis le code l'edite sur
+        place. Memes fournisseurs et memes regles que -numero-mail de Youl4b :
+        ni +33 ni quota (_pays, _quota_fr_ok : serveur FR seulement)."""
         if action not in ("sms", "mail"):
             await _ephemere(itx, "📱 La suite se passe dans ton salon.")
             return
-        non = refus(itx.channel, getattr(itx, "user", None))
+        if _clic_us(itx.channel):
+            import outils_communs as oc
+            perso = oc.cible_du_clic(itx.channel, getattr(itx, "user", None))
+            non = "" if perso is not None else oc.REFUS
+        else:
+            from cogs.outils import ou_livrer, refus
+            non = refus(itx.channel, getattr(itx, "user", None))
+            perso = None if non else ou_livrer(itx.channel, getattr(itx, "user", None))
         if non:
             await _ephemere(itx, non)
             return
-        perso = ou_livrer(itx.channel, getattr(itx, "user", None))
         if action == "sms" and not numgen.status()["sms_ok"]:
             await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
             return
@@ -648,7 +659,7 @@ class NumerosCog(commands.Cog):
         ch = canal or getattr(itx, "channel", None)
         if ch is None:
             return
-        if _salon_commun(ch):
+        if _clic_commun(ch):
             log.error("numgen: achat refuse dans le salon COMMUN #%s", getattr(ch, "name", "?"))
             return
         rec0 = _salon(ch.id)
@@ -4827,10 +4838,12 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     bilan.setdefault("vires", 0)
     if bot is None or channel is None:
         return False
-    if menage and _serveur_fr(channel) and not _salon_commun(channel):
+    if menage and (_serveur_fr(channel) or _outils_communs(channel)) \
+            and not _salon_commun(channel):
         # Sur le serveur FR le panneau vit dans le salon va- du VA, avec ses
         # menus et ses livraisons (spoofer, telechargement) : le menage y
-        # supprimerait tous les messages de bot.
+        # supprimerait tous les messages de bot. Sur YouCham (outils
+        # communs), dans son -content : la meme chose, tout ce qu'il a recu.
         menage = False
     nom = getattr(channel, "name", "?")
     cog = cog or bot.get_cog("NumerosCog")
@@ -5071,9 +5084,57 @@ def _serveur_fr(channel) -> bool:
 
 
 def _salon_commun(channel) -> bool:
+    """Un panneau COMMUN : 📱・numero-mail de Va IG (cogs/outils.py) ou
+    📱・numéro d'un serveur US aux outils communs (YouCham, outils_communs.py).
+    Il ne porte jamais de numero : le clic achete dans le salon du VA."""
     try:
         from cogs.outils import est_salon_outils
-        return est_salon_outils(channel, "numero-mail")
+        if est_salon_outils(channel, "numero-mail"):
+            return True
+    except Exception:                                        # noqa: BLE001
+        pass
+    return _salon_commun_us(channel)
+
+
+def _salon_commun_us(channel) -> bool:
+    """LE salon 📱・numéro commun d'un serveur US aux outils communs, par son
+    id ou son nom : la boucle _panneau_commun y pose le panneau."""
+    try:
+        import outils_communs as oc
+        return oc.est_salon_outil(channel, "numero")
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _clic_us(channel) -> bool:
+    """Un clic a servir au seul cliqueur sur un serveur aux outils communs
+    (YouCham) : partout sauf dans un -content (outils_communs.clic_commun).
+    Au seul nom du salon, un 📱・numéro renomme « 📱・phone » redevenait un
+    -numero-mail : le numero puis le code SMS du VA s'affichaient dans le
+    panneau que tout le monde lit, et le salon n'avait plus qu'une place."""
+    try:
+        import guild_features as gf
+        if not gf.outils_communs(getattr(channel, "guild", None)):
+            return False
+        import outils_communs as oc
+        return oc.clic_commun(channel)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _clic_commun(channel) -> bool:
+    """Le clic ou l'achat se fait-il ailleurs que dans ce salon ? Le salon
+    commun de Va IG, ou tout salon hors -content de YouCham. La boucle du
+    panneau et le menage, eux, ne lisent que _salon_commun : sinon Rem
+    poserait un panneau dans chaque salon public de YouCham."""
+    return _salon_commun(channel) or _clic_us(channel)
+
+
+def _outils_communs(channel) -> bool:
+    """Le salon est-il sur un serveur aux outils communs (YouCham) ?"""
+    try:
+        import guild_features as gf
+        return bool(gf.outils_communs(getattr(channel, "guild", None)))
     except Exception:                                        # noqa: BLE001
         return False
 

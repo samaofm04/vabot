@@ -2778,11 +2778,38 @@ def _us_content_target(interaction):
     -menu de quelqu'un d'autre n'en a pas, la redirection ne se faisait pas,
     et le contenu se deversait dans le -menu. On suit donc le salon, pas la
     personne : meme categorie (le dossier de la personne), sinon meme prefixe,
-    et en dernier recours le -content du cliqueur."""
+    et en dernier recours le -content du cliqueur.
+
+    Serveur aux outils communs (YouCham) : outils_communs.cible_du_clic -- le
+    -content clique lui-meme, sinon celui du CLIQUEUR. Jamais « le -content
+    de la meme categorie » : 📁 SALONS PERSO en range cinquante, le premier
+    venu etait celui d'un autre VA."""
     ch = getattr(interaction, "channel", None)
     guild = getattr(interaction, "guild", None)
     if ch is None or guild is None:
         return None
+    # La liste des serveurs d'abord (guild_features), le module ensuite :
+    # importe avant, un outils_communs.py absent du deploiement faisait
+    # rendre None ici sur Youl4b aussi -- tout son contenu partait en
+    # ephemere et disparaissait au rechargement.
+    try:
+        import guild_features as _gf
+        commun = _gf.outils_communs(guild)
+    except Exception as e:                                   # noqa: BLE001
+        # Serveur illisible : aucun salon plutot que « le -content de la meme
+        # categorie », qui sur YouCham serait celui d'un autre VA.
+        log.warning("outils communs : serveur illisible (%s: %s)", type(e).__name__, e)
+        return None
+    if commun:
+        try:
+            import outils_communs as _oc
+            return _oc.cible_du_clic(ch, getattr(interaction, "user", None))
+        except Exception as e:                               # noqa: BLE001
+            # Dans le doute, aucun salon : le clic repond en ephemere, jamais
+            # dans le salon d'un autre.
+            log.warning("outils communs : -content du clic introuvable (%s: %s)",
+                        type(e).__name__, e)
+            return None
     try:
         from cogs.welcome import _us_norm
     except Exception:
@@ -2810,6 +2837,24 @@ def _est_salon_menu(ch) -> bool:
         from cogs.welcome import _us_norm
         return _us_norm(getattr(ch, "name", "")).endswith("-menu")
     except Exception:
+        return False
+
+
+def _salon_outil_commun(ch, outil=None) -> bool:
+    """Un clic a servir au seul cliqueur, sur un serveur aux outils communs
+    (YouCham, outils_communs.clic_commun) : partout sauf dans un -content.
+    Rien n'y est jamais livre ni epingle. Pas seulement les salons de
+    🧰 OUTILS reconnus a leur nom : un « 📋・menu » renomme redevenait un
+    -menu de Youl4b, ou chaque choix de model reepinglait le panneau du
+    salon devant tout le monde. `outil` n'est plus lu : il reste pour les
+    appelants. Ne leve jamais."""
+    try:
+        import guild_features as _gf
+        if not _gf.outils_communs(getattr(ch, "guild", None)):
+            return False
+        import outils_communs as _oc
+        return _oc.clic_commun(ch)
+    except Exception:                                        # noqa: BLE001
         return False
 
 
@@ -6031,12 +6076,18 @@ class UserCog(commands.Cog):
         # Serveur US : le contenu part dans le salon @pseudo-content du cliqueur
         # (le salon -menu est en lecture seule), via un proxy d'interaction.
         itx, target = interaction, None
+        sans_salon = False
         try:
             import guild_features as gf
             if gf.is_us_guild(getattr(interaction, "guild", None)):
                 target = _us_content_target(interaction)
                 if target is not None and target.id != getattr(interaction.channel, "id", None):
                     itx = _JBRedirect(interaction, target)
+                elif _salon_outil_commun(getattr(interaction, "channel", None)):
+                    # Salon commun (YouCham) sans -content a soi : rien n'est
+                    # genere -- ni dans le salon que tout le monde voit, ni
+                    # en ephemere, qui disparait au rechargement.
+                    sans_salon = True
                 elif _est_salon_menu(getattr(interaction, "channel", None)):
                     # salon -menu sans -content identifiable : on n'y publie
                     # rien, tout repart en ephemere -- et le journal le dit,
@@ -6051,6 +6102,10 @@ class UserCog(commands.Cog):
                     target = None
         except Exception:
             itx, target = interaction, None
+        if sans_salon:
+            import outils_communs as _oc
+            await _jb_dire(interaction, _oc.REFUS, "outils communs")
+            return
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
         token_m = _MODEL_REELLE.set((brute_de or "").strip().lower() or None)
         try:
@@ -8111,13 +8166,32 @@ def _jb_sous_menu_perime(interaction, ident, qty, panneau=False) -> str:
     return ""
 
 
-async def _poser_panneau_jb(interaction, view):
+async def _poser_panneau_jb(interaction, view, repondre_d_abord=False):
     """Ouvre un panneau Jailbreak en fermant le precedent.
 
     Le handle du message est garde pour pouvoir l'eteindre : un ephemere
     envoye par send_message ne rend rien, il faut le redemander par
     original_response().
+
+    `repondre_d_abord` (salon 📋・menu commun) : le nouveau panneau part
+    AVANT que l'ancien soit efface. L'effacement est un appel a Discord ;
+    place avant la reponse, une API lente ou un 429 la faisait partir apres
+    les 3 s (10062) : le VA lisait « erreur (NotFound) » au lieu du panneau.
     """
+    if repondre_d_abord:
+        ancien = _DERNIER_PANNEAU_JB.pop(int(interaction.user.id), None)
+        await interaction.response.send_message(view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+            _DERNIER_PANNEAU_JB[int(interaction.user.id)] = view.message
+        except Exception:                                    # noqa: BLE001
+            view.message = None
+        if ancien is not None:
+            try:
+                await ancien.delete()
+            except Exception:                                # noqa: BLE001
+                pass
+        return
     await _fermer_panneau_jb(interaction.user.id)
     # Un panneau « Components V2 » (LayoutView) : pas d'embed, tout le texte
     # est dans la vue. discord.py pose lui-meme le drapeau du format.
@@ -8149,6 +8223,10 @@ def _vers_content(interaction):
             return interaction
         cible = _us_content_target(interaction)
         if cible is None:
+            # Un salon commun (YouCham) n'est jamais « le salon courant » ou
+            # publier : en ephemere, pour le seul cliqueur.
+            if _salon_outil_commun(getattr(interaction, "channel", None)):
+                return _JBRedirect(interaction, None)
             return interaction
         if cible.id == getattr(interaction.channel, "id", None):
             return interaction
@@ -11955,6 +12033,100 @@ async def _jb_model_ouvrir(interaction, ident):
         interaction, choisie=_jb_modele_courant(interaction, (ident or "").lower()))
 
 
+# ---------------------------------------------------------------------------
+# LE MENU DU SALON COMMUN 📋・menu (YouCham, outils_communs.py, 30/10/2026).
+#
+# Proprietaire : « un salon ou tout le monde voit un menu en commun […] et
+# un content qui est leur ticket a eux ». Le salon porte UN bouton,
+# « 📋 Ouvrir mon menu » ; tout le reste est EPHEMERE, pour le seul
+# cliqueur : le menu des models, puis le panneau de la model choisie et son
+# ✨ General -- les memes que dans un -menu de Youl4b. Le contenu part dans
+# SON -content (_us_content_target -> outils_communs.cible_du_clic).
+#
+# L'IDENTITE EST DANS LE CLIC, JAMAIS DANS LE SALON. Chaque bouton du panneau
+# porte sa model (« jbus:a:<model>:<action>:<quantite> ») ; aucun etat n'est
+# retenu pour le salon commun (_JB_PANNEAU_COURANT n'y est jamais ecrit) :
+# deux VA qui s'en servent en meme temps ne se marchent pas dessus. Et le
+# panneau precedent de la personne est efface a chaque choix
+# (_poser_panneau_jb) : les ephemeres empiles servaient la mauvaise model
+# (incident du 05/09/2026).
+
+#: Le dernier menu des models ouvert par chaque personne depuis 📋・menu, et
+#: son dernier ✨ General : {user_id: message}. Une entree par personne,
+#: remplacee a chaque ouverture.
+_DERNIER_MENU_COMMUN = {}
+_DERNIER_GENERAL_COMMUN = {}
+
+
+async def _effacer_ephemere(registre, user_id):
+    """Efface le message ephemere retenu pour cette personne. Ne leve
+    jamais : rejete a la main, ou jeton expire (15 min), il n'y a plus rien
+    a effacer -- et echouer ici empecherait d'ouvrir le suivant."""
+    ancien = registre.pop(int(user_id or 0), None)
+    if ancien is None:
+        return
+    try:
+        await ancien.delete()
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
+async def ouvrir_menu_commun(interaction):
+    """« 📋 Ouvrir mon menu » (salon 📋・menu commun) : le menu des models de
+    SON marche, en ephemere. Sans -content a soi (le staff) : refus court.
+    Le menu precedent de la personne, son panneau et son General sont
+    effaces : un seul jeu a l'ecran."""
+    import outils_communs as _oc
+    guild = getattr(interaction, "guild", None)
+    user = getattr(interaction, "user", None)
+    if _oc.content_de(guild, user) is None:
+        await interaction.response.send_message(_oc.REFUS, ephemeral=True)
+        return
+    if interaction.client.get_cog("UserCog") is None:
+        await interaction.response.send_message("Indisponible.", ephemeral=True)
+        return
+    vue = _vue_sans_suivi(_jb_menu_models_vue(marche_du_membre(user), guild))
+    await interaction.response.send_message(view=vue, ephemeral=True)
+    uid = int(getattr(user, "id", 0) or 0)
+    await _effacer_ephemere(_DERNIER_MENU_COMMUN, uid)
+    await _fermer_panneau_jb(uid)
+    await _effacer_ephemere(_DERNIER_GENERAL_COMMUN, uid)
+    try:
+        _DERNIER_MENU_COMMUN[uid] = await interaction.original_response()
+    except Exception as e:                                   # noqa: BLE001
+        log.info("📋・menu : menu de %s ouvert sans handle (%s: %s)", uid,
+                 type(e).__name__, e)
+
+
+async def _jb_model_panneau_commun(interaction, cog, ident, marche):
+    """Le choix d'une model dans le menu ephemere du salon 📋・menu : son
+    panneau d'actions (le panneau US, quantite comprise) puis son ✨ General,
+    en ephemere. Toute l'identite est dans leurs custom_id ; l'ancien
+    panneau et l'ancien General de la personne sont effaces."""
+    uid = int(getattr(interaction.user, "id", 0) or 0)
+    vue = _vue_sans_suivi(_jb_panel(cog, ident, _JB_QTE_DEFAUT, marche=marche,
+                                    guild=interaction.guild))
+    await _poser_panneau_jb(interaction, vue, repondre_d_abord=True)
+    await _effacer_ephemere(_DERNIER_GENERAL_COMMUN, uid)
+    probleme = _jb_panel_probleme(ident, _JB_QTE_DEFAUT)
+    if probleme:
+        await _jb_dire(interaction, f"⚠️ **{_couper_discord(ident.capitalize(), 60)}** : "
+                                    + probleme, "📋・menu")
+        return
+    # Le ✨ General de la model, comme sous le panneau d'un -menu. Sans
+    # reserve liee, il n'a que sa quantite : on ne l'envoie pas.
+    try:
+        gen = _jb_general(cog, ident, _JB_QTE_DEFAUT, guild=interaction.guild)
+        ids = [getattr(c, "custom_id", "") or "" for c in gen.walk_children()]
+        if any(i.startswith(("jbg:a:", "jbg:s:")) for i in ids):
+            _vue_sans_suivi(gen)
+            m = await interaction.followup.send(view=gen, ephemeral=True, wait=True)
+            _DERNIER_GENERAL_COMMUN[uid] = m
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("📋・menu : General de %s non ouvert (%s: %s)", ident,
+                    type(e).__name__, e)
+
+
 async def _jb_model_panneau(interaction, cog, ident):
     """Le corps de l'ancien JBModelButton.callback : panneau ephemere hors
     serveur US, panneau PERMANENT du salon sur le serveur US (accuse de
@@ -11967,6 +12139,12 @@ async def _jb_model_panneau(interaction, cog, ident):
     # Le MARCHE du VA (role @Jailbreak FR / US) decide des actions, pas le
     # serveur : un VA FR sur le serveur US garde le menu FR.
     _marche = marche_du_membre(interaction.user)
+    if _salon_outil_commun(getattr(interaction, "channel", None), "menu"):
+        # Le salon 📋・menu COMMUN (YouCham), renomme ou non : un panneau pour
+        # le seul cliqueur. Le chemin US du dessous editerait le panneau du
+        # SALON, celui que tout le monde verrait passer d'une model a l'autre.
+        await _jb_model_panneau_commun(interaction, cog, ident, _marche)
+        return
     if not us:
         view = JailbreakActionsView(cog, ident, us=(_marche != "fr"),
                                     icones=icones_actions(interaction.guild))

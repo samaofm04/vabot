@@ -517,10 +517,47 @@ class Outils(commands.Cog):
     async def cog_load(self):
         self._entretien.start()
         self._numeros.start()
+        # Outils COMMUNS des serveurs US (YouCham, outils_communs.py) : le
+        # bouton « 📋 Ouvrir mon menu » doit repondre apres un redemarrage.
+        # discord.py ne rattache pas seul une vue a un message deja poste :
+        # sans add_view, le VA lisait « l'application n'a pas repondu ».
+        try:
+            import outils_communs as oc
+            self.bot.add_view(oc.PanneauMenu())
+        except Exception as e:                               # noqa: BLE001
+            print(f"[outils-communs] bouton du menu non rattache : {type(e).__name__}: {e}",
+                  flush=True)
+        self._outils_communs.start()
 
     async def cog_unload(self):
         self._entretien.cancel()
         self._numeros.cancel()
+        self._outils_communs.cancel()
+
+    @tasks.loop(hours=6)
+    async def _outils_communs(self):
+        """🧰 OUTILS sur les serveurs aux outils communs (YouCham) : la
+        categorie, ses quatre salons et les panneaux de ce bot (menu, spoofer,
+        download), au demarrage puis toutes les six heures. Idempotent : un
+        passage sur un serveur deja en place ne fait que relire. Le panneau du
+        numero est pose par Rem (cogs/numeros._panneau_commun)."""
+        try:
+            import outils_communs as oc
+        except Exception as e:                               # noqa: BLE001
+            print(f"[outils-communs] module illisible : {type(e).__name__}: {e}", flush=True)
+            return
+        for guilde in list(getattr(self.bot, "guilds", []) or []):
+            if not oc.serveur(guilde):
+                continue
+            try:
+                await oc.assurer(guilde, self.bot)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils-communs] {getattr(guilde, 'name', '?')} : "
+                      f"{type(e).__name__}: {e}", flush=True)
+
+    @_outils_communs.before_loop
+    async def _avant_outils_communs(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=10)
     async def _numeros(self):
