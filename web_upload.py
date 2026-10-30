@@ -12166,7 +12166,7 @@ function identEditMarket(v){
   });
   var h=document.getElementById('ident-edit-mhint');
   if(h) h.textContent = (v === 'us')
-    ? "US : cette identité reste sur le serveur Youl4b uniquement."
+    ? "US : cette identité va sur les serveurs US (Youl4b, YouCham)."
     : "FR : cette identité va sur le Discord YouL4b Agency.";
   /* Une model US ne se lie qu a une reserve US : changer le marche change
      la liste, et un lien de l autre marche s affiche « sera retire ». */
@@ -18119,7 +18119,7 @@ _MARKET_FR_DEFAUT = _marche_mod.FR_DEFAUT
 
 
 def identity_market(ident: str) -> str:
-    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b)."""
+    """« fr » (Discord YouL4b Agency) ou « us » (serveurs Youl4b et YouCham)."""
     return _marche_mod.de(ident)
 
 
@@ -18224,7 +18224,7 @@ def _market_flag_html(identity: str, h: int = 11) -> str:
             % (i * 2 * 10.0 / 13, 10.0 / 13) for i in range(7))
         corps = ("<rect width='19' height='10' fill='#fff'/>" + bandes
                  + "<rect width='7.6' height='%.3f' fill='#3c3b6e'/>" % (10.0 * 7 / 13))
-        vb, titre = "0 0 19 10", "Marché US — serveur Youl4b"
+        vb, titre = "0 0 19 10", "Marché US — serveurs Youl4b et YouCham"
     else:
         w = int(round(h * 3 / 2))
         corps = ("<rect width='1' height='2' fill='#0055a4'/>"
@@ -65591,7 +65591,7 @@ def create_app():
 
     @app.route("/identity/market", methods=["POST"])
     def identity_market_set():
-        """Marché d'une identité : FR (Discord YouL4b Agency) ou US (Youl4b)."""
+        """Marché d'une identité : FR (Discord YouL4b Agency) ou US (Youl4b, YouCham)."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401

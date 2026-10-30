@@ -149,9 +149,14 @@ def est_salon_bases(canal) -> bool:
 
 
 def _serveur_us(guilde) -> bool:
+    """Youl4b SEUL, pas tous les serveurs US. Les pages TEMPLATE sont
+    communes à l'équipe JESSY LE RETOUR : un 2e salon sur YouCham poserait
+    un 2e panneau sur les mêmes pages, et l'entretien (assurer_salon) y
+    CRÉERAIT « bases-identites », que le propriétaire n'a pas recopié
+    (30/10/2026). Le salon reste de son côté, sur Youl4b."""
     try:
         import guild_features as gf
-        return gf.is_us_guild(guilde)
+        return gf.is_youl4b(guilde)
     except Exception:                                        # noqa: BLE001
         return False
 

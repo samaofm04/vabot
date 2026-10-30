@@ -96,7 +96,7 @@ PROFIL = ""
 # des VA (EMY TWITTER) pointe vers Emy, pas vers Jessye.
 EQUIPE_GMS = "tm_6a0e4739bfa0c238f20a8bf5"
 NOM_EQUIPE = "JESSY LE RETOUR"
-GUILD = "1535758943324999711"        # serveur Youl4b
+GUILD = "1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
 SALON = "1553218920842928219"        # salon « inflow-resultat », public : les VA le voient
 BOT_APP = "1552785601051365516"      # application Discord de Bixby
 REFRESH_S = 2 * 3600                 # Infloww ne met ses liens à jour que toutes les 2 h

@@ -39,6 +39,9 @@ ETAT = DATA / "proxeasy_salons.json"        # mode, messages postés, alertes, d
 API = "https://api.proxeasy.net/v1"
 DISCORD = "https://discord.com/api/v10"
 SERVEUR = "1535758943324999711"             # Youl4b ( Spam ) — Ryuk y est administrateur
+# Youl4b SEUL, pas tous les serveurs US (guild_features.US_GUILD_IDS) : un
+# proxy = un salon, et YouCham n'a recopié ni la catégorie proxy ni
+# suivi-proxy (30/10/2026). Le suivi des proxys reste du côté du propriétaire.
 SUIVI = "1556970178846130187"               # suivi-proxy (son tableau est tenu par proxy_discord, hors git)
 MOTIF = re.compile(r"proxyeasy-(\d+)-pe-(\d+)$")
 PROTOCOLE = "socks5"

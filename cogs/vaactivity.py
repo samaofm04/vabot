@@ -194,6 +194,13 @@ class VAActivity(commands.Cog):
 
     def _va_channels(self, guild):
         out = []
+        # Serveurs US (Youl4b, YouCham) : un VA y a un dossier <pseudo>-menu,
+        # jamais de salon va-<pseudo>. Sur YouCham (Rem administrateur, il
+        # voit va-managers), le salon du staff est devenu « 🔴-va-managers »
+        # le 30/10/2026, comme le salon d'un VA « managers ».
+        import guild_features as gf
+        if gf.is_us_guild(guild):
+            return out
         for ch in guild.text_channels:
             h = va_handle(ch.name)
             if h:

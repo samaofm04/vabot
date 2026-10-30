@@ -290,6 +290,9 @@ def test_canal():
 
 # ---- le cog --------------------------------------------------------------------------------
 
+YOUCHAM = "1565640097146347533"
+
+
 class G:
     def __init__(self, gid, name, cats, autres=0):
         self.id, self.name, self.unavailable = gid, name, False
@@ -316,7 +319,9 @@ def test_cog():
 
     spam_g = G(int(ae.SERVEUR_SPAM), "Spam", [(1, "VA 1", 3)], autres=10)
     vaig_g = G(int(ae.VA_IG), "Va IG", [(7, "👤 Amelia", 44), (8, "👤 Lola", 2)])
-    admin, principal = B([vaig_g]), B([spam_g, vaig_g])
+    # YouCham (30/10/2026) : second serveur US, surveillé comme le Spam
+    youcham_g = G(int(YOUCHAM), "YouCham", [(9, "VA 2", 5)], autres=20)
+    admin, principal = B([vaig_g]), B([spam_g, vaig_g, youcham_g])
     faux = types.ModuleType("web_upload")
     faux._BOT_REF, faux._BOT_ADMIN_REF = principal, admin
     appels = []
@@ -353,11 +358,15 @@ def test_cog():
     check("catégories de Va IG comptées",
           serveurs[ae.VA_IG]["categories"] == [{"id": "7", "nom": "👤 Amelia", "salons": 44},
                                                {"id": "8", "nom": "👤 Lola", "salons": 2}], serveurs)
+    check("YouCham lu chez le principal, comme le Spam",
+          serveurs.get(YOUCHAM, {}).get("salons") == 1 + 5 + 20, serveurs)
     check("tout vu : aucun avertissement", not avert, avert)
     faux._BOT_REF = None
     serveurs, avert = c.mesurer()
-    check("principal absent : Spam pas vu, et c'est dit",
-          ae.SERVEUR_SPAM not in serveurs and avert == [f"serveur {ae.SERVEUR_SPAM} vu par aucun bot"], avert)
+    check("principal absent : Spam et YouCham pas vus, et c'est dit",
+          ae.SERVEUR_SPAM not in serveurs and YOUCHAM not in serveurs
+          and sorted(avert) == sorted(f"serveur {g} vu par aucun bot"
+                                      for g in (ae.SERVEUR_SPAM, YOUCHAM)), avert)
     del sys.modules["web_upload"]
 
     arbre = ast.parse(pathlib.Path(ae.__file__).with_name("main.py").read_text(encoding="utf-8"))

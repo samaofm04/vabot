@@ -73,14 +73,46 @@ from discord.ext import commands, tasks
 
 import safe_json
 
-#: Le SEUL serveur ou /menudownload est proposee. Anna est sur plusieurs
-#: serveurs, mais le telechargement ne concerne que celui-ci : la commande
+#: Les SEULS serveurs ou /menudownload est proposee et dont les salons
+#: -download sont remis au propre chaque jour : les serveurs US
+#: (guild_features.US_GUILD_IDS : Youl4b, YouCham). Anna est sur plusieurs
+#: serveurs, mais le telechargement ne concerne que ceux-la : la commande
 #: n'est donc pas seulement refusee ailleurs, elle n'y est pas proposee du tout.
 #:
-#: On passe par un identifiant et non par un nom : il survit a un renommage.
-#:     Youl4b        1535758943324999711
-#:     YouLab AGENCY 1505418484052394004  (volontairement exclu)
-SERVEUR_ID = int(os.getenv("IG_SERVEUR_ID") or "1535758943324999711")
+#: On passe par des identifiants et non par des noms : ils survivent a un
+#: renommage. YouLab AGENCY (1505418484052394004) reste volontairement exclu.
+#: La liste vient de guild_features, pas d'une copie : le dossier d'un VA de
+#: YouCham recoit son panneau -download a l'arrivee (create_us_tickets), il
+#: lui faut aussi le menage quotidien. IG_SERVEUR_ID (un seul serveur, pour
+#: un essai) remplace la liste quand il est pose ; il ne l'est pas en prod.
+#: L'archive « all-download » reste celle du serveur du VA (salon_all_download).
+def _serveurs_download() -> tuple:
+    force = (os.getenv("IG_SERVEUR_ID") or "").strip()
+    if force:
+        return (int(force),)
+    import guild_features as _gf
+    return tuple(sorted(int(g) for g in _gf.US_GUILD_IDS))
+
+
+SERVEURS_IDS = _serveurs_download()
+
+
+def _serveur_archive_commune() -> int:
+    force = (os.getenv("IG_SERVEUR_ID") or "").strip()
+    if force:
+        return int(force)
+    import guild_features as _gf
+    return int(_gf.YOUL4B_GUILD_ID)
+
+
+#: Le serveur de l'archive « all-download » COMMUNE : celle des demandes qui
+#: ne viennent d'aucun serveur US, le Download des tickets TRUST INSTAGRAM
+#: (outils_tickets._travail_download lit tl.SERVEUR_ID). Youl4b, comme avant
+#: la liste ; IG_SERVEUR_ID le remplace pour un essai. Le 1er jet du
+#: branchement YouCham l'avait retiree : ce Download aurait leve
+#: AttributeError avant la livraison, le VA ne recevant rien et le journal
+#: seul en gardant trace (tests_youcham le verifie).
+SERVEUR_ID = _serveur_archive_commune()
 
 _RACINE = Path(__file__).resolve().parents[1]
 
@@ -429,15 +461,22 @@ class Telechargement(commands.Cog):
         le panneau actuel. /menudownload n'a jamais ete synchronise (commande
         de serveur, et la liste globale est pleine) : sans ceci, personne ne
         pouvait remettre les salons au propre."""
-        guilde = self.bot.get_guild(SERVEUR_ID) if hasattr(self.bot, "get_guild") else None
-        if guilde is None:
+        if not hasattr(self.bot, "get_guild"):
             return
-        try:
-            n = await remettre_au_propre(self, guilde)
-            if n:
-                print(f"[telechargement] {n} salon(s) -download remis au propre")
-        except Exception as exc:
-            print(f"[telechargement] entretien des salons : {type(exc).__name__}: {exc}")
+        for gid in SERVEURS_IDS:
+            # Chaque serveur dans son propre try : une panne sur YouCham ne
+            # prive pas Youl4b de son menage.
+            guilde = self.bot.get_guild(gid)
+            if guilde is None:
+                continue
+            try:
+                n = await remettre_au_propre(self, guilde)
+                if n:
+                    print(f"[telechargement] {n} salon(s) -download remis au propre "
+                          f"sur {getattr(guilde, 'name', gid)}")
+            except Exception as exc:
+                print(f"[telechargement] entretien des salons de "
+                      f"{getattr(guilde, 'name', gid)} : {type(exc).__name__}: {exc}")
 
     @_entretien.before_loop
     async def _avant_entretien(self):
@@ -712,7 +751,7 @@ class Telechargement(commands.Cog):
 
     # ----------------------------------------------------------------- menu --
 
-    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
+    @app_commands.guilds(*[discord.Object(id=g) for g in SERVEURS_IDS])
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.command(
         name="menudownload",

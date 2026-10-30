@@ -111,16 +111,45 @@ def is_restricted(guild_or_id) -> bool:
     return gid is not None and gid in _load()
 
 
-# ---- Serveur(s) US (Youl4b) ----
+# ---- Serveur(s) US (Youl4b, YouCham) ----
 # Les commandes dédiées US (/menujailbreakus, /ticketsall) ne marchent QUE sur
 # ces serveurs : partout ailleurs elles refusent — le serveur principal ne peut
 # pas être impacté, même par erreur.
-US_GUILD_IDS = {"1535758943324999711"}  # Youl4b
+#
+# YouCham (30/10/2026, propriétaire : « branche tout comme youl4b ») : mêmes
+# rôles et salons communs, recopiés de Youl4b. Sans lui dans cette liste, un
+# VA qui y arrivait recevait le ticket VA CLASSIQUE (setup_va_ticket :
+# identité de rotation, fiche users.json, salons cachés) au lieu de son
+# dossier perso. LA liste : arrivée, menu Jailbreak US, ✨ General, spoofer,
+# téléchargement, générateur de lien et alerte des 500 salons la lisent —
+# aucun module ne recopie l'id de YouCham.
+YOUL4B_GUILD_ID = "1535758943324999711"
+YOUCHAM_GUILD_ID = "1565640097146347533"
+#: id -> nom court, pour les textes (« serveurs US : Youl4b, YouCham »).
+US_GUILDS = {YOUL4B_GUILD_ID: "Youl4b", YOUCHAM_GUILD_ID: "YouCham"}
+US_GUILD_IDS = set(US_GUILDS)
 
 
 def is_us_guild(guild_or_id) -> bool:
-    """True si ce serveur est un serveur US (Youl4b)."""
+    """True si ce serveur est un serveur US (Youl4b ou YouCham)."""
     return _gid(guild_or_id) in US_GUILD_IDS
+
+
+def is_youl4b(guild_or_id) -> bool:
+    """True pour Youl4b SEUL, le serveur US d'origine.
+
+    Ce qui n'existe qu'UNE fois pour tout le marché US y reste : le salon
+    admin bases-identites (pages TEMPLATE GetMySocial communes à l'équipe),
+    les alertes staff du debrief-day (numgen.ALERTES_SALON), les logins
+    ProxEasy et suivi-proxy, inflow-resultat. Le propriétaire garde ces
+    outils de son côté ; YouCham n'a recopié ni « proxy » ni « base ». Un
+    second exemplaire sur YouCham doublerait l'alerte ou le panneau."""
+    return _gid(guild_or_id) == YOUL4B_GUILD_ID
+
+
+def noms_us() -> str:
+    """« Youl4b, YouCham » : les serveurs US, pour les textes montrés."""
+    return ", ".join(US_GUILDS[g] for g in US_GUILDS if g in US_GUILD_IDS)
 
 
 def set_features(guild_or_id, features) -> set:

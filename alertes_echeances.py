@@ -43,6 +43,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import guild_features as _gf
 import safe_json
 
 DATA_DIR = Path("data")
@@ -56,8 +57,13 @@ GMS_PALIERS = (7, 1, 0)
 
 #: Le serveur Spam : Discord plafonne un serveur a 500 salons, categories
 #: comprises (les fils ne comptent pas).
-SERVEUR_SPAM = "1535758943324999711"
-SERVEURS_SALONS = {SERVEUR_SPAM: "Spam"}          # id → nom si Discord ne le donne pas
+SERVEUR_SPAM = _gf.YOUL4B_GUILD_ID                  # Youl4b
+#: Tous les serveurs US (guild_features.US_GUILD_IDS) : YouCham (30/10/2026)
+#: se remplit comme Youl4b, un dossier de 5 a 6 salons par VA. Un autre
+#: serveur plein est un autre evenement (cle « salons:<id> »), pas un doublon.
+#: id → nom si Discord ne le donne pas ; Youl4b garde « Spam ».
+SERVEURS_SALONS = {g: ("Spam" if g == SERVEUR_SPAM else n)
+                   for g, n in _gf.US_GUILDS.items() if g in _gf.US_GUILD_IDS}
 PLAFOND_SERVEUR = 500
 SEUIL_SERVEUR = 450
 REARME_SERVEUR = 440
@@ -71,7 +77,8 @@ REARME_CATEGORIE = 45
 
 #: Le releve de l'audit, pour donner un rythme des la premiere alerte : sans
 #: lui, il faudrait une semaine d'historique avant de pouvoir dire « plein vers
-#: le … ». Constante, donc identique sur toutes les machines.
+#: le … ». Constante, donc identique sur toutes les machines. Pas d'amorce
+#: pour YouCham : son rythme viendra de son propre historique.
 AMORCE_SALONS = {SERVEUR_SPAM: ("2026-10-20", 381)}
 HISTORIQUE_JOURS = 60
 

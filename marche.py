@@ -6,7 +6,7 @@ premier oubli, le drapeau affiché n'aurait plus correspondu au serveur
 Discord réellement servi.
 
   - FR  -> Discord « YouL4b Agency »
-  - US  -> serveur « Youl4b » uniquement
+  - US  -> serveurs US « Youl4b » et « YouCham » (guild_features.US_GUILD_IDS)
 
 Le choix se fait sur le site (Bibliothèque -> ✏️ Modifier -> Marché) et
 atterrit dans data/identity_market.json, écrit en clair pour les deux

@@ -6599,7 +6599,8 @@ class UserCog(commands.Cog):
         import guild_features as gf
         if not gf.is_us_guild(guild):
             await interaction.response.send_message(
-                "🔒 Réservé au serveur US (Youl4b) — rien ne change sur ce serveur.", ephemeral=True)
+                f"🔒 Réservé aux serveurs US ({gf.noms_us()}) — rien ne change sur ce serveur.",
+                ephemeral=True)
             return
         models = _jb_us_models()
         if not models:
@@ -10276,7 +10277,7 @@ def _markets() -> dict:
 
 
 def _market_of(identity: str) -> str:
-    """« fr » (Discord YouL4b Agency) ou « us » (serveur Youl4b).
+    """« fr » (Discord YouL4b Agency) ou « us » (serveurs Youl4b et YouCham).
     La regle vit dans marche.py, partagee avec le site et la synchro Drive."""
     try:
         import marche as _mk

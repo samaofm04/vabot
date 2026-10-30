@@ -49,7 +49,11 @@ FICHIER_DIRECT = Path("data") / "sessions_direct.json"
 #: prise pour une session a figer.
 FICHIER_BILAN = Path("data") / "sessions_bilan.json"
 FICHIER_JAILBREAK = Path("data") / "jailbreak.json"
-SUIVI_GUILD_ID = 1535758943324999711  # Youl4b uniquement
+#: Youl4b uniquement. YouCham (30/10/2026) a ses salons session et
+#: session-bilan, mais n'est PAS branché : un bilan commun aux deux serveurs
+#: ou un bilan par serveur reste à décider, et les clés « jour:sN » de
+#: sessions_direct.json entreraient en collision entre deux serveurs.
+SUIVI_GUILD_ID = 1535758943324999711
 SUIVI_IDENTITE = "jessye"
 
 

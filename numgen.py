@@ -449,6 +449,8 @@ def _human(txt):
 
 ALERTES_FICHIER = pathlib.Path(__file__).resolve().parent / "data" / "numgen_alertes.json"
 #: Serveur Spam > 📊・debrief-day, posté par le bot admin (le même que le récap).
+#: Youl4b SEUL, même quand la panne touche un VA de YouCham : le solde est
+#: commun, l'alerte au staff part une fois, d'un seul endroit.
 ALERTES_SALON = "1553627411680338153"
 _VERROU_ALERTES = threading.Lock()
 

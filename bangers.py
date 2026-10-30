@@ -650,6 +650,10 @@ log = logging.getLogger("vabot.bangers")
 TZ = ZoneInfo("Europe/Paris")
 HEURE = 9
 IDENTITE = "jessye"
+#: Youl4b seul. YouCham (30/10/2026) a recopié 💥・banger, mais n'est PAS
+#: branché : une fiche ne garde qu'UNE annonce (details['annonce'], vérifiée
+#: dans publier_journee) -- un 2e salon US sur les mêmes reels Jessye
+#: l'écraserait et ferait refuser la journée suivante de Youl4b.
 GUILD_ID = 1535758943324999711
 CHANNEL_ID = 1548115360702664804
 DOSSIER_JOURNEES = Path(__file__).resolve().parent / "data" / "bangers_journees"

@@ -71,10 +71,6 @@ import safe_json
 #: /ticketsall supprime tout salon de ticket dont le suffixe n'y est pas.
 SUFFIXE = "generateur-de-lien"
 
-#: Youl4b US. Repli seulement : la constante qui fait foi est
-#: liens_identite_us.GUILD_ID (un seul endroit decide du serveur).
-GUILD_ID_DEFAUT = "1535758943324999711"
-
 #: Prefixe de TOUS les custom_id de ce cog. discord.py lance tous les motifs
 #: dynamiques qui correspondent a un custom_id : celui-ci ne recoupe aucun
 #: des existants (jbus: jbg: jbmenu cmenu: genlink: spf: numgen: lien: essai:
@@ -142,14 +138,16 @@ def _lu():
         return None
 
 
-def guild_id() -> str:
-    lu = _lu()
-    return str(getattr(lu, "GUILD_ID", "") or GUILD_ID_DEFAUT)
-
-
 def serveur_ok(guild) -> bool:
-    """Youl4b US seulement : partout ailleurs, aucun panneau, aucun clic."""
-    return str(getattr(guild, "id", "") or "") == guild_id()
+    """Les serveurs US seulement (guild_features.US_GUILD_IDS : Youl4b,
+    YouCham) : partout ailleurs, aucun panneau, aucun clic. La liste vit dans
+    guild_features, pas ici : c'est elle qui donne son dossier a un VA qui
+    arrive -- deux listes auraient cree le salon sans le servir."""
+    try:
+        import guild_features as gf
+        return bool(gf.is_us_guild(guild))
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 # ───────────────────────────────────────────────────────────── salons ──

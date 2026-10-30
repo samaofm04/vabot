@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Les liens GetMySocial PAR IDENTITE des VA du marche US (serveur Youl4b).
+"""Les liens GetMySocial PAR IDENTITE des VA du marche US (serveurs Youl4b et YouCham).
 
 POURQUOI (proprietaire, 06/10/2026)
     Chaque VA US a un LIEN GLOBAL GetMySocial, celui que le proprietaire lui
@@ -87,7 +87,12 @@ import clics_personnes as cp
 import podium_discord as pd
 import safe_json
 
-GUILD_ID = "1535758943324999711"                  # Youl4b (US)
+# Les serveurs du generateur : TOUS les serveurs US, lus par
+# cogs/generateur_lien.serveur_ok dans guild_features.US_GUILD_IDS (Youl4b,
+# YouCham). Plus d'id de serveur ici (l'ancien GUILD_ID) : le parcours
+# d'arrivee cree le dossier sur YouCham, un id recopie ici en aurait laisse
+# le salon -generateur-de-lien sans panneau. Les liens sont ranges par VA,
+# pas par serveur : rien d'autre a separer.
 EQUIPE = "tm_6a0e4739bfa0c238f20a8bf5"            # JESSY LE RETOUR
 NOM_EQUIPE = "JESSY LE RETOUR"
 REGISTRE = Path(__file__).resolve().parent / "data" / "liens_identite_us.json"

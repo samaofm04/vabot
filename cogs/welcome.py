@@ -1008,7 +1008,7 @@ async def _push_content_menu(bot, channel, identity, member):
             log.warning(f"_push_content_menu : ligne non epinglee ({e})")
 
 
-# ---- Tickets du serveur US (Youl4b) : 3 salons simples par membre ----
+# ---- Tickets des serveurs US (Youl4b, YouCham) : un dossier par membre ----
 # Pas de parcours VA (identité, onboarding, isolation, users.json) : juste
 # @pseudo-menu (lecture seule, menu Jailbreak US épinglé en permanence),
 # @pseudo-content (le contenu généré arrive là) et @pseudo-numero-mail,
@@ -2848,8 +2848,11 @@ class Welcome(commands.Cog):
         if not gf.enabled(member.guild, "tickets"):
             return
 
-        # Serveur US (Youl4b) : les tickets sont 2 salons simples par membre
-        # (content / numero-mail), PAS le parcours VA classique.
+        # Serveur US (Youl4b, YouCham) : un dossier perso par membre
+        # (create_us_tickets), PAS le parcours VA classique. Aucune fiche
+        # users.json n'est lue ni écrite : un VA de Youl4b qui rejoint YouCham
+        # y a son dossier aussi (le refus « déjà VA sur … » est celui de
+        # setup_va_ticket, jamais atteint ici).
         if gf.is_us_guild(member.guild):
             try:
                 created, errors = await create_us_tickets(member.guild, member, bot=self.bot)
@@ -4178,7 +4181,8 @@ class Welcome(commands.Cog):
         import guild_features as gf
         if not gf.is_us_guild(guild):
             await interaction.response.send_message(
-                "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
+                f"🔒 Réservé aux serveurs US ({gf.noms_us()}) — protection du serveur principal.",
+                ephemeral=True)
             return
         # RÉCONCILIATEUR : l'objectif est « les salons de US_TICKET_SUFFIXES, c'est tout » —
         # menu → content → numero-mail → download, groupés par personne,

@@ -64,18 +64,37 @@ def _sort_key(name: str):
     return (group, dot, handle)
 
 
+def _sans_salons_va(guild) -> bool:
+    """Serveurs US (Youl4b, YouCham) : un VA y a un dossier <pseudo>-menu,
+    jamais de salon va-<pseudo>. Un « va-… » y est un salon du staff.
+
+    Observé le 30/10/2026 sur YouCham, où Rem est administrateur et voit
+    donc va-managers (sur Youl4b, il ne le voit pas) : le tri l'a pris pour
+    le salon d'un VA « managers » et a posé un « ──😴-sans-lien » dans
+    📊・SUIVI DES VA à 09:01 UTC, puis de nouveau à 09:41 après sa
+    suppression : il revient au tour suivant (20 min) tant que Rem le voit.
+    Ici, plus aucun salon VA : un séparateur déjà posé y est retiré comme
+    orphelin (sort_guild), et rien d'autre ne bouge."""
+    try:
+        import guild_features as gf
+        return gf.is_us_guild(guild)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def _split(category):
     """(others, groupes {0:[ch],1:[],2:[]}, separateurs existants {group: ch})"""
     txts = list(category.text_channels)
     others, seps = [], {}
     groups = {0: [], 1: [], 2: []}
+    sans_va = _sans_salons_va(getattr(category, "guild", None))
     for c in txts:
         if _is_sep(c.name):
             for g, sname in SEP_BY_GROUP.items():
                 if _norm(c.name) == _norm(sname):
                     seps[g] = c
             continue
-        if _va_handle(c.name):
+        if not sans_va and _va_handle(c.name):
             groups[_sort_key(c.name)[0]].append(c)
         else:
             others.append(c)
