@@ -341,15 +341,23 @@ async def _dire(canal, texte: str) -> None:
     await _poster(canal, texte)
 
 
+#: « l'archive du serveur du salon » : ce que fait Youl4b, toujours.
+_ARCHIVE_DU_SERVEUR = object()
+
+
 class _Demande:
     """Une demande en cours : qui, quel compte, quelle option, quand."""
 
-    def __init__(self, pseudo: str, option: str, demandeur, canal):
+    def __init__(self, pseudo: str, option: str, demandeur, canal,
+                 archive=_ARCHIVE_DU_SERVEUR):
         self.pseudo = pseudo
         self.option = option
         self.demandeur_id = int(getattr(demandeur, "id", 0) or 0)
         self.quand = _heure_paris()
-        self.archive = salon_all_download(getattr(canal, "guild", None))
+        # Un ticket TRUST INSTAGRAM (outils_tickets) donne la sienne : le
+        # ticket est servi par Wario, l'archive vit sur Youl4b, chez Yoshi.
+        self.archive = (salon_all_download(getattr(canal, "guild", None))
+                        if archive is _ARCHIVE_DU_SERVEUR else archive)
         self.archivees = 0
         self.archives_ratees = 0
         self.trop_lourds = 0
@@ -570,14 +578,19 @@ class Telechargement(commands.Cog):
 
     async def livrer(self, canal, username: str, combien: int,
                      avatar: bool, bio: bool, photos: bool, reels: bool,
-                     par_vues: bool = False, demandeur=None, option: str = ""):
+                     par_vues: bool = False, demandeur=None, option: str = "",
+                     archive=_ARCHIVE_DU_SERVEUR):
         """Toute une demande, bilan compris. Ne leve jamais.
 
         Une reserve vide, un solde epuise ou un compte introuvable arretent la
         demande avec une phrase claire ; tout ce qui est deja parti reste.
+
+        `archive` : le salon de la copie, quand ce n'est pas le all-download
+        du serveur de `canal` (outils_tickets : le ticket est sur TRUST
+        INSTAGRAM, la copie part dans celui de Youl4b).
         """
         import hiker_medias as hm
-        dem = _Demande(username, option or "?", demandeur, canal)
+        dem = _Demande(username, option or "?", demandeur, canal, archive)
         cpt = hm.Compteur()
         arret = ""
         try:
@@ -757,6 +770,28 @@ def _libelle_compte(username: str = "", combien: int = 30) -> str:
     return f"👤 @{username} · {combien}" if username else "👤 Choisir un compte"
 
 
+def lire_compte(brut_pseudo: str, brut_combien: str = ""):
+    """(pseudo, combien, refus) d'une saisie de compte : « » quand c'est bon,
+    sinon la phrase a repondre. Une seule lecture pour la fenetre de -download
+    et pour celle du ticket TRUST INSTAGRAM (outils_tickets) : deux copies
+    finiraient par accepter des pseudos differents."""
+    brut = str(brut_pseudo or "").strip().rstrip("/")
+    # Minuscules : Instagram ne distingue pas la casse, et le cache de
+    # listing est range au pseudo -- « Sky.Ards » et « sky.ards » ne
+    # doivent pas payer deux fois.
+    username = brut.split("/")[-1].lstrip("@").split("?")[0].lower()
+    if not username:
+        return "", 30, "Pseudo invalide."
+    try:
+        n = int(str(brut_combien or "").strip() or "30")
+    except ValueError:
+        n = 30
+    n = max(1, min(n, 200))
+    if not _PSEUDO_OK.match(username):
+        return username, n, f"« {username} » ne ressemble pas a un pseudo Instagram."
+    return username, n, ""
+
+
 class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
     """Retient le pseudo pour la personne qui l a saisi.
 
@@ -780,23 +815,9 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         self.cog = cog
 
     async def on_submit(self, inter: discord.Interaction):
-        brut = str(self.pseudo).strip().rstrip("/")
-        # Minuscules : Instagram ne distingue pas la casse, et le cache de
-        # listing est range au pseudo -- « Sky.Ards » et « sky.ards » ne
-        # doivent pas payer deux fois.
-        username = brut.split("/")[-1].lstrip("@").split("?")[0].lower()
-        if not username:
-            await inter.response.send_message("Pseudo invalide.", ephemeral=True)
-            return
-        try:
-            n = int(str(self.combien).strip() or "30")
-        except ValueError:
-            n = 30
-        n = max(1, min(n, 200))
-        if not _PSEUDO_OK.match(username):
-            await inter.response.send_message(
-                f"« {username} » ne ressemble pas a un pseudo Instagram.",
-                ephemeral=True)
+        username, n, refus = lire_compte(str(self.pseudo), str(self.combien))
+        if refus:
+            await inter.response.send_message(refus, ephemeral=True)
             return
         self.cog.retenir(inter.user.id, username, n)
 

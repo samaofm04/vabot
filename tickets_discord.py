@@ -2455,7 +2455,9 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
 # (_deux_rangees, maquette validée).
 # 9 (24/10/2026) : « 🌱 Passer Débutant » à la place de « Confirmer » pour un VA
 # encore en essai (NIVEAUX_ICI).
-BOUTONS_VERSION = 9
+# 10 (30/10/2026) : « 📤 Spoofer » et « ⬇️ Download » dans la rangée du VA, sur
+# TRUST INSTAGRAM seulement (OUTILS_DANS_MENU, outils_tickets).
+BOUTONS_VERSION = 10
 
 
 def redessiner_boutons(gid: str) -> Dict[str, Any]:
@@ -3067,10 +3069,15 @@ def _epingler_sans_avis(salon: str, mid: str) -> None:
             _api("DELETE", f"/channels/{salon}/messages/{m['id']}")
 
 
-def ramener_menu(gid: str, uid: str, salon: str) -> str:
+def ramener_menu(gid: str, uid: str, salon: str, en_dernier: bool = False) -> str:
     """Le menu du ticket de `uid` en bas de `salon`, épinglé : « deja » (il y
     est, rien que des messages de bots dessous — la carte numéro), « ramene »,
-    ou « echec ». Ne lève jamais."""
+    ou « echec ». Ne lève jamais.
+
+    `en_dernier` (outils_tickets, après une livraison) : le menu doit être LE
+    dernier message. Les fichiers livrés sont des messages de bot : sans ça,
+    « rien que des bots dessous » laissait cinq versions spoofées entre le
+    menu et le bas du ticket jusqu'au tour de l'heure."""
     try:
         import verif_discord as vd
         gid, uid, salon = str(gid), str(uid), str(salon)
@@ -3094,7 +3101,7 @@ def ramener_menu(gid: str, uid: str, salon: str) -> str:
                              json={"content": texte, "components": rangs})
                         _noter_texte_menu(cle, texte)
                     return "deja"
-                if not (m.get("author") or {}).get("bot") or m.get("type") == 6:
+                if en_dernier or not (m.get("author") or {}).get("bot") or m.get("type") == 6:
                     break
             code, rep = _api("POST", f"/channels/{salon}/messages",
                              json={"content": texte, "components": rangs,
@@ -3666,3 +3673,77 @@ def ramener_menus(gid: str, profond: Optional[bool] = None) -> Dict[str, Any]:
     finally:
         _MENUS_EN_COURS.discard(gid)
     return bilan
+
+
+# ─── 📤 Spoofer et ⬇️ Download (TRUST INSTAGRAM, 30/10/2026) ─────────────
+# Propriétaire : les outils des salons perso de Youl4b dans le ticket, « je
+# veux vraiment un ticket pour le VA comme maintenant », puis « vas-y ajoute
+# dans trust agency ». Deux boutons de la rangée du VA (préfixe « outk: »,
+# hors _BOUTONS_MANAGERS), juste avant « 📱 Numéro », qui reste le dernier
+# (BOUTONS_VERSION 6) : 💳 · 📈 · 📤 · ⬇️ · 📱 — cinq, le plafond d'une
+# rangée ; un bouton de plus déborderait sur une rangée (_deux_rangees) au
+# lieu de faire refuser le menu. Enveloppe, et pas une ligne dans boutons_va :
+# le patch du VPS 99-z-tickets-subs-total réécrit le corps d'origine. Le clic
+# est à outils_tickets (traiter, plus haut, rend None pour « outk: »).
+OUTILS_DANS_MENU = {AGENCY_IG_ID}
+#: Le préfixe des clics servis par outils_tickets (il le lit ici).
+OUTILS_PREFIXE = "outk:"
+_boutons_va_sans_outils = boutons_va
+
+
+def boutons_outils(uid: str) -> List[Dict[str, Any]]:
+    """📤 Spoofer et ⬇️ Download. Décrits ICI, pas demandés à outils_tickets :
+    quand la rangée venait de son import, un module absent ou cassé un instant
+    (oublié d'un commit, poussé au suivant) donnait une rangée sans eux, que
+    redessiner_boutons marquait pourtant à jour (BOUTONS_VERSION) — ni les
+    accueils ni leurs copies ne les recevaient plus jamais. Le module ne sert
+    que les clics : absent, un clic répond « réessaie », et ça remarche dès
+    qu'il arrive, sans redessin."""
+    return [{"type": 2, "style": 2, "label": "Spoofer", "emoji": {"name": "📤"},
+             "custom_id": f"{OUTILS_PREFIXE}spf:{uid}"},
+            {"type": 2, "style": 2, "label": "Download", "emoji": {"name": "⬇️"},
+             "custom_id": f"{OUTILS_PREFIXE}dl:{uid}"}]
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # noqa: F811
+               gid: str = "", lien_actif: bool = True):
+    rangs = _boutons_va_sans_outils(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                    gid=gid, lien_actif=lien_actif)
+    if str(gid) not in OUTILS_DANS_MENU:
+        return rangs
+    neufs = boutons_outils(str(uid))
+    plats = [b for r in rangs for b in (r.get("components") or [])]
+    deja = {str(b.get("custom_id") or "") for b in plats}
+    neufs = [b for b in neufs if b["custom_id"] not in deja]
+    if not neufs:
+        return rangs
+    i = next((k for k, b in enumerate(plats) if b.get("custom_id") == "numx:menu"), None)
+    if i is None:                       # sans Numéro : au bout de la rangée du VA
+        i = max([k + 1 for k, b in enumerate(plats)
+                 if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)] or [0])
+    plats[i:i] = neufs
+    return _deux_rangees([{"type": 1, "components": plats}])
+
+
+# ─── Un ramener_menu à la fois par ticket ────────────────────────────────
+# Depuis les outils (30/10/2026), le menu est reposé après chaque livraison, de
+# deux fils différents (le spoof dans un fil du site, le téléchargement sur la
+# boucle de Yoshi), en plus du tour de l'heure et de 📱 Numéro. Deux appels
+# en même temps lisaient tous deux « menu pas en bas », postaient chacun une
+# copie et l'épinglaient, puis retiraient la même ancienne : la fiche ne
+# gardait que la dernière, l'autre restait épinglée, orpheline, jusqu'au
+# ménage — qui ne la voit plus derrière trente posts d'un « Tout ». Enveloppe
+# plutôt que dans le corps : les appels du module (ramener_menus) passent par
+# ce nom, donc par elle, et le corps garde ses lignes.
+_VERROUS_MENU: Dict[str, threading.RLock] = {}
+_ramener_menu_sans_verrou = ramener_menu
+
+
+def ramener_menu(gid: str, uid: str, salon: str, en_dernier: bool = False) -> str:  # noqa: F811
+    with _VERROU:
+        verrou = _VERROUS_MENU.setdefault(str(salon), threading.RLock())
+    with verrou:
+        return _ramener_menu_sans_verrou(gid, uid, salon, en_dernier=en_dernier)
+
+
+ramener_menu.__doc__ = _ramener_menu_sans_verrou.__doc__

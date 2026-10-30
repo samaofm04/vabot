@@ -61817,6 +61817,16 @@ def create_app():
         _nx_boot.demarrer()
     except Exception as _e:
         log.warning(f"numéros X non repris: {_e}")
+    # 📤 Spoofer / ⬇️ Download des tickets TRUST INSTAGRAM (outils_tickets) :
+    # un travail coupé par ce redémarrage est annoncé dans son ticket, au lieu
+    # d'y laisser le VA attendre des fichiers qui ne viendront pas. Même garde
+    # que l'accueil d'Agency : un rendu de page hors du VPS ne poste rien.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("outils-tickets"):
+            import outils_tickets as _ot_boot
+            _ot_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"outils des tickets non repris: {_e}")
     # Agency VA INSTAGRAM : arrivées, départs et parrains, relevés chaque
     # minute dans le fil d'agency_accueil (surveillé : _FILS_DISCORD). Pas
     # sous le banc d'essai : un rendu de page sur le VPS aurait lancé un
@@ -62035,6 +62045,19 @@ def create_app():
                 return jsonify(_rep_tk)
         except Exception as _e_tk:
             print(f"[ticket] route : {type(_e_tk).__name__}: {_e_tk}", flush=True)
+        # « 📤 Spoofer » et « ⬇️ Download » du menu des tickets TRUST INSTAGRAM
+        # (outils_tickets) : leurs fenêtres et leurs choix. Même principe, None
+        # quand ce n'est pas le sien.
+        try:
+            import outils_tickets as _ot
+            _rep_ot = _ot.traiter(charge)
+            if _rep_ot is not None:
+                return jsonify(_rep_ot)
+        except Exception as _e_ot:
+            print(f"[outils] route : {type(_e_ot).__name__}: {_e_ot}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("outk:"):
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         # Le bouton « Copier » posé sous les captions : même principe, il rend
         # None quand ce n'est pas son bouton.
         try:

@@ -316,9 +316,12 @@ try:
           r["ok"] and r["uid"] == "v1" and r["manager"] == "m1" and r["essai"]
           and not [a for a in appels if a[0] != "GET"], r)
     labels = [b["label"] for rg in r["corps"]["components"] for b in rg["components"]]
-    check("… l'accueil : USDC, Mes stats, Numéro, puis 🌱 Passer Débutant (en essai), Créer son lien, "
-          "et aucune mention",
-          labels == ["Mon adresse USDC", "Mes stats", "Numéro", "Passer Débutant", "Créer son lien"]
+    # 30/10/2026 : 📤 Spoofer et ⬇️ Download avant le Numéro (outils_tickets,
+    # « vas-y ajoute dans trust agency »)
+    check("… l'accueil : USDC, Mes stats, Spoofer, Download, Numéro, puis 🌱 Passer Débutant "
+          "(en essai), Créer son lien, et aucune mention",
+          labels == ["Mon adresse USDC", "Mes stats", "Spoofer", "Download", "Numéro",
+                     "Passer Débutant", "Créer son lien"]
           and r["corps"]["allowed_mentions"] == {"parse": []}, labels)
     check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])
     check("salon hors des catégories de managers : refusé", not tk.adopter_salon(AG, "c3")["ok"])
