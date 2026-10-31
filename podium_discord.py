@@ -451,9 +451,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                    # la lecture des pages figées (_ligne_affichee)
                    "libelle": "Instagram VA",
                    # la semaine et le bonus (qui paient) : ses VA ; la
-                   # quinzaine : ses VA ET ceux de Youl4b (Twitter) en
-                   # « Instagram VA 0nn » (propriétaire, « avec le 0 devant »,
-                   # « je parle de VA de Youl4b »). Voir subs_va.classement_agency
+                   # quinzaine : ses VA ET ceux de Youl4b (Twitter), en trois
+                   # lignes depuis le 24/10/2026 (« je parle de VA de
+                   # Youl4b »). Voir subs_va.classement_agency
                    "mesure": "agency_abonnes", "mesure_subs": "agency_quinzaine",
                    "bonus": True, "minutes": None,
                    "alltime": "podium_alltime_agency_ig.json",
@@ -2143,7 +2143,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         return subs_va.classement_va_ig(debut, fin)
     if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
         # Agency VA INSTAGRAM : les abonnés du tracking de chaque VA ; la
-        # quinzaine y mêle ceux de Youl4b (Twitter) en « Instagram VA 0nn »
+        # quinzaine y mêle ceux de Youl4b (Twitter) en trois lignes
+        # (subs_va.LIGNES_YOULAB)
         import subs_va
         return subs_va.classement_agency(
             debut, fin, avec_youl4b=_source(gid, mesure) == "agency_quinzaine")
@@ -5562,7 +5563,7 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
     pseudo, « Threads VA 023 » → « pseudo (Amelia VA 44 · Va IG) ». Ailleurs :
     _noms_va, au numéro."""
     if str(gid) == AGENCY_IG_ID:
-        # Agency : au libellé entier, ses VA et ceux de Youl4b (« 0nn »)
+        # Agency : au libellé entier, ses VA et les trois lignes de Youl4b
         import subs_va
         return subs_va.noms_agency()
     noms = _noms_va(gid)

@@ -361,7 +361,7 @@ try:
     _sauve_sv = {k: getattr(sv, k) for k in ("_subs_entite", "subs_depuis_toujours")}
     _sauve_pd = {k: getattr(pod, k) for k in ("_classement_avec_partis", "_noms_registre")}
     monde(etat={"liens": {
-        f"{AG}:u1": {"pseudo": "zaid014787", "numero": 12, "link_id": "lnk_a",
+        f"{AG}:u1": {"pseudo": "zaid014787", "numero": 99, "link_id": "lnk_a",
                      "tracking": "https://onlyfans.com/emy.brw/c300"},
         f"{AG}:u2": {"pseudo": "mike047639", "numero": 7, "link_id": "lnk_b",
                      "tracking": "https://onlyfans.com/emy.brw/c301"},
@@ -384,48 +384,68 @@ try:
     J1, J2 = dt.date(2026, 10, 19), dt.date(2026, 10, 25)
     cl = pod.classement(J1, J2, gid=AG)
     check("semaine Agency : ses VA en « Instagram VA n », aux abonnés ; lien coupé et sans lien absents",
-          [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Instagram VA 12", 56)]
+          [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Instagram VA 99", 56)]
           and cl["illisibles"] == ["Instagram VA 7"], cl)
     clq = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
     check("quinzaine Agency : + les abonnés des VA de Youl4b (Twitter) en trois lignes "
-          "« Instagram VA 001/002/003 », 44 % / 32 % / le reste ; leurs sans relevé en une ligne",
+          "« Instagram VA 160/134/12 » (yous1m, vector, Roucham), 44 % / 32 % / le reste ; "
+          "leurs sans relevé en une ligne",
           [(x["va"], x["clics"]) for x in clq["lignes"]]
-          == [("Instagram VA 12", 56), ("Instagram VA 001", 2), ("Instagram VA 002", 1),
-              ("Instagram VA 003", 1)]
+          == [("Instagram VA 99", 56), ("Instagram VA 160", 2), ("Instagram VA 12", 1),
+              ("Instagram VA 134", 1)]
           and all(x.get("youl4b") for x in clq["lignes"][1:]) and tw_appels == ["tracking_abonnes"]
           and clq["illisibles"] == ["Instagram VA 7", "YouLab Twitter (1 VA sans relevé)"], clq)
     check("partage 44 / 32 / reste : la somme ne bouge pas",
           sv._parts_youlab(100) == [44, 32, 24] and sv._parts_youlab(1) == [0, 0, 1]
           and sum(sv._parts_youlab(1469)) == 1469 and sv._parts_youlab(0) == [0, 0, 0])
-    pages = pod.pages_subs(clq, J1, J2, {"Instagram VA 12": 70}, gid=AG)
+    pages = pod.pages_subs(clq, J1, J2, {"Instagram VA 99": 70}, gid=AG)
     desc = pages[0]["description"]
-    check("quinzaine : « Instagram VA 12 — 56 subs · 🌐 70 all-time » ; Youl4b sans all-time "
+    check("quinzaine : « Instagram VA 99 — 56 subs · 🌐 70 all-time » ; Youl4b sans all-time "
           "(faux depuis le passage sur Emy, comme à Twitter)",
-          "**Instagram VA 12** — **56** subs · 🌐 70 all-time" in desc
-          and "**Instagram VA 001** — **2** subs\n" in desc + "\n"
+          "**Instagram VA 99** — **56** subs · 🌐 70 all-time" in desc
+          and "**Instagram VA 160** — **2** subs\n" in desc + "\n"
+          and "VA 001" not in desc
           and "Abonnés **tracking OF**" in desc and "$" not in desc, desc[:600])
     emb = pod.embed_podium(cl, J1, J2, gid=AG, en_cours=True)
     # au format du bonus du jour depuis le 25/10/2026 : plus d'en-tête
     check("podium de la semaine : en subs, « Instagram VA n », le top 3 et sa prime",
-          "**Instagram VA 12** — **56 subs** → pas de prime (min. 100)" in emb["description"]
+          "**Instagram VA 99** — **56 subs** → pas de prime (min. 100)" in emb["description"]
           and "clics" not in emb["description"],
           emb["description"][:500])
     bon = pod.embed_bonus(cl, J2, AG)
     check("bonus du jour : « Instagram VA n — N subs → 5.00$ » (format du 25/10/2026)",
-          "**Instagram VA 12** — **56 subs** → **5.00$**" in bon["description"], bon["description"][:300])
+          "**Instagram VA 99** — **56 subs** → **5.00$**" in bon["description"], bon["description"][:300])
     noms = pod._noms_libelles(AG)
-    check("👀 Pseudos : les VA d'Agency au pseudo, les trois lignes de YouLab à leur part",
-          noms.get("Instagram VA 12") == "zaid014787"
-          and noms.get("Instagram VA 001") == "YouLab Twitter · 44 % de leurs abonnés"
-          and noms.get("Instagram VA 003") == "YouLab Twitter · le reste de leurs abonnés"
-          and "Instagram VA 012" not in noms, noms)
+    check("👀 Pseudos : les VA d'Agency au pseudo, les trois lignes de YouLab à qui a le "
+          "numéro, et leur part",
+          noms.get("Instagram VA 99") == "zaid014787"
+          and noms.get("Instagram VA 160") == "yous1m · YouLab Twitter · 44 % de leurs abonnés"
+          and noms.get("Instagram VA 134") == "vectorofm · YouLab Twitter · 32 % de leurs abonnés"
+          and noms.get("Instagram VA 12") == "Roucham · YouLab Twitter · le reste de leurs abonnés"
+          and not any("VA 00" in k or "VA 012" in k for k in noms), noms)
     check("la semaine (qui paie) n'a pas les VA de Youl4b", tw_appels == ["tracking_abonnes"])
     _sauve_partis = tk.partis
     tk.partis = lambda g: {"u1": 1792000000} if str(g) == AG else {}
-    check("un VA d'Agency parti sort du classement (clé « Instagram VA 12 »)",
-          "Instagram VA 12" in pod._partis(AG)
+    check("un VA d'Agency parti sort du classement (clé « Instagram VA 99 »)",
+          "Instagram VA 99" in pod._partis(AG)
           and [x["va"] for x in pod.classement(J1, J2, gid=AG)["lignes"]] == [], pod._partis(AG))
     tk.partis = _sauve_partis
+    # yous1m prend un lien d'Agency : son numéro (160) est celui de la ligne
+    # YouLab à 44 %. Une seule ligne, la sienne, avec la part en plus.
+    monde(etat={"liens": {
+        f"{AG}:u1": {"pseudo": "zaid014787", "numero": 99, "link_id": "lnk_a",
+                     "tracking": "https://onlyfans.com/emy.brw/c300"},
+        f"{AG}:u5": {"pseudo": "yous1m", "numero": 160, "link_id": "lnk_e",
+                     "tracking": "https://onlyfans.com/emy.brw/c303"}}})
+    SUBS["https://onlyfans.com/emy.brw/c303"] = 10
+    clq2 = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
+    noms2 = pod._noms_libelles(AG)
+    check("… yous1m avec son lien d'Agency : une seule « Instagram VA 160 », ses 10 + la part (2)",
+          [(x["va"], x["clics"]) for x in clq2["lignes"]]
+          == [("Instagram VA 99", 56), ("Instagram VA 160", 12), ("Instagram VA 12", 1),
+              ("Instagram VA 134", 1)]
+          and noms2.get("Instagram VA 160") == "yous1m + YouLab Twitter · 44 % de leurs abonnés",
+          (clq2["lignes"], noms2))
     check("les salons d'Agency : les siens, pas ceux de Twitter",
           pod._profil(AG)["salon_podium"] == "🏆・classement" and pod._nom_salon_subs(AG) == "📈・subs"
           and pod._profil(AG)["salon_bonus"] == "💰・bonus-journalier")

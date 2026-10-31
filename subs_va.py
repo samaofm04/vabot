@@ -553,6 +553,15 @@ def _youl4b_relabel(va: Any) -> str:
 #: Les % des deux premières ; la troisième prend le reste.
 PARTS_YOULAB = (44, 32)
 
+#: Le numéro de chacune des trois lignes. Propriétaire, 31/10/2026, devant
+#: 👀 Pseudos (« Instagram VA 001 · … 44 % ») : « ça dit en mode 001 002 003,
+#: change […] met le numéro du VA yous1m, met après le num de vector et met
+#: le truc de Roucham ». Leurs numéros de podium_numeros.json : yous1m 160,
+#: vectorofm 134 ; Roucham 12 (« VA 12 (Roucham) », son numéro US) et pas
+#: son 63, qui est déjà sa propre ligne d'Agency (choix du propriétaire).
+#: Les abonnés restent la part de tous les VA de YouLab, pas les leurs.
+LIGNES_YOULAB = ((160, "yous1m"), (134, "vectorofm"), (12, "Roucham"))
+
 
 def _parts_youlab(total: int) -> List[int]:
     a = int(total * PARTS_YOULAB[0] / 100 + 0.5)
@@ -564,8 +573,8 @@ def classement_agency(debut: dt.date, fin: dt.date, avec_youl4b: bool = False) -
     """La forme de podium_discord.classement(), en abonnés (« clics » porte les
     abonnés de la période) : les VA d'Agency, et avec `avec_youl4b` les
     abonnés de ceux de Youl4b (Twitter, partis exclus), en trois lignes
-    « Instagram VA 001/002/003 » marquées « youl4b » (PARTS_YOULAB). Un VA
-    illisible est dit, jamais compté zéro."""
+    « Instagram VA 160/134/12 » marquées « youl4b » (PARTS_YOULAB,
+    LIGNES_YOULAB). Un VA illisible est dit, jamais compté zéro."""
     d0, d1 = debut.isoformat(), fin.isoformat()
     ents = entites_agency()
     lignes: List[Dict[str, Any]] = []
@@ -586,9 +595,17 @@ def classement_agency(debut: dt.date, fin: dt.date, avec_youl4b: bool = False) -
         les_leurs = [x for x in tw["lignes"] if _youl4b_relabel(x["va"])]
         if les_leurs:
             total = sum(int(x["clics"]) for x in les_leurs)
-            for i, n in enumerate(_parts_youlab(total), 1):
+            a_eux = {x["va"]: x for x in lignes}
+            for (num, _qui), n in zip(LIGNES_YOULAB, _parts_youlab(total)):
+                lib = libelle_agency(num)
+                if lib in a_eux:
+                    # yous1m ou vector avec un lien d'Agency : sa ligne porte
+                    # déjà ce numéro, deux « Instagram VA 160 » se
+                    # mélangeraient dans 👀 Pseudos et l'all-time
+                    a_eux[lib]["clics"] += n
+                    continue
                 nb_y += 1
-                lignes.append({"va": libelle_youl4b_agency(i), "numero": i, "clics": n,
+                lignes.append({"va": lib, "numero": num, "clics": n,
                                "liens": 0, "spam": False, "model": "", "youl4b": True})
         sans = [x for x in (tw.get("illisibles") or []) if _youl4b_relabel(x)]
         if sans:
@@ -615,10 +632,13 @@ def totaux_agency() -> Dict[str, int]:
 
 
 def noms_agency() -> Dict[str, str]:
-    """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 12 » → son
-    pseudo ; « Instagram VA 001/002/003 » → la part des VA de YouLab
-    (PARTS_YOULAB) : ce ne sont pas des personnes."""
+    """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 99 » → son
+    pseudo ; les trois lignes de YouLab (LIGNES_YOULAB) → à qui est le
+    numéro, et que leurs abonnés sont une part de ceux des VA de YouLab."""
     out = {e["nom"]: e["pseudo"] or "?" for e in entites_agency().values()}
-    for i, part in enumerate((f"{PARTS_YOULAB[0]} %", f"{PARTS_YOULAB[1]} %", "le reste"), 1):
-        out[libelle_youl4b_agency(i)] = f"YouLab Twitter · {part} de leurs abonnés"
+    parts = (f"{PARTS_YOULAB[0]} %", f"{PARTS_YOULAB[1]} %", "le reste")
+    for (num, qui), part in zip(LIGNES_YOULAB, parts):
+        lib = libelle_agency(num)
+        texte = f"YouLab Twitter · {part} de leurs abonnés"
+        out[lib] = f"{out[lib]} + {texte}" if lib in out else f"{qui} · {texte}"
     return out
