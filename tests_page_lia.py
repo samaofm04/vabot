@@ -21,6 +21,9 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     US_REESSAI_S ;
   - fichiers à elle (clics US, paie, copie GMS), la page Jessye et la page Emy
     ne changent pas ;
+  - la paie : 0,70 $ par sub pour tout VA sans réglage à lui (propriétaire,
+    31/10 : « pour cette fiche les VA c'est 0,7 par sub tout le temps ») ; un
+    réglage enregistré passe devant ; Jessye et Emy sans paie imposée ;
   - la route : clé des VA exigée, ni paiement ni gain, aucun JavaScript.
 
 Fausses lectures : aucun appel réseau. Lancement : python tests_page_lia.py
@@ -218,7 +221,27 @@ ho = m.page({}, cle="CLE", paie=True)
 check("propriétaire : Paiement et Gain / perte, sans colonne de clics OF",
       ">Paiement<" in ho and "Clics MyPuls" not in ho and "Clics Infloww" not in ho)
 
-print("5. La route")
+print("5. La paie : 0,70 $ par sub, tout le temps")
+check("paie de la page : au sub, 0,70 $ quel que soit le nombre, depuis le 31/10, un réglage valide",
+      m.PAIE_PAGE == m.valider_paie(m.PAIE_PAGE)[0] and m.PAIE_PAGE["type"] == "au_sub"
+      and m.cout_au_sub(m.PAIE_PAGE, 250)[0] == 175.0 and m.PAIE_PAGE["depuis"] == "2026-10-31")
+check("Jessye et Emy : aucune paie imposée", il.PAIE_PAGE is None and il.profil("emy").PAIE_PAGE is None)
+pa = {x["nom"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
+check("VA sans réglage : « 0,70 $ / sub » (un seul prix, pas « jusqu'à 0 »)",
+      all(pa[n]["paie"]["resume"] == "0,70\u00a0$ / sub" for n in ("VA 1", "VA 2", "VA 3")),
+      [pa[n]["paie"]["resume"] for n in pa])
+check("VA 1 : 3 subs × 0,70 = 2,10 $ payés, 12,50 $ rapportés, gain +10,40 $",
+      pa["VA 1"]["paie"].get("cout") == 2.1 and pa["VA 1"]["paie"].get("revenu") == 12.5
+      and abs((pa["VA 1"].get("gain") or 0) - 10.4) < 1e-9, pa["VA 1"]["paie"])
+check("VA 2 : 1 sub, rien rapporté : -0,70 $", abs((pa["VA 2"].get("gain") or 0) + 0.7) < 1e-9, pa["VA 2"].get("gain"))
+m.safe_json.write(m.PAIE_FICHIER, {"personnes": {"VA 2": {"type": "aucun", "montant": 0, "devise": "USD",
+                                                       "frequence": "quinzaine"}}})
+pa = {x["nom"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
+check("un réglage enregistré passe devant (VA 2 « Aucun »), les autres gardent 0,70 $",
+      pa["VA 2"]["paie"]["cfg"]["type"] == "aucun" and pa["VA 1"]["paie"]["cfg"]["type"] == "au_sub",
+      pa["VA 2"]["paie"]["cfg"])
+
+print("6. La route")
 import web_upload as wu      # noqa: E402
 app = wu.create_app()
 app.config["TESTING"] = True
@@ -236,7 +259,7 @@ try:
 finally:
     il.profil = _sauve
 
-print("6. Isolation")
+print("7. Isolation")
 check("rien écrit ni modifié dans le vrai data/ (fichiers de la page)", _instantane() == AVANT,
       set(_instantane().items()) ^ set(AVANT.items()))
 

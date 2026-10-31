@@ -2070,6 +2070,12 @@ FREQUENCES = ("quinzaine", "mois")
 PAIE_DEFAUT: Dict[str, Any] = {"type": "fixe_primes", "montant": 75.0, "devise": "USD",
                                "frequence": "quinzaine", "depuis": "",
                                "taux1": 0.40, "seuil": 200, "taux2": 0.50, "telephones": None}
+# La paie de TOUTE la page, pour qui n'a pas de réglage à lui. None : rien
+# n'est choisi à la place du propriétaire (pages Jessye et Emy). Page Lia
+# (REGLAGES) : « pour cette fiche les VA c'est 0,7 par sub tout le temps »
+# (propriétaire, 31/10/2026). Un réglage enregistré pour une personne passe
+# devant.
+PAIE_PAGE: Optional[Dict[str, Any]] = None
 MONTANT_MAX = 20000.0            # par quinzaine ou par mois : au-delà, une faute de frappe
 TAUX_SUB_MAX = 100.0             # $ par sub : au-delà, une faute de frappe
 SEUIL_SUB_MAX = 100000           # subs par quinzaine
@@ -3296,6 +3302,8 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     out["paie"] = P
     for x in lignes:
         cfg = cfgs.get(str(x.get("cle")))
+        if cfg is None and PAIE_PAGE:
+            cfg = dict(PAIE_PAGE)
         x["paie"] = {"cfg": cfg, "resume": resume_paie(cfg)}
         x["gain"] = None
     if t.get("erreur"):
@@ -3826,6 +3834,10 @@ def resume_paie(cfg: Optional[Mapping[str, Any]]) -> str:
         return "—"
     dev = "$" if cfg.get("devise") == "USD" else "EUR"
     if cfg["type"] == "au_sub":
+        if not cfg.get("seuil") or cfg.get("taux1") == cfg.get("taux2"):
+            # un seul prix (page Lia : 0,70 $ tout le temps) : « jusqu'à 0,
+            # 0,70 $ au-delà » ne voulait rien dire
+            return f"{_taux_court(cfg['taux2'] if not cfg.get('seuil') else cfg['taux1'])}\u00a0{dev} / sub"
         return (f"{_taux_court(cfg['taux1'])} {dev} / sub jusqu'à {_nb(cfg['seuil'])}, "
                 f"{_taux_court(cfg['taux2'])} {dev} au-delà")
     s = f"{_montant_court(cfg['montant'])} {dev} / {cfg['frequence']}"
@@ -5575,6 +5587,10 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
     "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",
     "PAIE_FICHIER": DATA_DIR / "infloww_liens_paie_lia.json",
+    # « pour cette fiche les VA c'est 0,7 par sub tout le temps » : un seul
+    # prix, sans fixe ; depuis la création des liens VA 1..4 (31/10/2026)
+    "PAIE_PAGE": {"type": "au_sub", "taux1": 0.7, "seuil": 0, "taux2": 0.7, "devise": "USD",
+                  "depuis": "2026-10-31"},
 }}
 # la créatrice dont la page additionne la part (voir PARTENAIRE) : le 27/10,
 # les liens de la page Emy sont passés sur Jessye
