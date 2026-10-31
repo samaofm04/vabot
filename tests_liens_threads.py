@@ -21,8 +21,16 @@ Ce qui est vérifié :
   - les accueils déjà ouverts sont redessinés une fois, pas à chaque tour ;
   - la synchro des groupes tourne pour Threads (et pas pour Twitter, déjà
     faite par la boucle du podium), au plus toutes les 30 minutes.
+  - pastilles et tri des salons (31/10/2026, propriétaire : « on avait parlé
+    d'un côté couleur pour savoir si les mecs bossent ou pas », « mets en
+    avant qui bosse et ceux qui font le plus de subs ») : Twitter et TRUST
+    INSTAGRAM comme Threads, Twitter sans numéro ; délai de grâce à la mise
+    en service ; une réponse GetMySocial vide ne change aucune pastille ; à
+    pastille égale, la valeur de la semaine, puis de la quinzaine, puis le
+    numéro ; leur passage à eux (_couleurs_et_tri), sans la synchro des liens.
 
-Faux GetMySocial et faux Discord : aucun appel réseau, rien dans data/.
+Faux GetMySocial, faux Discord et faux podium.json : aucun appel réseau, rien
+lu ni écrit dans data/.
 Lancement : python tests_liens_threads.py
 """
 from __future__ import annotations
@@ -45,6 +53,7 @@ except Exception:
     pass
 
 import liens_va as lv                  # noqa: E402
+import podium_discord as pod           # noqa: E402
 import tickets_discord as tk           # noqa: E402
 
 OKS, FAILS = [], []
@@ -56,6 +65,7 @@ def check(label, cond, detail=""):
 
 
 TH, TW = lv.THREADS_ID, lv.TWITTER_ID
+AG, VA_IG = tk.AGENCY_IG_ID, "1505418484052394004"      # TRUST INSTAGRAM, Va IG
 EMY_THREADS, EMY_TWITTER = "tm_6ab51e03b299b7e3ba6ff7bf", lv.EQUIPE_VA
 GABARIT_TW = "lnk_gabarit_twitter"
 
@@ -110,6 +120,9 @@ _SAUVE_LV = {k: getattr(lv, k) for k in ("CONFIG_FICHIER", "ETAT_FICHIER", "nume
 _SAUVE_TK = {k: getattr(tk, k) for k in ("ETAT_FICHIER", "CONFIG_FICHIER", "_api", "_EN_FOND",
                                          "_suite", "identifiant", "nom_manager")}
 _SAUVE_GMS = sys.modules.get("gms")
+# le tri lit le dernier relevé du podium (data/podium.json) : jamais le vrai ici
+_SAUVE_POD = pod._etat
+_SAUVE_DEPUIS = dict(tk.COULEUR_DEPUIS)
 
 
 def monde(config=None, tickets=None):
@@ -135,6 +148,7 @@ def monde(config=None, tickets=None):
 
 
 try:
+    pod._etat = lambda: {}             # pas de relevé, sauf là où un test en pose un
     # ── espace ───────────────────────────────────────────────────────────
     g, _ = monde()
     e = lv.espace(TH)
@@ -459,13 +473,14 @@ try:
                  tickets={f"{TH}:u1": {"salon": "s1", "ouvert": time.time()},
                           f"{TH}:u2": {"salon": "s2", "ouvert": time.time()},
                           f"{TH}:u9": {"salon": "s9", "ouvert": time.time()},
-                          f"{TW}:u3": {"salon": "s3"}})
+                          f"{TW}:u3": {"salon": "s3", "ouvert": time.time()}})
     lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
         f"{TH}:u1": {"pseudo": "momobtn", "shortcode": "velvetyy", "numero": 61}}}))
     A = tk.AROBASE
     SALONS_N = {"s1": f"─│🔵┤-va-{A}momobtn", "s2": f"─│🔵┤-va-{A}steave0454",
                 "s9": f"─│🔵┤-12-va-{A}deja", "s3": f"─│🔵┤-va-{A}yazid"}
     patchs_n = []
+    SALONS_TW = {"s3"}                 # les salons de SALONS_N qui sont sur Twitter
 
     MESSAGES_N = {}
 
@@ -475,7 +490,7 @@ try:
         if m == "GET" and c.endswith("/channels"):
             gid_ = c.split("/")[2]
             return 200, [{"id": i, "type": 0, "name": n} for i, n in SALONS_N.items()
-                         if (i == "s3") == (gid_ == TW)]
+                         if (i in SALONS_TW) == (gid_ == TW)]
         if m == "PATCH":
             cid = c.split("/")[2]
             patchs_n.append((cid, k["json"]["name"]))
@@ -492,9 +507,12 @@ try:
     patchs_n.clear()
     tk.numeroter_salons(TH)
     check("… une fois : le passage suivant ne renomme plus rien", not patchs_n, patchs_n)
-    check("Twitter garde ses noms (« ─│🔵┤-va-＠yazid »), sans numéro",
+    # Twitter a ses pastilles depuis le 31/10/2026, mais pas de numéro : u3
+    # vient d'arriver, sans lien (🔵), et rien ne change
+    check("Twitter ne prend pas de numéro (« ─│🔵┤-va-＠yazid » : pastille seule)",
           not tk.numeroter_salons(TW)["renommes"] and SALONS_N["s3"] == f"─│🔵┤-va-{A}yazid"
-          and tk.nom_salon_va(TW, "u3", "yazid") == f"─│🔵┤-va-{A}yazid")
+          and tk.nom_salon_va(TW, "u3", "yazid") == f"─│🔵┤-va-{A}yazid"
+          and TW not in tk.NUMERO_DANS_SALON)
     check("un ticket neuf sur Threads naît numéroté",
           tk.nom_salon_va(TH, "u1", "momobtn") == f"─│🔵┤-61-va-{A}momobtn")
 
@@ -563,8 +581,13 @@ try:
           and SALONS_N["c7"].startswith("─│🔵┤") and SALONS_N["c8"].startswith("─│🔵┤")
           and tk.derniere_activite(TH, "66") > _tm.time() - 7200
           and tk.derniere_activite(TH, "999") == 0, {k: SALONS_N[k] for k in ("c4", "c6", "c7", "c8")})
-    check("… et Twitter ne note rien (pastille de Threads seulement)",
-          (tk.noter_activite(TW, "5"), tk.derniere_activite(TW, "5"))[1] == 0)
+    # 31/10/2026 : Twitter et TRUST INSTAGRAM ont leurs pastilles ; Va IG a
+    # les siennes par le bot principal (cogs/vaactivity), pas d'ici
+    check("… Twitter et TRUST INSTAGRAM notent aussi l'activité de leurs VA ; Va IG non",
+          (tk.noter_activite(TW, "5"), tk.derniere_activite(TW, "5"))[1] > 0
+          and (tk.noter_activite(AG, "5"), tk.derniere_activite(AG, "5"))[1] > 0
+          and (tk.noter_activite(VA_IG, "5"), tk.derniere_activite(VA_IG, "5"))[1] == 0
+          and VA_IG not in tk.COULEUR_DANS_SALON)
     check("… un seul appel GetMySocial pour tout l'espace, sur J-2..J",
           [a for a in g.appels if a[0] == "get_link_metrics"]
           and all(a[1]["team_id"] == EMY_THREADS and a[1]["limit"] == 100
@@ -581,6 +604,75 @@ try:
     tk.numeroter_salons(TH)
     check("GetMySocial muet : aucune pastille ne change (pas de rouge sur une panne)",
           not patchs_n and SALONS_N["c1"].startswith("─│🟢┤"), patchs_n)
+    # Relevé sur Threads le 31/10/2026 : 9 salons passés 🟠 d'un coup, remis
+    # 🟢 au passage suivant. Une réponse « ok » SANS AUCUNE ligne alors que
+    # des VA ont un lien : illisible, pas « zéro visite partout ».
+    patchs_n.clear()
+    sys.modules["gms"] = GMSClics({})
+    tk.numeroter_salons(TH)
+    check("GetMySocial répond « ok » mais vide : aucune pastille ne change (pas d'aller-"
+          "retour 🟢 → 🟠 → 🟢)",
+          not patchs_n and SALONS_N["c1"].startswith("─│🟢┤")
+          and SALONS_N["c2"].startswith("─│🟢┤"), patchs_n)
+
+    # ── Twitter : la même pastille, sans numéro ──────────────────────────
+    # Propriétaire, 31/10/2026 : « on avait parlé d'un côté couleur pour
+    # savoir si les mecs bossent ou pas »
+    import datetime as _dtd
+    from zoneinfo import ZoneInfo as _ZI
+    _mise = _dtd.datetime(2026, 11, 1, tzinfo=_ZI("Europe/Paris")).timestamp()
+    check("mise en service des pastilles : 01/11/2026 00:00 (Paris) sur Twitter et TRUST "
+          "INSTAGRAM, aucune sur Threads (son activité est notée depuis le 13/10)",
+          tk.COULEUR_DEPUIS.get(TW) == _mise and tk.COULEUR_DEPUIS.get(AG) == _mise
+          and TH not in tk.COULEUR_DEPUIS, tk.COULEUR_DEPUIS)
+    g, _ = monde(config={"gabarit": GABARIT_TW},
+                 tickets={f"{TW}:w1": {"salon": "w1", "ouvert": vieux},
+                          f"{TW}:w2": {"salon": "w2", "ouvert": vieux},
+                          f"{TW}:w3": {"salon": "w3", "ouvert": vieux}})
+    tk._ACTIVITE.clear()
+    tk._ACTIVITE_LUE[0] = False
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+        f"{TW}:w1": {"shortcode": "x", "link_id": "lnk_w1", "numero": 95, "quand": vieux},
+        f"{TW}:w2": {"shortcode": "y", "link_id": "lnk_w2", "numero": 96, "quand": vieux}}}))
+    g = GMSClics({"lnk_w1": 4, "lnk_w2": 0})
+    sys.modules["gms"] = g
+    SALONS_N.clear()
+    SALONS_N.update({"w1": f"─│🔵┤-va-{A}x", "w2": f"─│🔵┤-va-{A}y", "w3": f"─│🔵┤-va-{A}z"})
+    SALONS_TW.clear()
+    SALONS_TW.update({"w1", "w2", "w3"})
+    MESSAGES_N.clear()
+    # en service depuis une heure : w3 (sans lien, ticket de 5 jours, rien
+    # noté) n'a pas encore eu deux jours pour se montrer
+    tk.COULEUR_DEPUIS[TW] = _tm.time() - 3600
+    patchs_n.clear()
+    tk.numeroter_salons(TW)
+    check("Twitter recoloré, sans numéro : « ─│🟢┤-va-＠x » (visites), « ─│🟠┤-va-＠y » (lien "
+          "sans visite)",
+          dict(patchs_n) == {"w1": f"─│🟢┤-va-{A}x", "w2": f"─│🟠┤-va-{A}y"}, patchs_n)
+    check("… un seul appel GetMySocial, dans l'espace de Twitter",
+          [a[1]["team_id"] for a in g.appels if a[0] == "get_link_metrics"] == [EMY_TWITTER],
+          g.appels)
+    check("délai de grâce : pas de 🔴 avant 2 jours après la mise en service, même ticket "
+          "vieux de 5 jours et rien noté",
+          SALONS_N["w3"] == f"─│🔵┤-va-{A}z"
+          and tk.rond_du_va(TW, "w3", {}, {"ouvert": vieux}) == tk.ROND_LA, SALONS_N)
+    tk.COULEUR_DEPUIS[TW] = _tm.time() - 2 * 86400 + 60
+    _encore = tk.rond_du_va(TW, "w3", {}, {"ouvert": vieux})
+    tk.COULEUR_DEPUIS[TW] = _tm.time() - 2 * 86400 - 60
+    _passe = tk.rond_du_va(TW, "w3", {}, {"ouvert": vieux})
+    check("… 🔵 à une minute des 2 jours, 🔴 une minute après",
+          _encore == tk.ROND_LA and _passe == tk.ROND_ABSENT, (_encore, _passe))
+    patchs_n.clear()
+    tk.numeroter_salons(TW)
+    check("… et le passage suivant le met 🔴 (seul renommage)",
+          patchs_n == [("w3", f"─│🔴┤-va-{A}z")], patchs_n)
+    patchs_n.clear()
+    sys.modules["gms"] = GMSClics({})
+    tk.numeroter_salons(TW)
+    check("… GetMySocial vide sur Twitter aussi : w1 reste 🟢, rien renommé",
+          not patchs_n and SALONS_N["w1"].startswith("─│🟢┤"), patchs_n)
+    tk.COULEUR_DEPUIS.clear()
+    tk.COULEUR_DEPUIS.update(_SAUVE_DEPUIS)
 
     # ── le tri : 🟢, puis 🟠, puis 🔵, et le numéro à couleur égale ─────────
     # « propose-moi quelque chose pour trier tout le monde » (13/10/2026)
@@ -594,22 +686,26 @@ try:
            {"id": "t5", "type": 0, "parent_id": "k2", "position": 20, "name": f"─│🟢┤-61-va-{A}m"},
            {"id": "t6", "type": 0, "parent_id": "k2", "position": 21, "name": f"─│🟠┤-62-va-{A}s"}]
     lots = []
+    POS_PAR = {TH: POS}                # les salons de chaque serveur
 
     def _api_tri(m, c, **k):
         if m == "GET" and c.endswith("/channels"):
-            return 200, json.loads(json.dumps(POS)) if c.split("/")[2] == TH else []
-        if m == "PATCH" and c == f"/guilds/{TH}/channels":
+            return 200, json.loads(json.dumps(POS_PAR.get(c.split("/")[2], [])))
+        g_ = c.split("/")[2] if c.startswith("/guilds/") else ""
+        if m == "PATCH" and g_ in POS_PAR and c == f"/guilds/{g_}/channels":
             lots.append(k["json"])
             for ch in k["json"]:
-                next(x for x in POS if x["id"] == ch["id"])["position"] = ch["position"]
+                next(x for x in POS_PAR[g_] if x["id"] == ch["id"])["position"] = ch["position"]
             return 204, {}
         return 404, {}
     tk._api = _api_tri
+    # aucun relevé du podium (pod._etat rend {}), aucune fiche pour ces salons :
+    # l'ordre d'avant le 31/10/2026, pastille puis numéro
     bt = tk.trier_salons(TH)
 
-    def ordre(cat):
+    def ordre(cat, pos=None):
         return [x["name"].split("-va-")[0] for x in sorted(
-            (x for x in POS if x.get("parent_id") == cat and "-va-" in x["name"]),
+            (x for x in (pos or POS) if x.get("parent_id") == cat and "-va-" in x["name"]),
             key=lambda x: (x["position"], x["id"]))]
     check("ABDOUL rangé : 🟢 31, 🟢 63, 🟠 70, 🔵 72 ; MOMOBY déjà en ordre, pas touché",
           ordre("k1") == ["─│🟢┤-31", "─│🟢┤-63", "─│🟠┤-70", "─│🔵┤-72"]
@@ -622,7 +718,137 @@ try:
     lots.clear()
     tk.trier_salons(TH)
     check("… et rien au passage suivant (l'ordre est déjà le bon)", not lots, lots)
-    check("Twitter n'est pas trié", tk.trier_salons(TW) == {"categories": [], "rates": []})
+
+    # ── le tri à la valeur du podium ─────────────────────────────────────
+    # Propriétaire, 31/10/2026 : « et mets en avant qui bosse et ceux qui font
+    # le plus de subs, tu vois comme ça on les voit en premier ». À pastille
+    # égale : la semaine, puis la quinzaine (la semaine repart à 0 le lundi),
+    # puis le numéro. Sur Threads, la valeur est celle de son podium (clics).
+    LUNDI = pod.semaine_en_cours()[0].isoformat()
+    SAISON = pod.saison_en_cours()[0].isoformat()
+    tk._TRI_DITS.clear()
+    tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {
+        f"{TH}:r": {"salon": "t3"}, f"{TH}:a": {"salon": "t4"}}}))
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {
+        f"{TH}:r": {"link_id": "lnk_r", "numero": 63},
+        f"{TH}:a": {"link_id": "lnk_a", "numero": 31}}}))
+    PODIUM = {"vivants": {TH: {"semaine": LUNDI, "dernier": {"lignes": [
+        {"va": "Threads 63", "numero": 63, "clics": 4},
+        {"va": "Threads 31", "numero": 31, "clics": 0},
+        # un VA de Va IG dans le relevé de Threads : le numéro d'un autre registre
+        {"va": "Threads VA 031", "numero": 31, "clics": 50, "cle_ig": "u7:amelia"}]}}}}
+    pod._etat = lambda: json.loads(json.dumps(PODIUM))
+    lots.clear()
+    tk.trier_salons(TH)
+    check("Threads : à pastille égale, le plus de clics de la semaine d'abord (🟢 63 : 4 clics "
+          "avant 🟢 31 : 0) ; la ligne Va IG au même numéro ne compte pas",
+          ordre("k1") == ["─│🟢┤-63", "─│🟢┤-31", "─│🟠┤-70", "─│🔵┤-72"]
+          and ordre("k2") == ["─│🟢┤-61", "─│🟠┤-62"] and len(lots) == 1, (ordre("k1"), lots))
+
+    # Twitter : pas de numéro dans les noms, il vient de la fiche du lien
+    POS_TW = [{"id": "kz", "type": 4, "name": "🔵┤ Manager ZAYNO ├🔵", "position": 3}] + [
+        {"id": i, "type": 0, "parent_id": "kz", "position": 30 + k, "name": n}
+        for k, (i, n) in enumerate([("a1", f"─│🟠┤-va-{A}lent"), ("a2", f"─│🟢┤-va-{A}petit"),
+                                    ("a3", f"─│🟢┤-va-{A}gros"), ("a4", f"─│🟢┤-va-{A}zero_a"),
+                                    ("a5", f"─│🟢┤-va-{A}zero_b"), ("a6", f"─│🟢┤-va-{A}zero_c"),
+                                    ("a7", f"─│🔵┤-va-{A}nouveau"), ("a8", f"─│🟢┤-va-{A}egal")])]
+    POS_PAR[TW] = POS_TW
+    NUM_TW = {"a1": 91, "a2": 98, "a3": 96, "a4": 130, "a5": 124, "a6": 77, "a8": 99}
+    tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {
+        f"{TW}:v{s}": {"salon": s} for s in ("a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8")}}))
+    lv.ETAT_FICHIER.write_text(json.dumps({"liens": {      # a7 : pas encore de lien
+        f"{TW}:v{s}": {"link_id": f"lnk_{s}", "numero": n} for s, n in NUM_TW.items()}}))
+    PODIUM = {
+        "vivants": {TW: {"semaine": LUNDI, "dernier": {"lignes": [
+            {"va": "VA 96", "numero": 96, "clics": 363}, {"va": "VA 91", "numero": 91, "clics": 55},
+            {"va": "VA 98", "numero": 98, "clics": 15}, {"va": "VA 99", "numero": 99, "clics": 15},
+            {"va": "VA 124", "numero": 124, "clics": 0}, {"va": "VA 130", "numero": 130, "clics": 0},
+            # les comptes internes : un numéro qui tomberait sur VA 77
+            {"va": "VA 41", "numero": 77, "clics": 5000, "interne": True},
+            {"va": "VA 32", "numero": 32, "clics": 40}]}}},          # parti : pas de salon
+        "subs": {TW: {"saison": SAISON, "dernier": {"lignes": [
+            {"va": "VA 96", "numero": 96, "clics": 5}, {"va": "VA 98", "numero": 98, "clics": 40},
+            {"va": "VA 99", "numero": 99, "clics": 50}, {"va": "VA 124", "numero": 124, "clics": 12},
+            {"va": "VA 130", "numero": 130, "clics": 12},
+            {"va": "Instagram VA 001", "numero": 77, "clics": 999, "youl4b": True}]}}}}
+    pod._etat = lambda: json.loads(json.dumps(PODIUM))
+
+    def ordre_ids(cat, pos):
+        return [x["id"] for x in sorted((x for x in pos if x.get("parent_id") == cat),
+                                        key=lambda x: (x["position"], x["id"]))]
+    vt = tk._valeurs_tri(TW)
+    check("valeurs du tri : salon → ticket → numéro du lien → relevé (semaine, quinzaine, "
+          "numéro) ; interne et youl4b écartés, un VA sans lien vaut 0",
+          vt.get("a3") == (363, 5, 96) and vt.get("a6") == (0, 0, 77)
+          and vt.get("a7") == (0, 0, 0) and vt.get("a8") == (15, 50, 99), vt)
+    lots.clear()
+    btw = tk.trier_salons(TW)
+    check("Twitter trié : 🟢 d'abord, le plus de subs de la semaine en tête (363), à égalité "
+          "(15) la quinzaine (50 avant 40), à 0 la quinzaine puis le numéro (124 avant 130), "
+          "puis 🟠 (même à 55 subs), puis 🔵",
+          ordre_ids("kz", POS_TW) == ["a3", "a8", "a2", "a5", "a4", "a6", "a1", "a7"]
+          and btw["categories"] == ["🔵┤ Manager ZAYNO ├🔵"] and len(lots) == 1,
+          (ordre_ids("kz", POS_TW), btw))
+    check("… sur les mêmes places (30 à 37)",
+          sorted(c["position"] for c in lots[0]) == list(range(30, 38)) if lots else False, lots)
+    lots.clear()
+    tk.trier_salons(TW)
+    check("… et rien au passage suivant", not lots, lots)
+    # le lundi matin, vivants[gid] porte encore la semaine finie : elle compte 0
+    import datetime as _dtt
+    PODIUM["vivants"][TW]["semaine"] = (_dtt.date.fromisoformat(LUNDI)
+                                        - _dtt.timedelta(days=7)).isoformat()
+    tk.trier_salons(TW)
+    check("semaine finie (lundi avant le podium) : comptée 0, la quinzaine départage "
+          "(50, 40, 12, 12, 5, 0)",
+          ordre_ids("kz", POS_TW) == ["a8", "a2", "a5", "a4", "a3", "a6", "a1", "a7"],
+          ordre_ids("kz", POS_TW))
+
+    def _podium_illisible():
+        raise RuntimeError("podium.json illisible")
+    pod._etat = _podium_illisible
+    tk.trier_salons(TW)
+    check("relevé illisible : tout le monde à 0, le tri retombe sur la pastille puis le "
+          "numéro (celui de la fiche, Twitter n'en a pas dans ses noms)",
+          tk._valeurs_tri(TW).get("a3") == (0, 0, 96)
+          and ordre_ids("kz", POS_TW) == ["a6", "a3", "a2", "a8", "a5", "a4", "a1", "a7"],
+          ordre_ids("kz", POS_TW))
+    pod._etat = lambda: {}
+    check("Twitter et TRUST INSTAGRAM sont triés ; Va IG non (ses salons ne sont pas des "
+          "tickets d'ici)",
+          {TH, TW, AG} <= tk.TRI_SALONS and VA_IG not in tk.TRI_SALONS
+          and tk.trier_salons(VA_IG) == {"categories": [], "rates": []})
+
+    # ── Twitter et TRUST INSTAGRAM : leur passage à eux ──────────────────
+    # Pas par _synchro_liens : elle refait liens_va.synchroniser, que la
+    # boucle du podium fait déjà pour eux (l'outil GetMySocial est limité).
+    vus_ct = []
+    _sauve_ct = (tk.numeroter_salons, tk.trier_salons)
+
+    def _pastilles_plantent(gid):
+        vus_ct.append(("pastilles", gid))
+        raise RuntimeError("Discord injoignable")
+    try:
+        tk.numeroter_salons = _pastilles_plantent
+        tk.trier_salons = lambda gid: (vus_ct.append(("tri", gid)) or {})
+        tk._COULEURS_VUE.clear()
+        for g_ in (TH, TW, TW, AG, VA_IG):
+            tk._couleurs_et_tri(g_, lambda gid: contextlib.nullcontext())
+    finally:
+        tk.numeroter_salons, tk.trier_salons = _sauve_ct
+    check("pastilles et tri : Twitter et TRUST INSTAGRAM, au plus toutes les 30 min ; "
+          "Threads garde _synchro_liens ; Va IG jamais",
+          vus_ct == [("pastilles", TW), ("tri", TW), ("pastilles", AG), ("tri", AG)], vus_ct)
+    check("… une panne des pastilles n'empêche pas le tri (chacun son try)",
+          ("tri", TW) in vus_ct)
+    import inspect as _insp
+    _src_sp = _insp.getsource(tk.suivre_partout)
+    check("… branché dans suivre_partout, juste après _synchro_liens ; la synchro des liens "
+          "reste à Threads seul",
+          "_couleurs_et_tri(gid, sur_serveur)" in _src_sp
+          and _src_sp.index("_synchro_liens(gid, sur_serveur)")
+          < _src_sp.index("_couleurs_et_tri(gid, sur_serveur)")
+          and tk.SYNCHRO_LIENS_ICI == {TH}, tk.SYNCHRO_LIENS_ICI)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)
@@ -632,7 +858,12 @@ finally:
         sys.modules["gms"] = _SAUVE_GMS
     else:
         sys.modules.pop("gms", None)
+    pod._etat = _SAUVE_POD
+    tk.COULEUR_DEPUIS.clear()
+    tk.COULEUR_DEPUIS.update(_SAUVE_DEPUIS)
     tk._SYNCHRO_VUE.clear()
+    tk._COULEURS_VUE.clear()
+    tk._TRI_DITS.clear()
     shutil.rmtree(TMP, ignore_errors=True)
 
 print()

@@ -34,7 +34,7 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import safe_json
 
@@ -600,9 +600,28 @@ def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
 #:      depuis au moins autant. Propriétaire, même jour : « le VA il est là mais
 #:      répond pas, inactif dans le serveur de partout, en rouge depuis 2 j »,
 #:      « sans lien »
-COULEUR_DANS_SALON = {"1498948161039896586"}     # YouLab THREADS
+#: Twitter et TRUST INSTAGRAM (Agency) aussi depuis le 31/10/2026 —
+#: propriétaire : « on avait parlé d'un côté couleur pour savoir si les mecs
+#: bossent ou pas ». Les mêmes règles ; sur Twitter la pastille seule, sans
+#: numéro (absent de NUMERO_DANS_SALON). Ils ne passent pas par _synchro_liens
+#: mais par _couleurs_et_tri (voir là). Va IG n'est PAS ici : ses salons
+#: (« 🔴-21-va-… », catégories de model) sont colorés par le bot principal,
+#: cogs/vaactivity + va_link_status.py (hors git, VPS).
+COULEUR_DANS_SALON = {"1498948161039896586",     # YouLab THREADS
+                      "1445108485090971710",     # TRUST TWITTER
+                      AGENCY_IG_ID}              # TRUST INSTAGRAM (Agency)
 JOURS_CLICS_SALON = 2
 ROND_LA, ROND_CLICS, ROND_RIEN, ROND_ABSENT = "🔵", "🟢", "🟠", "🔴"
+#: Mise en service de la pastille sur un serveur où l'activité des VA n'était
+#: pas notée avant (noter_activite ignore un serveur hors COULEUR_DANS_SALON) :
+#: data/activite_va.json n'avait au 31/10/2026 aucune entrée Twitter ni
+#: Agency. Sans ce délai, un VA sans lien au ticket vieux de deux jours
+#: passait 🔴 au premier passage même s'il avait cliqué la veille — jusqu'à 7
+#: sur Agency d'après la simulation du 31/10. Le 🔴 attend donc JOURS_CLICS_SALON
+#: jours d'activité réellement notée, comptés depuis cette date.
+#: 1793487600 = 01/11/2026 00:00 heure de Paris (UTC+1, heure d'hiver).
+COULEUR_DEPUIS: Dict[str, float] = {"1445108485090971710": 1793487600,   # TRUST TWITTER
+                                    AGENCY_IG_ID: 1793487600}            # TRUST INSTAGRAM
 
 
 _ACTIVITE: Dict[str, float] = {}
@@ -639,7 +658,8 @@ def noter_activite(gid: str, uid: str, quand: Optional[float] = None) -> None:
 
 
 def noter_clic(charge: Dict[str, Any]) -> None:
-    """Un clic reçu par la route des interactions (Bowser sur Threads)."""
+    """Un clic reçu par la route des interactions (Threads, Twitter et TRUST
+    INSTAGRAM y envoient tous leurs boutons)."""
     try:
         u = ((charge.get("member") or {}).get("user") or charge.get("user") or {})
         if not u.get("bot"):
@@ -737,7 +757,10 @@ def rond_du_va(gid: str, uid: str, clics: Optional[Dict[str, int]],
     lid = str(l.get("link_id") or "")
     if not lid:
         delai = JOURS_CLICS_SALON * 86400
-        ouvert = float((fiche or {}).get("ouvert") or 0)
+        # rien n'était noté avant la mise en service (COULEUR_DEPUIS) : le
+        # silence d'avant ne compte pas
+        ouvert = max(float((fiche or {}).get("ouvert") or 0),
+                     float(COULEUR_DEPUIS.get(str(gid), 0)))
         if (time.time() - ouvert >= delai
                 and time.time() - derniere_activite(gid, uid) >= delai):
             return ROND_ABSENT
@@ -774,8 +797,25 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
     clics = _clics_recents(gid) if colorer else None
     if colorer:
         import liens_va as lv
-        if any(not (lv.lien_de(gid, u) or {}).get("link_id") for u in fiches):
-            # un VA sans lien peut passer au rouge : qui a écrit, et où
+        avec_lien = sum(1 for u in fiches if (lv.lien_de(gid, u) or {}).get("link_id"))
+        if clics == {} and avec_lien:
+            # GetMySocial a dit « ok » sans une seule ligne alors que des liens
+            # existent : une réponse creuse, pas « zéro visite partout ». Relevé
+            # dans le journal de Threads le 31/10/2026 : 9 salons passés 🟠
+            # d'un coup, remis 🟢 au passage suivant — deux renommages pour
+            # rien chacun (Discord n'en permet que deux par dix minutes) ; sur
+            # Twitter, c'en serait 25. Lu comme illisible.
+            print(f"[ticket] {gid} : visites des liens vides alors que {avec_lien} VA "
+                  "ont un lien — lu comme illisible, pastilles laissées telles quelles",
+                  flush=True)
+            clics = None
+        if (avec_lien < len(fiches)
+                and time.time() - COULEUR_DEPUIS.get(gid, 0) >= JOURS_CLICS_SALON * 86400):
+            # un VA sans lien peut passer au rouge : qui a écrit, et où. Pas
+            # pendant le délai de grâce : rond_du_va ne peut rendre aucun 🔴,
+            # et relire ~80 salons toutes les 30 min retardait le podium de
+            # hh:00, qui tourne dans le même fil. Le premier passage après le
+            # délai relit les deux derniers jours, rien n'est perdu.
             _relire_messages(gid, salons)
     for uid, f in fiches.items():
         if len(bilan["renommes"]) >= max_par_tour:
@@ -809,31 +849,151 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
     return bilan
 
 
-#: Les serveurs dont les salons de VA sont rangés par pastille, puis par
-#: numéro, dans chaque catégorie de manager. Propriétaire, 13/10/2026 :
-#: « propose-moi quelque chose pour trier tout le monde » — choisi : 🟢 en
-#: haut, puis 🟠, puis 🔵, et à couleur égale le numéro du VA.
-TRI_SALONS = {"1498948161039896586"}             # YouLab THREADS
+#: Les serveurs dont les salons de VA sont rangés dans chaque catégorie de
+#: manager. Propriétaire, 13/10/2026 : « propose-moi quelque chose pour trier
+#: tout le monde » — choisi : 🟢 en haut, puis 🟠, puis 🔵, et à couleur égale
+#: le numéro du VA. Puis, le 31/10/2026, sur Twitter et TRUST INSTAGRAM aussi :
+#: « et mets en avant qui bosse et ceux qui font le plus de subs, tu vois comme
+#: ça on les voit en premier ». À pastille égale, donc : la valeur de la
+#: semaine (celle du podium : abonnés sur Twitter et Agency, clics US+UK sur
+#: Threads), puis celle de la quinzaine — la semaine repart à 0 le lundi, et
+#: tout le monde y serait à égalité —, puis le numéro, puis le nom (_cle_tri).
+#: Va IG n'est pas ici : ses salons ne sont pas des tickets de ce module.
+TRI_SALONS = {"1498948161039896586",             # YouLab THREADS
+              "1445108485090971710",             # TRUST TWITTER
+              AGENCY_IG_ID}                      # TRUST INSTAGRAM (Agency)
 ORDRE_RONDS = (ROND_CLICS, ROND_RIEN, ROND_LA, ROND_ABSENT)
 
 
-def _cle_tri(nom: str):
-    """(rang de la pastille, numéro, nom) d'un salon de VA « ─│🟢┤-61-va-＠x »."""
+def _cle_tri(nom: str, semaine: int = 0, quinzaine: int = 0, numero: int = 0):
+    """(rang de la pastille, -valeur de la semaine, -valeur de la quinzaine,
+    numéro, nom) d'un salon de VA « ─│🟢┤-61-va-＠x ». Le numéro est celui de
+    la fiche du lien, sinon celui du nom : Twitter n'en a pas dans ses noms.
+    Sans valeurs (pas de relevé), l'ordre d'avant : pastille, puis numéro."""
     i = nom.find(f"-va-{AROBASE}")
     tete = nom[:i] if i >= 0 else nom
     j = tete.find(BARRE)
     rond = tete[len(PREFIXE):j] if tete.startswith(PREFIXE) and j > 0 else ""
     rang = ORDRE_RONDS.index(rond) if rond in ORDRE_RONDS else len(ORDRE_RONDS)
     m = re.search(r"-(\d+)$", tete)
-    return (rang, int(m.group(1)) if m else 10 ** 6, nom)
+    n = int(numero or 0) or (int(m.group(1)) if m else 0) or 10 ** 6
+    return (rang, -int(semaine or 0), -int(quinzaine or 0), n, nom)
+
+
+# Ce que _valeurs_tri a dit au journal, par serveur : redit seulement quand ça
+# change, sinon une ligne toutes les 30 minutes que plus personne ne lit.
+_TRI_DITS: Dict[str, str] = {}
+
+
+def _valeurs_podium(garde: Any, cle: str, debut: str, quoi: str,
+                    notes: List[str]) -> Dict[int, int]:
+    """{numéro du VA: valeur} du dernier relevé que le podium a gardé
+    (`garde` : vivants[gid] ou subs[gid] de data/podium.json). Vide si ce
+    relevé est celui d'une période finie : le lundi matin, vivants[gid] porte
+    encore la semaine d'avant jusqu'au podium de 09h, et pour le propriétaire
+    la semaine repart à 0 le lundi. Ce qui est écarté est compté dans `notes`."""
+    if not isinstance(garde, dict) or not garde:
+        notes.append(f"{quoi} : aucun relevé")
+        return {}
+    periode = str(garde.get(cle) or "")
+    if periode and periode != debut:
+        notes.append(f"{quoi} : relevé du {periode}, période finie, comptée 0")
+        return {}
+    out: Dict[int, int] = {}
+    autres, illisibles, doublons = 0, 0, []
+    for x in ((garde.get("dernier") or {}).get("lignes") or []):
+        if not isinstance(x, dict):
+            illisibles += 1
+            continue
+        # comptes internes, VA de Youl4b chez Agency (« youl4b »), VA de Va IG
+        # (« cle_ig ») et de Twitter (« jessye ») chez Threads : leurs numéros
+        # sont ceux d'un autre registre, et tomberaient sur des VA d'ici
+        if any(x.get(k) for k in ("interne", "youl4b", "cle_ig", "jessye")):
+            autres += 1
+            continue
+        try:
+            n, v = int(x.get("numero") or 0), int(x.get("clics") or 0)
+        except (TypeError, ValueError):
+            illisibles += 1
+            continue
+        if n <= 0:
+            illisibles += 1
+            continue
+        if n in out:
+            # deux lignes pour un numéro : la plus haute, et c'est dit
+            doublons.append(n)
+            v = max(v, out[n])
+        out[n] = v
+    dits = [t for n, t in ((autres, f"{autres} ligne(s) hors VA du serveur"),
+                           (illisibles, f"{illisibles} ligne(s) illisible(s)"),
+                           (doublons, f"numéros en double {sorted(set(doublons))[:10]}"))
+            if n]
+    if dits:
+        notes.append(f"{quoi} : " + ", ".join(dits))
+    return out
+
+
+def _valeurs_tri(gid: str) -> Dict[str, Tuple[int, int, int]]:
+    """{identifiant du salon: (valeur de la semaine, de la quinzaine, numéro du
+    VA)} pour chaque ticket du serveur. AUCUN appel réseau : les chiffres du
+    dernier relevé du podium (data/podium.json, refait chaque heure), reliés au
+    salon par la fiche du ticket (uid) puis la fiche de son lien (numéro). Un
+    VA sans lien, ou absent du relevé, vaut 0 ; un relevé illisible aussi —
+    le numéro de la fiche reste, Twitter n'en a pas d'autre. {} si les fiches
+    sont illisibles : le tri retombe alors sur pastille et numéro du nom."""
+    gid = str(gid)
+    notes: List[str] = []
+    sem: Dict[int, int] = {}
+    quin: Dict[int, int] = {}
+    try:
+        import podium_discord as pod
+        d = pod._etat() or {}
+        sem = _valeurs_podium((d.get("vivants") or {}).get(gid), "semaine",
+                              pod.semaine_en_cours()[0].isoformat(), "semaine", notes)
+        quin = _valeurs_podium((d.get("subs") or {}).get(gid), "saison",
+                               pod.saison_en_cours()[0].isoformat(), "quinzaine", notes)
+    except Exception as e:                                   # noqa: BLE001
+        sem, quin = {}, {}
+        notes.append(f"relevé du podium illisible ({type(e).__name__}: {e}), tout le monde à 0")
+    try:
+        import liens_va as lv
+        out: Dict[str, Tuple[int, int, int]] = {}
+        relies = set()
+        for k, f in (_etat().get("tickets") or {}).items():
+            if not str(k).startswith(f"{gid}:") or not isinstance(f, dict) or not f.get("salon"):
+                continue
+            uid = str(k).split(":", 1)[1]
+            try:
+                n = int((lv.lien_de(gid, uid) or {}).get("numero") or 0)
+            except (TypeError, ValueError):
+                n = 0
+            out[str(f["salon"])] = (sem.get(n, 0), quin.get(n, 0), n)
+            if n:
+                relies.add(n)
+        sans = sorted((set(sem) | set(quin)) - relies)
+        if sans:
+            # VA partis, comptes sans ticket ici : leur chiffre ne classe personne
+            notes.append(f"{len(sans)} VA du relevé sans salon de ticket ici "
+                         f"(VA {', '.join(map(str, sans[:10]))})")
+        dit = "; ".join(notes)
+        if _TRI_DITS.get(gid) != dit:
+            _TRI_DITS[gid] = dit
+            if dit:
+                print(f"[ticket] {gid} : valeurs du tri : {dit}", flush=True)
+        return out
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] {gid} : fiches du tri illisibles ({type(e).__name__}: {e}) "
+              "— tri à la pastille et au numéro du nom", flush=True)
+        return {}
 
 
 def trier_salons(gid: str) -> Dict[str, Any]:
     """Range les salons de VA de chaque catégorie (TRI_SALONS) : pastille,
-    puis numéro. Les places déjà occupées par ces salons sont redistribuées
-    entre eux (les autres salons ne bougent pas), en UN appel pour tout le
-    serveur, et seulement si l'ordre a changé — les positions ne comptent
-    pas dans la limite des renommages."""
+    puis valeur de la semaine, de la quinzaine, puis numéro (_cle_tri). Les
+    places déjà occupées par ces salons sont redistribuées entre eux (les
+    autres salons ne bougent pas), en UN appel pour tout le serveur, et
+    seulement si l'ordre a changé — les positions ne comptent pas dans la
+    limite des renommages."""
     gid = str(gid)
     bilan: Dict[str, Any] = {"categories": [], "rates": []}
     if gid not in TRI_SALONS:
@@ -851,10 +1011,12 @@ def trier_salons(gid: str) -> Dict[str, Any]:
                 and f"-va-{AROBASE}" in str(c.get("name") or "")
                 and str(c.get("name") or "").startswith(PREFIXE)):
             groupes.setdefault(str(c["parent_id"]), []).append(c)
+    vals = _valeurs_tri(gid) if groupes else {}
     changes: List[Dict[str, Any]] = []
     for cid, enfants in groupes.items():
         actuel = sorted(enfants, key=_rang)
-        voulu = sorted(enfants, key=lambda c: _cle_tri(str(c.get("name") or "")))
+        voulu = sorted(enfants, key=lambda c: _cle_tri(str(c.get("name") or ""),
+                                                       *vals.get(str(c["id"]), (0, 0, 0))))
         if [str(c["id"]) for c in actuel] == [str(c["id"]) for c in voulu]:
             continue
         places = sorted(int(c.get("position") or 0) for c in enfants)
@@ -869,7 +1031,8 @@ def trier_salons(gid: str) -> Dict[str, Any]:
     code, rep = _api("PATCH", f"/guilds/{gid}/channels", json=changes)
     if code not in (200, 204):
         bilan["rates"].append(f"ordre refusé (HTTP {code}) {str(rep)[:80]}")
-    print(f"[ticket] {gid} : salons triés (pastille, numéro) : {bilan}", flush=True)
+    print(f"[ticket] {gid} : salons triés (pastille, semaine, quinzaine, numéro) : {bilan}",
+          flush=True)
     return bilan
 
 
@@ -2369,6 +2532,8 @@ def suivre_partout() -> Dict[str, Any]:
             except Exception as e:
                 print(f"[ticket] {gid} : accueils : {type(e).__name__}: {e}", flush=True)
         _synchro_liens(gid, sur_serveur)
+        # Twitter et TRUST INSTAGRAM : pastilles et tri sans la synchro des liens
+        _couleurs_et_tri(gid, sur_serveur)
         _couper_seren(gid)
         # 🧪 / 🌱 / ⭐ posés à la main dans Discord : la fiche et le menu suivent
         if gid in NIVEAUX_ICI:
@@ -2482,6 +2647,37 @@ def _synchro_liens(gid: str, sur_serveur) -> None:
             threading.Thread(target=_variantes, daemon=True).start()
     except Exception as e:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
+
+
+# Pastilles et tri des salons sur Twitter et TRUST INSTAGRAM (31/10/2026,
+# propriétaire : « on avait parlé d'un côté couleur pour savoir si les mecs
+# bossent ou pas », « mets en avant qui bosse et ceux qui font le plus de
+# subs »). Pas par _synchro_liens : elle refait aussi liens_va.synchroniser,
+# que la boucle du podium (web_upload._sync_liens_va) fait déjà pour eux —
+# deux fois l'outil GetMySocial, limité en débit. Leur chrono à eux, au même
+# rythme (SYNCHRO_LIENS_S) ; une lecture GetMySocial par passage et par serveur.
+_COULEURS_VUE: Dict[str, float] = {}
+
+
+def _couleurs_et_tri(gid: str, sur_serveur) -> None:
+    gid = str(gid)
+    if gid in SYNCHRO_LIENS_ICI or gid not in (COULEUR_DANS_SALON | TRI_SALONS):
+        return                         # Threads garde son chemin (_synchro_liens)
+    if time.time() - _COULEURS_VUE.get(gid, 0) < SYNCHRO_LIENS_S:
+        return
+    _COULEURS_VUE[gid] = time.time()
+    # chacun son try : dans _synchro_liens, une panne des pastilles privait
+    # aussi le serveur de son tri pendant 30 minutes
+    try:
+        with sur_serveur(gid):
+            numeroter_salons(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] {gid} : couleurs/tri : pastilles : {type(e).__name__}: {e}", flush=True)
+    try:
+        with sur_serveur(gid):
+            trier_salons(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] {gid} : couleurs/tri : ordre : {type(e).__name__}: {e}", flush=True)
 
 
 # Les accueils ouverts AVANT que Threads ait ses liens (13/10/2026) n'ont pas

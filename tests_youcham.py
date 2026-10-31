@@ -24,6 +24,9 @@ d'écrit dans data/) :
      de cogs.telechargement lu par un autre module existe.
   7. Sur un serveur US, vasort et vaactivity ne prennent aucun salon va-…
      pour celui d'un VA (va-managers, vu par Rem administrateur sur YouCham).
+  8. Sur Va IG, vasort range chaque catégorie par pastille (🟢 🟠 🔵 🔴), puis
+     subs de la semaine, puis de la quinzaine, puis numéro (31/10/2026) ; les
+     subs viennent des fichiers du podium, faux ici (rien de lu dans data/).
 
 Lancer depuis la racine du dépôt : python tests_youcham.py
 """
@@ -669,6 +672,117 @@ finally:
     gf.enabled = _enabled
 check("vaactivity : YouCham avec « statut » actif, va-managers n'est pas renommé",
       not g7d.renommes and _st.get("found") == 0, (_st, g7d.renommes))
+
+
+# ═════════════════════════════ 8. Va IG : pastille, puis subs, puis numéro ══
+# Propriétaire, 31/10/2026 : « mets en avant qui bosse et ceux qui font le
+# plus de subs, tu vois comme ça on les voit en premier ». Avant, à pastille
+# égale, l'ordre était alphabétique, et un 🔵 (arrivant) passait sous les 🔴.
+print("8. Va IG : pastille, puis subs de la semaine, de la quinzaine, puis numéro")
+import liens_fr  # noqa: E402
+
+check("vasort : 🔵 entre 🟠 et 🔴 (un arrivant ne passe plus sous les 🔴)",
+      sorted(["🔴-1-va-a", "🔵-2-va-b", "🟢-3-va-c", "🟠-4-va-d"], key=vs._sort_key)
+      == ["🟢-3-va-c", "🟠-4-va-d", "🔵-2-va-b", "🔴-1-va-a"])
+check("vasort : à pastille égale, plus de subs d'abord (semaine, puis quinzaine)",
+      sorted([("🟢-2-va-a", (0, 0)), ("🟢-9-va-b", (5, 0)), ("🟢-4-va-c", (0, 40)),
+              ("🟢-3-va-d", (5, 60))], key=lambda x: vs._sort_key(*x))
+      == [("🟢-3-va-d", (5, 60)), ("🟢-9-va-b", (5, 0)), ("🟢-4-va-c", (0, 40)),
+          ("🟢-2-va-a", (0, 0))])
+check("vasort : la pastille passe avant les subs (un 🟠 à 99 subs reste sous un 🟢 à 0)",
+      vs._sort_key("🟢-8-va-a", (0, 0)) < vs._sort_key("🟠-1-va-b", (99, 99)))
+check("vasort : sans subs, le numéro puis le pseudo (un salon sans numéro après)",
+      sorted(["🟢-va-zz", "🟢-12-va-aa", "🟢-3-va-mm"], key=vs._sort_key)
+      == ["🟢-3-va-mm", "🟢-12-va-aa", "🟢-va-zz"])
+
+g8 = _G7(VA_IG)
+cat8 = _C7(g8, "👤 Amelia")
+_S7(g8, "général", cat8)
+s8 = {n: _S7(g8, n, cat8) for n in (
+    "🔴-1-va-rouge", "🟢-2-va-zero", "🟢-3-va-quinz", "🔵-4-va-neuf",
+    "🟢-5-va-semaine", "🟢-6-va-deux", "🟠-7-va-orange", "🟢-8-va-orphelin")}
+_ids8 = {n: c.id for n, c in s8.items()}
+_users8 = {"801": {"channel_id": _ids8["🟢-5-va-semaine"]},
+           "802": {"channel_id": str(_ids8["🟢-3-va-quinz"])},
+           "803": {"channel_id": _ids8["🟢-2-va-zero"]},
+           # un salon revendiqué par deux fiches : rattaché à personne
+           "804": {"channel_id": _ids8["🟢-6-va-deux"]},
+           "805": {"channel_id": _ids8["🟢-6-va-deux"]},
+           "806": {"channel_id": _ids8["🟠-7-va-orange"]},
+           "807": {"channel_id": _ids8["🔴-1-va-rouge"]}}
+_liens8 = {"liens": {"801:amelia": {"numero": 5}, "801:emma": {"numero": 12},
+                     "802:amelia": {"numero": 3}, "804:amelia": {"numero": 6},
+                     "806:amelia": {"numero": 7}, "807:amelia": {"numero": 1}}}
+_podium8 = {
+    "vivants": {str(VA_IG): {"semaine": vs._lundi_paris(), "dernier": {"lignes": [
+        {"va": "Amelia VA 5", "numero": 5, "clics": 2, "model": "amelia"},
+        {"va": "Emma VA 12", "numero": 12, "clics": 3, "model": "emma"},
+        {"va": "Amelia VA 6", "numero": 6, "clics": 50, "model": "amelia"},
+        {"va": "Amelia VA 7", "numero": 7, "clics": 80, "model": "amelia"},
+        {"va": "Amelia VA 99", "numero": 99, "clics": 4, "model": "amelia"},
+        {"va": "VA 41", "numero": 41, "clics": 70, "interne": True}]}}},
+    "subs": {str(VA_IG): {"saison": "2026-10-16", "dernier": {"lignes": [
+        {"va": "Amelia VA 3", "numero": 3, "clics": 30, "model": "amelia"},
+        {"va": "Amelia VA 5", "numero": 5, "clics": 1, "model": "amelia"},
+        {"va": "Amelia VA 1", "numero": 1, "clics": 90, "model": "amelia"}]}}}}
+_lus8 = []
+
+
+def _faux_load8(chemin, default=None):
+    _lus8.append(pathlib.Path(chemin).name)
+    return {"users.json": _users8, "podium.json": _podium8}.get(pathlib.Path(chemin).name, default)
+
+
+_vrai_sj, _vrai_etat_fr = vs.safe_json, liens_fr._etat
+vs.safe_json = types.SimpleNamespace(load=_faux_load8)
+liens_fr._etat = lambda: _liens8
+try:
+    _t8 = vs._subs_par_salon(g8)
+    _t8b, _b8s = vs._lire_subs(g8, vs._salons_va(g8))
+    courir(vs.sort_guild(g8))
+    g7e, _ = _suivi(YOUCHAM, avec_sep=False)
+    _lus8_avant = list(_lus8)
+    courir(vs.sort_guild(g7e))
+    _lus8_us = _lus8[len(_lus8_avant):]
+    _t8_vieux, _b8_vieux = vs._subs_par_uid(
+        dict(_podium8, vivants={str(VA_IG): dict(_podium8["vivants"][str(VA_IG)],
+                                                 semaine="2026-10-19")}),
+        _liens8["liens"], liens_fr.MODELS, lundi="2026-10-26")
+    _t8_tout, _b8 = vs._subs_par_uid(_podium8, _liens8["liens"], liens_fr.MODELS,
+                                     lundi=vs._lundi_paris())
+finally:
+    vs.safe_json, liens_fr._etat = _vrai_sj, _vrai_etat_fr
+
+check("subs : un VA additionne toutes ses models (Amelia 2 + Emma 3 = 5 ; quinzaine 1)",
+      _t8.get(_ids8["🟢-5-va-semaine"]) == (5, 1), _t8)
+check("subs : la quinzaine seule, la semaine à 0 ; un VA sans subs à (0, 0)",
+      _t8.get(_ids8["🟢-3-va-quinz"]) == (0, 30) and _t8.get(_ids8["🟢-2-va-zero"]) == (0, 0),
+      _t8)
+check("subs : salon revendiqué par deux fiches → à personne (pas les 50 de l'une), et dit",
+      _ids8["🟢-6-va-deux"] not in _t8 and _b8s["deux_fiches"] == ["🟢-6-va-deux"]
+      and "804" in _b8s["subs_sans_salon"], (_t8, _b8s))
+check("subs : salons sans propriétaire comptés, pas ignorés",
+      sorted(_b8s["sans_proprietaire"]) == sorted(["🔵-4-va-neuf", "🟢-8-va-orphelin"])
+      and _b8s["salons"] == 8, _b8s)
+check("subs : ligne interne écartée et comptée, ligne sans fiche comptée",
+      _b8["internes"] == ["VA 41"] and _b8["sans_fiche"] == ["Amelia VA 99"], _b8)
+check("subs : seuls users.json et podium.json sont lus (liens_fr._etat à part)",
+      sorted(set(_lus8)) == ["podium.json", "users.json"], _lus8)
+check("subs : relevé d'une semaine finie (lundi avant le podium) → semaine comptée 0",
+      _t8_vieux.get("801") == [0, 1] and _b8_vieux["semaine_passee"] == "2026-10-19",
+      (_t8_vieux, _b8_vieux))
+_pos8 = {c.id: c.position for c in cat8.text_channels}
+for _p in g8._state.http.appels:
+    for _x in (_p if isinstance(_p, list) else []):
+        _pos8[_x["id"]] = _x["position"]
+_ordre8 = [c.name for c in sorted(cat8.text_channels, key=lambda c: _pos8[c.id])]
+check("vasort : Va IG rangé — 🟢 par subs (semaine, quinzaine), puis numéro ; 🟠, 🔵, 🔴 ensuite",
+      _ordre8 == ["général", "🟢-5-va-semaine", "🟢-3-va-quinz", "🟢-2-va-zero",
+                  "🟢-6-va-deux", "🟢-8-va-orphelin", "🟠-7-va-orange", "🔵-4-va-neuf",
+                  "🔴-1-va-rouge"], _ordre8)
+check("vasort : Va IG, un seul appel groupé, aucun séparateur créé",
+      len(g8._state.http.appels) == 1 and not g8.crees, (g8._state.http.appels, g8.crees))
+check("vasort : hors Va IG, aucun fichier de subs lu", _lus8_us == [], _lus8_us)
 
 # ═════════════════════════════════════════════════════ isolation ══
 check("isolation : rien écrit ni modifié dans data/", _instantane() == AVANT)
