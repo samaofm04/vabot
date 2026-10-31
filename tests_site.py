@@ -2250,6 +2250,13 @@ try:
     _cCa = _aCa.test_client()
     with _cCa.session_transaction() as _s:
         _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "CA1"
+    # La bibliotheque du test dans un dossier a part : ce test casse le
+    # fichier expres (« {casse ») puis retire ses entrees. Sur le vrai
+    # data/captions.json, lance dans le dossier de prod du VPS le 23/10/2026,
+    # il a laisse « {} » : les 86 captions des VA perdues.
+    import tempfile as _tfCa
+    _savCFCa = _wCa.CAPTIONS_FILE
+    _wCa.CAPTIONS_FILE = _plCa.Path(_tfCa.mkdtemp(prefix="tst_captions_")) / "captions.json"
     _idCa = _plCa.Path("data/identities/_tst_captions")
     _shCa.rmtree(_idCa, ignore_errors=True)
     (_idCa / "brutes").mkdir(parents=True)
@@ -2265,7 +2272,7 @@ try:
                                            "data": _jsCa.dumps(_blk)})
     check("captions : save ok", _r.status_code == 200 and (_r.get_json() or {}).get("ok"),
           f"http {_r.status_code} {_r.get_data(as_text=True)[:80]}")
-    _fCa = _plCa.Path("data/captions.json")
+    _fCa = _wCa.CAPTIONS_FILE
     check("captions : ecrit sur disque (atomique, pas de .tmp residuel)",
           _fCa.exists() and not list(_fCa.parent.glob("captions.json*.tmp")))
     _j = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
@@ -2927,23 +2934,18 @@ try:
 
     _wCa._load_web_users = _savCa
     _shCa.rmtree(_idCa, ignore_errors=True)
-    # nettoie les entrees de test de data/captions.json
-    try:
-        _lib = _jsCa.loads(_fCa.read_text(encoding="utf-8"))
-        _oteCa = False
-        if isinstance(_lib, dict):
-            for _kCa in ("_tst_captions", "_tst_captions2", "_tst_captions_plein"):
-                if _lib.pop(_kCa, None) is not None:
-                    _oteCa = True
-        if _oteCa:
-            _wCa.safe_json.write(_fCa, _lib, indent=2)
-            _wCa._invalidate_json_cache(_fCa)
-    except Exception:
-        pass
+    check("captions : le vrai data/captions.json n'a jamais ete touche",
+          _savCFCa != _fCa and "_tst_captions" not in (
+              _wCa.safe_json.load(_savCFCa, default={}) or {}))
 except Exception as _e:
     import traceback as _tbCa
     _tbCa.print_exc()
     check("captions : testable", False, repr(_e)[:120])
+finally:
+    # seulement le dossier temporaire du test, jamais celui de data/
+    if "_savCFCa" in globals() and _wCa.CAPTIONS_FILE.parent.name.startswith("tst_captions_"):
+        _shCa.rmtree(_wCa.CAPTIONS_FILE.parent, ignore_errors=True)
+        _wCa.CAPTIONS_FILE = _savCFCa
 
 print()
 print("=" * 70)
@@ -7472,7 +7474,13 @@ try:
         _wR.safe_json.write(_plR.Path("data/identity_order.json"), [_N, "autre"])
         _wR.safe_json.write(_plR.Path("data/fav_brutes.json"), {_N + "|reels|a.mp4": 1})
         # Les cinq trous que la cartographie a trouves apres coup.
-        _wR.safe_json.write(_plR.Path("data/captions.json"), {_N: ["une caption"]})
+        # AJOUTEE a la bibliotheque, jamais a sa place : ecraser le vrai
+        # fichier par une seule identite est ce que safe_json refuse depuis
+        # l'effacement du 23/10/2026 (le finally remet le texte d'origine).
+        _libR = _wR.safe_json.load(_plR.Path("data/captions.json"), default={})
+        _libR = _libR if isinstance(_libR, dict) else {}
+        _libR[_N] = {"items": [{"id": "c1", "text": "une caption"}]}
+        _wR.safe_json.write(_plR.Path("data/captions.json"), _libR)
         _wR.safe_json.write(_plR.Path("data/scrape_identites.json"),
                             {"actives": [_N, "jessye"], "modifie": 1})
         _wR.safe_json.write(_plR.Path("data/gdrive_sync_state.json"),
@@ -34175,7 +34183,10 @@ try:
         # 7. « RETIRER » NE SUPPRIME JAMAIS LA CAPTION DU PROPRIETAIRE
         # =================================================================
         _fxRemise()
-        safe_json.write(_fxW.CAPTIONS_FILE, {})
+        # Bibliotheque DU TEST remise a zero en retirant le fichier : safe_json
+        # refuse d'effacer d'un coup les captions de deux identites (23/10/2026).
+        for _fxCp in (_fxW.CAPTIONS_FILE, _fxW.CAPTIONS_FILE.with_suffix(".json.prev")):
+            _fxCp.unlink(missing_ok=True)
         _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
         _fxAa = "7 texts that make her want you baddd😱"
         _fxA8 = {"sc": "FxFlou", "vues": 1, "identite": "fx_mod", "identite_sure": True,
@@ -38159,6 +38170,61 @@ try:
 except Exception as _eS:
     import traceback as _tbS
     check("types de story : testable", False, (repr(_eS) + _tbS.format_exc()[-400:])[:600])
+
+print()
+print("=" * 70)
+print("Captions : jamais effacees d'un coup (safe_json, 23/10/2026)")
+print("=" * 70)
+try:
+    import safe_json as _sjE
+    import tempfile as _tfE
+    _dE = pathlib.Path(_tfE.mkdtemp(prefix="tst_garde_captions_"))
+    _fE = _dE / "captions.json"
+
+    def _blocE(*textes):
+        return {"font": "Strong", "items": [{"id": f"c{i}", "text": t} for i, t in enumerate(textes)]}
+
+    _libE = {"lola": _blocE("a", "b"), "julia": _blocE("c"), "brune": _blocE("d", "e"),
+             "vide": _blocE("   ")}
+    check("garde : une bibliotheque s'ecrit", _sjE.write(_fE, _libE) is True)
+    _avantE = _fE.read_text(encoding="utf-8")
+    check("garde : « {} » par-dessus est REFUSE, le fichier reste intact",
+          _sjE.write(_fE, {}) is False and _fE.read_text(encoding="utf-8") == _avantE)
+    check("garde : une seule identite gardee sur trois : refuse",
+          _sjE.write(_fE, {"lola": _libE["lola"]}) is False
+          and _fE.read_text(encoding="utf-8") == _avantE)
+    check("garde : un texte qui n'est plus une bibliotheque : refuse",
+          _sjE.write_text(_fE, "[]") is False and _fE.read_text(encoding="utf-8") == _avantE)
+    _unE = dict(_libE); _unE.pop("julia")
+    check("garde : retirer UNE identite passe", _sjE.write(_fE, _unE) is True)
+    _renE = dict(_unE); _renE["brunette"] = _renE.pop("brune")
+    check("garde : renommer une identite passe", _sjE.write(_fE, _renE) is True)
+    _videE = dict(_renE); _videE["lola"] = _blocE()
+    check("garde : vider la liste d'UNE identite passe", _sjE.write(_fE, _videE) is True)
+    _tstE = dict(_videE)
+    _tstE.update({"_tst_a": _blocE("x"), "_tst_b": _blocE("y")})
+    _sjE.write(_fE, _tstE)
+    check("garde : les identites _tst partent ensemble (tests)", _sjE.write(_fE, _videE) is True)
+    # fichier casse : la comparaison se fait sur .prev
+    _sjE.write(_fE, _libE)
+    _sjE.write(_fE, _libE)
+    _fE.write_text("{casse", encoding="utf-8")
+    check("garde : fichier illisible, une identite seule par-dessus : refuse (compare au .prev)",
+          _sjE.write(_fE, {"lola": _libE["lola"]}) is False)
+    check("garde : fichier illisible, la bibliotheque entiere repasse",
+          _sjE.write(_fE, _libE) is True)
+    # les autres fichiers ne sont pas concernes
+    _nE = _dE / "noctus" / "captions.json"
+    _sjE.write(_nE, [{"label": "a"}, {"label": "b"}])
+    check("garde : la liste de Noctus (autre format) s'ecrit librement",
+          _sjE.write(_nE, []) is True)
+    check("garde : un autre fichier n'est jamais compare",
+          _sjE.write(_dE / "autre.json", _libE) is True and _sjE.write(_dE / "autre.json", {}) is True)
+    _shutil_E = __import__("shutil")
+    _shutil_E.rmtree(_dE, ignore_errors=True)
+except Exception as _eE:
+    import traceback as _tbE
+    check("garde des captions : testable", False, (repr(_eE) + _tbE.format_exc()[-400:])[:600])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

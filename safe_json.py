@@ -51,13 +51,77 @@ def _is_cache(path: Path) -> bool:
     return any(h in n for h in _CACHE_HINTS)
 
 
+# ── La bibliothèque des captions (data/captions.json) ─────────────────────
+# Le 23/10/2026, tests_site.py lancé DANS le dossier de prod du VPS a réécrit
+# data/captions.json en « {} » : 86 captions de 17 identités perdues, .prev
+# compris, et « Reel + caption » répondait « Aucune caption active » partout
+# jusqu'au 31/10. Aucune action du site ne vide plus d'une identité à la fois
+# (retirer une identité, vider sa liste, la renommer) : une écriture qui fait
+# disparaître TOUTES les captions de CAPTIONS_EFFACEMENT_MAX identités ou plus
+# est refusée, et dite au journal. Ici, pas dans le site : tout le monde écrit
+# par safe_json (site, identite_admin, favoris, scripts, tests).
+_CAPTIONS_NOM = "captions.json"
+CAPTIONS_EFFACEMENT_MAX = 2
+#: Les identités de test se créent et s'effacent ensemble : hors du compte.
+_CAPTIONS_TEST = "_tst"
+
+
+def _identites_avec_captions(lib: Any):
+    """Les identités qui ont au moins une caption écrite, ou None si `lib`
+    n'est pas une bibliothèque {identité: {"items": [...]}} (celle de Noctus,
+    data/noctus/captions.json, est une liste)."""
+    if not isinstance(lib, dict):
+        return None
+    return {str(k) for k, b in lib.items()
+            if not str(k).startswith(_CAPTIONS_TEST) and isinstance(b, dict)
+            and isinstance(b.get("items"), list)
+            and any(isinstance(i, dict) and str(i.get("text") or "").strip()
+                    for i in b["items"])}
+
+
+def _captions_effacees(p: Path, text: str) -> list:
+    """Les identités dont `text` effacerait toutes les captions, comparé à
+    `p` (à son .prev si `p` est illisible). [] quand rien ne se compare."""
+    avant = None
+    for f in (p, p.with_suffix(p.suffix + ".prev")):
+        try:
+            avant = _identites_avec_captions(json.loads(f.read_text(encoding="utf-8")))
+            break
+        except (OSError, ValueError):
+            continue
+    if not avant:
+        return []
+    try:
+        apres = _identites_avec_captions(json.loads(text))
+    except ValueError:
+        apres = None
+    # un texte qui n'est plus une bibliothèque les efface toutes
+    return sorted(avant - (apres or set()))
+
+
 def write_text(path, text: str, backup: bool | None = None) -> bool:
     """Écrit `text` de façon ATOMIQUE. Retourne True si écrit.
 
     backup=None (défaut) : copie `.prev` sauf pour les fichiers de cache.
+    Refuse (False) une bibliothèque de captions qui en perdrait trop d'un
+    coup (voir plus haut).
     """
     p = Path(path)
     with _lock_for(p):
+        if p.name == _CAPTIONS_NOM:
+            try:
+                perdues = _captions_effacees(p, text)
+            except Exception as e:                           # noqa: BLE001
+                # le garde ne bloque jamais une écriture sur sa propre panne
+                print(f"[safe_json] garde des captions indisponible ({type(e).__name__}: {e})",
+                      flush=True)
+                perdues = []
+            if len(perdues) >= CAPTIONS_EFFACEMENT_MAX:
+                print(f"[safe_json] ALERTE {p} : écriture REFUSÉE, elle effaçait toutes les "
+                      f"captions de {len(perdues)} identités ({', '.join(perdues[:10])}"
+                      f"{'…' if len(perdues) > 10 else ''}) — fichier gardé tel quel",
+                      flush=True)
+                return False
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             if backup is None:
