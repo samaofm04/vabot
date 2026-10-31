@@ -1029,6 +1029,163 @@ try:
     check("branché dans le tour de chaque serveur à tickets (suivre_partout)",
           "ouvrir_tickets_verifies(gid)" in src16.split("def suivre_partout")[1])
 
+    # ══ 19. chacun son salon (salons_perso, 31/10/2026) ═══════════════════
+    # Propriétaire : « tout le monde doit avoir son salon » — samuel.0314,
+    # 🤝 Helper de TRUST TWITTER (ancien manager), n'en avait aucun.
+    print("\n— 19. chacun son salon : staff et anciens Vérifiés compris")
+    import salons_perso as sp
+    import verif_discord as _vd17
+    HELPER, CONF, BOSS, ATT = "710", "720", "730", "740"
+
+    def monde17():
+        f = monde()
+        f.liste_ouverte = True
+        f.roles += [{"id": HELPER, "name": "🤝 Helper"}, {"id": CONF, "name": "⭐ Confirmé"},
+                    {"id": BOSS, "name": "BOSS"}, {"id": ATT, "name": "⏳ En attente"}]
+        tk._CACHE_HELPER.clear()
+        base_twitter(f, avec_vector=False)           # YAZID (11) et MOAN (12)
+        for u in (YAZID, MOAN):
+            f.role(u, True)
+        with tk._VERROU:
+            d = tk._etat()
+            d["tickets"].update({f"{G}:201": {"salon": "301", "manager": YAZID},
+                                 f"{G}:202": {"salon": "302", "manager": MOAN}})
+            tk._ecrire_etat(d)
+        f.membres["201"]["roles"] += ["700", CONF]   # VA servis
+        f.membres["202"]["roles"] += ["700", ROLE_ESSAI]
+        f.membres["205"]["roles"] += [HELPER, "700", CONF]      # le Helper de la capture
+        f.membres["206"]["roles"] += ["700"]                   # Vérifié du premier passage
+        f.membres["207"]["roles"] += ["700", CONF]             # ⭐ sans salon
+        f.membres["208"]["roles"] += [BOSS, "700"]             # BOSS : oui, comme le staff
+        f.membres["209"]["roles"] += [ATT]                     # en attente : non
+        f.membre("299", "unbot")
+        f.membres["299"]["user"]["bot"] = True
+        f.membres["299"]["roles"] += ["700"]
+        return f
+
+    def postes(f):
+        """{salon créé: corps} et les rôles posés, lus dans les appels."""
+        crees = {}
+        for m, c, k in f.appels:
+            if m == "POST" and c.endswith("/channels") and (k.get("json") or {}).get("type", 0) == 0:
+                nom = (k.get("json") or {}).get("name")
+                crees[next(i for i, s in f.salons.items() if s.get("name") == nom)] = k["json"]
+        return crees
+
+    _sauve17 = _vd17.serveur
+    try:
+        _vd17.serveur = lambda gid=None: {"id": G, "role_verifie": "700",
+                                          "role_manager": ROLE_MGR}
+        f = monde17()
+        with calme():
+            b0 = sp.reparer_salons(G, ecrire=False)
+        check("essai à blanc : rien d'écrit, la liste de ce qui serait créé",
+              not f.ecritures() and sorted(x["pseudo"] for x in b0["a_creer"])
+              == ["moan_ofm", "va205", "va206", "va207", "va208", "yazid_ofm"], (f.ecritures(), b0))
+        f.appels.clear()
+        with calme():
+            b1 = sp.reparer_salons(G, max_par_tour=10)
+        crees = postes(f)
+        par_uid = {x["uid"]: x["salon"] for x in b1["crees"]}
+        check("un salon pour le Helper, le ⭐ et le Vérifié sans salon, BOSS et chaque manager "
+              "— rien pour ⏳ En attente, un bot, ni ceux qui ont déjà le leur",
+              sorted(par_uid) == sorted([YAZID, MOAN, "205", "206", "207", "208"])
+              and len(crees) == 6 and not b1["rates"], (b1, list(crees)))
+        roles_poses = [c for m, c, k in f.appels if m == "PUT" and "/roles/" in c]
+        check("🧪 Essai posé au seul Vérifié sans niveau (pas au Helper, ni au ⭐, ni à BOSS, "
+              "ni aux managers)",
+              roles_poses == [f"/guilds/{G}/members/206/roles/{ROLE_ESSAI}"], roles_poses)
+        s205 = f.salons[par_uid["205"]]
+        check("le salon du Helper : format d'un ticket, dans une catégorie de manager",
+              s205["name"] == "─│🔵┤-va-＠va205" and s205.get("parent_id") in ("11", "12")
+              and f.droits(par_uid["205"]).get("205", {}).get("allow") == str(tk.MEMBRE), s205)
+        s_y = f.salons[par_uid[YAZID]]
+        check("le salon d'un manager est dans SA catégorie, sans ligne de manager en double",
+              s_y.get("parent_id") == "11"
+              and f.droits(par_uid[YAZID]).get(YAZID, {}).get("allow") == str(tk.MEMBRE)
+              and f.salons[par_uid[MOAN]].get("parent_id") == "12", (s_y, f.droits(par_uid[YAZID])))
+        msgs = {c.split("/")[2]: k["json"] for m, c, k in f.appels
+                if m == "POST" and c.endswith("/messages")}
+        a205, a206, a208 = msgs[par_uid["205"]], msgs[par_uid["206"]], msgs[par_uid["208"]]
+        check("accueil du staff : « voici ton salon perso », lui seul mentionné ; un VA garde "
+              "« tu es confié à »",
+              a205["content"] == "<@205>" and a205["allowed_mentions"] == {"users": ["205"]}
+              and "voici ton salon perso" in a205["embeds"][0]["description"]
+              and "confié à" not in a205["embeds"][0]["description"]
+              and "tu es confié à <@" in a206["embeds"][0]["description"]
+              and a208["content"] == "<@208>", (a205, a206, a208))
+        check("fiches écrites dans tickets.json (le Helper : pas en essai)",
+              fiche("205").get("salon") == par_uid["205"] and fiche("205").get("essai") is False
+              and fiche("206").get("essai") is True and fiche(YAZID).get("manager") == YAZID,
+              (fiche("205"), fiche("206"), fiche(YAZID)))
+        f.appels.clear()
+        with calme():
+            b2 = sp.reparer_salons(G)
+        check("… et un second tour ne crée plus rien", not f.ecritures() and not b2["crees"]
+              and b2["servis"] == 8, (f.ecritures(), b2))
+
+        # salons supprimés à la main : comptés, dits une fois, jamais refaits
+        del f.salons[par_uid["207"]]
+        with tk._VERROU:
+            d = tk._etat()
+            d.setdefault("tickets_disparus", {})[f"{G}:206"] = dict(d["tickets"].pop(f"{G}:206"))
+            tk._ecrire_etat(d)
+        del f.salons[par_uid["206"]]
+        f.appels.clear()
+        sortie17 = io.StringIO()
+        with contextlib.redirect_stdout(sortie17):
+            b3 = sp.reparer_salons(G)
+            b3b = sp.reparer_salons(G)
+        check("salon supprimé à la main (fiche vivante ou rangée dans tickets_disparus) : "
+              "pas refait, et dit une seule fois",
+              not f.ecritures() and sorted(x["pseudo"] for x in b3["supprimes"]) == ["va206", "va207"]
+              and sortie17.getvalue().count("supprimé à la main") == 1, (f.ecritures(), b3, sortie17.getvalue()))
+        with calme():
+            nouveau = sp.refaire(G, "207")
+        check("refaire() : sur demande, le salon revient", nouveau and nouveau in f.salons
+              and fiche("207").get("salon") == nouveau, (nouveau, fiche("207")))
+
+        # un salon fait à la main sans fiche : pas de doublon
+        f = monde17()
+        f.ticket("350", "207", "12", MOAN, 3)
+        with calme():
+            b4 = sp.reparer_salons(G, max_par_tour=10)
+        check("salon fait à la main sans fiche : pas doublé, signalé",
+              "207" not in [x["uid"] for x in b4["crees"]]
+              and [x["salon"] for x in b4["sans_fiche"]] == ["350"], b4)
+
+        f = monde17()
+        with calme():
+            b5 = sp.reparer_salons(G)
+        check(f"au plus {sp.MAX_PAR_TOUR} salons par tour, le reste au suivant",
+              len(b5["crees"]) == sp.MAX_PAR_TOUR and len(b5["reportes"]) == 6 - sp.MAX_PAR_TOUR, b5)
+
+        f = monde17()
+        f.liste_ouverte = False
+        sortie17 = io.StringIO()
+        with contextlib.redirect_stdout(sortie17):
+            b6 = sp.reparer_salons(G)
+        check("liste des membres illisible : rien touché, et c'est dit",
+              not f.ecritures() and b6["ignore"] and "rien touché" in sortie17.getvalue(),
+              (b6, sortie17.getvalue()))
+        # Gone, de la liste fixe, a quitté TRUST INSTAGRAM : plus de nouveau VA
+        # pour lui, mais le suivi strict ne touche toujours à rien
+        f = monde(config={"managers": {G: [YAZID, "999"]}})
+        tk._CACHE.clear()
+        check("liste fixe : un manager qui n'est plus sur le serveur (404) ne reçoit plus "
+              "de nouveau VA ; une panne garde l'ancien comportement",
+              [tk._uid(m) for m in tk.managers(G, force=True)] == [YAZID]
+              and tk._membres_poses(G, [YAZID, "999"], strict=True) is None, tk.managers(G))
+        f.pannes.add("member:999")
+        check("… une panne (500) n'écarte personne",
+              sorted(tk._uid(m) for m in tk._membres_poses(G, [YAZID, "999"])) == ["101", "999"])
+    finally:
+        _vd17.serveur = _sauve17
+    src17 = (BOT / "tickets_discord.py").read_text(encoding="utf-8").split("def suivre_partout")[1]
+    check("branché dans suivre_partout, après les tickets des Vérifiés",
+          "salons_perso.reparer_salons(gid)" in src17
+          and src17.index("ouvrir_tickets_verifies(gid)") < src17.index("salons_perso.reparer_salons(gid)"))
+
     # ══ 13. branché dans la boucle du podium ══════════════════════════════
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")
     i0 = src.find("def _start_podium_semaine_daemon")

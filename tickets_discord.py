@@ -285,7 +285,7 @@ PAGE_MEMBRES = 1000         # le maximum que Discord rend par page
 PAGES_MAX = 50              # 50 000 membres : au-delà, on ne prétend plus savoir
 
 
-def _par_la_liste(gid: str, rid: str, strict: bool = False) -> Optional[List[Dict[str, Any]]]:
+def _par_la_liste(gid: str, rid: Optional[str], strict: bool = False) -> Optional[List[Dict[str, Any]]]:
     """Les membres via /guilds/{id}/members. None si Discord refuse (403).
 
     strict=True (suivi des catégories) lit TOUTES les pages : une seule page
@@ -325,6 +325,8 @@ def _par_la_liste(gid: str, rid: str, strict: bool = False) -> Optional[List[Dic
         # « pages » n'est pas effacé par un tour réussi (la recherche qui prend
         # le relais réussit) : sinon la même phrase reviendrait toutes les 10 min
         _dire(f"pages:{gid}", "")
+    if rid is None:                  # tout le serveur (salons_perso)
+        return tous
     return [m for m in tous if rid in (m.get("roles") or [])]
 
 
@@ -385,6 +387,12 @@ def _membres_poses(gid: str, poses: List[Any], strict: bool = False) -> Optional
             _dire(f"liste-detail:{gid}", f"{gid} : manager {u} de la liste fixe illisible "
                                          f"(HTTP {code}) — data/tickets_config.json à vérifier")
             return None
+        elif code == 404:
+            # Plus sur le serveur : Gone avait quitté TRUST INSTAGRAM et recevait
+            # encore un nouveau VA sur deux, dans une catégorie « Manager 1392… »
+            # (propriétaire, 31/10/2026 : « tout à Yoshiki »). Il reste dans la
+            # liste : le suivi strict, lui, ne touche toujours à rien.
+            continue
         else:
             out.append({"user": {"id": str(u)}})
     return out
@@ -1439,11 +1447,17 @@ def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) 
                "components": boutons_va(uid, confirme=confirme, a_un_lien=True, gid=gid)})
 
 
-def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None,
+                  essai: bool = True, staff: bool = False) -> str:
     """Confie le nouveau à un manager et lui ouvre son salon privé.
 
     Rend l'identifiant du salon, ou « » si rien n'a pu être fait — jamais une
     exception : l'appelant est la fin d'une vérification réussie.
+
+    `essai` False : le membre a déjà son niveau (⭐, 🌱), on ne lui remet pas
+    🧪. `staff` (Manager, Helper — salons_perso, 31/10/2026) : pas d'essai, un
+    manager reçoit son salon dans SA catégorie, et l'accueil ne dit pas « tu
+    es confié à ».
     """
     try:
         if cfg is None:
@@ -1469,17 +1483,20 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
             return str(deja["salon"])
 
         # avant le salon : s'il rate, le membre est quand même en essai
-        en_essai = poser_essai(gid, uid)
+        en_essai = poser_essai(gid, uid) if essai and not staff else False
 
         liste = managers(gid)
-        choisi = _prochain(gid, liste)
+        # un manager dans sa propre catégorie, comme johnmzn chez « Manager
+        # JOHN » : le tour de rôle l'aurait confié à un collègue
+        lui = next((m for m in liste if _uid(m) == uid), None) if staff else None
+        choisi = lui or _prochain(gid, liste)
         rid = role_manager(gid)
 
         parent = categorie_du_manager(gid, choisi) if choisi else ""
         droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)},
                   {"id": uid, "type": 1, "allow": str(MEMBRE), "deny": "0"}]
         droits += _droits_staff(rid, role_helper(gid))
-        if choisi:
+        if choisi and _uid(choisi) != uid:
             droits.append({"id": str((choisi.get("user") or {}).get("id")),
                            "type": 1, "allow": str(MANAGER), "deny": "0"})
 
@@ -1505,8 +1522,9 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
             "title": "👋 Bienvenue — voici ton espace perso",
             "color": 0x3B82F6,
             "description": (
-                f"<@{uid}>, tu es confié à {qui}.\n\n"
-                "**C'est ici que ça se passe :**\n"
+                (f"<@{uid}>, voici ton salon perso.\n\n" if staff
+                 else f"<@{uid}>, tu es confié à {qui}.\n\n")
+                + "**C'est ici que ça se passe :**\n"
                 "• tes questions,\n"
                 "• tes preuves et tes captures,\n"
                 "• la réclamation de tes bonus et de tes quêtes.\n\n"
@@ -1518,8 +1536,11 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         mentions = {"users": [uid] + ([mid] if mid else [])}
         if not mid and rid:
             mentions["roles"] = [rid]
+        if staff:                      # personne d'autre à prévenir
+            mentions = {"users": [uid]}
         code_m, rep_m = _api("POST", f"/channels/{salon}/messages",
-                             json={"content": f"<@{uid}> {qui}", "embeds": [embed],
+                             json={"content": f"<@{uid}>" if staff else f"<@{uid}> {qui}",
+                                   "embeds": [embed],
                                    "components": boutons_va(uid, confirme=not en_essai,
                                                             gid=gid),
                                    "allowed_mentions": mentions})
@@ -2306,6 +2327,13 @@ def suivre_partout() -> Dict[str, Any]:
                 ouvrir_tickets_verifies(gid)
         except Exception as e:
             print(f"[ticket] {gid} : Vérifiés : {type(e).__name__}: {e}", flush=True)
+        # Chacun son salon, staff et anciens Vérifiés compris (31/10/2026)
+        try:
+            import salons_perso
+            with sur_serveur(gid):
+                salons_perso.reparer_salons(gid)
+        except Exception as e:
+            print(f"[salons] {gid} : {type(e).__name__}: {e}", flush=True)
         # une fois l'heure : qui est parti, qui est revenu
         if maintenant - _DEPARTS_VU.get(gid, 0) >= DEPARTS_S:
             _DEPARTS_VU[gid] = maintenant
