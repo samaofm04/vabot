@@ -10,9 +10,10 @@ Ce qui est vérifié (tickets_discord.suivre_managers / suivre_partout) :
     leurs fiches et leurs droits passent à l'arrivé, et la synchro GetMySocial
     (liens_va.synchroniser) range leur lien chez SPECTRUM ;
   - un arrivé seul : sa catégorie est créée, vide ;
-  - un parti seul : ses VA vont au tour de rôle chez les autres, la catégorie
-    n'est supprimée que vide, tickets.json suit, le prochain ticket ne recrée
-    pas « Manager VECTOR » ;
+  - un parti seul : ses VA vont au manager qui en a le moins, sa catégorie
+    vide est gardée (31/10/2026 : plus aucune suppression), tickets.json suit,
+    le nouveau manager est prévenu dans son salon, le prochain ticket ne
+    recrée pas « Manager VECTOR » ; un BOSS qui a le rôle n'est pas manager ;
   - Discord muet, recherche incomplète, liste vide : rien n'est touché ;
   - la liste fixe de tickets_config.json fait foi ;
   - un second tour ne fait rien (idempotence) ;
@@ -315,8 +316,10 @@ try:
           and "manager_avant" not in fiche("201"))
     check("swap : le tour de rôle n'est pas touché", tours() == 0)
     j = json.loads(tk.JOURNAL_FICHIER.read_text(encoding="utf-8"))["journal"]
-    check("swap : chaque geste est dans le journal (data/managers_auto.json)",
-          [x["quoi"] for x in j] == ["renommees", "realignes", "realignes"], j)
+    check("swap : chaque geste est dans le journal (data/managers_auto.json), et Spectrum, "
+          "sans salon perso, n'a pas pu être prévenu (dit)",
+          [x["quoi"] for x in j] == ["renommees", "realignes", "realignes", "rates"]
+          and "pas de salon où le prévenir" in j[-1]["texte"], j)
     f.appels.clear()
     check("swap : le cache du tour de rôle est à jour (Vector n'y est plus)",
           [m["user"]["id"] for m in tk.managers(G)] == [YAZID, MOAN, SPECTRUM]
@@ -378,7 +381,8 @@ try:
     for u in (YAZID, MOAN):
         f.role(u, True)
     b = tk.suivre_managers(G)
-    check("parti seul : 3 VA déplacés au tour de rôle (Yazid, Moan, Yazid)",
+    check("parti seul : 3 VA déplacés au moins chargé (Yazid, Moan, Yazid : égalité -> "
+          "le plus petit identifiant)",
           [f.salons[c].get("parent_id") for c in ("303", "304", "305")] == ["11", "12", "11"],
           b)
     check("parti seul : tickets.json suit",
@@ -389,10 +393,11 @@ try:
           and f.droits("303").get(YAZID, {}).get("allow") == str(tk.MANAGER))
     check("parti seul : déplacés sans synchroniser les droits sur la catégorie",
           all("lock_permissions" not in (k.get("json") or {}) for m, c, k in f.ecritures()))
-    check("parti seul : la catégorie vide est supprimée", "13" not in f.salons and b["supprimees"], b)
-    check("parti seul : aucun salon supprimé, seulement la catégorie",
-          [c for m, c, k in f.ecritures() if m == "DELETE" and c.count("/") == 2] == ["/channels/13"])
-    check("parti seul : le tour de rôle a avancé de 3 (prochain : Moan)", tours() == 1, tours())
+    check("parti seul : la catégorie vide est GARDÉE (31/10 : on n'efface jamais rien)",
+          "13" in f.salons and b["gardees"] == [NOM[VECTOR]] and not b["supprimees"], b)
+    check("parti seul : aucune suppression, ni salon ni catégorie",
+          not [c for m, c, k in f.ecritures() if m == "DELETE" and c.count("/") == 2])
+    check("parti seul : le tour de rôle des nouveaux tickets n'a pas bougé", tours() == 0, tours())
     f.appels.clear()
     with calme():
         tk.suivre_managers(G)
@@ -403,8 +408,8 @@ try:
         sal = tk.ouvrir_ticket("209", {"id": G})
     cats_post = [k["json"]["name"] for m, c, k in f.ecritures()
                  if m == "POST" and c.endswith("/channels") and k["json"].get("type") == 4]
-    check("ticket suivant : chez Moan (le tour de rôle continue), dans sa catégorie",
-          sal and f.salons[sal].get("parent_id") == "12" and fiche("209").get("manager") == MOAN,
+    check("ticket suivant : au tour de rôle (Yazid), dans sa catégorie",
+          sal and f.salons[sal].get("parent_id") == "11" and fiche("209").get("manager") == YAZID,
           (sal, fiche("209")))
     check("ticket suivant : aucune catégorie recréée (pas de « Manager VECTOR »)",
           not cats_post, cats_post)
@@ -451,9 +456,10 @@ try:
           len(b["deplaces"]) == 5 and len(b["reportes"]) == 2 and "13" in f.salons
           and len(f.enfants("13")) == 2, b)
     b = tk.suivre_managers(G)
-    check("budget : le tour suivant finit le travail et supprime la catégorie vide",
-          len(b["deplaces"]) == 2 and b["supprimees"] and "13" not in f.salons, b)
-    check("budget : répartition au tour de rôle (4 chez Yazid, 3 chez Moan) et fiches à jour",
+    check("budget : le tour suivant finit le travail ; la catégorie vide est gardée",
+          len(b["deplaces"]) == 2 and not b["supprimees"] and "13" in f.salons
+          and not f.enfants("13"), b)
+    check("budget : répartition au moins chargé (4 chez Yazid, 3 chez Moan) et fiches à jour",
           [len(f.enfants("11")), len(f.enfants("12"))] == [1 + 4, 1 + 3]
           and all(fiche(str(203 + i)).get("manager") in (YAZID, MOAN) for i in range(7)),
           (f.enfants("11"), f.enfants("12")))
@@ -536,8 +542,8 @@ try:
     for u in (YAZID, MOAN, VECTOR, SPECTRUM):
         f.role(u, True)                # le rôle dit autre chose : la liste l'emporte
     b = tk.suivre_managers(G)
-    check("liste fixe : Vector n'y est pas -> ses VA répartis, sa catégorie supprimée",
-          "13" not in f.salons and len(b["deplaces"]) == 2, b)
+    check("liste fixe : Vector n'y est pas -> ses VA répartis, sa catégorie gardée",
+          "13" in f.salons and not f.enfants("13") and len(b["deplaces"]) == 2, b)
     check("liste fixe : Spectrum (rôle, mais pas dans la liste) n'a pas de catégorie",
           not [c for c in f.salons.values() if c["name"] == NOM[SPECTRUM]])
     check("liste fixe : aucune recherche de membres",
@@ -705,8 +711,8 @@ try:
           and all(f.droits(c).get(YAZID, {}).get("allow") == str(tk.MANAGER)
                   for c in ("301", "306", "307")))
     check("même personne : le tour de rôle n'a pas servi", tours() == tours_avant, (tours(), tours_avant))
-    check("même personne : l'ancienne « Manager YAZID », vide, est supprimée",
-          "11" not in f.salons and b["supprimees"], b)
+    check("même personne : l'ancienne « Manager YAZID », vide, est gardée",
+          "11" in f.salons and not f.enfants("11") and not b["supprimees"], b)
     f.appels.clear()
     with calme():
         tk.suivre_managers(G)
@@ -745,8 +751,8 @@ try:
           and [fiche(v).get("manager") for v in ("203", "204")] == [SPECTRUM, SPECTRUM], b)
     check("arrivé déjà rangé : droits — Spectrum nommé, Vector retiré",
           all(SPECTRUM in f.droits(c) and VECTOR not in f.droits(c) for c in ("303", "304")))
-    check("arrivé déjà rangé : le tour de rôle n'a pas servi, « Manager VECTOR » vide supprimée",
-          tours() == tours_avant and "13" not in f.salons
+    check("arrivé déjà rangé : le tour de rôle n'a pas servi, « Manager VECTOR » vide gardée",
+          tours() == tours_avant and "13" in f.salons and not f.enfants("13")
           and f.enfants("11") == ["301"] and f.enfants("12") == ["302"], (tours(), b))
     check("arrivé déjà rangé : la liste retenue devient Yazid, Moan, Spectrum",
           connus() == [YAZID, MOAN, SPECTRUM], connus())
@@ -782,7 +788,7 @@ try:
     check("relève sur deux tours (5 + 2 gestes) : les 7 VA de Vector chez SPECTRUM",
           sp and len(b1["deplaces"]) == 5 and len(b2["deplaces"]) == 2
           and f.enfants(sp[0]) == sorted(str(303 + i) for i in range(7))
-          and "13" not in f.salons, (b1, b2))
+          and "13" in f.salons and not f.enfants("13"), (b1, b2))
     check("relève sur deux tours : la liste n'est retenue qu'une fois tout rangé",
           connus() == [YAZID, MOAN, SPECTRUM], connus())
 
@@ -1185,6 +1191,88 @@ try:
     check("branché dans suivre_partout, après les tickets des Vérifiés",
           "salons_perso.reparer_salons(gid)" in src17
           and src17.index("ouvrir_tickets_verifies(gid)") < src17.index("salons_perso.reparer_salons(gid)"))
+
+    # ══ 20. un manager part : au moins chargé, prévenu, rien supprimé ══════
+    # Propriétaire, 31/10/2026 : « si y a plus [de manager], tu déplaces aux
+    # autres managers » ; Gone avait quitté TRUST INSTAGRAM, ses 4 VA rangés à
+    # la main chez Yoshiki gardaient Gone dans leur fiche.
+    print("\n— 20. départ d'un manager : le moins chargé, prévenu dans son salon")
+    BOSS20 = "730"
+    f = monde(tickets={"201": ("301", YAZID), "206": ("306", YAZID), "207": ("307", YAZID),
+                       "202": ("302", MOAN), "203": ("303", VECTOR), "204": ("304", VECTOR),
+                       MOAN: ("320", MOAN), YAZID: ("321", YAZID)})
+    f.roles.append({"id": BOSS20, "name": "BOSS"})
+    base_twitter(f)
+    f.ticket("306", "206", "11", YAZID, 2)
+    f.ticket("307", "207", "11", YAZID, 3)
+    f.ticket("320", MOAN, "12", MOAN, 0)               # le salon perso de Moan
+    f.ticket("321", YAZID, "11", YAZID, 0)             # celui de Yazid
+    f.liste_ouverte = True
+    for u in (YAZID, MOAN, SPECTRUM):
+        f.role(u, True)
+    f.membres[SPECTRUM]["roles"].append(BOSS20)       # BOSS avec le rôle Manager
+    sortie20 = io.StringIO()
+    with contextlib.redirect_stdout(sortie20):
+        b = tk.suivre_managers(G)
+    check("BOSS avec 🛡️ Manager : pas manager (ni catégorie ni VA)",
+          not [c for c in f.salons.values() if c["name"] == NOM[SPECTRUM]]
+          and SPECTRUM not in [tk._uid(m) for m in tk.managers(G, force=True)], b)
+    check("les 2 VA de Vector vont à Moan (1 VA, son salon perso à part) plutôt qu'à "
+          "Yazid (3 VA)",
+          [f.salons[c]["parent_id"] for c in ("303", "304")] == ["12", "12"]
+          and [fiche(v).get("manager") for v in ("203", "204")] == [MOAN, MOAN]
+          and fiche("203").get("manager_avant") == VECTOR and fiche("203").get("reassigne"),
+          (b, fiche("203")))
+    msgs20 = [(c, k["json"]) for m, c, k in f.appels if m == "POST" and c.endswith("/messages")]
+    check("Moan prévenu dans SON salon, lui seul mentionné, les 2 VA et l'ancien manager "
+          "nommés ; personne d'autre",
+          len(msgs20) == 1 and msgs20[0][0] == "/channels/320/messages"
+          and msgs20[0][1]["content"] == f"<@{MOAN}>"
+          and msgs20[0][1]["allowed_mentions"] == {"users": [MOAN]}
+          and msgs20[0][1]["embeds"][0]["title"] == "📥 2 VA te sont confiés"
+          and "<@203> · <#303> · avant <@103>" in msgs20[0][1]["embeds"][0]["description"],
+          msgs20)
+    check("« Manager VECTOR » vide : gardée, aucune suppression",
+          "13" in f.salons and not [1 for m, c, k in f.appels if m == "DELETE"
+                                    and c.count("/") == 2], b)
+    j20 = json.loads(tk.JOURNAL_FICHIER.read_text(encoding="utf-8"))["journal"]
+    check("chaque déplacement est au journal, avec la raison",
+          sum(1 for x in j20 if x["quoi"] == "deplaces" and "le moins de VA" in x["texte"]) == 2, j20)
+    f.appels.clear()
+    with calme():
+        tk.suivre_managers(G)
+    check("second tour : rien, et pas de second message", not f.ecritures(), f.ecritures())
+
+    # le cas de Gone : VA déjà rangés à la main chez Yoshiki, fiche au parti
+    f = monde(tickets={"201": ("301", YAZID), "202": ("302", MOAN), "203": ("303", VECTOR),
+                       "204": ("304", VECTOR), YAZID: ("321", YAZID)})
+    base_twitter(f, avec_vector=False)
+    f.ticket("303", "203", "11", VECTOR, 2)            # déplacés à la main, droits de Vector
+    f.ticket("304", "204", "11", VECTOR, 3)
+    f.ticket("321", YAZID, "11", YAZID, 0)
+    f.liste_ouverte = True
+    for u in (YAZID, MOAN):
+        f.role(u, True)
+    with calme():
+        b = tk.suivre_managers(G)
+    msgs20 = [(c, k["json"]) for m, c, k in f.appels if m == "POST" and c.endswith("/messages")]
+    check("VA rangés à la main chez Yazid : fiche et droits à Yazid, Vector retiré, Yazid prévenu",
+          [fiche(v).get("manager") for v in ("203", "204")] == [YAZID, YAZID]
+          and all(VECTOR not in f.droits(c) and YAZID in f.droits(c) for c in ("303", "304"))
+          and len(msgs20) == 1 and msgs20[0][0] == "/channels/321/messages", (b, msgs20))
+
+    # sans salon perso : rien posté, et c'est dit
+    f = monde(tickets={"201": ("301", YAZID), "202": ("302", MOAN), "203": ("303", VECTOR)})
+    base_twitter(f)
+    f.liste_ouverte = True
+    for u in (YAZID, MOAN):
+        f.role(u, True)
+    sortie20 = io.StringIO()
+    with contextlib.redirect_stdout(sortie20):
+        tk.suivre_managers(G)
+    check("manager sans salon perso : aucun message, et c'est dit au journal",
+          not [1 for m, c, k in f.appels if m == "POST" and c.endswith("/messages")]
+          and "pas de salon où le prévenir" in sortie20.getvalue(), sortie20.getvalue()[-300:])
 
     # ══ 13. branché dans la boucle du podium ══════════════════════════════
     src = (BOT / "web_upload.py").read_text(encoding="utf-8")

@@ -762,9 +762,9 @@ try:
           and 'not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("agency-accueil")' in src_wu)
     check("route Discord : le bouton agency-aff va à agency_accueil.traiter",
           "_rep_ag = _ag.traiter(charge)" in src_wu)
-    check("Agency dans le périmètre des tickets, managers fixes Gone et Yoshiki",
-          AG in tk.SERVEURS_TICKETS
-          and tk.MANAGERS_POSES[AG] == ["1392192812073615391", "1502081637591289877"])
+    check("Agency dans le périmètre des tickets, managers au rôle comme Twitter (31/10 : "
+          "plus de liste fixe, Gone parti)",
+          AG in tk.SERVEURS_TICKETS and AG not in tk.MANAGERS_POSES)
     cfg2 = vd2.serveur(AG)
     check("vérification d'Agency : panneau, entrées, suspicions, bienvenue, parcours",
           cfg2["salon_verification"] == "1562974555423776848"

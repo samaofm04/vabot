@@ -81,13 +81,13 @@ SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
                     AGENCY_IG_ID}             # Agency VA INSTAGRAM
 
 #: Les managers d'un serveur quand data/tickets_config.json n'en pose pas.
-#: Agency, 23/10/2026 : Gone et Yoshiki reçoivent les VA ; le propriétaire
-#: (vectorofm) et septofm ont 🛡️ Manager sans en recevoir — sans cette liste,
-#: le tour de rôle leur aurait donné des VA et une catégorie chacun.
-MANAGERS_POSES: Dict[str, List[str]] = {
-    AGENCY_IG_ID: ["1392192812073615391",     # Gone (jrm_12.)
-                   "1502081637591289877"],    # Yoshiki (yo_ofm)
-}
+#: Vide depuis le 31/10/2026 : Agency avait Gone et Yoshiki écrits ici (23/10),
+#: pour que vectorofm et septofm, qui avaient 🛡️ Manager, ne reçoivent pas de
+#: VA. Gone parti, la liste ne se relisait plus et plus rien ne suivait les
+#: managers d'Agency. Le rôle y fait foi comme ailleurs, BOSS exclu
+#: (_sans_boss) — propriétaire : « si y a plus [de manager], tu déplaces aux
+#: autres managers ».
+MANAGERS_POSES: Dict[str, List[str]] = {}
 
 
 def _poses(gid: str) -> List[Any]:
@@ -166,6 +166,20 @@ def _role_manager_sur(gid: str) -> Optional[str]:
 def role_manager(gid: str) -> str:
     """L'identifiant du rôle Manager du serveur, ou « »."""
     return _role_manager_sur(gid) or ""
+
+
+def _sans_boss(gid: str, membres: Optional[List[Dict[str, Any]]],
+               strict: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """Les porteurs du rôle Manager, moins les BOSS : sur TRUST INSTAGRAM,
+    vectorofm a 🛡️ Manager et BOSS, et ne reçoit pas de VA. Rôles illisibles :
+    None en strict (on ne sait pas), la liste telle quelle sinon."""
+    if not membres:
+        return membres
+    code, rep = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(rep, list):
+        return None if strict else membres
+    boss = {str(r.get("id")) for r in rep if "boss" in str(r.get("name", "")).lower()}
+    return [m for m in membres if not boss & {str(r) for r in (m.get("roles") or [])}]
 
 
 def _est_helper(r: Dict[str, Any]) -> bool:
@@ -417,6 +431,7 @@ def managers(gid: str, force: bool = False) -> List[Dict[str, Any]]:
         out = _par_la_liste(gid, rid)
         if out is None:                       # 403 : l'autorisation manque
             out = _par_la_recherche(gid, rid) or []
+        out = _sans_boss(gid, out) or []
     # Tri par identifiant : l'ordre du tour de rôle ne dépend pas de celui,
     # arbitraire, dans lequel Discord a répondu.
     out.sort(key=lambda m: str((m.get("user") or {}).get("id")))
@@ -1663,26 +1678,13 @@ def _managers_surs(gid: str):
         out = _par_la_liste(gid, rid, strict=True)
         if out is None:
             out = _par_la_recherche(gid, rid, strict=True)
+        out = _sans_boss(gid, out, strict=True) if out is not None else None
     if out is None:
         return bool(poses), rid, None
     out.sort(key=lambda m: _uid(m))
     if out:
         _CACHE[gid] = {"ts": time.time(), "v": list(out)}
     return bool(poses), rid, out
-
-
-def _au_tour(gid: str, liste: List[Dict[str, Any]]):
-    """Le manager dont c'est le tour, SANS avancer : on n'avance qu'une fois
-    le salon réellement déplacé (_tour_fait), sinon un échec sautait quelqu'un."""
-    i = int((_etat().get("tours") or {}).get(str(gid)) or 0) % len(liste)
-    return i, liste[i]
-
-
-def _tour_fait(gid: str, i: int, n: int) -> None:
-    with _VERROU:
-        d = _etat()
-        d.setdefault("tours", {})[str(gid)] = (i + 1) % n
-        _ecrire_etat(d)
 
 
 def _journaliser(lignes: List[Dict[str, Any]]) -> None:
@@ -1735,7 +1737,7 @@ def _retenir(gid: str, liste: List[Dict[str, Any]]) -> None:
 
 
 def _donner_ticket(gid: str, salon: Dict[str, Any], cle: str, m: Dict[str, Any],
-                   fiches: Dict[str, Any]) -> str:
+                   fiches: Dict[str, Any], confies: Optional[List[Dict[str, str]]] = None) -> str:
     """Le ticket passe au manager m. Rend « » si c'est fait, sinon pourquoi.
 
     Les droits redeviennent ceux d'un ticket neuf (ouvrir_ticket) : le
@@ -1786,6 +1788,9 @@ def _donner_ticket(gid: str, salon: Dict[str, Any], cle: str, m: Dict[str, Any],
         f["reassigne"] = int(time.time())
         _ecrire_etat(d)
     fiches[cle] = dict(f)
+    if confies is not None and va != mid:
+        # le nouveau manager en est prévenu dans son salon (_prevenir_managers)
+        confies.append({"manager": mid, "va": va, "salon": cid, "avant": avant})
     # l'accueil épinglé nomme le manager : sans ça il gardait l'ancien
     # (steave0454 lisait « Roucham », son manager était MOMOBY). Un échec ici
     # ne défait pas la réaffectation : entretenir_accueils le reprend
@@ -1807,7 +1812,8 @@ def suivre_managers(gid: str) -> Dict[str, Any]:
     gid = str(gid)
     bilan: Dict[str, Any] = {"renommees": [], "creees": [], "deplaces": [],
                              "supprimees": [], "realignes": [], "reportes": [],
-                             "rates": [], "gardees": [], "adoptes": [], "ignore": ""}
+                             "rates": [], "gardees": [], "adoptes": [], "confies": [],
+                             "ignore": ""}
     journal: List[Dict[str, Any]] = []
 
     def noter(quoi: str, texte: str) -> None:
@@ -1865,8 +1871,36 @@ def suivre_managers(gid: str) -> Dict[str, Any]:
         if bilan["reportes"]:
             print(f"[managers] {gid} : {len(bilan['reportes'])} geste(s) reporté(s) "
                   f"au prochain tour : " + " · ".join(bilan["reportes"][:8]), flush=True)
+        if bilan["confies"]:
+            _prevenir_managers(gid, bilan["confies"], noter)
         if journal:
             _journaliser(journal)
+
+
+def _prevenir_managers(gid: str, confies: List[Dict[str, str]], noter) -> None:
+    """Le manager qui reçoit des VA le lit dans son salon perso (salons_perso :
+    chaque manager en a un) — lui seul est mentionné, pas les VA. Sans salon,
+    c'est dit au journal. Ne lève jamais : le tour est déjà fait."""
+    par: Dict[str, List[Dict[str, str]]] = {}
+    for x in confies:
+        par.setdefault(str(x.get("manager") or ""), []).append(x)
+    for mid, xs in par.items():
+        try:
+            salon = ticket_de(gid, mid)
+            if not mid or not salon:
+                noter("rates", f"{len(xs)} VA confié(s) à {mid or '?'} : pas de salon où le prévenir")
+                continue
+            n = len(xs)
+            lignes = [f"<@{x['va']}> · <#{x['salon']}>"
+                      + (f" · avant <@{x['avant']}>" if x.get("avant") else "") for x in xs]
+            code, rep = _api("POST", f"/channels/{salon}/messages", json={
+                "content": f"<@{mid}>", "allowed_mentions": {"users": [mid]},
+                "embeds": [{"title": f"📥 {n} VA te {'sont confiés' if n > 1 else 'est confié'}",
+                            "color": 0x3B82F6, "description": "\n".join(lignes)[:4000]}]})
+            if code != 200:
+                noter("rates", f"{mid} pas prévenu de ses {n} VA (HTTP {code}) {str(rep)[:80]}")
+        except Exception as e:                               # noqa: BLE001
+            noter("rates", f"{mid} pas prévenu : {type(e).__name__}: {e}")
 
 
 def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
@@ -1924,7 +1958,7 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
             for mid in sorted(candidats(o) - connus):
                 code, m = _api("GET", f"/guilds/{gid}/members/{mid}")
                 if code == 200 and isinstance(m, dict):
-                    if rid in (m.get("roles") or []):
+                    if rid in (m.get("roles") or []) and _sans_boss(gid, [m]):
                         _dire(f"manque:{gid}:{mid}", f"{gid} : {mid} porte le rôle Manager "
                                                      "mais la recherche l'avait manqué — gardé")
                         liste.append(m)
@@ -2026,9 +2060,17 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
     #       « Manager ZED » — et au tour suivant les VA de Yazid, toujours
     #       manager, partaient chez Moan et Spectrum ;
     #    b. un arrivé qui avait déjà sa catégorie relève ce parti : chez lui ;
-    #    c. sinon le tour de rôle.
+    #    c. sinon le manager qui a le moins de VA sur ce serveur (propriétaire,
+    #       31/10/2026 ; avant : le tour de rôle, qui laissait Zayno à 9 VA et
+    #       John à 24 sur Twitter). À égalité, le plus petit identifiant.
     cibles = list(liste)
     par_uid = {_uid(m): m for m in liste}
+
+    def charge(m: Dict[str, Any]) -> int:
+        """Ses VA : les tickets suivis de sa catégorie, son propre salon à part."""
+        cat = _categorie_de(cats, m)
+        return len([c for c in suivis(cat) if salon_fiche[str(c["id"])]
+                    != f"{gid}:{_uid(m)}"]) if cat else 0
     for o in restent_o:
         oid = str(o["id"])
         for c in suivis(oid):
@@ -2036,7 +2078,6 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                 noter("reportes", f"déplacer « {c.get('name')} » hors de « {o.get('name')} »")
                 continue
             cle = salon_fiche[str(c["id"])]
-            i = None
             m = par_uid.get(str(fiches[cle].get("manager") or ""))
             if m is not None:
                 dest = _categorie_de(cats, m)
@@ -2051,9 +2092,9 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                 dest = _categorie_de(cats, m)
                 pourquoi = "l'arrivé qui relève ce manager"
             else:
-                i, m = _au_tour(gid, cibles)
+                m = min(cibles, key=lambda x: (charge(x), _uid(x)))
                 dest = _categorie_de(cats, m)
-                pourquoi = "tour de rôle"
+                pourquoi = f"le moins de VA ({charge(m)})"
             if not dest:
                 if reste < 2:
                     noter("reportes", f"créer « {nom_categorie(m)} » puis y déplacer "
@@ -2074,13 +2115,9 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                 continue
             c["parent_id"] = dest
             reste -= 1
-            if i is not None:
-                # le tour de rôle n'avance que s'il a servi, et une fois le
-                # salon réellement déplacé
-                _tour_fait(gid, i, len(cibles))
             noter("deplaces", f"« {c.get('name')} » : « {o.get('name')} » → "
                               f"« {nom_categorie(m)} » ({pourquoi})")
-            pb = _donner_ticket(gid, c, cle, m, fiches)
+            pb = _donner_ticket(gid, c, cle, m, fiches, bilan["confies"])
             if pb:
                 noter("rates", f"« {c.get('name')} » déplacé, mais {pb} — repris au prochain tour")
 
@@ -2095,30 +2132,11 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                       f"hors tickets dedans ({txt}) : à ranger à la main")
                 bilan["gardees"].append(str(o.get("name")))
             continue
-        if reste <= 0:
-            noter("reportes", f"supprimer « {o.get('name')} », vide")
-            continue
-        # relu juste avant : un ticket ouvert entre-temps dedans la sauve
-        code, frais = _api("GET", f"/guilds/{gid}/channels")
-        if code != 200 or not isinstance(frais, list):
-            noter("rates", f"« {o.get('name')} » non supprimée : salons illisibles (HTTP {code})")
-            continue
-        dedans = [c for c in frais if str(c.get("parent_id") or "") == oid]
-        if dedans:
-            noter("rates", f"« {o.get('name')} » non supprimée : {len(dedans)} salon(s) "
-                           "arrivé(s) dedans entre-temps")
-            continue
-        code, rep = _api("DELETE", f"/channels/{oid}")
-        if code == 429:
-            raise _Limite(f"suppression de « {o.get('name')} »")
-        if code in (200, 204):
-            reste -= 1
-            salons[:] = [c for c in salons if str(c.get("id")) != oid]
-            cats[:] = [c for c in cats if str(c.get("id")) != oid]
-            _dire(f"gardee:{gid}:{oid}", "")
-            noter("supprimees", f"« {o.get('name')} » supprimée (vide)")
-        else:
-            noter("rates", f"« {o.get('name')} » non supprimée (HTTP {code}) {str(rep)[:80]}")
+        # Vide : gardée, jamais supprimée (31/10/2026, « on n'efface jamais
+        # rien » ; avant, elle était supprimée). Le prochain manager qui
+        # arrive la reprend, renommée à son nom (étape 1).
+        _dire(f"gardee:{gid}:{oid}", f"{gid} : « {o.get('name')} » vide, gardée")
+        bilan["gardees"].append(str(o.get("name")))
 
     def _gere(o: Dict[str, Any]) -> bool:
         """La ligne d'un manager : « gérer les messages » (MANAGER), pas un VA."""
@@ -2189,7 +2207,7 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                 noter("reportes", f"fiche de « {c.get('name')} » → {_uid(m)}")
                 continue
             avant = str(fiches[cle].get("manager") or "") or "personne"
-            pb = _donner_ticket(gid, c, cle, m, fiches)
+            pb = _donner_ticket(gid, c, cle, m, fiches, bilan["confies"])
             reste_r -= 1
             if pb:
                 noter("rates", f"« {c.get('name')} » : {pb}")
