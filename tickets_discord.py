@@ -2566,7 +2566,10 @@ def redessiner_boutons(gid: str) -> Dict[str, Any]:
 # ce qu'il y lit doit être vrai. Une fois par jour et par serveur.
 ENTRETIEN_S = 86400
 _ENTRETIEN_VU: Dict[str, float] = {}
-_RE_CONFIE = re.compile(r"(tu es confié à )(<@&?\d+>|un manager)")
+# « suivi par » : l'accueil d'un salon adopté (adopter_salon). Sans lui, six
+# VA de TRUST INSTAGRAM repris par Yoshiki lisaient encore « tu es suivi par
+# @Gone » le 31/10/2026, Gone parti du serveur.
+_RE_CONFIE = re.compile(r"(tu es (?:confié à|suivi par) )(<@&?\d+>|un manager)")
 
 
 def corriger_manager_accueil(salon: str, mid: str, accueil: str,

@@ -1261,6 +1261,22 @@ try:
           and all(VECTOR not in f.droits(c) and YAZID in f.droits(c) for c in ("303", "304"))
           and len(msgs20) == 1 and msgs20[0][0] == "/channels/321/messages", (b, msgs20))
 
+    # l'accueil d'un salon adopté dit « tu es suivi par » : corrigé aussi
+    appels20 = []
+    _api20 = tk._api
+    tk._api = lambda m, c, **k: (appels20.append((m, c, k)) or (200, {}))
+    try:
+        msg20 = {"content": "<@203> <@103>", "embeds": [{"description":
+                 "<@203>, tu es suivi par <@103>.\n\nLa suite."}]}
+        r20 = tk.corriger_manager_accueil("303", YAZID, "999", msg20)
+    finally:
+        tk._api = _api20
+    patch20 = [k["json"] for m, c, k in appels20 if m == "PATCH"]
+    check("accueil adopté « tu es suivi par @ancien » : corrigé au manager du jour",
+          r20 == "fait" and patch20
+          and patch20[0]["embeds"][0]["description"].startswith(f"<@203>, tu es suivi par <@{YAZID}>.")
+          and patch20[0]["content"] == f"<@203> <@{YAZID}>", (r20, patch20))
+
     # sans salon perso : rien posté, et c'est dit
     f = monde(tickets={"201": ("301", YAZID), "202": ("302", MOAN), "203": ("303", VECTOR)})
     base_twitter(f)
