@@ -1247,6 +1247,40 @@ def list_all_links(max_pages: int = 50, force_refresh: bool = False) -> Dict[str
     return {"ok": True, "links": all_links}
 
 
+def list_links_group(group_id: str, max_pages: int = 10) -> Dict[str, Any]:
+    """Les liens d'UN groupe de l'espace PERSONNEL (filtre group_id de
+    list_links), sans cache : l'appelant garde sa copie. Les liens de YouCham
+    (groupe « YouCham ») sont dans l'espace personnel, pas dans une equipe :
+    list_links_team ne les voit pas, et list_all_links lirait tout le compte
+    pour quatre liens. Rend {ok, links} ou {ok: False, error}."""
+    if not group_id:
+        return {"ok": False, "error": "groupe absent"}
+    out: List[dict] = []
+    cursor: Optional[str] = None
+    for _ in range(max_pages):
+        args: Dict[str, Any] = {"limit": 100, "group_id": group_id}
+        if cursor:
+            args["cursor"] = cursor
+        res = _call_tool("list_links", args)
+        if not res["ok"]:
+            return res
+        data = res["data"] or {}
+        if isinstance(data, str):
+            try:
+                import json as _json_p
+                data = _json_p.loads(data)
+            except Exception:
+                return {"ok": False, "error": "reponse illisible de GetMySocial"}
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "reponse de forme imprevue (%s)" % type(data).__name__}
+        out.extend(l for l in data.get("data") or [] if isinstance(l, dict)
+                   and str(l.get("group_id") or "") == str(group_id))
+        if not data.get("has_more") or not data.get("next_cursor"):
+            return {"ok": True, "links": out}
+        cursor = data.get("next_cursor")
+    return {"ok": False, "error": "plus de %d pages dans le groupe %s" % (max_pages, group_id)}
+
+
 def categorize_link(link: dict) -> str:
     """Détecte la catégorie (= modèle) d'un lien.
 

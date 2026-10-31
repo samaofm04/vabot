@@ -94,7 +94,7 @@ def _interdit():
 def _ns_composant(d):
     """Un composant tel que discord.py le rend lu d'un message (custom_id,
     children, accessory, media) a partir du dict d'une vue."""
-    n = types.SimpleNamespace(custom_id=d.get("custom_id"), type=d.get("type"))
+    n = types.SimpleNamespace(custom_id=d.get("custom_id"), type=d.get("type"), url=d.get("url"))
     enfants = [_ns_composant(x) for x in d.get("components", []) or []]
     n.children = enfants
     n.components = enfants
@@ -728,9 +728,13 @@ class _FauxBot:
         self.vues.append(v)
 
 
+#: L'adresse de la page des clics : la vraie lirait (ou créerait) la clé dans data/.
+URL_CLICS = "https://youl4b.com/infloww/liens?k=CLE-VA&c=lia"
+_sauve_e["url"] = oc.url_clics
 try:
     u.ensure_identity_emojis = u.ensure_reserve_emojis = u.ensure_action_emojis = _rien_emoji
     asyncio.sleep = _instant
+    oc.url_clics = lambda: URL_CLICS
     g = youcham(n_va=0, avec_outils=False)
     w._membre_bot_admin = lambda gg: getattr(gg, "rem", None)
     bot = _FauxBot([g])
@@ -738,8 +742,9 @@ try:
     b1 = courir(oc.assurer(g, bot))
     cat = discord.utils.find(oc.est_categorie_outils, g.categories)
     noms = [c.name for c in cat.text_channels] if cat else []
-    check("🧰 OUTILS créée avec ses 4 salons, dans l'ordre de la maquette",
-          cat is not None and noms == ["📋・menu", "📤・spoofer", "⬇️・download", "📱・numéro"], noms)
+    check("🧰 OUTILS créée avec ses 5 salons, dans l'ordre (📊・click-et-sub en dernier, 31/10)",
+          cat is not None
+          and noms == ["📋・menu", "📤・spoofer", "⬇️・download", "📱・numéro", "📊・click-et-sub"], noms)
     check("🧰 OUTILS placée en tête du serveur, une fois",
           g.categories[0] is cat and any(d[0] == "[cat] 🧰 OUTILS" for d in g.deplaces), g.deplaces)
     sal = {oc._cle(c.name): c for c in cat.text_channels}
@@ -755,7 +760,8 @@ try:
           ok_droits)
     check("Rem a sa règle dans 📱・numéro seulement",
           g.rem in sal["numero"].overwrites and all(g.rem not in sal[k].overwrites
-                                                    for k in ("menu", "spoofer", "download")))
+                                                    for k in ("menu", "spoofer", "download",
+                                                              "click-et-sub")))
     check("chaque salon commun est reconnu (et le bon outil)",
           all(oc.est_salon_outil(sal[k], k) for k in oc.CLES)
           and not oc.est_salon_outil(sal["menu"], "spoofer"))
@@ -771,12 +777,25 @@ try:
           len(du_bot(sal["download"])) == 1
           and {"dl:compte", "dl:tout", "dl:reels"} <= oc._ids(du_bot(sal["download"])[0]))
     check("numéro : pas posé par Ryuk (c'est Rem, cogs/numeros)", not du_bot(sal["numero"]))
+    clics = du_bot(sal["click-et-sub"])
+    check("click-et-sub : UN panneau, un bouton-lien vers la page Lia (clé des VA), aucun texte",
+          len(clics) == 1 and clics[0].content is None and oc._urls(clics[0]) == {URL_CLICS}
+          and not any(isinstance(x, discord.ui.TextDisplay) for x in oc.PanneauClics(URL_CLICS).walk_children()),
+          [oc._urls(m) for m in clics])
     check("1er passage : bilan sans échec", not b1["rates"], b1)
     n_crees = len(g.crees)
     b2 = courir(oc.assurer(g, bot))
     check("2e passage : rien de créé, aucun panneau reposté",
           len(g.crees) == n_crees and not b2["panneaux"] and not b2["rates"]
-          and all(len(du_bot(sal[k])) == 1 for k in ("menu", "spoofer", "download")), b2)
+          and all(len(du_bot(sal[k])) == 1 for k in ("menu", "spoofer", "download", "click-et-sub")), b2)
+    # la clé de la page changée : l'ancien bouton mènerait à « Lien invalide »
+    oc.url_clics = lambda: URL_CLICS.replace("CLE-VA", "CLE-NEUVE")
+    b2b = courir(oc.assurer(g, bot))
+    check("click-et-sub : clé changée, l'ancien panneau est remplacé par UN neuf",
+          b2b["panneaux"] == ["click-et-sub"] and len(du_bot(sal["click-et-sub"])) == 1
+          and oc._urls(du_bot(sal["click-et-sub"])[0]) == {URL_CLICS.replace("CLE-VA", "CLE-NEUVE")}, b2b)
+    oc.url_clics = lambda: URL_CLICS
+    courir(oc.assurer(g, bot))
     # état perdu (data/ repartie de zéro) : le panneau est retrouvé dans le salon
     oc.ETAT.unlink()
     b3 = courir(oc.assurer(g, bot))
@@ -822,6 +841,7 @@ try:
 finally:
     u.ensure_identity_emojis, u.ensure_reserve_emojis, u.ensure_action_emojis = _sauve_e["emojis"]
     w._membre_bot_admin = _sauve_e["adm"]
+    oc.url_clics = _sauve_e["url"]
     asyncio.sleep = _sleep
 
 

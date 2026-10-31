@@ -96,7 +96,19 @@ PROFIL = ""
 # des VA (EMY TWITTER) pointe vers Emy, pas vers Jessye.
 EQUIPE_GMS = "tm_6a0e4739bfa0c238f20a8bf5"
 NOM_EQUIPE = "JESSY LE RETOUR"
-GUILD = "1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
+# Réglages que la page Lia (YouCham) change, voir REGLAGES près de profil().
+# Un groupe de l'espace PERSONNEL de GetMySocial au lieu d'une équipe :
+GROUPE_GMS = ""
+# D'où viennent les chiffres « depuis toujours » : Lia n'est pas chez Infloww.
+SOURCE_TOUJOURS = "Infloww"
+# False : pas de colonne des clics du lien de suivi, CVR = subs ÷ clics US.
+CLICS_OF = True
+# False : les liens de suivi qu'aucun lien GMS ne vise sont comptés, pas listés.
+HORS_DETAIL = True
+# Clics US « depuis toujours » : None = un relevé par jour ; sinon son âge maximal.
+US_FRAIS_S: Optional[int] = None
+MARQUE = "Infloww · YouL4b"
+GUILD ="1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
 SALON = "1553218920842928219"        # salon « inflow-resultat », public : les VA le voient
 BOT_APP = "1552785601051365516"      # application Discord de Bixby
 REFRESH_S = 2 * 3600                 # Infloww ne met ses liens à jour que toutes les 2 h
@@ -346,7 +358,8 @@ def _liens_gms_tous(maintenant: Optional[float] = None) -> Dict[str, Any]:
         import gms
         # force_refresh : un lien créé dans la journée doit apparaître au
         # prochain relevé, pas à l'expiration du cache de gms
-        r = gms.list_links_team(EQUIPE_GMS, force_refresh=True) or {}
+        r = ((gms.list_links_group(GROUPE_GMS) if GROUPE_GMS
+              else gms.list_links_team(EQUIPE_GMS, force_refresh=True)) or {})
         vivants = r.get("links") or r.get("data") or []
         if r.get("ok") is not False and vivants:
             try:
@@ -364,7 +377,8 @@ def _liens_gms_tous(maintenant: Optional[float] = None) -> Dict[str, Any]:
     if copie:
         return {"liens": list(copie["liens"]),
                 "repli": f"{raison or '?'} — dernière liste lue le {_heure(copie['t'])}"[:300]}
-    cache = _lire_json(GMS_CACHE).get(EQUIPE_GMS) or []
+    # le cache du site range les liens par équipe : un groupe n'y est pas
+    cache = [] if GROUPE_GMS else (_lire_json(GMS_CACHE).get(EQUIPE_GMS) or [])
     return {"liens": list(cache) if isinstance(cache, list) else [],
             "repli": (raison or "?")[:300]}
 
@@ -659,6 +673,12 @@ def _a_mesurer(ents: Mapping[str, Mapping[str, Any]], cache: Mapping[str, Any], 
                maintenant: float) -> List[str]:
     etats = us_depuis_cache(ents, cache, jour)
     pers = cache.get("personnes") or {}
+    if US_FRAIS_S:
+        # relevé du jour, mais plus vieux que US_FRAIS_S : refait (il reste
+        # affiché comme celui du jour en attendant)
+        return [c for c in ents
+                if maintenant - float((pers.get(c) or {}).get("essai") or 0)
+                >= {"ok": US_FRAIS_S, "rate": US_REESSAI_S}.get(etats[c]["etat"], 0)]
     return [c for c in ents if etats[c]["etat"] != "ok"
             # un essai raté il y a cinq minutes n'est pas refait à chaque affichage
             and not (etats[c]["etat"] == "rate"
@@ -1816,6 +1836,16 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     T.update(personnes=len(lignes), liens_infloww=len(comptes),
              us=sum(us_connus) if us_connus else None,
              us_manquants=len(lignes) - len(us_connus))
+    if not CLICS_OF:
+        # page Lia (propriétaire, 31/10/2026) : « pas les clics Infloww mais
+        # ceux de GMS, les US, après sub, CVR et LTV » -- CVR = subs ÷ clics
+        # US. Au total, les seules personnes dont subs ET clics US sont connus :
+        # les clics d'un lien sans lien de suivi en face faisaient baisser le CVR.
+        for x in lignes:
+            x["cvr"] = (int(x["subs"]) * 100.0 / x["us"]) if x.get("us") and x.get("subs") is not None else None
+        deux = [x for x in lignes if x.get("us") is not None and x.get("subs") is not None]
+        us_deux = sum(int(x["us"]) for x in deux)
+        T["cvr"] = (sum(int(x["subs"]) for x in deux) * 100.0 / us_deux) if us_deux else None
     pp_t = _part_partenaire(comptes)
     if pp_t:
         T["part_p"] = pp_t
@@ -1924,7 +1954,8 @@ def tableau(us: str = "page") -> Dict[str, Any]:
     codes_p = _codes_partenaire(g["liens"])
     if codes_p:
         _partenaire_toujours(codes_p, attente=0)
-    i = _infloww()
+    # page Lia : Infloww ne la voit pas ; MyPuls, du premier jour à aujourd'hui
+    i = _mypuls_periode(PLANCHER.isoformat(), _aujourdhui()) if SOURCE_TOUJOURS == "MyPuls" else _infloww()
     ents, _ = entites(g["liens"])
     erreur = i.get("erreur") or ""
     if not g["liens"]:
@@ -1940,11 +1971,18 @@ def tableau(us: str = "page") -> Dict[str, Any]:
     # page Emy : les liens Jessye, abonnés comptés un par un (sans ceux datés
     # de la création du lien), clics et gains cumulés
     part = _partenaire_toujours(codes_p) if PARTENAIRE and not erreur else None
-    return construire(i.get("liens") or [], g["liens"], us=us_depuis_cache(ents),
-                      lu_a=i.get("lu_a"), tronque=i.get("tronque"), doublons=i.get("doublons") or 0,
-                      depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
-                      us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "",
-                      desactives=int(g.get("desactives") or 0), partenaire=part)
+    t = construire(i.get("liens") or [], g["liens"], us=us_depuis_cache(ents),
+                   lu_a=i.get("lu_a"), tronque=i.get("tronque"),
+                   doublons=i.get("doublons") or 0, source=SOURCE_TOUJOURS,
+                   illisibles=int(i.get("illisibles") or 0),
+                   depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
+                   us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "",
+                   desactives=int(g.get("desactives") or 0), partenaire=part)
+    if i.get("perime"):
+        # page Lia : MyPuls muet, la dernière lecture réussie -- dite, pas
+        # passée pour neuve
+        t["perime"] = str(i["perime"])
+    return t
 
 
 def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
@@ -4262,7 +4300,8 @@ def _e(s: Any) -> str:
 
 def _tri_valide(tri: Any, sens: Any) -> Tuple[str, str]:
     tri = str(tri or "")
-    if tri not in TRIS:
+    # page Lia : pas de colonne des clics du lien de suivi, pas de tri dessus
+    if tri not in TRIS or (tri == "clics" and not CLICS_OF):
         return "nom", "asc"
     sens = str(sens or "")
     if sens not in SENS:
@@ -4422,6 +4461,8 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     lib_clics = "OF" if T.get("part_p") and source != "Infloww" else _e(source)
     cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", f"Clics\u00a0{lib_clics}", "n"),
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
+    if not CLICS_OF:
+        cols = tuple(c for c in cols if c[0] != "clics")
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
     P = paie or {}
@@ -4440,8 +4481,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         d_clics, d_subs, d_par_sub = _dets_partenaire(x)
         corps.append(f'<tr id="{ancre(x.get("cle"))}"><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
-                     f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}{d_clics}</td>'
-                     f'<td class="n fort">{_nb(x.get("subs"))}{d_subs}</td>'
+                     + (f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}{d_clics}</td>'
+                        if CLICS_OF else "")
+                     + f'<td class="n fort">{_nb(x.get("subs"))}{d_subs}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
                      f'{d_par_sub}</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
@@ -4452,8 +4494,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
     t_clics, t_subs, t_par_sub = _dets_partenaire(T)
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
-            f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}{t_clics}</td>'
-            f'<td class="n">{_nb(T.get("subs"))}{t_subs}</td>'
+            + (f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}{t_clics}</td>'
+               if CLICS_OF else "")
+            + f'<td class="n">{_nb(T.get("subs"))}{t_subs}</td>'
             f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
             f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
             f'{t_par_sub}</td>{_cellules_total_paie(P) if avec else ""}</tr>')
@@ -4485,8 +4528,9 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     h: List[str] = []
     source = str(t.get("source") or "Infloww")
     per = t.get("periode") or {}
-    if per.get("perime"):
-        h.append(f'<div class="avert"><b>MyPuls n\'a pas répondu</b> ({_e(per["perime"])}).</div>')
+    if per.get("perime") or t.get("perime"):
+        h.append(f'<div class="avert"><b>MyPuls n\'a pas répondu</b> '
+                 f'({_e(per.get("perime") or t.get("perime"))}).</div>')
     # page Emy : la part Jessye (Infloww). Muette ou en cours : la part Emy
     # reste affichée, et la page dit qui n'a qu'elle
     pt = t.get("partenaire") or {}
@@ -4635,7 +4679,7 @@ def _titre_periode(du: str, au: str, auj: str) -> str:
     toujours · Infloww » : d'où viennent les chiffres, avant tout le reste.
     Page Emy : « · MyPuls + Infloww » (la part Jessye vient d'Infloww)."""
     if not du:
-        return "Depuis toujours · Infloww"
+        return f"Depuis toujours · {SOURCE_TOUJOURS}"
     f = _jour_long if (du[:4] != auj[:4] or au[:4] != auj[:4]) else _jour_court
     return ((f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · MyPuls"
             + (" + Infloww" if PARTENAIRE else ""))
@@ -4738,7 +4782,17 @@ def _formulaire(du: str, au: str, tri: str, sens: str, cle: str, auj: str) -> st
 
 def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
     source = str(t.get("source") or "Infloww")
-    if not du:
+    if not du and SOURCE_TOUJOURS == "MyPuls":
+        # page Lia : MyPuls depuis le premier jour, CVR sur les clics US
+        note = [f"<b>Personnes</b> : liens GetMySocial du groupe « {_e(NOM_EQUIPE)} », un lien SPAM "
+                "compte à part ; une personne additionne ses liens de suivi distincts",
+                "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours, "
+                + (f"relevés toutes les {_nb(US_FRAIS_S // 60)} min" if US_FRAIS_S else "relevés une fois par jour"),
+                f"<b>Subs</b> : abonnés du lien de suivi {_e(_de_nom(NOM_AFFICHE))}, lus dans MyPuls",
+                "<b>CVR</b> = subs ÷ clics US ; <b>$ / sub</b> = gains nets ÷ subs",
+                f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
+                f"{_nb(MYPULS_TTL_S // 60)} min au plus"]
+    elif not du:
         note = [f"<b>Personnes</b> : liens GetMySocial de l'espace « {_e(NOM_EQUIPE)} », un lien SPAM "
                 "compte à part ; une personne additionne ses liens Infloww distincts",
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours "
@@ -4759,7 +4813,8 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                                         if bornes else
                                         f"du {_e(_jour_long(du))} à 00:00:00 au {_e(_jour_long(au))} à "
                                         "23:59:59, heure de Paris, les deux jours inclus")),
-                f"<b>Personnes</b> : liens GetMySocial de l'espace « {_e(NOM_EQUIPE)} », un lien SPAM "
+                f"<b>Personnes</b> : liens GetMySocial {'du groupe' if GROUPE_GMS else 'de l’espace'} "
+                f"« {_e(NOM_EQUIPE)} », un lien SPAM "
                 "compte à part ; une personne additionne ses liens de suivi distincts",
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial pendant ces mêmes "
                 "jours, calculés en arrière-plan puis gardés (toutes les 2 h si la période finit "
@@ -4770,13 +4825,14 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 "brute de GetMySocial",
                 # page Emy : ces deux phrases parlent de ses liens Emy (la part
                 # Jessye a les siennes, _note_partenaire)
-                f"<b>Clics {'OF' if PARTENAIRE else 'MyPuls'}</b> et <b>Subs</b>"
-                + (f" des liens {_e(NOM_AFFICHE)}" if PARTENAIRE else "")
-                + " : visites et abonnés du lien de suivi sur la période, "
-                "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
-                "clics US",
-                f"<b>CVR</b> = subs ÷ clics {'OF' if PARTENAIRE else 'MyPuls'} ; <b>$ / sub</b> = gains nets "
-                "que MyPuls attribue au lien sur la période ÷ subs de la période"]
+                (f"<b>Clics {'OF' if PARTENAIRE else 'MyPuls'}</b> et <b>Subs</b>"
+                 + (f" des liens {_e(NOM_AFFICHE)}" if PARTENAIRE else "")
+                 + " : visites et abonnés du lien de suivi sur la période, "
+                 "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
+                 "clics US" if CLICS_OF else
+                 "<b>Subs</b> : abonnés du lien de suivi sur la période, lus dans MyPuls"),
+                f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'US'} ; "
+                "<b>$ / sub</b> = gains nets que MyPuls attribue au lien sur la période ÷ subs de la période"]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")
         note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
@@ -5328,7 +5384,12 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
                  '<span class="nv r">rouge</span> sous la moitié.'
                  + (' Gain / perte : <span class="nv gp">vert</span> si le VA rapporte au moins ce '
                     'qu\'il coûte, <span class="nv gn">rouge</span> sinon.' if paie else "") + '</p>')
-        if hors:
+        if hors and not HORS_DETAIL:
+            # page Lia : les autres liens de suivi de Lia (Twitter, Threads,
+            # Agency) ne sont pas ceux de YouCham ; leur nombre seul est dit
+            h.append(f'<p class="legende">{_nb(len(hors))} autre(s) lien(s) de suivi '
+                     f'{_e(_de_nom(NOM_AFFICHE))}, hors « {_e(NOM_EQUIPE)} » : non comptés.</p>')
+        elif hors:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
                      # la créatrice de la page : « de Jessye » s'écrivait aussi sur la page Emy
                      f'liens de suivi {_e(_de_nom(NOM_AFFICHE))} qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
@@ -5441,7 +5502,7 @@ details .boite{{margin-top:8px;opacity:.85}}
 @media (max-width:480px){{.periode .lib{{flex-basis:100%}} table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} .nv{{padding:1px 3px}} h1{{font-size:18px}}}}
 @media (max-width:340px){{table{{font-size:11.5px}} th,td{{padding:7px 2px}} th:first-child,td:first-child{{padding-left:8px}} th:last-child,td:last-child{{padding-right:8px}} td.nom{{min-width:64px}}}}
 </style></head><body>
-<div class="marque">Infloww · YouL4b</div>
+<div class="marque">{_e(MARQUE)}</div>
 <h1>Liens de suivi · {_e(NOM_AFFICHE)}</h1>
 <p class="sous">{sous}</p>
 {perso}{"".join(h)}
@@ -5496,7 +5557,25 @@ def page(args: Mapping[str, Any], cle: str = "", paie: bool = False, lien_perso:
 # quinzaines, lignes figées : « c12 » n'est pas le même lien chez Jessye et
 # chez Emy) ; réglages de paie, clés, clics GetMySocial (par lien GMS, sans
 # créatrice) et taux de change restent communs.
-PROFILS: Dict[str, Tuple[str, str]] = {"emy": ("emy.brw", "Emy")}
+PROFILS: Dict[str, Tuple[str, str]] = {"emy": ("emy.brw", "Emy"), "lia": ("liasxcret", "Lia")}
+# Page Lia (propriétaire, 31/10/2026, pour YouCham : « comme lui mais pour
+# Lia, et pour les clics pas Infloww mais ceux de GMS, les US, après sub, CVR
+# et LTV », puis « même truc, la même exacte »). Ses personnes sont les liens
+# du groupe « YouCham » de l'espace PERSONNEL (VA 1..4, un lien de suivi de
+# Lia chacun) ; Infloww ne voit pas Lia, ses chiffres viennent de MyPuls. Ses
+# personnes ne sont pas celles de l'équipe : clics US, paie et copie de la
+# liste GMS ont leurs fichiers à elle.
+REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
+    "EQUIPE_GMS": "", "GROUPE_GMS": "grp_6ae626b131228574f13b70d2", "NOM_EQUIPE": "YouCham",
+    "SOURCE_TOUJOURS": "MyPuls", "CLICS_OF": False, "HORS_DETAIL": False,
+    # des liens tout neufs : un relevé par jour les laissait à zéro jusqu'au
+    # lendemain (une heure : la règle du propriétaire du 06/10 pour les clics)
+    "US_FRAIS_S": 3600, "MARQUE": "MyPuls · YouCham",
+    "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
+    "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
+    "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",
+    "PAIE_FICHIER": DATA_DIR / "infloww_liens_paie_lia.json",
+}}
 # la créatrice dont la page additionne la part (voir PARTENAIRE) : le 27/10,
 # les liens de la page Emy sont passés sur Jessye
 PARTENAIRES: Dict[str, Tuple[str, str]] = {"emy": (pd.CREATRICE_JESSYE, "Jessye")}
@@ -5531,5 +5610,7 @@ def profil(nom: Any) -> Any:
             m.QUINZ_FICHIER = DATA_DIR / f"infloww_liens_quinzaines_{nom}.json"
             m.LIGNES_FICHIER = DATA_DIR / f"infloww_liens_lignes_{nom}.json"
             m.ETAT_FICHIER = DATA_DIR / f"infloww_liens_discord_{nom}.json"
+            for k, v in REGLAGES.get(nom, {}).items():
+                setattr(m, k, v)
             _COPIES[nom] = m
     return m

@@ -537,8 +537,8 @@ class Outils(commands.Cog):
     @tasks.loop(hours=6)
     async def _outils_communs(self):
         """🧰 OUTILS sur les serveurs aux outils communs (YouCham) : la
-        categorie, ses quatre salons et les panneaux de ce bot (menu, spoofer,
-        download), au demarrage puis toutes les six heures. Idempotent : un
+        categorie, ses cinq salons et les panneaux de ce bot (menu, spoofer,
+        download, click-et-sub), au demarrage puis toutes les six heures. Idempotent : un
         passage sur un serveur deja en place ne fait que relire. Le panneau du
         numero est pose par Rem (cogs/numeros._panneau_commun)."""
         try:

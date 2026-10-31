@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Les outils COMMUNS d'un serveur US : quatre salons pour tous, un salon perso par VA.
+"""Les outils COMMUNS d'un serveur US : cinq salons pour tous, un salon perso par VA.
 
 POURQUOI (proprietaire, 30/10/2026, maquette validee)
     « sur YouCham, un salon ou tout le monde voit un menu en commun, un
@@ -19,8 +19,11 @@ CE QUI VIT OU
         ⬇️・download  le panneau du -download (cogs/telechargement.py)
         📱・numéro    le panneau du -numero-mail, pose par Rem, le bot admin
                       (cogs/numeros.py, boucle _panneau_commun) ; le numero
-                      s'affiche dans une carte ephemere du cliqueur, 15 min
+                      s'affiche dans une carte ephemere du cliqueur, 20 min
                       (numeros.clic_partage, depuis le 31/10/2026)
+        📊・click-et-sub  un bouton-lien vers la page des liens de suivi de
+                      Lia (infloww_liens, profil « lia ») : clics US, subs,
+                      CVR, $ / sub par VA (proprietaire, 31/10/2026)
     📁 SALONS PERSO, puis 📁 SALONS PERSO 2, 3... : Discord refuse un 51e
     salon dans une categorie. Un salon par VA, « <pseudo>-content » -- le
     nom de cogs/welcome._us_ticket_name, que toutes les recherches de -content
@@ -81,7 +84,8 @@ import safe_json
 #: /ticketsall le compterait comme un ticket.
 CATEGORIE = "🧰 OUTILS"
 SALONS = (("menu", "📋・menu"), ("spoofer", "📤・spoofer"),
-          ("download", "⬇️・download"), ("numero", "📱・numéro"))
+          ("download", "⬇️・download"), ("numero", "📱・numéro"),
+          ("click-et-sub", "📊・click-et-sub"))
 CLES = tuple(c for c, _n in SALONS)
 
 #: Les categories des salons perso : « 📁 SALONS PERSO », puis « … 2 »,
@@ -827,6 +831,64 @@ async def assurer_panneau_menu(canal, bot) -> int:
     return 1
 
 
+def url_clics() -> str:
+    """La page des clics et subs de YouCham : celle des liens de suivi, profil
+    Lia (proprietaire, 31/10/2026 : « comme lui mais pour Lia ... la même
+    exacte »), avec la cle des VA -- jamais celle du paiement."""
+    import infloww_liens
+    return infloww_liens.profil("lia").url_page()
+
+
+def _urls(message) -> set:
+    """Les adresses des boutons-liens d'un message (ils n'ont pas de custom_id)."""
+    out, pile = set(), list(getattr(message, "components", None) or [])
+    while pile:
+        c = pile.pop()
+        u = getattr(c, "url", None)
+        if u:
+            out.add(str(u))
+        pile += list(getattr(c, "children", None) or [])
+        pile += list(getattr(c, "components", None) or [])
+    return out
+
+
+class PanneauClics(discord.ui.LayoutView):
+    """Le panneau du 📊・click-et-sub : UN bouton-lien, sans texte, comme
+    celui du menu. Un lien n'a pas de rappel : rien a enregistrer au
+    demarrage."""
+
+    def __init__(self, url):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.ActionRow(discord.ui.Button(
+            label="Statistiques", emoji="📊", style=discord.ButtonStyle.link, url=url)))
+
+
+async def _assurer_clics(canal, bot) -> int:
+    """Le panneau du 📊・click-et-sub : un seul message du bot, vers l'adresse
+    du jour. La cle de la page changee, l'ancien bouton menerait a « Lien
+    invalide » : il est remplace. Rend 1 si un panneau est pose."""
+    moi = getattr(getattr(bot, "user", None), "id", None)
+    url = url_clics()
+    poses = [m async for m in canal.history(limit=25)
+             if getattr(getattr(m, "author", None), "id", None) == moi
+             and any("/infloww/liens" in u for u in _urls(m))]
+    bons = [m for m in poses if url in _urls(m)]
+    garde = max(bons, key=lambda m: m.id) if bons else None
+    for m in poses:
+        if m is not garde:
+            try:
+                await m.delete()
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils-communs] ancien panneau des clics non retire : {e}", flush=True)
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
+    if garde is not None:
+        _noter(gid, "click-et-sub", garde.id)
+        return 0
+    msg = await canal.send(view=PanneauClics(url))
+    _noter(gid, "click-et-sub", msg.id)
+    return 1
+
+
 async def _assurer_download(canal, bot) -> int:
     """Le panneau du ⬇️・download : un seul message du bot, a jour ; sinon le
     salon est remis au propre (cogs/telechargement.poser_panneaux)."""
@@ -843,8 +905,8 @@ async def _assurer_download(canal, bot) -> int:
 
 
 async def assurer(guilde, bot) -> dict:
-    """🧰 OUTILS, ses quatre salons et les panneaux de Ryuk (menu, spoofer,
-    download). Idempotent : ce qui existe n'est ni recree ni reposte. Le
+    """🧰 OUTILS, ses cinq salons et les panneaux de Ryuk (menu, spoofer,
+    download, click-et-sub). Idempotent : ce qui existe n'est ni recree ni reposte. Le
     panneau du numero est pose par Rem (cogs/numeros, _panneau_commun) : un
     bouton n'est servi que par l'application qui a poste le message.
     Rend un bilan ; chaque echec y est compte, aucun n'est tu."""
@@ -915,7 +977,8 @@ async def assurer(guilde, bot) -> dict:
         bilan["rates"].append(f"emojis des menus ({type(e).__name__}: {e})"[:200])
     for cle, poser in (("menu", lambda c: assurer_panneau_menu(c, bot)),
                        ("spoofer", lambda c: _assurer_spoofer(c, bot)),
-                       ("download", lambda c: _assurer_download(c, bot))):
+                       ("download", lambda c: _assurer_download(c, bot)),
+                       ("click-et-sub", lambda c: _assurer_clics(c, bot))):
         canal = salons.get(cle)
         if canal is None:
             continue
