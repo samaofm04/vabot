@@ -1461,8 +1461,12 @@ try:
     cs = gs.ajoute_cat("Salons textuels")
     num_s, num_us, gen_s = (gs.ajoute("📱・numéro", cs), gs.ajoute("🇺🇸 numéro-usa", cs),
                             gs.ajoute("général", cs))
-    check("aucune autre fonction n'y tourne (statut, tickets, onboarding…)",
-          gf.get_features(SEUL) == set() and not gf.enabled(gs, "statut"),
+    check("aucune autre fonction de Rem n'y tourne (statut, tickets, onboarding…)",
+          not any(gf.enabled(gs, f) for f in ("statut", "tickets", "onboarding", "clics",
+                                              "liens", "rappels")),
+          gf.get_features(SEUL))
+    check("… le 🎬 Contenu des tickets (Revel) y reste servi",
+          gf.get_features(SEUL) == {"contenu"} and gf.enabled(gs, "contenu"),
           gf.get_features(SEUL))
     check("le panneau va dans le salon « numéro » (📱・numéro, numéro-usa), pas dans général",
           nm._salon_commun(num_s) and nm._salon_commun(num_us) and not nm._salon_commun(gen_s))

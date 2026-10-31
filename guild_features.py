@@ -58,7 +58,7 @@ def get_features(guild_or_id) -> set:
     if gid is None:
         return set(ALL_FEATURES)
     if gid in NUMERO_SEUL:
-        return set()
+        return set(NUMERO_SEUL_GARDE)
     v = _load().get(gid)
     if v is None:
         return set(ALL_FEATURES)
@@ -172,11 +172,19 @@ OUTILS_COMMUNS = {YOUCHAM_GUILD_ID}
 #: 📱・numéro de YouCham (cogs/numeros.clic_partage), 3 numeros par jour et
 #: par VA. Proprietaire, 31/10/2026 : « mettre ce bot aussi juste pour ca pour
 #: un autre server juste le numero dans ce serv », puis « limite a 3 par jour
-#: pour le server trust instagram ». Aucune autre fonction n'y tourne
-#: (get_features) : un serveur inconnu les a TOUTES, et le tri des salons va-
+#: pour le server trust instagram ». Aucune autre fonction de Rem n'y tourne
+#: (get_features, sauf NUMERO_SEUL_GARDE) : un serveur inconnu les a TOUTES, et le tri des salons va-
 #: (vasort) s'y lancait toutes les 20 min. Le reste de TRUST INSTAGRAM est a
 #: Revel, par REST, qui ne lit pas ce fichier. id -> nom court.
 NUMERO_SEUL: dict = {"1488331963575177247": "TRUST INSTAGRAM"}
+
+#: Ce que ces serveurs GARDENT : le 🎬 Contenu des tickets (contenu_tickets)
+#: joue les commandes du menu US de Yoshi avec une interaction de CE serveur,
+#: et leur garde (_gate_contenu) lit get_features. Avec un ensemble vide,
+#: chaque clic du Contenu repondait « Cette fonction est désactivée sur ce
+#: serveur » (31/10/2026, ticket de jackson_lord1, 9 refus). Aucun cog de
+#: Rem ne lit « contenu », et Yoshi n'est pas sur TRUST INSTAGRAM.
+NUMERO_SEUL_GARDE = frozenset({"contenu"})
 
 
 def numero_seul(guild_or_id) -> bool:

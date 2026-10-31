@@ -387,6 +387,13 @@ try:
           len(r) == 3 and r[1] == [f"cnt:o:{VA}"], r)
     check("BOUTONS_VERSION à 11 : les accueils et leurs copies sont redessinés",
           tk.BOUTONS_VERSION >= 11)
+    # 31/10/2026 : TRUST INSTAGRAM passé « numéro seul » pour Rem
+    # (guild_features.NUMERO_SEUL) perdait « contenu », et chaque clic du 🎬
+    # répondait « Cette fonction est désactivée sur ce serveur ».
+    import guild_features as _gf
+    check("chaque serveur qui porte 🎬 garde la fonction « contenu » (guild_features)",
+          all(_gf.enabled(g, "contenu") for g in tk.CONTENU_DANS_MENU),
+          {g: sorted(_gf.get_features(g)) for g in tk.CONTENU_DANS_MENU})
     mp = tk.menu_prive(AG, CHEF)
     cmp_ = [c for x in ids(mp["data"]["components"]) for c in x]
     check("menu privé du staff : 🎬 y est, cinq par rangée au plus",
