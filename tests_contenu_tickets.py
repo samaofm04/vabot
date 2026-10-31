@@ -11,11 +11,13 @@ Ce qui est vérifié (contenu_tickets, tickets_discord, cogs/user) :
   - la route : tickets, quêtes et outils laissent passer « cnt: »/« cng: » ;
   - les droits : hors ticket, autre VA, autre serveur refusés ; le manager
     dans le ticket du VA servi ;
-  - le panneau éphémère : V2 (flags), ≤ 25 options par menu, ≤ 5 boutons par
+  - le menu éphémère : V2 (flags), ≤ 25 options par menu, ≤ 5 boutons par
     rangée, ≤ 40 composants, custom_id ≤ 100, toutes les identités US une
-    fois (37 puis 120) ; identité et quantité dans chaque custom_id ; un seul
-    message réécrit (réponse 7) ; « Choisir ma brute » absent ;
-  - la quantité (fenêtre, nombre refusé), le ✨ General (réserve, retour) ;
+    fois (37 puis 120) ; un seul message réécrit (réponse 7) ;
+  - la carte (01/11/2026) : le ✨ General de la réserve liée + le 🎥 Brut de
+    l'identité avant Caption, 👤 Identité ; plus de panneau de l'identité ;
+    sans réserve liée : refusée ; « Choisir ma brute » absent ;
+  - la quantité (fenêtre, nombre refusé), le choix de la réserve ;
   - la livraison : sur la boucle du bot principal, identité imposée, dans le
     TICKET (cartes V2 en multipart, textes à copier seuls, barre éditée sur
     place), jeton du bot (jamais le webhook du clic), menu reposé en bas ;
@@ -468,35 +470,45 @@ try:
     r = rep_de(clic(f"cnt:o:{VA}", uid=CHEF, chef=True))
     check("le manager dans le ticket du VA : le menu s'ouvre", r["type"] == 4 and r["data"]["flags"] & V2, r)
 
-    # ── 5. le panneau ────────────────────────────────────────────────────
+    # ── 5. la carte (propriétaire, 01/11/2026 : « tout de brune, y a que
+    # brut qui est de l'identité ») ────────────────────────────────────────
     r = rep_de(clic("cnt:ms:0:5", valeurs=["lola"]))
     comps = r["data"]["components"]
     pid = ids_de(comps)
     ok, pourquoi = valide(comps)
     textes = [c.get("content") for c in tous(comps) if c.get("type") == 10]
-    check("choix d'une identité : le MÊME message devient son panneau (réponse 7, V2)",
+    check("choix d'une identité : le MÊME message devient sa carte (réponse 7, V2)",
           r["type"] == 7 and r["data"]["flags"] == V2, r["type"])
     check("… valide pour Discord", ok, pourquoi)
-    check("… l'identité et la quantité dans CHAQUE custom_id d'action",
-          "cnt:qb:lola:5" in pid and "cnt:a:lola:pp:5" in pid and "cnt:a:lola:storyme:5" in pid
-          and "cnt:s:lola:caption:5" in pid and "cnt:s:lola:flash:5" in pid
-          and all(":lola:" in i for i in pid if i.startswith(("cnt:a:", "cnt:s:", "cnt:qb:"))), pid)
-    check("… les actions du menu US : Name, Pseudo, PP, Bio, Story me/life/travel, Story CTA, Post, "
-          "menus Brut, Caption, Template, Trash, Flash",
-          all(f"cnt:a:lola:{k}:5" in pid for k in ("name", "pseudo", "pp", "bio", "storyme", "stlife",
-                                                   "sttravel", "storycta", "post"))
-          and all(f"cnt:s:lola:{f}:5" in pid for f in ("brut", "caption", "template", "trash", "flash")),
+    check("… la carte de sa RÉSERVE (brune) : quantité, PP, Bio, Story me/life/travel, Story CTA, "
+          "Post, menus Caption, Template, Trash, Flash — identité, réserve et quantité dans chaque "
+          "custom_id",
+          "cng:qb:lola:brune:5" in pid
+          and all(f"cng:a:lola:brune:{k}:5" in pid for k in ("pp", "bio", "storyme", "stlife",
+                                                             "sttravel", "storycta", "post"))
+          and all(f"cng:s:lola:brune:{f}:5" in pid for f in ("caption", "template", "trash", "flash")),
           pid)
+    boite = next(c for c in comps if c.get("type") == 17)
+    dans = ids_de(boite["components"])
+    check("… le 🎥 Brut de l'IDENTITÉ, dans la carte, juste avant le menu Caption",
+          "cnt:s:lola:brut:5" in dans
+          and dans.index("cng:a:lola:brune:post:5") < dans.index("cnt:s:lola:brut:5")
+          < dans.index("cng:s:lola:brune:caption:5"), dans)
+    check("… plus rien du panneau de l'identité (Name, Pseudo, ses menus, ✨, ↩️)",
+          not [i for i in pid if i.startswith(("cnt:a:", "cnt:g:", "cnt:p:", "cnt:qb:"))]
+          and [i for i in pid if i.startswith("cnt:s:")] == ["cnt:s:lola:brut:5"], pid)
     opts = [o["value"] for c in tous(comps) if c.get("custom_id") == "cnt:s:lola:brut:5" for o in c["options"]]
     check("… « 🎛️ Choisir ma brute » absent (vue de Yoshi, clics jamais reçus par Wario)",
           "brutchoix" not in json.dumps(comps) and opts == ["brute", "brutbanger"], opts)
-    check("… en-tête : le nom seul ; « 👤 Identité » et « ✨ General » (réserves liées)",
-          textes == ["## Lola"] and "cnt:i:5" in pid and "cnt:g:lola:5" in pid, (textes, pid[-3:]))
+    check("… en-tête : la réserve seule ; « 👤 Identité » en bas, seul",
+          textes == ["## Brune"] and pid[-1] == "cnt:i:5" and comps[-1]["type"] == 1
+          and len(comps[-1]["components"]) == 1, (textes, pid[-3:]))
     check("… plus aucun custom_id du menu US (« jbus: », « jbg: ») : Wario ne les sert pas",
           not [i for i in pid if not i.startswith(("cnt:", "cng:"))], pid)
     r = rep_de(clic("cnt:ms:0:5", valeurs=["julia"]))
-    check("julia, sans réserve liée : pas de ✨ General",
-          "cnt:g:julia:5" not in ids_de(r["data"]["components"]) and "cnt:i:5" in ids_de(r["data"]["components"]))
+    check("julia, sans réserve liée : refusée, la raison en tête du menu des identités redessiné (7)",
+          r["type"] == 7 and "réserve liée" in (tete(r) or "") and not coches(r)
+          and "cnt:ms:0:5" in ids_de(r["data"]["components"]), (r["type"], tete(r)))
     r = rep_de(clic("cnt:ms:0:5", valeurs=["amelia"]))
     ok, pourquoi = valide(r["data"]["components"])
     check("une identité hors des identités US (forgée, ou retirée depuis) : refusée — le menu des "
@@ -512,8 +524,8 @@ try:
           r["type"] == 7 and r2["type"] == 4 and "Jailbreak" not in (tete(r) or "Jailbreak")
           and tete(r) == r2["data"]["content"], (r, r2))
     r = rep_de(clic("cnt:ms:0:5", valeurs=["lola"]))
-    check("… la pause levée, rechoisir lola dans le même menu ouvre son panneau (le choix n'était "
-          "pas resté affiché)", r["type"] == 7 and "cnt:a:lola:pp:5" in ids_de(r["data"]["components"])
+    check("… la pause levée, rechoisir lola dans le même menu ouvre sa carte (le choix n'était "
+          "pas resté affiché)", r["type"] == 7 and "cng:a:lola:brune:pp:5" in ids_de(r["data"]["components"])
           and tete(r) is None, r["type"])
     r = rep_de(clic("cnt:i:5"))
     check("👤 Identité : retour au menu des identités, sur place",
@@ -528,8 +540,9 @@ try:
           and champ.get("custom_id") == "nombre", r)
     r = rep_de(fenetre("cnt:qm:lola", "7"))
     pid = ids_de(r["data"]["components"])
-    check("… 7 validé : le panneau réécrit sur place, 7 dans chaque custom_id",
-          r["type"] == 7 and "cnt:a:lola:pp:7" in pid and "cnt:qb:lola:7" in pid and "cnt:i:7" in pid, pid)
+    check("… 7 validé (🔢 d'un panneau d'avant) : la carte réécrite sur place, 7 dans chaque custom_id",
+          r["type"] == 7 and "cng:a:lola:brune:pp:7" in pid and "cnt:s:lola:brut:7" in pid
+          and "cng:qb:lola:brune:7" in pid and "cnt:i:7" in pid, pid)
     r1, r2 = rep_de(fenetre("cnt:qm:lola", "abc")), rep_de(fenetre("cnt:qm:lola", "500"))
     check("… « abc » ou 500 : refusés en privé, avec ce qui était tapé",
           r1["type"] == 4 and "« abc »" in r1["data"]["content"]
@@ -605,21 +618,21 @@ try:
     neufs = rest.messages[n0:]
     defauts = [o for c in tous(r["data"]["components"]) if c.get("type") == 3 for o in c["options"]
                if o.get("default")]
-    check("menu Trash : le panneau redessiné (aucune option restée cochée), la vidéo livrée + sa "
-          "description seule",
-          r["type"] == 7 and not defauts and "cnt:s:lola:trash:4" in ids_de(r["data"]["components"])
+    check("menu Trash d'un panneau d'avant : la carte redessinée (aucune option restée cochée), la "
+          "vidéo livrée + sa description seule",
+          r["type"] == 7 and not defauts and "cnt:s:lola:brut:4" in ids_de(r["data"]["components"])
           and len(neufs) == 2 and neufs[0]["fichiers"][0][0] == "trash_1.mp4"
           and neufs[1]["content"].startswith("desc trash") and TIRAGES[0][1] == "lola", [m["content"] for m in neufs])
     r = rep_de(clic("cnt:s:lola:caption:5", valeurs=["pp"]))
     r2 = rep_de(clic("cnt:s:lola:brut:5", valeurs=["brutchoix"]))
     r3 = rep_de(clic("cnt:a:lola:zzz:5"))
     time.sleep(0.2)
-    check("une option hors de sa famille, « Choisir ma brute » (menus) : le panneau redessiné (7), "
+    check("une option hors de sa famille, « Choisir ma brute » (menus) : la carte redessinée (7), "
           "la raison en tête, aucune option restée choisie ; une action inconnue (bouton) : en privé ; "
           "rien de lancé",
           r["type"] == 7 and tete(r) == ct.TEXTE_INCONNUE and not coches(r)
           and r2["type"] == 7 and tete(r2) == ct.TEXTE_EXCLUE and not coches(r2)
-          and "cnt:a:lola:pp:5" in ids_de(r["data"]["components"])
+          and "cng:a:lola:brune:pp:5" in ids_de(r["data"]["components"])
           and r3["type"] == 4 and S not in ct._EN_FILE, (tete(r), tete(r2), r3))
 
     # une barre de progression : postée puis éditée sur place
@@ -662,16 +675,18 @@ try:
     r = rep_de(clic("cnt:g:lola:5"))
     gid_ = ids_de(r["data"]["components"])
     ok, pourquoi = valide(r["data"]["components"])
-    check("✨ General : sur place (7), valide, réserve active brune, retour au panneau et aux identités",
+    check("✨ d'un panneau d'avant : la carte sur place (7), valide, réserve active brune, plus de ↩️",
           r["type"] == 7 and ok and "cng:a:lola:brune:pp:5" in gid_ and "cng:r:lola:blonde:5" in gid_
-          and "cng:s:lola:brune:trash:5" in gid_ and "cnt:p:lola:5" in gid_ and "cnt:i:5" in gid_,
+          and "cng:s:lola:brune:trash:5" in gid_ and "cnt:s:lola:brut:5" in gid_
+          and "cnt:p:lola:5" not in gid_ and "cnt:i:5" in gid_,
           (pourquoi, gid_))
     r = rep_de(clic("cng:r:lola:blonde:5"))
-    check("… choisir blonde : le General passe sur elle",
-          r["type"] == 7 and "cng:a:lola:blonde:pp:5" in ids_de(r["data"]["components"]))
+    check("… choisir blonde : la carte passe sur elle, le 🎥 Brut reste celui de lola",
+          r["type"] == 7 and "cng:a:lola:blonde:pp:5" in ids_de(r["data"]["components"])
+          and "cnt:s:lola:brut:5" in ids_de(r["data"]["components"]))
     r = rep_de(clic("cng:qb:lola:blonde:5"))
     r2 = rep_de(fenetre("cng:qm:lola:blonde", "2"))
-    check("… sa quantité : la fenêtre, puis le General à 2, réserve gardée",
+    check("… sa quantité : la fenêtre, puis la carte à 2, réserve gardée",
           r["type"] == 9 and r["data"]["custom_id"] == "cng:qm:lola:blonde"
           and r2["type"] == 7 and "cng:a:lola:blonde:pp:2" in ids_de(r2["data"]["components"]), (r, r2))
     TIRAGES.clear()
@@ -685,23 +700,24 @@ try:
     TIRAGES.clear()
     r = rep_de(clic("cng:s:lola:brune:trash:5", valeurs=["templatetrash"]))
     livraison_finie()
-    check("… menu Trash du General : redessiné sur place, livré (réserve brune, brute de lola)",
+    check("… menu Trash de la carte : redessinée sur place, livré (réserve brune, brute de lola)",
           r["type"] == 7 and TIRAGES and TIRAGES[0][1:3] == ("brune", "lola"), (r, TIRAGES))
     r = rep_de(clic("cng:s:julia:brune:trash:5", valeurs=["templatetrash"]))
     LIES["julia"] = (["brune"], [])
     r2 = rep_de(clic("cng:s:julia:brune:trash:5", valeurs=["templatetrash"]))
     LIES.pop("julia")
-    check("… Trash pour une model sans brute : refusé AVANT tout rendu, en nommant la model — le "
-          "menu du General redessiné (7), la raison en tête",
-          r["type"] == 7 and r2["type"] == 7 and "Julia" in (tete(r2) or "")
-          and "brute" in (tete(r2) or "") and not coches(r2) and tete(r), (tete(r), tete(r2)))
+    check("… Trash pour une model sans brute : refusé AVANT tout rendu, en nommant la model — la "
+          "carte redessinée (7), la raison en tête ; sans réserve liée, la raison en privé (4)",
+          r["type"] == 4 and r["data"]["content"] and r2["type"] == 7 and "Julia" in (tete(r2) or "")
+          and "brute" in (tete(r2) or "") and not coches(r2), (r, tete(r2)))
     r = rep_de(clic("cng:a:lola:rousse:pp:2"))
     r2 = rep_de(clic("cng:a:julia:brune:pp:2"))
     check("… une réserve non liée : refusée en privé, avec la raison (gardes du General)",
           r["type"] == 4 and "rousse" in r["data"]["content"].lower() and "marché FR" in r["data"]["content"]
           and r2["type"] == 4, (r, r2))
     r = rep_de(clic("cnt:p:lola:5"))
-    check("… ↩️ : retour au panneau de lola", r["type"] == 7 and "cnt:a:lola:pp:5" in ids_de(r["data"]["components"]))
+    check("… ↩️ d'un message d'avant : la carte de lola",
+          r["type"] == 7 and "cng:a:lola:brune:pp:5" in ids_de(r["data"]["components"]))
 
     # ── 10. deux livraisons dans le même ticket : l'une après l'autre ────
     def marques(salon=S):

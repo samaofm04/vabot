@@ -19,10 +19,14 @@ UN SEUL MESSAGE ÉPHÉMÈRE, QUI CHANGE D'ÉCRAN
     Le clic ouvre, pour le seul cliqueur, le menu des identités US — LE MÊME
     que celui des -menu de Youl4b (_jb_menu_models_vue : identités au drapeau
     US hors pause, menus de 10, jamais plus de 25 options par menu). Choisir
-    une identité remplace ce message par SON panneau (_jb_panel : quantité,
-    Name, Pseudo, PP, Bio, Story me/life/travel, Story CTA, Post, menus Brut,
-    Caption, Template, Trash, Flash), puis « ✨ General » et « 👤 Identité »
-    passent d'un écran à l'autre. Un message, réécrit sur place (réponse 7) :
+    une identité remplace ce message par SA CARTE (ecran_carte, 01/11/2026 :
+    « tout de brune, y a que brut qui est de l'identité ») : le ✨ General de
+    sa réserve liée (quantité, PP, Bio, Story me/life/travel, Story CTA, Post,
+    menus Caption, Template, Trash, Flash) avec le menu 🎥 Brut de l'identité,
+    et « 👤 Identité » pour revenir. Le panneau de l'identité (Name, Pseudo…)
+    n'est plus montré ; ses boutons déjà affichés répondent encore. Une
+    identité sans réserve liée est refusée au choix, la raison dite. Un
+    message, réécrit sur place (réponse 7) :
     sur YouCham les éphémères empilés servaient la mauvaise identité (incident
     du 05/09/2026) ; ici il n'y en a qu'un, et chaque custom_id porte
     l'identité et la quantité — aucun état retenu. Les vues de cogs/user sont
@@ -320,32 +324,50 @@ def _a_un_general(vue) -> bool:
     return any(i.startswith(("jbg:a:", "jbg:s:")) for i in ids)
 
 
-def ecran_panneau(mod, ident: str, qte: int) -> List[Dict[str, Any]]:
-    """Le panneau de `ident` (celui du menu US), et ses deux boutons de
-    navigation : 👤 Identité, ✨ General. Lève _Refus quand son nom ne tient
-    pas dans un bouton Discord (_jb_panel_probleme) : un panneau sans
-    boutons ne servirait à rien, le refus le dit."""
+def _rangee_brut(mod, ident: str, qte: int) -> Optional[Dict[str, Any]]:
+    """La rangée du menu 🎥 Brut du panneau US de `ident` — la brute de
+    l'identité —, prise telle que le panneau la pose (mêmes options, mêmes
+    libellés, « Choisir ma brute » retiré par _convertir). None, AU JOURNAL,
+    quand le panneau ne la porte pas."""
     probleme = mod._jb_panel_probleme(ident, qte)
     if probleme:
-        raise _Refus(f"⚠️ **{ident.capitalize()[:60]}** : {probleme}")
-    comps = _convertir(mod._jb_panel(None, ident, qte, marche="us", guild=None), qte, "panneau")
-    nav = [_bouton_nav("Identité", "👤", f"{PREFIXE}i:{qte}")]
-    try:
-        if _a_un_general(_general_vue(mod, ident, qte)):
-            nav.append(_bouton_nav("General", "✨", f"{PREFIXE}g:{ident}:{qte}"))
-    except Exception as e:                                   # noqa: BLE001
-        _log(f"General de {ident} illisible ({type(e).__name__}: {e}) : panneau sans lui")
-    comps.append({"type": 1, "components": nav})
-    return comps
+        _log(f"carte de {ident} : pas de 🎥 Brut ({probleme})")
+        return None
+    cid = f"{PREFIXE}s:{ident}:{mod._FAMILLE_BRUT.cle}:{qte}"
+    for c in _a_plat(_convertir(mod._jb_panel(None, ident, qte, marche="us", guild=None),
+                                qte, "panneau")):
+        if c.get("type") == 1 and any(x.get("custom_id") == cid for x in c.get("components") or []):
+            return c
+    _log(f"carte de {ident} : le panneau ne porte pas {cid}, pas de 🎥 Brut")
+    return None
 
 
-def ecran_general(mod, model: str, qte: int, reserve: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Le ✨ General de `model` (contenu de sa réserve, brute de la model),
-    et le retour au panneau ou aux identités."""
-    comps = _convertir(_general_vue(mod, model, qte, reserve), qte, "General")
-    comps.append({"type": 1, "components": [
-        _bouton_nav(model.capitalize(), "↩️", f"{PREFIXE}p:{model}:{qte}"),
-        _bouton_nav("Identité", "👤", f"{PREFIXE}i:{qte}")]})
+def ecran_carte(mod, ident: str, qte: int, reserve: Optional[str] = None) -> List[Dict[str, Any]]:
+    """La carte d'une identité dans le ticket. Propriétaire, 01/11/2026 : « un
+    truc plus simple, direct avec brunette », « mets celle de brune, y a que
+    brut qui est de l'identité ». Le ✨ General de sa réserve liée (PP, Bio,
+    Stories, Story CTA, Post, Caption, Template, Trash, Flash : contenu de la
+    réserve, brute de l'identité), le 🎥 Brut de l'identité juste avant les
+    menus, puis 👤 Identité. Plus de panneau de l'identité ni de bouton ✨.
+    Lève _Refus quand l'identité n'a pas de réserve liée : sa carte n'aurait
+    que la quantité."""
+    vue = _general_vue(mod, ident, qte, reserve)
+    if not _a_un_general(vue):
+        raise _Refus(f"⚠️ **{ident.capitalize()[:60]}** n'a pas de réserve liée : "
+                     "choisis une autre identité.")
+    comps = _convertir(vue, qte, "carte")
+    brut = _rangee_brut(mod, ident, qte)
+    if brut is not None:
+        boite = next((c for c in comps if c.get("type") == 17), None)
+        enfants = boite.get("components") if boite else None
+        if isinstance(enfants, list):
+            # avant le premier menu déroulant (Caption), comme sur la maquette
+            i = next((k for k, c in enumerate(enfants) if c.get("type") == 1 and any(
+                x.get("type") == 3 for x in c.get("components") or [])), len(enfants))
+            enfants.insert(i, brut)
+        else:
+            comps.append(brut)
+    comps.append({"type": 1, "components": [_bouton_nav("Identité", "👤", f"{PREFIXE}i:{qte}")]})
     return comps
 
 
@@ -437,16 +459,16 @@ def _clic_contenu(p, t, bot, cog, mod, m: List[str]) -> Dict[str, Any]:
         if refus:
             return _sur_menu(refus, lambda: ecran_identites(mod, qte))
         try:
-            return _maj(ecran_panneau(mod, ident, qte))
+            return _maj(ecran_carte(mod, ident, qte))
         except _Refus as r:
             return _sur_menu(str(r), lambda: ecran_identites(mod, qte))
-    if action in ("p", "g") and len(m) == 3 and not modale:   # ↩️ panneau, ✨ General
+    if action in ("p", "g") and len(m) == 3 and not modale:
+        # ↩️ panneau et ✨ General des messages d'avant la carte (01/11/2026) :
+        # ils mènent à la carte
         refus = _refus_identite(bot, mod, m[1])
         if refus:
             raise _Refus(refus)
-        if action == "p":
-            return _maj(ecran_panneau(mod, m[1], _qte(mod, m[2])))
-        return _maj(ecran_general(mod, m[1], _qte(mod, m[2])))
+        return _maj(ecran_carte(mod, m[1], _qte(mod, m[2])))
     if action == "qb" and len(m) == 3 and not modale:
         return fenetre_quantite(f"{PREFIXE}qm:{m[1]}", _qte(mod, m[2]))
     if action == "qm" and len(m) == 2 and modale:
@@ -454,7 +476,7 @@ def _clic_contenu(p, t, bot, cog, mod, m: List[str]) -> Dict[str, Any]:
         refus = _refus_identite(bot, mod, m[1])
         if refus:
             raise _Refus(refus)
-        return _maj(ecran_panneau(mod, m[1], q))
+        return _maj(ecran_carte(mod, m[1], q))
     if action == "a" and len(m) == 4 and not modale:   # un bouton du panneau
         ident, cle, qte = m[1], m[2], _qte(mod, m[3])
         if cle in EXCLUES:
@@ -469,17 +491,17 @@ def _clic_contenu(p, t, bot, cog, mod, m: List[str]) -> Dict[str, Any]:
         # accusé silencieux : le contenu arrive dans le ticket — sauf s'il
         # attend son tour, ce que le VA doit savoir
         return ot._ephemere(en_file) if en_file else {"type": 6}
-    if action == "s" and len(m) == 4 and not modale:   # un menu de famille
+    if action == "s" and len(m) == 4 and not modale:   # 🎥 Brut de la carte
         ident, qte, cle = m[1], _qte(mod, m[3]), _valeur(p)
 
-        def panneau():
-            return ecran_panneau(mod, ident, qte)
+        def carte():
+            return ecran_carte(mod, ident, qte)
         fam = mod._famille_panneau(m[2])
         if cle in EXCLUES:
-            return _sur_menu(TEXTE_EXCLUE, panneau)
+            return _sur_menu(TEXTE_EXCLUE, carte)
         if fam is None or cle not in fam.actions:
-            _log(f"panneau du ticket {t['salon']} : choix {cle!r} refusé (famille {m[2]!r})")
-            return _sur_menu(TEXTE_INCONNUE, panneau)
+            _log(f"carte du ticket {t['salon']} : choix {cle!r} refusé (famille {m[2]!r})")
+            return _sur_menu(TEXTE_INCONNUE, carte)
         refus = _refus_identite(bot, mod, ident)
         if refus:
             # l'identité n'est plus servie : son panneau non plus
@@ -488,9 +510,9 @@ def _clic_contenu(p, t, bot, cog, mod, m: List[str]) -> Dict[str, Any]:
             cmd, sc = _commande(cog, mod, cle)
             en_file = _lancer(t, cog, mod, ident, cle, cmd, sc, qte)
         except _Refus as r:
-            return _sur_menu(str(r), panneau)
-        # le panneau redessiné, refusé ou non (_sur_menu)
-        return _sur_menu(en_file, panneau)
+            return _sur_menu(str(r), carte)
+        # la carte redessinée, refusé ou non (_sur_menu)
+        return _sur_menu(en_file, carte)
     return ot._ephemere(TEXTE_INCONNUE)
 
 
@@ -508,16 +530,16 @@ def _clic_general(p, t, bot, cog, mod, m: List[str]) -> Dict[str, Any]:
             return _sur_menu(refus, lambda: ecran_identites(mod, _qte(mod, m[4])))
         raise _Refus(refus)
     if action == "r" and len(m) == 4 and not modale:   # choix de la réserve
-        return _maj(ecran_general(mod, model, _qte(mod, m[3]), reserve=res))
+        return _maj(ecran_carte(mod, model, _qte(mod, m[3]), reserve=res))
     if action == "qb" and len(m) == 4 and not modale:
         return fenetre_quantite(f"{GENERAL}qm:{model}:{res}", _qte(mod, m[3]))
     if action == "qm" and len(m) == 3 and modale:
-        return _maj(ecran_general(mod, model, _lire_quantite(mod, p), reserve=res))
+        return _maj(ecran_carte(mod, model, _lire_quantite(mod, p), reserve=res))
     if action in ("a", "s") and len(m) == 5 and not modale:
         qte = _qte(mod, m[4])
 
         def general():
-            return ecran_general(mod, model, qte, reserve=res)
+            return ecran_carte(mod, model, qte, reserve=res)
         try:
             if action == "a":
                 cle = m[3]
