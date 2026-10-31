@@ -17,10 +17,12 @@ git) :
   son parrain, ses filleuls et leurs subs (primes à 10 et 200 subs, payées à
   la main).
 
-Un membre neuf est annoncé dans 🚪・arrivées-sur-le-serveur (avec son parrain),
-un membre parti dans 👋・départs-et-sanctions. Au premier passage, les membres
-déjà là sont notés SANS annonce : 160 « nouvelle arrivée » d'un coup
-n'apprendraient rien à personne.
+Un membre neuf est annoncé dans 🚪・arrivées-sur-le-serveur, avec le lien
+qui l'a fait venir et de la part de qui (origine_membres.lignes_arrivee), un
+membre parti dans 👋・départs-et-sanctions, avec son motif : parti de
+lui-même, exclu ou banni par qui (origine_membres.motif_depart). Au premier
+passage, les membres déjà là sont notés SANS annonce : 160 « nouvelle
+arrivée » d'un coup n'apprendraient rien à personne.
 
 C'est le SEUL relevé des membres d'Agency, dans son propre fil, chaque minute
 (demarrer) — il tournait avant dans le tour des tickets, toutes les dix
@@ -68,6 +70,9 @@ PERIODE_S = 60
 #: l'historique (rattraper) : au plus autant de messages par tour, pour ne
 #: pas retenir le relevé plusieurs minutes d'affilée
 RATTRAPAGE_PAR_TOUR = 40
+#: un départ sans exclusion ni ban au journal d'audit n'est dit « parti de
+#: lui-même » qu'après ce délai : le journal peut arriver après le constat
+DELAI_DEPART_S = 90
 #: l'affiche de Twitter (Mario, « 0,50 $ à 10 subs, 10 $ à 200 subs ») :
 #: aucune mention de serveur, servie par affiliation_site
 AFFICHE = "https://youl4b.com/affiliation/affiche.png"
@@ -234,14 +239,17 @@ def _carte(embed: Dict[str, Any], uid: str, m: Dict[str, Any], verifie: bool) ->
 
 
 def embed_arrivee(uid: str, m: Dict[str, Any], verifie: bool, historique: bool,
-                  parrain: Optional[str] = None) -> Dict[str, Any]:
+                  parrain: Optional[str] = None, origine: str = "") -> Dict[str, Any]:
+    """`origine` : les lignes « 🔗 Lien » d'un arrivé du relevé ; elles disent
+    aussi le parrain. L'historique garde « Invité par »."""
     quand = (f"a rejoint le serveur le {_date(m.get('joined_at'))}." if historique
              else "vient de rejoindre le serveur.")
     etat = ("✅ Vérification validée." if verifie else
             f"⏳ **Pas encore vérifié.** La vérification se fait dans <#{SALON_VERIF}>.")
+    suite = origine or (f"\nInvité par <@{parrain}>." if parrain else "")
     return _carte({"title": "🚪 " + ("Arrivée" if historique else "Nouvelle arrivée")
                             + " sur Agency VA INSTAGRAM",
-                   "description": f"<@{uid}> {quand}\n{etat}" + (f"\nInvité par <@{parrain}>." if parrain else ""),
+                   "description": f"<@{uid}> {quand}\n{etat}" + suite,
                    "color": 0x5865F2,
                    "footer": {"text": "Agency VA INSTAGRAM • Arrivées sur le serveur"}},
                   uid, m, verifie)
@@ -462,7 +470,8 @@ def _surveiller() -> Dict[str, Any]:
             return bilan
         # sans relevé d'invitations (état d'avant le parrainage), le premier
         # tour pose la référence : aucun parrain deviné
-        parrain = candidats(d.get("invite_uses"), inv, d.get("liens") or {}, len(neufs))
+        usages_avant = d.get("invite_uses")
+        parrain = candidats(usages_avant, inv, d.get("liens") or {}, len(neufs))
         filleuls = d.setdefault("filleuls", {})
         for uid in neufs:
             m = actuels[uid]
@@ -490,6 +499,7 @@ def _surveiller() -> Dict[str, Any]:
         _ecrire(d)
         arrivees = [(u, dict(f), (filleuls.get(u) or {}).get("parrain"))
                     for u, f in connus.items() if f.get("a_annoncer")][:MAX_ANNONCES]
+        liens = dict(d.get("liens") or {})
         departs = [(u, dict(f)) for u, f in (d.get("partis") or {}).items()
                    if f.get("a_annoncer")][:MAX_ANNONCES]
         rattrape = bool(d.get("rattrape"))
@@ -514,7 +524,9 @@ def _surveiller() -> Dict[str, Any]:
     for uid, f, p in arrivees:
         m = actuels.get(uid) or {}
         deja = bool(role_verifie and role_verifie in (m.get("roles") or []))
-        mid = _poster(SALON_ARRIVEES, embed_arrivee(uid, m, deja, historique=False, parrain=p),
+        mid = _poster(SALON_ARRIVEES, embed_arrivee(uid, m, deja, historique=False, parrain=p,
+                                                    origine=_origine(uid, liens, p, usages_avant
+                                                                     if uid in neufs else None)),
                       f"{GID}:{uid}:{f.get('joined_at')}:arrivee")
         if not mid:
             break                                   # Discord refuse : le tour suivant reprend
@@ -526,11 +538,21 @@ def _surveiller() -> Dict[str, Any]:
                 g["arrivee"] = mid
                 _ecrire(d)
         bilan["arrivees"] += 1
+    journal = None
     for uid, f in departs:
-        embed = {"title": "👋 Départ",
-                 "description": f"<@{uid}> a quitté le serveur.",
-                 "color": 0xE67E22,
-                 "footer": {"text": "Agency VA INSTAGRAM • Départs"}}
+        import origine_membres as om
+        if journal is None:
+            journal = om.journal(GID, _api)
+        motif = om.motif_depart(GID, uid, f.get("joined_at"), f.get("quand"), lu=journal)
+        if motif["kind"] == "depart" and motif["lu"] and time.time() - float(f.get("quand") or 0) < DELAI_DEPART_S:
+            bilan["departs_en_attente"] = bilan.get("departs_en_attente", 0) + 1
+            continue                                # le journal peut être en retard : tour suivant
+        t = om.texte_depart(motif)
+        nom = f" · `@{f['nom']}`" if f.get("nom") else ""
+        embed = {"title": t["titre"],
+                 "description": f"<@{uid}>{nom}\n\n{t['texte']}",
+                 "color": 0xE67E22 if motif["kind"] == "depart" else 0xED4245,
+                 "footer": {"text": f"Agency VA INSTAGRAM • {t['libelle']}"}}
         mid = _poster(SALON_DEPARTS, embed, f"{GID}:{uid}:{f.get('joined_at')}:depart")
         if not mid:
             break
@@ -547,6 +569,18 @@ def _surveiller() -> Dict[str, Any]:
         print(f"[agency] {bilan['arrivees']} arrivée(s) ({bilan['parraines']} parrainée(s)), "
               f"{bilan['departs']} départ(s) annoncé(s)", flush=True)
     return bilan
+
+
+def _origine(uid: str, liens: Dict[str, Any], parrain: Optional[str],
+             usages_avant: Optional[Dict[str, int]]) -> str:
+    """Les lignes « 🔗 Lien » de la carte d'un arrivé ; une panne le dit sur
+    la carte plutôt que de la retenir."""
+    try:
+        import origine_membres as om
+        return om.lignes_arrivee(GID, uid, liens, parrain, True, usages_avant, api=_api)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[agency] lien d'arrivée de {uid} illisible : {type(e).__name__}: {e}", flush=True)
+        return "\n🔗 **Lien** illisible (panne de lecture)." + (f"\nInvité par <@{parrain}>." if parrain else "")
 
 
 # ── l'espace personnel (youl4b.com/affiliation/mon-espace) ─────────────────

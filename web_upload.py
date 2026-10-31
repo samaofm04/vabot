@@ -80385,9 +80385,22 @@ def _brancher_suspensions() -> None:
         print(f"[suspension] branchement impossible : {type(e).__name__}: {e}", flush=True)
 
 
+def _brancher_origines() -> None:
+    # Le lien d'arrivée (de la part de qui) et le motif du départ (parti de
+    # lui-même, exclu ou banni par qui) sur les cartes d'accueil des modules
+    # hors git : voir origine_membres.brancher. Avant create_app, comme les
+    # suspensions.
+    try:
+        import origine_membres
+        origine_membres.brancher()
+    except Exception as e:
+        print(f"[origine] branchement impossible : {type(e).__name__}: {e}", flush=True)
+
+
 def create_app():
     remplacants = _demarrages_proteges()
     _brancher_suspensions()
+    _brancher_origines()
     try:
         app = _create_app_sans_protection()
     finally:

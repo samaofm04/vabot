@@ -26,6 +26,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import time
 import types
 
 BOT = pathlib.Path(__file__).parent.resolve()
@@ -439,13 +440,19 @@ try:
 
     # ── arrivées, départs, panneau (agency_accueil) ──────────────────────
     import agency_accueil as aa
+    import origine_membres as om
     import verif_discord as vd2
-    _sauve_aa = (aa.FICHIER, aa._api, vd2.assurer_message_verif)
+    _sauve_aa = (aa.FICHIER, aa._api, vd2.assurer_message_verif, aa.DELAI_DEPART_S, om.RECHERCHE_ESSAIS)
+    om.RECHERCHE_ESSAIS = (0,)            # pas d'attente : la fausse recherche répond tout de suite
+    om._CACHE.clear()
     aa.FICHIER = TMP / "agency_accueil.json"
     LISTE = {"ok": True, "m": [{"user": {"id": "1"}, "joined_at": "a", "roles": []},
                                {"user": {"id": "2"}, "joined_at": "b", "roles": []},
                                {"user": {"id": "9", "bot": True}, "roles": []}]}
     INVITES = {"ok": True, "usages": {"vanity": 4}}
+    # la recherche de membres (source d'arrivée notée par Discord) et le
+    # journal d'audit (exclusions, bans) : vides tant qu'un test ne les remplit pas
+    SOURCES_AA, AUDIT_AA = {}, {"ok": True, "entrees": []}
     postes, panneaux, appels_aa = [], [], []
 
     edits = []
@@ -462,6 +469,19 @@ try:
             if not INVITES["ok"]:
                 return 403, {"message": "Missing Permissions"}
             return 200, [{"code": c, "uses": n} for c, n in INVITES["usages"].items()]
+        if methode == "POST" and chemin.endswith("/members-search"):
+            uid_ = kw["json"]["and_query"]["user_id"]["or_query"][0]
+            if uid_ not in SOURCES_AA:
+                return 200, {"members": []}
+            code_, par_ = SOURCES_AA[uid_]
+            return 200, {"members": [{"member": {"user": {"id": uid_}}, "source_invite_code": code_,
+                                      "join_source_type": 5, "inviter_id": par_}]}
+        if methode == "GET" and chemin.endswith("/audit-logs"):
+            if not AUDIT_AA["ok"]:
+                return 403, {"message": "Missing Permissions"}
+            t_ = kw["params"]["action_type"]
+            return 200, {"audit_log_entries": [e_ for e_ in AUDIT_AA["entrees"] if e_["action_type"] == t_],
+                         "users": [{"id": "1", "username": "manager1"}]}
         if methode == "POST" and chemin.endswith("/invites"):
             code = f"inv{len(INVITES['usages'])}"
             INVITES["usages"][code] = 0
@@ -510,12 +530,22 @@ try:
     check("… ensuite plus rien n'est reposté", not postes, postes)
     LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "2"] + [
         {"user": {"id": "3"}, "joined_at": "c", "roles": []}]
+    # 2 a été exclu par 1 (31/10 : « je sais pas c'est qui l'a viré »)
+    AUDIT_AA["entrees"] = [{"id": str((int(time.time() * 1000) - 1420070400000) << 22), "action_type": 20,
+                            "target_id": "2", "user_id": "1", "reason": "Inactif depuis 7 jours"}]
     b2 = aa.surveiller()
     check("un arrivé dans 🚪 arrivées, un parti dans 👋 départs, sans mention ni bot",
           b2["arrivees"] == 1 and b2["departs"] == 1
           and postes[0][0].endswith(f"/{aa.SALON_ARRIVEES}/messages")
           and postes[1][0].endswith(f"/{aa.SALON_DEPARTS}/messages")
           and all(x[2].get("parse") == [] and not x[2].get("users") for x in postes), postes)
+    check("… l'exclu : par qui et pourquoi, lu au journal d'audit, annoncé sans attendre",
+          postes[1][1] == "🚫 Un membre a été exclu"
+          and "👮 **Exclu par** <@1> · `@manager1`" in postes[1][3]["description"]
+          and "**Raison** : Inactif depuis 7 jours" in postes[1][3]["description"]
+          and postes[1][3]["footer"]["text"].endswith("• Membre exclu"), postes[1])
+    check("… l'arrivé sans source ni invitation qui a monté : « inconnu », écrit",
+          "🔗 **Lien** inconnu" in postes[0][3]["description"], postes[0][3]["description"])
     check("… le panneau n'est pas revérifié à chaque tour (une fois l'heure)", panneaux == [AG])
     n = len(postes)
     b3 = aa.surveiller()
@@ -543,6 +573,7 @@ try:
           aa.lien_pour("1") == lien1 and len(invites_creees()) == 1)
     code1 = lien1.rsplit("/", 1)[1]
     INVITES["usages"][code1] += 1
+    SOURCES_AA["4"] = (code1, "9")            # l'invitation perso est créée par le bot
     LISTE["m"] = LISTE["m"] + [{"user": {"id": "4", "username": "nouveau4"}, "joined_at": "d", "roles": []}]
     n = len(postes)
     b5 = aa.surveiller()
@@ -550,7 +581,9 @@ try:
     check("arrivé par le lien de 1 : 1 est son parrain, et l'annonce le dit (sans mention)",
           b5["arrivees"] == 1 and b5["parraines"] == 1 and f4.get("parrain") == "1"
           and f4.get("source") == "invitation_unique" and len(postes) == n + 1
-          and "Invité par <@1>." in postes[n][3]["description"] and postes[n][3].get("thumbnail")
+          and f"🔗 **Lien** : 🤝 **De la part de** <@1> : son lien de parrainage `{code1}`"
+          in postes[n][3]["description"] and "Invité par" not in postes[n][3]["description"]
+          and postes[n][3].get("thumbnail")
           and postes[n][2] == {"parse": []}, (b5, f4, postes[n:]))
     check("… parrain_de le rend (le « Merci » de la bienvenue)",
           aa.parrain_de("4") == "1" and aa.parrain_de("3") == "")
@@ -568,13 +601,25 @@ try:
     check("deux arrivés par deux liens dans le même relevé : origine à confirmer, rien deviné",
           b6["arrivees"] == 2 and b6["parraines"] == 0
           and e6["5"]["parrain"] is None and e6["6"]["source"] == "a_confirmer", (b6, e6))
+    check("… et la carte le dit : plusieurs liens possibles, les deux nommés",
+          all(f"🔗 **Lien** : plusieurs possibles, `{code1}` (parrainage de <@1>), `{code3}` (parrainage de <@3>)"
+              in p_[3]["description"] for p_ in postes[-2:]), [p_[3]["description"] for p_ in postes[-2:]])
     INVITES["usages"]["vanity"] += 1
     LISTE["m"] = LISTE["m"] + [{"user": {"id": "7"}, "joined_at": "g", "roles": []}]
     aa.surveiller()
     check("arrivé par une invitation qui n'est à personne : sans parrain",
           etat_aa()["filleuls"]["7"]["parrain"] is None)
     LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "4"]
+    n = len(postes)
+    ba = aa.surveiller()
+    check("parti sans exclusion au journal : attend avant de conclure (journal en retard)",
+          ba["departs"] == 0 and ba.get("departs_en_attente") == 1 and len(postes) == n, ba)
+    aa.DELAI_DEPART_S = 0
     b7 = aa.surveiller()
+    check("… puis « parti de lui-même »",
+          b7["departs"] == 1 and postes[-1][1] == "👋 Un membre est parti de lui-même"
+          and "🚶 **Parti de lui-même**" in postes[-1][3]["description"]
+          and "<@4> · `@nouveau4`" in postes[-1][3]["description"], postes[-1])
     INVITES["usages"][code3] += 1
     LISTE["m"] = LISTE["m"] + [{"user": {"id": "4", "username": "nouveau4"}, "joined_at": "h", "roles": []}]
     b8 = aa.surveiller()
@@ -588,6 +633,13 @@ try:
           b9["arrivees"] == 0 and len(postes) == n and "8" not in etat_aa()["membres"])
     INVITES["ok"] = True
     check("… et le tour suivant reprend l'arrivée", aa.surveiller()["arrivees"] == 1)
+    AUDIT_AA["ok"] = False
+    LISTE["m"] = [x for x in LISTE["m"] if x["user"]["id"] != "8"]
+    b10 = aa.surveiller()
+    check("journal d'audit refusé : départ annoncé, sans conclure, et c'est dit",
+          b10["departs"] == 1 and postes[-1][1] == "👋 Un membre a quitté le serveur"
+          and "journal d'audit refusé (HTTP 403)" in postes[-1][3]["description"], postes[-1])
+    AUDIT_AA["ok"] = True
     _vrai_etat = aa.FICHIER.read_text()
     aa._ecrire({"initialise": 1, "membres": {"50": {"joined_at": "2026-01-01"},
                                              "51": {"joined_at": "2026-02-01", "neuf": True, "arrivee": "m"},
@@ -702,7 +754,7 @@ try:
     e4 = aa.embed_bienvenue("4", {"user": {"id": "4"}}, aa.parrain_de("4"))
     check("la bienvenue d'un filleul remercie son parrain (comme Twitter)",
           "🙏 Merci <@1>" in e4["description"] and "Merci" not in aa.embed_bienvenue("3", {})["description"])
-    aa.FICHIER, aa._api, vd2.assurer_message_verif = _sauve_aa
+    aa.FICHIER, aa._api, vd2.assurer_message_verif, aa.DELAI_DEPART_S, om.RECHERCHE_ESSAIS = _sauve_aa
     src_wu = (BOT / "web_upload.py").read_text(encoding="utf-8")
     check("un seul relevé des membres : plus dans le tour des tickets, le fil d'agency_accueil",
           ".surveiller()" not in inspect.getsource(tk.suivre_partout)
