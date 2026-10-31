@@ -69828,7 +69828,8 @@ def create_app():
         suffit, comparée en temps constant — et ne montre NI paiement NI gain.
         La clé du propriétaire (infloww_liens.cle_paie, jamais postée) ou une
         session admin sans clé montrent en plus les colonnes Paiement et
-        Gain / perte. Sans clé, c'est la règle de /infloww : admin seulement.
+        Gain / perte. Sans clé, c'est la règle de /infloww : admin seulement,
+        sauf la page Lia (?c=lia, ACCES_LIBRE) : ouverte à tous, vue des VA.
         Une clé FAUSSE est refusée même à un admin connecté — elle ne se
         confond pas avec une absence de clé.
         """
@@ -69854,6 +69855,11 @@ def create_app():
             if not acces:
                 return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
             paie = acces == "paie"
+        elif getattr(_il, "ACCES_LIBRE", False) and not (is_auth() and _is_admin()):
+            # ?c=lia (propriétaire, 31/10/2026 : « mets aussi un accès libre ») :
+            # sans clé ni compte, la vue des VA -- ni paiement ni gain.
+            # L'admin connecté garde la sienne, paiement compris.
+            paie = False
         else:
             if not is_auth():
                 return redirect("/")
@@ -69861,7 +69867,7 @@ def create_app():
                 return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
             paie = True
         try:
-            html = _il.page(request.args, cle=k, paie=paie, lien_perso=not k)
+            html = _il.page(request.args, cle=k, paie=paie, lien_perso=paie and not k)
         except Exception as e:
             # page() ne lève pas ; si elle le faisait, la panne s'affiche SUR
             # la page plutôt qu'en page blanche

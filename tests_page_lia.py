@@ -26,7 +26,9 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
   - la paie : 0,70 $ par sub pour tout VA sans réglage à lui (propriétaire,
     31/10 : « pour cette fiche les VA c'est 0,7 par sub tout le temps ») ; un
     réglage enregistré passe devant ; Jessye et Emy sans paie imposée ;
-  - la route : clé des VA exigée, ni paiement ni gain, aucun JavaScript.
+  - la route : accès libre (sans clé ni compte : vue des VA ; propriétaire,
+    31/10 : « mets aussi un accès libre »), le lien posté sans clé, l'admin
+    connecté garde le paiement ; Emy et Jessye restent fermées sans clé.
 
 Fausses lectures : aucun appel réseau. Lancement : python tests_page_lia.py
 """
@@ -148,8 +150,11 @@ check("Jessye et Emy inchangées : équipe, Infloww, clics OF, liste hors détai
       all(p.GROUPE_GMS == "" and p.EQUIPE_GMS == il.EQUIPE_GMS and p.SOURCE_TOUJOURS == "Infloww"
           and p.CLICS_OF is True and p.HORS_DETAIL is True and p.US_FRAIS_S is None
           for p in (il, il.profil("emy"))))
-check("le lien des VA porte c=lia (et la clé des VA)", m.url_page().endswith("&c=lia")
-      if m.CLE_FICHIER.exists() else True)
+check("le lien posté : la page Lia SANS clé (accès libre, 31/10)",
+      m.ACCES_LIBRE is True and m.url_page() == "https://youl4b.com/infloww/liens?c=lia", m.url_page())
+check("Jessye et Emy : toujours une clé dans le lien, pas d'accès libre",
+      il.ACCES_LIBRE is False and il.profil("emy").ACCES_LIBRE is False
+      and "k=" in il.profil("emy").url_page() if il.CLE_FICHIER.exists() else True)
 for _k in FICHIERS:
     setattr(m, _k, TMP / (_k.lower() + ".json"))
 m.US_EN_FOND = False
@@ -266,6 +271,29 @@ try:
           r.status_code == 200 and "Liens de suivi · Lia" in corps and "VA 1" in corps, r.status_code)
     check("route : sans paiement ni gain pour la clé des VA", ">Paiement<" not in corps)
     check("route : clé fausse refusée", c.get("/infloww/liens?k=FAUSSE&c=lia").status_code == 403)
+    r = c.get("/infloww/liens?c=lia")
+    libre = r.get_data(as_text=True)
+    check("accès libre : sans clé ni compte, 200, la page Lia, ni paiement ni gain",
+          r.status_code == 200 and "Liens de suivi · Lia" in libre and ">Paiement<" not in libre
+          and "Gain" not in libre and "Votre lien personnel" not in libre, r.status_code)
+    check("accès libre : les liens de tri et de période restent sans clé",
+          "k=" not in "".join(re.findall(r'href="([^"]*)"', libre)), re.findall(r'href="([^"]*)"', libre)[:5])
+    r_e = c.get("/infloww/liens?c=emy")
+    check("page Emy sans clé ni compte : toujours fermée (renvoi à l'accueil)",
+          r_e.status_code in (301, 302, 303) and "Liens de suivi" not in r_e.get_data(as_text=True), r_e.status_code)
+    with c.session_transaction() as s_:
+        s_["auth"], s_["username"], s_["role"] = True, "admin", "admin"
+    r_a = c.get("/infloww/liens?c=lia").get_data(as_text=True)
+    check("admin connecté, sans clé : sa vue, paiement compris", ">Paiement<" in r_a)
+    # le patch du VPS (hors git) qui ajoute « 🤝 Affiliations » remplace la
+    # balise <body> exacte de la vue du propriétaire
+    nav = '<body><nav style="padding:16px"><a href="/affiliations">🤝 Affiliations · Vue globale</a></nav>'
+    check("Lia : le lien « Affiliations » du patch VPS n'entre pas (31/10 : « rien à faire là »)",
+          "<body>" not in r_a and "Affiliations" not in r_a.replace("<body>", nav, 1)
+          and "<body" in r_a, r_a[:200])
+    _e_ = il.profil("emy")
+    check("Emy et Jessye : la balise <body> exacte reste, le lien du patch y entre",
+          all("<body>" in p_.page_html(p_._vide("x")) for p_ in (il, _e_)))
 finally:
     il.profil = _sauve
 

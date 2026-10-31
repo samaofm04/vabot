@@ -110,6 +110,11 @@ US_FRAIS_S: Optional[int] = None
 # True : une personne porte le nom de son lien de suivi (« @roucham_79944 »),
 # le nom GetMySocial (« VA 1 ») passe dessous.
 NOM_PAR_SUIVI = False
+# True : la page s'ouvre sans clé (vue des VA, ni paiement ni gain), et le
+# lien posté n'en porte pas.
+ACCES_LIBRE = False
+# False : pas de lien « 🤝 Affiliations » en tête de la page (voir page_html).
+LIEN_AFFILIATIONS = True
 MARQUE = "Infloww · YouL4b"
 GUILD ="1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
 SALON = "1553218920842928219"        # salon « inflow-resultat », public : les VA le voient
@@ -4306,6 +4311,10 @@ def acces_cle(k: Any) -> str:
 def url_page() -> str:
     """Le lien du salon, celui des VA : la clé du salon, jamais celle du
     paiement."""
+    if ACCES_LIBRE and PROFIL:
+        # page Lia : ouverte à tous ; la clé des VA ouvrirait en plus les
+        # pages Jessye et Emy, elle n'a rien à faire dans le salon de YouCham
+        return f"{SITE}/infloww/liens?c={PROFIL}"
     return f"{SITE}/infloww/liens?k={cle_page()}" + (f"&c={PROFIL}" if PROFIL else "")
 
 
@@ -5427,6 +5436,13 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
             + f" · GetMySocial « {_e(NOM_EQUIPE)} »")
     if not t.get("erreur"):
         sous += f" · {_nb(len(lignes))} personnes"
+    # Le lien « 🤝 Affiliations · Vue globale » est ajouté par un patch du VPS
+    # (hors git, 99zzzzzz-affiliation-site-web) qui remplace la balise <body>
+    # EXACTE de la vue du propriétaire : une autre balise le laisse dehors,
+    # sans toucher à ses lignes (un push qui les touche fait tomber le patch
+    # entier, et la page /affiliations avec). Page Lia, propriétaire, 31/10 :
+    # « retire aussi le truc affiliation, rien à faire là ».
+    corps = "<body>" if LIEN_AFFILIATIONS else '<body class="sans-affiliations">'
     perso = ""
     if paie and lien_perso:
         # le propriétaire connecté : son lien avec le paiement, à garder pour
@@ -5523,7 +5539,7 @@ details .boite{{margin-top:8px;opacity:.85}}
    l'écran. Ce qui ne tiendrait pas défile dans la boîte, jamais la page. */
 @media (max-width:480px){{.periode .lib{{flex-basis:100%}} table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} .nv{{padding:1px 3px}} h1{{font-size:18px}}}}
 @media (max-width:340px){{table{{font-size:11.5px}} th,td{{padding:7px 2px}} th:first-child,td:first-child{{padding-left:8px}} th:last-child,td:last-child{{padding-right:8px}} td.nom{{min-width:64px}}}}
-</style></head><body>
+</style></head>{corps}
 <div class="marque">{_e(MARQUE)}</div>
 <h1>Liens de suivi · {_e(NOM_AFFICHE)}</h1>
 <p class="sous">{sous}</p>
@@ -5595,6 +5611,9 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     "US_FRAIS_S": 3600, "MARQUE": "MyPuls · YouCham",
     # « change leur nom ... tu mets leur truc d'Infloww, genre @ » (31/10)
     "NOM_PAR_SUIVI": True,
+    # « mets aussi un accès libre » (31/10) : ouverte à tous, sans clé
+    "ACCES_LIBRE": True,
+    "LIEN_AFFILIATIONS": False,
     "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
     "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",
