@@ -101,7 +101,8 @@ NOM_EQUIPE = "JESSY LE RETOUR"
 GROUPE_GMS = ""
 # D'où viennent les chiffres « depuis toujours » : Lia n'est pas chez Infloww.
 SOURCE_TOUJOURS = "Infloww"
-# False : pas de colonne des clics du lien de suivi, CVR = subs ÷ clics US.
+# False : pas de colonne des clics du lien de suivi (le CVR reste calculé
+# sur eux : subs ÷ clics OnlyFans).
 CLICS_OF = True
 # False : les liens de suivi qu'aucun lien GMS ne vise sont comptés, pas listés.
 HORS_DETAIL = True
@@ -1862,16 +1863,11 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
              # un total qui en manquerait un se lirait comme complet : « — »
              glob=sum(glob_connus) if glob_connus and len(glob_connus) == len(us_connus) else None,
              us_manquants=len(lignes) - len(us_connus))
-    if not CLICS_OF:
-        # page Lia (propriétaire, 31/10/2026) : « pas les clics Infloww mais
-        # ceux de GMS, les US, après sub, CVR et LTV » -- CVR = subs ÷ clics
-        # US. Au total, les seules personnes dont subs ET clics US sont connus :
-        # les clics d'un lien sans lien de suivi en face faisaient baisser le CVR.
-        for x in lignes:
-            x["cvr"] = (int(x["subs"]) * 100.0 / x["us"]) if x.get("us") and x.get("subs") is not None else None
-        deux = [x for x in lignes if x.get("us") is not None and x.get("subs") is not None]
-        us_deux = sum(int(x["us"]) for x in deux)
-        T["cvr"] = (sum(int(x["subs"]) for x in deux) * 100.0 / us_deux) if us_deux else None
+    # Page Lia : le CVR a d'abord été calculé sur les clics US (« les clics
+    # ... de GMS, les US, après sub, CVR et LTV ») ; il montait à 400 % (des
+    # subs venus d'ailleurs que des US). Propriétaire, 31/10/2026, capture
+    # d'Infloww à l'appui : « prends juste les clics sur Infloww pour le CVR ».
+    # Il reste donc celui de _somme : subs ÷ clics du lien de suivi OnlyFans.
     pp_t = _part_partenaire(comptes)
     if pp_t:
         T["part_p"] = pp_t
@@ -4837,7 +4833,8 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours, "
                 + (f"relevés toutes les {_nb(US_FRAIS_S // 60)} min" if US_FRAIS_S else "relevés une fois par jour"),
                 f"<b>Subs</b> : abonnés du lien de suivi {_e(_de_nom(NOM_AFFICHE))}, lus dans MyPuls",
-                "<b>CVR</b> = subs ÷ clics US ; <b>$ / sub</b> = gains nets ÷ subs",
+                "<b>CVR</b> = subs ÷ clics du lien de suivi OnlyFans (ceux qu'affiche Infloww, lus dans "
+                "MyPuls) ; <b>$ / sub</b> = gains nets ÷ subs",
                 f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
                 f"{_nb(MYPULS_TTL_S // 60)} min au plus"]
     elif not du:
@@ -4879,7 +4876,7 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                  "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
                  "clics US" if CLICS_OF else
                  "<b>Subs</b> : abonnés du lien de suivi sur la période, lus dans MyPuls"),
-                f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'US'} ; "
+                f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'OnlyFans du lien de suivi'} ; "
                 "<b>$ / sub</b> = gains nets que MyPuls attribue au lien sur la période ÷ subs de la période"]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")

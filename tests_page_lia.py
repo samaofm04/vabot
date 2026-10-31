@@ -14,8 +14,8 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     Infloww), du premier jour à aujourd'hui ;
   - colonnes : Personne, Clics US, Clics globaux (tous pays, 31/10), Subs,
     CVR, $ / sub — pas de clics du lien
-    de suivi ; CVR = subs ÷ clics US, au total sur les seules lignes dont subs
-    ET clics US sont connus ;
+    de suivi ; CVR = subs ÷ clics du lien de suivi OnlyFans (propriétaire,
+    31/10 : « prends juste les clics sur Infloww pour le CVR ») ;
   - les autres liens de suivi de Lia (Twitter, Threads, Agency) sont comptés,
     pas listés : ni leur nom ni leurs chiffres sur la page ;
   - clics US relevés toutes les heures (liens neufs), un raté retenté après
@@ -190,8 +190,8 @@ check("Jessye et Emy : pas de colonne des clics globaux",
 check("aucune colonne « Clics MyPuls » ni « Clics Infloww »",
       "Clics MyPuls" not in texte.replace(" ", " ") and "Clics Infloww" not in texte.replace(" ", " "))
 va1 = lignes["VA 1"]
-check("VA 1 : 40 clics US, 3 subs, CVR 7,5 % (subs ÷ US), 4,17 $ / sub",
-      va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 7.5) < 1e-9
+check("VA 1 : 40 clics US, 3 subs, CVR 12,5 % (3 subs ÷ 24 clics OnlyFans, pas ÷ US), 4,17 $ / sub",
+      va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 12.5) < 1e-9
       and abs(va1["par_sub"] - 12.5 / 3) < 1e-9, va1)
 check("nom : le lien de suivi (« @roucham_79944 »), « VA 1 · c115 » dessous ; clé, paie et ancre : « VA 1 »",
       va1["nom"] == "@roucham_79944" and va1["cle"] == "VA 1"
@@ -201,12 +201,12 @@ check("sans lien de suivi trouvé : le nom GetMySocial reste (VA 4)", lignes["VA
       lignes["VA 4"]["nom"])
 check("Jessye et Emy : le nom reste celui de GetMySocial",
       il.NOM_PAR_SUIVI is False and il.profil("emy").NOM_PAR_SUIVI is False)
-check("VA 3 : 0 clic US, pas de CVR (et non 0 %)", lignes["VA 3"]["cvr"] is None, lignes["VA 3"])
+check("VA 3 : 0 clic OnlyFans, pas de CVR (et non 0 %)", lignes["VA 3"]["cvr"] is None, lignes["VA 3"])
 check("VA 4 : lien de suivi introuvable chez MyPuls, dit, pas de zéro inventé",
       lignes["VA 4"]["subs"] is None and lignes["VA 4"]["introuvables"], lignes["VA 4"])
 T = t["totaux"]
-check("total : CVR sur les seules lignes dont subs ET US sont connus (4 ÷ 52, pas 4 ÷ 82)",
-      T["us"] == 82 and abs(T["cvr"] - 4 * 100.0 / 52) < 1e-9, T)
+check("total : CVR = 4 subs ÷ 29 clics OnlyFans de ses liens de suivi (pas ÷ les 82 clics US)",
+      T["us"] == 82 and abs(T["cvr"] - 4 * 100.0 / 29) < 1e-9, T)
 check("le lien de suivi Twitter de Lia : compté hors YouCham, ni nom ni chiffres sur la page",
       "1 autre(s) lien(s) de suivi de Lia, hors « YouCham » : non comptés" in texte
       and "bid_a" not in h and "900" not in texte, texte[-600:])
@@ -214,7 +214,8 @@ check("autre créatrice : ignorée", "Emy VA" not in h)
 check("en-tête : « Depuis toujours · MyPuls · @liasxcret · GetMySocial « YouCham » », marque MyPuls · YouCham",
       "Depuis toujours · MyPuls · @liasxcret · GetMySocial « YouCham »" in texte
       and "MyPuls · YouCham" in texte and "Infloww · YouL4b" not in texte, texte[:400])
-check("note : CVR = subs ÷ clics US", "CVR = subs ÷ clics US" in texte)
+check("note : CVR = subs ÷ clics du lien de suivi OnlyFans", "CVR = subs ÷ clics du lien de suivi OnlyFans" in texte
+      and "CVR = subs ÷ clics US" not in texte)
 check("vue des VA : ni paiement ni gain, aucun JavaScript",
       "Paiement" not in texte and "Gain" not in texte and "<script" not in h.lower())
 check("tri sur les clics du lien de suivi (absent) : ramené au nom", m._tri_valide("clics", "desc") == ("nom", "asc"))
@@ -248,8 +249,8 @@ check("relevé du jour d'avant les clics globaux (sans « glob ») : refait, lui
 print("4. Une période, la vue du propriétaire")
 hp = m.page({"du": "2026-10-25", "au": "2026-10-31"}, cle="CLE", paie=False)
 tp = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", "", hp, flags=re.S))))
-check("période : mêmes colonnes, CVR sur les clics US, liens du groupe",
-      "Clics MyPuls" not in tp.replace(" ", " ") and "CVR = subs ÷ clics US" in tp
+check("période : mêmes colonnes, CVR sur les clics OnlyFans, liens du groupe",
+      "Clics MyPuls" not in tp.replace(" ", " ") and "CVR = subs ÷ clics OnlyFans du lien de suivi" in tp
       and "du groupe « YouCham »" in tp, tp[:600])
 m.taux_eur_usd = lambda maintenant=None: {"taux": 1.08}
 ho = m.page({}, cle="CLE", paie=True)
