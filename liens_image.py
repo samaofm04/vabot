@@ -8,7 +8,9 @@ POURQUOI
     quinzaine EN COURS et, dessous, le bouton « 📊 Statistiques » vers la page
     (outils_communs). Memes colonnes, memes chiffres et memes couleurs que la
     page (infloww_liens, profil « lia ») : Clics US, Clics globaux (tous pays,
-    proprietaire le 31/10 : « entre subs et clics US »), Subs, CVR, $ / sub. Les
+    proprietaire le 31/10 : « entre subs et clics US »), Clics Infloww (ceux
+    qui font le CVR : « et pour les clics Infloww, ils sont ou ? »), Subs,
+    CVR, $ / sub. Les
     chiffres sont ceux de la page sur la meme periode, pas recalcules ici.
 
 JAMAIS LE NET NI LA PAIE
@@ -31,9 +33,10 @@ from sessions_image import (FOND, FOND_ENTETE, FOND_LIGNE, SEPARATEUR, TEXTE,
 #: Le nom de la piece jointe : [a-zA-Z0-9_.-] seulement, sinon Discord le
 #: reecrit et « attachment://... » pointe dans le vide.
 NOM = "quinzaine_lia.png"
-#: Plus large que les images de clics (1100) : cinq colonnes de chiffres
-#: (Clics US, Clics globaux, Subs, CVR, $ / sub) s'y chevauchaient.
-LARGEUR = 1240
+#: Plus large que les images de clics (1100) : six colonnes de chiffres
+#: (Clics US, Clics globaux, Clics Infloww, Subs, CVR, $ / sub) s'y
+#: chevauchaient.
+LARGEUR = 1400
 _p = _ci._p
 
 #: Les couleurs des pastilles de la page (infloww_liens, classes .nv) : fond,
@@ -65,6 +68,8 @@ def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "") -> dict:
                      # la page dit « lien MyPuls introuvable » : l'image aussi, pas un blanc
                      or ("lien de suivi introuvable" if x.get("introuvables") else "")),
             "us": x.get("us"), "glob": x.get("glob"), "subs": x.get("subs"), "cvr": x.get("cvr"),
+            # « — » pour qui n'a pas ses clics chez Infloww (son CVR est alors sur MyPuls)
+            "inf": x.get("clics_cvr") if x.get("cvr_infloww") else None,
             "par_sub": x.get("par_sub"),
             "niv_cvr": _il.niveau(x.get("cvr"), _il.SEUIL_CVR),
             "niv_sub": _il.niveau(x.get("par_sub"), _il.SEUIL_PAR_SUB)})
@@ -84,7 +89,8 @@ def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "") -> dict:
     T = t.get("totaux") or {}
     return {"lignes": lignes, "du": du, "au": au, "maj": maj, "erreur": str(t.get("erreur") or ""),
             "nom": str(nom or ""),
-            "total": {"us": T.get("us"), "glob": T.get("glob"), "subs": T.get("subs"), "cvr": T.get("cvr"),
+            "total": {"us": T.get("us"), "glob": T.get("glob"), "inf": T.get("clics_cvr"),
+                      "subs": T.get("subs"), "cvr": T.get("cvr"),
                       "par_sub": T.get("par_sub"),
                       "niv_cvr": _il.niveau(T.get("cvr"), _il.SEUIL_CVR),
                       "niv_sub": _il.niveau(T.get("par_sub"), _il.SEUIL_PAR_SUB)}}
@@ -92,8 +98,8 @@ def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "") -> dict:
 
 def _textes(x: dict) -> tuple:
     import infloww_liens as _il
-    return (_il._nb(x.get("us"), " "), _il._nb(x.get("glob"), " "), _il._nb(x.get("subs"), " "),
-            _il._pct(x.get("cvr"), " "), _il._dollars(x.get("par_sub"), " "))
+    return (_il._nb(x.get("us"), " "), _il._nb(x.get("glob"), " "), _il._nb(x.get("inf"), " "),
+            _il._nb(x.get("subs"), " "), _il._pct(x.get("cvr"), " "), _il._dollars(x.get("par_sub"), " "))
 
 
 def _pastille(d, cx, cy, texte, niv, f):
@@ -116,7 +122,7 @@ def dessiner(v: dict, photos: dict = None) -> bytes:
     h_tete, h_entete, h_ligne, avatar = 118, 56, 66, 46
     x_rang, x_photo, x_nom = marge + 32, marge + 62, _ci.X_NOM
     # bords droits des nombres, centres des pastilles (px finaux)
-    x_us, x_glob, x_subs, x_cvr, x_sub = 600, 780, 900, 1005, 1140
+    x_us, x_glob, x_inf, x_subs, x_cvr, x_sub = 620, 790, 960, 1070, 1175, 1300
     lignes = v.get("lignes") or []
     corps = h_ligne * len(lignes) if lignes else 90
     h_total = h_ligne
@@ -152,6 +158,7 @@ def dessiner(v: dict, photos: dict = None) -> bytes:
     d.text((_p(x_nom), _p(cy)), "VA", font=f_col, fill=TEXTE_2, anchor="lm")
     d.text((_p(x_us), _p(cy)), "Clics US", font=f_col, fill=TEXTE_2, anchor="rm")
     d.text((_p(x_glob), _p(cy)), "Clics globaux", font=f_col, fill=TEXTE_2, anchor="rm")
+    d.text((_p(x_inf), _p(cy)), "Clics Infloww", font=f_col, fill=TEXTE_2, anchor="rm")
     d.text((_p(x_subs), _p(cy)), "Subs", font=f_col, fill=TEXTE, anchor="rm")
     d.text((_p(x_cvr), _p(cy)), "CVR", font=f_col, fill=TEXTE_2, anchor="mm")
     d.text((_p(x_sub), _p(cy)), "$ / sub", font=f_col, fill=TEXTE_2, anchor="mm")
@@ -176,9 +183,10 @@ def dessiner(v: dict, photos: dict = None) -> bytes:
         if x.get("sous"):
             d.text((_p(x_nom), _p(cy + 17)), ajuster(d, nettoyer(x["sous"], f_det), f_det, fin_nom - _p(x_nom)),
                    font=f_det, fill=TEXTE_3, anchor="lm")
-        us, glob, subs, cvr, par_sub = _textes(x)
+        us, glob, inf, subs, cvr, par_sub = _textes(x)
         d.text((_p(x_us), _p(cy)), us, font=f_ch, fill=TEXTE_3 if us == "—" else TEXTE_2, anchor="rm")
         d.text((_p(x_glob), _p(cy)), glob, font=f_ch, fill=TEXTE_3 if glob == "—" else TEXTE_2, anchor="rm")
+        d.text((_p(x_inf), _p(cy)), inf, font=f_ch, fill=TEXTE_3 if inf == "—" else TEXTE_2, anchor="rm")
         d.text((_p(x_subs), _p(cy)), subs, font=f_ch_b, fill=TEXTE_3 if subs == "—" else TEXTE, anchor="rm")
         _pastille(d, x_cvr, cy, cvr, x.get("niv_cvr"), f_pas)
         _pastille(d, x_sub, cy, par_sub, x.get("niv_sub"), f_pas)
@@ -189,9 +197,10 @@ def dessiner(v: dict, photos: dict = None) -> bytes:
     cy = yt + h_total / 2
     T = v.get("total") or {}
     d.text((_p(x_nom), _p(cy)), "Total · %d VA" % n, font=f_ch_b, fill=TEXTE, anchor="lm")
-    us, glob, subs, cvr, par_sub = _textes(T)
+    us, glob, inf, subs, cvr, par_sub = _textes(T)
     d.text((_p(x_us), _p(cy)), us, font=f_ch_b, fill=TEXTE, anchor="rm")
     d.text((_p(x_glob), _p(cy)), glob, font=f_ch_b, fill=TEXTE if glob != "—" else TEXTE_3, anchor="rm")
+    d.text((_p(x_inf), _p(cy)), inf, font=f_ch_b, fill=TEXTE if inf != "—" else TEXTE_3, anchor="rm")
     d.text((_p(x_subs), _p(cy)), subs, font=f_ch_b, fill=TEXTE, anchor="rm")
     _pastille(d, x_cvr, cy, cvr, T.get("niv_cvr"), f_pas)
     _pastille(d, x_sub, cy, par_sub, T.get("niv_sub"), f_pas)
@@ -202,8 +211,9 @@ def texte_alt(v: dict) -> str:
     """La description de l'image (lecteurs d'ecran, aperçu) : la quinzaine et
     le total, sans montant."""
     T = v.get("total") or {}
-    return ("%s · quinzaine du %s au %s : %s clics US, %s clics globaux, %s subs"
+    return ("%s · quinzaine du %s au %s : %s clics US, %s clics globaux, %s clics Infloww, %s subs"
             % (v.get("nom") or "Lia", _jour(v.get("du")), _jour(v.get("au")),
                T.get("us") if T.get("us") is not None else "—",
                T.get("glob") if T.get("glob") is not None else "—",
+               T.get("inf") if T.get("inf") is not None else "—",
                T.get("subs") if T.get("subs") is not None else "—"))[:1000]

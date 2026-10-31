@@ -12,7 +12,9 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     (gms.list_links_group), jamais une équipe ;
   - depuis toujours, les chiffres viennent de MyPuls (Lia n'est pas chez
     Infloww), du premier jour à aujourd'hui ;
-  - colonnes : Personne, Clics US, Clics globaux (tous pays, 31/10), Subs,
+  - colonnes : Personne, Clics US, Clics globaux (tous pays, 31/10), Clics
+    Infloww (ceux du CVR ; sur une période, cumul de fin − relevé de la
+    veille du début, relevé gardé chaque jour), Subs,
     CVR, $ / sub — pas de clics du lien
     de suivi ; CVR = subs ÷ clics du lien de suivi OnlyFans, lus CHEZ
     INFLOWW au pseudo « aileney » (propriétaire, 31/10 : « prends juste les
@@ -146,7 +148,8 @@ def _mypuls(du, au):
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="page_lia_"))
 m = il.profil("lia")
 FICHIERS = ("GMS_COPIE", "US_FICHIER", "US_PERIODES_FICHIER", "PAIE_FICHIER", "QUINZ_FICHIER",
-            "LIGNES_FICHIER", "ETAT_FICHIER", "CLE_FICHIER", "CLE_PAIE_FICHIER", "BCE_FICHIER")
+            "LIGNES_FICHIER", "ETAT_FICHIER", "CLE_FICHIER", "CLE_PAIE_FICHIER", "BCE_FICHIER",
+            "RELEVES_CVR_FICHIER")
 
 print("1. Le profil")
 check("profil lia : Lia (liasxcret), groupe YouCham de l'espace personnel, MyPuls, sans clics OF",
@@ -195,16 +198,27 @@ check("MyPuls lu depuis le premier jour jusqu'à aujourd'hui",
 check("une personne par lien du groupe : VA 1..VA 4", sorted(lignes) == ["VA 1", "VA 2", "VA 3", "VA 4"],
       sorted(lignes))
 entetes = re.findall(r"<th[^>]*>(?:<a[^>]*>)?([^<]+)", h)
-check("colonnes : Personne, Clics US, Clics globaux, Subs, CVR, $ / sub — rien d'autre",
+check("colonnes : Personne, Clics US, Clics globaux, Clics Infloww, Subs, CVR, $ / sub — rien d'autre",
       [" ".join(e.split()).rstrip(" ▴▾") for e in entetes]
-      == ["Personne", "Clics US", "Clics globaux", "Subs", "CVR", "$ / sub"], entetes)
+      == ["Personne", "Clics US", "Clics globaux", "Clics Infloww", "Subs", "CVR", "$ / sub"], entetes)
+check("Clics Infloww : ceux qui font le CVR (VA 1 : 49), « — » sans lien de suivi (VA 4), total 58",
+      lignes["VA 1"].get("clics_cvr") == 49 and lignes["VA 4"].get("cvr_infloww") is None
+      and t["totaux"].get("clics_cvr") == 58, (lignes["VA 1"].get("clics_cvr"), t["totaux"].get("clics_cvr")))
+_rel = m._lire_json(m.RELEVES_CVR_FICHIER)
+check("relevé du jour gardé (cumul Infloww de chaque lien, et sa création), fichier à Lia",
+      (_rel.get("jours") or {}).get(AUJ) == {"115": 49, "113": 1, "112": 8}
+      and (_rel.get("crees") or {}).get("115") == AUJ
+      and il.RELEVES_CVR_FICHIER.name == "infloww_liens_clics_infloww.json"
+      and il.REGLAGES["lia"]["RELEVES_CVR_FICHIER"].name == "infloww_liens_clics_infloww_lia.json", _rel)
+check("Jessye et Emy : pas de colonne Clics Infloww",
+      il.COLONNE_CLICS_CVR is False and il.profil("emy").COLONNE_CLICS_CVR is False)
 check("clics globaux : le total tous pays du même relevé GetMySocial (US 40 + 5 ailleurs)",
       lignes["VA 1"]["glob"] == 45 and lignes["VA 3"]["glob"] == 5 and t["totaux"]["glob"] == 45 + 17 + 5 + 35,
       (lignes["VA 1"].get("glob"), t["totaux"].get("glob")))
 check("Jessye et Emy : pas de colonne des clics globaux",
       il.CLICS_GLOBAUX is False and il.profil("emy").CLICS_GLOBAUX is False)
-check("aucune colonne « Clics MyPuls » ni « Clics Infloww »",
-      "Clics MyPuls" not in texte.replace(" ", " ") and "Clics Infloww" not in texte.replace(" ", " "))
+check("aucune colonne « Clics MyPuls » (la colonne des clics est celle d'Infloww)",
+      "Clics MyPuls" not in " ".join(texte.split()) and "Clics Infloww" in " ".join(texte.split()))
 va1 = lignes["VA 1"]
 check("VA 1 : 40 clics US, 3 subs (MyPuls), CVR = 3 ÷ 49 clics Infloww, 4,17 $ / sub",
       va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 300.0 / 49) < 1e-9
@@ -285,17 +299,36 @@ check("période : mêmes colonnes, CVR sur les clics OnlyFans, liens du groupe",
 import datetime as _dtl                 # noqa: E402
 _hier = (_dtl.date.fromisoformat(AUJ) - _dtl.timedelta(days=1)).isoformat()
 _t_ouv = {x["cle"]: x for x in m.tableau_periode("2026-10-20", AUJ, us="cache")["lignes"]}
-_t_close = m.tableau_periode("2026-10-20", _hier, us="cache")
+check("période, lien créé pendant : part de 0, jusqu'au cumul d'aujourd'hui (49 ; 3 ÷ 49)",
+      _t_ouv["VA 1"].get("clics_cvr") == 49 and abs(_t_ouv["VA 1"]["cvr"] - 300.0 / 49) < 1e-9, _t_ouv["VA 1"])
+# un lien créé AVANT la période : cumul de la fin moins celui de la veille du début
+INFLOWW["liens"] = [dict(x, cree="2026-10-01") for x in INFLOWW["liens"]]
+_r = m._lire_json(m.RELEVES_CVR_FICHIER)
+_r["jours"]["2026-10-24"] = {"115": 30, "113": 1, "112": 2}
+_r["jours"][_hier] = {"115": 45, "113": 1, "112": 7}
+m.safe_json.write(m.RELEVES_CVR_FICHIER, _r)
+_t_b = {x["cle"]: x for x in m.tableau_periode("2026-10-25", AUJ, us="cache")["lignes"]}
+check("période, lien créé avant : 49 aujourd'hui − 30 la veille du début = 19 (CVR 3 ÷ 19)",
+      _t_b["VA 1"].get("clics_cvr") == 19 and abs(_t_b["VA 1"]["cvr"] - 300.0 / 19) < 1e-9
+      and _t_b["VA 3"].get("clics_cvr") == 6, (_t_b["VA 1"].get("clics_cvr"), _t_b["VA 3"].get("clics_cvr")))
+_t_close = m.tableau_periode("2026-10-25", _hier, us="cache")
 _t_cl = {x["cle"]: x for x in _t_close["lignes"]}
-check("période qui couvre la vie du lien et finit aujourd'hui : clics Infloww (3 ÷ 49)",
-      abs(_t_ouv["VA 1"]["cvr"] - 300.0 / 49) < 1e-9 and _t_ouv["VA 1"].get("cvr_infloww"), _t_ouv["VA 1"])
-check("période close (Infloww ne date pas ses clics) : clics MyPuls de la période (3 ÷ 24), et c'est dit",
-      abs(_t_cl["VA 1"]["cvr"] - 12.5) < 1e-9 and not _t_cl["VA 1"].get("cvr_infloww")
-      and "CVR sur les clics MyPuls" in html.unescape(m.page_html(_t_close)), _t_cl["VA 1"])
+check("période close : le cumul vu le dernier jour (45) − la veille du début (30) = 15",
+      _t_cl["VA 1"].get("clics_cvr") == 15 and abs(_t_cl["VA 1"]["cvr"] - 20.0) < 1e-9, _t_cl["VA 1"])
+_t_sans = m.tableau_periode("2026-10-27", AUJ, us="cache")
+_t_s = {x["cle"]: x for x in _t_sans["lignes"]}
+check("sans relevé de la veille : « — », CVR sur les clics MyPuls de la période (3 ÷ 24), et c'est dit",
+      not _t_s["VA 1"].get("cvr_infloww") and abs(_t_s["VA 1"]["cvr"] - 12.5) < 1e-9
+      and _t_sans["totaux"].get("clics_cvr") is None
+      and "CVR sur les clics MyPuls" in html.unescape(m.page_html(_t_sans)), _t_s["VA 1"])
+_t_apres = {x["cle"]: x for x in m.tableau_periode("2026-09-01", "2026-09-30", us="cache")["lignes"]}
+check("période d'avant la création du lien : 0 clic Infloww", _t_apres["VA 1"].get("clics_cvr") == 0,
+      _t_apres["VA 1"].get("clics_cvr"))
+INFLOWW["liens"] = [dict(x, cree=AUJ) for x in INFLOWW["liens"]]
 m.taux_eur_usd = lambda maintenant=None: {"taux": 1.08}
 ho = m.page({}, cle="CLE", paie=True)
-check("propriétaire : Paiement et Gain / perte, sans colonne de clics OF",
-      ">Paiement<" in ho and "Clics MyPuls" not in ho and "Clics Infloww" not in ho)
+check("propriétaire : Paiement et Gain / perte, colonne Clics Infloww, pas de Clics MyPuls",
+      ">Paiement<" in ho and "Clics\u00a0MyPuls" not in ho and "Clics\u00a0Infloww" in ho)
 
 print("5. La paie : 0,70 $ par sub, tout le temps")
 check("paie de la page : au sub, 0,70 $ quel que soit le nombre, depuis le 31/10, un réglage valide",
@@ -341,8 +374,10 @@ check("image : les chiffres de la page, pas recalculés (CVR, $ / sub, couleurs)
 check("image : jamais le net ni la paie", not any(k in str(v) for k in ("'net'", "paie", "gain")))
 png = li.dessiner(v)
 _im = _Image.open(_io.BytesIO(png))
-check("image : un PNG de 1240 px de large (cinq colonnes de chiffres)",
-      png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == li.LARGEUR == 1240, _im.size)
+check("image : un PNG de 1400 px de large (six colonnes de chiffres)",
+      png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == li.LARGEUR == 1400, _im.size)
+check("image : la colonne Clics Infloww (ceux de la page)",
+      {x["cle"]: x for x in v["lignes"]}["VA 1"]["inf"] == {x["cle"]: x for x in _tq["lignes"]}["VA 1"].get("clics_cvr"))
 check("image : vide, elle se dessine quand même (le message de la page)",
       li.dessiner(li.tableau({"lignes": [], "totaux": {}, "erreur": "MyPuls muet"}, "2026-10-16", "2026-10-31"))[:4]
       == b"\x89PNG")
