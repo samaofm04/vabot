@@ -1589,13 +1589,15 @@ try:
         # « Telle quelle » envoyait le fichier du disque : l uniquification
         # etait allumee et ne s appliquait pas la, sans un mot.
         _srcUBr = _plBr.Path("cogs/user.py").read_text(encoding="utf-8")
+        # Trois depuis le 01/11/2026 : la version SANS TEXTE d'un montage
+        # (_livrer_sans_texte) part comme une brute, elle aussi reecrite.
         check("brutmeta : le VA est averti quand la brute part inchangee",
-              _srcUBr.count("pas** pu etre rendue unique") == 2,
-              "%d avertissement(s) sur 2"
+              _srcUBr.count("pas** pu etre rendue unique") == 3,
+              "%d avertissement(s) sur 3"
               % _srcUBr.count("pas** pu etre rendue unique"))
         check("brutmeta : toutes les voies passent par le meme reecrivain",
-              _srcUBr.count("await brute_a_envoyer(") == 2,
-              "%d appel(s) sur 2" % _srcUBr.count("await brute_a_envoyer("))
+              _srcUBr.count("await brute_a_envoyer(") == 3,
+              "%d appel(s) sur 3" % _srcUBr.count("await brute_a_envoyer("))
         check("brutmeta : plus aucune brute nue envoyee droit du disque",
               "file=discord.File(str(self.video), filename=self.video.name)"
               not in _srcUBr)
@@ -13712,8 +13714,15 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             pb.append(("libelle / vues / fleche", lib))
         return pb
 
+    def ecrits_rendus(c):
+        """Les textes que le moteur a incrustes dans la video de la carte `c`
+        (son brouillon, dans GEN) ; [] hors rendu."""
+        import sans_texte as _st
+        info = next((v for v in GEN.values() if c["srcs"] and v["out"] == c["srcs"][0]), None)
+        return _st.textes(info["draft"]) if info else []
+
     def verifier_lot(nom, envois, n, *, desc_de, cap_de=None, son_de=None, alertes_de=None,
-                     bloquant_de=None, emo=E_LOLA, ident="lola", srcs=None):
+                     bloquant_de=None, emo=E_LOLA, ident="lola", srcs=None, ecrits_de=None):
         cs = [lire(r) for r in cartes(envois)]
         check(f"{nom} : {n} carte(s), une par contenu", len(cs) == n,
               "%d carte(s) ; envois : %s" % (len(cs), [str(e.get("content"))[:60] for e in envois]))
@@ -13730,9 +13739,13 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             # Ce que la carte doit etre suivie de : chaque texte SEUL dans son
             # message, sans titre ni bloc de code ; nomme par un bouton gris
             # seulement quand ils sont plusieurs.
-            att = [(U._T_CAP, cap_de(c) if cap_de else None),
-                   (U._T_SON, son_de(c) if son_de else None),
-                   (U._T_DESC, desc_de(c))]
+            # Les textes que le bot a incrustes, chacun seul, avant la
+            # description (_livrer_sans_texte, 01/11/2026) : ici le rendu
+            # simule n'a pas d'entree, ils suivent donc la carte avec texte.
+            att = ([(U._T_ECRIT, t) for t in (ecrits_de or ecrits_rendus)(c)]
+                   + [(U._T_CAP, cap_de(c) if cap_de else None),
+                      (U._T_SON, son_de(c) if son_de else None),
+                      (U._T_DESC, desc_de(c))])
             att = [(t, str(x).strip()) for t, x in att if str(x or "").strip()]
             # Nom : tout texte sauf une description seule (_envoyer_textes).
             voulu = sorted((U._ETIQUETTES[t] if len(att) > 1 or t != U._T_DESC else None, x)
@@ -14057,11 +14070,13 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
                       srcs={rel(BRUTES[0])}, bloquant_de=lambda c: False)
     check("choisir ma brute, telle quelle : publique (pas d'ephemere force)",
           cs and not cs[0]["rec"].get("ephemeral"))
+    # GEN est vide a chaque etape (etape) : les textes incrustes sont donnes ici
     cs = verifier_lot("choisir ma brute, caption de la bibliotheque", o["biblio"][0], 1,
-                      desc_de=lambda c: DESC_A)
+                      desc_de=lambda c: DESC_A, ecrits_de=lambda c: [CAP_A])
     check("choisir ma brute, caption de la bibliotheque : piece jointe brute_caption_1.mp4",
           [c["noms"] for c in cs] == [["brute_caption_1.mp4"]], [c["noms"] for c in cs])
-    verifier_lot("choisir ma brute, sa caption", o["libre"][0], 1, desc_de=lambda c: "ma description")
+    verifier_lot("choisir ma brute, sa caption", o["libre"][0], 1, desc_de=lambda c: "ma description",
+                 ecrits_de=lambda c: ["ma caption à moi"])
     check("choisir ma brute : une brute rangee entre-temps est dite au VA",
           not cartes(o["rangee"][0])
           and any("introuvable" in str(e.get("content") or "") for e in o["rangee"][0]),
