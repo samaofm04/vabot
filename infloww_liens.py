@@ -107,6 +107,9 @@ CLICS_OF = True
 HORS_DETAIL = True
 # Clics US « depuis toujours » : None = un relevé par jour ; sinon son âge maximal.
 US_FRAIS_S: Optional[int] = None
+# True : une personne porte le nom de son lien de suivi (« @roucham_79944 »),
+# le nom GetMySocial (« VA 1 ») passe dessous.
+NOM_PAR_SUIVI = False
 MARQUE = "Infloww · YouL4b"
 GUILD ="1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
 SALON = "1553218920842928219"        # salon « inflow-resultat », public : les VA le voient
@@ -1823,6 +1826,12 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                  "us": u.get("us"), "us_etat": u.get("etat") or "absent",
                  "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or "",
                  "us_note": u.get("note") or ""}
+        if NOM_PAR_SUIVI:
+            # page Lia : « VA 1 » ne dit pas qui c'est ; le lien de suivi porte
+            # le pseudo du VA. La clé (paie, ancre, clics US) reste « VA 1 ».
+            noms = list(dict.fromkeys(r["nom"] for r in ligne["infloww"] if r.get("nom")))
+            if noms:
+                ligne.update(nom=" + ".join(noms), nom_gms=cle)
         ligne.update(_somme(list(siens.values())))
         pp = _part_partenaire(list(siens.values()))
         if pp:
@@ -4383,7 +4392,8 @@ def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
                      f'après la période : 0{partage}</span>')
             continue
         lib = _lib_code(_code_q(r)) if r.get("creatrice") else f"c{r.get('code')}"
-        s = f'{_e(r.get("nom")) or "(sans nom)"} · {_e(lib)}'
+        # page Lia : le nom du lien de suivi est déjà en tête ; dessous, « VA 1 »
+        s = f'{_e(x.get("nom_gms") or r.get("nom")) or "(sans nom)"} · {_e(lib)}'
         if r.get("quitte"):
             # un lien de suivi Emy que son lien GMS a quitté (registre du podium)
             s += f' · visé jusqu\'au {_e(_jour_court(r["quitte"]))}'
@@ -5583,6 +5593,8 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     # des liens tout neufs : un relevé par jour les laissait à zéro jusqu'au
     # lendemain (une heure : la règle du propriétaire du 06/10 pour les clics)
     "US_FRAIS_S": 3600, "MARQUE": "MyPuls · YouCham",
+    # « change leur nom ... tu mets leur truc d'Infloww, genre @ » (31/10)
+    "NOM_PAR_SUIVI": True,
     "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
     "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",

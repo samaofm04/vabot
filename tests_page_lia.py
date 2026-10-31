@@ -21,6 +21,8 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     US_REESSAI_S ;
   - fichiers à elle (clics US, paie, copie GMS), la page Jessye et la page Emy
     ne changent pas ;
+  - le nom d'une personne : son lien de suivi (« @roucham_79944 »), « VA 1 »
+    dessous (propriétaire, 31/10 : « tu mets leur truc d'Infloww, genre @ ») ;
   - la paie : 0,70 $ par sub pour tout VA sans réglage à lui (propriétaire,
     31/10 : « pour cette fiche les VA c'est 0,7 par sub tout le temps ») ; un
     réglage enregistré passe devant ; Jessye et Emy sans paie imposée ;
@@ -157,7 +159,7 @@ print("2. La page, depuis toujours")
 h = m.page({}, cle="CLE", paie=False)
 texte = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", "", h, flags=re.S))))
 t = m.tableau()
-lignes = {x["nom"]: x for x in t["lignes"]}
+lignes = {x["cle"]: x for x in t["lignes"]}
 check("liste GMS : le groupe YouCham, aucune équipe", GROUPES_LUS and set(GROUPES_LUS) == {GROUPE}, GROUPES_LUS)
 check("MyPuls lu depuis le premier jour jusqu'à aujourd'hui",
       MYPULS_LU and MYPULS_LU[0] == (il.PLANCHER.isoformat(), m._aujourdhui()), MYPULS_LU)
@@ -173,6 +175,14 @@ va1 = lignes["VA 1"]
 check("VA 1 : 40 clics US, 3 subs, CVR 7,5 % (subs ÷ US), 4,17 $ / sub",
       va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 7.5) < 1e-9
       and abs(va1["par_sub"] - 12.5 / 3) < 1e-9, va1)
+check("nom : le lien de suivi (« @roucham_79944 »), « VA 1 · c115 » dessous ; clé, paie et ancre : « VA 1 »",
+      va1["nom"] == "@roucham_79944" and va1["cle"] == "VA 1"
+      and "<b>@roucham_79944</b>" in h and "VA 1 · c115" in texte and 'id="' + m.ancre("VA 1") + '"' in h,
+      (va1["nom"], texte[:900]))
+check("sans lien de suivi trouvé : le nom GetMySocial reste (VA 4)", lignes["VA 4"]["nom"] == "VA 4",
+      lignes["VA 4"]["nom"])
+check("Jessye et Emy : le nom reste celui de GetMySocial",
+      il.NOM_PAR_SUIVI is False and il.profil("emy").NOM_PAR_SUIVI is False)
 check("VA 3 : 0 clic US, pas de CVR (et non 0 %)", lignes["VA 3"]["cvr"] is None, lignes["VA 3"])
 check("VA 4 : lien de suivi introuvable chez MyPuls, dit, pas de zéro inventé",
       lignes["VA 4"]["subs"] is None and lignes["VA 4"]["introuvables"], lignes["VA 4"])
@@ -201,7 +211,7 @@ m.safe_json.write(m.US_FICHIER, dict(cache, personnes=vieux))
 US["lnk_a"] = 55
 t2 = m.tableau()
 check("relevé de plus d'une heure : refait, la valeur neuve s'affiche",
-      len(APPELS_US) == n0 + 4 and {x["nom"]: x for x in t2["lignes"]}["VA 1"]["us"] == 55, APPELS_US[n0:])
+      len(APPELS_US) == n0 + 4 and {x["cle"]: x for x in t2["lignes"]}["VA 1"]["us"] == 55, APPELS_US[n0:])
 cache = m._us_cache()
 p = dict(cache["personnes"])
 p["VA 2"] = dict(p["VA 2"], rate="31/10 : panne", essai=time.time() - 120)
@@ -226,7 +236,7 @@ check("paie de la page : au sub, 0,70 $ quel que soit le nombre, depuis le 31/10
       m.PAIE_PAGE == m.valider_paie(m.PAIE_PAGE)[0] and m.PAIE_PAGE["type"] == "au_sub"
       and m.cout_au_sub(m.PAIE_PAGE, 250)[0] == 175.0 and m.PAIE_PAGE["depuis"] == "2026-10-31")
 check("Jessye et Emy : aucune paie imposée", il.PAIE_PAGE is None and il.profil("emy").PAIE_PAGE is None)
-pa = {x["nom"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
+pa = {x["cle"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
 check("VA sans réglage : « 0,70 $ / sub » (un seul prix, pas « jusqu'à 0 »)",
       all(pa[n]["paie"]["resume"] == "0,70\u00a0$ / sub" for n in ("VA 1", "VA 2", "VA 3")),
       [pa[n]["paie"]["resume"] for n in pa])
@@ -236,7 +246,7 @@ check("VA 1 : 3 subs × 0,70 = 2,10 $ payés, 12,50 $ rapportés, gain +10,40 $"
 check("VA 2 : 1 sub, rien rapporté : -0,70 $", abs((pa["VA 2"].get("gain") or 0) + 0.7) < 1e-9, pa["VA 2"].get("gain"))
 m.safe_json.write(m.PAIE_FICHIER, {"personnes": {"VA 2": {"type": "aucun", "montant": 0, "devise": "USD",
                                                        "frequence": "quinzaine"}}})
-pa = {x["nom"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
+pa = {x["cle"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
 check("un réglage enregistré passe devant (VA 2 « Aucun »), les autres gardent 0,70 $",
       pa["VA 2"]["paie"]["cfg"]["type"] == "aucun" and pa["VA 1"]["paie"]["cfg"]["type"] == "au_sub",
       pa["VA 2"]["paie"]["cfg"])
