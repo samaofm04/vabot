@@ -1142,6 +1142,7 @@ class _FauxNum:
     """Le cog des numeros, reduit a ce qu'un clic du 📱・numéro appelle : le
     vrai clic et la vraie carte, un achat simule."""
     clic_partage = nm.NumerosCog.clic_partage
+    _carte_rouverte = nm.NumerosCog._carte_rouverte
 
     def __init__(self):
         self.bas, self.achats, self.actions = [], [], []
@@ -1205,6 +1206,106 @@ try:
     check("pas de quota ni de +33 sur YouCham (règles de -numero-mail de Youl4b)",
           not nm._serveur_fr(CT1) and nm._pays(CT1) is None
           and not nm._serveur_fr(nm._CartePerso(S["numero"], VA1.id)))
+
+    # Propriétaire, 31/10 : « Faudrait le garder jusqu'à 20 minutes [...] le
+    # numéro, il reste pendant 20 minutes ». Un numéro vivant se retrouve, il
+    # ne se rachète pas ; la carte vit 20 min.
+    import time as _t
+    CLE1 = "%s:%s" % (S["numero"].id, VA1.id)
+
+    def _numero_de_va1(age_min, code=None, kind="sms"):
+        maintenant = int(_t.time())
+        r = {"actif": {"id": "a1", "kind": kind, "valeur": "+1 555 000 1111",
+                       "pris_le": maintenant - age_min * 60, "duree": nm.DUREE_CARTE_SEC},
+             "jeton": "vieux-jeton", "app": REM, "jeton_le": maintenant - age_min * 60}
+        if code:
+            r.update(code_valeur=code, code_de="a1", code_affiche=False)
+        _REG[CLE1] = r
+
+    def _textes_envoyes(it):
+        if not it.response.envois:
+            return ""
+        vue = it.response.envois[-1][1].get("view")
+        return " ".join(x.content for x in (vue.walk_children() if vue else [])
+                        if isinstance(x, discord.ui.TextDisplay))
+
+    def _compte():
+        return len(FN.achats), len(FN.actions)
+
+    # La carte d'un reclic part DESSINÉE : aucune édition derrière.
+    _maj = []
+    _vrai_maj = nm.maj_panneau
+
+    async def _faux_maj(bot, canal, souci="", solde=None, cog=None):
+        _maj.append((canal.id, souci, _REG.get(str(canal.id), {}).get("jeton")))
+        return True
+    nm.maj_panneau = _faux_maj
+
+    check("carte : 20 min moins la marge du rendu, plus les 15 min de Discord",
+          19 * 60 <= nm.DUREE_CARTE_SEC < nm.DUREE_NUMERO_SEC, nm.DUREE_CARTE_SEC)
+    _numero_de_va1(17)
+    avant, n_ret = _compte(), len(_RETIREES)
+    it = Itx(g, S["numero"], VA1)
+    courir(nm.NumerosCog.clic(FN, it, "sms"))
+    tx = _textes_envoyes(it)
+    check("📱 reclic à 17 min, sans code : la carte rouvre CE numéro, rien n'est acheté ni rendu",
+          _compte() == avant and "+15550001111" in tx and "En attente" in tx and not _maj
+          and it.response.envois[-1][1].get("ephemeral") is True,
+          (FN.achats[-1:], FN.actions, _maj, tx))
+    check("… son « Expire » tombe à 20 min de la prise",
+          "Expire <t:%d:R>" % (_REG[CLE1]["actif"]["pris_le"] + nm.DUREE_CARTE_SEC) in tx, tx)
+    check("… le jeton du clic remplace l'ancien, l'ancienne carte est retirée",
+          _REG[CLE1]["jeton"] == it.token and len(_RETIREES) == n_ret + 1, (_REG[CLE1], _RETIREES))
+    _numero_de_va1(10, code="482913")
+    avant = _compte()
+    it = Itx(g, S["numero"], VA1)
+    courir(nm.NumerosCog.clic(FN, it, "sms"))
+    check("📱 reclic à 10 min, code arrivé carte figée : le code se voit, rien n'est racheté",
+          _compte() == avant and "482913" in _textes_envoyes(it) and not _maj
+          and _REG[CLE1].get("code_affiche") is True, (_textes_envoyes(it), _REG[CLE1], _maj))
+    _numero_de_va1(21)
+    avant = _compte()
+    courir(nm.NumerosCog.clic(FN, Itx(g, S["numero"], VA1), "sms"))
+    check("📱 reclic à 21 min : le numéro est mort, un neuf est acheté",
+          len(FN.achats) == avant[0] + 1 and _carte_de(FN.achats[-1], S["numero"], VA1),
+          FN.achats[-1:])
+    _numero_de_va1(21, code="111222")
+    avant = _compte()
+    courir(nm.NumerosCog.clic(FN, Itx(g, S["numero"], VA1), "sms"))
+    check("📱 reclic à 21 min, code reçu : remplacé (« Autre »), comme avant",
+          FN.actions[-1:] and FN.actions[-1][0] == "autre" and len(FN.achats) == avant[0],
+          FN.actions[-1:])
+    _numero_de_va1(5)
+    courir(nm.NumerosCog.clic(FN, Itx(g, S["numero"], VA1), "mail"))
+    check("📧 Mail pendant un numéro vivant : le numéro est rendu (« Annuler »), pas rouvert",
+          FN.actions[-1][0] == "annuler", FN.actions[-1:])
+
+    # une carte figée (jeton mort) : son bouton la redessine par le jeton du clic
+    try:
+        _maj.clear()
+        _numero_de_va1(16)
+        avant = _compte()
+        it = Itx(g, S["numero"], VA1, ephemere=True)
+        courir(nm.NumerosCog.clic(FN, it, "sms"))
+        check("carte figée, « Prendre un numéro » : redessinée sur CE numéro par le jeton neuf",
+              _compte() == avant and _maj == [(CLE1, "", it.token)]
+              and not it.response.envois, (_maj, FN.actions[-1:]))
+
+        async def _rendu_ok(actif, contexte=""):
+            return True, "ACCESS_CANCEL"
+        _vrai_rendre, nm._rendre = nm._rendre, _rendu_ok
+        try:
+            _numero_de_va1(20)
+            courir(nm.NumerosCog._carte_expiree(FN, nm._CartePerso(S["numero"], VA1.id),
+                                                _REG[CLE1]["actif"]))
+        finally:
+            nm._rendre = _vrai_rendre
+        check("fin de vie sans code : rendu, la carte dit « 20 min », le numéro quitte le registre",
+              _maj[-1][1] == "⌛ Pas de code en 20 min : numéro rendu (remboursé)."
+              and "actif" not in _REG[CLE1], (_maj[-1:], _REG[CLE1]))
+    finally:
+        nm.maj_panneau = _vrai_maj
+        _REG.pop(CLE1, None)
 finally:
     nm.numgen.status = _status
 

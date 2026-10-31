@@ -605,8 +605,11 @@ class NumerosCog(commands.Cog):
         numéro » ouvre au cliqueur SA carte, un message ephemere que lui seul
         voit, qui change sur place comme le panneau d'un salon -numero-mail
         (numero, code arrive tout seul, Autre, Annuler). Reprendre un numero
-        depuis le panneau REMPLACE le sien (rendu, donc rembourse, s'il n'a
-        pas recu de code) : un membre n'a jamais qu'un numero a la fois.
+        depuis le panneau pendant que le sien vit encore (_meme_numero) lui
+        ROUVRE sa carte, avec ce numero et son code s'il est arrive : rien
+        n'est achete. Apres, ou pour l'autre type (mail / numero), il est
+        REMPLACE (rendu, donc rembourse, s'il n'a pas recu de code) : un
+        membre n'a jamais qu'un numero a la fois.
         Rien ne passe plus par son -content : pas de salon a creer, pas de
         refus pour qui n'en a pas.
 
@@ -632,6 +635,7 @@ class NumerosCog(commands.Cog):
             await maj_panneau(self.bot, ch, cog=self)
             return
         rec = _salon(carte.id)
+        garde = _meme_numero(rec, action)
         if dans_carte:
             # Reponse DIFFEREE sur la carte : le message clique reste la carte,
             # le jeton de CE clic sert aux editions des 15 prochaines minutes.
@@ -642,7 +646,10 @@ class NumerosCog(commands.Cog):
             # recherche du numero vient ensuite. Le solde affiche est le
             # dernier lu : le relire ici prendrait ces trois secondes.
             actif0, _ = _a_afficher(rec)
-            mot = "⏳ Changement de numéro…" if actif0 else "⏳ Recherche d'un numéro…"
+            if garde:
+                mot = ""
+            else:
+                mot = "⏳ Changement de numéro…" if actif0 else "⏳ Recherche d'un numéro…"
             vue = await _vue_salon(self, rec, mot, solde=_DERNIER_SOLDE["sms"] or "",
                                    canal=carte)
             kw = {"view": vue, "ephemeral": True}
@@ -662,10 +669,14 @@ class NumerosCog(commands.Cog):
                                  "été acheté. Préviens un admin.")
             return
         if ancien:
-            # L'ancienne carte montrerait un numero rendu : elle est retiree.
+            # L'ancienne carte montrerait un numero rendu, ou le meme en
+            # double : elle est retiree.
             await _retirer_carte(self.bot, carte, *ancien)
         if dans_carte and action not in ("sms", "mail"):
             await self.action_salon(itx, action, canal=carte)
+            return
+        if garde:
+            await self._carte_rouverte(carte, dans_carte, _code_courant(rec))
             return
         actif, _ = _a_afficher(_salon(carte.id))
         if actif:
@@ -679,6 +690,31 @@ class NumerosCog(commands.Cog):
             if _a_afficher(_salon(carte.id))[0]:
                 return
         await self.nouvelle_activation(itx, action, "ig", canal=carte)
+
+    async def _carte_rouverte(self, carte, dans_carte, code_vu):
+        """La carte d'un membre, rouverte sur son numero encore vivant.
+
+        Proprietaire, 31/10/2026 : la carte disparaissait avant la fin du
+        numero, qui vit 20 min chez le fournisseur ; un nouveau clic
+        en achetait un autre. Depuis le panneau, la carte neuve vient de
+        partir deja dessinee (`code_vu` : le code qu'elle montre) ; depuis
+        une carte figee (jeton de plus de 15 min), elle est redessinee par
+        le jeton du clic. Un code arrive quand plus rien ne pouvait
+        l'afficher est alors note comme vu."""
+        rec = _salon(carte.id)
+        log.info("numgen: carte de %s rouverte sur son numero en cours (%s)",
+                 carte.name, (rec.get("actif") or {}).get("id"))
+        if dans_carte:
+            if not await maj_panneau(self.bot, carte, cog=self):
+                return
+            rec = _salon(carte.id)
+            code_vu = _code_courant(rec)
+        if code_vu and _code_courant(rec) == code_vu and rec.get("code_affiche") is False:
+            try:
+                _salon_ecrire(carte.id, code_affiche=True)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("numgen: code de %s montre, mais non note comme tel (%s: %s)",
+                            carte.name, type(e).__name__, e)
 
     async def _panneau_en_bas(self, canal):
         """Le panneau du VA, en bas de son salon. Celui d'hier, remonte par
@@ -1204,12 +1240,12 @@ class NumerosCog(commands.Cog):
                               souci="❌ Aucun code reçu en %d min" % minutes)
 
     async def _carte_expiree(self, carte, actif):
-        """Fin de vie d'un numero de carte, sans code : il est RENDU.
-
-        Le fournisseur le garderait encore 5 min, mais la carte ne pourra
-        bientot plus etre modifiee (jeton de 15 min) : un code arrive apres
-        serait facture sans que personne ne le voie."""
+        """Fin de vie d'un numero de carte, sans code : il est RENDU, juste
+        avant que le fournisseur ne le clore. Si le membre n'a rien touche
+        depuis 15 min, sa carte figee ne peut plus le dire : elle garde le
+        numero, et son « Expire » est deja passe."""
         act_id = (actif or {}).get("id")
+        minutes = (_duree(actif) + 59) // 60          # 19 min 30 : « 20 min »
         ok, raison = await _rendre(actif, "carte expiree")
         rec = _salon(carte.id)
         if (rec.get("actif") or {}).get("id") != act_id or _code_courant(rec):
@@ -1219,9 +1255,9 @@ class NumerosCog(commands.Cog):
         if ok or _rendu_inutile(raison):
             _salon_ecrire(carte.id, actif=None, code_valeur=None, code_de=None,
                           code_affiche=None)
-            souci = "⌛ Pas de code en 15 min : numéro rendu (remboursé)."
+            souci = "⌛ Pas de code en %d min : numéro rendu (remboursé)." % minutes
         else:
-            souci = "❌ Pas de code en 15 min (%s)" % _ligne_courte(raison, 100)
+            souci = "❌ Pas de code en %d min (%s)" % (minutes, _ligne_courte(raison, 100))
         await maj_panneau(self.bot, carte, cog=self, souci=souci)
 
     async def action_salon(self, itx, quoi, attendu=None, code_vu=None, canal=None):
@@ -3458,12 +3494,15 @@ def _salon_ecrire(cid, **champs):
 #: plus de code et ne doit plus bloquer le salon.
 DUREE_NUMERO_SEC = 20 * 60
 
-#: Duree de vie d'un numero pris dans un salon PARTAGE (sa carte ephemere).
-#: Discord ne laisse modifier un message ephemere que 15 min apres le clic
-#: qui l'a ouvert : au-dela, le code arrive ne pourrait plus s'afficher. Le
-#: numero est donc rendu (rembourse) un peu AVANT, tant que la carte peut
-#: encore dire pourquoi.
-DUREE_CARTE_SEC = 15 * 60 - 30
+#: Duree de vie d'un numero pris dans un salon PARTAGE (sa carte ephemere) :
+#: celle du fournisseur, moins de quoi le rendre (rembourse) avant qu'il ne
+#: le clore lui-meme. Elle etait de 15 min, la limite de Discord pour
+#: modifier un ephemere, et le proprietaire l'a vu (31/10/2026) : « Faudrait
+#: le garder jusqu'a 20 minutes [...] le numero, il reste pendant 20
+#: minutes ». Passe 15 min sans clic, la carte est figee : un clic sur
+#: « Prendre un numero » (ou un bouton de la carte) la rouvre sur ce numero
+#: et son code (_carte_rouverte), pour 15 min de plus.
+DUREE_CARTE_SEC = DUREE_NUMERO_SEC - 30
 #: Validite du jeton d'une interaction (15 min chez Discord), marge comprise.
 JETON_SEC = 15 * 60 - 10
 
@@ -3489,6 +3528,18 @@ def _numero_vivant(actif) -> bool:
         return _t.time() - float((actif or {}).get("pris_le") or 0) < _duree(actif)
     except (TypeError, ValueError):
         return False
+
+
+def _meme_numero(rec, action) -> bool:
+    """Le membre redemande un numero (ou un mail) alors que le sien vit
+    encore, code recu ou non : c'est le sien qu'il doit retrouver. Sa carte
+    a pu disparaitre (Discord fige un ephemere apres 15 min, et le retire
+    quand on la ferme) ; en racheter un payait le meme compte deux fois."""
+    actif = (rec or {}).get("actif")
+    if not actif or action not in ("sms", "mail"):
+        return False
+    return (actif.get("kind") == ("mail" if action == "mail" else "sms")
+            and _numero_vivant(actif))
 
 
 class _CartePerso:
