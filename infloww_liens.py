@@ -112,6 +112,11 @@ CREATRICE_CVR = ""
 # clics globaux (propriétaire, 31/10 : « et pour les clics Infloww, ils sont
 # où ? »).
 COLONNE_CLICS_CVR = False
+# True : colonne « Gagné », ce que chaque VA a gagné sur la vue (subs × son
+# prix au sub), quand sa paie est au sub à un seul prix (page Lia : 0,70 $).
+# Propriétaire, 31/10 : « leur gain ... combien ils ont gagné ... toi, t'as
+# 2,80 directement ici ». Sa paie à lui, jamais le revenu de l'agence.
+COLONNE_GAGNE = False
 # False : les liens de suivi qu'aucun lien GMS ne vise sont comptés, pas listés.
 HORS_DETAIL = True
 # Clics US « depuis toujours » : None = un relevé par jour ; sinon son âge maximal.
@@ -272,7 +277,7 @@ US_PERIODES_GARDE_S = 45 * 86400     # au-delà, une période plus consultée so
 
 # « gain » : la colonne Gain / perte (le paiement, page seulement) ; une
 # personne sans réglage n'a pas de gain et va en bas, dans les deux sens
-TRIS = ("nom", "us", "glob", "clics_cvr", "clics", "subs", "cvr", "par_sub", "gain")
+TRIS = ("nom", "us", "glob", "clics_cvr", "clics", "subs", "cvr", "par_sub", "gagne", "gain")
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
@@ -2072,6 +2077,41 @@ def _clics_cvr(du: str = "", au: str = "") -> Tuple[Optional[Dict[str, int]], st
     return out, ""
 
 
+def _prix_unique(cfg: Optional[Mapping[str, Any]]) -> Optional[float]:
+    """Le prix d'un sub d'une paie au sub à UN seul prix, en dollars (page
+    Lia : 0,70 $ tout le temps) ; None pour tout autre réglage -- un fixe, ou
+    des paliers par quinzaine, ne se lit pas en subs × prix."""
+    if not cfg or cfg.get("type") != "au_sub" or cfg.get("devise") != "USD":
+        return None
+    if not cfg.get("seuil"):
+        return float(cfg.get("taux2") or 0)
+    if cfg.get("taux1") == cfg.get("taux2"):
+        return float(cfg.get("taux1") or 0)
+    return None
+
+
+def _ajouter_gagne(t: Dict[str, Any]) -> Dict[str, Any]:
+    """La colonne « Gagné » (COLONNE_GAGNE) : subs de la vue × prix au sub de
+    chaque VA (son réglage, sinon PAIE_PAGE). « — » quand ce n'est pas
+    calculable ainsi. Sa paie, jamais le revenu de l'agence."""
+    if not COLONNE_GAGNE or t.get("erreur"):
+        return t
+    try:
+        cfgs, _mauvais = lire_paie()
+    except Exception as e:  # réglages illisibles : la colonne se tait, la page reste
+        print(f"[infloww-liens] réglages de paie illisibles : {type(e).__name__}: {e}", flush=True)
+        cfgs = {}
+    vals = []
+    for x in t.get("lignes") or []:
+        prix = _prix_unique(cfgs.get(str(x.get("cle"))) or (dict(PAIE_PAGE) if PAIE_PAGE else None))
+        x["gagne"] = (_centimes(prix) * int(x["subs"]) / 100.0
+                      if prix is not None and x.get("subs") is not None else None)
+        if x["gagne"] is not None:
+            vals.append(x["gagne"])
+    (t.get("totaux") or {})["gagne"] = round(sum(vals), 2) if vals else None
+    return t
+
+
 def tableau(us: str = "page") -> Dict[str, Any]:
     """Le tableau par personne. `us` : « page » (valeurs gardées, relevé en
     arrière-plan), « calcul » (relevé sur place, pour le démon), « cache »
@@ -2115,7 +2155,7 @@ def tableau(us: str = "page") -> Dict[str, Any]:
         # page Lia : MyPuls muet, la dernière lecture réussie -- dite, pas
         # passée pour neuve
         t["perime"] = str(i["perime"])
-    return t
+    return _ajouter_gagne(t)
 
 
 def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
@@ -2174,7 +2214,7 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
                    partenaire=part, bornes=(du, au), fins=fins, clics_cvr=cc, **commun)
     if raison_cc:
         t["cvr_panne"] = raison_cc
-    return t
+    return _ajouter_gagne(t)
 
 
 # ─── le paiement des VA, et ce qu'ils rapportent ─────────────────────────
@@ -4455,7 +4495,7 @@ def _tri_valide(tri: Any, sens: Any) -> Tuple[str, str]:
     tri = str(tri or "")
     # page Lia : pas de colonne des clics du lien de suivi, pas de tri dessus
     if (tri not in TRIS or (tri == "clics" and not CLICS_OF) or (tri == "glob" and not CLICS_GLOBAUX)
-            or (tri == "clics_cvr" and not COLONNE_CLICS_CVR)):
+            or (tri == "clics_cvr" and not COLONNE_CLICS_CVR) or (tri == "gagne" and not COLONNE_GAGNE)):
         return "nom", "asc"
     sens = str(sens or "")
     if sens not in SENS:
@@ -4625,6 +4665,11 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         # page Lia : les clics Infloww qui font le CVR, juste avant les subs
         k = [c[0] for c in cols].index("subs")
         cols = cols[:k] + (("clics_cvr", "Clics\u00a0Infloww", "n"),) + cols[k:]
+        # « les clics US, c'est quoi ? C'est les clics sur GetMySocial ? » : dit
+        cols = tuple((c, t + "\u00a0GMS", cl) if c in ("us", "glob") else (c, t, cl) for c, t, cl in cols)
+    if COLONNE_GAGNE:
+        k = [c[0] for c in cols].index("par_sub") + 1
+        cols = cols[:k] + (("gagne", "Gagné", "n"),) + cols[k:]
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
     P = paie or {}
@@ -4651,7 +4696,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
                      + f'<td class="n fort">{_nb(x.get("subs"))}{d_subs}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
-                     f'{d_par_sub}</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
+                     f'{d_par_sub}</td>'
+                     + (f'<td class="n fort">{_dollars(x.get("gagne"))}</td>' if COLONNE_GAGNE else "")
+                     + f'{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
                      # le détail du gain : sa propre ligne, pleine largeur, juste dessous
                      + (_ligne_detail(x, P.get("taux"), len(cols)) if avec else ""))
     if not corps:
@@ -4666,7 +4713,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
             + f'<td class="n">{_nb(T.get("subs"))}{t_subs}</td>'
             f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
             f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
-            f'{t_par_sub}</td>{_cellules_total_paie(P) if avec else ""}</tr>')
+            f'{t_par_sub}</td>'
+            + (f'<td class="n">{_dollars(T.get("gagne"))}</td>' if COLONNE_GAGNE else "")
+            + f'{_cellules_total_paie(P) if avec else ""}</tr>')
     return (f'<div class="boite"><table><thead><tr>{"".join(th)}</tr></thead>'
             f'<tbody>{"".join(corps)}</tbody><tfoot>{pied}</tfoot></table></div>')
 
@@ -4997,7 +5046,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 f"« {_e(NOM_EQUIPE)} », un lien SPAM "
                 "compte à part ; une personne additionne ses liens de suivi distincts",
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial pendant ces mêmes "
-                "jours, calculés en arrière-plan puis gardés (toutes les 2 h si la période finit "
+                "jours, calculés en arrière-plan puis gardés (toutes les "
+                + (f"{_nb(US_OUVERTE_FRAIS_S // 3600)} h" if US_OUVERTE_FRAIS_S % 3600 == 0
+                   else f"{_nb(US_OUVERTE_FRAIS_S // 60)} min")
+                + " si la période finit "
                 f"aujourd'hui) ; {_nb(US_PERIODES_MAX_JOUR)} périodes différentes et "
                 f"{_nb(US_PERIODES_APPELS_PAR_PERSONNE)} appels GetMySocial par personne par jour au plus"
                 + (f" ({_nb(_budget_jour(len(t['lignes'])))} en tout)" if t.get("lignes") else "")
@@ -5770,7 +5822,14 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     "SOURCE_TOUJOURS": "MyPuls", "CLICS_OF": False, "HORS_DETAIL": False,
     # des liens tout neufs : un relevé par jour les laissait à zéro jusqu'au
     # lendemain (une heure : la règle du propriétaire du 06/10 pour les clics)
-    "US_FRAIS_S": 3600, "MARQUE": "MyPuls · YouCham",
+    # Propriétaire, 31/10 21h30 : « les clics US ... là, ils sont faux » --
+    # l'image de 21h00 montrait 9 vues GMS pour VA 1, GMS en comptait 17 à
+    # 21h38 : relevé d'il y a une heure (et deux pour la quinzaine), sur des
+    # liens qui démarrent. 20 min : l'image de chaque heure pile le refait,
+    # et quatre personnes coûtent au plus ~600 appels par jour (quota de
+    # 10 000 lectures par clé).
+    "US_FRAIS_S": 1200, "US_OUVERTE_FRAIS_S": 1200, "US_PERIODES_APPELS_PAR_PERSONNE": 80,
+    "MARQUE": "MyPuls · YouCham",
     # « change leur nom ... tu mets leur truc d'Infloww, genre @ » (31/10)
     "NOM_PAR_SUIVI": True,
     # « mets aussi un accès libre » (31/10) : ouverte à tous, sans clé
@@ -5783,6 +5842,7 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     # c112-c115 y sont), pas sous liasxcret
     "CREATRICE_CVR": "aileney",
     "COLONNE_CLICS_CVR": True,
+    "COLONNE_GAGNE": True,
     "RELEVES_CVR_FICHIER": DATA_DIR / "infloww_liens_clics_infloww_lia.json",
     "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",

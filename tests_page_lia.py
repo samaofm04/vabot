@@ -155,7 +155,7 @@ print("1. Le profil")
 check("profil lia : Lia (liasxcret), groupe YouCham de l'espace personnel, MyPuls, sans clics OF",
       m is not il and m.CREATRICE == "liasxcret" and m.NOM_AFFICHE == "Lia" and m.GROUPE_GMS == GROUPE
       and not m.EQUIPE_GMS and m.NOM_EQUIPE == "YouCham" and m.SOURCE_TOUJOURS == "MyPuls"
-      and m.CLICS_OF is False and m.HORS_DETAIL is False and m.US_FRAIS_S == 3600)
+      and m.CLICS_OF is False and m.HORS_DETAIL is False and m.US_FRAIS_S == 1200)
 check("profil lia : clics US, paie et copie GMS dans des fichiers à elle",
       all(getattr(m, k) != getattr(il, k) for k in ("GMS_COPIE", "US_FICHIER", "US_PERIODES_FICHIER",
                                                      "PAIE_FICHIER", "QUINZ_FICHIER", "LIGNES_FICHIER")))
@@ -198,9 +198,19 @@ check("MyPuls lu depuis le premier jour jusqu'à aujourd'hui",
 check("une personne par lien du groupe : VA 1..VA 4", sorted(lignes) == ["VA 1", "VA 2", "VA 3", "VA 4"],
       sorted(lignes))
 entetes = re.findall(r"<th[^>]*>(?:<a[^>]*>)?([^<]+)", h)
-check("colonnes : Personne, Clics US, Clics globaux, Clics Infloww, Subs, CVR, $ / sub — rien d'autre",
+check("colonnes : Personne, Clics US GMS, Clics globaux GMS, Clics Infloww, Subs, CVR, $ / sub, Gagné",
       [" ".join(e.split()).rstrip(" ▴▾") for e in entetes]
-      == ["Personne", "Clics US", "Clics globaux", "Clics Infloww", "Subs", "CVR", "$ / sub"], entetes)
+      == ["Personne", "Clics US GMS", "Clics globaux GMS", "Clics Infloww", "Subs", "CVR", "$ / sub", "Gagné"],
+      entetes)
+check("Gagné : subs × 0,70 $ (VA 1 : 3 subs = 2,10 $ ; VA 3 : 0 $ ; VA 4 sans subs connus : —), total 2,80 $",
+      lignes["VA 1"].get("gagne") == 2.1 and lignes["VA 2"].get("gagne") == 0.7 and lignes["VA 3"].get("gagne") == 0.0
+      and lignes["VA 4"].get("gagne") is None and t["totaux"].get("gagne") == 2.8,
+      ({k: x.get("gagne") for k, x in lignes.items()}, t["totaux"].get("gagne")))
+check("Gagné : écrit dans la page (2,10 $ sur la ligne de VA 1), Jessye et Emy sans la colonne",
+      "2,10 $" in " ".join(texte.split()) and il.COLONNE_GAGNE is False and il.profil("emy").COLONNE_GAGNE is False)
+check("clics GMS relus toutes les 20 min sur Lia (l'image de 21h00 montrait un relevé d'une heure)",
+      m.US_FRAIS_S == 1200 and il.REGLAGES["lia"]["US_OUVERTE_FRAIS_S"] == 1200
+      and il.US_OUVERTE_FRAIS_S == 7200 and il.US_FRAIS_S is None)
 check("Clics Infloww : ceux qui font le CVR (VA 1 : 49), « — » sans lien de suivi (VA 4), total 58",
       lignes["VA 1"].get("clics_cvr") == 49 and lignes["VA 4"].get("cvr_infloww") is None
       and t["totaux"].get("clics_cvr") == 58, (lignes["VA 1"].get("clics_cvr"), t["totaux"].get("clics_cvr")))
@@ -349,6 +359,8 @@ pa = {x["cle"]: x for x in m.avec_paie(m.tableau(), attente=10)["lignes"]}
 check("un réglage enregistré passe devant (VA 2 « Aucun »), les autres gardent 0,70 $",
       pa["VA 2"]["paie"]["cfg"]["type"] == "aucun" and pa["VA 1"]["paie"]["cfg"]["type"] == "au_sub",
       pa["VA 2"]["paie"]["cfg"])
+check("Gagné : VA 2 réglé « Aucun » n'a pas de gain au sub (—)",
+      {x["cle"]: x for x in m.tableau()["lignes"]}["VA 2"].get("gagne") is None)
 
 print("6. L'image de la quinzaine (📊・click-et-sub)")
 import asyncio                          # noqa: E402
@@ -374,8 +386,11 @@ check("image : les chiffres de la page, pas recalculés (CVR, $ / sub, couleurs)
 check("image : jamais le net ni la paie", not any(k in str(v) for k in ("'net'", "paie", "gain")))
 png = li.dessiner(v)
 _im = _Image.open(_io.BytesIO(png))
-check("image : un PNG de 1400 px de large (six colonnes de chiffres)",
-      png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == li.LARGEUR == 1400, _im.size)
+check("image : un PNG de 1600 px de large (sept colonnes de chiffres)",
+      png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == li.LARGEUR == 1600, _im.size)
+check("image : la colonne Gagné (celle de la page)",
+      {x["cle"]: x for x in v["lignes"]}["VA 1"]["gagne"] == {x["cle"]: x for x in _tq["lignes"]}["VA 1"].get("gagne")
+      and v["total"]["gagne"] == _tq["totaux"].get("gagne"))
 check("image : la colonne Clics Infloww (ceux de la page)",
       {x["cle"]: x for x in v["lignes"]}["VA 1"]["inf"] == {x["cle"]: x for x in _tq["lignes"]}["VA 1"].get("clics_cvr"))
 check("image : vide, elle se dessine quand même (le message de la page)",
