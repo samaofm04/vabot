@@ -104,6 +104,10 @@ SOURCE_TOUJOURS = "Infloww"
 # False : pas de colonne des clics du lien de suivi (le CVR reste calculé
 # sur eux : subs ÷ clics OnlyFans).
 CLICS_OF = True
+# Non vide : le CVR se calcule sur les clics des liens de suivi de CETTE
+# créatrice chez Infloww (son pseudo Infloww), et non sur ceux de la source
+# des subs. Page Lia : MyPuls donne ses subs, Infloww ses clics.
+CREATRICE_CVR = ""
 # False : les liens de suivi qu'aucun lien GMS ne vise sont comptés, pas listés.
 HORS_DETAIL = True
 # Clics US « depuis toujours » : None = un relevé par jour ; sinon son âge maximal.
@@ -1736,7 +1740,8 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                periode: Optional[Mapping[str, Any]] = None, desactives: int = 0,
                partenaire: Optional[Mapping[str, Any]] = None,
                bornes: Optional[Tuple[str, str]] = None,
-               fins: Optional[Mapping[str, Mapping[str, Any]]] = None) -> Dict[str, Any]:
+               fins: Optional[Mapping[str, Mapping[str, Any]]] = None,
+               clics_cvr: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
     """Le tableau par personne, à partir des liens normalisés d'infloww
     (_lien_norm), des liens GetMySocial de l'espace et des clics US relevés.
 
@@ -1867,7 +1872,21 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     # ... de GMS, les US, après sub, CVR et LTV ») ; il montait à 400 % (des
     # subs venus d'ailleurs que des US). Propriétaire, 31/10/2026, capture
     # d'Infloww à l'appui : « prends juste les clics sur Infloww pour le CVR ».
-    # Il reste donc celui de _somme : subs ÷ clics du lien de suivi OnlyFans.
+    # `clics_cvr` {code: clics chez Infloww} : une personne dont TOUS les
+    # liens de suivi y sont prend ces clics ; les autres gardent ceux de
+    # _somme (MyPuls), et la page le dit.
+    if clics_cvr is not None:
+        for x in lignes:
+            codes = sorted({str(r.get("code")) for r in x["infloww"] if r.get("code")})
+            if codes and all(c in clics_cvr for c in codes):
+                n = sum(int(clics_cvr[c]) for c in codes)
+                x.update(clics_cvr=n, cvr_infloww=True,
+                         cvr=(int(x["subs"]) * 100.0 / n) if n and x.get("subs") is not None else None)
+        # au total : chaque ligne avec les clics qui ont fait son CVR
+        avec = [x for x in lignes if x.get("subs") is not None
+                and (x.get("clics_cvr") if x.get("cvr_infloww") else x.get("clics")) is not None]
+        n_t = sum(int(x["clics_cvr"] if x.get("cvr_infloww") else x["clics"]) for x in avec)
+        T["cvr"] = (sum(int(x["subs"]) for x in avec) * 100.0 / n_t) if n_t else None
     pp_t = _part_partenaire(comptes)
     if pp_t:
         T["part_p"] = pp_t
@@ -1965,6 +1984,29 @@ def _vide(erreur: str, periode: Optional[Tuple[str, str]] = None) -> Dict[str, A
     return construire([], [], erreur=erreur)
 
 
+def _clics_cvr(du: str = "", au: str = "") -> Tuple[Optional[Dict[str, int]], str]:
+    """({code: clics}, "") des liens de suivi de CREATRICE_CVR chez Infloww,
+    pour le CVR ; (None, pourquoi) s'il ne répond pas. Ne lève jamais.
+
+    Infloww ne rend que des compteurs CUMULÉS depuis la création du lien : sur
+    une période, un lien n'y compte que si elle commence au plus tard le jour
+    de sa création et finit aujourd'hui (même règle que la part Jessye de la
+    page Emy). Les autres restent sur les clics MyPuls de la période."""
+    i = _infloww(CREATRICE_CVR)
+    if i.get("erreur"):
+        return None, str(i["erreur"])[:200]
+    auj = _aujourdhui()
+    out: Dict[str, int] = {}
+    for x in i.get("liens") or []:
+        code, n = _code_infloww(x), _entier(x.get("clics"))
+        if not code or n is None:
+            continue
+        if du and (au != auj or not str(x.get("cree") or "")[:10] or str(x.get("cree"))[:10] < du):
+            continue
+        out[code] = n
+    return out, ""
+
+
 def tableau(us: str = "page") -> Dict[str, Any]:
     """Le tableau par personne. `us` : « page » (valeurs gardées, relevé en
     arrière-plan), « calcul » (relevé sur place, pour le démon), « cache »
@@ -1993,13 +2035,17 @@ def tableau(us: str = "page") -> Dict[str, Any]:
     # page Emy : les liens Jessye, abonnés comptés un par un (sans ceux datés
     # de la création du lien), clics et gains cumulés
     part = _partenaire_toujours(codes_p) if PARTENAIRE and not erreur else None
+    cc, raison_cc = _clics_cvr() if CREATRICE_CVR and not erreur else (None, "")
     t = construire(i.get("liens") or [], g["liens"], us=us_depuis_cache(ents),
                    lu_a=i.get("lu_a"), tronque=i.get("tronque"),
                    doublons=i.get("doublons") or 0, source=SOURCE_TOUJOURS,
                    illisibles=int(i.get("illisibles") or 0),
                    depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
                    us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "",
-                   desactives=int(g.get("desactives") or 0), partenaire=part)
+                   desactives=int(g.get("desactives") or 0), partenaire=part,
+                   clics_cvr=cc)
+    if raison_cc:
+        t["cvr_panne"] = raison_cc
     if i.get("perime"):
         # page Lia : MyPuls muet, la dernière lecture réussie -- dite, pas
         # passée pour neuve
@@ -2058,8 +2104,12 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
         per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
     part = _partenaire_periode(du, au, codes_p) if PARTENAIRE and not erreur else None
     fins = {vu: _mypuls_periode(du, vu) for vu in fins_q} if not erreur else {}
-    return construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per,
-                      partenaire=part, bornes=(du, au), fins=fins, **commun)
+    cc, raison_cc = _clics_cvr(du, au) if CREATRICE_CVR and not erreur else (None, "")
+    t = construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per,
+                   partenaire=part, bornes=(du, au), fins=fins, clics_cvr=cc, **commun)
+    if raison_cc:
+        t["cvr_panne"] = raison_cc
+    return t
 
 
 # ─── le paiement des VA, et ce qu'ils rapportent ─────────────────────────
@@ -4572,6 +4622,15 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     h: List[str] = []
     source = str(t.get("source") or "Infloww")
     per = t.get("periode") or {}
+    if t.get("cvr_panne"):
+        h.append(f'<div class="avert"><b>Infloww n\'a pas répondu</b> ({_e(t["cvr_panne"])}) : le CVR '
+                 "est calculé sur les clics MyPuls du lien de suivi.</div>")
+    elif CREATRICE_CVR and not t.get("erreur"):
+        n_mp = sum(1 for x in lignes if x.get("subs") is not None and not x.get("cvr_infloww"))
+        if n_mp:
+            h.append(f'<div class="avert">{_nb(n_mp)} personne{"s" if n_mp > 1 else ""} : CVR sur les '
+                     "clics MyPuls (lien de suivi pas encore chez Infloww, ou période qu'Infloww ne sait "
+                     "pas dater).</div>")
     if per.get("perime") or t.get("perime"):
         h.append(f'<div class="avert"><b>MyPuls n\'a pas répondu</b> '
                  f'({_e(per.get("perime") or t.get("perime"))}).</div>')
@@ -4833,8 +4892,11 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours, "
                 + (f"relevés toutes les {_nb(US_FRAIS_S // 60)} min" if US_FRAIS_S else "relevés une fois par jour"),
                 f"<b>Subs</b> : abonnés du lien de suivi {_e(_de_nom(NOM_AFFICHE))}, lus dans MyPuls",
-                "<b>CVR</b> = subs ÷ clics du lien de suivi OnlyFans (ceux qu'affiche Infloww, lus dans "
-                "MyPuls) ; <b>$ / sub</b> = gains nets ÷ subs",
+                ("<b>CVR</b> = subs ÷ clics du lien de suivi OnlyFans, lus chez Infloww"
+                 + (f" (compte {_e(CREATRICE_CVR)})" if CREATRICE_CVR else "")
+                 if CREATRICE_CVR else
+                 "<b>CVR</b> = subs ÷ clics du lien de suivi OnlyFans (ceux qu'affiche Infloww, lus dans "
+                 "MyPuls)") + " ; <b>$ / sub</b> = gains nets ÷ subs",
                 f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
                 f"{_nb(MYPULS_TTL_S // 60)} min au plus"]
     elif not du:
@@ -4876,7 +4938,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                  "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
                  "clics US" if CLICS_OF else
                  "<b>Subs</b> : abonnés du lien de suivi sur la période, lus dans MyPuls"),
-                f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'OnlyFans du lien de suivi'} ; "
+                f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'OnlyFans du lien de suivi'}"
+                + (" (ceux d'Infloww quand la période commence au plus tard à la création du lien et "
+                   "finit aujourd'hui — Infloww ne donne que des cumuls —, sinon ceux de MyPuls)"
+                   if CREATRICE_CVR else "") + " ; "
                 "<b>$ / sub</b> = gains nets que MyPuls attribue au lien sur la période ÷ subs de la période"]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")
@@ -5634,6 +5699,10 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     "LIEN_AFFILIATIONS": False,
     # « tu peux mettre les clics globaux ... entre subs et clics US » (31/10)
     "CLICS_GLOBAUX": True,
+    # « prends juste les clics sur Infloww pour le CVR » (31/10) : Lia est
+    # chez Infloww sous son ancien pseudo, « aileney » (vérifié le 31/10 :
+    # c112-c115 y sont), pas sous liasxcret
+    "CREATRICE_CVR": "aileney",
     "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
     "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",

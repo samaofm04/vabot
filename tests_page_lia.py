@@ -14,8 +14,10 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     Infloww), du premier jour à aujourd'hui ;
   - colonnes : Personne, Clics US, Clics globaux (tous pays, 31/10), Subs,
     CVR, $ / sub — pas de clics du lien
-    de suivi ; CVR = subs ÷ clics du lien de suivi OnlyFans (propriétaire,
-    31/10 : « prends juste les clics sur Infloww pour le CVR ») ;
+    de suivi ; CVR = subs ÷ clics du lien de suivi OnlyFans, lus CHEZ
+    INFLOWW au pseudo « aileney » (propriétaire, 31/10 : « prends juste les
+    clics sur Infloww pour le CVR ») ; MyPuls en secours (Infloww muet,
+    période qu'il ne sait pas dater), et la page le dit ;
   - les autres liens de suivi de Lia (Twitter, Threads, Agency) sont comptés,
     pas listés : ni leur nom ni leurs chiffres sur la page ;
   - clics US relevés toutes les heures (liens neufs), un raté retenté après
@@ -167,6 +169,20 @@ for _k in FICHIERS:
     setattr(m, _k, TMP / (_k.lower() + ".json"))
 m.US_EN_FOND = False
 m._lire_mypuls_api = _mypuls
+# Infloww : Lia y est sous « aileney » ; ses clics font le CVR (31/10)
+AUJ = m._aujourdhui()
+INFLOWW_LU = []
+INFLOWW = {"erreur": "", "liens": [{"code": "115", "clics": 49, "cree": AUJ},
+                                   {"code": "113", "clics": 1, "cree": AUJ},
+                                   {"code": "112", "clics": 8, "cree": AUJ}]}
+
+
+def _infloww_faux(creatrice=""):
+    INFLOWW_LU.append(creatrice)
+    return dict(INFLOWW)
+
+
+m._infloww = _infloww_faux
 
 print("2. La page, depuis toujours")
 h = m.page({}, cle="CLE", paie=False)
@@ -190,9 +206,13 @@ check("Jessye et Emy : pas de colonne des clics globaux",
 check("aucune colonne « Clics MyPuls » ni « Clics Infloww »",
       "Clics MyPuls" not in texte.replace(" ", " ") and "Clics Infloww" not in texte.replace(" ", " "))
 va1 = lignes["VA 1"]
-check("VA 1 : 40 clics US, 3 subs, CVR 12,5 % (3 subs ÷ 24 clics OnlyFans, pas ÷ US), 4,17 $ / sub",
-      va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 12.5) < 1e-9
-      and abs(va1["par_sub"] - 12.5 / 3) < 1e-9, va1)
+check("VA 1 : 40 clics US, 3 subs (MyPuls), CVR = 3 ÷ 49 clics Infloww, 4,17 $ / sub",
+      va1["us"] == 40 and va1["subs"] == 3 and abs(va1["cvr"] - 300.0 / 49) < 1e-9
+      and va1.get("cvr_infloww") and abs(va1["par_sub"] - 12.5 / 3) < 1e-9, va1)
+check("Infloww lu au pseudo « aileney » (Lia y est sous son ancien pseudo), pas liasxcret",
+      INFLOWW_LU and set(INFLOWW_LU) == {"aileney"} and m.CREATRICE_CVR == "aileney", INFLOWW_LU)
+check("Jessye et Emy : CVR sur les clics de leur source, aucune lecture à part",
+      il.CREATRICE_CVR == "" and il.profil("emy").CREATRICE_CVR == "")
 check("nom : le lien de suivi (« @roucham_79944 »), « VA 1 · c115 » dessous ; clé, paie et ancre : « VA 1 »",
       va1["nom"] == "@roucham_79944" and va1["cle"] == "VA 1"
       and "<b>@roucham_79944</b>" in h and "VA 1 · c115" in texte and 'id="' + m.ancre("VA 1") + '"' in h,
@@ -201,12 +221,13 @@ check("sans lien de suivi trouvé : le nom GetMySocial reste (VA 4)", lignes["VA
       lignes["VA 4"]["nom"])
 check("Jessye et Emy : le nom reste celui de GetMySocial",
       il.NOM_PAR_SUIVI is False and il.profil("emy").NOM_PAR_SUIVI is False)
-check("VA 3 : 0 clic OnlyFans, pas de CVR (et non 0 %)", lignes["VA 3"]["cvr"] is None, lignes["VA 3"])
+check("VA 3 : 0 sub sur 8 clics Infloww : 0 % (0 clic MyPuls ne compte plus)",
+      lignes["VA 3"]["cvr"] == 0.0, lignes["VA 3"])
 check("VA 4 : lien de suivi introuvable chez MyPuls, dit, pas de zéro inventé",
       lignes["VA 4"]["subs"] is None and lignes["VA 4"]["introuvables"], lignes["VA 4"])
 T = t["totaux"]
-check("total : CVR = 4 subs ÷ 29 clics OnlyFans de ses liens de suivi (pas ÷ les 82 clics US)",
-      T["us"] == 82 and abs(T["cvr"] - 4 * 100.0 / 29) < 1e-9, T)
+check("total : CVR = 4 subs ÷ 58 clics Infloww (sans VA 4, subs inconnus)",
+      T["us"] == 82 and abs(T["cvr"] - 4 * 100.0 / 58) < 1e-9, T)
 check("le lien de suivi Twitter de Lia : compté hors YouCham, ni nom ni chiffres sur la page",
       "1 autre(s) lien(s) de suivi de Lia, hors « YouCham » : non comptés" in texte
       and "bid_a" not in h and "900" not in texte, texte[-600:])
@@ -214,8 +235,17 @@ check("autre créatrice : ignorée", "Emy VA" not in h)
 check("en-tête : « Depuis toujours · MyPuls · @liasxcret · GetMySocial « YouCham » », marque MyPuls · YouCham",
       "Depuis toujours · MyPuls · @liasxcret · GetMySocial « YouCham »" in texte
       and "MyPuls · YouCham" in texte and "Infloww · YouL4b" not in texte, texte[:400])
-check("note : CVR = subs ÷ clics du lien de suivi OnlyFans", "CVR = subs ÷ clics du lien de suivi OnlyFans" in texte
-      and "CVR = subs ÷ clics US" not in texte)
+check("note : CVR = subs ÷ clics du lien de suivi OnlyFans, lus chez Infloww (compte aileney)",
+      "CVR = subs ÷ clics du lien de suivi OnlyFans, lus chez Infloww (compte aileney)" in texte
+      and "CVR = subs ÷ clics US" not in texte and "CVR sur les clics MyPuls" not in texte, texte[-700:])
+INFLOWW["erreur"] = "Infloww en panne"
+t_p = m.tableau()
+h_p = m.page({}, cle="CLE")
+INFLOWW["erreur"] = ""
+check("Infloww muet : CVR sur les clics MyPuls (3 ÷ 24), et la page le dit",
+      abs({x["cle"]: x for x in t_p["lignes"]}["VA 1"]["cvr"] - 12.5) < 1e-9
+      and "Infloww n'a pas répondu" in html.unescape(h_p) and "Infloww en panne" in h_p,
+      {x["cle"]: x.get("cvr") for x in t_p["lignes"]})
 check("vue des VA : ni paiement ni gain, aucun JavaScript",
       "Paiement" not in texte and "Gain" not in texte and "<script" not in h.lower())
 check("tri sur les clics du lien de suivi (absent) : ramené au nom", m._tri_valide("clics", "desc") == ("nom", "asc"))
@@ -252,6 +282,16 @@ tp = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<style.*
 check("période : mêmes colonnes, CVR sur les clics OnlyFans, liens du groupe",
       "Clics MyPuls" not in tp.replace(" ", " ") and "CVR = subs ÷ clics OnlyFans du lien de suivi" in tp
       and "du groupe « YouCham »" in tp, tp[:600])
+import datetime as _dtl                 # noqa: E402
+_hier = (_dtl.date.fromisoformat(AUJ) - _dtl.timedelta(days=1)).isoformat()
+_t_ouv = {x["cle"]: x for x in m.tableau_periode("2026-10-20", AUJ, us="cache")["lignes"]}
+_t_close = m.tableau_periode("2026-10-20", _hier, us="cache")
+_t_cl = {x["cle"]: x for x in _t_close["lignes"]}
+check("période qui couvre la vie du lien et finit aujourd'hui : clics Infloww (3 ÷ 49)",
+      abs(_t_ouv["VA 1"]["cvr"] - 300.0 / 49) < 1e-9 and _t_ouv["VA 1"].get("cvr_infloww"), _t_ouv["VA 1"])
+check("période close (Infloww ne date pas ses clics) : clics MyPuls de la période (3 ÷ 24), et c'est dit",
+      abs(_t_cl["VA 1"]["cvr"] - 12.5) < 1e-9 and not _t_cl["VA 1"].get("cvr_infloww")
+      and "CVR sur les clics MyPuls" in html.unescape(m.page_html(_t_close)), _t_cl["VA 1"])
 m.taux_eur_usd = lambda maintenant=None: {"taux": 1.08}
 ho = m.page({}, cle="CLE", paie=True)
 check("propriétaire : Paiement et Gain / perte, sans colonne de clics OF",
