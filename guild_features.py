@@ -57,6 +57,8 @@ def get_features(guild_or_id) -> set:
     gid = _gid(guild_or_id)
     if gid is None:
         return set(ALL_FEATURES)
+    if gid in NUMERO_SEUL:
+        return set()
     v = _load().get(gid)
     if v is None:
         return set(ALL_FEATURES)
@@ -163,6 +165,23 @@ def noms_us() -> str:
 #: entretien du spoofer, menu, spoofer, download et numéro la lisent --
 #: jamais l'id recopié.
 OUTILS_COMMUNS = {YOUCHAM_GUILD_ID}
+
+
+#: Serveurs ou le bot admin (Rem) ne sert QUE le numero : le panneau du
+#: salon « numéro » et, au clic, une carte ephemere de 15 min, comme le
+#: 📱・numéro de YouCham (cogs/numeros.clic_partage), 3 numeros par jour et
+#: par VA. Proprietaire, 31/10/2026 : « mettre ce bot aussi juste pour ca pour
+#: un autre server juste le numero dans ce serv », puis « limite a 3 par jour
+#: pour le server trust instagram ». Aucune autre fonction n'y tourne
+#: (get_features) : un serveur inconnu les a TOUTES, et le tri des salons va-
+#: (vasort) s'y lancait toutes les 20 min. Le reste de TRUST INSTAGRAM est a
+#: Revel, par REST, qui ne lit pas ce fichier. id -> nom court.
+NUMERO_SEUL: dict = {"1488331963575177247": "TRUST INSTAGRAM"}
+
+
+def numero_seul(guild_or_id) -> bool:
+    """True si le bot ne sert que le numero sur ce serveur."""
+    return _gid(guild_or_id) in NUMERO_SEUL
 
 
 def outils_communs(guild_or_id) -> bool:

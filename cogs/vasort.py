@@ -243,7 +243,10 @@ class VASort(commands.Cog):
 
     @tasks.loop(minutes=20)
     async def auto_sort(self):
+        import guild_features as gf
         for g in self.bot.guilds:
+            if gf.numero_seul(g):
+                continue   # le bot n'y est que pour le numero
             try:
                 _c, _m, _f = await sort_guild(g)
                 if _f:

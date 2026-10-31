@@ -1244,6 +1244,85 @@ finally:
 check("Rem pose le panneau du 📱・numéro commun, et dans aucun -content",
       poses_n == ["📱・numéro"], poses_n)
 
+# ── 4e. serveur « numéro seul » (YouLab | INSTAGRAM, 31/10)
+print("  4e. serveur numéro seul")
+import cogs.vasort as vs  # noqa: E402
+
+SEUL = 1570000000000000001
+_sauve_seul = dict(gf.NUMERO_SEUL)
+gf.NUMERO_SEUL[str(SEUL)] = "Essai"
+nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
+try:
+    gs = Guilde(SEUL, "YouLab | INSTAGRAM")
+    cs = gs.ajoute_cat("Salons textuels")
+    num_s, num_us, gen_s = (gs.ajoute("📱・numéro", cs), gs.ajoute("🇺🇸 numéro-usa", cs),
+                            gs.ajoute("général", cs))
+    check("aucune autre fonction n'y tourne (statut, tickets, onboarding…)",
+          gf.get_features(SEUL) == set() and not gf.enabled(gs, "statut"),
+          gf.get_features(SEUL))
+    check("le panneau va dans le salon « numéro » (📱・numéro, numéro-usa), pas dans général",
+          nm._salon_commun(num_s) and nm._salon_commun(num_us) and not nm._salon_commun(gen_s))
+    check("tout salon du serveur donne une carte : le numéro n'est jamais montré à tous",
+          nm._salon_partage(num_s) and nm._salon_partage(gen_s))
+    check("un salon « numéro » d'un autre serveur n'en devient pas un",
+          not nm._salon_commun(Salon(Guilde(1570000000000000002, "x"), "📱・numéro"))
+          and not nm._salon_partage(Salon(Guilde(1570000000000000002, "x"), "📱・numéro")))
+    FNs = _FauxNum()
+    vas = Membre(7300, "va_insta", gs)
+    gs.members.append(vas)
+    it = Itx(gs, num_s, vas)
+    courir(nm.NumerosCog.clic(FNs, it, "sms"))
+    check("📱 Prendre un numéro : acheté dans SA carte, éphémère, avec « 3 numéros maximum »",
+          FNs.achats and _carte_de(FNs.achats[-1], num_s, vas) and _carte_envoyee(it),
+          (FNs.achats, it.response.envois))
+    poses_n = []
+    nm.poser_panneau = _faux_poser
+    try:
+        courir(nm.NumerosCog._panneau_commun.coro(types.SimpleNamespace(
+            bot=types.SimpleNamespace(guilds=[gs]))))
+    finally:
+        nm.poser_panneau = _vrai_poser
+    check("la boucle de Rem y pose le panneau, dans les salons « numéro » seulement",
+          sorted(poses_n) == sorted(["📱・numéro", "🇺🇸 numéro-usa"]), poses_n)
+    tries = []
+    _vrai_tri = vs.sort_guild
+
+    async def _faux_tri(gg, create_seps=True):
+        tries.append(gg.id)
+        return 0, 0, 0
+    vs.sort_guild = _faux_tri
+    try:
+        courir(vs.VASort.auto_sort.coro(types.SimpleNamespace(
+            bot=types.SimpleNamespace(guilds=[gs, g]))))
+    finally:
+        vs.sort_guild = _vrai_tri
+    check("le tri des salons va- n'y passe pas (il passe ailleurs)",
+          tries == [g.id], tries)
+    _vrai_jour = nm.numeros_du_jour
+    carte_s = nm._CartePerso(num_s, vas.id, "va_insta")
+    refus = []
+    try:
+        for n_pris, attendu in ((2, True), (3, False)):
+            nm.numeros_du_jour = lambda uid, gid, maintenant=None, n=n_pris: (
+                n if str(gid) == str(SEUL) and uid == vas.id else 0)
+            it = Itx(gs, num_s, vas)
+            ok = courir(nm._quota_fr_ok(it, carte_s, "sms"))
+            refus.append((n_pris, ok, it.response.envois))
+        it = Itx(g, S["numero"], VA1)
+        nm.numeros_du_jour = lambda uid, gid, maintenant=None: 9
+        ok_ycham = courir(nm._quota_fr_ok(it, nm._CartePerso(S["numero"], VA1.id), "sms"))
+    finally:
+        nm.numeros_du_jour = _vrai_jour
+    check("3 numéros par jour : le 3e passe, le 4e est refusé (« Reviens demain »)",
+          refus[0][1] is True and refus[1][1] is False
+          and "Reviens demain" in str(refus[1][2]), refus)
+    check("… la limite ne touche pas YouCham", ok_ycham is True)
+    check("… ni le +33 du serveur FR", nm._pays(carte_s) is None and nm._pays(num_s) is None)
+finally:
+    gf.NUMERO_SEUL.clear()
+    gf.NUMERO_SEUL.update(_sauve_seul)
+    nm.numgen.status = _status
+
 
 # ═══════════════════════════════════════════ 5. /ticketsall sur YouCham ══
 print("5. /ticketsall sur YouCham")

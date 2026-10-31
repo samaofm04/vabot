@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -3512,10 +3513,36 @@ class _CartePerso:
 def _salon_partage(channel) -> bool:
     """Un salon ou chacun recoit son numero dans une carte visible de lui
     seul : sur YouCham (outils communs), tout salon hors -content -- le
-    📱・numéro, meme renomme (_clic_us). Ailleurs, rien ne change."""
+    📱・numéro, meme renomme (_clic_us) ; sur un serveur « numero seul »
+    (guild_features.NUMERO_SEUL), tout salon. Ailleurs, rien ne change."""
     if channel is None or isinstance(channel, _CartePerso):
         return False
-    return _clic_us(channel)
+    return _clic_us(channel) or _numero_seul(channel)
+
+
+def _numero_seul(channel) -> bool:
+    """Le salon est-il sur un serveur ou ce bot ne sert que le numero ?"""
+    try:
+        import guild_features as gf
+        return bool(gf.numero_seul(getattr(channel, "guild", None)))
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _salon_numero_seul(channel) -> bool:
+    """LE salon du panneau d'un serveur « numero seul » : celui dont le nom,
+    sans son decor (emoji, « ・ »), commence par numero -- « 📱・numéro »,
+    « numero-usa ». Les autres salons du serveur n'ont pas de panneau."""
+    if isinstance(channel, _CartePerso) or not _numero_seul(channel):
+        return False
+    try:
+        from cogs.welcome import nom_sans_decor
+        nom = nom_sans_decor(getattr(channel, "name", ""))
+    except Exception:                                        # noqa: BLE001
+        nom = str(getattr(channel, "name", "") or "").lower()
+    nom = "".join(c for c in unicodedata.normalize("NFKD", nom)
+                  if not unicodedata.combining(c))
+    return nom.startswith("numero")
 
 
 def _canal_du_registre(bot, cid):
@@ -5331,7 +5358,9 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
 
 
 # ---- Serveur FR : le panneau commun de la categorie Outils (03/10/2026) -----
-# Proprietaire : numeros « +33 », « 3 numero max » par jour et par VA.
+# Proprietaire : numeros « +33 », « 3 numero max » par jour et par VA. Les
+# 3 par jour valent aussi sur un serveur « numero seul » (TRUST INSTAGRAM,
+# 31/10/2026), sans le +33.
 QUOTA_JOUR_FR = 3
 PAYS_FR = "78"           # France, numgen.PAYS
 
@@ -5345,9 +5374,10 @@ def _serveur_fr(channel) -> bool:
 
 
 def _salon_commun(channel) -> bool:
-    """Un panneau COMMUN : 📱・numero-mail de Va IG (cogs/outils.py) ou
-    📱・numéro d'un serveur US aux outils communs (YouCham, outils_communs.py).
-    Il ne porte jamais de numero : le clic achete dans le salon du VA."""
+    """Un panneau COMMUN : 📱・numero-mail de Va IG (cogs/outils.py),
+    📱・numéro d'un serveur US aux outils communs (YouCham, outils_communs.py)
+    ou d'un serveur « numero seul ». Il ne porte jamais de numero : le clic
+    achete dans le salon du VA, ou dans sa carte."""
     if isinstance(channel, _CartePerso):
         return False
     try:
@@ -5356,7 +5386,7 @@ def _salon_commun(channel) -> bool:
             return True
     except Exception:                                        # noqa: BLE001
         pass
-    return _salon_commun_us(channel)
+    return _salon_commun_us(channel) or _salon_numero_seul(channel)
 
 
 def _salon_commun_us(channel) -> bool:
@@ -5496,10 +5526,11 @@ def _sans_rest(agg):
 
 
 async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:
-    """3 numeros par jour et par VA sur le serveur FR ; le staff n'est pas
-    bride (il teste, il depanne). Historique illisible : on n'achete pas --
-    sans lui, rien ne bornerait plus la depense."""
-    if kind != "sms" or not _serveur_fr(channel):
+    """3 numeros par jour et par VA sur le serveur FR et sur un serveur
+    « numero seul » (la carte y porte le serveur) ; le staff n'est pas bride
+    (il teste, il depanne). Historique illisible : on n'achete pas -- sans
+    lui, rien ne bornerait plus la depense."""
+    if kind != "sms" or not (_serveur_fr(channel) or _numero_seul(channel)):
         return True
     user = getattr(itx, "user", None)
     if not par:
@@ -5519,7 +5550,8 @@ async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:
                              "été acheté. Préviens un admin.")
         return False
     if n >= QUOTA_JOUR_FR:
-        log.info("numgen: quota FR atteint pour %s (%d/%d)", qui, n, QUOTA_JOUR_FR)
+        log.info("numgen: quota du jour atteint pour %s sur %s (%d/%d)", qui,
+                 getattr(channel.guild, "name", "?"), n, QUOTA_JOUR_FR)
         await _ephemere(itx, "📵 %d numéros aujourd'hui : c'est le maximum. "
                              "Reviens demain." % QUOTA_JOUR_FR)
         return False
