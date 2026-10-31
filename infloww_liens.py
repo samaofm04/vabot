@@ -115,6 +115,9 @@ NOM_PAR_SUIVI = False
 ACCES_LIBRE = False
 # False : pas de lien « 🤝 Affiliations » en tête de la page (voir page_html).
 LIEN_AFFILIATIONS = True
+# True : une colonne « Clics globaux » (tous pays, même relevé GetMySocial
+# que les US) entre Clics US et Subs.
+CLICS_GLOBAUX = False
 MARQUE = "Infloww · YouL4b"
 GUILD ="1535758943324999711"        # serveur Youl4b (seul : Bixby n'est pas sur YouCham)
 SALON = "1553218920842928219"        # salon « inflow-resultat », public : les VA le voient
@@ -260,7 +263,7 @@ US_PERIODES_GARDE_S = 45 * 86400     # au-delà, une période plus consultée so
 
 # « gain » : la colonne Gain / perte (le paiement, page seulement) ; une
 # personne sans réglage n'a pas de gain et va en bas, dans les deux sens
-TRIS = ("nom", "us", "clics", "subs", "cvr", "par_sub", "gain")
+TRIS = ("nom", "us", "glob", "clics", "subs", "cvr", "par_sub", "gain")
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
@@ -673,7 +676,8 @@ def us_depuis_cache(ents: Mapping[str, Mapping[str, Any]], cache: Optional[Mappi
         else:
             etat = "ancien"
         out[cle] = {"us": None if v is None else int(v), "jour": str(c.get("jour") or ""),
-                    "etat": etat, "raison": str(c.get("rate") or "")}
+                    "etat": etat, "raison": str(c.get("rate") or ""),
+                    "glob": None if v is None else _entier(c.get("glob"))}
     return out
 
 
@@ -683,9 +687,11 @@ def _a_mesurer(ents: Mapping[str, Mapping[str, Any]], cache: Mapping[str, Any], 
     pers = cache.get("personnes") or {}
     if US_FRAIS_S:
         # relevé du jour, mais plus vieux que US_FRAIS_S : refait (il reste
-        # affiché comme celui du jour en attendant)
+        # affiché comme celui du jour en attendant). Un relevé d'avant les
+        # clics globaux (sans « glob ») est refait aussi.
         return [c for c in ents
-                if maintenant - float((pers.get(c) or {}).get("essai") or 0)
+                if (CLICS_GLOBAUX and etats[c]["etat"] == "ok" and etats[c]["glob"] is None)
+                or maintenant - float((pers.get(c) or {}).get("essai") or 0)
                 >= {"ok": US_FRAIS_S, "rate": US_REESSAI_S}.get(etats[c]["etat"], 0)]
     return [c for c in ents if etats[c]["etat"] != "ok"
             # un essai raté il y a cinq minutes n'est pas refait à chaque affichage
@@ -773,7 +779,8 @@ def releve_us(ents: Mapping[str, Mapping[str, Any]], forcer: bool = False) -> Di
                     raison = "quota GetMySocial épuisé" + _reprise_gms()
                 c["rate"] = f"{jour} : " + (raison or "GetMySocial n'a pas rendu de relevé")
             else:
-                c.update(us=int((pays or {}).get("US") or 0), jour=jour, ids=ids, rate="")
+                # le total, tous pays : le même appel le rend (CLICS_GLOBAUX)
+                c.update(us=int((pays or {}).get("US") or 0), glob=_entier(tot), jour=jour, ids=ids, rate="")
             pers[cle] = c
             cache = dict(cache, personnes=pers, maj=time.time())
             safe_json.write(US_FICHIER, cache)
@@ -1425,7 +1432,8 @@ def us_periode_depuis_cache(ents: Mapping[str, Mapping[str, Any]], du: str, au: 
         else:
             etat, note = "ancien", f"US : relevé du {_heure(c.get('quand'))}"
         out[cle] = {"us": None if v is None else int(v), "etat": etat, "jour": str(c.get("jour") or ""),
-                    "raison": str(c.get("rate") or ""), "note": note}
+                    "raison": str(c.get("rate") or ""), "note": note,
+                    "glob": None if v is None else _entier(c.get("glob"))}
     return out
 
 
@@ -1435,7 +1443,8 @@ def _a_mesurer_periode(ents: Mapping[str, Mapping[str, Any]], du: str, au: str,
     per = ((cache.get("periodes") or {}).get(_cle_periode(du, au)) or {})
     out = []
     for c in ents:
-        if etats[c]["etat"] == "ok":
+        # un relevé d'avant les clics globaux (sans « glob ») est refait
+        if etats[c]["etat"] == "ok" and not (CLICS_GLOBAUX and etats[c]["glob"] is None):
             continue
         p = per.get(c) or {}
         if etats[c]["etat"] == "rate":
@@ -1587,8 +1596,8 @@ def releve_us_periode(ents: Mapping[str, Mapping[str, Any]], du: str, au: str) -
                 c.update(rate=f"{jour} : " + (raison or "GetMySocial n'a pas rendu de relevé"),
                          essais=n + 1, essais_jour=jour)
             else:
-                c.update(us=int((pays or {}).get("US") or 0), ids=ids, quand=time.time(), jour=jour,
-                         rate="", essais=0)
+                c.update(us=int((pays or {}).get("US") or 0), glob=_entier(tot), ids=ids, quand=time.time(),
+                         jour=jour, rate="", essais=0)
             per[cle] = c
             cache["periodes"] = dict(cache["periodes"], **{cp: per})
             cache["appels"] = {jour: faits}
@@ -1828,7 +1837,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                  # ceux de la créatrice de la page d'abord, l'autre ensuite
                  "infloww": sorted(resumes, key=lambda r: (bool(r.get("creatrice")), len(r["code"]), r["code"])),
                  "introuvables": introuvables,
-                 "us": u.get("us"), "us_etat": u.get("etat") or "absent",
+                 "us": u.get("us"), "glob": u.get("glob"), "us_etat": u.get("etat") or "absent",
                  "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or "",
                  "us_note": u.get("note") or ""}
         if NOM_PAR_SUIVI:
@@ -1847,8 +1856,11 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     T = _somme(comptes)
     T.pop("sans_clics", None)
     us_connus = [x["us"] for x in lignes if x.get("us") is not None]
+    glob_connus = [x["glob"] for x in lignes if x.get("glob") is not None]
     T.update(personnes=len(lignes), liens_infloww=len(comptes),
              us=sum(us_connus) if us_connus else None,
+             # un total qui en manquerait un se lirait comme complet : « — »
+             glob=sum(glob_connus) if glob_connus and len(glob_connus) == len(us_connus) else None,
              us_manquants=len(lignes) - len(us_connus))
     if not CLICS_OF:
         # page Lia (propriétaire, 31/10/2026) : « pas les clics Infloww mais
@@ -4331,7 +4343,7 @@ def _e(s: Any) -> str:
 def _tri_valide(tri: Any, sens: Any) -> Tuple[str, str]:
     tri = str(tri or "")
     # page Lia : pas de colonne des clics du lien de suivi, pas de tri dessus
-    if tri not in TRIS or (tri == "clics" and not CLICS_OF):
+    if tri not in TRIS or (tri == "clics" and not CLICS_OF) or (tri == "glob" and not CLICS_GLOBAUX):
         return "nom", "asc"
     sens = str(sens or "")
     if sens not in SENS:
@@ -4494,6 +4506,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
     if not CLICS_OF:
         cols = tuple(c for c in cols if c[0] != "clics")
+    if CLICS_GLOBAUX:
+        # page Lia (31/10) : « les clics globaux ... entre subs et clics US »
+        cols = cols[:2] + (("glob", "Clics globaux", "n"),) + cols[2:]
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
     P = paie or {}
@@ -4512,6 +4527,7 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         d_clics, d_subs, d_par_sub = _dets_partenaire(x)
         corps.append(f'<tr id="{ancre(x.get("cle"))}"><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
+                     + (f'<td class="n{us_cl}">{_nb(x.get("glob"))}</td>' if CLICS_GLOBAUX else "")
                      + (f'<td class="n">{_nb(x.get("clics"))}{_part_us(x.get("clics"), x.get("us"))}{d_clics}</td>'
                         if CLICS_OF else "")
                      + f'<td class="n fort">{_nb(x.get("subs"))}{d_subs}</td>'
@@ -4525,6 +4541,7 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
     t_clics, t_subs, t_par_sub = _dets_partenaire(T)
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
+            + (f'<td class="n">{_nb(T.get("glob"))}</td>' if CLICS_GLOBAUX else "")
             + (f'<td class="n">{_nb(T.get("clics"))}{_part_us(T.get("clics"), T.get("us"))}{t_clics}</td>'
                if CLICS_OF else "")
             + f'<td class="n">{_nb(T.get("subs"))}{t_subs}</td>'
@@ -4868,6 +4885,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")
         note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
                     f"{_nb(MYPULS_TTL_S // 60)} min au plus")
+    if CLICS_GLOBAUX:
+        # juste après la ligne des clics US
+        note.insert(3 if du else 2, "<b>Clics globaux</b> : les clics de tous les pays sur ces mêmes liens "
+                    "GetMySocial, lus dans le même relevé que les US")
     note += _note_partenaire(t, du)
     if t.get("sans_clics"):
         note.append(f"{_nb(t['sans_clics'])} lien(s) sans nombre de clics chez {_e(source)}")
@@ -5614,6 +5635,8 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     # « mets aussi un accès libre » (31/10) : ouverte à tous, sans clé
     "ACCES_LIBRE": True,
     "LIEN_AFFILIATIONS": False,
+    # « tu peux mettre les clics globaux ... entre subs et clics US » (31/10)
+    "CLICS_GLOBAUX": True,
     "GMS_COPIE": DATA_DIR / "infloww_liens_gms_lia.json",
     "US_FICHIER": DATA_DIR / "infloww_liens_us_lia.json",
     "US_PERIODES_FICHIER": DATA_DIR / "infloww_liens_us_periodes_lia.json",

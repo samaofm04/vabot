@@ -12,7 +12,8 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     (gms.list_links_group), jamais une équipe ;
   - depuis toujours, les chiffres viennent de MyPuls (Lia n'est pas chez
     Infloww), du premier jour à aujourd'hui ;
-  - colonnes : Personne, Clics US, Subs, CVR, $ / sub — pas de clics du lien
+  - colonnes : Personne, Clics US, Clics globaux (tous pays, 31/10), Subs,
+    CVR, $ / sub — pas de clics du lien
     de suivi ; CVR = subs ÷ clics US, au total sur les seules lignes dont subs
     ET clics US sont connus ;
   - les autres liens de suivi de Lia (Twitter, Threads, Agency) sont comptés,
@@ -178,9 +179,14 @@ check("MyPuls lu depuis le premier jour jusqu'à aujourd'hui",
 check("une personne par lien du groupe : VA 1..VA 4", sorted(lignes) == ["VA 1", "VA 2", "VA 3", "VA 4"],
       sorted(lignes))
 entetes = re.findall(r"<th[^>]*>(?:<a[^>]*>)?([^<]+)", h)
-check("colonnes : Personne, Clics US, Subs, CVR, $ / sub — rien d'autre",
-      [e.replace(" ", " ").rstrip(" ▴▾") for e in entetes] == ["Personne", "Clics US", "Subs", "CVR", "$ / sub"],
-      entetes)
+check("colonnes : Personne, Clics US, Clics globaux, Subs, CVR, $ / sub — rien d'autre",
+      [" ".join(e.split()).rstrip(" ▴▾") for e in entetes]
+      == ["Personne", "Clics US", "Clics globaux", "Subs", "CVR", "$ / sub"], entetes)
+check("clics globaux : le total tous pays du même relevé GetMySocial (US 40 + 5 ailleurs)",
+      lignes["VA 1"]["glob"] == 45 and lignes["VA 3"]["glob"] == 5 and t["totaux"]["glob"] == 45 + 17 + 5 + 35,
+      (lignes["VA 1"].get("glob"), t["totaux"].get("glob")))
+check("Jessye et Emy : pas de colonne des clics globaux",
+      il.CLICS_GLOBAUX is False and il.profil("emy").CLICS_GLOBAUX is False)
 check("aucune colonne « Clics MyPuls » ni « Clics Infloww »",
       "Clics MyPuls" not in texte.replace(" ", " ") and "Clics Infloww" not in texte.replace(" ", " "))
 va1 = lignes["VA 1"]
@@ -231,6 +237,13 @@ m.safe_json.write(m.US_FICHIER, dict(cache, personnes=p))
 ents, _ = m.entites(LIENS)
 check("relevé raté il y a 2 min : pas retenté avant US_REESSAI_S",
       "VA 2" not in m._a_mesurer(ents, m._us_cache(), m._aujourdhui(), time.time()))
+cache = m._us_cache()
+p = {k: dict(v, essai=time.time(), rate="") for k, v in (cache.get("personnes") or {}).items()}
+p["VA 1"].pop("glob", None)
+m.safe_json.write(m.US_FICHIER, dict(cache, personnes=p))
+check("relevé du jour d'avant les clics globaux (sans « glob ») : refait, lui seul",
+      m._a_mesurer(ents, m._us_cache(), m._aujourdhui(), time.time()) == ["VA 1"],
+      m._a_mesurer(ents, m._us_cache(), m._aujourdhui(), time.time()))
 
 print("4. Une période, la vue du propriétaire")
 hp = m.page({"du": "2026-10-25", "au": "2026-10-31"}, cle="CLE", paie=False)
@@ -287,7 +300,8 @@ check("image : les chiffres de la page, pas recalculés (CVR, $ / sub, couleurs)
 check("image : jamais le net ni la paie", not any(k in str(v) for k in ("'net'", "paie", "gain")))
 png = li.dessiner(v)
 _im = _Image.open(_io.BytesIO(png))
-check("image : un PNG de 1100 px de large", png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == 1100, _im.size)
+check("image : un PNG de 1240 px de large (cinq colonnes de chiffres)",
+      png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == li.LARGEUR == 1240, _im.size)
 check("image : vide, elle se dessine quand même (le message de la page)",
       li.dessiner(li.tableau({"lignes": [], "totaux": {}, "erreur": "MyPuls muet"}, "2026-10-16", "2026-10-31"))[:4]
       == b"\x89PNG")
