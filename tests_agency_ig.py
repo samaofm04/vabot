@@ -545,7 +545,7 @@ try:
           and "**Raison** : Inactif depuis 7 jours" in postes[1][3]["description"]
           and postes[1][3]["footer"]["text"].endswith("• Membre exclu"), postes[1])
     check("… l'arrivé sans source ni invitation qui a monté : « inconnu », écrit",
-          "🔗 **Lien** inconnu" in postes[0][3]["description"], postes[0][3]["description"])
+          "🔗 **Invité par** : inconnu" in postes[0][3]["description"], postes[0][3]["description"])
     check("… le panneau n'est pas revérifié à chaque tour (une fois l'heure)", panneaux == [AG])
     n = len(postes)
     b3 = aa.surveiller()
@@ -581,8 +581,8 @@ try:
     check("arrivé par le lien de 1 : 1 est son parrain, et l'annonce le dit (sans mention)",
           b5["arrivees"] == 1 and b5["parraines"] == 1 and f4.get("parrain") == "1"
           and f4.get("source") == "invitation_unique" and len(postes) == n + 1
-          and f"🔗 **Lien** : 🤝 **De la part de** <@1> : son lien de parrainage `{code1}`"
-          in postes[n][3]["description"] and "Invité par" not in postes[n][3]["description"]
+          and f"🔗 **Invité par** <@1>\n🤝 Son lien de parrainage `{code1}`"
+          in postes[n][3]["description"] and "Invité par <@" not in postes[n][3]["description"]
           and postes[n][3].get("thumbnail")
           and postes[n][2] == {"parse": []}, (b5, f4, postes[n:]))
     check("… parrain_de le rend (le « Merci » de la bienvenue)",
@@ -602,7 +602,7 @@ try:
           b6["arrivees"] == 2 and b6["parraines"] == 0
           and e6["5"]["parrain"] is None and e6["6"]["source"] == "a_confirmer", (b6, e6))
     check("… et la carte le dit : plusieurs liens possibles, les deux nommés",
-          all(f"🔗 **Lien** : plusieurs possibles, `{code1}` (parrainage de <@1>), `{code3}` (parrainage de <@3>)"
+          all(f"🔗 **Invité par** : plusieurs possibles\n`{code1}` (parrainage de <@1>), `{code3}` (parrainage de <@3>)"
               in p_[3]["description"] for p_ in postes[-2:]), [p_[3]["description"] for p_ in postes[-2:]])
     INVITES["usages"]["vanity"] += 1
     LISTE["m"] = LISTE["m"] + [{"user": {"id": "7"}, "joined_at": "g", "roles": []}]

@@ -59,7 +59,12 @@ PHRASES_DEPART = ("Son départ du serveur a été constaté.",
                   "Discord confirme son bannissement du serveur.")
 LIBELLES_DEPART = ("Départ du serveur", "Membre exclu", "Membre banni", "Départ volontaire")
 TITRE_ARRIVEE = "🚪 Nouvelle arrivée"
-MARQUE_ARRIVEE = "🔗 **Lien**"
+# Propriétaire, 31/10/2026, devant « 🔗 Lien : 🛡️ Lien du staff …, créé par
+# @Zayno » : « c'est où le truc qui met le @ du mec qui l'a invité » — l'inviteur
+# en premier, le détail du lien en dessous.
+INVITE_PAR = "🔗 **Invité par**"
+# toute version de ces lignes (« 🔗 **Lien** » du premier format compris)
+MARQUE_ARRIVEE = "\n🔗 **"
 MARQUES_DEPART = ("🚶 **Parti de lui-même**", "👮 **Exclu par**", "👮 **Banni par**", "❔ **Parti, sans")
 _RE_MEMBRE = re.compile(r"<@!?(\d{5,25})>")
 _RE_INVITE_PAR = re.compile(r"\n?Invité par <@!?(\d+)>\.")
@@ -303,32 +308,34 @@ def _qui(gid: str, uid: str, api: Api) -> Dict[str, Any]:
 
 
 def _decrire_code(gid: str, code: str, inviteur: str, parrains: Dict[str, str],
-                  invits: Optional[Dict[str, Dict[str, Any]]], api: Api) -> str:
-    """Une ligne : ce lien-là, et de la part de qui."""
+                  invits: Optional[Dict[str, Dict[str, Any]]], api: Api) -> Tuple[str, str]:
+    """(qui l'a invité, ce lien-là) pour le code `code`."""
+    def nomme(uid: str) -> str:
+        q = _qui(gid, uid, api)
+        return f"<@{uid}>" + (f" · `@{q['nom']}`" if q.get("nom") else "")
     if code in parrains:
-        return f"🤝 **De la part de** <@{parrains[code]}> : son lien de parrainage `{code}`"
+        return nomme(parrains[code]), f"🤝 Son lien de parrainage `{code}`"
     if code == _serveur(gid, api)["vanity"]:
-        return f"🏷️ Lien officiel du serveur `{code}` · aucun parrain"
+        return "le lien officiel du serveur", f"🏷️ `{code}` · aucun parrain"
     inv = (invits or {}).get(code) or {}
     salon = str((inv.get("channel") or {}).get("id") or "")
     ou = f" dans <#{salon}>" if salon else ""
     inviteur = inviteur or str((inv.get("inviter") or {}).get("id") or "")
     if not inviteur:
-        return f"`{code}`, auteur inconnu · hors parrainage, aucun parrain"
+        return "inconnu", f"Lien `{code}`, son auteur n'est plus connu · aucun parrain"
     q = _qui(gid, inviteur, api)
-    nom = f" · `@{q['nom']}`" if q.get("nom") else ""
     if q.get("bot"):
-        return f"🤖 Lien `{code}` créé par le bot{ou} · inconnu du parrainage, aucun parrain"
+        return "inconnu", f"🤖 Lien `{code}` créé par le bot{ou} · inconnu du parrainage, aucun parrain"
     if q.get("staff"):
-        return f"🛡️ Lien du staff `{code}`, créé par <@{inviteur}>{nom}{ou} · aucun parrain"
-    return f"👥 Lien de <@{inviteur}>{nom} `{code}`{ou} · hors parrainage, aucun parrain enregistré"
+        return nomme(inviteur), f"🛡️ Lien du staff `{code}`{ou} · aucun parrain"
+    return nomme(inviteur), f"👥 Son lien Discord `{code}`{ou} · hors parrainage, aucun parrain"
 
 
 def lignes_arrivee(gid: str, uid: str, liens: Dict[str, Any], parrain: Optional[str] = None,
                    parrain_vu: bool = False, usages_avant: Optional[Dict[str, int]] = None,
                    api: Api = None) -> str:
-    """Les lignes « 🔗 Lien » d'une carte d'arrivée (commencent par un saut de
-    ligne). `liens` = le registre de parrainage du serveur ({uid: {code}}) ;
+    """Les lignes « 🔗 Invité par » d'une carte d'arrivée (commencent par un
+    saut de ligne). `liens` = le registre de parrainage du serveur ({uid: {code}}) ;
     `parrain` = celui que ce registre a noté pour `uid`, `parrain_vu` = le
     registre a déjà traité son arrivée ; `usages_avant` = le dernier comptage
     des invitations (secours quand Discord ne donne pas la source)."""
@@ -341,11 +348,11 @@ def lignes_arrivee(gid: str, uid: str, liens: Dict[str, Any], parrain: Optional[
     code = ""
     if src and src.get("code"):
         code = src["code"]
-        demande = " (demande d'adhésion acceptée)" if src.get("type") == 7 else ""
-        lignes.append(f"{MARQUE_ARRIVEE} : " + _decrire_code(gid, code, src.get("inviteur", ""),
-                                                           parrains, invits, api) + demande)
+        qui, lien = _decrire_code(gid, code, src.get("inviteur", ""), parrains, invits, api)
+        demande = " · demande d'adhésion acceptée" if src.get("type") == 7 else ""
+        lignes += [f"{INVITE_PAR} {qui}", lien + demande]
     elif src:
-        lignes.append(f"{MARQUE_ARRIVEE} : aucun, arrivé sans invitation "
+        lignes.append(f"{INVITE_PAR} personne : arrivé sans invitation "
                       f"({SOURCES.get(src.get('type'), 'source ' + str(src.get('type')))})")
     else:
         # les invitations dont le compteur a monté depuis le dernier relevé :
@@ -355,15 +362,15 @@ def lignes_arrivee(gid: str, uid: str, liens: Dict[str, Any], parrain: Optional[
             montees = sorted(c for c, i in invits.items()
                              if int(i.get("uses") or 0) > int(usages_avant.get(c, 0) or 0))
         if len(montees) == 1:
-            lignes.append(f"{MARQUE_ARRIVEE} probable (comptage des invitations) : "
-                          + _decrire_code(gid, montees[0], "", parrains, invits, api))
+            qui, lien = _decrire_code(gid, montees[0], "", parrains, invits, api)
+            lignes += [f"{INVITE_PAR} {qui} (probable : comptage des invitations)", lien]
         elif montees:
-            lignes.append(f"{MARQUE_ARRIVEE} : plusieurs possibles, "
-                          + ", ".join(f"`{c}`" + (f" (parrainage de <@{parrains[c]}>)" if c in parrains else "")
-                                      for c in montees[:5]))
+            lignes += [f"{INVITE_PAR} : plusieurs possibles",
+                       ", ".join(f"`{c}`" + (f" (parrainage de <@{parrains[c]}>)" if c in parrains else "")
+                                 for c in montees[:5])]
         else:
-            lignes.append(f"{MARQUE_ARRIVEE} inconnu : Discord ne l'a pas donné et le comptage des "
-                          "invitations ne tranche pas.")
+            lignes += [f"{INVITE_PAR} : inconnu",
+                       "Discord ne l'a pas donné et le comptage des invitations ne tranche pas."]
     p_code = parrains.get(code)
     if parrain and p_code and str(parrain) != p_code:
         lignes.append(f"⚠️ Le parrainage a noté <@{parrain}> : origine à vérifier.")
@@ -394,7 +401,7 @@ def _registre(gid: str) -> Optional[Dict[str, Any]]:
 
 
 def completer_arrivee(corps: Any, gid: str) -> bool:
-    """Les lignes « 🔗 Lien » sur une carte 🚪 Nouvelle arrivée, juste avant
+    """Les lignes « 🔗 Invité par » sur une carte 🚪 Nouvelle arrivée, juste avant
     son envoi ; la ligne « Invité par » qu'elles reprennent disparaît."""
     embeds = corps.get("embeds") if isinstance(corps, dict) else None
     if not embeds or not isinstance(embeds[0], dict):

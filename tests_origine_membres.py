@@ -178,29 +178,29 @@ INVITES = [{"code": "nekk7gb6n", "uses": 7, "inviter": {"id": "700"}, "channel":
 avec(Faux(sources={"50": ("TPTaHwuSK7", 5, "702")}, invites=INVITES))
 l = om.lignes_arrivee(G, "50", LIENS, "701", True)
 verifier("lien de parrainage : de la part du parrain du registre",
-         l == "\n🔗 **Lien** : 🤝 **De la part de** <@701> : son lien de parrainage `TPTaHwuSK7`", l)
+         l == "\n🔗 **Invité par** <@701> · `@momobtn`\n🤝 Son lien de parrainage `TPTaHwuSK7`", l)
 
 avec(Faux(sources={"51": ("nekk7gb6n", 5, "700")}, invites=INVITES))
 l = om.lignes_arrivee(G, "51", LIENS, None, True)
 verifier("lien du staff : qui l'a créé, dans quel salon, aucun parrain",
-         "🛡️ Lien du staff `nekk7gb6n`, créé par <@700> · `@vectorofm` dans <#5555> · aucun parrain" in l, l)
+         l.startswith("\n🔗 **Invité par** <@700> · `@vectorofm`\n🛡️ Lien du staff `nekk7gb6n` dans <#5555> · aucun parrain"), l)
 
 avec(Faux(sources={"52": ("perso701", 5, "701")}, invites=INVITES))
 l = om.lignes_arrivee(G, "52", LIENS, None, True)
 verifier("lien Discord d'un membre : de lui, hors parrainage",
-         "👥 Lien de <@701> · `@momobtn` `perso701` dans <#7777> · hors parrainage, aucun parrain enregistré" in l, l)
+         "🔗 **Invité par** <@701> · `@momobtn`\n👥 Son lien Discord `perso701` dans <#7777> · hors parrainage, aucun parrain" in l, l)
 
 avec(Faux(sources={"53": ("bot702", 5, "702")}, invites=INVITES))
 l = om.lignes_arrivee(G, "53", LIENS, None, True)
-verifier("lien créé par le bot hors registre : dit", "🤖 Lien `bot702` créé par le bot dans <#6666>" in l, l)
+verifier("lien créé par le bot hors registre : dit", "🔗 **Invité par** inconnu\n🤖 Lien `bot702` créé par le bot dans <#6666>" in l, l)
 
 avec(Faux(sources={"54": ("ancien", 5, "")}, invites=INVITES))
 l = om.lignes_arrivee(G, "54", LIENS, None, True)
-verifier("lien expiré sans auteur : écrit, pas inventé", "`ancien`, auteur inconnu" in l, l)
+verifier("lien expiré sans auteur : écrit, pas inventé", "🔗 **Invité par** inconnu\nLien `ancien`, son auteur n'est plus connu" in l, l)
 
 avec(Faux(sources={"55": ("", 3, "")}, invites=INVITES))
 l = om.lignes_arrivee(G, "55", LIENS, None, True)
-verifier("arrivé sans invitation : la source Discord", "aucun, arrivé sans invitation (découverte de serveurs)" in l, l)
+verifier("arrivé sans invitation : la source Discord", "🔗 **Invité par** personne : arrivé sans invitation (découverte de serveurs)" in l, l)
 
 avec(Faux(sources={"56": ("TPTaHwuSK7", 5, "702")}, invites=INVITES))
 l = om.lignes_arrivee(G, "56", LIENS, "999", True)
@@ -220,16 +220,16 @@ avant = {"nekk7gb6n": 6, "TPTaHwuSK7": 7, "perso701": 1, "bot702": 2}
 avec(Faux(invites=INVITES))
 l = om.lignes_arrivee(G, "58", LIENS, None, True, avant)
 verifier("Discord muet, une invitation a monté : « probable », avec son auteur",
-         l.startswith("\n🔗 **Lien** probable (comptage des invitations) : 🛡️ Lien du staff `nekk7gb6n`"), l)
+         l.startswith("\n🔗 **Invité par** <@700> · `@vectorofm` (probable : comptage des invitations)\n🛡️ Lien du staff `nekk7gb6n`"), l)
 avant2 = dict(avant, TPTaHwuSK7=6)
 l = om.lignes_arrivee(G, "58", LIENS, None, True, avant2)
 verifier("Discord muet, deux invitations ont monté : plusieurs possibles, nommées",
-         "plusieurs possibles, `TPTaHwuSK7` (parrainage de <@701>), `nekk7gb6n`" in l, l)
+         "🔗 **Invité par** : plusieurs possibles\n`TPTaHwuSK7` (parrainage de <@701>), `nekk7gb6n`" in l, l)
 l = om.lignes_arrivee(G, "58", LIENS, None, True, dict(avant, nekk7gb6n=7))
-verifier("Discord muet, rien n'a monté : inconnu, écrit", "🔗 **Lien** inconnu" in l, l)
+verifier("Discord muet, rien n'a monté : inconnu, écrit", "🔗 **Invité par** : inconnu" in l, l)
 l = om.lignes_arrivee(G, "58", LIENS, "701", True, None)
 verifier("Discord muet mais le registre a un parrain : il est dit",
-         "🔗 **Lien** inconnu" in l and "🤝 Parrain noté par le parrainage : <@701>." in l, l)
+         "🔗 **Invité par** : inconnu" in l and "🤝 Parrain noté par le parrainage : <@701>." in l, l)
 
 
 # ── brancher : sur des faux membres_evenements et threads_accueil ─────────
@@ -267,7 +267,7 @@ try:
     faux_th.api("POST", "/channels/1560075217903161441/messages", json=arrivee)
     d = envois[-1][3]["json"]["embeds"][0]["description"]
     verifier("arrivée postée par threads_accueil : le lien et le parrain, « Invité par » repris",
-             "🤝 **De la part de** <@701> : son lien de parrainage `TPTaHwuSK7`" in d and "Invité par" not in d
+             "🔗 **Invité par** <@701> · `@momobtn`\n🤝 Son lien de parrainage `TPTaHwuSK7`" in d and "Invité par <@" not in d
              and d.startswith(f"<@{ARRIVE}> vient de rejoindre le serveur."), d)
     faux_th.api("GET", f"/guilds/{G}/members")
     verifier("les lectures passent sans rien toucher", envois[-1][1:3] == ("GET", f"/guilds/{G}/members"))

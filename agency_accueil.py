@@ -240,8 +240,8 @@ def _carte(embed: Dict[str, Any], uid: str, m: Dict[str, Any], verifie: bool) ->
 
 def embed_arrivee(uid: str, m: Dict[str, Any], verifie: bool, historique: bool,
                   parrain: Optional[str] = None, origine: str = "") -> Dict[str, Any]:
-    """`origine` : les lignes « 🔗 Lien » d'un arrivé du relevé ; elles disent
-    aussi le parrain. L'historique garde « Invité par »."""
+    """`origine` : les lignes « 🔗 Invité par » d'un arrivé du relevé ; elles
+    disent aussi le parrain. L'historique garde « Invité par »."""
     quand = (f"a rejoint le serveur le {_date(m.get('joined_at'))}." if historique
              else "vient de rejoindre le serveur.")
     etat = ("✅ Vérification validée." if verifie else
@@ -573,14 +573,14 @@ def _surveiller() -> Dict[str, Any]:
 
 def _origine(uid: str, liens: Dict[str, Any], parrain: Optional[str],
              usages_avant: Optional[Dict[str, int]]) -> str:
-    """Les lignes « 🔗 Lien » de la carte d'un arrivé ; une panne le dit sur
+    """Les lignes « 🔗 Invité par » de la carte d'un arrivé ; une panne le dit sur
     la carte plutôt que de la retenir."""
     try:
         import origine_membres as om
         return om.lignes_arrivee(GID, uid, liens, parrain, True, usages_avant, api=_api)
     except Exception as e:                                   # noqa: BLE001
         print(f"[agency] lien d'arrivée de {uid} illisible : {type(e).__name__}: {e}", flush=True)
-        return "\n🔗 **Lien** illisible (panne de lecture)." + (f"\nInvité par <@{parrain}>." if parrain else "")
+        return "\n🔗 **Invité par** : illisible (panne de lecture)." + (f"\nInvité par <@{parrain}>." if parrain else "")
 
 
 # ── l'espace personnel (youl4b.com/affiliation/mon-espace) ─────────────────
