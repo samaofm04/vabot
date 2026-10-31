@@ -831,6 +831,15 @@ async def assurer_panneau_menu(canal, bot) -> int:
     return 1
 
 
+def salon_outil(guilde, cle):
+    """Le salon commun `cle` de ce serveur (par son id note, sinon par son nom
+    dans 🧰 OUTILS), ou None -- aussi hors des serveurs aux outils communs."""
+    if guilde is None or not serveur(guilde):
+        return None
+    return discord.utils.find(lambda c: est_salon_outil(c, cle),
+                              getattr(guilde, "text_channels", None) or [])
+
+
 def url_clics() -> str:
     """La page des clics et subs de YouCham : celle des liens de suivi, profil
     Lia (proprietaire, 31/10/2026 : « comme lui mais pour Lia ... la même
@@ -853,20 +862,97 @@ def _urls(message) -> set:
 
 
 class PanneauClics(discord.ui.LayoutView):
-    """Le panneau du 📊・click-et-sub : UN bouton-lien, sans texte, comme
-    celui du menu. Un lien n'a pas de rappel : rien a enregistrer au
-    demarrage."""
+    """Le panneau du 📊・click-et-sub : l'image de la quinzaine en cours
+    (liens_image), et dessous UN bouton-lien, sans texte, comme celui du
+    menu. Proprietaire, 31/10/2026 : « une image de la quinzaine toujours »,
+    « avec le lien colle ». Sans image (lecture ratee), le bouton seul. Un
+    lien n'a pas de rappel : rien a enregistrer au demarrage."""
 
-    def __init__(self, url):
+    def __init__(self, url, image=None, alt=""):
         super().__init__(timeout=None)
+        if image:
+            self.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem(
+                "attachment://" + image, description=(alt or image)[:1024])))
         self.add_item(discord.ui.ActionRow(discord.ui.Button(
             label="Statistiques", emoji="📊", style=discord.ButtonStyle.link, url=url)))
 
 
+#: Le dernier echec de l'image, par serveur : dit une fois, pas toutes les heures.
+_ECHEC_IMAGE = {}
+
+
+async def image_clics(guilde, bot) -> dict:
+    """{"png", "alt"} : l'image de la quinzaine en cours de la page Lia, aux
+    chiffres de la page sur la meme periode (du 1er ou du 16 a aujourd'hui) et
+    avec la photo Discord de chaque VA ; ou {"erreur"}. Ne leve pas."""
+    try:
+        import datetime
+        from zoneinfo import ZoneInfo
+
+        import clics_image as _ci
+        import infloww_liens
+        import liens_image as li
+        m = infloww_liens.profil("lia")
+        auj = datetime.date.fromisoformat(m._aujourdhui())
+        du, au = m.quinzaine_de(auj)[0].isoformat(), auj.isoformat()
+
+        def lire():
+            # MyPuls attendu plus longtemps que par la page (5 s) : personne
+            # n'attend devant un ecran, et un premier appel lent rendait
+            # « MyPuls ne repond pas encore » a la place des chiffres
+            m._mypuls_periode(du, au, attente=60)
+            return m.tableau_periode(du, au, us="calcul")
+        t = await asyncio.to_thread(lire)
+        if t.get("erreur"):
+            return {"erreur": str(t["erreur"])[:300]}
+        maj = datetime.datetime.now(ZoneInfo("Europe/Paris")).strftime("%Hh%M")
+        v = li.tableau(t, du, au, maj, nom=m.NOM_AFFICHE)
+        # la ligne porte le pseudo du lien de suivi (« @roucham_79944 ») : le
+        # nom d'utilisateur Discord du VA, sa photo quand il est unique
+        ids, _compte = _ci.resoudre_pseudos([x["nom"] for x in v["lignes"]],
+                                            list(getattr(guilde, "members", None) or []))
+        photos = {}
+        if ids:
+            from cogs.sessionsvoc import photos_avatars
+            par_id, _c = await photos_avatars(bot, sorted(set(ids.values())), guilde=guilde,
+                                              journal="click-et-sub")
+            photos = {x["cle"]: par_id.get(ids[x["nom"]]) for x in v["lignes"]
+                      if ids.get(x["nom"]) and par_id.get(ids[x["nom"]])}
+        png = await asyncio.to_thread(li.dessiner, v, photos)
+        return {"png": png, "alt": li.texte_alt(v)}
+    except Exception as e:                                   # noqa: BLE001
+        return {"erreur": f"{type(e).__name__}: {e}"[:300]}
+
+
+async def _vue_clics(guilde, bot, url):
+    """(vue, fichiers) du panneau : avec l'image si elle se fait, sinon le
+    bouton seul -- et l'echec est dit (une fois par raison)."""
+    import liens_image as li
+    im = await image_clics(guilde, bot)
+    gid = getattr(guilde, "id", 0)
+    if im.get("png"):
+        _ECHEC_IMAGE.pop(gid, None)
+        import io
+        return (PanneauClics(url, li.NOM, im.get("alt", "")),
+                [discord.File(io.BytesIO(im["png"]), filename=li.NOM)])
+    if _ECHEC_IMAGE.get(gid) != im.get("erreur"):
+        _ECHEC_IMAGE[gid] = im.get("erreur")
+        print(f"[outils-communs] image de la quinzaine impossible : {im.get('erreur')}", flush=True)
+    return None, []
+
+
+def _porte_image(message) -> bool:
+    import liens_image as li
+    return any(getattr(a, "filename", None) == li.NOM
+               for a in (getattr(message, "attachments", None) or []))
+
+
 async def _assurer_clics(canal, bot) -> int:
     """Le panneau du 📊・click-et-sub : un seul message du bot, vers l'adresse
-    du jour. La cle de la page changee, l'ancien bouton menerait a « Lien
-    invalide » : il est remplace. Rend 1 si un panneau est pose."""
+    du jour, avec l'image de la quinzaine. L'adresse changee (cle, acces
+    libre), l'ancien bouton menerait a « Lien invalide » : il est remplace.
+    Un panneau sans image (d'avant, ou lecture ratee) la recoit. Rend 1 si
+    un panneau est pose."""
     moi = getattr(getattr(bot, "user", None), "id", None)
     url = url_clics()
     poses = [m async for m in canal.history(limit=25)
@@ -883,10 +969,34 @@ async def _assurer_clics(canal, bot) -> int:
     gid = getattr(getattr(canal, "guild", None), "id", 0)
     if garde is not None:
         _noter(gid, "click-et-sub", garde.id)
+        if not _porte_image(garde):
+            await maj_clics(canal, bot, garde)
         return 0
-    msg = await canal.send(view=PanneauClics(url))
+    vue, fichiers = await _vue_clics(canal.guild, bot, url)
+    msg = await canal.send(view=vue or PanneauClics(url), files=fichiers)
     _noter(gid, "click-et-sub", msg.id)
     return 1
+
+
+async def maj_clics(canal, bot, message=None) -> bool:
+    """L'image du panneau redessinee aux chiffres du moment (cogs/outils, a
+    chaque heure pile). Lecture ratee : l'image d'avant reste, plutot qu'un
+    bouton seul. Rend True si le message a change."""
+    if message is None:
+        mid = (_etat().get(str(getattr(canal.guild, "id", 0))) or {}).get("click-et-sub")
+        if not mid:
+            return False
+        try:
+            message = await canal.fetch_message(int(mid))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[outils-communs] panneau des clics illisible ({type(e).__name__}) : "
+                  "l'entretien le reposera", flush=True)
+            return False
+    vue, fichiers = await _vue_clics(canal.guild, bot, url_clics())
+    if vue is None:
+        return False
+    await message.edit(view=vue, attachments=fichiers)
+    return True
 
 
 async def _assurer_download(canal, bot) -> int:

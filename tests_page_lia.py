@@ -26,6 +26,8 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
   - la paie : 0,70 $ par sub pour tout VA sans réglage à lui (propriétaire,
     31/10 : « pour cette fiche les VA c'est 0,7 par sub tout le temps ») ; un
     réglage enregistré passe devant ; Jessye et Emy sans paie imposée ;
+  - l'image de la quinzaine en cours (liens_image) : les chiffres de la page,
+    triés par subs, sans net ni paie, la photo Discord de chaque VA ;
   - la route : accès libre (sans clé ni compte : vue des VA ; propriétaire,
     31/10 : « mets aussi un accès libre »), le lien posté sans clé, l'admin
     connecté garde le paiement ; Emy et Jessye restent fermées sans clé.
@@ -72,6 +74,11 @@ import gms                             # noqa: E402
 import infloww_liens as il             # noqa: E402
 
 GROUPE = "grp_6ae626b131228574f13b70d2"
+
+
+def _dt_auj():
+    import datetime
+    return datetime.date.fromisoformat(il._aujourdhui())
 
 
 def _interdit(*a, **k):
@@ -256,7 +263,59 @@ check("un réglage enregistré passe devant (VA 2 « Aucun »), les autres garde
       pa["VA 2"]["paie"]["cfg"]["type"] == "aucun" and pa["VA 1"]["paie"]["cfg"]["type"] == "au_sub",
       pa["VA 2"]["paie"]["cfg"])
 
-print("6. La route")
+print("6. L'image de la quinzaine (📊・click-et-sub)")
+import asyncio                          # noqa: E402
+import io as _io                        # noqa: E402
+import types as _types                  # noqa: E402
+
+from PIL import Image as _Image         # noqa: E402
+
+import liens_image as li                # noqa: E402
+import outils_communs as oc             # noqa: E402
+_tq = m.tableau_periode("2026-10-16", "2026-10-31", us="cache")
+v = li.tableau(_tq, "2026-10-16", "2026-10-31", "19h00", nom="Lia")
+rangs = {x["cle"]: x["rang"] for x in v["lignes"]}
+check("image : triée par subs, rangs 1, 2 ; ni rang à zéro sub et zéro clic, ni sur des subs inconnus",
+      [x["cle"] for x in v["lignes"]][:2] == ["VA 1", "VA 2"] and rangs["VA 1"] == 1 and rangs["VA 2"] == 2
+      and rangs["VA 4"] == 0, rangs)
+_p1 = {x["cle"]: x for x in _tq["lignes"]}["VA 1"]
+_i1 = {x["cle"]: x for x in v["lignes"]}["VA 1"]
+check("image : les chiffres de la page, pas recalculés (CVR, $ / sub, couleurs)",
+      _i1["cvr"] == _p1["cvr"] and _i1["par_sub"] == _p1["par_sub"]
+      and _i1["niv_cvr"] == m.niveau(_p1["cvr"], m.SEUIL_CVR) and _i1["nom"] == "@roucham_79944"
+      and _i1["sous"] == "VA 1 · c115", _i1)
+check("image : jamais le net ni la paie", not any(k in str(v) for k in ("'net'", "paie", "gain")))
+png = li.dessiner(v)
+_im = _Image.open(_io.BytesIO(png))
+check("image : un PNG de 1100 px de large", png[:8] == b"\x89PNG\r\n\x1a\n" and _im.size[0] == 1100, _im.size)
+check("image : vide, elle se dessine quand même (le message de la page)",
+      li.dessiner(li.tableau({"lignes": [], "totaux": {}, "erreur": "MyPuls muet"}, "2026-10-16", "2026-10-31"))[:4]
+      == b"\x89PNG")
+import cogs.sessionsvoc as _svc        # noqa: E402
+_photo = _io.BytesIO()
+_Image.new("RGB", (64, 64), (200, 30, 30)).save(_photo, "PNG")
+_vues_ph = []
+
+
+async def _fausses_photos(bot, ids, **kw):
+    _vues_ph.append(list(ids))
+    return {i: _photo.getvalue() for i in ids}, {}
+_svc_sauve, _svc.photos_avatars = _svc.photos_avatars, _fausses_photos
+_il_sauve = il.profil
+il.profil = lambda nom: m if str(nom or "").lower() == "lia" else _il_sauve(nom)
+try:
+    _g = _types.SimpleNamespace(id=1565640097146347533, members=[
+        _types.SimpleNamespace(name="roucham_79944", id=111, bot=False),
+        _types.SimpleNamespace(name="bilal082598", id=222, bot=False)])
+    im = asyncio.run(oc.image_clics(_g, _types.SimpleNamespace()))
+finally:
+    il.profil, _svc.photos_avatars = _il_sauve, _svc_sauve
+check("salon : image de la quinzaine EN COURS (du 1er ou du 16 à aujourd'hui), photos des VA par leur pseudo",
+      im.get("png", b"")[:4] == b"\x89PNG" and _vues_ph == [["111", "222"]]
+      and MYPULS_LU[-1] == (m.quinzaine_de(_dt_auj())[0].isoformat(), m._aujourdhui()),
+      (im.get("erreur"), _vues_ph, MYPULS_LU[-2:]))
+
+print("7. La route")
 import web_upload as wu      # noqa: E402
 app = wu.create_app()
 app.config["TESTING"] = True
@@ -297,7 +356,7 @@ try:
 finally:
     il.profil = _sauve
 
-print("7. Isolation")
+print("8. Isolation")
 check("rien écrit ni modifié dans le vrai data/ (fichiers de la page)", _instantane() == AVANT,
       set(_instantane().items()) ^ set(AVANT.items()))
 

@@ -153,6 +153,10 @@ class Message:
         if kw.get("view") is not None:
             self.vue = kw["view"]
             self.components = [_ns_composant(c) for c in kw["view"].to_components()]
+        if "attachments" in kw:
+            # comme Discord : les pièces jointes sont REMPLACÉES
+            self.attachments = [types.SimpleNamespace(filename=getattr(f, "filename", None))
+                                for f in kw["attachments"] or []]
         self.channel.edites.append(self.id)
 
 
@@ -190,6 +194,8 @@ class Salon:
             except Exception:
                 pass
         m = Message(self, self.guild.me, content, kw.get("view"))
+        m.attachments = [types.SimpleNamespace(filename=getattr(f, "filename", None))
+                         for f in ([kw["file"]] if kw.get("file") is not None else []) + list(kw.get("files") or [])]
         self.messages.append(m)
         self.last_message_id = m.id
         if content:
@@ -460,6 +466,20 @@ import outils_communs as oc  # noqa: E402
 import cogs.welcome as w  # noqa: E402
 
 oc.ETAT = TMP / "outils_communs.json"
+#: La page et l'image de la quinzaine (📊・click-et-sub) : les vraies liraient
+#: la clé dans data/, MyPuls et GetMySocial, à chaque oc.assurer de la suite.
+URL_CLICS = "https://youl4b.com/infloww/liens?k=CLE-VA&c=lia"
+IMAGES = []
+IMAGE = {"png": b"\x89PNG-1", "alt": "Lia · quinzaine du 16/10 au 31/10"}
+
+
+async def _fausse_image(guilde, bot):
+    IMAGES.append(getattr(guilde, "id", None))
+    return dict(IMAGE)
+
+
+oc.url_clics = lambda: URL_CLICS
+oc.image_clics = _fausse_image
 
 
 def youcham(n_va=2, avec_outils=True):
@@ -728,13 +748,13 @@ class _FauxBot:
         self.vues.append(v)
 
 
-#: L'adresse de la page des clics : la vraie lirait (ou créerait) la clé dans data/.
-URL_CLICS = "https://youl4b.com/infloww/liens?k=CLE-VA&c=lia"
 _sauve_e["url"] = oc.url_clics
+_sauve_e["image"] = oc.image_clics
 try:
     u.ensure_identity_emojis = u.ensure_reserve_emojis = u.ensure_action_emojis = _rien_emoji
     asyncio.sleep = _instant
     oc.url_clics = lambda: URL_CLICS
+    oc.image_clics = _fausse_image
     g = youcham(n_va=0, avec_outils=False)
     w._membre_bot_admin = lambda gg: getattr(gg, "rem", None)
     bot = _FauxBot([g])
@@ -782,6 +802,12 @@ try:
           len(clics) == 1 and clics[0].content is None and oc._urls(clics[0]) == {URL_CLICS}
           and not any(isinstance(x, discord.ui.TextDisplay) for x in oc.PanneauClics(URL_CLICS).walk_children()),
           [oc._urls(m) for m in clics])
+    import liens_image as _li  # noqa: E402
+    check("click-et-sub : l'image de la quinzaine dans le MÊME message, le bouton dessous (31/10)",
+          [a.filename for a in clics[0].attachments] == [_li.NOM]
+          and [c.type for c in clics[0].components] == [12, 1]
+          and any(isinstance(x, discord.ui.MediaGallery) for x in clics[0].vue.walk_children()),
+          ([a.filename for a in clics[0].attachments], [c.type for c in clics[0].components]))
     check("1er passage : bilan sans échec", not b1["rates"], b1)
     n_crees = len(g.crees)
     b2 = courir(oc.assurer(g, bot))
@@ -796,6 +822,30 @@ try:
           and oc._urls(du_bot(sal["click-et-sub"])[0]) == {URL_CLICS.replace("CLE-VA", "CLE-NEUVE")}, b2b)
     oc.url_clics = lambda: URL_CLICS
     courir(oc.assurer(g, bot))
+    # l'heure pile : l'image est redessinée, le message reste le même
+    pan = du_bot(sal["click-et-sub"])[0]
+    n_ed, n_im = len(sal["click-et-sub"].edites), len(IMAGES)
+    check("heure pile : l'image redessinée sur place (même message, pièce jointe remplacée)",
+          courir(oc.maj_clics(sal["click-et-sub"], bot)) is True and len(IMAGES) == n_im + 1
+          and sal["click-et-sub"].edites[n_ed:] == [pan.id] and len(du_bot(sal["click-et-sub"])) == 1
+          and [a.filename for a in pan.attachments] == [_li.NOM], sal["click-et-sub"].edites[n_ed:])
+
+    async def _image_ratee(guilde, bot):
+        return {"erreur": "MyPuls n'a pas répondu"}
+    oc.image_clics = _image_ratee
+    n_ed = len(sal["click-et-sub"].edites)
+    check("lecture ratée : l'image d'avant reste (aucune édition, pas de bouton seul)",
+          courir(oc.maj_clics(sal["click-et-sub"], bot)) is False
+          and len(sal["click-et-sub"].edites) == n_ed and [a.filename for a in pan.attachments] == [_li.NOM])
+    oc.image_clics = _fausse_image
+    pan.attachments = []
+    courir(oc.assurer(g, bot))
+    check("panneau sans image (d'avant) : l'entretien la lui ajoute, sans reposter",
+          len(du_bot(sal["click-et-sub"])) == 1 and du_bot(sal["click-et-sub"])[0] is pan
+          and [a.filename for a in pan.attachments] == [_li.NOM])
+    check("salon_outil : le 📊・click-et-sub de YouCham ; rien ailleurs",
+          oc.salon_outil(g, "click-et-sub") is sal["click-et-sub"]
+          and oc.salon_outil(Guilde(YOUL4B, "l"), "click-et-sub") is None)
     # état perdu (data/ repartie de zéro) : le panneau est retrouvé dans le salon
     oc.ETAT.unlink()
     b3 = courir(oc.assurer(g, bot))
@@ -821,10 +871,26 @@ try:
             self.lance = True
 
     fo = types.SimpleNamespace(bot=_FauxBot(), _entretien=_Boucle(), _numeros=_Boucle(),
-                               _outils_communs=_Boucle())
+                               _outils_communs=_Boucle(), _clics_quinzaine=_Boucle())
     courir(co.Outils.cog_load(fo))
     check("cog Outils : bouton du menu rattaché au démarrage (add_view) et entretien lancé",
           any(isinstance(v, oc.PanneauMenu) for v in fo.bot.vues) and fo._outils_communs.lance)
+    check("cog Outils : l'image de la quinzaine redessinée à chaque heure pile, heure de Paris",
+          fo._clics_quinzaine.lance and len(co.Outils._clics_quinzaine.time) == 24
+          and all(t_.minute == 0 and str(t_.tzinfo) == "Europe/Paris" for t_ in co.Outils._clics_quinzaine.time))
+    _maj_vus = []
+    _vraie_maj = oc.maj_clics
+
+    async def _fausse_maj(canal, bb, message=None):
+        _maj_vus.append(canal.guild.id)
+        return True
+    oc.maj_clics = _fausse_maj
+    try:
+        courir(co.Outils._clics_quinzaine.coro(types.SimpleNamespace(
+            bot=_FauxBot([Guilde(YOUL4B, "l"), g, Guilde(VA_IG, "v")]))))
+    finally:
+        oc.maj_clics = _vraie_maj
+    check("heure pile : YouCham seul (son 📊・click-et-sub)", _maj_vus == [YOUCHAM], _maj_vus)
     vus = []
     _assurer = oc.assurer
 
@@ -842,6 +908,7 @@ finally:
     u.ensure_identity_emojis, u.ensure_reserve_emojis, u.ensure_action_emojis = _sauve_e["emojis"]
     w._membre_bot_admin = _sauve_e["adm"]
     oc.url_clics = _sauve_e["url"]
+    oc.image_clics = _sauve_e["image"]
     asyncio.sleep = _sleep
 
 

@@ -22,7 +22,9 @@ CE QUI N'EST PAS ICI
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import safe_json
 
@@ -528,11 +530,13 @@ class Outils(commands.Cog):
             print(f"[outils-communs] bouton du menu non rattache : {type(e).__name__}: {e}",
                   flush=True)
         self._outils_communs.start()
+        self._clics_quinzaine.start()
 
     async def cog_unload(self):
         self._entretien.cancel()
         self._numeros.cancel()
         self._outils_communs.cancel()
+        self._clics_quinzaine.cancel()
 
     @tasks.loop(hours=6)
     async def _outils_communs(self):
@@ -557,6 +561,30 @@ class Outils(commands.Cog):
 
     @_outils_communs.before_loop
     async def _avant_outils_communs(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(time=[_dt.time(hour=h, minute=0, tzinfo=ZoneInfo("Europe/Paris")) for h in range(24)])
+    async def _clics_quinzaine(self):
+        """L'image de la quinzaine du 📊・click-et-sub (YouCham), redessinee a
+        chaque heure pile, heure de Paris -- la regle des classements. Une
+        lecture ratee garde l'image d'avant (outils_communs.maj_clics)."""
+        try:
+            import outils_communs as oc
+        except Exception as e:                               # noqa: BLE001
+            print(f"[outils-communs] module illisible : {type(e).__name__}: {e}", flush=True)
+            return
+        for guilde in list(getattr(self.bot, "guilds", []) or []):
+            canal = oc.salon_outil(guilde, "click-et-sub")
+            if canal is None:
+                continue
+            try:
+                await oc.maj_clics(canal, self.bot)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[outils-communs] image de la quinzaine ({getattr(guilde, 'name', '?')}) : "
+                      f"{type(e).__name__}: {e}", flush=True)
+
+    @_clics_quinzaine.before_loop
+    async def _avant_clics_quinzaine(self):
         await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=10)
