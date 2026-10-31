@@ -942,9 +942,23 @@ async def _vue_clics(guilde, bot, url):
 
 
 def _porte_image(message) -> bool:
+    """Le panneau a-t-il son image ? Un message Components V2 ne liste PAS
+    ses fichiers dans `attachments` (vide, relu le 31/10) : l'image est dans
+    la galerie, son adresse finit par le nom du fichier. Sans ce test,
+    chaque entretien la redessinait pour rien."""
     import liens_image as li
-    return any(getattr(a, "filename", None) == li.NOM
-               for a in (getattr(message, "attachments", None) or []))
+    if any(getattr(a, "filename", None) == li.NOM for a in (getattr(message, "attachments", None) or [])):
+        return True
+    pile = list(getattr(message, "components", None) or [])
+    while pile:
+        c = pile.pop()
+        for it in getattr(c, "items", None) or []:
+            u = str(getattr(getattr(it, "media", None), "url", "") or "")
+            if u.split("?", 1)[0].endswith("/" + li.NOM) or u == "attachment://" + li.NOM:
+                return True
+        pile += list(getattr(c, "children", None) or [])
+        pile += list(getattr(c, "components", None) or [])
+    return False
 
 
 async def _assurer_clics(canal, bot) -> int:

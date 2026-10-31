@@ -102,6 +102,9 @@ def _ns_composant(d):
         n.accessory = _ns_composant(d["accessory"])
     if isinstance(d.get("media"), dict):
         n.media = types.SimpleNamespace(url=d["media"].get("url"))
+    # une galerie (type 12) : ses images, chacune avec son adresse
+    n.items = [types.SimpleNamespace(media=types.SimpleNamespace(url=(it.get("media") or {}).get("url")))
+               for it in d.get("items", []) or [] if isinstance(it, dict)]
     return n
 
 
@@ -838,11 +841,24 @@ try:
           courir(oc.maj_clics(sal["click-et-sub"], bot)) is False
           and len(sal["click-et-sub"].edites) == n_ed and [a.filename for a in pan.attachments] == [_li.NOM])
     oc.image_clics = _fausse_image
+    # Discord ne liste pas les fichiers d'un message V2 dans attachments : la
+    # galerie suffit à dire que l'image est là (relu sur YouCham le 31/10)
     pan.attachments = []
+    n_im = len(IMAGES)
+    courir(oc.assurer(g, bot))
+    check("panneau avec sa galerie mais sans attachments (V2) : pas redessiné à chaque entretien",
+          oc._porte_image(pan) and len(IMAGES) == n_im, len(IMAGES) - n_im)
+    pan.components = [_ns_composant(c) for c in oc.PanneauClics(URL_CLICS).to_components()]
     courir(oc.assurer(g, bot))
     check("panneau sans image (d'avant) : l'entretien la lui ajoute, sans reposter",
           len(du_bot(sal["click-et-sub"])) == 1 and du_bot(sal["click-et-sub"])[0] is pan
-          and [a.filename for a in pan.attachments] == [_li.NOM])
+          and [a.filename for a in pan.attachments] == [_li.NOM] and oc._porte_image(pan))
+    check("_porte_image : l'adresse Discord d'une galerie (cdn …/quinzaine_lia.png?ex=…)",
+          oc._porte_image(types.SimpleNamespace(attachments=[], components=[types.SimpleNamespace(
+              items=[types.SimpleNamespace(media=types.SimpleNamespace(
+                  url="https://cdn.discordapp.com/attachments/1/2/quinzaine_lia.png?ex=6ae7&is=1"))],
+              children=[], components=[])]))
+          and not oc._porte_image(types.SimpleNamespace(attachments=[], components=[])))
     check("salon_outil : le 📊・click-et-sub de YouCham ; rien ailleurs",
           oc.salon_outil(g, "click-et-sub") is sal["click-et-sub"]
           and oc.salon_outil(Guilde(YOUL4B, "l"), "click-et-sub") is None)
