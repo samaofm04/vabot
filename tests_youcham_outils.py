@@ -435,6 +435,7 @@ class Itx:
         self.data = {}
         self.filesize_limit = 10 * 1024 * 1024
         self.originale = None
+        self.token, self.application_id = "jeton-%d" % id(self), REM
 
     async def original_response(self):
         self.originale = Message(self.channel, self.guild.me, ephemeral=True)
@@ -1109,11 +1110,42 @@ import cogs.numeros as nm  # noqa: E402
 
 check("📱・numéro : panneau commun ; un -content n'en est pas un",
       nm._salon_commun(S["numero"]) and not nm._salon_commun(CT1))
+check("📱・numéro : salon PARTAGÉ (carte éphémère) ; ni un -content, ni un -numero-mail de Youl4b",
+      nm._salon_partage(S["numero"]) and not nm._salon_partage(CT1)
+      and not nm._salon_partage(Salon(Guilde(YOUL4B, "l"), "alice-numero-mail")))
+
+#: Le registre des numeros, en memoire : le vrai (data/numgen_salons.json)
+#: ne doit pas bouger. Une carte remplacee n'est pas retiree chez Discord.
+_REG, _RETIREES = {}, []
+_sauve_reg = (nm._salon, nm._salon_ecrire, nm._retirer_carte)
+
+
+def _reg_ecrire(cid, **k):
+    r = _REG.setdefault(str(cid), {})
+    for c, v in k.items():
+        if v is None:
+            r.pop(c, None)
+        else:
+            r[c] = v
+
+
+async def _faux_retirer(bot, carte, jeton, app, le):
+    _RETIREES.append((carte.id, jeton))
+
+
+nm._salon = lambda cid: dict(_REG.get(str(cid)) or {})
+nm._salon_ecrire = _reg_ecrire
+nm._retirer_carte = _faux_retirer
 
 
 class _FauxNum:
+    """Le cog des numeros, reduit a ce qu'un clic du 📱・numéro appelle : le
+    vrai clic et la vraie carte, un achat simule."""
+    clic_partage = nm.NumerosCog.clic_partage
+
     def __init__(self):
-        self.bas, self.achats = [], []
+        self.bas, self.achats, self.actions = [], [], []
+        self.bot = types.SimpleNamespace(user=types.SimpleNamespace(id=REM))
 
     async def _panneau_en_bas(self, canal):
         self.bas.append(canal)
@@ -1122,33 +1154,57 @@ class _FauxNum:
         self.achats.append((kind, canal, itx.user.id))
         return True
 
+    async def action_salon(self, itx, quoi, attendu=None, code_vu=None, canal=None):
+        self.actions.append((quoi, canal))
+
+
+def _carte_de(achat, salon, membre):
+    """L'achat s'est-il fait dans la carte de `membre`, sur `salon` ?"""
+    _k, carte, uid = achat
+    return (isinstance(carte, nm._CartePerso) and carte.salon_id == salon.id
+            and carte.uid == membre.id == uid)
+
+
+def _carte_envoyee(it):
+    """La reponse au clic : UNE carte, ephemere, avec l'avertissement."""
+    if len(it.response.envois) != 1:
+        return False
+    _c, kw = it.response.envois[0]
+    vue = kw.get("view")
+    textes = " ".join(x.content for x in (vue.walk_children() if vue else [])
+                      if isinstance(x, discord.ui.TextDisplay))
+    return kw.get("ephemeral") is True and nm.AVERTISSEMENT in textes
+
 
 _status = nm.numgen.status
 nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
 try:
     FN = _FauxNum()
-    for user, ct in ((VA1, CT1), (VA2, CT2)):
+    n_ct = [len(c.messages) for c in (CT1, CT2)]
+    for user in (VA1, VA2):
         it = Itx(g, S["numero"], user)
-        courir(nm.NumerosCog.clic_commun(FN, it, "sms"))
-        check(f"📱 Prendre un numéro ({user.name}) : la carte va dans SON -content",
-              FN.bas[-1:] == [ct] and FN.achats[-1:] == [("sms", ct, user.id)],
-              (FN.bas[-1:], FN.achats[-1:], it.response.envois))
-        check(f"… au cliqueur, une confirmation éphémère courte ({user.name})",
-              it.followup.envois and it.followup.envois[-1][1].get("ephemeral") is True
-              and ct.mention in it.followup.envois[-1][0])
+        courir(nm.NumerosCog.clic(FN, it, "sms"))
+        check(f"📱 Prendre un numéro ({user.name}) : acheté dans SA carte, sur le 📱・numéro",
+              FN.achats[-1:] and _carte_de(FN.achats[-1], S["numero"], user), FN.achats[-1:])
+        check(f"… la carte part en éphémère, avec « 3 numéros maximum » ({user.name})",
+              _carte_envoyee(it), it.response.envois)
+    check("… rien dans les -content : ni panneau, ni message",
+          not FN.bas and [len(c.messages) for c in (CT1, CT2)] == n_ct)
     it = Itx(g, S["numero"], VA1)
-    courir(nm.NumerosCog.clic_commun(FN, it, "mail"))
-    check("📧 Mail : même règle", FN.achats[-1:] == [("mail", CT1, VA1.id)])
-    n_av = len(FN.achats)
+    courir(nm.NumerosCog.clic(FN, it, "mail"))
+    check("📧 Mail : même règle, et la carte d'avant est retirée",
+          FN.achats[-1][0] == "mail" and _carte_de(FN.achats[-1], S["numero"], VA1)
+          and _RETIREES[-1:] and _RETIREES[-1][0] == "%s:%s" % (S["numero"].id, VA1.id),
+          (FN.achats[-1:], _RETIREES))
+    n_cr = len(g.crees)
     it = Itx(g, S["numero"], STAFF)
-    courir(nm.NumerosCog.clic_commun(FN, it, "sms"))
-    check("📱 staff dont Discord refuse le salon : clic acquitté, refus éphémère, rien acheté",
-          len(FN.achats) == n_av and not it.response.envois and it.response.is_done()
-          and [e[0] for e in it.followup.envois] == [oc.REFUS]
-          and it.followup.envois[0][1].get("ephemeral") is True,
-          (it.response.envois, it.followup.envois))
+    courir(nm.NumerosCog.clic(FN, it, "sms"))
+    check("📱 staff sans -content : sa carte quand même, aucun salon créé",
+          _carte_de(FN.achats[-1], S["numero"], STAFF) and len(g.crees) == n_cr
+          and _carte_envoyee(it), (FN.achats[-1:], g.crees[n_cr:]))
     check("pas de quota ni de +33 sur YouCham (règles de -numero-mail de Youl4b)",
-          not nm._serveur_fr(CT1) and nm._pays(CT1) is None)
+          not nm._serveur_fr(CT1) and nm._pays(CT1) is None
+          and not nm._serveur_fr(nm._CartePerso(S["numero"], VA1.id)))
 finally:
     nm.numgen.status = _status
 
@@ -1359,9 +1415,10 @@ try:
           and tl.salon_de_livraison(S7["download"], lea) is c_lea)
     nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
     FN7 = _FauxNum()
-    courir(nm.NumerosCog.clic_commun(FN7, Itx(g, S7["numero"], leam), "sms"))
-    check("numéro de « leam » : la carte chez lui, jamais chez lea.m",
-          FN7.bas == [c_leam] and FN7.achats == [("sms", c_leam, leam.id)], (FN7.bas, FN7.achats))
+    courir(nm.NumerosCog.clic(FN7, Itx(g, S7["numero"], leam), "sms"))
+    check("numéro de « leam » : SA carte, rien dans un -content (ni le sien, ni celui de lea.m)",
+          len(FN7.achats) == 1 and _carte_de(FN7.achats[0], S7["numero"], leam)
+          and not FN7.bas, (FN7.bas, FN7.achats))
     u._jb_models_marche = lambda marche="us": ["lola", "julia"]
     UC.appels.clear()
     courir(u.JBActionButton("lola", "pp", 2).callback(Itx(g, S7["menu"], leam, COGS, ephemere=True)))
@@ -1545,16 +1602,13 @@ try:
           len(g.crees) == n_crees and not b["panneaux"] and not b["rates"], (b, g.crees[n_crees:]))
     # le staff reste sans -content : Discord refuse de lui en creer un
     g.bloque = _interdit()
-    # numéro : la carte chez le cliqueur, jamais dans le salon renommé
+    # numéro : la carte du cliqueur, jamais le numéro dans le panneau renommé
     nm.numgen.status = lambda: {"sms_ok": True, "mail_ok": True}
-
-    class _FauxNum7(_FauxNum):
-        clic_commun = nm.NumerosCog.clic_commun
-
-    FN7 = _FauxNum7()
+    FN7 = _FauxNum()
     courir(nm.NumerosCog.clic(FN7, Itx(g, R["numero"], V1), "sms"))
-    check("📱 renommé « phone » : la carte dans le -content du cliqueur",
-          FN7.bas == [K1] and FN7.achats == [("sms", K1, V1.id)], (FN7.bas, FN7.achats))
+    check("📱 renommé « phone » : toujours une carte éphémère, rien dans le -content",
+          len(FN7.achats) == 1 and _carte_de(FN7.achats[0], R["numero"], V1)
+          and not FN7.bas, (FN7.bas, FN7.achats))
     poses_n = []
     nm.poser_panneau = _faux_poser
     nm._salon = lambda cid: {}
@@ -1862,15 +1916,14 @@ try:
     g.members.append(nu_m)
     FN8 = _FauxNum()
     it = Itx(g, S8["numero"], nu_m)
-    courir(nm.NumerosCog.clic_commun(FN8, it, "sms"))
-    c_n = _perso_de(g, nu_m)
-    check("📱 sans -content : salon créé, la carte y est posée et le numéro pris DEDANS",
-          c_n is not None and _droits_ok(g, c_n, nu_m)
-          and FN8.bas == [c_n] and FN8.achats == [("sms", c_n, nu_m.id)], (FN8.bas, FN8.achats))
-    check("… clic acquitté d'abord, confirmation en suivi éphémère (une seule réponse)",
-          it.response.is_done() and not it.response.envois and it.followup.envois
-          and it.followup.envois[-1][1].get("ephemeral") is True
-          and c_n.mention in it.followup.envois[-1][0], (it.response.envois, it.followup.envois))
+    n_cr = len(g.crees)
+    courir(nm.NumerosCog.clic(FN8, it, "sms"))
+    check("📱 sans -content : sa carte éphémère, et aucun salon créé pour ça",
+          FN8.achats and _carte_de(FN8.achats[-1], S8["numero"], nu_m) and not FN8.bas
+          and len(g.crees) == n_cr and _perso_de(g, nu_m) is None,
+          (FN8.bas, FN8.achats, g.crees[n_cr:]))
+    check("… une seule réponse : la carte, tout de suite (rien à créer d'abord)",
+          _carte_envoyee(it) and not it.followup.envois, (it.response.envois, it.followup.envois))
 
     class GuildeVueRem(Guilde):
         """YouCham tel que le voit Rem : son propre cache, où le salon que
@@ -1901,17 +1954,15 @@ try:
     g.members.append(clic_g)
     w._bot_principal = lambda: types.SimpleNamespace(
         get_guild=lambda gid: g if gid == YOUCHAM else None)
-    FNR = _FauxNum()
-    it = Itx(gR, numR, clic_R)
-    it.client.user = types.SimpleNamespace(id=REM)
-    courir(nm.NumerosCog.clic_commun(FNR, it, "sms"))
+    # Le 📱・numéro ne cree plus de salon (carte ephemere, 31/10) : Rem n'appelle
+    # plus perso_ou_creer, qui reste teste ici tel quel.
+    vu_R = courir(oc.perso_ou_creer(gR, clic_R))
     c_ry = _perso_de(g, clic_g)
-    check("📱 cliqué chez Rem : le salon est créé par Ryuk, avec la règle de Ryuk ET de Rem",
+    check("perso_ou_creer chez Rem : le salon est créé par Ryuk, avec la règle de Ryuk ET de Rem",
           c_ry is not None and _droits_ok(g, c_ry, clic_g) and not gR.crees, (g.crees[-2:], gR.crees))
-    check("… et Rem pose la carte dans le salon tel que LUI le voit (relu, pas l'objet de Ryuk)",
-          FNR.bas and FNR.bas[0].guild is gR and FNR.bas[0].id == c_ry.id
-          and FNR.achats == [("sms", FNR.bas[0], clic_R.id)] and gR.lus == [c_ry.id],
-          (FNR.bas, FNR.achats, gR.lus))
+    check("… et rendu tel que Rem le voit (relu, pas l'objet de Ryuk)",
+          vu_R is not None and vu_R.guild is gR and vu_R.id == c_ry.id and gR.lus == [c_ry.id],
+          (vu_R, gR.lus))
 
     # Relecture du 30/10 : Ryuk pas encore pret (sa reference existe des avant
     # bot.start) ou en reconnexion, Rem en ligne. Le repli sur Rem creait un
@@ -1925,33 +1976,24 @@ try:
             ("serveur unavailable", types.SimpleNamespace(
                 get_guild=lambda gid: types.SimpleNamespace(id=gid, unavailable=True)))):
         w._bot_principal = lambda principal=principal: principal
-        FNA = _FauxNum()
-        it = Itx(gR, numR, av_R)
-        it.client.user = types.SimpleNamespace(id=REM)
         tampon = io.StringIO()
         with contextlib.redirect_stdout(tampon):
-            courir(nm.NumerosCog.clic_commun(FNA, it, "sms"))
+            vu = courir(oc.perso_ou_creer(gR, av_R))
         journal = tampon.getvalue()
-        check(f"📱 chez Rem, Ryuk {etat} : rien n'est créé (ni par Rem, ni par Ryuk)",
-              len(gR.crees) == n_R and len(g.crees) == n_g and not FNA.bas and not FNA.achats
+        check(f"perso_ou_creer chez Rem, Ryuk {etat} : rien n'est créé (ni par Rem, ni par Ryuk)",
+              vu is None and len(gR.crees) == n_R and len(g.crees) == n_g
               and oc.content_de(gR, av_R) is None and oc.content_de(g, av_g) is None,
-              (gR.crees[n_R:], g.crees[n_g:], FNA.bas))
-        check(f"… REFUS en suivi (une réponse), la cause au journal ({etat})",
-              it.response.is_done() and not it.response.envois
-              and [e[0] for e in it.followup.envois] == [oc.REFUS]
-              and "non cree au clic" in journal and "ne voit pas ce serveur" in journal,
-              (it.response.envois, it.followup.envois, journal[-300:]))
+              (gR.crees[n_R:], g.crees[n_g:], vu))
+        check(f"… la cause au journal ({etat})",
+              "non cree au clic" in journal and "ne voit pas ce serveur" in journal,
+              journal[-300:])
     w._bot_principal = lambda: types.SimpleNamespace(
         get_guild=lambda gid: g if gid == YOUCHAM else None)
-    FNA = _FauxNum()
-    it = Itx(gR, numR, av_R)
-    it.client.user = types.SimpleNamespace(id=REM)
-    courir(nm.NumerosCog.clic_commun(FNA, it, "sms"))
+    vu = courir(oc.perso_ou_creer(gR, av_R))
     c_av = _perso_de(g, av_g)
-    check("… Ryuk revenu, le clic suivant crée le salon (par Ryuk) : rien n'est resté bloqué",
+    check("… Ryuk revenu, l'appel suivant crée le salon (par Ryuk) : rien n'est resté bloqué",
           c_av is not None and _droits_ok(g, c_av, av_g) and len(gR.crees) == n_R
-          and FNA.bas and FNA.bas[0].guild is gR and FNA.bas[0].id == c_av.id
-          and oc.REFUS not in [e[0] for e in it.followup.envois], (g.crees[n_g:], FNA.bas))
+          and vu is not None and vu.guild is gR and vu.id == c_av.id, (g.crees[n_g:], vu))
     w._bot_principal = _sauve_8["principal"]
 
     # ── 8e. clics simultanés
@@ -1967,7 +2009,7 @@ try:
         i2 = Itx(gl9, O9["numero"], dbl)
         i3 = Itx(gl9, O9["spoofer"], dbl, CSPF)
         i4 = Itx(gl9, O9["menu"], dbl, COGS)
-        await asyncio.gather(u.ouvrir_menu_commun(i1), nm.NumerosCog.clic_commun(FN9, i2, "sms"),
+        await asyncio.gather(u.ouvrir_menu_commun(i1), nm.NumerosCog.clic(FN9, i2, "sms"),
                              spf.SpfGo(1).callback(i3), u.ouvrir_menu_commun(i4))
         for t in list(oc._CREATIONS.values()):
             await t
@@ -1979,9 +2021,10 @@ try:
           sum(1 for x in gl9.crees if x[0] == "salon") == 1
           and [x for x in gl9.crees if x[0] == "categorie"] == [("categorie", "📁 SALONS PERSO")]
           and c9 is not None, gl9.crees)
-    check("… et chacun s'en sert : menus ouverts, carte posée dedans, fenêtre ouverte",
+    check("… et chacun s'en sert : menus ouverts, carte du numéro en éphémère, fenêtre ouverte",
           all(i.followup.envois and i.followup.envois[0][1].get("view") is not None for i in (i1, i4))
-          and FN9.bas == [c9] and len(i3.response.modales) == 1
+          and not FN9.bas and FN9.achats and _carte_de(FN9.achats[-1], O9["numero"], dbl)
+          and _carte_envoyee(i2) and len(i3.response.modales) == 1
           and not [i for i in (i1, i2, i3, i4) if oc.REFUS in [e[0] for e in
                                                              i.response.envois + i.followup.envois]])
 
@@ -2014,13 +2057,17 @@ try:
     it_d = Itx(gb, gb.outils["download"], robot, CDL8)
     courir(P8._compte(it_d))
     it_n = Itx(gb, gb.outils["numero"], robot)
-    courir(nm.NumerosCog.clic_commun(FN8, it_n, "sms"))
+    n_ach = len(FN8.achats)
+    courir(nm.NumerosCog.clic(FN8, it_n, "sms"))
     check("un bot qui clique : aucun salon, refus avant toute fenêtre",
           not gb.crees and not it_s.response.modales and not it_d.response.modales
           and it_s.response.envois == [(oc.REFUS, {"ephemeral": True})]
           and it_d.response.envois == [(oc.REFUS, {"ephemeral": True})]
-          and oc.REFUS in [e[0] for e in it_m.followup.envois]
-          and oc.REFUS in [e[0] for e in it_n.followup.envois], gb.crees)
+          and oc.REFUS in [e[0] for e in it_m.followup.envois], gb.crees)
+    check("… ni numéro : un refus éphémère, rien acheté",
+          len(FN8.achats) == n_ach and len(it_n.response.envois) == 1
+          and it_n.response.envois[0][1].get("ephemeral") is True
+          and it_n.response.envois[0][1].get("view") is None, it_n.response.envois)
 
     async def _bot_direct():
         return oc.lancer_perso(gb, robot), await oc.perso_ou_creer(gb, robot)
@@ -2042,6 +2089,8 @@ finally:
     w._bot_principal = _sauve_8["principal"]
     asyncio.sleep = _sleep
 
+
+nm._salon, nm._salon_ecrire, nm._retirer_carte = _sauve_reg
 
 # ═══════════════════════════════════════════════════ 6. « YouLab » ══
 print("6. Textes")

@@ -13,6 +13,13 @@ vignette (maquette /demonumero, validée par le propriétaire le 27/09/2026 :
 
 Un souci (pas de numéro, solde vide, écoute interrompue) = une ligne « ❌ … »
 dans ce même message. Seuls les refus et les confirmations sont éphémères.
+
+Sur YouCham (outils communs), le 📱・numéro est un salon PARTAGÉ : son
+panneau reste vide pour tous, et « Prendre un numéro » ouvre au cliqueur SA
+carte — le même message rose, éphémère, visible de lui seul, qui change sur
+place. 15 min de vie (Discord ne laisse modifier un éphémère que 15 min),
+puis le numéro sans code est rendu. En reprendre un remplace le sien
+(`clic_partage`, `_CartePerso`).
 Il remplace les trois messages d'avant (panneau, numéro, code) : un salon à
 l'ancien format est converti au premier clic ou à la première pose
 (`poser_panneau`), le numéro en cours gardé.
@@ -413,10 +420,9 @@ class NumerosCog(commands.Cog):
                 actif, code = _a_afficher(rec if isinstance(rec, dict) else {})
                 if not actif or code:
                     continue
-                try:
-                    ch = self.bot.get_channel(int(cid))
-                except (TypeError, ValueError):
-                    ch = None
+                # « <salon>:<membre> » : la carte d'un salon partage. int()
+                # sur cette cle levait, et son ecoute n'etait jamais reprise.
+                ch = _canal_du_registre(self.bot, cid)
                 if ch is None:
                     log.warning("numgen: ecoute de %s non reprise : salon %s introuvable "
                                 "pour ce bot", actif.get("valeur"), cid)
@@ -462,6 +468,11 @@ class NumerosCog(commands.Cog):
                 if mid:
                     try:
                         await c.fetch_message(mid)
+                        if _salon_partage(c):
+                            # Le panneau partage porte l'avertissement depuis
+                            # le 31/10 : celui deja pose ne l'avait pas. Le
+                            # solde y reste frais au passage.
+                            await maj_panneau(self.bot, c, cog=self)
                         continue
                     except discord.NotFound:
                         _salon_ecrire(c.id, panneau=None, v2=None)
@@ -526,6 +537,9 @@ class NumerosCog(commands.Cog):
         if ch is None:
             await itx.response.send_message("À utiliser dans un salon.", ephemeral=True)
             return
+        if _salon_partage(ch):
+            await self.clic_partage(itx, action)
+            return
         if _clic_commun(ch):
             await self.clic_commun(itx, action)
             return
@@ -559,46 +573,111 @@ class NumerosCog(commands.Cog):
         SON salon va- ; le code, Autre, Annuler et C'est bon s'y passent comme
         dans un salon -numero-mail US. Au cliqueur : des ephemeres seulement.
 
-        Le 📱・numéro de YouCham (outils communs) suit la meme regle, son
-        « salon a lui » est son -content (outils_communs.content_de), cree au
-        clic s'il n'en a pas (outils_communs.perso_ou_creer) : la carte du
-        numero y est posee par ce bot (Rem), puis le code l'edite sur place.
-        Memes fournisseurs et memes regles que -numero-mail de Youl4b :
-        ni +33 ni quota (_pays, _quota_fr_ok : serveur FR seulement)."""
+        Le 📱・numéro de YouCham n'arrive plus ici : il donne une carte
+        ephemere (clic_partage). Jusqu'au 31/10/2026 il posait la carte dans
+        le -content du VA ; le proprietaire : « que ça ne me le fasse pas
+        prendre dans mon ticket, mais dans le même salon ... un message
+        éphémère »."""
         if action not in ("sms", "mail"):
             await _ephemere(itx, "📱 La suite se passe dans ton salon.")
             return
-        if _clic_us(itx.channel):
-            import outils_communs as oc
-            perso = oc.cible_du_clic(itx.channel, getattr(itx, "user", None))
-            if perso is None:
-                # Arrive avant les outils communs (le proprietaire, Roucham) :
-                # son -content est cree ici, comme a l'arrivee -- par Ryuk,
-                # pour que les deux bots y aient leur regle ; rendu tel que
-                # Rem le voit (outils_communs.perso_ou_creer). Clic acquitte
-                # d'abord : la creation peut depasser les 3 s ; la suite part
-                # en ephemere de suivi (_ephemere).
-                await itx.response.defer()
-                perso = await oc.perso_ou_creer(getattr(itx, "guild", None),
-                                                getattr(itx, "user", None))
-            non = "" if perso is not None else oc.REFUS
-        else:
-            from cogs.outils import ou_livrer, refus
-            non = refus(itx.channel, getattr(itx, "user", None))
-            perso = None if non else ou_livrer(itx.channel, getattr(itx, "user", None))
+        from cogs.outils import ou_livrer, refus
+        non = refus(itx.channel, getattr(itx, "user", None))
         if non:
             await _ephemere(itx, non)
             return
+        perso = ou_livrer(itx.channel, getattr(itx, "user", None))
         if action == "sms" and not numgen.status()["sms_ok"]:
             await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
             return
-        if not itx.response.is_done():      # deja acquitte si le -content vient d'etre cree
-            await itx.response.defer()
+        await itx.response.defer()
         await self._panneau_en_bas(perso)
         achete = await self.nouvelle_activation(itx, action, "ig", canal=perso)
         actif = _salon(perso.id).get("actif") or {}
         if achete or actif.get("par") == getattr(itx.user, "id", None):
             await _ephemere(itx, "📱 C'est dans %s." % perso.mention)
+
+    async def clic_partage(self, itx, action):
+        """Un clic dans le 📱・numéro PARTAGE de YouCham (vu de tous).
+
+        Le panneau du salon reste vide pour tout le monde. « Prendre un
+        numéro » ouvre au cliqueur SA carte, un message ephemere que lui seul
+        voit, qui change sur place comme le panneau d'un salon -numero-mail
+        (numero, code arrive tout seul, Autre, Annuler). Reprendre un numero
+        depuis le panneau REMPLACE le sien (rendu, donc rembourse, s'il n'a
+        pas recu de code) : un membre n'a jamais qu'un numero a la fois.
+        Rien ne passe plus par son -content : pas de salon a creer, pas de
+        refus pour qui n'en a pas.
+
+        Les boutons de la carte ne demandent pas de confirmation : elle n'est
+        visible que de son proprietaire, personne d'autre ne peut cliquer
+        dessus, et un numero sans code rendu par erreur est rembourse."""
+        ch = itx.channel
+        user = getattr(itx, "user", None)
+        if getattr(user, "bot", False):
+            await _ephemere(itx, "Pas pour les bots.")
+            return
+        carte = _CartePerso(ch, getattr(user, "id", 0), _nom_de(user))
+        dans_carte = bool(getattr(getattr(getattr(itx, "message", None), "flags", None),
+                                  "ephemeral", False))
+        if action == "sms" and not numgen.status()["sms_ok"]:
+            await _ephemere(itx, "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.")
+            return
+        if not dans_carte and action not in ("sms", "mail"):
+            # Un bouton de numero sur le panneau du salon : un panneau d'avant
+            # la carte. Il est remis a vide, le numero se gere dans la carte.
+            await _ephemere(itx, "📱 Clique sur **Prendre un numéro** : ton numéro "
+                                 "s'affiche dans un message que toi seul vois.")
+            await maj_panneau(self.bot, ch, cog=self)
+            return
+        rec = _salon(carte.id)
+        if dans_carte:
+            # Reponse DIFFEREE sur la carte : le message clique reste la carte,
+            # le jeton de CE clic sert aux editions des 15 prochaines minutes.
+            await itx.response.defer()
+            ancien = None
+        else:
+            # La carte part TOUT DE SUITE (Discord laisse trois secondes) ; la
+            # recherche du numero vient ensuite. Le solde affiche est le
+            # dernier lu : le relire ici prendrait ces trois secondes.
+            actif0, _ = _a_afficher(rec)
+            mot = "⏳ Changement de numéro…" if actif0 else "⏳ Recherche d'un numéro…"
+            vue = await _vue_salon(self, rec, mot, solde=_DERNIER_SOLDE["sms"] or "",
+                                   canal=carte)
+            kw = {"view": vue, "ephemeral": True}
+            f = _fichier_icone() if vue.icone else None
+            if f is not None:
+                kw["file"] = f
+            await itx.response.send_message(**kw)
+            ancien = ((rec.get("jeton"), rec.get("app"), rec.get("jeton_le"))
+                      if rec.get("jeton") else None)
+        try:
+            _salon_ecrire(carte.id, jeton=itx.token, app=itx.application_id,
+                          jeton_le=int(time.time()))
+        except Exception as e:                               # noqa: BLE001
+            log.error("numgen: carte de %s non enregistree (%s: %s) : rien n'est achete",
+                      carte.name, type(e).__name__, e)
+            await _ephemere(itx, "❌ Le registre des numéros ne s'écrit plus : rien n'a "
+                                 "été acheté. Préviens un admin.")
+            return
+        if ancien:
+            # L'ancienne carte montrerait un numero rendu : elle est retiree.
+            await _retirer_carte(self.bot, carte, *ancien)
+        if dans_carte and action not in ("sms", "mail"):
+            await self.action_salon(itx, action, canal=carte)
+            return
+        actif, _ = _a_afficher(_salon(carte.id))
+        if actif:
+            # Un numero (ou un mail) en cours : on le remplace. Meme type :
+            # « Autre » ; sinon on le rend, puis on prend le nouveau -- s'il
+            # est encore la (refus du fournisseur), rien n'est achete.
+            if actif.get("kind") == ("mail" if action == "mail" else "sms"):
+                await self.action_salon(itx, "autre", canal=carte)
+                return
+            await self.action_salon(itx, "annuler", canal=carte)
+            if _a_afficher(_salon(carte.id))[0]:
+                return
+        await self.nouvelle_activation(itx, action, "ig", canal=carte)
 
     async def _panneau_en_bas(self, canal):
         """Le panneau du VA, en bas de son salon. Celui d'hier, remonte par
@@ -762,6 +841,8 @@ class NumerosCog(commands.Cog):
             # Heure de prise : un numero mort ne bloque plus le salon.
             "pris_le": int(time.time()),
         }
+        if isinstance(ch, _CartePerso):
+            actif["duree"] = DUREE_CARTE_SEC
         # Noté AVANT de l'afficher : il est paye, et le recap du soir doit le
         # compter meme si la suite echoue (il sera alors marque rendu).
         histo_prise(actif, ch, _membre_proprietaire(itx, ch, actif["par"]))
@@ -1043,11 +1124,11 @@ class NumerosCog(commands.Cog):
             pris = float(actif0.get("pris_le") or 0)
         except (TypeError, ValueError):
             pris = 0.0
-        # On ecoute tant que le numero VIT (20 min apres sa prise), pas un
-        # nombre fixe de tours : l'ecoute s'arretait a 3 min, et le code
-        # arrive ensuite ne s'affichait plus. Un numero sans heure (d'avant
-        # le 27/09) garde l'ancien delai.
-        fin = (pris + DUREE_NUMERO_SEC) if pris else (debut + POLL_MAX)
+        # On ecoute tant que le numero VIT (20 min apres sa prise, moins
+        # dans une carte), pas un nombre fixe de tours : l'ecoute s'arretait
+        # a 3 min, et le code arrive ensuite ne s'affichait plus. Un numero
+        # sans heure (d'avant le 27/09) garde l'ancien delai.
+        fin = (pris + _duree(actif0)) if pris else (debut + POLL_MAX)
         reste = max(0.0, fin - debut)
         log.info("numgen: ecoute du code demarree pour #%s (%s), %d s au plus",
                  nom, act_id, reste)
@@ -1115,10 +1196,34 @@ class NumerosCog(commands.Cog):
             minutes = int(round((fin - (pris or debut)) / 60.0))
             log.info("numgen: aucun code en %d min pour #%s (%s) : ecoute terminee",
                      minutes, nom, act_id)
+            if isinstance(channel, _CartePerso):
+                await self._carte_expiree(channel, rec.get("actif"))
+                return
             await maj_panneau(self.bot, channel, cog=self,
                               souci="❌ Aucun code reçu en %d min" % minutes)
 
-    async def action_salon(self, itx, quoi, attendu=None, code_vu=None):
+    async def _carte_expiree(self, carte, actif):
+        """Fin de vie d'un numero de carte, sans code : il est RENDU.
+
+        Le fournisseur le garderait encore 5 min, mais la carte ne pourra
+        bientot plus etre modifiee (jeton de 15 min) : un code arrive apres
+        serait facture sans que personne ne le voie."""
+        act_id = (actif or {}).get("id")
+        ok, raison = await _rendre(actif, "carte expiree")
+        rec = _salon(carte.id)
+        if (rec.get("actif") or {}).get("id") != act_id or _code_courant(rec):
+            # Remplace, ou son code est arrive pendant l'appel : on n'y touche plus.
+            await maj_panneau(self.bot, carte, cog=self)
+            return
+        if ok or _rendu_inutile(raison):
+            _salon_ecrire(carte.id, actif=None, code_valeur=None, code_de=None,
+                          code_affiche=None)
+            souci = "⌛ Pas de code en 15 min : numéro rendu (remboursé)."
+        else:
+            souci = "❌ Pas de code en 15 min (%s)" % _ligne_courte(raison, 100)
+        await maj_panneau(self.bot, carte, cog=self, souci=souci)
+
+    async def action_salon(self, itx, quoi, attendu=None, code_vu=None, canal=None):
         """🔄 Redemander · ✅ C'est bon · 🔁 Autre · ❌ Annuler, depuis le panneau.
 
         `attendu` : l'id de l'activation que nommait la confirmation
@@ -1131,8 +1236,11 @@ class NumerosCog(commands.Cog):
         posee. Un code arrive PENDANT la confirmation (le VA attendait
         justement son SMS) etait efface, et « Autre » rachetait un numero :
         A paye et son code perdu, B paye en plus.
+
+        `canal` : la carte d'un membre dans un salon partage, quand ce n'est
+        pas le salon du clic qui porte le numero.
         """
-        ch = getattr(itx, "channel", None)
+        ch = canal or getattr(itx, "channel", None)
         if ch is None:
             return
         nom = getattr(ch, "name", "?")
@@ -1335,7 +1443,7 @@ class NumerosCog(commands.Cog):
             # c'est un admin qui a clique.
             await self.nouvelle_activation(itx, "sms" if sms else "mail",
                                            actif.get("service", "ig"),
-                                           par=actif.get("par"))
+                                           par=actif.get("par"), canal=ch)
             return
         await maj_panneau(self.bot, ch, cog=self)
 
@@ -3349,6 +3457,27 @@ def _salon_ecrire(cid, **champs):
 #: plus de code et ne doit plus bloquer le salon.
 DUREE_NUMERO_SEC = 20 * 60
 
+#: Duree de vie d'un numero pris dans un salon PARTAGE (sa carte ephemere).
+#: Discord ne laisse modifier un message ephemere que 15 min apres le clic
+#: qui l'a ouvert : au-dela, le code arrive ne pourrait plus s'afficher. Le
+#: numero est donc rendu (rembourse) un peu AVANT, tant que la carte peut
+#: encore dire pourquoi.
+DUREE_CARTE_SEC = 15 * 60 - 30
+#: Validite du jeton d'une interaction (15 min chez Discord), marge comprise.
+JETON_SEC = 15 * 60 - 10
+
+#: Ecrit sur le panneau partage et dans la carte (proprietaire, 30/10/2026 :
+#: « ça coûte de l'argent, prends-en 3 de numéro pour le même compte »).
+AVERTISSEMENT = "⚠️ Un numéro coûte de l'argent : 3 numéros maximum pour un même compte."
+
+
+def _duree(actif) -> int:
+    """La duree de vie de CE numero : celle d'une carte s'il en vient."""
+    try:
+        return int((actif or {}).get("duree") or DUREE_NUMERO_SEC)
+    except (TypeError, ValueError):
+        return DUREE_NUMERO_SEC
+
 
 def _numero_vivant(actif) -> bool:
     """Un numero qui peut encore recevoir son code. Ceux d'avant le
@@ -3356,9 +3485,53 @@ def _numero_vivant(actif) -> bool:
     salons en gardaient un du 22/09), donc morts."""
     import time as _t
     try:
-        return _t.time() - float((actif or {}).get("pris_le") or 0) < DUREE_NUMERO_SEC
+        return _t.time() - float((actif or {}).get("pris_le") or 0) < _duree(actif)
     except (TypeError, ValueError):
         return False
+
+
+class _CartePerso:
+    """Le « salon » d'UN membre dans un salon partage : sa carte ephemere.
+
+    Tout le parcours du panneau (achat, ecoute, Autre, rendu differe) est
+    ecrit pour un salon et son registre. Un salon partage ne peut pas porter
+    le numero de chacun : la carte joue ce role, avec sa propre cle au
+    registre (« <salon>:<membre> »), et maj_panneau l'edite par le jeton de
+    l'interaction au lieu d'editer un message du salon."""
+
+    def __init__(self, salon, uid, nom=""):
+        self.salon = salon
+        self.uid = int(uid)
+        self.id = "%s:%s" % (getattr(salon, "id", 0), self.uid)
+        self.salon_id = getattr(salon, "id", None)
+        self.guild = getattr(salon, "guild", None)
+        self.mention = getattr(salon, "mention", "")
+        self.name = "%s/%s" % (getattr(salon, "name", "?"), nom or self.uid)
+
+
+def _salon_partage(channel) -> bool:
+    """Un salon ou chacun recoit son numero dans une carte visible de lui
+    seul : sur YouCham (outils communs), tout salon hors -content -- le
+    📱・numéro, meme renomme (_clic_us). Ailleurs, rien ne change."""
+    if channel is None or isinstance(channel, _CartePerso):
+        return False
+    return _clic_us(channel)
+
+
+def _canal_du_registre(bot, cid):
+    """Le salon -- ou la carte d'un membre -- d'une cle du registre.
+    None si ce bot ne voit pas le salon."""
+    base, _, uid = str(cid).partition(":")
+    try:
+        ch = bot.get_channel(int(base))
+    except (TypeError, ValueError):
+        return None
+    if ch is None or not uid:
+        return ch
+    try:
+        return _CartePerso(ch, int(uid))
+    except (TypeError, ValueError):
+        return None
 
 
 def _code_courant(rec):
@@ -3673,7 +3846,7 @@ def histo_prise(actif, channel=None, user=None, maintenant=None) -> bool:
             "par": actif.get("par") or getattr(user, "id", 0) or 0,
             # Le nom du moment : repli du recap si le VA a quitte le serveur.
             "nom": _nom_de(user),
-            "salon": getattr(channel, "id", None),
+            "salon": getattr(channel, "salon_id", None) or getattr(channel, "id", None),
             "serveur": getattr(getattr(channel, "guild", None), "id", None),
             "pris_le": int(actif.get("pris_le") or now),
         }
@@ -4676,7 +4849,7 @@ class PanneauNumero(discord.ui.LayoutView):
     """
 
     def __init__(self, cog=None, actif=None, code=None, solde=None, souci="",
-                 icone=None, tous=False):
+                 icone=None, tous=False, avertir=False):
         super().__init__(timeout=None)
         self.cog = cog
         self.icone = _ICONE.exists() if icone is None else bool(icone)
@@ -4697,14 +4870,29 @@ class PanneauNumero(discord.ui.LayoutView):
         self.etat = etat
         if etat == "vide":
             lignes = ["## Numéro Instagram", "-# 💵 " + _solde_affiche(solde)]
+            if avertir:
+                lignes.insert(1, AVERTISSEMENT)
         else:
             # Le numero COLLE, sans espaces : demande expresse du proprietaire.
             valeur = "".join(str(actif.get("valeur") or "?").split())
             ligne = ("⏳ En attente du code…" if etat == "attente"
                      else "🔑 **Code : `%s`**" % code)
             lignes = ["## `%s`" % valeur, _drapeau(actif) + " " + ligne]
+            if etat == "attente" and actif.get("duree"):
+                # Une carte de salon partage : sa fin de vie se voit.
+                try:
+                    fin = int(float(actif.get("pris_le") or 0)) + _duree(actif)
+                    lignes.append("-# ⌛ Expire <t:%d:R>" % fin)
+                except (TypeError, ValueError):
+                    pass
         if souci:
             lignes.append(_ligne_courte(souci))
+        # Une Section ne prend que TROIS textes (ValueError au-dela) :
+        # l'avertissement, l'expiration d'une carte et une ligne de souci en
+        # faisaient quatre, et le panneau ne se dessinait plus. Le surplus
+        # rejoint le troisieme, a la ligne.
+        if len(lignes) > 3:
+            lignes = lignes[:2] + ["\n".join(lignes[2:])]
         textes = [ui.TextDisplay(t) for t in lignes]
         rangee = ui.ActionRow(*[_BoutonNum(cog, *b) for b in _boutons_etat(etat)])
         if self.icone:
@@ -4808,11 +4996,19 @@ async def _chercher_panneau(channel, moi, sauf=()):
     return anciens[0] if anciens else None
 
 
-async def _vue_salon(cog, rec, souci="", solde=None):
+async def _vue_salon(cog, rec, souci="", solde=None, canal=None):
+    """La vue du panneau d'apres le registre. `canal` partage : le panneau
+    vu de tous reste VIDE, les numeros vivent dans les cartes ; lui et les
+    cartes portent l'avertissement."""
+    carte = isinstance(canal, _CartePerso)
+    partage = canal is not None and not carte and _salon_partage(canal)
+    if partage:
+        rec = {}
     actif, code = _a_afficher(rec)
     if not actif and solde is None:
         solde = await _solde_sms()
-    return PanneauNumero(cog, actif=actif, code=code, solde=solde, souci=souci)
+    return PanneauNumero(cog, actif=actif, code=code, solde=solde, souci=souci,
+                         avertir=carte or partage)
 
 
 async def _editer_v2(channel, mid, vue, joindre=False):
@@ -4850,6 +5046,8 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     bilan.setdefault("vires", 0)
     if bot is None or channel is None:
         return False
+    if isinstance(channel, _CartePerso):
+        return await _maj_carte(bot, channel, souci, solde, cog)
     if menage and (_serveur_fr(channel) or _outils_communs(channel)) \
             and not _salon_commun(channel):
         # Sur le serveur FR le panneau vit dans le salon va- du VA, avec ses
@@ -4887,7 +5085,7 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
         x = _id_message(rec.get(cle))
         if x:
             a_virer.add(x)
-    vue = await _vue_salon(cog, rec, souci, solde)
+    vue = await _vue_salon(cog, rec, souci, solde, canal=channel)
     pose = None
     essayes = set()
     while cible:
@@ -5032,6 +5230,55 @@ async def _appliquer_panneau(channel, cible, fmt, vue, nom, bilan):
     log.info("numgen: panneau de #%s converti au format V2 (message %s)", nom, cible)
 
 
+def _jeton_vivant(jeton, app, le) -> bool:
+    try:
+        return bool(jeton and app) and time.time() - float(le or 0) < JETON_SEC
+    except (TypeError, ValueError):
+        return False
+
+
+async def _maj_carte(bot, carte, souci="", solde=None, cog=None) -> bool:
+    """Redessine la carte ephemere d'un membre, par le jeton du dernier clic
+    qui l'a ouverte ou touchee (« @original » de ce clic).
+
+    Rend True si elle est REELLEMENT a jour -- meme regle que maj_panneau :
+    _acheter n'achete rien sur une carte qu'on ne peut pas ecrire, et rend
+    un numero pris qu'elle n'a pas pu montrer. Jeton expire (plus de 15 min
+    sans clic) ou carte fermee : False, et le journal le dit."""
+    rec = _salon(carte.id)
+    jeton, app, le = rec.get("jeton"), rec.get("app"), rec.get("jeton_le")
+    if not _jeton_vivant(jeton, app, le):
+        log.warning("numgen: carte de %s non mise a jour : jeton %s", carte.name,
+                    "absent" if not jeton else "expire")
+        return False
+    cog = cog or bot.get_cog("NumerosCog")
+    vue = await _vue_salon(cog, rec, souci, solde, canal=carte)
+    try:
+        wh = discord.Webhook.partial(int(app), str(jeton), client=bot)
+        await wh.edit_message("@original", view=vue)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("numgen: carte de %s non mise a jour (%s: %s)", carte.name,
+                    type(e).__name__, e)
+        return False
+    return True
+
+
+async def _retirer_carte(bot, carte, jeton, app, le):
+    """Retire une carte remplacee par une neuve (nouveau clic sur le panneau).
+    Elle montrerait un numero rendu. Au-dela de 15 min, son jeton ne sert
+    plus : la carte reste, figee, jusqu'a ce que Discord la fasse disparaitre."""
+    if not _jeton_vivant(jeton, app, le):
+        return
+    try:
+        wh = discord.Webhook.partial(int(app), str(jeton), client=bot)
+        await wh.delete_message("@original")
+    except discord.NotFound:
+        pass
+    except Exception as e:                                   # noqa: BLE001
+        log.info("numgen: ancienne carte de %s non retiree (%s: %s)", carte.name,
+                 type(e).__name__, e)
+
+
 async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
     """Redessine le panneau d'apres le registre (numero, code) ; `souci` :
     une ligne « ❌ … » en plus, le reste inchange.
@@ -5042,13 +5289,15 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
     """
     if bot is None or channel is None:
         return False
+    if isinstance(channel, _CartePerso):
+        return await _maj_carte(bot, channel, souci, solde, cog)
     cog = cog or bot.get_cog("NumerosCog")
     nom = getattr(channel, "name", "?")
     rec = _salon(channel.id)
     mid = _id_message(rec.get("panneau"))
     if not mid or not rec.get("v2"):
         return await poser_panneau(bot, channel, cog, souci=souci, solde=solde)
-    vue = await _vue_salon(cog, rec, souci, solde)
+    vue = await _vue_salon(cog, rec, souci, solde, canal=channel)
     joindre = bool(vue.icone and not rec.get("icone", True))
     try:
         await _editer_v2(channel, mid, vue, joindre)
@@ -5099,6 +5348,8 @@ def _salon_commun(channel) -> bool:
     """Un panneau COMMUN : 📱・numero-mail de Va IG (cogs/outils.py) ou
     📱・numéro d'un serveur US aux outils communs (YouCham, outils_communs.py).
     Il ne porte jamais de numero : le clic achete dans le salon du VA."""
+    if isinstance(channel, _CartePerso):
+        return False
     try:
         from cogs.outils import est_salon_outils
         if est_salon_outils(channel, "numero-mail"):
@@ -5123,7 +5374,10 @@ def _clic_us(channel) -> bool:
     (YouCham) : partout sauf dans un -content (outils_communs.clic_commun).
     Au seul nom du salon, un 📱・numéro renomme « 📱・phone » redevenait un
     -numero-mail : le numero puis le code SMS du VA s'affichaient dans le
-    panneau que tout le monde lit, et le salon n'avait plus qu'une place."""
+    panneau que tout le monde lit, et le salon n'avait plus qu'une place.
+    Une carte (_CartePerso) n'est pas un salon : on y achete."""
+    if isinstance(channel, _CartePerso):
+        return False
     try:
         import guild_features as gf
         if not gf.outils_communs(getattr(channel, "guild", None)):

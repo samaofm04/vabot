@@ -18,7 +18,9 @@ CE QUI VIT OU
         📤・spoofer   le panneau du -spoofer (cogs/spoofer.py)
         ⬇️・download  le panneau du -download (cogs/telechargement.py)
         📱・numéro    le panneau du -numero-mail, pose par Rem, le bot admin
-                      (cogs/numeros.py, boucle _panneau_commun)
+                      (cogs/numeros.py, boucle _panneau_commun) ; le numero
+                      s'affiche dans une carte ephemere du cliqueur, 15 min
+                      (numeros.clic_partage, depuis le 31/10/2026)
     📁 SALONS PERSO, puis 📁 SALONS PERSO 2, 3... : Discord refuse un 51e
     salon dans une categorie. Un salon par VA, « <pseudo>-content » -- le
     nom de cogs/welcome._us_ticket_name, que toutes les recherches de -content
@@ -36,6 +38,11 @@ LA REGLE DE LIVRAISON
     refuse, ou Ryuk ne voit pas encore le serveur). Seuls les
     refus et les confirmations courtes sont ephemeres ; ce qui est livre vit
     dans le -content, qui survit a un rechargement de Discord.
+
+    Sauf le numero, depuis le 31/10/2026 (proprietaire : « que ça ne me le
+    fasse pas prendre dans mon ticket, mais dans le même salon ... un
+    message éphémère ») : la carte du numero est ephemere, dans le
+    📱・numéro, et ne passe plus par le -content.
 
     Sur ces serveurs, la regle tient PAR SERVEUR, pas par nom de salon
     (cible_du_clic, clic_commun) : rien n'y est livre ailleurs que dans un
