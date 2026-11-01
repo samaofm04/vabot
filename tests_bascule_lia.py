@@ -203,6 +203,14 @@ try:
           and f.get("pays") is True, ({x["destination_url"] for x in geo}, f.get("pays_erreur")))
     check("… sa variante Seren (copie figée) est notée à recopier : « variante.pays » : false",
           (f.get("variante") or {}).get("pays") is False and f["variante"].get("posee") is True, f)
+    # 01/11/2026 : les pages de base sans tracking suivent la model —
+    # « Base Emy » et la règle des pays de « Base Seren » sont à refaire
+    check("… ses pages de base aussi : « bases » : false, faites pour l'ancienne page (Emy)",
+          f["variante"].get("bases") is False and f["variante"].get("bases_essais") == 0
+          and f["variante"].get("bases_pour") == "https://onlyfans.com/emy.brw", f["variante"])
+    fa = lv.lien_de(AG, "u63")["variante"]
+    check("… landing (Agency) comme lien direct", fa.get("bases") is False
+          and fa.get("bases_pour") == "https://onlyfans.com/emy.brw", fa)
     check("… landing : la liste sur le bouton OnlyFans, vers la nouvelle model",
           {x["destination_url"] for x in (b[0].get("geofilters") or [])} == {PROFIL}
           and len(b[0]["geofilters"]) == 250 and "geofilters" not in b[1], b)

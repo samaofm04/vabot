@@ -21,7 +21,14 @@ Ce qui est vérifié :
   - le podium voit le tracking de la variante, sur ce lien seulement ;
   - gms.poser_ab_testing : le corps envoyé, et un cookie périmé reconnu ;
   - le cookie : valeur d'authToken seule acceptée, échéance lue ;
-  - le message au manager.
+  - le message au manager ;
+  - 30 % sans tracking (01/11/2026) : un lien neuf a quatre branches (46,7
+    tracking / 23,3 Seren / 20 page de la model / 10 page Seren) ; les liens
+    déjà passés à la main sont reconnus sans rien réécrire ; « Base Emy »
+    remplacée après un changement de model ; « Variant … not found » remonté
+    tel quel ; refiltrer_variante avec trois variantes ; « sans_tracking » :
+    {} = comme avant ; un échec des pages ne fait pas échouer le lien ; Seren
+    coupée puis remise retrouve ses quatre branches.
 
 Faux GetMySocial, faux MyPuls, faux Discord : aucun appel réseau, rien dans data/.
 Lancement : python tests_liens_ab_twitter.py
@@ -65,7 +72,12 @@ def check(label, cond, detail=""):
 TW, TH = lv.TWITTER_ID, lv.THREADS_ID
 EMY_TWITTER = lv.EQUIPE_VA
 GABARIT_TW = "lnk_gabarit_twitter"
-CONFIG = {"gabarit": GABARIT_TW, "equipe": EMY_TWITTER, "mypuls_actif": True, "creator_id": 3352}
+# Les vérifications d'avant le 01/11/2026 portent sur le 50/50 seul : la clé
+# « sans_tracking » : {} coupe les pages de base (comportement d'avant). Les
+# quatre branches (CONFIG_4, la config par défaut) sont vérifiées plus bas.
+CONFIG = {"gabarit": GABARIT_TW, "equipe": EMY_TWITTER, "mypuls_actif": True, "creator_id": 3352,
+          "sans_tracking": {}}
+CONFIG_4 = {k: v for k, v in CONFIG.items() if k != "sans_tracking"}
 
 
 class FauxGMS(types.ModuleType):
@@ -138,9 +150,113 @@ class FauxGMS(types.ModuleType):
         return [a for a in self.appels if a[0] == genre]
 
 
+def _sans(lid):
+    s = str(lid or "")
+    return s[4:] if s.startswith("lnk_") else s
+
+
+class FauxAB(FauxGMS):
+    """FauxGMS avec l'écran A/B Testing tel qu'observé chez GetMySocial :
+    une variante est une copie FIGÉE de sa source à l'enregistrement (gardée
+    dans « copie ») ; l'enregistrement remplace la liste entière ; un
+    variantId inconnu est refusé (« Variant … not found », bloomvelvetyy le
+    01/11/2026) ; éteint, l'A/B perd ses variantes (21/10/2026)."""
+
+    def __init__(self):
+        super().__init__()
+        self.abs = {}            # id sans lnk_ -> {enabled, controlWeight, variants}
+        self.perdues = set()     # variantId que GetMySocial dit introuvables
+        self.refus_post = None   # réponse de tout POST, si posée
+        self.cookie_lire = False
+        self.dans_liste = []     # liens rendus par list_links_team (couper_seren)
+        self.n = 0
+
+    def _copie(self, src):
+        l = self.liens.get("lnk_" + _sans(src))
+        return json.loads(json.dumps(l)) if l else None
+
+    def _vid(self):
+        self.n += 1
+        return f"var{self.n}"
+
+    @staticmethod
+    def _public(cfg):
+        cfg = json.loads(json.dumps(cfg))
+        for v in cfg.get("variants") or []:
+            v.pop("copie", None)
+        return cfg
+
+    def poser_ab_testing(self, lid, source, equipe, poids, nom):
+        self.appels.append(("ab", lid, source, equipe, poids, nom))
+        if not self.ab.get("ok"):
+            return dict(self.ab)
+        self.abs[_sans(lid)] = {"enabled": True, "controlWeight": round(100 - poids, 1), "variants": [
+            {"variantId": self._vid(), "sourceLinkId": _sans(source), "name": nom, "weight": poids,
+             "description": "Variant based on another link", "copie": self._copie(source)}]}
+        return {"ok": True, "config": self._public(self.abs[_sans(lid)])}
+
+    def lire_ab_testing(self, lid, equipe=None):
+        self.appels.append(("lire", _sans(lid), equipe))
+        if self.cookie_lire:
+            return {"ok": False, "cookie": True, "error": "cookie de session GetMySocial refusé"}
+        return {"ok": True, "config": self._public(
+            self.abs.get(_sans(lid)) or {"enabled": False, "controlWeight": 50, "variants": []})}
+
+    def _ab_prive(self, methode, lid, equipe=None, corps=None):
+        if methode == "GET":
+            return self.lire_ab_testing(lid, equipe)
+        self.appels.append(("post", _sans(lid), json.loads(json.dumps(corps))))
+        if self.refus_post:
+            return dict(self.refus_post)
+        avant = {v["variantId"]: v for v in (self.abs.get(_sans(lid)) or {}).get("variants") or []}
+        neuves = []
+        for v in corps.get("variants") or []:
+            vid = v.get("variantId")
+            if vid and (vid not in avant or vid in self.perdues):
+                return {"ok": False, "error": f"HTTP 400 : Variant {vid} not found"}
+            if v.get("sourceLinkId"):
+                copie = self._copie(v["sourceLinkId"])
+                if copie is None:
+                    return {"ok": False, "error": "HTTP 404 : source introuvable"}
+            elif vid:
+                copie = avant[vid]["copie"]
+            else:
+                return {"ok": False, "error": "HTTP 400 : variante sans source"}
+            neuves.append({"variantId": vid or self._vid(),
+                           "sourceLinkId": v.get("sourceLinkId") or avant.get(vid, {}).get("sourceLinkId"),
+                           "name": v.get("name"), "weight": v.get("weight"),
+                           "description": v.get("description"), "copie": copie})
+        self.abs[_sans(lid)] = {"enabled": bool(corps.get("enabled")),
+                                "controlWeight": corps.get("controlWeight"),
+                                "variants": neuves if corps.get("enabled") else []}
+        return {"ok": True, "config": self._public(self.abs[_sans(lid)])}
+
+    def allumer_ab_testing(self, lid, equipe="", actif=True, variantes=None):
+        self.appels.append(("allumer", _sans(lid), actif))
+        cfg = self.abs.get(_sans(lid)) or {"enabled": False, "controlWeight": 50, "variants": []}
+        avant = self._public(cfg)
+        self.abs[_sans(lid)] = dict(cfg, enabled=bool(actif), variants=cfg["variants"] if actif else [])
+        return {"ok": True, "config": self._public(self.abs[_sans(lid)]), "avant": avant}
+
+    def delete_link(self, lid):
+        self.appels.append(("delete", lid))
+        self.liens.pop(lid, None)     # la variante, copie figée, n'en dépend plus
+        return {"ok": True}
+
+    def list_links_team(self, equipe, force_refresh=False):
+        out = []
+        for lid in self.dans_liste:
+            cfg = self.abs.get(_sans(lid)) or {"enabled": False, "variants": []}
+            out.append(dict(self.liens.get(lid) or {}, id=lid, shortcode=_sans(lid),
+                            ab_testing={"enabled": cfg["enabled"], "variants": cfg["variants"]}))
+        return {"links": out}
+
+
 TMP = pathlib.Path(tempfile.mkdtemp())
 _SAUVE_LV = {k: getattr(lv, k) for k in ("CONFIG_FICHIER", "ETAT_FICHIER", "numero_de",
-                                         "creer_tracking")}
+                                         "creer_tracking", "COUPES_FICHIER", "SEREN_EN_PAUSE",
+                                         "_tracking_existant", "PAUSE_BASES_S",
+                                         "BASES_PAR_PASSE", "RELIRE_ETEINT_S")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("ETAT_FICHIER", "CONFIG_FICHIER", "_api", "_EN_FOND",
                                          "_suite", "identifiant", "nom_manager")}
 _SAUVE_GMS = sys.modules.get("gms")
@@ -149,17 +265,18 @@ _SAUVE_COOKIE = vrai_gms.get_session_cookie
 SEQ = []      # l'ordre des créations, MyPuls et GetMySocial mêlés
 
 
-def monde(config=None, etat=None, mypuls_ok=True):
+def monde(config=None, etat=None, mypuls_ok=True, classe=None):
     lv.CONFIG_FICHIER = TMP / "liens_va_config.json"
     lv.ETAT_FICHIER = TMP / "liens_va.json"
     tk.ETAT_FICHIER = TMP / "tickets.json"
     tk.CONFIG_FICHIER = TMP / "tickets_config.json"
+    lv.COUPES_FICHIER = TMP / "liens_seren_coupes.json"
     for p in TMP.iterdir():
         p.unlink()
     lv.CONFIG_FICHIER.write_text(json.dumps(CONFIG if config is None else config))
     if etat is not None:
         lv.ETAT_FICHIER.write_text(json.dumps(etat))
-    g = FauxGMS()
+    g = (classe or FauxGMS)()
     sys.modules["gms"] = g
     lv.numero_de = lambda pseudo: 27
     suivis = []
@@ -1122,6 +1239,597 @@ try:
     finally:
         lv.reprendre_pays, lv.groupes = vrai_rp, vrai_groupes
     check("la synchro des liens (30 min) lance reprendre_pays", vus == [TW], vus)
+
+    # ── 30 % sans tracking : les pages de base (01/11/2026) ──────────────
+    # « 30 % des liens sans tracking, sur la page de base », « 2/3 et 1/3
+    # comme d'hab » : 46,7 tracking de la model / 23,3 tracking Seren / 20
+    # page de la model / 10 page Seren
+    LIA_P, SEREN_P = "https://onlyfans.com/liasxcret", "https://onlyfans.com/seren.vale"
+    lv._tracking_existant = lambda nom, cid: None     # aucun appel MyPuls
+    lv.PAUSE_BASES_S = 0
+
+    def monde4(etat=None, config=None):
+        g_, suivis_ = monde(config=CONFIG_4 if config is None else config, etat=etat, classe=FauxAB)
+
+        def faux_lia(nom, creator_id=None):
+            suivis_.append((nom, creator_id))
+            return ({"ok": True, "url": f"{SEREN_P}/c250", "code": "c250"} if creator_id == 3867
+                    else {"ok": True, "url": f"{LIA_P}/c63", "code": "c63"})
+        lv.creer_tracking = faux_lia
+        return g_, suivis_
+
+    def fiche4(n, sc, tracking=f"{LIA_P}/c60", seren=f"{SEREN_P}/c195", **kw):
+        return {"pseudo": f"va{n}", "numero": n, "shortcode": sc, "link_id": f"lnk_{sc}",
+                "tracking": tracking,
+                "variante": dict({"posee": True, "modele": "Seren", "creator_id": 3867,
+                                  "tracking": seren, "pays": True}, **kw)}
+
+    def ab4(*variantes, controle=46.7):
+        return {"enabled": True, "controlWeight": controle, "variants": [
+            {"variantId": vid, "sourceLinkId": None, "name": nom, "weight": w, "description": "",
+             "copie": {"url": url}} for vid, nom, w, url in variantes]}
+
+    QUATRE = (("vS", "Seren", 23.3, f"{SEREN_P}/c195"), ("vL", "Base Lia", 20, LIA_P),
+              ("vB", "Base Seren", 10, SEREN_P))
+
+    def branches(g_, sc):
+        cfg = g_.abs.get(sc) or {}
+        return cfg, {v["name"]: v for v in cfg.get("variants") or []}
+
+    check("les parts par défaut : 46,7 / 23,3 / 20 / 10, soit 66,7 Lia et 33,3 Seren, 30 % sans tracking",
+          lv.SANS_TRACKING == {"controle": 46.7, "variante": 23.3, "base_modele": 20, "base_variante": 10}
+          and round(lv.SANS_TRACKING["controle"] + lv.SANS_TRACKING["base_modele"], 1) == 66.7
+          and round(lv.SANS_TRACKING["base_modele"] + lv.SANS_TRACKING["base_variante"], 1) == 30)
+    check("noms des branches : la table des comptes du site (les 54 liens s'appellent « Base Lia », « Base Seren »)",
+          (lv.nom_de_page(LIA_P), lv.nom_de_page(f"{SEREN_P}/c195"), lv.nom_de_page("https://onlyfans.com/emy.brw"),
+           lv.nom_de_page("https://onlyfans.com/inconnue.x"), lv.nom_de_page("https://mym.fans/x"))
+          == ("Lia", "Seren", "Emy", "inconnue.x", ""))
+
+    # nouveau lien : quatre branches
+    g, suivis = monde4()
+    r = lv.creer_pour(TW, "n1", "nova", manager="YAZID")
+    sc = r.get("shortcode") or "?"
+    cfg, br = branches(g, sc)
+    check("lien neuf : quatre branches, 46,7 tracking Lia / 23,3 Seren / 20 page Lia / 10 page Seren",
+          r.get("ok") and (r.get("variante") or {}).get("ok") and cfg.get("enabled")
+          and cfg.get("controlWeight") == 46.7
+          and {n: v["weight"] for n, v in br.items()} == {"Seren": 23.3, "Base Lia": 20, "Base Seren": 10},
+          (r, cfg))
+    check("… la variante Seren reste celle posée juste avant (même variantId), vers SON tracking Seren",
+          (br.get("Seren") or {}).get("variantId") == "var1"
+          and ((br.get("Seren") or {}).get("copie") or {}).get("url") == f"{SEREN_P}/c250", br.get("Seren"))
+    ok_pages = all(
+        ((br.get(n) or {}).get("copie") or {}).get("url") == page
+        and {x["destination_url"] for x in ((br.get(n) or {}).get("copie") or {}).get("geofilters") or []} == {LIA_P}
+        and len(((br.get(n) or {}).get("copie") or {}).get("geofilters") or []) == NB
+        for n, page in (("Base Lia", LIA_P), ("Base Seren", SEREN_P)))
+    check("… les pages de base : copies figées des comptes SANS tracking, autres pays vers la page de la model du lien",
+          ok_pages, {n: (v.get("copie") or {}).get("url") for n, v in br.items()})
+    dup = g.de("duplicate")
+    check("… copies temporaires depuis le gabarit, dans EMY TWITTER, toutes supprimées",
+          len(dup) == 4 and all(d[1] == GABARIT_TW and d[5] == EMY_TWITTER for d in dup[1:])
+          and sorted(x[1] for x in g.de("delete")) == sorted(f"lnk_{d[2]}" for d in dup[1:])
+          and [d[4] for d in dup[2:]] == [LIA_P, SEREN_P], (dup, g.de("delete")))
+    post = g.de("post")
+    check("… un seul enregistrement : Seren gardée à son variantId sans source, deux pages neuves",
+          len(post) == 1 and post[0][2]["controlWeight"] == 46.7
+          and [(v["variantId"], v["sourceLinkId"] is None, v["weight"]) for v in post[0][2]["variants"]]
+          == [("var1", True, 23.3), (None, False, 20), (None, False, 10)], post)
+    fv = lv.lien_de(TW, "n1").get("variante") or {}
+    check("… fiche : « bases » : true, pour la page de Lia ; un seul tracking Seren chez MyPuls",
+          fv.get("bases") is True and fv.get("bases_pour") == LIA_P and fv.get("bases_essais") == 0
+          and [c for _n, c in suivis] == [None, 3867], (fv, suivis))
+    n = len(g.appels)
+    b = lv.reprendre_bases(TW)
+    check("… et la reprise n'y revient pas (rien lu)", not any(b[k] for k in ("poses", "deja", "rates"))
+          and len(g.appels) == n, (b, g.appels[n:]))
+
+    # les 54 liens passés à la main : reconnus, rien réécrit
+    g, _s = monde4(etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = ab4(*QUATRE)
+    avant = json.dumps(g.abs)
+    b = lv.reprendre_bases(TW)
+    check("lien déjà à quatre branches (« Base Lia », « Base Seren ») : reconnu, AUCUN enregistrement",
+          b["deja"] == ["babeyy"] and not b["poses"] and not b["rates"] and not g.de("post")
+          and not g.de("duplicate") and json.dumps(g.abs) == avant and len(g.de("lire")) == 1, (b, g.appels))
+    fv = lv.lien_de(TW, "d").get("variante") or {}
+    n = len(g.appels)
+    lv.reprendre_bases(TW)
+    check("… noté dans la fiche, plus relu ensuite",
+          fv.get("bases") is True and fv.get("bases_pour") == LIA_P and len(g.appels) == n, fv)
+    # par passage, BASES_PAR_PASSE liens au plus : synchroniser tourne dans la
+    # boucle du podium, les 54 d'un coup la bloqueraient
+    lv.BASES_PAR_PASSE = 2
+    g, _s = monde4(etat={"liens": {f"{TW}:{u}": fiche4(40 + i, f"sc{u}") for i, u in enumerate("xyz")}})
+    for u in "xyz":
+        g.liens[f"lnk_sc{u}"] = {"id": f"lnk_sc{u}", "type": "directlink", "url": f"{LIA_P}/c60"}
+        g.abs[f"sc{u}"] = ab4(*QUATRE)
+    b1, b2 = lv.reprendre_bases(TW), lv.reprendre_bases(TW)
+    lv.BASES_PAR_PASSE = _SAUVE_LV["BASES_PAR_PASSE"]
+    check("… deux liens par passage (ici) : le reste au passage suivant, et c'est dit",
+          (b1["deja"], b1["restent"], b2["deja"], b2["restent"]) == (["scx", "scy"], 1, ["scz"], 0)
+          and len(g.de("lire")) == 3, (b1, b2))
+
+    # Threads : la même reprise, dans EMY THREADS (sa variante vient du patch du VPS)
+    g, _s = monde4(etat={"liens": {f"{TH}:t": fiche4(61, "angelyy")}})
+    g.liens["lnk_angelyy"] = {"id": "lnk_angelyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["angelyy"] = ab4(QUATRE[0], controle=66.7)
+    g.abs["angelyy"]["variants"][0]["weight"] = 33.3
+    b = lv.reprendre_bases(TH)
+    dup = g.de("duplicate")
+    check("Threads : pages posées dans EMY THREADS, copies depuis emythreadsb (sans A/B)",
+          b["poses"] == ["angelyy"] and len(dup) == 2
+          and all(d[1] == lv.ESPACE_THREADS["source_variante"] and d[5] == lv.ESPACE_THREADS["equipe"] for d in dup)
+          and g.de("lire")[0][2] == lv.ESPACE_THREADS["equipe"], (b, dup))
+
+    # la model a changé (Emy → Lia) : la branche « Base Emy » est remplacée
+    g, _s = monde4(etat={"liens": {f"{TW}:m": fiche4(5, "vv")}})
+    g.liens["lnk_vv"] = {"id": "lnk_vv", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["vv"] = ab4(QUATRE[0], ("vE", "Base Emy", 20, "https://onlyfans.com/emy.brw"), QUATRE[2])
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "vv")
+    post = g.de("post")
+    check("branche « Base Emy » sur un lien passé chez Lia : remplacée par « Base Lia », le reste gardé",
+          b["poses"] == ["vv"] and set(br) == {"Seren", "Base Lia", "Base Seren"}
+          and br["Seren"]["variantId"] == "vS" and br["Base Seren"]["variantId"] == "vB"
+          and br["Base Lia"]["copie"]["url"] == LIA_P and len(g.de("duplicate")) == 1
+          and [v["variantId"] for v in post[0][2]["variants"]] == ["vS", None, "vB"], (b, cfg, post))
+
+    # passer_sur (Emy → Lia) : « bases_pour » dit l'ancienne page, les deux sont refaites
+    g, _s = monde4(etat={"liens": {f"{TW}:p": fiche4(6, "pp", bases=False,
+                                                       bases_pour="https://onlyfans.com/emy.brw")}})
+    g.liens["lnk_pp"] = {"id": "lnk_pp", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["pp"] = ab4(QUATRE[0], ("vE", "Base Emy", 20, "https://onlyfans.com/emy.brw"),
+                      ("vB", "Base Seren", 10, SEREN_P))
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "pp")
+    check("model changée (passer_sur) : « Base Seren » refaite aussi (ses autres pays partaient chez Emy)",
+          b["poses"] == ["pp"] and br["Base Seren"]["variantId"] not in ("vB", None)
+          and {x["destination_url"] for x in br["Base Seren"]["copie"].get("geofilters") or []} == {LIA_P}
+          and len(g.de("duplicate")) == 2 and br["Seren"]["variantId"] == "vS"
+          and (lv.lien_de(TW, "p").get("variante") or {}).get("bases_pour") == LIA_P, (b, br))
+
+    # « Variant … not found » : l'erreur remonte, rien d'autre
+    g, _s = monde4(etat={"liens": {f"{TW}:x": fiche4(7, "bloom")}})
+    g.liens["lnk_bloom"] = {"id": "lnk_bloom", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["bloom"] = ab4(QUATRE[0], controle=66.7)
+    g.abs["bloom"]["variants"][0]["weight"] = 33.3
+    g.perdues = {"vS"}
+    avant = json.dumps(g.abs)
+    b = lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "x").get("variante") or {}
+    check("« Variant … not found » : erreur remontée, un seul essai d'enregistrement, A/B intact",
+          len(g.de("post")) == 1 and json.dumps(g.abs) == avant and b["a_verifier"]
+          and "not found" in b["a_verifier"][0] and not b["poses"], (b, g.de("post")))
+    check("… Seren pas refaite d'office, copies supprimées, la main tout de suite",
+          [v.get("variantId") for v in g.de("post")[0][2]["variants"]][0] == "vS"
+          and len(g.de("delete")) == len(g.de("duplicate")) == 2
+          and fv.get("bases_a_verifier") is True and fv.get("bases") is False, fv)
+    n = len(g.appels)
+    lv.reprendre_bases(TW)
+    check("… plus de reprise automatique", len(g.appels) == n, g.appels[n:])
+
+    # « Variant <id> not found » quand l'enregistrement renvoie AUSSI une page
+    # de base gardée par son variantId : l'id cité dit quelle branche est perdue
+    # (avant, tout était mis sur Seren et le lien partait à la main)
+    g, _s = monde4(etat={"liens": {f"{TW}:q": fiche4(18, "qq")}})
+    g.liens["lnk_qq"] = {"id": "lnk_qq", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["qq"] = ab4(*QUATRE[:2])          # Seren + « Base Lia » gardée, « Base Seren » manque
+    g.perdues = {"vL"}
+    b = lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "q").get("variante") or {}
+    post = g.de("post")
+    check("« Variant vL not found » (page « Base Lia » gardée) : la bonne branche nommée, un essai normal",
+          len(post) == 1 and [v["variantId"] for v in post[0][2]["variants"]] == ["vS", "vL", None]
+          and b["rates"] and "Base Lia" in b["rates"][0] and "vL" in b["rates"][0]
+          and "Seren introuvable" not in b["rates"][0] and not b["a_verifier"]
+          and fv.get("bases_essais") == 1 and fv.get("bases_a_verifier") is False
+          and fv.get("bases_perdues") == ["vL"], (b, fv))
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "qq")
+    post = g.de("post")
+    fv = lv.lien_de(TW, "q").get("variante") or {}
+    check("… au passage suivant, « Base Lia » refaite en copie NEUVE (plus renvoyée par vL), Seren gardée",
+          b["poses"] == ["qq"] and len(post) == 2
+          and [(v["variantId"], v["sourceLinkId"] is None) for v in post[1][2]["variants"]]
+          == [("vS", True), (None, False), (None, False)]
+          and set(br) == {"Seren", "Base Lia", "Base Seren"} and br["Base Lia"]["variantId"] != "vL"
+          and br["Base Lia"]["copie"]["url"] == LIA_P and br["Seren"]["variantId"] == "vS"
+          and fv.get("bases") is True and "bases_perdues" not in fv, (b, post[-1:], fv))
+    # … et quand c'est Seren qui est citée, pages gardées ou non : la main, comme avant
+    g, _s = monde4(etat={"liens": {f"{TW}:q": fiche4(18, "qq")}})
+    g.liens["lnk_qq"] = {"id": "lnk_qq", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["qq"] = ab4(*QUATRE[:2])
+    g.perdues = {"vS"}
+    b = lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "q").get("variante") or {}
+    check("« Variant vS not found » avec une page gardée : Seren nommée, la main tout de suite",
+          b["a_verifier"] and "variante Seren introuvable" in b["a_verifier"][0]
+          and fv.get("bases_a_verifier") is True and "bases_perdues" not in fv, (b, fv))
+    # un id que l'on ne reconnaît pas, des pages gardées : on ne devine pas
+    g, _s = monde4(etat={"liens": {f"{TW}:q": fiche4(18, "qq")}})
+    g.liens["lnk_qq"] = {"id": "lnk_qq", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["qq"] = ab4(*QUATRE[:2])
+    g.refus_post = {"ok": False, "error": "HTTP 400 : Variant zz9 not found"}
+    b = lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "q").get("variante") or {}
+    check("… id non reconnu (ni Seren ni une page gardée) : la main, et c'est dit",
+          b["a_verifier"] and "non reconnu" in b["a_verifier"][0] and fv.get("bases_a_verifier") is True
+          and "bases_perdues" not in fv, (b, fv))
+
+    # refiltrer_variante avec trois variantes (après un changement de model)
+    g, _s = monde4(etat={"liens": {f"{TW}:r": fiche4(8, "rr", pays=False, bases=True)}})
+    g.liens["lnk_rr"] = {"id": "lnk_rr", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["rr"] = ab4(*QUATRE)
+    b = lv.reprendre_pays(TW)
+    post = g.de("post")
+    vs = post[0][2]["variants"] if post else []
+    cfg, br = branches(g, "rr")
+    check("refiltrer, quatre branches : Seren recopiée au MÊME variantId, les pages renvoyées telles quelles",
+          b["poses"] == ["rr (Seren)"] and len(post) == 1 and post[0][2]["controlWeight"] == 46.7
+          and [(v["variantId"], bool(v["sourceLinkId"]), v["weight"]) for v in vs]
+          == [("vS", True, 23.3), ("vL", False, 20), ("vB", False, 10)], (b, post))
+    check("… la copie Seren filtrée, les pages inchangées, fiche « pays » : true",
+          len(br["Seren"]["copie"].get("geofilters") or []) == NB and br["Base Lia"]["copie"] == {"url": LIA_P}
+          and br["Base Seren"]["copie"] == {"url": SEREN_P}
+          and (lv.lien_de(TW, "r").get("variante") or {}).get("pays") is True, br)
+    for forme, variantes in (("deux variantes", QUATRE[:2]),
+                             ("une variante inconnue", (QUATRE[0], ("vE", "Emy", 20, LIA_P), QUATRE[2]))):
+        g, _s = monde4(etat={"liens": {f"{TW}:r": fiche4(8, "rr", pays=False)}})
+        g.abs["rr"] = ab4(*variantes)
+        b = lv.reprendre_pays(TW)
+        check(f"refiltrer, {forme} : rien touché, et c'est dit",
+              not g.de("post") and not g.de("duplicate") and b["rates"] and "inattendu" in b["rates"][0], b)
+
+    # sans_tracking : {} → comme avant
+    g, suivis = monde4(config=CONFIG)
+    r = lv.creer_pour(TW, "n2", "nova")
+    cfg, br = branches(g, r.get("shortcode") or "?")
+    fv = lv.lien_de(TW, "n2").get("variante") or {}
+    n = len(g.appels)
+    b = lv.reprendre_bases(TW)
+    check("« sans_tracking » : {} : deux branches comme avant (66,7 / 33,3), aucune page, rien noté",
+          r.get("ok") and cfg.get("controlWeight") == 66.7 and list(br) == ["Seren"]
+          and len(g.de("duplicate")) == 2 and not g.de("post")
+          and not any(k.startswith("bases") for k in fv) and len(g.appels) == n
+          and not any(b[k] for k in ("poses", "deja", "rates")), (cfg, fv, b))
+    g, _s = monde4(config=dict(CONFIG, sans_tracking=False), etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+    check("… false aussi : la reprise ne lit rien", lv.reprendre_bases(TW)["deja"] == [] and not g.appels)
+
+    # un échec des pages ne fait pas échouer le lien
+    g, _s = monde4()
+    g.refus_post = {"ok": False, "error": "HTTP 500 : panne"}
+    r = lv.creer_pour(TW, "n3", "nova")
+    sc = r.get("shortcode") or "?"
+    cfg, br = branches(g, sc)
+    fv = lv.lien_de(TW, "n3").get("variante") or {}
+    check("pages refusées : le lien et son 50/50 sont posés quand même (deux branches)",
+          r.get("ok") and (r.get("variante") or {}).get("ok") and fv.get("posee") is True
+          and list(br) == ["Seren"] and cfg.get("controlWeight") == 66.7, (r, cfg))
+    check("… copies supprimées, l'échec noté (un essai), repris ensuite",
+          len(g.de("delete")) == 3 and fv.get("bases") is False and fv.get("bases_essais") == 1
+          and "panne" in fv.get("bases_erreur", ""), fv)
+    g.refus_post = None
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, sc)
+    check("… la reprise suivante les pose", b["poses"] == [sc] and set(br) == {"Seren", "Base Lia", "Base Seren"}
+          and (lv.lien_de(TW, "n3").get("variante") or {}).get("bases") is True, (b, br))
+    g, _s = monde4()
+    _vrai_pb = lv.poser_bases
+    lv.poser_bases = lambda gid_, uid_: 1 / 0
+    try:
+        r = lv.creer_pour(TW, "n4", "nova")
+    finally:
+        lv.poser_bases = _vrai_pb
+    check("… même une exception dans poser_bases : le lien et le 50/50 restent ok",
+          r.get("ok") and (r.get("variante") or {}).get("ok")
+          and (lv.lien_de(TW, "n4").get("variante") or {}).get("posee") is True, r)
+
+    # trois échecs : la main
+    g, _s = monde4(etat={"liens": {f"{TW}:e": fiche4(9, "ee")}})
+    g.liens["lnk_ee"] = {"id": "lnk_ee", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["ee"] = ab4(QUATRE[0], controle=66.7)
+    g.refus_post = {"ok": False, "error": "HTTP 500 : panne"}
+    for _ in range(lv.ESSAIS_BASES + 2):
+        lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "e").get("variante") or {}
+    check(f"échec répété : {lv.ESSAIS_BASES} essais, puis « bases_a_verifier » et plus rien",
+          len(g.de("post")) == lv.ESSAIS_BASES and fv.get("bases_essais") == lv.ESSAIS_BASES
+          and fv.get("bases_a_verifier") is True, (len(g.de("post")), fv))
+
+    # cookie refusé : arrêt au premier, pas compté comme essai
+    g, _s = monde4(etat={"liens": {f"{TW}:a": fiche4(10, "aa"), f"{TW}:b": fiche4(11, "bb")}})
+    g.cookie_lire = True
+    b = lv.reprendre_bases(TW)
+    check("cookie refusé : arrêt au premier lien, pas un essai, ce cookie n'est plus essayé",
+          b.get("cookie") and len(g.de("lire")) == 1
+          and not (lv.lien_de(TW, "a").get("variante") or {}).get("bases_essais")
+          and lv._etat().get("cookie_refuse") and lv.reprendre_bases(TW).get("cookie")
+          and len(g.de("lire")) == 1, (b, g.de("lire")))
+
+    # formes inattendues, fiche en retard, A/B éteint, config incohérente
+    for forme, variantes in (("une variante inconnue (« Emy »)", (QUATRE[0], ("vE", "Emy", 20, LIA_P))),
+                             ("deux Seren", (QUATRE[0], ("vS2", "Seren", 10, SEREN_P))),
+                             ("pas de Seren", (QUATRE[1],))):
+        g, _s = monde4(etat={"liens": {f"{TW}:i": fiche4(12, "ii")}})
+        g.liens["lnk_ii"] = {"id": "lnk_ii", "type": "directlink", "url": f"{LIA_P}/c60"}
+        g.abs["ii"] = ab4(*variantes)
+        rb = lv.poser_bases(TW, "i")
+        check(f"A/B avec {forme} : rien touché, et c'est dit",
+              not rb.get("ok") and "inattendu" in rb.get("erreur", "") and not g.de("post")
+              and not g.de("duplicate"), rb)
+    g, _s = monde4(etat={"liens": {f"{TW}:s": fiche4(13, "ss", tracking="https://onlyfans.com/emy.brw/c5")}})
+    g.liens["lnk_ss"] = {"id": "lnk_ss", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["ss"] = ab4(QUATRE[0], controle=66.7)
+    rb = lv.poser_bases(TW, "s")
+    check("fiche en retard sur le lien (Emy dans la fiche, Lia chez GetMySocial) : rien touché",
+          not rb.get("ok") and "mène à" in rb.get("erreur", "") and not g.de("duplicate") and not g.de("post"), rb)
+    g, _s = monde4(etat={"liens": {f"{TW}:o": fiche4(14, "oo")}})
+    rb = lv.poser_bases(TW, "o")
+    fv = lv.lien_de(TW, "o").get("variante") or {}
+    check("A/B éteint : rien posé, noté (« bases » : false, l'erreur) mais PAS compté comme essai",
+          not rb.get("ok") and rb.get("eteint") and not g.de("duplicate")
+          and fv.get("bases") is False and "éteint" in fv.get("bases_erreur", "")
+          and not fv.get("bases_essais") and fv.get("bases_a_verifier") is False, (rb, fv))
+    # compté, il passait « à vérifier » au bout de ESSAIS_BASES passages et
+    # n'était plus jamais repris une fois l'A/B rallumé
+    g.liens["lnk_oo"] = {"id": "lnk_oo", "type": "directlink", "url": f"{LIA_P}/c60"}
+    lv.RELIRE_ETEINT_S = 0          # chaque passage relit : rien ne doit compter d'essai
+    for _ in range(lv.ESSAIS_BASES + 2):
+        b = lv.reprendre_bases(TW)
+    fv = lv.lien_de(TW, "o").get("variante") or {}
+    check(f"… {lv.ESSAIS_BASES + 2} passages A/B éteint : jamais « à vérifier », listé à part (« eteints »)",
+          b["eteints"] == ["oo"] and not b["rates"] and not b["a_verifier"] and not fv.get("bases_essais")
+          and not fv.get("bases_a_verifier") and fv.get("bases_eteint") is True
+          and not g.de("duplicate"), (b, fv))
+    lv.RELIRE_ETEINT_S = _SAUVE_LV["RELIRE_ETEINT_S"]
+    # relu à chaque passage, un lien éteint coûtait pour toujours une lecture,
+    # une seconde de pause et une réécriture de liens_va.json toutes les 30 min
+    n_lu, etat_avant = len(g.de("lire")), lv.ETAT_FICHIER.read_text()
+    b = lv.reprendre_bases(TW)
+    check("… dans le délai (6 h) : un lien éteint n'est ni relu ni réécrit",
+          not b["eteints"] and b["restent"] == 0 and len(g.de("lire")) == n_lu
+          and lv.ETAT_FICHIER.read_text() == etat_avant, b)
+    d = lv._etat()
+    d["liens"][f"{TW}:o"]["variante"]["bases_quand"] -= lv.RELIRE_ETEINT_S + 1
+    lv._ecrire(d)
+    b = lv.reprendre_bases(TW)
+    check("… le délai passé : relu une fois", b["eteints"] == ["oo"] and len(g.de("lire")) == n_lu + 1, b)
+    d = lv._etat()
+    d["liens"][f"{TW}:o"]["variante"]["bases_quand"] -= lv.RELIRE_ETEINT_S + 1
+    lv._ecrire(d)
+    g.abs["oo"] = ab4(QUATRE[0], controle=66.7)
+    g.abs["oo"]["variants"][0]["weight"] = 33.3
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "oo")
+    check("… l'A/B rallumé : le lien est repris, ses deux pages posées",
+          b["poses"] == ["oo"] and set(br) == {"Seren", "Base Lia", "Base Seren"}
+          and (lv.lien_de(TW, "o").get("variante") or {}).get("bases") is True, (b, br))
+    # un lien éteint ne garde pas sa place en tête de file : les autres passent
+    lv.BASES_PAR_PASSE = 1
+    g, _s = monde4(etat={"liens": {f"{TW}:a": fiche4(19, "aa"), f"{TW}:b": fiche4(20, "bb")}})
+    g.liens["lnk_bb"] = {"id": "lnk_bb", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["bb"] = ab4(*QUATRE)
+    b1, b2 = lv.reprendre_bases(TW), lv.reprendre_bases(TW)
+    lv.BASES_PAR_PASSE = _SAUVE_LV["BASES_PAR_PASSE"]
+    check("… un lien éteint passe en queue : au passage suivant, le lien d'après a son tour",
+          b1["eteints"] == ["aa"] and b1["restent"] == 1 and b2["deja"] == ["bb"] and not b2["eteints"],
+          (b1, b2))
+    g, _s = monde4(config=dict(CONFIG_4, variante={"poids": 50}), etat={"liens": {f"{TW}:c": fiche4(15, "cc")}})
+    rb = lv.poser_bases(TW, "c")
+    check("poids de la variante changé (50) sans les parts : refusé sans rien lire ni noter",
+          not rb.get("ok") and rb.get("config") and "incohérentes" in rb.get("erreur", "") and not g.appels
+          and "bases_essais" not in (lv.lien_de(TW, "c").get("variante") or {}), rb)
+    g, _s = monde4(config=dict(CONFIG_4, sans_tracking={"controle": 50}), etat={"liens": {f"{TW}:c": fiche4(15, "cc")}})
+    b = lv.reprendre_bases(TW)
+    check("clé « sans_tracking » qui ne fait pas 100 : refusée en le disant, rien lu",
+          "100" in str(b.get("config")) and not g.appels, b)
+    monde4(config=dict(CONFIG_4, sans_tracking={"controle": 40, "base_modele": 26.7}))
+    check("… des parts qui font 100 : prises, le reste par défaut",
+          lv.parts_sans_tracking() == {"controle": 40, "variante": 23.3, "base_modele": 26.7, "base_variante": 10})
+
+    # Agency : une landing, copies depuis le lien direct emyigserenbase
+    g, _s = monde4(etat={"liens": {f"{lv.AGENCY_IG_ID}:g": fiche4(16, "gg")}})
+    g.liens["lnk_gg"] = {"id": "lnk_gg", "type": "landing", "buttons": [
+        {"label": "insta", "url": "https://instagram.com/x"}, {"label": "OF", "url": f"{LIA_P}/c118"}]}
+    g.abs["gg"] = ab4(QUATRE[0], controle=66.7)
+    g.abs["gg"]["variants"][0]["weight"] = 33.3
+    rb = lv.poser_bases(lv.AGENCY_IG_ID, "g")
+    dup = g.de("duplicate")
+    cfg, br = branches(g, "gg")
+    check("Agency (landing) : la model lue sur le bouton OnlyFans, copies depuis emyigserenbase dans EMY IG",
+          rb.get("ok") and len(dup) == 2 and all(d[1] == lv.ESPACE_AGENCY_IG["source_variante"]
+                                                 and d[5] == lv.ESPACE_AGENCY_IG["equipe"] for d in dup)
+          and set(br) == {"Seren", "Base Lia", "Base Seren"} and cfg.get("controlWeight") == 46.7, (rb, dup))
+
+    # Seren en pause puis de retour : couper efface les trois variantes, le
+    # retour refait Seren (même tracking) puis les pages
+    g, suivis = monde4(etat={"liens": {f"{TW}:k": fiche4(17, "kk", bases=True, bases_pour=LIA_P)}})
+    g.liens["lnk_kk"] = {"id": "lnk_kk", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["kk"] = ab4(*QUATRE)
+    g.dans_liste = ["lnk_kk"]
+    lv.SEREN_EN_PAUSE = True
+    try:
+        bc = lv.couper_seren(TW)
+        notes = json.loads(lv.COUPES_FICHIER.read_text())["liens"]["kk"]
+        check("couper : les quatre branches éteintes, la config d'avant notée avec ses TROIS variantes",
+              bc["coupes"] == ["kk"] and not g.abs["kk"]["enabled"] and not g.abs["kk"]["variants"]
+              and [v["name"] for v in notes["avant"]["variants"]] == ["Seren", "Base Lia", "Base Seren"]
+              and notes["tracking_seren"] == f"{SEREN_P}/c195"
+              and (lv.lien_de(TW, "k").get("variante") or {}).get("coupee"), (bc, notes))
+        check("… la reprise des pages ne touche pas un lien coupé", lv.reprendre_bases(TW)["poses"] == []
+              and not g.de("post"))
+    finally:
+        lv.SEREN_EN_PAUSE = False
+    rm = lv.remettre_seren(TW)
+    b = lv.reprendre_variantes(TW)
+    cfg, br = branches(g, "kk")
+    fv = lv.lien_de(TW, "k").get("variante") or {}
+    check("retour de Seren : 50/50 refait vers le MÊME tracking Seren, puis les deux pages aussitôt",
+          rm.get("a_reposer") == 1 and b["poses"] == ["va17"] and not suivis
+          and set(br) == {"Seren", "Base Lia", "Base Seren"} and cfg.get("controlWeight") == 46.7
+          and br["Seren"]["copie"]["url"] == f"{SEREN_P}/c195"
+          and fv.get("bases") is True and fv.get("posee") is True and not fv.get("coupee"), (b, br, fv))
+
+    # retour de Seren quand les pages sont coupées (« sans_tracking » : {}) ou
+    # la clé mal écrite : l'A/B reposé n'a que Seren, la fiche oublie quand
+    # même ses anciennes pages. Avant, « bases » : true d'avant la coupure
+    # restait (_remettre_seren ne retire que « coupee ») et la reprise sautait
+    # ce lien pour toujours une fois la règle revenue
+    for quoi, regle in (("pages coupées (« sans_tracking » : {})", {}),
+                        ("clé « sans_tracking » mal écrite", {"controle": 50})):
+        g, _s = monde4(config=dict(CONFIG_4, sans_tracking=regle),
+                       etat={"liens": {f"{TW}:k": fiche4(17, "kk", bases=True, bases_pour=LIA_P,
+                                                          bases_quand=1, coupee=1)}})
+        g.liens["lnk_kk"] = {"id": "lnk_kk", "type": "directlink", "url": f"{LIA_P}/c60"}
+        rm = lv.remettre_seren(TW)
+        b = lv.reprendre_variantes(TW)
+        cfg, br = branches(g, "kk")
+        fv = lv.lien_de(TW, "k").get("variante") or {}
+        check(f"retour de Seren, {quoi} : A/B à deux branches, la fiche oublie ses anciennes pages",
+              rm.get("a_reposer") == 1 and b["poses"] == ["va17"] and list(br) == ["Seren"]
+              and fv.get("posee") is True and not any(k.startswith("bases") for k in fv), (b, fv))
+        lv.CONFIG_FICHIER.write_text(json.dumps(CONFIG_4))
+        b = lv.reprendre_bases(TW)
+        cfg, br = branches(g, "kk")
+        check(f"… la règle revenue, la reprise pose ses pages ({quoi})",
+              b["poses"] == ["kk"] and set(br) == {"Seren", "Base Lia", "Base Seren"}
+              and cfg.get("controlWeight") == 46.7
+              and (lv.lien_de(TW, "k").get("variante") or {}).get("bases") is True, (b, br))
+
+    # passer_sur pendant une pose : la fiche passe sur Lia pendant que les
+    # pages d'Emy s'enregistrent. Avant, _noter_bases notait « bases » : true
+    # avec l'ancienne page, et « Base Emy » restait à vie
+    EMY_P = "https://onlyfans.com/emy.brw"
+    g, _s = monde4(etat={"liens": {f"{TW}:w": fiche4(21, "ww", tracking=f"{EMY_P}/c5")}})
+    g.liens["lnk_ww"] = {"id": "lnk_ww", "type": "directlink", "url": f"{EMY_P}/c5"}
+    g.abs["ww"] = ab4(QUATRE[0], controle=66.7)
+    g.abs["ww"]["variants"][0]["weight"] = 33.3
+    _vrai_post = g._ab_prive
+
+    def post_pendant_bascule(methode, lid, equipe=None, corps=None):
+        if methode == "POST" and not g.de("post"):
+            # ce que passer_sur écrit dans la fiche : tracking, bases false, bases_pour
+            d = lv._etat()
+            f = d["liens"][f"{TW}:w"]
+            f["tracking"] = f"{LIA_P}/c64"
+            f["variante"] = dict(f["variante"], bases=False, bases_essais=0, bases_a_verifier=False,
+                                 bases_pour=EMY_P)
+            lv._ecrire(d)
+            g.liens["lnk_ww"]["url"] = f"{LIA_P}/c64"
+        return _vrai_post(methode, lid, equipe, corps)
+    g._ab_prive = post_pendant_bascule
+    rb = lv.poser_bases(TW, "w")
+    fv = lv.lien_de(TW, "w").get("variante") or {}
+    cfg, br = branches(g, "ww")
+    check("passer_sur pendant la pose : pages d'Emy enregistrées, la fiche ne dit PAS « bases » : true",
+          rb.get("ok") and rb.get("base") == EMY_P and "Base Emy" in br and fv.get("bases") is False
+          and fv.get("bases_pour") == EMY_P and not fv.get("bases_essais")
+          and "entre-temps" in fv.get("bases_erreur", ""), (rb, fv))
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "ww")
+    fv = lv.lien_de(TW, "w").get("variante") or {}
+    check("… la reprise suivante refait les deux pour Lia (« Base Seren » : autres pays chez Lia)",
+          b["poses"] == ["ww"] and set(br) == {"Seren", "Base Lia", "Base Seren"}
+          and br["Seren"]["variantId"] == "vS"
+          and {x["destination_url"] for x in br["Base Seren"]["copie"].get("geofilters") or []} == {LIA_P}
+          and fv.get("bases") is True and fv.get("bases_pour") == LIA_P, (b, br, fv))
+
+    # plafond des VRAIES poses (~16 appels GetMySocial chacune), à part des
+    # lectures : synchroniser tourne dans la boucle du podium
+    check("plafonds par passage : 15 liens lus, dont 3 vraiment posés",
+          lv.BASES_PAR_PASSE == 15 and lv.BASES_POSEES_PAR_PASSE == 3)
+
+    def a_poser(n, deja=0):
+        etat_ = {f"{TW}:p{i}": fiche4(70 + i, f"pz{i}") for i in range(n)}
+        etat_.update({f"{TW}:d{i}": fiche4(80 + i, f"dz{i}") for i in range(deja)})
+        g_, _ = monde4(etat={"liens": etat_})
+        for i in range(n):
+            g_.liens[f"lnk_pz{i}"] = {"id": f"lnk_pz{i}", "type": "directlink", "url": f"{LIA_P}/c60"}
+            g_.abs[f"pz{i}"] = ab4(QUATRE[0], controle=66.7)
+            g_.abs[f"pz{i}"]["variants"][0]["weight"] = 33.3
+        for i in range(deja):
+            g_.abs[f"dz{i}"] = ab4(*QUATRE)
+        return g_
+    g = a_poser(5, deja=2)
+    sortie = io.StringIO()
+    _stdout, sys.stdout = sys.stdout, sortie
+    try:
+        b1 = lv.reprendre_bases(TW)
+    finally:
+        sys.stdout = _stdout
+    f3 = lv.lien_de(TW, "p3").get("variante") or {}
+    check("5 liens à poser + 2 déjà faits : 3 posés, 2 reportés (lus, pas posés), les 2 reconnus",
+          b1["deja"] == ["dz0", "dz1"] and b1["poses"] == ["pz0", "pz1", "pz2"]
+          and b1["reportes"] == ["pz3", "pz4"] and b1["restent"] == 2
+          and len(g.de("post")) == 3 and len(g.de("duplicate")) == 6 and len(g.de("lire")) == 10, b1)
+    check("… un reporté n'est pas noté (ni essai, ni erreur)",
+          not any(k.startswith("bases") for k in f3), f3)
+    check("… et c'est dit dans le journal", "restent 2 (dont 2 poses reportées" in sortie.getvalue()
+          and "pz3" in sortie.getvalue(), sortie.getvalue())
+    b2 = lv.reprendre_bases(TW)
+    check("… le passage suivant pose les deux reportés",
+          b2["poses"] == ["pz3", "pz4"] and not b2["reportes"] and b2["restent"] == 0
+          and len(g.de("post")) == 5, b2)
+    g = a_poser(5)
+    g.refus_post = {"ok": False, "error": "HTTP 500 : panne"}
+    b = lv.reprendre_bases(TW)
+    check("… une pose ratée compte aussi dans le plafond (elle a coûté pareil)",
+          len(g.de("post")) == 3 and len(b["rates"]) == 3 and b["reportes"] == ["pz3", "pz4"], b)
+
+    # les gardes d'entrée : rien lu sans cookie utilisable, ni pendant une
+    # autre reprise (le même écran A/B)
+    def un_a_poser(**kw):
+        g_, _ = monde4(etat=dict({"liens": {f"{TW}:g": fiche4(90, "gz")}}, **kw))
+        g_.liens["lnk_gz"] = {"id": "lnk_gz", "type": "directlink", "url": f"{LIA_P}/c60"}
+        g_.abs["gz"] = ab4(QUATRE[0], controle=66.7)
+        g_.abs["gz"]["variants"][0]["weight"] = 33.3
+        return g_
+    g = un_a_poser()
+    g.cookie = ""
+    b = lv.reprendre_bases(TW)
+    check("garde : pas de cookie GetMySocial → rien lu, « cookie » dit, le lien reste à faire",
+          b.get("cookie") and not g.appels and b["restent"] == 1 and not b["poses"]
+          and not any(k.startswith("bases") for k in lv.lien_de(TW, "g")["variante"]), b)
+    g = un_a_poser()
+    g.echeance = time.time() - 60
+    b = lv.reprendre_bases(TW)
+    check("garde : cookie échu → rien lu", b.get("cookie") and not g.appels, b)
+    g = un_a_poser(cookie_refuse=lv._empreinte(FauxGMS.cookie))
+    b = lv.reprendre_bases(TW)
+    check("garde : cookie déjà refusé (même empreinte) → rien lu", b.get("cookie") and not g.appels, b)
+    g.cookie = "authToken=x.y.z"
+    b = lv.reprendre_bases(TW)
+    check("… un cookie neuf collé : la reprise repart", b["poses"] == ["gz"] and not b.get("cookie"), b)
+    g = un_a_poser()
+    lv._REPRISE.acquire()
+    try:
+        b = lv.reprendre_bases(TW)
+        tenu = lv._REPRISE.locked()
+    finally:
+        # relâché par reprendre_bases (le défaut) : ne pas planter la suite ici
+        if lv._REPRISE.locked():
+            lv._REPRISE.release()
+    check("garde : une autre reprise tient le verrou → « occupe », rien lu, son verrou pas relâché",
+          b.get("occupe") and not g.appels and tenu and b["restent"] == 1, b)
+    b = lv.reprendre_bases(TW)
+    check("… verrou rendu : la reprise suivante pose, puis relâche le verrou",
+          b["poses"] == ["gz"] and not b.get("occupe") and not lv._REPRISE.locked(), b)
+
+    # synchroniser : les pays, PUIS les pages de base
+    g, _s = monde4()
+    ordre = []
+    vrai_rp, vrai_rb, vrai_groupes = lv.reprendre_pays, lv.reprendre_bases, lv.groupes
+    lv.reprendre_pays = lambda gid: ordre.append(("pays", gid)) or {}
+    lv.reprendre_bases = lambda gid: ordre.append(("bases", gid)) or {}
+    lv.groupes = lambda eq, essais=3: None
+    try:
+        lv.synchroniser(TW)
+    finally:
+        lv.reprendre_pays, lv.reprendre_bases, lv.groupes = vrai_rp, vrai_rb, vrai_groupes
+    check("la synchro (30 min) reprend les pays puis les pages de base", ordre == [("pays", TW), ("bases", TW)],
+          ordre)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)
