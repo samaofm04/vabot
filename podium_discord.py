@@ -3048,14 +3048,19 @@ BOUTON_PSEUDOS_MSG = "podium:pseudos:msg"
 YEUX_SOUS_PODIUM = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
 
 
+def _yeux_qui_lisent() -> Dict[str, Any]:
+    """Une rangée « 👀 Pseudos » qui lit le message cliqué lui-même."""
+    return {"components": [{"type": 1, "components": [
+        {"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"},
+         "custom_id": BOUTON_PSEUDOS_MSG}]}]}
+
+
 def _rangee_yeux_message(gid: Optional[str]) -> Dict[str, Any]:
     """La rangée « 👀 Pseudos » d'un podium ou d'un bonus, sur un serveur qui
     la veut ; {} ailleurs (le message reste celui d'avant)."""
     if str(gid or "") not in YEUX_SOUS_PODIUM or not _profil(gid).get("bouton_pseudos"):
         return {}
-    return {"components": [{"type": 1, "components": [
-        {"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"},
-         "custom_id": BOUTON_PSEUDOS_MSG}]}]}
+    return _yeux_qui_lisent()
 
 
 def _bouton_yeux() -> Dict[str, Any]:
@@ -3072,17 +3077,24 @@ def _boutons(gid: Optional[str], vivant: bool, pseudos: bool = False) -> Dict[st
     jour une période finie. Serveur sans aucune des deux clés (« bouton_maj »,
     « bouton_pseudos ») : rien du tout, le message est celui d'avant, à
     l'octet près. Twitter, Threads : « 👀 Pseudos » seul, sous la quinzaine
-    vivante ; `pseudos` et non vivant (ses pages figées) : retiré.
+    vivante. `pseudos` et non vivant (les pages d'une quinzaine finie) :
+    « 👀 Pseudos » qui lit la page elle-même, sur tout serveur qui a les yeux.
     Avec un thème, seul le libellé change (« Relancer la course ») : l'emoji
     et le custom_id restent, un bouton déjà posé continue de marcher.
     """
     pf = _profil(gid)
+    if pseudos and not vivant and pf.get("bouton_pseudos"):
+        # Propriétaire, 01/11/2026, devant la quinzaine finie de Va IG : « dis-moi
+        # pourquoi là y a pas les yeux pour voir leur pseudo ». Le 👀 de la
+        # quinzaine vivante (BOUTON_PSEUDOS) montre la quinzaine EN COURS : ses
+        # pages figées le perdaient, au moment même de payer. Celui-ci lit la
+        # page cliquée (_voir_pseudos_message), sans relevé ni état.
+        return _yeux_qui_lisent()
     if "bouton_maj" not in pf:
         # Twitter, Threads : pas de 🔄, seulement « 👀 Pseudos » sous la
-        # quinzaine vivante. Ses pages figées (`pseudos`, non vivant) le
-        # perdent : il montre la quinzaine EN COURS. Le podium de la semaine,
-        # vivant ou figé : « 👀 Pseudos » qui lit le message lui-même
-        # (_rangee_yeux_message, 24/10/2026)
+        # quinzaine vivante. Le podium de la semaine, vivant ou figé :
+        # « 👀 Pseudos » qui lit le message lui-même (_rangee_yeux_message,
+        # 24/10/2026)
         if not pseudos:
             return _rangee_yeux_message(gid)
         if "bouton_pseudos" not in pf:
@@ -3826,7 +3838,7 @@ def _quinzaine_sans_bouton(gid: str, d: Dict[str, Any], salon: str, saison: str)
     renvoie pas, les derniers chiffres restent affichés jusqu'au gel.
     Une fois par quinzaine (« sans_bouton ») ; Discord en panne passagère :
     nouvel essai au passage suivant. Un serveur sans aucun bouton : rien,
-    aucun appel. Twitter et Threads retirent ainsi leur « 👀 Pseudos ».
+    aucun appel. Un serveur à « 👀 Pseudos » le garde, celui qui lit la page.
     """
     retrait = _boutons(gid, False, pseudos=True)
     rec = (((d.get("subs_a_figer") or {}).get(gid) or {}).get(saison))
@@ -3982,6 +3994,14 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
                                   tetes=tetes)
         rec["complet_calc"] = not raison
         rec["comptes"] = len(cl["lignes"])
+        try:
+            # les noms de « 👀 Pseudos » de CETTE période, gardés avec elle :
+            # relus plus tard, un numéro changé de sens (VA 41, le 25/10/2026)
+            # ou un VA renommé montreraient d'autres noms
+            rec["noms"] = _noms_des_pages(gid, rec["pages"], fin)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[podium] quinzaine {debut} sur {gid} : noms non gardés "
+                  f"({type(e).__name__}: {e}), relus au clic", flush=True)
         rec["faites"] = 0
         _ecrire(d)
 
@@ -4055,6 +4075,8 @@ def _figer_quinzaine(gid: str, d: Dict[str, Any], salon: str, saison: str,
             "le": _maintenant().isoformat(timespec="minutes")}
     if manquantes:
         fige["manquantes"] = manquantes
+    if rec.get("noms"):
+        fige["noms"] = rec["noms"]
     d.setdefault("subs_figes", {}).setdefault(gid, {})[saison] = fige
     attente = (d.get("subs_a_figer") or {}).get(gid) or {}
     attente.pop(saison, None)
@@ -5506,19 +5528,24 @@ def _ligne_affichee(libelle: str) -> "re.Pattern[str]":
                       r"(?:US : )?\*{0,2}(\d+)\*{0,2}(?: (?:subs|clics)\b| · GBL)")
 
 
+def _qui(va: str, noms: Dict[Any, str]) -> str:
+    """La personne d'un libellé (« VA 41 », « Threads 23 »), « ? » sinon."""
+    if any(isinstance(k, str) for k in noms):
+        # au libellé entier : « Threads 23 » d'un VA de Threads et
+        # « Threads VA 023 » d'un VA de Va IG ne sont jamais confondus
+        # (quinzaine de Threads, _noms_libelles)
+        return noms.get(va) or "?"
+    m = re.search(r"\d+", va)
+    return (noms.get(int(m.group())) if m else None) or "?"
+
+
 def _bloc_pseudos(titre: str, lignes: List[Tuple[str, int]], sans: List[str], unite: str,
                   noms: Dict[Any, str]) -> str:
     """Un classement, la personne devant chaque « VA n ». Les VA à zéro sur
     une seule ligne : soixante VA, une ligne chacun, ne tenaient pas dans un
     message (tickets_discord._suite coupe à 1900)."""
     def qui(va: str) -> str:
-        if any(isinstance(k, str) for k in noms):
-            # au libellé entier : « Threads 23 » d'un VA de Threads et
-            # « Threads VA 023 » d'un VA de Va IG ne sont jamais confondus
-            # (quinzaine de Threads, _noms_libelles)
-            return noms.get(va) or "?"
-        m = re.search(r"\d+", va)
-        return (noms.get(int(m.group())) if m else None) or "?"
+        return _qui(va, noms)
     out = [titre]
     med = ["🥇", "🥈", "🥉"]
     zeros = []
@@ -5566,6 +5593,15 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:
         # Agency : au libellé entier, ses VA et les trois lignes de Youl4b
         import subs_va
         return subs_va.noms_agency()
+    if _source_subs(gid) == "abonnes":
+        # Va IG : « Instagram VA n » → le pseudo et la model (numéro de
+        # data/numeros_va_instagram.json). Un VA parti depuis reste nommé :
+        # une quinzaine figée le montre encore. Sans ça, le registre de
+        # Twitter (_noms_va) nommait au hasard d'un numéro commun.
+        import subs_va
+        table, marque = numeros_instagram(), str(_profil(gid).get("marque") or "Instagram")
+        return {f"{marque} VA {table[k]}": f'{e["pseudo"] or "?"} ({e["nom"]})'
+                for k, e in sorted(subs_va.entites_va_ig().items()) if k in table}
     noms = _noms_va(gid)
     pf = _profil(gid)
     if not pf.get("quinzaine_va_ig"):
@@ -5650,7 +5686,7 @@ def _texte_pseudos_avant(gid: str, jour: Optional[dt.date] = None) -> str:
     txt = _bloc_pseudos(
         f"👀 **Quinzaine d'avant, du {p_deb.strftime('%d/%m')} au {p_fin.strftime('%d/%m')}** "
         f"— telle qu'affichée" + (" (en clics)" if unite == "clics" else ""),
-        lignes, sans, unite, _noms_libelles(gid))
+        lignes, sans, unite, _noms_au(gid, p_fin, saison=p_deb.isoformat())[0])
     return txt if not souci else (txt + f"\n⚠️ _{souci}_")[:1900]
 
 
@@ -5728,9 +5764,10 @@ def _voir_pseudos(p: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
-    """« 👀 Pseudos » sous un bonus du jour ou un podium de la semaine : staff
-    seulement, en privé. Les VA du message cliqué (ses lignes, ses « sans
-    relevé »), la personne devant chaque numéro — aucun appel, tout de suite."""
+    """« 👀 Pseudos » sous un bonus du jour, un podium de la semaine ou une
+    page de quinzaine finie : staff seulement, en privé. Les VA du message
+    cliqué (ses lignes, ses « sans relevé »), la personne devant chaque
+    numéro — aucun appel, tout de suite."""
     gid = str(p.get("guild_id") or "")
     if not _staff(p):
         return _ephemere("🔒 Réservé au staff.")
@@ -5761,8 +5798,25 @@ def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
     if not lignes and not sans:
         return _ephemere("ℹ️ Personne au classement sur ce message.")
     titre = f"👀 **Pseudos — {str(emb.get('title') or 'classement').strip()}** (visible par toi seul)"
-    return _ephemere(_bloc_pseudos(titre, lignes, sans, "subs" if " subs" in txt else _unite(gid),
-                                   _noms_libelles(gid)))
+    # une page de quinzaine dit sa période : les noms de CETTE période (gardés
+    # au gel, sinon relus sans le sens neuf de VA 41), pas ceux d'aujourd'hui
+    per = re.search(r"Période \*\*\d\d/\d\d → (\d\d)/(\d\d)/(\d{4})\*\*", txt)
+    fin = dt.date(int(per.group(3)), int(per.group(2)), int(per.group(1))) if per else None
+    noms, gardes = (_noms_au(gid, fin, mid=mid) if fin and fin < _aujourdhui()
+                    else (_noms_libelles(gid), True))
+    texte = _bloc_pseudos(titre, lignes, sans, "subs" if " subs" in txt else _unite(gid), noms)
+    if not gardes:
+        note = ("\nℹ️ _Noms relus aujourd'hui : cette période a été figée avant qu'ils "
+                "soient gardés. Aucun numéro n'a changé de personne depuis."
+                + (" « ? » : aucun nom retrouvé pour ce numéro, rien n'est deviné._"
+                   if any(_qui(va, noms) == "?" for va, _n in lignes) or
+                   any(_qui(va, noms) == "?" for va in sans) else "_"))
+        # la note ne doit pas être coupée par les 2000 caractères de Discord
+        # (la quinzaine de Va IG, 39 VA avec leur model, les atteint)
+        if len(texte) + len(note) > 2000:
+            texte = texte[:2000 - len(note) - 2] + "\n…"
+        texte += note
+    return _ephemere(texte)
 
 
 def _ephemere(texte: str) -> Dict[str, Any]:
@@ -6200,6 +6254,55 @@ def _noms_libelles(gid: str) -> Dict[Any, str]:   # noqa: F811
     except Exception as e:                                   # noqa: BLE001
         print(f"[podium] pseudos {g} : comptes internes : {type(e).__name__}: {e}", flush=True)
         return noms
+
+
+#: Depuis le 25/10/2026 (ac387d8), « VA 41 » est la ligne des comptes
+#: internes ; avant, c'était Eddy, le VA 41 d'origine. « Instagram VA 141 » et
+#: « Threads 142 » n'existaient pas.
+INTERNES_DEPUIS = dt.date(2026, 10, 25)
+
+
+def _noms_au(gid: str, fin: Optional[dt.date], saison: str = "",
+             mid: str = "") -> Tuple[Dict[Any, str], bool]:
+    """(noms de « 👀 Pseudos », gardés) pour une période finie le `fin`.
+
+    Propriétaire, 01/11/2026 : « je dois tout pouvoir check », le pseudo tel
+    qu'il était sur la période. Gardés au gel (_noms_des_pages) : ceux-là,
+    tels quels. Sinon relus aujourd'hui (gardés False) : un numéro n'a jamais
+    changé de personne (relu le 01/11/2026 : aucun numéro de liens_va ni de
+    liens_va_fr partagé par deux comptes, aucun numéro de podium_numeros
+    changé depuis le 06/10), sauf VA 41 (INTERNES_DEPUIS). Twitter : un numéro
+    sans tracking au registre (VA parti avant lui) prend ses noms de
+    podium_numeros.json, qui le lui a donné pour toujours."""
+    d = _etat()
+    for cle in ("subs_figes", "subs_a_figer"):
+        for s, rec in sorted(((d.get(cle) or {}).get(str(gid)) or {}).items()):
+            if not isinstance(rec, dict) or not rec.get("noms"):
+                continue
+            if s == saison or (mid and mid in [str(x) for x in rec.get("messages") or []]):
+                return dict(rec["noms"]), True
+    if fin is not None and fin < INTERNES_DEPUIS:
+        noms = dict(_noms_libelles_sans_internes(gid))
+    else:
+        noms = dict(_noms_libelles(gid))
+    if str(gid) == TWITTER_ID and not any(isinstance(k, str) for k in noms):
+        anciens: Dict[int, List[str]] = {}
+        for c, n in sorted(numeros([], attribuer=False).items()):
+            if int(n) not in noms:
+                anciens.setdefault(int(n), []).append(c)
+        noms.update({n: " / ".join(cs) for n, cs in anciens.items()})
+    return noms, False
+
+
+def _noms_des_pages(gid: str, pages: List[Dict[str, Any]], fin: dt.date) -> Dict[str, str]:
+    """{libellé : personne} des VA de ces pages, au gel (voir _noms_au)."""
+    txt = "\n".join(str((p or {}).get("description") or "") for p in pages)
+    lib = str(_profil(gid).get("libelle") or "VA")
+    vus = {va for va, _n in _ligne_affichee(lib).findall(txt)}
+    vus |= set(re.findall(rf"(?:{re.escape(lib)} VA|{re.escape(lib)}|Instagram VA) \d+", txt))
+    noms, _gardes = _noms_au(gid, fin)
+    out = {va: _qui(va, noms) for va in sorted(vus)}
+    return {va: n for va, n in out.items() if n != "?"}
 
 
 # ─── le bonus du jour : les abonnés d'Emy lus chez Infloww ───────────────

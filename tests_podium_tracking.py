@@ -916,10 +916,10 @@ try:
           [c["custom_id"] for r in comp for c in r["components"]] == [pd.BOUTON_PSEUDOS], comp)
     # depuis le 24/10/2026 : « 👀 Pseudos » sous le podium (vivant ou figé) et le
     # bonus, qui lit le message cliqué (BOUTON_PSEUDOS_MSG)
-    check("… sous le podium, vivant ou figé, celui qui lit le message ; retiré d'une "
-          "quinzaine figée",
+    check("… sous le podium, vivant ou figé, celui qui lit le message ; sur une "
+          "quinzaine figée aussi (01/11/2026)",
           pd._boutons(TW, True) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]} and pd._boutons(TW, False) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]}
-          and pd._boutons(TW, False, pseudos=True) == {"components": []})
+          and pd._boutons(TW, False, pseudos=True) == {"components": [{"type": 1, "components": [{"type": 2, "style": 2, "label": "Pseudos", "emoji": {"name": "👀"}, "custom_id": pd.BOUTON_PSEUDOS_MSG}]}]})
     n = len(MP["appels"])
     txt13 = pd.texte_pseudos(TW)
     check("« 👀 Pseudos » : chaque « VA n » avec la personne du registre, les chiffres du salon",
