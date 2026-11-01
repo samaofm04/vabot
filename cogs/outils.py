@@ -567,7 +567,11 @@ class Outils(commands.Cog):
     async def _clics_quinzaine(self):
         """L'image de la quinzaine du 📊・click-et-sub (YouCham), redessinee a
         chaque heure pile, heure de Paris -- la regle des classements. Une
-        lecture ratee garde l'image d'avant (outils_communs.maj_clics)."""
+        lecture ratee garde l'image d'avant (outils_communs.maj_clics). Le
+        1er et le 16, le panneau devient l'image de la quinzaine finie, gardee
+        sans bouton, et un neuf est pose dessous (outils_communs._tourner ;
+        proprietaire, 01/11/2026 : « garde une trace de la période d'avant,
+        toujours »)."""
         try:
             import outils_communs as oc
         except Exception as e:                               # noqa: BLE001

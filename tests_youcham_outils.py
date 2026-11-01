@@ -12,6 +12,14 @@ d'écrit dans le vrai data/) :
      (privé, rangé par pseudo, débordement à 50) ; Youl4b : toujours 5 salons.
   3. 🧰 OUTILS : quatre salons en lecture seule, créés une fois, panneaux
      posés une fois (bouton du menu persistant).
+  3b. 📊・click-et-sub, au changement de quinzaine (01/11 : « garde une trace
+     de la période d'avant, toujours ») : le panneau devient l'image de la
+     quinzaine finie, sans bouton, jamais retirée, redessinée jusqu'au tour
+     de midi ; un panneau neuf dessous ; aussi au premier passage sans
+     quinzaine notée ; un échec (image, envoi, archivage) ne perd rien et se
+     réessaie ; jamais deux panneaux vivants, jamais deux archives. Le
+     panneau disparu avant le changement (retiré à la main, clé changée) :
+     l'entretien poste l'archive avant le neuf.
   4. Chaque outil livre dans le -content du CLIQUEUR, jamais dans le salon
      commun ; deux VA reçoivent chacun chez eux ; l'identité est portée par
      le clic ; le staff sans -content dont Discord refuse le salon est
@@ -476,13 +484,17 @@ IMAGES = []
 IMAGE = {"png": b"\x89PNG-1", "alt": "Lia · quinzaine du 16/10 au 31/10"}
 
 
-async def _fausse_image(guilde, bot):
+async def _fausse_image(guilde, bot, **periode):
     IMAGES.append(getattr(guilde, "id", None))
     return dict(IMAGE)
 
 
 oc.url_clics = lambda: URL_CLICS
 oc.image_clics = _fausse_image
+#: La quinzaine du panneau (01/11) : la vraie lirait infloww_liens. Fixe ici :
+#: le panneau ne change de quinzaine que dans la section 3b.
+QUINZ_OCT = {"du": "2026-10-16", "au": "2026-10-31", "prec_du": "2026-10-01", "prec_au": "2026-10-15"}
+oc._quinzaines_clics = lambda: dict(QUINZ_OCT)
 
 
 def youcham(n_va=2, avec_outils=True):
@@ -833,7 +845,7 @@ try:
           and sal["click-et-sub"].edites[n_ed:] == [pan.id] and len(du_bot(sal["click-et-sub"])) == 1
           and [a.filename for a in pan.attachments] == [_li.NOM], sal["click-et-sub"].edites[n_ed:])
 
-    async def _image_ratee(guilde, bot):
+    async def _image_ratee(guilde, bot, **periode):
         return {"erreur": "MyPuls n'a pas répondu"}
     oc.image_clics = _image_ratee
     n_ed = len(sal["click-et-sub"].edites)
@@ -926,6 +938,482 @@ finally:
     oc.url_clics = _sauve_e["url"]
     oc.image_clics = _sauve_e["image"]
     asyncio.sleep = _sleep
+
+
+# ═════════════ 3b. la quinzaine finie reste dans le 📊・click-et-sub (01/11) ══
+# Propriétaire, 01/11/2026, devant « 01/11 → 01/11 · quinzaine en cours », tout
+# à 0 : « ça doit faire un repost ... comment ils font pour voir combien de
+# subs ils ont fait pour la période d'avant sans cliquer ; garde une trace de
+# la période d'avant, toujours ».
+print("3b. Changement de quinzaine : la finie reste, un panneau neuf dessous")
+import datetime as _dtq  # noqa: E402
+from zoneinfo import ZoneInfo as _ZIq  # noqa: E402
+
+import liens_image as _liq  # noqa: E402
+
+QUINZ_NOV = {"du": "2026-11-01", "au": "2026-11-01", "prec_du": "2026-10-16", "prec_au": "2026-10-31"}
+NOM_OCT = _liq.nom_archive("2026-10-16", "2026-10-31")
+_PARIS = _ZIq("Europe/Paris")
+PERIODE = {"q": QUINZ_OCT}
+HEURE = {"t": _dtq.datetime(2026, 10, 31, 23, 0, tzinfo=_PARIS)}
+DESSINS = []        # (du, au, terminee) de chaque image demandée
+RATEES = set()      # « finie » / « cours » : ce genre d'image ne se fait pas
+
+
+def _a(j, h, mi=0, s=0):
+    """Une heure de Paris, le jour `j` (« 2026-11-01 »)."""
+    d = _dtq.date.fromisoformat(j)
+    return _dtq.datetime(d.year, d.month, d.day, h, mi, s, tzinfo=_PARIS)
+
+
+async def _image_periode(guilde, bot, du=None, au=None, terminee=False):
+    DESSINS.append((du, au, terminee))
+    await _sleep(0)         # rend la main : l'essai de concurrence en a besoin
+    if ("finie" if terminee else "cours") in RATEES:
+        return {"erreur": "MyPuls n'a pas répondu"}
+    return {"png": b"\x89PNG-q",
+            "alt": "Lia · quinzaine %sdu %s au %s" % ("terminée " if terminee else "", du, au)}
+
+
+def _salon_clics(q=None, t=None):
+    """Un YouCham neuf, son 📊・click-et-sub, un faux bot ; l'état vidé."""
+    if oc.ETAT.exists():
+        oc.ETAT.unlink()
+    oc._DITS.clear()
+    RATEES.clear()
+    PERIODE["q"], HEURE["t"] = q or QUINZ_OCT, t or _a("2026-10-31", 23)
+    gq = youcham(n_va=0)
+    return gq, gq.outils["click-et-sub"], _FauxBot([gq])
+
+
+def _etat_q():
+    return oc._etat().get(str(YOUCHAM)) or {}
+
+
+def _du_bot(c):
+    return [m for m in c.messages if m.author.id == RYUK]
+
+
+def _vivants(c):
+    return [m for m in _du_bot(c) if oc._vivant(m)]
+
+
+def _archives(c):
+    return [m for m in _du_bot(c) if not oc._vivant(m)]
+
+
+def _est_archive(m, nom=NOM_OCT):
+    """Une archive : l'image de la quinzaine finie, seule (galerie), sans
+    bouton ni lien, sous son nom à elle ; toujours dans le salon."""
+    return (not m.supprime and m in m.channel.messages and not oc._urls(m)
+            and [c.type for c in m.components] == [12]
+            and [a.filename for a in m.attachments] == [nom] and oc._porte_fichier(m, nom)
+            and not oc._porte_image(m))
+
+
+def _alt(m):
+    return [it.description for x in m.vue.walk_children() if isinstance(x, discord.ui.MediaGallery)
+            for it in x.items]
+
+
+@contextlib.contextmanager
+def _journal():
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        yield out
+
+
+def _refus(*a, **k):
+    raise discord.HTTPException(types.SimpleNamespace(status=500, reason="Internal Server Error"),
+                                "Discord en panne")
+
+
+async def _refuse(*a, **k):
+    _refus()
+
+
+_sauve_q = {k: getattr(oc, k) for k in ("_quinzaines_clics", "_maintenant", "image_clics", "url_clics", "ETAT")}
+try:
+    oc.ETAT = TMP / "outils_communs_quinzaine.json"
+    oc._quinzaines_clics = lambda: dict(PERIODE["q"])
+    oc._maintenant = lambda: HEURE["t"]
+    oc.image_clics = _image_periode
+    oc.url_clics = lambda: URL_CLICS
+
+    check("archive : PanneauArchive = l'image seule, ni bouton ni texte",
+          [type(x).__name__ for x in oc.PanneauArchive(NOM_OCT, "x").walk_children()] == ["MediaGallery"]
+          and not oc._urls(types.SimpleNamespace(components=[_ns_composant(c) for c in
+                                                              oc.PanneauArchive(NOM_OCT, "x").to_components()])))
+
+    # ── la pose, puis l'heure pile dans la même quinzaine
+    g, sal, bot = _salon_clics()
+    n_d = len(DESSINS)
+    r = courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0] if _vivants(sal) else None
+    check("pose : UN panneau sur la quinzaine en cours, sa quinzaine notée",
+          r == 1 and vieux is not None and _du_bot(sal) == [vieux]
+          and DESSINS[n_d:] == [("2026-10-16", "2026-10-31", False)]
+          and _etat_q().get("click-et-sub") == vieux.id and _etat_q().get(oc.DU_CLICS) == "2026-10-16",
+          (DESSINS[n_d:], _etat_q()))
+    n_ed = len(sal.edites)
+    check("même quinzaine : l'image redessinée sur place, rien de posté, aucune archive",
+          courir(oc.maj_clics(sal, bot)) is True and sal.edites[n_ed:] == [vieux.id]
+          and _du_bot(sal) == [vieux] and not _etat_q().get(oc.ARCHIVE_CLICS))
+
+    # ── le 01/11 à minuit : la quinzaine change
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+    n_d = len(DESSINS)
+    with _journal() as j:
+        r = courir(oc.maj_clics(sal, bot))
+    vv = _vivants(sal)
+    neuf = vv[0] if len(vv) == 1 else None
+    check("01/11 : l'ancien panneau DEVIENT l'archive du 16/10 au 31/10 (image seule, sans bouton)",
+          r is True and _est_archive(vieux) and _archives(sal) == [vieux]
+          and any("terminée du 2026-10-16 au 2026-10-31" in (a_ or "") for a_ in _alt(vieux)),
+          ([c.type for c in vieux.components], [a.filename for a in vieux.attachments], _alt(vieux)))
+    check("01/11 : un panneau neuf posé DESSOUS (quinzaine en cours + 📊 Statistiques)",
+          neuf is not None and neuf is not vieux and _du_bot(sal) == [vieux, neuf]
+          and oc._urls(neuf) == {URL_CLICS} and oc._porte_image(neuf)
+          and [a.filename for a in neuf.attachments] == [_liq.NOM], [m.id for m in _du_bot(sal)])
+    check("01/11 : archive dessinée du 16/10 au 31/10 « terminée », le neuf sur le 01/11",
+          sorted(DESSINS[n_d:]) == [("2026-10-16", "2026-10-31", True), ("2026-11-01", "2026-11-01", False)],
+          DESSINS[n_d:])
+    check("01/11 : état noté (panneau neuf, sa quinzaine, l'archive : id, du, au)",
+          neuf is not None and _etat_q().get("click-et-sub") == neuf.id
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01"
+          and _etat_q().get(oc.ARCHIVE_CLICS) == {"id": vieux.id, "du": "2026-10-16", "au": "2026-10-31"},
+          _etat_q())
+    check("01/11 : le changement est dit dans le journal", "gardee dans le salon" in j.getvalue(), j.getvalue())
+
+    # ── l'archive suit MyPuls jusqu'au tour de midi, puis ne bouge plus
+    HEURE["t"] = _a("2026-11-01", 11)
+    n_ed, n_d = len(sal.edites), len(DESSINS)
+    check("01/11 11h : l'archive redessinée (MyPuls rattrape la veille), le panneau aussi, rien de posté",
+          courir(oc.maj_clics(sal, bot)) is True and sorted(sal.edites[n_ed:]) == sorted([vieux.id, neuf.id])
+          and ("2026-10-16", "2026-10-31", True) in DESSINS[n_d:] and _du_bot(sal) == [vieux, neuf]
+          and _est_archive(vieux), (sal.edites[n_ed:], DESSINS[n_d:]))
+    HEURE["t"] = _a("2026-11-01", 12, 0, 4)
+    n_ed = len(sal.edites)
+    check("01/11 12h00 (le tour de midi) : l'archive encore redessinée",
+          courir(oc.maj_clics(sal, bot)) is True and vieux.id in sal.edites[n_ed:], sal.edites[n_ed:])
+    for t_ in (_a("2026-11-01", 13), _a("2026-11-02", 9)):
+        HEURE["t"] = t_
+        n_ed, n_d = len(sal.edites), len(DESSINS)
+        r = courir(oc.maj_clics(sal, bot))
+        check(f"après midi ({t_:%d/%m %Hh}) : l'archive ne bouge plus, seul le panneau est redessiné",
+              r is True and sal.edites[n_ed:] == [neuf.id] and not any(x[2] for x in DESSINS[n_d:])
+              and _est_archive(vieux), (sal.edites[n_ed:], DESSINS[n_d:]))
+
+    # ── l'entretien ne retire jamais l'archive
+    n_ed = len(sal.edites)
+    check("entretien : l'archive n'est jamais retirée, un seul panneau vivant, rien de redessiné",
+          courir(oc._assurer_clics(sal, bot)) == 0 and _du_bot(sal) == [vieux, neuf]
+          and _est_archive(vieux) and sal.edites[n_ed:] == [])
+    oc.url_clics = lambda: URL_CLICS.replace("CLE-VA", "CLE-NEUVE")
+    try:
+        r = courir(oc._assurer_clics(sal, bot))
+    finally:
+        oc.url_clics = lambda: URL_CLICS
+    vv = _vivants(sal)
+    check("entretien, clé changée : le panneau vivant remplacé, l'archive reste (et reste notée)",
+          r == 1 and len(vv) == 1 and vv[0] is not neuf and neuf.supprime and _est_archive(vieux)
+          and _du_bot(sal) == [vieux, vv[0]] and _etat_q().get(oc.DU_CLICS) == "2026-11-01"
+          and (_etat_q().get(oc.ARCHIVE_CLICS) or {}).get("id") == vieux.id, _etat_q())
+
+    # ── premier passage après ce correctif : aucune quinzaine notée (le cas du 01/11)
+    def _panneau_d_avant(sal_):
+        """Le panneau tel que le bot le laissait avant ce correctif, déjà sur le 01/11."""
+        return courir(sal_.send(view=oc.PanneauClics(URL_CLICS, _liq.NOM, "Lia · quinzaine du 01/11 au 01/11"),
+                                files=[discord.File(io.BytesIO(b"x"), filename=_liq.NOM)]))
+
+    g, sal, bot = _salon_clics(QUINZ_NOV, _a("2026-11-01", 1))
+    vieux = _panneau_d_avant(sal)
+    oc._noter(YOUCHAM, "click-et-sub", vieux.id)        # l'état d'avant : pas de quinzaine
+    r = courir(oc.maj_clics(sal, bot))
+    vv = _vivants(sal)
+    check("1er passage sans quinzaine notée (01/11) : le panneau devient l'archive du 16/10 au 31/10",
+          r is True and _est_archive(vieux) and len(vv) == 1 and _du_bot(sal) == [vieux, vv[0]]
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01" and _etat_q().get("click-et-sub") == vv[0].id
+          and _etat_q().get(oc.ARCHIVE_CLICS) == {"id": vieux.id, "du": "2026-10-16", "au": "2026-10-31"},
+          _etat_q())
+    g, sal, bot = _salon_clics(QUINZ_NOV, _a("2026-11-01", 1))
+    vieux = _panneau_d_avant(sal)
+    r = courir(oc._assurer_clics(sal, bot))
+    vv = _vivants(sal)
+    check("1er passage par l'entretien (démarrage), rien de noté : même chose, sans attendre l'heure pile",
+          r == 0 and _est_archive(vieux) and len(vv) == 1 and _du_bot(sal) == [vieux, vv[0]]
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01", _etat_q())
+    oc.ETAT.unlink()
+    n = len(sal.messages)
+    r, r2 = courir(oc._assurer_clics(sal, bot)), courir(oc.maj_clics(sal, bot))
+    check("état perdu ensuite : l'archive est relue dans le salon (nom d'image), pas de seconde archive",
+          r == 0 and r2 is True and len(sal.messages) == n and _archives(sal) == [vieux]
+          and len(_vivants(sal)) == 1 and _etat_q().get(oc.DU_CLICS) == "2026-11-01",
+          (r, r2, len(sal.messages) - n, _etat_q()))
+
+    # ── un échec ne perd rien, et se réessaie
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    comps, pj = list(vieux.components), [a.filename for a in vieux.attachments]
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+    sal.send = _refuse
+    n_ed = len(sal.edites)
+    with _journal() as j:
+        r1, r2 = courir(oc.maj_clics(sal, bot)), courir(oc.maj_clics(sal, bot))
+    check("envoi refusé : l'ancien panneau tel quel, ni archive ni quinzaine notée",
+          r1 is False and r2 is False and _du_bot(sal) == [vieux] and vieux.components == comps
+          and [a.filename for a in vieux.attachments] == pj and oc._vivant(vieux) and sal.edites[n_ed:] == []
+          and _etat_q().get(oc.DU_CLICS) == "2026-10-16" and _etat_q().get("click-et-sub") == vieux.id
+          and not _etat_q().get(oc.ARCHIVE_CLICS), _etat_q())
+    check("envoi refusé : la cause dite UNE fois sur deux tours",
+          j.getvalue().count("panneau neuf refuse") == 1, j.getvalue())
+    del sal.send
+    r = courir(oc.maj_clics(sal, bot))
+    check("envoi refusé : réessayé au tour suivant, et réussi",
+          r is True and _est_archive(vieux) and len(_vivants(sal)) == 1
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01", _etat_q())
+
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+    vieux.edit = _refuse
+    with _journal() as j:
+        r = courir(oc.maj_clics(sal, bot))
+    check("archivage refusé : le neuf est retiré (jamais deux panneaux vivants), l'ancien intact",
+          r is False and _du_bot(sal) == [vieux] and oc._vivant(vieux) and oc._porte_image(vieux)
+          and _etat_q().get(oc.DU_CLICS) == "2026-10-16" and not _etat_q().get(oc.ARCHIVE_CLICS)
+          and "non archive" in j.getvalue(), (j.getvalue(), _etat_q()))
+    del vieux.edit
+    r = courir(oc.maj_clics(sal, bot))
+    check("archivage refusé : réessayé au tour suivant, et réussi",
+          r is True and _est_archive(vieux) and len(_vivants(sal)) == 1, _etat_q())
+
+    for genre in ("finie", "cours"):
+        g, sal, bot = _salon_clics()
+        courir(oc._assurer_clics(sal, bot))
+        vieux = _vivants(sal)[0]
+        PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+        RATEES.add(genre)
+        n_ed = len(sal.edites)
+        with _journal() as j:
+            r = courir(oc.maj_clics(sal, bot))
+        check(f"image {genre} impossible : rien ne bouge (ni envoi, ni archive), la cause est dite",
+              r is False and _du_bot(sal) == [vieux] and oc._vivant(vieux) and sal.edites[n_ed:] == []
+              and _etat_q().get(oc.DU_CLICS) == "2026-10-16" and "impossible" in j.getvalue(),
+              (j.getvalue(), sal.edites[n_ed:]))
+        RATEES.clear()
+        r = courir(oc.maj_clics(sal, bot))
+        check(f"image {genre} impossible : réessayé au tour suivant, et réussi",
+              r is True and _est_archive(vieux) and len(_vivants(sal)) == 1)
+
+    # ── l'état écrit à moitié pointe l'archive : rien n'est retourné deux fois
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+    courir(oc.maj_clics(sal, bot))
+    neuf = _vivants(sal)[0]
+    oc._noter_valeurs(YOUCHAM, {"click-et-sub": vieux.id, oc.DU_CLICS: "2026-10-16", oc.ARCHIVE_CLICS: None})
+    n = len(sal.messages)
+    r = courir(oc.maj_clics(sal, bot))
+    check("état écrit à moitié (il pointe l'archive) : rien n'est posté ni retourné",
+          r is False and len(sal.messages) == n and _est_archive(vieux) and _vivants(sal) == [neuf])
+    r = courir(oc._assurer_clics(sal, bot))
+    check("… l'entretien retrouve le panneau et voit l'archive dans le salon : pas de seconde archive",
+          r == 0 and len(sal.messages) == n and _archives(sal) == [vieux] and _vivants(sal) == [neuf]
+          and _etat_q().get("click-et-sub") == neuf.id and _etat_q().get(oc.DU_CLICS) == "2026-11-01",
+          _etat_q())
+
+    # ── l'entretien du démarrage et l'heure pile en même temps : un seul tour
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+
+    async def _ensemble():
+        return await asyncio.gather(oc._assurer_clics(sal, bot), oc.maj_clics(sal, bot))
+    courir(_ensemble())
+    check("entretien et heure pile ensemble : UN panneau neuf, UNE archive",
+          len(_vivants(sal)) == 1 and _archives(sal) == [vieux] and _est_archive(vieux),
+          [(m.id, oc._vivant(m)) for m in _du_bot(sal)])
+
+    # ── la quinzaine illisible : rien ne bouge
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    n_ed = len(sal.edites)
+
+    def _illisible():
+        raise RuntimeError("infloww_liens illisible")
+    oc._quinzaines_clics = _illisible
+    with _journal() as j:
+        r1, r2 = courir(oc.maj_clics(sal, bot)), courir(oc.maj_clics(sal, bot))
+    oc._quinzaines_clics = lambda: dict(PERIODE["q"])
+    check("quinzaine illisible : le panneau laissé tel quel, la cause dite une fois",
+          r1 is False and r2 is False and _du_bot(sal) == [vieux] and sal.edites[n_ed:] == []
+          and j.getvalue().count("quinzaine de la page Lia illisible") == 1, j.getvalue())
+
+    # ── le panneau vivant disparu AVANT le changement de quinzaine (relecture
+    # du 01/11) : maj_clics ne le relit plus à minuit et laisse faire
+    # l'entretien, qui posait un neuf et notait le 01/11 -- la quinzaine du
+    # 16 au 31/10 perdue sans une ligne au journal.
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    courir(_vivants(sal)[0].delete())                   # retiré à la main le 31/10
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0)
+    with _journal() as j:
+        r1 = courir(oc.maj_clics(sal, bot))
+    HEURE["t"] = _a("2026-11-01", 3)
+    n_d = len(DESSINS)
+    with _journal() as j:
+        r2 = courir(oc._assurer_clics(sal, bot))
+    bots = _du_bot(sal)
+    arch, neuf = bots if len(bots) == 2 else (None, None)
+    check("panneau retiré le 31/10, entretien le 01/11 : l'archive du 16/10 au 31/10 postée, le neuf dessous",
+          r1 is False and r2 == 1 and arch is not None and _est_archive(arch) and _vivants(sal) == [neuf]
+          and oc._urls(neuf) == {URL_CLICS} and oc._porte_image(neuf)
+          and sorted(DESSINS[n_d:]) == [("2026-10-16", "2026-10-31", True), ("2026-11-01", "2026-11-01", False)],
+          ([(m.id, oc._vivant(m)) for m in bots], DESSINS[n_d:]))
+    check("… état noté (panneau neuf, sa quinzaine, l'archive : id, du, au), et dit au journal",
+          neuf is not None and _etat_q().get("click-et-sub") == neuf.id
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01"
+          and _etat_q().get(oc.ARCHIVE_CLICS) == {"id": arch.id, "du": "2026-10-16", "au": "2026-10-31"}
+          and "gardee dans le salon" in j.getvalue(), (_etat_q(), j.getvalue()))
+    HEURE["t"] = _a("2026-11-01", 11)
+    n_ed = len(sal.edites)
+    r = courir(oc.maj_clics(sal, bot))
+    check("… cette archive redessinée avant midi, comme celle d'un panneau tourné",
+          r is True and arch is not None and arch.id in sal.edites[n_ed:] and _est_archive(arch),
+          sal.edites[n_ed:])
+    HEURE["t"] = _a("2026-11-01", 13)
+    n_ed = len(sal.edites)
+    r = courir(oc.maj_clics(sal, bot))
+    check("… plus après midi ; l'entretien ne la retire pas",
+          r is True and neuf is not None and sal.edites[n_ed:] == [neuf.id]
+          and courir(oc._assurer_clics(sal, bot)) == 0 and _du_bot(sal) == [arch, neuf] and _est_archive(arch),
+          sal.edites[n_ed:])
+    # le neuf retiré à son tour, l'état écrit à moitié (quinzaine d'avant
+    # notée, archive notée) : elle est vue, pas de seconde archive
+    for m_ in _vivants(sal):
+        courir(m_.delete())
+    oc._noter_valeurs(YOUCHAM, {oc.DU_CLICS: "2026-10-16"})
+    n = len(sal.messages)
+    r = courir(oc._assurer_clics(sal, bot))
+    check("… archive déjà gardée, panneau de nouveau disparu : un neuf seul, pas de seconde archive",
+          r == 1 and len(sal.messages) == n + 1 and _archives(sal) == [arch] and len(_vivants(sal)) == 1
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01", _etat_q())
+
+    # la clé change au moment même du changement : l'entretien retire l'ancien
+    # (« Lien invalide » sinon), mais la finie est postée avant le neuf
+    url_neuve = URL_CLICS.replace("CLE-VA", "CLE-NEUVE")
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    vieux = _vivants(sal)[0]
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 0, 0, 5)
+    oc.url_clics = lambda: url_neuve
+    try:
+        r = courir(oc._assurer_clics(sal, bot))
+    finally:
+        oc.url_clics = lambda: URL_CLICS
+    bots = _du_bot(sal)
+    check("clé changée au changement de quinzaine : l'ancien retiré, l'archive postée, le neuf dessous",
+          r == 1 and vieux.supprime and len(bots) == 2 and _est_archive(bots[0])
+          and oc._urls(bots[1]) == {url_neuve} and _etat_q().get(oc.DU_CLICS) == "2026-11-01"
+          and (_etat_q().get(oc.ARCHIVE_CLICS) or {}).get("id") == bots[0].id,
+          ([(m.id, oc._vivant(m)) for m in bots], _etat_q()))
+    # premier passage (rien de noté) ET clé changée : le panneau d'avant est
+    # retiré, la quinzaine qu'il montrait est gardée quand même
+    g, sal, bot = _salon_clics(QUINZ_NOV, _a("2026-11-01", 1))
+    vieux = _panneau_d_avant(sal)
+    oc.url_clics = lambda: url_neuve
+    try:
+        r = courir(oc._assurer_clics(sal, bot))
+    finally:
+        oc.url_clics = lambda: URL_CLICS
+    bots = _du_bot(sal)
+    check("1er passage, rien de noté, clé changée : l'archive du 16/10 au 31/10 postée quand même",
+          r == 1 and vieux.supprime and len(bots) == 2 and _est_archive(bots[0])
+          and oc._urls(bots[1]) == {url_neuve} and _etat_q().get(oc.DU_CLICS) == "2026-11-01",
+          ([(m.id, oc._vivant(m)) for m in bots], _etat_q()))
+    # un salon neuf (ni panneau ni quinzaine notée) : pas d'archive d'une
+    # quinzaine que personne n'a vue
+    g, sal, bot = _salon_clics(QUINZ_NOV, _a("2026-11-01", 1))
+    r = courir(oc._assurer_clics(sal, bot))
+    check("salon neuf le 01/11 : le panneau seul, aucune archive",
+          r == 1 and len(_du_bot(sal)) == 1 and _vivants(sal) == _du_bot(sal) and not _archives(sal)
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01" and not _etat_q().get(oc.ARCHIVE_CLICS), _etat_q())
+
+    # l'image de la finie impossible : le neuf est posé quand même (le bouton
+    # d'abord), la quinzaine d'avant reste notée, et au tour suivant CE
+    # panneau devient l'archive (_tourner)
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    courir(_vivants(sal)[0].delete())
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 3)
+    RATEES.add("finie")
+    with _journal() as j:
+        r = courir(oc._assurer_clics(sal, bot))
+    RATEES.clear()
+    vv = _vivants(sal)
+    check("panneau disparu, image de la finie impossible : le neuf posé, la quinzaine d'avant reste notée, "
+          "la cause dite",
+          r == 1 and len(vv) == 1 and _du_bot(sal) == vv and _etat_q().get("click-et-sub") == vv[0].id
+          and _etat_q().get(oc.DU_CLICS) == "2026-10-16" and not _etat_q().get(oc.ARCHIVE_CLICS)
+          and "pas encore gardee" in j.getvalue(), (j.getvalue(), _etat_q()))
+    HEURE["t"] = _a("2026-11-01", 4)
+    r = courir(oc.maj_clics(sal, bot))
+    vv2 = _vivants(sal)
+    check("… au tour suivant, ce panneau devient l'archive du 16/10 au 31/10, un neuf dessous",
+          r is True and len(vv) == 1 and _est_archive(vv[0]) and len(vv2) == 1 and vv2[0] is not vv[0]
+          and _du_bot(sal) == [vv[0], vv2[0]] and _etat_q().get(oc.DU_CLICS) == "2026-11-01"
+          and (_etat_q().get(oc.ARCHIVE_CLICS) or {}).get("id") == vv[0].id, _etat_q())
+
+    # l'envoi de l'archive refusé (le panneau, lui, passe) : même chose, la
+    # cause dite une fois sur deux entretiens
+    g, sal, bot = _salon_clics()
+    courir(oc._assurer_clics(sal, bot))
+    courir(_vivants(sal)[0].delete())
+    PERIODE["q"], HEURE["t"] = QUINZ_NOV, _a("2026-11-01", 3)
+    _envoi_q = sal.send
+
+    async def _sans_archive(*a, **k):
+        if isinstance(k.get("view"), oc.PanneauArchive):
+            _refus()
+        return await _envoi_q(*a, **k)
+    sal.send = _sans_archive
+    try:
+        with _journal() as j:
+            r1 = courir(oc._assurer_clics(sal, bot))
+            courir(_vivants(sal)[0].delete())
+            r2 = courir(oc._assurer_clics(sal, bot))
+    finally:
+        del sal.send
+    vv = _vivants(sal)
+    check("panneau disparu, archive refusée : le neuf posé, rien de noté de la finie, la cause dite une fois",
+          r1 == 1 and r2 == 1 and len(vv) == 1 and _du_bot(sal) == vv and not _archives(sal)
+          and _etat_q().get(oc.DU_CLICS) == "2026-10-16" and not _etat_q().get(oc.ARCHIVE_CLICS)
+          and j.getvalue().count("archive refusee") == 1, (j.getvalue(), _etat_q()))
+    r = courir(oc.maj_clics(sal, bot))
+    check("… réessayé au tour suivant, et réussi",
+          r is True and len(vv) == 1 and _est_archive(vv[0]) and len(_vivants(sal)) == 1
+          and _etat_q().get(oc.DU_CLICS) == "2026-11-01", _etat_q())
+
+    # ── la fenêtre de rattrapage : jusqu'au tour de midi du 1er ou du 16
+    HEURE["t"] = _a("2026-11-01", 11, 59)
+    a1 = oc._rattrapage_ouvert("2026-10-31")
+    HEURE["t"] = _a("2026-11-01", 12, 0, 30)
+    a2 = oc._rattrapage_ouvert("2026-10-31")
+    HEURE["t"] = _a("2026-11-01", 13, 0)
+    a3 = oc._rattrapage_ouvert("2026-10-31")
+    HEURE["t"] = _a("2026-11-16", 12, 0, 2)
+    a4 = oc._rattrapage_ouvert("2026-11-15")
+    check("rattrapage : ouvert jusqu'au tour de midi du lendemain de la fin, fermé à 13h",
+          a1 and a2 and not a3 and a4 and not oc._rattrapage_ouvert("pas une date"), (a1, a2, a3, a4))
+finally:
+    for _k, _v in _sauve_q.items():
+        setattr(oc, _k, _v)
 
 
 # ═══════════════════════════ 4. livraison chez le cliqueur, jamais au commun ══

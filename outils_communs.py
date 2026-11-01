@@ -23,7 +23,9 @@ CE QUI VIT OU
                       (numeros.clic_partage, depuis le 31/10/2026)
         📊・click-et-sub  un bouton-lien vers la page des liens de suivi de
                       Lia (infloww_liens, profil « lia ») : clics US, subs,
-                      CVR, $ / sub par VA (proprietaire, 31/10/2026)
+                      CVR, $ / sub par VA (proprietaire, 31/10/2026) ; au
+                      dessus, l'image de chaque quinzaine finie, gardee
+                      (01/11/2026, voir _tourner)
     📁 SALONS PERSO, puis 📁 SALONS PERSO 2, 3... : Discord refuse un 51e
     salon dans une categorie. Un salon par VA, « <pseudo>-content » -- le
     nom de cogs/welcome._us_ticket_name, que toutes les recherches de -content
@@ -101,8 +103,11 @@ _RE_PERSO = re.compile(r"^salons perso(?: (\d+))?$")
 MENU_ID = "ocm:menu"
 
 #: Par serveur : {gid: {"menu": id du message, "categorie": id de 🧰 OUTILS,
-#: "salons": {cle: id du salon}}}. Le message du menu : sans lui, chaque
-#: passage relisait l'historique. Les ids des salons : voir « RECONNAITRE ».
+#: "salons": {cle: id du salon}, "click-et-sub": id du panneau vivant,
+#: "click-et-sub-du": debut de la quinzaine qu'il montre, "click-et-sub-archive":
+#: {"id", "du", "au"} de la derniere quinzaine finie}}. Le message du menu :
+#: sans lui, chaque passage relisait l'historique. Les ids des salons : voir
+#: « RECONNAITRE ». La quinzaine du panneau : voir _tourner.
 ETAT = Path(__file__).resolve().parent / "data" / "outils_communs.json"
 
 #: Le refus, le meme pour les quatre outils. Court, sans notice. Dit
@@ -147,6 +152,15 @@ def _noter(gid, cle, mid) -> None:
     d = copy.deepcopy(_etat())
     d.setdefault(str(gid), {})[cle] = int(mid) if mid else None
     _ecrire(d)
+
+
+def _noter_valeurs(gid, valeurs) -> bool:
+    """Plusieurs cles d'un serveur en UNE ecriture. Le changement de quinzaine
+    note trois choses (panneau neuf, sa quinzaine, l'archive) : ecrites une a
+    une, une coupure entre deux laisserait l'archive notee comme panneau vivant."""
+    d = copy.deepcopy(_etat())
+    d.setdefault(str(gid), {}).update(valeurs)
+    return _ecrire(d)
 
 
 def _noter_salons(gid, cat_id, salons) -> None:
@@ -877,24 +891,121 @@ class PanneauClics(discord.ui.LayoutView):
             label="Statistiques", emoji="📊", style=discord.ButtonStyle.link, url=url)))
 
 
-#: Le dernier echec de l'image, par serveur : dit une fois, pas toutes les heures.
-_ECHEC_IMAGE = {}
+class PanneauArchive(discord.ui.LayoutView):
+    """Une quinzaine FINIE, gardee dans le 📊・click-et-sub : son image seule,
+    sans bouton ni texte (voir _tourner). Sans bouton-lien vers
+    /infloww/liens, _assurer_clics ne la compte pas parmi ses panneaux : elle
+    n'est jamais retiree."""
+
+    def __init__(self, image, alt=""):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem(
+            "attachment://" + image, description=(alt or image)[:1024])))
 
 
-async def image_clics(guilde, bot) -> dict:
-    """{"png", "alt"} : l'image de la quinzaine en cours de la page Lia, aux
-    chiffres de la page sur la meme periode (du 1er ou du 16 a aujourd'hui) et
-    avec la photo Discord de chaque VA ; ou {"erreur"}. Ne leve pas."""
+#: Ce qui a deja ete dit, par (serveur, sujet) : un echec est dit une fois
+#: par raison, pas toutes les heures ; une reussite l'efface.
+_DITS = {}
+
+
+def _dire(cle, raison, texte) -> None:
+    if _DITS.get(cle) != raison:
+        _DITS[cle] = raison
+        print(texte, flush=True)
+
+
+#: Les cles de l'etat propres au 📊・click-et-sub (voir ETAT).
+DU_CLICS, ARCHIVE_CLICS = "click-et-sub-du", "click-et-sub-archive"
+
+#: L'archive d'une quinzaine finie est redessinee a chaque heure jusqu'au
+#: tour de midi du 1er ou du 16, heure de Paris : MyPuls rattrape des heures
+#: durant des subs de la veille, et le podium fige lui aussi a midi. Le tour
+#: de midi part a 12h00 et quelques secondes : il compte (marge de 15 min),
+#: celui de 13h non.
+FIN_RATTRAPAGE = (12, 15)
+
+#: Un verrou par serveur pour le 📊・click-et-sub : sans lui, l'entretien du
+#: demarrage et le tour de l'heure pile, lances ensemble au changement de
+#: quinzaine, posaient chacun leur panneau neuf (tests_youcham_outils, 3b).
+_VERROUS_CLICS = {}
+
+
+def _verrou_clics(canal) -> asyncio.Lock:
+    """Comme _verrou : un par boucle."""
+    boucle = asyncio.get_running_loop()
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
+    v = _VERROUS_CLICS.get(gid)
+    if v is None or v[0] is not boucle:
+        v = (boucle, asyncio.Lock())
+        _VERROUS_CLICS[gid] = v
+    return v[1]
+
+
+def _maintenant():
+    """L'heure de Paris : le VPS tourne en UTC."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.datetime.now(ZoneInfo("Europe/Paris"))
+
+
+def _quinzaines_clics() -> dict:
+    """La quinzaine en cours et la precedente, au jour de Paris de la page Lia
+    (infloww_liens, profil « lia » : du 1er au 15, du 16 a la fin du mois),
+    en ISO : {"du", "au" (aujourd'hui), "prec_du", "prec_au" (veille de du)}."""
+    import datetime
+
+    import infloww_liens
+    m = infloww_liens.profil("lia")
+    auj = datetime.date.fromisoformat(m._aujourdhui())
+    du = m.quinzaine_de(auj)[0]
+    veille = du - datetime.timedelta(days=1)
+    return {"du": du.isoformat(), "au": auj.isoformat(),
+            "prec_du": m.quinzaine_de(veille)[0].isoformat(), "prec_au": veille.isoformat()}
+
+
+def _quinzaines_ou_rien(gid):
+    """_quinzaines_clics, ou None -- et la raison est dite, une fois."""
+    try:
+        q = _quinzaines_clics()
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:300]
+        _dire((gid, "quinzaine"), raison, f"[outils-communs] quinzaine de la page Lia illisible "
+              f"({raison}) : panneau des clics laisse tel quel")
+        return None
+    _DITS.pop((gid, "quinzaine"), None)
+    return q
+
+
+def _rattrapage_ouvert(au) -> bool:
+    """L'archive de la quinzaine finie le jour `au` se redessine-t-elle
+    encore ? Oui jusqu'au tour de midi du lendemain (FIN_RATTRAPAGE)."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        jour = datetime.date.fromisoformat(str(au)[:10]) + datetime.timedelta(days=1)
+    except ValueError:
+        return False
+    fin = datetime.datetime.combine(jour, datetime.time(*FIN_RATTRAPAGE),
+                                    tzinfo=ZoneInfo("Europe/Paris"))
+    return _maintenant() < fin
+
+
+async def image_clics(guilde, bot, du=None, au=None, terminee=False) -> dict:
+    """{"png", "alt"} : l'image d'une quinzaine de la page Lia, aux chiffres
+    de la page sur la meme periode et avec la photo Discord de chaque VA ; ou
+    {"erreur"}. Par defaut la quinzaine en cours (du 1er ou du 16 a
+    aujourd'hui) ; `du`, `au` imposes et `terminee` : une quinzaine finie,
+    gardee dans le salon (_tourner). Ne leve pas."""
     try:
         import datetime
-        from zoneinfo import ZoneInfo
 
         import clics_image as _ci
         import infloww_liens
         import liens_image as li
         m = infloww_liens.profil("lia")
-        auj = datetime.date.fromisoformat(m._aujourdhui())
-        du, au = m.quinzaine_de(auj)[0].isoformat(), auj.isoformat()
+        if not du or not au:
+            auj = datetime.date.fromisoformat(m._aujourdhui())
+            du, au = du or m.quinzaine_de(auj)[0].isoformat(), au or auj.isoformat()
 
         def lire():
             # MyPuls attendu plus longtemps que par la page (5 s) : personne
@@ -905,8 +1016,11 @@ async def image_clics(guilde, bot) -> dict:
         t = await asyncio.to_thread(lire)
         if t.get("erreur"):
             return {"erreur": str(t["erreur"])[:300]}
-        maj = datetime.datetime.now(ZoneInfo("Europe/Paris")).strftime("%Hh%M")
-        v = li.tableau(t, du, au, maj, nom=m.NOM_AFFICHE)
+        h = _maintenant()
+        # finie, l'image dit aussi le JOUR de ses chiffres : redessinee
+        # jusqu'au lendemain midi, « 11h00 » seul ne disait pas lequel
+        maj = (h.strftime("%d/%m") + " à " + h.strftime("%Hh%M")) if terminee else h.strftime("%Hh%M")
+        v = li.tableau(t, du, au, maj, nom=m.NOM_AFFICHE, terminee=terminee)
         # la ligne porte le pseudo du lien de suivi (« @roucham_79944 ») : le
         # nom d'utilisateur Discord du VA, sa photo quand il est unique
         ids, _compte = _ci.resoudre_pseudos([x["nom"] for x in v["lignes"]],
@@ -924,80 +1038,183 @@ async def image_clics(guilde, bot) -> dict:
         return {"erreur": f"{type(e).__name__}: {e}"[:300]}
 
 
-async def _vue_clics(guilde, bot, url):
-    """(vue, fichiers) du panneau : avec l'image si elle se fait, sinon le
-    bouton seul -- et l'echec est dit (une fois par raison)."""
-    import liens_image as li
-    im = await image_clics(guilde, bot)
-    gid = getattr(guilde, "id", 0)
+async def _image(guilde, bot, quoi, **periode) -> dict:
+    """image_clics ; son echec est dit (une fois par raison), {} rendu."""
+    im = await image_clics(guilde, bot, **periode)
+    cle = (getattr(guilde, "id", 0), quoi)
     if im.get("png"):
-        _ECHEC_IMAGE.pop(gid, None)
-        import io
-        return (PanneauClics(url, li.NOM, im.get("alt", "")),
-                [discord.File(io.BytesIO(im["png"]), filename=li.NOM)])
-    if _ECHEC_IMAGE.get(gid) != im.get("erreur"):
-        _ECHEC_IMAGE[gid] = im.get("erreur")
-        print(f"[outils-communs] image de la quinzaine impossible : {im.get('erreur')}", flush=True)
-    return None, []
+        _DITS.pop(cle, None)
+        return im
+    _dire(cle, im.get("erreur"), f"[outils-communs] image {quoi} impossible : {im.get('erreur')}")
+    return {}
 
 
-def _porte_image(message) -> bool:
-    """Le panneau a-t-il son image ? Un message Components V2 ne liste PAS
-    ses fichiers dans `attachments` (vide, relu le 31/10) : l'image est dans
-    la galerie, son adresse finit par le nom du fichier. Sans ce test,
-    chaque entretien la redessinait pour rien."""
+async def _vue_clics(guilde, bot, url, du=None, au=None):
+    """(vue, fichiers) du panneau vivant, avec l'image ; (None, []) si elle
+    ne se fait pas."""
+    import io
+
     import liens_image as li
-    if any(getattr(a, "filename", None) == li.NOM for a in (getattr(message, "attachments", None) or [])):
+    im = await _image(guilde, bot, "de la quinzaine", **({"du": du, "au": au} if du else {}))
+    if not im:
+        return None, []
+    return (PanneauClics(url, li.NOM, im.get("alt", "")),
+            [discord.File(io.BytesIO(im["png"]), filename=li.NOM)])
+
+
+async def _vue_archive(guilde, bot, du, au):
+    """(vue, fichiers) de l'archive d'une quinzaine finie : l'image seule, a
+    son nom (liens_image.nom_archive) ; (None, []) si elle ne se fait pas."""
+    import io
+
+    import liens_image as li
+    im = await _image(guilde, bot, "de la quinzaine terminee", du=du, au=au, terminee=True)
+    if not im:
+        return None, []
+    nom = li.nom_archive(du, au)
+    return (PanneauArchive(nom, im.get("alt", "")),
+            [discord.File(io.BytesIO(im["png"]), filename=nom)])
+
+
+def _porte_fichier(message, nom) -> bool:
+    """Le message porte-t-il l'image `nom` ? Un message Components V2 ne liste
+    PAS ses fichiers dans `attachments` (vide, relu le 31/10) : l'image est
+    dans la galerie, son adresse finit par le nom du fichier."""
+    if any(getattr(a, "filename", None) == nom for a in (getattr(message, "attachments", None) or [])):
         return True
     pile = list(getattr(message, "components", None) or [])
     while pile:
         c = pile.pop()
         for it in getattr(c, "items", None) or []:
             u = str(getattr(getattr(it, "media", None), "url", "") or "")
-            if u.split("?", 1)[0].endswith("/" + li.NOM) or u == "attachment://" + li.NOM:
+            if u.split("?", 1)[0].endswith("/" + nom) or u == "attachment://" + nom:
                 return True
         pile += list(getattr(c, "children", None) or [])
         pile += list(getattr(c, "components", None) or [])
     return False
 
 
+def _porte_image(message) -> bool:
+    """Le panneau a-t-il son image ? Sans ce test, chaque entretien la
+    redessinait pour rien."""
+    import liens_image as li
+    return _porte_fichier(message, li.NOM)
+
+
+def _vivant(message) -> bool:
+    """Un panneau vivant porte le bouton vers la page ; une archive, non."""
+    return any("/infloww/liens" in u for u in _urls(message))
+
+
 async def _assurer_clics(canal, bot) -> int:
-    """Le panneau du 📊・click-et-sub : un seul message du bot, vers l'adresse
-    du jour, avec l'image de la quinzaine. L'adresse changee (cle, acces
-    libre), l'ancien bouton menerait a « Lien invalide » : il est remplace.
-    Un panneau sans image (d'avant, ou lecture ratee) la recoit. Rend 1 si
-    un panneau est pose."""
-    moi = getattr(getattr(bot, "user", None), "id", None)
-    url = url_clics()
-    poses = [m async for m in canal.history(limit=25)
-             if getattr(getattr(m, "author", None), "id", None) == moi
-             and any("/infloww/liens" in u for u in _urls(m))]
-    bons = [m for m in poses if url in _urls(m)]
-    garde = max(bons, key=lambda m: m.id) if bons else None
-    for m in poses:
-        if m is not garde:
-            try:
-                await m.delete()
-            except Exception as e:                           # noqa: BLE001
-                print(f"[outils-communs] ancien panneau des clics non retire : {e}", flush=True)
+    """Le panneau du 📊・click-et-sub : un seul message du bot avec le bouton,
+    vers l'adresse du jour, avec l'image de la quinzaine. L'adresse changee
+    (cle, acces libre), l'ancien bouton menerait a « Lien invalide » : il est
+    remplace. Un panneau sans image (d'avant, ou lecture ratee) la recoit ;
+    un panneau d'une autre quinzaine, ou dont la quinzaine n'est pas notee,
+    devient son archive (_tourner) ; plus de panneau du tout alors que sa
+    quinzaine est finie, l'archive est postee avant le neuf (_garder_finie).
+    Les archives n'ont pas de bouton : jamais comptees ici, jamais retirees.
+    Rend 1 si un panneau est pose ici (celui d'un changement de quinzaine
+    est dit par _tourner)."""
+    async with _verrou_clics(canal):
+        moi = getattr(getattr(bot, "user", None), "id", None)
+        url = url_clics()
+        poses = [m async for m in canal.history(limit=25)
+                 if getattr(getattr(m, "author", None), "id", None) == moi and _vivant(m)]
+        bons = [m for m in poses if url in _urls(m)]
+        garde = max(bons, key=lambda m: m.id) if bons else None
+        for m in poses:
+            if m is not garde:
+                try:
+                    await m.delete()
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[outils-communs] ancien panneau des clics non retire : {e}", flush=True)
+        gid = getattr(getattr(canal, "guild", None), "id", 0)
+        if garde is not None:
+            _noter(gid, "click-et-sub", garde.id)
+            q = _quinzaines_ou_rien(gid)
+            du_note = (_etat().get(str(gid)) or {}).get(DU_CLICS)
+            if not _porte_image(garde) or (q is not None and du_note != q["du"]):
+                await _maj_clics(canal, bot, garde, q)
+            return 0
+        q = _quinzaines_ou_rien(gid)
+        g = _etat().get(str(gid)) or {}
+        du_note = g.get(DU_CLICS)
+        # Plus de panneau vivant alors que sa quinzaine est finie : retire a la
+        # main le 31/10, ou a l'instant ci-dessus (cle changee). A 00h le 01/11,
+        # maj_clics ne le relisait plus et laissait faire l'entretien, qui
+        # posait un neuf sur le 01/11 et notait la quinzaine : celle du 16 au
+        # 31/10 n'etait plus nulle part, sans une ligne au journal --
+        # proprietaire, 01/11/2026 : « garde une trace de la période d'avant,
+        # toujours ». Aucune quinzaine notee, mais un panneau d'avant ce
+        # correctif retire ci-dessus (cle changee) : comme dans _maj_clics,
+        # la finie est gardee. Un salon neuf (rien de note, rien de retire)
+        # n'a pas d'archive : personne n'a vu cette quinzaine-la.
+        gardee = True
+        if q is not None and du_note != q["du"] and (du_note or poses):
+            gardee = await _garder_finie(canal, bot, g, q)
+        vue, fichiers = ((await _vue_clics(canal.guild, bot, url, q["du"], q["au"]))
+                         if q is not None else (None, []))
+        msg = await canal.send(view=vue or PanneauClics(url), files=fichiers)
+        # pose maintenant, il est de la quinzaine en cours, image ou pas : sa
+        # quinzaine est notee -- sauf si la finie n'a pas pu etre gardee :
+        # l'ancienne reste notee, et au tour suivant _maj_clics fait de CE
+        # panneau l'archive de la finie (_tourner, image redessinee sur elle)
+        _noter_valeurs(gid, {"click-et-sub": msg.id, **({DU_CLICS: q["du"]} if q and gardee else {})})
+        return 1
+
+
+async def _garder_finie(canal, bot, g, q) -> bool:
+    """Le panneau vivant a disparu avant d'avoir ete tourne : l'archive de la
+    quinzaine finie est postee seule (PanneauArchive), avant le panneau neuf
+    -- elle reste au-dessus, comme apres _tourner. Rend True si la finie est
+    gardee (deja, ou maintenant). False : rien de note, la cause est dite
+    une fois ; l'appelant garde la quinzaine d'avant notee pour que _tourner
+    reessaie au tour suivant. Ne leve pas."""
     gid = getattr(getattr(canal, "guild", None), "id", 0)
-    if garde is not None:
-        _noter(gid, "click-et-sub", garde.id)
-        if not _porte_image(garde):
-            await maj_clics(canal, bot, garde)
-        return 0
-    vue, fichiers = await _vue_clics(canal.guild, bot, url)
-    msg = await canal.send(view=vue or PanneauClics(url), files=fichiers)
-    _noter(gid, "click-et-sub", msg.id)
-    return 1
+    deja = await _archive_presente(canal, bot, g, q)
+    if deja:
+        return True
+    if deja is None:
+        return False            # salon illisible : dit par _archive_presente
+    cle, quinz = (gid, "garder"), f"quinzaine du {q['prec_du']} au {q['prec_au']}"
+    vue_a, f_a = await _vue_archive(canal.guild, bot, q["prec_du"], q["prec_au"])
+    if vue_a is None:
+        _dire(cle, "image", f"[outils-communs] {quinz} pas encore gardee (panneau vivant disparu, "
+              "image impossible) : elle le sera au tour suivant, sur le panneau neuf")
+        return False
+    try:
+        arch = await canal.send(view=vue_a, files=f_a)
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:200]
+        _dire(cle, "envoi " + raison, f"[outils-communs] {quinz} pas encore gardee (archive refusee : "
+              f"{raison}) : elle le sera au tour suivant, sur le panneau neuf")
+        return False
+    _DITS.pop(cle, None)
+    # notee tout de suite : le panneau neuf refuse ensuite, elle n'est ni
+    # perdue (relue a son nom, _archive_presente) ni postee deux fois
+    _noter_valeurs(gid, {ARCHIVE_CLICS: {"id": int(arch.id), "du": q["prec_du"], "au": q["prec_au"]}})
+    print(f"[outils-communs] {quinz} gardee dans le salon (message {arch.id}) : le panneau vivant "
+          "avait disparu avant le changement de quinzaine", flush=True)
+    return True
 
 
 async def maj_clics(canal, bot, message=None) -> bool:
     """L'image du panneau redessinee aux chiffres du moment (cogs/outils, a
-    chaque heure pile). Lecture ratee : l'image d'avant reste, plutot qu'un
-    bouton seul. Rend True si le message a change."""
+    chaque heure pile) ; la quinzaine changee, le panneau devient l'archive
+    de la finie et un neuf est pose (_tourner). Lecture ratee : l'image
+    d'avant reste, plutot qu'un bouton seul. Rend True si un message a
+    change."""
+    async with _verrou_clics(canal):
+        return await _maj_clics(canal, bot, message)
+
+
+async def _maj_clics(canal, bot, message=None, q=None) -> bool:
+    """maj_clics, verrou deja pris (_assurer_clics l'appelle aussi)."""
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
     if message is None:
-        mid = (_etat().get(str(getattr(canal.guild, "id", 0))) or {}).get("click-et-sub")
+        mid = (_etat().get(str(gid)) or {}).get("click-et-sub")
         if not mid:
             return False
         try:
@@ -1006,10 +1223,141 @@ async def maj_clics(canal, bot, message=None) -> bool:
             print(f"[outils-communs] panneau des clics illisible ({type(e).__name__}) : "
                   "l'entretien le reposera", flush=True)
             return False
-    vue, fichiers = await _vue_clics(canal.guild, bot, url_clics())
+    if not _vivant(message):
+        # le message note n'a pas de bouton : c'est une archive (etat ecrit a
+        # moitie, ou relu d'ailleurs). La « tourner » encore poserait un
+        # second panneau vivant ; l'entretien retrouve le vrai (_assurer_clics).
+        _dire((gid, "vivant"), message.id, f"[outils-communs] le message {message.id} note comme "
+              "panneau des clics n'a pas de bouton : laisse tel quel, l'entretien retrouvera le panneau")
+        return False
+    _DITS.pop((gid, "vivant"), None)
+    q = q or _quinzaines_ou_rien(gid)
+    if q is None:
+        return False
+    g = _etat().get(str(gid)) or {}
+    change = await _maj_archive(canal, bot, g.get(ARCHIVE_CLICS))
+    du_note = g.get(DU_CLICS)
+    if du_note != q["du"]:
+        # Une autre quinzaine, ou aucune de notee : le premier passage apres
+        # le 01/11/2026, quand le panneau montrait deja « 01/11 → 01/11 » et
+        # que la quinzaine du 16 au 31/10 n'etait plus nulle part. La finie
+        # est gardee -- sauf si elle l'est deja (data/ reparti de zero, etat
+        # ecrit a moitie) : une seconde archive serait du bruit.
+        deja = await _archive_presente(canal, bot, g, q)
+        if deja is None:
+            return change
+        if not deja:
+            return await _tourner(canal, bot, message, q) or change
+    vue, fichiers = await _vue_clics(canal.guild, bot, url_clics(), q["du"], q["au"])
+    if vue is None:
+        return change
+    await message.edit(view=vue, attachments=fichiers)
+    if du_note != q["du"]:
+        _noter_valeurs(gid, {DU_CLICS: q["du"]})
+    return True
+
+
+async def _archive_presente(canal, bot, g, q):
+    """La quinzaine precedente est-elle deja gardee : notee, ou relue dans le
+    salon a son nom d'image (liens_image.nom_archive) ? None si le salon ne
+    se lit pas -- rien ne tourne alors a l'aveugle, nouvel essai au tour
+    suivant."""
+    import liens_image as li
+    a = g.get(ARCHIVE_CLICS)
+    if isinstance(a, dict) and a.get("du") == q["prec_du"] and a.get("au") == q["prec_au"]:
+        return True
+    nom = li.nom_archive(q["prec_du"], q["prec_au"])
+    moi = getattr(getattr(bot, "user", None), "id", None)
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
+    try:
+        async for m in canal.history(limit=25):
+            if getattr(getattr(m, "author", None), "id", None) == moi and _porte_fichier(m, nom):
+                return True
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:200]
+        _dire((gid, "salon"), raison, f"[outils-communs] #{getattr(canal, 'name', '?')} illisible "
+              f"({raison}) : la quinzaine finie sera gardee au tour suivant")
+        return None
+    _DITS.pop((gid, "salon"), None)
+    return False
+
+
+async def _tourner(canal, bot, message, q) -> bool:
+    """La quinzaine a change : le panneau vivant devient l'archive de la
+    finie (son image redessinee du debut de la precedente a la veille de
+    l'actuelle, « quinzaine terminée », sans bouton : PanneauArchive), et un
+    panneau neuf est pose dessous, sur la quinzaine en cours.
+
+    POURQUOI (proprietaire, 01/11/2026, devant le salon reparti a zero, « 01/11
+    → 01/11 · quinzaine en cours ») : « ça doit faire un repost ... comment ils
+    font pour voir combien de subs ils ont fait pour la période d'avant sans
+    cliquer ; garde une trace de la période d'avant, toujours ». Le meme
+    message, redessine chaque heure, passait du 31/10 au 01/11 sans rien
+    garder ; et _assurer_clics retire tout panneau du bot qui porte le lien
+    sauf le plus recent : l'archive n'a donc pas de bouton.
+
+    Rien ne se perd. Les deux images d'abord : l'une ratee, rien n'est
+    touche. Le neuf ensuite : refuse, l'ancien reste tel quel. L'ancien
+    devient l'archive en dernier : refuse, le neuf est retire -- jamais deux
+    panneaux vivants. La quinzaine n'est notee qu'apres : un echec est
+    retente au tour suivant. Rend True si le salon a change."""
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
+    vue_a, f_a = await _vue_archive(canal.guild, bot, q["prec_du"], q["prec_au"])
+    if vue_a is None:
+        return False
+    vue, fichiers = await _vue_clics(canal.guild, bot, url_clics(), q["du"], q["au"])
     if vue is None:
         return False
-    await message.edit(view=vue, attachments=fichiers)
+    cle, quinz = (gid, "tourner"), f"quinzaine du {q['prec_du']} au {q['prec_au']}"
+    try:
+        neuf = await canal.send(view=vue, files=fichiers)
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:200]
+        _dire(cle, "envoi " + raison, f"[outils-communs] {quinz} : panneau neuf refuse ({raison}) ; "
+              "l'ancien reste tel quel, nouvel essai au tour suivant")
+        return False
+    try:
+        await message.edit(view=vue_a, attachments=f_a)
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:200]
+        _dire(cle, "archive " + raison, f"[outils-communs] {quinz} : ancien panneau non archive "
+              f"({raison}) ; le neuf est retire, nouvel essai au tour suivant")
+        try:
+            await neuf.delete()
+        except Exception as e2:                              # noqa: BLE001
+            print(f"[outils-communs] DEUX panneaux des clics : le neuf ({neuf.id}) n'a pas pu etre "
+                  f"retire ({type(e2).__name__}: {e2})", flush=True)
+        return False
+    _DITS.pop(cle, None)
+    _noter_valeurs(gid, {"click-et-sub": int(neuf.id), DU_CLICS: q["du"],
+                         ARCHIVE_CLICS: {"id": int(message.id), "du": q["prec_du"], "au": q["prec_au"]}})
+    print(f"[outils-communs] {quinz} gardee dans le salon (message {message.id}) ; panneau de la "
+          f"quinzaine en cours pose ({neuf.id})", flush=True)
+    return True
+
+
+async def _maj_archive(canal, bot, a) -> bool:
+    """L'archive de la derniere quinzaine finie, redessinee jusqu'au tour de
+    midi du 1er ou du 16 (FIN_RATTRAPAGE) ; ensuite plus jamais. Rend True si
+    elle a change."""
+    if not isinstance(a, dict) or not a.get("id") or not a.get("du") or not a.get("au"):
+        return False
+    if not _rattrapage_ouvert(a["au"]):
+        return False
+    gid = getattr(getattr(canal, "guild", None), "id", 0)
+    cle = (gid, "archive")
+    try:
+        m = await canal.fetch_message(int(a["id"]))
+        vue, fichiers = await _vue_archive(canal.guild, bot, a["du"], a["au"])
+        if vue is None:
+            return False
+        await m.edit(view=vue, attachments=fichiers)
+    except Exception as e:                                   # noqa: BLE001
+        raison = f"{type(e).__name__}: {e}"[:200]
+        _dire(cle, raison, f"[outils-communs] archive de la quinzaine du {a['du']} au {a['au']} "
+              f"non redessinee ({raison})")
+        return False
+    _DITS.pop(cle, None)
     return True
 
 

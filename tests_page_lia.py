@@ -33,6 +33,10 @@ Ce qui est vérifié (infloww_liens, profil « lia », REGLAGES) :
     réglage enregistré passe devant ; Jessye et Emy sans paie imposée ;
   - l'image de la quinzaine en cours (liens_image) : les chiffres de la page,
     triés par subs, sans net ni paie, la photo Discord de chaque VA ;
+  - l'image d'une quinzaine FINIE (01/11 : « garde une trace de la période
+    d'avant, toujours ») : période imposée, « quinzaine terminée » et le jour
+    des chiffres, un nom de fichier par période ; la quinzaine précédente
+    bien calculée (fin de mois, février, changement d'année) ;
   - la route : accès libre (sans clé ni compte : vue des VA ; propriétaire,
     31/10 : « mets aussi un accès libre »), le lien posté sans clé, l'admin
     connecté garde le paiement ; Emy et Jessye restent fermées sans clé.
@@ -419,6 +423,97 @@ check("salon : image de la quinzaine EN COURS (du 1er ou du 16 à aujourd'hui), 
       im.get("png", b"")[:4] == b"\x89PNG" and _vues_ph == [["111", "222"]]
       and MYPULS_LU[-1] == (m.quinzaine_de(_dt_auj())[0].isoformat(), m._aujourdhui()),
       (im.get("erreur"), _vues_ph, MYPULS_LU[-2:]))
+
+# La quinzaine FINIE, gardée dans le salon. Propriétaire, 01/11/2026, devant
+# « 01/11 → 01/11 · quinzaine en cours » tout à 0 : « garde une trace de la
+# période d'avant, toujours ».
+print("6b. L'image d'une quinzaine finie (archive du 📊・click-et-sub)")
+import PIL.ImageDraw as _ImageDraw      # noqa: E402
+
+v_fin = li.tableau(_tq, "2026-10-16", "2026-10-31", "01/11 à 11h00", nom="Lia", terminee=True)
+check("archive : tableau marqué « terminée », mêmes lignes et même total que la quinzaine en cours",
+      v_fin["terminee"] is True and v["terminee"] is False
+      and [x["cle"] for x in v_fin["lignes"]] == [x["cle"] for x in v["lignes"]] and v_fin["total"] == v["total"],
+      (v_fin.get("terminee"), v.get("terminee")))
+check("archive : le texte de l'image dit « quinzaine terminée du 16/10 au 31/10 » (en cours : inchangé)",
+      li.texte_alt(v_fin).startswith("Lia · quinzaine terminée du 16/10 au 31/10 : ")
+      and li.texte_alt(v).startswith("Lia · quinzaine du 16/10 au 31/10 : "),
+      (li.texte_alt(v_fin), li.texte_alt(v)))
+_ecrits = []
+_text_sauve = _ImageDraw.ImageDraw.text
+
+
+def _text_note(self, xy, text, *a, **k):
+    _ecrits.append(str(text))
+    return _text_sauve(self, xy, text, *a, **k)
+
+
+_ImageDraw.ImageDraw.text = _text_note
+try:
+    png_fin = li.dessiner(v_fin)
+    ecrits_fin, _ecrits[:] = list(_ecrits), []
+    li.dessiner(v)
+    ecrits_cours = list(_ecrits)
+finally:
+    _ImageDraw.ImageDraw.text = _text_sauve
+check("archive : dessinée « 16/10 → 31/10 · quinzaine terminée », « mis à jour le 01/11 à 11h00 »",
+      png_fin[:4] == b"\x89PNG" and "16/10 → 31/10 · quinzaine terminée" in ecrits_fin
+      and "mis à jour le 01/11 à 11h00" in ecrits_fin
+      and not any("en cours" in t_ for t_ in ecrits_fin), ecrits_fin[:6])
+check("en cours : toujours « quinzaine en cours » et « mis à jour 19h00 »",
+      "16/10 → 31/10 · quinzaine en cours" in ecrits_cours and "mis à jour 19h00" in ecrits_cours
+      and not any("terminée" in t_ for t_ in ecrits_cours), ecrits_cours[:6])
+import re as _re                        # noqa: E402
+check("archive : un nom de fichier à elle, par période, sans caractère que Discord réécrit",
+      li.nom_archive("2026-10-16", "2026-10-31") == "quinzaine_lia_20261016_20261031.png"
+      and li.nom_archive("2026-10-16", "2026-10-31") != li.NOM
+      and li.nom_archive("2026-11-01", "2026-11-15") != li.nom_archive("2026-10-16", "2026-10-31")
+      and _re.fullmatch(r"[A-Za-z0-9_.-]+", li.nom_archive("2026-10-16", "2026-10-31")) is not None)
+# la période lue est notée à l'appel : MyPuls garde la quinzaine 16 → 31/10
+# en cache (lue plus haut), MYPULS_LU ne la reverrait pas
+_lus = []
+_mp_sauve, _tp_sauve = m._mypuls_periode, m.tableau_periode
+
+
+def _mp_note(du, au, attente=None):
+    _lus.append(("mypuls", du, au))
+    return _mp_sauve(du, au, attente=attente)
+
+
+def _tp_note(du, au, us="page"):
+    _lus.append(("page", du, au))
+    return _tp_sauve(du, au, us=us)
+
+
+_svc_sauve, _svc.photos_avatars = _svc.photos_avatars, _fausses_photos
+il.profil = lambda nom: m if str(nom or "").lower() == "lia" else _il_sauve(nom)
+m._mypuls_periode, m.tableau_periode = _mp_note, _tp_note
+try:
+    im_fin = asyncio.run(oc.image_clics(_g, _types.SimpleNamespace(), du="2026-10-16", au="2026-10-31",
+                                        terminee=True))
+finally:
+    il.profil, _svc.photos_avatars = _il_sauve, _svc_sauve
+    m._mypuls_periode, m.tableau_periode = _mp_sauve, _tp_sauve
+check("image_clics : période imposée (16/10 → 31/10), lue telle quelle, texte « terminée »",
+      im_fin.get("png", b"")[:4] == b"\x89PNG"
+      and _lus[:1] == [("mypuls", "2026-10-16", "2026-10-31")] and ("page", "2026-10-16", "2026-10-31") in _lus
+      and "quinzaine terminée du 16/10 au 31/10" in im_fin.get("alt", ""),
+      (im_fin.get("erreur"), _lus, im_fin.get("alt")))
+_auj_sauve = m._aujourdhui
+il.profil = lambda nom: m if str(nom or "").lower() == "lia" else _il_sauve(nom)
+try:
+    _qs = {}
+    for _j in ("2026-11-01", "2026-11-15", "2026-11-16", "2026-03-05", "2026-01-02"):
+        m._aujourdhui = (lambda j=_j: j)
+        _qs[_j] = oc._quinzaines_clics()
+finally:
+    m._aujourdhui, il.profil = _auj_sauve, _il_sauve
+check("quinzaine en cours et précédente (1er → 15, 16 → fin du mois, février, changement d'année)",
+      _qs["2026-11-01"] == {"du": "2026-11-01", "au": "2026-11-01", "prec_du": "2026-10-16", "prec_au": "2026-10-31"}
+      and _qs["2026-11-15"] == {"du": "2026-11-01", "au": "2026-11-15", "prec_du": "2026-10-16", "prec_au": "2026-10-31"}
+      and _qs["2026-11-16"] == {"du": "2026-11-16", "au": "2026-11-16", "prec_du": "2026-11-01", "prec_au": "2026-11-15"}
+      and _qs["2026-03-05"]["prec_du"] == "2026-02-16" and _qs["2026-03-05"]["prec_au"] == "2026-02-28"
+      and _qs["2026-01-02"]["prec_du"] == "2025-12-16" and _qs["2026-01-02"]["prec_au"] == "2025-12-31", _qs)
 
 print("7. La route")
 import web_upload as wu      # noqa: E402

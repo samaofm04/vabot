@@ -15,6 +15,15 @@ POURQUOI
     toutes lettres : « les clics US, c'est quoi ? ». Les
     chiffres sont ceux de la page sur la meme periode, pas recalcules ici.
 
+LA QUINZAINE FINIE
+    Proprietaire, 01/11/2026, devant le salon reparti a zero (« 01/11 → 01/11
+    · quinzaine en cours ») : « ça doit faire un repost ... comment ils font
+    pour voir combien de subs ils ont fait pour la période d'avant sans
+    cliquer ; garde une trace de la période d'avant, toujours ». La quinzaine
+    finie reste donc dans le salon, en image seule (outils_communs,
+    PanneauArchive) : `terminee` y ecrit « quinzaine terminée » et le JOUR
+    des chiffres, sous un nom de fichier a elle (nom_archive).
+
 JAMAIS LE NET NI LA PAIE
     Le salon est lu par les VA : le $ / sub (LTV) seul, comme la page des VA.
 
@@ -55,11 +64,23 @@ def _jour(iso: str) -> str:
         return "?"
 
 
-def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "") -> dict:
+def nom_archive(du: str, au: str) -> str:
+    """Le nom de l'image d'une quinzaine FINIE : « quinzaine_lia_20261016_
+    20261031.png ». Distinct de NOM : le panneau vivant se reconnait a NOM
+    (outils_communs._porte_image), l'archive d'une periode a son nom a elle
+    -- relu dans le salon, il dit si cette quinzaine est deja gardee."""
+    def j(x):
+        return "".join(ch for ch in str(x)[:10] if ch.isdigit()) or "0"
+    return "quinzaine_lia_%s_%s.png" % (j(du), j(au))
+
+
+def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "", terminee: bool = False) -> dict:
     """Ce que l'image montre, tire du tableau de la page (infloww_liens
     tableau_periode) : une ligne par personne, triee par subs puis clics US
     (une valeur inconnue en bas), le total, la periode. Rien n'est recalcule :
-    CVR, $ / sub et couleurs sont ceux de la page."""
+    CVR, $ / sub et couleurs sont ceux de la page. `terminee` : une quinzaine
+    finie, gardee dans le salon (`maj` porte alors le jour : « 01/11 à
+    11h00 »)."""
     import infloww_liens as _il
     lignes = []
     for x in t.get("lignes") or []:
@@ -90,7 +111,7 @@ def tableau(t: dict, du: str, au: str, maj: str = "", nom: str = "") -> dict:
             x["rang"] = 0
     T = t.get("totaux") or {}
     return {"lignes": lignes, "du": du, "au": au, "maj": maj, "erreur": str(t.get("erreur") or ""),
-            "nom": str(nom or ""),
+            "nom": str(nom or ""), "terminee": bool(terminee),
             "total": {"us": T.get("us"), "glob": T.get("glob"), "inf": T.get("clics_cvr"),
                       "subs": T.get("subs"), "cvr": T.get("cvr"),
                       "par_sub": T.get("par_sub"), "gagne": T.get("gagne"),
@@ -138,20 +159,23 @@ def dessiner(v: dict, photos: dict = None) -> bytes:
     f_nom, f_det = police("medium", _p(27)), police("regular", _p(20))
     f_ch, f_ch_b, f_pas = police("regular", _p(27)), police("bold", _p(27)), police("bold", _p(23))
 
-    # en-tete : « Lia · clics & subs », « 16/10 → 31/10 · quinzaine en cours · mis a jour 19h00 »
+    # en-tete : « Lia · clics & subs », « 16/10 → 31/10 · quinzaine en cours · mis a jour 19h00 »,
+    # ou, finie : « 16/10 → 31/10 · quinzaine terminée · mis a jour le 01/11 à 11h00 »
     titre = nettoyer("%s · clics & subs" % (v.get("nom") or "Lia"), f_titre)
     d.text((_p(marge), _p(marge)), titre, font=f_titre, fill=TEXTE, anchor="lt")
     n = len(lignes)
     d.text((_p(largeur - marge), _p(marge + 12)), "%d VA" % n, font=f_sous, fill=TEXTE_2, anchor="rt")
     y = _p(marge + 86)
-    sous = "%s → %s · quinzaine en cours" % (_jour(v.get("du")), _jour(v.get("au")))
+    sous = "%s → %s · %s" % (_jour(v.get("du")), _jour(v.get("au")),
+                             "quinzaine terminée" if v.get("terminee") else "quinzaine en cours")
     sous = nettoyer(sous, f_sous)
     d.text((_p(marge), y), sous, font=f_sous, fill=TEXTE_2, anchor="ls")
     if v.get("maj"):
         x = _p(marge) + _si._largeur(d, sous, f_sous)
         d.text((x, y), " · ", font=f_sous, fill=TEXTE_3, anchor="ls")
         x += _si._largeur(d, " · ", f_sous)
-        d.text((x, y), nettoyer("mis à jour %s" % v["maj"], f_maj), font=f_maj, fill=VERT_CLAIR, anchor="ls")
+        maj = ("mis à jour le %s" if v.get("terminee") else "mis à jour %s") % v["maj"]
+        d.text((x, y), nettoyer(maj, f_maj), font=f_maj, fill=VERT_CLAIR, anchor="ls")
 
     y0 = marge + h_tete + 10
     d.rounded_rectangle((_p(marge), _p(y0), _p(largeur - marge), _p(y0 + h_entete - 6)),
@@ -223,8 +247,9 @@ def texte_alt(v: dict) -> str:
     """La description de l'image (lecteurs d'ecran, aperçu) : la quinzaine et
     le total, sans montant."""
     T = v.get("total") or {}
-    return ("%s · quinzaine du %s au %s : %s clics US, %s clics globaux, %s clics Infloww, %s subs"
-            % (v.get("nom") or "Lia", _jour(v.get("du")), _jour(v.get("au")),
+    return ("%s · quinzaine %sdu %s au %s : %s clics US, %s clics globaux, %s clics Infloww, %s subs"
+            % (v.get("nom") or "Lia", "terminée " if v.get("terminee") else "",
+               _jour(v.get("du")), _jour(v.get("au")),
                T.get("us") if T.get("us") is not None else "—",
                T.get("glob") if T.get("glob") is not None else "—",
                T.get("inf") if T.get("inf") is not None else "—",
