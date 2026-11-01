@@ -33,7 +33,11 @@ import gms                              # noqa: E402  (le vrai : heure_paris)
 
 # ------------------------------------------------ faux GetMySocial ----------
 ETAT_GMS = {"pause": 0, "pause_ecriture": 0, "budget": True, "liste": "ok", "appels": []}
-LIENS_EQUIPE = [{"id": "lnk_base_lola", "shortcode": "lola_bby", "display_name": "Lola 1"},
+# L'equipe du 01/11/2026 : la page tlg de Lola, son ancienne page restee
+# nommee « Lola 1 » (listee AVANT, comme dans GetMySocial), et Amelia sans tlg.
+LIENS_EQUIPE = [{"id": "lnk_ancien_lola", "shortcode": "lolatlgg", "display_name": "Lola 1"},
+                {"id": "lnk_ancien_lola2", "shortcode": "lola_bby", "display_name": "Lola"},
+                {"id": "lnk_base_lola", "shortcode": "lolatlg", "display_name": "Lola"},
                 {"id": "lnk_base_amelia", "shortcode": "amelia_bby", "display_name": "Amelia 1"}]
 
 
@@ -163,16 +167,28 @@ try:
         leve = True
     check("lien_de_base sur une liste illisible : GmsIndisponible, pas \"\"", leve)
 
-    print("\n— 6. une vraie absence reste dite")
+    print("\n— 6. la page tlg d'abord (01/11 : « prends juste tlg, c'est ça les bons »)")
     bac()
+    check("lola : lolatlg, pas lolatlgg nommée « Lola 1 » ni lola_bby",
+          liens_fr.lien_de_base("lola") == "lnk_base_lola")
+    check("amelia sans page tlg : l'ancien lien de base, comme avant",
+          liens_fr.lien_de_base("amelia") == "lnk_base_amelia")
     sauve = list(LIENS_EQUIPE)
-    LIENS_EQUIPE[:] = [l for l in LIENS_EQUIPE if l["shortcode"] != "lola_bby"]
+    LIENS_EQUIPE[:] = [l for l in LIENS_EQUIPE if l["shortcode"] != "lolatlg"]
+    bac()
+    check("lolatlg absent : repli sur l'ancienne page (pas d'erreur pour un renommage)",
+          liens_fr.lien_de_base("lola") in ("lnk_ancien_lola", "lnk_ancien_lola2"))
+    LIENS_EQUIPE[:] = sauve
+
+    print("\n— 7. une vraie absence reste dite")
+    bac()
+    LIENS_EQUIPE[:] = [l for l in LIENS_EQUIPE if not l["shortcode"].startswith("lola")]
     r = liens_fr.generer(VA, PSEUDO, "lola", par=MANAGER)
     LIENS_EQUIPE[:] = sauve
-    check("liste lue, lola_bby absent : « pas de lien de base », comme avant",
-          not r["ok"] and "pas de lien de base « lola_bby »" in r["erreur"], r)
+    check("liste lue, aucune page Lola : « pas de lien de base », comme avant",
+          not r["ok"] and "pas de lien de base « lolatlg »" in r["erreur"], r)
 
-    print("\n— 7. un lien déjà fait est rendu même pendant la pause")
+    print("\n— 8. un lien déjà fait est rendu même pendant la pause")
     bac(pause=5220)
     safe_json.write(liens_fr.ETAT, {"liens": {f"{VA}:lola": {
         "link_id": "lnk_x", "public_url": "https://getmysocial.com/lolaglow",

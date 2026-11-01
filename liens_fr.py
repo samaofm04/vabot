@@ -4,7 +4,7 @@
 POURQUOI (proprietaire, 03/10/2026)
     « Pour le lien de tracking, pareil que pour Twitter, tu crées pour le VA
     tranquillement. » Chaque model a, dans l'equipe GetMySocial des VA, un
-    lien de base « <Model> 1 » (getmysocial.com/<model>_bby) : une page aux
+    lien de base (getmysocial.com/<model>tlg depuis le 01/11) : une page aux
     boutons OF et/ou MYM. Le lien d'un VA en est la COPIE, dont chaque bouton
     pointe vers un lien de tracking MyPuls cree pour lui (« fais automatique
     depuis MyPuls », MYM comme OF), range dans le groupe de la model, nomme
@@ -139,17 +139,30 @@ def gms_indisponible() -> str:
 
 
 def lien_de_base(model: str) -> str:
-    """L'id du lien de base de la model dans l'equipe : adresse « <model>_bby »
-    (ou qui commence ainsi), sinon nomme « <Model> 1 ». "" s'il n'y est pas ;
-    GmsIndisponible si la liste n'a pas pu etre lue."""
+    """L'id du lien de base de la model dans l'equipe : adresse « <model>tlg »,
+    EXACTE. Une model sans page tlg (Sarah, 01/11) garde l'ancienne regle :
+    « <model>_bby » (ou qui commence ainsi), sinon nomme « <Model> 1 ». ""
+    s'il n'y est pas ; GmsIndisponible si la liste n'a pas pu etre lue.
+
+    Proprietaire, 01/11/2026 : « prends plutot comme ref juste tlg, c'est ca
+    les bons » -- les pages refaites au style de siennatlg. L'ancienne regle
+    prenait lolatlgg et juliatlgg, restees nommees « Lola 1 » / « Julia 1 »,
+    et chaque nouveau lien de VA heritait de l'ancien design. Adresse exacte :
+    lolatlgg, juliatlgg, ameliatlgss... sont justement les anciennes."""
     nom = MODELS.get(model, {}).get("nom", model)
     for force in (False, True):
         # relue pour de bon, une liste illisible leve GmsIndisponible : jamais
         # « pas de lien de base » sur une panne
-        for l in _liens_equipe(force, strict=force):
+        liens = _liens_equipe(force, strict=force)
+        for l in liens:
+            if str(l.get("shortcode") or "").lower() == f"{model}tlg":
+                return str(l.get("id") or "")
+        for l in liens:
             sc = str(l.get("shortcode") or "").lower()
             dn = str(l.get("display_name") or "").strip().lower()
             if sc == f"{model}_bby" or sc.startswith(f"{model}_bby") or dn == f"{nom.lower()} 1":
+                print(f"[liens_fr] pas de page {model}tlg : ancien lien de base {sc} copie",
+                      flush=True)
                 return str(l.get("id") or "")
     return ""
 
@@ -719,7 +732,7 @@ def generer(uid, pseudo: str, model: str, par: Any = None) -> Dict[str, Any]:
                     "erreur": f"GetMySocial n'a pas rendu la liste des liens ({e}) : rien n'a été "
                               "créé, à refaire plus tard."}
         if not gabarit:
-            return {"ok": False, "erreur": f"pas de lien de base « {model}_bby » ({cfg['nom']} 1) "
+            return {"ok": False, "erreur": f"pas de lien de base « {model}tlg » "
                                            "dans l'équipe GetMySocial VA IG DISCORD"}
         base = lire_lien(gabarit)
         plates = sorted({plateforme(b.get("url")) for b in base.get("buttons") or []} - {""})
