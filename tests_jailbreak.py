@@ -1590,7 +1590,7 @@ try:
         # etait allumee et ne s appliquait pas la, sans un mot.
         _srcUBr = _plBr.Path("cogs/user.py").read_text(encoding="utf-8")
         # Trois depuis le 01/11/2026 : la version SANS TEXTE d'un montage
-        # (_livrer_sans_texte) part comme une brute, elle aussi reecrite.
+        # (_livrer_avec_sans_texte) part comme une brute, elle aussi reecrite.
         check("brutmeta : le VA est averti quand la brute part inchangee",
               _srcUBr.count("pas** pu etre rendue unique") == 3,
               "%d avertissement(s) sur 3"
@@ -13740,7 +13740,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             # message, sans titre ni bloc de code ; nomme par un bouton gris
             # seulement quand ils sont plusieurs.
             # Les textes que le bot a incrustes, chacun seul, avant la
-            # description (_livrer_sans_texte, 01/11/2026) : ici le rendu
+            # description (_livrer_avec_sans_texte, 01/11/2026) : ici le rendu
             # simule n'a pas d'entree, ils suivent donc la carte avec texte.
             att = ([(U._T_ECRIT, t) for t in (ecrits_de or ecrits_rendus)(c)]
                    + [(U._T_CAP, cap_de(c) if cap_de else None),
@@ -14424,7 +14424,7 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             for _s in ast.walk(_n):
                 if isinstance(_s, ast.Call):
                     _porteur[id(_s)] = _n.name
-    _fichiers, _livreurs = [], set()
+    _fichiers, _livreurs, _relayes = [], set(), set()
     for _n in ast.walk(_arbre):
         if not isinstance(_n, ast.Call):
             continue
@@ -14433,6 +14433,10 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             _fichiers.append(_porteur.get(id(_n), "?"))
         if getattr(_n.func, "id", None) == "_livrer_contenu":
             _livreurs.add(_porteur.get(id(_n), "?"))
+        # Le relais des montages (avec ET sans texte, 01/11/2026) : il passe
+        # lui-meme par _livrer_contenu, verifie juste en dessous.
+        if getattr(_n.func, "id", None) == "_livrer_avec_sans_texte":
+            _relayes.add(_porteur.get(id(_n), "?"))
     # Deux exceptions NOMMEES : le tutoriel (un mode d'emploi, pas un contenu)
     # et la planche de « Choisir ma brute » (un menu, pas une livraison).
     _HORS_LIVRAISON = {"_livrer_contenu", "_send_tutoriel", "_planche_et_texte"}
@@ -14442,7 +14446,8 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
                  "_gen_and_send_montaged", "_send_caption_plus_brute", "_envoyer_brutes_meta",
                  "_gen_and_send_caption", "_sans_caption"}
     check("une seule voie : les 9 fonctions d'envoi passent par _livrer_contenu",
-          _ATTENDUS <= _livreurs, sorted(_ATTENDUS - _livreurs))
+          _ATTENDUS <= _livreurs | (_relayes if "_livrer_avec_sans_texte" in _livreurs else set()),
+          sorted(_ATTENDUS - _livreurs - _relayes))
 
     def _litteraux(code):
         """Les chaines que le code peut ENVOYER : constantes et morceaux de

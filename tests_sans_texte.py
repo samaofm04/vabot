@@ -4,17 +4,17 @@
 Propriétaire, 01/11/2026 : pour Caption, Template, Trash et Flash, la vidéo
 avec son texte, la même sans, puis chaque texte seul (copier-coller facile).
 
-Ce qui est vérifié (sans_texte, cogs/user._livrer_sans_texte et les deux
-livraisons de montage) :
+Ce qui est vérifié (sans_texte, cogs/user._livrer_avec_sans_texte et les
+deux livraisons de montage) :
   - les textes du brouillon, dans l'ordre, une fois, liste ou JSON ;
   - la vidéo d'entrée du rendu : trouvée, absente, ambiguë ;
-  - Template/Trash/Flash : carte avec texte (sans texte à copier), puis la
-    carte « sans texte » (l'ENTRÉE du rendu), puis chaque texte du bot seul,
-    puis la description ;
-  - Caption : pareil, la brute sans la caption, puis la caption et la
-    description seules ;
+  - Template/Trash/Flash : UNE carte, à gauche la vidéo sans texte (l'ENTRÉE
+    du rendu), à droite la même déjà prête (« à gauche la fraîche, à droite
+    celle déjà good »), puis chaque texte du bot seul, puis la description ;
+  - Caption : pareil, la brute sans la caption à gauche ;
+  - la paire trop lourde ensemble : une carte chacune, la prête d'abord ;
   - le « ne poste pas » (repli) : rien de plus ; variante de la réserve ou
-    rendu purgé : les textes seuls ;
+    rendu purgé : la carte de la vidéo prête, puis les textes ;
   - la vidéo sans texte passe par brute_a_envoyer (uniquification), et un
     échec de l'uniquification met le liseré rouge.
 
@@ -154,14 +154,30 @@ try:
     courir(cog._gen_and_send_montaged(i, src, DRAFT, "ma description", 1, 1, "brune",
                                       prefixe_fichier="flash"))
     r = resume(i.followup.envois)
-    check("Flash : la carte AVEC texte d'abord, sans rien à copier dedans",
-          r[0][0] == "carte" and r[0][1] == ("flash_1.mp4",) and not any("sans texte" in t for t in r[0][2]),
-          r[:1])
-    check("… puis la carte « sans texte », sur l'ENTRÉE du rendu",
-          r[1][0] == "carte" and r[1][1] == ("flash_1_sans_texte.mp4",) and "sans texte" in r[1][2], r[1:2])
+    check("Flash : UNE carte, à gauche la vidéo sans texte, à droite la même déjà prête",
+          r[0][0] == "carte" and r[0][1] == ("flash_1_sans_texte.mp4", "flash_1.mp4")
+          and len([x for x in r if x[0] == "carte"]) == 1, r[:1])
     check("… puis chaque texte du bot SEUL, dans l'ordre, puis la description seule",
-          [x[1] for x in r[2:]] == ["The view outside was amazing", "POV: me", "ma description"]
-          and all(x[0] == "texte" for x in r[2:]), r[2:])
+          [x[1] for x in r[1:]] == ["The view outside was amazing", "POV: me", "ma description"]
+          and all(x[0] == "texte" for x in r[1:]), r[1:])
+
+    # la paire refusée (trop lourde ENSEMBLE) : une carte chacune
+    class SuiviLourd(Suivi):
+        async def send(self, content=None, **kw):
+            if len(kw.get("files") or []) > 1:
+                raise discord.HTTPException(SimpleNamespace(status=413, reason="Payload Too Large"),
+                                            {"code": 40005, "message": "Request entity too large"})
+            return await super().send(content, **kw)
+
+    i = itx()
+    i.followup = SuiviLourd()
+    courir(cog._gen_and_send_montaged(i, src, DRAFT, "ma description", 1, 1, "brune",
+                                      prefixe_fichier="flash"))
+    r = resume(i.followup.envois)
+    check("paire trop lourde ensemble : la prête d'abord, puis la sans texte, puis les textes",
+          [x[:2] for x in r[:2]] == [("carte", ("flash_1.mp4",)), ("carte", ("flash_1_sans_texte.mp4",))]
+          and "sans texte" in r[1][2]
+          and [x[1] for x in r[2:]] == ["The view outside was amazing", "POV: me", "ma description"], r)
 
     # le repli (template entier, « ne poste pas ») : rien de plus
     def faux_gen_repli(src, draft, folders, model, brutes, report=None):
@@ -184,7 +200,7 @@ try:
     i = itx()
     courir(cog._gen_and_send_montaged(i, src, DRAFT, "ma description", 1, 1, "brune"))
     r = resume(i.followup.envois)
-    check("entrée du rendu disparue : la carte, puis les textes seuls (rien de perdu)",
+    check("entrée du rendu disparue : la carte de la vidéo prête, puis les textes seuls (rien de perdu)",
           [x[0] for x in r] == ["carte", "texte", "texte", "texte"]
           and r[1][1] == "The view outside was amazing", r)
     noctus_web.output_paths = lambda m: [MODELS / m / "output" / "V1" / "out.mp4"]
@@ -197,10 +213,10 @@ try:
     i = itx()
     courir(cog._gen_and_send_caption(i, brute, cap, block, 1, 1, "brune"))
     r = resume(i.followup.envois)
-    check("Caption : avec, puis sans (la brute), puis la caption seule, puis la description seule",
-          [x[0] for x in r] == ["carte", "carte", "texte", "texte"]
-          and r[1][1] == ("reel_caption_1_sans_texte.mp4",)
-          and [r[2][1], r[3][1]] == ["Men I'm not joking", "lien en bio"], r)
+    check("Caption : UNE carte (la brute sans la caption à gauche), la caption seule, la description seule",
+          [x[0] for x in r] == ["carte", "texte", "texte"]
+          and r[0][1] == ("reel_caption_1_sans_texte.mp4", "reel_caption_1.mp4")
+          and [r[1][1], r[2][1]] == ["Men I'm not joking", "lien en bio"], r)
 
     # ── 5. l'uniquification ──────────────────────────────────────────────
     vus = []
@@ -212,26 +228,43 @@ try:
 
     u.load_transform_config = lambda: {"enabled": True, "metadata_only": True}
     u.transform_metadata_strict = faux_meta
+    PRETE = MODELS / "vam-un" / "output" / "V1" / "out.mp4"
     i = itx()
-    courir(u._livrer_sans_texte(i, 1, 1, "brune", "vam-un", DRAFT, "x_sans_texte.mp4", "FLASH 1/1"))
+    courir(u._livrer_avec_sans_texte(i, 1, 1, "brune", PRETE, "x.mp4", "vam-un", DRAFT, "FLASH 1/1"))
     check("la version sans texte passe par brute_a_envoyer : métadonnées réécrites (uniquification)",
-          vus == ["asm1_x.mp4"] and resume(i.followup.envois)[0][1] == ("x_sans_texte.mp4",), (vus,))
+          vus == ["asm1_x.mp4"] and resume(i.followup.envois)[0][1] == ("x_sans_texte.mp4", "x.mp4"),
+          (vus, resume(i.followup.envois)[:1]))
+    NOTES = []
+
+    async def faux_noter(interaction, identite, medias, recette, quoi):
+        NOTES.append((list(medias), recette))
+    _vrai_noter = u._noter_livraison
+    u._noter_livraison = faux_noter
+    try:
+        courir(u._livrer_avec_sans_texte(itx(), 1, 1, "brune", PRETE, "x.mp4", "vam-un", DRAFT,
+                                         "FLASH 1/1", recette={"action": "FLASH"}))
+    finally:
+        u._noter_livraison = _vrai_noter
+    check("les favoris notent la vidéo DÉJÀ PRÊTE (à droite), jamais la sans texte",
+          len(NOTES) == 1 and [n for _c, n in NOTES[0][0]] == ["x.mp4"]
+          and NOTES[0][1] == {"action": "FLASH"}, NOTES)
     u.transform_metadata_strict = lambda video, sortie, **kw: False
     i = itx()
-    courir(u._livrer_sans_texte(i, 1, 1, "brune", "vam-un", DRAFT, "x_sans_texte.mp4", "FLASH 1/1"))
+    courir(u._livrer_avec_sans_texte(i, 1, 1, "brune", PRETE, "x.mp4", "vam-un", DRAFT, "FLASH 1/1"))
     t0 = resume(i.followup.envois)[0][2]
-    check("… uniquification ratée : la carte le dit (ne pas poster telle quelle)",
-          any("pas** pu etre rendue unique" in t for t in t0), t0)
+    check("… uniquification ratée : la carte le dit (ne pas poster la version sans texte telle quelle)",
+          any("sans texte n a **pas** pu etre rendue unique" in t for t in t0), t0)
     u.load_transform_config = lambda: {"enabled": False}
 
     # ── 6. variante de la réserve : textes seuls ─────────────────────────
     i = itx()
-    courir(u._livrer_sans_texte(i, 1, 1, "brune", None, DRAFT, "x.mp4", "FLASH 1/1",
-                                [(u._T_DESC, "desc")]))
-    check("variante de la réserve (aucun rendu) : les textes du bot puis la description, seuls",
-          resume(i.followup.envois) == [("texte", "The view outside was amazing"),
-                                        ("texte", "POV: me"), ("texte", "desc")],
-          resume(i.followup.envois))
+    courir(u._livrer_avec_sans_texte(i, 1, 1, "brune", PRETE, "x.mp4", None, DRAFT, "FLASH 1/1",
+                                     textes=[(u._T_DESC, "desc")]))
+    r = resume(i.followup.envois)
+    check("variante de la réserve (aucun rendu) : la carte de la vidéo prête, les textes du bot "
+          "puis la description, seuls",
+          r[0][:2] == ("carte", ("x.mp4",)) and r[1:] == [("texte", "The view outside was amazing"),
+                                                          ("texte", "POV: me"), ("texte", "desc")], r)
     check("le texte du bot porte son étiquette « ✍️ Texte »", u._ETIQUETTES.get(u._T_ECRIT) == "✍️ Texte")
 except Exception as e:                                       # noqa: BLE001
     import traceback

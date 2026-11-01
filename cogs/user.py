@@ -1613,7 +1613,8 @@ def _un_contenu_a_la_fois(fn):
 @_un_contenu_a_la_fois
 async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                           textes=(), alertes=(), bloquant=False, quoi="contenu",
-                          textes_a_part=True, recette=None, bilan=None):
+                          textes_a_part=True, recette=None, bilan=None, a_noter=0,
+                          paire=False):
     """Livre UN contenu au VA : la carte (_carte_livraison), sinon l'ancien
     envoi (en-tete + fichier(s)) ; puis chaque texte a copier, seul dans son
     message (_envoyer_textes).
@@ -1633,7 +1634,11 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
     banger ne de cette video retrouvera sa recette exacte.
 
     `bilan` (dict) : recoit « textes_rates », les textes que Discord a
-    refuses apres le media (_envoyer_textes ne les fait pas remonter)."""
+    refuses apres le media (_envoyer_textes ne les fait pas remonter).
+
+    `a_noter` : le media dont la recette est notee (le 1er par defaut).
+    `paire` : deux medias qui vont ensemble (avec et sans texte) : l'ancien
+    envoi refuse, rien ne part seul, l'erreur remonte."""
     guild = getattr(interaction, "guild", None)
     # LES TEXTES A COPIER SORTENT DE LA CARTE (27/09/2026). La carte porte
     # l'en-tete et le media ; chaque texte suit, juste en dessous, SEUL dans
@@ -1668,7 +1673,7 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
         if envoyee:
             if textes_a_part:
                 _textes_rates(quoi, await _envoyer_textes(interaction, textes), bilan)
-            await _noter_livraison(interaction, identite, medias, recette, quoi)
+            await _noter_livraison(interaction, identite, medias[a_noter:], recette, quoi)
             return "carte"
 
     # L'ANCIEN ENVOI, sans ses consignes : le meme en-tete que la carte, le
@@ -1687,7 +1692,9 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
     try:
         await interaction.followup.send(content=tete, files=ouverts)
     except discord.HTTPException as e:
-        if len(medias) < 2:
+        # `paire` (_livrer_avec_sans_texte) : les deux vont ensemble, jamais
+        # l'une sans l'autre -- l'appelant les envoie chacune a part.
+        if len(medias) < 2 or paire:
             raise
         # L'exemple fait souvent deborder la taille permise : le contenu
         # seul passe, et l'omission se dit.
@@ -1697,7 +1704,7 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
             content=tete + "\n⚠️ *(Exemple omis : trop lourd)*",
             file=discord.File(str(chemin), filename=_nom_piece_jointe(nom)))
     _textes_rates(quoi, await _envoyer_textes(interaction, textes), bilan)
-    await _noter_livraison(interaction, identite, medias, recette, quoi)
+    await _noter_livraison(interaction, identite, medias[a_noter:], recette, quoi)
     return "repli"
 
 
@@ -1812,49 +1819,69 @@ async def _noter_livraison(interaction, identite, medias, recette, quoi):
 
 
 #: Un texte que le bot incruste, rendu a part pour l'ecrire soi-meme sur
-#: Instagram (_livrer_sans_texte).
+#: Instagram (_livrer_avec_sans_texte).
 _T_ECRIT = "Texte à écrire"
 _ETIQUETTES[_T_ECRIT] = "✍️ Texte"
 
 
-async def _livrer_sans_texte(interaction, rang, total, identite, model, draft,
-                             nom, quoi, textes=()):
-    """Apres la carte d'un montage : la MEME video sans le texte du bot, puis
-    chaque texte seul dans son message, puis `textes` (la description).
+#: Sous la carte « avec et sans texte » quand la version sans texte n'a pas pu
+#: etre reecrite : deux VA posteraient le meme fichier.
+_ALERTE_SANS_TEXTE = ("⚠️ _La version sans texte n a **pas** pu etre rendue unique — "
+                      "ne la poste pas telle quelle, previens un admin._")
+
+
+async def _livrer_avec_sans_texte(interaction, rang, total, identite, avec, nom, model, draft,
+                                  quoi, *, textes=(), alertes=(), recette=None):
+    """UNE carte pour un montage : a GAUCHE la video sans le texte du bot, a
+    DROITE la meme deja prete ; puis chaque texte du bot seul dans son
+    message, puis `textes` (la description).
 
     Proprietaire, 01/11/2026, pour Caption, Template, Trash et Flash : « a
     chaque fois qu'il envoie, tu envoies toujours ca a cote, et remets
-    l'ecrit separement … comme ca le copier-coller est facile ». Des VA
+    l'ecrit separement … comme ca le copier-coller est facile », puis « mets-
+    les a cote, a gauche la fraiche, a droite celle deja good ». Des VA
     ecrivent leurs textes eux-memes sur Instagram, « ca prend mieux ».
 
-    La video est l'ENTREE du rendu `model` (sans_texte.video_du_rendu) :
-    aucun rendu de plus. Elle passe par brute_a_envoyer comme une brute :
-    metadonnees reecrites quand le site le demande, liseré rouge si ca rate
-    -- sinon deux VA posteraient le meme fichier. Sans elle (variante sortie
-    de la reserve, dossier purge), les textes partent quand meme et
-    l'absence va au journal. Une carte refusee se dit au VA."""
+    La video sans texte est l'ENTREE du rendu `model`
+    (sans_texte.video_du_rendu) : aucun rendu de plus. Elle passe par
+    brute_a_envoyer comme une brute (metadonnees reecrites quand le site le
+    demande, liseré rouge si ca rate). Seule la video deja prete est notee
+    pour les favoris (`recette`).
+
+    Sans elle (variante sortie de la reserve, dossier purge) : la carte de
+    la video prete puis les textes, l'absence au journal. La paire refusee
+    (trop lourde ENSEMBLE : 10 Mio sur un serveur sans boost) : une carte
+    chacune, la prete d'abord -- jamais une video perdue."""
     import sans_texte
-    ecrits = [(_T_ECRIT, t) for t in sans_texte.textes(draft)]
-    a_copier = ecrits + list(textes)
+    a_copier = [(_T_ECRIT, t) for t in sans_texte.textes(draft)] + list(textes)
     source = sans_texte.video_du_rendu(model) if model else None
     if source is None:
         log.info("%s : pas de version sans texte (%s), textes seuls", quoi,
                  "rendu introuvable" if model else "variante de la reserve")
-        _textes_rates(quoi, await _envoyer_textes(interaction, a_copier), None)
+        await _livrer_contenu(interaction, rang, total, identite, [(avec, nom)],
+                              textes=a_copier, alertes=alertes, quoi=quoi, recette=recette)
         return
+    nom_sans = f"{Path(nom).stem}_sans_texte{Path(nom).suffix}"
     import tempfile as _tmp
     with _tmp.TemporaryDirectory(prefix="sanstexte_") as dossier:
         fichier, _reecrit, raison = await brute_a_envoyer(source, dossier, identite,
                                                           noter=False)
-        alertes = ["sans texte"]
-        if raison:
-            alertes.append("⚠️ _Celle-ci n a **pas** pu etre rendue unique — "
-                           "ne la poste pas telle quelle, previens un admin._")
+        en_plus = [_ALERTE_SANS_TEXTE] if raison else []
         try:
             await _livrer_contenu(interaction, rang, total, identite,
-                                  [(fichier, nom)], textes=a_copier,
-                                  alertes=alertes, bloquant=bool(raison),
-                                  quoi=f"{quoi} sans texte")
+                                  [(fichier, nom_sans), (avec, nom)], textes=a_copier,
+                                  alertes=list(alertes) + en_plus, bloquant=bool(raison),
+                                  quoi=quoi, recette=recette, a_noter=1, paire=True)
+            return
+        except discord.HTTPException as e:
+            log.warning("%s : avec et sans texte refusees ensemble (%s), une carte chacune",
+                        quoi, e)
+        await _livrer_contenu(interaction, rang, total, identite, [(avec, nom)],
+                              alertes=alertes, quoi=quoi, recette=recette)
+        try:
+            await _livrer_contenu(interaction, rang, total, identite, [(fichier, nom_sans)],
+                                  textes=a_copier, alertes=["sans texte"] + en_plus,
+                                  bloquant=bool(raison), quoi=f"{quoi} sans texte")
         except (discord.HTTPException, FileNotFoundError) as e:
             _pq = "introuvable" if isinstance(e, FileNotFoundError) else "trop lourde"
             log.warning("%s : version sans texte non livree (%s)", quoi, e)
@@ -4173,26 +4200,26 @@ class UserCog(commands.Cog):
             # pas de legende ; le VA en inventerait une. On dit qu elle
             # existe, pourquoi elle ne part pas, et qui peut la debloquer.
             alertes.append(_ALERTE_DESC_RETENUE)
-        # La version sans texte suit, puis les textes (_livrer_sans_texte) --
-        # sauf derriere un « ne poste pas » : le template entier d'une autre
-        # creatrice, sans texte, resterait a ne pas poster.
-        _sans = not _rapport.get("repli")
+        _recette = _recette_montage(video, _rapport,
+                                    _fiche_res if de_la_reserve is not None else None,
+                                    famille, label)
         try:
-            await _livrer_contenu(
-                interaction, idx, total, identity,
-                [(out, f"{prefixe_fichier}_{idx}.mp4")],
-                textes=() if _sans else textes, alertes=alertes,
-                bloquant=bool(_rapport.get("repli")),
-                quoi=f"{label} {idx}/{total}",
-                recette=_recette_montage(video, _rapport,
-                                         _fiche_res if de_la_reserve is not None else None,
-                                         famille, label))
-            if _sans:
-                await _livrer_sans_texte(
-                    interaction, idx, total, identity,
+            if not _rapport.get("repli"):
+                # a cote, sans le texte du bot, puis les textes seuls
+                # (_livrer_avec_sans_texte)
+                await _livrer_avec_sans_texte(
+                    interaction, idx, total, identity, out, f"{prefixe_fichier}_{idx}.mp4",
                     None if de_la_reserve is not None else model, draft,
-                    f"{prefixe_fichier}_{idx}_sans_texte.mp4", f"{label} {idx}/{total}",
-                    textes)
+                    f"{label} {idx}/{total}", textes=textes, alertes=alertes,
+                    recette=_recette)
+            else:
+                # « ne poste pas » : le template entier d'une autre creatrice,
+                # sans texte, resterait a ne pas poster
+                await _livrer_contenu(
+                    interaction, idx, total, identity,
+                    [(out, f"{prefixe_fichier}_{idx}.mp4")],
+                    textes=textes, alertes=alertes, bloquant=True,
+                    quoi=f"{label} {idx}/{total}", recette=_recette)
         except (discord.HTTPException, FileNotFoundError) as e:
             # FileNotFoundError : la video produite (ou sortie de la reserve) a
             # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans
@@ -5513,21 +5540,18 @@ class UserCog(commands.Cog):
         # description a copier. Plus de « REEL CAPTION 1/5 → à poster sur ton
         # compte n°1 » ni de « Poste cette vidéo telle quelle » : le VA le sait.
         try:
-            await _livrer_contenu(
+            # a cote, la brute sans la caption ; puis la caption et la
+            # description seules (_livrer_avec_sans_texte)
+            await _livrer_avec_sans_texte(
                 interaction, idx, total, identity,
-                [(fichier, f"{prefixe_fichier}_{idx}.mp4")],
-                quoi=f"{label} {idx}/{total}",
+                fichier, f"{prefixe_fichier}_{idx}.mp4",
+                None if de_la_reserve is not None else model, draft,
+                f"{label} {idx}/{total}",
+                textes=[(_T_DESC, str(cap.get("desc") or "").strip())],
                 recette={"action": label, "famille": famille, "brute": video,
                          "reserve": de_la_reserve is not None,
                          "caption": {"id": cap.get("id"), "text": cap.get("text"),
                                      "ident": identity, "mode": "incrustee"}})
-            # la brute sans la caption, puis la caption et la description
-            # seules (_livrer_sans_texte)
-            await _livrer_sans_texte(
-                interaction, idx, total, identity,
-                None if de_la_reserve is not None else model, draft,
-                f"{prefixe_fichier}_{idx}_sans_texte.mp4", f"{label} {idx}/{total}",
-                [(_T_DESC, str(cap.get("desc") or "").strip())])
         except (discord.HTTPException, FileNotFoundError) as e:
             # FileNotFoundError : la video produite (ou sortie de la reserve) a
             # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans

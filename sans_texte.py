@@ -5,9 +5,10 @@ POURQUOI (propriétaire, 01/11/2026)
     Pour Caption, Template, Trash et Flash : « à chaque fois qu'il envoie, tu
     envoies toujours ça à côté, et remets l'écrit séparément … comme ça le
     copier-coller est facile ». Des VA préfèrent écrire eux-mêmes leurs
-    textes sur Instagram (« ça prend mieux »). Le bot livre donc la vidéo
-    avec son texte, la même SANS, puis chaque texte seul dans son message
-    (cogs/user._livrer_sans_texte).
+    textes sur Instagram (« ça prend mieux »). Le bot livre donc UNE carte,
+    la vidéo SANS le texte à gauche (« la fraîche »), la même déjà prête à
+    droite, puis chaque texte seul dans son message
+    (cogs/user._livrer_avec_sans_texte).
 
 D'OÙ VIENT LA VIDÉO SANS TEXTE
     Noctus monte d'abord la vidéo dans models/<id>/input (template + brute,
