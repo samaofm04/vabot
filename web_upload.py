@@ -69823,10 +69823,9 @@ def create_app():
         """Les liens de suivi de Jessye, par personne de GetMySocial « JESSY
         LE RETOUR » : clics US, clics OF, subs, CVR, $ par sub.
 
-        La page que Bixby met en tête de ses messages dans « inflow-resultat ».
-        Les VA qui l'ouvrent n'ont pas de compte : la clé du salon (?k=)
-        suffit, comparée en temps constant — et ne montre NI paiement NI gain.
-        La clé du propriétaire (infloww_liens.cle_paie, jamais postée) ou une
+        Depuis le 02/11/2026, Jessye et Emy ne s'ouvrent plus avec la clé du
+        salon (celle des VA) : réservées au propriétaire. Elle n'ouvre plus
+        que la page Lia, sans paiement ni gain. La clé du propriétaire (infloww_liens.cle_paie, jamais postée) ou une
         session admin sans clé montrent en plus les colonnes Paiement et
         Gain / perte. Sans clé, c'est la règle de /infloww : admin seulement,
         sauf la page Lia (?c=lia, ACCES_LIBRE) : ouverte à tous, vue des VA.
@@ -69854,6 +69853,13 @@ def create_app():
             acces = _il.acces_cle(k)
             if not acces:
                 return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+            if acces != "paie" and not getattr(_il, "ACCES_LIBRE", False):
+                # Pages Jessye et Emy : la clé des VA n'ouvre plus rien
+                # (propriétaire, 02/11/2026 : « je veux que personne ait accès
+                # à ça », « uniquement moi », « Lia c'est à part »). Elle avait
+                # servi 3 414 fois sur la page Emy. Restent sa clé perso et la
+                # session admin ; Lia (accès libre) ne change pas.
+                return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
             paie = acces == "paie"
         elif getattr(_il, "ACCES_LIBRE", False) and not (is_auth() and _is_admin()):
             # ?c=lia (propriétaire, 31/10/2026 : « mets aussi un accès libre ») :

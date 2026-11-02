@@ -7170,15 +7170,20 @@ try:
     _appE.config["TESTING"] = True
     _cE = _appE.test_client()
     _savE = (_emE.acces_cle, _emE.page, _ilE.acces_cle, _ilE.page)
-    _emE.acces_cle = _ilE.acces_cle = lambda k: "page" if k == "BONNE" else ""
+    _emE.acces_cle = _ilE.acces_cle = lambda k: {"BONNE": "paie", "VA": "page"}.get(k, "")
     _emE.page = lambda args, cle="", paie=False, lien_perso=False: "PAGE-EMY"
     _ilE.page = lambda args, cle="", paie=False, lien_perso=False: "PAGE-JESSYE"
     check("route : ?c=emy -> la page Emy ; sans c -> Jessye ; profil inconnu -> 404",
           _cE.get("/infloww/liens?k=BONNE&c=emy").get_data(as_text=True) == "PAGE-EMY"
           and _cE.get("/infloww/liens?k=BONNE").get_data(as_text=True) == "PAGE-JESSYE"
           and _cE.get("/infloww/liens?k=BONNE&c=zzz").status_code == 404)
-    check("route : la cle des VA reste exigee sur la page Emy",
+    check("route : une cle fausse est refusee sur la page Emy",
           _cE.get("/infloww/liens?k=FAUSSE&c=emy").status_code == 403)
+    # proprietaire, 02/11/2026 : « je veux que personne ait acces a ca »
+    check("route : la cle des VA n ouvre plus ni Emy ni Jessye",
+          _cE.get("/infloww/liens?k=VA&c=emy").status_code == 403
+          and _cE.get("/infloww/liens?k=VA").status_code == 403
+          and "PAGE-" not in _cE.get("/infloww/liens?k=VA&c=emy").get_data(as_text=True))
     (_emE.acces_cle, _emE.page, _ilE.acces_cle, _ilE.page) = _savE
 except Exception as _eE:
     import traceback as _tbE
@@ -31431,9 +31436,10 @@ try:
             _cN = _appL.test_client()
             _rK = _cN.get("/infloww/liens?k=" + _k1 + "&tri=us&sens=asc")
             _hK = _rK.get_data(as_text=True)
-            check("route : la bonne cle ouvre la page SANS session (aucun before_request ne bloque)",
-                  _rK.status_code == 200 and "Roucham SPAM" in _hK and "&amp;k=" + _k1 in _hK
-                  and 'class="n on"><a href="?tri=us&amp;sens=desc' in _hK, str(_rK.status_code))
+            # proprietaire, 02/11/2026 : « je veux que personne ait acces a ca » --
+            # la cle du salon (celle des VA) n ouvre plus la page Jessye
+            check("route : la cle des VA est refusee sur la page Jessye, sans session",
+                  _rK.status_code == 403 and "Roucham SPAM" not in _hK, str(_rK.status_code))
             check("route : ni cache, ni indexation, ni Referer (la cle est dans l adresse)",
                   "no-store" in (_rK.headers.get("Cache-Control") or "")
                   and "noindex" in (_rK.headers.get("X-Robots-Tag") or "")
@@ -31449,12 +31455,12 @@ try:
                   _cC.get("/infloww/liens").status_code == 403)
             _rCk = _cC.get("/infloww/liens?k=" + _k1)
             _hCk = _rCk.get_data(as_text=True)
-            check("route : un chatteur connecte AVEC la cle voit la page (le lien du salon)",
-                  _rCk.status_code == 200)
-            check("route : la cle du salon montre la page des VA, SANS paiement ni gain (ni colonne, ni formulaire)",
+            check("route : un chatteur connecte AVEC la cle des VA est refuse aussi",
+                  _rCk.status_code == 403 and "Roucham SPAM" not in _hCk, str(_rCk.status_code))
+            check("route : le refus ne laisse rien voir (ni page, ni paiement, ni cle du proprietaire)",
                   ">Paiement<" not in _hK and "Gain" not in _hK and "/infloww/liens/paie" not in _hK
                   and "revenu" not in _hK and ">Paiement<" not in _hCk and 'class="fpaie"' not in _hCk
-                  and "Votre lien personnel" not in _hK and _kP not in _hK)
+                  and "Votre lien personnel" not in _hK and _kP not in _hK and _kP not in _hCk)
             _rKP = _cN.get("/infloww/liens?k=" + _kP)
             _hKP = _rKP.get_data(as_text=True)
             check("route : la cle du proprietaire ouvre la page AVEC Paiement et Gain / perte (sans session)",
@@ -31467,12 +31473,12 @@ try:
                   ">Paiement<" in _cC.get("/infloww/liens?k=" + _kP).get_data(as_text=True))
             # une periode par l adresse : la cle ouvre, la periode et la cle suivent
             _JOUR["j"] = "2026-09-26"
-            _rPe = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26&tri=subs&sens=desc")
+            _rPe = _cN.get("/infloww/liens?k=" + _kP + "&du=2026-09-21&au=2026-09-26&tri=subs&sens=desc")
             _hPeR = _rPe.get_data(as_text=True)
             check("route : une periode par l adresse -> chiffres MyPuls, la cle et la periode suivent",
                   _rPe.status_code == 200 and "Du 21/09 au 26/09 · MyPuls" in _hPeR
-                  and 'name="k" value="' + _k1 + '"' in _hPeR
-                  and "du=2026-09-21&amp;au=2026-09-26&amp;k=" + _k1 in _hPeR and "<script" not in _hPeR,
+                  and 'name="k" value="' + _kP + '"' in _hPeR
+                  and "du=2026-09-21&amp;au=2026-09-26&amp;k=" + _kP in _hPeR and "<script" not in _hPeR,
                   str(_rPe.status_code))
             check("route : une periode avec une cle fausse -> 403",
                   _cN.get("/infloww/liens?k=faux&du=2026-09-21&au=2026-09-26").status_code == 403)
@@ -31606,11 +31612,11 @@ try:
                   _rPg.status_code == 200 and "81\u00a0$ / quinzaine + primes" in _hPgR
                   and 'action="/infloww/liens/paie"' in _hPgR and 'name="k" value="' + _kP + '"' in _hPgR
                   and "<script" not in _hPgR and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPgR))
-            _hPgS = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26").get_data(as_text=True)
-            check("route paie : ... et la meme vue par la cle du salon ne montre ni le reglage ni le gain",
-                  "81\u00a0$" not in _hPgS
-                  and "quinzaine" not in _reL.sub(r'(?s)<nav class="raccourcis".*?</nav>', "", _hPgS) and ">Paiement<" not in _hPgS
-                  and "Du 21/09 au 26/09 · MyPuls" in _hPgS)
+            _rPgS = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26")
+            _hPgS = _rPgS.get_data(as_text=True)
+            check("route paie : ... et la meme vue par la cle du salon est refusee, sans rien montrer",
+                  _rPgS.status_code == 403 and "81\u00a0$" not in _hPgS and ">Paiement<" not in _hPgS
+                  and "MyPuls" not in _hPgS, str(_rPgS.status_code))
             _razL(_il.PAIE_FICHIER)
         finally:
             _wL._load_web_users = _usersL
