@@ -75,8 +75,10 @@ GABARIT_TW = "lnk_gabarit_twitter"
 # Les vérifications d'avant le 01/11/2026 portent sur le 50/50 seul : la clé
 # « sans_tracking » : {} coupe les pages de base (comportement d'avant). Les
 # quatre branches (CONFIG_4, la config par défaut) sont vérifiées plus bas.
+# « lia_seule » : false garde Seren sur Twitter (avant le 02/11/2026) ; Twitter
+# sans Seren (la config par défaut) est vérifié à la fin.
 CONFIG = {"gabarit": GABARIT_TW, "equipe": EMY_TWITTER, "mypuls_actif": True, "creator_id": 3352,
-          "sans_tracking": {}}
+          "sans_tracking": {}, "lia_seule": False}
 CONFIG_4 = {k: v for k, v in CONFIG.items() if k != "sans_tracking"}
 
 
@@ -1830,6 +1832,74 @@ try:
         lv.reprendre_pays, lv.reprendre_bases, lv.groupes = vrai_rp, vrai_rb, vrai_groupes
     check("la synchro (30 min) reprend les pays puis les pages de base", ordre == [("pays", TW), ("bases", TW)],
           ordre)
+
+    # ── Twitter sans Seren : 70 tracking Lia / 30 page Lia (02/11/2026) ──
+    # « pour Twitter uniquement, le trafic uniquement sur Lia », « 70 avec
+    # tracking et 30 sans tracking »
+    CONFIG_LIA = {k: v for k, v in CONFIG_4.items() if k != "lia_seule"}
+    monde4(config=CONFIG_LIA)
+    e = lv.espace(TW)
+    check("Twitter par défaut : plus de variante Seren, la page de base seule à 70 / 30",
+          e.get("variante") is None and e.get("base_seule") == {"controle": 70, "base_modele": 30}
+          and lv.espace("").get("base_seule") == e.get("base_seule"), e)
+    check("… Agency et Threads gardent leur règle (pas de « base_seule »)",
+          lv.espace(lv.AGENCY_IG_ID).get("base_seule") is None and lv.espace(lv.THREADS_ID).get("base_seule") is None)
+    monde4(config=dict(CONFIG_LIA, lia_seule=False))
+    check("« lia_seule » : false ramène Seren sur Twitter",
+          lv.espace(TW).get("variante") is not None and lv.espace(TW).get("base_seule") is None)
+
+    # nouveau lien : deux branches, aucun tracking Seren
+    g, suivis = monde4(config=CONFIG_LIA)
+    r = lv.creer_pour(TW, "n2", "nova2", manager="YAZID")
+    sc = r.get("shortcode") or "?"
+    cfg, br = branches(g, sc)
+    check("lien neuf : 70 tracking Lia / 30 page Lia, rien d'autre",
+          r.get("ok") and r.get("variante") is None and cfg.get("enabled") and cfg.get("controlWeight") == 70
+          and {n: v["weight"] for n, v in br.items()} == {"Base Lia": 30}
+          and ((br.get("Base Lia") or {}).get("copie") or {}).get("url") == LIA_P, (r, cfg))
+    check("… aucun tracking Seren demandé à MyPuls (ils ne s'effacent pas)",
+          [c for _n, c in suivis] == [None], suivis)
+    check("… copie temporaire supprimée, fiche notée",
+          len(g.de("delete")) == len(g.de("duplicate")) - 1
+          and (lv.lien_de(TW, "n2").get("base_seule") or {}).get("ok") is True, (g.appels, lv.lien_de(TW, "n2")))
+
+    # les liens à quatre branches : Seren et « Base Seren » retirées, « Base Lia » gardée
+    g, _s = monde4(config=CONFIG_LIA, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = ab4(*QUATRE)
+    b = lv.reprendre_bases(TW)
+    cfg, br = branches(g, "babeyy")
+    post = g.de("post")
+    check("lien à quatre branches : passé à 70 / 30, « Base Lia » gardée à son variantId, sans copie",
+          b["poses"] == ["babeyy"] and cfg.get("controlWeight") == 70 and list(br) == ["Base Lia"]
+          and br["Base Lia"]["variantId"] == "vL" and br["Base Lia"]["weight"] == 30
+          and not g.de("duplicate") and len(post) == 1, (b, cfg, g.appels))
+    n = len(g.appels)
+    b = lv.reprendre_bases(TW)
+    check("… noté : la reprise n'y revient pas", len(g.appels) == n and not b["poses"], (b, g.appels[n:]))
+
+    # les 34 liens passés à la main le 02/11 : reconnus, rien réécrit
+    g, _s = monde4(config=CONFIG_LIA, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = ab4(("vL", "Base Lia", 30, LIA_P), controle=70)
+    b = lv.reprendre_bases(TW)
+    check("lien déjà à 70 / 30 : reconnu, AUCUN enregistrement",
+          b["deja"] == ["babeyy"] and not g.de("post") and not g.de("duplicate"), (b, g.appels))
+
+    # une variante inconnue : on ne devine pas
+    g, _s = monde4(config=CONFIG_LIA, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = ab4(("vX", "Autre", 30, "https://onlyfans.com/autre"), controle=70)
+    b = lv.reprendre_bases(TW)
+    check("variante inconnue : rien touché, et dit", not g.de("post") and b["rates"], (b, g.appels))
+
+    # la règle des pays ne recopie plus la variante Seren sur Twitter
+    g, _s = monde4(config=CONFIG_LIA, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy", pays=False)}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = ab4(("vL", "Base Lia", 30, LIA_P), controle=70)
+    lv.reprendre_pays(TW)
+    check("reprendre_pays : la variante Seren n'est pas recopiée sur Twitter",
+          not g.de("post") and not g.de("duplicate"), g.appels)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

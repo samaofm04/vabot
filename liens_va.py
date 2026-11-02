@@ -874,6 +874,12 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
         var = {"ok": bool(rv.get("ok")), "modele": e["variante"]["modele"],
                "poids": float(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
                "cookie": bool(rv.get("cookie")), "erreur": rv.get("erreur", "")}
+    elif e.get("base_seule"):
+        # Twitter depuis le 02/11/2026 : 30 % vers la page de la model, sans
+        # tracking. Raté ici, reprendre_bases le refait à la synchro suivante
+        rb = poser_base_seule(gid, uid)
+        if not rb.get("ok"):
+            print(f"[lien] page de base {gid}:{uid} non posée : {rb.get('erreur')}", flush=True)
     elif SEREN_EN_PAUSE and g.get("id"):
         # Threads : le lien neuf est une copie de emythreads, 50/50 Seren
         # compris. Éteint tout de suite ; raté (cookie), couper_seren le
@@ -1191,9 +1197,12 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:
     fiches = {c: f for c, f in (_etat().get("liens") or {}).items()
               if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
               and f.get("actif") is not False}
+    # Twitter sans Seren (02/11/2026) : recopier une variante Seren la remettrait
+    seren = not lia_seule(gid)
     a_faire = [c for c, f in fiches.items()
                if (f.get("pays") is False and int(f.get("pays_essais") or 0) < ESSAIS_PAYS)
-               or ((f.get("variante") or {}).get("posee") and (f.get("variante") or {}).get("pays") is False
+               or (seren and (f.get("variante") or {}).get("posee")
+                   and (f.get("variante") or {}).get("pays") is False
                    and int((f.get("variante") or {}).get("pays_essais") or 0) < ESSAIS_PAYS)]
     if not a_faire:
         return bilan
@@ -1221,7 +1230,7 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:
                 (bilan["poses"] if r.get("ok") else bilan["rates"]).append(
                     f'{qui}' + ("" if r.get("ok") else f' : {r.get("erreur")}'))
             fv = lien_de(gid, uid).get("variante") or {}
-            if fv.get("posee") and fv.get("pays") is False:
+            if seren and fv.get("posee") and fv.get("pays") is False:
                 r = refiltrer_variante(gid, uid)
                 d = _etat()
                 x = d["liens"][cle]
@@ -1639,6 +1648,31 @@ SEREN_EN_PAUSE = False
 COUPES_FICHIER = DATA_DIR / "liens_seren_coupes.json"
 _COUPE = __import__("threading").Lock()
 
+# ─── Twitter : Lia seule, 30 % sans tracking ─────────────────────────────
+# Propriétaire, 02/11/2026, « urgent » : « pour Twitter, uniquement pour
+# Twitter, le trafic envoyé uniquement sur Lia […] only Lia 30 % sans
+# tracking », puis « 70 avec tracking et 30 sans tracking, payé toujours US ».
+# Un lien de VA Twitter : le tracking du VA (controle, 70 %) et la page de la
+# model sans tracking (« Base Lia », 30 %), plus de Seren ni de « Base Seren ».
+# Les 34 liens ont été passés à la main ce jour-là (« Base Lia » gardée sous
+# son variantId) ; un lien neuf, ou repris par reprendre_bases, reçoit la même
+# chose (poser_base_seule). Threads et Agency gardent leurs quatre branches.
+# Clé « lia_seule » de liens_va_config.json : false pour revenir à Seren (puis
+# remettre les variantes : reprendre_variantes, reprendre_bases).
+LIA_SEULE = {"controle": 70, "base_modele": 30}
+LIA_SEULE_SERVEURS = {TWITTER_ID}
+
+
+def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
+    """Les deux parts de l'A/B des liens de ce serveur quand Seren en est
+    retirée (Twitter), None sinon. gid "" : Twitter, comme espace()."""
+    if (str(gid) or TWITTER_ID) not in LIA_SEULE_SERVEURS:
+        return None
+    if config().get("lia_seule", True) is False:
+        return None
+    return dict(LIA_SEULE)
+
+
 _espace_avec_seren = espace
 
 
@@ -1663,6 +1697,11 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
     e = _espace_avec_seren(gid)
     if SEREN_EN_PAUSE:
         e["variante"] = None
+    parts = lia_seule(gid)
+    if parts and str(gid) != THREADS_ID:
+        # ni tracking Seren créé, ni variante posée : la page de base à la place
+        e["variante"] = None
+        e["base_seule"] = parts
     return e
 
 
@@ -2255,6 +2294,8 @@ def reprendre_bases(gid: str) -> Dict[str, Any]:
     import time as _t
     import gms
     gid = str(gid)
+    if lia_seule(gid):
+        return reprendre_base_seule(gid)
     bilan: Dict[str, Any] = {"poses": [], "deja": [], "rates": [], "a_verifier": [],
                              "eteints": [], "reportes": [], "restent": 0}
     if SEREN_EN_PAUSE or gid not in SERVEURS:
@@ -2544,3 +2585,174 @@ def _garde_creatrice(creer):
 
 
 creer_tracking = _garde_creatrice(creer_tracking)
+
+
+# ─── Twitter sans Seren : la page de base seule (voir LIA_SEULE) ──────────
+def poser_base_seule(gid: str, uid: str) -> Dict[str, Any]:
+    """L'A/B d'un lien de VA quand Seren en est retirée (Twitter, 02/11/2026) :
+    le tracking du VA (controle) et la page de sa model sans tracking
+    (« Base Lia »), aux parts de LIA_SEULE. Seren et « Base Seren » sont
+    retirées ; toute autre variante fait renoncer (l'enregistrement remplace
+    la liste entière). Déjà en place : « deja », rien réécrit. Le résultat est
+    noté dans la fiche (« base_seule ») ; au bout de ESSAIS_BASES, à vérifier
+    à la main. N'interrompt jamais l'appelant."""
+    gid, uid = str(gid), str(uid)
+    try:
+        r = _poser_base_seule(gid, uid)
+    except Exception as ex:                                  # noqa: BLE001
+        r = {"ok": False, "erreur": f"{type(ex).__name__}: {str(ex)[:120]}"}
+    if not r.get("hors_sujet"):
+        try:
+            import time as _t
+            d = _etat()
+            f = (d.get("liens") or {}).get(f"{gid}:{uid}")
+            if isinstance(f, dict):
+                avant = f.get("base_seule") if isinstance(f.get("base_seule"), dict) else {}
+                n = 0 if r.get("ok") else int(avant.get("essais") or 0) + (0 if r.get("cookie") else 1)
+                f["base_seule"] = {"ok": bool(r.get("ok")), "pour": str(r.get("base") or ""),
+                                   "erreur": str(r.get("erreur") or ""), "essais": n,
+                                   "a_verifier": not r.get("ok") and n >= ESSAIS_BASES,
+                                   "quand": int(_t.time())}
+                _ecrire(d)
+        except Exception as ex:                              # noqa: BLE001
+            print(f"[lien] page de base {gid}:{uid} non notée : {type(ex).__name__}: {ex}", flush=True)
+    return r
+
+
+def _poser_base_seule(gid: str, uid: str) -> Dict[str, Any]:
+    import secrets
+    import gms
+    parts = lia_seule(gid)
+    if not parts:
+        return {"ok": True, "hors_sujet": True, "erreur": ""}
+    e = espace(gid)
+    l = lien_de(gid, uid)
+    equipe, lid = str(e["equipe"]), str(l.get("link_id") or "")
+    page = base_de(l.get("tracking"))
+    if not (lid and page):
+        return {"ok": False, "erreur": "lien ou tracking du VA manquant (hors OnlyFans ?)"}
+    nom = nom_de_page(page)
+    if not nom:
+        return {"ok": False, "erreur": "nom de model illisible (revenus_segments) : rien touché"}
+    nom = f"Base {nom}"[:40]
+    lu = gms.lire_ab_testing(lid, equipe)
+    if not lu.get("ok"):
+        return {"ok": False, "cookie": bool(lu.get("cookie")),
+                "erreur": "A/B illisible : " + str(lu.get("error") or "")[:120]}
+    cfg = lu.get("config") or {}
+    vs = [x for x in cfg.get("variants") or [] if isinstance(x, dict)]
+    base = [x for x in vs if str(x.get("name") or "") == nom and x.get("variantId")]
+    if (cfg.get("enabled") and len(vs) == 1 and base
+            and _proche(cfg.get("controlWeight"), parts["controle"])
+            and _proche(base[0].get("weight"), parts["base_modele"])):
+        return {"ok": True, "deja": True, "base": page, "erreur": ""}
+    modele_v = str(VARIANTE_TWITTER.get("modele") or "Seren")
+    inconnues = [x for x in vs if not (str(x.get("name") or "") == modele_v
+                                       or str(x.get("name") or "").startswith("Base "))]
+    if inconnues or len(base) > 1:
+        return {"ok": False, "inattendu": True, "erreur": f"A/B inattendu, rien touché : {str(cfg)[:160]}"}
+    # la destination du lien fait foi, pas la fiche (voir _poser_bases)
+    vraie = _page_du_lien(lid, equipe)
+    if vraie != page:
+        return {"ok": False, "erreur": f'le lien mène à {vraie or "?"}, sa fiche à {page} : rien touché'}
+    gardee = base[0] if base else None
+    tid = ""
+    try:
+        if not gardee:
+            source = str(e.get("source_variante") or e.get("gabarit") or "")
+            if not source:
+                return {"ok": False, "erreur": "aucun lien source pour la copie temporaire"}
+            r = gms.duplicate_link(source, "abtmp" + secrets.token_hex(5),
+                                   f'{nom.lower()} - {l.get("shortcode") or uid}'[:60], page, equipe)
+            tmp = r.get("link") if isinstance(r.get("link"), dict) else {}
+            tid = str(tmp.get("id") or "")
+            if not (r.get("ok") and tid):
+                return {"ok": False, "erreur": f'GetMySocial : copie temporaire refusée ({str(r.get("error"))[:100]})'}
+            if str(tmp.get("url") or "").strip().rstrip("/").lower() != page.lower():
+                return {"ok": False, "erreur": f'GetMySocial : la copie temporaire pointe sur '
+                                               f'{tmp.get("url") or "?"}, pas sur {page}'}
+            pays = poser_pays(tid, equipe, page)
+            if not pays.get("ok"):
+                return {"ok": False, "erreur": f'pays non filtrés sur la copie ({pays.get("erreur")})'}
+        variante = {"variantId": gardee["variantId"] if gardee else None,
+                    "sourceLinkId": None if gardee else _sans_prefixe(tid), "sourceTemplateId": None,
+                    "name": nom, "weight": _poids(parts["base_modele"]),
+                    "description": (gardee.get("description") if gardee else "")
+                    or "Variant based on another link"}
+        p = gms._ab_prive("POST", lid, equipe, {"enabled": True, "controlWeight": _poids(parts["controle"]),
+                                                "variants": [variante]})
+    finally:
+        if tid:
+            rd = gms.delete_link(tid)
+            if not rd.get("ok"):
+                print(f"[lien] copie temporaire {tid} non supprimée : {str(rd.get('error'))[:100]}", flush=True)
+    if not p.get("ok"):
+        return {"ok": False, "pose": True, "cookie": bool(p.get("cookie")),
+                "erreur": "A/B refusé : " + str(p.get("error") or "")[:120]}
+    rc = gms.lire_ab_testing(lid, equipe).get("config") or {}
+    rv = [x for x in rc.get("variants") or [] if isinstance(x, dict)]
+    if not (rc.get("enabled") and _proche(rc.get("controlWeight"), parts["controle"]) and len(rv) == 1
+            and str(rv[0].get("name") or "") == nom and _proche(rv[0].get("weight"), parts["base_modele"])):
+        return {"ok": False, "pose": True, "erreur": f"A/B relu autrement : {str(rc)[:160]}"}
+    return {"ok": True, "pose": True, "base": page, "erreur": ""}
+
+
+def reprendre_base_seule(gid: str) -> Dict[str, Any]:
+    """reprendre_bases quand Seren est retirée (Twitter) : chaque fiche en
+    service dont la page de base n'est pas notée faite (ou faite pour une autre
+    model) est lue, et posée s'il le faut. Mêmes gardes et mêmes plafonds que
+    reprendre_bases. Les 34 liens passés à la main le 02/11/2026 sont reconnus
+    (« deja ») et notés, sans rien réécrire."""
+    import time as _t
+    import gms
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "deja": [], "rates": [], "a_verifier": [], "restent": 0}
+    liens = _etat().get("liens") or {}
+
+    def note(f: Dict[str, Any]) -> Dict[str, Any]:
+        return f.get("base_seule") if isinstance(f.get("base_seule"), dict) else {}
+    a_faire = sorted(
+        (c for c, f in liens.items()
+         if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
+         and f.get("actif") is not False and not note(f).get("a_verifier")
+         and not (note(f).get("ok") and note(f).get("pour") == base_de(f.get("tracking")))),
+        key=lambda c: (int(note(liens[c]).get("quand") or 0), c))
+    if not a_faire:
+        return bilan
+    bilan["restent"] = len(a_faire)
+    ck = gms.get_session_cookie()
+    exp = gms.cookie_expiration(ck) if ck else None
+    if not ck or (exp and exp < _t.time()) or _etat().get("cookie_refuse") == _empreinte(ck):
+        bilan["cookie"] = True
+        return bilan
+    if not _REPRISE.acquire(blocking=False):
+        bilan["occupe"] = True
+        return bilan
+    try:
+        poses = 0
+        for i, cle in enumerate(a_faire[:BASES_PAR_PASSE]):
+            if poses >= BASES_POSEES_PAR_PASSE:
+                break
+            if i:
+                _t.sleep(PAUSE_BASES_S)
+            uid = cle.split(":", 1)[1]
+            qui = str(liens[cle].get("shortcode") or cle)
+            r = poser_base_seule(gid, uid)
+            if r.get("pose"):
+                poses += 1
+            if r.get("ok"):
+                bilan["deja" if r.get("deja") else "poses"].append(qui)
+            else:
+                bilan["rates"].append(f'{qui} : {r.get("erreur")}')
+                if note(lien_de(gid, uid)).get("a_verifier"):
+                    bilan["a_verifier"].append(qui)
+            if r.get("cookie"):
+                bilan["cookie"] = True
+                break
+    finally:
+        _REPRISE.release()
+    bilan["restent"] = max(0, bilan["restent"] - len(bilan["poses"]) - len(bilan["deja"]))
+    if bilan["poses"] or bilan["rates"]:
+        print(f"[lien] page de base seule {gid} : posées {bilan['poses'][:10]}, "
+              f"ratées {bilan['rates'][:5]}", flush=True)
+    return bilan

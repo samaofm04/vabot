@@ -54,7 +54,10 @@ TW, TH = lv.TWITTER_ID, lv.THREADS_ID
 EMY_TWITTER = lv.EQUIPE_VA
 EMY_THREADS = lv.ESPACE_THREADS["equipe"]
 CONFIG = {"gabarit": "lnk_gabarit_twitter", "equipe": EMY_TWITTER, "mypuls_actif": True,
-          "creator_id": 3352, "threads": {"tracking": True}}
+          "creator_id": 3352, "threads": {"tracking": True},
+          # la pause et son retour, avec Seren sur Twitter : avant le 02/11/2026
+          # (depuis, Twitter n'a plus Seren : tests_liens_ab_twitter)
+          "lia_seule": False}
 AB_SEREN = {"enabled": True, "controlWeight": 50,
             "variants": [{"variantId": "v1", "sourceLinkId": "s1", "weight": 50, "name": "Seren",
                           "description": "Variant based on another link"}]}
