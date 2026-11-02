@@ -202,13 +202,13 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 TWITTER_ID = "1445108485090971710"
 #: Propriétaire, 02/11/2026 : les liens de Twitter ne vont plus que chez Lia
 #: (liens_va.LIA_SEULE), « retire les subs additionnés de l'autre chaîne, garde
-#: que les subs de Lia », « ne change pas les dashboards d'avant ». Les
-#: trackings de Seren ne comptent plus dans les classements de Twitter dont la
-#: période commence ce jour-là ou après (quinzaine du 01/11, semaine du 02/11,
-#: bonus du jour) ; les périodes commencées avant (semaine du 26/10 en cours de
-#: gel, quinzaines figées, all-time) restent comme elles étaient. "" : Seren
-#: comptée partout, comme avant.
-TWITTER_SANS_SEREN_DEPUIS = "2026-11-01"
+#: que les subs de Lia », « ne change pas les dashboards d'avant » ; puis « mets
+#: juste les subs de Seren qui ont fait hier le 1, c'est tous les mecs du 1 ».
+#: Les trackings de Seren comptent jusqu'à ce jour INCLUS et plus après : la
+#: quinzaine du 01/11 garde les subs Seren du 01/11, la semaine du 02/11 et les
+#: bonus des jours suivants n'en ont aucun ; une période finie avant (semaines
+#: et quinzaines d'avant, all-time) ne change pas. "" : Seren comptée partout.
+TWITTER_SEREN_JUSQUAU = "2026-11-01"
 PAGE_SEREN = "seren.vale"
 VA_IG_ID = "1505418484052394004"
 THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
@@ -1927,14 +1927,15 @@ def _classement_tracking(debut: dt.date, fin: dt.date, gid: Optional[str] = None
     # le total gardé d'un tracking quitté : un par mesure, les visites et les
     # abonnés d'un même tracking ne se remplacent pas l'un l'autre
     cle_garde = "cumul_abonnes" if abonnes else "cumul"
-    # Twitter sans Seren : voir TWITTER_SANS_SEREN_DEPUIS
-    sans_seren = (str(gid or TWITTER_ID) == TWITTER_ID and bool(TWITTER_SANS_SEREN_DEPUIS)
-                  and d0 >= TWITTER_SANS_SEREN_DEPUIS)
+    # Twitter sans Seren : voir TWITTER_SEREN_JUSQUAU
+    seren_jusquau = (TWITTER_SEREN_JUSQUAU if str(gid or TWITTER_ID) == TWITTER_ID else "")
     for n in sorted(par_va):
         total = 0
         for t, fin_t, e in par_va[n]:
-            if sans_seren and t.startswith(PAGE_SEREN + "/"):
-                continue
+            if seren_jusquau and t.startswith(PAGE_SEREN + "/"):
+                if d0 > seren_jusquau:
+                    continue
+                fin_t = min(fin_t, seren_jusquau)
             garde = e.get(cle_garde) or {}
             if cumul and not e.get("actif") and garde.get("au") == fin_t:
                 # un tracking quitté ne bouge plus : son total est gardé
