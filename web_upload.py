@@ -63330,6 +63330,26 @@ def create_app():
                 # carre casse qu on veut supprimer — mesure apres coup : 191
                 # miniatures « servies par nous » et pourtant 191 cassees.
                 # On tombe sur l image d attente juste en dessous.
+            # Reel ajoute par son seul lien (liste de references d une model) :
+            # aucune adresse de miniature, et les 62 cartes restaient « apercu
+            # indisponible » alors que leurs videos etaient deja sur notre
+            # disque. On en tire une image, une fois, rangee comme les autres.
+            _mVt = _reVt.search(r"/(?:p|reel|reels)/([A-Za-z0-9_-]+)", reel.get("url") or "")
+            _videosVt = ([INSTA_VIDEOS_DIR / f"{_mVt.group(1)}.mp4"] if _mVt else []) \
+                + [DATA_DIR / "tg_tmp" / f"reelvid_{rid}.mp4"]
+            for _srcVt in _videosVt:
+                if not (_srcVt.exists() and _srcVt.stat().st_size > 1024):
+                    continue
+                # verrou : la grille demande toutes ses miniatures d un coup
+                with _thumb_gen_lock("veille/" + rid):
+                    _okVt = (local.exists() and local.stat().st_size > 512) \
+                        or _generate_video_thumbnail(_srcVt, local)
+                if _okVt:
+                    from flask import send_file
+                    rep = send_file(str(local), conditional=True)
+                    rep.headers["Cache-Control"] = "public, max-age=604800"
+                    return rep
+                break
         except Exception:
             pass
         rep = app.response_class(_VIGNETTE_ABSENTE, mimetype="image/svg+xml")
