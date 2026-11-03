@@ -53,6 +53,10 @@ except Exception:
     pass
 
 import liens_va as lv                  # noqa: E402
+# Les liens Twitter sont des pages depuis le 03/11/2026 (GABARIT_PAGE_TWITTER) ;
+# ce fichier garde les règles du lien direct (tracking d'abord, A/B, variantes),
+# toujours celles des copies des branches. Le chemin en page : tests_twitter_pages.py.
+lv.GABARIT_PAGE_TWITTER = ""
 import podium_discord as pod           # noqa: E402
 import tickets_discord as tk           # noqa: E402
 

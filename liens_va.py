@@ -1673,6 +1673,20 @@ def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
     return dict(LIA_SEULE)
 
 
+# ─── Twitter en pages, comme TRUST INSTAGRAM ─────────────────────────────
+# Propriétaire, 03/11/2026 : « mets aussi des landing pages pour Twitter comme
+# pour IG ». Les 34 liens de VA sur Lia sont passés de lien direct à page ce
+# soir-là (même id, même adresse : update_link avec typeLink « landing »,
+# l'habillage de la page Instagram du VA 108, le tracking sur le bouton, les
+# pays sur le bouton, l'A/B gardé) ; sauvegarde d'avant sur le VPS :
+# data/sauvegardes_gms/twitter_avant_page_2026-11-03.json. Un lien neuf part
+# de cette page (gabarit, bouton vers le profil de Lia, son bouton reçoit le
+# tracking du VA). Les copies des branches de l'A/B (« Base Lia ») restent des
+# liens DIRECTS : elles partent de l'ancien gabarit direct (source_variante),
+# comme Agency — une copie de la page garderait son bouton. "" : liens directs.
+GABARIT_PAGE_TWITTER = "lnk_6aea55ba68cb1865ee2b4fd0"
+
+
 _espace_avec_seren = espace
 
 
@@ -1695,6 +1709,9 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
                  base_shortcode=str(c.get("base_shortcode") or c.get("modele") or "emy"))
         return e
     e = _espace_avec_seren(gid)
+    if (str(gid) or TWITTER_ID) == TWITTER_ID and GABARIT_PAGE_TWITTER:
+        e["source_variante"] = e.get("source_variante") or e.get("gabarit") or ""
+        e.update(gabarit=GABARIT_PAGE_TWITTER, landing=True)
     if SEREN_EN_PAUSE:
         e["variante"] = None
     parts = lia_seule(gid)
