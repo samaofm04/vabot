@@ -150,6 +150,10 @@
       toast(T.ref_type_kling, 'info');
     }
     try { localStorage.setItem('sia_modele_' + S.type, cle); } catch (e) { /* navigation privée */ }
+    var ta = $('sia-prompt');
+    ta.disabled = !!m.sans_prompt;
+    if (m.sans_prompt) { ta.setAttribute('data-ph', ta.getAttribute('data-ph') || ta.getAttribute('placeholder') || ''); ta.setAttribute('placeholder', T.sans_prompt || ''); }
+    else if (ta.getAttribute('data-ph')) { ta.setAttribute('placeholder', ta.getAttribute('data-ph')); ta.removeAttribute('data-ph'); }
     rendreModeles(); rendreOptions(); rendreRefs(); majPrompt(); majEstime();
   }
   function choisirType(type) {
@@ -161,6 +165,7 @@
     try { souhaite = localStorage.getItem('sia_modele_' + S.type); } catch (e) { souhaite = null; }
     var m = (souhaite && modeleParCle(souhaite)) || modeleParCle(DEFAUTS[S.type]) || modelesDuType()[0];
     var ph = S.type === 'image' ? T.prompt_ph_image : (S.type === 'motion' ? T.prompt_ph_motion : T.prompt_ph_video);
+    $('sia-prompt').removeAttribute('data-ph');
     $('sia-prompt').setAttribute('placeholder', ph || '');
     // Motion : la zone de dépôt prend aussi la vidéo des gestes
     $('sia-fichier').setAttribute('accept', (S.type === 'motion' ? MIMES_IMAGE.concat(MIMES_VIDEO) : MIMES_IMAGE).join(','));

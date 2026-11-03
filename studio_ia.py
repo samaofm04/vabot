@@ -92,7 +92,8 @@ T = {
         "prompt_ph_motion": "Optionnel : précise ce qui doit rester (tenue, décor, cadrage) ou l'ambiance.",
         "video_type": "Vidéo refusée : MP4 ou MOV seulement.",
         "video_trop_grosse": "Vidéo trop lourde ({mo} Mo) : 100 Mo maximum.",
-        "video_duree": "La vidéo des gestes doit durer entre 3 et 30 s (celle-ci : {s} s).",
+        "video_duree": "La vidéo des gestes doit durer entre {min} et {max} s (celle-ci : {s} s).",
+        "sans_prompt": "Ce modèle n'a pas de prompt : la photo et la vidéo suffisent.",
         "video_10s": "Orientation « comme la photo » : vidéo de 10 s au plus (celle-ci : {s} s). Passe en « comme la vidéo » ou coupe-la.",
         "motion_refs": "Il faut une photo de la model et une vidéo des gestes.",
         "webp_converti": "Image WebP convertie en PNG (Kling n'accepte que JPG et PNG).",
@@ -150,7 +151,8 @@ T = {
         "prompt_ph_motion": "Optional: say what must stay (outfit, background, framing) or the mood.",
         "video_type": "Video rejected: MP4 or MOV only.",
         "video_trop_grosse": "Video too large ({mo} MB): 100 MB maximum.",
-        "video_duree": "The moves video must last 3 to 30 s (this one: {s} s).",
+        "video_duree": "The moves video must last {min} to {max} s (this one: {s} s).",
+        "sans_prompt": "This model takes no prompt: the photo and the video are enough.",
         "video_10s": "“Like the photo” orientation: video of 10 s at most (this one: {s} s). Switch to “like the video” or trim it.",
         "motion_refs": "A photo of the model and a moves video are both needed.",
         "webp_converti": "WebP image converted to PNG (Kling only takes JPG and PNG).",
@@ -399,8 +401,10 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
         if len(images) != 1 or len(videos) != 1:
             return {"ok": False, "erreur": t["motion_refs"], "code": "refs"}
         duree_video = float(videos[0].get("duree") or 0)
-        if not 3 <= duree_video <= 30:
-            return {"ok": False, "erreur": t["video_duree"].format(s=_nb(duree_video)), "code": "video_duree"}
+        d_min, d_max = tuple(m["references"].get("duree") or (1, 60))
+        if not d_min <= duree_video <= d_max:
+            return {"ok": False, "code": "video_duree",
+                    "erreur": t["video_duree"].format(s=_nb(duree_video), min=_nb(d_min), max=_nb(d_max))}
         if o.get("character_orientation") == "image" and duree_video > 10:
             return {"ok": False, "erreur": t["video_10s"].format(s=_nb(duree_video)), "code": "video_duree"}
     else:

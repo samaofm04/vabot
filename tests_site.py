@@ -38249,9 +38249,9 @@ try:
     _kie._CLE_ENV.update({"valeur": "", "t": 10 ** 12})   # ne pas relire le .env
     # -- 1) le registre : ce que l'ecran propose et ce qui part chez Kie ------
     _mods = _kie.registre_public("fr")
-    check("registre : 9 modeles, 5 video + 2 image + 2 motion",
-          len(_mods) == 9 and sum(m["type"] == "video" for m in _mods) == 5
-          and sum(m["type"] == "motion" for m in _mods) == 2)
+    check("registre : 11 modeles, 5 video + 2 image + 4 motion",
+          len(_mods) == 11 and sum(m["type"] == "video" for m in _mods) == 5
+          and sum(m["type"] == "motion" for m in _mods) == 4)
     check("registre : chaque modele video/image propose le 9:16 (Reels) par defaut",
           all(next(o for o in m["options"] if o["cle"] == "aspect_ratio")["defaut"] == "9:16"
               for m in _mods if m["type"] != "motion"))
@@ -38274,6 +38274,14 @@ try:
     except _kie.ErreurKie as _e:
         _sansVideo = _e.code == "refs"
     check("motion : sans video, entree_api refuse", _sansVideo)
+    _mw, _ew = _kie.entree_api("wan22move", "ignore", {}, ["https://x/a.png"], videos=["https://x/v.mp4"])
+    check("motion Wan : video_url + image_url, 720p, nsfw_checker false, pas de prompt ; 11,1 s = 12 x 12,5",
+          _mw == "wan/2-2-animate-move"
+          and _ew == {"video_url": "https://x/v.mp4", "image_url": "https://x/a.png", "resolution": "720p", "nsfw_checker": False}
+          and _kie.estimer("wan22move", {}, 1, duree_video=11.097) == 150
+          and _kie.estimer("wan22replace", {"resolution": "480p"}, 1, duree_video=11.097) == 72
+          and all(m["sans_prompt"] for m in _mods if m["cle"].startswith("wan22"))
+          and next(m for m in _mods if m["cle"] == "kling3motion")["duree"] == [3, 30])
     check("registre : la version anglaise traduit les libelles",
           any(o["nom"] == "Duration" for m in _kie.registre_public("en") for o in m["options"]))
     check("estimation : Kling pro + son, 10 s = 270 credits",
@@ -38510,8 +38518,16 @@ try:
                        content_type="multipart/form-data").get_json()
         _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
                                                     "references": [_rW["reference"]["id"], _rC["reference"]["id"]]}).get_json()
-        check("motion : video de 2 s -> refusee (3 a 30 s), Kie pas appele",
+        check("motion : video de 2 s -> refusee par Kling (3 a 30 s), Kie pas appele",
               _gM.get("code") == "video_duree" and "3" in _gM["erreur"] and "30" in _gM["erreur"])
+        _FAUX["record"] = {"state": "generating"}
+        _gW = _cS.post("/studio-ia/generer", json={"modele": "wan22move", "prompt": "",
+                                                    "references": [_rW["reference"]["id"], _rC["reference"]["id"]]}).get_json()
+        check("motion Wan : la meme video de 2 s passe (pas de borne Kling), 2 s x 12,5 = 25 credits, sans filtre",
+              _gW.get("ok") and _gW["tache"]["credits_estimes"] == 25
+              and _FAUX["entree"]["model"] == "wan/2-2-animate-move"
+              and _FAUX["entree"]["input"]["nsfw_checker"] is False)
+        _sia._maj(_gW["tache"]["id"], etat="echec", message="fin du test motion")
         _FAUX["record"] = {"state": "generating"}
         _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
                                                     "options": {"mode": "1080p"},

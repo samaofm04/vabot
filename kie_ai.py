@@ -360,7 +360,7 @@ TYPES_IMAGE = ("image/jpeg", "image/png", "image/webp")
 TYPES_VIDEO = ("video/mp4", "video/quicktime")
 TAILLE_MAX_VIDEO = 100_000_000
 _REFS_MOTION = {
-    "max": 2, "modes": ["motion"], "types": ("image/jpeg", "image/png") + TYPES_VIDEO,
+    "max": 2, "modes": ["motion"], "types": ("image/jpeg", "image/png") + TYPES_VIDEO, "duree": (3, 30),
     "aide": "1 photo de la model (JPG/PNG, 10 Mo, buste visible) + 1 vidéo des gestes (MP4/MOV, 3–30 s, 100 Mo). "
             "Le visage, la tenue et le décor viennent de la photo ; les mouvements de la vidéo. Le texte incrusté dans la vidéo n'est pas repris.",
     "aide_en": "1 photo of the model (JPG/PNG, 10 MB, head and torso visible) + 1 video of the moves (MP4/MOV, 3–30 s, 100 MB). "
@@ -532,11 +532,46 @@ MODELES: List[Dict[str, Any]] = [
     },
     {
         "cle": "kling26motion", "nom": "Kling 2.6 Motion Control", "editeur": "Kuaishou", "type": "motion",
-        "badge": "le moins cher", "badge_en": "cheapest",
         "resume": "720p / 1080p · même principe, génération précédente, presque moitié prix",
         "resume_en": "720p / 1080p · same idea, previous generation, nearly half price",
         "modele_api": "kling-2.6/motion-control", "prompt_max": 2500, "prompt_min": 0,
         "references": _REFS_MOTION, "options": _OPTIONS_MOTION,
+    },
+    # Wan 2.2 Animate (docs.kie.ai/market/wan/2-2-animate-move et -replace) :
+    # pas de prompt, pas de borne de durée documentée, et surtout
+    # nsfw_checker=false — Kling refuse une vidéo « sensible » (lingerie
+    # entrevue, 03/11/2026), Wan non.
+    {
+        "cle": "wan22move", "nom": "Wan 2.2 Animate", "editeur": "Alibaba", "type": "motion",
+        "badge": "sans filtre", "badge_en": "no filter",
+        "resume": "720p · la model de la photo refait les gestes, décor de la photo · passe où Kling refuse",
+        "resume_en": "720p · the model in the photo redoes the moves, photo background · passes where Kling refuses",
+        "modele_api": "wan/2-2-animate-move", "prompt_max": 2500, "prompt_min": 0, "sans_prompt": True,
+        "references": {
+            "max": 2, "modes": ["motion"], "types": TYPES_IMAGE + TYPES_VIDEO, "duree": (1, 60),
+            "aide": "1 photo de la model (JPG/PNG/WebP, 5 Mo) + 1 vidéo des gestes (MP4/MOV, 100 Mo). Visage, tenue et décor viennent de la photo ; pas de filtre de contenu.",
+            "aide_en": "1 photo of the model (JPG/PNG/WebP, 5 MB) + 1 video of the moves (MP4/MOV, 100 MB). Face, outfit and background come from the photo; no content filter.",
+        },
+        "options": [
+            {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
+             "valeurs": ["720p"], "defaut": "720p"},
+        ],
+    },
+    {
+        "cle": "wan22replace", "nom": "Wan 2.2 Animate Replace", "editeur": "Alibaba", "type": "motion",
+        "badge": "le moins cher", "badge_en": "cheapest",
+        "resume": "480p / 580p / 720p · garde le décor (et le texte) de la vidéo, remplace la personne",
+        "resume_en": "480p / 580p / 720p · keeps the video's scene (and text), replaces the person",
+        "modele_api": "wan/2-2-animate-replace", "prompt_max": 2500, "prompt_min": 0, "sans_prompt": True,
+        "references": {
+            "max": 2, "modes": ["motion"], "types": TYPES_IMAGE + TYPES_VIDEO, "duree": (1, 60),
+            "aide": "1 photo de la model (JPG/PNG/WebP, 10 Mo) + 1 vidéo (MP4/MOV, 10 Mo). La personne de la vidéo est remplacée par celle de la photo ; le décor, la lumière et le texte incrusté restent ceux de la vidéo.",
+            "aide_en": "1 photo of the model (JPG/PNG/WebP, 10 MB) + 1 video (MP4/MOV, 10 MB). The person in the video is replaced by the one in the photo; background, lighting and burned-in text stay those of the video.",
+        },
+        "options": [
+            {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
+             "valeurs": ["480p", "580p", "720p"], "defaut": "720p"},
+        ],
     },
 ]
 
@@ -555,6 +590,8 @@ PRIX = {
     "seedream5flash": {"image": 3.24},
     "kling3motion": {"720p": 20, "1080p": 27},     # par seconde de vidéo de gestes
     "kling26motion": {"720p": 11, "1080p": 18},
+    "wan22move": {"720p": 12.5},
+    "wan22replace": {"480p": 6, "580p": 9.5, "720p": 12.5},
 }
 
 
@@ -600,7 +637,8 @@ def estimer(cle_: str, options: Any, nb_refs: int = 0, duree_video: float = 0.0)
             secondes = math.ceil(float(duree_video or 0))
         except (TypeError, ValueError):
             secondes = 0
-        return round(float(p.get(o["mode"], 0)) * max(0, secondes), 2)
+        qualite = o.get("mode") or o.get("resolution")
+        return round(float(p.get(qualite, 0)) * max(0, secondes), 2)
     duree = float(o.get("duration") or 0)
     if cle_ == "kling3":
         sans, avec = p.get(o["mode"], (0, 0))
@@ -651,6 +689,10 @@ def entree_api(cle_: str, prompt: str, options: Any, refs: List[str],
         videos = [v for v in (videos or []) if isinstance(v, str) and v.startswith("http")]
         if not refs or not videos:
             raise ErreurKie("Il faut une photo et une vidéo.", "refs")
+        if cle_.startswith("wan"):
+            # nsfw_checker=false : pas de filtre en plus de celui du modèle
+            return m["modele_api"], {"video_url": videos[0], "image_url": refs[0],
+                                     "resolution": o["resolution"], "nsfw_checker": False}
         e_m: Dict[str, Any] = {"input_urls": refs[:1], "video_urls": videos[:1], "mode": o["mode"],
                                "character_orientation": o["character_orientation"]}
         if p:
@@ -733,11 +775,12 @@ def registre_public(langue: str = "fr") -> List[Dict[str, Any]]:
         prix_s = 0.0
         if m["type"] == "motion":
             # le prix de base est par seconde de vidéo : l'écran l'affiche « /s »
-            defaut_mode = next((o["defaut"] for o in m["options"] if o["cle"] == "mode"), "720p")
+            defaut_mode = next((o["defaut"] for o in m["options"] if o["cle"] in ("mode", "resolution")), "720p")
             prix_s = float((PRIX.get(m["cle"]) or {}).get(defaut_mode, 0))
         out.append({
             "cle": m["cle"], "nom": m["nom"], "editeur": m["editeur"], "type": m["type"],
-            "prix_seconde": prix_s,
+            "prix_seconde": prix_s, "sans_prompt": bool(m.get("sans_prompt")),
+            "duree": list(r.get("duree") or []),
             "badge": (m.get("badge_en") if en else m.get("badge")) or "",
             "resume": m.get("resume_en") if en and m.get("resume_en") else m.get("resume", ""),
             "prompt_max": m["prompt_max"], "prompt_min": int(m.get("prompt_min") or 1),
