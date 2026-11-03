@@ -16,7 +16,8 @@
   }
   var S = window.__sia = {
     type: 'video', modele: null, options: {}, refs: [], taches: [], credits: null,
-    cle: !!C.cle, timer: null, chrono: null, vue: 'creer', envoi: false,
+    cle: !!C.cle, cleFin: C.cle_fin || '', admin: !!C.admin, cleOuvert: false,
+    timer: null, chrono: null, vue: 'creer', envoi: false,
     estimTimer: null, estime: null, alerteErreur: false, collerHandler: null, toucheHandler: null
   };
   var MOD = C.modeles || [];
@@ -517,6 +518,55 @@
     });
   }
 
+  // ----------------------------------------------------------------- clé --
+  // Le panneau n'existe que pour l'admin (rendu serveur) : partout ailleurs
+  // ces fonctions ne trouvent rien et ne font rien.
+  function rendreCle() {
+    var p = $('sia-cle');
+    if (!p) { return; }
+    var et = $('sia-cle-etat');
+    et.textContent = S.cle ? fmt(T.cle_en_place, { fin: S.cleFin || '····' }) : T.cle_manquante_admin;
+    et.classList.toggle('ko', !S.cle);
+    p.hidden = S.cle && !S.cleOuvert;
+    $('sia-cle-annuler').hidden = !S.cle;
+  }
+  function ouvrirCle() {
+    S.cleOuvert = true;
+    rendreCle();
+    $('sia-cle-input').focus();
+  }
+  function enregistrerCle(ev) {
+    ev.preventDefault();
+    var inp = $('sia-cle-input'), btn = $('sia-cle-btn'), msg = $('sia-cle-msg');
+    var v = (inp.value || '').trim();
+    if (!v) { inp.focus(); return; }
+    btn.disabled = true;
+    msg.textContent = '…';
+    msg.className = 'sia-cle-msg';
+    post('/studio-ia/cle', { cle: v }).then(function (d) {
+      btn.disabled = false;
+      if (!d.ok) {
+        msg.textContent = d.erreur === 'forbidden' ? 'forbidden' : (d.erreur || T.erreur_reseau);
+        msg.className = 'sia-cle-msg ko';
+        return;
+      }
+      inp.value = '';
+      S.cle = true;
+      S.cleFin = d.fin || '';
+      S.cleOuvert = false;
+      msg.textContent = fmt(T.cle_ok, { fin: S.cleFin, n: nb(d.credits) });
+      msg.className = 'sia-cle-msg ok';
+      toast(msg.textContent, 'success');
+      majCredits({ credits: d.credits });
+      verifierCredits();
+      rendreCle();
+    }).catch(function () {
+      btn.disabled = false;
+      msg.textContent = T.erreur_reseau;
+      msg.className = 'sia-cle-msg ko';
+    });
+  }
+
   // --------------------------------------------------------------- vues --
   function choisirVue(vue) {
     S.vue = vue;
@@ -569,6 +619,12 @@
   $('sia-modal').addEventListener('click', function (ev) { if (ev.target === this) { fermerApercu(); } });
   $('sia-actualiser').addEventListener('click', function () { poll(); get('/studio-ia/etat?force=1').then(majCredits); });
   $('sia-actualiser2').addEventListener('click', function () { poll(); get('/studio-ia/etat?force=1').then(majCredits); });
+  if ($('sia-cle')) {
+    $('sia-cle-form').addEventListener('submit', enregistrerCle);
+    $('sia-cle-ouvrir').addEventListener('click', ouvrirCle);
+    $('sia-cle-annuler').addEventListener('click', function () { S.cleOuvert = false; rendreCle(); });
+    rendreCle();
+  }
 
   choisirType('video');
   choisirVue('creer');
@@ -576,9 +632,12 @@
   get('/studio-ia/etat').then(function (d) {
     if (!d.ok) { if (d.erreur === 'forbidden') { montrerAlerte('forbidden'); } return; }
     S.cle = !!d.cle;
+    S.cleFin = d.cle_fin || S.cleFin;
     S.taches = d.taches || [];
     rendreTaches();
     majCredits(d);
+    verifierCredits();
+    rendreCle();
     assurerPoll();
   }).catch(function () { majCredits({ credits: null }); });
 })();

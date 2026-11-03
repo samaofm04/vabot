@@ -9,10 +9,12 @@ vidéo) ; ses fichiers restent 14 jours chez eux, studio_ia.py les rapatrie.
 Les images de référence doivent être des URL publiques : l'API de dépôt
 (kieai.redpandaai.co) les héberge 24 h, le temps que la tâche les lise.
 
-La clé reste ici, côté serveur : KIE_API_KEY dans l'environnement, ou dans
-le .env du VPS (relu si l'environnement ne la porte pas, pour qu'ajouter la
-clé n'oblige pas à redémarrer). Elle ne sort jamais dans les journaux ni
-dans une réponse HTTP.
+La clé reste ici, côté serveur : collée par un admin dans l'onglet (gardée
+dans data/studio_ia/cle.json, lisible du seul service), sinon KIE_API_KEY
+dans l'environnement, sinon le .env du VPS (relu toutes les 30 s pour
+qu'ajouter la clé n'oblige pas à redémarrer). Elle ne sort jamais dans les
+journaux ni dans une réponse HTTP : l'écran ne voit que ses 4 derniers
+caractères.
 
 Ce module ne connaît ni Flask ni le dashboard : studio_ia.py s'en sert.
 Paramètres et prix relevés dans la doc et sur kie.ai le 03/11/2026 ; les
@@ -30,6 +32,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+
+import safe_json
 
 BOT_DIR = Path(__file__).resolve().parent
 BASE = "https://api.kie.ai"
@@ -53,12 +57,28 @@ class ErreurKie(Exception):
 # ------------------------------------------------------------------ clé --
 
 _CLE_ENV = {"valeur": "", "t": 0.0}
+#: la clé collée dans l'onglet ; les tests déplacent ce chemin hors de data/
+FICHIER_CLE = BOT_DIR / "data" / "studio_ia" / "cle.json"
+
+
+def _fiche_site() -> Dict[str, Any]:
+    d = safe_json.load(FICHIER_CLE, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def _cle_site() -> str:
+    return str(_fiche_site().get("cle") or "").strip()
 
 
 def cle() -> str:
-    """KIE_API_KEY : l'environnement d'abord (main.py charge le .env au
-    démarrage), sinon le .env relu toutes les 30 s. Sans ça, poser la clé
-    sur le VPS obligeait à redémarrer le bot pour qu'elle serve."""
+    """La clé collée dans l'onglet d'abord : c'est celle que le propriétaire
+    vient de poser, elle doit gagner sur un vieux KIE_API_KEY. Sinon
+    l'environnement (main.py charge le .env au démarrage), sinon le .env relu
+    toutes les 30 s. Sans ça, poser la clé sur le VPS obligeait à redémarrer
+    le bot pour qu'elle serve."""
+    k = _cle_site()
+    if k:
+        return k
     k = (os.environ.get("KIE_API_KEY") or "").strip()
     if k:
         return k
@@ -81,13 +101,64 @@ def cle_presente() -> bool:
     return bool(cle())
 
 
+def source_cle() -> Dict[str, Any]:
+    """Pour l'écran : d'où vient la clé et ses 4 derniers caractères, jamais
+    la clé entière."""
+    f = _fiche_site()
+    k = str(f.get("cle") or "").strip()
+    if k:
+        return {"source": "site", "fin": k[-4:], "le": f.get("le"), "par": f.get("par") or ""}
+    k = cle()
+    return {"source": "env" if k else "", "fin": k[-4:] if k else "", "le": None, "par": ""}
+
+
+def enregistrer_cle(valeur: str, par: str, langue: str = "fr") -> Tuple[bool, str, Optional[float]]:
+    """Garde la clé collée dans l'onglet, APRÈS l'avoir essayée sur le solde :
+    une clé refusée par Kie n'écraserait pas une clé peut-être encore bonne,
+    et un Kie injoignable ne fait rien garder (le propriétaire recolle dans
+    une minute). Renvoie (ok, message, solde)."""
+    t = _MESSAGES.get(langue) or _MESSAGES["fr"]
+    v = (valeur or "").strip()
+    if v.lower().startswith("bearer "):
+        v = v[7:].strip()
+    if len(v) < 16 or len(v) > 512 or any(c.isspace() for c in v):
+        return False, t["cle_mal_copiee"], None
+    try:
+        d = _requete("GET", BASE + "/api/v1/chat/credit", cle_=v)
+    except ErreurKie as e:
+        if e.code == 401:
+            return False, t["cle_refusee"], None
+        return False, str(e), None
+    try:
+        solde: Optional[float] = float(d.get("data"))
+    except (TypeError, ValueError):
+        solde = None
+    try:
+        FICHIER_CLE.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    # pas de copie .prev : une seconde copie de la clé pour rien ; perdue,
+    # elle se recolle en deux secondes
+    if not safe_json.write(FICHIER_CLE, {"cle": v, "le": time.time(), "par": par or ""}, backup=False):
+        return False, t["cle_non_ecrite"], None
+    try:
+        os.chmod(FICHIER_CLE, 0o600)
+    except OSError:
+        pass
+    return True, t["cle_posee"].format(fin=v[-4:]), solde
+
+
 # ------------------------------------------------------------ messages --
 
 _MESSAGES = {
     "fr": {
-        "sans_cle": "Clé Kie.ai absente : ajoute KIE_API_KEY=... dans le .env du VPS (kie.ai/api-key).",
+        "sans_cle": "Clé Kie.ai absente : un admin la colle dans l'onglet Studio IA (bouton 🔑), ou KIE_API_KEY dans le .env.",
+        "cle_mal_copiee": "Clé vide ou mal copiée : colle-la en entier, sans espace.",
+        "cle_refusee": "Kie.ai refuse cette clé : vérifie-la sur kie.ai/api-key et recolle-la.",
+        "cle_non_ecrite": "Écriture impossible dans data/ : clé non enregistrée.",
+        "cle_posee": "Clé Kie.ai enregistrée (…{fin}).",
         "reseau": "Kie.ai injoignable ({detail}) : réessaie dans un instant.",
-        401: "Clé Kie.ai refusée : vérifie KIE_API_KEY dans le .env du VPS.",
+        401: "Clé Kie.ai refusée : recolle une clé valide dans Studio IA (bouton 🔑).",
         402: "Crédits Kie.ai insuffisants : recharge le compte sur kie.ai.",
         404: "Adresse Kie.ai inconnue (modèle retiré ?) : {detail}",
         422: "Paramètres refusés par Kie.ai : {detail}",
@@ -96,9 +167,13 @@ _MESSAGES = {
         "autre": "Kie.ai a répondu {code} : {detail}",
     },
     "en": {
-        "sans_cle": "Kie.ai key missing: add KIE_API_KEY=... to the VPS .env (kie.ai/api-key).",
+        "sans_cle": "Kie.ai key missing: an admin pastes it in the Studio IA tab (🔑 button), or KIE_API_KEY in the .env.",
+        "cle_mal_copiee": "Empty or badly copied key: paste it whole, without spaces.",
+        "cle_refusee": "Kie.ai rejects this key: check it on kie.ai/api-key and paste it again.",
+        "cle_non_ecrite": "Cannot write in data/: key not saved.",
+        "cle_posee": "Kie.ai key saved (…{fin}).",
         "reseau": "Kie.ai unreachable ({detail}): try again in a moment.",
-        401: "Kie.ai key rejected: check KIE_API_KEY in the VPS .env.",
+        401: "Kie.ai key rejected: paste a valid key again in Studio IA (🔑 button).",
         402: "Not enough Kie.ai credits: top up the account on kie.ai.",
         404: "Unknown Kie.ai endpoint (model removed?): {detail}",
         422: "Parameters rejected by Kie.ai: {detail}",
@@ -123,11 +198,13 @@ def message_pour(code: Any, detail: str = "", langue: str = "fr") -> str:
 # ---------------------------------------------------------------- HTTP --
 
 def _requete(methode: str, url: str, *, json_: Any = None, data: Any = None,
-             files: Any = None, timeout: float = DELAI) -> Dict[str, Any]:
+             files: Any = None, timeout: float = DELAI,
+             cle_: Optional[str] = None) -> Dict[str, Any]:
     """Le seul point de sortie HTTP vers Kie : un seul endroit pour la clé,
     les délais et la lecture du `code` (Kie répond HTTP 200 même en échec,
-    le vrai verdict est dans le corps). Les tests le remplacent."""
-    k = cle()
+    le vrai verdict est dans le corps). Les tests le remplacent.
+    `cle_` : essayer une clé précise (celle qu'on est en train de coller)."""
+    k = cle_ or cle()
     if not k:
         raise ErreurKie(message_pour("sans_cle"), "sans_cle")
     entetes = {"Authorization": "Bearer " + k, "User-Agent": UA}

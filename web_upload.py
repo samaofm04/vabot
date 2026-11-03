@@ -44389,13 +44389,15 @@ def _render_tiktok_trends_html() -> str:
                 f"{type(e).__name__}: {e}</div>")
 
 
-def _render_studio_ia_html() -> str:
+def _render_studio_ia_html(admin: bool = False) -> str:
     """Onglet « Studio IA » (vidéos et photos générées via Kie.ai).
     Passe-plat vers studio_ia.py, import local : le module cassé n'emporte
-    que cet onglet, pas le tableau de bord."""
+    que cet onglet, pas le tableau de bord. `admin` vient de create_app
+    (_is_admin y est une fermeture) : le panneau de la clé n'est rendu que
+    pour lui."""
     try:
         import studio_ia
-        return studio_ia.rendu_html(_langue_courante())
+        return studio_ia.rendu_html(_langue_courante(), admin=bool(admin))
     except Exception as e:
         return ("<div style='background:#1a1a1a;border:1px solid #2a2a2a;"
                 "border-radius:12px;padding:40px 20px;text-align:center;"
@@ -62360,6 +62362,9 @@ def create_app():
         "/jbanalyse/", "/insta/", "/sheets", "/va/", "/identity/",
         "/textpool/", "/onboarding/", "/biolinks/", "/geelark/", "/noctus/",
         "/veille/", "/tg/", "/sfs", "/guild", "/vtg/", "/schedule/",
+        # Clé du compte Kie.ai (Studio IA) : un VA qui a l'onglet génère,
+        # mais ne touche pas à la clé.
+        "/studio-ia/cle",
         # Remote 2 : démarrer le pilote, changer les règles, mettre une machine
         # en pause ou un conteneur en quarantaine — ça pilote des téléphones.
         # Jamais un rôle restreint, même s'il a l'onglet en lecture.
@@ -62934,7 +62939,7 @@ def create_app():
                 # (HTML sans dependance a l'etat de la page -> reinjectable).
                 "tktrends": _render_tiktok_trends_html,
                 # Studio IA : rendu délégué à studio_ia.py (sans état de page).
-                "studioia": _render_studio_ia_html,
+                "studioia": lambda: _render_studio_ia_html(_is_admin()),
                 "cloudbios": lambda: _render_textvault_html("bios"),
                 "cloudctas": lambda: _render_textvault_html("ctas"),
                 "cloudcaptions": _render_cloud_captions_html,

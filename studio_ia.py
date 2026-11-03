@@ -92,7 +92,17 @@ T = {
         "erreur_reseau": "Le site n'a pas répondu.",
         "trop_en_cours": "Attends la fin des générations en cours ({n} au plus à la fois).",
         "actualiser": "Actualiser", "il_y_a": "il y a {d}", "par": "par",
-        "cle_absente": "Clé Kie.ai absente : ajoute KIE_API_KEY dans le .env du VPS, puis recharge la page.",
+        "cle_absente": "Clé Kie.ai absente : demande à un admin de la coller dans Studio IA (bouton 🔑).",
+        "cle_titre": "Clé Kie.ai",
+        "cle_aide": "Colle ici la clé créée sur",
+        "cle_aide2": "Elle reste sur le serveur : personne ne la revoit, pas même toi. Il faut aussi des crédits sur le compte Kie.",
+        "cle_ph": "Colle la clé ici",
+        "cle_enregistrer": "Enregistrer la clé",
+        "cle_annuler": "Annuler",
+        "cle_en_place": "Clé en place (…{fin})",
+        "cle_manquante_admin": "Aucune clé : colle-la pour ouvrir le Studio.",
+        "cle_ok": "Clé enregistrée (…{fin}). Solde : {n} crédits.",
+        "cle_bouton": "Changer la clé Kie.ai",
         "doc": "Clé et crédits sur kie.ai",
         "fermer": "Fermer", "secondes": "s", "ouvrir_kie": "Ouvrir chez Kie",
         "usage_refs_sans": "Aucune image : le modèle part du prompt seul.",
@@ -129,7 +139,17 @@ T = {
         "erreur_reseau": "The site did not answer.",
         "trop_en_cours": "Wait for the running generations to finish ({n} at a time at most).",
         "actualiser": "Refresh", "il_y_a": "{d} ago", "par": "by",
-        "cle_absente": "Kie.ai key missing: add KIE_API_KEY to the VPS .env, then reload the page.",
+        "cle_absente": "Kie.ai key missing: ask an admin to paste it in Studio IA (🔑 button).",
+        "cle_titre": "Kie.ai key",
+        "cle_aide": "Paste here the key created on",
+        "cle_aide2": "It stays on the server: nobody sees it again, not even you. The Kie account also needs credits.",
+        "cle_ph": "Paste the key here",
+        "cle_enregistrer": "Save the key",
+        "cle_annuler": "Cancel",
+        "cle_en_place": "Key in place (…{fin})",
+        "cle_manquante_admin": "No key: paste it to open the Studio.",
+        "cle_ok": "Key saved (…{fin}). Balance: {n} credits.",
+        "cle_bouton": "Change the Kie.ai key",
         "doc": "Key and credits on kie.ai",
         "fermer": "Close", "secondes": "s", "ouvrir_kie": "Open on Kie",
         "usage_refs_sans": "No image: the model starts from the prompt alone.",
@@ -631,6 +651,23 @@ body.light #sia-root .sia-tache .sia-actions a{color:#fff!important}
 #sia-root .sia-refs-mini img{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--sia-bord)}
 #sia-root .sia-sans-cle{padding:14px 16px;border-radius:12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.45);color:var(--sia-att);font-size:13px;line-height:1.5;margin-bottom:14px}
 #sia-root .sia-sans-cle code{font-size:12px}
+#sia-root .sia-cle{padding:14px 16px;border-radius:12px;background:var(--sia-carte);border:1px solid var(--sia-bord);margin-bottom:14px}
+#sia-root .sia-cle-tete{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#sia-root .sia-cle-tete h4{margin:0;font-size:14px}
+#sia-root .sia-cle-etat{font-size:12px;color:var(--sia-faible)}
+#sia-root .sia-cle-etat.ko{color:var(--sia-att)}
+#sia-root .sia-cle .sia-aide{margin:8px 0 0}
+#sia-root .sia-cle-ligne{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+#sia-root .sia-cle-ligne input{flex:1 1 260px;min-width:0;background:var(--sia-carte2);border:1px solid var(--sia-bord);color:var(--sia-texte);border-radius:9px;padding:9px 12px;font:inherit;font-size:13px}
+#sia-root .sia-cle-ligne input:focus{outline:none;border-color:var(--sia-accent)}
+#sia-root .sia-lien.primaire{background:var(--sia-accent);color:var(--sia-sur-accent);border-color:var(--sia-accent)}
+#sia-root .sia-lien:disabled{opacity:.55;cursor:default}
+#sia-root .sia-cle-msg{font-size:12px;margin-top:8px;min-height:1em;color:var(--sia-faible)}
+#sia-root .sia-cle-msg.ko{color:var(--sia-ko)}
+#sia-root .sia-cle-msg.ok{color:var(--sia-ok)}
+/* thème clair : la règle générale du site bleuit les liens et peut assombrir
+   un texte blanc ; le bouton plein garde son blanc sur l'accent */
+body.light #sia-root button.sia-lien.primaire{color:var(--sia-sur-accent)!important;background:var(--sia-accent)!important}
 @media (max-width:980px){#sia-root .sia-corps{grid-template-columns:1fr}#sia-root .sia-modal-boite{grid-template-columns:1fr;max-height:95vh;overflow:auto}#sia-root .sia-modal-media{min-height:200px}}
 """
 
@@ -639,32 +676,49 @@ _SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 _SVG_ETINCELLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>'
 
 
-def rendu_html(langue: str = "fr") -> str:
+def rendu_html(langue: str = "fr", admin: bool = False) -> str:
     """Le fragment de l'onglet (CSS + HTML + configuration JSON + script).
-    Sans état de page : réinjectable tel quel par le chargeur paresseux."""
+    Sans état de page : réinjectable tel quel par le chargeur paresseux.
+    `admin` : montrer le panneau de la clé (coller / changer)."""
     t = _t(langue)
     e = html.escape
     try:
         version = int((BOT_DIR / "studio_ia_app.js").stat().st_mtime)
     except OSError:
         version = 0
+    src = kie_ai.source_cle()
     conf = {
-        "langue": langue, "t": t, "cle": kie_ai.cle_presente(),
+        "langue": langue, "t": t, "cle": kie_ai.cle_presente(), "admin": bool(admin),
+        "cle_fin": src["fin"], "cle_source": src["source"],
         "modeles": kie_ai.registre_public(langue), "max_ouvertes": MAX_OUVERTES,
     }
-    sans_cle = "" if conf["cle"] else (
-        f'<div class="sia-sans-cle">{e(t["cle_absente"])} '
-        f'<a href="https://kie.ai/api-key" target="_blank" rel="noopener">kie.ai/api-key</a></div>')
+    # Sans clé : l'admin a le champ pour la coller, les autres savent à qui la
+    # demander. Avec clé, l'admin retrouve le panneau par le bouton 🔑.
+    sans_cle = "" if (conf["cle"] or admin) else f'<div class="sia-sans-cle">{e(t["cle_absente"])}</div>'
+    bouton_cle = (f'<button type="button" class="sia-lien" id="sia-cle-ouvrir" title="{e(t["cle_bouton"])}">🔑</button>'
+                  if admin else "")
+    panneau_cle = "" if not admin else f"""<div class="sia-cle" id="sia-cle"{"" if not conf["cle"] else " hidden"}>
+  <div class="sia-cle-tete"><h4>🔑 {e(t["cle_titre"])}</h4><span class="sia-cle-etat{"" if conf["cle"] else " ko"}" id="sia-cle-etat">{e(t["cle_en_place"].format(fin=src["fin"]) if conf["cle"] else t["cle_manquante_admin"])}</span></div>
+  <p class="sia-aide">{e(t["cle_aide"])} <a href="https://kie.ai/api-key" target="_blank" rel="noopener">kie.ai/api-key</a>. {e(t["cle_aide2"])}</p>
+  <form class="sia-cle-ligne" id="sia-cle-form" autocomplete="off">
+    <input type="password" id="sia-cle-input" placeholder="{e(t["cle_ph"])}" autocomplete="new-password" spellcheck="false" maxlength="512">
+    <button type="submit" class="sia-lien primaire" id="sia-cle-btn">{e(t["cle_enregistrer"])}</button>
+    <button type="button" class="sia-lien" id="sia-cle-annuler"{"" if conf["cle"] else " hidden"}>{e(t["cle_annuler"])}</button>
+  </form>
+  <div class="sia-cle-msg" id="sia-cle-msg"></div>
+</div>"""
     return f"""<style>{_CSS}</style>
 <div id="sia-root" class="sia" data-langue="{e(langue)}">
 <div class="sia-entete">
   <p class="sia-sous">{e(t["sous"])}</p>
   <div class="sia-droite">
     <span class="sia-credits" id="sia-credits" title="{e(t["doc"])}">⚡ <span id="sia-credits-txt">…</span> <a href="https://kie.ai/pricing" target="_blank" rel="noopener">↗</a></span>
+    {bouton_cle}
     <div class="sia-seg" id="sia-vues"><button type="button" class="on" data-vue="creer">{e(t["creer"])}</button><button type="button" data-vue="historique">{e(t["historique"])}<span class="sia-nb" id="sia-nb-ouvertes" hidden>0</span></button></div>
   </div>
 </div>
 {sans_cle}
+{panneau_cle}
 <div class="sia-types" id="sia-types">
   <button type="button" class="sia-type on" data-type="video">{_SVG_FILM}{e(t["reels"])}</button>
   <button type="button" class="sia-type" data-type="image">{_SVG_PHOTO}{e(t["photo"])}</button>
@@ -758,9 +812,28 @@ def register(app, deps: Dict[str, Any]) -> None:
         if r:
             return r
         s = solde(force=request.args.get("force") == "1")
+        src = kie_ai.source_cle()
         return _json({"ok": True, "cle": kie_ai.cle_presente(), "credits": s["credits"],
-                      "erreur_credits": s["erreur"],
+                      "erreur_credits": s["erreur"], "admin": _admin(),
+                      "cle_fin": src["fin"], "cle_source": src["source"],
                       "taches": taches_visibles(utilisateur(), _admin(), langue())})
+
+    @app.route("/studio-ia/cle", methods=["POST"])
+    def studio_ia_cle():
+        """La clé collée par un admin. Essayée chez Kie avant d'être gardée ;
+        jamais renvoyée (seulement sa fin). Admin seul : le garde d'écriture
+        du site la refuse aussi aux rôles restreints (_ADMIN_ONLY_WRITE)."""
+        r = _refus()
+        if r:
+            return r
+        if not _admin():
+            return _json({"ok": False, "erreur": "forbidden"}, 403)
+        corps = request.get_json(silent=True) or {}
+        ok, msg, credits_ = kie_ai.enregistrer_cle(str(corps.get("cle") or ""), utilisateur(), langue())
+        if not ok:
+            return _json({"ok": False, "erreur": msg}, 400)
+        _oublier_solde()
+        return _json({"ok": True, "message": msg, "fin": kie_ai.source_cle()["fin"], "credits": credits_})
 
     @app.route("/studio-ia/taches")
     def studio_ia_taches():

@@ -38243,6 +38243,7 @@ try:
     import web_upload as _wSia
     _dSia = _plSia.Path(_tfSia.mkdtemp(prefix="sia_tests_"))
     _sia.DOSSIER = _dSia                       # rien n'ecrit dans le vrai data/
+    _fcOrig, _kie.FICHIER_CLE = _kie.FICHIER_CLE, _dSia / "cle.json"   # ni la cle du site
     _osSia.environ.pop("KIE_API_KEY", None)
     _cleOrig, _reqOrig, _dlOrig = _kie.cle, _kie._requete, _kie.telecharger
     _kie._CLE_ENV.update({"valeur": "", "t": 10 ** 12})   # ne pas relire le .env
@@ -38294,12 +38295,15 @@ try:
     check("menu : le bouton n'est PAS ecrit dans UPLOAD_HTML (patchs du VPS)",
           'id="tab-studioia"' not in _wSia.UPLOAD_HTML)
     check("cablage : rendu paresseux et permission declares",
-          '"studioia": _render_studio_ia_html' in _plSia.Path("web_upload.py").read_text(encoding="utf-8")
+          '"studioia": lambda: _render_studio_ia_html(_is_admin())' in _plSia.Path("web_upload.py").read_text(encoding="utf-8")
           and any(it["key"] == "studioia" for sec in _wSia.ROLE_MENU_STRUCTURE for it in sec["items"]))
     _frS = _cS.get("/?lazy=studioia&tab=studioia", headers={"X-Tab-Ajax": "1"})
     _ftS = _frS.get_data(as_text=True)
     check("fragment : se rend (sia-root, SIA_CONF, app.js)",
           _frS.status_code == 200 and "sia-root" in _ftS and "SIA_CONF" in _ftS and "/studio-ia/app.js" in _ftS)
+    check("fragment admin sans cle : le panneau pour coller la cle est la, visible, sans bandeau",
+          'id="sia-cle"' in _ftS and 'id="sia-cle" hidden' not in _ftS and 'class="sia-sans-cle"' not in _ftS
+          and 'id="sia-cle-ouvrir"' in _ftS)
     # Hors <script> : la configuration JSON contient des objets imbriques, donc
     # des « }} » legitimes ; une accolade orpheline, elle, est dans le HTML.
     _htmlS = _reSia.sub(r"<(script|style)>.*?</\1>", "", _ftS, flags=_reSia.S)
@@ -38336,15 +38340,19 @@ try:
     check("sans cle : l etat le dit, pas de solde", _eS["ok"] and _eS["cle"] is False and _eS["credits"] is None)
     _gS = _cS.post("/studio-ia/generer", json={"modele": "wan3", "prompt": "un chat"})
     check("sans cle : la generation est refusee avec la marche a suivre",
-          _gS.status_code == 400 and "KIE_API_KEY" in _gS.get_json()["erreur"])
+          _gS.status_code == 400 and _gS.get_json()["code"] == "sans_cle" and "🔑" in _gS.get_json()["erreur"])
     check("estimation par la route : Wan 1080P 10 s = 320",
           _cS.get("/studio-ia/estimer?modele=wan3&o_duration=10&o_resolution=1080P").get_json()["credits"] == 320)
     # -- 5) Kie simule : credits, references, succes, echec -------------------
     _FAUX = {"credits": 1000.0, "record": {"state": "generating"}, "appels": [], "code402": False}
 
-    def _fauxReq(methode, url, json_=None, data=None, files=None, timeout=30):
+    def _fauxReq(methode, url, json_=None, data=None, files=None, timeout=30, cle_=None):
         _FAUX["appels"].append(url.split("?")[0].rsplit("/", 1)[-1])
         if url.endswith("/credit"):
+            if cle_ is not None:
+                _FAUX["cle_essayee"] = cle_
+                if cle_.endswith("mauvaise"):
+                    raise _kie.ErreurKie(_kie.message_pour(401), 401)
             return {"code": 200, "data": _FAUX["credits"]}
         if url.endswith("/createTask"):
             if _FAUX["code402"]:
@@ -38361,6 +38369,39 @@ try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"\x89PNG" + b"\x00" * 20)
         return 24, "image/png"
+    # -- 5a) la cle collee dans l onglet (admin seul) --------------------------
+    _kie._requete = _fauxReq
+    _vK = _appS.test_client()
+    with _vK.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "va1"; _s["role"] = "va"
+    check("cle : un VA avec l onglet ne peut pas la poser (403), un chatteur non plus",
+          _vK.post("/studio-ia/cle", json={"cle": "kie_" + "a" * 30}).status_code == 403
+          and _chS.post("/studio-ia/cle", json={"cle": "kie_" + "a" * 30}).status_code == 403)
+    _rK = _cS.post("/studio-ia/cle", json={"cle": "trop courte"})
+    check("cle : mal copiee -> 400 sans appel a Kie, rien d ecrit",
+          _rK.status_code == 400 and "cle_essayee" not in _FAUX and not (_dSia / "cle.json").exists())
+    _rK = _cS.post("/studio-ia/cle", json={"cle": "kie_" + "b" * 20 + "mauvaise"})
+    check("cle : refusee par Kie (401) -> 400 avec le message, rien d ecrit",
+          _rK.status_code == 400 and "kie.ai/api-key" in _rK.get_json()["erreur"] and not (_dSia / "cle.json").exists())
+    _rK = _cS.post("/studio-ia/cle", json={"cle": "Bearer kie_" + "c" * 28 + "1234"})
+    _jK = _rK.get_json()
+    check("cle : bonne -> enregistree, essayee chez Kie, fin seule renvoyee, solde lu",
+          _rK.status_code == 200 and _jK["ok"] and _jK["fin"] == "1234" and _jK["credits"] == 1000.0
+          and _FAUX["cle_essayee"] == "kie_" + "c" * 28 + "1234" and "kie_" not in _jK["fin"])
+    check("cle : fichier data/studio_ia/cle.json en 600, lu par kie_ai.cle() avant l environnement",
+          (_dSia / "cle.json").exists() and (_dSia / "cle.json").stat().st_mode & 0o777 == 0o600
+          and _kie.cle() == "kie_" + "c" * 28 + "1234" and _kie.source_cle() == {
+              "source": "site", "fin": "1234", "le": _kie._fiche_site()["le"], "par": "admin"})
+    _eK = _cS.get("/studio-ia/etat?force=1").get_json()
+    check("cle : l etat la dit presente (fin, source site, admin) et le solde arrive",
+          _eK["cle"] is True and _eK["cle_fin"] == "1234" and _eK["cle_source"] == "site"
+          and _eK["admin"] is True and _eK["credits"] == 1000.0)
+    _ftK = _cS.get("/?lazy=studioia", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    check("fragment admin avec cle : panneau replie, bouton 🔑 present ; VA : ni panneau ni bouton",
+          'id="sia-cle" hidden' in _ftK and 'id="sia-cle-ouvrir"' in _ftK
+          and 'id="sia-cle"' not in _vK.get("/?lazy=studioia", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True))
+    check("cle : la cle entiere n apparait ni dans l etat ni dans le fragment",
+          "c" * 28 not in _jsSia.dumps(_eK) and "c" * 28 not in _ftK)
     _kie._requete, _kie.cle, _kie.telecharger = _fauxReq, (lambda: "cle-test"), _fauxDl
     _sia._oublier_solde()
     check("avec cle : le solde est lu chez Kie", _cS.get("/studio-ia/etat?force=1").get_json()["credits"] == 1000.0)
@@ -38455,6 +38496,7 @@ finally:
         for _t in _sia._charger():
             _sia._maj(_t["id"], etat="echec", message="fin des tests")
         _kie.cle, _kie._requete, _kie.telecharger = _cleOrig, _reqOrig, _dlOrig
+        _kie.FICHIER_CLE = _fcOrig
         _kie._CLE_ENV.update({"valeur": "", "t": 0.0})
         _wSia._load_web_users, _wSia._load_role_definitions = _usersOrig, _rolesOrig
         _shSia.rmtree(_dSia, ignore_errors=True)
