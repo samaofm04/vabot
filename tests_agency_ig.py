@@ -54,8 +54,11 @@ def check(label, cond, detail=""):
 
 AG = lv.AGENCY_IG_ID
 EMY_IG = "tm_6ada83b07218da6450e65862"
+# « lia_seule » : false garde les quatre branches Seren (avant le 03/11/2026) ;
+# Agency en Lia seule (la config par défaut) est vérifié dans
+# tests_lia_seule_partout.py
 CONFIG = {"gabarit": "lnk_gabarit_twitter", "equipe": lv.EQUIPE_VA, "mypuls_actif": True,
-          "creator_id": 3352, "modele": "Emy"}
+          "creator_id": 3352, "modele": "Emy", "lia_seule": False}
 
 
 class FauxGMS(types.ModuleType):
@@ -207,7 +210,7 @@ try:
     page = g.liens[f'lnk_{r["shortcode"]}']
     check("… pays (29/10/2026) : hors US/CA/AU/GB/NZ/IE, le bouton OnlyFans mène au compte de base, "
           "rien sur la page",
-          len(b0.get("geofilters") or []) == 250 and "geofilters" not in page
+          len(b0.get("geofilters") or []) == 248 and "geofilters" not in page
           and {x["destination_url"] for x in b0["geofilters"]} == {"https://onlyfans.com/emy.brw"}
           and lv.lien_de(AG, "u1").get("pays") is True, (len(b0.get("geofilters") or []), page.keys()))
     g, suivis = monde()
@@ -232,7 +235,7 @@ try:
           getattr(g, "deeplink", "") == "pageload")
     geo = g.liens[f'lnk_{r["shortcode"]}'].get("geofilters") or []
     check("… et la liste des pays sur le lien direct, vers le compte de base",
-          len(geo) == 250 and {x["destination_url"] for x in geo} == {"https://onlyfans.com/emy.brw"},
+          len(geo) == 248 and {x["destination_url"] for x in geo} == {"https://onlyfans.com/emy.brw"},
           len(geo))
     f = lv.lien_de(AG, "u1")
     check("… la fiche : numéro, tracking, lien", f.get("numero") == 27

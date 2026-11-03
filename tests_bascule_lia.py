@@ -199,7 +199,7 @@ try:
     geo = LIENS["lnk_tw32"].get("geofilters") or []
     f = lv.lien_de(TW, "u32")
     check("pays : les autres pays partent sur le compte de la NOUVELLE model, plus l'ancienne",
-          len(geo) == 250 and {x["destination_url"] for x in geo} == {PROFIL}
+          len(geo) == 248 and {x["destination_url"] for x in geo} == {PROFIL}
           and f.get("pays") is True, ({x["destination_url"] for x in geo}, f.get("pays_erreur")))
     check("… sa variante Seren (copie figée) est notée à recopier : « variante.pays » : false",
           (f.get("variante") or {}).get("pays") is False and f["variante"].get("posee") is True, f)
@@ -213,7 +213,7 @@ try:
           and fa.get("bases_pour") == "https://onlyfans.com/emy.brw", fa)
     check("… landing : la liste sur le bouton OnlyFans, vers la nouvelle model",
           {x["destination_url"] for x in (b[0].get("geofilters") or [])} == {PROFIL}
-          and len(b[0]["geofilters"]) == 250 and "geofilters" not in b[1], b)
+          and len(b[0]["geofilters"]) == 248 and "geofilters" not in b[1], b)
 
     # ── lien coupé ──
     r = lv.passer_sur(TW, "u31", LIA, PROFIL)

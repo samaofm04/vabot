@@ -79,6 +79,12 @@ check("copie de la PAGE modèle, sans adresse (une page n'en prend pas)",
 check("le tracking du VA posé sur le bouton OnlyFans", r.get("ok") and BOUTONS[0] == "https://onlyfans.com/liasxcret/c999",
       (r, BOUTONS))
 
+print("2b. Bénin et Madagascar gardent le tracking, comme les US (03/11)")
+geo = lv.regles_pays("https://onlyfans.com/liasxcret")
+codes = {x["country_code"] for x in geo}
+check("BJ et MG ne sont pas renvoyés vers le compte de base, les US non plus ; FR oui",
+      not ({"BJ", "MG", "US", "CA", "AU", "GB", "NZ", "IE"} & codes) and "FR" in codes and len(geo) == 248, len(geo))
+
 print("3. Threads et Agency ne bougent pas")
 check("Threads : pas la page Twitter", lv.espace(lv.THREADS_ID).get("gabarit") != lv.GABARIT_PAGE_TWITTER)
 check("Agency : sa page à elle", lv.espace(lv.AGENCY_IG_ID).get("gabarit") == lv.ESPACE_AGENCY_IG["gabarit"])

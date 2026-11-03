@@ -575,7 +575,10 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
 # Sur une landing, la liste tient sur le bouton OnlyFans : posée sur la page,
 # GetMySocial l'efface sans erreur. Clé « pays » de liens_va_config.json :
 # {"cibles": [...]} change la liste, {} coupe la règle pour les liens à venir.
-PAYS_CIBLES = ("US", "CA", "AU", "GB", "NZ", "IE")
+# Propriétaire, 03/11/2026 : « le Béninois et le Malgache, il a le lien de
+# tracking, comme le mec US », sur les trois TRUST — prévenu qu'un abonnement
+# pris depuis là par le VA ou ses proches comptera dans sa paie.
+PAYS_CIBLES = ("US", "CA", "AU", "GB", "NZ", "IE", "BJ", "MG")
 # les territoires du CLDR (babel), relevés le 29/10/2026 : la même liste que
 # celle posée à la main sur les liens existants ce jour-là
 TOUS_LES_PAYS = (
@@ -875,8 +878,9 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
                "poids": float(e["variante"]["poids"]), "tracking": rv.get("tracking", ""),
                "cookie": bool(rv.get("cookie")), "erreur": rv.get("erreur", "")}
     elif e.get("base_seule"):
-        # Twitter depuis le 02/11/2026 : 30 % vers la page de la model, sans
-        # tracking. Raté ici, reprendre_bases le refait à la synchro suivante
+        # Lia seule (Twitter depuis le 02/11/2026, Threads et Agency le 03/11) :
+        # 30 % vers la page de la model, sans tracking. Raté ici,
+        # reprendre_bases le refait à la synchro suivante
         rb = poser_base_seule(gid, uid)
         if not rb.get("ok"):
             print(f"[lien] page de base {gid}:{uid} non posée : {rb.get('erreur')}", flush=True)
@@ -1197,7 +1201,8 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:
     fiches = {c: f for c, f in (_etat().get("liens") or {}).items()
               if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
               and f.get("actif") is not False}
-    # Twitter sans Seren (02/11/2026) : recopier une variante Seren la remettrait
+    # Lia seule (Twitter le 02/11/2026, Threads et Agency le 03/11) :
+    # recopier une variante Seren la remettrait
     seren = not lia_seule(gid)
     a_faire = [c for c, f in fiches.items()
                if (f.get("pays") is False and int(f.get("pays_essais") or 0) < ESSAIS_PAYS)
@@ -1656,16 +1661,23 @@ _COUPE = __import__("threading").Lock()
 # model sans tracking (« Base Lia », 30 %), plus de Seren ni de « Base Seren ».
 # Les 34 liens ont été passés à la main ce jour-là (« Base Lia » gardée sous
 # son variantId) ; un lien neuf, ou repris par reprendre_bases, reçoit la même
-# chose (poser_base_seule). Threads et Agency gardent leurs quatre branches.
+# chose (poser_base_seule).
+# Propriétaire, 03/11/2026 : « Lia seule partout » — TRUST THREADS et TRUST
+# INSTAGRAM aussi, à la place de leurs quatre branches (Lia 46,7 / Seren 23,3
+# / Base Lia 20 / Base Seren 10). Leurs liens sont passés ce soir-là (« Base
+# Lia » gardée sous son variantId). Les trackings Seren des VA restent dans
+# leurs fiches (variante.tracking, trackings_de_fiche) : leurs subs d'avant
+# restent ceux du VA.
 # Clé « lia_seule » de liens_va_config.json : false pour revenir à Seren (puis
 # remettre les variantes : reprendre_variantes, reprendre_bases).
 LIA_SEULE = {"controle": 70, "base_modele": 30}
-LIA_SEULE_SERVEURS = {TWITTER_ID}
+LIA_SEULE_SERVEURS = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
 
 
 def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
     """Les deux parts de l'A/B des liens de ce serveur quand Seren en est
-    retirée (Twitter), None sinon. gid "" : Twitter, comme espace()."""
+    retirée (les 3 TRUST depuis le 03/11/2026), None sinon. gid "" :
+    Twitter, comme espace()."""
     if (str(gid) or TWITTER_ID) not in LIA_SEULE_SERVEURS:
         return None
     if config().get("lia_seule", True) is False:
@@ -1707,6 +1719,11 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
                if mypuls_actif() and not SEREN_EN_PAUSE and e.get("source_variante") else None)
         e.update(tracking=mypuls_actif(), variante=var,
                  base_shortcode=str(c.get("base_shortcode") or c.get("modele") or "emy"))
+        parts = lia_seule(gid)
+        if parts:
+            # Lia seule (03/11/2026) : la page de Lia à la place de Seren
+            e["variante"] = None
+            e["base_seule"] = parts
         return e
     e = _espace_avec_seren(gid)
     if (str(gid) or TWITTER_ID) == TWITTER_ID and GABARIT_PAGE_TWITTER:
@@ -1715,7 +1732,7 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
     if SEREN_EN_PAUSE:
         e["variante"] = None
     parts = lia_seule(gid)
-    if parts and str(gid) != THREADS_ID:
+    if parts:
         # ni tracking Seren créé, ni variante posée : la page de base à la place
         e["variante"] = None
         e["base_seule"] = parts

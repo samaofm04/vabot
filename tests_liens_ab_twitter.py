@@ -1086,14 +1086,14 @@ try:
     # « dès que les mecs ne sont pas des USA, Australie, Canada […] renvoie-les
     # vers le lien qui n'a pas de tracking link, juste le compte de base »
     BASE = "https://onlyfans.com/emy.brw"       # le compte de la model du lien (tracking c55)
-    NB = len(lv.TOUS_LES_PAYS) - 6
+    NB = len(lv.TOUS_LES_PAYS) - len(lv.PAYS_CIBLES)     # 8 cibles depuis le 03/11 (+ Bénin, Madagascar)
     g, _s = monde()
     r = lv.creer_pour(TW, "p1", "paysva", manager="YAZID")
     lid = f'lnk_{r.get("shortcode")}'
     geo = g.liens.get(lid, {}).get("geofilters") or []
     codes = {x["country_code"] for x in geo}
     check("lien neuf : tout pays hors US/CA/AU/GB/NZ/IE va au compte de base de SA model, sans tracking",
-          r.get("ok") and len(geo) == NB == 250 and not codes & set(lv.PAYS_CIBLES)
+          r.get("ok") and len(geo) == NB == 248 and not codes & set(lv.PAYS_CIBLES)
           and {"FR", "DE", "MX"} <= codes and all(x["destination_url"] == BASE for x in geo),
           (r, len(geo), {x["destination_url"] for x in geo}))
     check("… noté dans la fiche et dans le retour",
@@ -1846,8 +1846,12 @@ try:
     check("Twitter par défaut : plus de variante Seren, la page de base seule à 70 / 30",
           e.get("variante") is None and e.get("base_seule") == {"controle": 70, "base_modele": 30}
           and lv.espace("").get("base_seule") == e.get("base_seule"), e)
-    check("… Agency et Threads gardent leur règle (pas de « base_seule »)",
-          lv.espace(lv.AGENCY_IG_ID).get("base_seule") is None and lv.espace(lv.THREADS_ID).get("base_seule") is None)
+    # 03/11/2026, « Lia seule partout » : Agency et Threads aussi
+    check("… Agency et Threads aussi, depuis le 03/11 (même « base_seule »)",
+          lv.espace(lv.AGENCY_IG_ID).get("base_seule") == e.get("base_seule")
+          and lv.espace(lv.THREADS_ID).get("base_seule") == e.get("base_seule")
+          and lv.espace(lv.AGENCY_IG_ID).get("variante") is None
+          and lv.espace(lv.THREADS_ID).get("variante") is None)
     monde4(config=dict(CONFIG_LIA, lia_seule=False))
     check("« lia_seule » : false ramène Seren sur Twitter",
           lv.espace(TW).get("variante") is not None and lv.espace(TW).get("base_seule") is None)
