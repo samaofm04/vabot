@@ -44389,6 +44389,45 @@ def _render_tiktok_trends_html() -> str:
                 f"{type(e).__name__}: {e}</div>")
 
 
+def _render_studio_ia_html() -> str:
+    """Onglet « Studio IA » (vidéos et photos générées via Kie.ai).
+    Passe-plat vers studio_ia.py, import local : le module cassé n'emporte
+    que cet onglet, pas le tableau de bord."""
+    try:
+        import studio_ia
+        return studio_ia.rendu_html(_langue_courante())
+    except Exception as e:
+        return ("<div style='background:#1a1a1a;border:1px solid #2a2a2a;"
+                "border-radius:12px;padding:40px 20px;text-align:center;"
+                "color:#f99'>Studio IA indisponible : "
+                f"{type(e).__name__}: {e}</div>")
+
+
+#: Bouton de menu du Studio IA, posé AU RENDU et non dans UPLOAD_HTML : les
+#: patchs du VPS s'ancrent sur les lignes du menu, une ligne ajoutée là-bas
+#: en ferait tomber (voir _menu_avec_equipe). L'id tab-studioia sert au garde
+#: des rôles et au lien ?tab=studioia ; showTab fabrique la section au clic.
+_MENU_STUDIO_IA_BTN = """<button class="item solo-item" id="tab-studioia" onclick="showTab('cloud','studioia','Studio IA','Vidéos et photos générées par IA (Kie.ai)')">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>
+  Studio IA
+</button>
+"""
+
+
+def _studio_ia_dans_la_page(page: str) -> str:
+    """Ajoute l'entrée « Studio IA » dans la section Création, juste avant le
+    groupe Reel montage. Si le repère manque, on le dit dans le journal au
+    lieu de perdre l'onglet sans trace."""
+    if 'id="tab-studioia"' in page:
+        return page
+    i = page.find('<div class="group" id="grp-montage">')
+    if i < 0:
+        print("[studio-ia] groupe Reel montage introuvable dans le menu : "
+              "entree Studio IA non ajoutee", flush=True)
+        return page
+    return page[:i] + _MENU_STUDIO_IA_BTN + page[i:]
+
+
 def _render_veille_feed_html() -> str:
     """Liste des reels veille, groupes par jour. Bouton 'Send to Telegram' par reel."""
     try:
@@ -58553,6 +58592,7 @@ ROLE_MENU_STRUCTURE = [
         {"key": "videocrea", "name": "Création de vidéos", "perms": ["view", "create"]},
         {"key": "svideo", "name": "Métadonnées vidéo (uniquification)", "perms": ["view", "edit"]},
         {"key": "montage", "name": "Reel montage (rushs bruts + templates + captions)", "perms": ["view", "create"]},
+        {"key": "studioia", "name": "Studio IA — vidéos et photos générées (Kie.ai)", "perms": ["view", "create"]},
     ]},
     {"section": "Liens", "items": [
         {"key": "gmsdash", "name": "Dashboard clics (GMS)", "perms": ["view"]},
@@ -59897,6 +59937,7 @@ def _render_upload_inner(msg=None, error=None):
         # et le navigateur qui se fige. showTab va la chercher au 1er open.
         .replace("{insta_trends_html_or_empty}", _lazy("igtrends"))
     )
+    html = _studio_ia_dans_la_page(html)
     if allowed is not None:
         html += _role_gate_script(allowed)
     # Tampon de version dans la console (F12) : vérifie en 2s que le navigateur
@@ -62300,6 +62341,9 @@ def create_app():
         # suffit à un visiteur SANS session, était refusée à qui l'ouvrait
         # depuis un navigateur connecté avec un rôle restreint.
         "/infloww/liens/paie",
+        # Studio IA : un rôle restreint qui a l'onglet peut lancer ses
+        # générations (le module revérifie l'onglet lui-même).
+        ("/studio-ia/", "studioia"),
         # NB : /settings/my_password est autorisé plus haut par un retour
         # anticipé du guard (exact-match), pas via cette liste de préfixes.
         # (Anciennes entrées /prefs//theme/sfw retirées : aucune route ne leur
@@ -62889,6 +62933,8 @@ def create_app():
                 # Onglet TikTok Trends : rendu delegue a veille_tiktok_ui.py
                 # (HTML sans dependance a l'etat de la page -> reinjectable).
                 "tktrends": _render_tiktok_trends_html,
+                # Studio IA : rendu délégué à studio_ia.py (sans état de page).
+                "studioia": _render_studio_ia_html,
                 "cloudbios": lambda: _render_textvault_html("bios"),
                 "cloudctas": lambda: _render_textvault_html("ctas"),
                 "cloudcaptions": _render_cloud_captions_html,
@@ -79763,6 +79809,20 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         parc_web.register(app, is_auth)
     except Exception as _pc_e:
         log.error(f"parc_web register échoué: {_pc_e}")
+
+    # Onglet « Studio IA » : vidéos et photos générées via Kie.ai
+    # (studio_ia.py + kie_ai.py). Le module reçoit ses dépendances au lieu
+    # d'importer ce fichier : l'onglet du rôle, le nom de session, la langue.
+    try:
+        import studio_ia
+        studio_ia.register(app, {
+            "is_auth": is_auth, "is_admin": _is_admin,
+            "onglets": lambda: _role_allowed_tabs(_live_role()),
+            "utilisateur": lambda: (session.get("username") or "admin"),
+            "langue": _langue_courante,
+        })
+    except Exception as _sia_e:
+        log.error(f"studio_ia register échoué: {_sia_e}")
 
     # Inscription publique + file d'attente de validation (signup_public.py).
     #

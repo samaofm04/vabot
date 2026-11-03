@@ -38232,6 +38232,235 @@ except Exception as _eE:
     import traceback as _tbE
     check("garde des captions : testable", False, (repr(_eE) + _tbE.format_exc()[-400:])[:600])
 
+print()
+print("=" * 70)
+print("Studio IA (Kie.ai) : registre des modeles, routes, gardes, suivi des taches")
+print("=" * 70)
+try:
+    import io as _ioSia, json as _jsSia, os as _osSia, re as _reSia, subprocess as _spSia
+    import shutil as _shSia, tempfile as _tfSia, pathlib as _plSia
+    import kie_ai as _kie, studio_ia as _sia
+    import web_upload as _wSia
+    _dSia = _plSia.Path(_tfSia.mkdtemp(prefix="sia_tests_"))
+    _sia.DOSSIER = _dSia                       # rien n'ecrit dans le vrai data/
+    _osSia.environ.pop("KIE_API_KEY", None)
+    _cleOrig, _reqOrig, _dlOrig = _kie.cle, _kie._requete, _kie.telecharger
+    _kie._CLE_ENV.update({"valeur": "", "t": 10 ** 12})   # ne pas relire le .env
+    # -- 1) le registre : ce que l'ecran propose et ce qui part chez Kie ------
+    _mods = _kie.registre_public("fr")
+    check("registre : 7 modeles, 5 video + 2 image",
+          len(_mods) == 7 and sum(m["type"] == "video" for m in _mods) == 5)
+    check("registre : chaque modele propose le 9:16 (Reels) par defaut",
+          all(next(o for o in m["options"] if o["cle"] == "aspect_ratio")["defaut"] == "9:16" for m in _mods))
+    check("registre : chaque modele a une estimation > 0 et un prix releve",
+          all(m["estimation_defaut"] > 0 for m in _mods) and all(m["cle"] in _kie.PRIX for m in _kie.MODELES))
+    check("registre : la version anglaise traduit les libelles",
+          any(o["nom"] == "Duration" for m in _kie.registre_public("en") for o in m["options"]))
+    check("estimation : Kling pro + son, 10 s = 270 credits",
+          _kie.estimer("kling3", {"mode": "pro", "sound": True, "duration": 10}) == 270)
+    check("estimation : Seedream Pro high + 3 images = 15 credits",
+          _kie.estimer("seedream5pro", {"quality": "high"}, 3) == 15)
+    check("normaliser : valeur inconnue -> defaut, nombre ramene dans ses bornes",
+          _kie.normaliser("wan3", {"resolution": "8K", "duration": 999})
+          == _kie.normaliser("wan3", {"resolution": "720P", "duration": 30}))
+    _mk, _ek = _kie.entree_api("kling3turbo", "un chat", {}, ["https://x/a.png"])
+    check("entree : Kling turbo avec image -> modele image-to-video, sans aspect_ratio",
+          _mk.endswith("image-to-video") and "aspect_ratio" not in _ek and _ek["image_urls"] == ["https://x/a.png"])
+    _mw, _ew = _kie.entree_api("wan3", "p", {"usage_refs": "references"}, ["https://x/a.png", "https://x/b.png"])
+    check("entree : Wan en references -> reference_image_urls, sans cadres",
+          _ew.get("reference_image_urls") == ["https://x/a.png", "https://x/b.png"] and "first_frame_url" not in _ew)
+    _ms, _es = _kie.entree_api("seedance25", "p", {}, ["https://x/a.png", "https://x/b.png"])
+    check("entree : Seedance en cadres -> premiere et derniere image",
+          _es.get("first_frame_url") == "https://x/a.png" and _es.get("last_frame_url") == "https://x/b.png")
+    check("prompt : vide refuse, trop long refuse, correct accepte",
+          bool(_kie.verifier_prompt("kling3", "")) and bool(_kie.verifier_prompt("kling3", "x" * 2501))
+          and not _kie.verifier_prompt("kling3", "un chat"))
+    check("messages : 402 = credits insuffisants (fr et en)",
+          "insuffisants" in _kie.message_pour(402) and "credits" in _kie.message_pour(402, "", "en"))
+    # -- 2) la page -----------------------------------------------------------
+    _appS = _wSia.create_app()
+    _appS.config["TESTING"] = True
+    _usersOrig, _rolesOrig = _wSia._load_web_users, _wSia._load_role_definitions
+    _wSia._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                     "chat1": {"role": "chatter", "password": "x"},
+                                     "va1": {"role": "va", "password": "x"}}
+    _wSia._load_role_definitions = lambda: {"va": {"permissions": {"studioia": {"enabled": True}}}}
+    _cS = _appS.test_client()
+    with _cS.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "admin"; _s["role"] = "admin"
+    _pg = _cS.get("/").get_data(as_text=True)
+    _iB, _iM = _pg.find('id="tab-studioia"'), _pg.find('<div class="group" id="grp-montage">')
+    check("menu : le bouton Studio IA est pose au rendu, avant Reel montage", 0 < _iB < _iM)
+    check("menu : le bouton n'est PAS ecrit dans UPLOAD_HTML (patchs du VPS)",
+          'id="tab-studioia"' not in _wSia.UPLOAD_HTML)
+    check("cablage : rendu paresseux et permission declares",
+          '"studioia": _render_studio_ia_html' in _plSia.Path("web_upload.py").read_text(encoding="utf-8")
+          and any(it["key"] == "studioia" for sec in _wSia.ROLE_MENU_STRUCTURE for it in sec["items"]))
+    _frS = _cS.get("/?lazy=studioia&tab=studioia", headers={"X-Tab-Ajax": "1"})
+    _ftS = _frS.get_data(as_text=True)
+    check("fragment : se rend (sia-root, SIA_CONF, app.js)",
+          _frS.status_code == 200 and "sia-root" in _ftS and "SIA_CONF" in _ftS and "/studio-ia/app.js" in _ftS)
+    # Hors <script> : la configuration JSON contient des objets imbriques, donc
+    # des « }} » legitimes ; une accolade orpheline, elle, est dans le HTML.
+    _htmlS = _reSia.sub(r"<(script|style)>.*?</\1>", "", _ftS, flags=_reSia.S)
+    check("fragment : aucune accolade de f-string orpheline (hors JSON et CSS)", "{{" not in _htmlS and "}}" not in _htmlS)
+    _cS.set_cookie("va_lang", "fr")
+    _ftFr = _cS.get("/?lazy=studioia", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    _cS.delete_cookie("va_lang")
+    check("fragment : anglais par defaut, francais avec le cookie va_lang",
+          "AI-generated videos" in _ftS and "Vidéos et photos" in _ftFr)
+    _node = _shSia.which("node")
+    if _node:
+        _fJs = _dSia / "app.js"
+        _fJs.write_bytes(_cS.get("/studio-ia/app.js").data)
+        check("app.js : servi et passe node --check",
+              _spSia.run([_node, "--check", str(_fJs)], capture_output=True).returncode == 0)
+        _inl = _reSia.findall(r"<script>(.*?)</script>", _ftS, _reSia.S)
+        _fIn = _dSia / "inline.js"
+        _fIn.write_text("\n".join(_inl), encoding="utf-8")
+        check("fragment : son script en ligne passe node --check",
+              bool(_inl) and _spSia.run([_node, "--check", str(_fIn)], capture_output=True).returncode == 0)
+    # -- 3) les gardes --------------------------------------------------------
+    _aS = _appS.test_client()
+    check("anonyme : etat 401, app.js 401",
+          _aS.get("/studio-ia/etat").status_code == 401 and _aS.get("/studio-ia/app.js").status_code == 401)
+    _chS = _appS.test_client()
+    with _chS.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "chat1"; _s["role"] = "chatter"
+    check("chatteur sans l onglet : lecture 403, generation 403, fragment 403",
+          _chS.get("/studio-ia/etat").status_code == 403
+          and _chS.post("/studio-ia/generer", json={"modele": "wan3", "prompt": "x"}).status_code == 403
+          and _chS.get("/?lazy=studioia", headers={"X-Tab-Ajax": "1"}).status_code == 403)
+    # -- 4) sans cle ----------------------------------------------------------
+    _eS = _cS.get("/studio-ia/etat").get_json()
+    check("sans cle : l etat le dit, pas de solde", _eS["ok"] and _eS["cle"] is False and _eS["credits"] is None)
+    _gS = _cS.post("/studio-ia/generer", json={"modele": "wan3", "prompt": "un chat"})
+    check("sans cle : la generation est refusee avec la marche a suivre",
+          _gS.status_code == 400 and "KIE_API_KEY" in _gS.get_json()["erreur"])
+    check("estimation par la route : Wan 1080P 10 s = 320",
+          _cS.get("/studio-ia/estimer?modele=wan3&o_duration=10&o_resolution=1080P").get_json()["credits"] == 320)
+    # -- 5) Kie simule : credits, references, succes, echec -------------------
+    _FAUX = {"credits": 1000.0, "record": {"state": "generating"}, "appels": [], "code402": False}
+
+    def _fauxReq(methode, url, json_=None, data=None, files=None, timeout=30):
+        _FAUX["appels"].append(url.split("?")[0].rsplit("/", 1)[-1])
+        if url.endswith("/credit"):
+            return {"code": 200, "data": _FAUX["credits"]}
+        if url.endswith("/createTask"):
+            if _FAUX["code402"]:
+                raise _kie.ErreurKie(_kie.message_pour(402), 402)
+            _FAUX["entree"] = json_
+            return {"code": 200, "data": {"taskId": "task_test"}}
+        if "recordInfo" in url:
+            return {"code": 200, "data": _FAUX["record"]}
+        if "upload" in url:
+            return {"code": 200, "data": {"downloadUrl": "https://tempfile.redpandaai.co/x.png"}}
+        raise AssertionError(url)
+
+    def _fauxDl(url, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"\x89PNG" + b"\x00" * 20)
+        return 24, "image/png"
+    _kie._requete, _kie.cle, _kie.telecharger = _fauxReq, (lambda: "cle-test"), _fauxDl
+    _sia._oublier_solde()
+    check("avec cle : le solde est lu chez Kie", _cS.get("/studio-ia/etat?force=1").get_json()["credits"] == 1000.0)
+    _rfS = _cS.post("/studio-ia/reference",
+                    data={"fichier": (_ioSia.BytesIO(b"\x89PNG fake"), "ref.png", "image/png")},
+                    content_type="multipart/form-data").get_json()
+    check("reference : deposee chez Kie et servie en apercu",
+          _rfS["ok"] and _rfS["reference"]["url"].startswith("https://")
+          and _cS.get(_rfS["reference"]["apercu"]).status_code == 200)
+    _rfK = _cS.post("/studio-ia/reference",
+                    data={"fichier": (_ioSia.BytesIO(b"GIF89a"), "x.gif", "image/gif")},
+                    content_type="multipart/form-data")
+    check("reference : un GIF est refuse", _rfK.status_code == 400)
+    _FAUX["credits"] = 10.0
+    _sia._oublier_solde()
+    _gS = _cS.post("/studio-ia/generer", json={"modele": "wan3", "prompt": "un chat",
+                                                "options": {"resolution": "1080P", "duration": 10}}).get_json()
+    check("credits insuffisants AVANT l appel : refuse, reste et besoin dits, Kie pas appele",
+          _gS["code"] == "credits" and "320" in _gS["erreur"] and "10" in _gS["erreur"]
+          and "createTask" not in _FAUX["appels"])
+    _FAUX["credits"] = 1000.0
+    _FAUX["code402"] = True
+    _sia._oublier_solde()
+    _gS = _cS.post("/studio-ia/generer", json={"modele": "seedream5flash", "prompt": "une photo"}).get_json()
+    check("402 de Kie : message credits insuffisants, rien d enregistre",
+          # reste et besoin cites, quelle que soit la langue (anglais par defaut)
+          _gS["code"] == 402 and "1000" in _gS["erreur"] and "3.2" in _gS["erreur"] and not _sia._charger())
+    _FAUX["code402"] = False
+    _gS = _cS.post("/studio-ia/generer", json={"modele": "seedream5pro", "prompt": "une photo",
+                                                "options": {"quality": "high"},
+                                                "references": [_rfS["reference"]["id"]]}).get_json()
+    check("generation : lancee, en attente, estimation et modele image-to-image",
+          _gS["ok"] and _gS["tache"]["etat"] == "en_attente" and _gS["tache"]["credits_estimes"] == 14
+          and _FAUX["entree"]["model"] == "seedream/5-pro-image-to-image"
+          and _FAUX["entree"]["input"]["image_urls"] == ["https://tempfile.redpandaai.co/x.png"])
+    _tid = _gS["tache"]["id"]
+    check("suivi : generating -> en_cours", _sia.verifier(_tid)["etat"] == "en_cours")
+    _FAUX["record"] = {"state": "success", "resultJson": _jsSia.dumps({"resultUrls": ["https://x/y.png"]}),
+                       "creditsConsumed": 14}
+    _tS = _sia.verifier(_tid)
+    check("suivi : success -> fini, fichier rapatrie, credits reels",
+          _tS["etat"] == "fini" and len(_tS["fichiers"]) == 1 and _tS["credits"] == 14
+          and (_dSia / "sorties" / _tS["fichiers"][0]["nom"]).exists())
+    _lS = _cS.get("/studio-ia/taches").get_json()["taches"]
+    check("liste : la tache finie porte ses liens de fichier et de telechargement",
+          bool(_lS) and _lS[0]["etat"] == "fini" and _lS[0]["fichiers"][0]["url"].startswith("/studio-ia/fichier/"))
+    _fS = _cS.get(_lS[0]["fichiers"][0]["dl"])
+    check("fichier : servi en telechargement avec un nom parlant",
+          _fS.status_code == 200 and "attachment" in (_fS.headers.get("Content-Disposition") or "")
+          and _cS.get(_lS[0]["fichiers"][0]["url"]).mimetype == "image/png")
+    _FAUX["record"] = {"state": "generating"}
+    _gS = _cS.post("/studio-ia/generer", json={"modele": "kling3", "prompt": "un chat",
+                                                "options": {"mode": "pro", "sound": True, "duration": 10}}).get_json()
+    _tid2 = _gS["tache"]["id"]
+    check("Kling : l input porte duration en texte, mode, sound et le 9:16",
+          _FAUX["entree"]["input"] == {"prompt": "un chat", "duration": "10", "mode": "pro",
+                                       "sound": True, "multi_shots": False, "aspect_ratio": "9:16"})
+    _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}
+    check("suivi : fail -> echec avec la raison de Kie",
+          _sia.verifier(_tid2)["etat"] == "echec" and "content policy" in _sia.verifier(_tid2)["message"])
+    check("masquer : la tache sort de la liste, le fichier reste",
+          _cS.post(f"/studio-ia/tache/{_tid2}/masquer").get_json()["ok"]
+          and all(t["id"] != _tid2 for t in _cS.get("/studio-ia/taches").get_json()["taches"])
+          and (_dSia / "sorties" / _tS["fichiers"][0]["nom"]).exists())
+    # -- 6) un VA qui a l onglet : ses taches seulement -----------------------
+    _FAUX["record"] = {"state": "generating"}
+    _vS = _appS.test_client()
+    with _vS.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "va1"; _s["role"] = "va"
+    check("VA avec l onglet : lecture ouverte, ne voit ni les taches ni les fichiers d admin",
+          _vS.get("/studio-ia/etat").status_code == 200
+          and _vS.get("/studio-ia/taches").get_json()["taches"] == []
+          and _vS.get(_lS[0]["fichiers"][0]["url"]).status_code == 404)
+    _gV = _vS.post("/studio-ia/generer", json={"modele": "wan3", "prompt": "une plage",
+                                                "options": {"duration": 4, "resolution": "480P"}})
+    check("VA avec l onglet : peut generer (allow-list) et voit la sienne",
+          _gV.status_code == 200
+          and [t["utilisateur"] for t in _vS.get("/studio-ia/taches").get_json()["taches"]] == ["va1"])
+    check("admin : voit les taches de tout le monde",
+          {t["utilisateur"] for t in _cS.get("/studio-ia/taches").get_json()["taches"]} == {"admin", "va1"})
+    check("le fil de suivi tourne tant qu une tache est ouverte",
+          _sia._SUIVI["fil"] is not None and _sia._SUIVI["fil"].is_alive())
+    check("ecriture atomique : le registre des taches passe par safe_json",
+          (_dSia / "taches.json").exists()
+          and "write_text(json.dumps" not in _plSia.Path("studio_ia.py").read_text(encoding="utf-8"))
+except Exception as _eSia:
+    import traceback as _tbSia
+    check("Studio IA : testable", False, (repr(_eSia) + _tbSia.format_exc()[-400:])[:600])
+finally:
+    try:
+        # la tache ouverte du VA ferait tourner le fil de suivi : on la ferme
+        for _t in _sia._charger():
+            _sia._maj(_t["id"], etat="echec", message="fin des tests")
+        _kie.cle, _kie._requete, _kie.telecharger = _cleOrig, _reqOrig, _dlOrig
+        _kie._CLE_ENV.update({"valeur": "", "t": 0.0})
+        _wSia._load_web_users, _wSia._load_role_definitions = _usersOrig, _rolesOrig
+        _shSia.rmtree(_dSia, ignore_errors=True)
+    except Exception:
+        pass
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

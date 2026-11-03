@@ -50,7 +50,8 @@ Flask, extraire le HTML produit et le regarder.
 
 `.env` (clés API), `data/` (identités, médias, ventes, cookies MyPuls, état
 Drive), `assets/`. À copier à la main pour monter un poste. **Ne jamais les
-committer** — `.env` porte les clés Anthropic, Discord et MyPuls.
+committer** — `.env` porte les clés Anthropic, Discord, MyPuls et Kie.ai
+(`KIE_API_KEY`, le Studio IA la relit sans redémarrage).
 
 ## Pièges — chacun a déjà coûté une régression
 
@@ -103,6 +104,8 @@ nom inconnu, un fichier sans miniature : compter et remonter. La plupart des
 | `ventes_sheet.py` | même registre, poussé dans un Google Sheet |
 | `safe_json.py` | lecture/écriture atomique — à utiliser partout |
 | `i18n_en.py` | traduction FR → EN de l'interface |
+| `studio_ia.py` | onglet Studio IA : tâches, suivi, routes `/studio-ia/*` (JS dans `studio_ia_app.js`) |
+| `kie_ai.py` | client Kie.ai + registre des modèles (Kling, Seedance, Wan, Seedream) et prix |
 | `cogs/` | commandes et menus Discord |
 
 ## Sources de données, et leurs travers
