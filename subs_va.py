@@ -370,7 +370,25 @@ def _texte_stats(gid: Any, uid: Any, r: Dict[str, Any]) -> str:
                           else "pas lisible pour l'instant"))
     out.append("-# MyPuls et GetMySocial se mettent à jour toutes les quelques heures."
                + (" Un tracking commun à plusieurs VA n'est pas compté." if r.get("communs") else ""))
+    out += _lien_page_perso(gid, uid)
     return "\n".join(out)
+
+
+def _lien_page_perso(gid: Any, uid: Any) -> List[str]:
+    """TRUST INSTAGRAM (stats_va.SERVEURS) : le lien de la page perso du VA,
+    sous ses chiffres — propriétaire, 03/11/2026 : « un petit lien perso pour
+    chaque VA », donné par le bouton du ticket. Entre < > : Discord n'en tire
+    pas d'aperçu. Une clé non écrite ne fait pas tomber le message."""
+    try:
+        import stats_va
+        u = stats_va.lien(gid, uid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[subs] lien de la page perso non créé : {type(e).__name__}: {e}", flush=True)
+        return []
+    if not u:
+        return []
+    return [f"📊 **Ta page complète** (depuis toujours, clics Infloww) : <{u}>",
+            "-# Ce lien est à toi : ne le partage pas."]
 
 
 # ─── Va IG : le classement de la quinzaine aux abonnés ───────────────────

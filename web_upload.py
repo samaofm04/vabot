@@ -69988,6 +69988,24 @@ def create_app():
             return _entetes(_R(_il.page_refus_paie(pourquoi, retour), status=400, mimetype="text/html"))
         return _entetes(redirect(retour, code=303))
 
+    @app.route("/mes-stats")
+    def stats_va_page():
+        """La page perso d'un VA de TRUST INSTAGRAM (stats_va) : ses clics et
+        ses subs à lui seul, par sa clé ?t=, que « 📈 Mes stats » lui donne
+        dans son ticket ; ?du=&au= la période, comme la page Lia (sans :
+        depuis toujours). Sans compte : la clé suffit, et une clé fausse rend
+        404 sans rien dire. GET seulement, rien à déclarer au before_request."""
+        from flask import Response as _R
+        import stats_va
+        code, html = stats_va.page(request.args.get("t"), request.args)
+        r = _R(html, status=code, mimetype="text/html")
+        # la clé est dans l'adresse : ni cache, ni moteur de recherche, ni
+        # en-tête Referer qui la porterait vers un autre site
+        r.headers["Cache-Control"] = "no-store"
+        r.headers["X-Robots-Tag"] = "noindex, nofollow"
+        r.headers["Referrer-Policy"] = "no-referrer"
+        return r
+
     # ==================================================================
     # Coffre d'adresses Outlook du proprietaire (admin seulement).
     # Une page À PART, comme /infloww : rien d'autre du site n'en depend.
