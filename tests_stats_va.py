@@ -17,11 +17,14 @@ relevés).
      fausse, vide ou courte : rien. Hors TRUST INSTAGRAM : pas de lien.
   2. Les chiffres d'une période : clics GMS de clics_du_va, subs de
      MyPuls « à son nom », clics Infloww des liens Lia (+ Emy depuis toujours),
-     « — » jamais 0 pour l'illisible.
+     CVR (subs ÷ visites MyPuls), $ / sub (net ÷ subs), Gagné selon la grille
+     quinzaine par quinzaine (palier de la quinzaine entière), « — » jamais 0
+     pour l'illisible.
   3. La page : choix de la période (raccourcis de la page Lia, clé gardée),
-     ses chiffres, pas la liste de ses trackings, en bas les trois API
-     officielles liées à leur doc et rien d'autre, aucun autre VA, aucun
-     montant, tout échappé.
+     la ligne de la page Lia (@ du VA, CVR et $ / sub colorés, Gagné), pas la
+     liste de ses trackings, en bas les trois API officielles liées à leur doc
+     et rien d'autre, aucun autre VA, ni revenu total ni paiement ni gain /
+     perte, tout échappé.
   4. La route /mes-stats : 404 sans clé, clé fausse, VA parti ou sans fiche ;
      en-têtes no-store, noindex, no-referrer.
   5. « 📈 Mes stats » : le lien sous les chiffres sur TRUST INSTAGRAM, pas
@@ -79,6 +82,7 @@ LIA, SEREN, EMY = ("https://onlyfans.com/liasxcret/c104", "https://onlyfans.com/
                    "https://onlyfans.com/emy.brw/c117")
 FICHES = {
     (GID, U108): {"numero": 108, "pseudo": "duc_duchesse", "link_id": "lnk_a", "public_url": "getmysocial.com/ducx",
+                  "quand": int(dt.datetime(2026, 10, 20, 12, 0).timestamp()),
                   "tracking": LIA, "variante": {"modele": "Seren", "tracking": SEREN},
                   "anciens_trackings": [EMY],
                   "bascule": {"vers": 3992, "de": EMY, "quand": BASCULE}},
@@ -96,11 +100,15 @@ pod._aujourdhui = lambda: JOUR
 P = {"toujours": ("", ""), "aujourdhui": ("2026-11-03", "2026-11-03"), "periode": ("2026-11-01", "2026-11-03"),
      "precedente": ("2026-10-16", "2026-10-31"), "libre": ("2026-10-20", "2026-10-22")}
 NOM = "Instagram VA 108 @duc_duchesse"
-#            (visites, subs) par tracking : Lia, Seren, Emy
-MP = {P["aujourdhui"]: {"liasxcret/c104": (12, 1), "seren.vale/c236": (3, 0), "emy.brw/c117": (0, 0)},
-      P["periode"]: {"liasxcret/c104": (107, 3), "seren.vale/c236": (20, 1), "emy.brw/c117": (0, 0)},
-      P["precedente"]: {"liasxcret/c104": (798, 10), "seren.vale/c236": (50, 5), "emy.brw/c117": (30, 2)},
-      P["libre"]: {"liasxcret/c104": (0, 0), "seren.vale/c236": (5, 0), "emy.brw/c117": (10, 6)}}
+#            (visites, subs, net en centimes) par tracking : Lia, Seren, Emy
+MP = {P["aujourdhui"]: {"liasxcret/c104": (12, 1, 300), "seren.vale/c236": (3, 0, 0), "emy.brw/c117": (0, 0, 0)},
+      P["periode"]: {"liasxcret/c104": (107, 3, 900), "seren.vale/c236": (20, 1, 200), "emy.brw/c117": (0, 0, 0)},
+      P["precedente"]: {"liasxcret/c104": (798, 10, 2000), "seren.vale/c236": (50, 5, 1500),
+                        "emy.brw/c117": (30, 2, 500)},
+      P["libre"]: {"liasxcret/c104": (0, 0, 0), "seren.vale/c236": (5, 0, 0), "emy.brw/c117": (10, 6, 600)},
+      # le revenu depuis toujours (lecture du 01/01/2024 à aujourd'hui)
+      ("2024-01-01", "2026-11-03"): {"liasxcret/c104": (905, 15, 3000), "seren.vale/c236": (78, 8, 1700),
+                                     "emy.brw/c117": (40, 2, 500)}}
 TOTAUX = {"liasxcret/c104": (905, 15), "seren.vale/c236": (78, 8), "emy.brw/c117": (40, 2),
           "liasxcret/c98": (0, 0), "seren.vale/c230": (0, 0)}
 NOMS = {"liasxcret/c104": NOM, "seren.vale/c236": NOM, "emy.brw/c117": NOM,
@@ -114,8 +122,8 @@ def _lire_mypuls(du, au, forcer=False):
     per = MP.get((du, au), {})
     out = {}
     for t, (vt, st) in TOTAUX.items():
-        v, s_ = per.get(t, (0, 0))
-        out[t] = {"visites": v, "total": vt, "subs": s_, "subs_total": st, "nom": NOMS[t]}
+        v, s_, net = per.get(t, (0, 0, 0))
+        out[t] = {"visites": v, "total": vt, "subs": s_, "subs_total": st, "nom": NOMS[t], "net": net}
     return out, ""
 
 
@@ -184,6 +192,33 @@ check("clics Infloww depuis toujours : Lia + ancien Emy (905 + 40)", D["toujours
 check("clics Infloww d'une période : Lia, par différence de relevés",
       [D[k]["infloww"] for k in ("aujourdhui", "periode", "precedente", "libre")] == [12, 107, 798, 0],
       [D[k]["infloww"] for k in ("aujourdhui", "periode", "precedente", "libre")])
+check("la grille : 0,70 $ jusqu'à 499, 0,80 dès 500, 0,90 dès 800, 1 dès 1000, 1,20 dès 1250",
+      [sv.prix_du_sub(n) for n in (0, 499, 500, 799, 800, 999, 1000, 1249, 1250, 5000)]
+      == [0.70, 0.70, 0.80, 0.80, 0.90, 0.90, 1.00, 1.00, 1.20, 1.20])
+check("Gagné d'une quinzaine : ses subs × le prix de son palier (17 × 0,70)", D["precedente"]["gagne"] == 11.9,
+      D["precedente"]["gagne"])
+check("Gagné depuis toujours : quinzaine par quinzaine, dès la quinzaine de ses liens, entière (17 × 0,70 + 4 × 0,70)",
+      D["toujours"]["gagne"] == 14.7, D["toujours"]["gagne"])
+check("Gagné d'une période dans une quinzaine : ses subs au palier de la quinzaine entière (6 × 0,70)",
+      D["libre"]["gagne"] == 4.2, D["libre"]["gagne"])
+_sauve_mp = dict(MP)
+MP[P["precedente"]] = {"liasxcret/c104": (798, 500, 2000), "seren.vale/c236": (50, 5, 1500), "emy.brw/c117": (30, 5, 500)}
+dpal = sv.chiffres(GID, U108, *P["precedente"])
+dpal_l = sv.chiffres(GID, U108, *P["libre"])
+MP.clear()
+MP.update(_sauve_mp)
+check("palier atteint : 510 subs sur la quinzaine → les 510 à 0,80 $ (408 $)", dpal["gagne"] == 408.0, dpal["gagne"])
+check("une période dans cette quinzaine paie au palier de la quinzaine entière (6 × 0,80)", dpal_l["gagne"] == 4.8,
+      dpal_l["gagne"])
+check("CVR = subs ÷ visites MyPuls de ses liens (17 ÷ 878)", abs(D["precedente"]["cvr"] - 1700 / 878) < 1e-9,
+      D["precedente"]["cvr"])
+check("CVR depuis toujours : compteurs depuis la création (25 ÷ 1023)", abs(D["toujours"]["cvr"] - 2500 / 1023) < 1e-9,
+      D["toujours"]["cvr"])
+check("$ / sub = revenu net MyPuls de ses liens ÷ subs (40 $ ÷ 17)", abs(D["precedente"]["par_sub"] - 40 / 17) < 1e-9,
+      D["precedente"]["par_sub"])
+check("$ / sub depuis toujours (52 $ ÷ 25)", abs(D["toujours"]["par_sub"] - 52 / 25) < 1e-9, D["toujours"]["par_sub"])
+check("une période sans sub : $ / sub « — », pas une division par zéro",
+      sv.chiffres(GID, U108, "2026-10-25", "2026-10-25")["par_sub"] is None)
 check("une période : « du/au » gardés ; depuis toujours : vides",
       (D["libre"]["du"], D["libre"]["au"]) == P["libre"] and (D["toujours"]["du"], D["toujours"]["au"]) == ("", ""))
 NOMS["seren.vale/c236"] = "LIEN COMMUN AGENCE"
@@ -203,6 +238,11 @@ d3 = sv.chiffres(GID, U108, *P["periode"])
 GMS_MUET.clear()
 check("GetMySocial muet : None, le reste de la page reste", (d3["us"], d3["glob"]) == (None, None)
       and d3["subs"] == 4)
+MYPULS["muet"] = True
+dmu = sv.chiffres(GID, U108, *P["periode"])
+MYPULS["muet"] = False
+check("MyPuls muet : subs, CVR, $ / sub et Gagné « — », jamais 0",
+      all(dmu[k] is None for k in ("subs", "cvr", "par_sub", "gagne")), dmu)
 sv._CACHE.clear()
 n0 = APPELS["clics"]
 for _ in range(2):
@@ -257,7 +297,17 @@ check("en bas : les trois API officielles, chacune liée à sa doc",
 check("en bas, rien d'autre : ni bloc de preuves, ni longues explications",
       "Preuves" not in h and "<details" not in h and "<ul" not in pied and pied.count('<p class="pied">') <= 3)
 check("aucun autre VA", "autre_va_secret" not in h and "VA 63" not in h)
-check("aucun montant", "$" not in h and "€" not in h)
+check("la ligne de la page Lia : @ du VA, son numéro dessous",
+      re.search(r'<td class="nom">@duc_duchesse<span class="det">Instagram VA 108</span></td>', h))
+check("les colonnes de la page Lia, sans Paiement ni Gain / perte",
+      re.findall(r"<th[^>]*>([^<]*)</th>", h) == ["Personne", "Clics US GMS", "Clics globaux GMS", "Clics Infloww",
+                                                  "Subs", "CVR", "$ / sub", "Gagné"]
+      and "Paiement" not in h and "Gain" not in h, re.findall(r"<th[^>]*>([^<]*)</th>", h))
+check("CVR et $ / sub colorés comme la page Lia (rouge sous la moitié du seuil)",
+      '<span class="nv r">1,94 %</span>' in h and '<span class="nv v1">2,35 $</span>' in h,
+      re.findall(r'<span class="nv[^"]*">[^<]*</span>', h))
+check("Gagné : 11,90 $", ">11,90 $<" in h)
+check("jamais le revenu total (40 $) ni l'euro", "40,00" not in h and "€" not in h)
 check("ni astérisque ni note sur les anciens liens Emy (« retire ça »)",
       "*" not in re.sub(r"<style>.*?</style>", "", h, flags=re.S) and "Emy" not in h)
 check("en bas, deux lignes quand tout est lisible : les sources, l'heure",

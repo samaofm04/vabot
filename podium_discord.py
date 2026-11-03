@@ -1586,10 +1586,18 @@ def _lire_mypuls(du: str, au: str, forcer: bool = False
         # « subs » : les VRAIS abonnés de la période (subscribers_period), à
         # côté des visites. « Mes subs » (subs_va) les montre ; le classement,
         # lui, compte toujours les visites (15/10/2026 : VA 60, 2 visites, 0 sub)
+        # « net » : le revenu NET de la période, en centimes (la page perso du
+        # VA, stats_va, en tire son $ par sub ; même lecture que ses subs)
+        rev = it.get("revenue")
+        rev = rev.get("total") if isinstance(rev, dict) else rev
+        try:
+            net = None if rev is None or isinstance(rev, bool) else int(round(float(rev) * 100))
+        except (TypeError, ValueError):
+            net = None
         out[t] = {"visites": _n(it.get("visits_period")), "total": _n(it.get("visits_total")),
                   "subs": _n(it.get("subscribers_period")),
                   "subs_total": _n(it.get("subscribers_total")),
-                  "nom": str(it.get("name") or "").strip()}
+                  "nom": str(it.get("name") or "").strip(), "net": net}
     if ecartes or doublons:
         print(f"[podium] MyPuls {du} → {au} : {ecartes} ligne(s) sans url de tracking, "
               f"{doublons} en double (la première gardée)", flush=True)
