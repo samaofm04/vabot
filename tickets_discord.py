@@ -1579,6 +1579,20 @@ def nom_manager(gid: str, uid: str) -> str:
     return _nom_court(m) if code == 200 and isinstance(m, dict) else ""
 
 
+def ligne_page_perso(gid: str, uid: str) -> str:
+    """TRUST INSTAGRAM (stats_va.SERVEURS) : sous « 🔗 Ton lien » de l'accueil
+    épinglé, le lien de sa page de stats perso — propriétaire, 03/11/2026 :
+    « mets-le ici, en bas de son lien ». Refaite avec le bloc du lien, comme
+    lui. "" ailleurs, ou si sa clé n'a pas pu être écrite."""
+    try:
+        import stats_va
+        u = stats_va.lien(gid, uid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] page perso non ajoutée à l'accueil : {type(e).__name__}: {e}", flush=True)
+        return ""
+    return f"\n\n📊 **Ta page de stats** — rien que pour toi :\n{u}" if u else ""
+
+
 def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) -> None:
     """Écrit le lien DANS l'accueil épinglé, et retire le bouton devenu inutile.
 
@@ -1618,6 +1632,7 @@ def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) 
            + ("\n_Il compte tes subs pour le podium._" if plateforme == "Twitter" else ""))
     if r.get("provisoire"):
         bas += "\n_(destination provisoire, à rattacher côté MyPuls)_"
+    bas += ligne_page_perso(gid, uid)
     embeds[0]["description"] = (d.rstrip() + bas)[:4096]
     confirme = bool(fiche.get("confirme"))
     _api("PATCH", f"/channels/{salon}/messages/{mid}",

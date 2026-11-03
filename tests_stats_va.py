@@ -28,7 +28,9 @@ relevés).
   4. La route /mes-stats : 404 sans clé, clé fausse, VA parti ou sans fiche ;
      en-têtes no-store, noindex, no-referrer.
   5. « 📈 Mes stats » : le lien sous les chiffres sur TRUST INSTAGRAM, pas
-     ailleurs ; une clé non écrite ne fait pas tomber le message.
+     ailleurs ; une clé non écrite ne fait pas tomber le message. L'accueil
+     épinglé du ticket : la page sous « 🔗 Ton lien » (« mets-le ici, en bas de
+     son lien »), refaite avec lui, pas ailleurs.
   6. Rien d'écrit dans le vrai data/.
 
 Lancer depuis la racine du dépôt : python tests_stats_va.py
@@ -393,6 +395,44 @@ sv.jeton = _j
 pod.clics_du_va = _cv
 check("clé non écrite : le message part quand même, sans lien",
       "mes-stats" not in txt_p and "Clics de ton lien" in txt_p)
+
+print("5b. L'accueil épinglé")
+ACC = {"description": "Bonjour.\n\n🔗 **Ton lien** — celui que tu postes sur Instagram :\nhttps://getmysocial.com/vieux"}
+APPELS_API = []
+
+
+def _faux_api(methode, chemin, **kw):
+    APPELS_API.append((methode, chemin, kw))
+    if methode == "GET":
+        return 200, {"embeds": [dict(ACC)]}
+    return 200, {}
+
+
+_api_sauve, _etat_sauve = tickets_discord._api, tickets_discord._etat
+tickets_discord._api = _faux_api
+tickets_discord._etat = lambda: {"tickets": {f"{GID}:{U108}": {"accueil": "m1"}, f"{TW}:{U108}": {"accueil": "m2"}}}
+try:
+    tickets_discord._poser_lien_dans_accueil(GID, U108, "sal", {"public_url": "https://getmysocial.com/neuf",
+                                                               "plateforme": "Instagram"})
+    d_ig = [kw for m, c, kw in APPELS_API if m == "PATCH"][-1]["json"]["embeds"][0]["description"]
+    APPELS_API.clear()
+    tickets_discord._poser_lien_dans_accueil(TW, U108, "sal", {"public_url": "https://getmysocial.com/neuf",
+                                                              "plateforme": "Twitter"})
+    d_tw = [kw for m, c, kw in APPELS_API if m == "PATCH"][-1]["json"]["embeds"][0]["description"]
+    ACC["description"] = d_ig
+    APPELS_API.clear()
+    tickets_discord._poser_lien_dans_accueil(GID, U108, "sal", {"public_url": "https://getmysocial.com/autre",
+                                                               "plateforme": "Instagram"})
+    d_re = [kw for m, c, kw in APPELS_API if m == "PATCH"][-1]["json"]["embeds"][0]["description"]
+finally:
+    tickets_discord._api, tickets_discord._etat = _api_sauve, _etat_sauve
+check("TRUST INSTAGRAM : la page de stats juste sous « 🔗 Ton lien »",
+      d_ig.endswith(f"https://getmysocial.com/neuf\n\n📊 **Ta page de stats** — rien que pour toi :\n"
+                    f"https://youl4b.com/mes-stats?t={t108}") and "vieux" not in d_ig, d_ig[-200:])
+check("ailleurs (Twitter) : pas de page de stats dans l'accueil", "mes-stats" not in d_tw, d_tw[-160:])
+check("lien refait : la page de stats une seule fois, sous le nouveau lien",
+      d_re.count("mes-stats") == 1 and d_re.index("autre") < d_re.index("mes-stats") and "neuf" not in d_re, d_re[-200:])
+check("ligne_page_perso : rien hors TRUST INSTAGRAM", tickets_discord.ligne_page_perso(TW, U108) == "")
 
 print("6. Isolation")
 check("rien écrit dans le vrai data/ (clés, relevés Infloww de Lia)",
