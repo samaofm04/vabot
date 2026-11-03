@@ -69993,7 +69993,8 @@ def create_app():
         """La page perso d'un VA de TRUST INSTAGRAM (stats_va) : ses clics et
         ses subs à lui seul, par sa clé ?t=, que « 📈 Mes stats » lui donne
         dans son ticket ; ?du=&au= la période, comme la page Lia (sans :
-        depuis toujours). Sans compte : la clé suffit, et une clé fausse rend
+        cette quinzaine ; ?tout=1 : depuis toujours). Sans compte : la clé
+        suffit, et une clé fausse rend
         404 sans rien dire. GET seulement, rien à déclarer au before_request."""
         from flask import Response as _R
         import stats_va

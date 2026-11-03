@@ -388,13 +388,23 @@ def chiffres_caches(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str,
 
 def periode(args: Any) -> Tuple[str, str]:
     """(du, au) demandés dans l'adresse, ramenés entre le 01/01/2024 et
-    aujourd'hui (la règle de la page Lia) ; ("", "") = depuis toujours."""
+    aujourd'hui (la règle de la page Lia) ; ?tout=1 : ("", ""), depuis
+    toujours. Sans rien : CETTE QUINZAINE (propriétaire, 03/11 : « comme
+    préréglage, pas depuis toujours mais toujours cette quinzaine »)."""
     import infloww_liens as il
+    import podium_discord as pod
+    import subs_va
+    args = args or {}
+    if str(args.get("tout") or "") == "1":
+        return "", ""
     try:
-        p = il.periode_des_args(args or {})
+        p = il.periode_des_args(args)
     except Exception:
         p = None
-    return p or ("", "")
+    if p:
+        return p
+    a, b = {c: (x, y) for c, x, y in subs_va.periodes(pod._aujourdhui())}["periode"]
+    return a.isoformat(), b.isoformat()
 
 
 # ─── la page ─────────────────────────────────────────────────────────────
@@ -424,7 +434,8 @@ def _raccourcis(jour: dt.date) -> List[Tuple[str, str, str]]:
 
 def _adresse(t: str, du: str = "", au: str = "") -> str:
     from urllib.parse import quote
-    q = f"?t={quote(t, safe='')}" + (f"&du={du}&au={au}" if du else "")
+    # sans dates, la page ouvre la quinzaine : « depuis toujours » se demande
+    q = f"?t={quote(t, safe='')}" + (f"&du={du}&au={au}" if du else "&tout=1")
     return _e(q)
 
 

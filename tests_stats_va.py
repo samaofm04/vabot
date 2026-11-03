@@ -269,7 +269,10 @@ sv._CACHE.clear()
 check("période de l'adresse : celle de la page Lia (bornes, inversion, illisible = toujours)",
       sv.periode({"du": "2026-11-01", "au": "2026-11-03"}) == ("2026-11-01", "2026-11-03")
       and sv.periode({"du": "2026-11-03", "au": "2026-11-01"}) == ("2026-11-01", "2026-11-03")
-      and sv.periode({"du": "zzz"}) == ("", "") and sv.periode({}) == ("", ""))
+      and sv.periode({"tout": "1"}) == ("", ""))
+check("sans période : cette quinzaine par défaut (« pas depuis toujours mais cette quinzaine »)",
+      sv.periode({}) == ("2026-11-01", "2026-11-03") and sv.periode(None) == ("2026-11-01", "2026-11-03")
+      and sv.periode({"du": "zzz"}) == ("2026-11-01", "2026-11-03"))
 
 print("3. La page")
 h = sv.page_html(D["precedente"], t108, JOUR)
@@ -329,8 +332,13 @@ c = app.test_client()
 sv._CACHE.clear()
 r = c.get(f"/mes-stats?t={t108}")
 corps = r.get_data(as_text=True)
-check("sa clé : 200, sa page, depuis toujours", r.status_code == 200 and "Instagram VA 108" in corps
-      and "<b>Depuis toujours</b>" in corps and ">500<" in corps, r.status_code)
+check("sa clé seule : 200, sa page, CETTE QUINZAINE allumée", r.status_code == 200 and "Instagram VA 108" in corps
+      and "<b>Cette quinzaine (du 01/11 au 03/11)</b>" in corps and ">80<" in corps
+      and re.search(r'du=2026-11-01&amp;au=2026-11-03" class="on"', corps), r.status_code)
+rt = c.get(f"/mes-stats?t={t108}&tout=1").get_data(as_text=True)
+check("le raccourci « Depuis toujours » (?tout=1) : depuis toujours",
+      "<b>Depuis toujours</b>" in rt and ">500<" in rt and re.search(r'tout=1" class="on"', rt)
+      and f'href="?t={t108}&amp;tout=1"' in corps)
 check("en-têtes : no-store, noindex, no-referrer",
       "no-store" in r.headers.get("Cache-Control", "") and "noindex" in r.headers.get("X-Robots-Tag", "")
       and r.headers.get("Referrer-Policy") == "no-referrer", dict(r.headers))
