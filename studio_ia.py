@@ -24,6 +24,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -84,7 +85,18 @@ T = {
         "credits_insuffisants": "Crédits insuffisants : il en reste {reste}, cette génération en demande environ {besoin}. Recharge sur kie.ai.",
         "credits_inconnus": "solde inconnu", "solde": "{n} crédits",
         "refs_max": "{n} image(s) maximum pour ce modèle.",
-        "ref_type": "Format refusé : JPG, PNG ou WebP seulement.",
+        "ref_type": "Format refusé : JPG, PNG ou WebP (MP4/MOV pour la vidéo des gestes).",
+        "motion": "Motion · gestes",
+        "deposer_motion": "Clique, dépose ou colle la photo de la model et la vidéo des gestes",
+        "deposer_aide_motion": "JPG/PNG + MP4/MOV de 3 à 30 s",
+        "prompt_ph_motion": "Optionnel : précise ce qui doit rester (tenue, décor, cadrage) ou l'ambiance.",
+        "video_type": "Vidéo refusée : MP4 ou MOV seulement.",
+        "video_trop_grosse": "Vidéo trop lourde ({mo} Mo) : 100 Mo maximum.",
+        "video_duree": "La vidéo des gestes doit durer entre 3 et 30 s (celle-ci : {s} s).",
+        "video_10s": "Orientation « comme la photo » : vidéo de 10 s au plus (celle-ci : {s} s). Passe en « comme la vidéo » ou coupe-la.",
+        "motion_refs": "Il faut une photo de la model et une vidéo des gestes.",
+        "webp_converti": "Image WebP convertie en PNG (Kling n'accepte que JPG et PNG).",
+        "par_seconde": "/s",
         "ref_type_kling": "Kling n'accepte que le JPG et le PNG.",
         "ref_trop_grosse": "Image trop lourde ({mo} Mo) : 30 Mo maximum.",
         "envoi_ref": "Envoi de l'image…",
@@ -131,7 +143,18 @@ T = {
         "credits_insuffisants": "Not enough credits: {reste} left, this generation needs about {besoin}. Top up on kie.ai.",
         "credits_inconnus": "balance unknown", "solde": "{n} credits",
         "refs_max": "At most {n} image(s) for this model.",
-        "ref_type": "Rejected format: JPG, PNG or WebP only.",
+        "ref_type": "Rejected format: JPG, PNG or WebP (MP4/MOV for the moves video).",
+        "motion": "Motion · moves",
+        "deposer_motion": "Click, drop or paste the model's photo and the moves video",
+        "deposer_aide_motion": "JPG/PNG + MP4/MOV, 3 to 30 s",
+        "prompt_ph_motion": "Optional: say what must stay (outfit, background, framing) or the mood.",
+        "video_type": "Video rejected: MP4 or MOV only.",
+        "video_trop_grosse": "Video too large ({mo} MB): 100 MB maximum.",
+        "video_duree": "The moves video must last 3 to 30 s (this one: {s} s).",
+        "video_10s": "“Like the photo” orientation: video of 10 s at most (this one: {s} s). Switch to “like the video” or trim it.",
+        "motion_refs": "A photo of the model and a moves video are both needed.",
+        "webp_converti": "WebP image converted to PNG (Kling only takes JPG and PNG).",
+        "par_seconde": "/s",
         "ref_type_kling": "Kling only accepts JPG and PNG.",
         "ref_trop_grosse": "Image too large ({mo} MB): 30 MB maximum.",
         "envoi_ref": "Uploading image…",
@@ -236,32 +259,86 @@ def _oublier_solde() -> None:
 
 # ---------------------------------------------------------- références --
 
+def _webp_en_png(octets: bytes) -> Optional[bytes]:
+    """Kling refuse le WebP ; converti ici une fois pour toutes, le fichier
+    reste bon pour tous les modèles. None si ffmpeg ne peut pas."""
+    with tempfile.TemporaryDirectory(prefix="sia_webp_") as d:
+        src, dst = Path(d) / "in.webp", Path(d) / "out.png"
+        src.write_bytes(octets)
+        try:
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-frames:v", "1", str(dst)],
+                               capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if r.returncode != 0 or not dst.exists():
+            return None
+        return dst.read_bytes()
+
+
+def _duree_media(chemin: Path) -> float:
+    """Durée en secondes lue par ffprobe (0 si illisible : la vidéo est
+    alors refusée, pas devinée)."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", str(chemin)], capture_output=True, text=True, timeout=60)
+        return max(0.0, float((r.stdout or "0").strip() or 0))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
 def deposer_reference(utilisateur: str, octets: bytes, nom: str, mime: str,
                       langue: str = "fr") -> Dict[str, Any]:
-    """Garde l'image en local (aperçu de l'historique) et chez Kie (24 h,
-    le temps que la tâche la lise). Lève ValueError avec le message à
-    montrer si le fichier ne convient pas."""
+    """Garde le fichier en local (aperçu de l'historique) et chez Kie (24 h,
+    le temps que la tâche le lise). Image de référence, ou vidéo des gestes
+    pour les modèles motion (sa durée est mesurée ici : elle fait le prix).
+    Lève ValueError avec le message à montrer si le fichier ne convient pas."""
     t = _t(langue)
     mime = (mime or "").split(";")[0].strip().lower()
     if mime == "image/jpg":
         mime = "image/jpeg"
-    if mime not in kie_ai.TYPES_IMAGE:
+    nom_bas = (nom or "").lower()
+    if mime in ("", "application/octet-stream"):
+        # certains navigateurs n'étiquettent pas les .mov
+        if nom_bas.endswith((".mov", ".qt")):
+            mime = "video/quicktime"
+        elif nom_bas.endswith(".mp4"):
+            mime = "video/mp4"
+    video = mime in kie_ai.TYPES_VIDEO
+    if not video and mime not in kie_ai.TYPES_IMAGE:
         raise ValueError(t["ref_type"])
-    if len(octets) > kie_ai.TAILLE_MAX_REF:
-        raise ValueError(t["ref_trop_grosse"].format(mo=round(len(octets) / 1e6, 1)))
     if not octets:
         raise ValueError(t["ref_type"])
+    if video and len(octets) > kie_ai.TAILLE_MAX_VIDEO:
+        raise ValueError(t["video_trop_grosse"].format(mo=round(len(octets) / 1e6, 1)))
+    if not video and len(octets) > kie_ai.TAILLE_MAX_REF:
+        raise ValueError(t["ref_trop_grosse"].format(mo=round(len(octets) / 1e6, 1)))
+    converti = False
+    if mime == "image/webp":
+        png = _webp_en_png(octets)
+        if png:
+            octets, mime, converti = png, "image/png", True
     rid = uuid.uuid4().hex[:16]
     ext = _EXT_PAR_MIME.get(mime, ".bin")
     _dossier_refs().mkdir(parents=True, exist_ok=True)
     local = _dossier_refs() / (rid + ext)
     local.write_bytes(octets)
-    url = kie_ai.televerser(octets, (nom or "image") + ("" if (nom or "").lower().endswith(ext) else ext), mime)
-    meta = {"id": rid, "nom": (nom or "image")[:120], "mime": mime, "taille": len(octets),
+    duree = _duree_media(local) if video else 0.0
+    if video and duree <= 0:
+        try:
+            local.unlink()
+        except OSError:
+            pass
+        raise ValueError(t["video_type"])
+    nom_envoi = (nom or ("video" if video else "image"))
+    if not nom_envoi.lower().endswith(ext):
+        nom_envoi += ext
+    url = kie_ai.televerser(octets, nom_envoi, mime)
+    meta = {"id": rid, "nom": (nom or ("video" if video else "image"))[:120], "mime": mime, "taille": len(octets),
+            "type": "video" if video else "image", "duree": round(duree, 2), "converti": converti,
             "url": url, "utilisateur": utilisateur, "t": int(time.time())}
     safe_json.write(_dossier_refs() / (rid + ".json"), meta, backup=False)
-    return {"id": rid, "nom": meta["nom"], "mime": mime, "taille": len(octets),
-            "url": url, "apercu": "/studio-ia/reference/" + rid}
+    return {"id": rid, "nom": meta["nom"], "mime": mime, "taille": len(octets), "type": meta["type"],
+            "duree": meta["duree"], "converti": converti, "url": url, "apercu": "/studio-ia/reference/" + rid}
 
 
 def _reference(rid: str) -> Optional[Dict[str, Any]]:
@@ -280,7 +357,7 @@ def _reference(rid: str) -> Optional[Dict[str, Any]]:
 
 # --------------------------------------------------------- générations --
 
-def _resume_options(m: Dict[str, Any], o: Dict[str, Any]) -> str:
+def _resume_options(m: Dict[str, Any], o: Dict[str, Any], duree_video: float = 0.0) -> str:
     morceaux = []
     for k in ("mode", "resolution", "quality", "size"):
         if o.get(k):
@@ -289,6 +366,8 @@ def _resume_options(m: Dict[str, Any], o: Dict[str, Any]) -> str:
         morceaux.append(str(o["aspect_ratio"]))
     if o.get("duration"):
         morceaux.append(f"{o['duration']} s")
+    if duree_video:
+        morceaux.append(f"{_nb(duree_video)} s")
     if o.get("sound") or o.get("generate_audio") or o.get("audio"):
         morceaux.append("audio")
     return " · ".join(morceaux)
@@ -309,18 +388,34 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
         return {"ok": False, "erreur": t["cle_absente"], "code": "sans_cle"}
     refs_meta = [r for r in (_reference(x) for x in (refs or [])[:int(m["references"]["max"])]) if r]
     if m["references"].get("types") and any(r.get("mime") not in m["references"]["types"] for r in refs_meta):
-        return {"ok": False, "erreur": t["ref_type_kling"], "code": "ref_type"}
+        return {"ok": False, "erreur": t["motion_refs" if m["type"] == "motion" else "ref_type_kling"], "code": "ref_type"}
+    o = kie_ai.normaliser(cle_modele, options)
+    images = [r for r in refs_meta if str(r.get("mime") or "").startswith("image/")]
+    videos = [r for r in refs_meta if str(r.get("mime") or "").startswith("video/")]
+    duree_video = 0.0
+    if m["type"] == "motion":
+        # exactement une photo et une vidéo ; la durée de la vidéo borne
+        # Kling (3–30 s, 10 s si le personnage suit la photo) et fait le prix
+        if len(images) != 1 or len(videos) != 1:
+            return {"ok": False, "erreur": t["motion_refs"], "code": "refs"}
+        duree_video = float(videos[0].get("duree") or 0)
+        if not 3 <= duree_video <= 30:
+            return {"ok": False, "erreur": t["video_duree"].format(s=_nb(duree_video)), "code": "video_duree"}
+        if o.get("character_orientation") == "image" and duree_video > 10:
+            return {"ok": False, "erreur": t["video_10s"].format(s=_nb(duree_video)), "code": "video_duree"}
+    else:
+        videos = []       # une vidéo déposée puis un autre modèle choisi : pas envoyée
     nb_ouvertes = sum(1 for x in _ouvertes() if x.get("utilisateur") == utilisateur)
     if nb_ouvertes >= MAX_OUVERTES:
         return {"ok": False, "erreur": t["trop_en_cours"].format(n=MAX_OUVERTES), "code": "trop"}
-    o = kie_ai.normaliser(cle_modele, options)
-    besoin = kie_ai.estimer(cle_modele, o, len(refs_meta))
+    besoin = kie_ai.estimer(cle_modele, o, len(images), duree_video=duree_video)
     s = solde()
     if s["credits"] is not None and besoin > s["credits"]:
         return {"ok": False, "code": "credits",
                 "erreur": t["credits_insuffisants"].format(reste=_nb(s["credits"]), besoin=_nb(besoin)),
                 "credits": s["credits"]}
-    modele_api, entree = kie_ai.entree_api(cle_modele, prompt, o, [r["url"] for r in refs_meta])
+    modele_api, entree = kie_ai.entree_api(cle_modele, prompt, o, [r["url"] for r in images],
+                                           videos=[r["url"] for r in videos])
     try:
         task_id = kie_ai.creer_tache(modele_api, entree)
     except kie_ai.ErreurKie as e:
@@ -336,8 +431,8 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
     tache = {
         "id": uuid.uuid4().hex[:12], "task_id": task_id, "utilisateur": utilisateur,
         "modele": cle_modele, "nom_modele": m["nom"], "modele_api": modele_api, "type": m["type"],
-        "prompt": (prompt or "").strip(), "options": o, "resume": _resume_options(m, o),
-        "references": [{"id": r["id"], "nom": r.get("nom", "")} for r in refs_meta],
+        "prompt": (prompt or "").strip(), "options": o, "resume": _resume_options(m, o, duree_video),
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")} for r in images + videos],
         "etat": "en_attente", "message": "", "credits_estimes": besoin, "credits": None,
         "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
         "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,
@@ -499,7 +594,7 @@ def _publique(t: Dict[str, Any], langue: str = "fr") -> Dict[str, Any]:
         "cree_le": t.get("cree_le"), "fini_le": t.get("fini_le"), "utilisateur": t.get("utilisateur"),
         "fichiers": fichiers,
         "urls_kie": list(t.get("urls_kie") or []) if (t.get("etat") == "fini" and not fichiers) else [],
-        "references": [{"apercu": "/studio-ia/reference/" + r["id"], "nom": r.get("nom", "")}
+        "references": [{"apercu": "/studio-ia/reference/" + r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")}
                        for r in (t.get("references") or []) if _ID_OK.match(str(r.get("id") or ""))],
         "derniere_erreur": t.get("derniere_erreur", ""),
     }
@@ -567,7 +662,9 @@ body.light #sia-root{--sia-carte:#fff;--sia-carte2:#f5f5f5;--sia-bord:#e0e0e0;--
 #sia-root .sia-drop input{display:none}
 #sia-root .sia-refs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 #sia-root .sia-ref{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--sia-bord);background:var(--sia-carte2)}
-#sia-root .sia-ref img{width:100%;height:100%;object-fit:cover;display:block}
+#sia-root .sia-ref img,#sia-root .sia-ref video{width:100%;height:100%;object-fit:cover;display:block}
+#sia-root .sia-ref.video{width:96px}
+#sia-root .sia-refs-mini video{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--sia-bord)}
 #sia-root .sia-ref .sia-ref-x{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:12px;line-height:20px;cursor:pointer;padding:0}
 #sia-root .sia-ref .sia-ref-n{position:absolute;left:4px;bottom:3px;font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:6px}
 #sia-root .sia-ref.envoi{display:flex;align-items:center;justify-content:center}
@@ -672,6 +769,7 @@ body.light #sia-root button.sia-lien.primaire{color:var(--sia-sur-accent)!import
 """
 
 _SVG_FILM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg>'
+_SVG_MOTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="4" r="1.8"/><path d="m6 20 4-7 3 2 2 5"/><path d="m4 12 5-3 4 1 3 3 4-1"/><path d="m9 9-1.5 5"/></svg>'
 _SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
 _SVG_ETINCELLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>'
 
@@ -722,12 +820,13 @@ def rendu_html(langue: str = "fr", admin: bool = False) -> str:
 <div class="sia-types" id="sia-types">
   <button type="button" class="sia-type on" data-type="video">{_SVG_FILM}{e(t["reels"])}</button>
   <button type="button" class="sia-type" data-type="image">{_SVG_PHOTO}{e(t["photo"])}</button>
+  <button type="button" class="sia-type" data-type="motion">{_SVG_MOTION}{e(t["motion"])}</button>
 </div>
 <div class="sia-corps" id="sia-vue-creer">
   <aside>
     <section class="sia-carte"><h4>{e(t["modele"])}</h4><div id="sia-modeles"></div></section>
     <section class="sia-carte"><h4>{e(t["references"])} <small>{e(t["optionnel"])}</small></h4>
-      <label class="sia-drop" id="sia-drop"><b>{e(t["deposer"])}</b>{e(t["deposer_aide"])}<input type="file" id="sia-fichier" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <label class="sia-drop" id="sia-drop"><b id="sia-drop-t">{e(t["deposer"])}</b><span id="sia-drop-a">{e(t["deposer_aide"])}</span><input type="file" id="sia-fichier" accept="image/jpeg,image/png,image/webp" multiple></label>
       <div class="sia-refs" id="sia-refs"></div>
       <p class="sia-aide" id="sia-refs-aide"></p>
     </section>
@@ -855,9 +954,13 @@ def register(app, deps: Dict[str, Any]) -> None:
             nb = int(request.args.get("nb_refs") or 0)
         except ValueError:
             nb = 0
+        try:
+            duree = float(request.args.get("duree") or 0)
+        except ValueError:
+            duree = 0.0
         if not kie_ai.modele(cle_m):
             return _json({"ok": False, "erreur": "modele"}, 400)
-        return _json({"ok": True, "credits": kie_ai.estimer(cle_m, opts, nb)})
+        return _json({"ok": True, "credits": kie_ai.estimer(cle_m, opts, nb, duree_video=duree)})
 
     @app.route("/studio-ia/generer", methods=["POST"])
     def studio_ia_generer():
@@ -878,7 +981,7 @@ def register(app, deps: Dict[str, Any]) -> None:
         f = request.files.get("fichier")
         if f is None:
             return _json({"ok": False, "erreur": _t(langue())["ref_type"]}, 400)
-        octets = f.read(kie_ai.TAILLE_MAX_REF + 1)
+        octets = f.read(kie_ai.TAILLE_MAX_VIDEO + 1)
         try:
             ref = deposer_reference(utilisateur(), octets, f.filename or "image",
                                     f.mimetype or "", langue())

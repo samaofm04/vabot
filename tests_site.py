@@ -38249,12 +38249,31 @@ try:
     _kie._CLE_ENV.update({"valeur": "", "t": 10 ** 12})   # ne pas relire le .env
     # -- 1) le registre : ce que l'ecran propose et ce qui part chez Kie ------
     _mods = _kie.registre_public("fr")
-    check("registre : 7 modeles, 5 video + 2 image",
-          len(_mods) == 7 and sum(m["type"] == "video" for m in _mods) == 5)
-    check("registre : chaque modele propose le 9:16 (Reels) par defaut",
-          all(next(o for o in m["options"] if o["cle"] == "aspect_ratio")["defaut"] == "9:16" for m in _mods))
-    check("registre : chaque modele a une estimation > 0 et un prix releve",
-          all(m["estimation_defaut"] > 0 for m in _mods) and all(m["cle"] in _kie.PRIX for m in _kie.MODELES))
+    check("registre : 9 modeles, 5 video + 2 image + 2 motion",
+          len(_mods) == 9 and sum(m["type"] == "video" for m in _mods) == 5
+          and sum(m["type"] == "motion" for m in _mods) == 2)
+    check("registre : chaque modele video/image propose le 9:16 (Reels) par defaut",
+          all(next(o for o in m["options"] if o["cle"] == "aspect_ratio")["defaut"] == "9:16"
+              for m in _mods if m["type"] != "motion"))
+    check("registre : chaque modele a une estimation > 0 (ou un prix a la seconde) et un prix releve",
+          all(m["estimation_defaut"] > 0 or m["prix_seconde"] > 0 for m in _mods)
+          and all(m["cle"] in _kie.PRIX for m in _kie.MODELES))
+    check("motion : estimation a la seconde arrondie au-dessus (11,1 s en 1080p = 12 x 27)",
+          _kie.estimer("kling3motion", {"mode": "1080p"}, 1, duree_video=11.097) == 324
+          and _kie.estimer("kling26motion", {}, 1, duree_video=4) == 44
+          and _kie.estimer("kling3motion", {}, 0) == 0)
+    _mm, _em = _kie.entree_api("kling3motion", " ", {"character_orientation": "image"},
+                               ["https://x/a.png"], videos=["https://x/v.mp4"])
+    check("motion : entree = input_urls + video_urls, mode, orientation, prompt vide non envoye",
+          _mm == "kling-3.0/motion-control" and _em == {"input_urls": ["https://x/a.png"], "video_urls": ["https://x/v.mp4"],
+                                                      "mode": "720p", "character_orientation": "image"}
+          and not _kie.verifier_prompt("kling3motion", ""))
+    try:
+        _kie.entree_api("kling3motion", "", {}, ["https://x/a.png"])
+        _sansVideo = False
+    except _kie.ErreurKie as _e:
+        _sansVideo = _e.code == "refs"
+    check("motion : sans video, entree_api refuse", _sansVideo)
     check("registre : la version anglaise traduit les libelles",
           any(o["nom"] == "Duration" for m in _kie.registre_public("en") for o in m["options"]))
     check("estimation : Kling pro + son, 10 s = 270 credits",
@@ -38301,6 +38320,8 @@ try:
     _ftS = _frS.get_data(as_text=True)
     check("fragment : se rend (sia-root, SIA_CONF, app.js)",
           _frS.status_code == 200 and "sia-root" in _ftS and "SIA_CONF" in _ftS and "/studio-ia/app.js" in _ftS)
+    check("fragment : trois genres (Reels, Photo, Motion) et la zone de depot pilotable",
+          'data-type="motion"' in _ftS and 'id="sia-drop-t"' in _ftS and 'id="sia-drop-a"' in _ftS)
     check("fragment admin sans cle : le panneau pour coller la cle est la, visible, sans bandeau",
           'id="sia-cle"' in _ftS and 'id="sia-cle" hidden' not in _ftS and 'class="sia-sans-cle"' not in _ftS
           and 'id="sia-cle-ouvrir"' in _ftS)
@@ -38459,6 +38480,53 @@ try:
     check("Kling : l input porte duration en texte, mode, sound et le 9:16",
           _FAUX["entree"]["input"] == {"prompt": "un chat", "duration": "10", "mode": "pro",
                                        "sound": True, "multi_shots": False, "aspect_ratio": "9:16"})
+    # -- 5b) motion : photo (WebP convertie) + video des gestes ---------------
+    _ffm = _shSia.which("ffmpeg")
+    if _ffm:
+        _spSia.run([_ffm, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=10", "-t", "4",
+                    "-pix_fmt", "yuv420p", str(_dSia / "gestes.mp4")], capture_output=True, timeout=60)
+        _spSia.run([_ffm, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=10", "-t", "2",
+                    "-pix_fmt", "yuv420p", str(_dSia / "court.mp4")], capture_output=True, timeout=60)
+        _spSia.run([_ffm, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1",
+                    str(_dSia / "model.webp")], capture_output=True, timeout=60)
+    if _ffm and (_dSia / "gestes.mp4").exists() and (_dSia / "model.webp").exists():
+        _rW = _cS.post("/studio-ia/reference",
+                       data={"fichier": (_ioSia.BytesIO((_dSia / "model.webp").read_bytes()), "model.webp", "image/webp")},
+                       content_type="multipart/form-data").get_json()
+        check("motion : une photo WebP est convertie en PNG au depot (Kling la refuse telle quelle)",
+              _rW["ok"] and _rW["reference"]["mime"] == "image/png" and _rW["reference"]["converti"] is True
+              and _cS.get(_rW["reference"]["apercu"]).data[:4] == b"\x89PNG")
+        _rV = _cS.post("/studio-ia/reference",
+                       data={"fichier": (_ioSia.BytesIO((_dSia / "gestes.mp4").read_bytes()), "gestes.mp4", "video/mp4")},
+                       content_type="multipart/form-data").get_json()
+        check("motion : la video des gestes est deposee, sa duree mesuree, servie en apercu",
+              _rV["ok"] and _rV["reference"]["type"] == "video" and 3.5 <= _rV["reference"]["duree"] <= 4.5
+              and _cS.get(_rV["reference"]["apercu"]).mimetype == "video/mp4")
+        _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
+                                                    "references": [_rW["reference"]["id"]]}).get_json()
+        check("motion : photo seule -> refuse (il faut la video)", _gM.get("code") == "refs")
+        _rC = _cS.post("/studio-ia/reference",
+                       data={"fichier": (_ioSia.BytesIO((_dSia / "court.mp4").read_bytes()), "court.mp4", "video/mp4")},
+                       content_type="multipart/form-data").get_json()
+        _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
+                                                    "references": [_rW["reference"]["id"], _rC["reference"]["id"]]}).get_json()
+        check("motion : video de 2 s -> refusee (3 a 30 s), Kie pas appele",
+              _gM.get("code") == "video_duree" and "3" in _gM["erreur"] and "30" in _gM["erreur"])
+        _FAUX["record"] = {"state": "generating"}
+        _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
+                                                    "options": {"mode": "1080p"},
+                                                    "references": [_rV["reference"]["id"], _rW["reference"]["id"]]}).get_json()
+        check("motion : photo + video -> lancee sans prompt, 4 s x 27 = 108 credits, input_urls/video_urls",
+              _gM.get("ok") and _gM["tache"]["credits_estimes"] == 108 and _gM["tache"]["type"] == "motion"
+              and _FAUX["entree"]["model"] == "kling-3.0/motion-control"
+              and _FAUX["entree"]["input"]["input_urls"] == ["https://tempfile.redpandaai.co/x.png"]
+              and _FAUX["entree"]["input"]["video_urls"] == ["https://tempfile.redpandaai.co/x.png"]
+              and "prompt" not in _FAUX["entree"]["input"]
+              and [r["mime"] for r in _gM["tache"]["references"]] == ["image/png", "video/mp4"]
+              and _cS.get("/studio-ia/estimer?modele=kling3motion&o_mode=720p&duree=11.1").get_json()["credits"] == 240)
+        _sia._maj(_gM["tache"]["id"], etat="echec", message="fin du test motion")
+    else:
+        check("motion : ffmpeg present pour le test de depot", False, "ffmpeg absent ou lavfi/webp indisponible")
     _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}
     check("suivi : fail -> echec avec la raison de Kie",
           _sia.verifier(_tid2)["etat"] == "echec" and "content policy" in _sia.verifier(_tid2)["message"])

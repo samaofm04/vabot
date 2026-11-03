@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import re
 import time
@@ -355,6 +356,26 @@ _OPT_USAGE_REFS = {"cle": "usage_refs", "nom": "Images envoyées", "nom_en": "Up
                    "si_refs": True}
 
 TYPES_IMAGE = ("image/jpeg", "image/png", "image/webp")
+#: vidéo de gestes des modèles « motion » (Kling : MP4 ou MOV, 100 Mo, 3–30 s)
+TYPES_VIDEO = ("video/mp4", "video/quicktime")
+TAILLE_MAX_VIDEO = 100_000_000
+_REFS_MOTION = {
+    "max": 2, "modes": ["motion"], "types": ("image/jpeg", "image/png") + TYPES_VIDEO,
+    "aide": "1 photo de la model (JPG/PNG, 10 Mo, buste visible) + 1 vidéo des gestes (MP4/MOV, 3–30 s, 100 Mo). "
+            "Le visage, la tenue et le décor viennent de la photo ; les mouvements de la vidéo. Le texte incrusté dans la vidéo n'est pas repris.",
+    "aide_en": "1 photo of the model (JPG/PNG, 10 MB, head and torso visible) + 1 video of the moves (MP4/MOV, 3–30 s, 100 MB). "
+               "Face, outfit and background come from the photo; the moves from the video. Text burned into the video is not kept.",
+}
+_OPTIONS_MOTION = [
+    {"cle": "mode", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
+     "valeurs": ["720p", "1080p"], "defaut": "720p"},
+    {"cle": "character_orientation", "nom": "Orientation du personnage", "nom_en": "Character orientation", "type": "choix",
+     "valeurs": ["video", "image"], "defaut": "video",
+     "libelles": {"video": {"fr": "Comme la vidéo (recommandé)", "en": "Like the video (recommended)"},
+                  "image": {"fr": "Comme la photo (10 s max)", "en": "Like the photo (10 s max)"}},
+     "aide": "« Comme la vidéo » : le personnage se tourne comme dans la vidéo, jusqu'à 30 s. « Comme la photo » : il garde l'orientation de la photo, vidéo de 10 s au plus.",
+     "aide_en": "“Like the video”: the character turns as in the video, up to 30 s. “Like the photo”: it keeps the photo's orientation, video of 10 s at most."},
+]
 
 MODELES: List[Dict[str, Any]] = [
     {
@@ -498,6 +519,25 @@ MODELES: List[Dict[str, Any]] = [
              "valeurs": ["png", "jpeg"], "defaut": "png"},
         ],
     },
+    # Motion control : la personne de la photo refait les gestes de la vidéo
+    # (docs.kie.ai/market/kling/motion-control-v3 et /motion-control). Pas de
+    # prompt obligatoire ; la durée de sortie = celle de la vidéo, facturée
+    # à la seconde.
+    {
+        "cle": "kling3motion", "nom": "Kling 3.0 Motion Control", "editeur": "Kuaishou", "type": "motion",
+        "resume": "720p / 1080p · la model de la photo refait les gestes de la vidéo (3–30 s)",
+        "resume_en": "720p / 1080p · the model in the photo redoes the moves of the video (3–30 s)",
+        "modele_api": "kling-3.0/motion-control", "prompt_max": 2500, "prompt_min": 0,
+        "references": _REFS_MOTION, "options": _OPTIONS_MOTION,
+    },
+    {
+        "cle": "kling26motion", "nom": "Kling 2.6 Motion Control", "editeur": "Kuaishou", "type": "motion",
+        "badge": "le moins cher", "badge_en": "cheapest",
+        "resume": "720p / 1080p · même principe, génération précédente, presque moitié prix",
+        "resume_en": "720p / 1080p · same idea, previous generation, nearly half price",
+        "modele_api": "kling-2.6/motion-control", "prompt_max": 2500, "prompt_min": 0,
+        "references": _REFS_MOTION, "options": _OPTIONS_MOTION,
+    },
 ]
 
 _PAR_CLE = {m["cle"]: m for m in MODELES}
@@ -513,6 +553,8 @@ PRIX = {
     "wan3": {"480P": 8, "720P": 16, "1080P": 32},
     "seedream5pro": {"basic": 7, "high": 14, "image_sup": 0.5},
     "seedream5flash": {"image": 3.24},
+    "kling3motion": {"720p": 20, "1080p": 27},     # par seconde de vidéo de gestes
+    "kling26motion": {"720p": 11, "1080p": 18},
 }
 
 
@@ -544,13 +586,21 @@ def normaliser(cle_: str, options: Any) -> Dict[str, Any]:
     return out
 
 
-def estimer(cle_: str, options: Any, nb_refs: int = 0) -> float:
-    """Crédits attendus pour cette génération (0 si le modèle est inconnu)."""
+def estimer(cle_: str, options: Any, nb_refs: int = 0, duree_video: float = 0.0) -> float:
+    """Crédits attendus pour cette génération (0 si le modèle est inconnu).
+    `duree_video` : les modèles motion sortent une vidéo aussi longue que
+    celle des gestes ; Kie facture à la seconde, on arrondit au-dessus."""
     m = modele(cle_)
     if not m:
         return 0.0
     o = normaliser(cle_, options)
     p = PRIX.get(cle_) or {}
+    if m["type"] == "motion":
+        try:
+            secondes = math.ceil(float(duree_video or 0))
+        except (TypeError, ValueError):
+            secondes = 0
+        return round(float(p.get(o["mode"], 0)) * max(0, secondes), 2)
     duree = float(o.get("duration") or 0)
     if cle_ == "kling3":
         sans, avec = p.get(o["mode"], (0, 0))
@@ -572,7 +622,7 @@ def verifier_prompt(cle_: str, prompt: str, langue: str = "fr") -> str:
     if not m:
         return "Modèle inconnu." if langue != "en" else "Unknown model."
     p = (prompt or "").strip()
-    mini = int(m.get("prompt_min") or 1)
+    mini = int(m.get("prompt_min", 1))     # 0 = prompt facultatif (motion)
     if len(p) < mini:
         if langue == "en":
             return f"Write a prompt first ({mini} characters minimum)."
@@ -584,10 +634,12 @@ def verifier_prompt(cle_: str, prompt: str, langue: str = "fr") -> str:
     return ""
 
 
-def entree_api(cle_: str, prompt: str, options: Any, refs: List[str]) -> Tuple[str, Dict[str, Any]]:
+def entree_api(cle_: str, prompt: str, options: Any, refs: List[str],
+               videos: Optional[List[str]] = None) -> Tuple[str, Dict[str, Any]]:
     """(modèle Kie, input de createTask) pour cette demande. `refs` : les URL
-    publiques des images, dans l'ordre déposé. Les bornes de nombre et de
-    types viennent du registre ; ce qui n'y est pas n'est pas envoyé."""
+    publiques des images, dans l'ordre déposé ; `videos` : celles des vidéos
+    (modèles motion seulement). Les bornes de nombre et de types viennent du
+    registre ; ce qui n'y est pas n'est pas envoyé."""
     m = modele(cle_)
     if not m:
         raise ErreurKie("Modèle inconnu.", "modele")
@@ -595,6 +647,15 @@ def entree_api(cle_: str, prompt: str, options: Any, refs: List[str]) -> Tuple[s
     p = (prompt or "").strip()
     refs = [r for r in (refs or []) if isinstance(r, str) and r.startswith("http")]
     refs = refs[:int(m["references"]["max"])]
+    if m["type"] == "motion":
+        videos = [v for v in (videos or []) if isinstance(v, str) and v.startswith("http")]
+        if not refs or not videos:
+            raise ErreurKie("Il faut une photo et une vidéo.", "refs")
+        e_m: Dict[str, Any] = {"input_urls": refs[:1], "video_urls": videos[:1], "mode": o["mode"],
+                               "character_orientation": o["character_orientation"]}
+        if p:
+            e_m["prompt"] = p
+        return m["modele_api"], e_m
     if cle_ == "kling3":
         e: Dict[str, Any] = {"prompt": p, "duration": str(o["duration"]), "mode": o["mode"],
                              "sound": bool(o["sound"]), "multi_shots": False}
@@ -669,8 +730,14 @@ def registre_public(langue: str = "fr") -> List[Dict[str, Any]]:
                 d["si_refs"] = True
             opts.append(d)
         r = m["references"]
+        prix_s = 0.0
+        if m["type"] == "motion":
+            # le prix de base est par seconde de vidéo : l'écran l'affiche « /s »
+            defaut_mode = next((o["defaut"] for o in m["options"] if o["cle"] == "mode"), "720p")
+            prix_s = float((PRIX.get(m["cle"]) or {}).get(defaut_mode, 0))
         out.append({
             "cle": m["cle"], "nom": m["nom"], "editeur": m["editeur"], "type": m["type"],
+            "prix_seconde": prix_s,
             "badge": (m.get("badge_en") if en else m.get("badge")) or "",
             "resume": m.get("resume_en") if en and m.get("resume_en") else m.get("resume", ""),
             "prompt_max": m["prompt_max"], "prompt_min": int(m.get("prompt_min") or 1),
