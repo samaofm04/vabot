@@ -129,11 +129,13 @@ def lien(gid: Any, uid: Any) -> str:
 
 # ─── les chiffres ────────────────────────────────────────────────────────
 def _codes(trackings: List[str], createrice: str) -> List[str]:
+    import podium_discord as pod
     out = []
     for u in trackings:
         m = _RE_TRACKING.search(str(u or ""))
-        # « c040 » chez OnlyFans est « 40 » chez Infloww (_code_infloww)
-        if m and m.group(1).lower() == createrice and str(int(m.group(2))) not in out:
+        # « c040 » chez OnlyFans est « 40 » chez Infloww (_code_infloww) ; un
+        # compte renommé (emy.brww) garde son ancien nom (pod.pseudo_of)
+        if m and pod.pseudo_of(m.group(1)) == createrice and str(int(m.group(2))) not in out:
             out.append(str(int(m.group(2))))
     return out
 

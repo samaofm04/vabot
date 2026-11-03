@@ -463,7 +463,7 @@ def code_de_l_url(url: Any) -> Tuple[str, str]:
     m = _URL_OF.match(u)
     if not m:
         return "", "l'adresse du lien GetMySocial n'est pas un lien de suivi OnlyFans"
-    if m.group(1).lower() != CREATRICE:
+    if pd.pseudo_of(m.group(1)) != CREATRICE:
         return "", f"le lien GetMySocial pointe vers @{m.group(1)}, pas vers @{CREATRICE}"
     return str(int(m.group(2))), ""
 
@@ -480,7 +480,7 @@ def _suivi_de(url: Any) -> str:
     """« emy.brw/c40 » pour https://onlyfans.com/Emy.Brw/c040 : la clé des
     liens de suivi du registre du podium (podium_discord.tracking_de)."""
     m = _URL_OF.match(str(url or "").strip())
-    return f"{m.group(1).lower()}/c{int(m.group(2))}" if m else ""
+    return f"{pd.pseudo_of(m.group(1))}/c{int(m.group(2))}" if m else ""
 
 
 def code_partenaire(url: Any) -> str:
@@ -987,7 +987,8 @@ def _lire_mypuls(d: Any) -> Dict[str, Any]:
             if CREATRICE in url.lower():
                 illisibles += 1
             continue
-        if m.group(1).lower() != CREATRICE:
+        # pd.pseudo_of : un compte renommé chez OnlyFans (Emy, emy.brww, 03/11)
+        if pd.pseudo_of(m.group(1)) != CREATRICE:
             continue
         code = str(int(m.group(2)))
         if code in vus:

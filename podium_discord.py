@@ -1350,6 +1350,21 @@ FRAIS_REGISTRE_H = 24
 RATTRAPAGE_MYPULS_H = 12
 _MP_LUS: Dict[Tuple[str, str], Tuple[float, Dict[str, Dict[str, Any]]]] = {}
 _URL_TRACKING = re.compile(r"onlyfans\.com/([A-Za-z0-9._-]+)/c(\d+)(?:[/?#]|$)", re.IGNORECASE)
+#: Les pseudos OnlyFans qui ont changé : le nouveau → celui que nos fiches,
+#: registres et relevés gardent. Constaté le 03/11/2026 vers 21 h : Emy est
+#: passée de « emy.brw » à « emy.brww ». MyPuls (même compte 3352, mêmes
+#: numéros, mêmes noms de liens, aucun numéro sous les deux) ne rend plus que
+#: onlyfans.com/emy.brww/cN, et 37 VA des trois serveurs avaient leurs subs
+#: « pas lisibles » : un de leurs trackings semblait avoir disparu. Infloww,
+#: lui, l'appelle toujours emy.brw.
+PSEUDOS_RENOMMES = {"emy.brww": "emy.brw"}
+
+
+def pseudo_of(pseudo: Any) -> str:
+    """Le pseudo OnlyFans tel que le bot le garde : en minuscules, l'ancien
+    nom d'un compte renommé (PSEUDOS_RENOMMES)."""
+    p = str(pseudo or "").strip().lower()
+    return PSEUDOS_RENOMMES.get(p, p)
 
 
 def _fichier_trackings() -> Path:
@@ -1411,7 +1426,7 @@ def tracking_de(url: Any) -> str:
     """« https://onlyfans.com/Emy.Brw/c042/ » → « emy.brw/c42 » ; "" si l'url
     n'est pas un lien de tracking OnlyFans (« onlyfans.com/emy.brw » seul)."""
     m = _URL_TRACKING.search(str(url or "").strip())
-    return f"{m.group(1).lower()}/c{int(m.group(2))}" if m else ""
+    return f"{pseudo_of(m.group(1))}/c{int(m.group(2))}" if m else ""
 
 
 def _trackings_variante(l: Dict[str, Any]) -> List[str]:
