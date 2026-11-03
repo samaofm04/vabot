@@ -38528,6 +38528,24 @@ try:
               and _FAUX["entree"]["model"] == "wan/2-2-animate-move"
               and _FAUX["entree"]["input"]["nsfw_checker"] is False)
         _sia._maj(_gW["tache"]["id"], etat="echec", message="fin du test motion")
+        # Seedance : la video des gestes devient une video de REFERENCE (tenue, decor, gestes)
+        _gSd = _cS.post("/studio-ia/generer", json={"modele": "seedance2fast", "prompt": "la femme de l image 1 fait les gestes de la video",
+                                                     "options": {"resolution": "720p", "duration": 4},
+                                                     "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        check("Seedance 2 Fast : image + video -> reference_image_urls + reference_video_urls, sans cadres, nsfw_checker false",
+              _gSd.get("ok") and _FAUX["entree"]["model"] == "bytedance/seedance-2-fast"
+              and _FAUX["entree"]["input"]["reference_video_urls"] == ["https://tempfile.redpandaai.co/x.png"]
+              and _FAUX["entree"]["input"]["reference_image_urls"] == ["https://tempfile.redpandaai.co/x.png"]
+              and "first_frame_url" not in _FAUX["entree"]["input"]
+              and _FAUX["entree"]["input"]["nsfw_checker"] is False
+              and [r["mime"] for r in _gSd["tache"]["references"]] == ["image/png", "video/mp4"])
+        _sia._maj(_gSd["tache"]["id"], etat="echec", message="fin du test seedance")
+        _gSk = _cS.post("/studio-ia/generer", json={"modele": "kling3", "prompt": "un chat",
+                                                     "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        check("Kling 3.0 (Reels) : une video deposee n est pas envoyee (image seule en cadre)",
+              _gSk.get("code") == "ref_type" or (_gSk.get("ok") and "video" not in _jsSia.dumps(_FAUX["entree"]["input"])))
+        if _gSk.get("ok"):
+            _sia._maj(_gSk["tache"]["id"], etat="echec", message="fin du test kling")
         _FAUX["record"] = {"state": "generating"}
         _gM = _cS.post("/studio-ia/generer", json={"modele": "kling3motion", "prompt": "",
                                                     "options": {"mode": "1080p"},

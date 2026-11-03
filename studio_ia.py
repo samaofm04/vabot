@@ -407,6 +407,16 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
                     "erreur": t["video_duree"].format(s=_nb(duree_video), min=_nb(d_min), max=_nb(d_max))}
         if o.get("character_orientation") == "image" and duree_video > 10:
             return {"ok": False, "erreur": t["video_10s"].format(s=_nb(duree_video)), "code": "video_duree"}
+    elif m["references"].get("videos_max"):
+        # Seedance : des vidéos de référence en plus des images, chacune dans
+        # les bornes du modèle ; la sortie garde la durée réglée
+        videos = videos[:int(m["references"]["videos_max"])]
+        d_min, d_max = tuple(m["references"].get("duree") or (1, 60))
+        for v in videos:
+            d = float(v.get("duree") or 0)
+            if not d_min <= d <= d_max:
+                return {"ok": False, "code": "video_duree",
+                        "erreur": t["video_duree"].format(s=_nb(d), min=_nb(d_min), max=_nb(d_max))}
     else:
         videos = []       # une vidéo déposée puis un autre modèle choisi : pas envoyée
     nb_ouvertes = sum(1 for x in _ouvertes() if x.get("utilisateur") == utilisateur)

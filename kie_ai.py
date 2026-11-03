@@ -422,9 +422,14 @@ MODELES: List[Dict[str, Any]] = [
         "resume": "480p / 720p / 1080p · 4–30 s · audio synchronisé",
         "resume_en": "480p / 720p / 1080p · 4–30 s · synced audio",
         "modele_api": "bytedance/seedance-2-5", "prompt_max": 20000,
-        "references": {"max": 9, "modes": ["cadres", "references"], "types": TYPES_IMAGE,
-                       "aide": "Jusqu'à 9 images (JPG/PNG/WebP, 300–6000 px). En cadres : 1 = première image, 2 = première et dernière.",
-                       "aide_en": "Up to 9 images (JPG/PNG/WebP, 300–6000 px). As frames: 1 = first, 2 = first and last."},
+        "references": {"max": 9, "modes": ["cadres", "references"], "types": TYPES_IMAGE + TYPES_VIDEO,
+                       "videos_max": 3, "duree": (2, 30),
+                       "aide": "Jusqu'à 9 images (JPG/PNG/WebP, 300–6000 px) et des vidéos de référence (MP4/MOV, 2–30 s, 720p max) : "
+                               "le prompt dit quoi prendre de chaque (« la femme de l'image 1, la tenue, le décor et les gestes de la vidéo »). "
+                               "Avec une vidéo, la sortie reste en 480p/720p et la vidéo est facturée en plus. En cadres : 1 = première image, 2 = première et dernière.",
+                       "aide_en": "Up to 9 images (JPG/PNG/WebP, 300–6000 px) and reference videos (MP4/MOV, 2–30 s, 720p max): "
+                                  "the prompt says what to take from each (“the woman from image 1, the outfit, room and moves of the video”). "
+                                  "With a video the output stays 480p/720p and the video is billed on top. As frames: 1 = first, 2 = first and last."},
         "options": [
             {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
              "valeurs": ["480p", "720p", "1080p"], "defaut": "720p"},
@@ -444,9 +449,14 @@ MODELES: List[Dict[str, Any]] = [
         "resume": "480p / 720p · 4–15 s · le moins cher des Seedance",
         "resume_en": "480p / 720p · 4–15 s · cheapest Seedance",
         "modele_api": "bytedance/seedance-2-fast", "prompt_max": 20000,
-        "references": {"max": 9, "modes": ["cadres", "references"], "types": TYPES_IMAGE,
-                       "aide": "Jusqu'à 9 images (JPG/PNG/WebP, 300–6000 px). En cadres : 1 = première image, 2 = première et dernière.",
-                       "aide_en": "Up to 9 images (JPG/PNG/WebP, 300–6000 px). As frames: 1 = first, 2 = first and last."},
+        "references": {"max": 9, "modes": ["cadres", "references"], "types": TYPES_IMAGE + TYPES_VIDEO,
+                       "videos_max": 3, "duree": (2, 15),
+                       "aide": "Jusqu'à 9 images (JPG/PNG/WebP, 300–6000 px) et des vidéos de référence (MP4/MOV, 2–15 s, 720p max) : "
+                               "le prompt dit quoi prendre de chaque (« la femme de l'image 1, la tenue, le décor et les gestes de la vidéo »). "
+                               "La vidéo est facturée en plus. En cadres : 1 = première image, 2 = première et dernière.",
+                       "aide_en": "Up to 9 images (JPG/PNG/WebP, 300–6000 px) and reference videos (MP4/MOV, 2–15 s, 720p max): "
+                                  "the prompt says what to take from each (“the woman from image 1, the outfit, room and moves of the video”). "
+                                  "The video is billed on top. As frames: 1 = first, 2 = first and last."},
         "options": [
             {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
              "valeurs": ["480p", "720p"], "defaut": "720p"},
@@ -715,8 +725,20 @@ def entree_api(cle_: str, prompt: str, options: Any, refs: List[str],
         return m["modele_api"], e
     if cle_ in ("seedance25", "seedance2fast"):
         e = {"prompt": p, "resolution": o["resolution"], "aspect_ratio": o["aspect_ratio"],
-             "duration": int(o["duration"]), "generate_audio": bool(o["generate_audio"])}
-        _poser_refs(e, refs, o.get("usage_refs"))
+             "duration": int(o["duration"]), "generate_audio": bool(o["generate_audio"]),
+             "nsfw_checker": False}
+        videos = [v for v in (videos or []) if isinstance(v, str) and v.startswith("http")]
+        videos = videos[:int(m["references"].get("videos_max") or 0)]
+        if videos:
+            # une vidéo de référence exclut les cadres : tout passe en références,
+            # et la sortie ne dépasse pas 720p (la doc borne la vidéo à 480p/720p)
+            if refs:
+                e["reference_image_urls"] = refs
+            e["reference_video_urls"] = videos
+            if e["resolution"] == "1080p":
+                e["resolution"] = "720p"
+        else:
+            _poser_refs(e, refs, o.get("usage_refs"))
         return m["modele_api"], e
     if cle_ == "wan3":
         e = {"prompt": p, "resolution": o["resolution"], "aspect_ratio": o["aspect_ratio"],
@@ -785,6 +807,7 @@ def registre_public(langue: str = "fr") -> List[Dict[str, Any]]:
             "resume": m.get("resume_en") if en and m.get("resume_en") else m.get("resume", ""),
             "prompt_max": m["prompt_max"], "prompt_min": int(m.get("prompt_min") or 1),
             "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(r["types"]),
+                           "videos_max": int(r.get("videos_max") or 0),
                            "aide": r.get("aide_en") if en and r.get("aide_en") else r.get("aide", "")},
             "options": opts,
             "estimation_defaut": estimer(m["cle"], {}, 0),

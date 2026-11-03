@@ -26,6 +26,7 @@
   var MIMES_IMAGE = ['image/jpeg', 'image/png', 'image/webp'];
   var MIMES_VIDEO = ['video/mp4', 'video/quicktime'];
   function estVideo(mime) { return (mime || '').indexOf('video/') === 0; }
+  function accepteVideo(m) { return !!m && m.references.types.some(estVideo); }
   var SVG_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg>';
   var SVG_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
   var SVG_REDO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
@@ -150,6 +151,8 @@
       toast(T.ref_type_kling, 'info');
     }
     try { localStorage.setItem('sia_modele_' + S.type, cle); } catch (e) { /* navigation privée */ }
+    // la zone de dépôt prend la vidéo quand le modèle la lit (motion, Seedance)
+    $('sia-fichier').setAttribute('accept', (accepteVideo(m) ? MIMES_IMAGE.concat(MIMES_VIDEO) : MIMES_IMAGE).join(','));
     var ta = $('sia-prompt');
     ta.disabled = !!m.sans_prompt;
     if (m.sans_prompt) { ta.setAttribute('data-ph', ta.getAttribute('data-ph') || ta.getAttribute('placeholder') || ''); ta.setAttribute('placeholder', T.sans_prompt || ''); }
@@ -167,8 +170,6 @@
     var ph = S.type === 'image' ? T.prompt_ph_image : (S.type === 'motion' ? T.prompt_ph_motion : T.prompt_ph_video);
     $('sia-prompt').removeAttribute('data-ph');
     $('sia-prompt').setAttribute('placeholder', ph || '');
-    // Motion : la zone de dépôt prend aussi la vidéo des gestes
-    $('sia-fichier').setAttribute('accept', (S.type === 'motion' ? MIMES_IMAGE.concat(MIMES_VIDEO) : MIMES_IMAGE).join(','));
     $('sia-drop-t').textContent = S.type === 'motion' ? (T.deposer_motion || '') : (T.deposer || '');
     $('sia-drop-a').textContent = S.type === 'motion' ? (T.deposer_aide_motion || '') : (T.deposer_aide || '');
     if (m) { choisirModele(m.cle); } else { rendreModeles(); }
@@ -318,7 +319,10 @@
         S.refs = S.refs.filter(function (r) { return estVideo(r.mime) !== video; });
       }
       if (S.refs.length >= m.references.max) { toast(fmt(T.refs_max, { n: m.references.max }), 'info'); return; }
-      if (video && S.type !== 'motion') { toast(T.ref_type, 'error'); return; }
+      if (video && !accepteVideo(m)) { toast(T.ref_type, 'error'); return; }
+      if (video && S.type !== 'motion' && S.refs.filter(function (r) { return estVideo(r.mime); }).length >= (m.references.videos_max || 0)) {
+        toast(fmt(T.refs_max, { n: m.references.videos_max || 0 }), 'info'); return;
+      }
       if (!video && MIMES_IMAGE.indexOf(mime) < 0) { toast(T.ref_type, 'error'); return; }
       if (video && MIMES_VIDEO.indexOf(mime) < 0) { toast(T.video_type, 'error'); return; }
       // WebP : le serveur le convertit en PNG pour les modèles qui le refusent (Kling)
@@ -337,6 +341,11 @@
           tmp.id = d.reference.id; tmp.envoi = false; tmp.apercu = d.reference.apercu; tmp.mime = d.reference.mime;
           tmp.duree = d.reference.duree || 0;
           if (d.reference.converti) { toast(T.webp_converti || '', 'info'); }
+          if (estVideo(tmp.mime) && tmp.duree && S.type !== 'motion' && ('duration' in S.options)) {
+            var oD = null;
+            m.options.forEach(function (x) { if (x.cle === 'duration') { oD = x; } });
+            if (oD) { S.options.duration = Math.max(oD.min, Math.min(oD.max, Math.ceil(tmp.duree))); }
+          }
           rendreRefs(); rendreOptions(); majEstime();
         })
         .catch(function (e) {
