@@ -1928,7 +1928,16 @@ def nom_propre(cle: Any) -> str:
     spam = bool(re.search(r"\bspam\b", n, re.I))
     n = re.sub(r"\bspam\b", "", n, flags=re.I)
     n = re.sub(r"\s+\d+\s*$", "", n.strip()).strip(" -")
+    # « ANDRY » → « Andry » : un prénom écrit normalement (propriétaire,
+    # 04/11/2026 : « Andry (Safidy) »)
+    if len(n) > 1 and n.isupper():
+        n = n.title()
     return (n + (" SPAM" if spam else "")).strip() or str(cle or "")
+
+
+def nom_manager(groupe: Any) -> str:
+    """« Manageur Safidy » → « Safidy », « Manageuse Noum » → « Noum »."""
+    return re.sub(r"^\s*manag\w*\s+", "", str(groupe or ""), flags=re.I).strip()
 
 
 def _equiper(ligne: Dict[str, Any], liens: List[Mapping[str, Any]]) -> None:
@@ -1940,6 +1949,7 @@ def _equiper(ligne: Dict[str, Any], liens: List[Mapping[str, Any]]) -> None:
                   if _id_groupe(l.get("group_id")) in groupes})
     if vus:
         ligne["rang_equipe"], ligne["equipe"] = vus[0]
+        ligne["manager"] = nom_manager(vus[0][1])
     m = _RE_NUM_VA.search(str(ligne.get("cle") or ""))
     if not m:
         for l in liens:
@@ -4856,7 +4866,13 @@ def _detail_simple(x: Mapping[str, Any], source: str) -> str:
     prénom »). Restent seulement, en orange, ce qui manque vraiment : un lien
     pas lu, introuvable, partagé, un relevé raté."""
     nom = re.sub(r"\s*\bSPAM\b\s*$", "", str(x.get("nom") or x.get("cle") or ""), flags=re.I).strip()
-    d = [f'<span>{_e(nom)} ({"spam" if x.get("spam") else "normal"})</span>']
+    # « Andry (Safidy) » : son manager, le groupe GetMySocial de ses liens
+    # (propriétaire, 04/11/2026) ; sans groupe connu, « (normal) » comme avant
+    chef = str(x.get("manager") or "")
+    if chef:
+        d = [f'<span>{_e(nom)}{" (spam)" if x.get("spam") else ""} ({_e(chef)})</span>']
+    else:
+        d = [f'<span>{_e(nom)} ({"spam" if x.get("spam") else "normal"})</span>']
     for r in x.get("infloww") or []:
         if r.get("creatrice") and r.get("manque"):
             d.append(f'<span class="manque">un lien pas lu chez Infloww, ses subs manquent</span>')

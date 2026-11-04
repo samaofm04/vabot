@@ -173,7 +173,7 @@ check("le titre d'une période lue chez Infloww dit « · Infloww », plus « My
 print("6. Rangée par équipe de manager, noms propres")
 for brut, propre in (("VA 2 - Abdoul", "Abdoul"), ("VA 3 - Roucham 1", "Roucham"), ("VA 4 - Ricardo 1", "Ricardo"),
                      ("VA 5 - Gerome SPAM", "Gerome SPAM"), ("VA 1 Misandratra", "Misandratra"),
-                     ("VA 5 Kanto", "Kanto"), ("Carter", "Carter"), ("ANDRY", "ANDRY"), ("Toxi", "Toxi")):
+                     ("VA 5 Kanto", "Kanto"), ("Carter", "Carter"), ("ANDRY", "Andry"), ("Toxi", "Toxi"), ("DONLAD", "Donlad")):
     check(f"« {brut} » → « {propre} »", emy.nom_propre(brut) == propre, emy.nom_propre(brut))
 emy._GROUPES.update(t=9e18, par_id={"s1": (1, "Manageur Safidy"), "n1": (2, "Manageuse Noum"),
                                      "c1": (3, "Manageur Carter"), "r1": (4, "Manageur Roucham")})
@@ -188,7 +188,7 @@ for cle, gid, nom_gms in (("Toxi", "grp_c1", "VA 10 - ( Toxi)"), ("Carter", "grp
     L.append(x)
 ordre = [x["nom"] for x in emy.trier(L, "equipe", "asc")]
 check("l'ordre de GetMySocial : Safidy, Noum (VA 1, VA 5), Carter (VA 1, VA 10), Roucham (VA 2, VA 3), puis sans groupe",
-      ordre == ["ANDRY", "Misandratra", "Kanto", "Carter", "Toxi", "Abdoul", "Roucham", "Orphelin"], ordre)
+      ordre == ["Andry", "Misandratra", "Kanto", "Carter", "Toxi", "Abdoul", "Roucham", "Orphelin"], ordre)
 check("la clé ne change pas (paie, ancre) : seul le nom affiché", L[2]["cle"] == "VA 3 - Roucham 1" and L[2]["nom"] == "Roucham")
 check("page JESSY LE RETOUR : rangée par équipe sans « ?tri= » ; les autres pages par nom",
       emy._tri_valide(None, None) == ("equipe", "asc") and lia._tri_valide(None, None) == ("nom", "asc")
@@ -211,6 +211,20 @@ check("une ligne SPAM : « Gerome (spam) » ; ce qui manque reste dit, en orange
 check("les autres pages gardent le détail des liens de suivi",
       "c33" in lia._detail_personne({"cle": "VA 1", "nom": "VA 1", "infloww": [{"code": "33", "nom": "x"}],
                                      "introuvables": []}))
+
+
+print("8. Son manager entre parenthèses : « Andry (Safidy) »")
+x = {"cle": "ANDRY", "nom": "ANDRY", "spam": False, "infloww": [], "introuvables": [], "us_etat": "ok"}
+emy._equiper(x, [{"group_id": "grp_s1", "display_name": "(ANDRY) 1"}])
+d = emy._detail_personne(x)
+check("« Andry (Safidy) » sous le nom, prénom écrit normalement", x["nom"] == "Andry" and "Andry (Safidy)" in d
+      and x["manager"] == "Safidy", (x, d))
+x = {"cle": "VA 5 - Gerome SPAM", "nom": "VA 5 - Gerome SPAM", "spam": True, "infloww": [], "introuvables": []}
+emy._equiper(x, [{"group_id": "grp_r1", "display_name": "VA 5 - Gerome ( spam )"}])
+check("une ligne SPAM : « Gerome (spam) (Roucham) »", "Gerome (spam) (Roucham)" in emy._detail_personne(x),
+      emy._detail_personne(x))
+check("« Manageuse Noum » → « Noum »", emy.nom_manager("Manageuse Noum") == "Noum"
+      and emy.nom_manager("Manageur Carter") == "Carter")
 
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
