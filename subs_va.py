@@ -274,6 +274,19 @@ def subs_du_va(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> Dict[str, 
         n_mym = _subs_mym(mym, d0, d1)
         n = None if n_of is None or n_mym is None else n_of + n_mym
         out[cle] = {"du": d0, "au": d1, "n": n}
+    # 04/11/2026, « période précédente figée » : illisible (Seren partie avec
+    # MyPuls), le chiffre de la quinzaine figée, celui de ses pages
+    p = out.get("precedente") or {}
+    if p.get("n") is None and ts and str(gid or "") != VA_IG_ID:
+        try:
+            import liens_va
+            import podium_discord as pod
+            n = pod.subs_fige_du_va(gid, p["du"], liens_va.lien_de(gid, uid).get("numero"))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[subs] quinzaine figée illisible : {type(e).__name__}: {e}", flush=True)
+            n = None
+        if n is not None:
+            out["precedente"] = dict(p, n=n, fige=True)
     return out
 
 
@@ -313,7 +326,8 @@ def texte(gid: Any, uid: Any, jour: Optional[dt.date] = None) -> str:
                 "dès que ton lien sera prêt.")
 
     def ligne(titre, p, dates=True):
-        val = f"**{p['n']}**" if p["n"] is not None else "pas lisible pour l'instant"
+        val = (f"**{p['n']}**" + (" (quinzaine figée)" if p.get("fige") else "")
+               if p["n"] is not None else "pas lisible pour l'instant")
         if not dates:
             return f"{titre} : {val}"
         du, au = p["du"], p["au"]
@@ -349,7 +363,8 @@ def _texte_stats(gid: Any, uid: Any, r: Dict[str, Any]) -> str:
         for cle in cles:
             n = r[cle]["n"]
             out.append(f"{quand(r[cle], cle)} : "
-                       + (f"**{n}**" if n is not None else "pas lisible pour l'instant"))
+                       + (f"**{n}**" + (" (quinzaine figée)" if r[cle].get("fige") else "")
+                          if n is not None else "pas lisible pour l'instant"))
     else:
         out.append("Tu n'as pas encore de tracking : tes subs apparaîtront ici dès que ton "
                    "lien sera prêt.")

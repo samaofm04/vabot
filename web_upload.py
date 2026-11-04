@@ -61385,6 +61385,7 @@ def _start_infloww_liens_daemon() -> bool:
         _t_il.sleep(120)                    # laisser le site se lever
         dernier = None
         dernier_us = None
+        dernier_releve = ""
         while True:
             try:
                 import infloww_liens as _il
@@ -61402,6 +61403,21 @@ def _start_infloww_liens_daemon() -> bool:
                         dernier = s
             except Exception as e:
                 print(f"[infloww-liens] boucle : {type(e).__name__}: {e}", flush=True)
+            try:
+                # les clics Infloww des liens de Lia (page perso des VA, page
+                # Lia) ne sont que des cumuls : une période part du relevé de
+                # la veille. Pris ici à chaque réveil, plus seulement quand
+                # quelqu'un ouvre une page (04/11/2026) -- un jour sans visite,
+                # tous les VA auraient eu « — » sur la période suivante
+                import infloww_liens as _il
+                _lia = _il.profil("lia")
+                if _lia is not None and getattr(_lia, "CREATRICE_CVR", ""):
+                    _m, _r = _lia._clics_cvr()
+                    if _m is None and _r != dernier_releve:
+                        print(f"[infloww-liens] relevé des clics de Lia raté : {_r}", flush=True)
+                    dernier_releve = _r
+            except Exception as e:
+                print(f"[infloww-liens] relevé des clics de Lia : {type(e).__name__}: {e}", flush=True)
             _t_il.sleep(600)
 
     _th_il.Thread(target=_boucle, daemon=True, name="infloww-liens").start()

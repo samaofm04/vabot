@@ -243,7 +243,8 @@ def _debut_liens(fiche: Dict[str, Any]) -> Optional[dt.date]:
     return min(jours) if jours else None
 
 
-def _gagne(of: List[str], mym: List[str], d0: str, d1: str) -> Optional[float]:
+def _gagne(of: List[str], mym: List[str], d0: str, d1: str,
+           fige: Optional[Any] = None) -> Optional[float]:
     """Sa paie sur [d0, d1] selon GRILLE, quinzaine par quinzaine (1-15,
     16-fin, le calendrier du classement) : les subs de la période tombés dans
     une quinzaine, au prix que TOUTE cette quinzaine (jusqu'à aujourd'hui)
@@ -265,8 +266,13 @@ def _gagne(of: List[str], mym: List[str], d0: str, d1: str) -> Optional[float]:
         lues += 1
         if lues > QUINZAINES_MAX:
             return None
+        fini = q1 < auj
         q1 = min(q1, auj)
         n_q = subs(q0, q1)
+        if n_q is None and fini and fige:
+            # quinzaine finie illisible (Seren partie avec MyPuls, 03/11) :
+            # le chiffre de sa page figée, celui qui a été payé
+            n_q = fige(q0.isoformat())
         lo, hi = max(q0, a), min(q1, b)
         n_in = n_q if (lo, hi) == (q0, q1) else subs(lo, hi)
         if n_q is None or n_in is None:
@@ -320,6 +326,20 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-va] subs illisibles : {type(e).__name__}: {e}", flush=True)
         subs, communs = None, []
+
+    def fige(saison: str) -> Optional[int]:
+        try:
+            return pod.subs_fige_du_va(gid, saison, f.get("numero"))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[stats-va] quinzaine figée illisible : {type(e).__name__}: {e}", flush=True)
+            return None
+    # 04/11/2026, « période précédente figée » : une quinzaine finie, entière,
+    # devenue illisible -- le chiffre de sa page figée
+    if (subs is None and ts and not toujours
+            and pod.saison_en_cours(dt.date.fromisoformat(d0)) == (dt.date.fromisoformat(d0),
+                                                                   dt.date.fromisoformat(d1))
+            and dt.date.fromisoformat(d1) < pod._aujourdhui()):
+        subs = fige(d0)
     # un lien commun (pas à son nom) n'est pas compté dans ses subs : ses clics
     # Infloww, ceux de tout le monde, ne le sont pas non plus
     i = _clics_infloww([u for _p, u in ts if u not in communs], d0, d1, toujours)
@@ -342,7 +362,7 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             # 01/01/2024 (une lecture MyPuls par quinzaine)
             deb = _debut_liens(f) or (dt.date.fromisoformat(d1) - dt.timedelta(days=180))
             d0_g = pod.saison_en_cours(deb)[0].isoformat()
-        gagne = _gagne(of, mym, d0_g, d1) if ts else None
+        gagne = _gagne(of, mym, d0_g, d1, fige) if ts else None
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-va] CVR, $ par sub ou gain illisibles : {type(e).__name__}: {e}", flush=True)
     return {"numero": f.get("numero"), "pseudo": str(f.get("pseudo") or ""),

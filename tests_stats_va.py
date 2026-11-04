@@ -442,7 +442,20 @@ check("ailleurs (Threads) : pas de page de stats dans l'accueil", "mes-stats" no
 check("lien refait : la page de stats une seule fois, sous le nouveau lien",
       d_re.count("mes-stats") == 1 and d_re.index("autre") < d_re.index("mes-stats") and "neuf" not in d_re, d_re[-200:])
 check("ligne_page_perso : rien hors TRUST INSTAGRAM et TRUST TWITTER", tickets_discord.ligne_page_perso(TW, U108) == "")
-check("ligne_page_perso : TRUST TWITTER a la sienne", "mes-stats?t=" in tickets_discord.ligne_page_perso(sv.TWITTER_ID, U108))
+# 04/11 : « pas Bienvenue, mets en mode voilà ton menu » -- Twitter : dans le menu, pas l'accueil
+check("TRUST TWITTER : rien dans l'accueil", tickets_discord.ligne_page_perso(sv.TWITTER_ID, U108) == "")
+_lv_lien = __import__("liens_va").lien_de
+__import__("liens_va").lien_de = lambda g, u: {"public_url": "https://getmysocial.com/neuf", "actif": True}
+try:
+    _menu_tw = tickets_discord._texte_menu(sv.TWITTER_ID, U108)
+    _menu_ig = tickets_discord._texte_menu(GID, U108)
+finally:
+    __import__("liens_va").lien_de = _lv_lien
+check("TRUST TWITTER : le menu porte le lien puis la page de stats",
+      _menu_tw.startswith("📋 **Menu**\n🔗 <https://getmysocial.com/neuf>\n📊 Tes stats : <https://youl4b.com/mes-stats?t=")
+      and _menu_tw.endswith(">"), _menu_tw)
+check("TRUST INSTAGRAM : le menu ne change pas (sa page reste dans l'accueil)",
+      _menu_ig == "📋 **Menu**\n🔗 <https://getmysocial.com/neuf>", _menu_ig)
 
 print("6. Isolation")
 check("rien écrit dans le vrai data/ (clés, relevés Infloww de Lia)",

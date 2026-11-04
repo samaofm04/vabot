@@ -2019,8 +2019,14 @@ def _noter_releve(liens: List[Any], jour: str) -> Dict[str, Any]:
             code, n = _code_infloww(x), _entier(x.get("clics"))
             if code and n is not None:
                 neuf[code] = n
-                if str(x.get("cree") or "")[:10]:
-                    crees[code] = str(x["cree"])[:10]
+                # le jour de Paris : Infloww date en UTC, et c119 (Twitter VA
+                # 166), créé le 01/11 à 00h10 à Paris, était « du 31/10 » --
+                # sa quinzaine du 01/11 cherchait un relevé du 31/10 qu'il ne
+                # pouvait pas avoir, et ses 42 clics restaient « — » (04/11)
+                ms = _entier(x.get("cree_ms"))
+                jour_cree = (_jour_de(ms / 1000) if ms else "") or str(x.get("cree") or "")[:10]
+                if jour_cree:
+                    crees[code] = jour_cree
         if neuf != jours.get(jour) or crees != (d.get("crees") or {}):
             jours[jour] = neuf
             for k in sorted(jours)[:-RELEVES_CVR_JOURS]:

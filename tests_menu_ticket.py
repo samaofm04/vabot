@@ -42,6 +42,9 @@ except Exception:
 
 import liens_va as lv                  # noqa: E402
 import tickets_discord as tk           # noqa: E402
+# la page de stats dans le menu de Twitter (04/11/2026) est vérifiée dans
+# tests_stats_va.py : ici, le menu tel qu'il était (et aucune clé écrite)
+tk.MENU_PAGE_STATS = set()
 
 OKS, FAILS = [], []
 

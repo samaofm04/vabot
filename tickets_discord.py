@@ -1584,6 +1584,8 @@ def ligne_page_perso(gid: str, uid: str) -> str:
     épinglé, le lien de sa page de stats perso — propriétaire, 03/11/2026 :
     « mets-le ici, en bas de son lien ». Refaite avec le bloc du lien, comme
     lui. "" ailleurs, ou si sa clé n'a pas pu être écrite."""
+    if str(gid) in MENU_PAGE_STATS:
+        return ""                    # dans le menu (_texte_menu), pas dans l'accueil
     try:
         import stats_va
         u = stats_va.lien(gid, uid)
@@ -3289,6 +3291,14 @@ def _rangs_du_menu(gid: str, uid: str, f: Dict[str, Any], salon: str) -> List[Di
                       gid=gid, lien_actif=lv.est_actif(gid, uid))
 
 
+#: Propriétaire, 04/11/2026, sur TRUST TWITTER : « tu peux pas leur envoyer
+#: dans le menu, toujours ça », « pas Bienvenue, mets en mode voilà ton
+#: menu » : la page de stats perso (stats_va) sous le lien, dans le menu, et
+#: plus dans l'accueil (ligne_page_perso). TRUST INSTAGRAM la garde dans son
+#: accueil (« mets-le ici, en bas de son lien », 03/11).
+MENU_PAGE_STATS = {"1445108485090971710"}
+
+
 def _texte_menu(gid: str, uid: str) -> str:
     """« 📋 Menu », et le lien du VA dessous quand il en a un en service
     (propriétaire, 23/10/2026 : « mets aussi leur lien s'il a un lien »,
@@ -3302,6 +3312,11 @@ def _texte_menu(gid: str, uid: str) -> str:
         parti = ((_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}).get("parti")
         if url and l.get("actif", True) is not False and not parti:
             texte += f"\n🔗 <{url}>"
+            if str(gid) in MENU_PAGE_STATS:
+                import stats_va
+                page = stats_va.lien(gid, uid)
+                if page:
+                    texte += f"\n📊 Tes stats : <{page}>"
     except Exception as e:                                   # noqa: BLE001
         print(f"[ticket] menu : lien de {uid} illisible ({type(e).__name__}: {e})", flush=True)
     return texte

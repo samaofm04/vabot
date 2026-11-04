@@ -5717,6 +5717,44 @@ def _quinzaine_affichee(gid: str, saison: str) -> Tuple[List[Tuple[str, int]], L
     return lignes, sans, ("subs" if "Abonnés **" in txt else "clics"), " ; ".join(soucis)
 
 
+# Propriétaire, 04/11/2026 : la « Période précédente » (16→31/10) de Mes stats
+# était « pas lisible » pour tout VA qui avait Seren, ses subs de cette
+# quinzaine partis avec MyPuls ; il a choisi « période précédente figée » :
+# le chiffre de la quinzaine figée, tel que ses pages Discord l'affichent
+# (ce que les VA ont lu, et ce qui a été payé). Relu au plus une fois par
+# heure (un appel Discord par page).
+_FIGEES_LUES: Dict[Tuple[str, str], Tuple[float, Dict[str, int]]] = {}
+FIGEES_S = 3600
+FIGEES_RATEES_S = 600
+
+
+def subs_fige_du_va(gid: Any, saison: str, numero: Any) -> Optional[int]:
+    """Les subs du VA `numero` sur la quinzaine figée qui commence le
+    `saison`, lus sur ses pages ; None si elle n'est pas figée, si ses pages
+    ne parlent pas en abonnés, ou si le VA n'y est pas (page perdue, « sans
+    relevé » : jamais un zéro)."""
+    gid, saison = str(gid or ""), str(saison or "")
+    if not str(numero or "").isdigit():
+        return None
+    rec = (((_etat().get("subs_figes") or {}).get(gid) or {}).get(saison))
+    if not isinstance(rec, dict) or not rec.get("messages"):
+        return None
+    t = time.time()
+    deja = _FIGEES_LUES.get((gid, saison))
+    if not deja or not 0 <= t - deja[0] < (FIGEES_S if deja[1] else FIGEES_RATEES_S):
+        try:
+            lignes, sans, unite, souci = _quinzaine_affichee(gid, saison)
+        except Exception as e:                               # noqa: BLE001
+            lignes, sans, unite, souci = [], [], "", f"{type(e).__name__}: {e}"
+        table = {va: int(n) for va, n in lignes if va not in sans} if unite == "subs" else {}
+        if souci:
+            print(f"[podium] quinzaine figée {saison} de {gid} relue pour Mes stats : {souci}", flush=True)
+        deja = (t, table)
+        _FIGEES_LUES[(gid, saison)] = deja
+    lib = str(_profil(gid).get("libelle") or "VA")
+    return deja[1].get(f"VA {int(numero)}" if lib == "VA" else f"{lib} {int(numero)}")
+
+
 def _texte_pseudos_avant(gid: str, jour: Optional[dt.date] = None) -> str:
     """La quinzaine d'avant, telle que ses pages l'affichent, pseudos compris.
     Propriétaire, 19/10/2026 : « pour cette période et même celle d'avant »."""
