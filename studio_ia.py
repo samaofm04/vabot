@@ -22,6 +22,12 @@ sur une machine à nous — le Mac du propriétaire aujourd'hui, le VPS quand il
 aura la place (2 Go de modèles) — qui vient chercher le travail ici avec
 visage_worker.py et un jeton (data/studio_ia/machine.json). Le site ne
 calcule rien : il garde la file, la progression et le résultat.
+
+Le genre « Perso » enchaîne deux tâches Kie : Seedream habille d'abord la
+model avec la tenue lue sur une image du reel, puis Wan 2.2 Animate Replace
+met cette photo retouchée dans le reel. Sans la retouche, Wan habillait la
+model comme sur sa photo (t-shirt blanc à la place du hoodie, vu le 04/11) :
+le propriétaire veut « mêmes vêtements, seul le perso change ».
 """
 from __future__ import annotations
 
@@ -37,7 +43,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import kie_ai
 import safe_json
@@ -146,6 +152,15 @@ T = {
         "visage_refs": "Il faut une photo du visage et une vidéo.",
         "gratuit": "gratuit",
         "visage_lance": "Remplacement de visage mis en file (gratuit).",
+        "perso": "Perso · même tenue",
+        "deposer_perso": "Clique ou dépose la photo de la model et le reel à refaire",
+        "deposer_aide_perso": "JPG/PNG/WebP + MP4/MOV de 1 à 60 s (10 Mo)",
+        "perso_refs": "Il faut une photo de la model et un reel.",
+        "perso_sans_image": "Impossible de lire une image du reel (ffmpeg) : réessaie avec un MP4.",
+        "perso_lance": "Lancé : retouche de la photo, puis remplacement du personnage (≈ {n} crédits).",
+        "perso_etape_retouche": "1/2 · la model prend la tenue du reel",
+        "perso_etape_remplacement": "2/2 · remplacement du personnage dans le reel",
+        "perso_etape_fini": "terminé",
         "visage_machine_ok": "Machine en ligne : {nom} (vue il y a {d}).",
         "visage_machine_occupee": "{nom} travaille (vue il y a {d}).",
         "visage_sans_machine": "Aucune machine en ligne pour le visage : le travail attendra qu'elle se connecte (le Mac, allumé et déverrouillé).",
@@ -227,6 +242,15 @@ T = {
         "visage_refs": "A face photo and a video are both needed.",
         "gratuit": "free",
         "visage_lance": "Face swap queued (free).",
+        "perso": "Character · same outfit",
+        "deposer_perso": "Click or drop the model's photo and the reel to redo",
+        "deposer_aide_perso": "JPG/PNG/WebP + MP4/MOV, 1 to 60 s (10 MB)",
+        "perso_refs": "A photo of the model and a reel are both needed.",
+        "perso_sans_image": "Could not read a frame of the reel (ffmpeg): try again with an MP4.",
+        "perso_lance": "Started: photo retouch, then character replacement (≈ {n} credits).",
+        "perso_etape_retouche": "1/2 · the model takes the reel's outfit",
+        "perso_etape_remplacement": "2/2 · replacing the character in the reel",
+        "perso_etape_fini": "done",
         "visage_machine_ok": "Machine online: {nom} (seen {d}).",
         "visage_machine_occupee": "{nom} is working (seen {d}).",
         "visage_sans_machine": "No machine online for faces: the job will wait until it connects (the Mac, on and unlocked).",
@@ -289,6 +313,60 @@ def registre_visage(langue: str = "fr") -> Dict[str, Any]:
         "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(kie_ai.TYPES_IMAGE + kie_ai.TYPES_VIDEO),
                        "videos_max": r["videos_max"], "aide": r["aide_en"] if en else r["aide"]},
         "options": opts, "estimation_defaut": 0,
+    }
+
+
+#: Le genre « Perso » : deux tâches Kie enchaînées. Wan Replace habille la
+#: model comme sur la PHOTO, pas comme dans le reel (04/11 : t-shirt blanc de
+#: la photo à la place du hoodie) ; une retouche Seedream met donc d'abord la
+#: model dans la tenue du reel, puis Wan remplace la fille du reel par elle.
+MODELE_PERSO = {
+    "cle": "perso", "nom": "Retouche + Wan Replace", "editeur": "ByteDance + Alibaba", "editeur_en": "ByteDance + Alibaba",
+    "type": "perso", "badge": "2 étapes", "badge_en": "2 steps",
+    "resume": "la model prend la tenue du reel (Seedream), puis remplace la fille du reel (Wan 2.2) : décor, gestes et texte gardés",
+    "resume_en": "the model takes the reel's outfit (Seedream), then replaces the reel's girl (Wan 2.2): scene, moves and text kept",
+    "prompt_max": 0, "prompt_min": 0, "sans_prompt": True,
+    "references": {
+        "max": 2, "modes": ["perso"], "videos_max": 1, "duree": [1, 60],
+        "aide": "1 photo de la model (de face, nette) + 1 reel MP4/MOV de 1 à 60 s (10 Mo). La tenue est lue sur une image du reel, au-dessus du texte incrusté ; le décor, les gestes et le texte restent ceux du reel.",
+        "aide_en": "1 photo of the model (front-facing, sharp) + 1 MP4/MOV reel of 1 to 60 s (10 MB). The outfit is read from one frame of the reel, above the burned-in text; scene, moves and text stay those of the reel.",
+    },
+    "options": [
+        {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
+         "valeurs": ["480p", "580p", "720p"], "defaut": "720p",
+         "libelles": {"480p": {"fr": "480p", "en": "480p"}, "580p": {"fr": "580p", "en": "580p"}, "720p": {"fr": "720p", "en": "720p"}},
+         "aide": "Résolution du remplacement Wan (6 / 9,5 / 12,5 crédits la seconde). La retouche de la photo coûte 7,5 crédits en plus.",
+         "aide_en": "Resolution of the Wan replacement (6 / 9.5 / 12.5 credits per second). The photo retouch adds 7.5 credits."},
+        {"cle": "tenue_s", "nom": "Tenue lue à", "nom_en": "Outfit read at", "type": "nombre",
+         "min": 0, "max": 30, "defaut": 0, "unite": "s",
+         "aide": "Seconde du reel où la tenue se voit le mieux. 0 = le milieu du reel.",
+         "aide_en": "Second of the reel where the outfit shows best. 0 = the middle of the reel."},
+    ],
+}
+
+
+def registre_perso(langue: str = "fr") -> Dict[str, Any]:
+    en = langue == "en"
+    m = MODELE_PERSO
+    r = m["references"]
+    opts = []
+    for o in m["options"]:
+        d: Dict[str, Any] = {"cle": o["cle"], "nom": o["nom_en"] if en else o["nom"], "type": o["type"],
+                             "defaut": o["defaut"], "aide": o["aide_en"] if en else o["aide"]}
+        if o["type"] == "choix":
+            d["valeurs"] = list(o["valeurs"])
+            d["libelles"] = {k: (v["en"] if en else v["fr"]) for k, v in o.get("libelles", {}).items()}
+        else:
+            d.update({"min": o["min"], "max": o["max"], "unite": o.get("unite", "")})
+        opts.append(d)
+    return {
+        "cle": m["cle"], "nom": m["nom"], "editeur": m["editeur_en"] if en else m["editeur"], "type": m["type"],
+        "prix_seconde": kie_ai.PRIX["wan22replace"]["720p"], "sans_prompt": True, "duree": list(r["duree"]),
+        "badge": m["badge_en"] if en else m["badge"], "resume": m["resume_en"] if en else m["resume"],
+        "prompt_max": 0, "prompt_min": 0,
+        "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(kie_ai.TYPES_IMAGE + kie_ai.TYPES_VIDEO),
+                       "videos_max": r["videos_max"], "aide": r["aide_en"] if en else r["aide"]},
+        "options": opts, "estimation_defaut": estimer_perso({}, 10.0),
     }
 
 
@@ -491,6 +569,8 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
     t = _t(langue)
     if cle_modele == "visage":
         return lancer_visage(utilisateur, options, refs, langue)
+    if cle_modele == "perso":
+        return lancer_perso(utilisateur, options, refs, langue)
     m = kie_ai.modele(cle_modele)
     if not m:
         return {"ok": False, "erreur": "Modèle inconnu." if langue != "en" else "Unknown model.", "code": "modele"}
@@ -621,6 +701,8 @@ def verifier(tid: str) -> Optional[Dict[str, Any]]:
         return t
     if t.get("type") == "visage":
         return _verifier_visage(t)
+    if t.get("type") == "perso":
+        return _verifier_perso(t)
     if time.time() - t.get("cree_le", 0) > DELAI_MAX_S:
         return _maj(tid, etat="echec", message="Délai dépassé (2 h) : Kie n'a jamais rendu cette tâche.",
                     fini_le=int(time.time()))
@@ -652,9 +734,22 @@ def verifier(tid: str) -> Optional[Dict[str, Any]]:
     return _maj(tid, derniere_erreur=f"état inconnu : {etat}"[:200])
 
 
+def _fichier_sortie(dest: Path, garde: bool = False) -> Dict[str, Any]:
+    """L'entrée `fichiers` d'un résultat rapatrié. `garde` : il survit au
+    rapatriement suivant (la retouche du genre Perso, rendue avant la vidéo)."""
+    f = {"nom": dest.name, "mime": _MIME_PAR_EXT.get(dest.suffix.lower(), "application/octet-stream"),
+         "taille": dest.stat().st_size, "vignette": _vignette(dest)}
+    if garde:
+        f["garde"] = True
+    return f
+
+
 def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tid = t["id"]
     fichiers: List[Dict[str, Any]] = []
+    # les fichiers d'une étape précédente (perso : la photo retouchée) restent,
+    # derrière les nouveaux : la carte montre la vidéo, l'aperçu les deux
+    gardes = [f for f in (t.get("fichiers") or []) if f.get("garde")]
     _dossier_sorties().mkdir(parents=True, exist_ok=True)
     for n, url in enumerate(t.get("urls_kie") or []):
         ext = Path(url.split("?")[0]).suffix.lower()
@@ -680,7 +775,7 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 return _maj(tid, etat="fini", fini_le=int(time.time()), essais_dl=essais,
                             message="Fichier non rapatrié : lien Kie direct (14 jours).")
             return _maj(tid, essais_dl=essais, message="")
-    return _maj(tid, etat="fini", fichiers=fichiers, fini_le=int(time.time()), message="")
+    return _maj(tid, etat="fini", fichiers=fichiers + gardes, fini_le=int(time.time()), message="")
 
 
 def _vignette(video: Path) -> Optional[str]:
@@ -728,6 +823,9 @@ def _publique(t: Dict[str, Any], langue: str = "fr") -> Dict[str, Any]:
                     "etape": str((t.get("visage") or {}).get("etape") or ""),
                     "machine": str((t.get("visage") or {}).get("machine") or "")}
                    if t.get("type") == "visage" else None),
+        "perso": ({"etape": str((t.get("perso") or {}).get("etape") or ""),
+                   "credits_retouche": (t.get("perso") or {}).get("credits_retouche")}
+                  if t.get("type") == "perso" else None),
     }
 
 
@@ -1019,6 +1117,231 @@ def echec_visage(tid: str, erreur: str) -> Optional[Dict[str, Any]]:
     return _maj(tid, etat="echec", fini_le=int(time.time()), message=(erreur or "échec sur la machine")[:400])
 
 
+# --------------------------------------------------------------- perso --
+
+#: Ce que Seedream reçoit pour habiller la model : image 1 = la model, image
+#: 2 = une image du reel. En anglais : les modèles image le suivent mieux.
+PROMPT_RETOUCHE = (
+    "Image 1 is the person: keep her exact face, skin tone, hair and body completely unchanged. "
+    "Dress her in exactly the outfit of image 2: the same garments, colors, fabric and the way they are worn "
+    "(hood up or down, sleeves, fit, accessories). Keep the pose, framing and background of image 1, facing the camera. "
+    "Photorealistic, natural lighting, no text, no captions, no watermark."
+)
+OPTIONS_RETOUCHE = {"quality": "basic", "output_format": "png"}
+#: Part haute de l'image du reel gardée pour lire la tenue : les textes
+#: incrustés sont au milieu ou en bas, et Seedream les recopiait sur la photo.
+PART_TENUE = 0.6
+RESOLUTIONS_PERSO = ("480p", "580p", "720p")
+
+
+def _dimensions(chemin: Path) -> Tuple[int, int]:
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                            "-of", "csv=p=0", str(chemin)], capture_output=True, text=True, timeout=60)
+        w, h = (r.stdout or "").strip().split("\n")[0].split(",")[:2]
+        return max(0, int(w)), max(0, int(h))
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return 0, 0
+
+
+def _format_image(w: int, h: int) -> str:
+    """Le format Seedream le plus proche de la photo : la retouche garde le
+    cadrage de la model au lieu de l'étirer en 9:16."""
+    if w <= 0 or h <= 0:
+        return "9:16"
+    r = w / h
+    return min(kie_ai._FORMATS_IMAGE, key=lambda f: abs(int(f.split(":")[0]) / int(f.split(":")[1]) - r))
+
+
+def _image_du_reel(video: Path, seconde: float, duree: float) -> Optional[bytes]:
+    """Une image JPEG du reel, part haute seulement (PART_TENUE), à la
+    seconde demandée (0 = le milieu). None si ffmpeg ne peut pas."""
+    s = 0.0
+    if duree > 0:
+        s = seconde if 0 < seconde < duree else duree / 2
+        s = min(s, max(0.0, duree - 0.3))
+    with tempfile.TemporaryDirectory(prefix="sia_tenue_") as d:
+        dst = Path(d) / "tenue.jpg"
+        try:
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{s:.2f}", "-i", str(video), "-frames:v", "1",
+                                "-vf", f"crop=iw:floor(ih*{PART_TENUE}/2)*2:0:0", "-q:v", "2", str(dst)],
+                               capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if r.returncode != 0 or not dst.exists():
+            return None
+        return dst.read_bytes()
+
+
+def _options_perso(options: Any) -> Dict[str, Any]:
+    o = options if isinstance(options, dict) else {}
+    res = o.get("resolution")
+    if res not in RESOLUTIONS_PERSO:
+        res = "720p"
+    try:
+        s = float(o.get("tenue_s") or 0)
+    except (TypeError, ValueError):
+        s = 0.0
+    return {"resolution": res, "tenue_s": max(0.0, min(30.0, s))}
+
+
+def estimer_perso(options: Any, duree_video: float) -> float:
+    """Retouche Seedream (basic, 2 images) + remplacement Wan à la seconde."""
+    o = _options_perso(options)
+    return round(kie_ai.estimer("seedream5pro", OPTIONS_RETOUCHE, 2)
+                 + kie_ai.estimer("wan22replace", {"resolution": o["resolution"]}, 1, duree_video=duree_video), 2)
+
+
+def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = "fr") -> Dict[str, Any]:
+    """Deux tâches Kie à la suite : Seedream habille la model avec la tenue
+    lue sur le reel, puis Wan Replace la met dans le reel (_verifier_perso
+    enchaîne). Le prix annoncé couvre les deux."""
+    t = _t(langue)
+    if not kie_ai.cle_presente():
+        return {"ok": False, "erreur": t["cle_absente"], "code": "sans_cle"}
+    refs_meta = [r for r in (_reference(x) for x in (refs or [])[:2]) if r]
+    images = [r for r in refs_meta if str(r.get("mime") or "").startswith("image/")]
+    videos = [r for r in refs_meta if str(r.get("mime") or "").startswith("video/")]
+    if len(images) != 1 or len(videos) != 1:
+        return {"ok": False, "erreur": t["perso_refs"], "code": "refs"}
+    photo, video = images[0], videos[0]
+    duree_video = float(video.get("duree") or 0)
+    d_min, d_max = MODELE_PERSO["references"]["duree"]
+    if not d_min <= duree_video <= d_max:
+        return {"ok": False, "code": "video_duree",
+                "erreur": t["video_duree"].format(s=_nb(duree_video), min=_nb(d_min), max=_nb(d_max))}
+    nb_ouvertes = sum(1 for x in _ouvertes() if x.get("utilisateur") == utilisateur)
+    if nb_ouvertes >= MAX_OUVERTES:
+        return {"ok": False, "erreur": t["trop_en_cours"].format(n=MAX_OUVERTES), "code": "trop"}
+    o = _options_perso(options)
+    besoin = estimer_perso(o, duree_video)
+    s = solde()
+    if s["credits"] is not None and besoin > s["credits"]:
+        return {"ok": False, "code": "credits",
+                "erreur": t["credits_insuffisants"].format(reste=_nb(s["credits"]), besoin=_nb(besoin)),
+                "credits": s["credits"]}
+    tenue = _image_du_reel(video["chemin"], o["tenue_s"], duree_video)
+    if not tenue:
+        print(f"[studio-ia] perso : aucune image lue dans {video['chemin']}", flush=True)
+        return {"ok": False, "erreur": t["perso_sans_image"], "code": "tenue"}
+    try:
+        ref_tenue = deposer_reference(utilisateur, tenue, f"tenue_{_nb(o['tenue_s'] or duree_video / 2)}s.jpg",
+                                      "image/jpeg", langue)
+    except (ValueError, kie_ai.ErreurKie) as e:
+        print(f"[studio-ia] perso : image de la tenue refusée : {type(e).__name__}: {e}", flush=True)
+        return {"ok": False, "erreur": str(e), "code": "tenue"}
+    w, h = _dimensions(photo["chemin"])
+    modele_api, entree = kie_ai.entree_api("seedream5pro", PROMPT_RETOUCHE, dict(OPTIONS_RETOUCHE, aspect_ratio=_format_image(w, h)),
+                                           [photo["url"], ref_tenue["url"]])
+    try:
+        task_id = kie_ai.creer_tache(modele_api, entree)
+    except kie_ai.ErreurKie as e:
+        _oublier_solde()
+        msg = kie_ai.message_pour(e.code, str(e), langue) if e.code in (401, 402, 404, 422, 429, 455, "reseau", "sans_cle") else str(e)
+        print(f"[studio-ia] perso : retouche refusée ({e.code}) pour {utilisateur} : {e}", flush=True)
+        return {"ok": False, "erreur": msg, "code": e.code}
+    maintenant = int(time.time())
+    tache = {
+        "id": uuid.uuid4().hex[:12], "task_id": task_id, "utilisateur": utilisateur,
+        "modele": "perso", "nom_modele": MODELE_PERSO["nom"], "modele_api": modele_api, "type": "perso",
+        "prompt": "", "options": o, "resume": f"{o['resolution']} · {_nb(duree_video)} s",
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")}
+                       for r in (photo, video, ref_tenue)],
+        "etat": "en_attente", "message": "", "credits_estimes": besoin, "credits": None,
+        "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
+        "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,
+        "perso": {"etape": "retouche", "task_retouche": task_id, "task_remplacement": "", "credits_retouche": None,
+                  "ref_retouche": "", "photo": photo["id"], "video": video["id"], "tenue": ref_tenue["id"],
+                  "duree": round(duree_video, 2)},
+    }
+    with _VERROU:
+        taches = _charger()
+        taches.append(tache)
+        _ecrire(taches)
+    print(f"[studio-ia] perso {tache['id']} lancé par {utilisateur} : retouche {task_id}, ≈{besoin} crédits", flush=True)
+    _assurer_suivi()
+    return {"ok": True, "tache": _publique(tache, langue)}
+
+
+def _verifier_perso(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Même lecture de Kie que `verifier`, plus l'enchaînement : la retouche
+    rendue devient la photo de référence du remplacement Wan."""
+    tid = t["id"]
+    p = dict(t.get("perso") or {})
+    if time.time() - t.get("cree_le", 0) > DELAI_MAX_S:
+        return _maj(tid, etat="echec", message="Délai dépassé (2 h) : Kie n'a jamais rendu cette tâche.",
+                    fini_le=int(time.time()))
+    if t.get("urls_kie"):        # la vidéo est connue, pas encore rapatriée
+        return _rapatrier(t)
+    try:
+        d = kie_ai.detail_tache(t["task_id"])
+    except kie_ai.ErreurKie as e:
+        return _maj(tid, derniere_erreur=f"{e.code}: {e}"[:200])
+    etat = d.get("state")
+    etape = "Retouche" if p.get("etape") == "retouche" else "Remplacement"
+    if etat in ("waiting", "queuing"):
+        return _maj(tid, etat="en_attente", derniere_erreur="")
+    if etat == "generating":
+        return _maj(tid, etat="en_cours", derniere_erreur="")
+    if etat == "fail":
+        _oublier_solde()
+        raison = (d.get("failMsg") or "").strip() or f"code {d.get('failCode') or '?'}"
+        credits = float(p.get("credits_retouche") or 0) + float(d.get("creditsConsumed") or 0)
+        return _maj(tid, etat="echec", message=f"{etape} : {raison}"[:400], fini_le=int(time.time()), credits=credits)
+    if etat != "success":
+        return _maj(tid, derniere_erreur=f"état inconnu : {etat}"[:200])
+    _oublier_solde()
+    urls = list(d.get("resultUrls") or [])
+    if not urls:
+        return _maj(tid, etat="echec", message=f"{etape} : succès annoncé sans fichier.", fini_le=int(time.time()))
+    if p.get("etape") == "remplacement":
+        p["etape"] = "fini"
+        t = _maj(tid, etat="en_cours", urls_kie=urls, perso=p, derniere_erreur="", duree_calcul=d.get("costTime"),
+                 credits=float(p.get("credits_retouche") or 0) + float(d.get("creditsConsumed") or 0))
+        return _rapatrier(t)
+    return _enchainer_perso(t, urls[0], d.get("creditsConsumed"))
+
+
+def _enchainer_perso(t: Dict[str, Any], url_retouche: str, credits_retouche: Any) -> Optional[Dict[str, Any]]:
+    """La retouche est rendue : rapatriée (gardée sur la carte), redéposée
+    comme référence (Kie ne lit que ses propres URL de dépôt, un résultat
+    n'en est pas une), puis le remplacement Wan part avec elle et le reel."""
+    tid = t["id"]
+    p = dict(t.get("perso") or {})
+    _dossier_sorties().mkdir(parents=True, exist_ok=True)
+    dest = _dossier_sorties() / f"{tid}_retouche.png"
+    try:
+        if not dest.exists():
+            kie_ai.telecharger(url_retouche, dest)
+        octets = dest.read_bytes()
+    except Exception as e:
+        essais = int(t.get("essais_dl") or 0) + 1
+        print(f"[studio-ia] perso {tid} : retouche non rapatriée ({essais}/{ESSAIS_DL}) : {type(e).__name__}: {e}", flush=True)
+        if essais >= ESSAIS_DL:
+            return _maj(tid, etat="echec", fini_le=int(time.time()), essais_dl=essais, credits=credits_retouche,
+                        message="Retouche rendue mais impossible à rapatrier.")
+        return _maj(tid, essais_dl=essais)
+    fichier = _fichier_sortie(dest, garde=True)
+    try:
+        ref = deposer_reference(t.get("utilisateur") or "", octets, f"retouche_{tid}.png", "image/png")
+        video = _reference(p.get("video") or "")
+        if not video:
+            raise ValueError("reel introuvable")
+        modele_api, entree = kie_ai.entree_api("wan22replace", "", {"resolution": (t.get("options") or {}).get("resolution", "720p")},
+                                               [ref["url"]], videos=[video["url"]])
+        task_id = kie_ai.creer_tache(modele_api, entree)
+    except (ValueError, kie_ai.ErreurKie) as e:
+        _oublier_solde()
+        print(f"[studio-ia] perso {tid} : remplacement refusé : {type(e).__name__}: {e}", flush=True)
+        return _maj(tid, etat="echec", fini_le=int(time.time()), credits=credits_retouche, fichiers=[fichier],
+                    message=f"Remplacement : {e}"[:400])
+    p.update({"etape": "remplacement", "credits_retouche": credits_retouche, "ref_retouche": ref["id"],
+              "task_remplacement": task_id})
+    print(f"[studio-ia] perso {tid} : retouche rendue, remplacement {task_id} lancé", flush=True)
+    return _maj(tid, etat="en_attente", task_id=task_id, modele_api=modele_api, perso=p, derniere_erreur="",
+                essais_dl=0, fichiers=[fichier])
+
+
 # --------------------------------------------------------------- rendu --
 
 _CSS = """
@@ -1185,6 +1508,7 @@ body.light #sia-root button.sia-lien.primaire{color:var(--sia-sur-accent)!import
 _SVG_FILM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg>'
 _SVG_MOTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="4" r="1.8"/><path d="m6 20 4-7 3 2 2 5"/><path d="m4 12 5-3 4 1 3 3 4-1"/><path d="m9 9-1.5 5"/></svg>'
 _SVG_VISAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="m17 3 2 2-2 2"/><path d="m7 3-2 2 2 2"/></svg>'
+_SVG_PERSO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="3"/><path d="M2 20a5 5 0 0 1 10 0"/><circle cx="17" cy="6" r="3"/><path d="M12 20a5 5 0 0 1 10 0"/><path d="M9 11h6m-2-2 2 2-2 2"/></svg>'
 _SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
 _SVG_ETINCELLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>'
 
@@ -1203,7 +1527,7 @@ def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://you
     conf = {
         "langue": langue, "t": t, "cle": kie_ai.cle_presente(), "admin": bool(admin),
         "cle_fin": src["fin"], "cle_source": src["source"],
-        "modeles": kie_ai.registre_public(langue) + [registre_visage(langue)], "max_ouvertes": MAX_OUVERTES,
+        "modeles": kie_ai.registre_public(langue) + [registre_visage(langue), registre_perso(langue)], "max_ouvertes": MAX_OUVERTES,
         "visage": etat_visage(langue, admin, site),
     }
     # Sans clé : l'admin a le champ pour la coller, les autres savent à qui la
@@ -1237,6 +1561,7 @@ def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://you
   <button type="button" class="sia-type on" data-type="video">{_SVG_FILM}{e(t["reels"])}</button>
   <button type="button" class="sia-type" data-type="image">{_SVG_PHOTO}{e(t["photo"])}</button>
   <button type="button" class="sia-type" data-type="motion">{_SVG_MOTION}{e(t["motion"])}</button>
+  <button type="button" class="sia-type" data-type="perso">{_SVG_PERSO}{e(t["perso"])}</button>
   <button type="button" class="sia-type" data-type="visage">{_SVG_VISAGE}{e(t["visage"])}</button>
 </div>
 <div class="sia-corps" id="sia-vue-creer">
@@ -1502,6 +1827,8 @@ def register(app, deps: Dict[str, Any]) -> None:
             duree = 0.0
         if cle_m == "visage":
             return _json({"ok": True, "credits": 0})
+        if cle_m == "perso":
+            return _json({"ok": True, "credits": estimer_perso(opts, duree)})
         if not kie_ai.modele(cle_m):
             return _json({"ok": False, "erreur": "modele"}, 400)
         return _json({"ok": True, "credits": kie_ai.estimer(cle_m, opts, nb, duree_video=duree)})

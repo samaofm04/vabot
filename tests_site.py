@@ -38689,6 +38689,76 @@ try:
               "face_enhancer" in _vw.commande_facefusion(_vw.chemins("/d"), "nette", "v.png", "c.mp4", "s.mp4", 4)
               and "face_enhancer" not in _vw.commande_facefusion(_vw.chemins("/d"), "rapide", "v.png", "c.mp4", "s.mp4", 4)
               and _vw._RE_TQDM.search("processing:  45%|████      | 150/333 [00:10<00:12, 14.9frame/s]").group(3) == "150")
+        # -- 5d) perso : retouche Seedream puis Wan Replace, enchaines par le suivi
+        _rPe = _sia.registre_perso("fr")
+        check("perso : 5e genre rendu, dans le registre de l ecran (prix a la seconde, photo + reel 1-60 s), estimation = 7,5 + Wan, format de la photo",
+              _rPe["cle"] == "perso" and _rPe["prix_seconde"] == 12.5 and _rPe["references"]["max"] == 2 and _rPe["duree"] == [1, 60]
+              and '"cle": "perso"' in _ftS and 'data-type="perso"' in _ftS and _kie.modele("perso") is None
+              and _sia.estimer_perso({"resolution": "720p"}, 10.97) == 145 and _sia.estimer_perso({"resolution": "480p"}, 4) == 31.5
+              and _cS.get("/studio-ia/estimer?modele=perso&duree=10.97&o_resolution=720p").get_json()["credits"] == 145
+              and _sia._format_image(736, 1312) == "9:16" and _sia._format_image(64, 64) == "1:1" and _sia._format_image(0, 0) == "9:16")
+        _FAUX["record"] = {"state": "queuing"}
+        _gPe = _cS.post("/studio-ia/generer", json={"modele": "perso", "options": {"resolution": "480p", "tenue_s": 1},
+                                                    "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        _tPe = _gPe.get("tache") or {}
+        _ePe = _FAUX.get("entree") or {}
+        check("perso : photo + reel -> la retouche Seedream part (image 1 = la model, image 2 = une image du reel deposee, prompt tenue), 3 references, etape retouche, prix des deux etapes",
+              _gPe.get("ok") and _tPe["type"] == "perso" and _tPe["perso"]["etape"] == "retouche" and _tPe["credits_estimes"] == 31.5
+              and len(_tPe["references"]) == 3 and _tPe["references"][2]["mime"] == "image/jpeg"
+              and _ePe.get("model") == "seedream/5-pro-image-to-image" and len(_ePe["input"].get("image_urls") or []) == 2
+              and "outfit" in _ePe["input"].get("prompt", "") and _ePe["input"].get("aspect_ratio") == "1:1"
+              and _tPe["resume"] == "480p · 4 s", _gPe)
+        check("perso : photo seule refusee (code refs)",
+              _cS.post("/studio-ia/generer", json={"modele": "perso", "references": [_rW["reference"]["id"]]}).get_json().get("code") == "refs")
+        _pid = _tPe["id"]
+        _dlAvant = _kie.telecharger
+
+        def _fauxDlPng(url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"\x89PNG" + b"\x00" * 20)
+            return 24, "image/png"
+        _kie.telecharger = _fauxDlPng
+        _FAUX["record"] = {"state": "success", "resultJson": _jsSia.dumps({"resultUrls": ["https://kie.test/retouche.png"]}), "creditsConsumed": 7.5}
+        _tPe2 = _sia.verifier(_pid)
+        _ePe2 = _FAUX.get("entree") or {}
+        check("perso : retouche rendue -> rapatriee (fichier garde), redeposee chez Kie, Wan Replace lance avec elle + le reel, etape remplacement, en attente",
+              _tPe2["etat"] == "en_attente" and _tPe2["perso"]["etape"] == "remplacement" and _tPe2["perso"]["credits_retouche"] == 7.5
+              and _tPe2["task_id"] == "task_test" and _tPe2["perso"]["task_remplacement"] == "task_test"
+              and len(_tPe2["fichiers"]) == 1 and _tPe2["fichiers"][0].get("garde") and _tPe2["fichiers"][0]["nom"] == f"{_pid}_retouche.png"
+              and (_dSia / "sorties" / f"{_pid}_retouche.png").exists()
+              and _ePe2.get("model") == "wan/2-2-animate-replace" and _ePe2["input"].get("resolution") == "480p"
+              and _ePe2["input"].get("image_url") and _ePe2["input"].get("video_url") and _ePe2["input"].get("nsfw_checker") is False
+              and _sia._reference(_tPe2["perso"]["ref_retouche"]) is not None,
+              {k: _tPe2.get(k) for k in ("etat", "message", "derniere_erreur", "perso", "fichiers", "modele_api")})
+
+        def _fauxDlMp4(url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"\x00" * 32)
+            return 32, "video/mp4"
+        _kie.telecharger = _fauxDlMp4
+        _FAUX["record"] = {"state": "generating"}
+        check("perso : remplacement en cours -> en_cours, la retouche reste sur la carte",
+              _sia.verifier(_pid)["etat"] == "en_cours" and len(_sia.verifier(_pid)["fichiers"]) == 1)
+        _FAUX["record"] = {"state": "success", "resultJson": _jsSia.dumps({"resultUrls": ["https://kie.test/perso.mp4"]}), "creditsConsumed": 24}
+        _tPe3 = _sia.verifier(_pid)
+        _pubPe = next(t for t in _cS.get("/studio-ia/taches").get_json()["taches"] if t["id"] == _pid)
+        check("perso : video rendue -> fini, fichiers = la video PUIS la retouche gardee, credits = 7,5 + 24, etape fini a l ecran, 2e fichier servi",
+              _tPe3["etat"] == "fini" and [f["mime"] for f in _tPe3["fichiers"]] == ["video/mp4", "image/png"]
+              and _tPe3["credits"] == 31.5 and _pubPe["perso"]["etape"] == "fini" and len(_pubPe["fichiers"]) == 2
+              and _pubPe["fichiers"][0]["url"].endswith("/0") and _cS.get(_pubPe["fichiers"][1]["url"]).mimetype == "image/png", _tPe3)
+        _FAUX["record"] = {"state": "queuing"}
+        _gPe4 = _cS.post("/studio-ia/generer", json={"modele": "perso", "options": {"resolution": "720p"},
+                                                     "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}
+        _tPe4 = _sia.verifier(_gPe4["tache"]["id"])
+        check("perso : retouche refusee par Kie -> echec qui dit l etape",
+              _tPe4["etat"] == "echec" and _tPe4["message"].startswith("Retouche : content policy"))
+        _kie.telecharger = _dlAvant
+        _FAUX["record"] = {"state": "generating"}
+        _jsPe = _cS.get("/studio-ia/app.js").get_data(as_text=True)
+        check("app.js : le genre perso est une paire photo + video, prix a la seconde, etape montree sur la carte, 2e fichier dans l apercu",
+              "perso: 'perso'" in _jsPe and "S.type === 'perso'" in _jsPe and "function prixSeconde" in _jsPe
+              and "perso_etape_" in _jsPe and "slice(1)" in _jsPe and "deposer_perso" in _jsPe)
     else:
         check("motion : ffmpeg present pour le test de depot", False, "ffmpeg absent ou lavfi/webp indisponible")
     _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}
