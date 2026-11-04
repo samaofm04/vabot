@@ -7179,11 +7179,14 @@ try:
           and _cE.get("/infloww/liens?k=BONNE&c=zzz").status_code == 404)
     check("route : une cle fausse est refusee sur la page Emy",
           _cE.get("/infloww/liens?k=FAUSSE&c=emy").status_code == 403)
-    # proprietaire, 02/11/2026 : « je veux que personne ait acces a ca »
-    check("route : la cle des VA n ouvre plus ni Emy ni Jessye",
-          _cE.get("/infloww/liens?k=VA&c=emy").status_code == 403
-          and _cE.get("/infloww/liens?k=VA").status_code == 403
-          and "PAGE-" not in _cE.get("/infloww/liens?k=VA&c=emy").get_data(as_text=True))
+    # proprietaire, 02/11/2026 : « je veux que personne ait acces a ca » ; puis
+    # 04/11 « reouvre la page » : la page Emy (JESSY LE RETOUR) rouverte aux VA,
+    # vue sans paiement ; Jessye seule reste fermee
+    _vuesE = []
+    _emE.page = lambda args, cle="", paie=False, lien_perso=False: (_vuesE.append(paie), "PAGE-EMY")[1]
+    check("route : la cle des VA rouvre la page Emy (vue des VA, sans paiement), pas Jessye",
+          _cE.get("/infloww/liens?k=VA&c=emy").get_data(as_text=True) == "PAGE-EMY" and _vuesE[-1] is False
+          and _cE.get("/infloww/liens?k=VA").status_code == 403)
     (_emE.acces_cle, _emE.page, _ilE.acces_cle, _ilE.page) = _savE
 except Exception as _eE:
     import traceback as _tbE

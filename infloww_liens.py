@@ -117,6 +117,9 @@ COLONNE_CLICS_CVR = False
 # Propriétaire, 31/10 : « leur gain ... combien ils ont gagné ... toi, t'as
 # 2,80 directement ici ». Sa paie à lui, jamais le revenu de l'agence.
 COLONNE_GAGNE = False
+# True : la clé des VA (cle_page) ouvre la page, vue des VA (page JESSY LE
+# RETOUR, rouverte le 04/11/2026) ; False : réservée au propriétaire (02/11).
+CLE_VA_OUVERTE = False
 # False : les liens de suivi qu'aucun lien GMS ne vise sont comptés, pas listés.
 HORS_DETAIL = True
 # Clics US « depuis toujours » : None = un relevé par jour ; sinon son âge maximal.
@@ -6010,6 +6013,9 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
 # VA TRUST (propriétaire, 04/11/2026 : « donne-moi le lien avec tous les VA de
 # JESSY LE RETOUR », « c'est pour Youl4b Spam »).
 REGLAGES["emy"] = {
+    # la clé des VA rouvre la page (fermée le 02/11) : « réouvre la page »,
+    # le 04/11, une fois Gagné à leur grille ; la vue paie reste au propriétaire
+    "CLE_VA_OUVERTE": True,
     "CLICS_GLOBAUX": True,
     "COLONNE_GAGNE": True,
     "PAIE_GRILLE": {"depuis": "2026-11-01", "seuil": 70, "fixe": 60.0, "sous_seuil": 0.40,

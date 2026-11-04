@@ -70008,8 +70008,12 @@ def create_app():
             acces = _il.acces_cle(k)
             if not acces:
                 return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
-            if acces != "paie" and not getattr(_il, "ACCES_LIBRE", False):
+            if (acces != "paie" and not getattr(_il, "ACCES_LIBRE", False)
+                    and not getattr(_il, "CLE_VA_OUVERTE", False)):
                 # Pages Jessye et Emy : la clé des VA n'ouvre plus rien
+                # -- sauf la page JESSY LE RETOUR (?c=emy), rouverte aux VA le
+                # 04/11/2026 (« réouvre la page », avec la colonne Gagné à
+                # leur grille) : CLE_VA_OUVERTE, vue des VA sans paiement
                 # (propriétaire, 02/11/2026 : « je veux que personne ait accès
                 # à ça », « uniquement moi », « Lia c'est à part »). Elle avait
                 # servi 3 414 fois sur la page Emy. Restent sa clé perso et la
