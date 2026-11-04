@@ -62385,6 +62385,7 @@ def create_app():
         # Clé du compte Kie.ai (Studio IA) : un VA qui a l'onglet génère,
         # mais ne touche pas à la clé.
         "/studio-ia/cle",
+        "/studio-ia/visage/machine/",
         # Remote 2 : démarrer le pilote, changer les règles, mettre une machine
         # en pause ou un conteneur en quarantaine — ça pilote des téléphones.
         # Jamais un rôle restreint, même s'il a l'onglet en lecture.

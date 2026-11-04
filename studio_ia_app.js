@@ -601,6 +601,29 @@
     } else {
       box.className = 'sia-machine ko';
       box.textContent = T.visage_sans_machine || '';
+      if (S.admin && v.demandes && v.demandes.length) {
+        // une machine s'est présentée : un clic l'accepte, aucun jeton à recopier
+        v.demandes.forEach(function (nom) {
+          var ligne = document.createElement('div');
+          ligne.style.marginTop = '8px';
+          ligne.appendChild(document.createTextNode(fmt(T.visage_demande, { nom: nom }) + ' '));
+          [['accepter', T.visage_accepter, 'sia-lien primaire'], ['refuser', T.visage_refuser, 'sia-lien']].forEach(function (a) {
+            var b = document.createElement('button');
+            b.type = 'button'; b.className = a[2]; b.textContent = a[1] || a[0]; b.style.marginLeft = '6px';
+            b.addEventListener('click', function () {
+              b.disabled = true;
+              post('/studio-ia/visage/machine/' + encodeURIComponent(nom) + '/' + a[0]).then(function (d) {
+                if (!d.ok) { toast(d.erreur || T.erreur_reseau, 'error'); b.disabled = false; return; }
+                if (a[0] === 'accepter') { toast(fmt(T.visage_acceptee, { nom: nom }), 'success'); }
+                if (d.visage) { S.visage = d.visage; }
+                rendreMachine();
+              }).catch(function () { b.disabled = false; toast(T.erreur_reseau, 'error'); });
+            });
+            ligne.appendChild(b);
+          });
+          box.appendChild(ligne);
+        });
+      }
       if (S.admin && v.commande) {
         box.appendChild(document.createElement('br'));
         box.appendChild(document.createTextNode(T.visage_sans_machine_admin || ''));

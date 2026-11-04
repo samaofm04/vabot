@@ -38587,8 +38587,9 @@ try:
         _vSv = _appS.test_client()
         with _vSv.session_transaction() as _s:
             _s["auth"] = True; _s["username"] = "va1"; _s["role"] = "va"
-        check("visage : sans machine vue, l admin voit la commande (jeton dedans), le VA non",
-              _etV["machines"] == [] and _jV in _etV["commande"] and "installer" in _etV["commande"]
+        check("visage : sans machine vue, l admin voit la commande (SANS jeton dedans), le VA non",
+              _etV["machines"] == [] and _jV not in _etV["commande"] and "installer" in _etV["commande"]
+              and "/studio-ia/visage/worker.py" in _etV["commande"] and _etV["demandes"] == []
               and "commande" not in _vSv.get("/studio-ia/etat").get_json()["visage"])
         _wV = _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV).get_json()
         check("machine : prend le travail (en_cours), recoit photo + video avec leur extension, au jeton seul",
@@ -38627,12 +38628,33 @@ try:
               _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV).get_json()["tache"]["id"] == _vid3
               and _anon.post(f"/studio-ia/visage/echec/{_vid3}", json={"erreur": "FaceFusion a echoue", "machine": "mac-test"}, headers=_HV).get_json()["ok"]
               and next(t for t in _sia._charger() if t["id"] == _vid3)["message"] == "FaceFusion a echoue"
-              and _anon.get("/studio-ia/visage/worker.py", headers=_HV).status_code == 200
-              and _anon.get("/studio-ia/visage/worker.py").status_code == 401)
+              and _anon.get("/studio-ia/visage/worker.py").status_code == 200
+              and b"jeton" in _anon.get("/studio-ia/visage/worker.py").data)
+        # appairage : la machine arrive avec SON jeton, un admin l accepte
+        _jM = "m" * 48
+        _pres = _anon.post("/studio-ia/visage/machine", json={"nom": "mac-appaire", "jeton": _jM}).get_json()
+        check("appairage : la machine se presente -> en attente, sans aucun droit tant que l admin n a rien dit",
+              _pres == {"ok": True, "etat": "attente"}
+              and _anon.get("/studio-ia/visage/travail?nom=mac-appaire", headers={"X-Visage-Jeton": _jM}).status_code == 401
+              and _cS.get("/studio-ia/etat").get_json()["visage"]["demandes"] == ["mac-appaire"]
+              and _anon.post("/studio-ia/visage/machine", json={"nom": "x", "jeton": "court"}).status_code == 400)
+        check("appairage : un VA (meme avec l onglet) ne peut pas accepter ; l admin oui ; la machine travaille alors",
+              _vSv.post("/studio-ia/visage/machine/mac-appaire/accepter").status_code == 403
+              and _cS.post("/studio-ia/visage/machine/mac-appaire/accepter").get_json()["ok"]
+              and _anon.post("/studio-ia/visage/machine", json={"nom": "mac-appaire", "jeton": _jM}).get_json()["etat"] == "acceptee"
+              and _anon.get("/studio-ia/visage/travail?nom=mac-appaire", headers={"X-Visage-Jeton": _jM}).status_code == 200
+              and _cS.get("/studio-ia/etat").get_json()["visage"]["acceptees"] == ["mac-appaire"])
+        check("appairage : refusee -> le jeton ne vaut plus rien ; reinstallation (autre jeton, meme nom) -> redemande",
+              _cS.post("/studio-ia/visage/machine/mac-appaire/refuser").get_json()["ok"]
+              and _anon.get("/studio-ia/visage/travail?nom=mac-appaire", headers={"X-Visage-Jeton": _jM}).status_code == 401
+              and _anon.post("/studio-ia/visage/machine", json={"nom": "mac-appaire", "jeton": "n" * 48}).get_json()["etat"] == "attente"
+              and (_dSia / "machines.json").exists())
+        _sia.refuser_machine("mac-appaire")
         import plistlib as _plV, ast as _astV, visage_worker as _vw
         _plV.loads(_vw.plist_launchd("/tmp/x").encode())
         _astV.parse(_plSia.Path("visage_worker.py").read_text(encoding="utf-8"), feature_version=(3, 9))
-        check("visage_worker.py : syntaxe Python 3.9 (le python3 du Mac), FaceFusion avec gfpgan en nette, sans en rapide, progression lue",
+        check("visage_worker.py : syntaxe Python 3.9 (le python3 du Mac), FaceFusion avec gfpgan en nette, sans en rapide, progression lue, se presente au site",
+              "def se_presenter(" in _plSia.Path("visage_worker.py").read_text(encoding="utf-8") and
               "face_enhancer" in _vw.commande_facefusion(_vw.chemins("/d"), "nette", "v.png", "c.mp4", "s.mp4", 4)
               and "face_enhancer" not in _vw.commande_facefusion(_vw.chemins("/d"), "rapide", "v.png", "c.mp4", "s.mp4", 4)
               and _vw._RE_TQDM.search("processing:  45%|████      | 150/333 [00:10<00:12, 14.9frame/s]").group(3) == "150")

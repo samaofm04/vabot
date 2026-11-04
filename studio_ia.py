@@ -159,6 +159,9 @@ T = {
         "visage_etape_attente": "en attente d'une machine",
         "visage_copier": "📋 Copier la commande",
         "visage_copiee": "Commande copiée : colle-la dans le Terminal et appuie sur Entrée.",
+        "visage_demande": "La machine « {nom} » demande à se brancher.",
+        "visage_accepter": "✅ Accepter", "visage_refuser": "✖ Refuser",
+        "visage_acceptee": "Machine acceptée : {nom}. Elle prend le travail dans les 10 s.",
     },
     "en": {
         "titre": "Studio IA",
@@ -237,6 +240,9 @@ T = {
         "visage_etape_attente": "waiting for a machine",
         "visage_copier": "📋 Copy the command",
         "visage_copiee": "Command copied: paste it in the Terminal and press Enter.",
+        "visage_demande": "Machine “{nom}” asks to connect.",
+        "visage_accepter": "✅ Accept", "visage_refuser": "✖ Refuse",
+        "visage_acceptee": "Machine accepted: {nom}. It picks up the job within 10 s.",
     },
 }
 
@@ -761,18 +767,91 @@ def jeton_machine() -> str:
         return jeton
 
 
+def _fichier_machines() -> Path:
+    return DOSSIER / "machines.json"
+
+
+def _machines_connues() -> Dict[str, Dict[str, Any]]:
+    d = safe_json.load(_fichier_machines(), default={})
+    return {k: v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
+
+
+def _ecrire_machines(d: Dict[str, Dict[str, Any]]) -> None:
+    DOSSIER.mkdir(parents=True, exist_ok=True)
+    safe_json.write(_fichier_machines(), d, backup=False)
+    try:
+        _fichier_machines().chmod(0o600)
+    except OSError:
+        pass
+
+
+def demande_machine(nom: str, jeton: str) -> str:
+    """Appairage : la machine arrive avec un jeton qu'elle a tiré elle-même
+    (personne ne recopie rien). Elle attend qu'un admin l'accepte sur le
+    site. Renvoie son état : attente, acceptee ou refusee. Un nouveau jeton
+    sous un nom déjà accepté (réinstallation) redemande l'accord."""
+    nom = (nom or "").strip()[:40]
+    jeton = (jeton or "").strip()
+    if not nom or not (24 <= len(jeton) <= 128) or not re.match(r"^[A-Za-z0-9_-]+$", jeton):
+        return "refusee"
+    if hmac.compare_digest(jeton, jeton_machine()):
+        return "acceptee"
+    with _VERROU:
+        d = _machines_connues()
+        m = d.get(nom)
+        if m and hmac.compare_digest(str(m.get("jeton") or ""), jeton):
+            m["vu_le"] = int(time.time())
+            _ecrire_machines(d)
+            return str(m.get("etat") or "attente")
+        if not m and len(d) >= 10:
+            return "refusee"
+        d[nom] = {"jeton": jeton, "etat": "attente", "cree_le": int(time.time()), "vu_le": int(time.time())}
+        _ecrire_machines(d)
+        print(f"[studio-ia] visage : la machine « {nom} » demande à se brancher", flush=True)
+        return "attente"
+
+
+def accepter_machine(nom: str, par: str = "") -> bool:
+    with _VERROU:
+        d = _machines_connues()
+        if nom not in d:
+            return False
+        d[nom]["etat"] = "acceptee"
+        d[nom]["acceptee_le"] = int(time.time())
+        d[nom]["par"] = par
+        _ecrire_machines(d)
+    print(f"[studio-ia] visage : machine « {nom} » acceptée par {par}", flush=True)
+    return True
+
+
+def refuser_machine(nom: str) -> bool:
+    with _VERROU:
+        d = _machines_connues()
+        if nom not in d:
+            return False
+        del d[nom]
+        _ecrire_machines(d)
+    _MACHINES.pop(nom, None)
+    return True
+
+
 def jeton_machine_ok(envoye: str) -> bool:
     envoye = (envoye or "").strip()
-    return bool(envoye) and hmac.compare_digest(envoye, jeton_machine())
+    if not envoye:
+        return False
+    if hmac.compare_digest(envoye, jeton_machine()):
+        return True
+    return any(m.get("etat") == "acceptee" and hmac.compare_digest(str(m.get("jeton") or ""), envoye)
+               for m in _machines_connues().values())
 
 
 def commande_machine(site: str) -> str:
-    """La commande à lancer une fois sur la machine (montrée à l'admin seul) :
-    elle va chercher visage_worker.py sur le site (au jeton), puis l'installe
-    (FaceFusion, venv, agent launchd) dans ~/.vabot/visage."""
-    j = jeton_machine()
-    return (f"mkdir -p ~/.vabot/visage && curl -fsS -H 'X-Visage-Jeton: {j}' {site}/studio-ia/visage/worker.py "
-            f"-o ~/.vabot/visage/visage_worker.py && python3 ~/.vabot/visage/visage_worker.py installer --site {site} --jeton {j}")
+    """La commande à lancer une fois sur la machine, sans aucun secret : elle
+    va chercher visage_worker.py sur le site et l'installe (FaceFusion, venv,
+    agent launchd) dans ~/.vabot/visage ; la machine se présente ensuite
+    d'elle-même et un admin l'accepte ici."""
+    return (f"mkdir -p ~/.vabot/visage && curl -fsS {site}/studio-ia/visage/worker.py "
+            f"-o ~/.vabot/visage/visage_worker.py && python3 ~/.vabot/visage/visage_worker.py installer --site {site}")
 
 
 def voir_machine(nom: str, etat: str = "libre", tid: str = "") -> None:
@@ -791,6 +870,9 @@ def etat_visage(langue: str = "fr", admin: bool = False, site: str = "https://yo
     d: Dict[str, Any] = {"machines": machines_visage(), "en_ligne_s": MACHINE_EN_LIGNE_S}
     if admin:
         d["commande"] = commande_machine(site)
+        connues = _machines_connues()
+        d["demandes"] = sorted(n for n, m in connues.items() if m.get("etat") == "attente")
+        d["acceptees"] = sorted(n for n, m in connues.items() if m.get("etat") == "acceptee")
     return d
 
 
@@ -1308,13 +1390,35 @@ def register(app, deps: Dict[str, Any]) -> None:
         t = echec_visage(tid, str(d.get("erreur") or "")) if _ID_OK.match(str(tid)) else None
         return _json({"ok": bool(t)}, 200 if t else 404)
 
-    @app.route("/studio-ia/visage/worker.py")
-    def studio_ia_visage_worker():
-        """Le programme de la machine, tel qu'il est dans git : la machine
-        se met à jour seule quand il change (worker_sha)."""
-        r = _machine_refus()
+    @app.route("/studio-ia/visage/machine", methods=["POST"])
+    def studio_ia_visage_machine():
+        """La machine se présente avec son propre jeton ; tant qu'un admin ne
+        l'a pas acceptée, elle n'obtient rien (ni travail, ni fichiers)."""
+        d = request.get_json(silent=True) or {}
+        etat = demande_machine(str(d.get("nom") or ""), str(d.get("jeton") or ""))
+        return _json({"ok": etat != "refusee", "etat": etat}, 200 if etat != "refusee" else 400)
+
+    @app.route("/studio-ia/visage/machine/<nom>/<action>", methods=["POST"])
+    def studio_ia_visage_machine_action(nom, action):
+        r = _refus()
         if r:
             return r
+        if not _admin():
+            return _json({"ok": False, "erreur": "forbidden"}, 403)
+        nom = str(nom)[:40]
+        if action == "accepter":
+            ok = accepter_machine(nom, utilisateur())
+        elif action == "refuser":
+            ok = refuser_machine(nom)
+        else:
+            return _json({"ok": False, "erreur": "action"}, 400)
+        return _json({"ok": ok, "visage": etat_visage(langue(), True, _site())}, 200 if ok else 404)
+
+    @app.route("/studio-ia/visage/worker.py")
+    def studio_ia_visage_worker():
+        """Le programme de la machine, tel qu'il est dans git (aucun secret
+        dedans) : la machine se met à jour seule quand il change (worker_sha).
+        Public : c'est ce que la commande d'installation va chercher."""
         p = BOT_DIR / "visage_worker.py"
         if not p.exists():
             return "", 404

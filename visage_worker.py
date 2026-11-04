@@ -11,11 +11,14 @@ Bibliothèque standard seulement (le Mac n'a que Python 3.9 hors venv) :
 urllib, subprocess, json. FaceFusion tourne dans son propre venv (Python
 3.10+), installé par `installer`.
 
-    python3 visage_worker.py installer --site https://youl4b.com --jeton XXXX
+    python3 visage_worker.py installer --site https://youl4b.com
         clone FaceFusion 3.9.2 + venv + dépendances (les modèles, ~1,7 Go,
         se téléchargent au premier travail), garde site/jeton dans
         ~/.vabot/visage/config.json, pose un agent launchd (macOS) qui le
-        relance à l'ouverture de session.
+        relance à l'ouverture de session. Aucun secret à recopier : la
+        machine tire son propre jeton, se présente au site, et un admin
+        l'accepte dans Studio IA (genre Visage). `--jeton` reste possible
+        (jeton maître du site) pour brancher sans accord.
     python3 visage_worker.py tourner [--une-fois]
         la boucle (c'est ce que launchd lance).
     python3 visage_worker.py etat
@@ -31,6 +34,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -40,6 +44,7 @@ import urllib.request
 import uuid
 
 DOSSIER_DEFAUT = os.path.join(os.path.expanduser("~"), ".vabot", "visage")
+SITE_DEFAUT = "https://youl4b.com"
 DEPOT_FACEFUSION = "https://github.com/facefusion/facefusion.git"
 VERSION_FACEFUSION = "3.9.2"
 #: Ce dont headless-run a besoin ; gradio (l'interface web) n'est pas
@@ -202,17 +207,20 @@ def installer(args):
         conf["jeton"] = args.jeton.strip()
     if args.nom:
         conf["nom"] = args.nom
+    conf.setdefault("site", SITE_DEFAUT)
     conf.setdefault("nom", nom_machine_defaut())
     conf.setdefault("threads", max(1, min(8, (os.cpu_count() or 2) // 2)))
-    if not conf.get("site") or not conf.get("jeton"):
-        raise SystemExit("Il faut --site et --jeton (la commande complète est dans Studio IA, genre Visage, pour un admin).")
+    if not conf.get("jeton"):
+        conf["jeton"] = secrets.token_hex(24)     # le nôtre : le site l'acceptera
+        conf["acceptee"] = False
     installer_facefusion(dossier)
     ecrire_config(dossier, conf)
     moi = chemins(dossier)["moi"]
     if os.path.abspath(__file__) != os.path.abspath(moi):
         shutil.copyfile(__file__, moi)
     poser_agent(dossier)
-    log("Installé. La machine « %s » se connecte à %s ; les modèles (~1,7 Go) se téléchargent au premier travail." % (conf["nom"], conf["site"]))
+    log("Installé. La machine « %s » se présente à %s : un admin doit l'accepter dans Studio IA (genre Visage) ; "
+        "les modèles (~1,7 Go) se téléchargent au premier travail." % (conf["nom"], conf["site"]))
 
 
 # ---------------------------------------------------------------- site --
@@ -370,21 +378,58 @@ def se_mettre_a_jour(site, sha_site):
     os.execv(sys.executable, [sys.executable, moi] + sys.argv[1:])
 
 
+def se_presenter(site, dossier, conf):
+    """Appairage : tant que le site n'a pas accepté notre jeton, on se
+    représente toutes les 10 s (un admin clique Accepter dans Studio IA)."""
+    try:
+        d = site.json("/studio-ia/visage/machine", {"nom": site.nom, "jeton": site.jeton}, timeout=30)
+    except urllib.error.HTTPError as e:
+        log("présentation refusée : HTTP %s" % e.code)
+        return False
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log("site injoignable : %s" % e)
+        return False
+    if d.get("etat") == "acceptee":
+        conf["acceptee"] = True
+        ecrire_config(dossier, conf)
+        log("machine acceptée par le site")
+        return True
+    return False
+
+
 def tourner(args):
     dossier = os.path.abspath(os.path.expanduser(args.dossier))
     conf = lire_config(dossier)
-    if not conf.get("site") or not conf.get("jeton"):
-        raise SystemExit("Pas de config : lance d'abord `installer --site … --jeton …`.")
+    if not conf.get("site"):
+        conf["site"] = SITE_DEFAUT
+    if not conf.get("jeton"):
+        conf["jeton"] = secrets.token_hex(24)
+        conf["acceptee"] = False
+        conf.setdefault("nom", nom_machine_defaut())
+        ecrire_config(dossier, conf)
     c = chemins(dossier)
     if not os.path.exists(c["python"]):
         raise SystemExit("FaceFusion n'est pas installé dans %s : lance `installer`." % dossier)
     site = Site(conf["site"], conf["jeton"], conf.get("nom") or nom_machine_defaut())
     log("machine « %s » branchée sur %s (dossier %s)" % (site.nom, site.base, dossier))
+    dernier_mot = 0.0
     while True:
+        if not conf.get("acceptee"):
+            if not se_presenter(site, dossier, conf):
+                if time.time() - dernier_mot > 60:
+                    log("en attente d'acceptation sur le site (Studio IA > Visage > Accepter « %s »)" % site.nom)
+                    dernier_mot = time.time()
+                if args.une_fois:
+                    return
+                time.sleep(PAUSE_S)
+                continue
         try:
             d = site.json("/studio-ia/visage/travail?nom=" + urllib.request.quote(site.nom), timeout=30)
         except urllib.error.HTTPError as e:
             log("site : HTTP %s (%s)" % (e.code, "jeton refusé" if e.code == 401 else e.reason))
+            if e.code == 401:
+                conf["acceptee"] = False     # retiré du site : on se représente
+                ecrire_config(dossier, conf)
             d = {}
         except (urllib.error.URLError, OSError, ValueError) as e:
             log("site injoignable : %s" % e)
@@ -417,7 +462,8 @@ def etat(args):
     print("venv :", "oui" if os.path.exists(c["python"]) else "non")
     modeles = glob.glob(os.path.join(c["app"], ".assets", "models", "*.onnx"))
     print("modèles :", len(modeles))
-    print("site :", conf.get("site", "—"), "| machine :", conf.get("nom", "—"), "| jeton :", "oui" if conf.get("jeton") else "non")
+    print("site :", conf.get("site", "—"), "| machine :", conf.get("nom", "—"), "| jeton :", "oui" if conf.get("jeton") else "non",
+          "| acceptée :", "oui" if conf.get("acceptee") else "non")
     if os.path.exists(c["journal"]):
         with open(c["journal"], "r", encoding="utf-8", errors="replace") as f:
             lignes = f.readlines()[-8:]
