@@ -659,7 +659,8 @@ try:
           and "Abonnements" not in e_tw["description"])
     # Luigi et Bowser ne lisent aucun message (audit du 20/10/2026) : la
     # consigne renvoie au bouton 💳 du ticket, sur le podium comme au bonus
-    bouton = ("enregistre **ton adresse USDC (réseau Solana)** avec le bouton "
+    # 04/11/2026 : Solana ou Ethereum sur Twitter et Threads (tickets_discord, 💳 par réseau)
+    bouton = ("enregistre **ton adresse USDC (Solana ou Ethereum)** avec le bouton "
               "**💳 Mon adresse USDC** du message épinglé de **ton espace perso**")
     e_b = pd.embed_bonus({"lignes": [{"va": "VA 12", "clics": 7}], "illisibles": [], "frais": True},
                          auj, TW)

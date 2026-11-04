@@ -4071,3 +4071,730 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # no
     lignes = ([va[i:i + 5] for i in range(0, len(va), 5)] + [[bouton]]
               + [chefs[i:i + 5] for i in range(0, len(chefs), 5)])
     return [{"type": 1, "components": l} for l in lignes if l]
+
+
+# ─── Le menu en blocs et l'adresse USDC par réseau (04/11/2026) ──────────
+# Propriétaire, devant le menu texte (« un petit bloc dégueulasse ») : « fais
+# un truc plus carré », et pour l'adresse : « les virements sont en USDC,
+# choisis en Solana ou en ETH », l'adresse « mais aussi le QR code si
+# possible », le fichier visible « à tout moment » pour lui et pour le VA.
+# Maquette validée le 04/11 (maquettes/menu_usdc_v1.png, « oui fais-la »),
+# QR facultatif, « uniquement Twitter et Threads ».
+#  - Le menu (la copie épinglée en bas du ticket) devient un message en
+#    composants v2 : « 📋 Ton menu », son lien, sa page de stats (Twitter),
+#    son paiement, puis les rangées de boutons de l'accueil. Les copies texte
+#    d'avant sont reposées en v2 au premier tour (ramener_menu poste la neuve
+#    puis retire l'ancienne) ; le ménage reconnaît les deux formes.
+#  - 💳 : un éphémère « choisis ton réseau » (Solana / Ethereum), puis une
+#    fenêtre : l'adresse, et le QR (facultatif) déposé dans la fenêtre même.
+#  - Une carte « 💳 Paiement » épinglée dans le ticket : l'adresse entière,
+#    son QR, Modifier et Copier l'adresse (sur téléphone, l'appui long prend
+#    tout le message : le bouton rend l'adresse SEULE).
+# Enveloppes en fin de fichier : les corps de boutons_va, traiter et
+# _fenetre_adresse sont réécrits par des patchs du VPS (99-z-tickets-subs-
+# total, zzzzz-usdc-modal) et restent tels quels. TRUST INSTAGRAM garde le
+# menu texte et l'adresse Solana d'avant.
+TWITTER_ID = "1445108485090971710"
+THREADS_ID = "1498948161039896586"
+MENU_V2 = {TWITTER_ID, THREADS_ID}
+USDC_RESEAUX_ICI = {TWITTER_ID, THREADS_ID}
+#: le drapeau de MESSAGE des composants v2 (FICHIERS, plus haut, est la
+#: permission ATTACH_FILES, de même valeur)
+V2 = 1 << 15
+EPHEMERE = 64
+TITRE_MENU_V2 = "## 📋 Ton menu"
+TITRE_CARTE_USDC = "## 💳 Paiement"
+_ACCENT_MENU = {TWITTER_ID: 0x1D9BF0, THREADS_ID: 0x5865F2}
+_PLATEFORME = {TWITTER_ID: "Twitter", THREADS_ID: "Threads"}
+USDC_ICONE = "usdc/usdc.png"
+USDC_QR_DOSSIER = DATA_DIR / "usdc_qr"
+USDC_QR_MAX = 8 * 1024 * 1024
+_RESEAU_COURT = {"sol": "solana", "eth": "ethereum"}
+# « Mets aussi une icône Solana et ETH » (04/11) : un bouton ne prend qu'un
+# emoji. Ceux-ci sont des emojis d'APPLICATION, créés sur le bot de chaque
+# serveur (un emoji d'application ne sert qu'à elle : ceux de Yoshi ne
+# marchent pas pour Luigi ni Bowser), une fois, en fond ; en attendant, 🟣 / 💎.
+USDC_EMOJIS = {"solana": ("usdc_solana", "usdc/solana.png", "🟣"),
+               "ethereum": ("usdc_ethereum", "usdc/ethereum.png", "💎")}
+USDC_EMOJIS_FICHIER = DATA_DIR / "usdc_emojis.json"
+#: un essai de création par application et par heure au plus
+USDC_EMOJIS_ESSAI_S = 3600
+_EMOJIS_ESSAIS: Dict[str, float] = {}
+
+
+def _app_du_serveur(gid: str) -> str:
+    try:
+        import verif_discord as vd
+        return str((vd.bot_du_serveur(str(gid)) or {}).get("app_id") or "")
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def _id_emoji(gid: str, reseau: str) -> str:
+    app = _app_du_serveur(gid)
+    nom = USDC_EMOJIS.get(reseau, ("", "", ""))[0]
+    d = safe_json.load(USDC_EMOJIS_FICHIER, default={}) or {}
+    return str(((d.get(app) or {}) if isinstance(d, dict) else {}).get(nom) or "")
+
+
+def _creer_emojis_usdc(gid: str, app: str) -> None:
+    """Les emojis Solana / Ethereum sur l'application `app` : relus s'ils y
+    sont déjà (même nom), créés sinon, notés dans USDC_EMOJIS_FICHIER."""
+    import base64
+    import verif_discord as vd
+    try:
+        with vd.sur_serveur(gid):
+            code, rep = vd.api("GET", f"/applications/{app}/emojis", gid=gid)
+            items = rep.get("items") if isinstance(rep, dict) else rep
+            if code != 200 or not isinstance(items, list):
+                print(f"[usdc] emojis de l'application {app} illisibles (HTTP {code})", flush=True)
+                return
+            ids = {str(e.get("name")): str(e.get("id")) for e in items if isinstance(e, dict)}
+            for _reseau, (nom, rel, _repli) in USDC_EMOJIS.items():
+                if nom in ids:
+                    continue
+                b64 = base64.b64encode((Path(__file__).resolve().parent / "static" / rel).read_bytes()).decode()
+                if "YouLab" in b64:
+                    # verif_discord.en_trust réécrit « YouLab » dans tout le
+                    # JSON envoyé sur les serveurs TRUST : l'image serait abîmée
+                    print(f"[usdc] emoji {nom} pas créé : son image contient « YouLab »", flush=True)
+                    continue
+                c2, r2 = vd.api("POST", f"/applications/{app}/emojis", gid=gid,
+                                json={"name": nom, "image": "data:image/png;base64," + b64})
+                if c2 in (200, 201) and isinstance(r2, dict) and r2.get("id"):
+                    ids[nom] = str(r2["id"])
+                else:
+                    print(f"[usdc] emoji {nom} non créé sur {app} (HTTP {c2}) {str(r2)[:120]}", flush=True)
+        with _VERROU:
+            d = safe_json.load(USDC_EMOJIS_FICHIER, default={}) or {}
+            d = d if isinstance(d, dict) else {}
+            d[app] = {n: ids[n] for n, _r, _x in USDC_EMOJIS.values() if n in ids}
+            safe_json.write(USDC_EMOJIS_FICHIER, d)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[usdc] emojis : {type(e).__name__}: {e}", flush=True)
+
+
+def _emoji_reseau(gid: str, reseau: str, app_clic: str = "") -> Dict[str, Any]:
+    """L'emoji du bouton : celui de l'application s'il existe, sinon le repli
+    unicode, et la création lancée en fond (une fois par heure au plus). La
+    réponse à un clic part au nom de l'application qui l'a REÇU : un vieux
+    message posé par une autre (Siri sur Threads) n'a droit qu'au repli, un
+    emoji d'une autre application ferait refuser toute la réponse."""
+    nom, _rel, repli = USDC_EMOJIS.get(reseau, ("", "", "💳"))
+    eid = _id_emoji(gid, reseau)
+    if eid and (not app_clic or app_clic == _app_du_serveur(gid)):
+        return {"name": nom, "id": eid}
+    if eid:
+        return {"name": repli}
+    app = _app_du_serveur(gid)
+    if app and time.time() - _EMOJIS_ESSAIS.get(app, 0) >= USDC_EMOJIS_ESSAI_S:
+        _EMOJIS_ESSAIS[app] = time.time()
+        _EN_FOND(lambda: _creer_emojis_usdc(str(gid), app))
+    return {"name": repli}
+
+
+def _emoji_texte(gid: str, reseau: str) -> str:
+    """« <:usdc_solana:id> » dans un texte, "" tant qu'il n'existe pas."""
+    eid = _id_emoji(gid, reseau)
+    return f"<:{USDC_EMOJIS[reseau][0]}:{eid}> " if eid and reseau in USDC_EMOJIS else ""
+
+
+def _icone_usdc() -> str:
+    """L'adresse publique de l'icône (static/, versionnée) ; "" si absente :
+    les cartes partent sans icône plutôt que pas du tout."""
+    try:
+        import hashlib
+        import verif_discord as vd
+        v = hashlib.md5((Path(__file__).resolve().parent / "static" / USDC_ICONE)
+                        .read_bytes()).hexdigest()[:8]
+        return f"{vd.SITE.rstrip('/')}/static/{USDC_ICONE}?v={v}"
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def _paiement_court(gid: str, uid: str) -> str:
+    import suivi_va
+    e = suivi_va.paiement_de(gid, uid)
+    if not e:
+        return "Pas encore d'adresse"
+    a = str(e["adresse"])
+    return (f"USDC · {_emoji_texte(gid, e['reseau'])}{suivi_va.RESEAUX.get(e['reseau'], 'Solana')} · `{a[:4]}…{a[-4:]}`"
+            + (" · QR ✅" if e.get("qr") else ""))
+
+
+def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = "") -> List[Dict[str, Any]]:
+    """Les composants v2 du menu : un conteneur, rien d'autre. `rangs` : les
+    rangées de l'accueil (le 💳 y est retiré : il devient le bouton de la
+    section Paiement, un custom_id ne vit qu'une fois par message). Sans appel
+    réseau : le tour des liens le recalcule à chaque passage."""
+    gid, uid = str(gid), str(uid)
+    blocs: List[Dict[str, Any]] = []
+    entete = TITRE_MENU_V2
+    try:
+        import liens_va as lv
+        l = lv.lien_de(gid, uid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menu v2 : lien de {uid} illisible ({type(e).__name__}: {e})", flush=True)
+        l = {}
+    if l.get("numero") and l.get("pseudo"):
+        entete += f"\n-# {_PLATEFORME.get(gid, 'VA')} VA {l['numero']} · @{l['pseudo']}"
+    blocs.append({"type": 10, "content": entete})
+    blocs.append({"type": 14, "divider": True, "spacing": 1})
+    url = str(l.get("public_url") or "")
+    parti = (_fiche(gid, uid) or {}).get("parti")
+    if url and l.get("actif", True) is not False and not parti:
+        blocs.append({"type": 9, "components": [{"type": 10, "content": f"**🔗 Ton lien**\n{url}"}],
+                      "accessory": {"type": 2, "style": 5, "label": "Ouvrir", "url": url}})
+        if gid in MENU_PAGE_STATS:
+            try:
+                import stats_va
+                page = stats_va.lien(gid, uid)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[ticket] menu v2 : page de stats de {uid} ({type(e).__name__}: {e})", flush=True)
+                page = ""
+            if page:
+                blocs.append({"type": 9, "components": [{"type": 10, "content": "**📊 Tes stats**\nClics, subs et gains"}],
+                              "accessory": {"type": 2, "style": 5, "label": "Voir ma page", "url": page}})
+    plats = [b for r in rangs for b in (r.get("components") or []) if isinstance(b, dict)]
+    usdc = next((b for b in plats if str(b.get("custom_id") or "").startswith("usdc:set:")), None)
+    if usdc:
+        court = _paiement_court(gid, uid)
+        a_une = not court.startswith("Pas encore")
+        blocs.append({"type": 9, "components": [{"type": 10, "content": f"**💳 Paiement**\n{court}"}],
+                      "accessory": {"type": 2, "style": 2 if a_une else 1,
+                                    "label": "Modifier" if a_une else "Ajouter",
+                                    "emoji": {"name": "💳"}, "custom_id": usdc["custom_id"]}})
+    blocs.append({"type": 14, "divider": True, "spacing": 1})
+    for r in rangs:
+        bs = [b for b in (r.get("components") or []) if b is not usdc]
+        if bs:
+            blocs.append({"type": 1, "components": bs})
+    if extra:
+        blocs.append({"type": 10, "content": extra[:1900]})
+    return [{"type": 17, "accent_color": _ACCENT_MENU.get(gid, 0x5865F2), "components": blocs}]
+
+
+def _empreinte(corps: Any) -> str:
+    import hashlib
+    return hashlib.sha1(json.dumps(corps, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def _noter_menu_v2(cle: str, mid: str, rangs: Any, corps: Any, pose: bool = False) -> None:
+    """Note le menu v2 dans la fiche. `pose` : un menu NEUF (son id devient
+    celui de la fiche) ; sinon seulement si la fiche pointe encore sur lui (un
+    ramener_menu a pu en reposer un autre entre-temps). `corps` None :
+    empreinte vide, le prochain tour le réécrit une fois (une réponse à un
+    clic peut avoir été refusée par Discord)."""
+    with _VERROU:
+        d = _etat()
+        g = (d.get("tickets") or {}).get(cle)
+        if isinstance(g, dict) and (pose or str(g.get("menu") or "") == str(mid)):
+            g["menu"], g["menu_v2"] = str(mid), 1
+            g["menu_rangs"] = _sans_ids(rangs)
+            g["menu_empreinte"] = _empreinte(corps) if corps is not None else ""
+            g.pop("menu_texte", None)
+            _ecrire_etat(d)
+
+
+def _premier_texte_v2(m: Dict[str, Any]) -> str:
+    for c in (m.get("components") or []):
+        if isinstance(c, dict) and c.get("type") == 17:
+            for x in (c.get("components") or []):
+                if isinstance(x, dict) and x.get("type") == 10:
+                    return str(x.get("content") or "")
+                if isinstance(x, dict) and x.get("type") == 9:
+                    for y in (x.get("components") or []):
+                        if isinstance(y, dict) and y.get("type") == 10:
+                            return str(y.get("content") or "")
+            return ""
+    return ""
+
+
+_est_copie_du_menu_texte = est_copie_du_menu
+
+
+def est_copie_du_menu(m: Dict[str, Any], bots: set) -> bool:   # noqa: F811
+    """Une copie du menu, texte (d'avant le 04/11/2026) ou v2 : de nos bots,
+    v2, et « 📋 Ton menu » en tête. La carte 💳 Paiement, la carte numéro et
+    la carte Outlook n'en sont pas."""
+    if _est_copie_du_menu_texte(m, bots):
+        return True
+    return (str((m.get("author") or {}).get("id") or "") in bots
+            and m.get("type") in (0, 19) and bool(int(m.get("flags") or 0) & V2)
+            and _premier_texte_v2(m).startswith(TITRE_MENU_V2))
+
+
+def _ramener_menu_v2(gid: str, uid: str, salon: str, en_dernier: bool = False) -> str:
+    """ramener_menu (plus haut) pour MENU_V2 : mêmes règles (« deja » s'il est
+    en bas avec seulement des messages de bots dessous, sinon reposé puis
+    l'ancien retiré), mais en v2. Une copie texte trouvée est reposée en v2,
+    jamais modifiée (le PATCH d'un texte en v2 serait refusé). Ne lève jamais."""
+    try:
+        import verif_discord as vd
+        gid, uid, salon = str(gid), str(uid), str(salon)
+        cle = f"{gid}:{uid}"
+        f = (_etat().get("tickets") or {}).get(cle) or {}
+        if not salon or str(f.get("salon") or "") != salon:
+            print(f"[ticket] menu : {salon} n'est pas le ticket de {uid}", flush=True)
+            return "echec"
+        with vd.sur_serveur(gid):
+            rangs = _rangs_du_menu(gid, uid, f, salon)
+            if not rangs:
+                return "echec"
+            rangs = _sans_ids(rangs)
+            corps = _corps_menu(gid, uid, rangs)
+            copie, accueil = str(f.get("menu") or ""), str(f.get("accueil") or "")
+            code, ms = _api("GET", f"/channels/{salon}/messages?limit=10")
+            for m in (ms if code == 200 and isinstance(ms, list) else []):
+                if str(m.get("id")) in {copie, accueil} - {""}:
+                    if str(m["id"]) == copie:
+                        if not (int(m.get("flags") or 0) & V2) or not f.get("menu_v2"):
+                            break            # copie texte : reposée en v2 ci-dessous
+                        if f.get("menu_empreinte") != _empreinte(corps):
+                            c2, _r = _api_reseau("PATCH", f"/channels/{salon}/messages/{copie}",
+                                                 json={"components": corps,
+                                                       "allowed_mentions": {"parse": []}})
+                            if c2 == 200:
+                                _noter_menu_v2(cle, copie, rangs, corps)
+                    return "deja"
+                if en_dernier or not (m.get("author") or {}).get("bot") or m.get("type") == 6:
+                    break
+            code, rep = _api("POST", f"/channels/{salon}/messages",
+                             json={"flags": V2, "components": corps,
+                                   "allowed_mentions": {"parse": []}})
+            if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
+                print(f"[ticket] menu v2 de {uid} non reposé (HTTP {code}) {str(rep)[:120]}", flush=True)
+                return "echec"
+            neuf = str(rep["id"])
+            _noter_menu_v2(cle, neuf, rangs, corps, pose=True)
+            _epingler_sans_avis(salon, neuf)
+            if copie:
+                _api("DELETE", f"/channels/{salon}/messages/{copie}")
+        return "ramene"
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] menu v2 de {uid} : {type(e).__name__}: {e}", flush=True)
+        return "echec"
+
+
+_ramener_menu_texte = _ramener_menu_sans_verrou
+
+
+def _ramener_menu_sans_verrou(gid: str, uid: str, salon: str,   # noqa: F811
+                              en_dernier: bool = False) -> str:
+    if str(gid) in MENU_V2:
+        return _ramener_menu_v2(gid, uid, salon, en_dernier=en_dernier)
+    return _ramener_menu_texte(gid, uid, salon, en_dernier=en_dernier)
+
+
+def _maj_menu_v2(gid: str, uid: str, rangs: Any = None, f: Optional[Dict[str, Any]] = None) -> int:
+    """Remet le menu v2 de ce VA à jour sur place, sur ses rangées gardées (ou
+    `rangs`) ; rien n'est envoyé s'il n'a pas bougé. Rend le code HTTP (0 :
+    rien à faire)."""
+    gid, uid = str(gid), str(uid)
+    f = f if f is not None else _fiche(gid, uid)
+    if gid not in MENU_V2 or not f.get("menu") or not f.get("menu_v2"):
+        return 0
+    rangs = _sans_ids(rangs) if rangs is not None else (f.get("menu_rangs") or [])
+    if not rangs:
+        return 0
+    corps = _corps_menu(gid, uid, rangs)
+    if f.get("menu_empreinte") == _empreinte(corps) and rangs == f.get("menu_rangs"):
+        return 0
+    code, _r = _api_reseau("PATCH", f"/channels/{f.get('salon')}/messages/{f['menu']}",
+                           json={"components": corps, "allowed_mentions": {"parse": []}})
+    if code == 200:
+        _noter_menu_v2(f"{gid}:{uid}", str(f["menu"]), rangs, corps)
+    elif code == 404:
+        with _VERROU:
+            d = _etat()
+            g = (d.get("tickets") or {}).get(f"{gid}:{uid}")
+            if isinstance(g, dict) and str(g.get("menu") or "") == str(f["menu"]):
+                for k in ("menu", "menu_v2", "menu_rangs", "menu_empreinte", "menu_texte"):
+                    g.pop(k, None)
+                _ecrire_etat(d)
+    return code
+
+
+_miroir_texte = _miroir
+
+
+def _miroir(chemin: str, rangs: Any) -> None:   # noqa: F811
+    """La copie suit l'accueil (plus haut) ; une copie v2 reçoit ses blocs."""
+    morceaux = chemin.strip("/").split("/")
+    if len(morceaux) == 4 and morceaux[0] == "channels" and morceaux[2] == "messages":
+        salon, mid = morceaux[1], morceaux[3]
+        for cle, f in (_etat().get("tickets") or {}).items():
+            if (isinstance(f, dict) and str(f.get("accueil") or "") == mid and f.get("menu")
+                    and str(f.get("salon") or "") == salon):
+                gid, _sep, uid = str(cle).partition(":")
+                if gid in MENU_V2 and f.get("menu_v2"):
+                    _maj_menu_v2(gid, uid, rangs, f)
+                    return
+                break
+    return _miroir_texte(chemin, rangs)
+
+
+_rafraichir_menus_texte = rafraichir_menus
+
+
+def rafraichir_menus(gid: str) -> Dict[str, Any]:   # noqa: F811
+    """Le tour des liens (plus haut) ; sur MENU_V2, les menus v2 recalculés
+    sur leurs rangées gardées, sans appel tant que rien n'a bougé. Les copies
+    texte attendent le tour de l'heure, qui les repose en v2."""
+    gid = str(gid)
+    if gid not in MENU_V2:
+        return _rafraichir_menus_texte(gid)
+    bilan: Dict[str, Any] = {"faits": [], "partis": [], "rates": []}
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict) and v.get("menu")
+              and v.get("menu_v2")}
+    for cle, f in fiches.items():
+        uid = cle.split(":", 1)[1]
+        code = _maj_menu_v2(gid, uid, None, f)
+        if code == 200:
+            bilan["faits"].append(uid)
+        elif code == 404:
+            bilan["partis"].append(uid)
+        elif code:
+            bilan["rates"].append(f"{uid} (HTTP {code})")
+            if code == 429:
+                break
+    if bilan["faits"] or bilan["rates"]:
+        print(f"[ticket] menus v2 {gid} : {len(bilan['faits'])} mis à jour"
+              + (f", ratés : {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
+
+
+# ─── 💳 : le réseau, l'adresse, le QR, la carte ──────────────────────────
+def _droit_usdc(gid: str, uid: str, p: Dict[str, Any]) -> bool:
+    membre = p.get("member") or {}
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+    return qui == str(uid) or _est_manager_brut(gid, membre)
+
+
+def _choix_reseau(gid: str, uid: str, app_clic: str = "") -> Dict[str, Any]:
+    import suivi_va
+    e = suivi_va.paiement_de(gid, uid)
+    texte = "**Tes paiements arrivent en USDC**\nChoisis le réseau de ton portefeuille."
+    if e:
+        texte += f"\n-# Aujourd'hui : {_paiement_court(gid, uid)}"
+    icone = _icone_usdc()
+    haut = ({"type": 9, "components": [{"type": 10, "content": texte}],
+             "accessory": {"type": 11, "media": {"url": icone}, "description": "USDC"}}
+            if icone else {"type": 10, "content": texte})
+    return {"type": 4, "data": {"flags": EPHEMERE | V2, "components": [
+        {"type": 17, "accent_color": 0x2775CA, "components": [
+            haut,
+            {"type": 1, "components": [
+                {"type": 2, "style": 1, "label": "Solana", "emoji": _emoji_reseau(gid, "solana", app_clic),
+                 "custom_id": f"usdc:net:sol:{uid}"},
+                {"type": 2, "style": 1, "label": "Ethereum (ERC-20)",
+                 "emoji": _emoji_reseau(gid, "ethereum", app_clic),
+                 "custom_id": f"usdc:net:eth:{uid}"}]}]}],
+        "allowed_mentions": {"parse": []}}}
+
+
+def _fenetre_usdc(gid: str, uid: str, court: str) -> Dict[str, Any]:
+    import suivi_va
+    reseau = _RESEAU_COURT.get(court, "solana")
+    nom = suivi_va.RESEAUX[reseau]
+    e = suivi_va.paiement_de(gid, uid)
+    mini, maxi = (42, 42) if reseau == "ethereum" else (32, 44)
+    champ = {"type": 4, "custom_id": "adresse", "style": 1, "min_length": mini,
+             "max_length": maxi, "required": True,
+             "placeholder": "0x… (42 caractères)" if reseau == "ethereum" else "32 à 44 caractères"}
+    deja = str(e.get("adresse") or "")
+    # la règle du patch zzzzz-usdc-modal : une valeur hors des longueurs fait
+    # refuser la fenêtre entière par Discord
+    if deja and e.get("reseau") == reseau and mini <= len(deja) <= maxi:
+        champ["value"] = deja
+    aide = ("USDC sur Ethereum (ERC-20) seulement, pas Base, Arbitrum, BNB ni Polygon"
+            if reseau == "ethereum" else "Ton adresse Solana. Pas Tron, pas BNB")
+    return {"type": 9, "data": {
+        "custom_id": f"usdc:f2:{court}:{uid}",
+        "title": f"USDC · réseau {nom}"[:45],
+        "components": [
+            {"type": 18, "label": f"Ton adresse {nom}"[:45], "description": aide[:100], "component": champ},
+            {"type": 18, "label": "QR code de ton adresse (facultatif)",
+             "description": "La capture de l'écran « Recevoir » de ton portefeuille",
+             "component": {"type": 19, "custom_id": "qr", "min_values": 0, "max_values": 1,
+                           "required": False}}]}}
+
+
+def _image_qr(octets: bytes) -> bytes:
+    """Le QR réencodé en PNG : plus léger, et sans l'EXIF d'une photo de
+    téléphone (sa position GPS)."""
+    import io
+    from PIL import Image
+    try:
+        import pillow_heif                                   # noqa: F401
+        pillow_heif.register_heif_opener()
+    except Exception:                                        # noqa: BLE001
+        pass
+    im = Image.open(io.BytesIO(octets))
+    im.load()
+    if max(im.size) > 1600:
+        im.thumbnail((1600, 1600))
+    if im.mode not in ("RGB", "L"):
+        fond = Image.new("RGB", im.size, (255, 255, 255))
+        im = im.convert("RGBA")
+        fond.paste(im, mask=im.split()[-1])
+        im = fond
+    sortie = io.BytesIO()
+    im.save(sortie, "PNG", optimize=True)
+    return sortie.getvalue()
+
+
+def _garder_qr(gid: str, uid: str, piece: Dict[str, Any]) -> Tuple[str, str]:
+    """(chemin relatif à data/, "") ou ("", raison). Téléchargé TOUT DE SUITE :
+    l'adresse signée d'une pièce jointe expire. Écrit à part, jamais par-dessus
+    un QR d'avant (rien n'est effacé)."""
+    import os
+    import requests
+    if not str(piece.get("content_type") or "").startswith("image/"):
+        return "", "le QR doit être une image (une capture d'écran)"
+    if int(piece.get("size") or 0) > USDC_QR_MAX:
+        return "", "image trop lourde (8 Mo au plus)"
+    try:
+        r = requests.get(str(piece.get("url") or ""), timeout=(10, 60))
+        if r.status_code != 200 or not r.content:
+            return "", f"image illisible chez Discord (HTTP {r.status_code}), renvoie-la"
+        if len(r.content) > USDC_QR_MAX:
+            return "", "image trop lourde (8 Mo au plus)"
+        png = _image_qr(r.content)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[usdc] QR de {uid} non lu : {type(e).__name__}: {str(e)[:160]}", flush=True)
+        return "", "image non lue (envoie une capture PNG ou JPG)"
+    USDC_QR_DOSSIER.mkdir(parents=True, exist_ok=True)
+    nom = f"{gid}_{uid}_{int(time.time())}.png"
+    dest = USDC_QR_DOSSIER / nom
+    tmp = dest.with_suffix(".png.part")
+    tmp.write_bytes(png)
+    os.replace(tmp, dest)
+    return f"usdc_qr/{nom}", ""
+
+
+def _corps_carte_usdc(gid: str, uid: str, nom_qr: str = "") -> List[Dict[str, Any]]:
+    import suivi_va
+    e = suivi_va.paiement_de(gid, uid)
+    reseau = suivi_va.RESEAUX.get(e.get("reseau") or "solana", "Solana")
+    try:
+        import liens_va as lv
+        pseudo = str(lv.lien_de(gid, uid).get("pseudo") or "")
+    except Exception:                                        # noqa: BLE001
+        pseudo = ""
+    tete = (f"{TITRE_CARTE_USDC}\n" + (f"@{pseudo} · " if pseudo else "")
+            + f"USDC · réseau {_emoji_texte(gid, e.get('reseau') or 'solana')}**{reseau}**")
+    icone = _icone_usdc()
+    blocs: List[Dict[str, Any]] = [
+        {"type": 9, "components": [{"type": 10, "content": tete}],
+         "accessory": {"type": 11, "media": {"url": icone}, "description": "USDC"}}
+        if icone else {"type": 10, "content": tete},
+        {"type": 14, "divider": True, "spacing": 1},
+        {"type": 10, "content": f"```\n{e.get('adresse') or '—'}\n```"}]
+    if nom_qr:
+        blocs.append({"type": 12, "items": [{"media": {"url": f"attachment://{nom_qr}"},
+                                             "description": "QR code de l'adresse"}]})
+    quand = time.strftime("%d/%m à %H:%M", time.localtime(int(e.get("quand") or time.time())))
+    regle = ("Envoi en USDC sur Ethereum (ERC-20) uniquement." if e.get("reseau") == "ethereum"
+             else "Envoi en USDC sur Solana uniquement.")
+    blocs.append({"type": 10, "content": f"-# {regle} Mis à jour le {quand}."})
+    blocs.append({"type": 1, "components": [
+        {"type": 2, "style": 2, "label": "Modifier", "emoji": {"name": "✏️"}, "custom_id": f"usdc:set:{uid}"},
+        {"type": 2, "style": 2, "label": "Copier l'adresse", "emoji": {"name": "📋"},
+         "custom_id": f"usdc:copie:{uid}"}]})
+    return [{"type": 17, "accent_color": 0x23A55A, "components": blocs}]
+
+
+def poser_carte_usdc(gid: str, uid: str) -> str:
+    """La carte 💳 Paiement du VA dans son ticket, épinglée : refaite sur
+    place, ou reposée si elle a disparu. "" si tout va bien, sinon pourquoi."""
+    import verif_discord as vd
+    import suivi_va
+    gid, uid = str(gid), str(uid)
+    f = _fiche(gid, uid)
+    salon = str(f.get("salon") or "")
+    if not salon:
+        return "pas de ticket"
+    e = suivi_va.paiement_de(gid, uid)
+    if not e:
+        return "pas d'adresse"
+    octets, nom = b"", ""
+    if e.get("qr"):
+        try:
+            octets = (DATA_DIR / str(e["qr"])).read_bytes()
+            nom = f"qr_{uid}_{int(e.get('qr_quand') or 0)}.png"
+        except OSError as ex:
+            print(f"[usdc] QR de {uid} illisible ({ex}) : carte sans image", flush=True)
+            octets, nom = b"", ""
+    corps = _corps_carte_usdc(gid, uid, nom)
+    with vd.sur_serveur(gid):
+        mid = str(f.get("carte_usdc") or "")
+        if mid:
+            if nom:
+                code, _r = _api_reseau(
+                    "PATCH", f"/channels/{salon}/messages/{mid}",
+                    data={"payload_json": json.dumps({"components": corps,
+                                                      "attachments": [{"id": 0, "filename": nom}]},
+                                                     ensure_ascii=False)},
+                    files={"files[0]": (nom, octets, "image/png")})
+            else:
+                code, _r = _api_reseau("PATCH", f"/channels/{salon}/messages/{mid}",
+                                       json={"components": corps, "attachments": []})
+            if code == 200:
+                return ""
+            if code != 404:
+                return f"carte non modifiée (HTTP {code})"
+        base = {"flags": V2, "components": corps, "allowed_mentions": {"parse": []}}
+        if nom:
+            code, rep = _api_reseau(
+                "POST", f"/channels/{salon}/messages",
+                data={"payload_json": json.dumps(dict(base, attachments=[{"id": 0, "filename": nom}]),
+                                                 ensure_ascii=False)},
+                files={"files[0]": (nom, octets, "image/png")})
+        else:
+            code, rep = _api_reseau("POST", f"/channels/{salon}/messages", json=base)
+        if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
+            return f"carte non posée (HTTP {code})"
+        neuf = str(rep["id"])
+        with _VERROU:
+            d = _etat()
+            g = (d.get("tickets") or {}).get(f"{gid}:{uid}")
+            if isinstance(g, dict):
+                g["carte_usdc"] = neuf
+                _ecrire_etat(d)
+        _epingler_sans_avis(salon, neuf)
+    return ""
+
+
+def _recevoir_usdc(p: Dict[str, Any], gid: str, court: str, uid: str) -> Dict[str, Any]:
+    import outils_tickets as ot
+    import suivi_va
+    reseau = _RESEAU_COURT.get(court, "solana")
+    champs = ot._champs((p.get("data") or {}).get("components"))
+    qui = str((((p.get("member") or {}).get("user")) or {}).get("id") or "")
+    r = suivi_va.poser_adresse(gid, uid, str(champs.get("adresse") or ""), reseau, par=qui, strict=True)
+    if not r.get("ok"):
+        return _ephemere("✕ " + str(r.get("erreur") or "adresse refusée"))
+    ids = [str(x) for x in (champs.get("qr") or []) if x]
+    pieces = ((p.get("data") or {}).get("resolved") or {}).get("attachments") or {}
+    piece = pieces.get(ids[0]) if ids else None
+    jeton = str(p.get("token") or "")
+    a = r["adresse"]
+
+    def travail() -> None:
+        note = ""
+        try:
+            if piece:
+                chemin, raison = _garder_qr(gid, uid, piece)
+                if not chemin:
+                    note += f"\n⚠️ QR non enregistré : {raison}."
+                elif not suivi_va.poser_qr(gid, uid, chemin, a):
+                    note += "\n⚠️ QR non rattaché : l'adresse a changé entre-temps, renvoie-le."
+            souci = poser_carte_usdc(gid, uid)
+            if souci and souci != "pas de ticket":
+                note += f"\n⚠️ Carte du ticket : {souci}."
+            _maj_menu_v2(gid, uid)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[usdc] {gid}:{uid} : {type(e).__name__}: {e}", flush=True)
+            note += "\n⚠️ La carte du ticket n'a pas pu être refaite."
+        _suite(jeton, f"✅ Adresse enregistrée : USDC · {suivi_va.RESEAUX[reseau]} · "
+                      f"`{a[:6]}…{a[-4:]}`" + (" · QR ✅" if piece and not note.startswith("\n⚠️ QR") else "")
+                      + "\nTes primes partiront là-dessus." + note, p)
+    _EN_FOND(travail)
+    return _differer()
+
+
+def _usdc(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Les clics 💳 de USDC_RESEAUX_ICI ; None pour tout le reste (TRUST
+    INSTAGRAM garde la fenêtre Solana d'avant, plus haut)."""
+    gid = str((p or {}).get("guild_id") or "")
+    if gid not in USDC_RESEAUX_ICI:
+        return None
+    t = (p or {}).get("type")
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if t == 3 and cid.startswith("usdc:set:"):
+        uid = cid.split(":", 2)[2]
+        if not _droit_usdc(gid, uid, p):
+            return _ephemere("Seul ce VA peut renseigner son adresse.")
+        return _choix_reseau(gid, uid, str(p.get("application_id") or ""))
+    if t == 3 and cid.startswith("usdc:net:"):
+        _a, _b, court, uid = (cid.split(":", 3) + ["", "", "", ""])[:4]
+        if court not in _RESEAU_COURT or not uid:
+            return _ephemere("Choix inconnu, reclique 💳.")
+        if not _droit_usdc(gid, uid, p):
+            return _ephemere("Seul ce VA peut renseigner son adresse.")
+        return _fenetre_usdc(gid, uid, court)
+    if t == 3 and cid.startswith("usdc:copie:"):
+        import suivi_va
+        uid = cid.split(":", 2)[2]
+        if not _droit_usdc(gid, uid, p):
+            return _ephemere("Réservé à ce VA et aux managers.")
+        a = suivi_va.adresse_de(gid, uid)
+        return {"type": 4, "data": {"content": a or "Pas encore d'adresse.", "flags": EPHEMERE}}
+    if t == 5 and cid.startswith("usdc:f2:"):
+        _a, _b, court, uid = (cid.split(":", 3) + ["", "", "", ""])[:4]
+        if court not in _RESEAU_COURT or not uid:
+            return _ephemere("Fenêtre inconnue, reclique 💳.")
+        if not _droit_usdc(gid, uid, p):
+            return _ephemere("Seul ce VA peut renseigner son adresse.")
+        return _recevoir_usdc(p, gid, court, uid)
+    return None
+
+
+def _menu_v2_clique(p: Dict[str, Any]) -> Tuple[str, str]:
+    """(gid, uid) si le message cliqué est un menu v2 d'un VA de MENU_V2 :
+    celui de sa fiche, ou un ancien encore là (reconnu à son titre, le VA lu
+    dans ses boutons)."""
+    gid = str((p or {}).get("guild_id") or "")
+    msg = (p or {}).get("message") or {}
+    if gid not in MENU_V2 or not (int(msg.get("flags") or 0) & V2):
+        return "", ""
+    mid = str(msg.get("id") or "")
+    for cle, f in (_etat().get("tickets") or {}).items():
+        if isinstance(f, dict) and str(f.get("menu") or "") == mid and str(cle).startswith(gid + ":"):
+            return gid, str(cle).split(":", 1)[1]
+    if _premier_texte_v2(msg).startswith(TITRE_MENU_V2):
+        cid = str(((p.get("data") or {}).get("custom_id")) or "")
+        m = re.search(r":(\d+)$", cid)
+        if m:
+            return gid, m.group(1)
+    return "", ""
+
+
+_traiter_sans_usdc = traiter
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    """💳 par réseau d'abord ; puis le reste, et une réponse « sur place »
+    (type 7 : ⭐ Confirmer, 🌱 Débutant, 🚫/✅ lien…) cliquée sur un menu v2
+    est remise en blocs — les corps d'avant répondent en texte + rangées,
+    qu'un message v2 refuse. Les enveloppes d'avant ont déjà recopié les
+    rangées sur l'accueil."""
+    try:
+        rep = _usdc(p)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[usdc] clic : {type(e).__name__}: {e}", flush=True)
+        return _ephemere("✕ Une erreur est survenue, reclique dans un instant.")
+    if rep is not None:
+        return rep
+    rep = _traiter_sans_usdc(p)
+    if not (isinstance(rep, dict) and rep.get("type") == 7
+            and isinstance((rep.get("data") or {}).get("components"), list)):
+        return rep
+    gid, uid = _menu_v2_clique(p)
+    if not gid:
+        return rep
+    data = rep.get("data") or {}
+    rangs = _sans_ids([c for c in data["components"] if isinstance(c, dict) and c.get("type") == 1])
+    if not rangs:
+        return rep
+    contenu = str(data.get("content") or "")
+    extra = "\n".join(l for l in contenu.split("\n")
+                      if l.strip() and not l.startswith(("📋", "🔗", "📊")))
+    corps = _corps_menu(gid, uid, rangs, extra)
+    # empreinte NON notée : Discord peut refuser la réponse (ou la recevoir
+    # après 3 s) alors que le rôle est déjà posé ; le prochain tour réécrit le
+    # menu une fois (et retire la ligne « ⭐ Confirmé par … »)
+    _noter_menu_v2(f"{gid}:{uid}", str(((p.get("message") or {}).get("id")) or ""), rangs, None)
+    return {"type": 7, "data": {"components": corps, "allowed_mentions": {"parse": []}}}

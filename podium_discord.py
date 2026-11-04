@@ -276,6 +276,8 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # primes Threads du 12-18/10 sont parties « sans adresse ». Lu
                  # par _reclamer_prime (podium et bonus).
                  "bouton_usdc": True,
+                 # 04/11/2026 : Solana ou Ethereum (tickets_discord, menu v2)
+                 "usdc_reseaux": True,
                  # le nom exact du salon du classement subs (voir _salon_subs)
                  "salon_subs": SALON_SUBS_VA},
     # Va Threads : SES VA, à leurs liens Threads (EMY THREADS, « Threads VA 61
@@ -320,6 +322,8 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # l'adresse USDC au bouton du ticket, comme Twitter (Bowser ne
                  # lit pas les messages non plus)
                  "bouton_usdc": True,
+                 # 04/11/2026 : Solana ou Ethereum (tickets_discord, menu v2)
+                 "usdc_reseaux": True,
                  # LA QUINZAINE (salon -l-clicks) seulement, propriétaire
                  # 21/10/2026 : « add ici les va ig aussi uniquement les click
                  # threads = ig pour le moment c'est meta, prend leur click et
@@ -537,7 +541,8 @@ def _reclamer_prime(pf: Dict[str, Any], tete: str, rang: str) -> str:
     qui paie à la main. Va IG (tickets du bot principal, sans ce bouton) : la
     phrase d'avant, mot pour mot."""
     if pf.get("bouton_usdc"):
-        return (f"{tete} enregistre **ton adresse USDC (réseau Solana)** avec le bouton "
+        reseau = "Solana ou Ethereum" if pf.get("usdc_reseaux") else "réseau Solana"
+        return (f"{tete} enregistre **ton adresse USDC ({reseau})** avec le bouton "
                 "**💳 Mon adresse USDC** du message épinglé de **ton espace perso** "
                 f"(une fois suffit, elle est gardée), puis écris-y **{rang}**.")
     return (f'{tete} envoie un message à **@{pf["bot"]}** dans **ton espace perso** '

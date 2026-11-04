@@ -28,9 +28,12 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import threading
+
 import safe_json
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+_VERROU_ADRESSES = threading.RLock()
 ETAT_FICHIER = DATA_DIR / "suivi_va.json"
 CONFIG_FICHIER = DATA_DIR / "suivi_va_config.json"
 
@@ -63,7 +66,27 @@ def _etat() -> Dict[str, Any]:
 
 
 def _ecrire(d: Dict[str, Any]) -> None:
-    safe_json.write_text(ETAT_FICHIER, json.dumps(d, ensure_ascii=False, indent=2))
+    # verifier et annoncer_primes réécrivent tout le fichier depuis un état lu
+    # AVANT leurs appels réseau : une adresse posée entre-temps (le VA qui
+    # clique dès qu'on lui écrit « aucune adresse ») était effacée sans trace.
+    # Le fichier fait foi pour toute adresse plus récente que la nôtre.
+    with _VERROU_ADRESSES:
+        try:
+            cur = (_etat().get("adresses") or {})
+            mien = d.setdefault("adresses", {})
+            for k, v in cur.items():
+                if not isinstance(v, dict):
+                    continue
+                m = mien.get(k) if isinstance(mien.get(k), dict) else None
+                # « maj » : l'instant exact de la dernière écriture de CETTE
+                # entrée (poser_adresse, poser_qr) ; « quand » à la seconde
+                # pour les entrées d'avant le 04/11/2026
+                if m is None or float(v.get("maj") or v.get("quand") or 0) \
+                        > float(m.get("maj") or m.get("quand") or 0):
+                    mien[k] = v
+        except Exception as e:                               # noqa: BLE001
+            print(f"[suivi] adresses du fichier non relues : {type(e).__name__}: {e}", flush=True)
+        safe_json.write_text(ETAT_FICHIER, json.dumps(d, ensure_ascii=False, indent=2))
 
 
 # ─── les clics d'un VA ───────────────────────────────────────────────────
@@ -89,26 +112,138 @@ def clics_us(link_id: str, debut: dt.date, fin: dt.date) -> Optional[int]:
 # ─── adresse de paiement ─────────────────────────────────────────────────
 # Une adresse Solana est du base58 : ni 0, ni O, ni I, ni l, jamais.
 RE_SOLANA = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+# Propriétaire, 04/11/2026 (TRUST TWITTER et THREADS) : « les virements sont en
+# USDC, choisis en Solana ou en ETH ». Une adresse Ethereum : 0x + 40 hexa.
+# La casse mixte (EIP-55) demanderait Keccak-256, absent ici : la forme seule.
+RE_ETH = re.compile(r"^0x[0-9a-fA-F]{40}$")
+#: les adresses du jeton USDC lui-même, collées par erreur à la place de la sienne
+USDC_SOL = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+USDC_ETH = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+RESEAUX = {"solana": "Solana", "ethereum": "Ethereum"}
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
-def adresse_valide(a: str) -> bool:
-    return bool(RE_SOLANA.match(str(a or "").strip()))
+def _octets_b58(s: str) -> int:
+    """La longueur en octets d'une chaîne base58 : 32 pour une clé Solana.
+    Une adresse Tron (T…) ou Bitcoin (1…) a la forme mais 25 octets."""
+    n = 0
+    for c in s:
+        n = n * 58 + _B58.index(c)
+    return (len(s) - len(s.lstrip("1"))) + (n.bit_length() + 7) // 8
 
 
-def poser_adresse(gid: str, uid: str, adresse: str) -> Dict[str, Any]:
-    """Garde l'adresse USDC d'un VA. Refuse ce qui n'est pas une adresse Solana."""
-    a = str(adresse or "").strip()
-    if not adresse_valide(a):
-        return {"ok": False, "erreur": "Ce n'est pas une adresse Solana valide "
-                                       "(32 à 44 caractères, sans 0, O, I ni l)."}
-    d = _etat()
-    (d.setdefault("adresses", {}))[f"{gid}:{uid}"] = {"adresse": a, "quand": int(time.time())}
-    _ecrire(d)
-    return {"ok": True, "adresse": a, "erreur": ""}
+def _nettoyer(a: Any) -> str:
+    """« solana:7xKX…?amount=1 » ou « ethereum:0x…@1 » (un QR de paiement
+    collé) : l'adresse seule."""
+    a = re.sub(r"^(solana|ethereum):", "", str(a or "").strip(), flags=re.I)
+    return a.split("?")[0].split("@")[0].strip()
+
+
+def verifier_adresse(a: Any, reseau: str = "solana") -> tuple:
+    """(adresse nettoyée, "") si elle convient à ce réseau, sinon ("", ce qu'il
+    faut dire au VA)."""
+    reseau = reseau if reseau in RESEAUX else "solana"
+    x = _nettoyer(a)
+    if reseau == "ethereum":
+        if x[:2] == "0X":
+            x = "0x" + x[2:]
+        if x.lower().endswith(".eth"):
+            return "", "Mets l'adresse 0x…, pas un nom .eth."
+        if RE_SOLANA.match(x) and not x.startswith("0x"):
+            return "", "C'est une adresse Solana : choisis Solana."
+        if not RE_ETH.match(x) or int(x, 16) == 0:
+            return "", ("Une adresse Ethereum commence par 0x et fait 42 caractères (0-9, a-f). "
+                        "Copie-la depuis Recevoir → USDC → Ethereum.")
+        if x.lower() == USDC_ETH:
+            return "", "C'est l'adresse du jeton USDC, pas la tienne."
+        return x, ""
+    if x.lower().startswith("0x"):
+        return "", "C'est une adresse Ethereum : choisis Ethereum."
+    if not RE_SOLANA.match(x) or _octets_b58(x) != 32 or x == "1" * 32:
+        return "", ("Ce n'est pas une adresse Solana valide (32 à 44 caractères, "
+                    "sans 0, O, I ni l). Pas Tron, pas BNB.")
+    if x == USDC_SOL:
+        return "", "C'est l'adresse du jeton USDC, pas la tienne."
+    return x, ""
+
+
+def adresse_valide(a: str, reseau: str = "solana", strict: bool = False) -> bool:
+    """`strict` : la règle du 04/11/2026 (32 octets, Ethereum, le jeton USDC
+    refusé), celle de la fenêtre par réseau de Twitter et Threads ; sans,
+    la règle d'avant, celle de TRUST INSTAGRAM et des fenêtres d'avant."""
+    if not strict:
+        return bool(RE_SOLANA.match(str(a or "").strip()))
+    return not verifier_adresse(a, reseau)[1]
+
+
+def poser_adresse(gid: str, uid: str, adresse: str, reseau: str = "solana",
+                  par: str = "", strict: bool = False) -> Dict[str, Any]:
+    """Garde l'adresse USDC d'un VA et son réseau. Refuse ce qui ne convient
+    pas au réseau. Le QR d'avant n'est gardé que pour la même adresse sur le
+    même réseau (il montrerait l'ancienne) ; l'entrée d'avant va dans
+    « avant » (dix au plus), jamais effacée."""
+    reseau = reseau if reseau in RESEAUX else "solana"
+    if strict:
+        a, err = verifier_adresse(adresse, reseau)
+        if err:
+            return {"ok": False, "erreur": err}
+    else:
+        # la règle et le message d'avant, mot pour mot (TRUST INSTAGRAM, et les
+        # fenêtres ouvertes avant le 04/11/2026)
+        a = str(adresse or "").strip()
+        if not adresse_valide(a):
+            return {"ok": False, "erreur": "Ce n'est pas une adresse Solana valide "
+                                           "(32 à 44 caractères, sans 0, O, I ni l)."}
+    with _VERROU_ADRESSES:
+        d = _etat()
+        cle = f"{gid}:{uid}"
+        prev = (d.get("adresses") or {}).get(cle)
+        prev = prev if isinstance(prev, dict) else {}
+        neuf: Dict[str, Any] = {"adresse": a, "quand": int(time.time()), "maj": time.time()}
+        if strict:
+            # le réseau n'est écrit que par la fenêtre par réseau : sans lui,
+            # c'est Solana, et l'annonce de prime reste mot pour mot celle d'avant
+            neuf["reseau"] = reseau
+        if par:
+            neuf["par"] = str(par)
+        if prev.get("qr") and prev.get("adresse") == a and (prev.get("reseau") or "solana") == reseau:
+            neuf["qr"], neuf["qr_quand"] = prev["qr"], prev.get("qr_quand") or prev.get("quand")
+        if prev:
+            neuf["avant"] = ([{k: v for k, v in prev.items() if k != "avant"}]
+                             + list(prev.get("avant") or []))[:10]
+        (d.setdefault("adresses", {}))[cle] = neuf
+        _ecrire(d)
+    return {"ok": True, "adresse": a, "reseau": reseau, "erreur": ""}
+
+
+def poser_qr(gid: str, uid: str, chemin: str, adresse: str = "") -> bool:
+    """Le QR (chemin relatif à data/) de l'adresse en place. False si
+    l'adresse a changé entre-temps (`adresse` : celle que le QR montre)."""
+    with _VERROU_ADRESSES:
+        d = _etat()
+        e = (d.get("adresses") or {}).get(f"{gid}:{uid}")
+        if not isinstance(e, dict) or (adresse and e.get("adresse") != adresse):
+            return False
+        e["qr"], e["qr_quand"], e["maj"] = str(chemin), int(time.time()), time.time()
+        _ecrire(d)
+    return True
 
 
 def adresse_de(gid: str, uid: str) -> str:
     return str(((_etat().get("adresses") or {}).get(f"{gid}:{uid}") or {}).get("adresse") or "")
+
+
+def paiement_de(gid: str, uid: str) -> Dict[str, Any]:
+    """{adresse, reseau, qr, quand…} du VA ; {} sans adresse. Sans réseau
+    noté : Solana (toutes les adresses d'avant le 04/11/2026)."""
+    e = (_etat().get("adresses") or {}).get(f"{gid}:{uid}")
+    if not isinstance(e, dict) or not e.get("adresse"):
+        return {}
+    return dict(e, reseau=e.get("reseau") if e.get("reseau") in RESEAUX else "solana")
+
+
+def reseau_de(gid: str, uid: str) -> str:
+    return str(paiement_de(gid, uid).get("reseau") or "solana")
 
 
 # ─── le tour de garde ────────────────────────────────────────────────────
@@ -358,6 +493,10 @@ def annoncer_primes(gid: str, cl: Dict[str, Any], debut, fin) -> Dict[str, Any]:
         montant = pod.PRIMES[rang]
         if adr:
             ligne_adr = f"💳 Vers `{adr}`"
+            res = ((_etat().get("adresses") or {}).get(f"{gid}:{uid}") or {}).get("reseau")
+            if res in RESEAUX:
+                # réseau choisi dans la fenêtre par réseau (Twitter, Threads)
+                ligne_adr += f" · USDC {RESEAUX[res]}"
         else:
             ligne_adr = ("⚠️ **Aucune adresse enregistrée** — clique "
                          "💳 **Mon adresse USDC** sur le message épinglé.")

@@ -42,6 +42,9 @@ except Exception:
 
 import liens_va as lv                  # noqa: E402
 import tickets_discord as tk           # noqa: E402
+# le menu TEXTE, celui de TRUST INSTAGRAM ; le menu en blocs de Twitter et
+# Threads (04/11/2026) est vérifié dans tests_menu_v2_usdc.py
+tk.MENU_V2 = set()
 # la page de stats dans le menu de Twitter (04/11/2026) est vérifiée dans
 # tests_stats_va.py : ici, le menu tel qu'il était (et aucune clé écrite)
 tk.MENU_PAGE_STATS = set()
