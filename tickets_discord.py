@@ -3313,8 +3313,9 @@ def _texte_menu(gid: str, uid: str) -> str:
         l = lv.lien_de(gid, uid)
         url = str(l.get("public_url") or "")
         parti = ((_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}).get("parti")
-        if url and l.get("actif", True) is not False and not parti:
-            texte += f"\n🔗 <{url}>"
+        if url and not parti:
+            texte += (f"\n🔗 <{url}>" if l.get("actif", True) is not False
+                      else "\n🔗 🚫 Désactivé pour le moment")
             if str(gid) in MENU_PAGE_STATS:
                 import stats_va
                 page = stats_va.lien(gid, uid)
@@ -4248,9 +4249,14 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     blocs.append({"type": 14, "divider": True, "spacing": 1})
     url = str(l.get("public_url") or "")
     parti = (_fiche(gid, uid) or {}).get("parti")
-    if url and l.get("actif", True) is not False and not parti:
-        blocs.append({"type": 9, "components": [{"type": 10, "content": f"**🔗 Ton lien**\n{url}"}],
-                      "accessory": {"type": 2, "style": 5, "label": "Ouvrir", "url": url}})
+    if url and not parti:
+        if l.get("actif", True) is not False:
+            blocs.append({"type": 9, "components": [{"type": 10, "content": f"**🔗 Ton lien**\n{url}"}],
+                          "accessory": {"type": 2, "style": 5, "label": "Ouvrir", "url": url}})
+        else:
+            # lien coupé (04/11/2026, « mets un lien mais désactivé ») : ni son
+            # adresse ni « Ouvrir », mais sa page de stats reste là, dessous
+            blocs.append({"type": 10, "content": "**🔗 Ton lien**\n🚫 Désactivé pour le moment"})
         if (gid in MENU_PAGE_STATS or gid in MENU_V2) if avec_page is None else avec_page:
             try:
                 import stats_va

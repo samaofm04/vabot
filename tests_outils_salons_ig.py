@@ -626,6 +626,27 @@ tk._recevoir_adresse_sans_menu = lambda p: {"type": 4, "data": {"content": "✕ 
 tk._recevoir_adresse(f)
 check("une adresse refusée : rien n'est réécrit", MAJ == [(AG, VA)], MAJ)
 
+
+print("9. Un lien désactivé garde sa page de stats (« mets un lien mais désactivé »)")
+LIENS[TH] = dict(LIENS[TH], actif=False)
+corps_off = tk._corps_menu(TH, VA, tk.boutons_va(VA, a_un_lien=True, gid=TH, lien_actif=False))
+check("Threads, lien coupé : « 🔗 Ton lien — 🚫 Désactivé », sans son adresse ni « Ouvrir »",
+      "**🔗 Ton lien**\n🚫 Désactivé pour le moment" in textes(corps_off)
+      and not any(u == LIENS[TH]["public_url"] for _l, u in urls(corps_off))
+      and LIENS[TH]["public_url"] not in json.dumps(corps_off), textes(corps_off))
+check("… et « 📊 Tes stats » / « Voir ma page » toujours là",
+      ("Voir ma page", stats_va.lien(TH, VA)) in urls(corps_off), urls(corps_off))
+check("le menu texte aussi : désactivé, puis la page",
+      "🔗 🚫 Désactivé pour le moment" in tk._texte_menu(TH, VA) and "📊 Tes stats : <" in tk._texte_menu(TH, VA)
+      and LIENS[TH]["public_url"] not in tk._texte_menu(TH, VA), tk._texte_menu(TH, VA))
+LIENS[TH] = {k: v for k, v in LIENS[TH].items() if k != "actif"}
+ETAT["tickets"][f"{TH}:{VA}"]["parti"] = {"quand": 1}
+check("un VA parti : ni lien ni page", not any(l == "Voir ma page" for l, _u in urls(
+    tk._corps_menu(TH, VA, tk.boutons_va(VA, a_un_lien=True, gid=TH)))))
+ETAT["tickets"][f"{TH}:{VA}"].pop("parti")
+check("lien actif : comme avant (« Ouvrir » vers son lien)",
+      ("Ouvrir", LIENS[TH]["public_url"]) in urls(tk._corps_menu(TH, VA, tk.boutons_va(VA, a_un_lien=True, gid=TH))))
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:

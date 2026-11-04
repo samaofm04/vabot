@@ -221,7 +221,9 @@ try:
           b1["faits"] == [U] and d.messages[c2]["content"].endswith("<https://getmysocial.com/emy-neuve>"), b1)
     LIEN.update(actif=False)
     tk.rafraichir_menus(G)
-    check("lien coupé : plus de lien dans le menu", d.messages[c2]["content"] == "📋 **Menu**", d.messages[c2])
+    # 04/11/2026 (« mets un lien mais désactivé ») : le menu le dit, sans son adresse
+    check("lien coupé : plus son adresse dans le menu, « 🚫 Désactivé » à la place",
+          d.messages[c2]["content"] == "📋 **Menu**\n🔗 🚫 Désactivé pour le moment", d.messages[c2])
     LIEN.update(actif=True)
     e_ = etat(); e_["tickets"][f"{G}:{U}"]["parti"] = {"quand": 1}; tk.ETAT_FICHIER.write_text(json.dumps(e_))
     check("VA parti : pas de lien", tk._texte_menu(G, U) == "📋 **Menu**")
