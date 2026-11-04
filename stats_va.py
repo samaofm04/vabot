@@ -1,4 +1,5 @@
-"""La page perso d'un VA de TRUST INSTAGRAM : ses chiffres, à lui seul.
+"""La page perso d'un VA de TRUST INSTAGRAM (et de TRUST TWITTER depuis le 04/11) :
+ses chiffres, à lui seul.
 
 Propriétaire, 03/11/2026 : « un petit lien perso pour chaque VA où il voit
 uniquement son tracking link. Il voit depuis toujours, aujourd'hui, cette
@@ -51,8 +52,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import safe_json
 
 AGENCY_IG_ID = "1488331963575177247"
-#: Les serveurs dont « Mes stats » donne le lien de la page.
-SERVEURS = {AGENCY_IG_ID}
+TWITTER_ID = "1445108485090971710"
+#: Les serveurs dont « Mes stats » donne le lien de la page. TRUST TWITTER
+#: depuis le 04/11/2026 (propriétaire, devant « pas lisible » dans Mes stats :
+#: « mets en place le lien avec l'API Infloww, l'API GetMySocial et tout, un
+#: peu comme sur Instagram, pour qu'ils aient directement accès à ce lien-là
+#: avec leurs statistiques ») ; même grille de paie (« la même qu'Instagram »).
+SERVEURS = {AGENCY_IG_ID, TWITTER_ID}
+#: Le bandeau de la page et le nom du lien, par serveur.
+MARQUES = {AGENCY_IG_ID: ("TRUST INSTAGRAM", "Instagram"), TWITTER_ID: ("TRUST TWITTER", "Twitter")}
 SITE = "https://youl4b.com"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CLES_FICHIER = DATA_DIR / "stats_va_cles.json"
@@ -343,7 +351,7 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             "infloww": i["n"], "subs": subs,
             "cvr": (subs * 100.0 / visites) if subs is not None and visites else None,
             "par_sub": (net / 100.0 / subs) if net is not None and subs else None,
-            "gagne": gagne, "communs": communs, "lu_a": time.time()}
+            "gagne": gagne, "communs": communs, "lu_a": time.time(), "gid": str(gid)}
 
 
 _CACHE_MAX = 300
@@ -481,13 +489,14 @@ td.nom{white-space:nowrap}
 """
 
 
-def _gabarit(titre: str, corps: str) -> str:
+def _gabarit(titre: str, corps: str, gid: Any = AGENCY_IG_ID) -> str:
+    marque = MARQUES.get(str(gid or ""), MARQUES[AGENCY_IG_ID])[0]
     return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
 <title>{_e(titre)}</title><style>{_STYLE}</style></head><body>
-<div class="marque">TRUST INSTAGRAM</div>
+<div class="marque">{_e(marque)}</div>
 {corps}
 </body></html>'''
 
@@ -535,7 +544,8 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
     import podium_discord as pod
     jour = jour or pod._aujourdhui()
     du, au = str(d.get("du") or ""), str(d.get("au") or "")
-    nom = f"Instagram VA {d['numero']}" if str(d.get("numero") or "").isdigit() else "Ton lien"
+    plateforme = MARQUES.get(str(d.get("gid") or ""), MARQUES[AGENCY_IG_ID])[1]
+    nom = f"{plateforme} VA {d['numero']}" if str(d.get("numero") or "").isdigit() else "Ton lien"
     sous = f"<b>{_e(_titre_periode(du, au, jour))}</b>" + (f" · @{_e(d['pseudo'])}" if d.get("pseudo") else "")
     import infloww_liens as il
     infl = _nb(d.get("infloww"))
@@ -566,7 +576,7 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
              f'<td class="subs">{_nb(d.get("subs"))}</td><td>{cvr}</td><td>{par_sub}</td>'
              f'<td>{il._dollars(d.get("gagne"))}</td></tr></tbody></table></div>'
              + pied)
-    return _gabarit(f"Tes stats · {nom}", corps)
+    return _gabarit(f"Tes stats · {nom}", corps, d.get("gid"))
 
 
 def page(t: Any, args: Any = None) -> Tuple[int, str]:
@@ -592,12 +602,12 @@ def page(t: Any, args: Any = None) -> Tuple[int, str]:
         return 429, _gabarit("Tes stats", '<h1>📈 Tes stats</h1><p class="sous">Tu as demandé beaucoup de '
                              'périodes aujourd\'hui. Reprends un des raccourcis (depuis toujours, '
                              'aujourd\'hui, les quinzaines…) : ils marchent toujours.</p>'
-                             + _formulaire(str(t), "", "", pod._aujourdhui()))
+                             + _formulaire(str(t), "", "", pod._aujourdhui()), gid)
     except Exception as e:                                   # noqa: BLE001
         return 200, _gabarit("Tes stats", f'<h1>📈 Tes stats</h1><div class="err"><b>Lecture '
-                             f'impossible.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>')
+                             f'impossible.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', gid)
     try:
         return 200, page_html(d, str(t))
     except Exception as e:                                   # noqa: BLE001
         return 200, _gabarit("Tes stats", f'<h1>📈 Tes stats</h1><div class="err"><b>La page n\'a pas '
-                             f'pu être construite.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>')
+                             f'pu être construite.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', gid)

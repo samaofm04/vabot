@@ -9,6 +9,10 @@ les liens NEUFS naissent en page, sans réseau :
      du VA posé sur son bouton OnlyFans (comme Agency).
   3. Threads et Agency ne bougent pas.
 
+04/11/2026, « urgent » : « repasse toutes les pages Twitter en lien direct,
+pas de landing page » : GABARIT_PAGE_TWITTER vide, un lien neuf naît direct
+(0.) ; les pages restent possibles derrière l'interrupteur (1. et 2.).
+
 Lancer depuis la racine du dépôt : python tests_twitter_pages.py
 """
 from __future__ import annotations
@@ -40,7 +44,14 @@ import gms                # noqa: E402
 DIRECT = "lnk_ancien_direct"
 lv.config = lambda: {"gabarit": DIRECT, "equipe": "tm_twitter", "modele": "Lia"}
 
-print("1. L'espace Twitter")
+print("0. Par défaut, depuis le 04/11 : lien direct")
+e0 = lv.espace(lv.TWITTER_ID)
+check("GABARIT_PAGE_TWITTER vide : le gabarit direct, pas de page",
+      lv.GABARIT_PAGE_TWITTER == "" and e0["gabarit"] == DIRECT and not e0.get("landing"), e0)
+check("… la Lia seule (70/30) reste", e0.get("base_seule") == lv.LIA_SEULE, e0.get("base_seule"))
+lv.GABARIT_PAGE_TWITTER = "lnk_page_modele"
+
+print("1. L'espace Twitter, interrupteur des pages ouvert")
 e = lv.espace(lv.TWITTER_ID)
 check("gabarit = la page modèle, en page", e["gabarit"] == lv.GABARIT_PAGE_TWITTER and e.get("landing") is True, e)
 check("les copies des branches de l'A/B partent de l'ancien gabarit direct", e.get("source_variante") == DIRECT, e)

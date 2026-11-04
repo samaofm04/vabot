@@ -208,7 +208,10 @@ TWITTER_ID = "1445108485090971710"
 #: quinzaine du 01/11 garde les subs Seren du 01/11, la semaine du 02/11 et les
 #: bonus des jours suivants n'en ont aucun ; une période finie avant (semaines
 #: et quinzaines d'avant, all-time) ne change pas. "" : Seren comptée partout.
-TWITTER_SEREN_JUSQUAU = "2026-11-01"
+#: Propriétaire, 03-04/11/2026 : « tu peux leur compter les subs », « même si
+#: y a que Lia », puis Seren retirée de MyPuls et « remets-les » : ses subs
+#: relevés du 01 au 03/11 comptent (RELEVE_SEREN, plus bas) ; plus de coupure.
+TWITTER_SEREN_JUSQUAU = ""
 PAGE_SEREN = "seren.vale"
 VA_IG_ID = "1505418484052394004"
 THREADS_ID = "1498948161039896586"         # verif_discord.THREADS_ID
@@ -6423,7 +6426,8 @@ def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str, plancher_ms: int = 0) 
 
 
 def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
-                 creatrice: str = CREATRICE_INFLOWW, pause: bool = True) -> Optional[Dict[str, int]]:
+                 creatrice: str = CREATRICE_INFLOWW, pause: bool = True,
+                 infos: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[Dict[str, int]]:
     """{« emy.brw/cNN » : abonnés du jour} chez Infloww, pour ceux de
     `trackings` qu'Infloww connaît ; None s'il ne répond pas. Avec `au` et
     `creatrice` : du `jour` au `au` compris, chez elle (les trackings Jessye
@@ -6433,13 +6437,20 @@ def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
     La page /infloww/liens?c=emy lit les mêmes trackings Jessye ; sans ça, une
     erreur de la page coupait la part Jessye de VA 41 / 141 / 142 au
     classement horaire suivant (10 min de pause, ligne « partiel »). Une
-    pause posée par le podium est respectée quand même."""
+    pause posée par le podium est respectée quand même.
+    `infos` : rempli de la fiche Infloww (clics, abonnés, revenu, nom) de
+    chaque tracking connu -- les pages retirées de MyPuls (_retirees) : un
+    seul endroit du podium lit Infloww.
+    """
     au = au or jour
     if time.time() < _INFLOWW_MUET.get(creatrice, 0):
         return None                          # muet il y a peu : dit au journal à ce moment-là
     try:
         import infloww as iw
         c = iw.creatrice(creatrice)
+        for ancien, voulu in PSEUDOS_RENOMMES.items():
+            if not c and voulu == creatrice:
+                c = iw.creatrice(ancien)     # Emy renommée emy.brww chez OnlyFans (03/11)
         if not c:
             raise RuntimeError(f"créatrice {creatrice} inconnue d'Infloww")
         cid = str(c["id"])
@@ -6449,6 +6460,11 @@ def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
             l = liens.get(t.rsplit("/c", 1)[-1])
             if not l:
                 continue                     # inconnu d'Infloww : MyPuls pour lui
+            if infos is not None:
+                infos[t] = dict(l)
+            if not int(l.get("abonnes") or 0):
+                out[t] = 0                   # aucun abonné : rien à lire jour par jour
+                continue
             g = _INFLOWW_FANS.get(str(l["id"]))
             if not (g and g[1] == int(l.get("abonnes") or 0) and time.time() - g[0] < INFLOWW_FANS_S):
                 # Jessye, 27/10 : 5 « abonnés » de c135 et 1 de c144 datés à la
@@ -6474,6 +6490,173 @@ def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
                       f"Infloww muet pour le bonus du {jour} ({type(e).__name__}: {str(e)[:120]}) : "
                       "les abonnés d'Emy restent ceux de MyPuls")
         return None
+
+
+# ─── Emy et Seren retirées de MyPuls (03/11/2026) ─────────────────────────
+# Propriétaire, 03/11/2026 vers minuit : « j'ai déjà remove Emy et Seren de
+# MyPuls », « y a plus que Lia ». MyPuls ne rend plus AUCUN de leurs
+# trackings, pour aucune période, et la règle « une lecture ratée n'est
+# jamais un zéro » mettait « sans relevé » tout VA qui en portait un : Agency
+# VA 63, 92, 100, 108, 110, 112 le soir même, 21 VA Twitter par leur ancien
+# tracking Emy, 19 comptes internes de VA 41. Ses choix, le 04/11 :
+#  - Emy : « lire Emy chez Infloww » (« Emy finito ») : les abonnés par jour
+#    de ses liens de suivi, comme le bonus (subs_infloww) ;
+#  - Seren, absente d'Infloww : « remets-les » : les abonnés relevés le 03/11
+#    à 23h17 (Paris) sur la quinzaine du 01/11, RELEVE_SEREN. Pas datés au
+#    jour : ils comptent pour une période qui couvre tout le 01→03/11 (la
+#    quinzaine, depuis toujours), ni pour la semaine du 02/11 ni pour un
+#    bonus. Seren avant le 01/11 est perdue avec MyPuls.
+# Les trackings de ces pages (registre du podium, fiches des liens) sont
+# remis dans chaque lecture MyPuls d'après RETIREES_DEPUIS, sous leur nom
+# MyPuls (subs_va._a_lui et _suivre_trackings le lisent). Infloww ne date
+# pas les clics ni le revenu : sur une période, 0 ; depuis toujours, ses
+# cumuls. Infloww muet : les trackings Emy restent absents, leur VA « sans
+# relevé » (une panne n'est pas un zéro). MyPuls qui les rendrait de nouveau
+# (créatrice remise) fait foi.
+RETIREES_DEPUIS = "2026-11-03"
+PAGES_RETIREES_INFLOWW = {"emy.brw": CREATRICE_INFLOWW}
+PAGES_RETIREES_RELEVE = {"seren.vale"}
+RELEVE_SEREN = {"du": "2026-11-01", "au": "2026-11-03", "subs": {
+    # TRUST TWITTER, VA 74, 84, 91, 95, 96, 97, 98, 124, 144, 146, 148
+    "seren.vale/c201": 1, "seren.vale/c212": 2, "seren.vale/c218": 3, "seren.vale/c224": 10,
+    "seren.vale/c226": 9, "seren.vale/c225": 6, "seren.vale/c227": 2, "seren.vale/c228": 4,
+    "seren.vale/c242": 2, "seren.vale/c244": 1, "seren.vale/c246": 1,
+    # TRUST INSTAGRAM, VA 92
+    "seren.vale/c241": 7}}
+_RETIREES_LUES: Dict[Tuple[str, str], Tuple[float, Dict[str, Dict[str, Any]]]] = {}
+_RETIREES_DIT: Dict[str, str] = {}
+# page -> fin de la pause : Infloww muet coûte jusqu'à ~94 s par appel
+# (INFLOWW_MUET_S), et toute lecture MyPuls de tous les serveurs passe ici
+_RETIREES_MUETTES: Dict[str, float] = {}
+
+
+def page_retiree(t: Any) -> bool:
+    """Ce tracking (« emy.brw/c35 ») est-il d'une page retirée de MyPuls ?"""
+    p = pseudo_of(str(t or "").split("/", 1)[0])
+    return p in PAGES_RETIREES_INFLOWW or p in PAGES_RETIREES_RELEVE
+
+
+def _trackings_retires() -> Dict[str, str]:
+    """{tracking d'une page retirée : son nom MyPuls} : ceux du registre du
+    podium (leur nom gardé), puis ceux des fiches des liens, nommés comme à
+    leur création (« Instagram VA 92 @fiable0010 », liens_va.poser_variante)
+    -- sans nom, subs_va les prendrait pour des trackings communs."""
+    out: Dict[str, str] = {}
+    for t, e in (_lire_registre().get("trackings") or {}).items():
+        if isinstance(e, dict) and page_retiree(t):
+            out[t] = str(e.get("nom") or "")
+    try:
+        import liens_va
+        plats: Dict[str, str] = {}
+        for cle, f in (liens_va._etat().get("liens") or {}).items():
+            if not isinstance(f, dict):
+                continue
+            gid = str(cle).split(":", 1)[0]
+            if gid not in plats:
+                try:
+                    plats[gid] = str(liens_va.espace(gid).get("plateforme") or "")
+                except Exception:                            # noqa: BLE001
+                    plats[gid] = ""
+            plat = plats[gid]
+            nom = (f'{plat} VA {f.get("numero")} @{f.get("pseudo")}'[:60]
+                   if plat and f.get("numero") and f.get("pseudo") else "")
+            for u in liens_va.trackings_de_fiche(f):
+                t = tracking_de(u)
+                if t and page_retiree(t) and not out.get(t):
+                    out[t] = nom
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] pages retirées de MyPuls : fiches des liens illisibles "
+              f"({type(e).__name__}: {e})", flush=True)
+    for t in RELEVE_SEREN["subs"]:
+        out.setdefault(t, "")
+    return out
+
+
+def _retirees(du: str, au: str) -> Dict[str, Dict[str, Any]]:
+    """Les trackings des pages retirées de MyPuls, à la forme de
+    _lire_mypuls, pour [du, au]. Emy absente si Infloww ne répond pas."""
+    t0 = time.time()
+    deja = _RETIREES_LUES.get((du, au))
+    if deja and 0 <= t0 - deja[0] < MP_CACHE_S:
+        return deja[1]
+    noms = _trackings_retires()
+    toujours = du <= ALLTIME_DEPUIS
+    out: Dict[str, Dict[str, Any]] = {}
+    s = RELEVE_SEREN
+    couvre = du <= s["du"] and au >= s["au"]
+    releve = [t for t in noms if pseudo_of(t.split("/", 1)[0]) in PAGES_RETIREES_RELEVE]
+    for t in releve:
+        if du < s["du"] and not toujours:
+            # une période qui commence avant le relevé (16→31/10 relue le
+            # 04/11, « Période précédente ») : ses subs Seren d'avant le 01/11
+            # sont perdus avec MyPuls, pas nuls -- absente, « pas lisible »,
+            # plutôt qu'un total plus bas que ce qui a été payé
+            continue
+        n = int(s["subs"].get(t, 0))
+        out[t] = {"visites": 0, "total": 0, "subs": n if couvre else 0,
+                  "subs_total": n if au >= s["au"] else 0, "nom": noms[t], "net": 0,
+                  "retiree": "releve"}
+    inconnus: List[str] = []
+    muet = False
+    for page, creatrice in PAGES_RETIREES_INFLOWW.items():
+        emy = {t for t in noms if pseudo_of(t.split("/", 1)[0]) == page}
+        if not emy:
+            continue
+        if time.time() < _RETIREES_MUETTES.get(page, 0):
+            muet = True                      # muet il y a peu : pas de nouvel essai
+            continue
+        infos: Dict[str, Dict[str, Any]] = {}
+        per = subs_infloww(du, emy, au, creatrice=creatrice, infos=infos)
+        tot = subs_infloww(ALLTIME_DEPUIS, emy, au, creatrice=creatrice) if per is not None else None
+        if per is None or tot is None:
+            muet = True                      # dit par subs_infloww
+            _RETIREES_MUETTES[page] = time.time() + INFLOWW_MUET_S
+            _dire_infloww(f"retiree:muet:{page}:{du}:{au}",
+                          f"{page} retirée de MyPuls et Infloww muet du {du} au {au} : "
+                          "ses trackings restent sans relevé")
+            continue
+        for t in sorted(emy):
+            l = infos.get(t)
+            if l is None:
+                inconnus.append(t)
+                l = {}
+            out[t] = {"visites": int(l.get("clics") or 0) if toujours else 0,
+                      "total": int(l.get("clics") or 0),
+                      "subs": int(per.get(t, 0)), "subs_total": int(tot.get(t, 0)),
+                      "nom": noms[t] or str(l.get("nom") or ""),
+                      # infloww._lien_norm : déjà en centimes, comme _lire_mypuls
+                      "net": int(l.get("net") or 0) if toujours else 0,
+                      "retiree": "infloww"}
+    if not muet:
+        for k in [k for k, (q, _o) in _RETIREES_LUES.items() if not 0 <= t0 - q < MP_CACHE_S]:
+            del _RETIREES_LUES[k]
+        _RETIREES_LUES[(du, au)] = (t0, out)
+    jour = _aujourdhui().isoformat()
+    dit = (f"{sum(1 for v in out.values() if v['retiree'] == 'infloww')} Emy chez Infloww"
+           f"{f' (dont {len(inconnus)} inconnus d Infloww, comptés 0 : {inconnus[:5]})' if inconnus else ''}, "
+           f"{len(releve)} Seren au relevé du 03/11")
+    if _RETIREES_DIT.get(jour) != dit:
+        _RETIREES_DIT.clear()
+        _RETIREES_DIT[jour] = dit
+        print(f"[podium] Emy et Seren retirées de MyPuls : {dit}", flush=True)
+    return out
+
+
+_lire_mypuls_sans_retirees = _lire_mypuls
+
+
+def _lire_mypuls(du: str, au: str, forcer: bool = False   # noqa: F811
+                 ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], str]:
+    vus, raison = _lire_mypuls_sans_retirees(du, au, forcer)
+    if vus is None or _aujourdhui().isoformat() < RETIREES_DEPUIS:
+        return vus, raison
+    ajout = _retirees(du, au)
+    if not ajout:
+        return vus, raison
+    out = dict(vus)                   # le cache de MyPuls reste intact
+    for t, v in ajout.items():
+        out.setdefault(t, dict(v))
+    return out, raison
 
 
 _lire_mypuls_seul = _lire_mypuls

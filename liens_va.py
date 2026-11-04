@@ -1696,7 +1696,12 @@ def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
 # tracking du VA). Les copies des branches de l'A/B (« Base Lia ») restent des
 # liens DIRECTS : elles partent de l'ancien gabarit direct (source_variante),
 # comme Agency — une copie de la page garderait son bouton. "" : liens directs.
-GABARIT_PAGE_TWITTER = "lnk_6aea55ba68cb1865ee2b4fd0"
+# Propriétaire, 04/11/2026, « urgent » : « repasse toutes les pages Twitter en
+# lien direct, pas de landing page » — les 34 liens repassés en direct ce
+# jour-là (même id, destination = le tracking du bouton, pays sur le lien,
+# A/B gardé) ; sauvegarde des pages : data/sauvegardes_gms/
+# twitter_pages_avant_direct_2026-11-04.json. Un lien neuf naît direct.
+GABARIT_PAGE_TWITTER = ""
 
 
 _espace_avec_seren = espace
