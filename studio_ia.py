@@ -845,6 +845,16 @@ def jeton_machine_ok(envoye: str) -> bool:
                for m in _machines_connues().values())
 
 
+def site_public(url: str) -> str:
+    """Derrière nginx, Flask voit « http://youl4b.com » : la commande copiée
+    par un admin faisait `curl -fsS http://…`, qui suit une 301 sans -L et
+    écrit un fichier vide (vu le 04/11). Hors localhost, c'est https."""
+    u = (url or "").strip().rstrip("/") or "https://youl4b.com"
+    if u.startswith("http://") and not re.match(r"http://(localhost|127\.0\.0\.1|\[::1\]|192\.168\.)", u):
+        u = "https://" + u[len("http://"):]
+    return u
+
+
 def commande_machine(site: str) -> str:
     """La commande à lancer une fois sur la machine, sans aucun secret : elle
     va chercher visage_worker.py sur le site et l'installe (FaceFusion, venv,
@@ -1310,7 +1320,7 @@ def register(app, deps: Dict[str, Any]) -> None:
 
     def _site() -> str:
         try:
-            return (request.url_root or "https://youl4b.com").rstrip("/")
+            return site_public(request.url_root)
         except Exception:
             return "https://youl4b.com"
 

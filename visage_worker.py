@@ -57,6 +57,37 @@ _RE_TQDM = re.compile(r"(analysing|extracting|processing|merging)\s*:\s*(\d+)%\|
 #: rapides, le remplacement est le gros morceau).
 _PARTS = {"analysing": (0, 8), "extracting": (8, 14), "processing": (14, 94), "merging": (94, 100)}
 ETIQUETTE = "com.youl4b.visage"
+#: Où ffmpeg se cache quand launchd ne donne qu'un PATH réduit : sur le Mac
+#: du propriétaire il est dans ~/.local/bin (binaire statique) et FaceFusion
+#: répondait « ffmpeg is not installed » au premier travail (04/11).
+DOSSIERS_FFMPEG = [os.path.join(os.path.expanduser("~"), ".local", "bin"), "/opt/homebrew/bin",
+                   "/usr/local/bin", "/usr/bin"]
+
+
+def trouver_ffmpeg(conf=None, dossier=None):
+    """Chemin d'un ffmpeg exécutable, ou None. L'ordre : celui noté dans la
+    config, le PATH courant, le venv, puis les dossiers habituels."""
+    cands = []
+    if conf and conf.get("ffmpeg"):
+        cands.append(conf["ffmpeg"])
+    w = shutil.which("ffmpeg")
+    if w:
+        cands.append(w)
+    if dossier:
+        cands.append(os.path.join(dossier, "venv", "bin", "ffmpeg"))
+    cands += [os.path.join(d, "ffmpeg") for d in DOSSIERS_FFMPEG]
+    for c in cands:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return os.path.abspath(c)
+    return None
+
+
+def env_facefusion(ffmpeg):
+    """L'environnement de FaceFusion : le dossier de ffmpeg (et de ffprobe,
+    à côté) devant le PATH, quel que soit celui que launchd a donné."""
+    env = dict(os.environ)
+    env["PATH"] = os.path.dirname(ffmpeg) + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def log(msg):
@@ -153,8 +184,14 @@ def installer_facefusion(dossier):
         os.makedirs(d, exist_ok=True)
 
 
-def plist_launchd(dossier):
+def plist_launchd(dossier, ffmpeg=None):
     c = chemins(dossier)
+    # launchd ne lit pas le profil du shell : sans ~/.local/bin dans ce PATH,
+    # le ffmpeg du Mac restait invisible (04/11).
+    path = []
+    for d in ([os.path.dirname(ffmpeg)] if ffmpeg else []) + [os.path.join(c["venv"], "bin")] + DOSSIERS_FFMPEG + ["/bin"]:
+        if d not in path:
+            path.append(d)
     # --dossier avant la sous-commande : un worker d'avant le 04/11 ne le
     # comprenait qu'a cette place et mourait « unrecognized arguments »
     # toutes les 30 s sous launchd.
@@ -174,10 +211,10 @@ def plist_launchd(dossier):
   <key>StandardOutPath</key><string>%s</string>
   <key>StandardErrorPath</key><string>%s</string>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict><key>PATH</key><string>%s</string></dict>
 </dict>
 </plist>
-""" % (ETIQUETTE, lignes, c["journal"], c["journal"]))
+""" % (ETIQUETTE, lignes, c["journal"], c["journal"], ":".join(path).replace("&", "&amp;")))
 
 
 def poser_agent(dossier):
@@ -191,7 +228,7 @@ def poser_agent(dossier):
     os.makedirs(rep, exist_ok=True)
     plist = os.path.join(rep, ETIQUETTE + ".plist")
     with open(plist, "w", encoding="utf-8") as f:
-        f.write(plist_launchd(dossier))
+        f.write(plist_launchd(dossier, trouver_ffmpeg(lire_config(dossier), dossier)))
     uid = str(os.getuid())
     subprocess.run(["launchctl", "bootout", "gui/" + uid, plist], capture_output=True)
     r = subprocess.run(["launchctl", "bootstrap", "gui/" + uid, plist], capture_output=True, text=True)
@@ -217,6 +254,14 @@ def installer(args):
         conf["jeton"] = secrets.token_hex(24)     # le nôtre : le site l'acceptera
         conf["acceptee"] = False
     installer_facefusion(dossier)
+    ff = trouver_ffmpeg(conf, dossier)
+    if ff:
+        conf["ffmpeg"] = ff
+        log("ffmpeg : %s" % ff)
+    else:
+        conf.pop("ffmpeg", None)
+        log("ATTENTION : ffmpeg introuvable (PATH, ~/.local/bin, Homebrew) : FaceFusion en a besoin. "
+            "Installe-le (brew install ffmpeg) puis relance `installer`.")
     ecrire_config(dossier, conf)
     moi = chemins(dossier)["moi"]
     if os.path.abspath(__file__) != os.path.abspath(moi):
@@ -299,10 +344,14 @@ def faire(site, dossier, conf, tache):
     if not visage or not cible:
         raise RuntimeError("entrées incomplètes (photo + vidéo attendues)")
     sortie = os.path.join(rep, "sortie" + os.path.splitext(cible)[1].lower())
+    ff = trouver_ffmpeg(conf, dossier)
+    if not ff:
+        raise RuntimeError("ffmpeg introuvable sur « %s » (PATH, ~/.local/bin, Homebrew) : "
+                           "installe-le (brew install ffmpeg) puis relance `installer`" % site.nom)
     cmd = commande_facefusion(c, tache.get("finition") or "nette", visage, cible, sortie, int(conf.get("threads") or 4))
-    log("%s : FaceFusion (%s)" % (tid, tache.get("finition") or "nette"))
+    log("%s : FaceFusion (%s), ffmpeg %s" % (tid, tache.get("finition") or "nette", ff))
     p = subprocess.Popen(cmd, cwd=c["app"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         errors="replace", bufsize=1)
+                         errors="replace", bufsize=1, env=env_facefusion(ff))
     dernier_envoi, dernier_pct, dernier_etape = 0.0, -1, ""
     dernieres = []
     tampon = ""
@@ -465,6 +514,7 @@ def etat(args):
     print("venv :", "oui" if os.path.exists(c["python"]) else "non")
     modeles = glob.glob(os.path.join(c["app"], ".assets", "models", "*.onnx"))
     print("modèles :", len(modeles))
+    print("ffmpeg :", trouver_ffmpeg(conf, dossier) or "INTROUVABLE (brew install ffmpeg)")
     print("site :", conf.get("site", "—"), "| machine :", conf.get("nom", "—"), "| jeton :", "oui" if conf.get("jeton") else "non",
           "| acceptée :", "oui" if conf.get("acceptee") else "non")
     if os.path.exists(c["journal"]):

@@ -38658,6 +38658,22 @@ try:
               and _vw.analyseur().parse_args(["tourner"]).dossier == _vw.DOSSIER_DEFAUT
               and _vw.analyseur().parse_args(["installer", "--dossier", "/z", "--site", "s"]).dossier == "/z"
               and _plistV.index("--dossier") < _plistV.index("tourner"))
+        _dFf = _tfSia.mkdtemp(prefix="ffm_")
+        _ffF = _plSia.Path(_dFf, "ffmpeg"); _ffF.write_text("#!/bin/sh\n"); _ffF.chmod(0o755)
+        _plPath = _plV.loads(_vw.plist_launchd("/tmp/x", str(_ffF)).encode())["EnvironmentVariables"]["PATH"]
+        check("visage_worker.py : ffmpeg cherche dans la config, le PATH, ~/.local/bin et Homebrew ; son dossier passe devant le PATH de FaceFusion et dans celui de l agent (launchd ne lit pas le profil)",
+              _vw.trouver_ffmpeg({"ffmpeg": str(_ffF)}) == str(_ffF)
+              and _vw.trouver_ffmpeg({"ffmpeg": _dFf + "/absent"}) != _dFf + "/absent"
+              and _vw.env_facefusion(str(_ffF))["PATH"].startswith(_dFf + ":")
+              and _plPath.startswith(_dFf + ":") and ".local/bin" in _plPath and "/opt/homebrew/bin" in _plPath
+              and "trouver_ffmpeg" in _vw.etat.__code__.co_names)
+        _shSia.rmtree(_dFf, ignore_errors=True)
+        check("commande machine : https force hors localhost (nginx montre http a Flask, curl -fsS http:// ecrivait un fichier vide)",
+              _sia.site_public("http://youl4b.com/") == "https://youl4b.com"
+              and _sia.site_public("https://youl4b.com") == "https://youl4b.com"
+              and _sia.site_public("http://localhost:5000/") == "http://localhost:5000"
+              and _sia.site_public("") == "https://youl4b.com"
+              and "https://youl4b.com/studio-ia" in _sia.commande_machine(_sia.site_public("http://youl4b.com/")))
         _astV.parse(_plSia.Path("visage_worker.py").read_text(encoding="utf-8"), feature_version=(3, 9))
         check("visage_worker.py : syntaxe Python 3.9 (le python3 du Mac), FaceFusion avec gfpgan en nette, sans en rapide, progression lue, se presente au site",
               "def se_presenter(" in _plSia.Path("visage_worker.py").read_text(encoding="utf-8") and

@@ -44398,7 +44398,7 @@ def _render_studio_ia_html(admin: bool = False) -> str:
     try:
         import studio_ia
         try:
-            site = (request.url_root or "").rstrip("/") or "https://youl4b.com"
+            site = studio_ia.site_public(request.url_root)
         except Exception:
             site = "https://youl4b.com"
         return studio_ia.rendu_html(_langue_courante(), admin=bool(admin), site=site)
