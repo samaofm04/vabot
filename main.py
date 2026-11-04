@@ -47,6 +47,9 @@ MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_remind
              # Categorie « 🧰 Outils » du serveur FR (salons communs spoofer
              # et download) : ZERO commande slash, comme spoofer.
              "outils",
+             # Compteur « 🔓 VA Jailbreak : n » de MARCHE FR (Jailbreak FR
+             # de Youl4b), chaque heure : ZERO commande slash.
+             "compteurjailbreak",
              # Salon -generateur-de-lien des VA US (un lien GetMySocial par
              # identite) : ZERO commande slash, comme spoofer.
              "generateur_lien",
