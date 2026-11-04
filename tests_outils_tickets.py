@@ -917,6 +917,7 @@ try:
                 self.n += 1
                 i = f"c{self.n}"
                 self.poser({"id": i, "type": 0, "author": {"id": "w", "bot": True},
+                            "flags": kw["json"].get("flags", 0),
                             "content": kw["json"].get("content"), "components": kw["json"]["components"]})
                 return 200, {"id": i}
             if methode == "PUT" and "/pins/" in chemin:
@@ -932,10 +933,10 @@ try:
     ft = FauxTicket()
     rangs = tk.boutons_va(VA, confirme=True, a_un_lien=False, gid=AG)
     ft.poser({"id": ACC, "type": 0, "author": {"id": "w", "bot": True}, "components": rangs})
+    # 04/11/2026 : le menu du ticket est en blocs sur TRUST INSTAGRAM aussi
+    # (MENU_V2) ; la copie texte d'avant est reposée en blocs une fois
     ft.poser({"id": "menu0", "type": 0, "author": {"id": "w", "bot": True},
               "content": "📋 **Menu**", "components": rangs})
-    for i in range(3):                     # trois livraisons de Wario sous le menu
-        ft.poser({"id": f"f{i}", "type": 0, "author": {"id": "w", "bot": True}, "content": ""})
     e_ = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))
     e_["tickets"][f"{AG}:{VA}"]["menu"] = "menu0"
     tk.ETAT_FICHIER.write_text(json.dumps(e_), encoding="utf-8")
@@ -943,7 +944,17 @@ try:
     import liens_va as lv
     _lien_sauve = lv.lien_de
     lv.lien_de = lambda gid, uid: {}
+
+    def copies_v2():
+        return [i for i in ft.fil if i in ft.msgs
+                and tk._premier_texte_v2(ft.msgs[i]).startswith(tk.TITRE_MENU_V2)]
     try:
+        check("TRUST INSTAGRAM en blocs : la copie texte d'avant est reposée en v2, l'ancienne retirée",
+              AG in tk.MENU_V2 and tk.ramener_menu(AG, VA, S) == "ramene" and "menu0" not in ft.msgs
+              and len(copies_v2()) == 1 and ft.msgs[copies_v2()[0]]["flags"] == 32768
+              and not ft.msgs[copies_v2()[0]].get("content"), ft.fil)
+        for i in range(3):                     # trois livraisons de Wario sous le menu
+            ft.poser({"id": f"f{i}", "type": 0, "author": {"id": "w", "bot": True}, "content": ""})
         check("ramener_menu sans en_dernier : des messages de bots dessous, « deja » (comme avant)",
               tk.ramener_menu(AG, VA, S) == "deja" and ft.fil[-1] == "f2")
         r_ = tk.ramener_menu(AG, VA, S, en_dernier=True)
@@ -967,7 +978,7 @@ try:
         for f_ in fils:
             f_.join(10)
         ft.lent = 0.0
-        copies = [i for i in ft.fil if i in ft.msgs and ft.msgs[i].get("content") == "📋 **Menu**"]
+        copies = copies_v2()
         neuf = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))["tickets"][f"{AG}:{VA}"]["menu"]
         check("deux ramener_menu en même temps sur un ticket : UNE copie du menu, en dernier, celle de la "
               "fiche (pas d'orpheline épinglée)",

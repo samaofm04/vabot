@@ -4231,7 +4231,8 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     rangées de l'accueil (le 💳 y est retiré : il devient le bouton de la
     section Paiement, un custom_id ne vit qu'une fois par message). Sans appel
     réseau : le tour des liens le recalcule à chaque passage. `avec_page` : la
-    section « 📊 Tes stats » (par défaut, MENU_PAGE_STATS)."""
+    section « 📊 Tes stats » (par défaut : MENU_PAGE_STATS et tout menu v2 ;
+    stats_va.lien ne rend rien hors de ses serveurs)."""
     gid, uid = str(gid), str(uid)
     blocs: List[Dict[str, Any]] = []
     entete = TITRE_MENU_V2
@@ -4250,7 +4251,7 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     if url and l.get("actif", True) is not False and not parti:
         blocs.append({"type": 9, "components": [{"type": 10, "content": f"**🔗 Ton lien**\n{url}"}],
                       "accessory": {"type": 2, "style": 5, "label": "Ouvrir", "url": url}})
-        if (gid in MENU_PAGE_STATS) if avec_page is None else avec_page:
+        if (gid in MENU_PAGE_STATS or gid in MENU_V2) if avec_page is None else avec_page:
             try:
                 import stats_va
                 page = stats_va.lien(gid, uid)
@@ -4839,3 +4840,35 @@ def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, An
     return {"type": 4, "data": {"flags": EPHEMERE | V2,
                                 "components": _corps_menu(gid, uid, rangs, avec_page=True),
                                 "allowed_mentions": {"parse": []}}}
+
+
+# ─── Le menu du ticket en blocs sur TRUST INSTAGRAM aussi (04/11/2026) ───
+# Propriétaire, devant la copie texte du menu d'un ticket Instagram
+# (« 📋 Menu », le lien, sept boutons en vrac) à côté de celle de Twitter :
+# « je trouve vraiment le menu pas très carré [...] au niveau de Twitter [...]
+# c'est ton menu, voilà, tranquille [...] quelque chose de sensiblement
+# pareil, même s'il y a plus d'options ». Le même menu en blocs : lien, page
+# de stats, paiement, puis les rangées de l'accueil (📈 📤 ⬇️ 📱, 🎬, celle
+# des managers). Le 💳 garde la fenêtre Solana d'Instagram (USDC_RESEAUX_ICI
+# inchangé) ; l'accueil ne change pas. Les copies texte sont reposées en v2
+# au tour de l'heure (ramener_menus), comme sur Twitter le 04/11.
+MENU_V2.add(AGENCY_IG_ID)
+_recevoir_adresse_sans_menu = _recevoir_adresse
+
+
+def _recevoir_adresse(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    """La fenêtre Solana d'avant (TRUST INSTAGRAM) ; une adresse enregistrée
+    remet la section 💳 du menu en blocs à jour aussitôt — sinon il montrait
+    « Pas encore d'adresse » jusqu'au tour suivant."""
+    rep = _recevoir_adresse_sans_menu(p)
+    gid = str((p or {}).get("guild_id") or "")
+    cid = str((((p or {}).get("data") or {}).get("custom_id")) or "")
+    if (gid in MENU_V2 and cid.startswith("usdc:form:") and isinstance(rep, dict)
+            and str((rep.get("data") or {}).get("content") or "").startswith("✅")):
+        uid = cid.split(":", 2)[2]
+        try:
+            _EN_FOND(lambda: _maj_menu_v2(gid, uid))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[usdc] menu de {uid} non remis à jour : {type(e).__name__}: {e}", flush=True)
+    return rep
+

@@ -581,6 +581,51 @@ check("« numeros_x_discord poser agency » : rien posé dans le 📋・menu rep
       "rien posé" in rep and [a for a in APPELS_NX if a[0] != "GET"] == [], (rep, APPELS_NX))
 vd.api, vd.sur_serveur, vd.bot_du_serveur = _vd
 
+
+print("8. Le menu du ticket Instagram en blocs (« pas très carré »)")
+rangs_ag = tk.boutons_va(VA, a_un_lien=True, gid=AG)
+corps_ag = tk._corps_menu(AG, VA, rangs_ag)
+cids_ag = ids(corps_ag)
+check("TRUST INSTAGRAM : le menu du ticket est en blocs (MENU_V2), Twitter et Threads aussi",
+      {AG, TW, TH} <= tk.MENU_V2)
+check("en-tête « Instagram VA 160 · @yous1m », 🔗 lien, 📊 page, 💳 paiement",
+      textes(corps_ag)[0] == "## 📋 Ton menu\n-# Instagram VA 160 · @yous1m"
+      and ("Ouvrir", LIENS[AG]["public_url"]) in urls(corps_ag)
+      and ("Voir ma page", stats_va.lien(AG, VA)) in urls(corps_ag)
+      and any(x.startswith("**💳 Paiement**") for x in textes(corps_ag)), (textes(corps_ag), urls(corps_ag)))
+check("tous les boutons du ticket y sont (📈 📤 ⬇️ 📱 🎬 et ceux des managers), chacun une fois",
+      {f"usdc:set:{VA}", f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu", f"cnt:o:{VA}"}
+      <= set(cids_ag) and any(c.startswith(("essai:", "lien:")) for c in cids_ag)
+      and len(cids_ag) == len(set(cids_ag)), cids_ag)
+
+
+def compter(cs):
+    n, pile = 0, list(cs)
+    while pile:
+        c = pile.pop()
+        n += 1
+        pile += list(c.get("components") or [])
+        if isinstance(c.get("accessory"), dict):
+            pile.append(c["accessory"])
+    return n
+
+
+check("sous les 40 composants d'un message (Discord refuse au-delà)", compter(corps_ag) <= 40, compter(corps_ag))
+check("aucune rangée de plus de 5 boutons",
+      all(len(c.get("components") or []) <= 5 for c in corps_ag[0]["components"] if c.get("type") == 1))
+check("le 💳 garde la fenêtre Solana d'Instagram (pas le choix du réseau)", AG not in tk.USDC_RESEAUX_ICI)
+MAJ = []
+tk._maj_menu_v2 = lambda g, u, *a, **k: MAJ.append((g, u)) or 200
+tk._EN_FOND = lambda f: f()
+tk._recevoir_adresse_sans_menu = lambda p: {"type": 4, "data": {"content": "✅ Adresse enregistrée : `Em…`"}}
+f = clic(f"usdc:form:{VA}")
+f["type"] = 5
+tk._recevoir_adresse(f)
+check("une adresse enregistrée : la section 💳 du menu est remise à jour aussitôt", MAJ == [(AG, VA)], MAJ)
+tk._recevoir_adresse_sans_menu = lambda p: {"type": 4, "data": {"content": "✕ adresse invalide"}}
+tk._recevoir_adresse(f)
+check("une adresse refusée : rien n'est réécrit", MAJ == [(AG, VA)], MAJ)
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:
