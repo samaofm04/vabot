@@ -169,6 +169,33 @@ check("le titre d'une période lue chez Infloww dit « · Infloww », plus « My
       emy._titre_periode("2026-11-01", "2026-11-04", "2026-11-04", "Infloww") == "Du 01/11 au 04/11 · Infloww"
       and "MyPuls" in emy._titre_periode("2026-10-16", "2026-10-31", "2026-11-04", "MyPuls"))
 
+
+print("6. Rangée par équipe de manager, noms propres")
+for brut, propre in (("VA 2 - Abdoul", "Abdoul"), ("VA 3 - Roucham 1", "Roucham"), ("VA 4 - Ricardo 1", "Ricardo"),
+                     ("VA 5 - Gerome SPAM", "Gerome SPAM"), ("VA 1 Misandratra", "Misandratra"),
+                     ("VA 5 Kanto", "Kanto"), ("Carter", "Carter"), ("ANDRY", "ANDRY"), ("Toxi", "Toxi")):
+    check(f"« {brut} » → « {propre} »", emy.nom_propre(brut) == propre, emy.nom_propre(brut))
+emy._GROUPES.update(t=9e18, par_id={"s1": (1, "Manageur Safidy"), "n1": (2, "Manageuse Noum"),
+                                     "c1": (3, "Manageur Carter"), "r1": (4, "Manageur Roucham")})
+L = []
+for cle, gid, nom_gms in (("Toxi", "grp_c1", "VA 10 - ( Toxi)"), ("Carter", "grp_c1", "VA 1 - ( Carter ) 1"),
+                          ("VA 3 - Roucham 1", "grp_r1", "VA 3 - Roucham 1 ( normal )"),
+                          ("VA 2 - Abdoul", "grp_r1", "VA 2 - Abdoul ( normal )"),
+                          ("VA 5 Kanto", "grp_n1", "(VA 5 Kanto)"), ("VA 1 Misandratra", "grp_n1", "(VA 1 Misandratra)"),
+                          ("ANDRY", "grp_s1", "(ANDRY) 1"), ("Orphelin", "", "Orphelin")):
+    x = {"cle": cle, "nom": cle, "subs": 1}
+    emy._equiper(x, [{"group_id": gid, "display_name": nom_gms}])
+    L.append(x)
+ordre = [x["nom"] for x in emy.trier(L, "equipe", "asc")]
+check("l'ordre de GetMySocial : Safidy, Noum (VA 1, VA 5), Carter (VA 1, VA 10), Roucham (VA 2, VA 3), puis sans groupe",
+      ordre == ["ANDRY", "Misandratra", "Kanto", "Carter", "Toxi", "Abdoul", "Roucham", "Orphelin"], ordre)
+check("la clé ne change pas (paie, ancre) : seul le nom affiché", L[2]["cle"] == "VA 3 - Roucham 1" and L[2]["nom"] == "Roucham")
+check("page JESSY LE RETOUR : rangée par équipe sans « ?tri= » ; les autres pages par nom",
+      emy._tri_valide(None, None) == ("equipe", "asc") and lia._tri_valide(None, None) == ("nom", "asc")
+      and il._tri_valide("equipe", "asc") == ("nom", "asc"))
+check("le lien sans tri garde l'ordre par équipe (pas de « tri= » dans l'adresse)",
+      "tri=" not in emy._requete_page("equipe", "asc", "", "2026-11-01", "2026-11-15"))
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:

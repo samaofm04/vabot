@@ -280,7 +280,16 @@ US_PERIODES_GARDE_S = 45 * 86400     # au-delà, une période plus consultée so
 
 # « gain » : la colonne Gain / perte (le paiement, page seulement) ; une
 # personne sans réglage n'a pas de gain et va en bas, dans les deux sens
-TRIS = ("nom", "us", "glob", "clics_cvr", "clics", "subs", "cvr", "par_sub", "gagne", "gain")
+TRIS = ("nom", "us", "glob", "clics_cvr", "clics", "subs", "cvr", "par_sub", "gagne", "gain", "equipe")
+#: L'ordre de la page sans « ?tri= ». « equipe » (page JESSY LE RETOUR) : par
+#: groupe de manager comme sur GetMySocial, puis par numéro de VA (PAR_EQUIPE).
+TRI_DEFAUT = "nom"
+#: True : chaque personne prend le groupe GetMySocial de ses liens (le manager,
+#: « Manageur Carter »…), son numéro de VA et un nom propre (« VA 3 - Roucham
+#: 1 » → « Roucham ») ; sa clé (paie, ancre) ne change pas. Propriétaire,
+#: 04/11/2026 : « tu les ranges par classe, sans avoir un trait », « tu mets
+#: tout bien normal comme il faut ».
+PAR_EQUIPE = False
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
@@ -322,7 +331,9 @@ GMS_COPIE = DATA_DIR / "infloww_liens_gms.json"
 GMS_FRAIS_S = 3600                   # une heure (propriétaire, 06/10/2026)
 # created_at / createdAt : gardés s'ils viennent un jour (la liste v3 du 26/09
 # n'en a pas) — la date de création d'un lien GMS borne ses lignes (cree_gms)
-_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt", "status")
+_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt", "status",
+               # le groupe du manager (page JESSY LE RETOUR, rangée par équipe)
+               "group_id")
 
 
 def _url_boutons(l: Mapping[str, Any]) -> List[str]:
@@ -1876,6 +1887,70 @@ def _part_partenaire(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
             "net_hors": sum(1 for x in lus if x.get("net_absent") and int(x.get("abonnes") or 0))}
 
 
+_GROUPES: Dict[str, Any] = {"t": 0.0, "par_id": {}}
+GROUPES_FRAIS_S = 3600
+
+
+def _id_groupe(g: Any) -> str:
+    g = str(g or "").strip()
+    return g[4:] if g.startswith("grp_") else g
+
+
+def groupes_equipe() -> Dict[str, Tuple[int, str]]:
+    """{id de groupe: (rang sur GetMySocial, nom)} des groupes de l'espace,
+    relus au plus une fois par heure ; la dernière lecture si GetMySocial ne
+    répond pas ; {} sans aucune (la page reste par nom). Ne lève pas."""
+    if time.time() - float(_GROUPES["t"]) < GROUPES_FRAIS_S and _GROUPES["par_id"]:
+        return dict(_GROUPES["par_id"])
+    try:
+        import gms
+        r = gms.list_team_groups(EQUIPE_GMS) if EQUIPE_GMS else {}
+        gs = [g for g in (r.get("groups") or []) if isinstance(g, Mapping)]
+        par = {_id_groupe(g.get("id")): (k, str(g.get("name") or "").strip())
+               for k, g in enumerate(gs) if _id_groupe(g.get("id")) not in ("", "ungrouped")}
+        if par:
+            _GROUPES.update(t=time.time(), par_id=par)
+        elif r.get("error"):
+            print(f"[infloww-liens] groupes GetMySocial illisibles : {str(r.get('error'))[:120]}", flush=True)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[infloww-liens] groupes GetMySocial : {type(e).__name__}: {e}", flush=True)
+    return dict(_GROUPES["par_id"])
+
+
+_RE_NUM_VA = re.compile(r"\bVA\s*(\d+)\b", re.I)
+
+
+def nom_propre(cle: Any) -> str:
+    """« VA 3 - Roucham 1 » → « Roucham », « VA 5 Kanto » → « Kanto »,
+    « VA 5 - Gerome SPAM » → « Gerome SPAM » : le numéro de VA sort du nom
+    (il range la ligne), comme « Carter » ou « Mihkim »."""
+    n = re.sub(r"^\s*VA\s*\d+\s*-?\s*", "", str(cle or ""), flags=re.I)
+    spam = bool(re.search(r"\bspam\b", n, re.I))
+    n = re.sub(r"\bspam\b", "", n, flags=re.I)
+    n = re.sub(r"\s+\d+\s*$", "", n.strip()).strip(" -")
+    return (n + (" SPAM" if spam else "")).strip() or str(cle or "")
+
+
+def _equiper(ligne: Dict[str, Any], liens: List[Mapping[str, Any]]) -> None:
+    """Le groupe du manager (celui de ses liens ; le premier dans l'ordre de
+    GetMySocial s'ils diffèrent), le numéro de VA (son nom, sinon celui d'un
+    de ses liens) et le nom propre de la personne."""
+    groupes = groupes_equipe()
+    vus = sorted({groupes[_id_groupe(l.get("group_id"))] for l in liens
+                  if _id_groupe(l.get("group_id")) in groupes})
+    if vus:
+        ligne["rang_equipe"], ligne["equipe"] = vus[0]
+    m = _RE_NUM_VA.search(str(ligne.get("cle") or ""))
+    if not m:
+        for l in liens:
+            m = _RE_NUM_VA.search(str(l.get("display_name") or l.get("title") or ""))
+            if m:
+                break
+    if m:
+        ligne["num"] = int(m.group(1))
+    ligne["nom"] = nom_propre(ligne.get("cle"))
+
+
 def _cle_nom(nom: Any) -> Tuple[Tuple[int, Any], ...]:
     """Ordre alphabétique « naturel », sans accents ni casse : les numéros
     comptent comme des nombres. Sans ça, VA 10 Noum passerait avant VA 2 Noum
@@ -2005,6 +2080,8 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                  "us": u.get("us"), "glob": u.get("glob"), "us_etat": u.get("etat") or "absent",
                  "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or "",
                  "us_note": u.get("note") or ""}
+        if PAR_EQUIPE:
+            _equiper(ligne, [par_id.get(str(g_)) or {} for g_ in e["ids"]])
         if NOM_PAR_SUIVI:
             # page Lia : « VA 1 » ne dit pas qui c'est ; le lien de suivi porte
             # le pseudo du VA. La clé (paie, ancre, clics US) reste « VA 1 ».
@@ -2813,7 +2890,7 @@ def lire_paie() -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
 def _requete_page(tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
     """« ?tri=…&du=…&k=… » brut (pas pour un href : _lien_page l'échappe)."""
     from urllib.parse import quote
-    defaut = (tri, sens) == ("nom", "asc")
+    defaut = (tri, sens) == (TRI_DEFAUT, "asc")
     paires = (("tri", "" if defaut else tri), ("sens", "" if defaut else sens),
               ("du", du), ("au", au), ("k", cle), ("c", PROFIL))
     return "?" + "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires if v)
@@ -4714,11 +4791,12 @@ def _tri_valide(tri: Any, sens: Any) -> Tuple[str, str]:
     tri = str(tri or "")
     # page Lia : pas de colonne des clics du lien de suivi, pas de tri dessus
     if (tri not in TRIS or (tri == "clics" and not CLICS_OF) or (tri == "glob" and not CLICS_GLOBAUX)
-            or (tri == "clics_cvr" and not COLONNE_CLICS_CVR) or (tri == "gagne" and not COLONNE_GAGNE)):
-        return "nom", "asc"
+            or (tri == "clics_cvr" and not COLONNE_CLICS_CVR) or (tri == "gagne" and not COLONNE_GAGNE)
+            or (tri == "equipe" and not PAR_EQUIPE)):
+        return TRI_DEFAUT, "asc"
     sens = str(sens or "")
     if sens not in SENS:
-        sens = "asc" if tri == "nom" else "desc"
+        sens = "asc" if tri in ("nom", "equipe") else "desc"
     return tri, sens
 
 
@@ -4731,6 +4809,12 @@ def trier(lignes: List[Mapping[str, Any]], tri: str = "nom", sens: str = "asc"
     base = sorted(lignes, key=_ordre_defaut)
     avec = [x for x in base if x.get(tri) is not None]
     sans = [x for x in base if x.get(tri) is None]
+    if tri == "equipe":
+        # le groupe du manager dans l'ordre de GetMySocial, puis le numéro de
+        # VA, puis le nom ; une personne sans groupe connu en dernier
+        return sorted(base, key=lambda x: (int(x.get("rang_equipe") if x.get("rang_equipe") is not None else 999),
+                                           int(x.get("num") or 9999), _cle_nom(x.get("nom"))),
+                      reverse=(sens == "desc"))
     if tri == "nom":
         cle = lambda x: _cle_nom(x.get("nom"))  # noqa: E731
     else:
@@ -5837,7 +5921,7 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
     paie = "paie" in t
     tri, sens = _tri_valide(tri, sens)
     if tri == "gain" and not paie:
-        tri, sens = "nom", "asc"         # pas de colonne Gain sur la vue des VA
+        tri, sens = TRI_DEFAUT, "asc"    # pas de colonne Gain sur la vue des VA
     lignes = trier(t.get("lignes") or [], tri, sens)
     hors = sorted(t.get("hors_gms") or [], key=_ordre_defaut)
     T = t.get("totaux") or {}
@@ -6093,6 +6177,9 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
 # VA TRUST (propriétaire, 04/11/2026 : « donne-moi le lien avec tous les VA de
 # JESSY LE RETOUR », « c'est pour Youl4b Spam »).
 REGLAGES["emy"] = {
+    # rangée par équipe de manager, comme sur GetMySocial (« tu les ranges par
+    # classe ») ; noms propres
+    "PAR_EQUIPE": True, "TRI_DEFAUT": "equipe",
     # Emy et Jessye n'y sont plus chez MyPuls : une période depuis le 01/11 se
     # lit chez Infloww seul (voir PERIODE_INFLOWW_DEPUIS)
     "PERIODE_INFLOWW_DEPUIS": "2026-11-01",
