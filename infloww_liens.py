@@ -2097,11 +2097,69 @@ def _prix_unique(cfg: Optional[Mapping[str, Any]]) -> Optional[float]:
     return None
 
 
+#: La paie des VA de Youl4b (Spam), page JESSY LE RETOUR (?c=emy), par
+#: quinzaine (propriétaire, 04/11/2026, « Système de rémunération » : 14 jours,
+#: payés le 1er et le 16) : sous SEUIL subs, SOUS_SEUIL $ par sub et pas de
+#: fixe (« si le mec est en dessous de 70 subs, mets-lui 0,40 par sub ») ; à
+#: partir du seuil, le FIXE (60 $) plus une prime sur les subs AU-DELÀ du
+#: seuil, au taux du palier qu'ils atteignent, appliqué à tous (« s'il fait
+#: 160 subs, tu retires 70, ça fait 90 [...] 0,5 le sub [...] plus les 60 du
+#: fixe » ; « les primes ne sont pas cumulables »). Seulement pour les
+#: quinzaines qui commencent le DEPUIS ou après ; None : pas de grille.
+PAIE_GRILLE: Optional[Dict[str, Any]] = None
+
+
+def paie_grille(subs: Any, g: Optional[Mapping[str, Any]] = None) -> Optional[float]:
+    """Ce que gagne un VA à `subs` sur UNE quinzaine selon PAIE_GRILLE (ou `g`) ;
+    None sans grille ou sans nombre."""
+    g = g if g is not None else PAIE_GRILLE
+    if not g or subs is None:
+        return None
+    n = int(subs)
+    seuil = int(g["seuil"])
+    if n < seuil:
+        return round(n * float(g["sous_seuil"]), 2)
+    reste = n - seuil
+    taux = next(t for plancher, t in g["paliers"] if reste >= plancher)
+    return round(float(g["fixe"]) + reste * float(taux), 2)
+
+
+def _quinzaine_de_la_vue(t: Mapping[str, Any]) -> Optional[Tuple[dt.date, dt.date]]:
+    """La quinzaine que la vue couvre EN ENTIER (du 1 au 15, du 16 à la fin,
+    ou la quinzaine en cours jusqu'à aujourd'hui) ; None pour toute autre vue
+    (depuis toujours, un jour, 7 jours…) : la grille se paie par quinzaine, une
+    part de quinzaine n'a pas de prix."""
+    per = t.get("periode") or {}
+    try:
+        du, au = dt.date.fromisoformat(str(per.get("du"))), dt.date.fromisoformat(str(per.get("au")))
+    except (TypeError, ValueError):
+        return None
+    q0, q1 = quinzaine_de(du)
+    auj = dt.date.fromisoformat(_aujourdhui())
+    if du == q0 and (au == q1 or (au == auj and q0 <= auj <= q1)):
+        return q0, q1
+    return None
+
+
 def _ajouter_gagne(t: Dict[str, Any]) -> Dict[str, Any]:
     """La colonne « Gagné » (COLONNE_GAGNE) : subs de la vue × prix au sub de
     chaque VA (son réglage, sinon PAIE_PAGE). « — » quand ce n'est pas
-    calculable ainsi. Sa paie, jamais le revenu de l'agence."""
+    calculable ainsi. Sa paie, jamais le revenu de l'agence. Avec PAIE_GRILLE
+    (Youl4b Spam) : la grille, sur une vue d'une quinzaine entière seulement,
+    pour tout le monde (le système du 04/11 remplace les réglages d'avant)."""
     if not COLONNE_GAGNE or t.get("erreur"):
+        return t
+    if PAIE_GRILLE:
+        q = _quinzaine_de_la_vue(t)
+        payable = q is not None and q[0].isoformat() >= str(PAIE_GRILLE.get("depuis") or "")
+        vals = []
+        for x in t.get("lignes") or []:
+            x["gagne"] = paie_grille(x.get("subs")) if payable else None
+            if x["gagne"] is not None:
+                vals.append(x["gagne"])
+        if not isinstance(t.get("totaux"), dict):
+            t["totaux"] = {}
+        t["totaux"]["gagne"] = round(sum(vals), 2) if vals else None
         return t
     try:
         cfgs, _mauvais = lire_paie()
@@ -5860,6 +5918,16 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
     "PAIE_PAGE": {"type": "au_sub", "taux1": 0.7, "seuil": 0, "taux2": 0.7, "devise": "USD",
                   "depuis": "2026-10-31"},
 }}
+# Page JESSY LE RETOUR (?c=emy), les VA de Youl4b (Spam) : la colonne « Gagné »
+# à leur grille (PAIE_GRILLE) et les clics globaux, comme la page de stats des
+# VA TRUST (propriétaire, 04/11/2026 : « donne-moi le lien avec tous les VA de
+# JESSY LE RETOUR », « c'est pour Youl4b Spam »).
+REGLAGES["emy"] = {
+    "CLICS_GLOBAUX": True,
+    "COLONNE_GAGNE": True,
+    "PAIE_GRILLE": {"depuis": "2026-11-01", "seuil": 70, "fixe": 60.0, "sous_seuil": 0.40,
+                    "paliers": ((500, 0.80), (200, 0.70), (100, 0.60), (0, 0.50))},
+}
 # la créatrice dont la page additionne la part (voir PARTENAIRE) : le 27/10,
 # les liens de la page Emy sont passés sur Jessye
 PARTENAIRES: Dict[str, Tuple[str, str]] = {"emy": (pd.CREATRICE_JESSYE, "Jessye")}

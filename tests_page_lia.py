@@ -210,8 +210,11 @@ check("Gagné : subs × 0,70 $ (VA 1 : 3 subs = 2,10 $ ; VA 3 : 0 $ ; VA 4 sans 
       lignes["VA 1"].get("gagne") == 2.1 and lignes["VA 2"].get("gagne") == 0.7 and lignes["VA 3"].get("gagne") == 0.0
       and lignes["VA 4"].get("gagne") is None and t["totaux"].get("gagne") == 2.8,
       ({k: x.get("gagne") for k, x in lignes.items()}, t["totaux"].get("gagne")))
-check("Gagné : écrit dans la page (2,10 $ sur la ligne de VA 1), Jessye et Emy sans la colonne",
-      "2,10 $" in " ".join(texte.split()) and il.COLONNE_GAGNE is False and il.profil("emy").COLONNE_GAGNE is False)
+# 04/11/2026 : la page Emy (JESSY LE RETOUR, Youl4b Spam) a sa colonne, à sa
+# grille (tests_paie_youl4b_spam) ; Jessye seule toujours sans
+check("Gagné : écrit dans la page (2,10 $ sur la ligne de VA 1), Jessye sans la colonne, Emy à sa grille",
+      "2,10 $" in " ".join(texte.split()) and il.COLONNE_GAGNE is False and il.profil("emy").COLONNE_GAGNE is True
+      and il.profil("emy").PAIE_GRILLE and not getattr(m, "PAIE_GRILLE", None))
 check("clics GMS relus toutes les 20 min sur Lia (l'image de 21h00 montrait un relevé d'une heure)",
       m.US_FRAIS_S == 1200 and il.REGLAGES["lia"]["US_OUVERTE_FRAIS_S"] == 1200
       and il.US_OUVERTE_FRAIS_S == 7200 and il.US_FRAIS_S is None)
@@ -229,8 +232,8 @@ check("Jessye et Emy : pas de colonne Clics Infloww",
 check("clics globaux : le total tous pays du même relevé GetMySocial (US 40 + 5 ailleurs)",
       lignes["VA 1"]["glob"] == 45 and lignes["VA 3"]["glob"] == 5 and t["totaux"]["glob"] == 45 + 17 + 5 + 35,
       (lignes["VA 1"].get("glob"), t["totaux"].get("glob")))
-check("Jessye et Emy : pas de colonne des clics globaux",
-      il.CLICS_GLOBAUX is False and il.profil("emy").CLICS_GLOBAUX is False)
+check("Jessye : pas de colonne des clics globaux ; Emy (JESSY LE RETOUR) : oui, depuis le 04/11",
+      il.CLICS_GLOBAUX is False and il.profil("emy").CLICS_GLOBAUX is True)
 check("aucune colonne « Clics MyPuls » (la colonne des clics est celle d'Infloww)",
       "Clics MyPuls" not in " ".join(texte.split()) and "Clics Infloww" in " ".join(texte.split()))
 va1 = lignes["VA 1"]
