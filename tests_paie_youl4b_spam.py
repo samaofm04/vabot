@@ -164,6 +164,11 @@ check("une quinzaine d'avant (16→31/10) : MyPuls comme avant", APPELS_MP and t
 emy._mypuls_periode = _mp
 _pd.subs_infloww = _pd_si
 
+
+check("le titre d'une période lue chez Infloww dit « · Infloww », plus « MyPuls + Infloww »",
+      emy._titre_periode("2026-11-01", "2026-11-04", "2026-11-04", "Infloww") == "Du 01/11 au 04/11 · Infloww"
+      and "MyPuls" in emy._titre_periode("2026-10-16", "2026-10-31", "2026-11-04", "MyPuls"))
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:

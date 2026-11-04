@@ -5118,13 +5118,15 @@ def _avert_us_periode(per: Mapping[str, Any], lignes: List[Mapping[str, Any]], c
     return '<div class="avert">Clics US de la période : ' + " ; ".join(m) + suite + "</div>"
 
 
-def _titre_periode(du: str, au: str, auj: str) -> str:
+def _titre_periode(du: str, au: str, auj: str, source: str = "") -> str:
     """« Du 21/09 au 26/09 · MyPuls », « Le 26/09 · MyPuls » ou « Depuis
     toujours · Infloww » : d'où viennent les chiffres, avant tout le reste.
     Page Emy : « · MyPuls + Infloww » (la part Jessye vient d'Infloww)."""
     if not du:
         return f"Depuis toujours · {SOURCE_TOUJOURS}"
     f = _jour_long if (du[:4] != auj[:4] or au[:4] != auj[:4]) else _jour_court
+    if source == "Infloww":          # plus de MyPuls (PERIODE_INFLOWW_DEPUIS)
+        return (f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · Infloww"
     return ((f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · MyPuls"
             + (" + Infloww" if PARTENAIRE else ""))
 
@@ -5153,12 +5155,18 @@ def _note_partenaire(t: Mapping[str, Any], du: str) -> List[str]:
                "un lien créé après la période y vaut 0, sans lecture",
                f"<b>Liens de suivi quittés</b> : un lien de suivi {nc} qu'un lien GetMySocial visait encore "
                "pendant la période (registre du podium) compte chez la personne de ce lien jusqu'au dernier "
-               "jour où il était visé, comme au podium (clics et subs lus dans MyPuls jusqu'à ce jour ; gains "
-               f"de toute la période) — {_nb(n_q)} ici, « visé jusqu'au » sous son nom",
-               f"<b>Clics OF</b> = clics MyPuls des liens {nc} + clics Infloww des liens {np}. Infloww ne date "
-               f"ni les clics ni les gains : ceux d'un lien {np} ne comptent que si la période commence au "
-               "plus tard le jour de sa création et finit aujourd'hui ; sinon « hors " + np + " » sous les "
-               f"clics (CVR sans eux) et « {nc} seule » sous le $ / sub"]
+               "jour où il était visé, comme au podium (clics et subs lus "
+               + ("chez Infloww" if t.get("source") == "Infloww" else "dans MyPuls")
+               + f" jusqu'à ce jour ; gains de toute la période) — {_nb(n_q)} ici, « visé jusqu'au » sous son nom",
+               (f"<b>Clics OF</b> = clics Infloww des liens {nc} et {np}. Infloww ne date ni les clics ni "
+                "les gains : ceux d'une période = le cumul de la fin moins celui de la veille du début, "
+                "relevés chaque jour depuis le 04/11/2026 ; sans relevé de la veille, « — » (un lien créé "
+                "pendant la période part de 0)"
+                if t.get("source") == "Infloww" else
+                f"<b>Clics OF</b> = clics MyPuls des liens {nc} + clics Infloww des liens {np}. Infloww ne date "
+                f"ni les clics ni les gains : ceux d'un lien {np} ne comptent que si la période commence au "
+                "plus tard le jour de sa création et finit aujourd'hui ; sinon « hors " + np + " » sous les "
+                f"clics (CVR sans eux) et « {nc} seule » sous le $ / sub")]
     if any(r.get("partage_avec") for x in t.get("lignes") or [] for r in x.get("infloww") or []):
         out.append("« tracking partagé avec » sous un nom : le même lien de suivi compte sur chacune de ces "
                    "lignes (une fois au total) ; à qui il revient n'est pas tranché ici")
@@ -5276,7 +5284,10 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 "brute de GetMySocial",
                 # page Emy : ces deux phrases parlent de ses liens Emy (la part
                 # Jessye a les siennes, _note_partenaire)
-                (f"<b>Clics {'OF' if PARTENAIRE else 'MyPuls'}</b> et <b>Subs</b>"
+                (f"<b>Subs</b> des liens {_e(NOM_AFFICHE)} : abonnés du lien de suivi sur la période, lus "
+                 "chez Infloww abonné par abonné (plus de MyPuls) ; clics et gains : voir plus bas"
+                 if t.get("source") == "Infloww" else
+                 f"<b>Clics {'OF' if PARTENAIRE else 'MyPuls'}</b> et <b>Subs</b>"
                  + (f" des liens {_e(NOM_AFFICHE)}" if PARTENAIRE else "")
                  + " : visites et abonnés du lien de suivi sur la période, "
                  "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls) ; dessous, la part des "
@@ -5285,11 +5296,16 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
                 f"<b>CVR</b> = subs ÷ clics {('OF' if PARTENAIRE else 'MyPuls') if CLICS_OF else 'OnlyFans du lien de suivi'}"
                 + (" (ceux d'Infloww quand ils sont connus pour la période, sinon ceux de MyPuls)"
                    if CREATRICE_CVR else "") + " ; "
-                "<b>$ / sub</b> = gains nets que MyPuls attribue au lien sur la période ÷ subs de la période"]
+                + ("<b>$ / sub</b> = gains nets Infloww du lien sur la période (différence des relevés) ÷ subs "
+                 "de la période" if t.get("source") == "Infloww" else
+                 "<b>$ / sub</b> = gains nets que MyPuls attribue au lien sur la période ÷ subs de la période")]
         if au == auj:
             note.append("aujourd'hui compte jusqu'à l'heure de lecture")
-        note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
-                    f"{_nb(MYPULS_TTL_S // 60)} min au plus")
+        if t.get("source") == "Infloww":
+            note.append(f"Infloww lu le {_e(_heure(t.get('lu_a')))} (heure de Paris)")
+        else:
+            note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
+                        f"{_nb(MYPULS_TTL_S // 60)} min au plus")
     if COLONNE_CLICS_CVR:
         # Infloww ne date pas ses clics : sur une période, une différence de relevés
         note.insert(3 if du else 2, "<b>Clics Infloww</b> : clics du lien de suivi OnlyFans, lus chez "
@@ -5864,7 +5880,7 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
     if paie and not t.get("erreur"):
         note += _note_paie(t, du)
     pt = t.get("partenaire") or {}
-    sous = (f"<b>{_e(_titre_periode(du, au, auj))}</b> · @{_e(t.get('creatrice') or CREATRICE)}"
+    sous = (f"<b>{_e(_titre_periode(du, au, auj, str(t.get('source') or '')))}</b> · @{_e(t.get('creatrice') or CREATRICE)}"
             + (f" + @{_e(pt.get('creatrice'))}" if pt.get("creatrice") else "")
             + f" · GetMySocial « {_e(NOM_EQUIPE)} »")
     if not t.get("erreur"):
