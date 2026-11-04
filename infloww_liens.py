@@ -1181,6 +1181,82 @@ def _crees_partenaire(codes: Any) -> Dict[str, str]:
     return out
 
 
+#: Les cumuls Infloww (clics, net) de chaque lien de suivi de la PARTENAIRE,
+#: le dernier vu chaque jour de Paris (propriétaire, 04/11/2026 : Jessye « n'est
+#: plus sur MyPuls, uniquement API Infloww ») : Infloww ne date ni les clics ni
+#: les gains, une période les prend par différence de deux relevés (fin −
+#: veille du début). Sans relevé de la veille, « — » : jamais les clics
+#: d'octobre comptés dans la quinzaine du 1er novembre.
+_VERROU_RELEVES_PART = threading.Lock()
+
+
+def _fichier_releves_part() -> Path:
+    return DATA_DIR / f"infloww_liens_releves_partenaire_{PROFIL or 'jessye'}.json"
+
+
+def _noter_releve_partenaire(liens: Mapping[str, Mapping[str, Any]], jour: str) -> Dict[str, Any]:
+    """Range le cumul du jour (clics, net) de chaque lien et rend les relevés.
+    N'écrit que si quelque chose a changé."""
+    with _VERROU_RELEVES_PART:
+        f = _fichier_releves_part()
+        d = _lire_json(f)
+        jours = {k: dict(v) for k, v in (d.get("jours") or {}).items() if isinstance(v, Mapping)}
+        neuf = dict(jours.get(jour) or {})
+        for code, l in liens.items():
+            c, n = _entier(l.get("clics")), _entier(l.get("net"))
+            if code and c is not None and n is not None:
+                neuf[str(code)] = [c, n]
+        if neuf != jours.get(jour):
+            jours[jour] = neuf
+            for k in sorted(jours)[:-RELEVES_CVR_JOURS]:
+                jours.pop(k, None)
+            try:
+                safe_json.write(f, {"jours": jours, "maj": time.time()})
+            except Exception as e:
+                print(f"[infloww-liens] relevé de {NOM_PARTENAIRE or PARTENAIRE} non écrit : {e}", flush=True)
+        return jours
+
+
+def relever_partenaire() -> str:
+    """Le relevé du jour de la partenaire, pris par la boucle du site (un jour
+    sans visite de la page aurait laissé la période suivante en « — »).
+    Rend "" ou la raison de l'échec. Ne lève pas."""
+    if not PARTENAIRE:
+        return ""
+    try:
+        i = _infloww(PARTENAIRE)
+        if i.get("erreur"):
+            return str(i["erreur"])[:200]
+        par = {_code_infloww(l): l for l in i.get("liens") or [] if isinstance(l, Mapping) and _code_infloww(l)}
+        _noter_releve_partenaire(par, _aujourdhui())
+        return ""
+    except Exception as e:                                   # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+
+
+def _cumuls_periode(jours: Mapping[str, Any], par: Mapping[str, Mapping[str, Any]], code: str,
+                    cree: str, du: str, au: str, auj: str) -> Optional[Tuple[int, int]]:
+    """(clics, net) du lien `code` sur [du, au] par différence des relevés ;
+    None s'il manque un relevé (ou s'ils reculent)."""
+    if au >= auj:
+        fin = (_entier(par[code].get("clics")), _entier(par[code].get("net")))
+    else:
+        v = (jours.get(au) or {}).get(code)
+        fin = (v[0], v[1]) if isinstance(v, list) and len(v) == 2 else (None, None)
+    if cree and cree >= du:
+        debut: Tuple[Optional[int], Optional[int]] = (0, 0)
+    else:
+        try:
+            veille = (dt.date.fromisoformat(du) - dt.timedelta(days=1)).isoformat()
+        except ValueError:
+            return None
+        v = (jours.get(veille) or {}).get(code)
+        debut = (v[0], v[1]) if isinstance(v, list) and len(v) == 2 else (None, None)
+    if None in fin or None in debut or fin[0] < debut[0]:
+        return None
+    return int(fin[0]) - int(debut[0]), int(fin[1]) - int(debut[1])
+
+
 def _lire_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> Tuple[Dict[str, Any], str]:
     """La part Jessye de [du, au] (bornes incluses, jours de Paris ; du = au =
     "" : depuis toujours) : ({liens, lu_a, tronque}, "") ou ({}, pourquoi). Un
@@ -1212,6 +1288,12 @@ def _lire_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> Tuple[Dict[str
         return {}, ("Infloww n'a pas rendu les abonnés de ses liens (linkfans), ou le podium l'a trouvé "
                     "muet il y a moins de 10 min : nouvel essai ensuite")
     auj = _aujourdhui()
+    try:
+        jours = _noter_releve_partenaire(par, auj)
+    except Exception as e:  # un relevé illisible ne fait pas tomber la page
+        print(f"[infloww-liens] relevés de {NOM_PARTENAIRE or PARTENAIRE} illisibles : "
+              f"{type(e).__name__}: {e}", flush=True)
+        jours = {}
     liens = []
     for c in connus:
         l = par[c]
@@ -1221,10 +1303,15 @@ def _lire_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> Tuple[Dict[str
         cree = crees.get(c, "")
         # les compteurs cumulés d'Infloww SONT ceux de la période quand elle
         # couvre toute la vie du lien et finit aujourd'hui (depuis toujours :
-        # toujours) ; sinon inconnus
+        # toujours) ; sinon, par différence des relevés du jour (04/11/2026)
         entier = not du or (bool(cree) and du <= cree and au >= auj)
         n = subs.get(f"{PARTENAIRE}/c{c}")
-        liens.append(_entree_partenaire(l, c, None if n is None else int(n), entier))
+        e = _entree_partenaire(l, c, None if n is None else int(n), entier)
+        if not entier:
+            cn = _cumuls_periode(jours, par, c, cree, du, au, auj)
+            if cn is not None:
+                e.update(clics=cn[0], net=cn[1], net_absent=False)
+        liens.append(e)
     return {"liens": liens, "lu_a": i.get("lu_a"), "tronque": list(i.get("tronque") or [])}, ""
 
 

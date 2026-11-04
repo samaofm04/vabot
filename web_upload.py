@@ -61441,6 +61441,7 @@ def _start_infloww_liens_daemon() -> bool:
         dernier = None
         dernier_us = None
         dernier_releve = ""
+        dernier_releve_p = ""
         while True:
             try:
                 import infloww_liens as _il
@@ -61473,6 +61474,17 @@ def _start_infloww_liens_daemon() -> bool:
                     dernier_releve = _r
             except Exception as e:
                 print(f"[infloww-liens] relevé des clics de Lia : {type(e).__name__}: {e}", flush=True)
+            try:
+                # même chose pour Jessye (page JESSY LE RETOUR, ?c=emy) : plus
+                # sur MyPuls depuis le 04/11/2026, clics et gains d'une période
+                # par différence de ses relevés Infloww
+                _emy = _il.profil("emy")
+                _r2 = _emy.relever_partenaire() if _emy is not None else ""
+                if _r2 and _r2 != dernier_releve_p:
+                    print(f"[infloww-liens] relevé de Jessye raté : {_r2}", flush=True)
+                dernier_releve_p = _r2
+            except Exception as e:
+                print(f"[infloww-liens] relevé de Jessye : {type(e).__name__}: {e}", flush=True)
             _t_il.sleep(600)
 
     _th_il.Thread(target=_boucle, daemon=True, name="infloww-liens").start()

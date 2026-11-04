@@ -92,6 +92,45 @@ print("3. La page")
 check("la page Emy porte la colonne « Gagné » et les clics globaux",
       emy.COLONNE_GAGNE and emy.CLICS_GLOBAUX)
 
+
+print("4. Jessye : clics et gains d'une période par l'API Infloww seule (relevés du jour)")
+import tempfile  # noqa: E402
+_tmp = pathlib.Path(tempfile.mkdtemp(prefix="releves_jessye_"))
+emy.DATA_DIR = _tmp
+import safe_json  # noqa: E402
+LIENS_I = {"liens": [{"code": "136", "clics": 900, "net": 50000, "cree_ms": 1790000000000, "nom": "Mihkim"},
+                     {"code": "200", "clics": 40, "net": 3000, "cree_ms": 1793750000000, "nom": "neuf"}],
+           "lu_a": 1.0}
+emy._infloww = lambda createur: LIENS_I
+emy._code_infloww = lambda l: str(l.get("code") or "")
+import podium_discord as _pd  # noqa: E402
+_pd_si = _pd.subs_infloww
+_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None: {t: 10 for t in tr}
+check("le relevé du jour se prend sans visite (relever_partenaire), dans le fichier de la page",
+      emy.relever_partenaire() == "" and safe_json.load(emy._fichier_releves_part())["jours"]["2026-11-04"]["136"]
+      == [900, 50000], safe_json.load(emy._fichier_releves_part(), {}))
+r, err = emy._lire_partenaire("2026-11-01", "2026-11-04", ("136", "200"))
+par = {x["code"]: x for x in r["liens"]}
+check("sans relevé du 31/10 : clics et gain de c136 « — » (jamais ceux d'octobre)",
+      par["136"]["clics"] is None and par["136"]["net_absent"] is True and par["136"]["abonnes"] == 10, par["136"])
+check("un lien créé pendant la période part de 0 : ses cumuls entiers",
+      par["200"]["clics"] == 40 and par["200"]["net"] == 3000 and par["200"]["net_absent"] is False, par["200"])
+d = safe_json.load(emy._fichier_releves_part())
+d["jours"]["2026-10-31"] = {"136": [700, 41000]}
+d["jours"]["2026-11-02"] = {"136": [800, 45000]}
+safe_json.write(emy._fichier_releves_part(), d)
+r, err = emy._lire_partenaire("2026-11-01", "2026-11-04", ("136",))
+x = r["liens"][0]
+check("avec le relevé du 31/10 : la période = cumul d'aujourd'hui − celui du 31/10 (200 clics, 90 $)",
+      x["clics"] == 200 and x["net"] == 9000 and x["net_absent"] is False, x)
+r, err = emy._lire_partenaire("2026-11-01", "2026-11-02", ("136",))
+x = r["liens"][0]
+check("une période finie avant aujourd'hui : son relevé de fin (02/11) − la veille (100 clics)",
+      x["clics"] == 100 and x["net"] == 4000, x)
+r, err = emy._lire_partenaire("2026-11-03", "2026-11-03", ("136",))
+check("un jour sans relevé de fin : « — »", r["liens"][0]["clics"] is None, r["liens"][0])
+_pd.subs_infloww = _pd_si
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:
