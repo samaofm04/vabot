@@ -177,6 +177,7 @@
     $('sia-drop-t').textContent = S.type === 'visage' ? (T.deposer_visage || '') : (S.type === 'motion' ? (T.deposer_motion || '') : (T.deposer || ''));
     $('sia-drop-a').textContent = S.type === 'visage' ? (T.deposer_aide_visage || '') : (S.type === 'motion' ? (T.deposer_aide_motion || '') : (T.deposer_aide || ''));
     if (m) { choisirModele(m.cle); } else { rendreModeles(); }
+    if (S.type === 'visage') { rafraichirMachine(); }
   }
 
   // ------------------------------------------------------------ options --
@@ -581,7 +582,18 @@
     Array.prototype.forEach.call(root.querySelectorAll('.sia-chrono'), function (el) {
       el.textContent = duree(maintenant() - parseInt(el.getAttribute('data-depuis') || '0', 10));
     });
-    if (S.type === 'visage' && (maintenant() % 10) === 0) { rendreMachine(); }
+    if (S.type === 'visage' && (maintenant() % 10) === 0) {
+      // poll() ne tourne que pendant un travail : sans ceci, le bloc passait
+      // « hors ligne » 90 s après l'ouverture de la page alors que le Mac
+      // appelait le site toutes les 10 s (vu le 04/11 juste après un résultat)
+      if (!S.timer && (maintenant() % 30) === 0) { rafraichirMachine(); } else { rendreMachine(); }
+    }
+  }
+  function rafraichirMachine() {
+    get('/studio-ia/taches').then(function (d) {
+      if (d.ok && d.visage) { S.visage = d.visage; }
+      rendreMachine();
+    }).catch(function () { rendreMachine(); });
   }
 
   // ------------------------------------------------------------ machine --

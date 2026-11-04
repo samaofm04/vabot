@@ -38668,6 +38668,15 @@ try:
               and _plPath.startswith(_dFf + ":") and ".local/bin" in _plPath and "/opt/homebrew/bin" in _plPath
               and "trouver_ffmpeg" in _vw.etat.__code__.co_names)
         _shSia.rmtree(_dFf, ignore_errors=True)
+        _jsV = _plSia.Path("studio_ia_app.js").read_text(encoding="utf-8")
+        _iCt = _jsV.index("function choisirType"); _iTt = _jsV.index("function tictac")
+        _nodeV = _shSia.which("node")
+        _ckV = _spSia.run([_nodeV, "--check", "studio_ia_app.js"], capture_output=True, text=True, timeout=60).returncode == 0 if _nodeV else True
+        check("machine : l etat se rafraichit sans travail ouvert (au choix du genre Visage et toutes les 30 s), sinon le bloc passait hors ligne au bout de 90 s",
+              "function rafraichirMachine" in _jsV
+              and "rafraichirMachine()" in _jsV[_iCt:_jsV.index("\n  function ", _iCt + 10)]
+              and "rafraichirMachine()" in _jsV[_iTt:_jsV.index("function rafraichirMachine")]
+              and _ckV)
         check("commande machine : https force hors localhost (nginx montre http a Flask, curl -fsS http:// ecrivait un fichier vide)",
               _sia.site_public("http://youl4b.com/") == "https://youl4b.com"
               and _sia.site_public("https://youl4b.com") == "https://youl4b.com"
