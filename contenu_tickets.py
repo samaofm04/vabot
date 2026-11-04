@@ -1079,3 +1079,21 @@ class _InteractionTicket:
 
     async def original_response(self):
         raise RuntimeError("pas de réponse d'origine dans le ticket")
+
+
+# ─── Lancé d'un salon commun (04/11/2026) ─────────────────────────────────
+# Le 🎬 du menu éphémère de 📋・menu (outils_tickets, salons communs de TRUST
+# INSTAGRAM) livre dans le ticket DU CLIQUEUR (_ticket_du_clic) : l'accusé
+# silencieux du ticket, ou « ça arrive dans ton ticket », laissait le VA sans
+# savoir où regarder. Enveloppe : les appels de _clic_contenu et _clic_general
+# passent par ce nom.
+_lancer_dans_le_ticket = _lancer
+
+
+def _lancer(t: Dict[str, str], cog, mod, ident: str, cle: str, cmd, sc: bool, qte: int,  # noqa: F811
+            brute_de: Optional[str] = None) -> str:
+    phrase = _lancer_dans_le_ticket(t, cog, mod, ident, cle, cmd, sc, qte, brute_de)
+    if not t.get("commun"):
+        return phrase
+    ici = f"<#{t['salon']}>"
+    return phrase.replace("ton ticket", ici) if phrase else f"📥 Ça arrive dans {ici}."

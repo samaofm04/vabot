@@ -76,7 +76,8 @@ import tickets_discord          # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="stats_va_"))
 sv.CLES_FICHIER = TMP / "stats_va_cles.json"
-# « ailleurs » : Threads -- TRUST TWITTER a sa page depuis le 04/11 (vérifié plus bas)
+# TW : Threads (le nom est resté) -- TRUST TWITTER et THREADS ont leur page
+# depuis le 04/11 (vérifié plus bas), « ailleurs » est Va IG
 GID, TW = sv.AGENCY_IG_ID, subs_va.THREADS_ID
 U108, U63 = "111111111111111108", "111111111111111063"
 JOUR = dt.date(2026, 11, 3)
@@ -176,8 +177,12 @@ check("clé fausse, vide ou courte : rien",
       and sv.qui(t108[:10]) is None and sv.qui(t108 + "a") is None)
 check("le lien : https://youl4b.com/mes-stats?t=<sa clé>",
       sv.lien(GID, U108) == f"https://youl4b.com/mes-stats?t={t108}", sv.lien(GID, U108))
-check("hors TRUST INSTAGRAM et TRUST TWITTER (Threads), pas de lien (ni clé créée)",
-      sv.lien(TW, U108) == "" and f"{TW}:{U108}" not in sv._cles())
+check("hors des TRUST (Va IG), pas de lien (ni clé créée)",
+      sv.lien(subs_va.VA_IG_ID, U108) == "" and f"{subs_va.VA_IG_ID}:{U108}" not in sv._cles())
+# 04/11/2026, devant le menu de Threads : « il manque les trucs pour mes stats
+# et tout [...] un peu comme sur Twitter »
+check("TRUST THREADS : sa page aussi, une clé à lui",
+      sv.lien(TW, U108).startswith("https://youl4b.com/mes-stats?t=") and sv.lien(TW, U108) != sv.lien(GID, U108))
 
 print("2. Les chiffres")
 sv._CACHE.clear()
@@ -382,7 +387,8 @@ check("TRUST INSTAGRAM : le lien sous les chiffres, entre < > (pas d'aperçu)",
       txt[-300:])
 check("TRUST INSTAGRAM : aucun montant dans le message", "$" not in txt)
 txt_tw = subs_va._texte_stats(TW, U108, r_)
-check("Threads : pas de lien", "mes-stats" not in txt_tw and "Clics de ton lien" in txt_tw)
+check("Threads (04/11) : le lien sous les chiffres aussi",
+      "mes-stats" in txt_tw and "Clics de ton lien" in txt_tw)
 # 04/11/2026 : « un peu comme sur Instagram » pour TRUST TWITTER
 check("TRUST TWITTER : son lien, une clé à lui, distincte d'Instagram",
       sv.lien(sv.TWITTER_ID, U108).startswith("https://youl4b.com/mes-stats?t=")
@@ -438,10 +444,10 @@ finally:
 check("TRUST INSTAGRAM : la page de stats juste sous « 🔗 Ton lien »",
       d_ig.endswith(f"https://getmysocial.com/neuf\n\n📊 **Ta page de stats** — rien que pour toi :\n"
                     f"https://youl4b.com/mes-stats?t={t108}") and "vieux" not in d_ig, d_ig[-200:])
-check("ailleurs (Threads) : pas de page de stats dans l'accueil", "mes-stats" not in d_tw, d_tw[-160:])
+check("Threads : pas de page de stats dans l'accueil (elle est dans le menu)", "mes-stats" not in d_tw, d_tw[-160:])
 check("lien refait : la page de stats une seule fois, sous le nouveau lien",
       d_re.count("mes-stats") == 1 and d_re.index("autre") < d_re.index("mes-stats") and "neuf" not in d_re, d_re[-200:])
-check("ligne_page_perso : rien hors TRUST INSTAGRAM et TRUST TWITTER", tickets_discord.ligne_page_perso(TW, U108) == "")
+check("ligne_page_perso : rien pour Threads (dans le menu)", tickets_discord.ligne_page_perso(TW, U108) == "")
 # 04/11 : « pas Bienvenue, mets en mode voilà ton menu » -- Twitter : dans le menu, pas l'accueil
 check("TRUST TWITTER : rien dans l'accueil", tickets_discord.ligne_page_perso(sv.TWITTER_ID, U108) == "")
 _lv_lien = __import__("liens_va").lien_de

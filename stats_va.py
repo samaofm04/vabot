@@ -1,4 +1,4 @@
-"""La page perso d'un VA de TRUST INSTAGRAM (et de TRUST TWITTER depuis le 04/11) :
+"""La page perso d'un VA de TRUST INSTAGRAM (et de TRUST TWITTER et THREADS depuis le 04/11) :
 ses chiffres, à lui seul.
 
 Propriétaire, 03/11/2026 : « un petit lien perso pour chaque VA où il voit
@@ -30,7 +30,8 @@ le menu (5 par rangée).
   visites MyPuls de ses liens de suivi (le même compteur d'OnlyFans que les
   clics Infloww, vérifié le 03/11 : 87 = 87, et Seren y est), $ / sub =
   revenu net MyPuls de ses liens ÷ subs (le « par abonné », admis chez les
-  VA), Gagné = sa paie selon la grille de TRUST INSTAGRAM (GRILLE). Jamais le
+  VA), Gagné = sa paie selon la grille de TRUST INSTAGRAM (GRILLE) — aux
+  clics pour TRUST THREADS (GRILLE_CLICS_ICI, 04/11/2026). Jamais le
   revenu de l'agence en total, ni paiement ni gain / perte du propriétaire.
 - En bas, les sources, et rien d'autre (propriétaire, 03/11, devant un bloc
   de preuves détaillé : « pas fan, plus propre, juste en bas : API officielle
@@ -58,9 +59,14 @@ TWITTER_ID = "1445108485090971710"
 #: « mets en place le lien avec l'API Infloww, l'API GetMySocial et tout, un
 #: peu comme sur Instagram, pour qu'ils aient directement accès à ce lien-là
 #: avec leurs statistiques ») ; même grille de paie (« la même qu'Instagram »).
-SERVEURS = {AGENCY_IG_ID, TWITTER_ID}
+#: TRUST THREADS depuis le 04/11/2026 aussi (propriétaire, devant le menu en
+#: blocs de Threads : « il manque les trucs pour mes stats et tout [...] un
+#: peu comme sur Twitter ») : même page, même grille.
+THREADS_ID = "1498948161039896586"
+SERVEURS = {AGENCY_IG_ID, TWITTER_ID, THREADS_ID}
 #: Le bandeau de la page et le nom du lien, par serveur.
-MARQUES = {AGENCY_IG_ID: ("TRUST INSTAGRAM", "Instagram"), TWITTER_ID: ("TRUST TWITTER", "Twitter")}
+MARQUES = {AGENCY_IG_ID: ("TRUST INSTAGRAM", "Instagram"), TWITTER_ID: ("TRUST TWITTER", "Twitter"),
+           THREADS_ID: ("TRUST THREADS", "Threads")}
 SITE = "https://youl4b.com"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CLES_FICHIER = DATA_DIR / "stats_va_cles.json"
@@ -203,6 +209,70 @@ GRILLE = ((1250, 1.20), (1000, 1.00), (800, 0.90), (500, 0.80), (0, 0.70))
 #: Au plus ce nombre de quinzaines lues pour « Gagné » (une lecture MyPuls par
 #: quinzaine) ; au-delà, « — ».
 QUINZAINES_MAX = 12
+
+
+#: La grille de TRUST THREADS (propriétaire, 04/11/2026, image « Système de
+#: paiement par clics » : « toutes les 2 semaines », « US · UK · CA ») : les
+#: clics de la quinzaine, comptés comme sa ligne de la quinzaine
+#: (podium_discord.clics_du_va : US + UK + CA, uniques), par tranches de 100 —
+#: 5 $ de base par tranche, plus la prime de la tranche (« la prime du palier
+#: atteint s'ajoute au paiement de base »). Moins de 100 : rien. La grille
+#: s'arrête à 3 000 ; au-delà, le dernier palier (propriétaire, le même jour :
+#: « au dessus de 3000 tu mets 188 $ pareil »).
+GRILLE_CLICS_ICI = {THREADS_ID}
+#: La prime des tranches 100-200, 200-300… 2 900-3 000 (29 tranches).
+PRIMES_CLICS = (0, 1, 2, 3, 5, 6, 7, 9, 11, 13, 14, 16, 18, 20, 22, 23, 25, 27, 28, 30,
+                31, 33, 34, 36, 37, 39, 40, 42, 43)
+BASE_TRANCHE = 5
+
+
+def paie_clics(n: Optional[int]) -> Optional[float]:
+    """Le total (base + prime) d'une quinzaine à `n` clics ; None sans nombre.
+    3 000 et plus : le dernier palier (188 $)."""
+    if n is None:
+        return None
+    k = min(int(n) // 100, len(PRIMES_CLICS))
+    return 0.0 if k < 1 else float(BASE_TRANCHE * k + PRIMES_CLICS[k - 1])
+
+
+def _gagne_clics(gid: str, uid: str, d0: str, d1: str) -> Optional[float]:
+    """Sa paie sur [d0, d1] selon la grille aux clics, quinzaine par quinzaine
+    (1-15, 16-fin) : le total de la quinzaine (jusqu'à aujourd'hui), au
+    prorata de ses clics quand la période n'en couvre qu'une partie. None si
+    un nombre manque."""
+    import podium_discord as pod
+    auj = pod._aujourdhui()
+    a, b = dt.date.fromisoformat(d0), min(dt.date.fromisoformat(d1), auj)
+    if a > b:
+        return 0.0
+    qs: List[Tuple[dt.date, dt.date]] = []
+    q0, q1 = pod.saison_en_cours(a)
+    while q0 <= b:
+        if len(qs) >= QUINZAINES_MAX:
+            return None
+        qs.append((q0, min(q1, auj)))
+        q0 = q1 + dt.timedelta(days=1)
+        q1 = pod.saison_en_cours(q0)[1]
+    parts = [(max(q0, a), min(q1, b)) for q0, q1 in qs]
+    partiels = [p for p, q in zip(parts, qs) if p != q]
+    lus = pod.clics_du_va(str(gid), str(uid), qs + partiels)
+    if not lus or len(lus) != len(qs) + len(partiels):
+        return None
+    du_partiel = dict(zip(partiels, lus[len(qs):]))
+    total = 0.0
+    for q, p, l in zip(qs, parts, lus[:len(qs)]):
+        n_q = l[0] if l else None
+        paie = paie_clics(n_q)
+        if paie is None:
+            return None
+        if p == q:
+            total += paie
+            continue
+        n_in = (du_partiel.get(p) or (None,))[0]
+        if n_in is None:
+            return None
+        total += paie * min(n_in, n_q) / n_q if n_q else 0.0
+    return round(total, 2)
 
 
 def prix_du_sub(n: int) -> float:
@@ -362,7 +432,11 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             # 01/01/2024 (une lecture MyPuls par quinzaine)
             deb = _debut_liens(f) or (dt.date.fromisoformat(d1) - dt.timedelta(days=180))
             d0_g = pod.saison_en_cours(deb)[0].isoformat()
-        gagne = _gagne(of, mym, d0_g, d1, fige) if ts else None
+        if str(gid) in GRILLE_CLICS_ICI:
+            # Threads : payé aux clics (« Système de paiement par clics »)
+            gagne = _gagne_clics(str(gid), str(uid), d0_g, d1)
+        else:
+            gagne = _gagne(of, mym, d0_g, d1, fige) if ts else None
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-va] CVR, $ par sub ou gain illisibles : {type(e).__name__}: {e}", flush=True)
     return {"numero": f.get("numero"), "pseudo": str(f.get("pseudo") or ""),
@@ -587,7 +661,8 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
             + "ce lien est à toi, ne le partage pas</p>")
     corps = (f'<h1>📈 Tes stats · {_e(nom)}</h1><p class="sous">{sous}</p>'
              + _formulaire(t, du, au, jour)
-             + '<div class="boite"><table><thead><tr><th class="g">Personne</th><th>Clics US GMS</th>'
+             + '<div class="boite"><table><thead><tr><th class="g">Personne</th>'
+             f'<th>Clics {"US·UK·CA" if str(d.get("gid") or "") in GRILLE_CLICS_ICI else "US"} GMS</th>'
              '<th>Clics globaux GMS</th><th>Clics Infloww</th><th>Subs</th><th>CVR</th><th>$ / sub</th>'
              '<th>Gagné</th></tr></thead><tbody><tr>'
              f'<td class="nom">{("@" + _e(d["pseudo"])) if d.get("pseudo") else _e(nom)}'

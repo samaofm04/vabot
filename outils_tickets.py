@@ -125,6 +125,12 @@ RESERVATION_MAX_S = 1.5
 REPRISE_DELAI_S = 20
 
 TEXTE_HORS_TICKET = "Ça se lance depuis le salon perso d'un VA."
+#: Les serveurs aux outils en salons communs (propriétaire, 04/11/2026, devant
+#: les 🧰 OUTILS de YouCham : « j'aimerais bien que ça se passe comme ça
+#: maintenant pour Instagram aussi ») : un clic hors d'un ticket sert le
+#: ticket DU CLIQUEUR (_ticket_du_clic). Les boutons du ticket restent.
+SALONS_COMMUNS = {AGENCY_IG_ID}
+TEXTE_SANS_TICKET = "Tu n'as pas de ticket ici : rien ne peut t'être livré."
 TEXTE_PAS_A_TOI = "Seul ce VA ou son manager peut s'en servir."
 TEXTE_INDISPONIBLE = "Indisponible pour le moment, réessaie dans un instant."
 TEXTE_SPOOF_EN_COURS = "⏳ Ton spoof précédent n'est pas fini."
@@ -209,12 +215,23 @@ def _ticket_du_clic(p: Dict[str, Any], serveurs=None) -> Tuple[Optional[Dict[str
     if gid not in (SERVEURS if serveurs is None else serveurs):
         return None, "Ce bouton ne sert pas sur ce serveur."
     salon = str(p.get("channel_id") or "")
-    vau = _tickets(gid).get(salon)
-    if not vau:
-        # le menu privé du staff (menu_prive), ou un vieux message ailleurs
-        return None, TEXTE_HORS_TICKET
+    tickets = _tickets(gid)
+    vau = tickets.get(salon)
     membre = p.get("member") or {}
     qui = str(((membre.get("user") or {}).get("id")) or "")
+    if not vau:
+        if gid in SALONS_COMMUNS and qui.isdigit():
+            # un salon commun de 🧰 OUTILS (04/11/2026), ou l'éphémère qu'il a
+            # ouvert : c'est le ticket DU CLIQUEUR qui reçoit, jamais le salon
+            # commun (tout le monde y verrait ses fichiers)
+            sien = next((s for s, u in sorted(tickets.items()) if u == qui), "")
+            if not sien:
+                return None, TEXTE_SANS_TICKET
+            nom = str(((membre.get("user") or {}).get("username")) or qui)
+            return {"gid": gid, "salon": sien, "uid": qui, "qui": qui, "nom": nom,
+                    "commun": "1"}, ""
+        # le menu privé du staff (menu_prive), ou un vieux message ailleurs
+        return None, TEXTE_HORS_TICKET
     if qui != vau:
         import tickets_discord as tk
         if not tk._est_manager_brut(gid, membre):
@@ -529,9 +546,21 @@ def demarrer() -> None:
         return
     _DEMARRE[0] = True
     try:
-        _fond(lambda: (_dormir(REPRISE_DELAI_S), prevenir_interrompus()))
+        _fond(_au_demarrage)
     except Exception as e:                                   # noqa: BLE001
         _log(f"reprise non lancée ({type(e).__name__}: {e})")
+
+
+def _au_demarrage() -> None:
+    """Les travaux interrompus annoncés, puis les panneaux des salons communs
+    reposés s'ils ont disparu : l'un qui lève n'empêche pas l'autre."""
+    _dormir(REPRISE_DELAI_S)
+    try:
+        prevenir_interrompus()
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"reprise : {type(e).__name__}: {e}")
+    for g in sorted(SALONS_COMMUNS):
+        assurer_panneaux(g)
 
 
 # ─── L'aiguillage ─────────────────────────────────────────────────────────
@@ -544,21 +573,38 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     action = cid[len(PREFIXE):].split(":", 1)[0]
     t, refus = _ticket_du_clic(p)
+    if t is None and action == "menu" and refus == TEXTE_SANS_TICKET:
+        # 📋 sans ticket (le staff, un VA pas encore servi) : son menu quand
+        # même, sans 🎬 (qui livre dans un ticket) — l'ancien « Afficher le
+        # menu » lui donnait sa rangée en privé (23/10 : « un menu pour les
+        # boss, les managers, pour tout le monde »)
+        return _menu_commun({"gid": str(p.get("guild_id") or ""), "uid": str(
+            (((p.get("member") or {}).get("user")) or {}).get("id") or ""), "sans_ticket": "1"})
     if t is None:
         return _ephemere(refus)
+    rep = None
     if p.get("type") == 3:
+        if action == "menu":
+            return _menu_commun(t)
         if action == "spf":
-            return _clic_spoofer(t)
-        if action == "dl":
-            return _fenetre_download(t)
-        if action == "dlo":
-            return _clic_option(p, t, cid)
+            rep = _clic_spoofer(t)
+        elif action == "dl":
+            rep = _fenetre_download(t)
+        elif action == "dlo":
+            rep = _clic_option(p, t, cid)
     else:
         if action == "spff":
-            return _recevoir_spoofer(p, t)
-        if action == "dlf":
-            return _recevoir_download(p, t)
-    return _ephemere("Action inconnue.")
+            rep = _recevoir_spoofer(p, t)
+        elif action == "dlf":
+            rep = _recevoir_download(p, t)
+    if rep is None:
+        return _ephemere("Action inconnue.")
+    if t.get("commun") and rep == {"type": 6}:
+        # lancé d'un salon commun : l'accusé silencieux du ticket laissait le
+        # VA sans savoir où regarder
+        quoi = "tes versions arrivent" if action == "spff" else "ça arrive"
+        return _ephemere(f"{'📤' if action == 'spff' else '⬇️'} C'est parti : {quoi} dans <#{t['salon']}>.")
+    return rep
 
 
 # ─── 📤 Spoofer ───────────────────────────────────────────────────────────
@@ -1027,3 +1073,349 @@ async def _travail_download(bot, cog, t: Dict[str, str], pseudo: str, n: int, cl
         await asyncio.to_thread(_noter, salon, "download", None)
         if not menu_pose and (ticket is None or not ticket.disparu):
             await asyncio.to_thread(_ramener_menu, gid, vau, salon)
+
+
+# ─── 🧰 Les salons communs de TRUST INSTAGRAM (04/11/2026) ────────────────
+# Propriétaire, devant les 🧰 OUTILS de YouCham (📋 menu, 📤 spoofer,
+# ⬇️ download, 📱 numéro) : « j'aimerais bien que ça se passe comme ça
+# maintenant pour Instagram aussi. Tu peux garder ce qu'il y a dans le
+# ticket, rajoute ça », puis « intègre déjà les outils, soit le menu, le
+# spoofer, le download, le numéro ». Quand il dira « c'est bon », les boutons
+# du ticket pourront partir ; d'ici là ils restent.
+#  - Un panneau par salon, UN bouton, sans texte (le propriétaire déteste les
+#    notices), posé par Wario en REST. Le clic arrive ici comme ceux du ticket,
+#    et _ticket_du_clic sert le ticket du cliqueur : rien n'est jamais livré
+#    dans le salon commun, que tout le monde lit.
+#  - 📋・menu ouvre le menu du cliqueur en éphémère, en blocs comme celui de
+#    Twitter (tickets_discord.menu_ephemere).
+#  - 📱・numéro est à Rem (numeros.py, carte éphémère) : son panneau n'est pas
+#    d'ici.
+#  - Les salons sont créés une fois (installer_salons, lancé à la main) ; le
+#    démarrage ne fait que reposer un panneau disparu (assurer_panneaux). Un
+#    salon supprimé à la main n'est jamais refait.
+V2 = 1 << 15
+SALONS_FICHIER = DATA_DIR / "outils_salons.json"
+#: La catégorie des outils (son nom sans décor), celle où vit déjà 📱・numéro.
+CATEGORIE_OUTILS = "outils instagram"
+#: (clé, nom à la création, (libellé, emoji, custom_id) du bouton). L'ordre est
+#: celui des salons en tête de la catégorie, comme sur YouCham ; 📱・numéro
+#: ferme la marche.
+PANNEAUX = (("menu", "📋・menu", ("Ouvrir mon menu", "📋", f"{PREFIXE}menu")),
+            ("spoofer", "📤・spoofer", ("Spoofer", "📤", f"{PREFIXE}spf:commun")),
+            ("download", "⬇️・download", ("Download", "⬇️", f"{PREFIXE}dl:commun")))
+CLE_NUMERO = "numero"
+#: Les droits d'un bot dans un salon où personne d'autre n'écrit : voir,
+#: écrire, intégrer, joindre, historique.
+DROITS_BOT = 1024 | 2048 | 16384 | 32768 | 65536
+
+
+def _menu_commun(t: Dict[str, str]) -> Dict[str, Any]:
+    """📋 Ouvrir mon menu : le menu du VA (celui du ticket quand on y clique),
+    en éphémère. Une panne ne doit jamais laisser le clic sans réponse."""
+    import tickets_discord as tk
+    try:
+        return tk.menu_ephemere(t["gid"], t["uid"], avec_contenu=not t.get("sans_ticket"))
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"menu commun de {t.get('uid')} : {type(e).__name__}: {e}")
+        return _ephemere(TEXTE_INDISPONIBLE)
+
+
+def corps_panneau(cle: str) -> Dict[str, Any]:
+    libelle, emoji, cid = {c: b for c, _n, b in PANNEAUX}[cle]
+    return {"flags": V2, "allowed_mentions": {"parse": []},
+            "components": [{"type": 1, "components": [
+                {"type": 2, "style": 1, "label": libelle, "emoji": {"name": emoji},
+                 "custom_id": cid}]}]}
+
+
+def _cle_salon(nom: Any) -> str:
+    """« 📱・numéro » → « numero » : le nom sans décor ni accent, la partie
+    après « ・ » s'il y en a une (un salon renommé à la main reste reconnu)."""
+    import re
+    import unicodedata
+    n = str(nom or "")
+    if "・" in n:
+        n = n.split("・", 1)[1]
+    n = unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", n).strip()
+
+
+def _ids_message(m: Any) -> set:
+    out, pile = set(), list((m or {}).get("components") or []) if isinstance(m, dict) else []
+    while pile:
+        c = pile.pop()
+        if not isinstance(c, dict):
+            continue
+        if c.get("custom_id"):
+            out.add(str(c["custom_id"]))
+        pile += list(c.get("components") or [])
+        if isinstance(c.get("accessory"), dict):
+            pile.append(c["accessory"])
+    return out
+
+
+def _etat_salons() -> Dict[str, Any]:
+    d = safe_json.load(SALONS_FICHIER, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def _noter_salon(gid: str, cle: str, **champs) -> None:
+    with _VERROU:
+        d = _etat_salons()
+        f = d.setdefault(str(gid), {}).setdefault(cle, {})
+        f.update({k: str(v) for k, v in champs.items()})
+        if not safe_json.write(SALONS_FICHIER, d):
+            _log(f"salons communs : fiche {cle} non écrite ({SALONS_FICHIER})")
+
+
+def _salon_inconnu(code: int, rep: Any) -> bool:
+    return isinstance(rep, dict) and rep.get("code") == 10003
+
+
+#: Ce qui a déjà été dit au journal (salon supprimé, rien d'installé, ancien
+#: panneau encore là) : une ligne, pas une par démarrage.
+_DITS: set = set()
+#: L'ancien panneau de 📋・menu (numeros_x_discord, « 📋 Afficher le menu »).
+ANCIEN_MENU = "numx:menu"
+
+
+def _dire_une_fois(cle: Any, texte: str) -> None:
+    if cle not in _DITS:
+        _DITS.add(cle)
+        _log(texte)
+
+
+def _lire_categorie(gid: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], str]:
+    """(🧰 OUTILS INSTAGRAM, ses salons texte dans leur ordre, tous les salons
+    du serveur, raison d'un échec)."""
+    code, salons = _api("GET", f"/guilds/{gid}/channels", gid=gid)
+    if code != 200 or not isinstance(salons, list):
+        return None, [], [], f"salons illisibles (HTTP {code})"
+    cat = next((c for c in salons if c.get("type") == 4
+                and _cle_salon(c.get("name")).endswith(CATEGORIE_OUTILS)), None)
+    if cat is None:
+        return None, [], salons, "catégorie 🧰 OUTILS INSTAGRAM introuvable"
+    dedans = sorted([c for c in salons if c.get("parent_id") == cat["id"] and c.get("type") == 0],
+                    key=lambda c: (int(c.get("position") or 0), str(c["id"]).zfill(20)))
+    return cat, dedans, salons, ""
+
+
+def _salons_par_cle(gid: str, dedans: List[Dict[str, Any]], tous: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """{clé: salon} : par l'id noté d'abord (un salon renommé, même hors de la
+    catégorie, reste le sien : sinon une relance en recréait un second), par
+    son nom dans la catégorie ensuite."""
+    fiches = _etat_salons().get(str(gid)) or {}
+    par_id = {str(c.get("id")): c for c in tous}
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle in [c for c, _n, _b in PANNEAUX] + [CLE_NUMERO]:
+        c = par_id.get(str((fiches.get(cle) or {}).get("salon") or ""))
+        if c is not None and c.get("type") == 0:
+            out[cle] = c
+    pris = {str(c["id"]) for c in out.values()}
+    for c in dedans:
+        k = _cle_salon(c.get("name"))
+        if k in ([x for x, _n, _b in PANNEAUX] + [CLE_NUMERO]) and k not in out and str(c["id"]) not in pris:
+            out[k] = c
+            pris.add(str(c["id"]))
+    return out
+
+
+def assurer_panneaux(gid: str, sauf: Tuple[str, ...] = ()) -> Dict[str, Any]:
+    """Le panneau de chaque salon commun, reposé s'il a disparu. Trouvé par
+    son id, sinon en relisant le salon ; Discord injoignable : rien n'est
+    reposté — un second panneau vaut moins qu'un passage raté. Rien tant que
+    installer_salons n'est pas passé (fiche « installe ») : avant, 📋・menu
+    porte encore l'ancien panneau, et un second y serait posé à côté. Une
+    fiche sans l'id d'un salon (data/ refait) : retrouvé par son nom, noté.
+    `sauf` : les clés à ne pas poser. Rend {ok, poses, rates, supprimes}.
+    Ne lève pas."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"ok": [], "poses": [], "rates": [], "supprimes": []}
+    fiches = _etat_salons().get(gid) or {}
+    if not fiches.get("installe"):
+        _dire_une_fois((gid, "pas installe"), f"salons communs {gid} : pas installés "
+                       "(outils_tickets.installer_salons), aucun panneau posé")
+        return bilan
+    try:
+        if any(not str((fiches.get(cle) or {}).get("salon") or "") for cle, _n, _b in PANNEAUX):
+            _cat, dedans, tous, raison = _lire_categorie(gid)
+            if raison:
+                bilan["rates"].append(raison)
+            for cle, c in _salons_par_cle(gid, dedans, tous).items():
+                if cle != CLE_NUMERO and not str((fiches.get(cle) or {}).get("salon") or ""):
+                    _noter_salon(gid, cle, salon=c["id"])
+                    _log(f"salons communs {gid} : {cle} retrouvé par son nom ({c.get('name')})")
+            fiches = _etat_salons().get(gid) or {}
+    except Exception as e:                                   # noqa: BLE001
+        bilan["rates"].append(f"salons ({type(e).__name__}: {e})")
+    for cle, _nom, (_l, _e, cid) in PANNEAUX:
+        f = fiches.get(cle) or {}
+        salon, mid = str(f.get("salon") or ""), str(f.get("panneau") or "")
+        if not salon:
+            bilan["rates"].append(f"{cle} (salon introuvable)")
+            continue
+        try:
+            if mid:
+                code, m = _api("GET", f"/channels/{salon}/messages/{mid}", gid=gid)
+                if code == 200 and cid in _ids_message(m):
+                    bilan["ok"].append(cle)
+                    continue
+                if _salon_inconnu(code, m):
+                    bilan["supprimes"].append(cle)
+                    continue
+                if code != 404:
+                    bilan["rates"].append(f"{cle} (HTTP {code})")
+                    continue
+            code, ms = _api("GET", f"/channels/{salon}/messages?limit=50", gid=gid)
+            if _salon_inconnu(code, ms):
+                bilan["supprimes"].append(cle)
+                continue
+            if code != 200 or not isinstance(ms, list):
+                bilan["rates"].append(f"{cle} (HTTP {code})")
+                continue
+            poses = [m for m in ms if isinstance(m, dict) and cid in _ids_message(m)]
+            if poses:
+                _noter_salon(gid, cle, panneau=max(poses, key=lambda m: str(m["id"]).zfill(20))["id"])
+                bilan["ok"].append(cle)
+                continue
+            if cle in sauf:
+                continue
+            if cle == "menu" and any(ANCIEN_MENU in _ids_message(m) for m in ms if isinstance(m, dict)):
+                # l'ancien « Afficher le menu » est encore là : installer_salons
+                # le convertit ; en poser un second ferait deux menus
+                bilan["rates"].append("menu (l'ancien panneau numx:menu est encore là)")
+                continue
+            code, m = _api("POST", f"/channels/{salon}/messages", json=corps_panneau(cle), gid=gid)
+            if code in (200, 201) and isinstance(m, dict) and m.get("id"):
+                _noter_salon(gid, cle, panneau=m["id"])
+                bilan["poses"].append(cle)
+            else:
+                bilan["rates"].append(f"{cle} (HTTP {code}) {str(m)[:120]}")
+        except Exception as e:                               # noqa: BLE001
+            bilan["rates"].append(f"{cle} ({type(e).__name__}: {e})")
+    neufs = [c for c in bilan["supprimes"] if (gid, "supprime", c) not in _DITS]
+    _DITS.update((gid, "supprime", c) for c in neufs)
+    if bilan["poses"] or bilan["rates"] or neufs:
+        _log(f"salons communs {gid} : posés {bilan['poses']}, ratés {bilan['rates']}, "
+             f"supprimés à la main (jamais refaits) {neufs}")
+    return bilan
+
+
+def installer_salons(gid: str, essai: bool = True) -> Dict[str, Any]:
+    """Une fois, à la main, SUR LE VPS (la fiche data/outils_salons.json doit
+    être celle du bot en service) : dans 🧰 OUTILS INSTAGRAM, 📋・menu (déjà
+    là), 📤・spoofer et ⬇️・download (créés) puis 📱・numéro (déjà là, à Rem),
+    en tête de la catégorie et dans cet ordre ; chacun en lecture seule, avec
+    les droits de 📱・numéro (Essai, Confirmé, Manager, Helper), plus
+    🌱 Débutant : ce rôle remplace 🧪 Essai au passage et n'avait AUCUN droit
+    sur la catégorie (trois VA ne voyaient pas les outils, 04/11). Puis les
+    panneaux. Le panneau d'avant de 📋・menu (« Afficher le menu », numx:menu,
+    posé par Wario) devient le nouveau, par modification : rien n'est
+    supprimé. Tout ce qui manque (bot, rôles, catégorie) arrête AVANT la
+    première écriture. Relançable : les salons sont repris par leur id.
+    `essai` : rien n'est écrit, le plan est rendu. Rend {plan, faits, rates}."""
+    import tickets_discord as tk
+    gid = str(gid)
+    out: Dict[str, Any] = {"plan": [], "faits": [], "rates": []}
+    cat, dedans, tous, raison = _lire_categorie(gid)
+    if raison:
+        out["rates"].append(raison)
+        return out
+    par_cle = _salons_par_cle(gid, dedans, tous)
+    numero = par_cle.get(CLE_NUMERO)
+    if numero is None:
+        out["rates"].append("📱・numéro introuvable : ses droits servent de modèle")
+        return out
+    deb, essai_rid = tk.role_debutant(gid), tk.role_essai(gid)
+    modele = [dict(o) for o in numero.get("permission_overwrites") or [] if int(o.get("type", 0)) == 0]
+    ref = next((o for o in modele if o["id"] == essai_rid), None)
+    code, moi = _api("GET", "/users/@me", gid=gid)
+    bot = str((moi or {}).get("id") or "") if code == 200 and isinstance(moi, dict) else ""
+    manque = ([] if deb else ["rôle 🌱 Débutant introuvable (rôles illisibles ?)"]) \
+        + ([] if ref else ["droits de 🧪 Essai absents de 📱・numéro"]) \
+        + ([] if bot else [f"identité du bot illisible (HTTP {code})"])
+    if manque:
+        out["rates"] += manque
+        out["plan"].append("rien : " + " ; ".join(manque))
+        return out
+    if not any(o["id"] == deb for o in modele):
+        modele.append({"id": deb, "type": 0, "allow": ref["allow"], "deny": ref["deny"]})
+
+    def faire(quoi: str, methode: str, chemin: str, **kw):
+        out["plan"].append(quoi)
+        if essai:
+            return 200, {}
+        c, r = _api(methode, chemin, gid=gid, **kw)
+        (out["faits"] if c in (200, 201, 204) else out["rates"]).append(
+            quoi if c in (200, 201, 204) else f"{quoi} (HTTP {c}) {str(r)[:160]}")
+        return c, r
+
+    def debutant(c: Dict[str, Any]) -> None:
+        if not any(o.get("id") == deb for o in c.get("permission_overwrites") or []):
+            faire(f"🌱 Débutant dans {c.get('name')}", "PUT", f"/channels/{c['id']}/permissions/{deb}",
+                  json={"type": 0, "allow": ref["allow"], "deny": ref["deny"]})
+
+    ordre = []
+    for cle, nom, _b in PANNEAUX:
+        c = par_cle.get(cle)
+        if c is None:
+            droits = modele + [{"id": bot, "type": 1, "allow": str(DROITS_BOT), "deny": "0"}]
+            code, c = faire(f"créer {nom}", "POST", f"/guilds/{gid}/channels",
+                            json={"name": nom, "type": 0, "parent_id": cat["id"],
+                                  "permission_overwrites": droits})
+            if essai:
+                c = {"id": f"<{cle}>", "name": nom}
+            elif code not in (200, 201) or not isinstance(c, dict) or not c.get("id"):
+                continue
+        else:
+            debutant(c)
+        if not essai:
+            _noter_salon(gid, cle, salon=c["id"])
+        ordre.append(c)
+    debutant(numero)
+    ordre.append(numero)
+    # en tête de la catégorie, dans l'ordre de YouCham ; les autres suivent
+    ids = [str(c["id"]) for c in ordre]
+    reste = [c for c in dedans if str(c["id"]) not in ids]
+    base = min([int(c.get("position") or 0) for c in dedans] or [0])
+    positions = [{"id": i, "position": base + k} for k, i in enumerate(ids + [str(c["id"]) for c in reste])
+                 if not i.startswith("<")]
+    actuel = [str(c["id"]) for c in dedans]
+    if [x["id"] for x in positions] != actuel or any(
+            int(c.get("position") or 0) != base + k for k, c in enumerate(dedans)):
+        faire("ranger menu · spoofer · download · numéro en tête", "PATCH", f"/guilds/{gid}/channels",
+              json=positions)
+    # l'ancien panneau de 📋・menu (Wario, numx:menu) devient le neuf
+    sauf: Tuple[str, ...] = ()
+    menu = par_cle.get("menu")
+    cid_menu = {c: b for c, _n, b in PANNEAUX}["menu"][2]
+    if menu is not None:
+        code, ms = _api("GET", f"/channels/{menu['id']}/messages?limit=50", gid=gid)
+        if code != 200 or not isinstance(ms, list):
+            out["rates"].append(f"📋・menu illisible (HTTP {code}) : son panneau attend la relance")
+            sauf = ("menu",)
+        else:
+            a_nous = [m for m in ms if str((m.get("author") or {}).get("id")) == bot]
+            vieux = [m for m in a_nous if ANCIEN_MENU in _ids_message(m)]
+            neuf = any(cid_menu in _ids_message(m) for m in a_nous)
+            if vieux and neuf:
+                out["rates"].append("📋・menu : l'ancien panneau (numx:menu) est encore à côté du neuf ; "
+                                    "rien n'est supprimé, à retirer à la main")
+            elif vieux:
+                c, _r = faire("📋・menu : l'ancien panneau (numx:menu) devient « Ouvrir mon menu »",
+                              "PATCH", f"/channels/{menu['id']}/messages/{vieux[0]['id']}",
+                              json=corps_panneau("menu"))
+                if c == 200 and not essai:
+                    _noter_salon(gid, "menu", panneau=vieux[0]["id"])
+                elif not essai:
+                    sauf = ("menu",)       # pas de second panneau à côté de l'ancien
+    if essai:
+        out["plan"].append("poser les panneaux manquants")
+        return out
+    _noter_salon(gid, "installe", quand=int(time.time()))
+    if not (_etat_salons().get(gid) or {}).get("installe"):
+        out["rates"].append(f"fiche {SALONS_FICHIER} non écrite : le démarrage ne reposera rien")
+    b = assurer_panneaux(gid, sauf=sauf)
+    out["faits"] += [f"panneau {c} posé" for c in b["poses"]]
+    out["rates"] += b["rates"]
+    return out

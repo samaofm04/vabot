@@ -1566,6 +1566,13 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
             return f"salon illisible : HTTP {code} {str(ms)[:160]}"
         # Le panneau, ou la ligne de renvoi qui l'a remplacé (sans bouton) :
         # sans elle, le menu aurait été posé EN PLUS de la ligne.
+        # 📋・menu de TRUST INSTAGRAM est repris par les salons communs
+        # (outils_tickets, 04/11/2026) : son panneau « Ouvrir mon menu » a
+        # remplacé celui d'ici, qui n'y est jamais reposé à côté
+        if any(str((m.get("author") or {}).get("id")) == str(moi)
+               and any(str(c).startswith("outk:menu") for c in _ids(m.get("components")))
+               for m in ms):
+            return "salon repris par les outils communs (« Ouvrir mon menu ») : rien posé"
         miens = [m for m in ms if str((m.get("author") or {}).get("id")) == str(moi)
                  and (any(c.startswith(PREFIXE) for c in _ids(m.get("components")))
                       or TEXTE_RENVOI in str(m.get("components")))]

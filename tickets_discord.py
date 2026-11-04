@@ -3295,8 +3295,11 @@ def _rangs_du_menu(gid: str, uid: str, f: Dict[str, Any], salon: str) -> List[Di
 #: dans le menu, toujours ça », « pas Bienvenue, mets en mode voilà ton
 #: menu » : la page de stats perso (stats_va) sous le lien, dans le menu, et
 #: plus dans l'accueil (ligne_page_perso). TRUST INSTAGRAM la garde dans son
-#: accueil (« mets-le ici, en bas de son lien », 03/11).
-MENU_PAGE_STATS = {"1445108485090971710"}
+#: accueil (« mets-le ici, en bas de son lien », 03/11). TRUST THREADS le même
+#: jour, devant son menu en blocs sans la page : « il manque les trucs pour
+#: mes stats et tout [...] un peu comme sur Twitter ».
+MENU_PAGE_STATS = {"1445108485090971710",     # YouLab TWITTER
+                   "1498948161039896586"}     # YouLab THREADS
 
 
 def _texte_menu(gid: str, uid: str) -> str:
@@ -4222,11 +4225,13 @@ def _paiement_court(gid: str, uid: str) -> str:
             + (" · QR ✅" if e.get("qr") else ""))
 
 
-def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = "") -> List[Dict[str, Any]]:
+def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = "",
+                avec_page: Optional[bool] = None) -> List[Dict[str, Any]]:
     """Les composants v2 du menu : un conteneur, rien d'autre. `rangs` : les
     rangées de l'accueil (le 💳 y est retiré : il devient le bouton de la
     section Paiement, un custom_id ne vit qu'une fois par message). Sans appel
-    réseau : le tour des liens le recalcule à chaque passage."""
+    réseau : le tour des liens le recalcule à chaque passage. `avec_page` : la
+    section « 📊 Tes stats » (par défaut, MENU_PAGE_STATS)."""
     gid, uid = str(gid), str(uid)
     blocs: List[Dict[str, Any]] = []
     entete = TITRE_MENU_V2
@@ -4245,7 +4250,7 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     if url and l.get("actif", True) is not False and not parti:
         blocs.append({"type": 9, "components": [{"type": 10, "content": f"**🔗 Ton lien**\n{url}"}],
                       "accessory": {"type": 2, "style": 5, "label": "Ouvrir", "url": url}})
-        if gid in MENU_PAGE_STATS:
+        if (gid in MENU_PAGE_STATS) if avec_page is None else avec_page:
             try:
                 import stats_va
                 page = stats_va.lien(gid, uid)
@@ -4798,3 +4803,39 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
     # menu une fois (et retire la ligne « ⭐ Confirmé par … »)
     _noter_menu_v2(f"{gid}:{uid}", str(((p.get("message") or {}).get("id")) or ""), rangs, None)
     return {"type": 7, "data": {"components": corps, "allowed_mentions": {"parse": []}}}
+
+
+# ─── 📋 Le menu du salon commun de TRUST INSTAGRAM (04/11/2026) ──────────
+# Propriétaire, devant les 🧰 OUTILS de YouCham : « j'aimerais bien que ça se
+# passe comme ça maintenant pour Instagram aussi », et du menu en blocs de
+# Twitter : « c'est good, parfait », « pour Instagram [...] ça peut être
+# intéressant d'intégrer ça ». Le salon 📋・menu (outils_tickets, PANNEAUX)
+# ouvre ce menu-ci, pour le seul cliqueur : son lien, sa page de stats, son
+# paiement, 📈 Mes stats et 🎬 Contenu. 📤, ⬇️ et 📱 ont leur salon ; les
+# boutons des managers restent au ticket. Le ticket, lui, ne change pas
+# (« tu peux garder ce qu'il y a dans le ticket ») ; le 💳 garde la fenêtre
+# Solana de TRUST INSTAGRAM (USDC_RESEAUX_ICI : Twitter et Threads seuls).
+_PLATEFORME[AGENCY_IG_ID] = "Instagram"
+_ACCENT_MENU[AGENCY_IG_ID] = 0xE1306C
+#: Les boutons de la rangée du VA que ce menu garde.
+_DANS_MENU_COMMUN = ("usdc:set:", "subs:total:", CONTENU_PREFIXE)
+
+
+def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, Any]:
+    """Le menu en blocs de ce VA, en éphémère (réponse au clic). Lève si sa
+    fiche est illisible : outils_tickets répond alors « réessaie ».
+    `avec_contenu` False : sans 🎬 (le cliqueur n'a pas de ticket où livrer)."""
+    import liens_va as lv
+    gid, uid = str(gid), str(uid)
+    garder = _DANS_MENU_COMMUN if avec_contenu else tuple(x for x in _DANS_MENU_COMMUN
+                                                           if x != CONTENU_PREFIXE)
+    f = _fiche(gid, uid) or {}
+    rangs = boutons_va(uid, confirme=bool(f.get("confirme")),
+                       a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
+                       gid=gid, lien_actif=lv.est_actif(gid, uid))
+    gardes = [b for r in rangs for b in (r.get("components") or [])
+              if isinstance(b, dict) and str(b.get("custom_id") or "").startswith(garder)]
+    rangs = [{"type": 1, "components": gardes[i:i + 5]} for i in range(0, len(gardes), 5)]
+    return {"type": 4, "data": {"flags": EPHEMERE | V2,
+                                "components": _corps_menu(gid, uid, rangs, avec_page=True),
+                                "allowed_mentions": {"parse": []}}}

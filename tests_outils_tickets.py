@@ -301,8 +301,8 @@ try:
 
     # ── 3. qui peut cliquer ──────────────────────────────────────────────
     r = noter_textes(ot.traiter(clic(f"outk:spf:{CHEF}", uid=CHEF, salon="9999", chef=True)))
-    check("hors ticket (menu privé du staff) : refus poli, en privé",
-          r["type"] == 4 and r["data"]["flags"] == 64 and r["data"]["content"] == ot.TEXTE_HORS_TICKET, r)
+    check("hors ticket, sans ticket à soi (le staff, menu privé ou salon commun) : refus poli, en privé",
+          r["type"] == 4 and r["data"]["flags"] == 64 and r["data"]["content"] == ot.TEXTE_SANS_TICKET, r)
     r = noter_textes(ot.traiter(clic(f"outk:dl:{VA}", uid=VA2, salon=S)))
     check("un autre VA dans ce ticket : refusé, en privé",
           r["type"] == 4 and r["data"]["flags"] == 64 and r["data"]["content"] == ot.TEXTE_PAS_A_TOI, r)
