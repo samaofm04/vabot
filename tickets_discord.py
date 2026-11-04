@@ -4359,6 +4359,12 @@ def _ramener_menu_v2(gid: str, uid: str, salon: str, en_dernier: bool = False) -
             code, ms = _api("GET", f"/channels/{salon}/messages?limit=10")
             for m in (ms if code == 200 and isinstance(ms, list) else []):
                 if str(m.get("id")) in {copie, accueil} - {""}:
+                    if str(m["id"]) != copie and not (copie and f.get("menu_v2")):
+                        # l'accueil en bas et pas encore de menu en blocs
+                        # (04/11/2026) : il n'en tenait pas lieu — sans page
+                        # de stats ni paiement, le VA n'avait pas « 📊 Tes
+                        # stats » ; le menu est posé dessous
+                        break
                     if str(m["id"]) == copie:
                         if not (int(m.get("flags") or 0) & V2) or not f.get("menu_v2"):
                             break            # copie texte : reposée en v2 ci-dessous

@@ -199,8 +199,15 @@ check("le 💳 n'est plus dans les rangées (un custom_id par message)",
 check("aucun texte « YouLab » (réécrit sur les serveurs TRUST)", "YouLab" not in json.dumps(c))
 
 print("2. ramener_menu")
-check("accueil tout juste posé, rien dessous : déjà en bas, rien posé",
-      tk.ramener_menu(G, U, S) == "deja" and not d.ecrits(), d.ecrits())
+# 04/11/2026 : l'accueil en bas ne tient plus lieu de menu (ni page de stats,
+# ni paiement) : un ticket sans menu en blocs en reçoit un, dessous
+r0 = tk.ramener_menu(G, U, S)
+post0 = [a for a in d.ecrits() if a[0] == "POST"]
+check("accueil tout juste posé, pas encore de menu en blocs : le menu posé dessous, en v2",
+      r0 == "ramene" and len(post0) == 1 and post0[0][2].get("flags") == tk.V2, (r0, d.ecrits()))
+n0 = len(d.ecrits())
+check("… redemandé : déjà en bas, rien de plus", tk.ramener_menu(G, U, S) == "deja" and len(d.ecrits()) == n0,
+      d.ecrits()[n0:])
 d.n += 1
 d.messages["h1"] = {"id": "h1", "type": 0, "author": {"id": U}}
 d.fil.append("h1")
