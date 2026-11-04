@@ -44397,7 +44397,11 @@ def _render_studio_ia_html(admin: bool = False) -> str:
     pour lui."""
     try:
         import studio_ia
-        return studio_ia.rendu_html(_langue_courante(), admin=bool(admin))
+        try:
+            site = (request.url_root or "").rstrip("/") or "https://youl4b.com"
+        except Exception:
+            site = "https://youl4b.com"
+        return studio_ia.rendu_html(_langue_courante(), admin=bool(admin), site=site)
     except Exception as e:
         return ("<div style='background:#1a1a1a;border:1px solid #2a2a2a;"
                 "border-radius:12px;padding:40px 20px;text-align:center;"

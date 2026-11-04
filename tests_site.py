@@ -38559,6 +38559,83 @@ try:
               and [r["mime"] for r in _gM["tache"]["references"]] == ["image/png", "video/mp4"]
               and _cS.get("/studio-ia/estimer?modele=kling3motion&o_mode=720p&duree=11.1").get_json()["credits"] == 240)
         _sia._maj(_gM["tache"]["id"], etat="echec", message="fin du test motion")
+        # -- 5b) Visage : file locale, machine au jeton, resultat ---------------
+        _rVi = _sia.registre_visage("fr")
+        check("visage : dans le registre de l ecran (gratuit, photo + video), pas chez Kie, 4e genre rendu",
+              _rVi["cle"] == "visage" and _rVi["estimation_defaut"] == 0 and _rVi["references"]["max"] == 2
+              and _kie.modele("visage") is None and '"cle": "visage"' in _ftS and 'data-type="visage"' in _ftS
+              and 'id="sia-machine"' in _ftS)
+        _jV = _sia.jeton_machine()
+        _anon = _appS.test_client()
+        check("visage : jeton machine cree une fois (fichier 600), refuse sans en-tete, meme connecte",
+              len(_jV) == 48 and _sia.jeton_machine() == _jV and (_dSia / "machine.json").exists()
+              and _anon.get("/studio-ia/visage/travail?nom=mac").status_code == 401
+              and _cS.get("/studio-ia/visage/travail?nom=mac").status_code == 401
+              and _anon.get("/studio-ia/visage/travail?nom=mac", headers={"X-Visage-Jeton": "x" * 48}).status_code == 401)
+        _HV = {"X-Visage-Jeton": _jV}
+        _gVi = _cS.post("/studio-ia/generer", json={"modele": "visage", "options": {"finition": "rapide"},
+                                                     "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        check("visage : photo + video -> en file, 0 credit, Kie pas appele, estimation 0",
+              _gVi.get("ok") and _gVi["tache"]["etat"] == "en_attente" and _gVi["tache"]["credits_estimes"] == 0
+              and _gVi["tache"]["visage"]["etape"] == "attente" and _gVi["tache"]["resume"].startswith("rapide")
+              and _cS.get("/studio-ia/estimer?modele=visage").get_json()["credits"] == 0)
+        _vid = _gVi["tache"]["id"]
+        check("visage : photo seule refusee (code refs), 2 videos aussi",
+              _cS.post("/studio-ia/generer", json={"modele": "visage", "references": [_rW["reference"]["id"]]}).get_json().get("code") == "refs"
+              and _cS.post("/studio-ia/generer", json={"modele": "visage", "references": [_rV["reference"]["id"], _rC["reference"]["id"]]}).get_json().get("code") == "refs")
+        _etV = _cS.get("/studio-ia/etat").get_json()["visage"]
+        _vSv = _appS.test_client()
+        with _vSv.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = "va1"; _s["role"] = "va"
+        check("visage : sans machine vue, l admin voit la commande (jeton dedans), le VA non",
+              _etV["machines"] == [] and _jV in _etV["commande"] and "installer" in _etV["commande"]
+              and "commande" not in _vSv.get("/studio-ia/etat").get_json()["visage"])
+        _wV = _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV).get_json()
+        check("machine : prend le travail (en_cours), recoit photo + video avec leur extension, au jeton seul",
+              _wV["ok"] and _wV["tache"]["id"] == _vid and _wV["tache"]["finition"] == "rapide"
+              and [e["role"] for e in _wV["tache"]["entrees"]] == ["visage", "cible"]
+              and _wV["tache"]["entrees"][0]["ext"] == ".png" and _wV["tache"]["entrees"][1]["ext"] == ".mp4"
+              and _anon.get(_wV["tache"]["entrees"][1]["url"], headers=_HV).mimetype == "video/mp4"
+              and _anon.get(_wV["tache"]["entrees"][1]["url"]).status_code == 401
+              and next(t for t in _sia._charger() if t["id"] == _vid)["etat"] == "en_cours"
+              and _cS.get("/studio-ia/etat").get_json()["visage"]["machines"][0]["nom"] == "mac-test"
+              and _wV.get("worker_sha") == _sia._sha_worker() and len(_wV["worker_sha"]) == 64)
+        check("machine : la meme machine redemande -> retrouve SON travail ; une autre n a rien",
+              _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV).get_json()["tache"]["id"] == _vid
+              and _anon.get("/studio-ia/visage/travail?nom=autre", headers=_HV).get_json()["tache"] is None)
+        _anon.post(f"/studio-ia/visage/avancement/{_vid}", json={"progression": 42, "etape": "processing", "machine": "mac-test"}, headers=_HV)
+        _pubV = next(t for t in _cS.get("/studio-ia/taches").get_json()["taches"] if t["id"] == _vid)
+        check("machine : l avancement se voit sur la carte (42 %, processing, mac-test)",
+              _pubV["visage"] == {"progression": 42, "etape": "processing", "machine": "mac-test"})
+        _rRes = _anon.post(f"/studio-ia/visage/resultat/{_vid}", headers=_HV, content_type="multipart/form-data",
+                           data={"fichier": (_ioSia.BytesIO((_dSia / "gestes.mp4").read_bytes()), "sortie.mp4"), "machine": "mac-test"}).get_json()
+        _tV = next(t for t in _sia._charger() if t["id"] == _vid)
+        check("machine : le resultat entre dans sorties/ comme un resultat Kie (fini, fichier, vignette, 0 credit)",
+              _rRes["ok"] and _tV["etat"] == "fini" and _tV["credits"] == 0 and _tV["visage"]["progression"] == 100
+              and (_dSia / "sorties" / _tV["fichiers"][0]["nom"]).exists() and _tV["fichiers"][0]["vignette"]
+              and _cS.get(f"/studio-ia/fichier/{_vid}/0").mimetype == "video/mp4"
+              and _anon.post(f"/studio-ia/visage/resultat/{_vid}", headers=_HV, content_type="multipart/form-data",
+                             data={"fichier": (_ioSia.BytesIO(b"x" * 2000), "sortie.mp4")}).status_code == 404)
+        _g3 = _cS.post("/studio-ia/generer", json={"modele": "visage", "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        _vid3 = _g3["tache"]["id"]
+        _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV)
+        _sia._maj(_vid3, visage=dict(next(t for t in _sia._charger() if t["id"] == _vid3)["visage"], pris_le=1, vu_le=1))
+        check("machine muette 10 min : le travail revient en file (reprise 1), pas en echec",
+              _sia.verifier(_vid3)["etat"] == "en_attente"
+              and next(t for t in _sia._charger() if t["id"] == _vid3)["visage"]["reprises"] == 1)
+        check("machine : echec declare -> echec avec la raison ; worker.py servi au jeton seul",
+              _anon.get("/studio-ia/visage/travail?nom=mac-test", headers=_HV).get_json()["tache"]["id"] == _vid3
+              and _anon.post(f"/studio-ia/visage/echec/{_vid3}", json={"erreur": "FaceFusion a echoue", "machine": "mac-test"}, headers=_HV).get_json()["ok"]
+              and next(t for t in _sia._charger() if t["id"] == _vid3)["message"] == "FaceFusion a echoue"
+              and _anon.get("/studio-ia/visage/worker.py", headers=_HV).status_code == 200
+              and _anon.get("/studio-ia/visage/worker.py").status_code == 401)
+        import plistlib as _plV, ast as _astV, visage_worker as _vw
+        _plV.loads(_vw.plist_launchd("/tmp/x").encode())
+        _astV.parse(_plSia.Path("visage_worker.py").read_text(encoding="utf-8"), feature_version=(3, 9))
+        check("visage_worker.py : syntaxe Python 3.9 (le python3 du Mac), FaceFusion avec gfpgan en nette, sans en rapide, progression lue",
+              "face_enhancer" in _vw.commande_facefusion(_vw.chemins("/d"), "nette", "v.png", "c.mp4", "s.mp4", 4)
+              and "face_enhancer" not in _vw.commande_facefusion(_vw.chemins("/d"), "rapide", "v.png", "c.mp4", "s.mp4", 4)
+              and _vw._RE_TQDM.search("processing:  45%|████      | 150/333 [00:10<00:12, 14.9frame/s]").group(3) == "150")
     else:
         check("motion : ffmpeg present pour le test de depot", False, "ffmpeg absent ou lavfi/webp indisponible")
     _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}

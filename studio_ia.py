@@ -16,12 +16,20 @@ tant qu'il en reste d'ouvertes, et chaque résultat est rapatrié dans
 data/studio_ia/sorties/ (Kie ne garde les fichiers que 14 jours). Le site
 n'efface jamais un média : « retirer de l'historique » masque la tâche, le
 fichier reste.
+
+Le genre « Visage » ne passe pas par Kie : FaceFusion (libre, gratuit) tourne
+sur une machine à nous — le Mac du propriétaire aujourd'hui, le VPS quand il
+aura la place (2 Go de modèles) — qui vient chercher le travail ici avec
+visage_worker.py et un jeton (data/studio_ia/machine.json). Le site ne
+calcule rien : il garde la file, la progression et le résultat.
 """
 from __future__ import annotations
 
+import hmac
 import html
 import json
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -48,6 +56,18 @@ DELAI_MAX_S = 2 * 3600
 #: Tentatives de rapatriement avant de se contenter de l'URL Kie (14 jours).
 ESSAIS_DL = 5
 ETATS_OUVERTS = ("en_attente", "en_cours")
+#: Visage : une machine qui ne donne plus signe pendant 10 min a planté (ou
+#: dort) : le travail est remis en file, deux fois, puis déclaré perdu.
+SILENCE_MAX_VISAGE_S = 10 * 60
+#: Visage : sans machine en ligne, un travail attend jusqu'à 24 h (le Mac
+#: peut être éteint le soir), pas 2 h comme une tâche Kie.
+ATTENTE_MAX_VISAGE_S = 24 * 3600
+DUREE_MAX_VISAGE_S = 180
+#: Une machine vue il y a moins de 90 s est « en ligne » (elle passe toutes
+#: les 10 s).
+MACHINE_EN_LIGNE_S = 90
+TAILLE_MAX_RESULTAT = 400_000_000
+_MACHINES: Dict[str, Dict[str, Any]] = {}
 _ID_OK = re.compile(r"^[a-f0-9]{12,32}$")
 _VERROU = threading.RLock()
 _SUIVI: Dict[str, Any] = {"fil": None}
@@ -120,6 +140,23 @@ T = {
         "fermer": "Fermer", "secondes": "s", "ouvrir_kie": "Ouvrir chez Kie",
         "usage_refs_sans": "Aucune image : le modèle part du prompt seul.",
         "trad_options": "Les réglages suivent le modèle choisi.",
+        "visage": "Visage · même vidéo",
+        "deposer_visage": "Clique ou dépose la photo du visage et la vidéo à modifier",
+        "deposer_aide_visage": "JPG/PNG/WebP + MP4/MOV (100 Mo, 3 min au plus)",
+        "visage_refs": "Il faut une photo du visage et une vidéo.",
+        "gratuit": "gratuit",
+        "visage_lance": "Remplacement de visage mis en file (gratuit).",
+        "visage_machine_ok": "Machine en ligne : {nom} (vue il y a {d}).",
+        "visage_machine_occupee": "{nom} travaille (vue il y a {d}).",
+        "visage_sans_machine": "Aucune machine en ligne pour le visage : le travail attendra qu'elle se connecte (le Mac, allumé et déverrouillé).",
+        "visage_sans_machine_admin": "Sur le Mac, une seule fois (puis elle se reconnecte seule) :",
+        "visage_etape_modeles": "téléchargement des modèles",
+        "visage_etape_analysing": "analyse de la vidéo",
+        "visage_etape_extracting": "extraction des images",
+        "visage_etape_processing": "remplacement du visage",
+        "visage_etape_merging": "assemblage",
+        "visage_etape_envoi": "envoi du résultat",
+        "visage_etape_attente": "en attente d'une machine",
     },
     "en": {
         "titre": "Studio IA",
@@ -179,8 +216,70 @@ T = {
         "fermer": "Close", "secondes": "s", "ouvrir_kie": "Open on Kie",
         "usage_refs_sans": "No image: the model starts from the prompt alone.",
         "trad_options": "Settings follow the chosen model.",
+        "visage": "Face · same video",
+        "deposer_visage": "Click or drop the face photo and the video to change",
+        "deposer_aide_visage": "JPG/PNG/WebP + MP4/MOV (100 MB, 3 min at most)",
+        "visage_refs": "A face photo and a video are both needed.",
+        "gratuit": "free",
+        "visage_lance": "Face swap queued (free).",
+        "visage_machine_ok": "Machine online: {nom} (seen {d}).",
+        "visage_machine_occupee": "{nom} is working (seen {d}).",
+        "visage_sans_machine": "No machine online for faces: the job will wait until it connects (the Mac, on and unlocked).",
+        "visage_sans_machine_admin": "On the Mac, once (it reconnects by itself afterwards):",
+        "visage_etape_modeles": "downloading the models",
+        "visage_etape_analysing": "analysing the video",
+        "visage_etape_extracting": "extracting frames",
+        "visage_etape_processing": "swapping the face",
+        "visage_etape_merging": "merging",
+        "visage_etape_envoi": "uploading the result",
+        "visage_etape_attente": "waiting for a machine",
     },
 }
+
+#: Le « modèle » Visage tel que l'écran le lit, à côté du registre Kie
+#: (même forme que kie_ai.registre_public : l'écran ne fait pas la
+#: différence, sauf pour le prix : gratuit).
+MODELE_VISAGE = {
+    "cle": "visage", "nom": "FaceFusion", "editeur": "sur notre machine", "editeur_en": "on our machine",
+    "type": "visage", "badge": "gratuit", "badge_en": "free",
+    "resume": "la vidéo reste identique (tenue, gestes, son, texte), seule la tête devient celle de la photo",
+    "resume_en": "the video stays identical (outfit, moves, sound, text), only the head becomes the photo's",
+    "prompt_max": 0, "prompt_min": 0, "sans_prompt": True,
+    "references": {
+        "max": 2, "modes": ["visage"], "videos_max": 1, "duree": [1, DUREE_MAX_VISAGE_S],
+        "aide": "1 photo du visage (de face, nette, bien éclairée) + 1 vidéo MP4/MOV de 3 min au plus. Les cheveux, le corps, le son et le texte restent ceux de la vidéo. Gratuit : le calcul se fait sur notre machine, compte ~30 s par seconde de vidéo.",
+        "aide_en": "1 face photo (front-facing, sharp, well lit) + 1 MP4/MOV video of 3 min at most. Hair, body, sound and text stay those of the video. Free: computed on our machine, count ~30 s per second of video.",
+    },
+    "options": [
+        {"cle": "finition", "nom": "Finition", "nom_en": "Finish", "type": "choix",
+         "valeurs": ["nette", "rapide"], "defaut": "nette",
+         "libelles": {"nette": {"fr": "Nette (visage lissé)", "en": "Sharp (face enhanced)"},
+                      "rapide": {"fr": "Rapide (sans lissage)", "en": "Fast (no enhancing)"}},
+         "aide": "Nette : GFPGAN affine le visage posé (2× plus long). Rapide : le visage seul, pour un essai.",
+         "aide_en": "Sharp: GFPGAN refines the swapped face (2× slower). Fast: the swap alone, for a quick try."},
+    ],
+}
+
+
+def registre_visage(langue: str = "fr") -> Dict[str, Any]:
+    en = langue == "en"
+    m = MODELE_VISAGE
+    r = m["references"]
+    opts = []
+    for o in m["options"]:
+        opts.append({"cle": o["cle"], "nom": o["nom_en"] if en else o["nom"], "type": o["type"], "defaut": o["defaut"],
+                     "valeurs": list(o["valeurs"]),
+                     "libelles": {k: (v["en"] if en else v["fr"]) for k, v in o["libelles"].items()},
+                     "aide": o["aide_en"] if en else o["aide"]})
+    return {
+        "cle": m["cle"], "nom": m["nom"], "editeur": m["editeur_en"] if en else m["editeur"], "type": m["type"],
+        "prix_seconde": 0, "sans_prompt": True, "duree": list(r["duree"]),
+        "badge": m["badge_en"] if en else m["badge"], "resume": m["resume_en"] if en else m["resume"],
+        "prompt_max": 0, "prompt_min": 0,
+        "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(kie_ai.TYPES_IMAGE + kie_ai.TYPES_VIDEO),
+                       "videos_max": r["videos_max"], "aide": r["aide_en"] if en else r["aide"]},
+        "options": opts, "estimation_defaut": 0,
+    }
 
 
 def _t(langue: str) -> Dict[str, str]:
@@ -380,6 +479,8 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
     """Vérifie, estime, lance chez Kie et enregistre la tâche. Renvoie
     {ok: True, tache} ou {ok: False, erreur, code}. Ne lève pas."""
     t = _t(langue)
+    if cle_modele == "visage":
+        return lancer_visage(utilisateur, options, refs, langue)
     m = kie_ai.modele(cle_modele)
     if not m:
         return {"ok": False, "erreur": "Modèle inconnu." if langue != "en" else "Unknown model.", "code": "modele"}
@@ -508,6 +609,8 @@ def verifier(tid: str) -> Optional[Dict[str, Any]]:
     t = next((x for x in taches if x.get("id") == tid), None)
     if not t or t.get("etat") not in ETATS_OUVERTS:
         return t
+    if t.get("type") == "visage":
+        return _verifier_visage(t)
     if time.time() - t.get("cree_le", 0) > DELAI_MAX_S:
         return _maj(tid, etat="echec", message="Délai dépassé (2 h) : Kie n'a jamais rendu cette tâche.",
                     fini_le=int(time.time()))
@@ -611,6 +714,10 @@ def _publique(t: Dict[str, Any], langue: str = "fr") -> Dict[str, Any]:
         "references": [{"apercu": "/studio-ia/reference/" + r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")}
                        for r in (t.get("references") or []) if _ID_OK.match(str(r.get("id") or ""))],
         "derniere_erreur": t.get("derniere_erreur", ""),
+        "visage": ({"progression": int((t.get("visage") or {}).get("progression") or 0),
+                    "etape": str((t.get("visage") or {}).get("etape") or ""),
+                    "machine": str((t.get("visage") or {}).get("machine") or "")}
+                   if t.get("type") == "visage" else None),
     }
 
 
@@ -624,6 +731,192 @@ def taches_visibles(utilisateur: str, admin: bool, langue: str = "fr") -> List[D
         out.append(_publique(t, langue))
     out.sort(key=lambda x: x.get("cree_le") or 0, reverse=True)
     return out
+
+
+# -------------------------------------------------------------- visage --
+
+def _fichier_jeton_machine() -> Path:
+    return DOSSIER / "machine.json"
+
+
+def jeton_machine() -> str:
+    """Le jeton que la machine (visage_worker.py) présente. Créé au premier
+    besoin, fichier 600, jamais renouvelé : il ne circule que vers un admin
+    (commande à lancer) et dans l'en-tête de la machine."""
+    with _VERROU:
+        d = safe_json.load(_fichier_jeton_machine(), default=None)
+        if isinstance(d, dict) and d.get("jeton"):
+            return str(d["jeton"])
+        jeton = secrets.token_hex(24)
+        DOSSIER.mkdir(parents=True, exist_ok=True)
+        safe_json.write(_fichier_jeton_machine(), {"jeton": jeton, "cree_le": int(time.time())}, backup=False)
+        try:
+            _fichier_jeton_machine().chmod(0o600)
+        except OSError:
+            pass
+        return jeton
+
+
+def jeton_machine_ok(envoye: str) -> bool:
+    envoye = (envoye or "").strip()
+    return bool(envoye) and hmac.compare_digest(envoye, jeton_machine())
+
+
+def commande_machine(site: str) -> str:
+    """La commande à lancer une fois sur le Mac (montrée à l'admin seul)."""
+    return f"python3 visage_worker.py installer --site {site} --jeton {jeton_machine()}"
+
+
+def voir_machine(nom: str, etat: str = "libre", tid: str = "") -> None:
+    nom = (nom or "machine")[:40]
+    _MACHINES[nom] = {"nom": nom, "vu_le": int(time.time()), "etat": etat, "tache": tid}
+
+
+def machines_visage() -> List[Dict[str, Any]]:
+    """Les machines vues récemment (en mémoire : au redémarrage, la
+    prochaine passe de la machine la remet en 10 s)."""
+    limite = time.time() - 6 * 3600
+    return sorted([dict(m) for m in _MACHINES.values() if m["vu_le"] > limite], key=lambda m: -m["vu_le"])
+
+
+def etat_visage(langue: str = "fr", admin: bool = False, site: str = "https://youl4b.com") -> Dict[str, Any]:
+    d: Dict[str, Any] = {"machines": machines_visage(), "en_ligne_s": MACHINE_EN_LIGNE_S}
+    if admin:
+        d["commande"] = commande_machine(site)
+    return d
+
+
+def lancer_visage(utilisateur: str, options: Any, refs: List[str], langue: str = "fr") -> Dict[str, Any]:
+    """Met un remplacement de visage en file : 1 photo (le visage) + 1 vidéo
+    (ce qui est modifié). Rien ne part chez Kie, rien n'est débité."""
+    t = _t(langue)
+    refs_meta = [r for r in (_reference(x) for x in (refs or [])[:2]) if r]
+    images = [r for r in refs_meta if str(r.get("mime") or "").startswith("image/")]
+    videos = [r for r in refs_meta if str(r.get("mime") or "").startswith("video/")]
+    if len(images) != 1 or len(videos) != 1:
+        return {"ok": False, "erreur": t["visage_refs"], "code": "refs"}
+    duree_video = float(videos[0].get("duree") or 0)
+    if not 1 <= duree_video <= DUREE_MAX_VISAGE_S:
+        return {"ok": False, "code": "video_duree",
+                "erreur": t["video_duree"].format(s=_nb(duree_video), min="1", max=str(DUREE_MAX_VISAGE_S))}
+    nb_ouvertes = sum(1 for x in _ouvertes() if x.get("utilisateur") == utilisateur)
+    if nb_ouvertes >= MAX_OUVERTES:
+        return {"ok": False, "erreur": t["trop_en_cours"].format(n=MAX_OUVERTES), "code": "trop"}
+    o = {"finition": "rapide" if isinstance(options, dict) and options.get("finition") == "rapide" else "nette"}
+    maintenant = int(time.time())
+    tache = {
+        "id": uuid.uuid4().hex[:12], "task_id": "", "utilisateur": utilisateur,
+        "modele": "visage", "nom_modele": MODELE_VISAGE["nom"], "modele_api": "facefusion", "type": "visage",
+        "prompt": "", "options": o, "resume": f"{o['finition']} · {_nb(duree_video)} s",
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")} for r in images + videos],
+        "etat": "en_attente", "message": "", "credits_estimes": 0, "credits": 0,
+        "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
+        "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,
+        "visage": {"progression": 0, "etape": "attente", "machine": "", "pris_le": 0, "vu_le": 0, "reprises": 0,
+                   "duree": round(duree_video, 2)},
+    }
+    with _VERROU:
+        taches = _charger()
+        taches.append(tache)
+        _ecrire(taches)
+    print(f"[studio-ia] visage {tache['id']} mis en file par {utilisateur} ({o['finition']}, {_nb(duree_video)} s)", flush=True)
+    _assurer_suivi()
+    return {"ok": True, "tache": _publique(tache, langue)}
+
+
+def _verifier_visage(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pas de Kie à interroger : seuls les délais. Une machine muette rend
+    son travail à la file (deux fois), un travail sans machine finit par
+    expirer."""
+    tid = t["id"]
+    v = dict(t.get("visage") or {})
+    maintenant = time.time()
+    if t.get("etat") == "en_cours":
+        dernier = max(float(v.get("vu_le") or 0), float(v.get("pris_le") or 0))
+        if maintenant - dernier > SILENCE_MAX_VISAGE_S:
+            reprises = int(v.get("reprises") or 0) + 1
+            if reprises > 2:
+                return _maj(tid, etat="echec", fini_le=int(maintenant),
+                            message=f"La machine {v.get('machine') or '?'} n'a plus donné signe (3 fois) : travail abandonné.")
+            v.update({"reprises": reprises, "progression": 0, "etape": "attente", "machine": ""})
+            print(f"[studio-ia] visage {tid} : machine muette, remis en file ({reprises})", flush=True)
+            return _maj(tid, etat="en_attente", visage=v,
+                        message="La machine n'a plus donné signe : remis en file.")
+        return t
+    if maintenant - float(t.get("cree_le") or 0) > ATTENTE_MAX_VISAGE_S:
+        return _maj(tid, etat="echec", fini_le=int(maintenant),
+                    message="Aucune machine n'a pris ce travail en 24 h.")
+    return t
+
+
+def prendre_travail(nom_machine: str) -> Optional[Dict[str, Any]]:
+    """Le plus ancien travail en attente passe à la machine qui le demande.
+    Une machine qui en tient déjà un (reprise après coupure) le retrouve."""
+    with _VERROU:
+        taches = _charger()
+        miens = [x for x in taches if x.get("type") == "visage" and x.get("etat") == "en_cours"
+                 and (x.get("visage") or {}).get("machine") == nom_machine]
+        attente = sorted([x for x in taches if x.get("type") == "visage" and x.get("etat") == "en_attente"],
+                         key=lambda x: x.get("cree_le") or 0)
+        t = miens[0] if miens else (attente[0] if attente else None)
+        if not t:
+            return None
+        v = dict(t.get("visage") or {})
+        v.update({"machine": nom_machine, "pris_le": int(time.time()), "vu_le": int(time.time()),
+                  "progression": 0, "etape": "demarrage"})
+        t["etat"], t["visage"], t["message"], t["maj_le"] = "en_cours", v, "", int(time.time())
+        _ecrire(taches)
+    entrees = []
+    for n, r in enumerate(t.get("references") or []):
+        meta = _reference(r.get("id") or "")
+        if not meta:
+            continue
+        role = "visage" if str(meta.get("mime") or "").startswith("image/") else "cible"
+        entrees.append({"role": role, "n": n, "url": f"/studio-ia/visage/entree/{t['id']}/{n}",
+                        "ext": Path(meta["chemin"]).suffix, "duree": meta.get("duree") or 0})
+    return {"id": t["id"], "finition": (t.get("options") or {}).get("finition", "nette"), "entrees": entrees}
+
+
+def avancement_visage(tid: str, progression: Any, etape: str, machine: str) -> Optional[Dict[str, Any]]:
+    try:
+        p = max(0, min(100, int(float(progression))))
+    except (TypeError, ValueError):
+        p = 0
+    t = next((x for x in _charger() if x.get("id") == tid), None)
+    if not t or t.get("type") != "visage" or t.get("etat") != "en_cours":
+        return None
+    v = dict(t.get("visage") or {})
+    v.update({"progression": p, "etape": (etape or "")[:40], "vu_le": int(time.time()), "machine": machine or v.get("machine", "")})
+    return _maj(tid, visage=v)
+
+
+def resultat_visage(tid: str, octets: bytes, nom: str) -> Optional[Dict[str, Any]]:
+    """Le fichier rendu par la machine entre dans sorties/ comme un résultat
+    Kie : même carte, même aperçu, même téléchargement."""
+    t = next((x for x in _charger() if x.get("id") == tid), None)
+    if not t or t.get("type") != "visage" or t.get("etat") not in ETATS_OUVERTS:
+        return None
+    ext = Path(nom or "").suffix.lower()
+    if ext not in _MIME_PAR_EXT:
+        ext = ".mp4"
+    _dossier_sorties().mkdir(parents=True, exist_ok=True)
+    dest = _dossier_sorties() / f"{tid}_0{ext}"
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp.write_bytes(octets)
+    tmp.replace(dest)
+    fichier = {"nom": dest.name, "mime": _MIME_PAR_EXT[ext], "taille": dest.stat().st_size, "vignette": _vignette(dest)}
+    v = dict(t.get("visage") or {})
+    v.update({"progression": 100, "etape": "fini", "vu_le": int(time.time())})
+    print(f"[studio-ia] visage {tid} rendu par {v.get('machine') or '?'} ({fichier['taille']} octets)", flush=True)
+    return _maj(tid, etat="fini", fichiers=[fichier], fini_le=int(time.time()), message="", credits=0, visage=v)
+
+
+def echec_visage(tid: str, erreur: str) -> Optional[Dict[str, Any]]:
+    t = next((x for x in _charger() if x.get("id") == tid), None)
+    if not t or t.get("type") != "visage" or t.get("etat") not in ETATS_OUVERTS:
+        return None
+    print(f"[studio-ia] visage {tid} en échec : {erreur[:200]}", flush=True)
+    return _maj(tid, etat="echec", fini_le=int(time.time()), message=(erreur or "échec sur la machine")[:400])
 
 
 # --------------------------------------------------------------- rendu --
@@ -665,6 +958,13 @@ body.light #sia-root{--sia-carte:#fff;--sia-carte2:#f5f5f5;--sia-bord:#e0e0e0;--
 #sia-root .sia-logo.l-seedance{background:linear-gradient(135deg,#f97316,#ef4444)}
 #sia-root .sia-logo.l-wan{background:linear-gradient(135deg,#a855f7,#7c3aed)}
 #sia-root .sia-logo.l-seedream{background:linear-gradient(135deg,#ec4899,#f43f5e)}
+#sia-root .sia-logo.l-visage{background:linear-gradient(135deg,#22c55e,#0ea5e9)}
+#sia-root .sia-barre{width:100%;height:6px;border-radius:999px;background:var(--sia-bord);overflow:hidden;margin:4px 0}
+#sia-root .sia-barre i{display:block;height:100%;background:var(--sia-accent);border-radius:999px;transition:width .6s}
+#sia-root .sia-machine{padding:10px 12px;border-radius:10px;font-size:12px;line-height:1.5;margin-bottom:14px;border:1px solid var(--sia-bord);background:var(--sia-carte);color:var(--sia-faible)}
+#sia-root .sia-machine.ko{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.45);color:var(--sia-att)}
+#sia-root .sia-machine.ok{color:var(--sia-ok)}
+#sia-root .sia-machine code{display:block;margin-top:6px;padding:8px;border-radius:8px;background:var(--sia-carte2);color:var(--sia-texte);font-size:11px;word-break:break-all;user-select:all}
 #sia-root .sia-modele-txt{min-width:0;flex:1}
 #sia-root .sia-modele-nom{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 #sia-root .sia-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(34,197,94,.14);color:var(--sia-ok);text-transform:uppercase;letter-spacing:.04em}
@@ -784,11 +1084,12 @@ body.light #sia-root button.sia-lien.primaire{color:var(--sia-sur-accent)!import
 
 _SVG_FILM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg>'
 _SVG_MOTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="4" r="1.8"/><path d="m6 20 4-7 3 2 2 5"/><path d="m4 12 5-3 4 1 3 3 4-1"/><path d="m9 9-1.5 5"/></svg>'
+_SVG_VISAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="m17 3 2 2-2 2"/><path d="m7 3-2 2 2 2"/></svg>'
 _SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
 _SVG_ETINCELLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>'
 
 
-def rendu_html(langue: str = "fr", admin: bool = False) -> str:
+def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://youl4b.com") -> str:
     """Le fragment de l'onglet (CSS + HTML + configuration JSON + script).
     Sans état de page : réinjectable tel quel par le chargeur paresseux.
     `admin` : montrer le panneau de la clé (coller / changer)."""
@@ -802,7 +1103,8 @@ def rendu_html(langue: str = "fr", admin: bool = False) -> str:
     conf = {
         "langue": langue, "t": t, "cle": kie_ai.cle_presente(), "admin": bool(admin),
         "cle_fin": src["fin"], "cle_source": src["source"],
-        "modeles": kie_ai.registre_public(langue), "max_ouvertes": MAX_OUVERTES,
+        "modeles": kie_ai.registre_public(langue) + [registre_visage(langue)], "max_ouvertes": MAX_OUVERTES,
+        "visage": etat_visage(langue, admin, site),
     }
     # Sans clé : l'admin a le champ pour la coller, les autres savent à qui la
     # demander. Avec clé, l'admin retrouve le panneau par le bouton 🔑.
@@ -835,10 +1137,12 @@ def rendu_html(langue: str = "fr", admin: bool = False) -> str:
   <button type="button" class="sia-type on" data-type="video">{_SVG_FILM}{e(t["reels"])}</button>
   <button type="button" class="sia-type" data-type="image">{_SVG_PHOTO}{e(t["photo"])}</button>
   <button type="button" class="sia-type" data-type="motion">{_SVG_MOTION}{e(t["motion"])}</button>
+  <button type="button" class="sia-type" data-type="visage">{_SVG_VISAGE}{e(t["visage"])}</button>
 </div>
 <div class="sia-corps" id="sia-vue-creer">
   <aside>
     <section class="sia-carte"><h4>{e(t["modele"])}</h4><div id="sia-modeles"></div></section>
+    <div class="sia-machine" id="sia-machine" hidden></div>
     <section class="sia-carte"><h4>{e(t["references"])} <small>{e(t["optionnel"])}</small></h4>
       <label class="sia-drop" id="sia-drop"><b id="sia-drop-t">{e(t["deposer"])}</b><span id="sia-drop-a">{e(t["deposer_aide"])}</span><input type="file" id="sia-fichier" accept="image/jpeg,image/png,image/webp" multiple></label>
       <div class="sia-refs" id="sia-refs"></div>
@@ -871,6 +1175,12 @@ def rendu_html(langue: str = "fr", admin: bool = False) -> str:
 
 
 # -------------------------------------------------------------- routes --
+
+def _sha_worker() -> str:
+    import hashlib
+    p = BOT_DIR / "visage_worker.py"
+    return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else ""
+
 
 def register(app, deps: Dict[str, Any]) -> None:
     """Branche les routes. `deps` : is_auth (obligatoire), is_admin,
@@ -908,6 +1218,100 @@ def register(app, deps: Dict[str, Any]) -> None:
         r.headers["Cache-Control"] = "no-store"
         return r
 
+    def _site() -> str:
+        try:
+            return (request.url_root or "https://youl4b.com").rstrip("/")
+        except Exception:
+            return "https://youl4b.com"
+
+    # -- la machine qui fait les visages (visage_worker.py) : jeton, pas de
+    # session. Le garde d'écriture laisse passer l'anonyme (chaque handler
+    # décide) ; ici c'est le jeton qui décide.
+    def _machine_refus():
+        if jeton_machine_ok(request.headers.get("X-Visage-Jeton") or request.args.get("jeton") or ""):
+            return None
+        return _json({"ok": False, "erreur": "jeton"}, 401)
+
+    @app.route("/studio-ia/visage/travail")
+    def studio_ia_visage_travail():
+        r = _machine_refus()
+        if r:
+            return r
+        nom = (request.args.get("nom") or "machine")[:40]
+        t = prendre_travail(nom)
+        voir_machine(nom, "occupee" if t else "libre", t["id"] if t else "")
+        if _ouvertes():
+            _assurer_suivi()
+        try:
+            sha = _sha_worker()
+        except OSError:
+            sha = ""
+        return _json({"ok": True, "tache": t, "worker_sha": sha})
+
+    @app.route("/studio-ia/visage/entree/<tid>/<int:n>")
+    def studio_ia_visage_entree(tid, n):
+        r = _machine_refus()
+        if r:
+            return r
+        if not _ID_OK.match(str(tid)):
+            return "", 404
+        t = next((x for x in _charger() if x.get("id") == tid), None)
+        refs = (t or {}).get("references") or []
+        if not t or t.get("type") != "visage" or n < 0 or n >= len(refs):
+            return "", 404
+        meta = _reference(refs[n].get("id") or "")
+        if not meta:
+            return "", 404
+        return send_file(str(meta["chemin"]), mimetype=meta.get("mime"), conditional=True)
+
+    @app.route("/studio-ia/visage/avancement/<tid>", methods=["POST"])
+    def studio_ia_visage_avancement(tid):
+        r = _machine_refus()
+        if r:
+            return r
+        d = request.get_json(silent=True) or {}
+        nom = str(d.get("machine") or "machine")[:40]
+        voir_machine(nom, "occupee", tid)
+        t = avancement_visage(tid, d.get("progression"), str(d.get("etape") or ""), nom) if _ID_OK.match(str(tid)) else None
+        return _json({"ok": bool(t), "etat": (t or {}).get("etat")}, 200 if t else 404)
+
+    @app.route("/studio-ia/visage/resultat/<tid>", methods=["POST"])
+    def studio_ia_visage_resultat(tid):
+        r = _machine_refus()
+        if r:
+            return r
+        f = request.files.get("fichier")
+        if f is None or not _ID_OK.match(str(tid)):
+            return _json({"ok": False, "erreur": "fichier"}, 400)
+        octets = f.read(TAILLE_MAX_RESULTAT + 1)
+        if not octets or len(octets) > TAILLE_MAX_RESULTAT:
+            return _json({"ok": False, "erreur": "taille"}, 400)
+        t = resultat_visage(tid, octets, f.filename or "sortie.mp4")
+        voir_machine(str(request.form.get("machine") or "machine")[:40], "libre", "")
+        return _json({"ok": bool(t)}, 200 if t else 404)
+
+    @app.route("/studio-ia/visage/echec/<tid>", methods=["POST"])
+    def studio_ia_visage_echec(tid):
+        r = _machine_refus()
+        if r:
+            return r
+        d = request.get_json(silent=True) or {}
+        voir_machine(str(d.get("machine") or "machine")[:40], "libre", "")
+        t = echec_visage(tid, str(d.get("erreur") or "")) if _ID_OK.match(str(tid)) else None
+        return _json({"ok": bool(t)}, 200 if t else 404)
+
+    @app.route("/studio-ia/visage/worker.py")
+    def studio_ia_visage_worker():
+        """Le programme de la machine, tel qu'il est dans git : la machine
+        se met à jour seule quand il change (worker_sha)."""
+        r = _machine_refus()
+        if r:
+            return r
+        p = BOT_DIR / "visage_worker.py"
+        if not p.exists():
+            return "", 404
+        return send_file(str(p), mimetype="text/x-python", conditional=True)
+
     @app.route("/studio-ia/app.js")
     def studio_ia_app_js():
         # Le .js est LOAD-BEARING : le garde de lecture exempte les assets
@@ -929,7 +1333,8 @@ def register(app, deps: Dict[str, Any]) -> None:
         return _json({"ok": True, "cle": kie_ai.cle_presente(), "credits": s["credits"],
                       "erreur_credits": s["erreur"], "admin": _admin(),
                       "cle_fin": src["fin"], "cle_source": src["source"],
-                      "taches": taches_visibles(utilisateur(), _admin(), langue())})
+                      "taches": taches_visibles(utilisateur(), _admin(), langue()),
+                      "visage": etat_visage(langue(), _admin(), _site())})
 
     @app.route("/studio-ia/cle", methods=["POST"])
     def studio_ia_cle():
@@ -955,7 +1360,8 @@ def register(app, deps: Dict[str, Any]) -> None:
             return r
         if _ouvertes():
             _assurer_suivi()
-        return _json({"ok": True, "taches": taches_visibles(utilisateur(), _admin(), langue())})
+        return _json({"ok": True, "taches": taches_visibles(utilisateur(), _admin(), langue()),
+                      "visage": etat_visage(langue(), _admin(), _site())})
 
     @app.route("/studio-ia/estimer")
     def studio_ia_estimer():
@@ -972,6 +1378,8 @@ def register(app, deps: Dict[str, Any]) -> None:
             duree = float(request.args.get("duree") or 0)
         except ValueError:
             duree = 0.0
+        if cle_m == "visage":
+            return _json({"ok": True, "credits": 0})
         if not kie_ai.modele(cle_m):
             return _json({"ok": False, "erreur": "modele"}, 400)
         return _json({"ok": True, "credits": kie_ai.estimer(cle_m, opts, nb, duree_video=duree)})

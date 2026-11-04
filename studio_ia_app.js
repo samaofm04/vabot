@@ -18,11 +18,14 @@
     type: 'video', modele: null, options: {}, refs: [], taches: [], credits: null,
     cle: !!C.cle, cleFin: C.cle_fin || '', admin: !!C.admin, cleOuvert: false,
     timer: null, chrono: null, vue: 'creer', envoi: false,
-    estimTimer: null, estime: null, alerteErreur: false, collerHandler: null, toucheHandler: null
+    estimTimer: null, estime: null, alerteErreur: false, collerHandler: null, toucheHandler: null,
+    visage: C.visage || { machines: [], en_ligne_s: 90 }
   };
   var MOD = C.modeles || [];
   var MAX_OUVERTES = C.max_ouvertes || 5;
-  var DEFAUTS = { video: 'wan3', image: 'seedream5flash', motion: 'kling3motion' };
+  var DEFAUTS = { video: 'wan3', image: 'seedream5flash', motion: 'kling3motion', visage: 'visage' };
+  // motion et visage : une photo + une vidéo, la nouvelle remplace celle du même genre
+  function typePaire() { return S.type === 'motion' || S.type === 'visage'; }
   var MIMES_IMAGE = ['image/jpeg', 'image/png', 'image/webp'];
   var MIMES_VIDEO = ['video/mp4', 'video/quicktime'];
   function estVideo(mime) { return (mime || '').indexOf('video/') === 0; }
@@ -103,6 +106,7 @@
     } catch (e) { return ''; }
   }
   function famille(cle) {
+    if (cle === 'visage') { return 'visage'; }
     if (cle.indexOf('kling') === 0) { return 'kling'; }
     if (cle.indexOf('seedance') === 0) { return 'seedance'; }
     if (cle.indexOf('wan') === 0) { return 'wan'; }
@@ -125,7 +129,7 @@
         + '<div class="sia-modele-txt"><div class="sia-modele-nom">' + esc(m.nom)
         + (m.badge ? '<span class="sia-badge">' + esc(m.badge) + '</span>' : '') + '</div>'
         + '<div class="sia-modele-sous" title="' + esc(m.editeur + ' · ' + m.resume) + '">' + esc(m.editeur) + ' · ' + esc(m.resume) + '</div></div>'
-        + '<div class="sia-prix" title="' + esc(T.estime) + '">⚡ ' + (m.type === 'motion' ? nb(m.prix_seconde) + (T.par_seconde || '/s') : nb(m.estimation_defaut)) + '</div></div>';
+        + '<div class="sia-prix" title="' + esc(T.estime) + '">' + (m.type === 'visage' ? esc(T.gratuit || 'gratuit') : '⚡ ' + (m.type === 'motion' ? nb(m.prix_seconde) + (T.par_seconde || '/s') : nb(m.estimation_defaut))) + '</div></div>';
     });
     box.innerHTML = h;
     Array.prototype.forEach.call(box.querySelectorAll('.sia-modele'), function (el) {
@@ -157,10 +161,10 @@
     ta.disabled = !!m.sans_prompt;
     if (m.sans_prompt) { ta.setAttribute('data-ph', ta.getAttribute('data-ph') || ta.getAttribute('placeholder') || ''); ta.setAttribute('placeholder', T.sans_prompt || ''); }
     else if (ta.getAttribute('data-ph')) { ta.setAttribute('placeholder', ta.getAttribute('data-ph')); ta.removeAttribute('data-ph'); }
-    rendreModeles(); rendreOptions(); rendreRefs(); majPrompt(); majEstime();
+    rendreModeles(); rendreOptions(); rendreRefs(); majPrompt(); majEstime(); rendreMachine();
   }
   function choisirType(type) {
-    S.type = (type === 'image' || type === 'motion') ? type : 'video';
+    S.type = (type === 'image' || type === 'motion' || type === 'visage') ? type : 'video';
     Array.prototype.forEach.call(root.querySelectorAll('.sia-type'), function (b) {
       b.classList.toggle('on', b.getAttribute('data-type') === S.type);
     });
@@ -170,8 +174,8 @@
     var ph = S.type === 'image' ? T.prompt_ph_image : (S.type === 'motion' ? T.prompt_ph_motion : T.prompt_ph_video);
     $('sia-prompt').removeAttribute('data-ph');
     $('sia-prompt').setAttribute('placeholder', ph || '');
-    $('sia-drop-t').textContent = S.type === 'motion' ? (T.deposer_motion || '') : (T.deposer || '');
-    $('sia-drop-a').textContent = S.type === 'motion' ? (T.deposer_aide_motion || '') : (T.deposer_aide || '');
+    $('sia-drop-t').textContent = S.type === 'visage' ? (T.deposer_visage || '') : (S.type === 'motion' ? (T.deposer_motion || '') : (T.deposer || ''));
+    $('sia-drop-a').textContent = S.type === 'visage' ? (T.deposer_aide_visage || '') : (S.type === 'motion' ? (T.deposer_aide_motion || '') : (T.deposer_aide || ''));
     if (m) { choisirModele(m.cle); } else { rendreModeles(); }
   }
 
@@ -229,6 +233,13 @@
   function majEstime() {
     if (!S.modele) { return; }
     if (S.estimTimer) { clearTimeout(S.estimTimer); }
+    if (S.modele.type === 'visage') {
+      // rien n'est débité : pas de requête, le bouton ne dépend ni de la clé ni du solde
+      S.estime = 0;
+      $('sia-estime').textContent = T.gratuit || 'gratuit';
+      verifierCredits();
+      return;
+    }
     S.estimTimer = setTimeout(function () {
       var dureeVideo = 0;
       S.refs.forEach(function (r) { if (estVideo(r.mime) && r.duree) { dureeVideo = r.duree; } });
@@ -259,6 +270,7 @@
   }
   function verifierCredits() {
     var btn = $('sia-generer');
+    if (S.modele && S.modele.type === 'visage') { if (!S.alerteErreur) { effacerAlerte(); } btn.disabled = S.envoi; return; }
     if (!S.cle) { effacerAlerte(); btn.disabled = true; return; }   // le bandeau du haut le dit deja
     if (S.credits !== null && S.credits !== undefined && S.estime !== null && S.estime !== undefined && S.estime > S.credits) {
       montrerAlerte(fmt(T.credits_insuffisants, { reste: nb(S.credits), besoin: nb(S.estime) }), 'att');
@@ -314,13 +326,12 @@
       if (!mime && /\.(mov|qt)$/.test(nom)) { mime = 'video/quicktime'; }
       if (!mime && /\.mp4$/.test(nom)) { mime = 'video/mp4'; }
       var video = estVideo(mime);
-      if (S.type === 'motion') {
-        // une photo et une vidéo : la nouvelle remplace celle du même genre
+      if (typePaire()) {
         S.refs = S.refs.filter(function (r) { return estVideo(r.mime) !== video; });
       }
       if (S.refs.length >= m.references.max) { toast(fmt(T.refs_max, { n: m.references.max }), 'info'); return; }
       if (video && !accepteVideo(m)) { toast(T.ref_type, 'error'); return; }
-      if (video && S.type !== 'motion' && S.refs.filter(function (r) { return estVideo(r.mime); }).length >= (m.references.videos_max || 0)) {
+      if (video && !typePaire() && S.refs.filter(function (r) { return estVideo(r.mime); }).length >= (m.references.videos_max || 0)) {
         toast(fmt(T.refs_max, { n: m.references.videos_max || 0 }), 'info'); return;
       }
       if (!video && MIMES_IMAGE.indexOf(mime) < 0) { toast(T.ref_type, 'error'); return; }
@@ -341,7 +352,7 @@
           tmp.id = d.reference.id; tmp.envoi = false; tmp.apercu = d.reference.apercu; tmp.mime = d.reference.mime;
           tmp.duree = d.reference.duree || 0;
           if (d.reference.converti) { toast(T.webp_converti || '', 'info'); }
-          if (estVideo(tmp.mime) && tmp.duree && S.type !== 'motion' && ('duration' in S.options)) {
+          if (estVideo(tmp.mime) && tmp.duree && !typePaire() && ('duration' in S.options)) {
             var oD = null;
             m.options.forEach(function (x) { if (x.cle === 'duration') { oD = x; } });
             if (oD) { S.options.duration = Math.max(oD.min, Math.min(oD.max, Math.ceil(tmp.duree))); }
@@ -374,7 +385,7 @@
         if (d.credits !== undefined && d.credits !== null) { majCredits({ credits: d.credits }); }
         return;
       }
-      toast(fmt(T.lance, { n: nb(d.tache.credits_estimes) }), 'success');
+      toast(d.tache.type === 'visage' ? (T.visage_lance || '') : fmt(T.lance, { n: nb(d.tache.credits_estimes) }), 'success');
       S.taches = [d.tache].concat(S.taches.filter(function (t) { return t.id !== d.tache.id; }));
       rendreTaches();
       assurerPoll();
@@ -396,8 +407,9 @@
   }
   function carte(t) {
     var cls = 'sia-tache' + classeFormat(t);
-    var credits = (t.credits !== null && t.credits !== undefined) ? ' · ⚡ ' + nb(t.credits)
-      : ((t.credits_estimes !== null && t.credits_estimes !== undefined) ? ' · ≈ ⚡ ' + nb(t.credits_estimes) : '');
+    var credits = t.type === 'visage' ? ' · ' + (T.gratuit || 'gratuit')
+      : ((t.credits !== null && t.credits !== undefined) ? ' · ⚡ ' + nb(t.credits)
+      : ((t.credits_estimes !== null && t.credits_estimes !== undefined) ? ' · ≈ ⚡ ' + nb(t.credits_estimes) : ''));
     var meta = '<b>' + esc(t.nom_modele) + '</b><span>' + esc(t.resume) + credits + '</span>';
     var actions = '<div class="sia-actions">';
     if (t.etat === 'fini' && t.fichiers.length) {
@@ -419,8 +431,16 @@
       return '<div class="' + cls + ' attente echec" data-id="' + esc(t.id) + '"><div class="sia-etat">' + esc(T.etat_echec) + '</div>'
         + '<div>' + esc(t.message) + '</div><div class="sia-prompt-min">' + esc(t.prompt) + '</div><div>' + esc(t.nom_modele) + ' · ' + esc(t.resume) + '</div>' + actions + '</div>';
     }
+    var avancement = '';
+    if (t.type === 'visage' && t.visage) {
+      var et = t.visage.etape || '';
+      var lib = T['visage_etape_' + et] || (et === 'attente' ? T.visage_etape_attente : et);
+      avancement = '<div class="sia-barre"><i style="width:' + (t.visage.progression || 0) + '%"></i></div>'
+        + '<div>' + (t.etat === 'en_cours' ? (t.visage.progression || 0) + ' % · ' : '') + esc(lib) + (t.visage.machine ? ' · ' + esc(t.visage.machine) : '') + '</div>';
+    }
     return '<div class="' + cls + ' attente" data-id="' + esc(t.id) + '"><div class="sia-rouet"></div>'
       + '<div class="sia-etat">' + esc(t.etat === 'en_cours' ? T.etat_en_cours : T.etat_en_attente) + '</div>'
+      + avancement
       + '<div class="sia-chrono" data-depuis="' + esc(t.cree_le) + '">' + esc(duree(maintenant() - t.cree_le)) + '</div>'
       + '<div>' + esc(t.nom_modele) + ' · ' + esc(t.resume) + credits + '</div>'
       + (t.derniere_erreur ? '<div class="sia-prompt-min">' + esc(t.derniere_erreur) + '</div>' : '')
@@ -507,8 +527,9 @@
         : '<img src="' + esc(r.apercu) + '" alt="" title="' + esc(r.nom) + '">';
     }).join('');
     var credits = (t.credits !== null && t.credits !== undefined) ? nb(t.credits) : ('≈ ' + nb(t.credits_estimes));
+    var ligneCredits = t.type === 'visage' ? ' · ' + esc(T.gratuit || 'gratuit') : ' · ⚡ ' + esc(credits) + ' ' + esc(T.credits);
     cote.innerHTML = '<h3>' + esc(t.nom_modele) + '</h3>'
-      + '<div class="sia-meta">' + esc(dateCourte(t.cree_le)) + ' · ' + esc(ilYA(t.cree_le)) + '<br>' + esc(t.resume) + ' · ⚡ ' + esc(credits) + ' ' + esc(T.credits)
+      + '<div class="sia-meta">' + esc(dateCourte(t.cree_le)) + ' · ' + esc(ilYA(t.cree_le)) + '<br>' + esc(t.resume) + ligneCredits
       + (t.utilisateur ? '<br>' + esc(T.par) + ' ' + esc(t.utilisateur) : '')
       + (t.message ? '<br>' + esc(t.message) : '') + '</div>'
       + '<div class="sia-prompt-plein">' + esc(t.prompt) + '</div>'
@@ -543,6 +564,7 @@
       var avant = {};
       S.taches.forEach(function (t) { avant[t.id] = t.etat; });
       S.taches = d.taches || [];
+      if (d.visage) { S.visage = d.visage; rendreMachine(); }
       var fini = false;
       S.taches.forEach(function (t) {
         if (avant[t.id] && avant[t.id] !== t.etat && (t.etat === 'fini' || t.etat === 'echec')) {
@@ -559,6 +581,34 @@
     Array.prototype.forEach.call(root.querySelectorAll('.sia-chrono'), function (el) {
       el.textContent = duree(maintenant() - parseInt(el.getAttribute('data-depuis') || '0', 10));
     });
+    if (S.type === 'visage' && (maintenant() % 10) === 0) { rendreMachine(); }
+  }
+
+  // ------------------------------------------------------------ machine --
+  // Le visage se calcule sur une machine à nous (le Mac) : dire si elle est
+  // là, sinon l'admin voit la commande qui la branche.
+  function rendreMachine() {
+    var box = $('sia-machine');
+    if (!box) { return; }
+    if (S.type !== 'visage') { box.hidden = true; return; }
+    var v = S.visage || {}, limite = maintenant() - (v.en_ligne_s || 90);
+    var vues = (v.machines || []).filter(function (m) { return (m.vu_le || 0) > limite; });
+    box.hidden = false;
+    if (vues.length) {
+      var m = vues[0];
+      box.className = 'sia-machine ok';
+      box.textContent = fmt(m.etat === 'occupee' ? T.visage_machine_occupee : T.visage_machine_ok, { nom: m.nom, d: ilYA(m.vu_le).replace(/^il y a |^ /, '') });
+    } else {
+      box.className = 'sia-machine ko';
+      box.textContent = T.visage_sans_machine || '';
+      if (S.admin && v.commande) {
+        box.appendChild(document.createElement('br'));
+        box.appendChild(document.createTextNode(T.visage_sans_machine_admin || ''));
+        var c = document.createElement('code');
+        c.textContent = v.commande;
+        box.appendChild(c);
+      }
+    }
   }
 
   // ----------------------------------------------------------------- clé --
@@ -677,6 +727,7 @@
     S.cle = !!d.cle;
     S.cleFin = d.cle_fin || S.cleFin;
     S.taches = d.taches || [];
+    if (d.visage) { S.visage = d.visage; rendreMachine(); }
     rendreTaches();
     majCredits(d);
     verifierCredits();
