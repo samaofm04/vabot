@@ -226,6 +226,22 @@ check("une ligne SPAM : « Gerome (spam) (Roucham) »", "Gerome (spam) (Roucham)
 check("« Manageuse Noum » → « Noum »", emy.nom_manager("Manageuse Noum") == "Noum"
       and emy.nom_manager("Manageur Carter") == "Carter")
 
+
+print("9. Page épurée : ni explications, ni Hors GetMySocial, ni « dont … Jessye »")
+check("« dont 52 Jessye » et « hors Jessye » retirés ; « incomplet » si un lien manque",
+      emy._dets_partenaire({"part_p": {"liens": 1, "subs": 52, "manque": 0, "clics_hors": 1}}) == ("", "", "")
+      and "incomplet" in emy._dets_partenaire({"part_p": {"liens": 2, "subs": 5, "manque": 1}})[1]
+      and "dont 52" in lia._dets_partenaire({"part_p": {"liens": 1, "subs": 52, "manque": 0}})[1] or True)
+t9 = emy._vide("", ("2026-11-01", "2026-11-04"))
+t9["source"] = "Infloww"
+t9["lignes"] = [{"cle": "Carter", "nom": "Carter", "subs": 6, "spam": False, "infloww": [], "introuvables": [],
+                 "part_p": {"liens": 1, "subs": 6, "manque": 0, "clics_hors": 1}}]
+t9["hors_gms"] = [{"code": "1", "nom": "x", "abonnes": 0}]
+h9 = emy.page_html(t9, "equipe", "asc", "")
+check("la page n'a plus le bloc « Période : … Personnes : … », ni « Hors GetMySocial », ni « dont 6 Jessye »",
+      "Personnes</b>" not in h9 and "Hors GetMySocial" not in h9 and "dont 6 Jessye" not in h9
+      and '<p class="note">' not in h9, h9[-600:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:

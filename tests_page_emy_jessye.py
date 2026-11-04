@@ -75,6 +75,10 @@ def check(label, cond, detail=""):
 
 
 em = il.profil("emy")
+# 04/11/2026 : la page JESSY LE RETOUR est épurée (PAGE_EPUREE : ni notes, ni
+# « Hors GetMySocial », ni « dont … Jessye ») ; ce fichier vérifie le détail,
+# toujours calculé -- l'épuré est vérifié dans tests_paie_youl4b_spam
+em.PAGE_EPUREE = False
 J = "https://onlyfans.com/jessyewdiference/c"
 E = "https://onlyfans.com/emy.brw/c"
 DU, AU = "2026-10-16", "2026-10-28"

@@ -290,6 +290,11 @@ TRI_DEFAUT = "nom"
 #: 04/11/2026 : « tu les ranges par classe, sans avoir un trait », « tu mets
 #: tout bien normal comme il faut ».
 PAR_EQUIPE = False
+#: True : page sans le bloc d'explications du bas, sans la liste « Hors
+#: GetMySocial » et sans les « dont … Jessye » / « hors Jessye » sous les
+#: chiffres (page JESSY LE RETOUR, propriétaire, 04/11/2026 : « retire ça »).
+#: Ce qui manque vraiment reste dit, en orange.
+PAGE_EPUREE = False
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
@@ -4963,6 +4968,11 @@ def _dets_partenaire(x: Mapping[str, Any]) -> Tuple[str, str, str]:
     if not pp:
         return "", "", ""
     nom = _e(NOM_PARTENAIRE)
+    if PAGE_EPUREE:
+        # ni « dont … », ni « hors … » ; un lien pas lu reste dit
+        if pp.get("manque"):
+            return "", f'<div class="det"><span class="manque">incomplet</span></div>', ""
+        return "", "", ""
     n = int(pp.get("liens") or 0)
 
     def sans(k: int, tous: int, lib_tous: str) -> str:
@@ -5994,16 +6004,17 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
             # Agency) ne sont pas ceux de YouCham ; leur nombre seul est dit
             h.append(f'<p class="legende">{_nb(len(hors))} autre(s) lien(s) de suivi '
                      f'{_e(_de_nom(NOM_AFFICHE))}, hors « {_e(NOM_EQUIPE)} » : non comptés.</p>')
-        elif hors:
+        elif hors and not PAGE_EPUREE:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
                      # la créatrice de la page : « de Jessye » s'écrivait aussi sur la page Emy
                      f'liens de suivi {_e(_de_nom(NOM_AFFICHE))} qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
                      + (" ni n'a visé pendant la période" if (t.get("partenaire") and du) else
                         " ni n'a visé" if t.get("partenaire") else "")
                      + f'</summary>{_table_hors(hors, source)}</details>')
-    note = _note(t, du, au, auj)
+    note = [] if PAGE_EPUREE else _note(t, du, au, auj)
     if paie and not t.get("erreur"):
         note += _note_paie(t, du)
+    note_html = f'<p class="note">{" · ".join(note)}.</p>' if note else ""
     pt = t.get("partenaire") or {}
     sous = (f"<b>{_e(_titre_periode(du, au, auj, str(t.get('source') or '')))}</b> · @{_e(t.get('creatrice') or CREATRICE)}"
             + (f" + @{_e(pt.get('creatrice'))}" if pt.get("creatrice") else "")
@@ -6118,7 +6129,7 @@ details .boite{{margin-top:8px;opacity:.85}}
 <h1>Liens de suivi · {_e(NOM_AFFICHE)}</h1>
 <p class="sous">{sous}</p>
 {perso}{"".join(h)}
-<p class="note">{" · ".join(note)}.</p>
+{note_html}
 </body></html>'''
 
 
@@ -6221,6 +6232,8 @@ REGLAGES["emy"] = {
     # rangée par équipe de manager, comme sur GetMySocial (« tu les ranges par
     # classe ») ; noms propres
     "PAR_EQUIPE": True, "TRI_DEFAUT": "equipe",
+    # « retire ça » (le bloc d'explications, Hors GetMySocial, « dont … Jessye »)
+    "PAGE_EPUREE": True,
     # Emy et Jessye n'y sont plus chez MyPuls : une période depuis le 01/11 se
     # lit chez Infloww seul (voir PERIODE_INFLOWW_DEPUIS)
     "PERIODE_INFLOWW_DEPUIS": "2026-11-01",
