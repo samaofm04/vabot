@@ -763,8 +763,12 @@ def jeton_machine_ok(envoye: str) -> bool:
 
 
 def commande_machine(site: str) -> str:
-    """La commande à lancer une fois sur le Mac (montrée à l'admin seul)."""
-    return f"python3 visage_worker.py installer --site {site} --jeton {jeton_machine()}"
+    """La commande à lancer une fois sur la machine (montrée à l'admin seul) :
+    elle va chercher visage_worker.py sur le site (au jeton), puis l'installe
+    (FaceFusion, venv, agent launchd) dans ~/.vabot/visage."""
+    j = jeton_machine()
+    return (f"mkdir -p ~/.vabot/visage && curl -fsS -H 'X-Visage-Jeton: {j}' {site}/studio-ia/visage/worker.py "
+            f"-o ~/.vabot/visage/visage_worker.py && python3 ~/.vabot/visage/visage_worker.py installer --site {site} --jeton {j}")
 
 
 def voir_machine(nom: str, etat: str = "libre", tid: str = "") -> None:
