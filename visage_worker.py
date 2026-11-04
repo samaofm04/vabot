@@ -155,7 +155,10 @@ def installer_facefusion(dossier):
 
 def plist_launchd(dossier):
     c = chemins(dossier)
-    args = [c["python"], c["moi"], "tourner", "--dossier", dossier]
+    # --dossier avant la sous-commande : un worker d'avant le 04/11 ne le
+    # comprenait qu'a cette place et mourait « unrecognized arguments »
+    # toutes les 30 s sous launchd.
+    args = [c["python"], c["moi"], "--dossier", dossier, "tourner"]
     lignes = "".join("    <string>%s</string>\n" % a.replace("&", "&amp;").replace("<", "&lt;") for a in args)
     return ("""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -472,17 +475,32 @@ def etat(args):
             print("  " + l.rstrip())
 
 
-def main(argv=None):
+def analyseur():
     ap = argparse.ArgumentParser(description="Machine des visages du Studio IA (FaceFusion).")
     ap.add_argument("--dossier", default=DOSSIER_DEFAUT)
     sub = ap.add_subparsers(dest="cmd")
-    i = sub.add_parser("installer")
+
+    def sous(nom):
+        # --dossier vaut aussi APRES la sous-commande : l'agent launchd pose
+        # le 04/11 l'ecrivait ainsi et le worker mourait a chaque relance.
+        # SUPPRESS, sinon la valeur de la sous-commande (None) ecrase celle
+        # donnee avant.
+        p = sub.add_parser(nom)
+        p.add_argument("--dossier", default=argparse.SUPPRESS)
+        return p
+
+    i = sous("installer")
     i.add_argument("--site")
     i.add_argument("--jeton")
     i.add_argument("--nom")
-    t = sub.add_parser("tourner")
+    t = sous("tourner")
     t.add_argument("--une-fois", action="store_true", dest="une_fois")
-    sub.add_parser("etat")
+    sous("etat")
+    return ap
+
+
+def main(argv=None):
+    ap = analyseur()
     args = ap.parse_args(argv)
     if args.cmd == "installer":
         installer(args)

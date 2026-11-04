@@ -38651,7 +38651,13 @@ try:
               and (_dSia / "machines.json").exists())
         _sia.refuser_machine("mac-appaire")
         import plistlib as _plV, ast as _astV, visage_worker as _vw
-        _plV.loads(_vw.plist_launchd("/tmp/x").encode())
+        _plistV = _plV.loads(_vw.plist_launchd("/tmp/x").encode())["ProgramArguments"]
+        check("visage_worker.py : --dossier accepte avant ET apres la sous-commande (l agent launchd du 04/11 mourait toutes les 30 s)",
+              _vw.analyseur().parse_args(["tourner", "--dossier", "/x"]).dossier == "/x"
+              and _vw.analyseur().parse_args(["--dossier", "/y", "tourner"]).dossier == "/y"
+              and _vw.analyseur().parse_args(["tourner"]).dossier == _vw.DOSSIER_DEFAUT
+              and _vw.analyseur().parse_args(["installer", "--dossier", "/z", "--site", "s"]).dossier == "/z"
+              and _plistV.index("--dossier") < _plistV.index("tourner"))
         _astV.parse(_plSia.Path("visage_worker.py").read_text(encoding="utf-8"), feature_version=(3, 9))
         check("visage_worker.py : syntaxe Python 3.9 (le python3 du Mac), FaceFusion avec gfpgan en nette, sans en rapide, progression lue, se presente au site",
               "def se_presenter(" in _plSia.Path("visage_worker.py").read_text(encoding="utf-8") and
