@@ -10,8 +10,17 @@ Repris du projet test de l'user (sms_api/main.py) :
            de get_number : un clic sur Instagram ne doit pas acheter chez lui,
            ni un clic X chez GetAText.
 
-Clés : .env (GETATEXT_API_KEY / SMSBOWER_API_KEY / HEROSMS_API_KEY) ou
-data/numgen.json (posé par `/smskey`). Jamais de clé dans le code.
+  - GetAText TRUST : un SECOND compte GetAText, pour les seuls serveurs de
+           TRUST_SERVEURS (propriétaire, 04/11/2026 : « je veux use les propres
+           numéros avec un autre compte GetAText [...] juste pour les serveurs
+           TRUST », puis « que pour Instagram et Threads »). Fournisseur
+           « getatext_trust » : chaque numéro garde le compte qui l'a vendu,
+           ses codes et son rendu passent par la même clé. Sans cette clé, ces
+           serveurs achètent comme avant (compte principal).
+
+Clés : .env (GETATEXT_API_KEY / SMSBOWER_API_KEY / HEROSMS_API_KEY /
+GETATEXT_TRUST_API_KEY) ou data/numgen.json (posé par `/smskey`, et par le site
+pour la clé TRUST : Réglages › Générateurs SMS). Jamais de clé dans le code.
 """
 import os
 import pathlib
@@ -91,9 +100,32 @@ def herosms_key() -> str:
     return _key("herosms_api_key")
 
 
+#: Les serveurs qui achètent sur le compte GetAText TRUST (voir l'en-tête).
+#: TRUST TWITTER n'y est pas : il garde HeroSMS (« pas TRUST Twitter »).
+TRUST_SERVEURS = {"1488331963575177247": "TRUST INSTAGRAM",
+                  "1498948161039896586": "TRUST THREADS"}
+
+
+def getatext_trust_key() -> str:
+    return _key("getatext_trust_api_key")
+
+
+def compte(gid) -> str:
+    """« trust » si ce serveur achète sur le compte GetAText TRUST (sa clé
+    posée), sinon "" : le compte principal, comme avant."""
+    return "trust" if str(gid or "") in TRUST_SERVEURS and getatext_trust_key() else ""
+
+
+def fournisseur_sms(cpt: str = "") -> str:
+    """Le fournisseur GetAText de ce compte."""
+    return "getatext_trust" if cpt == "trust" else "getatext"
+
+
 def set_keys(getatext=None, smsbower=None, country=None, service=None,
-             smspool=None, herosms=None) -> dict:
+             smspool=None, herosms=None, getatext_trust=None) -> dict:
     c = _cfg()
+    if getatext_trust is not None:
+        c["getatext_trust_api_key"] = str(getatext_trust).strip()
     if getatext is not None:
         c["getatext_api_key"] = str(getatext).strip()
     if smsbower is not None:
@@ -124,6 +156,7 @@ def status() -> dict:
         "smsbower": _m(smsbower_key()),
         "smspool": _m(smspool_key()),
         "herosms": _m(herosms_key()),
+        "getatext_trust": _m(getatext_trust_key()),
         "country": str(c.get("country") or PAYS_DEFAUT),
         "service": str(c.get("service") or "ig"),
         "sms_ok": bool(getatext_key() or smsbower_key()),
@@ -133,6 +166,7 @@ def status() -> dict:
         "smspool_ok": bool(smspool_key()),
         # Hors de sms_ok aussi : HeroSMS ne sert que les numéros X.
         "herosms_ok": bool(herosms_key()),
+        "trust_ok": bool(getatext_trust_key()),
     }
 
 
@@ -164,7 +198,11 @@ def stock(service="ig") -> dict:
 
 def balances() -> dict:
     """Soldes des fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
-    out = {"sms": "—", "mail": "—", "smspool": "—", "herosms": "—"}
+    out = {"sms": "—", "mail": "—", "smspool": "—", "herosms": "—", "sms_trust": "—"}
+    if getatext_trust_key():
+        t = _stubs("getatext_trust", "getBalance")
+        out["sms_trust"] = (t.split(":", 1)[1].strip() + " $"
+                            if t.startswith("ACCESS_BALANCE:") else _human(t))
     if getatext_key():
         t = _get(GETATEXT_URL, {"api_key": getatext_key(), "action": "getBalance"})
         if t.startswith("ACCESS_BALANCE:"):
@@ -217,7 +255,15 @@ def _get(url, params, timeout=20):
         r = requests.get(url, params=params, timeout=timeout)
         return r.text.strip()
     except Exception as e:
-        return f"ERR:{e}"
+        # L'exception de requests porte l'adresse ENTIÈRE, clé comprise
+        # (« ...?api_key=… ») : relevé à la relecture du 04/11/2026, elle
+        # finissait dans les cartes des VA, le journal et l'onglet Réglages.
+        texte = str(e)
+        for k in ("api_key", "key"):
+            v = str((params or {}).get(k) or "")
+            if len(v) >= 6:
+                texte = texte.replace(v, "***")
+        return f"ERR:{type(e).__name__}: {texte[:160]}"
 
 
 # ---------------------------------------------------------------- SMS (stubs)
@@ -227,13 +273,40 @@ def _stubs(provider, action, **params):
         key, url = smsbower_key(), SMSBOWER_STUBS_URL
     elif provider == "herosms":
         key, url = herosms_key(), HEROSMS_URL
+    elif provider == "getatext_trust":
+        key, url = getatext_trust_key(), GETATEXT_URL
     else:
         key, url = getatext_key(), GETATEXT_URL
+    if provider == "getatext_trust" and action in ("getStatus", "setStatus"):
+        return _stubs_trust_suivi(key, action, **params)
     if not key:
         return "NO_KEY"
     txt = _get(url, {"api_key": key, "action": action, **params})
     if provider == "herosms":
         return _texte_herosms(txt)
+    return txt
+
+
+#: Réponses qui disent « pas sur ce compte » : un numéro pris avec l'ancienne
+#: clé TRUST (remplacée ou retirée pendant qu'il vivait) se lit sur elle.
+_PAS_ICI = ("NO_ACTIVATION", "WRONG_ACTIVATION_ID", "BAD_KEY")
+
+
+def _stubs_trust_suivi(key, action, **params):
+    """Code, rendu, fin d'un numéro TRUST : la clé TRUST, puis l'ancienne
+    (getatext_trust_api_key_precedente) si celle-ci n'a pas ce numéro. Sans
+    ça, changer la clé pendant qu'un numéro vivait le rendait illisible et
+    impossible à rendre (relecture du 04/11/2026) : payé pour rien."""
+    precedente = _key("getatext_trust_api_key_precedente")
+    txt = "NO_KEY"
+    if key:
+        txt = _get(GETATEXT_URL, {"api_key": key, "action": action, **params})
+        if not any(m in txt for m in _PAS_ICI):
+            return txt
+    if precedente and precedente != key:
+        t2 = _get(GETATEXT_URL, {"api_key": precedente, "action": action, **params})
+        if not key or not any(m in t2 for m in _PAS_ICI):
+            return t2
     return txt
 
 
@@ -256,9 +329,23 @@ def _texte_herosms(txt):
     return t
 
 
-def _commander(service, country):
-    """Un achat, dans un pays. -> (ok, message|infos, réponses brutes)."""
+def _commander(service, country, cpt=""):
+    """Un achat, dans un pays. -> (ok, message|infos, réponses brutes).
+    `cpt` « trust » : le compte GetAText TRUST seul, sans repli SMSBower (le
+    repli dépenserait le compte principal)."""
     errs, brut = [], []
+    if cpt == "trust":
+        if not getatext_trust_key():
+            return False, "clé GetAText TRUST absente (Réglages › Générateurs SMS)", brut
+        txt = _stubs("getatext_trust", "getNumber",
+                     service=GETATEXT_SERVICES.get(service, service), country=country)
+        brut.append(txt)
+        if txt.startswith("ACCESS_NUMBER"):
+            p = txt.split(":")
+            if len(p) >= 3:
+                return True, {"id": p[1], "phone": "+" + p[2].lstrip("+"),
+                              "provider": "getatext_trust", "country": country}, brut
+        return False, f"GetAText TRUST : {_human(txt)}", brut
     if getatext_key():
         txt = _stubs("getatext", "getNumber",
                      service=GETATEXT_SERVICES.get(service, service), country=country)
@@ -281,11 +368,12 @@ def _commander(service, country):
     return False, " | ".join(errs) or "aucune clé SMS configurée (`/smskey`)", brut
 
 
-def get_number(service="ig", country=None):
-    """Commande un numéro (GetAText, fallback SMSBower).
+def get_number(service="ig", country=None, cpt=""):
+    """Commande un numéro (GetAText, fallback SMSBower ; « trust » : le
+    compte GetAText TRUST seul, voir compte()).
     -> (True, {id, phone, provider, country}) ou (False, message)."""
     demande = str(country if country is not None else default_country())
-    ok, res, brut = _commander(service, demande)
+    ok, res, brut = _commander(service, demande, cpt)
     if ok or country is not None:
         return ok, res
 
@@ -310,7 +398,7 @@ def get_number(service="ig", country=None):
         if code in essayes:
             continue
         essayes.add(code)
-        ok2, res2, brut2 = _commander(service, code)
+        ok2, res2, brut2 = _commander(service, code, cpt)
         if ok2:
             return True, res2
         # Une cle refusee ou un solde vide se reproduiraient a l'identique
@@ -535,3 +623,50 @@ def fin_alerte(cle: str) -> bool:
         safe_json.write(ALERTES_FICHIER, d)
     print(f"[numgen] « {cle} » : service revenu, la prochaine panne sera redite", flush=True)
     return True
+
+
+def enregistrer_cle_trust(valeur: str) -> tuple:
+    """La clé du compte GetAText TRUST, testée AVANT d'être gardée (une clé
+    refusée remplacerait une clé peut-être encore bonne). GetAText injoignable
+    n'empêche pas de la garder. "" la retire : les serveurs TRUST repartent
+    sur le compte principal. -> (ok, message), jamais la clé en clair."""
+    v = (valeur or "").strip()
+    avant = getatext_trust_key()
+    if not v:
+        _garder_precedente(avant)
+        set_keys(getatext_trust="")
+        if getatext_trust_key():
+            return False, ("Une clé TRUST reste posée dans .env (GETATEXT_TRUST_API_KEY) : "
+                           "c'est là qu'il faut la retirer.")
+        return True, ("Clé GetAText TRUST retirée : TRUST INSTAGRAM et THREADS achètent sur le "
+                      "compte principal. Les numéros déjà pris sur l'ancien compte restent lus et rendus.")
+    if len(v) < 16 or len(v) > 120 or any(c.isspace() for c in v):
+        return False, "Clé vide ou mal copiée : colle-la en entier, sans espace."
+    if v == getatext_key():
+        return False, "C'est la clé du compte principal : il faut celle du NOUVEAU compte GetAText."
+    t = _get(GETATEXT_URL, {"api_key": v, "action": "getBalance"})
+    if t.startswith("BAD_KEY") or "BAD_KEY" in t:
+        return False, "GetAText refuse cette clé (BAD_KEY)."
+    if avant and avant != v:
+        _garder_precedente(avant)
+    set_keys(getatext_trust=v)
+    if getatext_trust_key() != v:
+        return False, ("Clé non enregistrée (écriture impossible dans data/, ou une autre clé dans "
+                       ".env : GETATEXT_TRUST_API_KEY) : l'ancienne reste en service.")
+    fin = v[-4:]
+    if t.startswith("ACCESS_BALANCE:"):
+        return True, f"Clé GetAText TRUST enregistrée (…{fin}), solde {t.split(':', 1)[1].strip()} $."
+    return True, f"Clé enregistrée (…{fin}), mais GetAText n'a pas répondu au test : {_human(t)}"
+
+
+def _garder_precedente(cle: str) -> None:
+    """L'ancienne clé TRUST, gardée pour lire et rendre les numéros pris avec
+    elle (_stubs_trust_suivi) ; jamais montrée."""
+    if not cle:
+        return
+    c = _cfg()
+    c["getatext_trust_api_key_precedente"] = cle
+    try:
+        safe_json.write(_FILE, c, indent=2)
+    except Exception:
+        pass

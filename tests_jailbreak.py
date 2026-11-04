@@ -14858,7 +14858,7 @@ try:
         _nN.SALONS_FILE = _tmpN / "numgen_salons.json"
         _nN.POLL_SECONDS = 1
         _gN.status = lambda: {"sms_ok": True, "mail_ok": True}
-        _gN.get_number = lambda service="ig", country=None: (
+        _gN.get_number = lambda service="ig", country=None, cpt="": (
             _achN.append(1) or (True, {"id": str(900 + len(_achN)), "phone": "+1555000%04d" % len(_achN),
                                        "provider": "getatext", "country": "187"}))
         _gN.balances = lambda: {"sms": "1 $", "mail": "0 $"}
@@ -15116,7 +15116,7 @@ try:
         _nF.SALONS_FILE = _tmpF / "numgen_salons.json"
         _nF.POLL_SECONDS = 1
 
-        def _gnF(service="ig", country=None):
+        def _gnF(service="ig", country=None, cpt=""):
             _F.achats.append(service)
             k = len(_F.achats)
             return True, {"id": str(700 + k), "phone": "+1555777%04d" % k,
@@ -15748,7 +15748,7 @@ try:
         _nR.RECAP_FILE = _tmpR / "numgen_recap.json"
         _nR.POLL_SECONDS = 1
 
-        def _numR(service="ig", country=None):
+        def _numR(service="ig", country=None, cpt=""):
             if _echecR["apres_achat"] is not None:
                 _echecR["apres_achat"].echec = 2
                 _echecR["apres_achat"] = None
@@ -16691,8 +16691,8 @@ try:
                     k0 = len(_FQ.journal)
                     _gQ_orig = _gQ.get_number
 
-                    def _achat_puis_panne(service="ig", country=None):
-                        r = _gQ_orig(service, country)
+                    def _achat_puis_panne(service="ig", country=None, cpt=""):
+                        r = _gQ_orig(service, country, cpt)
                         _panneQ["salons"] = True
                         return r
                     _gQ.get_number = _achat_puis_panne
@@ -16732,8 +16732,8 @@ try:
                     # Filet : l'ecriture dit « ok » mais le registre relu n'a pas le numero.
                     _gQ_ment = _gQ.get_number
 
-                    def _achat_puis_ment(service="ig", country=None):
-                        r = _gQ_orig(service, country)
+                    def _achat_puis_ment(service="ig", country=None, cpt=""):
+                        r = _gQ_orig(service, country, cpt)
                         _panneQ["ment"] = True
                         return r
                     _gQ.get_number = _achat_puis_ment

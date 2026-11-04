@@ -58105,9 +58105,60 @@ def _render_numgen_settings() -> str:
         "<span id='ng-acces-msg' style='font-size:12px;color:#8a91a8;"
         "margin-left:10px'></span>"
         "</div>"
-        "<small style='color:#8a91a8;display:block;margin-top:10px'>Les clés API se "
-        "posent dans Discord avec <code>/smskey</code> — elles ne transitent jamais "
-        "par cette page. Ici on ne règle que le pays et le service.</small>")
+        + _numgen_trust_html(soldes)
+        + "<small style='color:#8a91a8;display:block;margin-top:10px'>Les clés API se "
+        "posent dans Discord avec <code>/smskey</code> — sauf celle du compte GetAText "
+        "des serveurs TRUST, ci-dessus : la fenêtre de <code>/smskey</code> est pleine "
+        "(cinq champs, le maximum de Discord).</small>")
+
+
+def _numgen_trust_html(soldes=None) -> str:
+    """La clé du compte GetAText des serveurs TRUST (Instagram, Threads).
+
+    Propriétaire, 04/11/2026 : « je veux use les propres numéros avec un autre
+    compte GetAText [...] juste pour les serveurs TRUST », « que pour Instagram
+    et Threads ». Champ masqué, testée chez GetAText avant d'être gardée
+    (numgen.enregistrer_cle_trust) ; seule sa fin ressort, jamais la valeur.
+    Sans elle, ces serveurs achètent sur le compte principal, comme avant.
+    `soldes` : ceux que l'onglet vient de lire (un seul relevé des
+    fournisseurs par affichage)."""
+    try:
+        import numgen
+        st = numgen.status()
+        solde = (soldes or {}).get("sms_trust", "—") if st.get("trust_ok") else ""
+        noms = " et ".join(sorted(numgen.TRUST_SERVEURS.values()))
+    except Exception as e:
+        return ("<div style='color:#f99;padding:10px'>Compte TRUST illisible : "
+                + html_escape(str(e)[:120]) + "</div>")
+    if st.get("trust_ok"):
+        etat = ("<div style='padding:11px 14px;background:rgba(16,185,129,.08);border:1px solid "
+                "rgba(16,185,129,.3);border-radius:8px;color:#34d399;font-size:13px;margin-bottom:10px'>"
+                "✓ Clé enregistrée (" + html_escape(st.get("getatext_trust") or "") + ") — solde <b>"
+                + html_escape(str(solde)) + "</b>. " + html_escape(noms)
+                + " achètent sur ce compte. Colle une nouvelle clé pour la remplacer.</div>")
+    else:
+        etat = ("<div style='padding:11px 14px;background:rgba(148,163,184,.08);border:1px solid "
+                "rgba(148,163,184,.25);border-radius:8px;color:#8a91a8;font-size:13px;margin-bottom:10px'>"
+                "Aucune clé : " + html_escape(noms) + " achètent sur le compte GetAText principal.</div>")
+    retirer = ("<form method='POST' action='/settings/numgen/cle_trust' style='margin-top:8px'>"
+               "<input type='hidden' name='retirer' value='1'>"
+               "<button type='submit' style='padding:8px 14px;background:#1a1f2e;border:1px solid "
+               "#2a3245;color:#c4c4cc;border-radius:8px;cursor:pointer;font-size:12px'>"
+               "Retirer la clé (retour au compte principal)</button></form>"
+               if st.get("trust_ok") else "")
+    return ("<div style='margin-top:16px;padding:13px 15px;background:#0e1219;"
+            "border:1px solid #223047;border-radius:10px'>"
+            "<div style='font-size:13px;font-weight:700;margin-bottom:8px;color:#e8eaf2'>"
+            "Compte GetAText des serveurs TRUST</div>" + etat
+            + "<form method='POST' action='/settings/numgen/cle_trust' "
+            "style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
+            "<input type='password' name='cle' autocomplete='off' spellcheck='false' required "
+            "minlength='16' placeholder='clé API du nouveau compte GetAText' "
+            "style='flex:1;min-width:220px;padding:10px;background:#0b0e15;border:1px solid #2a3245;"
+            "color:#e8eaf2;border-radius:8px;font-family:monospace;font-size:12px'>"
+            "<button type='submit' style='padding:10px 18px;background:#22c55e;color:#fff;"
+            "border:0;border-radius:8px;cursor:pointer;font-weight:700'>Enregistrer</button>"
+            "</form>" + retirer + "</div>")
 
 
 def _render_gms_cookie_settings() -> str:
@@ -79019,6 +79070,22 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     # Clé ProxEasy (Settings › Intégrations). Sous /settings/ : le garde-fou
     # la refuse déjà aux rôles restreints (_ADMIN_ONLY_WRITE, et rien dans
     # _RESTRICTED_WRITE_ALLOW) ; revérifié ici, la clé lit des mots de passe.
+    # Clé du compte GetAText des serveurs TRUST (Réglages › Générateurs SMS).
+    # Sous /settings/ : refusée aux rôles restreints par le garde-fou
+    # (_ADMIN_ONLY_WRITE) ; revérifié ici, la clé achète des numéros.
+    @app.route("/settings/numgen/cle_trust", methods=["POST"])
+    def settings_numgen_cle_trust():
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _error("✕ Réservé aux administrateurs", tab="snumgen")
+        import numgen
+        valeur = "" if request.form.get("retirer") else (request.form.get("cle") or "")
+        if not valeur.strip() and not request.form.get("retirer"):
+            return _error("✕ Colle la clé avant d'enregistrer.", tab="snumgen")
+        ok, msg = numgen.enregistrer_cle_trust(valeur)
+        return _success("✓ " + msg, tab="snumgen") if ok else _error("✕ " + msg, tab="snumgen")
+
     @app.route("/settings/proxeasy/cle", methods=["POST"])
     def settings_proxeasy_cle():
         if not is_auth():

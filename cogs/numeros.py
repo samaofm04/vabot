@@ -650,7 +650,7 @@ class NumerosCog(commands.Cog):
                 mot = ""
             else:
                 mot = "⏳ Changement de numéro…" if actif0 else "⏳ Recherche d'un numéro…"
-            vue = await _vue_salon(self, rec, mot, solde=_DERNIER_SOLDE["sms"] or "",
+            vue = await _vue_salon(self, rec, mot, solde=_DERNIER_SOLDE.get(_cle_solde(ch)) or "",
                                    canal=carte)
             kw = {"view": vue, "ephemeral": True}
             f = _fichier_icone() if vue.icone else None
@@ -842,7 +842,7 @@ class NumerosCog(commands.Cog):
         # n'y en a pas encore (None) : _vue_salon le lit alors une fois, au
         # lieu d'afficher « 💵 — » le temps de la recherche.
         if not await maj_panneau(self.bot, ch, cog=self, souci=cherche,
-                                 solde=_DERNIER_SOLDE["sms"]):
+                                 solde=_DERNIER_SOLDE.get(_cle_solde(ch))):
             log.error("numgen: panneau de #%s impossible a ecrire : rien n'est achete",
                       getattr(ch, "name", "?"))
             await _ephemere(itx, "❌ Le panneau ne peut pas s'afficher dans ce salon : "
@@ -852,7 +852,9 @@ class NumerosCog(commands.Cog):
         if kind == "sms":
             # +33 sur le serveur FR, sans repli sur un autre pays ; ailleurs
             # le reglage global (None)
-            ok, res = await asyncio.to_thread(numgen.get_number, service, _pays(ch))
+            # TRUST INSTAGRAM et THREADS : leur compte GetAText à eux
+            # (numgen.compte, 04/11/2026)
+            ok, res = await asyncio.to_thread(numgen.get_number, service, _pays(ch), _compte(ch))
         else:
             ok, res = await asyncio.to_thread(numgen.get_mail, service)
         if not ok:
@@ -860,9 +862,10 @@ class NumerosCog(commands.Cog):
                         getattr(ch, "name", "?"), str(res)[:300])
             # Un solde vide ou un fournisseur a sec se DIT dans le panneau,
             # sur une ligne : le reste ne bouge pas.
-            await maj_panneau(self.bot, ch, cog=self, souci=await _souci_fournisseur(kind, res))
+            await maj_panneau(self.bot, ch, cog=self,
+                              souci=await _souci_fournisseur(kind, res, _compte(ch)))
             return
-        numgen.fin_alerte("credit:%s" % kind)
+        numgen.fin_alerte(_cle_credit(kind, _compte(ch)))
         log.info("numgen: %s obtenu (%s, %s) pour #%s", kind,
                  (res or {}).get("provider"), (res or {}).get("country"),
                  getattr(ch, "name", "?"))
@@ -2831,9 +2834,10 @@ class NumerosCog(commands.Cog):
 
     # ------------------------------------------------------------ génération
     async def start_sms(self, interaction, service):
-        ok, res = await asyncio.to_thread(numgen.get_number, service)
+        cpt = _compte(getattr(interaction, "channel", None))
+        ok, res = await asyncio.to_thread(numgen.get_number, service, None, cpt)
         if not ok:
-            await interaction.followup.send(await _souci_fournisseur("sms", res), ephemeral=True)
+            await interaction.followup.send(await _souci_fournisseur("sms", res, cpt), ephemeral=True)
             return
         # Ce parcours (« Autre service » des anciens panneaux) achete aussi :
         # hors de l'historique, ses numeros manquaient au recap sans un mot.
@@ -2843,7 +2847,7 @@ class NumerosCog(commands.Cog):
         view = _ActivationView(self, "sms", res["id"], res["phone"], res["provider"])
         view.owner_id = interaction.user.id
         view.service = service
-        solde = (await asyncio.to_thread(numgen.balances)).get("sms")
+        solde = (await asyncio.to_thread(numgen.balances)).get("sms_trust" if cpt else "sms")
         # Le pays réglé peut être à sec : numgen bascule alors seul sur un
         # pays qui a du stock. Le dire, sinon on reçoit un numéro étranger
         # sans comprendre pourquoi — et le réglage a l'air cassé.
@@ -3104,7 +3108,7 @@ class NumerosCog(commands.Cog):
             return
         # Un seul releve du solde pour tous les salons : quarante releves,
         # c etait quatre-vingts appels au fournisseur pour la meme valeur.
-        solde = await _solde_sms()
+        solde = await _solde_sms(targets[0])
         ok = skipped = vides = convertis = 0
         for ch in targets:
             rec = _salon(ch.id)
@@ -3277,7 +3281,8 @@ class NumerosCog(commands.Cog):
             f"• 📱 Numéros (GetAText) : **{b['sms']}**\n"
             f"• 📧 Mails (SMSBower) : **{b['mail']}**\n"
             f"• 🏊 SMSPool : **{b.get('smspool', '—')}**\n"
-            f"• 𝕏 HeroSMS (numéros X) : **{b.get('herosms', '—')}**", ephemeral=True)
+            f"• 𝕏 HeroSMS (numéros X) : **{b.get('herosms', '—')}**\n"
+            f"• 📱 GetAText TRUST (Instagram, Threads) : **{b.get('sms_trust', '—')}**", ephemeral=True)
 
 
 class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
@@ -4819,7 +4824,27 @@ TITRES_PANNEAU_ANCIEN = ("Numéros & Mails", "Numéro & Mail")
 
 #: Le dernier solde SMS lu. « Recherche d'un numero… » s'affiche AVANT
 #: l'achat : relire le solde a ce moment-la retardait l'achat d'autant.
-_DERNIER_SOLDE = {"sms": None}
+_DERNIER_SOLDE = {"sms": None, "sms_trust": None}
+
+
+def _compte(canal) -> str:
+    """Le compte GetAText du serveur de ce salon (numgen.compte) : « trust »
+    sur TRUST INSTAGRAM et THREADS quand sa clé est posée, "" ailleurs."""
+    try:
+        return numgen.compte(getattr(getattr(canal, "guild", None), "id", None))
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def _cle_solde(canal) -> str:
+    """Le solde affiché sur ce salon : celui de SON compte."""
+    return "sms_trust" if _compte(canal) == "trust" else "sms"
+
+
+def _cle_credit(kind, cpt="") -> str:
+    """La clé de l'alerte « sans crédit » : une par compte (le compte TRUST à
+    sec ne doit pas taire celle du principal, ni l'inverse)."""
+    return "credit:sms_trust" if kind == "sms" and cpt == "trust" else "credit:%s" % kind
 
 
 def _fichier_icone():
@@ -4832,14 +4857,16 @@ def _fichier_icone():
     return discord.File(str(_ICONE), filename=_ICONE_NOM)
 
 
-async def _solde_sms():
-    """Le solde SMS a afficher ; en cas d'echec, le dernier connu."""
+async def _solde_sms(canal=None):
+    """Le solde SMS a afficher (celui du compte du salon) ; en cas d'echec,
+    le dernier connu."""
+    k = _cle_solde(canal)
     try:
-        v = (await asyncio.to_thread(numgen.balances)).get("sms")
+        v = (await asyncio.to_thread(numgen.balances)).get(k)
     except Exception as e:                                   # noqa: BLE001
         log.warning("numgen: solde illisible (%s: %s)", type(e).__name__, e)
-        return _DERNIER_SOLDE["sms"]
-    _DERNIER_SOLDE["sms"] = v
+        return _DERNIER_SOLDE.get(k)
+    _DERNIER_SOLDE[k] = v
     return v
 
 
@@ -5084,7 +5111,7 @@ async def _vue_salon(cog, rec, souci="", solde=None, canal=None):
         rec = {}
     actif, code = _a_afficher(rec)
     if not actif and solde is None:
-        solde = await _solde_sms()
+        solde = await _solde_sms(canal)
     return PanneauNumero(cog, actif=actif, code=code, solde=solde, souci=souci,
                          avertir=carte or partage)
 
@@ -5526,7 +5553,7 @@ def numeros_du_jour(uid, gid, maintenant=None) -> int:
     return n
 
 
-async def _souci_fournisseur(kind, res) -> str:
+async def _souci_fournisseur(kind, res, cpt="") -> str:
     """Ce que le VA lit quand le fournisseur refuse. Un solde vide se dit en
     clair, et le staff en est prevenu UNE fois (numgen.alerter_staff) :
     « ❌ Insufficient balance » ne disait ni pourquoi ni que quelqu'un etait
@@ -5538,16 +5565,22 @@ async def _souci_fournisseur(kind, res) -> str:
         quoi = "mail"
         alerte = ("⚠️ **Mail SMSBower sans crédit** (« %s ») : les VA ne peuvent plus "
                   "prendre de mail. À recharger sur SMSBower." % str(res)[:120])
+    elif cpt == "trust":
+        quoi = "de numéros"
+        alerte = ("⚠️ **GetAText TRUST sans crédit** (« %s ») : les VA de TRUST INSTAGRAM et "
+                  "THREADS ne peuvent plus prendre de numéro. À recharger sur le compte "
+                  "GetAText des serveurs TRUST." % str(res)[:120])
     else:
         quoi = "de numéros"
         alerte = ("⚠️ **Numéros SMS sans crédit** (« %s ») : les VA ne peuvent plus "
                   "prendre de numéro. À recharger." % str(res)[:160])
     try:
-        etat = await asyncio.to_thread(numgen.alerter_staff, "credit:%s" % kind, alerte)
+        etat = await asyncio.to_thread(numgen.alerter_staff, _cle_credit(kind, cpt), alerte)
         if etat not in ("envoye", "deja", "hors production"):
-            log.warning("numgen: alerte « credit:%s » non envoyee au staff (%s)", kind, etat)
+            log.warning("numgen: alerte « %s » non envoyee au staff (%s)", _cle_credit(kind, cpt), etat)
     except Exception as e:                                   # noqa: BLE001
-        log.warning("numgen: alerte « credit:%s » en echec (%s: %s)", kind, type(e).__name__, e)
+        log.warning("numgen: alerte « %s » en echec (%s: %s)", _cle_credit(kind, cpt),
+                    type(e).__name__, e)
     return "❌ Service %s sans crédit : le staff est prévenu." % quoi
 
 

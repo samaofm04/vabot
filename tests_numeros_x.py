@@ -63,8 +63,10 @@ def faux_code(act_id, provider="getatext"):
 FOURNIS = []                # (appel, fournisseur) vus par les faux de numgen
 
 
-def faux_numero_getatext(service="ig", country=None):
-    ACHATS.append(("getatext", service, country))
+def faux_numero_getatext(service="ig", country=None, cpt=""):
+    # cpt : le compte GetAText (« trust » sur TRUST INSTAGRAM et THREADS,
+    # 04/11/2026) ; sans clé TRUST posée ici, toujours ""
+    ACHATS.append(("getatext", service, country) if not cpt else ("getatext", service, country, cpt))
     n = len(ACHATS)
     return True, {"id": f"ga{n}", "phone": f"+1555111{n:04d}", "provider": "getatext",
                   "country": country}

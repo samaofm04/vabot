@@ -99,6 +99,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+for _g, _c in SERVEURS.items():
+    _c.setdefault("gid", _g)
+
 #: Durée de vie d'un numéro chez le fournisseur (comme cogs/numeros.py).
 DUREE_NUMERO_SEC = 20 * 60
 #: Un jeton d'interaction vit 15 min : au-delà, Discord refuse l'édition.
@@ -497,7 +500,17 @@ def _quota_refus(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any
     return ""
 
 
-NOMS_FOURNISSEURS = {"herosms": "HeroSMS", "getatext": "GetAText", "smsbower": "SMSBower"}
+NOMS_FOURNISSEURS = {"herosms": "HeroSMS", "getatext": "GetAText", "smsbower": "SMSBower",
+                     "getatext_trust": "GetAText TRUST"}
+
+
+def _compte(conf: Dict[str, Any]) -> str:
+    """« trust » : ce serveur achète sur le compte GetAText TRUST
+    (numgen.TRUST_SERVEURS, sa clé posée) ; "" : comme avant. Une seule liste,
+    celle de numgen : le panneau du salon commun (cogs/numeros) lit la même."""
+    if _fournisseur(conf) == "herosms":
+        return ""
+    return "trust" if conf.get("gid") and numgen.compte(conf["gid"]) == "trust" else ""
 
 
 def _fournisseur(conf: Dict[str, Any]) -> str:
@@ -511,6 +524,8 @@ def _prov(a: Optional[Dict[str, Any]]) -> str:
 
 
 def _cle_posee(conf: Dict[str, Any]) -> bool:
+    if _compte(conf) == "trust":
+        return True                  # compte() ne rend « trust » qu'avec sa clé
     if _fournisseur(conf) == "herosms":
         return bool(numgen.herosms_key())
     return bool(numgen.getatext_key() or numgen.smsbower_key())
@@ -519,6 +534,8 @@ def _cle_posee(conf: Dict[str, Any]) -> bool:
 def _cle_credit(conf: Dict[str, Any]) -> str:
     """La clé de l'alerte « sans crédit » : GetAText a la même que les
     panneaux Instagram (cogs/numeros) — c'est le même compte."""
+    if _compte(conf) == "trust":
+        return "credit:sms_trust"
     return "credit:herosms" if _fournisseur(conf) == "herosms" else "credit:sms"
 
 
@@ -526,8 +543,9 @@ def _acheter_chez(conf: Dict[str, Any]):
     if _fournisseur(conf) == "herosms":
         return numgen.get_number_herosms(conf["service"], conf["pays"])
     # Le même achat que les numéros Instagram (GetAText, repli SMSBower), mais
-    # dans CE pays : le drapeau du panneau ne doit pas mentir.
-    return numgen.get_number(conf["service"], conf["pays"])
+    # dans CE pays : le drapeau du panneau ne doit pas mentir. TRUST INSTAGRAM
+    # et THREADS : leur compte GetAText à eux, sans repli (04/11/2026).
+    return numgen.get_number(conf["service"], conf["pays"], _compte(conf))
 
 
 def _souci_achat(res: Any, conf: Dict[str, Any]) -> str:
@@ -540,6 +558,10 @@ def _souci_achat(res: Any, conf: Dict[str, Any]) -> str:
     if cle == "credit:herosms":
         alerte = ("⚠️ **HeroSMS sans crédit** (« %s ») : les VA de Twitter ne peuvent plus "
                   "prendre de Numéro X. À recharger sur hero-sms.com." % str(res)[:120])
+    elif cle == "credit:sms_trust":
+        alerte = ("⚠️ **GetAText TRUST sans crédit** (« %s ») : les VA de TRUST INSTAGRAM et "
+                  "THREADS ne peuvent plus prendre de numéro. À recharger sur le compte "
+                  "GetAText des serveurs TRUST." % str(res)[:120])
     else:
         alerte = ("⚠️ **Numéros SMS sans crédit** (« %s ») : les VA ne peuvent plus prendre "
                   "de numéro (Instagram, Threads). À recharger." % str(res)[:160])
