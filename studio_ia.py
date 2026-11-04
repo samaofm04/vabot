@@ -157,6 +157,8 @@ T = {
         "visage_etape_merging": "assemblage",
         "visage_etape_envoi": "envoi du résultat",
         "visage_etape_attente": "en attente d'une machine",
+        "visage_copier": "📋 Copier la commande",
+        "visage_copiee": "Commande copiée : colle-la dans le Terminal et appuie sur Entrée.",
     },
     "en": {
         "titre": "Studio IA",
@@ -233,6 +235,8 @@ T = {
         "visage_etape_merging": "merging",
         "visage_etape_envoi": "uploading the result",
         "visage_etape_attente": "waiting for a machine",
+        "visage_copier": "📋 Copy the command",
+        "visage_copiee": "Command copied: paste it in the Terminal and press Enter.",
     },
 }
 

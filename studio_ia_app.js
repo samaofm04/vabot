@@ -607,6 +607,17 @@
         var c = document.createElement('code');
         c.textContent = v.commande;
         box.appendChild(c);
+        // un double-clic ne prend qu'un mot de la ligne : un bouton la copie entière
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'sia-lien primaire'; b.style.marginTop = '8px';
+        b.textContent = T.visage_copier || 'Copier la commande';
+        b.addEventListener('click', function () {
+          var fini = function () { toast(T.visage_copiee || '', 'success'); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(v.commande).then(fini, function () { window.prompt(T.visage_copier || '', v.commande); });
+          } else { window.prompt(T.visage_copier || '', v.commande); }
+        });
+        box.appendChild(b);
       }
     }
   }
