@@ -131,6 +131,39 @@ r, err = emy._lire_partenaire("2026-11-03", "2026-11-03", ("136",))
 check("un jour sans relevé de fin : « — »", r["liens"][0]["clics"] is None, r["liens"][0])
 _pd.subs_infloww = _pd_si
 
+
+print("5. Plus de MyPuls : Emy aussi lue chez Infloww pour une période depuis le 01/11")
+LIENS_EMY = {"liens": [{"code": "33", "clics": 1200, "net": 90000, "cree_ms": 1789000000000, "nom": "Carter 2",
+                        "abonnes": 90},
+                       {"code": "35", "clics": 5000, "net": 900000, "cree_ms": 1789000000000, "nom": "Eddy 2",
+                        "abonnes": 545}], "lu_a": 2.0}
+APPELS_I = []
+emy._infloww = lambda createur="": (APPELS_I.append(createur), LIENS_EMY if createur in ("emy.brw", "") else LIENS_I)[1]
+_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None: {t: 0 for t in tr}
+r = emy._periode_infloww_principale("2026-11-01", "2026-11-04")
+par = {x["code"]: x for x in r["liens"]}
+check("Emy chez Infloww : ses liens à la forme de MyPuls, subs datés (0 depuis le 01/11)",
+      not r["erreur"] and par["33"]["id"] == "mypuls:33" and par["33"]["abonnes"] == 0 and par["35"]["abonnes"] == 0, r)
+check("… clics et gain « — » sans relevé de la veille (jamais les cumuls d'avant)",
+      par["33"]["clics"] is None and par["33"]["net"] is None, par["33"])
+check("… son relevé du jour pris dans SON fichier, pas celui de Jessye",
+      safe_json.load(emy._fichier_releves_principale())["jours"]["2026-11-04"]["33"] == [1200, 90000]
+      and "33" not in (safe_json.load(emy._fichier_releves_part())["jours"].get("2026-11-04") or {}))
+check("la page JESSY LE RETOUR lit Infloww seul depuis le 01/11", emy.PERIODE_INFLOWW_DEPUIS == "2026-11-01"
+      and lia.PERIODE_INFLOWW_DEPUIS == "" and il.PERIODE_INFLOWW_DEPUIS == "")
+_mp = emy._mypuls_periode
+APPELS_MP = []
+emy._mypuls_periode = lambda du, au, attente=None: (APPELS_MP.append((du, au)), {"erreur": "", "liens": []})[1]
+emy.liens_gms = lambda: {"liens": [], "repli": "", "desactives": 0}
+t = emy.tableau_periode("2026-11-01", "2026-11-04", us="cache")
+check("une période depuis le 01/11 : aucune lecture MyPuls, source « Infloww »",
+      not APPELS_MP and t.get("source") == "Infloww", (APPELS_MP, t.get("source"), t.get("erreur")))
+t = emy.tableau_periode("2026-10-16", "2026-10-31", us="cache")
+check("une quinzaine d'avant (16→31/10) : MyPuls comme avant", APPELS_MP and t.get("source") == "MyPuls",
+      (APPELS_MP, t.get("source")))
+emy._mypuls_periode = _mp
+_pd.subs_infloww = _pd_si
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:

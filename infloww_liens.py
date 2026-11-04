@@ -1197,11 +1197,17 @@ def _fichier_releves_part() -> Path:
     return DATA_DIR / f"infloww_liens_releves_partenaire_{PROFIL or 'jessye'}.json"
 
 
-def _noter_releve_partenaire(liens: Mapping[str, Mapping[str, Any]], jour: str) -> Dict[str, Any]:
+def _fichier_releves_principale() -> Path:
+    return DATA_DIR / f"infloww_liens_releves_principale_{PROFIL or 'jessye'}.json"
+
+
+def _noter_releve_partenaire(liens: Mapping[str, Mapping[str, Any]], jour: str,
+                             fichier: Optional[Path] = None) -> Dict[str, Any]:
     """Range le cumul du jour (clics, net) de chaque lien et rend les relevés.
-    N'écrit que si quelque chose a changé."""
+    N'écrit que si quelque chose a changé. `fichier` : celui de la créatrice
+    de la page (_fichier_releves_principale) ; par défaut, la partenaire."""
     with _VERROU_RELEVES_PART:
-        f = _fichier_releves_part()
+        f = fichier or _fichier_releves_part()
         d = _lire_json(f)
         jours = {k: dict(v) for k, v in (d.get("jours") or {}).items() if isinstance(v, Mapping)}
         neuf = dict(jours.get(jour) or {})
@@ -1258,6 +1264,59 @@ def _cumuls_periode(jours: Mapping[str, Any], par: Mapping[str, Mapping[str, Any
     if None in fin or None in debut or fin[0] < debut[0]:
         return None
     return int(fin[0]) - int(debut[0]), int(fin[1]) - int(debut[1])
+
+
+#: À partir de ce jour, une période de la créatrice de la page se lit chez
+#: Infloww et plus chez MyPuls (page JESSY LE RETOUR : Emy et Jessye retirées
+#: de MyPuls le 03/11/2026 ; propriétaire, 04/11 : « il n'y a plus MyPuls »).
+#: Sans ça, ses anciens liens de suivi sortaient « lien MyPuls introuvable ».
+#: "" : MyPuls, comme avant.
+PERIODE_INFLOWW_DEPUIS = ""
+
+
+def _periode_infloww_principale(du: str, au: str) -> Dict[str, Any]:
+    """La période [du, au] de la créatrice de la page, lue chez Infloww, à la
+    forme de _mypuls_periode : subs datés abonné par abonné (les mêmes que le
+    podium, pd.subs_infloww), clics et gain par différence des relevés du
+    jour (« — » sans relevé de la veille). Ne lève jamais."""
+    try:
+        cle = pd.PAGES_RETIREES_INFLOWW.get(CREATRICE, CREATRICE)
+        i = _infloww(cle)
+        if i.get("erreur"):
+            for nouveau, ancien in pd.PSEUDOS_RENOMMES.items():
+                if ancien == CREATRICE:
+                    i2 = _infloww(nouveau)
+                    if not i2.get("erreur"):
+                        i = i2
+                        break
+        if i.get("erreur"):
+            return {"erreur": f"Infloww ({NOM_AFFICHE}) : {str(i['erreur'])[:200]}", "liens": []}
+        par = {_code_infloww(l): l for l in i.get("liens") or [] if isinstance(l, Mapping) and _code_infloww(l)}
+        subs = pd.subs_infloww(du, {f"{CREATRICE}/c{c}" for c in par}, au=au, creatrice=cle, pause=False)
+        if subs is None:
+            return {"erreur": f"Infloww n'a pas rendu les abonnés {_de_nom(NOM_AFFICHE)}, nouvel essai ensuite",
+                    "liens": []}
+        auj = _aujourdhui()
+        jours = _noter_releve_partenaire(par, auj, _fichier_releves_principale())
+        liens = []
+        for c, l in par.items():
+            ms = _entier(l.get("cree_ms"))
+            cree = _jour_de(ms / 1000.0) if ms else ""
+            n = subs.get(f"{CREATRICE}/c{c}")
+            if cree and au and cree > au:
+                clics, net, n = 0, 0, 0
+            elif cree and du <= cree and au >= auj:
+                clics, net = _entier(l.get("clics")), _entier(l.get("net"))
+            else:
+                cn = _cumuls_periode(jours, par, c, cree, du, au, auj)
+                clics, net = cn if cn is not None else (None, None)
+            liens.append({"id": f"mypuls:{c}", "nom": str(l.get("nom") or "").strip(), "code": c,
+                          "clics": clics, "abonnes": None if n is None else int(n), "net": net,
+                          "termine": bool(l.get("termine"))})
+        return {"erreur": "", "liens": liens, "lu_a": i.get("lu_a"), "tronque": list(i.get("tronque") or []),
+                "illisibles": 0, "doublons": 0, "devise": "USD", "champs_manquants": 0}
+    except Exception as e:                                   # noqa: BLE001
+        return {"erreur": f"Infloww ({NOM_AFFICHE}) : {type(e).__name__}: {e}", "liens": []}
 
 
 def _lire_partenaire(du: str, au: str, codes: Tuple[str, ...]) -> Tuple[Dict[str, Any], str]:
@@ -2328,9 +2387,14 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     # les liens de suivi quittés pendant la période : une lecture MyPuls
     # jusqu'à chaque dernier jour, lancée tout de suite elle aussi
     fins_q = _fins_quittes(g["liens"], du, au)
-    for vu in fins_q:
-        _mypuls_periode(du, vu, attente=0)
-    m = _mypuls_periode(du, au)
+    infloww_seul = bool(PERIODE_INFLOWW_DEPUIS) and du >= PERIODE_INFLOWW_DEPUIS
+    if infloww_seul:
+        lire = _periode_infloww_principale
+    else:
+        lire = _mypuls_periode
+        for vu in fins_q:
+            _mypuls_periode(du, vu, attente=0)
+    m = lire(du, au)
     ents, _ = entites(g["liens"])
     erreur = m.get("erreur") or ""
     if not g["liens"]:
@@ -2343,7 +2407,7 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
                            # MyPuls n'a pas répondu dans le temps que la page lui laisse
                            "mypuls_en_cours": bool(m.get("en_cours"))}
     commun = dict(lu_a=m.get("lu_a"), tronque=m.get("tronque"), repli_gms=g["repli"], erreur=erreur,
-                  source="MyPuls", illisibles=int(m.get("illisibles") or 0),
+                  source="Infloww" if infloww_seul else "MyPuls", illisibles=int(m.get("illisibles") or 0),
                   desactives=int(g.get("desactives") or 0))
     liens = m.get("liens") or []
     if not erreur:
@@ -2363,7 +2427,7 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     if _pause_gms() and not info.get("plafond") and not info.get("budget"):
         per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
     part = _partenaire_periode(du, au, codes_p) if PARTENAIRE and not erreur else None
-    fins = {vu: _mypuls_periode(du, vu) for vu in fins_q} if not erreur else {}
+    fins = {vu: lire(du, vu) for vu in fins_q} if not erreur else {}
     cc, raison_cc = _clics_cvr(du, au) if CREATRICE_CVR and not erreur else (None, "")
     t = construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per,
                    partenaire=part, bornes=(du, au), fins=fins, clics_cvr=cc, **commun)
@@ -6013,6 +6077,9 @@ REGLAGES: Dict[str, Dict[str, Any]] = {"lia": {
 # VA TRUST (propriétaire, 04/11/2026 : « donne-moi le lien avec tous les VA de
 # JESSY LE RETOUR », « c'est pour Youl4b Spam »).
 REGLAGES["emy"] = {
+    # Emy et Jessye n'y sont plus chez MyPuls : une période depuis le 01/11 se
+    # lit chez Infloww seul (voir PERIODE_INFLOWW_DEPUIS)
+    "PERIODE_INFLOWW_DEPUIS": "2026-11-01",
     # la clé des VA rouvre la page (fermée le 02/11) : « réouvre la page »,
     # le 04/11, une fois Gagné à leur grille ; la vue paie reste au propriétaire
     "CLE_VA_OUVERTE": True,
