@@ -71,7 +71,7 @@ def ts(*a):
 
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="minuteur_"))
-_SAUVE = {k: getattr(pd, k) for k in ("_maintenant", "_etat", "_staff", "_noms_libelles",
+_SAUVE = {k: getattr(pd, k) for k in ("_maintenant", "_etat", "_staff", "_refus_pseudos", "_noms_libelles",
                                       "HEURE_FIXE", "MINUTEUR", "INTERNES_REUNIS")}
 try:
     pd.INTERNES_REUNIS = False
@@ -234,6 +234,7 @@ try:
 
     # ── 👀 : les sans relevé, lus dans l'état ──
     pd._staff = lambda p: True
+    pd._refus_pseudos = lambda p: ""
     pd._noms_libelles = lambda gid: {41: "comptes internes", 124: "bigmaxm", 11: "Kylmich"}
     rep = pd._voir_pseudos_message({"guild_id": TW, "message": {"id": "B", "embeds": [b]}})
     check("👀 sous le bonus : « Sans relevé : VA 11 », lu dans l'état (le message ne le dit plus)",

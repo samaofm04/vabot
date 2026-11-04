@@ -128,7 +128,7 @@ _SAUVE = {k: getattr(pd, k) for k in ("_lire_registre", "_classement_sans_intern
                                       "_entites_jessye_toutes", "VA_TWITTER_SUR_THREADS",
                                       "_liens_twitter", "_entites_jessye", "_releve_liens",
                                       "_quinzaine_sans_internes", "_noms_libelles_sans_internes",
-                                      "_staff", "INTERNES_REUNIS")}
+                                      "_staff", "_refus_pseudos", "INTERNES_REUNIS")}
 _SAUVE_LV = lv._etat
 _SAUVE_SV = {k: getattr(suivi_va, k) for k in ("ETAT_FICHIER", "adresse_de")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("_etat", "_api")}
@@ -381,6 +381,7 @@ try:
           and pd._noms_libelles(AG)["Instagram VA 141"] == texte and pd._noms_libelles(TW)[124] == "bigmaxm",
           pd._noms_libelles(TW))
     pd._staff = lambda p: True
+    pd._refus_pseudos = lambda p: ""
     rep = pd._voir_pseudos_message({"guild_id": TW, "message": {"embeds": [b]}})
     check("… sous le bonus, au staff, en privé : VA 41 → les comptes internes",
           rep["data"]["flags"] == 64 and f"🥇 VA 41 · **{texte}** · 261 subs" in rep["data"]["content"],

@@ -8,7 +8,7 @@ Ce qui est vérifié :
   - la rangée « 👀 Pseudos » (BOUTON_PSEUDOS_MSG) sous le bonus du jour (posé,
     complété le lendemain) et sous le podium, vivant ou figé ; rien ailleurs
     (Va IG garde son 🔄) ;
-  - le clic : staff seulement, en privé, les VA DU MESSAGE cliqué (ses lignes,
+  - le clic : BOSS seulement (04/11/2026), en privé, les VA DU MESSAGE cliqué (ses lignes,
     ses « sans relevé »), la personne devant chaque numéro ; un message sans
     classement le dit ;
   - depuis le 01/11/2026 (« dis-moi pourquoi là y a pas les yeux ») : la même
@@ -63,9 +63,12 @@ check("bonus du jour : posé et complété avec la rangée",
       "**_rangee_yeux_message(gid)" in inspect.getsource(pd._rafraichir_bonus_mypuls)
       and "**_rangee_yeux_message(gid)" in inspect.getsource(pd._bonus_veille))
 
-_sauve = (pd._staff, pd._noms_libelles)
+_sauve = (pd._staff, pd._noms_libelles, pd._refus_pseudos)
 try:
     pd._staff = lambda p: str(((p.get("member") or {}).get("user") or {}).get("id")) == "boss"
+    # 04/11/2026 : 👀 au rôle BOSS seulement (vérifié plus bas sur le vrai contrôle)
+    pd._refus_pseudos = lambda p: ("" if str(((p.get("member") or {}).get("user") or {}).get("id")) == "boss"
+                                   else pd.TEXTE_PSEUDOS_REFUS)
     pd._noms_libelles = lambda gid: {41: "Eddy", 43: "Tsiry", 12: "Roucham", 11: "Kylmich"}
     msg = {"embeds": [{"title": "💸 Bonus subs du jour — 24/10/2026", "description":
                        "📅 Journée du **24/10/2026** · abonnés **tracking OF**\n\n"
@@ -90,7 +93,7 @@ try:
     check("… les places payées seulement : sous le minimum (VA 12, 9 subs), pas à vérifier",
           "VA 12" not in t2 and "Roucham" not in t2, t2)
     va = dict(p, member={"user": {"id": "va"}})
-    check("clic d'un VA : refusé, aucun pseudo", "Réservé au staff" in pd.traiter(va)["data"]["content"])
+    check("clic d'un VA : refusé, aucun pseudo", "Réservé aux BOSS" in pd.traiter(va)["data"]["content"])
     vide = dict(p, message={"embeds": [{"title": "x", "description": "rien"}]})
     check("message sans classement : dit", "Personne" in pd.traiter(vide)["data"]["content"])
     check("le 👀 de la quinzaine garde son chemin",
@@ -122,7 +125,7 @@ try:
               and "Instagram VA 30 ? (Julia VA 9)" in ti and "Total" not in ti, ti)
         check("… un VA sans numéro Instagram n'invente aucune ligne",
               "sansnumero" not in str(pd._noms_libelles(VA_IG)), pd._noms_libelles(VA_IG))
-        check("… clic d'un VA : refusé", "Réservé au staff" in pd.traiter(
+        check("… clic d'un VA : refusé", "Réservé aux BOSS" in pd.traiter(
             dict(pi, member={"user": {"id": "va"}}))["data"]["content"])
     finally:
         pd.numeros_instagram, subs_va.entites_va_ig = _sauve_ig
@@ -178,7 +181,53 @@ try:
     finally:
         pd._noms_libelles, pd._noms_libelles_sans_internes, pd.numeros, pd._etat = _sauve_p
 finally:
-    pd._staff, pd._noms_libelles = _sauve
+    pd._staff, pd._noms_libelles, pd._refus_pseudos = _sauve
+
+
+# ── 👀 au rôle BOSS seulement (04/11/2026) : le vrai contrôle ─────────────
+print("👀 : le rôle BOSS seulement")
+import verif_discord as _vd  # noqa: E402
+_api_sauve = _vd.api
+LECTURES = []
+
+
+def _roles(m, c, **kw):
+    LECTURES.append(c)
+    return 200, [{"id": "R_BOSS", "name": "BOSS"}, {"id": "R_MAN", "name": "🛡️ Manager"},
+                 {"id": "R_BOSS2", "name": "Boss adjoint"}]
+
+
+def clic_roles(roles, perms="0"):
+    return {"type": 3, "guild_id": pd.AGENCY_IG_ID, "member": {"user": {"id": "x"}, "roles": roles,
+                                                               "permissions": perms}}
+
+
+_vd.api = _roles
+pd._ROLES_BOSS.clear()
+try:
+    check("un BOSS : servi", pd._refus_pseudos(clic_roles(["R_BOSS"])) == "")
+    check("un manager (même administrateur) sans BOSS : refusé, « Réservé aux BOSS »",
+          pd._refus_pseudos(clic_roles(["R_MAN"], perms="8")) == pd.TEXTE_PSEUDOS_REFUS)
+    check("un rôle qui contient « Boss » sans l'être : refusé",
+          pd._refus_pseudos(clic_roles(["R_BOSS2"])) == pd.TEXTE_PSEUDOS_REFUS)
+    check("les rôles sont relus au plus toutes les 10 min (le clic n'a que 3 s)", len(LECTURES) == 1, LECTURES)
+    rep = pd.traiter({"type": 3, "guild_id": pd.AGENCY_IG_ID, "data": {"custom_id": pd.BOUTON_PSEUDOS_MSG},
+                      "member": {"user": {"id": "y"}, "roles": ["R_MAN"], "permissions": "8"},
+                      "message": {"embeds": [{"description": "🥇 **Instagram VA 141** — **116** subs"}]}})
+    check("le clic sur 👀 d'un manager : refusé en privé, rien montré",
+          rep["data"]["flags"] == 64 and rep["data"]["content"] == pd.TEXTE_PSEUDOS_REFUS, rep)
+    rep = pd.traiter({"type": 3, "guild_id": pd.AGENCY_IG_ID, "data": {"custom_id": pd.BOUTON_PSEUDOS},
+                      "member": {"user": {"id": "y"}, "roles": ["R_MAN"], "permissions": "8"}, "token": "t"})
+    check("… sur le 👀 de la quinzaine aussi", rep["data"]["content"] == pd.TEXTE_PSEUDOS_REFUS, rep)
+    pd._ROLES_BOSS.clear()
+    _vd.api = lambda m, c, **kw: (503, {"message": "panne"})
+    check("rôles illisibles et rien de gardé : refusé (« réessaie »), jamais ouvert par défaut",
+          pd._refus_pseudos(clic_roles(["R_BOSS"])) == pd.TEXTE_PSEUDOS_ILLISIBLE)
+    pd._ROLES_BOSS[pd.AGENCY_IG_ID] = (0.0, {"R_BOSS"})
+    check("Discord muet mais une lecture d'avant : elle sert", pd._refus_pseudos(clic_roles(["R_BOSS"])) == "")
+finally:
+    _vd.api = _api_sauve
+    pd._ROLES_BOSS.clear()
 
 print()
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

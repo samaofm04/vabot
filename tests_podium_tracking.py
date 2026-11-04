@@ -947,7 +947,7 @@ try:
     pd._api = api_figee
     import tickets_discord as tk
     suites13, plus13 = [], []
-    sauve13 = (pd._staff, pd._en_fond, tk._suite, pd._prive_en_plus)
+    sauve13 = (pd._refus_pseudos, pd._en_fond, tk._suite, pd._prive_en_plus)
     try:
         avant13 = pd._texte_pseudos_avant(TW)
         pd._en_fond = lambda f: f()
@@ -955,12 +955,13 @@ try:
         pd._prive_en_plus = lambda jeton_, texte, p=None: plus13.append(texte)
         clic = {"type": 3, "guild_id": TW, "token": "t", "data": {"custom_id": pd.BOUTON_PSEUDOS},
                 "member": {"user": {"id": "1"}}}
-        pd._staff = lambda p_: False
+        # 04/11/2026 : 👀 au rôle BOSS seulement (tests_pseudos_bonus vérifie le contrôle)
+        pd._refus_pseudos = lambda p_: pd.TEXTE_PSEUDOS_REFUS
         r_va = pd.traiter(clic)
-        pd._staff = lambda p_: True
+        pd._refus_pseudos = lambda p_: ""
         r_staff = pd.traiter(clic)
     finally:
-        pd._staff, pd._en_fond, tk._suite, pd._prive_en_plus = sauve13
+        pd._refus_pseudos, pd._en_fond, tk._suite, pd._prive_en_plus = sauve13
         pd._api = api_vrai
     check("la quinzaine d'avant : sa page figée relue, pseudos compris, l'unité de l'époque",
           "01/10 au 15/10" in avant13 and "(en clics)" in avant13
@@ -968,7 +969,7 @@ try:
           and "**Sans relevé** : VA 12 Roucham · VA 22 " in avant13, avant13)
     check("le clic : un VA est refusé, le staff reçoit en privé la quinzaine en cours PUIS "
           "celle d'avant",
-          "staff" in r_va["data"]["content"] and r_staff == {"type": 5, "data": {"flags": 64}}
+          "BOSS" in r_va["data"]["content"] and r_staff == {"type": 5, "data": {"flags": 64}}
           and suites13 == [txt13] and plus13 == [avant13], (r_va, r_staff, suites13, plus13))
     check("… sans relire MyPuls (le dernier relevé du salon, la page figée)",
           len(MP["appels"]) == n, MP["appels"][n:])

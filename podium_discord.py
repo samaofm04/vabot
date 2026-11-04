@@ -5819,10 +5819,12 @@ def texte_pseudos(gid: str, jour: Optional[dt.date] = None) -> str:
 
 
 def _voir_pseudos(p: Dict[str, Any]) -> Dict[str, Any]:
-    """« 👀 Pseudos » : staff seulement, réponse privée et différée (MyPuls)."""
+    """« 👀 Pseudos » : BOSS seulement (_refus_pseudos), réponse privée et
+    différée (MyPuls)."""
     gid = str(p.get("guild_id") or "")
-    if not _staff(p):
-        return _ephemere("🔒 Réservé au staff.")
+    refus = _refus_pseudos(p)
+    if refus:
+        return _ephemere(refus)
     if not (SERVEURS.get(gid) or {}).get("bouton_pseudos"):
         return _ephemere("ℹ️ Pas de pseudos à montrer sur ce serveur.")
     import tickets_discord as tk
@@ -5852,10 +5854,11 @@ def _voir_pseudos_message(p: Dict[str, Any]) -> Dict[str, Any]:
     """« 👀 Pseudos » sous un bonus du jour, un podium de la semaine ou une
     page de quinzaine finie : staff seulement, en privé. Les VA du message
     cliqué (ses lignes, ses « sans relevé »), la personne devant chaque
-    numéro — aucun appel, tout de suite."""
+    numéro — tout de suite. BOSS seulement (_refus_pseudos)."""
     gid = str(p.get("guild_id") or "")
-    if not _staff(p):
-        return _ephemere("🔒 Réservé au staff.")
+    refus = _refus_pseudos(p)
+    if refus:
+        return _ephemere(refus)
     emb = ((p.get("message") or {}).get("embeds") or [None])[0]
     if not isinstance(emb, dict):
         return _ephemere("ℹ️ Rien à montrer sur ce message.")
@@ -5928,6 +5931,52 @@ def _staff(p: Dict[str, Any]) -> bool:
         return bool(vd._permissions(membre) & 0x8)
     except Exception:
         return False
+
+
+#: « 👀 Pseudos » : le rôle BOSS seulement (propriétaire, 04/11/2026 : « il faut
+#: qu'il y ait uniquement les personnes avec le rôle boss qui ont le droit de
+#: voir les pseudos »). Avant : tout le staff (_staff), managers et helpers
+#: compris. Le rôle est reconnu à son nom exact sur chaque serveur (les quatre
+#: serveurs à 👀 ont un « BOSS », vérifié le 04/11) ; ni l'administrateur ni
+#: le propriétaire du serveur sans ce rôle. 🔄 Mettre à jour garde _staff.
+ROLE_PSEUDOS = "BOSS"
+ROLES_BOSS_S = 600
+_ROLES_BOSS: Dict[str, Tuple[float, set]] = {}
+TEXTE_PSEUDOS_REFUS = "🔒 Réservé aux BOSS."
+TEXTE_PSEUDOS_ILLISIBLE = "⚠️ Rôles illisibles pour le moment, réessaie dans un instant."
+
+
+def _roles_boss(gid: str) -> Optional[set]:
+    """Les ids des rôles « BOSS » de ce serveur, gardés 10 min (le clic n'a que
+    3 s) ; la dernière lecture si Discord ne répond pas ; None sans aucune."""
+    gid = str(gid)
+    c = _ROLES_BOSS.get(gid)
+    if c and time.time() - c[0] < ROLES_BOSS_S:
+        return c[1]
+    try:
+        import verif_discord as vd
+        code, rep = vd.api("GET", f"/guilds/{gid}/roles", gid=gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] rôles de {gid} illisibles : {type(e).__name__}: {e}", flush=True)
+        return c[1] if c else None
+    if code != 200 or not isinstance(rep, list):
+        print(f"[podium] rôles de {gid} illisibles (HTTP {code})", flush=True)
+        return c[1] if c else None
+    ids = {str(r.get("id")) for r in rep
+           if isinstance(r, dict) and str(r.get("name") or "").strip().upper() == ROLE_PSEUDOS}
+    _ROLES_BOSS[gid] = (time.time(), ids)
+    return ids
+
+
+def _refus_pseudos(p: Dict[str, Any]) -> str:
+    """"" si le cliqueur a le rôle BOSS de ce serveur, sinon le refus à dire
+    (en privé). Rôles illisibles : refusé, jamais ouvert par défaut."""
+    gid = str((p or {}).get("guild_id") or "")
+    roles = {str(r) for r in (((p or {}).get("member") or {}).get("roles") or [])}
+    boss = _roles_boss(gid) if gid else None
+    if boss is None:
+        return TEXTE_PSEUDOS_ILLISIBLE
+    return "" if boss & roles else TEXTE_PSEUDOS_REFUS
 
 
 def _maj_en_fond(gid: str, suivi: Optional[Dict[str, bool]] = None) -> None:

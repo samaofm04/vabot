@@ -742,18 +742,19 @@ try:
               "**york** (Amelia VA 43) — 11 subs" in txt and "**adh040** (Lola VA 2) — 7 subs" in txt
               and "Instagram VA" in txt, txt)
         suites3 = []
-        _sauve_pt = {k: getattr(pod, k) for k in ("_staff", "_en_fond")}
+        _sauve_pt = {k: getattr(pod, k) for k in ("_refus_pseudos", "_en_fond")}
         _sauve_tk3 = tk._suite
         try:
             pod._en_fond = lambda f: f()
             tk._suite = lambda jeton_, texte, p=None: suites3.append(texte)
             clic = {"type": 3, "guild_id": sv.VA_IG_ID, "token": "t",
                     "data": {"custom_id": pod.BOUTON_PSEUDOS}, "member": {"user": {"id": "1"}}}
-            pod._staff = lambda p_: False
+            # 04/11/2026 : 👀 au rôle BOSS seulement (tests_pseudos_bonus)
+            pod._refus_pseudos = lambda p_: pod.TEXTE_PSEUDOS_REFUS
             r = pod.traiter(clic)
             check("… un VA qui clique : refusé, rien calculé",
-                  r.get("type") == 4 and "staff" in r["data"]["content"] and not suites3, r)
-            pod._staff = lambda p_: True
+                  r.get("type") == 4 and "BOSS" in r["data"]["content"] and not suites3, r)
+            pod._refus_pseudos = lambda p_: ""
             r = pod.traiter(clic)
             check("… le staff : réponse privée différée, avec les pseudos",
                   r == {"type": 5, "data": {"flags": 64}} and suites3 and "york" in suites3[0], (r, suites3))
