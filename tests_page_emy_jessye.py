@@ -229,8 +229,16 @@ try:
           fq == {"2026-10-27": ["37", "40", "55", "62"]} and em._fins_quittes(GMS, DU, "2026-10-27") == {}
           and il._fins_quittes(GMS, DU, AU) == {}, fq)
     h = em.page_html(t, "nom", "asc", "CLE")
-    check("page : sous les subs « dont 27 Jessye », sous le nom « visé jusqu'au 27/10 »",
-          "dont 27 Jessye" in h and "visé jusqu'au 27/10" in h)
+    # 04/11/2026 : sous le nom, la page JESSY LE RETOUR ne dit plus que « Carter
+    # (normal) » (PAR_EQUIPE) ; le détail des liens de suivi reste calculé, et
+    # rendu sans PAR_EQUIPE
+    em.PAR_EQUIPE = False
+    h_det = em.page_html(t, "nom", "asc", "CLE")
+    em.PAR_EQUIPE = True
+    check("page : sous les subs « dont 27 Jessye », sous le nom « (normal) » ; le détail « visé jusqu'au "
+          "27/10 » toujours calculé",
+          "dont 27 Jessye" in h and "(normal)" in h and "visé jusqu'au 27/10" not in h
+          and "visé jusqu'au 27/10" in h_det)
     check("page : colonne « Clics OF », titre « MyPuls + Infloww », @emy.brw + @jessyewdiference",
           "Clics OF" in h and "· MyPuls + Infloww" in h and "@emy.brw + @jessyewdiference" in h)
     check("page : « liens de suivi d'Emy » (et non « de Jessye ») hors GetMySocial",
@@ -406,7 +414,9 @@ try:
     t_av = em.construire(MP01, GMS, source="MyPuls", periode={"du": P1, "au": P2, "devise": "USD"},
                          partenaire=p_av, bornes=(P1, P2), fins=FINS01)
     L_av = {x["cle"]: x for x in t_av["lignes"]}
+    em.PAR_EQUIPE = False
     h_av = em.page_html(t_av, "nom", "asc", "CLE")
+    em.PAR_EQUIPE = True
     s_av, tr_av = em._subs_par_personne(MP01, GMS, bornes=(P1, P2), partenaire=p_av, fins=FINS01)
     check("avant la création : Abdoul 150 + 3 (c10 jusqu'au 05/10), Mihkim 80, aucun « — » ni part Jessye",
           L_av["VA 2 - Abdoul"]["subs"] == 153 and L_av["Mihkim"]["subs"] == 80

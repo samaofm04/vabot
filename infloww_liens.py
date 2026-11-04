@@ -4849,8 +4849,33 @@ def _lien_tri(col: str, tri: str, sens: str, cle: str, du: str = "", au: str = "
     return _adresse(("tri", col), ("sens", nouveau), ("du", du), ("au", au), ("k", cle))
 
 
+def _detail_simple(x: Mapping[str, Any], source: str) -> str:
+    """Page JESSY LE RETOUR (PAR_EQUIPE) : sous le nom, « Carter (normal) » et
+    c'est tout (propriétaire, 04/11/2026, devant les codes c33 / c147 et les
+    « visé jusqu'au » : « écris juste Carter (normal) et c'est tout, avec leur
+    prénom »). Restent seulement, en orange, ce qui manque vraiment : un lien
+    pas lu, introuvable, partagé, un relevé raté."""
+    nom = re.sub(r"\s*\bSPAM\b\s*$", "", str(x.get("nom") or x.get("cle") or ""), flags=re.I).strip()
+    d = [f'<span>{_e(nom)} ({"spam" if x.get("spam") else "normal"})</span>']
+    for r in x.get("infloww") or []:
+        if r.get("creatrice") and r.get("manque"):
+            d.append(f'<span class="manque">un lien pas lu chez Infloww, ses subs manquent</span>')
+        if r.get("partage_avec"):
+            d.append(f'<span class="manque">tracking partagé avec {_e(", ".join(r["partage_avec"]))}</span>')
+        if r.get("fin_manque"):
+            d.append(f'<span class="manque">compté sur toute la période ({_e(r["fin_manque"])})</span>')
+    for r in x.get("introuvables") or []:
+        d.append(f'<span class="manque">lien {_e("Infloww" if r.get("creatrice") else source)} introuvable — '
+                 f'{_e(r.get("raison"))}</span>')
+    if x.get("us_etat") == "rate":
+        d.append('<span class="manque">US : dernier relevé raté</span>')
+    return f'<div class="det">{"<br>".join(d)}</div>'
+
+
 def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
     """Sous le nom, en petit : les liens de suivi comptés, et ce qui manque."""
+    if PAR_EQUIPE:
+        return _detail_simple(x, source)
     d: List[str] = []
     for r in x.get("infloww") or []:
         # page Emy : le même lien de suivi sur une autre ligne (Gerome c141,

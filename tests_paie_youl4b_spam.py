@@ -196,6 +196,22 @@ check("page JESSY LE RETOUR : rangée par équipe sans « ?tri= » ; les autres 
 check("le lien sans tri garde l'ordre par équipe (pas de « tri= » dans l'adresse)",
       "tri=" not in emy._requete_page("equipe", "asc", "", "2026-11-01", "2026-11-15"))
 
+
+print("7. Sous le nom : « Carter (normal) » et c'est tout")
+d = emy._detail_personne({"cle": "Carter", "nom": "Carter", "spam": False, "nb_gms": 2,
+                          "infloww": [{"code": "33", "nom": "Carter - ( normal )", "quitte": "2026-11-04"},
+                                      {"code": "147", "creatrice": "jessyewdiference", "nom": "Carter - (spam) / (normal)"}],
+                          "introuvables": [], "us_etat": "ok"})
+check("« Carter (normal) », sans codes c33 / c147, sans « visé jusqu'au », sans « 2 liens GetMySocial »",
+      "Carter (normal)" in d and "c33" not in d and "c147" not in d and "visé" not in d and "liens GetMySocial" not in d, d)
+d = emy._detail_personne({"cle": "VA 5 - Gerome SPAM", "nom": "Gerome SPAM", "spam": True, "infloww": [],
+                          "introuvables": [{"nom": "x", "raison": "absent"}], "us_etat": "ok"})
+check("une ligne SPAM : « Gerome (spam) » ; ce qui manque reste dit, en orange",
+      "Gerome (spam)" in d and "introuvable" in d and 'class="manque"' in d, d)
+check("les autres pages gardent le détail des liens de suivi",
+      "c33" in lia._detail_personne({"cle": "VA 1", "nom": "VA 1", "infloww": [{"code": "33", "nom": "x"}],
+                                     "introuvables": []}))
+
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 if KO:
