@@ -273,6 +273,43 @@ r = c.post("/settings/numgen/cle_trust", data={"cle": "NOUVELLE-CLE-TRUST-4321"}
 check("l'admin : la clé enregistrée", numgen.getatext_trust_key() == "NOUVELLE-CLE-TRUST-4321", r.status_code)
 r = c.post("/settings/numgen/cle_trust", data={"retirer": "1"})
 check("… et « Retirer » la retire", numgen.getatext_trust_key() == "", r.status_code)
+
+print("6. La clé SMSBower depuis le site (05/11/2026)")
+REPONSES[("BOWER-NOUVELLE-22222222", "getBalance")] = "ACCESS_BALANCE:7.25"
+REPONSES[("BOWER-MAUVAISE-33333333", "getBalance")] = "BAD_KEY"
+ok, msg = numgen.enregistrer_cle_smsbower("BOWER-MAUVAISE-33333333")
+check("SMSBower refuse la clé : refusée, l'ancienne reste", not ok and "BAD_KEY" in msg
+      and numgen.smsbower_key() == "BOWER-1111", (ok, msg))
+ok, msg = numgen.enregistrer_cle_smsbower("trop courte")
+check("clé mal copiée : refusée", not ok and numgen.smsbower_key() == "BOWER-1111", (ok, msg))
+APPELS.clear()
+ok, msg = numgen.enregistrer_cle_smsbower("  BOWER-NOUVELLE-22222222 ")
+check("bonne clé : testée chez SMSBower puis enregistrée, solde dit, clé jamais en entier",
+      ok and numgen.smsbower_key() == "BOWER-NOUVELLE-22222222" and "7.25" in msg
+      and "BOWER-NOUVELLE-22222222" not in msg
+      and any(u == numgen.SMSBOWER_STUBS_URL and pr.get("action") == "getBalance" for u, pr in APPELS),
+      (ok, msg, APPELS))
+check("… la clé GetAText principale et la TRUST ne bougent pas",
+      numgen.getatext_key() == "CLE-PRINCIPALE-0000")
+h = w._numgen_smsbower_html({"mail": "7.25 $"})
+check("la case : fin de la clé, solde, champ masqué, jamais la clé entière",
+      "type='password'" in h and "/settings/numgen/cle_smsbower" in h and "7.25 $" in h
+      and "BOWER-NOUVELLE-22222222" not in h and "2222" in h, h[:300])
+check("… dans l'onglet Générateurs SMS", "_numgen_smsbower_html(soldes)" in (BOT / "web_upload.py").read_text(encoding="utf-8"))
+c = app.test_client()
+with c.session_transaction() as s:
+    s["auth"], s["username"], s["role"] = True, "chatteur1", "chatter"
+r = c.post("/settings/numgen/cle_smsbower", data={"cle": "BOWER-MAUVAISE-33333333"})
+check("un chatteur : refusé, la clé ne bouge pas",
+      r.status_code in (302, 403) and numgen.smsbower_key() == "BOWER-NOUVELLE-22222222", r.status_code)
+REPONSES[("BOWER-AUTRE-44444444", "getBalance")] = "ACCESS_BALANCE:1.00"
+c = app.test_client()
+with c.session_transaction() as s:
+    s["auth"], s["username"], s["role"] = True, "admin", "owner"
+r = c.post("/settings/numgen/cle_smsbower", data={"cle": "BOWER-AUTRE-44444444"})
+check("l'admin : enregistrée, retour sur l'onglet Générateurs SMS",
+      numgen.smsbower_key() == "BOWER-AUTRE-44444444" and r.status_code == 302
+      and "tab=snumgen" in (r.headers.get("Location") or ""), (r.status_code, r.headers.get("Location")))
 w._load_web_users = _users
 
 print("=" * 70)

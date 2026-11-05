@@ -58106,10 +58106,45 @@ def _render_numgen_settings() -> str:
         "margin-left:10px'></span>"
         "</div>"
         + _numgen_trust_html(soldes)
-        + "<small style='color:#8a91a8;display:block;margin-top:10px'>Les clés API se "
-        "posent dans Discord avec <code>/smskey</code> — sauf celle du compte GetAText "
-        "des serveurs TRUST, ci-dessus : la fenêtre de <code>/smskey</code> est pleine "
-        "(cinq champs, le maximum de Discord).</small>")
+        + _numgen_smsbower_html(soldes)
+        + "<small style='color:#8a91a8;display:block;margin-top:10px'>Les autres clés API se "
+        "posent dans Discord avec <code>/smskey</code>.</small>")
+
+
+def _numgen_smsbower_html(soldes=None) -> str:
+    """La clé SMSBower, collée ici (propriétaire, 05/11/2026 : « donne-moi
+    juste un lien à mettre »). La même clé que la case « SMSBower » de
+    /smskey : les mails, et le repli des numéros du compte principal. Seuls
+    les 4 derniers caractères ressortent."""
+    try:
+        import numgen
+        st = numgen.status()
+        solde = (soldes or {}).get("mail", "—") if st.get("mail_ok") else ""
+    except Exception as e:
+        return ("<div style='color:#f99;padding:10px'>Clé SMSBower illisible : "
+                + html_escape(str(e)[:120]) + "</div>")
+    if st.get("mail_ok"):
+        etat = ("<div style='padding:11px 14px;background:rgba(16,185,129,.08);border:1px solid "
+                "rgba(16,185,129,.3);border-radius:8px;color:#34d399;font-size:13px;margin-bottom:10px'>"
+                "✓ Clé enregistrée (" + html_escape(st.get("smsbower") or "") + ") — solde <b>"
+                + html_escape(str(solde)) + "</b>. Colle une nouvelle clé pour la remplacer.</div>")
+    else:
+        etat = ("<div style='padding:11px 14px;background:rgba(148,163,184,.08);border:1px solid "
+                "rgba(148,163,184,.25);border-radius:8px;color:#8a91a8;font-size:13px;margin-bottom:10px'>"
+                "Aucune clé SMSBower.</div>")
+    return ("<div id='cle-smsbower' style='margin-top:16px;padding:13px 15px;background:#0e1219;"
+            "border:1px solid #223047;border-radius:10px'>"
+            "<div style='font-size:13px;font-weight:700;margin-bottom:8px;color:#e8eaf2'>"
+            "<svg class='lgi'><use href='#lg-smsbower'/></svg> Clé SMSBower</div>" + etat
+            + "<form method='POST' action='/settings/numgen/cle_smsbower' "
+            "style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
+            "<input type='password' name='cle' autocomplete='off' spellcheck='false' required "
+            "minlength='16' placeholder='clé API SMSBower' "
+            "style='flex:1;min-width:220px;padding:10px;background:#0b0e15;border:1px solid #2a3245;"
+            "color:#e8eaf2;border-radius:8px;font-family:monospace;font-size:12px'>"
+            "<button type='submit' style='padding:10px 18px;background:#22c55e;color:#fff;"
+            "border:0;border-radius:8px;cursor:pointer;font-weight:700'>Enregistrer</button>"
+            "</form></div>")
 
 
 def _numgen_trust_html(soldes=None) -> str:
@@ -79100,6 +79135,18 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if not valeur.strip() and not request.form.get("retirer"):
             return _error("✕ Colle la clé avant d'enregistrer.", tab="snumgen")
         ok, msg = numgen.enregistrer_cle_trust(valeur)
+        return _success("✓ " + msg, tab="snumgen") if ok else _error("✕ " + msg, tab="snumgen")
+
+    # Clé SMSBower (Réglages › Générateurs SMS), 05/11/2026. Sous /settings/ :
+    # refusée aux rôles restreints (_ADMIN_ONLY_WRITE) ; revérifié ici.
+    @app.route("/settings/numgen/cle_smsbower", methods=["POST"])
+    def settings_numgen_cle_smsbower():
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _error("✕ Réservé aux administrateurs", tab="snumgen")
+        import numgen
+        ok, msg = numgen.enregistrer_cle_smsbower(request.form.get("cle") or "")
         return _success("✓ " + msg, tab="snumgen") if ok else _error("✕ " + msg, tab="snumgen")
 
     @app.route("/settings/proxeasy/cle", methods=["POST"])

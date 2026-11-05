@@ -659,6 +659,28 @@ def enregistrer_cle_trust(valeur: str) -> tuple:
     return True, f"Clé enregistrée (…{fin}), mais GetAText n'a pas répondu au test : {_human(t)}"
 
 
+def enregistrer_cle_smsbower(valeur: str) -> tuple:
+    """La clé SMSBower posée depuis le site (Réglages › Générateurs SMS).
+    Propriétaire, 05/11/2026 : « donne-moi juste un lien à mettre » plutôt que
+    /smskey. Testée AVANT d'être gardée (getBalance) : une clé refusée
+    remplacerait une clé peut-être encore bonne. SMSBower injoignable
+    n'empêche pas de la garder. -> (ok, message), jamais la clé en clair."""
+    v = (valeur or "").strip()
+    if len(v) < 16 or len(v) > 120 or any(c.isspace() for c in v):
+        return False, "Clé vide ou mal copiée : colle-la en entier, sans espace."
+    t = _get(SMSBOWER_STUBS_URL, {"api_key": v, "action": "getBalance"})
+    if "BAD_KEY" in t:
+        return False, "SMSBower refuse cette clé (BAD_KEY)."
+    set_keys(smsbower=v)
+    if smsbower_key() != v:
+        return False, ("Clé non enregistrée (écriture impossible dans data/) : "
+                       "l'ancienne reste en service.")
+    fin = v[-4:]
+    if t.startswith("ACCESS_BALANCE:"):
+        return True, f"Clé SMSBower enregistrée (…{fin}), solde {t.split(':', 1)[1].strip()} $."
+    return True, f"Clé SMSBower enregistrée (…{fin}), mais SMSBower n'a pas répondu au test : {_human(t)}"
+
+
 def _garder_precedente(cle: str) -> None:
     """L'ancienne clé TRUST, gardée pour lire et rendre les numéros pris avec
     elle (_stubs_trust_suivi) ; jamais montrée."""

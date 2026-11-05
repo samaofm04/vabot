@@ -11723,8 +11723,12 @@ try:
         check("titres : « %s » porte sa propre couleur" % _tTi[:22],
               _iTi >= 0 and "color:#e8eaf2" in _avTi,
               "il herite de la page, donc invisible en theme clair")
+    # + la case de la cle SMSBower (05/11/2026), meme fond, titre colore
     check("titres : le fond sombre des deux blocs est toujours la",
-          _hTi.count("#0e1219") == 2, "%d bloc(s)" % _hTi.count("#0e1219"))
+          _hTi.count("#0e1219") == 3, "%d bloc(s)" % _hTi.count("#0e1219"))
+    _iSb = _hTi.find("Clé SMSBower</div>")
+    check("titres : la case SMSBower porte sa propre couleur",
+          _iSb >= 0 and "color:#e8eaf2" in _hTi[max(0, _iSb - 220):_iSb])
 except Exception as _eTi:
     check("titres : testable", False, repr(_eTi)[:200])
 
