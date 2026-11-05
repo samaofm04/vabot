@@ -248,8 +248,9 @@ check("🔗 son lien, 📊 sa page, 💳 son paiement",
       and ("Voir ma page", stats_va.lien(AG, VA)) in urls(d["components"])
       and any(x.startswith("**💳 Paiement**\nUSDC · Solana · `EmXt…z2Vt`") for x in textes(d["components"])),
       (urls(d["components"]), textes(d["components"])))
-check("boutons : 💳 (Modifier), 📈 Mes stats, 🎬 Contenu — rien d'autre",
-      sorted(cids) == sorted([f"usdc:set:{VA}", f"subs:total:{VA}", f"cnt:o:{VA}"]), cids)
+# 05/11/2026 : « remove ici mes stat » — plus de 📈 Mes stats (📊 Voir ma page reste)
+check("boutons : 💳 (Modifier), 🎬 Contenu — rien d'autre, plus de 📈 Mes stats",
+      sorted(cids) == sorted([f"usdc:set:{VA}", f"cnt:o:{VA}"]), cids)
 check("ni 📤 ⬇️ 📱 (leurs salons), ni boutons de manager",
       not any(c.startswith(("outk:", "numx:", "essai:", "lien:")) for c in cids), cids)
 check("chaque custom_id une seule fois (sinon Discord refuse le message)", len(cids) == len(set(cids)), cids)
@@ -261,7 +262,7 @@ rep = ot.traiter(clic("outk:menu", uid=CHEF, chef=True))
 d2 = rep.get("data") or {}
 check("sans ticket (le staff) : SON menu quand même, sans 🎬 (rien où livrer) — pas un refus",
       rep["type"] == 4 and d2.get("flags") == 64 | 32768
-      and sorted(ids(d2.get("components"))) == sorted([f"usdc:set:{CHEF}", f"subs:total:{CHEF}"]), rep)
+      and sorted(ids(d2.get("components"))) == sorted([f"usdc:set:{CHEF}"]), rep)
 avant = tk.menu_ephemere
 tk.menu_ephemere = lambda g, u, **k: (_ for _ in ()).throw(RuntimeError("fiche illisible"))
 rep = ot.traiter(clic("outk:menu"))

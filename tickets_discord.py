@@ -4832,8 +4832,10 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
 # Solana de TRUST INSTAGRAM (USDC_RESEAUX_ICI : Twitter et Threads seuls).
 _PLATEFORME[AGENCY_IG_ID] = "Instagram"
 _ACCENT_MENU[AGENCY_IG_ID] = 0xE1306C
-#: Les boutons de la rangée du VA que ce menu garde.
-_DANS_MENU_COMMUN = ("usdc:set:", "subs:total:", CONTENU_PREFIXE)
+#: Les boutons de la rangée du VA que ce menu garde. Plus de « 📈 Mes stats »
+#: depuis le 05/11/2026 (propriétaire, capture de ce menu : « remove ici mes
+#: stat ») : la section 📊 Tes stats et son « Voir ma page » restent.
+_DANS_MENU_COMMUN = ("usdc:set:", CONTENU_PREFIXE)
 
 
 def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, Any]:
@@ -4845,8 +4847,8 @@ def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, An
     garder = _DANS_MENU_COMMUN if avec_contenu else tuple(x for x in _DANS_MENU_COMMUN
                                                            if x != CONTENU_PREFIXE)
     f = _fiche(gid, uid) or {}
-    # _boutons_va_complets (fin du fichier) : la rangée d'avant TICKET_SANS —
-    # 📈 Mes stats est retiré du ticket, pas de ce menu-ci
+    # _boutons_va_complets (fin du fichier) : la rangée d'avant TICKET_SANS ;
+    # ce menu choisit les siens (_DANS_MENU_COMMUN)
     rangs = _boutons_va_complets(uid, confirme=bool(f.get("confirme")),
                                  a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
                                  gid=gid, lien_actif=lv.est_actif(gid, uid))
