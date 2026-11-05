@@ -1121,16 +1121,21 @@ def echec_visage(tid: str, erreur: str) -> Optional[Dict[str, Any]]:
 
 #: Ce que Seedream reçoit pour habiller la model : image 1 = la model, image
 #: 2 = une image du reel. En anglais : les modèles image le suivent mieux.
+#: Corps entier et bas de la tenue demandés explicitement : avec une image du
+#: reel coupée au buste et une photo arrêtée aux hanches, Seedream inventait le
+#: bas (un short à la place du jogging) et Wan habillait toute la vidéo avec.
+#: Le texte incrusté du reel est écarté par le prompt plutôt que par un
+#: recadrage, qui cachait justement le pantalon.
 PROMPT_RETOUCHE = (
     "Image 1 is the person: keep her exact face, skin tone, hair and body completely unchanged. "
-    "Dress her in exactly the outfit of image 2: the same garments, colors, fabric and the way they are worn "
-    "(hood up or down, sleeves, fit, accessories). Keep the pose, framing and background of image 1, facing the camera. "
+    "Show her standing full-length, head to feet, facing the camera, in the same place as image 1 "
+    "(extend the background downward if image 1 is cropped). "
+    "Dress her in exactly the complete outfit of image 2, top AND bottom: the same garments including the trousers, "
+    "shorts or skirt, the same colors, fabric and the way they are worn (hood up or down, sleeves, fit, accessories). "
+    "Ignore and do not reproduce any text, caption, subtitle or watermark from image 2. "
     "Photorealistic, natural lighting, no text, no captions, no watermark."
 )
 OPTIONS_RETOUCHE = {"quality": "basic", "output_format": "png"}
-#: Part haute de l'image du reel gardée pour lire la tenue : les textes
-#: incrustés sont au milieu ou en bas, et Seedream les recopiait sur la photo.
-PART_TENUE = 0.6
 RESOLUTIONS_PERSO = ("480p", "580p", "720p")
 
 
@@ -1154,8 +1159,8 @@ def _format_image(w: int, h: int) -> str:
 
 
 def _image_du_reel(video: Path, seconde: float, duree: float) -> Optional[bytes]:
-    """Une image JPEG du reel, part haute seulement (PART_TENUE), à la
-    seconde demandée (0 = le milieu). None si ffmpeg ne peut pas."""
+    """Une image JPEG du reel, entière, à la seconde demandée (0 = le
+    milieu). None si ffmpeg ne peut pas."""
     s = 0.0
     if duree > 0:
         s = seconde if 0 < seconde < duree else duree / 2
@@ -1164,7 +1169,7 @@ def _image_du_reel(video: Path, seconde: float, duree: float) -> Optional[bytes]
         dst = Path(d) / "tenue.jpg"
         try:
             r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{s:.2f}", "-i", str(video), "-frames:v", "1",
-                                "-vf", f"crop=iw:floor(ih*{PART_TENUE}/2)*2:0:0", "-q:v", "2", str(dst)],
+                                "-q:v", "2", str(dst)],
                                capture_output=True, timeout=120)
         except (OSError, subprocess.SubprocessError):
             return None
