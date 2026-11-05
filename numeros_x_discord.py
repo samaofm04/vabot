@@ -1880,6 +1880,85 @@ def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[s
     return _menu_partout(p, gid, uid, conf)
 
 
+# ─── Un numéro pris hors de la carte d'un VA qui en a une (06/11/2026) ────
+# 🧰 OUTILS TWITTER > 📱・numéro porte le formulaire « Numéro X » : un clic y
+# achète en privé, hors de la carte du ticket. _retenir y remplaçait la carte
+# par le message privé dans « messages » : la carte du ticket ne recevait
+# plus ni le numéro ni le code, vider_cartes_echues ne la voyait plus (elle
+# restait figée, le numéro jamais terminé), et « Redemander » cliqué dessus
+# effaçait le code reçu. La carte reste désormais LE message du VA ; le
+# message privé s'y ajoute (« prive ») et reçoit les mêmes mises à jour tant
+# que son jeton vit. Un clic sur la carte (_retenir_carte) l'oublie.
+_retenir_sans_carte = _retenir
+
+
+def _retenir(cle: str, jeton: str, app: str) -> Optional[Dict[str, Any]]:   # noqa: F811
+    """_retenir (plus haut), sauf quand la personne a une carte : la carte
+    reste son message, le privé s'y ajoute. Rend le privé d'avant (à effacer)."""
+    with _VERROU:
+        d = _lire()
+        m = d["messages"].get(cle)
+        if not (isinstance(m, dict) and m.get("carte")):
+            return _retenir_sans_carte(cle, jeton, app)
+        avant = m.get("prive") if isinstance(m.get("prive"), dict) else None
+        d["messages"][cle] = dict(m, prive={"jeton": jeton, "app": app, "le": time.time()})
+        _ecrire(d)
+    return avant
+
+
+_redessiner_sans_prive = _redessiner
+
+
+def _redessiner(cle: str, conf: Dict[str, Any], comps: Optional[List[Dict[str, Any]]] = None) -> int:   # noqa: F811
+    """_redessiner (plus haut) — la carte —, puis le message privé ouvert du
+    salon 📱・numéro, s'il y en a un et que son jeton vit encore."""
+    code = _redessiner_sans_prive(cle, conf, comps)
+    m = _message(cle) or {}
+    pv = m.get("prive") if m.get("carte") else None
+    if isinstance(pv, dict) and pv.get("jeton") and time.time() - float(pv.get("le") or 0) <= JETON_SEC:
+        a = _actif(cle)
+        if comps is not None or a:
+            _editer(pv.get("app") or "", pv["jeton"], comps or vue_actif(a, conf))
+    return code
+
+
+_retenir_carte_sans_prive = _retenir_carte
+
+
+def _retenir_carte(cle: str, salon: str, mid: str) -> None:   # noqa: F811
+    """_retenir_carte (plus haut), en gardant le message privé encore ouvert
+    du salon 📱・numéro : décroché, il restait figé avec des boutons vivants
+    (« Redemander » y effaçait un code déjà reçu)."""
+    with _VERROU:
+        m = _lire()["messages"].get(cle)
+        pv = m.get("prive") if isinstance(m, dict) else None
+        _retenir_carte_sans_prive(cle, salon, mid)
+        if isinstance(pv, dict) and time.time() - float(pv.get("le") or 0) <= JETON_SEC:
+            d = _lire()
+            n = d["messages"].get(cle)
+            if isinstance(n, dict) and n.get("carte"):
+                d["messages"][cle] = dict(n, prive=pv)
+                _ecrire(d)
+
+
+_agir_sans_carte_suivie = _agir
+
+
+def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):   # noqa: F811
+    """_agir (plus haut) ; « ✅ C'est bon » cliqué dans le message privé du
+    salon 📱・numéro ferme aussi la carte du ticket : elle restait sur le
+    numéro et son code, ses boutons vivants, jusqu'au numéro suivant."""
+    rep = _agir_sans_carte_suivie(p, gid, uid, cle, membre, user, conf, action, act_id)
+    if action == "fini" and not p.get("_carte"):
+        m, a = _message(cle) or {}, _actif(cle)
+        if m.get("carte") and a and str(a.get("id")) == str(act_id) and a.get("clos") == "fini":
+            try:
+                _fond(lambda: _redessiner_sans_prive(cle, conf, vue_close("✅ C'est bon.", conf)))
+            except Exception as e:
+                _log(f"carte de {cle} non fermée après « C'est bon » ({type(e).__name__}: {e})")
+    return rep
+
+
 if __name__ == "__main__":
     import sys
     noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID, "agency": vd.AGENCY_IG_ID}

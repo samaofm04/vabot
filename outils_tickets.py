@@ -1185,16 +1185,21 @@ def _dire_une_fois(cle: Any, texte: str) -> None:
         _log(texte)
 
 
+def _categorie_outils(gid: str) -> str:
+    """Le nom (sans décor) de la catégorie des outils de ce serveur."""
+    return CATEGORIES_OUTILS.get(str(gid), CATEGORIE_OUTILS)
+
+
 def _lire_categorie(gid: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    """(🧰 OUTILS INSTAGRAM, ses salons texte dans leur ordre, tous les salons
+    """(🧰 OUTILS <serveur>, ses salons texte dans leur ordre, tous les salons
     du serveur, raison d'un échec)."""
     code, salons = _api("GET", f"/guilds/{gid}/channels", gid=gid)
     if code != 200 or not isinstance(salons, list):
         return None, [], [], f"salons illisibles (HTTP {code})"
     cat = next((c for c in salons if c.get("type") == 4
-                and _cle_salon(c.get("name")).endswith(CATEGORIE_OUTILS)), None)
+                and _cle_salon(c.get("name")).endswith(_categorie_outils(gid))), None)
     if cat is None:
-        return None, [], salons, "catégorie 🧰 OUTILS INSTAGRAM introuvable"
+        return None, [], salons, f"catégorie 🧰 {_categorie_outils(gid).upper()} introuvable"
     dedans = sorted([c for c in salons if c.get("parent_id") == cat["id"] and c.get("type") == 0],
                     key=lambda c: (int(c.get("position") or 0), str(c["id"]).zfill(20)))
     return cat, dedans, salons, ""
@@ -1206,15 +1211,21 @@ def _salons_par_cle(gid: str, dedans: List[Dict[str, Any]], tous: List[Dict[str,
     son nom dans la catégorie ensuite."""
     fiches = _etat_salons().get(str(gid)) or {}
     par_id = {str(c.get("id")): c for c in tous}
+    # {clé : le nom sans décor qui la reconnaît} — sur Twitter, « adresse »
+    # est le salon 📧・adresse-outlook (« adresse outlook »)
+    noms = {cle: _cle_salon(nom) for cle, nom, _m, _c in _panneaux(gid)}
+    if str(gid) == AGENCY_IG_ID:
+        noms.setdefault(CLE_NUMERO, CLE_NUMERO)
     out: Dict[str, Dict[str, Any]] = {}
-    for cle in [c for c, _n, _b in PANNEAUX] + [CLE_NUMERO]:
+    for cle in noms:
         c = par_id.get(str((fiches.get(cle) or {}).get("salon") or ""))
         if c is not None and c.get("type") == 0:
             out[cle] = c
     pris = {str(c["id"]) for c in out.values()}
+    par_nom = {v: k for k, v in noms.items()}
     for c in dedans:
-        k = _cle_salon(c.get("name"))
-        if k in ([x for x, _n, _b in PANNEAUX] + [CLE_NUMERO]) and k not in out and str(c["id"]) not in pris:
+        k = par_nom.get(_cle_salon(c.get("name")))
+        if k and k not in out and str(c["id"]) not in pris:
             out[k] = c
             pris.add(str(c["id"]))
     return out
@@ -1236,19 +1247,21 @@ def assurer_panneaux(gid: str, sauf: Tuple[str, ...] = ()) -> Dict[str, Any]:
         _dire_une_fois((gid, "pas installe"), f"salons communs {gid} : pas installés "
                        "(outils_tickets.installer_salons), aucun panneau posé")
         return bilan
+    panneaux = _panneaux(gid)
     try:
-        if any(not str((fiches.get(cle) or {}).get("salon") or "") for cle, _n, _b in PANNEAUX):
+        if any(not str((fiches.get(cle) or {}).get("salon") or "") for cle, _n, _m, _c in panneaux):
             _cat, dedans, tous, raison = _lire_categorie(gid)
             if raison:
                 bilan["rates"].append(raison)
+            a_noter = {c for c, _n, _m, _f in panneaux}       # 📱 de Rem (Instagram) : pas d'ici
             for cle, c in _salons_par_cle(gid, dedans, tous).items():
-                if cle != CLE_NUMERO and not str((fiches.get(cle) or {}).get("salon") or ""):
+                if cle in a_noter and not str((fiches.get(cle) or {}).get("salon") or ""):
                     _noter_salon(gid, cle, salon=c["id"])
                     _log(f"salons communs {gid} : {cle} retrouvé par son nom ({c.get('name')})")
             fiches = _etat_salons().get(gid) or {}
     except Exception as e:                                   # noqa: BLE001
         bilan["rates"].append(f"salons ({type(e).__name__}: {e})")
-    for cle, _nom, (_l, _e, cid) in PANNEAUX:
+    for cle, _nom, cid, corps in panneaux:
         f = fiches.get(cle) or {}
         salon, mid = str(f.get("salon") or ""), str(f.get("panneau") or "")
         if not salon:
@@ -1285,7 +1298,7 @@ def assurer_panneaux(gid: str, sauf: Tuple[str, ...] = ()) -> Dict[str, Any]:
                 # le convertit ; en poser un second ferait deux menus
                 bilan["rates"].append("menu (l'ancien panneau numx:menu est encore là)")
                 continue
-            code, m = _api("POST", f"/channels/{salon}/messages", json=corps_panneau(cle), gid=gid)
+            code, m = _api("POST", f"/channels/{salon}/messages", json=corps(), gid=gid)
             if code in (200, 201) and isinstance(m, dict) and m.get("id"):
                 _noter_salon(gid, cle, panneau=m["id"])
                 bilan["poses"].append(cle)
@@ -1416,6 +1429,190 @@ def installer_salons(gid: str, essai: bool = True) -> Dict[str, Any]:
     if not (_etat_salons().get(gid) or {}).get("installe"):
         out["rates"].append(f"fiche {SALONS_FICHIER} non écrite : le démarrage ne reposera rien")
     b = assurer_panneaux(gid, sauf=sauf)
+    out["faits"] += [f"panneau {c} posé" for c in b["poses"]]
+    out["rates"] += b["rates"]
+    return out
+
+
+# ─── 🧰 OUTILS TWITTER (06/11/2026) ───────────────────────────────────────
+# Propriétaire, sur TRUST TWITTER : « tu peux faire un truc outils Twitter et
+# tu mets le numéro, adresse, numéro, spoofer vraiment séparé », puis ses
+# réponses : 📱 numéro, 📧 adresse, 📤 spoofer (pas de download) ; les tickets
+# GARDENT leurs cartes numéro / Outlook et leurs boutons jusqu'à son « c'est
+# bon ». Une catégorie 🧰 OUTILS TWITTER, juste après 📚 RESSOURCES, un outil
+# par salon, chacun avec les droits de 📧・adresse-outlook (✅ Vérifié lit,
+# personne n'écrit) :
+#  - 📱・numéro : le formulaire « Numéro X » de numeros_x_discord (HeroSMS),
+#    validé le 18/10 ; un clic hors carte achète en privé, 3 codes par jour,
+#    le même compte du jour que la carte du ticket (numeros_du_jour) ;
+#  - 📧・adresse-outlook : le salon d'avant, vide depuis le 23/10 (« retire
+#    outlook »), DÉPLACÉ dans la catégorie avec ses droits, et le formulaire
+#    « Adresses Outlook » d'outlook_x_discord ; l'adresse s'ouvre en privé et
+#    part aussi dans le ticket (deposer_au_salon), 3 par jour ;
+#  - 📤・spoofer : le même bouton que TRUST INSTAGRAM, les versions livrées
+#    dans le ticket du cliqueur (_ticket_du_clic, salon commun), postées par
+#    le bot du serveur.
+# Chaque panneau appartient au module qui sert ses clics (numx:, mailx:,
+# outk:) ; il est posé et reposé ici (assurer_panneaux, au démarrage), une
+# seule liste par serveur (_panneaux). Installé une fois, à la main, SUR LE
+# VPS : installer_salons_twitter(essai=True) puis essai=False.
+TWITTER_ID = "1445108485090971710"
+SERVEURS.add(TWITTER_ID)
+SALONS_COMMUNS.add(TWITTER_ID)
+CATEGORIES_OUTILS: Dict[str, str] = {AGENCY_IG_ID: CATEGORIE_OUTILS, TWITTER_ID: "outils twitter"}
+NOM_CATEGORIE_TWITTER = "🧰 OUTILS TWITTER"
+#: 📚 RESSOURCES > 📧・adresse-outlook : déplacé, ses droits servent de modèle.
+ADRESSE_OUTLOOK_TWITTER = "1552392906340565114"
+#: La catégorie après laquelle 🧰 OUTILS TWITTER est rangée (nom sans décor).
+CATEGORIE_AVANT_TWITTER = "ressources"
+
+
+def _corps_numero_twitter() -> Dict[str, Any]:
+    import numeros_x_discord as nx
+    return {"flags": V2, "allowed_mentions": {"parse": []},
+            "components": nx.vue_panneau(nx.SERVEURS[TWITTER_ID])}
+
+
+def _corps_adresse_twitter() -> Dict[str, Any]:
+    import outlook_x_discord as ox
+    return {"flags": V2, "allowed_mentions": {"parse": []}, "components": ox.vue_panneau()}
+
+
+#: (clé, nom à la création, custom_id qui reconnaît le panneau, son corps),
+#: dans l'ordre des salons de la catégorie.
+PANNEAUX_TWITTER = (
+    ("numero", "📱・numéro", "numx:prendre", _corps_numero_twitter),
+    ("adresse", "📧・adresse-outlook", "mailx:prendre", _corps_adresse_twitter),
+    ("spoofer", "📤・spoofer", f"{PREFIXE}spf:commun", lambda: corps_panneau("spoofer")),
+)
+
+
+def _panneaux(gid: str) -> List[Tuple[str, str, str, Any]]:
+    """Les panneaux des salons communs de ce serveur : (clé, nom, custom_id
+    qui reconnaît le panneau, fonction qui rend son corps). TRUST INSTAGRAM :
+    PANNEAUX (📱・numéro y est à Rem, pas d'ici)."""
+    if str(gid) == TWITTER_ID:
+        return list(PANNEAUX_TWITTER)
+    return [(cle, nom, b[2], (lambda c=cle: corps_panneau(c))) for cle, nom, b in PANNEAUX]
+
+
+_ramener_menu_partout = _ramener_menu
+
+
+def _ramener_menu(gid: str, uid: str, salon: str) -> None:   # noqa: F811
+    """Sur TRUST TWITTER, le menu ne redescend pas après un spoof : sur TRUST
+    INSTAGRAM, une fois les outils en salons communs, le propriétaire l'a
+    demandé (« ne renvoie plus le menu à chaque fois dans leur salon »,
+    05/11, tickets_discord.MENU_FIXE). Le tour de l'heure, lui, ne change pas."""
+    if str(gid) == TWITTER_ID:
+        return
+    _ramener_menu_partout(gid, uid, salon)
+
+
+def installer_salons_twitter(essai: bool = True) -> Dict[str, Any]:
+    """Une fois, à la main, SUR LE VPS : 🧰 OUTILS TWITTER (créée si elle
+    manque, rangée juste après 📚 RESSOURCES), puis 📱・numéro (créé),
+    📧・adresse-outlook (déplacé, ses droits gardés) et 📤・spoofer (créé),
+    dans cet ordre, chacun avec les droits de 📧・adresse-outlook. Puis les
+    panneaux. Ce qui manque (salon modèle, droits fermés à @everyone) arrête
+    AVANT la première écriture. Relançable : les salons sont repris par leur
+    id (fiche data/outils_salons.json) ou leur nom. `essai` : rien n'est
+    écrit, le plan est rendu. Rend {plan, faits, rates}."""
+    gid = TWITTER_ID
+    out: Dict[str, Any] = {"plan": [], "faits": [], "rates": []}
+    code, tous = _api("GET", f"/guilds/{gid}/channels", gid=gid)
+    if code != 200 or not isinstance(tous, list):
+        out["rates"].append(f"salons illisibles (HTTP {code})")
+        return out
+    par_id = {str(c.get("id")): c for c in tous}
+    note_id = str(((_etat_salons().get(gid) or {}).get("adresse") or {}).get("salon") or "")
+    adresse = par_id.get(note_id) or par_id.get(ADRESSE_OUTLOOK_TWITTER)
+    if adresse is None or adresse.get("type") != 0:
+        out["rates"].append("📧・adresse-outlook introuvable : ses droits servent de modèle")
+        return out
+    droits = [{"id": str(o["id"]), "type": int(o.get("type", 0)), "allow": str(o.get("allow") or "0"),
+               "deny": str(o.get("deny") or "0")}
+              for o in adresse.get("permission_overwrites") or [] if o.get("id")]
+    if not any(o["id"] == gid and int(o["deny"]) & 1024 for o in droits):
+        out["rates"].append("📧・adresse-outlook n'est pas fermé à @everyone : ses droits ne "
+                            "peuvent pas servir de modèle, rien n'est fait")
+        return out
+
+    def faire(quoi: str, methode: str, chemin: str, **kw):
+        out["plan"].append(quoi)
+        if essai:
+            return 200, {}
+        c, r = _api(methode, chemin, gid=gid, **kw)
+        (out["faits"] if c in (200, 201, 204) else out["rates"]).append(
+            quoi if c in (200, 201, 204) else f"{quoi} (HTTP {c}) {str(r)[:160]}")
+        return c, r
+
+    def pos(c):
+        return (int(c.get("position") or 0), str(c.get("id")).zfill(20))
+
+    cats = sorted([c for c in tous if c.get("type") == 4], key=pos)
+    cat = next((c for c in cats if _cle_salon(c.get("name")).endswith(CATEGORIES_OUTILS[gid])), None)
+    if cat is None:
+        code, cat = faire(f"créer la catégorie {NOM_CATEGORIE_TWITTER} (droits de 📧・adresse-outlook)",
+                          "POST", f"/guilds/{gid}/channels",
+                          json={"name": NOM_CATEGORIE_TWITTER, "type": 4, "permission_overwrites": droits})
+        if essai:
+            cat = {"id": "<categorie>", "name": NOM_CATEGORIE_TWITTER}
+        elif code not in (200, 201) or not isinstance(cat, dict) or not cat.get("id"):
+            return out
+    # rangée juste après 📚 RESSOURCES — vérifié à CHAQUE passage : un
+    # rangement raté (Discord muet) se refait à la relance
+    avant = next((c for c in cats if _cle_salon(c.get("name")).endswith(CATEGORIE_AVANT_TWITTER)), None)
+    if avant is None:
+        out["plan"].append("📚 RESSOURCES introuvable : la catégorie reste où elle est")
+    else:
+        actuel = [str(c["id"]) for c in cats]
+        ordre: List[str] = []
+        for c in cats:
+            if str(c["id"]) == str(cat["id"]):
+                continue
+            ordre.append(str(c["id"]))
+            if c is avant:
+                ordre.append(str(cat["id"]))
+        if ordre != actuel:
+            faire(f"ranger {NOM_CATEGORIE_TWITTER} juste après {avant.get('name')}", "PATCH",
+                  f"/guilds/{gid}/channels",
+                  json=[{"id": i, "position": k} for k, i in enumerate(ordre) if not i.startswith("<")])
+    dedans = sorted([c for c in tous if str(c.get("parent_id") or "") == str(cat["id"])
+                     and c.get("type") == 0], key=pos)
+    par_cle = _salons_par_cle(gid, dedans, tous)
+    par_cle.setdefault("adresse", adresse)
+    ordre_salons: List[Dict[str, Any]] = []
+    for cle, nom, _m, _c in PANNEAUX_TWITTER:
+        c = par_cle.get(cle)
+        if c is None:
+            code, c = faire(f"créer {nom}", "POST", f"/guilds/{gid}/channels",
+                            json={"name": nom, "type": 0, "parent_id": cat["id"],
+                                  "permission_overwrites": droits})
+            if essai:
+                c = {"id": f"<{cle}>", "name": nom}
+            elif code not in (200, 201) or not isinstance(c, dict) or not c.get("id"):
+                continue
+        elif str(c.get("parent_id") or "") != str(cat["id"]):
+            code, _r = faire(f"déplacer {c.get('name')} dans {NOM_CATEGORIE_TWITTER} (ses droits gardés)",
+                             "PATCH", f"/channels/{c['id']}", json={"parent_id": cat["id"]})
+            if not essai and code not in (200, 201):
+                continue
+        if not essai:
+            _noter_salon(gid, cle, salon=c["id"])
+        ordre_salons.append(c)
+    ids = [str(c["id"]) for c in ordre_salons]
+    reste = [str(c["id"]) for c in dedans if str(c["id"]) not in ids]
+    voulu = [{"id": i, "position": k} for k, i in enumerate(ids + reste) if not i.startswith("<")]
+    if essai or [str(c["id"]) for c in dedans] != ids + reste:
+        faire("ranger numéro · adresse · spoofer", "PATCH", f"/guilds/{gid}/channels", json=voulu)
+    if essai:
+        out["plan"].append("poser les 3 panneaux (Numéro X, Adresses Outlook, Spoofer)")
+        return out
+    _noter_salon(gid, "installe", quand=int(time.time()))
+    if not (_etat_salons().get(gid) or {}).get("installe"):
+        out["rates"].append(f"fiche {SALONS_FICHIER} non écrite : le démarrage ne reposera rien")
+    b = assurer_panneaux(gid)
     out["faits"] += [f"panneau {c} posé" for c in b["poses"]]
     out["rates"] += b["rates"]
     return out

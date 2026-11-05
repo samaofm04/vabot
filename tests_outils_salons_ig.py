@@ -228,7 +228,8 @@ check("dans un ticket : comme avant (le manager sert le VA du ticket, pas « com
       t and t["salon"] == TICKET and t["uid"] == VA and t["qui"] == CHEF and "commun" not in t, t)
 t, r = ot._ticket_du_clic(clic(f"outk:spf:{VA}", uid=VA2, salon=TICKET))
 check("un autre VA dans un ticket : toujours refusé", t is None and r == ot.TEXTE_PAS_A_TOI, r)
-t, r = ot._ticket_du_clic(clic("outk:spf:commun", gid=TW, salon="1"))
+# (TRUST TWITTER a ses salons communs depuis le 06/11 : tests_outils_twitter)
+t, r = ot._ticket_du_clic(clic("outk:spf:commun", gid=TH, salon="1"))
 check("un autre serveur : refusé", t is None, r)
 rep = ot.traiter(clic("outk:spf:commun", uid=CHEF, chef=True))
 check("le refus part en privé", rep["type"] == 4 and rep["data"]["flags"] == 64
@@ -400,8 +401,10 @@ ot._dormir = lambda s: APPELS.append(("dormir", s))
 ot.prevenir_interrompus = lambda: (_ for _ in ()).throw(RuntimeError("état illisible"))
 ot.assurer_panneaux = lambda g: APPELS.append(("panneaux", g))
 ot._au_demarrage()
+# (TRUST TWITTER aussi depuis le 06/11 : chaque serveur à salons communs)
 check("au démarrage : une reprise qui lève n'empêche pas les panneaux",
-      APPELS == [("dormir", ot.REPRISE_DELAI_S), ("panneaux", AG)], APPELS)
+      APPELS == [("dormir", ot.REPRISE_DELAI_S)] + [("panneaux", g) for g in sorted(ot.SALONS_COMMUNS)]
+      and ("panneaux", AG) in APPELS, APPELS)
 ot.assurer_panneaux = ASSURER
 
 # ── 6. l'installation ─────────────────────────────────────────────────────

@@ -595,7 +595,32 @@ def _prendre(p, gid, uid, membre, user, conf):
         _fond(lambda: deposer_au_salon(gid, uid, c))
     except Exception as e:
         _log(f"dépôt au salon perso non lancé pour {uid} ({type(e).__name__}: {e})")
+    if not p.get("_carte"):
+        # pris dans 📧・adresse-outlook (🧰 OUTILS TWITTER, 06/11/2026) : la
+        # carte du ticket montrait encore ses cases vides, et un clic dessus
+        # donnait une 2e adresse
+        try:
+            _fond(lambda: maj_carte_du_va(gid, uid))
+        except Exception as e:
+            _log(f"carte Outlook de {uid} non remise à jour ({type(e).__name__}: {e})")
     return rep
+
+
+def maj_carte_du_va(gid: str, uid: str) -> int:
+    """La carte Outlook du ticket de ce VA, redessinée sur place (ses
+    adresses, sans les codes). Rend le code HTTP, 0 sans carte."""
+    # la carte de son ticket ACTUEL : le registre garde celles des salons
+    # supprimés puis refaits, et la première trouvée était parfois l'ancienne
+    salon = next((s for s, u in _tickets(gid).items() if str(u) == str(uid)), "")
+    c = (_lire().get("cartes") or {}).get(salon) if salon else None
+    if not (isinstance(c, dict) and c.get("message") and str(c.get("uid")) == str(uid)):
+        return 0
+    with vd.sur_serveur(gid):
+        code, corps = vd.api("PATCH", f"/channels/{salon}/messages/{c['message']}",
+                             json={"components": vue_carte(uid, gid), "allowed_mentions": {"parse": []}})
+    if code != 200:
+        _log(f"carte Outlook de {uid} non redessinée dans {salon} : HTTP {code} {str(corps)[:120]}")
+    return code
 
 
 def deposer_au_salon(gid: str, uid: str, c: Dict[str, Any]) -> bool:
