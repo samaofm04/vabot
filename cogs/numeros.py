@@ -5609,6 +5609,36 @@ def _sans_rest(agg):
     return {g: v for g, v in agg.items() if g not in rest}
 
 
+async def _quota_jour(itx, channel, qui) -> int:
+    """La limite du jour de `qui` : QUOTA_JOUR_FR, ou son palier de numeros
+    (paliers_numeros, TRUST INSTAGRAM, 05/11/2026). Ses roles sont relus a
+    chaque achat : ceux du clic quand c'est lui qui clique, sinon lus chez
+    Discord. Illisibles : la limite de base (une panne ne debride personne)."""
+    g = getattr(channel, "guild", None)
+    gid = getattr(g, "id", None)
+    try:
+        import paliers_numeros as pn
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("numgen: paliers de numeros illisibles (%s: %s) : limite de base",
+                    type(e).__name__, e)
+        return QUOTA_JOUR_FR
+    if not pn.a_des_paliers(gid):
+        return QUOTA_JOUR_FR
+    user = getattr(itx, "user", None)
+    membre = user if str(getattr(user, "id", "")) == str(qui) else None
+    roles = getattr(membre, "roles", None)
+    if roles is None:
+        try:
+            membre = g.get_member(int(qui)) or await g.fetch_member(int(qui))
+            roles = getattr(membre, "roles", None)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: roles de %s illisibles sur %s (%s: %s) : limite de base",
+                        qui, getattr(g, "name", "?"), type(e).__name__, e)
+            roles = None
+    ids = None if roles is None else [getattr(r, "id", r) for r in roles]
+    return pn.quota(gid, ids, QUOTA_JOUR_FR)
+
+
 async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:
     """3 numeros par jour et par VA sur le serveur FR et sur un serveur
     « numero seul » (la carte y porte le serveur) ; le staff n'est pas bride
@@ -5633,11 +5663,12 @@ async def _quota_fr_ok(itx, channel, kind, par=None) -> bool:
         await _ephemere(itx, "❌ L'historique des numéros ne se lit plus : rien n'a "
                              "été acheté. Préviens un admin.")
         return False
-    if n >= QUOTA_JOUR_FR:
+    q = await _quota_jour(itx, channel, qui)
+    if n >= q:
         log.info("numgen: quota du jour atteint pour %s sur %s (%d/%d)", qui,
-                 getattr(channel.guild, "name", "?"), n, QUOTA_JOUR_FR)
+                 getattr(channel.guild, "name", "?"), n, q)
         await _ephemere(itx, "📵 %d numéros aujourd'hui : c'est le maximum. "
-                             "Reviens demain." % QUOTA_JOUR_FR)
+                             "Reviens demain." % q)
         return False
     return True
 

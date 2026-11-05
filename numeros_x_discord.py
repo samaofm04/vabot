@@ -482,21 +482,55 @@ def _staff(membre: Dict[str, Any], gid: str) -> bool:
         return False
 
 
-def _quota_refus(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any]) -> str:
+def _quota(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any]) -> int:
+    """La limite du jour de `uid` : celle du serveur, ou son palier
+    (paliers_numeros, TRUST INSTAGRAM). Ses rôles : ceux du clic quand c'est
+    lui qui clique, sinon (son manager sur sa carte) lus chez Discord."""
+    base = int(conf["quota"])
+    try:
+        import paliers_numeros as pn
+        if not pn.a_des_paliers(gid):
+            return base
+        if str((membre.get("user") or {}).get("id") or "") == str(uid):
+            roles = membre.get("roles")
+        else:
+            roles = pn.roles_rest(gid, uid)
+        return pn.quota(gid, roles, base)
+    except Exception as e:
+        _log(f"palier de {uid} illisible ({type(e).__name__}: {e}) : limite de base")
+        return base
+
+
+def _quota_vu(a: Optional[Dict[str, Any]], conf: Dict[str, Any]) -> int:
+    """La limite à citer pour ce numéro (« il ne compte pas dans tes N du
+    jour ») : celle de son titulaire, relue MAINTENANT. Figée à l'achat, elle
+    disait 3 au VA de Niveau 2 dont le manager avait pris le numéro (staff :
+    rien n'était lu), et encore 10 après le retrait du rôle. Appelée hors du
+    fil du clic seulement (écoute, cartes échues, Annuler en fond) : ses
+    rôles peuvent s'y lire chez Discord sans retarder la réponse."""
+    uid, gid = str((a or {}).get("par") or ""), str(conf.get("gid") or "")
+    if not uid.isdigit():
+        return int(conf["quota"])
+    return _quota(uid, gid, {}, conf)
+
+
+def _quota_refus(uid: str, gid: str, membre: Dict[str, Any], conf: Dict[str, Any],
+                 quota: Optional[int] = None) -> str:
     """« » si l'achat est permis, sinon le refus à montrer. Historique
     illisible : rien n'est acheté — sans lui, rien ne bornerait la dépense."""
     if _staff(membre, gid):
         return ""
+    q = _quota(uid, gid, membre, conf) if quota is None else int(quota)
     try:
         n = numeros_du_jour(uid, gid)
     except Exception as e:
         _log(f"quota illisible pour {uid} ({type(e).__name__}: {e}) : rien n'est acheté")
         return "❌ L'historique des numéros ne se lit plus : rien n'a été acheté. Préviens un admin."
-    if n >= conf["quota"]:
-        _log(f"quota atteint pour {uid} ({n}/{conf['quota']})")
+    if n >= q:
+        _log(f"quota atteint pour {uid} ({n}/{q})")
         # Seuls les numéros qui ont reçu leur code comptent : les autres sont
         # rendus, donc remboursés (cogs.numeros.numeros_du_jour).
-        return "📵 %d codes reçus aujourd'hui : c'est le maximum. Reviens demain." % conf["quota"]
+        return "📵 %d codes reçus aujourd'hui : c'est le maximum. Reviens demain." % q
     return ""
 
 
@@ -581,6 +615,10 @@ def _prendre(p, gid, uid, cle, membre, user, conf):
         _log(f"clic « Prendre un numéro » : clé {nom} absente")
         return _repondre(p, cle, vue_close(
             "❌ Numéros indisponibles : la clé %s n'est pas posée. Préviens un admin." % nom, conf))
+    # Le palier AVANT le verrou : pour la carte d'un autre, ses rôles se lisent
+    # chez Discord, et tous les clics attendraient cet appel. Le staff n'est
+    # pas bridé : rien à lire pour lui.
+    q = None if _staff(membre, gid) else _quota(uid, gid, membre, conf)
     with _VERROU:
         if cle in _ACHATS:
             # Le message « Recherche d'un numéro… » va recevoir le numéro : en
@@ -593,7 +631,7 @@ def _prendre(p, gid, uid, cle, membre, user, conf):
             rep = _repondre(p, cle, vue_actif(a, conf))
             _assurer_ecoute(cle, a, conf)
             return rep
-        refus = _quota_refus(uid, gid, membre, conf)
+        refus = _quota_refus(uid, gid, membre, conf, q)
         if refus:
             return _repondre(p, cle, vue_close(refus, conf))
         _ACHATS.add(cle)
@@ -706,9 +744,11 @@ def _rendre(cle, gid, uid, membre, user, conf, act_id, action):
     if action == "annuler":
         _redessiner(cle, conf, vue_close(
             "❌ Numéro annulé." if a.get("code")
-            else "❌ Numéro annulé : il ne compte pas dans tes %d du jour." % conf["quota"], conf))
+            else "❌ Numéro annulé : il ne compte pas dans tes %d du jour."
+            % _quota(uid, gid, membre, conf), conf))
         return
-    refus = _quota_refus(uid, gid, membre, conf)
+    q = None if _staff(membre, gid) else _quota(uid, gid, membre, conf)
+    refus = _quota_refus(uid, gid, membre, conf, q)
     if refus:
         _redessiner(cle, conf, vue_close(refus, conf))
         return
@@ -748,7 +788,7 @@ def _ecouter(cle: str, act_id: str, conf: Dict[str, Any]) -> None:
                 _log(f"{a.get('valeur')} : aucun code en {DUREE_NUMERO_SEC // 60} min")
                 _redessiner(cle, conf, vue_close(
                     "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes %d du jour."
-                    % conf["quota"], conf))
+                    % _quota_vu(a, conf), conf))
                 return
             etat, val = numgen.get_code(act_id, _prov(a))
             if etat == "code" and val:
@@ -1517,7 +1557,7 @@ def vider_cartes_echues(maintenant: Optional[float] = None) -> List[str]:
                 numgen.cancel(act_id, _prov(a))
                 _redessiner(cle, conf, vue_close(
                     "⌛ Aucun code en 20 min : numéro rendu, il ne compte pas dans tes %d du jour."
-                    % conf["quota"], conf))
+                    % _quota_vu(a, conf), conf))
         vides.append(cle)
         _log(f"carte de {cle} vidée : numéro {a.get('valeur')} au bout de 20 min")
     return vides
