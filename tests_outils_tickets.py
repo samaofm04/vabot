@@ -896,7 +896,9 @@ try:
           r["type"] == 4 and r["data"]["content"] == ot.TEXTE_INDISPONIBLE, r)
 
     # ── 10. ramener_menu(en_dernier=True), le vrai ───────────────────────
-    tk.ramener_menu = _SAUVE_TK["ramener_menu"]
+    # la descente elle-même (Twitter, Threads) ; TRUST INSTAGRAM ne la fait
+    # plus depuis le 05/11/2026 (MENU_FIXE, vérifié au bout de la section)
+    tk.ramener_menu = tk._ramener_menu_qui_descend
 
     class FauxTicket:
         def __init__(self):
@@ -987,6 +989,27 @@ try:
               "fiche (pas d'orpheline épinglée)",
               sorted(rs) == ["deja", "ramene"] and copies == [neuf] and ft.fil[-1] == neuf,
               (rs, copies, neuf, ft.fil[-4:]))
+        # 05/11/2026 : « ne renvoie plus le menu à chaque fois dans leur salon »
+        tk.ramener_menu = _SAUVE_TK["ramener_menu"]
+        for i in range(3):
+            ft.poser({"id": f"h{i}", "type": 0, "author": {"id": "w", "bot": True}, "content": ""})
+        avant_fil, n_avant = list(ft.fil), ft.n
+        r_ = tk.ramener_menu(AG, VA, S, en_dernier=True)
+        check("TRUST INSTAGRAM (MENU_FIXE) : après une livraison, le menu n'est PLUS reposé en bas",
+              r_ == "deja" and ft.fil == avant_fil and ft.n == n_avant and neuf in ft.msgs, (r_, ft.fil[-4:]))
+        r_ = tk.ramener_menu(AG, VA, S)
+        check("… ni au tour de l'heure", r_ == "deja" and ft.fil == avant_fil and ft.n == n_avant, r_)
+        e_ = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))
+        e_["tickets"][f"{AG}:{VA}"].pop("menu", None)
+        e_["tickets"][f"{AG}:{VA}"].pop("menu_v2", None)
+        tk.ETAT_FICHIER.write_text(json.dumps(e_), encoding="utf-8")
+        r_ = tk.ramener_menu(AG, VA, S)
+        check("… un ticket SANS menu en blocs en reçoit un, une fois",
+              r_ == "ramene" and len(ft.fil) == len(avant_fil) + 1
+              and ft.fil[-1] == json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))["tickets"][f"{AG}:{VA}"]["menu"],
+              (r_, ft.fil[-3:]))
+        n2 = ft.n
+        check("… puis il ne bouge plus", tk.ramener_menu(AG, VA, S, en_dernier=True) == "deja" and ft.n == n2)
     finally:
         lv.lien_de = _lien_sauve
         tk._api_reseau = _SAUVE_TK["_api_reseau"]

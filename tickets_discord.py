@@ -4927,3 +4927,31 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # no
         if bs:
             out.append(dict(r, components=bs))
     return out
+
+
+# ─── TRUST INSTAGRAM : le menu reste où il est (05/11/2026) ──────────────
+# Propriétaire, une fois les outils dans 🧰 OUTILS INSTAGRAM : « ne renvoie
+# plus le menu à chaque fois dans leur salon du coup ». Le menu en blocs du
+# ticket (épinglé) n'est plus reposé en bas : ni après une livraison (📤 ⬇️
+# 🎬, outils_tickets._ramener_menu), ni au tour de l'heure (ramener_menus,
+# dont le ménage des copies orphelines et des avis d'épingle continue). Il
+# est remis à jour SUR PLACE (_maj_menu_v2 : aucun message neuf). Un ticket
+# sans menu en blocs (jamais posé, retiré à la main, ou encore une copie
+# texte d'avant) en reçoit un, une fois — ensuite il ne bouge plus.
+# POUR REVENIR : retirer le serveur de MENU_FIXE.
+MENU_FIXE = {AGENCY_IG_ID}
+_ramener_menu_qui_descend = ramener_menu
+
+
+def ramener_menu(gid: str, uid: str, salon: str, en_dernier: bool = False) -> str:  # noqa: F811
+    gid, uid, salon = str(gid), str(uid), str(salon)
+    if gid in MENU_FIXE:
+        f = _fiche(gid, uid)
+        if f.get("menu") and f.get("menu_v2") and str(f.get("salon") or "") == salon:
+            code = _maj_menu_v2(gid, uid, None, f)
+            if code != 404:            # 404 : retiré à la main, oublié — reposé une fois
+                return "deja"
+    return _ramener_menu_qui_descend(gid, uid, salon, en_dernier=en_dernier)
+
+
+ramener_menu.__doc__ = _ramener_menu_qui_descend.__doc__
