@@ -355,8 +355,10 @@ try:
     def ids(rangs):
         return [[b.get("custom_id") for b in r.get("components") or []] for r in rangs]
 
+    # _boutons_va_complets : avant TICKET_SANS (05/11/2026 : le ticket garde
+    # 💳 et 🎬, tests_ticket_allege)
     for confirme, lien in ((False, True), (True, False), (True, True)):
-        r = ids(tk.boutons_va(VA, confirme=confirme, a_un_lien=lien, gid=AG))
+        r = ids(tk._boutons_va_complets(VA, confirme=confirme, a_un_lien=lien, gid=AG))
         check(f"Agency (confirmé={confirme}, lien={lien}) : rangée du VA (5), puis « 🎬 Contenu » "
               "seul sur la 2e, puis les managers",
               r[0] == [f"usdc:set:{VA}", f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}",

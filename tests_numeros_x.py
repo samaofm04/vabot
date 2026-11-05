@@ -805,12 +805,18 @@ try:
     h["cartes"].pop("T2", None)
     nx.FICHIER.write_text(json.dumps(h), encoding="utf-8")
     APPELS.clear()
-    ba = nx.poser_cartes(AG)
+    # la pose d'avant le 05/11/2026 (_poser_cartes_partout) : depuis, plus de
+    # carte dans les tickets d'Agency (CARTES_RETIREES, tests_ticket_allege)
+    ba = nx._poser_cartes_partout(AG)
     ag = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/T2/messages"]
     check("Agency : comme Threads — carte Instagram dans le ticket, chez GetAText, 3 par jour",
           ba["posees"] == ["T2"] and ag and textes(ag[0]["components"]) == ["## `….`", "🇺🇸 ⏳ En attente"]
           and nx.SERVEURS[AG]["fournisseur"] == "getatext" and nx.SERVEURS[AG]["quota"] == 3
           and AG in num._serveurs_rest(), (ba, ag))
+    APPELS.clear()
+    bz = nx.poser_cartes(AG)
+    check("Agency depuis le 05/11 : le tour ne pose plus de carte, celle qui reste sort du registre",
+          not [1 for m, ch, kw in APPELS if m == "POST"] and "T2" not in nx._lire()["cartes"], (bz, APPELS))
     check("Twitter : la carte du ticket garde le formulaire « Numéro X »",
           b["posees"] == ["TW1"] and tw and textes(tw[0]["components"])[0] == "## Numéro X"
           and boutons(tw[0]["components"]) == ["numx:prendre"], (b, tw))

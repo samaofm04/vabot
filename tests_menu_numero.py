@@ -53,7 +53,10 @@ def ids(rangs):
 
 TW, TH, AG = "1445108485090971710", "1498948161039896586", tk.AGENCY_IG_ID
 for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), (AG, "Agency", [])):
-    r = ids(tk.boutons_va("7", confirme=False, a_un_lien=True, gid=gid))
+    # Agency : la rangée d'avant TICKET_SANS (05/11/2026, le ticket n'a plus
+    # 📱 : tests_ticket_allege) — celle que garde le menu privé du staff
+    bv = tk._boutons_va_complets if gid == AG else tk.boutons_va
+    r = ids(bv("7", confirme=False, a_un_lien=True, gid=gid))
     va, chefs = r[0], r[-1]
     # Agency : « 🎬 Contenu » sur SA rangée, entre celle du VA et celle des
     # managers (contenu_tickets, 30/10/2026)
@@ -65,7 +68,7 @@ for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), 
           and va[0] == "usdc:set:7" and va[-1 - len(outlook)] == "numx:menu"
           and va[len(va) - len(outlook):] == outlook and chefs == ["essai:deb:7", "lien:off:7"]
           and all(len(x) <= 5 for x in r), r)
-    r2 = ids(tk.boutons_va("7", confirme=True, a_un_lien=False, gid=gid))
+    r2 = ids(bv("7", confirme=True, a_un_lien=False, gid=gid))
     plats = [c for x in r2 for c in x]
     check(f"{nom} : VA confirmé sans lien — « Créer son lien » seul chez les managers",
           r2[-1] == ["lien:new:7"] and plats.count("numx:menu") == 1

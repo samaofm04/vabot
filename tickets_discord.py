@@ -3412,7 +3412,9 @@ def menu_prive(gid: str, uid: str) -> Dict[str, Any]:
     """Sans salon perso (le staff, ou un VA pas encore servi) : la rangée du
     VA (USDC, Mes stats, Numéro, Outlook) pour lui seul, comme la carte
     numéro privée (01eed36). Rien n'est écrit dans un ticket."""
-    siens = [b for r in boutons_va(str(uid), confirme=True, a_un_lien=False, gid=str(gid))
+    # _boutons_va_complets (fin du fichier) : ce menu n'est pas le ticket,
+    # il garde 📈 📤 ⬇️ 📱 que TICKET_SANS retire des tickets
+    siens = [b for r in _boutons_va_complets(str(uid), confirme=True, a_un_lien=False, gid=str(gid))
              for b in (r.get("components") or [])
              if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
     rangs = [{"type": 1, "components": siens[i:i + 5]} for i in range(0, len(siens), 5)]
@@ -4843,9 +4845,11 @@ def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, An
     garder = _DANS_MENU_COMMUN if avec_contenu else tuple(x for x in _DANS_MENU_COMMUN
                                                            if x != CONTENU_PREFIXE)
     f = _fiche(gid, uid) or {}
-    rangs = boutons_va(uid, confirme=bool(f.get("confirme")),
-                       a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
-                       gid=gid, lien_actif=lv.est_actif(gid, uid))
+    # _boutons_va_complets (fin du fichier) : la rangée d'avant TICKET_SANS —
+    # 📈 Mes stats est retiré du ticket, pas de ce menu-ci
+    rangs = _boutons_va_complets(uid, confirme=bool(f.get("confirme")),
+                                 a_un_lien=bool(lv.lien_de(gid, uid).get("public_url")),
+                                 gid=gid, lien_actif=lv.est_actif(gid, uid))
     gardes = [b for r in rangs for b in (r.get("components") or [])
               if isinstance(b, dict) and str(b.get("custom_id") or "").startswith(garder)]
     rangs = [{"type": 1, "components": gardes[i:i + 5]} for i in range(0, len(gardes), 5)]
@@ -4884,3 +4888,40 @@ def _recevoir_adresse(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: 
             print(f"[usdc] menu de {uid} non remis à jour : {type(e).__name__}: {e}", flush=True)
     return rep
 
+
+# ─── Le ticket de TRUST INSTAGRAM allégé (05/11/2026) ────────────────────
+# Propriétaire, captures du menu d'un ticket et de sa carte numéro à
+# l'appui : « ça tu peux remove ici, le spoofer, le download, le truc mes
+# stats et tout, ils sont dans outils ; garde bien contenu et passer
+# débutant », puis « garder 💳 Paiement ». 📈 Mes stats, 📤 Spoofer,
+# ⬇️ Download et 📱 Numéro ont leur place dans 🧰 OUTILS INSTAGRAM (📋・menu
+# donne 📈 Mes stats, menu_ephemere lit _boutons_va_complets) ; le ticket
+# garde son lien, sa page de stats, son 💳, 🎬 Contenu et la rangée des
+# managers (🌱 Passer Débutant, le lien). La carte numéro du ticket part
+# aussi (numeros_x_discord.CARTES_RETIREES). Enveloppe en dernier : chaque
+# enveloppe d'avant ajoute ses boutons, celle-ci retire ceux du ticket, et
+# les rangées gardent leur ordre (une rangée vidée disparaît).
+# BOUTONS_VERSION 12 : les accueils déjà postés sont redessinés une fois
+# (_sync_liens_va du site, toutes les 30 min), leurs copies en blocs suivent
+# (_miroir). POUR LES REMETTRE : retirer le serveur de TICKET_SANS.
+TICKET_SANS: Dict[str, Tuple[str, ...]] = {
+    AGENCY_IG_ID: ("subs:total:", OUTILS_PREFIXE, "numx:menu"),
+}
+BOUTONS_VERSION = 12
+_boutons_va_complets = boutons_va
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # noqa: F811
+               gid: str = "", lien_actif: bool = True):
+    rangs = _boutons_va_complets(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                 gid=gid, lien_actif=lien_actif)
+    retirer = TICKET_SANS.get(str(gid))
+    if not retirer:
+        return rangs
+    out = []
+    for r in rangs or []:
+        bs = [b for b in (r.get("components") or [])
+              if not str((b or {}).get("custom_id") or "").startswith(retirer)]
+        if bs:
+            out.append(dict(r, components=bs))
+    return out

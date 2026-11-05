@@ -250,13 +250,14 @@ try:
           and g.de("duplicate")[0][5] == EMY_IG and not g.de("direct"), g.appels)
 
     # ── les boutons du ticket ────────────────────────────────────────────
+    # 05/11/2026 : 📈 Mes stats quitte le ticket (📋・menu des outils le donne)
     b = [c for rg in tk.boutons_va("u1", confirme=True, gid=AG) for c in rg["components"]]
     ids = [c["custom_id"].split(":")[0] + ":" + c["custom_id"].split(":")[1] for c in b]
-    check("accueil Agency : Créer son lien, Mon adresse USDC, Mes stats",
-          "lien:new" in ids and "usdc:set" in ids and "subs:total" in ids
-          and [c["label"] for c in b if c["custom_id"].startswith("subs:total")] == ["Mes stats"], b)
-    b2 = [c for rg in tk.boutons_va("u1", confirme=True, gid=AG) for c in rg["components"]]
-    check("… un seul « Mes stats »", sum(1 for c in b2 if c["custom_id"].startswith("subs:total")) == 1)
+    check("accueil Agency : Créer son lien, Mon adresse USDC, plus de Mes stats",
+          "lien:new" in ids and "usdc:set" in ids and "subs:total" not in ids, b)
+    b2 = [c for rg in tk._boutons_va_complets("u1", confirme=True, gid=AG) for c in rg["components"]]
+    check("… la rangée complète (📋・menu) : un seul « Mes stats »",
+          [c["label"] for c in b2 if c["custom_id"].startswith("subs:total")] == ["Mes stats"], b2)
 
     # ── subs et clics ────────────────────────────────────────────────────
     monde(etat={"liens": {f"{AG}:u1": {"pseudo": "zaid014787", "numero": 27, "link_id": "lnk_abc",
@@ -320,14 +321,13 @@ try:
           r["ok"] and r["uid"] == "v1" and r["manager"] == "m1" and r["essai"]
           and not [a for a in appels if a[0] != "GET"], r)
     labels = [b["label"] for rg in r["corps"]["components"] for b in rg["components"]]
-    # 30/10/2026 : 📤 Spoofer et ⬇️ Download avant le Numéro (outils_tickets,
-    # « vas-y ajoute dans trust agency ») ; puis 🎬 Contenu, seul sur la 2e
-    # rangée du VA (contenu_tickets)
+    # 30/10/2026 : 📤 Spoofer et ⬇️ Download avant le Numéro ; puis 🎬 Contenu,
+    # seul sur la 2e rangée du VA. 05/11/2026 : 📈 📤 ⬇️ 📱 quittent le
+    # ticket (TICKET_SANS, ils sont dans 🧰 OUTILS INSTAGRAM)
     rangees = [[b["label"] for b in rg["components"]] for rg in r["corps"]["components"]]
-    check("… l'accueil : USDC, Mes stats, Spoofer, Download, Numéro, puis 🎬 Contenu sur sa "
-          "rangée, puis 🌱 Passer Débutant (en essai), Créer son lien, et aucune mention",
-          labels == ["Mon adresse USDC", "Mes stats", "Spoofer", "Download", "Numéro",
-                     "Contenu", "Passer Débutant", "Créer son lien"]
+    check("… l'accueil : USDC, puis 🎬 Contenu sur sa rangée, puis 🌱 Passer Débutant "
+          "(en essai), Créer son lien, et aucune mention",
+          labels == ["Mon adresse USDC", "Contenu", "Passer Débutant", "Créer son lien"]
           and rangees[1] == ["Contenu"]
           and r["corps"]["allowed_mentions"] == {"parse": []}, (labels, rangees))
     check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])

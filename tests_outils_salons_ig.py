@@ -267,9 +267,11 @@ tk.menu_ephemere = lambda g, u, **k: (_ for _ in ()).throw(RuntimeError("fiche i
 rep = ot.traiter(clic("outk:menu"))
 check("une panne : « réessaie », en privé", rep["type"] == 4 and rep["data"]["content"] == ot.TEXTE_INDISPONIBLE, rep)
 tk.menu_ephemere = avant
-check("le ticket garde ses boutons (« tu peux garder ce qu'il y a dans le ticket »)",
-      {f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu", f"cnt:o:{VA}"}
-      <= set(ids(tk.boutons_va(VA, a_un_lien=True, gid=AG))))
+# 05/11/2026 : « c'est bon » — 📈 📤 ⬇️ 📱 quittent le ticket, 💳 et 🎬 restent
+_t = set(ids(tk.boutons_va(VA, a_un_lien=True, gid=AG)))
+check("le ticket perd 📈 📤 ⬇️ 📱 (ils sont dans les outils), garde 💳 et 🎬",
+      {f"usdc:set:{VA}", f"cnt:o:{VA}"} <= _t
+      and not {f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu"} & _t, _t)
 
 # ── 4. 📤 et ⬇️ ───────────────────────────────────────────────────────────
 print("4. 📤 Spoofer et ⬇️ Download des salons")
@@ -593,9 +595,10 @@ check("en-tête « Instagram VA 160 · @yous1m », 🔗 lien, 📊 page, 💳 pa
       and ("Ouvrir", LIENS[AG]["public_url"]) in urls(corps_ag)
       and ("Voir ma page", stats_va.lien(AG, VA)) in urls(corps_ag)
       and any(x.startswith("**💳 Paiement**") for x in textes(corps_ag)), (textes(corps_ag), urls(corps_ag)))
-check("tous les boutons du ticket y sont (📈 📤 ⬇️ 📱 🎬 et ceux des managers), chacun une fois",
-      {f"usdc:set:{VA}", f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu", f"cnt:o:{VA}"}
-      <= set(cids_ag) and any(c.startswith(("essai:", "lien:")) for c in cids_ag)
+check("les boutons du ticket y sont (💳 🎬 et ceux des managers, plus 📈 📤 ⬇️ 📱), chacun une fois",
+      {f"usdc:set:{VA}", f"cnt:o:{VA}"} <= set(cids_ag)
+      and not {f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu"} & set(cids_ag)
+      and any(c.startswith(("essai:", "lien:")) for c in cids_ag)
       and len(cids_ag) == len(set(cids_ag)), cids_ag)
 
 

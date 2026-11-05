@@ -242,8 +242,11 @@ try:
     def ids(rangs):
         return [[b.get("custom_id") for b in r.get("components") or []] for r in rangs]
 
+    # _boutons_va_complets : la rangée d'avant TICKET_SANS (05/11/2026 : le
+    # ticket perd 📈 📤 ⬇️ 📱, tests_ticket_allege) — 📋・menu et le menu privé
+    # du staff la lisent encore
     for confirme, lien in ((False, True), (True, False), (True, True)):
-        r = ids(tk.boutons_va(VA, confirme=confirme, a_un_lien=lien, gid=AG))
+        r = ids(tk._boutons_va_complets(VA, confirme=confirme, a_un_lien=lien, gid=AG))
         check(f"Agency (confirmé={confirme}, lien={lien}) : rangée du VA = USDC, stats, 📤, ⬇️, "
               "Numéro — cinq, le Numéro reste le dernier",
               r[0] == [f"usdc:set:{VA}", f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}",
@@ -261,7 +264,7 @@ try:
     _mod_ot = sys.modules.get("outils_tickets")
     sys.modules["outils_tickets"] = None             # « import outils_tickets » lève
     try:
-        r = ids(tk.boutons_va(VA, confirme=True, a_un_lien=True, gid=AG))
+        r = ids(tk._boutons_va_complets(VA, confirme=True, a_un_lien=True, gid=AG))
     except Exception as e:                           # noqa: BLE001
         r = [repr(e)]
     finally:

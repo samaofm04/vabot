@@ -1648,6 +1648,238 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
         return f"panneau posé : HTTP {code}" + ("" if code == 200 else f" {str(rep)[:160]}")
 
 
+# ─── Plus de carte numéro dans les tickets de TRUST INSTAGRAM (05/11/2026) ─
+# Propriétaire, capture de la carte d'un ticket à l'appui : « ça tu peux
+# remove ici [...] ils sont dans outils ». Le numéro se prend dans 🧰 OUTILS
+# INSTAGRAM > 📱・numéro (Rem, carte éphémère, cogs/numeros) ; la carte du
+# ticket, le bouton « 📱 Numéro » du menu (tickets_discord.TICKET_SANS) et sa
+# boucle s'arrêtent là. Les cartes déjà posées sont retirées (retirer_cartes) :
+# seulement un message V2 de Wario au gabarit de la carte (_carte_a_retirer),
+# jamais l'accueil ni le menu ; une carte dont le numéro sert encore (attente de code, ou code
+# reçu depuis moins de 20 min) attend que vider_cartes_echues l'ait vidée,
+# puis part au tour suivant de la boucle (toutes les 10 min). Le registre
+# perdu, une carte se retrouve dans les 300 derniers messages (_cartes_dans).
+# Une carte qui reste ne vend plus rien : « Prendre » et « Autre » cliqués dans
+# un ticket répondent où prendre le numéro.
+# Twitter et Threads gardent les leurs. POUR LES REMETTRE : retirer le serveur
+# de CARTES_RETIREES, puis « python numeros_x_discord.py cartes agency tous ».
+CARTES_RETIREES = {vd.AGENCY_IG_ID}
+
+
+def _numero_en_cours(cle: str) -> bool:
+    """Un numéro sert encore sur cette clé : un achat en cours (_ACHATS), ou un
+    numéro vivant / un code reçu pas encore clos."""
+    with _VERROU:
+        if cle in _ACHATS:
+            return True
+        a = _actif(cle)
+    return bool(a) and not a.get("clos") and (_vivant(a) or bool(a.get("code")))
+
+
+def _premier_texte(comps: Any) -> str:
+    for c in comps or []:
+        if isinstance(c, dict):
+            if c.get("type") == 10:
+                return str(c.get("content") or "")
+            t = _premier_texte(c.get("components"))
+            if t:
+                return t
+    return ""
+
+
+def _carte_a_retirer(m: Any, moi: str) -> bool:
+    """Une carte numéro de ce bot, quel que soit son état : est_carte (un
+    bouton de carte), ou le gabarit de la carte Instagram sans bouton. Une
+    carte figée sur « ⏳ Recherche d'un numéro… » (vue_attente) par un
+    redémarrage en plein achat n'a aucun bouton : est_carte la laissait, pour
+    toujours. Jamais l'accueil (message classique) ni le menu en blocs
+    (« ## 📋 Ton menu ») : seule la carte commence par « ## ` »."""
+    if est_carte(m, moi):
+        return True
+    if not isinstance(m, dict) or not int(m.get("flags") or 0) & V2:
+        return False
+    if str((m.get("author") or {}).get("id")) != str(moi):
+        return False
+    comps = m.get("components") or []
+    return (len(comps) == 1 and isinstance(comps[0], dict) and comps[0].get("type") == 17
+            and _premier_texte(comps).startswith("## `"))
+
+
+def _cartes_dans(salon: str, moi: str, pages: int = 3):
+    """(ids de TOUTES les cartes de ce bot dans les `pages` × 100 derniers
+    messages, lecture complète ?). Un ticket peut en porter deux : la carte
+    d'avant qu'un « 📱 Numéro » n'a pas pu retirer, les doublons du 23/10."""
+    out: List[str] = []
+    avant = ""
+    for _ in range(pages):
+        code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=100"
+                          + (f"&before={avant}" if avant else ""))
+        if code != 200 or not isinstance(ms, list):
+            return out, False
+        out += [str(m["id"]) for m in ms if isinstance(m, dict) and _carte_a_retirer(m, moi)]
+        if len(ms) < 100:
+            break
+        avant = str(ms[-1].get("id") or "")
+    return out, True
+
+
+def retirer_cartes(gid: str, essai: bool = False, chercher: bool = False) -> Dict[str, Any]:
+    """Retire la carte numéro de chaque ticket de `gid` (voir CARTES_RETIREES) :
+    celle du registre ; avec `chercher`, aussi toutes celles des 300 derniers
+    messages de chaque ticket (registre perdu, doublons). `essai` : rien n'est
+    retiré ni écrit, le bilan dit ce qui le serait. Rend {retirees (salons),
+    cartes (messages), en_cours, pas_carte, echecs}."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"retirees": [], "cartes": 0, "en_cours": [], "pas_carte": [],
+                             "echecs": [], "essai": essai}
+    tickets = _tickets_du_serveur(gid)
+    with vd.sur_serveur(gid):
+        moi = vd.bot_du_serveur(gid)["app_id"]
+        # salon -> {uid, registre (id noté), ids (cartes à relire)}
+        a_voir: Dict[str, Dict[str, Any]] = {}
+        for salon, c in (_lire().get("cartes") or {}).items():
+            if not isinstance(c, dict):
+                continue
+            if str(c.get("gid") or "") == gid or (not c.get("gid") and str(salon) in tickets):
+                mid = str(c.get("message") or "")
+                a_voir[str(salon)] = {"uid": str(c.get("uid") or tickets.get(str(salon)) or ""),
+                                      "registre": mid, "ids": {mid} - {""}}
+        if chercher:
+            for salon, uid in sorted(tickets.items()):
+                ids, complet = _cartes_dans(salon, moi)
+                if not complet:
+                    bilan["echecs"].append(f"{salon} (messages illisibles)")
+                if ids:
+                    x = a_voir.setdefault(salon, {"uid": uid, "registre": "", "ids": set()})
+                    x["ids"].update(ids)
+        for salon, x in sorted(a_voir.items()):
+            uid = x["uid"]
+            if uid and _numero_en_cours(f"{gid}:{uid}"):
+                bilan["en_cours"].append(salon)        # au tour suivant, une fois vidée
+                continue
+            retire, rate = False, False
+            for mid in sorted(x["ids"]):
+                code, m = vd.api("GET", f"/channels/{salon}/messages/{mid}")
+                if code == 404:
+                    retire = True                      # déjà parti : il suffit de l'oublier
+                    continue
+                if code != 200:
+                    bilan["echecs"].append(f"{salon} (relecture HTTP {code})")
+                    rate = True
+                    continue
+                if not _carte_a_retirer(m, moi):
+                    # le registre pointait sur autre chose (l'accueil ?) : on n'y touche pas
+                    bilan["pas_carte"].append(salon)
+                    continue
+                if essai:
+                    retire = True
+                    bilan["cartes"] += 1
+                    continue
+                code_d, rep = vd.api("DELETE", f"/channels/{salon}/messages/{mid}")
+                if code_d not in (204, 404):
+                    bilan["echecs"].append(f"{salon} (HTTP {code_d} {str(rep)[:80]})")
+                    rate = True
+                    continue
+                retire = True
+                bilan["cartes"] += 1
+            if retire:
+                bilan["retirees"].append(salon)
+            if not essai and not rate and x["registre"]:
+                _oublier_carte(salon, f"{gid}:{uid}", x["registre"])
+    if bilan["retirees"] or bilan["echecs"] or bilan["pas_carte"]:
+        _log(f"cartes de {gid} retirées{' (essai)' if essai else ''} : {bilan['cartes']} dans "
+             f"{len(bilan['retirees'])} salon(s), en cours {len(bilan['en_cours'])}, pas une carte "
+             f"{bilan['pas_carte']}, échecs {bilan['echecs'][:5]}")
+    return bilan
+
+
+def _oublier_carte(salon: str, cle: str, mid: str) -> None:
+    """La carte sort du registre ; le message de la personne aussi s'il
+    pointait sur elle (sinon un numéro suivant s'écrirait dans un message
+    retiré)."""
+    with _VERROU:
+        d = _lire()
+        c = d["cartes"].get(str(salon))
+        if isinstance(c, dict) and str(c.get("message") or "") == str(mid):
+            d["cartes"].pop(str(salon), None)
+        m = d["messages"].get(cle)
+        if isinstance(m, dict) and m.get("carte") and str(m.get("message") or "") == str(mid):
+            d["messages"].pop(cle, None)
+        _ecrire(d)
+
+
+def _dans_ticket_sans_carte(p: Dict[str, Any], gid: str) -> bool:
+    """Le clic vient-il d'un ticket d'un serveur de CARTES_RETIREES ?"""
+    return str(gid) in CARTES_RETIREES and str(p.get("channel_id") or "") in _tickets_du_serveur(gid)
+
+
+_prendre_partout = _prendre
+
+
+def _prendre(p, gid, uid, cle, membre, user, conf):   # noqa: F811
+    """_prendre (plus haut), sauf dans un ticket d'un serveur de
+    CARTES_RETIREES : une carte pas encore retirée (son numéro servait au
+    tour de la boucle, ou un doublon hors registre) ne vend plus de numéro.
+    Le numéro se prend dans 📱・numéro."""
+    if _dans_ticket_sans_carte(p, gid):
+        return _texte(TEXTE_NUMERO_AILLEURS)
+    return _prendre_partout(p, gid, uid, cle, membre, user, conf)
+
+
+_agir_partout = _agir
+
+
+def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):   # noqa: F811
+    """_agir (plus haut) ; « 🔁 Autre » rachète : refusé dans un ticket d'un
+    serveur de CARTES_RETIREES, comme « Prendre ». Le numéro en cours reste,
+    Annuler et C'est bon marchent toujours."""
+    if action == "autre" and _dans_ticket_sans_carte(p, gid):
+        return _texte(TEXTE_NUMERO_AILLEURS)
+    return _agir_partout(p, gid, uid, cle, membre, user, conf, action, act_id)
+
+
+_poser_cartes_partout = poser_cartes
+
+
+def poser_cartes(gid: str, seulement: Optional[str] = None,   # noqa: F811
+                 maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """poser_cartes (plus haut), sauf sur un serveur de CARTES_RETIREES : là,
+    le tour de la boucle retire celles qui restent."""
+    if str(gid) in CARTES_RETIREES:
+        b = retirer_cartes(gid)
+        return {"posees": [], "retrouvees": [], "deja": 0, "echecs": b["echecs"], "partis": [],
+                "retirees": b["retirees"], "en_cours": b["en_cours"]}
+    return _poser_cartes_partout(gid, seulement=seulement, maintenant=maintenant)
+
+
+_ramener_carte_partout = ramener_carte
+
+
+def ramener_carte(gid: str, uid: str, salon: str) -> str:   # noqa: F811
+    """ramener_carte (plus haut), sauf sur un serveur de CARTES_RETIREES : un
+    vieux « 📱 Numéro » cliqué dans un menu pas encore redessiné ne repose
+    plus de carte."""
+    if str(gid) in CARTES_RETIREES:
+        _log(f"menu : pas de carte dans les tickets de {gid} (CARTES_RETIREES)")
+        return "deja"
+    return _ramener_carte_partout(gid, uid, salon)
+
+
+_menu_partout = _menu
+
+#: Ce que lit celui qui clique un vieux « 📱 Numéro » dans un ticket sans carte.
+TEXTE_NUMERO_AILLEURS = "📱 Le numéro se prend dans 🧰 OUTILS INSTAGRAM › 📱・numéro."
+
+
+def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:   # noqa: F811
+    """_menu (plus haut), sauf le « 📱 Numéro » d'un ticket d'un serveur de
+    CARTES_RETIREES (un menu pas encore redessiné) : il dit où le prendre,
+    plutôt qu'un clic sans effet."""
+    if str(gid) in CARTES_RETIREES and str(p.get("channel_id") or "") in _tickets_du_serveur(gid):
+        return _texte(TEXTE_NUMERO_AILLEURS)
+    return _menu_partout(p, gid, uid, conf)
+
+
 if __name__ == "__main__":
     import sys
     noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID, "agency": vd.AGENCY_IG_ID}
@@ -1656,6 +1888,10 @@ if __name__ == "__main__":
         quel = (sys.argv[2:] or ["twitter"])[0].lower()
         gid = noms.get(quel, quel)
         print(poser_panneau(gid) if gid in SERVEURS else f"serveur inconnu : {quel}")
+    elif sys.argv[1:3] == ["retirer", "agency"] and len(sys.argv) <= 4:
+        # retirer agency [essai] : les cartes des tickets de TRUST INSTAGRAM
+        vd._charger_config()
+        print(retirer_cartes(vd.AGENCY_IG_ID, essai=sys.argv[3:4] == ["essai"], chercher=True))
     elif sys.argv[1:2] == ["cartes"] and len(sys.argv) == 4:
         # cartes threads <salon> : une seule carte (essai) ; cartes threads tous :
         # toutes, la boucle des nouveaux tickets, et le panneau commun en renvoi.
