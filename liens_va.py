@@ -2658,14 +2658,16 @@ def poser_base_seule(gid: str, uid: str) -> Dict[str, Any]:
     return r
 
 
-def _poser_base_seule(gid: str, uid: str) -> Dict[str, Any]:
+def _poser_base_seule(gid: str, uid: str, lien: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """`lien` : {link_id, tracking, shortcode} d'un autre lien du VA sur le
+    même tracking (sa page, pages_va) ; sinon le lien de sa fiche."""
     import secrets
     import gms
     parts = lia_seule(gid)
     if not parts:
         return {"ok": True, "hors_sujet": True, "erreur": ""}
     e = espace(gid)
-    l = lien_de(gid, uid)
+    l = lien if lien is not None else lien_de(gid, uid)
     equipe, lid = str(e["equipe"]), str(l.get("link_id") or "")
     page = base_de(l.get("tracking"))
     if not (lid and page):
@@ -2795,3 +2797,38 @@ def reprendre_base_seule(gid: str) -> Dict[str, Any]:
         print(f"[lien] page de base seule {gid} : posées {bilan['poses'][:10]}, "
               f"ratées {bilan['rates'][:5]}", flush=True)
     return bilan
+
+
+# ─── La page du VA suit son lien direct (pages_va, 06/11/2026) ───────────
+# Un VA coupé (parti, ou « 🚫 Désactiver le lien ») ne garde pas une page
+# vivante sur son tracking ; rallumé, elle revient. Sans page : rien.
+_basculer_sans_page = basculer
+
+
+def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:   # noqa: F811
+    r = _basculer_sans_page(gid, uid, actif)
+    if r.get("ok"):
+        try:
+            import pages_va
+            pages_va.suivre_bascule(gid, uid, actif)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[lien] page de {gid}:{uid} non suivie : {type(e).__name__}: {e}", flush=True)
+    return r
+
+
+# La synchro (toutes les 30 min) reprend aussi les pages : coupure ratée,
+# tracking changé, étapes manquées (pages_va.reprendre_pages).
+_synchroniser_sans_pages = synchroniser
+
+
+def synchroniser(gid: str) -> Dict[str, Any]:   # noqa: F811
+    b = _synchroniser_sans_pages(gid)
+    try:
+        import pages_va
+        if pages_va.PILOTE.get(str(gid)):
+            r = pages_va.reprendre_pages(gid)
+            if isinstance(b, dict) and any(r.values()):
+                b["pages"] = r
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] reprise des pages {gid} : {type(e).__name__}: {e}", flush=True)
+    return b

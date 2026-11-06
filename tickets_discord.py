@@ -4955,3 +4955,209 @@ def ramener_menu(gid: str, uid: str, salon: str, en_dernier: bool = False) -> st
 
 
 ramener_menu.__doc__ = _ramener_menu_qui_descend.__doc__
+
+
+# ─── 📄 Ta page : la page GetMySocial du VA, qu'il modifie (06/11/2026) ──
+# Propriétaire : « je veux avoir 2 liens pour les VA, un direct et un landing
+# page qu'ils peuvent modifier » — photo (il dépose une image), nom et bio,
+# texte du bouton, couleur du fond ; essai sur lui seul d'abord
+# (pages_va.PILOTE). Le menu en blocs porte une section « 📄 Ta page » sous
+# « 🔗 Ton lien » : l'adresse et « ✏️ Modifier », qui ouvre UNE fenêtre (les
+# cinq champs, la photo facultative). Tout se fait en fond, la réponse dit le
+# résultat ; GetMySocial est relu. « 📄 Créer » (manager) quand le VA a un
+# lien direct et pas encore de page. Rien ne change pour qui n'est pas pilote.
+PAGE_PREFIXE = "page:"
+
+
+def _section_page(gid: str, uid: str) -> Optional[Dict[str, Any]]:
+    import pages_va as pv
+    if not pv.ouverte(gid, uid) or (_fiche(gid, uid) or {}).get("parti"):
+        return None                     # un VA parti : ni lien ni page dans son menu
+    pg = pv.page_de(gid, uid)
+    if pg.get("link_id") and pg.get("etat", "prete") != "prete":
+        # création ratée (ou interrompue) : coupée ; un manager la reprend
+        return {"type": 9, "components": [{"type": 10, "content": "**📄 Ta page**\n-# À reprendre"}],
+                "accessory": {"type": 2, "style": 1, "label": "Réessayer", "emoji": {"name": "🔁"},
+                              "custom_id": f"{PAGE_PREFIXE}new:{uid}"}}
+    if pg.get("link_id") and pg.get("public_url"):
+        if pg.get("actif", True) is False:
+            return {"type": 10, "content": "**📄 Ta page**\n🚫 Désactivée pour le moment"}
+        return {"type": 9, "components": [{"type": 10, "content": f"**📄 Ta page**\n{pg['public_url']}"}],
+                "accessory": {"type": 2, "style": 2, "label": "Modifier", "emoji": {"name": "✏️"},
+                              "custom_id": f"{PAGE_PREFIXE}o:{uid}"}}
+    import liens_va as lv
+    if lv.lien_de(gid, uid).get("public_url"):
+        return {"type": 9, "components": [{"type": 10, "content": "**📄 Ta page**\n-# Pas encore créée"}],
+                "accessory": {"type": 2, "style": 1, "label": "Créer", "emoji": {"name": "📄"},
+                              "custom_id": f"{PAGE_PREFIXE}new:{uid}"}}
+    return None
+
+
+_corps_menu_sans_page = _corps_menu
+
+
+def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = "",   # noqa: F811
+                avec_page: Optional[bool] = None) -> List[Dict[str, Any]]:
+    corps = _corps_menu_sans_page(gid, uid, rangs, extra, avec_page)
+    try:
+        s = _section_page(str(gid), str(uid))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[page] menu de {uid} : {type(e).__name__}: {e}", flush=True)
+        s = None
+    if not s or not corps or not isinstance(corps[0].get("components"), list):
+        return corps
+    blocs = corps[0]["components"]
+
+    def lien(b: Dict[str, Any]) -> bool:
+        textes = [b.get("content")] + [x.get("content") for x in b.get("components") or []
+                                       if isinstance(x, dict)]
+        return any(str(t or "").startswith("**🔗 Ton lien**") for t in textes)
+    i = next((k + 1 for k, b in enumerate(blocs) if isinstance(b, dict) and lien(b)), None)
+    blocs.insert(i if i is not None else min(2, len(blocs)), s)
+    return corps
+
+
+def fenetre_page(gid: str, uid: str) -> Dict[str, Any]:
+    """La fenêtre « Ma page » : photo (facultative), nom, bio, texte du
+    bouton, couleur du fond — cinq composants, le maximum d'une fenêtre.
+    Un texte prérempli trop long ferait refuser la fenêtre entière : il n'est
+    prérempli que s'il tient."""
+    import pages_va as pv
+    c = pv.page_de(gid, uid).get("champs") or {}
+
+    def texte(cid: str, label: str, n: int, style: int) -> Dict[str, Any]:
+        comp: Dict[str, Any] = {"type": 4, "custom_id": cid, "style": style, "max_length": n,
+                                "required": False}
+        v = str(c.get(cid) or "")
+        if v and len(v) <= n:
+            comp["value"] = v
+        return {"type": 18, "label": label, "component": comp}
+    return {"type": 9, "data": {"custom_id": f"{PAGE_PREFIXE}f:{uid}", "title": "Ma page", "components": [
+        {"type": 18, "label": "Photo de profil", "description": "Vide : tu gardes la tienne",
+         "component": {"type": 19, "custom_id": "photo", "min_values": 0, "max_values": 1,
+                       "required": False}},
+        texte("nom", "Nom", pv.MAX_NOM, 1),
+        texte("bio", "Bio", pv.MAX_BIO, 2),
+        texte("bouton", "Texte du bouton", pv.MAX_BOUTON, 1),
+        {"type": 18, "label": "Couleur du fond",
+         "component": {"type": 3, "custom_id": "couleur", "min_values": 0, "max_values": 1,
+                       "required": False,
+                       "options": [{"label": nom, "value": hexa, "default": hexa == c.get("couleur")}
+                                   for nom, hexa in pv.COULEURS]}}]}}
+
+
+def _telecharger_image(url: str, plafond: int) -> Tuple[Optional[bytes], str]:
+    """La pièce jointe de la fenêtre, tout de suite : son adresse signée expire."""
+    import requests
+    try:
+        with requests.get(url, stream=True, timeout=(10, 60)) as r:
+            if r.status_code != 200:
+                return None, f"image illisible chez Discord (HTTP {r.status_code}), renvoie-la."
+            buf, n = bytearray(), 0
+            for bloc in r.iter_content(1 << 16):
+                n += len(bloc)
+                if n > plafond:
+                    return None, f"image trop lourde ({plafond // (1024 * 1024)} Mo au plus)."
+                buf += bloc
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[page] image non téléchargée : {type(e).__name__}: {str(e)[:120]}", flush=True)
+        return None, "image non récupérée, renvoie-la."
+    return bytes(buf), ""
+
+
+def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Les clics « page: » et la fenêtre, ou None si ce n'est pas le nôtre."""
+    p = p or {}
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if not cid.startswith(PAGE_PREFIXE) or p.get("type") not in (3, 5):
+        return None
+    import pages_va as pv
+    gid = str(p.get("guild_id") or "")
+    morceaux = cid.split(":")
+    if len(morceaux) != 3 or not morceaux[2].isdigit():
+        return _ephemere("Action inconnue.")
+    action, uid = morceaux[1], morceaux[2]
+    if not pv.ouverte(gid, uid):
+        return _ephemere("Pas encore ouvert.")
+    membre = p.get("member") or {}
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+    if not _droit_usdc(gid, uid, p):
+        return _ephemere("Seul ce VA ou son manager peut s'en servir.")
+    jeton = str(p.get("token") or "")
+    if p.get("type") == 3 and action == "o":
+        pg = pv.page_de(gid, uid)
+        if not pg.get("link_id") or pg.get("etat", "prete") != "prete":
+            return _ephemere("Pas encore de page.")
+        return fenetre_page(gid, uid)
+    if p.get("type") == 3 and action == "new":
+        if not _est_manager_brut(gid, membre):
+            return _ephemere("Seul un manager peut créer la page.")
+
+        def creer():
+            r = pv.creer_page(gid, uid, par=qui)
+            manques = r.get("manques") or []
+            _suite(jeton, (f"✅ Ta page : {r.get('url')}"
+                           + (f"\n⚠️ À reprendre : {', '.join(manques)} (reprise automatique)" if manques else "")
+                           if r.get("ok") else f"✕ Page non créée : {r.get('erreur')}"), p)
+            _maj_menu_v2(gid, uid)
+        _EN_FOND(creer)
+        return _differer()
+    if p.get("type") == 5 and action == "f":
+        import outils_tickets as ot
+        data = p.get("data") or {}
+        champs = ot._champs(data.get("components"))
+        ids = [str(x) for x in (champs.get("photo") or []) if x]
+        piece = (((data.get("resolved") or {}).get("attachments") or {}).get(ids[0]) if ids else None)
+        if ids and not (isinstance(piece, dict) and piece.get("url")):
+            return _ephemere("📎 Image non reçue, renvoie-la.")
+        if piece and not str(piece.get("content_type") or "").startswith("image/"):
+            return _ephemere("📎 Ce n'est pas une image.")
+        if piece and int(piece.get("size") or 0) > pv.PHOTO_MAX:
+            return _ephemere(f"📎 Image trop lourde ({pv.PHOTO_MAX // (1024 * 1024)} Mo au plus).")
+        avant = pv.page_de(gid, uid).get("champs") or {}
+        nom = pv.nettoyer(champs.get("nom"), pv.MAX_NOM)
+        bouton = pv.nettoyer(champs.get("bouton"), pv.MAX_BOUTON)
+        bio = pv.nettoyer(champs.get("bio"), pv.MAX_BIO, lignes=4) if "bio" in champs else None
+        couleur = pv.couleur_valide((champs.get("couleur") or [""])[0] if isinstance(champs.get("couleur"), list)
+                                    else champs.get("couleur"))
+        # vide : on garde (un nom ou un bouton vide n'a pas de sens) ; la bio
+        # vidée est voulue (le champ était prérempli)
+        nom = nom if nom and nom != avant.get("nom") else None
+        bouton = bouton if bouton and bouton != avant.get("bouton") else None
+        bio = bio if bio is not None and bio != (avant.get("bio") or "") else None
+        if bio == "" and len(str(avant.get("bio") or "")) > pv.MAX_BIO:
+            bio = None                  # pas préremplie (trop longue) : vide ≠ effacée
+        couleur = couleur if couleur and couleur != avant.get("couleur") else None
+        if not (piece or nom or bouton or couleur or bio is not None):
+            return _ephemere("Rien n'a changé.")
+
+        def modifier():
+            photo = None
+            if piece:
+                octets, err = _telecharger_image(str(piece["url"]), pv.PHOTO_MAX)
+                if not err:
+                    photo, err = pv.preparer_photo(octets or b"")
+                if err:
+                    _suite(jeton, "✕ " + err, p)
+                    return
+            r = pv.modifier_page(gid, uid, nom=nom, bio=bio, bouton=bouton, couleur=couleur, photo=photo)
+            _suite(jeton, "✅ Ta page est à jour." if r.get("ok") else f"✕ {r.get('erreur')}", p)
+        _EN_FOND(modifier)
+        return _differer()
+    return _ephemere("Action inconnue.")
+
+
+_traiter_sans_page = traiter
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    try:
+        rep = _page(p)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[page] clic : {type(e).__name__}: {e}", flush=True)
+        if str((((p or {}).get("data") or {}).get("custom_id")) or "").startswith(PAGE_PREFIXE):
+            return _ephemere("✕ Une erreur est survenue, reclique dans un instant.")
+        rep = None
+    if rep is not None:
+        return rep
+    return _traiter_sans_page(p)

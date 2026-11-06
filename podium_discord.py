@@ -6919,3 +6919,31 @@ def _avec_jessye(cl: Dict[str, Any], debut: dt.date, fin: dt.date) -> Dict[str, 
         print(f"[podium] comptes internes : part Jessye non comptée ({type(e).__name__}: {e})",
               flush=True)
         return cl
+
+
+# ─── Hors classement : les pilotes (06/11/2026) ───────────────────────────
+# Le propriétaire essaie la page modifiable des VA (pages_va) sur son propre
+# lien Twitter : « hors classement ». Ses subs de test ne prennent jamais la
+# place ni la prime d'un vrai VA — sorti du bonus, de la semaine et de la
+# quinzaine comme un VA parti (_sans_partis), sans que son lien soit coupé.
+HORS_CLASSEMENT: Dict[str, set] = {TWITTER_ID: {"479005370438778891"}}
+#: Une période finie avant le pilote le garde (comme un VA parti).
+DEBUT_PILOTE = "2026-11-06"
+_partis_sans_pilotes = _partis
+
+
+def _partis(gid: Optional[str]) -> Dict[str, str]:   # noqa: F811
+    out = _partis_sans_pilotes(gid)
+    g = str(gid or "")
+    if not HORS_CLASSEMENT.get(g):
+        return out
+    try:
+        import liens_va as lv
+        lib = str(_profil(gid).get("libelle") or "VA")
+        for uid in HORS_CLASSEMENT[g]:
+            n = lv.lien_de(g, uid).get("numero")
+            if n:
+                out.setdefault(f"{lib} {int(n)}", DEBUT_PILOTE)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] hors classement illisibles : {type(e).__name__}: {e}", flush=True)
+    return out
