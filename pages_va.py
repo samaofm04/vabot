@@ -1788,3 +1788,73 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
 
 
 reprendre_pages.__doc__ = _reprendre_pages_sans_liste.__doc__
+
+
+# ─── Le look de la page : brune, blonde, général (TRUST TWITTER, 06/11/2026) ──
+# Propriétaire : « quand ils cliquent sur modifier [...] ils peuvent choisir
+# leur template [...] template brune, template blonde, [...] et après ils
+# peuvent modifier par eux-mêmes comme ils le veulent, mais ils ont toujours
+# une seule page en safe page sur Twitter » ; « Template » renommé « Général ».
+# Les trois gabarits de TRUST INSTAGRAM (tpligbrune1, tpligblonde2,
+# tpligtemplate3) ne diffèrent que par la photo et le fond : seules ces deux
+# images changent (adresses recopiées ici, leurs liens ne sont jamais lus ni
+# touchés) ; nom, bio, boutons, tracking, pays, safe page, Telegram restent.
+_IMG = "https://images.getmysocial.com/68e4961d3abdf07547f50bd7"
+_SLIDES = "https://images.getmysocial.com/profile-slides/68e4961d3abdf07547f50bd7"
+#: (clé, emoji, libellé, photo, fond)
+LOOKS: Dict[str, Tuple[Tuple[str, str, str, str, str], ...]] = {TWITTER_ID: (
+    ("brune", "🟤", "Brune", f"{_IMG}/1793965144979-b1e1240d04e3.jpg", f"{_IMG}/1793965144944-e832f9bc389f.jpg"),
+    ("blonde", "🟡", "Blonde", f"{_SLIDES}/1793971762887-6260dbacfdec.jpg", f"{_IMG}/1793971762889-7786fb4455fa.jpg"),
+    ("general", "✨", "Général", f"{_SLIDES}/1793971989305-788e7bcfed60.jpg", f"{_IMG}/1793971990377-6691d940790e.jpg"),
+)}
+
+
+def looks(gid: Any) -> Tuple[Tuple[str, str, str, str, str], ...]:
+    return LOOKS.get(str(gid or ""), ())
+
+
+def _poser_look_lien(lid: str, equipe: str, photo: str, fond: str) -> Dict[str, Any]:
+    """Photo + fond d'un look sur une page ; relue (images posées, bouton
+    OnlyFans intact). Rend {ok, erreur}."""
+    import gms
+    lu = _lire_page(lid, equipe)
+    if not lu:
+        return {"ok": False, "erreur": "page illisible chez GetMySocial"}
+    avant = [(b.get("url"), len(b.get("geofilters") or [])) for b in _boutons_of(lu.get("buttons"))]
+    # la diapo de profil vidée : une ancienne diapo restait affichée à la place
+    # de la nouvelle photo (essai du 06/11 sur sugarlilyy) ; les pages vivantes
+    # n'en ont pas, et la photo déposée par le VA (fenêtre) ne la touche pas
+    r = gms.update_link(lid, {"display_name": str(lu.get("display_name") or ""),
+                              "profile_picture": photo, "profile_picture_slides": [],
+                              "background_image": fond}, equipe)
+    if not r.get("ok"):
+        return {"ok": False, "erreur": str(r.get("error") or "GetMySocial a refusé")[:140]}
+    l2 = _lire_page(lid, equipe)
+    apres = [(b.get("url"), len(b.get("geofilters") or [])) for b in _boutons_of(l2.get("buttons"))]
+    if (str(l2.get("profile_picture") or "") != photo or str(l2.get("background_image") or "") != fond
+            or l2.get("profile_picture_slides")):
+        return {"ok": False, "erreur": "relue sans le nouveau look"}
+    if apres != avant:
+        # jamais vu : dit, plutôt qu'un « ✅ » sur un bouton changé
+        _log(f"look de {lid} : bouton OnlyFans changé ({avant} → {apres})")
+        return {"ok": False, "erreur": "bouton OnlyFans changé à la relecture : prévenir un manager"}
+    return {"ok": True, "erreur": ""}
+
+
+def appliquer_look(gid: str, uid: str, cle: str, n: int = 1) -> Dict[str, Any]:
+    """Le look `cle` sur la page n du VA, sous le verrou de la page."""
+    gid = str(gid)
+    choix = {x[0]: x for x in looks(gid)}
+    if cle not in choix:
+        return {"ok": False, "erreur": "look inconnu"}
+    u = place(_vrai_uid(uid), n)
+    with _verrou_page(f"{gid}:{u}"):
+        pg = page_de(gid, u)
+        if not pg.get("link_id") or pg.get("etat", "prete") != "prete":
+            return {"ok": False, "erreur": "pas de page"}
+        _c, _e, libelle, photo, fond = choix[cle]
+        r = _poser_look_lien(str(pg["link_id"]), _equipe(gid), photo, fond)
+        if r.get("ok"):
+            _noter(gid, u, look=cle)
+            _log(f"page {pg.get('shortcode')} de {gid}:{u} : look {libelle}")
+        return dict(r, libelle=libelle)

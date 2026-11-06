@@ -740,7 +740,12 @@ try:
             p["data"]["resolved"] = resolved
         return p
     r = tk.traiter(clic(f"page:o:{MOI}"))
-    check("✏️ Modifier : la fenêtre s'ouvre", r.get("type") == 9 and r["data"]["custom_id"] == f"page:f:{MOI}", r)
+    # 06/11 : sur Twitter, ✏️ propose d'abord un look (tests_pages_looks.py),
+    # « ✏️ Modifier moi-même » (page:m) ouvre la fenêtre
+    check("✏️ Modifier (Twitter) : le choix du look, avec « Modifier moi-même »",
+          r.get("type") == 4 and f"page:m:{MOI}" in json.dumps(r), r)
+    r = tk.traiter(clic(f"page:m:{MOI}"))
+    check("✏️ Modifier moi-même : la fenêtre s'ouvre", r.get("type") == 9 and r["data"]["custom_id"] == f"page:f:{MOI}", r)
     r = tk.traiter(clic(f"page:o:{MOI}", qui=AUTRE))
     check("un autre membre (pas manager) : refusé", r["type"] == 4 and r["data"]["flags"] == 64, r)
     r = tk.traiter(clic(f"page:o:{AUTRE}", qui=AUTRE))

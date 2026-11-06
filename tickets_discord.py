@@ -5213,6 +5213,21 @@ def _telecharger_image(url: str, plafond: int) -> Tuple[Optional[bytes], str]:
     return bytes(buf), ""
 
 
+def _choix_look(gid: str, uid: str, n: int = 1) -> Dict[str, Any]:
+    """✏️ sur un serveur à looks : un look (photo + fond d'un gabarit) ou la
+    fenêtre. Le look en place est en vert."""
+    import pages_va as pv
+    actuel = str(pv.page_de(gid, pv.place(uid, n)).get("look") or "")
+    bts = [{"type": 2, "style": 3 if cle == actuel else 2, "label": libelle, "emoji": {"name": emo},
+            "custom_id": _bouton_page("l" + cle, n, uid)} for cle, emo, libelle, _ph, _fd in pv.looks(gid)][:4]
+    bts.append({"type": 2, "style": 1, "label": "Modifier moi-même", "emoji": {"name": "✏️"},
+                "custom_id": _bouton_page("m", n, uid)})
+    return {"type": 4, "data": {"flags": EPHEMERE, "allowed_mentions": {"parse": []},
+                                "content": "**🎨 Ta page**\nChoisis un look (photo + fond), ou modifie-la toi-même.\n"
+                                           "-# Ton lien, ton tracking et ton Telegram ne bougent pas.",
+                                "components": [{"type": 1, "components": bts}]}}
+
+
 def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Les clics « page: » et la fenêtre, ou None si ce n'est pas le nôtre."""
     p = p or {}
@@ -5224,7 +5239,9 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     morceaux = cid.split(":")
     # (\d*) et pas (\d?) : sans maximum sur TRUST INSTAGRAM, « page:o10 » doit
     # ouvrir la page 10 (pas « Action inconnue »)
-    m_act = re.fullmatch(r"(o|new|f|sel)(\d*)", morceaux[1]) if len(morceaux) == 3 else None
+    # « m » : la fenêtre (✏️ Modifier moi-même) ; « l<look> » : un look
+    # (pages_va.LOOKS, TRUST TWITTER, 06/11/2026)
+    m_act = re.fullmatch(r"(o|new|f|sel|m|l[a-z]+)(\d*)", morceaux[1]) if len(morceaux) == 3 else None
     if not m_act or not morceaux[2].isdigit() or (m_act.group(1) == "sel" and m_act.group(2)):
         return _ephemere("Action inconnue.")
     action, n, uid = m_act.group(1), int(m_act.group(2) or 1), morceaux[2]
@@ -5243,7 +5260,7 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             _EN_FOND(lambda: _redessiner_menu(gid, uid, salon_m, mid_m))
     if not pv.ouverte(gid, uid) or n not in pv.places(gid, uid):
         return _ephemere("Pas encore ouvert.")
-    if action in ("o", "f") and not pv.modifiable(gid, n):
+    if (action in ("o", "f", "m") or action.startswith("l")) and not pv.modifiable(gid, n):
         # une place fixe ne se modifie pas depuis Discord, même par un manager :
         # refusé ici, pas seulement en ne dessinant pas le bouton
         return _ephemere("📄 Page fixe : elle ne se modifie pas.")
@@ -5256,10 +5273,23 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not _droit_usdc(gid, uid, p):
         return _ephemere("Seul ce VA ou son manager peut s'en servir.")
     jeton = str(p.get("token") or "")
-    if p.get("type") == 3 and action == "o":
+    if p.get("type") == 3 and (action in ("o", "m") or action.startswith("l")):
         pg = pv.page_de(gid, pv.place(uid, n))
         if not pg.get("link_id") or pg.get("etat", "prete") != "prete":
             return _ephemere("Pas encore de page.")
+        if action == "o" and pv.looks(gid):
+            return _choix_look(gid, uid, n)
+        if action.startswith("l"):
+            cle_look = action[1:]
+            if cle_look not in {x[0] for x in pv.looks(gid)}:
+                return _ephemere("Look inconnu.")
+
+            def poser_look():
+                r = pv.appliquer_look(gid, uid, cle_look, n=n)
+                _suite(jeton, (f"✅ Look « {r.get('libelle')} » posé sur ta page. Tu peux encore la modifier toi-même."
+                               if r.get("ok") else f"✕ Look non posé : {r.get('erreur')}"), p)
+            _EN_FOND(poser_look)
+            return _differer()
         return fenetre_page(gid, uid, n)
     if p.get("type") == 3 and action == "new":
         # le VA la crée lui-même quand il veut (06/11 : « pour tout le monde »),
