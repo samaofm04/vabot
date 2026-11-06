@@ -5033,12 +5033,15 @@ def _sections_page(gid: str, uid: str, compact: bool = False) -> List[Dict[str, 
     return out
 
 
-# ─── TRUST INSTAGRAM : 3 pages fixes + des pages à la demande (06/11/2026) ─
-# Propriétaire : chaque VA a 3 pages fixes (brune, blonde, template) que
-# personne ne modifie depuis Discord, et peut en demander d'autres, sans
-# maximum, qu'un manager accepte ou refuse dans son ticket ; les pages
-# acceptées se modifient comme celle de Twitter. Le menu : un bloc « 📄 Tes
-# pages » (les adresses), les ✏️ des pages modifiables, puis ➕ / ⏳.
+# ─── TRUST INSTAGRAM : page 1 = le lien + des pages à la demande (06/11/2026) ─
+# Propriétaire, l'après-midi : 3 pages fixes par VA ; le soir : « il n'y a
+# pas 3 pages d'un coup, il y a une seule page » — la page 1 est son lien
+# principal (pages_va.LIEN_PAGE_1), ✏️ Page 1 y pose un look (brune, blonde,
+# général). Il en demande d'autres, sans maximum, qu'un manager accepte ou
+# refuse dans son ticket ; les pages acceptées (page 2, 3…) ont le choix du
+# look et se modifient comme celle de Twitter. Le menu : un bloc « 📄 Tes
+# pages » (page 1 = « ton lien », puis les adresses), les ✏️, puis ➕ / ⏳.
+# Le mécanisme des places fixes (pages_va.FIXES) reste, sans serveur.
 #: Au-delà, les ✏️ passent en liste déroulante (une rangée tient 5 boutons).
 PAGES_BOUTONS_MAX = 5
 #: Une liste déroulante tient 25 choix : les pages les plus récentes.
@@ -5086,6 +5089,14 @@ def _sections_pages_fixes(gid: str, uid: str, l: Dict[str, Any], compact: bool =
     montrees = acceptees[-PAGES_LISTEES_MAX:]
     etats = {n: pv.etat_place(gid, uid, n, reg, hors_service=hors)
              for n in list(range(1, pv.fixes(gid) + 1)) + acceptees}
+    page1 = pv.lien_page_1(gid) and bool(pv.looks(gid))
+    if pv.lien_page_1(gid):
+        # TRUST INSTAGRAM (06/11 au soir) : la page 1 est le lien principal,
+        # son adresse est déjà sous « 🔗 Ton lien » — pas répétée
+        sc = str(l.get("shortcode") or "") or str(l.get("public_url") or "").rstrip("/").rsplit("/", 1)[-1]
+        coupe = l.get("actif", True) is False
+        page1 = page1 and not coupe
+        lignes.append("Page 1 · 🚫 désactivée" if coupe else f"Page 1 · ton lien 🔗 ({sc})")
     for n in list(range(1, pv.fixes(gid) + 1)) + montrees:
         etat, url = etats[n]
         lignes.append(f"Page {n} · {url if etat == 'prete' else _TEXTE_ETAT_PAGE.get(etat, etat)}")
@@ -5093,6 +5104,8 @@ def _sections_pages_fixes(gid: str, uid: str, l: Dict[str, Any], compact: bool =
     # montrées : au-delà de PAGES_LISTEES_MAX, les plus anciennes n'étaient
     # plus modifiables depuis aucun menu (la liste en prend 25)
     modifiables = [(n, etats[n][1]) for n in acceptees if etats[n][0] == "prete" and pv.modifiable(gid, n)]
+    if page1:
+        modifiables = [(1, str(l.get("public_url") or ""))] + modifiables     # ✏️ Page 1 : le choix du look
     cachees = acceptees[:len(acceptees) - len(montrees)]
     if cachees:
         lignes.append(f"-# + {len(cachees)} page(s) plus ancienne(s) : {_plage(cachees)}")
@@ -5210,7 +5223,8 @@ def fenetre_page(gid: str, uid: str, n: int = 1) -> Dict[str, Any]:
         if v and len(v) <= longueur:
             comp["value"] = v
         return {"type": 18, "label": label, "component": comp}
-    titre = "Ma page" if pv.pages_max(gid) <= 1 else f"Ma page {n}"
+    # « Ma page 2 » sur TRUST INSTAGRAM, dont les pages_max (sans VA) valent 1
+    titre = "Ma page" if pv.pages_max(gid) <= 1 and int(n) <= 1 else f"Ma page {n}"
     return {"type": 9, "data": {"custom_id": _bouton_page("f", n, uid), "title": titre, "components": [
         {"type": 18, "label": "Photo de profil", "description": "Vide : tu gardes la tienne",
          "component": {"type": 19, "custom_id": "photo", "min_values": 0, "max_values": 1,
@@ -5246,15 +5260,49 @@ def _choix_look(gid: str, uid: str, n: int = 1) -> Dict[str, Any]:
     """✏️ sur un serveur à looks : un look (photo + fond d'un gabarit) ou la
     fenêtre. Le look en place est en vert."""
     import pages_va as pv
-    actuel = str(pv.page_de(gid, pv.place(uid, n)).get("look") or "")
+    # la page 1 de TRUST INSTAGRAM est le lien principal : son look est noté
+    # à part, et elle ne change que par un look (pas de « Modifier moi-même »)
+    lien = pv.lien_page_1(gid) and int(n) <= 1
+    actuel = pv.look_du_lien(gid, uid) if lien else str(pv.page_de(gid, pv.place(uid, n)).get("look") or "")
     bts = [{"type": 2, "style": 3 if cle == actuel else 2, "label": libelle, "emoji": {"name": emo},
             "custom_id": _bouton_page("l" + cle, n, uid)} for cle, emo, libelle, _ph, _fd in pv.looks(gid)][:4]
-    bts.append({"type": 2, "style": 1, "label": "Modifier moi-même", "emoji": {"name": "✏️"},
-                "custom_id": _bouton_page("m", n, uid)})
+    if not lien:
+        bts.append({"type": 2, "style": 1, "label": "Modifier moi-même", "emoji": {"name": "✏️"},
+                    "custom_id": _bouton_page("m", n, uid)})
+    texte = ("**🎨 Ta page 1 (ton lien)**\nChoisis un look (photo + fond).\n"
+             "-# Ton adresse, ton tracking et ton Telegram ne bougent pas.") if lien else \
+            ("**🎨 Ta page**\nChoisis un look (photo + fond), ou modifie-la toi-même.\n"
+             "-# Ton lien, ton tracking et ton Telegram ne bougent pas.")
     return {"type": 4, "data": {"flags": EPHEMERE, "allowed_mentions": {"parse": []},
-                                "content": "**🎨 Ta page**\nChoisis un look (photo + fond), ou modifie-la toi-même.\n"
-                                           "-# Ton lien, ton tracking et ton Telegram ne bougent pas.",
-                                "components": [{"type": 1, "components": bts}]}}
+                                "content": texte, "components": [{"type": 1, "components": bts}]}}
+
+
+def _page_lien(p: Dict[str, Any], gid: str, uid: str, action: str) -> Dict[str, Any]:
+    """La page 1 d'un serveur LIEN_PAGE_1, le lien principal du VA : ✏️ ouvre
+    le choix du look ; un look se pose en fond ; rien d'autre (ni fenêtre, ni
+    création)."""
+    import pages_va as pv
+    import liens_va as lv
+    if not _droit_usdc(gid, uid, p):
+        return _ephemere("Seul ce VA ou son manager peut s'en servir.")
+    if p.get("type") != 3 or not (action == "o" or action.startswith("l")) or not pv.looks(gid):
+        return _ephemere("🔗 Ta page 1, c'est ton lien : elle change par un look (✏️ Page 1).")
+    f = lv.lien_de(gid, uid)
+    if not (f.get("link_id") and f.get("public_url")):
+        return _ephemere("Pas encore de lien.")
+    if action == "o":
+        return _choix_look(gid, uid, 1)
+    cle_look = action[1:]
+    if cle_look not in {x[0] for x in pv.looks(gid)}:
+        return _ephemere("Look inconnu.")
+    jeton = str(p.get("token") or "")
+
+    def poser_look():
+        r = pv.appliquer_look(gid, uid, cle_look, n=1)
+        _suite(jeton, (f"✅ Look « {r.get('libelle')} » posé sur ta page 1 (ton lien)."
+                       if r.get("ok") else f"✕ Look non posé : {r.get('erreur')}"), p)
+    _EN_FOND(poser_look)
+    return _differer()
 
 
 def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -5288,6 +5336,9 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             # n'enverrait plus rien. Le menu redessiné remet la liste à zéro.
             salon_m, mid_m = str(p.get("channel_id") or ""), str(((p.get("message") or {}).get("id")) or "")
             _EN_FOND(lambda: _redessiner_menu(gid, uid, salon_m, mid_m))
+    if pv.lien_page_1(gid) and n <= 1 and pv.ouverte(gid, uid):
+        # TRUST INSTAGRAM : la page 1 est le lien principal (pas une page notée)
+        return _page_lien(p, gid, uid, action)
     if not pv.ouverte(gid, uid) or n not in pv.places(gid, uid):
         return _ephemere("Pas encore ouvert.")
     if (action in ("o", "f", "m") or action.startswith("l")) and not pv.modifiable(gid, n):

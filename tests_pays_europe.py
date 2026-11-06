@@ -67,6 +67,16 @@ def f_update(lid, champs, team_id=None):
 
 
 gms.get_link, gms.update_link = f_get, f_update
+# jamais le vrai GetMySocial : la reprise des pages de TRUST INSTAGRAM range
+# et coupe des pages, et cherche des copies orphelines (06/11 au soir)
+_VRAIS_GMS = (gms.disable_link, gms.list_links_team)
+
+
+def _gms_interdit(*a, **k):
+    raise AssertionError("appel GetMySocial réel dans tests_pays_europe")
+
+
+gms.disable_link = gms.list_links_team = _gms_interdit
 
 
 def direct(lid, tracking="https://onlyfans.com/liasxcret/c76"):
@@ -274,14 +284,20 @@ try:
     _vr = pv._reprendre_pages_sans_liste
     pv._reprendre_pages_sans_liste = lambda g: (APPELS.append(
         ("reprise", sorted(pv._lire()["pages"][f"{AG}:5#2"]["manques"]))) or {})
+    # (le rangement des pages hors places de TRUST INSTAGRAM est testé dans
+    # tests_pages_ig_lien : ici, l'ordre de l'enveloppe des pays seulement)
+    _vl1 = set(pv.LIEN_PAGE_1)
+    pv.LIEN_PAGE_1.discard(AG)
     try:
         pv._noter(AG, "5#2", pays_liste_due="", pays_cibles="")
         pv.reprendre_pages(AG)
     finally:
         pv._reprendre_pages_sans_liste = _vr
+        pv.LIEN_PAGE_1.update(_vl1)
     check("reprendre_pages : la page est marquée AVANT la reprise", APPELS == [("reprise", ["70/30", "pays"])], APPELS)
 finally:
     (lv.ETAT_FICHIER, lv.config, gms.get_link, gms.update_link, lv.lia_seule, lv.PAUSE_PAYS_S, pv.FICHIER) = SAV
+    gms.disable_link, gms.list_links_team = _VRAIS_GMS
 
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")

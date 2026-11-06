@@ -37,14 +37,16 @@ Ce que le VA tape est nettoyé (nettoyer) : ni accolades (le balisage
 longueurs bornées. Il ne touche jamais au nom de tableau de bord ni à
 l'adresse (display_name, shortcode).
 
-TRUST INSTAGRAM (propriétaire, 06/11/2026) : chaque VA qui a un lien en
-service a 3 pages FIXES, une par place, chacune copiée de SON gabarit
-(GABARITS_PLACE : liabrune, liablonde, liatemplate, équipe EMY IG), créées
-d'office par la reprise (creer_pages_manquantes, en fond), jamais modifiables
-depuis Discord. Il peut en demander d'autres (« ➕ Demander une page »), sans
-maximum : un manager accepte ou refuse (registre « demandes »), la page
-acceptée copie GABARIT_PAGE et se modifie comme celle de Twitter. Toutes ont
-le 70/30 « Lia seule » (AB_PAGES) ; Twitter reste sans A/B.
+TRUST INSTAGRAM (propriétaire, 06/11/2026 au soir) : la page 1 est le lien
+principal du VA, déjà une landing page (LIEN_PAGE_1) ; il en demande d'autres
+(« ➕ Demander une page »), sans maximum : un manager accepte ou refuse
+(registre « demandes »), la page acceptée (page 2, 3…) copie GABARIT_PAGE
+(liabrune) et se modifie comme celle de Twitter. Brune par défaut, lien
+principal compris (LOOK_DEFAUT) ; le choix du look sur toutes. Les pages
+acceptées ont le 70/30 « Lia seule » (AB_PAGES) ; Twitter reste sans A/B.
+L'après-midi du même jour, chaque VA avait 3 pages FIXES créées d'office
+(FIXES, GABARITS_PLACE) : rangées dans « anciennes » et coupées
+(retirer_pages_hors_places), jamais supprimées.
 """
 from __future__ import annotations
 
@@ -75,7 +77,20 @@ PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1}
 #: delà, des pages à la demande, sans maximum, une fois acceptées par un
 #: manager — modifiables, elles. Ce dictionnaire décide seul où il y a des
 #: places fixes et des demandes : Twitter n'y est pas (sa page 1 reste à lui).
-FIXES: Dict[str, int] = {AGENCY_IG_ID: 3}
+#: TRUST INSTAGRAM n'y est plus depuis le 06/11 au soir (propriétaire : « il
+#: n'y a pas 3 pages d'un coup, il y a une seule page pour l'instant et puis
+#: on ajoute tranquillement ») : sa page 1 est le lien principal du VA
+#: (LIEN_PAGE_1), les suivantes se demandent (DEMANDES). Le mécanisme reste.
+FIXES: Dict[str, int] = {}
+#: Les serveurs où le VA demande ses pages (➕, un manager accepte) — séparé
+#: de FIXES : sur_demande() y garde le comportement de TRUST INSTAGRAM (VA
+#: parti sans ticket, adresses en paires de mots, doublons, réessai à 24 h…).
+DEMANDES = {AGENCY_IG_ID}
+#: Les serveurs dont la page 1 est le lien principal du VA (déjà une landing
+#: page : « le premier lien, c'est aussi une première page ») : aucune page
+#: de pages_va à la place 1, les pages demandées commencent à 2, le look
+#: (LOOKS) se pose aussi sur le lien principal.
+LIEN_PAGE_1 = {AGENCY_IG_ID}
 #: Le gabarit de page de l'équipe du serveur (GetMySocial refuse de copier un
 #: lien d'une autre équipe) : « Gabarit Twitter (page de base) ».
 #: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo ». liaseeo
@@ -86,20 +101,21 @@ FIXES: Dict[str, int] = {AGENCY_IG_ID: 3}
 #: — « MY TELEGRAM » ajouté en dernier bouton sur ce gabarit (à la main, dans
 #: GetMySocial). Le code ne touche que les boutons OnlyFans (_RE_OF) : le
 #: Telegram reste quand le VA modifie sa page ou que la reprise re-pointe.
-#: TRUST INSTAGRAM : liatemplate (EMY IG), le gabarit des pages demandées
-#: (place 4 et suivantes) ; les places fixes ont le leur (GABARITS_PLACE).
+#: TRUST INSTAGRAM : liabrune (EMY IG) depuis le 06/11 au soir, le gabarit
+#: des pages demandées (« par défaut, à tout le monde, la brune ») ; c'était
+#: liatemplate pour les places 4 et suivantes, au temps des places fixes.
 #: Une chaîne par serveur : tout ce qui copie ou teste un gabarit la lit telle
 #: quelle (gabarit() choisit entre les deux).
 GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aed1548c7881b6c805e773a",
-                                AGENCY_IG_ID: "lnk_6aedd88dc7881b6c8066a2c0"}
+                                AGENCY_IG_ID: "lnk_6aedd88bc7881b6c8066a247"}
 #: Un gabarit par place fixe (propriétaire, 06/11), tous dans l'équipe EMY IG
 #: du serveur. Leur 2e bouton (Telegram) n'est jamais touché : seuls les
 #: boutons OnlyFans (liens_va._RE_OF) reçoivent le tracking ou un texte.
-GABARITS_PLACE: Dict[str, Dict[int, str]] = {
-    AGENCY_IG_ID: {1: "lnk_6aedd88bc7881b6c8066a247",      # liabrune
-                   2: "lnk_6aedd88cc7881b6c8066a28c",      # liablonde
-                   3: "lnk_6aedd88dc7881b6c8066a2c0"},     # liatemplate
-}
+#: TRUST INSTAGRAM en avait trois (liabrune lnk_6aedd88bc7881b6c8066a247,
+#: liablonde lnk_6aedd88cc7881b6c8066a28c, liatemplate
+#: lnk_6aedd88dc7881b6c8066a2c0) jusqu'au 06/11 au soir : retirés, sinon une
+#: page demandée en place 2 aurait copié la blonde.
+GABARITS_PLACE: Dict[str, Dict[int, str]] = {}
 #: Les serveurs dont les pages portent le 70/30 « Lia seule » (70 % sur le
 #: tracking du VA, 30 % « Base Lia » directe), comme leurs liens directs — si
 #: liens_va.lia_seule(gid) le veut encore. Twitter n'y est pas : « ça doit pas
@@ -214,25 +230,40 @@ def fixes(gid: Any) -> int:
 
 
 def sur_demande(gid: Any) -> bool:
-    """Ce serveur a des places fixes créées d'office et des pages à la
-    demande (acceptées par un manager)."""
-    return fixes(gid) > 0
+    """Ce serveur a des pages à la demande (acceptées par un manager), avec
+    ou sans places fixes créées d'office."""
+    return fixes(gid) > 0 or str(gid or "") in DEMANDES
+
+
+def lien_page_1(gid: Any) -> bool:
+    """La page 1 de ce serveur est le lien principal du VA (LIEN_PAGE_1)."""
+    return str(gid or "") in LIEN_PAGE_1
+
+
+def plancher(gid: Any) -> int:
+    """Les places qui ne se demandent pas : les fixes, et la page 1 quand
+    c'est le lien principal. Une page demandée prend une place au-delà."""
+    return fixes(gid) + (1 if lien_page_1(gid) else 0)
 
 
 def modifiable(gid: Any, n: int = 1) -> bool:
-    """Une place fixe ne se modifie pas depuis Discord ; les autres oui."""
-    return int(n or 1) > fixes(gid)
+    """Une place fixe ne se modifie pas depuis Discord ; les autres oui. La
+    page 1 qui est le lien principal (LIEN_PAGE_1) ne change que par un look
+    (appliquer_look), jamais par la fenêtre."""
+    n = int(n or 1)
+    return n > fixes(gid) and not (lien_page_1(gid) and n <= 1)
 
 
 def places(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -> List[int]:
-    """Les places auxquelles ce VA a droit : 1..PAGES_MAX sans places fixes
-    (Twitter) ; sinon les fixes puis chaque page acceptée par un manager.
+    """Les places auxquelles ce VA a droit : 1..PAGES_MAX sans pages à la
+    demande (Twitter) ; sinon les fixes (s'il y en a) puis chaque page
+    acceptée par un manager — la page 1 qui est le lien principal
+    (LIEN_PAGE_1) n'en fait pas partie : pages_va ne la gère pas.
     `d` : le registre déjà lu (un tour sur tous les VA ne le relit pas)."""
     gid = str(gid or "")
-    f = fixes(gid)
-    if not f:
+    if not sur_demande(gid):
         return list(range(1, int(PAGES_MAX.get(gid, 1)) + 1))
-    return list(range(1, f + 1)) + places_acceptees(gid, uid, d)
+    return list(range(1, fixes(gid) + 1)) + places_acceptees(gid, uid, d)
 
 
 def pages_max(gid: Any, uid: Any = None) -> int:
@@ -240,7 +271,8 @@ def pages_max(gid: Any, uid: Any = None) -> int:
     sans places fixes ; sinon les fixes, plus les pages acceptées du VA."""
     if uid is None or not sur_demande(gid):
         return fixes(gid) or int(PAGES_MAX.get(str(gid or ""), 1))
-    return max(places(gid, uid))
+    # sans places fixes ni page acceptée (TRUST INSTAGRAM) : max([]) levait
+    return max(places(gid, uid) or [plancher(gid) or 1])
 
 
 def _vrai_uid(uid: Any) -> str:
@@ -406,7 +438,7 @@ def demande_en_attente(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -
 def places_acceptees(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -> List[int]:
     """Les places attribuées aux demandes acceptées de ce VA, dans l'ordre."""
     gid, uid = str(gid), _vrai_uid(uid)
-    f = fixes(gid)
+    f = plancher(gid)
     out = set()
     for x in ((d if d is not None else _lire()).get("demandes") or {}).values():
         if _de_ce_va(x, gid, uid) and x.get("etat") == "acceptee":
@@ -530,7 +562,7 @@ def annuler_demande(did: str, raison: str) -> bool:
 def _prochaine_place(d: Dict[str, Any], gid: str, uid: str) -> int:
     """Après les fixes, la plus haute place déjà attribuée (demande acceptée)
     ou créée (registre des pages), plus un : jamais deux fois la même."""
-    haut = fixes(gid)
+    haut = plancher(gid)
     for x in _demandes(d).values():
         if _de_ce_va(x, gid, uid) and x.get("etat") == "acceptee":
             try:
@@ -1608,11 +1640,10 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
 #: page, 70/30 avec sa copie temporaire, rangement, relecture), toutes sur la
 #: clé principale. Le rattrapage d'un serveur entier (≈ 3 pages par VA)
 #: s'étale donc sur plusieurs passages de la synchro (30 min).
-#: 0 depuis le 06/11 vers 20 h 45 : le propriétaire ne veut plus de 3 pages
-#: fixes sur TRUST INSTAGRAM (« il n'y a pas 3 pages d'un coup, il y a une
-#: seule page pour l'instant ») ; arrêtées d'abord, chaque lot en créait 3 de
-#: plus à désactiver ensuite. Le nouveau fonctionnement suit.
-CREATIONS_PAR_PASSE = 0
+#: (Mis à 0 le 06/11 vers 20 h 45 le temps de retirer les places fixes de
+#: TRUST INSTAGRAM, 1d363d1 ; sans places fixes, le lot ne refait plus que
+#: les pages acceptées dont la copie a raté.)
+CREATIONS_PAR_PASSE = 3
 #: Au-delà, la place attend (« a_verifier » dans « creations », dit au journal
 #: à chaque passage) — CREATION_REESSAI_S, puis un nouvel essai. Pour la
 #: relancer tout de suite : retirer sa clé « gid:uid#n » de « creations »
@@ -2229,3 +2260,301 @@ def appliquer_look(gid: str, uid: str, cle: str, n: int = 1) -> Dict[str, Any]:
             _noter(gid, u, look=cle)
             _log(f"page {pg.get('shortcode')} de {gid}:{u} : look {libelle}")
         return dict(r, libelle=libelle)
+
+
+# ─── TRUST INSTAGRAM : la page 1 est le lien principal (06/11/2026 au soir) ─
+# Propriétaire : « sur Instagram, c'est quasiment que des landing pages […]
+# le premier lien, c'est aussi une première page […] il n'y a pas 3 pages
+# d'un coup, il y a une seule page pour l'instant et puis on ajoute
+# tranquillement […] comme sur Twitter, il y a les options blonde, brune,
+# général, mais par défaut, à tout le monde, la brune » ; « tu gardes que
+# celui qui est là, ou au pire tu disable la page » ; le look = photo et fond
+# seulement. Les 36 pages fixes de l'après-midi (6 visites en tout ce
+# jour-là, des essais) sont rangées dans « anciennes » puis coupées.
+LOOKS[AGENCY_IG_ID] = LOOKS[TWITTER_ID]
+#: Le look posé d'office sur le lien principal (LIEN_PAGE_1) d'un VA qui n'en
+#: a pas encore sur CE lien (un lien refait repart d'emyigbase) : à chaque
+#: reprise, LOOKS_PAR_PASSE au plus.
+LOOK_DEFAUT: Dict[str, str] = {AGENCY_IG_ID: "brune"}
+LOOKS_PAR_PASSE = 20
+#: Les coupures des pages rangées, par passage (une écriture chacune).
+RETRAITS_PAR_PASSE = 40
+RAISON_RETRAIT = "places fixes retirées (06/11 au soir) : la page 1 est le lien principal"
+
+
+def _cle_lien(gid: Any, uid: Any) -> str:
+    return f"{gid}:{_vrai_uid(uid)}"
+
+
+def look_du_lien(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None,
+                 fiche: Optional[Dict[str, Any]] = None) -> str:
+    """Le look posé sur le lien principal de ce VA, « » s'il n'y en a pas —
+    ou s'il a été posé sur un ancien lien (refait depuis : il repart du
+    gabarit). `d`, `fiche` : le registre et la fiche liens_va déjà lus."""
+    d = d if d is not None else _lire()
+    x = (d.get("looks_liens") or {}).get(_cle_lien(gid, uid)) if isinstance(d.get("looks_liens"), dict) else None
+    if not isinstance(x, dict) or not x.get("cle"):
+        return ""
+    if fiche is None:
+        import liens_va as lv
+        fiche = lv.lien_de(str(gid), _vrai_uid(uid))
+    lid = str((fiche or {}).get("link_id") or "")
+    return str(x["cle"]) if lid and str(x.get("link_id") or "") == lid else ""
+
+
+def _noter_look_lien(gid: Any, uid: Any, **champs) -> bool:
+    with _VERROU:
+        d = _lire()
+        ll = d.get("looks_liens")
+        if not isinstance(ll, dict):
+            ll = d["looks_liens"] = {}
+        c = _cle_lien(gid, uid)
+        ll[c] = dict(ll.get(c) if isinstance(ll.get(c), dict) else {}, **champs)
+        return _ecrire(d)
+
+
+def _look_sur_lien(gid: str, uid: str, cle: str) -> Dict[str, Any]:
+    """Le look `cle` sur le lien principal du VA (sa page 1) : photo + fond,
+    rien d'autre (_poser_look_lien relit le bouton OnlyFans). Rend {ok,
+    erreur, libelle}."""
+    import liens_va as lv
+    choix = {x[0]: x for x in looks(gid)}
+    if cle not in choix:
+        return {"ok": False, "erreur": "look inconnu"}
+    vrai = _vrai_uid(uid)
+    _c, _e, libelle, photo, fond = choix[cle]
+    # un verrou à part (pas celui d'une page) : deux looks cliqués ensemble
+    # sur le même lien ne s'écrasent pas
+    with _verrou_page(f"{gid}:lien:{vrai}"):
+        f = lv.lien_de(gid, vrai)
+        lid = str(f.get("link_id") or "")
+        if not (lid and f.get("public_url")):
+            return {"ok": False, "erreur": "pas de lien", "libelle": libelle}
+        r = _poser_look_lien(lid, _equipe(gid), photo, fond)
+        if r.get("ok"):
+            _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0, erreur="")
+            _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}")
+        return dict(r, libelle=libelle)
+
+
+_appliquer_look_page = appliquer_look
+
+
+def appliquer_look(gid: str, uid: str, cle: str, n: int = 1) -> Dict[str, Any]:   # noqa: F811
+    """Le look `cle` sur la page n du VA ; la page 1 d'un serveur LIEN_PAGE_1
+    est son lien principal."""
+    if lien_page_1(gid) and int(n or 1) <= 1:
+        return _look_sur_lien(str(gid), str(uid), cle)
+    return _appliquer_look_page(gid, uid, cle, n)
+
+
+appliquer_look.__doc__ = (appliquer_look.__doc__ or "") + "\n" + (_appliquer_look_page.__doc__ or "")
+
+
+def retirer_pages_hors_places(gid: str) -> Dict[str, Any]:
+    """Serveur LIEN_PAGE_1 : chaque page notée dont la place n'est pas une des
+    places du VA (les places fixes d'avant, la page 1 surtout) sortie de
+    « pages » vers « anciennes », en UNE écriture, puis coupée — dans cet
+    ordre : la reprise rallume une page notée coupée dans « pages » si son VA
+    est en service. Une page tenue (bascule, look, modification) attend le
+    passage suivant. Les coupures ratées sont refaites au passage suivant
+    (« a_couper »), RETRAITS_PAR_PASSE au plus. Jamais supprimées. Rend un
+    bilan ; ne lève pas."""
+    import gms
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"rangees": [], "coupees": [], "rates": []}
+    if not lien_page_1(gid):
+        return bilan
+    d = _lire()
+    a_ranger = [c for c, pg in (d.get("pages") or {}).items()
+                if str(c).partition(":")[0] == gid and isinstance(pg, dict)
+                and numero_de_place(str(c).partition(":")[2]) not in
+                places(gid, _vrai_uid(str(c).partition(":")[2]), d)]
+    tenus = []
+    for c in a_ranger:
+        v = _verrou_page(c)
+        if v.acquire(blocking=False):
+            tenus.append((c, v))
+    try:
+        if tenus:
+            with _VERROU:
+                d = _lire()
+                anc = d.get("anciennes")
+                if not isinstance(anc, dict):
+                    anc = d["anciennes"] = {}
+                t = int(time.time())
+                for c, _v in tenus:
+                    pg = d["pages"].pop(c, None)
+                    if not isinstance(pg, dict):
+                        continue
+                    k, i = f"{c}:{t}", 2
+                    while k in anc:          # la même page rangée deux fois dans la même seconde
+                        k, i = f"{c}:{t}-{i}", i + 1
+                    anc[k] = dict(pg, place=numero_de_place(c.partition(":")[2]), retiree=t,
+                                           raison=RAISON_RETRAIT,
+                                           a_couper=bool(pg.get("link_id")) and pg.get("actif", True) is not False)
+                    bilan["rangees"].append(c)
+                if bilan["rangees"] and not _ecrire(d):
+                    _log(f"pages {gid} : {len(bilan['rangees'])} page(s) à ranger, registre non écrit — "
+                         "rien rangé, refait au passage suivant")
+                    bilan["rangees"] = []
+                    return bilan
+    finally:
+        for _c, v in tenus:
+            v.release()
+    if len(tenus) < len(a_ranger):
+        _log(f"pages {gid} : {len(a_ranger) - len(tenus)} page(s) tenue(s), rangée(s) au passage suivant")
+    # les coupures, celles d'un passage d'avant comprises (refus GetMySocial)
+    a_couper = [(k, x) for k, x in (_lire().get("anciennes") or {}).items()
+                if str(k).startswith(gid + ":") and isinstance(x, dict) and x.get("a_couper")]
+    faits: Dict[str, Dict[str, Any]] = {}
+    for k, x in a_couper[:RETRAITS_PAR_PASSE]:
+        try:
+            r = gms.disable_link(str(x["link_id"]))
+        except Exception as e:                               # noqa: BLE001
+            r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        if r.get("ok"):
+            faits[k] = {"a_couper": False, "actif": False, "coupee_quand": int(time.time())}
+            bilan["coupees"].append(str(x.get("shortcode") or x.get("link_id")))
+        else:
+            faits[k] = {"essais_coupure": int(x.get("essais_coupure") or 0) + 1,
+                        "erreur_coupure": str(r.get("error") or "refus GetMySocial")[:140]}
+            bilan["rates"].append(str(x.get("shortcode") or x.get("link_id")))
+    if faits:
+        with _VERROU:
+            d = _lire()
+            anc = d.get("anciennes") if isinstance(d.get("anciennes"), dict) else {}
+            for k, ch in faits.items():
+                if isinstance(anc.get(k), dict):
+                    anc[k].update(ch)
+            _ecrire(d)
+    if bilan["rangees"] or bilan["coupees"] or bilan["rates"]:
+        _log(f"pages {gid} hors places : {len(bilan['rangees'])} rangée(s) dans « anciennes », "
+             f"{len(bilan['coupees'])} coupée(s)"
+             + (f", {len(bilan['rates'])} NON coupée(s), refaites au passage suivant : {', '.join(bilan['rates'][:10])}"
+                if bilan["rates"] else "")
+             + (f" ; {len(a_couper) - RETRAITS_PAR_PASSE} au passage suivant"
+                if len(a_couper) > RETRAITS_PAR_PASSE else ""))
+    return bilan
+
+
+def couper_copies_orphelines(gid: str) -> Dict[str, Any]:
+    """Une fois par serveur LIEN_PAGE_1 (« orphelines_vues ») : les liens de
+    l'équipe au nom d'une page de VA (« Instagram VA <n> @<pseudo> page [n] »)
+    que le registre ne connaît pas (ni « pages » ni « anciennes ») — une copie
+    faite par un lot interrompu (redémarrage entre la copie et sa note) :
+    coupés, jamais supprimés, dits. Une lecture de l'équipe ; refaite au
+    passage suivant si elle échoue. Ne lève pas."""
+    import gms
+    import liens_va as lv
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"coupees": [], "rates": []}
+    if not lien_page_1(gid) or (_lire().get("orphelines_vues") or {}).get(gid):
+        return bilan
+    equipe = _equipe(gid)
+    try:
+        r = gms.list_links_team(equipe, force_refresh=True)
+    except Exception as e:                                   # noqa: BLE001
+        r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if not r.get("ok"):
+        _log(f"copies orphelines de {gid} non cherchées ({str(r.get('error'))[:100]}) : au passage suivant")
+        return bilan
+    plateforme = re.escape(str(lv.espace(gid).get("plateforme") or "Twitter"))
+    motif = re.compile(rf"{plateforme} VA \d+ @\S+ page( \d+)?")
+    connus = _ids_notes()
+    for l in r.get("links") or []:
+        i = str((l or {}).get("id") or "") if isinstance(l, dict) else ""
+        nom = str(l.get("display_name") or "") if isinstance(l, dict) else ""
+        if not i or i in connus or not motif.fullmatch(nom):
+            continue
+        # (déjà coupé : la coupure ne change rien, la liste ne le dit pas sûrement)
+        if gms.disable_link(i).get("ok"):
+            bilan["coupees"].append(f"{nom} ({i})")
+        else:
+            bilan["rates"].append(f"{nom} ({i})")
+    if bilan["coupees"] or bilan["rates"]:
+        _log(f"copies orphelines de {gid} : {len(bilan['coupees'])} coupée(s) {bilan['coupees'][:10]}"
+             + (f", {len(bilan['rates'])} NON coupée(s), à couper à la main : {bilan['rates'][:10]}"
+                if bilan["rates"] else ""))
+    with _VERROU:
+        d = _lire()
+        vues = d.get("orphelines_vues")
+        if not isinstance(vues, dict):
+            vues = d["orphelines_vues"] = {}
+        vues[gid] = int(time.time())
+        _ecrire(d)
+    return bilan
+
+
+def poser_looks_par_defaut(gid: str) -> Dict[str, Any]:
+    """LOOK_DEFAUT sur le lien principal de chaque VA en service qui n'a pas
+    encore de look noté SUR CE LIEN (nouveau VA, lien refait) —
+    LOOKS_PAR_PASSE au plus ; un lien qui refuse ESSAIS_REPRISE fois
+    attend qu'on regarde (dit au journal). Ne lève pas."""
+    gid = str(gid)
+    cle_def = LOOK_DEFAUT.get(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    if not (cle_def and lien_page_1(gid) and cle_def in {x[0] for x in looks(gid)}):
+        return bilan
+    d = _lire()
+    ll = d.get("looks_liens") if isinstance(d.get("looks_liens"), dict) else {}
+    faits = 0
+    for uid, f in sorted(_va_du_serveur(gid).items()):
+        if faits >= LOOKS_PAR_PASSE:
+            break
+        lid = str(f.get("link_id") or "")
+        if not (lid and f.get("public_url")) or f.get("actif", True) is False:
+            continue
+        x = ll.get(_cle_lien(gid, uid)) if isinstance(ll.get(_cle_lien(gid, uid)), dict) else {}
+        meme = str(x.get("link_id") or "") == lid
+        if meme and (x.get("cle") or int(x.get("essais") or 0) >= ESSAIS_REPRISE):
+            continue
+        faits += 1
+        try:
+            r = _look_sur_lien(gid, uid, cle_def)
+        except Exception as e:                               # noqa: BLE001
+            r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+        if r.get("ok"):
+            bilan["poses"].append(str(f.get("shortcode") or lid))
+        else:
+            essais = (int(x.get("essais") or 0) if meme else 0) + 1
+            _noter_look_lien(gid, uid, link_id=lid, essais=essais, erreur=str(r.get("erreur") or "")[:140])
+            bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')}"
+                                  + (" (plus retenté)" if essais >= ESSAIS_REPRISE else ""))
+    if bilan["poses"] or bilan["rates"]:
+        _log(f"look « {cle_def} » par défaut sur {gid} : {len(bilan['poses'])} lien(s)"
+             + (f", ratés : {'; '.join(bilan['rates'][:5])}" if bilan["rates"] else ""))
+    return bilan
+
+
+_reprendre_pages_avant_page1 = reprendre_pages
+
+
+def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
+    rangees: List[str] = []
+    if lien_page_1(gid):
+        # rangées AVANT la reprise : elle rallumerait une page coupée de « pages »
+        for nom_etape, etape in (("rangement", retirer_pages_hors_places), ("orphelines", couper_copies_orphelines),
+                                 ("look par défaut", poser_looks_par_defaut)):
+            try:
+                b = etape(gid)
+                if nom_etape == "rangement":
+                    rangees = list(b.get("rangees") or [])
+            except Exception as e:                           # noqa: BLE001
+                _log(f"pages {gid} : {nom_etape} en échec ({type(e).__name__}: {e})")
+    bilan = _reprendre_pages_avant_page1(gid)
+    vas = sorted({_vrai_uid(c.partition(":")[2]) for c in rangees})
+    if vas:
+        # leurs menus montraient encore les adresses des pages rangées
+        def redessiner() -> None:
+            import tickets_discord as tk
+            for uid in vas:
+                try:
+                    tk._maj_menu_v2(str(gid), uid)
+                except Exception as e:                       # noqa: BLE001
+                    _log(f"menu de {gid}:{uid} non remis à jour : {type(e).__name__}: {e}")
+        EN_FOND(redessiner)
+    return bilan
+
+
+reprendre_pages.__doc__ = _reprendre_pages_avant_page1.__doc__

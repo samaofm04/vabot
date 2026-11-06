@@ -84,7 +84,8 @@ try:
     check("chaque look : une photo et un fond chez GetMySocial",
           all(x[3].startswith("https://images.getmysocial.com/") and x[4].startswith("https://images.getmysocial.com/")
               for x in lk))
-    check("TRUST INSTAGRAM : pas de looks (ses pages sont fixes)", pv.looks(AG) == ())
+    check("TRUST INSTAGRAM : les mêmes looks depuis le 06/11 au soir (page 1 = son lien, tests_pages_ig_lien)",
+          pv.looks(AG) == lk)
 
     print("2. appliquer_look")
     LIENS["lnk_page"] = json.loads(json.dumps(PAGE))
