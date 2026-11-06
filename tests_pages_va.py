@@ -3,7 +3,7 @@
 
 Propriétaire : « je veux avoir 2 liens pour les VA, un direct et un landing page
 qu'ils peuvent modifier » ; photo (il dépose une image), nom et bio, texte du
-bouton, fond = une couleur ; même tracking, mêmes règles (70/30, pays, safe
+bouton, image de fond ; même tracking, pays, safe page, PAS de 70/30 (« ça doit pas être 70 30 ») ; (
 page) ; essai sur lui seul, hors classement.
 
 Sans réseau ni data/ : gms, requests et liens_va sont remplacés là où il faut,
@@ -207,12 +207,12 @@ try:
           ("pays", lid) in APPELS and ("ranger", lid, "Manager JOHN") in APPELS
           and any(a[0] == "update" and a[1] == lid and a[2].get("bot_protection") == {"mode": "safe_page"}
                   for a in APPELS), APPELS)
-    check("70/30 posé sur la page (son id, son tracking)",
-          AB and AB[-1] == {"link_id": lid, "tracking": FICHE["tracking"], "shortcode": pg["shortcode"]}, AB)
+    check("PAS de 70/30 sur la page (« ça doit pas être 70 30 »)", not AB, AB)
+    check("base de la page : liaseeo (copie dans l'équipe)", pv.GABARIT_PAGE[TW] == "lnk_6aed1548c7881b6c805e773a")
     check("registre : adresse, actif, ce qu'affiche la page (sans balisage)",
           pg.get("public_url", "").startswith("https://getmysocial.com/") and pg.get("actif") is True
           and pg["champs"] == {"nom": "Lia ♡", "bio": "posting my secretttts :3",
-                               "bouton": "“exclusive” stuff lol", "couleur": ""}, pg)
+                               "bouton": "“exclusive” stuff lol"}, pg)
     APPELS.clear()
     r2 = pv.creer_page(TW, MOI)
     check("relancée : déjà là, rien recréé", r2.get("deja") and not [a for a in APPELS if a[0] == "duplicate"], r2)
@@ -256,7 +256,8 @@ try:
     r = pv.modifier_page(TW, MOI, nom="Lia {{color:#000}}x{{/color}}", bio="hello\nworld")
     up = [a for a in APPELS if a[0] == "update"][-1][2]
     check("nom et bio : nettoyés, envoyés, relus ; aucune image envoyée",
-          r["ok"] and up["name_user"] == "Lia x" and up["bio"] == "hello\nworld" and up.get("display_name")
+          r["ok"] and up["name_user"] == "{{color:#ffffff}}Lia x{{/color}}"
+          and up["bio"] == "{{color:#ffffff}}hello\nworld{{/color}}" and up.get("display_name")
           and not [a for a in APPELS if a[0] == "post"], (r, up))
     APPELS.clear()
     r = pv.modifier_page(TW, MOI, bouton="Mon OF 🔥")
@@ -283,9 +284,31 @@ try:
           r["ok"] and up["profile_picture"].startswith("https://images.getmysocial.com/")
           and up["profile_picture_slides"] == [{"url": up["profile_picture"], "media_type": "image"}]
           and any(a[0] == "delete" for a in APPELS), (r, up))
-    check("registre : ce qui a changé noté (préremplit la fenêtre)",
+    check("registre : ce qui a changé noté, sans balisage (préremplit la fenêtre)",
           pv.page_de(TW, MOI)["champs"] == {"nom": "Lia x", "bio": "hello\nworld", "bouton": "Mon OF 🔥",
                                              "couleur": "#FFFFFF"}, pv.page_de(TW, MOI)["champs"])
+    APPELS.clear()
+    fj, _e = pv.preparer_fond(b.getvalue())
+    imf = Image.open(io.BytesIO(fj)) if fj else None
+    check("image de fond préparée : 9:16 (1080×1920), JPEG", imf is not None and imf.size == (1080, 1920)
+          and imf.format == "JPEG", _e)
+    r = pv.modifier_page(TW, MOI, fond=fj)
+    up = [a for a in APPELS if a[0] == "update"][-1][2]
+    post = [a for a in APPELS if a[0] == "post"]
+    check("image de fond : envoyée par une page temporaire (supprimée), seul le fond change",
+          r["ok"] and r["faits"] == ["fond"] and post and post[0][3] == ["backgroundImage"]
+          and up["background_image"].startswith("https://images.getmysocial.com/")
+          and "custom_background_color" not in up and "name_user" not in up and "buttons" not in up
+          and any(a[0] == "delete" for a in APPELS), (r, up))
+    # le texte modifié garde la couleur du texte de la page de base (blanc sur le canard)
+    lidp = pv.page_de(TW, MOI)["link_id"]
+    PAGES[lidp]["name_user"] = "{{color:#ffffff}}*Lia  ♡*{{/color}}"
+    APPELS.clear()
+    r = pv.modifier_page(TW, MOI, nom="Emma ♡")
+    up = [a for a in APPELS if a[0] == "update"][-1][2]
+    check("nom changé : gardé en blanc comme celui de la base ({{color:#ffffff}})",
+          up["name_user"] == "{{color:#ffffff}}Emma ♡{{/color}}" and pv.page_de(TW, MOI)["champs"]["nom"] == "Emma ♡",
+          up.get("name_user"))
     REGLE["vieille_image"] = True
     APPELS.clear()
     r = pv.modifier_page(TW, MOI, photo=j)
@@ -339,8 +362,6 @@ try:
 
     # ── 5b. la reprise (synchro des liens) ───────────────────────────────
     print("5b. Reprise")
-    _vrai_cookie = pv._cookie_ok
-    pv._cookie_ok = lambda: True
     FICHES[f"{TW}:{MOI}"]["actif"] = False
     APPELS.clear()
     bl = pv.reprendre_pages(TW)
@@ -355,33 +376,27 @@ try:
     APPELS.clear()
     bl = pv.reprendre_pages(TW)
     lidm = pv.page_de(TW, MOI)["link_id"]
-    check("tracking du direct changé (changement de model) : le bouton de la page suit, pays et 70/30 refaits",
+    check("tracking du direct changé (changement de model) : le bouton de la page suit, pays refaits, pas de 70/30",
           MOI in bl["trackings"] and POSES == [(lidm, "https://onlyfans.com/liasxcret/c999")]
-          and ("pays", lidm) in APPELS and AB and AB[-1]["tracking"] == "https://onlyfans.com/liasxcret/c999"
+          and ("pays", lidm) in APPELS and not AB
           and pv.page_de(TW, MOI)["tracking"] == "https://onlyfans.com/liasxcret/c999", (bl, POSES, AB))
     FICHES[f"{TW}:{MOI}"]["tracking"] = FICHE["tracking"]
     d0 = pv._lire()
-    d0["pages"][f"{TW}:{MOI}"].update(manques=["70/30"], essais=0, tracking=FICHE["tracking"])
+    d0["pages"][f"{TW}:{MOI}"].update(manques=["70/30"], essais={}, tracking=FICHE["tracking"])
     pv._ecrire(d0)
-    pv._cookie_ok = lambda: True
-    lv._poser_base_seule = lambda g, u, lien=None: {"ok": False, "erreur": "cookie", "cookie": True}
-    for _ in range(4):
-        pv.reprendre_pages(TW)
-    pg5 = pv.page_de(TW, MOI)
-    check("refus de cookie : jamais compté (la page attend le cookie, comme le direct)",
-          pg5["manques"] == ["70/30"] and not (pg5.get("essais") or {}).get("70/30") and not pg5.get("a_verifier"), pg5)
-    pv._cookie_ok = lambda: False
     AB.clear()
     pv.reprendre_pages(TW)
-    check("cookie absent : le 70/30 n'est même pas tenté", not AB and pv.page_de(TW, MOI)["manques"] == ["70/30"])
-    pv._cookie_ok = lambda: True
-    lv._poser_base_seule = lambda g, u, lien=None: {"ok": False, "erreur": "A/B inattendu"}
+    check("une ancienne étape 70/30 tombe, sans rien poser", not AB and pv.page_de(TW, MOI)["manques"] == [], AB)
+    lv.poser_pays = lambda lid, eq, *a: {"ok": False, "erreur": "x"}
+    d0 = pv._lire()
+    d0["pages"][f"{TW}:{MOI}"].update(manques=["pays"], essais={})
+    pv._ecrire(d0)
     for _ in range(4):
         pv.reprendre_pages(TW)
     pg5 = pv.page_de(TW, MOI)
-    check("autre échec : ESSAIS_REPRISE fois, puis « a_verifier » (compté par étape)",
-          pg5["manques"] == ["70/30"] and pg5["essais"].get("70/30") == pv.ESSAIS_REPRISE and pg5["a_verifier"] is True, pg5)
-    lv._poser_base_seule = lambda g, u, lien=None: (AB.append(lien) or {"ok": True})
+    check("étape ratée : ESSAIS_REPRISE fois, puis « a_verifier » (compté par étape)",
+          pg5["manques"] == ["pays"] and pg5["essais"].get("pays") == pv.ESSAIS_REPRISE and pg5["a_verifier"] is True, pg5)
+    lv.poser_pays = lambda lid, eq, *a: (APPELS.append(("pays", lid)) or {"ok": True})
     d0 = pv._lire()
     d0["pages"][f"{TW}:{MOI}"].update(essais={})
     pv._ecrire(d0)
@@ -437,7 +452,7 @@ try:
     check("… supprimée à la reprise suivante", "lnk_tmp_x" not in (pv._lire().get("orphelines") or {}))
     src = (BOT / "liens_va.py").read_text(encoding="utf-8")
     # essais remis à zéro pour de bon (pas fusionnés)
-    pv._noter(TW, MOI, essais={"70/30": 3})
+    pv._noter(TW, MOI, essais={"pays": 3})
     pv._noter(TW, MOI, essais={})
     check("un compteur remis à {} est vraiment vidé", pv.page_de(TW, MOI)["essais"] == {})
     # une page au rallumage incertain (a_rallumer) est coupée quand le direct l'est
@@ -457,19 +472,18 @@ try:
     check("… et par la reprise (direct coupé)", MOI in bl["coupees"] and not pv.page_de(TW, MOI).get("a_rallumer"), bl)
     FICHES[f"{TW}:{MOI}"]["actif"] = True
     pv.reprendre_pages(TW)
-    # le plafond par passage ne bloque ni coupures ni rallumages, et un 70/30 qui attend le cookie ne compte pas
+    # le plafond par passage ne bloque ni coupures ni rallumages
     _vrai_plaf = pv.PAGES_PAR_PASSE
     pv.PAGES_PAR_PASSE = 0
-    pv._cookie_ok = lambda: False
     d0 = pv._lire()
-    d0["pages"][f"{TW}:{MOI}"].update(actif=False, manques=["70/30"], essais={})
+    d0["pages"][f"{TW}:{MOI}"].update(actif=False, manques=["pays"], essais={})
     pv._ecrire(d0)
     APPELS.clear()
     bl = pv.reprendre_pages(TW)
-    check("plafond atteint : le rallumage passe quand même ; le 70/30 attend sans compter",
-          MOI in bl["rallumees"] and pv.page_de(TW, MOI)["essais"] == {} and pv.page_de(TW, MOI)["manques"] == ["70/30"], bl)
+    check("plafond atteint : le rallumage passe quand même ; le reste attend (sans compter)",
+          MOI in bl["rallumees"] and pv.page_de(TW, MOI)["essais"] == {} and pv.page_de(TW, MOI)["manques"] == ["pays"], bl)
     pv.PAGES_PAR_PASSE = _vrai_plaf
-    pv._cookie_ok = _vrai_cookie
+    pv.reprendre_pages(TW)
     check("la synchro des liens (30 min) lance la reprise des pages du pilote",
           "pages_va.reprendre_pages(gid)" in src and "_synchroniser_sans_pages = synchroniser" in src)
 
@@ -530,12 +544,14 @@ try:
     pv._ecrire(d)
     f = tk.fenetre_page(TW, MOI)
     comps = f["data"]["components"]
-    check("fenêtre : 5 composants — photo (facultative), nom, bio, bouton, couleur ; préremplie",
+    check("fenêtre : 5 composants — photo, nom, bio, bouton, image de fond (facultatives) ; préremplie",
           f["type"] == 9 and f["data"]["custom_id"] == f"page:f:{MOI}" and len(comps) == 5
           and comps[0]["component"]["type"] == 19 and comps[0]["component"]["required"] is False
-          and comps[1]["component"].get("value") == "Lia x" and comps[2]["component"]["style"] == 2
+          and comps[1]["component"].get("value") == pv.page_de(TW, MOI)["champs"]["nom"]
+          and comps[2]["component"]["style"] == 2
           and comps[3]["component"].get("value") == "Mon OF 🔥"
-          and [o["value"] for o in comps[4]["component"]["options"] if o["default"]] == ["#FFFFFF"], comps)
+          and comps[4]["component"]["type"] == 19 and comps[4]["component"]["custom_id"] == "fond"
+          and comps[4]["component"]["required"] is False, comps)
     d["pages"][f"{TW}:{MOI}"]["champs"]["nom"] = "x" * 60
     pv._ecrire(d)
     check("un texte trop long n'est pas prérempli (Discord refuserait la fenêtre)",
@@ -568,22 +584,22 @@ try:
     r = tk.traiter(clic(f"page:o:{VA}", qui=VA))
     check("hors pilote : refusé", r["type"] == 4 and "Pas encore" in r["data"]["content"], r)
 
-    def fen(nom="Lia x", bio="hello\nworld", bouton="Mon OF 🔥", couleur=None, photo=None):
+    def fen(nom="Lia x", bio="hello\nworld", bouton="Mon OF 🔥", fond=None, photo=None):
         return [{"type": 18, "component": {"type": 19, "custom_id": "photo", "values": photo or []}},
                 {"type": 18, "component": {"type": 4, "custom_id": "nom", "value": nom}},
                 {"type": 18, "component": {"type": 4, "custom_id": "bio", "value": bio}},
                 {"type": 18, "component": {"type": 4, "custom_id": "bouton", "value": bouton}},
-                {"type": 18, "component": {"type": 3, "custom_id": "couleur", "values": couleur or ["#FFFFFF"]}}]
+                {"type": 18, "component": {"type": 19, "custom_id": "fond", "values": fond or []}}]
     r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen()))
     check("fenêtre renvoyée sans changement : « Rien n'a changé. », rien envoyé",
           r["type"] == 4 and r["data"]["content"] == "Rien n'a changé.", r)
     VUS = []
     _vrai_mod = pv.modifier_page
     pv.modifier_page = lambda g, u, **k: (VUS.append(k) or {"ok": True, "faits": list(k)})
-    r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(nom="Nouveau", couleur=["#EC4899"])))
-    check("seuls les champs changés partent (nom, couleur), en fond ; « ✅ Ta page est à jour. »",
+    r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(nom="Nouveau")))
+    check("seuls les champs changés partent (le nom), en fond ; « ✅ Ta page est à jour. »",
           r == {"type": 5, "data": {"flags": 64}} and VUS[-1] == {"nom": "Nouveau", "bio": None, "bouton": None,
-                                                                   "couleur": "#EC4899", "photo": None}
+                                                                   "photo": None, "fond": None}
           and SUITES[-1] == "✅ Ta page est à jour.", (r, VUS, SUITES))
     r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(bio="")))
     check("la bio vidée : voulue (le champ était prérempli)", VUS[-1]["bio"] == "", VUS[-1])
@@ -608,7 +624,15 @@ try:
     tk._telecharger_image = lambda url, plafond: (b.getvalue(), "")
     r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(photo=["9"]), resolved=att))
     check("une photo déposée : téléchargée, préparée (JPEG), envoyée",
-          VUS[-1]["photo"] and VUS[-1]["photo"][:2] == b"\xff\xd8", str(VUS[-1])[:200])
+          VUS[-1]["photo"] and VUS[-1]["photo"][:2] == b"\xff\xd8" and VUS[-1]["fond"] is None, str(VUS[-1])[:200])
+    att["attachments"]["8"] = dict(att["attachments"]["9"])
+    r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(fond=["8"]), resolved=att))
+    imv = Image.open(io.BytesIO(VUS[-1]["fond"])) if VUS[-1].get("fond") else None
+    check("une image de fond déposée : préparée en 9:16, envoyée (la photo reste)",
+          imv is not None and imv.size == (1080, 1920) and VUS[-1]["photo"] is None, str(VUS[-1])[:200])
+    att["attachments"]["8"]["content_type"] = "text/plain"
+    r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(fond=["8"]), resolved=att))
+    check("un fond qui n'est pas une image : refusé tout de suite", "pas une image" in r["data"]["content"], r)
     pv.modifier_page = _vrai_mod
     APPELS.clear()
     r = tk.traiter(clic(f"page:new:{MOI}", perms=str(0x8)))
@@ -616,10 +640,10 @@ try:
           r == {"type": 5, "data": {"flags": 64}} and SUITES[-1].startswith("✅ Ta page")
           and not [a for a in APPELS if a[0] == "duplicate"], (r, SUITES[-1]))
     d1 = pv._lire()
-    d1["pages"][f"{TW}:{MOI}"]["manques"] = ["70/30"]
+    d1["pages"][f"{TW}:{MOI}"]["manques"] = ["safe page"]
     pv._ecrire(d1)
     tk.traiter(clic(f"page:new:{MOI}", perms=str(0x8)))
-    check("📄 Créer : les étapes manquées sont dites (« ⚠️ À reprendre »)", "⚠️ À reprendre : 70/30" in SUITES[-1],
+    check("📄 Créer : les étapes manquées sont dites (« ⚠️ À reprendre »)", "⚠️ À reprendre : safe page" in SUITES[-1],
           SUITES[-1])
     d1["pages"][f"{TW}:{MOI}"]["manques"] = []
     pv._ecrire(d1)

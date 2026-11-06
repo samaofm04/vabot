@@ -4959,11 +4959,12 @@ ramener_menu.__doc__ = _ramener_menu_qui_descend.__doc__
 
 # ─── 📄 Ta page : la page GetMySocial du VA, qu'il modifie (06/11/2026) ──
 # Propriétaire : « je veux avoir 2 liens pour les VA, un direct et un landing
-# page qu'ils peuvent modifier » — photo (il dépose une image), nom et bio,
-# texte du bouton, couleur du fond ; essai sur lui seul d'abord
-# (pages_va.PILOTE). Le menu en blocs porte une section « 📄 Ta page » sous
-# « 🔗 Ton lien » : l'adresse et « ✏️ Modifier », qui ouvre UNE fenêtre (les
-# cinq champs, la photo facultative). Tout se fait en fond, la réponse dit le
+# page qu'ils peuvent modifier » — photo de profil et image de fond (il dépose
+# des images : « les deux quoi »), nom et bio, texte du bouton ; essai sur lui
+# seul d'abord (pages_va.PILOTE). Le menu en blocs porte une section
+# « 📄 Ta page » sous « 🔗 Ton lien » : l'adresse et « ✏️ Modifier », qui
+# ouvre UNE fenêtre (cinq cases, le maximum de Discord ; les images
+# facultatives). Tout se fait en fond, la réponse dit le
 # résultat ; GetMySocial est relu. « 📄 Créer » (manager) quand le VA a un
 # lien direct et pas encore de page. Rien ne change pour qui n'est pas pilote.
 PAGE_PREFIXE = "page:"
@@ -5019,7 +5020,8 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
 
 def fenetre_page(gid: str, uid: str) -> Dict[str, Any]:
     """La fenêtre « Ma page » : photo (facultative), nom, bio, texte du
-    bouton, couleur du fond — cinq composants, le maximum d'une fenêtre.
+    bouton, image de fond (facultative) — cinq composants, le maximum d'une
+    fenêtre (la couleur du fond a laissé sa case à l'image, 06/11).
     Un texte prérempli trop long ferait refuser la fenêtre entière : il n'est
     prérempli que s'il tient."""
     import pages_va as pv
@@ -5039,11 +5041,9 @@ def fenetre_page(gid: str, uid: str) -> Dict[str, Any]:
         texte("nom", "Nom", pv.MAX_NOM, 1),
         texte("bio", "Bio", pv.MAX_BIO, 2),
         texte("bouton", "Texte du bouton", pv.MAX_BOUTON, 1),
-        {"type": 18, "label": "Couleur du fond",
-         "component": {"type": 3, "custom_id": "couleur", "min_values": 0, "max_values": 1,
-                       "required": False,
-                       "options": [{"label": nom, "value": hexa, "default": hexa == c.get("couleur")}
-                                   for nom, hexa in pv.COULEURS]}}]}}
+        {"type": 18, "label": "Image de fond", "description": "Vide : tu gardes le tien",
+         "component": {"type": 19, "custom_id": "fond", "min_values": 0, "max_values": 1,
+                       "required": False}}]}}
 
 
 def _telecharger_image(url: str, plafond: int) -> Tuple[Optional[bytes], str]:
@@ -5106,20 +5106,23 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         import outils_tickets as ot
         data = p.get("data") or {}
         champs = ot._champs(data.get("components"))
-        ids = [str(x) for x in (champs.get("photo") or []) if x]
-        piece = (((data.get("resolved") or {}).get("attachments") or {}).get(ids[0]) if ids else None)
-        if ids and not (isinstance(piece, dict) and piece.get("url")):
-            return _ephemere("📎 Image non reçue, renvoie-la.")
-        if piece and not str(piece.get("content_type") or "").startswith("image/"):
-            return _ephemere("📎 Ce n'est pas une image.")
-        if piece and int(piece.get("size") or 0) > pv.PHOTO_MAX:
-            return _ephemere(f"📎 Image trop lourde ({pv.PHOTO_MAX // (1024 * 1024)} Mo au plus).")
+        jointes = ((data.get("resolved") or {}).get("attachments") or {})
+        pieces: Dict[str, Any] = {}
+        for cle_img in ("photo", "fond"):
+            ids = [str(x) for x in (champs.get(cle_img) or []) if x] if isinstance(champs.get(cle_img), list) else []
+            piece = jointes.get(ids[0]) if ids else None
+            if ids and not (isinstance(piece, dict) and piece.get("url")):
+                return _ephemere("📎 Image non reçue, renvoie-la.")
+            if piece and not str(piece.get("content_type") or "").startswith("image/"):
+                return _ephemere("📎 Ce n'est pas une image.")
+            if piece and int(piece.get("size") or 0) > pv.PHOTO_MAX:
+                return _ephemere(f"📎 Image trop lourde ({pv.PHOTO_MAX // (1024 * 1024)} Mo au plus).")
+            if piece:
+                pieces[cle_img] = piece
         avant = pv.page_de(gid, uid).get("champs") or {}
         nom = pv.nettoyer(champs.get("nom"), pv.MAX_NOM)
         bouton = pv.nettoyer(champs.get("bouton"), pv.MAX_BOUTON)
         bio = pv.nettoyer(champs.get("bio"), pv.MAX_BIO, lignes=4) if "bio" in champs else None
-        couleur = pv.couleur_valide((champs.get("couleur") or [""])[0] if isinstance(champs.get("couleur"), list)
-                                    else champs.get("couleur"))
         # vide : on garde (un nom ou un bouton vide n'a pas de sens) ; la bio
         # vidée est voulue (le champ était prérempli)
         nom = nom if nom and nom != avant.get("nom") else None
@@ -5127,20 +5130,21 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         bio = bio if bio is not None and bio != (avant.get("bio") or "") else None
         if bio == "" and len(str(avant.get("bio") or "")) > pv.MAX_BIO:
             bio = None                  # pas préremplie (trop longue) : vide ≠ effacée
-        couleur = couleur if couleur and couleur != avant.get("couleur") else None
-        if not (piece or nom or bouton or couleur or bio is not None):
+        if not (pieces or nom or bouton or bio is not None):
             return _ephemere("Rien n'a changé.")
 
         def modifier():
-            photo = None
-            if piece:
-                octets, err = _telecharger_image(str(piece["url"]), pv.PHOTO_MAX)
+            images: Dict[str, Optional[bytes]] = {"photo": None, "fond": None}
+            for cle_img, piece_img in pieces.items():
+                octets, err = _telecharger_image(str(piece_img["url"]), pv.PHOTO_MAX)
                 if not err:
-                    photo, err = pv.preparer_photo(octets or b"")
+                    preparer = pv.preparer_photo if cle_img == "photo" else pv.preparer_fond
+                    images[cle_img], err = preparer(octets or b"")
                 if err:
-                    _suite(jeton, "✕ " + err, p)
+                    _suite(jeton, f"✕ {'Photo' if cle_img == 'photo' else 'Fond'} : {err}", p)
                     return
-            r = pv.modifier_page(gid, uid, nom=nom, bio=bio, bouton=bouton, couleur=couleur, photo=photo)
+            r = pv.modifier_page(gid, uid, nom=nom, bio=bio, bouton=bouton,
+                                 photo=images["photo"], fond=images["fond"])
             _suite(jeton, "✅ Ta page est à jour." if r.get("ok") else f"✕ {r.get('erreur')}", p)
         _EN_FOND(modifier)
         return _differer()

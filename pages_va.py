@@ -2,17 +2,17 @@
 
 Propriétaire, 06/11/2026 : « je veux avoir 2 liens pour les VA, un direct et
 un landing page qu'ils peuvent modifier ». Ses réponses : le VA change sa
-photo de profil (il dépose une image), son nom et sa bio, le texte du bouton,
-et le fond — « juste une couleur ». Même tracking que son lien direct (« c'est
-le même tracking pour les VA, y a rien qui change »), mêmes règles : 70/30
-avec la page de la model sans tracking, pays hors cibles vers la model, safe
-page. Essai d'abord sur le propriétaire seul (PILOTE), dans son ticket.
+photo de profil et l'image de fond (il dépose des images : « le fond aussi
+c'est une image », « les deux quoi »), son nom et sa bio, le texte du bouton.
+Même tracking que son lien direct (« c'est le même tracking pour les VA, y a
+rien qui change »), pays hors cibles vers la model, safe page — mais PAS de
+70/30 (« ça doit pas être 70 30 ») : tout le bouton sur le tracking. Base :
+liaseeo. Essai d'abord sur le propriétaire seul (PILOTE), dans son ticket.
 
 Le lien direct ne change pas : la page est un SECOND lien GetMySocial, copie
 du gabarit de page de l'équipe (GABARIT_PAGE), son bouton OnlyFans sur le
 tracking du VA (liens_va._poser_tracking), ses pays sur le bouton
-(liens_va.poser_pays), son A/B comme le lien direct
-(liens_va._poser_base_seule, sur ce lien-ci), la safe page posée. Rangée dans
+(liens_va.poser_pays), la safe page posée, sans A/B. Rangée dans
 le groupe de son manager. Le registre vit à part (data/pages_va.json) : la
 fiche de liens_va ne porte qu'un lien, et tout ce qui la relit (pays, bases,
 podium, menus) continue de ne voir que le direct.
@@ -55,7 +55,11 @@ TWITTER_ID = "1445108485090971710"
 PILOTE: Dict[str, set] = {TWITTER_ID: {"479005370438778891"}}
 #: Le gabarit de page de l'équipe du serveur (GetMySocial refuse de copier un
 #: lien d'une autre équipe) : « Gabarit Twitter (page de base) ».
-GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aea55ba68cb1865ee2b4fd0"}
+#: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo », « juste
+#: le lien OF, pas de lien Telegram ». liaseeo vit dans l'espace perso : sa
+#: copie identique dans EMY TWITTER, « Template landing Twitter (liaseeo) »
+#: (le canard, « Lia ♡ », « MY FREE 0F 🔗 »).
+GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aed1548c7881b6c805e773a"}
 
 FICHIER = Path(__file__).resolve().parent / "data" / "pages_va.json"
 MAX_NOM, MAX_BIO, MAX_BOUTON = 40, 160, 40
@@ -160,6 +164,19 @@ def nettoyer(texte: Any, n: int, lignes: int = 1) -> str:
     return " ".join(morceaux).strip()[:n]
 
 
+_BALISE_OUVRANTE = re.compile(r"^\{\{color:(#[0-9A-Fa-f]{3,8})\}\}")
+
+
+def avec_couleur_du_modele(nouveau: str, ancien: Any) -> str:
+    """Le texte du VA dans la couleur du texte qu'il remplace : la page de
+    base écrit « Lia ♡ » en blanc ({{color:#ffffff}}) sur le canard ; sans
+    ça, le texte modifié prenait la couleur de la page et disparaissait."""
+    m = _BALISE_OUVRANTE.match(str(ancien or "").strip())
+    if not m or not nouveau:
+        return nouveau
+    return "{{color:%s}}%s{{/color}}" % (m.group(1), nouveau)
+
+
 def couleur_valide(c: Any) -> str:
     c = str(c or "").strip().upper()
     return c if re.fullmatch(r"#[0-9A-F]{6}", c) else ""
@@ -186,8 +203,16 @@ def image_unie(couleur: str) -> bytes:
     return buf.getvalue()
 
 
-def preparer_photo(octets: bytes) -> Tuple[Optional[bytes], str]:
-    """(JPEG carré COTE_PHOTO, « ») ou (None, la raison à dire au VA)."""
+def preparer_fond(octets: bytes) -> Tuple[Optional[bytes], str]:
+    """L'image de fond déposée : (JPEG FOND_TAILLE, 9:16, recadré au centre,
+    sans EXIF, « ») ou (None, la raison)."""
+    return preparer_photo(octets, FOND_TAILLE)
+
+
+def preparer_photo(octets: bytes, taille: Optional[Tuple[int, int]] = None) -> Tuple[Optional[bytes], str]:
+    """(JPEG carré COTE_PHOTO — ou `taille` —, « ») ou (None, la raison à dire
+    au VA)."""
+    taille = taille or (COTE_PHOTO, COTE_PHOTO)
     if not octets:
         return None, "image vide"
     if len(octets) > PHOTO_MAX:
@@ -198,7 +223,7 @@ def preparer_photo(octets: bytes) -> Tuple[Optional[bytes], str]:
         if im.size[0] * im.size[1] > PIXELS_MAX:
             return None, "image trop grande (en pixels) : envoie une photo normale"
         if im.format == "JPEG":
-            im.draft("RGB", (COTE_PHOTO * 2, COTE_PHOTO * 2))
+            im.draft("RGB", (taille[0] * 2, taille[1] * 2))
         im = ImageOps.exif_transpose(im)
         if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
             # la transparence devenait du noir : posée sur du blanc
@@ -206,7 +231,7 @@ def preparer_photo(octets: bytes) -> Tuple[Optional[bytes], str]:
             fond = Image.new("RGBA", im.size, (255, 255, 255, 255))
             im = Image.alpha_composite(fond, im)
         im = im.convert("RGB")
-        im = ImageOps.fit(im, (COTE_PHOTO, COTE_PHOTO), method=Image.LANCZOS)
+        im = ImageOps.fit(im, taille, method=Image.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=90)        # sans EXIF : ni GPS ni appareil
         return buf.getvalue(), ""
@@ -337,7 +362,7 @@ def _boutons_of(boutons: Any) -> List[Dict[str, Any]]:
 # ─── Création ─────────────────────────────────────────────────────────────
 def creer_page(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
     """La page du VA : copie du gabarit, bouton sur SON tracking, pays, safe
-    page, 70/30, rangée chez son manager. Rend {ok, url, erreur, deja}.
+    page (pas d'A/B), rangée chez son manager. Rend {ok, url, erreur, deja}.
     Un échec après la copie la laisse COUPÉE (jamais supprimée), dite."""
     import gms
     import liens_va as lv
@@ -408,23 +433,16 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
         return {"ok": False, "erreur": f"bouton non posé ({pose.get('erreur')}) : page coupée"}
     pays = lv.poser_pays(lid, equipe)
     sur = gms.update_link(lid, {"display_name": nom, "bot_protection": {"mode": "safe_page"}}, equipe)
-    ab: Dict[str, Any] = {"ok": True, "hors_sujet": True}
-    if lv.lia_seule(gid):
-        try:
-            ab = lv._poser_base_seule(gid, uid, lien={"link_id": lid, "tracking": f["tracking"],
-                                                      "shortcode": sc})
-        except Exception as e:                           # noqa: BLE001
-            ab = {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
+    # Propriétaire, 06/11 : « ça doit pas être 70 30 » — la page n'a pas
+    # d'A/B : tout le bouton sur le tracking du VA.
     groupe = lv.ranger(equipe, lid, str(f.get("groupe") or f.get("manager") or ""))
     lu = _lire_page(lid, equipe)
     ofs = _boutons_of(lu.get("buttons"))
     champs = {"nom": nettoyer(lu.get("name_user"), MAX_NOM),
               "bio": nettoyer(lu.get("bio"), MAX_BIO, lignes=4),
-              "bouton": nettoyer((ofs[0].get("label") if ofs else ""), MAX_BOUTON),
-              "couleur": ""}
+              "bouton": nettoyer((ofs[0].get("label") if ofs else ""), MAX_BOUTON)}
     actif = f.get("actif", True) is not False
-    manques = ([] if pays.get("ok") else ["pays"]) + ([] if sur.get("ok") else ["safe page"]) \
-        + ([] if ab.get("ok") else ["70/30"])
+    manques = ([] if pays.get("ok") else ["pays"]) + ([] if sur.get("ok") else ["safe page"])
     a_rallumer = False
     if not actif:
         # son lien direct est coupé : la page aussi (reprise si GetMySocial refuse)
@@ -435,9 +453,7 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
         a_rallumer = not gms.enable_link(lid).get("ok")
     _noter(gid, uid, actif=bool(actif) and not a_rallumer, a_rallumer=a_rallumer, etat="prete", erreur="",
            pays=bool(pays.get("ok")), pays_erreur=str(pays.get("erreur") or ""),
-           safe=bool(sur.get("ok")), ab={"ok": bool(ab.get("ok")), "erreur": str(ab.get("erreur") or ""),
-                                         "cookie": bool(ab.get("cookie"))},
-           groupe=groupe, champs=champs, manques=manques, essais={}, a_verifier=False,
+           safe=bool(sur.get("ok")), groupe=groupe, champs=champs, manques=manques, essais={}, a_verifier=False,
            tracking=f["tracking"])
     _log(f"page {sc} prête pour {cle}" + (f", à reprendre : {manques}" if manques else ""))
     return {"ok": True, "url": url, "erreur": "", "manques": manques}
@@ -454,9 +470,11 @@ def _couper(gid: str, uid: str, lid: str, etat: str, erreur: str) -> None:
 # ─── Modification ─────────────────────────────────────────────────────────
 def modifier_page(gid: str, uid: str, nom: Optional[str] = None, bio: Optional[str] = None,
                   bouton: Optional[str] = None, couleur: Optional[str] = None,
-                  photo: Optional[bytes] = None) -> Dict[str, Any]:
-    """Change ce qui est donné (None : on n'y touche pas). `photo` : un JPEG
-    déjà préparé (preparer_photo). Relu ensuite. Rend {ok, faits, erreur}."""
+                  photo: Optional[bytes] = None, fond: Optional[bytes] = None) -> Dict[str, Any]:
+    """Change ce qui est donné (None : on n'y touche pas). `photo`, `fond` :
+    des JPEG déjà préparés (preparer_photo, preparer_fond). `couleur` : un
+    fond uni (plus proposé dans la fenêtre depuis l'image de fond, 06/11).
+    Relu ensuite. Rend {ok, faits, erreur}."""
     import gms
     gid, uid = str(gid), str(uid)
     pg = page_de(gid, uid)
@@ -466,12 +484,12 @@ def modifier_page(gid: str, uid: str, nom: Optional[str] = None, bio: Optional[s
     equipe = _equipe(gid)
     couleur = couleur_valide(couleur) if couleur else ""
     with _verrou_page(f"{gid}:{uid}"):
-        return _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo)
+        return _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo, fond)
 
 
-def _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo) -> Dict[str, Any]:
+def _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo, fond=None) -> Dict[str, Any]:
     import gms
-    imgs = envoyer_images(equipe, photo=photo, fond=image_unie(couleur) if couleur else None)
+    imgs = envoyer_images(equipe, photo=photo, fond=fond or (image_unie(couleur) if couleur else None))
     if not imgs.get("ok"):
         return {"ok": False, "erreur": imgs.get("erreur") or "images refusées"}
     lu = _lire_page(lid, equipe)
@@ -480,11 +498,14 @@ def _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo) -> Di
     champs: Dict[str, Any] = {"display_name": str(lu.get("display_name") or pg.get("nom") or "")}
     faits: List[str] = []
     if nom is not None:
-        champs["name_user"] = nettoyer(nom, MAX_NOM)
+        champs["name_user"] = avec_couleur_du_modele(nettoyer(nom, MAX_NOM), lu.get("name_user"))
         faits.append("nom")
     if bio is not None:
-        champs["bio"] = nettoyer(bio, MAX_BIO, lignes=4)
+        champs["bio"] = avec_couleur_du_modele(nettoyer(bio, MAX_BIO, lignes=4), lu.get("bio"))
         faits.append("bio")
+    if fond:
+        champs["background_image"] = imgs["fond"]
+        faits.append("fond")
     if couleur:
         champs.update(custom_background_color=couleur, custom_text_color=couleur_texte(couleur),
                       background_image=imgs["fond"])
@@ -525,7 +546,8 @@ def _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo) -> Di
         _log(f"page {lid} de {gid}:{uid} relue autrement : {rates}")
         return {"ok": False, "faits": faits, "erreur": "relu autrement chez GetMySocial : " + ", ".join(rates)}
     _noter(gid, uid, champs={k: v for k, v in (
-        ("nom", champs.get("name_user")), ("bio", champs.get("bio")),
+        ("nom", nettoyer(champs["name_user"], MAX_NOM) if "name_user" in champs else None),
+        ("bio", nettoyer(champs["bio"], MAX_BIO, lignes=4) if "bio" in champs else None),
         ("bouton", nettoyer(bouton, MAX_BOUTON) if bouton is not None else None),
         ("couleur", couleur or None)) if v is not None}, modifiee=int(time.time()))
     _log(f"page {lid} de {gid}:{uid} modifiée : {faits}")
@@ -555,8 +577,7 @@ def suivre_bascule(gid: str, uid: str, actif: bool) -> None:
 
 # ─── Reprise (synchro des liens, toutes les 30 min) ───────────────────────
 #: Au-delà, une étape ratée attend une main (« a_verifier », dit au journal à
-#: chaque passage). Un refus de cookie GetMySocial ne compte pas : comme le
-#: lien direct (liens_va.poser_base_seule), la page attend le cookie.
+#: chaque passage).
 ESSAIS_REPRISE = 3
 #: Les pages remises d'aplomb par passage (la boucle du podium attend).
 PAGES_PAR_PASSE = 10
@@ -565,26 +586,13 @@ PAGES_PAR_PASSE = 10
 EN_COURS_MAX_S = 15 * 60
 
 
-def _cookie_ok() -> bool:
-    """Le cookie de l'écran A/B (le 70/30) : posé, pas expiré, pas refusé."""
-    import gms
-    import liens_va as lv
-    try:
-        ck = gms.get_session_cookie()
-        exp = gms.cookie_expiration(ck) if ck else None
-        return bool(ck) and not (exp and exp < time.time()) \
-            and lv._etat().get("cookie_refuse") != lv._empreinte(ck)
-    except Exception:                                        # noqa: BLE001
-        return False
-
-
 def reprendre_pages(gid: str) -> Dict[str, Any]:
     """Les pages de ce serveur, remises d'aplomb sur leur lien direct :
       - une page ratée, ou une création interrompue, encore vivante : coupée ;
       - une page prête : coupée si le direct l'est, rallumée s'il sert ;
         son bouton re-pointé si le tracking du direct a changé (changement de
         model, passer_sur) — le tracking n'est noté qu'une fois le bouton
-        relu dessus —, puis pays et 70/30 refaits ; rangée chez le manager
+        relu dessus —, puis les pays refaits ; rangée chez le manager
         actuel ; les étapes manquées refaites, ESSAIS_REPRISE fois chacune ;
       - les pages temporaires d'images non supprimées : supprimées.
     PAGES_PAR_PASSE pages au plus. Ne lève pas."""
@@ -600,7 +608,6 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                 (d2.get("orphelines") or {}).pop(tid, None)
                 _ecrire(d2)
     traitees = 0
-    cookie = None
     for cle, pg in list(d["pages"].items()):
         g, _s, uid = str(cle).partition(":")
         if g != str(gid) or not isinstance(pg, dict) or not pg.get("link_id"):
@@ -649,7 +656,7 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                         if not pose.get("ok"):
                             bilan["rates"].append(f"{uid} : tracking ({pose.get('erreur')})")
                             continue
-                    manques = sorted(set(manques) | {"pays", "70/30"})
+                    manques = sorted(set(manques) | {"pays"})
                     essais = {}
                     _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False)
                     bilan["trackings"].append(uid)
@@ -670,17 +677,13 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                     if rg:
                         _noter(g, uid, groupe=rg)
                 restes, a_verifier = [], []
+                # « ça doit pas être 70 30 » (06/11) : une ancienne étape 70/30 tombe
+                manques = [m for m in manques if m != "70/30"]
                 for etape in manques:
                     if int(essais.get(etape) or 0) >= ESSAIS_REPRISE:
                         restes.append(etape)
                         a_verifier.append(etape)
                         continue
-                    if etape == "70/30" and lv.lia_seule(g):
-                        if cookie is None:
-                            cookie = _cookie_ok()
-                        if not cookie:
-                            restes.append(etape)    # attend le cookie : ni essai ni passage compté
-                            continue
                     if traitees >= PAGES_PAR_PASSE:
                         restes.append(etape)
                         continue
@@ -693,19 +696,6 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                             ok = bool(gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
                                                             "bot_protection": {"mode": "safe_page"}},
                                                       equipe).get("ok"))
-                        elif etape == "70/30":
-                            if not lv.lia_seule(g):
-                                ok = True
-                            else:
-                                if cookie is None:
-                                    cookie = _cookie_ok()
-                                if not cookie:
-                                    ok, compte = False, False
-                                else:
-                                    ab = lv._poser_base_seule(g, uid, lien={
-                                        "link_id": lid, "tracking": f["tracking"],
-                                        "shortcode": pg.get("shortcode")})
-                                    ok, compte = bool(ab.get("ok")), not ab.get("cookie")
                         else:
                             ok = True                    # étape inconnue (ancienne fiche)
                     except Exception as e:               # noqa: BLE001
