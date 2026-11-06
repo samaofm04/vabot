@@ -121,12 +121,17 @@ def page_de(gid: Any, uid: Any) -> Dict[str, Any]:
     return dict(p) if isinstance(p, dict) else {}
 
 
+#: Les champs remplacés tels quels (les autres dict sont fusionnés) : un
+#: compteur remis à zéro par {} ne doit pas garder ses anciennes valeurs.
+_REMPLACES = {"essais"}
+
+
 def _noter(gid: Any, uid: Any, **champs) -> None:
     with _VERROU:
         d = _lire()
         p = d["pages"].setdefault(f"{gid}:{uid}", {})
         for k, v in champs.items():
-            if isinstance(v, dict) and isinstance(p.get(k), dict):
+            if isinstance(v, dict) and isinstance(p.get(k), dict) and k not in _REMPLACES:
                 p[k] = dict(p[k], **v)
             else:
                 p[k] = v
@@ -536,11 +541,12 @@ def suivre_bascule(gid: str, uid: str, actif: bool) -> None:
     lid = str(pg.get("link_id") or "")
     if not lid or pg.get("etat", "prete") != "prete":
         return                      # une page ratée ne se rallume jamais par là
-    if bool(pg.get("actif", True)) == bool(actif) and not pg.get("a_couper"):
-        return
+    if bool(pg.get("actif", True)) == bool(actif) and not pg.get("a_couper") \
+            and not (not actif and pg.get("a_rallumer")):
+        return                      # (a_rallumer : un enable incertain, la page est peut-être en ligne)
     r = gms.enable_link(lid) if actif else gms.disable_link(lid)
     if r.get("ok"):
-        _noter(gid, uid, actif=bool(actif), a_couper=False)
+        _noter(gid, uid, actif=bool(actif), a_couper=False, a_rallumer=False)
     else:
         # repris par reprendre_pages (synchro des liens, toutes les 30 min)
         _noter(gid, uid, a_couper=not actif, a_rallumer=bool(actif))
@@ -599,8 +605,6 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
         g, _s, uid = str(cle).partition(":")
         if g != str(gid) or not isinstance(pg, dict) or not pg.get("link_id"):
             continue
-        if traitees >= PAGES_PAR_PASSE:
-            break
         lid = str(pg["link_id"])
         try:
             with _verrou_page(cle):
@@ -620,28 +624,20 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                 f = lv.lien_de(g, uid)
                 sert = bool(f.get("link_id")) and f.get("actif", True) is not False
                 if not sert:
-                    if pg.get("actif") is not False or pg.get("a_couper"):
-                        traitees += 1
+                    if pg.get("actif") is not False or pg.get("a_couper") or pg.get("a_rallumer"):
                         if gms.disable_link(lid).get("ok"):
-                            _noter(g, uid, actif=False, a_couper=False)
+                            _noter(g, uid, actif=False, a_couper=False, a_rallumer=False)
                             bilan["coupees"].append(uid)
                         else:
                             _noter(g, uid, a_couper=True)
                             bilan["rates"].append(f"{uid} : coupure")
                     continue
-                if pg.get("actif") is False or pg.get("a_rallumer"):
-                    traitees += 1
-                    if gms.enable_link(lid).get("ok"):
-                        _noter(g, uid, actif=True, a_rallumer=False)
-                        bilan["rallumees"].append(uid)
-                    else:
-                        _noter(g, uid, a_rallumer=True)
-                        bilan["rates"].append(f"{uid} : rallumage")
-                        continue
                 equipe = _equipe(g)
                 manques = list(pg.get("manques") or [])
                 essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
                 if f.get("tracking") and str(pg.get("tracking") or "") != str(f["tracking"]):
+                    if traitees >= PAGES_PAR_PASSE:
+                        continue
                     traitees += 1
                     lu = _lire_page(lid, equipe)
                     ofs = _boutons_of(lu.get("buttons"))
@@ -657,6 +653,16 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                     essais = {}
                     _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False)
                     bilan["trackings"].append(uid)
+                if pg.get("actif") is False or pg.get("a_rallumer"):
+                    if gms.enable_link(lid).get("ok"):
+                        _noter(g, uid, actif=True, a_rallumer=False)
+                        bilan["rallumees"].append(uid)
+                    else:
+                        _noter(g, uid, a_rallumer=True)
+                        bilan["rates"].append(f"{uid} : rallumage")
+                        continue
+                if traitees >= PAGES_PAR_PASSE:
+                    continue                # le reste au passage suivant (la boucle du podium attend)
                 voulu = str(f.get("groupe") or f.get("manager") or "")
                 if voulu and voulu != str(pg.get("groupe") or ""):
                     traitees += 1
@@ -668,6 +674,15 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                     if int(essais.get(etape) or 0) >= ESSAIS_REPRISE:
                         restes.append(etape)
                         a_verifier.append(etape)
+                        continue
+                    if etape == "70/30" and lv.lia_seule(g):
+                        if cookie is None:
+                            cookie = _cookie_ok()
+                        if not cookie:
+                            restes.append(etape)    # attend le cookie : ni essai ni passage compté
+                            continue
+                    if traitees >= PAGES_PAR_PASSE:
+                        restes.append(etape)
                         continue
                     traitees += 1
                     compte = True

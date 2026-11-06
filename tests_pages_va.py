@@ -436,6 +436,39 @@ try:
     pv.reprendre_pages(TW)
     check("… supprimée à la reprise suivante", "lnk_tmp_x" not in (pv._lire().get("orphelines") or {}))
     src = (BOT / "liens_va.py").read_text(encoding="utf-8")
+    # essais remis à zéro pour de bon (pas fusionnés)
+    pv._noter(TW, MOI, essais={"70/30": 3})
+    pv._noter(TW, MOI, essais={})
+    check("un compteur remis à {} est vraiment vidé", pv.page_de(TW, MOI)["essais"] == {})
+    # une page au rallumage incertain (a_rallumer) est coupée quand le direct l'est
+    d0 = pv._lire()
+    d0["pages"][f"{TW}:{MOI}"].update(actif=False, a_rallumer=True, a_couper=False)
+    pv._ecrire(d0)
+    APPELS.clear()
+    pv.suivre_bascule(TW, MOI, False)
+    check("enable incertain puis VA coupé : la page est coupée quand même",
+          ("disable", pv.page_de(TW, MOI)["link_id"]) in APPELS and not pv.page_de(TW, MOI).get("a_rallumer"), APPELS)
+    d0 = pv._lire()
+    d0["pages"][f"{TW}:{MOI}"].update(actif=False, a_rallumer=True)
+    pv._ecrire(d0)
+    FICHES[f"{TW}:{MOI}"]["actif"] = False
+    APPELS.clear()
+    bl = pv.reprendre_pages(TW)
+    check("… et par la reprise (direct coupé)", MOI in bl["coupees"] and not pv.page_de(TW, MOI).get("a_rallumer"), bl)
+    FICHES[f"{TW}:{MOI}"]["actif"] = True
+    pv.reprendre_pages(TW)
+    # le plafond par passage ne bloque ni coupures ni rallumages, et un 70/30 qui attend le cookie ne compte pas
+    _vrai_plaf = pv.PAGES_PAR_PASSE
+    pv.PAGES_PAR_PASSE = 0
+    pv._cookie_ok = lambda: False
+    d0 = pv._lire()
+    d0["pages"][f"{TW}:{MOI}"].update(actif=False, manques=["70/30"], essais={})
+    pv._ecrire(d0)
+    APPELS.clear()
+    bl = pv.reprendre_pages(TW)
+    check("plafond atteint : le rallumage passe quand même ; le 70/30 attend sans compter",
+          MOI in bl["rallumees"] and pv.page_de(TW, MOI)["essais"] == {} and pv.page_de(TW, MOI)["manques"] == ["70/30"], bl)
+    pv.PAGES_PAR_PASSE = _vrai_plaf
     pv._cookie_ok = _vrai_cookie
     check("la synchro des liens (30 min) lance la reprise des pages du pilote",
           "pages_va.reprendre_pages(gid)" in src and "_synchroniser_sans_pages = synchroniser" in src)
