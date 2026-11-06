@@ -1813,7 +1813,8 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
     team_id : optionnel — si fourni, le duplicate est créé dans ce team
               (workspace). Sans ça, le duplicate va dans le workspace owner.
 
-    Retourne {ok, link, error}.
+    Retourne {ok, link, error} — et « erreur_url » (le texte de GetMySocial)
+    quand new_url n'a pas pu être posée : ok reste vrai, la copie existe.
     """
     sc = new_shortcode.strip()
     if not source_link_id or not sc:
@@ -1845,6 +1846,13 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
     # Si une nouvelle URL est fournie ET qu'on a bien l'id, on patch le lien.
     # update_link exige link_id + url + display_name + typeLink="directlink"
     new_url_clean = (new_url or "").strip()
+    # L'échec de cette mise à jour n'échoue pas l'appel (la copie existe :
+    # l'appelant doit pouvoir la supprimer), mais son texte est rendu dans
+    # « erreur_url ». Avalé, un 429 ici laissait la copie sur l'adresse de sa
+    # source, et l'appelant ne voyait que « la copie temporaire pointe sur
+    # … seren.vale » : pages_va le comptait comme un vrai refus, et le 70/30
+    # d'une page passait « à vérifier » (24 h à 100 % sur le tracking du VA).
+    erreur_url = ""
     if new_url_clean and new_id:
         try:
             upd_res = _call_tool("update_link", {
@@ -1855,14 +1863,16 @@ def duplicate_link(source_link_id: str, new_shortcode: str,
             })
             if upd_res.get("ok"):
                 new_link = upd_res.get("data") or new_link
-        except Exception:
-            pass
+            else:
+                erreur_url = str(upd_res.get("error") or "update_link refusé")
+        except Exception as e:
+            erreur_url = f"{type(e).__name__}: {e}"
     # Invalider le cache pour rafraîchir la liste à la prochaine lecture
     try:
         invalidate_grouping_cache()
     except Exception:
         pass
-    return {"ok": True, "link": new_link}
+    return {"ok": True, "link": new_link, **({"erreur_url": erreur_url[:200]} if erreur_url else {})}
 
 
 def delete_link(link_id: str) -> Dict[str, Any]:

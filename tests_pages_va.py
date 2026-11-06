@@ -41,6 +41,30 @@ import tickets_discord as tk   # noqa: E402
 
 OK, KO = [], []
 
+# ── garde réseau : la suite échoue si une connexion sort ────────────────
+# Relecture du 06/11 : un ✅ de la section 7b lançait le vrai creer_page,
+# dont _couper_doublons appelait le VRAI gms.list_links_team (doublé plus bas
+# seulement) — un GET vers api.getmysocial.com, sur la vraie équipe, avec la
+# clé du poste. Toute connexion (et toute résolution DNS) est refusée et notée.
+import socket  # noqa: E402
+SORTIES = []
+_VRAI_CONNECT, _VRAI_CONNECT_EX, _VRAI_GAI = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
+
+
+def _connexion_interdite(self, adresse, *a, **k):
+    SORTIES.append(f"connect {str(adresse)[:80]}")
+    raise OSError("réseau interdit dans tests_pages_va")
+
+
+def _dns_interdit(hote, *a, **k):
+    SORTIES.append(f"DNS {str(hote)[:80]}")
+    raise socket.gaierror("réseau interdit dans tests_pages_va")
+
+
+socket.socket.connect = _connexion_interdite
+socket.socket.connect_ex = _connexion_interdite
+socket.getaddrinfo = _dns_interdit
+
 
 def check(label, cond, detail=""):
     (OK if cond else KO).append(label)
@@ -153,20 +177,39 @@ SAV = (gms.duplicate_link, gms.update_link, gms.get_link, gms.disable_link, gms.
        gms.delete_link, gms.get_api_key, requests.post, lv.lien_de, lv.espace, lv._poser_tracking,
        lv.poser_pays, lv._poser_base_seule, lv.ranger, lv.lia_seule, tk._etat, tk.role_manager,
        tk.role_helper, tk._maj_menu_v2, tk._EN_FOND, tk._suite, tk._api_reseau, lv._etat,
-       gms._call_tool, pv._cookie_ok, pv._FIL)
+       gms._call_tool, pv._cookie_ok, pv._FIL, pv.EN_FOND)
 VRAI_POSER_TRACKING = lv._poser_tracking
 VRAI_POSER_BASE_SEULE = lv._poser_base_seule
+VRAI_POSER_PAYS = lv.poser_pays
+VRAI_PAGE_DU_LIEN = lv._page_du_lien
+VRAI_MAJ_MENU = tk._maj_menu_v2
+VRAI_EN_FOND = pv.EN_FOND
 #: Les autres attributs remplacés (relectures du 06/11), remis à la fin.
 SAV2 = {(m, n): getattr(m, n) for m, n in (
     (gms, "pause_restante"), (gms, "list_links_team"), (gms, "lire_ab_testing"), (gms, "_ab_prive"),
-    (lv, "_page_du_lien"), (lv, "nom_de_page"), (lv, "espace"), (tk, "ATTENTE_AVANT_PATCH_S"),
-    (tk, "REDESSIN_LISTE_S"), (tk, "_noter_menu_v2"), (pv, "_ecrire"))}
+    (gms, "get_session_cookie"), (lv, "_page_du_lien"), (lv, "nom_de_page"), (lv, "espace"),
+    (lv, "_basculer_sans_page"), (tk, "ATTENTE_AVANT_PATCH_S"), (tk, "REDESSIN_LISTE_S"),
+    (tk, "_noter_menu_v2"), (tk, "COMPOSANTS_MAX_V2"), (pv, "_ecrire"), (pv, "_log"),
+    (pv, "COUPURES_DEPART_PAR_PASSE"), (pv, "PAGES_PAR_PASSE"), (pv, "CREATIONS_PAR_PASSE"),
+    (pod, "_profil"), (pod, "_source"), (pod, "liens_bruts"), (pod, "_directs"), (pod, "_releve_liens"))}
+SAV_AB_SERVEUR = dict(pv.AB_PAR_PASSE_SERVEUR)
 FICHES = {f"{TW}:{MOI}": dict(FICHE)}
 SAV_TK = (tk.ETAT_FICHIER, tk._api_reseau)
 # aucune voie vers le vrai état des tickets ni vers Discord
 tk.ETAT_FICHIER = TMP / "tickets.json"
 tk._api_reseau = lambda *a, **k: (0, None)
 try:
+    # Tout ce qui parle à GetMySocial est doublé DÈS LE DÉBUT (la lecture de
+    # l'équipe, les pauses, l'A/B privé, le cookie, l'outil MCP brut) : un
+    # chemin réel atteint avant sa doublure faisait un vrai appel.
+    gms.list_links_team = lambda eq, force_refresh=False: (APPELS.append(("list", eq)) or {
+        "ok": True, "links": [{"id": k, "display_name": v.get("display_name")} for k, v in PAGES.items()]})
+    gms.pause_restante = lambda genre="lecture": 0
+    gms.lire_ab_testing = lambda lid, eq: {"ok": False, "error": "doublure : A/B non prévu ici"}
+    gms._ab_prive = lambda *a, **k: {"ok": False, "error": "doublure : A/B non prévu ici"}
+    gms.get_session_cookie = lambda: ""
+    gms._call_tool = lambda nom, args=None, *a, **k: (APPELS.append(("call", nom, (args or {}).get("link_id")))
+                                                      or {"ok": False, "error": "doublure : _call_tool non prévu"})
     gms.duplicate_link, gms.update_link, gms.get_link = f_duplicate, f_update, f_get
     gms.disable_link, gms.enable_link, gms.delete_link = f_disable, f_enable, f_delete
     gms.get_api_key = lambda: "cle-test"
@@ -974,11 +1017,13 @@ try:
     _vplaf = pv.CREATIONS_PAR_PASSE
     pv.CREATIONS_PAR_PASSE = 0
     FICHES[f"{AG}:9999"] = fiche_ig(199, "vaneuf")
+    TICKETS[f"{AG}:9999"] = {"salon": "T99"}      # sans ticket vivant, il compterait pour parti
     n_dup = len(APPELS)
     bl = pv.creer_pages_manquantes(AG)
     check("plafond à 0 : rien créé, tout « restent »", not dups(n_dup) and bl["restent"] == 3, bl)
     pv.CREATIONS_PAR_PASSE = _vplaf
     FICHES.pop(f"{AG}:9999")
+    TICKETS.pop(f"{AG}:9999")
 
     # ── le 70/30 : attente du cookie, reprise, plafond, rattrapage ──
     print("7b-2. Le 70/30 des pages")
@@ -1028,10 +1073,20 @@ try:
     pv._ecrire(d0)
     a_rattraper = len([k for k in d0["pages"] if k.startswith(f"{AG}:")])
     AB.clear()
+    # le plafond du serveur (AB_PAR_PASSE_SERVEUR, 10 sur TRUST INSTAGRAM)
+    # ramené à 4 pour le voir jouer, et PAGES_PAR_PASSE à 0 : le 70/30 n'y
+    # est plus compté (3 par passage laissaient la branche 30 % ~11 h sur
+    # l'ancienne model après un changement de model)
+    pv.AB_PAR_PASSE_SERVEUR[AG] = 4
+    _vpp0 = pv.PAGES_PAR_PASSE
+    pv.PAGES_PAR_PASSE = 0
     bl = pv.reprendre_pages(AG)
-    check("rattrapage : une page prête sans 70/30 noté le reçoit ; AB_PAR_PASSE (3) au plus par passage",
-          pv.AB_PAR_PASSE == 3 and len(AB) == 3 and a_rattraper > 3 and bl["ab_en_attente"] == a_rattraper - 3,
-          (len(AB), bl))
+    pv.PAGES_PAR_PASSE = _vpp0
+    pv.AB_PAR_PASSE_SERVEUR[AG] = SAV_AB_SERVEUR[AG]
+    check("rattrapage : une page prête sans 70/30 noté le reçoit ; le plafond 70/30 du serveur au plus par passage, "
+          "à part de PAGES_PAR_PASSE (10 sur TRUST INSTAGRAM, AB_PAR_PASSE = 3 ailleurs)",
+          pv.AB_PAR_PASSE == 3 and SAV_AB_SERVEUR == {AG: 10} and len(AB) == 4 and a_rattraper > 4
+          and bl["ab_en_attente"] == a_rattraper - 4, (len(AB), bl))
     for _ in range(5):
         pv.reprendre_pages(AG)
     check("… les suivantes aux passages d'après, sans rien compter",
@@ -1373,6 +1428,8 @@ try:
         POSTS.append((m, chemin, json.loads(json.dumps(kw.get("json")))))
         if m == "GET":
             return GETS.get(chemin, 200), {}
+        if m == "PATCH" and REGLE.get("patch_discord", 200) != 200:
+            return REGLE["patch_discord"], {"message": "refus"}
         if m == "POST" and REGLE.get("post_discord", 200) != 200:
             return REGLE["post_discord"], {"message": "refus"}
         return 200, ({"id": f"M{len(POSTS)}"} if m == "POST" else {})
@@ -1531,6 +1588,7 @@ try:
     # ── un registre qui refuse d'écrire ──
     VD = "4123"
     FICHES[f"{AG}:{VD}"] = fiche_ig(153, "vadisque")
+    TICKETS[f"{AG}:{VD}"] = {"salon": "T23"}
     _vecr = pv._ecrire
     pv._ecrire = lambda d: False
     n_dup = len(APPELS)
@@ -1555,15 +1613,21 @@ try:
           and not pv.page_de(AG, VD).get("link_id"), (copies, coupees, bl))
     n_ap = len(APPELS)
     tout_creer()
-    check("… le disque revenu : ses 3 pages créées, l'ancienne copie (coupée, inconnue du registre) recoupée, pas rallumée",
+    # elle existait AVANT cet appel (le relevé de l'équipe pris avant la 1re
+    # copie la contient) : ce n'est pas une copie à la réponse perdue, elle
+    # n'est pas recoupée — elle l'a été au refus du disque, et le reste
+    check("… le disque revenu : ses 3 pages créées ; l'ancienne copie (coupée au refus du disque) ni rallumée "
+          "ni recoupée",
           all(pv.page_de(AG, pv.place(VD, n)).get("etat") == "prete" for n in (1, 2, 3))
-          and ("disable", "lnk_page_" + copies[0][2]) in APPELS[n_ap:]
-          and ("enable", "lnk_page_" + copies[0][2]) not in APPELS[n_ap:], APPELS[n_ap:][:8])
+          and ("disable", "lnk_page_" + copies[0][2]) not in APPELS[n_ap:]
+          and ("enable", "lnk_page_" + copies[0][2]) not in APPELS[n_ap:]
+          and pv.page_de(AG, VD).get("link_id") != "lnk_page_" + copies[0][2], APPELS[n_ap:][:8])
 
     # ── une panne passagère de GetMySocial ne compte pas ──
     VQ1, VQ2 = "4124", "4125"
     FICHES[f"{AG}:{VQ1}"] = fiche_ig(154, "vaquota")
     FICHES[f"{AG}:{VQ2}"] = fiche_ig(155, "vaquotb")
+    TICKETS[f"{AG}:{VQ1}"], TICKETS[f"{AG}:{VQ2}"] = {"salon": "T24"}, {"salon": "T25"}
     REGLE["dup_refus"] = {GAB_BRUNE, GAB_BLONDE, GAB_TEMPLATE}
     REGLE["dup_erreur"] = "Quota GetMySocial epuise (ecritures) — reprise vers 18:00 (40 min)"
     n_dup = len(APPELS)
@@ -1582,6 +1646,7 @@ try:
                                             for u in (VQ1, VQ2) for n in (1, 2, 3)))
     VW = "4126"
     FICHES[f"{AG}:{VW}"] = fiche_ig(156, "vapause")
+    TICKETS[f"{AG}:{VW}"] = {"salon": "T26"}
     gms.pause_restante = lambda genre="lecture": 1800 if genre == "ecriture" else 0
     n_dup = len(APPELS)
     bl = pv.creer_pages_manquantes(AG)
@@ -1647,6 +1712,7 @@ try:
     # ── réponse perdue : la 1re copie existe, le renvoi dit « adresse prise » ──
     VP = "4131"
     FICHES[f"{AG}:{VP}"] = fiche_ig(161, "vaperdue")
+    TICKETS[f"{AG}:{VP}"] = {"salon": "T31"}
     nom_p = "Instagram VA 161 @vaperdue page"
     sc0 = lv.mots_sans_prenom(nom_p, len(lv.MOTS_THREADS))
     REGLE["perdue"] = {sc0}
@@ -1663,6 +1729,7 @@ try:
     # ── une copie qui hérite d'un A/B inconnu de son gabarit ──
     VX = "4130"
     FICHES[f"{AG}:{VX}"] = fiche_ig(160, "vaab")
+    TICKETS[f"{AG}:{VX}"] = {"salon": "T30"}
     lv._poser_base_seule = lambda g, u, lien=None: (AB.append(lien) or {
         "ok": False, "inattendu": True, "erreur": "A/B inattendu, rien touché : {'variants': ['Variant 1']}"})
     n_ap = len(APPELS)
@@ -1868,6 +1935,796 @@ try:
     for u in (VO, VS, VD, VQ1, VQ2, VW, VP, VX, VM):
         FICHES.pop(f"{AG}:{u}", None)
     FICHES.pop(f"{TW}:4129", None)
+    # ── 7e. Deuxième relecture du 06/11 (production depuis 17 h 01) ─────────
+    print("7e. Deuxième relecture : départs, fiche relue, pannes masquées, doublons, lot, menus, chemins réels")
+    import datetime as _dt
+    import verif_discord as vd
+    LOGS = []
+    _vlog = pv._log
+    pv._log = lambda t: (LOGS.append(str(t)), _vlog(t))[1]
+    _vlancer7e = pv.lancer_creations
+    pv.PAGES_PAR_PASSE = 100
+    tout_creer()                        # plus aucune place en attente : chaque lot ci-dessous part de rien
+    pv.lancer_creations = lambda g: "rien"      # la reprise ne lance pas de lot ici (appelé à la main)
+    _vget7e, _vtrk7e, _vpays7e, _vab7e = gms.get_link, lv._poser_tracking, lv.poser_pays, lv._poser_base_seule
+    _vetat7e = tk._etat
+
+    def ig(u, numero, pseudo, ticket=True, **k):
+        FICHES[f"{AG}:{u}"] = fiche_ig(numero, pseudo, **k)
+        if ticket:
+            TICKETS[f"{AG}:{u}"] = {"salon": f"T{u}"}
+
+    def noter_page(g, u_place, lid, **k):
+        """Une page prête notée, vivante chez GetMySocial (sans passer par la copie)."""
+        PAGES[lid] = dict(page_neuve(lid), display_name=f"page {u_place}")
+        d0 = pv._lire()
+        pg0 = {"link_id": lid, "shortcode": lid[4:], "public_url": f"https://getmysocial.com/{lid[4:]}",
+               "nom": f"page {u_place}", "etat": "prete", "actif": True,
+               "tracking": TRK if g == AG else FICHE["tracking"], "groupe": "Manager JOHN", "manques": [],
+               "essais": {}, "pays": True, "ab": {"ok": True}}
+        try:
+            # posée avec la liste de pays du moment (c117413) : sans ça,
+            # l'enveloppe pays de reprendre_pages la remet « à refaire »
+            pg0["pays_cibles"] = lv.signature_pays(g)
+        except Exception:                                    # noqa: BLE001
+            pass
+        pg0.update(k)
+        d0["pages"][f"{g}:{u_place}"] = pg0
+        pv._ecrire(d0)
+
+    def retirer(*uids, g=AG):
+        d0 = pv._lire()
+        for u in uids:
+            for k in [k for k in d0["pages"] if k.startswith(f"{g}:") and k.split(":", 1)[1].split("#")[0] == u]:
+                d0["pages"].pop(k)
+            for k in [k for k in (d0.get("creations") or {}) if k.startswith(f"{g}:")
+                      and k.split(":", 1)[1].split("#")[0] == u]:
+                d0["creations"].pop(k)
+            for k in [k for k, x in (d0.get("demandes") or {}).items() if str(x.get("uid")) == u]:
+                d0["demandes"].pop(k)
+            FICHES.pop(f"{g}:{u}", None)
+            TICKETS.pop(f"{g}:{u}", None)
+        pv._ecrire(d0)
+
+    def appels(depuis, genre):
+        return [a[1] for a in APPELS[depuis:] if a[0] == genre]
+
+    # ── 1. un VA parti : jamais de page, et ses pages vivantes coupées ──
+    VPA, VNUL = "4210", "4211"
+    ig(VPA, 210, "vadisparu", ticket=False)      # comme le VA 110 : fiche liens_va active, ticket rangé
+    ig(VNUL, 211, "vanulle", ticket=False)       # aucun ticket nulle part
+    DISPARUS = {f"{AG}:{VPA}": {"salon": "T210", "parti": {"quand": 1}, "disparu": 2}}
+    tk._etat = lambda: {"tickets": TICKETS, "tickets_disparus": DISPARUS}
+    check("en_service : un VA rangé dans « tickets_disparus » avec « parti » (comme le VA 110), ou sans ticket "
+          "nulle part, est « parti » ; un VA à ticket vivant reste en service",
+          pv.en_service(AG, VPA) == (False, "parti") and pv.en_service(AG, VNUL) == (False, "parti")
+          and pv.en_service(AG, VPA, ticket={}) == (False, "parti") and pv.en_service(AG, VI) == (True, ""),
+          (pv.en_service(AG, VPA), pv.en_service(AG, VNUL)))
+    n_ap = len(APPELS)
+    bl = pv.creer_pages_manquantes(AG)
+    check("… la création automatique les écarte, comptés « parti » (rien en silence), aucune copie",
+          not [a for a in APPELS[n_ap:] if a[0] == "duplicate" and ("vadisparu" in a[3] or "vanulle" in a[3])]
+          and bl["ignores"].get("parti") == 3, bl["ignores"])
+    r = pv.creer_page(AG, VPA, n=1)
+    check("… et creer_page le refuse (« hors_service » : parti)", not r["ok"] and r.get("hors_service") == "parti", r)
+    for n in (1, 2, 3):
+        noter_page(AG, pv.place(VPA, n), f"lnk_dep{n}")      # créées avant ce correctif (prod du 06/11)
+    pv.COUPURES_DEPART_PAR_PASSE = 2
+    n_ap, n_log = len(APPELS), len(LOGS)
+    bl = pv.reprendre_pages(AG)
+    lid_direct = FICHES[f"{AG}:{VPA}"]["link_id"]
+    check("reprise : les pages VIVANTES d'un VA parti coupées (disable_link, jamais delete), notées coupées, "
+          "COUPURES_DEPART_PAR_PASSE au plus par passage, le reste compté",
+          [x for x in appels(n_ap, "disable") if str(x).startswith("lnk_dep")] == ["lnk_dep1", "lnk_dep2"]
+          and not [x for x in appels(n_ap, "delete") if str(x).startswith("lnk_dep")]
+          and [x.split(" : ")[0] for x in bl.get("departs") or []] == [VPA, f"{VPA}#2"]
+          and bl.get("departs_restent") == 1 and pv.page_de(AG, VPA).get("actif") is False
+          and not pv.page_de(AG, VPA).get("a_couper") and pv.page_de(AG, f"{VPA}#3").get("actif") is True, bl)
+    check("… son lien direct n'est pas touché (hors champ), mais signalé au journal avec la raison",
+          lid_direct not in [a[1] for a in APPELS[n_ap:] if len(a) > 1]
+          and any("VA parti (ticket rangé dans tickets_disparus (parti))" in t and "à couper à la main" in t
+                  for t in LOGS[n_log:]), LOGS[n_log:])
+    pv.COUPURES_DEPART_PAR_PASSE = SAV2[(pv, "COUPURES_DEPART_PAR_PASSE")]
+    n_ap = len(APPELS)
+    pv.reprendre_pages(AG)
+    bl2 = pv.reprendre_pages(AG)
+    check("… la 3e au passage suivant, puis plus rien (déjà coupées)",
+          appels(n_ap, "disable") == ["lnk_dep3"] and not bl2.get("departs"), (appels(n_ap, "disable"), bl2))
+    gms.disable_link = lambda lid: (APPELS.append(("disable", lid)) or {"ok": False, "error": "429"})
+    noter_page(AG, f"{VPA}#4", "lnk_dep4")
+    d0 = pv._lire()
+    d0["demandes"]["ee00000004"] = {"gid": AG, "uid": VPA, "etat": "acceptee", "place": 4}
+    pv._ecrire(d0)
+    pv.reprendre_pages(AG)
+    gms.disable_link = f_disable
+    p_dep4 = pv.page_de(AG, f"{VPA}#4")
+    check("… coupure refusée par GetMySocial : notée « a_couper » comme suivre_bascule(False), recoupée ensuite",
+          p_dep4.get("a_couper") is True and p_dep4.get("a_rallumer") is False
+          and (pv.reprendre_pages(AG) or True) and pv.page_de(AG, f"{VPA}#4").get("actif") is False, p_dep4)
+    noter_page(AG, VNUL, "lnk_nul1")
+    tk._etat = lambda: {}
+    n_ap, n_log = len(APPELS), len(LOGS)
+    pv.reprendre_pages(AG)
+    check("tickets illisibles (tk._etat rend {}) : aucune page coupée pour un départ, ni RALLUMÉE (celles du parti "
+          "restent coupées), dit au journal",
+          "lnk_nul1" not in appels(n_ap, "disable")
+          and not [x for x in appels(n_ap, "enable") if str(x).startswith("lnk_dep")]
+          and pv.page_de(AG, VPA).get("actif") is False
+          and any("tickets illisibles" in t for t in LOGS[n_log:]), (LOGS[n_log:], appels(n_ap, "enable")))
+    tk._etat = lambda: {"tickets": TICKETS, "tickets_disparus": DISPARUS}
+    n_ap = len(APPELS)
+    bl = pv.reprendre_pages(AG)
+    check("… relisibles : la page d'un VA sans aucun ticket coupée, la raison dite",
+          appels(n_ap, "disable") == ["lnk_nul1"]
+          and f"{VNUL} : aucun ticket sur ce serveur" in (bl.get("departs") or []), bl)
+    TICKETS[f"{AG}:{VPA}"] = {"salon": "T212"}  # ticket refait : le VA est de retour, son direct sert
+    DISPARUS.clear()
+    n_ap = len(APPELS)
+    pv.reprendre_pages(AG)
+    check("… un ticket refait (VA revenu, direct en service) : ses pages rallumées",
+          sorted(appels(n_ap, "enable")) == ["lnk_dep1", "lnk_dep2", "lnk_dep3", "lnk_dep4"], appels(n_ap, "enable"))
+    TWX = "4213"
+    FICHES[f"{TW}:{TWX}"] = dict(FICHE, numero=213, pseudo="vatwx")
+    noter_page(TW, TWX, "lnk_twx")
+    n_ap = len(APPELS)
+    bl_tw = pv.reprendre_pages(TW)
+    bl_ig = pv.reprendre_pages(AG)
+    check("Twitter inchangé : un VA sans ticket garde sa page (seul le direct décide)",
+          "lnk_twx" not in appels(n_ap, "disable") and pv.page_de(TW, TWX).get("actif") is True, bl_tw)
+    check("bilan de la reprise Twitter : ses six clés, sans « ab_en_attente » ni « passageres » vides ; "
+          "TRUST INSTAGRAM les garde",
+          set(bl_tw) == {"coupees", "rallumees", "trackings", "reprises", "rates", "a_verifier"}
+          and "ab_en_attente" in bl_ig and "passageres" in bl_ig, (sorted(bl_tw), sorted(bl_ig)))
+    # Troisième relecture : un ticket rangé dans « tickets_disparus » SANS
+    # « parti » (salon supprimé à la main, VA toujours là, direct actif) était
+    # jugé parti — ses pages vivantes coupées, et le journal conseillait de
+    # couper son direct.
+    VDS = "4214"
+    ig(VDS, 214, "vasalon", ticket=False)
+    DISPARUS[f"{AG}:{VDS}"] = {"salon": "T214", "disparu": 2}
+    for n in (1, 2, 3):
+        noter_page(AG, pv.place(VDS, n), f"lnk_ds{n}")
+    noter_page(AG, f"{VDS}#4", "lnk_ds4")
+    d0 = pv._lire()
+    d0["demandes"]["ee00000014"] = {"gid": AG, "uid": VDS, "etat": "acceptee", "place": 4}
+    pv._ecrire(d0)
+    n_ap, n_log = len(APPELS), len(LOGS)
+    bl = pv.reprendre_pages(AG)
+    check("ticket rangé dans « tickets_disparus » SANS « parti » (salon supprimé, VA en service) : pas parti — "
+          "en_service vrai, ses 4 pages vivantes gardées, aucun départ dit ni direct à couper",
+          pv.en_service(AG, VDS) == (True, "") and pv.en_service(AG, VDS, ticket={}) == (True, "")
+          and pv.raison_depart(AG, VDS, tk._etat()) == ""
+          and not [x for x in appels(n_ap, "disable") if str(x).startswith("lnk_ds")]
+          and not [x for x in (bl.get("departs") or []) if x.startswith(VDS)]
+          and all(pv.page_de(AG, pv.place(VDS, n)).get("actif") is True for n in (1, 2, 3, 4))
+          and not [t for t in LOGS[n_log:] if f":{VDS}" in t and "à couper à la main" in t],
+          (pv.en_service(AG, VDS), bl.get("departs"), appels(n_ap, "disable")))
+    n_ap = len(APPELS)
+    bl_sp = pv.creer_pages_manquantes(AG)
+    DISPARUS[f"{AG}:{VDS}"]["parti"] = {"quand": 1}
+    bl_p = pv.creer_pages_manquantes(AG)
+    check("… la création ne le compte pas « parti » (ses places sont prêtes : rien copié) ; la même fiche AVEC "
+          "« parti » l'y fait compter",
+          bl_p["ignores"].get("parti") == bl_sp["ignores"].get("parti") + 1
+          and not [a for a in APPELS[n_ap:] if a[0] == "duplicate" and "vasalon" in a[3]],
+          (bl_sp["ignores"], bl_p["ignores"]))
+    n_ap = len(APPELS)
+    bl = pv.reprendre_pages(AG)
+    check("… et la reprise coupe alors ses 4 pages, raison dite (« (parti) »)",
+          sorted(x for x in appels(n_ap, "disable") if str(x).startswith("lnk_ds"))
+          == ["lnk_ds1", "lnk_ds2", "lnk_ds3", "lnk_ds4"]
+          and f"{VDS} : ticket rangé dans tickets_disparus (parti)" in (bl.get("departs") or []), bl.get("departs"))
+    DISPARUS.pop(f"{AG}:{VDS}", None)
+    retirer(VPA, VNUL, VDS)
+    retirer(TWX, g=TW)
+
+    # ── 2. la fiche du direct relue sous le verrou avant de couper / rallumer ──
+    A2, B2 = "4220", "4221"
+    ig(A2, 220, "vacache")
+    ig(B2, 221, "vacacheb")
+    noter_page(AG, A2, "lnk_ca1")                    # registre : A, B, A#2 (le cas de la relecture)
+    noter_page(AG, B2, "lnk_cb1", manques=["pays"], pays=False)
+    noter_page(AG, f"{A2}#2", "lnk_ca2")
+    FAIT = []
+
+    def pays_pendant_b(actif):
+        def f(lid, eq, *a):
+            if lid == "lnk_cb1" and not FAIT:
+                FAIT.append(1)
+                # liens_va.basculer : la fiche d'abord, puis la tâche de fond (un autre fil)
+                FICHES[f"{AG}:{A2}"]["actif"] = actif
+                t = _th.Thread(target=pv.suivre_bascule, args=(AG, A2, actif))
+                t.start()
+                t.join(5)
+            return _vpays7e(lid, eq, *a)
+        return f
+    lv.poser_pays = pays_pendant_b(False)
+    n_ap = len(APPELS)
+    pv.reprendre_pages(AG)
+    lv.poser_pays = _vpays7e
+    check("« 🚫 Désactiver » pendant une reprise : la page #2, coupée par la bascule en fond, n'est PAS rallumée "
+          "(fiche relue sous le verrou de la page, pas celle du cache du passage)",
+          FAIT and pv.page_de(AG, f"{A2}#2").get("actif") is False and "lnk_ca2" in appels(n_ap, "disable")
+          and "lnk_ca2" not in appels(n_ap, "enable"), (FAIT, appels(n_ap, "disable"), appels(n_ap, "enable")))
+    FAIT.clear()
+    d0 = pv._lire()
+    d0["pages"][f"{AG}:{B2}"].update(manques=["pays"], pays=False)
+    pv._ecrire(d0)
+    lv.poser_pays = pays_pendant_b(True)
+    n_ap = len(APPELS)
+    pv.reprendre_pages(AG)
+    lv.poser_pays = _vpays7e
+    check("… et l'inverse : un VA rallumé pendant la reprise garde sa page #2 en ligne (pas re-coupée)",
+          FAIT and pv.page_de(AG, f"{A2}#2").get("actif") is True and "lnk_ca2" in appels(n_ap, "enable")
+          and "lnk_ca2" not in appels(n_ap, "disable"), (FAIT, appels(n_ap, "disable"), appels(n_ap, "enable")))
+    retirer(A2, B2)
+
+    # ── 3. numéro ou pseudo manquant : une seule règle (en_service) ──
+    VF, VOK = "4230", "4232"
+    ig(VF, 230, "")
+    ig(VOK, 232, "vacomplet")
+    check("en_service : numéro ou pseudo manquant → « fiche_incomplete » (la règle de creer_page, une seule)",
+          pv.en_service(AG, VF) == (False, "fiche_incomplete") and pv.fiche_complete(FICHES[f"{AG}:{VOK}"])
+          and not pv.fiche_complete(dict(FICHES[f"{AG}:{VOK}"], numero="x")), pv.en_service(AG, VF))
+    sec = tk._sections_page(AG, VF)
+    check("… menu : « ⚠️ lien incomplet » sur les 3 places (plus « ⏳ en préparation »), pas de ➕",
+          textes(sec) and textes(sec)[0].count("⚠️ lien incomplet") == 3
+          and not [c for c in ids(sec) if c.startswith("pgd:")], sec)
+    r = tk.traiter(clic_ig(f"pgd:new:{VF}", qui=VF, salon=f"T{VF}"))
+    check("… ➕ forgé : refusé avec sa raison, rien noté",
+          r["type"] == 4 and "incomplet" in r["data"]["content"] and not pv.demande_en_attente(AG, VF), r)
+    FICHES[f"{AG}:{VF}"]["pseudo"] = "vaf"
+    did_f = pv.demander_page(AG, VF, par=VF)["id"]
+    FICHES[f"{AG}:{VF}"]["pseudo"] = ""
+    r = tk.traiter(clic_ig(f"pgd:ok:{VF}:{did_f}", qui=MGR, roles=["R_MANAGER"], salon=f"T{VF}"))
+    check("… ✅ d'une demande notée avant : refusé, rien décidé (la copie aurait été refusée à chaque passage)",
+          r["type"] == 4 and "numéro ou pseudo" in r["data"]["content"] and pv.demande(did_f).get("etat") == "attente", r)
+    pv.annuler_demande(did_f, "essai")
+    n_ap = len(APPELS)
+    bl = pv.creer_pages_manquantes(AG)
+    cr = pv._lire().get("creations") or {}
+    check("… création automatique : écarté et compté (« fiche_incomplete »), aucun essai noté, le lot sert les autres",
+          bl["ignores"].get("fiche_incomplete") == 1 and not [k for k in cr if f":{VF}" in k]
+          and bl["creees"] == [VOK, f"{VOK}#2", f"{VOK}#3"]
+          and not [a for a in APPELS[n_ap:] if a[0] == "duplicate" and "VA 230" in a[3]], bl)
+    retirer(VF, VOK)
+
+    # ── 4. pannes passagères masquées par liens_va ──
+    ERR429 = "Error 429 (rate_limit_exceeded): RATE_LIMITED: retry after 30s"
+    gms.get_link = lambda lid, team_id=None: {"ok": False, "error": ERR429}
+    v = VRAI_PAGE_DU_LIEN("lnk_x", EQ)
+    check("_page_du_lien : GetMySocial muet → « » (comme avant), avec son texte d'erreur",
+          v == "" and isinstance(v, str) and ERR429 in str(getattr(v, "erreur", "")), getattr(v, "erreur", None))
+    gms.get_link = lambda lid, team_id=None: {"ok": True, "link": {
+        "type": "landing", "buttons": [{"url": "https://onlyfans.com/liasxcret/c1"}]}}
+    v = VRAI_PAGE_DU_LIEN("lnk_x", EQ)
+    check("… lu : la même chaîne qu'avant, sans erreur", v == "https://onlyfans.com/liasxcret"
+          and not getattr(v, "erreur", ""), v)
+    sav4 = (gms.lire_ab_testing, lv._page_du_lien, lv.nom_de_page, lv.espace)
+    gms.lire_ab_testing = lambda lid, eq: {"ok": True, "config": {}}
+    lv._page_du_lien = VRAI_PAGE_DU_LIEN
+    lv.nom_de_page = lambda page: "Lia"
+    lv.espace = lambda g="": dict({"equipe": EQ, "source_variante": "lnk_source"},
+                                  **({"plateforme": "Instagram"} if str(g) == AG else {}))
+    gms.get_link = lambda lid, team_id=None: {"ok": False, "error": ERR429}
+    r = VRAI_POSER_BASE_SEULE(AG, VI, lien=pv._lien_ab("lnk_pg", TRK, "pgx"))
+    check("70/30 (vrai _poser_base_seule), destination illisible sur un 429 : le texte de GetMySocial dans l'erreur "
+          "(même début qu'avant), reconnu comme panne passagère",
+          not r.get("ok") and r["erreur"].startswith("le lien mène à ?, sa fiche à https://onlyfans.com/liasxcret")
+          and ERR429 in r["erreur"] and pv.erreur_passagere(r["erreur"]), r)
+    V4 = "4240"
+    ig(V4, 240, "varelu")
+    noter_page(AG, V4, "lnk_r429", manques=["70/30"], ab={"ok": False})
+    gms.get_link = lambda lid, team_id=None: ({"ok": False, "error": ERR429} if lid == "lnk_r429"
+                                              else _vget7e(lid, team_id))
+    lv._poser_base_seule = VRAI_POSER_BASE_SEULE
+    for _ in range(4):
+        bl = pv.reprendre_pages(AG)
+    lv._poser_base_seule = _vab7e
+    gms.get_link = _vget7e
+    pg4 = pv.page_de(AG, V4)
+    check("reprise : 4 passages de 429 sur la lecture du 70/30 (le cas du VA 63) — aucun essai compté, pas "
+          "« à vérifier », dit en panne passagère",
+          pg4["manques"] == ["70/30"] and not (pg4.get("essais") or {}).get("70/30") and not pg4.get("a_verifier")
+          and any(x.startswith(V4 + " : 70/30") for x in bl["passageres"]), (pg4, bl.get("passageres")))
+    LECT = {"n": 0}
+
+    def get_puis_429(lid, team_id=None):
+        LECT["n"] += 1
+        if LECT["n"] == 1:
+            return {"ok": True, "link": {"type": "landing", "buttons": [{"url": "https://onlyfans.com/liasxcret/c1"}]}}
+        return {"ok": False, "error": ERR429}
+    _vupd7e = gms.update_link
+    gms.get_link = get_puis_429
+    gms.update_link = lambda lid, champs, team_id=None: {"ok": True}
+    rp = VRAI_POSER_PAYS("lnk_pp", EQ)
+    gms.get_link, gms.update_link = _vget7e, _vupd7e
+    (gms.lire_ab_testing, lv._page_du_lien, lv.nom_de_page, lv.espace) = sav4
+    check("poser_pays, relecture refusée par un 429 : « écrit, mais relecture impossible » (comme avant) ET le texte "
+          "de GetMySocial", not rp["ok"] and rp["erreur"].startswith("écrit, mais relecture impossible")
+          and ERR429 in rp["erreur"] and pv.erreur_passagere(rp["erreur"]), rp)
+    _vcall7e = gms._call_tool
+    gms._call_tool = lambda nom, args=None, *a, **k: {"ok": False, "error": ERR429}
+    r1 = VRAI_POSER_TRACKING("lnk_pt", TRK, "x", EQ)
+    CT = {"n": 0}
+
+    def call_puis_429(nom, args=None, *a, **k):
+        CT["n"] += 1
+        if nom == "get_link" and CT["n"] == 1:
+            return {"ok": True, "data": {"buttons": [{"url": "https://onlyfans.com/liasxcret"}]}}
+        if nom == "update_link":
+            return {"ok": True}
+        return {"ok": False, "error": ERR429}
+    gms._call_tool = call_puis_429
+    r2 = VRAI_POSER_TRACKING("lnk_pt", TRK, "x", EQ)
+    gms._call_tool = _vcall7e
+    check("_poser_tracking : lecture puis relecture en 429 — le texte de GetMySocial dans l'erreur (même début "
+          "qu'avant), reconnu passager",
+          r1["erreur"].startswith("copie illisible ou sans bouton") and ERR429 in r1["erreur"]
+          and r2["erreur"].startswith("relu : bouton(s) encore ailleurs") and ERR429 in r2["erreur"]
+          and pv.erreur_passagere(r1["erreur"]) and pv.erreur_passagere(r2["erreur"]), (r1, r2))
+    # Troisième relecture : gms.duplicate_link AVALAIT l'échec de sa mise à
+    # jour d'adresse. Un 429 dessus laissait la copie temporaire du 70/30 sur
+    # l'adresse de sa source (seren.vale), et _poser_base_seule répondait « la
+    # copie temporaire pointe sur … » sans « 429 » : un essai compté par
+    # passage, puis « à vérifier » 24 h, la page à 100 % sur le tracking.
+    VRAI_DUP = SAV[0]
+    APPELS_DUP = []
+    PANNE_URL = {"on": True}
+    AB_ETAT = {}
+
+    def call_dup(nom, args=None, *a, **k):
+        args = args or {}
+        APPELS_DUP.append((nom, args.get("link_id")))
+        if nom == "duplicate_link":
+            return {"ok": True, "data": {"id": "lnk_abtmp429", "url": "https://onlyfans.com/seren.vale"}}
+        if nom == "update_link":
+            if PANNE_URL["on"]:
+                return {"ok": False, "error": ERR429}
+            return {"ok": True, "data": {"id": args.get("link_id"), "url": args.get("url")}}
+        return {"ok": False, "error": "doublure : _call_tool non prévu"}
+
+    def post_ab(m, lid, eq, corps):
+        AB_ETAT[lid] = dict(corps, variants=[dict(v, variantId="v429") for v in corps.get("variants") or []])
+        return {"ok": True}
+    sav_dup = (gms.duplicate_link, gms._call_tool, gms.lire_ab_testing, gms._ab_prive, lv._page_du_lien,
+               lv.nom_de_page, lv.espace, lv._poser_base_seule, COOKIE["ok"])
+    gms._call_tool = call_dup
+    gms.duplicate_link = VRAI_DUP
+    V6 = "4243"
+    try:
+        r_dup = gms.duplicate_link("lnk_source", "abtmpx", "base lia - x", "https://onlyfans.com/liasxcret", EQ)
+        PANNE_URL["on"] = False
+        r_ok = gms.duplicate_link("lnk_source", "abtmpy", "base lia - y", "https://onlyfans.com/liasxcret", EQ)
+        PANNE_URL["on"] = True
+        check("gms.duplicate_link (vrai) : la mise à jour d'adresse refusée (429) rend « erreur_url », ok reste "
+              "vrai (la copie existe, l'appelant la supprime) ; réussie : la réponse d'avant, sans la clé",
+              r_dup.get("ok") is True and (r_dup.get("link") or {}).get("id") == "lnk_abtmp429"
+              and ERR429 in r_dup.get("erreur_url", "")
+              and r_ok == {"ok": True, "link": {"id": "lnk_abtmp429", "url": "https://onlyfans.com/liasxcret"}},
+              (r_dup, r_ok))
+        gms.lire_ab_testing = lambda lid, eq: {"ok": True, "config": dict(AB_ETAT.get(lid) or {})}
+        gms._ab_prive = post_ab
+        lv._page_du_lien = lambda lid, eq: "https://onlyfans.com/liasxcret"
+        lv.nom_de_page = lambda page: "Lia"
+        lv.espace = lambda g="": {"equipe": EQ, "source_variante": "lnk_source"}
+        lv._poser_base_seule = VRAI_POSER_BASE_SEULE
+        COOKIE["ok"] = True
+        ig(V6, 243, "vadup")
+        noter_page(AG, V6, "lnk_dup429", manques=["70/30"], ab={"ok": False})
+        vus = []
+        for _ in range(4):
+            vus.append(any(x.startswith(V6 + " : 70/30") for x in pv.reprendre_pages(AG)["passageres"]))
+        pg6 = pv.page_de(AG, V6)
+        check("reprise : 4 passages de 429 sur l'adresse de la copie temporaire du 70/30 (le cas de la page 2 du "
+              "VA 63) — tentée à chaque passage, aucun essai compté, pas « à vérifier », dite en panne passagère "
+              "avec le texte de GetMySocial",
+              vus == [True] * 4 and pg6["manques"] == ["70/30"] and not (pg6.get("essais") or {}).get("70/30")
+              and not pg6.get("a_verifier") and ERR429 in str((pg6.get("ab") or {}).get("erreur")),
+              (vus, pg6))
+        PANNE_URL["on"] = False
+        pv.reprendre_pages(AG)
+        pg6 = pv.page_de(AG, V6)
+        check("… GetMySocial revenu : le 70/30 posé au passage suivant (70 / « Base Lia » 30)",
+              pg6["manques"] == [] and (pg6.get("ab") or {}).get("ok") is True
+              and (AB_ETAT.get("lnk_dup429") or {}).get("controlWeight") == 70
+              and [v.get("name") for v in (AB_ETAT.get("lnk_dup429") or {}).get("variants") or []] == ["Base Lia"],
+              (pg6, AB_ETAT.get("lnk_dup429")))
+    finally:
+        (gms.duplicate_link, gms._call_tool, gms.lire_ab_testing, gms._ab_prive, lv._page_du_lien,
+         lv.nom_de_page, lv.espace, lv._poser_base_seule, COOKIE["ok"]) = sav_dup
+    retirer(V6)
+    V5 = "4241"
+    ig(V5, 241, "vareessai")
+    noter_page(AG, V5, "lnk_rv", manques=["pays"], essais={"pays": 3}, a_verifier=True, pays=False,
+               a_verifier_quand=int(time.time()) - pv.CREATION_REESSAI_S - 60)
+    lv.poser_pays = lambda lid, eq, *a: (APPELS.append(("pays", lid)) or {"ok": False, "erreur": "refus définitif"})
+    n_ap = len(APPELS)
+    pv.reprendre_pages(AG)
+    essai1 = [a for a in APPELS[n_ap:] if a == ("pays", "lnk_rv")]
+    pv.reprendre_pages(AG)
+    pv.reprendre_pages(AG)
+    pg5 = pv.page_de(AG, V5)
+    check("TRUST INSTAGRAM : une étape « à vérifier » depuis plus de CREATION_REESSAI_S retentée une fois, puis "
+          "« à vérifier » jusqu'au lendemain (le même réessai que la création ; elle restait figée pour toujours)",
+          len(essai1) == 1 and len([a for a in APPELS[n_ap:] if a == ("pays", "lnk_rv")]) == 1
+          and pg5.get("a_verifier") is True and time.time() - float(pg5.get("a_verifier_quand") or 0) < 60
+          and pg5["essais"].get("pays") == 4, pg5)
+    lv.poser_pays = lambda lid, eq, *a: (APPELS.append(("pays", lid)) or {"ok": True})
+    d0 = pv._lire()
+    d0["pages"][f"{AG}:{V5}"]["a_verifier_quand"] = 1
+    pv._ecrire(d0)
+    pv.reprendre_pages(AG)
+    check("… le lendemain, réussie : plus rien à faire", pv.page_de(AG, V5)["manques"] == [], pv.page_de(AG, V5))
+    TWR = "4242"
+    FICHES[f"{TW}:{TWR}"] = dict(FICHE, numero=242, pseudo="vatwr")
+    noter_page(TW, TWR, "lnk_twr", manques=["pays"], essais={"pays": 3}, a_verifier=True, pays=False)
+    n_ap = len(APPELS)
+    pv.reprendre_pages(TW)
+    lv.poser_pays = _vpays7e
+    check("… Twitter inchangé : une étape « à vérifier » n'y est jamais retentée d'elle-même",
+          ("pays", "lnk_twr") not in APPELS[n_ap:] and pv.page_de(TW, TWR).get("a_verifier") is True
+          and "a_verifier_quand" not in pv.page_de(TW, TWR))
+    retirer(V4, V5)
+    retirer(TWR, g=TW)
+
+    # ── 5. _couper_doublons : seulement ce qui naît pendant l'appel ──
+    def copie_vivante(numero, pseudo):
+        nom_c = f"Instagram VA {numero} @{pseudo} page"
+        lid_c = "lnk_page_" + lv.mots_sans_prenom(nom_c, len(lv.MOTS_THREADS))
+        PAGES[lid_c] = dict(page_neuve(lid_c), display_name=nom_c)
+        return lid_c
+    VAN, VAN2, VAN3, VAN4 = "4250", "4251", "4252", "4253"
+    ig(VAN, 250, "vaancienne")
+    lid_an = copie_vivante(250, "vaancienne")
+    d0 = pv._lire()
+    d0.setdefault("anciennes", {})[f"{AG}:{VAN}:1"] = {"link_id": lid_an, "nom": "Instagram VA 250 @vaancienne page",
+                                                       "actif": True, "raison": "ancien gabarit (essai)"}
+    pv._ecrire(d0)
+    n_ap = len(APPELS)
+    r = pv.creer_page(AG, VAN, n=1)
+    check("une ancienne page VIVANTE au même nom (rangée dans « anciennes ») : la nouvelle prend l'adresse suivante, "
+          "l'ancienne n'est PAS coupée (elle existait avant la copie)",
+          r["ok"] and pv.page_de(AG, VAN)["link_id"] != lid_an and lid_an not in appels(n_ap, "disable"),
+          (r, appels(n_ap, "disable")))
+    ig(VAN2, 251, "vaperdu")
+    lid_p = copie_vivante(251, "vaperdu")               # vivante, inconnue du registre (registre restauré)
+    n_ap = len(APPELS)
+    r = pv.creer_page(AG, VAN2, n=1)
+    check("… registre perdu (la page vivante n'y est plus du tout) : pas coupée non plus",
+          r["ok"] and lid_p not in appels(n_ap, "disable"), (r, appels(n_ap, "disable")))
+    ig(VAN3, 252, "vasansrel")
+    sc3 = lv.mots_sans_prenom("Instagram VA 252 @vasansrel page", len(lv.MOTS_THREADS))
+    REGLE["perdue"] = {sc3}
+    _vlist7e = gms.list_links_team
+    LISTES = {"n": 0}
+
+    def liste_puis(eq, force_refresh=False):
+        LISTES["n"] += 1
+        return {"ok": False, "error": "HTTP 503"} if LISTES["n"] == 1 else _vlist7e(eq, force_refresh)
+    gms.list_links_team = liste_puis
+    n_ap, n_log = len(APPELS), len(LOGS)
+    r = pv.creer_page(AG, VAN3, n=1)
+    gms.list_links_team = _vlist7e
+    REGLE["perdue"] = set()
+    check("… relevé de l'équipe d'avant la copie impossible : rien coupé (même la copie à la réponse perdue), dit",
+          r["ok"] and ("lnk_page_" + sc3) not in appels(n_ap, "disable")
+          and any("relevé de l'équipe d'avant la copie impossible" in t and "rien coupé" in t for t in LOGS[n_log:]),
+          (r, LOGS[n_log:]))
+    ig(VAN4, 253, "vaperdue2")
+    sc4 = lv.mots_sans_prenom("Instagram VA 253 @vaperdue2 page", len(lv.MOTS_THREADS))
+    REGLE["perdue"] = {sc4}
+    n_ap, n_log = len(APPELS), len(LOGS)
+    r = pv.creer_page(AG, VAN4, n=1)
+    REGLE["perdue"] = set()
+    check("… la copie à la réponse perdue (née pendant cet appel) reste coupée, et le journal le dit juste",
+          r["ok"] and appels(n_ap, "disable") == ["lnk_page_" + sc4]
+          and any("née pendant cet appel" in t for t in LOGS[n_log:])
+          and not any("réponse perdue de GetMySocial ?" in t for t in LOGS[n_log:]), (r, LOGS[n_log:]))
+    retirer(VAN, VAN2, VAN3, VAN4)
+
+    # ── 6. une panne passagère d'UNE place ne bloque plus le lot ──
+    V61, V62, V63, V64 = "4260", "4261", "4263", "4264"
+    ig(V61, 260, "vaplante")
+    ig(V62, 261, "vasuite")
+    TENTES, PANNE = [], {"Instagram VA 260 @vaplante page"}
+
+    def trk_502(lid, t, nom, eq):
+        TENTES.append(nom)
+        if nom in PANNE:
+            return {"ok": False, "erreur": "HTTP 502 : <html>bad gateway</html>"}
+        return _vtrk7e(lid, t, nom, eq)
+    lv._poser_tracking = trk_502
+    bl = pv.creer_pages_manquantes(AG)
+    cr = (pv._lire().get("creations") or {}).get(f"{AG}:{V61}") or {}
+    check("une panne passagère propre à UNE place (502 sur son bouton) : ni essai compté ni arrêt du lot — les "
+          "places suivantes créées dans le même passage",
+          bl["creees"] == [V62, f"{V61}#2"] and any(x.startswith(V61 + " ") for x in bl["passageres"])
+          and not cr.get("essais") and cr.get("passagere_quand"), (bl, cr))
+    retirer(V61, V62)
+    ig(V63, 263, "varota")
+    ig(V64, 264, "varotb")
+    PANNE = {"Instagram VA 263 @varota page", "Instagram VA 264 @varotb page"}
+    pv.CREATIONS_PAR_PASSE = 1
+    TENTES.clear()
+    pv.creer_pages_manquantes(AG)
+    pv.creer_pages_manquantes(AG)
+    pv.CREATIONS_PAR_PASSE = SAV2[(pv, "CREATIONS_PAR_PASSE")]
+    lv._poser_tracking = _vtrk7e
+    check("… rotation : la place restée en panne repasse derrière (« passagere_quand »), la suivante est tentée",
+          TENTES == ["Instagram VA 263 @varota page", "Instagram VA 264 @varotb page"], TENTES)
+    retirer(V63, V64)
+
+    # ── 7. deux pannes passagères de plus ──
+    BUD = "Budget GetMySocial du jour reserve a la paie (podium, primes) — relance plus tard"
+    CF = "Réponse invalide : <!DOCTYPE html><title>Just a moment...</title>"
+    check("« Budget GetMySocial du jour reserve a la paie … relance plus tard » : panne passagère, de tout le compte",
+          pv.erreur_passagere(BUD) and pv.panne_globale(BUD)
+          and pv.erreur_passagere(f"bouton non posé (lien illisible ({BUD})) : page coupée"))
+    check("« Réponse invalide » (page Cloudflare) : panne passagère, propre à l'appel (le lot continue)",
+          pv.erreur_passagere(CF) and not pv.panne_globale(CF))
+    check("… quota et 429 : de tout le compte (le lot s'arrête) ; un 502 ou le réseau : non ; un vrai refus : rien",
+          pv.panne_globale("Quota GetMySocial epuise — reprise vers 18:00 (40 min)") and pv.panne_globale(ERR429)
+          and pv.panne_globale("HTTP 429 (rate-limit GetMySocial)") and not pv.panne_globale("HTTP 502 : Bad Gateway")
+          and not pv.panne_globale("Erreur réseau : Read timed out") and not pv.erreur_passagere("shortcode already taken"))
+
+    # ── 8. un VA coupé PENDANT le lot ──
+    V8 = "4270"
+    ig(V8, 270, "vacoupelot")
+
+    def trk_coupe(lid, t, nom, eq):
+        if nom == "Instagram VA 270 @vacoupelot page":
+            FICHES[f"{AG}:{V8}"]["actif"] = False       # « 🚫 Désactiver » pendant la copie de la place 1
+        return _vtrk7e(lid, t, nom, eq)
+    lv._poser_tracking = trk_coupe
+    coupes_avant = len([k for k, x in FICHES.items() if k.startswith(f"{AG}:") and x.get("actif") is False])
+    bl = pv.creer_pages_manquantes(AG)
+    lv._poser_tracking = _vtrk7e
+    cr = pv._lire().get("creations") or {}
+    check("un VA désactivé PENDANT le lot : ses places suivantes ni essais ratés, ni places du lot — rangées dans "
+          "« ignores » (coupe) ; sa page 1 née coupée",
+          bl["creees"] == [V8] and not bl["ratees"] and not [k for k in cr if f":{V8}" in k]
+          and bl["ignores"].get("coupe") == coupes_avant + 1 and pv.page_de(AG, V8).get("actif") is False, (bl, cr))
+    retirer(V8)
+
+    # ── 9. la reprise n'attend plus une page tenue ──
+    V9 = "4275"
+    ig(V9, 275, "vaoccupe")
+    noter_page(AG, V9, "lnk_occ1")
+    noter_page(AG, f"{V9}#2", "lnk_occ2", etat="en_cours", quand=int(time.time()) - 3600)
+    noter_page(AG, f"{V9}#3", "lnk_occ3", actif=False)
+    pris, lacher = _th.Event(), _th.Event()
+
+    def tenir():
+        with pv._verrou_page(f"{AG}:{V9}"):
+            pris.set()
+            lacher.wait(5)
+    fil = _th.Thread(target=tenir)
+    fil.start()
+    pris.wait(2)
+    with pv._VERROU:
+        pv._CREATIONS.add(f"{AG}:{V9}#2")
+    n_ap = len(APPELS)
+    t0 = time.time()
+    bl = pv.reprendre_pages(AG)
+    duree = time.time() - t0
+    lacher.set()
+    fil.join()
+    with pv._VERROU:
+        pv._CREATIONS.discard(f"{AG}:{V9}#2")
+    check("reprise : une page tenue (création au clic, bascule, modification) ou en création est laissée au passage "
+          "suivant, sans l'attendre ; les autres suivent",
+          duree < 1 and V9 in (bl.get("occupees") or []) and f"{V9}#2" in (bl.get("occupees") or [])
+          and "lnk_occ3" in appels(n_ap, "enable") and "lnk_occ2" not in appels(n_ap, "disable"),
+          (round(duree, 2), bl.get("occupees")))
+    retirer(V9)
+
+    # ── 10. le message de la demande refait après un PATCH raté ──
+    V10 = "4280"
+    ig(V10, 280, "vamessage")
+    tout_creer()
+
+    def accepter(mid):
+        did_x = pv.demander_page(AG, V10, par=V10)["id"]
+        pv.noter_message_demande(did_x, f"T{V10}", mid)
+        return did_x, pv.decider_demande(AG, V10, did_x, True, par=MGR)["place"]
+    did10, n10 = accepter("MSG10")
+    REGLE["patch_discord"] = 500
+    tout_creer()                        # la page créée par le lot ; le PATCH de son message refusé
+    REGLE["patch_discord"] = 200
+    chemin10 = f"/channels/T{V10}/messages/MSG10"
+    POSTS.clear()
+    pv.creer_pages_manquantes(AG)
+    check("message de demande resté « en création » (PATCH raté) : pas refait aussitôt (le fil du ✅ a "
+          "DEMANDE_SANS_MESSAGE_S pour le faire)",
+          pv.page_de(AG, pv.place(V10, n10)).get("etat") == "prete" and not pv.demande(did10).get("message_maj")
+          and not [x for x in POSTS if x[0] == "PATCH" and x[1] == chemin10], POSTS)
+    vieillir_decision = lambda did_x: (lambda d0: (d0["demandes"][did_x].update(
+        decide_quand=d0["demandes"][did_x]["decide_quand"] - pv.DEMANDE_SANS_MESSAGE_S - 5), pv._ecrire(d0)))(pv._lire())
+    vieillir_decision(did10)
+    POSTS.clear()
+    n_log = len(LOGS)
+    bl = pv.creer_pages_manquantes(AG)
+    p10 = pv.page_de(AG, pv.place(V10, n10))
+    patch = [x for x in POSTS if x[0] == "PATCH" and x[1] == chemin10]
+    check("… passé ce délai, le lot refait le PATCH : le message prend l'adresse, noté, dit au journal",
+          len(patch) == 1 and patch[0][2]["content"].endswith(f"page {n10} : {p10['public_url']}")
+          and pv.demande(did10).get("message_maj") and bl.get("messages")
+          and any("messages de demande refaits" in t for t in LOGS[n_log:]), (patch, bl.get("messages")))
+    POSTS.clear()
+    pv.creer_pages_manquantes(AG)
+    check("… et une seule fois", not [x for x in POSTS if x[0] == "PATCH" and x[1] == chemin10], POSTS)
+    did11, n11 = accepter("MSG11")
+    REGLE["patch_discord"] = 500
+    tout_creer()
+    vieillir_decision(did11)
+    POSTS.clear()
+    n_log = len(LOGS)
+    for _ in range(pv.MESSAGE_ESSAIS_MAX + 2):
+        pv.creer_pages_manquantes(AG)
+    REGLE["patch_discord"] = 200
+    chemin11 = f"/channels/T{V10}/messages/MSG11"
+    check("… un PATCH toujours refusé : MESSAGE_ESSAIS_MAX essais, puis plus retenté (dit au journal)",
+          len([x for x in POSTS if x[0] == "PATCH" and x[1] == chemin11]) == pv.MESSAGE_ESSAIS_MAX
+          and any("plus retenté" in t for t in LOGS[n_log:]), [x[1] for x in POSTS])
+    retirer(V10)
+
+    # ── 13. le menu d'un VA hors service ne promet rien ──
+    V13 = "4285"
+    ig(V13, 285, "vamenucoupe", actif=False)
+    noter_page(AG, V13, "lnk_m1", actif=False)
+    noter_page(AG, f"{V13}#2", "lnk_m2", etat="ratee", actif=False)
+    noter_page(AG, f"{V13}#3", "lnk_m3", etat="en_cours", actif=False)
+    t13 = textes(tk._sections_page(AG, V13))[0]
+    check("direct coupé : aucune place « ⚠️ à reprendre » ou « ⏳ en préparation » (rien ne s'y fera), toutes "
+          "« 🚫 désactivée »", t13.count("🚫 désactivée") == 3 and "à reprendre" not in t13 and "préparation" not in t13,
+          t13)
+    check("etat_place : VA parti → « coupee » ; lien ou fiche incomplets → « sans_lien », même sur une page ratée ; "
+          "en service, une ratée reste « à reprendre »",
+          pv.etat_place(AG, V13, 2, hors_service="parti") == ("coupee", "")
+          and pv.etat_place(AG, V13, 2, hors_service="fiche_incomplete") == ("sans_lien", "")
+          and pv.etat_place(AG, V13, 3, hors_service="sans_lien") == ("sans_lien", "")
+          and pv.etat_place(AG, V13, 2) == ("a_reprendre", ""))
+    retirer(V13)
+
+    # ── 14. plus de 25 pages acceptées : aucune ne disparaît sans trace ──
+    V14 = "4290"
+    ig(V14, 290, "valongue")
+    lourds14 = [{"type": 1, "components": [{"type": 2, "style": 2, "label": f"b{i}{j}", "custom_id": f"x:{i}{j}:{V14}"}
+                                           for j in range(5)]} for i in range(3)]
+
+    def forger14(jusqua):
+        d0 = pv._lire()
+        for k in [k for k in d0["pages"] if k.startswith(f"{AG}:{V14}")]:
+            d0["pages"].pop(k)
+        for k in [k for k, x in d0["demandes"].items() if str(x.get("uid")) == V14]:
+            d0["demandes"].pop(k)
+        for n in range(1, jusqua + 1):
+            d0["pages"][f"{AG}:{pv.place(V14, n)}"] = {
+                "link_id": f"lnk_g{n}", "public_url": f"https://getmysocial.com/g{n}", "etat": "prete",
+                "actif": True, "tracking": TRK, "ab": {"ok": True}, "manques": [], "essais": {}, "pays": True,
+                "groupe": "Manager JOHN"}
+            if n > pv.fixes(AG):
+                d0["demandes"][f"cd{n:08x}"] = {"gid": AG, "uid": V14, "etat": "acceptee", "place": n}
+        pv._ecrire(d0)
+
+    def listes(c):
+        out, pile = [], list(c or [])
+        while pile:
+            x = pile.pop(0)
+            if isinstance(x, dict):
+                if x.get("type") == 3:
+                    out.append(x)
+                pile += list(x.get("components") or [])
+        return out
+    forger14(33)
+    sec = tk._sections_page(AG, V14)
+    ls = listes(sec)
+    vals = [int(o["value"]) for l in ls for o in l["options"]]
+    c30, c30l = ct.compter(tk._corps_menu(AG, V14, rangs_ig)), ct.compter(tk._corps_menu(AG, V14, lourds14))
+    check("3 fixes + 30 acceptées : deux listes ✏️ (25 + 5), les 30 pages modifiables depuis le menu, les lignes "
+          "cachées nommées ; ≤ 40 composants",
+          [l["custom_id"] for l in ls] == [f"page:sel:{V14}", f"page:sel2:{V14}"] and sorted(vals) == list(range(4, 34))
+          and "-# + 10 page(s) plus ancienne(s) : pages 4 à 13" in textes(sec)[0] and c30 <= 40 and c30l <= 40,
+          ([l["custom_id"] for l in ls], c30, c30l, textes(sec)[0][-120:]))
+    r = tk.traiter(clic_ig(f"page:sel2:{V14}", qui=V14, values=["5"], salon=f"T{V14}"))
+    check("… la 2e liste : « Page 5 » choisie → sa fenêtre (page:f5)",
+          r.get("type") == 9 and r["data"]["custom_id"] == f"page:f5:{V14}", r)
+    r = tk.traiter(clic_ig(f"page:sel3:{V14}", qui=V14, values=["5"], salon=f"T{V14}"))
+    check("… « page:sel3 » forgé : « Action inconnue. »", r["data"].get("content") == "Action inconnue.", r)
+    forger14(63)
+    sec = tk._sections_page(AG, V14)
+    ls = listes(sec)
+    vals = [int(o["value"]) for l in ls for o in l["options"]]
+    t60 = textes(sec)[0]
+    c60, c60l = ct.compter(tk._corps_menu(AG, V14, rangs_ig)), ct.compter(tk._corps_menu(AG, V14, lourds14))
+    check("3 fixes + 60 acceptées : deux listes (les 50 plus récentes), les 10 plus anciennes DITES (« ✏️ pages 4 à "
+          "13 : hors des listes »), jamais disparues sans trace ; ≤ 40 composants",
+          len(ls) == 2 and sorted(vals) == list(range(14, 64))
+          and "-# ✏️ pages 4 à 13 : hors des listes (les 50 plus récentes seulement)" in t60
+          and "-# + 40 page(s) plus ancienne(s) : pages 4 à 43" in t60 and c60 <= 40 and c60l <= 40,
+          (len(ls), c60, c60l, t60[-200:]))
+    base14 = ct.compter(tk._corps_menu_sans_page(AG, V14, lourds14))
+    tk.COMPOSANTS_MAX_V2 = base14 + 5
+    corps14 = tk._corps_menu(AG, V14, lourds14)
+    tk.COMPOSANTS_MAX_V2 = SAV2[(tk, "COMPOSANTS_MAX_V2")]
+    check("… menu trop juste pour deux listes : une seule, et la ligne dit les pages restées hors liste",
+          ct.compter(corps14) <= base14 + 5 and len(listes(corps14)) == 1
+          and any("✏️ pages 4 à 38 : hors des listes (les 25 plus récentes seulement)" in x for x in textes(corps14)),
+          (ct.compter(corps14), base14))
+    retirer(V14)
+
+    # ── 15. les chemins réels que la suite n'essayait pas ──
+    V15 = "4295"
+    ig(V15, 295, "vabascule")
+    TICKETS[f"{AG}:{V15}"].update(menu="MB15", menu_v2=1, menu_rangs=[{"type": 1, "components": [
+        {"type": 2, "style": 2, "label": "💳", "custom_id": f"usdc:set:{V15}"}]}])
+    for n in (1, 2, 3):
+        noter_page(AG, pv.place(V15, n), f"lnk_b{n}")
+    d0 = pv._lire()
+    d0["demandes"]["bb00000004"] = {"gid": AG, "uid": V15, "etat": "acceptee", "place": 4}
+    pv._ecrire(d0)
+    noter_page(AG, f"{V15}#4", "lnk_b4")
+    _vmaj7e, _vapi7e, _venfond7e = tk._maj_menu_v2, tk._api_reseau, pv.EN_FOND
+    lv._basculer_sans_page = lambda g, u, actif: (FICHES[f"{g}:{u}"].update(actif=actif) or {"ok": True})
+    pv.EN_FOND = VRAI_EN_FOND
+    tk._maj_menu_v2 = VRAI_MAJ_MENU
+    SERV = []
+    tk._api_reseau = lambda m, c, **kw: (SERV.append((m, c, vd._SERVEUR_COURANT.get())), _vapi7e(m, c, **kw))[1]
+    POSTS.clear()
+    n_ap = len(APPELS)
+    with vd.sur_serveur(AG):
+        r15 = lv.basculer(AG, V15, False)
+    pv._FILE.join()
+    patch = [x for x in POSTS if x[0] == "PATCH" and x[1] == f"/channels/T{V15}/messages/MB15"]
+    texte_menu = "".join(textes(patch[-1][2]["components"])) if patch else ""
+    check("le vrai chemin liens_va.basculer → EN_FOND → suivre_bascule → le vrai _maj_menu_v2 : les 4 places "
+          "(3 fixes + 1 acceptée) coupées dans l'ordre, PUIS le menu redessiné une fois, sous le serveur du clic",
+          r15 == {"ok": True} and appels(n_ap, "disable") == ["lnk_b1", "lnk_b2", "lnk_b3", "lnk_b4"]
+          and len(patch) == 1 and texte_menu.count("🚫 désactivée") == 4
+          and f"pgd:new:{V15}" not in ids(patch[0][2]["components"])
+          and [s for s in SERV if s[0] == "PATCH"] == [("PATCH", f"/channels/T{V15}/messages/MB15", AG)],
+          (appels(n_ap, "disable"), SERV, texte_menu[:200]))
+    FICHES[f"{AG}:{V15}"]["actif"] = True
+    with vd.sur_serveur(AG):
+        lv.basculer(AG, V15, True)
+    pv._FILE.join()
+    check("… rallumé par le même chemin : les 4 suivent", all(pv.page_de(AG, pv.place(V15, n)).get("actif") is True
+                                                               for n in (1, 2, 3, 4)))
+    with tk._VERROU:
+        vm = tk._VERROUS_MAJ_MENU.setdefault(f"{AG}:{V15}", _th.RLock())
+    T_PATCH = []
+    tk._api_reseau = lambda m, c, **kw: (T_PATCH.append(time.time()) if m == "PATCH" else None, _vapi7e(m, c, **kw))[1]
+    vm.acquire()
+    t0 = time.time()
+    fil = _th.Thread(target=tk._redessiner_menu, args=(AG, V15, f"T{V15}", "MB15"))
+    fil.start()
+    time.sleep(0.5)
+    avant_rendu = list(T_PATCH)
+    vm.release()
+    fil.join(5)
+    check("_redessiner_menu (liste ✏️) attend le verrou du menu de ce ticket : son PATCH part une fois le verrou rendu",
+          not avant_rendu and T_PATCH and T_PATCH[0] - t0 >= 0.45, (avant_rendu, T_PATCH))
+    tk._maj_menu_v2, tk._api_reseau, pv.EN_FOND = _vmaj7e, _vapi7e, _venfond7e
+    lv._basculer_sans_page = SAV2[(lv, "_basculer_sans_page")]
+    VUS_IDS = []
+    pod._profil = lambda g: {"pays": ["US"], "pays_subs": ["US"]}
+    pod._source = lambda g: "liens"
+    pod.liens_bruts = lambda g, e: ([], True)
+    pod._directs = lambda liens: set()
+    pod._releve_liens = lambda g, ids_, d0_, d1_, mesure, etiq, directs: (VUS_IDS.append(list(ids_)) or (3, {"US": 2}))
+    r = pod.clics_du_va(AG, V15, [(_dt.date(2026, 11, 1), _dt.date(2026, 11, 6))])
+    for nom_p in ("_profil", "_source", "liens_bruts", "_directs", "_releve_liens"):
+        setattr(pod, nom_p, SAV2[(pod, nom_p)])
+    check("📈 Mes stats (podium_discord.clics_du_va) sur TRUST INSTAGRAM : le direct ET ses 4 pages comptés",
+          VUS_IDS == [[FICHES[f"{AG}:{V15}"]["link_id"], "lnk_b1", "lnk_b2", "lnk_b3", "lnk_b4"]] and r == [(2, 3)],
+          (VUS_IDS, r))
+    retirer(V15)
+    tk._etat = _vetat7e
+    gms.get_link, lv._poser_tracking, lv.poser_pays, lv._poser_base_seule = _vget7e, _vtrk7e, _vpays7e, _vab7e
+    pv.lancer_creations = _vlancer7e
+    pv.PAGES_PAR_PASSE = SAV2[(pv, "PAGES_PAR_PASSE")]
+    pv._log = _vlog
     # ── 7c. la pastille du salon compte la page ─────────────────────────
     print("7c. Pastille")
     pl = pv.page_de(TW, MOI)["link_id"]
@@ -1892,11 +2749,15 @@ finally:
      gms.delete_link, gms.get_api_key, requests.post, lv.lien_de, lv.espace, lv._poser_tracking,
      lv.poser_pays, lv._poser_base_seule, lv.ranger, lv.lia_seule, tk._etat, tk.role_manager,
      tk.role_helper, tk._maj_menu_v2, tk._EN_FOND, tk._suite, tk._api_reseau, lv._etat,
-     gms._call_tool, pv._cookie_ok, pv._FIL) = SAV
+     gms._call_tool, pv._cookie_ok, pv._FIL, pv.EN_FOND) = SAV
     for (m, n), v in SAV2.items():
         setattr(m, n, v)
+    pv.AB_PAR_PASSE_SERVEUR.clear()
+    pv.AB_PAR_PASSE_SERVEUR.update(SAV_AB_SERVEUR)
     tk.ETAT_FICHIER, tk._api_reseau = SAV_TK
+    socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo = _VRAI_CONNECT, _VRAI_CONNECT_EX, _VRAI_GAI
 
+check("aucune connexion réseau (ni résolution DNS) tentée pendant toute la suite", not SORTIES, SORTIES[:5])
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")
 sys.exit(1 if KO else 0)

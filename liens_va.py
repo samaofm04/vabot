@@ -536,7 +536,10 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
         copie = copie["data"]
     boutons = (copie or {}).get("buttons") if isinstance(copie, dict) else None
     if not boutons:
-        return {"ok": False, "erreur": "copie illisible ou sans bouton"}
+        # le texte de GetMySocial gardé : un 429 sur cette lecture comptait
+        # comme un vrai refus (3 essais, place « à reprendre » 24 h)
+        return {"ok": False, "erreur": "copie illisible ou sans bouton"
+                + (f" ({str(lu.get('error'))[:100]})" if not lu.get("ok") and lu.get("error") else "")}
     neufs = []
     for b in boutons:
         b2 = dict(b)
@@ -556,7 +559,9 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
     restes = [b.get("url") for b in ((d or {}).get("buttons") or []) if isinstance(d, dict)
               and _RE_OF.match(str(b.get("url") or "")) and b.get("url") != tracking]
     if not isinstance(d, dict) or restes:
-        return {"ok": False, "erreur": f"relu : bouton(s) encore ailleurs {restes[:2]}"}
+        return {"ok": False, "erreur": f"relu : bouton(s) encore ailleurs {restes[:2]}"
+                + (f" (relecture : {str(relu.get('error'))[:100]})"
+                   if not relu.get("ok") and relu.get("error") else "")}
     return {"ok": True}
 
 
@@ -679,7 +684,10 @@ def poser_pays(lid: str, equipe: str, base: Optional[str] = None) -> Dict[str, A
         lu = gms.get_link(lid, equipe)
         l = lu.get("link") if lu.get("ok") else None
         if not l:
-            return {"ok": False, "erreur": "écrit, mais relecture impossible"}
+            # le texte de GetMySocial gardé : un 429 ici n'est pas un refus
+            # des pays (pages_va.erreur_passagere le reconnaît)
+            return {"ok": False, "erreur": "écrit, mais relecture impossible"
+                    + (f" ({str(lu.get('error'))[:100]})" if lu.get("error") else "")}
         poses = [b.get("geofilters") for b in l.get("buttons") or []
                  if _RE_OF.match(str(b.get("url") or ""))] if landing else [l.get("geofilters")]
         voulu = {(x["country_code"], x["destination_url"]) for x in regles}
@@ -990,7 +998,7 @@ def poser_variante(gid: str, uid: str) -> Dict[str, Any]:
         if str(tmp.get("url") or "").strip().rstrip("/").lower() != \
                 str(fv["tracking"]).strip().rstrip("/").lower():
             return rate(f'GetMySocial : la copie temporaire pointe sur '
-                        f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}')
+                        f'{tmp.get("url") or "?"}, pas sur le tracking {v["modele"]}{_erreur_adresse(r)}')
         # la variante est une copie FIGÉE : sa règle de pays se pose sur la
         # copie temporaire, avant l'A/B, ou jamais. Ratée, pas d'A/B : le lien
         # reste à 100 % sur la model (filtré) et reprendre_variantes refait
@@ -1153,7 +1161,8 @@ def refiltrer_variante(gid: str, uid: str) -> Dict[str, Any]:
             return {"ok": False, "erreur": f'copie temporaire refusée ({str(r.get("error"))[:100]})'}
         if str(tmp.get("url") or "").strip().rstrip("/").lower() != \
                 str(fv["tracking"]).strip().rstrip("/").lower():
-            return {"ok": False, "erreur": f'la copie temporaire pointe sur {tmp.get("url") or "?"}'}
+            return {"ok": False, "erreur": f'la copie temporaire pointe sur {tmp.get("url") or "?"}'
+                                           + _erreur_adresse(r)}
         pays = poser_pays(tmp_id, equipe, base)
         if not pays.get("ok"):
             return {"ok": False, "erreur": f'pays non filtrés sur la copie ({pays.get("erreur")})'}
@@ -2018,14 +2027,44 @@ def nom_de_page(page: Any) -> str:
     return noms.get(pseudo.lower()) or pseudo
 
 
+class _Destination(str):
+    """Ce que rend _page_du_lien : une chaîne, comme avant (comparée,
+    formatée telle quelle), qui porte aussi `erreur`, le texte de GetMySocial
+    quand il n'a pas répondu."""
+    erreur = ""
+
+
+def _erreur_lue(vraie: Any) -> str:
+    """« (lecture : … ) » à ajouter à un refus quand la destination n'a pas
+    pu être lue : sans le texte de GetMySocial (« Error 429 … RATE_LIMITED »,
+    « Quota GetMySocial epuise … »), pages_va comptait la panne comme un vrai
+    refus et figeait le 70/30 d'une page « à vérifier » au 3e passage."""
+    e = str(getattr(vraie, "erreur", "") or "")
+    return f" (lecture : {e[:120]})" if e else ""
+
+
+def _erreur_adresse(r: Any) -> str:
+    """« (adresse non posée : … ) » à ajouter au refus « la copie temporaire
+    pointe sur … » : gms.duplicate_link rend dans « erreur_url » le texte de
+    la mise à jour d'adresse qui a échoué. Sans lui, un 429 sur cette mise à
+    jour passait pour un vrai refus (pages_va.erreur_passagere ne voyait
+    que l'adresse de la source, seren.vale) : 3 passages, et le 70/30 d'une
+    page restait « à vérifier » 24 h à 100 % sur le tracking du VA."""
+    e = str((r.get("erreur_url") if isinstance(r, dict) else "") or "")
+    return f" (adresse non posée : {e[:120]})" if e else ""
+
+
 def _page_du_lien(lid: str, equipe: str) -> str:
     """Le compte OnlyFans vers lequel le lien mène vraiment (sa destination,
-    ou le bouton OnlyFans d'une landing), "" si GetMySocial se tait."""
+    ou le bouton OnlyFans d'une landing), "" si GetMySocial se tait — avec,
+    dans ce cas, son texte d'erreur dans `.erreur` (_Destination)."""
     import gms
     lu = gms.get_link(lid, equipe)
     l = lu.get("link") if lu.get("ok") else None
     if not isinstance(l, dict):
-        return ""
+        vide = _Destination("")
+        vide.erreur = str(lu.get("error") or ("réponse vide" if lu.get("ok") else "lecture refusée"))
+        return vide
     if l.get("type") == "landing":
         of = [b for b in l.get("buttons") or [] if isinstance(b, dict) and _RE_OF.match(str(b.get("url") or ""))]
         return base_de(of[0].get("url")) if of else ""
@@ -2145,7 +2184,7 @@ def _poser_bases(gid: str, uid: str, poser: bool = True,
     vraie = _page_du_lien(lid, equipe)
     if vraie != pages["base_modele"]:
         return {"ok": False, "erreur": f'le lien mène à {vraie or "?"}, sa fiche à '
-                                       f'{pages["base_modele"]} : rien touché'}
+                                       f'{pages["base_modele"]} : rien touché{_erreur_lue(vraie)}'}
     source = str(e.get("source_variante") or e.get("gabarit") or "")
     if not source:
         return {"ok": False, "erreur": "aucun lien source pour les copies temporaires"}
@@ -2168,7 +2207,7 @@ def _poser_bases(gid: str, uid: str, poser: bool = True,
             # copie garderait celle de sa source (un tracking, une autre page)
             if str(tmp.get("url") or "").strip().rstrip("/").lower() != pages[k].lower():
                 return {"ok": False, "erreur": f'GetMySocial : la copie temporaire pointe sur '
-                                               f'{tmp.get("url") or "?"}, pas sur {pages[k]}'}
+                                               f'{tmp.get("url") or "?"}, pas sur {pages[k]}{_erreur_adresse(r)}'}
             # copie figée : sa règle des pays se pose avant l'A/B, ou jamais.
             # Les autres pays vont au compte de la model du LIEN (voir PAYS_CIBLES)
             pays = poser_pays(tid, equipe, pages["base_modele"])
@@ -2695,7 +2734,8 @@ def _poser_base_seule(gid: str, uid: str, lien: Optional[Dict[str, Any]] = None)
     # la destination du lien fait foi, pas la fiche (voir _poser_bases)
     vraie = _page_du_lien(lid, equipe)
     if vraie != page:
-        return {"ok": False, "erreur": f'le lien mène à {vraie or "?"}, sa fiche à {page} : rien touché'}
+        return {"ok": False, "erreur": f'le lien mène à {vraie or "?"}, sa fiche à {page} : rien touché'
+                                       + _erreur_lue(vraie)}
     gardee = base[0] if base else None
     tid = ""
     try:
@@ -2711,7 +2751,7 @@ def _poser_base_seule(gid: str, uid: str, lien: Optional[Dict[str, Any]] = None)
                 return {"ok": False, "erreur": f'GetMySocial : copie temporaire refusée ({str(r.get("error"))[:100]})'}
             if str(tmp.get("url") or "").strip().rstrip("/").lower() != page.lower():
                 return {"ok": False, "erreur": f'GetMySocial : la copie temporaire pointe sur '
-                                               f'{tmp.get("url") or "?"}, pas sur {page}'}
+                                               f'{tmp.get("url") or "?"}, pas sur {page}{_erreur_adresse(r)}'}
             pays = poser_pays(tid, equipe, page)
             if not pays.get("ok"):
                 return {"ok": False, "erreur": f'pays non filtrés sur la copie ({pays.get("erreur")})'}

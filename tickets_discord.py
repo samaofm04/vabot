@@ -5054,16 +5054,29 @@ _TEXTE_ETAT_PAGE = {"en_preparation": "⏳ en préparation", "a_reprendre": "⚠
                     "coupee": "🚫 désactivée", "sans_lien": "⚠️ lien incomplet"}
 
 
+def _plage(ns: List[int]) -> str:
+    a, b = min(ns), max(ns)
+    return f"page {a}" if a == b else f"pages {a} à {b}"
+
+
+#: Au plus deux listes ✏️ (50 pages modifiables), deux composants chacune :
+#: au-delà de 25 pages acceptées, les plus anciennes n'avaient ni adresse
+#: visible ni ✏️, sans un mot.
+PAGES_LISTES_MAX = 2
+
+
 def _sections_pages_fixes(gid: str, uid: str, l: Dict[str, Any], compact: bool = False,
                           sans_modifier: bool = False,
-                          ticket: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                          ticket: Optional[Dict[str, Any]] = None,
+                          une_liste: bool = False) -> List[Dict[str, Any]]:
     """« 📄 Tes pages » : les places fixes puis les pages acceptées (adresse,
     ou ⏳ en préparation, ⚠️ à reprendre, 🚫 désactivée, ⚠️ lien incomplet) ;
     les ✏️ des pages modifiables — PAGES_BOUTONS_MAX boutons au plus, sinon
-    (ou `compact`) une liste déroulante ; puis ➕ Demander une page, ou ⏳
-    Demande en attente, si le VA est en service (pages_va.en_service). Pas de
-    ✏️ sur une place fixe : refusée aussi au clic (_page) et par
-    pages_va.modifier_page."""
+    (ou `compact`) PAGES_LISTES_MAX listes déroulantes de PAGES_LISTE_MAX
+    (une seule avec `une_liste`), les pages laissées hors des listes dites
+    par une ligne ; puis ➕ Demander une page, ou ⏳ Demande en attente, si
+    le VA est en service (pages_va.en_service). Pas de ✏️ sur une place
+    fixe : refusée aussi au clic (_page) et par pages_va.modifier_page."""
     import pages_va as pv
     reg = pv._lire()                    # une lecture pour tout le bloc (menus de tous les VA à chaque tour)
     sert, raison = pv.en_service(gid, uid, fiche=l, ticket=ticket)   # ticket déjà lu : pas relu ici
@@ -5080,21 +5093,34 @@ def _sections_pages_fixes(gid: str, uid: str, l: Dict[str, Any], compact: bool =
     # montrées : au-delà de PAGES_LISTEES_MAX, les plus anciennes n'étaient
     # plus modifiables depuis aucun menu (la liste en prend 25)
     modifiables = [(n, etats[n][1]) for n in acceptees if etats[n][0] == "prete" and pv.modifiable(gid, n)]
-    if len(acceptees) > len(montrees):
-        lignes.append(f"-# + {len(acceptees) - len(montrees)} page(s) plus ancienne(s)")
-    out: List[Dict[str, Any]] = [{"type": 10, "content": "**📄 Tes pages**\n" + "\n".join(lignes)}]
+    cachees = acceptees[:len(acceptees) - len(montrees)]
+    if cachees:
+        lignes.append(f"-# + {len(cachees)} page(s) plus ancienne(s) : {_plage(cachees)}")
+    rangees: List[Dict[str, Any]] = []
     if modifiables and not sans_modifier:
         if len(modifiables) <= PAGES_BOUTONS_MAX and not compact:
-            out.append({"type": 1, "components": [
+            rangees.append({"type": 1, "components": [
                 {"type": 2, "style": 2, "label": f"Page {n}", "emoji": {"name": "✏️"},
                  "custom_id": _bouton_page("o", n, uid)} for n, _u in modifiables]})
         else:
-            recentes = sorted(modifiables, reverse=True)[:PAGES_LISTE_MAX]
-            out.append({"type": 1, "components": [{
-                "type": 3, "custom_id": f"{PAGE_PREFIXE}sel:{uid}", "placeholder": "✏️ Modifier une page",
-                "min_values": 1, "max_values": 1,
-                "options": [{"label": f"Page {n}", "value": str(n),
-                             "description": u.split("://", 1)[-1][:100]} for n, u in recentes]}]})
+            recentes = sorted(modifiables, reverse=True)
+            nb = 1 if une_liste else PAGES_LISTES_MAX
+            for k in range(nb):
+                tranche = recentes[k * PAGES_LISTE_MAX:(k + 1) * PAGES_LISTE_MAX]
+                if not tranche:
+                    break
+                rangees.append({"type": 1, "components": [{
+                    "type": 3, "custom_id": f"{PAGE_PREFIXE}sel{'' if k == 0 else k + 1}:{uid}",
+                    "placeholder": ("✏️ Modifier une page" if k == 0
+                                    else f"✏️ Plus anciennes ({_plage([n for n, _u in tranche])})"),
+                    "min_values": 1, "max_values": 1,
+                    "options": [{"label": f"Page {n}", "value": str(n),
+                                 "description": u.split("://", 1)[-1][:100]} for n, u in tranche]}]})
+            hors_listes = [n for n, _u in recentes[nb * PAGES_LISTE_MAX:]]
+            if hors_listes:
+                lignes.append(f"-# ✏️ {_plage(hors_listes)} : hors des listes "
+                              f"(les {nb * PAGES_LISTE_MAX} plus récentes seulement)")
+    out: List[Dict[str, Any]] = [{"type": 10, "content": "**📄 Tes pages**\n" + "\n".join(lignes)}] + rangees
     if sert:
         if pv.demande_en_attente(gid, uid, reg):
             bouton = {"type": 2, "style": 2, "label": "Demande en attente", "emoji": {"name": "⏳"},
@@ -5143,8 +5169,9 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
 def _sections_dans_la_limite(gid: str, uid: str, corps: List[Dict[str, Any]],
                              sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Les sections 📄, réduites tant que le menu dépasserait COMPOSANTS_MAX_V2 :
-    les ✏️ en liste déroulante, puis sans ✏️ (dit au journal), puis rien
-    (dit aussi) — un menu sans ses pages vaut mieux qu'un menu refusé."""
+    les ✏️ en listes déroulantes, puis une seule liste (dit au journal, la
+    ligne « hors des listes » nomme les autres), puis sans ✏️ (dit), puis
+    rien (dit aussi) — un menu sans ses pages vaut mieux qu'un menu refusé."""
     import contenu_tickets as ct
     base = ct.compter(corps)
     if base + ct.compter(sections) <= COMPOSANTS_MAX_V2:
@@ -5153,12 +5180,14 @@ def _sections_dans_la_limite(gid: str, uid: str, corps: List[Dict[str, Any]],
     if pv.sur_demande(gid):
         import liens_va as lv
         l = lv.lien_de(gid, uid)
-        for reduit in ({"compact": True}, {"compact": True, "sans_modifier": True}):
+        for reduit in ({"compact": True}, {"compact": True, "une_liste": True},
+                       {"compact": True, "sans_modifier": True}):
             s = _sections_pages_fixes(gid, uid, l, **reduit)
             if base + ct.compter(s) <= COMPOSANTS_MAX_V2:
-                if reduit.get("sans_modifier"):
-                    print(f"[page] menu de {gid}:{uid} : sans ✏️ (sinon plus de "
-                          f"{COMPOSANTS_MAX_V2} composants)", flush=True)
+                if reduit.get("sans_modifier") or reduit.get("une_liste"):
+                    print(f"[page] menu de {gid}:{uid} : "
+                          + ("sans ✏️" if reduit.get("sans_modifier") else "une seule liste ✏️")
+                          + f" (sinon plus de {COMPOSANTS_MAX_V2} composants)", flush=True)
                 return s
     print(f"[page] menu de {gid}:{uid} : sections 📄 retirées ({base} + {ct.compter(sections)} composants, "
           f"{COMPOSANTS_MAX_V2} au plus)", flush=True)
@@ -5242,7 +5271,8 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # « m » : la fenêtre (✏️ Modifier moi-même) ; « l<look> » : un look
     # (pages_va.LOOKS, TRUST TWITTER, 06/11/2026)
     m_act = re.fullmatch(r"(o|new|f|sel|m|l[a-z]+)(\d*)", morceaux[1]) if len(morceaux) == 3 else None
-    if not m_act or not morceaux[2].isdigit() or (m_act.group(1) == "sel" and m_act.group(2)):
+    # « sel2 » : la 2e liste ✏️ (au-delà de PAGES_LISTE_MAX pages acceptées)
+    if not m_act or not morceaux[2].isdigit() or (m_act.group(1) == "sel" and m_act.group(2) not in ("", "2")):
         return _ephemere("Action inconnue.")
     action, n, uid = m_act.group(1), int(m_act.group(2) or 1), morceaux[2]
     if action == "sel":
@@ -5383,8 +5413,11 @@ def _tete_demande(uid: str) -> str:
 #: ➕ refusé, selon pages_va.en_service.
 _TEXTE_HORS_SERVICE = {"sans_lien": "Il te faut d'abord ton lien.",
                        "coupe": "🚫 Ton lien est désactivé pour le moment.",
-                       "parti": "Pas de ticket pour ce VA."}
-_RAISON_DITE = {"sans_lien": "lien incomplet", "coupe": "lien coupé", "parti": "VA parti"}
+                       "parti": "Pas de ticket pour ce VA.",
+                       "fiche_incomplete": "⚠️ Ton lien est incomplet (numéro ou pseudo manquant) : "
+                                           "préviens ton manager."}
+_RAISON_DITE = {"sans_lien": "lien incomplet", "coupe": "lien coupé", "parti": "VA parti",
+                "fiche_incomplete": "numéro ou pseudo manquant"}
 #: Le PATCH du message de demande attend au moins ça après le clic ✅ : la
 #: réponse type 7 « en création » doit être passée avant (voir creer()).
 ATTENTE_AVANT_PATCH_S = 3.5

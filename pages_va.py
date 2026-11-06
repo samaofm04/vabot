@@ -247,15 +247,58 @@ def _vrai_uid(uid: Any) -> str:
     return str(uid).split("#", 1)[0]
 
 
+def fiche_complete(fiche: Any) -> bool:
+    """Le numéro et le pseudo du VA dans sa fiche liens_va : sans eux, la
+    page s'appellerait « Twitter VA None @None page » et le registre des
+    trackings y verrait une 2e personne sur son tracking (« en doute », sans
+    relevé). Lu par en_service ET creer_page : une seule règle."""
+    f = fiche if isinstance(fiche, dict) else {}
+    return str(f.get("numero") or "").isdigit() and bool(str(f.get("pseudo") or "").strip())
+
+
+def depart_du_va(gid: Any, ticket: Any, disparu: Any) -> str:
+    """Pourquoi ce VA compte pour parti (« » s'il ne l'est pas). LA règle du
+    départ, lue par en_service (création, menu, ➕, ✅) et par la reprise
+    (raison_depart), qui coupe ses pages :
+      - un ticket vivant (dans « tickets ») fait foi : parti s'il porte
+        « parti » ;
+      - sans ticket vivant, sur un serveur à places fixes : parti si sa fiche
+        rangée dans « tickets_disparus » porte « parti » (le VA 110, parti le
+        28/10, fiche liens_va jamais coupée, a reçu ses pages au premier
+        passage du 06/11), ou s'il n'a de ticket NULLE PART.
+    Un ticket rangé dans « tickets_disparus » SANS « parti » (salon supprimé
+    à la main, entretenir_accueils) ne dit pas que le VA est parti : la 1re
+    version de la règle le jugeait parti, et la reprise coupait les pages
+    vivantes d'un VA en service en conseillant au journal de couper son
+    direct (4 VA de TRUST TWITTER sont dans ce cas en prod le 06/11, direct
+    actif). `ticket`, `disparu` : les fiches de ce VA ({} ou None : aucune)."""
+    t = ticket if isinstance(ticket, dict) else {}
+    if t:
+        return "ticket marqué parti" if t.get("parti") else ""
+    if not sur_demande(gid):
+        return ""                       # Twitter : seul le direct décide
+    x = disparu if isinstance(disparu, dict) else {}
+    if x:
+        return "ticket rangé dans tickets_disparus (parti)" if x.get("parti") else ""
+    return "aucun ticket sur ce serveur"
+
+
 def en_service(gid: Any, uid: Any, fiche: Optional[Dict[str, Any]] = None,
-               ticket: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+               ticket: Optional[Dict[str, Any]] = None,
+               disparu: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
     """Ce VA peut-il avoir des pages créées sur un serveur à places fixes ?
-    (vrai, « ») ou (faux, « sans_lien » | « coupe » | « parti »). Sa fiche
-    liens_va doit avoir link_id, tracking et public_url, le lien en service,
-    et son ticket ne pas être parti. Seul endroit qui le décide : le menu, ➕,
-    ✅ et la création automatique en avaient chacun leur version — un VA sans
-    tracking pouvait demander, être accepté, puis rester « ⏳ en préparation »
-    à vie (la reprise l'écartait). `fiche`, `ticket` : déjà lus."""
+    (vrai, « ») ou (faux, « sans_lien » | « coupe » | « parti » |
+    « fiche_incomplete »). Sa fiche liens_va doit avoir link_id, tracking et
+    public_url, le lien en service, son numéro et son pseudo (fiche_complete),
+    et le VA ne pas être parti (depart_du_va). Seul endroit qui le décide : le
+    menu, ➕, ✅, la création automatique et creer_page en avaient chacun leur
+    version — un VA sans tracking pouvait demander, être accepté, puis rester
+    « ⏳ en préparation » à vie (la reprise l'écartait) ; un VA sans pseudo
+    était annoncé « ⏳ », accepté, puis refusé par creer_page à chaque passage
+    (3 essais comptés par place, le lot bloqué pour les autres).
+    `fiche`, `ticket` (sa fiche dans « tickets »), `disparu` (sa fiche dans
+    « tickets_disparus ») : déjà lus ({} : lu, et absent ; None : relu ici —
+    « tickets_disparus » seulement s'il n'a pas de ticket vivant)."""
     gid, vrai = str(gid or ""), _vrai_uid(uid)
     if fiche is None:
         import liens_va as lv
@@ -268,20 +311,23 @@ def en_service(gid: Any, uid: Any, fiche: Optional[Dict[str, Any]] = None,
     if ticket is None:
         import tickets_discord as tk
         ticket = tk._fiche(gid, vrai)
-    if isinstance(ticket, dict) and ticket.get("parti"):
-        return False, "parti"
-    if not ticket:
-        # salon supprimé : la fiche passe dans « tickets_disparus » et _fiche
-        # rend {}. Le VA 110 de TRUST INSTAGRAM (parti le 28/10, salon effacé,
-        # lien direct jamais coupé) a reçu sa page 1 le 06/11 sans ça. Un
-        # ticket disparu SANS « parti » (salon effacé par erreur) reste en service.
+    if disparu is None and sur_demande(gid) and not (isinstance(ticket, dict) and ticket):
         import tickets_discord as tk
-        etat = tk._etat()
-        disparus = etat.get("tickets_disparus") if isinstance(etat, dict) else None
-        disparu = (disparus or {}).get(f"{gid}:{vrai}") if isinstance(disparus, dict) else None
-        if isinstance(disparu, dict) and disparu.get("parti"):
-            return False, "parti"
+        disparu = (tk._etat().get("tickets_disparus") or {}).get(f"{gid}:{vrai}") or {}
+    if depart_du_va(gid, ticket, disparu):
+        return False, "parti"
+    if not fiche_complete(f):
+        return False, "fiche_incomplete"
     return True, ""
+
+
+def raison_depart(gid: Any, uid: Any, etat_tickets: Dict[str, Any]) -> str:
+    """Pourquoi ce VA compte pour parti sur un serveur à places fixes (« »
+    s'il ne l'est pas, depart_du_va) — pour la reprise, qui coupe ses pages,
+    et son journal. `etat_tickets` : tickets_discord._etat() déjà lu."""
+    cle = f"{gid}:{_vrai_uid(uid)}"
+    return depart_du_va(gid, (etat_tickets.get("tickets") or {}).get(cle),
+                        (etat_tickets.get("tickets_disparus") or {}).get(cle))
 
 
 # ─── Registre ─────────────────────────────────────────────────────────────
@@ -452,6 +498,19 @@ def noter_message_maj(did: str) -> None:
         if isinstance(x, dict):
             x["message_maj"] = int(time.time())
             _ecrire(d)
+
+
+def noter_message_rate(did: str) -> int:
+    """Un PATCH du message de la demande refusé par Discord : compté (le lot
+    le refait, MESSAGE_ESSAIS_MAX fois). Rend le nombre d'essais."""
+    with _VERROU:
+        d = _lire()
+        x = _demandes(d).get(str(did))
+        if not isinstance(x, dict):
+            return 0
+        x["message_essais"] = int(x.get("message_essais") or 0) + 1
+        _ecrire(d)
+        return int(x["message_essais"])
 
 
 def annuler_demande(did: str, raison: str) -> bool:
@@ -732,8 +791,9 @@ def _boutons_of(boutons: Any) -> List[Dict[str, Any]]:
 def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     """La page du VA : copie du gabarit de sa place, bouton sur SON tracking,
     pays, safe page, le 70/30 là où il est voulu (AB_PAGES), rangée chez son
-    manager. Rend {ok, url, erreur, deja}. Un échec après la copie la laisse
-    COUPÉE (jamais supprimée), dite."""
+    manager. Rend {ok, url, erreur, deja} — et « hors_service » (la raison
+    d'en_service) quand le VA ne peut pas avoir de page : rien n'a été tenté.
+    Un échec après la copie la laisse COUPÉE (jamais supprimée), dite."""
     import gms
     import liens_va as lv
     gid, vrai = str(gid), _vrai_uid(uid)
@@ -751,22 +811,25 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     gab = gabarit(gid, n)
     if not gab:
         return {"ok": False, "erreur": "pas de gabarit de page sur ce serveur"}
+    # « hors_service » : la raison d'en_service — le lot de créations
+    # automatiques n'y voit pas un essai raté (un VA coupé PENDANT le lot
+    # perdait ainsi 2 essais sur 3 et 2 places du lot)
     f = lv.lien_de(gid, vrai)
     if not (f.get("link_id") and f.get("tracking") and f.get("public_url")):
-        return {"ok": False, "erreur": "il faut d'abord son lien direct (avec son tracking)"}
+        return {"ok": False, "hors_service": "sans_lien",
+                "erreur": "il faut d'abord son lien direct (avec son tracking)"}
     if f.get("actif", True) is False:
         # la copie naîtrait coupée et le VA recevrait « ✅ » avec une adresse morte
-        return {"ok": False, "erreur": "son lien direct est désactivé"}
-    if not (str(f.get("numero") or "").isdigit() and str(f.get("pseudo") or "").strip()):
-        # « Twitter VA None @None page » : le registre des trackings y verrait
-        # une 2e personne sur son tracking (« en doute », sans relevé)
-        return {"ok": False, "erreur": "numéro ou pseudo du VA manquant dans sa fiche"}
+        return {"ok": False, "hors_service": "coupe", "erreur": "son lien direct est désactivé"}
+    if not fiche_complete(f):
+        return {"ok": False, "hors_service": "fiche_incomplete",
+                "erreur": "numéro ou pseudo du VA manquant dans sa fiche"}
     if sur_demande(gid):
         # la règle de la création automatique et de ✅ (en_service) : une page
         # vivante sur le tracking d'un VA parti, ou née coupée, ne sert à rien
         sert, raison = en_service(gid, vrai, fiche=f)
         if not sert:
-            return {"ok": False, "erreur": f"VA hors service ({raison}) : pas de page"}
+            return {"ok": False, "hors_service": raison, "erreur": f"VA hors service ({raison}) : pas de page"}
     # Plus de « crée d'abord la page n-1 » : une page ratée (quota, panne)
     # bloquait toutes les suivantes, création automatique comprise.
     equipe = _equipe(gid)
@@ -813,6 +876,14 @@ def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Di
     # principale, 25 de plus par page × 3 pages × chaque VA. Twitter garde
     # son ordre.
     decalage = len(lv.MOTS_THREADS) if sur_demande(gid) else 0
+    # Les liens de l'équipe à ce nom AVANT la 1re copie : seuls ceux qui
+    # naissent pendant cet appel peuvent être une copie à la réponse perdue.
+    # Sans ce relevé, _couper_doublons coupait une page VIVANTE au même nom
+    # que le registre ne connaissait plus (rangée dans « anciennes », registre
+    # restauré) : la 1re adresse essayée ne dépend que du nom, l'ancienne page
+    # la porte, le refus « adresse prise » menait à la coupure à coup sûr.
+    # Twitter n'a pas _couper_doublons : pas de relevé (aucune lecture en plus).
+    avant = _ids_au_nom(equipe, nom) if sur_demande(gid) else None
     for essai in range(lv.ESSAIS_ADRESSE):
         sc = lv.mots_sans_prenom(nom, essai + decalage)
         r = gms.duplicate_link(gab, sc, nom, "", equipe)
@@ -837,7 +908,7 @@ def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Di
         # un « adresse prise » peut être la NÔTRE : gms renvoie une fois
         # un appel dont la réponse s'est perdue (_call_tool_brut), la 1re
         # copie existe alors sans que personne ne la connaisse
-        _couper_doublons(gid, vrai, equipe, nom, lid)
+        _couper_doublons(gid, vrai, equipe, nom, lid, avant)
     try:
         return _finir_page(gid, uid, f, lid, sc, nom, url, equipe)
     except Exception as e:                               # noqa: BLE001
@@ -846,11 +917,44 @@ def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Di
         return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
 
 
-def _couper_doublons(gid: str, vrai: str, equipe: str, nom: str, lid: str) -> int:
-    """Les copies de l'équipe au nom de cette page que le registre ne connaît
-    pas (ni `lid`, ni aucune page de ce VA) : coupées, jamais supprimées, et
-    dites. Rend leur nombre."""
+def _ids_au_nom(equipe: str, nom: str) -> Tuple[Optional[set], str]:
+    """Les ids des liens de l'équipe dont le nom (display_name) est `nom`, lus
+    à l'instant (force_refresh). (None, la raison) si l'équipe est illisible."""
     import gms
+    try:
+        r = gms.list_links_team(equipe, force_refresh=True)
+    except Exception as e:                                   # noqa: BLE001
+        r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if not r.get("ok"):
+        return None, str(r.get("error") or "équipe illisible")[:100]
+    return {str(l.get("id")) for l in (r.get("links") or [])
+            if isinstance(l, dict) and l.get("id") and str(l.get("display_name") or "") == nom}, ""
+
+
+def _ids_notes() -> set:
+    """Les link_id de toutes les pages du registre, « anciennes » comprises :
+    aucune n'est une copie orpheline."""
+    d = _lire()
+    out = set()
+    for groupe in (d.get("pages"), d.get("anciennes")):
+        valeurs = groupe.values() if isinstance(groupe, dict) else groupe if isinstance(groupe, list) else []
+        out |= {str(p["link_id"]) for p in valeurs if isinstance(p, dict) and p.get("link_id")}
+    return out
+
+
+def _couper_doublons(gid: str, vrai: str, equipe: str, nom: str, lid: str,
+                     avant: Tuple[Optional[set], str]) -> int:
+    """Les copies au nom de cette page NÉES PENDANT CET APPEL (absentes du
+    relevé `avant`, pris avant la 1re copie) que le registre ne connaît pas
+    (ni `lid`, ni aucune page notée, « anciennes » comprises) : coupées,
+    jamais supprimées, et dites. Sans relevé d'avant : rien coupé, dit. Rend
+    leur nombre."""
+    import gms
+    ids_avant, pourquoi = avant if isinstance(avant, tuple) else (None, "pas de relevé")
+    if ids_avant is None:
+        _log(f"doublons de « {nom} » non cherchés : relevé de l'équipe d'avant la copie impossible "
+             f"({pourquoi}) — rien coupé")
+        return 0
     try:
         r = gms.list_links_team(equipe, force_refresh=True)
     except Exception as e:                                   # noqa: BLE001
@@ -858,7 +962,7 @@ def _couper_doublons(gid: str, vrai: str, equipe: str, nom: str, lid: str) -> in
     if not r.get("ok"):
         _log(f"doublons de « {nom} » non cherchés : équipe illisible ({str(r.get('error'))[:100]})")
         return 0
-    connus = set(liens_des_pages(gid, vrai)) | {str(lid)}
+    connus = set(ids_avant) | _ids_notes() | set(liens_des_pages(gid, vrai)) | {str(lid)}
     coupees = 0
     for l in r.get("links") or []:
         i = str((l or {}).get("id") or "") if isinstance(l, dict) else ""
@@ -866,9 +970,11 @@ def _couper_doublons(gid: str, vrai: str, equipe: str, nom: str, lid: str) -> in
             continue
         if gms.disable_link(i).get("ok"):
             coupees += 1
-            _log(f"copie orpheline {i} « {nom} » (réponse perdue de GetMySocial ?) : coupée")
+            _log(f"copie {i} « {nom} » née pendant cet appel (réponse perdue de GetMySocial), "
+                 "inconnue du registre : coupée")
         else:
-            _log(f"copie orpheline {i} « {nom} » : NON coupée, à couper à la main")
+            _log(f"copie {i} « {nom} » née pendant cet appel, inconnue du registre : NON coupée, "
+                 "à couper à la main")
     return coupees
 
 
@@ -1144,6 +1250,16 @@ EN_COURS_MAX_S = 15 * 60
 #: dizaine d'appels GetMySocial (copie temporaire, pays, lecture et écriture
 #: privées, relecture) — comme BASES_POSEES_PAR_PASSE pour les liens directs.
 AB_PAR_PASSE = 3
+#: Le plafond des 70/30 par passage, par serveur, compté à part de
+#: PAGES_PAR_PASSE (comme REPOINTES_PAR_PASSE). TRUST INSTAGRAM : après un
+#: changement de model, 3 par passage laissaient la branche 30 % « Base … »
+#: sur l'ancienne model ~11 h pour 22 VA (66 pages), ~17 h pour 45 VA.
+AB_PAR_PASSE_SERVEUR: Dict[str, int] = {AGENCY_IG_ID: 10}
+#: Les pages d'un VA parti (serveur à places fixes) coupées par passage : le
+#: VA 110, parti le 28/10, a reçu 3 pages vivantes le 06/11 ; la reprise les
+#: coupe (une écriture chacune), un tickets.json mal relu ne doit pas tout
+#: couper d'un coup.
+COUPURES_DEPART_PAR_PASSE = 15
 #: Les boutons re-pointés par passage, à part de PAGES_PAR_PASSE, là où un VA
 #: a plusieurs pages (TRUST INSTAGRAM) : après un changement de model, 45 VA ×
 #: 3 pages × (bouton, pays, 70/30) dans un plafond de 10 laissaient 70 % des
@@ -1155,32 +1271,78 @@ REPOINTES_PAR_PASSE: Dict[str, int] = {AGENCY_IG_ID: 30}
 #: session MCP) : ni essai compté ni « à vérifier » — sinon une heure de quota
 #: épuisé figeait des places « à reprendre » pour toujours. Le texte vient de
 #: gms (« Quota GetMySocial epuise … », « HTTP 429 … », « Erreur réseau : … »).
-_RE_PASSAGERE = re.compile(r"quota|HTTP 429|too many requests|rate.?limit|r[ée]seau|injoignable|"
-                           r"time[d ]?out|HTTP 5\d\d|initialiser la session", re.I)
+#: Aussi « Budget GetMySocial du jour reserve a la paie (…) — relance plus
+#: tard » (gms._choisir_cle, lectures de fond quand le pool est en pause) et
+#: « Réponse invalide : <!DOCTYPE html>… » (page Cloudflare) : comptés comme
+#: de vrais refus, ils figeaient 3 places « à reprendre » en fin de journée.
+_RE_PASSAGERE = re.compile(r"quota|(?:HTTP|Error) 429|too many requests|rate.?limit|r[ée]seau|injoignable|"
+                           r"time[d ]?out|HTTP 5\d\d|initialiser la session|budget getmysocial|"
+                           r"r[ée]serv[ée]e? [aà] la paie|relance plus tard|r[ée]ponse invalide", re.I)
+#: Parmi elles, celles qui touchent TOUT le compte (quota, 429, budget du
+#: jour) : la copie suivante échouerait pareil, le lot s'arrête. Une autre
+#: (un 502 sur le bouton d'UNE page) arrêtait aussi le lot, toujours sur la
+#: même place en tête de file : plus aucune création sur le serveur.
+_RE_GLOBALE = re.compile(r"quota|(?:HTTP|Error) 429|too many requests|rate.?limit|budget getmysocial|"
+                         r"r[ée]serv[ée]e? [aà] la paie|relance plus tard", re.I)
 
 
 def erreur_passagere(texte: Any) -> bool:
     return bool(_RE_PASSAGERE.search(str(texte or "")))
 
 
+def panne_globale(texte: Any) -> bool:
+    """Une panne passagère de tout le compte GetMySocial (quota, 429, budget)."""
+    return bool(_RE_GLOBALE.search(str(texte or "")))
+
+
+def _tickets_pour_departs(gid: str) -> Optional[Dict[str, Any]]:
+    """L'état des tickets, s'il permet de dire qui est parti sur ce serveur ;
+    None sinon, dit au journal : tickets_discord._etat rend {} sur un fichier
+    (et son .prev) illisible, et sans un seul ticket de ce serveur tous ses
+    VA compteraient pour partis — leurs pages seraient toutes coupées."""
+    try:
+        import tickets_discord as tk
+        e = tk._etat()
+    except Exception as ex:                                  # noqa: BLE001
+        _log(f"reprise des pages {gid} : tickets illisibles ({type(ex).__name__}: {ex}) — "
+             "aucune page coupée pour un départ ni rallumée ce passage")
+        return None
+    t = e.get("tickets") if isinstance(e, dict) else None
+    if not isinstance(t, dict) or not any(str(k).startswith(f"{gid}:") for k in t):
+        _log(f"reprise des pages {gid} : tickets illisibles ou sans ticket de ce serveur — "
+             "aucune page coupée pour un départ ni rallumée ce passage")
+        return None
+    return e
+
+
 def reprendre_pages(gid: str) -> Dict[str, Any]:
     """Les pages de ce serveur, remises d'aplomb sur leur lien direct :
       - une page ratée, ou une création interrompue, encore vivante : coupée ;
-      - une page prête : coupée si le direct l'est, rallumée s'il sert ;
+      - une page prête : coupée si le direct l'est — ou, sur un serveur à
+        places fixes, si son VA est parti (depart_du_va : ticket marqué
+        parti, rangé dans tickets_disparus AVEC « parti », ou introuvable
+        partout ; un salon supprimé seul ne coupe rien),
+        COUPURES_DEPART_PAR_PASSE au plus, son lien direct laissé tel quel
+        et signalé —, rallumée s'il sert ;
+        la fiche du direct est relue sous le verrou de la page avant de
+        couper ou de rallumer ;
         son bouton re-pointé si le tracking du direct a changé (changement de
         model, passer_sur) — le tracking n'est noté qu'une fois le bouton
         relu dessus —, puis les pays (et le 70/30 sur AB_PAGES) refaits ;
         rangée chez le manager actuel ; les étapes manquées refaites,
         ESSAIS_REPRISE fois chacune (un 70/30 sans cookie attend sans
         compter ; sur un serveur à places fixes, une panne passagère de
-        GetMySocial non plus) ; sur AB_PAGES, une page prête sans 70/30 noté
-        le reçoit ;
+        GetMySocial non plus, et une étape « à vérifier » est retentée une
+        fois par CREATION_REESSAI_S) ; sur AB_PAGES, une page prête sans 70/30
+        noté le reçoit ;
+      - une page tenue par une création, une bascule ou une modification :
+        laissée au passage suivant (« occupees »), jamais attendue ;
       - les pages temporaires d'images non supprimées : supprimées ;
       - sur un serveur à places fixes, les pages manquantes créées en fond
         (lancer_creations).
-    PAGES_PAR_PASSE pages, AB_PAR_PASSE 70/30 et (là où il est fixé)
-    REPOINTES_PAR_PASSE boutons re-pointés au plus. Le registre n'est réécrit
-    que pour ce qui change. Ne lève pas."""
+    PAGES_PAR_PASSE pages, AB_PAR_PASSE 70/30 (AB_PAR_PASSE_SERVEUR à part)
+    et (là où il est fixé) REPOINTES_PAR_PASSE boutons re-pointés au plus. Le
+    registre n'est réécrit que pour ce qui change. Ne lève pas."""
     import gms
     import liens_va as lv
     bilan: Dict[str, Any] = {"coupees": [], "rallumees": [], "trackings": [], "reprises": [],
@@ -1191,13 +1353,22 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
     bilan["ab_en_attente"] = 0           # pages dont le 70/30 attend le cookie ou le passage suivant
     plafond_repointes = REPOINTES_PAR_PASSE.get(str(gid))
     repointees = 0
+    plafond_ab = AB_PAR_PASSE_SERVEUR.get(str(gid))
+    ab_max = AB_PAR_PASSE if plafond_ab is None else plafond_ab
+    ab_a_part = plafond_ab is not None and ab_ici        # le 70/30 hors de PAGES_PAR_PASSE
     # Twitter garde ses règles (une page par VA) : la panne passagère n'est
     # mise à part que là où il y a des places fixes
     passageres_ici = sur_demande(gid)
     bilan["passageres"] = []
     # la fiche du direct, lue une fois par VA et par passage : 3 pages et plus
-    # par VA relisaient liens_va.json chacune
+    # par VA relisaient liens_va.json chacune — RELUE sous le verrou de la page
+    # avant de couper ou de rallumer (plus bas)
     fiches_vues: Dict[str, Dict[str, Any]] = {}
+    etat_tk = _tickets_pour_departs(gid) if passageres_ici else None
+    # sans savoir qui est parti, rien n'est rallumé non plus : la page d'un
+    # VA parti, coupée au passage d'avant, revenait en ligne pour un passage
+    tickets_inconnus = passageres_ici and etat_tk is None
+    coupes_depart = 0
     d = _lire()
     eq = _equipe(gid)
     for tid, o in list((d.get("orphelines") or {}).items()):
@@ -1214,153 +1385,213 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
         if g != str(gid) or not isinstance(pg, dict) or not pg.get("link_id"):
             continue
         lid = str(pg["link_id"])
+        # Jamais attendre la page : depuis c8b306f une création (✅ d'un
+        # manager, le lot) tient son verrou pendant toute la copie — plusieurs
+        # dizaines de secondes avec le 70/30 —, et la reprise tourne dans la
+        # boucle du podium, qui restait bloquée derrière. Reprise au passage
+        # suivant.
+        with _VERROU:
+            en_creation = cle in _CREATIONS
+        verrou = _verrou_page(cle)
+        if en_creation or not verrou.acquire(blocking=False):
+            bilan.setdefault("occupees", []).append(uid)
+            continue
         try:
-            with _verrou_page(cle):
-                pg = page_de(g, uid)
-                etat = pg.get("etat", "prete")
-                if etat != "prete":
-                    vieille = etat == "en_cours" and cle not in _CREATIONS \
-                        and time.time() - float(pg.get("quand") or 0) > EN_COURS_MAX_S
-                    if pg.get("a_couper") or (vieille and pg.get("actif") is not False):
-                        traitees += 1
-                        if gms.disable_link(lid).get("ok"):
-                            _noter(g, uid, actif=False, a_couper=False, etat="ratee")
-                            bilan["coupees"].append(uid)
-                        else:
-                            bilan["rates"].append(f"{uid} : coupure")
-                    continue
-                vrai = _vrai_uid(uid)
-                if vrai not in fiches_vues:
-                    fiches_vues[vrai] = lv.lien_de(g, vrai)
-                f = fiches_vues[vrai]
-                sert = bool(f.get("link_id")) and f.get("actif", True) is not False
-                if not sert:
-                    if pg.get("actif") is not False or pg.get("a_couper") or pg.get("a_rallumer"):
-                        if gms.disable_link(lid).get("ok"):
-                            _noter(g, uid, actif=False, a_couper=False, a_rallumer=False)
-                            bilan["coupees"].append(uid)
-                        else:
-                            _noter(g, uid, a_couper=True)
-                            bilan["rates"].append(f"{uid} : coupure")
-                    continue
-                equipe = _equipe(g)
-                manques = list(pg.get("manques") or [])
-                essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
-                if f.get("tracking") and str(pg.get("tracking") or "") != str(f["tracking"]):
-                    if plafond_repointes is None:
-                        if traitees >= PAGES_PAR_PASSE:
-                            continue
-                        traitees += 1
-                    else:
-                        if repointees >= plafond_repointes:
-                            continue
-                        repointees += 1
-                    lu = _lire_page(lid, equipe)
-                    ofs = _boutons_of(lu.get("buttons"))
-                    if not ofs:
-                        bilan["rates"].append(f"{uid} : page illisible, tracking non suivi")
-                        continue
-                    if any(str(b.get("url") or "") != f["tracking"] for b in ofs):
-                        pose = lv._poser_tracking(lid, f["tracking"], str(pg.get("nom") or ""), equipe)
-                        if not pose.get("ok"):
-                            bilan["rates"].append(f"{uid} : tracking ({pose.get('erreur')})")
-                            continue
-                    # une autre model : la branche « Base … » de l'A/B est à refaire
-                    manques = sorted(set(manques) | {"pays"} | ({"70/30"} if ab_ici else set()))
-                    essais = {}
-                    _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False,
-                           **({"ab": {"ok": False}} if ab_ici else {}))
-                    pg = page_de(g, uid)    # ce qui est noté fait foi pour l'écriture de fin
-                    bilan["trackings"].append(uid)
-                if pg.get("actif") is False or pg.get("a_rallumer"):
-                    if gms.enable_link(lid).get("ok"):
-                        _noter(g, uid, actif=True, a_rallumer=False)
-                        bilan["rallumees"].append(uid)
-                    else:
-                        _noter(g, uid, a_rallumer=True)
-                        bilan["rates"].append(f"{uid} : rallumage")
-                        continue
-                if traitees >= PAGES_PAR_PASSE:
-                    continue                # le reste au passage suivant (la boucle du podium attend)
-                voulu = str(f.get("groupe") or f.get("manager") or "")
-                if voulu and voulu != str(pg.get("groupe") or ""):
+            pg = page_de(g, uid)
+            etat = pg.get("etat", "prete")
+            if etat != "prete":
+                vieille = etat == "en_cours" and cle not in _CREATIONS \
+                    and time.time() - float(pg.get("quand") or 0) > EN_COURS_MAX_S
+                if pg.get("a_couper") or (vieille and pg.get("actif") is not False):
                     traitees += 1
-                    rg = lv.ranger(equipe, lid, voulu)
-                    if rg:
-                        _noter(g, uid, groupe=rg)
-                restes, a_verifier, attend = [], [], False
-                if not ab_ici:
-                    # Twitter : « ça doit pas être 70 30 » (06/11) — une ancienne
-                    # étape 70/30 tombe, sans rien poser
-                    manques = [m for m in manques if m != "70/30"]
-                elif not (pg.get("ab") or {}).get("ok") and "70/30" not in manques:
-                    # une page prête avant le 70/30 (ou dont la note s'est
-                    # perdue) : sans ça, la reprise ne la verrait jamais
-                    manques.append("70/30")
-                for etape in manques:
-                    if int(essais.get(etape) or 0) >= ESSAIS_REPRISE:
-                        restes.append(etape)
-                        a_verifier.append(etape)
-                        continue
-                    if etape == "70/30":
-                        if cookie is None:
-                            cookie = _cookie_ok()
-                        if not cookie or ab_tentes >= AB_PAR_PASSE:
-                            restes.append(etape)    # attend le cookie, ou le passage suivant : rien compté
-                            attend = True
+                    if gms.disable_link(lid).get("ok"):
+                        _noter(g, uid, actif=False, a_couper=False, etat="ratee")
+                        bilan["coupees"].append(uid)
+                    else:
+                        bilan["rates"].append(f"{uid} : coupure")
+                continue
+            vrai = _vrai_uid(uid)
+            if vrai not in fiches_vues:
+                fiches_vues[vrai] = lv.lien_de(g, vrai)
+            f = fiches_vues[vrai]
+            depart = raison_depart(g, vrai, etat_tk) if etat_tk is not None else ""
+            sert = bool(f.get("link_id")) and f.get("actif", True) is not False and not depart
+            if pg.get("a_couper") or pg.get("a_rallumer") or sert != (pg.get("actif") is not False):
+                # une coupure ou un rallumage à décider : la fiche RELUE, sous
+                # le verrou de la page. La bascule en fond (liens_va.basculer →
+                # EN_FOND → suivre_bascule) écrit la fiche AVANT de prendre ce
+                # verrou : la fiche du cache, lue sur une page précédente du
+                # même VA, faisait rallumer la page d'un VA que le manager
+                # venait de désactiver (et re-couper celle d'un VA rallumé).
+                f = fiches_vues[vrai] = lv.lien_de(g, vrai)
+                sert = bool(f.get("link_id")) and f.get("actif", True) is not False and not depart
+            if not sert:
+                if pg.get("actif") is not False or pg.get("a_couper") or pg.get("a_rallumer"):
+                    # le direct sert encore : c'est le départ du VA qui coupe
+                    par_depart = bool(depart) and bool(f.get("link_id")) and f.get("actif", True) is not False
+                    if par_depart:
+                        if coupes_depart >= COUPURES_DEPART_PAR_PASSE:
+                            bilan["departs_restent"] = int(bilan.get("departs_restent") or 0) + 1
                             continue
+                        coupes_depart += 1
+                    coupee = bool(gms.disable_link(lid).get("ok"))
+                    if coupee:
+                        _noter(g, uid, actif=False, a_couper=False, a_rallumer=False)
+                        bilan["coupees"].append(uid)
+                    else:
+                        # comme suivre_bascule(False) : la reprise suivante recoupe
+                        _noter(g, uid, a_couper=True, **({"a_rallumer": False} if par_depart else {}))
+                        bilan["rates"].append(f"{uid} : coupure")
+                    if par_depart:
+                        bilan.setdefault("departs", []).append(f"{uid} : {depart}")
+                        _log(f"page {pg.get('shortcode') or lid} de {cle} "
+                             + ("coupée" if coupee else "NON coupée (refus GetMySocial, recoupée au passage suivant)")
+                             + f" : VA parti ({depart}) ; son lien direct "
+                             f"{f.get('shortcode') or f.get('link_id')} est encore en service — "
+                             "hors des pages, à couper à la main")
+                continue
+            equipe = _equipe(g)
+            manques = list(pg.get("manques") or [])
+            essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
+            if f.get("tracking") and str(pg.get("tracking") or "") != str(f["tracking"]):
+                if plafond_repointes is None:
                     if traitees >= PAGES_PAR_PASSE:
-                        restes.append(etape)
                         continue
                     traitees += 1
-                    compte, err = True, ""
-                    try:
-                        if etape == "70/30":
-                            ab_tentes += 1
-                            ab = lv._poser_base_seule(g, uid, lien=_lien_ab(lid, f["tracking"], pg.get("shortcode")))
-                            ok, compte = bool(ab.get("ok")), not ab.get("cookie")
-                            err = str(ab.get("erreur") or "")
-                            if ab.get("cookie"):
-                                cookie = False      # refusé : les suivantes attendent aussi
-                            _noter(g, uid, ab=_note_ab(ab))
-                        elif etape == "pays":
-                            rp = lv.poser_pays(lid, equipe)
-                            ok, err = bool(rp.get("ok")), str(rp.get("erreur") or "")
-                        elif etape == "safe page":
-                            ru = gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
-                                                       "bot_protection": {"mode": "safe_page"}}, equipe)
-                            ok, err = bool(ru.get("ok")), str(ru.get("error") or "")
-                        else:
-                            ok = True                    # étape inconnue (ancienne fiche)
-                    except Exception as e:               # noqa: BLE001
-                        _log(f"reprise {etape} de {cle} : {type(e).__name__}: {str(e)[:100]}")
-                        ok, err = False, f"{type(e).__name__}: {e}"
-                    if not ok:
-                        restes.append(etape)
-                        if compte and passageres_ici and erreur_passagere(err):
-                            compte = False          # panne passagère : refaite au passage suivant
-                            bilan["passageres"].append(f"{uid} : {etape} ({err[:80]})")
-                        if compte:
-                            essais[etape] = int(essais.get(etape) or 0) + 1
-                fin = {"manques": restes, "essais": essais, "a_verifier": bool(a_verifier),
-                       "pays": "pays" not in restes}
-                if (list(pg.get("manques") or []) != fin["manques"]
-                        or (pg.get("essais") if isinstance(pg.get("essais"), dict) else {}) != fin["essais"]
-                        or bool(pg.get("a_verifier")) != fin["a_verifier"] or pg.get("pays") != fin["pays"]):
-                    # écrit seulement si quelque chose change : le registre
-                    # entier était réécrit (copie .prev, fsync) pour chaque
-                    # page prête à chaque passage, dans la boucle du podium
-                    _noter(g, uid, **fin)
-                if a_verifier:
-                    bilan["a_verifier"].append(f"{uid} : {a_verifier}")
-                if attend:
-                    bilan["ab_en_attente"] += 1
-                if manques and not restes:
-                    bilan["reprises"].append(uid)
-                elif restes and set(restes) - set(a_verifier) - ({"70/30"} if attend else set()):
-                    bilan["rates"].append(f"{uid} : {restes}")
+                else:
+                    if repointees >= plafond_repointes:
+                        continue
+                    repointees += 1
+                lu = _lire_page(lid, equipe)
+                ofs = _boutons_of(lu.get("buttons"))
+                if not ofs:
+                    bilan["rates"].append(f"{uid} : page illisible, tracking non suivi")
+                    continue
+                if any(str(b.get("url") or "") != f["tracking"] for b in ofs):
+                    pose = lv._poser_tracking(lid, f["tracking"], str(pg.get("nom") or ""), equipe)
+                    if not pose.get("ok"):
+                        bilan["rates"].append(f"{uid} : tracking ({pose.get('erreur')})")
+                        continue
+                # une autre model : la branche « Base … » de l'A/B est à refaire
+                manques = sorted(set(manques) | {"pays"} | ({"70/30"} if ab_ici else set()))
+                essais = {}
+                _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False,
+                       **({"ab": {"ok": False}} if ab_ici else {}))
+                pg = page_de(g, uid)    # ce qui est noté fait foi pour l'écriture de fin
+                bilan["trackings"].append(uid)
+            if pg.get("actif") is False or pg.get("a_rallumer"):
+                if tickets_inconnus:
+                    bilan.setdefault("rallumages_reportes", []).append(uid)
+                    continue
+                if gms.enable_link(lid).get("ok"):
+                    _noter(g, uid, actif=True, a_rallumer=False)
+                    bilan["rallumees"].append(uid)
+                else:
+                    _noter(g, uid, a_rallumer=True)
+                    bilan["rates"].append(f"{uid} : rallumage")
+                    continue
+            plein = traitees >= PAGES_PAR_PASSE
+            if plein and not ab_a_part:
+                continue                # le reste au passage suivant (la boucle du podium attend)
+            voulu = str(f.get("groupe") or f.get("manager") or "")
+            if not plein and voulu and voulu != str(pg.get("groupe") or ""):
+                traitees += 1
+                rg = lv.ranger(equipe, lid, voulu)
+                if rg:
+                    _noter(g, uid, groupe=rg)
+            restes, a_verifier, attend, differees = [], [], False, []
+            if not ab_ici:
+                # Twitter : « ça doit pas être 70 30 » (06/11) — une ancienne
+                # étape 70/30 tombe, sans rien poser
+                manques = [m for m in manques if m != "70/30"]
+            elif not (pg.get("ab") or {}).get("ok") and "70/30" not in manques:
+                # une page prête avant le 70/30 (ou dont la note s'est
+                # perdue) : sans ça, la reprise ne la verrait jamais
+                manques.append("70/30")
+            # Sur un serveur à places fixes, une étape « à vérifier » est
+            # retentée une fois par CREATION_REESSAI_S, comme une création :
+            # trois 429 de suite sur une lecture figeaient le 70/30 pour
+            # toujours (page à 100 % sur le tracking, sans geste possible).
+            reessai = passageres_ici and bool(pg.get("a_verifier")) \
+                and time.time() - float(pg.get("a_verifier_quand") or 0) >= CREATION_REESSAI_S
+            for etape in manques:
+                if int(essais.get(etape) or 0) >= ESSAIS_REPRISE and not reessai:
+                    restes.append(etape)
+                    a_verifier.append(etape)
+                    continue
+                if etape == "70/30":
+                    if cookie is None:
+                        cookie = _cookie_ok()
+                    if not cookie or ab_tentes >= ab_max:
+                        restes.append(etape)    # attend le cookie, ou le passage suivant : rien compté
+                        attend = True
+                        continue
+                a_part = etape == "70/30" and ab_a_part
+                if traitees >= PAGES_PAR_PASSE and not a_part:
+                    restes.append(etape)
+                    if passageres_ici:
+                        differees.append(etape)     # pas tentée : ni ratée ni comptée
+                    continue
+                if not a_part:
+                    traitees += 1
+                compte, err = True, ""
+                try:
+                    if etape == "70/30":
+                        ab_tentes += 1
+                        ab = lv._poser_base_seule(g, uid, lien=_lien_ab(lid, f["tracking"], pg.get("shortcode")))
+                        ok, compte = bool(ab.get("ok")), not ab.get("cookie")
+                        err = str(ab.get("erreur") or "")
+                        if ab.get("cookie"):
+                            cookie = False      # refusé : les suivantes attendent aussi
+                        _noter(g, uid, ab=_note_ab(ab))
+                    elif etape == "pays":
+                        rp = lv.poser_pays(lid, equipe)
+                        ok, err = bool(rp.get("ok")), str(rp.get("erreur") or "")
+                    elif etape == "safe page":
+                        ru = gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
+                                                   "bot_protection": {"mode": "safe_page"}}, equipe)
+                        ok, err = bool(ru.get("ok")), str(ru.get("error") or "")
+                    else:
+                        ok = True                    # étape inconnue (ancienne fiche)
+                except Exception as e:               # noqa: BLE001
+                    _log(f"reprise {etape} de {cle} : {type(e).__name__}: {str(e)[:100]}")
+                    ok, err = False, f"{type(e).__name__}: {e}"
+                if not ok:
+                    restes.append(etape)
+                    if compte and passageres_ici and erreur_passagere(err):
+                        compte = False          # panne passagère : refaite au passage suivant
+                        bilan["passageres"].append(f"{uid} : {etape} ({err[:80]})")
+                    if compte:
+                        essais[etape] = int(essais.get(etape) or 0) + 1
+            fin = {"manques": restes, "essais": essais, "a_verifier": bool(a_verifier),
+                   "pays": "pays" not in restes}
+            if passageres_ici and fin["a_verifier"] and not pg.get("a_verifier"):
+                fin["a_verifier_quand"] = int(time.time())  # le réessai du lendemain part d'ici
+            if ("a_verifier_quand" in fin or list(pg.get("manques") or []) != fin["manques"]
+                    or (pg.get("essais") if isinstance(pg.get("essais"), dict) else {}) != fin["essais"]
+                    or bool(pg.get("a_verifier")) != fin["a_verifier"] or pg.get("pays") != fin["pays"]):
+                # écrit seulement si quelque chose change : le registre
+                # entier était réécrit (copie .prev, fsync) pour chaque
+                # page prête à chaque passage, dans la boucle du podium
+                _noter(g, uid, **fin)
+            if a_verifier:
+                bilan["a_verifier"].append(f"{uid} : {a_verifier}")
+            if attend:
+                bilan["ab_en_attente"] += 1
+            if manques and not restes:
+                bilan["reprises"].append(uid)
+            elif restes and set(restes) - set(a_verifier) - ({"70/30"} if attend else set()) - set(differees):
+                bilan["rates"].append(f"{uid} : {restes}")
         except Exception as e:                               # noqa: BLE001
             bilan["rates"].append(f"{uid} : {type(e).__name__}: {str(e)[:80]}")
+        finally:
+            verrou.release()
+    # Twitter : ni 70/30 ni panne passagère mise à part — ces deux clés,
+    # toujours vides, s'ajoutaient à chaque ligne de son journal
+    if not ab_ici and not bilan.get("ab_en_attente"):
+        bilan.pop("ab_en_attente", None)
+    if not passageres_ici and not bilan.get("passageres"):
+        bilan.pop("passageres", None)
     if any(bilan.values()):
         _log(f"reprise des pages {gid} : {bilan}")
     if sur_demande(gid):
@@ -1459,22 +1690,27 @@ def etat_place(gid: Any, uid: Any, n: int, d: Optional[Dict[str, Any]] = None,
                hors_service: str = "") -> Tuple[str, str]:
     """Ce que montre le menu pour la place n de ce VA : (« prete », adresse),
     (« coupee », adresse), (« en_preparation », « »), (« a_reprendre », « »),
-    ou, sans page quand le VA est hors service (`hors_service` : la raison
-    d'en_service), (« coupee », « ») ou (« sans_lien », « ») — rien ne s'y
-    préparera, « ⏳ » mentirait. Seul endroit qui le décide. `d` : le
-    registre déjà lu."""
+    ou, quand le VA est hors service (`hors_service` : la raison
+    d'en_service) et que la place n'a pas de page prête, (« coupee », « »)
+    pour un lien coupé ou un VA parti, (« sans_lien », « ») pour un lien ou
+    une fiche incomplets — rien ne s'y préparera ni ne s'y reprendra (le lot
+    l'écarte), « ⏳ » ou « ⚠️ à reprendre » mentiraient. Seul endroit qui le
+    décide. `d` : le registre déjà lu."""
     d = d if d is not None else _lire()
     pg = (d.get("pages") or {}).get(f"{gid}:{place(_vrai_uid(uid), n)}")
     pg = pg if isinstance(pg, dict) else {}
+    hors = ("coupee" if hors_service in ("coupe", "parti") else "sans_lien") if hors_service else ""
     if pg.get("link_id"):
         etat = pg.get("etat", "prete")
         if etat == "prete":
             return ("coupee" if pg.get("actif", True) is False else "prete"), str(pg.get("public_url") or "")
+        if hors:
+            return hors, ""
         if etat == "ratee":
             return "a_reprendre", ""
         return "en_preparation", ""                    # en_cours : la copie se fait
-    if hors_service:
-        return ("coupee" if hors_service == "coupe" else "sans_lien"), ""
+    if hors:
+        return hors, ""
     return ("a_reprendre" if creation_a_verifier(gid, uid, n, d) else "en_preparation"), ""
 
 
@@ -1548,6 +1784,26 @@ def _pause_ecritures() -> int:
         return 0
 
 
+def _noter_passagere(cle: str, erreur: str) -> None:
+    """Une panne passagère propre à cette place (pas de tout le compte) :
+    l'heure notée, AUCUN essai compté — le lot suivant la passe après les
+    places jamais en panne (rotation), au lieu de la retenter en tête."""
+    with _VERROU:
+        d = _lire()
+        c = _creations(d)
+        x = c.get(cle) if isinstance(c.get(cle), dict) else {}
+        c[cle] = dict(x, passagere_quand=int(time.time()), passagere=str(erreur)[:200])
+        _ecrire(d)
+
+
+#: Les messages de demande (pages acceptées) dont le PATCH de l'adresse est
+#: refait par passage : un seul 500 ou 429 de Discord au clic ✅ laissait le
+#: message « — page 4 en création » pour toujours, sans adresse.
+MESSAGES_REPRIS_PAR_PASSE = 5
+#: Au-delà, le message n'est plus retenté (supprimé, salon fermé) : dit une fois.
+MESSAGE_ESSAIS_MAX = 3
+
+
 def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
     """Les places de chaque VA en service (en_service) qui n'ont pas encore de
     page prête : les places fixes, et les pages acceptées dont la copie a
@@ -1555,10 +1811,14 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
     manager les a voulues), puis place par place (la page 1 de chacun avant
     la page 2 de personne). CREATIONS_PAR_PASSE au plus, chaque place
     ESSAIS_CREATION fois au plus (puis une fois par CREATION_REESSAI_S) ; une
-    panne passagère de GetMySocial arrête le lot sans rien compter ; un
-    registre qui refuse l'écriture l'arrête aussi. Une page ratée ne bloque
-    pas les autres. Balaie d'abord les demandes sans réponse possible.
-    Rend un bilan ; ne lève pas."""
+    panne passagère de tout le compte GetMySocial (quota, 429, budget) arrête
+    le lot sans rien compter ; celle d'une seule place ne compte pas non
+    plus, et le lot passe à la suivante (rotation : elle repart derrière) ;
+    un registre qui refuse l'écriture l'arrête aussi. Un VA coupé ou parti
+    PENDANT le lot n'est pas un essai (« ignores »). Une page ratée ne bloque
+    pas les autres. Balaie d'abord les demandes sans réponse possible ;
+    refait ensuite le message d'une demande resté « en création ». Rend un
+    bilan ; ne lève pas."""
     gid = str(gid)
     bilan: Dict[str, Any] = {"creees": [], "ratees": [], "a_verifier": [], "restent": 0,
                              "passageres": [], "ignores": {"sans_lien": 0, "coupe": 0, "parti": 0}}
@@ -1574,6 +1834,8 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
             # ce contrôle, personne n'était « parti »
             raise ValueError("état des tickets vide ou illisible")
         tickets = tickets if isinstance(tickets, dict) else {}
+        disparus = etat_tk.get("tickets_disparus") if isinstance(etat_tk, dict) else None
+        disparus = disparus if isinstance(disparus, dict) else {}
     except Exception as e:                                   # noqa: BLE001
         # sans savoir qui est parti, ne rien créer : une page vivante sur le
         # tracking d'un VA parti serait pire qu'un passage sauté
@@ -1584,13 +1846,18 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
         bilan["demandes"] = balayer_demandes(gid, tickets)
     except Exception as e:                                   # noqa: BLE001
         _log(f"demandes de pages {gid} non balayées : {type(e).__name__}: {e}")
-    a_faire: List[Tuple[int, int, str]] = []
+    a_faire: List[Tuple[int, int, float, str]] = []
+    servis: set = set()
     reg = _lire()                       # un instantané pour le tour : relu par creer_page ensuite
     for uid, f in sorted(vas.items()):
-        sert, raison = en_service(gid, uid, fiche=f, ticket=tickets.get(f"{gid}:{uid}") or {})
+        # sans ticket vivant : « parti » si sa fiche rangée porte « parti », ou
+        # s'il n'en a nulle part (depart_du_va, la règle de la reprise aussi)
+        sert, raison = en_service(gid, uid, fiche=f, ticket=tickets.get(f"{gid}:{uid}") or {},
+                                  disparu=disparus.get(f"{gid}:{uid}") or {})
         if not sert:
             bilan["ignores"][raison] = bilan["ignores"].get(raison, 0) + 1
             continue
+        servis.add(uid)
         for n in places(gid, uid, reg):
             pg = reg["pages"].get(f"{gid}:{place(uid, n)}")
             pg = pg if isinstance(pg, dict) else {}
@@ -1599,7 +1866,11 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
             if creation_a_verifier(gid, uid, n, reg):
                 bilan["a_verifier"].append(place(uid, n))
                 continue
-            a_faire.append((0 if modifiable(gid, n) else 1, n, uid))
+            x = (reg.get("creations") or {}).get(f"{gid}:{place(uid, n)}")
+            pq = float(x.get("passagere_quand") or 0) if isinstance(x, dict) else 0.0
+            # (priorité, place, dernière panne passagère, VA) : à place égale,
+            # une place restée en panne passe derrière les autres
+            a_faire.append((0 if modifiable(gid, n) else 1, n, pq, uid))
     pause = _pause_ecritures() if a_faire else 0
     if pause:
         # rien ne passerait : ni essai compté, ni copie tentée
@@ -1613,11 +1884,14 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
         bilan["erreur"] = "registre non écrit"
         a_faire = []
     faites = 0
-    for i, (_prio, n, uid) in enumerate(sorted(a_faire)):
+    ecartes: set = set()
+    for i, (_prio, n, _pq, uid) in enumerate(sorted(a_faire)):
         cle = f"{gid}:{place(uid, n)}"
         if faites >= CREATIONS_PAR_PASSE:
             bilan["restent"] += 1
             continue
+        if uid in ecartes:
+            continue                # coupé ou parti pendant ce lot : déjà compté
         with _VERROU:
             en_cours = cle in _CREATIONS
         if en_cours:
@@ -1639,15 +1913,33 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
         if r.get("erreur") == "création déjà en cours":
             faites -= 1             # rien tenté : ni essai ni place du plafond
             continue
+        if r.get("hors_service"):
+            # coupé (« 🚫 Désactiver »), parti ou fiche retouchée APRÈS la
+            # lecture du début du lot : creer_page a refusé sans rien copier.
+            # Ce n'est pas un essai raté (3 essais et « à reprendre » à la
+            # réactivation), ni une place du lot.
+            faites -= 1
+            ecartes.add(uid)
+            raison = str(r["hors_service"])
+            bilan["ignores"][raison] = bilan["ignores"].get(raison, 0) + 1
+            _log(f"création de {place(uid, n)} sur {gid} : VA devenu hors service pendant le lot ({raison}), "
+                 "ses places attendent")
+            continue
         if r.get("disque"):
             bilan["erreur"] = "registre non écrit"
             bilan["restent"] += len(a_faire) - i        # la copie est coupée : sa place reste à faire
             break
         if erreur_passagere(r.get("erreur")):
-            # GetMySocial ne répond pas : les suivantes échoueraient pareil
             bilan["passageres"].append(f"{place(uid, n)} : {str(r.get('erreur'))[:100]}")
-            bilan["restent"] += len(a_faire) - i
-            break
+            if panne_globale(r.get("erreur")):
+                # tout le compte GetMySocial : les suivantes échoueraient pareil
+                bilan["restent"] += len(a_faire) - i
+                break
+            # cette place seule (un 502 sur son bouton, une page Cloudflare) :
+            # ni essai ni arrêt du lot, elle repart derrière au tour suivant
+            _noter_passagere(cle, str(r.get("erreur") or ""))
+            bilan["restent"] += 1
+            continue
         x = _noter_creation(cle, False, str(r.get("erreur") or "?"))
         bilan["ratees"].append(f"{place(uid, n)} : {r.get('erreur')}")
         if x.get("a_verifier"):
@@ -1656,15 +1948,79 @@ def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
             bilan["erreur"] = "registre non écrit"
             bilan["restent"] += len(a_faire) - i - 1
             break
+    try:
+        refaits = _reprendre_messages(gid, servis)
+        if refaits:
+            bilan["messages"] = refaits
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"messages de demande de {gid} non repris : {type(e).__name__}: {e}")
     if (bilan["creees"] or bilan["ratees"] or bilan["a_verifier"] or bilan["passageres"]
-            or bilan.get("erreur") or any(bilan["ignores"].values())):
+            or bilan.get("erreur") or bilan.get("messages") or any(bilan["ignores"].values())):
         # les VA écartés sont dits à chaque passage (« ne jamais écarter en
         # silence »), même quand rien d'autre n'a eu lieu
         _log(f"création des pages {gid} : créées {bilan['creees']}, ratées {bilan['ratees'][:5]}, "
              f"à vérifier {bilan['a_verifier'][:10]}, restent {bilan['restent']}, "
              f"en attente {bilan['passageres'][:3]}, VA écartés {bilan['ignores']}"
+             + (f", messages de demande refaits {bilan['messages']}" if bilan.get("messages") else "")
              + (f", ERREUR {bilan['erreur']}" if bilan.get("erreur") else ""))
     return bilan
+
+
+def _reprendre_messages(gid: str, servis: set) -> List[str]:
+    """Les demandes acceptées dont la page est prête mais dont le message ne
+    porte pas encore l'adresse (PATCH raté au clic ✅) : refait,
+    MESSAGES_REPRIS_PAR_PASSE au plus, MESSAGE_ESSAIS_MAX fois chacun. Le fil
+    du clic a DEMANDE_SANS_MESSAGE_S pour le faire lui-même (sa réponse type 7
+    doit passer avant). Seulement les VA en service. Rend ce qui a été tenté."""
+    d = _lire()
+    faits: List[str] = []
+    candidates = sorted(((did, x) for did, x in _demandes(d).items() if isinstance(x, dict)),
+                        key=lambda dx: float(dx[1].get("decide_quand") or 0))
+    for did, x in candidates:
+        if len(faits) >= MESSAGES_REPRIS_PAR_PASSE:
+            break
+        if not (str(x.get("gid")) == gid and x.get("etat") == "acceptee" and x.get("salon")
+                and x.get("message") and not x.get("message_maj")):
+            continue
+        uid = str(x.get("uid") or "")
+        if uid not in servis or int(x.get("message_essais") or 0) >= MESSAGE_ESSAIS_MAX:
+            continue
+        if time.time() - float(x.get("decide_quand") or 0) < DEMANDE_SANS_MESSAGE_S:
+            continue
+        try:
+            n = int(x.get("place") or 0)
+        except (TypeError, ValueError):
+            continue
+        pg = (d.get("pages") or {}).get(f"{gid}:{place(uid, n)}")
+        if not (isinstance(pg, dict) and pg.get("link_id") and pg.get("etat", "prete") == "prete"):
+            continue                    # pas encore créée : _apres_creation s'en chargera
+        code = _maj_message_de_place(gid, uid, n, str(pg.get("public_url") or ""), dict(x, id=str(did)))
+        faits.append(f"{place(uid, n)} : HTTP {code}")
+        if code != 200:
+            essais = noter_message_rate(str(did))
+            if essais >= MESSAGE_ESSAIS_MAX:
+                _log(f"demande {did} : message de {place(uid, n)} jamais mis à jour ({essais} essais, "
+                     f"HTTP {code}) — plus retenté, l'adresse est dans le menu du ticket")
+    return faits
+
+
+def _maj_message_de_place(gid: str, uid: str, n: int, url: str, x: Dict[str, Any]) -> int:
+    """Le message de la demande `x` ({salon, message, decide_par, id}) prend
+    l'adresse de la page n ; noté (message_maj) s'il est passé. Rend le code
+    HTTP (0 : exception, dite)."""
+    try:
+        import tickets_discord as tk
+        import verif_discord as vd
+        with vd.sur_serveur(gid):
+            code = tk.maj_message_demande(uid, x, n, url)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"demande {x.get('id')} : message non mis à jour : {type(e).__name__}: {e}")
+        return 0
+    if code == 200:
+        noter_message_maj(str(x["id"]))
+    else:
+        _log(f"demande {x.get('id')} : message non mis à jour (HTTP {code})")
+    return int(code or 0)
 
 
 def _apres_creation(gid: str, uid: str, n: int, url: str) -> None:
@@ -1677,17 +2033,7 @@ def _apres_creation(gid: str, uid: str, n: int, url: str) -> None:
     x = demande_de_place(gid, uid, n)
     if not (x.get("salon") and x.get("message")) or x.get("message_maj"):
         return
-    try:
-        import tickets_discord as tk
-        import verif_discord as vd
-        with vd.sur_serveur(gid):
-            code = tk.maj_message_demande(uid, x, n, url)
-        if code == 200:
-            noter_message_maj(x["id"])
-        else:
-            _log(f"demande {x['id']} : message non mis à jour (HTTP {code})")
-    except Exception as e:                                   # noqa: BLE001
-        _log(f"demande {x.get('id')} : message non mis à jour : {type(e).__name__}: {e}")
+    _maj_message_de_place(gid, uid, n, url, x)
 
 
 def _menu_a_jour(gid: str, uid: str) -> None:
@@ -1751,12 +2097,23 @@ def _marquer_liste_pays(gid: str) -> List[str]:
             continue
         if str(posee or avant) == voulu or pg.get("pays_liste_due") == voulu:
             continue
-        with _verrou_page(cle):
+        # verrou NON bloquant, comme la reprise : une page tenue (création au
+        # clic, bascule, modification) faisait attendre la boucle du podium ;
+        # elle est revue au passage suivant
+        v = _verrou_page(cle)
+        if not v.acquire(blocking=False):
+            continue
+        try:
             pg = page_de(g, uid)
             essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
             essais.pop("pays", None)
+            # sans « a_verifier=False » : la reprise le recalcule des essais à la
+            # fin du passage ; l'écrire ici sautait le réessai à 24 h d'un 70/30
+            # « à vérifier » et remettait son horloge à zéro
             _noter(g, uid, manques=sorted(set(pg.get("manques") or []) | {"pays"}), essais=essais,
-                   a_verifier=False, pays=False, pays_liste_due=voulu)
+                   pays=False, pays_liste_due=voulu)
+        finally:
+            v.release()
         marques.append(uid)
     if marques:
         _log(f"pays {gid} : {len(marques)} page(s) à reposer avec la nouvelle liste")
@@ -1768,10 +2125,15 @@ def _noter_liste_pays(gid: str) -> None:
         g, _s, uid = str(cle).partition(":")
         if (g == str(gid) and isinstance(pg, dict) and pg.get("pays_liste_due")
                 and "pays" not in (pg.get("manques") or [])):
-            with _verrou_page(cle):
+            v = _verrou_page(cle)
+            if not v.acquire(blocking=False):
+                continue                    # tenue : notée au passage suivant (pays_liste_due reste)
+            try:
                 due = page_de(g, uid).get("pays_liste_due")
                 if due:
                     _noter(g, uid, pays_cibles=due, pays_liste_due="")
+            finally:
+                v.release()
 
 
 def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
@@ -1847,6 +2209,11 @@ def appliquer_look(gid: str, uid: str, cle: str, n: int = 1) -> Dict[str, Any]:
     choix = {x[0]: x for x in looks(gid)}
     if cle not in choix:
         return {"ok": False, "erreur": "look inconnu"}
+    if not modifiable(gid, n):
+        # la même garde que modifier_page : un appel direct ou une tâche de
+        # fond ne doit jamais changer une place fixe (si LOOKS s'ouvre un jour
+        # à TRUST INSTAGRAM)
+        return {"ok": False, "erreur": "page fixe : elle ne se modifie pas"}
     u = place(_vrai_uid(uid), n)
     with _verrou_page(f"{gid}:{u}"):
         pg = page_de(gid, u)
