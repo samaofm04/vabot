@@ -1488,6 +1488,32 @@ try:
           pv.en_service(AG, VI) == (True, "") and pv.en_service(AG, VS) == (False, "sans_lien")
           and pv.en_service(AG, VI_COUPE) == (False, "coupe") and pv.en_service(AG, VI_PARTI) == (False, "parti"))
 
+    # ── VA parti dont le salon a été supprimé (ticket dans « tickets_disparus ») ──
+    # prod 06/11 : le VA 110 (parti le 28/10, salon effacé, direct jamais coupé)
+    # a reçu sa page 1 — _fiche rendait {} et en_service le jugeait en service
+    VD, VD2 = "4131", "4132"
+    FICHES[f"{AG}:{VD}"] = fiche_ig(161, "vadisparu")
+    FICHES[f"{AG}:{VD2}"] = fiche_ig(162, "vaeffaceparerreur")
+    _vetat_d = tk._etat
+    tk._etat = lambda: {"tickets": TICKETS, "tickets_disparus": {
+        f"{AG}:{VD}": {"salon": "T31", "parti": {"quand": 1}, "disparu": 2},
+        f"{AG}:{VD2}": {"salon": "T32", "disparu": 2}}}
+    try:
+        check("ticket disparu avec « parti » : hors service (parti)", pv.en_service(AG, VD) == (False, "parti"),
+              pv.en_service(AG, VD))
+        check("ticket disparu SANS « parti » (salon effacé par erreur) : reste en service",
+              pv.en_service(AG, VD2) == (True, ""), pv.en_service(AG, VD2))
+        check("… même règle quand l'appelant passe le ticket vide (lot de création : tickets.get(...) or {})",
+              pv.en_service(AG, VD, fiche=FICHES[f"{AG}:{VD}"], ticket={}) == (False, "parti"))
+        n_dup = len(APPELS)
+        r = pv.creer_page(AG, VD, n=1)
+        check("creer_page pour un VA parti au salon disparu : refusé, aucune copie",
+              not r["ok"] and "hors service" in r["erreur"] and not dups(n_dup), r)
+    finally:
+        tk._etat = _vetat_d
+        FICHES.pop(f"{AG}:{VD}", None)
+        FICHES.pop(f"{AG}:{VD2}", None)
+
     # ── tickets illisibles ──
     _vetat = tk._etat
     tk._etat = lambda: {}

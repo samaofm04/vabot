@@ -270,6 +270,17 @@ def en_service(gid: Any, uid: Any, fiche: Optional[Dict[str, Any]] = None,
         ticket = tk._fiche(gid, vrai)
     if isinstance(ticket, dict) and ticket.get("parti"):
         return False, "parti"
+    if not ticket:
+        # salon supprimé : la fiche passe dans « tickets_disparus » et _fiche
+        # rend {}. Le VA 110 de TRUST INSTAGRAM (parti le 28/10, salon effacé,
+        # lien direct jamais coupé) a reçu sa page 1 le 06/11 sans ça. Un
+        # ticket disparu SANS « parti » (salon effacé par erreur) reste en service.
+        import tickets_discord as tk
+        etat = tk._etat()
+        disparus = etat.get("tickets_disparus") if isinstance(etat, dict) else None
+        disparu = (disparus or {}).get(f"{gid}:{vrai}") if isinstance(disparus, dict) else None
+        if isinstance(disparu, dict) and disparu.get("parti"):
+            return False, "parti"
     return True, ""
 
 
