@@ -575,6 +575,40 @@ try:
           AB["lnk_m5"] == avant_ab and not [k for k in LIENS if k.startswith("lnk_tmp")]
           and "relue autrement" in " ".join(b["rates"]), b)
     check("Twitter : jamais", pv.poser_bases_en_page(TW) == {"poses": [], "rates": []})
+
+    print("10. Les pannes passagères (429 à la minute, 06/11 au soir) ne comptent pas")
+    E429 = "Error 429 (rate_limit_exceeded): RATE_LIMITED: retry after 23s."
+    d = pv._lire()
+    d["bases_page"].pop("lnk_m5", None)
+    d["looks_liens"][f"{AG}:{VA2}"].pop("habillage", None)
+    d["looks_liens"][f"{AG}:{VA2}"]["essais_habillage"] = 0
+    pv._ecrire(d)
+    _vupd3, _vdup = gms.update_link, gms.duplicate_link
+
+    def upd_429(lid, champs, team_id=None):
+        if "name_user" in champs:
+            return {"ok": False, "error": E429}
+        return _vupd3(lid, champs, team_id)
+    gms.update_link = upd_429
+    gms.duplicate_link = lambda *a, **k: {"ok": False, "error": E429}
+    FONDS = []
+    pv.EN_FOND = lambda f: FONDS.append(f)
+    for _ in range(5):
+        bl = pv.poser_looks_par_defaut(AG)
+        bb = pv.poser_bases_en_page(AG)
+    gms.update_link, gms.duplicate_link = _vupd3, _vdup
+    pv.EN_FOND = lambda f: f()
+    x2 = pv._lire()["looks_liens"][f"{AG}:{VA2}"]
+    check("habillage en 429 cinq fois : aucun essai compté (retenté au passage suivant)",
+          not x2.get("essais_habillage") and not x2.get("habillage"), x2)
+    check("page des 30 % en 429 : aucun essai compté, le passage s'arrête au 1er refus",
+          not (pv._lire()["bases_page"].get("lnk_m5") or {}).get("essais") and len(bb["rates"]) == 1
+          and "passage arrêté" in bb["rates"][0], bb)
+    check("le look par défaut ne lance pas en plus une copie en fond (l'étape suivante la fait)", FONDS == [], len(FONDS))
+    b = pv.poser_looks_par_defaut(AG)
+    b2 = pv.poser_bases_en_page(AG)
+    check("le 429 passé : habillage et page des 30 % faits", "lildreamyy" in b["poses"] and "refusyy" in b2["poses"]
+          and pv._lire()["looks_liens"][f"{AG}:{VA2}"].get("habillage") == pv.HABILLAGE_VERSION, (b, b2))
 finally:
     for (m, n), v in SAV.items():
         setattr(m, n, v)

@@ -2313,7 +2313,7 @@ def _noter_look_lien(gid: Any, uid: Any, **champs) -> bool:
         return _ecrire(d)
 
 
-def _look_sur_lien(gid: str, uid: str, cle: str) -> Dict[str, Any]:
+def _look_sur_lien(gid: str, uid: str, cle: str, refaire_base: bool = True) -> Dict[str, Any]:
     """Le look `cle` sur le lien principal du VA (sa page 1) : photo + fond,
     rien d'autre (_poser_look_lien relit le bouton OnlyFans). Rend {ok,
     erreur, libelle}."""
@@ -2342,13 +2342,16 @@ def _look_sur_lien(gid: str, uid: str, cle: str) -> Dict[str, Any]:
             else:
                 # photo et fond posés : le look est noté ; l'habillage est
                 # retenté par poser_looks_par_defaut (ESSAIS_REPRISE fois)
+                # une panne passagère (429 à la minute, quota) n'est pas un
+                # essai : le 06/11 au soir, 17 liens d'affilée en ont pris
+                passe = erreur_passagere(h.get("erreur"))
                 _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0,
                                  erreur=str(h.get("erreur") or "")[:140],
-                                 essais_habillage=int(x.get("essais_habillage") or 0) + 1)
+                                 essais_habillage=int(x.get("essais_habillage") or 0) + (0 if passe else 1))
                 _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}, "
                      f"texte et bouton NON posés ({h.get('erreur')})")
                 r = {"ok": False, "erreur": f"photo et fond posés, texte et bouton non ({h.get('erreur')})"}
-    if r.get("ok") and gid in BASE_EN_PAGE:
+    if r.get("ok") and gid in BASE_EN_PAGE and refaire_base:
         # la page des 30 % sans tracking est une copie figée : refaite au
         # nouveau look, en fond (la reprise la referait au passage suivant)
         EN_FOND(lambda: poser_bases_en_page(gid, seul=vrai))
@@ -2533,11 +2536,18 @@ def poser_looks_par_defaut(gid: str) -> Dict[str, Any]:
             continue
         faits += 1
         try:
-            r = _look_sur_lien(gid, uid, str(x["cle"]) if rehabiller else cle_def)
+            # la page des 30 % : refaite par l'étape suivante de la reprise,
+            # pas en fond à chaque lien (deux fils à la fois : 429 à la minute)
+            r = _look_sur_lien(gid, uid, str(x["cle"]) if rehabiller else cle_def, refaire_base=False)
         except Exception as e:                               # noqa: BLE001
             r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
         if r.get("ok"):
             bilan["poses"].append(str(f.get("shortcode") or lid))
+        elif panne_globale(r.get("erreur")):
+            bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')} (passagère : passage arrêté, rien compté)")
+            break
+        elif erreur_passagere(r.get("erreur")):
+            bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')} (passagère, rien compté)")
         elif rehabiller:
             bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')}")    # compté par _look_sur_lien
         else:
@@ -2780,6 +2790,12 @@ def poser_bases_en_page(gid: str, seul: str = "") -> Dict[str, Any]:
         if r.get("cookie"):
             bilan["rates"].append(f"{nom} : {r.get('erreur')} (cookie A/B : passage arrêté, rien compté)")
             break
+        if panne_globale(r.get("erreur")):
+            bilan["rates"].append(f"{nom} : {r.get('erreur')} (passagère : passage arrêté, rien compté)")
+            break
+        if erreur_passagere(r.get("erreur")):
+            bilan["rates"].append(f"{nom} : {r.get('erreur')} (passagère, rien compté)")
+            continue
         essais = (int(x.get("essais") or 0) if x.get("etat_essai") == etat else 0) + 1
         _noter_base(lid, etat_essai=etat, essais=essais, erreur=str(r.get("erreur") or "")[:160])
         bilan["rates"].append(f"{nom} : {r.get('erreur')}" + (" (plus retenté)" if essais >= ESSAIS_REPRISE else ""))
