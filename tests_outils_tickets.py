@@ -275,7 +275,9 @@ try:
     pareils = True
     for gid in (TW, TH, "1"):
         for confirme, lien in ((False, True), (True, False), (False, False)):
-            avec = tk.boutons_va(VA, confirme=confirme, a_un_lien=lien, gid=gid)
+            # la sortie de l'enveloppe des outils (_boutons_va_sans_contenu) ; le
+            # ticket Twitter perd ensuite 📱 et 📧 (TICKET_SANS, 06/11/2026)
+            avec = tk._boutons_va_sans_contenu(VA, confirme=confirme, a_un_lien=lien, gid=gid)
             sans = tk._boutons_va_sans_outils(VA, confirme=confirme, a_un_lien=lien, gid=gid)
             pareils = pareils and avec == sans and "outk:" not in json.dumps(avec)
     check("Twitter, Threads, autre serveur : la rangée ne change pas", pareils)

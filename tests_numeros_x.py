@@ -795,7 +795,9 @@ try:
           and textes(patch_carte("T1")) == ["## `….`", "🇺🇸 ⏳ En attente"], (vides, FINIS, patch_carte("T1")))
     check("ticket : avant 20 min, rien n'est vidé", nx.vider_cartes_echues() == [])
     APPELS.clear()
-    b = nx.poser_cartes(GID)
+    # la pose d'avant le 06/11 (_poser_cartes_partout) : depuis, plus de carte
+    # dans les tickets de Twitter non plus (CARTES_RETIREES, tests_outils_twitter)
+    b = nx._poser_cartes_partout(GID)
     tw = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/TW1/messages"]
     AG = vd.AGENCY_IG_ID
     tk = json.loads(tickets_discord.ETAT_FICHIER.read_text(encoding="utf-8"))

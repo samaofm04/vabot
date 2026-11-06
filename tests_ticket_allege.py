@@ -107,15 +107,19 @@ try:
     complet = plats(tk._boutons_va_complets(VA, confirme=False, a_un_lien=True, gid=AG))
     check("la rangée complète garde 📈 📤 ⬇️ 📱 (📋・menu et le menu privé du staff la lisent)",
           {f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu"} <= set(complet), complet)
-    for gid, nom in ((TW, "Twitter"), (TH, "Threads"), ("1", "un autre serveur")):
+    for gid, nom in ((TH, "Threads"), ("1", "un autre serveur")):
         pareil = all(tk.boutons_va(VA, confirme=c, a_un_lien=l, gid=gid)
                      == tk._boutons_va_complets(VA, confirme=c, a_un_lien=l, gid=gid)
                      for c, l in ((False, True), (True, False), (False, False)))
         check(f"{nom} : rangées inchangées", pareil)
     # (son 📈 Mes stats vient d'un patch du VPS, absent ici : « inchangées » le couvre)
-    check("Twitter garde 📱 Numéro", "numx:menu" in plats(tk.boutons_va(VA, a_un_lien=True, gid=TW)))
-    check("BOUTONS_VERSION 12 : les accueils déjà postés seront redessinés une fois",
-          tk.BOUTONS_VERSION == 12)
+    # 06/11/2026 : Twitter perd 📱 et 📧 à son tour (🧰 OUTILS TWITTER), rien d'autre
+    tw_t, tw_c = plats(tk.boutons_va(VA, a_un_lien=True, gid=TW)), plats(tk._boutons_va_complets(VA, a_un_lien=True, gid=TW))
+    check("Twitter : le ticket perd 📱 Numéro et 📧 Outlook, et seulement eux",
+          "numx:menu" not in tw_t and "mailx:menu" not in tw_t
+          and tw_t == [x for x in tw_c if x not in ("numx:menu", "mailx:menu")] and "numx:menu" in tw_c, (tw_t, tw_c))
+    check("BOUTONS_VERSION ≥ 12 : les accueils déjà postés seront redessinés une fois",
+          tk.BOUTONS_VERSION >= 12)
     m = tk.menu_prive(AG, VA)
     c = [b["custom_id"] for r in m["data"]["components"] for b in r["components"]]
     check("menu privé du staff (pas le ticket) : inchangé, il garde 📈 📤 ⬇️ 📱",
@@ -141,25 +145,26 @@ try:
     lv.est_actif = lambda g, u: True
     tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {
         f"{AG}:{VA}": {"salon": "S1", "accueil": "A1", "boutons": 11},
-        f"{AG}:{VA2}": {"salon": "S2", "accueil": "A2", "boutons": 12},
+        f"{AG}:{VA2}": {"salon": "S2", "accueil": "A2", "boutons": tk.BOUTONS_VERSION},
         f"{TW}:{VA}": {"salon": "S3", "accueil": "A3", "boutons": 11}}}), encoding="utf-8")
     b = tk._redessiner_boutons_sans_menus(AG)
     p1 = [j for ch, j in PATCHS if ch == "/channels/S1/messages/A1"]
     check("l'accueil d'un ticket marqué 11 est redessiné sans 📈 📤 ⬇️ 📱",
           b["faits"] == [VA] and p1 and not [x for x in plats(p1[0]["components"]) if x.startswith(RETIRES)]
           and f"cnt:o:{VA}" in plats(p1[0]["components"]), (b, PATCHS))
-    check("… un accueil déjà à 12 n'est pas touché",
+    check("… un accueil déjà à jour (BOUTONS_VERSION) n'est pas touché",
           not [1 for ch, j in PATCHS if ch.endswith("/A2")], PATCHS)
     f = json.loads(tk.ETAT_FICHIER.read_text(encoding="utf-8"))["tickets"][f"{AG}:{VA}"]
-    check("… et marqué 12 (une fois)", f.get("boutons") == 12, f)
+    check("… et marqué à jour (une fois)", f.get("boutons") == tk.BOUTONS_VERSION, f)
     # BOUTONS_VERSION est commun : Twitter (et Threads) sont redessinés une fois
     # aussi, avec EXACTEMENT leurs boutons d'avant
     PATCHS.clear()
     tk._redessiner_boutons_sans_menus(TW)
     p3 = [j for ch, j in PATCHS if ch == "/channels/S3/messages/A3"]
-    check("Twitter : redessiné une fois, avec ses boutons d'avant (rien de retiré)",
-          p3 and p3[0]["components"] == tk._boutons_va_complets(
-              VA, confirme=False, a_un_lien=True, gid=TW, lien_actif=True), (PATCHS,))
+    # (depuis le 06/11, Twitter perd lui aussi 📱 et 📧 : TICKET_SANS)
+    check("Twitter : redessiné une fois, sans 📱 ni 📧 (et rien d'autre de retiré)",
+          p3 and p3[0]["components"] == tk.boutons_va(VA, confirme=False, a_un_lien=True, gid=TW, lien_actif=True)
+          and not [x for x in plats(p3[0]["components"]) if x in ("numx:menu", "mailx:menu")], (PATCHS,))
 
     # 3. les cartes numéro des tickets
     print("3. cartes numéro")

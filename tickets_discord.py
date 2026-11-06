@@ -5165,3 +5165,14 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
     if rep is not None:
         return rep
     return _traiter_sans_page(p)
+
+
+# ─── TRUST TWITTER : le ticket sans 📱 Numéro ni 📧 Outlook (06/11/2026) ──
+# Le « c'est bon » du propriétaire une fois 🧰 OUTILS TWITTER en place : plus
+# de cartes numéro / Outlook dans les tickets (numeros_x_discord et
+# outlook_x_discord, CARTES_RETIREES) — leurs boutons du menu n'ouvrent plus
+# rien, ils partent aussi (comme sur TRUST INSTAGRAM). Le menu privé du staff
+# les garde (_boutons_va_complets). BOUTONS_VERSION 13 : les accueils déjà
+# postés sont redessinés une fois.
+TICKET_SANS[TWITTER_ID] = ("numx:menu", "mailx:menu")
+BOUTONS_VERSION = 13

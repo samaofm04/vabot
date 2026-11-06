@@ -1664,6 +1664,11 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
 # Twitter et Threads gardent les leurs. POUR LES REMETTRE : retirer le serveur
 # de CARTES_RETIREES, puis « python numeros_x_discord.py cartes agency tous ».
 CARTES_RETIREES = {vd.AGENCY_IG_ID}
+# TRUST TWITTER aussi, 06/11/2026 : le « c'est bon » du propriétaire, une fois
+# 🧰 OUTILS TWITTER en place (« pas dans le ticket, c'est tout ici que y a
+# ça ») — le Numéro X se prend dans 📱・numéro. Ses cartes ont le gabarit
+# « ## Numéro X » (_carte_a_retirer).
+CARTES_RETIREES.add(vd.TWITTER_ID)
 
 
 def _numero_en_cours(cle: str) -> bool:
@@ -1702,7 +1707,8 @@ def _carte_a_retirer(m: Any, moi: str) -> bool:
         return False
     comps = m.get("components") or []
     return (len(comps) == 1 and isinstance(comps[0], dict) and comps[0].get("type") == 17
-            and _premier_texte(comps).startswith("## `"))
+            and (_premier_texte(comps).startswith("## `")
+                 or _premier_texte(comps) == "## Numéro X"))
 
 
 def _cartes_dans(salon: str, moi: str, pages: int = 3):
@@ -1822,7 +1828,7 @@ def _prendre(p, gid, uid, cle, membre, user, conf):   # noqa: F811
     tour de la boucle, ou un doublon hors registre) ne vend plus de numéro.
     Le numéro se prend dans 📱・numéro."""
     if _dans_ticket_sans_carte(p, gid):
-        return _texte(TEXTE_NUMERO_AILLEURS)
+        return _texte(texte_numero_ailleurs(gid))
     return _prendre_partout(p, gid, uid, cle, membre, user, conf)
 
 
@@ -1834,7 +1840,7 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):   # noqa: F811
     serveur de CARTES_RETIREES, comme « Prendre ». Le numéro en cours reste,
     Annuler et C'est bon marchent toujours."""
     if action == "autre" and _dans_ticket_sans_carte(p, gid):
-        return _texte(TEXTE_NUMERO_AILLEURS)
+        return _texte(texte_numero_ailleurs(gid))
     return _agir_partout(p, gid, uid, cle, membre, user, conf, action, act_id)
 
 
@@ -1869,6 +1875,13 @@ _menu_partout = _menu
 
 #: Ce que lit celui qui clique un vieux « 📱 Numéro » dans un ticket sans carte.
 TEXTE_NUMERO_AILLEURS = "📱 Le numéro se prend dans 🧰 OUTILS INSTAGRAM › 📱・numéro."
+#: Par serveur : chacun renvoie à SON salon 📱・numéro.
+TEXTES_NUMERO_AILLEURS = {vd.AGENCY_IG_ID: TEXTE_NUMERO_AILLEURS,
+                          vd.TWITTER_ID: "📱 Le numéro se prend dans 🧰 OUTILS TWITTER › 📱・numéro."}
+
+
+def texte_numero_ailleurs(gid: str) -> str:
+    return TEXTES_NUMERO_AILLEURS.get(str(gid), TEXTE_NUMERO_AILLEURS)
 
 
 def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[str, Any]:   # noqa: F811
@@ -1876,7 +1889,7 @@ def _menu(p: Dict[str, Any], gid: str, uid: str, conf: Dict[str, Any]) -> Dict[s
     CARTES_RETIREES (un menu pas encore redessiné) : il dit où le prendre,
     plutôt qu'un clic sans effet."""
     if str(gid) in CARTES_RETIREES and str(p.get("channel_id") or "") in _tickets_du_serveur(gid):
-        return _texte(TEXTE_NUMERO_AILLEURS)
+        return _texte(texte_numero_ailleurs(gid))
     return _menu_partout(p, gid, uid, conf)
 
 

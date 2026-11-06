@@ -280,7 +280,7 @@ try:
             out += textes_v2(c.get("components"))
         return out
 
-    b = ox.poser_cartes(GID, seulement="T1")
+    b = ox._poser_cartes_partout(GID, seulement="T1")
     posts = [kw["json"] for m, ch, kw in APPELS if m == "POST" and ch == "/channels/T1/messages"]
     check("carte : essai sur UN ticket — le formulaire vide, « Prendre une adresse » seul",
           b["posees"] == ["T1"] and len(posts) == 1
@@ -316,7 +316,7 @@ try:
     r = clic_carte("mailx:prendre")
     check("carte : 4e adresse du jour — le refus est écrit dans la carte",
           r["type"] == 7 and any("3 adresses aujourd'hui" in t for t in textes_v2(r["data"]["components"])), r)
-    ox.poser_cartes(GID, seulement="T2")
+    ox._poser_cartes_partout(GID, seulement="T2")
     r = clic_carte("mailx:prendre", salon="T2", uid=CHEF, perms=str(0x8))
     check("carte : le manager clique dans le ticket d'un VA — l'adresse est au VA, pas au manager",
           oc.comptes_du_va(VA2, GID) and not oc.comptes_du_va(CHEF, GID), oc.comptes())
@@ -330,8 +330,10 @@ try:
     check("menu : ce renvoi s'efface tout seul",
           ("DELETE", f"/webhooks/{APP}/tm/messages/@original") in [(m, ch) for m, ch, kw in APPELS], APPELS)
     r = ox.traiter(dict(p_menu, channel_id="T1"))
-    check("menu : le bouton « 📧 Outlook » du menu épinglé — la carte descend, sans message",
-          r == {"type": 6}, r)
+    # depuis le 06/11 (CARTES_RETIREES) : plus de carte dans le ticket — un vieux
+    # « 📧 Outlook » encore affiché dit où prendre l'adresse
+    check("menu : un vieux « 📧 Outlook » du ticket dit où prendre l'adresse (plus de carte)",
+          r["type"] == 4 and r["data"]["content"] == ox.TEXTE_ADRESSE_AILLEURS, r)
     r = ox.traiter(dict(p_menu, member={"user": {"id": CHEF, "username": "chef"}, "roles": [],
                                         "permissions": str(0x8)}))
     check("menu : sans salon perso (le staff), ses adresses s'ouvrent en privé",
@@ -348,7 +350,7 @@ try:
     h["cartes"]["T1"]["message"] = "accueil-T1"
     ox.FICHIER.write_text(json.dumps(h), encoding="utf-8")
     APPELS.clear()
-    ox.ramener_carte(GID, VA, "T1")
+    ox._ramener_carte_partout(GID, VA, "T1")
     check("carte Outlook : registre faux — l'accueil n'est JAMAIS effacé",
           not [1 for m, ch, kw in APPELS if m == "DELETE" and "accueil" in ch], APPELS)
     APPELS.clear()

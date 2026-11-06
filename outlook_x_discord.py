@@ -674,11 +674,132 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
         return f"panneau posé : HTTP {code}" + ("" if code == 200 else f" {str(rep)[:160]}")
 
 
+# ─── Plus de carte Outlook dans les tickets de TRUST TWITTER (06/11/2026) ─
+# Propriétaire, une fois 🧰 OUTILS TWITTER en place : « pas dans le ticket,
+# c'est tout ici que y a ça ». L'adresse se prend dans 📧・adresse-outlook
+# (le panneau, outils_tickets.PANNEAUX_TWITTER) ; la carte du ticket, le
+# bouton « 📧 Outlook » du menu (tickets_discord.TICKET_SANS) et la boucle
+# (tour_cartes) s'arrêtent là. Les cartes posées sont retirées : seulement un
+# message V2 de ce bot avec « Prendre une adresse » (est_carte), jamais
+# l'accueil ni un dépôt adresse / mot de passe. Les dépôts restent (copie sur
+# téléphone). POUR LES REMETTRE : retirer le serveur de CARTES_RETIREES, puis
+# « python outlook_x_discord.py cartes tous ».
+CARTES_RETIREES = {vd.TWITTER_ID}
+TEXTE_ADRESSE_AILLEURS = "📧 L'adresse se prend dans 🧰 OUTILS TWITTER › 📧・adresse-outlook."
+
+
+def retirer_cartes(gid: str, essai: bool = False, chercher: bool = False) -> Dict[str, Any]:
+    """Retire la carte Outlook de chaque ticket de `gid` : celle du registre ;
+    avec `chercher`, aussi celles des 300 derniers messages de chaque ticket.
+    `essai` : rien n'est retiré ni écrit. Rend {retirees, cartes, pas_carte, echecs}."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"retirees": [], "cartes": 0, "pas_carte": [], "echecs": [], "essai": essai}
+    tickets = _tickets(gid)
+    with vd.sur_serveur(gid):
+        moi = vd.bot_du_serveur(gid)["app_id"]
+        a_voir: Dict[str, Dict[str, Any]] = {}
+        for salon, c in (_lire().get("cartes") or {}).items():
+            if isinstance(c, dict) and (str(c.get("gid") or "") == gid
+                                        or (not c.get("gid") and str(salon) in tickets)):
+                mid = str(c.get("message") or "")
+                a_voir[str(salon)] = {"registre": mid, "ids": {mid} - {""}}
+        if chercher:
+            for salon in sorted(tickets):
+                avant, n = "", 0
+                for _ in range(3):
+                    code, ms = vd.api("GET", f"/channels/{salon}/messages?limit=100"
+                                      + (f"&before={avant}" if avant else ""))
+                    if code != 200 or not isinstance(ms, list):
+                        bilan["echecs"].append(f"{salon} (messages illisibles)")
+                        break
+                    ids = {str(m["id"]) for m in ms if isinstance(m, dict) and est_carte(m, moi)}
+                    if ids:
+                        a_voir.setdefault(salon, {"registre": "", "ids": set()})["ids"].update(ids)
+                    if len(ms) < 100:
+                        break
+                    avant = str(ms[-1].get("id") or "")
+        for salon, x in sorted(a_voir.items()):
+            retire, rate = False, False
+            for mid in sorted(x["ids"]):
+                code, m = vd.api("GET", f"/channels/{salon}/messages/{mid}")
+                if code == 404:
+                    retire = True
+                    continue
+                if code != 200:
+                    bilan["echecs"].append(f"{salon} (relecture HTTP {code})")
+                    rate = True
+                    continue
+                if not est_carte(m, moi):
+                    bilan["pas_carte"].append(salon)
+                    continue
+                if essai:
+                    retire = True
+                    bilan["cartes"] += 1
+                    continue
+                code_d, r = vd.api("DELETE", f"/channels/{salon}/messages/{mid}")
+                if code_d not in (204, 404):
+                    bilan["echecs"].append(f"{salon} (HTTP {code_d} {str(r)[:80]})")
+                    rate = True
+                    continue
+                retire = True
+                bilan["cartes"] += 1
+            if retire:
+                bilan["retirees"].append(salon)
+            if not essai and not rate and x["registre"]:
+                with _VERROU:
+                    d = _lire()
+                    c = d["cartes"].get(salon)
+                    if isinstance(c, dict) and str(c.get("message") or "") == x["registre"]:
+                        d["cartes"].pop(salon, None)
+                        _ecrire(d)
+    if bilan["retirees"] or bilan["echecs"] or bilan["pas_carte"]:
+        _log(f"cartes Outlook de {gid} retirées{' (essai)' if essai else ''} : {bilan['cartes']} dans "
+             f"{len(bilan['retirees'])} salon(s), pas une carte {bilan['pas_carte']}, échecs {bilan['echecs'][:5]}")
+    return bilan
+
+
+_poser_cartes_partout = poser_cartes
+
+
+def poser_cartes(gid: str, seulement: Optional[str] = None,   # noqa: F811
+                 maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """poser_cartes (plus haut), sauf sur un serveur de CARTES_RETIREES : le
+    tour de la boucle retire celles qui restent."""
+    if str(gid) in CARTES_RETIREES:
+        b = retirer_cartes(gid)
+        return {"posees": [], "retrouvees": [], "deja": 0, "echecs": b["echecs"], "partis": [],
+                "retirees": b["retirees"]}
+    return _poser_cartes_partout(gid, seulement=seulement, maintenant=maintenant)
+
+
+_ramener_carte_partout = ramener_carte
+
+
+def ramener_carte(gid: str, uid: str, salon: str) -> str:   # noqa: F811
+    if str(gid) in CARTES_RETIREES:
+        return "deja"
+    return _ramener_carte_partout(gid, uid, salon)
+
+
+_menu_partout = _menu
+
+
+def _menu(p: Dict[str, Any], gid: str, uid: str) -> Dict[str, Any]:   # noqa: F811
+    """Un vieux « 📧 Outlook » cliqué dans un ticket (menu pas encore
+    redessiné) : il dit où prendre l'adresse."""
+    if str(gid) in CARTES_RETIREES and str(p.get("channel_id") or "") in _tickets(gid):
+        return nx._texte(TEXTE_ADRESSE_AILLEURS)
+    return _menu_partout(p, gid, uid)
+
+
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["poser"]:
         vd._charger_config()
         print(poser_panneau())
+    elif sys.argv[1:2] == ["retirer"] and len(sys.argv) <= 3:
+        vd._charger_config()
+        print(retirer_cartes(vd.TWITTER_ID, essai=sys.argv[2:3] == ["essai"], chercher=True))
     elif sys.argv[1:2] == ["cartes"] and len(sys.argv) == 3:
         # cartes <salon> : une seule carte (essai) ; cartes tous : toutes, les
         # nouveaux tickets ensuite, et le panneau du salon commun en menu.

@@ -55,7 +55,8 @@ TW, TH, AG = "1445108485090971710", "1498948161039896586", tk.AGENCY_IG_ID
 for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), (AG, "Agency", [])):
     # Agency : la rangée d'avant TICKET_SANS (05/11/2026, le ticket n'a plus
     # 📱 : tests_ticket_allege) — celle que garde le menu privé du staff
-    bv = tk._boutons_va_complets if gid == AG else tk.boutons_va
+    # Twitter aussi depuis le 06/11 (TICKET_SANS : plus de 📱 ni 📧 dans le ticket)
+    bv = tk._boutons_va_complets if gid in (AG, TW) else tk.boutons_va
     r = ids(bv("7", confirme=False, a_un_lien=True, gid=gid))
     va, chefs = r[0], r[-1]
     # Agency : « 🎬 Contenu » sur SA rangée, entre celle du VA et celle des
@@ -73,7 +74,12 @@ for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), 
     check(f"{nom} : VA confirmé sans lien — « Créer son lien » seul chez les managers",
           r2[-1] == ["lien:new:7"] and plats.count("numx:menu") == 1
           and plats.count("mailx:menu") == len(outlook), r2)
-tw = tk.boutons_va("7", confirme=False, a_un_lien=True, gid=TW)
+# les boutons eux-mêmes (le menu privé du staff les garde ; le ticket Twitter
+# ne les a plus depuis le 06/11 : TICKET_SANS)
+tw = tk._boutons_va_complets("7", confirme=False, a_un_lien=True, gid=TW)
+check("ticket Twitter : ni 📱 Numéro ni 📧 Outlook (06/11 : ils sont dans 🧰 OUTILS TWITTER)",
+      not [b for r in tk.boutons_va("7", confirme=False, a_un_lien=True, gid=TW) for b in r["components"]
+           if b.get("custom_id") in ("numx:menu", "mailx:menu")])
 num = [b for r in tw for b in r["components"] if b.get("custom_id") == "numx:menu"][0]
 out = [b for r in tw for b in r["components"] if b.get("custom_id") == "mailx:menu"][0]
 check("les boutons : 📱 Numéro et 📧 Outlook, gris",
@@ -83,7 +89,7 @@ _vrai = tk._boutons_va_avant_stats
 try:
     tk._boutons_va_avant_stats = lambda uid, **kw: [{"type": 1, "components": [
         {"type": 2, "custom_id": f"x{i}"} for i in range(5)]}]
-    plein = ids(tk.boutons_va("7", gid=TW))
+    plein = ids(tk._boutons_va_complets("7", gid=TW))     # (le ticket Twitter n'a plus 📱 📧)
     check("trop de boutons pour une rangée : la suite passe dessous, jamais un 6e",
           all(len(x) <= 5 for x in plein) and [c for x in plein for c in x]
           == [f"x{i}" for i in range(5)] + ["numx:menu", "mailx:menu"], plein)

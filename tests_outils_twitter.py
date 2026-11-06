@@ -370,6 +370,66 @@ try:
     check("Outlook : son ancien panneau reste coupé (le nôtre le remplace)",
           ox.SERVEURS[TW].get("panneau") is False and "pas de panneau" in ox.poser_panneau(TW))
 
+    # ── 3b. le « c'est bon » : plus de cartes ni de boutons 📱 📧 dans les tickets
+    print("3b. Tickets sans cartes numéro / Outlook (06/11)")
+    check("Twitter : cartes numéro ET Outlook retirées des tickets",
+          TW in nx.CARTES_RETIREES and TW in ox.CARTES_RETIREES)
+    check("chaque serveur renvoie à SON 📱・numéro",
+          "OUTILS TWITTER" in nx.texte_numero_ailleurs(TW) and "OUTILS INSTAGRAM" in nx.texte_numero_ailleurs(AG)
+          and "OUTILS TWITTER" in ox.TEXTE_ADRESSE_AILLEURS)
+    figee = {"id": "c", "flags": nx.V2, "author": {"id": "moi"},
+             "components": [{"type": 17, "components": [{"type": 10, "content": "## Numéro X"},
+                                                        {"type": 10, "content": "🇺🇸 ⏳ Recherche d'un numéro…"}]}]}
+    check("une carte Twitter figée sans bouton est reconnue (retirée elle aussi)", nx._carte_a_retirer(figee, "moi")
+          and not nx._carte_a_retirer(dict(figee, flags=0), "moi"))
+    plats_tw = [c for r in tk.boutons_va(VA, a_un_lien=True, gid=TW) for c in ids([r])]
+    check("ticket Twitter : plus de 📱 Numéro ni 📧 Outlook dans le menu",
+          "numx:menu" not in plats_tw and "mailx:menu" not in plats_tw and tk.BOUTONS_VERSION >= 13, plats_tw)
+    import verif_discord as vd2
+    _s3b = (vd2.api, nx.FICHIER, ox.FICHIER, tk.ETAT_FICHIER)
+    API3B = []
+    try:
+        tk.ETAT_FICHIER = TMP / "tickets3b.json"
+        tk.ETAT_FICHIER.write_text(json.dumps({"tickets": {f"{TW}:{VA}": {"salon": TICKET}}}), encoding="utf-8")
+        nx.FICHIER = TMP / "numeros_x3b.json"
+        ox.FICHIER = TMP / "outlook_x3b.json"
+        moi = vd2.bot_du_serveur(TW)["app_id"]
+        carte_n = {"id": "cn", "flags": nx.V2, "author": {"id": moi}, "components": nx.vue_panneau(nx.SERVEURS[TW])}
+        carte_o = {"id": "co", "flags": nx.V2, "author": {"id": moi}, "components": ox.vue_carte(VA, TW)}
+        MSG3 = {("cn"): carte_n, ("co"): carte_o}
+
+        def api3b(methode, chemin, **kw):
+            API3B.append((methode, chemin))
+            if methode == "GET" and "?limit" in chemin:
+                return 200, list(MSG3.values())
+            if methode == "GET":
+                m = MSG3.get(chemin.rsplit("/", 1)[1])
+                return (200, m) if m else (404, {})
+            if methode == "DELETE":
+                MSG3.pop(chemin.rsplit("/", 1)[1], None)
+                return 204, {}
+            return 200, {"id": "neuf"}
+        vd2.api = api3b
+        nx.FICHIER.write_text(json.dumps({"cartes": {TICKET: {"message": "cn", "uid": VA, "gid": TW}},
+                                          "messages": {}, "actifs": {}}), encoding="utf-8")
+        ox.FICHIER.write_text(json.dumps({"cartes": {TICKET: {"message": "co", "uid": VA, "gid": TW}},
+                                          "messages": {}}), encoding="utf-8")
+        bn = nx.poser_cartes(TW)
+        bo = ox.poser_cartes(TW)
+        check("le tour de la boucle ne pose plus de carte : il retire la carte numéro et la carte Outlook",
+              not [a for a in API3B if a[0] == "POST"] and bn.get("retirees") == [TICKET]
+              and bo.get("retirees") == [TICKET] and not MSG3, (bn, bo, API3B))
+        check("… et les registres les oublient", not nx._lire()["cartes"] and not ox._lire()["cartes"])
+        API3B.clear()
+        check("un vieux « 📱 Numéro » / « 📧 Outlook » ne repose pas de carte",
+              nx.ramener_carte(TW, VA, TICKET) == "deja" and ox.ramener_carte(TW, VA, TICKET) == "deja"
+              and not [a for a in API3B if a[0] == "POST"], API3B)
+        r = ox.traiter(clic("mailx:menu", salon=TICKET))
+        check("… cliqué dans le ticket : dit où prendre l'adresse", r["type"] == 4
+              and r["data"]["content"] == ox.TEXTE_ADRESSE_AILLEURS, r)
+    finally:
+        (vd2.api, nx.FICHIER, ox.FICHIER, tk.ETAT_FICHIER) = _s3b
+
     # ── 4. l'installation ─────────────────────────────────────────────────
     print("4. L'installation")
     nouveau_monde()
