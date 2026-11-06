@@ -1608,7 +1608,11 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
 #: page, 70/30 avec sa copie temporaire, rangement, relecture), toutes sur la
 #: clé principale. Le rattrapage d'un serveur entier (≈ 3 pages par VA)
 #: s'étale donc sur plusieurs passages de la synchro (30 min).
-CREATIONS_PAR_PASSE = 3
+#: 0 depuis le 06/11 vers 20 h 45 : le propriétaire ne veut plus de 3 pages
+#: fixes sur TRUST INSTAGRAM (« il n'y a pas 3 pages d'un coup, il y a une
+#: seule page pour l'instant ») ; arrêtées d'abord, chaque lot en créait 3 de
+#: plus à désactiver ensuite. Le nouveau fonctionnement suit.
+CREATIONS_PAR_PASSE = 0
 #: Au-delà, la place attend (« a_verifier » dans « creations », dit au journal
 #: à chaque passage) — CREATION_REESSAI_S, puis un nouvel essai. Pour la
 #: relancer tout de suite : retirer sa clé « gid:uid#n » de « creations »

@@ -184,6 +184,8 @@ VRAI_POSER_PAYS = lv.poser_pays
 VRAI_PAGE_DU_LIEN = lv._page_du_lien
 VRAI_MAJ_MENU = tk._maj_menu_v2
 VRAI_EN_FOND = pv.EN_FOND
+# le mécanisme reste testé à 3 par passage (0 en prod depuis le 06/11 au soir)
+pv.CREATIONS_PAR_PASSE = 3
 #: Les autres attributs remplacés (relectures du 06/11), remis à la fin.
 SAV2 = {(m, n): getattr(m, n) for m, n in (
     (gms, "pause_restante"), (gms, "list_links_team"), (gms, "lire_ab_testing"), (gms, "_ab_prive"),
@@ -1247,6 +1249,7 @@ try:
     pv.FICHIER = fichier_reg
     pv._FIL = lambda f: f()
     pv._cookie_ok = lambda: COOKIE["ok"]
+    pv.CREATIONS_PAR_PASSE = 3              # le rechargement remet celle de la prod (0)
     r = tk.traiter(clic_ig(f"pgd:ok:{VI}:{did}", qui=MGR2, roles=["R_MANAGER"], mid="M1"))
     check("après un redémarrage : le vieux ✅ dit « Déjà acceptée », aucune page en plus",
           r["type"] == 7 and "Déjà acceptée" in r["data"]["content"] and pv.places(AG, VI) == [1, 2, 3, 4], r)
