@@ -50,7 +50,7 @@ EUROPE = {"FR", "DE", "CH", "AT", "BE", "NL", "LU", "DK", "SE", "NO", "FI", "IS"
 AVANT = {"US", "CA", "AU", "GB", "NZ", "IE", "BJ", "MG"}
 
 # ── faux GetMySocial : liens directs et landings, geofilters gardés ──────
-LIENS, ECRITS, REFUS = {}, [], set()
+LIENS, ECRITS, REFUS = {}, [], {}
 
 
 def f_get(lid, team_id=None):
@@ -61,7 +61,7 @@ def f_get(lid, team_id=None):
 def f_update(lid, champs, team_id=None):
     ECRITS.append((lid, team_id))
     if lid in REFUS:
-        return {"ok": False, "error": "refus"}
+        return {"ok": False, "error": REFUS[lid]}
     LIENS[lid].update(json.loads(json.dumps(champs)))
     return {"ok": True}
 
@@ -168,7 +168,7 @@ try:
     d["liens"][f"{TW}:6"] = {"link_id": "d_tw6", "actif": True, "pays": True, "shortcode": "f"}
     lv._ecrire(d)
     direct("d_tw6")
-    REFUS.add("d_tw6")
+    REFUS["d_tw6"] = "refus"
     ECRITS.clear()
     for _ in range(lv.ESSAIS_PAYS + 4):
         lv.reprendre_pays(TW)
@@ -176,7 +176,47 @@ try:
     check("refusé : ESSAIS_PAYS essais puis « pays_a_verifier », jamais remis à zéro par la nouvelle liste",
           len([x for x, _t in ECRITS if x == "d_tw6"]) == lv.ESSAIS_PAYS and f6.get("pays_a_verifier") is True
           and f6.get("pays_liste_due") == sig_tw, (len(ECRITS), f6))
-    REFUS.discard("d_tw6")
+    check("… et il est dit à chaque passage (pas écarté en silence)", lv._rendre_essais_passagers(TW) == ["f"])
+    REFUS.pop("d_tw6")
+
+    # une panne passagère (quota, 429) ne compte pas comme un essai
+    d = lv._etat()
+    d["liens"][f"{TW}:10"] = {"link_id": "d_tw10", "actif": True, "pays": True, "shortcode": "q"}
+    lv._ecrire(d)
+    direct("d_tw10")
+    REFUS["d_tw10"] = "HTTP 429 (rate-limit GetMySocial)"
+    for _ in range(lv.ESSAIS_PAYS + 3):
+        lv.reprendre_pays(TW)
+    f10 = lv._etat()["liens"][f"{TW}:10"]
+    check("panne passagère (429) : jamais « à vérifier », reprise au passage suivant",
+          f10.get("pays") is False and not f10.get("pays_a_verifier") and int(f10.get("pays_essais") or 0) == 0, f10)
+    REFUS.pop("d_tw10")
+    lv.reprendre_pays(TW)
+    f10 = lv._etat()["liens"][f"{TW}:10"]
+    check("… GetMySocial revenu : posé avec la nouvelle liste", f10.get("pays") is True
+          and f10.get("pays_cibles") == sig_tw and not (EUROPE & vers_la_base(LIENS["d_tw10"]["geofilters"])), f10)
+
+    # retour en arrière : un serveur retiré de PAYS_EN_PLUS revient à la liste de base
+    _vplus = dict(lv.PAYS_EN_PLUS)
+    lv.PAYS_EN_PLUS.pop(AG)
+    try:
+        ECRITS.clear()
+        lv.reprendre_pays(AG)
+        f5 = lv._etat()["liens"][f"{AG}:5"]
+        check("Instagram retiré de la liste : ses liens reposés, la France repart à la base",
+              [x for x, _t in ECRITS] == ["d_ag5"] and EUROPE <= vers_la_base(LIENS["d_ag5"]["geofilters"])
+              and f5.get("pays_cibles") == lv.signature_pays_avant(), (ECRITS, f5))
+        pv._noter(AG, "5#9", link_id="p_ag9", etat="prete", actif=True, manques=[],
+                  pays_cibles=",".join(sorted(AVANT | EUROPE)))
+        check("… ses pages aussi (marquées « pays »)", "5#9" in pv._marquer_liste_pays(AG))
+        pv._ecrire({"pages": {k: v for k, v in pv._lire()["pages"].items() if k != f"{AG}:5#9"}})
+    finally:
+        lv.PAYS_EN_PLUS.clear()
+        lv.PAYS_EN_PLUS.update(_vplus)
+    lv.reprendre_pays(AG)
+    ECRITS.clear()
+    lv.reprendre_pays(TH)
+    check("Threads, jamais dans la liste : toujours rien reposé", not ECRITS, ECRITS)
 
     # règle coupée ({} dans la config) : elle ne vaut que pour les liens à venir
     d = lv._etat()

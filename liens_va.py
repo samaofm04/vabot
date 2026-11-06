@@ -2990,15 +2990,46 @@ def _noter_liste_pays(gid: str) -> None:
         _ecrire(d)
 
 
+def _rendre_essais_passagers(gid: str) -> List[str]:
+    """Une panne passagère de GetMySocial (quota, 429, session) ne compte pas
+    comme un essai : la reprise d'origine compte tout, et cinq synchros de
+    quota épuisé (2 h 30) figeaient un lien sur l'ancienne liste, pour
+    toujours (« une fois par liste »). Rend ceux qui restent à vérifier."""
+    try:
+        from pages_va import erreur_passagere
+    except Exception:                                        # noqa: BLE001
+        return []
+    d = _etat()
+    change = False
+    bloques: List[str] = []
+    for cle, f in (d.get("liens") or {}).items():
+        if not (str(cle).startswith(f"{gid}:") and isinstance(f, dict) and f.get("pays") is False):
+            continue
+        if erreur_passagere(f.get("pays_erreur")) and int(f.get("pays_essais") or 0) > 0:
+            f.update(pays_essais=int(f["pays_essais"]) - 1, pays_a_verifier=False)
+            change = True
+        elif f.get("pays_a_verifier") and f.get("pays_liste_due"):
+            bloques.append(str(f.get("shortcode") or cle))
+    if change:
+        _ecrire(d)
+    return bloques
+
+
 def reprendre_pays(gid: str) -> Dict[str, Any]:   # noqa: F811
-    if str(gid) in PAYS_EN_PLUS:
-        try:
-            _marquer_liste_pays(gid)
-        except Exception as e:                               # noqa: BLE001
-            print(f"[lien] pays {gid} : liste non comparée ({type(e).__name__}: {e})", flush=True)
+    # aussi un serveur retiré de PAYS_EN_PLUS : ses liens à l'Europe reviennent
+    # à la liste de base (Threads, jamais marqué : avant == voulu, rien ne bouge)
+    try:
+        _marquer_liste_pays(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] pays {gid} : liste non comparée ({type(e).__name__}: {e})", flush=True)
     b = _reprendre_pays_sans_liste(gid)
     try:
         _noter_liste_pays(gid)
+        bloques = _rendre_essais_passagers(gid)
+        if bloques:
+            # « ne jamais écarter en silence » : dit à chaque passage
+            print(f"[lien] pays {gid} : {len(bloques)} lien(s) encore sur l'ancienne liste, "
+                  f"à vérifier à la main : {', '.join(bloques[:8])}", flush=True)
     except Exception as e:                                   # noqa: BLE001
         print(f"[lien] pays {gid} : liste posée non notée ({type(e).__name__}: {e})", flush=True)
     return b

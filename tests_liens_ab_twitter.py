@@ -111,7 +111,9 @@ class FauxGMS(types.ModuleType):
     def update_link(self, lid, champs, equipe=None):
         self.appels.append(("pays", lid))
         if any(lid.startswith(x) for x in self.refus_maj):
-            return {"ok": False, "error": "HTTP 429"}
+            # un vrai refus : un 429 (panne passagère) ne compte plus comme un
+            # essai depuis le 06/11 (liens_va._rendre_essais_passagers)
+            return {"ok": False, "error": "HTTP 400 : refusé"}
         self.liens.setdefault(lid, {"id": lid, "type": "directlink", "url": ""}).update(
             json.loads(json.dumps(champs)))
         return {"ok": True, "link": self.liens[lid]}
@@ -1133,7 +1135,7 @@ try:
     r = lv.creer_pour(TW, "p1", "paysva", manager="YAZID")
     f = lv.lien_de(TW, "p1")
     check("règle ratée sur le lien : créé quand même, la fiche dit « pays » : false et pourquoi",
-          r.get("ok") and r.get("pays") is False and f.get("pays") is False and "429" in f.get("pays_erreur", ""),
+          r.get("ok") and r.get("pays") is False and f.get("pays") is False and "refusé" in f.get("pays_erreur", ""),
           (r, f))
     g.refus_maj = set()
     b = lv.reprendre_pays(TW)

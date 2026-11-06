@@ -1725,8 +1725,8 @@ _reprendre_pages_sans_liste = reprendre_pages
 def _marquer_liste_pays(gid: str) -> List[str]:
     import liens_va as lv
     gid = str(gid)
-    if gid not in lv.PAYS_EN_PLUS or lv._cibles_pays_sans_serveur() is None:
-        return []
+    if lv._cibles_pays_sans_serveur() is None:
+        return []       # (aussi hors PAYS_EN_PLUS : un serveur retiré revient à la liste de base)
     voulu, avant = lv.signature_pays(gid), lv.signature_pays_avant()
     marques: List[str] = []
     for cle, pg in list((_lire().get("pages") or {}).items()):
