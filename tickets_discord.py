@@ -4985,17 +4985,21 @@ def _bouton_page(action: str, n: int, uid: str) -> str:
     return f"{PAGE_PREFIXE}{action}{'' if int(n) <= 1 else int(n)}:{uid}"
 
 
-def _sections_page(gid: str, uid: str) -> List[Dict[str, Any]]:
+def _sections_page(gid: str, uid: str, compact: bool = False) -> List[Dict[str, Any]]:
     """Les sections « 📄 » du menu : chaque page créée (adresse + ✏️ Modifier,
     ou « À reprendre » + 🔁 Réessayer, ou « Désactivée »), puis la suivante à
-    créer (📄 Créer), une à la fois, jusqu'à pages_va.pages_max."""
+    créer (📄 Créer), une à la fois, jusqu'à pages_va.pages_max. Sur un
+    serveur à places fixes (TRUST INSTAGRAM) : _sections_pages_fixes."""
     import pages_va as pv
-    if not pv.ouverte(gid, uid) or (_fiche(gid, uid) or {}).get("parti"):
+    ticket = _fiche(gid, uid) or {}
+    if not pv.ouverte(gid, uid) or ticket.get("parti"):
         return []                       # un VA parti : ni lien ni page dans son menu
     import liens_va as lv
     direct = lv.lien_de(gid, uid)
     if not direct.get("public_url"):
         return []
+    if pv.sur_demande(gid):
+        return _sections_pages_fixes(gid, uid, direct, compact=compact, ticket=ticket)
     # direct coupé : ses pages restent affichées, rien de neuf à créer
     # (pages_va.creer_page le refuse aussi)
     peut_creer = direct.get("actif", True) is not False
@@ -5029,6 +5033,79 @@ def _sections_page(gid: str, uid: str) -> List[Dict[str, Any]]:
     return out
 
 
+# ─── TRUST INSTAGRAM : 3 pages fixes + des pages à la demande (06/11/2026) ─
+# Propriétaire : chaque VA a 3 pages fixes (brune, blonde, template) que
+# personne ne modifie depuis Discord, et peut en demander d'autres, sans
+# maximum, qu'un manager accepte ou refuse dans son ticket ; les pages
+# acceptées se modifient comme celle de Twitter. Le menu : un bloc « 📄 Tes
+# pages » (les adresses), les ✏️ des pages modifiables, puis ➕ / ⏳.
+#: Au-delà, les ✏️ passent en liste déroulante (une rangée tient 5 boutons).
+PAGES_BOUTONS_MAX = 5
+#: Une liste déroulante tient 25 choix : les pages les plus récentes.
+PAGES_LISTE_MAX = 25
+#: Les pages acceptées listées dans « 📄 Tes pages » (les plus récentes) : un
+#: message en composants v2 tient 4000 caractères de texte en tout.
+PAGES_LISTEES_MAX = 20
+#: Un message en composants v2 en tient 40 (tous, à toutes les profondeurs) :
+#: au-delà, Discord refuse le message ENTIER (menu figé, éphémère en échec).
+COMPOSANTS_MAX_V2 = 40
+DEMANDE_PREFIXE = "pgd:"
+_TEXTE_ETAT_PAGE = {"en_preparation": "⏳ en préparation", "a_reprendre": "⚠️ à reprendre",
+                    "coupee": "🚫 désactivée", "sans_lien": "⚠️ lien incomplet"}
+
+
+def _sections_pages_fixes(gid: str, uid: str, l: Dict[str, Any], compact: bool = False,
+                          sans_modifier: bool = False,
+                          ticket: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """« 📄 Tes pages » : les places fixes puis les pages acceptées (adresse,
+    ou ⏳ en préparation, ⚠️ à reprendre, 🚫 désactivée, ⚠️ lien incomplet) ;
+    les ✏️ des pages modifiables — PAGES_BOUTONS_MAX boutons au plus, sinon
+    (ou `compact`) une liste déroulante ; puis ➕ Demander une page, ou ⏳
+    Demande en attente, si le VA est en service (pages_va.en_service). Pas de
+    ✏️ sur une place fixe : refusée aussi au clic (_page) et par
+    pages_va.modifier_page."""
+    import pages_va as pv
+    reg = pv._lire()                    # une lecture pour tout le bloc (menus de tous les VA à chaque tour)
+    sert, raison = pv.en_service(gid, uid, fiche=l, ticket=ticket)   # ticket déjà lu : pas relu ici
+    hors = "" if sert else raison
+    lignes = []
+    acceptees = pv.places_acceptees(gid, uid, reg)
+    montrees = acceptees[-PAGES_LISTEES_MAX:]
+    etats = {n: pv.etat_place(gid, uid, n, reg, hors_service=hors)
+             for n in list(range(1, pv.fixes(gid) + 1)) + acceptees}
+    for n in list(range(1, pv.fixes(gid) + 1)) + montrees:
+        etat, url = etats[n]
+        lignes.append(f"Page {n} · {url if etat == 'prete' else _TEXTE_ETAT_PAGE.get(etat, etat)}")
+    # les ✏️ sur TOUTES les pages acceptées prêtes, pas seulement les lignes
+    # montrées : au-delà de PAGES_LISTEES_MAX, les plus anciennes n'étaient
+    # plus modifiables depuis aucun menu (la liste en prend 25)
+    modifiables = [(n, etats[n][1]) for n in acceptees if etats[n][0] == "prete" and pv.modifiable(gid, n)]
+    if len(acceptees) > len(montrees):
+        lignes.append(f"-# + {len(acceptees) - len(montrees)} page(s) plus ancienne(s)")
+    out: List[Dict[str, Any]] = [{"type": 10, "content": "**📄 Tes pages**\n" + "\n".join(lignes)}]
+    if modifiables and not sans_modifier:
+        if len(modifiables) <= PAGES_BOUTONS_MAX and not compact:
+            out.append({"type": 1, "components": [
+                {"type": 2, "style": 2, "label": f"Page {n}", "emoji": {"name": "✏️"},
+                 "custom_id": _bouton_page("o", n, uid)} for n, _u in modifiables]})
+        else:
+            recentes = sorted(modifiables, reverse=True)[:PAGES_LISTE_MAX]
+            out.append({"type": 1, "components": [{
+                "type": 3, "custom_id": f"{PAGE_PREFIXE}sel:{uid}", "placeholder": "✏️ Modifier une page",
+                "min_values": 1, "max_values": 1,
+                "options": [{"label": f"Page {n}", "value": str(n),
+                             "description": u.split("://", 1)[-1][:100]} for n, u in recentes]}]})
+    if sert:
+        if pv.demande_en_attente(gid, uid, reg):
+            bouton = {"type": 2, "style": 2, "label": "Demande en attente", "emoji": {"name": "⏳"},
+                      "custom_id": f"{DEMANDE_PREFIXE}att:{uid}", "disabled": True}
+        else:
+            bouton = {"type": 2, "style": 1, "label": "Demander une page", "emoji": {"name": "➕"},
+                      "custom_id": f"{DEMANDE_PREFIXE}new:{uid}"}
+        out.append({"type": 1, "components": [bouton]})
+    return out
+
+
 def _section_page(gid: str, uid: str) -> Optional[Dict[str, Any]]:
     """La première section « 📄 » (les essais d'avant les 3 pages)."""
     s = _sections_page(gid, uid)
@@ -5041,6 +5118,8 @@ _corps_menu_sans_page = _corps_menu
 def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = "",   # noqa: F811
                 avec_page: Optional[bool] = None) -> List[Dict[str, Any]]:
     corps = _corps_menu_sans_page(gid, uid, rangs, extra, avec_page)
+    if _MENU_COMMUN.get():
+        return corps                    # le 📋・menu du salon commun : sans les pages (voir menu_ephemere)
     try:
         sections = _sections_page(str(gid), str(uid))
     except Exception as e:                                   # noqa: BLE001
@@ -5048,6 +5127,7 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
         sections = []
     if not sections or not corps or not isinstance(corps[0].get("components"), list):
         return corps
+    sections = _sections_dans_la_limite(str(gid), str(uid), corps, sections)
     blocs = corps[0]["components"]
 
     def lien(b: Dict[str, Any]) -> bool:
@@ -5058,6 +5138,31 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     i = i if i is not None else min(2, len(blocs))
     blocs[i:i] = sections
     return corps
+
+
+def _sections_dans_la_limite(gid: str, uid: str, corps: List[Dict[str, Any]],
+                             sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Les sections 📄, réduites tant que le menu dépasserait COMPOSANTS_MAX_V2 :
+    les ✏️ en liste déroulante, puis sans ✏️ (dit au journal), puis rien
+    (dit aussi) — un menu sans ses pages vaut mieux qu'un menu refusé."""
+    import contenu_tickets as ct
+    base = ct.compter(corps)
+    if base + ct.compter(sections) <= COMPOSANTS_MAX_V2:
+        return sections
+    import pages_va as pv
+    if pv.sur_demande(gid):
+        import liens_va as lv
+        l = lv.lien_de(gid, uid)
+        for reduit in ({"compact": True}, {"compact": True, "sans_modifier": True}):
+            s = _sections_pages_fixes(gid, uid, l, **reduit)
+            if base + ct.compter(s) <= COMPOSANTS_MAX_V2:
+                if reduit.get("sans_modifier"):
+                    print(f"[page] menu de {gid}:{uid} : sans ✏️ (sinon plus de "
+                          f"{COMPOSANTS_MAX_V2} composants)", flush=True)
+                return s
+    print(f"[page] menu de {gid}:{uid} : sections 📄 retirées ({base} + {ct.compter(sections)} composants, "
+          f"{COMPOSANTS_MAX_V2} au plus)", flush=True)
+    return []
 
 
 def fenetre_page(gid: str, uid: str, n: int = 1) -> Dict[str, Any]:
@@ -5117,12 +5222,35 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     import pages_va as pv
     gid = str(p.get("guild_id") or "")
     morceaux = cid.split(":")
-    m_act = re.fullmatch(r"(o|new|f)(\d?)", morceaux[1]) if len(morceaux) == 3 else None
-    if not m_act or not morceaux[2].isdigit():
+    # (\d*) et pas (\d?) : sans maximum sur TRUST INSTAGRAM, « page:o10 » doit
+    # ouvrir la page 10 (pas « Action inconnue »)
+    m_act = re.fullmatch(r"(o|new|f|sel)(\d*)", morceaux[1]) if len(morceaux) == 3 else None
+    if not m_act or not morceaux[2].isdigit() or (m_act.group(1) == "sel" and m_act.group(2)):
         return _ephemere("Action inconnue.")
     action, n, uid = m_act.group(1), int(m_act.group(2) or 1), morceaux[2]
-    if not pv.ouverte(gid, uid) or n > pv.pages_max(gid):
+    if action == "sel":
+        # la liste déroulante des pages (au-delà de PAGES_BOUTONS_MAX) : la
+        # page choisie, puis comme ✏️
+        choix = [str(v) for v in ((p.get("data") or {}).get("values") or [])]
+        if p.get("type") != 3 or not choix or not choix[0].isdigit():
+            return _ephemere("Action inconnue.")
+        action, n = "o", int(choix[0])
+        if _menu_v2_clique(p) == (gid, uid):
+            # la réponse est une fenêtre (type 9), qui ne touche pas au
+            # message : Discord garderait « Page 7 » choisie, et la rechoisir
+            # n'enverrait plus rien. Le menu redessiné remet la liste à zéro.
+            salon_m, mid_m = str(p.get("channel_id") or ""), str(((p.get("message") or {}).get("id")) or "")
+            _EN_FOND(lambda: _redessiner_menu(gid, uid, salon_m, mid_m))
+    if not pv.ouverte(gid, uid) or n not in pv.places(gid, uid):
         return _ephemere("Pas encore ouvert.")
+    if action in ("o", "f") and not pv.modifiable(gid, n):
+        # une place fixe ne se modifie pas depuis Discord, même par un manager :
+        # refusé ici, pas seulement en ne dessinant pas le bouton
+        return _ephemere("📄 Page fixe : elle ne se modifie pas.")
+    if action == "new" and pv.sur_demande(gid):
+        # places fixes et pages acceptées : créées d'office (reprise, ou
+        # l'acceptation d'un manager) ; une nouvelle se demande (➕)
+        return _ephemere("⏳ Tes pages se créent toutes seules.")
     membre = p.get("member") or {}
     qui = str(((membre.get("user") or {}).get("id")) or "")
     if not _droit_usdc(gid, uid, p):
@@ -5195,15 +5323,244 @@ def _page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return _ephemere("Action inconnue.")
 
 
+def _manager_des_pages(gid: str, uid: str, membre: Dict[str, Any]) -> bool:
+    """Accepter ou refuser une demande de page : un MANAGER seulement — le
+    rôle Manager du serveur ou le bit administrateur. Pas _droit_usdc (il
+    laisse passer le VA), pas _est_manager_brut (il laisse passer les
+    Helpers) ; et jamais le VA lui-même, même s'il a le rôle."""
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+    if not qui or qui == str(uid):
+        return False
+    try:
+        perms = int(str(membre.get("permissions") or "0") or 0)
+    except ValueError:
+        perms = 0
+    if perms & 0x8:
+        return True
+    rid = role_manager(gid)
+    return bool(rid) and rid in {str(r) for r in (membre.get("roles") or [])}
+
+
+_ETAT_DEMANDE_DIT = {"acceptee": "acceptée", "refusee": "refusée", "annulee": "annulée"}
+
+
+def _tete_demande(uid: str) -> str:
+    # pas « 📋 **Menu** » ni « ## 📋 Ton menu » en tête : le ménage horaire
+    # des tickets retire les copies du menu (est_copie_du_menu)
+    return f"📄 **Demande de page** — <@{uid}> demande une nouvelle page."
+
+
+#: ➕ refusé, selon pages_va.en_service.
+_TEXTE_HORS_SERVICE = {"sans_lien": "Il te faut d'abord ton lien.",
+                       "coupe": "🚫 Ton lien est désactivé pour le moment.",
+                       "parti": "Pas de ticket pour ce VA."}
+_RAISON_DITE = {"sans_lien": "lien incomplet", "coupe": "lien coupé", "parti": "VA parti"}
+#: Le PATCH du message de demande attend au moins ça après le clic ✅ : la
+#: réponse type 7 « en création » doit être passée avant (voir creer()).
+ATTENTE_AVANT_PATCH_S = 3.5
+#: Le menu redessiné après un choix dans la liste ✏️ (_page, « sel ») : la
+#: fenêtre part d'abord.
+REDESSIN_LISTE_S = 1.0
+
+
+def maj_message_demande(uid: str, x: Dict[str, Any], n: int, url: str, erreur: str = "") -> int:
+    """Le message de la demande (x : salon, message, decide_par) après la
+    copie : l'adresse de la page n, ou l'erreur et la reprise automatique.
+    Seul endroit qui l'écrit (le clic ✅, puis la reprise si la copie s'est
+    faite après un redémarrage). Rend le code HTTP."""
+    qui = str(x.get("decide_par") or "")
+    acceptee = "\n✅ Acceptée" + (f" par <@{qui}>" if qui else "")
+    suite = (f"{acceptee} — page {n} : {url}" if url and not erreur
+             else f"{acceptee} — page {n} pas encore créée ({erreur[:120]}) : reprise automatique")
+    code, _r = _api_reseau("PATCH", f"/channels/{x.get('salon')}/messages/{x.get('message')}", json={
+        "content": _tete_demande(uid) + suite, "components": [], "allowed_mentions": {"parse": []}})
+    return code
+
+
+def _redessiner_menu(gid: str, uid: str, salon: str, mid: str) -> None:
+    """Le menu du ticket renvoyé tel quel (PATCH forcé, même empreinte) : une
+    liste déroulante y revient à son texte d'attente. Seulement le menu noté
+    du VA. Ne lève pas."""
+    try:
+        time.sleep(REDESSIN_LISTE_S)
+        # le verrou de _maj_menu_v2 (fin du fichier) : sans lui, ce PATCH
+        # croisait un redessin du fil des pages et remettait ses rangées d'avant
+        with _VERROU:
+            verrou = _VERROUS_MAJ_MENU.setdefault(f"{gid}:{uid}", threading.RLock())
+        with verrou:
+            f = _fiche(gid, uid)
+            if not (salon and mid and str(f.get("menu") or "") == str(mid) and f.get("menu_rangs")):
+                return
+            corps = _corps_menu(gid, uid, f["menu_rangs"])
+            code, _r = _api_reseau("PATCH", f"/channels/{salon}/messages/{mid}",
+                                   json={"components": corps, "allowed_mentions": {"parse": []}})
+            if code == 200:
+                _noter_menu_v2(f"{gid}:{uid}", str(mid), f["menu_rangs"], corps)
+            else:
+                print(f"[page] menu de {gid}:{uid} non redessiné (HTTP {code})", flush=True)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[page] menu de {gid}:{uid} non redessiné : {type(e).__name__}: {e}", flush=True)
+
+
+def _demande_page(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Les clics « pgd: » (TRUST INSTAGRAM) : ➕ du VA, puis ✅ / ❌ d'un
+    manager sur le message posé dans son ticket. None si ce n'est pas le nôtre."""
+    p = p or {}
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if not cid.startswith(DEMANDE_PREFIXE) or p.get("type") != 3:
+        return None
+    import pages_va as pv
+    gid = str(p.get("guild_id") or "")
+    morceaux = cid.split(":")
+    action = morceaux[1] if len(morceaux) > 1 else ""
+    membre = p.get("member") or {}
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+    if action in ("new", "att") and len(morceaux) == 3 and morceaux[2].isdigit():
+        uid = morceaux[2]
+        if not (pv.sur_demande(gid) and pv.ouverte(gid, uid)):
+            return _ephemere("Pas encore ouvert.")
+        if not _droit_usdc(gid, uid, p):
+            return _ephemere("Seul ce VA ou son manager peut s'en servir.")
+        if action == "att":
+            return _ephemere("⏳ Ta demande attend la réponse d'un manager.")
+        f = _fiche(gid, uid)
+        salon = str(f.get("salon") or "")
+        if not salon:
+            return _ephemere("Pas de ticket pour ce VA.")
+        # la règle de la création automatique et de ✅ : un VA sans tracking
+        # pouvait demander, être accepté, puis rester « ⏳ » à vie
+        sert, raison = pv.en_service(gid, uid, ticket=f)
+        if not sert:
+            return _ephemere(_TEXTE_HORS_SERVICE.get(raison, "Pas encore ouvert."))
+        # notée AVANT de répondre (disque, sous verrou) : un 2e clic, même
+        # rapide, trouve la demande en attente
+        r = pv.demander_page(gid, uid, par=qui)
+        if r.get("deja"):
+            return _ephemere("⏳ Demande déjà en attente.")
+        if not r.get("ok"):
+            return _ephemere("✕ " + str(r.get("erreur") or "demande non notée"))
+        did, jeton = str(r["id"]), str(p.get("token") or "")
+
+        def poster() -> None:
+            try:
+                code, rep = _api_reseau("POST", f"/channels/{salon}/messages", json={
+                    "content": _tete_demande(uid),
+                    "components": [{"type": 1, "components": [
+                        {"type": 2, "style": 3, "label": "Accepter", "emoji": {"name": "✅"},
+                         "custom_id": f"{DEMANDE_PREFIXE}ok:{uid}:{did}"},
+                        {"type": 2, "style": 4, "label": "Refuser", "emoji": {"name": "❌"},
+                         "custom_id": f"{DEMANDE_PREFIXE}non:{uid}:{did}"}]}],
+                    # le VA seul est mentionné : aucun rôle pingé
+                    "allowed_mentions": {"parse": [], "users": [str(uid)]}})
+            except Exception as e:                           # noqa: BLE001
+                code, rep = 0, f"{type(e).__name__}: {e}"
+            if code in (200, 201) and isinstance(rep, dict) and rep.get("id"):
+                pv.noter_message_demande(did, salon, str(rep["id"]))
+                _suite(jeton, "📄 Demande envoyée : un manager va te répondre dans ton ticket.", p)
+            else:
+                # sans message, personne ne pourrait répondre : la demande est
+                # annulée (sinon « ⏳ en attente » à vie)
+                pv.annuler_demande(did, f"message non posé (HTTP {code})")
+                print(f"[page] demande {did} de {gid}:{uid} : message non posé (HTTP {code}) "
+                      f"{str(rep)[:120]}", flush=True)
+                _suite(jeton, "✕ Demande non envoyée (Discord n'a pas pris le message), reclique "
+                              "dans un instant.", p)
+            _maj_menu_v2(gid, uid)
+        _EN_FOND(poster)
+        return _differer()
+    if action in ("ok", "non") and len(morceaux) == 4 and morceaux[2].isdigit() \
+            and re.fullmatch(r"[0-9a-f]{4,32}", morceaux[3]):
+        uid, did = morceaux[2], morceaux[3]
+        if not _manager_des_pages(gid, uid, membre):
+            return _ephemere("Seul un manager peut accepter ou refuser une page.")
+        if action == "ok" and pv.demande(did).get("etat") == "attente":
+            # ✅ créerait une page pour un VA parti (15-20 appels GetMySocial
+            # pour une page née coupée) ou sans tracking (« ⏳ » à vie) : rien
+            # décidé, la demande reste là (❌ reste possible)
+            sert, raison = pv.en_service(gid, uid)
+            if not sert:
+                return _ephemere(f"🚫 Ce VA n'a pas de lien en service ({_RAISON_DITE.get(raison, raison)}) : "
+                                 "rien n'est décidé.")
+        t0 = time.time()
+        r = pv.decider_demande(gid, uid, did, accepte=action == "ok", par=qui)
+        tete = _tete_demande(uid)
+        if r.get("deja"):
+            dit = _ETAT_DEMANDE_DIT.get(str(r.get("etat")), str(r.get("etat") or "tranchée"))
+            return {"type": 7, "data": {
+                "content": tete + f"\nDéjà {dit}" + (f" par <@{r['par']}>" if r.get("par") else "")
+                + (f" — page {r['place']}" if r.get("etat") == "acceptee" and r.get("place") else "") + ".",
+                "components": [], "allowed_mentions": {"parse": []}}}
+        if not r.get("ok"):
+            return _ephemere("✕ " + str(r.get("erreur") or "rien décidé"))
+        if r.get("etat") == "refusee":
+            _EN_FOND(lambda: _maj_menu_v2(gid, uid))
+            return {"type": 7, "data": {"content": tete + f"\n❌ Refusée par <@{qui}>.",
+                                        "components": [], "allowed_mentions": {"parse": []}}}
+        n = int(r["place"])
+        salon = str(p.get("channel_id") or "")
+        mid = str(((p.get("message") or {}).get("id")) or "")
+
+        def creer() -> None:
+            try:
+                rc = pv.creer_page(gid, uid, par=qui, n=n)
+            except Exception as e:                           # noqa: BLE001
+                rc = {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
+            # Un échec immédiat (quelques ms) faisait arriver ce PATCH chez
+            # Discord AVANT la réponse type 7 « en création », qui l'écrasait
+            # ensuite : passé ce délai, la réponse est appliquée ou perdue.
+            time.sleep(max(0.0, ATTENTE_AVANT_PATCH_S - (time.time() - t0)))
+            # par le salon et pas @original : le jeton d'interaction expire
+            # au bout de 15 min, et une copie GetMySocial peut traîner
+            try:
+                if salon and mid:
+                    x = {"salon": salon, "message": mid, "decide_par": qui}
+                    if rc.get("ok"):
+                        code = maj_message_demande(uid, x, n, str(rc.get("url") or ""))
+                        if code == 200:
+                            pv.noter_message_maj(did)
+                    else:
+                        code = maj_message_demande(uid, x, n, "", erreur=str(rc.get("erreur") or "?"))
+                    if code != 200:
+                        print(f"[page] demande {did} : message non mis à jour (HTTP {code})", flush=True)
+                _maj_menu_v2(gid, uid)
+            except Exception as e:                           # noqa: BLE001
+                print(f"[page] demande {did} : suite de l'acceptation : {type(e).__name__}: {e}", flush=True)
+        _EN_FOND(creer)
+        return {"type": 7, "data": {"content": tete + f"\n✅ Acceptée par <@{qui}> — page {n} en création",
+                                    "components": [], "allowed_mentions": {"parse": []}}}
+    return _ephemere("Action inconnue.")
+
+
+# Le menu éphémère du salon commun 📋・menu (TRUST INSTAGRAM) garde ce que le
+# propriétaire y a validé (lien, page de stats, 💳, 🎬 — « rien d'autre »,
+# 05/11) : « 📄 Tes pages », ses ✏️ et ➕ vivent dans le menu du TICKET, où
+# la demande est postée et tranchée. Une variable de contexte et pas un
+# argument : le corps de menu_ephemere reste tel quel.
+import contextvars as _contextvars  # noqa: E402
+_MENU_COMMUN: _contextvars.ContextVar = _contextvars.ContextVar("menu_commun_sans_pages", default=False)
+_menu_ephemere_avec_pages = menu_ephemere
+
+
+def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, Any]:   # noqa: F811
+    jeton = _MENU_COMMUN.set(True)
+    try:
+        return _menu_ephemere_avec_pages(gid, uid, avec_contenu=avec_contenu)
+    finally:
+        _MENU_COMMUN.reset(jeton)
+
+
+menu_ephemere.__doc__ = _menu_ephemere_avec_pages.__doc__
 _traiter_sans_page = traiter
 
 
 def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
     try:
         rep = _page(p)
+        if rep is None:
+            rep = _demande_page(p)
     except Exception as e:                                   # noqa: BLE001
         print(f"[page] clic : {type(e).__name__}: {e}", flush=True)
-        if str((((p or {}).get("data") or {}).get("custom_id")) or "").startswith(PAGE_PREFIXE):
+        if str((((p or {}).get("data") or {}).get("custom_id")) or "").startswith((PAGE_PREFIXE, DEMANDE_PREFIXE)):
             return _ephemere("✕ Une erreur est survenue, reclique dans un instant.")
         rep = None
     if rep is not None:

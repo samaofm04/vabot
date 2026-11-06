@@ -2703,8 +2703,8 @@ def _poser_base_seule(gid: str, uid: str, lien: Optional[Dict[str, Any]] = None)
             source = str(e.get("source_variante") or e.get("gabarit") or "")
             if not source:
                 return {"ok": False, "erreur": "aucun lien source pour la copie temporaire"}
-            r = gms.duplicate_link(source, "abtmp" + secrets.token_hex(5),
-                                   f'{nom.lower()} - {l.get("shortcode") or uid}'[:60], page, equipe)
+            nom_tmp = f'{nom.lower()} - {l.get("shortcode") or uid}'[:60]
+            r = gms.duplicate_link(source, "abtmp" + secrets.token_hex(5), nom_tmp, page, equipe)
             tmp = r.get("link") if isinstance(r.get("link"), dict) else {}
             tid = str(tmp.get("id") or "")
             if not (r.get("ok") and tid):
@@ -2715,6 +2715,14 @@ def _poser_base_seule(gid: str, uid: str, lien: Optional[Dict[str, Any]] = None)
             pays = poser_pays(tid, equipe, page)
             if not pays.get("ok"):
                 return {"ok": False, "erreur": f'pays non filtrés sur la copie ({pays.get("erreur")})'}
+            if l.get("safe_page"):
+                # une page protégée (pages_va) : la variante est figée sur la
+                # copie au moment de l'enregistrement, comme ses pays — sans
+                # ça, les robots des 30 % passeraient sans safe page
+                sp = gms.update_link(tid, {"display_name": nom_tmp, "bot_protection": {"mode": "safe_page"}},
+                                     equipe)
+                if not sp.get("ok"):
+                    return {"ok": False, "erreur": f'safe page non posée sur la copie ({str(sp.get("error"))[:100]})'}
         variante = {"variantId": gardee["variantId"] if gardee else None,
                     "sourceLinkId": None if gardee else _sans_prefixe(tid), "sourceTemplateId": None,
                     "name": nom, "weight": _poids(parts["base_modele"]),

@@ -36,6 +36,15 @@ Ce que le VA tape est nettoyé (nettoyer) : ni accolades (le balisage
 {{color}} et les jetons {city} de GetMySocial), ni caractères de contrôle,
 longueurs bornées. Il ne touche jamais au nom de tableau de bord ni à
 l'adresse (display_name, shortcode).
+
+TRUST INSTAGRAM (propriétaire, 06/11/2026) : chaque VA qui a un lien en
+service a 3 pages FIXES, une par place, chacune copiée de SON gabarit
+(GABARITS_PLACE : liabrune, liablonde, liatemplate, équipe EMY IG), créées
+d'office par la reprise (creer_pages_manquantes, en fond), jamais modifiables
+depuis Discord. Il peut en demander d'autres (« ➕ Demander une page »), sans
+maximum : un manager accepte ou refuse (registre « demandes »), la page
+acceptée copie GABARIT_PAGE et se modifie comme celle de Twitter. Toutes ont
+le 70/30 « Lia seule » (AB_PAGES) ; Twitter reste sans A/B.
 """
 from __future__ import annotations
 
@@ -55,12 +64,18 @@ AGENCY_IG_ID = "1488331963575177247"
 #: 06/11 sur le propriétaire ; le même jour : « envoie le truc pour les liens
 #: page aussi à tout le monde pour les VA Twitter » — chaque VA qui a un lien
 #: la crée quand il veut (« 📄 Créer »). TRUST INSTAGRAM : « met leur genre 3
-#: pages de dispo » — repris par une autre session (pages fixes + demandes) :
-#: ni PILOTE ni GABARIT_PAGE ici tant qu'elle n'a pas fini.
-PILOTE: Dict[str, set] = {TWITTER_ID: {"*"}}
-#: Combien de pages par VA (« pour Twitter 1 page directe et une safe » : le
-#: lien direct + 1 page ; Instagram : 3 pages).
-PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1, AGENCY_IG_ID: 3}
+#: pages de dispo » — ouvert à tous ses VA : sans ça, liens_va.synchroniser
+#: ne lance pas la reprise, donc ni création des pages fixes ni 70/30.
+PILOTE: Dict[str, set] = {TWITTER_ID: {"*"}, AGENCY_IG_ID: {"*"}}
+#: Combien de pages par VA là où il n'y a pas de places fixes (« pour Twitter
+#: 1 page directe et une safe » : le lien direct + 1 page, que le VA crée).
+PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1}
+#: Les places FIXES par serveur : créées d'office pour chaque VA dont le lien
+#: sert, jamais modifiables depuis Discord (ni par le VA ni par personne). Au
+#: delà, des pages à la demande, sans maximum, une fois acceptées par un
+#: manager — modifiables, elles. Ce dictionnaire décide seul où il y a des
+#: places fixes et des demandes : Twitter n'y est pas (sa page 1 reste à lui).
+FIXES: Dict[str, int] = {AGENCY_IG_ID: 3}
 #: Le gabarit de page de l'équipe du serveur (GetMySocial refuse de copier un
 #: lien d'une autre équipe) : « Gabarit Twitter (page de base) ».
 #: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo ». liaseeo
@@ -71,7 +86,26 @@ PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1, AGENCY_IG_ID: 3}
 #: — « MY TELEGRAM » ajouté en dernier bouton sur ce gabarit (à la main, dans
 #: GetMySocial). Le code ne touche que les boutons OnlyFans (_RE_OF) : le
 #: Telegram reste quand le VA modifie sa page ou que la reprise re-pointe.
-GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aed1548c7881b6c805e773a"}
+#: TRUST INSTAGRAM : liatemplate (EMY IG), le gabarit des pages demandées
+#: (place 4 et suivantes) ; les places fixes ont le leur (GABARITS_PLACE).
+#: Une chaîne par serveur : tout ce qui copie ou teste un gabarit la lit telle
+#: quelle (gabarit() choisit entre les deux).
+GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aed1548c7881b6c805e773a",
+                                AGENCY_IG_ID: "lnk_6aedd88dc7881b6c8066a2c0"}
+#: Un gabarit par place fixe (propriétaire, 06/11), tous dans l'équipe EMY IG
+#: du serveur. Leur 2e bouton (Telegram) n'est jamais touché : seuls les
+#: boutons OnlyFans (liens_va._RE_OF) reçoivent le tracking ou un texte.
+GABARITS_PLACE: Dict[str, Dict[int, str]] = {
+    AGENCY_IG_ID: {1: "lnk_6aedd88bc7881b6c8066a247",      # liabrune
+                   2: "lnk_6aedd88cc7881b6c8066a28c",      # liablonde
+                   3: "lnk_6aedd88dc7881b6c8066a2c0"},     # liatemplate
+}
+#: Les serveurs dont les pages portent le 70/30 « Lia seule » (70 % sur le
+#: tracking du VA, 30 % « Base Lia » directe), comme leurs liens directs — si
+#: liens_va.lia_seule(gid) le veut encore. Twitter n'y est pas : « ça doit pas
+#: être 70 30 » (06/11). Une page se coupe par disable_link, jamais en
+#: éteignant son A/B : éteindre efface les variantes chez GetMySocial (21/10).
+AB_PAGES = {AGENCY_IG_ID}
 
 FICHIER = Path(__file__).resolve().parent / "data" / "pages_va.json"
 MAX_NOM, MAX_BIO, MAX_BOUTON = 40, 160, 40
@@ -108,9 +142,17 @@ def _log(texte: str) -> None:
     print(f"[page] {texte}", flush=True)
 
 
+def gabarit(gid: Any, n: int = 1) -> str:
+    """Le lien que copie la page n de ce serveur : celui de sa place fixe
+    (GABARITS_PLACE), sinon le gabarit du serveur (GABARIT_PAGE). « » : pas
+    de page ici. Seul endroit qui le décide."""
+    gid = str(gid or "")
+    return str((GABARITS_PLACE.get(gid) or {}).get(int(n or 1)) or GABARIT_PAGE.get(gid) or "")
+
+
 def ouverte(gid: Any, uid: Any) -> bool:
     membres = PILOTE.get(str(gid or ""), set())
-    return bool(GABARIT_PAGE.get(str(gid or ""))) and ("*" in membres or str(uid).split("#")[0] in membres)
+    return bool(gabarit(gid, 1)) and ("*" in membres or str(uid).split("#")[0] in membres)
 
 
 def a_des_pages(gid: Any) -> bool:
@@ -159,12 +201,76 @@ def place(uid: Any, n: int = 1) -> str:
     return str(uid) if int(n or 1) <= 1 else f"{uid}#{int(n)}"
 
 
-def pages_max(gid: Any) -> int:
-    return int(PAGES_MAX.get(str(gid or ""), 1))
+def numero_de_place(uid_place: Any) -> int:
+    """L'inverse de place() : « uid » → 1, « uid#7 » → 7."""
+    _u, _s, n = str(uid_place).partition("#")
+    return int(n) if n.isdigit() else 1
+
+
+def fixes(gid: Any) -> int:
+    """Le nombre de places fixes de ce serveur (0 : pas de places fixes, pas
+    de demandes — Twitter)."""
+    return int(FIXES.get(str(gid or ""), 0))
+
+
+def sur_demande(gid: Any) -> bool:
+    """Ce serveur a des places fixes créées d'office et des pages à la
+    demande (acceptées par un manager)."""
+    return fixes(gid) > 0
+
+
+def modifiable(gid: Any, n: int = 1) -> bool:
+    """Une place fixe ne se modifie pas depuis Discord ; les autres oui."""
+    return int(n or 1) > fixes(gid)
+
+
+def places(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -> List[int]:
+    """Les places auxquelles ce VA a droit : 1..PAGES_MAX sans places fixes
+    (Twitter) ; sinon les fixes puis chaque page acceptée par un manager.
+    `d` : le registre déjà lu (un tour sur tous les VA ne le relit pas)."""
+    gid = str(gid or "")
+    f = fixes(gid)
+    if not f:
+        return list(range(1, int(PAGES_MAX.get(gid, 1)) + 1))
+    return list(range(1, f + 1)) + places_acceptees(gid, uid, d)
+
+
+def pages_max(gid: Any, uid: Any = None) -> int:
+    """La plus haute place de ce VA (de ce serveur sans `uid`) : PAGES_MAX
+    sans places fixes ; sinon les fixes, plus les pages acceptées du VA."""
+    if uid is None or not sur_demande(gid):
+        return fixes(gid) or int(PAGES_MAX.get(str(gid or ""), 1))
+    return max(places(gid, uid))
 
 
 def _vrai_uid(uid: Any) -> str:
     return str(uid).split("#", 1)[0]
+
+
+def en_service(gid: Any, uid: Any, fiche: Optional[Dict[str, Any]] = None,
+               ticket: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    """Ce VA peut-il avoir des pages créées sur un serveur à places fixes ?
+    (vrai, « ») ou (faux, « sans_lien » | « coupe » | « parti »). Sa fiche
+    liens_va doit avoir link_id, tracking et public_url, le lien en service,
+    et son ticket ne pas être parti. Seul endroit qui le décide : le menu, ➕,
+    ✅ et la création automatique en avaient chacun leur version — un VA sans
+    tracking pouvait demander, être accepté, puis rester « ⏳ en préparation »
+    à vie (la reprise l'écartait). `fiche`, `ticket` : déjà lus."""
+    gid, vrai = str(gid or ""), _vrai_uid(uid)
+    if fiche is None:
+        import liens_va as lv
+        fiche = lv.lien_de(gid, vrai)
+    f = fiche if isinstance(fiche, dict) else {}
+    if not (f.get("link_id") and f.get("tracking") and f.get("public_url")):
+        return False, "sans_lien"
+    if f.get("actif", True) is False:
+        return False, "coupe"
+    if ticket is None:
+        import tickets_discord as tk
+        ticket = tk._fiche(gid, vrai)
+    if isinstance(ticket, dict) and ticket.get("parti"):
+        return False, "parti"
+    return True, ""
 
 
 # ─── Registre ─────────────────────────────────────────────────────────────
@@ -196,7 +302,10 @@ def page_de(gid: Any, uid: Any) -> Dict[str, Any]:
 _REMPLACES = {"essais"}
 
 
-def _noter(gid: Any, uid: Any, **champs) -> None:
+def _noter(gid: Any, uid: Any, **champs) -> bool:
+    """Rend vrai si le registre est écrit : creer_page en dépend (une copie
+    GetMySocial que le registre ne connaît pas serait recopiée à chaque
+    passage — disque plein, 4 passages : 12 copies vivantes pour 3 places)."""
     with _VERROU:
         d = _lire()
         p = d["pages"].setdefault(f"{gid}:{uid}", {})
@@ -205,7 +314,190 @@ def _noter(gid: Any, uid: Any, **champs) -> None:
                 p[k] = dict(p[k], **v)
             else:
                 p[k] = v
-        _ecrire(d)
+        return _ecrire(d)
+
+
+# ─── Demandes de pages (TRUST INSTAGRAM, 06/11/2026) ─────────────────────
+# Une clé à part, « demandes », et pas une fiche « uid#n » sans link_id dans
+# « pages » : le menu et la reprise y verraient une page à créer. Une demande
+# par id (secrets.token_hex, dans le custom_id des boutons ✅ / ❌) : un vieux
+# ✅ resté sur un message ne peut pas accepter une demande plus récente. La
+# bascule attente → acceptee / refusee se fait sous _VERROU, écrite sur le
+# disque avant de répondre : un seul clic gagne, même après un redémarrage
+# (un verrou en mémoire, comme celui de verif_discord, s'y perd).
+def _demandes(d: Dict[str, Any]) -> Dict[str, Any]:
+    dem = d.get("demandes")
+    if not isinstance(dem, dict):
+        dem = d["demandes"] = {}
+    return dem
+
+
+def _de_ce_va(x: Any, gid: str, uid: str) -> bool:
+    return isinstance(x, dict) and str(x.get("gid")) == gid and str(x.get("uid")) == uid
+
+
+def demande_en_attente(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """La demande en attente de ce VA ({…, "id"}), ou {}. `d` : le registre
+    déjà lu."""
+    gid, uid = str(gid), _vrai_uid(uid)
+    for did, x in ((d if d is not None else _lire()).get("demandes") or {}).items():
+        if _de_ce_va(x, gid, uid) and x.get("etat") == "attente":
+            return dict(x, id=str(did))
+    return {}
+
+
+def places_acceptees(gid: Any, uid: Any, d: Optional[Dict[str, Any]] = None) -> List[int]:
+    """Les places attribuées aux demandes acceptées de ce VA, dans l'ordre."""
+    gid, uid = str(gid), _vrai_uid(uid)
+    f = fixes(gid)
+    out = set()
+    for x in ((d if d is not None else _lire()).get("demandes") or {}).values():
+        if _de_ce_va(x, gid, uid) and x.get("etat") == "acceptee":
+            try:
+                n = int(x.get("place") or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n > f:
+                out.add(n)
+            else:
+                _log(f"demande acceptée de {gid}:{uid} sans place valable ({x.get('place')!r}) : ignorée")
+    return sorted(out)
+
+
+def demander_page(gid: Any, uid: Any, par: str = "") -> Dict[str, Any]:
+    """Note une demande de page de ce VA. Une seule en attente à la fois.
+    Rend {ok, id} ou {ok: False, deja, id, erreur}."""
+    gid, uid = str(gid), _vrai_uid(uid)
+    if not sur_demande(gid):
+        return {"ok": False, "erreur": "pas de pages à la demande sur ce serveur"}
+    orpheline = ""
+    with _VERROU:
+        d = _lire()
+        dem = _demandes(d)
+        deja = next((k for k, x in dem.items() if _de_ce_va(x, gid, uid) and x.get("etat") == "attente"), "")
+        if deja and _sans_message_depuis_trop(dem[deja]):
+            # notée, puis le bot a redémarré avant de poser le message ✅ / ❌
+            # (le cron redémarre va-bot moins d'une minute après un push) :
+            # personne ne pourrait y répondre, le VA resterait « ⏳ » à vie
+            dem[deja].update(etat="annulee", raison="message jamais posé (redémarrage ?)",
+                             decide_quand=int(time.time()))
+            orpheline, deja = str(deja), ""
+        if deja:
+            return {"ok": False, "deja": True, "id": str(deja), "erreur": "demande déjà en attente"}
+        did = secrets.token_hex(5)
+        while did in dem:
+            did = secrets.token_hex(5)
+        dem[did] = {"gid": gid, "uid": uid, "etat": "attente", "par": str(par or ""), "quand": int(time.time())}
+        if not _ecrire(d):
+            return {"ok": False, "erreur": "registre non écrit : demande non notée, reclique"}
+    if orpheline:
+        _log(f"demande de page {orpheline} de {gid}:{uid} annulée : message jamais posé (redémarrage ?)")
+    _log(f"demande de page {did} de {gid}:{uid} (par {par or '?'})")
+    return {"ok": True, "id": did}
+
+
+#: Une demande notée sans message ✅ / ❌ au-delà de ça est orpheline : le
+#: fil qui le pose (tickets_discord, _demande_page) met au pire une
+#: quarantaine de secondes (429 de Discord) ; au-delà, le bot a redémarré.
+DEMANDE_SANS_MESSAGE_S = 10 * 60
+
+
+def _sans_message_depuis_trop(x: Any) -> bool:
+    return isinstance(x, dict) and x.get("etat") == "attente" and not x.get("message") \
+        and time.time() - float(x.get("quand") or 0) > DEMANDE_SANS_MESSAGE_S
+
+
+def demande(did: str) -> Dict[str, Any]:
+    """La demande `did` ({…, "id"}), ou {}."""
+    x = (_lire().get("demandes") or {}).get(str(did))
+    return dict(x, id=str(did)) if isinstance(x, dict) else {}
+
+
+def demande_de_place(gid: Any, uid: Any, n: int, d: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """La demande acceptée qui a attribué la place n de ce VA ({…, "id"}), ou {}."""
+    gid, uid = str(gid), _vrai_uid(uid)
+    for did, x in ((d if d is not None else _lire()).get("demandes") or {}).items():
+        if _de_ce_va(x, gid, uid) and x.get("etat") == "acceptee" and str(x.get("place")) == str(int(n)):
+            return dict(x, id=str(did))
+    return {}
+
+
+def noter_message_demande(did: str, salon: str, mid: str) -> None:
+    """Le message ✅ / ❌ posé pour cette demande (pour le retrouver)."""
+    with _VERROU:
+        d = _lire()
+        x = _demandes(d).get(str(did))
+        if isinstance(x, dict):
+            x.update(salon=str(salon), message=str(mid))
+            _ecrire(d)
+
+
+def noter_message_maj(did: str) -> None:
+    """Le message de la demande porte l'adresse de la page : la reprise ne le
+    réécrit plus."""
+    with _VERROU:
+        d = _lire()
+        x = _demandes(d).get(str(did))
+        if isinstance(x, dict):
+            x["message_maj"] = int(time.time())
+            _ecrire(d)
+
+
+def annuler_demande(did: str, raison: str) -> bool:
+    """Une demande dont le message n'a pas pu être posé : annulée (sinon le VA
+    resterait « ⏳ en attente » sans que personne ne puisse répondre)."""
+    with _VERROU:
+        d = _lire()
+        x = _demandes(d).get(str(did))
+        if not isinstance(x, dict) or x.get("etat") != "attente":
+            return False
+        x.update(etat="annulee", raison=str(raison)[:200], decide_quand=int(time.time()))
+        ok = _ecrire(d)
+    _log(f"demande de page {did} annulée : {raison}")
+    return ok
+
+
+def _prochaine_place(d: Dict[str, Any], gid: str, uid: str) -> int:
+    """Après les fixes, la plus haute place déjà attribuée (demande acceptée)
+    ou créée (registre des pages), plus un : jamais deux fois la même."""
+    haut = fixes(gid)
+    for x in _demandes(d).values():
+        if _de_ce_va(x, gid, uid) and x.get("etat") == "acceptee":
+            try:
+                haut = max(haut, int(x.get("place") or 0))
+            except (TypeError, ValueError):
+                pass
+    for cle in (d.get("pages") or {}):
+        g, _s, u = str(cle).partition(":")
+        if g == gid and _vrai_uid(u) == uid:
+            haut = max(haut, numero_de_place(u))
+    return haut + 1
+
+
+def decider_demande(gid: Any, uid: Any, did: str, accepte: bool, par: str = "") -> Dict[str, Any]:
+    """Accepte ou refuse la demande `did` de ce VA. Rend {ok, etat, place}
+    (place : attribuée ici, à l'acceptation) ; déjà tranchée : {ok: False,
+    deja, etat, par, place} ; disque refusé : {ok: False, erreur}, rien
+    décidé."""
+    gid, uid, did = str(gid), _vrai_uid(uid), str(did)
+    with _VERROU:
+        d = _lire()
+        x = _demandes(d).get(did)
+        if not _de_ce_va(x, gid, uid):
+            return {"ok": False, "erreur": "demande inconnue"}
+        if x.get("etat") != "attente":
+            return {"ok": False, "deja": True, "etat": str(x.get("etat") or ""),
+                    "par": str(x.get("decide_par") or ""), "place": int(x.get("place") or 0)}
+        n = _prochaine_place(d, gid, uid) if accepte else 0
+        x.update(etat="acceptee" if accepte else "refusee", decide_par=str(par or ""),
+                 decide_quand=int(time.time()))
+        if accepte:
+            x["place"] = n
+        if not _ecrire(d):
+            return {"ok": False, "erreur": "registre non écrit : rien n'est décidé, reclique"}
+    _log(f"demande de page {did} de {gid}:{uid} {'acceptée (page ' + str(n) + ')' if accepte else 'refusée'}"
+         f" par {par or '?'}")
+    return {"ok": True, "etat": "acceptee" if accepte else "refusee", "place": n}
 
 
 # ─── Ce que tape le VA ────────────────────────────────────────────────────
@@ -427,14 +719,17 @@ def _boutons_of(boutons: Any) -> List[Dict[str, Any]]:
 
 # ─── Création ─────────────────────────────────────────────────────────────
 def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
-    """La page du VA : copie du gabarit, bouton sur SON tracking, pays, safe
-    page (pas d'A/B), rangée chez son manager. Rend {ok, url, erreur, deja}.
-    Un échec après la copie la laisse COUPÉE (jamais supprimée), dite."""
+    """La page du VA : copie du gabarit de sa place, bouton sur SON tracking,
+    pays, safe page, le 70/30 là où il est voulu (AB_PAGES), rangée chez son
+    manager. Rend {ok, url, erreur, deja}. Un échec après la copie la laisse
+    COUPÉE (jamais supprimée), dite."""
     import gms
     import liens_va as lv
     gid, vrai = str(gid), _vrai_uid(uid)
     n = int(n or 1)
-    if n > pages_max(gid):
+    if n not in places(gid, vrai):
+        if sur_demande(gid):
+            return {"ok": False, "erreur": f"page {n} pas acceptée par un manager"}
         return {"ok": False, "erreur": f"{pages_max(gid)} page(s) au plus ici"}
     uid = place(vrai, n)
     cle = f"{gid}:{uid}"
@@ -442,7 +737,7 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     if deja.get("link_id") and deja.get("etat", "prete") == "prete":
         return {"ok": True, "deja": True, "url": deja.get("public_url", ""), "erreur": "",
                 "manques": list(deja.get("manques") or [])}
-    gab = GABARIT_PAGE.get(gid, "")
+    gab = gabarit(gid, n)
     if not gab:
         return {"ok": False, "erreur": "pas de gabarit de page sur ce serveur"}
     f = lv.lien_de(gid, vrai)
@@ -455,8 +750,14 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
         # « Twitter VA None @None page » : le registre des trackings y verrait
         # une 2e personne sur son tracking (« en doute », sans relevé)
         return {"ok": False, "erreur": "numéro ou pseudo du VA manquant dans sa fiche"}
-    if n > 1 and page_de(gid, place(vrai, n - 1)).get("etat") != "prete":
-        return {"ok": False, "erreur": f"crée d'abord la page {n - 1}"}
+    if sur_demande(gid):
+        # la règle de la création automatique et de ✅ (en_service) : une page
+        # vivante sur le tracking d'un VA parti, ou née coupée, ne sert à rien
+        sert, raison = en_service(gid, vrai, fiche=f)
+        if not sert:
+            return {"ok": False, "erreur": f"VA hors service ({raison}) : pas de page"}
+    # Plus de « crée d'abord la page n-1 » : une page ratée (quota, panne)
+    # bloquait toutes les suivantes, création automatique comprise.
     equipe = _equipe(gid)
     with _VERROU:
         if cle in _CREATIONS:
@@ -493,9 +794,16 @@ def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Di
         except Exception as e:                           # noqa: BLE001
             _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
             return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
-    lid, sc, erreur = "", "", ""
+    lid, sc, erreur, essai = "", "", "", 0
+    # Sur un serveur à places fixes, directement les paires de mots : les
+    # 25 mots seuls sont pris chez GetMySocial (adresses communes à tous
+    # les comptes ; la page pilote Twitter du 06/11 est sortie
+    # « sugarlilyy », une paire). Chaque refus est une écriture sur la clé
+    # principale, 25 de plus par page × 3 pages × chaque VA. Twitter garde
+    # son ordre.
+    decalage = len(lv.MOTS_THREADS) if sur_demande(gid) else 0
     for essai in range(lv.ESSAIS_ADRESSE):
-        sc = lv.mots_sans_prenom(nom, essai)
+        sc = lv.mots_sans_prenom(nom, essai + decalage)
         r = gms.duplicate_link(gab, sc, nom, "", equipe)
         if r.get("ok") and (r.get("link") or {}).get("id"):
             lid = str(r["link"]["id"])
@@ -506,14 +814,51 @@ def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Di
     if not lid:
         return {"ok": False, "erreur": f"GetMySocial : {erreur[:140]}"}
     url = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
-    _noter(gid, uid, link_id=lid, shortcode=sc, public_url=url, nom=nom, par=str(par),
-           quand=int(time.time()), actif=True, etat="en_cours")
+    if not _noter(gid, uid, link_id=lid, shortcode=sc, public_url=url, nom=nom, par=str(par),
+                  quand=int(time.time()), actif=True, etat="en_cours"):
+        # une copie que le registre ne connaît pas serait refaite au
+        # passage suivant, et ainsi de suite : coupée tout de suite
+        coupee = bool(gms.disable_link(lid).get("ok"))
+        _log(f"page {sc} de {cle} : registre non écrit, copie {lid} "
+             + ("coupée" if coupee else "NON coupée (à couper à la main)"))
+        return {"ok": False, "disque": True, "erreur": "registre non écrit : copie coupée"}
+    if essai and sur_demande(gid):
+        # un « adresse prise » peut être la NÔTRE : gms renvoie une fois
+        # un appel dont la réponse s'est perdue (_call_tool_brut), la 1re
+        # copie existe alors sans que personne ne la connaisse
+        _couper_doublons(gid, vrai, equipe, nom, lid)
     try:
         return _finir_page(gid, uid, f, lid, sc, nom, url, equipe)
     except Exception as e:                               # noqa: BLE001
         _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
         _log(f"page {sc} de {cle} : {type(e).__name__}: {e} — coupée")
         return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
+
+
+def _couper_doublons(gid: str, vrai: str, equipe: str, nom: str, lid: str) -> int:
+    """Les copies de l'équipe au nom de cette page que le registre ne connaît
+    pas (ni `lid`, ni aucune page de ce VA) : coupées, jamais supprimées, et
+    dites. Rend leur nombre."""
+    import gms
+    try:
+        r = gms.list_links_team(equipe, force_refresh=True)
+    except Exception as e:                                   # noqa: BLE001
+        r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if not r.get("ok"):
+        _log(f"doublons de « {nom} » non cherchés : équipe illisible ({str(r.get('error'))[:100]})")
+        return 0
+    connus = set(liens_des_pages(gid, vrai)) | {str(lid)}
+    coupees = 0
+    for l in r.get("links") or []:
+        i = str((l or {}).get("id") or "") if isinstance(l, dict) else ""
+        if not i or i in connus or str(l.get("display_name") or "") != nom:
+            continue
+        if gms.disable_link(i).get("ok"):
+            coupees += 1
+            _log(f"copie orpheline {i} « {nom} » (réponse perdue de GetMySocial ?) : coupée")
+        else:
+            _log(f"copie orpheline {i} « {nom} » : NON coupée, à couper à la main")
+    return coupees
 
 
 def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: str,
@@ -528,8 +873,18 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
         return {"ok": False, "erreur": f"bouton non posé ({pose.get('erreur')}) : page coupée"}
     pays = lv.poser_pays(lid, equipe)
     sur = gms.update_link(lid, {"display_name": nom, "bot_protection": {"mode": "safe_page"}}, equipe)
-    # Propriétaire, 06/11 : « ça doit pas être 70 30 » — la page n'a pas
-    # d'A/B : tout le bouton sur le tracking du VA.
+    # Le 70/30 APRÈS le bouton : _poser_base_seule relit la destination de la
+    # page (sa model) et refuse tant qu'elle ne mène pas au tracking du VA.
+    # Twitter : « ça doit pas être 70 30 » — aucun A/B (ab_voulu faux).
+    ab = _poser_ab(gid, uid, lid, f["tracking"], sc) if ab_voulu(gid) else None
+    if ab is not None and ab.get("inattendu"):
+        # la copie a hérité d'un A/B inconnu de son gabarit (un duplicata garde
+        # l'A/B de sa source) : elle servirait une variante que personne ne
+        # connaît. Coupée (disable_link : éteindre l'A/B effacerait ses
+        # variantes), jamais donnée.
+        _couper(gid, uid, lid, etat="ratee", erreur=f"70/30 : {str(ab.get('erreur'))[:160]}")
+        _log(f"page {sc} de {cle} : A/B inattendu hérité du gabarit, coupée ({str(ab.get('erreur'))[:120]})")
+        return {"ok": False, "erreur": "A/B inattendu sur la copie (hérité du gabarit) : page coupée"}
     groupe = lv.ranger(equipe, lid, str(f.get("groupe") or f.get("manager") or ""))
     lu = _lire_page(lid, equipe)
     ofs = _boutons_of(lu.get("buttons"))
@@ -541,7 +896,8 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
     # trouvée sans page ; dans les deux cas la page ne doit pas rester vivante
     actif = f.get("actif", True) is not False \
         and lv.lien_de(gid, _vrai_uid(uid)).get("actif", True) is not False
-    manques = ([] if pays.get("ok") else ["pays"]) + ([] if sur.get("ok") else ["safe page"])
+    manques = ([] if pays.get("ok") else ["pays"]) + ([] if sur.get("ok") else ["safe page"]) \
+        + ([] if ab is None or ab.get("ok") else ["70/30"])
     a_rallumer = False
     if not actif:
         # son lien direct est coupé : la page aussi (reprise si GetMySocial refuse)
@@ -553,9 +909,68 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
     _noter(gid, uid, actif=bool(actif) and not a_rallumer, a_rallumer=a_rallumer, etat="prete", erreur="",
            pays=bool(pays.get("ok")), pays_erreur=str(pays.get("erreur") or ""),
            safe=bool(sur.get("ok")), groupe=groupe, champs=champs, manques=manques, essais={}, a_verifier=False,
-           tracking=f["tracking"])
+           tracking=f["tracking"], **({"ab": _note_ab(ab)} if ab is not None else {}))
     _log(f"page {sc} prête pour {cle}" + (f", à reprendre : {manques}" if manques else ""))
     return {"ok": True, "url": url, "erreur": "", "manques": manques}
+
+
+def ab_voulu(gid: Any) -> bool:
+    """Le 70/30 « Lia seule » sur les pages de ce serveur : AB_PAGES, et
+    liens_va.lia_seule encore vrai (la clé « lia_seule » de la config peut
+    l'éteindre pour tous les liens d'un coup)."""
+    if str(gid or "") not in AB_PAGES:
+        return False
+    import liens_va as lv
+    try:
+        return bool(lv.lia_seule(str(gid)))
+    except Exception as e:                                   # noqa: BLE001
+        # config illisible : pas de 70/30 cette fois, et pas de note « ab » —
+        # la reprise le rattrape dès qu'elle se relit (page prête sans ab.ok)
+        _log(f"70/30 de {gid} : lia_seule illisible ({type(e).__name__}: {e})")
+        return False
+
+
+def _cookie_ok() -> bool:
+    """Le cookie de l'écran A/B (le 70/30 passe par l'API privée) : posé, pas
+    expiré, pas refusé. Sans lui, la page ATTEND : ni essai ni passage
+    compté, comme le lien direct (liens_va.reprendre_base_seule)."""
+    import gms
+    import liens_va as lv
+    try:
+        ck = gms.get_session_cookie()
+        exp = gms.cookie_expiration(ck) if ck else None
+        return bool(ck) and not (exp and exp < time.time()) \
+            and lv._etat().get("cookie_refuse") != lv._empreinte(ck)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def _poser_ab(gid: str, uid: str, lid: str, tracking: str, sc: str) -> Dict[str, Any]:
+    """Le 70/30 sur CETTE page (son id, son tracking) : l'appel privé avec
+    `lien`. Le public liens_va.poser_base_seule écrirait dans la fiche du lien
+    direct du VA. Ne lève pas."""
+    import liens_va as lv
+    if not _cookie_ok():
+        return {"ok": False, "cookie": True, "erreur": "cookie GetMySocial absent, expiré ou refusé"}
+    try:
+        return lv._poser_base_seule(gid, uid, lien=_lien_ab(lid, tracking, sc))
+    except Exception as e:                                   # noqa: BLE001
+        return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
+
+
+def _lien_ab(lid: str, tracking: str, sc: Any) -> Dict[str, Any]:
+    """Ce que reçoit liens_va._poser_base_seule pour une page. `safe_page` :
+    la branche 30 % est une copie FIGÉE du lien temporaire au moment de
+    l'enregistrement (ses pays sont posés dessus avant, pour cette raison) ;
+    sans la safe page sur cette copie, les robots qui tombent dans les 30 %
+    verraient l'adresse OnlyFans que la page, elle, cache. Non vérifié chez
+    GetMySocial (pas d'essai possible sans réseau) : posée par prudence."""
+    return {"link_id": lid, "tracking": tracking, "shortcode": sc, "safe_page": True}
+
+
+def _note_ab(ab: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": bool(ab.get("ok")), "erreur": str(ab.get("erreur") or ""),
+            "cookie": bool(ab.get("cookie")), "quand": int(time.time())}
 
 
 def _couper(gid: str, uid: str, lid: str, etat: str, erreur: str) -> None:
@@ -575,6 +990,10 @@ def modifier_page(gid: str, uid: str, nom: Optional[str] = None, bio: Optional[s
     fond uni (plus proposé dans la fenêtre depuis l'image de fond, 06/11).
     Relu ensuite. Rend {ok, faits, erreur}."""
     import gms
+    if not modifiable(gid, n):
+        # refusé ICI, avant toute lecture GetMySocial : cacher le bouton ne
+        # suffit pas (un vieux menu, un custom_id forgé)
+        return {"ok": False, "erreur": "page fixe : elle ne se modifie pas"}
     gid, uid = str(gid), place(_vrai_uid(uid), n)
     pg = page_de(gid, uid)
     lid = str(pg.get("link_id") or "")
@@ -710,6 +1129,27 @@ PAGES_PAR_PASSE = 10
 #: Une création « en_cours » plus vieille que ça (redémarrage au milieu) est
 #: coupée : son adresse n'a jamais été donnée.
 EN_COURS_MAX_S = 15 * 60
+#: Les 70/30 tentés par passage, à part de PAGES_PAR_PASSE : un 70/30 coûte une
+#: dizaine d'appels GetMySocial (copie temporaire, pays, lecture et écriture
+#: privées, relecture) — comme BASES_POSEES_PAR_PASSE pour les liens directs.
+AB_PAR_PASSE = 3
+#: Les boutons re-pointés par passage, à part de PAGES_PAR_PASSE, là où un VA
+#: a plusieurs pages (TRUST INSTAGRAM) : après un changement de model, 45 VA ×
+#: 3 pages × (bouton, pays, 70/30) dans un plafond de 10 laissaient 70 % des
+#: visiteurs sur l'ancienne model pendant ~20 h (39 passages). Un re-pointage
+#: coûte ~4 appels ; pays et 70/30 suivent aux passages d'après. Twitter (une
+#: page par VA) garde le plafond commun.
+REPOINTES_PAR_PASSE: Dict[str, int] = {AGENCY_IG_ID: 30}
+#: Ce qui dit une panne PASSAGÈRE de GetMySocial (quota, 429, réseau, 5xx,
+#: session MCP) : ni essai compté ni « à vérifier » — sinon une heure de quota
+#: épuisé figeait des places « à reprendre » pour toujours. Le texte vient de
+#: gms (« Quota GetMySocial epuise … », « HTTP 429 … », « Erreur réseau : … »).
+_RE_PASSAGERE = re.compile(r"quota|HTTP 429|too many requests|rate.?limit|r[ée]seau|injoignable|"
+                           r"time[d ]?out|HTTP 5\d\d|initialiser la session", re.I)
+
+
+def erreur_passagere(texte: Any) -> bool:
+    return bool(_RE_PASSAGERE.search(str(texte or "")))
 
 
 def reprendre_pages(gid: str) -> Dict[str, Any]:
@@ -718,14 +1158,35 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
       - une page prête : coupée si le direct l'est, rallumée s'il sert ;
         son bouton re-pointé si le tracking du direct a changé (changement de
         model, passer_sur) — le tracking n'est noté qu'une fois le bouton
-        relu dessus —, puis les pays refaits ; rangée chez le manager
-        actuel ; les étapes manquées refaites, ESSAIS_REPRISE fois chacune ;
-      - les pages temporaires d'images non supprimées : supprimées.
-    PAGES_PAR_PASSE pages au plus. Ne lève pas."""
+        relu dessus —, puis les pays (et le 70/30 sur AB_PAGES) refaits ;
+        rangée chez le manager actuel ; les étapes manquées refaites,
+        ESSAIS_REPRISE fois chacune (un 70/30 sans cookie attend sans
+        compter ; sur un serveur à places fixes, une panne passagère de
+        GetMySocial non plus) ; sur AB_PAGES, une page prête sans 70/30 noté
+        le reçoit ;
+      - les pages temporaires d'images non supprimées : supprimées ;
+      - sur un serveur à places fixes, les pages manquantes créées en fond
+        (lancer_creations).
+    PAGES_PAR_PASSE pages, AB_PAR_PASSE 70/30 et (là où il est fixé)
+    REPOINTES_PAR_PASSE boutons re-pointés au plus. Le registre n'est réécrit
+    que pour ce qui change. Ne lève pas."""
     import gms
     import liens_va as lv
     bilan: Dict[str, Any] = {"coupees": [], "rallumees": [], "trackings": [], "reprises": [],
                              "rates": [], "a_verifier": []}
+    ab_ici = ab_voulu(gid)
+    cookie: Optional[bool] = None
+    ab_tentes = 0
+    bilan["ab_en_attente"] = 0           # pages dont le 70/30 attend le cookie ou le passage suivant
+    plafond_repointes = REPOINTES_PAR_PASSE.get(str(gid))
+    repointees = 0
+    # Twitter garde ses règles (une page par VA) : la panne passagère n'est
+    # mise à part que là où il y a des places fixes
+    passageres_ici = sur_demande(gid)
+    bilan["passageres"] = []
+    # la fiche du direct, lue une fois par VA et par passage : 3 pages et plus
+    # par VA relisaient liens_va.json chacune
+    fiches_vues: Dict[str, Dict[str, Any]] = {}
     d = _lire()
     eq = _equipe(gid)
     for tid, o in list((d.get("orphelines") or {}).items()):
@@ -757,7 +1218,10 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                         else:
                             bilan["rates"].append(f"{uid} : coupure")
                     continue
-                f = lv.lien_de(g, _vrai_uid(uid))
+                vrai = _vrai_uid(uid)
+                if vrai not in fiches_vues:
+                    fiches_vues[vrai] = lv.lien_de(g, vrai)
+                f = fiches_vues[vrai]
                 sert = bool(f.get("link_id")) and f.get("actif", True) is not False
                 if not sert:
                     if pg.get("actif") is not False or pg.get("a_couper") or pg.get("a_rallumer"):
@@ -772,9 +1236,14 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                 manques = list(pg.get("manques") or [])
                 essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
                 if f.get("tracking") and str(pg.get("tracking") or "") != str(f["tracking"]):
-                    if traitees >= PAGES_PAR_PASSE:
-                        continue
-                    traitees += 1
+                    if plafond_repointes is None:
+                        if traitees >= PAGES_PAR_PASSE:
+                            continue
+                        traitees += 1
+                    else:
+                        if repointees >= plafond_repointes:
+                            continue
+                        repointees += 1
                     lu = _lire_page(lid, equipe)
                     ofs = _boutons_of(lu.get("buttons"))
                     if not ofs:
@@ -785,9 +1254,12 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                         if not pose.get("ok"):
                             bilan["rates"].append(f"{uid} : tracking ({pose.get('erreur')})")
                             continue
-                    manques = sorted(set(manques) | {"pays"})
+                    # une autre model : la branche « Base … » de l'A/B est à refaire
+                    manques = sorted(set(manques) | {"pays"} | ({"70/30"} if ab_ici else set()))
                     essais = {}
-                    _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False)
+                    _noter(g, uid, tracking=f["tracking"], manques=manques, essais={}, a_verifier=False,
+                           **({"ab": {"ok": False}} if ab_ici else {}))
+                    pg = page_de(g, uid)    # ce qui est noté fait foi pour l'écriture de fin
                     bilan["trackings"].append(uid)
                 if pg.get("actif") is False or pg.get("a_rallumer"):
                     if gms.enable_link(lid).get("ok"):
@@ -805,45 +1277,439 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                     rg = lv.ranger(equipe, lid, voulu)
                     if rg:
                         _noter(g, uid, groupe=rg)
-                restes, a_verifier = [], []
-                # « ça doit pas être 70 30 » (06/11) : une ancienne étape 70/30 tombe
-                manques = [m for m in manques if m != "70/30"]
+                restes, a_verifier, attend = [], [], False
+                if not ab_ici:
+                    # Twitter : « ça doit pas être 70 30 » (06/11) — une ancienne
+                    # étape 70/30 tombe, sans rien poser
+                    manques = [m for m in manques if m != "70/30"]
+                elif not (pg.get("ab") or {}).get("ok") and "70/30" not in manques:
+                    # une page prête avant le 70/30 (ou dont la note s'est
+                    # perdue) : sans ça, la reprise ne la verrait jamais
+                    manques.append("70/30")
                 for etape in manques:
                     if int(essais.get(etape) or 0) >= ESSAIS_REPRISE:
                         restes.append(etape)
                         a_verifier.append(etape)
                         continue
+                    if etape == "70/30":
+                        if cookie is None:
+                            cookie = _cookie_ok()
+                        if not cookie or ab_tentes >= AB_PAR_PASSE:
+                            restes.append(etape)    # attend le cookie, ou le passage suivant : rien compté
+                            attend = True
+                            continue
                     if traitees >= PAGES_PAR_PASSE:
                         restes.append(etape)
                         continue
                     traitees += 1
-                    compte = True
+                    compte, err = True, ""
                     try:
-                        if etape == "pays":
-                            ok = bool(lv.poser_pays(lid, equipe).get("ok"))
+                        if etape == "70/30":
+                            ab_tentes += 1
+                            ab = lv._poser_base_seule(g, uid, lien=_lien_ab(lid, f["tracking"], pg.get("shortcode")))
+                            ok, compte = bool(ab.get("ok")), not ab.get("cookie")
+                            err = str(ab.get("erreur") or "")
+                            if ab.get("cookie"):
+                                cookie = False      # refusé : les suivantes attendent aussi
+                            _noter(g, uid, ab=_note_ab(ab))
+                        elif etape == "pays":
+                            rp = lv.poser_pays(lid, equipe)
+                            ok, err = bool(rp.get("ok")), str(rp.get("erreur") or "")
                         elif etape == "safe page":
-                            ok = bool(gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
-                                                            "bot_protection": {"mode": "safe_page"}},
-                                                      equipe).get("ok"))
+                            ru = gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
+                                                       "bot_protection": {"mode": "safe_page"}}, equipe)
+                            ok, err = bool(ru.get("ok")), str(ru.get("error") or "")
                         else:
                             ok = True                    # étape inconnue (ancienne fiche)
                     except Exception as e:               # noqa: BLE001
                         _log(f"reprise {etape} de {cle} : {type(e).__name__}: {str(e)[:100]}")
-                        ok = False
+                        ok, err = False, f"{type(e).__name__}: {e}"
                     if not ok:
                         restes.append(etape)
+                        if compte and passageres_ici and erreur_passagere(err):
+                            compte = False          # panne passagère : refaite au passage suivant
+                            bilan["passageres"].append(f"{uid} : {etape} ({err[:80]})")
                         if compte:
                             essais[etape] = int(essais.get(etape) or 0) + 1
-                _noter(g, uid, manques=restes, essais=essais, a_verifier=bool(a_verifier),
-                       pays="pays" not in restes)
+                fin = {"manques": restes, "essais": essais, "a_verifier": bool(a_verifier),
+                       "pays": "pays" not in restes}
+                if (list(pg.get("manques") or []) != fin["manques"]
+                        or (pg.get("essais") if isinstance(pg.get("essais"), dict) else {}) != fin["essais"]
+                        or bool(pg.get("a_verifier")) != fin["a_verifier"] or pg.get("pays") != fin["pays"]):
+                    # écrit seulement si quelque chose change : le registre
+                    # entier était réécrit (copie .prev, fsync) pour chaque
+                    # page prête à chaque passage, dans la boucle du podium
+                    _noter(g, uid, **fin)
                 if a_verifier:
                     bilan["a_verifier"].append(f"{uid} : {a_verifier}")
+                if attend:
+                    bilan["ab_en_attente"] += 1
                 if manques and not restes:
                     bilan["reprises"].append(uid)
-                elif restes and set(restes) != set(a_verifier):
+                elif restes and set(restes) - set(a_verifier) - ({"70/30"} if attend else set()):
                     bilan["rates"].append(f"{uid} : {restes}")
         except Exception as e:                               # noqa: BLE001
             bilan["rates"].append(f"{uid} : {type(e).__name__}: {str(e)[:80]}")
     if any(bilan.values()):
         _log(f"reprise des pages {gid} : {bilan}")
+    if sur_demande(gid):
+        try:
+            lancer_creations(gid)
+        except Exception as e:                               # noqa: BLE001
+            _log(f"création des pages de {gid} non lancée : {type(e).__name__}: {e}")
     return bilan
+
+
+# ─── Création automatique (serveurs à places fixes) ──────────────────────
+#: Les créations par passage : une copie coûte une vingtaine d'appels
+#: GetMySocial dont une dizaine d'écritures (copie, bouton relu, pays, safe
+#: page, 70/30 avec sa copie temporaire, rangement, relecture), toutes sur la
+#: clé principale. Le rattrapage d'un serveur entier (≈ 3 pages par VA)
+#: s'étale donc sur plusieurs passages de la synchro (30 min).
+CREATIONS_PAR_PASSE = 3
+#: Au-delà, la place attend (« a_verifier » dans « creations », dit au journal
+#: à chaque passage) — CREATION_REESSAI_S, puis un nouvel essai. Pour la
+#: relancer tout de suite : retirer sa clé « gid:uid#n » de « creations »
+#: dans data/pages_va.json. Une panne passagère (erreur_passagere) ne compte
+#: pas.
+ESSAIS_CREATION = 3
+#: Une place « à vérifier » est retentée une fois par jour : une vraie panne
+#: de GetMySocial ne la figeait plus pour toujours, sans geste possible
+#: depuis Discord (seule une retouche du registre sur le VPS la relançait).
+CREATION_REESSAI_S = 24 * 3600
+#: Les demandes en attente dont on relit le message ✅ / ❌ par passage (un GET
+#: Discord chacune) : un message supprimé laissait le VA « ⏳ » à vie.
+DEMANDES_RELUES_PAR_PASSE = 25
+#: Un seul lot de créations à la fois, sans jamais attendre : la synchro
+#: (liens_va.synchroniser) tourne dans la boucle du podium, qui ne doit pas
+#: rester bloquée une minute derrière 3 copies GetMySocial — d'où le fil, et
+#: un verrou non bloquant (comme les 50/50 de web_upload, _variantes) : si le
+#: lot d'avant tourne encore, ce passage-ci n'en lance pas un second.
+_LOT_CREATIONS = threading.Lock()
+#: Quand chaque demande en attente a vu son message relu (en mémoire : la
+#: rotation repart du début après un redémarrage, sans gravité).
+_RELUES: Dict[str, float] = {}
+
+
+def _fil(f) -> None:
+    threading.Thread(target=f, daemon=True, name="pages-va-creations").start()
+
+
+#: Remplaçable par les tests (exécution sur place).
+_FIL = _fil
+
+
+def _creations(d: Dict[str, Any]) -> Dict[str, Any]:
+    c = d.get("creations")
+    if not isinstance(c, dict):
+        c = d["creations"] = {}
+    return c
+
+
+def creation_a_verifier(gid: Any, uid: Any, n: int, d: Optional[Dict[str, Any]] = None) -> bool:
+    """Cette place a épuisé ses essais de création automatique, il y a moins
+    de CREATION_REESSAI_S."""
+    x = ((d if d is not None else _lire()).get("creations") or {}).get(f"{gid}:{place(_vrai_uid(uid), n)}")
+    return bool(isinstance(x, dict) and x.get("a_verifier")
+                and time.time() - float(x.get("quand") or 0) < CREATION_REESSAI_S)
+
+
+def _noter_creation(cle: str, ok: bool, erreur: str = "") -> Dict[str, Any]:
+    """Le compteur d'essais de cette place. Rend la note, avec « ecrit » :
+    faux si le registre a refusé l'écriture (le lot s'arrête alors)."""
+    with _VERROU:
+        d = _lire()
+        c = _creations(d)
+        if ok:
+            c.pop(cle, None)
+            x: Dict[str, Any] = {}
+        else:
+            x = c.get(cle) if isinstance(c.get(cle), dict) else {}
+            x = dict(x, essais=int(x.get("essais") or 0) + 1, erreur=str(erreur)[:200],
+                     quand=int(time.time()))
+            x["a_verifier"] = x["essais"] >= ESSAIS_CREATION
+            c[cle] = x
+        ecrit = _ecrire(d)
+    return dict(x, ecrit=ecrit)
+
+
+def _va_du_serveur(gid: str) -> Dict[str, Dict[str, Any]]:
+    """Les fiches de liens_va de ce serveur, par VA."""
+    import liens_va as lv
+    out: Dict[str, Dict[str, Any]] = {}
+    for c, f in ((lv._etat().get("liens") or {}).items()):
+        g, _s, u = str(c).partition(":")
+        if g == gid and u and isinstance(f, dict):
+            out[u] = f
+    return out
+
+
+def etat_place(gid: Any, uid: Any, n: int, d: Optional[Dict[str, Any]] = None,
+               hors_service: str = "") -> Tuple[str, str]:
+    """Ce que montre le menu pour la place n de ce VA : (« prete », adresse),
+    (« coupee », adresse), (« en_preparation », « »), (« a_reprendre », « »),
+    ou, sans page quand le VA est hors service (`hors_service` : la raison
+    d'en_service), (« coupee », « ») ou (« sans_lien », « ») — rien ne s'y
+    préparera, « ⏳ » mentirait. Seul endroit qui le décide. `d` : le
+    registre déjà lu."""
+    d = d if d is not None else _lire()
+    pg = (d.get("pages") or {}).get(f"{gid}:{place(_vrai_uid(uid), n)}")
+    pg = pg if isinstance(pg, dict) else {}
+    if pg.get("link_id"):
+        etat = pg.get("etat", "prete")
+        if etat == "prete":
+            return ("coupee" if pg.get("actif", True) is False else "prete"), str(pg.get("public_url") or "")
+        if etat == "ratee":
+            return "a_reprendre", ""
+        return "en_preparation", ""                    # en_cours : la copie se fait
+    if hors_service:
+        return ("coupee" if hors_service == "coupe" else "sans_lien"), ""
+    return ("a_reprendre" if creation_a_verifier(gid, uid, n, d) else "en_preparation"), ""
+
+
+def balayer_demandes(gid: str, tickets: Dict[str, Any]) -> Dict[str, Any]:
+    """Les demandes en attente que plus aucun bouton ne peut trancher,
+    annulées (le VA retrouve ➕) et dites : message jamais posé (redémarrage
+    entre la note et le POST), message supprimé (relu, 404), ticket refait
+    (autre salon), VA parti. `tickets` : l'état des tickets déjà lu. Ne lève
+    pas."""
+    import tickets_discord as tk
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"annulees": [], "relues": 0}
+    a_relire: List[Tuple[str, Dict[str, Any]]] = []
+    for did, x in list((_lire().get("demandes") or {}).items()):
+        if not (isinstance(x, dict) and str(x.get("gid")) == gid and x.get("etat") == "attente"):
+            continue
+        uid = str(x.get("uid") or "")
+        t = tickets.get(f"{gid}:{uid}") if isinstance(tickets.get(f"{gid}:{uid}"), dict) else {}
+        raison = ""
+        if _sans_message_depuis_trop(x):
+            raison = "message jamais posé (redémarrage ?)"
+        elif not x.get("message"):
+            continue                    # le fil le pose en ce moment
+        elif t.get("parti"):
+            raison = "VA parti"
+        elif t.get("salon") and str(t["salon"]) != str(x.get("salon") or ""):
+            raison = "ticket refait (autre salon)"
+        else:
+            a_relire.append((str(did), x))
+            continue
+        if annuler_demande(did, raison):
+            bilan["annulees"].append(f"{uid} : {raison}")
+            _menu_a_jour(gid, uid)
+    a_relire.sort(key=lambda dx: _RELUES.get(dx[0], 0.0))
+    for did, x in a_relire[:DEMANDES_RELUES_PAR_PASSE]:
+        _RELUES[did] = time.time()
+        bilan["relues"] += 1
+        try:
+            import verif_discord as vd
+            with vd.sur_serveur(gid):
+                code, _r = tk._api_reseau("GET", f"/channels/{x.get('salon')}/messages/{x.get('message')}")
+        except Exception as e:                               # noqa: BLE001
+            _log(f"demande {did} : message non relu ({type(e).__name__}: {e})")
+            continue
+        # 404 seulement (message ou salon inconnus) : une panne, un 403 ou un
+        # 429 ne disent pas que le message a disparu
+        if code == 404 and annuler_demande(did, "message disparu (supprimé ?)"):
+            bilan["annulees"].append(f"{x.get('uid')} : message disparu")
+            _menu_a_jour(gid, str(x.get("uid") or ""))
+    for did in [k for k in _RELUES if k not in dict(a_relire)]:
+        _RELUES.pop(did, None)
+    if bilan["annulees"]:
+        _log(f"demandes de pages {gid} sans réponse possible, annulées : {bilan['annulees']}")
+    return bilan
+
+
+def _registre_ecrit() -> bool:
+    """Le registre s'écrit-il ? Relu et réécrit tel quel sous _VERROU (jamais
+    un instantané plus vieux : il écraserait un ✅ tranché entre-temps)."""
+    with _VERROU:
+        return _ecrire(_lire())
+
+
+def _pause_ecritures() -> int:
+    """Secondes de pause des écritures GetMySocial (0 : libre)."""
+    import gms
+    try:
+        return int(gms.pause_restante("ecriture") or 0)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"pause GetMySocial illisible : {type(e).__name__}: {e}")
+        return 0
+
+
+def creer_pages_manquantes(gid: str) -> Dict[str, Any]:
+    """Les places de chaque VA en service (en_service) qui n'ont pas encore de
+    page prête : les places fixes, et les pages acceptées dont la copie a
+    raté ou n'a pas eu lieu (redémarrage). Les pages acceptées d'abord (un
+    manager les a voulues), puis place par place (la page 1 de chacun avant
+    la page 2 de personne). CREATIONS_PAR_PASSE au plus, chaque place
+    ESSAIS_CREATION fois au plus (puis une fois par CREATION_REESSAI_S) ; une
+    panne passagère de GetMySocial arrête le lot sans rien compter ; un
+    registre qui refuse l'écriture l'arrête aussi. Une page ratée ne bloque
+    pas les autres. Balaie d'abord les demandes sans réponse possible.
+    Rend un bilan ; ne lève pas."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"creees": [], "ratees": [], "a_verifier": [], "restent": 0,
+                             "passageres": [], "ignores": {"sans_lien": 0, "coupe": 0, "parti": 0}}
+    if not sur_demande(gid) or not PILOTE.get(gid):
+        return bilan
+    vas = _va_du_serveur(gid)
+    try:
+        import tickets_discord as tk
+        etat_tk = tk._etat()
+        tickets = etat_tk.get("tickets") if isinstance(etat_tk, dict) else None
+        if not isinstance(tickets, dict) and vas:
+            # tk._etat rend {} sur un fichier (et son .prev) illisible : sans
+            # ce contrôle, personne n'était « parti »
+            raise ValueError("état des tickets vide ou illisible")
+        tickets = tickets if isinstance(tickets, dict) else {}
+    except Exception as e:                                   # noqa: BLE001
+        # sans savoir qui est parti, ne rien créer : une page vivante sur le
+        # tracking d'un VA parti serait pire qu'un passage sauté
+        _log(f"pages de {gid} : tickets illisibles ({type(e).__name__}: {e}), aucune création ce passage")
+        bilan["erreur"] = "tickets illisibles"
+        return bilan
+    try:
+        bilan["demandes"] = balayer_demandes(gid, tickets)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"demandes de pages {gid} non balayées : {type(e).__name__}: {e}")
+    a_faire: List[Tuple[int, int, str]] = []
+    reg = _lire()                       # un instantané pour le tour : relu par creer_page ensuite
+    for uid, f in sorted(vas.items()):
+        sert, raison = en_service(gid, uid, fiche=f, ticket=tickets.get(f"{gid}:{uid}") or {})
+        if not sert:
+            bilan["ignores"][raison] = bilan["ignores"].get(raison, 0) + 1
+            continue
+        for n in places(gid, uid, reg):
+            pg = reg["pages"].get(f"{gid}:{place(uid, n)}")
+            pg = pg if isinstance(pg, dict) else {}
+            if pg.get("link_id") and pg.get("etat", "prete") in ("prete", "en_cours"):
+                continue            # prête, ou en cours (la reprise coupe une création interrompue)
+            if creation_a_verifier(gid, uid, n, reg):
+                bilan["a_verifier"].append(place(uid, n))
+                continue
+            a_faire.append((0 if modifiable(gid, n) else 1, n, uid))
+    pause = _pause_ecritures() if a_faire else 0
+    if pause:
+        # rien ne passerait : ni essai compté, ni copie tentée
+        bilan["restent"] = len(a_faire)
+        bilan["passageres"].append(f"quota des écritures GetMySocial, reprise dans {pause // 60} min")
+        a_faire = []
+    elif a_faire and not _registre_ecrit():
+        # le registre refuse d'écrire (disque plein, droits) : une copie
+        # créée serait inconnue de lui, donc refaite à chaque passage
+        bilan["restent"] = len(a_faire)
+        bilan["erreur"] = "registre non écrit"
+        a_faire = []
+    faites = 0
+    for i, (_prio, n, uid) in enumerate(sorted(a_faire)):
+        cle = f"{gid}:{place(uid, n)}"
+        if faites >= CREATIONS_PAR_PASSE:
+            bilan["restent"] += 1
+            continue
+        with _VERROU:
+            en_cours = cle in _CREATIONS
+        if en_cours:
+            continue                # un clic la crée en ce moment
+        if i and _pause_ecritures():
+            bilan["restent"] += len(a_faire) - i
+            bilan["passageres"].append("quota des écritures GetMySocial")
+            break
+        faites += 1
+        try:
+            r = creer_page(gid, uid, par="auto", n=n)
+        except Exception as e:                               # noqa: BLE001
+            r = {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:120]}"}
+        if r.get("ok"):
+            _noter_creation(cle, True)
+            bilan["creees"].append(place(uid, n))
+            _apres_creation(gid, uid, n, str(r.get("url") or ""))
+            continue
+        if r.get("erreur") == "création déjà en cours":
+            faites -= 1             # rien tenté : ni essai ni place du plafond
+            continue
+        if r.get("disque"):
+            bilan["erreur"] = "registre non écrit"
+            bilan["restent"] += len(a_faire) - i        # la copie est coupée : sa place reste à faire
+            break
+        if erreur_passagere(r.get("erreur")):
+            # GetMySocial ne répond pas : les suivantes échoueraient pareil
+            bilan["passageres"].append(f"{place(uid, n)} : {str(r.get('erreur'))[:100]}")
+            bilan["restent"] += len(a_faire) - i
+            break
+        x = _noter_creation(cle, False, str(r.get("erreur") or "?"))
+        bilan["ratees"].append(f"{place(uid, n)} : {r.get('erreur')}")
+        if x.get("a_verifier"):
+            bilan["a_verifier"].append(place(uid, n))
+        if not x.get("ecrit"):
+            bilan["erreur"] = "registre non écrit"
+            bilan["restent"] += len(a_faire) - i - 1
+            break
+    if (bilan["creees"] or bilan["ratees"] or bilan["a_verifier"] or bilan["passageres"]
+            or bilan.get("erreur") or any(bilan["ignores"].values())):
+        # les VA écartés sont dits à chaque passage (« ne jamais écarter en
+        # silence »), même quand rien d'autre n'a eu lieu
+        _log(f"création des pages {gid} : créées {bilan['creees']}, ratées {bilan['ratees'][:5]}, "
+             f"à vérifier {bilan['a_verifier'][:10]}, restent {bilan['restent']}, "
+             f"en attente {bilan['passageres'][:3]}, VA écartés {bilan['ignores']}"
+             + (f", ERREUR {bilan['erreur']}" if bilan.get("erreur") else ""))
+    return bilan
+
+
+def _apres_creation(gid: str, uid: str, n: int, url: str) -> None:
+    """Une page créée par la reprise : le menu du ticket la montre, et le
+    message de sa demande (page acceptée) prend son adresse — sinon, après
+    un redémarrage pendant la copie, il disait « en création » à vie."""
+    _menu_a_jour(gid, uid)
+    if not modifiable(gid, n):
+        return
+    x = demande_de_place(gid, uid, n)
+    if not (x.get("salon") and x.get("message")) or x.get("message_maj"):
+        return
+    try:
+        import tickets_discord as tk
+        import verif_discord as vd
+        with vd.sur_serveur(gid):
+            code = tk.maj_message_demande(uid, x, n, url)
+        if code == 200:
+            noter_message_maj(x["id"])
+        else:
+            _log(f"demande {x['id']} : message non mis à jour (HTTP {code})")
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"demande {x.get('id')} : message non mis à jour : {type(e).__name__}: {e}")
+
+
+def _menu_a_jour(gid: str, uid: str) -> None:
+    """Le menu du ticket montre l'adresse aussitôt (sinon au tour suivant)."""
+    try:
+        import tickets_discord as tk
+        import verif_discord as vd
+        with vd.sur_serveur(gid):
+            tk._maj_menu_v2(gid, uid)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"menu de {gid}:{uid} non remis à jour : {type(e).__name__}: {e}")
+
+
+def lancer_creations(gid: str) -> str:
+    """creer_pages_manquantes en fond, un lot à la fois. Rend « lancee »,
+    « occupee » (le lot d'avant tourne encore) ou « rien »."""
+    gid = str(gid)
+    if not sur_demande(gid) or not PILOTE.get(gid):
+        return "rien"
+    if not _LOT_CREATIONS.acquire(blocking=False):
+        _log(f"création des pages {gid} : le lot d'avant tourne encore, rien de lancé")
+        return "occupee"
+
+    def travail() -> None:
+        try:
+            creer_pages_manquantes(gid)
+        except Exception as e:                               # noqa: BLE001
+            _log(f"création des pages {gid} : {type(e).__name__}: {e}")
+        finally:
+            _LOT_CREATIONS.release()
+    try:
+        _FIL(travail)
+    except Exception:
+        _LOT_CREATIONS.release()
+        raise
+    return "lancee"
