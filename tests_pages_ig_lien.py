@@ -171,7 +171,9 @@ SAV = {(m, n): getattr(m, n) for m, n in (
     (gms, "list_links_team"), (lv, "_etat"), (pv, "FICHIER"), (pv, "EN_FOND"), (pv, "LOOKS_PAR_PASSE"),
     (pv, "_reprendre_pages_avant_page1"), (tk, "_suite"), (tk, "_EN_FOND"), (tk, "_fiche"),
     (tk, "_maj_menu_v2"), (tk, "_api_reseau"), (gms, "lire_ab_testing"), (gms, "_ab_prive"),
-    (gms, "duplicate_link"), (gms, "delete_link"), (pv, "BASE_EN_PAGE"), (lv, "lia_seule"))}
+    (gms, "duplicate_link"), (gms, "delete_link"), (pv, "BASE_EN_PAGE"), (lv, "lia_seule"),
+    (pv, "LOOK_IMPOSE"), (pv, "PAUSE_LIENS_S"))}
+SAV_DEFAUT = dict(pv.LOOK_DEFAUT)
 SUITES, MENUS = [], []
 try:
     gms.get_link, gms.update_link, gms.disable_link, gms.enable_link = f_get, f_update, f_disable, f_enable
@@ -198,8 +200,14 @@ try:
           pv.gabarit(AG, 2) == pv.gabarit(AG, 7) == "lnk_6aedd88bc7881b6c8066a247")
     check("… la page 1 ne se modifie pas par la fenêtre ; les pages demandées oui",
           not pv.modifiable(AG, 1) and pv.modifiable(AG, 2) and pv.modifiable(AG, 9))
-    check("… les mêmes looks que Twitter (Brune, Blonde, Général), brune par défaut",
-          pv.looks(AG) == pv.looks(TW) and pv.LOOK_DEFAUT.get(AG) == "brune")
+    check("… les mêmes looks que Twitter (Brune, Blonde, Général) ; blonde par défaut et imposée aux deux serveurs "
+          "(« Blonde à tous », 06/11 23 h)",
+          pv.looks(AG) == pv.looks(TW) and pv.LOOK_DEFAUT.get(AG) == "blonde"
+          and pv.LOOK_IMPOSE.get(AG, ("",))[0] == pv.LOOK_IMPOSE.get(TW, ("",))[0] == "blonde")
+    # les sections 2 à 10 testent les mécanismes avec la brune par défaut, sans look imposé (section 11)
+    pv.LOOK_DEFAUT[AG] = "brune"
+    pv.LOOK_IMPOSE = {}
+    pv.PAUSE_LIENS_S = 0
     check("Twitter inchangé : pas de demandes, plancher 0, 1 page modifiable, pas de look par défaut",
           not pv.sur_demande(TW) and not pv.lien_page_1(TW) and pv.plancher(TW) == 0
           and pv.places(TW, VA) == [1] and pv.modifiable(TW, 1) and not pv.LOOK_DEFAUT.get(TW))
@@ -609,9 +617,51 @@ try:
     b2 = pv.poser_bases_en_page(AG)
     check("le 429 passé : habillage et page des 30 % faits", "lildreamyy" in b["poses"] and "refusyy" in b2["poses"]
           and pv._lire()["looks_liens"][f"{AG}:{VA2}"].get("habillage") == pv.HABILLAGE_VERSION, (b, b2))
+
+    print("11. « Blonde à tous » : le look imposé une fois par marque")
+    MQ = "essai-blonde"
+    pv.LOOKS_PAR_PASSE = 20                      # (2 depuis la section 4)
+    pv.LOOK_IMPOSE = {AG: ("blonde", MQ), TW: ("blonde", MQ)}
+    LIENS["lnk_t1"]["profile_picture_slides"] = []
+    n = len(APPELS)
+    b = pv.imposer_looks(AG)
+    b_tw = pv.imposer_looks(TW)
+    actifs = ["newyy", "lildreamyy", "angelyy", "refusyy"]
+    check("Instagram : chaque lien principal actif passe en blonde (lien coupé laissé), la page demandée aussi",
+          sorted(b["poses"]) == sorted(actifs + ["kittyyy"])
+          and all(LIENS[l]["profile_picture"] == BLONDE[3] for l in ("lnk_m1b", "lnk_m2", "lnk_m4", "lnk_m5", "lnk_d1"))
+          and LIENS["lnk_m3"]["profile_picture"] != BLONDE[3], b)
+    check("… même ceux qui avaient choisi un autre look (Général pour VA4)", pv.look_du_lien(AG, VA4) == "blonde")
+    check("… habillage gardé (nom blanc, MY FREE 0F)", LIENS["lnk_m4"]["name_user"].startswith("{{color:#ffffff}}")
+          and LIENS["lnk_m4"]["buttons"][0]["label"] == "MY FREE 0F 🔗")
+    check("Twitter : ses pages passent en blonde", b_tw["poses"] == ["starrdollyy"]
+          and LIENS["lnk_t1"]["profile_picture"] == BLONDE[3] and pv.page_de(TW, "160").get("look") == "blonde", b_tw)
+    n = len(APPELS)
+    check("une seule fois : le passage suivant ne refait rien",
+          pv.imposer_looks(AG) == {"poses": [], "rates": []} and pv.imposer_looks(TW) == {"poses": [], "rates": []}
+          and not [a for a in APPELS[n:] if a[0] == "update"])
+    pv.appliquer_look(AG, VA, "general", n=1)
+    pv.imposer_looks(AG)
+    check("le VA choisit ensuite Général : il le garde", pv.look_du_lien(AG, VA) == "general")
+    pv._noter(TW, "161", link_id="lnk_t2", shortcode="newtwyy", etat="prete", actif=True)
+    LIENS["lnk_t2"] = lien_gms("lnk_t2", "newtwyy", 161, "Twitter VA 161 @y page")
+    b = pv.imposer_looks(TW)
+    check("une page Twitter créée après : blonde une fois", b["poses"] == ["newtwyy"]
+          and LIENS["lnk_t2"]["profile_picture"] == BLONDE[3], b)
+    pv.LOOK_DEFAUT[AG] = "blonde"
+    LIENS["lnk_m6"] = lien_gms("lnk_m6", "neufyy", 97, "Instagram VA 97 @f")
+    FICHES[f"{AG}:5006"] = fiche(97, "f", "lnk_m6", "neufyy")
+    n = len(APPELS)
+    pv.poser_looks_par_defaut(AG)
+    b = pv.imposer_looks(AG)
+    check("un nouveau VA Instagram : blonde par défaut, une seule fois (pas reposée par le look imposé)",
+          LIENS["lnk_m6"]["profile_picture"] == BLONDE[3] and b["poses"] == []
+          and len([a for a in APPELS[n:] if a[0] == "update" and a[1] == "lnk_m6"]) == 2, (b, APPELS[n:]))
 finally:
     for (m, n), v in SAV.items():
         setattr(m, n, v)
+    pv.LOOK_DEFAUT.clear()
+    pv.LOOK_DEFAUT.update(SAV_DEFAUT)
 
 check("aucune connexion réseau tentée", not SORTIES, SORTIES)
 print("=" * 70)

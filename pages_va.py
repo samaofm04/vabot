@@ -2534,6 +2534,8 @@ def poser_looks_par_defaut(gid: str) -> Dict[str, Any]:
             and int(x.get("essais_habillage") or 0) < ESSAIS_REPRISE
         if meme and (x.get("cle") or int(x.get("essais") or 0) >= ESSAIS_REPRISE) and not rehabiller:
             continue
+        if faits:
+            time.sleep(PAUSE_LIENS_S)
         faits += 1
         try:
             # la page des 30 % : refaite par l'étape suivante de la reprise,
@@ -2543,6 +2545,9 @@ def poser_looks_par_defaut(gid: str) -> Dict[str, Any]:
             r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
         if r.get("ok"):
             bilan["poses"].append(str(f.get("shortcode") or lid))
+            imp = LOOK_IMPOSE.get(gid)
+            if imp and imp[0] == (str(x["cle"]) if rehabiller else cle_def):
+                _noter_look_lien(gid, uid, impose=imp[1])
         elif panne_globale(r.get("erreur")):
             bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')} (passagère : passage arrêté, rien compté)")
             break
@@ -2566,17 +2571,22 @@ _reprendre_pages_avant_page1 = reprendre_pages
 
 def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
     rangees: List[str] = []
+    etapes: List[Tuple[str, Any]] = []
     if lien_page_1(gid):
         # rangées AVANT la reprise : elle rallumerait une page coupée de « pages »
-        for nom_etape, etape in (("rangement", retirer_pages_hors_places), ("orphelines", couper_copies_orphelines),
-                                 ("look par défaut", poser_looks_par_defaut),
-                                 ("pages des 30 % sans tracking", poser_bases_en_page)):
-            try:
-                b = etape(gid)
-                if nom_etape == "rangement":
-                    rangees = list(b.get("rangees") or [])
-            except Exception as e:                           # noqa: BLE001
-                _log(f"pages {gid} : {nom_etape} en échec ({type(e).__name__}: {e})")
+        etapes += [("rangement", retirer_pages_hors_places), ("orphelines", couper_copies_orphelines),
+                   ("look par défaut", poser_looks_par_defaut)]
+    if str(gid) in LOOK_IMPOSE:
+        etapes.append(("look imposé", imposer_looks))
+    if lien_page_1(gid):
+        etapes.append(("pages des 30 % sans tracking", poser_bases_en_page))
+    for nom_etape, etape in etapes:
+        try:
+            b = etape(gid)
+            if nom_etape == "rangement":
+                rangees = list(b.get("rangees") or [])
+        except Exception as e:                               # noqa: BLE001
+            _log(f"pages {gid} : {nom_etape} en échec ({type(e).__name__}: {e})")
     bilan = _reprendre_pages_avant_page1(gid)
     vas = sorted({_vrai_uid(c.partition(":")[2]) for c in rangees})
     if vas:
@@ -2776,6 +2786,8 @@ def poser_bases_en_page(gid: str, seul: str = "") -> Dict[str, Any]:
             x = (_lire().get("bases_page") or {}).get(lid) or {}
             if x.get("etat") == etat:
                 continue
+            if faits:
+                time.sleep(PAUSE_LIENS_S)
             faits += 1
             try:
                 r = poser_base_en_page(gid, lid, verrou=verrou)
@@ -2858,3 +2870,89 @@ def _habiller_lien(gid: str, lid: str) -> Dict[str, Any]:
             b.get("label") != style["label"] for b in _boutons_of(l2.get("buttons"))):
         return {"ok": False, "erreur": "relu sans le nom, la bio ou le bouton du gabarit"}
     return {"ok": True, "erreur": ""}
+
+
+# ─── Un look imposé à tous (06/11/2026, 23 h) ──────────────────────────────
+# Propriétaire, après avoir vu les trois looks : « vas-y envoie pour INSTA et
+# TWITTER », puis, à la question « envoyer quoi ? », « Blonde à tous » :
+# chaque lien principal (TRUST INSTAGRAM) et chaque page (les deux serveurs)
+# passe en blonde. Une fois par MARQUE : ce qui existe la reçoit au passage
+# suivant, ce qui naît après aussi (une page Twitter neuve copie le gabarit
+# brune) ; un VA qui choisit ensuite un autre look le garde. Une nouvelle
+# consigne = une nouvelle marque.
+LOOK_IMPOSE: Dict[str, Tuple[str, str]] = {AGENCY_IG_ID: ("blonde", "2026-11-06-blonde-a-tous"),
+                                           TWITTER_ID: ("blonde", "2026-11-06-blonde-a-tous")}
+LOOK_DEFAUT[AGENCY_IG_ID] = "blonde"
+#: Entre deux liens écrits d'affilée : 17 liens enchaînés ont pris des 429 à
+#: la minute le 06/11 au soir (« Requests remaining this minute: 0 »).
+PAUSE_LIENS_S = 2.0
+
+
+def imposer_looks(gid: str) -> Dict[str, Any]:
+    """LOOK_IMPOSE : le look sur chaque lien principal (LIEN_PAGE_1) et chaque
+    page notée de ce serveur qui n'a pas encore la marque — LOOKS_PAR_PASSE
+    au plus ; une panne de tout le compte arrête le passage sans rien
+    compter ; un refus propre compte, ESSAIS_REPRISE fois. Ne lève pas."""
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    imp = LOOK_IMPOSE.get(gid)
+    if not imp or imp[0] not in {x[0] for x in looks(gid)}:
+        return bilan
+    cle, marque = imp
+    d = _lire()
+    a_faire: List[Tuple[str, str, int, str]] = []                # (genre, uid, n, nom)
+    if lien_page_1(gid):
+        ll = d.get("looks_liens") if isinstance(d.get("looks_liens"), dict) else {}
+        for uid, f in sorted(_va_du_serveur(gid).items()):
+            lid = str(f.get("link_id") or "")
+            if not (lid and f.get("public_url")) or f.get("actif", True) is False:
+                continue
+            x = ll.get(_cle_lien(gid, uid)) if isinstance(ll.get(_cle_lien(gid, uid)), dict) else {}
+            if str(x.get("link_id") or "") == lid and (x.get("impose") == marque
+                                                       or int(x.get("essais_impose") or 0) >= ESSAIS_REPRISE):
+                continue
+            a_faire.append(("lien", uid, 1, str(f.get("shortcode") or lid)))
+    for c, pg in sorted((d.get("pages") or {}).items()):
+        g, _s, u = str(c).partition(":")
+        if g != gid or not isinstance(pg, dict) or not pg.get("link_id") or pg.get("etat", "prete") != "prete":
+            continue
+        if pg.get("look_impose") == marque or int(pg.get("essais_impose") or 0) >= ESSAIS_REPRISE:
+            continue
+        a_faire.append(("page", u, numero_de_place(u), str(pg.get("shortcode") or pg["link_id"])))
+    faits = 0
+    for genre, u, n, nom in a_faire:
+        if faits >= LOOKS_PAR_PASSE:
+            break
+        if faits:
+            time.sleep(PAUSE_LIENS_S)
+        faits += 1
+        try:
+            if genre == "lien":
+                r = _look_sur_lien(gid, u, cle, refaire_base=False)
+            else:
+                r = appliquer_look(gid, _vrai_uid(u), cle, n=n)
+        except Exception as e:                               # noqa: BLE001
+            r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+        if r.get("ok"):
+            if genre == "lien":
+                _noter_look_lien(gid, u, impose=marque, essais_impose=0)
+            else:
+                _noter(gid, u, look_impose=marque, essais_impose=0)
+            bilan["poses"].append(nom)
+            continue
+        if panne_globale(r.get("erreur")):
+            bilan["rates"].append(f"{nom} : {r.get('erreur')} (passagère : passage arrêté, rien compté)")
+            break
+        if erreur_passagere(r.get("erreur")):
+            bilan["rates"].append(f"{nom} : {r.get('erreur')} (passagère, rien compté)")
+            continue
+        if genre == "lien":
+            x = (_lire().get("looks_liens") or {}).get(_cle_lien(gid, u)) or {}
+            _noter_look_lien(gid, u, essais_impose=int(x.get("essais_impose") or 0) + 1)
+        else:
+            _noter(gid, u, essais_impose=int(page_de(gid, u).get("essais_impose") or 0) + 1)
+        bilan["rates"].append(f"{nom} : {r.get('erreur')}")
+    if bilan["poses"] or bilan["rates"]:
+        _log(f"look « {cle} » imposé sur {gid} : {len(bilan['poses'])} lien(s)/page(s)"
+             + (f", ratés : {'; '.join(bilan['rates'][:5])}" if bilan["rates"] else ""))
+    return bilan
