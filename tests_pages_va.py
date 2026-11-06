@@ -3,8 +3,10 @@
 
 Propriétaire : « je veux avoir 2 liens pour les VA, un direct et un landing page
 qu'ils peuvent modifier » ; photo (il dépose une image), nom et bio, texte du
-bouton, image de fond ; même tracking, pays, safe page, PAS de 70/30 (« ça doit pas être 70 30 ») ; (
-page) ; essai sur lui seul, hors classement.
+bouton, image de fond ; même tracking, pays, safe page, PAS de 70/30 (« ça doit pas être 70 30 ») ;
+essai sur lui seul, hors classement — puis (06/11) « pour tout le monde » : sur
+Twitter 1 lien direct + 1 page, que le VA crée lui-même ; TRUST INSTAGRAM 3
+pages par VA, éteint tant que son gabarit n'existe pas.
 
 Sans réseau ni data/ : gms, requests et liens_va sont remplacés là où il faut,
 le registre vit dans un dossier temporaire.
@@ -186,8 +188,13 @@ try:
     check("fond : une image unie de la couleur", fond.size == pv.FOND_TAILLE and fond.getpixel((5, 5))[0] > 200)
 
     # ── 2. pilote ────────────────────────────────────────────────────────
-    check("pilote : le propriétaire seul sur Twitter", pv.ouverte(TW, MOI) and not pv.ouverte(TW, VA)
-          and not pv.ouverte("1488331963575177247", MOI))
+    AG = pv.AGENCY_IG_ID
+    check("Twitter ouvert à tous les VA ; TRUST INSTAGRAM fermé tant qu'il n'a pas de gabarit",
+          pv.ouverte(TW, MOI) and pv.ouverte(TW, VA) and not pv.ouverte(AG, MOI) and not pv.GABARIT_PAGE.get(AG))
+    check("une page par VA sur Twitter (1 direct + 1 page), 3 sur TRUST INSTAGRAM",
+          pv.pages_max(TW) == 1 and pv.pages_max(AG) == 3 and pv.pages_max("999") == 1)
+    check("places : « uid », « uid#2 », « uid#3 »", pv.place(VA, 1) == VA and pv.place(VA, 2) == f"{VA}#2"
+          and pv._vrai_uid(f"{VA}#3") == VA)
 
     # ── 3. création ──────────────────────────────────────────────────────
     print("3. Création")
@@ -520,7 +527,11 @@ try:
     check("pilote : « 📄 Ta page » juste sous « 🔗 Ton lien », avec ✏️ Modifier",
           t[i_lien + 1].startswith("**📄 Ta page**\nhttps://getmysocial.com/") and f"page:o:{MOI}" in ids(corps), t)
     FICHES[f"{TW}:{VA}"]["actif"] = True
-    check("un VA hors pilote : menu inchangé", tk._corps_menu(TW, VA, []) == tk._corps_menu_sans_page(TW, VA, []))
+    check("un membre sans lien direct : menu inchangé",
+          tk._corps_menu(TW, AUTRE, []) == tk._corps_menu_sans_page(TW, AUTRE, []))
+    check("Twitter : une seule page, jamais de « Page 2 » à créer",
+          not [c for c in ids(tk._corps_menu(TW, MOI, [])) if c.startswith("page:new2")]
+          and "1 page(s) au plus" in pv.creer_page(TW, MOI, n=2)["erreur"])
     _vf = tk._fiche
     tk._fiche = lambda g, u: {"parti": 1}
     check("parti : ni lien ni page dans son menu", tk._section_page(TW, MOI) is None)
@@ -581,8 +592,13 @@ try:
     check("✏️ Modifier : la fenêtre s'ouvre", r.get("type") == 9 and r["data"]["custom_id"] == f"page:f:{MOI}", r)
     r = tk.traiter(clic(f"page:o:{MOI}", qui=AUTRE))
     check("un autre membre (pas manager) : refusé", r["type"] == 4 and r["data"]["flags"] == 64, r)
-    r = tk.traiter(clic(f"page:o:{VA}", qui=VA))
-    check("hors pilote : refusé", r["type"] == 4 and "Pas encore" in r["data"]["content"], r)
+    r = tk.traiter(clic(f"page:o:{AUTRE}", qui=AUTRE))
+    check("✏️ Modifier sans page : refusé", r["type"] == 4 and "Pas encore de page" in r["data"]["content"], r)
+    r = tk.traiter(clic(f"page:o2:{MOI}"))
+    check("une place au-delà du plafond (page 2 sur Twitter) : refusée",
+          r["type"] == 4 and "Pas encore ouvert" in r["data"]["content"], r)
+    r = tk.traiter(clic(f"page:oo:{MOI}"))
+    check("un custom_id abîmé : « Action inconnue. »", r["data"].get("content") == "Action inconnue.", r)
 
     def fen(nom="Lia x", bio="hello\nworld", bouton="Mon OF 🔥", fond=None, photo=None):
         return [{"type": 18, "component": {"type": 19, "custom_id": "photo", "values": photo or []}},
@@ -599,7 +615,7 @@ try:
     r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(nom="Nouveau")))
     check("seuls les champs changés partent (le nom), en fond ; « ✅ Ta page est à jour. »",
           r == {"type": 5, "data": {"flags": 64}} and VUS[-1] == {"nom": "Nouveau", "bio": None, "bouton": None,
-                                                                   "photo": None, "fond": None}
+                                                                   "photo": None, "fond": None, "n": 1}
           and SUITES[-1] == "✅ Ta page est à jour.", (r, VUS, SUITES))
     r = tk.traiter(clic(f"page:f:{MOI}", typ=5, comps=fen(bio="")))
     check("la bio vidée : voulue (le champ était prérempli)", VUS[-1]["bio"] == "", VUS[-1])
@@ -647,9 +663,118 @@ try:
           SUITES[-1])
     d1["pages"][f"{TW}:{MOI}"]["manques"] = []
     pv._ecrire(d1)
+    r = tk.traiter(clic(f"page:new:{MOI}", qui=AUTRE))
+    check("📄 Créer par un autre membre (pas manager) : refusé",
+          r["type"] == 4 and "Seul ce VA ou son manager" in r["data"]["content"], r)
+    n_suites = len(SUITES)
     r = tk.traiter(clic(f"page:new:{MOI}", qui=MOI))
-    check("📄 Créer par un non-manager : refusé", r["type"] == 4 and "manager" in r["data"]["content"], r)
+    check("📄 Créer par le VA lui-même (sans être manager) : accepté",
+          r == {"type": 5, "data": {"flags": 64}} and len(SUITES) == n_suites + 1
+          and SUITES[-1].startswith("✅ Ta page"), (r, SUITES[-1:]))
     check("un clic d'un autre module passe son chemin", tk._page(clic("usdc:set:1")) is None)
+
+    # ── 7b. plusieurs pages (TRUST INSTAGRAM, 3 places) ──────────────────
+    print("7b. Plusieurs pages")
+    check("TRUST INSTAGRAM sans gabarit : aucune section, aucun bouton", tk._sections_page(AG, VA) == [])
+    VI = "4100"
+    FICHES[f"{AG}:{VI}"] = dict(FICHE, numero=141, pseudo="vaig", tracking="https://onlyfans.com/x/c400",
+                                link_id="lnk_direct_ig", public_url="https://getmysocial.com/directig")
+    pv.GABARIT_PAGE[AG] = "lnk_gab_ig"
+    pv.PILOTE[AG] = {"*"}
+    tk._etat = lambda: {"tickets": {f"{TW}:{MOI}": {"salon": "T1"}, f"{AG}:{VI}": {"salon": "T9"}}}
+    try:
+        sec = tk._sections_page(AG, VI)
+        check("aucune page : « 📄 Page 1 » à créer, une seule section",
+              len(sec) == 1 and textes(sec)[0] == "**📄 Page 1**\n-# Pas encore créée"
+              and ids(sec) == [f"page:new:{VI}"], sec)
+        r = pv.creer_page(AG, VI, n=2)
+        check("la page 2 avant la page 1 : refusée, rien créé",
+              not r["ok"] and "page 1" in r["erreur"] and not pv.page_de(AG, pv.place(VI, 2)), r)
+
+        def clic_ig(cid, qui=VI, **k):
+            q = clic(cid, qui=qui, **k)
+            q["guild_id"], q["channel_id"] = AG, "T9"
+            return q
+        APPELS.clear()
+        POSES.clear()
+        r = tk.traiter(clic_ig(f"page:new:{VI}"))
+        p1 = pv.page_de(AG, VI)
+        check("le VA crée sa page 1 lui-même", r == {"type": 5, "data": {"flags": 64}} and p1.get("etat") == "prete"
+              and SUITES[-1].startswith("✅ Ta page"), (r, p1, SUITES[-1:]))
+        sec = tk._sections_page(AG, VI)
+        check("page 1 prête : son adresse + ✏️, puis « 📄 Page 2 » à créer",
+              [x.split("\n")[0] for x in textes(sec)] == ["**📄 Page 1**", "**📄 Page 2**"]
+              and ids(sec) == [f"page:o:{VI}", f"page:new2:{VI}"], (textes(sec), ids(sec)))
+        r = tk.traiter(clic_ig(f"page:new2:{VI}"))
+        p2 = pv.page_de(AG, pv.place(VI, 2))
+        dup = [a for a in APPELS if a[0] == "duplicate"]
+        check("page 2 : une 2e copie du gabarit, « … page 2 », sur le MÊME tracking",
+              p2.get("etat") == "prete" and p2.get("link_id") not in ("", None, p1.get("link_id"))
+              and len(dup) == 2 and str(p2.get("nom", "")).endswith(" page 2")
+              and POSES == [(p1["link_id"], FICHES[f"{AG}:{VI}"]["tracking"]),
+                            (p2["link_id"], FICHES[f"{AG}:{VI}"]["tracking"])], (p2, dup, POSES))
+        r = tk.traiter(clic_ig(f"page:new2:{VI}"))
+        check("page 2 recliquée : déjà là, rien recréé",
+              len([a for a in APPELS if a[0] == "duplicate"]) == 2, APPELS)
+        tk.traiter(clic_ig(f"page:new3:{VI}"))
+        sec = tk._sections_page(AG, VI)
+        check("3 pages prêtes : 3 sections avec ✏️, plus rien à créer",
+              ids(sec) == [f"page:o:{VI}", f"page:o2:{VI}", f"page:o3:{VI}"], ids(sec))
+        r = tk.traiter(clic_ig(f"page:new4:{VI}"))
+        check("une 4e page : refusée", r["type"] == 4 and "Pas encore ouvert" in r["data"]["content"], r)
+        corps = tk._corps_menu(AG, VI, [])
+        check("le menu du ticket porte les 3 pages", all(f"page:o{n}:{VI}" in ids(corps) for n in ("", "2", "3")),
+              ids(corps))
+        f2 = tk.fenetre_page(AG, VI, 2)
+        check("fenêtre de la page 2 : « Ma page 2 », custom_id page:f2",
+              f2["data"]["custom_id"] == f"page:f2:{VI}" and f2["data"]["title"] == "Ma page 2", f2["data"])
+        r = tk.traiter(clic_ig(f"page:o2:{VI}"))
+        check("✏️ de la page 2 : sa fenêtre", r.get("type") == 9 and r["data"]["custom_id"] == f"page:f2:{VI}", r)
+        VUS2 = []
+        _vrai_mod2 = pv.modifier_page
+        pv.modifier_page = lambda g, u, **k: (VUS2.append((g, u, k)) or {"ok": True, "faits": ["nom"]})
+        tk.traiter(clic_ig(f"page:f2:{VI}", typ=5, comps=fen(nom="Page deux", bio=p2["champs"].get("bio", ""),
+                                                                bouton=p2["champs"].get("bouton", ""))))
+        pv.modifier_page = _vrai_mod2
+        check("la fenêtre de la page 2 modifie la page 2 (n=2)", VUS2 and VUS2[-1][2].get("n") == 2
+              and VUS2[-1][2].get("nom") == "Page deux", VUS2)
+        APPELS.clear()
+        r = pv.modifier_page(AG, VI, nom="Deux", n=2)
+        maj = [a for a in APPELS if a[0] == "update"]
+        check("modifier_page(n=2) : seule la page 2 touchée", r.get("ok") and maj
+              and all(a[1] == p2["link_id"] for a in maj), (r, maj))
+        APPELS.clear()
+        pv.suivre_bascule(AG, VI, False)
+        coup = sorted(a[1] for a in APPELS if a[0] == "disable")
+        check("direct coupé : ses 3 pages coupées", len(coup) == 3 and p1["link_id"] in coup and p2["link_id"] in coup,
+              APPELS)
+        APPELS.clear()
+        _vmax = pv.PAGES_MAX[AG]
+        pv.PAGES_MAX[AG] = 1
+        pv.suivre_bascule(AG, VI, True)
+        pv.PAGES_MAX[AG] = _vmax
+        check("rallumé (même si le plafond a baissé) : les 3 pages suivent",
+              len([a for a in APPELS if a[0] == "enable"]) == 3, APPELS)
+        FICHES[f"{AG}:{VI}"]["tracking"] = "https://onlyfans.com/x/c401"
+        POSES.clear()
+        bl = pv.reprendre_pages(AG)
+        check("tracking du direct changé : les 3 pages re-pointées (fiche lue sans la place)",
+              sorted(bl["trackings"]) == sorted([VI, f"{VI}#2", f"{VI}#3"])
+              and all(t == "https://onlyfans.com/x/c401" for _l, t in POSES) and len(POSES) == 3, (bl, POSES))
+        r = tk.traiter(clic_ig(f"page:new2:{VI}", qui=AUTRE))
+        check("la page 2 d'un autre : refusée", r["type"] == 4 and "Seul ce VA" in r["data"]["content"], r)
+    finally:
+        pv.GABARIT_PAGE.pop(AG, None)
+        pv.PILOTE.pop(AG, None)
+
+    # ── 7c. la pastille du salon compte la page ─────────────────────────
+    print("7c. Pastille")
+    pl = pv.page_de(TW, MOI)["link_id"]
+    check("pastille : des visites sur la page seule = 🟢 (comme sur le direct)",
+          tk.rond_du_va(TW, MOI, {pl: 5}) == tk.ROND_CLICS and tk.rond_du_va(TW, MOI, {}) == tk.ROND_RIEN
+          and tk.rond_du_va(TW, MOI, {"lnk_direct": 2}) == tk.ROND_CLICS)
+    check("les pages d'un VA, toutes places, et pas celles d'un autre",
+          pv.liens_des_pages(TW, MOI) == [pl] and pv.page_de(TW, VA)["link_id"] not in pv.liens_des_pages(TW, MOI))
 
     # ── 8. hors classement ───────────────────────────────────────────────
     print("8. Hors classement")

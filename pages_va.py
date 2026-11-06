@@ -50,9 +50,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import safe_json
 
 TWITTER_ID = "1445108485090971710"
-#: Pilote (06/11/2026) : la page, pour ces seuls membres. Pour l'ouvrir à
-#: tous les VA d'un serveur : y mettre « * ».
-PILOTE: Dict[str, set] = {TWITTER_ID: {"479005370438778891"}}
+AGENCY_IG_ID = "1488331963575177247"
+#: Qui a ses pages, par serveur : des membres, ou « * » pour tous. Pilote le
+#: 06/11 sur le propriétaire ; le même jour : « envoie le truc pour les liens
+#: page aussi à tout le monde pour les VA Twitter » — chaque VA qui a un lien
+#: la crée quand il veut (« 📄 Créer »). TRUST INSTAGRAM : « met leur genre 3
+#: pages de dispo » — ouvert dès que son gabarit existe (GABARIT_PAGE).
+PILOTE: Dict[str, set] = {TWITTER_ID: {"*"}}
+#: Combien de pages par VA (« pour Twitter 1 page directe et une safe » : le
+#: lien direct + 1 page ; Instagram : 3 pages).
+PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1, AGENCY_IG_ID: 3}
 #: Le gabarit de page de l'équipe du serveur (GetMySocial refuse de copier un
 #: lien d'une autre équipe) : « Gabarit Twitter (page de base) ».
 #: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo », « juste
@@ -98,7 +105,22 @@ def _log(texte: str) -> None:
 
 def ouverte(gid: Any, uid: Any) -> bool:
     membres = PILOTE.get(str(gid or ""), set())
-    return "*" in membres or str(uid) in membres
+    return bool(GABARIT_PAGE.get(str(gid or ""))) and ("*" in membres or str(uid).split("#")[0] in membres)
+
+
+def place(uid: Any, n: int = 1) -> str:
+    """La clé de registre de la n-ième page d'un VA : « uid » pour la 1re,
+    « uid#n » ensuite (une clé par page : chacune se crée, se modifie, se
+    coupe à part)."""
+    return str(uid) if int(n or 1) <= 1 else f"{uid}#{int(n)}"
+
+
+def pages_max(gid: Any) -> int:
+    return int(PAGES_MAX.get(str(gid or ""), 1))
+
+
+def _vrai_uid(uid: Any) -> str:
+    return str(uid).split("#", 1)[0]
 
 
 # ─── Registre ─────────────────────────────────────────────────────────────
@@ -360,13 +382,17 @@ def _boutons_of(boutons: Any) -> List[Dict[str, Any]]:
 
 
 # ─── Création ─────────────────────────────────────────────────────────────
-def creer_page(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
+def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     """La page du VA : copie du gabarit, bouton sur SON tracking, pays, safe
     page (pas d'A/B), rangée chez son manager. Rend {ok, url, erreur, deja}.
     Un échec après la copie la laisse COUPÉE (jamais supprimée), dite."""
     import gms
     import liens_va as lv
-    gid, uid = str(gid), str(uid)
+    gid, vrai = str(gid), _vrai_uid(uid)
+    n = int(n or 1)
+    if n > pages_max(gid):
+        return {"ok": False, "erreur": f"{pages_max(gid)} page(s) au plus ici"}
+    uid = place(vrai, n)
     cle = f"{gid}:{uid}"
     deja = page_de(gid, uid)
     if deja.get("link_id") and deja.get("etat", "prete") == "prete":
@@ -375,16 +401,19 @@ def creer_page(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
     gab = GABARIT_PAGE.get(gid, "")
     if not gab:
         return {"ok": False, "erreur": "pas de gabarit de page sur ce serveur"}
-    f = lv.lien_de(gid, uid)
+    f = lv.lien_de(gid, vrai)
     if not (f.get("link_id") and f.get("tracking") and f.get("public_url")):
         return {"ok": False, "erreur": "il faut d'abord son lien direct (avec son tracking)"}
+    if n > 1 and page_de(gid, place(vrai, n - 1)).get("etat") != "prete":
+        return {"ok": False, "erreur": f"crée d'abord la page {n - 1}"}
     equipe = _equipe(gid)
     with _VERROU:
         if cle in _CREATIONS:
             return {"ok": False, "erreur": "création déjà en cours"}
         _CREATIONS.add(cle)
     try:
-        nom = f'Twitter VA {f.get("numero")} @{f.get("pseudo")} page'[:60]
+        plateforme = str(lv.espace(gid).get("plateforme") or "Twitter")
+        nom = (f'{plateforme} VA {f.get("numero")} @{f.get("pseudo")} page' + (f" {n}" if n > 1 else ""))[:60]
         if deja.get("link_id"):
             # une création ratée (bouton non posé, panne) : reprise sur la MÊME
             # copie, coupée en attendant — jamais une seconde copie
@@ -470,13 +499,13 @@ def _couper(gid: str, uid: str, lid: str, etat: str, erreur: str) -> None:
 # ─── Modification ─────────────────────────────────────────────────────────
 def modifier_page(gid: str, uid: str, nom: Optional[str] = None, bio: Optional[str] = None,
                   bouton: Optional[str] = None, couleur: Optional[str] = None,
-                  photo: Optional[bytes] = None, fond: Optional[bytes] = None) -> Dict[str, Any]:
+                  photo: Optional[bytes] = None, fond: Optional[bytes] = None, n: int = 1) -> Dict[str, Any]:
     """Change ce qui est donné (None : on n'y touche pas). `photo`, `fond` :
     des JPEG déjà préparés (preparer_photo, preparer_fond). `couleur` : un
     fond uni (plus proposé dans la fenêtre depuis l'image de fond, 06/11).
     Relu ensuite. Rend {ok, faits, erreur}."""
     import gms
-    gid, uid = str(gid), str(uid)
+    gid, uid = str(gid), place(_vrai_uid(uid), n)
     pg = page_de(gid, uid)
     lid = str(pg.get("link_id") or "")
     if not lid:
@@ -555,9 +584,31 @@ def _modifier(gid, uid, pg, lid, equipe, nom, bio, bouton, couleur, photo, fond=
 
 
 # ─── Suivre le lien direct ────────────────────────────────────────────────
+def liens_des_pages(gid: str, uid: str) -> List[str]:
+    """Les identifiants GetMySocial de toutes les pages notées de ce VA (toutes
+    places) — pour compter leurs visites avec celles du lien direct."""
+    vrai = _vrai_uid(uid)
+    out: List[str] = []
+    for c, pg in (_lire().get("pages") or {}).items():
+        g, _s, u = str(c).partition(":")
+        if g == str(gid) and _vrai_uid(u) == vrai and isinstance(pg, dict) and pg.get("link_id"):
+            out.append(str(pg["link_id"]))
+    return out
+
+
 def suivre_bascule(gid: str, uid: str, actif: bool) -> None:
-    """Le lien direct coupé ou rallumé (liens_va.basculer) : la page suit —
-    un VA parti ne garde pas une page vivante sur son tracking."""
+    """Le lien direct coupé ou rallumé (liens_va.basculer) : ses pages suivent
+    — un VA parti ne garde pas une page vivante sur son tracking."""
+    vrai = _vrai_uid(uid)
+    # toutes ses places notées, pas seulement jusqu'à pages_max : un plafond
+    # baissé ne doit pas laisser une page 3 vivante sur le tracking d'un parti
+    places = {place(vrai, 1)} | {str(c).partition(":")[2] for c in (_lire().get("pages") or {})
+                                 if str(c).startswith(f"{gid}:{vrai}#")}
+    for u in sorted(places):
+        _suivre_bascule_une(gid, u, actif)
+
+
+def _suivre_bascule_une(gid: str, uid: str, actif: bool) -> None:
     import gms
     pg = page_de(gid, uid)
     lid = str(pg.get("link_id") or "")
@@ -609,7 +660,7 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                 _ecrire(d2)
     traitees = 0
     for cle, pg in list(d["pages"].items()):
-        g, _s, uid = str(cle).partition(":")
+        g, _s, uid = str(cle).partition(":")          # uid : « uid » ou « uid#n » (la place)
         if g != str(gid) or not isinstance(pg, dict) or not pg.get("link_id"):
             continue
         lid = str(pg["link_id"])
@@ -628,7 +679,7 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                         else:
                             bilan["rates"].append(f"{uid} : coupure")
                     continue
-                f = lv.lien_de(g, uid)
+                f = lv.lien_de(g, _vrai_uid(uid))
                 sert = bool(f.get("link_id")) and f.get("actif", True) is not False
                 if not sert:
                     if pg.get("actif") is not False or pg.get("a_couper") or pg.get("a_rallumer"):

@@ -183,7 +183,14 @@ c = tk._corps_menu(G, U, RANGS)
 check("un conteneur, et rien d'autre", len(c) == 1 and c[0]["type"] == 17)
 check("« 📋 Ton menu », puis « Twitter VA 95 · @rodolpheks »",
       blocs(c)[0]["content"] == "## 📋 Ton menu\n-# Twitter VA 95 · @rodolpheks", blocs(c)[0])
-sec = [b for b in blocs(c) if b.get("type") == 9]
+sec_toutes = [b for b in blocs(c) if b.get("type") == 9]
+# 06/11/2026 : « 📄 Ta page » (pages_va, ouverte à tous sur Twitter) se glisse
+# sous « 🔗 Ton lien » — vérifiée à part, les autres sections lues sans elle
+sec = [b for b in sec_toutes if not b["components"][0]["content"].startswith("**📄")]
+check("📄 Ta page : juste sous « 🔗 Ton lien », « Créer » tant qu'il n'en a pas",
+      len(sec_toutes) == len(sec) + 1
+      and sec_toutes[1]["components"][0]["content"].startswith("**📄 Ta page**")
+      and sec_toutes[1]["accessory"].get("custom_id") == f"page:new:{U}", sec_toutes[:2])
 check("Ton lien : le lien en texte et un bouton-lien Ouvrir",
       "https://getmysocial.com/candypeachyy" in sec[0]["components"][0]["content"]
       and sec[0]["accessory"] == {"type": 2, "style": 5, "label": "Ouvrir", "url": LIEN["public_url"]}, sec[0])
