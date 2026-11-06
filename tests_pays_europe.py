@@ -258,6 +258,17 @@ try:
     pv._noter_liste_pays(AG)
     check("page encore à faire : rien noté", not pv._lire()["pages"][f"{AG}:5#2"].get("pays_cibles"))
 
+    # une page dont les pays sont posés (création, reprise) note la liste dans
+    # son registre : elle survit à un redémarrage (_POSES_PAYS est en mémoire)
+    pv._noter(TW, "11", link_id="p_tw11", etat="en_cours", actif=True)
+    landing("p_tw11")
+    lv.poser_pays("p_tw11", EQ[TW])
+    lv._POSES_PAYS.clear()                  # le redémarrage
+    pv._noter(TW, "11", etat="prete", manques=[])
+    check("page posée juste avant un redémarrage : la liste est dans son registre, pas reposée",
+          pv._lire()["pages"][f"{TW}:11"].get("pays_cibles") == sig_tw and "11" not in pv._marquer_liste_pays(TW),
+          pv._lire()["pages"][f"{TW}:11"])
+
     # l'enveloppe : marquer, la reprise, puis noter
     APPELS = []
     _vr = pv._reprendre_pages_sans_liste

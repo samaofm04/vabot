@@ -2923,9 +2923,28 @@ def poser_pays(lid: str, equipe: str, base: Optional[str] = None) -> Dict[str, A
             c = cibles_pays()
             if c is not None:
                 _POSES_PAYS[str(lid)] = ",".join(sorted(c))
+                _noter_page_posee(str(lid), _POSES_PAYS[str(lid)])
         return r
     finally:
         _EQUIPE_PAYS.reset(jeton)
+
+
+def _noter_page_posee(lid: str, sig: str) -> None:
+    """Une page (pages_va) dont on vient de poser les pays note la liste dans
+    son registre : _POSES_PAYS vit en mémoire, et une page créée juste avant
+    un redémarrage (une mise en ligne) était reposée une fois pour rien
+    (relevé le 06/11 : 3 pages Instagram créées à 16:35, reposées à 16:40).
+    La page est déjà notée (link_id) quand creer_page pose ses pays."""
+    try:
+        import pages_va as pv
+        for cle, pg in (pv._lire().get("pages") or {}).items():
+            if isinstance(pg, dict) and str(pg.get("link_id") or "") == lid:
+                g, _s, u = str(cle).partition(":")
+                if pg.get("pays_cibles") != sig:
+                    pv._noter(g, u, pays_cibles=sig)
+                return
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] liste des pays de la page {lid} non notée : {type(e).__name__}: {e}", flush=True)
 
 
 poser_pays.__doc__ = _poser_pays_sans_serveur.__doc__
