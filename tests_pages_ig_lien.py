@@ -115,6 +115,47 @@ def f_liste(equipe, force_refresh=False):
     return {"ok": True, "links": [{"id": k, "display_name": v.get("display_name")} for k, v in LIENS.items()]}
 
 
+# l'A/B privé et les copies temporaires (la page des 30 % sans tracking)
+AB, VARIANTES, REGLE_AB = {}, {}, {"cookie": False, "abime_copie": False}
+N = {"copie": 0, "variante": 0}
+
+
+def f_lire_ab(lid, team_id=""):
+    if REGLE_AB["cookie"]:
+        return {"ok": False, "cookie": True, "error": "cookie absent"}
+    return {"ok": True, "config": json.loads(json.dumps(AB.get(lid) or {"enabled": False, "variants": []}))}
+
+
+def f_ab_prive(methode, lid, team_id="", corps=None):
+    APPELS.append(("ab", lid))
+    vs = []
+    for v in (corps or {}).get("variants") or []:
+        N["variante"] += 1
+        vid = v.get("variantId") or f"v_new{N['variante']}"
+        src = "lnk_" + str(v.get("sourceLinkId") or "")
+        VARIANTES[vid] = json.loads(json.dumps(LIENS.get(src) or {}))     # copie figée, à l'enregistrement
+        vs.append({"variantId": vid, "name": v.get("name"), "weight": v.get("weight")})
+    AB[lid] = {"enabled": corps.get("enabled"), "controlWeight": corps.get("controlWeight"), "variants": vs}
+    return {"ok": True}
+
+
+def f_dup(source, sc, nom="", url="", team_id=None):
+    APPELS.append(("dup", source))
+    N["copie"] += 1
+    tid = f"lnk_tmp{N['copie']}"
+    LIENS[tid] = dict(json.loads(json.dumps(LIENS[source])), id=tid, display_name=nom, shortcode=sc)
+    return {"ok": True, "link": LIENS[tid]}
+
+
+def f_delete(lid):
+    APPELS.append(("delete", lid))
+    LIENS.pop(lid, None)
+    return {"ok": True}
+
+
+_f_update_simple = None
+
+
 FICHES = {}
 
 
@@ -127,7 +168,8 @@ SAV = {(m, n): getattr(m, n) for m, n in (
     (gms, "get_link"), (gms, "update_link"), (gms, "disable_link"), (gms, "enable_link"),
     (gms, "list_links_team"), (lv, "_etat"), (pv, "FICHIER"), (pv, "EN_FOND"), (pv, "LOOKS_PAR_PASSE"),
     (pv, "_reprendre_pages_avant_page1"), (tk, "_suite"), (tk, "_EN_FOND"), (tk, "_fiche"),
-    (tk, "_maj_menu_v2"), (tk, "_api_reseau"))}
+    (tk, "_maj_menu_v2"), (tk, "_api_reseau"), (gms, "lire_ab_testing"), (gms, "_ab_prive"),
+    (gms, "duplicate_link"), (gms, "delete_link"), (pv, "BASE_EN_PAGE"), (lv, "lia_seule"))}
 SUITES, MENUS = [], []
 try:
     gms.get_link, gms.update_link, gms.disable_link, gms.enable_link = f_get, f_update, f_disable, f_enable
@@ -140,6 +182,10 @@ try:
     tk._fiche = lambda g, u: {"salon": "T1"}
     tk._maj_menu_v2 = lambda g, u, *a, **k: MENUS.append((g, u)) or 1
     tk._api_reseau = lambda *a, **k: (0, None)
+    gms.lire_ab_testing, gms._ab_prive, gms.duplicate_link, gms.delete_link = f_lire_ab, f_ab_prive, f_dup, f_delete
+    lv.lia_seule = lambda gid="": {"controle": 70, "base_modele": 30} if str(gid) == AG else None
+    # sections 1 à 8 sans la page des 30 % (section 9)
+    pv.BASE_EN_PAGE = set()
 
     print("1. Les règles")
     check("TRUST INSTAGRAM : plus de places fixes (FIXES vide), mais toujours des pages à la demande",
@@ -398,6 +444,91 @@ try:
     check("la page fixe est rangée AVANT la reprise (sinon elle la rallumerait)",
           f"{AG}:{VA2}" not in VUS["pages"] and f"{AG}:{VA4}#2" in VUS["pages"], VUS)
     check("… puis le menu de son VA est redessiné", MENUS == [(AG, VA2)], MENUS)
+
+    print("9. Les 30 % sans tracking voient la page")
+    pv.BASE_EN_PAGE = {AG}
+    GAB = "lnk_6aedd88bc7881b6c8066a247"
+    LIENS[GAB] = dict(lien_gms(GAB, "tpligbrune1", 1, "Gabarit page IG 1 (liabrune)"), whitelabel=True,
+                      bio="Come chat with me", name_user="Lia")
+    LIENS[GAB]["buttons"][0].update(url="https://onlyfans.com/liasxcret", geofilters=[], label="MY FREE 0F")
+    for lid in ("lnk_m1b", "lnk_m2", "lnk_m4", "lnk_m5"):
+        AB[lid] = {"enabled": True, "controlWeight": 70, "variants": [{"variantId": f"v_old_{lid}", "name": "Base Lia",
+                                                                       "weight": 30}]}
+    for lid in ("lnk_m1b", "lnk_m2", "lnk_m4", "lnk_m5"):
+        LIENS[lid]["bio"] = f"bio de {lid}"
+    avant_m1 = json.loads(json.dumps(LIENS["lnk_m1b"]))
+    pv._noter(AG, f"{VA4}#2", tracking=track(95), ab={"ok": True})
+    AB["lnk_d1"] = {"enabled": True, "controlWeight": 70, "variants": [{"variantId": "v_old_d1", "name": "Base Lia",
+                                                                        "weight": 30}]}
+    n = len(APPELS)
+    b = pv.poser_bases_en_page(AG)
+    check("liens principaux actifs + page demandée : chacun sa page des 30 % (lien coupé laissé)",
+          sorted(b["poses"]) == sorted(["newyy", "lildreamyy", "angelyy", "refusyy", "kittyyy"]) and not b["rates"], b)
+    v = AB["lnk_m1b"]
+    copie = VARIANTES[v["variants"][0]["variantId"]]
+    check("… A/B : 70 / 30, une variante « Base Lia », NOUVELLE (l'ancienne copie d'un direct remplacée)",
+          v["enabled"] and v["controlWeight"] == 70 and len(v["variants"]) == 1
+          and v["variants"][0]["name"] == "Base Lia" and v["variants"][0]["weight"] == 30
+          and v["variants"][0]["variantId"] != "v_old_lnk_m1b", v)
+    check("… la variante est une PAGE : la même que le lien (photo, fond, bio, texte du bouton, Telegram, 233 pays)",
+          copie["type"] == "landing" and copie["profile_picture"] == avant_m1["profile_picture"]
+          and copie["background_image"] == avant_m1["background_image"] and copie["bio"] == "bio de lnk_m1b"
+          and [x["label"] for x in copie["buttons"]] == [x["label"] for x in avant_m1["buttons"]]
+          and copie["buttons"][1]["url"] == "https://t.me/m/x" and len(copie["buttons"][0]["geofilters"]) == 233, copie)
+    check("… son bouton OnlyFans SANS tracking (la page de la model)",
+          copie["buttons"][0]["url"] == "https://onlyfans.com/liasxcret", copie["buttons"][0]["url"])
+    check("… le lien du VA lui-même inchangé (tracking, boutons)", LIENS["lnk_m1b"]["buttons"] == avant_m1["buttons"]
+          and LIENS["lnk_m1b"]["profile_picture"] == avant_m1["profile_picture"])
+    check("… copie temporaire partie de liabrune (sans A/B), puis supprimée",
+          all(a[1] == GAB for a in APPELS[n:] if a[0] == "dup")
+          and not [k for k in LIENS if k.startswith("lnk_tmp")]
+          and len([a for a in APPELS[n:] if a[0] == "delete"]) == len([a for a in APPELS[n:] if a[0] == "dup"]))
+    n = len(APPELS)
+    check("passage suivant : rien à refaire", pv.poser_bases_en_page(AG) == {"poses": [], "rates": []}
+          and APPELS[n:] == [], APPELS[n:])
+    # le VA change de look : sa page des 30 % est refaite, en fond, seule
+    pv.EN_FOND = lambda f: f()
+    n = len(APPELS)
+    pv.appliquer_look(AG, VA2, "general", n=1)
+    abs_ = [a for a in APPELS[n:] if a[0] == "ab"]
+    copie2 = VARIANTES[AB["lnk_m2"]["variants"][0]["variantId"]]
+    check("nouveau look : sa page des 30 % refaite tout de suite, la sienne seulement, au nouveau look",
+          abs_ == [("ab", "lnk_m2")] and copie2["profile_picture"] == pv.looks(AG)[2][3], abs_)
+    # un A/B inconnu : jamais touché, 3 essais puis plus rien
+    AB["lnk_m4"]["variants"].append({"variantId": "v_x", "name": "Seren", "weight": 10})
+    d = pv._lire()
+    d["bases_page"].pop("lnk_m4")
+    pv._ecrire(d)
+    for _ in range(4):
+        pv.poser_bases_en_page(AG)
+    check("A/B inattendu (une variante inconnue) : rien touché, 3 essais puis plus rien",
+          [x["variantId"] for x in AB["lnk_m4"]["variants"]][-1] == "v_x"
+          and (pv._lire()["bases_page"]["lnk_m4"]).get("essais") == pv.ESSAIS_REPRISE)
+    # cookie absent : le passage s'arrête, rien compté
+    d = pv._lire()
+    d["bases_page"].pop("lnk_m5")
+    pv._ecrire(d)
+    REGLE_AB["cookie"] = True
+    b = pv.poser_bases_en_page(AG)
+    REGLE_AB["cookie"] = False
+    check("cookie A/B absent : rien posé, rien compté (refait au passage suivant)",
+          not b["poses"] and "cookie" in b["rates"][0] and not (pv._lire()["bases_page"].get("lnk_m5") or {}).get("essais"), b)
+    # une copie relue autrement (pays perdus) : rien enregistré, copie supprimée
+    _vupd = gms.update_link
+
+    def upd_abime(lid, champs, team_id=None):
+        r = _vupd(lid, champs, team_id)
+        if str(lid).startswith("lnk_tmp"):
+            LIENS[lid]["buttons"][0]["geofilters"] = []
+        return r
+    gms.update_link = upd_abime
+    avant_ab = json.loads(json.dumps(AB["lnk_m5"]))
+    b = pv.poser_bases_en_page(AG)
+    gms.update_link = _vupd
+    check("copie relue sans ses pays : variante non enregistrée, copie supprimée, dit",
+          AB["lnk_m5"] == avant_ab and not [k for k in LIENS if k.startswith("lnk_tmp")]
+          and "relue autrement" in " ".join(b["rates"]), b)
+    check("Twitter : jamais", pv.poser_bases_en_page(TW) == {"poses": [], "rates": []})
 finally:
     for (m, n), v in SAV.items():
         setattr(m, n, v)

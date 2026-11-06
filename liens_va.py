@@ -3095,3 +3095,21 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:   # noqa: F811
 
 
 reprendre_pays.__doc__ = _reprendre_pays_sans_liste.__doc__
+
+
+
+# ─── Une variante copiée d'une page (pages_va, 06/11/2026) ──────────────────
+def poser_variante_copie(lid: str, equipe: str, tid: str, nom: str,
+                         parts: Dict[str, float]) -> Dict[str, Any]:
+    """Le 70/30 de `lid` avec UNE variante `nom`, copie figée du lien `tid`
+    (pages_va.poser_base_en_page : la page des 30 % sans tracking de TRUST
+    INSTAGRAM, propriétaire 06/11 « Page sans tracking »). Toujours allumé :
+    éteindre l'A/B efface ses variantes chez GetMySocial (21/10) — l'A/B
+    privé reste ici, pages_va n'y touche jamais lui-même. Rend la réponse de
+    gms._ab_prive ({ok, error, cookie})."""
+    import gms
+    variante = {"variantId": None, "sourceLinkId": _sans_prefixe(tid), "sourceTemplateId": None,
+                "name": nom, "weight": _poids(parts["base_modele"]),
+                "description": "Variant based on another link"}
+    return gms._ab_prive("POST", lid, equipe, {"enabled": True, "controlWeight": _poids(parts["controle"]),
+                                               "variants": [variante]})

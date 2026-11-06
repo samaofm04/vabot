@@ -2334,7 +2334,11 @@ def _look_sur_lien(gid: str, uid: str, cle: str) -> Dict[str, Any]:
         if r.get("ok"):
             _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0, erreur="")
             _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}")
-        return dict(r, libelle=libelle)
+    if r.get("ok") and gid in BASE_EN_PAGE:
+        # la page des 30 % sans tracking est une copie figée : refaite au
+        # nouveau look, en fond (la reprise la referait au passage suivant)
+        EN_FOND(lambda: poser_bases_en_page(gid, seul=vrai))
+    return dict(r, libelle=libelle)
 
 
 _appliquer_look_page = appliquer_look
@@ -2535,7 +2539,8 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
     if lien_page_1(gid):
         # rangées AVANT la reprise : elle rallumerait une page coupée de « pages »
         for nom_etape, etape in (("rangement", retirer_pages_hors_places), ("orphelines", couper_copies_orphelines),
-                                 ("look par défaut", poser_looks_par_defaut)):
+                                 ("look par défaut", poser_looks_par_defaut),
+                                 ("pages des 30 % sans tracking", poser_bases_en_page)):
             try:
                 b = etape(gid)
                 if nom_etape == "rangement":
@@ -2558,3 +2563,205 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
 
 
 reprendre_pages.__doc__ = _reprendre_pages_avant_page1.__doc__
+
+
+# ─── Les 30 % sans tracking voient la page (TRUST INSTAGRAM, 06/11/2026) ───
+# Le 70/30 « Lia seule » envoyait les 30 % sans tracking TOUT DROIT sur
+# onlyfans.com/liasxcret (variante « Base Lia » copiée d'un lien direct).
+# Propriétaire, le 06/11 au soir : « quand je dis direct, c'est plutôt quand
+# le mec tombe sur la landing page, le lien qui va à OF, y a pas de
+# tracking » — puis, au choix proposé, « Page sans tracking » : les 30 %
+# voient la même page que les 70 % (look, bio, Telegram, pays), seul le
+# bouton OnlyFans mène à la page de la model sans tracking.
+# Une variante GetMySocial est une copie FIGÉE d'un autre lien, faite à
+# l'enregistrement : une copie temporaire est fabriquée (le gabarit liabrune,
+# sans A/B — la copie du lien du VA hériterait de son A/B), habillée comme
+# le lien (CHAMPS_COPIES, boutons OnlyFans sans tracking), relue, enregistrée
+# comme variante, puis supprimée (comme les copies temporaires de liens_va).
+# Refaite quand ce qu'elle copie change (le look, la fenêtre d'une page
+# demandée, la model) : « bases_page » note, par lien, ce qui a été copié.
+BASE_EN_PAGE = {AGENCY_IG_ID}
+#: La source de la copie temporaire, par serveur : un lien SANS A/B.
+SOURCE_BASE_PAGE: Dict[str, str] = {AGENCY_IG_ID: "lnk_6aedd88bc7881b6c8066a247"}     # liabrune
+BASES_PAGE_PAR_PASSE = 20
+#: Ce que la copie reprend du lien (lu par get_link) : tout ce qui se voit.
+#: whitelabel ne s'écrit pas par l'API (la copie garde celui du gabarit).
+CHAMPS_COPIES = ("adult_link_captcha", "age_verification_enabled", "audio_autoplay", "audio_cta",
+                 "audio_enabled", "audio_loop", "audio_style", "background_blur", "background_color",
+                 "background_image", "bio", "buttons_styles", "custom_background_color", "custom_text_color",
+                 "deeplink_mode", "disable_link_logos", "fallback_location", "font_family", "location", "name_user",
+                 "open_in_new_tab", "profile_picture", "profile_picture_slides", "redirect_cta_button",
+                 "redirect_cta_subtitle", "response_time", "seo", "show_profile_picture", "social_media_links",
+                 "template", "texts_color", "verified_badge", "verified_badge_color")
+
+
+def _empreinte_boutons(l: Dict[str, Any]) -> List[Any]:
+    """Les boutons d'un lien sans l'adresse des boutons OnlyFans : ce que la
+    copie doit garder à l'identique (texte, ordre, pays, Telegram)."""
+    import liens_va as lv
+    out = []
+    for b in l.get("buttons") or []:
+        if not isinstance(b, dict):
+            continue
+        of = bool(lv._RE_OF.search(str(b.get("url") or "")))
+        out.append((str(b.get("label") or ""), "OF" if of else str(b.get("url") or ""),
+                    len(b.get("geofilters") or [])))
+    return out
+
+
+def poser_base_en_page(gid: str, lid: str, verrou: str = "") -> Dict[str, Any]:
+    """La branche sans tracking du 70/30 du lien `lid` en PAGE : copie figée
+    de ce lien, boutons OnlyFans vers la page de la model sans tracking.
+    Rend {ok, erreur, base, cookie, inattendu}. Rien n'est enregistré si la
+    copie relue n'est pas celle voulue ; la copie temporaire est toujours
+    supprimée (c'est la variante qui garde la page)."""
+    import secrets as _sec
+    import gms
+    import liens_va as lv
+    gid = str(gid)
+    parts = lv.lia_seule(gid)
+    if not parts or gid not in BASE_EN_PAGE:
+        return {"ok": True, "hors_sujet": True, "erreur": ""}
+    equipe = _equipe(gid)
+    source = SOURCE_BASE_PAGE.get(gid, "")
+    with _verrou_page(verrou or f"{gid}:base:{lid}"):
+        l = _lire_page(lid, equipe)
+        if not l:
+            return {"ok": False, "erreur": "lien illisible chez GetMySocial"}
+        ofs = _boutons_of(l.get("buttons"))
+        page = lv.base_de(ofs[0].get("url")) if ofs else ""
+        if not (ofs and page and source):
+            return {"ok": False, "erreur": "pas de bouton OnlyFans sur le lien (ou pas de source)"}
+        nom = lv.nom_de_page(page)
+        if not nom:
+            return {"ok": False, "erreur": "nom de model illisible : rien touché"}
+        nom = f"Base {nom}"[:40]
+        lu = gms.lire_ab_testing(lid, equipe)
+        if not lu.get("ok"):
+            return {"ok": False, "cookie": bool(lu.get("cookie")),
+                    "erreur": "A/B illisible : " + str(lu.get("error") or "")[:120]}
+        vs = [x for x in (lu.get("config") or {}).get("variants") or [] if isinstance(x, dict)]
+        if len(vs) > 1 or any(not str(x.get("name") or "").startswith("Base ") for x in vs):
+            return {"ok": False, "inattendu": True,
+                    "erreur": f"A/B inattendu, rien touché : {str(lu.get('config'))[:160]}"}
+        ancien = str(vs[0].get("variantId") or "") if vs else ""
+        tid, p = "", {}
+        try:
+            nom_tmp = f"{nom.lower()} page - {l.get('shortcode') or lid}"[:60]
+            r = gms.duplicate_link(source, "abtmp" + _sec.token_hex(5), nom_tmp, "", equipe)
+            tid = str(((r.get("link") or {}) if isinstance(r.get("link"), dict) else {}).get("id") or "")
+            if not (r.get("ok") and tid):
+                return {"ok": False, "erreur": f"copie temporaire refusée ({str(r.get('error'))[:100]})"}
+            charge: Dict[str, Any] = {k: l[k] for k in CHAMPS_COPIES if l.get(k) is not None}
+            charge["display_name"] = nom_tmp
+            bp = l.get("bot_protection") if isinstance(l.get("bot_protection"), dict) else {}
+            charge["bot_protection"] = {"mode": str(bp.get("mode") or "off")}
+            if bp.get("mode") == "redirect" and bp.get("redirect_url"):
+                charge["bot_protection"]["redirect_url"] = bp["redirect_url"]
+            charge["buttons"] = [dict({k: v for k, v in b.items() if k != "block_id"},
+                                      **({"url": page} if lv._RE_OF.search(str(b.get("url") or "")) else {}))
+                                 for b in l.get("buttons") or [] if isinstance(b, dict)]
+            u = gms.update_link(tid, charge, equipe)
+            if not u.get("ok"):
+                return {"ok": False, "erreur": f"copie non habillée ({str(u.get('error'))[:100]})"}
+            t2 = _lire_page(tid, equipe)
+            of2 = _boutons_of(t2.get("buttons"))
+            if not (of2 and all(str(b.get("url") or "") == page for b in of2)
+                    and _empreinte_boutons(t2) == _empreinte_boutons(l)
+                    and t2.get("profile_picture") == l.get("profile_picture")
+                    and t2.get("background_image") == l.get("background_image")):
+                return {"ok": False, "erreur": "copie relue autrement (boutons, pays ou images) : rien enregistré"}
+            p = lv.poser_variante_copie(lid, equipe, tid, nom, parts)
+        finally:
+            if tid:
+                rd = gms.delete_link(tid)
+                if not rd.get("ok"):
+                    _log(f"copie temporaire {tid} non supprimée : {str(rd.get('error'))[:100]}")
+        if not p.get("ok"):
+            return {"ok": False, "cookie": bool(p.get("cookie")),
+                    "erreur": "A/B refusé : " + str(p.get("error") or "")[:120]}
+        rc = gms.lire_ab_testing(lid, equipe).get("config") or {}
+        rv = [x for x in rc.get("variants") or [] if isinstance(x, dict)]
+        if not (rc.get("enabled") and lv._proche(rc.get("controlWeight"), parts["controle"]) and len(rv) == 1
+                and str(rv[0].get("name") or "") == nom and lv._proche(rv[0].get("weight"), parts["base_modele"])
+                and str(rv[0].get("variantId") or "") != ancien):
+            return {"ok": False, "erreur": f"A/B relu autrement : {str(rc)[:160]}"}
+        return {"ok": True, "erreur": "", "base": page}
+
+
+def _noter_base(lid: str, **champs) -> None:
+    with _VERROU:
+        d = _lire()
+        bp = d.get("bases_page")
+        if not isinstance(bp, dict):
+            bp = d["bases_page"] = {}
+        bp[str(lid)] = dict(bp.get(str(lid)) if isinstance(bp.get(str(lid)), dict) else {}, **champs)
+        _ecrire(d)
+
+
+def poser_bases_en_page(gid: str, seul: str = "") -> Dict[str, Any]:
+    """Serveur BASE_EN_PAGE : la page des 30 % de chaque lien principal en
+    service (et de chaque page demandée qui a son 70/30), refaite quand ce
+    qu'elle copie a changé depuis la dernière fois (look, fenêtre, model) —
+    BASES_PAGE_PAR_PASSE au plus, ESSAIS_REPRISE essais par état ; un cookie
+    A/B absent arrête le passage sans rien compter. `seul` : un VA (après
+    son look). Ne lève pas."""
+    import json as _json
+    import liens_va as lv
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    if gid not in BASE_EN_PAGE or not lv.lia_seule(gid):
+        return bilan
+    d = _lire()
+    notes = d.get("bases_page") if isinstance(d.get("bases_page"), dict) else {}
+    a_faire: List[Tuple[str, str, str, str]] = []          # (lid, état, verrou, nom)
+    for uid, f in sorted(_va_du_serveur(gid).items()):
+        if seul and uid != _vrai_uid(seul):
+            continue
+        lid = str(f.get("link_id") or "")
+        if lid and f.get("public_url") and f.get("actif", True) is not False and f.get("tracking"):
+            etat = _json.dumps(["lien", look_du_lien(gid, uid, d, f), lv.base_de(f.get("tracking"))])
+            a_faire.append((lid, etat, f"{gid}:lien:{uid}", str(f.get("shortcode") or lid)))
+    for cle, pg in (d.get("pages") or {}).items():
+        g, _s, u = str(cle).partition(":")
+        if g != gid or not isinstance(pg, dict) or (seul and _vrai_uid(u) != _vrai_uid(seul)):
+            continue
+        if (pg.get("link_id") and pg.get("etat", "prete") == "prete" and pg.get("actif", True) is not False
+                and (pg.get("ab") or {}).get("ok") and pg.get("tracking")):
+            etat = _json.dumps(["page", pg.get("look"), pg.get("champs"), lv.base_de(pg.get("tracking"))],
+                               sort_keys=True, ensure_ascii=False)
+            a_faire.append((str(pg["link_id"]), etat, str(cle), str(pg.get("shortcode") or pg["link_id"])))
+    faits = 0
+    for lid, etat, verrou, nom in a_faire:
+        x = notes.get(lid) if isinstance(notes.get(lid), dict) else {}
+        if x.get("etat") == etat or (x.get("etat_essai") == etat and int(x.get("essais") or 0) >= ESSAIS_REPRISE):
+            continue
+        if faits >= BASES_PAGE_PAR_PASSE:
+            break
+        # sous le verrou du lien, la note relue : le look cliqué (en fond) et
+        # la reprise ne refont pas deux fois la même copie
+        with _verrou_page(verrou):
+            x = (_lire().get("bases_page") or {}).get(lid) or {}
+            if x.get("etat") == etat:
+                continue
+            faits += 1
+            try:
+                r = poser_base_en_page(gid, lid, verrou=verrou)
+            except Exception as e:                           # noqa: BLE001
+                r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+        if r.get("hors_sujet"):
+            break
+        if r.get("ok"):
+            _noter_base(lid, etat=etat, quand=int(time.time()), essais=0, etat_essai="", erreur="")
+            bilan["poses"].append(nom)
+            continue
+        if r.get("cookie"):
+            bilan["rates"].append(f"{nom} : {r.get('erreur')} (cookie A/B : passage arrêté, rien compté)")
+            break
+        essais = (int(x.get("essais") or 0) if x.get("etat_essai") == etat else 0) + 1
+        _noter_base(lid, etat_essai=etat, essais=essais, erreur=str(r.get("erreur") or "")[:160])
+        bilan["rates"].append(f"{nom} : {r.get('erreur')}" + (" (plus retenté)" if essais >= ESSAIS_REPRISE else ""))
+    if bilan["poses"] or bilan["rates"]:
+        _log(f"pages des 30 % sans tracking sur {gid} : {len(bilan['poses'])} posée(s)"
+             + (f", ratées : {'; '.join(bilan['rates'][:5])}" if bilan["rates"] else ""))
+    return bilan
