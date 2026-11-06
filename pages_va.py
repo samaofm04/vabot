@@ -55,17 +55,22 @@ AGENCY_IG_ID = "1488331963575177247"
 #: 06/11 sur le propriétaire ; le même jour : « envoie le truc pour les liens
 #: page aussi à tout le monde pour les VA Twitter » — chaque VA qui a un lien
 #: la crée quand il veut (« 📄 Créer »). TRUST INSTAGRAM : « met leur genre 3
-#: pages de dispo » — ouvert dès que son gabarit existe (GABARIT_PAGE).
+#: pages de dispo » — repris par une autre session (pages fixes + demandes) :
+#: ni PILOTE ni GABARIT_PAGE ici tant qu'elle n'a pas fini.
 PILOTE: Dict[str, set] = {TWITTER_ID: {"*"}}
 #: Combien de pages par VA (« pour Twitter 1 page directe et une safe » : le
 #: lien direct + 1 page ; Instagram : 3 pages).
 PAGES_MAX: Dict[str, int] = {TWITTER_ID: 1, AGENCY_IG_ID: 3}
 #: Le gabarit de page de l'équipe du serveur (GetMySocial refuse de copier un
 #: lien d'une autre équipe) : « Gabarit Twitter (page de base) ».
-#: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo », « juste
-#: le lien OF, pas de lien Telegram ». liaseeo vit dans l'espace perso : sa
-#: copie identique dans EMY TWITTER, « Template landing Twitter (liaseeo) »
-#: (le canard, « Lia ♡ », « MY FREE 0F 🔗 »).
+#: Propriétaire, 06/11 : « tu prends le lien qui s'appelle liaseeo ». liaseeo
+#: vit dans l'espace perso : sa copie dans EMY TWITTER, « Template landing
+#: Twitter (liaseeo) » (le canard, « Lia ♡ », « MY FREE 0F 🔗 »). D'abord
+#: « juste le lien OF, pas de Telegram » ; le même jour vers 13 h : « que les
+#: landing pages [aient] Telegram ; quand c'est direct, y a pas de Telegram »
+#: — « MY TELEGRAM » ajouté en dernier bouton sur ce gabarit (à la main, dans
+#: GetMySocial). Le code ne touche que les boutons OnlyFans (_RE_OF) : le
+#: Telegram reste quand le VA modifie sa page ou que la reprise re-pointe.
 GABARIT_PAGE: Dict[str, str] = {TWITTER_ID: "lnk_6aed1548c7881b6c805e773a"}
 
 FICHIER = Path(__file__).resolve().parent / "data" / "pages_va.json"
@@ -106,6 +111,45 @@ def _log(texte: str) -> None:
 def ouverte(gid: Any, uid: Any) -> bool:
     membres = PILOTE.get(str(gid or ""), set())
     return bool(GABARIT_PAGE.get(str(gid or ""))) and ("*" in membres or str(uid).split("#")[0] in membres)
+
+
+def a_des_pages(gid: Any) -> bool:
+    """Ce serveur a des pages notées : leur reprise tourne même si on le
+    referme (PILOTE ou GABARIT_PAGE retirés) — sinon une page vivante ne
+    suivrait plus ni coupure ni changement de tracking."""
+    g = f"{gid}:"
+    return any(str(c).startswith(g) for c in (_lire().get("pages") or {}))
+
+
+#: La bascule des pages part en fond, dans l'ordre (une file, un fil) : le
+#: clic « 🚫 Désactiver » d'un manager attendait une réponse de GetMySocial
+#: par page, au risque des 3 s de Discord. Un redémarrage au milieu : la
+#: reprise (30 min) remet les pages sur leur direct.
+_FILE: "queue.Queue" = None  # type: ignore[assignment]
+
+
+def _travailleur() -> None:
+    while True:
+        f = _FILE.get()
+        try:
+            f()
+        except Exception as e:                               # noqa: BLE001
+            _log(f"tâche de fond : {type(e).__name__}: {e}")
+        finally:
+            _FILE.task_done()
+
+
+def _en_fond(f) -> None:
+    global _FILE
+    import queue
+    with _VERROU:
+        if _FILE is None:
+            _FILE = queue.Queue()
+            threading.Thread(target=_travailleur, name="pages_va", daemon=True).start()
+    _FILE.put(f)
+
+
+EN_FOND = _en_fond
 
 
 def place(uid: Any, n: int = 1) -> str:
@@ -404,6 +448,13 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     f = lv.lien_de(gid, vrai)
     if not (f.get("link_id") and f.get("tracking") and f.get("public_url")):
         return {"ok": False, "erreur": "il faut d'abord son lien direct (avec son tracking)"}
+    if f.get("actif", True) is False:
+        # la copie naîtrait coupée et le VA recevrait « ✅ » avec une adresse morte
+        return {"ok": False, "erreur": "son lien direct est désactivé"}
+    if not (str(f.get("numero") or "").isdigit() and str(f.get("pseudo") or "").strip()):
+        # « Twitter VA None @None page » : le registre des trackings y verrait
+        # une 2e personne sur son tracking (« en doute », sans relevé)
+        return {"ok": False, "erreur": "numéro ou pseudo du VA manquant dans sa fiche"}
     if n > 1 and page_de(gid, place(vrai, n - 1)).get("etat") != "prete":
         return {"ok": False, "erreur": f"crée d'abord la page {n - 1}"}
     equipe = _equipe(gid)
@@ -412,42 +463,57 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
             return {"ok": False, "erreur": "création déjà en cours"}
         _CREATIONS.add(cle)
     try:
-        plateforme = str(lv.espace(gid).get("plateforme") or "Twitter")
-        nom = (f'{plateforme} VA {f.get("numero")} @{f.get("pseudo")} page' + (f" {n}" if n > 1 else ""))[:60]
-        if deja.get("link_id"):
-            # une création ratée (bouton non posé, panne) : reprise sur la MÊME
-            # copie, coupée en attendant — jamais une seconde copie
-            lid, sc = str(deja["link_id"]), str(deja.get("shortcode") or "")
-            url = str(deja.get("public_url") or f"{gms.PUBLIC_LINK_DOMAIN}/{sc}")
-            try:
-                return _finir_page(gid, uid, f, lid, sc, str(deja.get("nom") or nom), url, equipe)
-            except Exception as e:                           # noqa: BLE001
-                _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
-                return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
-        lid, sc, erreur = "", "", ""
-        for essai in range(lv.ESSAIS_ADRESSE):
-            sc = lv.mots_sans_prenom(nom, essai)
-            r = gms.duplicate_link(gab, sc, nom, "", equipe)
-            if r.get("ok") and (r.get("link") or {}).get("id"):
-                lid = str(r["link"]["id"])
-                break
-            erreur = str(r.get("error") or "refus GetMySocial")
-            if "shortcode" not in erreur.lower():
-                break
-        if not lid:
-            return {"ok": False, "erreur": f"GetMySocial : {erreur[:140]}"}
-        url = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
-        _noter(gid, uid, link_id=lid, shortcode=sc, public_url=url, nom=nom, par=str(par),
-               quand=int(time.time()), actif=True, etat="en_cours")
-        try:
-            return _finir_page(gid, uid, f, lid, sc, nom, url, equipe)
-        except Exception as e:                               # noqa: BLE001
-            _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
-            _log(f"page {sc} de {cle} : {type(e).__name__}: {e} — coupée")
-            return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
+        # sous le verrou de la page, comme la bascule, la reprise et la
+        # modification : un « Désactiver » ou un « 🔁 Réessayer » pendant la
+        # copie attend la fin, puis voit la page telle qu'elle est notée
+        with _verrou_page(cle):
+            return _creer_sous_verrou(gid, uid, vrai, n, cle, page_de(gid, uid), f, equipe, gab, par)
     finally:
         with _VERROU:
             _CREATIONS.discard(cle)
+
+
+def _creer_sous_verrou(gid: str, uid: str, vrai: str, n: int, cle: str, deja: Dict[str, Any],
+                       f: Dict[str, Any], equipe: str, gab: str, par: str) -> Dict[str, Any]:
+    import gms
+    import liens_va as lv
+    if deja.get("link_id") and deja.get("etat", "prete") == "prete":
+        # finie par un autre clic pendant qu'on attendait le verrou
+        return {"ok": True, "deja": True, "url": deja.get("public_url", ""), "erreur": "",
+                "manques": list(deja.get("manques") or [])}
+    plateforme = str(lv.espace(gid).get("plateforme") or "Twitter")
+    nom = (f'{plateforme} VA {f.get("numero")} @{f.get("pseudo")} page' + (f" {n}" if n > 1 else ""))[:60]
+    if deja.get("link_id"):
+        # une création ratée (bouton non posé, panne) : reprise sur la MÊME
+        # copie, coupée en attendant — jamais une seconde copie
+        lid, sc = str(deja["link_id"]), str(deja.get("shortcode") or "")
+        url = str(deja.get("public_url") or f"{gms.PUBLIC_LINK_DOMAIN}/{sc}")
+        try:
+            return _finir_page(gid, uid, f, lid, sc, str(deja.get("nom") or nom), url, equipe)
+        except Exception as e:                           # noqa: BLE001
+            _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
+            return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
+    lid, sc, erreur = "", "", ""
+    for essai in range(lv.ESSAIS_ADRESSE):
+        sc = lv.mots_sans_prenom(nom, essai)
+        r = gms.duplicate_link(gab, sc, nom, "", equipe)
+        if r.get("ok") and (r.get("link") or {}).get("id"):
+            lid = str(r["link"]["id"])
+            break
+        erreur = str(r.get("error") or "refus GetMySocial")
+        if "shortcode" not in erreur.lower():
+            break
+    if not lid:
+        return {"ok": False, "erreur": f"GetMySocial : {erreur[:140]}"}
+    url = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
+    _noter(gid, uid, link_id=lid, shortcode=sc, public_url=url, nom=nom, par=str(par),
+           quand=int(time.time()), actif=True, etat="en_cours")
+    try:
+        return _finir_page(gid, uid, f, lid, sc, nom, url, equipe)
+    except Exception as e:                               # noqa: BLE001
+        _couper(gid, uid, lid, etat="ratee", erreur=f"{type(e).__name__}: {str(e)[:120]}")
+        _log(f"page {sc} de {cle} : {type(e).__name__}: {e} — coupée")
+        return {"ok": False, "erreur": f"{type(e).__name__} : page coupée"}
 
 
 def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: str,
@@ -470,7 +536,11 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
     champs = {"nom": nettoyer(lu.get("name_user"), MAX_NOM),
               "bio": nettoyer(lu.get("bio"), MAX_BIO, lignes=4),
               "bouton": nettoyer((ofs[0].get("label") if ofs else ""), MAX_BOUTON)}
-    actif = f.get("actif", True) is not False
+    # relue à la fin : un « Désactiver » (ou un départ) pendant la copie a
+    # écrit la fiche et sa tâche de fond attend notre verrou — ou l'a déjà
+    # trouvée sans page ; dans les deux cas la page ne doit pas rester vivante
+    actif = f.get("actif", True) is not False \
+        and lv.lien_de(gid, _vrai_uid(uid)).get("actif", True) is not False
     manques = ([] if pays.get("ok") else ["pays"]) + ([] if sur.get("ok") else ["safe page"])
     a_rallumer = False
     if not actif:
@@ -609,6 +679,11 @@ def suivre_bascule(gid: str, uid: str, actif: bool) -> None:
 
 
 def _suivre_bascule_une(gid: str, uid: str, actif: bool) -> None:
+    with _verrou_page(f"{gid}:{uid}"):
+        _suivre_bascule_une_sous_verrou(gid, uid, actif)
+
+
+def _suivre_bascule_une_sous_verrou(gid: str, uid: str, actif: bool) -> None:
     import gms
     pg = page_de(gid, uid)
     lid = str(pg.get("link_id") or "")
@@ -652,7 +727,10 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
     bilan: Dict[str, Any] = {"coupees": [], "rallumees": [], "trackings": [], "reprises": [],
                              "rates": [], "a_verifier": []}
     d = _lire()
+    eq = _equipe(gid)
     for tid, o in list((d.get("orphelines") or {}).items()):
+        if isinstance(o, dict) and o.get("equipe") and str(o["equipe"]) != eq:
+            continue                # celle d'un autre serveur : sa reprise s'en charge
         if gms.delete_link(tid).get("ok"):
             with _VERROU:
                 d2 = _lire()

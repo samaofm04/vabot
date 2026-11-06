@@ -4959,6 +4959,12 @@ def clics_du_va(gid: str, uid: str,
     lid = str(liens_va.lien_de(str(gid), str(uid)).get("link_id") or "")
     if lid and lid not in ids:
         ids.append(lid)
+    try:
+        # ses pages (pages_va) : leurs visites sont les siennes aussi
+        import pages_va
+        ids += [x for x in pages_va.liens_des_pages(gid, uid) if x not in ids]
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[podium] pages de {uid} illisibles pour ses stats : {type(e).__name__}: {e}", flush=True)
     if not ids:
         return None
     pays_q = tuple(pf.get("pays_subs") or pf["pays"])

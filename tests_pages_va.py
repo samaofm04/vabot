@@ -134,6 +134,10 @@ SAV = (gms.duplicate_link, gms.update_link, gms.get_link, gms.disable_link, gms.
        lv.poser_pays, lv._poser_base_seule, lv.ranger, lv.lia_seule, tk._etat, tk.role_manager,
        tk.role_helper, tk._maj_menu_v2, tk._EN_FOND, tk._suite)
 FICHES = {f"{TW}:{MOI}": dict(FICHE)}
+SAV_TK = (tk.ETAT_FICHIER, tk._api_reseau)
+# aucune voie vers le vrai état des tickets ni vers Discord
+tk.ETAT_FICHIER = TMP / "tickets.json"
+tk._api_reseau = lambda *a, **k: (0, None)
 try:
     gms.duplicate_link, gms.update_link, gms.get_link = f_duplicate, f_update, f_get
     gms.disable_link, gms.enable_link, gms.delete_link = f_disable, f_enable, f_delete
@@ -254,8 +258,48 @@ try:
     FICHES[f"{TW}:{VA}"]["actif"] = False
     APPELS.clear()
     r = pv.creer_page(TW, VA)
-    check("lien direct coupé : la page naît coupée aussi",
-          r["ok"] and pv.page_de(TW, VA).get("actif") is False and any(a[0] == "disable" for a in APPELS), r)
+    check("lien direct coupé : création refusée, rien copié (pas de « ✅ » sur une adresse morte)",
+          not r["ok"] and "désactivé" in r["erreur"] and not pv.page_de(TW, VA)
+          and not [a for a in APPELS if a[0] == "duplicate"], r)
+    FICHES[f"{TW}:{VA}"]["actif"] = True
+    # un manager clique « 🚫 Désactiver » PENDANT la copie : liens_va.basculer
+    # écrit la fiche (coupée) et met la bascule des pages en file
+    import threading as _th
+    VERROU_LIBRE = []
+    _vp = lv._poser_tracking
+
+    def tracking_pendant_desactiver(lid, t, nom, eq):
+        FICHES[f"{TW}:{VA}"]["actif"] = False
+        essai = []
+
+        def tenter():
+            # un autre fil (la bascule en fond) : relâché par lui-même s'il l'a eu
+            v = pv._verrou_page(f"{TW}:{VA}")
+            pris = v.acquire(blocking=False)
+            essai.append(pris)
+            if pris:
+                v.release()
+        fil = _th.Thread(target=tenter)
+        fil.start()
+        fil.join()
+        VERROU_LIBRE.append(essai[0])
+        return _vp(lid, t, nom, eq)
+    lv._poser_tracking = tracking_pendant_desactiver
+    APPELS.clear()
+    r = pv.creer_page(TW, VA)
+    lv._poser_tracking = _vp
+    check("direct coupé pendant la création : fiche relue à la fin, la page naît coupée",
+          r["ok"] and pv.page_de(TW, VA).get("actif") is False and pv.page_de(TW, VA).get("etat") == "prete"
+          and any(a[0] == "disable" for a in APPELS), (r, pv.page_de(TW, VA)))
+    check("la création tient le verrou de la page (bascule, reprise et Réessayer attendent)",
+          VERROU_LIBRE == [False], VERROU_LIBRE)
+    FICHES[f"{TW}:{VA}"]["actif"] = False
+    for manque in ({"numero": None}, {"pseudo": ""}):
+        FICHES[f"{TW}:{AUTRE}"] = dict(FICHE, **manque)
+        r = pv.creer_page(TW, AUTRE)
+        check(f"fiche sans {list(manque)[0]} : refusée (pas de « VA None @None page »)",
+              not r["ok"] and "manquant" in r["erreur"], r)
+    FICHES.pop(f"{TW}:{AUTRE}")
 
     # ── 4. modification ──────────────────────────────────────────────────
     print("4. Modification")
@@ -343,7 +387,33 @@ try:
     check("rallumé : la page aussi", [a[0] for a in APPELS] == ["enable"] and pv.page_de(TW, MOI)["actif"] is True)
     _vrai_bs = lv._basculer_sans_page
     try:
+        import threading as _th
         lv._basculer_sans_page = lambda g, u, a: {"ok": True}
+        APPELS.clear()
+        retenue = _th.Event()
+        _vdis = gms.disable_link
+        gms.disable_link = lambda lid: (retenue.wait(5), _vdis(lid))[1]
+        import verif_discord as vd
+        MENUS_FOND = []
+        tk._maj_menu_v2 = lambda g, u, *a, **k: MENUS_FOND.append((g, u, vd._SERVEUR_COURANT.get())) or 0
+        t0 = time.time()
+        with vd.sur_serveur(TW):
+            r_off = lv.basculer(TW, MOI, False)
+            rendu_vite = time.time() - t0 < 1 and not APPELS
+            r_on = lv.basculer(TW, MOI, True)
+        retenue.set()
+        pv._FILE.join()
+        gms.disable_link = _vdis
+        check("… puis le menu du ticket est remis à jour (une fois par bascule), sous le serveur du clic",
+              MENUS_FOND == [(TW, MOI, TW), (TW, MOI, TW)], MENUS_FOND)
+        check("liens_va.basculer : rend la main sans attendre GetMySocial (la page suit en fond)",
+              r_off == {"ok": True} and r_on == {"ok": True} and rendu_vite, (r_off, APPELS))
+        check("… et dans l'ordre : coupée puis rallumée", [a[0] for a in APPELS] == ["disable", "enable"]
+              and pv.page_de(TW, MOI)["actif"] is True, APPELS)
+        # jamais le vrai ici : il lirait data/tickets.json et enverrait un PATCH
+        # à Discord (MOI est le vrai uid du propriétaire) ; SAV le remet à la fin
+        tk._maj_menu_v2 = lambda g, u, *a, **k: 0
+        pv.EN_FOND = lambda f: f()      # la suite, sans fil
         APPELS.clear()
         lv.basculer(TW, MOI, False)
         coupe = [a[0] for a in APPELS]
@@ -455,6 +525,16 @@ try:
     check("page temporaire non supprimée : coupée et notée", "lnk_tmp_x" in (pv._lire().get("orphelines") or {})
           and ("disable", "lnk_tmp_x") in APPELS)
     gms.delete_link = f_delete
+    d_o = pv._lire()
+    d_o["orphelines"]["lnk_tmp_x"]["equipe"] = "tm_autre_serveur"
+    pv._ecrire(d_o)
+    APPELS.clear()
+    pv.reprendre_pages(TW)
+    check("une orpheline d'une autre équipe : laissée à la reprise de son serveur",
+          "lnk_tmp_x" in (pv._lire().get("orphelines") or {}) and ("delete", "lnk_tmp_x") not in APPELS, APPELS)
+    d_o = pv._lire()
+    d_o["orphelines"]["lnk_tmp_x"]["equipe"] = EQ
+    pv._ecrire(d_o)
     pv.reprendre_pages(TW)
     check("… supprimée à la reprise suivante", "lnk_tmp_x" not in (pv._lire().get("orphelines") or {}))
     src = (BOT / "liens_va.py").read_text(encoding="utf-8")
@@ -493,6 +573,20 @@ try:
     pv.reprendre_pages(TW)
     check("la synchro des liens (30 min) lance la reprise des pages du pilote",
           "pages_va.reprendre_pages(gid)" in src and "_synchroniser_sans_pages = synchroniser" in src)
+    _vs, _vr, _vpil = lv._synchroniser_sans_pages, pv.reprendre_pages, pv.PILOTE.get(TW)
+    REPRISES = []
+    lv._synchroniser_sans_pages = lambda g: {}
+    pv.reprendre_pages = lambda g: (REPRISES.append(str(g)) or {})
+    pv.PILOTE.pop(TW, None)             # serveur refermé, ses pages restent notées
+    try:
+        lv.synchroniser(TW)
+        lv.synchroniser("999")          # ni pilote ni page : rien
+    finally:
+        lv._synchroniser_sans_pages, pv.reprendre_pages = _vs, _vr
+        if _vpil is not None:
+            pv.PILOTE[TW] = _vpil
+    check("… et de tout serveur qui a des pages notées, même refermé (vrai appel de synchroniser)",
+          REPRISES == [TW] and pv.a_des_pages(TW) and not pv.a_des_pages("999"), REPRISES)
 
     # ── 6. le menu et la fenêtre ─────────────────────────────────────────
     print("6. Menu et fenêtre")
@@ -546,11 +640,21 @@ try:
     sauve = d["pages"].pop(f"{TW}:{MOI}")
     pv._ecrire(d)
     check("lien direct sans page : « 📄 Créer »", f"page:new:{MOI}" in ids(tk._corps_menu(TW, MOI, [])))
+    FICHES[f"{TW}:{MOI}"]["actif"] = False
+    check("… direct désactivé : pas de « 📄 Créer » (la page naîtrait morte)",
+          not [c for c in ids(tk._corps_menu(TW, MOI, [])) if c.startswith("page:")]
+          and "**🔗 Ton lien**" in "".join(textes(tk._corps_menu(TW, MOI, []))))
+    FICHES[f"{TW}:{MOI}"]["actif"] = True
     d["pages"][f"{TW}:{MOI}"] = dict(sauve, etat="ratee")
     pv._ecrire(d)
     check("page ratée : « À reprendre » avec 🔁 Réessayer (manager)",
           "**📄 Ta page**\n-# À reprendre" in textes(tk._corps_menu(TW, MOI, []))
           and f"page:new:{MOI}" in ids(tk._corps_menu(TW, MOI, [])))
+    FICHES[f"{TW}:{MOI}"]["actif"] = False
+    check("… direct désactivé : « 🚫 Désactivée », sans 🔁 Réessayer",
+          "**📄 Ta page**\n🚫 Désactivée pour le moment" in textes(tk._corps_menu(TW, MOI, []))
+          and f"page:new:{MOI}" not in ids(tk._corps_menu(TW, MOI, [])))
+    FICHES[f"{TW}:{MOI}"]["actif"] = True
     d["pages"][f"{TW}:{MOI}"] = sauve
     pv._ecrire(d)
     f = tk.fenetre_page(TW, MOI)
@@ -791,6 +895,7 @@ finally:
      gms.delete_link, gms.get_api_key, requests.post, lv.lien_de, lv.espace, lv._poser_tracking,
      lv.poser_pays, lv._poser_base_seule, lv.ranger, lv.lia_seule, tk._etat, tk.role_manager,
      tk.role_helper, tk._maj_menu_v2, tk._EN_FOND, tk._suite) = SAV
+    tk.ETAT_FICHIER, tk._api_reseau = SAV_TK
 
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")

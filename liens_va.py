@@ -2809,8 +2809,27 @@ def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:   # noqa: F811
     r = _basculer_sans_page(gid, uid, actif)
     if r.get("ok"):
         try:
+            import contextvars
             import pages_va
-            pages_va.suivre_bascule(gid, uid, actif)
+            # le serveur courant (verif_discord.sur_serveur : quel bot parle)
+            # suit la tâche dans le fil de pages_va
+            ctx = contextvars.copy_context()
+
+            def suivre_puis_menu() -> None:
+                pages_va.suivre_bascule(gid, uid, actif)
+                if not pages_va.liens_des_pages(gid, uid):
+                    return              # sans page : le menu du clic est déjà juste
+                try:
+                    # le menu redessiné pendant le clic a lu les pages AVANT leur
+                    # coupure (« 📄 Ta page » + ✏️ sous « 🚫 Désactivé ») ; rien
+                    # n'est envoyé s'il n'a pas bougé
+                    import tickets_discord
+                    tickets_discord._maj_menu_v2(gid, uid)
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[lien] menu de {gid}:{uid} non remis à jour après ses pages : "
+                          f"{type(e).__name__}: {e}", flush=True)
+            # en fond : une réponse GetMySocial par page, dans le temps du clic
+            pages_va.EN_FOND(lambda: ctx.run(suivre_puis_menu))
         except Exception as e:                               # noqa: BLE001
             print(f"[lien] page de {gid}:{uid} non suivie : {type(e).__name__}: {e}", flush=True)
     return r
@@ -2825,7 +2844,7 @@ def synchroniser(gid: str) -> Dict[str, Any]:   # noqa: F811
     b = _synchroniser_sans_pages(gid)
     try:
         import pages_va
-        if pages_va.PILOTE.get(str(gid)):
+        if pages_va.PILOTE.get(str(gid)) or pages_va.a_des_pages(gid):
             r = pages_va.reprendre_pages(gid)
             if isinstance(b, dict) and any(r.values()):
                 b["pages"] = r

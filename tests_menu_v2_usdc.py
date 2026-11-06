@@ -60,6 +60,8 @@ tk.DATA_DIR = TMP
 tk.USDC_QR_DOSSIER = TMP / "usdc_qr"
 tk.USDC_EMOJIS_FICHIER = TMP / "usdc_emojis.json"
 suivi_va.ETAT_FICHIER = TMP / "suivi_va.json"
+import pages_va                # noqa: E402
+pages_va.FICHIER = TMP / "pages_va.json"     # jamais le vrai registre des pages
 tk._EN_FOND = lambda f: f()
 tk._en_fond = lambda f: f()
 tk._app_du_serveur = lambda g: ""            # pas d'application : repli unicode
@@ -448,6 +450,36 @@ r = tk.traiter(dict(clic(f"usdc:set:{U}"), application_id="AUTRE_APP"))
 em3 = [x["emoji"] for b in r["data"]["components"][0]["components"] if b.get("type") == 1 for x in b["components"]]
 check("un clic reçu par une AUTRE application (vieux message de Siri) : le repli, jamais l'emoji d'une autre",
       em3 == [{"name": "🟣"}, {"name": "💎"}], em3)
+
+print("9. Un redessin à la fois")
+# 06/11/2026 : le clic (PATCH de l'accueil → _miroir) et le fil des pages
+# (liens_va.basculer en fond) redessinaient le même menu en même temps
+import threading as _th
+import time as _t
+EN_COURS, MAX_SIMUL, VUS_F = [0], [0], []
+_vraie_maj = tk._maj_menu_v2_sans_verrou
+
+
+def maj_lente(g, u, rangs=None, f=None):
+    EN_COURS[0] += 1
+    MAX_SIMUL[0] = max(MAX_SIMUL[0], EN_COURS[0])
+    VUS_F.append(f)
+    _t.sleep(0.05)
+    EN_COURS[0] -= 1
+    return 0
+
+
+tk._maj_menu_v2_sans_verrou = maj_lente
+try:
+    fils = [_th.Thread(target=tk._maj_menu_v2, args=(G, U, None, {"vieille": 1})) for _ in range(4)]
+    for x in fils:
+        x.start()
+    for x in fils:
+        x.join()
+finally:
+    tk._maj_menu_v2_sans_verrou = _vraie_maj
+check("même ticket : un redessin à la fois, la fiche relue sous le verrou (jamais l'instantané de l'appelant)",
+      MAX_SIMUL[0] == 1 and len(VUS_F) == 4 and all(x is None for x in VUS_F), (MAX_SIMUL, VUS_F))
 
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")

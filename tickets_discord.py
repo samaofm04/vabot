@@ -4993,20 +4993,29 @@ def _sections_page(gid: str, uid: str) -> List[Dict[str, Any]]:
     if not pv.ouverte(gid, uid) or (_fiche(gid, uid) or {}).get("parti"):
         return []                       # un VA parti : ni lien ni page dans son menu
     import liens_va as lv
-    if not lv.lien_de(gid, uid).get("public_url"):
+    direct = lv.lien_de(gid, uid)
+    if not direct.get("public_url"):
         return []
+    # direct coupé : ses pages restent affichées, rien de neuf à créer
+    # (pages_va.creer_page le refuse aussi)
+    peut_creer = direct.get("actif", True) is not False
     out: List[Dict[str, Any]] = []
     m = pv.pages_max(gid)
     for n in range(1, m + 1):
         titre = "**📄 Ta page**" if m == 1 else f"**📄 Page {n}**"
         pg = pv.page_de(gid, pv.place(uid, n))
         if not pg.get("link_id"):
+            if not peut_creer:
+                break
             out.append({"type": 9, "components": [{"type": 10, "content": f"{titre}\n-# Pas encore créée"}],
                         "accessory": {"type": 2, "style": 1, "label": "Créer", "emoji": {"name": "📄"},
                                       "custom_id": _bouton_page("new", n, uid)}})
             break
         if pg.get("etat", "prete") != "prete":
             # création ratée (ou interrompue) : coupée ; on la reprend
+            if not peut_creer:
+                out.append({"type": 10, "content": f"{titre}\n🚫 Désactivée pour le moment"})
+                break
             out.append({"type": 9, "components": [{"type": 10, "content": f"{titre}\n-# À reprendre"}],
                         "accessory": {"type": 2, "style": 1, "label": "Réessayer", "emoji": {"name": "🔁"},
                                       "custom_id": _bouton_page("new", n, uid)}})
@@ -5211,3 +5220,28 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
 # postés sont redessinés une fois.
 TICKET_SANS[TWITTER_ID] = ("numx:menu", "mailx:menu")
 BOUTONS_VERSION = 13
+
+
+# ─── Un redessin du menu v2 à la fois, par ticket (06/11/2026) ───────────
+# Depuis que les pages suivent un « 🚫 Désactiver » en fond (liens_va.basculer
+# → pages_va.EN_FOND), deux redessins du même menu se croisaient : celui du
+# clic (PATCH de l'accueil → _miroir) et celui du fil des pages. Le second
+# lisait les rangées d'AVANT (le PATCH du clic encore en vol, menu_rangs pas
+# encore noté) et repostait « 🚫 Désactiver le lien » sous un lien coupé, puis
+# notait ces rangées-là. Lecture de la fiche, PATCH et note : sous un même
+# verrou, la fiche relue une fois le verrou pris (celle des appelants est un
+# instantané). Enveloppe : tous les appels passent par ce nom.
+_VERROUS_MAJ_MENU: Dict[str, threading.RLock] = {}
+_maj_menu_v2_sans_verrou = _maj_menu_v2
+
+
+def _maj_menu_v2(gid: str, uid: str, rangs: Any = None,   # noqa: F811
+                 f: Optional[Dict[str, Any]] = None) -> int:
+    gid, uid = str(gid), str(uid)
+    with _VERROU:
+        verrou = _VERROUS_MAJ_MENU.setdefault(f"{gid}:{uid}", threading.RLock())
+    with verrou:
+        return _maj_menu_v2_sans_verrou(gid, uid, rangs, None)
+
+
+_maj_menu_v2.__doc__ = _maj_menu_v2_sans_verrou.__doc__
