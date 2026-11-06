@@ -2332,8 +2332,22 @@ def _look_sur_lien(gid: str, uid: str, cle: str) -> Dict[str, Any]:
             return {"ok": False, "erreur": "pas de lien", "libelle": libelle}
         r = _poser_look_lien(lid, _equipe(gid), photo, fond)
         if r.get("ok"):
-            _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0, erreur="")
-            _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}")
+            # le nom en blanc et le bouton OnlyFans du gabarit (HABILLAGE)
+            h = _habiller_lien(gid, lid)
+            x = (_lire().get("looks_liens") or {}).get(_cle_lien(gid, vrai)) or {}
+            if h.get("ok"):
+                _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0, erreur="",
+                                 habillage=HABILLAGE_VERSION, essais_habillage=0)
+                _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}")
+            else:
+                # photo et fond posés : le look est noté ; l'habillage est
+                # retenté par poser_looks_par_defaut (ESSAIS_REPRISE fois)
+                _noter_look_lien(gid, vrai, cle=cle, link_id=lid, quand=int(time.time()), essais=0,
+                                 erreur=str(h.get("erreur") or "")[:140],
+                                 essais_habillage=int(x.get("essais_habillage") or 0) + 1)
+                _log(f"lien {f.get('shortcode')} de {gid}:{vrai} (page 1) : look {libelle}, "
+                     f"texte et bouton NON posés ({h.get('erreur')})")
+                r = {"ok": False, "erreur": f"photo et fond posés, texte et bouton non ({h.get('erreur')})"}
     if r.get("ok") and gid in BASE_EN_PAGE:
         # la page des 30 % sans tracking est une copie figée : refaite au
         # nouveau look, en fond (la reprise la referait au passage suivant)
@@ -2511,15 +2525,21 @@ def poser_looks_par_defaut(gid: str) -> Dict[str, Any]:
             continue
         x = ll.get(_cle_lien(gid, uid)) if isinstance(ll.get(_cle_lien(gid, uid)), dict) else {}
         meme = str(x.get("link_id") or "") == lid
-        if meme and (x.get("cle") or int(x.get("essais") or 0) >= ESSAIS_REPRISE):
+        # un look posé avant l'habillage (nom blanc, bouton du gabarit) : le
+        # MÊME look reposé avec lui — jamais la brune à la place d'un choix
+        rehabiller = meme and bool(x.get("cle")) and x.get("habillage") != HABILLAGE_VERSION \
+            and int(x.get("essais_habillage") or 0) < ESSAIS_REPRISE
+        if meme and (x.get("cle") or int(x.get("essais") or 0) >= ESSAIS_REPRISE) and not rehabiller:
             continue
         faits += 1
         try:
-            r = _look_sur_lien(gid, uid, cle_def)
+            r = _look_sur_lien(gid, uid, str(x["cle"]) if rehabiller else cle_def)
         except Exception as e:                               # noqa: BLE001
             r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
         if r.get("ok"):
             bilan["poses"].append(str(f.get("shortcode") or lid))
+        elif rehabiller:
+            bilan["rates"].append(f"{f.get('shortcode') or lid} : {r.get('erreur')}")    # compté par _look_sur_lien
         else:
             essais = (int(x.get("essais") or 0) if meme else 0) + 1
             _noter_look_lien(gid, uid, link_id=lid, essais=essais, erreur=str(r.get("erreur") or "")[:140])
@@ -2720,7 +2740,9 @@ def poser_bases_en_page(gid: str, seul: str = "") -> Dict[str, Any]:
             continue
         lid = str(f.get("link_id") or "")
         if lid and f.get("public_url") and f.get("actif", True) is not False and f.get("tracking"):
-            etat = _json.dumps(["lien", look_du_lien(gid, uid, d, f), lv.base_de(f.get("tracking"))])
+            hab = ((d.get("looks_liens") or {}).get(_cle_lien(gid, uid)) or {}).get("habillage")
+            etat = _json.dumps(["lien", look_du_lien(gid, uid, d, f), lv.base_de(f.get("tracking"))]
+                               + ([hab] if hab else []))
             a_faire.append((lid, etat, f"{gid}:lien:{uid}", str(f.get("shortcode") or lid)))
     for cle, pg in (d.get("pages") or {}).items():
         g, _s, u = str(cle).partition(":")
@@ -2765,3 +2787,58 @@ def poser_bases_en_page(gid: str, seul: str = "") -> Dict[str, Any]:
         _log(f"pages des 30 % sans tracking sur {gid} : {len(bilan['poses'])} posée(s)"
              + (f", ratées : {'; '.join(bilan['rates'][:5])}" if bilan["rates"] else ""))
     return bilan
+
+
+# ─── L'habillage du lien principal (TRUST INSTAGRAM, 06/11/2026, 22 h 30) ───
+# Propriétaire, après le look : « je me suis zappé, faut mettre les trucs en
+# blanc […] et mets les mêmes trucs MY FREE OF » (captures : liaseeo,
+# « Lia ♡ » en blanc et « MY FREE 0F 🔗 », contre sweetpearlyy, « Lia ♡ »
+# en couleur et « “exclusive” stuff lol » violet), puis « oui mets aussi la
+# bio come chat with me ». Avec le look, le lien principal prend du gabarit
+# (GABARIT_PAGE) le nom et la bio (en blanc) et le style du bouton
+# OnlyFans ; son adresse, ses pays et le Telegram ne bougent pas. La police,
+# la ville et le badge restent (« photo et fond » choisi d'abord). Les pages
+# de Twitter et les pages demandées sont déjà des copies du gabarit.
+HABILLAGE_VERSION = 2
+#: Ce que le bouton OnlyFans prend du bouton OnlyFans du gabarit.
+STYLE_BOUTON_OF = ("label", "description", "button_animation", "container_style", "container_color",
+                   "text_color", "desc_color")
+
+
+def _habiller_lien(gid: str, lid: str) -> Dict[str, Any]:
+    """Le nom et le style du bouton OnlyFans du gabarit sur le lien `lid`,
+    relu (nom posé, boutons OnlyFans : même adresse, mêmes pays ; les autres
+    boutons inchangés). Rend {ok, erreur}."""
+    import gms
+    import liens_va as lv
+    equipe = _equipe(gid)
+    gab = _lire_page(GABARIT_PAGE.get(str(gid), ""), equipe)
+    gof = _boutons_of(gab.get("buttons"))
+    if not (gab and gof and gab.get("name_user") and gab.get("bio")):
+        return {"ok": False, "erreur": "gabarit illisible"}
+    style = {k: gof[0].get(k) for k in STYLE_BOUTON_OF}
+    l = _lire_page(lid, equipe)
+    if not l:
+        return {"ok": False, "erreur": "lien illisible"}
+
+    def empreinte(x: Dict[str, Any]) -> Tuple[Any, Any]:
+        bs = [b for b in x.get("buttons") or [] if isinstance(b, dict)]
+        return ([(b.get("url"), len(b.get("geofilters") or [])) for b in bs if lv._RE_OF.search(str(b.get("url") or ""))],
+                [(b.get("label"), b.get("url")) for b in bs if not lv._RE_OF.search(str(b.get("url") or ""))])
+    avant = empreinte(l)
+    if not avant[0]:
+        return {"ok": False, "erreur": "pas de bouton OnlyFans"}
+    boutons = [dict(b, **style) if lv._RE_OF.search(str(b.get("url") or "")) else b
+               for b in l.get("buttons") or [] if isinstance(b, dict)]
+    r = gms.update_link(lid, {"display_name": str(l.get("display_name") or ""), "name_user": gab["name_user"],
+                              "bio": gab["bio"], "buttons": boutons}, equipe)
+    if not r.get("ok"):
+        return {"ok": False, "erreur": str(r.get("error") or "GetMySocial a refusé")[:140]}
+    l2 = _lire_page(lid, equipe)
+    if empreinte(l2) != avant:
+        _log(f"habillage de {lid} : boutons changés à la relecture ({avant} → {empreinte(l2)})")
+        return {"ok": False, "erreur": "boutons changés à la relecture : prévenir un manager"}
+    if l2.get("name_user") != gab["name_user"] or l2.get("bio") != gab["bio"] or any(
+            b.get("label") != style["label"] for b in _boutons_of(l2.get("buttons"))):
+        return {"ok": False, "erreur": "relu sans le nom, la bio ou le bouton du gabarit"}
+    return {"ok": True, "erreur": ""}

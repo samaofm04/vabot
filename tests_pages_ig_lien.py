@@ -65,11 +65,13 @@ def track(n):
 
 
 def lien_gms(lid, sc, n, nom):
-    return {"id": lid, "type": "landing", "display_name": nom,
+    return {"id": lid, "type": "landing", "display_name": nom, "name_user": "Lia  ♡", "bio": "posting :3",
             "profile_picture": f"https://images.getmysocial.com/links/x/{sc}/profile.jpg",
             "background_image": f"https://images.getmysocial.com/links/x/{sc}/background.jpg",
-            "buttons": [{"label": "“exclusive” stuff lol", "url": track(n),
-                         "geofilters": [{"country_code": "ES"}] * 233},
+            "buttons": [{"label": "“exclusive” stuff lol", "description": "(yes, for free)", "url": track(n),
+                         "button_animation": "bounce", "container_style": "custom-color",
+                         "container_color": "#d99be3", "text_color": "#000000", "desc_color": "#FFFFFF",
+                         "block_id": f"b_{lid}", "geofilters": [{"country_code": "ES"}] * 233},
                         {"label": "MY TELEGRAM", "url": "https://t.me/m/x"}]}
 
 
@@ -214,6 +216,12 @@ try:
                             ("lnk_t1", "starrdollyy", 160, "Twitter VA 160 @x page"),
                             ("lnk_gab", "tpligbrune1", 1, "Gabarit page IG 1 (liabrune)")):
         LIENS[lid] = lien_gms(lid, sc, n, nom)
+    GAB = "lnk_6aedd88bc7881b6c8066a247"
+    LIENS[GAB] = dict(lien_gms(GAB, "tpligbrune1", 1, "Gabarit page IG 1 (liabrune)"), whitelabel=True,
+                      bio="Come chat with me", name_user="{{color:#ffffff}}*Lia  ♡*{{/color}}")
+    LIENS[GAB]["buttons"][0].update(url="https://onlyfans.com/liasxcret", geofilters=[], label="MY FREE 0F 🔗",
+                                    description=None, button_animation="pulse", container_style="glass-effect",
+                                    container_color="#785EFF", text_color="#ffffff", desc_color="#ffffff")
     FICHES.update({f"{AG}:{VA}": fiche(92, "fiable0010", "lnk_m1", "sweetpearlyy"),
                    f"{AG}:{VA2}": fiche(93, "b", "lnk_m2", "lildreamyy"),
                    f"{AG}:{VA3}": fiche(94, "c", "lnk_m3", "babeyy", actif=False),
@@ -320,12 +328,22 @@ try:
     check("LOOKS_PAR_PASSE (2) liens par passage, lien coupé (VA3) laissé",
           len(b["poses"]) == 2 and "babeyy" not in b["poses"], b)
     m1 = LIENS["lnk_m1"]
-    check("… photo et fond de la brune, diapo vidée ; bio, boutons, tracking, pays, Telegram intacts",
+    check("… photo et fond de la brune, diapo vidée ; tracking, pays, Telegram intacts",
           m1["profile_picture"] == BRUNE[3] and m1["background_image"] == BRUNE[4]
           and m1["profile_picture_slides"] == [] and m1["buttons"][0]["url"] == track(92)
           and len(m1["buttons"][0]["geofilters"]) == 233 and m1["buttons"][1]["url"] == "https://t.me/m/x"
-          and all(set(a[2]) == {"display_name", "profile_picture", "profile_picture_slides", "background_image"}
-                  for a in APPELS[n:] if a[0] == "update"), m1)
+          and m1["buttons"][1]["label"] == "MY TELEGRAM", m1)
+    check("… habillage du gabarit : « Lia ♡ » et sa bio en blanc, bouton « MY FREE 0F 🔗 » (transparent, pulse)",
+          m1["name_user"] == "{{color:#ffffff}}*Lia  ♡*{{/color}}" and m1["bio"] == "Come chat with me"
+          and m1["buttons"][0]["label"] == "MY FREE 0F 🔗"
+          and m1["buttons"][0]["description"] is None and m1["buttons"][0]["button_animation"] == "pulse"
+          and m1["buttons"][0]["container_style"] == "glass-effect" and m1["buttons"][0]["text_color"] == "#ffffff"
+          and m1["buttons"][0]["block_id"] == "b_lnk_m1", m1["buttons"][0])
+    check("… deux écritures seulement : photo/fond, puis nom + bio + boutons (jamais l'A/B)",
+          sorted({tuple(a[2]) for a in APPELS[n:] if a[0] == "update"}) == sorted(
+              {("background_image", "display_name", "profile_picture", "profile_picture_slides"),
+               ("bio", "buttons", "display_name", "name_user")}), {tuple(a[2]) for a in APPELS[n:] if a[0] == "update"})
+    check("… noté avec l'habillage", (pv._lire()["looks_liens"][f"{AG}:{VA}"]).get("habillage") == pv.HABILLAGE_VERSION)
     check("… noté par lien : look « brune » sur le lien principal", pv.look_du_lien(AG, VA) == "brune")
     b = pv.poser_looks_par_defaut(AG)
     check("passage suivant : le reste (VA4), personne deux fois", b["poses"] == ["angelyy"], b)
@@ -355,6 +373,38 @@ try:
           len(essais) == pv.ESSAIS_REPRISE and not pv.look_du_lien(AG, "5005"), len(essais))
     REGLE["refus_update"] = set()
     check("Twitter : aucun look par défaut", pv.poser_looks_par_defaut(TW) == {"poses": [], "rates": []})
+    # un look posé AVANT l'habillage (prod du 06/11 21 h 50) : le même look reposé, avec l'habillage
+    d = pv._lire()
+    d["looks_liens"][f"{AG}:{VA2}"].pop("habillage", None)
+    pv._ecrire(d)
+    LIENS["lnk_m2"]["name_user"] = "Lia  ♡"
+    b = pv.poser_looks_par_defaut(AG)
+    check("un look d'avant l'habillage : le MÊME look (blonde) reposé avec le nom blanc et le bouton, pas la brune",
+          b["poses"] == ["lildreamyy"] and pv.look_du_lien(AG, VA2) == "blonde"
+          and LIENS["lnk_m2"]["profile_picture"] == BLONDE[3]
+          and LIENS["lnk_m2"]["name_user"].startswith("{{color:#ffffff}}"), b)
+    # l'habillage refusé : photo et fond posés, look noté, 3 essais puis plus rien
+    d = pv._lire()
+    d["looks_liens"][f"{AG}:{VA2}"].pop("habillage", None)
+    pv._ecrire(d)
+    _vupd2 = gms.update_link
+
+    def refus_nom(lid, champs, team_id=None):
+        if "name_user" in champs:
+            APPELS.append(("update", lid, sorted(champs)))
+            return {"ok": False, "error": "500 panne"}
+        return _vupd2(lid, champs, team_id)
+    gms.update_link = refus_nom
+    for _ in range(4):
+        pv.poser_looks_par_defaut(AG)
+    gms.update_link = _vupd2
+    x2 = pv._lire()["looks_liens"][f"{AG}:{VA2}"]
+    check("habillage refusé : look gardé, essais comptés, ESSAIS_REPRISE (3) puis plus rien",
+          x2.get("cle") == "blonde" and x2.get("essais_habillage") == pv.ESSAIS_REPRISE and not x2.get("habillage"), x2)
+    d = pv._lire()
+    d["looks_liens"][f"{AG}:{VA2}"].update(essais_habillage=0)
+    pv._ecrire(d)
+    pv.poser_looks_par_defaut(AG)
 
     print("5. appliquer_look : page 1 = le lien, page 2 = la page demandée")
     r = pv.appliquer_look(AG, VA4, "general", n=1)
@@ -447,10 +497,6 @@ try:
 
     print("9. Les 30 % sans tracking voient la page")
     pv.BASE_EN_PAGE = {AG}
-    GAB = "lnk_6aedd88bc7881b6c8066a247"
-    LIENS[GAB] = dict(lien_gms(GAB, "tpligbrune1", 1, "Gabarit page IG 1 (liabrune)"), whitelabel=True,
-                      bio="Come chat with me", name_user="Lia")
-    LIENS[GAB]["buttons"][0].update(url="https://onlyfans.com/liasxcret", geofilters=[], label="MY FREE 0F")
     for lid in ("lnk_m1b", "lnk_m2", "lnk_m4", "lnk_m5"):
         AB[lid] = {"enabled": True, "controlWeight": 70, "variants": [{"variantId": f"v_old_{lid}", "name": "Base Lia",
                                                                        "weight": 30}]}
