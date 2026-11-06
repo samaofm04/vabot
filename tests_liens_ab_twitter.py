@@ -1087,15 +1087,19 @@ try:
     # « dès que les mecs ne sont pas des USA, Australie, Canada […] renvoie-les
     # vers le lien qui n'a pas de tracking link, juste le compte de base »
     BASE = "https://onlyfans.com/emy.brw"       # le compte de la model du lien (tracking c55)
-    NB = len(lv.TOUS_LES_PAYS) - len(lv.PAYS_CIBLES)     # 8 cibles depuis le 03/11 (+ Bénin, Madagascar)
+    # 8 cibles depuis le 03/11 (+ Bénin, Madagascar), plus l'Europe riche sur
+    # Twitter depuis le 06/11 (liens_va.PAYS_EN_PLUS) : 23
+    CIBLES_TW = lv.cibles_pays(lv.espace(TW)["equipe"])
+    NB = len(lv.TOUS_LES_PAYS) - len(CIBLES_TW)
     g, _s = monde()
     r = lv.creer_pour(TW, "p1", "paysva", manager="YAZID")
     lid = f'lnk_{r.get("shortcode")}'
     geo = g.liens.get(lid, {}).get("geofilters") or []
     codes = {x["country_code"] for x in geo}
-    check("lien neuf : tout pays hors US/CA/AU/GB/NZ/IE va au compte de base de SA model, sans tracking",
-          r.get("ok") and len(geo) == NB == 248 and not codes & set(lv.PAYS_CIBLES)
-          and {"FR", "DE", "MX"} <= codes and all(x["destination_url"] == BASE for x in geo),
+    check("lien neuf : tout pays hors US/CA/AU/GB/NZ/IE (et l'Europe riche) va au compte de base de SA model, sans tracking",
+          r.get("ok") and len(geo) == NB == 233 and not codes & CIBLES_TW
+          and {"ES", "IT", "MX"} <= codes and not {"FR", "DE"} & codes
+          and all(x["destination_url"] == BASE for x in geo),
           (r, len(geo), {x["destination_url"] for x in geo}))
     check("… noté dans la fiche et dans le retour",
           lv.lien_de(TW, "p1").get("pays") is True and r.get("pays") is True)
@@ -1164,7 +1168,7 @@ try:
     # la variante Seren refiltrée (après un changement de model) : même variantId
     g, _s = monde(etat={"liens": {f"{TW}:v": {
         "pseudo": "v", "numero": 5, "shortcode": "vv", "link_id": "lnk_vv",
-        "tracking": "https://onlyfans.com/liasxcret/c63",
+        "tracking": "https://onlyfans.com/liasxcret/c63", "pays_cibles": lv.signature_pays(TW),
         "variante": {"posee": True, "pays": False, "tracking": SEREN}}}})
     cfg = {"enabled": True, "controlWeight": 66.7,
            "variants": [{"variantId": "v1", "sourceLinkId": "vieux", "weight": 33.3, "name": "Seren"}]}
@@ -1201,7 +1205,8 @@ try:
     rp = lv.poser_pays("lnk_page", "tm_x")
     bts = g.liens["lnk_page"]["buttons"]
     check("landing (Agency) : la liste sur son bouton OnlyFans seulement (sur la page, GMS l'efface)",
-          rp.get("ok") and len(bts[1].get("geofilters") or []) == NB
+          rp.get("ok") and len(bts[1].get("geofilters") or [])
+          == len(lv.TOUS_LES_PAYS) - len(lv.cibles_pays("tm_x")) == 248     # équipe d'aucun serveur : liste d'avant
           and {x["destination_url"] for x in bts[1]["geofilters"]} == {"https://onlyfans.com/liasxcret"}
           and "geofilters" not in bts[0] and "geofilters" not in g.liens["lnk_page"], (rp, bts))
     g.liens["lnk_sans"] = {"id": "lnk_sans", "type": "landing", "buttons": [{"label": "a", "url": "https://x.com"}]}
@@ -1267,7 +1272,7 @@ try:
 
     def fiche4(n, sc, tracking=f"{LIA_P}/c60", seren=f"{SEREN_P}/c195", **kw):
         return {"pseudo": f"va{n}", "numero": n, "shortcode": sc, "link_id": f"lnk_{sc}",
-                "tracking": tracking,
+                "tracking": tracking, "pays_cibles": lv.signature_pays(TW),
                 "variante": dict({"posee": True, "modele": "Seren", "creator_id": 3867,
                                   "tracking": seren, "pays": True}, **kw)}
 

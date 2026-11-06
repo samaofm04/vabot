@@ -210,7 +210,7 @@ try:
     page = g.liens[f'lnk_{r["shortcode"]}']
     check("… pays (29/10/2026) : hors US/CA/AU/GB/NZ/IE, le bouton OnlyFans mène au compte de base, "
           "rien sur la page",
-          len(b0.get("geofilters") or []) == 248 and "geofilters" not in page
+          len(b0.get("geofilters") or []) == len(lv.TOUS_LES_PAYS) - len(lv.cibles_pays(lv.espace(AG)["equipe"])) and "geofilters" not in page
           and {x["destination_url"] for x in b0["geofilters"]} == {"https://onlyfans.com/emy.brw"}
           and lv.lien_de(AG, "u1").get("pays") is True, (len(b0.get("geofilters") or []), page.keys()))
     g, suivis = monde()
@@ -235,7 +235,7 @@ try:
           getattr(g, "deeplink", "") == "pageload")
     geo = g.liens[f'lnk_{r["shortcode"]}'].get("geofilters") or []
     check("… et la liste des pays sur le lien direct, vers le compte de base",
-          len(geo) == 248 and {x["destination_url"] for x in geo} == {"https://onlyfans.com/emy.brw"},
+          len(geo) == len(lv.TOUS_LES_PAYS) - len(lv.cibles_pays(lv.espace(AG)["equipe"])) and {x["destination_url"] for x in geo} == {"https://onlyfans.com/emy.brw"},
           len(geo))
     f = lv.lien_de(AG, "u1")
     check("… la fiche : numéro, tracking, lien", f.get("numero") == 27

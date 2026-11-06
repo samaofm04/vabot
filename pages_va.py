@@ -1713,3 +1713,67 @@ def lancer_creations(gid: str) -> str:
         _LOT_CREATIONS.release()
         raise
     return "lancee"
+
+
+# ─── Pays riches d'Europe sur les pages (06/11/2026) ──────────────────────
+# liens_va.PAYS_EN_PLUS (Twitter et Instagram) : une page posée avec l'ancienne
+# liste reprend l'étape « pays » (son bouton OnlyFans), une fois par liste ;
+# la reprise ci-dessus la refait (ESSAIS_REPRISE, puis « a_verifier »).
+_reprendre_pages_sans_liste = reprendre_pages
+
+
+def _marquer_liste_pays(gid: str) -> List[str]:
+    import liens_va as lv
+    gid = str(gid)
+    if gid not in lv.PAYS_EN_PLUS or lv._cibles_pays_sans_serveur() is None:
+        return []
+    voulu, avant = lv.signature_pays(gid), lv.signature_pays_avant()
+    marques: List[str] = []
+    for cle, pg in list((_lire().get("pages") or {}).items()):
+        g, _s, uid = str(cle).partition(":")
+        if g != gid or not isinstance(pg, dict) or not pg.get("link_id") or pg.get("etat", "prete") != "prete":
+            continue
+        posee = pg.get("pays_cibles") or (lv._POSES_PAYS.get(str(pg["link_id"]))
+                                          if "pays" not in (pg.get("manques") or []) else None)
+        if posee == voulu and not pg.get("pays_cibles"):
+            _noter(g, uid, pays_cibles=voulu)     # posée par ce processus : notée, rien à refaire
+            continue
+        if str(posee or avant) == voulu or pg.get("pays_liste_due") == voulu:
+            continue
+        with _verrou_page(cle):
+            pg = page_de(g, uid)
+            essais = dict(pg.get("essais") or {}) if isinstance(pg.get("essais"), dict) else {}
+            essais.pop("pays", None)
+            _noter(g, uid, manques=sorted(set(pg.get("manques") or []) | {"pays"}), essais=essais,
+                   a_verifier=False, pays=False, pays_liste_due=voulu)
+        marques.append(uid)
+    if marques:
+        _log(f"pays {gid} : {len(marques)} page(s) à reposer avec la nouvelle liste")
+    return marques
+
+
+def _noter_liste_pays(gid: str) -> None:
+    for cle, pg in list((_lire().get("pages") or {}).items()):
+        g, _s, uid = str(cle).partition(":")
+        if (g == str(gid) and isinstance(pg, dict) and pg.get("pays_liste_due")
+                and "pays" not in (pg.get("manques") or [])):
+            with _verrou_page(cle):
+                due = page_de(g, uid).get("pays_liste_due")
+                if due:
+                    _noter(g, uid, pays_cibles=due, pays_liste_due="")
+
+
+def reprendre_pages(gid: str) -> Dict[str, Any]:   # noqa: F811
+    try:
+        _marquer_liste_pays(gid)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"pays {gid} : liste des pages non comparée ({type(e).__name__}: {e})")
+    b = _reprendre_pages_sans_liste(gid)
+    try:
+        _noter_liste_pays(gid)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"pays {gid} : liste posée des pages non notée ({type(e).__name__}: {e})")
+    return b
+
+
+reprendre_pages.__doc__ = _reprendre_pages_sans_liste.__doc__

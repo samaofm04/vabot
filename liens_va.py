@@ -2859,3 +2859,149 @@ def synchroniser(gid: str) -> Dict[str, Any]:   # noqa: F811
     except Exception as e:                                   # noqa: BLE001
         print(f"[lien] reprise des pages {gid} : {type(e).__name__}: {e}", flush=True)
     return b
+
+
+# ─── Pays riches d'Europe : Twitter et Instagram (06/11/2026) ────────────
+# Propriétaire : « par rapport à tout ce qu'il y a, on a dit qu'on allait
+# prendre que les trucs USA. [...] tous les pays riches », « un gros SMIC,
+# comme la France, des 1500, des 2000 balles par mois », « Europe seulement »,
+# puis « uniquement pour Twitter et Instagram ; pour Threads que du US comme
+# d'hab ». Espagne, Italie, Portugal restent dehors (un peu sous la France).
+# Ces pays GARDENT le tracking du VA (ses abonnés comptent dans sa paie) sur
+# les liens et les pages de TRUST TWITTER et TRUST INSTAGRAM ; Threads
+# inchangé. La branche 30 % « Base » du 70/30 n'est pas à refaire : sa copie
+# vise déjà le compte de base, tous pays.
+PAYS_EUROPE = ("FR", "DE", "CH", "AT", "BE", "NL", "LU", "DK", "SE", "NO", "FI", "IS",
+               "MC", "LI", "AD")
+import contextvars as _cv_pays                                # noqa: E402
+from typing import List, Tuple                                # noqa: E402
+
+PAYS_EN_PLUS: Dict[str, Tuple[str, ...]] = {TWITTER_ID: PAYS_EUROPE, AGENCY_IG_ID: PAYS_EUROPE}
+
+#: l'équipe du lien que poser_pays est en train de régler : regles_pays et
+#: cibles_pays n'ont que la model en main, la liste dépend du serveur
+_EQUIPE_PAYS: "_cv_pays.ContextVar[str]" = _cv_pays.ContextVar("equipe_pays", default="")
+_cibles_pays_sans_serveur = cibles_pays
+_poser_pays_sans_serveur = poser_pays
+_reprendre_pays_sans_liste = reprendre_pays
+
+
+def _serveur_de_equipe(equipe: Any) -> str:
+    eq = str(equipe or "")
+    if not eq:
+        return ""
+    for g in PAYS_EN_PLUS:
+        try:
+            if str(espace(g).get("equipe") or "") == eq:
+                return g
+        except Exception:                                    # noqa: BLE001
+            continue
+    return ""
+
+
+def cibles_pays(equipe: Any = None) -> Optional[set]:   # noqa: F811
+    """Les pays qui gardent le tracking (plus haut), plus ceux du serveur de
+    `equipe` (PAYS_EN_PLUS) ; sans `equipe`, celle du poser_pays en cours."""
+    c = _cibles_pays_sans_serveur()
+    if c is None:
+        return None
+    g = _serveur_de_equipe(_EQUIPE_PAYS.get() if equipe is None else equipe)
+    return set(c) | set(PAYS_EN_PLUS.get(g, ()))
+
+
+#: {link_id: liste posée} par ce processus : un lien créé (ou rallumé) après
+#: la mise en service porte déjà la bonne liste — sans ça, sa fiche (sans
+#: « pays_cibles ») passait pour ancienne et il était reposé une fois pour rien
+_POSES_PAYS: Dict[str, str] = {}
+
+
+def poser_pays(lid: str, equipe: str, base: Optional[str] = None) -> Dict[str, Any]:   # noqa: F811
+    jeton = _EQUIPE_PAYS.set(str(equipe or ""))
+    try:
+        r = _poser_pays_sans_serveur(lid, equipe, base)
+        if r.get("ok") and not r.get("coupe"):
+            c = cibles_pays()
+            if c is not None:
+                _POSES_PAYS[str(lid)] = ",".join(sorted(c))
+        return r
+    finally:
+        _EQUIPE_PAYS.reset(jeton)
+
+
+poser_pays.__doc__ = _poser_pays_sans_serveur.__doc__
+
+
+def signature_pays(gid: str) -> str:
+    """La liste attendue sur les liens de ce serveur, en texte (« AD,AT,… »).
+    "" quand la règle est coupée."""
+    c = cibles_pays(espace(gid)["equipe"])
+    return "" if c is None else ",".join(sorted(c))
+
+
+def signature_pays_avant() -> str:
+    """Ce que porte un lien posé avant PAYS_EN_PLUS (sans « pays_cibles »)."""
+    c = _cibles_pays_sans_serveur()
+    return "" if c is None else ",".join(sorted(c))
+
+
+def _marquer_liste_pays(gid: str) -> List[str]:
+    """Les liens de ce serveur posés avec une AUTRE liste : « pays » à refaire
+    (la reprise ci-dessous, ou le rallumage pour un lien coupé), une fois par
+    liste — un lien qui rate encore ne repart pas de zéro à chaque passage.
+    Règle coupée ({} dans la config) : rien, elle ne vaut que pour les liens à
+    venir."""
+    gid = str(gid)
+    if _cibles_pays_sans_serveur() is None:
+        return []
+    voulu, avant = signature_pays(gid), signature_pays_avant()
+    d = _etat()
+    marques: List[str] = []
+    change = False
+    for cle, f in (d.get("liens") or {}).items():
+        if not (str(cle).startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")):
+            continue
+        posee = f.get("pays_cibles") or (_POSES_PAYS.get(str(f["link_id"])) if f.get("pays") is True else None)
+        if posee == voulu and not f.get("pays_cibles"):
+            f["pays_cibles"] = voulu            # posé par ce processus : noté, rien à refaire
+            change = True
+            continue
+        if str(posee or avant) == voulu or f.get("pays_liste_due") == voulu:
+            continue
+        f.update(pays=False, pays_essais=0, pays_a_verifier=False, pays_liste_due=voulu)
+        marques.append(cle.split(":", 1)[1])
+        change = True
+    if change:
+        _ecrire(d)
+    if marques:
+        print(f"[lien] pays {gid} : {len(marques)} lien(s) à reposer avec la nouvelle liste", flush=True)
+    return marques
+
+
+def _noter_liste_pays(gid: str) -> None:
+    """Un lien reposé (pays vrai) note la liste qu'il porte désormais."""
+    d = _etat()
+    change = False
+    for cle, f in (d.get("liens") or {}).items():
+        if (str(cle).startswith(f"{gid}:") and isinstance(f, dict) and f.get("pays") is True
+                and f.get("pays_liste_due")):
+            f["pays_cibles"] = f.pop("pays_liste_due")
+            change = True
+    if change:
+        _ecrire(d)
+
+
+def reprendre_pays(gid: str) -> Dict[str, Any]:   # noqa: F811
+    if str(gid) in PAYS_EN_PLUS:
+        try:
+            _marquer_liste_pays(gid)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[lien] pays {gid} : liste non comparée ({type(e).__name__}: {e})", flush=True)
+    b = _reprendre_pays_sans_liste(gid)
+    try:
+        _noter_liste_pays(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[lien] pays {gid} : liste posée non notée ({type(e).__name__}: {e})", flush=True)
+    return b
+
+
+reprendre_pays.__doc__ = _reprendre_pays_sans_liste.__doc__
