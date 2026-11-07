@@ -50,6 +50,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import domaines
 import safe_json
 
 AGENCY_IG_ID = "1488331963575177247"
@@ -67,7 +68,9 @@ SERVEURS = {AGENCY_IG_ID, TWITTER_ID, THREADS_ID}
 #: Le bandeau de la page et le nom du lien, par serveur.
 MARQUES = {AGENCY_IG_ID: ("TRUST INSTAGRAM", "Instagram"), TWITTER_ID: ("TRUST TWITTER", "Twitter"),
            THREADS_ID: ("TRUST THREADS", "Threads")}
-SITE = "https://youl4b.com"
+#: trust-ofm.com depuis le 07/11/2026 (domaines.py) : les liens youl4b.com
+#: déjà donnés marchent toujours, c'est la même application.
+SITE = domaines.SITE_TRUST
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CLES_FICHIER = DATA_DIR / "stats_va_cles.json"
 #: Les sources des chiffres et leur documentation officielle, en bas de la page
@@ -138,7 +141,7 @@ def lien(gid: Any, uid: Any) -> str:
     """L'adresse de la page de ce VA ; "" hors des SERVEURS."""
     if str(gid or "") not in SERVEURS or not str(uid or "").isdigit():
         return ""
-    return f"{SITE}/mes-stats?t={jeton(gid, uid)}"
+    return f"{domaines.site(gid)}/mes-stats?t={jeton(gid, uid)}"
 
 
 # ─── les chiffres ────────────────────────────────────────────────────────

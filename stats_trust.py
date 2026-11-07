@@ -38,6 +38,7 @@ import threading
 import time
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+import domaines
 import safe_json
 import stats_va as sv
 
@@ -50,7 +51,9 @@ SERVEURS: Tuple[Tuple[str, str, str], ...] = (
 _PAR_CODE = {c: (g, n) for g, c, n in SERVEURS}
 _PAR_GID = {g: (c, n) for g, c, n in SERVEURS}
 CLE_FICHIER = sv.DATA_DIR / "stats_trust_cle.json"
-SITE = sv.SITE
+#: la page de direction reste sur youl4b.com ; celle des VA (sv.SITE) est
+#: passée sur trust-ofm.com le 07/11/2026
+SITE = domaines.SITE
 CHEMIN = "/trust/liens"
 #: Une période relue est gardée 10 min, comme la page perso.
 CACHE_S = 600

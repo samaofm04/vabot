@@ -86,6 +86,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+import domaines
 import safe_json
 
 # ─── Configuration (identifiants Discord, pas des secrets) ────────────────
@@ -1702,7 +1703,7 @@ def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "
             "Il est personnel, valable **15 minutes**, et remplace tout lien précédent.",
             [{"type": 1, "components": [{"type": 2, "style": 5, "label": "Ouvrir la vérification",
-                                         "url": f"{SITE}/verif/{jeton}"}]}])
+                                         "url": f"{domaines.site(gid)}/verif/{jeton}"}]}])
 
     m = re.fullmatch(r"verif:(ok|kick|ban):(\d{5,25})", cid)
     if m:

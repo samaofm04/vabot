@@ -135,7 +135,7 @@ def urls(composants):
 print("1. TRUST THREADS : 📊 Tes stats dans le menu")
 check("stats_va : Threads a sa page, à son bandeau",
       TH in stats_va.SERVEURS and stats_va.MARQUES[TH] == ("TRUST THREADS", "Threads")
-      and stats_va.lien(TH, VA).startswith("https://youl4b.com/mes-stats?t="))
+      and stats_va.lien(TH, VA).startswith("https://trust-ofm.com/mes-stats?t="))
 check("le menu en blocs de Threads porte la page, comme Twitter",
       TH in tk.MENU_PAGE_STATS and TW in tk.MENU_PAGE_STATS)
 rangs_th = tk.boutons_va(VA, a_un_lien=True, gid=TH)

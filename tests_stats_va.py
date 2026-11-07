@@ -175,14 +175,14 @@ check("la clé retrouve son VA", sv.qui(t108) == (GID, U108), sv.qui(t108))
 check("clé fausse, vide ou courte : rien",
       sv.qui("x" * 32) is None and sv.qui("") is None and sv.qui(None) is None
       and sv.qui(t108[:10]) is None and sv.qui(t108 + "a") is None)
-check("le lien : https://youl4b.com/mes-stats?t=<sa clé>",
-      sv.lien(GID, U108) == f"https://youl4b.com/mes-stats?t={t108}", sv.lien(GID, U108))
+check("le lien : https://trust-ofm.com/mes-stats?t=<sa clé>",
+      sv.lien(GID, U108) == f"https://trust-ofm.com/mes-stats?t={t108}", sv.lien(GID, U108))
 check("hors des TRUST (Va IG), pas de lien (ni clé créée)",
       sv.lien(subs_va.VA_IG_ID, U108) == "" and f"{subs_va.VA_IG_ID}:{U108}" not in sv._cles())
 # 04/11/2026, devant le menu de Threads : « il manque les trucs pour mes stats
 # et tout [...] un peu comme sur Twitter »
 check("TRUST THREADS : sa page aussi, une clé à lui",
-      sv.lien(TW, U108).startswith("https://youl4b.com/mes-stats?t=") and sv.lien(TW, U108) != sv.lien(GID, U108))
+      sv.lien(TW, U108).startswith("https://trust-ofm.com/mes-stats?t=") and sv.lien(TW, U108) != sv.lien(GID, U108))
 
 print("2. Les chiffres")
 sv._CACHE.clear()
@@ -411,7 +411,7 @@ _cv = pod.clics_du_va
 pod.clics_du_va = lambda g, u, p: [(1, 2) for _x in p]
 txt = subs_va._texte_stats(GID, U108, r_)
 check("TRUST INSTAGRAM : le lien sous les chiffres, entre < > (pas d'aperçu)",
-      f"<https://youl4b.com/mes-stats?t={t108}>" in txt and txt.index("Clics de ton lien") < txt.index("mes-stats"),
+      f"<https://trust-ofm.com/mes-stats?t={t108}>" in txt and txt.index("Clics de ton lien") < txt.index("mes-stats"),
       txt[-300:])
 check("TRUST INSTAGRAM : aucun montant dans le message", "$" not in txt)
 txt_tw = subs_va._texte_stats(TW, U108, r_)
@@ -419,7 +419,7 @@ check("Threads (04/11) : le lien sous les chiffres aussi",
       "mes-stats" in txt_tw and "Clics de ton lien" in txt_tw)
 # 04/11/2026 : « un peu comme sur Instagram » pour TRUST TWITTER
 check("TRUST TWITTER : son lien, une clé à lui, distincte d'Instagram",
-      sv.lien(sv.TWITTER_ID, U108).startswith("https://youl4b.com/mes-stats?t=")
+      sv.lien(sv.TWITTER_ID, U108).startswith("https://trust-ofm.com/mes-stats?t=")
       and sv.lien(sv.TWITTER_ID, U108) != sv.lien(GID, U108))
 _dtw = dict(D["precedente"], gid=sv.TWITTER_ID)
 _htw = sv.page_html(_dtw, sv.jeton(sv.TWITTER_ID, U108), JOUR)
@@ -471,7 +471,7 @@ finally:
     tickets_discord._api, tickets_discord._etat = _api_sauve, _etat_sauve
 check("TRUST INSTAGRAM : la page de stats juste sous « 🔗 Ton lien »",
       d_ig.endswith(f"https://getmysocial.com/neuf\n\n📊 **Ta page de stats** — rien que pour toi :\n"
-                    f"https://youl4b.com/mes-stats?t={t108}") and "vieux" not in d_ig, d_ig[-200:])
+                    f"https://trust-ofm.com/mes-stats?t={t108}") and "vieux" not in d_ig, d_ig[-200:])
 check("Threads : pas de page de stats dans l'accueil (elle est dans le menu)", "mes-stats" not in d_tw, d_tw[-160:])
 check("lien refait : la page de stats une seule fois, sous le nouveau lien",
       d_re.count("mes-stats") == 1 and d_re.index("autre") < d_re.index("mes-stats") and "neuf" not in d_re, d_re[-200:])
@@ -486,7 +486,7 @@ try:
 finally:
     __import__("liens_va").lien_de = _lv_lien
 check("TRUST TWITTER : le menu porte le lien puis la page de stats",
-      _menu_tw.startswith("📋 **Menu**\n🔗 <https://getmysocial.com/neuf>\n📊 Tes stats : <https://youl4b.com/mes-stats?t=")
+      _menu_tw.startswith("📋 **Menu**\n🔗 <https://getmysocial.com/neuf>\n📊 Tes stats : <https://trust-ofm.com/mes-stats?t=")
       and _menu_tw.endswith(">"), _menu_tw)
 check("TRUST INSTAGRAM : le menu ne change pas (sa page reste dans l'accueil)",
       _menu_ig == "📋 **Menu**\n🔗 <https://getmysocial.com/neuf>", _menu_ig)

@@ -61916,6 +61916,10 @@ def create_app():
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=True,
     )
+    # trust-ofm.com (07/11/2026) ne sert que les pages des VA de TRUST :
+    # sans cette garde, sa racine ouvrait la connexion du dashboard.
+    import domaines
+    domaines.installer(app)
 
     # Anti-force brute sur le login : 8 essais ratés par IP -> pause de 10 min.
     _LOGIN_FAILS: dict = {}

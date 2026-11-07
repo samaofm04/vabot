@@ -132,6 +132,12 @@ Les commentaires expliquent **pourquoi**, pas quoi — de préférence ce qui a 
 observé (« sans ça, X arrivait »). Le code et les messages de commit sont en
 français, sans accents dans les messages de commit.
 
+**Deux domaines, une application.** youl4b.com sert tout. trust-ofm.com ne
+sert que les pages des VA de TRUST TWITTER, INSTAGRAM et THREADS (page perso,
+vérification, espace d'affiliation) ; le reste y rend une page neutre.
+`domaines.py` porte la table et la garde : un lien donné à un VA se fabrique
+avec `domaines.site(gid)`, jamais avec une adresse en dur.
+
 Les métadonnées d'un média sont des fichiers voisins : `<stem>.txt` (caption),
 `<stem>.desc.txt` (description), `<stem>.acheck.txt` (description reprise d'un
 post, en attente de relecture), `<stem>.montage.json` (brouillon d'édition),
