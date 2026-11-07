@@ -225,6 +225,34 @@ check("CVR depuis toujours : compteurs depuis la création (25 ÷ 1023)", abs(D[
 check("$ / sub = revenu net MyPuls de ses liens ÷ subs (40 $ ÷ 17)", abs(D["precedente"]["par_sub"] - 40 / 17) < 1e-9,
       D["precedente"]["par_sub"])
 check("$ / sub depuis toujours (52 $ ÷ 25)", abs(D["toujours"]["par_sub"] - 52 / 25) < 1e-9, D["toujours"]["par_sub"])
+check("revenu net (page de la direction) : 40 $ sur la quinzaine précédente, MyPuls rend tout",
+      abs(D["precedente"]["revenu"] - 40) < 1e-9 and D["precedente"]["revenu_partiel"] is False,
+      (D["precedente"].get("revenu"), D["precedente"].get("revenu_partiel")))
+_L, _E, _S = ("https://onlyfans.com/liasxcret/c104", "https://onlyfans.com/emy.brw/c117",
+              "https://onlyfans.com/seren.vale/c236")
+_vrai_lire = pod._lire_mypuls
+LECT = {}
+pod._lire_mypuls = lambda du, au, forcer=False: (dict(LECT), "")
+try:
+    LECT.update({"liasxcret/c104": {"subs": 3, "net": 900},
+                 "emy.brw/c117": {"subs": 2, "net": 0, "retiree": "infloww"},
+                 "seren.vale/c236": {"subs": 0, "subs_total": 4, "net": 0, "retiree": "releve"}})
+    r_lia = sv._revenu_partiel([_L], "2026-11-01", "2026-11-03", False)
+    r_emy = sv._revenu_partiel([_L, _E], "2026-11-01", "2026-11-03", False)
+    r_ser = sv._revenu_partiel([_L, _S], "2026-11-01", "2026-11-03", False)
+    r_emy_t = sv._revenu_partiel([_L, _E], "", "2026-11-03", True)
+    r_ser_t = sv._revenu_partiel([_L, _S], "", "2026-11-03", True)
+    LECT.pop("seren.vale/c236")
+    r_abs = sv._revenu_partiel([_L, _S], "2026-10-16", "2026-10-31", False)
+finally:
+    pod._lire_mypuls = _vrai_lire
+check("revenu partiel : Lia seule non ; Emy avec des subs payés sur la période oui ; Seren à 0 sub non",
+      r_lia is False and r_emy is True and r_ser is False, (r_lia, r_emy, r_ser))
+check("depuis toujours : Emy lue chez Infloww non ; Seren et ses subs oui ; page absente de la lecture oui",
+      r_emy_t is False and r_ser_t is True and r_abs is True, (r_emy_t, r_ser_t, r_abs))
+check("le revenu n'est jamais écrit sur la page du VA",
+      "40,00" not in sv.page_html(dict(D["precedente"], par_sub=None, gagne=None), "t" * 32, JOUR)
+      and "Revenu" not in sv.page_html(D["precedente"], "t" * 32, JOUR))
 check("une période sans sub : $ / sub « — », pas une division par zéro",
       sv.chiffres(GID, U108, "2026-10-25", "2026-10-25")["par_sub"] is None)
 check("une période : « du/au » gardés ; depuis toujours : vides",

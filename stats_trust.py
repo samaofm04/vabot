@@ -85,6 +85,7 @@ TRIS: Dict[str, Tuple[str, str]] = {
     "infloww": ("Clics Infloww", "desc"), "subs": ("Subs", "desc"),
     "cvr": ("CVR", "desc"), "ltv": ("LTV", "desc"), "gagne": ("Gagné", "desc"),
     "cout": ("Coût / sub", "asc"), "marge": ("Marge / sub", "desc"),
+    "gain": ("Gain / perte", "desc"),
 }
 TRI_DEFAUT = ("subs", "desc")
 #: Les tris demandés par le propriétaire, en raccourcis au-dessus du tableau.
@@ -94,6 +95,7 @@ RACCOURCIS_TRI: Tuple[Tuple[str, str, str], ...] = (
     ("Meilleure LTV", "ltv", "desc"), ("Pire LTV", "ltv", "asc"),
     ("Coût / sub le plus bas", "cout", "asc"), ("Coût / sub le plus haut", "cout", "desc"),
     ("Plus rentables", "marge", "desc"), ("Moins rentables", "marge", "asc"),
+    ("Plus gros gains", "gain", "desc"), ("Plus grosses pertes", "gain", "asc"),
 )
 
 _VERROU = threading.Lock()
@@ -323,10 +325,20 @@ def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]]) -> Dict[str, An
     """La ligne d'un VA : ses chiffres, et les trois qui en découlent."""
     d = d or {}
     subs, gagne, ltv = d.get("subs"), d.get("gagne"), d.get("par_sub")
+    if d.get("revenu_partiel"):
+        # un revenu sans Emy ou Seren (retirées de MyPuls) : LTV et marge
+        # seraient fausses comme le gain, « — » et la raison au pied
+        ltv = None
     cout = (float(gagne) / subs) if gagne is not None and subs else None
     # Threads est payé aux clics : 0 sub et un Gagné > 0, ce n'est pas une
     # ligne illisible, c'est la plus chère (130 $ pour 0 sub sortait en bas)
     paye_sans_sub = subs == 0 and bool(gagne)
+    # Gain / perte (propriétaire, 07/11 : « combien d'argent j'ai perdu sur le
+    # VA ») : la règle de la page du Spam (infloww_liens), revenu net MyPuls de
+    # ses liens sur la période − ce qu'il a gagné, en centimes entiers
+    revenu = d.get("revenu")
+    gain = (round(float(revenu) * 100) - round(float(gagne) * 100)) / 100 \
+        if revenu is not None and gagne is not None else None
     num = str(p.get("numero") or "")
     return {"gid": p["gid"], "code": p["code"], "plateforme": p["plateforme"],
             "nom": f"{p['plateforme']} VA {num}" if num.isdigit() else f"{p['plateforme']} (sans numéro)",
@@ -334,7 +346,8 @@ def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]]) -> Dict[str, An
             "pseudo": str(d.get("pseudo") or p.get("pseudo") or ""),
             "lu": bool(d), "us": d.get("us"), "glob": d.get("glob"), "infloww": d.get("infloww"),
             "subs": subs, "cvr": d.get("cvr"), "ltv": ltv, "gagne": gagne, "cout": cout,
-            "paye_sans_sub": paye_sans_sub,
+            "paye_sans_sub": paye_sans_sub, "revenu": revenu, "gain": gain,
+            "revenu_partiel": bool(d.get("revenu_partiel")),
             "marge": (ltv - cout) if ltv is not None and cout is not None else None}
 
 
@@ -371,10 +384,13 @@ def totaux(lignes: List[Mapping[str, Any]]) -> Dict[str, Any]:
     paie = sum(x["gagne"] for x in groupe)
     ltv = (sum((x["ltv"] or 0) * x["subs"] for x in groupe) / n) if n else None
     cout = (paie / n) if n else None
+    avec_gain = [x for x in lignes if x.get("gain") is not None]
+    gain = (sum(round(x["gain"] * 100) for x in avec_gain) / 100) if avec_gain else None
     return {"us": somme("us"), "glob": somme("glob"), "infloww": somme("infloww"), "subs": somme("subs"),
-            "gagne": somme("gagne"), "ltv": ltv, "cout": cout,
+            "gagne": somme("gagne"), "ltv": ltv, "cout": cout, "gain": gain, "n_gain": len(avec_gain),
             "marge": (ltv - cout) if ltv is not None and cout is not None else None,
-            "paye_sans_sub": bool(groupe) and not n and paie > 0, "n_groupe": len(groupe)}
+            "paye_sans_sub": bool(groupe) and not n and paie > 0, "n_groupe": len(groupe),
+            "th_groupe": any(x.get("code") == "th" for x in groupe)}
 
 
 # ─── la page ─────────────────────────────────────────────────────────────
@@ -506,17 +522,39 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
         cls = "" if v is None else (' class="neg"' if v < 0 else ' class="pos"')
         return f"<td{cls}>{_argent(v, signe=True)}</td>"
 
+    def th_td(v: Any, marge: bool, threads: bool) -> str:
+        # Threads : Gagné paie tous les clics, les subs ne comptent que les
+        # visiteurs trackés : coût / sub trop haut, marge trop basse
+        if v is None or not threads:
+            return marge_td(v) if marge else f"<td>{_argent(v)}</td>"
+        cls = (' class="neg"' if v < 0 else ' class="pos"') if marge else ""
+        return (f'<td{cls} title="subs des visiteurs envoyés sans tracking non comptés">'
+                f'{_argent(v, signe=marge)}*</td>')
+
+    def gain_td(v: Any, threads: bool) -> str:
+        # Threads : Gagné paie tous les clics du lien, mais une partie des
+        # visiteurs part sur une page sans tracking : leur revenu n'est compté
+        # nulle part, la perte affichée est un maximum (relecture du 07/11)
+        if v is None or not threads:
+            return marge_td(v)
+        cls = ' class="neg"' if v < 0 else ' class="pos"'
+        return (f'<td{cls} title="revenu des visiteurs envoyés sans tracking non compté">'
+                f'{_argent(v, signe=True)}*</td>')
+
     corps_t = []
     det_tot = f"{len(lignes)} VA"
     if lignes and tot["n_groupe"] < len(lignes):
         det_tot += f" · LTV, coût, marge : {tot['n_groupe']} VA"
+    if lignes and tot["n_gain"] < len(lignes):
+        det_tot += f" · gain / perte : {tot['n_gain']} VA"
     corps_t.append('<tr class="total"><td class="rang"></td><td class="nom"><b>Total</b>'
                    f'<span class="det">{_e(det_tot)}</span></td>'
                    f'<td>{nb(tot["us"])}</td><td>{nb(tot["glob"])}</td><td>{nb(tot["infloww"])}</td>'
                    f'<td class="subs">{nb(tot["subs"])}</td><td></td>'
                    f'<td>{_argent(tot["ltv"])}</td><td>{_argent(tot["gagne"])}</td>'
                    + ('<td class="neg">payé, 0 sub</td><td class="neg">payé, 0 sub</td>' if tot["paye_sans_sub"]
-                      else f'<td>{_argent(tot["cout"])}</td>{marge_td(tot["marge"])}')
+                      else th_td(tot["cout"], False, tot["th_groupe"]) + th_td(tot["marge"], True, tot["th_groupe"]))
+                   + gain_td(tot["gain"], any(x["code"] == "th" and x.get("gain") is not None for x in lignes))
                    + '</tr>')
     for i, x in enumerate(lignes, 1):
         cvr = il._pastille(il._pct(x["cvr"]), il.niveau(x["cvr"], il.SEUIL_CVR))
@@ -530,11 +568,12 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
                        f'<td class="subs">{nb(x["subs"])}</td><td>{cvr}</td><td>{ltv}</td>'
                        f'<td>{_argent(x["gagne"])}</td>'
                        + ('<td class="neg">payé, 0 sub</td><td class="neg">payé, 0 sub</td>'
-                          if x.get("paye_sans_sub") else f'<td>{_argent(x["cout"])}</td>{marge_td(x["marge"])}')
-                       + '</tr>')
+                          if x.get("paye_sans_sub")
+                          else th_td(x["cout"], False, x["code"] == "th") + th_td(x["marge"], True, x["code"] == "th"))
+                       + gain_td(x["gain"], x["code"] == "th") + '</tr>')
     tableau = ('<div class="boite"><table><thead><tr><th></th>'
                + "".join(entete(t) for t in ("nom", "us", "glob", "infloww", "subs", "cvr",
-                                             "ltv", "gagne", "cout", "marge"))
+                                             "ltv", "gagne", "cout", "marge", "gain"))
                + '</tr></thead><tbody>' + "".join(corps_t) + '</tbody></table></div>')
 
     bandeau = ""
@@ -559,7 +598,17 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
                "LTV : revenu net MyPuls des liens du VA ÷ ses subs",
                "Coût / sub : Gagné ÷ subs · Marge / sub : LTV − coût / sub · payé, 0 sub : Gagné sans "
                "aucun sub sur la période (Threads, payé aux clics)",
+               "Gain / perte : revenu net MyPuls des liens du VA sur la période − Gagné (vert : on gagne, "
+               "rouge : on perd) ; « — » quand le revenu net ou le Gagné n'est pas lisible (MyPuls muet, "
+               "VA sans tracking à lui, VA non lu)",
+               "* Threads : Gagné paie tous les clics US·UK·CA du lien, mais une partie des visiteurs part "
+               "sur une page sans tracking : ni leurs subs ni leur revenu ne sont comptés ; coût / sub et "
+               "perte affichés sont des maximums, marge et gain des minimums",
                "Threads : clics US·UK·CA, payé aux clics ; Twitter et Instagram : payés aux subs"]
+    n_partiel = sum(1 for x in lignes if x.get("revenu_partiel"))
+    if n_partiel:
+        marques.append(f"{n_partiel} VA avec un ancien tracking Emy ou une variante Seren (retirées de "
+                       "MyPuls, revenu non daté) : LTV, marge et gain / perte « — »")
     pannes = dict(montre.get("pannes") or {})
     if pannes:
         noms = {f"{p['gid']}:{p['uid']}": f"{p['plateforme']} VA {p.get('numero') or '?'}" for p in gens}

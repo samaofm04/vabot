@@ -371,6 +371,37 @@ def _subs(gid: str, uid: str, ts: List[Tuple[str, str]], du: str, au: str,
     return (None if n_of is None or n_mym is None else n_of + n_mym), sorted(communs)
 
 
+def _revenu_partiel(of: List[str], d0: str, d1: str, toujours: bool) -> bool:
+    """Le revenu net MyPuls de ces trackings oublie-t-il des subs payés ?
+    Emy et Seren sont remises dans la lecture MyPuls avec un net à 0 (voir
+    podium_discord._retirees) : Seren toujours (relevé de subs seul), Emy sauf
+    depuis toujours (Infloww ne date pas son revenu), et absentes quand leur
+    relevé manque. Partiel seulement si une page retirée manque à la lecture
+    du net, ou y compte des subs (donc payés) sans leur revenu. Sans cette
+    marque, la page de la direction affichait des pertes inventées sur les VA
+    à ancien tracking Emy ou à variante Seren ; sur le seul nom du tracking,
+    presque tous les VA sortaient « — » (relectures du 07/11/2026)."""
+    import podium_discord as pod
+    retires = [pod.tracking_de(u) for u in of if pod.page_retiree(pod.tracking_de(u))]
+    if not retires:
+        return False
+    vus, _r = pod._lire_mypuls(pod.ALLTIME_DEPUIS if toujours else d0, d1)   # celle du net, gardée 90 s
+    if vus is None:
+        return True
+    for t in retires:
+        v = vus.get(t)
+        if v is None:
+            return True
+        marque = v.get("retiree")
+        if not marque:
+            continue                    # rendue par MyPuls : son net fait foi
+        if toujours and marque == "infloww":
+            continue                    # le net d'Emy depuis toujours est lu chez Infloww
+        if int((v.get("subs_total") if toujours else v.get("subs")) or 0) > 0:
+            return True
+    return False
+
+
 def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
     """{numero, pseudo, du, au, us, glob, infloww, subs, communs,
     lu_a} sur [du, au] (jours de Paris, bornes incluses) ; sans du : depuis
@@ -439,12 +470,27 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             gagne = _gagne(of, mym, d0_g, d1, fige) if ts else None
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-va] CVR, $ par sub ou gain illisibles : {type(e).__name__}: {e}", flush=True)
+    # le revenu pour la page de la direction : sans tracking à lui, il n'est
+    # pas mesurable (0 « lu » faisait de toute sa paie une perte, Threads payé
+    # aux clics) ; avec une page retirée, il est partiel
+    partiel = False
+    if net is not None and of:
+        try:
+            partiel = _revenu_partiel(of, d0, d1, toujours)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[stats-va] pages retirées illisibles : {type(e).__name__}: {e}", flush=True)
+            partiel = True
     return {"numero": f.get("numero"), "pseudo": str(f.get("pseudo") or ""),
             "du": "" if toujours else d0, "au": "" if toujours else d1,
             "us": c[0] if c else None, "glob": c[1] if c else None,
             "infloww": i["n"], "subs": subs,
             "cvr": (subs * 100.0 / visites) if subs is not None and visites else None,
             "par_sub": (net / 100.0 / subs) if net is not None and subs else None,
+            # le revenu net MyPuls de ses liens, en dollars : lu par la page de la
+            # direction (stats_trust, Gain / perte), JAMAIS affiché sur la page du VA
+            # (None sans tracking à lui ; revenu_partiel : une page retirée y manque)
+            "revenu": (net / 100.0) if net is not None and of and not partiel else None,
+            "revenu_partiel": partiel,
             "gagne": gagne, "communs": communs, "lu_a": time.time(), "gid": str(gid)}
 
 

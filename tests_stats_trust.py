@@ -83,10 +83,10 @@ tickets_discord.partis = lambda g: {"3": 1.0} if g == TW else {}
 
 #  subs, gagné, LTV ($ / sub), clics US, clics globaux, Infloww, CVR
 CH = {
-    "1": dict(subs=100, gagne=70.0, par_sub=3.0, us=900, glob=2000, infloww=950, cvr=10.5),
-    "2": dict(subs=10, gagne=7.0, par_sub=1.0, us=100, glob=300, infloww=120, cvr=8.0),
-    "4": dict(subs=50, gagne=35.0, par_sub=None, us=400, glob=600, infloww=None, cvr=None),
-    "6": dict(subs=20, gagne=60.0, par_sub=2.5, us=3000, glob=5000, infloww=2900, cvr=0.7),
+    "1": dict(subs=100, gagne=70.0, par_sub=3.0, revenu=300.0, us=900, glob=2000, infloww=950, cvr=10.5),
+    "2": dict(subs=10, gagne=7.0, par_sub=1.0, revenu=10.0, us=100, glob=300, infloww=120, cvr=8.0),
+    "4": dict(subs=50, gagne=35.0, par_sub=None, revenu=None, us=400, glob=600, infloww=None, cvr=None),
+    "6": dict(subs=20, gagne=60.0, par_sub=2.5, revenu=50.0, us=3000, glob=5000, infloww=2900, cvr=0.7),
 }
 APPELS = []
 
@@ -153,6 +153,18 @@ check("coût / sub le plus bas puis le plus haut", ordre("cout", "asc")[0] in (1
 check("plus rentables : 12 (marge 2,30 $) ; moins rentables : 141",
       ordre("marge", "desc")[0] == 12 and ordre("marge", "asc")[0] == 141)
 check("onglet Twitter : ses deux VA seulement", sorted(ordre("subs", "desc", "tw")) == [12, 13])
+check("gain / perte = revenu net − Gagné : +230 $, +3 $, −10 $ ; revenu illisible : « — »",
+      par_nom["Twitter VA 12"]["gain"] == 230.0 and par_nom["Twitter VA 13"]["gain"] == 3.0
+      and par_nom["Threads VA 141"]["gain"] == -10.0 and par_nom["Instagram VA 108"]["gain"] is None)
+check("plus gros gains : 12, 13, 141 puis les illisibles", ordre("gain", "desc")[:3] == [12, 13, 141]
+      and set(ordre("gain", "desc")[3:]) == {108, 109, 142}, ordre("gain", "desc"))
+check("plus grosses pertes : 141 d'abord, les illisibles toujours en bas", ordre("gain", "asc")[:3] == [141, 13, 12])
+zp = st._ligne({"gid": TW, "code": "tw", "plateforme": "Twitter", "numero": 30, "pseudo": "emy"},
+               {"subs": 65, "gagne": 45.5, "par_sub": 0.31, "revenu": None, "revenu_partiel": True})
+check("ancien tracking Emy (revenu partiel) : LTV, marge et gain « — », pas une perte inventée",
+      zp["ltv"] is None and zp["marge"] is None and zp["gain"] is None and abs(zp["cout"] - 0.7) < 1e-9, zp)
+tg = st.totaux(lignes)
+check("total gain / perte : 230 + 3 − 10 = 223 $, sur 3 VA", tg["gain"] == 223.0 and tg["n_gain"] == 3, tg)
 tot = st.totaux([x for x in lignes if x["code"] == "tw"])
 check("total Twitter : sommes, LTV pondérée par les subs ((3×100 + 1×10) / 110)",
       tot["subs"] == 110 and tot["glob"] == 2300 and abs(tot["gagne"] - 77) < 1e-9
@@ -163,7 +175,26 @@ h = st.page_html(lot, None, cle_=k, s="tous", du="2026-11-01", au="2026-11-07", 
 check("un pseudo ne peut rien casser (échappé)", "<b>beta</b>" not in h and "&lt;b&gt;beta&lt;/b&gt;" in h)
 check("les tris demandés, en raccourcis",
       all(x in h for x in ("Plus de subs", "Moins de subs", "Plus de clics", "Moins de clics", "Meilleure LTV",
-                           "Pire LTV", "Coût / sub le plus bas", "Plus rentables")))
+                           "Pire LTV", "Coût / sub le plus bas", "Plus rentables", "Plus gros gains",
+                           "Plus grosses pertes")))
+check("colonne Gain / perte : en-tête, perte en rouge avec son signe, gain en vert",
+      ">Gain / perte</a></th>" in h and re.search(r'<td class="neg" title="[^"]*">−10,00', h)
+      and '<td class="pos">230,00' in h)
+check("Total : le gain / perte partiel est dit", "gain / perte : 3 VA" in h)
+check("Threads : astérisque et explication au survol sur son gain / perte",
+      re.search(r'<td class="neg" title="revenu des visiteurs envoyés sans tracking non compté">−10,00[^<]*\*</td>', h))
+check("… et pas d'astérisque sur Twitter", re.search(r'<td class="pos">230,00[^<*]*</td>', h))
+check("la note Threads au pied de la page", "perte affichés sont des maximums" in h)
+check("Threads : astérisque aussi sur coût / sub et marge",
+      re.search(r'<td title="subs des visiteurs envoyés sans tracking non comptés">3,00[^<]*\*</td>', h)
+      and re.search(r'<td class="neg" title="subs des visiteurs envoyés sans tracking non comptés">−0,50[^<]*\*</td>', h),
+      h[h.find("Threads VA 141"):h.find("Threads VA 141") + 900])
+hp = st.page_html({"gens": [{"gid": TW, "uid": "30", "code": "tw", "plateforme": "Twitter", "numero": 30, "pseudo": "emy"}],
+                   "lignes": {f"{TW}:30": {"subs": 65, "gagne": 45.5, "par_sub": 0.31, "revenu": None,
+                                            "revenu_partiel": True}}, "pannes": {}, "fin": 1.0},
+                  None, cle_=k, s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR)
+check("revenu partiel : dit au pied (« 1 VA avec un ancien tracking Emy ou une variante Seren »)",
+      "1 VA avec un ancien tracking Emy ou une variante Seren" in hp)
 check("la clé gardée dans les liens (onglets, tris, périodes, formulaire)",
       h.count(f"k={k}") >= 15 and f'name="k" value="{k}"' in h)
 check("onglets Tous 6, Twitter 2, Instagram 2, Threads 2",
