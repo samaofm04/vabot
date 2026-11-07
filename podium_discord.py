@@ -140,6 +140,7 @@ s'il y en a eu un) — un essai par jour au plus.
 from __future__ import annotations
 
 import base64
+import contextlib
 import contextvars
 import datetime as dt
 import functools
@@ -1135,6 +1136,39 @@ def cle_entite(nom: str, spam: bool) -> str:
     return f"{nom} SPAM" if spam else nom
 
 
+#: Le temps d'un lot de la page TRUST (stats_trust : ~80 VA lus d'affilée
+#: par un seul fil), chaque espace GetMySocial n'est relu qu'une fois par ce
+#: fil. Sans ça, chaque VA relisait la liste de son espace en force_refresh :
+#: 130 lectures de liste par page pour 4 espaces (relecture du 07/11/2026).
+#: Hors d'un lot, rien ne change : le podium, la paie et la page perso gardent
+#: leur force_refresh à chaque appel.
+_LISTES_DU_FIL = threading.local()
+
+
+@contextlib.contextmanager
+def listes_du_lot():
+    avant = getattr(_LISTES_DU_FIL, "memo", None)
+    _LISTES_DU_FIL.memo = {} if avant is None else avant
+    try:
+        yield
+    finally:
+        _LISTES_DU_FIL.memo = avant
+
+
+def _liste_equipe(equipe: str) -> Dict[str, Any]:
+    """gms.list_links_team(equipe, force_refresh=True), une seule fois par
+    espace dans un lot (listes_du_lot). Une réponse vide ou en échec n'est pas
+    gardée : le VA suivant retente, puis se replie sur le cache, comme avant."""
+    import gms
+    memo = getattr(_LISTES_DU_FIL, "memo", None)
+    if memo is not None and equipe in memo:
+        return memo[equipe]
+    r = gms.list_links_team(equipe, force_refresh=True) or {}
+    if memo is not None and r.get("ok") is not False and (r.get("links") or r.get("data")):
+        memo[equipe] = r
+    return r
+
+
 def liens_bruts(gid: Optional[str] = None,
                 etiquette: str = "podium") -> Tuple[List[Dict[str, Any]], bool]:
     """(liens, frais) sur TOUS les espaces de VA du serveur.
@@ -1155,7 +1189,7 @@ def liens_bruts(gid: Optional[str] = None,
             # force_refresh : la liste est mise en cache deux minutes cote gms,
             # et un lien cree la veille doit apparaitre des le lendemain.
             with _etiquette(etiquette):
-                r = gms.list_links_team(equipe, force_refresh=True) or {}
+                r = _liste_equipe(equipe)
             vivants = r.get("links") or r.get("data") or []
             if r.get("ok") is not False and vivants:
                 liens = vivants
@@ -4733,7 +4767,7 @@ def _liens_equipe(equipe: str, etiquette: str) -> Tuple[List[Dict[str, Any]], bo
     try:
         import gms
         with _etiquette(etiquette):
-            r = gms.list_links_team(equipe, force_refresh=True) or {}
+            r = _liste_equipe(equipe)
         liens = r.get("links") or r.get("data") or []
         if r.get("ok") is not False and liens:
             return [l for l in liens if isinstance(l, dict) and l.get("id")], True

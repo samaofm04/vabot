@@ -70135,6 +70135,41 @@ def create_app():
         r.headers["Referrer-Policy"] = "no-referrer"
         return r
 
+    @app.route("/trust/liens")
+    def trust_liens_page():
+        """Tous les VA de TRUST TWITTER, INSTAGRAM et THREADS (stats_trust),
+        triables par subs, clics, LTV, coût par sub : pour le propriétaire et
+        les managers (07/11/2026), pas pour les VA. La clé ?k= ouvre sans
+        compte ; un admin connecté l'ouvre sans clé et y lit le lien à donner.
+        Une clé FAUSSE est refusée même à un admin, comme /infloww/liens. GET
+        seulement, rien à déclarer au before_request."""
+        from flask import Response as _R
+        import stats_trust
+
+        def _entetes(r):
+            r.headers["Cache-Control"] = "no-store"
+            r.headers["X-Robots-Tag"] = "noindex, nofollow"
+            r.headers["Referrer-Policy"] = "no-referrer"
+            return r
+
+        k = str(request.args.get("k") or "")
+        lien_mgr = ""
+        if k:
+            if not stats_trust.cle_ok(k):
+                return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+        else:
+            if not is_auth():
+                return redirect("/")
+            if not _is_admin():
+                return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+            try:
+                lien_mgr = stats_trust.lien()
+            except Exception as e:
+                # la page reste lisible ; seul le lien à donner manque
+                print(f"[stats-trust] clé non écrite : {type(e).__name__}: {e}", flush=True)
+        code, html = stats_trust.page(request.args, cle_=k, lien_mgr=lien_mgr)
+        return _entetes(_R(html, status=code, mimetype="text/html"))
+
     # ==================================================================
     # Coffre d'adresses Outlook du proprietaire (admin seulement).
     # Une page À PART, comme /infloww : rien d'autre du site n'en depend.
