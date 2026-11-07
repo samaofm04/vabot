@@ -105,6 +105,47 @@ check("affiliation : plus de YouL4b, l'affiche Mario retirée, « Agency » → 
 check("affiliation : le bouton « Copier » et son script restent",
       'class="copier-lien"' in _h and "addEventListener" in _h and ".copier-lien{cursor:pointer}" in _h)
 check("bouton « Copier » plus spécifique que la règle de la page", "section .copier-lien{" in ht.STYLE)
+# les filleuls en carrés, aux trois formats des panneaux
+def _prog(v):
+    return f"<section><h2>📊 Progression du filleul</h2><p>{v}</p></section>"
+_COMPTE = "<section><h2>👥 Tes filleuls</h2><p>3 filleul(s) enregistré(s).</p></section>"
+_AG = _AFF.replace("</section><style>", "</section>" + _COMPTE
+                   + _prog("@lea — ✅ Vérifié<br>0 vrais subs · Objectif 10 : 0 % · Objectif 200 : 0 %")
+                   + _prog("@sam — ✅ Vérifié<br>60 vrais subs · Objectif 10 : 100 % · Objectif 200 : 30 %")
+                   + _prog("@zoe — ⏳ Pas encore vérifié<br>Pas encore de lien de suivi : ses subs compteront dès sa création.")
+                   + "<style>", 1)
+_h = ht.affiliation(_AG, "agency")
+check("filleuls TRUST INSTAGRAM : une carte « Tes filleuls · 3 », plus de rubrique par filleul",
+      "👥 Tes filleuls · 3" in _h and "Progression du filleul" not in _h and _h.count('class="fil"') == 3
+      and "filleul(s) enregistré(s)" not in _h)
+check("60 subs : objectif 10 vert (100 % ✓), objectif 200 à 3 carrés sur 10 (30 %)",
+      '<span class="nb">60 subs</span>' in _h and '<div class="pal ok"><span class="lib">Objectif 10</span>' in _h
+      and "100 % ✓" in _h and ">30 %</span>" in _h)
+_sam = _h.split("@sam")[1].split('class="fil"')[0]
+check("… soit exactement 10 + 3 carrés pleins pour @sam", _sam.count('<i class="on">') == 13
+      and _sam.count("<i") == 20, _sam.count('<i class="on">'))
+check("un filleul sans subs lisibles garde son texte, sans carrés",
+      "Pas encore de lien de suivi" in _h.split("@zoe")[1].split("</section>")[0]
+      and "<i" not in _h.split("@zoe")[1].split("</section>")[0])
+check("15 subs sur 200 : le premier carré se remplit aux trois quarts (7,5 %)",
+      "var(--acc) 75%" in ht._cases(15, 200, "Objectif 200") and ">7,5 %<" in ht._cases(15, 200, "Objectif 200"))
+_TW = _AFF.replace("VA AGENCY", "VA TWITTER").replace("</section><style>", "</section>"
+      + _COMPTE.replace("3 filleul", "1 filleul")
+      + _prog("@max<br>12 vrais subs · Objectif 10 : 100 % · Objectif 200 : 6 %") + "<style>", 1)
+_h = ht.affiliation(_TW, "twitter")
+check("filleuls TRUST TWITTER (sans état) : carte et carrés",
+      "👥 Tes filleuls · 1" in _h and '<b>@max</b><span class="nb">12 subs</span>' in _h)
+_TH = _AFF.replace("VA AGENCY", "VA THREADS").replace("</section><style>", "</section>"
+      "<section><h2>👥 Tes filleuls · 2</h2><p>@ana — ✅ Vérifié<br>🎯 10 : 60/10 subs · 100 % ▰▰▰▰▰▰▰▰▰▰ ✅"
+      "<br>🏆 200 : 60/200 subs · 30 % ▰▰▰▱▱▱▱▱▱▱<br><br>@bob — 👋 Arrivé, non vérifié<br>"
+      "Subs et progression indisponibles : suivi MyPuls en attente.</p></section><style>", 1)
+_h = ht.affiliation(_TH, "threads")
+check("filleuls TRUST THREADS : les deux lus, ▰▱ remplacés par les carrés",
+      "👥 Tes filleuls · 2" in _h and '<span class="nb">60 subs</span>' in _h and "▰" not in _h
+      and "suivi MyPuls en attente" in _h and _h.count('class="fil"') == 2)
+check("Threads sans filleul : la rubrique reste telle quelle",
+      ht.filleuls("<section><h2>👥 Tes filleuls · 0</h2><p>Aucun filleul.</p></section>", "threads")
+      == "<section><h2>👥 Tes filleuls · 0</h2><p>Aucun filleul.</p></section>")
 for p, b in (("threads", "TRUST THREADS"), ("twitter", "TRUST TWITTER")):
     check(f"affiliation {p} : bandeau {b}",
           f'<div class="marque">{b}</div>' in ht.affiliation(_AFF.replace("VA AGENCY", "VA " + p.upper()), p))
