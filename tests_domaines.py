@@ -146,6 +146,46 @@ check("filleuls TRUST THREADS : les deux lus, ▰▱ remplacés par les carrés"
 check("Threads sans filleul : la rubrique reste telle quelle",
       ht.filleuls("<section><h2>👥 Tes filleuls · 0</h2><p>Aucun filleul.</p></section>", "threads")
       == "<section><h2>👥 Tes filleuls · 0</h2><p>Aucun filleul.</p></section>")
+# la carte des invitations du serveur de recrutement, sur un faux
+# entretien_parrainage (hors git sur le VPS)
+import datetime as _dt  # noqa: E402
+import threading as _th  # noqa: E402
+import types as _types  # noqa: E402
+_ep = _types.ModuleType("entretien_parrainage")
+_ep.LOCK, _ep.TZ, _ep.PRIX_CENTIMES = _th.RLock(), _dt.timezone.utc, 20
+_ep.euros = lambda c: f"{c // 100},{c % 100:02d} $"
+_ep.semaine = lambda now: (now.date() - _dt.timedelta(days=now.weekday())).isoformat()
+_ep.lire = lambda: {"liens": {"77": {"code": "AbC123"}},
+                    "declarations": {"a": {"parrain": "77", "semaine": "2026-11-02", "centimes": 20},
+                                     "b": {"parrain": "77", "semaine": "2026-11-02", "centimes": 20},
+                                     "c": {"parrain": "77", "semaine": "2026-10-26", "centimes": 15},
+                                     "d": {"parrain": "88", "semaine": "2026-11-02", "centimes": 20}},
+                    "en_attente": {"x": {"parrain": "77"}}}
+sys.modules["entretien_parrainage"] = _ep
+_d = ht.recrutement("77", _dt.datetime(2026, 11, 7, 22, 0, tzinfo=_dt.timezone.utc))
+check("recrutement : semaine (2 · 0,40 $), total (3 · 0,55 $), 1 en attente, lien existant",
+      _d["semaine"] == (2, "0,40 $") and _d["total"] == (3, "0,55 $") and _d["attente"] == 1
+      and _d["lien"] == "https://discord.gg/AbC123" and (_d["du"], _d["au"]) == ("02/11", "08/11"), _d)
+_c = ht.carte_recrutement(_d)
+check("carte recrutement : 0,20 $ par personne, les deux tuiles, le bouton « Copier »",
+      "🎙️ Recrutement · TRUST Agency" in _c and "<b>0,20 $</b>" in _c and "Cette semaine · du 02/11 au 08/11" in _c
+      and 'class="copier-lien" data-lien="https://discord.gg/AbC123"' in _c and "0,55 $" in _c)
+check("sans lien : la carte le dit, sans en créer (lecture seule)",
+      "t'attend sur le serveur de recrutement" in ht.carte_recrutement(ht.recrutement("99"))
+      and "data-lien" not in ht.carte_recrutement(ht.recrutement("99")))
+check("la carte s'ajoute avant le pied de page de l'espace d'affiliation",
+      ht.affiliation(_AFF, "agency", "77").index("Recrutement · TRUST Agency")
+      < ht.affiliation(_AFF, "agency", "77").index("<footer>"))
+check("recrutement : une seule prime par personne, pas une par espace", ht.NOTE_RECRUTEMENT in _c
+      and "ne s'additionne pas" in ht.NOTE_RECRUTEMENT)
+del sys.modules["entretien_parrainage"]
+check("primes de parrainage : par plateforme (3 × 0,50 $), sous la rubrique des primes",
+      ht.NOTE_PRIMES in ht.affiliation(_AFF.replace("</section><style>", "</section><section><h2>💰 Primes de "
+                                       "parrainage</h2><p>0,50 $ à 10 subs.</p></section><style>", 1), "agency")
+      and "3 × 0,50 $" in ht.NOTE_PRIMES
+      and ht.NOTE_PRIMES in ht._note_primes("<section><h2>🎯 Objectifs par filleul</h2><p>x</p></section>", "threads"))
+check("hors VPS : pas de carte recrutement", ht.carte_recrutement(ht.recrutement("77")) == ""
+      and "Recrutement" not in ht.affiliation(_AFF, "agency", "77"))
 for p, b in (("threads", "TRUST THREADS"), ("twitter", "TRUST TWITTER")):
     check(f"affiliation {p} : bandeau {b}",
           f'<div class="marque">{b}</div>' in ht.affiliation(_AFF.replace("VA AGENCY", "VA " + p.upper()), p))
@@ -193,8 +233,8 @@ app2 = Flask(__name__ + "2", static_folder=None)
 app2.add_url_rule("/affiliation/mon-espace", "aff", lambda: _AFF)
 app2.add_url_rule("/autre", "autre", lambda: _AFF)
 ht.installer(app2)
-_vrai = ht.plateforme_affiliation
-ht.plateforme_affiliation = lambda t: {"a": "agency", "i": "instagram"}.get(t)
+_vrai = ht.qui_affiliation
+ht.qui_affiliation = lambda t: {"a": ("agency", "11"), "i": ("instagram", "12")}.get(t)
 c2 = app2.test_client()
 check("espace d'affiliation d'un VA TRUST INSTAGRAM : habillé à la sortie",
       "TRUST INSTAGRAM" in c2.get("/affiliation/mon-espace?t=a").get_data(as_text=True))
@@ -202,7 +242,7 @@ check("Va IG (instagram), lien inconnu, autre page : inchangés",
       c2.get("/affiliation/mon-espace?t=i").get_data(as_text=True) == _AFF
       and c2.get("/affiliation/mon-espace?t=zz").get_data(as_text=True) == _AFF
       and c2.get("/autre?t=a").get_data(as_text=True) == _AFF)
-ht.plateforme_affiliation = _vrai
+ht.qui_affiliation = _vrai
 check("lien d'affiliation inconnu : aucune plateforme, rien d'habillé",
       ht.plateforme_affiliation("x") is None)
 

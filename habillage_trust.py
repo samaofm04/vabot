@@ -13,8 +13,10 @@ laissé de côté en silence.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
-from typing import Optional
+from html import escape as _esc
+from typing import Any, Dict, Optional, Tuple
 
 import domaines
 import stats_va
@@ -36,6 +38,7 @@ main>p{color:var(--faible);font-size:13px;margin:0 0 16px}
 section{background:var(--carte);border:1px solid var(--bord);border-radius:12px;padding:14px 16px;margin:0 0 10px}
 section h2{font-size:13px;font-weight:600;color:var(--faible);margin:0 0 6px}
 section p{margin:0;font-size:14px;overflow-wrap:anywhere}
+section p+p{margin-top:6px}
 section a{color:var(--acc);font-weight:600;text-decoration:none}
 section .copier-lien{background:var(--acc);color:#1c0a02;border:0;border-radius:8px;padding:8px 16px;font:inherit;font-weight:700;cursor:pointer;margin:10px 10px 0 0}
 section .copie-statut{color:var(--faible);font-size:12px}
@@ -56,6 +59,11 @@ footer{color:var(--faible);font-size:12px;line-height:1.6;margin:14px 0 0}
 .pal .pct{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pal.ok .pct{color:#4ade80}
 .fil-note{color:var(--faible);font-size:12px;margin:8px 0 0}
+.tuiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 0}
+.tuile{background:var(--fond);border:1px solid var(--bord);border-radius:10px;padding:10px 12px}
+.tuile small{display:block;color:var(--faible);font-size:11.5px;margin:0 0 3px}
+.tuile b{font-size:20px;color:var(--acc);font-variant-numeric:tabular-nums}
+.tuile span{display:block;color:var(--faible);font-size:12px}
 """
 
 _RE_TITRE = re.compile(r"<title>[^<]*</title>")
@@ -66,8 +74,9 @@ _RE_AFFICHE = re.compile(r'<figure class="aff-poster">.*?</figure>', re.S)
 _NOMS_YOULAB = (("YouL4b", "TRUST"), ("YOUL4B", "TRUST"), ("YouLab", "TRUST"), ("YOULAB", "TRUST"))
 
 
-def affiliation(html: str, plateforme: str) -> str:
-    """La page d'affiliation de `plateforme` au thème TRUST."""
+def affiliation(html: str, plateforme: str, uid: Optional[str] = None) -> str:
+    """La page d'affiliation de `plateforme` au thème TRUST ; avec `uid`, la
+    carte de ses invitations sur le serveur de recrutement."""
     bandeau, court = NOMS[plateforme]
     h, n_titre = _RE_TITRE.subn("<title>Mon affiliation · TRUST</title>" + domaines.ICONE_LIEN, html, count=1)
     # le premier <style> est celui du thème (Mario) ; le second, celui du
@@ -81,6 +90,11 @@ def affiliation(html: str, plateforme: str) -> str:
     for avant, apres in _NOMS_YOULAB:
         h = h.replace(avant, apres)
     h = filleuls(h, plateforme)
+    h = _note_primes(h, plateforme)
+    if uid:
+        carte = carte_recrutement(recrutement(uid))
+        if carte:
+            h = h.replace("<footer>", carte + "<footer>", 1)
     manque = [nom for nom, n in (("titre", n_titre), ("thème", n_style), ("bandeau", n_bandeau)) if not n]
     if manque:
         print(f"[habillage_trust] affiliation {plateforme} : {', '.join(manque)} introuvable(s) "
@@ -174,18 +188,96 @@ def filleuls(h: str, plateforme: str) -> str:
     return h
 
 
-def plateforme_affiliation(jeton: Optional[str]) -> Optional[str]:
-    """La plateforme du lien d'affiliation, par affiliation_site (hors git) :
-    même règle que sa page, personnel(). None hors VPS ou lien inconnu."""
+# ─── les invitations du serveur de recrutement (propriétaire, 07/11/2026 :
+# « quand il invite quelqu'un dans le serveur recrutement il gagne 0,20 ») ──
+# Les chiffres sont ceux du bilan que le bot poste chaque semaine
+# (entretien_parrainage / entretien_espaces, hors git) : mêmes déclarations,
+# même semaine close le dimanche à 23 h 59. Lecture seule : lien_pour()
+# créerait une invitation Discord, on lit seulement celle qui existe.
+def recrutement(uid: str, maintenant: Optional[dt.datetime] = None) -> Optional[Dict[str, Any]]:
+    """Le lien et les invitations vérifiées de `uid`, ou None hors VPS."""
+    try:
+        import entretien_parrainage as e
+    except ImportError:
+        return None
+    uid = str(uid)
+    with e.LOCK:
+        etat = e.lire()
+    semaine = e.semaine(maintenant or dt.datetime.now(e.TZ))
+    siennes = [r for r in (etat.get("declarations") or {}).values() if r.get("parrain") == uid]
+    cette = [r for r in siennes if r.get("semaine") == semaine]
+    debut = dt.date.fromisoformat(semaine)
+    code = ((etat.get("liens") or {}).get(uid) or {}).get("code")
+    return {"lien": f"https://discord.gg/{code}" if code else "",
+            "prix": e.euros(e.PRIX_CENTIMES),
+            "du": debut.strftime("%d/%m"), "au": (debut + dt.timedelta(days=6)).strftime("%d/%m"),
+            "semaine": (len(cette), e.euros(sum(int(r.get("centimes", 0)) for r in cette))),
+            "total": (len(siennes), e.euros(sum(int(r.get("centimes", 0)) for r in siennes))),
+            "attente": sum(1 for r in (etat.get("en_attente") or {}).values() if r.get("parrain") == uid)}
+
+
+def carte_recrutement(d: Optional[Dict[str, Any]]) -> str:
+    if not d:
+        return ""
+    if d["lien"]:
+        l = _esc(d["lien"], quote=True)
+        lien = (f'<p><a href="{l}" target="_blank" rel="noreferrer">{l}</a></p>'
+                f'<button type="button" class="copier-lien" data-lien="{l}">📋 Copier le lien</button>'
+                '<span class="copie-statut" role="status" aria-live="polite"></span>')
+    else:
+        lien = '<p class="fil-msg">Ton lien d\'invitation t\'attend sur le serveur de recrutement TRUST Agency.</p>'
+    (n_s, m_s), (n_t, m_t) = d["semaine"], d["total"]
+    return ("<section><h2>🎙️ Recrutement · TRUST Agency</h2>"
+            f"<p>Invite des personnes sur le serveur de recrutement : <b>{d['prix']}</b> par personne "
+            "qui se vérifie.</p>" + lien
+            + '<div class="tuiles">'
+            f'<div class="tuile"><small>Cette semaine · du {d["du"]} au {d["au"]}</small><b>{n_s}</b>'
+            f'<span>vérifiée(s) · {m_s}</span></div>'
+            f'<div class="tuile"><small>Depuis le début</small><b>{n_t}</b><span>vérifiée(s) · {m_t}</span></div>'
+            "</div>"
+            f'<p class="fil-note">⏳ {d["attente"]} en attente de vérification · semaine close le dimanche '
+            f'à 23 h 59 (heure de Paris)</p><p class="fil-note">{NOTE_RECRUTEMENT}</p></section>')
+
+
+def qui_affiliation(jeton: Optional[str]) -> Optional[Tuple[str, str]]:
+    """(plateforme, uid) du lien d'affiliation, par affiliation_site (hors
+    git) : même règle que sa page, personnel(). None hors VPS ou lien inconnu."""
     try:
         import affiliation_site
     except ImportError:
         return None
-    uid = affiliation_site.identite(jeton)
-    if not uid:
+    cle = affiliation_site.identite(jeton)
+    if not cle:
         return None
-    uid = str(uid)
-    return uid.split(":", 1)[0] if uid.startswith(("twitter:", "instagram:", "agency:")) else "threads"
+    cle = str(cle)
+    if cle.startswith(("twitter:", "instagram:", "agency:")):
+        p, _, uid = cle.partition(":")
+        return p, uid
+    return "threads", cle
+
+
+# Propriétaire, 07/11/2026 : les primes de parrainage comptent plateforme par
+# plateforme (« 0,5 × 3 s'il a fait 10 subs sur les trois »), le recrutement
+# une seule fois par personne (« ça peut pas s'additionner »). Le VA de deux
+# ou trois serveurs voit la même carte recrutement sur chacun de ses espaces :
+# sans le dire, il aurait cru toucher 0,20 $ par espace.
+NOTE_PRIMES = ("Les primes comptent par plateforme : un filleul qui fait 10 subs sur Instagram, "
+               "Threads et Twitter rapporte 3 × 0,50 $.")
+NOTE_RECRUTEMENT = ("Une seule prime par personne invitée, même si tu travailles sur Instagram, Threads "
+                    "et Twitter : ce compteur est le même sur tes trois espaces, il ne s'additionne pas.")
+_RE_PRIMES = re.compile(r"(<section><h2>(?:💰 Primes de parrainage|🎯 Objectifs par filleul)</h2>.*?)(</section>)", re.S)
+
+
+def _note_primes(h: str, plateforme: str) -> str:
+    h, n = _RE_PRIMES.subn(lambda m: m.group(1) + f'<p class="fil-note">{NOTE_PRIMES}</p>' + m.group(2), h, count=1)
+    if not n:
+        print(f"[habillage_trust] affiliation {plateforme} : rubrique des primes introuvable", flush=True)
+    return h
+
+
+def plateforme_affiliation(jeton: Optional[str]) -> Optional[str]:
+    q = qui_affiliation(jeton)
+    return q[0] if q else None
 
 
 def installer(app) -> None:
@@ -197,9 +289,9 @@ def installer(app) -> None:
                 or r.mimetype != "text/html" or r.direct_passthrough):
             return r
         try:
-            p = plateforme_affiliation(request.args.get("t"))
-            if p in NOMS:
-                r.set_data(affiliation(r.get_data(as_text=True), p))
+            q = qui_affiliation(request.args.get("t"))
+            if q and q[0] in NOMS:
+                r.set_data(affiliation(r.get_data(as_text=True), q[0], q[1]))
         except Exception as e:      # la page d'origine plutôt qu'une erreur 500
             print(f"[habillage_trust] {type(e).__name__}: {e}", flush=True)
         return r
