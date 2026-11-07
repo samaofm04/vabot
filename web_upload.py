@@ -62005,6 +62005,16 @@ def create_app():
             _ag_boot.demarrer()
     except Exception as _e:
         log.warning(f"accueil d'Agency non démarré: {_e}")
+    # 📈・évolution-des-primes (TRUST Agency, staff) : chaque arrivée
+    # parrainée, recrutement vérifié et palier de filleul, un message chacun
+    # (journal_primes, surveillé : _FILS_DISCORD). Même garde que l'accueil
+    # d'Agency.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("journal-primes"):
+            import journal_primes as _jp_boot
+            _jp_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"journal des primes non démarré: {_e}")
     # Salons proxy de Youl4b (Spam) : les logins ProxEasy relus toutes les
     # 10 minutes et tenus par Ryuk (proxeasy.py). Même garde que l'accueil
     # d'Agency : un rendu de page hors du VPS ne doit rien poster.
@@ -80550,6 +80560,9 @@ _FILS_DISCORD = {
     # celui-là est dans git, démarré plus haut dans create_app
     "agency_accueil": ("agency-accueil", "arrivées et parrainage d'Agency VA INSTAGRAM",
                        ("surveiller",), 60),
+    # dans git lui aussi, démarré juste après agency_accueil
+    "journal_primes": ("journal-primes", "salon de l'évolution des primes (TRUST Agency)",
+                       ("tour",), 120),
 }
 # Un appel Discord peut attendre la fin d'un 429 : trois périodes de 15 s
 # donneraient de fausses alertes. Jamais moins de 3 minutes.
