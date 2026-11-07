@@ -176,14 +176,9 @@ check("sans lien : la carte le dit, sans en créer (lecture seule)",
 check("la carte s'ajoute avant le pied de page de l'espace d'affiliation",
       ht.affiliation(_AFF, "agency", "77").index("Recrutement · TRUST Agency")
       < ht.affiliation(_AFF, "agency", "77").index("<footer>"))
-check("recrutement : une seule prime par personne, pas une par espace", ht.NOTE_RECRUTEMENT in _c
-      and "ne s'additionne pas" in ht.NOTE_RECRUTEMENT)
 del sys.modules["entretien_parrainage"]
-check("primes de parrainage : par plateforme (3 × 0,50 $), sous la rubrique des primes",
-      ht.NOTE_PRIMES in ht.affiliation(_AFF.replace("</section><style>", "</section><section><h2>💰 Primes de "
-                                       "parrainage</h2><p>0,50 $ à 10 subs.</p></section><style>", 1), "agency")
-      and "3 × 0,50 $" in ht.NOTE_PRIMES
-      and ht.NOTE_PRIMES in ht._note_primes("<section><h2>🎯 Objectifs par filleul</h2><p>x</p></section>", "threads"))
+check("pas de phrase « par plateforme » ni « une seule prime » (propriétaire : « ça fait trop »)",
+      "par plateforme" not in ht.affiliation(_AFF, "agency") and not hasattr(ht, "NOTE_PRIMES"))
 check("hors VPS : pas de carte recrutement", ht.carte_recrutement(ht.recrutement("77")) == ""
       and "Recrutement" not in ht.affiliation(_AFF, "agency", "77"))
 for p, b in (("threads", "TRUST THREADS"), ("twitter", "TRUST TWITTER")):

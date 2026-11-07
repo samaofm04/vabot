@@ -90,7 +90,6 @@ def affiliation(html: str, plateforme: str, uid: Optional[str] = None) -> str:
     for avant, apres in _NOMS_YOULAB:
         h = h.replace(avant, apres)
     h = filleuls(h, plateforme)
-    h = _note_primes(h, plateforme)
     if uid:
         carte = carte_recrutement(recrutement(uid))
         if carte:
@@ -236,7 +235,7 @@ def carte_recrutement(d: Optional[Dict[str, Any]]) -> str:
             f'<div class="tuile"><small>Depuis le début</small><b>{n_t}</b><span>vérifiée(s) · {m_t}</span></div>'
             "</div>"
             f'<p class="fil-note">⏳ {d["attente"]} en attente de vérification · semaine close le dimanche '
-            f'à 23 h 59 (heure de Paris)</p><p class="fil-note">{NOTE_RECRUTEMENT}</p></section>')
+            "à 23 h 59 (heure de Paris)</p></section>")
 
 
 def qui_affiliation(jeton: Optional[str]) -> Optional[Tuple[str, str]]:
@@ -254,25 +253,6 @@ def qui_affiliation(jeton: Optional[str]) -> Optional[Tuple[str, str]]:
         p, _, uid = cle.partition(":")
         return p, uid
     return "threads", cle
-
-
-# Propriétaire, 07/11/2026 : les primes de parrainage comptent plateforme par
-# plateforme (« 0,5 × 3 s'il a fait 10 subs sur les trois »), le recrutement
-# une seule fois par personne (« ça peut pas s'additionner »). Le VA de deux
-# ou trois serveurs voit la même carte recrutement sur chacun de ses espaces :
-# sans le dire, il aurait cru toucher 0,20 $ par espace.
-NOTE_PRIMES = ("Les primes comptent par plateforme : un filleul qui fait 10 subs sur Instagram, "
-               "Threads et Twitter rapporte 3 × 0,50 $.")
-NOTE_RECRUTEMENT = ("Une seule prime par personne invitée, même si tu travailles sur Instagram, Threads "
-                    "et Twitter : ce compteur est le même sur tes trois espaces, il ne s'additionne pas.")
-_RE_PRIMES = re.compile(r"(<section><h2>(?:💰 Primes de parrainage|🎯 Objectifs par filleul)</h2>.*?)(</section>)", re.S)
-
-
-def _note_primes(h: str, plateforme: str) -> str:
-    h, n = _RE_PRIMES.subn(lambda m: m.group(1) + f'<p class="fil-note">{NOTE_PRIMES}</p>' + m.group(2), h, count=1)
-    if not n:
-        print(f"[habillage_trust] affiliation {plateforme} : rubrique des primes introuvable", flush=True)
-    return h
 
 
 def plateforme_affiliation(jeton: Optional[str]) -> Optional[str]:
