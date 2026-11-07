@@ -134,9 +134,11 @@ français, sans accents dans les messages de commit.
 
 **Deux domaines, une application.** youl4b.com sert tout. trust-ofm.com ne
 sert que les pages des VA de TRUST TWITTER, INSTAGRAM et THREADS (page perso,
-vérification, espace d'affiliation) ; le reste y rend une page neutre.
-`domaines.py` porte la table et la garde : un lien donné à un VA se fabrique
-avec `domaines.site(gid)`, jamais avec une adresse en dur.
+espace d'affiliation) ; le reste y rend une page neutre. `domaines.py` porte
+la table et la garde : un lien donné à un VA se fabrique avec
+`domaines.site(gid)`, jamais avec une adresse en dur. La vérification reste
+sur youl4b.com (habillée TRUST) : l'identifiant d'appareil qu'elle garde dans
+le navigateur ne passe pas d'un domaine à l'autre.
 
 Les métadonnées d'un média sont des fichiers voisins : `<stem>.txt` (caption),
 `<stem>.desc.txt` (description), `<stem>.acheck.txt` (description reprise d'un

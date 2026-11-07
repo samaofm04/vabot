@@ -61920,6 +61920,9 @@ def create_app():
     # sans cette garde, sa racine ouvrait la connexion du dashboard.
     import domaines
     domaines.installer(app)
+    # l'espace d'affiliation (affiliation_site, hors git) habillé TRUST
+    import habillage_trust
+    habillage_trust.installer(app)
 
     # Anti-force brute sur le login : 8 essais ratés par IP -> pause de 10 min.
     _LOGIN_FAILS: dict = {}
@@ -62320,12 +62323,14 @@ def create_app():
     def verif_page(jeton):
         from flask import Response
         import verif_discord as _vd
-        if not _vd.lire_jeton(jeton):
+        _info = _vd.lire_jeton(jeton)
+        if not _info:
             return Response("<!doctype html><meta charset=utf-8><body style='font-family:sans-serif;"
                             "background:#0b0b10;color:#e8e8f0;padding:30px'>Lien expiré ou invalide. "
                             "Retourne sur Discord et clique à nouveau « Se vérifier ».</body>",
                             status=410, mimetype="text/html")
-        r = Response(_vd.PAGE_HTML, mimetype="text/html")
+        # au nom du serveur du lien : TRUST, TRUST Agency, YouLab (Va IG)
+        r = Response(_vd.page_html(_info.get("guild_id")), mimetype="text/html")
         r.headers["Cache-Control"] = "no-store"
         r.headers["Referrer-Policy"] = "no-referrer"
         r.headers["X-Robots-Tag"] = "noindex"
@@ -62348,8 +62353,11 @@ def create_app():
         # Tout visiteur de youl4b.com passe par Cloudflare, qui pose CF-Ray :
         # son absence veut dire qu'on a vise le serveur en direct.
         with _vd.sur_serveur(_srv):
-            return jsonify(_vd.verifier(jeton, donnees, ip, garantie,
-                                        hors_cloudflare=not request.headers.get("CF-Ray")))
+            _res = _vd.verifier(jeton, donnees, ip, garantie,
+                                hors_cloudflare=not request.headers.get("CF-Ray"))
+        # la réponse s'affiche sur la page : « le serveur YouLab » y restait
+        _table = _vd.table_marque(_srv)
+        return jsonify(_vd.en_trust(_res, _table) if _table else _res)
 
     # ── FAVICON ──────────────────────────────────────────────────────
     # Servi SANS authentification, et c'est volontaire : le navigateur

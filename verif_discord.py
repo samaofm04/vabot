@@ -1703,7 +1703,7 @@ def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "
             "Il est personnel, valable **15 minutes**, et remplace tout lien précédent.",
             [{"type": 1, "components": [{"type": 2, "style": 5, "label": "Ouvrir la vérification",
-                                         "url": f"{domaines.site(gid)}/verif/{jeton}"}]}])
+                                         "url": f"{SITE}/verif/{jeton}"}]}])
 
     m = re.fullmatch(r"verif:(ok|kick|ban):(\d{5,25})", cid)
     if m:
@@ -2060,7 +2060,7 @@ PAGE_HTML = """<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Vérification YouLab</title>
+<title>Vérification __MARQUE__</title>__ICONE__
 <style>
 :root{--fond:#0b0b10;--carte:#15151d;--bord:#26263a;--texte:#e8e8f0;--gris:#9a9ab0;--bleu:#5865f2;--vert:#22c55e;--orange:#f59e0b;--rouge:#ef4444}
 *{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}
@@ -2074,9 +2074,9 @@ button:disabled{opacity:.6}.res{margin-top:16px;padding:12px;border-radius:10px;
 .champ{display:block;margin-top:14px;font-size:13px;color:var(--gris)}
 .champ input{display:block;width:100%;margin-top:6px;padding:12px;border-radius:10px;border:1px solid var(--bord);background:var(--fond);color:var(--texte);font-size:16px}
 </style></head><body><div class="carte">
-<h1>🔐 Vérification YouLab</h1>
+<h1>🔐 Vérification __MARQUE__</h1>
 <p>Pour protéger le serveur contre les faux comptes et la fraude, on vérifie ta connexion avant de t'ouvrir l'accès.</p>
-<p class="petit">En continuant, tu acceptes que soient relevés <b>ton numéro de téléphone, ton adresse IP, ton pays, ta ville approximative, ton opérateur et une empreinte technique de ton appareil</b>, uniquement pour détecter la fraude et les doubles comptes. Elles sont visibles par l'équipe YouLab seulement. Le fichier de vérification est purgé au bout de 90 jours ; les alertes transmises à l'équipe sur Discord sont conservées.</p>
+<p class="petit">En continuant, tu acceptes que soient relevés <b>ton numéro de téléphone, ton adresse IP, ton pays, ta ville approximative, ton opérateur et une empreinte technique de ton appareil</b>, uniquement pour détecter la fraude et les doubles comptes. Elles sont visibles par l'équipe __MARQUE__ seulement. Le fichier de vérification est purgé au bout de 90 jours ; les alertes transmises à l'équipe sur Discord sont conservées.</p>
 <div class="piege"><label>Site web<input id="site_web" tabindex="-1" autocomplete="off"></label></div>
 <label class="champ">Ton numéro de téléphone (WhatsApp), avec l'indicatif
 <input id="tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="+229 01 23 45 67 89" maxlength="24"></label>
@@ -2208,3 +2208,24 @@ def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:   # noqa: F811
         if isinstance(data, dict) and isinstance(data.get("payload_json"), str):
             kw["data"] = dict(data, payload_json=en_trust(data["payload_json"], table))
     return _api_sans_trust(methode, chemin, **kw)
+
+
+def table_marque(gid: Optional[str]) -> Optional[Tuple[Tuple[str, str], ...]]:
+    """Les noms à mettre sur ce serveur : TRUST, TRUST Agency, ou None
+    (Va IG garde YouLab). La même règle que les messages du bot (api())."""
+    gid = str(gid or "")
+    return _TRUST if gid in SERVEURS_TRUST else _TRUST_AGENCY if gid in SERVEURS_TRUST_AGENCY else None
+
+
+def page_html(gid: Optional[str] = None) -> str:
+    """La page de vérification au nom du serveur du lien (07/11/2026,
+    propriétaire : « enlève youl4b du titre des pages, mets trust »). Seuls
+    le titre, l'en-tête et la mention de l'équipe changent : le texte que le
+    script dessine pour l'empreinte (« YouLab verif ») reste le même partout,
+    sinon les empreintes d'avant ne se compareraient plus à celles d'après."""
+    gid = str(gid or "")
+    if gid in SERVEURS_TRUST:
+        return PAGE_HTML.replace("__MARQUE__", "TRUST").replace("__ICONE__", domaines.ICONE_LIEN)
+    if gid in SERVEURS_TRUST_AGENCY:
+        return PAGE_HTML.replace("__MARQUE__", "TRUST Agency").replace("__ICONE__", domaines.ICONE_LIEN)
+    return PAGE_HTML.replace("__MARQUE__", "YouLab").replace("__ICONE__", "")

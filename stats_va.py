@@ -638,7 +638,7 @@ def _gabarit(titre: str, corps: str, gid: Any = AGENCY_IG_ID) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
-<title>{_e(titre)}</title><style>{_STYLE}</style></head><body>
+<title>{_e(titre)}</title>{domaines.ICONE_LIEN}<style>{_STYLE}</style></head><body>
 <div class="marque">{_e(marque)}</div>
 {corps}
 </body></html>'''
