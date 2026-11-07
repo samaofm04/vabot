@@ -2149,23 +2149,34 @@ def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:   #
 # Agency », « YouLab • … » — dans git ET dans les fichiers du VPS hors git
 # (twitter_accueil, threads_accueil, entretien_visuel), sous des patchs qu'on
 # ne réécrit pas. Un seul point de passage : tout ce que Luigi, Bowser et
-# Wario ÉCRIVENT sur ces trois serveurs passe ici et prend le nom TRUST. Les
-# autres serveurs (Entretien, Va IG) gardent YouLab.
+# Wario ÉCRIVENT sur ces trois serveurs passe ici et prend le nom TRUST. Va IG
+# garde YouLab.
 SERVEURS_TRUST = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
 _TRUST = (("YouLab Agency", "TRUST Instagram"), ("Agency VA INSTAGRAM", "TRUST INSTAGRAM"),
           ("YOULAB", "TRUST"), ("YouLab", "TRUST"))
+# Le serveur de recrutement (Entretien) devient « TRUST Agency » le 07/11/2026
+# (propriétaire : « remplacer systématiquement le nom YouLab par TRUST
+# Agency »). Même point de passage : vérification, bienvenues, annonces des
+# entretiens et parrainage (fichiers du VPS hors git compris) y écrivent tous
+# par api().
+SERVEURS_TRUST_AGENCY = {GUILD_ID}
+_TRUST_AGENCY = (("YouLab - Entretien", "TRUST Agency - Entretien"),
+                 # « dans l'agence TRUST Agency » se lisait deux fois
+                 ("dans l'agence YouLab", "chez TRUST Agency"), ("dans l’agence YouLab", "chez TRUST Agency"),
+                 ("l'agence YouLab", "TRUST Agency"), ("l’agence YouLab", "TRUST Agency"),
+                 ("YOULAB", "TRUST AGENCY"), ("YouLab", "TRUST Agency"))
 
 
-def en_trust(x: Any) -> Any:
-    """`x` (texte, ou JSON d'un message) aux noms TRUST."""
+def en_trust(x: Any, table: Tuple[Tuple[str, str], ...] = _TRUST) -> Any:
+    """`x` (texte, ou JSON d'un message) aux noms TRUST (ou de `table`)."""
     if isinstance(x, str):
-        for avant, apres in _TRUST:
+        for avant, apres in table:
             x = x.replace(avant, apres)
         return x
     if isinstance(x, list):
-        return [en_trust(y) for y in x]
+        return [en_trust(y, table) for y in x]
     if isinstance(x, dict):
-        return {k: en_trust(v) for k, v in x.items()}
+        return {k: en_trust(v, table) for k, v in x.items()}
     return x
 
 
@@ -2187,10 +2198,12 @@ _api_sans_trust = api
 
 
 def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:   # noqa: F811
-    if methode in ("POST", "PATCH", "PUT") and _serveur_vise(chemin, kw.get("gid")) in SERVEURS_TRUST:
+    vise = _serveur_vise(chemin, kw.get("gid")) if methode in ("POST", "PATCH", "PUT") else ""
+    table = _TRUST if vise in SERVEURS_TRUST else _TRUST_AGENCY if vise in SERVEURS_TRUST_AGENCY else None
+    if table:
         if isinstance(kw.get("json"), (dict, list)):
-            kw["json"] = en_trust(kw["json"])
+            kw["json"] = en_trust(kw["json"], table)
         data = kw.get("data")
         if isinstance(data, dict) and isinstance(data.get("payload_json"), str):
-            kw["data"] = dict(data, payload_json=en_trust(data["payload_json"]))
+            kw["data"] = dict(data, payload_json=en_trust(data["payload_json"], table))
     return _api_sans_trust(methode, chemin, **kw)

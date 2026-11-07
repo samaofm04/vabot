@@ -3,7 +3,7 @@
 
 Propriétaire : « oui, passe en TRUST partout ». Tout ce que les bots REST
 écrivent sur TRUST TWITTER, TRUST THREADS et TRUST INSTAGRAM passe par
-verif_discord.api et y prend le nom TRUST ; Entretien et Va IG gardent YouLab.
+verif_discord.api et y prend le nom TRUST ; Entretien y prend « TRUST Agency » (07/11/2026) ; Va IG garde YouLab.
 
 Ce qui est vérifié :
   - en_trust : « YouLab Twitter » → « TRUST Twitter », « Agency VA INSTAGRAM »
@@ -65,8 +65,14 @@ try:
     vd.api("POST", "/channels/c1/messages", gid=vd.TWITTER_ID, json=corps)
     check("POST vers TRUST TWITTER (serveur donné) : renommé",
           envois[-1][2]["json"]["embeds"][0]["title"] == "TRUST Twitter", envois[-1])
-    vd.api("POST", "/channels/c1/messages", gid=vd.GUILD_ID, json=corps)
-    check("POST vers Entretien : YouLab gardé", envois[-1][2]["json"]["embeds"][0]["title"] == "YouLab Twitter")
+    vd.api("POST", "/channels/c1/messages", gid=vd.GUILD_ID,
+           json={"embeds": [{"title": "👋 Bienvenue dans l'agence YouLab !",
+                             "footer": {"text": "YouLab • Entretiens du jour"}}]})
+    check("POST vers Entretien (07/11) : « TRUST Agency »",
+          envois[-1][2]["json"]["embeds"][0]["title"] == "👋 Bienvenue chez TRUST Agency !"
+          and envois[-1][2]["json"]["embeds"][0]["footer"]["text"] == "TRUST Agency • Entretiens du jour", envois[-1])
+    vd.api("POST", "/channels/c1/messages", gid="1505418484052394004", json=corps)
+    check("POST vers Va IG : YouLab gardé", envois[-1][2]["json"]["embeds"][0]["title"] == "YouLab Twitter")
     with vd.sur_serveur(vd.AGENCY_IG_ID):
         vd.api("PATCH", "/channels/c2/messages/m", json={"embeds": [{"footer": {"text": "Agency VA INSTAGRAM • Départs"}}]})
     check("PATCH sous le serveur courant (Agency) : renommé",
