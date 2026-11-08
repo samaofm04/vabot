@@ -634,12 +634,15 @@ try:
           textes(nx.vue_actif(_ax, nx.SERVEURS[TH])))
     carte = dernier_patch()[0]
     vignette = (carte["components"][0].get("accessory") or {}).get("media", {}).get("url", "")
-    check("Threads : carte rose, l'icône Instagram en vignette, servie par le site (versionnée)",
+    check("Threads (TRUST) : carte rose, la puce GetAText en vignette, servie par le site (versionnée)",
           carte["accent_color"] == nx.ROSE and carte["components"][0]["type"] == 9
-          and vignette.startswith(vd.SITE.rstrip("/") + "/static/numeros/numero_instagram.png?v="),
+          and vignette.startswith(vd.SITE.rstrip("/") + "/static/numeros/numero_getatext.png?v="),
           carte)
+    check("TRUST : la puce GetAText sur les deux serveurs TRUST, et eux seuls (« seulement TRUST »)",
+          {g for g, c in nx.SERVEURS.items() if c.get("icone") == "numeros/numero_getatext.png"}
+          == set(numgen.TRUST_SERVEURS), {g: c.get("icone") for g, c in nx.SERVEURS.items()})
     check("Threads : l'icône existe dans static/ (sinon 404 gardé 7 jours par Cloudflare)",
-          (Path(__file__).resolve().parent / "static/numeros/numero_instagram.png").is_file())
+          (Path(__file__).resolve().parent / "static/numeros/numero_getatext.png").is_file())
     a = nx._actif(f"{TH}:{VA}")
     check("Threads : noté à l'historique sur le serveur Threads",
           a and num._histo_lire()[0]["serveur"] == TH and num._histo_lire()[0]["service"] == "ig",

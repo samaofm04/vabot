@@ -2176,6 +2176,26 @@ try:
     check("panneau : consigne + expiration + souci tiennent en trois textes (limite d une Section)",
           len(_txt3(_v3e)) == 3 and "WhatsApp" in _txt3(_v3e)[2] and "Expire" in _txt3(_v3e)[2]
           and "❌ x" in _txt3(_v3e)[2], _txt3(_v3e))
+    # La puce GetAText sur les serveurs TRUST seulement (proprietaire, 08/11/2026).
+    _ns3 = __import__("types").SimpleNamespace
+    _trust3 = _ns3(guild=_ns3(id=int(next(iter(_n3.numgen.TRUST_SERVEURS)))))
+    _autre3 = _ns3(guild=_ns3(id=1445108485090971710))
+    _vt3 = _n3.PanneauNumero(None, actif=_act3, canal=_trust3, icone=True)
+    _vo3 = _n3.PanneauNumero(None, actif=_act3, canal=_autre3, icone=True)
+    _vign3 = lambda v: [i.media.url for i in v.walk_children() if isinstance(i, _d3.ui.Thumbnail)]
+    check("panneau : sur TRUST, la puce GetAText en vignette, et c est elle qui est jointe",
+          _vign3(_vt3) == ["attachment://numero_getatext.png"]
+          and _n3._fichier_icone(_vt3).filename == "numero_getatext.png"
+          and _n3._ICONE_TRUST.is_file(), (_vign3(_vt3), _n3._ICONE_TRUST))
+    check("panneau : ailleurs, le telephone d avant (« seulement TRUST »)",
+          _vign3(_vo3) == ["attachment://numero_instagram.png"]
+          and _n3._fichier_icone(_vo3).filename == "numero_instagram.png"
+          and _vign3(_n3.PanneauNumero(None, icone=True)) == ["attachment://numero_instagram.png"])
+    check("panneau : un panneau TRUST pose avant la puce (registre sans icone_nom) est rejoint, "
+          "pas les autres ni un panneau deja a jour",
+          _n3._autre_icone({}, _vt3) and not _n3._autre_icone({}, _vo3)
+          and not _n3._autre_icone({"icone_nom": "numero_getatext.png"}, _vt3)
+          and _n3._autre_icone({"icone_nom": "numero_getatext.png"}, _vo3))
     check("panneau : en attente, Redemander / Autre / Annuler (custom_id d avant)",
           [c for c, _l in _btn3(_v3)] == ["numgen:retry", "numgen:autre", "numgen:annuler"])
     _v3 = _n3.PanneauNumero(None, actif=_act3, code="482913")

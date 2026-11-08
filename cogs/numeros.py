@@ -653,7 +653,7 @@ class NumerosCog(commands.Cog):
             vue = await _vue_salon(self, rec, mot, solde=_DERNIER_SOLDE.get(_cle_solde(ch)) or "",
                                    canal=carte)
             kw = {"view": vue, "ephemeral": True}
-            f = _fichier_icone() if vue.icone else None
+            f = _fichier_icone(vue) if vue.icone else None
             if f is not None:
                 kw["file"] = f
             await itx.response.send_message(**kw)
@@ -4809,6 +4809,29 @@ async def _ephemere(itx, texte):
 
 _ICONE = _Path(__file__).resolve().parent.parent / "emojis" / "numero_instagram.png"
 _ICONE_NOM = "numero_instagram.png"
+#: La puce GetAText, sur les seuls serveurs TRUST (propriétaire, 08/11/2026 :
+#: « mets ça à la place », puis « seulement TRUST »). Un AUTRE nom de pièce
+#: jointe : une vignette vise son fichier par son nom, et un panneau qui garde
+#: l'ancien téléphone joint est refusé à l'édition, puis rejoint la puce
+#: (maj_panneau, _maj_carte).
+_ICONE_TRUST = _ICONE.parent / "numero_getatext.png"
+_ICONE_TRUST_NOM = "numero_getatext.png"
+
+
+def _icone_de(canal):
+    """(chemin, nom de pièce jointe) de la vignette du serveur de `canal`."""
+    gid = str(getattr(getattr(canal, "guild", None), "id", "") or "")
+    if gid and gid in numgen.TRUST_SERVEURS:
+        return _ICONE_TRUST, _ICONE_TRUST_NOM
+    return _ICONE, _ICONE_NOM
+
+
+def _autre_icone(rec, vue) -> bool:
+    """Le panneau porte-t-il une AUTRE vignette que celle de `vue` ? Le
+    registre note le nom joint (« icone_nom ») ; absent, c'est le téléphone
+    d'avant le 08/11/2026. Sans ça, une édition gardait l'ancien fichier joint
+    -- rien ne relit le message pour le voir."""
+    return str((rec or {}).get("icone_nom") or _ICONE_NOM) != str(getattr(vue, "icone_nom", _ICONE_NOM))
 #: Le rose Instagram de la maquette validee.
 _ROSE = 0xE1306C
 
@@ -4847,14 +4870,17 @@ def _cle_credit(kind, cpt="") -> str:
     return "credit:sms_trust" if kind == "sms" and cpt == "trust" else "credit:%s" % kind
 
 
-def _fichier_icone():
-    """L'icone a joindre, neuve a chaque envoi (un discord.File ne se lit
-    qu'une fois), ou None si le fichier manque -- le panneau part alors sans
-    vignette plutot que pas du tout, et le journal le dit."""
-    if not _ICONE.exists():
-        log.warning("numgen: icone absente (%s) : panneau sans vignette", _ICONE)
+def _fichier_icone(vue=None):
+    """L'icone a joindre -- celle que vise la vignette de `vue` --, neuve a
+    chaque envoi (un discord.File ne se lit qu'une fois), ou None si le
+    fichier manque -- le panneau part alors sans vignette plutot que pas du
+    tout, et le journal le dit."""
+    chemin = getattr(vue, "icone_chemin", None) or _ICONE
+    nom = getattr(vue, "icone_nom", None) or _ICONE_NOM
+    if not chemin.exists():
+        log.warning("numgen: icone absente (%s) : panneau sans vignette", chemin)
         return None
-    return discord.File(str(_ICONE), filename=_ICONE_NOM)
+    return discord.File(str(chemin), filename=nom)
 
 
 async def _solde_sms(canal=None):
@@ -4954,10 +4980,13 @@ class PanneauNumero(discord.ui.LayoutView):
     """
 
     def __init__(self, cog=None, actif=None, code=None, solde=None, souci="",
-                 icone=None, tous=False, avertir=False):
+                 icone=None, tous=False, avertir=False, canal=None):
         super().__init__(timeout=None)
         self.cog = cog
-        self.icone = _ICONE.exists() if icone is None else bool(icone)
+        # `canal` choisit la vignette (la puce GetAText sur TRUST) ; le
+        # fichier joint suit la vue (_fichier_icone(vue)).
+        self.icone_chemin, self.icone_nom = _icone_de(canal)
+        self.icone = self.icone_chemin.exists() if icone is None else bool(icone)
         ui = discord.ui
         if tous:
             boutons, vus = [], set()
@@ -5004,7 +5033,7 @@ class PanneauNumero(discord.ui.LayoutView):
         rangee = ui.ActionRow(*[_BoutonNum(cog, *b) for b in _boutons_etat(etat)])
         if self.icone:
             tete = ui.Section(*textes,
-                              accessory=ui.Thumbnail("attachment://" + _ICONE_NOM))
+                              accessory=ui.Thumbnail("attachment://" + self.icone_nom))
             self.add_item(ui.Container(tete, rangee, accent_colour=_ROSE))
         else:
             self.add_item(ui.Container(*textes, rangee, accent_colour=_ROSE))
@@ -5115,7 +5144,7 @@ async def _vue_salon(cog, rec, souci="", solde=None, canal=None):
     if not actif and solde is None:
         solde = await _solde_sms(canal)
     return PanneauNumero(cog, actif=actif, code=code, solde=solde, souci=souci,
-                         avertir=carte or partage)
+                         avertir=carte or partage, canal=canal)
 
 
 async def _editer_v2(channel, mid, vue, joindre=False):
@@ -5125,7 +5154,7 @@ async def _editer_v2(channel, mid, vue, joindre=False):
     vise par son nom) ; `joindre` la renvoie."""
     kw = {"view": vue}
     if joindre:
-        f = _fichier_icone()
+        f = _fichier_icone(vue)
         if f is not None:
             kw["attachments"] = [f]
     await channel.get_partial_message(int(mid)).edit(**kw)
@@ -5198,7 +5227,8 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     while cible:
         essayes.add(int(cible))
         try:
-            await _appliquer_panneau(channel, cible, fmt, vue, nom, bilan)
+            await _appliquer_panneau(channel, cible, fmt, vue, nom, bilan,
+                                     joindre=_autre_icone(rec, vue))
             pose = int(cible)
             break
         except discord.NotFound:
@@ -5236,7 +5266,7 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
         log.info("numgen: aucun panneau utilisable dans #%s : un neuf est pose", nom)
     if pose is None:
         kw = {"view": vue}
-        f = _fichier_icone() if vue.icone else None
+        f = _fichier_icone(vue) if vue.icone else None
         if f is not None:
             kw["file"] = f
         try:
@@ -5266,7 +5296,7 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
             log.warning("numgen: ancien message %s de #%s non supprime (%s: %s)",
                         mid, nom, type(e).__name__, e)
             restants.add(mid)
-    champs = {"panneau": pose, "v2": True, "icone": vue.icone}
+    champs = {"panneau": pose, "v2": True, "icone": vue.icone, "icone_nom": vue.icone_nom}
     for cle in ("numero", "code"):
         # Un ancien message qu'on n'a pas pu supprimer reste au registre : la
         # prochaine pose reessaiera. « code » a longtemps porte une VALEUR de
@@ -5309,14 +5339,14 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     return True
 
 
-async def _appliquer_panneau(channel, cible, fmt, vue, nom, bilan):
+async def _appliquer_panneau(channel, cible, fmt, vue, nom, bilan, joindre=False):
     """Met la vue sur le message `cible` : edition d'un panneau V2, ou
     CONVERSION d'un ancien (texte et embed retires, l'icone jointe). Leve
     discord.NotFound si le message n'existe plus, et toute autre erreur
     telle quelle : c'est poser_panneau qui decide de la suite."""
     if fmt == "v2":
         try:
-            await _editer_v2(channel, cible, vue)
+            await _editer_v2(channel, cible, vue, joindre=bool(joindre and vue.icone))
         except discord.NotFound:
             raise
         except Exception as e1:                              # noqa: BLE001
@@ -5329,7 +5359,7 @@ async def _appliquer_panneau(channel, cible, fmt, vue, nom, bilan):
             await _editer_v2(channel, cible, vue, joindre=True)
         return
     kw = {"content": None, "embed": None, "view": vue}
-    f = _fichier_icone() if vue.icone else None
+    f = _fichier_icone(vue) if vue.icone else None
     if f is not None:
         kw["attachments"] = [f]
     await channel.get_partial_message(int(cible)).edit(**kw)
@@ -5360,13 +5390,26 @@ async def _maj_carte(bot, carte, souci="", solde=None, cog=None) -> bool:
         return False
     cog = cog or bot.get_cog("NumerosCog")
     vue = await _vue_salon(cog, rec, souci, solde, canal=carte)
+    wh = None
     try:
         wh = discord.Webhook.partial(int(app), str(jeton), client=bot)
         await wh.edit_message("@original", view=vue)
     except Exception as e:                                   # noqa: BLE001
-        log.warning("numgen: carte de %s non mise a jour (%s: %s)", carte.name,
-                    type(e).__name__, e)
-        return False
+        f = _fichier_icone(vue) if (vue.icone and wh is not None
+                                    and not isinstance(e, discord.NotFound)) else None
+        if f is None:
+            log.warning("numgen: carte de %s non mise a jour (%s: %s)", carte.name,
+                        type(e).__name__, e)
+            return False
+        # Une carte ouverte avant le changement de vignette (TRUST, 08/11/2026)
+        # porte l'ancien fichier : la vignette qui vise le nouveau est refusée.
+        # On le rejoint, une fois -- comme maj_panneau pour le panneau.
+        try:
+            await wh.edit_message("@original", view=vue, attachments=[f])
+        except Exception as e2:                              # noqa: BLE001
+            log.warning("numgen: carte de %s non mise a jour (%s: %s, puis %s: %s)",
+                        carte.name, type(e).__name__, e, type(e2).__name__, e2)
+            return False
     return True
 
 
@@ -5405,7 +5448,7 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
     if not mid or not rec.get("v2"):
         return await poser_panneau(bot, channel, cog, souci=souci, solde=solde)
     vue = await _vue_salon(cog, rec, souci, solde, canal=channel)
-    joindre = bool(vue.icone and not rec.get("icone", True))
+    joindre = bool(vue.icone and (not rec.get("icone", True) or _autre_icone(rec, vue)))
     try:
         await _editer_v2(channel, mid, vue, joindre)
     except discord.NotFound:
@@ -5430,7 +5473,7 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
         # Le panneau EST a jour : un drapeau d'icone non note ne doit pas
         # le faire passer pour inaffichable (un achat serait alors rendu).
         try:
-            _salon_ecrire(channel.id, icone=True)
+            _salon_ecrire(channel.id, icone=True, icone_nom=vue.icone_nom)
         except Exception as e:                               # noqa: BLE001
             log.warning("numgen: icone de #%s jointe mais non notee au registre (%s: %s)",
                         nom, type(e).__name__, e)

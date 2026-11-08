@@ -81,7 +81,10 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         # Propriétaire, 21/10/2026, captures à l'appui : « comme ça », la carte
         # numéro des salons -numero-mail d'Instagram (cogs/numeros.PanneauNumero).
         "style": "insta",
-        "icone": "numeros/numero_instagram.png",  # sous static/ (copie de emojis/)
+        # La puce GetAText sur les serveurs TRUST (propriétaire, 08/11/2026 :
+        # « mets ça à la place », « seulement TRUST ») ; même image que la
+        # carte du salon (cogs/numeros._ICONE_TRUST). Sous static/.
+        "icone": "numeros/numero_getatext.png",
     },
     # Propriétaire, 23/10/2026, sur 📱・numéro-usa d'Agency VA INSTAGRAM :
     # « remplace le truc num » (le panneau d'un autre bot, « Numéro US »).
@@ -95,7 +98,7 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "quota": 3,
         "titre": "Numéro Instagram",
         "style": "insta",
-        "icone": "numeros/numero_instagram.png",
+        "icone": "numeros/numero_getatext.png",
     },
 }
 
