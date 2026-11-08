@@ -2217,6 +2217,24 @@ def table_marque(gid: Optional[str]) -> Optional[Tuple[Tuple[str, str], ...]]:
     return _TRUST if gid in SERVEURS_TRUST else _TRUST_AGENCY if gid in SERVEURS_TRUST_AGENCY else None
 
 
+_serveur_avec_staff = serveur
+
+
+def serveur(gid: Optional[str] = None) -> Optional[Dict[str, Any]]:   # noqa: F811
+    """serveur(), sans ✅┃entrées ni 🚩┃suspicions pour Entretien.
+
+    08/11/2026, propriétaire : plus de vérification sur Entretien (« tout le
+    monde est vérifié instantanément », entretien_ouvert), ces deux salons
+    supprimés. ⏳┃en-attente reste, renommé 🎙️┃candidat-en-vocal : Peach y
+    prévient les managers d'un candidat dans le vocal (salon_attente).
+    Posée en enveloppe : un patch du VPS (zzzz-entretien-manuel) réécrit les
+    lignes de la configuration d'Entretien, les toucher le ferait tomber."""
+    c = _serveur_avec_staff(gid)
+    if c and str(c.get("id")) == GUILD_ID:
+        c = dict(c, salon_entrees="", salon_suspicions="")
+    return c
+
+
 def page_html(gid: Optional[str] = None) -> str:
     """La page de vérification au nom du serveur du lien (07/11/2026,
     propriétaire : « enlève youl4b du titre des pages, mets trust »). Seuls

@@ -62025,6 +62025,14 @@ def create_app():
             _taa_boot.demarrer()
     except Exception as _e:
         log.warning(f"anciens messages de TRUST Agency non repris: {_e}")
+    # Entretien sans vérification (entretien_ouvert) : ménage des salons une
+    # fois, ✅ Vérifié donné chaque minute aux arrivants. Même garde.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("entretien-ouvert"):
+            import entretien_ouvert as _eo_boot
+            _eo_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"Entretien sans vérification non démarré: {_e}")
     # Salons proxy de Youl4b (Spam) : les logins ProxEasy relus toutes les
     # 10 minutes et tenus par Ryuk (proxeasy.py). Même garde que l'accueil
     # d'Agency : un rendu de page hors du VPS ne doit rien poster.
@@ -80590,6 +80598,8 @@ _FILS_DISCORD = {
     # dans git lui aussi, démarré juste après agency_accueil
     "journal_primes": ("journal-primes", "salon 🤝・qui-t-a-invité de TRUST Agency",
                        ("tour",), 120),
+    "entretien_ouvert": ("entretien-ouvert", "✅ Vérifié donné aux arrivants d'Entretien",
+                         ("tour",), 60),
 }
 # Un appel Discord peut attendre la fin d'un 429 : trois périodes de 15 s
 # donneraient de fausses alertes. Jamais moins de 3 minutes.

@@ -105,6 +105,9 @@ SALON_VU_S = 900
 #: attribue »). Le bouton ouvre une liste des membres : le @ est exact par
 #: construction, rien n'est tapé à la main.
 BOUTON_ID = "qui-invite:ouvrir"
+#: à changer avec le texte du panneau : le message déjà posé est réécrit
+#: (2 : 08/11, plus de vérification sur Entretien, la prime compte à l'arrivée)
+PANNEAU_VERSION = 2
 CHOIX_ID = "qui-invite:choix"
 #: au-delà, une arrivée est trop ancienne pour être déclarée ici : le
 #: 08/11, 32 arrivées depuis septembre restaient sans parrain, et les ouvrir
@@ -458,7 +461,7 @@ def message_panneau(prix: int = PRIX_RECRUTEMENT) -> Dict[str, Any]:
         "description": ("Bienvenue ! 👋\n\n"
                         "Si quelqu'un t'a fait venir sur **TRUST Agency** et que ton arrivée ne s'est pas "
                         "reliée à lui, clique le bouton ci-dessous et choisis **son @**.\n"
-                        f"Ça lui rapporte **{dollars(prix)}** dès que ta vérification est validée 💸.\n\n"
+                        f"Ça lui rapporte **{dollars(prix)}** 💸.\n\n"
                         "👉 Clique sur **« Indiquer qui m'a invité »** juste en dessous."),
         "color": 0x57F287}],
         "components": [{"type": 1, "components": [
@@ -475,6 +478,19 @@ def assurer_panneau(salon: str) -> str:
         if time.time() - _SALON_VU.get("panneau:" + f["message"], 0) < SALON_VU_S:
             return "deja"
         code, _ = _api("GET", f"/channels/{salon}/messages/{f['message']}")
+        if code == 200 and int(f.get("version") or 1) != PANNEAU_VERSION:
+            code, _ = _api("PATCH", f"/channels/{salon}/messages/{f['message']}",
+                           json=message_panneau(prix_recrutement()))
+            if code != 200:
+                _dire("panneau", f"panneau non remis à jour (HTTP {code})")
+                return f"non remis a jour (HTTP {code})"
+            with LOCK:
+                d = _etat()
+                d.setdefault("panneau", {})["version"] = PANNEAU_VERSION
+                _ecrire(d)
+            print("[journal-primes] panneau « Qui t'a invité ? » remis à jour", flush=True)
+            _SALON_VU["panneau:" + f["message"]] = time.time()
+            return "mis a jour"
         if code == 200:
             _SALON_VU["panneau:" + f["message"]] = time.time()
             return "deja"
@@ -487,7 +503,7 @@ def assurer_panneau(salon: str) -> str:
     mid = str(rep["id"])
     with LOCK:
         d = _etat()
-        d["panneau"] = {"salon": salon, "message": mid, "date": int(time.time())}
+        d["panneau"] = {"salon": salon, "message": mid, "date": int(time.time()), "version": PANNEAU_VERSION}
         _ecrire(d)
     code_p, _ = _api("PUT", f"/channels/{salon}/pins/{mid}")
     if code_p not in (200, 204):
@@ -593,8 +609,7 @@ def traiter(charge: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     print(f"[journal-primes] {uid} déclare avoir été invité par {choisi}", flush=True)
     threading.Thread(target=annoncer_declaration, args=(uid, choisi), daemon=True,
                      name="journal-primes-declaration").start()
-    return _reponse(f"✅ C'est noté : {nom} t'a invité. Sa prime de {dollars(prix_recrutement())} compte dès "
-                    "que ta vérification est validée.", maj=True)
+    return _reponse(f"✅ C'est noté : {nom} t'a invité. Ça lui rapporte {dollars(prix_recrutement())}.", maj=True)
 
 
 def annoncer_declaration(uid: str, parrain: str) -> str:

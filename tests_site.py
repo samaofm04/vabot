@@ -19861,10 +19861,15 @@ try:
         _jFR = _vd.creer_jeton("111111111111111111")
         _rFR = _vd.verifier(_jFR, {"t0": _tmV.time() - 10, "fuseau": "Europe/Paris", "canvas": "c",
                                    "telephone": "+33 6 12 34 56 78"}, "90.1.1.1", True)
-        check("parcours : IP francaise -> alerte dans #suspicions, role Suspect, jamais Verifie",
+        # 08/11/2026 : Entretien n'a plus de #suspicions ni de #entrees
+        # (entretien_ouvert) : aucune carte n'est postee dans un salon qui
+        # n'existe plus. Sans alerte, verifier() ne pose pas Suspect (« aucun
+        # responsable prevenu ») : le membre peut recliquer.
+        check("parcours : IP francaise (Entretien sans #suspicions) -> ni Suspect ni Verifie, aucune carte",
               _rFR["etat"] == "attente" and "refus" not in _rFR["message"]
-              and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
-              and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_SUSPECT) for m, c, _j in _poses)
+              and not any(c in (f"/channels/{_vd.SALON_SUSPICIONS}/messages", "/channels//messages")
+                          for _, c, _j in _poses)
+              and not any(c.endswith("/roles/" + _vd.ROLE_SUSPECT) for _, c, _j in _poses)
               and not any(c.endswith("/roles/" + _vd.ROLE_VERIFIE) for _, c, _j in _poses))
         check("parcours : le meme lien ne sert qu une fois",
               "déjà servi" in _vd.verifier(_jFR, {"t0": _tmV.time() - 10, "telephone": "+33612345678"}, "90.1.1.1", True)["message"])
@@ -19877,9 +19882,10 @@ try:
                             {"t0": _tmV.time() - 10, "fuseau": "Africa/Porto-Novo", "canvas": "unique-bj", "appareil": "dev-bj",
                              "telephone": "+229 01 61 00 00 02"},
                             "41.85.160.10", True)
-        check("parcours : Benin -> role Verifie pose + ligne dans #entrees pour le staff",
+        check("parcours : Benin -> role Verifie pose, aucune ligne (plus de #entrees)",
               _rBJ["etat"] == "ok" and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_VERIFIE) for m, c, _j in _poses)
-              and any(c == f"/channels/{_vd.SALON_ALERTES}/messages" for _, c, _j in _poses))
+              and not any(c in (f"/channels/{_vd.SALON_ALERTES}/messages", "/channels//messages")
+                          for _, c, _j in _poses))
         _bienV = [j for _, c, j in _poses if c == f"/channels/{_vd.SALON_BIENVENUE}/messages"]
         check("parcours : bienvenue dans #bienvenue, le nouveau est mentionne (et lui seul)",
               len(_bienV) == 1 and _bienV[0]["allowed_mentions"] == {"users": ["222222222222222222"]}

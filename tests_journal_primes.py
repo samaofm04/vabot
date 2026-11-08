@@ -70,6 +70,9 @@ class Discord:
             self.salons.append(c)
             self.creations.append(c)
             return 201, c
+        if methode == "PATCH" and "/messages/" in chemin:
+            self.patchs.append(chemin.rsplit("/", 1)[1])
+            return 200, {}
         if methode == "PATCH" and chemin.startswith("/channels/"):
             sid = chemin.split("/")[2]
             c = next(c for c in self.salons if c["id"] == sid)
@@ -345,7 +348,19 @@ try:
     jp._SALON_VU.clear()
     jp.tour()
     check("panneau supprimé : reposé", len(D2.panneaux) == 1, D2.panneaux)
+    d = jp._etat()
+    d["panneau"]["version"] = 1                # un panneau posé avec l'ancien texte
+    jp._ecrire(d)
+    jp._SALON_VU.clear()
+    n_p = len(D2.panneaux)
+    D2.patchs.clear()
+    jp.tour()
+    check("panneau à l'ancien texte : réécrit en place, pas reposté",
+          D2.patchs == [D2.panneaux[-1]] and len(D2.panneaux) == n_p
+          and jp._etat()["panneau"]["version"] == jp.PANNEAU_VERSION, (D2.patchs, D2.panneaux))
     corps = jp.message_panneau(20)
+    check("panneau : la prime compte à l'arrivée (plus de vérification)",
+          "vérification" not in corps["embeds"][0]["description"], corps["embeds"][0]["description"])
     b = corps["components"][0]["components"][0]
     check("panneau : bouton vert « ✍️ Indiquer qui m'a invité », prix 0,20 $",
           b["label"] == "✍️ Indiquer qui m'a invité" and b["style"] == 3 and b["custom_id"] == jp.BOUTON_ID
