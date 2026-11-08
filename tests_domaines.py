@@ -4,7 +4,8 @@ Propriétaire, 07/11/2026 : les pages que voient les VA de TRUST TWITTER,
 INSTAGRAM et THREADS (stats, affiliation, vérification) passent sur
 trust-ofm.com. Vérifie :
   1. la table : quel serveur reçoit quel domaine ;
-  2. les liens du bot : page perso, vérification ; /trust/liens reste ;
+  2. les liens du bot : page perso, vérification ; /trust/liens (lien des
+     managers) sur trust-ofm.com depuis le 08/11, toujours ouvert sur youl4b.com ;
   3. la garde de trust-ofm.com, par le client de test Flask : les pages des
      VA y répondent, le reste rend une page neutre ; youl4b.com ne change pas.
 
@@ -45,8 +46,10 @@ check("hôte trust-ofm.com reconnu (www, port, casse)",
       and not dm.hote_trust(""))
 check("chemins des VA servis, le reste non",
       all(dm.chemin_trust(c) for c in ("/mes-stats", "/verif/abc", "/affiliation/mon-espace",
-                                       "/affiliation/affiche.png", "/static/x/y.png", "/favicon.svg"))
-      and not any(dm.chemin_trust(c) for c in ("/", "/login", "/trust/liens", "/affiliations",
+                                       "/affiliation/affiche.png", "/static/x/y.png", "/favicon.svg",
+                                       "/trust/liens"))
+      and not any(dm.chemin_trust(c) for c in ("/", "/login", "/trust/liensX", "/trust/liens/x",
+                                               "/trust", "/trust/", "/affiliations",
                                                "/subs", "/mes-statsX", "/verif", "/settings/role/add",
                                                "/interactions", "/version", "/affiliation/mon-espaceX")))
 
@@ -61,8 +64,8 @@ for g in (TW, IG, TH):
     check(f"page perso {g[-4:]} sur trust-ofm.com",
           sv.lien(g, U) == f"https://trust-ofm.com/mes-stats?t={sv.jeton(g, U)}", sv.lien(g, U))
 check("hors TRUST, pas de page perso (inchangé)", sv.lien(VA_IG, U) == "")
-check("/trust/liens (direction) reste sur youl4b.com",
-      st.lien().startswith("https://youl4b.com/trust/liens?k="), st.lien())
+check("/trust/liens : le lien des managers sur trust-ofm.com",
+      st.lien().startswith("https://trust-ofm.com/trust/liens?k="), st.lien())
 
 import verif_discord as vd  # noqa: E402
 check("images des embeds : verif_discord.SITE reste youl4b.com", vd.SITE == "https://youl4b.com")
@@ -203,8 +206,10 @@ def get(chemin, hote, **kw):
 for hote in ("trust-ofm.com", "www.trust-ofm.com"):
     check(f"{hote}/ : page neutre en 404, pas la connexion",
           get("/", hote) == (404, dm.PAGE_NEUTRE), get("/", hote)[0])
-    check(f"{hote}/trust/liens : neutre (direction sur youl4b.com seulement)",
-          get("/trust/liens?k=x", hote)[0] == 404)
+    check(f"{hote}/trust/liens : la vue répond (elle vérifie la clé)",
+          get("/trust/liens?k=x", hote) == (200, "VUE"))
+    check(f"{hote}/trust/liens/… et /trust : neutres",
+          get("/trust/liens/x", hote)[0] == 404 and get("/trust", hote)[0] == 404)
     check(f"{hote}/mes-stats?t= : la vue répond", get("/mes-stats?t=abc", hote) == (200, "VUE"))
     check(f"{hote}/verif/<j> en GET et en POST", get("/verif/j", hote) == (200, "VUE")
           and get("/verif/j", hote, method="POST", json={}) == (200, "VUE"))

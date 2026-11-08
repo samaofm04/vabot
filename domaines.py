@@ -42,6 +42,7 @@ CHEMINS_TRUST = (
     "/verif/",                    # liens de vérification donnés le 07/11 au soir (15 min)
     "/affiliation/mon-espace",    # affiliation_site (VPS) : l'espace du parrain
     "/affiliation/affiche.png",   # l'affiche de cet espace
+    "/trust/liens",               # stats_trust : la page de direction, clé des managers
     "/static/",
     "/favicon.svg", "/favicon.ico",
     "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png",

@@ -110,7 +110,8 @@ check("créée : longue, la même au second appel", len(k) >= 20 and st.cle() ==
 check("fichier 0600", stat.S_IMODE(st.CLE_FICHIER.stat().st_mode) == 0o600, oct(st.CLE_FICHIER.stat().st_mode))
 check("bonne clé : oui ; fausse, coupée, vide : non",
       st.cle_ok(k) and not st.cle_ok("x" * 32) and not st.cle_ok(k[:-1]) and not st.cle_ok("") and not st.cle_ok(None))
-check("le lien des managers porte la clé", st.lien() == f"https://youl4b.com/trust/liens?k={k}")
+check("le lien des managers porte la clé, sur trust-ofm.com",
+      st.lien() == f"https://trust-ofm.com/trust/liens?k={k}", st.lien())
 
 print("2. Qui est sur la page")
 gens, rem = st.personnes()
@@ -441,6 +442,18 @@ check("bonne clé : la page, sans le lien des managers", r.status_code == 200 an
 check("en-têtes : no-store, noindex, no-referrer",
       "no-store" in r.headers.get("Cache-Control", "") and "noindex" in r.headers.get("X-Robots-Tag", "")
       and r.headers.get("Referrer-Policy") == "no-referrer", dict(r.headers))
+# 08/11 : le lien des managers est sur trust-ofm.com ; sans la garde de
+# domaines qui laisse passer /trust/liens, il ouvrait la page neutre.
+r = c.get(f"/trust/liens?k={k}", headers={"Host": "trust-ofm.com"})
+check("trust-ofm.com, bonne clé : la page", r.status_code == 200 and "VA TRUST" in r.get_data(as_text=True),
+      r.status_code)
+r = c.get("/trust/liens?k=" + "z" * 32, headers={"Host": "trust-ofm.com"})
+check("trust-ofm.com, clé fausse : 403", r.status_code == 403, r.status_code)
+r = c.get("/trust/liens", headers={"Host": "trust-ofm.com"})
+r2 = c.get("/", headers={"Host": "trust-ofm.com"})
+check("trust-ofm.com, sans clé : renvoi vers la page neutre, rien du dashboard",
+      r.status_code in (301, 302) and r2.status_code == 404 and "Page introuvable" in r2.get_data(as_text=True),
+      (r.status_code, r2.status_code))
 with c.session_transaction() as s:
     s["auth"] = True
     s["username"] = "admin"
