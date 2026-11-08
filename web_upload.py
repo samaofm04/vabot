@@ -62325,6 +62325,18 @@ def create_app():
             if str((charge.get("data") or {}).get("custom_id") or "").startswith("agency-aff:"):
                 return jsonify({"type": 4, "data": {"content": "Service temporairement indisponible.",
                                                     "flags": 64}})
+        # « ✍️ Indiquer qui m'a invité » de 🤝・qui-t-a-invité (TRUST Agency) et
+        # la liste des membres qui suit (journal_primes).
+        try:
+            import journal_primes as _jp
+            _rep_jp = _jp.traiter(charge)
+            if _rep_jp is not None:
+                return jsonify(_rep_jp)
+        except Exception as _e_jp:
+            print(f"[journal-primes] route : {type(_e_jp).__name__}: {_e_jp}", flush=True)
+            if str((charge.get("data") or {}).get("custom_id") or "").startswith("qui-invite:"):
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         # ▶️ Lever la suspension, sous les cartes ⏸️ de 👋・départs-et-sanctions
         # (suspensions_discord). Même principe, None quand ce n'est pas le sien.
         try:

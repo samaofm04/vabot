@@ -57,6 +57,8 @@ class Discord:
         self.creations = []
         self.patchs = []
         self.refuser = False
+        self.panneaux = []
+        self.epingles = []
         self.n = 1000
 
     def __call__(self, methode, chemin, **kw):
@@ -87,8 +89,16 @@ class Discord:
             if self.refuser:
                 return 429, {}
             self.n += 1
-            self.messages.append(kw["json"]["content"])
+            if "content" in kw["json"]:
+                self.messages.append(kw["json"]["content"])
+            else:
+                self.panneaux.append(str(self.n))
             return 200, {"id": str(self.n)}
+        if methode == "GET" and "/messages/" in chemin:
+            return (200, {}) if chemin.rsplit("/", 1)[1] in self.panneaux else (404, {})
+        if methode == "PUT" and "/pins/" in chemin:
+            self.epingles.append(chemin.rsplit("/", 1)[1])
+            return 204, {}
         return 404, {}
 
 
@@ -325,10 +335,86 @@ try:
     check("subs : MyPuls illisible, inconnu", SUBS_REEL("twitter", "201", None) is None)
     del sys.modules["liens_va"]
 
+    # ── le panneau « 🤝 Qui t'a invité ? » ──────────────────────────────────
+    check("panneau : posé une fois et épinglé, en tête du salon neuf",
+          len(D2.panneaux) == 1 and D2.epingles == D2.panneaux, (D2.panneaux, D2.epingles))
+    redemarrer(D2)
+    jp.tour()
+    check("panneau : pas reposé au redémarrage", len(D2.panneaux) == 1, D2.panneaux)
+    D2.panneaux.clear()                  # quelqu'un l'a supprimé
+    jp._SALON_VU.clear()
+    jp.tour()
+    check("panneau supprimé : reposé", len(D2.panneaux) == 1, D2.panneaux)
+    corps = jp.message_panneau(20)
+    b = corps["components"][0]["components"][0]
+    check("panneau : bouton vert « ✍️ Indiquer qui m'a invité », prix 0,20 $",
+          b["label"] == "✍️ Indiquer qui m'a invité" and b["style"] == 3 and b["custom_id"] == jp.BOUTON_ID
+          and "0,20 $" in corps["embeds"][0]["description"], corps)
+
+    # ── le bouton et la liste des membres ────────────────────────────────────
+    import threading
+    import datetime as _dt
+    ENT = TMP / "entretien.json"
+    jp.safe_json.write(ENT, {"declarations": {"900": {"parrain": "901"}}, "en_attente": {},
+                             "non_attribues": {"910": {"date": "x", "raison": "lien inconnu"}}})
+    sys.modules["entretien_parrainage"] = types.SimpleNamespace(
+        LOCK=threading.RLock(), FILE=ENT, PRIX_CENTIMES=20, lire=lambda: jp.safe_json.load(ENT, default={}))
+    sys.modules["verif_discord"].bot_du_serveur = lambda gid=None: {"app_id": BOT}
+    recent = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    vieux = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=30)).isoformat()
+
+    def clic(uid, cid, joined=recent, guild=jp.GID, **data):
+        return jp.traiter({"type": 3, "guild_id": guild, "application_id": BOT,
+                           "member": {"user": {"id": uid}, "joined_at": joined},
+                           "data": dict({"custom_id": cid}, **data)})
+
+    check("un autre bouton : pas le sien", jp.traiter({"data": {"custom_id": "agency-aff:mes"}}) is None)
+    r = clic("910", jp.BOUTON_ID, guild="1")
+    check("autre serveur : refusé", "ne correspond pas" in r["data"]["content"], r)
+    r = clic("900", jp.BOUTON_ID)
+    check("déjà relié par son lien : rien à changer", "déjà reliée" in r["data"]["content"]
+          and r["data"]["flags"] == 64 and r["data"]["components"] == [], r)
+    r = clic("910", jp.BOUTON_ID, joined=vieux)
+    check("arrivée de plus de 7 jours : refusée", "trop ancien" in r["data"]["content"], r)
+    r = clic("910", jp.BOUTON_ID)
+    sel = r["data"]["components"][0]["components"][0]
+    check("bouton : une liste des membres (le @ exact), visible de lui seul",
+          sel["type"] == 5 and sel["custom_id"] == jp.CHOIX_ID and r["data"]["flags"] == 64 and r["type"] == 4, r)
+    r = clic("910", jp.CHOIX_ID, values=["910"], resolved={"users": {"910": {}}, "members": {"910": {}}})
+    check("se choisir soi-même : refusé, la liste reste", r["type"] == 7 and "toi-même" in r["data"]["content"]
+          and r["data"]["components"], r)
+    r = clic("910", jp.CHOIX_ID, values=["555"], resolved={"users": {"555": {"bot": True}}, "members": {"555": {}}})
+    check("choisir un bot : refusé", "pas membre" in r["data"]["content"], r)
+    n0 = len(D2.messages)
+    r = clic("910", jp.CHOIX_ID, values=["920"],
+             resolved={"users": {"920": {"username": "yous1m", "global_name": "You"}}, "members": {"920": {}}})
+    ent = jp.safe_json.load(ENT, default={})
+    check("choix : noté en attente de vérification, comme une invitation par lien",
+          ent["en_attente"].get("910", {}).get("parrain") == "920"
+          and ent["en_attente"]["910"]["source"] == "declaration", ent.get("en_attente"))
+    check("choix : la trace des non attribués est gardée, annotée",
+          ent["non_attribues"]["910"] == {"date": "x", "raison": "lien inconnu", "declare": "920"}, ent["non_attribues"])
+    check("choix : confirmation à la place de la liste", r["type"] == 7 and r["data"]["components"] == []
+          and "**You** t'a invité" in r["data"]["content"] and "0,20 $" in r["data"]["content"], r)
+    for t_ in threading.enumerate():
+        if t_.name == "journal-primes-declaration":
+            t_.join(5)
+    check("choix : annoncé dans le salon, une fois",
+          D2.messages[n0:] == ["✍️ **Nom 910** indique avoir été invité par **Nom 920**"], D2.messages[n0:])
+    jp.annoncer_declaration("910", "920")
+    check("annonce : pas deux fois", len(D2.messages) == n0 + 1)
+    r = clic("910", jp.CHOIX_ID, values=["930"], resolved={"users": {"930": {}}, "members": {"930": {}}})
+    check("second choix : refusé, la première déclaration reste",
+          "déjà reliée" in r["data"]["content"]
+          and jp.safe_json.load(ENT, default={})["en_attente"]["910"]["parrain"] == "920", r)
+    del sys.modules["entretien_parrainage"]
+
     # ── le branchement dans le site ──────────────────────────────────────────
     src = (ICI / "web_upload.py").read_text(encoding="utf-8")
     check("web_upload : le fil démarre sur la machine de production seulement",
           '_machine_proprietaire("journal-primes")' in src and "_jp_boot.demarrer()" in src)
+    check("web_upload : la route Discord passe les clics « qui-invite: » à journal_primes",
+          "_jp.traiter(charge)" in src and 'startswith("qui-invite:")' in src)
     check("web_upload : le fil est surveillé (_FILS_DISCORD)",
           '"journal_primes": ("journal-primes"' in src)
     check("journal_primes : écritures par safe_json seulement",

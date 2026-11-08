@@ -25,6 +25,14 @@ Rien n'est calculé ailleurs : on lit les registres que tiennent déjà les
 relevés de chaque serveur, sans rien y écrire (comme habillage_trust) —
 entretien_parrainage (TRUST Agency), agency_accueil (TRUST INSTAGRAM),
 twitter_accueil (TRUST TWITTER), threads_accueil (TRUST THREADS) — et les
+En tête du salon, épinglé, « 🤝 Qui t'a invité ? » : un invité dont
+l'arrivée ne s'est reliée à personne (lien d'un autre, invitation mal
+relevée) choisit son parrain dans la liste des membres — le @ exact, rien
+de tapé — dans les 7 jours qui suivent son arrivée. Sa déclaration entre
+dans le registre d'entretien_parrainage (en_attente), qui en fait un
+recrutement à 0,20 $ quand la vérification est validée, comme pour un lien.
+Une arrivée déjà reliée ne se change pas.
+
 subs de MyPuls comme les espaces d'affiliation (affiliation_privee.compteurs),
 sur les seuls trackings de Lia (voir subs). Jamais lien_pour() : il
 créerait une invitation.
@@ -91,6 +99,17 @@ MODELE_PRIMES = "Lia"
 TZ = ZoneInfo("Europe/Paris")
 #: le salon n'est revérifié (un GET) qu'une fois tous les quarts d'heure
 SALON_VU_S = 900
+#: le panneau « 🤝 Qui t'a invité ? » épinglé en tête du salon (propriétaire,
+#: 08/11, devant celui d'AuraX : « si le mec il fait un truc bizarre avec
+#: l'invitation […] avec l'arobase exact de la personne, pour que ça lui
+#: attribue »). Le bouton ouvre une liste des membres : le @ est exact par
+#: construction, rien n'est tapé à la main.
+BOUTON_ID = "qui-invite:ouvrir"
+CHOIX_ID = "qui-invite:choix"
+#: au-delà, une arrivée est trop ancienne pour être déclarée ici : le
+#: 08/11, 32 arrivées depuis septembre restaient sans parrain, et les ouvrir
+#: toutes aurait payé d'un coup des invitations que personne n'a vérifiées
+DELAI_DECLARATION_S = 7 * 86400
 
 LOCK = threading.RLock()
 _TOUR = threading.Lock()
@@ -149,7 +168,7 @@ def semaine(t: float) -> str:
     try:
         import entretien_parrainage as e
         return e.semaine(dt.datetime.fromtimestamp(t, e.TZ))
-    except ImportError:
+    except (ImportError, AttributeError):
         pass
     d = (dt.datetime.fromtimestamp(t, TZ) + dt.timedelta(minutes=1)).date()
     return (d - dt.timedelta(days=d.weekday())).isoformat()
@@ -403,6 +422,8 @@ def texte(e: Dict[str, Any], noms: Dict[str, str], total: int = 0,
         if q and (maintenant or time.time()) - q > ARRIVEE_TARDIVE_S:
             t += " · arrivé le " + dt.datetime.fromtimestamp(q, TZ).strftime("%d/%m")
         return t
+    if e["type"] == "declaration":
+        return f"✍️ {f} indique avoir été invité par {p}"
     if e["type"] == "recrutement":
         t = f"{f} a été invité par {p} — {montant(e['centimes'])} pour lui 💸"
     else:
@@ -430,6 +451,178 @@ def _poster(salon: str, e: Dict[str, Any], contenu: str) -> str:
     return str(rep.get("id") or "") if code in (200, 201) and isinstance(rep, dict) else ""
 
 
+# ─── « Indiquer qui m'a invité » ─────────────────────────────────────────────
+def message_panneau(prix: int = PRIX_RECRUTEMENT) -> Dict[str, Any]:
+    return {"embeds": [{
+        "title": "🤝 Qui t'a invité ?",
+        "description": ("Bienvenue ! 👋\n\n"
+                        "Si quelqu'un t'a fait venir sur **TRUST Agency** et que ton arrivée ne s'est pas "
+                        "reliée à lui, clique le bouton ci-dessous et choisis **son @**.\n"
+                        f"Ça lui rapporte **{dollars(prix)}** dès que ta vérification est validée 💸.\n\n"
+                        "👉 Clique sur **« Indiquer qui m'a invité »** juste en dessous."),
+        "color": 0x57F287}],
+        "components": [{"type": 1, "components": [
+            {"type": 2, "style": 3, "custom_id": BOUTON_ID, "label": "✍️ Indiquer qui m'a invité"}]}],
+        "allowed_mentions": {"parse": []}}
+
+
+def assurer_panneau(salon: str) -> str:
+    """Le panneau épinglé du salon, posé une fois (reposé s'il a été
+    supprimé). Rend "pose", "deja" ou la raison de l'échec."""
+    with LOCK:
+        f = dict(_etat().get("panneau") or {})
+    if f.get("message") and f.get("salon") == salon:
+        if time.time() - _SALON_VU.get("panneau:" + f["message"], 0) < SALON_VU_S:
+            return "deja"
+        code, _ = _api("GET", f"/channels/{salon}/messages/{f['message']}")
+        if code == 200:
+            _SALON_VU["panneau:" + f["message"]] = time.time()
+            return "deja"
+        if code != 404:
+            return f"illisible (HTTP {code})"
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=message_panneau(prix_recrutement()))
+    if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
+        _dire("panneau", f"panneau « Qui t'a invité ? » non posé (HTTP {code})")
+        return f"non pose (HTTP {code})"
+    mid = str(rep["id"])
+    with LOCK:
+        d = _etat()
+        d["panneau"] = {"salon": salon, "message": mid, "date": int(time.time())}
+        _ecrire(d)
+    code_p, _ = _api("PUT", f"/channels/{salon}/pins/{mid}")
+    if code_p not in (200, 204):
+        _dire("panneau", f"panneau posé, épingle refusée (HTTP {code_p})")
+    else:
+        _dire("panneau", "")
+    print(f"[journal-primes] panneau « Qui t'a invité ? » posé ({mid})", flush=True)
+    _SALON_VU["panneau:" + mid] = time.time()
+    return "pose"
+
+
+def prix_recrutement() -> int:
+    try:
+        import entretien_parrainage as e
+        return int(e.PRIX_CENTIMES)
+    except Exception:                                        # noqa: BLE001
+        return PRIX_RECRUTEMENT
+
+
+def _reponse(texte_: str, composants: Optional[list] = None, maj: bool = False) -> Dict[str, Any]:
+    """Visible de lui seul ; `maj` : remplace le message du choix."""
+    data: Dict[str, Any] = {"content": texte_, "allowed_mentions": {"parse": []},
+                            "components": composants or []}
+    if not maj:
+        data["flags"] = 64               # une mise à jour garde l'éphémère du message d'origine
+    return {"type": 7 if maj else 4, "data": data}
+
+
+def _liste() -> list:
+    return [{"type": 1, "components": [{"type": 5, "custom_id": CHOIX_ID, "min_values": 1, "max_values": 1,
+                                        "placeholder": "Son @ sur TRUST Agency"}]}]
+
+
+def _parrain_deja(etat: Dict[str, Any], uid: str) -> str:
+    for cle in ("declarations", "en_attente"):
+        p = str(((etat.get(cle) or {}).get(uid) or {}).get("parrain") or "")
+        if p:
+            return p
+    return ""
+
+
+def _nom_de(uid: str, resolus: Optional[Dict[str, Any]] = None) -> str:
+    u = (resolus or {}).get(uid) or {}
+    n = str(u.get("global_name") or u.get("username") or "")
+    if not n:
+        noms: Dict[str, str] = {}
+        n = pseudo(uid, noms)
+    return _qui(uid, {uid: n})
+
+
+def traiter(charge: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Le bouton « ✍️ Indiquer qui m'a invité » et la liste qui suit. None
+    quand ce n'est pas le sien."""
+    data = charge.get("data") or {}
+    cid = str(data.get("custom_id") or "")
+    if not cid.startswith("qui-invite:"):
+        return None
+    import verif_discord as vd
+    membre = charge.get("member") or {}
+    uid = str((membre.get("user") or {}).get("id") or "")
+    if (str(charge.get("guild_id")) != GID or not uid.isdigit() or (membre.get("user") or {}).get("bot")
+            or str(charge.get("application_id")) != str(vd.bot_du_serveur(GID).get("app_id"))):
+        return _reponse("Ce bouton ne correspond pas à ce serveur.")
+    try:
+        import entretien_parrainage as e
+    except ImportError:
+        return _reponse("❌ Indisponible pour le moment. Réessaie dans un instant.")
+    with e.LOCK:
+        etat = e.lire()
+    deja = _parrain_deja(etat, uid)
+    if deja:
+        return _reponse(f"✅ Ton arrivée est déjà reliée à {_nom_de(deja)} : rien à faire.", maj=cid == CHOIX_ID)
+    arrivee = _ts(membre.get("joined_at"))
+    if not arrivee or time.time() - arrivee > DELAI_DECLARATION_S:
+        quand = dt.datetime.fromtimestamp(arrivee, TZ).strftime("%d/%m") if arrivee else "?"
+        return _reponse(f"Ton arrivée date du {quand} : c'est trop ancien pour l'indiquer ici. "
+                        "Parles-en à un manager.", maj=cid == CHOIX_ID)
+    if cid == BOUTON_ID:
+        return _reponse("Choisis la personne qui t'a invité (tape son pseudo pour la trouver) :", _liste())
+    if cid != CHOIX_ID:
+        return _reponse("Action inconnue.")
+    choisi = str((data.get("values") or [""])[0])
+    resolus = (data.get("resolved") or {})
+    u = (resolus.get("users") or {}).get(choisi) or {}
+    if choisi == uid:
+        return _reponse("Tu ne peux pas t'indiquer toi-même. Choisis la personne qui t'a invité :", _liste(), maj=True)
+    if not choisi.isdigit() or u.get("bot") or choisi not in (resolus.get("members") or {}):
+        return _reponse("Cette personne n'est pas membre de TRUST Agency. Choisis-en une autre :", _liste(), maj=True)
+    with e.LOCK:
+        etat = e.lire()
+        deja = _parrain_deja(etat, uid)
+        if not deja:
+            etat.setdefault("en_attente", {})[uid] = {
+                "filleul": uid, "parrain": choisi, "arrivee": membre.get("joined_at") or "",
+                "source": "declaration", "declare_le": dt.datetime.now(TZ).isoformat()}
+            na = (etat.get("non_attribues") or {}).get(uid)
+            if isinstance(na, dict):
+                na["declare"] = choisi           # gardé, pas effacé : la trace reste
+            safe_json.write(e.FILE, etat)
+    if deja:
+        return _reponse(f"✅ Ton arrivée est déjà reliée à {_nom_de(deja)} : rien à faire.", maj=True)
+    nom = _nom_de(choisi, resolus.get("users"))
+    print(f"[journal-primes] {uid} déclare avoir été invité par {choisi}", flush=True)
+    threading.Thread(target=annoncer_declaration, args=(uid, choisi), daemon=True,
+                     name="journal-primes-declaration").start()
+    return _reponse(f"✅ C'est noté : {nom} t'a invité. Sa prime de {dollars(prix_recrutement())} compte dès "
+                    "que ta vérification est validée.", maj=True)
+
+
+def annoncer_declaration(uid: str, parrain: str) -> str:
+    """« ✍️ X indique avoir été invité par Y » dans le salon, une fois."""
+    e = {"cle": f"decl:{uid}", "type": "declaration", "plateforme": "entretien",
+         "filleul": uid, "parrain": parrain}
+    try:
+        salon = assurer_salon()
+        with LOCK:
+            d = _etat()
+            if not salon or e["cle"] in (d.get("vus") or {}):
+                return ""
+            noms = dict(d.get("noms") or {})
+        for u in (uid, parrain):
+            pseudo(u, noms)
+        mid = _poster(salon, e, texte(e, noms))
+        if mid:
+            with LOCK:
+                d = _etat()
+                d.setdefault("vus", {})[e["cle"]] = {"m": mid, "t": int(time.time())}
+                d.setdefault("noms", {}).update(noms)
+                _ecrire(d)
+        return mid
+    except Exception as ex:                                  # noqa: BLE001
+        print(f"[journal-primes] déclaration de {uid} non annoncée : {type(ex).__name__}: {ex}", flush=True)
+        return ""
+
+
 # ─── un tour ─────────────────────────────────────────────────────────────────
 def tour() -> Dict[str, Any]:
     """Un relevé : les événements neufs postés, un message chacun. Rend le bilan."""
@@ -446,6 +639,7 @@ def _tour() -> Dict[str, Any]:
     salon = assurer_salon()
     if not salon:
         return bilan
+    bilan["panneau"] = assurer_panneau(salon)
     registres = {p: registre(p) for p in SERVEURS}
     metrics = compteurs()
     maintenant = time.time()
