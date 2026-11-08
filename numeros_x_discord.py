@@ -376,7 +376,12 @@ def vue_actif(a: Dict[str, Any], conf: Dict[str, Any]) -> List[Dict[str, Any]]:
                    _bouton("annuler", "Annuler", "❌", 4, act_id)]
     if _insta(conf):
         etat = ("🔑 **Code : `%s`**" % code) if code else "⏳ En attente du code…"
-        return _carte(conf, _valeur(a), etat, boutons, souci=a.get("souci") or "")
+        souci = a.get("souci") or ""
+        if not code:
+            # Sur la même ligne que le souci : une Section ne prend que trois
+            # textes (numéro, attente, le reste).
+            souci = numgen.CONSIGNE_SMS + ("\n" + souci if souci else "")
+        return _carte(conf, _valeur(a), etat, boutons, souci=souci)
     return _vue([_titre(conf), _drapeau(conf) + " " + _numero(a), "🔐 " + ligne,
                  a.get("souci") or ""], boutons)
 

@@ -2165,8 +2165,17 @@ try:
           _btn3(_v3) == [("numgen:sms", "Prendre un numéro"), ("numgen:mail", "Mail")])
     _v3 = _n3.PanneauNumero(None, actif=_act3)
     # Le numero COLLE : demande expresse du proprietaire (« +15550142294 »).
-    check("panneau : en attente, le numero colle, le drapeau, l attente",
-          _txt3(_v3) == ["## `+15550142294`", "🇺🇸 ⏳ En attente du code…"], _txt3(_v3))
+    check("panneau : en attente, le numero colle, le drapeau, l attente, la consigne SMS",
+          _txt3(_v3) == ["## `+15550142294`", "🇺🇸 ⏳ En attente du code…",
+                         "⚠️ Choisis bien **recevoir par SMS**, pas par WhatsApp."], _txt3(_v3))
+    check("panneau : la consigne SMS part avec le code recu, et n est pas sur un mail",
+          not any("WhatsApp" in t for t in _txt3(_n3.PanneauNumero(None, actif=_act3, code="1")))
+          and not any("WhatsApp" in t for t in _txt3(_n3.PanneauNumero(
+              None, actif=dict(_act3, kind="mail", valeur="a@b.c")))), _txt3(_v3))
+    _v3e = _n3.PanneauNumero(None, actif=dict(_act3, duree=1200), souci="❌ x")
+    check("panneau : consigne + expiration + souci tiennent en trois textes (limite d une Section)",
+          len(_txt3(_v3e)) == 3 and "WhatsApp" in _txt3(_v3e)[2] and "Expire" in _txt3(_v3e)[2]
+          and "❌ x" in _txt3(_v3e)[2], _txt3(_v3e))
     check("panneau : en attente, Redemander / Autre / Annuler (custom_id d avant)",
           [c for c, _l in _btn3(_v3)] == ["numgen:retry", "numgen:autre", "numgen:annuler"])
     _v3 = _n3.PanneauNumero(None, actif=_act3, code="482913")
@@ -15419,6 +15428,8 @@ try:
                       and not _regF(ch).get("actif"), _F.mails_annules)
 
                 # Annuler / Autre depuis le panneau : seul un rendu REUSSI efface.
+                # Le souci est la DERNIERE ligne du dernier texte : en attente, la
+                # consigne SMS partage ce texte (une Section en prend trois).
                 await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
                 _jeterF(bot)
                 ida = _regF(ch)["actif"]["id"]
@@ -15426,7 +15437,7 @@ try:
                 await _oui(cog, ch, 7, "annuler", bot, act_id=ida)
                 check("Annuler en echec (timeout) : numero garde, raison affichee",
                       (_regF(ch).get("actif") or {}).get("id") == ida and ida not in _F.annules
-                      and _txtF(p)[-1].startswith("❌ ERR:") and not _histoF(ida).get("annule_le"),
+                      and _txtF(p)[-1].split("\n")[-1].startswith("❌ ERR:") and not _histoF(ida).get("annule_le"),
                       _txtF(p))
                 n0 = len(_F.achats)
                 _F.cancel_rep = [(False, "BAD_STATUS")]
@@ -15457,7 +15468,7 @@ try:
                 await _tachesF(bot)
                 check("ecoute : %d erreurs d affilee -> arret, dit dans le panneau"
                       % _nF.ECOUTE_ERREURS_MAX,
-                      _F.appels.get(ide) == _nF.ECOUTE_ERREURS_MAX and _txtF(p)[-1] == "❌ ERR:x",
+                      _F.appels.get(ide) == _nF.ECOUTE_ERREURS_MAX and _txtF(p)[-1].split("\n")[-1] == "❌ ERR:x",
                       (_F.appels.get(ide), _txtF(p)))
                 # « Redemander » lit d'abord le code (attente), puis l'ecoute
                 # relancee tombe sur l'activation inconnue.
@@ -15474,14 +15485,14 @@ try:
                 tours = _F.appels.get(ide, 0) - 1
                 check("ecoute : elle dure la vie du numero (plus de 3 min), puis le dit",
                       tours > _nF.POLL_MAX // _nF.POLL_SECONDS
-                      and _txtF(p)[-1] == "❌ Aucun code reçu en %d min"
+                      and _txtF(p)[-1].split("\n")[-1] == "❌ Aucun code reçu en %d min"
                       % (_nF.DUREE_NUMERO_SEC // 60), (tours, _txtF(p)))
                 # « Redemander » refuse par le fournisseur : l'ecoute repart quand meme.
                 _F.retry_rep = (False, "BAD_STATUS")
                 await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
                 _F.retry_rep = None
                 check("Redemander refuse : l ecoute du numero vivant est relancee",
-                      len(bot.loop.t) == 1 and _txtF(p)[-1] == "❌ BAD_STATUS", len(bot.loop.t))
+                      len(bot.loop.t) == 1 and _txtF(p)[-1].split("\n")[-1] == "❌ BAD_STATUS", len(bot.loop.t))
                 _F.code[ide] = ("code", "121212")
                 await _tachesF(bot)
                 check("Redemander refuse : le code arrive ensuite s affiche tout seul",

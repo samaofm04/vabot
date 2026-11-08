@@ -4983,6 +4983,8 @@ class PanneauNumero(discord.ui.LayoutView):
             ligne = ("⏳ En attente du code…" if etat == "attente"
                      else "🔑 **Code : `%s`**" % code)
             lignes = ["## `%s`" % valeur, _drapeau(actif) + " " + ligne]
+            if etat == "attente" and (actif.get("kind") or "sms") == "sms":
+                lignes.append(numgen.CONSIGNE_SMS)
             if etat == "attente" and actif.get("duree"):
                 # Une carte de salon partage : sa fin de vie se voit.
                 try:

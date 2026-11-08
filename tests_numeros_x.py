@@ -624,6 +624,14 @@ try:
           boutons(dernier_patch()) == ["numx:retry:ga1", "numx:autre:ga1", "numx:annuler:ga1"]
           and [b["style"] for b in dernier_patch()[0]["components"][1]["components"]] == [1, 2, 4],
           dernier_patch())
+    check("Threads : en attente, la consigne « recevoir par SMS, pas par WhatsApp » sous le numéro, "
+          "trois textes au plus (limite d'une Section)",
+          textes(dernier_patch())[2:] == [numgen.CONSIGNE_SMS]
+          and "WhatsApp" in numgen.CONSIGNE_SMS, dernier_patch())
+    _ax = dict(nx._actif(f"{TH}:{VA}") or {}, souci="❌ x")
+    check("Threads : consigne et souci partagent le 3e texte",
+          textes(nx.vue_actif(_ax, nx.SERVEURS[TH]))[2:] == [numgen.CONSIGNE_SMS + "\n❌ x"],
+          textes(nx.vue_actif(_ax, nx.SERVEURS[TH])))
     carte = dernier_patch()[0]
     vignette = (carte["components"][0].get("accessory") or {}).get("media", {}).get("url", "")
     check("Threads : carte rose, l'icône Instagram en vignette, servie par le site (versionnée)",
@@ -642,6 +650,8 @@ try:
           textes(dernier_patch())[:2] == ["## `+15551110001`", "🇺🇸 🔑 **Code : `135790`**"]
           and boutons(dernier_patch()) == ["numx:fini:ga1", "numx:retry:ga1", "numx:autre:ga1"],
           dernier_patch())
+    check("Threads : code reçu, la consigne SMS n'est plus là",
+          not any("WhatsApp" in t for t in textes(dernier_patch())), dernier_patch())
     check("Threads : le quota de Twitter n'est pas touché",
           num.numeros_du_jour(VA, TH) == 1 and num.numeros_du_jour(VA, GID) == 0)
     APPELS.clear()

@@ -53,6 +53,13 @@ SERVICE_LABELS = {
     "fb": "Facebook", "tg": "Telegram", "wa": "WhatsApp", "sc": "Snapchat",
 }
 
+#: Sous un numéro Instagram qui attend son code (propriétaire, 08/11/2026 :
+#: « attention bien choisir recevoir par SMS et pas par WhatsApp ») : envoyé
+#: par WhatsApp, le code n'arrive jamais chez le fournisseur et le numéro est
+#: payé pour rien. Une seule phrase pour les deux cartes (cogs/numeros, le
+#: salon ; numeros_x_discord, les tickets).
+CONSIGNE_SMS = "⚠️ Choisis bien **recevoir par SMS**, pas par WhatsApp."
+
 # Pays proposés, du plus fourni au moins fourni. Une seule table : le site et
 # le bot y lisaient chacun la leur, et elles divergeaient.
 PAYS = (
