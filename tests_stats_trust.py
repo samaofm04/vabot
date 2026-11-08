@@ -9,7 +9,8 @@ Ce que ce fichier prouve, sans réseau et sans rien écrire dans le vrai data/.
 Les chiffres d'un VA (stats_va.chiffres, testés par tests_stats_va.py) sont
 simulés ; tout le reste est le vrai code.
   1. La clé : créée une fois, stable, fichier 0600 ; fausse, vide ou courte :
-     rien.
+     rien. Une clé par serveur (08/11) : distinctes, n'ouvrent que leur
+     serveur, ne changent pas la clé de la page.
   2. Qui est sur la page : les fiches des trois serveurs TRUST, pas les autres
      serveurs, pas les VA partis ; une fiche illisible garde sa ligne.
   3. Les lignes : coût / sub = Gagné ÷ subs, marge = LTV − coût ; les tris
@@ -112,6 +113,38 @@ check("bonne clé : oui ; fausse, coupée, vide : non",
       st.cle_ok(k) and not st.cle_ok("x" * 32) and not st.cle_ok(k[:-1]) and not st.cle_ok("") and not st.cle_ok(None))
 check("le lien des managers porte la clé, sur trust-ofm.com",
       st.lien() == f"https://trust-ofm.com/trust/liens?k={k}", st.lien())
+# 08/11, propriétaire : « un lien exprès pour que Twitter, un pour que
+# Instagram et un pour que Threads »
+k_tw, k_ig, k_th = st.cle("tw"), st.cle("ig"), st.cle("th")
+check("une clé par serveur : longues, toutes différentes",
+      all(len(x) >= 20 for x in (k_tw, k_ig, k_th)) and len({k, k_tw, k_ig, k_th}) == 4)
+check("créer les clés des serveurs ne change pas celle déjà donnée", st.cle() == k)
+check("chaque clé de serveur stable au second appel",
+      (st.cle("tw"), st.cle("ig"), st.cle("th")) == (k_tw, k_ig, k_th))
+check("portée : page → tous, chaque serveur → le sien, fausse ou coupée → rien",
+      st.portee(k) == "tous" and st.portee(k_tw) == "tw" and st.portee(k_ig) == "ig"
+      and st.portee(k_th) == "th" and st.portee(k_tw[:-1]) is None and st.portee("x" * 32) is None
+      and st.portee("") is None and st.portee(None) is None)
+check("cle_ok accepte aussi les clés des serveurs", st.cle_ok(k_ig) and not st.cle_ok(k_ig + "x"))
+try:
+    st.cle("spam")
+    _leve = False
+except ValueError:
+    _leve = True
+check("serveur inconnu : refusé, rien créé", _leve and "spam" not in str(st.CLE_FICHIER.read_text()))
+check("fichier toujours 0600", stat.S_IMODE(st.CLE_FICHIER.stat().st_mode) == 0o600)
+lm = st.liens_managers()
+check("liens des managers : la page entière puis Twitter, Instagram, Threads, sur trust-ofm.com",
+      [lib for lib, _u in lm] == ["Tous", "TRUST TWITTER seul", "TRUST INSTAGRAM seul", "TRUST THREADS seul"]
+      and [u for _l, u in lm] == [f"https://trust-ofm.com/trust/liens?k={x}" for x in (k, k_tw, k_ig, k_th)], lm)
+_vrai_fichier = st.CLE_FICHIER
+st.CLE_FICHIER = TMP / "ancien_format.json"
+import safe_json as _sj  # noqa: E402
+_sj.write(st.CLE_FICHIER, {"cle": "A" * 32, "cree": 1})
+_k_ancien = st.cle("th")
+check("fichier de l'ancien format : la clé de la page est gardée, celle de Threads ajoutée",
+      st.cle() == "A" * 32 and st.portee("A" * 32) == "tous" and st.portee(_k_ancien) == "th")
+st.CLE_FICHIER = _vrai_fichier
 
 print("2. Qui est sur la page")
 gens, rem = st.personnes()
@@ -213,6 +246,65 @@ he = st.page_html(None, {"gens": lot["gens"], "lignes": {}, "pannes": {}, "debut
                   du="", au="", tri="subs", sens="desc", jour=JOUR)
 check("lecture en cours : bandeau 0 / 6 et rechargement seul",
       "Lecture en cours : 0 / 6" in he and 'http-equiv="refresh"' in he)
+hv = st.page_html(lot, None, cle_=k_tw, s="th", du="", au="", tri="subs", sens="desc", jour=JOUR, verrou="tw")
+check("lien Twitter : ses VA seulement, même si ?s=th est demandé",
+      "alpha" in hv and "beta" in hv and "delta" not in hv and "gamma" not in hv and "spam_va" not in hv)
+check("lien Twitter : un seul onglet, ni Tous ni les autres serveurs",
+      "Twitter <span>2</span>" in hv and "Tous <span>" not in hv and "Instagram <span>" not in hv
+      and "Threads <span>" not in hv)
+check("lien Twitter : titre et marque TRUST TWITTER",
+      "<h1>📊 VA TRUST TWITTER · clics et subs</h1>" in hv and '<div class="marque">TRUST · Twitter</div>' in hv
+      and "<title>VA TRUST TWITTER · clics et subs</title>" in hv)
+check("lien Twitter : ni les non-lus ni les notes Threads des autres serveurs",
+      "Threads VA 142" not in hv and "Instagram VA 109" not in hv and "perte affichés sont des maximums" not in hv)
+check("lien Twitter : la clé Twitter gardée dans les liens", hv.count(f"k={k_tw}") >= 10 and f"k={k}&" not in hv)
+hth = st.page_html(lot, None, cle_=k_th, s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR, verrou="th")
+check("lien Threads : ses VA, ses non-lus et sa note Threads",
+      "delta" in hth and "alpha" not in hth and "Threads VA 142" in hth and "perte affichés sont des maximums" in hth)
+hve = st.page_html(None, {"gens": lot["gens"], "lignes": {f"{TW}:1": {}}, "pannes": {}, "debut": 0}, cle_=k_ig,
+                   s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR, verrou="ig")
+check("lien Instagram, lecture en cours : le bandeau ne compte que ses VA (0 / 2)",
+      "Lecture en cours : 0 / 2" in hve, re.findall(r"Lecture en cours : [^.]*", hve))
+check("pages Twitter et Instagram : le mot Threads n'y paraît nulle part",
+      "Threads" not in hv and "Threads" not in hve, [m.start() for m in re.finditer("Threads", hv)][:5])
+check("page Threads : sa note de paie seule, pas celle des autres serveurs",
+      "Threads : clics US·UK·CA, payé aux clics" in hth and "Twitter et Instagram" not in hth)
+# lecture arrêtée (source muette) : le nombre du texte compte les trois serveurs
+_arret = ("Lecture arrêtée après 3 VA de plus de 60 s chacun (MyPuls, Infloww ou GetMySocial ne répond "
+          "plus) : 6 VA pas lus")
+_lot_arr = dict(lot, remarques=[_arret], incomplet=True,
+                pannes={f"{IG}:4": "pas lu : une source ne répond plus", f"{TH}:6": "pas lu : une source ne répond plus"})
+hva = st.page_html(_lot_arr, None, cle_=k_tw, s="tw", du="", au="", tri="subs", sens="desc", jour=JOUR,
+                   verrou="tw", essai_apres=__import__("time").time() + 300, echec=_arret)
+check("lien Twitter, lecture arrêtée : ni le total des trois serveurs ni leurs non-lus",
+      "6 VA pas lus" not in hva and "Lecture interrompue" in hva and "Instagram VA" not in hva
+      and "Threads VA" not in hva, re.findall(r'class="encours">[^<]*', hva))
+hta = st.page_html(_lot_arr, None, cle_=k_th, s="th", du="", au="", tri="subs", sens="desc", jour=JOUR,
+                   verrou="th", essai_apres=__import__("time").time() + 300, echec=_arret)
+check("lien Threads, lecture arrêtée : ses non-lus nommés au pied",
+      "Non lus : Threads VA 141" in hta and "6 VA pas lus" not in hta)
+hpa = st.page_html(_lot_arr, None, cle_=k, s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR,
+                   essai_apres=__import__("time").time() + 300, echec=_arret)
+check("page entière, lecture arrêtée : le texte d'origine (inchangé)", hpa.count("6 VA pas lus") == 2)
+_vrai_jour = pod._aujourdhui
+pod._aujourdhui = lambda: (_ for _ in ()).throw(RuntimeError("panne"))
+_c, herr = st.page({}, cle_=k_ig, verrou="ig")
+_c2, herr2 = st.page({}, cle_=k_ig, verrou="zz")
+pod._aujourdhui = _vrai_jour
+check("page d'erreur d'un lien Instagram : marque TRUST · Instagram ; verrou inconnu : ne lève pas",
+      '<div class="marque">TRUST · Instagram</div>' in herr and "Lecture impossible" in herr2
+      and '<div class="marque">TRUST · Twitter · Instagram · Threads</div>' in herr2)
+_vrai_lien = st.lien
+st.lien = lambda code="": (_ for _ in ()).throw(OSError("lecture seule")) if code == "ig" else _vrai_lien(code)
+_lm = st.liens_managers()
+st.lien = _vrai_lien
+check("une clé non écrite n'emporte pas les autres liens",
+      len(_lm) == 4 and _lm[0][1] == st.lien() and "non écrite" in _lm[2][1] and _lm[3][1] == st.lien("th"), _lm)
+ha2 = st.page_html(lot, None, cle_="", s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR,
+                   lien_mgr=st.liens_managers())
+check("admin : les quatre liens à donner, chacun nommé",
+      "Liens à donner aux managers" in ha2 and all(u in ha2 for _l, u in st.liens_managers())
+      and "TRUST INSTAGRAM seul" in ha2)
 
 print("5. La lecture en fond")
 st._LOTS.clear()
@@ -449,6 +541,14 @@ check("trust-ofm.com, bonne clé : la page", r.status_code == 200 and "VA TRUST"
       r.status_code)
 r = c.get("/trust/liens?k=" + "z" * 32, headers={"Host": "trust-ofm.com"})
 check("trust-ofm.com, clé fausse : 403", r.status_code == 403, r.status_code)
+r = c.get(f"/trust/liens?k={k_tw}&s=th", headers={"Host": "trust-ofm.com"})
+b = r.get_data(as_text=True)
+check("clé Twitter avec ?s=th : la page Twitter seule",
+      r.status_code == 200 and "VA TRUST TWITTER" in b and "Threads <span>" not in b
+      and "Tous <span>" not in b and "Lien à donner" not in b and "Liens à donner" not in b, r.status_code)
+r = c.get(f"/trust/liens?k={k_ig}", headers={"Host": "trust-ofm.com"})
+check("clé Instagram : la page Instagram seule",
+      r.status_code == 200 and "VA TRUST INSTAGRAM" in r.get_data(as_text=True), r.status_code)
 r = c.get("/trust/liens", headers={"Host": "trust-ofm.com"})
 r2 = c.get("/", headers={"Host": "trust-ofm.com"})
 check("trust-ofm.com, sans clé : renvoi vers la page neutre, rien du dashboard",
@@ -461,8 +561,9 @@ with c.session_transaction() as s:
     s["legacy_owner"] = True
 r = c.get("/trust/liens?s=th")
 ca = r.get_data(as_text=True)
-check("admin connecté, sans clé : la page et le lien des managers",
-      r.status_code == 200 and "Lien à donner aux managers" in ca and k in ca, r.status_code)
+check("admin connecté, sans clé : la page et les liens des managers",
+      r.status_code == 200 and "Liens à donner aux managers" in ca and k in ca and k_tw in ca
+      and k_ig in ca and k_th in ca, r.status_code)
 if st._FIL:
     st._FIL.join(10)
 

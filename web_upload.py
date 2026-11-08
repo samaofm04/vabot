@@ -70176,20 +70176,25 @@ def create_app():
 
         k = str(request.args.get("k") or "")
         lien_mgr = ""
+        verrou = ""
         if k:
-            if not stats_trust.cle_ok(k):
+            # 08/11 : une clé par serveur en plus de la clé de la page ; elle
+            # n'ouvre que son serveur, quel que soit ?s=
+            portee = stats_trust.portee(k)
+            if portee is None:
                 return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+            verrou = "" if portee == "tous" else portee
         else:
             if not is_auth():
                 return redirect("/")
             if not _is_admin():
                 return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
             try:
-                lien_mgr = stats_trust.lien()
+                lien_mgr = stats_trust.liens_managers()
             except Exception as e:
-                # la page reste lisible ; seul le lien à donner manque
+                # la page reste lisible ; seuls les liens à donner manquent
                 print(f"[stats-trust] clé non écrite : {type(e).__name__}: {e}", flush=True)
-        code, html = stats_trust.page(request.args, cle_=k, lien_mgr=lien_mgr)
+        code, html = stats_trust.page(request.args, cle_=k, lien_mgr=lien_mgr, verrou=verrou)
         return _entetes(_R(html, status=code, mimetype="text/html"))
 
     # ==================================================================

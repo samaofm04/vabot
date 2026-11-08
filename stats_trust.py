@@ -117,41 +117,93 @@ _COMPTEES: Dict[str, set] = {}
 
 
 # ─── la clé ──────────────────────────────────────────────────────────────
-def cle() -> str:
-    """La clé de la page, créée au premier appel puis toujours la même. Lève
-    OSError si elle n'a pas pu être écrite."""
+def _ecrire_cles(d: Dict[str, Any]) -> None:
+    if not safe_json.write(CLE_FICHIER, d):
+        raise OSError(f"clé de la page TRUST non écrite ({CLE_FICHIER})")
+    try:
+        CLE_FICHIER.chmod(0o600)
+    except Exception:
+        pass
+
+
+def cle(code: str = "") -> str:
+    """La clé de la page (code "") ou celle d'un seul serveur (tw, ig, th),
+    créée au premier appel puis toujours la même. Le fichier est relu et
+    complété, jamais refait : créer la clé Twitter ne doit pas changer celle
+    déjà donnée aux managers. Lève OSError si elle n'a pas pu être écrite,
+    ValueError pour un code inconnu."""
+    if code and code not in _PAR_CODE:
+        raise ValueError(f"serveur inconnu : {code!r}")
     with _VERROU:
         d = safe_json.load(CLE_FICHIER, {})
-        k = str((d or {}).get("cle") or "") if isinstance(d, dict) else ""
+        d = dict(d) if isinstance(d, dict) else {}
+        if not code:
+            k = str(d.get("cle") or "")
+            if len(k) >= 20:
+                return k
+            d["cle"], d["cree"] = secrets.token_urlsafe(24), int(time.time())
+            _ecrire_cles(d)
+            return d["cle"]
+        par = d.get("serveurs")
+        par = dict(par) if isinstance(par, dict) else {}
+        f = par.get(code)
+        k = str(f.get("cle") or "") if isinstance(f, dict) else ""
         if len(k) >= 20:
             return k
         k = secrets.token_urlsafe(24)
-        if not safe_json.write(CLE_FICHIER, {"cle": k, "cree": int(time.time())}):
-            raise OSError(f"clé de la page TRUST non écrite ({CLE_FICHIER})")
-        try:
-            CLE_FICHIER.chmod(0o600)
-        except Exception:
-            pass
+        par[code] = {"cle": k, "cree": int(time.time())}
+        d["serveurs"] = par
+        _ecrire_cles(d)
         return k
 
 
-def cle_ok(k: Any) -> bool:
-    """La clé donnée est-elle celle de la page ? Comparée en temps constant ;
-    sans clé créée, rien n'ouvre. Ne lève pas."""
-    s = str(k or "").encode("utf-8")
-    if len(s) < 20:
-        return False
+def portee(k: Any) -> Optional[str]:
+    """Ce qu'ouvre la clé donnée : "tous" (la clé de la page), "tw", "ig" ou
+    "th" (propriétaire, 08/11/2026 : « un lien exprès pour que Twitter, un
+    pour que Instagram et un pour que Threads »), None sinon. Toutes les clés
+    sont comparées en temps constant, sans sortie anticipée ; sans clé créée,
+    rien n'ouvre. Ne lève pas."""
+    s_ = str(k or "").encode("utf-8")
+    if len(s_) < 20:
+        return None
     try:
         d = safe_json.load(CLE_FICHIER, {})
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-trust] clé illisible : {type(e).__name__}: {e}", flush=True)
-        return False
-    bonne = str((d or {}).get("cle") or "").encode("utf-8") if isinstance(d, dict) else b""
-    return bool(bonne) and hmac.compare_digest(s, bonne)
+        return None
+    d = d if isinstance(d, dict) else {}
+    par = d.get("serveurs") if isinstance(d.get("serveurs"), dict) else {}
+    candidates = [("tous", d.get("cle"))] + [
+        (c, (par.get(c) or {}).get("cle") if isinstance(par.get(c), dict) else None) for c in _PAR_CODE]
+    trouve = None
+    for nom, bonne in candidates:
+        b = str(bonne or "").encode("utf-8")
+        if len(b) >= 20 and hmac.compare_digest(s_, b):
+            trouve = nom
+    return trouve
 
 
-def lien() -> str:
-    return f"{SITE}{CHEMIN}?k={cle()}"
+def cle_ok(k: Any) -> bool:
+    """La clé donnée ouvre-t-elle la page (toute ou un serveur) ? Ne lève pas."""
+    return portee(k) is not None
+
+
+def lien(code: str = "") -> str:
+    return f"{SITE}{CHEMIN}?k={cle(code)}"
+
+
+def liens_managers() -> List[Tuple[str, str]]:
+    """[(libellé, lien)] : la page entière puis un lien par serveur, pour
+    l'admin connecté. Une clé qui n'a pas pu être écrite n'emporte pas les
+    autres liens : sa ligne le dit. Ne lève pas."""
+    out: List[Tuple[str, str]] = []
+    for lib, code in [("Tous", "")] + [(f"TRUST {n.upper()} seul", c) for _g, c, n in SERVEURS]:
+        try:
+            out.append((lib, lien(code)))
+        except Exception as e:                               # noqa: BLE001
+            print(f"[stats-trust] clé {code or 'tous'} non écrite : {type(e).__name__}: {e}", flush=True)
+            out.append((lib, "clé non écrite, réessayer plus tard"))
+    return out
 
 
 # ─── qui est sur la page ─────────────────────────────────────────────────
@@ -194,6 +246,11 @@ def _abandonnee(du: str, au: str) -> bool:
     return t is not None and time.time() - t > ABANDON_S
 
 
+#: Début de la remarque d'arrêt « source muette ». Son nombre compte les VA
+#: des trois serveurs : une page à un seul serveur ne la reprend pas.
+ARRET = "Lecture arrêtée"
+
+
 def _calculer(du: str, au: str) -> Dict[str, Any]:
     """Lit tous les VA sur [du, au] (("", "") : depuis toujours), un par un,
     dans le lot « encours » de la période ; le lot passe « fait » à la fin
@@ -212,7 +269,7 @@ def _calculer(du: str, au: str) -> Dict[str, Any]:
                 for q in gens[i:]:
                     lot["pannes"][f"{q['gid']}:{q['uid']}"] = "pas lu : une source ne répond plus"
                 lot["remarques"].append(
-                    f"Lecture arrêtée après {LENTS_MAX} VA de plus de {LENT_S} s chacun (MyPuls, Infloww "
+                    f"{ARRET} après {LENTS_MAX} VA de plus de {LENT_S} s chacun (MyPuls, Infloww "
                     f"ou GetMySocial ne répond plus) : {len(gens) - i} VA pas lus")
                 print(f"[stats-trust] lecture {du or 'toujours'}→{au} arrêtée : {len(gens) - i} VA pas lus",
                       flush=True)
@@ -472,35 +529,45 @@ tr.vide td{color:var(--faible);font-weight:400}
 """
 
 
-def _gabarit(titre: str, corps: str, recharge: bool = False, recharge_s: int = RECHARGE_S) -> str:
+def _gabarit(titre: str, corps: str, recharge: bool = False, recharge_s: int = RECHARGE_S,
+             marque: str = "TRUST · Twitter · Instagram · Threads") -> str:
     meta = f'<meta http-equiv="refresh" content="{int(recharge_s)}">' if recharge else ""
     return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">{meta}
 <title>{_e(titre)}</title><style>{sv._STYLE}{_STYLE_EN_PLUS}</style></head><body>
-<div class="marque">TRUST · Twitter · Instagram · Threads</div>
+<div class="marque">{_e(marque)}</div>
 {corps}
 </body></html>'''
 
 
 def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, Any]], *,
               cle_: str, s: str, du: str, au: str, tri: str, sens: str,
-              jour: dt.date, lien_mgr: str = "", en_file: bool = False,
-              essai_apres: float = 0.0, echec: str = "") -> str:
+              jour: dt.date, lien_mgr: Any = "", en_file: bool = False,
+              essai_apres: float = 0.0, echec: str = "", verrou: str = "") -> str:
     """La page, sans JavaScript. `lot` : la dernière lecture finie (ou None) ;
     `encours` : celle qui tourne (ou None) ; `en_file` : une relecture attend
-    son tour. Tout est échappé."""
+    son tour ; `verrou` : le serveur d'un lien « un seul serveur » (tw, ig,
+    th) : ni les autres serveurs, ni leurs VA, ni leurs comptes n'y
+    paraissent. `lien_mgr` : un lien ou [(libellé, lien)]. Tout est échappé."""
     import infloww_liens as il
     montre = lot or encours or {}
     gens = list(montre.get("gens") or [])
+    if verrou:
+        # un lien Twitter ne doit rien dire des VA Instagram ou Threads, pas
+        # même leur nombre (onglets, bandeau, pied)
+        gens = [p for p in gens if p.get("code") == verrou]
+        s = verrou
     lignes_tous = [_ligne(p, (montre.get("lignes") or {}).get(f"{p['gid']}:{p['uid']}")) for p in gens]
     lignes = [x for x in lignes_tous if s == "tous" or x["code"] == s]
     lignes = trier(lignes, tri, sens)
     tot = totaux(lignes)
 
     onglets = []
-    for code, nom in [("tous", "Tous")] + [(c, n) for _g, c, n in SERVEURS]:
+    serveurs_vus = ([(verrou, _PAR_CODE[verrou][1])] if verrou
+                    else [("tous", "Tous")] + [(c, n) for _g, c, n in SERVEURS])
+    for code, nom in serveurs_vus:
         n = sum(1 for x in lignes_tous if code == "tous" or x["code"] == code)
         on = ' class="on" aria-current="page"' if code == s else ""
         onglets.append(f'<a href="{_adresse(cle_, code, du, au, tri, sens)}"{on}>{_e(nom)} <span>{n}</span></a>')
@@ -580,10 +647,17 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
                                              "ltv", "gagne", "cout", "marge", "gain"))
                + '</tr></thead><tbody>' + "".join(corps_t) + '</tbody></table></div>')
 
+    if verrou and echec.startswith(ARRET):
+        # le nombre de VA pas lus du texte compte les trois serveurs ; ceux
+        # de ce serveur sont nommés au pied (« Non lus »)
+        echec = "Lecture interrompue : MyPuls, Infloww ou GetMySocial ne répond plus"
     bandeau = ""
     if encours:
-        fait_n = len(encours.get("lignes") or {}) + len(encours.get("pannes") or {})
-        total_n = len(encours.get("gens") or [])
+        a_lui = {f"{p['gid']}:{p['uid']}" for p in (encours.get("gens") or [])
+                 if not verrou or p.get("code") == verrou}
+        fait_n = sum(1 for k_ in list(encours.get("lignes") or {}) + list(encours.get("pannes") or {})
+                     if k_ in a_lui)
+        total_n = len(a_lui)
         bandeau = (f'<div class="encours">Lecture en cours : {fait_n} / {total_n} VA. '
                    + ("La page montre la lecture précédente et se met à jour seule."
                       if lot else "La page se complète seule.") + '</div>')
@@ -601,23 +675,34 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
     marques = ["— : pas encore lisible",
                "LTV : revenu net MyPuls des liens du VA ÷ ses subs",
                "Coût / sub : Gagné ÷ subs · Marge / sub : LTV − coût / sub · payé, 0 sub : Gagné sans "
-               "aucun sub sur la période (Threads, payé aux clics)",
+               "aucun sub sur la période" + ("" if verrou in ("tw", "ig") else " (Threads, payé aux clics)"),
                "Gain / perte : revenu net MyPuls des liens du VA sur la période − Gagné (vert : on gagne, "
                "rouge : on perd) ; « — » quand le revenu net ou le Gagné n'est pas lisible (MyPuls muet, "
                "VA sans tracking à lui, VA non lu)",
                "* Threads : Gagné paie tous les clics US·UK·CA du lien, mais une partie des visiteurs part "
                "sur une page sans tracking : ni leurs subs ni leur revenu ne sont comptés ; coût / sub et "
                "perte affichés sont des maximums, marge et gain des minimums",
-               "Threads : clics US·UK·CA, payé aux clics ; Twitter et Instagram : payés aux subs"]
+               {"tw": "Twitter : payé aux subs", "ig": "Instagram : payé aux subs",
+                "th": "Threads : clics US·UK·CA, payé aux clics"}.get(
+                   verrou, "Threads : clics US·UK·CA, payé aux clics ; Twitter et Instagram : payés aux subs")]
+    if verrou in ("tw", "ig"):
+        # une page Twitter ou Instagram ne parle pas de Threads
+        marques = [m for m in marques if not m.startswith("* Threads")]
     n_partiel = sum(1 for x in lignes if x.get("revenu_partiel"))
     if n_partiel:
         marques.append(f"{n_partiel} VA avec un ancien tracking Emy ou une variante Seren (retirées de "
                        "MyPuls, revenu non daté) : LTV, marge et gain / perte « — »")
     pannes = dict(montre.get("pannes") or {})
+    if verrou:
+        a_lui = {f"{p['gid']}:{p['uid']}" for p in gens}
+        pannes = {k_: v for k_, v in pannes.items() if k_ in a_lui}
     if pannes:
         noms = {f"{p['gid']}:{p['uid']}": f"{p['plateforme']} VA {p.get('numero') or '?'}" for p in gens}
         marques.append("Non lus : " + " · ".join(f"{noms.get(k, k)} ({v})" for k, v in sorted(pannes.items())))
-    marques += list(montre.get("remarques") or [])
+    autres = [n.upper() for _g, c, n in SERVEURS if verrou and c != verrou]
+    marques += [m for m in (montre.get("remarques") or [])
+                if not any(f"TRUST {a}" in str(m) for a in autres)
+                and not (verrou and str(m).startswith(ARRET))]
     lu_t = sv._paris(montre.get("fin") or montre.get("debut") or time.time())
     sources = " · ".join(f'API officielle <a href="{_e(u)}" rel="noopener noreferrer">{_e(n)}</a>'
                          for n, u in sv.SOURCES)
@@ -625,29 +710,43 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
             + "".join(f'<p class="pied">{_e(m)}</p>' for m in marques)
             + (f'<p class="pied">Lu le {_e(lu_t.strftime("%d/%m à %H:%M"))} (heure de Paris)'
                ' · page réservée à la direction, ne pas la donner aux VA</p>' if lu_t else ""))
-    lienmgr = (f'<div class="lienmgr">Lien à donner aux managers (sans compte) : <code>{_e(lien_mgr)}</code></div>'
-               if lien_mgr else "")
-    corps = ('<h1>📊 VA TRUST · clics et subs</h1>'
+    if isinstance(lien_mgr, (list, tuple)):
+        lienmgr = ('<div class="lienmgr">Liens à donner aux managers (sans compte) :'
+                   + "".join(f'<br>{_e(lib)} : <code>{_e(u)}</code>' for lib, u in lien_mgr) + '</div>'
+                   if lien_mgr else "")
+    else:
+        lienmgr = (f'<div class="lienmgr">Lien à donner aux managers (sans compte) : <code>{_e(lien_mgr)}</code></div>'
+                   if lien_mgr else "")
+    titre = f"VA TRUST {_PAR_CODE[verrou][1].upper()} · clics et subs" if verrou else "VA TRUST · clics et subs"
+    corps = (f'<h1>📊 {_e(titre)}</h1>'
              f'<p class="sous"><b>{_e(sv._titre_periode(du, au, jour))}</b></p>'
              + lienmgr + _formulaire(cle_, s, du, au, tri, sens, jour)
              + f'<nav class="onglets" aria-label="Serveurs">{"".join(onglets)}</nav>'
              + f'<nav class="tris" aria-label="Tri"><span class="lib">Trier</span>{"".join(puces)}</nav>'
              + bandeau + tableau + pied)
     attente = int(essai_apres - time.time()) + 1 if essai_apres > time.time() and not encours else 0
-    return _gabarit("VA TRUST · clics et subs", corps,
+    return _gabarit(titre, corps,
                     recharge=bool(encours) or en_file or not montre or attente > 0,
-                    recharge_s=min(ESSAI_S, max(RECHARGE_S, attente)) if attente > 0 else RECHARGE_S)
+                    recharge_s=min(ESSAI_S, max(RECHARGE_S, attente)) if attente > 0 else RECHARGE_S,
+                    marque=_marque(verrou))
 
 
-def page(args: Any, cle_: str = "", lien_mgr: str = "") -> Tuple[int, str]:
+def _marque(verrou: str = "") -> str:
+    return f"TRUST · {_PAR_CODE[verrou][1]}" if verrou else "TRUST · Twitter · Instagram · Threads"
+
+
+def page(args: Any, cle_: str = "", lien_mgr: Any = "", verrou: str = "") -> Tuple[int, str]:
     """(code HTTP, HTML) de la page pour `args` (s, du, au, tout, tri, sens).
+    `verrou` (tw, ig, th) : la clé n'ouvre que ce serveur, `s` est ignoré.
     Lance la lecture en fond si besoin et rend tout de suite ce qui est lu.
     Ne lève jamais : une panne s'affiche sur la page."""
     import podium_discord as pod
     args = args or {}
+    if verrou not in _PAR_CODE:
+        verrou = ""
     try:
         jour = pod._aujourdhui()
-        s = str(args.get("s") or "tous").lower()
+        s = verrou or str(args.get("s") or "tous").lower()
         if s not in _PAR_CODE:
             s = "tous"
         tri = str(args.get("tri") or TRI_DEFAUT[0]).lower()
@@ -663,14 +762,15 @@ def page(args: Any, cle_: str = "", lien_mgr: str = "") -> Tuple[int, str]:
             return 429, _gabarit("VA TRUST", '<h1>📊 VA TRUST</h1><p class="sous">Beaucoup de périodes '
                                  'demandées à la main aujourd\'hui. Les raccourcis (quinzaines, 7 et 30 '
                                  'jours…) marchent toujours.</p>'
-                                 + _formulaire(cle_, s, "", "", tri, sens, jour))
+                                 + _formulaire(cle_, s, "", "", tri, sens, jour), marque=_marque(verrou))
         demander(du, au)
         with _VERROU:
             e = dict(_LOTS.get((du, au)) or {})
             en_file = (du, au) in _FILE
         return 200, page_html(e.get("fait"), e.get("encours"), cle_=cle_, s=s, du=du, au=au,
                               tri=tri, sens=sens, jour=jour, lien_mgr=lien_mgr, en_file=en_file,
-                              essai_apres=float(e.get("essai_apres") or 0), echec=str(e.get("echec") or ""))
+                              essai_apres=float(e.get("essai_apres") or 0), echec=str(e.get("echec") or ""),
+                              verrou=verrou)
     except Exception as e:                                   # noqa: BLE001
         return 200, _gabarit("VA TRUST", f'<h1>📊 VA TRUST</h1><div class="err"><b>Lecture impossible.</b>'
-                             f'<br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>')
+                             f'<br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', marque=_marque(verrou))
