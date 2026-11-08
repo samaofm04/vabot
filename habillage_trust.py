@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 from html import escape as _esc
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import domaines
 import stats_va
@@ -89,7 +89,10 @@ def affiliation(html: str, plateforme: str, uid: Optional[str] = None) -> str:
         h = h.replace(" Agency", " " + court)
     for avant, apres in _NOMS_YOULAB:
         h = h.replace(avant, apres)
-    h = filleuls(h, plateforme)
+    # Threads (affiliation_privee, hors git) annonçait encore « tous les
+    # trackings » : faux depuis la règle des primes du 08/11
+    h = h.replace(ANCIENNE_REGLE_THREADS, REGLE_PRIMES)
+    h = filleuls(h, plateforme, uid)
     if uid:
         carte = carte_recrutement(recrutement(uid))
         if carte:
@@ -136,14 +139,16 @@ def _cases(n: int, seuil: int, lib: str) -> str:
             f'<span class="pct">{texte} %{" ✓" if ok else ""}</span></div>')
 
 
-def _ligne(tete: str, n: Optional[int], message: str) -> str:
+def _ligne(tete: str, n: Optional[int], message: str, ou: str = "", note: str = "") -> str:
+    """Un filleul : nom, état, subs (et où ils comptent), ses deux barres."""
     nom, _, etat = tete.partition(" — ")
     haut = (f'<div class="fil-tete"><b>{nom.strip()}</b>'
             + (f'<span class="etat">{etat.strip()}</span>' if etat.strip() else "")
-            + (f'<span class="nb">{n} subs</span>' if n is not None else "") + "</div>")
+            + (f'<span class="nb">{n} subs{" · " + ou if ou else ""}</span>' if n is not None else "") + "</div>")
     if n is None:
         return f'<div class="fil">{haut}<div class="fil-msg">{message}</div></div>'
-    return f'<div class="fil">{haut}{_cases(n, 10, "Objectif 10")}{_cases(n, 200, "Objectif 200")}</div>'
+    return (f'<div class="fil">{haut}{_cases(n, 10, "Objectif 10")}{_cases(n, 200, "Objectif 200")}'
+            + (f'<div class="fil-msg">{note}</div>' if note else "") + "</div>")
 
 
 def _carte(lignes: list, total: str, note: str = "") -> str:
@@ -151,8 +156,109 @@ def _carte(lignes: list, total: str, note: str = "") -> str:
             + (f'<p class="fil-note">{note}</p>' if note else "") + "</section>")
 
 
-def filleuls(h: str, plateforme: str) -> str:
-    """Les rubriques de progression des filleuls réunies en une carte, en carrés."""
+# ─── la règle des primes (propriétaire, 07-08/11/2026) ─────────────────────
+# « juste tu prends là où le mec il a le plus de subs », « que pour lia » : un
+# filleul ne rapporte qu'une prime, comptée sur la plateforme où il a le plus
+# de subs de Lia (parmi celles où il a un parrain). Le salon 🤝・qui-t-a-invité
+# paie sur cette règle (journal_primes) : la page la lit au même endroit,
+# sinon elle montrerait des barres pleines là où rien n'est payé.
+LIBELLES = {"agency": "Instagram", "twitter": "Twitter", "threads": "Threads"}
+INCONNU_LIA = "Subs de Lia indisponibles pour le moment : aucun palier compté."
+ANCIENNE_REGLE_THREADS = ("Les compteurs additionnent les vrais nouveaux abonnés de tous les trackings du "
+                          "filleul, anciens compris, cumulés sur ses liens individuels.")
+REGLE_PRIMES = "Comptés sur les liens de Lia, sur la plateforme où le filleul a le plus de subs."
+#: noms lus sur Discord (journal_primes.pseudo), gardés le temps du processus :
+#: sans eux, les filleuls de Twitter et Threads s'affichaient en identifiants
+_NOMS_LUS: Dict[str, str] = {}
+_LECTURES_MAX = 25          # par page : au-delà, l'identifiant (page lente sinon)
+
+
+def _etat_filleul(plateforme: str, reg: Dict[str, Any], f: str) -> str:
+    """L'état affiché par les panneaux (agency_accueil, twitter/threads_accueil)."""
+    fiche = (reg.get("filleuls") or {}).get(f) or {}
+    if plateforme == "agency":
+        if f in (reg.get("partis") or {}) and f not in (reg.get("membres") or {}):
+            return "👋 Parti du serveur"
+        return "✅ Vérifié" if fiche.get("verifie") else "⏳ Pas encore vérifié"
+    return "✅ Vérifié" if fiche.get("verified") else "👋 Arrivé, non vérifié"
+
+
+def _noms_connus(regs: Dict[str, Any], jp: Any) -> Dict[str, str]:
+    """uid → nom : ceux que le salon a déjà lus sur Discord, ceux du registre
+    d'Agency, ceux de la page des affiliations (affiliation_site)."""
+    import safe_json
+    noms: Dict[str, str] = {}
+    try:
+        import affiliation_site
+        noms.update({str(u): str(n) for u, n in ((affiliation_site._NOMS or {}).get("values") or {}).items() if n})
+    except Exception:                                        # noqa: BLE001
+        pass
+    for cle in ("membres", "partis"):
+        noms.update({str(u): str(m.get("nom")) for u, m in ((regs.get("agency") or {}).get(cle) or {}).items()
+                     if isinstance(m, dict) and m.get("nom")})
+    noms.update({str(u): str(n) for u, n in ((safe_json.load(jp.FICHIER, default={}) or {}).get("noms") or {}).items()
+                 if n})
+    return noms
+
+
+def lignes_filleuls(plateforme: str, uid: str) -> Optional[List[str]]:
+    """Les filleuls de `uid` sur `plateforme`, à la règle des primes. None si
+    une source manque : la page garde alors le texte des panneaux."""
+    try:
+        import journal_primes as jp
+    except ImportError:
+        return None
+    regs = {p: jp.registre(p) for p in LIBELLES}
+    if regs.get(plateforme) is None:
+        return None
+    arrivees = [e for p, d in regs.items() if d is not None
+                for e in jp.evenements_registre(p, d) if e.get("type") == "arrivee"]
+    siens = sorted((e for e in arrivees if e["plateforme"] == plateforme and e["parrain"] == str(uid)),
+                   key=lambda e: e.get("quand") or 0)
+    if not siens:
+        return []
+    metrics = jp.compteurs()
+    noms = _noms_connus(regs, jp)
+    lectures = 0
+    for e in siens:
+        f = e["filleul"]
+        if not noms.get(f) and f not in _NOMS_LUS and lectures < _LECTURES_MAX:
+            lectures += 1
+            jp.pseudo(f, _NOMS_LUS)
+        if not noms.get(f) and _NOMS_LUS.get(f):
+            noms[f] = _NOMS_LUS[f]
+    lignes = []
+    for e in siens:
+        f = e["filleul"]
+        tete = "@" + _esc(noms.get(f) or f) + " — " + _etat_filleul(plateforme, regs[plateforme], f)
+        best = jp.meilleure_plateforme([x for x in arrivees if x["filleul"] == f], metrics)
+        if not best:
+            lignes.append(_ligne(tete, None, INCONNU_LIA))
+            continue
+        note = ""
+        if best["parrain"] != str(uid):
+            note = f"Sa prime va à son parrain sur {LIBELLES.get(best['plateforme'], best['plateforme'])}."
+        lignes.append(_ligne(tete, best["subs"], "", LIBELLES.get(best["plateforme"], ""), note))
+    return lignes
+
+
+def filleuls(h: str, plateforme: str, uid: Optional[str] = None) -> str:
+    """Les filleuls réunis en une carte, en carrés. Avec `uid` (la page en
+    ligne) : à la règle des primes ; sans (ou source illisible) : les chiffres
+    écrits par les panneaux."""
+    lignes = lignes_filleuls(plateforme, uid) if uid else None
+    if lignes:
+        blocs = list(_RE_THREADS.finditer(h)) if plateforme == "threads" else []
+        carte = _carte(lignes, str(len(lignes)))
+        if plateforme == "threads" and blocs:
+            return h[:blocs[0].start()] + carte + "".join(
+                h[a.end():b.start()] for a, b in zip(blocs, blocs[1:])) + h[blocs[-1].end():]
+        h = _RE_PROGRESSION.sub("", h)
+        compte = _RE_COMPTE.search(h)
+        if compte:
+            return h[:compte.start()] + carte + h[compte.end():]
+        print(f"[habillage_trust] filleuls {plateforme} : rubrique « Tes filleuls » introuvable", flush=True)
+        return h.replace("<footer>", carte + "<footer>", 1)
     if plateforme in ("agency", "twitter"):
         lignes = []
         for m in _RE_PROGRESSION.finditer(h):

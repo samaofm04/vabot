@@ -182,6 +182,34 @@ check("la carte s'ajoute avant le pied de page de l'espace d'affiliation",
 del sys.modules["entretien_parrainage"]
 check("pas de phrase « par plateforme » ni « une seule prime » (propriétaire : « ça fait trop »)",
       "par plateforme" not in ht.affiliation(_AFF, "agency") and not hasattr(ht, "NOTE_PRIMES"))
+# la règle des primes (journal_primes) : un faux registre, de faux subs
+import journal_primes as _jp  # noqa: E402
+_sauve = {k: getattr(_jp, k) for k in ("registre", "compteurs", "subs", "pseudo")}
+_REG = {"threads": {"filleuls": {"21": {"parrain": "7", "verified": True}, "22": {"parrain": "7"}}},
+        "twitter": {"filleuls": {"21": {"parrain": "8", "verified": True}, "23": {"parrain": "7", "verified": True}}},
+        "agency": {"filleuls": {}, "membres": {"23": {"nom": "zoe"}}}}
+_SUBS = {("threads", "21"): 21, ("twitter", "21"): 300, ("twitter", "23"): 12}
+_jp.registre = lambda p: _REG.get(p)
+_jp.compteurs = lambda: {}
+_jp.subs = lambda p, u, m: _SUBS.get((p, u))
+_jp.pseudo = lambda u, noms: noms.setdefault(u, {"21": "fiable", "22": "sympa"}.get(u, ""))
+_L = ht.lignes_filleuls("threads", "7")
+check("règle des primes : la meilleure plateforme compte (300 subs · Twitter, pas 21 sur Threads)",
+      len(_L) == 2 and "300 subs · Twitter" in _L[0] and "@fiable" in _L[0], _L)
+check("prime chez un autre parrain : c'est dit", "Sa prime va à son parrain sur Twitter." in _L[0])
+check("subs de Lia inconnus : aucun carré, la phrase", ht.INCONNU_LIA in _L[1] and "<i" not in _L[1] and "@sympa" in _L[1])
+_L = ht.lignes_filleuls("twitter", "7")
+check("filleul Twitter, nom lu au registre d'Agency, sa prime chez son parrain",
+      len(_L) == 1 and "@zoe" in _L[0] and "12 subs · Twitter" in _L[0] and "Sa prime va" not in _L[0], _L)
+check("sans filleul : la page garde le texte du panneau", ht.lignes_filleuls("agency", "7") == [])
+_h = ht.affiliation(_AFF.replace("VA AGENCY", "VA THREADS").replace("</section><style>", "</section>"
+     "<section><h2>🎯 Objectifs par filleul</h2><p>10 subs → 0,50 $<br>" + ht.ANCIENNE_REGLE_THREADS + "</p></section>"
+     "<section><h2>👥 Tes filleuls · 0</h2><p>Aucun filleul pour le moment.</p></section><style>", 1), "threads", "7")
+check("page Threads : la carte des filleuls vient de la règle, la phrase « tous les trackings » remplacée",
+      "👥 Tes filleuls · 2" in _h and "300 subs · Twitter" in _h and ht.REGLE_PRIMES in _h
+      and ht.ANCIENNE_REGLE_THREADS not in _h and "Aucun filleul pour le moment" not in _h)
+for _k, _v in _sauve.items():
+    setattr(_jp, _k, _v)
 check("hors VPS : pas de carte recrutement", ht.carte_recrutement(ht.recrutement("77")) == ""
       and "Recrutement" not in ht.affiliation(_AFF, "agency", "77"))
 for p, b in (("threads", "TRUST THREADS"), ("twitter", "TRUST TWITTER")):
