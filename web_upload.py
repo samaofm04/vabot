@@ -62005,7 +62005,7 @@ def create_app():
             _ag_boot.demarrer()
     except Exception as _e:
         log.warning(f"accueil d'Agency non démarré: {_e}")
-    # 📈・évolution-des-primes (TRUST Agency, staff) : chaque arrivée
+    # 🤝・qui-t-a-invité (TRUST Agency, lu de tous) : chaque arrivée
     # parrainée, recrutement vérifié et palier de filleul, un message chacun
     # (journal_primes, surveillé : _FILS_DISCORD). Même garde que l'accueil
     # d'Agency.
@@ -80561,7 +80561,7 @@ _FILS_DISCORD = {
     "agency_accueil": ("agency-accueil", "arrivées et parrainage d'Agency VA INSTAGRAM",
                        ("surveiller",), 60),
     # dans git lui aussi, démarré juste après agency_accueil
-    "journal_primes": ("journal-primes", "salon de l'évolution des primes (TRUST Agency)",
+    "journal_primes": ("journal-primes", "salon 🤝・qui-t-a-invité de TRUST Agency",
                        ("tour",), 120),
 }
 # Un appel Discord peut attendre la fin d'un 429 : trois périodes de 15 s
