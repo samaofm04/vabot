@@ -60,10 +60,11 @@ for gid, nom, outlook in ((TW, "Twitter", ["mailx:menu"]), (TH, "Threads", []), 
     r = ids(bv("7", confirme=False, a_un_lien=True, gid=gid))
     va, chefs = r[0], r[-1]
     # Agency : « 🎬 Contenu » sur SA rangée, entre celle du VA et celle des
-    # managers (contenu_tickets, 30/10/2026)
-    milieu = [["cnt:o:7"]] if gid == AG else []
+    # managers (contenu_tickets, 30/10/2026) ; 📷 Mes comptes à côté
+    # (comptes_tickets, 08/11/2026)
+    milieu = [["cnt:o:7", "cpt:o:7"]] if gid == AG else []
     check(f"{nom} : rangée du VA (USDC, stats, Numéro{', Outlook' if outlook else ''}), "
-          f"{'puis 🎬 Contenu, ' if milieu else ''}"
+          f"{'puis 🎬 Contenu et 📷 Mes comptes, ' if milieu else ''}"
           "puis celle des managers (🌱 Passer Débutant pour un VA en essai, lien)",
           len(r) == 2 + len(milieu) and r[1:-1] == milieu
           and va[0] == "usdc:set:7" and va[-1 - len(outlook)] == "numx:menu"

@@ -4068,6 +4068,18 @@ def bouton_contenu(uid: str) -> Dict[str, Any]:
             "custom_id": f"{CONTENU_PREFIXE}o:{uid}"}
 
 
+#: « 📷 Mes comptes » (08/11/2026) : à côté de 🎬, sur les serveurs dont une
+#: model reçoit les comptes de ses VA (comptes_tickets.MODELE, qui sert les
+#: clics). Décrit ici pour la même raison que 🎬.
+COMPTES_DANS_MENU = {AGENCY_IG_ID}
+COMPTES_PREFIXE = "cpt:"
+
+
+def bouton_comptes(uid: str) -> Dict[str, Any]:
+    return {"type": 2, "style": 2, "label": "Mes comptes", "emoji": {"name": "📷"},
+            "custom_id": f"{COMPTES_PREFIXE}o:{uid}"}
+
+
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # noqa: F811
                gid: str = "", lien_actif: bool = True):
     rangs = _boutons_va_sans_contenu(uid, confirme=confirme, a_un_lien=a_un_lien,
@@ -4080,9 +4092,10 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # no
         return rangs
     va = [b for b in plats if not str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
     chefs = [b for b in plats if str(b.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)]
+    rangee = [bouton] + ([bouton_comptes(str(uid))] if str(gid) in COMPTES_DANS_MENU else [])
     # Cinq par rangée, cinq rangées au plus : Discord refuse le menu ENTIER
-    # au-delà (VA, 🎬, managers : trois aujourd'hui).
-    lignes = ([va[i:i + 5] for i in range(0, len(va), 5)] + [[bouton]]
+    # au-delà (VA, 🎬 📷, managers : trois aujourd'hui).
+    lignes = ([va[i:i + 5] for i in range(0, len(va), 5)] + [rangee]
               + [chefs[i:i + 5] for i in range(0, len(chefs), 5)])
     return [{"type": 1, "components": l} for l in lignes if l]
 
@@ -4843,17 +4856,18 @@ _ACCENT_MENU[AGENCY_IG_ID] = 0xE1306C
 #: Les boutons de la rangée du VA que ce menu garde. Plus de « 📈 Mes stats »
 #: depuis le 05/11/2026 (propriétaire, capture de ce menu : « remove ici mes
 #: stat ») : la section 📊 Tes stats et son « Voir ma page » restent.
-_DANS_MENU_COMMUN = ("usdc:set:", CONTENU_PREFIXE)
+_DANS_MENU_COMMUN = ("usdc:set:", CONTENU_PREFIXE, COMPTES_PREFIXE)
 
 
 def menu_ephemere(gid: str, uid: str, avec_contenu: bool = True) -> Dict[str, Any]:
     """Le menu en blocs de ce VA, en éphémère (réponse au clic). Lève si sa
     fiche est illisible : outils_tickets répond alors « réessaie ».
-    `avec_contenu` False : sans 🎬 (le cliqueur n'a pas de ticket où livrer)."""
+    `avec_contenu` False : sans 🎬 ni 📷 (le cliqueur n'a pas de ticket :
+    rien où livrer, et 📷 refuserait comme tout bouton du ticket)."""
     import liens_va as lv
     gid, uid = str(gid), str(uid)
-    garder = _DANS_MENU_COMMUN if avec_contenu else tuple(x for x in _DANS_MENU_COMMUN
-                                                           if x != CONTENU_PREFIXE)
+    garder = _DANS_MENU_COMMUN if avec_contenu else tuple(
+        x for x in _DANS_MENU_COMMUN if x not in (CONTENU_PREFIXE, COMPTES_PREFIXE))
     f = _fiche(gid, uid) or {}
     # _boutons_va_complets (fin du fichier) : la rangée d'avant TICKET_SANS ;
     # ce menu choisit les siens (_DANS_MENU_COMMUN)
@@ -5691,6 +5705,9 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
 # postés sont redessinés une fois.
 TICKET_SANS[TWITTER_ID] = ("numx:menu", "mailx:menu")
 BOUTONS_VERSION = 13
+# 14 (08/11/2026) : « 📷 Mes comptes » à côté de 🎬 sur TRUST INSTAGRAM ; les
+# accueils et les menus déjà posés sont redessinés une fois.
+BOUTONS_VERSION = 14
 
 
 # ─── Un redessin du menu v2 à la fois, par ticket (06/11/2026) ───────────

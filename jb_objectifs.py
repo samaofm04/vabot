@@ -875,3 +875,17 @@ def pastille(tenus: int, notes: int) -> str:
     if part >= 0.5:
         return "🟠"
     return "🔴"
+
+
+# ─── Les identités sans paie Jailbreak (08/11/2026) ─────────────────────
+# Les VA de TRUST INSTAGRAM ajoutent leurs comptes sous Lia par « 📷 Mes
+# comptes » (comptes_tickets), mais ils sont payés aux subs, pas à la journée
+# Jailbreak : leur page ne doit ni montrer « 5 $ / jour, 75 $ la quinzaine »,
+# ni « ta paie ne peut pas être calculée ». La page des comptes (va_portal)
+# demande paie_active() avant d'afficher quoi que ce soit de la paie.
+SANS_PAIE = frozenset({"lia"})
+
+
+def paie_active(identite: str) -> bool:
+    """Les VA de cette identité sont-ils payés par la journée Jailbreak ?"""
+    return str(identite or "").strip().lower() not in SANS_PAIE

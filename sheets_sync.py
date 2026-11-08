@@ -315,6 +315,11 @@ def identity_names() -> list:
         return []
 
 
+#: {identité: heure de la dernière création de classeur refusée}.
+_CREATION_RATEE: dict = {}
+CREATION_PAUSE_S = 6 * 3600
+
+
 def _ensure_identity_sheet(gc, identity: str, cfg: dict):
     """Retourne le classeur Google de l'identité, en le CRÉANT dans le dossier
     partagé s'il n'existe pas encore. Mémorise l'id dans cfg['sheets']."""
@@ -359,11 +364,25 @@ def _ensure_identity_sheet(gc, identity: str, cfg: dict):
         pass
     # 2) sinon on TENTE de créer (échoue si compte de service sans quota de stockage
     #    -> l'appelant remonte l'erreur claire).
+    # Une création refusée n'est retentée qu'après CREATION_PAUSE_S : sans ça,
+    # chaque envoi (après chaque ajout de compte) refaisait les deux recherches
+    # et la création, refusée de la même façon (08/11/2026, Lia sans classeur).
+    rate = _CREATION_RATEE.get(key)
+    if rate and time.time() - rate < CREATION_PAUSE_S:
+        raise RuntimeError(f"classeur « {title} » absent et non créable par le compte de "
+                           f"service : crée-le dans le dossier partagé (nouvel essai dans "
+                           f"{int((CREATION_PAUSE_S - (time.time() - rate)) / 60) + 1} min)")
     fid = cfg.get("folder_id") or None
     try:
-        sh = gc.create(title, folder_id=fid)
-    except TypeError:
-        sh = gc.create(title)
+        try:
+            sh = gc.create(title, folder_id=fid)
+        except TypeError:
+            sh = gc.create(title)
+    except Exception as e:
+        if not _erreur_passagere(e):
+            _CREATION_RATEE[key] = time.time()
+        raise
+    _CREATION_RATEE.pop(key, None)
     sheets[key] = sh.id
     save_config(cfg)
     # Sécurité d'accès : partage direct avec l'owner si un email est configuré

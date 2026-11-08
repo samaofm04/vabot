@@ -62270,6 +62270,19 @@ def create_app():
                 print(f"[contenu] route : {type(_e_ct).__name__}: {_e_ct}", flush=True)
                 return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
                                                     "flags": 64}})
+        # « 📷 Mes comptes » des tickets TRUST INSTAGRAM (comptes_tickets,
+        # 08/11/2026) : le lien perso du VA vers sa page de comptes. Importé
+        # pour SES clics seulement, comme 🎬.
+        if str((charge.get("data") or {}).get("custom_id") or "").startswith("cpt:"):
+            try:
+                import comptes_tickets as _cpt
+                _rep_cpt = _cpt.traiter(charge)
+                if _rep_cpt is not None:
+                    return jsonify(_rep_cpt)
+            except Exception as _e_cpt:
+                print(f"[comptes] route : {type(_e_cpt).__name__}: {_e_cpt}", flush=True)
+                return jsonify({"type": 4, "data": {"content": "❌ Erreur, réessaie dans un instant.",
+                                                    "flags": 64}})
         # Le bouton « Copier » posé sous les captions : même principe, il rend
         # None quand ce n'est pas son bouton.
         try:

@@ -250,8 +250,9 @@ check("🔗 son lien, 📊 sa page, 💳 son paiement",
       and any(x.startswith("**💳 Paiement**\nUSDC · Solana · `EmXt…z2Vt`") for x in textes(d["components"])),
       (urls(d["components"]), textes(d["components"])))
 # 05/11/2026 : « remove ici mes stat » — plus de 📈 Mes stats (📊 Voir ma page reste)
-check("boutons : 💳 (Modifier), 🎬 Contenu — rien d'autre, plus de 📈 Mes stats",
-      sorted(cids) == sorted([f"usdc:set:{VA}", f"cnt:o:{VA}"]), cids)
+# 08/11/2026 : « 📷 Mes comptes » s'y ajoute (comptes_tickets)
+check("boutons : 💳 (Modifier), 🎬 Contenu, 📷 Mes comptes — rien d'autre, plus de 📈 Mes stats",
+      sorted(cids) == sorted([f"usdc:set:{VA}", f"cnt:o:{VA}", f"cpt:o:{VA}"]), cids)
 check("ni 📤 ⬇️ 📱 (leurs salons), ni boutons de manager",
       not any(c.startswith(("outk:", "numx:", "essai:", "lien:")) for c in cids), cids)
 check("chaque custom_id une seule fois (sinon Discord refuse le message)", len(cids) == len(set(cids)), cids)

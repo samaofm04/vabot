@@ -43,6 +43,7 @@ CHEMINS_TRUST = (
     "/affiliation/mon-espace",    # affiliation_site (VPS) : l'espace du parrain
     "/affiliation/affiche.png",   # l'affiche de cet espace
     "/trust/liens",               # stats_trust : la page de direction, clé des managers
+    "/mes-comptes/",              # va_portal : la page des comptes d'un VA (📷 Mes comptes)
     "/static/",
     "/favicon.svg", "/favicon.ico",
     "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png",

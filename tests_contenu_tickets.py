@@ -359,11 +359,12 @@ try:
     # 💳 et 🎬, tests_ticket_allege)
     for confirme, lien in ((False, True), (True, False), (True, True)):
         r = ids(tk._boutons_va_complets(VA, confirme=confirme, a_un_lien=lien, gid=AG))
+        # 08/11/2026 : « 📷 Mes comptes » à côté de 🎬 (comptes_tickets)
         check(f"Agency (confirmé={confirme}, lien={lien}) : rangée du VA (5), puis « 🎬 Contenu » "
-              "seul sur la 2e, puis les managers",
+              "et « 📷 Mes comptes » sur la 2e, puis les managers",
               r[0] == [f"usdc:set:{VA}", f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}",
                        "numx:menu"]
-              and r[1] == [f"cnt:o:{VA}"] and len(r) == 3
+              and r[1] == [f"cnt:o:{VA}", f"cpt:o:{VA}"] and len(r) == 3
               and all(c.startswith(tk._BOUTONS_MANAGERS) for c in r[2])
               and all(1 <= len(x) <= 5 for x in r) and len(r) <= 5, r)
     b = ct.bouton(VA)
@@ -390,7 +391,7 @@ try:
     finally:
         sys.modules["contenu_tickets"] = _mod
     check("contenu_tickets introuvable : le menu porte quand même 🎬 (rien de consommé)",
-          len(r) == 3 and r[1] == [f"cnt:o:{VA}"], r)
+          len(r) == 3 and r[1] == [f"cnt:o:{VA}", f"cpt:o:{VA}"], r)
     check("BOUTONS_VERSION à 11 : les accueils et leurs copies sont redessinés",
           tk.BOUTONS_VERSION >= 11)
     # 31/10/2026 : TRUST INSTAGRAM passé « numéro seul » pour Rem

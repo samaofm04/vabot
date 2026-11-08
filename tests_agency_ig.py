@@ -325,10 +325,11 @@ try:
     # seul sur la 2e rangée du VA. 05/11/2026 : 📈 📤 ⬇️ 📱 quittent le
     # ticket (TICKET_SANS, ils sont dans 🧰 OUTILS INSTAGRAM)
     rangees = [[b["label"] for b in rg["components"]] for rg in r["corps"]["components"]]
-    check("… l'accueil : USDC, puis 🎬 Contenu sur sa rangée, puis 🌱 Passer Débutant "
-          "(en essai), Créer son lien, et aucune mention",
-          labels == ["Mon adresse USDC", "Contenu", "Passer Débutant", "Créer son lien"]
-          and rangees[1] == ["Contenu"]
+    # 08/11/2026 : 📷 Mes comptes à côté de 🎬 (comptes_tickets)
+    check("… l'accueil : USDC, puis 🎬 Contenu et 📷 Mes comptes sur leur rangée, puis "
+          "🌱 Passer Débutant (en essai), Créer son lien, et aucune mention",
+          labels == ["Mon adresse USDC", "Contenu", "Mes comptes", "Passer Débutant", "Créer son lien"]
+          and rangees[1] == ["Contenu", "Mes comptes"]
           and r["corps"]["allowed_mentions"] == {"parse": []}, (labels, rangees))
     check("salon d'un manager : refusé", not tk.adopter_salon(AG, "c2")["ok"])
     check("salon hors des catégories de managers : refusé", not tk.adopter_salon(AG, "c3")["ok"])

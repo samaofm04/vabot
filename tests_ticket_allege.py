@@ -102,8 +102,9 @@ try:
         check("… aucune rangée vide, cinq boutons au plus par rangée",
               all(1 <= len(x) <= 5 for x in ids(r)) and len(r) <= 5, ids(r))
     r = tk.boutons_va(VA, confirme=False, a_un_lien=True, gid=AG)
-    check("VA en essai avec lien : 💳 · 🎬 · (🌱 Passer Débutant, 🚫 Désactiver le lien)",
-          ids(r) == [[f"usdc:set:{VA}"], [f"cnt:o:{VA}"], [f"essai:deb:{VA}", f"lien:off:{VA}"]], ids(r))
+    check("VA en essai avec lien : 💳 · 🎬 📷 · (🌱 Passer Débutant, 🚫 Désactiver le lien)",
+          ids(r) == [[f"usdc:set:{VA}"], [f"cnt:o:{VA}", f"cpt:o:{VA}"],
+                     [f"essai:deb:{VA}", f"lien:off:{VA}"]], ids(r))
     complet = plats(tk._boutons_va_complets(VA, confirme=False, a_un_lien=True, gid=AG))
     check("la rangée complète garde 📈 📤 ⬇️ 📱 (📋・menu et le menu privé du staff la lisent)",
           {f"subs:total:{VA}", f"outk:spf:{VA}", f"outk:dl:{VA}", "numx:menu"} <= set(complet), complet)
