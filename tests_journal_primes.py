@@ -32,6 +32,8 @@ def check(nom, cond, detail=""):
 
 # ── les doublures ────────────────────────────────────────────────────────────
 BOT = "1552153790701117480"
+# les droits du rôle de Siri sur TRUST Agency (08/11) : pas les fils de discussion
+SIRI = sum(1 << b for b in (0, 4, 5, 10, 11, 13, 14, 15, 16, 17, 26, 28))
 sys.modules["verif_discord"] = types.SimpleNamespace(
     bot_du_serveur=lambda gid=None: {"app_id": BOT}, api=None, sur_serveur=None)
 
@@ -40,7 +42,12 @@ MODELE = {"id": jp.SALON_MODELE, "type": 0, "name": "🤝・parrainage", "parent
               {"id": "1552159041084727339", "type": 0, "allow": "117760", "deny": "0"},
               {"id": jp.GID, "type": 0, "allow": "0", "deny": "377957124096"}]}
 ANCIEN = {"id": "777", "type": 0, "name": "📈・évolution-des-primes", "parent_id": "1552167027504971826",
-          "topic": "ancien", "permission_overwrites": [{"id": jp.GID, "type": 0, "allow": "0", "deny": "1024"}]}
+          "topic": "ancien", "permission_overwrites": [
+              {"id": jp.GID, "type": 0, "allow": "0", "deny": "1024"},
+              # le salon staff du 07/11 : rôle du bot avec « Se connecter » (bit 20), que Siri n'a pas
+              {"id": "1552159041084727339", "type": 0, "allow": "1049600", "deny": "0"},
+              {"id": "1552167022324879422", "type": 0, "allow": "66560", "deny": "2048"},
+              {"id": "1552167021037490306", "type": 0, "allow": "0", "deny": "1024"}]}
 
 
 class Discord:
@@ -67,6 +74,12 @@ class Discord:
             c.update(kw["json"])
             self.patchs.append(sid)
             return 200, c
+        if methode == "GET" and chemin == f"/guilds/{jp.GID}/roles":
+            # le bot n'a pas les droits de fils de discussion (comme Siri)
+            return 200, [{"id": jp.GID, "permissions": "2048"},
+                         {"id": "1552159041084727339", "permissions": str(SIRI)}]
+        if methode == "GET" and chemin == f"/guilds/{jp.GID}/members/{BOT}":
+            return 200, {"roles": ["1552159041084727339"]}
         if methode == "GET" and chemin.startswith("/users/"):
             uid = chemin.split("/")[2]
             return 200, {"id": uid, "username": "u" + uid, "global_name": "Nom " + uid}
@@ -129,7 +142,13 @@ try:
           s["name"] == "🤝・qui-t-a-invité" and s["parent_id"] == jp.CATEGORIE, s)
     dr = {o["id"]: o for o in s["permission_overwrites"]}
     check("droits : ceux de 🤝・parrainage (tout le monde lit, personne n'écrit)",
-          dr[jp.GID]["deny"] == "377957124096" and not int(dr[jp.GID]["deny"]) & 1024, dr.get(jp.GID))
+          int(dr[jp.GID]["deny"]) & 2048 and not int(dr[jp.GID]["deny"]) & 1024, dr.get(jp.GID))
+    check("droits : sans les fils de discussion, que le bot n'a pas (Discord : 403)",
+          dr[jp.GID]["deny"] == "2048" and dr[jp.GID]["allow"] == "0", dr.get(jp.GID))
+    check("droits : un droit que le bot n'a pas reste tel quel (le retirer vaudrait un 403)",
+          dr["1552159041084727339"]["allow"] == str(117760 | 1 << 20), dr.get("1552159041084727339"))
+    check("droits : managers et vérifiés n'ont plus de droits à part",
+          "1552167022324879422" not in dr and "1552167021037490306" not in dr, list(dr))
     check("droits : le bot peut poster", dr.get(BOT, {}).get("allow") == str(1024 | 2048 | 16384 | 65536)
           and dr[BOT]["type"] == 1, dr.get(BOT))
     check("premier tour : rien d'avant la mise en route n'est posté", D.messages == [], D.messages)

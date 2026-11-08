@@ -250,15 +250,51 @@ def meilleure_plateforme(arrivees: List[Dict[str, Any]],
 
 
 # ─── le salon ────────────────────────────────────────────────────────────────
-def droits_salon(modele: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _permissions_du_bot(bot: str) -> Optional[int]:
+    """Les droits du bot sur le serveur (ses rôles), None si illisibles."""
+    code, roles = _api("GET", f"/guilds/{GID}/roles")
+    code_m, membre = _api("GET", f"/guilds/{GID}/members/{bot}")
+    if code != 200 or code_m != 200 or not isinstance(roles, list) or not isinstance(membre, dict):
+        return None
+    siens = set(map(str, membre.get("roles") or [])) | {GID}
+    p = 0
+    for r in roles:
+        if isinstance(r, dict) and str(r.get("id")) in siens:
+            p |= int(r.get("permissions") or 0)
+    return p
+
+
+def droits_salon(modele: Dict[str, Any], actuel: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Les droits de 🤝・parrainage (tout le monde lit, personne n'écrit), et
-    le bot qui poste."""
+    le bot qui poste ; `actuel` : le salon à remettre aux droits.
+
+    Discord refuse (403) à un bot de régler un droit qu'il n'a pas lui-même :
+    le 08/11, 🤝・parrainage refusait aussi les fils de discussion à
+    @everyone, Siri ne les a pas, et le salon restait sous son ancien nom.
+    Ces droits-là ne sont ni recopiés ni retirés : ceux que le salon porte
+    déjà restent tels quels — et c'est dit. Aucun rôle ne donne les fils sur
+    TRUST Agency : rien ne change pour les membres."""
     import verif_discord as vd
     bot = str(vd.bot_du_serveur(GID).get("app_id") or "")
-    out = [{k: str(o[k]) if k != "type" else o[k] for k in ("id", "type", "allow", "deny")}
-           for o in modele.get("permission_overwrites") or [] if str(o.get("id")) != bot]
+    siens = _permissions_du_bot(bot) if bot else None
+    masque = siens if siens is not None and not siens & 8 else ~0    # 8 : administrateur
+    deja = {str(o.get("id")): (int(o.get("allow") or 0), int(o.get("deny") or 0))
+            for o in (actuel or {}).get("permission_overwrites") or []}
+    voulu = {str(o["id"]): (o.get("type", 0), int(o.get("allow") or 0), int(o.get("deny") or 0))
+             for o in modele.get("permission_overwrites") or [] if str(o.get("id")) != bot}
     if bot:
-        out.append({"id": bot, "type": 1, "allow": str(VOIR | ECRIRE | LIENS | HISTORIQUE), "deny": "0"})
+        voulu[bot] = (1, VOIR | ECRIRE | LIENS | HISTORIQUE, 0)
+    types = {str(o.get("id")): o.get("type", 0) for o in (actuel or {}).get("permission_overwrites") or []}
+    out, laisses = [], 0
+    for oid in list(voulu) + [i for i in deja if i not in voulu]:
+        typ, allow, deny = voulu.get(oid, (types.get(oid, 0), 0, 0))
+        a0, d0 = deja.get(oid, (0, 0))
+        laisses |= (allow | deny) & ~masque
+        allow, deny = (allow & masque) | (a0 & ~masque), (deny & masque) | (d0 & ~masque)
+        if allow or deny or oid in voulu:
+            out.append({"id": oid, "type": typ, "allow": str(allow), "deny": str(deny)})
+    if laisses:
+        _dire("droits", f"droits de 🤝・parrainage que le bot n'a pas, non recopiés : {laisses}")
     return out
 
 
@@ -288,7 +324,7 @@ def assurer_salon() -> str:
         _dire("salon", "🤝・parrainage introuvable : droits du salon inconnus, rien créé ni changé")
         return str(c["id"]) if c else ""
     attendu = {"name": NOM_SALON, "parent_id": CATEGORIE, "topic": SUJET,
-               "permission_overwrites": droits_salon(modele)}
+               "permission_overwrites": droits_salon(modele, c)}
     if c is None:
         code, rep = _api("POST", f"/guilds/{GID}/channels", json=dict(attendu, type=0))
         if code not in (200, 201) or not isinstance(rep, dict) or not rep.get("id"):
