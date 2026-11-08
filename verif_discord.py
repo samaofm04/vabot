@@ -2228,10 +2228,15 @@ def serveur(gid: Optional[str] = None) -> Optional[Dict[str, Any]]:   # noqa: F8
     supprimés. ⏳┃en-attente reste, renommé 🎙️┃candidat-en-vocal : Peach y
     prévient les managers d'un candidat dans le vocal (salon_attente).
     Posée en enveloppe : un patch du VPS (zzzz-entretien-manuel) réécrit les
-    lignes de la configuration d'Entretien, les toucher le ferait tomber."""
+    lignes de la configuration d'Entretien, les toucher le ferait tomber.
+
+    Même jour, plus tard : le propriétaire fait SUPPRIMER ✅・membres-vérifiés,
+    le salon des bienvenues (SALON_BIENVENUE). Sans salon, poster_bienvenue ne
+    poste rien ; sinon chaque « Vérifier » d'un manager tentait un POST vers un
+    salon disparu (404)."""
     c = _serveur_avec_staff(gid)
     if c and str(c.get("id")) == GUILD_ID:
-        c = dict(c, salon_entrees="", salon_suspicions="")
+        c = dict(c, salon_entrees="", salon_suspicions="", salon_bienvenue="")
     return c
 
 

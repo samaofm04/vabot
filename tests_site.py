@@ -19819,9 +19819,12 @@ try:
         _fileM.pop()()
         _vd._EN_FOND = lambda f: f()
         _majM = [j for m, c, j in _appelsM if m == "PATCH" and c.endswith("/tokM/messages/@original")]
-        check("manager qui accepte : role pose sur LE MEMBRE, une bienvenue, fiche « ok », boutons retires",
+        # 08/11/2026 : ✅・membres-vérifiés (le salon des bienvenues d'Entretien) est
+        # supprimé à la demande du propriétaire -> plus aucune bienvenue, et surtout
+        # aucun POST vers un salon disparu ou vers « /channels//messages »
+        check("manager qui accepte : role pose sur LE MEMBRE, AUCUNE bienvenue (salon supprimé), fiche « ok », boutons retires",
               ("PUT", f"/guilds/{_vd.GUILD_ID}/members/{_cibleM}/roles/{_vd.ROLE_VERIFIE}") in [(m, c) for m, c, _ in _appelsM]
-              and sum(1 for _, c, _j in _appelsM if c == f"/channels/{_vd.SALON_BIENVENUE}/messages") == 1
+              and not any(c in (f"/channels/{_vd.SALON_BIENVENUE}/messages", "/channels//messages") for _, c, _j in _appelsM)
               and _vd._fiches()[_cibleM]["etat"] == "ok"
               and len(_majM) == 1 and _majM[0]["components"] == []
               and "accepté par boss" in _majM[0]["embeds"][0]["footer"]["text"])
@@ -19886,11 +19889,9 @@ try:
               _rBJ["etat"] == "ok" and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_VERIFIE) for m, c, _j in _poses)
               and not any(c in (f"/channels/{_vd.SALON_ALERTES}/messages", "/channels//messages")
                           for _, c, _j in _poses))
-        _bienV = [j for _, c, j in _poses if c == f"/channels/{_vd.SALON_BIENVENUE}/messages"]
-        check("parcours : bienvenue dans #bienvenue, le nouveau est mentionne (et lui seul)",
-              len(_bienV) == 1 and _bienV[0]["allowed_mentions"] == {"users": ["222222222222222222"]}
-              and "<@222222222222222222>" in _bienV[0]["content"]
-              and all(("<#" + x + ">") in _bienV[0]["embeds"][0]["description"] for x in _vd.SALONS_ETAPES.values()))
+        _bienV = [j for _, c, j in _poses if c in (f"/channels/{_vd.SALON_BIENVENUE}/messages", "/channels//messages")]
+        check("parcours : plus de bienvenue sur Entretien (✅・membres-vérifiés supprimé le 08/11)",
+              _bienV == [] and _vd.serveur(_vd.GUILD_ID)["salon_bienvenue"] == "", _bienV)
         _poses.clear()
         _vd.api = lambda m, chemin, **k: (_poses.append((m, chemin, k.get("json")))
                                           or ((403, {}) if chemin.endswith("/roles/" + _vd.ROLE_VERIFIE) else (200, {"id": "9"})))

@@ -158,6 +158,8 @@ try:
     check("verif_discord : plus de ✅┃entrées ni de 🚩┃suspicions pour Entretien, Peach garde son salon",
           c["salon_entrees"] == "" and c["salon_suspicions"] == "" and c["salon_attente"] == vrai.SALON_ATTENTE
           and vrai.serveur(vrai.TWITTER_ID)["salon_entrees"], c)
+    check("verif_discord : plus de salon de bienvenue pour Entretien (✅・membres-vérifiés supprimé), Twitter garde le sien",
+          c["salon_bienvenue"] == "" and vrai.serveur(vrai.TWITTER_ID)["salon_bienvenue"], c)
     check("écritures par safe_json seulement",
           "write_text" not in (ICI / "entretien_ouvert.py").read_text(encoding="utf-8"))
 finally:
