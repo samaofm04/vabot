@@ -62015,6 +62015,14 @@ def create_app():
             _jp_boot.demarrer()
     except Exception as _e:
         log.warning(f"journal des primes non démarré: {_e}")
+    # Les anciens messages du bot sur TRUST Agency remis au nom TRUST Agency
+    # (trust_agency_anciens) : une seule passe, notée ; même garde.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("trust-agency-anciens"):
+            import trust_agency_anciens as _taa_boot
+            _taa_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"anciens messages de TRUST Agency non repris: {_e}")
     # Salons proxy de Youl4b (Spam) : les logins ProxEasy relus toutes les
     # 10 minutes et tenus par Ryuk (proxeasy.py). Même garde que l'accueil
     # d'Agency : un rendu de page hors du VPS ne doit rien poster.
