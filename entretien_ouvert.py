@@ -210,8 +210,16 @@ def menage() -> Dict[str, str]:
             attente = _ow(c, role_a)
             if not attente:
                 return "⏳ En attente n'y a pas de droit à recopier"
+            deja = _ow(c, role_v) or {}
+            if int(deja.get("allow") or 0) & VOIR and not int(deja.get("deny") or 0) & VOIR:
+                return "ok"                  # déjà ouvert (à la main, pour le vocal)
             code = _poser(sid, role_v, 0, int(attente.get("allow") or 0), int(attente.get("deny") or 0),
                           _ow(c, role_v), masque)
+            if code == 403:
+                # 08/11 : le vocal 🎙️ Entretiens est dans 🎙️ ESPACE VOCAL, que
+                # le bot ne voit pas — Discord lui interdit d'en régler les
+                # droits. À faire à la main ; l'étape se tient alors pour faite.
+                return "HTTP 403 (le bot ne voit pas ce salon : ✅ Vérifié à ouvrir à la main)"
             return "ok" if code in (200, 204) else f"HTTP {code}"
         faire(f"ouvrir:{sid}", ouvrir)
 

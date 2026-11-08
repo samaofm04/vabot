@@ -134,6 +134,18 @@ try:
           sorted(roles) == [f"/guilds/{G}/members/2/roles/{V}", f"/guilds/{G}/members/4/roles/{V}"]
           and b["donnes"] == 2, roles)
 
+    # le vocal ouvert à la main : l'étape se tient pour faite, sans écrire
+    for f in TMP.iterdir():
+        f.unlink()
+    D.ecritures.clear()
+    for c in D.salons:
+        if c["id"] == "1552152471281860612":
+            c["permission_overwrites"] = [o for o in c["permission_overwrites"] if o["id"] != V] + [ow(V, 1024 | 1 << 20)]
+    r = eo.menage()
+    check("vocal déjà ouvert à la main : étape faite, aucun PUT dessus",
+          r["ouvrir:1552152471281860612"] == "ok"
+          and not any(c == f"/channels/1552152471281860612/permissions/{V}" for m, c, _ in D.ecritures), r)
+
     src = (ICI / "web_upload.py").read_text(encoding="utf-8")
     check("web_upload : démarré sur la machine de production seulement, surveillé",
           '_machine_proprietaire("entretien-ouvert")' in src and "_eo_boot.demarrer()" in src
