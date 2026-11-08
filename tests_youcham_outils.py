@@ -1904,7 +1904,7 @@ finally:
 _sauve_n = (nm._salon, nm._salon_ecrire, nm._fichier_icone)
 nm._salon = lambda cid: {}
 nm._salon_ecrire = lambda cid, **k: None
-nm._fichier_icone = lambda: None
+nm._fichier_icone = lambda *a: None
 try:
     livraison = courir(CT1.send("une video livree"))
 

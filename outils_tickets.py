@@ -1120,12 +1120,57 @@ def _menu_commun(t: Dict[str, str]) -> Dict[str, Any]:
         return _ephemere(TEXTE_INDISPONIBLE)
 
 
+#: Les panneaux en carte, avec leur vignette sous static/ et la couleur de son
+#: bord (propriétaire, 08/11/2026 : « pour le truc downloader met ça », « pour
+#: le spoofer met ça », une carte comme celle du 📱・numéro). Une image absente
+#: de static/ : le bouton seul, comme avant, plutôt qu'une vignette en 404
+#: (Cloudflare la garde 7 jours).
+VIGNETTES = {"download": ("outils/download.png", 0x3072E2),
+             "spoofer": ("outils/spoofer.png", 0xFF5A5A)}
+
+
+def _url_vignette(rel: str) -> str:
+    """L'adresse publique d'une image de static/, versionnée par son contenu
+    (une image changée n'est pas servie du cache) ; "" si elle manque."""
+    try:
+        import hashlib
+        import verif_discord as vd
+        v = hashlib.md5((Path(__file__).resolve().parent / "static" / rel)
+                        .read_bytes()).hexdigest()[:8]
+        return f"{vd.SITE.rstrip('/')}/static/{rel}?v={v}"
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def _vignettes(composants: Any) -> List[str]:
+    """Les adresses des vignettes d'un message ou d'un corps, dans l'ordre."""
+    out, pile = [], list(composants or [])
+    while pile:
+        c = pile.pop(0)
+        if not isinstance(c, dict):
+            continue
+        if c.get("type") == 11:
+            out.append(str((c.get("media") or {}).get("url") or ""))
+        pile += list(c.get("components") or [])
+        if isinstance(c.get("accessory"), dict):
+            pile.append(c["accessory"])
+    return out
+
+
 def corps_panneau(cle: str) -> Dict[str, Any]:
     libelle, emoji, cid = {c: b for c, _n, b in PANNEAUX}[cle]
+    bouton = {"type": 2, "style": 1, "label": libelle, "emoji": {"name": emoji},
+              "custom_id": cid}
+    rel, couleur = VIGNETTES.get(cle, ("", 0))
+    url = _url_vignette(rel) if rel else ""
+    if not url:
+        return {"flags": V2, "allowed_mentions": {"parse": []},
+                "components": [{"type": 1, "components": [bouton]}]}
     return {"flags": V2, "allowed_mentions": {"parse": []},
-            "components": [{"type": 1, "components": [
-                {"type": 2, "style": 1, "label": libelle, "emoji": {"name": emoji},
-                 "custom_id": cid}]}]}
+            "components": [{"type": 17, "accent_color": couleur, "components": [
+                {"type": 9, "components": [{"type": 10, "content": f"## {libelle}"}],
+                 "accessory": {"type": 11, "media": {"url": url}}},
+                {"type": 1, "components": [bouton]}]}]}
 
 
 def _cle_salon(nom: Any) -> str:
@@ -1231,6 +1276,24 @@ def _salons_par_cle(gid: str, dedans: List[Dict[str, Any]], tous: List[Dict[str,
     return out
 
 
+def _rafraichir_vignette(gid: str, salon: str, mid: str, cle: str, m: Any,
+                         corps: Dict[str, Any], bilan: Dict[str, Any]) -> None:
+    """Un panneau déjà posé dont la vignette n'est pas (ou plus) celle du
+    corps -- posé en bouton seul avant le 08/11/2026, ou image changée -- est
+    modifié sur place : rien n'est reposté, l'id reste. Un panneau sans
+    vignette prévue n'est jamais touché. Un refus se dit dans `bilan`."""
+    voulues = _vignettes(corps.get("components"))
+    if not voulues or voulues == _vignettes((m or {}).get("components")):
+        return
+    code, r = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                   json={"flags": V2, "components": corps["components"]}, gid=gid)
+    if code == 200:
+        bilan.setdefault("maj", []).append(cle)
+        _log(f"salons communs {gid} : panneau {cle} mis en carte (vignette {voulues[0][-40:]})")
+    else:
+        bilan["rates"].append(f"{cle} (vignette, HTTP {code}) {str(r)[:120]}")
+
+
 def assurer_panneaux(gid: str, sauf: Tuple[str, ...] = ()) -> Dict[str, Any]:
     """Le panneau de chaque salon commun, reposé s'il a disparu. Trouvé par
     son id, sinon en relisant le salon ; Discord injoignable : rien n'est
@@ -1271,6 +1334,7 @@ def assurer_panneaux(gid: str, sauf: Tuple[str, ...] = ()) -> Dict[str, Any]:
             if mid:
                 code, m = _api("GET", f"/channels/{salon}/messages/{mid}", gid=gid)
                 if code == 200 and cid in _ids_message(m):
+                    _rafraichir_vignette(gid, salon, mid, cle, m, corps(), bilan)
                     bilan["ok"].append(cle)
                     continue
                 if _salon_inconnu(code, m):

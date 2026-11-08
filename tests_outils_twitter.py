@@ -178,9 +178,10 @@ try:
     check("📧 : le formulaire Adresses Outlook d'outlook_x_discord (mailx:prendre)",
           marques["adresse"] == "mailx:prendre" and corps["adresse"]["components"] == ox.vue_panneau()
           and "mailx:prendre" in ids(corps["adresse"]["components"]), corps["adresse"])
-    check("📤 : un bouton « Spoofer », sans texte, comme sur Instagram",
+    check("📤 : le panneau « Spoofer » d'Instagram, tel quel (bouton seul, ou la carte et sa vignette)",
           ids(corps["spoofer"]["components"]) == ["outk:spf:commun"]
-          and not textes(corps["spoofer"]["components"]) and corps["spoofer"] == ot.corps_panneau("spoofer"))
+          and textes(corps["spoofer"]["components"]) in ([], ["## Spoofer"])
+          and corps["spoofer"] == ot.corps_panneau("spoofer"))
     check("Instagram inchangé : 📋 menu, 📤 spoofer, ⬇️ download",
           [(c, n, m) for c, n, m, _f in ot._panneaux(AG)]
           == [(c, n, b[2]) for c, n, b in ot.PANNEAUX]

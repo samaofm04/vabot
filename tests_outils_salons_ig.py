@@ -314,12 +314,28 @@ check("🎬 dans le ticket : rien ne change",
 
 # ── 5. les panneaux ───────────────────────────────────────────────────────
 print("5. Les panneaux")
+def _boutons_corps(c):
+    return [x for x in ot._ids_message(c)]
+
+
 for cle, _nom, (lib, emo, cid) in ot.PANNEAUX:
     c = ot.corps_panneau(cle)
-    b = c["components"][0]["components"]
-    check(f"{cle} : un bouton « {emo} {lib} », sans texte",
-          c["flags"] == 32768 and len(c["components"]) == 1 and len(b) == 1 and b[0]["custom_id"] == cid
-          and "content" not in c)
+    rel = ot.VIGNETTES.get(cle, ("", 0))[0]
+    if rel and (BOT / "static" / rel).is_file():
+        # Propriétaire, 08/11/2026 : une carte comme celle du 📱・numéro.
+        carte = c["components"][0]
+        check(f"{cle} : une carte, « {lib} » en titre, sa vignette (static/, versionnée), le bouton",
+              c["flags"] == 32768 and len(c["components"]) == 1 and carte["type"] == 17
+              and carte["components"][0]["components"] == [{"type": 10, "content": f"## {lib}"}]
+              and ot._vignettes(c["components"]) and ot._vignettes(c["components"])[0].split("?v=")[0]
+              .endswith("/static/" + rel)
+              and carte["components"][1]["components"][0]["custom_id"] == cid
+              and _boutons_corps(c) == [cid] and "content" not in c, c)
+    else:
+        b = c["components"][0]["components"]
+        check(f"{cle} : un bouton « {emo} {lib} », sans texte",
+              c["flags"] == 32768 and len(c["components"]) == 1 and len(b) == 1 and b[0]["custom_id"] == cid
+              and "content" not in c)
     check(f"{cle} : son clic est servi (« {cid.split(':')[1]} »)",
           ot.traiter(clic(cid))["type"] in (4, 9))
 
@@ -328,6 +344,7 @@ class Faux:
     def __init__(self):
         self.appels, self.messages, self.n = [], {}, 500
         self.supprimes, self.panne_get = set(), False
+        self.refus_patch = False
 
     def api(self, methode, chemin, **kw):
         self.appels.append((methode, chemin, kw.get("json")))
@@ -341,6 +358,11 @@ class Faux:
             return (200, m) if m else (404, {"code": 10008, "message": "Unknown Message"})
         if methode == "GET" and chemin.startswith("/channels/") and "messages?" in chemin:
             return 200, [m for m in self.messages.values() if m["channel_id"] == morceaux[1]]
+        if methode == "PATCH" and len(morceaux) == 4 and morceaux[2] == "messages":
+            if self.refus_patch:
+                return 400, {"message": "refus simulé"}
+            self.messages[morceaux[3]].update(kw["json"])
+            return 200, self.messages[morceaux[3]]
         if methode == "POST" and morceaux[-1] == "messages":
             self.n += 1
             m = dict(kw["json"], id=str(self.n), channel_id=morceaux[1], author={"id": "BOT"})
@@ -372,6 +394,34 @@ n = len([a for a in faux.appels if a[0] == "POST"])
 b = ot.assurer_panneaux(AG)
 check("deuxième passage : rien de reposté (lus par leur id)",
       len([a for a in faux.appels if a[0] == "POST"]) == n and sorted(b["ok"]) == ["download", "menu", "spoofer"], b)
+# Un panneau posé en bouton seul (avant le 08/11/2026) devient la carte, sur place.
+_dl = ot._etat_salons()[AG]["download"]["panneau"]
+if ot._vignettes(ot.corps_panneau("download")["components"]):
+    faux.messages[_dl]["components"] = [{"type": 1, "components": [
+        {"type": 2, "style": 1, "label": "Download", "custom_id": "outk:dl:commun"}]}]
+    n = len([a for a in faux.appels if a[0] == "POST"])
+    b = ot.assurer_panneaux(AG)
+    _patch = [a for a in faux.appels if a[0] == "PATCH"]
+    check("panneau Download d'avant (bouton seul) : modifié en carte, sur place, rien de reposté",
+          b.get("maj") == ["download"] and len(_patch) == 1 and _patch[0][1] == f"/channels/9202/messages/{_dl}"
+          and _patch[0][2]["components"] == ot.corps_panneau("download")["components"]
+          and len([a for a in faux.appels if a[0] == "POST"]) == n
+          and ot._etat_salons()[AG]["download"]["panneau"] == _dl, (b, _patch))
+    b = ot.assurer_panneaux(AG)
+    check("… et au passage suivant, plus rien à modifier",
+          not b.get("maj") and len([a for a in faux.appels if a[0] == "PATCH"]) == 1, b)
+    faux.messages[_dl]["components"] = [{"type": 1, "components": [
+        {"type": 2, "style": 1, "label": "Download", "custom_id": "outk:dl:commun"}]}]
+    faux.refus_patch = True
+    b = ot.assurer_panneaux(AG)
+    check("modification refusée par Discord : dit dans le bilan, le panneau reste, rien de reposté",
+          not b.get("maj") and any(r.startswith("download (vignette, HTTP 400)") for r in b["rates"])
+          and len([a for a in faux.appels if a[0] == "POST"]) == n, b)
+    faux.refus_patch = False
+    faux.messages[_dl]["components"] = ot.corps_panneau("download")["components"]
+b = ot.assurer_panneaux(AG)
+check("menu, sans vignette prévue : jamais modifié",
+      not any(a[0] == "PATCH" and "/9200/" in a[1] for a in faux.appels), b)
 mid = ot._etat_salons()[AG]["spoofer"]["panneau"]
 del faux.messages[mid]
 b = ot.assurer_panneaux(AG)
@@ -511,8 +561,8 @@ check("le message d'un autre bot dans 📋・menu n'est pas touché",
       ids(srv.messages["NUMUS"]["components"]) == ["sms:prendre:ig:187"])
 check("les panneaux 📤 et ⬇️ posés dans leurs salons",
       {m["channel_id"]: ids(m["components"]) for m in srv.messages.values() if m["channel_id"].startswith("NEUF")}
-      == {c["id"]: [ot.corps_panneau("spoofer" if "spoofer" in c["name"] else "download")["components"][0]
-                    ["components"][0]["custom_id"]] for c in neufs})
+      == {c["id"]: sorted(ot._ids_message(ot.corps_panneau("spoofer" if "spoofer" in c["name"] else "download")))
+          for c in neufs})
 n = len([a for a in srv.appels if a[0] in ("POST", "PUT") or (a[0] == "PATCH" and "/messages/" in a[1])])
 r = ot.installer_salons(AG, essai=False)
 check("relancée : ni salon, ni droit, ni panneau de plus",
