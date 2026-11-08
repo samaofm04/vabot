@@ -25,8 +25,9 @@ Rien n'est calculé ailleurs : on lit les registres que tiennent déjà les
 relevés de chaque serveur, sans rien y écrire (comme habillage_trust) —
 entretien_parrainage (TRUST Agency), agency_accueil (TRUST INSTAGRAM),
 twitter_accueil (TRUST TWITTER), threads_accueil (TRUST THREADS) — et les
-subs comme les espaces d'affiliation (affiliation_privee.compteurs,
-affiliation_sources.subs). Jamais lien_pour() : il créerait une invitation.
+subs de MyPuls comme les espaces d'affiliation (affiliation_privee.compteurs),
+sur les seuls trackings de Lia (voir subs). Jamais lien_pour() : il
+créerait une invitation.
 
 Ce qui était déjà là à la mise en route n'est PAS posté : au premier relevé
 réussi de chaque source, ses événements sont notés comme référence. Pour les
@@ -83,6 +84,9 @@ SERVEURS = {
 #: les paliers de parrainage, en centimes (agency_accueil.panneau, twitter_accueil.panneau)
 PALIERS = ((10, 50), (200, 1000))
 PRIX_RECRUTEMENT = 20
+#: les paliers ne comptent que les subs de cette model (« que pour lia »),
+#: nommée comme dans la table des comptes OnlyFans (liens_va.nom_de_page)
+MODELE_PRIMES = "Lia"
 
 TZ = ZoneInfo("Europe/Paris")
 #: le salon n'est revérifié (un GET) qu'une fois tous les quarts d'heure
@@ -219,17 +223,30 @@ def compteurs() -> Optional[Dict[str, Any]]:
 
 
 def subs(plateforme: str, uid: str, metrics: Optional[Dict[str, Any]]) -> Optional[int]:
-    """Les vrais subs cumulés du filleul `uid` sur `plateforme`, à la règle
-    de son espace d'affiliation ; None = inconnu (aucun palier décidé)."""
+    """Les vrais subs du filleul `uid` sur `plateforme`, sur les seuls
+    trackings de Lia (MODELE_PRIMES) ; None = inconnu (aucun palier décidé).
+
+    Propriétaire, 08/11/2026, à propos des filleuls aux subs inconnus :
+    « que pour lia ». La règle des espaces d'affiliation
+    (affiliation_sources.subs, VPS) additionne TOUS les trackings du filleul,
+    Emy et Seren compris ; ces deux-là ne sont plus dans MyPuls depuis le
+    03/11, et les 15 filleuls parrainés restaient inconnus, aucun palier ne
+    partait. Un tracking de Lia absent de MyPuls rend toujours inconnu : une
+    somme partielle ne valide aucun palier."""
     if metrics is None:
         return None
     try:
-        import affiliation_sources
         import liens_va
-        return affiliation_sources.subs(plateforme, liens_va.lien_de(SERVEURS[plateforme][0], uid) or {}, metrics)
+        fiche = liens_va.lien_de(SERVEURS[plateforme][0], uid) or {}
+        urls = {str(u).strip().rstrip("/").lower() for u in liens_va.trackings_de_fiche(fiche)
+                if liens_va.nom_de_page(u) == MODELE_PRIMES}
     except Exception as e:                                   # noqa: BLE001
         _dire(f"subs:{plateforme}", f"subs {plateforme} illisibles : {type(e).__name__}: {e}")
         return None
+    if not urls:
+        return None
+    ns = [metrics.get(u) for u in urls]
+    return None if any(not isinstance(n, int) for n in ns) else sum(ns)
 
 
 def meilleure_plateforme(arrivees: List[Dict[str, Any]],
@@ -496,10 +513,9 @@ def _tour() -> Dict[str, Any]:
         _dire("subs", "subs MyPuls indisponibles : paliers non relevés ce tour")
     else:
         _dire("subs", "")
-        # même règle que les espaces d'affiliation : une somme partielle ne
-        # valide aucun palier. Le 07/11, les trackings Emy et Seren (retirées
-        # de MyPuls le 03/11) rendaient ainsi inconnus tous les filleuls
-        # parrainés — dit, pas tu.
+        # une somme partielle ne valide aucun palier : un filleul sans
+        # tracking de Lia lisible reste inconnu — dit, pas tu (le 07/11, les
+        # trackings Emy et Seren rendaient ainsi inconnus les 15 filleuls)
         _dire("inconnus", f"{inconnus} filleul(s) aux subs inconnus sur toutes leurs plateformes "
                           "(pas de tracking, ou un tracking absent de MyPuls) : leurs paliers ne sont "
                           "pas relevés" if inconnus else "")

@@ -97,6 +97,7 @@ REG = {"entretien": {"arrivees": {}, "declarations": {}},
 SUBS = {}
 jp.registre = lambda p: REG[p]
 jp.compteurs = lambda: {}
+SUBS_REEL = jp.subs
 jp.subs = lambda p, uid, m: SUBS.get((p, uid))
 
 
@@ -305,6 +306,24 @@ try:
     jp.tour()
     check("arrivée relevée tard : « arrivé le 05/11 »", D2.messages[-1].endswith("· arrivé le 05/11"),
           D2.messages[-1:])
+
+    # ── « que pour lia » : seuls les trackings de Lia comptent ───────────────
+    FICHES = {"201": {"tracking": "https://onlyfans.com/liasxcret/c96",
+                      "variante": {"modele": "Seren", "tracking": "https://onlyfans.com/seren.vale/c219"},
+                      "anciens": ["https://onlyfans.com/emy.brw/c100"]},
+              "202": {"tracking": "https://onlyfans.com/seren.vale/c1"}}
+    sys.modules["liens_va"] = types.SimpleNamespace(
+        lien_de=lambda gid, uid: FICHES.get(uid, {}),
+        trackings_de_fiche=lambda f: [x for x in [f.get("tracking"), (f.get("variante") or {}).get("tracking")]
+                                      + f.get("anciens", []) if x],
+        nom_de_page=lambda u: {"liasxcret": "Lia", "seren.vale": "Seren"}.get(u.split("/")[3], u.split("/")[3]))
+    m = {"https://onlyfans.com/liasxcret/c96": 21}            # Seren et Emy absents de MyPuls
+    check("subs : Lia seule, Seren et Emy absents de MyPuls ne bloquent plus", SUBS_REEL("twitter", "201", m) == 21)
+    check("subs : pas de tracking Lia, inconnu", SUBS_REEL("twitter", "202", m) is None)
+    check("subs : le tracking Lia absent de MyPuls, inconnu (pas de somme partielle)",
+          SUBS_REEL("twitter", "201", {}) is None)
+    check("subs : MyPuls illisible, inconnu", SUBS_REEL("twitter", "201", None) is None)
+    del sys.modules["liens_va"]
 
     # ── le branchement dans le site ──────────────────────────────────────────
     src = (ICI / "web_upload.py").read_text(encoding="utf-8")
