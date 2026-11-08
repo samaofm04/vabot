@@ -218,7 +218,10 @@ check("Total : le gain / perte partiel est dit", "gain / perte : 3 VA" in h)
 check("Threads : astérisque et explication au survol sur son gain / perte",
       re.search(r'<td class="neg" title="revenu des visiteurs envoyés sans tracking non compté">−10,00[^<]*\*</td>', h))
 check("… et pas d'astérisque sur Twitter", re.search(r'<td class="pos">230,00[^<*]*</td>', h))
-check("la note Threads au pied de la page", "perte affichés sont des maximums" in h)
+# 08/11, propriétaire : « remove ça » (le pied) et « le truc qui dit 12 VA ancien »
+check("pied : plus de sources, de légende ni d'heure de lecture",
+      "Sources :" not in h and "perte affichés sont des maximums" not in h and "LTV : revenu net" not in h
+      and "Lu le " not in h and "réservée à la direction" not in h and "payé aux subs" not in h)
 check("Threads : astérisque aussi sur coût / sub et marge",
       re.search(r'<td title="subs des visiteurs envoyés sans tracking non comptés">3,00[^<]*\*</td>', h)
       and re.search(r'<td class="neg" title="subs des visiteurs envoyés sans tracking non comptés">−0,50[^<]*\*</td>', h),
@@ -227,8 +230,8 @@ hp = st.page_html({"gens": [{"gid": TW, "uid": "30", "code": "tw", "plateforme":
                    "lignes": {f"{TW}:30": {"subs": 65, "gagne": 45.5, "par_sub": 0.31, "revenu": None,
                                             "revenu_partiel": True}}, "pannes": {}, "fin": 1.0},
                   None, cle_=k, s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR)
-check("revenu partiel : dit au pied (« 1 VA avec un ancien tracking Emy ou une variante Seren »)",
-      "1 VA avec un ancien tracking Emy ou une variante Seren" in hp)
+check("revenu partiel : plus de note « N VA avec un ancien tracking Emy » au pied",
+      "ancien tracking Emy" not in hp and "Seren" not in hp)
 check("la clé gardée dans les liens (onglets, tris, périodes, formulaire)",
       h.count(f"k={k}") >= 15 and f'name="k" value="{k}"' in h)
 check("onglets Tous 6, Twitter 2, Instagram 2, Threads 2",
@@ -259,16 +262,15 @@ check("lien Twitter : ni les non-lus ni les notes Threads des autres serveurs",
       "Threads VA 142" not in hv and "Instagram VA 109" not in hv and "perte affichés sont des maximums" not in hv)
 check("lien Twitter : la clé Twitter gardée dans les liens", hv.count(f"k={k_tw}") >= 10 and f"k={k}&" not in hv)
 hth = st.page_html(lot, None, cle_=k_th, s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR, verrou="th")
-check("lien Threads : ses VA, ses non-lus et sa note Threads",
-      "delta" in hth and "alpha" not in hth and "Threads VA 142" in hth and "perte affichés sont des maximums" in hth)
+check("lien Threads : ses VA et ses non-lus",
+      "delta" in hth and "alpha" not in hth and "Threads VA 142" in hth)
 hve = st.page_html(None, {"gens": lot["gens"], "lignes": {f"{TW}:1": {}}, "pannes": {}, "debut": 0}, cle_=k_ig,
                    s="tous", du="", au="", tri="subs", sens="desc", jour=JOUR, verrou="ig")
 check("lien Instagram, lecture en cours : le bandeau ne compte que ses VA (0 / 2)",
       "Lecture en cours : 0 / 2" in hve, re.findall(r"Lecture en cours : [^.]*", hve))
 check("pages Twitter et Instagram : le mot Threads n'y paraît nulle part",
       "Threads" not in hv and "Threads" not in hve, [m.start() for m in re.finditer("Threads", hv)][:5])
-check("page Threads : sa note de paie seule, pas celle des autres serveurs",
-      "Threads : clics US·UK·CA, payé aux clics" in hth and "Twitter et Instagram" not in hth)
+check("page Threads : rien des autres serveurs", "Twitter" not in hth and "Instagram" not in hth)
 # lecture arrêtée (source muette) : le nombre du texte compte les trois serveurs
 _arret = ("Lecture arrêtée après 3 VA de plus de 60 s chacun (MyPuls, Infloww ou GetMySocial ne répond "
           "plus) : 6 VA pas lus")

@@ -672,26 +672,12 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
     elif not montre:
         bandeau = '<div class="encours">Lecture en attente. La page se complète seule.</div>'
 
-    marques = ["— : pas encore lisible",
-               "LTV : revenu net MyPuls des liens du VA ÷ ses subs",
-               "Coût / sub : Gagné ÷ subs · Marge / sub : LTV − coût / sub · payé, 0 sub : Gagné sans "
-               "aucun sub sur la période" + ("" if verrou in ("tw", "ig") else " (Threads, payé aux clics)"),
-               "Gain / perte : revenu net MyPuls des liens du VA sur la période − Gagné (vert : on gagne, "
-               "rouge : on perd) ; « — » quand le revenu net ou le Gagné n'est pas lisible (MyPuls muet, "
-               "VA sans tracking à lui, VA non lu)",
-               "* Threads : Gagné paie tous les clics US·UK·CA du lien, mais une partie des visiteurs part "
-               "sur une page sans tracking : ni leurs subs ni leur revenu ne sont comptés ; coût / sub et "
-               "perte affichés sont des maximums, marge et gain des minimums",
-               {"tw": "Twitter : payé aux subs", "ig": "Instagram : payé aux subs",
-                "th": "Threads : clics US·UK·CA, payé aux clics"}.get(
-                   verrou, "Threads : clics US·UK·CA, payé aux clics ; Twitter et Instagram : payés aux subs")]
-    if verrou in ("tw", "ig"):
-        # une page Twitter ou Instagram ne parle pas de Threads
-        marques = [m for m in marques if not m.startswith("* Threads")]
-    n_partiel = sum(1 for x in lignes if x.get("revenu_partiel"))
-    if n_partiel:
-        marques.append(f"{n_partiel} VA avec un ancien tracking Emy ou une variante Seren (retirées de "
-                       "MyPuls, revenu non daté) : LTV, marge et gain / perte « — »")
+    # Propriétaire, 08/11/2026, devant le pied de la page : « remove ça » puis
+    # « le truc qui dit 12 VA ancien » : plus de sources, de légende, de note
+    # Emy / Seren ni d'heure de lecture. Restent les pannes (VA non lus,
+    # source illisible), qui ne paraissent que quand quelque chose manque :
+    # sans elles, un « — » ne dirait pas pourquoi.
+    marques: List[str] = []
     pannes = dict(montre.get("pannes") or {})
     if verrou:
         a_lui = {f"{p['gid']}:{p['uid']}" for p in gens}
@@ -703,13 +689,7 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
     marques += [m for m in (montre.get("remarques") or [])
                 if not any(f"TRUST {a}" in str(m) for a in autres)
                 and not (verrou and str(m).startswith(ARRET))]
-    lu_t = sv._paris(montre.get("fin") or montre.get("debut") or time.time())
-    sources = " · ".join(f'API officielle <a href="{_e(u)}" rel="noopener noreferrer">{_e(n)}</a>'
-                         for n, u in sv.SOURCES)
-    pied = (f'<p class="pied">Sources : {sources}</p>'
-            + "".join(f'<p class="pied">{_e(m)}</p>' for m in marques)
-            + (f'<p class="pied">Lu le {_e(lu_t.strftime("%d/%m à %H:%M"))} (heure de Paris)'
-               ' · page réservée à la direction, ne pas la donner aux VA</p>' if lu_t else ""))
+    pied = "".join(f'<p class="pied">{_e(m)}</p>' for m in marques)
     if isinstance(lien_mgr, (list, tuple)):
         lienmgr = ('<div class="lienmgr">Liens à donner aux managers (sans compte) :'
                    + "".join(f'<br>{_e(lib)} : <code>{_e(u)}</code>' for lib, u in lien_mgr) + '</div>'
