@@ -1126,7 +1126,7 @@ def _menu_commun(t: Dict[str, str]) -> Dict[str, Any]:
 #: de static/ : le bouton seul, comme avant, plutôt qu'une vignette en 404
 #: (Cloudflare la garde 7 jours).
 VIGNETTES = {"download": ("outils/download.png", 0x3072E2),
-             "spoofer": ("outils/spoofer.png", 0xFF5A5A)}
+             "spoofer": ("outils/spoofer.png", 0xFF5757)}
 
 
 def _url_vignette(rel: str) -> str:
