@@ -94,10 +94,12 @@ SYNC_VAULT2 = False
 # « A IMPORTER » — c'etait illisible.
 RACINE_BIBLIO = "Bibliothèque"
 
-# Identites qui n'ont rien a faire sur le Drive. Jessye n'est pas une model :
-# elle sert de SOURCE au menu US (pseudo et name), elle n'a pas de contenu
-# propre a sauvegarder.
-EXCLURE_DRIVE = {"jessye"}
+# Identites qui n'ont rien a faire sur le Drive : les « Jailbreak seulement »
+# (type_identite.JAILBREAK_SEULEMENT, la meme liste que le site et le bot).
+# Jessye sert de SOURCE au menu US (pseudo et name), Lia (08/11/2026) n'a que
+# des comptes : ni l'une ni l'autre n'a de contenu propre a sauvegarder.
+import type_identite as _type_jb
+EXCLURE_DRIVE = set(_type_jb.JAILBREAK_SEULEMENT)
 
 
 def _marche_de(ident: str) -> str:

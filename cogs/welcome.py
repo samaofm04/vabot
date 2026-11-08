@@ -438,8 +438,10 @@ def reserves_hors_liste():
 
 
 # Identités réservées à Jailbreak : JAMAIS assignées aux VAs Discord (pas de
-# salon général, gérées dans le système Jailbreak). Aligné avec web_upload.py.
-JAILBREAK_ONLY_IDENTITIES = {"jessye"}
+# salon général, gérées dans le système Jailbreak). La liste est celle du site
+# et du Drive : type_identite.JAILBREAK_SEULEMENT.
+import type_identite as _type_jb
+JAILBREAK_ONLY_IDENTITIES = set(_type_jb.JAILBREAK_SEULEMENT)
 
 
 def est_une_model(nom) -> bool:

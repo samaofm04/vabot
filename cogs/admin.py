@@ -1811,7 +1811,8 @@ class Admin(commands.Cog):
         try:
             from cogs.welcome import JAILBREAK_ONLY_IDENTITIES as _JB_ONLY
         except Exception:
-            _JB_ONLY = {"jessye"}
+            import type_identite as _ti_jb
+            _JB_ONLY = set(_ti_jb.JAILBREAK_SEULEMENT)
         if safe.lower() in {x.lower() for x in _JB_ONLY}:
             await interaction.response.send_message(
                 f"❌ `{safe}` est une identité **jailbreak-only** (pas de salon général sur Discord). "

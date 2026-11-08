@@ -17936,8 +17936,10 @@ def _list_identities():
 # "Contenu / Bibliothèque" (Vue d'ensemble, Reels, Posts, Stories, Story CTA,
 # Photos profil). Elles n'ont pas de médias à programmer — elles servent
 # uniquement de référentiel de comptes dans la section Jailbreak.
-# Pour en masquer une autre : ajoute son nom (en minuscules) ici.
-JAILBREAK_ONLY_IDENTITIES = {"jessye"}
+# La liste vit dans type_identite.JAILBREAK_SEULEMENT (une seule pour le
+# site, le bot et le Drive) : c'est là qu'on en ajoute une.
+import type_identite as _type_jb
+JAILBREAK_ONLY_IDENTITIES = set(_type_jb.JAILBREAK_SEULEMENT)
 
 
 # ===== Vault PRO : espace TOTALEMENT indépendant =====

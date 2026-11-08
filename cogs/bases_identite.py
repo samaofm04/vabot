@@ -209,7 +209,8 @@ def identites_us() -> List[str]:
         try:
             from cogs.user import EXCLURE_MENU
         except Exception:                                    # noqa: BLE001
-            EXCLURE_MENU = {"jessye"}
+            import type_identite as _ti_jb
+            EXCLURE_MENU = set(_ti_jb.JAILBREAK_SEULEMENT)
         return sorted((n for n in list_identities()
                        if marche.de(n) == "us" and n.strip().lower() not in EXCLURE_MENU),
                       key=str.lower)

@@ -86,6 +86,19 @@ _PREFIXE_V2 = "v2_"
 #: ajouter son nom (en minuscules).
 TOUJOURS_MODELE = {"jessye"}
 
+#: Les models « Jailbreak seulement » : un référentiel de comptes Instagram
+#: par VA, sans contenu à elles. Hors de la Bibliothèque, du Drive, de la
+#: rotation des nouveaux VA, des menus de models et de /setidentite ; la page
+#: Jailbreak (Accounts) les garde. Jessye depuis toujours ; Lia le 08/11/2026
+#: (propriétaire, devant la Bibliothèque : « je veux pas Lia ici, je veux
+#: juste au niveau de Accounts … elle n'a pas de photos, de vidéos et tout,
+#: comme pour Jessye »).
+#:
+#: UNE liste pour le site, le bot et la synchro Drive : il y en avait trois
+#: copies (web_upload, cogs/welcome, gdrive_sync) et deux de plus en repli,
+#: chacune réduite à « jessye ».
+JAILBREAK_SEULEMENT = frozenset({"jessye", "lia"})
+
 _CACHE: dict = {"sig": None, "data": {}}
 
 

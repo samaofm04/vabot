@@ -10629,8 +10629,11 @@ def _jb_en_pause(n) -> bool:
         return False
 
 
-# Jessye est la SOURCE du menu (pseudo/name), pas une model a proposer.
-EXCLURE_MENU = {"jessye"}
+# Jessye est la SOURCE du menu (pseudo/name), pas une model a proposer ; Lia
+# (08/11/2026) n'a pas de contenu, seulement des comptes sur la page Jailbreak.
+# La liste est type_identite.JAILBREAK_SEULEMENT, la meme que le site et le Drive.
+import type_identite as _type_jb
+EXCLURE_MENU = set(_type_jb.JAILBREAK_SEULEMENT)
 
 
 def _jb_us_models():
@@ -13600,7 +13603,8 @@ def _jb_models_ecartees(marche="us"):
             if _jb_en_pause(n):
                 raisons.append("en pause")
             if idl in EXCLURE_MENU:
-                raisons.append("source du menu (pseudo/name)")
+                raisons.append("source du menu (pseudo/name)" if idl == _US_SOURCE_IDENTITY
+                               else "Jailbreak seulement (comptes, sans contenu)")
             mk = _market_of(n)
             if mk != marche:
                 raisons.append(f"marché {str(mk).upper()}")
