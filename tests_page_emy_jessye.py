@@ -89,6 +89,7 @@ em.ANCIENS_NOTE = ""
 em.MYPULS_CREATOR_ID = None
 em.BASCULE_PARTENAIRE = {}
 em.SOURCE_TOUJOURS = "Infloww"
+em.INFLOWW_CREATOR_ID = ""
 J = "https://onlyfans.com/jessyewdiference/c"
 E = "https://onlyfans.com/emy.brw/c"
 DU, AU = "2026-10-16", "2026-10-28"

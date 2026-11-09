@@ -532,20 +532,36 @@ def creatrices() -> List[Dict[str, Any]]:
     return _avec_cache("creators", f)[0]
 
 
-def creatrice(pseudo: str) -> Optional[Dict[str, Any]]:
+def _choisir(pseudo: str, toutes: List[Dict[str, Any]], vise: Optional[str] = None
+             ) -> Optional[Dict[str, Any]]:
+    """La créatrice de ce pseudo ; `vise` (son identifiant Infloww) : celle-là
+    et jamais une autre. Deux créatrices peuvent porter le même pseudo : le
+    05/11/2026, la NOUVELLE Emy (onlyfans.com/emy.brw) a été connectée, et
+    l'ancienne (« Emy finito », devenue emy.brww chez OnlyFans le 03/11) y
+    porte toujours emy.brw ; sans `vise`, la première rendue gagne, au gré de
+    l'ordre de /v1/creators. Seul l'appelant sait laquelle il veut : la page
+    JESSY LE RETOUR passe l'id de la nouvelle (09/11), le podium garde son
+    choix d'avant (épingler ici pour tout le module aurait fait lire la
+    nouvelle aux anciens trackings des VA, relecture du 09/11)."""
     p = str(pseudo or "").lower()
-    for c in creatrices():
-        if str(c.get("userName") or "").lower() == p:
-            return c
-    return None
+    cands = [c for c in toutes if str(c.get("userName") or "").lower() == p]
+    if vise:
+        return next((c for c in cands if str(c.get("id") or "") == str(vise)), None)
+    return cands[0] if cands else None
 
 
-def _creatrice_ou_erreur(pseudo: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+def creatrice(pseudo: str, vise: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    return _choisir(pseudo, creatrices(), vise)
+
+
+def _creatrice_ou_erreur(pseudo: str, vise: Optional[str] = None
+                         ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     toutes = creatrices()
-    p = str(pseudo or "").lower()
-    for c in toutes:
-        if str(c.get("userName") or "").lower() == p:
-            return c, toutes
+    c = _choisir(pseudo, toutes, vise)
+    if c is not None:
+        return c, toutes
+    if vise:
+        raise ErreurInfloww(f"« {pseudo} » (Infloww n° {vise}) n'est plus rendue par Infloww")
     raise ErreurInfloww(f"« {pseudo} » n'est pas connectée à Infloww, ou la clé "
                         "n'a pas le droit de la lire")
 

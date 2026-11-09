@@ -105,7 +105,7 @@ emy._infloww = lambda createur: LIENS_I
 emy._code_infloww = lambda l: str(l.get("code") or "")
 import podium_discord as _pd  # noqa: E402
 _pd_si = _pd.subs_infloww
-_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None: {t: 10 for t in tr}
+_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None, vise="": {t: 10 for t in tr}
 check("le relevé du jour se prend sans visite (relever_partenaire), dans le fichier de la page",
       emy.relever_partenaire() == "" and safe_json.load(emy._fichier_releves_part())["jours"]["2026-11-04"]["136"]
       == [900, 50000], safe_json.load(emy._fichier_releves_part(), {}))
@@ -139,7 +139,7 @@ LIENS_EMY = {"liens": [{"code": "33", "clics": 1200, "net": 90000, "cree_ms": 17
                         "abonnes": 545}], "lu_a": 2.0}
 APPELS_I = []
 emy._infloww = lambda createur="": (APPELS_I.append(createur), LIENS_EMY if createur in ("emy.brw", "") else LIENS_I)[1]
-_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None: {t: 0 for t in tr}
+_pd.subs_infloww = lambda d0, tr, au=None, creatrice="", pause=True, infos=None, vise="": {t: 0 for t in tr}
 r = emy._periode_infloww_principale("2026-11-01", "2026-11-04")
 par = {x["code"]: x for x in r["liens"]}
 check("Emy chez Infloww : ses liens à la forme de MyPuls, subs datés (0 depuis le 01/11)",
@@ -149,31 +149,15 @@ check("… clics et gain « — » sans relevé de la veille (jamais les cumuls 
 check("… son relevé du jour pris dans SON fichier, pas celui de Jessye",
       safe_json.load(emy._fichier_releves_principale())["jours"]["2026-11-04"]["33"] == [1200, 90000]
       and "33" not in (safe_json.load(emy._fichier_releves_part())["jours"].get("2026-11-04") or {}))
-# Depuis le 09/11/2026, la créatrice de la page est la nouvelle Emy, lue chez
-# MyPuls seul (4126) : plus de période « Infloww seul » sur la page Emy. Le
-# mécanisme PERIODE_INFLOWW_DEPUIS reste (vérifié ci-dessus sur
-# _periode_infloww_principale) pour une page qui le règle.
-check("la page JESSY LE RETOUR lit la nouvelle Emy chez MyPuls (4126), plus Infloww seul",
-      emy.PERIODE_INFLOWW_DEPUIS == "" and emy.MYPULS_CREATOR_ID == 4126 and emy.SOURCE_TOUJOURS == "MyPuls"
+check("la page JESSY LE RETOUR lit Infloww seul depuis le 01/11", emy.PERIODE_INFLOWW_DEPUIS == "2026-11-01"
       and lia.PERIODE_INFLOWW_DEPUIS == "" and il.PERIODE_INFLOWW_DEPUIS == "")
 _mp = emy._mypuls_periode
 APPELS_MP = []
 emy._mypuls_periode = lambda du, au, attente=None: (APPELS_MP.append((du, au)), {"erreur": "", "liens": []})[1]
 emy.liens_gms = lambda: {"liens": [], "repli": "", "desactives": 0}
 t = emy.tableau_periode("2026-11-01", "2026-11-04", us="cache")
-check("une période depuis le 01/11 : lue chez MyPuls (nouvelle Emy), source « MyPuls »",
-      APPELS_MP == [("2026-11-01", "2026-11-04")] and t.get("source") == "MyPuls",
-      (APPELS_MP, t.get("source"), t.get("erreur")))
-# le réglage d'une page « Infloww seul » marche toujours (PERIODE_INFLOWW_DEPUIS)
-APPELS_MP.clear()
-emy.PERIODE_INFLOWW_DEPUIS = "2026-11-01"
-try:
-    t = emy.tableau_periode("2026-11-01", "2026-11-04", us="cache")
-finally:
-    emy.PERIODE_INFLOWW_DEPUIS = ""
-check("… avec PERIODE_INFLOWW_DEPUIS réglé : aucune lecture MyPuls, source « Infloww »",
+check("une période depuis le 01/11 : aucune lecture MyPuls, source « Infloww »",
       not APPELS_MP and t.get("source") == "Infloww", (APPELS_MP, t.get("source"), t.get("erreur")))
-APPELS_MP.clear()
 t = emy.tableau_periode("2026-10-16", "2026-10-31", us="cache")
 check("une quinzaine d'avant (16→31/10) : MyPuls comme avant", APPELS_MP and t.get("source") == "MyPuls",
       (APPELS_MP, t.get("source")))

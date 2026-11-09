@@ -6559,7 +6559,8 @@ def _abonnes_par_jour_infloww(iw, cid: str, lien_id: str, plancher_ms: int = 0) 
 
 def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
                  creatrice: str = CREATRICE_INFLOWW, pause: bool = True,
-                 infos: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[Dict[str, int]]:
+                 infos: Optional[Dict[str, Dict[str, Any]]] = None,
+                 vise: str = "") -> Optional[Dict[str, int]]:
     """{« emy.brw/cNN » : abonnés du jour} chez Infloww, pour ceux de
     `trackings` qu'Infloww connaît ; None s'il ne répond pas. Avec `au` et
     `creatrice` : du `jour` au `au` compris, chez elle (les trackings Jessye
@@ -6573,15 +6574,18 @@ def subs_infloww(jour: str, trackings: set, au: Optional[str] = None,
     `infos` : rempli de la fiche Infloww (clics, abonnés, revenu, nom) de
     chaque tracking connu -- les pages retirées de MyPuls (_retirees) : un
     seul endroit du podium lit Infloww.
+    `vise` : l'identifiant Infloww de la créatrice, quand deux portent ce
+    pseudo (infloww._choisir) ; alors ni repli sur un ancien pseudo, ni autre
+    compte (page JESSY LE RETOUR, nouvelle Emy, 09/11/2026).
     """
     au = au or jour
     if time.time() < _INFLOWW_MUET.get(creatrice, 0):
         return None                          # muet il y a peu : dit au journal à ce moment-là
     try:
         import infloww as iw
-        c = iw.creatrice(creatrice)
+        c = iw.creatrice(creatrice, vise) if vise else iw.creatrice(creatrice)
         for ancien, voulu in PSEUDOS_RENOMMES.items():
-            if not c and voulu == creatrice:
+            if not c and not vise and voulu == creatrice:
                 c = iw.creatrice(ancien)     # Emy renommée emy.brww chez OnlyFans (03/11)
         if not c:
             raise RuntimeError(f"créatrice {creatrice} inconnue d'Infloww")

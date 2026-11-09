@@ -259,6 +259,17 @@ NOM_PARTENAIRE = ""
 # toute la période (pas de coupure au jour de la bascule) : c'est un autre lien
 # de suivi, ses subs ne peuvent pas être comptés deux fois.
 BASCULE_PARTENAIRE: Dict[str, str] = {}
+# Dernier jour où la part du partenaire de la bascule compte (AAAA-MM-JJ, "" :
+# toujours). Propriétaire, 09/11 : « tu additionnes là pour cette fois les subs
+# de Jessye, sinon Emy » : la quinzaine du 01 au 15/11, puis Emy seule.
+BASCULE_JUSQU_AU = ""
+# Le fichier des relevés Infloww de la créatrice de la page ("" : celui du
+# profil). Page JESSY LE RETOUR : jusqu'au 05/11 il gardait les cumuls de
+# l'ANCIENNE Emy sous les mêmes codes (c1…c27) : un fichier neuf, sans mélange.
+RELEVES_PRINCIPALE_NOM = ""
+# L'identifiant Infloww de la créatrice de la page, quand deux portent son
+# pseudo chez Infloww (infloww._choisir) : "" = la première rendue.
+INFLOWW_CREATOR_ID = ""
 # Une lecture neuve coûte une page /v1/linkfans par centaine d'abonnés et par
 # lien (27 pour les 26 liens du 28/10) : elle part dans un fil, comme MyPuls,
 # et la page ne l'attend que PARTENAIRE_ATTENTE_S (compté depuis le départ du
@@ -539,7 +550,13 @@ def code_partenaire(url: Any) -> str:
     return t.split("/c", 1)[1] if t.startswith(PARTENAIRE + "/c") else ""
 
 
-def _codes_partenaire(liens_gms_: List[Any]) -> List[str]:
+def _bascule_compte(du: str = "") -> bool:
+    """La part du partenaire des liens basculés compte-t-elle pour une période
+    qui commence `du` ("" : depuis toujours, l'historique : oui) ?"""
+    return not (du and BASCULE_JUSQU_AU and du > BASCULE_JUSQU_AU)
+
+
+def _codes_partenaire(liens_gms_: List[Any], du: str = "") -> List[str]:
     """Les codes Jessye que visent les liens GMS de l'espace (page Emy) :
     ceux qu'il faut lire chez Infloww, pour le tableau comme pour la paie."""
     if not PARTENAIRE:
@@ -551,7 +568,8 @@ def _codes_partenaire(liens_gms_: List[Any]) -> List[str]:
         u = url_du_lien(l)
         cs.add(code_partenaire(u))
         # un lien passé du partenaire à la créatrice : son ancien code aussi
-        cs.add(BASCULE_PARTENAIRE.get(str(l.get("id") or ""), ""))
+        if _bascule_compte(du):
+            cs.add(BASCULE_PARTENAIRE.get(str(l.get("id") or ""), ""))
     return sorted((c for c in cs if c), key=lambda c: (len(c), c))
 
 
@@ -939,12 +957,14 @@ def _infloww(creatrice: str = "") -> Dict[str, Any]:
     """Les liens de suivi de la créatrice de la page (ou de `creatrice`),
     lus dans Infloww. Ne lève jamais : une panne est rendue dans « erreur »."""
     creatrice = creatrice or CREATRICE
+    vise = INFLOWW_CREATOR_ID if creatrice == CREATRICE else ""
     suivi: Dict[str, Any] = {"appels": 0, "caches": 0, "plus_ancien": None}
     # le suivi d'infloww dit de quand date la plus vieille lecture servie par
     # son cache : « lu à » est l'âge réel des chiffres, pas l'heure d'affichage
     jeton_ctx = infloww._SUIVI.set(suivi)
     try:
-        c, _toutes = infloww._creatrice_ou_erreur(creatrice)
+        c, _toutes = (infloww._creatrice_ou_erreur(creatrice, vise) if vise
+                      else infloww._creatrice_ou_erreur(creatrice))
         cid = str(c.get("id") or "")
         if not cid:
             return {"erreur": f"« {creatrice} » est rendue par Infloww sans identifiant"}
@@ -1098,7 +1118,15 @@ def _releve_mypuls(du: str, au: str) -> None:
     (gardé MYPULS_ECHEC_S), puis se retire. Ne lève jamais."""
     cle = (du, au)
     try:
-        v, raison = _lire_mypuls_api(du, au)
+        if PERIODE_INFLOWW_DEPUIS and du >= PERIODE_INFLOWW_DEPUIS:
+            # la même source que le tableau de la période : sans ça, la paie
+            # de la page JESSY LE RETOUR lisait MyPuls quand son tableau lisait
+            # Infloww (Misandratra 49 contre 43), et la tranche du 01 au 15/11
+            # aurait été figée le 16 sur les chiffres de MyPuls (relecture, 09/11)
+            v = _periode_infloww_principale(du, au)
+            raison = str(v.get("erreur") or "")
+        else:
+            v, raison = _lire_mypuls_api(du, au)
     except Exception as e:  # par ceinture : un fil qui meurt sans rien ranger ne dirait rien
         v, raison = {}, f"{type(e).__name__} : {e}"
     t = time.time()
@@ -1254,6 +1282,8 @@ def _fichier_releves_part() -> Path:
 
 
 def _fichier_releves_principale() -> Path:
+    if RELEVES_PRINCIPALE_NOM:
+        return DATA_DIR / RELEVES_PRINCIPALE_NOM
     return DATA_DIR / f"infloww_liens_releves_principale_{PROFIL or 'jessye'}.json"
 
 
@@ -1338,7 +1368,8 @@ def _periode_infloww_principale(du: str, au: str) -> Dict[str, Any]:
     try:
         cle = pd.PAGES_RETIREES_INFLOWW.get(CREATRICE, CREATRICE)
         i = _infloww(cle)
-        if i.get("erreur"):
+        # créatrice désignée par son id : jamais de repli sur un autre compte
+        if i.get("erreur") and not INFLOWW_CREATOR_ID:
             for nouveau, ancien in pd.PSEUDOS_RENOMMES.items():
                 if ancien == CREATRICE:
                     i2 = _infloww(nouveau)
@@ -1348,7 +1379,8 @@ def _periode_infloww_principale(du: str, au: str) -> Dict[str, Any]:
         if i.get("erreur"):
             return {"erreur": f"Infloww ({NOM_AFFICHE}) : {str(i['erreur'])[:200]}", "liens": []}
         par = {_code_infloww(l): l for l in i.get("liens") or [] if isinstance(l, Mapping) and _code_infloww(l)}
-        subs = pd.subs_infloww(du, {f"{CREATRICE}/c{c}" for c in par}, au=au, creatrice=cle, pause=False)
+        subs = pd.subs_infloww(du, {f"{CREATRICE}/c{c}" for c in par}, au=au, creatrice=cle, pause=False,
+                               **({"vise": INFLOWW_CREATOR_ID} if INFLOWW_CREATOR_ID else {}))
         if subs is None:
             return {"erreur": f"Infloww n'a pas rendu les abonnés {_de_nom(NOM_AFFICHE)}, nouvel essai ensuite",
                     "liens": []}
@@ -2098,7 +2130,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                     iid = str(x.get("id") or "")
                     siens[iid] = x
                     quittes[iid] = max(quittes.get(iid, ""), a["vu"])
-            cb = BASCULE_PARTENAIRE.get(str(gid), "")
+            cb = BASCULE_PARTENAIRE.get(str(gid), "") if _bascule_compte(bornes[0] if bornes else "") else ""
             if cb:
                 # l'ancien lien de suivi du partenaire de ce lien (bascule) :
                 # compté chez lui en plus de son code d'aujourd'hui
@@ -2534,9 +2566,12 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     g = liens_gms()
     # page Emy : la lecture Infloww de la part Jessye part AVANT celle de
     # MyPuls, dans son fil ; les deux attentes courent en même temps
-    codes_p = _codes_partenaire(g["liens"])
+    codes_p = _codes_partenaire(g["liens"], du)
+    # la part de la bascule ne compte que jusqu'à BASCULE_JUSQU_AU, même sur
+    # une période qui le dépasse (10→20/11 : Jessye du 10 au 15 seulement)
+    au_p = min(au, BASCULE_JUSQU_AU) if BASCULE_JUSQU_AU and au else au
     if codes_p:
-        _partenaire_periode(du, au, codes_p, attente=0)
+        _partenaire_periode(du, au_p, codes_p, attente=0)
     # les liens de suivi quittés pendant la période : une lecture MyPuls
     # jusqu'à chaque dernier jour, lancée tout de suite elle aussi
     fins_q = _fins_quittes(g["liens"], du, au)
@@ -2580,7 +2615,7 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     info = per.get("us_info") or {}
     if _pause_gms() and not info.get("plafond") and not info.get("budget"):
         per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
-    part = _partenaire_periode(du, au, codes_p) if PARTENAIRE and not erreur else None
+    part = _partenaire_periode(du, au_p, codes_p) if PARTENAIRE and not erreur else None
     fins = {vu: lire(du, vu) for vu in fins_q} if not erreur else {}
     cc, raison_cc = _clics_cvr(du, au) if CREATRICE_CVR and not erreur else (None, "")
     t = construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per,
@@ -6306,17 +6341,20 @@ REGLAGES["emy"] = {
     # « retire ça » (le bloc d'explications, Hors GetMySocial, « dont … Jessye »)
     "PAGE_EPUREE": True,
     # Depuis le 09/11/2026, la créatrice de la page est la NOUVELLE Emy
-    # (onlyfans.com/emy.brw, MyPuls 4126) : propriétaire, « Emy là y a que sur
-    # MyPuls et Jessye API Infloww ». Plus de lecture Infloww pour elle (chez
-    # Infloww, deux créatrices portent le pseudo emy.brw et la première rendue
-    # gagnait) : MyPuls pour toutes les périodes, depuis toujours compris.
-    # (Du 01 au 09/11, PERIODE_INFLOWW_DEPUIS lisait l'ancienne chez Infloww.)
-    "SOURCE_TOUJOURS": "MyPuls",
+    # (onlyfans.com/emy.brw, Infloww 2639487016566802, MyPuls 4126), lue chez
+    # Infloww seul pour toute période depuis le 01/11 (propriétaire, 09/11 :
+    # « use que Infloww comme avant ») ; infloww.EPINGLES désigne la nouvelle
+    # sous « emy.brw », l'ancienne y porte le même pseudo. Avant le 01/11 :
+    # MyPuls, filtré sur 4126 (l'ancienne y a d'autres codes sous le même).
+    "PERIODE_INFLOWW_DEPUIS": "2026-11-01",
     "MYPULS_CREATOR_ID": 4126,
+    "RELEVES_PRINCIPALE_NOM": "infloww_liens_releves_principale_emy_2639487016566802.json",
+    "INFLOWW_CREATOR_ID": "2639487016566802",
     "ANCIENS_DEPUIS": "2026-11-09",
     "ANCIENS_NOTE": ("Avant le 09/11, la part Emy de cette page était l'ancienne Emy (emy.brww), "
-                     "un autre compte : elle n'est plus comptée ici. Cette page additionne la "
-                     "nouvelle Emy (MyPuls) et Jessye (Infloww)."),
+                     "un autre compte : elle n'est plus comptée ici. Cette page compte la nouvelle "
+                     "Emy (Infloww), plus Jessye (Infloww) pour la quinzaine du 01 au 15/11 seulement."),
+    "BASCULE_JUSQU_AU": "2026-11-15",
     # la bascule du 09/11 : id du lien GetMySocial -> son code Jessye d'avant
     # (31 liens actifs ; les 7 liens Andry sur c150)
     "BASCULE_PARTENAIRE": {

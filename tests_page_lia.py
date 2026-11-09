@@ -163,11 +163,8 @@ check("profil lia : Lia (liasxcret), groupe YouCham de l'espace personnel, MyPul
 check("profil lia : clics US, paie et copie GMS dans des fichiers à elle",
       all(getattr(m, k) != getattr(il, k) for k in ("GMS_COPIE", "US_FICHIER", "US_PERIODES_FICHIER",
                                                      "PAIE_FICHIER", "QUINZ_FICHIER", "LIGNES_FICHIER")))
-# depuis le 09/11/2026, la page Emy lit la nouvelle Emy chez MyPuls (4126) :
-# sa source « depuis toujours » est MyPuls, le reste ne change pas
-check("Jessye et Emy inchangées : équipe, clics OF, liste hors détaillée ; Infloww pour Jessye, MyPuls pour Emy",
-      all(p.GROUPE_GMS == "" and p.EQUIPE_GMS == il.EQUIPE_GMS
-          and p.SOURCE_TOUJOURS == ("MyPuls" if p is not il else "Infloww")
+check("Jessye et Emy inchangées : équipe, Infloww, clics OF, liste hors détaillée",
+      all(p.GROUPE_GMS == "" and p.EQUIPE_GMS == il.EQUIPE_GMS and p.SOURCE_TOUJOURS == "Infloww"
           and p.CLICS_OF is True and p.HORS_DETAIL is True and p.US_FRAIS_S is None
           for p in (il, il.profil("emy"))))
 check("le lien posté : la page Lia SANS clé (accès libre, 31/10)",
