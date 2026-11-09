@@ -79,6 +79,16 @@ em = il.profil("emy")
 # « Hors GetMySocial », ni « dont … Jessye ») ; ce fichier vérifie le détail,
 # toujours calculé -- l'épuré est vérifié dans tests_paie_youl4b_spam
 em.PAGE_EPUREE = False
+# Les données de ce fichier sont celles d'octobre (ANCIENNE Emy + Jessye) : le
+# mécanisme y est vérifié tel qu'il était avant le 09/11/2026. Depuis, la page
+# lit la nouvelle Emy (MyPuls 4126), ignore les anciens liens de suivi Emy
+# quittés avant le 09/11 et reprend la part Jessye des liens basculés : c'est
+# vérifié, page rendue, dans tests_page_emy_bascule.py.
+em.ANCIENS_DEPUIS = ""
+em.ANCIENS_NOTE = ""
+em.MYPULS_CREATOR_ID = None
+em.BASCULE_PARTENAIRE = {}
+em.SOURCE_TOUJOURS = "Infloww"
 J = "https://onlyfans.com/jessyewdiference/c"
 E = "https://onlyfans.com/emy.brw/c"
 DU, AU = "2026-10-16", "2026-10-28"

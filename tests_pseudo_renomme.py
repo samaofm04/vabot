@@ -74,9 +74,26 @@ rep = {"data": {"data": [{"url": "https://onlyfans.com/emy.brww/c66", "name": "T
                          {"url": "https://onlyfans.com/liasxcret/c66", "name": "Lia",
                           "subscribers_period": 9, "visits_period": 9, "revenue": {"total": 1}}],
                 "count": 2, "period": {"from": "2026-11-01", "to": "2026-11-03"}}}
-lu = emy._lire_mypuls(rep["data"])
+# Le mécanisme d'alias, sans compte imposé (comme avant le 09/11/2026)
+_cid = emy.MYPULS_CREATOR_ID
+emy.MYPULS_CREATOR_ID = None
+try:
+    lu = emy._lire_mypuls(rep["data"])
+finally:
+    emy.MYPULS_CREATOR_ID = _cid
 codes = [(x["code"], x["abonnes"]) for x in lu.get("liens") or []]
-check("lecture MyPuls de la page Emy : la ligne emy.brww comptée, celle de Lia non", codes == [("66", 4)], lu)
+check("lecture MyPuls (sans compte imposé) : la ligne emy.brww comptée, celle de Lia non", codes == [("66", 4)], lu)
+# Depuis le 09/11/2026, la page Emy lit la NOUVELLE Emy (MyPuls 4126, emy.brw) :
+# une ligne de l'ancienne (3352, rendue emy.brww) ne compte plus, même code
+rep2 = {"data": [{"url": "https://onlyfans.com/emy.brww/c66", "name": "ancienne", "creator_id": 3352,
+                  "subscribers_period": 4, "visits_period": 10, "revenue": {"total": 2.5}},
+                 {"url": "https://onlyfans.com/emy.brw/c66", "name": "nouvelle", "creator_id": 4126,
+                  "subscribers_period": 7, "visits_period": 10, "revenue": {"total": 1}},
+                 {"url": "https://onlyfans.com/liasxcret/c66", "name": "Lia", "creator_id": 3992,
+                  "subscribers_period": 9, "visits_period": 9, "revenue": {"total": 1}}]}
+lu2 = emy._lire_mypuls(rep2)
+codes2 = [(x["code"], x["abonnes"]) for x in lu2.get("liens") or []]
+check("page Emy : seule la nouvelle Emy (4126) est lue, ni l'ancienne ni Lia", codes2 == [("66", 7)], lu2)
 
 print("4. La page perso du VA")
 check("stats_va._codes : un tracking emy.brww compte pour emy.brw",

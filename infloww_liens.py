@@ -101,6 +101,21 @@ NOM_EQUIPE = "JESSY LE RETOUR"
 GROUPE_GMS = ""
 # D'où viennent les chiffres « depuis toujours » : Lia n'est pas chez Infloww.
 SOURCE_TOUJOURS = "Infloww"
+# Le compte MyPuls (creator_id) dont la page lit les liens de suivi ; None :
+# tout compte au pseudo de CREATRICE. Page JESSY LE RETOUR, 09/11/2026 : la
+# nouvelle Emy (4126) porte le pseudo emy.brw qu'avait l'ancienne avant de
+# devenir emy.brww, et pd.pseudo_of replie emy.brww sur emy.brw : sans le
+# numéro, les deux comptes se mêleraient sous les mêmes codes.
+MYPULS_CREATOR_ID: Optional[int] = None
+# Non vide (AAAA-MM-JJ) : les liens de suivi quittés (registre du podium,
+# _anciens_trackings) dont le dernier jour visé est AVANT ce jour ne sont pas
+# comptés. Page JESSY LE RETOUR : avant le 09/11, « emy.brw/cN » au registre
+# désigne l'ANCIENNE Emy, un autre compte que celui que la page lit ; ses
+# codes croisent ceux de la nouvelle (c12, c17…c27) et sortaient « absents »
+# de MyPuls, ce qui mettait la ligne en trou.
+ANCIENS_DEPUIS = ""
+# Ce que la page dit d'une période qui commence avant ANCIENS_DEPUIS.
+ANCIENS_NOTE = ""
 # False : pas de colonne des clics du lien de suivi (le CVR reste calculé
 # sur eux : subs ÷ clics OnlyFans).
 CLICS_OF = True
@@ -231,6 +246,19 @@ _VERROU_MP = threading.Lock()
 # PARTENAIRES.
 PARTENAIRE = ""
 NOM_PARTENAIRE = ""
+# Liens de l'espace passés d'un lien de suivi du PARTENAIRE à un lien de la
+# créatrice de la page : {id du lien GetMySocial : code du partenaire quitté}.
+# Le 09/11/2026 vers 00 h 15 UTC, les 31 liens de JESSY LE RETOUR sont passés
+# de Jessye (jessyewdiference/c132…c160) à la nouvelle Emy (emy.brw/c1…c27).
+# Plus aucun bouton ne portant jessyewdiference, la part Jessye du 01 au 09/11
+# disparaissait de la quinzaine, Gagné compris, sans un mot (simulé :
+# Misandratra 43 → 3 subs). Par l'ID du lien, ni par son nom (renommés le même
+# soir) ni par son code d'aujourd'hui : un lien qui changerait plus tard de lien
+# de suivi aurait perdu sa part Jessye, même sur une quinzaine figée (relecture
+# du 09/11). Le lien Jessye garde
+# toute la période (pas de coupure au jour de la bascule) : c'est un autre lien
+# de suivi, ses subs ne peuvent pas être comptés deux fois.
+BASCULE_PARTENAIRE: Dict[str, str] = {}
 # Une lecture neuve coûte une page /v1/linkfans par centaine d'abonnés et par
 # lien (27 pour les 26 liens du 28/10) : elle part dans un fil, comme MyPuls,
 # et la page ne l'attend que PARTENAIRE_ATTENTE_S (compté depuis le départ du
@@ -516,7 +544,14 @@ def _codes_partenaire(liens_gms_: List[Any]) -> List[str]:
     ceux qu'il faut lire chez Infloww, pour le tableau comme pour la paie."""
     if not PARTENAIRE:
         return []
-    cs = {code_partenaire(url_du_lien(l)) for l in liens_gms_ if isinstance(l, Mapping)}
+    cs = set()
+    for l in liens_gms_:
+        if not isinstance(l, Mapping):
+            continue
+        u = url_du_lien(l)
+        cs.add(code_partenaire(u))
+        # un lien passé du partenaire à la créatrice : son ancien code aussi
+        cs.add(BASCULE_PARTENAIRE.get(str(l.get("id") or ""), ""))
     return sorted((c for c in cs if c), key=lambda c: (len(c), c))
 
 
@@ -610,6 +645,8 @@ def _anciens_trackings(liens_gms_: List[Any], bornes: Optional[Tuple[str, str]] 
                 continue
             vu, premier = str(e.get("vu") or ""), str(e.get("premier") or "")
             if du and (vu < du or premier > au):
+                continue
+            if ANCIENS_DEPUIS and vu < ANCIENS_DEPUIS:
                 continue
             par_nom = bool(nom) and nom in (e.get("liens") or [])
             par_num = (seul is not None and lid in (e.get("ids") or [])
@@ -994,7 +1031,7 @@ def _lire_mypuls(d: Any) -> Dict[str, Any]:
         return {"erreur": f"MyPuls a rendu une réponse de forme imprévue ({type(d).__name__})"}
     liens: List[Dict[str, Any]] = []
     vus: Dict[str, int] = {}
-    illisibles = doublons = champs = 0
+    illisibles = doublons = champs = autre_compte = 0
     for it in items:
         if not isinstance(it, Mapping):
             illisibles += 1
@@ -1008,6 +1045,9 @@ def _lire_mypuls(d: Any) -> Dict[str, Any]:
             continue
         # pd.pseudo_of : un compte renommé chez OnlyFans (Emy, emy.brww, 03/11)
         if pd.pseudo_of(m.group(1)) != CREATRICE:
+            continue
+        if MYPULS_CREATOR_ID and _entier(it.get("creator_id")) != MYPULS_CREATOR_ID:
+            autre_compte += 1        # même pseudo, autre compte : écarté, mais dit
             continue
         code = str(int(m.group(2)))
         if code in vus:
@@ -1029,7 +1069,7 @@ def _lire_mypuls(d: Any) -> Dict[str, Any]:
     compte = _entier(d.get("count")) if isinstance(d, Mapping) else None
     per = d.get("period") if isinstance(d, Mapping) else None
     return {"erreur": "", "liens": liens, "illisibles": illisibles, "doublons": doublons,
-            "champs_manquants": champs,
+            "champs_manquants": champs, "autre_compte": autre_compte,
             "tronque": ([f"MyPuls annonce {compte} liens de suivi, {len(items)} rendus"]
                         if compte is not None and compte > len(items) else []),
             "periode_mypuls": ({"from": str(per.get("from") or ""), "to": str(per.get("to") or "")}
@@ -2058,6 +2098,17 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                     iid = str(x.get("id") or "")
                     siens[iid] = x
                     quittes[iid] = max(quittes.get(iid, ""), a["vu"])
+            cb = BASCULE_PARTENAIRE.get(str(gid), "")
+            if cb:
+                # l'ancien lien de suivi du partenaire de ce lien (bascule) :
+                # compté chez lui en plus de son code d'aujourd'hui
+                x = par_code_p.get(cb) or (_manque_partenaire(cb, manque_p) if manque_p else None)
+                if x is None:
+                    introuvables.append({"nom": nom_gms(l), "code": cb, "creatrice": PARTENAIRE,
+                                         "raison": f"code c{cb} (avant le passage sur {NOM_AFFICHE}) "
+                                                   f"absent des liens de suivi de {NOM_PARTENAIRE} chez Infloww"})
+                else:
+                    siens[str(x["id"])] = x
             cp = "" if code else code_partenaire(u)
             if cp:
                 # un lien de suivi Jessye (page Emy), lu chez Infloww
@@ -2104,6 +2155,11 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
             if noms:
                 ligne.update(nom=" + ".join(noms), nom_gms=cle)
         ligne.update(_somme(list(siens.values())))
+        # la règle de trou de _subs_par_personne (la paie) : un lien rattaché
+        # sans subs connus (MyPuls muet sur ce champ, part du partenaire pas
+        # lue), un lien quitté sans sa lecture, un introuvable AVEC code
+        ligne["a_trou"] = bool(any(v.get("abonnes") is None or v.get("fin_manque") for v in siens.values())
+                               or any(r.get("code") for r in introuvables))
         pp = _part_partenaire(list(siens.values()))
         if pp:
             ligne["part_p"] = pp
@@ -2395,12 +2451,17 @@ def _ajouter_gagne(t: Dict[str, Any]) -> Dict[str, Any]:
         payable = q is not None and q[0].isoformat() >= str(PAIE_GRILLE.get("depuis") or "")
         vals = []
         for x in t.get("lignes") or []:
-            x["gagne"] = paie_grille(x.get("subs")) if payable else None
+            # une prime ne se calcule pas sur un compte à trou (lien introuvable,
+            # part du partenaire pas lue) : juste sous le seuil, l'écart était de
+            # 27,60 $ contre 60 $
+            x["gagne"] = paie_grille(x.get("subs")) if payable and not x.get("a_trou") else None
             if x["gagne"] is not None:
                 vals.append(x["gagne"])
         if not isinstance(t.get("totaux"), dict):
             t["totaux"] = {}
-        t["totaux"]["gagne"] = round(sum(vals), 2) if vals else None
+        # un total qui en manquerait un se lirait comme complet : « — »
+        manquent = payable and any(x.get("a_trou") for x in t.get("lignes") or [])
+        t["totaux"]["gagne"] = round(sum(vals), 2) if vals and not manquent else None
         return t
     try:
         cfgs, _mauvais = lire_paie()
@@ -2497,7 +2558,8 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
                            "devise": m.get("devise") or "", "doublons": int(m.get("doublons") or 0),
                            "champs_manquants": int(m.get("champs_manquants") or 0),
                            # MyPuls n'a pas répondu dans le temps que la page lui laisse
-                           "mypuls_en_cours": bool(m.get("en_cours"))}
+                           "mypuls_en_cours": bool(m.get("en_cours")),
+                           "autre_compte": int(m.get("autre_compte") or 0)}
     commun = dict(lu_a=m.get("lu_a"), tronque=m.get("tronque"), repli_gms=g["repli"], erreur=erreur,
                   source="Infloww" if infloww_seul else "MyPuls", illisibles=int(m.get("illisibles") or 0),
                   desactives=int(g.get("desactives") or 0))
@@ -3658,6 +3720,7 @@ def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
     fige = bloc.get("fige") if isinstance(bloc.get("fige"), Mapping) else {}
     rel = bloc.get("liens") if isinstance(bloc.get("liens"), Mapping) else {}
     miens = {str(l["id"]): str(l.get("nom") or l["id"]) for l in liens_now}
+    personnes_jour = set(proprio.values())
     a_autrui: Dict[str, str] = {}
     for c, v in fige.items():
         if str(c) != cle and isinstance(v, Mapping) and isinstance(v.get("liens"), Mapping):
@@ -3688,7 +3751,10 @@ def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
         for lid, nom in miens.items():
             e = rel.get(lid) if isinstance(rel.get(lid), Mapping) else {}
             q = str(e.get("qui") or "")
-            autre = a_autrui.get(lid) or (q if q and q != cle else "")
+            # noté à une personne qui n'existe plus (renommage : « ANDRY » →
+            # « Andry », le 09/11/2026) : il est à celle d'aujourd'hui. Sans
+            # ça, les 7 liens Andry sortaient de son fixe, « exclus chez ANDRY ».
+            autre = a_autrui.get(lid) or (q if q and q != cle and q in personnes_jour else "")
             if autre:
                 out["exclus"].append({"nom": nom, "chez": autre})
             else:
@@ -5098,6 +5164,11 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: 
     h: List[str] = []
     source = str(t.get("source") or "Infloww")
     per = t.get("periode") or {}
+    if ANCIENS_NOTE and (not per.get("du") or str(per.get("du")) < ANCIENS_DEPUIS):
+        h.append(f'<div class="avert">{_e(ANCIENS_NOTE)}</div>')
+    if per.get("autre_compte"):
+        h.append(f'<div class="avert">{_nb(per["autre_compte"])} lien(s) de suivi @{_e(CREATRICE)} d\'un '
+                 f"autre compte MyPuls que le n° {MYPULS_CREATOR_ID}, écartés : ils ne sont pas à cette page.</div>")
     if t.get("cvr_panne"):
         h.append(f'<div class="avert"><b>Infloww n\'a pas répondu</b> ({_e(t["cvr_panne"])}) : le CVR '
                  "est calculé sur les clics MyPuls du lien de suivi.</div>")
@@ -6234,9 +6305,42 @@ REGLAGES["emy"] = {
     "PAR_EQUIPE": True, "TRI_DEFAUT": "equipe",
     # « retire ça » (le bloc d'explications, Hors GetMySocial, « dont … Jessye »)
     "PAGE_EPUREE": True,
-    # Emy et Jessye n'y sont plus chez MyPuls : une période depuis le 01/11 se
-    # lit chez Infloww seul (voir PERIODE_INFLOWW_DEPUIS)
-    "PERIODE_INFLOWW_DEPUIS": "2026-11-01",
+    # Depuis le 09/11/2026, la créatrice de la page est la NOUVELLE Emy
+    # (onlyfans.com/emy.brw, MyPuls 4126) : propriétaire, « Emy là y a que sur
+    # MyPuls et Jessye API Infloww ». Plus de lecture Infloww pour elle (chez
+    # Infloww, deux créatrices portent le pseudo emy.brw et la première rendue
+    # gagnait) : MyPuls pour toutes les périodes, depuis toujours compris.
+    # (Du 01 au 09/11, PERIODE_INFLOWW_DEPUIS lisait l'ancienne chez Infloww.)
+    "SOURCE_TOUJOURS": "MyPuls",
+    "MYPULS_CREATOR_ID": 4126,
+    "ANCIENS_DEPUIS": "2026-11-09",
+    "ANCIENS_NOTE": ("Avant le 09/11, la part Emy de cette page était l'ancienne Emy (emy.brww), "
+                     "un autre compte : elle n'est plus comptée ici. Cette page additionne la "
+                     "nouvelle Emy (MyPuls) et Jessye (Infloww)."),
+    # la bascule du 09/11 : id du lien GetMySocial -> son code Jessye d'avant
+    # (31 liens actifs ; les 7 liens Andry sur c150)
+    "BASCULE_PARTENAIRE": {
+        "lnk_6aba04fad38dbae582b4333e": "147", "lnk_6abe1a9d37937d9566352b6c": "146",
+        "lnk_6abe1ae51eecdf1691b98b6f": "145", "lnk_6abe1b0337937d95663530cb": "136",
+        "lnk_6ac140ba0b1140e50ba7a009": "148", "lnk_6ace9ec63b0adf5c6cb7735e": "135",
+        "lnk_6ace9f109b2a0986fde57c28": "134", "lnk_6ace9f6a1e5eaf1785a4dbee": "133",
+        "lnk_6ad242841ed48b5efd7b450a": "132", "lnk_6adaa4e5f05823ad80d4ad2c": "158",
+        "lnk_6aea283147dff14a5d48d873": "159", "lnk_6aea2888251a15b3e8dfde5b": "160",
+        "lnk_6ac45440dae3fc7e8312b918": "153", "lnk_6ac453d9b8d63d263617fe24": "155",
+        "lnk_6aaa4862f8e7bb1c51a679ec": "156", "lnk_6ac454189e8dc5ba261e5c2d": "154",
+        "lnk_6aaa47f4695aae833dc64429": "157", "lnk_6a0e5415a5835045d4a1a4d2": "144",
+        "lnk_6a5167c3661861fd7a0eaa59": "143", "lnk_6a8732e82a99dd49a091c423": "142",
+        "lnk_6a9b830982ff27ad6a5b13e3": "138", "lnk_6a0e533ba5835045d4a19815": "151",
+        "lnk_6a0e5362fea0a6e3ed3390d9": "149", "lnk_6a0e53f9bfa0c238f20b46b8": "152",
+        "lnk_6a9c1052e92a6bdb5e732c7a": "150", "lnk_6a9c107102cce46ce2dcc64c": "150",
+        "lnk_6ad868d11f59a2659b845ddb": "150", "lnk_6ad868d91f59a2659b845e22": "150",
+        "lnk_6ad868db1f59a2659b845e49": "150", "lnk_6ad868dc1f59a2659b845e6d": "150",
+        "lnk_6ad868dd1f59a2659b845e93": "150"},
+    # les quinzaines figées de l'ANCIENNE Emy rangent leurs subs par code seul
+    # (c1…c111) : servies ici, elles étaient comptées au VA qui tient
+    # aujourd'hui le même code chez la nouvelle (relecture du 09/11 : 16→31/10,
+    # Misandratra 77 + 40 dans la paie, 40 au tableau). Un fichier à elle.
+    "QUINZ_FICHIER": DATA_DIR / "infloww_liens_quinzaines_emy_4126.json",
     # la clé des VA rouvre la page (fermée le 02/11) : « réouvre la page »,
     # le 04/11, une fois Gagné à leur grille ; la vue paie reste au propriétaire
     "CLE_VA_OUVERTE": True,
