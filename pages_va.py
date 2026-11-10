@@ -43,7 +43,9 @@ principal du VA, déjà une landing page (LIEN_PAGE_1) ; il en demande d'autres
 (registre « demandes »), la page acceptée (page 2, 3…) copie GABARIT_PAGE
 (liabrune) et se modifie comme celle de Twitter. Brune par défaut, lien
 principal compris (LOOK_DEFAUT) ; le choix du look sur toutes. Les pages
-acceptées ont le 70/30 « Lia seule » (AB_PAGES) ; Twitter reste sans A/B.
+acceptées avaient le 70/30 « Lia seule » (AB_PAGES) ; retiré le 10/11/2026
+avec la marge sans tracking des trois TRUST (liens_va.MARGE_SANS_TRACKING) :
+plus aucun A/B sur les pages. Twitter n'en a jamais eu.
 L'après-midi du même jour, chaque VA avait 3 pages FIXES créées d'office
 (FIXES, GABARITS_PLACE) : rangées dans « anciennes » et coupées
 (retirer_pages_hors_places), jamais supprimées.
@@ -121,6 +123,8 @@ GABARITS_PLACE: Dict[str, Dict[int, str]] = {}
 #: liens_va.lia_seule(gid) le veut encore. Twitter n'y est pas : « ça doit pas
 #: être 70 30 » (06/11). Une page se coupe par disable_link, jamais en
 #: éteignant son A/B : éteindre efface les variantes chez GetMySocial (21/10).
+#: Depuis le 10/11/2026, liens_va.lia_seule est None partout (« remove le truc
+#: erreur des 30 % ») : ab_voulu est faux, aucune page ne reçoit de 70/30.
 AB_PAGES = {AGENCY_IG_ID}
 
 FICHIER = Path(__file__).resolve().parent / "data" / "pages_va.json"
@@ -2620,6 +2624,8 @@ reprendre_pages.__doc__ = _reprendre_pages_avant_page1.__doc__
 # comme variante, puis supprimée (comme les copies temporaires de liens_va).
 # Refaite quand ce qu'elle copie change (le look, la fenêtre d'une page
 # demandée, la model) : « bases_page » note, par lien, ce qui a été copié.
+# Éteint depuis le 10/11/2026 avec la marge sans tracking (liens_va.lia_seule
+# None) : poser_base_en_page et poser_bases_en_page ne font plus rien.
 BASE_EN_PAGE = {AGENCY_IG_ID}
 #: La source de la copie temporaire, par serveur : un lien SANS A/B.
 SOURCE_BASE_PAGE: Dict[str, str] = {AGENCY_IG_ID: "lnk_6aedd88bc7881b6c8066a247"}     # liabrune

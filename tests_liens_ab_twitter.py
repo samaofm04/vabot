@@ -1847,11 +1847,14 @@ try:
 
     # ── Twitter sans Seren : 70 tracking Lia / 30 page Lia (02/11/2026) ──
     # « pour Twitter uniquement, le trafic uniquement sur Lia », « 70 avec
-    # tracking et 30 sans tracking »
-    CONFIG_LIA = {k: v for k, v in CONFIG_4.items() if k != "lia_seule"}
+    # tracking et 30 sans tracking ». Retiré le 10/11/2026 (« remove le truc
+    # erreur des 30 % », vérifié plus bas) : le 70/30 est vérifié tel qu'il
+    # reviendrait par la clé « marge_sans_tracking » : true.
+    CONFIG_SANS_MARGE = {k: v for k, v in CONFIG_4.items() if k != "lia_seule"}
+    CONFIG_LIA = dict(CONFIG_SANS_MARGE, marge_sans_tracking=True)
     monde4(config=CONFIG_LIA)
     e = lv.espace(TW)
-    check("Twitter par défaut : plus de variante Seren, la page de base seule à 70 / 30",
+    check("marge remise : plus de variante Seren, la page de base seule à 70 / 30",
           e.get("variante") is None and e.get("base_seule") == {"controle": 70, "base_modele": 30}
           and lv.espace("").get("base_seule") == e.get("base_seule"), e)
     # 03/11/2026, « Lia seule partout » : Agency et Threads aussi
@@ -1916,6 +1919,53 @@ try:
     lv.reprendre_pays(TW)
     check("reprendre_pays : la variante Seren n'est pas recopiée sur Twitter",
           not g.de("post") and not g.de("duplicate"), g.appels)
+
+    # ── 10/11/2026 : la marge des 30 % retirée des trois TRUST ──
+    # « pour TRUST Threads, Twitter, Instagram, tu peux remove le truc erreur
+    # stp des 30 % » : 100 % sur le tracking du VA, et Seren toujours retirée
+    monde4(config=CONFIG_SANS_MARGE)
+    TROIS = (TW, lv.THREADS_ID, lv.AGENCY_IG_ID)
+    check("sans marge (par défaut) : ni Seren ni page de base sur les 3 TRUST",
+          all(lv.espace(x).get("variante") is None and lv.espace(x).get("base_seule") is None for x in TROIS)
+          and lv.espace("").get("base_seule") is None, [lv.espace(x) for x in TROIS])
+    check("… lia_seule() vaut None, sans_seren() reste vrai",
+          all(lv.lia_seule(x) is None and lv.sans_seren(x) for x in TROIS)
+          and not lv.marge_sans_tracking(), [(lv.lia_seule(x), lv.sans_seren(x)) for x in TROIS])
+    check("… Va IG (pas un TRUST) : ni Seren retirée ni marge",
+          lv.sans_seren("1505418484052394004") is False and lv.lia_seule("1505418484052394004") is None)
+    monde4(config=dict(CONFIG_SANS_MARGE, lia_seule=False))
+    check("… « lia_seule » : false ramène toujours Seren (sans page de base)",
+          lv.espace(TW).get("variante") is not None and lv.espace(TW).get("base_seule") is None)
+
+    # un lien neuf : aucun A/B, aucun tracking Seren, aucune copie temporaire
+    g, suivis = monde4(config=CONFIG_SANS_MARGE)
+    r = lv.creer_pour(TW, "n3", "nova3", manager="YAZID")
+    sc = r.get("shortcode") or "?"
+    check("sans marge : lien neuf à 100 % sur le tracking, aucun A/B posé",
+          r.get("ok") and r.get("variante") is None and not (g.abs.get(sc) or {}).get("enabled")
+          and not g.de("post") and not g.de("ab") and not g.de("lire") and not g.de("delete")
+          and len(g.de("duplicate")) == 1, (r, g.appels))
+    check("… aucun tracking Seren demandé à MyPuls", [c for _n, c in suivis] == [None], suivis)
+    check("… fiche sans note « base_seule »", "base_seule" not in lv.lien_de(TW, "n3"), lv.lien_de(TW, "n3"))
+
+    # la reprise (30 min) ne remet RIEN : ni « Base Lia », ni les quatre branches
+    for etat_ab in (ab4(*QUATRE), ab4(("vL", "Base Lia", 30, LIA_P), controle=70),
+                    {"enabled": False, "variants": []}):
+        g, _s = monde4(config=CONFIG_SANS_MARGE, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy")}})
+        g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+        g.abs["babeyy"] = etat_ab
+        b = lv.reprendre_bases(TW)
+        check(f"sans marge : reprendre_bases ne lit ni n'écrit rien (A/B {etat_ab.get('controlWeight', 'éteint')})",
+              not g.appels and not b["poses"] and not b["rates"], (b, g.appels))
+    g, _s = monde4(config=CONFIG_SANS_MARGE, etat={"liens": {f"{TW}:d": fiche4(32, "babeyy", pays=False)}})
+    g.liens["lnk_babeyy"] = {"id": "lnk_babeyy", "type": "directlink", "url": f"{LIA_P}/c60"}
+    g.abs["babeyy"] = {"enabled": False, "variants": []}
+    lv.reprendre_pays(TW)
+    check("sans marge : reprendre_pays ne recopie pas Seren non plus",
+          not g.de("post") and not g.de("duplicate") and not g.de("ab"), g.appels)
+    r = lv.poser_base_seule(TW, "d")
+    check("sans marge : poser_base_seule hors sujet, rien noté",
+          r.get("hors_sujet") and not g.de("post") and "base_seule" not in lv.lien_de(TW, "d"), r)
 finally:
     for _k, _v in _SAUVE_LV.items():
         setattr(lv, _k, _v)

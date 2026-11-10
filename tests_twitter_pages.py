@@ -48,7 +48,9 @@ print("0. Par défaut, depuis le 04/11 : lien direct")
 e0 = lv.espace(lv.TWITTER_ID)
 check("GABARIT_PAGE_TWITTER vide : le gabarit direct, pas de page",
       lv.GABARIT_PAGE_TWITTER == "" and e0["gabarit"] == DIRECT and not e0.get("landing"), e0)
-check("… la Lia seule (70/30) reste", e0.get("base_seule") == lv.LIA_SEULE, e0.get("base_seule"))
+# Lia seule, sans la marge des 30 % depuis le 10/11/2026 : ni Seren ni « Base Lia »
+check("… Lia seule, sans marge : ni Seren ni 70/30", e0.get("variante") is None
+      and e0.get("base_seule") is None, e0)
 lv.GABARIT_PAGE_TWITTER = "lnk_page_modele"
 
 print("1. L'espace Twitter, interrupteur des pages ouvert")
@@ -56,7 +58,8 @@ e = lv.espace(lv.TWITTER_ID)
 check("gabarit = la page modèle, en page", e["gabarit"] == lv.GABARIT_PAGE_TWITTER and e.get("landing") is True, e)
 check("les copies des branches de l'A/B partent de l'ancien gabarit direct", e.get("source_variante") == DIRECT, e)
 check("espace() sans serveur = Twitter, pareil", lv.espace("")["gabarit"] == lv.GABARIT_PAGE_TWITTER)
-check("la Lia seule (70/30) reste", e.get("base_seule") == lv.LIA_SEULE, e.get("base_seule"))
+check("Lia seule, sans marge, inchangée par les pages", e.get("variante") is None
+      and e.get("base_seule") is None, e)
 
 print("2. Un lien neuf sur Twitter")
 APPELS = []

@@ -1211,8 +1211,8 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:
               if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
               and f.get("actif") is not False}
     # Lia seule (Twitter le 02/11/2026, Threads et Agency le 03/11) :
-    # recopier une variante Seren la remettrait
-    seren = not lia_seule(gid)
+    # recopier une variante Seren la remettrait — même sans la marge des 30 %
+    seren = not sans_seren(gid)
     a_faire = [c for c, f in fiches.items()
                if (f.get("pays") is False and int(f.get("pays_essais") or 0) < ESSAIS_PAYS)
                or (seren and (f.get("variante") or {}).get("posee")
@@ -1682,14 +1682,41 @@ _COUPE = __import__("threading").Lock()
 LIA_SEULE = {"controle": 70, "base_modele": 30}
 LIA_SEULE_SERVEURS = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
 
+# Propriétaire, 10/11/2026 : « pour TRUST Threads, Twitter, Instagram, tu peux
+# remove le truc erreur stp des 30 % ». La marge sans tracking (« Base Lia »,
+# 30 %) est retirée des trois TRUST : 100 % des visites sur le tracking du VA,
+# liens directs, Page 1 et pages demandées d'Instagram compris. Seren reste
+# retirée (sans_seren) : mettre « lia_seule » à false l'aurait ramenée, avec
+# les quatre branches de SANS_TRACKING. Le code ne pose plus de « Base Lia »
+# nulle part (création, reprise, pages) ; les A/B déjà posés chez GetMySocial
+# s'éteignent à part, à la main, lien par lien. Clé « marge_sans_tracking » de liens_va_config.json : true
+# pour la remettre — un lien passé le 10/11 garde sa note « base_seule » ok
+# (et ses pages leur « bases_page ») : la reprise le sauterait, effacer ces
+# notes d'abord.
+MARGE_SANS_TRACKING = False
+
+
+def sans_seren(gid: str = "") -> bool:
+    """Seren retirée des liens de ce serveur (les 3 TRUST depuis le
+    03/11/2026) : ni tracking Seren créé ni variante posée. gid "" : Twitter,
+    comme espace()."""
+    if (str(gid) or TWITTER_ID) not in LIA_SEULE_SERVEURS:
+        return False
+    return config().get("lia_seule", True) is not False
+
+
+def marge_sans_tracking() -> bool:
+    """La marge des 30 % sans tracking (voir MARGE_SANS_TRACKING), remise par
+    la clé « marge_sans_tracking » : true de la config."""
+    return config().get("marge_sans_tracking", MARGE_SANS_TRACKING) is True
+
 
 def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
-    """Les deux parts de l'A/B des liens de ce serveur quand Seren en est
-    retirée (les 3 TRUST depuis le 03/11/2026), None sinon. gid "" :
-    Twitter, comme espace()."""
-    if (str(gid) or TWITTER_ID) not in LIA_SEULE_SERVEURS:
-        return None
-    if config().get("lia_seule", True) is False:
+    """Les deux parts du 70/30 des liens de ce serveur quand Seren en est
+    retirée, None sinon — et None tant que la marge sans tracking est retirée
+    (10/11/2026) : plus aucune « Base Lia » posée. gid "" : Twitter, comme
+    espace()."""
+    if not sans_seren(gid) or not marge_sans_tracking():
         return None
     return dict(LIA_SEULE)
 
@@ -1733,11 +1760,13 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
                if mypuls_actif() and not SEREN_EN_PAUSE and e.get("source_variante") else None)
         e.update(tracking=mypuls_actif(), variante=var,
                  base_shortcode=str(c.get("base_shortcode") or c.get("modele") or "emy"))
-        parts = lia_seule(gid)
-        if parts:
-            # Lia seule (03/11/2026) : la page de Lia à la place de Seren
+        if sans_seren(gid):
+            # Lia seule (03/11/2026) : plus de Seren ; la page de Lia à sa
+            # place tant que la marge sans tracking est là (retirée le 10/11)
             e["variante"] = None
-            e["base_seule"] = parts
+            parts = lia_seule(gid)
+            if parts:
+                e["base_seule"] = parts
         return e
     e = _espace_avec_seren(gid)
     if (str(gid) or TWITTER_ID) == TWITTER_ID and GABARIT_PAGE_TWITTER:
@@ -1745,11 +1774,13 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
         e.update(gabarit=GABARIT_PAGE_TWITTER, landing=True)
     if SEREN_EN_PAUSE:
         e["variante"] = None
-    parts = lia_seule(gid)
-    if parts:
-        # ni tracking Seren créé, ni variante posée : la page de base à la place
+    if sans_seren(gid):
+        # ni tracking Seren créé, ni variante posée ; la page de base à la
+        # place tant que la marge sans tracking est là (retirée le 10/11)
         e["variante"] = None
-        e["base_seule"] = parts
+        parts = lia_seule(gid)
+        if parts:
+            e["base_seule"] = parts
     return e
 
 
@@ -2372,8 +2403,13 @@ def reprendre_bases(gid: str) -> Dict[str, Any]:
     import time as _t
     import gms
     gid = str(gid)
-    if lia_seule(gid):
-        return reprendre_base_seule(gid)
+    if sans_seren(gid):
+        # Seren retirée : la page de base seule, ou rien du tout depuis que la
+        # marge sans tracking est retirée (10/11/2026) — surtout pas les
+        # quatre branches plus bas, qui remettraient Seren
+        if lia_seule(gid):
+            return reprendre_base_seule(gid)
+        return {"poses": [], "deja": [], "rates": [], "a_verifier": [], "restent": 0}
     bilan: Dict[str, Any] = {"poses": [], "deja": [], "rates": [], "a_verifier": [],
                              "eteints": [], "reportes": [], "restent": 0}
     if SEREN_EN_PAUSE or gid not in SERVEURS:
