@@ -595,6 +595,15 @@ PARTS_YOULAB = (44, 32)
 #: Les abonnés restent la part de tous les VA de YouLab, pas les leurs.
 LIGNES_YOULAB = ((160, "yous1m"), (134, "vectorofm"), (12, "Roucham"))
 
+#: Propriétaire, 10/11/2026, devant 👀 Pseudos d'Agency (« Instagram VA 160 ·
+#: yous1m + TRUST Twitter · 44 % ») : « remove dans les serveurs TRUST les
+#: trucs des autres serveurs », « les IG y a que IG ». Les trois lignes de
+#: YouLab (TRUST TWITTER) quittent la quinzaine d'Agency : elle ne compte plus
+#: que ses VA, comme sa semaine et son bonus. Ces lignes prenaient tout le
+#: podium (909, 661 et 497 subs de VA Twitter au 10/11). Lu par
+#: podium_discord.classement et noms_agency. POUR LES REMETTRE : True.
+YOULAB_SUR_AGENCY = False
+
 
 def _parts_youlab(total: int) -> List[int]:
     a = int(total * PARTS_YOULAB[0] / 100 + 0.5)
@@ -667,8 +676,13 @@ def totaux_agency() -> Dict[str, int]:
 def noms_agency() -> Dict[str, str]:
     """« 👀 Pseudos » d'Agency : {libellé : qui}. « Instagram VA 99 » → son
     pseudo ; les trois lignes de YouLab (LIGNES_YOULAB) → à qui est le
-    numéro, et que leurs abonnés sont une part de ceux des VA de YouLab."""
+    numéro, et que leurs abonnés sont une part de ceux des VA de YouLab —
+    quand elles y sont (YOULAB_SUR_AGENCY)."""
     out = {e["nom"]: e["pseudo"] or "?" for e in entites_agency().values()}
+    if not YOULAB_SUR_AGENCY:
+        # sans ses lignes de YouLab, « Instagram VA 160 » n'est plus que yous1m
+        # (les quinzaines figées avant gardent leurs noms, podium_discord._noms_au)
+        return out
     parts = (f"{PARTS_YOULAB[0]} %", f"{PARTS_YOULAB[1]} %", "le reste")
     for (num, qui), part in zip(LIGNES_YOULAB, parts):
         lib = libelle_agency(num)

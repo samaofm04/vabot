@@ -35,7 +35,12 @@ Ce qui est vérifié (podium_discord, section « VA 41 ») :
     les places payées seulement ;
   - suivi_va.annoncer_primes saute la ligne interne : personne n'est payé à
     son nom, le 2e garde la prime du 2e ;
-  - INTERNES_REUNIS = False : tout comme avant.
+  - INTERNES_REUNIS = False : tout comme avant ;
+  - depuis le 10/11/2026 (« les Twitter y a que Twitter, les IG y a que IG,
+    et Threads y a que Threads ») : INTERNES_SUR = {Twitter}, VA 41 reste,
+    ni « Instagram VA 141 » ni « Threads 142 » (semaine, bonus, quinzaine),
+    et rien n'est relu pour eux. Le mécanisme d'avant reste vérifié plus
+    haut, l'interrupteur rallumé.
 
 Aucun appel réseau. Lancement : python tests_va_interne.py
 """
@@ -128,7 +133,8 @@ _SAUVE = {k: getattr(pd, k) for k in ("_lire_registre", "_classement_sans_intern
                                       "_entites_jessye_toutes", "VA_TWITTER_SUR_THREADS",
                                       "_liens_twitter", "_entites_jessye", "_releve_liens",
                                       "_quinzaine_sans_internes", "_noms_libelles_sans_internes",
-                                      "_staff", "_refus_pseudos", "INTERNES_REUNIS")}
+                                      "_staff", "_refus_pseudos", "INTERNES_REUNIS",
+                                      "INTERNES_SUR")}
 _SAUVE_LV = lv._etat
 _SAUVE_SV = {k: getattr(suivi_va, k) for k in ("ETAT_FICHIER", "adresse_de")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("_etat", "_api")}
@@ -138,6 +144,9 @@ try:
     pd._noms_registre = lambda: dict(NOMS)
     pd._classement_sans_internes = faux_classement
     pd.INTERNES_REUNIS = True
+    # le mécanisme d'avant le 10/11/2026 (141 et 142) : vérifié ici, rallumé ;
+    # le défaut (Twitter seul) l'est plus bas
+    pd.INTERNES_SUR = {TW, AG, TH}
 
     check("comptes internes : ni tracking de fiche (variante comprise), ni « Twitter VA n @ », "
           "ni numéro de fiche de Twitter",
@@ -413,6 +422,69 @@ try:
           and not pd.prime_semaine_due(TH, {"clics": 0})
           and not pd.prime_semaine_due(TH, {"clics": 1478, "interne": True})
           and not pd.prime_semaine_due(TW, {"clics": 1478, "interne": True}))
+
+    # ── chaque serveur TRUST ses VA (10/11/2026) ──
+    # « les Twitter y a que Twitter, les IG y a que IG, et Threads y a que Threads »
+    pd.INTERNES_SUR = set(_SAUVE["INTERNES_SUR"])
+    check("par défaut, la ligne des comptes internes est à Twitter seul (VA 41)",
+          pd.INTERNES_SUR == {TW}, pd.INTERNES_SUR)
+    pd._TW_INTERNES.clear()
+    APPELS.clear()
+    lots.clear()
+    pd._releve_liens = faux_releve
+    with contextlib.redirect_stdout(io.StringIO()):
+        ca_d = pd.classement(J, J, gid=AG, mesure=pd._mesure_podium(AG))
+        ct_d = pd.classement(L, J, gid=TH, mesure=pd._mesure_podium(TH))
+    check("… Agency, bonus et semaine : plus d'« Instagram VA 141 », et Twitter n'est pas relu pour lui",
+          [x["va"] for x in ca_d["lignes"]] == ["Instagram VA 100", "Instagram VA 63"]
+          and "Instagram VA 141" not in ca_d["illisibles"]
+          and not any(x.get("interne") for x in ca_d["lignes"])
+          and [a for a in APPELS if a[0] == TW] == [], (ca_d, APPELS))
+    bd = pd.embed_bonus(ca_d, dt.date(2026, 11, 10), AG)
+    check("… son bonus : la 🥇 est à un VA d'Agency",
+          "🥇 **Instagram VA 100**" in bd["description"] and "141" not in bd["description"],
+          bd["description"])
+    check("… Threads, bonus et semaine : plus de « Threads 142 », aucun lien interne relevé",
+          [x["va"] for x in ct_d["lignes"]] == ["Threads 92", "Threads 87"]
+          and "Threads 142" not in ct_d["illisibles"] and lots == [], (ct_d, lots))
+    pd._quinzaine_sans_internes = fausse_quinzaine
+    with contextlib.redirect_stdout(io.StringIO()):
+        cq_d = pd._quinzaine_us_gbl(L, J, TH, "quinzaine")
+    check("… Threads, la quinzaine : ni « Threads 142 » ni « Threads VA 1nn »",
+          [x["va"] for x in cq_d["lignes"]] == ["Threads VA 023", "Threads 92"]
+          and not any(x.get("interne") for x in cq_d["lignes"]), cq_d["lignes"])
+    jeton = pd._EN_QUINZAINE_THREADS.set(True)
+    try:
+        dans_q_d = _SAUVE["_entites_jessye"]([])
+    finally:
+        pd._EN_QUINZAINE_THREADS.reset(jeton)
+    check("… et rien n'est relevé pour eux dans la quinzaine ; ailleurs, la liste entière",
+          dans_q_d == {} and sorted(_SAUVE["_entites_jessye"]([])) == [12, 41, 124], dans_q_d)
+    # la vraie quinzaine de Threads : plus rien à tirer des listes de Twitter
+    # ni de Va IG, elles ne sont pas lues (le 10/11, elles l'étaient encore)
+    lus_listes = []
+    _lb, _at = pd.liens_bruts, pd._alltime_clics
+    pd._liens_twitter = lambda etiq: (lus_listes.append("twitter"), ([], True))[1]
+    pd.liens_bruts = lambda gid=None, *a, **k: (lus_listes.append(str(gid)), ([], True))[1]
+    pd._alltime_clics = lambda gid, cl, etiq: None
+    pd._quinzaine_sans_internes = _SAUVE["_quinzaine_sans_internes"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cq_vrai = pd._quinzaine_us_gbl(L, J, TH, "quinzaine")
+    finally:
+        pd.liens_bruts, pd._alltime_clics = _lb, _at
+    check("… la vraie quinzaine de Threads : ses VA seuls, sans lire les liens de Twitter ni de Va IG",
+          lus_listes == [] and [x["va"] for x in cq_vrai["lignes"]] == ["Threads 92", "Threads 87"],
+          (lus_listes, cq_vrai["lignes"]))
+    pd._TW_INTERNES.clear()
+    with contextlib.redirect_stdout(io.StringIO()):
+        ctw_d = pd.classement(J, J, gid=TW, mesure="tracking_abonnes")
+    check("… Twitter garde VA 41, en tête",
+          ctw_d["lignes"][0]["va"] == "VA 41" and ctw_d["lignes"][0].get("interne") is True,
+          ctw_d["lignes"][:2])
+    check("… 👀 Pseudos nomme encore 141 et 142 (pages figées d'avant)",
+          str(pd._noms_libelles(AG).get("Instagram VA 141", "")).startswith("comptes internes")
+          and str(pd._noms_libelles(TH).get("Threads 142", "")).startswith("comptes internes"))
 
     # ── l'interrupteur ──
     pd.INTERNES_REUNIS = False

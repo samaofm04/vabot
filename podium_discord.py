@@ -340,6 +340,8 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                  # Le même jour : « Threads VA 023 » plutôt qu'« Instagram VA
                  # 23 » (_libelle_va_ig).
                  # Voir _quinzaine_us_gbl. POUR REVENIR : retirer ces cinq clés.
+                 # Les VA de Va IG en sont ressortis le 10/11/2026 (« Threads
+                 # y a que Threads ») : VA_IG_SUR_THREADS.
                  "quinzaine_va_ig": True, "pays_subs": ("US", "GB", "CA"),
                  "marche_subs": "US + UK + CA", "us_gbl": True, "alltime_subs": False,
                  # « 📈 Mes stats » à la place de « 📈 Mes subs » dans les
@@ -471,7 +473,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
                    # la semaine et le bonus (qui paient) : ses VA ; la
                    # quinzaine : ses VA ET ceux de Youl4b (Twitter), en trois
                    # lignes depuis le 24/10/2026 (« je parle de VA de
-                   # Youl4b »). Voir subs_va.classement_agency
+                   # Youl4b »), plus que ses VA depuis le 10/11/2026 (« les IG
+                   # y a que IG ») : subs_va.YOULAB_SUR_AGENCY. Voir
+                   # subs_va.classement_agency
                    "mesure": "agency_abonnes", "mesure_subs": "agency_quinzaine",
                    "bonus": True, "minutes": None,
                    "alltime": "podium_alltime_agency_ig.json",
@@ -2223,12 +2227,13 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,
         import subs_va
         return subs_va.classement_va_ig(debut, fin)
     if _source(gid, mesure) in ("agency_abonnes", "agency_quinzaine"):
-        # Agency VA INSTAGRAM : les abonnés du tracking de chaque VA ; la
-        # quinzaine y mêle ceux de Youl4b (Twitter) en trois lignes
-        # (subs_va.LIGNES_YOULAB)
+        # Agency VA INSTAGRAM : les abonnés du tracking de chaque VA. Sa
+        # quinzaine a mêlé ceux de Youl4b (Twitter) en trois lignes
+        # (subs_va.LIGNES_YOULAB) jusqu'au 10/11/2026 : subs_va.YOULAB_SUR_AGENCY
         import subs_va
         return subs_va.classement_agency(
-            debut, fin, avec_youl4b=_source(gid, mesure) == "agency_quinzaine")
+            debut, fin, avec_youl4b=(_source(gid, mesure) == "agency_quinzaine"
+                                     and subs_va.YOULAB_SUR_AGENCY))
     if _source(gid, mesure) == "tracking_abonnes":
         # Twitter, quinzaine : les abonnés OF des trackings du registre (Emy
         # et sa variante Seren additionnées), plus leurs visites
@@ -4197,7 +4202,21 @@ def _format_subs(gid: Optional[str]) -> str:
     return (_format_affiche(gid) + ("+us-gbl-va-at-j2" if _profil(gid).get("us_gbl") else "")
             # les VA de Twitter retirés (25/10/2026) : refaite au premier passage
             + ("+sans-va-twitter" if _profil(gid).get("quinzaine_jessye")
-               and not VA_TWITTER_SUR_THREADS else ""))
+               and not VA_TWITTER_SUR_THREADS else "")
+            # chaque serveur TRUST ses VA (10/11/2026) : refaite au premier passage
+            + ("+seuls-ses-va" if _seuls_ses_va(gid) else ""))
+
+
+def _seuls_ses_va(gid: Optional[str]) -> bool:
+    """La quinzaine de ce serveur a perdu, le 10/11/2026, des lignes venues
+    d'un autre (subs_va.YOULAB_SUR_AGENCY, VA_IG_SUR_THREADS, INTERNES_SUR)."""
+    import subs_va
+    g = str(gid or "")
+    if g == AGENCY_IG_ID:
+        return not subs_va.YOULAB_SUR_AGENCY
+    if g == THREADS_ID:
+        return not VA_IG_SUR_THREADS or not _internes_sur(THREADS_ID)
+    return False
 
 
 def _format_affiche(gid: Optional[str]) -> str:
@@ -4833,6 +4852,25 @@ def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:
     return out
 
 
+#: Propriétaire, 10/11/2026 : « les Twitter y a que Twitter, les IG y a que
+#: IG, et Threads y a que Threads ». Les VA de Va IG (« Threads VA 0nn »,
+#: entrés le 21/10/2026 : « threads = ig pour le moment c'est meta ») quittent
+#: la quinzaine de Threads, et ne sont plus relevés : autant d'appels
+#: GetMySocial en moins. La clé « quinzaine_va_ig » reste au profil : 👀
+#: Pseudos nomme encore leurs lignes sur les quinzaines figées avant
+#: (_noms_libelles). POUR LES REMETTRE : True.
+VA_IG_SUR_THREADS = False
+
+
+def _jessye_sur_threads() -> bool:
+    """La quinzaine de Threads a-t-elle encore des lignes tirées des liens de
+    Twitter (JESSY LE RETOUR, EMY TWITTER) ? Ses VA Discord
+    (VA_TWITTER_SUR_THREADS) ou ses comptes internes (INTERNES_SUR). Sans
+    elles, ces listes ne sont même pas lues : le 10/11/2026, la quinzaine les
+    relisait encore pour n'en rien garder."""
+    return VA_TWITTER_SUR_THREADS or _internes_sur(THREADS_ID)
+
+
 def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                       etiquette: str) -> Dict[str, Any]:
     """La quinzaine de Threads (clés « pays_subs », « quinzaine_va_ig »,
@@ -4848,7 +4886,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
     illisibles = list(cl.get("illisibles") or [])
     frais = bool(cl.get("frais", True))
     n_ig = 0
-    if pf.get("quinzaine_va_ig"):
+    if pf.get("quinzaine_va_ig") and VA_IG_SUR_THREADS:
         ig = _entites_va_ig()
         table = numeros_instagram(set(ig))
         # un lien direct de Va IG se compte à ses visites, comme ceux de Threads
@@ -4874,7 +4912,7 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,
                                "liens": len(e["ids"]), "spam": False, "model": e["model"],
                                "cle_ig": k})
             time.sleep(0.3)
-    if pf.get("quinzaine_jessye"):
+    if pf.get("quinzaine_jessye") and _jessye_sur_threads():
         liens_j, frais_j = _liens_twitter(etiquette)
         frais = frais and frais_j
         directs_j = _directs(liens_j)
@@ -4931,13 +4969,14 @@ def _alltime_clics(gid: str, cl: Dict[str, Any], etiquette: str) -> None:
         # les listes de liens, lues seulement si un all-time manque
         if not lus:
             liens, _f = liens_bruts(gid, etiquette)
-            liens_ig, _f2 = liens_bruts(VA_IG_ID, etiquette)
-            directs = _directs(liens) | _directs(liens_ig)
-            if _profil(gid).get("quinzaine_jessye"):
+            directs = _directs(liens)
+            if VA_IG_SUR_THREADS:
+                directs |= _directs(liens_bruts(VA_IG_ID, etiquette)[0])
+            if _profil(gid).get("quinzaine_jessye") and _jessye_sur_threads():
                 directs |= _directs(_liens_twitter(etiquette)[0])
             lus.update(ents=entites_liens_va(liens), directs=directs)
         return lus
-    ig_ids = {k: e["ids"] for k, e in _entites_va_ig().items()}
+    ig_ids = {k: e["ids"] for k, e in _entites_va_ig().items()} if VA_IG_SUR_THREADS else {}
     change = False
     for x in cl.get("lignes") or []:
         at = totaux.get(str(x["va"]))
@@ -6132,6 +6171,26 @@ assert {VA_INTERNE_AGENCY, VA_INTERNE_THREADS} <= NUMEROS_RESERVES
 #: qui vérifient le calcul VA par VA (registre sans fiches liens_va : tout y
 #: serait interne) le coupent aussi.
 INTERNES_REUNIS = True
+#: Les serveurs qui ont la ligne des comptes internes. Propriétaire, 10/11/2026 :
+#: « remove dans les serveurs TRUST les trucs des autres serveurs », « les
+#: Twitter y a que Twitter, les IG y a que IG, et Threads y a que Threads ».
+#: Les comptes internes sont le registre de Twitter (liens JESSY LE RETOUR) :
+#: VA 41 y reste. « Instagram VA 141 » (Agency : bonus et semaine) et
+#: « Threads 142 » (Threads : bonus, semaine et quinzaine) n'ont plus de ligne.
+#: Ils prenaient la 🥇 sans être payés (prime_semaine_due) : les VA de ces
+#: deux serveurs touchaient la prime du rang d'en dessous. Les pages déjà
+#: figées les gardent, et 👀 Pseudos les nomme encore (_noms_libelles).
+#: POUR LES REMETTRE : {TWITTER_ID, AGENCY_IG_ID, THREADS_ID}.
+INTERNES_SUR = {TWITTER_ID}
+
+
+def _internes_sur(gid: Optional[str]) -> bool:
+    """Les comptes internes ont-ils leur place sur ce serveur (INTERNES_SUR) ?
+    Sans regroupement (INTERNES_REUNIS False), il n'y a pas de comptes
+    internes : chacun est un VA comme les autres, comme avant le 25/10/2026."""
+    return not INTERNES_REUNIS or str(gid or "") in INTERNES_SUR
+
+
 _LIEN_VA_DISCORD = re.compile(r"^\s*(?:Twitter|Threads|Instagram) VA \d+ @", re.IGNORECASE)
 #: le relevé de Twitter réuni, gardé un quart d'heure : Agency reprend sa
 #: ligne VA 41 sans relire MyPuls ni les listes GetMySocial
@@ -6346,9 +6405,11 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
                 _TW_INTERNES[(debut.isoformat(), fin.isoformat(), bool(_BONUS_EN_COURS.get()))] = (
                     time.time(), out)
             return out
-        if g == AGENCY_IG_ID and src == "agency_abonnes" and (cl.get("lignes") or cl.get("illisibles")):
+        if (g == AGENCY_IG_ID and g in INTERNES_SUR and src == "agency_abonnes"
+                and (cl.get("lignes") or cl.get("illisibles"))):
             return _avec_internes_agency(cl, debut, fin, etiquette)
-        if (g == THREADS_ID and src == "gms_bouton" and not _EN_QUINZAINE_THREADS.get()
+        if (g == THREADS_ID and g in INTERNES_SUR and src == "gms_bouton"
+                and not _EN_QUINZAINE_THREADS.get()
                 and (cl.get("lignes") or cl.get("illisibles"))):
             return _avec_internes_threads(cl, debut, fin, etiquette)
     except Exception as e:                                   # noqa: BLE001
@@ -6362,8 +6423,9 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
 # vois les mecs de Twitter, ils ne doivent pas être là ». Les VA Discord de
 # Twitter (« Threads VA 1nn », leurs liens de JESSY LE RETOUR / EMY TWITTER)
 # en sortent ; restent les VA de Threads, ceux de Va IG et la ligne des comptes
-# internes (Threads 142). Ils ne sont plus relevés du tout : autant d'appels
-# GetMySocial en moins. POUR LES REMETTRE : True.
+# internes (Threads 142) — ces deux-là sortis à leur tour le 10/11/2026
+# (VA_IG_SUR_THREADS, INTERNES_SUR). Ils ne sont plus relevés du tout : autant
+# d'appels GetMySocial en moins. POUR LES REMETTRE : True.
 VA_TWITTER_SUR_THREADS = False
 
 _entites_jessye_toutes = _entites_jessye
@@ -6371,9 +6433,13 @@ _entites_jessye_toutes = _entites_jessye
 
 def _entites_jessye(liens: List[Dict[str, Any]]) -> Dict[int, List[str]]:   # noqa: F811
     ents = _entites_jessye_toutes(liens)
-    if _EN_QUINZAINE_THREADS.get() and not VA_TWITTER_SUR_THREADS:
+    avec_internes = _internes_sur(THREADS_ID)
+    if _EN_QUINZAINE_THREADS.get() and not (VA_TWITTER_SUR_THREADS and avec_internes):
+        # la quinzaine de Threads : les comptes internes s'il les a
+        # (INTERNES_SUR), les VA Discord de Twitter s'il les a
         internes = numeros_internes()
-        return {n: ids for n, ids in ents.items() if n in internes}
+        return {n: ids for n, ids in ents.items()
+                if (avec_internes if n in internes else VA_TWITTER_SUR_THREADS)}
     return ents
 
 
@@ -6394,12 +6460,13 @@ def _quinzaine_us_gbl(debut: dt.date, fin: dt.date, gid: str,   # noqa: F811
         return cl
     if not VA_TWITTER_SUR_THREADS:
         # une ligne de Twitter qui resterait (relevé gardé d'avant) : pas affichée
-        internes = {_libelle_va_jessye(n) for n in numeros_internes()}
+        internes = ({_libelle_va_jessye(n) for n in numeros_internes()}
+                    if _internes_sur(THREADS_ID) else set())
         cl = dict(cl, lignes=[x for x in cl.get("lignes") or []
                               if "jessye" not in x or str(x.get("va")) in internes],
                   illisibles=[v for v in cl.get("illisibles") or []
                               if not re.fullmatch(r"Threads VA 1\d{2,}", str(v)) or str(v) in internes])
-    if not INTERNES_REUNIS:
+    if not INTERNES_REUNIS or THREADS_ID not in INTERNES_SUR:
         return cl
     try:
         return _reunir(cl, str(gid), {_libelle_va_jessye(n): n for n in numeros_internes()},

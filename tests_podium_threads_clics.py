@@ -195,6 +195,10 @@ pd.INTERNES_REUNIS = False
 # retirées depuis le 25/10/2026 (« les mecs de Twitter ne doivent pas être
 # là »), ce retrait est vérifié dans tests_va_interne.py
 pd.VA_TWITTER_SUR_THREADS = True
+# … et celui des VA de Va IG (« Threads VA 0nn »), retirés le 10/11/2026
+# (« Threads y a que Threads ») : rallumé ici, le défaut vérifié en section 4
+VA_IG_DEFAUT = pd.VA_IG_SUR_THREADS
+pd.VA_IG_SUR_THREADS = True
 # Ces tests suivent le podium de la semaine et le bonus du jour de Twitter
 # AUX CLICS des trackings : depuis le 24/10/2026, ils comptent les abonnés
 # (« mesure_podium »), vérifié dans tests_podium_semaine_subs.py.
@@ -778,6 +782,27 @@ try:
           and not GMS["vues"])
     check("… sous l'étiquette « quinzaine » (elle ne paie rien : elle cède la réserve)",
           set(GMS["tags"][n_b:]) == {pd.ETIQUETTE_QUINZAINE} != "podium", GMS["tags"][n_b:])
+    # Propriétaire, 10/11/2026 : « les Twitter y a que Twitter, les IG y a que
+    # IG, et Threads y a que Threads » (VA_IG_SUR_THREADS)
+    check("par défaut, les VA de Va IG ne sont plus dans la quinzaine de Threads",
+          VA_IG_DEFAUT is False)
+    pd.VA_IG_SUR_THREADS = False
+    n_b2 = len(GMS["boutons"])
+    with vd.sur_serveur(TH), contextlib.redirect_stdout(io.StringIO()):
+        cq_sans = pd._quinzaine_us_gbl(dt.date(2026, 10, 1), dt.date(2026, 10, 13), TH,
+                                       pd.ETIQUETTE_QUINZAINE)
+    format_sans = pd._format_subs(TH)
+    pd.VA_IG_SUR_THREADS = True
+    vas_sans = [str(x["va"]) for x in cq_sans["lignes"]]
+    check("… la quinzaine sans eux : ni « Threads VA 0nn », ni leurs liens relevés ; ses VA restent",
+          not any(x.get("cle_ig") or v.startswith("Threads VA 0")
+                  for x, v in zip(cq_sans["lignes"], vas_sans))
+          and "Threads 12" in vas_sans and "Threads 31" in vas_sans
+          and not any(set(a[0]) & {"i1", "i2", "i3"} for a in GMS["boutons"][n_b2:]),
+          (vas_sans, GMS["boutons"][n_b2:]))
+    check("… et elle se refait au premier passage (format « +seuls-ses-va »)",
+          format_sans.endswith("+seuls-ses-va")
+          and not pd._format_subs(TH).endswith("+seuls-ses-va"), format_sans)
     check("prochain passage de la quinzaine : dans une heure",
           not pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 59 * 60)
           and pd.a_rafraichir_subs(TH, CLOCK["now"].timestamp() + 61 * 60))

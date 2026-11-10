@@ -390,6 +390,25 @@ try:
     check("semaine Agency : ses VA en « Instagram VA n », aux abonnés ; lien coupé et sans lien absents",
           [(x["va"], x["clics"]) for x in cl["lignes"]] == [("Instagram VA 99", 56)]
           and cl["illisibles"] == ["Instagram VA 7"], cl)
+    # Propriétaire, 10/11/2026 : « les IG y a que IG » (subs_va.YOULAB_SUR_AGENCY)
+    check("par défaut, YouLab (TRUST TWITTER) n'est plus dans la quinzaine d'Agency",
+          sv.YOULAB_SUR_AGENCY is False)
+    clq0 = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
+    check("… la quinzaine d'Agency : ses VA seuls, Twitter n'est même pas relevé",
+          [(x["va"], x["clics"]) for x in clq0["lignes"]] == [("Instagram VA 99", 56)]
+          and clq0["illisibles"] == ["Instagram VA 7"] and tw_appels == []
+          and not any(x.get("youl4b") for x in clq0["lignes"]), (clq0, tw_appels))
+    noms0 = pod._noms_libelles(AG)
+    check("… 👀 Pseudos : plus aucune ligne « YouLab / TRUST Twitter »",
+          noms0.get("Instagram VA 99") == "zaid014787"
+          and not any("YouLab" in str(v) for v in noms0.values())
+          and "Instagram VA 134" not in noms0, noms0)
+    check("… sa quinzaine se refait au premier passage (format « +seuls-ses-va »)",
+          pod._format_subs(AG).endswith("+seuls-ses-va")
+          and pod._format_subs(pod.TWITTER_ID) == pod._format_affiche(pod.TWITTER_ID),
+          pod._format_subs(AG))
+    # le mécanisme reste vérifié, l'interrupteur rallumé
+    sv.YOULAB_SUR_AGENCY = True
     clq = pod.classement(J1, J2, gid=AG, mesure=pod._profil(AG)["mesure_subs"])
     check("quinzaine Agency : + les abonnés des VA de Youl4b (Twitter) en trois lignes "
           "« Instagram VA 160/134/12 » (yous1m, vector, Roucham), 44 % / 32 % / le reste ; "
@@ -459,6 +478,7 @@ try:
           cfg and cfg["role_verifie"] == "1562953421508837426" and cfg["quetes"] is False, cfg)
     for k, v in _sauve_sv.items():
         setattr(sv, k, v)
+    sv.YOULAB_SUR_AGENCY = False
     for k, v in _sauve_pd.items():
         setattr(pod, k, v)
 
