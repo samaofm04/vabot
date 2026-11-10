@@ -111,7 +111,7 @@ def herosms_key() -> str:
 #: l'en-tête). TRUST TWITTER n'y est pas : il garde HeroSMS (« pas TRUST
 #: Twitter »). C'est aussi la liste de la vignette GetAText des panneaux
 #: (cogs/numeros._icone_de). Un serveur qui prend ce compte SANS être un
-#: serveur TRUST (You FR) est dans guild_features.NUMEROS_COMPTE_TRUST :
+#: serveur TRUST (You FR, You US) est dans guild_features.NUMEROS_COMPTE_TRUST :
 #: serveurs_compte_trust() rend les deux.
 TRUST_SERVEURS = {"1488331963575177247": "TRUST INSTAGRAM",
                   "1498948161039896586": "TRUST THREADS"}
@@ -128,12 +128,14 @@ _DITS_COMPTE: set = set()
 def serveurs_compte_trust() -> dict:
     """{id: nom} de TOUS les serveurs qui achètent sur le compte TRUST : les
     serveurs TRUST (TRUST_SERVEURS), plus ceux qui n'en sont pas mais
-    prennent ce compte — guild_features.NUMEROS_COMPTE_TRUST (You FR,
-    propriétaire, 10/11/2026 : « change juste API du fournisseur … pour les
-    SMS sur You FR »). Leurs ids ne sont pas recopiés ici.
+    prennent ce compte — guild_features.NUMEROS_COMPTE_TRUST (You FR et You
+    US, propriétaire, 10/11/2026 : « change juste API du fournisseur … pour
+    les SMS sur You FR », puis « oui, You US aussi »). Leurs ids ne sont pas
+    recopiés ici.
 
-    Table illisible : les serveurs TRUST seuls, et c'est DIT — You FR
-    retomberait sinon sur le compte principal sans que rien ne le montre."""
+    Table illisible : les serveurs TRUST seuls, et c'est DIT — You FR et You
+    US retomberaient sinon sur le compte principal sans que rien ne le
+    montre."""
     d = dict(TRUST_SERVEURS)
     try:
         import guild_features as gf

@@ -228,10 +228,11 @@ PSEUDO_MODEL = {YOU_FR_GUILD_ID}
 #: panneau et son alerte « sans crédit ». Ni la vignette GetAText (« seulement
 #: TRUST », 08/11/2026 : elle reste lue dans numgen.TRUST_SERVEURS), ni les
 #: paliers de numéros par jour de TRUST INSTAGRAM, ni le pays des numéros.
-#: You US reste sur le compte principal : il l'avait d'abord demandé pour ce
-#: serveur, puis a dit « stop laisse tomber » et nommé You FR. Sans la clé
-#: TRUST, ces serveurs achètent sur le compte principal, comme avant.
-NUMEROS_COMPTE_TRUST = {YOU_FR_GUILD_ID: "You FR"}
+#: You US aussi : demandé d'abord pour lui, puis You FR seul (« stop laisse
+#: tomber »), puis, à la question « aussi You US ? » : « oui, You US aussi ».
+#: YouCham reste sur le compte principal. Sans la clé TRUST, ces serveurs
+#: achètent sur le compte principal, comme avant.
+NUMEROS_COMPTE_TRUST = {YOU_FR_GUILD_ID: "You FR", YOU_US_GUILD_ID: "You US"}
 
 #: Le bridage que le CODE porte, pour les serveurs absents de
 #: data/guild_features.json : les fonctions de YouCham (tout sauf « statut »,
