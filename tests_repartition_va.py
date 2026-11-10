@@ -61,6 +61,34 @@ TMP = pathlib.Path(tempfile.mkdtemp(prefix="tst_repartition_"))
 rv.ETAT = TMP / "repartition_va.json"
 VRAI_ETAT = BOT / "data" / "repartition_va.json"
 AVANT = VRAI_ETAT.read_bytes() if VRAI_ETAT.exists() else None
+VRAI_JB = BOT / "data" / "jailbreak.json"
+AVANT_JB = VRAI_JB.stat().st_mtime if VRAI_JB.exists() else None
+
+# Le détail par model lit le registre des liens, la liste GetMySocial et la
+# page Virtual Assistants : tout est simulé, la page dans un dossier à part.
+import cartes_va_fr as cv               # noqa: E402
+import jailbreak as jb                  # noqa: E402
+import liens_fr                         # noqa: E402
+TMPJB = pathlib.Path(tempfile.mkdtemp(prefix="tst_repartition_jb_"))
+jb.JAILBREAK_FILE, jb.PREV_FILE = TMPJB / "jailbreak.json", TMPJB / "jailbreak.prev.json"
+jb.BACKUP_DIR, jb.TOMB_FILE = TMPJB / "jailbreak_backups", TMPJB / "jb_tombstones.json"
+REGISTRE = {
+    "1390429527087251618:amelia": {"public_url": "https://getmysocial.com/ameliacandy2", "link_id": "a"},
+    "1390429527087251618:emma": {"public_url": "https://getmysocial.com/emmababy2", "link_id": "e"},
+    "1390429527087251618:alicia": {"public_url": "https://getmysocial.com/aliciacutie", "link_id": "c"},
+    "1525508553081753621:alicia": {"public_url": "https://getmysocial.com/aliciababe", "link_id": "f"},
+}
+liens_fr.lien_de = lambda uid, model: REGISTRE.get(f"{int(uid)}:{model}")
+cv._statuts_gms = lambda: {}
+jb.add_va("emma", "York Emérick", discord_username="york_emerick12")
+jb.add_va("alicia", "York Emérick", discord_username="york_emerick12")
+jb.add_va("alicia", "Fahnih", discord_username="fahnih_37050")
+jb.add_va("amelia", "fenoainir", discord_username="fenoainir")
+for _m, _u, _v in (("emma", "emma_.brunet", "York Emérick"), ("emma", "emmaa.cutty", "York Emérick"),
+                   ("alicia", "alicia.qyzelia", "York Emérick"),
+                   ("alicia", "alicia_valiriaww", "Fahnih"), ("alicia", "alicia.miaaxx", "Fahnih"),
+                   ("amelia", "amelie_kiarrah", "fenoainir")):
+    jb.add_account(_m, _u, va=_v)
 
 ns = types.SimpleNamespace
 YOU_FR, YOU_US = int(gf.YOU_FR_GUILD_ID), int(gf.YOU_US_GUILD_ID)
@@ -103,10 +131,15 @@ class Canal:
         self.category, self.overwrites = category, overwrites
         self.messages = []
         self.envois = 0
+        self.envois_detail = 0
         self.panne = False
 
     async def send(self, embed=None):
-        self.envois += 1
+        # envois : le tableau seul ; le détail par model est compté à part
+        if getattr(embed, "title", "") == rv.TITRE:
+            self.envois += 1
+        else:
+            self.envois_detail += 1
         Canal._n += 1
         m = Message(self, Canal._n, self.guild.me.id, embed)
         self.messages.append(m)
@@ -177,6 +210,7 @@ def run(coro):
 
 def reset():
     rv._POSE.clear()
+    rv._POSE_M.clear()
     rv._PLANIFIES.clear()
     rv._ENCORE.clear()
     rv._VERROUS.clear()
@@ -292,7 +326,8 @@ check("salon renommé à la main : retrouvé par son id, pas de second",
 canal.messages.clear()
 b = run(rv.assurer(g, forcer=True))
 check("message supprimé à la main : reposté au passage forcé",
-      b["pose"] and canal.envois == 2 and len(canal.messages) == 1, b)
+      b["pose"] and canal.envois == 2
+      and [m.embeds[0].title for m in canal.messages].count(rv.TITRE) == 1, b)
 
 # Données perdues (data/ reparti de zéro) : retrouvé par nom et dans le salon.
 reset()
@@ -328,6 +363,78 @@ reset()
 g = Guilde(YOU_US, vrais_membres())
 b = run(rv.assurer(g))
 check("You US : rien créé, rien posté", not g.creations and not b["pose"], b)
+
+# ── 4b. Le détail par model : liens et comptes de chacun ────────────────────
+print("\n── 4b. Le détail par model")
+reset()
+g = Guilde(YOU_FR, vrais_membres())
+g.roles = [ns(name="Amelia", colour=ns(value=0xE91E63)), ns(name="Alicia", colour=ns(value=0xF1C40F))]
+b = run(rv.assurer(g))
+canal = g.text_channels[0]
+titres = [m.embeds[0].title for m in canal.messages]
+check("le tableau, puis une carte par model dans l'ordre des models",
+      titres == [rv.TITRE, "🩷 AMELIA · 2 VA", "💜 EMMA · 2 VA", "💙 SARAH · 0 VA",
+                 "🩵 JULIA · 0 VA", "🧡 LOLA · 1 VA", "💛 ALICIA · 2 VA"], titres)
+check("bilan : 6 cartes de model posées", b["details_poses"] == 6 and not b["rates"], b)
+desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.messages[1:]}
+print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
+check("Alicia : chaque VA, son lien, ses comptes (échappés)",
+      desc["ALICIA"] == "**fahnih\\_37050** · 🔗 https://getmysocial.com/aliciababe\n"
+                        "2 comptes : @alicia\\_valiriaww @alicia.miaaxx\n\n"
+                        "**york\\_emerick12** · 🔗 https://getmysocial.com/aliciacutie\n"
+                        "1 compte : @alicia.qyzelia", desc["ALICIA"])
+check("Emma : la fiche faite à la main « York Emérick » donne les comptes de york",
+      "**york\\_emerick12** · 🔗 https://getmysocial.com/emmababy2\n2 comptes : @emma\\_.brunet "
+      "@emmaa.cutty" in desc["EMMA"], desc["EMMA"])
+check("sans lien : « pas encore de lien » ; sans fiche : 0 compte",
+      "**priscah0017\\_30005** · pas encore de lien\n0 compte" in desc["EMMA"]
+      and "**fenoainir** · pas encore de lien\n1 compte : @amelie\\_kiarrah" in desc["AMELIA"],
+      (desc["EMMA"], desc["AMELIA"]))
+check("model sans VA : —", desc["SARAH"] == "—" and desc["JULIA"] == "—", desc)
+check("couleur de la carte = couleur du rôle",
+      canal.messages[1].embeds[0].colour.value == 0xE91E63
+      and canal.messages[6].embeds[0].colour.value == 0xF1C40F)
+check("aucun montant dans les cartes", not any("$" in d or "€" in d for d in desc.values()))
+
+b = run(rv.assurer(g, forcer=True))
+check("passage forcé sans changement : rien de reposté ni réécrit",
+      b["details_poses"] == 0 and b["details_maj"] == 0 and canal.envois_detail == 6, b)
+
+jb.add_account("alicia", "alicia.neuve", va="Fahnih")
+b = run(rv.assurer(g, forcer=True))
+alicia = canal.messages[6]
+check("compte ajouté sur le site : SEULE la carte Alicia est réécrite",
+      b["details_maj"] == 1 and b["details_poses"] == 0 and not b["maj"]
+      and alicia.edits == 1 and "3 comptes" in alicia.embeds[0].description, b)
+
+REGISTRE["1561628437938970677:amelia"] = {"public_url": "https://getmysocial.com/ameliafeno",
+                                          "link_id": "n"}
+cv._statuts_gms = lambda: {"n": False}
+b = run(rv.assurer(g, forcer=True))
+check("lien coupé chez GetMySocial : toujours « pas encore de lien »",
+      "**fenoainir** · pas encore de lien" in canal.messages[1].embeds[0].description, b)
+cv._statuts_gms = lambda: {}
+b = run(rv.assurer(g, forcer=True))
+check("lien en service : il apparaît sur la carte Amelia",
+      b["details_maj"] == 1
+      and "**fenoainir** · 🔗 https://getmysocial.com/ameliafeno" in canal.messages[1].embeds[0].description, b)
+
+lola = canal.messages[5]
+canal.messages.remove(lola)
+b = run(rv.assurer(g, forcer=True))
+check("carte supprimée à la main : reposée, pas de doublon",
+      b["details_poses"] == 1 and [m.embeds[0].title for m in canal.messages].count("🧡 LOLA · 1 VA") == 1, b)
+
+reset()                                   # data/ reparti de zéro
+b = run(rv.assurer(g))
+check("data/ vide : les cartes sont retrouvées par leur titre, aucune reposée",
+      b["details_poses"] == 0 and len(canal.messages) == 7, (b, len(canal.messages)))
+
+beaucoup = [f"compte_{i:03d}_xxxxxxxxxxxxxxx" for i in range(300)]
+d = rv.description_model([("a", "https://getmysocial.com/x", beaucoup),
+                          ("b", "", ["seul"])])
+check("300 comptes : coupés en « … +N », le VA suivant reste visible, sous 4096",
+      len(d) <= 4096 and "… +" in d and "**b** · pas encore de lien\n1 compte : @seul" in d, len(d))
 
 # ── 5. L'envoi ────────────────────────────────────────────────────────────
 print("\n── 5. L'envoi")
@@ -376,6 +483,8 @@ check("écriture atomique (safe_json), jamais write_text",
 # data/ réel intact
 apres = VRAI_ETAT.read_bytes() if VRAI_ETAT.exists() else None
 check("data/repartition_va.json réel intact", apres == AVANT)
+check("data/jailbreak.json réel intact",
+      (VRAI_JB.stat().st_mtime if VRAI_JB.exists() else None) == AVANT_JB)
 
 print(f"\n{len(OKS)} OK, {len(FAILS)} FAIL")
 if FAILS:

@@ -18,6 +18,19 @@ CE QUE LE SALON MONTRE
     rôle de model, ni bot ni propriétaire du serveur. Aucun texte d'aide (le
     propriétaire retire toutes les notices), aucun montant.
 
+SOUS LE TABLEAU : UNE CARTE PAR MODEL, LIENS ET COMPTES DE CHACUN
+    Propriétaire, même jour : « je voulais genre la liste [où] tout le monde
+    voit [les] comptes des autres, les liens des autres » ; maquette validée,
+    tous les @. Un embed par model, dans l'ordre des models, à la couleur de
+    son rôle : chaque VA qui porte le rôle, son lien GetMySocial pour cette
+    model (cartes_va_fr.lien_gms : le registre des liens FR, montré s'il est
+    en service) ou « pas encore de lien », puis ses comptes Instagram de la
+    page Virtual Assistants (la fiche qui porte son pseudo Discord,
+    comptes_tickets.fiche_au_pseudo, sinon celle à son nom). Les cartes
+    privées des -content (cartes_va_fr) sont retirées : tout est ici.
+    Un compte ajouté sur le site ou un lien créé arrive au passage des
+    trente minutes.
+
 LES RÔLES : CEUX DU PSEUDO, PAS UNE SECONDE LISTE
     Un membre est sous une model quand pseudo_model dit qu'il en porte le
     rôle (models_du_serveur, models_du_membre). Une seconde reconnaissance
@@ -62,6 +75,9 @@ EMOJIS = {"amelia": "🩷", "emma": "💜", "sarah": "💙",
 EMOJI_AUTRE = "▫️"
 SANS_MODEL = "⚪ SANS MODEL"
 VIDE = "—"
+PAS_DE_LIEN = "pas encore de lien"
+#: Description d'un embed : 4096 signes. Le reste sert à « … +N ».
+PLAFOND_DETAIL = 3900
 
 #: Discord : 1024 signes par champ, 6000 par embed. 7 champs × 800 tiennent.
 PLAFOND_CHAMP = 800
@@ -73,6 +89,8 @@ _ENCORE: set = set()
 _VERROUS: Dict[int, asyncio.Lock] = {}
 #: gid -> (id du message, empreinte posée) : rien à relire si rien n'a changé.
 _POSE: Dict[int, Tuple[int, tuple]] = {}
+#: (gid, model) -> (id du message, empreinte posée), pour le détail par model.
+_POSE_M: Dict[Tuple[int, str], Tuple[int, tuple]] = {}
 _DITS: set = set()
 
 
@@ -97,15 +115,18 @@ def _nom(membre) -> str:
     return str(getattr(membre, "name", "") or "").strip() or str(getattr(membre, "id", "?"))
 
 
-def repartition(guild) -> Tuple[List[Tuple[str, List[str]]], List[str]]:
-    """([(model, [noms des VA])...] dans l'ordre des models, [noms sans model]).
+def _cle_tri(n: str):
+    return (n.casefold(), n)
 
-    Les noms sont triés sans tenir compte de la casse. Les bots ne comptent
-    pas ; le propriétaire du serveur n'est sous une model que s'il en porte
-    le rôle, et jamais dans « Sans model »."""
+
+def par_model(guild) -> Tuple[List[Tuple[str, List[Tuple[str, int]]]], List[str]]:
+    """([(model, [(nom, id) des VA])...] dans l'ordre des models, [noms sans
+    model]). Les noms sont triés sans tenir compte de la casse. Les bots ne
+    comptent pas ; le propriétaire du serveur n'est sous une model que s'il
+    en porte le rôle, et jamais dans « Sans model »."""
     import pseudo_model as pm
     models = pm.models_du_serveur(guild)
-    colonnes: Dict[str, List[str]] = {m: [] for m in models}
+    colonnes: Dict[str, List[Tuple[str, int]]] = {m: [] for m in models}
     sans: List[str] = []
     proprio = getattr(guild, "owner_id", None)
     for membre in list(getattr(guild, "members", None) or []):
@@ -113,11 +134,17 @@ def repartition(guild) -> Tuple[List[Tuple[str, List[str]]], List[str]]:
             continue
         siennes = pm.models_du_membre(membre, models)
         for m in siennes:
-            colonnes[m].append(_nom(membre))
+            colonnes[m].append((_nom(membre), int(getattr(membre, "id", 0) or 0)))
         if not siennes and getattr(membre, "id", None) != proprio:
             sans.append(_nom(membre))
-    tri = lambda noms: sorted(noms, key=lambda n: (n.casefold(), n))   # noqa: E731
-    return [(m, tri(colonnes[m])) for m in models], tri(sans)
+    return ([(m, sorted(colonnes[m], key=lambda t: _cle_tri(t[0]))) for m in models],
+            sorted(sans, key=_cle_tri))
+
+
+def repartition(guild) -> Tuple[List[Tuple[str, List[str]]], List[str]]:
+    """([(model, [noms des VA])...] dans l'ordre des models, [noms sans model])."""
+    colonnes, sans = par_model(guild)
+    return [(m, [n for n, _uid in vas]) for m, vas in colonnes], sans
 
 
 def _valeur(noms: List[str]) -> str:
@@ -166,6 +193,97 @@ def embed(guild):
     for n, v, i in champs(guild):
         e.add_field(name=n, value=v, inline=i)
     return e
+
+
+# ─────────────────────────────────────────── le détail par model ──
+
+def comptes_du_va(model: str, pseudo: str) -> List[str]:
+    """Les comptes Instagram du VA pour cette model, dans l'ordre de la page
+    Virtual Assistants : ceux de la fiche qui porte son pseudo Discord
+    (« York Emérick » @york_emerick12), sinon de la fiche à son nom."""
+    import comptes_tickets as ct
+    import jailbreak as jb
+    fiche = (ct.fiche_au_pseudo(model, pseudo) or pseudo).strip().lower()
+    return [str(a.get("username")).strip().lstrip("@") for a in jb.list_accounts(model)
+            if isinstance(a, dict) and a.get("username")
+            and str(a.get("va") or "").strip().lower() == fiche]
+
+
+def _n_comptes(n: int) -> str:
+    return f"{n} compte" if n <= 1 else f"{n} comptes"
+
+
+def _handles(handles: List[str], place: int) -> str:
+    """« @a @b @c », échappés, coupés en « … +N » pour tenir dans `place`."""
+    import discord
+    morceaux: List[str] = []
+    for i, h in enumerate(handles):
+        m = "@" + discord.utils.escape_markdown(h)
+        if len(" ".join(morceaux + [m])) > place - 8:
+            morceaux.append(f"… +{len(handles) - i}")
+            break
+        morceaux.append(m)
+    return " ".join(morceaux)
+
+
+def description_model(vas: List[Tuple[str, str, List[str]]]) -> str:
+    """Le texte d'une model. vas = [(nom, lien GMS ou "", [comptes])] :
+
+        **fahnih_37050** · 🔗 https://getmysocial.com/aliciababe
+        29 comptes : @alicia_valiriaww @alicia.miaaxx …
+
+    La place est partagée entre les VA : aucun ne disparaît derrière un
+    autre qui aurait cent comptes."""
+    if not vas:
+        return VIDE
+    import discord
+    place = max(120, PLAFOND_DETAIL // len(vas) - 80)
+    blocs = []
+    for nom, url, handles in vas:
+        tete = f"**{discord.utils.escape_markdown(nom)}** · " + (f"🔗 {url}" if url else PAS_DE_LIEN)
+        ligne = _n_comptes(len(handles)) + (" : " + _handles(handles, place) if handles else "")
+        blocs.append(tete + "\n" + ligne)
+    return "\n\n".join(blocs)[:4096]
+
+
+def titre_model(model: str, n: int) -> str:
+    return f"{EMOJIS.get(model, EMOJI_AUTRE)} {model.upper()} · {n} VA"
+
+
+def _prefixe_model(model: str) -> str:
+    """Le début du titre, qui ne change pas avec le nombre de VA."""
+    return f"{EMOJIS.get(model, EMOJI_AUTRE)} {model.upper()} ·"
+
+
+def donnees_details(colonnes) -> List[Tuple[str, str]]:
+    """[(model, description)]. Lit le disque (registre des liens, page
+    Virtual Assistants) et la liste GetMySocial : hors de la boucle."""
+    import cartes_va_fr as cv
+    statuts = cv._statuts_gms()
+    out = []
+    for model, vas in colonnes:
+        lignes = [(nom, cv.lien_gms(uid, model, statuts), comptes_du_va(model, nom))
+                  for nom, uid in vas]
+        out.append((model, description_model(lignes)))
+    return out
+
+
+def embed_model(model: str, n: int, description: str, couleur: Optional[int]):
+    import discord
+    return discord.Embed(title=titre_model(model, n), description=description, colour=couleur)
+
+
+def empreinte_detail(e) -> Optional[tuple]:
+    if e is None:
+        return None
+    c = getattr(e, "colour", None)
+    return (str(getattr(e, "title", "") or ""), str(getattr(e, "description", "") or ""),
+            getattr(c, "value", None) if c is not None else None)
+
+
+def _embed_de(message):
+    embeds = list(getattr(message, "embeds", None) or [])
+    return embeds[0] if embeds else None
 
 
 # ──────────────────────────────────────────────────────────── l'état ──
@@ -263,6 +381,55 @@ async def _message(canal, bot_id):
     return garde
 
 
+async def _assurer_details(guild, canal, bot_id, forcer: bool, bilan: dict) -> None:
+    """Un message par model sous le tableau, posé une fois, réécrit s'il a
+    changé. Retrouvé par son id gardé, sinon dans le salon par le début de
+    son titre (« 💛 ALICIA · ») ; un doublon est retiré."""
+    import discord
+    import cartes_va_fr as cv
+    colonnes, _sans = par_model(guild)
+    donnees = await asyncio.to_thread(donnees_details, colonnes)
+    nb = {m: len(v) for m, v in colonnes}
+    notes = dict((_etat().get(str(guild.id)) or {}).get("details") or {})
+    historique = None
+    for model, description in donnees:
+        e = embed_model(model, nb[model], description, cv.couleur_du_role(guild, model))
+        voulu = empreinte_detail(e)
+        deja = _POSE_M.get((guild.id, model))
+        mid = int(notes.get(model) or 0) or None
+        if not forcer and deja and deja == (mid, voulu):
+            continue
+        msg = None
+        if mid:
+            try:
+                msg = await canal.fetch_message(mid)
+            except discord.NotFound:
+                msg = None
+        if msg is None:
+            if historique is None:
+                historique = [m async for m in canal.history(limit=50)
+                              if getattr(getattr(m, "author", None), "id", None) == bot_id]
+            poses = [m for m in historique
+                     if str(getattr(_embed_de(m), "title", "") or "").startswith(_prefixe_model(model))]
+            if poses:
+                msg = max(poses, key=lambda m: m.id)
+                for m in poses:
+                    if m is not msg:
+                        try:
+                            await m.delete()
+                        except Exception as ex:              # noqa: BLE001
+                            print(f"[repartition-va] {model} en double non retire : {ex}", flush=True)
+        if msg is None:
+            msg = await canal.send(embed=e)
+            bilan["details_poses"] += 1
+        elif empreinte_detail(_embed_de(msg)) != voulu:
+            await msg.edit(content=None, embed=e)
+            bilan["details_maj"] += 1
+        notes[model] = msg.id
+        _POSE_M[(guild.id, model)] = (msg.id, voulu)
+    _noter(guild.id, details=notes)
+
+
 def _verrou(gid) -> asyncio.Lock:
     v = _VERROUS.get(gid)
     if v is None:
@@ -276,7 +443,8 @@ async def assurer(guild, forcer: bool = False) -> dict:
     contenu identique au dernier posé ne relit même pas le message ; le
     passage des trente minutes force, pour revoir un message supprimé à la
     main. Rend le bilan ; chaque échec y est compté et imprimé, aucun n'est tu."""
-    bilan = {"crees": [], "pose": False, "maj": False, "rates": []}
+    bilan = {"crees": [], "pose": False, "maj": False, "details_poses": 0, "details_maj": 0,
+             "rates": []}
     if guild is None or not serveur(guild):
         return bilan
     import pseudo_model as pm
@@ -307,9 +475,17 @@ async def assurer(guild, forcer: bool = False) -> dict:
                     _POSE[guild.id] = (msg.id, voulu)
                 except Exception as ex:                      # noqa: BLE001
                     bilan["rates"].append(f"message ({type(ex).__name__}: {ex})"[:200])
-    if bilan["crees"] or bilan["pose"] or bilan["maj"] or bilan["rates"]:
+            # Sous le tableau : liens et comptes, model par model.
+            try:
+                await _assurer_details(guild, canal, getattr(getattr(guild, "me", None), "id", None),
+                                       forcer, bilan)
+            except Exception as ex:                          # noqa: BLE001
+                bilan["rates"].append(f"detail ({type(ex).__name__}: {ex})"[:200])
+    if (bilan["crees"] or bilan["pose"] or bilan["maj"] or bilan["details_poses"]
+            or bilan["details_maj"] or bilan["rates"]):
         print(f"[repartition-va] {getattr(guild, 'name', '?')} : crees {bilan['crees']}, "
-              f"pose {bilan['pose']}, mis a jour {bilan['maj']}, echecs {bilan['rates']}",
+              f"pose {bilan['pose']}, mis a jour {bilan['maj']}, details poses "
+              f"{bilan['details_poses']} reecrits {bilan['details_maj']}, echecs {bilan['rates']}",
               flush=True)
     return bilan
 

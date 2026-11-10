@@ -29,6 +29,15 @@ LES RÔLES : CEUX DU PSEUDO
     pseudo_model.models_du_membre : la même reconnaissance que le pseudo
     « (AMELIA) » et que la répartition. Rôle retiré : sa carte est retirée.
 
+ÉTEINT LE 10/11/2026, QUELQUES HEURES PLUS TARD
+    « Je voulais genre la liste [où] tout le monde voit [les] comptes des
+    autres, les liens des autres », puis, pour ces cartes : « les retirer ».
+    Les liens et les comptes de chacun sont dans 🗓️・répartition-va
+    (repartition_va). guild_features.CARTES_VA est vide : un serveur qui en
+    sort voit ses cartes effacées au passage suivant (assurer), et
+    cartes_posees() dit au cog qu'il reste à faire ce ménage. lien_gms sert
+    la liste commune.
+
 QUAND
     cogs/pseudomodel demande un passage quelques secondes après chaque rôle
     donné ou retiré, et repasse toutes les trente minutes. Chaque carte est
@@ -262,11 +271,48 @@ async def _supprimer(guild, entree) -> bool:
     return True
 
 
+def cartes_posees(guild) -> bool:
+    """Des cartes de ce serveur sont-elles encore notées comme posées ?"""
+    return bool(_etat().get(str(getattr(guild, "id", ""))))
+
+
+async def _tout_retirer(guild, bilan) -> dict:
+    """Serveur sorti de CARTES_VA : chaque carte notée est effacée. Une carte
+    qu'on n'a pas pu effacer reste notée, retentée au passage suivant."""
+    gid = str(guild.id)
+    async with _verrou(guild.id):
+        d = copy.deepcopy(_etat())
+        g = d.get(gid) or {}
+        for uid_s in list(g):
+            for model in list(g[uid_s]):
+                try:
+                    await _supprimer(guild, g[uid_s][model])
+                    del g[uid_s][model]
+                    bilan["retirees"] += 1
+                except Exception as e:                       # noqa: BLE001
+                    bilan["rates"].append(f"retrait {uid_s}/{model} ({type(e).__name__}: {e})"[:200])
+            if not g[uid_s]:
+                del g[uid_s]
+        if g:
+            d[gid] = g
+        else:
+            d.pop(gid, None)
+        _ecrire(d)
+    print(f"[cartes-va-fr] {getattr(guild, 'name', '?')} : cartes eteintes, {bilan['retirees']} "
+          f"retiree(s), echecs {bilan['rates']}", flush=True)
+    return bilan
+
+
 async def assurer(guild) -> dict:
     """Pose, réécrit ou retire les cartes du serveur. Rend le bilan ; chaque
-    échec et chaque VA sans salon y sont comptés et imprimés."""
+    échec et chaque VA sans salon y sont comptés et imprimés. Hors de
+    CARTES_VA : efface les cartes encore notées."""
     bilan = {"posees": 0, "maj": 0, "retirees": 0, "sans_salon": [], "rates": []}
-    if guild is None or not serveur(guild):
+    if guild is None:
+        return bilan
+    if not serveur(guild):
+        if cartes_posees(guild):
+            return await _tout_retirer(guild, bilan)
         return bilan
     import outils_communs as oc
     gid = str(guild.id)

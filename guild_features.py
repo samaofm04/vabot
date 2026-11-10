@@ -232,7 +232,11 @@ REPARTITION_VA = {YOU_FR_GUILD_ID}
 #: ses rôles : son lien GetMySocial et 📷 Ajouter mes comptes
 #: (cartes_va_fr.py). Propriétaire, 10/11/2026 : « tu peux leur donner leurs
 #: liens gms pour leurs models et le lien pour qu'ils ajoutent des comptes ».
-CARTES_VA = {YOU_FR_GUILD_ID}
+#: VIDÉ le même jour : « je voulais genre la liste [où] tout le monde voit
+#: [les] comptes des autres, les liens des autres », puis « les retirer » —
+#: les liens et les comptes sont dans 🗓️・répartition-va (repartition_va), et
+#: les cartes déjà posées sont effacées (cartes_va_fr.assurer).
+CARTES_VA: set = set()
 
 #: Les serveurs qui achètent leurs numéros sur le compte GetAText des serveurs
 #: TRUST sans en être un (numgen.serveurs_compte_trust), id -> nom court.

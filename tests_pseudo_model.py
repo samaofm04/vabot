@@ -48,6 +48,8 @@ import repartition_va as rv             # noqa: E402
 # plus bas, n'écrit jamais dans le vrai data/.
 import tempfile                         # noqa: E402
 rv.ETAT = pathlib.Path(tempfile.mkdtemp(prefix="tst_pseudo_rv_")) / "repartition_va.json"
+import cartes_va_fr as _cv              # noqa: E402
+_cv.ETAT = rv.ETAT.parent / "cartes_va_fr.json"
 
 OKS, FAILS = [], []
 

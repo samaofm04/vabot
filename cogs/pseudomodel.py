@@ -122,7 +122,8 @@ class PseudoModel(commands.Cog):
                 if rv.serveur(guild):
                     await rv.assurer(guild, forcer=True)
                 import cartes_va_fr as cv
-                if cv.serveur(guild):
+                # éteintes le 10/11 : le passage efface celles encore posées
+                if cv.serveur(guild) or cv.cartes_posees(guild):
                     await cv.assurer(guild)
         except Exception:
             # une exception non attrapee tue une tasks.loop sans rien dire

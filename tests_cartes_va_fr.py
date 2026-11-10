@@ -212,6 +212,15 @@ def reset():
     SANS_SALON.clear()
 
 
+# ── 0. Éteintes (10/11/2026, « les retirer ») ─────────────────────────────
+print("\n── 0. Éteintes")
+check("CARTES_VA est vide : plus aucun serveur ne reçoit de cartes",
+      not gf.CARTES_VA and not cv.serveur(ns(id=YOU_FR)))
+# Ce qui suit essaie les cartes allumées (elles reviennent si on rallume) ;
+# l'extinction est essayée à la fin.
+_CARTES_VRAI = gf.CARTES_VA
+gf.CARTES_VA = {gf.YOU_FR_GUILD_ID}
+
 # ── 1. Le serveur ─────────────────────────────────────────────────────────
 print("\n── 1. Le serveur")
 check("You FR a les cartes", cv.serveur(ns(id=YOU_FR)))
@@ -428,6 +437,23 @@ url4, nom4, refus4 = ct.page_du_va(str(YOU_FR), "999", "york_emerick12", "emma")
 check("un AUTRE id qui prend le même pseudo : refusé (la fiche est liée à york)",
       refus4 and not url4, (url4, nom4, refus4))
 
+# ── 6b. L'extinction : les cartes posées sont effacées ─────────────────────
+print("\n── 6b. L'extinction")
+reset()
+g = nouvelle_guilde()
+run(cv.assurer(g))
+avant = sum(len(sl.messages) for sl in g.salons.values())
+gf.CARTES_VA = set()
+check("éteint : le serveur a encore des cartes notées", cv.cartes_posees(g) and avant == 5, avant)
+bl = run(cv.assurer(g))
+check("éteint : le passage efface les 5 cartes et oublie l'état",
+      bl["retirees"] == 5 and not bl["rates"] and not cv.cartes_posees(g)
+      and sum(len(sl.messages) for sl in g.salons.values()) == 0, bl)
+bl = run(cv.assurer(g))
+check("éteint : passage suivant, rien à faire", bl["retirees"] == 0 and bl["posees"] == 0, bl)
+check("éteint : un rôle donné ne planifie plus rien", cv.planifier(g) is False)
+gf.CARTES_VA = _CARTES_VRAI
+
 # ── 7. Le cog ─────────────────────────────────────────────────────────────
 print("\n── 7. Le cog")
 src = (BOT / "cogs" / "pseudomodel.py").read_text(encoding="utf-8")
@@ -435,7 +461,8 @@ check("le bouton des cartes est enregistré au chargement du cog",
       "add_dynamic_items(cv.BoutonComptes)" in src and "async def cog_load" in src)
 check("rôle donné ou retiré, départ, rôle renommé : un passage des cartes",
       src.count("cv.planifier(") >= 3)
-check("le passage des 30 minutes repasse les cartes", "await cv.assurer(guild)" in src)
+check("le passage des 30 minutes repasse les cartes, et les efface une fois éteintes",
+      "await cv.assurer(guild)" in src and "cv.cartes_posees(guild)" in src)
 check("aucune commande slash", "app_commands" not in src and "@commands.command" not in src)
 mod = (BOT / "cartes_va_fr.py").read_text(encoding="utf-8")
 check("cartes : rôles lus par pseudo_model, écriture atomique",
