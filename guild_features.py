@@ -201,6 +201,16 @@ CLICS_ET_SUBS = {YOUCHAM_GUILD_ID}
 #: VA d'une autre model, passe ces serveurs).
 MARCHE_SERVEUR = {YOU_US_GUILD_ID: "us", YOU_FR_GUILD_ID: "fr"}
 
+#: Les serveurs dont les salons bangers reçoivent, en COPIE, ceux de leur
+#: marché (bangers_miroir.py) : « us » = le 💥・banger et le 💣・all-banger de
+#: Youl4b, « fr » = les 🔥・banger-<model> de Va IG. Propriétaire, 10/11/2026 :
+#: « sur FR … il va falloir quand même retrouver banger Emma, banger Amelia …
+#: et sur l'autre, comme d'hab, banger et all-banger », puis « oui, les
+#: bangers ». Ses équipes n'ont pas encore de comptes à elles dans le relevé :
+#: rien d'autre n'alimenterait ces salons. Une table à part du marché : couper
+#: la copie d'un serveur ne doit pas changer son menu.
+BANGERS_MIROIR = dict(MARCHE_SERVEUR)
+
 #: Le bridage que le CODE porte, pour les serveurs absents de
 #: data/guild_features.json : les fonctions de YouCham (tout sauf « statut »,
 #: les ronds des salons va-, qui n'existent pas sur un serveur US). Celles de

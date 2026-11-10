@@ -654,6 +654,9 @@ IDENTITE = "jessye"
 #: branché : une fiche ne garde qu'UNE annonce (details['annonce'], vérifiée
 #: dans publier_journee) -- un 2e salon US sur les mêmes reels Jessye
 #: l'écraserait et ferait refuser la journée suivante de Youl4b.
+#: You US et You FR (10/11/2026) reçoivent une COPIE de ce qui paraît ici,
+#: par bangers_miroir.py : il lit les journaux sans jamais toucher à
+#: l'annonce, et tient le sien.
 GUILD_ID = 1535758943324999711
 CHANNEL_ID = 1548115360702664804
 DOSSIER_JOURNEES = Path(__file__).resolve().parent / "data" / "bangers_journees"
@@ -1563,7 +1566,8 @@ def _mention_gerant(f):
     return ('<@' + uid + '> · ' if uid.isdigit() else '') + name
 
 
-def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye', anonyme=False):
+def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye', anonyme=False,
+                  sans_gerant=False):
     """Une carte native Discord ; fichiers texte complets, mentions non notifiantes.
 
     La vidéo, la description et le bouton viennent des briques partagées avec
@@ -1575,6 +1579,11 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye', anonyme
     `anonyme` (Va IG) : le VA par son numéro (`va_libelle`, anonymiser_fr),
     jamais sa mention ni son nom — même pour une fiche préparée avant cette
     règle, qui porte encore `discord_id` : elle dit alors « VA ».
+
+    `sans_gerant` (copies de You US et You FR, bangers_miroir.py) : pas de
+    ligne « Géré par ». Le VA de la fiche est celui de Youl4b ou de Va IG,
+    un inconnu pour le serveur qui reçoit la copie — et son numéro (« Amelia
+    VA 3 ») n'y désigne personne.
     """
     import discord
     date = datetime.strptime(f['jour_bilan'], '%Y-%m-%d').strftime('%d/%m/%Y')
@@ -1582,7 +1591,8 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024, libelle='Jessye', anonyme
     commentaires = f.get('commentaires')
     label = 'commentaire' if commentaires == 1 else 'commentaires'
     gerant = str(f.get('va_libelle') or 'VA') if anonyme else _mention_gerant(f)
-    header = (f"### @{f['compte']}\n**Géré par :** {gerant}\n"
+    ligne_gerant = '' if sans_gerant else f"**Géré par :** {gerant}\n"
+    header = (f"### @{f['compte']}\n{ligne_gerant}"
               f"{libelle} · Bangers du {date}\n\n**{_nombre(vues)}** vues  ·  "
               f"**{_nombre(commentaires)}** {label}  ·  **{_nombre(f.get('likes'))}** likes")
     if f.get('vues_actuelles') is None:

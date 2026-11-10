@@ -50,6 +50,13 @@ MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_remind
              # Compteur « 🔓 VA Jailbreak : n » de MARCHE FR (Jailbreak FR
              # de Youl4b), chaque heure : ZERO commande slash.
              "compteurjailbreak",
+             # Les bangers de Youl4b et de Va IG recopies sur You US et You FR
+             # (bangers_miroir.py), toutes les dix minutes : ZERO commande
+             # slash. Ici, et pas en fin de liste : le patch peach_accueil du
+             # VPS s'appuie sur les trois dernieres lignes de cette liste.
+             # (Ne pas ecrire ici le NOM des deux listes : des essais
+             # decoupent ce fichier dessus.)
+             "bangersmiroir",
              # Salon -generateur-de-lien des VA US (un lien GetMySocial par
              # identite) : ZERO commande slash, comme spoofer.
              "generateur_lien",
