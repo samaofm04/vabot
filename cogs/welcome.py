@@ -559,6 +559,36 @@ def models_du_membre(member) -> list:
     return out
 
 
+def models_tous_serveurs(bot, member) -> list:
+    """Les models qui gardent EN SERVICE les liens FR d'un VA de Va IG : ses
+    roles sur Va IG (models_du_membre), puis ceux qu'il porte sur les
+    serveurs ou le role d'une model s'ecrit dans le pseudo (You FR,
+    pseudo_model), avec leur regle a eux.
+
+    Proprietaire, 10/11/2026 : les VA de You FR y travaillent d'autres
+    models que sur Va IG (fenoainir : Alicia sur Va IG, Amelia sur You FR).
+    Leurs liens Amelia, Emma et Lola, crees a sa demande, etaient coupes
+    dans la minute (« role amelia retire ») : seul Va IG etait lu. Un lien
+    reste en service si le role est porte sur l'un d'eux. Ne fait qu'AJOUTER
+    des models : rien n'est coupe de plus qu'avant."""
+    out = list(models_du_membre(member))
+    try:
+        import pseudo_model as pm
+        for g in list(getattr(bot, "guilds", None) or []):
+            if g is getattr(member, "guild", None) or not pm.serveur(g):
+                continue
+            autre = g.get_member(int(getattr(member, "id", 0) or 0))
+            if autre is None:
+                continue
+            for m in pm.models_du_membre(autre, pm.models_du_serveur(g)):
+                if m not in out:
+                    out.append(m)
+    except Exception as e:                                   # noqa: BLE001
+        # sans les autres serveurs, la regle d'avant : les roles de Va IG
+        log.warning(f"liens FR : roles des autres serveurs illisibles ({type(e).__name__}: {e})")
+    return out
+
+
 def _serveur_fr(guild) -> bool:
     try:
         from cogs.outils import serveur_outils
@@ -3344,7 +3374,9 @@ class Welcome(commands.Cog):
                 gens = [m for m in guild.members if not m.bot]
             else:
                 gens = [m for m in (guild.get_member(int(u)) for u in uids) if m is not None]
-            membres = [(m.id, m.name, models_du_membre(m)) for m in gens]
+            # Va IG ET You FR : un lien reste en service si l'un des deux
+            # porte le role de sa model (models_tous_serveurs)
+            membres = [(m.id, m.name, models_tous_serveurs(self.bot, m)) for m in gens]
             if not membres:
                 return
             try:

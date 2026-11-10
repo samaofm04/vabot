@@ -42,10 +42,33 @@ ATTENTE_DEMARRAGE_SEC = 60
 class PseudoModel(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._taches: set = set()
         self.boucle.start()
 
     def cog_unload(self):
         self.boucle.cancel()
+
+    def _liens_va_ig(self, guild, membre) -> None:
+        """Un rôle de model changé ici (You FR) : les liens FR du VA sur Va IG
+        suivent tout de suite (cogs/welcome._liens_suivent, qui lit les rôles
+        des deux serveurs : models_tous_serveurs). Sans ça, un lien coupé
+        parce que Va IG n'a pas le rôle attendait le passage des 30 minutes."""
+        try:
+            import pseudo_model as pm
+            if not pm.serveur(guild):
+                return
+            w = self.bot.get_cog("Welcome")
+            if w is None or not hasattr(w, "_liens_suivent"):
+                return
+            from cogs.welcome import _serveur_fr
+            for g in list(getattr(self.bot, "guilds", None) or []):
+                if g is guild or not _serveur_fr(g) or g.get_member(membre.id) is None:
+                    continue
+                t = asyncio.create_task(w._liens_suivent(g, [membre.id]))
+                self._taches.add(t)
+                t.add_done_callback(self._taches.discard)
+        except Exception:
+            traceback.print_exc()
 
     async def cog_load(self):
         try:
@@ -67,6 +90,7 @@ class PseudoModel(commands.Cog):
                 rv.planifier(guild)
                 import cartes_va_fr as cv
                 cv.planifier(guild)
+                self._liens_va_ig(guild, after)
             if not pm.serveur(guild):
                 return
             # Seuls les rôles et le pseudo comptent : l'événement part aussi

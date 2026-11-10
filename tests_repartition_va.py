@@ -493,8 +493,9 @@ check("le cog ne déclare aucune commande slash",
       and "hybrid_command" not in src)
 check("le passage des 30 minutes force la répartition",
       "rv.assurer(guild, forcer=True)" in src)
+_maj = src[src.index("async def on_member_update"):src.index("async def on_member_join")]
 check("un rôle donné planifie la répartition, même hors serveur à pseudo",
-      src.index("rv.planifier(guild)") < src.index("if not pm.serveur(guild):"))
+      _maj.index("rv.planifier(guild)") < _maj.index("if not pm.serveur(guild):"))
 check("la répartition lit les rôles de pseudo_model, pas une seconde liste",
       "pm.models_du_membre" in (BOT / "repartition_va.py").read_text(encoding="utf-8")
       and "cle(" not in (BOT / "repartition_va.py").read_text(encoding="utf-8")

@@ -20447,7 +20447,8 @@ try:
               and _srcR.index("_liens_suivent") < _srcR.index("if ch is None"))
         _srcS = _inLf.getsource(_wLf.Welcome._liens_suivent)
         check("roles : les roles sont relus sous verrou, au moment de basculer",
-              _srcS.index("async with self._verrou_liens") < _srcS.index("models_du_membre(m)"))
+              # 10/11/2026 : les roles de Va IG ET de You FR (models_tous_serveurs)
+              _srcS.index("async with self._verrou_liens") < _srcS.index("models_tous_serveurs(self.bot, m)"))
         _srcI = _inLf.getsource(_wLf.Welcome.__init__)
         check("roles : rattrapage lance au demarrage (toutes les 30 min)",
               "self.liens_suivent_roles.start()" in _srcI)
