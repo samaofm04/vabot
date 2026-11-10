@@ -107,8 +107,12 @@ def herosms_key() -> str:
     return _key("herosms_api_key")
 
 
-#: Les serveurs qui achètent sur le compte GetAText TRUST (voir l'en-tête).
-#: TRUST TWITTER n'y est pas : il garde HeroSMS (« pas TRUST Twitter »).
+#: Les serveurs TRUST qui achètent sur le compte GetAText TRUST (voir
+#: l'en-tête). TRUST TWITTER n'y est pas : il garde HeroSMS (« pas TRUST
+#: Twitter »). C'est aussi la liste de la vignette GetAText des panneaux
+#: (cogs/numeros._icone_de). Un serveur qui prend ce compte SANS être un
+#: serveur TRUST (You FR) est dans guild_features.NUMEROS_COMPTE_TRUST :
+#: serveurs_compte_trust() rend les deux.
 TRUST_SERVEURS = {"1488331963575177247": "TRUST INSTAGRAM",
                   "1498948161039896586": "TRUST THREADS"}
 
@@ -117,10 +121,37 @@ def getatext_trust_key() -> str:
     return _key("getatext_trust_api_key")
 
 
+#: Ce qui a déjà été dit, une fois par cause (serveurs_compte_trust).
+_DITS_COMPTE: set = set()
+
+
+def serveurs_compte_trust() -> dict:
+    """{id: nom} de TOUS les serveurs qui achètent sur le compte TRUST : les
+    serveurs TRUST (TRUST_SERVEURS), plus ceux qui n'en sont pas mais
+    prennent ce compte — guild_features.NUMEROS_COMPTE_TRUST (You FR,
+    propriétaire, 10/11/2026 : « change juste API du fournisseur … pour les
+    SMS sur You FR »). Leurs ids ne sont pas recopiés ici.
+
+    Table illisible : les serveurs TRUST seuls, et c'est DIT — You FR
+    retomberait sinon sur le compte principal sans que rien ne le montre."""
+    d = dict(TRUST_SERVEURS)
+    try:
+        import guild_features as gf
+        d.update({str(g): str(n) for g, n in gf.NUMEROS_COMPTE_TRUST.items()})
+    except Exception as e:                                   # noqa: BLE001
+        cause = type(e).__name__
+        if cause not in _DITS_COMPTE:
+            _DITS_COMPTE.add(cause)
+            print(f"[numgen] serveurs du compte TRUST illisibles ({cause}: {e}) : seuls les "
+                  f"serveurs TRUST achètent dessus", flush=True)
+    return d
+
+
 def compte(gid) -> str:
     """« trust » si ce serveur achète sur le compte GetAText TRUST (sa clé
     posée), sinon "" : le compte principal, comme avant."""
-    return "trust" if str(gid or "") in TRUST_SERVEURS and getatext_trust_key() else ""
+    return ("trust" if str(gid or "") in serveurs_compte_trust() and getatext_trust_key()
+            else "")
 
 
 def fournisseur_sms(cpt: str = "") -> str:

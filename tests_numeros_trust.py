@@ -50,6 +50,9 @@ def check(label, cond, detail=""):
 
 AG, TH, TW = "1488331963575177247", "1498948161039896586", "1445108485090971710"
 YOUCHAM, VA_IG = "1565640097146347533", "1505418484052394004"
+# You FR (10/11/2026) prend le compte TRUST sans être un serveur TRUST ; You US non.
+import guild_features as _gf_you  # noqa: E402
+YOU_US, YOU_FR = _gf_you.YOU_US_GUILD_ID, _gf_you.YOU_FR_GUILD_ID
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="numeros_trust_"))
 numgen._FILE = TMP / "numgen.json"
 import safe_json  # noqa: E402
@@ -69,11 +72,27 @@ numgen._get = faux_get
 
 print("1. Qui achète sur le compte TRUST")
 check("sans clé TRUST : personne (tout le monde reste sur le compte principal)",
-      all(numgen.compte(g) == "" for g in (AG, TH, TW, YOUCHAM)))
+      all(numgen.compte(g) == "" for g in (AG, TH, TW, YOUCHAM, YOU_US, YOU_FR)))
 numgen.set_keys(getatext_trust="CLE-TRUST-NOUVELLE-9999")
 check("clé posée : TRUST INSTAGRAM et TRUST THREADS", numgen.compte(AG) == "trust" and numgen.compte(TH) == "trust")
 check("… pas TRUST TWITTER (« pas TRUST Twitter »), ni YouCham, ni Va IG",
       numgen.compte(TW) == "" and numgen.compte(YOUCHAM) == "" and numgen.compte(VA_IG) == "" and numgen.compte(None) == "")
+# Propriétaire, 10/11/2026 : « je veux use des num avec API du serv trust
+# instagram », puis « change juste API du fournisseur … pour les SMS sur You FR ».
+check("You FR achète sur le compte TRUST (id texte ou entier) ; You US reste sur le principal",
+      numgen.compte(YOU_FR) == "trust" and numgen.compte(int(YOU_FR)) == "trust"
+      and numgen.compte(YOU_US) == "")
+check("la liste du compte : les deux serveurs TRUST et You FR, lue dans guild_features",
+      numgen.serveurs_compte_trust() == {AG: "TRUST INSTAGRAM", TH: "TRUST THREADS", YOU_FR: "You FR"}
+      and _gf_you.NUMEROS_COMPTE_TRUST == {YOU_FR: "You FR"}, numgen.serveurs_compte_trust())
+check("You FR n'est PAS un serveur TRUST (TRUST_SERVEURS inchangée) ; son id n'est pas recopié dans numgen",
+      set(numgen.TRUST_SERVEURS) == {AG, TH}
+      and YOU_FR not in (BOT / "numgen.py").read_text(encoding="utf-8"))
+_sauve_table = dict(_gf_you.NUMEROS_COMPTE_TRUST)
+_gf_you.NUMEROS_COMPTE_TRUST.clear()
+check("table vidée : You FR revient sur le compte principal, les serveurs TRUST ne bougent pas",
+      numgen.compte(YOU_FR) == "" and numgen.compte(AG) == "trust")
+_gf_you.NUMEROS_COMPTE_TRUST.update(_sauve_table)
 REPONSES[("CLE-TRUST-NOUVELLE-9999", "getNumber")] = "ACCESS_NUMBER:777:15551234567"
 APPELS.clear()
 ok, res = numgen.get_number("ig", "187", "trust")
@@ -228,6 +247,22 @@ check("salon 📱・numéro de TRUST INSTAGRAM (et la carte du cliqueur) : le co
       cn._compte(salon_ag) == "trust" and cn._compte(carte) == "trust" and cn._compte(salon_tw) == ""
       and cn._compte(None) == "")
 check("… son solde est celui du compte TRUST", cn._cle_solde(carte) == "sms_trust" and cn._cle_solde(salon_tw) == "sms")
+# You FR : le salon commun 📱・numéro et la carte du cliqueur prennent le compte
+# TRUST ; la vignette GetAText reste aux serveurs TRUST (« seulement TRUST »).
+salon_us = SimpleNamespace(id=3, name="📱・numéro", guild=SimpleNamespace(id=int(YOU_US)))
+salon_fr = SimpleNamespace(id=4, name="📱・numéro", guild=SimpleNamespace(id=int(YOU_FR)))
+carte_fr = cn._CartePerso(salon_fr, 43, "zoe")
+check("You FR : salon et carte sur le compte TRUST, son solde et son alerte ; You US sur le principal",
+      cn._compte(salon_fr) == "trust" and cn._compte(carte_fr) == "trust"
+      and cn._cle_solde(carte_fr) == "sms_trust"
+      and cn._cle_credit("sms", cn._compte(carte_fr)) == "credit:sms_trust"
+      and cn._compte(salon_us) == "" and cn._cle_solde(salon_us) == "sms")
+check("You FR garde la vignette du téléphone (la puce GetAText est celle des serveurs TRUST)",
+      cn._icone_de(salon_fr) == (cn._ICONE, cn._ICONE_NOM)
+      and cn._icone_de(salon_ag) == (cn._ICONE_TRUST, cn._ICONE_TRUST_NOM))
+check("You FR : seul le compte change — ni limite par jour, ni paliers, ni numéros +33 (propres à "
+      "TRUST INSTAGRAM et à Va IG)",
+      not cn._numero_seul(salon_fr) and not cn._serveur_fr(salon_fr) and cn._pays(salon_fr) is None)
 check("… son alerte aussi ; les mails gardent la leur",
       cn._cle_credit("sms", "trust") == "credit:sms_trust" and cn._cle_credit("sms") == "credit:sms"
       and cn._cle_credit("mail", "trust") == "credit:mail")
@@ -254,6 +289,8 @@ _users = w._load_web_users
 w._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"},
                              "chatteur1": {"role": "chatter", "password": "x"}}
 h = w._numgen_trust_html({"sms_trust": "12.50 $"})
+check("l'onglet nomme TOUS les serveurs qui achètent sur ce compte, You FR compris",
+      "TRUST INSTAGRAM, TRUST THREADS et You FR achètent sur ce compte" in h, h[:400])
 check("l'onglet montre l'état (fin de la clé, solde) et un champ masqué, jamais la clé entière",
       "CLE-…9999" in h and "type='password'" in h and "CLE-TRUST-NOUVELLE-9999" not in h
       and "/settings/numgen/cle_trust" in h and "12.50 $" in h, h[:300])

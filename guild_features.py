@@ -220,6 +220,19 @@ BANGERS_MIROIR = dict(MARCHE_SERVEUR)
 #: bangers restent à tous (MARCHE_SERVEUR).
 PSEUDO_MODEL = {YOU_FR_GUILD_ID}
 
+#: Les serveurs qui achètent leurs numéros sur le compte GetAText des serveurs
+#: TRUST sans en être un (numgen.serveurs_compte_trust), id -> nom court.
+#: Propriétaire, 10/11/2026 : « je veux use des num avec API du serv trust
+#: instagram », puis « change juste API du fournisseur … pour les SMS sur You
+#: FR ». Seul le COMPTE change : la clé qui achète, le solde affiché sur le
+#: panneau et son alerte « sans crédit ». Ni la vignette GetAText (« seulement
+#: TRUST », 08/11/2026 : elle reste lue dans numgen.TRUST_SERVEURS), ni les
+#: paliers de numéros par jour de TRUST INSTAGRAM, ni le pays des numéros.
+#: You US reste sur le compte principal : il l'avait d'abord demandé pour ce
+#: serveur, puis a dit « stop laisse tomber » et nommé You FR. Sans la clé
+#: TRUST, ces serveurs achètent sur le compte principal, comme avant.
+NUMEROS_COMPTE_TRUST = {YOU_FR_GUILD_ID: "You FR"}
+
 #: Le bridage que le CODE porte, pour les serveurs absents de
 #: data/guild_features.json : les fonctions de YouCham (tout sauf « statut »,
 #: les ronds des salons va-, qui n'existent pas sur un serveur US). Celles de

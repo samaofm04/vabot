@@ -58163,7 +58163,11 @@ def _numgen_trust_html(soldes=None) -> str:
         import numgen
         st = numgen.status()
         solde = (soldes or {}).get("sms_trust", "—") if st.get("trust_ok") else ""
-        noms = " et ".join(sorted(numgen.TRUST_SERVEURS.values()))
+        # TOUS les serveurs qui achètent sur ce compte, You FR compris
+        # (10/11/2026) : nommer les seuls serveurs TRUST aurait caché à qui
+        # recharge le compte un serveur qui le vide aussi.
+        _noms = sorted(numgen.serveurs_compte_trust().values())
+        noms = ", ".join(_noms[:-1]) + (" et " if len(_noms) > 1 else "") + "".join(_noms[-1:])
     except Exception as e:
         return ("<div style='color:#f99;padding:10px'>Compte TRUST illisible : "
                 + html_escape(str(e)[:120]) + "</div>")
