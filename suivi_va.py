@@ -327,8 +327,13 @@ def _annoncer_confirme(gid: str, uid: str, salon: str, n: int, but: int) -> None
         "allowed_mentions": {"users": [uid]},
         "embeds": [{"title": "⭐ Essai réussi — tu es confirmé",
                     "color": 0x22C55E,
-                    "description": f"**{n} subs** sur la période, l'objectif était de "
-                                   f"**{but}**.\nTon badge 🧪 Essai laisse la place à "
+                    # n : les clics US de son lien (clics_us), pas des abonnés.
+                    # Écrit « subs » jusqu'au 10/11/2026 : Dav (TRUST INSTAGRAM)
+                    # lisait « 53 subs » pour 53 clics et 0 abonné ; le
+                    # propriétaire : « Écrire clics US »
+                    "description": f"**{n} clics US** sur ton lien pendant la période, "
+                                   f"l'objectif était de **{but} clics US**.\n"
+                                   "Ton badge 🧪 Essai laisse la place à "
                                    "⭐ **Confirmé**. Bien joué."}]})
     # le badge de l'accueil n'a plus lieu d'être : on remet les bons boutons
     fiche = (tk._etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
