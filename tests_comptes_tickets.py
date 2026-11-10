@@ -223,9 +223,14 @@ check("jeton annoncé mais pas enregistré : pas de lien mort, « réessaie »",
 
 print("4c. Paie et Sheet")
 import jb_objectifs as ob  # noqa: E402
-check("Lia : pas de paie Jailbreak ; les autres models si",
-      not ob.paie_active("lia") and not ob.paie_active(" Lia ") and ob.paie_active("jessye")
-      and ob.paie_active("julia"))
+check("Lia : pas de paie Jailbreak ; Jessye si",
+      not ob.paie_active("lia") and not ob.paie_active(" Lia ") and ob.paie_active("jessye"))
+# 10/11/2026 : la page des VA des models FR (You FR, 📷 Ajouter mes comptes)
+# tait aussi la paie (« masque-la ») ; le dashboard la garde.
+import bangers as _bgP  # noqa: E402
+check("models FR : la page du VA ne montre pas la paie (les six, casse ignorée)",
+      len(_bgP.MODELS_FR) == 6 and not any(ob.paie_active(m) for m in _bgP.MODELS_FR)
+      and not ob.paie_active(" Julia "))
 import sheets_sync as ss  # noqa: E402
 
 

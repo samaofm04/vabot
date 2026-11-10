@@ -883,9 +883,25 @@ def pastille(tenus: int, notes: int) -> str:
 # Jailbreak : leur page ne doit ni montrer « 5 $ / jour, 75 $ la quinzaine »,
 # ni « ta paie ne peut pas être calculée ». La page des comptes (va_portal)
 # demande paie_active() avant d'afficher quoi que ce soit de la paie.
+#
+# 10/11/2026 : les models FR aussi (bangers.MODELS_FR). Les VA de You FR
+# ouvrent cette page par « 📷 Ajouter mes comptes » (cartes_va_fr) ; elle
+# leur montrait « 💵 0,00 $ / 75 ». Le propriétaire : « masque-la ». Seule
+# la PAGE DU VA se tait : rien d'autre ne lit paie_active, la paie des VA FR
+# se calcule et se montre sur le dashboard comme avant.
 SANS_PAIE = frozenset({"lia"})
 
 
 def paie_active(identite: str) -> bool:
-    """Les VA de cette identité sont-ils payés par la journée Jailbreak ?"""
-    return str(identite or "").strip().lower() not in SANS_PAIE
+    """La page des comptes du VA (va_portal) montre-t-elle sa paie Jailbreak ?
+    Non pour Lia (payés aux subs) ni pour les models FR."""
+    i = str(identite or "").strip().lower()
+    if i in SANS_PAIE:
+        return False
+    try:
+        import bangers
+        return i not in bangers.MODELS_FR
+    except Exception as e:                                   # noqa: BLE001
+        # sans la liste, on se tait plutôt que de montrer un montant
+        print(f"[paie] models FR illisibles ({type(e).__name__}: {e}) : paie masquée", flush=True)
+        return False
