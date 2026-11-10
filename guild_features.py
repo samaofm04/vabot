@@ -211,6 +211,15 @@ MARCHE_SERVEUR = {YOU_US_GUILD_ID: "us", YOU_FR_GUILD_ID: "fr"}
 #: la copie d'un serveur ne doit pas changer son menu.
 BANGERS_MIROIR = dict(MARCHE_SERVEUR)
 
+#: Les serveurs où le rôle d'une model s'écrit dans le pseudo du membre :
+#: « yous1m (AMELIA) » (pseudo_model.py). Propriétaire, 10/11/2026, devant You
+#: FR : « tu peux créer un rôle par model … y a le rôle Amelia, Lola etc. et …
+#: ça change leur name dans le serveur, genre yous1m (AMELIA) ». Les models
+#: sont celles du marché du serveur (les mêmes que ses salons banger). Le
+#: rôle n'est qu'une étiquette : il n'ouvre ni ne ferme rien, le menu et les
+#: bangers restent à tous (MARCHE_SERVEUR).
+PSEUDO_MODEL = {YOU_FR_GUILD_ID}
+
 #: Le bridage que le CODE porte, pour les serveurs absents de
 #: data/guild_features.json : les fonctions de YouCham (tout sauf « statut »,
 #: les ronds des salons va-, qui n'existent pas sur un serveur US). Celles de
@@ -266,6 +275,11 @@ def marche_serveur(guild_or_id):
     """« fr » ou « us » pour un serveur au marché unique (MARCHE_SERVEUR),
     None partout ailleurs."""
     return MARCHE_SERVEUR.get(_gid(guild_or_id))
+
+
+def pseudo_model(guild_or_id) -> bool:
+    """True si, sur ce serveur, le rôle d'une model s'écrit dans le pseudo."""
+    return _gid(guild_or_id) in PSEUDO_MODEL
 
 
 def set_features(guild_or_id, features) -> set:

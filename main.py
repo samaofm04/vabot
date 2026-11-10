@@ -57,6 +57,9 @@ MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_remind
              # (Ne pas ecrire ici le NOM des deux listes : des essais
              # decoupent ce fichier dessus.)
              "bangersmiroir",
+             # You FR : le role d'une model s'ecrit dans le pseudo du membre,
+             # « yous1m (AMELIA) » (pseudo_model.py). ZERO commande slash.
+             "pseudomodel",
              # Salon -generateur-de-lien des VA US (un lien GetMySocial par
              # identite) : ZERO commande slash, comme spoofer.
              "generateur_lien",
