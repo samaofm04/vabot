@@ -521,8 +521,13 @@ def youcham(n_va=2, avec_outils=True):
 
 # ════════════════════════════════════════════════ 1. la liste ══
 print("1. La liste des serveurs aux outils communs")
-check("OUTILS_COMMUNS = {YouCham}, sous-ensemble des serveurs US",
-      gf.OUTILS_COMMUNS == {str(YOUCHAM)} and gf.OUTILS_COMMUNS <= gf.US_GUILD_IDS)
+check("OUTILS_COMMUNS = {YouCham, You US, You FR}, sous-ensemble des serveurs US",
+      gf.OUTILS_COMMUNS == {str(YOUCHAM), gf.YOU_US_GUILD_ID, gf.YOU_FR_GUILD_ID}
+      and gf.OUTILS_COMMUNS <= gf.US_GUILD_IDS, gf.OUTILS_COMMUNS)
+check("📊・click-et-sub : YouCham seul (You US et You FR n'ont pas ses chiffres)",
+      gf.CLICS_ET_SUBS == {str(YOUCHAM)} and gf.clics_et_subs(YOUCHAM)
+      and not any(gf.clics_et_subs(x) for x in (gf.YOU_US_GUILD_ID, gf.YOU_FR_GUILD_ID,
+                                                YOUL4B, VA_IG, None)))
 check("YouCham oui (id entier, texte, objet) ; Youl4b, Va IG et rien non",
       gf.outils_communs(YOUCHAM) and gf.outils_communs(str(YOUCHAM))
       and gf.outils_communs(types.SimpleNamespace(id=YOUCHAM))
@@ -885,6 +890,42 @@ try:
     check("panneau supprimé à la main : reposé une fois",
           b4["panneaux"] == ["menu"] and len(du_bot(sal["menu"])) == 1, b4)
     check("Youl4b : aucun salon commun créé", not courir(oc.assurer(Guilde(YOUL4B, "l"), bot))["crees"])
+    # You US et You FR (10/11/2026) : les quatre outils de YouCham, sans son
+    # 📊・click-et-sub -- la page de Lia est celle des VA de YouCham.
+    _n_img = len(IMAGES)
+    for _gid_y, _nom_y in ((int(gf.YOU_US_GUILD_ID), "You US"), (int(gf.YOU_FR_GUILD_ID), "You FR")):
+        gy = Guilde(_gid_y, _nom_y)
+        gy.rem = Membre(REM, "Rem", gy, bot=True)
+        gy.members.append(gy.rem)
+        by = courir(oc.assurer(gy, bot))
+        caty = discord.utils.find(oc.est_categorie_outils, gy.categories)
+        nomsy = [c.name for c in caty.text_channels] if caty else []
+        check(f"{_nom_y} : 🧰 OUTILS avec quatre salons, SANS 📊・click-et-sub",
+              nomsy == ["📋・menu", "📤・spoofer", "⬇️・download", "📱・numéro"] and not by["rates"],
+              (nomsy, by))
+        saly = {oc._cle(c.name): c for c in caty.text_channels}
+        check(f"{_nom_y} : panneaux du menu, du spoofer et du download posés ; le numéro attend Rem",
+              by["panneaux"] == ["menu", "spoofer", "download"]
+              and all(len(du_bot(saly[k])) == 1 for k in ("menu", "spoofer", "download"))
+              and not du_bot(saly["numero"]) and gy.rem in saly["numero"].overwrites, by)
+        check(f"{_nom_y} : salons_de / cles_de sans click-et-sub, salon_outil ne le trouve pas",
+              oc.cles_de(gy) == ("menu", "spoofer", "download", "numero")
+              and oc.salon_outil(gy, "click-et-sub") is None
+              and oc.salon_outil(gy, "menu") is saly["menu"])
+        # un « click-et-sub » créé à la main dans 🧰 OUTILS n'est pas un outil ici :
+        # le tour de l'heure n'y pose pas l'image des VA de YouCham
+        _main = gy.ajoute("📊・click-et-sub", caty)
+        check(f"{_nom_y} : un click-et-sub créé à la main n'est PAS reconnu (aucune image de Lia)",
+              not oc.est_salon_outil(_main) and oc.salon_outil(gy, "click-et-sub") is None)
+        _nc = len(gy.crees)
+        by2 = courir(oc.assurer(gy, bot))
+        check(f"{_nom_y} : 2e passage, rien de créé ni reposté",
+              len(gy.crees) == _nc and not by2["panneaux"] and not by2["rates"]
+              and not _main.messages, by2)
+    check("You US / You FR : aucune image de la quinzaine de Lia dessinée", len(IMAGES) == _n_img,
+          len(IMAGES) - _n_img)
+    check("YouCham garde ses cinq salons (salons_de)",
+          oc.cles_de(g) == oc.CLES and oc.CLES[-1] == oc.CLE_CLICS == "click-et-sub")
     vue = oc.PanneauMenu()
     check("bouton du menu : vue persistante (custom_id fixe, sans délai)",
           vue.is_persistent() and _ids(vue) == [oc.MENU_ID])
@@ -1568,6 +1609,64 @@ try:
     mn, cn = gl.ajoute("bob-menu", dos), gl.ajoute("bob-content", dos)
     check("Youl4b inchangé : depuis -menu, le -content du même dossier",
           u._us_content_target(types.SimpleNamespace(channel=mn, guild=gl, user=None)) is cn)
+
+    # ── You FR et You US (10/11/2026) : le même menu commun, au marché du
+    # SERVEUR. Aucun rôle @Jailbreak FR / US n'y est posé : sans
+    # guild_features.MARCHE_SERVEUR, un membre de You FR recevait le menu US.
+    def _serveur_you(gid, nom, pseudo):
+        gy = Guilde(gid, nom)
+        cy = gy.ajoute_cat(oc.CATEGORIE)
+        sy = {cle: gy.ajoute(n, cy) for cle, n in oc.salons_de(gy)}
+        va = Membre(7900 + (gid % 50), pseudo, gy)
+        gy.members.append(va)
+        py = courir(oc.categorie_perso(gy))
+        ct = gy.ajoute(w._us_ticket_name(va, "content"), py)
+        ct.overwrites = {gy.default_role: discord.PermissionOverwrite(view_channel=False),
+                         va: discord.PermissionOverwrite(view_channel=True)}
+        return gy, sy, va, ct
+
+    for _gid_y, _nom_y, _marche_y in ((int(gf.YOU_FR_GUILD_ID), "You FR", "fr"),
+                                      (int(gf.YOU_US_GUILD_ID), "You US", "us")):
+        gy, sy, VAY, CTY = _serveur_you(_gid_y, _nom_y, "va_" + _marche_y)
+        _autre = "us" if _marche_y == "fr" else "fr"
+        itx = Itx(gy, sy["menu"], VAY, COGS)
+        courir(u.ouvrir_menu_commun(itx))
+        env = itx.response.envois
+        ids_m = _ids(env[0][1]["view"]) if env else []
+        check(f"{_nom_y} : 📋 Ouvrir mon menu donne le menu {_marche_y.upper()}, sans aucun rôle, "
+              "en éphémère",
+              len(env) == 1 and env[0][1].get("ephemeral") is True
+              and any(i.startswith(f"jbus:ms:{_marche_y}:") for i in ids_m)
+              and not any(i.startswith(f"jbus:ms:{_autre}:") for i in ids_m), ids_m)
+        # un rôle de l'AUTRE marché posé à la main n'y change rien
+        VAY.roles = [Role(41, "Jailbreak " + _autre.upper())]
+        itx = Itx(gy, sy["menu"], VAY, COGS)
+        courir(u.ouvrir_menu_commun(itx))
+        ids_m = _ids(itx.response.envois[0][1]["view"]) if itx.response.envois else []
+        check(f"{_nom_y} : même avec le rôle « Jailbreak {_autre.upper()} », le menu reste "
+              f"{_marche_y.upper()}",
+              any(i.startswith(f"jbus:ms:{_marche_y}:") for i in ids_m)
+              and not any(i.startswith(f"jbus:ms:{_autre}:") for i in ids_m), ids_m)
+        VAY.roles = []
+        it = Itx(gy, sy["menu"], VAY, COGS, ephemere=True)
+        courir(u._jb_model_panneau(it, UC, "lola"))
+        env = it.response.envois
+        ids_p = _ids(env[0][1]["view"]) if env else []
+        actions = [i for i in ids_p if i.startswith("jbus:a:lola:")]
+        check(f"{_nom_y} : choix d'une model, SON panneau en éphémère, des actions dedans",
+              len(env) == 1 and env[0][1].get("ephemeral") is True and actions
+              and all(":lola:" in i for i in ids_p if i.startswith("jbus:")), ids_p[:8])
+        check(f"{_nom_y} : rien de posé dans les salons communs",
+              all(not [m for m in c.messages if m.content or m.vue] for c in sy.values()))
+        UC.appels.clear()
+        _cle_a, _qte_a = actions[0].split(":")[3], int(actions[0].split(":")[4])
+        it = Itx(gy, sy["menu"], VAY, COGS, ephemere=True)
+        courir(u.JBActionButton("lola", _cle_a, _qte_a).callback(it))
+        check(f"{_nom_y} : une action du panneau ({_cle_a}) est livrée dans le -content du cliqueur",
+              len(UC.appels) == 1 and UC.appels[0][1:3] == (VAY.id, "lola")
+              and len(CTY.messages) == 1 and CTY.messages[0].content.endswith("pour lola")
+              and all(not [m for m in c.messages if m.content or m.vue] for c in sy.values()),
+              (UC.appels, [m.content for m in CTY.messages]))
 finally:
     u._jb_models_marche = _vrai_marche
 

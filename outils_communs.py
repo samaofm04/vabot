@@ -25,7 +25,9 @@ CE QUI VIT OU
                       Lia (infloww_liens, profil « lia ») : clics US, subs,
                       CVR, $ / sub par VA (proprietaire, 31/10/2026) ; au
                       dessus, l'image de chaque quinzaine finie, gardee
-                      (01/11/2026, voir _tourner)
+                      (01/11/2026, voir _tourner). YouCham SEUL (salons_de) :
+                      You US et You FR, branches le 10/11/2026, ont les
+                      quatre outils, pas les chiffres des VA de YouCham
     📁 SALONS PERSO, puis 📁 SALONS PERSO 2, 3... : Discord refuse un 51e
     salon dans une categorie. Un salon par VA, « <pseudo>-content » -- le
     nom de cogs/welcome._us_ticket_name, que toutes les recherches de -content
@@ -89,6 +91,34 @@ SALONS = (("menu", "📋・menu"), ("spoofer", "📤・spoofer"),
           ("download", "⬇️・download"), ("numero", "📱・numéro"),
           ("click-et-sub", "📊・click-et-sub"))
 CLES = tuple(c for c, _n in SALONS)
+
+#: Le salon que tous les serveurs aux outils communs n'ont pas : la page des
+#: liens de suivi de Lia est celle des VA de YouCham
+#: (guild_features.CLICS_ET_SUBS).
+CLE_CLICS = "click-et-sub"
+
+
+def salons_de(guilde) -> tuple:
+    """Les salons communs de CE serveur, (cle, nom) : les quatre outils
+    partout, le 📊・click-et-sub la seulement ou guild_features le dit.
+
+    You US et You FR (10/11/2026) ont les outils de YouCham, pas ses
+    chiffres : cree partout, le salon y aurait montre a tous les clics et
+    les subs des VA de YouCham, image redessinee toutes les heures. Serveur
+    illisible : sans le click-et-sub -- un salon de trop se voit, il
+    faudrait le supprimer a la main."""
+    try:
+        import guild_features as gf
+        avec = bool(gf.clics_et_subs(guilde))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[outils-communs] click-et-sub de {getattr(guilde, 'name', '?')} "
+              f"indecidable ({type(e).__name__}: {e}) : sans lui", flush=True)
+        avec = False
+    return tuple((c, n) for c, n in SALONS if avec or c != CLE_CLICS)
+
+
+def cles_de(guilde) -> tuple:
+    return tuple(c for c, _n in salons_de(guilde))
 
 #: Les categories des salons perso : « 📁 SALONS PERSO », puis « … 2 »,
 #: « … 3 ». Discord refuse un 51e salon dans une categorie (code 50035) : la
@@ -241,7 +271,10 @@ def est_salon_outil(canal, outil=None) -> bool:
         if not est_categorie_outils(getattr(canal, "category", None)):
             return False
         cle = _cle(getattr(canal, "name", ""))
-        if cle not in CLES:
+        # Au nom, seulement les salons que CE serveur a : un « click-et-sub »
+        # cree a la main dans le 🧰 OUTILS de You US n'est pas le panneau des
+        # chiffres de YouCham (le tour de l'heure l'y aurait pose).
+        if cle not in cles_de(canal.guild):
             return False
     return outil is None or cle == outil
 
@@ -1377,8 +1410,9 @@ async def _assurer_download(canal, bot) -> int:
 
 
 async def assurer(guilde, bot) -> dict:
-    """🧰 OUTILS, ses cinq salons et les panneaux de Ryuk (menu, spoofer,
-    download, click-et-sub). Idempotent : ce qui existe n'est ni recree ni reposte. Le
+    """🧰 OUTILS, ses salons (salons_de : quatre outils, plus le click-et-sub
+    sur YouCham) et les panneaux de Ryuk (menu, spoofer, download,
+    click-et-sub). Idempotent : ce qui existe n'est ni recree ni reposte. Le
     panneau du numero est pose par Rem (cogs/numeros, _panneau_commun) : un
     bouton n'est servi que par l'application qui a poste le message.
     Rend un bilan ; chaque echec y est compte, aucun n'est tu."""
@@ -1407,7 +1441,7 @@ async def assurer(guilde, bot) -> dict:
             bilan["rates"].append(f"{CATEGORIE} non placee en tete ({type(e).__name__})")
     salons = {}
     id_de = {k: i for i, k in par_id.items()}
-    for cle, nom in SALONS:
+    for cle, nom in salons_de(guilde):
         # Renomme ou sorti de 🧰 OUTILS, un salon reste le sien par son id.
         canal = (discord.utils.get(guilde.text_channels, id=id_de[cle])
                  if cle in id_de else None)

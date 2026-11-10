@@ -809,7 +809,12 @@ async def sync_general_channel_access(guild, member, identity):
       membre sur TOUS les salons par-identite.
 
     Best-effort (ignore les erreurs). Retourne (granted, revoked) pour le report.
+
+    Serveur au marche unique (You US, You FR, marche_unique) : rien. Les
+    salons de model y sont a tous, aucun droit n'y est pose au nom d'un VA.
     """
+    if marche_unique(guild):
+        return 0, 0
     # Une identite, ou plusieurs : un VA a plusieurs models (roles du serveur
     # FR) voit les salons de CHACUNE, et ceux d'aucune autre.
     if isinstance(identity, str) or identity is None:
@@ -1247,7 +1252,29 @@ ROLES_MARCHE = {"fr": "Jailbreak FR", "us": "Jailbreak US"}
 #: du serveur (cogs/user.marche_du_membre) : sans ca, un VA sans role passait
 #: en menu US.
 SANS_ROLE_JAILBREAK = {1505418484052394004: "fr"}
+# You US et You FR (10/11/2026) : un marche pour tout le serveur, lu dans
+# guild_features.MARCHE_SERVEUR -- leurs ids ne sont pas recopies ici. Meme
+# regle que Va IG : aucun role Jailbreak a poser, le menu suit le serveur.
+try:
+    import guild_features as _gf_marches
+    SANS_ROLE_JAILBREAK.update(
+        {int(_g): _m for _g, _m in _gf_marches.MARCHE_SERVEUR.items()})
+except Exception as _e:                                      # noqa: BLE001
+    # Dit, pas tu : sans cette table, You FR recevrait le menu US.
+    log.error("marches par serveur illisibles (%s: %s) : You FR et You US "
+              "retombent sur le marche des roles", type(_e).__name__, _e)
 NOMS_ROLES_JAILBREAK = ("jailbreak", "jailbreak fr", "jailbreak us")
+
+
+def marche_unique(guild) -> bool:
+    """Un serveur ou tout le monde travaille le meme marche (You US, You FR :
+    guild_features.MARCHE_SERVEUR). Personne n'y a UNE model a lui : aucun
+    salon n'y est reserve aux VA d'une identite."""
+    try:
+        import guild_features as _gf
+        return _gf.marche_serveur(guild) is not None
+    except Exception:                                        # noqa: BLE001
+        return False
 
 
 async def _role_marche(guild, marche):
@@ -3542,6 +3569,13 @@ class Welcome(commands.Cog):
         try:
             users = load_users()
             for guild in self.bot.guilds:
+                # Serveur au marche unique (You US, You FR) : les
+                # 💥・banger-<model> y sont a TOUT le monde. Sans cette
+                # sortie, ce tour les cachait a @everyone des leur creation
+                # -- aucun membre n'y a de fiche VA pour les lui rouvrir --
+                # et un VA de Va IG de passage y recevait un droit a son nom.
+                if marche_unique(guild):
+                    continue
                 # Build identity_lower -> set of Member objects (VAs actifs)
                 identity_to_members = {}
                 for user_id, data in users.items():

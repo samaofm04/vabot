@@ -172,9 +172,14 @@ check("Va IG, Twitter et rien ne sont pas US",
       not any(gf.is_us_guild(g) for g in (VA_IG, TWITTER, None, 0, "x")))
 check("is_youl4b : Youl4b seul",
       gf.is_youl4b(YOUL4B) and not gf.is_youl4b(YOUCHAM) and not gf.is_youl4b(None))
+# You US et You FR (10/11/2026) : branchés comme YouCham, lus dans
+# guild_features (tests_you_us_fr.py les couvre).
+YOU_US, YOU_FR = gf.YOU_US_GUILD_ID, gf.YOU_FR_GUILD_ID
 check("une seule liste : US_GUILD_IDS = clés de US_GUILDS",
-      gf.US_GUILD_IDS == set(gf.US_GUILDS) == {str(YOUL4B), str(YOUCHAM)}, gf.US_GUILDS)
-check("libellé des refus : « Youl4b, YouCham »", gf.noms_us() == "Youl4b, YouCham", gf.noms_us())
+      gf.US_GUILD_IDS == set(gf.US_GUILDS) == {str(YOUL4B), str(YOUCHAM), YOU_US, YOU_FR},
+      gf.US_GUILDS)
+check("libellé des refus : « Youl4b, YouCham, You US, You FR »",
+      gf.noms_us() == "Youl4b, YouCham, You US, You FR", gf.noms_us())
 
 # Aucun module ne recopie l'id de YouCham : il ne vit que dans guild_features.
 _copies = []
@@ -339,11 +344,14 @@ check("liens_identite_us : plus d'id de serveur recopié", not hasattr(lius, "GU
 # Téléchargement
 import cogs.telechargement as tl  # noqa: E402
 
-check("téléchargement : les deux serveurs US, Youl4b d'abord",
-      tl.SERVEURS_IDS == (YOUL4B, YOUCHAM), tl.SERVEURS_IDS)
+# Les quatre serveurs US, dans l'ordre de leurs ids (You US et You FR depuis
+# le 10/11/2026) : la liste est lue dans guild_features, jamais recopiée.
+US_TOUS = tuple(sorted((YOUL4B, YOUCHAM, int(YOU_US), int(YOU_FR))))
+check("téléchargement : tous les serveurs US (Youl4b, YouCham, You US, You FR)",
+      tl.SERVEURS_IDS == US_TOUS, tl.SERVEURS_IDS)
 _gids_cmd = sorted(getattr(tl.Telechargement.menudownload, "_guild_ids", None) or [])
-check("/menudownload : proposée sur Youl4b et YouCham (commande de serveur)",
-      _gids_cmd == [YOUL4B, YOUCHAM], _gids_cmd)
+check("/menudownload : proposée sur les serveurs US (commande de serveur)",
+      _gids_cmd == list(US_TOUS), _gids_cmd)
 _avant_env = os.environ.get("IG_SERVEUR_ID")
 os.environ["IG_SERVEUR_ID"] = "42"
 check("IG_SERVEUR_ID posé : un seul serveur, comme avant", tl._serveurs_download() == (42,))
@@ -351,7 +359,7 @@ if _avant_env is None:
     os.environ.pop("IG_SERVEUR_ID", None)
 else:
     os.environ["IG_SERVEUR_ID"] = _avant_env
-check("IG_SERVEUR_ID absent : la liste US", tl._serveurs_download() == (YOUL4B, YOUCHAM))
+check("IG_SERVEUR_ID absent : la liste US", tl._serveurs_download() == US_TOUS)
 
 menages = []
 
@@ -445,8 +453,9 @@ check("menu Jailbreak : ouvert à tous sur YouCham comme sur Youl4b",
 # Alerte des 500 salons
 import alertes_echeances as ae  # noqa: E402
 
-check("500 salons : YouCham surveillé, Youl4b garde son nom « Spam »",
-      ae.SERVEURS_SALONS == {str(YOUL4B): "Spam", str(YOUCHAM): "YouCham"}, ae.SERVEURS_SALONS)
+check("500 salons : YouCham, You US et You FR surveillés, Youl4b garde son nom « Spam »",
+      ae.SERVEURS_SALONS == {str(YOUL4B): "Spam", str(YOUCHAM): "YouCham",
+                             YOU_US: "You US", YOU_FR: "You FR"}, ae.SERVEURS_SALONS)
 check("500 salons : pas d'amorce pour YouCham", str(YOUCHAM) not in ae.AMORCE_SALONS)
 etat = {"envoyees": {}, "historique": {}}
 mes = {"serveurs": {str(YOUL4B): {"nom": "Youl4b ( Spam )", "salons": 432},

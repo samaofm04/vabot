@@ -291,6 +291,9 @@ def test_canal():
 # ---- le cog --------------------------------------------------------------------------------
 
 YOUCHAM = "1565640097146347533"
+# You US et You FR : lus dans guild_features, jamais recopiés
+import guild_features as _gf_you  # noqa: E402
+YOU_US, YOU_FR = _gf_you.YOU_US_GUILD_ID, _gf_you.YOU_FR_GUILD_ID
 
 
 class G:
@@ -321,7 +324,10 @@ def test_cog():
     vaig_g = G(int(ae.VA_IG), "Va IG", [(7, "👤 Amelia", 44), (8, "👤 Lola", 2)])
     # YouCham (30/10/2026) : second serveur US, surveillé comme le Spam
     youcham_g = G(int(YOUCHAM), "YouCham", [(9, "VA 2", 5)], autres=20)
-    admin, principal = B([vaig_g]), B([spam_g, vaig_g, youcham_g])
+    # You US et You FR (10/11/2026) : serveurs US eux aussi, donc surveillés
+    you_us_g = G(int(YOU_US), "You US", [(10, "🧰 OUTILS", 4)], autres=6)
+    you_fr_g = G(int(YOU_FR), "You FR", [(11, "🧰 OUTILS", 4)], autres=12)
+    admin, principal = B([vaig_g]), B([spam_g, vaig_g, youcham_g, you_us_g, you_fr_g])
     faux = types.ModuleType("web_upload")
     faux._BOT_REF, faux._BOT_ADMIN_REF = principal, admin
     appels = []
@@ -360,13 +366,16 @@ def test_cog():
                                                {"id": "8", "nom": "👤 Lola", "salons": 2}], serveurs)
     check("YouCham lu chez le principal, comme le Spam",
           serveurs.get(YOUCHAM, {}).get("salons") == 1 + 5 + 20, serveurs)
+    check("You US et You FR lus chez le principal, comme YouCham",
+          serveurs.get(YOU_US, {}).get("salons") == 1 + 4 + 6
+          and serveurs.get(YOU_FR, {}).get("salons") == 1 + 4 + 12, serveurs)
     check("tout vu : aucun avertissement", not avert, avert)
     faux._BOT_REF = None
     serveurs, avert = c.mesurer()
-    check("principal absent : Spam et YouCham pas vus, et c'est dit",
-          ae.SERVEUR_SPAM not in serveurs and YOUCHAM not in serveurs
+    check("principal absent : aucun serveur US vu (Spam, YouCham, You US, You FR), et c'est dit",
+          not {ae.SERVEUR_SPAM, YOUCHAM, YOU_US, YOU_FR} & set(serveurs)
           and sorted(avert) == sorted(f"serveur {g} vu par aucun bot"
-                                      for g in (ae.SERVEUR_SPAM, YOUCHAM)), avert)
+                                      for g in (ae.SERVEUR_SPAM, YOUCHAM, YOU_US, YOU_FR)), avert)
     del sys.modules["web_upload"]
 
     arbre = ast.parse(pathlib.Path(ae.__file__).with_name("main.py").read_text(encoding="utf-8"))

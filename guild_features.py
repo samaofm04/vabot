@@ -4,6 +4,8 @@ Principe :
 - Un serveur NON listé dans data/guild_features.json a **toutes** les fonctions
   (le serveur principal n'est donc jamais impacté, aucune config requise).
 - Un serveur **listé** n'a QUE les fonctions de sa liste (serveur « bridé »).
+- You US et You FR sont bridés par le CODE (FONCTIONS_PAR_DEFAUT), sans
+  dépendre du fichier ; une entrée du fichier passe devant.
 
 Fonctions (clés) :
 - contenu    : menu de contenu (Reel/Story/Post/Pseudo/Name/Bio/PP) + boutons
@@ -61,8 +63,12 @@ def get_features(guild_or_id) -> set:
         return set(NUMERO_SEUL_GARDE)
     v = _load().get(gid)
     if v is None:
+        # Pas d'entree dans le fichier : le bridage que le CODE porte pour ce
+        # serveur (FONCTIONS_PAR_DEFAUT), s'il en a un.
+        v = FONCTIONS_PAR_DEFAUT.get(gid)
+    if v is None:
         return set(ALL_FEATURES)
-    if not isinstance(v, list):
+    if not isinstance(v, (list, tuple)):
         return set(ALL_FEATURES)
     return {x for x in v if x in ALL_FEATURES}
 
@@ -127,13 +133,24 @@ def is_restricted(guild_or_id) -> bool:
 # aucun module ne recopie l'id de YouCham.
 YOUL4B_GUILD_ID = "1535758943324999711"
 YOUCHAM_GUILD_ID = "1565640097146347533"
+# You US et You FR (10/11/2026, propriétaire : « un serveur uniquement dédié
+# pour le marché français … et un exprès pour le marché US, pour mes pôles à
+# moi. Ça reprend le même style que YouLab Spam … le seul truc qui importe,
+# c'est le bot avec le menu, le spoofer, download, numéro, email. Ça, il faut
+# que je le retrouve au niveau des deux nouveaux serveurs »). Branchés comme
+# YouCham. « Serveur US » dit ici le MODÈLE de serveur, celui de Youl4b (un
+# salon perso par membre, menu ouvert à tous, outils communs), pas le marché :
+# celui de You FR est « fr » (MARCHE_SERVEUR).
+YOU_US_GUILD_ID = "1569560765961207909"
+YOU_FR_GUILD_ID = "1569560463887442022"
 #: id -> nom court, pour les textes (« serveurs US : Youl4b, YouCham »).
-US_GUILDS = {YOUL4B_GUILD_ID: "Youl4b", YOUCHAM_GUILD_ID: "YouCham"}
+US_GUILDS = {YOUL4B_GUILD_ID: "Youl4b", YOUCHAM_GUILD_ID: "YouCham",
+             YOU_US_GUILD_ID: "You US", YOU_FR_GUILD_ID: "You FR"}
 US_GUILD_IDS = set(US_GUILDS)
 
 
 def is_us_guild(guild_or_id) -> bool:
-    """True si ce serveur est un serveur US (Youl4b ou YouCham)."""
+    """True si ce serveur est un serveur US (Youl4b, YouCham, You US, You FR)."""
     return _gid(guild_or_id) in US_GUILD_IDS
 
 
@@ -150,7 +167,8 @@ def is_youl4b(guild_or_id) -> bool:
 
 
 def noms_us() -> str:
-    """« Youl4b, YouCham » : les serveurs US, pour les textes montrés."""
+    """« Youl4b, YouCham, You US, You FR » : les serveurs US, pour les textes
+    montrés."""
     return ", ".join(US_GUILDS[g] for g in US_GUILDS if g in US_GUILD_IDS)
 
 
@@ -164,7 +182,35 @@ def noms_us() -> str:
 #: arrivée, /ticketsall, rattrapage des dossiers (completer_dossiers_us),
 #: entretien du spoofer, menu, spoofer, download et numéro la lisent --
 #: jamais l'id recopié.
-OUTILS_COMMUNS = {YOUCHAM_GUILD_ID}
+OUTILS_COMMUNS = {YOUCHAM_GUILD_ID, YOU_US_GUILD_ID, YOU_FR_GUILD_ID}
+
+#: Les serveurs aux outils communs qui ont AUSSI le 📊・click-et-sub : la page
+#: des liens de suivi de Lia, celle des VA de YouCham (leurs liens, leurs
+#: subs). Créé partout, le salon aurait montré à You US et à You FR les
+#: chiffres des VA de YouCham, redessinés toutes les heures.
+CLICS_ET_SUBS = {YOUCHAM_GUILD_ID}
+
+#: Le marché d'un serveur ENTIER, quand tout le monde y travaille le même :
+#: You FR (« uniquement dédié pour le marché français ») et You US. Le menu y
+#: sert à chacun les models de CE marché, sans rôle @Jailbreak FR / US à
+#: poser : cogs/welcome.SANS_ROLE_JAILBREAK les reprend, à côté de Va IG, et
+#: cogs/user.marche_du_membre le lit. Sans cette table, un membre de You FR,
+#: sans rôle, recevait le menu US -- « us » est le défaut d'un serveur US.
+#: Personne n'y a UNE model à lui : les 💥・banger-<model> y sont à tous
+#: (cogs/welcome.auto_secure_general_channels, qui les cache ailleurs aux
+#: VA d'une autre model, passe ces serveurs).
+MARCHE_SERVEUR = {YOU_US_GUILD_ID: "us", YOU_FR_GUILD_ID: "fr"}
+
+#: Le bridage que le CODE porte, pour les serveurs absents de
+#: data/guild_features.json : les fonctions de YouCham (tout sauf « statut »,
+#: les ronds des salons va-, qui n'existent pas sur un serveur US). Celles de
+#: YouCham vivent dans le fichier du VPS, posé à la main le 30/10/2026 ; data/
+#: n'est pas dans git, You US et You FR auraient donc eu TOUTES les fonctions
+#: jusqu'à ce que quelqu'un pense au fichier. Une entrée du fichier passe
+#: devant celle-ci (get_features).
+FONCTIONS_PAR_DEFAUT = {
+    g: ("contenu", "onboarding", "clics", "liens", "tickets", "rappels")
+    for g in (YOU_US_GUILD_ID, YOU_FR_GUILD_ID)}
 
 
 #: Serveurs ou le bot admin (Rem) ne sert QUE le numero : le panneau du
@@ -193,10 +239,23 @@ def numero_seul(guild_or_id) -> bool:
 
 
 def outils_communs(guild_or_id) -> bool:
-    """True si ce serveur a les outils communs (YouCham). Toujours un serveur
-    US : hors US_GUILD_IDS, le menu Jailbreak US n'y serait pas servi."""
+    """True si ce serveur a les outils communs (YouCham, You US, You FR).
+    Toujours un serveur US : hors US_GUILD_IDS, le menu Jailbreak US n'y
+    serait pas servi."""
     g = _gid(guild_or_id)
     return g in OUTILS_COMMUNS and g in US_GUILD_IDS
+
+
+def clics_et_subs(guild_or_id) -> bool:
+    """True si ce serveur aux outils communs a le 📊・click-et-sub (YouCham)."""
+    g = _gid(guild_or_id)
+    return g in CLICS_ET_SUBS and outils_communs(g)
+
+
+def marche_serveur(guild_or_id):
+    """« fr » ou « us » pour un serveur au marché unique (MARCHE_SERVEUR),
+    None partout ailleurs."""
+    return MARCHE_SERVEUR.get(_gid(guild_or_id))
 
 
 def set_features(guild_or_id, features) -> set:
