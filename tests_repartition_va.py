@@ -72,6 +72,12 @@ import liens_fr                         # noqa: E402
 TMPJB = pathlib.Path(tempfile.mkdtemp(prefix="tst_repartition_jb_"))
 jb.JAILBREAK_FILE, jb.PREV_FILE = TMPJB / "jailbreak.json", TMPJB / "jailbreak.prev.json"
 jb.BACKUP_DIR, jb.TOMB_FILE = TMPJB / "jailbreak_backups", TMPJB / "jb_tombstones.json"
+import comptes_tickets as ct            # noqa: E402
+import va_portal as vp                  # noqa: E402
+vp.LIENS_FILE = TMPJB / "jb_va_liens.json"
+ct.LIAISONS_FILE = TMPJB / "comptes_tickets.json"
+VRAIS_PORTAIL = [BOT / "data" / n for n in ("jb_va_liens.json", "comptes_tickets.json")]
+AVANT_PORTAIL = [f.stat().st_mtime if f.exists() else None for f in VRAIS_PORTAIL]
 REGISTRE = {
     "1390429527087251618:amelia": {"public_url": "https://getmysocial.com/ameliacandy2", "link_id": "a"},
     "1390429527087251618:emma": {"public_url": "https://getmysocial.com/emmababy2", "link_id": "e"},
@@ -364,7 +370,7 @@ g = Guilde(YOU_US, vrais_membres())
 b = run(rv.assurer(g))
 check("You US : rien créé, rien posté", not g.creations and not b["pose"], b)
 
-# ── 4b. Le détail par model : liens et comptes de chacun ────────────────────
+# ── 4b. Le détail par model : page de comptes et lien GMS de chacun ───────
 print("\n── 4b. Le détail par model")
 reset()
 g = Guilde(YOU_FR, vrais_membres())
@@ -378,18 +384,29 @@ check("le tableau, puis une carte par model dans l'ordre des models",
 check("bilan : 6 cartes de model posées", b["details_poses"] == 6 and not b["rates"], b)
 desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.messages[1:]}
 print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
-check("Alicia : chaque VA, son lien, ses comptes (échappés)",
-      desc["ALICIA"] == "**fahnih\\_37050** · 🔗 https://getmysocial.com/aliciababe\n"
-                        "2 comptes : @alicia\\_valiriaww @alicia.miaaxx\n\n"
-                        "**york\\_emerick12** · 🔗 https://getmysocial.com/aliciacutie\n"
-                        "1 compte : @alicia.qyzelia", desc["ALICIA"])
-check("Emma : la fiche faite à la main « York Emérick » donne les comptes de york",
-      "**york\\_emerick12** · 🔗 https://getmysocial.com/emmababy2\n2 comptes : @emma\\_.brunet "
-      "@emmaa.cutty" in desc["EMMA"], desc["EMMA"])
-check("sans lien : « pas encore de lien » ; sans fiche : 0 compte",
-      "**priscah0017\\_30005** · pas encore de lien\n0 compte" in desc["EMMA"]
-      and "**fenoainir** · pas encore de lien\n1 compte : @amelie\\_kiarrah" in desc["AMELIA"],
-      (desc["EMMA"], desc["AMELIA"]))
+import re as _re                        # noqa: E402
+PAGE = r"📷 https://youl4b\.com/mes-comptes/([A-Za-z0-9_-]+)"
+m_al = _re.fullmatch(r"\*\*fahnih\\_37050\*\*\n" + PAGE + r"\n🔗 https://getmysocial\.com/aliciababe\n\n"
+                     r"\*\*york\\_emerick12\*\*\n" + PAGE + r"\n🔗 https://getmysocial\.com/aliciacutie",
+                     desc["ALICIA"])
+check("Alicia : chaque VA, son nom, sa page youl4b, puis son lien GMS", m_al is not None, desc["ALICIA"])
+check("aucun compte Instagram dans les cartes (« je veux pas les comptes »)",
+      not any("@" in d or "compte :" in d or "comptes :" in d for d in desc.values()), desc)
+if m_al:
+    r1, r2 = vp.resoudre(m_al.group(1)), vp.resoudre(m_al.group(2))
+    check("la page de fahnih ouvre SA fiche d'Alicia (« Fahnih », reprise par son pseudo)",
+          r1 and r1.get("identite") == "alicia" and r1.get("va") == "Fahnih", r1)
+    check("celle de york ouvre « York Emérick » sous Alicia, une autre page",
+          r2 and r2.get("identite") == "alicia" and r2.get("va") == "York Emérick"
+          and m_al.group(1) != m_al.group(2), r2)
+check("sans lien GMS : « pas encore de lien » ; sans fiche : page préparée à son pseudo",
+      "**priscah0017\\_30005**\n📷 https://youl4b.com/mes-comptes/" in desc["EMMA"]
+      and "🔗 pas encore de lien" in desc["EMMA"]
+      and any(v.get("name") == "priscah0017_30005" for v in jb.list_vas_for_identity("emma")),
+      desc["EMMA"])
+check("Emma : la page de york est celle de sa fiche « York Emérick », pas une seconde",
+      [v["name"] for v in jb.list_vas_for_identity("emma")].count("York Emérick") == 1
+      and not any(v.get("name") == "york_emerick12" for v in jb.list_vas_for_identity("emma")))
 check("model sans VA : —", desc["SARAH"] == "—" and desc["JULIA"] == "—", desc)
 check("couleur de la carte = couleur du rôle",
       canal.messages[1].embeds[0].colour.value == 0xE91E63
@@ -397,27 +414,25 @@ check("couleur de la carte = couleur du rôle",
 check("aucun montant dans les cartes", not any("$" in d or "€" in d for d in desc.values()))
 
 b = run(rv.assurer(g, forcer=True))
-check("passage forcé sans changement : rien de reposté ni réécrit",
+check("passage forcé : mêmes pages, rien de reposté ni réécrit",
       b["details_poses"] == 0 and b["details_maj"] == 0 and canal.envois_detail == 6, b)
 
 jb.add_account("alicia", "alicia.neuve", va="Fahnih")
 b = run(rv.assurer(g, forcer=True))
-alicia = canal.messages[6]
-check("compte ajouté sur le site : SEULE la carte Alicia est réécrite",
-      b["details_maj"] == 1 and b["details_poses"] == 0 and not b["maj"]
-      and alicia.edits == 1 and "3 comptes" in alicia.embeds[0].description, b)
+check("compte ajouté sur le site : aucune carte réécrite", b["details_maj"] == 0, b)
 
 REGISTRE["1561628437938970677:amelia"] = {"public_url": "https://getmysocial.com/ameliafeno",
                                           "link_id": "n"}
 cv._statuts_gms = lambda: {"n": False}
 b = run(rv.assurer(g, forcer=True))
 check("lien coupé chez GetMySocial : toujours « pas encore de lien »",
-      "**fenoainir** · pas encore de lien" in canal.messages[1].embeds[0].description, b)
+      "**fenoainir**\n📷 https://youl4b.com/mes-comptes/" in canal.messages[1].embeds[0].description
+      and "🔗 pas encore de lien" in canal.messages[1].embeds[0].description, b)
 cv._statuts_gms = lambda: {}
 b = run(rv.assurer(g, forcer=True))
 check("lien en service : il apparaît sur la carte Amelia",
       b["details_maj"] == 1
-      and "**fenoainir** · 🔗 https://getmysocial.com/ameliafeno" in canal.messages[1].embeds[0].description, b)
+      and "🔗 https://getmysocial.com/ameliafeno" in canal.messages[1].embeds[0].description, b)
 
 lola = canal.messages[5]
 canal.messages.remove(lola)
@@ -430,11 +445,19 @@ b = run(rv.assurer(g))
 check("data/ vide : les cartes sont retrouvées par leur titre, aucune reposée",
       b["details_poses"] == 0 and len(canal.messages) == 7, (b, len(canal.messages)))
 
-beaucoup = [f"compte_{i:03d}_xxxxxxxxxxxxxxx" for i in range(300)]
-d = rv.description_model([("a", "https://getmysocial.com/x", beaucoup),
-                          ("b", "", ["seul"])])
-check("300 comptes : coupés en « … +N », le VA suivant reste visible, sous 4096",
-      len(d) <= 4096 and "… +" in d and "**b** · pas encore de lien\n1 compte : @seul" in d, len(d))
+# Un autre id Discord a déjà la fiche « dioplucky » de Lola : sa page est refusée.
+ct.page_du_va(str(YOU_FR), "999", "dioplucky", "lola")
+g.members.append(Membre(1561658465569472538, "dioplucky", ("Lola",)))
+b = run(rv.assurer(g, forcer=True))
+d_lola = [m for m in canal.messages if m.embeds[0].title.startswith("🧡 LOLA")][0].embeds[0].description
+check("page refusée (fiche liée à un autre id) : « page pas encore prête », et c'est dit",
+      "**dioplucky**\n📷 page pas encore prête\n🔗 pas encore de lien" in d_lola, d_lola)
+
+d = rv.description_model([(f"va_{i:03d}", "https://youl4b.com/mes-comptes/" + "x" * 24,
+                           "https://getmysocial.com/xxxxxxxxxx") for i in range(80)])
+check("80 VA : coupés en « … +N VA », jamais au milieu d'une adresse, sous 4096",
+      len(d) <= 4096 and d.splitlines()[-1].startswith("… +") and d.endswith(" VA")
+      and d.splitlines()[-3].startswith("🔗 https://getmysocial.com/"), len(d))
 
 # ── 5. L'envoi ────────────────────────────────────────────────────────────
 print("\n── 5. L'envoi")
@@ -485,6 +508,8 @@ apres = VRAI_ETAT.read_bytes() if VRAI_ETAT.exists() else None
 check("data/repartition_va.json réel intact", apres == AVANT)
 check("data/jailbreak.json réel intact",
       (VRAI_JB.stat().st_mtime if VRAI_JB.exists() else None) == AVANT_JB)
+check("pages des comptes réelles intactes (jb_va_liens, comptes_tickets)",
+      [f.stat().st_mtime if f.exists() else None for f in VRAIS_PORTAIL] == AVANT_PORTAIL)
 
 print(f"\n{len(OKS)} OK, {len(FAILS)} FAIL")
 if FAILS:

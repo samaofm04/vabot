@@ -18,18 +18,26 @@ CE QUE LE SALON MONTRE
     rôle de model, ni bot ni propriétaire du serveur. Aucun texte d'aide (le
     propriétaire retire toutes les notices), aucun montant.
 
-SOUS LE TABLEAU : UNE CARTE PAR MODEL, LIENS ET COMPTES DE CHACUN
+SOUS LE TABLEAU : UNE CARTE PAR MODEL, LES DEUX LIENS DE CHACUN
     Propriétaire, même jour : « je voulais genre la liste [où] tout le monde
-    voit [les] comptes des autres, les liens des autres » ; maquette validée,
-    tous les @. Un embed par model, dans l'ordre des models, à la couleur de
-    son rôle : chaque VA qui porte le rôle, son lien GetMySocial pour cette
-    model (cartes_va_fr.lien_gms : le registre des liens FR, montré s'il est
-    en service) ou « pas encore de lien », puis ses comptes Instagram de la
-    page Virtual Assistants (la fiche qui porte son pseudo Discord,
-    comptes_tickets.fiche_au_pseudo, sinon celle à son nom). Les cartes
-    privées des -content (cartes_va_fr) sont retirées : tout est ici.
-    Un compte ajouté sur le site ou un lien créé arrive au passage des
-    trente minutes.
+    voit [les] comptes des autres, les liens des autres », puis « je veux
+    pas les comptes … je veux le lien où ils [mettent] des comptes », et :
+    « une liste avec genre écrit Prisca, son lien youlab et après son lien
+    gms, après les autres, par catégorie ». Un embed par model, dans l'ordre
+    des models, à la couleur de son rôle ; pour chaque VA qui porte le rôle :
+    son nom, 📷 sa page de comptes youl4b.com/mes-comptes/<jeton> pour cette
+    model (comptes_tickets.page_du_va, la page de TRUST INSTAGRAM, préparée
+    au besoin sur la fiche qui porte son pseudo Discord), puis 🔗 son lien
+    GetMySocial (cartes_va_fr.lien_gms : le registre des liens FR, montré
+    s'il est en service) ou « pas encore de lien ».
+
+    LES PAGES SONT LISIBLES DE TOUS, en connaissance de cause : chacune
+    permet d'ajouter, de modifier et de retirer les comptes de son VA (jamais
+    d'afficher un mot de passe). Le propriétaire a choisi la liste publique
+    plutôt qu'un bouton qui ne donne à chacun que la sienne.
+
+    Les cartes privées des -content (cartes_va_fr) sont retirées : tout est
+    ici. Un lien créé arrive au passage des trente minutes.
 
 LES RÔLES : CEUX DU PSEUDO, PAS UNE SECONDE LISTE
     Un membre est sous une model quand pseudo_model dit qu'il en porte le
@@ -76,6 +84,7 @@ EMOJI_AUTRE = "▫️"
 SANS_MODEL = "⚪ SANS MODEL"
 VIDE = "—"
 PAS_DE_LIEN = "pas encore de lien"
+PAGE_INDISPONIBLE = "page pas encore prête"
 #: Description d'un embed : 4096 signes. Le reste sert à « … +N ».
 PLAFOND_DETAIL = 3900
 
@@ -197,53 +206,45 @@ def embed(guild):
 
 # ─────────────────────────────────────────── le détail par model ──
 
-def comptes_du_va(model: str, pseudo: str) -> List[str]:
-    """Les comptes Instagram du VA pour cette model, dans l'ordre de la page
-    Virtual Assistants : ceux de la fiche qui porte son pseudo Discord
-    (« York Emérick » @york_emerick12), sinon de la fiche à son nom."""
-    import comptes_tickets as ct
-    import jailbreak as jb
-    fiche = (ct.fiche_au_pseudo(model, pseudo) or pseudo).strip().lower()
-    return [str(a.get("username")).strip().lstrip("@") for a in jb.list_accounts(model)
-            if isinstance(a, dict) and a.get("username")
-            and str(a.get("va") or "").strip().lower() == fiche]
+def page_comptes(gid, uid: int, nom: str, model: str) -> str:
+    """L'adresse youl4b.com/mes-comptes/<jeton> du VA pour cette model : sa
+    page déjà liée, sinon une neuve sur la fiche qui porte son pseudo
+    Discord, à défaut une fiche à son nom (comptes_tickets.page_du_va). ""
+    si elle n'a pas pu être préparée — c'est dit, une fois."""
+    try:
+        import comptes_tickets as ct
+        url, _fiche, refus = ct.page_du_va(str(gid), str(uid), nom, model)
+    except Exception as e:                                   # noqa: BLE001
+        url, refus = "", f"{type(e).__name__}: {e}"
+    if not url:
+        _dire_une_fois(f"page:{uid}:{model}:{refus}", f"[repartition-va] page des comptes de "
+                       f"{nom} ({model}) non préparée : {refus}"[:300])
+    return url
 
 
-def _n_comptes(n: int) -> str:
-    return f"{n} compte" if n <= 1 else f"{n} comptes"
+def description_model(vas: List[Tuple[str, str, str]]) -> str:
+    """Le texte d'une model. vas = [(nom, page des comptes, lien GMS)], une
+    adresse vide si elle manque :
 
+        **priscah0017_30005**
+        📷 https://youl4b.com/mes-comptes/…
+        🔗 pas encore de lien
 
-def _handles(handles: List[str], place: int) -> str:
-    """« @a @b @c », échappés, coupés en « … +N » pour tenir dans `place`."""
-    import discord
-    morceaux: List[str] = []
-    for i, h in enumerate(handles):
-        m = "@" + discord.utils.escape_markdown(h)
-        if len(" ".join(morceaux + [m])) > place - 8:
-            morceaux.append(f"… +{len(handles) - i}")
-            break
-        morceaux.append(m)
-    return " ".join(morceaux)
-
-
-def description_model(vas: List[Tuple[str, str, List[str]]]) -> str:
-    """Le texte d'une model. vas = [(nom, lien GMS ou "", [comptes])] :
-
-        **fahnih_37050** · 🔗 https://getmysocial.com/aliciababe
-        29 comptes : @alicia_valiriaww @alicia.miaaxx …
-
-    La place est partagée entre les VA : aucun ne disparaît derrière un
-    autre qui aurait cent comptes."""
+    Au-delà de PLAFOND_DETAIL signes, la fin devient « … +N VA » : jamais
+    coupée au milieu d'une adresse."""
     if not vas:
         return VIDE
     import discord
-    place = max(120, PLAFOND_DETAIL // len(vas) - 80)
-    blocs = []
-    for nom, url, handles in vas:
-        tete = f"**{discord.utils.escape_markdown(nom)}** · " + (f"🔗 {url}" if url else PAS_DE_LIEN)
-        ligne = _n_comptes(len(handles)) + (" : " + _handles(handles, place) if handles else "")
-        blocs.append(tete + "\n" + ligne)
-    return "\n\n".join(blocs)[:4096]
+    blocs: List[str] = []
+    for i, (nom, page, gms) in enumerate(vas):
+        bloc = (f"**{discord.utils.escape_markdown(nom)}**\n"
+                f"📷 {page or PAGE_INDISPONIBLE}\n"
+                f"🔗 {gms or PAS_DE_LIEN}")
+        if len("\n\n".join(blocs + [bloc])) > PLAFOND_DETAIL:
+            blocs.append(f"… +{len(vas) - i} VA")
+            break
+        blocs.append(bloc)
+    return "\n\n".join(blocs)
 
 
 def titre_model(model: str, n: int) -> str:
@@ -255,14 +256,14 @@ def _prefixe_model(model: str) -> str:
     return f"{EMOJIS.get(model, EMOJI_AUTRE)} {model.upper()} ·"
 
 
-def donnees_details(colonnes) -> List[Tuple[str, str]]:
-    """[(model, description)]. Lit le disque (registre des liens, page
-    Virtual Assistants) et la liste GetMySocial : hors de la boucle."""
+def donnees_details(gid, colonnes) -> List[Tuple[str, str]]:
+    """[(model, description)]. Lit et écrit le disque (registre des liens,
+    pages des comptes) et lit la liste GetMySocial : hors de la boucle."""
     import cartes_va_fr as cv
     statuts = cv._statuts_gms()
     out = []
     for model, vas in colonnes:
-        lignes = [(nom, cv.lien_gms(uid, model, statuts), comptes_du_va(model, nom))
+        lignes = [(nom, page_comptes(gid, uid, nom, model), cv.lien_gms(uid, model, statuts))
                   for nom, uid in vas]
         out.append((model, description_model(lignes)))
     return out
@@ -388,7 +389,7 @@ async def _assurer_details(guild, canal, bot_id, forcer: bool, bilan: dict) -> N
     import discord
     import cartes_va_fr as cv
     colonnes, _sans = par_model(guild)
-    donnees = await asyncio.to_thread(donnees_details, colonnes)
+    donnees = await asyncio.to_thread(donnees_details, guild.id, colonnes)
     nb = {m: len(v) for m, v in colonnes}
     notes = dict((_etat().get(str(guild.id)) or {}).get("details") or {})
     historique = None
