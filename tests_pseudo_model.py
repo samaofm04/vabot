@@ -42,6 +42,12 @@ import discord                          # noqa: E402
 import bangers as bg                    # noqa: E402
 import guild_features as gf             # noqa: E402
 import pseudo_model as pm               # noqa: E402
+import repartition_va as rv             # noqa: E402
+
+# Le cog tient aussi le salon de répartition : son passage périodique, essayé
+# plus bas, n'écrit jamais dans le vrai data/.
+import tempfile                         # noqa: E402
+rv.ETAT = pathlib.Path(tempfile.mkdtemp(prefix="tst_pseudo_rv_")) / "repartition_va.json"
 
 OKS, FAILS = [], []
 

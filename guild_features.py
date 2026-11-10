@@ -220,6 +220,14 @@ BANGERS_MIROIR = dict(MARCHE_SERVEUR)
 #: bangers restent à tous (MARCHE_SERVEUR).
 PSEUDO_MODEL = {YOU_FR_GUILD_ID}
 
+#: Les serveurs qui ont le salon 🗓️・répartition-va : une colonne par model,
+#: ses VA dessous (repartition_va.py). Propriétaire, 10/11/2026 : « sur You
+#: FR je peux avoir un emploi du temps avec les VA par model … crée le
+#: channel et tu drop un [message] qui dépend des rôles sur le serveur ». Les
+#: rôles lus sont ceux du pseudo (pseudo_model) : un serveur ici sans être
+#: dans PSEUDO_MODEL lirait quand même les mêmes rôles de model.
+REPARTITION_VA = {YOU_FR_GUILD_ID}
+
 #: Les serveurs qui achètent leurs numéros sur le compte GetAText des serveurs
 #: TRUST sans en être un (numgen.serveurs_compte_trust), id -> nom court.
 #: Propriétaire, 10/11/2026 : « je veux use des num avec API du serv trust
@@ -294,6 +302,11 @@ def marche_serveur(guild_or_id):
 def pseudo_model(guild_or_id) -> bool:
     """True si, sur ce serveur, le rôle d'une model s'écrit dans le pseudo."""
     return _gid(guild_or_id) in PSEUDO_MODEL
+
+
+def repartition_va(guild_or_id) -> bool:
+    """True si ce serveur a le salon de répartition des VA par model."""
+    return _gid(guild_or_id) in REPARTITION_VA
 
 
 def set_features(guild_or_id, features) -> set:

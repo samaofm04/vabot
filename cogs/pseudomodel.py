@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Le rôle d'une model dans le pseudo (« yous1m (AMELIA) ») : les événements.
+"""Les rôles de model de You FR : le pseudo (« yous1m (AMELIA) ») et le
+salon 🗓️・répartition-va. Les événements.
 
 Ce cog ne fait qu'ÉCOUTER : un rôle donné ou retiré, un pseudo changé, et il
 demande à pseudo_model.py — qui porte toute la règle et se teste sans bot —
@@ -7,10 +8,18 @@ de poser le bon pseudo. Toutes les trente minutes, et au démarrage, il
 repasse sur tous les membres : un changement de rôle fait pendant un
 redémarrage du bot (un par déploiement) n'arrive jamais comme événement.
 
+La répartition des VA par model (repartition_va.py, 10/11/2026) suit les
+mêmes rôles : chaque rôle donné ou retiré, chaque arrivée ou départ, chaque
+rôle renommé lui demande une mise à jour, et le passage des trente minutes
+la revoit. Un seul cog pour les deux : ils lisent la même reconnaissance des
+rôles (pseudo_model.models_du_membre).
+
 AUCUNE COMMANDE SLASH : le bot principal en a 100 sur 100.
 
 SUR LE BOT PRINCIPAL (Ryuk) : c'est lui qui est sur You FR, en administrateur.
-Aucun état sur le disque : poser deux fois le même pseudo ne change rien.
+Aucun état sur le disque pour le pseudo : le poser deux fois ne change rien.
+La répartition garde l'id de son salon et de son message
+(data/repartition_va.json), pour ne jamais en poser un second.
 """
 from __future__ import annotations
 
@@ -37,14 +46,46 @@ class PseudoModel(commands.Cog):
     async def on_member_update(self, before, after):
         try:
             import pseudo_model as pm
-            if not pm.serveur(getattr(after, "guild", None)):
+            import repartition_va as rv
+            guild = getattr(after, "guild", None)
+            roles_changes = (list(getattr(before, "roles", []) or [])
+                             != list(getattr(after, "roles", []) or []))
+            if roles_changes:
+                rv.planifier(guild)
+            if not pm.serveur(guild):
                 return
             # Seuls les rôles et le pseudo comptent : l'événement part aussi
             # pour une exclusion temporaire ou un avatar de serveur.
-            if (list(getattr(before, "roles", []) or []) == list(getattr(after, "roles", []) or [])
-                    and getattr(before, "nick", None) == getattr(after, "nick", None)):
+            if not roles_changes and getattr(before, "nick", None) == getattr(after, "nick", None):
                 return
             await pm.appliquer(after)
+        except Exception:
+            traceback.print_exc()
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member):
+        try:
+            import repartition_va as rv
+            rv.planifier(getattr(member, "guild", None))
+        except Exception:
+            traceback.print_exc()
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member):
+        try:
+            import repartition_va as rv
+            rv.planifier(getattr(member, "guild", None))
+        except Exception:
+            traceback.print_exc()
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before, after):
+        try:
+            # « Amelia » renommé « Amélia 🩷 » reste la model ; renommé
+            # « Ancienne », ses VA passent dans « Sans model ».
+            if getattr(before, "name", None) != getattr(after, "name", None):
+                import repartition_va as rv
+                rv.planifier(getattr(after, "guild", None))
         except Exception:
             traceback.print_exc()
 
@@ -52,9 +93,12 @@ class PseudoModel(commands.Cog):
     async def boucle(self):
         try:
             import pseudo_model as pm
+            import repartition_va as rv
             for guild in list(getattr(self.bot, "guilds", []) or []):
                 if pm.serveur(guild):
                     await pm.passer(guild)
+                if rv.serveur(guild):
+                    await rv.assurer(guild, forcer=True)
         except Exception:
             # une exception non attrapee tue une tasks.loop sans rien dire
             traceback.print_exc()
