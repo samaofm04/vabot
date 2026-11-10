@@ -51,6 +51,20 @@ rv.ETAT = pathlib.Path(tempfile.mkdtemp(prefix="tst_pseudo_rv_")) / "repartition
 import cartes_va_fr as _cv              # noqa: E402
 _cv.ETAT = rv.ETAT.parent / "cartes_va_fr.json"
 
+# Le passage du cog crée des liens GetMySocial et des trackings MyPuls RÉELS
+# (liens_jb_fr, 10/11/2026) : jamais depuis un essai. Liens JB coupés, et
+# toute création lève.
+import liens_jb_fr as _lj               # noqa: E402
+gf.LIENS_JB = {}
+_lj.ETAT = pathlib.Path(tempfile.mkdtemp(prefix="tst_sans_jb_")) / "liens_jb_fr.json"
+
+
+def _creation_interdite(*a, **k):
+    raise RuntimeError("création de lien JB interdite dans un essai")
+
+
+_lj.creer = _creation_interdite
+
 OKS, FAILS = [], []
 
 

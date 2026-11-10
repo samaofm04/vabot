@@ -238,6 +238,13 @@ REPARTITION_VA = {YOU_FR_GUILD_ID}
 #: les cartes déjà posées sont effacées (cartes_va_fr.assurer).
 CARTES_VA: set = set()
 
+#: Les serveurs dont chaque VA (un rôle de model au moins) reçoit ses liens
+#: GetMySocial « JB FR », neufs, un par model listée, dans l'équipe VA JB FR
+#: (liens_jb_fr.py). Propriétaire, 10/11/2026 : « je veux que tout le monde
+#: ait un lien pour les 4 models Amelia, Emma, Lola et Alicia », « crée que
+#: des nouveaux liens ». Vider la table arrête les créations, rien n'est coupé.
+LIENS_JB = {YOU_FR_GUILD_ID: ("amelia", "emma", "lola", "alicia")}
+
 #: Les serveurs qui achètent leurs numéros sur le compte GetAText des serveurs
 #: TRUST sans en être un (numgen.serveurs_compte_trust), id -> nom court.
 #: Propriétaire, 10/11/2026 : « je veux use des num avec API du serv trust
@@ -322,6 +329,11 @@ def repartition_va(guild_or_id) -> bool:
 def cartes_va(guild_or_id) -> bool:
     """True si les VA de ce serveur reçoivent leurs cartes de model."""
     return _gid(guild_or_id) in CARTES_VA
+
+
+def liens_jb(guild_or_id) -> tuple:
+    """Les models des liens JB FR de ce serveur, () hors LIENS_JB."""
+    return tuple(LIENS_JB.get(_gid(guild_or_id)) or ())
 
 
 def set_features(guild_or_id, features) -> set:

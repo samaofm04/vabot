@@ -39,6 +39,12 @@ SOUS LE TABLEAU : UNE CARTE PAR MODEL, LES DEUX LIENS DE CHACUN
     Les cartes privées des -content (cartes_va_fr) sont retirées : tout est
     ici. Un lien créé arrive au passage des trente minutes.
 
+    AMELIA, EMMA, LOLA, ALICIA : CHAQUE VA (10/11/2026, « sous les 4 models »)
+    Pour les models de guild_features.LIENS_JB, la carte liste TOUS les VA
+    du serveur (un rôle de model au moins), rôle ou pas pour celle-ci, avec
+    leur lien de l'équipe VA JB FR (liens_jb_fr : quatre liens neufs par VA,
+    créés par le bot). Le tableau du haut reste la répartition par rôle.
+
 LES RÔLES : CEUX DU PSEUDO, PAS UNE SECONDE LISTE
     Un membre est sous une model quand pseudo_model dit qu'il en porte le
     rôle (models_du_serveur, models_du_membre). Une seconde reconnaissance
@@ -256,14 +262,18 @@ def _prefixe_model(model: str) -> str:
     return f"{EMOJIS.get(model, EMOJI_AUTRE)} {model.upper()} ·"
 
 
-def donnees_details(gid, colonnes) -> List[Tuple[str, str]]:
-    """[(model, description)]. Lit et écrit le disque (registre des liens,
-    pages des comptes) et lit la liste GetMySocial : hors de la boucle."""
+def donnees_details(gid, colonnes, jb=()) -> List[Tuple[str, str]]:
+    """[(model, description)]. Lit et écrit le disque (registres des liens,
+    pages des comptes) et lit la liste GetMySocial : hors de la boucle. Pour
+    une model de `jb`, le lien est celui de l'équipe VA JB FR (liens_jb_fr) ;
+    pour les autres, celui de Va IG (cartes_va_fr.lien_gms)."""
     import cartes_va_fr as cv
-    statuts = cv._statuts_gms()
+    import liens_jb_fr as lj
+    statuts = cv._statuts_gms() if any(m not in jb for m, vas in colonnes if vas) else {}
     out = []
     for model, vas in colonnes:
-        lignes = [(nom, page_comptes(gid, uid, nom, model), cv.lien_gms(uid, model, statuts))
+        lignes = [(nom, page_comptes(gid, uid, nom, model),
+                   lj.lien_public(uid, model) if model in jb else cv.lien_gms(uid, model, statuts))
                   for nom, uid in vas]
         out.append((model, description_model(lignes)))
     return out
@@ -389,7 +399,14 @@ async def _assurer_details(guild, canal, bot_id, forcer: bool, bilan: dict) -> N
     import discord
     import cartes_va_fr as cv
     colonnes, _sans = par_model(guild)
-    donnees = await asyncio.to_thread(donnees_details, guild.id, colonnes)
+    # Amelia, Emma, Lola, Alicia : CHAQUE VA, avec son lien JB (« sous les 4
+    # models », 10/11/2026) ; les autres models restent par rôle.
+    import liens_jb_fr as lj
+    jb = tuple(lj.models_du_serveur(guild))
+    if jb:
+        tous = [(nom, uid) for uid, nom in lj.vas_du_serveur(guild)]
+        colonnes = [(m, tous if m in jb else vas) for m, vas in colonnes]
+    donnees = await asyncio.to_thread(donnees_details, guild.id, colonnes, jb)
     nb = {m: len(v) for m, v in colonnes}
     notes = dict((_etat().get(str(guild.id)) or {}).get("details") or {})
     historique = None

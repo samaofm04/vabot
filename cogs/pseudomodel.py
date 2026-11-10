@@ -43,10 +43,47 @@ class PseudoModel(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._taches: set = set()
+        self._jb_en_cours: set = set()
         self.boucle.start()
 
     def cog_unload(self):
         self.boucle.cancel()
+
+    def _lancer_liens_jb(self, guild) -> None:
+        """Un rôle de model donné : les liens JB du VA, sans attendre le
+        passage des trente minutes."""
+        try:
+            import liens_jb_fr as lj
+            if not lj.models_du_serveur(guild):
+                return
+            t = asyncio.create_task(self._liens_jb(guild))
+            self._taches.add(t)
+            t.add_done_callback(self._taches.discard)
+        except Exception:
+            traceback.print_exc()
+
+    async def _liens_jb(self, guild) -> None:
+        """Les quatre liens GetMySocial « JB FR » de chaque VA (liens_jb_fr),
+        créés dans un fil (réseau, MyPuls) ; puis la liste de répartition les
+        montre. Un passage à la fois par serveur : une demande pendant un
+        passage est reprise par le suivant (trente minutes au plus)."""
+        try:
+            import liens_jb_fr as lj
+            import repartition_va as rv
+            if not lj.models_du_serveur(guild) or guild.id in self._jb_en_cours:
+                return
+            a_faire = lj.manquants(guild)
+            if not a_faire:
+                return
+            self._jb_en_cours.add(guild.id)
+            try:
+                bilan = await asyncio.to_thread(lj.assurer, guild, a_faire)
+            finally:
+                self._jb_en_cours.discard(guild.id)
+            if bilan.get("crees"):
+                rv.planifier(guild)
+        except Exception:
+            traceback.print_exc()
 
     def _liens_va_ig(self, guild, membre) -> None:
         """Un rôle de model changé ici (You FR) : les liens FR du VA sur Va IG
@@ -91,6 +128,7 @@ class PseudoModel(commands.Cog):
                 import cartes_va_fr as cv
                 cv.planifier(guild)
                 self._liens_va_ig(guild, after)
+                self._lancer_liens_jb(guild)
             if not pm.serveur(guild):
                 return
             # Seuls les rôles et le pseudo comptent : l'événement part aussi
@@ -149,6 +187,7 @@ class PseudoModel(commands.Cog):
                 # éteintes le 10/11 : le passage efface celles encore posées
                 if cv.serveur(guild) or cv.cartes_posees(guild):
                     await cv.assurer(guild)
+                await self._liens_jb(guild)
         except Exception:
             # une exception non attrapee tue une tasks.loop sans rien dire
             traceback.print_exc()

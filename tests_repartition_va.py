@@ -69,6 +69,20 @@ AVANT_JB = VRAI_JB.stat().st_mtime if VRAI_JB.exists() else None
 import cartes_va_fr as cv               # noqa: E402
 import jailbreak as jb                  # noqa: E402
 import liens_fr                         # noqa: E402
+
+# Le passage du cog crée des liens GetMySocial et des trackings MyPuls RÉELS
+# (liens_jb_fr, 10/11/2026) : jamais depuis un essai. Liens JB coupés, et
+# toute création lève.
+import liens_jb_fr as _lj               # noqa: E402
+gf.LIENS_JB = {}
+_lj.ETAT = pathlib.Path(tempfile.mkdtemp(prefix="tst_sans_jb_")) / "liens_jb_fr.json"
+
+
+def _creation_interdite(*a, **k):
+    raise RuntimeError("création de lien JB interdite dans un essai")
+
+
+_lj.creer = _creation_interdite
 TMPJB = pathlib.Path(tempfile.mkdtemp(prefix="tst_repartition_jb_"))
 jb.JAILBREAK_FILE, jb.PREV_FILE = TMPJB / "jailbreak.json", TMPJB / "jailbreak.prev.json"
 jb.BACKUP_DIR, jb.TOMB_FILE = TMPJB / "jailbreak_backups", TMPJB / "jb_tombstones.json"
