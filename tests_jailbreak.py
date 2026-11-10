@@ -412,8 +412,10 @@ if ok_render:
 import shutil as _shJV, tempfile as _tfJV
 import safe_json as _sjJV
 _dJV = pathlib.Path(_tfJV.mkdtemp(prefix="jb_optdiscord_"))
-_svJV = (w.USERS_FILE, w._va_ig_vue_discord)
+_svJV = (w.USERS_FILE, w._va_ig_vue_discord, w._JB_DC_BOUTON)
 try:
+    # Le bouton est eteint depuis le 10/11/2026 : l'option s'essaie allumee.
+    w._JB_DC_BOUTON = True
     w.USERS_FILE = _dJV / "users.json"
     _sjJV.write(w.USERS_FILE, {"999": {"identity": IDENT, "channel_id": 1,
                                        "insta_accounts": ["X<script>alert(1)</script>",
@@ -425,7 +427,7 @@ try:
 except Exception as e:
     ok_d, html_d = False, repr(e)
 finally:
-    w.USERS_FILE, w._va_ig_vue_discord = _svJV
+    w.USERS_FILE, w._va_ig_vue_discord, w._JB_DC_BOUTON = _svJV
     _shJV.rmtree(_dJV, ignore_errors=True)
 check("page Jailbreak, option Discord allumee, rendue", ok_d, html_d if not ok_d else "")
 if ok_d:

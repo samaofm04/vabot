@@ -43141,6 +43141,14 @@ _VA_IG_GUILD_ID = 1505418484052394004
 
 _JB_DC_COOKIE = "jb_scope"
 
+#: Le bouton « Discord » de la barre d'outils, et la portee qu'il allume.
+#: ETEINT le 10/11/2026 (proprietaire, devant la page : « juste le gros truc
+#: discord ça je veux plus », il ajoute les VA a la main). Les logos a cote
+#: des fiches restent (« garde les emojis discord »). Eteint, le cookie n'est
+#: plus lu : pose avant, il laissait la page filtree sans bouton pour en
+#: sortir. True remet le bouton et l'option tels quels.
+_JB_DC_BOUTON = False
+
 #: Le logo Discord (simple-icons). Le trace suit `currentColor` : la couleur
 #: vient d'une classe, et donc du theme.
 _DISCORD_LOGO_D = (
@@ -44055,11 +44063,14 @@ def _jb_dc_poser(html: str, etat: dict) -> str:
     rat = etat.get("rat")
     manques: list = []
 
-    # 1) Barre d'outils : le bouton, apres le choix d'identite.
+    # 1) Barre d'outils : le bouton, apres le choix d'identite (s'il est
+    # allume : _JB_DC_BOUTON).
     bouton = _jb_dc_bouton(dis)
     i = html.find("<select id='jb-filter-identity'")
     j = html.find("</select>", i) if i >= 0 else -1
-    if j >= 0:
+    if not _JB_DC_BOUTON:
+        pass
+    elif j >= 0:
         j += len("</select>")
         html = html[:j] + bouton + html[j:]
     else:
@@ -44300,7 +44311,7 @@ def _jb_option_discord(rendu):
     @_ft_dc.wraps(rendu)
     def _rendu_avec_option(portee=None):
         if portee is None:
-            portee = "discord" if _jb_dc_cookie() else "all"
+            portee = "discord" if (_JB_DC_BOUTON and _jb_dc_cookie()) else "all"
         etat = {"discord": portee == "discord"}
         jeton = _JB_DC_ETAT.set(etat)
         try:

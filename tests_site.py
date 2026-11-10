@@ -36533,6 +36533,11 @@ try:
             (_sV / "identities" / _iV).mkdir()
         _wV._oublier_identites()
 
+        # Le bouton est ETEINT depuis le 10/11/2026 (_JB_DC_BOUTON) : ce qui
+        # suit essaie l'option telle qu'elle revient si on le rallume ; la
+        # page eteinte est essayee apres les routes.
+        _boutonV = _wV._JB_DC_BOUTON
+        _wV._JB_DC_BOUTON = True
         _hD = _wV._render_jailbreak_html("discord")
         _hA = _wV._render_jailbreak_html("all")
         _hN = _wV._render_jailbreak_html()          # hors requete : option eteinte
@@ -36736,6 +36741,29 @@ try:
               and "max-age=0" in _jsT and "chargerOngletDiffere(sec)" in _jsT
               and "window.location.reload()" in _jsT
               and "<div data-lazy-tab='jailbreak'" in _rV[(True, "/?lazy=jailbreak")][1])
+        # -- bouton eteint (10/11/2026, « juste le gros truc discord ça je
+        # veux plus ») : ni bouton ni filtre, meme avec l'ancien cookie ;
+        # les logos restent (« garde les emojis discord »).
+        _wV._JB_DC_BOUTON = False
+        _hOff = _wV._render_jailbreak_html("all")
+        check("bouton eteint : plus de bouton Discord dans la barre d outils",
+              "id='jb-dc-toggle'" not in _hOff and "<select id='jb-filter-identity'" in _hOff)
+        check("bouton eteint : les logos Discord restent a cote des fiches",
+              _ICOv in _btnV(_hOff, "julia|paul") and _ICOv in _carteV(_hOff, "julia|paul")
+              and _ICOv not in _btnV(_hOff, "julia|noum"))
+        check("bouton eteint : le reste de la page = la page allumee moins le bouton",
+              _hOff == _reVd.sub(r"<button type='button' id='jb-dc-toggle'.*?</button>", "", _hA,
+                                 flags=_reVd.S))
+        _rOff = {}
+        for _uV in ("/?lazy=jailbreak", "/?tab=jailbreak&frag=1"):
+            _rr = _clientV(True).get(_uV, headers=_hdV)
+            _rOff[_uV] = (_rr.status_code, _rr.get_data(as_text=True))
+        check("bouton eteint : l ancien cookie jb_scope=discord ne filtre plus (sinon page coincee)",
+              all(st == 200 and "data-va-id='julia|noum'" in h and "id='jb-dc-bandeau'" not in h
+                  and "id='jb-dc-toggle'" not in h for st, h in _rOff.values()),
+              [(st, "julia|noum" in h, "jb-dc-bandeau" in h) for st, h in _rOff.values()])
+        _wV._JB_DC_BOUTON = True
+
         _nodeV = _shVd.which("node")
         if _nodeV:
             _cassV, _nbV = [], 0
@@ -36786,6 +36814,10 @@ try:
         (_wV.DATA_DIR, _wV.IDENTITIES_DIR, _wV.USERS_FILE, _wV._load_web_users,
          _wV._va_ig_vue_discord, _wV._load_insta_3_stats_cache) = _savV["wu"]
         _wV._oublier_identites()
+        try:
+            _wV._JB_DC_BOUTON = _boutonV
+        except NameError:
+            pass
 except Exception as _eVd:
     import traceback as _tbVd
     check("option discord : testable", False, repr(_eVd)[:200] + " " + _tbVd.format_exc()[-600:])
