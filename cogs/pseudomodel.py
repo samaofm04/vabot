@@ -73,15 +73,19 @@ class PseudoModel(commands.Cog):
             if not lj.models_du_serveur(guild) or guild.id in self._jb_en_cours:
                 return
             a_faire = lj.manquants(guild)
-            if not a_faire:
-                return
-            self._jb_en_cours.add(guild.id)
-            try:
-                bilan = await asyncio.to_thread(lj.assurer, guild, a_faire)
-            finally:
-                self._jb_en_cours.discard(guild.id)
-            if bilan.get("crees"):
-                rv.planifier(guild)
+            if a_faire:
+                self._jb_en_cours.add(guild.id)
+                try:
+                    bilan = await asyncio.to_thread(lj.assurer, guild, a_faire)
+                finally:
+                    self._jb_en_cours.discard(guild.id)
+                if bilan.get("crees"):
+                    rv.planifier(guild)
+            # Le salon 🔗・liens (salon_liens) : posé quand TOUS les liens
+            # existent (son envoi notifie), tenu à jour ensuite — même quand
+            # il n'y avait rien à créer (un VA parti, un rôle retiré).
+            import salon_liens as sl
+            await sl.assurer(guild)
         except Exception:
             traceback.print_exc()
 

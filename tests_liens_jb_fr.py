@@ -62,6 +62,8 @@ def check(label, cond, detail=""):
 ns = types.SimpleNamespace
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="tst_liens_jb_"))
 lj.ETAT = TMP / "liens_jb_fr.json"
+import salon_liens as _sl               # noqa: E402
+_sl.ETAT = TMP / "salon_liens_etat.json"     # le cog appelle aussi le salon 🔗・liens
 lj.time.sleep = lambda s: None
 YOU_FR, YOU_US = int(gf.YOU_FR_GUILD_ID), int(gf.YOU_US_GUILD_ID)
 
@@ -252,6 +254,25 @@ reset()
 PAUSE["v"] = "GetMySocial est en pause (quota du jour épuisé) jusque vers 09h33"
 r = lj.creer(2, "faxx103", "alicia")
 check("GetMySocial en pause : rien, arrêt", not r["ok"] and r["arret"] and not APPELS, r)
+
+reset()
+_vrai_call = gms._call_tool
+_n429 = {"n": 0}
+
+
+def _call_429(nom, args=None, **k):
+    if nom == "create_link" and _n429["n"] < 2:
+        _n429["n"] += 1
+        APPELS.append(("429", {}))
+        return {"ok": False, "error": "Error 429 (rate_limit_exceeded): RATE_LIMITED: retry after 10s."}
+    return _vrai_call(nom, args, **k)
+
+
+gms._call_tool = _call_429
+r = lj.creer(2, "faxx103", "alicia")
+gms._call_tool = _vrai_call
+check("429 : attend le délai donné et réessaie, le lien est créé",
+      r["ok"] and _n429["n"] == 2 and len(appels("create_link")) == 1, r)
 
 # ── 4. Le passage ─────────────────────────────────────────────────────────
 print("\n── 4. Le passage")

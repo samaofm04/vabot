@@ -186,6 +186,24 @@ def _boutons(gabarit: Dict[str, Any], urls: Dict[str, str]) -> List[Dict[str, An
     return out
 
 
+def _appel(nom: str, args: Dict[str, Any], essais: int = 4) -> Dict[str, Any]:
+    """Un appel GetMySocial qui, sur un 429, attend le délai qu'il donne et
+    réessaie. Le 10/11/2026, chaque passage s'arrêtait au bout d'une
+    vingtaine de liens sur « 429 … retry after 10s » et la suite attendait
+    trente minutes."""
+    import re
+    import gms
+    r: Dict[str, Any] = {}
+    for _ in range(essais):
+        r = gms._call_tool(nom, args)
+        err = str(r.get("error") or "")
+        if r.get("ok") or "429" not in err:
+            return r
+        m = re.search(r"retry after (\d+)\s*s", err)
+        time.sleep(min(60, int(m.group(1)) + 2) if m else 15)
+    return r
+
+
 def creer(uid, pseudo: str, model: str, par: Any = "bot") -> Dict[str, Any]:
     """Le lien JB FR de ce VA pour cette model. Idempotent : déjà là, il est
     rendu tel quel. Rend {ok, deja, public_url, display_name, soucis, erreur,
@@ -259,7 +277,7 @@ def creer(uid, pseudo: str, model: str, par: Any = "bot") -> Dict[str, Any]:
             lien = None
             for essai in range(ESSAIS_ADRESSE):
                 sc = liens_fr._mots_doux(model, n + 7 + essai)
-                r = gms._call_tool("create_link", {**corps, "shortcode": sc})
+                r = _appel("create_link", {**corps, "shortcode": sc})
                 if r.get("ok"):
                     lien = liens_fr._objet(r)
                     break
@@ -294,7 +312,7 @@ def creer(uid, pseudo: str, model: str, par: Any = "bot") -> Dict[str, Any]:
         if gabarit.get("whitelabel") is not None:
             # reposé ici : la création l'a ignoré une fois (10/11/2026)
             maj["whitelabel"] = gabarit["whitelabel"]
-        r = gms._call_tool("update_link", maj)
+        r = _appel("update_link", maj)
         if not r.get("ok"):
             return _echec(f"boutons non posés ({str(r.get('error'))[:160]})")
 

@@ -331,38 +331,47 @@ def _cle(nom) -> str:
     return oc._cle(nom)
 
 
-def salon(guild):
-    """Le salon de répartition (par son id gardé, sinon par son nom), ou None."""
+def salon_nomme(guild, nom: str, sid: Optional[int] = None):
+    """Un salon par son id gardé, sinon par son nom (sans décor ni accent,
+    partout sur le serveur : renommé ou déplacé à la main, il reste le sien)."""
     import discord
     textes = list(getattr(guild, "text_channels", None) or [])
-    sid = _note(guild.id, "salon")
     if sid:
         c = discord.utils.get(textes, id=sid)
         if c is not None:
             return c
-    return discord.utils.find(lambda c: _cle(c.name) == _cle(NOM), textes)
+    return discord.utils.find(lambda c: _cle(c.name) == _cle(nom), textes)
 
 
-async def _creer_salon(guild, bilan):
+def salon(guild):
+    """Le salon de répartition (par son id gardé, sinon par son nom), ou None."""
+    return salon_nomme(guild, NOM, _note(guild.id, "salon"))
+
+
+async def creer_salon_annonces(guild, nom: str, raison: str, bilan) -> Optional[object]:
+    """Crée `nom` dans 📣 ANNONCES ET SUIVI, dont il prend les droits (tout le
+    monde lit, personne n'écrit, Ryuk écrit) ; sans la catégorie, en lecture
+    seule à son compte. Partagé avec le salon 🔗・liens (salon_liens)."""
     cat = next((c for c in (getattr(guild, "categories", None) or [])
                 if _cle(c.name) == _cle(CATEGORIE)), None)
     try:
         if cat is not None:
-            # Dans la catégorie, sans droits à soi : il prend les siens
-            # (tout le monde lit, personne n'écrit, Ryuk écrit).
-            c = await guild.create_text_channel(NOM, category=cat,
-                                                reason="Répartition des VA par model")
+            c = await guild.create_text_channel(nom, category=cat, reason=raison)
         else:
             import outils_communs as oc
             c = await guild.create_text_channel(
-                NOM, overwrites=oc.droits_outil(guild, (getattr(guild, "me", None),)),
-                reason="Répartition des VA par model")
+                nom, overwrites=oc.droits_outil(guild, (getattr(guild, "me", None),)),
+                reason=raison)
             bilan["rates"].append(f"{CATEGORIE} introuvable : salon cree hors categorie")
     except Exception as e:                                   # noqa: BLE001
-        bilan["rates"].append(f"{NOM} non cree ({type(e).__name__}: {e})"[:200])
+        bilan["rates"].append(f"{nom} non cree ({type(e).__name__}: {e})"[:200])
         return None
     bilan["crees"].append(c.name)
     return c
+
+
+async def _creer_salon(guild, bilan):
+    return await creer_salon_annonces(guild, NOM, "Répartition des VA par model", bilan)
 
 
 async def _message(canal, bot_id):
