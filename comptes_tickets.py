@@ -112,12 +112,38 @@ def _fiche_vivante(model: str, nom: str) -> bool:
     return isinstance(entree, dict) and nom.lower() in jb.noms_occupes(entree)
 
 
-def page_du_va(gid: str, uid: str, nom_actuel: str) -> Tuple[str, str, str]:
+def fiche_au_pseudo(model: str, pseudo: str) -> str:
+    """Le nom de la fiche de `model` qui porte déjà ce pseudo Discord, ou "".
+
+    You FR (10/11/2026) : les VA de Va IG y ont souvent une fiche faite à la
+    main, « York Eméric » au pseudo york_emerick12. Sans ce repli, sa page
+    créait à côté une seconde fiche « york_emerick12 » : deux lignes pour un
+    VA, ses comptes coupés en deux. Deux fiches au même pseudo : aucune n'est
+    choisie (une fiche neuve à son nom, et c'est dit)."""
+    import jailbreak as jb
+    pseudo = str(pseudo or "").strip().lstrip("@").lower()
+    if not pseudo:
+        return ""
+    noms = [str(v.get("name") or "").strip() for v in jb.list_vas_for_identity(model)
+            if isinstance(v, dict) and str(v.get("discord_username") or "")
+            .strip().lstrip("@").lower() == pseudo and str(v.get("name") or "").strip()]
+    if len(noms) > 1:
+        print(f"[comptes] {model} : {len(noms)} fiches au pseudo {pseudo} ({', '.join(noms)}), "
+              "aucune reprise", flush=True)
+        return ""
+    return noms[0] if noms else ""
+
+
+def page_du_va(gid: str, uid: str, nom_actuel: str,
+               model: str = "") -> Tuple[str, str, str]:
     """(adresse, nom de la fiche, refus) pour le VA `uid` : sa page déjà liée
-    si elle vit encore, sinon une neuve au nom `nom_actuel` (son identifiant
-    Discord d'aujourd'hui). `nom_actuel` vide : seule une page liée sert."""
+    si elle vit encore, sinon une neuve — sur la fiche qui porte déjà son
+    pseudo Discord (fiche_au_pseudo), à défaut au nom `nom_actuel` (son
+    identifiant Discord d'aujourd'hui). `nom_actuel` vide : seule une page
+    liée sert. `model` : celle du serveur (MODELE) si elle n'est pas donnée ;
+    un serveur à plusieurs models (You FR, cartes_va_fr) la donne."""
     import va_portal as vp
-    model = MODELE[gid]
+    model = str(model or MODELE[gid]).strip().lower()
     with _VERROU:
         d = _liaisons()
         a_lui = d.setdefault(model, {})
@@ -131,14 +157,18 @@ def page_du_va(gid: str, uid: str, nom_actuel: str) -> Tuple[str, str, str]:
         nom = _propre(nom_actuel)
         if not nom or nom.isdigit():
             return "", "", TEXTE_PANNE
+        reprise = fiche_au_pseudo(model, nom)
+        if reprise:
+            nom = reprise
         for autre, j in a_lui.items():
             r = vp.resoudre(j) if autre != uid else None
-            if r is not None and str(r.get("va") or "").strip().lower() == nom:
+            if r is not None and str(r.get("va") or "").strip().lower() == nom.lower():
                 print(f"[comptes] {model}/{nom} déjà lié à l'id {autre} : refusé pour {uid}", flush=True)
                 return "", "", TEXTE_NOM_PRIS.format(nom=nom, model=model.capitalize())
-        ok, raison = fiche(model, nom)
-        if not ok:
-            return "", "", raison
+        if not reprise:
+            ok, raison = fiche(model, nom)
+            if not ok:
+                return "", "", raison
         url = lien(gid, model, nom)
         if not url:
             print(f"[comptes] {model}/{nom} : jeton non écrit", flush=True)

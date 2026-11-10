@@ -228,6 +228,12 @@ PSEUDO_MODEL = {YOU_FR_GUILD_ID}
 #: dans PSEUDO_MODEL lirait quand même les mêmes rôles de model.
 REPARTITION_VA = {YOU_FR_GUILD_ID}
 
+#: Les serveurs où chaque VA reçoit dans son -content une carte par model de
+#: ses rôles : son lien GetMySocial et 📷 Ajouter mes comptes
+#: (cartes_va_fr.py). Propriétaire, 10/11/2026 : « tu peux leur donner leurs
+#: liens gms pour leurs models et le lien pour qu'ils ajoutent des comptes ».
+CARTES_VA = {YOU_FR_GUILD_ID}
+
 #: Les serveurs qui achètent leurs numéros sur le compte GetAText des serveurs
 #: TRUST sans en être un (numgen.serveurs_compte_trust), id -> nom court.
 #: Propriétaire, 10/11/2026 : « je veux use des num avec API du serv trust
@@ -307,6 +313,11 @@ def pseudo_model(guild_or_id) -> bool:
 def repartition_va(guild_or_id) -> bool:
     """True si ce serveur a le salon de répartition des VA par model."""
     return _gid(guild_or_id) in REPARTITION_VA
+
+
+def cartes_va(guild_or_id) -> bool:
+    """True si les VA de ce serveur reçoivent leurs cartes de model."""
+    return _gid(guild_or_id) in CARTES_VA
 
 
 def set_features(guild_or_id, features) -> set:

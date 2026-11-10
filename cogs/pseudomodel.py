@@ -14,6 +14,11 @@ rôle renommé lui demande une mise à jour, et le passage des trente minutes
 la revoit. Un seul cog pour les deux : ils lisent la même reconnaissance des
 rôles (pseudo_model.models_du_membre).
 
+Les cartes de model des VA (cartes_va_fr.py, 10/11/2026 : lien GMS et 📷
+Ajouter mes comptes dans leur -content) suivent les mêmes rôles, de la même
+façon ; leur bouton est enregistré ici (cog_load), pour répondre après un
+redémarrage.
+
 AUCUNE COMMANDE SLASH : le bot principal en a 100 sur 100.
 
 SUR LE BOT PRINCIPAL (Ryuk) : c'est lui qui est sur You FR, en administrateur.
@@ -42,6 +47,14 @@ class PseudoModel(commands.Cog):
     def cog_unload(self):
         self.boucle.cancel()
 
+    async def cog_load(self):
+        try:
+            import cartes_va_fr as cv
+            self.bot.add_dynamic_items(cv.BoutonComptes)
+        except Exception:
+            # sans lui, les boutons 📷 des cartes ne répondraient plus : dit
+            traceback.print_exc()
+
     @commands.Cog.listener()
     async def on_member_update(self, before, after):
         try:
@@ -52,6 +65,8 @@ class PseudoModel(commands.Cog):
                              != list(getattr(after, "roles", []) or []))
             if roles_changes:
                 rv.planifier(guild)
+                import cartes_va_fr as cv
+                cv.planifier(guild)
             if not pm.serveur(guild):
                 return
             # Seuls les rôles et le pseudo comptent : l'événement part aussi
@@ -75,6 +90,9 @@ class PseudoModel(commands.Cog):
         try:
             import repartition_va as rv
             rv.planifier(getattr(member, "guild", None))
+            # ses cartes partent avec lui
+            import cartes_va_fr as cv
+            cv.planifier(getattr(member, "guild", None))
         except Exception:
             traceback.print_exc()
 
@@ -86,6 +104,10 @@ class PseudoModel(commands.Cog):
             if getattr(before, "name", None) != getattr(after, "name", None):
                 import repartition_va as rv
                 rv.planifier(getattr(after, "guild", None))
+            if (getattr(before, "name", None) != getattr(after, "name", None)
+                    or getattr(before, "colour", None) != getattr(after, "colour", None)):
+                import cartes_va_fr as cv
+                cv.planifier(getattr(after, "guild", None))
         except Exception:
             traceback.print_exc()
 
@@ -99,6 +121,9 @@ class PseudoModel(commands.Cog):
                     await pm.passer(guild)
                 if rv.serveur(guild):
                     await rv.assurer(guild, forcer=True)
+                import cartes_va_fr as cv
+                if cv.serveur(guild):
+                    await cv.assurer(guild)
         except Exception:
             # une exception non attrapee tue une tasks.loop sans rien dire
             traceback.print_exc()
