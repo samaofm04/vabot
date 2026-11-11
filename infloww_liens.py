@@ -1964,8 +1964,14 @@ def _part_partenaire(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
             "net_hors": sum(1 for x in lus if x.get("net_absent") and int(x.get("abonnes") or 0))}
 
 
-_GROUPES: Dict[str, Any] = {"t": 0.0, "par_id": {}}
+_GROUPES: Dict[str, Any] = {"t": 0.0, "par_id": {}, "echec": 0.0}
 GROUPES_FRAIS_S = 3600
+#: Après une lecture ratée, on ne rappelle pas GetMySocial avant ce délai.
+#: Rien n'était retenu sur un échec, et chaque ligne du tableau (un VA)
+#: relançait l'appel : quand le cookie GetMySocial a expiré, du 07/11/2026
+#: 18:34 au 08/11 23:09 UTC, 12 700 appels sont partis pour rien (7 354 « JSON
+#: invalide », puis 5 346 « HTTP 429 » : GetMySocial s'est mis à bloquer).
+GROUPES_ECHEC_S = 600
 
 
 def _id_groupe(g: Any) -> str:
@@ -1976,9 +1982,14 @@ def _id_groupe(g: Any) -> str:
 def groupes_equipe() -> Dict[str, Tuple[int, str]]:
     """{id de groupe: (rang sur GetMySocial, nom)} des groupes de l'espace,
     relus au plus une fois par heure ; la dernière lecture si GetMySocial ne
-    répond pas ; {} sans aucune (la page reste par nom). Ne lève pas."""
+    répond pas ; {} sans aucune (la page reste par nom). Après une lecture
+    ratée, pas de nouvel appel avant GROUPES_ECHEC_S (dit une fois). Ne lève
+    pas."""
     if time.time() - float(_GROUPES["t"]) < GROUPES_FRAIS_S and _GROUPES["par_id"]:
         return dict(_GROUPES["par_id"])
+    if time.time() - float(_GROUPES.get("echec") or 0) < GROUPES_ECHEC_S:
+        return dict(_GROUPES["par_id"])
+    attente = f" — nouvel essai dans {GROUPES_ECHEC_S // 60} min"
     try:
         import gms
         r = gms.list_team_groups(EQUIPE_GMS) if EQUIPE_GMS else {}
@@ -1986,11 +1997,16 @@ def groupes_equipe() -> Dict[str, Tuple[int, str]]:
         par = {_id_groupe(g.get("id")): (k, str(g.get("name") or "").strip())
                for k, g in enumerate(gs) if _id_groupe(g.get("id")) not in ("", "ungrouped")}
         if par:
-            _GROUPES.update(t=time.time(), par_id=par)
-        elif r.get("error"):
-            print(f"[infloww-liens] groupes GetMySocial illisibles : {str(r.get('error'))[:120]}", flush=True)
+            _GROUPES.update(t=time.time(), par_id=par, echec=0.0)
+        else:
+            # rien lu (erreur, ou espace sans groupe) : on n'insiste pas à chaque ligne
+            _GROUPES["echec"] = time.time()
+            if r.get("error"):
+                print(f"[infloww-liens] groupes GetMySocial illisibles : {str(r.get('error'))[:120]}"
+                      + attente, flush=True)
     except Exception as e:                                   # noqa: BLE001
-        print(f"[infloww-liens] groupes GetMySocial : {type(e).__name__}: {e}", flush=True)
+        _GROUPES["echec"] = time.time()
+        print(f"[infloww-liens] groupes GetMySocial : {type(e).__name__}: {e}" + attente, flush=True)
     return dict(_GROUPES["par_id"])
 
 
