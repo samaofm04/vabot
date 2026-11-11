@@ -200,10 +200,11 @@ try:
           pv.gabarit(AG, 2) == pv.gabarit(AG, 7) == "lnk_6aedd88bc7881b6c8066a247")
     check("… la page 1 ne se modifie pas par la fenêtre ; les pages demandées oui",
           not pv.modifiable(AG, 1) and pv.modifiable(AG, 2) and pv.modifiable(AG, 9))
-    check("… les mêmes looks que Twitter (Brune, Blonde, Général) ; blonde par défaut et imposée aux deux serveurs "
-          "(« Blonde à tous », 06/11 23 h)",
-          pv.looks(AG) == pv.looks(TW) and pv.LOOK_DEFAUT.get(AG) == "blonde"
-          and pv.LOOK_IMPOSE.get(AG, ("",))[0] == pv.LOOK_IMPOSE.get(TW, ("",))[0] == "blonde")
+    check("… les mêmes looks que Twitter (Brune, Blonde, Général) ; Général par défaut et imposé aux deux serveurs "
+          "(« le général, de base pour tout le monde », 11/11), avec une marque neuve",
+          pv.looks(AG) == pv.looks(TW) and pv.LOOK_DEFAUT.get(AG) == "general"
+          and pv.LOOK_IMPOSE.get(AG, ("",))[0] == pv.LOOK_IMPOSE.get(TW, ("",))[0] == "general"
+          and pv.LOOK_IMPOSE[AG][1] == pv.LOOK_IMPOSE[TW][1] != "2026-11-06-blonde-a-tous")
     # les sections 2 à 10 testent les mécanismes avec la brune par défaut, sans look imposé (section 11)
     pv.LOOK_DEFAUT[AG] = "brune"
     pv.LOOK_IMPOSE = {}

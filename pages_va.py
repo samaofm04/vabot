@@ -43,7 +43,8 @@ principal du VA, déjà une landing page (LIEN_PAGE_1) ; il en demande d'autres
 (« ➕ Demander une page »), sans maximum : un manager accepte ou refuse
 (registre « demandes »), la page acceptée (page 2, 3…) copie GABARIT_PAGE
 (liabrune) et se modifie comme celle de Twitter. Brune par défaut, lien
-principal compris (LOOK_DEFAUT) ; le choix du look sur toutes. Les pages
+principal compris (LOOK_DEFAUT) — Général depuis le 11/11/2026, imposé aux
+deux serveurs (LOOK_IMPOSE) ; le choix du look sur toutes. Les pages
 acceptées avaient le 70/30 « Lia seule » (AB_PAGES) ; retiré le 10/11/2026
 avec la marge sans tracking des trois TRUST (liens_va.MARGE_SANS_TRACKING) :
 plus aucun A/B sur les pages. Twitter n'en a jamais eu.
@@ -2901,9 +2902,14 @@ def _habiller_lien(gid: str, lid: str) -> Dict[str, Any]:
 # suivant, ce qui naît après aussi (une page Twitter neuve copie le gabarit
 # brune) ; un VA qui choisit ensuite un autre look le garde. Une nouvelle
 # consigne = une nouvelle marque.
-LOOK_IMPOSE: Dict[str, Tuple[str, str]] = {AGENCY_IG_ID: ("blonde", "2026-11-06-blonde-a-tous"),
-                                           TWITTER_ID: ("blonde", "2026-11-06-blonde-a-tous")}
-LOOK_DEFAUT[AGENCY_IG_ID] = "blonde"
+# Propriétaire, 11/11/2026 : « que ce soit sur Instagram ou sur n'importe quoi,
+# tu peux mettre [Lia] en rose là, le général, de base pour tout le monde » —
+# le look Général (fond rose de liatemplate, tpligtemplate3) remplace la
+# blonde : imposé une fois sur chaque lien principal et chaque page des deux
+# serveurs (nouvelle marque), et par défaut pour les liens à venir.
+LOOK_IMPOSE: Dict[str, Tuple[str, str]] = {AGENCY_IG_ID: ("general", "2026-11-11-general-a-tous"),
+                                           TWITTER_ID: ("general", "2026-11-11-general-a-tous")}
+LOOK_DEFAUT[AGENCY_IG_ID] = "general"
 #: Entre deux liens écrits d'affilée : 17 liens enchaînés ont pris des 429 à
 #: la minute le 06/11 au soir (« Requests remaining this minute: 0 »).
 PAUSE_LIENS_S = 2.0
