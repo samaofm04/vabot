@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -643,7 +644,20 @@ class Outils(commands.Cog):
                     await asyncio.sleep(1.5)
                 except Exception as e:                       # noqa: BLE001
                     bilan["rates"].append(f"{ch.name} ({type(e).__name__})")
-        if bilan["renommes"] or bilan["sans_va"] or bilan["rates"]:
+        # Les memes salons sans fiche ne sont redits qu'une fois par jour (ou des
+        # que leur liste change) : « sans fiche ['🔴-va-hycham'] » etait reecrit
+        # toutes les dix minutes, 1 301 lignes du 03 au 11/11/2026. Un renommage
+        # ou un rate se dit toujours.
+        dits = getattr(self, "_sans_fiche_dits", None)
+        if dits is None:
+            dits = self._sans_fiche_dits = {}
+        sig, vu = tuple(bilan["sans_va"]), dits.get(guilde.id)
+        nouveau = bool(sig) and (vu is None or vu[0] != sig or time.time() - vu[1] >= 86400)
+        if not sig:
+            dits.pop(guilde.id, None)
+        elif nouveau:
+            dits[guilde.id] = (sig, time.time())
+        if bilan["renommes"] or bilan["rates"] or nouveau:
             print(f"[outils] numeros des VA : {bilan['renommes']} renomme(s), {bilan['deja']} deja bons, "
                   f"sans fiche {bilan['sans_va'][:10]}, rates {bilan['rates'][:10]}", flush=True)
         return bilan
