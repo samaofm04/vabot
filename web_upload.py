@@ -20976,28 +20976,138 @@ def _load_insta_3_stats_cache() -> dict:
         return {}
 
 
-def _save_insta_3_stats_cache(d: dict):
+def _stats_signature(chemin=None):
+    """De quoi reconnaitre le fichier du cache tel que nous l'avons laisse
+    (inode, date, taille), ou None s'il n'existe pas. `chemin` : le fichier a
+    regarder quand ce n'est pas encore celui du cache (cf. plus bas)."""
+    import os as _os_sg
+    try:
+        st = _os_sg.stat(chemin or VA_INSTA_3_STATS_FILE)
+    except OSError:
+        return None
+    return (str(VA_INSTA_3_STATS_FILE), st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _ecrire_insta_3_stats_texte(texte):
     """Ecriture atomique (temp + replace) pour ne jamais laisser un fichier
     JSON tronque si 2 ecritures se croisent ou si le process meurt en plein
-    write."""
+    write. `texte` : une chaine, ou des octets deja encodes en UTF-8.
+
+    Rend la signature du fichier ecrit (cf. _stats_signature), ou None quand
+    safe_json n'a pas pu l'ecrire."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = VA_INSTA_3_STATS_FILE.with_suffix(".json.tmp")
-    safe_json.write_text(tmp, json.dumps(d, indent=2, ensure_ascii=False))
+    ecrit = safe_json.write_text(tmp, texte)
     import os as _os_sv
+    # Relevee sur NOTRE fichier, avant de le mettre en place (un renommage ne
+    # change ni l'inode, ni la date, ni la taille). Relevee apres, elle
+    # pouvait etre celle d'un autre ecrivain passe entre-temps : son fichier
+    # aurait ete pris pour le notre, et efface a l'ecriture suivante.
+    sig = _stats_signature(tmp) if ecrit else None
     _os_sv.replace(tmp, VA_INSTA_3_STATS_FILE)
+    return sig
+
+
+def _save_insta_3_stats_cache(d: dict):
+    """Serialise tout le cache et l'ecrit (cf. _ecrire_insta_3_stats_texte)."""
+    _ecrire_insta_3_stats_texte(json.dumps(d, indent=2, ensure_ascii=False))
+
+
+# ── LE TEXTE DE CHAQUE FICHE, GARDE ENTRE DEUX ECRITURES ─────────────────────
+#
+# _cache_put_stats est appele une fois par compte scrape : ~950 fois d'affilee
+# au releve de 04 h UTC. Il relisait TOUT le fichier (13 Mo, 3 737 fiches le
+# 11/11/2026) puis le re-serialisait en entier pour une seule fiche changee :
+# 0,36 s de calcul par compte, mesure sur le VPS, dans quatre fils -- le
+# processeur du bot passait de 6 % a 20 % pendant un quart d'heure, et tout ce
+# qui lisait un fichier sur la boucle Discord pendant ce temps attendait le GIL
+# a chaque lecture (cf. cogs/noctuspool.py, les blocages de 04 h).
+#
+# On garde donc le TEXTE de chaque fiche, tel que json.dumps(indent=2) l'ecrit
+# dans le fichier, et on ne re-serialise que la fiche qui change. Le fichier
+# ecrit est le meme a l'octet pres, a chaque compte comme avant : rien n'est
+# differe, rien n'est regroupe.
+#
+# En OCTETS, pas en chaines : 823 fiches sur 3 737 portent un accent ou un
+# emoji, et recoller des chaines de natures differentes les elargit toutes
+# (136 ms mesures sur le vrai fichier, contre 3,5 ms en octets).
+#
+# Ces textes ne valent que pour le fichier que NOUS avons ecrit. Sa signature
+# (inode, date a la nanoseconde, taille) est relue avant chaque usage : des
+# qu'un autre ecrivain y a touche (la route des sondes, une copie de data/),
+# on repart du fichier, comme avant.
+_STATS_FICHES = {"sig": None, "fiches": None}
+
+#: Les tests remplacent le chargeur ou l'ecrivain par des doublures en memoire.
+#: Les fiches gardees ne decrivent alors plus ce que le chargeur rend : dans ce
+#: cas, et dans ce cas seulement, on garde le chemin d'origine.
+_STATS_LOAD_D_ORIGINE = _load_insta_3_stats_cache
+_STATS_SAVE_D_ORIGINE = _save_insta_3_stats_cache
+
+
+def _stats_fiche_octets(handle: str, entry) -> bytes:
+    """Le texte d'UNE fiche, exactement comme json.dumps(tout, indent=2) l'ecrit
+    a l'interieur du cache : sa cle, puis sa valeur decalee de deux espaces.
+
+    Decaler par remplacement des sauts de ligne est exact : dans du JSON, un
+    saut de ligne brut n'existe qu'entre deux elements -- ceux d'une chaine
+    sont ecrits « \\n ».
+    """
+    return ("  " + json.dumps(handle, ensure_ascii=False) + ": "
+            + json.dumps(entry, indent=2, ensure_ascii=False).replace("\n", "\n  ")
+            ).encode("utf-8")
+
+
+def _stats_octets(fiches: dict) -> bytes:
+    """Le fichier entier, a partir du texte de ses fiches."""
+    return b"{\n" + b",\n".join(fiches.values()) + b"\n}" if fiches else b"{}"
 
 
 def _cache_put_stats(handle: str, entry: dict):
     """Merge thread-safe d UN handle dans le cache stats.
 
-    Re-load le fichier SOUS le lock juste avant d ecrire, pour ne pas
+    Part de l'etat du fichier SOUS le lock juste avant d ecrire, pour ne pas
     ecraser les ecritures concurrentes des autres workers (sinon la plupart
     des resultats du refresh parallele sont perdus). C est le fix du bug
-    'tout reste NON SCRAPÉ'."""
+    'tout reste NON SCRAPÉ'.
+
+    Cet etat n'est relu du disque que si le fichier a change depuis notre
+    derniere ecriture ; sinon ce sont les fiches gardees (cf. _STATS_FICHES).
+    """
     with _CACHE_LOCK:
-        cur = _load_insta_3_stats_cache()
-        cur[handle] = entry
-        _save_insta_3_stats_cache(cur)
+        if (_load_insta_3_stats_cache is not _STATS_LOAD_D_ORIGINE
+                or _save_insta_3_stats_cache is not _STATS_SAVE_D_ORIGINE
+                or not isinstance(handle, str)):
+            _STATS_FICHES["sig"] = None
+            cur = _load_insta_3_stats_cache()
+            cur[handle] = entry
+            _save_insta_3_stats_cache(cur)
+            return
+        # Avant de toucher a quoi que ce soit : une fiche non serialisable
+        # doit lever ici, fichier et fiches gardees intacts (comme avant, ou
+        # json.dumps levait avant l'ecriture).
+        texte = _stats_fiche_octets(handle, entry)
+        sig = _STATS_FICHES["sig"]
+        if sig is not None and sig == _stats_signature():
+            fiches = _STATS_FICHES["fiches"]
+            fiches[handle] = texte
+        else:
+            cur = _load_insta_3_stats_cache()
+            cur[handle] = entry
+            fiches = {k: _stats_fiche_octets(k, v) for k, v in cur.items()}
+        # Invalide tant que l'ecriture n'est pas confirmee : si elle echoue,
+        # la prochaine fiche repart du fichier.
+        _STATS_FICHES["sig"] = None
+        sig = _ecrire_insta_3_stats_texte(_stats_octets(fiches))
+        if sig is not None:
+            # Au compte suivant, l'ancienne ecriture relisait cette fiche du
+            # fichier avant de la re-serialiser. Le texte ne change que si
+            # deux cles se confondent une fois ecrites (1 et "1") : on garde
+            # donc la fiche RELUE, pour rester identique jusque-la.
+            relue = next(iter(json.loads(b"{" + texte + b"}").values()))
+            fiches[handle] = _stats_fiche_octets(handle, relue)
+            _STATS_FICHES["fiches"] = fiches
+            _STATS_FICHES["sig"] = sig
 
 
 def _verify_ig_profile_exists(handle: str):

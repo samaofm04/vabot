@@ -99,12 +99,18 @@ def _captions_effacees(p: Path, text: str) -> list:
     return sorted(avant - (apres or set()))
 
 
-def write_text(path, text: str, backup: bool | None = None) -> bool:
+def write_text(path, text: str | bytes, backup: bool | None = None) -> bool:
     """Écrit `text` de façon ATOMIQUE. Retourne True si écrit.
 
     backup=None (défaut) : copie `.prev` sauf pour les fichiers de cache.
     Refuse (False) une bibliothèque de captions qui en perdrait trop d'un
     coup (voir plus haut).
+
+    `text` peut être des OCTETS, déjà encodés en UTF-8 : ils sont écrits tels
+    quels. Pour un gros fichier assemblé morceau par morceau (le cache des
+    stats Instagram, 13 Mo), passer par une chaîne coûtait un décodage puis
+    un ré-encodage complets à chaque écriture. Même fonction, pour que le
+    verrou, l'écriture atomique et les garde-fous restent au même endroit.
     """
     p = Path(path)
     with _lock_for(p):
@@ -132,7 +138,8 @@ def write_text(path, text: str, backup: bool | None = None) -> bool:
                 except Exception:
                     pass
             tmp = p.with_suffix(p.suffix + ".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
+            with (open(tmp, "wb") if isinstance(text, (bytes, bytearray))
+                  else open(tmp, "w", encoding="utf-8")) as f:
                 f.write(text)
                 f.flush()
                 os.fsync(f.fileno())

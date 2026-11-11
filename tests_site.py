@@ -38878,6 +38878,274 @@ finally:
     except Exception:
         pass
 
+
+# ==============================================================================
+# Cache des stats Instagram : une fiche re-serialisee par compte, meme fichier
+# ==============================================================================
+# Au releve de 04 h UTC, _cache_put_stats relisait et re-serialisait les 13 Mo
+# du cache a CHAQUE compte (~950 fois) : 0,36 s de calcul par compte, le bot a
+# 20 % de processeur pendant un quart d'heure. Il garde maintenant le texte de
+# chaque fiche et n'en refait qu'une. Ce qui ne doit PAS changer : le fichier,
+# a l'octet pres, apres chaque compte -- c'est lui qui decide la paie des VA.
+try:
+    import json as _jsCs
+    import pathlib as _plCs
+    import random as _rdCs
+    import shutil as _shCs
+    import tempfile as _tfCs
+    import threading as _thCs
+    import safe_json as _sjCs
+    import web_upload as _wCs
+
+    _dCs = _plCs.Path(_tfCs.mkdtemp(prefix="statscache-"))
+    _origCs = (_wCs.VA_INSTA_3_STATS_FILE, _wCs.DATA_DIR, _wCs._stats_fiche_octets,
+               _wCs._load_insta_3_stats_cache, _sjCs.write_text)
+    _wCs.VA_INSTA_3_STATS_FILE = _dCs / "va_insta_3_stats_cache.json"
+    _wCs.DATA_DIR = _dCs
+    _fCs = _wCs.VA_INSTA_3_STATS_FILE
+    _rCs = _rdCs.Random(20261111)
+
+    def _valeurCs(prof=0):
+        """Une valeur JSON au hasard, avec tout ce qui peut tromper une
+        indentation refaite a la main : sauts de ligne DANS les chaines,
+        accolades, guillemets, emojis, conteneurs vides, cles non textuelles."""
+        t = _rCs.randrange(11 if prof < 3 else 7)
+        if t == 0:
+            return _rCs.randrange(-10 ** 6, 10 ** 12)
+        if t == 1:
+            return _rCs.random() * 10 ** _rCs.randrange(-5, 9)
+        if t == 2:
+            return _rCs.choice([True, False, None])
+        if t in (3, 4, 5):
+            return "".join(_rCs.choice(["a", "é", " ", "\n", "\r\n", "\t", "\"", "\\", "{", "}",
+                                        "[", "]", ",", ": ", "💥", " ", "漢", "\x07", "/"])
+                           for _ in range(_rCs.randrange(0, 24)))
+        if t == 6:
+            return _rCs.choice([{}, [], "", 0, 0.0, "\n"])
+        if t in (7, 8):
+            return [_valeurCs(prof + 1) for _ in range(_rCs.randrange(0, 5))]
+        return {_rCs.choice([_rCs.randrange(99), "k%d" % _rCs.randrange(99), "é\n\"%d" % _rCs.randrange(9),
+                             True, None, 1.5]):
+                _valeurCs(prof + 1) for _ in range(_rCs.randrange(0, 6))}
+
+    def _ficheCs():
+        return {"followers": _rCs.randrange(10 ** 6), "scraped_at": 1794370115,
+                "last_post_at": "2026-11-10T21:03:11+01:00", "is_private": False,
+                "preview": [{"url": "https://exemple.test/p/%d" % i, "legende": _valeurCs(9)}
+                            for i in range(_rCs.randrange(0, 7))],
+                "reel_days": {"2026-11-%02d" % (j + 1): _rCs.randrange(5) for j in range(_rCs.randrange(0, 9))},
+                "divers": _valeurCs()}
+
+    def _ancienCs(attendu, handle, fiche):
+        """L'ancienne ecriture, rejouee en memoire : relire le fichier, poser
+        la fiche, tout re-serialiser. Rend le texte que le fichier doit porter."""
+        cur = _jsCs.loads(attendu) if attendu is not None else {}
+        cur[handle] = fiche
+        return _jsCs.dumps(cur, indent=2, ensure_ascii=False)
+
+    _fichesCs = []                   # les comptes dont la fiche est serialisee
+
+    def _compteCs(handle, entry):
+        _fichesCs.append(handle)
+        return _origCs[2](handle, entry)
+
+    _wCs._stats_fiche_octets = _compteCs
+    try:
+        # -- 1. Fichier identique, compte apres compte ------------------------
+        _attCs, _ecartsCs, _coutsCs = None, [], []
+        _nomsCs = ["compte%03d" % i for i in range(60)] + ["été.du_sud", "a\"b", "漢字", "x\ny"]
+        for _iCs in range(260):
+            _hCs = _rCs.choice(_nomsCs)            # nouveau compte ou compte deja vu
+            _eCs = _ficheCs() if _iCs % 9 else _valeurCs()
+            _attCs = _ancienCs(_attCs, _hCs, _eCs)
+            del _fichesCs[:]
+            _wCs._cache_put_stats(_hCs, _eCs)
+            _coutsCs.append(set(_fichesCs) == {_hCs})
+            if _fCs.read_bytes() != _attCs.encode("utf-8"):
+                _ecartsCs.append((_iCs, _hCs))
+        check("cache stats : fichier identique a l'octet pres apres chacune de 260 ecritures",
+              not _ecartsCs, "premiers ecarts : %s" % _ecartsCs[:3])
+        check("cache stats : ce que le chargeur relit est ce que l'ancienne ecriture donnait",
+              _wCs._load_insta_3_stats_cache() == _jsCs.loads(_attCs))
+        # Seule la fiche du compte ecrit est serialisee, plus jamais les 64.
+        check("cache stats : seule la fiche du compte est re-serialisee, pas tout le cache",
+              all(_coutsCs), "%d ecriture(s) sur %d ont serialise d'autres fiches"
+              % (_coutsCs.count(False), len(_coutsCs)))
+
+        # Deux cles qui se confondent une fois ecrites (1 et "1") : l'ancienne
+        # ecriture les gardait toutes les deux au compte lui-meme, puis une
+        # seule des le compte suivant (fichier relu). Meme chose ici.
+        _eCs = {1: "a", "1": "b", True: 1, "true": 2, "reels": (1, 2)}
+        _attCs = _ancienCs(_attCs, "compte001", _eCs)
+        _wCs._cache_put_stats("compte001", _eCs)
+        _memeCs = _fCs.read_bytes() == _attCs.encode("utf-8")
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_attCs, "compte002", _eCs)
+        _wCs._cache_put_stats("compte002", _eCs)
+        check("cache stats : cles confondues a l'ecriture -> identique au compte meme ET au suivant",
+              _memeCs and _fCs.read_bytes() == _attCs.encode("utf-8"), "au compte meme : %s" % _memeCs)
+
+        # -- 2. Un autre ecrivain est passe : on repart du fichier ------------
+        # La route des sondes ecrit le cache entier sans passer par ici. Les
+        # fiches gardees ne valent alors plus rien : s'en servir effacerait
+        # ce qu'elle vient d'ecrire.
+        _autreCs = {"sonde1": {"banned": True, "vu": "par la route"}, "compte001": {"followers": 7}}
+        _wCs._save_insta_3_stats_cache(_autreCs)
+        _attCs = _jsCs.dumps(_autreCs, indent=2, ensure_ascii=False)
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_attCs, "compte002", _eCs)
+        del _fichesCs[:]
+        _wCs._cache_put_stats("compte002", _eCs)
+        check("cache stats : apres un autre ecrivain, on repart de SON fichier",
+              _fCs.read_bytes() == _attCs.encode("utf-8") and "sonde1" in _fichesCs,
+              "fiches serialisees : %s, cles du fichier : %s"
+              % (sorted(set(_fichesCs)), sorted(_jsCs.loads(_fCs.read_text(encoding="utf-8")))[:5]))
+
+        # Un fichier reecrit de l'exterieur (copie de data/) : MEME taille,
+        # meme inode, seule sa date change.
+        import os as _osCs
+        _tailleCs, _stCs = _fCs.stat().st_size, _fCs.stat()
+        _brutCs = _fCs.read_text(encoding="utf-8").replace('"par la route"', '"par la copie"')
+        _fCs.write_text(_brutCs, encoding="utf-8")
+        _osCs.utime(_fCs, ns=(_stCs.st_atime_ns, _stCs.st_mtime_ns + 2_000_000_000))
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_brutCs, "compte003", _eCs)
+        _wCs._cache_put_stats("compte003", _eCs)
+        check("cache stats : un fichier reecrit de l'exterieur est relu, meme a taille egale",
+              len(_brutCs.encode("utf-8")) == _tailleCs
+              and _fCs.read_bytes() == _attCs.encode("utf-8"),
+              str(_jsCs.loads(_fCs.read_text(encoding="utf-8")).get("sonde1")))
+
+        # Un autre ecrivain passe JUSTE APRES notre ecriture, avant meme que
+        # nous ayons regarde le fichier : le sien ne doit pas passer pour le
+        # notre, sinon l'ecriture suivante efface ce qu'il vient de poser.
+        _vraiReplCs = _osCs.replace
+        _passeCs = {"compte": "", "fait": False}
+
+        def _replCs(src, dst, *a, **k):
+            _vraiReplCs(src, dst, *a, **k)
+            if not _passeCs["fait"] and str(dst) == str(_fCs):
+                _passeCs["fait"] = True
+                cur = _jsCs.loads(_fCs.read_text(encoding="utf-8"))
+                cur["sonde2"] = {"vu": "juste apres"}
+                _passeCs["texte"] = _jsCs.dumps(cur, indent=2, ensure_ascii=False)
+                (_dCs / "autre.tmp").write_text(_passeCs["texte"], encoding="utf-8")
+                _vraiReplCs(_dCs / "autre.tmp", _fCs)
+
+        _osCs.replace = _replCs
+        try:
+            _wCs._cache_put_stats("compte009", _ficheCs())
+        finally:
+            _osCs.replace = _vraiReplCs
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_passeCs.get("texte"), "compte010", _eCs)
+        _wCs._cache_put_stats("compte010", _eCs)
+        check("cache stats : un ecrivain passe juste apres nous n'est pas efface au compte suivant",
+              _passeCs["fait"] and _fCs.read_bytes() == _attCs.encode("utf-8"),
+              "sonde2 : %s" % _jsCs.loads(_fCs.read_text(encoding="utf-8")).get("sonde2"))
+
+        _fCs.unlink()
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(None, "compte004", _eCs)
+        _wCs._cache_put_stats("compte004", _eCs)
+        check("cache stats : fichier disparu -> on repart de zero, comme avant",
+              _fCs.read_bytes() == _attCs.encode("utf-8"))
+
+        # -- 3. Une fiche impossible a ecrire ne casse rien --------------------
+        _avantCs = _fCs.read_bytes()
+        try:
+            _wCs._cache_put_stats("compte005", {"reels": {1, 2, 3}})
+            _leveCs = None
+        except Exception as _xCs:
+            _leveCs = type(_xCs).__name__
+        _intactCs = _fCs.read_bytes() == _avantCs
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_attCs, "compte006", _eCs)
+        _wCs._cache_put_stats("compte006", _eCs)
+        check("cache stats : une fiche non serialisable leve, fichier intact, la suite repart juste",
+              _leveCs == "TypeError" and _intactCs
+              and _fCs.read_bytes() == _attCs.encode("utf-8"), "%s, intact : %s" % (_leveCs, _intactCs))
+
+        # L'ecriture echoue (disque plein) : les fiches gardees ne doivent pas
+        # passer pour le contenu du fichier.
+        _sjCs.write_text = lambda *a, **k: False
+        try:
+            _wCs._cache_put_stats("perdu", {"followers": 1})
+            _leveCs = None
+        except Exception as _xCs:
+            _leveCs = type(_xCs).__name__
+        finally:
+            _sjCs.write_text = _origCs[4]
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_attCs, "compte007", _eCs)
+        _wCs._cache_put_stats("compte007", _eCs)
+        check("cache stats : apres une ecriture ratee, la fiche perdue ne ressort pas",
+              _fCs.read_bytes() == _attCs.encode("utf-8")
+              and "perdu" not in _wCs._load_insta_3_stats_cache(), str(_leveCs))
+
+        # -- 4. Les doublures des autres tests gardent le chemin d'origine ----
+        _doubleCs = {"deja": {"followers": 3}}
+        _wCs._load_insta_3_stats_cache = lambda: _doubleCs
+        try:
+            _wCs._cache_put_stats("neuf", {"followers": 4})
+        finally:
+            _wCs._load_insta_3_stats_cache = _origCs[3]
+        check("cache stats : chargeur remplace par une doublure -> elle est lue et completee",
+              _doubleCs.get("neuf") == {"followers": 4}
+              and _wCs._load_insta_3_stats_cache() == _doubleCs, str(sorted(_doubleCs)))
+        _attCs = _jsCs.dumps(_doubleCs, indent=2, ensure_ascii=False)
+        _eCs = _ficheCs()
+        _attCs = _ancienCs(_attCs, "compte008", _eCs)
+        _wCs._cache_put_stats("compte008", _eCs)
+        check("cache stats : doublure retiree -> on repart du fichier qu'elle a laisse",
+              _fCs.read_bytes() == _attCs.encode("utf-8"))
+
+        # -- 5. Quatre fils, comme le pool du releve ---------------------------
+        _lotCs = {"fil%d_%02d" % (f, i): _ficheCs() for f in range(4) for i in range(40)}
+        _errCs = []
+
+        def _filCs(f):
+            try:
+                for i in range(40):
+                    k = "fil%d_%02d" % (f, i)
+                    _wCs._cache_put_stats(k, _lotCs[k])
+            except Exception as x:                        # noqa: BLE001
+                _errCs.append(repr(x))
+
+        _filsCs = [_thCs.Thread(target=_filCs, args=(f,)) for f in range(4)]
+        [t.start() for t in _filsCs]
+        [t.join() for t in _filsCs]
+        _luCs = _wCs._load_insta_3_stats_cache()
+        check("cache stats : 4 fils x 40 comptes, aucune fiche perdue",
+              not _errCs and all(_luCs.get(k) == _jsCs.loads(_jsCs.dumps(v)) for k, v in _lotCs.items())
+              and _luCs.get("compte008") == _jsCs.loads(_jsCs.dumps(_eCs)),
+              "%s ; %d fiche(s) manquante(s)" % (_errCs[:1], sum(k not in _luCs for k in _lotCs)))
+        check("cache stats : et le fichier reste celui que json.dumps(indent=2) ecrirait",
+              _fCs.read_bytes() == _jsCs.dumps(_luCs, indent=2, ensure_ascii=False).encode("utf-8"))
+
+        # -- 6. safe_json ecrit des octets comme il ecrit du texte ------------
+        # Le cache passe par safe_json.write_text avec des octets deja
+        # encodes : meme verrou, meme ecriture atomique, memes garde-fous.
+        _octCs = _dCs / "octets.json"
+        _brutCs = '{\n  "é💥": "x\\ny"\n}'.encode("utf-8")
+        check("safe_json : des octets sont ecrits tels quels, sans fichier temporaire oublie",
+              _sjCs.write_text(_octCs, _brutCs) is True and _octCs.read_bytes() == _brutCs
+              and not _octCs.with_suffix(".json.tmp").exists()
+              and _sjCs.load(_octCs) == {"é💥": "x\ny"})
+        _capCs = _dCs / "captions.json"
+        _libCs = {i: {"items": [{"text": "une caption"}]} for i in ("ida", "idb", "idc")}
+        _sjCs.write(_capCs, _libCs)
+        check("safe_json : la garde des captions vaut aussi pour des octets",
+              _sjCs.write_text(_capCs, b"{}") is False and _sjCs.load(_capCs) == _libCs)
+    finally:
+        (_wCs.VA_INSTA_3_STATS_FILE, _wCs.DATA_DIR, _wCs._stats_fiche_octets,
+         _wCs._load_insta_3_stats_cache, _sjCs.write_text) = _origCs
+        _wCs._STATS_FICHES.update(sig=None, fiches=None)
+        _shCs.rmtree(_dCs, ignore_errors=True)
+except Exception as _eCs0:
+    import traceback as _tbCs
+    check("cache stats : testable", False, (repr(_eCs0) + _tbCs.format_exc()[-500:])[:700])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
