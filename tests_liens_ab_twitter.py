@@ -60,6 +60,10 @@ import liens_va as lv                  # noqa: E402
 lv.GABARIT_PAGE_TWITTER = ""
 import podium_discord as pod           # noqa: E402
 import tickets_discord as tk           # noqa: E402
+# Le renvoi des autres pays vers le compte de base, tel qu'il reviendrait :
+# coupé par défaut le 11/11/2026 (liens_va.FILTRE_PAYS) ; le défaut est
+# vérifié par tests_sans_filtres_trust.py.
+lv.FILTRE_PAYS = True
 
 OKS, FAILS = [], []
 

@@ -12,7 +12,8 @@ liaseeo. Essai d'abord sur le propriétaire seul (PILOTE), dans son ticket.
 Le lien direct ne change pas : la page est un SECOND lien GetMySocial, copie
 du gabarit de page de l'équipe (GABARIT_PAGE), son bouton OnlyFans sur le
 tracking du VA (liens_va._poser_tracking), ses pays sur le bouton
-(liens_va.poser_pays), la safe page posée, sans A/B. Rangée dans
+(liens_va.poser_pays, coupé le 11/11/2026), sans safe page depuis le
+11/11/2026 (SAFE_PAGE), sans A/B. Rangée dans
 le groupe de son manager. Le registre vit à part (data/pages_va.json) : la
 fiche de liens_va ne porte qu'un lien, et tout ce qui la relit (pays, bases,
 podium, menus) continue de ne voir que le direct.
@@ -126,6 +127,15 @@ GABARITS_PLACE: Dict[str, Dict[int, str]] = {}
 #: Depuis le 10/11/2026, liens_va.lia_seule est None partout (« remove le truc
 #: erreur des 30 % ») : ab_voulu est faux, aucune page ne reçoit de 70/30.
 AB_PAGES = {AGENCY_IG_ID}
+#: La « safe page » GetMySocial (bot_protection safe_page : robots, VPN et
+#: centres de données voient la page sans le bouton OnlyFans) posée sur chaque
+#: page créée. Retirée le 11/11/2026 — propriétaire : « bloque plus les clics ni
+#: rien de bizarre [...] mets le truc de base en général » : d'après la doc de
+#: GetMySocial, un vrai visiteur derrière un VPN voit aussi la page sans
+#: bouton. Les pages naissent donc
+#: avec le réglage de base (off, celui du gabarit), et une étape « safe page »
+#: restée en attente dans le registre n'est plus refaite. True pour la remettre.
+SAFE_PAGE = False
 
 FICHIER = Path(__file__).resolve().parent / "data" / "pages_va.json"
 MAX_NOM, MAX_BIO, MAX_BOUTON = 40, 160, 40
@@ -1025,7 +1035,10 @@ def _finir_page(gid: str, uid: str, f: Dict[str, Any], lid: str, sc: str, nom: s
         _log(f"page {sc} de {cle} : tracking non posé ({pose.get('erreur')}), coupée")
         return {"ok": False, "erreur": f"bouton non posé ({pose.get('erreur')}) : page coupée"}
     pays = lv.poser_pays(lid, equipe)
-    sur = gms.update_link(lid, {"display_name": nom, "bot_protection": {"mode": "safe_page"}}, equipe)
+    # le nom de la page est posé ici dans tous les cas ; la safe page seulement
+    # si SAFE_PAGE (retirée le 11/11/2026)
+    sur = gms.update_link(lid, {"display_name": nom, **({"bot_protection": {"mode": "safe_page"}}
+                                                       if SAFE_PAGE else {})}, equipe)
     # Le 70/30 APRÈS le bouton : _poser_base_seule relit la destination de la
     # page (sa model) et refuse tant qu'elle ne mène pas au tracking du VA.
     # Twitter : « ça doit pas être 70 30 » — aucun A/B (ab_voulu faux).
@@ -1118,7 +1131,7 @@ def _lien_ab(lid: str, tracking: str, sc: Any) -> Dict[str, Any]:
     sans la safe page sur cette copie, les robots qui tombent dans les 30 %
     verraient l'adresse OnlyFans que la page, elle, cache. Non vérifié chez
     GetMySocial (pas d'essai possible sans réseau) : posée par prudence."""
-    return {"link_id": lid, "tracking": tracking, "shortcode": sc, "safe_page": True}
+    return {"link_id": lid, "tracking": tracking, "shortcode": sc, "safe_page": SAFE_PAGE}
 
 
 def _note_ab(ab: Dict[str, Any]) -> Dict[str, Any]:
@@ -1583,6 +1596,8 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                     elif etape == "pays":
                         rp = lv.poser_pays(lid, equipe)
                         ok, err = bool(rp.get("ok")), str(rp.get("erreur") or "")
+                    elif etape == "safe page" and not SAFE_PAGE:
+                        ok = True                    # retirée le 11/11/2026 : plus rien à poser
                     elif etape == "safe page":
                         ru = gms.update_link(lid, {"display_name": str(pg.get("nom") or ""),
                                                    "bot_protection": {"mode": "safe_page"}}, equipe)

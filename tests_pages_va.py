@@ -37,6 +37,13 @@ import gms                     # noqa: E402
 import liens_va as lv          # noqa: E402
 import pages_va as pv          # noqa: E402
 import podium_discord as pod   # noqa: E402
+# Le renvoi des autres pays vers le compte de base, tel qu'il reviendrait :
+# coupé par défaut le 11/11/2026 (liens_va.FILTRE_PAYS) ; le défaut est
+# vérifié par tests_sans_filtres_trust.py.
+lv.FILTRE_PAYS = True
+# la safe page des pages, telle qu'elle reviendrait (pages_va.SAFE_PAGE,
+# retirée le 11/11/2026 ; défaut vérifié par tests_sans_filtres_trust.py)
+pv.SAFE_PAGE = True
 import tickets_discord as tk   # noqa: E402
 
 OK, KO = [], []
@@ -1263,6 +1270,7 @@ try:
     fichier_reg = pv.FICHIER
     importlib.reload(pv)
     pv.FICHIER = fichier_reg
+    pv.SAFE_PAGE = True                      # le rechargement l'éteint (défaut du 11/11/2026)
     pv._FIL = lambda f: f()
     pv._cookie_ok = lambda: COOKIE["ok"]
     places_fixes_ig()                        # le rechargement remet ceux de la prod
@@ -2763,6 +2771,33 @@ try:
         check("ailleurs : rien", pod._partis("1488331963575177247") == {})
     finally:
         pod._partis_sans_pilotes = _vrais_partis
+
+    # ── 9. réglages de base (11/11/2026) ────────────────────────────────
+    # « bloque plus les clics ni rien de bizarre [...] mets le truc de base » :
+    # SAFE_PAGE éteinte — ni posée à la création, ni refaite par la reprise
+    print("9. Plus de safe page (11/11/2026)")
+    pv.SAFE_PAGE = False
+    U9 = "4900"
+    FICHES[f"{TW}:{U9}"] = dict(FICHE, link_id="lnk_direct49", tracking="https://onlyfans.com/liasxcret/c490",
+                                numero=149, pseudo="va149")
+    APPELS.clear()
+    r9 = pv.creer_page(TW, U9, par=MOI)
+    lid9 = pv.page_de(TW, U9).get("link_id")
+    maj9 = [a for a in APPELS if a[0] == "update" and a[1] == lid9]
+    check("création : le nom de la page posé, SANS safe page, rien « à reprendre »",
+          r9.get("ok") and lid9 and any(a[2].get("display_name") for a in maj9)
+          and not any("bot_protection" in a[2] for a in maj9)
+          and "safe page" not in (pv.page_de(TW, U9).get("manques") or []), (r9, maj9))
+    d9 = pv._lire()
+    d9["pages"][f"{TW}:{U9}"].update(manques=["safe page"], essais={})
+    pv._ecrire(d9)
+    APPELS.clear()
+    pv.reprendre_pages(TW)
+    check("reprise : une étape « safe page » restée en attente tombe, sans rien écrire",
+          pv.page_de(TW, U9).get("manques") == []
+          and not any(a[0] == "update" and "bot_protection" in a[2] for a in APPELS), APPELS[:6])
+    FICHES.pop(f"{TW}:{U9}")
+    pv.SAFE_PAGE = True
 finally:
     (gms.duplicate_link, gms.update_link, gms.get_link, gms.disable_link, gms.enable_link,
      gms.delete_link, gms.get_api_key, requests.post, lv.lien_de, lv.espace, lv._poser_tracking,

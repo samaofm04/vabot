@@ -40,6 +40,10 @@ def check(label, cond, detail=""):
 
 import liens_va as lv     # noqa: E402
 import gms                # noqa: E402
+# Le renvoi des autres pays vers le compte de base, tel qu'il reviendrait :
+# coupé par défaut le 11/11/2026 (liens_va.FILTRE_PAYS) ; le défaut est
+# vérifié par tests_sans_filtres_trust.py.
+lv.FILTRE_PAYS = True
 
 DIRECT = "lnk_ancien_direct"
 lv.config = lambda: {"gabarit": DIRECT, "equipe": "tm_twitter", "modele": "Lia"}

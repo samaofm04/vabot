@@ -584,6 +584,18 @@ def _poser_tracking(lid: str, tracking: str, nom: str, equipe: str) -> Dict[str,
 # tracking, comme le mec US », sur les trois TRUST — prévenu qu'un abonnement
 # pris depuis là par le VA ou ses proches comptera dans sa paie.
 PAYS_CIBLES = ("US", "CA", "AU", "GB", "NZ", "IE", "BJ", "MG")
+# Propriétaire, 11/11/2026 : « maintenant bloque plus les clics ni rien de
+# bizarre du coup pour Twitter, Threads et IG ». Le compte OnlyFans de Lia
+# bloque lui-même 210 pays sur 227 depuis ce jour-là (via MyPuls) : renvoyer
+# les autres pays vers le compte de base ne sert plus, et sur Threads la
+# France, l'Allemagne, la Suisse… qu'OnlyFans laisse passer partaient encore
+# sans tracking (perdus pour le VA). La règle est
+# donc COUPÉE par défaut : plus aucune liste posée, ni à la création, ni par
+# la reprise, ni au rallumage. Les listes déjà posées ont été retirées à la
+# main le 11/11 (109 liens des trois TRUST, relus). Pour la remettre : clé
+# « pays » {"cibles": [...]} de la config — et effacer d'abord « pays_cibles »
+# des fiches et des pages, sinon _marquer_liste_pays les croit déjà posées.
+FILTRE_PAYS = False
 # les territoires du CLDR (babel), relevés le 29/10/2026 : la même liste que
 # celle posée à la main sur les liens existants ce jour-là
 TOUS_LES_PAYS = (
@@ -611,12 +623,13 @@ def base_de(url: Any) -> str:
 
 def cibles_pays() -> Optional[set]:
     """Les pays qui gardent le tracking ; None quand la règle est coupée
-    (clé « pays » : {}). Une clé mal écrite lève ValueError plutôt que de
-    deviner : {"cibles": "US"} lu lettre par lettre, ou « UK » au lieu de
-    « GB », enverrait des pays cibles sur le compte de base sans un mot."""
+    (clé « pays » : {}, ou absente tant que FILTRE_PAYS est faux). Une clé
+    mal écrite lève ValueError plutôt que de deviner : {"cibles": "US"} lu
+    lettre par lettre, ou « UK » au lieu de « GB », enverrait des pays cibles
+    sur le compte de base sans un mot."""
     c = config()
     if "pays" not in c:
-        return set(PAYS_CIBLES)
+        return set(PAYS_CIBLES) if FILTRE_PAYS else None
     p = c["pays"]
     if isinstance(p, dict) and not p:
         return None
@@ -1207,6 +1220,10 @@ def reprendre_pays(gid: str) -> Dict[str, Any]:
     import time as _t
     gid = str(gid)
     bilan: Dict[str, Any] = {"poses": [], "rates": []}
+    if cibles_pays() is None:
+        # règle coupée (11/11/2026) : rien à poser, et un « pays » : false
+        # reste vrai — il serait repris si la règle revenait
+        return bilan
     fiches = {c: f for c, f in (_etat().get("liens") or {}).items()
               if c.startswith(f"{gid}:") and isinstance(f, dict) and f.get("link_id")
               and f.get("actif") is not False}
@@ -3111,6 +3128,10 @@ def _rendre_essais_passagers(gid: str) -> List[str]:
 
 
 def reprendre_pays(gid: str) -> Dict[str, Any]:   # noqa: F811
+    if _cibles_pays_sans_serveur() is None:
+        # règle coupée (11/11/2026) : rien à poser, et pas d'alerte « encore sur
+        # l'ancienne liste » chaque demi-heure pour un lien qu'on ne reposera pas
+        return {"poses": [], "rates": []}
     # aussi un serveur retiré de PAYS_EN_PLUS : ses liens à l'Europe reviennent
     # à la liste de base (Threads, jamais marqué : avant == voulu, rien ne bouge)
     try:

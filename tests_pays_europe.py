@@ -27,6 +27,13 @@ except Exception:
 import gms                     # noqa: E402
 import liens_va as lv          # noqa: E402
 import pages_va as pv          # noqa: E402
+# Le renvoi des autres pays vers le compte de base, tel qu'il reviendrait :
+# coupé par défaut le 11/11/2026 (liens_va.FILTRE_PAYS) ; le défaut est
+# vérifié par tests_sans_filtres_trust.py.
+lv.FILTRE_PAYS = True
+# la safe page des pages, telle qu'elle reviendrait (pages_va.SAFE_PAGE,
+# retirée le 11/11/2026 ; défaut vérifié par tests_sans_filtres_trust.py)
+pv.SAFE_PAGE = True
 
 OK, KO = [], []
 
