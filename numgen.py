@@ -607,6 +607,11 @@ def souci_redemander(msg, attend) -> str:
 # staff est désormais prévenu UNE fois par panne, dans le 📊・debrief-day du
 # serveur Spam -- là où part déjà le récap des numéros (choix du propriétaire,
 # 21/10/2026). Recharger ou remplir reste à lui.
+# Une fois, c'était trop peu : le 11/11/2026, HeroSMS était à sec et le coffre
+# Outlook vide depuis plus de huit jours, 55 VA refusés, et l'unique message
+# du premier jour était loin dans le salon. Une panne qui DURE est donc redite,
+# une fois par jour au plus (propriétaire, 11/11/2026), au refus suivant : le
+# rappel dit depuis quand, et combien de VA ont été refusés entre-temps.
 
 ALERTES_FICHIER = pathlib.Path(__file__).resolve().parent / "data" / "numgen_alertes.json"
 #: Serveur Spam > 📊・debrief-day, posté par le bot admin (le même que le récap).
@@ -614,6 +619,8 @@ ALERTES_FICHIER = pathlib.Path(__file__).resolve().parent / "data" / "numgen_ale
 #: commun, l'alerte au staff part une fois, d'un seul endroit.
 ALERTES_SALON = "1553627411680338153"
 _VERROU_ALERTES = threading.Lock()
+#: Une panne déjà dite est redite au plus une fois par ce délai.
+RAPPEL_ALERTE_S = 24 * 3600
 
 #: Les mots d'un solde vide : SMSBower (mail, en JSON) écrit « Insufficient
 #: balance », le protocole stubs NO_BALANCE, que _human traduit.
@@ -658,17 +665,67 @@ def _en_production() -> bool:
     return os.environ.get("VA_MACHINE_PROD") == "1"
 
 
-def alerter_staff(cle: str, texte: str) -> str:
-    """Prévient le staff UNE fois par panne (`cle` : « credit:mail »,
-    « outlook:vide »…), retenu dans data/numgen_alertes.json : un redémarrage
-    ne le redit pas. Rend « envoye », « deja », ou la raison de l'échec -- rien
-    n'est alors retenu, le refus suivant réessaie.
+def _texte_rappel(texte: str, depuis: int, refus) -> str:
+    """Le rappel d'une panne qui dure : depuis quand (date de Paris), combien
+    de refus depuis le dernier message, puis le texte de la panne. `refus`
+    None : la panne a été dite avant qu'on compte les refus."""
+    tete = "⏰ **Rappel — toujours en panne**"
+    if depuis:
+        try:
+            import datetime as _dt
+            from zoneinfo import ZoneInfo
+            quand = _dt.datetime.fromtimestamp(depuis, ZoneInfo("Europe/Paris")).strftime("%d/%m")
+        except Exception:                                    # noqa: BLE001
+            quand = time.strftime("%d/%m", time.localtime(depuis))
+        jours = max(1, int((time.time() - depuis) // 86400))
+        tete += f" depuis le {quand} ({jours} jour{'s' if jours > 1 else ''})"
+    tete += (" : des VA sont encore refusés." if refus is None
+             else f" : {refus} refus depuis le dernier message.")
+    return (tete + "\n" + texte)[:1900]
 
-    Hors de la machine de production (VA_MACHINE_PROD absent), rien ne part :
-    les suites de tests passent par ici avec le vrai data/."""
+
+def alerter_staff(cle: str, texte: str) -> str:
+    """Prévient le staff d'une panne (`cle` : « credit:mail », « outlook:vide »…)
+    au premier refus, puis la REDIT une fois par jour au plus tant qu'elle
+    dure (RAPPEL_ALERTE_S), au refus suivant. Retenu dans
+    data/numgen_alertes.json : un redémarrage ne le redit pas. Rend « envoye »
+    (premier message ou rappel parti), « deja » (dit il y a moins d'un jour),
+    ou la raison de l'échec du PREMIER message -- rien n'est alors retenu, le
+    refus suivant réessaie. Un rappel qui ne part pas rend « deja » : le staff
+    a bien été prévenu, et le rappel repart au refus suivant.
+
+    Hors de la machine de production (VA_MACHINE_PROD absent), rien ne part
+    et rien n'est écrit : les suites de tests passent par ici avec le vrai
+    data/."""
     with _VERROU_ALERTES:
-        if cle in _alertes():
-            return "deja"
+        d = _alertes()
+        if cle in d:
+            if not _en_production():
+                return "deja"
+            f = d[cle] if isinstance(d[cle], dict) else {}
+            depuis = int(f.get("le") or 0)
+            # une fiche d'avant le 11/11/2026 n'a pas de compteur : ses refus
+            # passés ne sont pas connus, le premier rappel ne donne pas de nombre
+            compte = "refus" in f
+            refus = int(f.get("refus") or 0) + 1
+            f["refus"] = refus
+            d[cle] = f
+            if time.time() - int(f.get("rappel") or depuis) < RAPPEL_ALERTE_S:
+                safe_json.write(ALERTES_FICHIER, d)          # compté, dit au prochain rappel
+                return "deja"
+            ok, pourquoi = _poster_alerte(_texte_rappel(texte, depuis, refus if compte else None))
+            if not ok:
+                safe_json.write(ALERTES_FICHIER, d)
+                print(f"[numgen] rappel de l'alerte « {cle} » NON envoyé : {pourquoi}", flush=True)
+                return "deja"
+            f.update(rappel=int(time.time()), rappels=int(f.get("rappels") or 0) + 1, refus=0,
+                     texte=texte[:300])
+            if not f.get("le"):
+                f["le"] = f["rappel"]
+            safe_json.write(ALERTES_FICHIER, d)
+            print(f"[numgen] alerte staff « {cle} » redite ({refus} refus depuis le dernier message)",
+                  flush=True)
+            return "envoye"
         if not _en_production():
             return "hors production"
         ok, pourquoi = _poster_alerte(texte)
