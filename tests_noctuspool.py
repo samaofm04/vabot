@@ -161,6 +161,162 @@ def main():
               choisir(None, idents, ecartees=toutes) is None,
               "la boucle tournerait a vide jusqu au matin")
 
+        # ---- le tour ne retient pas la boucle du bot ----------------------
+        # Du 04 au 11/11/2026, chaque matin de 04:00 a 04:15 UTC : le choix de
+        # la case (toute la reserve relue, ~5 500 petites lectures) tournait
+        # SUR la boucle du bot. Pendant le releve Instagram il durait 10 a
+        # 30 s : « heartbeat blocked », et les clics des VA en « Unknown
+        # interaction ». On rejoue un tour avec un balayage et une recette
+        # LENTS : la boucle doit continuer de battre, et le tour doit decider
+        # exactement ce qu il decidait.
+        import asyncio
+        import threading
+        import time
+        import types
+
+        nr.RACINE = Path(tmp) / "reserve3"
+        LENT = 0.3
+        journal = []                     # (quoi, fil, detail), dans l ordre
+        sans_recette = ("emma", "caption")
+
+        pool = object.__new__(np.NoctusPool)     # ni bot, ni tache lancee
+        pool._occupe = False
+
+        def balayage_lent(identites, ecartees=()):
+            journal.append(("balayage", threading.get_ident(), set(ecartees)))
+            time.sleep(LENT)
+            return choisir(None, identites, ecartees)
+
+        def recette_lente(identite, famille):
+            journal.append(("recette", threading.get_ident(), (identite, famille)))
+            time.sleep(LENT)
+            if (identite, famille) == sans_recette:
+                return None                      # vivier vide
+            return ({"video": "x"}, "emp-" + identite + "-" + famille)
+
+        async def moteur_en_panne(identite, famille, prep):
+            journal.append(("fabrique", threading.get_ident(),
+                            ((identite, famille), prep)))
+            return False
+
+        pool._case_la_plus_vide = balayage_lent
+        pool._preparer = recette_lente
+        pool._fabriquer_une = moteur_en_panne
+        pool._sans_reserves = lambda identites: list(identites)
+
+        attend = {"oui": False}
+
+        def quelqu_un_attend():
+            journal.append(("attend", threading.get_ident(), attend["oui"]))
+            return attend["oui"]
+
+        # Le tour lit trois modules du site : des doublures, pour que ce test
+        # ne depende ni de web_upload ni du data/ du poste.
+        doublures = {
+            "web_upload": types.SimpleNamespace(
+                _list_content_identities=lambda: list(idents)),
+            "identite_pause": types.SimpleNamespace(
+                sans_pauses=lambda identites: list(identites)),
+        }
+        avant = {nom: sys.modules.get(nom) for nom in doublures}
+        vrais = (np._quelqu_un_attend, np.REPOS_S, _nw.setup_ok)
+        sys.modules.update(doublures)
+        np._quelqu_un_attend = quelqu_un_attend
+        np.REPOS_S = 0
+        _nw.setup_ok = lambda: True
+
+        async def un_tour():
+            """Joue remplir() ; rend le pire retard de la boucle et son fil."""
+            pire, fini = [0.0], [False]
+
+            async def battement():
+                while not fini[0]:
+                    t = time.monotonic()
+                    await asyncio.sleep(0.01)
+                    pire[0] = max(pire[0], time.monotonic() - t - 0.01)
+
+            b = asyncio.ensure_future(battement())
+            await asyncio.sleep(0.05)
+            await np.NoctusPool.remplir.coro(pool)
+            fini[0] = True
+            await b
+            return pire[0], threading.get_ident()
+
+        try:
+            pire, boucle = asyncio.run(un_tour())
+            balayages = [j for j in journal if j[0] == "balayage"]
+            recettes = [j for j in journal if j[0] == "recette"]
+            fabriques = [j for j in journal if j[0] == "fabrique"]
+            check("tour : le choix de la case ne tourne plus sur la boucle du bot",
+                  balayages and all(j[1] != boucle for j in balayages),
+                  "c est lui qui arretait le bot 10 a 30 s chaque matin")
+            check("tour : la recette non plus",
+                  recettes and all(j[1] != boucle for j in recettes))
+            check("tour : la boucle bat pendant un balayage lent",
+                  pire < LENT / 2,
+                  "boucle arretee %.2f s pour un balayage de %.2f s" % (pire, LENT))
+            # Ce que le tour DECIDE n a pas change : la case la plus vide,
+            # ecartee si rien n en sort, jusqu a ce qu il n en reste aucune.
+            check("tour : chaque balayage voit les cases deja ecartees",
+                  [len(j[2]) for j in balayages] == [0, 1, 2, 3, 4]
+                  and balayages[-1][2] == toutes, [j[2] for j in balayages])
+            check("tour : une case par balayage, jamais deux fois la meme",
+                  len(recettes) == 4 and {j[2] for j in recettes} == toutes,
+                  [j[2] for j in recettes])
+            check("tour : une case sans recette est ecartee sans lancer le moteur",
+                  sans_recette not in [j[2][0] for j in fabriques]
+                  and len(fabriques) == 3, [j[2][0] for j in fabriques])
+            check("tour : le moteur recoit la recette deja preparee",
+                  all(j[2][1] == ({"video": "x"}, "emp-%s-%s" % j[2][0])
+                      for j in fabriques), fabriques[:1])
+            # La politesse : rien ne s intercale entre « un VA attend-il ? »
+            # et le lancement du moteur, sinon un VA pourrait cliquer dans
+            # l intervalle et se retrouver a partager ffmpeg.
+            ordre = [j[0] for j in journal]
+            check("tour : le regard « un VA attend ? » precede IMMEDIATEMENT le moteur",
+                  all(ordre[i - 1] == "attend"
+                      for i, q in enumerate(ordre) if q == "fabrique"), ordre)
+            check("tour : la tache se libere a la fin", pool._occupe is False)
+
+            # Un VA attend : on rend la main au premier regard, sans moteur.
+            del journal[:]
+            attend["oui"] = True
+            asyncio.run(un_tour())
+            check("tour : un VA attend -> un seul balayage, aucun moteur",
+                  [j[0] for j in journal] == ["balayage", "recette", "attend"],
+                  [j[0] for j in journal])
+            check("tour : ... et la tache se libere quand meme",
+                  pool._occupe is False)
+        finally:
+            np._quelqu_un_attend, np.REPOS_S, _nw.setup_ok = vrais
+            for nom, module in avant.items():
+                if module is None:
+                    sys.modules.pop(nom, None)
+                else:
+                    sys.modules[nom] = module
+
+        # ---- la preparation : recette, empreinte, et « en manque-t-on ? » --
+        nr.RACINE = Path(tmp) / "reserve4"
+        source = atelier / "source.mp4"
+        source.write_bytes(b"s")
+        recette = {"video": source, "draft": {"cut_at": 1.5}, "imposees": (),
+                   "brute_imposee": None, "desc": "", "caption": None}
+        faux = types.SimpleNamespace(_recette=lambda i, f: None)
+        check("preparation : vivier vide -> rien a fabriquer",
+              np.NoctusPool._preparer(faux, "emma", "caption") is None)
+        faux._recette = lambda i, f: recette
+        attendue = nr.empreinte("emma", "caption", source, brutes=(),
+                                caption=None, draft=recette["draft"])
+        check("preparation : la recette et SON empreinte",
+              np.NoctusPool._preparer(faux, "emma", "caption") == (recette, attendue))
+        for i in range(nr.PROFONDEUR):
+            f = atelier / ("pourvue_%d.mp4" % i)
+            f.write_bytes(b"v")
+            nr.deposer("emma", "caption", f, attendue, recette={"repli": False})
+        check("preparation : recette deja pourvue -> rien a fabriquer",
+              np.NoctusPool._preparer(faux, "emma", "caption") is None,
+              "on refabriquerait sans fin la meme variante")
+
     print()
     if ECHECS:
         print("%d ECHEC(S) : %s" % (len(ECHECS), ", ".join(ECHECS)))

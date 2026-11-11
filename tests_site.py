@@ -12140,6 +12140,33 @@ try:
               <= set(_nrRl._FAMILLES_A_MONTER),
           str(_nrRl._FAMILLES_A_MONTER))
 
+    # -- 1 bis. Le tour de remplissage ne relit plus la reserve SUR la boucle --
+    # Du 04 au 11/11/2026, de 04:00 a 04:15 UTC chaque matin : le choix de la
+    # case (toute la reserve relue, ~5 500 petites lectures, toutes les 3 s)
+    # tournait sur la boucle du bot. Pendant le releve Instagram il durait 10
+    # a 30 s : « heartbeat blocked », et les clics des VA en « Unknown
+    # interaction ». On lit l'arbre du source, pas son texte : une mise en
+    # forme differente ne doit pas faire mentir ce controle. Le comportement,
+    # lui, est joue dans tests_noctuspool.py.
+    import ast as _astRl
+    _tourRl = [n for n in _astRl.walk(_astRl.parse(_srcRl))
+               if isinstance(n, _astRl.AsyncFunctionDef) and n.name == "remplir"]
+    _lourdsRl = {"_case_la_plus_vide", "_preparer", "_recette"}
+
+    def _de_selfRl(n):
+        return (isinstance(n, _astRl.Attribute) and isinstance(n.value, _astRl.Name)
+                and n.value.id == "self" and n.attr in _lourdsRl)
+
+    _appelsRl = [n for t in _tourRl for n in _astRl.walk(t) if isinstance(n, _astRl.Call)]
+    _directsRl = [n.func.attr for n in _appelsRl if _de_selfRl(n.func)]
+    _en_filRl = {n.args[0].attr for n in _appelsRl
+                 if _astRl.unparse(n.func) == "asyncio.to_thread"
+                 and n.args and _de_selfRl(n.args[0])}
+    check("reserve : le tour ne relit plus la reserve sur la boucle du bot",
+          len(_tourRl) == 1 and not _directsRl
+          and {"_case_la_plus_vide", "_preparer"} <= _en_filRl,
+          "appels directs : %s ; dans un fil : %s" % (_directsRl, sorted(_en_filRl)))
+
     # -- 2. Une legende reprise d un AUTRE compte ne part pas -----------------
     _dRl = _plRl.Path(_tfRl.mkdtemp(prefix="descrl-"))
     try:

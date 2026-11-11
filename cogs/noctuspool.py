@@ -276,23 +276,40 @@ class NoctusPool(commands.Cog):
                 "brute_imposee": brute_imposee,
                 "desc": desc or "", "caption": None}
 
-    async def _fabriquer_une(self, identite: str, famille: str) -> bool:
-        """Fabrique UNE variante et la range. Rend True si elle est en stock."""
+    def _preparer(self, identite: str, famille: str):
+        """(recette, empreinte) d UNE variante a fabriquer, ou None s il n y a
+        rien a faire : vivier vide, ou recette deja pourvue.
+
+        D UNE TRAITE, POUR TOURNER DANS UN FIL (cf. remplir). Tirer la recette
+        liste les templates et les brutes de l identite, compter le stock
+        relit ses fiches : que des lectures de fichiers, qui n ont rien a
+        faire sur la boucle du bot. Les fonctions de cogs.user appelees ici
+        le sont deja depuis les fils du site (diagnostic de la reserve).
+        """
+        r = self._recette(identite, famille)
+        if r is None:
+            return None
+        emp = reserve.empreinte(identite, famille, r["video"],
+                                brutes=r.get("imposees") or (),
+                                caption=r.get("caption"), draft=r["draft"])
+        if reserve.manque(identite, famille, emp) <= 0:
+            return None                      # cette recette est deja pourvue
+        return r, emp
+
+    async def _fabriquer_une(self, identite: str, famille: str, prep) -> bool:
+        """Fabrique UNE variante et la range. Rend True si elle est en stock.
+
+        `prep` : la recette et son empreinte, rendues par _preparer. remplir
+        les calcule AVANT de regarder si un VA attend, pour qu aucune attente
+        ne s intercale entre ce regard et le lancement du moteur.
+        """
         import os as _os
         import shutil as _sh
         import tempfile as _tf
         import noctus_web
         from cogs import user as u
 
-        r = self._recette(identite, famille)
-        if r is None:
-            return False
-
-        emp = reserve.empreinte(identite, famille, r["video"],
-                                brutes=r.get("imposees") or (),
-                                caption=r.get("caption"), draft=r["draft"])
-        if reserve.manque(identite, famille, emp) <= 0:
-            return False                     # cette recette est deja pourvue
+        r, emp = prep
 
         # Une brute imposee passe par un dossier ne contenant qu elle : sans ce
         # detour, le moteur en tire une au hasard parmi toutes celles de
@@ -367,7 +384,10 @@ class NoctusPool(commands.Cog):
             except Exception:
                 _cut = 0.0
             _nu = (_cut > 0.05 and not _rap.get("montage_demande"))
-            pose = reserve.deposer(
+            # Le rangement deplace la video et ecrit sa fiche (fsync) : dans
+            # un fil lui aussi, pas sur la boucle du bot.
+            pose = await asyncio.to_thread(
+                reserve.deposer,
                 identite, famille, sorties[0], emp, desc=r.get("desc") or "",
                 recette={"source": str(r["video"]),
                          "imposees": list(r.get("imposees") or ()),
@@ -471,12 +491,36 @@ class NoctusPool(commands.Cog):
             # net a la fin du creneau.
             ecartees = set()
             while _dans_le_creneau():
-                case = self._case_la_plus_vide(identites, ecartees)
+                # DANS UN FIL, PLUS SUR LA BOUCLE DU BOT.
+                #
+                # Ce choix relit TOUTE la reserve : un dossier et une fiche
+                # par variante, ~1 060 fiches le 11/11/2026, soit ~5 500
+                # petites lectures -- et il revient toutes les trois secondes
+                # tant qu il reste des cases impossibles a remplir (vivier
+                # vide). D ordinaire, un dixieme de seconde. Mais a 04 h UTC
+                # le releve Instagram reecrit son cache de 13 Mo a chaque
+                # compte, dans quatre fils : chaque lecture rend alors le GIL
+                # et attend ~5 ms pour le reprendre. Le balayage durait 10 a
+                # 30 s, sur la boucle : « heartbeat blocked » chaque matin de
+                # 04:00 a 04:15 UTC (165 des 172 traces de la semaine du 04
+                # au 11/11 s arretaient ici), le bot deconnecte puis
+                # reconnecte, et les clics des VA qui commencent leur journee
+                # en « Unknown interaction » (97 en une semaine).
+                #
+                # Dans un fil, le balayage est aussi lent a cette heure-la,
+                # mais plus personne ne l attend. Il ne fait que lire, comme
+                # le font deja les fils du site (noctus_reserve.prendre).
+                case = await asyncio.to_thread(
+                    self._case_la_plus_vide, identites, ecartees)
                 if case is None:
                     return                   # tout est plein : rien a faire
+                # La recette AVANT de regarder si un VA attend, et plus apres :
+                # elle passe par un fil elle aussi, et rien ne doit s
+                # intercaler entre ce regard et le lancement du moteur.
+                prep = await asyncio.to_thread(self._preparer, *case)
                 if _quelqu_un_attend():
                     return                   # un VA attend : on lui laisse tout
-                if not await self._fabriquer_une(*case):
+                if prep is None or not await self._fabriquer_une(*case, prep):
                     # Vivier vide ou moteur en panne : on ecarte la case. Sans
                     # ca elle se represente comme « la plus degarnie » a chaque
                     # tour, et le remplissage s y userait indefiniment.
