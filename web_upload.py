@@ -5205,7 +5205,7 @@ window.igEmbedInCard = function(card){
   if(!media) return;
   var url = card.getAttribute('data-url') || '';
   if(!url) return;
-  var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  var m = url.match(/\\/(?:p|reel|reels)\\/([A-Za-z0-9_-]+)/);
   if(!m) return;
   var shortcode = m[1];
   // Vire overlays existants
@@ -5397,7 +5397,7 @@ window.igShowCardErrorClean = function(card){
           if(ov.parentNode) ov.remove();
           // la video est maintenant sur le serveur -> pointe le <video> sur le
           // fichier local et relance la lecture, comme un reel normal
-          var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+          var m = url.match(/\\/(?:p|reel|reels)\\/([A-Za-z0-9_-]+)/);
           if(m){
             card.setAttribute('data-video-url',
               '/insta/proxy_video?url=' + encodeURIComponent(url) +
@@ -6911,7 +6911,7 @@ function lbCollectGallery(){
     var wrap = card.querySelector('[onclick*="openLightbox"]');
     if(!wrap) return;
     var oc = wrap.getAttribute('onclick') || '';
-    var m = oc.match(/openLightbox\("([^"]+)",(true|false),"([^"]*)",?"?([^"]*)"?,?"?([^"]*)"?\)/);
+    var m = oc.match(/openLightbox\\("([^"]+)",(true|false),"([^"]*)",?"?([^"]*)"?,?"?([^"]*)"?\\)/);
     if(m) lbGallery.push({
       url: m[1], isVideo: m[2]==='true', name: m[3],
       fileId: m[4] || '', exampleUrl: m[5] || ''
@@ -8491,7 +8491,7 @@ function nxMDelCap(i){
   try{ nxMUpdatePreview(); }catch(e){}    // enleve aussi le texte sur la video
   nxMHistTouch();
   if(typeof showToast==='function'){
-    var t=((c&&c.text)||'').replace(/\s+/g,' ').slice(0,40);
+    var t=((c&&c.text)||'').replace(/\\s+/g,' ').slice(0,40);
     showToast('⌫ Caption supprimee'+(t?' : « '+t+' »':'')+' — Ctrl+Z pour annuler','info',5000);
   }
 }
@@ -8553,7 +8553,7 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMState.pourTrend=false;
   nxMState.perfect=null; nxMPerfectBtn();
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
-  var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
+  var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
   nxMState.vname=name; nxMState.thumbs=null; nxMState.thumbsSrc=''; nxMState.cut=null; nxMState.zoom=1; nxMState.scrollLeft=0;
   // remet les boutons « Analyser » a neuf (une analyse laissee en cours sur un
@@ -10199,8 +10199,8 @@ document.addEventListener('click', function(){
 // ---- Détection « déjà utilisée » : normalisation + similarité par mots ----
 function capNorm(s){
   s=String(s||'').toLowerCase();
-  s=s.replace(/[^a-z0-9À-ɏ\s]/g,' ').replace(/\s+/g,' ');
-  return s.replace(/^\s+|\s+$/g,'');
+  s=s.replace(/[^a-z0-9À-ɏ\\s]/g,' ').replace(/\\s+/g,' ');
+  return s.replace(/^\\s+|\\s+$/g,'');
 }
 function capSim(a,b){
   var A=capNorm(a).split(' ').filter(Boolean), B=capNorm(b).split(' ').filter(Boolean);
@@ -13004,7 +13004,7 @@ window.igCopyCaption = function(el){
 window.igDownloadVideo = function(btn, url, owner){
   if(!url) return;
   // Shortcode pour le nom de fichier
-  var m = url.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  var m = url.match(/\\/(?:p|reel|reels)\\/([A-Za-z0-9_-]+)/);
   var shortcode = m ? m[1] : 'reel';
   var filename = (owner || 'video') + '_' + shortcode + '.mp4';
   // Construit l'URL proxy
@@ -17741,7 +17741,7 @@ function vaAppliquerIcones(actif){
         if(!svg) return;
         // libelle = le texte de l'entree, sans les pastilles de comptage
         var lab = el.querySelector('.label');
-        var nom = ((lab ? lab.textContent : el.textContent) || '').replace(/\s+/g,' ').trim();
+        var nom = ((lab ? lab.textContent : el.textContent) || '').replace(/\\s+/g,' ').trim();
         var d = VA_ICONES_APPLE[nom];
         if(actif && d){
           if(!svg.hasAttribute('data-icone-origine')){
@@ -17823,7 +17823,7 @@ function vaSetNotifs(v){
     var sel = document.getElementById('va-lang-select');
     if(!sel) return;
     var l = 'en';
-    try{ l = (document.cookie.match(/(?:^|;\s*)va_lang=(fr|en)/) || [])[1] || 'en'; }catch(e){}
+    try{ l = (document.cookie.match(/(?:^|;\\s*)va_lang=(fr|en)/) || [])[1] || 'en'; }catch(e){}
     sel.value = l;
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
@@ -26808,7 +26808,7 @@ function mkMarketOf(ident){
   if(window.__mkMap && window.__mkMap[n]) return window.__mkMap[n];
   try{      // repli : la carte de la barre laterale, si elle est chargee
     var el = document.querySelector(".vault-item[data-ident='"
-      + n.replace(/[^a-z0-9_.\-]/g, '') + "']");
+      + n.replace(/[^a-z0-9_.\\-]/g, '') + "']");
     return el ? (el.getAttribute('data-market') || '') : '';
   }catch(e){ return ''; }
 }
@@ -30925,7 +30925,7 @@ function igAddAccount(e){
         if(typeof showToast === 'function') showToast(d.message || ('@' + (d.username||u) + ' ajoute'), 'success');
         inp.value = '';
         inp.focus();
-        var cleanU = d.username || u.replace(/^@/, '').replace(/.*\//, '').trim();
+        var cleanU = d.username || u.replace(/^@/, '').replace(/.*\\//, '').trim();
         // Track le scrape pour le polling
         if(d.scrape_started){
           window.__igScraping[cleanU] = {startedAt: Date.now()};
