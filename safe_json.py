@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -99,12 +100,54 @@ def _captions_effacees(p: Path, text: str) -> list:
     return sorted(avant - (apres or set()))
 
 
+# ── Un fichier qu'on n'a pas le DROIT de lire n'est pas un fichier vide ────
+# Le 08/11/2026, un script lancé en root par ssh a réécrit
+# data/stats_trust_cle.json en root:root 0600 : le bot (utilisateur vabot) ne
+# pouvait plus le lire. load() le traitait comme un fichier abîmé : il rendait
+# la valeur par défaut — l'appelant fabriquait alors un contenu neuf et
+# l'écrivait PAR-DESSUS (os.replace passe : le dossier, lui, est au bot) — ou,
+# pire, il remettait la copie .prev, plus ancienne, à la place de la version
+# la plus récente. Dix lignes « illisible (Permission denied) — tentative
+# .prev » ce jour-là ; la clé n'a tenu que parce qu'aucun .prev lisible
+# n'existait. Désormais : ni repli sur .prev, ni écriture par-dessus, et une
+# ALERTE qui dit quoi faire. Rendre le fichier au bot (chown) remet tout en
+# marche sans rien perdre.
+_INTERDITS_DITS: dict = {}
+#: Une alerte par fichier et par minute : un fichier lu à chaque page ne doit
+#: pas noyer le journal.
+INTERDIT_REDIT_S = 60
+
+
+def _illisible_faute_de_droits(p: Path) -> bool:
+    """`p` existe, c'est un fichier, et ce processus n'a pas le droit de le lire."""
+    try:
+        return p.is_file() and not os.access(p, os.R_OK)
+    except OSError:
+        return False
+
+
+def _dire_interdit(p: Path, quoi: str, detail: Any = "") -> None:
+    cle, maintenant = (str(p), quoi), time.time()
+    if maintenant - _INTERDITS_DITS.get(cle, 0.0) < INTERDIT_REDIT_S:
+        return
+    _INTERDITS_DITS[cle] = maintenant
+    if quoi == "lecture":
+        print(f"[safe_json] ALERTE : {p.name} existe mais ce processus n'a pas le droit de le "
+              f"lire ({detail}) — pris pour absent, RIEN ne sera écrit par-dessus ; rendre le "
+              f"fichier à l'utilisateur du bot (chown) : {p}", flush=True)
+    else:
+        print(f"[safe_json] ALERTE : écriture de {p.name} REFUSÉE — le fichier existe mais ce "
+              f"processus n'a pas le droit de le lire, l'écraser perdrait son contenu ; rendre "
+              f"le fichier à l'utilisateur du bot (chown) : {p}", flush=True)
+
+
 def write_text(path, text: str | bytes, backup: bool | None = None) -> bool:
     """Écrit `text` de façon ATOMIQUE. Retourne True si écrit.
 
     backup=None (défaut) : copie `.prev` sauf pour les fichiers de cache.
     Refuse (False) une bibliothèque de captions qui en perdrait trop d'un
-    coup (voir plus haut).
+    coup (voir plus haut), et un fichier existant que ce processus n'a pas le
+    droit de lire (voir juste au-dessus).
 
     `text` peut être des OCTETS, déjà encodés en UTF-8 : ils sont écrits tels
     quels. Pour un gros fichier assemblé morceau par morceau (le cache des
@@ -114,6 +157,9 @@ def write_text(path, text: str | bytes, backup: bool | None = None) -> bool:
     """
     p = Path(path)
     with _lock_for(p):
+        if _illisible_faute_de_droits(p):
+            _dire_interdit(p, "ecriture")
+            return False
         if p.name == _CAPTIONS_NOM:
             try:
                 perdues = _captions_effacees(p, text)
@@ -160,7 +206,11 @@ def write(path, data: Any, indent: int | None = 2, ensure_ascii: bool = False,
 def load(path, default: Any = None) -> Any:
     """Lit un JSON. Si le fichier est illisible/tronqué, tente `.prev` avant de
     rendre `default` — et signale le repli dans les logs (au lieu de faire
-    croire silencieusement à un fichier vide)."""
+    croire silencieusement à un fichier vide).
+
+    Un fichier que ce processus n'a pas le DROIT de lire n'est pas abîmé : pas
+    de repli sur `.prev` (il remettrait une vieille version par-dessus), on
+    rend `default` et write_text refusera d'écrire par-dessus."""
     p = Path(path)
     with _lock_for(p):
         if p.exists():
@@ -168,6 +218,9 @@ def load(path, default: Any = None) -> Any:
                 txt = p.read_text(encoding="utf-8")
                 if txt.strip():
                     return json.loads(txt)
+            except PermissionError as e:
+                _dire_interdit(p, "lecture", e)
+                return default
             except Exception as e:
                 print(f"[safe_json] ATTENTION : {p.name} illisible ({e}) — tentative .prev", flush=True)
         prev = p.with_suffix(p.suffix + ".prev")
