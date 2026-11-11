@@ -15513,12 +15513,28 @@ try:
                 _F.retry_rep = (False, "BAD_STATUS")
                 await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
                 _F.retry_rep = None
-                check("Redemander refuse : l ecoute du numero vivant est relancee",
-                      len(bot.loop.t) == 1 and _txtF(p)[-1].split("\n")[-1] == "❌ BAD_STATUS", len(bot.loop.t))
+                # Avant le premier SMS le fournisseur refuse TOUJOURS : ce n'est
+                # plus ecrit comme une erreur sous un numero qui attend (les VA
+                # le jetaient, journal du 05 au 11/11/2026).
+                check("Redemander refuse avant le 1er SMS : « pas encore de SMS » (plus une "
+                      "fausse erreur), l ecoute du numero vivant est relancee",
+                      len(bot.loop.t) == 1
+                      and _txtF(p)[-1].split("\n")[-1] == _gF.SOUCI_PAS_ENCORE
+                      and "❌" not in " ".join(_txtF(p)), (len(bot.loop.t), _txtF(p)))
                 _F.code[ide] = ("code", "121212")
                 await _tachesF(bot)
                 check("Redemander refuse : le code arrive ensuite s affiche tout seul",
                       "121212" in _txtF(p)[1], _txtF(p))
+                # Le meme refus sur un numero qui a DEJA son code : il est clos chez
+                # le fournisseur, et le VA le lit (« activation inconnue » ne lui
+                # disait pas d'en prendre un autre).
+                _F.retry_rep = (False, _gF._MSG["NO_ACTIVATION"])
+                await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
+                _F.retry_rep = None
+                check("Nouveau code refuse sur un numero qui a son code : « ne reçoit plus de "
+                      "code », le code reste, aucune ecoute relancee",
+                      _txtF(p)[-1].split("\n")[-1] == _gF.SOUCI_FERME and "121212" in _txtF(p)[1]
+                      and not bot.loop.t, (_txtF(p), len(bot.loop.t)))
 
                 # ---- 3. les boutons du numero sont a son proprietaire --------
                 it = _ItxF(ch, 8, bot, message=p)
@@ -16861,6 +16877,45 @@ try:
                           and not bot.loop.t and ("setStatus3", aid) in _FQ.actions(k0)
                           and _ditQ("rien n'est redemande ni efface", j0),
                           (_regQ(ch), _txtQ(ch), bot.loop.t))
+                    _jeterQ(bot)
+                    # Le statut 3 REFUSE, comme GetAText le fait avant le premier
+                    # SMS (NO_ACTIVATION, journal du 05 au 11/11/2026) : le numero
+                    # attend, ce n'est plus ecrit comme une erreur.
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch)
+                    _FQ.rep["setStatus3"] = ["NO_ACTIVATION"]
+                    j0 = len(_jQ.l)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    _FQ.rep.pop("setStatus3", None)
+                    check("C3 statut 3 refuse avant le 1er SMS (NO_ACTIVATION) : « pas encore de "
+                          "SMS », plus « activation inconnue », l ecoute repart, le refus est journalise",
+                          _txtQ(ch)[-1].split("\n")[-1] == _gQ.SOUCI_PAS_ENCORE
+                          and "activation inconnue" not in " ".join(_txtQ(ch))
+                          and len(bot.loop.t) == 1 and _ditQ("nouveau code refuse", j0),
+                          (_txtQ(ch), len(bot.loop.t)))
+                    _jeterQ(bot)
+                    # Et la meme course que ci-dessus quand il refuse : le SMS arrive
+                    # pendant l'appel. Le refus ecrivait sa ligne sans relire le
+                    # registre -- « pas encore de SMS » sous un code a l'ecran.
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch)
+
+                    def _code_pendant_refus(a, ch=ch, aid=aid):
+                        a["etat"], a["code"] = "OK", "606060"
+                        _nQ._salon_ecrire(ch.id, code_valeur="606060", code_de=aid,
+                                          code_affiche=False)
+                    _FQ.pendant["setStatus3"] = _code_pendant_refus
+                    _FQ.rep["setStatus3"] = ["NO_ACTIVATION"]
+                    j0 = len(_jQ.l)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    _FQ.rep.pop("setStatus3", None)
+                    check("C3 code ecrit pendant un statut 3 REFUSE : le code est montre seul (aucune "
+                          "consigne dessous), pas de nouvelle ecoute, le refus est journalise",
+                          _regQ(ch).get("code_valeur") == "606060" and "606060" in _txtQ(ch)[1]
+                          and _gQ.SOUCI_PAS_ENCORE not in " ".join(_txtQ(ch))
+                          and _gQ.SOUCI_FERME not in " ".join(_txtQ(ch))
+                          and "❌" not in " ".join(_txtQ(ch)) and not bot.loop.t
+                          and _ditQ("nouveau code refuse", j0), (_txtQ(ch), bot.loop.t))
                     _jeterQ(bot)
                     ch = await _salonQ(bot, cog)
                     _it, aid = await _prendreQ(cog, ch)

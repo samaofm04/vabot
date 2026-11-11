@@ -716,12 +716,23 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):
 
 
 def _redemander(cle, act_id, conf):
-    ok, txt = numgen.retry(act_id, _prov(_actif(cle)))
+    a0 = _actif(cle)
+    ok, txt = numgen.retry(act_id, _prov(a0))
     if ok:
         a = _maj(cle, act_id, code=None, souci="")
         _log(f"nouveau code demandé sur {act_id}")
     else:
-        a = _maj(cle, act_id, souci="❌ " + txt)
+        # Avant le premier SMS, le fournisseur refuse toujours : le numéro
+        # attend, il n'est pas mort (numgen.souci_redemander). Relu APRÈS
+        # l'appel, sous le verrou de l'écoute : un code arrivé pendant (20 s
+        # au pire) s'affiche seul -- le refus parlait du numéro d'avant lui.
+        with _VERROU:
+            a1 = _actif(cle) or {}
+            if a1.get("code") and a1.get("code") != (a0 or {}).get("code"):
+                a = _maj(cle, act_id, souci="")
+            else:
+                attend = _vivant(a1) and not a1.get("code")
+                a = _maj(cle, act_id, souci=numgen.souci_redemander(txt, attend))
         _log(f"nouveau code refusé sur {act_id} : {txt}")
     if a:
         _redessiner(cle, conf)

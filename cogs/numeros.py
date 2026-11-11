@@ -1384,17 +1384,9 @@ class NumerosCog(commands.Cog):
                     numgen.retry, actif["id"], actif["provider"])
                 if not ok:
                     log.warning("numgen: nouveau code refuse pour #%s : %s", nom, msg)
-                    await maj_panneau(self.bot, ch, cog=self, souci="❌ %s" % msg)
-                    # Le refus du « Redemander » ne tue pas le numero : son
-                    # premier SMS peut encore arriver. Sans ecoute relancee
-                    # ici, il n'etait jamais affiche (numero repris au
-                    # redemarrage, ecoute deja finie).
-                    if (not deja and _numero_vivant(actif) and etat0 != "cancel"
-                            and not (etat0 == "error" and _erreur_definitive(val0))):
-                        log.info("numgen: %s : l'ecoute de son code continue (#%s)",
-                                 actif.get("valeur"), nom)
-                        self._ecouter(ch)
-                    return
+                # Relu apres l'appel, ACCEPTE OU REFUSE : le refus ecrivait sa
+                # ligne sans relire, donc sous le numero suivant si « Autre »
+                # etait passe, ou sous un code arrive entre-temps.
                 rec = _salon(ch.id)
                 if (rec.get("actif") or {}).get("id") != act_id:
                     log.info("numgen: nouveau code de %s demande, mais le numero a ete "
@@ -1406,6 +1398,23 @@ class NumerosCog(commands.Cog):
                 # l'effacer ci-dessous le faisait disparaitre du panneau.
                 if await self._code_arrive_pendant(ch, rec, act_id, deja,
                                                    "la demande d'un nouveau code"):
+                    return
+                if not ok:
+                    # Le refus du « Redemander » ne tue pas le numero : son
+                    # premier SMS peut encore arriver. Sans ecoute relancee
+                    # ici, il n'etait jamais affiche (numero repris au
+                    # redemarrage, ecoute deja finie).
+                    attend = (not deja and _numero_vivant(actif) and etat0 != "cancel"
+                              and not (etat0 == "error" and _erreur_definitive(val0)))
+                    # Et ce refus ne s'ecrit plus « ❌ activation inconnue »
+                    # sous un numero qui attend : le VA le jetait
+                    # (numgen.souci_redemander).
+                    await maj_panneau(self.bot, ch, cog=self,
+                                      souci=numgen.souci_redemander(msg, attend))
+                    if attend:
+                        log.info("numgen: %s : l'ecoute de son code continue (#%s)",
+                                 actif.get("valeur"), nom)
+                        self._ecouter(ch)
                     return
             else:
                 # Le prochain code du mail doit etre DIFFERENT de celui-ci. On

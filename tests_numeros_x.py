@@ -84,7 +84,9 @@ def faux_finir(act_id, provider="getatext"):
 
 def faux_retry(act_id, provider="getatext"):
     RETRY.append(act_id)
-    return True, "ACCESS_RETRY_GET"
+    if REGLE.get("retry_pendant"):          # ce qui se passe PENDANT l'appel (course)
+        REGLE.pop("retry_pendant")()
+    return REGLE.get("retry") or (True, "ACCESS_RETRY_GET")
 
 
 def clic(cid, uid=VA, ephemere=False, perms="0", roles=(), gid=GID, jeton="tok"):
@@ -124,7 +126,8 @@ def remise_a_zero():
     safe_json le restaure depuis sa copie .prev."""
     for l in (APPELS, ACHATS, ANNULES, FINIS, RETRY, CODES, ALERTES):
         l.clear()
-    REGLE.update(achat=True, annuler=(True, "ACCESS_CANCEL"), messages=[])
+    REGLE.update(achat=True, annuler=(True, "ACCESS_CANCEL"), messages=[], retry=None,
+                 retry_pendant=None)
     nx._ACHATS.clear()
     nx._ECOUTES.clear()
     nx._REPRIS[0] = True
@@ -368,6 +371,57 @@ try:
     check("Nouveau code : demandé à HeroSMS", RETRY == ["act1"], RETRY)
     check("Nouveau code : le nouveau code s'affiche", "🔐 **222222**" in textes(dernier_patch()),
           dernier_patch())
+
+    # 12 bis. « Redemander » refusé. Avant le premier SMS, le fournisseur
+    # refuse TOUJOURS (statut 3 = après un code) : le ticket écrivait
+    # « ❌ activation inconnue (déjà terminée ?) » sous un numéro vivant, et
+    # un VA sur deux le jetait (journal du 05 au 11/11/2026).
+    remise_a_zero()
+    REGLE["retry"] = (False, numgen._human("NO_ACTIVATION"))
+    nx.traiter(clic("numx:prendre"))
+    nx.traiter(clic("numx:retry:act1", ephemere=True))
+    t12 = textes(dernier_patch())
+    check("Redemander refusé avant le 1er SMS : « pas encore de SMS », plus « activation inconnue »",
+          RETRY == ["act1"] and any(numgen.SOUCI_PAS_ENCORE in x for x in t12)
+          and not any("activation inconnue" in x or "❌" in x for x in t12)
+          and nx._vivant(nx._actif(f"{GID}:{VA}")), t12)
+    remise_a_zero()
+    CODES.append(("code", "111111"))
+    nx.traiter(clic("numx:prendre"))
+    REGLE["retry"] = (False, numgen._human("NO_ACTIVATION"))
+    nx.traiter(clic("numx:retry:act1", ephemere=True))
+    t12 = textes(dernier_patch())
+    check("Nouveau code refusé après un code : « ne reçoit plus de code », le code reste affiché",
+          any(numgen.SOUCI_FERME in x for x in t12) and any("111111" in x for x in t12)
+          and not any("activation inconnue" in x for x in t12), t12)
+    remise_a_zero()
+    REGLE["retry"] = (False, numgen._human("BAD_KEY"))
+    nx.traiter(clic("numx:prendre"))
+    nx.traiter(clic("numx:retry:act1", ephemere=True))
+    t12 = textes(dernier_patch())
+    check("Redemander refusé pour une autre raison (clé) : la raison telle quelle",
+          any("❌ clé API refusée" in x for x in t12)
+          and not any(numgen.SOUCI_PAS_ENCORE in x for x in t12), t12)
+    # Le SMS arrive PENDANT l'appel refusé (l'écoute l'écrit) : le code
+    # s'affiche seul, sans consigne dessous -- « prends-en un autre » sous un
+    # code tout neuf ferait jeter un bon numéro.
+    remise_a_zero()
+    REGLE["retry"] = (False, numgen._human("NO_ACTIVATION"))
+    nx.traiter(clic("numx:prendre"))
+    REGLE["retry_pendant"] = lambda: nx._maj(f"{GID}:{VA}", "act1", code="246802",
+                                             code_le=int(time.time()), souci="")
+    nx.traiter(clic("numx:retry:act1", ephemere=True))
+    t12 = textes(dernier_patch())
+    check("code arrivé PENDANT un Redemander refusé : le code seul, aucune consigne dessous",
+          any("246802" in x for x in t12)
+          and not any(numgen.SOUCI_FERME in x or numgen.SOUCI_PAS_ENCORE in x or "❌" in x
+                      for x in t12), t12)
+    check("souci_redemander : SMSBower (BAD_STATUS) en attente = pas encore ; après un code = tel quel",
+          numgen.souci_redemander("BAD_STATUS", True) == numgen.SOUCI_PAS_ENCORE
+          and numgen.souci_redemander("BAD_STATUS", False) == "❌ BAD_STATUS"
+          and numgen.souci_redemander("ERR:Timeout: x", True).startswith("❌ ERR:")
+          and numgen.souci_redemander("NOT_FOUND", False) == numgen.SOUCI_FERME
+          and numgen.souci_redemander("", False) == "❌ réponse vide")
 
     # 13. expiration : 20 min sans code
     remise_a_zero()

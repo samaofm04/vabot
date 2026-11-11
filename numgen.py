@@ -567,6 +567,39 @@ def _human(txt):
     return _MSG.get(t.split(":")[0], t or "réponse vide")
 
 
+#: « Redemander un code » refuse par le fournisseur. Un nouveau SMS (statut 3)
+#: ne se demande qu'APRES un premier code : avant, GetAText repond
+#: NO_ACTIVATION et SMSBower BAD_STATUS, a chaque fois (396 refus sur 414
+#: clics du 05 au 11/11/2026). Le panneau ecrivait alors « ❌ activation
+#: inconnue (déjà terminée ?) » sous un numero bien vivant : sur 181 refus
+#: suivis au journal, 94 numeros ont ete jetes dans les 30 s, alors que 28
+#: des 50 gardes ont recu leur code dans la minute.
+SOUCI_PAS_ENCORE = ("⏳ Pas encore de SMS. Redemande le code dans l'appli "
+                    "(par SMS) : il s'affichera ici.")
+#: Le meme refus sur un numero qui a deja son code, ou qui a depasse sa duree :
+#: il est clos chez le fournisseur (un « Nouveau code » sur quatre, cliques
+#: 31 min apres la prise en mediane). « activation inconnue » ne disait pas
+#: au VA qu'il fallait en prendre un autre.
+SOUCI_FERME = "⌛ Ce numéro ne reçoit plus de code (expiré). Prends-en un autre."
+
+
+def souci_redemander(msg, attend) -> str:
+    """La ligne du panneau quand le fournisseur refuse un nouveau code.
+
+    `attend` : le numero vit et son premier code n'est pas encore arrive --
+    le refus ne dit alors rien de lui. Un refus d'une autre nature (cle,
+    reseau, solde) reste montre tel quel."""
+    brut = " ".join(str(msg or "").split())
+    tete = brut.split(":")[0]
+    inconnue = (brut == _MSG["NO_ACTIVATION"]
+                or tete in ("NO_ACTIVATION", "NOT_FOUND", "WRONG_ACTIVATION_ID"))
+    if attend and (inconnue or tete == "BAD_STATUS"):
+        return SOUCI_PAS_ENCORE
+    if inconnue:
+        return SOUCI_FERME
+    return "❌ %s" % (brut or "réponse vide")
+
+
 # ------------------------------------------------------- ALERTE AU STAFF
 # Un service à sec ne se lisait que dans le panneau du VA : du 16 au 20/10/2026,
 # huit VA du serveur Spam ont reçu « Insufficient balance » de SMSBower, et
