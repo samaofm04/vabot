@@ -647,17 +647,20 @@ class Outils(commands.Cog):
         # Les memes salons sans fiche ne sont redits qu'une fois par jour (ou des
         # que leur liste change) : « sans fiche ['🔴-va-hycham'] » etait reecrit
         # toutes les dix minutes, 1 301 lignes du 03 au 11/11/2026. Un renommage
-        # ou un rate se dit toujours.
+        # ou un rate se dit toujours, et la fin du defaut aussi (une ligne
+        # « sans fiche [] ») : sans elle, un silence de moins d'un jour ne
+        # distinguait plus « corrige » de « toujours la, redit demain ».
         dits = getattr(self, "_sans_fiche_dits", None)
         if dits is None:
             dits = self._sans_fiche_dits = {}
         sig, vu = tuple(bilan["sans_va"]), dits.get(guilde.id)
         nouveau = bool(sig) and (vu is None or vu[0] != sig or time.time() - vu[1] >= 86400)
+        leve = False
         if not sig:
-            dits.pop(guilde.id, None)
+            leve = dits.pop(guilde.id, None) is not None
         elif nouveau:
             dits[guilde.id] = (sig, time.time())
-        if bilan["renommes"] or bilan["rates"] or nouveau:
+        if bilan["renommes"] or bilan["rates"] or nouveau or leve:
             print(f"[outils] numeros des VA : {bilan['renommes']} renomme(s), {bilan['deja']} deja bons, "
                   f"sans fiche {bilan['sans_va'][:10]}, rates {bilan['rates'][:10]}", flush=True)
         return bilan

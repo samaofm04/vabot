@@ -327,8 +327,10 @@ def bloc_b099():
               (b7, cat.text_channels[-1].name))
         cat.text_channels[:] = [bob, cat.text_channels[-1]]
         b8, n8 = passe()
-        check("plus aucun salon sans fiche : rien au journal, registre remis à zéro",
-              b8["sans_va"] == [] and n8 == 0 and 777 not in cog._sans_fiche_dits, (b8, n8))
+        b8b, n8b = passe()
+        check("plus aucun salon sans fiche : la fin du défaut est dite UNE fois, puis plus rien ; registre remis à zéro",
+              b8["sans_va"] == b8b["sans_va"] == [] and (n8, n8b) == (1, 0) and 777 not in cog._sans_fiche_dits,
+              (b8, n8, n8b))
         cat.text_channels.append(hycham)
         _b, n9 = passe()
         check("… et s'il revient, il est redit tout de suite", n9 == 1, n9)
