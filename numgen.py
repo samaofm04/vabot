@@ -621,6 +621,18 @@ ALERTES_SALON = "1553627411680338153"
 _VERROU_ALERTES = threading.Lock()
 #: Une panne déjà dite est redite au plus une fois par ce délai.
 RAPPEL_ALERTE_S = 24 * 3600
+#: {clé: heure du dernier message parti} — la mémoire du processus, en plus
+#: du fichier : si le fichier ne peut pas être écrit (disque plein le
+#: 06/11/2026, fichier rendu illisible par root), le message ne repart pas à
+#: chaque refus mais au plus une fois par RAPPEL_ALERTE_S.
+_DERNIER_MESSAGE: dict = {}
+#: Les clés dont un message est en train de partir. Il part HORS du verrou :
+#: le POST peut durer 20 s, et fin_alerte est appelée sur la boucle du bot
+#: (cogs/numeros) — tenir le verrou pendant l'envoi la gelait.
+_EN_COURS: set = set()
+#: {clé: nombre de levées} : une panne levée (fin_alerte) PENDANT l'envoi
+#: n'est pas réinscrite après coup.
+_LEVEES: dict = {}
 
 #: Les mots d'un solde vide : SMSBower (mail, en JSON) écrit « Insufficient
 #: balance », le protocole stubs NO_BALANCE, que _human traduit.
@@ -688,18 +700,24 @@ def alerter_staff(cle: str, texte: str) -> str:
     """Prévient le staff d'une panne (`cle` : « credit:mail », « outlook:vide »…)
     au premier refus, puis la REDIT une fois par jour au plus tant qu'elle
     dure (RAPPEL_ALERTE_S), au refus suivant. Retenu dans
-    data/numgen_alertes.json : un redémarrage ne le redit pas. Rend « envoye »
-    (premier message ou rappel parti), « deja » (dit il y a moins d'un jour),
-    ou la raison de l'échec du PREMIER message -- rien n'est alors retenu, le
-    refus suivant réessaie. Un rappel qui ne part pas rend « deja » : le staff
-    a bien été prévenu, et le rappel repart au refus suivant.
+    data/numgen_alertes.json (un redémarrage ne le redit pas) et dans la
+    mémoire du processus (une écriture ratée ne le fait pas redire à chaque
+    refus). Rend « envoye » (premier message ou rappel parti), « deja » (dit il
+    y a moins d'un jour, ou en train de partir), ou la raison de l'échec du
+    PREMIER message -- rien n'est alors retenu, le refus suivant réessaie. Un
+    rappel qui ne part pas rend « deja » : le staff a bien été prévenu, et le
+    rappel repart au refus suivant.
 
     Hors de la machine de production (VA_MACHINE_PROD absent), rien ne part
     et rien n'est écrit : les suites de tests passent par ici avec le vrai
     data/."""
     with _VERROU_ALERTES:
+        if cle in _EN_COURS:
+            return "deja"
+        dernier = float(_DERNIER_MESSAGE.get(cle) or 0)
         d = _alertes()
-        if cle in d:
+        rappel = cle in d
+        if rappel:
             if not _en_production():
                 return "deja"
             f = d[cle] if isinstance(d[cle], dict) else {}
@@ -710,33 +728,51 @@ def alerter_staff(cle: str, texte: str) -> str:
             refus = int(f.get("refus") or 0) + 1
             f["refus"] = refus
             d[cle] = f
-            if time.time() - int(f.get("rappel") or depuis) < RAPPEL_ALERTE_S:
-                safe_json.write(ALERTES_FICHIER, d)          # compté, dit au prochain rappel
+            safe_json.write(ALERTES_FICHIER, d)              # le refus est compté, quoi qu'il arrive
+            if time.time() - max(int(f.get("rappel") or depuis), dernier) < RAPPEL_ALERTE_S:
                 return "deja"
-            ok, pourquoi = _poster_alerte(_texte_rappel(texte, depuis, refus if compte else None))
-            if not ok:
-                safe_json.write(ALERTES_FICHIER, d)
+            message = _texte_rappel(texte, depuis, refus if compte else None)
+        else:
+            if not _en_production():
+                return "hors production"
+            if time.time() - dernier < RAPPEL_ALERTE_S:
+                return "deja"                                # parti, mais le fichier ne l'a pas gardé
+            message = texte
+        _EN_COURS.add(cle)
+        levees = _LEVEES.get(cle, 0)
+    try:
+        ok, pourquoi = _poster_alerte(message)
+    except Exception as e:                                   # noqa: BLE001
+        ok, pourquoi = False, f"{type(e).__name__}: {str(e)[:160]}"
+    with _VERROU_ALERTES:
+        _EN_COURS.discard(cle)
+        if not ok:
+            if rappel:
                 print(f"[numgen] rappel de l'alerte « {cle} » NON envoyé : {pourquoi}", flush=True)
                 return "deja"
-            f.update(rappel=int(time.time()), rappels=int(f.get("rappels") or 0) + 1, refus=0,
-                     texte=texte[:300])
-            if not f.get("le"):
-                f["le"] = f["rappel"]
-            safe_json.write(ALERTES_FICHIER, d)
-            print(f"[numgen] alerte staff « {cle} » redite ({refus} refus depuis le dernier message)",
-                  flush=True)
-            return "envoye"
-        if not _en_production():
-            return "hors production"
-        ok, pourquoi = _poster_alerte(texte)
-        if not ok:
             print(f"[numgen] alerte staff « {cle} » NON envoyée : {pourquoi}", flush=True)
             return pourquoi or "refus"
-        d = _alertes()
-        d[cle] = {"le": int(time.time()), "texte": texte[:300]}
+        if _LEVEES.get(cle, 0) != levees:
+            # le service est revenu pendant l'envoi : rien à inscrire
+            return "envoye"
+        maintenant = int(time.time())
+        _DERNIER_MESSAGE[cle] = maintenant
+        d = _alertes()                                       # relu : un autre fil a pu l'écrire
+        if rappel:
+            f = d[cle] if isinstance(d.get(cle), dict) else {}
+            f.update(rappel=maintenant, rappels=int(f.get("rappels") or 0) + 1, refus=0, texte=texte[:300])
+            if not f.get("le"):
+                f["le"] = maintenant
+            d[cle] = f
+        else:
+            d[cle] = {"le": maintenant, "texte": texte[:300]}
         if not safe_json.write(ALERTES_FICHIER, d):
-            print(f"[numgen] alerte staff « {cle} » envoyée mais non retenue : "
-                  f"elle repartira au prochain refus", flush=True)
+            print(f"[numgen] alerte staff « {cle} » {'redite' if rappel else 'envoyée'} mais NON retenue "
+                  f"dans {ALERTES_FICHIER.name} : ce processus ne la redira pas avant demain, un "
+                  f"redémarrage la redirait au prochain refus", flush=True)
+        elif rappel:
+            print(f"[numgen] alerte staff « {cle} » redite ({refus} refus depuis le dernier message)",
+                  flush=True)
         else:
             print(f"[numgen] alerte staff « {cle} » envoyée", flush=True)
         return "envoye"
@@ -746,6 +782,8 @@ def fin_alerte(cle: str) -> bool:
     """Le service est revenu (un mail livré, une adresse donnée) : la
     prochaine panne sera redite. Rend True si une alerte était en cours."""
     with _VERROU_ALERTES:
+        _LEVEES[cle] = _LEVEES.get(cle, 0) + 1
+        _DERNIER_MESSAGE.pop(cle, None)
         d = _alertes()
         if cle not in d:
             return False

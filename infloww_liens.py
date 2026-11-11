@@ -1972,6 +1972,10 @@ GROUPES_FRAIS_S = 3600
 #: 18:34 au 08/11 23:09 UTC, 12 700 appels sont partis pour rien (7 354 « JSON
 #: invalide », puis 5 346 « HTTP 429 » : GetMySocial s'est mis à bloquer).
 GROUPES_ECHEC_S = 600
+#: … sauf tant qu'aucune lecture n'a jamais réussi (rien à rendre) : un seul
+#: raté passager au premier affichage aurait privé toute la page de ses
+#: équipes pendant dix minutes. On réessaie alors après une minute.
+GROUPES_ECHEC_VIDE_S = 60
 
 
 def _id_groupe(g: Any) -> str:
@@ -1987,9 +1991,10 @@ def groupes_equipe() -> Dict[str, Tuple[int, str]]:
     pas."""
     if time.time() - float(_GROUPES["t"]) < GROUPES_FRAIS_S and _GROUPES["par_id"]:
         return dict(_GROUPES["par_id"])
-    if time.time() - float(_GROUPES.get("echec") or 0) < GROUPES_ECHEC_S:
+    delai = GROUPES_ECHEC_S if _GROUPES["par_id"] else GROUPES_ECHEC_VIDE_S
+    if time.time() - float(_GROUPES.get("echec") or 0) < delai:
         return dict(_GROUPES["par_id"])
-    attente = f" — nouvel essai dans {GROUPES_ECHEC_S // 60} min"
+    attente = f" — nouvel essai dans {max(1, delai // 60)} min"
     try:
         import gms
         r = gms.list_team_groups(EQUIPE_GMS) if EQUIPE_GMS else {}

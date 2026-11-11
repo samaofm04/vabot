@@ -544,12 +544,14 @@ def coffre_vide(qui: str, refus: bool = True) -> None:
 
 
 def suivre_coffre(qui: str) -> None:
-    """Après une adresse donnée (Twitter ou Va IG) : la dernière partie, le
-    staff est prévenu tout de suite ; sinon une alerte en cours est levée (le
-    coffre a été rempli), la prochaine panne sera redite."""
-    if oc.nb_libres():
-        numgen.fin_alerte("outlook:vide")
-    else:
+    """Après une adresse donnée (Twitter ou Va IG) : une panne en cours est
+    levée — le coffre avait de quoi donner, il a donc été rempli. Si c'était
+    la dernière adresse, la NOUVELLE panne est dite tout de suite, avant le
+    premier VA éconduit. Sans la levée d'abord, un coffre rempli d'une seule
+    adresse gardait la panne précédente : son rappel quotidien aurait dit
+    « toujours en panne depuis le <date de l'ancienne panne> »."""
+    numgen.fin_alerte("outlook:vide")
+    if not oc.nb_libres():
         coffre_vide(qui, refus=False)
 
 

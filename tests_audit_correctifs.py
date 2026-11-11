@@ -156,11 +156,15 @@ def bloc_b076():
         return lire().get(cle) or {}
 
     def vieillir(secondes, cle="credit:herosms"):
+        """Fait passer le temps : sur la fiche du fichier ET dans la mémoire du processus."""
         d = lire()
         for k in ("le", "rappel"):
             if k in d[cle]:
                 d[cle][k] -= secondes
         poser(d)
+        memoire = getattr(numgen, "_DERNIER_MESSAGE", {})
+        if cle in memoire:
+            memoire[cle] -= secondes
 
     try:
         with journal():
@@ -206,6 +210,104 @@ def bloc_b076():
             r9 = numgen.alerter_staff("outlook:vide", "⚠️ **Coffre Outlook vide**")
         check("service revenu puis nouvelle panne : un premier message, pas un rappel",
               fin and r9 == "envoye" and "Rappel" not in envois[-1], (fin, r9, envois[-1]))
+        # ── relecture : le fichier ne peut pas être écrit (disque plein le 06/11) ──
+        import safe_json as sj
+        vrai_write = sj.write
+        sj.write = lambda *a, **k: False
+        try:
+            numgen._DERNIER_MESSAGE.clear()
+            poser({"credit:sms": {"le": int(time.time()) - 3 * 86400, "texte": "x", "refus": 4,
+                                  "rappel": int(time.time()) - 2 * 86400}})
+            n = len(envois)
+            with journal() as j:
+                rs = [numgen.alerter_staff("credit:sms", "⚠️ **SMS sans crédit**") for _ in range(4)]
+            check("rappel parti mais fichier non écrit : UN rappel, pas un par refus ; dit « NON retenue »",
+                  rs == ["envoye", "deja", "deja", "deja"] and len(envois) == n + 1
+                  and "NON retenue" in j.getvalue(), (rs, len(envois) - n, j.getvalue()[:200]))
+            n = len(envois)
+            with journal():
+                rs = [numgen.alerter_staff("credit:neuve", "⚠️ **Neuve**") for _ in range(3)]
+            check("premier message parti mais non retenu : il ne repart pas à chaque refus (avant : à chaque refus)",
+                  rs == ["envoye", "deja", "deja"] and len(envois) == n + 1, (rs, len(envois) - n))
+        finally:
+            sj.write = vrai_write
+        # ── relecture : l'envoi se fait HORS du verrou (fin_alerte tourne sur la boucle du bot) ──
+        import threading
+        numgen._DERNIER_MESSAGE.clear()
+        poser({})
+        sortie = {}
+
+        def poster_qui_leve(txt):
+            # pendant l'envoi, un autre service revient : fin_alerte doit passer tout de suite
+            sortie["leve"] = numgen.fin_alerte("credit:autre")
+            envois.append(txt)
+            return True, ""
+
+        numgen._poster_alerte = poster_qui_leve
+        th = threading.Thread(target=lambda: sortie.update(r=numgen.alerter_staff("credit:mail", "⚠️ **Mail**")),
+                              daemon=True)
+        with journal():
+            th.start()
+            th.join(5)
+        check("pendant l'envoi, fin_alerte d'une autre panne passe (le verrou n'est plus tenu pendant le POST)",
+              not th.is_alive() and sortie.get("r") == "envoye" and sortie.get("leve") is False, sortie)
+
+        def poster_pendant_retour(txt):
+            sortie["leve2"] = numgen.fin_alerte("credit:mail")       # le service revient PENDANT l'envoi
+            envois.append(txt)
+            return True, ""
+
+        numgen._poster_alerte = poster_pendant_retour
+        numgen._DERNIER_MESSAGE.clear()
+        d0 = lire()
+        d0["credit:mail"]["le"] -= 2 * 86400                          # un rappel est dû
+        poser(d0)
+        with journal():
+            r = numgen.alerter_staff("credit:mail", "⚠️ **Mail**")
+        check("service revenu pendant l'envoi du rappel : la panne n'est pas réinscrite",
+              r == "envoye" and "credit:mail" not in lire() and "credit:mail" not in numgen._DERNIER_MESSAGE,
+              (r, lire()))
+        numgen._poster_alerte = lambda texte: (envois.append(texte) or (True, ""))
+        n = len(envois)
+        with journal():
+            r = numgen.alerter_staff("credit:mail", "⚠️ **Mail**")
+        check("… et la panne suivante est dite tout de suite, comme un premier message",
+              r == "envoye" and len(envois) == n + 1 and "Rappel" not in envois[-1], (r, envois[-1:]))
+
+        def poster_lent(txt):
+            time.sleep(0.3)
+            envois.append(txt)
+            return True, ""
+
+        numgen._poster_alerte = poster_lent
+        n, res2 = len(envois), []
+        fils = [threading.Thread(target=lambda: res2.append(numgen.alerter_staff("credit:double", "⚠️ **Double**")),
+                                 daemon=True) for _ in range(2)]
+        with journal():
+            for t in fils:
+                t.start()
+            for t in fils:
+                t.join(5)
+        check("deux refus en même temps : un seul message part",
+              sorted(res2) == ["deja", "envoye"] and len(envois) == n + 1, (res2, len(envois) - n))
+        # ── relecture : le coffre Outlook rempli d'UNE adresse, aussitôt donnée ──
+        import outlook_comptes as oc
+        import outlook_x_discord as ox
+        sav_oc = (oc.nb_libres, oc.comptes)
+        numgen._poster_alerte = lambda texte: (envois.append(texte) or (True, ""))
+        try:
+            oc.nb_libres = lambda: 0
+            oc.comptes = lambda: [{"adresse": "x"}]
+            poser({"outlook:vide": {"le": int(time.time()) - 8 * 86400, "texte": "x", "refus": 3}})
+            numgen._DERNIER_MESSAGE.clear()
+            n = len(envois)
+            with journal():
+                ox.suivre_coffre("va1")
+            check("dernière adresse donnée après un remplissage : NOUVELLE panne (premier message, date du jour), pas « toujours en panne depuis » l'ancienne",
+                  len(envois) == n + 1 and "Rappel" not in envois[-1]
+                  and time.time() - fiche("outlook:vide").get("le", 0) < 60, (envois[-1:], fiche("outlook:vide")))
+        finally:
+            oc.nb_libres, oc.comptes = sav_oc
         # hors production : rien ne part, rien n'est écrit
         numgen._en_production = lambda: False
         vieillir(30 * 3600, "outlook:vide")              # un rappel serait dû : il ne doit pas partir
@@ -225,7 +327,8 @@ def bloc_b069():
     import infloww_liens as il
     sav = (gms.list_team_groups, il.EQUIPE_GMS, dict(il._GROUPES))
     appels, reponse = [], {"r": {"error": "JSON invalide"}}
-    attente = getattr(il, "GROUPES_ECHEC_S", 600)
+    long_s = getattr(il, "GROUPES_ECHEC_S", 600)
+    court_s = getattr(il, "GROUPES_ECHEC_VIDE_S", 60)
 
     def faux_groupes(equipe):
         appels.append(equipe)
@@ -241,13 +344,15 @@ def bloc_b069():
         with journal() as j:
             lus = [il.groupes_equipe() for _ in range(40)]       # 40 lignes d'un tableau
         check("lecture ratée : UN appel pour 40 lignes du tableau (avant : 40), dit une fois",
-              len(appels) == 1 and lus == [{}] * 40 and j.getvalue().count("illisibles") == 1
-              and "nouvel essai dans 10 min" in j.getvalue(), (len(appels), j.getvalue()[:200]))
-        il._GROUPES["echec"] = time.time() - attente - 1
+              len(appels) == 1 and lus == [{}] * 40 and j.getvalue().count("illisibles") == 1,
+              (len(appels), j.getvalue()[:200]))
+        check("… sans aucune lecture réussie, nouvel essai après UNE minute (pas dix : rien à rendre en attendant)",
+              "nouvel essai dans 1 min" in j.getvalue() and court_s == 60 and long_s == 600, j.getvalue()[:200])
+        il._GROUPES["echec"] = time.time() - court_s - 1
         with journal():
             il.groupes_equipe()
             il.groupes_equipe()
-        check("dix minutes plus tard : un nouvel essai, un seul", len(appels) == 2, len(appels))
+        check("une minute plus tard : un nouvel essai, un seul", len(appels) == 2, len(appels))
         il._GROUPES["echec"] = 0.0
         reponse["r"] = RuntimeError("connexion coupée")
         with journal() as j:
@@ -264,10 +369,20 @@ def bloc_b069():
               (len(appels), g1))
         il._GROUPES["t"] = time.time() - il.GROUPES_FRAIS_S - 1
         reponse["r"] = {"error": "HTTP 429"}
-        with journal():
+        with journal() as j:
             g3, g4 = il.groupes_equipe(), il.groupes_equipe()
-        check("une heure après, GetMySocial en panne : la dernière lecture connue est rendue, un seul appel",
-              len(appels) == 5 and g3 == g4 == {"a": (0, "Manager A")}, (len(appels), g3))
+        check("une heure après, GetMySocial en panne : la dernière lecture connue est rendue, un seul appel, essai dans 10 min",
+              len(appels) == 5 and g3 == g4 == {"a": (0, "Manager A")} and "nouvel essai dans 10 min" in j.getvalue(),
+              (len(appels), g3, j.getvalue()[:160]))
+        il._GROUPES["echec"] = time.time() - court_s - 1
+        with journal():
+            il.groupes_equipe()
+        check("… avec une lecture à rendre, une minute ne suffit pas : pas de nouvel appel", len(appels) == 5,
+              len(appels))
+        il._GROUPES["echec"] = time.time() - long_s - 1
+        with journal():
+            il.groupes_equipe()
+        check("… dix minutes plus tard : un nouvel essai", len(appels) == 6, len(appels))
     finally:
         gms.list_team_groups, il.EQUIPE_GMS = sav[0], sav[1]
         il._GROUPES.clear()
