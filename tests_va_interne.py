@@ -44,12 +44,14 @@ Ce qui est vérifié (podium_discord, section « VA 41 ») :
   - depuis le 12/11/2026 (« ici y a encore le va 41 tu peux le remove »,
     « je crois c des va pas de twitter ») : le BONUS DU JOUR de Twitter n'a
     plus les comptes internes, ni réunis ni chacun sa ligne, ni « sans
-    relevé » ; les VA remontent d'un rang ; la semaine et la quinzaine
-    gardent VA 41 ; un bonus d'avant le 12/11 (celui de la veille, réédité
-    le matin) garde sa ligne ; Agency, rallumé, retrouve quand même son 141 ;
-    une panne : aucun relevé plutôt que des comptes internes un par un ;
-  - INTERNES_SUR sans Twitter (la suite, si le propriétaire le dit) : plus
-    de VA 41 nulle part sur Twitter, le 1er VA touche la prime du 1er ;
+    relevé » ; les VA remontent d'un rang ; un bonus d'avant le 12/11 (celui
+    de la veille, réédité le matin) garde sa ligne ; Agency, rallumé,
+    retrouve quand même son 141 ; une panne : aucun relevé plutôt que des
+    comptes internes un par un ;
+  - la semaine et la quinzaine (« change rien que les nouveau stp ») : celles
+    en cours le 12/11 gardent VA 41, celles qui commencent le 16/11 ou après
+    n'ont plus les comptes internes, et le 1er VA touche la prime du 1er ;
+  - INTERNES_SUR sans Twitter : plus de VA 41 nulle part, tout de suite ;
   - le minimum du bonus du jour de TRUST INSTAGRAM : 20 subs depuis le
     12/11/2026, 40 pour un bonus d'avant (minimum_jour).
 
@@ -146,8 +148,8 @@ _SAUVE = {k: getattr(pd, k) for k in ("_lire_registre", "_classement_sans_intern
                                       "_quinzaine_sans_internes", "_noms_libelles_sans_internes",
                                       "_staff", "_refus_pseudos", "INTERNES_REUNIS",
                                       "INTERNES_SUR", "INTERNES_HORS_BONUS",
-                                      "INTERNES_HORS_BONUS_DEPUIS", "_avec_jessye",
-                                      "numeros_internes")}
+                                      "INTERNES_HORS_BONUS_DEPUIS", "INTERNES_HORS_DEPUIS",
+                                      "_avec_jessye", "numeros_internes")}
 _SAUVE_LV = lv._etat
 _SAUVE_SV = {k: getattr(suivi_va, k) for k in ("ETAT_FICHIER", "adresse_de")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("_etat", "_api")}
@@ -580,9 +582,57 @@ try:
           cr12["lignes"][0]["va"] == "VA 41" and cr12["lignes"][0].get("interne") is True,
           cr12["lignes"][:2])
 
-    # ── la suite, s'il le dit : plus de VA 41 nulle part sur Twitter ──
-    check("tant qu'il ne l'a pas dit : la quinzaine de Twitter n'est pas refaite",
+    # ── la semaine et la quinzaine : « change rien que les nouveau stp » ──
+    # (sa réponse du 12/11, chiffres en main) : celles en cours gardent VA 41,
+    # celles qui commencent le 16/11 ou après partent sans les comptes internes
+    L9, D15 = dt.date(2026, 11, 9), dt.date(2026, 11, 15)
+    L16, D22 = dt.date(2026, 11, 16), dt.date(2026, 11, 22)
+    check("par défaut : Twitter sans comptes internes sur les périodes qui commencent le 16/11",
+          pd.INTERNES_HORS_DEPUIS == {TW: L16}, pd.INTERNES_HORS_DEPUIS)
+    pd._INTERNES_DITS.clear()
+    jessye_lue.clear()
+    sortie = io.StringIO()
+    with contextlib.redirect_stdout(sortie):
+        c_s9 = pd.classement(L9, D15, gid=TW, mesure="tracking_abonnes")
+        c_q1 = pd.classement(dt.date(2026, 11, 1), D15, gid=TW, mesure="tracking_abonnes")
+        c_s16 = pd.classement(L16, D22, gid=TW, mesure="tracking_abonnes")
+        c_q16 = pd.classement(L16, dt.date(2026, 11, 30), gid=TW, mesure="tracking_abonnes")
+        c_c16 = pd.classement(L16, D22, gid=TW, mesure="tracking")
+    check("la semaine du 09/11 et la quinzaine du 01/11, en cours : VA 41 reste en tête, "
+          "jusqu'à leur gel (relues le 16/11 comprises)",
+          [c["lignes"][0]["va"] for c in (c_s9, c_q1)] == ["VA 41", "VA 41"]
+          and c_s9["lignes"][0].get("interne") is True, (c_s9["lignes"][:2], c_q1["lignes"][:2]))
+    sans = [("VA 124", 48), ("VA 95", 8), ("VA 31", 0)]
+    check("la semaine et la quinzaine du 16/11 : ni VA 41, ni un compte interne sur sa ligne, "
+          "ni « sans relevé » ; en abonnés comme en clics",
+          all([(x["va"], x["clics"]) for x in c["lignes"]] == sans and c["illisibles"] == []
+              for c in (c_s16, c_q16, c_c16)), (c_s16["lignes"], c_q16["lignes"], c_c16["lignes"]))
+    check("… leur part Jessye n'est lue que pour les périodes qui gardent VA 41, et c'est dit",
+          jessye_lue == [(L9, D15), (dt.date(2026, 11, 1), D15)]
+          and "hors des périodes du 16/11 et après" in sortie.getvalue(),
+          (jessye_lue, sortie.getvalue()))
+    cb16, _ = au_bonus(lambda: pd.classement(L16, L16, gid=TW, mesure="tracking_abonnes"))
+    check("… le bonus du 16/11 aussi",
+          [x["va"] for x in cb16["lignes"]] == ["VA 124", "VA 95", "VA 31"], cb16["lignes"])
+    posts.clear()
+    sv.unlink(missing_ok=True)
+    s16 = {"lignes": [ligne("VA 124", 124, 151), ligne("VA 95", 95, 15)]}
+    bilan16 = suivi_va.annoncer_primes(TW, s16, L16, D22)
+    check("… la prime de la semaine du 16/11 : le 1er VA touche celle du 1er (10 $), "
+          "plus celle du rang d'en dessous",
+          not bilan16.get("internes") and len(posts) == 1
+          and "1e de la semaine — 10.00$" in posts[0][2]["embeds"][0]["title"], (bilan16, posts))
+    check("… la quinzaine en cours n'est pas refaite (pas de format « +seuls-ses-va »)",
           not pd._seuls_ses_va(TW) and "+seuls-ses-va" not in pd._format_subs(TW), pd._format_subs(TW))
+    pd.INTERNES_HORS_DEPUIS = {}
+    with contextlib.redirect_stdout(io.StringIO()):
+        c_r16 = pd.classement(L16, D22, gid=TW, mesure="tracking_abonnes")
+    pd.INTERNES_HORS_DEPUIS = dict(_SAUVE["INTERNES_HORS_DEPUIS"])
+    check("POUR REVENIR, INTERNES_HORS_DEPUIS = {} : VA 41 revient sur les périodes neuves",
+          c_r16["lignes"][0]["va"] == "VA 41" and c_r16["lignes"][0].get("interne") is True,
+          c_r16["lignes"][:2])
+
+    # ── INTERNES_SUR sans Twitter : plus de VA 41 nulle part, périodes en cours comprises ──
     pd.INTERNES_SUR = set()
     pd._INTERNES_DITS.clear()
     jessye_lue.clear()
@@ -598,13 +648,6 @@ try:
           and jessye_lue == [] and "hors du classement" in sortie.getvalue(), (va, sortie.getvalue()))
     check("… la quinzaine de Twitter est refaite au premier passage (format « +seuls-ses-va »)",
           pd._seuls_ses_va(TW) and pd._format_subs(TW).endswith("+seuls-ses-va"), pd._format_subs(TW))
-    posts.clear()
-    sv.unlink(missing_ok=True)
-    semaine = {"lignes": [ligne("VA 124", 124, 151), ligne("VA 95", 95, 15)]}
-    bilan2 = suivi_va.annoncer_primes(TW, semaine, dt.date(2026, 11, 9), dt.date(2026, 11, 15))
-    check("… la prime : le 1er VA touche celle du 1er (10 $), plus celle du rang d'en dessous",
-          not bilan2.get("internes") and len(posts) == 1
-          and "1e de la semaine — 10.00$" in posts[0][2]["embeds"][0]["title"], (bilan2, posts))
     pd.INTERNES_SUR = set(_SAUVE["INTERNES_SUR"])
     pd._avec_jessye = _SAUVE["_avec_jessye"]
 

@@ -6177,7 +6177,9 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # 25 VA Discord. Pas une liste de prénoms : un compte interne neuf rejoint
 # VA 41 tout seul, un VA qui crée son lien en sort.
 #  - Twitter : ces lignes réunies en « VA 41 » (bonus, semaine, quinzaine ;
-#    plus au bonus du jour depuis le 12/11/2026, INTERNES_HORS_BONUS) ;
+#    plus au bonus du jour depuis le 12/11/2026, INTERNES_HORS_BONUS, ni à
+#    la semaine et à la quinzaine qui commencent le 16/11/2026 ou après,
+#    INTERNES_HORS_DEPUIS) ;
 #  - Agency : les abonnés des mêmes trackings, au bonus et à la semaine (sa
 #    quinzaine les compte déjà, dans les trois lignes YouLab : les y ajouter
 #    serait les compter deux fois) ;
@@ -6225,6 +6227,24 @@ INTERNES_HORS_BONUS = {TWITTER_ID}
 #: un message posté ne se réécrit qu'avec l'accord du propriétaire (règle du
 #: 25/10/2026). Reculer cette date réécrit donc la veille au passage suivant.
 INTERNES_HORS_BONUS_DEPUIS = dt.date(2026, 11, 12)
+#: … et la semaine et la quinzaine : {serveur: le premier jour des périodes
+#: sans comptes internes}. Propriétaire, 12/11/2026, à qui la question était
+#: posée chiffres en main (semaine du 09/11 : VA 41 1er à 310 subs, VA 96
+#: 2e à 5 $ au lieu de 10 $) : « change rien que les nouveau stp », et pour
+#: le bonus du 11/11 déjà posté : « Non, le laisser ». Une période qui
+#: COMMENCE ce jour-là ou après n'a plus les comptes internes (semaine et
+#: quinzaine du 16/11, les premières neuves) ; celles en cours ce 12/11
+#: (semaine du 09/11, quinzaine du 01/11) gardent VA 41 jusqu'à leur gel, et
+#: une période d'avant relue plus tard (« Période précédente ») aussi.
+#: POUR REVENIR (VA 41 sur les périodes neuves de Twitter) : {}.
+INTERNES_HORS_DEPUIS: Dict[str, dt.date] = {TWITTER_ID: dt.date(2026, 11, 16)}
+
+
+def _periode_sans_internes(gid: Optional[str], debut: dt.date) -> bool:
+    """La période qui commence le `debut` est-elle de celles où ce serveur
+    n'a plus ses comptes internes (INTERNES_HORS_DEPUIS) ?"""
+    depuis = INTERNES_HORS_DEPUIS.get(str(gid or ""))
+    return depuis is not None and debut >= depuis
 
 
 def _internes_sur(gid: Optional[str]) -> bool:
@@ -6476,7 +6496,7 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
                etiquette: str = "podium") -> Dict[str, Any]:
     """Le classement du serveur, ses comptes internes en une ligne (VA 41) —
     ou sans eux, là où Twitter ne les montre plus (INTERNES_SUR,
-    INTERNES_HORS_BONUS)."""
+    INTERNES_HORS_BONUS, INTERNES_HORS_DEPUIS)."""
     cl = _classement_sans_internes(debut, fin, pause=pause, gid=gid, mesure=mesure,
                                    etiquette=etiquette)
     g, src = str(gid or ""), _source(gid, mesure)
@@ -6487,6 +6507,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
         if g == TWITTER_ID and src in ("tracking", "tracking_abonnes"):
             if not _LIGNE_INTERNE_VOULUE.get():
                 sortis = ("du classement" if g not in INTERNES_SUR
+                          else f"des périodes du {INTERNES_HORS_DEPUIS[g]:%d/%m} et après"
+                          if _periode_sans_internes(g, debut)
                           else "du bonus du jour" if _hors_bonus(g, debut) else "")
             libs = {f"VA {n}": n for n in numeros_internes()}
             if sortis:
