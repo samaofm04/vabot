@@ -179,8 +179,28 @@ DEBUT_BAREME_JOUR = dt.date(2026, 10, 25)
 #: propriétaire : « il faut faire au moins 40 subs pour la prime
 #: quotidienne » (Twitter, Instagram), « au moins 400 clics US » (Threads,
 #: le « US » de ses lignes). Une place en dessous reste affichée, sans prime.
-MINIMUM_JOUR = {"1445108485090971710": 40, "1488331963575177247": 40,
+#: TRUST INSTAGRAM : 20 depuis le bonus du 12/11/2026 (propriétaire : « aussi
+#: pour ig met la prime quotidienne à 20 sub »).
+MINIMUM_JOUR = {"1445108485090971710": 40, "1488331963575177247": 20,
                 "1498948161039896586": 400}
+#: Le minimum d'AVANT un changement : {serveur: [(premier jour du minimum
+#: suivant, minimum d'avant)]}. Comme le barème, le minimum est celui du JOUR
+#: du bonus : jusqu'à midi, _bonus_veille réédite le bonus de la veille, et
+#: celui du 11/11 de TRUST INSTAGRAM serait passé de « min. 40 » à « min. 20 »
+#: sous les yeux des VA, une place sans prime devenant payée après coup.
+MINIMUM_JOUR_AVANT = {"1488331963575177247": [(dt.date(2026, 11, 12), 40)]}
+
+
+def minimum_jour(gid: Optional[str], jour: dt.date) -> int:
+    """Le minimum de la prime du jour sur ce serveur, tel qu'il valait ce
+    jour-là (0 avant le 25/10/2026 : pas de minimum)."""
+    if jour < DEBUT_BAREME_JOUR:
+        return 0
+    g = str(gid or "")
+    for suivant, avant in sorted(MINIMUM_JOUR_AVANT.get(g) or []):
+        if jour < suivant:
+            return int(avant)
+    return int(MINIMUM_JOUR.get(g, 0))
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
 ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
 # Les espaces GetMySocial qui portent des liens de VA. Il y en a DEUX : les
@@ -4216,6 +4236,11 @@ def _seuls_ses_va(gid: Optional[str]) -> bool:
         return not subs_va.YOULAB_SUR_AGENCY
     if g == THREADS_ID:
         return not VA_IG_SUR_THREADS or not _internes_sur(THREADS_ID)
+    if g == TWITTER_ID:
+        # VA 41 sorti de sa quinzaine (INTERNES_SUR sans Twitter) : refaite au
+        # premier passage. Le bonus du jour seul (INTERNES_HORS_BONUS) n'y
+        # change rien
+        return not _internes_sur(TWITTER_ID)
     return False
 
 
@@ -4308,7 +4333,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
     Une place à 0 sub reste vide (« — ») : « VA 1 — 0 subs → 5.00$ » se
     réclamerait, et le message n'explique plus un jour sans sub.
 
-    Depuis le 25/10/2026, un minimum (MINIMUM_JOUR) : une place en dessous
+    Depuis le 25/10/2026, un minimum (minimum_jour) : une place en dessous
     reste affichée, « → pas de prime (min. 40) », et une ligne le dit. Le
     barème et le minimum sont ceux du JOUR du bonus : un bonus d'avant,
     réécrit, garde 7,50 / 5 / 3,50 $ et pas de minimum. Threads compte des
@@ -4316,7 +4341,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date,
     Canada) range et fait le minimum."""
     clics = _unite(gid) == "clics"
     primes = PRIMES_JOUR if jour >= DEBUT_BAREME_JOUR else PRIMES_JOUR_AVANT
-    mini = int(MINIMUM_JOUR.get(str(gid or ""), 0)) if jour >= DEBUT_BAREME_JOUR else 0
+    mini = minimum_jour(gid, jour)
 
     def us(x: Dict[str, Any]) -> int:
         return int(x.get("clics_subs", x.get("clics")) or 0) if clics else int(x.get("clics") or 0)
@@ -6151,7 +6176,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # « VA 3 - Roucham ( normal / spam ) », « (Carter) », Jerry, Tiger, Robot…),
 # 25 VA Discord. Pas une liste de prénoms : un compte interne neuf rejoint
 # VA 41 tout seul, un VA qui crée son lien en sort.
-#  - Twitter : ces lignes réunies en « VA 41 » (bonus, semaine, quinzaine) ;
+#  - Twitter : ces lignes réunies en « VA 41 » (bonus, semaine, quinzaine ;
+#    plus au bonus du jour depuis le 12/11/2026, INTERNES_HORS_BONUS) ;
 #  - Agency : les abonnés des mêmes trackings, au bonus et à la semaine (sa
 #    quinzaine les compte déjà, dans les trois lignes YouLab : les y ajouter
 #    serait les compter deux fois) ;
@@ -6181,7 +6207,24 @@ INTERNES_REUNIS = True
 #: deux serveurs touchaient la prime du rang d'en dessous. Les pages déjà
 #: figées les gardent, et 👀 Pseudos les nomme encore (_noms_libelles).
 #: POUR LES REMETTRE : {TWITTER_ID, AGENCY_IG_ID, THREADS_ID}.
+#: Twitter retiré de l'ensemble : ses comptes internes n'ont plus AUCUNE
+#: ligne, ni réunie (VA 41) ni chacun la sienne (_sans_internes) — ce n'est
+#: pas INTERNES_REUNIS = False, qui les remet un par un (59 numéros le 25/10).
 INTERNES_SUR = {TWITTER_ID}
+#: Les serveurs dont le BONUS DU JOUR n'a plus les comptes internes, même
+#: s'ils gardent leur ligne à la semaine et à la quinzaine (INTERNES_SUR).
+#: Propriétaire, 12/11/2026, devant le bonus du 11/11 de TRUST TWITTER
+#: (« 🥉 VA 41 — 60 subs → 2.00$ ») : « ici y a encore le va 41 tu peux le
+#: remove stp », « je crois c des va pas de twitter ». VA 41 y prenait une
+#: place que personne ne touche : ce jour-là, VA 95 (43 subs, au-dessus du
+#: minimum) est resté 4e, sans la 🥉 à 2 $. Les VA remontent d'un rang.
+#: POUR REVENIR (VA 41 au bonus de Twitter) : set().
+INTERNES_HORS_BONUS = {TWITTER_ID}
+#: … à partir du bonus de ce jour. Un bonus d'avant, déjà posté, garde sa
+#: ligne VA 41 : jusqu'à midi, _bonus_veille réédite celui de la veille, et
+#: un message posté ne se réécrit qu'avec l'accord du propriétaire (règle du
+#: 25/10/2026). Reculer cette date réécrit donc la veille au passage suivant.
+INTERNES_HORS_BONUS_DEPUIS = dt.date(2026, 11, 12)
 
 
 def _internes_sur(gid: Optional[str]) -> bool:
@@ -6189,6 +6232,14 @@ def _internes_sur(gid: Optional[str]) -> bool:
     Sans regroupement (INTERNES_REUNIS False), il n'y a pas de comptes
     internes : chacun est un VA comme les autres, comme avant le 25/10/2026."""
     return not INTERNES_REUNIS or str(gid or "") in INTERNES_SUR
+
+
+def _hors_bonus(gid: Optional[str], jour: dt.date) -> bool:
+    """Ce relevé est-il un bonus du jour d'où les comptes internes sont sortis
+    (INTERNES_HORS_BONUS) ? Le bonus se relève sous _BONUS_EN_COURS
+    (rafraichir_bonus, le bonus de la veille compris)."""
+    return (bool(_BONUS_EN_COURS.get()) and str(gid or "") in INTERNES_HORS_BONUS
+            and jour >= INTERNES_HORS_BONUS_DEPUIS)
 
 
 _LIEN_VA_DISCORD = re.compile(r"^\s*(?:Twitter|Threads|Instagram) VA \d+ @", re.IGNORECASE)
@@ -6202,6 +6253,10 @@ _TW_INTERNES: Dict[Tuple[str, str, bool], Tuple[float, Dict[str, Any]]] = {}
 _INTERNES_DITS: set = set()
 _EN_QUINZAINE_THREADS: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "podium_quinzaine_threads", default=False)
+#: Agency relit Twitter pour SA ligne interne (_avec_internes_agency) : il lui
+#: faut le relevé réuni, même là où Twitter n'affiche plus VA 41
+_LIGNE_INTERNE_VOULUE: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "podium_ligne_interne_voulue", default=False)
 
 
 def numeros_internes(reg: Optional[Dict[str, Any]] = None) -> set:
@@ -6306,6 +6361,30 @@ def _reunir(cl: Dict[str, Any], gid: str, libs: Dict[str, int], tri) -> Dict[str
     return dict(cl, lignes=reste, illisibles=sorted(illis))
 
 
+def _sans_internes(cl: Dict[str, Any], gid: str, libs: Dict[str, int],
+                   quoi: str) -> Dict[str, Any]:
+    """Le classement sans les lignes de `libs` (les comptes internes) : ni
+    réunies, ni chacune à sa place, ni « sans relevé » à leur nom — le staff
+    lirait « VA 27 » sous 👀 sans savoir que ce n'est pas un VA. Les autres
+    lignes gardent leur ordre et remontent d'autant. Jamais écartés en
+    silence : comptés et dits au journal, une fois par total."""
+    if not isinstance(cl, dict):
+        return cl
+    lignes = [x for x in cl.get("lignes") or [] if str(x.get("va")) not in libs]
+    illis = [v for v in cl.get("illisibles") or [] if str(v) not in libs]
+    n = len(cl.get("lignes") or []) - len(lignes)
+    m = len(cl.get("illisibles") or []) - len(illis)
+    if not n and not m:
+        return cl
+    dit = f"hors|{gid}|{quoi}|{n}|{m}"
+    if dit not in _INTERNES_DITS:
+        _INTERNES_DITS.add(dit)
+        print(f"[podium] {gid} : {n + m} compte(s) interne(s) hors {quoi} "
+              f"({n} avec relevé, {m} sans) : ni {libelle_interne(gid)}, ni chacun sa ligne",
+              flush=True)
+    return dict(cl, lignes=lignes, illisibles=illis)
+
+
 def _tri_tracking(x: Dict[str, Any]):
     return (-int(x.get("clics") or 0), str(x.get("model") or ""), int(x.get("numero") or 0))
 
@@ -6320,7 +6399,12 @@ def _avec_internes_agency(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if deja and 0 <= time.time() - deja[0] < TW_INTERNES_S:
         tw = deja[1]
     else:
-        tw = classement(debut, fin, gid=TWITTER_ID, mesure="tracking_abonnes", etiquette=etiquette)
+        jeton = _LIGNE_INTERNE_VOULUE.set(True)
+        try:
+            tw = classement(debut, fin, gid=TWITTER_ID, mesure="tracking_abonnes",
+                            etiquette=etiquette)
+        finally:
+            _LIGNE_INTERNE_VOULUE.reset(jeton)
     lib = libelle_interne(AGENCY_IG_ID)
     x = next((x for x in tw.get("lignes") or [] if x.get("interne")), None)
     lignes = [y for y in cl.get("lignes") or [] if str(y.get("va")) != lib]
@@ -6390,17 +6474,28 @@ _classement_sans_internes = classement
 def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
                gid: Optional[str] = None, mesure: Optional[str] = None,
                etiquette: str = "podium") -> Dict[str, Any]:
-    """Le classement du serveur, ses comptes internes en une ligne (VA 41)."""
+    """Le classement du serveur, ses comptes internes en une ligne (VA 41) —
+    ou sans eux, là où Twitter ne les montre plus (INTERNES_SUR,
+    INTERNES_HORS_BONUS)."""
     cl = _classement_sans_internes(debut, fin, pause=pause, gid=gid, mesure=mesure,
                                    etiquette=etiquette)
     g, src = str(gid or ""), _source(gid, mesure)
     if not INTERNES_REUNIS:
         return cl
+    sortis = ""
     try:
         if g == TWITTER_ID and src in ("tracking", "tracking_abonnes"):
+            if not _LIGNE_INTERNE_VOULUE.get():
+                sortis = ("du classement" if g not in INTERNES_SUR
+                          else "du bonus du jour" if _hors_bonus(g, debut) else "")
+            libs = {f"VA {n}": n for n in numeros_internes()}
+            if sortis:
+                # avant _avec_jessye : leur part Jessye n'est pas lue chez
+                # Infloww pour des lignes qui ne paraîtront pas
+                return _sans_internes(cl, g, libs, sortis)
             if src == "tracking_abonnes":
                 cl = _avec_jessye(cl, debut, fin)       # voir INTERNES_JESSYE
-            out = _reunir(cl, g, {f"VA {n}": n for n in numeros_internes()}, _tri_tracking)
+            out = _reunir(cl, g, libs, _tri_tracking)
             if src == "tracking_abonnes":
                 _TW_INTERNES[(debut.isoformat(), fin.isoformat(), bool(_BONUS_EN_COURS.get()))] = (
                     time.time(), out)
@@ -6413,6 +6508,14 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3,   # noqa: F811
                 and (cl.get("lignes") or cl.get("illisibles"))):
             return _avec_internes_threads(cl, debut, fin, etiquette)
     except Exception as e:                                   # noqa: BLE001
+        if sortis:
+            # on ne sait plus qui est interne : aucun relevé (le message reste
+            # tel quel, repris au passage suivant) plutôt que des comptes
+            # internes chacun sur sa ligne, à une place qui se réclame
+            print(f"[podium] {g} : comptes internes illisibles ({type(e).__name__}: {e}), "
+                  f"aucun relevé plutôt que de les laisser dans le classement", flush=True)
+            return dict(cl, lignes=[], illisibles=[],
+                        erreur=f"comptes internes illisibles ({type(e).__name__})")
         # le classement d'avant plutôt que rien : les comptes internes y
         # restent chacun sur sa ligne, et c'est dit
         print(f"[podium] {g} : comptes internes non réunis ({type(e).__name__}: {e})", flush=True)

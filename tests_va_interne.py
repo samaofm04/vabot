@@ -40,7 +40,18 @@ Ce qui est vérifié (podium_discord, section « VA 41 ») :
     et Threads y a que Threads ») : INTERNES_SUR = {Twitter}, VA 41 reste,
     ni « Instagram VA 141 » ni « Threads 142 » (semaine, bonus, quinzaine),
     et rien n'est relu pour eux. Le mécanisme d'avant reste vérifié plus
-    haut, l'interrupteur rallumé.
+    haut, l'interrupteur rallumé ;
+  - depuis le 12/11/2026 (« ici y a encore le va 41 tu peux le remove »,
+    « je crois c des va pas de twitter ») : le BONUS DU JOUR de Twitter n'a
+    plus les comptes internes, ni réunis ni chacun sa ligne, ni « sans
+    relevé » ; les VA remontent d'un rang ; la semaine et la quinzaine
+    gardent VA 41 ; un bonus d'avant le 12/11 (celui de la veille, réédité
+    le matin) garde sa ligne ; Agency, rallumé, retrouve quand même son 141 ;
+    une panne : aucun relevé plutôt que des comptes internes un par un ;
+  - INTERNES_SUR sans Twitter (la suite, si le propriétaire le dit) : plus
+    de VA 41 nulle part sur Twitter, le 1er VA touche la prime du 1er ;
+  - le minimum du bonus du jour de TRUST INSTAGRAM : 20 subs depuis le
+    12/11/2026, 40 pour un bonus d'avant (minimum_jour).
 
 Aucun appel réseau. Lancement : python tests_va_interne.py
 """
@@ -134,7 +145,9 @@ _SAUVE = {k: getattr(pd, k) for k in ("_lire_registre", "_classement_sans_intern
                                       "_liens_twitter", "_entites_jessye", "_releve_liens",
                                       "_quinzaine_sans_internes", "_noms_libelles_sans_internes",
                                       "_staff", "_refus_pseudos", "INTERNES_REUNIS",
-                                      "INTERNES_SUR")}
+                                      "INTERNES_SUR", "INTERNES_HORS_BONUS",
+                                      "INTERNES_HORS_BONUS_DEPUIS", "_avec_jessye",
+                                      "numeros_internes")}
 _SAUVE_LV = lv._etat
 _SAUVE_SV = {k: getattr(suivi_va, k) for k in ("ETAT_FICHIER", "adresse_de")}
 _SAUVE_TK = {k: getattr(tk, k) for k in ("_etat", "_api")}
@@ -485,6 +498,137 @@ try:
     check("… 👀 Pseudos nomme encore 141 et 142 (pages figées d'avant)",
           str(pd._noms_libelles(AG).get("Instagram VA 141", "")).startswith("comptes internes")
           and str(pd._noms_libelles(TH).get("Threads 142", "")).startswith("comptes internes"))
+
+    # ── le bonus du jour de Twitter sans les comptes internes (12/11/2026) ──
+    # « ici y a encore le va 41 tu peux le remove stp », « je crois c des va
+    # pas de twitter », devant « 🥉 VA 41 — 60 subs → 2.00$ » (bonus du 11/11)
+    J11, J12 = dt.date(2026, 11, 11), dt.date(2026, 11, 12)
+
+    def au_bonus(f):
+        """f() comme dans rafraichir_bonus, et ce que le journal en a dit."""
+        jeton, dit = pd._BONUS_EN_COURS.set(True), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(dit):
+                return f(), dit.getvalue()
+        finally:
+            pd._BONUS_EN_COURS.reset(jeton)
+
+    check("par défaut : le bonus du jour de Twitter sans les comptes internes, depuis le 12/11",
+          pd.INTERNES_HORS_BONUS == {TW} and pd.INTERNES_HORS_BONUS_DEPUIS == J12
+          and pd.INTERNES_SUR == {TW}, (pd.INTERNES_HORS_BONUS, pd.INTERNES_HORS_BONUS_DEPUIS))
+    jessye_lue = []
+    pd._avec_jessye = lambda cl, d, f: (jessye_lue.append((d, f)), cl)[1]
+    pd._INTERNES_DITS.clear()
+    pd._TW_INTERNES.clear()
+    cb12, dit12 = au_bonus(lambda: pd.classement(J12, J12, gid=TW, mesure="tracking_abonnes"))
+    va = [(x["va"], x["clics"]) for x in cb12["lignes"]]
+    check("bonus du 12/11 : ni VA 41, ni un compte interne sur sa ligne (VA 12, VA 24) ; "
+          "les VA remontent d'un rang",
+          va == [("VA 124", 48), ("VA 95", 8), ("VA 31", 0)]
+          and not any(x.get("interne") for x in cb12["lignes"]), va)
+    check("… ni « sans relevé » à leur nom (VA 11), ni part Jessye lue chez Infloww pour rien",
+          cb12["illisibles"] == [] and jessye_lue == [], (cb12["illisibles"], jessye_lue))
+    check("… jamais écartés en silence : comptés au journal (3 avec relevé, 1 sans)",
+          "4 compte(s) interne(s) hors du bonus du jour (3 avec relevé, 1 sans)" in dit12, dit12)
+    e12 = pd.embed_bonus(cb12, J12, TW)["description"]
+    check("… le message : 🥇 VA 124 à 5 $, la 🥈 sous le minimum, la 🥉 vide ; aucun compte interne",
+          "🥇 **VA 124** — **48 subs** → **5.00$**" in e12
+          and "🥈 **VA 95** — **8 subs** → pas de prime (min. 40)" in e12
+          and "🥉 **—** → **2.00$**" in e12
+          and not any(n in e12 for n in ("**VA 41**", "**VA 12**", "**VA 24**", "**VA 11**",
+                                         "interne")), e12)
+    rep12 = pd._voir_pseudos_message({"guild_id": TW, "message": {
+        "embeds": [dict(pd.embed_bonus(cb12, J12, TW))]}})
+    check("… 👀 Pseudos sous ce bonus : aucun compte interne nommé",
+          "comptes internes" not in rep12["data"]["content"] and "bigmaxm" in rep12["data"]["content"],
+          rep12["data"]["content"])
+    check("… 👀 Pseudos sous un bonus d'avant, qui montre VA 41 : toujours nommé",
+          f"VA 41 · **{texte}**" in rep["data"]["content"] and pd._noms_libelles(TW)[41] == texte)
+    check("… rien n'est gardé pour Agency d'un relevé sans la ligne interne",
+          pd._TW_INTERNES == {}, pd._TW_INTERNES)
+    with contextlib.redirect_stdout(io.StringIO()):
+        cs12 = pd.classement(dt.date(2026, 11, 9), J12, gid=TW, mesure="tracking_abonnes")
+    check("la semaine et la quinzaine (hors bonus) gardent VA 41 en tête, part Jessye lue",
+          cs12["lignes"][0]["va"] == "VA 41" and cs12["lignes"][0]["clics"] == 261
+          and cs12["lignes"][0].get("interne") is True and len(jessye_lue) == 1, cs12["lignes"][:2])
+    cb11, _ = au_bonus(lambda: pd.classement(J11, J11, gid=TW, mesure="tracking_abonnes"))
+    check("le bonus du 11/11, réédité le 12 au matin (_bonus_veille) : sa ligne VA 41 reste, "
+          "un message posté ne se réécrit pas tout seul",
+          cb11["lignes"][0]["va"] == "VA 41" and cb11["lignes"][0]["clics"] == 261, cb11["lignes"][:2])
+    # Agency rallumé : son 141 se lit dans le relevé RÉUNI de Twitter, même au
+    # bonus, où Twitter n'affiche plus VA 41
+    pd.INTERNES_SUR = {TW, AG}
+    pd._TW_INTERNES.clear()
+    ca12, _ = au_bonus(lambda: pd.classement(J12, J12, gid=AG, mesure=pd._mesure_podium(AG)))
+    pd.INTERNES_SUR = {TW}
+    check("Agency rallumé (INTERNES_SUR) : « Instagram VA 141 » à 261 à son bonus, "
+          "bien que Twitter n'y ait plus VA 41",
+          ca12["lignes"][0]["va"] == "Instagram VA 141" and ca12["lignes"][0]["clics"] == 261,
+          ca12["lignes"][:2])
+    pd._TW_INTERNES.clear()
+    pd.numeros_internes = lambda reg=None: 1 / 0
+    cp12, ditp = au_bonus(lambda: pd.classement(J12, J12, gid=TW, mesure="tracking_abonnes"))
+    pd.numeros_internes = _SAUVE["numeros_internes"]
+    check("comptes internes illisibles au bonus : aucun relevé (le message reste tel quel), "
+          "jamais les comptes internes chacun sur sa ligne",
+          cp12["lignes"] == [] and cp12["illisibles"] == [] and "illisibles" in cp12["erreur"]
+          and "aucun relevé" in ditp, (cp12, ditp))
+    pd.INTERNES_HORS_BONUS = set()
+    cr12, _ = au_bonus(lambda: pd.classement(J12, J12, gid=TW, mesure="tracking_abonnes"))
+    pd.INTERNES_HORS_BONUS = set(_SAUVE["INTERNES_HORS_BONUS"])
+    check("POUR REVENIR, INTERNES_HORS_BONUS = set() : VA 41 revient au bonus",
+          cr12["lignes"][0]["va"] == "VA 41" and cr12["lignes"][0].get("interne") is True,
+          cr12["lignes"][:2])
+
+    # ── la suite, s'il le dit : plus de VA 41 nulle part sur Twitter ──
+    check("tant qu'il ne l'a pas dit : la quinzaine de Twitter n'est pas refaite",
+          not pd._seuls_ses_va(TW) and "+seuls-ses-va" not in pd._format_subs(TW), pd._format_subs(TW))
+    pd.INTERNES_SUR = set()
+    pd._INTERNES_DITS.clear()
+    jessye_lue.clear()
+    sortie = io.StringIO()
+    with contextlib.redirect_stdout(sortie):
+        cw = pd.classement(dt.date(2026, 11, 9), J12, gid=TW, mesure="tracking_abonnes")
+        cwc = pd.classement(dt.date(2026, 11, 9), J12, gid=TW, mesure="tracking")
+    va = [(x["va"], x["clics"]) for x in cw["lignes"]]
+    check("INTERNES_SUR sans Twitter : semaine et quinzaine sans comptes internes, "
+          "ni réunis ni un par un, en abonnés comme en clics",
+          va == [("VA 124", 48), ("VA 95", 8), ("VA 31", 0)] and cw["illisibles"] == []
+          and [x["va"] for x in cwc["lignes"]] == ["VA 124", "VA 95", "VA 31"]
+          and jessye_lue == [] and "hors du classement" in sortie.getvalue(), (va, sortie.getvalue()))
+    check("… la quinzaine de Twitter est refaite au premier passage (format « +seuls-ses-va »)",
+          pd._seuls_ses_va(TW) and pd._format_subs(TW).endswith("+seuls-ses-va"), pd._format_subs(TW))
+    posts.clear()
+    sv.unlink(missing_ok=True)
+    semaine = {"lignes": [ligne("VA 124", 124, 151), ligne("VA 95", 95, 15)]}
+    bilan2 = suivi_va.annoncer_primes(TW, semaine, dt.date(2026, 11, 9), dt.date(2026, 11, 15))
+    check("… la prime : le 1er VA touche celle du 1er (10 $), plus celle du rang d'en dessous",
+          not bilan2.get("internes") and len(posts) == 1
+          and "1e de la semaine — 10.00$" in posts[0][2]["embeds"][0]["title"], (bilan2, posts))
+    pd.INTERNES_SUR = set(_SAUVE["INTERNES_SUR"])
+    pd._avec_jessye = _SAUVE["_avec_jessye"]
+
+    # ── le minimum du bonus du jour de TRUST INSTAGRAM : 20 subs (12/11/2026) ──
+    # « aussi pour ig met la prime quotidienne à 20 sub »
+    check("minimum du jour : TRUST INSTAGRAM à 20 depuis le 12/11, 40 avant ; Twitter 40, "
+          "Threads 400 ; rien avant le 25/10",
+          (pd.minimum_jour(AG, J12), pd.minimum_jour(AG, J11), pd.minimum_jour(TW, J12),
+           pd.minimum_jour(TH, J12), pd.minimum_jour(AG, J), pd.minimum_jour(None, J12))
+          == (20, 40, 40, 400, 0, 0))
+    cig = {"lignes": [ligne("Instagram VA 100", 100, 41), ligne("Instagram VA 63", 63, 25),
+                      ligne("Instagram VA 92", 92, 19)], "illisibles": []}
+    i12 = pd.embed_bonus(cig, J12, AG)["description"]
+    i11 = pd.embed_bonus(cig, J11, AG)["description"]
+    check("TRUST INSTAGRAM, bonus du 12/11 : 25 subs payés, 19 non, « Minimum 20 subs »",
+          "🥈 **Instagram VA 63** — **25 subs** → **3.00$**" in i12
+          and "🥉 **Instagram VA 92** — **19 subs** → pas de prime (min. 20)" in i12
+          and "\nMinimum 20 subs dans la journée pour toucher la prime.\n" in i12, i12)
+    check("… son bonus du 11/11, réédité le 12 au matin : toujours 40, 25 subs sans prime",
+          "🥈 **Instagram VA 63** — **25 subs** → pas de prime (min. 40)" in i11
+          and "Minimum 40 subs" in i11, i11)
+    check("… Twitter garde 40 le 12/11",
+          "Minimum 40 subs" in pd.embed_bonus({"lignes": [ligne("VA 124", 124, 25)], "illisibles": []},
+                                              J12, TW)["description"])
 
     # ── l'interrupteur ──
     pd.INTERNES_REUNIS = False
