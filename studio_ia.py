@@ -28,6 +28,11 @@ model avec la tenue lue sur une image du reel, puis Wan 2.2 Animate Replace
 met cette photo retouchée dans le reel. Sans la retouche, Wan habillait la
 model comme sur sa photo (t-shirt blanc à la place du hoodie, vu le 04/11) :
 le propriétaire veut « mêmes vêtements, seul le perso change ».
+
+Le genre « Sans caption » retire l'écriture incrustée d'une vidéo en un clic
+(Kling 3.0 Omni, consigne fixe dans kie_ai.PROMPT_SANS_TEXTE). Kling rend la
+vidéo muette : la piste son de la vidéo déposée est remise au rapatriement,
+sans réencoder l'image.
 """
 from __future__ import annotations
 
@@ -161,6 +166,15 @@ T = {
         "perso_etape_retouche": "1/2 · la model prend la tenue du reel",
         "perso_etape_remplacement": "2/2 · remplacement du personnage dans le reel",
         "perso_etape_fini": "terminé",
+        "sanstexte": "Sans caption",
+        "deposer_sanstexte": "Clique ou dépose la vidéo dont il faut retirer l'écriture",
+        "deposer_aide_sanstexte": "MP4/MOV de 3 à 15 s, 700 px de côté au moins",
+        "sanstexte_refs": "Il faut une vidéo, et rien d'autre.",
+        "sanstexte_petite": "Vidéo trop petite ({w}×{h}) : Kling demande au moins {min} px de côté.",
+        "sanstexte_lance": "Lancé : l'écriture est retirée, le son d'origine sera remis (≈ {n} crédits).",
+        "sanstexte_generer": "Retirer la caption",
+        "sanstexte_sans_prompt": "Rien à écrire : dépose la vidéo et clique « Retirer la caption ».",
+        "sanstexte_muet": "Le son d'origine n'a pas pu être remis : la vidéo est muette.",
         "visage_machine_ok": "Machine en ligne : {nom} (vue il y a {d}).",
         "visage_machine_occupee": "{nom} travaille (vue il y a {d}).",
         "visage_sans_machine": "Aucune machine en ligne pour le visage : le travail attendra qu'elle se connecte (le Mac, allumé et déverrouillé).",
@@ -251,6 +265,15 @@ T = {
         "perso_etape_retouche": "1/2 · the model takes the reel's outfit",
         "perso_etape_remplacement": "2/2 · replacing the character in the reel",
         "perso_etape_fini": "done",
+        "sanstexte": "Remove caption",
+        "deposer_sanstexte": "Click or drop the video to strip of its text",
+        "deposer_aide_sanstexte": "MP4/MOV, 3 to 15 s, at least 700 px per side",
+        "sanstexte_refs": "One video is needed, and nothing else.",
+        "sanstexte_petite": "Video too small ({w}×{h}): Kling needs at least {min} px per side.",
+        "sanstexte_lance": "Started: the text is being removed, the original sound will be put back (≈ {n} credits).",
+        "sanstexte_generer": "Remove the caption",
+        "sanstexte_sans_prompt": "Nothing to write: drop the video and click “Remove the caption”.",
+        "sanstexte_muet": "The original sound could not be put back: the video is silent.",
         "visage_machine_ok": "Machine online: {nom} (seen {d}).",
         "visage_machine_occupee": "{nom} is working (seen {d}).",
         "visage_sans_machine": "No machine online for faces: the job will wait until it connects (the Mac, on and unlocked).",
@@ -574,6 +597,10 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
     m = kie_ai.modele(cle_modele)
     if not m:
         return {"ok": False, "erreur": "Modèle inconnu." if langue != "en" else "Unknown model.", "code": "modele"}
+    if m["type"] == "sanstexte":
+        # la consigne est fixe : ce que la zone de prompt contient encore (elle
+        # est grisée, pas vidée) n'est ni vérifié, ni envoyé, ni gardé
+        prompt = ""
     pb = kie_ai.verifier_prompt(cle_modele, prompt, langue)
     if pb:
         return {"ok": False, "erreur": pb, "code": "prompt"}
@@ -581,12 +608,32 @@ def lancer(utilisateur: str, cle_modele: str, prompt: str, options: Any,
         return {"ok": False, "erreur": t["cle_absente"], "code": "sans_cle"}
     refs_meta = [r for r in (_reference(x) for x in (refs or [])[:int(m["references"]["max"])]) if r]
     if m["references"].get("types") and any(r.get("mime") not in m["references"]["types"] for r in refs_meta):
-        return {"ok": False, "erreur": t["motion_refs" if m["type"] == "motion" else "ref_type_kling"], "code": "ref_type"}
+        cle_msg = {"motion": "motion_refs", "sanstexte": "sanstexte_refs"}.get(m["type"], "ref_type_kling")
+        return {"ok": False, "erreur": t[cle_msg], "code": "ref_type"}
     o = kie_ai.normaliser(cle_modele, options)
     images = [r for r in refs_meta if str(r.get("mime") or "").startswith("image/")]
     videos = [r for r in refs_meta if str(r.get("mime") or "").startswith("video/")]
     duree_video = 0.0
-    if m["type"] == "motion":
+    if m["type"] == "sanstexte":
+        # une vidéo et rien d'autre : sa durée fait le prix, et Kling la refuse
+        # hors de ses bornes ou trop petite — le dire ici plutôt que de payer
+        # un createTask qui échoue
+        if len(videos) != 1 or images:
+            return {"ok": False, "erreur": t["sanstexte_refs"], "code": "refs"}
+        duree_video = float(videos[0].get("duree") or 0)
+        d_min, d_max = tuple(m["references"].get("duree") or (1, 60))
+        if not d_min <= duree_video <= d_max:
+            return {"ok": False, "code": "video_duree",
+                    "erreur": t["video_duree"].format(s=_nb(duree_video), min=_nb(d_min), max=_nb(d_max))}
+        cote = int(m["references"].get("cote_min") or 0)
+        w, h = _dimensions(videos[0]["chemin"])
+        if not (w and h):
+            # taille illisible : on laisse Kling juger, mais on le note
+            print(f"[studio-ia] sans caption : taille illisible pour {videos[0]['chemin']}", flush=True)
+        elif cote and min(w, h) < cote:
+            return {"ok": False, "code": "video_petite",
+                    "erreur": t["sanstexte_petite"].format(w=w, h=h, min=cote)}
+    elif m["type"] == "motion":
         # exactement une photo et une vidéo ; la durée de la vidéo borne
         # Kling (3–30 s, 10 s si le personnage suit la photo) et fait le prix
         if len(images) != 1 or len(videos) != 1:
@@ -744,9 +791,67 @@ def _fichier_sortie(dest: Path, garde: bool = False) -> Dict[str, Any]:
     return f
 
 
+def _piste_son(chemin: Path) -> bool:
+    """La vidéo a-t-elle une piste son ? (False aussi si ffprobe ne lit rien.)"""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type",
+                            "-of", "csv=p=0", str(chemin)], capture_output=True, text=True, timeout=60)
+        return "audio" in (r.stdout or "")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _remettre_son(video: Path, original: Path) -> bool:
+    """Kling rend une vidéo muette : remet sur `video` la piste son de la
+    vidéo déposée, sans réencoder l'image. La sortie de Kling dure 0,1 à
+    0,2 s de moins que l'original (mesuré le 14/11) : le son est coupé à la
+    fin de l'image. False si ffmpeg échoue ; la vidéo reste alors telle quelle."""
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        return False
+    tmp = video.with_name(video.stem + ".son" + video.suffix)
+    # d'abord la piste telle quelle ; si le conteneur ne la prend pas, en AAC
+    for codec in ("copy", "aac"):
+        try:
+            r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(video), "-i", str(original),
+                                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", codec,
+                                "-shortest", "-movflags", "+faststart", str(tmp)],
+                               timeout=300, capture_output=True)
+            if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+                tmp.replace(video)
+                return True
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[studio-ia] son de {video.name} ({codec}) : {type(e).__name__}: {e}", flush=True)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    return False
+
+
+def _son_d_origine(t: Dict[str, Any], dest: Path) -> str:
+    """Sans caption : remet le son de la vidéo déposée sur le résultat. Rend
+    '' si c'est fait ou s'il n'y avait pas de son, sinon le message à montrer
+    (la vidéo muette est gardée : mieux vaut elle que rien)."""
+    if dest.suffix.lower() not in (".mp4", ".mov"):
+        return ""
+    ref = next((r for r in (t.get("references") or []) if str(r.get("mime") or "").startswith("video/")), None)
+    meta = _reference(str(ref.get("id") or "")) if ref else None
+    if not meta:
+        print(f"[studio-ia] sans caption {t.get('id')} : vidéo déposée introuvable, son non remis", flush=True)
+        return _t("fr")["sanstexte_muet"]
+    if not _piste_son(meta["chemin"]):
+        return ""      # l'original était muet : rien à remettre
+    if _remettre_son(dest, meta["chemin"]):
+        return ""
+    print(f"[studio-ia] sans caption {t.get('id')} : son non remis sur {dest.name}", flush=True)
+    return _t("fr")["sanstexte_muet"]
+
+
 def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tid = t["id"]
     fichiers: List[Dict[str, Any]] = []
+    note = ""
     # les fichiers d'une étape précédente (perso : la photo retouchée) restent,
     # derrière les nouveaux : la carte montre la vidéo, l'aperçu les deux
     gardes = [f for f in (t.get("fichiers") or []) if f.get("garde")]
@@ -754,7 +859,7 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     for n, url in enumerate(t.get("urls_kie") or []):
         ext = Path(url.split("?")[0]).suffix.lower()
         if ext not in _MIME_PAR_EXT:
-            ext = ".mp4" if t.get("type") == "video" else ".png"
+            ext = ".mp4" if t.get("type") in ("video", "sanstexte") else ".png"
         nom = f"{tid}_{n}{ext}"
         dest = _dossier_sorties() / nom
         try:
@@ -764,6 +869,10 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     neuf = dest.with_suffix(_EXT_PAR_MIME[ctype])
                     dest.replace(neuf)
                     dest, nom, ext = neuf, neuf.name, neuf.suffix
+                if t.get("type") == "sanstexte":
+                    # une seule fois, au téléchargement : un second passage
+                    # retrouverait le fichier déjà sonorisé
+                    note = _son_d_origine(t, dest) or note
             fichiers.append({"nom": nom, "mime": _MIME_PAR_EXT.get(ext, "application/octet-stream"),
                              "taille": dest.stat().st_size, "vignette": _vignette(dest)})
         except Exception as e:
@@ -775,7 +884,7 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 return _maj(tid, etat="fini", fini_le=int(time.time()), essais_dl=essais,
                             message="Fichier non rapatrié : lien Kie direct (14 jours).")
             return _maj(tid, essais_dl=essais, message="")
-    return _maj(tid, etat="fini", fichiers=fichiers + gardes, fini_le=int(time.time()), message="")
+    return _maj(tid, etat="fini", fichiers=fichiers + gardes, fini_le=int(time.time()), message=note)
 
 
 def _vignette(video: Path) -> Optional[str]:
@@ -1516,6 +1625,7 @@ _SVG_VISAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 _SVG_PERSO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="3"/><path d="M2 20a5 5 0 0 1 10 0"/><circle cx="17" cy="6" r="3"/><path d="M12 20a5 5 0 0 1 10 0"/><path d="M9 11h6m-2-2 2 2-2 2"/></svg>'
 _SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
 _SVG_ETINCELLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></svg>'
+_SVG_SANSTEXTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/><path d="m3 3 18 18"/></svg>'
 
 
 def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://youl4b.com") -> str:
@@ -1568,6 +1678,7 @@ def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://you
   <button type="button" class="sia-type" data-type="motion">{_SVG_MOTION}{e(t["motion"])}</button>
   <button type="button" class="sia-type" data-type="perso">{_SVG_PERSO}{e(t["perso"])}</button>
   <button type="button" class="sia-type" data-type="visage">{_SVG_VISAGE}{e(t["visage"])}</button>
+  <button type="button" class="sia-type" data-type="sanstexte">{_SVG_SANSTEXTE}{e(t["sanstexte"])}</button>
 </div>
 <div class="sia-corps" id="sia-vue-creer">
   <aside>

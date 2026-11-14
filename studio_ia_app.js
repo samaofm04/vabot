@@ -23,10 +23,15 @@
   };
   var MOD = C.modeles || [];
   var MAX_OUVERTES = C.max_ouvertes || 5;
-  var DEFAUTS = { video: 'wan3', image: 'seedream5flash', motion: 'kling3motion', visage: 'visage', perso: 'perso' };
+  var DEFAUTS = { video: 'wan3', image: 'seedream5flash', motion: 'kling3motion', visage: 'visage', perso: 'perso', sanstexte: 'klingsanstexte' };
+  var TYPES = ['video', 'image', 'motion', 'visage', 'perso', 'sanstexte'];
   // motion, visage et perso : une photo + une vidéo, la nouvelle remplace celle du même genre
   function typePaire() { return S.type === 'motion' || S.type === 'visage' || S.type === 'perso'; }
-  function prixSeconde(m) { return !!m && (m.type === 'motion' || m.type === 'perso'); }
+  // sans caption : une vidéo et rien d'autre, la nouvelle remplace l'ancienne
+  function typeVideoSeule() { return S.type === 'sanstexte'; }
+  function prixSeconde(m) { return !!m && (m.type === 'motion' || m.type === 'perso' || m.type === 'sanstexte'); }
+  // le bouton dit ce qu'il fait : « Retirer la caption » plutôt que « Générer »
+  function libelleGenerer() { return (typeVideoSeule() && T.sanstexte_generer) || T.generer; }
   var MIMES_IMAGE = ['image/jpeg', 'image/png', 'image/webp'];
   var MIMES_VIDEO = ['video/mp4', 'video/quicktime'];
   function estVideo(mime) { return (mime || '').indexOf('video/') === 0; }
@@ -154,19 +159,19 @@
     var mauvaises = S.refs.filter(function (r) { return r.mime && m.references.types.indexOf(r.mime) < 0; });
     if (mauvaises.length) {
       S.refs = S.refs.filter(function (r) { return mauvaises.indexOf(r) < 0; });
-      toast(T.ref_type_kling, 'info');
+      toast(m.type === 'sanstexte' ? T.sanstexte_refs : T.ref_type_kling, 'info');
     }
     try { localStorage.setItem('sia_modele_' + S.type, cle); } catch (e) { /* navigation privée */ }
-    // la zone de dépôt prend la vidéo quand le modèle la lit (motion, Seedance)
-    $('sia-fichier').setAttribute('accept', (accepteVideo(m) ? MIMES_IMAGE.concat(MIMES_VIDEO) : MIMES_IMAGE).join(','));
+    // la zone de dépôt prend la vidéo quand le modèle la lit (motion, Seedance) ; sans caption : la vidéo seule
+    $('sia-fichier').setAttribute('accept', (m.type === 'sanstexte' ? MIMES_VIDEO : (accepteVideo(m) ? MIMES_IMAGE.concat(MIMES_VIDEO) : MIMES_IMAGE)).join(','));
     var ta = $('sia-prompt');
     ta.disabled = !!m.sans_prompt;
-    if (m.sans_prompt) { ta.setAttribute('data-ph', ta.getAttribute('data-ph') || ta.getAttribute('placeholder') || ''); ta.setAttribute('placeholder', T.sans_prompt || ''); }
+    if (m.sans_prompt) { ta.setAttribute('data-ph', ta.getAttribute('data-ph') || ta.getAttribute('placeholder') || ''); ta.setAttribute('placeholder', (m.type === 'sanstexte' ? T.sanstexte_sans_prompt : T.sans_prompt) || ''); }
     else if (ta.getAttribute('data-ph')) { ta.setAttribute('placeholder', ta.getAttribute('data-ph')); ta.removeAttribute('data-ph'); }
     rendreModeles(); rendreOptions(); rendreRefs(); majPrompt(); majEstime(); rendreMachine();
   }
   function choisirType(type) {
-    S.type = (type === 'image' || type === 'motion' || type === 'visage' || type === 'perso') ? type : 'video';
+    S.type = TYPES.indexOf(type) >= 0 ? type : 'video';
     Array.prototype.forEach.call(root.querySelectorAll('.sia-type'), function (b) {
       b.classList.toggle('on', b.getAttribute('data-type') === S.type);
     });
@@ -177,9 +182,11 @@
     $('sia-prompt').removeAttribute('data-ph');
     $('sia-prompt').setAttribute('placeholder', ph || '');
     var txtDepot = { visage: [T.deposer_visage, T.deposer_aide_visage], motion: [T.deposer_motion, T.deposer_aide_motion],
-      perso: [T.deposer_perso, T.deposer_aide_perso] }[S.type] || [T.deposer, T.deposer_aide];
+      perso: [T.deposer_perso, T.deposer_aide_perso],
+      sanstexte: [T.deposer_sanstexte, T.deposer_aide_sanstexte] }[S.type] || [T.deposer, T.deposer_aide];
     $('sia-drop-t').textContent = txtDepot[0] || '';
     $('sia-drop-a').textContent = txtDepot[1] || '';
+    if (!S.envoi) { $('sia-generer-txt').textContent = libelleGenerer(); }
     if (m) { choisirModele(m.cle); } else { rendreModeles(); }
     if (S.type === 'visage') { rafraichirMachine(); }
   }
@@ -334,6 +341,10 @@
       if (typePaire()) {
         S.refs = S.refs.filter(function (r) { return estVideo(r.mime) !== video; });
       }
+      if (typeVideoSeule()) {
+        if (!video) { toast(T.sanstexte_refs, 'error'); return; }
+        S.refs = [];
+      }
       if (S.refs.length >= m.references.max) { toast(fmt(T.refs_max, { n: m.references.max }), 'info'); return; }
       if (video && !accepteVideo(m)) { toast(T.ref_type, 'error'); return; }
       if (video && !typePaire() && S.refs.filter(function (r) { return estVideo(r.mime); }).length >= (m.references.videos_max || 0)) {
@@ -376,6 +387,7 @@
   function generer() {
     if (!S.modele || S.envoi) { return; }
     if (S.refs.some(function (r) { return r.envoi; })) { toast(T.envoi_ref, 'info'); return; }
+    if (typeVideoSeule() && !S.refs.length) { montrerAlerte(T.sanstexte_refs); return; }
     var prompt = $('sia-prompt').value.trim();
     S.envoi = true;
     $('sia-generer').disabled = true;
@@ -390,8 +402,8 @@
         if (d.credits !== undefined && d.credits !== null) { majCredits({ credits: d.credits }); }
         return;
       }
-      toast(d.tache.type === 'visage' ? (T.visage_lance || '')
-        : fmt(d.tache.type === 'perso' ? (T.perso_lance || T.lance) : T.lance, { n: nb(d.tache.credits_estimes) }), 'success');
+      var lance = { perso: T.perso_lance, sanstexte: T.sanstexte_lance }[d.tache.type] || T.lance;
+      toast(d.tache.type === 'visage' ? (T.visage_lance || '') : fmt(lance, { n: nb(d.tache.credits_estimes) }), 'success');
       S.taches = [d.tache].concat(S.taches.filter(function (t) { return t.id !== d.tache.id; }));
       rendreTaches();
       assurerPoll();
@@ -399,7 +411,7 @@
       montrerAlerte(T.erreur_reseau);
     }).then(function () {
       S.envoi = false;
-      $('sia-generer-txt').textContent = T.generer;
+      $('sia-generer-txt').textContent = libelleGenerer();
       verifierCredits();
     });
   }
@@ -527,7 +539,7 @@
         ? '<video src="' + esc(f.url) + '" controls autoplay playsinline loop></video>'
         : '<img src="' + esc(f.url) + '" alt="">';
     } else if (t.urls_kie && t.urls_kie.length) {
-      media.innerHTML = t.type === 'video'
+      media.innerHTML = (t.type === 'video' || t.type === 'sanstexte')
         ? '<video src="' + esc(t.urls_kie[0]) + '" controls autoplay playsinline loop></video>'
         : '<img src="' + esc(t.urls_kie[0]) + '" alt="">';
     } else {

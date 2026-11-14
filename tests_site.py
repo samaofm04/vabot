@@ -38322,12 +38322,30 @@ try:
     _kie._CLE_ENV.update({"valeur": "", "t": 10 ** 12})   # ne pas relire le .env
     # -- 1) le registre : ce que l'ecran propose et ce qui part chez Kie ------
     _mods = _kie.registre_public("fr")
-    check("registre : 11 modeles, 5 video + 2 image + 4 motion",
-          len(_mods) == 11 and sum(m["type"] == "video" for m in _mods) == 5
-          and sum(m["type"] == "motion" for m in _mods) == 4)
+    check("registre : 12 modeles, 5 video + 2 image + 4 motion + 1 sans caption",
+          len(_mods) == 12 and sum(m["type"] == "video" for m in _mods) == 5
+          and sum(m["type"] == "motion" for m in _mods) == 4
+          and sum(m["type"] == "sanstexte" for m in _mods) == 1)
     check("registre : chaque modele video/image propose le 9:16 (Reels) par defaut",
           all(next(o for o in m["options"] if o["cle"] == "aspect_ratio")["defaut"] == "9:16"
-              for m in _mods if m["type"] != "motion"))
+              for m in _mods if m["type"] in ("video", "image")))
+    _mt, _et = _kie.entree_api("klingsanstexte", "ignore moi", {}, [], videos=["https://x/v.mp4"])
+    check("sans caption : Kling 3.0 Omni, consigne fixe, video seule, format auto, sans son genere",
+          _mt == "kling-3.0-omni/transformation"
+          and _et == {"prompt": _kie.PROMPT_SANS_TEXTE, "video_urls": ["https://x/v.mp4"], "resolution": "720p",
+                      "aspect_ratio": "auto", "audio": False}
+          and "ignore moi" not in _et["prompt"] and "Keep everything else unchanged" in _et["prompt"])
+    check("sans caption : prix a la seconde entamee (5,5 s = 6 x 15,1 ; 10 s en 1080p = 202), affiche /s",
+          _kie.estimer("klingsanstexte", {}, 0, duree_video=5.525) == 90.6
+          and _kie.estimer("klingsanstexte", {"resolution": "1080p"}, 0, duree_video=10) == 202
+          and next(m for m in _mods if m["cle"] == "klingsanstexte")["prix_seconde"] == 15.1
+          and next(m for m in _mods if m["cle"] == "klingsanstexte")["sans_prompt"] is True)
+    try:
+        _kie.entree_api("klingsanstexte", "", {}, ["https://x/a.png"])
+        _sansVideoT = False
+    except _kie.ErreurKie as _e:
+        _sansVideoT = _e.code == "refs"
+    check("sans caption : sans video, entree_api refuse", _sansVideoT)
     check("registre : chaque modele a une estimation > 0 (ou un prix a la seconde) et un prix releve",
           all(m["estimation_defaut"] > 0 or m["prix_seconde"] > 0 for m in _mods)
           and all(m["cle"] in _kie.PRIX for m in _kie.MODELES))
@@ -38403,6 +38421,9 @@ try:
           _frS.status_code == 200 and "sia-root" in _ftS and "SIA_CONF" in _ftS and "/studio-ia/app.js" in _ftS)
     check("fragment : trois genres (Reels, Photo, Motion) et la zone de depot pilotable",
           'data-type="motion"' in _ftS and 'id="sia-drop-t"' in _ftS and 'id="sia-drop-a"' in _ftS)
+    check("fragment : le genre Sans caption a son bouton, son modele et ses textes (bouton « Remove the caption »)",
+          'data-type="sanstexte"' in _ftS and '"cle": "klingsanstexte"' in _ftS
+          and '"sanstexte_generer": "Remove the caption"' in _ftS and '"deposer_sanstexte"' in _ftS)
     check("fragment admin sans cle : le panneau pour coller la cle est la, visible, sans bandeau",
           'id="sia-cle"' in _ftS and 'id="sia-cle" hidden' not in _ftS and 'class="sia-sans-cle"' not in _ftS
           and 'id="sia-cle-ouvrir"' in _ftS)
@@ -38632,6 +38653,93 @@ try:
               and [r["mime"] for r in _gM["tache"]["references"]] == ["image/png", "video/mp4"]
               and _cS.get("/studio-ia/estimer?modele=kling3motion&o_mode=720p&duree=11.1").get_json()["credits"] == 240)
         _sia._maj(_gM["tache"]["id"], etat="echec", message="fin du test motion")
+        # -- 5b bis) Sans caption : une video, un clic, le son d origine remis ---
+        # Kling refuse moins de 700 px de cote : les videos de 64 px servent au refus,
+        # celles de 704 px au lancement (l une avec son, l autre muette).
+        _spSia.run([_ffm, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=704x704:rate=10",
+                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "4", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(_dSia / "reel_son.mp4")], capture_output=True, timeout=120)
+        _spSia.run([_ffm, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=704x704:rate=10", "-t", "4",
+                    "-pix_fmt", "yuv420p", str(_dSia / "reel_muet.mp4")], capture_output=True, timeout=120)
+        if (_dSia / "reel_son.mp4").exists() and (_dSia / "reel_muet.mp4").exists():
+            def _depotT(nom):
+                return _cS.post("/studio-ia/reference",
+                                data={"fichier": (_ioSia.BytesIO((_dSia / nom).read_bytes()), nom, "video/mp4")},
+                                content_type="multipart/form-data").get_json()["reference"]["id"]
+
+            def _sonT(chemin):
+                return "audio" in _spSia.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                                              "stream=codec_type", "-of", "csv=p=0", str(chemin)],
+                                             capture_output=True, text=True, timeout=60).stdout
+            _nbCT = _FAUX["appels"].count("createTask")
+            _gT = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte",
+                                                        "references": [_rW["reference"]["id"]]}).get_json()
+            check("sans caption : une photo a la place de la video -> refuse, Kie pas appele",
+                  _gT.get("ok") is False and _gT.get("code") in ("ref_type", "refs")
+                  and _FAUX["appels"].count("createTask") == _nbCT)
+            _gT = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte",
+                                                        "references": [_rC["reference"]["id"]]}).get_json()
+            check("sans caption : video de 2 s -> refusee (3 a 15,5 s), Kie pas appele",
+                  _gT.get("code") == "video_duree" and "15.5" in _gT["erreur"]
+                  and _FAUX["appels"].count("createTask") == _nbCT)
+            _gT = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte",
+                                                        "references": [_rV["reference"]["id"]]}).get_json()
+            check("sans caption : video de 64 px -> refusee avant d payer (Kling demande 700 px de cote)",
+                  _gT.get("code") == "video_petite" and "64" in _gT["erreur"] and "700" in _gT["erreur"]
+                  and _FAUX["appels"].count("createTask") == _nbCT)
+            check("sans caption : estimation par la route, a la seconde entamee (9,975 s = 151)",
+                  _cS.get("/studio-ia/estimer?modele=klingsanstexte&duree=9.975").get_json()["credits"] == 151)
+            _FAUX["record"] = {"state": "generating"}
+            _idSon = _depotT("reel_son.mp4")
+            _gT = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte", "prompt": "x" * 5000,
+                                                        "references": [_idSon]}).get_json()
+            check("sans caption : lancee d un clic, 4 s x 15,1 = 60,4 credits, consigne fixe (le prompt de l ecran est ignore)",
+                  _gT.get("ok") and _gT["tache"]["type"] == "sanstexte" and _gT["tache"]["credits_estimes"] == 60.4
+                  and _gT["tache"]["prompt"] == "" and _gT["tache"]["resume"].startswith("720p")
+                  and _FAUX["entree"]["model"] == "kling-3.0-omni/transformation"
+                  and _FAUX["entree"]["input"] == {"prompt": _kie.PROMPT_SANS_TEXTE,
+                                                   "video_urls": ["https://tempfile.redpandaai.co/x.png"],
+                                                   "resolution": "720p", "aspect_ratio": "auto", "audio": False})
+
+            def _fauxDlMuet(url, dest):
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                _shSia.copyfile(_dSia / "reel_muet.mp4", dest)
+                return dest.stat().st_size, "video/mp4"
+            _kie.telecharger = _fauxDlMuet
+            try:
+                _FAUX["record"] = {"state": "success", "creditsConsumed": 60.4,
+                                   "resultJson": _jsSia.dumps({"resultUrls": ["https://x/sortie.mp4"]})}
+                _tT = _sia.verifier(_gT["tache"]["id"])
+                _fT = _dSia / "sorties" / _tT["fichiers"][0]["nom"] if _tT.get("fichiers") else None
+                check("sans caption : Kie rend une video muette -> le son de la video deposee est remis, sans message",
+                      _tT["etat"] == "fini" and _tT["credits"] == 60.4 and _tT["message"] == ""
+                      and _fT is not None and _fT.suffix == ".mp4" and _sonT(_fT)
+                      and not list((_dSia / "sorties").glob("*.son.*")))
+                check("sans caption : la carte finie porte la video et sa vignette",
+                      _tT["fichiers"][0]["mime"] == "video/mp4" and bool(_tT["fichiers"][0]["vignette"]))
+                _FAUX["record"] = {"state": "generating"}
+                _gT2 = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte",
+                                                             "references": [_depotT("reel_muet.mp4")]}).get_json()
+                _FAUX["record"] = {"state": "success", "creditsConsumed": 60.4,
+                                   "resultJson": _jsSia.dumps({"resultUrls": ["https://x/sortie.mp4"]})}
+                _tT2 = _sia.verifier(_gT2["tache"]["id"])
+                check("sans caption : video deposee muette -> resultat muet, sans message d erreur",
+                      _tT2["etat"] == "fini" and _tT2["message"] == ""
+                      and not _sonT(_dSia / "sorties" / _tT2["fichiers"][0]["nom"]))
+                # la video deposee a disparu (nettoyage) : la tache finit quand meme, et le dit
+                _FAUX["record"] = {"state": "generating"}
+                _idPerdu = _depotT("reel_son.mp4")
+                _gT3 = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte", "references": [_idPerdu]}).get_json()
+                for _pT in (_dSia / "references").glob(_idPerdu + ".*"):
+                    _pT.unlink()
+                _FAUX["record"] = {"state": "success", "creditsConsumed": 60.4,
+                                   "resultJson": _jsSia.dumps({"resultUrls": ["https://x/sortie.mp4"]})}
+                _tT3 = _sia.verifier(_gT3["tache"]["id"])
+                check("sans caption : video deposee introuvable au retour -> video gardee, « muette » dit dans le message",
+                      _tT3["etat"] == "fini" and "muette" in _tT3["message"] and len(_tT3["fichiers"]) == 1)
+            finally:
+                _kie.telecharger = _fauxDl
+                _FAUX["record"] = {"state": "generating"}
         # -- 5b) Visage : file locale, machine au jeton, resultat ---------------
         _rVi = _sia.registre_visage("fr")
         check("visage : dans le registre de l ecran (gratuit, photo + video), pas chez Kie, 4e genre rendu",

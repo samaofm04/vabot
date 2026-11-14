@@ -583,7 +583,43 @@ MODELES: List[Dict[str, Any]] = [
              "valeurs": ["480p", "580p", "720p"], "defaut": "720p"},
         ],
     },
+    # Sans caption : Kling 3.0 Omni retouche la vidéo déposée d'après une
+    # consigne (docs.kie.ai/market/kling/v3-omni-transformation). La consigne
+    # est fixe (PROMPT_SANS_TEXTE) : l'écran ne demande qu'une vidéo et un
+    # clic. Essayé le 14/11/2026 sur trois reels : l'écriture part, le reste
+    # ne bouge pas, la sortie garde la taille d'origine. Deux limites vues ce
+    # jour-là : Kling efface un sous-vêtement montré à l'écran (il remet le
+    # vêtement par-dessus), et il ne rend pas le son — studio_ia le remet.
+    {
+        "cle": "klingsanstexte", "nom": "Kling 3.0 Omni Edit", "editeur": "Kuaishou", "type": "sanstexte",
+        "resume": "720p / 1080p · retire l'écriture incrustée, garde tout le reste (3–15 s)",
+        "resume_en": "720p / 1080p · removes burned-in text, keeps everything else (3–15 s)",
+        "modele_api": "kling-3.0-omni/transformation", "prompt_max": 3000, "prompt_min": 0, "sans_prompt": True,
+        "references": {
+            "max": 1, "modes": ["sanstexte"], "types": TYPES_VIDEO, "videos_max": 1, "duree": (3, 15.5),
+            # Kling refuse une vidéo dont un côté fait moins de 700 px
+            "cote_min": 700,
+            "aide": "1 vidéo MP4/MOV de 3 à 15 s, 700 px de côté au moins (100 Mo). L'écriture incrustée est retirée, "
+                    "le reste ne change pas, le son d'origine est remis. Kling efface aussi un sous-vêtement montré à l'écran.",
+            "aide_en": "1 MP4/MOV video of 3 to 15 s, at least 700 px per side (100 MB). Burned-in text is removed, "
+                       "everything else stays, the original sound is put back. Kling also covers underwear shown on screen.",
+        },
+        "options": [
+            {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
+             "valeurs": ["720p", "1080p"], "defaut": "720p"},
+        ],
+    },
 ]
+
+#: La consigne du genre « Sans caption ». En anglais : c'est la langue du
+#: modèle. « Change nothing else » ne suffisait pas (essais du 14/11) : il faut
+#: nommer ce qui doit rester, sinon le modèle se permet de retoucher le plan.
+PROMPT_SANS_TEXTE = (
+    "Remove all the on-screen text burned into the video - captions, subtitles, titles and watermarks - "
+    "for the whole duration of the video, and restore what is behind it. "
+    "Keep everything else unchanged: the same people, faces, hair, clothes, movements, lip movements, "
+    "objects, background, lighting, framing and camera. No text anywhere in the video."
+)
 
 _PAR_CLE = {m["cle"]: m for m in MODELES}
 
@@ -602,6 +638,8 @@ PRIX = {
     "kling26motion": {"720p": 11, "1080p": 18},
     "wan22move": {"720p": 12.5},
     "wan22replace": {"480p": 6, "580p": 9.5, "720p": 12.5},
+    # par seconde de vidéo retouchée, sans son (kie.ai/kling-o3, relevé le 14/11/2026)
+    "klingsanstexte": {"720p": 15.1, "1080p": 20.2},
 }
 
 
@@ -642,7 +680,7 @@ def estimer(cle_: str, options: Any, nb_refs: int = 0, duree_video: float = 0.0)
         return 0.0
     o = normaliser(cle_, options)
     p = PRIX.get(cle_) or {}
-    if m["type"] == "motion":
+    if m["type"] in ("motion", "sanstexte"):
         try:
             secondes = math.ceil(float(duree_video or 0))
         except (TypeError, ValueError):
@@ -695,6 +733,14 @@ def entree_api(cle_: str, prompt: str, options: Any, refs: List[str],
     p = (prompt or "").strip()
     refs = [r for r in (refs or []) if isinstance(r, str) and r.startswith("http")]
     refs = refs[:int(m["references"]["max"])]
+    if m["type"] == "sanstexte":
+        videos = [v for v in (videos or []) if isinstance(v, str) and v.startswith("http")]
+        if not videos:
+            raise ErreurKie("Il faut une vidéo.", "refs")
+        # audio=False : avec une vidéo en entrée Kling ne génère pas de son ;
+        # « auto » est le seul format admis quand la vidéo est seule
+        return m["modele_api"], {"prompt": PROMPT_SANS_TEXTE, "video_urls": videos[:1],
+                                 "resolution": o["resolution"], "aspect_ratio": "auto", "audio": False}
     if m["type"] == "motion":
         videos = [v for v in (videos or []) if isinstance(v, str) and v.startswith("http")]
         if not refs or not videos:
@@ -795,7 +841,7 @@ def registre_public(langue: str = "fr") -> List[Dict[str, Any]]:
             opts.append(d)
         r = m["references"]
         prix_s = 0.0
-        if m["type"] == "motion":
+        if m["type"] in ("motion", "sanstexte"):
             # le prix de base est par seconde de vidéo : l'écran l'affiche « /s »
             defaut_mode = next((o["defaut"] for o in m["options"] if o["cle"] in ("mode", "resolution")), "720p")
             prix_s = float((PRIX.get(m["cle"]) or {}).get(defaut_mode, 0))
