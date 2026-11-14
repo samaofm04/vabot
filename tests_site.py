@@ -38335,10 +38335,11 @@ try:
           and _et == {"prompt": _kie.PROMPT_SANS_TEXTE, "video_urls": ["https://x/v.mp4"], "resolution": "720p",
                       "aspect_ratio": "auto", "audio": False}
           and "ignore moi" not in _et["prompt"] and "Keep everything else unchanged" in _et["prompt"])
-    check("sans caption : prix a la seconde entamee (5,5 s = 6 x 15,1 ; 10 s en 1080p = 202), affiche /s",
-          _kie.estimer("klingsanstexte", {}, 0, duree_video=5.525) == 90.6
-          and _kie.estimer("klingsanstexte", {"resolution": "1080p"}, 0, duree_video=10) == 202
-          and next(m for m in _mods if m["cle"] == "klingsanstexte")["prix_seconde"] == 15.1
+    check("sans caption : prix a la duree exacte, releve sur un vrai essai (5,525 s = 125,42 pour 125,41 factures), affiche /s",
+          _kie.estimer("klingsanstexte", {}, 0, duree_video=5.525) == 125.42
+          and _kie.estimer("klingsanstexte", {"resolution": "1080p"}, 0, duree_video=10) == 303
+          and _kie.estimer("klingsanstexte", {}, 0) == 0
+          and next(m for m in _mods if m["cle"] == "klingsanstexte")["prix_seconde"] == 22.7
           and next(m for m in _mods if m["cle"] == "klingsanstexte")["sans_prompt"] is True)
     try:
         _kie.entree_api("klingsanstexte", "", {}, ["https://x/a.png"])
@@ -38687,14 +38688,14 @@ try:
             check("sans caption : video de 64 px -> refusee avant d payer (Kling demande 700 px de cote)",
                   _gT.get("code") == "video_petite" and "64" in _gT["erreur"] and "700" in _gT["erreur"]
                   and _FAUX["appels"].count("createTask") == _nbCT)
-            check("sans caption : estimation par la route, a la seconde entamee (9,975 s = 151)",
-                  _cS.get("/studio-ia/estimer?modele=klingsanstexte&duree=9.975").get_json()["credits"] == 151)
+            check("sans caption : estimation par la route, a la duree exacte (9,975 s = 226,43)",
+                  _cS.get("/studio-ia/estimer?modele=klingsanstexte&duree=9.975").get_json()["credits"] == 226.43)
             _FAUX["record"] = {"state": "generating"}
             _idSon = _depotT("reel_son.mp4")
             _gT = _cS.post("/studio-ia/generer", json={"modele": "klingsanstexte", "prompt": "x" * 5000,
                                                         "references": [_idSon]}).get_json()
-            check("sans caption : lancee d un clic, 4 s x 15,1 = 60,4 credits, consigne fixe (le prompt de l ecran est ignore)",
-                  _gT.get("ok") and _gT["tache"]["type"] == "sanstexte" and _gT["tache"]["credits_estimes"] == 60.4
+            check("sans caption : lancee d un clic, 4 s x 22,7 = 90,8 credits, consigne fixe (le prompt de l ecran est ignore)",
+                  _gT.get("ok") and _gT["tache"]["type"] == "sanstexte" and 90 <= _gT["tache"]["credits_estimes"] <= 92
                   and _gT["tache"]["prompt"] == "" and _gT["tache"]["resume"].startswith("720p")
                   and _FAUX["entree"]["model"] == "kling-3.0-omni/transformation"
                   and _FAUX["entree"]["input"] == {"prompt": _kie.PROMPT_SANS_TEXTE,

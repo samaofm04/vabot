@@ -638,8 +638,11 @@ PRIX = {
     "kling26motion": {"720p": 11, "1080p": 18},
     "wan22move": {"720p": 12.5},
     "wan22replace": {"480p": 6, "580p": 9.5, "720p": 12.5},
-    # par seconde de vidéo retouchée, sans son (kie.ai/kling-o3, relevé le 14/11/2026)
-    "klingsanstexte": {"720p": 15.1, "1080p": 20.2},
+    # Par seconde de vidéo retouchée. Le tarif affiché sur kie.ai/kling-o3 (15,1 en
+    # 720p) vaut SANS vidéo en entrée : le premier vrai essai (14/11/2026, 5,525 s
+    # en 720p) a coûté 125,41 crédits, soit 22,7 la seconde — une fois et demie le
+    # tarif affiché. Le 1080p est déduit de la même règle (20,2 × 1,5), pas mesuré.
+    "klingsanstexte": {"720p": 22.7, "1080p": 30.3},
 }
 
 
@@ -681,11 +684,19 @@ def estimer(cle_: str, options: Any, nb_refs: int = 0, duree_video: float = 0.0)
     o = normaliser(cle_, options)
     p = PRIX.get(cle_) or {}
     if m["type"] in ("motion", "sanstexte"):
+        qualite = o.get("mode") or o.get("resolution")
+        if m["type"] == "sanstexte":
+            # ici Kie compte la durée exacte, pas la seconde entamée
+            # (125,41 crédits pour 5,525 s : 5,525 × 22,7 = 125,42)
+            try:
+                exacte = max(0.0, float(duree_video or 0))
+            except (TypeError, ValueError):
+                exacte = 0.0
+            return round(float(p.get(qualite, 0)) * exacte, 2)
         try:
             secondes = math.ceil(float(duree_video or 0))
         except (TypeError, ValueError):
             secondes = 0
-        qualite = o.get("mode") or o.get("resolution")
         return round(float(p.get(qualite, 0)) * max(0, secondes), 2)
     duree = float(o.get("duration") or 0)
     if cle_ == "kling3":
