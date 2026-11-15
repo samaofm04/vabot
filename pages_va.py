@@ -51,6 +51,12 @@ plus aucun A/B sur les pages. Twitter n'en a jamais eu.
 L'après-midi du même jour, chaque VA avait 3 pages FIXES créées d'office
 (FIXES, GABARITS_PLACE) : rangées dans « anciennes » et coupées
 (retirer_pages_hors_places), jamais supprimées.
+
+15/11/2026 (« les liens directs des VA, tu mets juste des landing pages à la
+place ») : le lien principal d'un VA de TRUST TWITTER est lui aussi une page,
+au look Général (liens_va.GABARIT_PAGE_TWITTER) — plus de lien direct sur
+aucun des trois TRUST. Sa page d'ici reste son SECOND lien, la seule qu'il
+modifie ; « direct », plus bas, se lit « son lien principal ».
 """
 from __future__ import annotations
 
@@ -864,10 +870,10 @@ def creer_page(gid: str, uid: str, par: str = "", n: int = 1) -> Dict[str, Any]:
     f = lv.lien_de(gid, vrai)
     if not (f.get("link_id") and f.get("tracking") and f.get("public_url")):
         return {"ok": False, "hors_service": "sans_lien",
-                "erreur": "il faut d'abord son lien direct (avec son tracking)"}
+                "erreur": "il faut d'abord son lien principal (avec son tracking)"}
     if f.get("actif", True) is False:
         # la copie naîtrait coupée et le VA recevrait « ✅ » avec une adresse morte
-        return {"ok": False, "hors_service": "coupe", "erreur": "son lien direct est désactivé"}
+        return {"ok": False, "hors_service": "coupe", "erreur": "son lien principal est désactivé"}
     if not fiche_complete(f):
         return {"ok": False, "hors_service": "fiche_incomplete",
                 "erreur": "numéro ou pseudo du VA manquant dans sa fiche"}
@@ -1496,7 +1502,7 @@ def reprendre_pages(gid: str) -> Dict[str, Any]:
                         bilan.setdefault("departs", []).append(f"{uid} : {depart}")
                         _log(f"page {pg.get('shortcode') or lid} de {cle} "
                              + ("coupée" if coupee else "NON coupée (refus GetMySocial, recoupée au passage suivant)")
-                             + f" : VA parti ({depart}) ; son lien direct "
+                             + f" : VA parti ({depart}) ; son lien principal "
                              f"{f.get('shortcode') or f.get('link_id')} est encore en service — "
                              "hors des pages, à couper à la main")
                 continue

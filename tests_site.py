@@ -22152,11 +22152,22 @@ try:
     # Proprietaire, 13/10/2026 : « pour Threads c'est pas avec un lien de
     # tracking, faut juste dupliquer le lien de VA Threads » — chaque VA
     # Threads a sa copie de emythreads, dans SON espace (tests_liens_threads.py)
+    # Proprietaire, 15/11/2026 : « les liens directs des VA, tu mets juste des
+    # landing pages a la place » — un lien neuf copie la page Generale de
+    # l'equipe (GABARIT_PAGE_THREADS) ; emythreads reste le gabarit du lien
+    # direct, derriere l'interrupteur (tests_twitter_pages.py)
     _eTh = _lvT.espace(_THR)
-    check("les liens GetMySocial de Threads vivent dans EMY THREADS, copie de emythreads, sans tracking",
+    _gpTh, _lvT.GABARIT_PAGE_THREADS = _lvT.GABARIT_PAGE_THREADS, ""
+    try:
+        _eThD = _lvT.espace(_THR)
+    finally:
+        _lvT.GABARIT_PAGE_THREADS = _gpTh
+    check("les liens GetMySocial de Threads vivent dans EMY THREADS, en page Generale, sans tracking ici ; "
+          "sans le gabarit de page : copie de emythreads",
           _TWI in _lvT.SERVEURS and _THR in _lvT.SERVEURS
           and _eTh["equipe"] == "tm_6ab51e03b299b7e3ba6ff7bf"
-          and _eTh["gabarit"] == "lnk_6acdd0a53fb996c565a47e90"
+          and _gpTh and _eTh["gabarit"] == _gpTh and _eTh.get("landing") is True
+          and _eThD["gabarit"] == "lnk_6acdd0a53fb996c565a47e90" and not _eThD.get("landing")
           and _eTh["tracking"] is False and _lvT.espace(_TWI)["equipe"] != _eTh["equipe"])
     check("la synchro des groupes de Threads passe par le suivi des managers, pas par le podium",
           _THR in _tkT.SYNCHRO_LIENS_ICI and _TWI not in _tkT.SYNCHRO_LIENS_ICI)

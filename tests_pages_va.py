@@ -313,7 +313,7 @@ try:
     # ── 3. création ──────────────────────────────────────────────────────
     print("3. Création")
     r = pv.creer_page(TW, VA)
-    check("sans lien direct : refusée, rien créé", not r["ok"] and "lien direct" in r["erreur"]
+    check("sans lien principal : refusée, rien créé", not r["ok"] and "lien principal" in r["erreur"]
           and not [a for a in APPELS if a[0] == "duplicate"], r)
     APPELS.clear()
     r = pv.creer_page(TW, MOI, par=MOI)

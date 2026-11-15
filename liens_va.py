@@ -500,7 +500,11 @@ def creer_gms(nom: str, url: str, gid: str = "") -> Dict[str, Any]:
         if r.get("ok"):
             lien = r.get("link") or {}
             lid = str(lien.get("id") or "")
-            if landing:
+            # sans tracking (MyPuls fermé) la page garde le bouton du gabarit,
+            # le profil de la model : comme un lien direct sans URL gardait la
+            # destination du sien. Sans ce « and url », la copie était coupée
+            # (« lien ou tracking manquant ») et le VA n'avait pas de lien.
+            if landing and url:
                 pose = _poser_tracking(lid, url, nom, equipe)
                 if not pose.get("ok"):
                     # la copie garde le tracking d'un autre VA (celui du
@@ -1754,7 +1758,23 @@ def lia_seule(gid: str = "") -> Optional[Dict[str, float]]:
 # jour-là (même id, destination = le tracking du bouton, pays sur le lien,
 # A/B gardé) ; sauvegarde des pages : data/sauvegardes_gms/
 # twitter_pages_avant_direct_2026-11-04.json. Un lien neuf naît direct.
-GABARIT_PAGE_TWITTER = ""
+# Propriétaire, 15/11/2026 : « pour les VA, Trust Instagram, Trust Twitter,
+# Trust Thread, il faut que tu mettes la landing page pour tout […] en
+# général […] les liens directs des VA, tu mets juste des landing pages à la
+# place » — prévenu du retour du 04/11, il a confirmé (« Oui, vas-y »). Les 42
+# liens directs actifs de Twitter et les 16 de Threads (plus 11 coupés sur
+# Lia) sont repassés en page ce jour-là, au look Général (la page rose de
+# Lia, « MY FREE 0F 🔗 » blanc, « MY TELEGRAM » dessous) : même id, même
+# adresse, le tracking sur le bouton ; sauvegarde d'avant sur le VPS :
+# data/sauvegardes_gms/trust_avant_pages_general_2026-11-15.json. Un lien
+# neuf copie le gabarit de son équipe (GetMySocial refuse de copier d'une
+# équipe à l'autre), déjà en Général : « tpltwgeneral » dans EMY TWITTER
+# (deeplink au toucher du bouton), « tplthgeneral » dans EMY THREADS (deeplink
+# au chargement, comme ses liens directs d'avant). Ni captcha, ni pays, ni
+# safe page, ni A/B sur ces gabarits : une copie les recopierait.
+# "" : les liens neufs de ce serveur redeviennent directs.
+GABARIT_PAGE_TWITTER = "lnk_6afa16a808166d658bdd1e65"
+GABARIT_PAGE_THREADS = "lnk_6afa16ac08166d658bdd1eab"
 
 
 _espace_avec_seren = espace
@@ -1789,6 +1809,13 @@ def espace(gid: str = "") -> Dict[str, Any]:    # noqa: F811 — voir plus haut
     if (str(gid) or TWITTER_ID) == TWITTER_ID and GABARIT_PAGE_TWITTER:
         e["source_variante"] = e.get("source_variante") or e.get("gabarit") or ""
         e.update(gabarit=GABARIT_PAGE_TWITTER, landing=True)
+    if str(gid) == THREADS_ID and GABARIT_PAGE_THREADS:
+        # Threads en pages (15/11/2026), ici et pas dans le corps d'origine :
+        # ses lignes sont celles du patch local du VPS (99-threads-mypuls).
+        # La copie d'une branche d'A/B part toujours d'un lien DIRECT
+        # (emythreadsb, déjà dans ESPACE_THREADS).
+        e["source_variante"] = e.get("source_variante") or e.get("gabarit") or ""
+        e.update(gabarit=GABARIT_PAGE_THREADS, landing=True)
     if SEREN_EN_PAUSE:
         e["variante"] = None
     if sans_seren(gid):
@@ -3170,3 +3197,48 @@ def poser_variante_copie(lid: str, equipe: str, tid: str, nom: str,
                 "description": "Variant based on another link"}
     return gms._ab_prive("POST", lid, equipe, {"enabled": True, "controlWeight": _poids(parts["controle"]),
                                                "variants": [variante]})
+
+
+# ─── Rebrancher un lien qui est une page (15/11/2026) ──────────────────────
+# Les liens des trois TRUST sont des pages. rebrancher() (plus haut) pose le
+# tracking par « url » + typeLink « directlink » : sur une page, GetMySocial
+# en refait un lien direct, sans une erreur (c'est par ce même champ que les
+# pages de Twitter étaient redevenues des liens directs le 04/11). Enveloppe,
+# et pas une retouche du corps : ses lignes sont celles du patch local du VPS
+# (99-threads-mypuls), qui tomberait.
+_rebrancher_direct = rebrancher
+
+
+def rebrancher(gid: str, uid: str) -> Dict[str, Any]:    # noqa: F811 — voir plus haut
+    """rebrancher() (plus haut) ; quand le lien du VA est une page, son
+    tracking va sur le bouton OnlyFans (_poser_tracking) et la page reste une
+    page. Un lien encore direct (les vieux liens coupés) garde l'ancien
+    chemin."""
+    e = espace(gid)
+    l = lien_de(gid, uid)
+    if not e.get("landing") or not l.get("shortcode") or l.get("tracking"):
+        return _rebrancher_direct(gid, uid)
+    equipe = str(e["equipe"])
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
+    lu = _lire_lien(lid, equipe) if lid else None
+    if not lu or lu.get("type") != "landing":
+        return _rebrancher_direct(gid, uid)
+    if not (e.get("tracking") and mypuls_actif()):
+        return {"ok": False, "erreur": "suivi MyPuls fermé pour ce serveur"}
+    nom = f'{e["plateforme"]} VA {l.get("numero") or "?"} @{l.get("pseudo") or uid}'[:60]
+    # un tracking déjà créé à ce nom est repris : MyPuls ne supprime rien
+    t = _creer_ou_reprendre(nom)
+    if not t.get("ok"):
+        return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
+    pose = _poser_tracking(lid, t["url"], nom, equipe)
+    if not pose.get("ok"):
+        # le tracking link existe et ne peut pas être défait : on le nomme
+        return {"ok": False, "tracking": t["url"],
+                "erreur": f'GetMySocial : {str(pose.get("erreur"))[:100]} — le tracking '
+                          f'link {t["code"]} est créé, à rebrancher à la main.'}
+    d = _etat()
+    fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+    fiche["tracking"], fiche["code"], fiche["link_id"] = t["url"], t["code"], lid
+    _ecrire(d)
+    return {"ok": True, "public_url": l.get("public_url", ""), "tracking": t["url"],
+            "code": t["code"], "erreur": ""}
