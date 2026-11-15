@@ -209,6 +209,19 @@ def _clics_infloww(trackings: List[str], du: str, au: str, toujours: bool) -> Di
 #: la paye Instagram ») : TOUS les subs d'une quinzaine au prix du palier que
 #: leur nombre total sur la quinzaine atteint.
 GRILLE = ((1250, 1.20), (1000, 1.00), (800, 0.90), (500, 0.80), (0, 0.70))
+#: Un prix unique par sub, pour UNE quinzaine (sa clé : son premier jour) et par
+#: serveur : il passe devant GRILLE, qui reste telle quelle. Propriétaire, le
+#: 16/11/2026 : « sur Twitter et sur Instagram, durant cette quinzaine, je vais
+#: payer chaque sub $1 [...] uniquement pour cette quinzaine, du 16 au 31, je
+#: te redis si je continue [...] tu gardes bien le truc. Si je te dis vas-y
+#: remets, tu remets ». Threads n'y est pas : il est payé aux clics.
+#: La quinzaine d'après retombe SEULE sur la grille (rien à faire le 01/12).
+#: POUR CONTINUER : ajouter la quinzaine suivante ("2026-12-01": {...}).
+#: POUR REVENIR tout de suite à la grille : retirer la ligne — mais pas une fois
+#: la quinzaine payée à 1 $, sinon « depuis toujours » la recompte à la grille.
+PRIX_UNIQUE: Dict[str, Dict[str, float]] = {
+    "2026-11-16": {AGENCY_IG_ID: 1.00, TWITTER_ID: 1.00},
+}
 #: Au plus ce nombre de quinzaines lues pour « Gagné » (une lecture MyPuls par
 #: quinzaine) ; au-delà, « — ».
 QUINZAINES_MAX = 12
@@ -278,8 +291,13 @@ def _gagne_clics(gid: str, uid: str, d0: str, d1: str) -> Optional[float]:
     return round(total, 2)
 
 
-def prix_du_sub(n: int) -> float:
-    """Le prix d'un sub quand la quinzaine en compte `n` en tout."""
+def prix_du_sub(n: int, gid: Any = "", q0: Any = "") -> float:
+    """Le prix d'un sub quand la quinzaine en compte `n` en tout : le prix
+    unique de cette quinzaine (`q0`, son premier jour) sur ce serveur s'il y en
+    a un (PRIX_UNIQUE), sinon le palier de GRILLE."""
+    unique = (PRIX_UNIQUE.get(str(q0)) or {}).get(str(gid))
+    if unique is not None:
+        return float(unique)
     for seuil, prix in GRILLE:
         if n >= seuil:
             return prix
@@ -317,11 +335,12 @@ def _debut_liens(fiche: Dict[str, Any]) -> Optional[dt.date]:
 
 
 def _gagne(of: List[str], mym: List[str], d0: str, d1: str,
-           fige: Optional[Any] = None) -> Optional[float]:
+           fige: Optional[Any] = None, gid: Any = "") -> Optional[float]:
     """Sa paie sur [d0, d1] selon GRILLE, quinzaine par quinzaine (1-15,
     16-fin, le calendrier du classement) : les subs de la période tombés dans
     une quinzaine, au prix que TOUTE cette quinzaine (jusqu'à aujourd'hui)
-    atteint. None si un nombre manque, jamais une paie inventée."""
+    atteint — ou au prix unique de cette quinzaine sur le serveur `gid`
+    (PRIX_UNIQUE). None si un nombre manque, jamais une paie inventée."""
     import podium_discord as pod
     import subs_va
 
@@ -350,7 +369,7 @@ def _gagne(of: List[str], mym: List[str], d0: str, d1: str,
         n_in = n_q if (lo, hi) == (q0, q1) else subs(lo, hi)
         if n_q is None or n_in is None:
             return None
-        total += n_in * prix_du_sub(n_q)
+        total += n_in * prix_du_sub(n_q, gid, q0.isoformat())
         q0 = pod.saison_en_cours(q0)[1] + dt.timedelta(days=1)
         q1 = pod.saison_en_cours(q0)[1]
     return round(total, 2)
@@ -470,7 +489,7 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             # Threads : payé aux clics (« Système de paiement par clics »)
             gagne = _gagne_clics(str(gid), str(uid), d0_g, d1)
         else:
-            gagne = _gagne(of, mym, d0_g, d1, fige) if ts else None
+            gagne = _gagne(of, mym, d0_g, d1, fige, gid=str(gid)) if ts else None
     except Exception as e:                                   # noqa: BLE001
         print(f"[stats-va] CVR, $ par sub ou gain illisibles : {type(e).__name__}: {e}", flush=True)
     # le revenu pour la page de la direction : sans tracking à lui, il n'est

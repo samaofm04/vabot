@@ -218,6 +218,31 @@ MP.update(_sauve_mp)
 check("palier atteint : 510 subs sur la quinzaine → les 510 à 0,80 $ (408 $)", dpal["gagne"] == 408.0, dpal["gagne"])
 check("une période dans cette quinzaine paie au palier de la quinzaine entière (6 × 0,80)", dpal_l["gagne"] == 4.8,
       dpal_l["gagne"])
+# Le prix unique d'une quinzaine (propriétaire, 16/11/2026 : « sur Twitter et sur
+# Instagram, durant cette quinzaine, je vais payer chaque sub $1 [...] tu gardes
+# bien le truc. Si je te dis vas-y remets, tu remets »).
+check("prix unique en place : 1 $ pour la quinzaine du 16/11, TRUST INSTAGRAM et TRUST TWITTER seulement",
+      sv.PRIX_UNIQUE == {"2026-11-16": {sv.AGENCY_IG_ID: 1.0, sv.TWITTER_ID: 1.0}}, sv.PRIX_UNIQUE)
+check("ce prix passe devant la grille, quel que soit le nombre de subs",
+      [sv.prix_du_sub(n, sv.TWITTER_ID, "2026-11-16") for n in (0, 499, 800, 1250)] == [1.0] * 4
+      and sv.prix_du_sub(10, sv.AGENCY_IG_ID, "2026-11-16") == 1.0)
+check("la quinzaine d'avant et celle d'après restent à la grille, Threads aussi (payé aux clics)",
+      sv.prix_du_sub(10, sv.TWITTER_ID, "2026-11-01") == 0.70 and sv.prix_du_sub(10, sv.TWITTER_ID, "2026-12-01") == 0.70
+      and sv.prix_du_sub(1300, sv.AGENCY_IG_ID, "2026-12-01") == 1.20
+      and sv.prix_du_sub(10, sv.THREADS_ID, "2026-11-16") == 0.70)
+_sauve_pu = sv.PRIX_UNIQUE
+sv.PRIX_UNIQUE = {P["precedente"][0]: {GID: 1.0}}
+dun = {k: sv.chiffres(GID, U108, *P[k]) for k in ("precedente", "libre", "toujours", "periode")}
+sv.PRIX_UNIQUE = _sauve_pu
+check("Gagné d'une quinzaine au prix unique : 17 subs × 1 $ (11,90 $ à la grille)", dun["precedente"]["gagne"] == 17.0,
+      dun["precedente"]["gagne"])
+check("une période dans cette quinzaine : au prix unique aussi (6 × 1 $)", dun["libre"]["gagne"] == 6.0,
+      dun["libre"]["gagne"])
+check("depuis toujours : cette quinzaine à 1 $, la suivante à la grille (17 × 1 + 4 × 0,70)",
+      dun["toujours"]["gagne"] == 19.8, dun["toujours"]["gagne"])
+check("la quinzaine suivante n'a pas bougé (4 × 0,70)", dun["periode"]["gagne"] == 2.8, dun["periode"]["gagne"])
+check("écrit sur la page du VA : 17,00 $", ">17,00\u00a0$<" in sv.page_html(dun["precedente"], t108, JOUR))
+check("la ligne retirée : la grille revient (11,90 $)", sv.chiffres(GID, U108, *P["precedente"])["gagne"] == 11.9)
 check("CVR = subs ÷ visites MyPuls de ses liens (17 ÷ 878)", abs(D["precedente"]["cvr"] - 1700 / 878) < 1e-9,
       D["precedente"]["cvr"])
 check("CVR depuis toujours : compteurs depuis la création (25 ÷ 1023)", abs(D["toujours"]["cvr"] - 2500 / 1023) < 1e-9,
