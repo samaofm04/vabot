@@ -1550,6 +1550,56 @@ def _pays_par_metrique(ids, metric: str, start_date: str, end_date: str):
     return out
 
 
+# ─── Les liens passes de lien direct a page (15/11/2026) ─────────────────
+# Proprietaire, 15/11/2026 : « les liens directs des VA, tu mets juste des
+# landing pages a la place ». Les liens directs des VA de TRUST TWITTER (49)
+# et de TRUST THREADS (20) sont devenus des pages ce soir-la, vers 21 h 30
+# (Paris), meme identifiant. Or boutons_par_pays compte une page a ses clics
+# de bouton et un lien direct a ses visites : relu comme une page sur toute
+# la periode, un lien converti perdait d'un coup toutes ses visites d'avant
+# (button_clicks vaut 0 tant qu'il etait direct) -- la semaine, la quinzaine
+# et l'all-time de Threads retombaient a zero le soir meme.
+# Jusqu'au jour note, inclus, ces liens se comptent donc a leurs visites ; a
+# partir du lendemain, a leurs clics de bouton. Le 15/11 entier reste compte
+# en visites : les deux heures et demie d'apres la bascule y comptent une
+# visite sans clic, en faveur du VA, plutot que d'effacer sa journee.
+_PAGES_DU_15_11_TWITTER = (
+    "lnk_6ab54711df921d748d05b88f", "lnk_6acfe1fe96ab629a39ba3d8f", "lnk_6acffa2796ab629a39bab396",
+    "lnk_6acffb3b96ab629a39bab983", "lnk_6acffcb196ab629a39bace6f", "lnk_6ad0024396ab629a39baf5cb",
+    "lnk_6ad0abc2e63c135f97248b0f", "lnk_6ad0abc5e63c135f97248c7a", "lnk_6ad1349e21ae8018c6cca374",
+    "lnk_6ad1521c21ae8018c6cd4c57", "lnk_6ad1c72221ae8018c6cf83b6", "lnk_6ad3dc2e8cffc70c0b9cd333",
+    "lnk_6ad3df498cffc70c0b9ce77c", "lnk_6ad893e54efd520d6433bd23", "lnk_6ada39e0cf84f313d19b57bf",
+    "lnk_6ada3e95cf84f313d19b6c7a", "lnk_6ada41f5cf84f313d19b8152", "lnk_6ada5624cf84f313d19bd6c6",
+    "lnk_6ada9b12cf84f313d19d06d6", "lnk_6adc7e69c2f08bda9011c477", "lnk_6add1c8e4f1bc4baa7ae759c",
+    "lnk_6add32be4f1bc4baa7aee897", "lnk_6ade9a2b5ff0d0bcb45bc621", "lnk_6adfc1ca6aef744018b0ffa9",
+    "lnk_6adfcc6b6aef744018b19e94", "lnk_6ae103f46aef744018c1bde3", "lnk_6ae1de8c6aef744018c85ae6",
+    "lnk_6ae1e3006aef744018c86fb0", "lnk_6ae60dcf31228574f13aef5d", "lnk_6ae66a0b31228574f13cb45e",
+    "lnk_6ae6758431228574f13cf926", "lnk_6ae68c4431228574f13dbf51", "lnk_6ae7056431228574f13fe59d",
+    "lnk_6ae861cc31228574f145d3ba", "lnk_6ae8e54c65b2c603249fa572", "lnk_6aeb8a7868cb1865ee34a769",
+    "lnk_6aeda869c7881b6c8064e763", "lnk_6aedae75c7881b6c80650e7a", "lnk_6aee2e20c7881b6c80693478",
+    "lnk_6af1a6b4c7881b6c807f3873", "lnk_6af4747b8c186a09f5d8298b", "lnk_6af4d3318c186a09f5da89cc",
+    "lnk_6af589bf8c186a09f5de724f", "lnk_6af63f6e8c186a09f5e45e6d", "lnk_6af73ee28c186a09f5ea0145",
+    "lnk_6af97a188c186a09f5fa06ea", "lnk_6af9a4978c186a09f5fafd78", "lnk_6af9db6c08166d658bdb6cca",
+    "lnk_6af9f65b08166d658bdc2616",
+)
+_PAGES_DU_15_11_THREADS = (
+    "lnk_6acdf8903fb996c565a5540d", "lnk_6acdf89b3fb996c565a5550b", "lnk_6acdf9a73fb996c565a559e1",
+    "lnk_6acdf9aa3fb996c565a55aec", "lnk_6ad12f6221ae8018c6cc8437", "lnk_6ad14fda21ae8018c6cd3b34",
+    "lnk_6ad365e78de04c81017c0519", "lnk_6ad385c98cffc70c0b9b225d", "lnk_6ad477d38cffc70c0ba00b31",
+    "lnk_6ad5fdfc8cffc70c0ba8788e", "lnk_6ad60e4e8cffc70c0ba8c7fb", "lnk_6aeb2da968cb1865ee32f3f2",
+    "lnk_6aeb2dc868cb1865ee32f885", "lnk_6aeb2de368cb1865ee32f9c3", "lnk_6aeb2ea768cb1865ee33031d",
+    "lnk_6aeb2eed68cb1865ee33083e", "lnk_6af663998c186a09f5e57c1b", "lnk_6af80a208c186a09f5efd270",
+    "lnk_6af8a7478c186a09f5f2f130", "lnk_6afa059808166d658bdc8240",
+)
+#: {identifiant du lien: dernier jour (inclus) ou il etait un lien direct}
+EX_DIRECTS: Dict[str, str] = {i: "2026-11-15" for i in _PAGES_DU_15_11_TWITTER + _PAGES_DU_15_11_THREADS}
+
+
+def _lendemain(jour: str) -> str:
+    import datetime as _dt
+    return (_dt.date.fromisoformat(jour) + _dt.timedelta(days=1)).isoformat()
+
+
 def boutons_par_pays(link_ids, start_date: str, end_date: str, directs=()):
     """(total, {country_code: count}) des PASSAGES vers la destination d'un
     lot de liens, par pays.
@@ -1560,7 +1610,9 @@ def boutons_par_pays(link_ids, start_date: str, end_date: str, directs=()):
     Un LIEN DIRECT (`directs`) n'a ni page ni bouton : chaque visite y EST le
     passage vers OnlyFans, il se compte a ses visites (« pageviews ») -- en
     button_clicks il valait 0 pour toujours, et son VA ne pouvait jamais
-    gagner. analytics_for_links, lui, rend les VUES de la page et seulement
+    gagner. Un lien passe de direct a page (EX_DIRECTS) : ses visites
+    jusqu'au jour de la bascule, ses clics de bouton ensuite.
+    analytics_for_links, lui, rend les VUES de la page et seulement
     son top 10 de pays ; ici, la liste entiere : un pays hors du top n'est
     jamais perdu. (None, None) si un des appels a echoue : jamais un total
     partiel rendu comme entier."""
@@ -1568,13 +1620,30 @@ def boutons_par_pays(link_ids, start_date: str, end_date: str, directs=()):
     if not ids:
         return None, None
     d = {str(i) for i in (directs or ())}
-    pages = [i for i in ids if str(i) not in d]
     dirs = [i for i in ids if str(i) in d]
+    # un lien converti (EX_DIRECTS) : ses visites jusqu'au jour note, ses
+    # clics de bouton apres. Redevenu direct (`directs`), il se compte comme
+    # un lien direct sur toute la periode.
+    ex = [i for i in ids if str(i) not in d and str(i) in EX_DIRECTS]
+    pages = [i for i in ids if str(i) not in d and str(i) not in EX_DIRECTS]
+    d0, d1 = str(start_date)[:10], str(end_date)[:10]
+    lots = [(pages, "button_clicks", start_date, end_date), (dirs, "pageviews", start_date, end_date)]
+    par_jour: Dict[str, list] = {}
+    for i in ex:
+        par_jour.setdefault(EX_DIRECTS[str(i)], []).append(i)
+    for jour, lot in sorted(par_jour.items()):
+        if d1 <= jour:
+            lots.append((lot, "pageviews", start_date, end_date))
+        elif d0 > jour:
+            lots.append((lot, "button_clicks", start_date, end_date))
+        else:
+            lots.append((lot, "pageviews", start_date, jour))
+            lots.append((lot, "button_clicks", _lendemain(jour), end_date))
     total, pays = 0, {}
-    for lot, metric in ((pages, "button_clicks"), (dirs, "pageviews")):
+    for lot, metric, debut, fin in lots:
         if not lot:
             continue
-        t, p = _pays_par_metrique(lot, metric, start_date, end_date)
+        t, p = _pays_par_metrique(lot, metric, debut, fin)
         if p is None:
             return None, None
         total += t
