@@ -487,9 +487,27 @@ def _salon_existe(cid: str) -> bool:
     return bool(cid) and _api("GET", f"/channels/{cid}")[0] == 200
 
 
-def nom_categorie(m: Dict[str, Any]) -> str:
-    """« 🔵┤ Manager YAZID ├🔵 » — le seul endroit qui fabrique ce nom."""
-    return f"🔵{BARRE} Manager {_nom_court(m)} ├🔵"
+#: Discord refuse un 51e salon dans une catégorie (CHANNEL_PARENT_MAX_CHANNELS).
+#: Le 16/11/2026, « Manager YOSHIKI » de TRUST INSTAGRAM en tenait 50 : plus
+#: aucun ticket ne s'ouvrait depuis la veille (alex02726 refusé 40 fois, puis
+#: expdie et stanley010182, toutes les 10 minutes), et rien ne le disait
+#: ailleurs que dans le journal. Propriétaire : « fais une catégorie 2 alors ».
+#: Un manager a donc sa catégorie, puis sa « 2 », sa « 3 » : même nom suivi du
+#: numéro, que _cle_categorie lit comme le même manager (un morceau purement
+#: numérique ne nomme personne) — les fiches, les droits et les groupes
+#: GetMySocial suivent sans rien savoir de la suite.
+MAX_SALONS_CATEGORIE = 50
+# deux tickets ouverts au même instant (la boucle et un clic) ne doivent pas
+# créer chacun « Manager X 2 »
+_VERROU_CATEGORIES = threading.Lock()
+
+
+def nom_categorie(m: Dict[str, Any], suite: int = 1) -> str:
+    """« 🔵┤ Manager YAZID ├🔵 » — le seul endroit qui fabrique ce nom.
+    `suite` : sa 2e, sa 3e catégorie (« 🔵┤ Manager YAZID 2 ├🔵 »), ouverte
+    quand les précédentes sont pleines (MAX_SALONS_CATEGORIE)."""
+    return (f"🔵{BARRE} Manager {_nom_court(m)}"
+            + (f" {int(suite)}" if int(suite) > 1 else "") + " ├🔵")
 
 
 def _cle_categorie(nom: Any) -> str:
@@ -515,44 +533,133 @@ def _rang(c: Dict[str, Any]):
     return (int(c.get("position") or 0), int(i) if i.isdigit() else 0, i)
 
 
-def _categorie_de(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> str:
-    """La catégorie existante de ce manager parmi `salons`, ou « »."""
+def _categories_de(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> List[str]:
+    """Les catégories de ce manager parmi `salons`, la sienne d'abord puis ses
+    suites (« … 2 ├🔵 »), dans l'ordre de Discord. [] : il n'en a pas."""
     nom, cle = nom_categorie(m), _nom_court(m)
+    debut, fin = nom[:-len(" ├🔵")] + " ", " ├🔵"
+
+    def suite(n: Any) -> bool:
+        """Au nom exact d'une de ses suites. Comparé au caractère près, comme
+        la première : un surnom que _cle_categorie relit mal (« Loÿc » → LOŸC,
+        relu LO) aurait une suite jamais reconnue, donc une catégorie neuve
+        par ticket."""
+        n = str(n or "")
+        num = n[len(debut):-len(fin)]
+        return n.startswith(debut) and n.endswith(fin) and num.isascii() and num.isdigit()
+
     cats = sorted((c for c in salons if c.get("type") == 4), key=_rang)
-    for c in cats:
-        if c.get("name") == nom:
-            return str(c["id"])
-    for c in cats:
-        if _cle_categorie(c.get("name")) == cle:
-            return str(c["id"])
+    exactes = [str(c["id"]) for c in cats if c.get("name") == nom]
+    exactes += [str(c["id"]) for c in cats if c.get("name") != nom and suite(c.get("name"))]
+    return exactes + [str(c["id"]) for c in cats
+                      if str(c["id"]) not in exactes and _cle_categorie(c.get("name")) == cle]
+
+
+def _categorie_de(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> str:
+    """La catégorie existante de ce manager parmi `salons`, ou « » — la
+    première : pour y ranger un salon de plus, voir _categorie_libre."""
+    siennes = _categories_de(salons, m)
+    return siennes[0] if siennes else ""
+
+
+def _categorie_libre(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> str:
+    """Celle de ses catégories où un salon de plus tient : la première qui en
+    a moins de MAX_SALONS_CATEGORIE. « » : il n'en a pas, ou toutes sont
+    pleines. `salons` doit porter les salons, pas les seules catégories."""
+    pleins: Dict[str, int] = {}
+    for c in salons:
+        if c.get("type") != 4 and c.get("parent_id"):
+            pleins[str(c["parent_id"])] = pleins.get(str(c["parent_id"]), 0) + 1
+    for cid in _categories_de(salons, m):
+        if pleins.get(cid, 0) < MAX_SALONS_CATEGORIE:
+            return cid
     return ""
 
 
-def _creer_categorie(gid: str, m: Dict[str, Any], rid: Optional[str] = None):
-    """Crée la catégorie du manager. Rend (code HTTP, identifiant ou « »)."""
+def _suite_libre(salons: List[Dict[str, Any]], m: Dict[str, Any]) -> int:
+    """Le numéro de sa prochaine catégorie : 1 s'il n'en a aucune, sinon le
+    premier (2, 3…) dont le nom n'est pas déjà pris."""
+    if not _categories_de(salons, m):
+        return 1
+    pris = {str(c.get("name")) for c in salons if c.get("type") == 4}
+    # borné : un serveur Discord ne tient que 50 catégories en tout
+    return next((n for n in range(2, 60) if nom_categorie(m, n) not in pris), 60)
+
+
+def _creer_categorie(gid: str, m: Dict[str, Any], rid: Optional[str] = None,
+                     suite: int = 1, sous: Optional[Dict[str, Any]] = None):
+    """Crée la catégorie du manager. Rend (code HTTP, identifiant ou « »).
+
+    `suite` : voir nom_categorie. `sous` : la catégorie sous laquelle la
+    ranger (sa précédente) — même position, Discord départage alors par
+    l'identifiant et la plus récente vient juste après ; sans ça elle naît
+    tout en bas du serveur, loin de la première."""
     if rid is None:
         rid = role_manager(gid)
     droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)}]
     droits += _droits_staff(rid, role_helper(gid))
-    code, rep = _api("POST", f"/guilds/{gid}/channels",
-                     json={"name": nom_categorie(m), "type": 4,
-                           "permission_overwrites": droits})
+    corps: Dict[str, Any] = {"name": nom_categorie(m, suite), "type": 4,
+                             "permission_overwrites": droits}
+    try:
+        if sous is not None and sous.get("position") is not None:
+            corps["position"] = int(sous["position"])
+    except (TypeError, ValueError):
+        pass
+    code, rep = _api("POST", f"/guilds/{gid}/channels", json=corps)
+    if code == 400 and "position" in corps:
+        # la place refusée : la catégorie d'abord, tant pis pour l'ordre
+        corps.pop("position")
+        code, rep = _api("POST", f"/guilds/{gid}/channels", json=corps)
     ok = code == 201 and isinstance(rep, dict) and rep.get("id")
     return code, (str(rep["id"]) if ok else "")
 
 
+def _categorie_pour(gid: str, m: Dict[str, Any],
+                    a_l_aveugle: bool = True) -> Tuple[str, bool]:
+    """(catégorie où ranger un salon de plus, elle a de la place).
+
+    False : toutes ses catégories sont pleines et la suite n'a pas pu être
+    créée — la pleine est rendue exprès (voir plus bas), inutile de retenter.
+    `a_l_aveugle` False : la liste des salons illisible rend (« », False) au
+    lieu de créer sans savoir. C'est la seconde tentative d'ouvrir_ticket : là
+    on SAIT que le manager a une catégorie, elle vient de refuser le salon —
+    en créer une à l'aveugle faisait un second « Manager X » du même nom."""
+    with _VERROU_CATEGORIES:
+        code, rep = _api("GET", f"/guilds/{gid}/channels")
+        if code == 200 and isinstance(rep, list):
+            libre = _categorie_libre(rep, m)
+            if libre:
+                return libre, True
+            siennes = _categories_de(rep, m)
+            if siennes:
+                suite = _suite_libre(rep, m)
+                sous = next((c for c in rep if str(c.get("id")) == siennes[-1]), None)
+                code_c, cid = _creer_categorie(gid, m, suite=suite, sous=sous)
+                if cid:
+                    print(f"[ticket] {gid} : catégorie(s) de {_nom_court(m)} pleine(s) "
+                          f"({MAX_SALONS_CATEGORIE} salons, le maximum de Discord) — "
+                          f"« {nom_categorie(m, suite)} » créée", flush=True)
+                    return cid, True
+                print(f"[ticket] {gid} : catégorie(s) de {_nom_court(m)} pleine(s) et "
+                      f"« {nom_categorie(m, suite)} » non créée (HTTP {code_c})", flush=True)
+                # La pleine, exprès : Discord refusera le salon, ouvrir_ticket
+                # le dira et le tour suivant réessaiera. Sans parent, le
+                # ticket naîtrait hors de toute catégorie, où plus aucun
+                # suivi (managers, liens) ne le voit.
+                return siennes[0], False
+        elif not a_l_aveugle:
+            return "", False
+        return _creer_categorie(gid, m)[1], True
+
+
 def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
-    """La catégorie « 🔵┤ Manager X ├🔵 », créée si elle manque.
+    """La catégorie « 🔵┤ Manager X ├🔵 » où ranger un salon de plus, créée si
+    elle manque — et sa suite (« … 2 ├🔵 ») quand elle est pleine.
 
     Trouvée aussi quand son nom a été retapé à la main (casse, emoji) : le
     13/10 le propriétaire a renommé « Manager VECTOR » en « Manager SPECTRUM »
     lui-même ; une comparaison au caractère près en aurait recréé une."""
-    code, rep = _api("GET", f"/guilds/{gid}/channels")
-    if code == 200 and isinstance(rep, list):
-        deja = _categorie_de(rep, m)
-        if deja:
-            return deja
-    return _creer_categorie(gid, m)[1]
+    return _categorie_pour(gid, m)[0]
 
 
 #: Les serveurs dont les salons de VA portent le numéro du VA, comme Va IG
@@ -1695,7 +1802,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None,
         choisi = lui or _prochain(gid, liste)
         rid = role_manager(gid)
 
-        parent = categorie_du_manager(gid, choisi) if choisi else ""
+        parent, place = _categorie_pour(gid, choisi) if choisi else ("", True)
         droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)},
                   {"id": uid, "type": 1, "allow": str(MEMBRE), "deny": "0"}]
         droits += _droits_staff(rid, role_helper(gid))
@@ -1713,6 +1820,16 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None,
         if parent:
             corps["parent_id"] = parent
         code, rep = _api("POST", f"/guilds/{gid}/channels", json=corps)
+        if code == 400 and parent and place and "CHANNEL_PARENT_MAX_CHANNELS" in str(rep):
+            # La catégorie s'est remplie entre sa lecture et la création (un
+            # autre ticket au même instant) : celle qui a de la place, ou la
+            # suite, et une seconde tentative — pas dix minutes d'attente.
+            # Pas quand la pleine a été rendue exprès (`place` faux) : la
+            # suite vient d'être refusée, la redemander ne changerait rien.
+            autre, place = _categorie_pour(gid, choisi, a_l_aveugle=False)
+            if autre and place and autre != parent:
+                corps["parent_id"] = autre
+                code, rep = _api("POST", f"/guilds/{gid}/channels", json=corps)
         if code != 201 or not rep.get("id"):
             print(f"[ticket] {uid} : création refusée (HTTP {code}) "
                   f"{str(rep)[:160]}", flush=True)
@@ -2174,17 +2291,30 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
     # Les paires parti -> arrivé. D'abord par la personne : une catégorie dont
     # les fiches nomment l'arrivé est la sienne (il a changé de surnom). Puis
     # dans l'ordre : catégories par position, managers par identifiant.
-    paires = []
+    paires = []                           # (catégorie, arrivé, suite)
     restent_o, restent_n = list(orphelines), list(nouveaux)
+
+    def apparier(o: Dict[str, Any], n: Dict[str, Any]) -> None:
+        """L'arrivé reprend la catégorie du parti ET ses suites (« … 2 ») :
+        sans ça la « 2 » partait à un autre arrivé, ou ses VA un par un au
+        tour de rôle pendant que la première était simplement renommée."""
+        cle = _cle_categorie(o.get("name"))
+        groupe = sorted((x for x in restent_o if _cle_categorie(x.get("name")) == cle),
+                        key=_rang)
+        restent_n.remove(n)
+        for k, x in enumerate(groupe, start=1):
+            restent_o.remove(x)
+            paires.append((x, n, k))
+
     for o in list(restent_o):
+        if o not in restent_o:
+            continue                      # déjà partie avec la première
         c = candidats(o)
         n = next((m for m in restent_n if _uid(m) in c), None)
         if n is not None:
-            paires.append((o, n))
-            restent_o.remove(o)
-            restent_n.remove(n)
+            apparier(o, n)
     while restent_o and restent_n:
-        paires.append((restent_o.pop(0), restent_n.pop(0)))
+        apparier(restent_o[0], restent_n[0])
 
     # Un arrivé qui a DÉJÀ sa catégorie (un ticket l'a créée avant ce tour) :
     # pas de renommage possible, mais les VA du parti passent quand même à
@@ -2194,31 +2324,79 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
     arrives = [m for m in liste if deja_vus is not None and _uid(m) not in deja_vus
                and _nom_court(m) in prises]
     releve: Dict[str, Dict[str, Any]] = {}
+    releve_de: Dict[str, Dict[str, Any]] = {}     # par parti : ses suites suivent
     for o in restent_o:
-        if not arrives:
-            break
-        if suivis(str(o["id"])):
-            releve[str(o["id"])] = arrives.pop(0)
+        if not suivis(str(o["id"])):
+            continue
+        cle_o = _cle_categorie(o.get("name"))
+        if cle_o not in releve_de:
+            if not arrives:
+                continue
+            releve_de[cle_o] = arrives.pop(0)
+        releve[str(o["id"])] = releve_de[cle_o]
 
     reste = int(cfg.get("managers_auto_max") or MAX_CHANGEMENTS)
 
     def ajouter_categorie(m: Dict[str, Any]) -> str:
-        code, cid = _creer_categorie(gid, m, rid if rid else None)
+        """Sa catégorie, ou sa suite s'il en a déjà (toutes pleines)."""
+        with _VERROU_CATEGORIES:
+            vue = cats
+            if _categories_de(cats, m):
+                # Un ticket ouvert pendant ce tour (_categorie_pour, autre
+                # fil) a pu créer la suite : la liste du début du tour ne la
+                # connaît pas, et le suivi en créait une seconde du même nom.
+                code_l, frais = _api("GET", f"/guilds/{gid}/channels")
+                if code_l == 200 and isinstance(frais, list):
+                    libre = _categorie_libre(frais, m)
+                    if libre:
+                        if all(str(x.get("id")) != libre for x in cats):
+                            c = next(x for x in frais if str(x.get("id")) == libre)
+                            salons.append(c)
+                            cats.append(c)
+                        return libre
+                    vue = frais
+            siennes = _categories_de(vue, m)
+            suite = _suite_libre(vue, m)
+            sous = (next((c for c in vue if str(c.get("id")) == siennes[-1]), None)
+                    if siennes else None)
+            nom = nom_categorie(m, suite)
+            code, cid = _creer_categorie(gid, m, rid if rid else None, suite=suite, sous=sous)
         if code == 429:
-            raise _Limite(f"création de « {nom_categorie(m)} »")
+            raise _Limite(f"création de « {nom} »")
         if not cid:
-            noter("rates", f"« {nom_categorie(m)} » non créée (HTTP {code})")
+            noter("rates", f"« {nom} » non créée (HTTP {code})")
             return ""
-        c = {"id": cid, "type": 4, "name": nom_categorie(m), "position": 10 ** 6}
+        c = {"id": cid, "type": 4, "name": nom,
+             "position": sous.get("position", 10 ** 6) if sous else 10 ** 6}
         salons.append(c)
         cats.append(c)
         noter("creees", f"« {c['name']} » créée pour {_uid(m)}")
         return cid
 
-    # 1. parti + arrivé : on renomme, les VA restent dedans
-    for o, m in paires:
-        avant, voulu = str(o.get("name")), nom_categorie(m)
-        if reste <= 0:
+    # 1. parti + arrivé : on renomme, les VA restent dedans. Les catégories
+    #    d'un même parti (« X », « X 2 ») d'un bloc ou pas du tout : la
+    #    première renommée seule (budget du tour épuisé, ou l'inverse : elle
+    #    refusée et la « 2 » renommée), l'arrivé n'était plus « nouveau » au
+    #    tour suivant, et le reste n'était jamais repris.
+    #    LIMITE CONNUE : la première renommée, puis la « 2 » refusée par
+    #    Discord (5xx, 429, redémarrage entre les deux) — la « 2 » reste au nom
+    #    du parti et ses VA suivent le chemin d'une catégorie orpheline (la
+    #    relève, sinon le moins de VA), un par un. Personne n'est perdu, mais
+    #    ce peut être un autre arrivé. Une reprise déduite des fiches
+    #    (manager_avant) a été essayée puis retirée : elle renommait aussi une
+    #    « Manager 1392… » (surnom illisible) et la suite d'un manager
+    #    toujours là. Pour la faire bien : noter {parti: arrivé} au journal
+    #    AVANT le premier renommage du groupe, et ne reprendre que ces paires.
+    budget = reste
+    tailles: Dict[str, int] = {}
+    for _o, m, _k in paires:
+        tailles[_uid(m)] = tailles.get(_uid(m), 0) + 1
+    attend: set = set()                   # arrivés dont le groupe attend le tour suivant
+    for o, m, k in paires:
+        avant, voulu = str(o.get("name")), nom_categorie(m, k)
+        if k == 1 and reste < min(tailles[_uid(m)], budget):
+            attend.add(_uid(m))
+        if reste <= 0 or _uid(m) in attend:
             noter("reportes", f"renommer « {avant} » en « {voulu} »")
             continue
         code, rep = _api("PATCH", f"/channels/{o['id']}", json={"name": voulu})
@@ -2226,6 +2404,8 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
             raise _Limite(f"renommage de « {avant} »")
         if code != 200:
             noter("rates", f"renommage de « {avant} » refusé (HTTP {code}) {str(rep)[:80]}")
+            if k == 1:
+                attend.add(_uid(m))       # ses suites attendent avec elle
             continue
         o["name"] = voulu
         reste -= 1
@@ -2255,10 +2435,14 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
     par_uid = {_uid(m): m for m in liste}
 
     def charge(m: Dict[str, Any]) -> int:
-        """Ses VA : les tickets suivis de sa catégorie, son propre salon à part."""
-        cat = _categorie_de(cats, m)
-        return len([c for c in suivis(cat) if salon_fiche[str(c["id"])]
-                    != f"{gid}:{_uid(m)}"]) if cat else 0
+        """Ses VA : les tickets suivis de SES catégories (ses suites comprises),
+        son propre salon à part."""
+        return len([c for cat in _categories_de(cats, m) for c in suivis(cat)
+                    if salon_fiche[str(c["id"])] != f"{gid}:{_uid(m)}"])
+
+    def nom_de(cid: str, m: Dict[str, Any]) -> str:
+        return next((str(c.get("name")) for c in cats if str(c.get("id")) == str(cid)),
+                    nom_categorie(m))
     for o in restent_o:
         oid = str(o["id"])
         for c in suivis(oid):
@@ -2268,8 +2452,8 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
             cle = salon_fiche[str(c["id"])]
             m = par_uid.get(str(fiches[cle].get("manager") or ""))
             if m is not None:
-                dest = _categorie_de(cats, m)
-                if not dest or dest == oid:
+                siennes = _categories_de(cats, m)
+                if not siennes or oid in siennes:
                     # sa catégorie est à créer (reportée, ou refusée) : on
                     # attend qu'elle existe plutôt que de le confier à un autre
                     noter("reportes", f"« {c.get('name')} » attend « {nom_categorie(m)} »")
@@ -2277,16 +2461,17 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
                 pourquoi = "son manager, sous son nom du jour"
             elif oid in releve:
                 m = releve[oid]
-                dest = _categorie_de(cats, m)
                 pourquoi = "l'arrivé qui relève ce manager"
             else:
                 m = min(cibles, key=lambda x: (charge(x), _uid(x)))
-                dest = _categorie_de(cats, m)
                 pourquoi = f"le moins de VA ({charge(m)})"
+            # celle de ses catégories qui a de la place ; toutes pleines (ou
+            # aucune) : la suivante est créée ici
+            dest = _categorie_libre(salons, m)
             if not dest:
                 if reste < 2:
-                    noter("reportes", f"créer « {nom_categorie(m)} » puis y déplacer "
-                                      f"« {c.get('name')} »")
+                    noter("reportes", f"créer « {nom_categorie(m, _suite_libre(cats, m))} » "
+                                      f"puis y déplacer « {c.get('name')} »")
                     continue
                 dest = ajouter_categorie(m)
                 if not dest:
@@ -2304,7 +2489,7 @@ def _suivre(gid, cfg, salons, cats, fixe, rid, liste, bilan, noter, ignorer):
             c["parent_id"] = dest
             reste -= 1
             noter("deplaces", f"« {c.get('name')} » : « {o.get('name')} » → "
-                              f"« {nom_categorie(m)} » ({pourquoi})")
+                              f"« {nom_de(dest, m)} » ({pourquoi})")
             pb = _donner_ticket(gid, c, cle, m, fiches, bilan["confies"])
             if pb:
                 noter("rates", f"« {c.get('name')} » déplacé, mais {pb} — repris au prochain tour")
