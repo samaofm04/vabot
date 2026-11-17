@@ -41,6 +41,7 @@ le menu (5 par rangée).
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hmac
 import html as _html
 import re
@@ -48,7 +49,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import domaines
 import safe_json
@@ -615,7 +616,7 @@ _STYLE = """
 :root{--fond:#0e0e10;--carte:#18181b;--bord:#2a2a2f;--texte:#f4f4f5;--faible:#a1a1aa;--acc:#f97341;--ambre:#f59e0b}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--fond);color:var(--texte)}
-body{font:14px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:20px 16px 32px;max-width:960px;margin:0 auto}
+body{font:14px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:20px 16px 32px;max-width:1040px;margin:0 auto}
 .marque{color:var(--acc);font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 h1{font-size:20px;margin:4px 0 2px;overflow-wrap:anywhere}
 .sous{color:var(--faible);font-size:13px;margin:0 0 16px;overflow-wrap:anywhere}
@@ -645,6 +646,30 @@ td.nom{white-space:nowrap}
 .pied{color:var(--faible);font-size:12px;margin:12px 0 0;overflow-wrap:anywhere}
 .pied a{color:var(--acc);text-decoration:none}
 .err{background:rgba(239,68,68,.12);border:1px solid #ef4444;border-radius:12px;padding:14px 16px}
+/* l'adresse USDC : un QR à scanner, l'adresse en tout petit dessous ; un clic l'ouvre en grand au centre (.zoom).
+   Le QR garde son fond blanc sur la page sombre : sans lui, aucun téléphone ne le lit.
+   L'adresse entière (.za) déborde de 8 px sur la marge de la carte : 44 caractères tiennent sur une ligne dès 360 px */
+.adrb{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.qr{display:block;background:none;border:0;padding:0;margin:0;line-height:0;cursor:zoom-in;border-radius:6px}
+.qr svg{display:block;width:var(--qr,64px);height:var(--qr,64px);border-radius:6px}
+.adrt{display:block;color:var(--faible);font-size:10.5px;font-weight:400;line-height:1.35;text-align:right}
+.adrt b{display:block;font-weight:500;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.manque{color:var(--ambre)}
+/* les logos USDC et réseau : deux pastilles qui se chevauchent, à la taille du texte qui les suit. Un filet
+   clair autour : le logo Solana est un disque NOIR, il disparaissait sur la carte sombre (il n'en restait que
+   les trois barres) */
+.adrr{display:block;white-space:nowrap;margin-top:2px}
+.lgs{display:inline-flex;vertical-align:-.28em;margin-right:.4em}
+.lgs img{display:block;width:1.3em;height:1.3em;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.28)}
+.lgs img+img{margin-left:-.3em}
+.adrt .lgs img{width:15px;height:15px}
+.adrm{display:block;color:var(--acc);font-size:10.5px;font-weight:600;text-decoration:none;margin-top:2px}
+.zoom{position:fixed;top:0;right:0;bottom:0;left:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.82);cursor:zoom-out}
+.zc{width:100%;max-width:350px;background:var(--carte);border:1px solid var(--bord);border-radius:18px;padding:18px;text-align:center}
+.zc svg{display:block;width:100%;height:auto;border-radius:10px}
+.zr{margin:14px 0 6px;font-size:15px;font-weight:700}
+.za{display:block;width:calc(100% + 16px);background:none;border:0;padding:0;margin:0 -8px;color:var(--faible);font:10.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere;word-break:break-all;text-wrap:balance;cursor:copy;-webkit-user-select:all;user-select:all}
+.ze{min-height:16px;margin-top:4px;color:#4ade80;font-size:12px;font-weight:600}
 /* 375 px : comme la page Lia, ce qui ne tient pas défile dans la boîte, jamais la page ; les en-têtes passent
    sur deux lignes */
 @media (max-width:480px){.periode .lib{flex-basis:100%} th{font-size:11px;white-space:normal} th,td{padding:9px 5px} th:first-child,td:first-child{padding-left:10px} th:last-child,td:last-child{padding-right:10px} h1{font-size:18px} td{font-size:14px} td.nom{white-space:normal;overflow-wrap:anywhere;min-width:92px} .nv{padding:1px 4px}}
@@ -701,8 +726,190 @@ def _titre_periode(du: str, au: str, jour: dt.date) -> str:
     return f"Le {_jj_mm(du)}" if du == au else f"Du {_jj_mm(du)} au {_jj_mm(au)}"
 
 
+# ─── l'adresse USDC, dernière colonne ────────────────────────────────────
+# Propriétaire, 17/11/2026, devant la page d'un VA : « rajouter une catégorie
+# à la toute fin [...] pour savoir c'est quoi son adresse crypto ». LECTURE
+# SEULE : la page s'ouvre par un simple lien à clé ; si ce lien fuit, personne
+# ne doit pouvoir changer l'adresse de paie d'ici. Elle se change dans Discord
+# (💳 du ticket).
+def paiements() -> Optional[Dict[str, Dict[str, Any]]]:
+    """suivi_va.paiements() sans lever : {« gid:uid » : {adresse, reseau…}},
+    None si les adresses ne sont pas lisibles."""
+    try:
+        import suivi_va
+        return suivi_va.paiements()
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[stats-va] adresses USDC illisibles : {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def paiement_de(tous: Optional[Mapping[str, Any]], gid: Any, uid: Any) -> Optional[Dict[str, str]]:
+    """{adresse, reseau} du VA dans `tous` (paiements()), {} s'il n'a pas
+    d'adresse, None si elles sont illisibles : « à renseigner » ne s'écrit
+    que quand on SAIT qu'il n'en a pas donné."""
+    if tous is None:
+        return None
+    e = tous.get(f"{gid}:{uid}") or {}
+    return {"adresse": str(e.get("adresse") or ""), "reseau": str(e.get("reseau") or "solana")} \
+        if e.get("adresse") else {}
+
+
+@functools.lru_cache(maxsize=8)
+def _logo_url(fichier: str) -> str:
+    """/static/<fichier>?v=<empreinte> ; "" si le fichier manque : la page
+    reste entière, sans logo, plutôt qu'avec une image cassée."""
+    try:
+        import hashlib
+        octets = (Path(__file__).resolve().parent / "static" / fichier).read_bytes()
+    except OSError as e:
+        print(f"[stats-va] logo {fichier} illisible : {e}", flush=True)
+        return ""
+    return f"/static/{fichier}?v={hashlib.md5(octets).hexdigest()[:8]}"
+
+
+def logo(fichier: str, alt: str = "") -> str:
+    u = _logo_url(fichier)
+    return (f'<img src="{_e(u)}" alt="{_e(alt)}" width="16" height="16" loading="lazy" decoding="async">'
+            if u else "")
+
+
+def logo_reseau(reseau: Any) -> str:
+    """Le logo du réseau (Solana, Ethereum) : ceux du menu Discord
+    (tickets_discord.USDC_EMOJIS), une seule table pour les deux."""
+    import tickets_discord as tk
+    return logo((tk.USDC_EMOJIS.get(str(reseau)) or tk.USDC_EMOJIS["solana"])[1])
+
+
+def logos_usdc(reseau: Any) -> str:
+    """Propriétaire, 17/11/2026 : « mets les logo usdc et le logo icône
+    solana », « ou eth ». Le logo USDC et celui du réseau, l'un contre
+    l'autre, devant le nom du réseau ; leur taille suit celle du texte."""
+    import tickets_discord as tk
+    h = logo(tk.USDC_ICONE, "USDC") + logo_reseau(reseau)
+    return f'<span class="lgs">{h}</span>' if h else ""
+
+
+def cellule_adresse(p: Optional[Mapping[str, Any]], modifier: str = "") -> str:
+    """La case « Adresse USDC », la même sur la page du VA et sur celle de la
+    direction (propriétaire, 17/11/2026 : « juste un QR code, avec le texte
+    écrit en tout petit ; quand je clique, ça zoome ») : le QR de l'adresse,
+    puis l'adresse courte comme dans le menu du ticket (4…4) et le réseau.
+    Un clic l'ouvre en grand au centre (SCRIPT_ADRESSE). Sans adresse :
+    « à renseigner », jamais une case vide. `modifier` : l'adresse de la page
+    où la direction la change (adresse_usdc), donnée par la SEULE page de la
+    direction ouverte avec un compte ; jamais sur la page d'un VA ni avec une
+    clé de manager. Adresses illisibles : pas de lien non plus, on ne change
+    pas ce qu'on ne lit pas."""
+    if p is None:
+        return '<td class="adr">—</td>'
+    lien = f'<a class="adrm" href="{_e(modifier)}">Modifier</a>' if modifier else ""
+    a = str(p.get("adresse") or "")
+    if not a:
+        return f'<td class="adr"><span class="manque">à renseigner</span>{lien}</td>'
+    import suivi_va
+    reseau = suivi_va.RESEAUX.get(str(p.get("reseau") or ""), suivi_va.RESEAUX["solana"])
+    court = a if len(a) <= 11 else f"{a[:4]}…{a[-4:]}"
+    texte = (f'<span class="adrt"><b>{_e(court)}</b><span class="adrr">{logos_usdc(p.get("reseau"))}'
+             f'{_e(reseau)}</span>{lien}</span>')
+    try:
+        import qr_code
+        dessin = qr_code.svg(a)
+    except Exception as e:                                   # noqa: BLE001
+        # pas de QR ne doit pas emporter la page : l'adresse reste écrite
+        print(f"[stats-va] QR de l'adresse non dessiné : {type(e).__name__}: {e}", flush=True)
+        return (f'<td class="adr"><div class="adrb"><span class="adrt" title="{_e(a)}"><b>{_e(court)}</b>'
+                f'<span class="adrr">{logos_usdc(p.get("reseau"))}{_e(reseau)}</span>{lien}</span></div></td>')
+    return (f'<td class="adr"><div class="adrb"><button type="button" class="qr" data-a="{_e(a)}" '
+            f'data-r="USDC · {_e(reseau)}" title="{_e(a)}" aria-label="Agrandir le QR code de l\'adresse USDC">'
+            f'{dessin}</button>{texte}</div></td>')
+
+
+#: Le seul JavaScript des deux pages : un clic sur le QR l'ouvre en grand au
+#: centre, avec le réseau et l'adresse entière ; un clic sur l'adresse la
+#: copie, un clic ailleurs (ou Échap) referme. Sans JavaScript, le QR de la
+#: case reste un vrai QR et la page reste entière. Rien n'est écrit en HTML :
+#: que du texte (textContent) et une copie du dessin déjà sur la page.
+#: Que des guillemets doubles, aucune barre oblique inverse : ce texte vit
+#: dans une chaîne Python.
+SCRIPT_ADRESSE = """<script>
+(function(){
+  function fermer(){
+    var z=document.getElementById("zoomqr");
+    if(z){z.parentNode.removeChild(z);}
+  }
+  function copier(a,fin){
+    function secours(){
+      var ok=false;
+      var t=document.createElement("textarea");
+      t.value=a;
+      t.setAttribute("readonly","");
+      t.style.position="fixed";
+      t.style.opacity="0";
+      document.body.appendChild(t);
+      t.select();
+      try{ok=document.execCommand("copy");}catch(e){ok=false;}
+      document.body.removeChild(t);
+      fin(ok);
+    }
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(a).then(function(){fin(true);},secours);
+    }else{
+      secours();
+    }
+  }
+  function ouvrir(b){
+    fermer();
+    var z=document.createElement("div");
+    z.id="zoomqr";
+    z.className="zoom";
+    var c=document.createElement("div");
+    c.className="zc";
+    var s=b.querySelector("svg");
+    if(s){c.appendChild(s.cloneNode(true));}
+    var r=document.createElement("div");
+    r.className="zr";
+    var l=b.parentNode.querySelector(".lgs");
+    if(l){r.appendChild(l.cloneNode(true));}
+    r.appendChild(document.createTextNode(b.getAttribute("data-r")||""));
+    var a=document.createElement("button");
+    a.type="button";
+    a.className="za";
+    a.textContent=b.getAttribute("data-a")||"";
+    var e=document.createElement("div");
+    e.className="ze";
+    c.appendChild(r);
+    c.appendChild(a);
+    c.appendChild(e);
+    z.appendChild(c);
+    document.body.appendChild(z);
+  }
+  document.addEventListener("click",function(ev){
+    var c=ev.target;
+    if(!c||!c.closest){return;}
+    var b=c.closest("button.qr");
+    if(b){ouvrir(b);return;}
+    var a=c.closest(".za");
+    if(a){
+      copier(a.textContent,function(ok){
+        var e=a.parentNode.querySelector(".ze");
+        if(e){e.textContent=ok?"Adresse copiée ✓":"";}
+      });
+      return;
+    }
+    if(c.closest("#zoomqr")){fermer();}
+  });
+  document.addEventListener("keydown",function(ev){
+    if(ev.key==="Escape"){fermer();}
+  });
+})();
+</script>"""
+
+
 def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) -> str:
-    """La page, sans JavaScript. Tout est échappé : un pseudo ne peut rien casser."""
+    """La page. Tout est échappé : un pseudo ne peut rien casser. Un seul
+    script, le QR de l'adresse USDC en grand (SCRIPT_ADRESSE) ; le reste marche sans.
+    d["paiement"] : {adresse, reseau}, {} sans adresse, None (ou absent) si
+    illisible."""
     import podium_discord as pod
     jour = jour or pod._aujourdhui()
     du, au = str(d.get("du") or ""), str(d.get("au") or "")
@@ -717,7 +924,7 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
     # en bas, les sources et rien d'autre ; une marque n'est expliquée que si
     # elle est sur la page
     marques = []
-    if any(d.get(k) is None for k in ("us", "glob", "infloww", "subs", "gagne")):
+    if any(d.get(k) is None for k in ("us", "glob", "infloww", "subs", "gagne", "paiement")):
         marques.append("— : pas encore lisible")
     if d.get("communs"):
         marques.append("un lien de suivi commun à plusieurs VA n'est pas compté")
@@ -732,13 +939,14 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
              + '<div class="boite"><table><thead><tr><th class="g">Personne</th>'
              f'<th>Clics {"US·UK·CA" if str(d.get("gid") or "") in GRILLE_CLICS_ICI else "US"} GMS</th>'
              '<th>Clics globaux GMS</th><th>Clics Infloww</th><th>Subs</th><th>CVR</th><th>$ / sub</th>'
-             '<th>Gagné</th></tr></thead><tbody><tr>'
+             '<th>Gagné</th><th>Adresse USDC</th></tr></thead><tbody><tr>'
              f'<td class="nom">{("@" + _e(d["pseudo"])) if d.get("pseudo") else _e(nom)}'
              + (f'<span class="det">{_e(nom)}</span>' if d.get("pseudo") else "") + '</td>'
              f'<td>{_nb(d.get("us"))}</td><td>{_nb(d.get("glob"))}</td><td>{infl}</td>'
              f'<td class="subs">{_nb(d.get("subs"))}</td><td>{cvr}</td><td>{par_sub}</td>'
-             f'<td>{il._dollars(d.get("gagne"))}</td></tr></tbody></table></div>'
-             + pied)
+             f'<td>{il._dollars(d.get("gagne"))}</td>{cellule_adresse(d.get("paiement"))}'
+             '</tr></tbody></table></div>'
+             + pied + SCRIPT_ADRESSE)
     return _gabarit(f"Tes stats · {nom}", corps, d.get("gid"))
 
 
@@ -770,7 +978,10 @@ def page(t: Any, args: Any = None) -> Tuple[int, str]:
         return 200, _gabarit("Tes stats", f'<h1>📈 Tes stats</h1><div class="err"><b>Lecture '
                              f'impossible.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', gid)
     try:
-        return 200, page_html(d, str(t))
+        # l'adresse est lue à CHAQUE affichage, hors du cache des chiffres
+        # (10 min) : un VA qui vient de la changer par 💳 la retrouve ici
+        # tout de suite, sinon il croit que rien n'a été enregistré
+        return 200, page_html(dict(d, paiement=paiement_de(paiements(), gid, uid)), str(t))
     except Exception as e:                                   # noqa: BLE001
         return 200, _gabarit("Tes stats", f'<h1>📈 Tes stats</h1><div class="err"><b>La page n\'a pas '
                              f'pu être construite.</b><br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', gid)

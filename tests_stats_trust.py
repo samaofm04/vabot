@@ -53,6 +53,14 @@ def check(label, cond, detail=""):
     print(("OK   " if cond else "FAIL ") + label + ("" if cond else f"  [{str(detail)[:300]}]"))
 
 
+def adr_ok(page, court, reseau):
+    """L'adresse courte, puis le logo USDC, le logo du BON réseau et son nom, dans cet ordre."""
+    return re.search(rf'<b>{re.escape(court)}</b><span class="adrr"><span class="lgs">'
+                     rf'<img src="/static/usdc/usdc\.png\?v=[0-9a-f]{{8}}" alt="USDC"[^>]*>'
+                     rf'<img src="/static/usdc/{reseau.lower()}\.png\?v=[0-9a-f]{{8}}" alt=""[^>]*>'
+                     rf'</span>{reseau}</span>', page) is not None
+
+
 VRAI = BOT / "data" / "stats_trust_cle.json"
 AVANT = VRAI.stat().st_mtime if VRAI.exists() else None
 
@@ -64,6 +72,15 @@ import tickets_discord          # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="stats_trust_"))
 st.CLE_FICHIER = TMP / "stats_trust_cle.json"
+# 17/11/2026 : la colonne « Adresse USDC » lit data/suivi_va.json ; ici, une
+# copie vide, pour ne ni lire ni écrire les adresses des vrais VA
+import suivi_va                 # noqa: E402
+import qr_code                  # noqa: E402
+suivi_va.ETAT_FICHIER = TMP / "suivi_va.json"
+VRAI_ADR = BOT / "data" / "suivi_va.json"
+AVANT_ADR = VRAI_ADR.stat().st_mtime if VRAI_ADR.exists() else None
+SOL = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+ETH = "0x52908400098527886E0F7030069857D2E4169EE7"
 JOUR = dt.date(2026, 11, 7)
 pod._aujourdhui = lambda: JOUR
 TW, IG, TH = sv.TWITTER_ID, sv.AGENCY_IG_ID, sv.THREADS_ID
@@ -569,8 +586,52 @@ check("admin connecté, sans clé : la page et les liens des managers",
 if st._FIL:
     st._FIL.join(10)
 
+print("6 bis. La colonne « Adresse USDC » (17/11/2026)")
+_kw = dict(cle_=k, s="tous", du="2026-11-01", au="2026-11-07", tri="subs", sens="desc", jour=JOUR)
+_uids = [(p["gid"], p["uid"]) for p in lot["gens"]]
+_adr = {f"{_uids[0][0]}:{_uids[0][1]}": {"adresse": SOL, "reseau": "solana"},
+        f"{_uids[1][0]}:{_uids[1][1]}": {"adresse": ETH, "reseau": "ethereum"}}
+hq = st.page_html(lot, None, adresses=_adr, **_kw)
+_cases = re.findall(r'<td class="adr">.*?</td>', hq, flags=re.S)
+check("dernière colonne, triable comme les autres",
+      re.findall(r"<th[^>]*>(?:<a[^>]*>)?([^<]*)", hq)[-1] == "Adresse USDC"
+      and re.search(r'tri=adr&amp;sens=asc">Adresse USDC</a></th></tr>', hq), re.findall(r"<th[^>]*>(?:<a[^>]*>)?([^<]*)", hq))
+check("chaque VA a sa case : le QR de SON adresse, ou « à renseigner » (aucun écarté)",
+      len(_cases) == len(lot["gens"]) and sum(1 for x in _cases if "<svg" in x) == 2
+      and sum(1 for x in _cases if "à renseigner" in x) == len(lot["gens"]) - 2, [x[:60] for x in _cases])
+check("le QR est celui de l'adresse entière, avec l'adresse courte et le réseau",
+      any(qr_code.svg(SOL) in x and adr_ok(x, "7xKX…gAsU", "Solana") and f'data-a="{SOL}"' in x for x in _cases)
+      and any(qr_code.svg(ETH) in x and adr_ok(x, "0x52…9EE7", "Ethereum") for x in _cases))
+check("Total : le nombre de VA qui ne peuvent pas encore être payés",
+      f'<span class="manque">{len(lot["gens"]) - 2} à renseigner</span></td></tr>' in hq.split('<tr class="total">')[1])
+htr = st.page_html(lot, None, adresses=_adr, **dict(_kw, tri="adr", sens="asc"))
+_ordre = ["svg" if "<svg" in x else "manque" for x in re.findall(r'<td class="adr">.*?</td>', htr, flags=re.S)]
+check("tri « Adresse USDC » croissant : les « à renseigner » d'abord",
+      _ordre == ["manque"] * (len(lot["gens"]) - 2) + ["svg"] * 2, _ordre)
+htw = st.page_html(lot, None, adresses=_adr, **dict(_kw, cle_=k_tw, s="tw"), verrou="tw")
+check("lien d'un seul serveur : seules les adresses de ses VA",
+      len(re.findall(r'<td class="adr">', htw)) == sum(1 for g, _u in _uids if g == TW)
+      and all(a["adresse"] not in htw for kk, a in _adr.items() if not kk.startswith(TW + ":")))
+hno = st.page_html(lot, None, adresses=None, **_kw)
+check("adresses illisibles : « — » partout, dit au pied, jamais « à renseigner »",
+      hno.count('<td class="adr">—</td>') == len(lot["gens"]) and "à renseigner" not in hno
+      and "Adresses USDC illisibles" in hno.split("</table></div>", 1)[1])
+check("tout lisible : rien de plus au pied", "Adresses USDC" not in hq.split("</table></div>", 1)[1])
+check("un seul script, celui du QR en grand ; lecture seule (un formulaire, en GET)",
+      hq.lower().count("<script") == 1 and sv.SCRIPT_ADRESSE in hq and hq.count("<form") == 1
+      and 'method="get"' in hq)
+check("sans `adresses` : lues dans le fichier (ici vide : tout « à renseigner »)",
+      st.page_html(lot, None, **_kw).count("à renseigner</span></td>") == len(lot["gens"]) + 1)
+suivi_va.poser_adresse(_uids[0][0], _uids[0][1], SOL)
+check("... et une adresse donnée dans Discord y paraît au prochain affichage",
+      qr_code.svg(SOL) in st.page_html(lot, None, **_kw))
+check("une ligne sans adresse lisible trie en bas, quel que soit le sens",
+      [x["adr"] for x in st.trier([st._ligne(lot["gens"][0], None, {}), st._ligne(lot["gens"][1], None, None),
+                                   st._ligne(lot["gens"][2], None, {"adresse": SOL})], "adr", "desc")] == [1, 0, None])
+
 print("7. Isolation")
-check("rien écrit dans le vrai data/", (VRAI.stat().st_mtime if VRAI.exists() else None) == AVANT)
+check("rien écrit dans le vrai data/", (VRAI.stat().st_mtime if VRAI.exists() else None) == AVANT
+      and (VRAI_ADR.stat().st_mtime if VRAI_ADR.exists() else None) == AVANT_ADR)
 
 print("=" * 70)
 print(f"RESULTAT : {len(OK)} OK / {len(KO)} ECHEC(S)")

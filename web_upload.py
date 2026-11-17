@@ -70345,6 +70345,10 @@ def create_app():
         k = str(request.args.get("k") or "")
         lien_mgr = ""
         verrou = ""
+        # 17/11/2026 : « moi j'ai un lien où je peux modifier, je mets mes
+        # logs ». « Modifier » (l'adresse USDC d'un VA) ne paraît que pour un
+        # compte à accès complet, sans clé : jamais avec la clé d'un manager.
+        modifier = False
         if k:
             # 08/11 : une clé par serveur en plus de la clé de la page ; elle
             # n'ouvre que son serveur, quel que soit ?s=
@@ -70357,13 +70361,63 @@ def create_app():
                 return redirect("/")
             if not _is_admin():
                 return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+            modifier = True
             try:
                 lien_mgr = stats_trust.liens_managers()
             except Exception as e:
                 # la page reste lisible ; seuls les liens à donner manquent
                 print(f"[stats-trust] clé non écrite : {type(e).__name__}: {e}", flush=True)
-        code, html = stats_trust.page(request.args, cle_=k, lien_mgr=lien_mgr, verrou=verrou)
+        code, html = stats_trust.page(request.args, cle_=k, lien_mgr=lien_mgr, verrou=verrou,
+                                      modifier=modifier)
         return _entetes(_R(html, status=code, mimetype="text/html"))
+
+    @app.route("/trust/liens/adresse", methods=["GET", "POST"])
+    def trust_liens_adresse():
+        """L'adresse USDC d'un VA TRUST changée par la direction (adresse_usdc),
+        17/11/2026 : « y a un accès où le mec voit, mais moi j'ai un lien où
+        je peux modifier, je mets mes logs ». Un compte du dashboard à accès
+        complet, et RIEN d'autre : aucune clé n'ouvre cette page (ni celle
+        d'un manager, ni le lien « Tes stats » d'un VA), et trust-ofm.com ne
+        la sert pas (domaines.CHEMINS_TRUST). L'adresse où part une paie ne
+        doit pas pouvoir être changée par qui a seulement reçu un lien.
+        Rien à déclarer dans _RESTRICTED_WRITE_ALLOW : un rôle restreint est
+        refusé par défaut au before_request, et revérifié ici."""
+        from flask import Response as _R
+        import adresse_usdc
+
+        def _entetes(r):
+            r.headers["Cache-Control"] = "no-store"
+            r.headers["X-Robots-Tag"] = "noindex, nofollow"
+            r.headers["Referrer-Policy"] = "no-referrer"
+            return r
+
+        if not is_auth():
+            if request.method == "POST":
+                return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+            return redirect("/")
+        if not _is_admin():
+            return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+        if request.method == "POST":
+            # Un formulaire forgé sur un autre site : la session n'y part pas
+            # (cookie SameSite=Lax) ; un navigateur récent dit en plus d'où
+            # vient l'envoi — ceinture et bretelles, comme /infloww/liens/paie.
+            if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+                return _entetes(_R("Envoi refusé : il ne vient pas de la page.", status=403,
+                                   mimetype="text/plain"))
+            res = adresse_usdc.enregistrer(request.form, par=str(session.get("username") or "admin"))
+            if res.get("va") is None:
+                return _entetes(_R("VA introuvable.", status=404, mimetype="text/plain"))
+            if not res.get("ok"):
+                return _entetes(_R(adresse_usdc.page_html(res["va"], erreur=str(res.get("erreur") or ""),
+                                                          saisie=request.form),
+                                   status=400, mimetype="text/html"))
+            return _entetes(redirect(adresse_usdc.retour(res), code=303))
+        p = adresse_usdc.va(request.args.get("va"))
+        if p is None:
+            return _entetes(_R("VA introuvable.", status=404, mimetype="text/plain"))
+        return _entetes(_R(adresse_usdc.page_html(p, fait=request.args.get("ok") or "",
+                                                  notes=request.args.get("n") or ""),
+                           mimetype="text/html"))
 
     # ==================================================================
     # Coffre d'adresses Outlook du proprietaire (admin seulement).

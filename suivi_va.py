@@ -233,13 +233,43 @@ def adresse_de(gid: str, uid: str) -> str:
     return str(((_etat().get("adresses") or {}).get(f"{gid}:{uid}") or {}).get("adresse") or "")
 
 
-def paiement_de(gid: str, uid: str) -> Dict[str, Any]:
-    """{adresse, reseau, qr, quand…} du VA ; {} sans adresse. Sans réseau
-    noté : Solana (toutes les adresses d'avant le 04/11/2026)."""
-    e = (_etat().get("adresses") or {}).get(f"{gid}:{uid}")
+def _paiement(e: Any) -> Dict[str, Any]:
+    """Une entrée du fichier, avec son réseau ; {} sans adresse. La seule
+    règle, pour le ticket (paiement_de) comme pour les pages (paiements)."""
     if not isinstance(e, dict) or not e.get("adresse"):
         return {}
     return dict(e, reseau=e.get("reseau") if e.get("reseau") in RESEAUX else "solana")
+
+
+def paiement_de(gid: str, uid: str) -> Dict[str, Any]:
+    """{adresse, reseau, qr, quand…} du VA ; {} sans adresse. Sans réseau
+    noté : Solana (toutes les adresses d'avant le 04/11/2026)."""
+    return _paiement((_etat().get("adresses") or {}).get(f"{gid}:{uid}"))
+
+
+def paiements() -> Optional[Dict[str, Dict[str, Any]]]:
+    """{« gid:uid » : {adresse, reseau…}} des VA qui ont une adresse, en UNE
+    lecture (la page de la direction montre ~80 VA et se recharge toutes les
+    8 s pendant une lecture). None quand le fichier EXISTE mais n'a rien
+    rendu (droits, JSON abîmé) : _etat() rendrait {} et les pages écriraient
+    « à renseigner » à des VA qui ont donné leur adresse. Sans fichier : {},
+    personne n'en a encore donné."""
+    try:
+        d = safe_json.load(ETAT_FICHIER, default=None)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[suivi] adresses illisibles : {type(e).__name__}: {e}", flush=True)
+        d = None
+    if not isinstance(d, dict):
+        return None if ETAT_FICHIER.exists() else {}
+    adresses = d.get("adresses")
+    if not isinstance(adresses, dict):
+        return None if adresses else {}
+    lus: Dict[str, Dict[str, Any]] = {}
+    for k, e in adresses.items():
+        p = _paiement(e)
+        if p:
+            lus[str(k)] = p
+    return lus
 
 
 def reseau_de(gid: str, uid: str) -> str:

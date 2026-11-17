@@ -27,6 +27,10 @@ relevés).
      perte, tout échappé.
   4. La route /mes-stats : 404 sans clé, clé fausse, VA parti ou sans fiche ;
      en-têtes no-store, noindex, no-referrer.
+  4 bis. La colonne « Adresse USDC » (17/11/2026) : le QR de l'adresse
+     enregistrée, l'adresse courte et le réseau ; « à renseigner » sans
+     adresse, « — » si le fichier est illisible ; lue à chaque affichage ;
+     lecture seule.
   5. « 📈 Mes stats » : le lien sous les chiffres sur TRUST INSTAGRAM, pas
      ailleurs ; une clé non écrite ne fait pas tomber le message. L'accueil
      épinglé du ticket : la page sous « 🔗 Ton lien » (« mets-le ici, en bas de
@@ -64,6 +68,14 @@ def check(label, cond, detail=""):
     print(("OK   " if cond else "FAIL ") + label + ("" if cond else f"  [{str(detail)[:300]}]"))
 
 
+def adr_ok(page, court, reseau):
+    """L'adresse courte, puis le logo USDC, le logo du BON réseau et son nom, dans cet ordre."""
+    return re.search(rf'<b>{re.escape(court)}</b><span class="adrr"><span class="lgs">'
+                     rf'<img src="/static/usdc/usdc\.png\?v=[0-9a-f]{{8}}" alt="USDC"[^>]*>'
+                     rf'<img src="/static/usdc/{reseau.lower()}\.png\?v=[0-9a-f]{{8}}" alt=""[^>]*>'
+                     rf'</span>{reseau}</span>', page) is not None
+
+
 VRAIS = [BOT / "data" / n for n in ("stats_va_cles.json", "infloww_liens_clics_infloww_lia.json")]
 AVANT = {str(p): (p.stat().st_mtime if p.exists() else None) for p in VRAIS}
 
@@ -76,6 +88,17 @@ import tickets_discord          # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="stats_va_"))
 sv.CLES_FICHIER = TMP / "stats_va_cles.json"
+# 17/11/2026 : la colonne « Adresse USDC » lit data/suivi_va.json ; ici, une
+# copie vide, pour ne ni lire ni écrire les adresses des vrais VA
+import suivi_va                 # noqa: E402
+import qr_code                  # noqa: E402
+suivi_va.ETAT_FICHIER = TMP / "suivi_va.json"
+VRAIS.append(BOT / "data" / "suivi_va.json")
+AVANT[str(VRAIS[-1])] = VRAIS[-1].stat().st_mtime if VRAIS[-1].exists() else None
+# les adresses d'exemple des documentations (Solana, EIP-55), à personne
+SOL = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+ETH = "0x52908400098527886E0F7030069857D2E4169EE7"
+PAIE = {"adresse": SOL, "reseau": "solana"}
 # TW : Threads (le nom est resté) -- TRUST TWITTER et THREADS ont leur page
 # depuis le 04/11 (vérifié plus bas), « ailleurs » est Va IG
 GID, TW = sv.AGENCY_IG_ID, subs_va.THREADS_ID
@@ -186,7 +209,8 @@ check("TRUST THREADS : sa page aussi, une clé à lui",
 
 print("2. Les chiffres")
 sv._CACHE.clear()
-D = {k: sv.chiffres(GID, U108, *v) for k, v in P.items()}
+# « paiement » : posé par page() à chaque affichage, jamais par chiffres()
+D = {k: dict(sv.chiffres(GID, U108, *v), paiement=PAIE) for k, v in P.items()}
 check("clics GMS US et globaux, sur la période demandée",
       [(D[k]["us"], D[k]["glob"]) for k in P] == [(500, 1000), (10, 20), (80, 150), (300, 900), (40, 70)],
       [(D[k]["us"], D[k]["glob"]) for k in P])
@@ -365,7 +389,7 @@ check("la ligne de la page Lia : @ du VA, son numéro dessous",
       re.search(r'<td class="nom">@duc_duchesse<span class="det">Instagram VA 108</span></td>', h))
 check("les colonnes de la page Lia, sans Paiement ni Gain / perte",
       re.findall(r"<th[^>]*>([^<]*)</th>", h) == ["Personne", "Clics US GMS", "Clics globaux GMS", "Clics Infloww",
-                                                  "Subs", "CVR", "$ / sub", "Gagné"]
+                                                  "Subs", "CVR", "$ / sub", "Gagné", "Adresse USDC"]
       and "Paiement" not in h and "Gain" not in h, re.findall(r"<th[^>]*>([^<]*)</th>", h))
 check("CVR et $ / sub colorés comme la page Lia (rouge sous la moitié du seuil)",
       '<span class="nv r">1,94 %</span>' in h and '<span class="nv v1">2,35 $</span>' in h,
@@ -377,7 +401,57 @@ check("ni astérisque ni note sur les anciens liens Emy (« retire ça »)",
 check("en bas, deux lignes quand tout est lisible : les sources, l'heure",
       (ha := sv.page_html(D["aujourdhui"], t108, JOUR)).count('<p class="pied">') == 2
       and "pas encore lisible" not in ha)
-check("aucun JavaScript", "<script" not in h.lower())
+check("un seul script, celui du QR en grand ; aucun gestionnaire en ligne",
+      h.lower().count("<script") == 1 and sv.SCRIPT_ADRESSE in h
+      and not re.search(r"\son[a-z]+=", re.sub(r"<script>.*?</script>", "", h, flags=re.S)))
+check("le script : que des guillemets doubles, aucune barre oblique inverse (il vit dans une chaîne Python)",
+      "'" not in sv.SCRIPT_ADRESSE and "\\" not in sv.SCRIPT_ADRESSE and "innerHTML" not in sv.SCRIPT_ADRESSE)
+# 17/11/2026 : « rajouter une catégorie à la toute fin [...] son adresse crypto », puis « juste un QR code,
+# avec le texte écrit en tout petit, quand je clique, ça zoome »
+case = re.findall(r'<td class="adr">.*?</td>', h, flags=re.S)
+check("Adresse USDC : la DERNIÈRE case de la ligne, après Gagné",
+      len(case) == 1 and h.index(">11,90") < h.index('<td class="adr">')
+      and h.split('<td class="adr">', 1)[1].split("</td>", 1)[1].startswith("</tr>"), case)
+check("la case : le QR de SON adresse, l'adresse courte (4…4) et le réseau en petit",
+      qr_code.svg(SOL) in case[0] and adr_ok(case[0], "7xKX…gAsU", "Solana"), case[0][-300:])
+# 17/11/2026 : « mets les logo usdc et le logo icône solana », « ou eth »
+check("les logos : USDC puis Solana, ceux du menu Discord, jamais celui d'Ethereum sur une adresse Solana",
+      case[0].count("<img ") == 2 and "ethereum.png" not in h and 'alt="USDC"' in case[0])
+check("le bouton porte l'adresse entière et « USDC · Solana » pour le QR en grand",
+      f'data-a="{SOL}"' in case[0] and 'data-r="USDC · Solana"' in case[0] and f'title="{SOL}"' in case[0])
+he = sv.page_html(dict(D["precedente"], paiement={"adresse": ETH, "reseau": "ethereum"}), t108, JOUR)
+check("Ethereum : son QR, « 0x52…9EE7 », « Ethereum »",
+      qr_code.svg(ETH) in he and adr_ok(he, "0x52…9EE7", "Ethereum") and 'data-r="USDC · Ethereum"' in he
+      and "solana.png" not in he)
+check("le QR en grand reprend les logos de la case (copiés, pas réécrits)",
+      'querySelector(".lgs")' in sv.SCRIPT_ADRESSE and "cloneNode(true)" in sv.SCRIPT_ADRESSE)
+_url = sv._logo_url
+sv._logo_url = lambda f: ""
+try:
+    hsl = sv.page_html(D["precedente"], t108, JOUR)
+finally:
+    sv._logo_url = _url
+check("un logo qui manque sur le disque : pas d'image cassée, l'adresse et le réseau restent",
+      "<img" not in hsl and 'class="lgs"' not in hsl and '<b>7xKX…gAsU</b><span class="adrr">Solana</span>' in hsl)
+hs = sv.page_html(dict(D["precedente"], paiement={}), t108, JOUR)
+check("sans adresse : « à renseigner », bien visible, pas de QR, rien dit de plus en bas",
+      '<td class="adr"><span class="manque">à renseigner</span></td>' in hs and "<svg" not in hs
+      and hs.count('<p class="pied">') == 2)
+hi = sv.page_html(dict(D["precedente"], paiement=None), t108, JOUR)
+check("adresses illisibles : « — » et « pas encore lisible », jamais « à renseigner »",
+      '<td class="adr">—</td>' in hi and "pas encore lisible" in hi and "à renseigner" not in hi)
+check("sans la clé « paiement » : pareil (illisible), pas « à renseigner »",
+      '<td class="adr">—</td>' in sv.page_html({k: v for k, v in D["precedente"].items() if k != "paiement"},
+                                               t108, JOUR))
+hx = sv.page_html(dict(D["precedente"], paiement={"adresse": '"><img src=x onerror=alert(1)>', "reseau": "solana"}),
+                  t108, JOUR)
+check("une adresse ne peut rien casser (échappée)", "<img src=x" not in hx)
+hl = sv.page_html(dict(D["precedente"], paiement={"adresse": "x" * 200, "reseau": "solana"}), t108, JOUR)
+check("une adresse trop longue pour un QR : la page tient, l'adresse reste écrite",
+      "<svg" not in hl and adr_ok(hl, "xxxx…xxxx", "Solana"))
+check("lecture seule : un seul formulaire (la période, en GET), aucun champ pour l'adresse",
+      h.count("<form") == 1 and 'method="get"' in h and "<textarea" not in h.lower()
+      and re.findall(r'<input[^>]*name="([^"]*)"', h) == ["t", "du", "au"])
 check("« — » quand ce n'est pas lisible, et dit en bas",
       "—" in (h3 := sv.page_html(d3, t108, JOUR)) and "pas encore lisible" in h3)
 check("une période libre : « Du 20/10 au 22/10 », aucun raccourci allumé",
@@ -430,6 +504,62 @@ check("quota : 429, le message et les raccourcis, la clé gardée",
       rq.status_code)
 r63 = c.get(f"/mes-stats?t={sv.jeton(GID, U63)}").get_data(as_text=True)
 check("la clé d'un autre VA n'ouvre que la sienne", "Instagram VA 63" in r63 and "duc_duchesse" not in r63)
+
+print("4 bis. L'adresse USDC sur la route")
+def _case(page):
+    return (re.findall(r'<td class="adr">.*?</td>', page, flags=re.S) or [""])[0]
+check("aucune adresse enregistrée (pas de fichier) : « à renseigner »",
+      not suivi_va.ETAT_FICHIER.exists() and "à renseigner" in _case(corps), _case(corps)[:200])
+check("suivi_va.paiements : {} sans fichier", suivi_va.paiements() == {})
+c.get(f"/mes-stats?t={t108}")                 # ses chiffres sont dans le cache (10 min)
+_lus = APPELS["clics"]
+check("le VA donne son adresse dans Discord (la fenêtre d'Instagram)", suivi_va.poser_adresse(GID, U108, SOL)["ok"])
+ra = c.get(f"/mes-stats?t={t108}").get_data(as_text=True)
+check("la page la montre AUSSITÔT : son QR, « 7xKX…gAsU », Solana (sans réseau noté : Solana)",
+      qr_code.svg(SOL) in _case(ra) and adr_ok(_case(ra), "7xKX…gAsU", "Solana"), _case(ra)[-200:])
+for _hote in ("youl4b.com", "trust-ofm.com"):
+    _rl = [c.get(u, headers={"Host": _hote}) for u in re.findall(r'<img src="([^"]*)"', _case(ra))]
+    check(f"les deux logos se chargent sur {_hote} (200, image PNG)",
+          len(_rl) == 2 and all(x.status_code == 200 and x.mimetype == "image/png" for x in _rl),
+          [(x.status_code, x.mimetype) for x in _rl])
+check("... alors que ses chiffres viennent du cache : l'adresse est relue à chaque affichage, pas eux",
+      APPELS["clics"] == _lus, (APPELS["clics"], _lus))
+check("l'adresse d'un VA n'est pas sur la page d'un autre",
+      "à renseigner" in _case(c.get(f"/mes-stats?t={sv.jeton(GID, U63)}").get_data(as_text=True)))
+_tw108 = sv.jeton(sv.TWITTER_ID, U108)
+FICHES[(sv.TWITTER_ID, U108)] = dict(FICHES[(GID, U108)])
+check("la même personne sur TRUST TWITTER : son adresse d'Instagram n'y est pas reprise",
+      "à renseigner" in _case(c.get(f"/mes-stats?t={_tw108}").get_data(as_text=True)))
+check("... elle y choisit Ethereum (fenêtre par réseau)",
+      suivi_va.poser_adresse(sv.TWITTER_ID, U108, ETH, reseau="ethereum", strict=True)["ok"])
+rtw = c.get(f"/mes-stats?t={_tw108}").get_data(as_text=True)
+check("... la page Twitter : QR de l'adresse Ethereum, « 0x52…9EE7 », Ethereum",
+      qr_code.svg(ETH) in _case(rtw) and adr_ok(_case(rtw), "0x52…9EE7", "Ethereum"), _case(rtw)[-200:])
+FICHES.pop((sv.TWITTER_ID, U108))
+SOL2 = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+check("il change d'adresse", suivi_va.poser_adresse(GID, U108, SOL2)["ok"])
+rb = c.get(f"/mes-stats?t={t108}").get_data(as_text=True)
+check("... la page montre la nouvelle au rechargement, plus l'ancienne",
+      qr_code.svg(SOL2) in _case(rb) and "<b>9WzD…AWWM</b>" in _case(rb) and SOL not in rb, _case(rb)[-200:])
+rpo = c.post(f"/mes-stats?t={t108}", data={"adresse": SOL, "paiement": SOL})
+check("lecture seule : un POST sur la page est refusé et ne change rien",
+      rpo.status_code in (403, 405) and suivi_va.adresse_de(GID, U108) == SOL2, rpo.status_code)
+rg = c.get(f"/mes-stats?t={t108}&adresse={SOL}&paiement={SOL}")
+check("... ni une adresse glissée dans le lien",
+      rg.status_code == 200 and suivi_va.adresse_de(GID, U108) == SOL2 and SOL not in rg.get_data(as_text=True))
+if os.geteuid() != 0:
+    suivi_va.ETAT_FICHIER.chmod(0)
+    try:
+        ri = c.get(f"/mes-stats?t={t108}").get_data(as_text=True)
+        check("fichier des adresses illisible (droits) : suivi_va.paiements() rend None, pas {}",
+              suivi_va.paiements() is None)
+        check("... la page dit « — » et « pas encore lisible », JAMAIS « à renseigner » à un VA qui a une adresse",
+              _case(ri) == '<td class="adr">—</td>' and "pas encore lisible" in ri and "à renseigner" not in ri,
+              _case(ri)[:200])
+        check("... et le reste de la page tient (ses chiffres)", "Instagram VA 108" in ri and ">80<" in ri)
+    finally:
+        suivi_va.ETAT_FICHIER.chmod(0o600)
+check("droits rendus : l'adresse revient", "<b>9WzD…AWWM</b>" in _case(c.get(f"/mes-stats?t={t108}").get_data(as_text=True)))
 print("5. « 📈 Mes stats »")
 r_ = subs_va.subs_du_va(GID, U108, JOUR)
 _cv = pod.clics_du_va

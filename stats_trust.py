@@ -90,6 +90,9 @@ TRIS: Dict[str, Tuple[str, str]] = {
     "cvr": ("CVR", "desc"), "ltv": ("LTV", "desc"), "gagne": ("Gagné", "desc"),
     "cout": ("Coût / sub", "asc"), "marge": ("Marge / sub", "desc"),
     "gain": ("Gain / perte", "desc"),
+    # 17/11/2026 : croissant = les « à renseigner » d'abord, ceux à relancer
+    # avant la paie
+    "adr": ("Adresse USDC", "asc"),
 }
 TRI_DEFAUT = ("subs", "desc")
 #: Les tris demandés par le propriétaire, en raccourcis au-dessus du tableau.
@@ -382,8 +385,11 @@ def _compter_periode(du: str, au: str, jour: dt.date) -> None:
 
 
 # ─── les lignes ──────────────────────────────────────────────────────────
-def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    """La ligne d'un VA : ses chiffres, et les trois qui en découlent."""
+def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]],
+           paiement: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """La ligne d'un VA : ses chiffres, et les trois qui en découlent.
+    `paiement` : {adresse, reseau}, {} sans adresse, None si illisible
+    (stats_va.paiement_de) ; « adr » le trie : 0 à renseigner, 1 donnée."""
     d = d or {}
     subs, gagne, ltv = d.get("subs"), d.get("gagne"), d.get("par_sub")
     if d.get("revenu_partiel"):
@@ -401,7 +407,7 @@ def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]]) -> Dict[str, An
     gain = (round(float(revenu) * 100) - round(float(gagne) * 100)) / 100 \
         if revenu is not None and gagne is not None else None
     num = str(p.get("numero") or "")
-    return {"gid": p["gid"], "code": p["code"], "plateforme": p["plateforme"],
+    return {"gid": p["gid"], "uid": str(p.get("uid") or ""), "code": p["code"], "plateforme": p["plateforme"],
             "nom": f"{p['plateforme']} VA {num}" if num.isdigit() else f"{p['plateforme']} (sans numéro)",
             "numero": int(num) if num.isdigit() else None,
             "pseudo": str(d.get("pseudo") or p.get("pseudo") or ""),
@@ -409,6 +415,8 @@ def _ligne(p: Mapping[str, Any], d: Optional[Mapping[str, Any]]) -> Dict[str, An
             "subs": subs, "cvr": d.get("cvr"), "ltv": ltv, "gagne": gagne, "cout": cout,
             "paye_sans_sub": paye_sans_sub, "revenu": revenu, "gain": gain,
             "revenu_partiel": bool(d.get("revenu_partiel")),
+            "paiement": paiement,
+            "adr": None if paiement is None else (1 if paiement.get("adresse") else 0),
             "marge": (ltv - cout) if ltv is not None and cout is not None else None}
 
 
@@ -508,7 +516,9 @@ def _formulaire(cle_: str, s: str, du: str, au: str, tri: str, sens: str, jour: 
 
 
 _STYLE_EN_PLUS = """
-body{max-width:1240px}
+body{max-width:1320px}
+/* ~80 lignes : le QR plus petit, l'adresse à sa gauche, la ligne garde sa hauteur */
+.adrb{flex-direction:row-reverse;align-items:center;justify-content:flex-start;gap:8px;--qr:44px}
 .onglets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
 .onglets a{color:var(--texte);text-decoration:none;background:var(--carte);border:1px solid var(--bord);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;white-space:nowrap}
 .onglets a.on{background:var(--acc);border-color:var(--acc);color:#1c0a02}
@@ -542,24 +552,39 @@ def _gabarit(titre: str, corps: str, recharge: bool = False, recharge_s: int = R
 </body></html>'''
 
 
+#: page_html sans `adresses` : elles sont lues à l'affichage.
+_A_LIRE: Any = object()
+
+
 def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, Any]], *,
               cle_: str, s: str, du: str, au: str, tri: str, sens: str,
               jour: dt.date, lien_mgr: Any = "", en_file: bool = False,
-              essai_apres: float = 0.0, echec: str = "", verrou: str = "") -> str:
-    """La page, sans JavaScript. `lot` : la dernière lecture finie (ou None) ;
+              essai_apres: float = 0.0, echec: str = "", verrou: str = "",
+              adresses: Any = _A_LIRE, modifier: bool = False) -> str:
+    """La page ; un seul script, le QR d'une adresse USDC en grand (stats_va.
+    SCRIPT_ADRESSE), le reste marche sans. `adresses` : stats_va.paiements()
+    ({« gid:uid » : {adresse, reseau}}, None si illisibles), lues ici, à
+    chaque affichage, jamais gardées avec les chiffres : une adresse changée
+    par 💳 doit être celle qu'on scanne pour payer. `modifier` : la page est
+    ouverte par un compte du dashboard à accès complet, sans clé : chaque
+    ligne porte « Modifier » (adresse_usdc) ; jamais avec une clé de manager.
+    `lot` : la dernière lecture finie (ou None) ;
     `encours` : celle qui tourne (ou None) ; `en_file` : une relecture attend
     son tour ; `verrou` : le serveur d'un lien « un seul serveur » (tw, ig,
     th) : ni les autres serveurs, ni leurs VA, ni leurs comptes n'y
     paraissent. `lien_mgr` : un lien ou [(libellé, lien)]. Tout est échappé."""
     import infloww_liens as il
     montre = lot or encours or {}
+    if adresses is _A_LIRE:
+        adresses = sv.paiements()
     gens = list(montre.get("gens") or [])
     if verrou:
         # un lien Twitter ne doit rien dire des VA Instagram ou Threads, pas
         # même leur nombre (onglets, bandeau, pied)
         gens = [p for p in gens if p.get("code") == verrou]
         s = verrou
-    lignes_tous = [_ligne(p, (montre.get("lignes") or {}).get(f"{p['gid']}:{p['uid']}")) for p in gens]
+    lignes_tous = [_ligne(p, (montre.get("lignes") or {}).get(f"{p['gid']}:{p['uid']}"),
+                          sv.paiement_de(adresses, p["gid"], p["uid"])) for p in gens]
     lignes = [x for x in lignes_tous if s == "tous" or x["code"] == s]
     lignes = trier(lignes, tri, sens)
     tot = totaux(lignes)
@@ -612,6 +637,16 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
         return (f'<td{cls} title="revenu des visiteurs envoyés sans tracking non compté">'
                 f'{_argent(v, signe=True)}*</td>')
 
+    # Total : combien de VA de la liste ne peuvent pas encore être payés
+    sans_adr = sum(1 for x in lignes if x["adr"] == 0)
+    adr_tot = ("<td>—</td>" if adresses is None and lignes
+               else f'<td><span class="manque">{sans_adr} à renseigner</span></td>' if sans_adr else "<td></td>")
+    def lien_modifier(x: Mapping[str, Any]) -> str:
+        if not modifier or not x.get("uid"):
+            return ""
+        import adresse_usdc
+        return adresse_usdc.lien(x["gid"], x["uid"])
+
     corps_t = []
     det_tot = f"{len(lignes)} VA"
     if lignes and tot["n_groupe"] < len(lignes):
@@ -626,7 +661,7 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
                    + ('<td class="neg">payé, 0 sub</td><td class="neg">payé, 0 sub</td>' if tot["paye_sans_sub"]
                       else th_td(tot["cout"], False, tot["th_groupe"]) + th_td(tot["marge"], True, tot["th_groupe"]))
                    + gain_td(tot["gain"], any(x["code"] == "th" and x.get("gain") is not None for x in lignes))
-                   + '</tr>')
+                   + adr_tot + '</tr>')
     for i, x in enumerate(lignes, 1):
         cvr = il._pastille(il._pct(x["cvr"]), il.niveau(x["cvr"], il.SEUIL_CVR))
         ltv = il._pastille(il._dollars(x["ltv"]), il.niveau(x["ltv"], il.SEUIL_PAR_SUB))
@@ -641,10 +676,11 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
                        + ('<td class="neg">payé, 0 sub</td><td class="neg">payé, 0 sub</td>'
                           if x.get("paye_sans_sub")
                           else th_td(x["cout"], False, x["code"] == "th") + th_td(x["marge"], True, x["code"] == "th"))
-                       + gain_td(x["gain"], x["code"] == "th") + '</tr>')
+                       + gain_td(x["gain"], x["code"] == "th")
+                       + sv.cellule_adresse(x["paiement"], lien_modifier(x)) + '</tr>')
     tableau = ('<div class="boite"><table><thead><tr><th></th>'
                + "".join(entete(t) for t in ("nom", "us", "glob", "infloww", "subs", "cvr",
-                                             "ltv", "gagne", "cout", "marge", "gain"))
+                                             "ltv", "gagne", "cout", "marge", "gain", "adr"))
                + '</tr></thead><tbody>' + "".join(corps_t) + '</tbody></table></div>')
 
     if verrou and echec.startswith(ARRET):
@@ -678,6 +714,9 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
     # source illisible), qui ne paraissent que quand quelque chose manque :
     # sans elles, un « — » ne dirait pas pourquoi.
     marques: List[str] = []
+    if adresses is None and gens:
+        # sans cette ligne, un « — » dans la colonne ne dirait pas pourquoi
+        marques.append("Adresses USDC illisibles (data/suivi_va.json)")
     pannes = dict(montre.get("pannes") or {})
     if verrou:
         a_lui = {f"{p['gid']}:{p['uid']}" for p in gens}
@@ -703,7 +742,7 @@ def page_html(lot: Optional[Mapping[str, Any]], encours: Optional[Mapping[str, A
              + lienmgr + _formulaire(cle_, s, du, au, tri, sens, jour)
              + f'<nav class="onglets" aria-label="Serveurs">{"".join(onglets)}</nav>'
              + f'<nav class="tris" aria-label="Tri"><span class="lib">Trier</span>{"".join(puces)}</nav>'
-             + bandeau + tableau + pied)
+             + bandeau + tableau + pied + sv.SCRIPT_ADRESSE)
     attente = int(essai_apres - time.time()) + 1 if essai_apres > time.time() and not encours else 0
     return _gabarit(titre, corps,
                     recharge=bool(encours) or en_file or not montre or attente > 0,
@@ -715,7 +754,8 @@ def _marque(verrou: str = "") -> str:
     return f"TRUST · {_PAR_CODE[verrou][1]}" if verrou else "TRUST · Twitter · Instagram · Threads"
 
 
-def page(args: Any, cle_: str = "", lien_mgr: Any = "", verrou: str = "") -> Tuple[int, str]:
+def page(args: Any, cle_: str = "", lien_mgr: Any = "", verrou: str = "",
+         modifier: bool = False) -> Tuple[int, str]:
     """(code HTTP, HTML) de la page pour `args` (s, du, au, tout, tri, sens).
     `verrou` (tw, ig, th) : la clé n'ouvre que ce serveur, `s` est ignoré.
     Lance la lecture en fond si besoin et rend tout de suite ce qui est lu.
@@ -750,7 +790,7 @@ def page(args: Any, cle_: str = "", lien_mgr: Any = "", verrou: str = "") -> Tup
         return 200, page_html(e.get("fait"), e.get("encours"), cle_=cle_, s=s, du=du, au=au,
                               tri=tri, sens=sens, jour=jour, lien_mgr=lien_mgr, en_file=en_file,
                               essai_apres=float(e.get("essai_apres") or 0), echec=str(e.get("echec") or ""),
-                              verrou=verrou)
+                              verrou=verrou, modifier=modifier)
     except Exception as e:                                   # noqa: BLE001
         return 200, _gabarit("VA TRUST", f'<h1>📊 VA TRUST</h1><div class="err"><b>Lecture impossible.</b>'
                              f'<br>{_e(type(e).__name__)} : {_e(str(e)[:200])}</div>', marque=_marque(verrou))
