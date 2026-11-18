@@ -36125,6 +36125,15 @@ body.light .mypuls-bar{background:#e5e7eb}
             creators_map = cr_res.get("creators") or {}
     except Exception:
         pass
+    # La lecture par cookie revenait VIDE sur le serveur (constate en ligne le
+    # 18/11/2026) : plus une seule photo de model sur la page, sans erreur.
+    # L'API connait les comptes : elle prend le relais.
+    if not creators_map:
+        try:
+            from revenus_chatteurs import comptes as _comptes_par_api
+            creators_map = _comptes_par_api()
+        except Exception:
+            pass
 
     # Construire les datasets pour Chart.js
     import json as _json
@@ -73807,10 +73816,7 @@ def create_app():
         try:
             import mypuls
             import revenus_chatteurs
-            comptes = {}
-            cr = mypuls.list_creators()
-            if cr.get("ok"):
-                comptes = cr.get("creators") or {}
+            comptes = revenus_chatteurs.comptes()
             cur = mypuls.fetch_team_stats(debut, fin, use_cache=True)
             ventes = (cur.get("transactions") or []) if cur.get("ok") else []
             return jsonify(revenus_chatteurs.complement(debut, fin, comptes, ventes))

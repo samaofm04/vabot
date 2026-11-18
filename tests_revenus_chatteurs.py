@@ -210,13 +210,31 @@ def test_messages():
         r = rc.messages("2026-11-01", "2026-11-15", COMPTES)
     check("MyPuls ignore le filtre par compte : la somme gonflee n'est PAS affichee",
           r["par_compte"] is False and all(l[1] == "*" for l in r["lignes"]), r["lignes"][:3])
-    check("... et c'est dit, avec les deux chiffres", any("ne recoupe pas" in e for e in r["erreurs"]), r["erreurs"])
+    check("... et c'est dit, avec les deux chiffres", any("ne recoupe pas" in e for e in r["notes"]), r["notes"])
+    check("... comme un constat, pas une panne : la reponse sera gardee, sans rappeler MyPuls a chaque page",
+          r["erreurs"] == [], r["erreurs"])
+    with Bouchon():
+        r = rc.messages("2026-11-01", "2026-11-15", {})
+    check("liste des comptes vide : total tous comptes, et c'est dit",
+          r["par_compte"] is False and any("liste des comptes" in e for e in r["erreurs"]), r["erreurs"])
     check("... le total rendu est le vrai (moyle : 500, pas 5 fois 500)",
           {l[0]: l[2] for l in r["lignes"]}.get("moyle@example.com") == 500, r["lignes"])
     with Bouchon(messages=lambda d, f, creator="all": {"ok": False, "error": "Quota MyPuls atteint (429)"}):
         r = rc.messages("2026-11-01", "2026-11-15", COMPTES)
     check("l'appel echoue : aucune ligne, et l'erreur est nommee",
           r["lignes"] == [] and any("429" in e for e in r["erreurs"]), r)
+
+
+def test_comptes():
+    print("\n--- la liste des comptes ---")
+    with Bouchon():
+        check("par l'API : les 5 comptes, avec leur identifiant", rc.comptes() == COMPTES, rc.comptes())
+        # Le cas constate en ligne le 18/11/2026 : la lecture par cookie rend vide.
+        mypuls.list_creators = lambda force_refresh=False: {"ok": False, "error": "cookie"}
+        check("la lecture par cookie echoue : la liste vient quand meme de l'API", rc.comptes() == COMPTES, rc.comptes())
+        mypuls.list_creators = lambda force_refresh=False: {"ok": True, "creators": {"Ancienne": 7}}
+        mypuls.api_creators_cached = lambda force=False: (_ for _ in ()).throw(RuntimeError("API en panne"))
+        check("l'API echoue : la lecture par cookie complete", rc.comptes() == {"Ancienne": 7}, rc.comptes())
 
 
 def test_complement():
@@ -340,7 +358,14 @@ def test_site(tmp):
                   comp.get("erreurs"))
 
             # ---- la page
+            # Comme en ligne le 18/11/2026 : la lecture par cookie ne rend rien.
+            mypuls.list_creators = lambda force_refresh=False: {"ok": False, "error": "cookie"}
+            w._render_mypuls_section_html.invalidate()
             page = admin.get("/?tab=revenus&mp_start=2026-11-01&mp_end=2026-11-15").get_data(as_text=True)
+            m = re.search(r"window\.__mpCreatorAvatars=(\{.*?\});</script>", page, re.S)
+            photos = json.loads(m.group(1)) if m else {}
+            check("les photos des models sont la meme quand la lecture par cookie rend vide",
+                  photos.get("Lola ღ") == "/mypuls/avatar/3673" and len(photos) == 5, photos)
             check("la liste des chatteurs est dans la page", "id='mp-tab-chatters'" in page, len(page))
             check("les deux boutons du tableau de bord y sont ($ / €, Net / Brut)",
                   "mp-fx-cur" in page and "mp-fx-mode" in page and "mpFxToggle('mode')" in page)
@@ -408,6 +433,7 @@ if __name__ == "__main__":
     test_periode()
     test_agregat()
     test_messages()
+    test_comptes()
     test_complement()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:

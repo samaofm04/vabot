@@ -180,16 +180,6 @@
   }
   function currency(t) { return /USD|\$/.test(String(t.currency || '')) || t.u ? 'USD' : 'EUR'; }
   function money(value, code) { return new Intl.NumberFormat('fr-FR', {style:'currency', currency:code || 'EUR'}).format(value); }
-  function sums(txs) {
-    var result = {};
-    txs.forEach(function (t) { var code = currency(t); result[code] = (result[code] || 0) + Math.round(Number(t.a || 0) * 100); });
-    return result;
-  }
-  function moneyLines(target, amounts) {
-    var keys = Object.keys(amounts);
-    if (!keys.length) { target.textContent = '—'; return; }
-    keys.sort().forEach(function (code) { target.appendChild(el('span', 'mp-revenue-currency', money(amounts[code] / 100, code))); });
-  }
   function nameCell(name, subtitle) {
     var cell = el('td'), person = el('div', 'mp-revenue-sale-person'), label = el('span');
     person.appendChild(avatar(name));
@@ -299,19 +289,19 @@
     var ledger = el('table', 'mp-revenue-ledger' + (entry.mode === 'models' ? ' mp-revenue-by-model' : ''));
     ledger.setAttribute('aria-label', entry.mode === 'sales' ? 'Chaque vente de ' + entry.label : 'Ventes par modèle de ' + entry.label);
     var head = ledger.createTHead().insertRow(), body = ledger.createTBody();
-    (entry.mode === 'sales' ? ['Modèle et vente', 'Date / heure de Paris', 'Fan', 'Montant'] : ['Modèle', 'Ventes', 'Total du journal']).forEach(function (label) { head.appendChild(el('th', '', label)); });
+    (entry.mode === 'sales' ? ['Model et vente', 'Date / heure de Paris', 'Fan', 'Montant'] : ['Model', 'Ventes', 'Total']).forEach(function (label) { head.appendChild(el('th', '', label)); });
     if (entry.mode === 'sales') {
       txs.slice(0, entry.limit).forEach(function (t) {
         var row = body.insertRow(); row.appendChild(nameCell(t.c, t.y));
         row.appendChild(el('td', '', dateLabel(t.d)));
         row.appendChild(el('td', '', t.f || '—'));
-        row.appendChild(el('td', 'mp-revenue-money', money(Number(t.a || 0), currency(t))));
+        row.appendChild(el('td', 'mp-revenue-money', argent(base(t.a, !!t.u))));
       });
     } else {
       names.forEach(function (name) {
         var sales = txs.filter(function (t) { return (t.c || '') === name; }), row = body.insertRow();
         row.appendChild(nameCell(name)); row.appendChild(el('td', '', sales.length));
-        var amount = el('td', 'mp-revenue-money'); moneyLines(amount, sums(sales)); row.appendChild(amount);
+        row.appendChild(el('td', 'mp-revenue-money', argent(sommer(sales).v)));
       });
     }
     entry.panel.appendChild(ledger);
@@ -321,7 +311,7 @@
       entry.panel.appendChild(more);
     }
     var footer = el('p', 'mp-revenue-note', txs.length + ' ventes dans le journal · ');
-    var total = el('span', 'mp-revenue-money'); moneyLines(total, sums(txs)); footer.appendChild(total); entry.panel.appendChild(footer);
+    footer.appendChild(el('span', 'mp-revenue-money', argent(sommer(txs).v) + (enBrut() ? ' brut' : ' net'))); entry.panel.appendChild(footer);
     var observed = txs.reduce(function (sum, t) { return sum + Number(t.a || 0); }, 0);
     var reference = (window.__mpPerfCa || {})[entry.name];
     if (!(window.__mpExcluded && window.__mpExcluded.size) && !window.__mpShift && typeof reference === 'number' && Math.abs(reference - observed) > Math.max(1, reference * .05)) {
@@ -699,7 +689,8 @@
     if (complementErreur) notes.push('Comparaison et messages indisponibles : ' + complementErreur);
     if (complement && complement.erreurs && complement.erreurs.length) notes.push(complement.erreurs.join(' · '));
     if (messagesOk && sousShift) notes.push('Sous un shift, les messages et PPV envoyés ne sont pas affichés : MyPuls ne les découpe pas par heure.');
-    if (messagesOk && !sousShift && complement.messages_par_compte === false) notes.push('Messages et PPV envoyés : tous comptes confondus, MyPuls ne les a pas rendus compte par compte.');
+    if (complement && complement.notes && complement.notes.length) notes.push(complement.notes.join(' · '));
+    else if (messagesOk && !sousShift && complement.messages_par_compte === false) notes.push('Messages et PPV envoyés : tous comptes confondus.');
     if (complement && complement.avant && !complementErreur) notes.unshift('Le petit % compare au ' + dateLabel(complement.avant[0] + 'T00:00').slice(0, 10) + ' → ' + dateLabel(complement.avant[1] + 'T00:00').slice(0, 10) + '. Golden ratio = PPV envoyés ÷ messages envoyés. Taux de déblocage = PPV débloqués ÷ PPV envoyés.');
     avis.textContent = notes.join(' — '); avis.hidden = !notes.length;
     ranger();

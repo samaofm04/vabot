@@ -126,6 +126,34 @@ def agreger_ventes(transactions) -> list:
             for c, v in par.items()]
 
 
+def comptes() -> dict:
+    """{pseudo: identifiant} des comptes des creatrices, par l'API d'abord.
+
+    La page tenait cette liste de mypuls.list_creators(), qui lit le site de
+    MyPuls avec le cookie. Constate en ligne le 18/11/2026 : elle revenait
+    VIDE sur le serveur, sans erreur. Deux effets, aucun message : plus une
+    seule photo de model sur la page (pastilles en initiales), et les messages
+    ne pouvaient pas etre lus compte par compte. L'API, elle, connait les 13
+    comptes : on part d'elle, et le cookie ne fait que completer.
+    """
+    import mypuls
+    liste = {}
+    try:
+        for c in mypuls.api_creators_cached() or []:
+            if isinstance(c, dict) and c.get("pseudo") and c.get("id") is not None:
+                liste[str(c["pseudo"])] = c["id"]
+    except Exception:
+        pass
+    try:
+        r = mypuls.list_creators()
+        if r.get("ok"):
+            for nom, cid in (r.get("creators") or {}).items():
+                liste.setdefault(str(nom), cid)
+    except Exception:
+        pass
+    return liste
+
+
 def _messages_d_un_compte(debut, fin, compte):
     import mypuls
     r = mypuls.api_team_messages_stats(debut, fin, creator=str(compte))
@@ -146,7 +174,12 @@ def _messages_d_un_compte(debut, fin, compte):
 def messages(debut: str, fin: str, comptes: dict) -> dict:
     """Messages et PPV envoyes par chatteur, compte par compte.
 
-    Rend {lignes: [[chatteur, model, messages, ppv_envoyes]], par_compte, erreurs}.
+    Rend {lignes: [[chatteur, model, messages, ppv_envoyes]], par_compte, erreurs, notes}.
+    `erreurs` : une panne passagere (la reponse ne sera pas gardee, on retentera).
+    `notes` : un constat stable sur ce que MyPuls rend — il s'affiche, et la
+    reponse est gardee quand meme. Sans cette difference, un MyPuls qui ignore
+    le filtre par compte aurait relance une trentaine d'appels a chaque
+    ouverture de la page, pour retomber sur le meme constat.
 
     POURQUOI COMPTE PAR COMPTE. La page filtre par plateforme (MYM / OF US /
     OF FR). Un total « tous comptes » sous un filtre donnerait un golden ratio
@@ -162,9 +195,9 @@ def messages(debut: str, fin: str, comptes: dict) -> dict:
     from concurrent.futures import ThreadPoolExecutor
     tout, err = _messages_d_un_compte(debut, fin, "all")
     if tout is None:
-        return {"lignes": [], "par_compte": False, "erreurs": ["Messages : " + err]}
+        return {"lignes": [], "par_compte": False, "erreurs": ["Messages : " + err], "notes": []}
     noms = [(nom, cid) for nom, cid in (comptes or {}).items() if cid is not None]
-    erreurs, lignes, somme = [], [], 0
+    erreurs, notes, lignes, somme = [], [], [], 0
     if noms:
         with ThreadPoolExecutor(max_workers=min(4, len(noms))) as pool:
             rendus = list(pool.map(lambda nc: _messages_d_un_compte(debut, fin, nc[1]), noms))
@@ -179,11 +212,13 @@ def messages(debut: str, fin: str, comptes: dict) -> dict:
     total = sum(v[0] for v in tout.values())
     recoupe = bool(lignes) and not erreurs and abs(somme - total) <= max(5, 0.02 * total)
     if not recoupe:
-        if noms and not erreurs:
-            erreurs.append("Messages : le detail par compte (%d) ne recoupe pas le total (%d), "
-                           "total tous comptes affiche" % (somme, total))
+        if not noms:
+            erreurs.append("Messages : liste des comptes indisponible, total tous comptes affiche")
+        elif not erreurs:
+            notes.append("Messages et PPV envoyés : le détail par compte (%d messages) ne recoupe pas "
+                         "le total (%d), le total tous comptes est affiché" % (somme, total))
         lignes = [[c, "*", v[0], v[1]] for c, v in tout.items() if v[0] or v[1]]
-    return {"lignes": lignes, "par_compte": recoupe, "erreurs": erreurs}
+    return {"lignes": lignes, "par_compte": recoupe, "erreurs": erreurs, "notes": notes}
 
 
 def presence(ventes_des_deux_periodes) -> dict:
@@ -242,11 +277,14 @@ def complement(debut: str, fin: str, comptes: dict, ventes: list = None) -> dict
         rep["ventes_avant"] = None
         erreurs.append("Période d'avant : " + str(prec.get("error") or "indisponible"))
 
+    notes = []
     for nom, d0, d1 in (("messages", debut, fin), ("messages_avant", avant[0], avant[1])):
         m = messages(d0, d1, comptes)
         rep[nom] = m["lignes"] if (m["lignes"] or not m["erreurs"]) else None
         rep[nom + "_par_compte"] = m["par_compte"]
         erreurs.extend(m["erreurs"])
+        notes.extend(n for n in m["notes"] if n not in notes)
+    rep["notes"] = notes
 
     p = presence(list(ventes or []) + list(ventes_avant))
     rep["presence"] = p["lignes"]
