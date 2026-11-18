@@ -709,6 +709,16 @@ def test_paie_nette():
           round(B(nov["mazid"], 1.10), 2) == 86.0, round(B(nov["mazid"], 1.10), 2))
     check("... un chatteur 100 % MYM ne bouge pas (moyle : 150 EUR -> 165 $)",
           round(B(nov["moyle@example.com"], 1.10), 2) == 165.0)
+    # Vu en ligne le 18/11 : 1 123,97 $ de ventes -> 899,176 $ nets. Arrondie
+    # au centime AVANT le pourcentage, la base donnait 125,89 $ ; le navigateur,
+    # qui n'arrondit qu'a la fin, 125,88 $.
+    un = [{"name": "ivan", "ca_total": 1123.97, "ca_ppv": 1123.97, "ca_tips": 0.0, "non_attribue": False}]
+    mypuls._assembler_stats([{"chatter": "ivan", "creator": "Amelia", "amount": 1123.97, "currency": "USD",
+                              "type": "Média privé", "date": "2026-11-05T10:00:00+01:00", "fan": "f"}],
+                            un, "2026-11-01", "2026-11-15", {})
+    check("la base n'est pas arrondie avant le pourcentage : 14 % de 899,176 $ = 125,88 $, pas 125,89 $",
+          round(mypuls.base_paie_usd(un[0], 1.10) * 14 / 100.0, 2) == 125.88,
+          (un[0].get("ca_usd_paie"), round(mypuls.base_paie_usd(un[0], 1.10) * 14 / 100.0, 2)))
     check("quinzaine d'octobre, deja reglee sur le brut : rien n'est recalcule (Baadooo 100 $ reste 100 $)",
           octo["Baadooo"]["ca_usd_paie"] == 100.0 and octo["mazid"]["ca_usd_paie"] == 10.0,
           (octo["Baadooo"].get("ca_usd_paie"), octo["mazid"].get("ca_usd_paie")))

@@ -2714,7 +2714,11 @@ def _assembler_stats(transactions, chatters, start_date, end_date,
         split = _by_chatter_cur.get((c.get("name") or "").strip().lower())
         c["ca_eur"] = round(split["EUR"], 2) if split else None
         c["ca_usd"] = round(split["USD"], 2) if split else None
-        c["ca_usd_paie"] = round(split["USD_PAIE"], 2) if split else None
+        # PAS arrondie au centime : c'est une base, le pourcentage vient
+        # APRES. Arrondie, 1 123,97 $ x 0,8 = 899,176 devenait 899,18, et
+        # 14 % donnait 125,89 $ sur la page pour 125,88 $ des qu'un filtre
+        # faisait recalculer le navigateur (vu en ligne le 18/11/2026).
+        c["ca_usd_paie"] = round(split["USD_PAIE"], 6) if split else None
     # Tri par CA Total décroissant
     chatters.sort(key=lambda c: c["ca_total"], reverse=True)
 
