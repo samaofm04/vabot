@@ -75,7 +75,19 @@ body .mp-revenue-section .mpm .mpm-portee>button{cursor:pointer;padding:8px 15px
 .mpm-aide{margin:0 0 14px;font-size:12.5px;line-height:1.45;color:var(--mpm-faible);font-weight:500}
 
 /* le carre : une ligne par model, une colonne par shift */
-.mpm-carre{display:grid;grid-template-columns:minmax(150px,190px) repeat(4,minmax(0,1fr));gap:7px}
+/* --mpm-cols : les quatre shifts du site, plus les colonnes d'heures libres. */
+.mpm-carre{display:grid;grid-template-columns:minmax(150px,190px) repeat(var(--mpm-cols,4),minmax(0,1fr));gap:7px}
+.mpm-outils{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;font-size:12px;font-weight:500;color:var(--mpm-faible)}
+body .mp-revenue-section .mpm button.mpm-btn.mpm-btn-fin{padding:6px 11px!important;font-size:12px!important}
+/* une colonne d'heures libres : ses deux heures se reglent dans l'en-tete */
+.mpm-tete-libre{display:flex;flex-direction:column;align-items:center;gap:1px;padding:0 0 4px;min-width:0}
+.mpm-heures{display:inline-flex;align-items:center;gap:3px;max-width:100%}
+.mpm-heures i{font-style:normal;font-size:12px;color:var(--mpm-faible)}
+body .mp-revenue-section .mpm .mpm-heures select{width:auto!important;min-width:0;height:auto;margin:0;padding:3px 4px!important;background:var(--mpm-champ)!important;color:var(--mpm-texte)!important;border:1px solid var(--mpm-acc)!important;border-radius:6px!important;font:inherit;font-size:12.5px!important;font-weight:700;box-shadow:none!important;cursor:pointer}
+body .mp-revenue-section .mpm button.mpm-ote{background:transparent!important;border:0!important;padding:0 3px!important;font-size:15px!important;font-weight:700!important;line-height:1;color:var(--mpm-faible)!important;cursor:pointer}
+body .mp-revenue-section .mpm button.mpm-ote:hover{color:var(--mpm-rouge)!important}
+body .mp-revenue-section .mpm button.mpm-somme{background:transparent!important;border:0!important;padding:0!important;font-size:11.5px!important;font-weight:500!important;color:var(--mpm-faible)!important;text-align:center;cursor:pointer}
+body .mp-revenue-section .mpm button.mpm-somme:hover{color:var(--mpm-acc)!important}
 body .mp-revenue-section .mpm .mpm-carre button{font:inherit;box-shadow:none!important;min-height:0;width:auto;cursor:pointer;text-align:left;color:var(--mpm-texte)!important}
 body .mp-revenue-section .mpm button.mpm-tete-shift{background:transparent!important;border:0!important;border-radius:8px!important;padding:2px 0 6px!important;text-align:center}
 .mpm-tete-shift b{display:block;font-size:13.5px;font-weight:700}
@@ -135,7 +147,7 @@ body .mp-revenue-section .mpm button.mpm-lien.mpm-lien-rouge:hover{color:var(--m
 @media(max-width:900px){
  .mpm-ligne{grid-template-columns:28px minmax(0,1fr) 84px 96px 44px;gap:6px 10px}
  .mpm-ligne>span:nth-child(3),.mpm-ligne>span:nth-child(4),.mpm-ligne>span:nth-child(8){display:none}
- .mpm-carre{grid-template-columns:minmax(92px,120px) repeat(4,minmax(0,1fr));gap:5px}
+ .mpm-carre{grid-template-columns:minmax(92px,120px) repeat(var(--mpm-cols,4),minmax(0,1fr));gap:5px}
  body .mp-revenue-section .mpm button.mpm-case{padding:7px 6px!important;min-height:48px}
  .mpm-case b{font-size:12.5px}.mpm-case span,.mpm-case em{display:none}
  .mpm-case u{top:5px;right:5px;width:14px;height:14px;font-size:9px}

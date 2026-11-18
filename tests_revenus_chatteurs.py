@@ -719,8 +719,9 @@ def test_managers(tmp):
                             "cases": {"1733": [3, 1, 1, 9, "x"], "3673": [], "": [0]}})
         check("manager cree : nom nettoye, « 3,5 » lu 3.5, pseudo sans arobase en minuscules",
               g["nom"] == "Ghost" and g["pct"] == 3.5 and g["discord"] == "ghost_45605" and g["id"].startswith("m_"), g)
-        check("... les cases : shifts tries, sans doublon, hors 0-3 ecartes, model sans shift non gardee",
-              g["cases"] == {"1733": [1, 3]}, g["cases"])
+        check("... les cases : un ancien numero de shift est relu comme sa plage d'heures (1 -> 8h-14h, 3 -> 20h-2h), "
+              "sans doublon, hors 0-3 ecartes, model sans plage non gardee",
+              g["cases"] == {"1733": [[8, 14], [20, 2]]}, g["cases"])
         d = rm.du(g, mat)
         check("... il touche 3,5 % de ses cases : 110 + 66 = 176 $ -> 6,16 $",
               d["ca"] == 176.0 and d["a_payer"] == 6.16 and d["nb_cases"] == 2 and d["nb_models"] == 1, d)
@@ -728,7 +729,7 @@ def test_managers(tmp):
         rm.enregistrer({"id": g["id"], "crypto_type": "usdc", "crypto_address": " 0xabc "})
         g2 = rm.trouver(g["id"])
         check("mise a jour partielle : l'adresse change, le carre et le pourcentage restent",
-              g2["crypto_type"] == "USDC" and g2["crypto_address"] == "0xabc" and g2["cases"] == {"1733": [1, 3]}
+              g2["crypto_type"] == "USDC" and g2["crypto_address"] == "0xabc" and g2["cases"] == {"1733": [[8, 14], [20, 2]]}
               and g2["pct"] == 3.5, g2)
         for mauvais, quoi in (({"role": "manager", "nom": "X", "pct": "120"}, "pourcentage au-dela de 100"),
                               ({"role": "manager", "nom": "   "}, "nom vide"),
@@ -742,6 +743,24 @@ def test_managers(tmp):
                 refuse = True
             check("refuse : " + quoi, refuse)
         check("... et un refus n'a rien ecrit de travers", len(rm.personnes()) == 1 and rm.trouver(g["id"])["pct"] == 3.5)
+
+        # ---- heures libres (« shift 8-12 », « 22h-4h »)
+        check("heures : 8h-12h = 8, 9, 10, 11 ; 22h-4h passe minuit ; « de 8 h a 8 h » = la journee",
+              rm.heures_de([8, 12]) == [8, 9, 10, 11] and rm.heures_de([22, 4]) == [22, 23, 0, 1, 2, 3]
+              and len(rm.heures_de([8, 8])) == 24)
+        check("matrice : les ventes sont rendues HEURE PAR HEURE (10 h, 21 h, 1 h pour Emma)",
+              L["1733"]["heures"][10] == 110.0 and L["1733"]["heures"][21] == 55.0 and L["1733"]["heures"][1] == 11.0
+              and sum(L["1733"]["heures"]) == 176.0 and L["1733"]["sans_chatteur_h"][21] == 55.0, L["1733"]["heures"])
+        libre = {"role": "manager", "pct": 10}
+        check("heures libres 8h-12h : la vente de 10 h compte, celle de 21 h non",
+              rm.du(dict(libre, cases={"1733": [[8, 12]]}), mat)["ca"] == 110.0)
+        check("heures libres 22h-4h : seule la vente de 1 h 30 compte (celle de 21 h est avant)",
+              rm.du(dict(libre, cases={"1733": [[22, 4]]}), mat)["ca"] == 11.0)
+        d2 = rm.du(dict(libre, cases={"1733": [[20, 2], [22, 4]]}), mat)
+        check("deux plages qui se recoupent (20h-2h et 22h-4h) : les heures communes ne paient qu'une fois",
+              d2["ca"] == 66.0 and d2["a_payer"] == 6.6 and d2["nb_cases"] == 2, d2)
+        check("une plage illisible est ecartee, une plage libre est gardee telle quelle",
+              rm._cases({"1733": [[8, 12], [25, 3], ["a", 2], [22, 4], [8, 12]]}) == {"1733": [[8, 12], [22, 4]]})
 
         b = rm.enregistrer({"role": "miniboss", "nom": "Kiah", "pct": 2})
         base = dict(rm.trouver(b["id"]))
@@ -888,7 +907,7 @@ def test_site(tmp):
             check("managers : l'admin recoit la matrice, les 4 shifts et une liste vide",
                   jm.get("ok") is True and jm.get("personnes") == [] and len(jm.get("creneaux") or []) == 4
                   and "1116" in (jm.get("matrice") or {}).get("lignes", {}), jm.get("erreur"))
-            fiche = {"role": "manager", "nom": "Ghost", "pct": 10, "discord": "ba_doo", "cases": {"1116": [1]}}
+            fiche = {"role": "manager", "nom": "Ghost", "pct": 10, "discord": "ba_doo", "cases": {"1116": [[8, 14]]}}
             corps = {"fiche": fiche, "start": "2026-11-01", "end": "2026-11-15"}
             r = chatteur.post("/mypuls/managers/enregistrer", json=corps)
             check("managers : un role restreint ne peut rien enregistrer (403)", r.status_code == 403, r.status_code)
@@ -902,6 +921,14 @@ def test_site(tmp):
             check("... la part sans chatteur est dite (16,86 $)", pers.get("sans_chatteur") == 16.86, pers.get("sans_chatteur"))
             check("... et la photo Discord est trouvee et retenue",
                   pers.get("discord_trouve") is True and "cdn.discordapp.com" in (pers.get("photo") or ""), pers.get("photo"))
+            check("... les plages reviennent en heures, et la matrice porte les 24 heures",
+                  pers.get("cases") == {"1116": [[8, 14]]} and len(jm["matrice"]["lignes"]["1116"]["heures"]) == 24, pers.get("cases"))
+            jl = admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "cases": {"1116": [[10, 11]]}},
+                                                                "start": "2026-11-01", "end": "2026-11-15"}).get_json() or {}
+            check("managers : des heures libres (10h-11h) : seule la vente de 10 h compte (110 $)",
+                  (jl.get("personne") or {}).get("ca") == 110.0 and (jl.get("personne") or {}).get("cases") == {"1116": [[10, 11]]},
+                  jl.get("personne"))
+            admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "cases": {"1116": [[8, 14]]}}})
             ko = admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "pct": "abc"}}).get_json() or {}
             check("managers : un pourcentage illisible est refuse avec son message", ko.get("ok") is False and "ourcentage" in (ko.get("erreur") or ""), ko)
             rp = admin.post("/mypuls/managers/paye", json={"id": pers.get("id"), "start": "2026-11-01", "end": "2026-11-15", "paye": True})

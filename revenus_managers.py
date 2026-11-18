@@ -11,8 +11,9 @@ une colonne par shift, ou l'on coche ce qu'il surveille.
 
 CE QUE CE MODULE DECIDE, ET LUI SEUL
 
-  - la MATRICE : le chiffre d'affaires de chaque model, shift par shift, sur
-    la periode affichee. Une seule fabrique : la page ne reclasse rien de son
+  - la MATRICE : le chiffre d'affaires de chaque model, heure par heure, sur
+    la periode affichee (un manager surveille des plages d'heures LIBRES : les
+    quatre shifts du site, ou « 8h-12h », ou « 22h-4h »). Une seule fabrique : la page ne reclasse rien de son
     cote, elle additionne des cases deja calculees ici ;
   - ce que chacun TOUCHE : la somme de ses cases, fois son pourcentage ;
   - ce qui est GARDE : data/mypuls_managers.json, ecrit par safe_json.
@@ -58,6 +59,10 @@ def charger() -> dict:
     if not isinstance(d, dict):
         d = {}
     personnes = [p for p in (d.get("personnes") or []) if isinstance(p, dict) and p.get("id")]
+    for p in personnes:
+        # relu a chaque fois : une fiche de la premiere version (numeros de
+        # shift) sort deja en plages d'heures, et sera reecrite ainsi
+        p["cases"] = _cases(p.get("cases"))
     return {"personnes": personnes,
             "paye": d.get("paye") if isinstance(d.get("paye"), dict) else {},
             "retires": d.get("retires") if isinstance(d.get("retires"), list) else []}
@@ -90,29 +95,74 @@ def _pct(v) -> float:
     return round(x, 4)
 
 
-def _cases(v) -> dict:
-    """{cle de model: [shifts]} — shifts entre 0 et 3, tries, sans doublon.
+def creneaux_du_site() -> list:
+    """Les quatre shifts du site, proposes d'office comme colonnes du carre."""
+    import revenus_chatteurs
+    return [list(c) for c in revenus_chatteurs.CRENEAUX]
 
-    Une model sans aucun shift coche ne reste pas dans le fichier : une cle
+
+def heures_de(plage) -> list:
+    """Les heures pleines couvertes par [de, a[, en passant minuit s'il le faut.
+
+    [8, 12] -> 8, 9, 10, 11.   [22, 4] -> 22, 23, 0, 1, 2, 3.
+    de == a : la journee entiere (« de 8 h a 8 h » fait le tour du cadran).
+    """
+    de, a = int(plage[0]) % 24, int(plage[1]) % 24
+    if de == a:
+        return list(range(24))
+    heures, h = [], de
+    while h != a:
+        heures.append(h)
+        h = (h + 1) % 24
+    return heures
+
+
+def _plage(v):
+    """Une plage [de, a] propre, ou None.
+
+    HEURES LIBRES (demande du 18/11/2026 : « shift 8-12 », et sur Discord un
+    manager est note « 22h-4h », a cheval sur deux shifts du site). Un manager
+    surveille donc des plages d'heures quelconques, plus les quatre shifts.
+
+    Un ENTIER est l'ancien numero de shift (0 a 3), celui que la premiere
+    version enregistrait : il est relu comme la plage du shift, sans que
+    personne ait a recocher quoi que ce soit.
+    """
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int) or (isinstance(v, str) and v.strip().isdigit()):
+        i, site = int(v), creneaux_du_site()
+        return list(site[i]) if 0 <= i < len(site) else None
+    if isinstance(v, (list, tuple)) and len(v) == 2:
+        try:
+            de, a = int(v[0]), int(v[1])
+        except (TypeError, ValueError):
+            return None
+        if 0 <= de <= 23 and 0 <= a <= 24:
+            return [de, a % 24]
+    return None
+
+
+def _cases(v) -> dict:
+    """{cle de model: [[de, a], ...]} — plages triees, sans doublon.
+
+    Une model sans aucune plage cochee ne reste pas dans le fichier : une cle
     vide se lirait « il surveille cette model » dans un an.
     """
     out = {}
     if not isinstance(v, dict):
         return out
-    for cle, shifts in v.items():
+    for cle, plages in v.items():
         cle = str(cle).strip()
-        if not cle or not isinstance(shifts, (list, tuple, set)):
+        if not cle or not isinstance(plages, (list, tuple, set)):
             continue
-        bons = set()
-        for s in shifts:
-            try:
-                i = int(s)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= i < NB_SHIFTS:
-                bons.add(i)
-        if bons:
-            out[cle] = sorted(bons)
+        bonnes = []
+        for brut in plages:
+            pl = _plage(brut)
+            if pl is not None and pl not in bonnes:
+                bonnes.append(pl)
+        if bonnes:
+            out[cle] = sorted(bonnes)
     return out
 
 
@@ -246,16 +296,25 @@ def cle_model(nom: str, comptes: dict) -> str:
     return str(cid) if cid not in (None, "") else "nom:" + str(nom)
 
 
+def _ligne_vide(nom: str, segment: str) -> dict:
+    return {"nom": nom, "segment": segment,
+            "heures": [0.0] * 24, "sans_chatteur_h": [0.0] * 24,
+            "shifts": [0.0] * NB_SHIFTS, "sans_chatteur": [0.0] * NB_SHIFTS,
+            "total": 0.0, "sans_heure": 0.0}
+
+
 def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) -> dict:
     """Le chiffre d'affaires de chaque model, shift par shift.
 
-    {"lignes": {cle: {"nom", "segment", "shifts": [4], "sans_chatteur": [4],
-                      "total", "sans_heure"}},
+    {"lignes": {cle: {"nom", "segment", "heures": [24], "sans_chatteur_h": [24],
+                      "shifts": [4], "sans_chatteur": [4], "total", "sans_heure"}},
      "ordre": [cles, du plus gros chiffre au plus petit],
      "ecartees": n}
 
-    `shifts` : base de la paie, en dollars (MYM net converti, OnlyFans brut).
-    `sans_chatteur` : la part de chaque case que MyPuls ne rattache a personne.
+    `heures` : le chiffre de chaque heure de Paris (0 a 23), base de la paie,
+    en dollars (MYM net converti, OnlyFans brut). C'est de la que sort TOUTE
+    plage d'heures, libre ou non. `shifts` en est le resume par shift du site.
+    `sans_chatteur_h` / `sans_chatteur` : la part que MyPuls ne rattache a personne.
     `total` : la model sur 24 h, ventes sans heure lisible comprises
     (`sans_heure`) — c'est la base d'un mini-boss, qui n'a pas de shift.
     `ecartees` : ventes sans nom de model, comptees nulle part ici ; le nombre
@@ -283,30 +342,31 @@ def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) ->
         cle = cle_model(nom, comptes)
         l = lignes.get(cle)
         if l is None:
-            l = lignes[cle] = {"nom": nom, "segment": (segments or {}).get(nom, ""),
-                               "shifts": [0.0] * NB_SHIFTS, "sans_chatteur": [0.0] * NB_SHIFTS,
-                               "total": 0.0, "sans_heure": 0.0}
+            l = lignes[cle] = _ligne_vide(nom, (segments or {}).get(nom, ""))
         l["total"] += usd
-        s = revenus_chatteurs.creneau(transaction_hour(t.get("date")))
-        if s < 0:
+        heure = transaction_hour(t.get("date"))
+        if not 0 <= heure <= 23:
             l["sans_heure"] += usd
             continue
-        l["shifts"][s] += usd
-        chatteur = str(t.get("chatter") or "").strip()
-        if not chatteur or est_non_attribue(chatteur):
-            l["sans_chatteur"][s] += usd
+        sans = not str(t.get("chatter") or "").strip() or est_non_attribue(str(t.get("chatter")))
+        l["heures"][heure] += usd
+        if sans:
+            l["sans_chatteur_h"][heure] += usd
+        s = revenus_chatteurs.creneau(heure)
+        if s >= 0:
+            l["shifts"][s] += usd
+            if sans:
+                l["sans_chatteur"][s] += usd
     # TOUTES les models connues ont leur ligne, meme sans vente : sur une
     # periode courte (« Aujourd'hui »), le carre n'aurait montre que deux ou
     # trois models et on n'aurait pas pu cocher les autres.
     for nom in (comptes or {}):
         cle = cle_model(nom, comptes)
         if cle not in lignes:
-            lignes[cle] = {"nom": str(nom), "segment": (segments or {}).get(nom, ""),
-                           "shifts": [0.0] * NB_SHIFTS, "sans_chatteur": [0.0] * NB_SHIFTS,
-                           "total": 0.0, "sans_heure": 0.0}
+            lignes[cle] = _ligne_vide(str(nom), (segments or {}).get(nom, ""))
     for l in lignes.values():
-        l["shifts"] = [round(x, 2) for x in l["shifts"]]
-        l["sans_chatteur"] = [round(x, 2) for x in l["sans_chatteur"]]
+        for champ in ("shifts", "sans_chatteur", "heures", "sans_chatteur_h"):
+            l[champ] = [round(x, 2) for x in l[champ]]
         l["total"], l["sans_heure"] = round(l["total"], 2), round(l["sans_heure"], 2)
     ordre = sorted(lignes, key=lambda k: (-lignes[k]["total"], lignes[k]["nom"].lower()))
     return {"lignes": lignes, "ordre": ordre, "ecartees": ecartees}
@@ -330,9 +390,10 @@ def du(fiche: dict, mat: dict) -> dict:
 
     {"ca", "a_payer", "nb_cases", "nb_models", "sans_chatteur"}
 
-    Manager : la somme de ses cases. Une case cochee sur une model sans vente
-    dans la periode vaut zero et ne compte pas dans `nb_models` vendues, mais
-    reste cochee : la periode suivante peut la remplir.
+    Manager : pour chaque model, les heures de ses plages (comptees une seule
+    fois si deux plages se recoupent). Une plage cochee sur une model sans
+    vente dans la periode vaut zero mais reste cochee : la periode suivante
+    peut la remplir.
     Mini-boss : les models de son perimetre, sur 24 h.
     """
     lignes = (mat or {}).get("lignes") or {}
@@ -346,15 +407,19 @@ def du(fiche: dict, mat: dict) -> dict:
                 sans += sum(l["sans_chatteur"])
                 models.add(cle)
     else:
-        for cle, shifts in (fiche.get("cases") or {}).items():
-            nb_cases += len(shifts)
+        for cle, plages in _cases(fiche.get("cases")).items():
+            nb_cases += len(plages)
             models.add(cle)
             l = lignes.get(cle)
             if not l:
                 continue
-            for s in shifts:
-                ca += l["shifts"][s]
-                sans += l["sans_chatteur"][s]
+            # L'UNION des heures : deux plages qui se recoupent pour la meme
+            # model (14h-20h et 18h-22h) ne paient pas deux fois 18h-20h.
+            heures = set()
+            for pl in plages:
+                heures.update(heures_de(pl))
+            ca += sum(l["heures"][h] for h in heures)
+            sans += sum(l["sans_chatteur_h"][h] for h in heures)
     pct = float(fiche.get("pct") or 0)
     return {"ca": round(ca, 2), "a_payer": round(ca * pct / 100.0, 2), "nb_cases": nb_cases,
             "nb_models": len(models), "sans_chatteur": round(sans, 2)}

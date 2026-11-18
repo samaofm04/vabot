@@ -6,6 +6,11 @@
    mini-boss (un pourcentage sur tout un perimetre). Pour un manager, un CARRE :
    une ligne par model, une colonne par shift, on coche ce qu'il surveille.
 
+   HEURES LIBRES (meme jour : « shift 8-12 », et un manager note « 22h-4h » sur
+   Discord). Une colonne est une PLAGE d'heures [de, a] : les quatre shifts du
+   site d'office, plus celles qu'on ajoute. Le serveur rend les ventes heure
+   par heure ; une case additionne les heures de sa plage.
+
    RIEN N'EST DANS LA PAGE : elle est gardee en memoire et servie a tous les
    roles. Tout arrive par /mypuls/managers.json, qui ne repond qu'aux acces
    complets. Refuse, ce script ne pose aucun onglet.
@@ -55,7 +60,36 @@
     var x = parseFloat(String(texte || '').replace(',', '.'));
     return isFinite(x) && x >= 0 && x <= 100 ? x : null;
   }
-  function creneau(i) { var c = data.creneaux[i] || [0, 0]; return c[0] + 'h → ' + c[1] + 'h'; }
+  /* Une plage [de, a] : de incluse, a exclue, en passant minuit s'il le faut
+     ([22, 4] = 22, 23, 0, 1, 2, 3). de == a : la journee entiere. Memes regles
+     que revenus_managers.heures_de. */
+  function heuresDe(pl) {
+    var de = pl[0] % 24, a = pl[1] % 24, out = [], h = de;
+    if (de === a) { for (h = 0; h < 24; h++) out.push(h); return out; }
+    while (h !== a) { out.push(h); h = (h + 1) % 24; }
+    return out;
+  }
+  function clePlage(pl) { return pl[0] + '-' + pl[1]; }
+  function enClair(pl) { return pl[0] + 'h → ' + pl[1] + 'h'; }
+  function memePlage(x, y) { return x[0] === y[0] && x[1] === y[1]; }
+  function sommePlage(l, pl, champ) { var t = 0; heuresDe(pl).forEach(function (h) { t += l[champ][h]; }); return t; }
+  // Les heures d'une model, toutes plages reunies : 24 cases vrai / faux.
+  function cadran(plages) {
+    var on = []; for (var h = 0; h < 24; h++) on.push(false);
+    (plages || []).forEach(function (pl) { heuresDe(pl).forEach(function (x) { on[x] = true; }); });
+    return on;
+  }
+  // Le cadran relu en plages d'un seul tenant : 14h-20h + 20h-2h se lit « 14h → 2h ».
+  function fusion(plages) {
+    var on = cadran(plages), out = [], h;
+    if (on.every(function (x) { return x; })) return null;       // la journee entiere
+    for (h = 0; h < 24; h++) {
+      if (!on[h] || on[(h + 23) % 24]) continue;                  // pas un debut de plage
+      var fin = h; while (on[fin % 24]) fin++;
+      out.push([h, fin % 24]);
+    }
+    return out;
+  }
   function lignes() { return data.matrice.lignes; }
   function rond(nom, image, rang, taille) {
     var r = el('span', 'mpm-rond' + (taille ? ' mpm-rond-' + taille : ''));
@@ -98,24 +132,28 @@
       });
     } else {
       Object.keys(fiche.cases || {}).forEach(function (cle) {
-        var shifts = fiche.cases[cle] || [], l = lignes()[cle];
-        cases += shifts.length; models++;
-        if (l) shifts.forEach(function (s) { ca += l.shifts[s]; sans += l.sans_chatteur[s]; });
+        var plages = fiche.cases[cle] || [], l = lignes()[cle];
+        cases += plages.length; models++;
+        // L'UNION des heures : deux plages qui se recoupent ne paient pas deux fois.
+        if (l) cadran(plages).forEach(function (pris, h) { if (pris) { ca += l.heures[h]; sans += l.sans_chatteur_h[h]; } });
       });
     }
     return {ca:ca, a_payer:ca * Number(fiche.pct || 0) / 100, nb_cases:cases, nb_models:models, sans_chatteur:sans};
   }
   // Qui d'autre surveille cette case : dit dans le carre, avant de payer.
-  function autresSur(fiche, cle, s) {
+  function autresSur(fiche, cle, pl) {
+    var heures = heuresDe(pl);
     return deRole('manager').filter(function (p) {
-      return p.id !== fiche.id && ((p.cases || {})[cle] || []).indexOf(s) >= 0;
+      if (p.id === fiche.id) return false;
+      var on = cadran((p.cases || {})[cle]);
+      return heures.some(function (h) { return on[h]; });
     }).map(function (p) { return p.nom; });
   }
 
   /* ---------- le resume d'une ligne ---------- */
-  function shiftsEnClair(shifts) {
-    if (shifts.length === data.creneaux.length) return '24 h';
-    return shifts.map(creneau).join(' · ');
+  function shiftsEnClair(plages) {
+    var f = fusion(plages);
+    return f === null ? '24 h' : f.map(enClair).join(' · ');
   }
   function resumeManager(fiche) {
     var boite = el('div', 'mpm-puces'), cases = fiche.cases || {}, reste = 0, posees = 0;
@@ -127,9 +165,9 @@
     SEGMENTS.forEach(function (seg) {
       var tous = modelsDuSegment(seg[0]), coches = tous.filter(function (c) { return (cases[c] || []).length; });
       if (!coches.length) return;
-      var premier = (cases[coches[0]] || []).join(',');
+      var premier = cadran(cases[coches[0]]).join(',');
       var pareil = coches.length === tous.length && tous.length > 1
-        && coches.every(function (c) { return (cases[c] || []).join(',') === premier; });
+        && coches.every(function (c) { return cadran(cases[c]).join(',') === premier; });
       if (pareil) { puce(seg[1], shiftsEnClair(cases[coches[0]])); return; }
       coches.forEach(function (c) { puce(lignes()[c].nom, shiftsEnClair(cases[c])); });
     });
@@ -158,19 +196,52 @@
   }
 
   /* ---------- le carre d'un manager ---------- */
+  // Les colonnes : les shifts du site, puis les heures libres de cette fiche.
+  function colonnes(fiche) {
+    return data.creneaux.map(function (c) { return {pl:c, libre:false}; })
+      .concat((fiche.colonnes || []).map(function (c, i) { return {pl:c, libre:true, rang:i}; }));
+  }
+  function estCochee(fiche, cle, pl) {
+    return (fiche.cases[cle] || []).some(function (x) { return memePlage(x, pl); });
+  }
   function carre(fiche, repeindre) {
+    var cols = colonnes(fiche);
     var g = el('div', 'mpm-carre');
+    g.style.setProperty('--mpm-cols', String(cols.length));
     g.appendChild(el('div', 'mpm-coin'));
-    data.creneaux.forEach(function (_c, s) {
-      var total = 0; data.matrice.ordre.forEach(function (cle) { total += lignes()[cle].shifts[s]; });
-      var t = el('button', 'mpm-tete-shift'); t.type = 'button'; t.title = 'Cocher ou décocher toute la colonne';
-      t.appendChild(el('b', '', creneau(s))); t.appendChild(el('span', '', usd(total, 0)));
-      t.onclick = function () {
-        var cles = data.matrice.ordre, tout = cles.every(function (c) { return (fiche.cases[c] || []).indexOf(s) >= 0; });
-        cles.forEach(function (c) { basculer(fiche, c, s, !tout); });
+    cols.forEach(function (col) {
+      var total = 0; data.matrice.ordre.forEach(function (cle) { total += sommePlage(lignes()[cle], col.pl, 'heures'); });
+      var toute = function () {
+        var cles = data.matrice.ordre, tout = cles.every(function (c) { return estCochee(fiche, c, col.pl); });
+        cles.forEach(function (c) { basculer(fiche, c, col.pl, !tout); });
         repeindre();
       };
-      g.appendChild(t);
+      if (!col.libre) {
+        var t = el('button', 'mpm-tete-shift'); t.type = 'button'; t.title = 'Cocher ou décocher toute la colonne';
+        t.appendChild(el('b', '', enClair(col.pl))); t.appendChild(el('span', '', usd(total, 0)));
+        t.onclick = toute; g.appendChild(t);
+        return;
+      }
+      // Une colonne d'heures libres : ses deux heures se reglent sur place.
+      var tete = el('div', 'mpm-tete-libre'), heures = el('span', 'mpm-heures');
+      [0, 1].forEach(function (bout) {
+        var sel = el('select'); sel.setAttribute('aria-label', bout ? 'Heure de fin' : 'Heure de début');
+        for (var h = 0; h < 24; h++) { var o = el('option', '', h + 'h'); o.value = String(h); if (h === col.pl[bout]) o.selected = true; sel.appendChild(o); }
+        sel.onchange = function () {
+          var neuve = col.pl.slice(); neuve[bout] = Number(sel.value);
+          changerHeures(fiche, col.rang, neuve); repeindre();
+        };
+        heures.appendChild(sel);
+        if (!bout) heures.appendChild(el('i', '', '→'));
+      });
+      var oter = el('button', 'mpm-ote', '×'); oter.type = 'button'; oter.title = 'Retirer ces heures';
+      oter.setAttribute('aria-label', 'Retirer la colonne ' + enClair(col.pl));
+      oter.onclick = function () { changerHeures(fiche, col.rang, null); repeindre(); };
+      heures.appendChild(oter);
+      tete.appendChild(heures);
+      var somme = el('button', 'mpm-somme', usd(total, 0)); somme.type = 'button'; somme.title = 'Cocher ou décocher toute la colonne';
+      somme.onclick = toute; tete.appendChild(somme);
+      g.appendChild(tete);
     });
     SEGMENTS.forEach(function (seg) {
       var cles = modelsDuSegment(seg[0]);
@@ -180,7 +251,8 @@
       tete.appendChild(el('span', 'mpm-plat mpm-plat-' + seg[2], seg[1]));
       var tout = el('button', 'mpm-tout' + (nb ? ' mpm-on' : ''), nb ? 'tout décocher' : 'tout cocher'); tout.type = 'button';
       tout.onclick = function () {
-        cles.forEach(function (c) { data.creneaux.forEach(function (_x, s) { basculer(fiche, c, s, !nb); }); });
+        // « tout cocher » = les shifts du site (la journee entiere) ; les heures libres se cochent a la main.
+        cles.forEach(function (c) { cols.forEach(function (col) { basculer(fiche, c, col.pl, !nb && !col.libre); }); });
         repeindre();
       };
       tete.appendChild(tout); g.appendChild(tete);
@@ -190,37 +262,63 @@
         nom.appendChild(rond(l.nom, (window.__mpCreatorAvatars || {})[l.nom], i + 3, 'petit'));
         nom.appendChild(el('b', '', l.nom));
         nom.onclick = function () {
-          var plein = (fiche.cases[cle] || []).length === data.creneaux.length;
-          data.creneaux.forEach(function (_x, s) { basculer(fiche, cle, s, !plein); });
+          var plein = data.creneaux.every(function (c) { return estCochee(fiche, cle, c); });
+          cols.forEach(function (col) { basculer(fiche, cle, col.pl, !plein && !col.libre); });
           repeindre();
         };
         g.appendChild(nom);
-        data.creneaux.forEach(function (_c, s) {
-          var on = (fiche.cases[cle] || []).indexOf(s) >= 0, v = l.shifts[s];
+        cols.forEach(function (col) {
+          var on = estCochee(fiche, cle, col.pl), v = sommePlage(l, col.pl, 'heures');
           var c = el('button', 'mpm-case' + (on ? ' mpm-on' : '')); c.type = 'button';
           c.setAttribute('aria-pressed', String(on));
-          c.setAttribute('aria-label', l.nom + ', ' + creneau(s));
+          c.setAttribute('aria-label', l.nom + ', ' + enClair(col.pl));
           c.appendChild(el('b', '', usd(v, 0)));
           c.appendChild(el('span', '', on ? pct(fiche.pct) + ' % → ' + usd(v * Number(fiche.pct || 0) / 100) : '—'));
-          var autres = autresSur(fiche, cle, s);
+          var autres = autresSur(fiche, cle, col.pl);
           if (autres.length) {
             var badge = el('em', '', '+ ' + (autres.length > 1 ? autres.length + ' autres' : autres[0]));
             badge.title = 'Aussi surveillé par ' + autres.join(', ');
             c.appendChild(badge);
           }
           if (on) c.appendChild(el('u', '', '✓'));
-          c.onclick = function () { basculer(fiche, cle, s, !on); repeindre(); };
+          c.onclick = function () { basculer(fiche, cle, col.pl, !on); repeindre(); };
           g.appendChild(c);
         });
       });
     });
     return g;
   }
-  function basculer(fiche, cle, s, coche) {
-    var liste = (fiche.cases[cle] || []).filter(function (x) { return x !== s; });
-    if (coche) liste.push(s);
-    liste.sort(function (a, b) { return a - b; });
+  function basculer(fiche, cle, pl, coche) {
+    var liste = (fiche.cases[cle] || []).filter(function (x) { return !memePlage(x, pl); });
+    if (coche) liste.push(pl.slice());
+    liste.sort(function (x, y) { return x[0] - y[0] || x[1] - y[1]; });
     if (liste.length) fiche.cases[cle] = liste; else delete fiche.cases[cle];
+    fiche.modifie = true;
+  }
+  // Une plage est-elle deja une colonne (shift du site ou heures libres) ?
+  function dejaColonne(fiche, pl, saufRang) {
+    return data.creneaux.some(function (c) { return memePlage(c, pl); })
+      || (fiche.colonnes || []).some(function (c, i) { return i !== saufRang && memePlage(c, pl); });
+  }
+  // Ajoute une colonne d'heures libres : la premiere plage courante pas encore la.
+  function ajouterHeures(fiche) {
+    var idees = [[8, 12], [22, 4], [12, 16], [16, 20], [0, 6], [6, 12], [18, 0]], h;
+    var libre = idees.filter(function (pl) { return !dejaColonne(fiche, pl, -1); })[0];
+    for (h = 0; !libre && h < 24; h++) if (!dejaColonne(fiche, [h, (h + 1) % 24], -1)) libre = [h, (h + 1) % 24];
+    if (!libre) return;
+    fiche.colonnes = (fiche.colonnes || []).concat([libre]);
+  }
+  // Change les heures d'une colonne libre (ou la retire, `neuve` null) : les
+  // cases cochees suivent. Si les nouvelles heures existent deja en colonne,
+  // les coches rejoignent cette colonne et celle-ci disparait.
+  function changerHeures(fiche, rang, neuve) {
+    var ancienne = fiche.colonnes[rang], double = neuve && dejaColonne(fiche, neuve, rang);
+    Object.keys(fiche.cases).forEach(function (cle) {
+      if (!estCochee(fiche, cle, ancienne)) return;
+      basculer(fiche, cle, ancienne, false);
+      if (neuve) basculer(fiche, cle, neuve, true);
+    });
+    if (neuve && !double) fiche.colonnes[rang] = neuve; else fiche.colonnes.splice(rang, 1);
     fiche.modifie = true;
   }
 
@@ -365,25 +463,37 @@
       if (c.sans_chatteur > 0.005) r.chiffres.appendChild(el('p', 'mpm-note', 'dont ' + usd(c.sans_chatteur) + ' de ventes sans chatteur attribué'));
       if (role === 'manager') {
         var partagees = 0, avec = {};
+        var recoupe = false;
         Object.keys(fiche.cases || {}).forEach(function (cle) {
-          fiche.cases[cle].forEach(function (s) {
-            var a = autresSur(fiche, cle, s); if (a.length) { partagees++; a.forEach(function (n) { avec[n] = 1; }); }
+          var heuresComptees = 0;
+          fiche.cases[cle].forEach(function (pl) {
+            heuresComptees += heuresDe(pl).length;
+            var a = autresSur(fiche, cle, pl); if (a.length) { partagees++; a.forEach(function (n) { avec[n] = 1; }); }
           });
+          if (heuresComptees > cadran(fiche.cases[cle]).filter(function (x) { return x; }).length) recoupe = true;
         });
+        // Deux de SES plages se recoupent pour une meme model : dit, et compte une fois.
+        if (recoupe) r.chiffres.appendChild(el('p', 'mpm-note', 'Des heures cochées se recoupent : elles sont comptées une seule fois.'));
         if (partagees) r.chiffres.appendChild(el('p', 'mpm-note mpm-note-ambre', partagees + ' case' + (partagees > 1 ? 's' : '')
           + ' aussi surveillée' + (partagees > 1 ? 's' : '') + ' par ' + Object.keys(avec).join(', ') + '. Chacun est payé dessus.'));
       }
       if (avecZone) peindreZone();
     }
     function peindreZone() {
-      zone.replaceChildren(role === 'manager' ? carre(fiche, repeindre) : perimetre(fiche, repeindre));
+      if (role !== 'manager') { zone.replaceChildren(perimetre(fiche, repeindre)); return; }
+      var plus = el('button', 'mpm-btn mpm-btn-fin', '+ Heures libres'); plus.type = 'button';
+      plus.title = 'Ajouter une colonne à tes heures : 8h → 12h, 22h → 4h…';
+      plus.onclick = function () { ajouterHeures(fiche); repeindre(); };
+      var barre = el('div', 'mpm-outils'); barre.appendChild(plus);
+      barre.appendChild(el('span', '', 'pour un shift à tes heures (8h → 12h, 22h → 4h…)'));
+      zone.replaceChildren(barre, carre(fiche, repeindre));
     }
     function repeindre() { peindreZone(); peindreChiffres(false); }
     gauche.appendChild(el('h4', '', role === 'manager'
       ? 'Ce que ' + (fiche.nom || 'ce manager') + ' surveille'
       : 'Le périmètre de ' + (fiche.nom || 'ce mini-boss')));
     gauche.appendChild(el('p', 'mpm-aide', role === 'manager'
-      ? 'Clique une case pour la cocher. Une case = les ventes d’une model pendant un shift, sur la période affichée. Un clic sur un shift ou sur une model coche toute la colonne ou toute la ligne.'
+      ? 'Clique une case pour la cocher. Une case = les ventes d’une model pendant ces heures, sur la période affichée. Un clic sur un shift ou sur une model coche toute la colonne ou toute la ligne.'
       : 'Il touche son pourcentage sur toutes les ventes des models de son périmètre, sur 24 h.'));
     gauche.appendChild(zone);
     boite.appendChild(gauche); boite.appendChild(r.boite);
@@ -397,6 +507,12 @@
     if (!brouillons[p.id]) {
       var copie = JSON.parse(JSON.stringify(p));
       copie.cases = copie.cases || {}; copie.models = copie.models || []; copie.portee = copie.portee || 'tout';
+      // Ses heures libres : toute plage cochee qui n'est pas un shift du site.
+      copie.colonnes = [];
+      Object.keys(copie.cases).forEach(function (cle) {
+        copie.cases[cle].forEach(function (pl) { if (!dejaColonne(copie, pl, -1)) copie.colonnes.push(pl.slice()); });
+      });
+      copie.colonnes.sort(function (x, y) { return x[0] - y[0] || x[1] - y[1]; });
       brouillons[p.id] = copie;
     }
     return brouillons[p.id];
@@ -418,7 +534,7 @@
     bande.appendChild(gauche); bande.appendChild(el('span', 'mpm-esp'));
     var ajouter = el('button', 'mpm-btn', '+ Ajouter ' + R.un); ajouter.type = 'button';
     ajouter.onclick = function () {
-      brouillons['nouveau-' + role] = {id:'nouveau-' + role, nouveau:true, role:role, nom:'', discord:'', pct:0, cases:{}, portee:'tout', models:[]};
+      brouillons['nouveau-' + role] = {id:'nouveau-' + role, nouveau:true, role:role, nom:'', discord:'', pct:0, cases:{}, colonnes:[], portee:'tout', models:[]};
       ouvert[role] = 'nouveau-' + role; peindre(role);
       var champNom = panneau.querySelector('.mpm-reglages input'); if (champNom) champNom.focus();
     };
