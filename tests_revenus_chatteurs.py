@@ -327,6 +327,16 @@ def test_deux_bots():
         w._DISCORD_RESOLVE_CACHE.clear()
         check("un bot pas pret ne compte pas : il n'a rien regarde",
               [g.name for g in w._guildes_des_bots()] == ["Va IG"] and w._resolve_discord_user_by_handle("ba_doo") is None)
+        # Le serveur de chatting : reconnu par son nom, jamais par un prefixe.
+        w._BOT_REF, w._BOT_ADMIN_REF = _Bot([commun, _Serveur(3, "YouLab AGENCY THREADS", [_Membre(30, "va_threads")])]), None
+        check("aucun bot sur le serveur de chatting : il n'est pas reconnu (« ... THREADS » n'est pas lui)",
+              w._guilde_chatteurs() == "", w._guilde_chatteurs())
+        w._BOT_ADMIN_REF = _Bot([_Serveur(4, "YouLab  Agency", [_Membre(20, "ba_doo")])])
+        check("un bot le voit : son nom exact est rendu, quelle que soit la casse",
+              w._guilde_chatteurs() == "YouLab  Agency", w._guilde_chatteurs())
+        options, nb, _ = w._membres_discord_pour_liste(w._guilde_chatteurs())
+        check("... et sa liste ne contient QUE ses membres (pas les VA des autres serveurs)",
+              nb == 1 and "value='ba_doo'" in options and "abdoul_9684" not in options and "va_threads" not in options, options)
         w._BOT_REF, w._BOT_ADMIN_REF = None, None
         check("aucun bot : rien n'est verifiable, on n'accuse personne",
               w._discord_observable() is False and w._discord_du_chatteur("ba_doo")["verifiable"] is False)
@@ -335,11 +345,111 @@ def test_deux_bots():
         w._DISCORD_RESOLVE_CACHE.clear()
 
 
+def test_identifiant(tmp):
+    print("\n--- relier par l'IDENTIFIANT Discord (sans serveur commun) ---")
+    import verif_discord
+    import web_upload as w
+    sauve = (w._BOT_REF, w._BOT_ADMIN_REF, verif_discord.api, mypuls.DATA_DIR, mypuls.CHATTERS_FILE)
+    mypuls.DATA_DIR = pathlib.Path(tmp) / "data_id"
+    mypuls.CHATTERS_FILE = mypuls.DATA_DIR / "mypuls_chatters.json"
+    appels = []
+    connus = {"1551685501927424071": {"id": "1551685501927424071", "username": "ba_doo",
+                                      "global_name": "BA DOO OF 14 20H", "avatar": "abc123"},
+              "222222222222222222": {"id": "222222222222222222", "username": "sans_photo",
+                                     "global_name": None, "avatar": None}}
+
+    def faux_api(methode, chemin, **kw):
+        appels.append((methode, chemin))
+        uid = chemin.rsplit("/", 1)[-1]
+        return (200, connus[uid]) if uid in connus else (404, {"message": "Unknown User"})
+    try:
+        # Le cas du 18/11/2026 : aucun bot ne partage de serveur avec le chatteur.
+        w._BOT_REF, w._BOT_ADMIN_REF = _Bot([_Serveur(1, "Va IG", [_Membre(10, "abdoul_9684")])]), None
+        verif_discord.api = faux_api
+        check("17 a 20 chiffres = un identifiant ; un pseudo, meme en chiffres courts, n'en est pas un",
+              w._est_identifiant_discord("1551685501927424071") and not w._est_identifiant_discord("ba_doo")
+              and not w._est_identifiant_discord("12345"))
+        check("pendant le rendu de la page : AUCUNE lecture chez Discord",
+              w._discord_du_chatteur("1551685501927424071")["trouve"] is False and appels == [], appels)
+        etat = w._relier_discord_du_chatteur("Baadooo", "1551685501927424071")
+        check("en reliant : la photo et le nom viennent de Discord, sans serveur commun",
+              etat["trouve"] and etat["par_id"] and etat["affiche"] == "BA DOO OF 14 20H"
+              and etat["avatar"] == "https://cdn.discordapp.com/avatars/1551685501927424071/abc123.png?size=128", etat)
+        fiche = mypuls.get_chatter_discord_fiche("Baadooo")
+        check("... et ils sont retenus sur la fiche", fiche["avatar"].endswith("abc123.png?size=128") and fiche["maj"] > 0, fiche)
+        appels.clear()
+        rendu = w._discord_du_chatteur(fiche["discord"], fiche)
+        check("au rendu suivant : la photo retenue est servie, toujours sans lecture chez Discord",
+              rendu["trouve"] and rendu["avatar"] == fiche["avatar"] and appels == [], (rendu, appels))
+        etat = w._relier_discord_du_chatteur("Ivan", "222222222222222222")
+        check("un compte sans photo recoit la pastille par defaut de Discord",
+              etat["trouve"] and "/embed/avatars/" in etat["avatar"] and etat["affiche"] == "sans_photo", etat)
+        etat = w._relier_discord_du_chatteur("Tsiry", "999999999999999999")
+        check("identifiant inconnu : dit introuvable, apres verification",
+              etat["trouve"] is False and etat["verifiable"] is True and etat["par_id"] is True, etat)
+        appels.clear()
+        check("la reverification du jour ne relit pas ce qui vient d'etre verifie",
+              w._rafraichir_discord_des_chatteurs(["Baadooo", "Ivan", "Tsiry", ""]) == {} and appels == [], appels)
+        # Le lendemain : la fiche a plus de 24 h.
+        data = mypuls._load_chatters()
+        data["baadooo"]["discord_maj"] = 1.0
+        mypuls._save_chatters(data)
+        connus["1551685501927424071"]["avatar"] = "nouvelle"
+        maj = w._rafraichir_discord_des_chatteurs(["Baadooo", "Ivan"])
+        check("... mais reprend une fiche de plus de 24 h, et sa nouvelle photo",
+              list(maj) == ["Baadooo"] and maj["Baadooo"]["avatar"].endswith("nouvelle.png?size=128")
+              and len(appels) == 1, (maj, appels))
+        # Un chatteur relie par identifiant AVANT cette version : rien de retenu.
+        mypuls.set_discord("Vieux", "1551685501927424071")
+        check("un identifiant saisi sans verification retenue : pas dit introuvable, il sera verifie",
+              w._discord_du_chatteur("1551685501927424071", mypuls.get_chatter_discord_fiche("Vieux"))["verifiable"] is False)
+        check("... et la reverification le prend en charge",
+              "Vieux" in w._rafraichir_discord_des_chatteurs(["Vieux"]))
+        mypuls.set_discord("Baadooo", "autre_pseudo")
+        check("changer de Discord oublie la photo de l'ancien",
+              mypuls.get_chatter_discord_fiche("Baadooo") == {"discord": "autre_pseudo", "avatar": "", "nom": "", "maj": 0.0},
+              mypuls.get_chatter_discord_fiche("Baadooo"))
+    finally:
+        (w._BOT_REF, w._BOT_ADMIN_REF, verif_discord.api, mypuls.DATA_DIR, mypuls.CHATTERS_FILE) = sauve
+        w._DISCORD_RESOLVE_CACHE.clear()
+
+
+def test_photo_model():
+    print("\n--- la photo d'une model ---")
+    sauve = mypuls._make_session
+
+    class _Rep:
+        def __init__(self, type_rendu, corps):
+            self.status_code, self.headers, self.content = 200, {"Content-Type": type_rendu}, corps
+
+    class _Session:
+        def __init__(self, rep):
+            self.rep = rep
+
+        def get(self, *a, **k):
+            return self.rep
+    try:
+        mypuls._make_session = lambda: _Session(_Rep("text/html; charset=UTF-8", b"<html>Connexion</html>"))
+        r = mypuls.get_avatar_bytes(3673)
+        check("cookie expire : la page de connexion de MyPuls n'est PAS servie comme une photo", r.get("ok") is False, r)
+        mypuls._make_session = lambda: _Session(_Rep("image/jpeg", b"\xff\xd8photo"))
+        r = mypuls.get_avatar_bytes(3673)
+        check("une vraie image passe, avec son type", r.get("ok") is True and r.get("content_type") == "image/jpeg", r)
+    finally:
+        mypuls._make_session = sauve
+    import revenus_ui
+    from datetime import date
+    page = revenus_ui.render_revenus_ui({"Lola": 3673})
+    check("l'adresse des photos change chaque jour (une reponse cassee n'est pas gardee 24 h)",
+          '"/mypuls/avatar/3673?j=%s"' % date.today().isoformat() in page)
+
+
 def test_site(tmp):
     print("\n--- la page et ses deux routes ---")
     import web_upload as w
     sauve = (w._load_web_users, w._discord_observable, w._resolve_discord_user_by_handle,
              w._membres_discord_pour_liste, mypuls.DATA_DIR, mypuls.CHATTERS_FILE)
+    sauve_guilde = w._guilde_chatteurs
     # Tout ce qui s'ecrit pendant ce cas tombe dans le dossier temporaire.
     os.chdir(tmp)
     mypuls.DATA_DIR = pathlib.Path(tmp) / "data"
@@ -420,7 +530,7 @@ def test_site(tmp):
             m = re.search(r"window\.__mpCreatorAvatars=(\{.*?\});</script>", page, re.S)
             photos = json.loads(m.group(1)) if m else {}
             check("les photos des models sont la meme quand la lecture par cookie rend vide",
-                  photos.get("Lola ღ") == "/mypuls/avatar/3673" and len(photos) == 5, photos)
+                  str(photos.get("Lola ღ")).startswith("/mypuls/avatar/3673?j=") and len(photos) == 5, photos)
             check("la liste des chatteurs est dans la page", "id='mp-tab-chatters'" in page, len(page))
             check("les deux boutons du tableau de bord y sont ($ / €, Net / Brut)",
                   "mp-fx-cur" in page and "mp-fx-mode" in page and "mpFxToggle('mode')" in page)
@@ -430,9 +540,15 @@ def test_site(tmp):
                   extra.get("Baadooo", {}).get("avatar", "").startswith("https://cdn.discordapp.com/"), extra)
             check("la liste des membres n'est PAS dans la page (elle est servie a tous les roles)",
                   "<datalist id='mp-discord-membres'></datalist>" in page and "value='ba_doo'" not in page)
+            w._guilde_chatteurs = lambda: "YouLab AGENCY"
             j = admin.get("/mypuls/chatters/membres_discord.json").get_json() or {}
-            check("... elle est lue a part par un acces complet",
-                  j.get("ok") and "value='ba_doo'" in (j.get("options") or "") and j.get("nb") == 2, j)
+            check("... elle est lue a part par un acces complet, pour le serveur de chatting",
+                  j.get("ok") and "value='ba_doo'" in (j.get("options") or "") and j.get("nb") == 2
+                  and j.get("serveur") == "YouLab AGENCY", j)
+            w._guilde_chatteurs = lambda: ""
+            j = admin.get("/mypuls/chatters/membres_discord.json").get_json() or {}
+            check("... aucun bot sur le serveur de chatting : liste VIDE (on ne propose pas les VA a la place)",
+                  j.get("ok") and j.get("options") == "" and j.get("nb") == 0 and j.get("serveur") == "", j)
             check("... et refusee a un role restreint, meme s'il a l'onglet Revenus (403)",
                   chatteur.get("/mypuls/chatters/membres_discord.json").status_code == 403,
                   chatteur.get("/mypuls/chatters/membres_discord.json").status_code)
@@ -481,6 +597,7 @@ def test_site(tmp):
     finally:
         (w._load_web_users, w._discord_observable, w._resolve_discord_user_by_handle,
          w._membres_discord_pour_liste, mypuls.DATA_DIR, mypuls.CHATTERS_FILE) = sauve
+        w._guilde_chatteurs = sauve_guilde
         os.chdir(str(ICI))
 
 
@@ -491,8 +608,10 @@ if __name__ == "__main__":
     test_comptes()
     test_complement()
     test_deux_bots()
+    test_photo_model()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
+        test_identifiant(_tmp)
         test_site(_tmp)
     except Exception as e:                                   # noqa: BLE001
         import traceback

@@ -3148,14 +3148,37 @@ def get_chatter_discord(name: str) -> str:
     return str(meta.get("discord") or "") if isinstance(meta, dict) else ""
 
 
-def set_discord(name: str, pseudo: str) -> str:
-    """Relie (ou delie, avec "") le pseudo Discord d'un chatteur. Rend le pseudo garde.
+def get_chatter_discord_fiche(name: str) -> dict:
+    """{discord, avatar, nom, maj} : le Discord relie et ce qu'on en a retenu.
+
+    `avatar` et `nom` sont ceux lus chez Discord a la derniere verification
+    (`maj`, en secondes). Ils servent quand le chatteur est relie par son
+    IDENTIFIANT et qu'aucun bot ne partage de serveur avec lui : la page ne
+    peut alors pas le retrouver en memoire, et elle ne doit pas interroger
+    Discord a chaque affichage.
+    """
+    meta = _load_chatters().get((name or "").strip().lower(), {})
+    if not isinstance(meta, dict):
+        meta = {}
+    return {"discord": str(meta.get("discord") or ""),
+            "avatar": str(meta.get("discord_avatar") or ""),
+            "nom": str(meta.get("discord_nom") or ""),
+            "maj": float(meta.get("discord_maj") or 0)}
+
+
+def set_discord(name: str, pseudo: str, avatar: str = None, nom: str = None) -> str:
+    """Relie (ou delie, avec "") le Discord d'un chatteur. Rend ce qui est garde.
+
+    `pseudo` : son pseudo, ou son identifiant (les chiffres de « Copier
+    l'identifiant »). `avatar` / `nom` : ce que Discord a rendu pour lui, s'il
+    a ete retrouve ; None laisse ce qui etait retenu pour le MEME Discord.
 
     LE LIEN VIT SUR LA FICHE DU CHATTEUR, pas dans le planning. Les deux listes
     ne portent pas les memes noms : MyPuls dit « Skurt », le planning dit
     « Jerry » pour la meme personne (constate le 18/11/2026). Passer par le
     planning aurait rattache des photos a la mauvaise ligne.
     """
+    import time as _t
     pseudo = str(pseudo or "").strip().lstrip("@").strip().lower()[:40]
     data = _load_chatters()
     key = (name or "").strip().lower()
@@ -3163,11 +3186,20 @@ def set_discord(name: str, pseudo: str) -> str:
         return ""
     if key not in data:
         data[key] = {}
+    fiche = data[key]
+    if not pseudo or fiche.get("discord") != pseudo:
+        # Un autre Discord (ou plus aucun) : la photo retenue n'est plus la sienne.
+        for cle in ("discord_avatar", "discord_nom", "discord_maj"):
+            fiche.pop(cle, None)
     if pseudo:
-        data[key]["discord"] = pseudo
+        fiche["discord"] = pseudo
+        if avatar is not None or nom is not None:
+            fiche["discord_avatar"] = str(avatar or "")
+            fiche["discord_nom"] = str(nom or "")
+            fiche["discord_maj"] = _t.time()
     else:
-        data[key].pop("discord", None)
-    data[key]["original_name"] = name
+        fiche.pop("discord", None)
+    fiche["original_name"] = name
     _save_chatters(data)
     return pseudo
 
@@ -4206,10 +4238,18 @@ def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
         return {"ok": False, "error": f"Erreur réseau : {e}"}
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code}"}
+    # UNE PAGE N'EST PAS UNE PHOTO. Cookie expire, MyPuls repond 200 avec sa
+    # page de connexion : elle etait servie comme une image (constate en
+    # ligne le 18/11/2026 : 3,7 Ko de HTML par « photo », toutes les pastilles
+    # de model en initiales), et gardee 24 h par le navigateur — les photos
+    # seraient restees cassees un jour entier apres le retour du cookie.
+    type_rendu = str(r.headers.get("Content-Type", "") or "").lower()
+    if not type_rendu.startswith("image/"):
+        return {"ok": False, "error": "MyPuls n'a pas rendu une image (cookie expiré ?)"}
     return {
         "ok": True,
         "content": r.content,
-        "content_type": r.headers.get("Content-Type", "image/jpeg"),
+        "content_type": type_rendu,
     }
 
 

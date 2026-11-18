@@ -4,6 +4,7 @@ This module does not write chatter metadata or crypto images. The browser moves
 the existing controls into the expandable view, preserving their actions.
 """
 import json
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 from revenus_dates import transaction_hour
@@ -15,7 +16,12 @@ _CHART_JS = (_HERE / 'revenus_chart.js').read_text(encoding='utf-8')
 
 
 def render_revenus_ui(creators, segments=None, chatter_names=None):
-    avatars = {str(name): '/mypuls/avatar/' + quote(str(cid), safe='')
+    # « ?j=<jour> » : l'adresse change chaque jour. La route gardait 24 h dans
+    # le navigateur meme une reponse cassee (page de connexion servie comme une
+    # image, le 18/11/2026) ; sans ce jeton, les photos des models seraient
+    # restees en initiales un jour entier apres le retour du cookie.
+    jour = date.today().isoformat()
+    avatars = {str(name): '/mypuls/avatar/' + quote(str(cid), safe='') + '?j=' + jour
                for name, cid in (creators or {}).items() if cid is not None}
     payload = (json.dumps(avatars, ensure_ascii=False)
                .replace('&', '\\u0026').replace('<', '\\u003c')

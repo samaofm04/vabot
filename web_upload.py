@@ -280,93 +280,170 @@ def _titre_colonne_discord(nb: int, tronque: bool) -> str:
 GUILDE_CHATTEURS = "YouLab AGENCY"
 
 
-def _guilde_chatteurs() -> str:
-    """Le serveur ou chercher les chatteurs : GUILDE_CHATTEURS s'il existe
-    encore, sinon "" (tous les serveurs du bot).
+#: Les noms sous lesquels le serveur des chatteurs est reconnu, en minuscules.
+#: Une liste FERMEE, jamais un prefixe : « YouLab AGENCY THREADS » commence
+#: pareil et n'est pas le serveur des chatteurs.
+NOMS_GUILDE_CHATTEURS = ("youlab agency", "youl4b agency", "youlab chatting", "youl4b chatting")
 
-    Le nom est compare EXACTEMENT, et ce serveur a disparu de la vue du bot :
-    le 18/11/2026 il voyait Va IG, YouLab AGENCY THREADS, Youl4b ( Spam ),
-    YouCham, You FR et You US — plus aucun « YouLab AGENCY ». La colonne
-    Discord du planning ne fouillait donc plus AUCUN membre : liste de choix
-    « indisponible », et les 16 pseudos saisis tous en orange, sans que rien
-    ne dise pourquoi. Chercher partout propose aussi des VA dans la liste ;
-    c'est moins net qu'un seul serveur, mais ca marche, alors que l'ancien
-    reglage ne trouvait plus personne.
+
+def _guilde_chatteurs() -> str:
+    """Le nom EXACT du serveur des chatteurs, tel qu'un bot le voit, ou "".
+
+    "" veut dire : aucun des deux bots n'est sur ce serveur. C'etait le cas le
+    18/11/2026 — les bots voyaient dix serveurs (960 membres), aucun n'etait
+    celui du chatting, et « ba_doo », qui y est, restait introuvable.
+
+    Le planning chatteurs traite "" comme « tous les serveurs » (sa colonne
+    Discord ne trouvait plus personne). La page Revenus chatteurs, elle, ne
+    propose alors AUCUN membre : le proprietaire ne veut dans sa liste que les
+    gens du serveur de chatting, pas les VA des autres serveurs.
     """
     try:
-        if any((getattr(g, "name", "") or "") == GUILDE_CHATTEURS for g in _guildes_des_bots()):
-            return GUILDE_CHATTEURS
+        for g in _guildes_des_bots():
+            nom = getattr(g, "name", "") or ""
+            if " ".join(nom.lower().split()) in NOMS_GUILDE_CHATTEURS:
+                return nom
     except Exception:
         pass
     return ""
 
 
-def _etat_discord(handle: str, nb_membres: int = 0, guilde: str = ""):
-    """L etat d un pseudo Discord : couleur de bordure, explication, pastille.
+def _est_identifiant_discord(texte) -> bool:
+    """Les chiffres de « Copier l'identifiant » (17 a 20 en pratique)."""
+    t = str(texte or "").strip()
+    return t.isdigit() and 15 <= len(t) <= 21
 
-    UNE SEULE redaction du verdict, pour les DEUX rendus : le serveur peint
-    la cellule au chargement, la route la repeint apres une saisie. Deux
-    formulations du meme jugement finissent toujours par diverger -- c est le
-    « deux endroits decident la meme chose » que ce depot a deja paye cher.
 
-    Rend (bordure, titre, pastille_html).
+def _discord_par_identifiant(uid: str, reseau: bool = False):
+    """Un compte Discord par son IDENTIFIANT : {id, username, display_name,
+    avatar_url}, ou None.
+
+    D'abord ce que les bots ont en memoire (un membre d'un de leurs serveurs).
+    Avec reseau=True, sinon, une lecture chez Discord (GET /users/<id>) : elle
+    rend la photo de N'IMPORTE quel compte, meme sans serveur commun. C'est ce
+    qui manquait le 18/11/2026 : les chatteurs sont sur un serveur ou aucun
+    des deux bots n'est present, et un pseudo ne se cherche que parmi les
+    membres des serveurs des bots.
+
+    La lecture reseau n'est JAMAIS faite pendant le rendu de la page (une par
+    chatteur relie, a chaque affichage) : seulement quand on relie, et une
+    fois par jour par le complement.
     """
-    handle = (handle or "").strip()
-    if not handle:
-        return ("#2a2a2a", "Pseudo Discord du chatteur", "")
-    info = _resolve_discord_user_by_handle(handle, guilde)
-    if info:
-        av = info.get("avatar_url") or ""
-        pastille = (f"<img src='{html_escape(av)}' alt='' "
-                    f"style='width:18px;height:18px;border-radius:50%;"
-                    f"vertical-align:middle;margin-right:5px'>") if av else ""
-        return ("#22c55e",
-                "Rattache a " + (info.get("display_name") or handle),
-                pastille)
-    if not _discord_observable():
-        # Muet n est pas « introuvable » : accuser ici serait un faux negatif.
-        return ("#2a2a2a",
-                "Bot Discord hors ligne : rattachement non verifiable",
-                "<span style='color:#666;margin-right:5px' title='non verifiable'>•</span>")
-    # DIRE POURQUOI, ET QUOI FAIRE. « Aucun membre du Discord » se lisait
-    # comme une panne du site : le proprietaire a signale « ca marche
-    # toujours pas » devant un avertissement qui, lui, disait vrai. Nommer
-    # le nombre de membres reellement fouilles transforme un reproche opaque
-    # en constat verifiable.
-    ou = guilde or "tes serveurs"
-    titre = ("Aucun des %d membre%s de %s ne porte « %s ». Cette personne n y "
-             "est pas : fais-la rejoindre, ou invite le bot sur le serveur ou "
-             "elle se trouve." % (nb_membres, "s" if nb_membres > 1 else "",
-                                  ou, handle)
-             ) if nb_membres else (
-             "« %s » n a ete trouve sur %s." % (handle, ou))
-    return ("#f97316", titre,
-            "<span style='color:#f97316;margin-right:5px'>⚠</span>")
+    uid = str(uid or "").strip()
+    if not _est_identifiant_discord(uid):
+        return None
+    for b in (_BOT_REF, _BOT_ADMIN_REF):
+        try:
+            if b is None or not b.is_ready():
+                continue
+            u = b.get_user(int(uid))
+            if u is None:
+                for g in (b.guilds or []):
+                    u = g.get_member(int(uid))
+                    if u:
+                        break
+            if u:
+                return {"id": uid, "username": getattr(u, "name", "") or "",
+                        "display_name": getattr(u, "display_name", "") or getattr(u, "name", "") or "",
+                        "avatar_url": _avatar_petit(str(u.display_avatar.url))}
+        except Exception:
+            continue
+    if not reseau:
+        return None
+    try:
+        import verif_discord
+        code, corps = verif_discord.api("GET", f"/users/{uid}")
+    except Exception:
+        return None
+    if code != 200 or not isinstance(corps, dict) or not corps.get("id"):
+        return None
+    empreinte = corps.get("avatar")
+    # Sans photo choisie, Discord affiche une des six pastilles par defaut.
+    avatar = (f"https://cdn.discordapp.com/avatars/{uid}/{empreinte}.png?size=128" if empreinte
+              else f"https://cdn.discordapp.com/embed/avatars/{(int(uid) >> 22) % 6}.png")
+    return {"id": uid, "username": str(corps.get("username") or ""),
+            "display_name": str(corps.get("global_name") or corps.get("username") or ""),
+            "avatar_url": avatar}
 
 
-def _discord_du_chatteur(pseudo: str) -> dict:
-    """Ce que la liste des chatteurs affiche pour un pseudo Discord relie.
+def _discord_du_chatteur(pseudo: str, fiche: dict = None, reseau: bool = False) -> dict:
+    """Ce que la liste des chatteurs affiche pour un Discord relie (pseudo ou
+    identifiant).
 
     UNE SEULE fabrique pour le rendu de la page et pour la reponse de la route
     qui relie : la ligne repeinte apres une saisie et la meme ligne apres
     rechargement doivent dire la meme chose.
 
-    `trouve` False + `verifiable` True : aucun membre des serveurs du bot ne
-    porte ce pseudo — la ligne garde ses initiales et le dit. `verifiable`
-    False : le bot ne repond pas, on ne peut rien affirmer.
+    `fiche` : ce qui a ete retenu a la derniere verification
+    (mypuls.get_chatter_discord_fiche). Un compte relie par son identifiant,
+    que les bots ne voient pas, garde ainsi sa photo sans relire Discord.
+
+    `trouve` False + `verifiable` True : on a cherche, il n'existe pas — la
+    ligne garde ses initiales et le dit. `verifiable` False : on n'a pas pu
+    regarder (bot hors ligne, identifiant pas encore verifie), on n'affirme rien.
     """
     pseudo = str(pseudo or "").strip()
-    info = _resolve_discord_user_by_handle(pseudo) if pseudo else None
+    par_id = _est_identifiant_discord(pseudo)
+    if par_id:
+        info = _discord_par_identifiant(pseudo, reseau)
+    else:
+        info = _resolve_discord_user_by_handle(pseudo) if pseudo else None
+    avatar = (info or {}).get("avatar_url") or ""
+    affiche = (info or {}).get("display_name") or ""
+    trouve = bool(info)
+    retenu = bool(fiche) and fiche.get("discord") == pseudo and bool(fiche.get("maj"))
+    if not trouve and retenu and (fiche.get("avatar") or fiche.get("nom")):
+        avatar, affiche, trouve = fiche.get("avatar") or "", fiche.get("nom") or "", True
+    if par_id:
+        # Un identifiant se verifie chez Discord : c'est fait des qu'on a
+        # relie (reseau) ou qu'une verification est retenue sur la fiche.
+        verifiable = trouve or reseau or retenu
+    else:
+        verifiable = _discord_observable()
     return {
         "discord": pseudo,
-        "avatar": (info or {}).get("avatar_url") or "",
-        "affiche": (info or {}).get("display_name") or "",
-        "trouve": bool(info),
-        "verifiable": _discord_observable(),
+        "avatar": avatar,
+        "affiche": affiche,
+        "trouve": trouve,
+        "verifiable": verifiable,
+        "par_id": par_id,
         # Les serveurs REELLEMENT fouilles : « introuvable » sans dire ou l'on
         # a cherche ne permet pas de savoir sur quel serveur inviter le bot.
         "serveurs": sorted({str(getattr(g, "name", "") or "?") for g in _guildes_des_bots()}),
     }
+
+
+def _relier_discord_du_chatteur(nom: str, saisi: str) -> dict:
+    """Enregistre le Discord d'un chatteur et retient ce que Discord en dit."""
+    import mypuls
+    pseudo = mypuls.set_discord(nom, saisi)
+    etat = _discord_du_chatteur(pseudo, None, reseau=True)
+    if pseudo and (etat["trouve"] or etat["par_id"]):
+        # Introuvable par identifiant : on retient AUSSI la verification (photo
+        # vide), sinon la page reinterrogerait Discord a chaque ouverture.
+        mypuls.set_discord(nom, pseudo, avatar=etat["avatar"], nom=etat["affiche"])
+    return etat
+
+
+def _rafraichir_discord_des_chatteurs(noms, limite: int = 10) -> dict:
+    """Reverifie, au plus une fois par jour, les Discord relies par identifiant.
+
+    Une photo Discord porte une empreinte dans son adresse : quand le chatteur
+    change de photo, l'ancienne adresse finit par ne plus rien rendre. Appele
+    par le complement, donc APRES la page. `limite` borne les lectures par
+    appel : la page de paie ne doit pas declencher une rafale.
+    """
+    import time as _t_dc
+    import mypuls
+    changes = {}
+    for nom in sorted({str(n or "").strip() for n in (noms or []) if str(n or "").strip()}):
+        if len(changes) >= limite:
+            break
+        fiche = mypuls.get_chatter_discord_fiche(nom)
+        if not _est_identifiant_discord(fiche["discord"]) or _t_dc.time() - fiche["maj"] < 86400:
+            continue
+        changes[nom] = _relier_discord_du_chatteur(nom, fiche["discord"])
+    return changes
 
 
 def _membres_discord_pour_liste(guilde: str = ""):
@@ -36601,9 +36678,9 @@ body.light .mypuls-bar{background:#e5e7eb}
     for c in chatters:
         if c.get("non_attribue"):
             continue
-        _ps_dc = mypuls.get_chatter_discord(c["name"])
-        if _ps_dc:
-            _extra_chatteurs[c["name"]] = _discord_du_chatteur(_ps_dc)
+        _fiche_dc = mypuls.get_chatter_discord_fiche(c["name"])
+        if _fiche_dc["discord"]:
+            _extra_chatteurs[c["name"]] = _discord_du_chatteur(_fiche_dc["discord"], _fiche_dc)
     extra_json = (_json_mod.dumps(_extra_chatteurs, ensure_ascii=False)
                   .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
     # Period_id pour le tracking "paye" : YYYY-MM-DD_YYYY-MM-DD
@@ -73790,12 +73867,12 @@ def create_app():
         # personne : rien a relier, comme il n'y a rien a payer.
         if est_non_attribue(name):
             return jsonify({"ok": False, "error": "Ventes non attribuées : aucun chatteur à relier"})
-        pseudo = mypuls.set_discord(name, request.form.get("discord") or "")
+        etat = _relier_discord_du_chatteur(name, request.form.get("discord") or "")
         try:
             _render_mypuls_section_html.invalidate()
         except Exception:
             pass
-        return jsonify(dict(_discord_du_chatteur(pseudo), ok=True, name=name))
+        return jsonify(dict(etat, ok=True, name=name))
 
     @app.route("/mypuls/chatters/membres_discord.json")
     def mypuls_chatters_membres_discord():
@@ -73811,9 +73888,17 @@ def create_app():
             _complet = False
         if not _complet:
             return jsonify({"ok": False, "error": "Accès refusé"}), 403
-        options, nb, tronque = _membres_discord_pour_liste("")
+        # UNIQUEMENT le serveur de chatting (demande du proprietaire, le
+        # 18/11/2026 : la liste proposait les 960 membres de tous les
+        # serveurs, VA compris). Si aucun bot n'y est, la liste est vide et la
+        # page explique quoi faire — proposer les autres serveurs a la place
+        # ferait relier un chatteur a un inconnu qui porte un pseudo voisin.
+        serveur = _guilde_chatteurs()
+        options, nb, tronque = _membres_discord_pour_liste(serveur) if serveur else ("", 0, False)
         return jsonify({"ok": True, "options": options, "nb": nb, "tronque": tronque,
-                        "verifiable": _discord_observable()})
+                        "serveur": serveur, "verifiable": _discord_observable(),
+                        "serveurs_vus": sorted({str(getattr(g, "name", "") or "?")
+                                                for g in _guildes_des_bots()})})
 
     @app.route("/mypuls/chatters/complement.json")
     def mypuls_chatters_complement():
@@ -73841,7 +73926,21 @@ def create_app():
             comptes = revenus_chatteurs.comptes()
             cur = mypuls.fetch_team_stats(debut, fin, use_cache=True)
             ventes = (cur.get("transactions") or []) if cur.get("ok") else []
-            return jsonify(revenus_chatteurs.complement(debut, fin, comptes, ventes))
+            rep = revenus_chatteurs.complement(debut, fin, comptes, ventes)
+            # Les Discord relies par identifiant, reverifies ici (une fois
+            # par jour) : la page n'attend pas Discord, et la photo arrive
+            # avec le reste du complement.
+            try:
+                photos = _rafraichir_discord_des_chatteurs(t.get("chatter") for t in ventes)
+            except Exception:
+                photos = {}
+            if photos:
+                rep = dict(rep, discord=photos)      # une copie : la reponse gardee en memoire ne change pas
+                try:
+                    _render_mypuls_section_html.invalidate()
+                except Exception:
+                    pass
+            return jsonify(rep)
         except Exception as e:
             return jsonify({"ok": False, "erreurs": [f"{type(e).__name__} : {e}"]})
 
@@ -73953,7 +74052,12 @@ def create_app():
             return "", 404
         res = mypuls.get_avatar_bytes(creator_id)
         if not res.get("ok"):
-            return "", 404
+            # Un echec ne se garde pas : la photo doit revenir des que le
+            # cookie MyPuls est de nouveau valide, pas un jour plus tard.
+            from flask import Response as _RepAv
+            _vide = _RepAv("", status=404)
+            _vide.headers["Cache-Control"] = "no-store"
+            return _vide
         from flask import Response
         resp = Response(res["content"], mimetype=res.get("content_type", "image/jpeg"))
         resp.headers["Cache-Control"] = "public, max-age=86400"

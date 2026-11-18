@@ -349,10 +349,11 @@
       entry.discordEtat.className = 'mp-t-discord-etat';
       if (!d.discord) entry.discordEtat.textContent = 'Aucun Discord relié : la ligne garde ses initiales.';
       else if (d.trouve) { entry.discordEtat.textContent = 'Relié à ' + (d.affiche || d.discord) + ' · photo à jour.'; entry.discordEtat.classList.add('mp-t-ok'); }
-      else if (!d.verifiable) entry.discordEtat.textContent = '@' + d.discord + ' enregistré. Bot Discord hors ligne : photo non vérifiable pour l’instant.';
+      else if (!d.verifiable) entry.discordEtat.textContent = d.par_id ? 'Identifiant enregistré : vérification chez Discord en cours.' : '@' + d.discord + ' enregistré. Bot Discord hors ligne : photo non vérifiable pour l’instant.';
+      else if (d.par_id) { entry.discordEtat.textContent = 'Aucun compte Discord ne porte l’identifiant ' + d.discord + '. Vérifie les chiffres (clic droit sur son profil › Copier l’identifiant).'; entry.discordEtat.classList.add('mp-t-alerte'); }
       else {
         var ou = d.serveurs && d.serveurs.length ? ' Serveurs fouillés : ' + d.serveurs.join(', ') + '.' : '';
-        entry.discordEtat.textContent = 'Aucun membre des serveurs que les bots voient ne porte « ' + d.discord + ' ».' + ou + ' Invite le bot sur le serveur de ce chatteur, ou corrige le pseudo.';
+        entry.discordEtat.textContent = 'Aucun membre des serveurs que les bots voient ne porte « ' + d.discord + ' ».' + ou + ' Colle plutôt son identifiant Discord (clic droit sur son profil › Copier l’identifiant) : il marche sans serveur commun.';
         entry.discordEtat.classList.add('mp-t-alerte');
       }
     }
@@ -389,6 +390,12 @@
         var liste = document.getElementById('mp-discord-membres');
         // `options` est du HTML deja echappe par le serveur (html_escape).
         if (liste && j && j.ok && j.options) liste.innerHTML = j.options;
+        if (!j || !j.ok) return;
+        // D'ou vient la liste, ou pourquoi elle est vide : dit sous le champ.
+        var aide = j.serveur
+          ? 'La liste propose les ' + j.nb + ' membres de « ' + j.serveur + ' ». Tu peux aussi coller un identifiant Discord.'
+          : 'Aucun bot n\u2019est sur ton serveur de chatting : la liste est vide. Colle l\u2019identifiant Discord du chatteur (clic droit sur son profil › Copier l\u2019identifiant), ou invite le bot sur ce serveur depuis youl4b.com/version.';
+        entries.forEach(function (entry) { if (entry.discordAide) entry.discordAide.textContent = aide; });
       })
       .catch(function () {});
   }
@@ -537,12 +544,14 @@
       var blocDiscord = el('form', 'mp-t-discord');
       blocDiscord.appendChild(el('span', 'mp-revenue-crypto-label', 'Discord'));
       entry.discordInput = el('input'); entry.discordInput.type = 'text'; entry.discordInput.maxLength = 40;
-      entry.discordInput.placeholder = 'pseudo Discord'; entry.discordInput.setAttribute('list', 'mp-discord-membres');
-      entry.discordInput.setAttribute('aria-label', 'Pseudo Discord de ' + entry.label); entry.discordInput.autocomplete = 'off';
+      entry.discordInput.placeholder = 'pseudo ou identifiant Discord'; entry.discordInput.setAttribute('list', 'mp-discord-membres');
+      entry.discordInput.setAttribute('aria-label', 'Pseudo ou identifiant Discord de ' + entry.label); entry.discordInput.autocomplete = 'off';
       entry.discordInput.addEventListener('focus', chargerMembres);
       entry.discordBouton = el('button', 'mp-t-relier', 'Relier'); entry.discordBouton.type = 'submit';
       entry.discordEtat = el('span', 'mp-t-discord-etat');
+      entry.discordAide = el('span', 'mp-t-discord-aide');
       blocDiscord.appendChild(entry.discordInput); blocDiscord.appendChild(entry.discordBouton); blocDiscord.appendChild(entry.discordEtat);
+      blocDiscord.appendChild(entry.discordAide);
       blocDiscord.onsubmit = function (event) { event.preventDefault(); relierDiscord(entry); };
       detailCell.appendChild(blocDiscord);
     }
@@ -772,6 +781,12 @@
       .then(function (r) { return r.json().catch(function () { return {ok:false, erreurs:['Réponse illisible (HTTP ' + r.status + ')']}; }); })
       .then(function (j) {
         if (j && j.ok) complement = j; else complementErreur = ((j && j.erreurs) || ['réponse vide']).join(' · ');
+        // Les photos Discord reverifiees pendant le complement : on repeint.
+        if (j && j.discord) Object.keys(j.discord).forEach(function (nom) {
+          discord[nom] = j.discord[nom];
+          var e = entries.find(function (x) { return x.name === nom; });
+          if (e && !e.orphan) peindrePhoto(e);
+        });
       })
       .catch(function (e) { complementErreur = String(e); })
       .then(function () { entries.forEach(function (entry) { if (!entry.orphan) peindreSousLigne(entry); }); refresh(); });
