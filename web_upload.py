@@ -36360,29 +36360,98 @@ body.light .mypuls-bar{background:#e5e7eb}
         tot = float(c.get("ca_total") or 0)
         return (mypuls.ca_usd_chatteur(c, _taux_ca) / tot) if tot else _taux_ca
 
-    def _stat_usd(cle, valeur, couleur, libelle, plus=""):
-        return (f"<div class='mypuls-stat' title='MyM : net · OnlyFans : brut'>"
-                f"<div class='v' data-mp-stat='{cle}' style='color:{couleur}'>{plus}${valeur:,.0f}</div>"
-                f"<div class='l'>{libelle} <span data-mp-stat-eur='{cle}'>"
-                f"≈ {round(valeur / _taux_ca):,} €</span></div></div>")
+    # LE BLOC DES CHIFFRES, FACON DASHBOARD. Demande du 18/11/2026 : la rangee
+    # de cinq cases (« CA Total », « CA PPV »…) remplacee par le bloc de
+    # l'accueil -- le total a gauche, six cases a droite, « Unlock ratio » en
+    # bas a droite. Les cases « Médias push » et « Media on demand » qu'il a
+    # voulues y sont, mais VIDES pour l'instant : l'API MyPuls ne rend pas ces
+    # ventes (jamais vues sur 1 892 releves ni sur 21 558 ventes ; sur le site
+    # MyPuls, ~10 € chacune sur l'annee 2026).
+    # Les data-mp-stat sont ceux de l'ancienne rangee : mpRecompute et
+    # revenus_ui.js les remplissent sans rien savoir du changement de forme.
+    from dashboard_layout import CATEGORIES as _CAT_ACCUEIL
+    _icones_accueil = {lib: (coul, fond, svg) for lib, coul, fond, svg in _CAT_ACCUEIL}
 
-    # Stats grid (avec data-attributes pour update JS)
+    def _svg_case(chemins):
+        return ("<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' "
+                "stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>"
+                + chemins + "</svg>")
+
+    def _case(valeur_html, libelle_html, couleur, fond, icone, montant=False, titre=""):
+        # La couleur passe par des variables, pas par « color:#… » en ligne :
+        # les themes repeignent tout style en ligne qui contient certaines
+        # couleurs (c'est ce qui rendait une case de la legende bleue).
+        return (f"<div class='mp-apercu-case{' mp-apercu-base' if montant else ''}'"
+                + (f" title='{html_escape(titre)}'" if titre else "") + ">"
+                f"<div class='mp-apercu-rond' style='--mpa-c:{couleur};--mpa-f:{fond}'>{icone}</div>"
+                f"<div class='mp-apercu-valeur'>{valeur_html}</div>"
+                f"<div class='mp-apercu-nom'>{libelle_html}</div></div>")
+
+    def _montant_case(cle):
+        return f"<span data-mp-stat='{cle}'>${_ca_usd[cle]:,.2f}</span>"
+
+    def _autre_devise(cle):
+        return f"<span class='mp-apercu-autre' data-mp-stat-eur='{cle}'>≈ {round(_ca_usd[cle] / _taux_ca):,} €</span>"
+
+    # PPV debloques = nombre de ventes de medias prives, meme regle que la
+    # colonne de la liste (revenus_chatteurs.famille).
+    import revenus_chatteurs as _rc_apercu
+    _familles = [(_rc_apercu.famille(_t.get("type")), _usd_ca(_t)) for _t in transactions]
+    _nb_ppv = sum(1 for _f, _ in _familles if _f == "p")
+    _ca_push = sum(_v for _f, _v in _familles if _f == "u")
+    _ca_demande = sum(_v for _f, _v in _familles if _f == "d")
+
+    def _montant_ou_tiret(cle, valeur):
+        # Un tiret, pas « $0.00 » : MyPuls n'envoie pas ces ventes a son API
+        # (voir revenus_chatteurs.famille). Zero dirait « il n'y en a pas eu ».
+        return f"<span data-mp-stat='{cle}'>" + (f"${valeur:,.2f}" if valeur > 0.005 else "—") + "</span>"
+
+    _base_titre = "MyM : net · OnlyFans : brut"
+    _sans_donnee = ("Ventes de ce type dans le journal MyPuls. A ce jour MyPuls ne les envoie pas "
+                    "a son API : la case reste vide tant qu'il n'en arrive pas.")
+    _c_msg, _c_tip = _icones_accueil["Messages (PPV)"], _icones_accueil["Pourboires"]
     stats_html = (
-        "<div class='mypuls-stats-grid'>"
-        + _stat_usd("ca_total", _ca_usd["ca_total"], "#22c55e", "CA Total", "+")
-        + _stat_usd("ca_ppv", _ca_usd["ca_ppv"], "#3b82f6", "CA PPV")
-        + _stat_usd("ca_tips", _ca_usd["ca_tips"], "#a855f7", "CA Tips")
-        + f"<div class='mypuls-stat'><div class='v' data-mp-stat='nb_tx'>{totals['nb_transactions']}</div><div class='l'>Transactions</div></div>"
-        # Registre verifiable : une vente contestee se retrouve ici, avec
-        # son heure, la creatrice et le fan concernes.
-        + f"<a href='/chatters/ventes.xlsx?start={start_str}&end={end_str}' "
-          f"class='mypuls-export' title='Toutes les ventes de la periode, avec heure, creatrice, fan et montant'>"
-          f"<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' "
-          f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
-          f"<path d='M12 3v12'/><path d='M7.5 10.5L12 15l4.5-4.5'/><path d='M4 20h16'/></svg>"
-          f"Registre des ventes (Excel)</a>"
-        f"<div class='mypuls-stat'><div class='v' data-mp-stat='active_chatters'>{totals['active_chatters']}<span style='font-size:14px;color:#666'>/{totals['nb_chatters']}</span></div><div class='l'>Chatteurs actifs</div></div>"
-        "</div>"
+        "<div class='mp-apercu'><div class='mp-apercu-grille'>"
+        f"<div class='mp-apercu-total mp-apercu-base' title='{_base_titre}'>"
+        "<div class='mp-apercu-icone' aria-hidden='true'>$</div>"
+        "<div><div class='mp-apercu-lib'>Ventes des chatteurs</div>"
+        f"<div class='mp-apercu-gros'>{_montant_case('ca_total')}</div>"
+        f"<div class='mp-apercu-sous'>{_autre_devise('ca_total')}"
+        # Le nombre de ventes et les chatteurs actifs tenaient deux cases de
+        # l'ancienne rangee : ils restent lisibles ici, sous le total.
+        f" · <span data-mp-stat='nb_tx'>{totals['nb_transactions']}</span> ventes"
+        f" · <span data-mp-stat='active_chatters'>{totals['active_chatters']}"
+        f"<span class='mp-apercu-sur'>/{totals['nb_chatters']}</span></span> chatteurs actifs"
+        "</div></div></div>"
+        # LA DISPOSITION DE SA CAPTURE DU DASHBOARD (18/11/2026) : « Media on
+        # demand » et « Médias push » a la place d'Abonnements et de
+        # Parrainage, « Unlock ratio » a la place de Streams, Messages et
+        # Pourboires a leur place. La case « Posts » n'a pas de sens ici (un
+        # chatteur ne vend pas de post) : elle porte les PPV debloques.
+        + _case(_montant_ou_tiret("ca_demande", _ca_demande), "Media on demand",
+                "#18c9a3", "rgba(24,201,163,.12)",
+                _svg_case("<rect x='3' y='5' width='18' height='14' rx='2'/><path d='m10 9 5 3-5 3z'/>"),
+                titre=_sans_donnee)
+        + _case("<span data-mp-stat='nb_ppv'>" + f"{_nb_ppv:,}".replace(",", " ") + "</span>",
+                "PPV débloqués <span class='mp-apercu-autre' data-mp-stat='ppv_envoyes'></span>",
+                "#18c9a3", "rgba(24,201,163,.12)",
+                _svg_case("<rect x='4' y='11' width='16' height='10' rx='2'/><path d='M8 11V7a4 4 0 0 1 7.6-1.8'/>"))
+        + _case(_montant_case("ca_ppv"), "Messages (PPV) " + _autre_devise("ca_ppv"),
+                _c_msg[0], _c_msg[1], _c_msg[2], montant=True, titre=_base_titre)
+        + _case(_montant_case("ca_tips"), "Pourboires " + _autre_devise("ca_tips"),
+                _c_tip[0], _c_tip[1], _c_tip[2], montant=True, titre=_base_titre)
+        + _case(_montant_ou_tiret("ca_push", _ca_push), "Médias push",
+                "#eb5b5b", "rgba(235,91,91,.12)",
+                _svg_case("<path d='M22 2 11 13'/><path d='M22 2 15 22l-4-9-9-4z'/>"),
+                titre=_sans_donnee)
+        # TOUT EN BAS A DROITE, a sa demande. La valeur arrive avec les
+        # messages (complement.json) : PPV debloques ÷ PPV envoyes, le meme
+        # calcul que « Taux de déblocage » sur la ligne Total de la liste.
+        + _case("<span data-mp-stat='unlock_ratio'>…</span>", "Unlock ratio",
+                "#3775ff", "rgba(55,117,255,.12)",
+                _svg_case("<path d='M19 5 5 19'/><circle cx='6.5' cy='6.5' r='2.5'/><circle cx='17.5' cy='17.5' r='2.5'/>"),
+                titre="PPV débloqués ÷ PPV envoyés")
+        + "</div></div>"
     )
 
     # ============ Graphique évolution revenus par créateur ============
@@ -36474,7 +36543,12 @@ body.light .mypuls-bar{background:#e5e7eb}
         legend_items.append(
             f"<button type='button' onclick=\"mpToggleCreator('{ds_label_safe}')\" "
             f"data-mp-legend='{ds_label}' aria-pressed='true' class='mp-revenue-model-filter' "
-            f"style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600;color:inherit;cursor:pointer;font-family:inherit;transition:all .2s'>"
+            # PAS DE COULEUR DE SERIE DANS LE STYLE EN LIGNE. Une regle generale
+            # des themes repeint en couleur d'accent tout bouton dont le style
+            # contient « background:#a855f7 » : la troisieme model de la
+            # legende (violette) s'affichait donc en bleu plein, seule de la
+            # rangee (vu le 18/11/2026). La couleur passe par une variable.
+            f"style='--mp-series-color:{color}'>"
             f"{avatar_legend}"
             f"{ds['label']} <span class='mp-revenue-model-total'>"
             f"${ds['total'] * (1 if _devise_modele.get(ds['label']) == 'USD' else _taux_ca):,.0f}</span>"
@@ -37078,7 +37152,7 @@ function mpRecompute(){
   };
   ['ca_total', 'ca_ppv', 'ca_tips'].forEach(function(k){
     var el = document.querySelector('[data-mp-stat="'+k+'"]');
-    if(el) el.textContent = (k === 'ca_total' ? '+' : '') + fmtUsd(totals[k], 0);
+    if(el) el.textContent = fmtUsd(totals[k], 2);
     var eu = document.querySelector('[data-mp-stat-eur="'+k+'"]');
     if(eu) eu.textContent = '≈ ' + Math.round(totals[k] / rate).toLocaleString('en-US') + ' €';
   });
@@ -37148,7 +37222,7 @@ function mpRecompute(){
   // Update active chatters stat
   var statActive = document.querySelector('[data-mp-stat="active_chatters"]');
   if(statActive){
-    statActive.innerHTML = activeCount + '<span style="font-size:14px;color:#666">/' + (window.__mpChattersBase || []).length + '</span>';
+    statActive.innerHTML = activeCount + '<span class="mp-apercu-sur">/' + (window.__mpChattersBase || []).length + '</span>';
   }
   // Update total à payer — somme sur TOUS les chatteurs de byChat, pas
   // seulement les 30 lignes rendues (avant, filtrer sur 'Tous' faisait

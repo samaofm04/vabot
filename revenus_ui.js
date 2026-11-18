@@ -128,7 +128,7 @@
     var explication = enBrut()
       ? 'Brut : ce que le fan a payé. OnlyFans : lu chez MyPuls. MYM : calculé (MyPuls ne donne que le net).'
       : 'Net : ce que la créatrice reçoit, frais de la plateforme retirés.';
-    (section || host).querySelectorAll('.mypuls-stat[title]').forEach(function (s) { s.title = explication; });
+    (section || host).querySelectorAll('.mypuls-stat[title], .mp-apercu-base').forEach(function (s) { s.title = explication; });
   }
   window.mpFxToggle = function (quoi) {
     try {
@@ -191,10 +191,12 @@
   /* ---------- Les chiffres d'une ligne ---------- */
   // v ventes, p ventes PPV, t tips (dollars, base choisie) ; np PPV debloques.
   function sommer(txs) {
-    var s = {v:0, p:0, t:0, np:0, n:txs.length};
+    // pu / od : media push et media a la demande (cases du bloc du haut).
+    var s = {v:0, p:0, t:0, np:0, pu:0, od:0, n:txs.length};
     txs.forEach(function (x) {
       var b = base(x.a, !!x.u); s.v += b;
       if (x.k === 'p') { s.p += b; s.np++; } else if (x.k === 't') { s.t += b; }
+      else if (x.k === 'u') { s.pu += b; } else if (x.k === 'd') { s.od += b; }
     });
     return s;
   }
@@ -713,13 +715,28 @@
       total.paye.textContent = payes + ' / ' + visibles;
       total.adresse.replaceChildren(sansAdresse ? el('span', 'mp-t-manque', sansAdresse + ' à renseigner') : document.createTextNode(''));
     }
-    // Le bandeau du haut suit la meme base et la meme devise que la liste.
-    [['ca_total', tous.v, '+'], ['ca_ppv', tous.p, ''], ['ca_tips', tous.t, '']].forEach(function (b) {
-      var gros = (section || host).querySelector('[data-mp-stat="' + b[0] + '"]');
-      if (gros) gros.textContent = b[2] + argent(b[1], 0);
+    // Le bloc du haut (facon Dashboard) suit la meme base et la meme devise
+    // que la liste : memes sommes, au centime, que la ligne Total.
+    var haut = function (cle) { return (section || host).querySelector('[data-mp-stat="' + cle + '"]'); };
+    [['ca_total', tous.v], ['ca_ppv', tous.p], ['ca_tips', tous.t]].forEach(function (b) {
+      var gros = haut(b[0]);
+      if (gros) gros.textContent = argent(b[1]);
       var petit = (section || host).querySelector('[data-mp-stat-eur="' + b[0] + '"]');
       if (petit) petit.textContent = '≈ ' + (enEuros() ? '$' + Math.round(b[1]).toLocaleString('en-US') : Math.round(b[1] / taux()).toLocaleString('fr-FR') + ' €');
     });
+    // PPV debloques, et « Unlock ratio » en bas a droite : le MEME calcul que
+    // « Taux de déblocage » sur la ligne Total. Deux calculs auraient fini
+    // par afficher deux taux differents sur le meme ecran.
+    // Media push et media a la demande : un tiret tant que MyPuls n'en
+    // envoie pas (zero dirait « il n'y en a pas eu »).
+    [['ca_push', tous.pu], ['ca_demande', tous.od]].forEach(function (b) {
+      var c = haut(b[0]); if (c) c.textContent = b[1] > 0.005 ? argent(b[1]) : '—';
+    });
+    var enAttente = !complement && !complementErreur ? '…' : '—';
+    var hDeb = haut('nb_ppv'), hEnv = haut('ppv_envoyes'), hTaux = haut('unlock_ratio');
+    if (hDeb) hDeb.textContent = nombre(tous.np);
+    if (hEnv) hEnv.textContent = aDesMessages && totMsg.e ? '· sur ' + nombre(totMsg.e) + ' envoyés' : '';
+    if (hTaux) hTaux.textContent = aDesMessages ? pourcent(tous.np, totMsg.e, 1) : enAttente;
     // Ce qui manque est DIT, jamais tu.
     var notes = [];
     if (complementErreur) notes.push('Comparaison et messages indisponibles : ' + complementErreur);

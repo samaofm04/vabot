@@ -72,6 +72,34 @@
       tooltip.style.top = Math.max(4, tip.caretY - tooltip.offsetHeight - 12) + 'px';
     }
 
+    /* LE THEME DE LA COURBE DE L'ACCUEIL (« Revenus par jour »), demande du
+       18/11/2026 : trait epais et arrondi, points blancs cercles de la couleur
+       de la courbe, grille en pointilles, leger fondu dessous. Seule la
+       couleur change d'une model a l'autre.
+       L'ancienne courbe etait « monotone » : entre deux jours a zero elle
+       filait a plat puis montait a pic -- « des trucs tres horizontaux,
+       verticaux », ses mots. La tension simple arrondit comme a l'accueil ;
+       Chart.js garde les points de controle dans la zone du graphique, la
+       courbe ne passe donc pas sous zero. */
+    var nbPoints = singleDay ? 24 : source.days.length;
+    // Sur une longue periode, des centaines de points blancs feraient une
+    // bouillie : le trait s'affine et les points s'effacent.
+    var trait = nbPoints <= 16 ? {w:3.6, r:4.6} : nbPoints <= 35 ? {w:3.2, r:3.8}
+      : nbPoints <= 70 ? {w:2.6, r:2.6} : nbPoints <= 140 ? {w:2.2, r:0} : {w:1.7, r:0};
+    function voile(hex, a) {
+      var n = parseInt(String(hex || '').replace('#', ''), 16);
+      if (isNaN(n)) return 'transparent';
+      return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+    function fondu(couleur) {
+      return function (ctx) {
+        var zone = ctx.chart.chartArea;
+        if (!zone) return 'transparent';
+        var g = ctx.chart.ctx.createLinearGradient(0, zone.top, 0, zone.bottom);
+        g.addColorStop(0, voile(couleur, .16)); g.addColorStop(1, voile(couleur, .02));
+        return g;
+      };
+    }
     function theme() {
       var css = getComputedStyle(card);
       return {text:css.getPropertyValue('--mpr-text').trim(), muted:css.getPropertyValue('--mpr-muted').trim(),
@@ -123,6 +151,10 @@
           button.querySelector('.mp-revenue-model-total').textContent = ecrire(amount);
         }
       });
+      // Beaucoup de courbes a la fois : le trait s'affine un peu, sinon dix
+      // traits epais se recouvrent. Une ou deux models : le trait de l'accueil.
+      var epaisseur = trait.w * (active > 6 ? .78 : 1);
+      chart.data.datasets.forEach(function (ds) { ds.borderWidth = epaisseur; });
       status.textContent = active + ' modèle' + (active > 1 ? 's' : '') + ' affiché' + (active > 1 ? 's' : '');
       note.textContent = !active ? 'Aucun modèle sélectionné. Clique sur un modèle pour afficher ses revenus.'
         : total === 0 ? 'Aucune vente sur ce créneau pour les modèles sélectionnés.'
@@ -132,7 +164,6 @@
       card.dataset.chartGranularity = singleDay ? 'hour' : 'day';
       canvas.setAttribute('aria-label', note.textContent + '. Total affiché : ' + ecrire(total) + '.');
       var colors = theme(), opt = chart.options;
-      opt.scales.y.grid.color = colors.border;
       opt.scales.y.ticks.color = opt.scales.x.ticks.color = colors.muted;
       opt.plugins.tooltip.backgroundColor = colors.surface;
       opt.plugins.tooltip.titleColor = colors.text;
@@ -153,16 +184,24 @@
         type:'line',
         data:{labels:source.labels.slice(), datasets:source.datasets.map(function (ds) {
           return {label:ds.label, devise:ds.devise, data:ds.data.map(function (v) { return enUsd(ds, v); }), borderColor:ds.borderColor,
-            backgroundColor:ds.backgroundColor,
-            borderWidth:2, borderCapStyle:'round', borderJoinStyle:'round', fill:false,
-            tension:.4, cubicInterpolationMode:'monotone', pointRadius:2.5, pointHoverRadius:5};
+            backgroundColor:fondu(ds.borderColor),
+            borderWidth:trait.w, borderCapStyle:'round', borderJoinStyle:'round', fill:'origin',
+            tension:.35, clip:8,
+            // Pas de point sur un jour a zero : avec dix models, la ligne du
+            // bas devenait un chapelet de points blancs qui ne disaient rien.
+            pointRadius:function (ctx) { return ctx.parsed && ctx.parsed.y ? trait.r : 0; },
+            pointHoverRadius:trait.r ? trait.r + 1.6 : 5,
+            pointBackgroundColor:'#fff', pointHoverBackgroundColor:'#fff',
+            pointBorderColor:ds.borderColor, pointBorderWidth:1.8, pointHoverBorderWidth:2.5};
         })},
         options:{responsive:true, maintainAspectRatio:false, animation:false,
+          layout:{padding:{top:6,right:8}},
           interaction:{mode:'index',intersect:false},
           plugins:{legend:{display:false}, tooltip:{enabled:false,external:externalTooltip,borderWidth:1,padding:12,
             callbacks:{label:function (ctx) { return ctx.dataset.label + ' : ' + ecrire(ctx.parsed.y); }}}},
-          scales:{y:{beginAtZero:true,border:{display:false},ticks:{maxTicksLimit:5,callback:function (v) { return ecrire(v); }}},
-            x:{grid:{display:false},border:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:8}}}
+          scales:{y:{beginAtZero:true,border:{display:false,dash:[4,3]},grid:{color:'rgba(136,136,136,.32)',lineWidth:.9},
+              ticks:{maxTicksLimit:5,padding:10,font:{size:12.5},callback:function (v) { return ecrire(v); }}},
+            x:{grid:{display:false},border:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:10,padding:8,font:{size:12.5}}}}
         }
       });
       refresh();

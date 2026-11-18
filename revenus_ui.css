@@ -8,13 +8,49 @@ body.light .mp-revenue-section,body.light #mp-tab-chatters {
   --mpr-border:#e3e6ec;--mpr-text:#20252e;--mpr-muted:#687280;--mpr-accent:#2864de;
 }
 .mp-revenue-section.mypuls-section{border-color:var(--mpr-border);background:var(--mpr-surface);color:var(--mpr-text)}
-.mp-revenue-section .mypuls-stats-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:0;border:1px solid var(--mpr-border);border-radius:9px;background:var(--mpr-surface);overflow:hidden;margin:16px 0}
-.mp-revenue-section .mypuls-stats-grid>.mypuls-export{display:none}
-.mp-revenue-section .mypuls-stat{border:0;border-right:1px solid var(--mpr-border);border-radius:0;background:transparent!important;padding:15px 12px;display:flex;flex-direction:column-reverse;gap:7px}
-.mp-revenue-section .mypuls-stat:last-child{border-right:0}
-.mp-revenue-section .mypuls-stat .v{font-size:19px;font-weight:600;letter-spacing:-.4px;color:var(--mpr-text)!important}
-.mp-revenue-section .mypuls-stat:first-child .v{color:#23ac82!important}
-.mp-revenue-section .mypuls-stat .l{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;margin:0;color:var(--mpr-muted)}
+/* LE BLOC DES CHIFFRES, FACON DASHBOARD (demande du 18/11/2026) : le total a
+   gauche, six cases separees par des traits, une pastille ronde a droite de
+   chaque chiffre. Memes proportions que .home-overview de l'accueil, mais des
+   classes a part : l'accueil ne doit pas bouger quand on retouche ici. */
+/* .mp-apercu est le CONTENEUR, .mp-apercu-grille la grille : une requete de
+   conteneur ne restyle jamais son propre conteneur (essai du 18/11 : sur
+   ecran etroit, la grille gardait ses quatre colonnes et tout se tassait). */
+.mp-apercu{container:mp-apercu / inline-size;background:var(--mpr-detail);border:1px solid var(--mpr-border);border-radius:16px;padding:12px 18px;margin:16px 0;color:var(--mpr-text)}
+.mp-apercu-grille{display:grid;grid-template-columns:minmax(220px,1fr) repeat(3,minmax(0,1fr))}
+.mp-apercu-total{grid-row:span 2;display:flex;flex-direction:column;justify-content:space-between;min-height:226px;min-width:0;box-sizing:border-box;padding:14px 26px 12px 8px}
+.mp-apercu-icone{width:58px;height:58px;border-radius:50%;background:#3075ff;color:#fff;font-size:33px;font-weight:600;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mp-apercu-lib{font-size:13px;font-weight:600;color:#5294ff}
+.mp-apercu-gros{font-size:36px;font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-top:6px;color:#3275ff;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.mp-apercu-sous{margin-top:6px;min-height:16px;font-size:12px;line-height:1.5;color:var(--mpr-muted)}
+.mp-apercu-sous .mp-apercu-sur{font-size:inherit}
+.mp-apercu-autre{font-size:12px;font-weight:400;color:var(--mpr-muted);white-space:nowrap}
+.mp-apercu-case{position:relative;min-width:0;min-height:113px;box-sizing:border-box;border-left:1px solid var(--mpr-border);padding:22px 78px 22px 28px;display:flex;flex-direction:column;justify-content:center}
+.mp-apercu-valeur{font-size:25px;font-weight:650;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:var(--mpr-text)}
+.mp-apercu-nom{font-size:13px;margin-top:7px;color:var(--mpr-muted);line-height:1.35}
+.mp-apercu-sur{font-size:15px;font-weight:500;color:var(--mpr-muted)}
+.mp-apercu-rond{position:absolute;top:50%;right:22px;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--mpa-c);background:var(--mpa-f)}
+.mp-apercu-rond svg{width:25px;height:25px}
+body.light .mp-apercu-lib{color:#2864de}
+body.light .mp-apercu-gros{color:#2563eb}
+@container mp-apercu (max-width:1100px){
+ .mp-apercu-case{padding-left:20px;padding-right:58px}
+ .mp-apercu-rond{right:12px;width:36px;height:36px}.mp-apercu-rond svg{width:21px;height:21px}
+ .mp-apercu-valeur{font-size:22px}
+}
+@container mp-apercu (max-width:860px){
+ .mp-apercu-grille{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .mp-apercu-total{grid-column:1/-1;grid-row:auto;min-height:0;flex-direction:row;justify-content:flex-start;align-items:center;gap:18px;padding:10px 6px 20px;border-bottom:1px solid var(--mpr-border)}
+ .mp-apercu-case:nth-child(3n+2){border-left:0}
+}
+@container mp-apercu (max-width:520px){
+ .mp-apercu-grille{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .mp-apercu-case{padding:18px 44px 18px 12px;min-height:100px}
+ .mp-apercu-case:nth-child(n){border-left:1px solid var(--mpr-border)}
+ .mp-apercu-case:nth-child(2n){border-left:0}
+ .mp-apercu-valeur{font-size:19px}.mp-apercu-gros{font-size:28px}
+ .mp-apercu-rond{right:6px;width:30px;height:30px}.mp-apercu-rond svg{width:18px;height:18px}
+ .mp-apercu-icone{width:48px;height:48px;font-size:27px}
+}
 .mp-revenue-section .mypuls-period{gap:8px;margin-top:15px}
 .mp-revenue-section .mp-revenue-period-presets{display:flex;align-items:center;justify-content:space-between;gap:5px;width:max-content;max-width:100%;box-sizing:border-box;overflow-x:auto;padding:6px;border:1px solid var(--mpr-border);border-radius:999px;background:var(--mpr-detail);margin:0 0 6px;flex:0 0 auto;scrollbar-width:thin}
 .mp-revenue-section .mypuls-period:has(.mp-revenue-period-presets){display:flex;flex-wrap:wrap}
@@ -37,13 +73,13 @@ body .mp-revenue-section button.mp-revenue-segment:focus-visible{outline:2px sol
 .mp-revenue-section .mypuls-period-btn{border-color:var(--mpr-border);color:var(--mpr-muted);background:var(--mpr-surface);font-weight:500;font-size:12px;padding:7px 10px}
 .mp-revenue-section .mypuls-period-btn-active{background:var(--mpr-detail);color:var(--mpr-accent);border-color:var(--mpr-accent)}
 .mp-revenue-section .mypuls-period input,.mp-revenue-section .mypuls-period select{color:var(--mpr-text)!important;background:var(--mpr-surface)!important;border-color:var(--mpr-border)!important}
-body .mp-revenue-section .mp-revenue-chart{background:var(--mpr-surface)!important;border:1px solid var(--mpr-border)!important;border-radius:9px!important;padding:18px;margin:0 0 18px;color:var(--mpr-text)}
+body .mp-revenue-section .mp-revenue-chart{background:var(--mpr-detail)!important;border:1px solid var(--mpr-border)!important;border-radius:16px!important;padding:22px 24px;margin:0 0 18px;color:var(--mpr-text)}
 .mp-revenue-chart-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-body .mp-revenue-section .mp-revenue-chart h3{font-size:14px;font-weight:600;letter-spacing:0;line-height:1.4;margin:0;color:var(--mpr-text)!important}
+body .mp-revenue-section .mp-revenue-chart h3{font-size:16px;font-weight:600;letter-spacing:0;line-height:1.4;margin:0;color:var(--mpr-text)!important}
 body .mp-revenue-section .mp-revenue-chart h3{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .mp-revenue-chart h3>svg{color:var(--mpr-accent);flex-shrink:0}
 .mp-revenue-chart-avatars{display:inline-flex;align-items:center;padding-left:5px;margin-left:8px}
-body .mp-revenue-section .mp-revenue-chart-avatars button{display:block;border:0!important;background:transparent!important;border-radius:50%!important;padding:0!important;margin-left:-6px;width:29px;height:29px;box-shadow:0 0 0 2px var(--mpr-surface)!important;cursor:pointer}
+body .mp-revenue-section .mp-revenue-chart-avatars button{display:block;border:0!important;background:transparent!important;border-radius:50%!important;padding:0!important;margin-left:-6px;width:29px;height:29px;box-shadow:0 0 0 2px var(--mpr-detail)!important;cursor:pointer}
 .mp-revenue-chart-avatars img{width:100%;height:100%;border-radius:50%;object-fit:cover;border:2px solid var(--mp-series-color,transparent);box-sizing:border-box}
 .mp-revenue-chart-avatars button[aria-pressed=false]{filter:grayscale(1);opacity:.42}
 .mp-revenue-chart-avatars button:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:3px}
@@ -56,14 +92,15 @@ body .mp-revenue-section .mp-revenue-chart-avatars button{display:block;border:0
 .mp-revenue-chart-status,.mp-revenue-chart-note{font-size:11px;color:var(--mpr-muted);line-height:1.5}
 .mp-revenue-chart-note{margin:12px 0 14px;min-height:17px}
 .mp-revenue-chart-filters{display:flex;flex-wrap:wrap;gap:7px}
-body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter{display:inline-flex;align-items:center;gap:7px;background:var(--mpr-detail)!important;color:var(--mpr-text)!important;border:1px solid var(--mpr-border)!important;border-radius:6px!important;padding:6px 9px!important;box-shadow:none!important;font-family:inherit;font-weight:500;font-size:11px;line-height:1.4;min-height:32px;cursor:pointer;transition:opacity .15s}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter{display:inline-flex;align-items:center;gap:7px;background:var(--mpr-head)!important;color:var(--mpr-text)!important;border:1px solid var(--mpr-border)!important;border-radius:8px!important;padding:6px 10px!important;box-shadow:none!important;font-family:inherit;font-weight:500;font-size:11px;line-height:1.4;min-height:32px;cursor:pointer;transition:opacity .15s}
 body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter:hover{border-color:var(--mpr-accent)!important}
 body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:2px}
 body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter[aria-pressed=false]{opacity:.45;background:transparent!important}
 body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter[hidden]{display:none!important}
 body .mp-revenue-section .mp-revenue-chart .mp-revenue-model-filter img{width:22px!important;height:22px!important;border-radius:50%;object-fit:cover}
 .mp-revenue-model-total{font-size:11px;font-weight:400;color:var(--mpr-muted);font-variant-numeric:tabular-nums}
-.mp-revenue-chart-canvas{position:relative;height:240px;min-width:0}
+.mp-revenue-chart-canvas{position:relative;height:340px;min-width:0}
+@media(max-width:700px){.mp-revenue-chart-canvas{height:240px}body .mp-revenue-section .mp-revenue-chart{padding:16px 12px}}
 #mp-tab-chatters .mp-revenue-payout{padding:15px 17px!important;background:var(--mpr-surface)!important;border-color:var(--mpr-border)!important;border-radius:9px!important;margin-bottom:16px!important}
 #mp-tab-chatters .mp-revenue-payout [data-mp-stat=total_pay_usd]{color:var(--mpr-text)!important;font-size:23px!important;font-weight:600!important}
 #mp-tab-chatters .mp-revenue-table {display:block;width:100%;border:1px solid var(--mpr-border);border-radius:10px;background:var(--mpr-surface);overflow:hidden;color:var(--mpr-text)}
@@ -125,8 +162,6 @@ body .mp-revenue-section .mp-revenue-chart .mp-revenue-model-filter img{width:22
 #mp-tab-chatters .mp-revenue-table .mp-edit-row input,#mp-tab-chatters .mp-revenue-table .mp-edit-row select{background:var(--mpr-surface);color:var(--mpr-text);border-color:var(--mpr-border)}
 #mp-tab-chatters .mp-revenue-table [hidden]{display:none!important}
 @media(max-width:700px){
- .mp-revenue-section .mypuls-stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
- .mp-revenue-section .mypuls-stat{border:0}
  #mp-tab-chatters .mp-revenue-table>thead>tr,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row{grid-template-columns:minmax(110px,1.3fr) minmax(66px,1fr) repeat(3,minmax(64px,1fr)) 44px}
  #mp-tab-chatters .mp-revenue-table>thead th,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td{padding:12px 7px;font-size:11px}
  #mp-tab-chatters .mp-revenue-name{font-size:12px}
@@ -261,6 +296,6 @@ body .mp-revenue-section .mp-revenue-chart-avatars button:first-child{margin-lef
 body .mp-revenue-section .mp-revenue-chart-avatars button:hover{transform:translateY(-2px);z-index:2}
 body .mp-revenue-section .mp-revenue-chart-avatars button[hidden]{display:none!important}
 .mp-revenue-chart-avatars img{border-width:2.5px}
-.mp-revenue-plat{position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);font-style:normal;font-size:7px;font-weight:800;line-height:1;letter-spacing:.02em;padding:2px 4px;border-radius:6px;color:#fff;box-shadow:0 0 0 1.5px var(--mpr-surface);white-space:nowrap}
+.mp-revenue-plat{position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);font-style:normal;font-size:7px;font-weight:800;line-height:1;letter-spacing:.02em;padding:2px 4px;border-radius:6px;color:#fff;box-shadow:0 0 0 1.5px var(--mpr-detail);white-space:nowrap}
 .mp-revenue-plat-mym{background:#347dff}
 .mp-revenue-plat-of{background:#00afe8}

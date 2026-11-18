@@ -864,6 +864,41 @@ def test_site(tmp):
             check("les photos de la legende portent leur couleur de repli et l'adresse du jour",
                   "data-couleur='#" in page and re.search(r"/mypuls/avatar/\d+\?j=\d{4}-\d\d-\d\d' data-couleur", page) is not None)
 
+            # ---- le bloc des chiffres facon Dashboard, la legende, les courbes
+            cases = re.findall(r"<div class='mp-apercu-case[^>]*>.*?<div class='mp-apercu-nom'>(.*?)</div></div>", page, re.S)
+            # l'interface se traduit : « Pourboires » sort « Tips » en anglais
+            noms = ["Pourboires" if n == "Tips" else n
+                    for n in (re.sub(r"<[^>]+>", "", c).split("≈")[0].strip() for c in cases)]
+            check("le bloc des chiffres est celui du Dashboard : le total a gauche, six cases",
+                  "class='mp-apercu-total" in page and len(cases) == 6 and "mypuls-stats-grid'" not in page, noms)
+            check("... dans l'ordre de sa capture : Media on demand et Médias push a la place d'Abonnements et de "
+                  "Parrainage, « Unlock ratio » en bas a droite a la place de Streams",
+                  noms == ["Media on demand", "PPV débloqués", "Messages (PPV)", "Pourboires", "Médias push",
+                           "Unlock ratio"], noms)
+            check("... sans abonnements, parrainage ni streams",
+                  not any(m in " ".join(noms) for m in ("Abonnement", "Parrainage", "Streams", "Posts")), noms)
+            check("... media push et media a la demande : un tiret tant que MyPuls n'en envoie pas, jamais « $0.00 »",
+                  "<span data-mp-stat='ca_push'>—</span>" in page and "<span data-mp-stat='ca_demande'>—</span>" in page)
+            check("... et il garde les reperes que les scripts remplissent (total, PPV, pourboires, ventes, chatteurs)",
+                  all(("data-mp-stat='%s'" % k) in page for k in
+                      ("ca_total", "ca_ppv", "ca_tips", "nb_tx", "active_chatters", "nb_ppv", "unlock_ratio")))
+            m = re.search(r"class='mp-apercu-gros'><span data-mp-stat='ca_total'>\$([\d,]+\.\d\d)</span>", page)
+            check("... le total s'ecrit au centime, comme au Dashboard", m is not None, m and m.group(1))
+            # Le 18/11, la troisieme model de la legende s'affichait en bleu
+            # plein : son style en ligne contenait « background:#a855f7 », que
+            # les themes repeignent en couleur d'accent sur tout bouton.
+            boutons = re.findall(r"<button type='button' onclick=\"mpToggleCreator[^>]*>", page)
+            check("aucune case de la legende ne porte de couleur de fond en ligne (plus de case bleue)",
+                  bool(boutons) and not any("background:" in b for b in boutons)
+                  and all("--mp-series-color:#" in b for b in boutons), boutons[:1])
+            F = rc.famille
+            check("une vente « Média push » ou « Média à la demande » irait dans sa case, pas dans les PPV",
+                  [F("Média push"), F("Médias push"), F("Média à la demande"), F("Media on demand"),
+                   F("Média privé"), F("Pourboires"), F("")] == ["u", "u", "d", "d", "p", "t", ""],
+                  [F("Média push"), F("Média à la demande"), F("Media on demand"), F("Média privé")])
+            check("les courbes ne sont plus « monotones » (paliers a plat puis montees a pic)",
+                  "cubicInterpolationMode" not in page and "tension:.35" in page)
+
             # ---- le JavaScript rendu
             node = shutil.which("node")
             if node:

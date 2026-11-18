@@ -84,7 +84,8 @@ def est_usd(devise) -> bool:
 
 
 def famille(libelle) -> str:
-    """'p' (PPV vendu en message), 't' (pourboire), '' (autre).
+    """'p' (PPV vendu en message), 't' (pourboire), 'u' (media push),
+    'd' (media a la demande), '' (autre).
 
     UNE SEULE regle pour les deux periodes et pour le navigateur : la page
     recoit cette lettre avec chaque vente (cle « k ») au lieu de reclasser le
@@ -92,6 +93,19 @@ def famille(libelle) -> str:
     diverger, et le % comparerait alors deux choses differentes.
     """
     import mypuls
+    # « u » (media push) et « d » (media a la demande) : les deux cases que
+    # le proprietaire a demandees le 18/11/2026 dans le bloc du haut. A cette
+    # date l'API MyPuls ne les envoie PAS (21 558 ventes depuis 2024 : rien
+    # que « Média privé » et « Pourboires »), alors que le site MyPuls les
+    # montre a part. La regle est prete pour le jour ou elles arriveront :
+    # elles iront dans leur case au lieu de grossir le total sans etre
+    # rangees nulle part. Testees AVANT les familles classiques, pour qu'un
+    # « Média push » ne soit jamais compte comme un PPV de conversation.
+    nu = mypuls._sans_accent(str(libelle or ""))
+    if "push" in nu:
+        return "u"
+    if "demande" in nu or "on demand" in nu or "on-demand" in nu:
+        return "d"
     f = mypuls.categorie_transaction(libelle)
     return "p" if f == "Messages" else "t" if f == "Tips" else ""
 
