@@ -58323,6 +58323,130 @@ def _numgen_trust_html(soldes=None) -> str:
             "</form>" + retirer + "</div>")
 
 
+def _cookies_etat_services() -> list:
+    """L'etat des deux cookies de session que le site emprunte au navigateur
+    du proprietaire (GetMySocial, MyPuls), en phrases, SANS aucune valeur.
+
+    Une seule fabrique pour Reglages et pour l'extension Chrome
+    (extension_cookies/) : son popup affiche ces phrases telles quelles, il
+    n'en ecrit aucune. Deux redactions auraient fini par se contredire."""
+    import time as _t
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    maintenant = _t.time()
+
+    def _jour(ts):
+        # heure de Paris : le VPS est en UTC, un cookie echu a 00:30 y
+        # porterait la date de la veille
+        return _dt.datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y")
+
+    def _depuis(ts):
+        ecart = max(0, maintenant - float(ts))
+        if ecart < 3600:
+            return "il y a %d min" % (ecart // 60)
+        if ecart < 48 * 3600:
+            return "il y a %d h" % (ecart // 3600)
+        return "il y a %d j" % (ecart // 86400)
+
+    def _service(cle, nom, aide, lire, dire):
+        srv = {"cle": cle, "nom": nom, "aide": aide, "jours": None}
+        try:
+            srv.update(dire(lire()))
+        except Exception as e:
+            # dit, pas tu : un etat illisible n'est pas un cookie valide
+            srv.update(niveau="ko", texte="État illisible (%s)." % type(e).__name__)
+        return srv
+
+    def _lire_gms():
+        import gms
+        return gms.cookie_etat()
+
+    def _dire_gms(e):
+        exp = e.get("expire")
+        if not e.get("present"):
+            return {"niveau": "ko", "texte": "Aucun cookie sur le site."}
+        if not exp:
+            return {"niveau": "alerte", "texte": "Cookie enregistré, échéance illisible."}
+        if exp < maintenant:
+            return {"niveau": "ko", "texte": "Échu depuis le %s." % _jour(exp)}
+        j = int((exp - maintenant) // 86400)
+        return {"niveau": "alerte" if j <= 3 else "ok", "jours": j,
+                "texte": "Valide jusqu’au %s (%d j).%s"
+                         % (_jour(exp), j, (" Connexion du %s." % _jour(e["emis"])) if e.get("emis") else "")}
+
+    def _lire_mypuls():
+        import mypuls
+        return mypuls.cookies_etat()
+
+    def _dire_mypuls(e):
+        exp = e.get("expire")
+        if not e.get("present"):
+            return {"niveau": "ko", "texte": "Aucun cookie sur le site."}
+        if e.get("refuse_depuis"):
+            return {"niveau": "ko",
+                    "texte": "MyPuls refuse le cookie du site depuis le %s." % _jour(e["refuse_depuis"])}
+        if not e.get("rememberme"):
+            return {"niveau": "alerte",
+                    "texte": "Session sans « Se souvenir de moi » : elle ne se renouvelle pas toute seule."}
+        if not exp:
+            return {"niveau": "alerte", "texte": "Cookie enregistré, échéance illisible."}
+        if exp < maintenant:
+            return {"niveau": "ko", "texte": "Échu depuis le %s." % _jour(exp)}
+        j = int((exp - maintenant) // 86400)
+        if j <= 2:
+            # chaque renouvellement redonne 7 jours : 2 jours restants, c'est
+            # plus de 4 jours sans un seul renouvellement reussi
+            return {"niveau": "alerte", "jours": j,
+                    "texte": "Valide jusqu’au %s (%d j) : le renouvellement automatique ne passe plus."
+                             % (_jour(exp), j)}
+        return {"niveau": "ok", "jours": j,
+                "texte": "Valide jusqu’au %s%s. Le site le renouvelle tout seul."
+                         % (_jour(exp), (", renouvelé " + _depuis(e["renouvele"])) if e.get("renouvele") else "")}
+
+    return [
+        _service("gms", "GetMySocial",
+                 "Ouvre getmysocial.com, connecte-toi, puis clique « Envoyer les deux cookies » "
+                 "dans l’extension.", _lire_gms, _dire_gms),
+        _service("mypuls", "MyPuls",
+                 "Ouvre mypuls.app, connecte-toi en cochant « Se souvenir de moi », puis clique "
+                 "« Envoyer les deux cookies » dans l’extension.", _lire_mypuls, _dire_mypuls),
+    ]
+
+
+def _render_cookies_etat() -> str:
+    """Reglages : l'etat des deux cookies au meme endroit (18/11/2026). Le
+    meme bloc ouvre « Cookies GetMySocial » et « Cookies MyPuls » : qui vient
+    pour l'un voit l'autre."""
+    styles = {"ok": ("rgba(16,185,129,.08)", "#34d399", "✓"),
+              "alerte": ("rgba(245,158,11,.08)", "#fbbf24", "⚠"),
+              "ko": ("rgba(239,68,68,.08)", "#f87171", "✕")}
+    lignes = []
+    for srv in _cookies_etat_services():
+        fond, couleur, signe = styles.get(srv.get("niveau"), styles["ko"])
+        # #888 et pas #94a3b8 : le theme clair fonce le premier, pas le second,
+        # qui restait gris pale sur fond rose pale (rendu du 18/11/2026)
+        aide = ("<div style='color:#888;font-size:12px;margin-top:3px'>%s</div>"
+                % html_escape(srv["aide"])) if srv.get("niveau") != "ok" else ""
+        lignes.append(
+            "<div style='display:flex;gap:12px;padding:10px 14px;background:%s;font-size:13px;"
+            "border-top:1px solid rgba(148,163,184,.18)'>"
+            "<div style='min-width:118px;font-weight:700;color:%s'>%s %s</div>"
+            "<div style='flex:1;min-width:0;color:%s'>%s%s</div>"
+            "</div>" % (fond, couleur, signe, html_escape(srv["nom"]),
+                        couleur, html_escape(srv.get("texte") or ""), aide))
+    return (
+        "<div class='cookies-etat' style='border:1px solid rgba(148,163,184,.25);border-radius:8px;"
+        "margin-bottom:14px;overflow:hidden'>"
+        "<div style='padding:8px 14px;font-size:11px;color:#888;font-weight:600;"
+        "text-transform:uppercase;letter-spacing:.05em'>État des cookies</div>"
+        + "".join(lignes)
+        + "<div style='padding:9px 14px;font-size:12px;color:#888;"
+        "border-top:1px solid rgba(148,163,184,.18)'>Un cookie mort ? Dans Chrome, clique "
+        "l’extension <b>Cookies → youl4b</b>, puis « Envoyer les deux cookies ». "
+        "Aucune valeur de cookie n’est affichée ici.</div>"
+        "</div>")
+
+
 def _render_gms_cookie_settings() -> str:
     """Section Settings : le cookie de session GetMySocial (statut + formulaire).
 
@@ -58330,47 +58454,28 @@ def _render_gms_cookie_settings() -> str:
     proprietaire le cherchait dans Integrations, a cote de MyPuls (14/10/2026 :
     « tu peux mettre un truc gms comme pour les autres dans integration »).
     L'echeance seule ressort, jamais la valeur."""
-    import time as _t_c
-    try:
-        import gms
-        ck = gms.get_session_cookie()
-        exp = gms.cookie_expiration(ck) if ck else None
-    except Exception:
-        ck, exp = "", None
     try:
         import liens_va
         attente = sum(len(liens_va.en_attente(g)) for g in (liens_va.TWITTER_ID, liens_va.THREADS_ID)
                       if liens_va.espace(g).get("variante"))
     except Exception:
         attente = 0
-    jours = int((exp - _t_c.time()) // 86400) if exp else None
-    quand = _t_c.strftime("%d/%m/%Y", _t_c.localtime(exp)) if exp else ""
 
     def _boite(fond, bord, couleur, texte):
         return ("<div style='padding:12px 16px;background:%s;border:1px solid %s;"
                 "border-radius:8px;margin-bottom:14px;font-size:13px;color:%s'>%s</div>"
                 % (fond, bord, couleur, texte))
-    if not ck:
-        etat = _boite("rgba(148,163,184,.08)", "rgba(148,163,184,.25)", "#94a3b8",
-                      "Aucun cookie : la part Seren des liens VA ne se pose pas. "
-                      "Les liens sont quand même créés, tout part sur la model principale.")
-    elif jours is not None and jours < 0:
-        etat = _boite("rgba(239,68,68,.08)", "rgba(239,68,68,.35)", "#f87171",
-                      f"✕ Cookie échu depuis le {quand} : recolle-le ci-dessous.")
-    elif jours is not None and jours <= 3:
-        etat = _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
-                      f"⚠ Cookie valide jusqu’au {quand} ({jours} j) : pense à le recoller.")
-    else:
-        etat = _boite("rgba(16,185,129,.08)", "rgba(16,185,129,.3)", "#34d399",
-                      "✓ Cookie enregistré" + (f", valide jusqu’au {quand} ({jours} j)" if quand else "")
-                      + ". Colle un nouveau cookie ci-dessous pour le remplacer.")
+    # l'etat du cookie : le bloc commun aux deux sections (GetMySocial + MyPuls)
+    etat = _render_cookies_etat()
     if attente:
         etat += _boite("rgba(245,158,11,.08)", "rgba(245,158,11,.35)", "#fbbf24",
                        f"{attente} lien(s) VA en attente de leur part Seren : ils se posent dès "
                        "qu’un cookie valide est enregistré.")
     return (
         etat
-        + "<form method='POST' action='/gms/set_session_cookie' style='display:flex;flex-direction:column;gap:8px'>"
+        + "<div style='font-size:12px;color:#888;margin-bottom:10px'>Sans l’extension : colle la valeur "
+        "ci-dessous, elle remplace le cookie du site.</div>"
+        "<form method='POST' action='/gms/set_session_cookie' style='display:flex;flex-direction:column;gap:8px'>"
         "<input type='hidden' name='retour' value='settings'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Valeur d’authToken (commence par eyJ)</label>"
         "<input type='password' name='cookie' placeholder='eyJhbGciOi…' autocomplete='off' "
@@ -58621,23 +58726,14 @@ def _render_mypuls_cookies_settings() -> str:
     )
     api_block = api_block + lien_block
 
-    if configured:
-        status = (
-            "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
-            "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
-            "✓ Cookies enregistrés — la sync MyPuls est active. Colle de nouveaux cookies ci-dessous pour les remplacer."
-            "</div>"
-        )
-    else:
-        status = (
-            "<div style='padding:12px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);"
-            "border-radius:8px;margin-bottom:14px;font-size:13px;color:#fbbf24'>"
-            "⚠ Cookies non configurés. Loggue-toi sur <a href='https://mypuls.app/' target='_blank' "
-            "style='color:#fbbf24;text-decoration:underline'>mypuls.app</a> et colle tes cookies ci-dessous."
-            "</div>"
-        )
+    status = ("<div style='font-size:12px;color:#888;margin-bottom:10px'>Sans l’extension : colle les cookies "
+              "ci-dessous, ils remplacent ceux du site.</div>")
     return (
-        api_block
+        # L'etat des cookies : le bloc commun aux deux sections (GetMySocial +
+        # MyPuls), en TETE. Sous les cles API et le report des clics, il
+        # fallait descendre d'un ecran pour le voir (rendu du 18/11/2026).
+        _render_cookies_etat()
+        + api_block
         + status
         + "<form method='POST' action='/mypuls/save_cookies' style='display:flex;flex-direction:column;gap:8px;margin-bottom:14px'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Cookie PHPSESSID (obligatoire)</label>"
@@ -62702,6 +62798,8 @@ def create_app():
         # Les noms, rôles et pseudos Discord de toute l équipe.
         "/jbequipe/",
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
+        # l'etat des cookies GetMySocial et MyPuls (popup de l'extension)
+        "/settings/cookies_etat",
         "/sheets", "/external/list", "/va/get_insta",
         "/sessions/",
         "/mypulslive/", "/mypuls/keys/test",
@@ -71922,6 +72020,18 @@ def create_app():
             return _rep(False, "ce cookie est déjà échu (le "
                         + _t.strftime("%d/%m/%Y", _t.localtime(exp))
                         + ") : reconnecte-toi à GetMySocial et recopie authToken")
+        # L'extension Chrome (extension_cookies/) envoie le cookie du navigateur
+        # sans qu'on le lui demande. Plusieurs comptes GetMySocial s'ouvrent
+        # dans ce Chrome : celui d'un autre compte remplacerait le bon, et
+        # chaque A/B des liens VA echouerait ensuite sans bruit. Le formulaire
+        # de Reglages, lui, est un geste voulu : pas de controle.
+        if request.form.get("source") == "extension":
+            _avant, _neuf = gms.cookie_compte(), gms.cookie_compte(cookie)
+            if _avant and _neuf and _avant != _neuf and request.form.get("forcer") != "1":
+                print("[cookies] GetMySocial par l'extension : refuse (autre compte)", flush=True)
+                return _rep(False, "ce Chrome est connecté à un AUTRE compte GetMySocial que celui du site",
+                            autre_compte=True)
+            print("[cookies] GetMySocial par l'extension : enregistre", flush=True)
         gms.save_session_cookie(cookie)
         # les liens Twitter dont le 50/50 attendait un cookie : repris en fond,
         # le panneau n'attend pas une minute de MyPuls et de GetMySocial
@@ -72973,12 +73083,37 @@ def create_app():
 
     @app.route("/mypuls/save_cookies", methods=["POST"])
     def mypuls_save_cookies():
+        # L'extension Chrome (extension_cookies/) appelle cette meme route avec
+        # source=extension : elle lit du JSON, et il lui faut un 401 pour dire
+        # « pas connecte au site » (un renvoi a l'accueil ne lui dit rien).
+        ext = request.form.get("source") == "extension"
         if not is_auth():
+            if ext:
+                from flask import jsonify
+                return jsonify({"ok": False, "error": "unauth"}), 401
             return redirect("/")
         try:
             import mypuls
         except Exception as e:
+            if ext:
+                from flask import jsonify
+                return jsonify({"ok": False, "error": f"module indispo: {e}"})
             return _error(f"✕ Module mypuls indispo : {e}")
+        if ext:
+            from flask import jsonify
+            # Le REMEMBERME seul : le site s'ouvre sa propre session avec, et
+            # le cookie est essaye AVANT de remplacer celui du site.
+            res = mypuls.remettre_rememberme(request.form.get("rememberme") or "",
+                                             forcer=request.form.get("forcer") == "1")
+            print("[cookies] MyPuls par l'extension : "
+                  + ("remis" if res.get("ok") else "refuse (%s)" % res.get("error")), flush=True)
+            if res.get("ok"):
+                try:
+                    _invalidate_all_ttl_cache()
+                except Exception:
+                    pass
+            return jsonify({k: v for k, v in res.items()
+                            if k in ("ok", "error", "autre_compte", "panne", "compte_change")})
         phpsessid = (request.form.get("phpsessid") or "").strip()
         rememberme = (request.form.get("rememberme") or "").strip()
         if not phpsessid or len(phpsessid) < 16:
@@ -72989,6 +73124,21 @@ def create_app():
         if res.get("ok"):
             return _success(f"✓ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"⚠ Cookies enregistrés mais ping échoué : {res.get('error', '?')}")
+
+    @app.route("/settings/cookies_etat")
+    def settings_cookies_etat():
+        """L'etat des cookies GetMySocial et MyPuls du site, pour le popup de
+        l'extension Chrome (extension_cookies/). Des phrases et des dates,
+        jamais une valeur. Acces complets seulement : le prefixe est aussi
+        dans _ADMIN_ONLY_READ, ceinture et bretelles."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        rep = jsonify({"ok": True, "services": _cookies_etat_services()})
+        rep.headers["Cache-Control"] = "no-store"
+        return rep
 
     @app.route("/mypuls/import_har", methods=["POST"])
     def mypuls_import_har():

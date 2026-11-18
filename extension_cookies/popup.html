@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px -apple-system, system-ui, sans-serif; width: 320px; margin: 0; padding: 14px; background: #111; color: #eee; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  #site { padding: 10px; border-radius: 8px; border: 1px solid #dc2626; background: #1f1f1f; line-height: 1.45; margin-bottom: 8px; }
+  .service { padding: 10px; border-radius: 8px; background: #1f1f1f; border: 1px solid #333; line-height: 1.45; margin-bottom: 8px; }
+  .service.ok { border-color: #16a34a; }
+  .service.alerte { border-color: #f59e0b; }
+  .service.ko { border-color: #dc2626; }
+  .nom { font-weight: 600; }
+  .ok .signe { color: #4ade80; }
+  .alerte .signe { color: #fbbf24; }
+  .ko .signe { color: #f87171; }
+  .texte { margin-top: 3px; }
+  .petit { color: #999; font-size: 11px; margin-top: 5px; }
+  .refus { color: #f87171; font-size: 12px; margin-top: 5px; }
+  .lien { margin-top: 6px; padding: 0; border: 0; background: none; color: #60a5fa; font-size: 12px; text-decoration: underline; cursor: pointer; }
+  #envoyer { margin-top: 4px; width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  #pied { text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Cookies → youl4b</h1>
+  <div id="site" hidden></div>
+  <div id="services">Lecture…</div>
+  <button id="envoyer">Envoyer les deux cookies</button>
+  <div class="petit" id="pied">Les cookies vont de ce Chrome à youl4b.com, nulle part ailleurs.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

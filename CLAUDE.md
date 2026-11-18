@@ -109,6 +109,7 @@ nom inconnu, un fichier sans miniature : compter et remonter. La plupart des
 | `studio_ia.py` | onglet Studio IA : tâches, suivi, routes `/studio-ia/*` (JS dans `studio_ia_app.js`) |
 | `kie_ai.py` | client Kie.ai + registre des modèles (Kling, Seedance, Wan, Seedream) et prix |
 | `cogs/` | commandes et menus Discord |
+| `extension_cookies/` | extension Chrome du propriétaire : remet au site les cookies de session GetMySocial et MyPuls (voir son `LISEZMOI.md`) |
 
 ## Sources de données, et leurs travers
 

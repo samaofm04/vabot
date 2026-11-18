@@ -1258,6 +1258,8 @@ def save_cookies(phpsessid: str, rememberme: str = ""):
     cfg["PHPSESSID"] = (phpsessid or "").strip()
     if rememberme:
         cfg["REMEMBERME"] = rememberme.strip()
+    # des cookies neufs : le refus note par auto_refresh visait les anciens
+    cfg.pop("cookies_refuses", None)
     save_config(cfg)
 
 
@@ -1342,6 +1344,161 @@ def _save_rotated_cookies(session: requests.Session) -> bool:
     return changed
 
 
+# ---- Le cookie REMEMBERME : son compte, son echeance, sa remise -------------
+#
+# 18/11/2026. Forme relevee sur le cookie du site, sans lire sa valeur : quatre
+# morceaux separes par « : » (ecrits %3A) -- « App.Entity.User », le compte en
+# base64, l'echeance (epoch, 7 jours apres chaque renouvellement), la
+# signature. Une signature et pas un jeton garde chez MyPuls : on en DEDUIT
+# (ce n'est pas verifie) que le cookie du navigateur et celui du site vivent
+# chacun leur vie, et que seul un changement de mot de passe les tue.
+_ENTETES_NAVIGATEUR = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+}
+
+
+def _morceaux_rememberme(valeur: str) -> Optional[Tuple[str, int]]:
+    """(compte, echeance) d'un REMEMBERME, None s'il est illisible.
+
+    Le compte sort tel qu'il est ecrit dans le cookie : il ne sert qu'a etre
+    COMPARE (compte_rememberme en rend une empreinte), jamais affiche."""
+    from urllib.parse import unquote
+    morceaux = unquote(str(valeur or "").strip()).split(":")
+    # Symfony 5 : classe, compte, echeance, signature. Symfony 6 : sans la
+    # classe. L'echeance est le premier morceau fait de 9 a 11 chiffres.
+    for i in (2, 1):
+        if len(morceaux) > i + 1 and morceaux[i].isdigit() and 9 <= len(morceaux[i]) <= 11:
+            return ":".join(morceaux[:i]), int(morceaux[i])
+    return None
+
+
+def compte_rememberme(valeur: str) -> str:
+    """Empreinte du COMPTE d'un REMEMBERME, "" s'il est illisible.
+
+    Une empreinte et pas le compte : assez pour dire « meme compte » ou
+    « autre compte », sans que l'adresse du compte sorte du cookie."""
+    import hashlib
+    m = _morceaux_rememberme(valeur)
+    return hashlib.sha256(m[0].encode("utf-8")).hexdigest()[:16] if m else ""
+
+
+def echeance_rememberme(valeur: Optional[str] = None) -> Optional[int]:
+    """L'echeance (epoch) du REMEMBERME donne, ou de celui du site."""
+    m = _morceaux_rememberme(load_config().get("REMEMBERME", "") if valeur is None else valeur)
+    return m[1] if m else None
+
+
+def _essai_profil(cookies: Dict[str, str], timeout: int = TIMEOUT) -> Dict[str, Any]:
+    """Charge /profil avec CES cookies, sans rien enregistrer.
+
+    Rend {"ok": True, "session": s} ou {"ok": False, "error", "refuse"}.
+    « refuse » : MyPuls a rendu sa page de connexion, donc ces cookies ne
+    valent plus rien. Une panne (reseau, 500) n'est PAS un refus : la
+    confondre ferait dire « cookie mort » au site un jour de maintenance."""
+    s = requests.Session()
+    for nom, v in cookies.items():
+        s.cookies.set(nom, v, domain="mypuls.app", path="/")
+    s.headers.update(_ENTETES_NAVIGATEUR)
+    try:
+        r = s.get(f"{BASE_URL}/profil", timeout=timeout, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "refuse": False, "error": f"Erreur réseau : {e}"}
+    if r.status_code == 200 and not _detect_login_redirect(r.text):
+        return {"ok": True, "session": s}
+    # 401 : MyPuls dit lui-meme « pas connecte ». Un 403 ou un 5xx peut venir
+    # d'un pare-feu ou d'une maintenance : pas un refus.
+    if r.status_code in (200, 401):
+        return {"ok": False, "refuse": True, "error": "Cookies expirés ou révoqués"}
+    return {"ok": False, "refuse": False, "error": f"MyPuls a répondu HTTP {r.status_code}"}
+
+
+def _noter_refus_cookies():
+    """MyPuls vient de refuser le cookie du site. On garde la date du PREMIER
+    refus : c'est elle que Reglages et l'extension montrent."""
+    import time as _t
+    cfg = load_config()
+    if not cfg.get("cookies_refuses"):
+        cfg["cookies_refuses"] = int(_t.time())
+        save_config(cfg)
+
+
+def _lever_refus_cookies():
+    cfg = load_config()
+    if cfg.pop("cookies_refuses", None):
+        save_config(cfg)
+
+
+def cookies_etat() -> Dict[str, Any]:
+    """L'etat des cookies du site, SANS aucune valeur : pour Reglages et pour
+    l'extension Chrome (extension_cookies/)."""
+    cfg = load_config()
+    rem = cfg.get("REMEMBERME", "")
+    return {
+        "present": bool(cfg.get("PHPSESSID") or rem),
+        "rememberme": bool(rem),
+        "expire": echeance_rememberme(rem) if rem else None,
+        "renouvele": cfg.get("last_refreshed") or None,
+        "refuse_depuis": cfg.get("cookies_refuses") or None,
+    }
+
+
+def remettre_rememberme(rememberme: str, forcer: bool = False) -> Dict[str, Any]:
+    """Remet les cookies du site a partir du REMEMBERME du navigateur, envoye
+    par l'extension Chrome. Il est ESSAYE avant d'etre enregistre.
+
+    Le REMEMBERME seul suffit : envoye sans PHPSESSID, MyPuls ouvre une
+    session NEUVE et rend un REMEMBERME prolonge (le mecanisme d'auto_refresh,
+    qui tourne deux fois par jour). Le site a ainsi sa propre session : se
+    deconnecter de MyPuls dans le navigateur ne la coupe pas.
+
+    Refuse sans rien toucher : un cookie illisible ou echu, un cookie que
+    MyPuls n'accepte pas, et le cookie d'un AUTRE compte que celui du site --
+    sinon un compte de chatteur ouvert dans ce Chrome remplacerait celui de
+    l'agence, et les ventes, les pushs et les photos viendraient du mauvais
+    compte sans un message. `forcer` leve ce dernier refus."""
+    import time as _t
+    rememberme = str(rememberme or "").strip()
+    m = _morceaux_rememberme(rememberme)
+    if not m:
+        return {"ok": False, "error": "cookie REMEMBERME illisible"}
+    if m[1] < _t.time():
+        return {"ok": False, "error": "ce cookie MyPuls est déjà échu"}
+    compte = compte_rememberme(rememberme)
+    ancien = compte_rememberme(load_config().get("REMEMBERME", ""))
+    if ancien and ancien != compte and not forcer:
+        return {"ok": False, "autre_compte": True,
+                "error": "ce Chrome est connecté à un AUTRE compte MyPuls que celui du site"}
+    # 15 s : l'extension qui attend la reponse est coupee par Chrome a 30 s
+    res = _essai_profil({"REMEMBERME": rememberme}, timeout=15)
+    if not res["ok"]:
+        if res.get("refuse"):
+            return {"ok": False, "error": "MyPuls refuse ce cookie"}
+        return {"ok": False, "panne": True, "error": res["error"]}
+    jar = [c for c in res["session"].cookies
+           if c.value and c.domain in ("mypuls.app", ".mypuls.app", "")]
+    # MyPuls rend un REMEMBERME prolonge : on garde celui-la, pas celui du
+    # navigateur, qui continue de servir au navigateur.
+    rem_neuf = next((c.value for c in jar if c.name == "REMEMBERME" and c.value != rememberme), "")
+    session_neuve = next((c.value for c in jar if c.name == "PHPSESSID"), "")
+    cfg = load_config()
+    cfg["REMEMBERME"] = rem_neuf or rememberme
+    if session_neuve:
+        cfg["PHPSESSID"] = session_neuve
+    else:
+        # L'ancienne session est celle de l'ANCIEN cookie, peut-etre d'un
+        # autre compte : envoyee avec le REMEMBERME neuf, c'est elle que MyPuls
+        # suivrait. Sans elle, la prochaine requete en ouvre une.
+        cfg.pop("PHPSESSID", None)
+    cfg["last_refreshed"] = int(_t.time())
+    cfg.pop("cookies_refuses", None)
+    save_config(cfg)
+    return {"ok": True, "expire": echeance_rememberme(cfg["REMEMBERME"]),
+            "compte_change": bool(ancien and ancien != compte)}
+
+
 def auto_refresh() -> Dict[str, Any]:
     """Ping silencieux de MyPuls pour rafraîchir le REMEMBERME.
 
@@ -1362,21 +1519,17 @@ def auto_refresh() -> Dict[str, Any]:
     rememberme = cfg.get("REMEMBERME", "")
     if not rememberme:
         return {"ok": False, "error": "REMEMBERME non configuré — refresh impossible"}
-    s = requests.Session()
-    s.cookies.set("REMEMBERME", rememberme, domain="mypuls.app", path="/")
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-    })
-    try:
-        r = s.get(f"{BASE_URL}/profil", timeout=TIMEOUT, allow_redirects=True)
-    except Exception as e:
-        return {"ok": False, "error": f"Erreur réseau : {e}"}
-    if r.status_code != 200 or _detect_login_redirect(r.text):
-        return {"ok": False, "error": "Cookies expirés ou révoqués"}
-    rotated = _save_rotated_cookies(s)
+    res = _essai_profil({"REMEMBERME": rememberme})
+    if load_config().get("REMEMBERME", "") != rememberme:
+        # remis pendant l'appel (extension Chrome, formulaire) : ce resultat
+        # parle de l'ANCIEN cookie, il ne doit ni ecraser ni marquer le neuf
+        return {"ok": True, "rotated": False}
+    if not res["ok"]:
+        if res.get("refuse"):
+            _noter_refus_cookies()
+        return {"ok": False, "error": res["error"]}
+    rotated = _save_rotated_cookies(res["session"])
+    _lever_refus_cookies()
     return {"ok": True, "rotated": rotated}
 
 

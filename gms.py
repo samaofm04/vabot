@@ -2144,25 +2144,68 @@ def normaliser_cookie(saisie: str) -> str:
     return s
 
 
+def _charge_jeton(cookie: Optional[str] = None) -> dict:
+    """Les champs du jeton authToken du cookie, {} s'il est illisible.
+
+    Releves le 18/11/2026 sur le cookie du site (les noms, pas les valeurs) :
+    exp, iat, id (le compte), sessionId."""
+    import base64
+    ck = get_session_cookie() if cookie is None else cookie
+    m = re.search(r"(?:^|;\s*)authToken=([^;]+)", ck or "")
+    if not m:
+        return {}
+    morceaux = m.group(1).strip().split(".")
+    if len(morceaux) != 3:
+        return {}
+    try:
+        charge = morceaux[1] + "=" * (-len(morceaux[1]) % 4)
+        champs = json.loads(base64.urlsafe_b64decode(charge))
+        return champs if isinstance(champs, dict) else {}
+    except Exception:
+        return {}
+
+
 def cookie_expiration(cookie: Optional[str] = None) -> Optional[int]:
     """L'échéance (epoch) du jeton authToken du cookie, None si illisible.
 
     Le jeton GetMySocial dure 30 jours (iat 21/06 → exp 21/07 sur l'ancien
     cookie du site). Passé ce délai l'API privée renvoie vers la connexion :
     le dire AVANT, plutôt que de découvrir un A/B non posé."""
-    import base64
-    ck = get_session_cookie() if cookie is None else cookie
-    m = re.search(r"(?:^|;\s*)authToken=([^;]+)", ck or "")
-    if not m:
-        return None
-    morceaux = m.group(1).strip().split(".")
-    if len(morceaux) != 3:
-        return None
     try:
-        charge = morceaux[1] + "=" * (-len(morceaux[1]) % 4)
-        return int(json.loads(base64.urlsafe_b64decode(charge)).get("exp"))
+        return int(_charge_jeton(cookie).get("exp"))
     except Exception:
         return None
+
+
+def cookie_compte(cookie: Optional[str] = None) -> str:
+    """Empreinte du COMPTE GetMySocial du cookie, "" s'il est illisible.
+
+    Plusieurs comptes GetMySocial s'ouvrent dans le meme Chrome. L'extension
+    (extension_cookies/) envoie le cookie du navigateur sans qu'on le lui
+    demande : celui d'un autre compte remplacerait le bon, et chaque A/B des
+    liens VA echouerait ensuite sans bruit. Une empreinte suffit a comparer,
+    l'identifiant lui-meme ne sort pas du cookie."""
+    import hashlib
+    champs = _charge_jeton(cookie)
+    for k in ("id", "userId", "sub"):
+        v = str(champs.get(k) or "").strip()
+        if v:
+            return hashlib.sha256(v.encode("utf-8")).hexdigest()[:16]
+    return ""
+
+
+def cookie_etat() -> Dict[str, Any]:
+    """L'etat du cookie de session du site, SANS sa valeur : pour Reglages
+    et pour l'extension Chrome."""
+    ck = get_session_cookie()
+    champs = _charge_jeton(ck) if ck else {}
+
+    def _epoch(k):
+        try:
+            return int(champs.get(k))
+        except Exception:
+            return None
+    return {"present": bool(ck), "expire": _epoch("exp"), "emis": _epoch("iat")}
 
 
 def _entetes_privees(cookie: str) -> Dict[str, str]:
