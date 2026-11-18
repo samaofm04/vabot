@@ -314,7 +314,7 @@ def complement(debut: str, fin: str, comptes: dict, ventes: list = None) -> dict
                 "presence": {}, "erreurs": [], "frais": {"of": FRAIS_OF, "mym": FRAIS_MYM},
                 "creneaux": [list(c) for c in CRENEAUX],
                 "notes": ["Période de plus de 90 jours : pas de comparaison avec la période d’avant, "
-                          "ni messages et PPV envoyés (MyPuls ne les rend que par tranches de 92 jours)."]}
+                          "ni messages, PPV envoyés et posts (MyPuls ne les rend que par tranches de 92 jours)."]}
     cle = (debut, fin, tuple(sorted((str(k), str(v)) for k, v in (comptes or {}).items())))
     close = fin < date.today().isoformat()
     with _VERROU:
@@ -355,6 +355,64 @@ def complement(debut: str, fin: str, comptes: dict, ventes: list = None) -> dict
         with _VERROU:
             _CACHE[cle] = (time.time(), rep)
     return rep
+
+
+SEGMENTS = ("all", "mym", "of_us", "of_fr")
+
+
+def posts(debut: str, fin: str, taux: float, exclure=()) -> dict:
+    """Le revenu des POSTS de la periode, par segment : {segment: [net, brut]},
+    en dollars. Pour la case « Posts » du bloc du haut.
+
+    LE MEME CHIFFRE QUE LA CASE « Posts » DU DASHBOARD, parce qu'il sort de la
+    meme fonction (mypuls.api_overview : API MyPuls + Infloww) et du meme
+    calcul du brut. Le proprietaire a demande cette case le 18/11/2026 en
+    montrant le Dashboard : un second calcul aurait fini par afficher deux
+    « Posts » differents pour la meme periode.
+
+    Ce n'est PAS une vente de chatteur (un post se vend sur le fil, sans
+    conversation) : le journal des ventes n'en contient aucune, et ce montant
+    n'entre ni dans le total du bloc ni dans la paie.
+
+    Au-dela de 90 jours, rien : MyPuls refuse les periodes de plus de 92 jours.
+    """
+    import mypuls
+    try:
+        if (date.fromisoformat(fin) - date.fromisoformat(debut)).days >= 90:
+            return {"lignes": None, "erreurs": [], "partiel": False}
+    except ValueError:
+        return {"lignes": None, "erreurs": ["Posts : période illisible"], "partiel": False}
+    if not mypuls.api_configured():
+        return {"lignes": None, "erreurs": ["Posts : aucune clé d'API MyPuls"], "partiel": False}
+    # UN COMPTE A LA FOIS, avant l'agregat. api_overview precharge les
+    # creatrices a six de front ; c'est supportable depuis le Dashboard, mais
+    # cette page vient deja de lire les ventes et lit les messages au meme
+    # moment : le 18/11/2026, une rafale partie d'ici a fait ecarter 8 cles
+    # sur 11. Les releves lus ici restent 5 minutes en memoire, l'agregat
+    # qui suit ne refait donc aucun appel.
+    try:
+        for c in (mypuls.api_creators_cached() or []):
+            if c.get("active"):
+                mypuls.api_creator_stats_cached(c.get("id"), debut, fin)
+    except Exception:
+        pass                          # l'agregat sait lire ce qui manque
+    lignes, erreurs, partiel = {}, [], False
+    for seg in SEGMENTS:
+        try:
+            ov = mypuls.api_overview(debut, fin, taux, exclude=exclure, segment=seg)
+        except Exception as e:                       # noqa: BLE001
+            ov = {"ok": False, "error": "%s : %s" % (type(e).__name__, e)}
+        if not ov.get("ok"):
+            return {"lignes": None, "partiel": False,
+                    "erreurs": ["Posts : " + str(ov.get("error") or "indisponible")[:120]]}
+        net = float((ov.get("types") or {}).get("Posts") or 0)
+        brut = (float((ov.get("types_of") or {}).get("Posts") or 0) / (1 - FRAIS_OF)
+                + float((ov.get("types_mym") or {}).get("Posts") or 0) / (1 - FRAIS_MYM))
+        lignes[seg] = [round(net, 2), round(brut, 2)]
+        if seg == "all" and (ov.get("errors") or ov.get("manquantes")):
+            # Une creatrice sans releve : le chiffre est un minimum, on le dit.
+            partiel = True
+    return {"lignes": lignes, "erreurs": erreurs, "partiel": partiel}
 
 
 def vider_cache():

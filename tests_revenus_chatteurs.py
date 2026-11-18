@@ -792,6 +792,47 @@ def test_site(tmp):
             check("complement : rendu a l'admin, sans erreur", comp.get("ok") is True and comp.get("erreurs") == [],
                   comp.get("erreurs"))
 
+            # ---- les posts (case « Posts » du bloc du haut)
+            url_p = "/mypuls/chatters/posts.json?start=2026-11-01&end=2026-11-15"
+            check("posts : refuse sans session (401)", app.test_client().get(url_p).status_code == 401)
+            check("posts : refuse a un role qui n'a pas l'ecran des revenus (403)",
+                  monteur.get(url_p).status_code == 403, monteur.get(url_p).status_code)
+            sauve_p = (mypuls.api_overview, mypuls.api_configured, mypuls.api_creators_cached,
+                       mypuls.api_creator_stats_cached)
+            appels_p = []
+
+            def faux_agregat(d0, d1, taux=1.14, force=False, exclude=None, segment="all"):
+                appels_p.append((segment, tuple(sorted(exclude or ()))))
+                of, mym = {"all": (80.0, 7.4), "mym": (0.0, 7.4), "of_us": (60.0, 0.0), "of_fr": (20.0, 0.0)}[segment]
+                return {"ok": True, "types": {"Posts": of + mym, "Messages": 999.0},
+                        "types_of": {"Posts": of}, "types_mym": {"Posts": mym}, "errors": [], "manquantes": []}
+            try:
+                mypuls.api_overview = faux_agregat
+                mypuls.api_configured = lambda: True
+                mypuls.api_creators_cached = lambda force=False: [{"id": 1, "active": True}, {"id": 2, "active": False}]
+                lus = []
+                mypuls.api_creator_stats_cached = lambda cid, d0, d1: lus.append(cid) or {"ok": True}
+                rp = admin.get(url_p).get_json() or {}
+                check("posts : par segment, [net, brut] -- le brut remonte chaque plateforme a son taux (OF /0,80, MYM /0,74)",
+                      rp.get("ok") is True and rp.get("posts") == {"all": [87.4, 110.0], "mym": [7.4, 10.0],
+                                                                    "of_us": [60.0, 75.0], "of_fr": [20.0, 25.0]},
+                      rp)
+                check("... lu par la fonction du Dashboard, avec la meme liste de models ecartees",
+                      [a[0] for a in appels_p] == ["all", "mym", "of_us", "of_fr"]
+                      and all(a[1] == tuple(sorted(w.MODELES_ECARTES_REVENUS)) for a in appels_p), appels_p)
+                check("... et les creatrices actives sont lues une a une avant l'agregat (pas de rafale)",
+                      lus == [1], lus)
+                long_p = admin.get("/mypuls/chatters/posts.json?start=2026-01-01&end=2026-11-18").get_json() or {}
+                check("posts : au-dela de 90 jours, rien (MyPuls refuse), sans erreur",
+                      long_p.get("posts") is None and long_p.get("erreurs") == [] and len(appels_p) == 4, long_p)
+                mypuls.api_overview = lambda *a, **k: {"ok": False, "error": "Quota MyPuls atteint (429)"}
+                ko = admin.get(url_p).get_json() or {}
+                check("posts : MyPuls en panne -> pas de chiffre, et la cause est dite",
+                      ko.get("posts") is None and "429" in " ".join(ko.get("erreurs") or []), ko)
+            finally:
+                (mypuls.api_overview, mypuls.api_configured, mypuls.api_creators_cached,
+                 mypuls.api_creator_stats_cached) = sauve_p
+
             # ---- la page
             # Comme en ligne le 18/11/2026 : la lecture par cookie ne rend rien.
             mypuls.list_creators = lambda force_refresh=False: {"ok": False, "error": "cookie"}
@@ -873,15 +914,18 @@ def test_site(tmp):
                   "class='mp-apercu-total" in page and len(cases) == 6 and "mypuls-stats-grid'" not in page, noms)
             check("... dans l'ordre de sa capture : Media on demand et Médias push a la place d'Abonnements et de "
                   "Parrainage, « Unlock ratio » en bas a droite a la place de Streams",
-                  noms == ["Media on demand", "PPV débloqués", "Messages (PPV)", "Pourboires", "Médias push",
-                           "Unlock ratio"], noms)
+                  noms[:5] == ["Media on demand", "Posts", "Messages (PPV)", "Pourboires", "Médias push"]
+                  and noms[5].startswith("Unlock ratio"), noms)
             check("... sans abonnements, parrainage ni streams",
-                  not any(m in " ".join(noms) for m in ("Abonnement", "Parrainage", "Streams", "Posts")), noms)
+                  not any(m in " ".join(noms) for m in ("Abonnement", "Parrainage", "Streams")), noms)
+            check("... « Posts » attend son chiffre (lu apres la page, a la meme source que le Dashboard)",
+                  "<span data-mp-stat='ca_posts'>…</span>" in page and "window.__mpPostsUrl = '/mypuls/chatters/posts.json?" in page)
             check("... media push et media a la demande : un tiret tant que MyPuls n'en envoie pas, jamais « $0.00 »",
                   "<span data-mp-stat='ca_push'>—</span>" in page and "<span data-mp-stat='ca_demande'>—</span>" in page)
             check("... et il garde les reperes que les scripts remplissent (total, PPV, pourboires, ventes, chatteurs)",
                   all(("data-mp-stat='%s'" % k) in page for k in
-                      ("ca_total", "ca_ppv", "ca_tips", "nb_tx", "active_chatters", "nb_ppv", "unlock_ratio")))
+                      ("ca_total", "ca_ppv", "ca_tips", "nb_tx", "active_chatters", "nb_ppv", "unlock_ratio",
+                       "ca_posts", "ca_push", "ca_demande")))
             m = re.search(r"class='mp-apercu-gros'><span data-mp-stat='ca_total'>\$([\d,]+\.\d\d)</span>", page)
             check("... le total s'ecrit au centime, comme au Dashboard", m is not None, m and m.group(1))
             # Le 18/11, la troisieme model de la legende s'affichait en bleu

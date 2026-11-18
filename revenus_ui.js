@@ -202,6 +202,9 @@
   }
   // Le complement (periode d'avant, messages, presence) arrive apres la page.
   var complement = null, complementErreur = '';
+  // Les posts (case « Posts » du bloc du haut) : lus a part, apres la page.
+  // {segment: [net, brut]} en dollars, le meme chiffre que le Dashboard.
+  var posts = null, postsLus = false, postsErreur = '', postsPartiel = false;
   function shiftChoisi() {
     var sh = window.__mpShift;
     if (!sh || !complement || !complement.creneaux) return -1;
@@ -735,12 +738,24 @@
     var enAttente = !complement && !complementErreur ? '…' : '—';
     var hDeb = haut('nb_ppv'), hEnv = haut('ppv_envoyes'), hTaux = haut('unlock_ratio');
     if (hDeb) hDeb.textContent = nombre(tous.np);
-    if (hEnv) hEnv.textContent = aDesMessages && totMsg.e ? '· sur ' + nombre(totMsg.e) + ' envoyés' : '';
+    if (hEnv) hEnv.textContent = aDesMessages && totMsg.e ? ' sur ' + nombre(totMsg.e) + ' PPV' : ' PPV débloqués';
     if (hTaux) hTaux.textContent = aDesMessages ? pourcent(tous.np, totMsg.e, 1) : enAttente;
+    // « Posts » : le revenu des posts du segment affiche, dans la base et la
+    // devise choisies. Sous un shift, un tiret : ce revenu n'est pas decoupe
+    // par heure, l'afficher entier a cote de ventes filtrees tromperait.
+    var hPosts = haut('ca_posts');
+    if (hPosts) {
+      var lignePosts = posts && posts[segment];
+      hPosts.textContent = sousShift ? '—'
+        : lignePosts ? (postsPartiel ? '≥ ' : '') + ecrire(affiche(enBrut() ? lignePosts[1] : lignePosts[0]))
+        : postsLus ? '—' : '…';
+    }
     // Ce qui manque est DIT, jamais tu.
     var notes = [];
     if (complementErreur) notes.push('Comparaison et messages indisponibles : ' + complementErreur);
     if (complement && complement.erreurs && complement.erreurs.length) notes.push(complement.erreurs.join(' · '));
+    if (postsErreur) notes.push(postsErreur);
+    if (postsPartiel) notes.push('Posts : total partiel, une créatrice n’a pas pu être lue.');
     if (messagesOk && sousShift) notes.push('Sous un shift, les messages et PPV envoyés ne sont pas affichés : MyPuls ne les découpe pas par heure.');
     if (complement && complement.notes && complement.notes.length) notes.push(complement.notes.join(' · '));
     else if (messagesOk && !sousShift && complement.messages_par_compte === false) notes.push('Messages et PPV envoyés : tous comptes confondus.');
@@ -844,5 +859,17 @@
       .then(function () { entries.forEach(function (entry) { if (!entry.orphan) peindreSousLigne(entry); }); refresh(); });
   } else {
     complementErreur = 'adresse du complément absente';
+  }
+  if (window.__mpPostsUrl) {
+    fetch(window.__mpPostsUrl, {credentials:'same-origin'})
+      .then(function (r) { return r.json().catch(function () { return {ok:false, erreurs:['Posts : réponse illisible (HTTP ' + r.status + ')']}; }); })
+      .then(function (j) {
+        posts = (j && j.posts) || null; postsPartiel = !!(j && j.partiel);
+        postsErreur = ((j && j.erreurs) || []).join(' · ');
+      })
+      .catch(function (e) { postsErreur = 'Posts : ' + String(e); })
+      .then(function () { postsLus = true; refresh(); });
+  } else {
+    postsLus = true;
   }
 })();

@@ -35391,6 +35391,10 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
 
 from dashboard_cache import dashboard_cached
 
+#: Les models qu'on ne suit plus, ecartees des revenus. Une seule liste pour
+#: le Dashboard et pour la case « Posts » des revenus chatteurs.
+MODELES_ECARTES_REVENUS = {"bella"}
+
 
 @dashboard_cached
 def _render_home_dashboard_html() -> str:
@@ -35542,8 +35546,10 @@ def _render_home_dashboard_html() -> str:
         return a * _eur_usd
 
     # Modèles qu'on ne suit plus : leurs transactions sont IGNORÉES partout
-    # (total, cartes par type, segments). Pour en retirer une : l'ajouter ici.
-    EXCLUDED_MODELS = {"bella"}
+    # (total, cartes par type, segments). Pour en retirer une : l'ajouter à
+    # MODELES_ECARTES_REVENUS (la case « Posts » des revenus chatteurs lit la
+    # même liste, pour afficher le même chiffre).
+    EXCLUDED_MODELS = MODELES_ECARTES_REVENUS
 
     def _model_match(creator, names):
         """Compare une créatrice à une liste, sans ponctuation, en début de nom.
@@ -36410,6 +36416,7 @@ body.light .mypuls-bar{background:#e5e7eb}
     _sans_donnee = ("Ventes de ce type dans le journal MyPuls. A ce jour MyPuls ne les envoie pas "
                     "a son API : la case reste vide tant qu'il n'en arrive pas.")
     _c_msg, _c_tip = _icones_accueil["Messages (PPV)"], _icones_accueil["Pourboires"]
+    _c_post = _icones_accueil["Posts"]
     stats_html = (
         "<div class='mp-apercu'><div class='mp-apercu-grille'>"
         f"<div class='mp-apercu-total mp-apercu-base' title='{_base_titre}'>"
@@ -36426,16 +36433,18 @@ body.light .mypuls-bar{background:#e5e7eb}
         # LA DISPOSITION DE SA CAPTURE DU DASHBOARD (18/11/2026) : « Media on
         # demand » et « Médias push » a la place d'Abonnements et de
         # Parrainage, « Unlock ratio » a la place de Streams, Messages et
-        # Pourboires a leur place. La case « Posts » n'a pas de sens ici (un
-        # chatteur ne vend pas de post) : elle porte les PPV debloques.
+        # Pourboires a leur place, « Posts » aussi.
         + _case(_montant_ou_tiret("ca_demande", _ca_demande), "Media on demand",
                 "#18c9a3", "rgba(24,201,163,.12)",
                 _svg_case("<rect x='3' y='5' width='18' height='14' rx='2'/><path d='m10 9 5 3-5 3z'/>"),
                 titre=_sans_donnee)
-        + _case("<span data-mp-stat='nb_ppv'>" + f"{_nb_ppv:,}".replace(",", " ") + "</span>",
-                "PPV débloqués <span class='mp-apercu-autre' data-mp-stat='ppv_envoyes'></span>",
-                "#18c9a3", "rgba(24,201,163,.12)",
-                _svg_case("<rect x='4' y='11' width='16' height='10' rx='2'/><path d='M8 11V7a4 4 0 0 1 7.6-1.8'/>"))
+        # « Posts », a sa demande (« Mets Posts », 18/11/2026) : le revenu des
+        # posts des creatrices, LE MEME chiffre que la case du Dashboard
+        # (revenus_chatteurs.posts). Il arrive apres la page (posts.json).
+        + _case("<span data-mp-stat='ca_posts'>…</span>", "Posts",
+                _c_post[0], _c_post[1], _c_post[2],
+                titre="Revenu des posts des créatrices sur la période : le même chiffre que le Dashboard. "
+                      "Ce ne sont pas des ventes de chatteurs : il n'entre ni dans le total ni dans la paie.")
         + _case(_montant_case("ca_ppv"), "Messages (PPV) " + _autre_devise("ca_ppv"),
                 _c_msg[0], _c_msg[1], _c_msg[2], montant=True, titre=_base_titre)
         + _case(_montant_case("ca_tips"), "Pourboires " + _autre_devise("ca_tips"),
@@ -36447,7 +36456,9 @@ body.light .mypuls-bar{background:#e5e7eb}
         # TOUT EN BAS A DROITE, a sa demande. La valeur arrive avec les
         # messages (complement.json) : PPV debloques ÷ PPV envoyes, le meme
         # calcul que « Taux de déblocage » sur la ligne Total de la liste.
-        + _case("<span data-mp-stat='unlock_ratio'>…</span>", "Unlock ratio",
+        + _case("<span data-mp-stat='unlock_ratio'>…</span>",
+                "Unlock ratio <span class='mp-apercu-autre'>· <span data-mp-stat='nb_ppv'>"
+                + f"{_nb_ppv:,}".replace(",", " ") + "</span><span data-mp-stat='ppv_envoyes'> PPV débloqués</span></span>",
                 "#3775ff", "rgba(55,117,255,.12)",
                 _svg_case("<path d='M19 5 5 19'/><circle cx='6.5' cy='6.5' r='2.5'/><circle cx='17.5' cy='17.5' r='2.5'/>"),
                 titre="PPV débloqués ÷ PPV envoyés")
@@ -36969,6 +36980,7 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<script>window.__mpChatterExtra = {extra_json};</script>"
         f"<script>window.__mpFrais = {{of: {_FRAIS_OF}, mym: {_FRAIS_MYM}}};</script>"
         f"<script>window.__mpComplementUrl = '/mypuls/chatters/complement.json?start={start_str}&end={end_str}';</script>"
+        f"<script>window.__mpPostsUrl = '/mypuls/chatters/posts.json?start={start_str}&end={end_str}';</script>"
         # La liste des membres a choisir n'est PAS dans la page : ce rendu est
         # mis en cache et servi a tous les roles qui ont l'onglet, chatteurs
         # compris. Elle est lue a part, par une route reservee aux acces
@@ -74239,6 +74251,36 @@ def create_app():
             return jsonify(rep)
         except Exception as e:
             return jsonify({"ok": False, "erreurs": [f"{type(e).__name__} : {e}"]})
+
+    @app.route("/mypuls/chatters/posts.json")
+    def mypuls_chatters_posts():
+        """Le revenu des posts de la periode, pour la case « Posts » du bloc.
+
+        A PART du complement : les messages se lisent un compte a la fois et
+        prennent une vingtaine de secondes a froid ; la case « Posts »
+        n'a pas a les attendre. Lecture seule.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "erreurs": ["Session expirée"]}), 401
+        try:
+            _al_rev = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al_rev = None
+        if _al_rev is not None and "revenus" not in _al_rev:
+            return jsonify({"ok": False, "erreurs": ["Accès refusé"]}), 403
+        debut = (request.args.get("start") or "").strip()
+        fin = (request.args.get("end") or "").strip()
+        try:
+            import mypuls
+            import revenus_chatteurs
+            taux = float(mypuls.get_eur_usd_rate()["rate"])
+            r = revenus_chatteurs.posts(debut, fin, taux, exclure=MODELES_ECARTES_REVENUS)
+            return jsonify({"ok": r.get("lignes") is not None or not r.get("erreurs"),
+                            "posts": r.get("lignes"), "partiel": bool(r.get("partiel")),
+                            "erreurs": r.get("erreurs") or []})
+        except Exception as e:
+            return jsonify({"ok": False, "posts": None, "erreurs": [f"{type(e).__name__} : {e}"]})
 
     @app.route("/mypuls/chatter/set_crypto", methods=["POST"])
     def mypuls_chatter_set_crypto():
