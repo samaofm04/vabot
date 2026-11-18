@@ -15,6 +15,11 @@
    roles. Tout arrive par /mypuls/managers.json, qui ne repond qu'aux acces
    complets. Refuse, ce script ne pose aucun onglet.
 
+   TOUT EST SUR LE NET (ce que la creatrice recoit : frais OnlyFans retires,
+   MYM tel quel), quel que soit l'etat des boutons Net / Brut de la page. La
+   premiere version payait sur le brut OnlyFans ; il l'a vu le jour meme. Une
+   paie ne doit pas bouger selon un bouton d'affichage.
+
    LES CHIFFRES DES LIGNES VIENNENT DU SERVEUR (revenus_managers.du). Ici, on
    ne fait qu'additionner des cases deja calculees pour l'APERCU pendant
    qu'on coche ; apres « Enregistrer », la ligne reprend le chiffre du serveur. */
@@ -26,10 +31,10 @@
   if (!adresse || !barre || !apres) return;
 
   var ROLES = {
-    manager: {onglet:'Managers', un:'un manager', pluriel:'managers', titre:'Manager', portee:'Surveille', ca:'CA surveillé',
-      aide:'Même base que les chatteurs : MYM net, OnlyFans brut · suit la période choisie en haut'},
-    miniboss: {onglet:'Mini-boss', un:'un mini-boss', pluriel:'mini-boss', titre:'Mini-boss', portee:'Périmètre', ca:'CA du périmètre',
-      aide:'Un pourcentage sur tout le CA d’un périmètre, tous shifts confondus · même base que les chatteurs'}
+    manager: {onglet:'Managers', un:'un manager', pluriel:'managers', titre:'Manager', portee:'Surveille', ca:'CA surveillé (net)',
+      aide:'Calculé sur le NET : ce que la créatrice reçoit (frais OnlyFans retirés, MYM tel quel). Les boutons Net / Brut du haut ne changent pas la paie.'},
+    miniboss: {onglet:'Mini-boss', un:'un mini-boss', pluriel:'mini-boss', titre:'Mini-boss', portee:'Périmètre', ca:'CA du périmètre (net)',
+      aide:'Un pourcentage sur tout le CA NET d’un périmètre, tous shifts confondus (frais OnlyFans retirés, MYM tel quel). Les boutons Net / Brut ne changent pas la paie.'}
   };
   var SEGMENTS = [['mym','MYM','mym'], ['of_fr','OF FR','of'], ['of_us','OF US','of'], ['','Autres','of']];
   var PORTEES = [['tout','Tout'], ['mym','MYM'], ['of','OnlyFans'], ['choix','Choisir…']];
@@ -123,11 +128,11 @@
     return true;
   }
   function calcul(fiche) {
-    var ca = 0, sans = 0, cases = 0, models = 0;
+    var ca = 0, sans = 0, frais = 0, cases = 0, models = 0;
     if (fiche.role === 'miniboss') {
       data.matrice.ordre.forEach(function (cle) {
         if (!dansLaPortee(fiche, cle)) return;
-        var l = lignes()[cle]; ca += l.total; models++;
+        var l = lignes()[cle]; ca += l.total; frais += l.frais_of; models++;
         l.sans_chatteur.forEach(function (x) { sans += x; });
       });
     } else {
@@ -135,10 +140,10 @@
         var plages = fiche.cases[cle] || [], l = lignes()[cle];
         cases += plages.length; models++;
         // L'UNION des heures : deux plages qui se recoupent ne paient pas deux fois.
-        if (l) cadran(plages).forEach(function (pris, h) { if (pris) { ca += l.heures[h]; sans += l.sans_chatteur_h[h]; } });
+        if (l) cadran(plages).forEach(function (pris, h) { if (pris) { ca += l.heures[h]; sans += l.sans_chatteur_h[h]; frais += l.frais_of_h[h]; } });
       });
     }
-    return {ca:ca, a_payer:ca * Number(fiche.pct || 0) / 100, nb_cases:cases, nb_models:models, sans_chatteur:sans};
+    return {ca:ca, a_payer:ca * Number(fiche.pct || 0) / 100, nb_cases:cases, nb_models:models, sans_chatteur:sans, frais_of:frais};
   }
   // Qui d'autre surveille cette case : dit dans le carre, avant de payer.
   function autresSur(fiche, cle, pl) {
@@ -459,6 +464,9 @@
       r.chiffres.replaceChildren();
       r.chiffres.appendChild(el('small', '', ROLES[role].ca)); r.chiffres.appendChild(el('div', 'mpm-gros', usd(c.ca)));
       r.chiffres.appendChild(el('small', '', 'À payer')); r.chiffres.appendChild(el('div', 'mpm-gros mpm-vert', usd(c.a_payer)));
+      // Net : ce qui a ete retire du brut est DIT, pour qu'il retrouve son calcul.
+      if (c.frais_of > 0.005) r.chiffres.appendChild(el('p', 'mpm-note', 'Net : ' + usd(c.frais_of) + ' de frais OnlyFans ('
+        + Math.round(100 * Number(data.frais_of || 0.2)) + ' %) déjà retirés du brut (' + usd(c.ca + c.frais_of) + ').'));
       // Sur quoi il est paye : la part que MyPuls ne rattache a aucun chatteur est DITE.
       if (c.sans_chatteur > 0.005) r.chiffres.appendChild(el('p', 'mpm-note', 'dont ' + usd(c.sans_chatteur) + ' de ventes sans chatteur attribué'));
       if (role === 'manager') {
@@ -577,14 +585,21 @@
         l.appendChild(ca);
         var com = el('span'); var pastille = el('span', 'mpm-pct'); pastille.appendChild(document.createTextNode(pct(p.pct))); pastille.appendChild(el('i', '', '%'));
         com.appendChild(pastille); l.appendChild(com);
-        l.appendChild(el('span', 'mpm-vert', usd(p.a_payer)));
+        var du = el('span', 'mpm-vert'); du.appendChild(document.createTextNode(usd(p.a_payer)));
+        // Coche « Paye » sur un autre montant (la regle a change depuis, ou son carre) : dit.
+        var verse = (data.paye_montants || {})[p.id];
+        if (data.paye.indexOf(p.id) >= 0 && verse !== undefined && verse !== null && Math.abs(Number(verse) - Number(p.a_payer || 0)) >= 0.01) {
+          var note = el('small', 'mpm-alerte', 'payé ' + usd(verse)); note.title = 'Montant affiché le jour où « Payé » a été coché';
+          du.appendChild(note);
+        }
+        l.appendChild(du);
         var paye = el('span', 'mpm-c'), coche = el('input'); coche.type = 'checkbox'; coche.className = 'mpm-paye';
         coche.checked = data.paye.indexOf(p.id) >= 0; coche.setAttribute('aria-label', 'Payé pour cette période : ' + p.nom);
         coche.onclick = function (e) { e.stopPropagation(); };
         coche.onchange = function () {
           coche.disabled = true;
           poster('/mypuls/managers/paye', {id:p.id, start:periode.start, end:periode.end, paye:coche.checked})
-            .then(function (j) { if (j.ok) data.paye = j.paye; else { coche.checked = !coche.checked; window.alert(j.erreur || 'Refusé'); } })
+            .then(function (j) { if (j.ok) { data.paye = j.paye; data.paye_montants = j.paye_montants || {}; } else { coche.checked = !coche.checked; window.alert(j.erreur || 'Refusé'); } })
             .catch(function () { coche.checked = !coche.checked; })
             .then(function () { coche.disabled = false; peindre(role); });
         };

@@ -18,9 +18,16 @@ CE QUE CE MODULE DECIDE, ET LUI SEUL
   - ce que chacun TOUCHE : la somme de ses cases, fois son pourcentage ;
   - ce qui est GARDE : data/mypuls_managers.json, ecrit par safe_json.
 
-LA BASE EST CELLE DE LA PAIE DES CHATTEURS : MYM net, OnlyFans brut, en
-dollars au taux de la paie. Deux bases pour deux paies de la meme page
-auraient fini par se contredire.
+LA BASE EST LE NET : ce que la creatrice recoit. MyPuls rend le MYM deja net
+(en euros, convertis au taux de la paie) et l'OnlyFans BRUT (en dollars) : les
+frais OnlyFans (revenus_chatteurs.FRAIS_OF, 20 %) sont donc retires ici.
+La premiere version payait sur la base des chatteurs (OnlyFans brut). Le
+proprietaire l'a vu le jour meme (18/11/2026) : « j'ai l'impression que ca
+reste du brut », Esras affichait 134,51 $ la ou il attendait 108 $ (5 % du
+net). Les boutons Net / Brut de la page ne changent RIEN ici : une paie qui
+bougerait selon un bouton d'affichage serait dangereuse. La paie des
+CHATTEURS, elle, n'est pas touchee : sa base est une autre decision.
+La part des frais retires est rendue a part (`frais_of`), et l'ecran la dit.
 
 TOUTES LES VENTES DE LA MODEL COMPTENT, y compris celles que MyPuls ne
 rattache a aucun chatteur (un tiers du chiffre en novembre 2026). C'est le
@@ -65,6 +72,7 @@ def charger() -> dict:
         p["cases"] = _cases(p.get("cases"))
     return {"personnes": personnes,
             "paye": d.get("paye") if isinstance(d.get("paye"), dict) else {},
+            "paye_montants": d.get("paye_montants") if isinstance(d.get("paye_montants"), dict) else {},
             "retires": d.get("retires") if isinstance(d.get("retires"), list) else []}
 
 
@@ -266,26 +274,46 @@ def _cle_periode(debut: str, fin: str) -> str:
     return "%s|%s" % (str(debut)[:10], str(fin)[:10])
 
 
-def marquer_paye(pid: str, debut: str, fin: str, paye: bool) -> list:
-    """Coche ou decoche « Paye » pour UNE periode. Rend les ids payes."""
+def marquer_paye(pid: str, debut: str, fin: str, paye: bool, montant=None) -> list:
+    """Coche ou decoche « Paye » pour UNE periode. Rend les ids payes.
+
+    `montant` : ce qui etait a payer AU MOMENT de cocher. Il est garde avec la
+    date : si la regle de calcul change ensuite (c'est arrive le jour meme,
+    du brut au net), l'ecran peut dire « paye 153,89 $ » a cote du montant
+    recalcule, au lieu de laisser croire qu'on a verse le nouveau chiffre.
+    """
     with _VERROU:
         d = charger()
         if not any(p.get("id") == pid for p in d["personnes"]):
             raise ValueError("Fiche introuvable")
         cle = _cle_periode(debut, fin)
         ids = [i for i in (d["paye"].get(cle) or []) if i != pid]
+        montants = dict(d["paye_montants"].get(cle) or {})
+        montants.pop(pid, None)
         if paye:
             ids.append(pid)
+            if montant is not None:
+                montants[pid] = {"montant": round(float(montant), 2), "le": time.time()}
         if ids:
             d["paye"][cle] = ids
         else:
             d["paye"].pop(cle, None)
+        if montants:
+            d["paye_montants"][cle] = montants
+        else:
+            d["paye_montants"].pop(cle, None)
         _ecrire(d)
         return ids
 
 
 def payes(debut: str, fin: str) -> list:
     return list(charger()["paye"].get(_cle_periode(debut, fin)) or [])
+
+
+def montants_payes(debut: str, fin: str) -> dict:
+    """{id: montant verse} pour les « Paye » coches depuis qu'on le retient."""
+    brut = charger()["paye_montants"].get(_cle_periode(debut, fin)) or {}
+    return {pid: v.get("montant") for pid, v in brut.items() if isinstance(v, dict)}
 
 
 # ------------------------------------------------------------------ calcul
@@ -298,9 +326,9 @@ def cle_model(nom: str, comptes: dict) -> str:
 
 def _ligne_vide(nom: str, segment: str) -> dict:
     return {"nom": nom, "segment": segment,
-            "heures": [0.0] * 24, "sans_chatteur_h": [0.0] * 24,
+            "heures": [0.0] * 24, "sans_chatteur_h": [0.0] * 24, "frais_of_h": [0.0] * 24,
             "shifts": [0.0] * NB_SHIFTS, "sans_chatteur": [0.0] * NB_SHIFTS,
-            "total": 0.0, "sans_heure": 0.0}
+            "total": 0.0, "sans_heure": 0.0, "frais_of": 0.0}
 
 
 def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) -> dict:
@@ -311,10 +339,12 @@ def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) ->
      "ordre": [cles, du plus gros chiffre au plus petit],
      "ecartees": n}
 
-    `heures` : le chiffre de chaque heure de Paris (0 a 23), base de la paie,
-    en dollars (MYM net converti, OnlyFans brut). C'est de la que sort TOUTE
-    plage d'heures, libre ou non. `shifts` en est le resume par shift du site.
+    `heures` : le chiffre NET de chaque heure de Paris (0 a 23), en dollars
+    (MYM net converti ; OnlyFans brut moins ses frais). C'est de la que sort
+    TOUTE plage d'heures, libre ou non. `shifts` en est le resume par shift.
     `sans_chatteur_h` / `sans_chatteur` : la part que MyPuls ne rattache a personne.
+    `frais_of_h` / `frais_of` : les frais OnlyFans retires, heure par heure et
+    sur 24 h — pour que l'ecran dise ce qui a ete enleve du brut.
     `total` : la model sur 24 h, ventes sans heure lisible comprises
     (`sans_heure`) — c'est la base d'un mini-boss, qui n'a pas de shift.
     `ecartees` : ventes sans nom de model, comptees nulle part ici ; le nombre
@@ -338,18 +368,28 @@ def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) ->
         except (TypeError, ValueError):
             montant = 0.0
         devise = str(t.get("currency") or "").upper()
-        usd = montant if ("USD" in devise or "$" in devise) else montant * float(taux or 1)
+        # Dollars = OnlyFans, rendu BRUT par MyPuls : on retire ses frais.
+        # Euros = MYM, deja net : converti, rien a retirer. (Meme regle que le
+        # mode « Net » de la page, revenus_ui.js.)
+        if "USD" in devise or "$" in devise:
+            frais = montant * revenus_chatteurs.FRAIS_OF
+            usd = montant - frais
+        else:
+            frais = 0.0
+            usd = montant * float(taux or 1)
         cle = cle_model(nom, comptes)
         l = lignes.get(cle)
         if l is None:
             l = lignes[cle] = _ligne_vide(nom, (segments or {}).get(nom, ""))
         l["total"] += usd
+        l["frais_of"] += frais
         heure = transaction_hour(t.get("date"))
         if not 0 <= heure <= 23:
             l["sans_heure"] += usd
             continue
         sans = not str(t.get("chatter") or "").strip() or est_non_attribue(str(t.get("chatter")))
         l["heures"][heure] += usd
+        l["frais_of_h"][heure] += frais
         if sans:
             l["sans_chatteur_h"][heure] += usd
         s = revenus_chatteurs.creneau(heure)
@@ -365,9 +405,10 @@ def matrice(ventes, taux: float, comptes: dict = None, segments: dict = None) ->
         if cle not in lignes:
             lignes[cle] = _ligne_vide(str(nom), (segments or {}).get(nom, ""))
     for l in lignes.values():
-        for champ in ("shifts", "sans_chatteur", "heures", "sans_chatteur_h"):
+        for champ in ("shifts", "sans_chatteur", "heures", "sans_chatteur_h", "frais_of_h"):
             l[champ] = [round(x, 2) for x in l[champ]]
         l["total"], l["sans_heure"] = round(l["total"], 2), round(l["sans_heure"], 2)
+        l["frais_of"] = round(l["frais_of"], 2)
     ordre = sorted(lignes, key=lambda k: (-lignes[k]["total"], lignes[k]["nom"].lower()))
     return {"lignes": lignes, "ordre": ordre, "ecartees": ecartees}
 
@@ -388,7 +429,10 @@ def dans_la_portee(fiche: dict, cle: str, ligne: dict) -> bool:
 def du(fiche: dict, mat: dict) -> dict:
     """Ce que cette personne touche sur la matrice de la periode.
 
-    {"ca", "a_payer", "nb_cases", "nb_models", "sans_chatteur"}
+    {"ca", "a_payer", "nb_cases", "nb_models", "sans_chatteur", "frais_of"}
+
+    `ca` est NET (voir l'en-tete du module) ; `frais_of` dit les frais
+    OnlyFans qui ont ete retires du brut pour y arriver.
 
     Manager : pour chaque model, les heures de ses plages (comptees une seule
     fois si deux plages se recoupent). Une plage cochee sur une model sans
@@ -397,7 +441,7 @@ def du(fiche: dict, mat: dict) -> dict:
     Mini-boss : les models de son perimetre, sur 24 h.
     """
     lignes = (mat or {}).get("lignes") or {}
-    ca = sans = 0.0
+    ca = sans = frais = 0.0
     nb_cases = 0
     models = set()
     if fiche.get("role") == "miniboss":
@@ -405,6 +449,7 @@ def du(fiche: dict, mat: dict) -> dict:
             if dans_la_portee(fiche, cle, l):
                 ca += l["total"]
                 sans += sum(l["sans_chatteur"])
+                frais += l["frais_of"]
                 models.add(cle)
     else:
         for cle, plages in _cases(fiche.get("cases")).items():
@@ -420,6 +465,7 @@ def du(fiche: dict, mat: dict) -> dict:
                 heures.update(heures_de(pl))
             ca += sum(l["heures"][h] for h in heures)
             sans += sum(l["sans_chatteur_h"][h] for h in heures)
+            frais += sum(l["frais_of_h"][h] for h in heures)
     pct = float(fiche.get("pct") or 0)
     return {"ca": round(ca, 2), "a_payer": round(ca * pct / 100.0, 2), "nb_cases": nb_cases,
-            "nb_models": len(models), "sans_chatteur": round(sans, 2)}
+            "nb_models": len(models), "sans_chatteur": round(sans, 2), "frais_of": round(frais, 2)}

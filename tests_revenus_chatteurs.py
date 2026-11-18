@@ -707,9 +707,15 @@ def test_managers(tmp):
         check("... 1 h 30 du matin tombe dans le shift 20h-2h, pas dans 2h-8h", L["1733"]["shifts"][3] == 66.0)
         check("... la part sans chatteur est rendue A PART (vide, ou le libelle de MyPuls)",
               L["1733"]["sans_chatteur"] == [0.0, 0.0, 0.0, 66.0], L["1733"]["sans_chatteur"])
-        check("... OnlyFans en dollars, pris tel quel (brut)", L["3673"]["shifts"] == [0.0, 0.0, 200.0, 0.0])
+        # Le 18/11, la premiere version payait sur le brut OnlyFans : Esras
+        # affichait 134,51 $ la ou le proprietaire attendait 108 $ (5 % du net).
+        check("... OnlyFans en dollars : rendu BRUT par MyPuls, compte NET ici (200 $ -> 160 $, frais de 20 % retires)",
+              L["3673"]["shifts"] == [0.0, 0.0, 160.0, 0.0] and L["3673"]["heures"][16] == 160.0, L["3673"]["shifts"])
+        check("... les frais OnlyFans retires sont rendus a part (40 $ a 16 h, 48 $ sur 24 h) ; aucun sur du MYM",
+              L["3673"]["frais_of_h"][16] == 40.0 and L["3673"]["frais_of"] == 48.0 and L["1733"]["frais_of"] == 0.0,
+              (L["3673"]["frais_of_h"][16], L["3673"]["frais_of"], L["1733"]["frais_of"]))
         check("... une vente sans heure lisible : hors des shifts, mais dans le total de la model (24 h)",
-              L["3673"]["total"] == 240.0 and L["3673"]["sans_heure"] == 40.0, L["3673"])
+              L["3673"]["total"] == 192.0 and L["3673"]["sans_heure"] == 32.0, L["3673"])
         check("... une vente sans model : comptee, jamais ecartee en silence", mat["ecartees"] == 1, mat["ecartees"])
         check("... une model sans vente a quand meme sa ligne (sinon on ne pourrait pas la cocher)",
               L["77"]["total"] == 0 and L["77"]["segment"] == "mym")
@@ -764,16 +770,26 @@ def test_managers(tmp):
 
         b = rm.enregistrer({"role": "miniboss", "nom": "Kiah", "pct": 2})
         base = dict(rm.trouver(b["id"]))
-        check("mini-boss « Tout » : 2 % de toutes les models sur 24 h (ventes sans heure comprises)",
-              rm.du(base, mat)["ca"] == round(176 + 240 + 300, 2) and rm.du(base, mat)["a_payer"] == 14.32, rm.du(base, mat))
-        check("mini-boss « MYM » : les models MYM seulement", rm.du(dict(base, portee="mym"), mat)["ca"] == 176.0)
-        check("mini-boss « OnlyFans » : OF FR et OF US ensemble", rm.du(dict(base, portee="of"), mat)["ca"] == 540.0)
+        check("mini-boss « Tout » : 2 % du NET de toutes les models sur 24 h (ventes sans heure comprises)",
+              rm.du(base, mat)["ca"] == round(176 + 192 + 240, 2) and rm.du(base, mat)["a_payer"] == 12.16, rm.du(base, mat))
+        check("mini-boss « MYM » : les models MYM seulement, deja nettes", rm.du(dict(base, portee="mym"), mat)["ca"] == 176.0)
+        dof = rm.du(dict(base, portee="of"), mat)
+        check("mini-boss « OnlyFans » : OF FR et OF US ensemble, en net (540 $ brut -> 432 $), frais dits (108 $)",
+              dof["ca"] == 432.0 and dof["frais_of"] == 108.0 and dof["a_payer"] == 8.64, dof)
         check("mini-boss « Choisir » : les models cochees, rien d'autre",
-              rm.du(dict(base, portee="choix", models=["3992"]), mat)["ca"] == 300.0)
+              rm.du(dict(base, portee="choix", models=["3992"]), mat)["ca"] == 240.0)
+        dman = rm.du({"role": "manager", "pct": 5, "cases": {"3673": [[14, 20]], "1733": [[8, 14]]}}, mat)
+        check("manager sur une model OnlyFans et une MYM : 5 % de (160 net + 110) = 13,50 $, pas 5 % du brut",
+              dman["ca"] == 270.0 and dman["a_payer"] == 13.5 and dman["frais_of"] == 40.0, dman)
 
-        check("paye : coche pour UNE periode", rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", True) == [g["id"]]
+        check("paye : coche pour UNE periode", rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", True, 6.16) == [g["id"]]
               and rm.payes("2026-11-01", "2026-11-15") == [g["id"]] and rm.payes("2026-11-16", "2026-11-30") == [])
-        check("... et decoche", rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", False) == [])
+        check("... et le montant verse ce jour-la est garde (il reste explicable si la regle change ensuite)",
+              rm.montants_payes("2026-11-01", "2026-11-15") == {g["id"]: 6.16}
+              and rm.montants_payes("2026-11-16", "2026-11-30") == {}, rm.montants_payes("2026-11-01", "2026-11-15"))
+        check("... et decoche : la case et le montant partent ensemble",
+              rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", False) == []
+              and rm.montants_payes("2026-11-01", "2026-11-15") == {})
         check("retirer : la fiche quitte la liste mais reste gardee (rien n'est efface)",
               rm.retirer(g["id"]) is True and rm.trouver(g["id"]) is None
               and [r.get("nom") for r in rm.charger()["retires"]] == ["Ghost"])
@@ -928,10 +944,18 @@ def test_site(tmp):
             check("managers : des heures libres (10h-11h) : seule la vente de 10 h compte (110 $)",
                   (jl.get("personne") or {}).get("ca") == 110.0 and (jl.get("personne") or {}).get("cases") == {"1116": [[10, 11]]},
                   jl.get("personne"))
+            jo = admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "cases": {"3106": [[14, 20], [8, 14]]}},
+                                                                "start": "2026-11-01", "end": "2026-11-15"}).get_json() or {}
+            check("managers : sur une model OnlyFans, la paie est sur le NET (320 $ brut -> 256 $ -> 25,60 $ a 10 %)",
+                  (jo.get("personne") or {}).get("ca") == 256.0 and (jo.get("personne") or {}).get("a_payer") == 25.6
+                  and (jo.get("personne") or {}).get("frais_of") == 64.0, jo.get("personne"))
             admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "cases": {"1116": [[8, 14]]}}})
             ko = admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "pct": "abc"}}).get_json() or {}
             check("managers : un pourcentage illisible est refuse avec son message", ko.get("ok") is False and "ourcentage" in (ko.get("erreur") or ""), ko)
             rp = admin.post("/mypuls/managers/paye", json={"id": pers.get("id"), "start": "2026-11-01", "end": "2026-11-15", "paye": True})
+            check("managers : « Paye » retient le montant calcule PAR LE SERVEUR ce jour-la (14,89 $)",
+                  (rp.get_json() or {}).get("paye_montants") == {pers.get("id"): 14.89}
+                  and (admin.get(url_m).get_json() or {}).get("paye_montants") == {pers.get("id"): 14.89}, rp.get_json())
             check("managers : « Paye » coche pour la periode affichee, pas pour une autre",
                   (rp.get_json() or {}).get("paye") == [pers.get("id")]
                   and (admin.get(url_m).get_json() or {}).get("paye") == [pers.get("id")]

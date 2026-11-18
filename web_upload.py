@@ -74334,6 +74334,8 @@ def create_app():
                             "creneaux": [list(c) for c in revenus_chatteurs.CRENEAUX],
                             "personnes": [_managers_fiche(p, mat) for p in revenus_managers.charger()["personnes"]],
                             "paye": revenus_managers.payes(debut, fin),
+                            "paye_montants": revenus_managers.montants_payes(debut, fin),
+                            "frais_of": revenus_chatteurs.FRAIS_OF,
                             "cryptos": mypuls.CRYPTO_NETWORKS})
         except Exception as e:
             return jsonify({"ok": False, "erreur": f"{type(e).__name__} : {e}"})
@@ -74395,11 +74397,23 @@ def create_app():
         debut, fin = (corps.get("start") or "").strip(), (corps.get("end") or "").strip()
         if not debut or not fin:
             return jsonify({"ok": False, "erreur": "Période manquante"})
+        pid, coche = str(corps.get("id") or ""), bool(corps.get("paye"))
+        # Le montant verse est CALCULE ICI, pas recu du navigateur : c'est lui
+        # qui restera ecrit a cote de la case.
+        montant = None
+        if coche:
+            try:
+                fiche = revenus_managers.trouver(pid)
+                mat, _pourquoi = _managers_matrice(debut, fin)
+                if fiche and mat is not None:
+                    montant = revenus_managers.du(fiche, mat)["a_payer"]
+            except Exception as e:                      # noqa: BLE001
+                print(f"[managers] montant paye non calcule pour {pid}: {e}", flush=True)
         try:
-            ids = revenus_managers.marquer_paye(str(corps.get("id") or ""), debut, fin, bool(corps.get("paye")))
+            ids = revenus_managers.marquer_paye(pid, debut, fin, coche, montant)
         except ValueError as e:
             return jsonify({"ok": False, "erreur": str(e)})
-        return jsonify({"ok": True, "paye": ids})
+        return jsonify({"ok": True, "paye": ids, "paye_montants": revenus_managers.montants_payes(debut, fin)})
 
     @app.route("/mypuls/chatters/posts.json")
     def mypuls_chatters_posts():
