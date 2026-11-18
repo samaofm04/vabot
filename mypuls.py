@@ -3816,6 +3816,48 @@ OF_QUEUE_TZ = "Europe/Paris"
 _OF_LINK_RE = re.compile(r"https?://onlyfans\.com/[A-Za-z0-9_.\-]+(?:/c\d+)?")
 _OF_MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,})")
 
+# ---- « Confirmez votre connexion » : le code par e-mail de MyPuls -----------
+#
+# Releve sur le serveur le 18/11/2026. Depuis le 17/11 (dernier releve bon a
+# 16 h 46 UTC, premier refus a 17 h 16, quatre minutes apres le renouvellement
+# du cookie de 17 h 12 qui ouvre une session neuve), MyPuls met sa page
+# /securite/verifier (« Confirmez votre connexion » : un code recu par e-mail,
+# case « Se souvenir de cet appareil pendant un an ») devant le changement de
+# creatrice et devant l'acces OnlyFans :
+#   /switch-creator/<id>        -> 302 vers /securite/verifier
+#   /of-nav/api2/v2/users/me    -> 401 {"error":"step_up_required",...}
+# /profil, lui, repond toujours 200 : Reglages et l'extension Chrome disaient
+# « cookie bon », le proprietaire remettait ses cookies pour rien, et chaque
+# lecture OnlyFans rendait « HTTP 401 » sans un mot sur la cause. Ce n'est PAS
+# un cookie mort : c'est une etape que le navigateur du proprietaire a passee
+# et que le site n'a pas passee. D'ou un message a part.
+VERIFICATION_MYPULS = ("MyPuls demande un code de confirmation par e-mail "
+                       "(« Confirmez votre connexion ») que le site n'a pas saisi")
+
+
+def verification_demandee(reponse) -> bool:
+    """Vrai si cette reponse de MyPuls est sa demande de code par e-mail, et
+    pas une panne ni un cookie mort (voir VERIFICATION_MYPULS)."""
+    try:
+        if "/securite/verifier" in str(getattr(reponse, "url", "") or ""):
+            return True
+        if getattr(reponse, "status_code", None) in (401, 403):
+            return "step_up_required" in str(getattr(reponse, "text", "") or "")[:2000]
+    except Exception:
+        pass
+    return False
+
+
+def _refus_acces_of(reponse) -> Dict[str, Any]:
+    """Pourquoi l'acces OnlyFans de MyPuls n'a pas rendu 200, en clair.
+
+    UN seul endroit le decide, pour la file d'attente et pour les abonnes du
+    Setup SFS : `verification` dit a l'appelant que la cause vaut pour TOUTES
+    les creatrices (inutile de la repeter quatre fois)."""
+    if verification_demandee(reponse):
+        return {"ok": False, "verification": True, "error": VERIFICATION_MYPULS}
+    return {"ok": False, "error": f"accès OF indisponible (HTTP {reponse.status_code})"}
+
 
 def _of_html_to_text(html: str) -> str:
     """<p>/<br> -> retours à la ligne, balises retirées, entités décodées.
@@ -3875,7 +3917,7 @@ def of_queue(creator_id: int, start: str, end: str,
     except Exception as e:
         return {"ok": False, "error": f"accès OF: {e}"}
     if me.status_code != 200:
-        return {"ok": False, "error": f"accès OF indisponible (HTTP {me.status_code})"}
+        return _refus_acces_of(me)
     try:
         mj = me.json()
     except Exception:
@@ -4185,6 +4227,10 @@ def of_massdm_open(creator_id: int, session: requests.Session) -> Dict[str, Any]
             r = session.get(f"{BASE_URL}/of/massdm", timeout=TIMEOUT)
     except Exception as e:
         return {"ok": False, "error": f"page Mass DM : {e}"}
+    if verification_demandee(r):
+        # sans ce test : « page servie pour la créatrice #None — sélection non
+        # prise », qui envoyait chercher du côté du changement de créatrice
+        return {"ok": False, "verification": True, "error": VERIFICATION_MYPULS}
     if r.status_code != 200:
         return {"ok": False, "error": f"page Mass DM HTTP {r.status_code}"}
     m = _OF_HEADER_CREATOR_RE.search(r.text)
@@ -4740,7 +4786,7 @@ def of_fans_stats(creator_id: int, session: Optional[requests.Session] = None) -
     except Exception as e:
         return {"ok": False, "error": f"accès OF: {e}"}
     if me.status_code != 200:
-        return {"ok": False, "error": f"accès OF indisponible (HTTP {me.status_code})"}
+        return _refus_acces_of(me)
     try:
         mj = me.json()
     except Exception:

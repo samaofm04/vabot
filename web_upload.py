@@ -46291,6 +46291,26 @@ def _sfssetup_autofill_of_etat() -> dict:
         return {}
 
 
+# Quoi faire, pour les deux causes qui bloquent TOUS les modeles a la fois.
+# Le 18/11/2026 le proprietaire a remis ses cookies pour une panne qui n en
+# venait pas : la phrase dit donc aussi ce qui ne sert a rien.
+_SFS_OF_AIDE_COOKIES = ("Remets-le : dans Chrome, icône de l'extension « Cookies → youl4b », "
+                        "« 1 · Prendre les cookies de Chrome » puis « 2 · Valider l'envoi à YouLab » "
+                        "— ou Réglages › Cookies MyPuls. Puis reclique ce bouton.")
+_SFS_OF_AIDE_VERIFICATION = ("Tes cookies MyPuls sont bons : les remettre avec l'extension n'y change rien. "
+                             "Ce code vaut pour UN appareil : celui saisi dans ton Chrome ne vaut pas pour "
+                             "le site, et le site n'a pas encore de quoi le saisir. L'accès OnlyFans lui "
+                             "reste fermé jusque-là.")
+
+
+def _sfs_of_cause(erreurs: list, aide: str = "") -> str:
+    """Ce que dit le bouton « Chiffres depuis OnlyFans » quand AUCUN modele n a
+    ete lu : la cause, puis quoi faire. Jamais vide — c est ce vide qui
+    donnait « Erreur : ? »."""
+    cause = " ; ".join(str(e) for e in erreurs if e) or "Aucun modèle lu, et MyPuls n'a donné aucune raison"
+    return cause + "." + (f"\n\n{aide}" if aide else "")
+
+
 def _sfssetup_autofill_of(force: bool = False) -> dict:
     """Remplit SUB Total et Last 30 Day des modeles OnlyFans (FR et US) depuis
     OnlyFans, via l acces OF de MyPuls (mypuls.of_fans_stats).
@@ -46307,7 +46327,8 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
     if not force and time.time() - float(etat.get("ts") or 0) < SFS_OF_AUTOFILL_TTL:
         return dict(etat, cached=True)
     if not _SFS_OF_AUTOFILL_LOCK.acquire(blocking=False):
-        return dict(etat, ok=False, error="relevé OnlyFans déjà en cours")
+        return dict(etat, ok=False, error="Un relevé OnlyFans est déjà en cours. "
+                                          "Attends une minute, puis recharge la page.")
     try:
         import mypuls
         import sfs_setup
@@ -46317,11 +46338,24 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
         s = mypuls._make_session()
         champs_of = sfs_setup.fields_for("of")
         remplis, erreurs, vus = [], [], {}
-        for cle, cid in modeles:
+        # Une cause qui vaut pour TOUS les modeles (elle tient a la session du
+        # site chez MyPuls, pas a une creatrice) : dite une fois, avec quoi
+        # faire, au lieu de quatre lignes « HTTP 401 » qui ne disaient rien.
+        aide = ""
+        if s is None:
+            aide = _SFS_OF_AIDE_COOKIES
+            erreurs.append(", ".join(c for c, _ in modeles)
+                           + " : non lu(s) — le site n'a plus de cookie MyPuls")
+        for i, (cle, cid) in enumerate([] if s is None else modeles):
             if not cid:
                 erreurs.append(f"{cle} : pas d identifiant MyPuls")
                 continue
             r = mypuls.of_fans_stats(cid, session=s)
+            if r.get("verification"):
+                aide = _SFS_OF_AIDE_VERIFICATION
+                erreurs.append(", ".join(c for c, _ in modeles[i:])
+                               + f" : non lu(s) — {r.get('error')}")
+                break
             if not r.get("ok"):
                 erreurs.append(f"{cle} : {r.get('error')}")
                 continue
@@ -46345,7 +46379,16 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
         except Exception:
             pass
         etat.update(ts=int(time.time()), ok=bool(remplis), remplis=remplis, erreurs=erreurs)
-        etat.pop("error", None)
+        for _k in ("error", "aide"):
+            etat.pop(_k, None)
+        if aide:
+            etat["aide"] = aide
+        if remplis:
+            etat["ts_ok"] = etat["ts"]          # de quand datent les chiffres affiches
+        else:
+            # Sans cause ici, la route rendait ok=False et rien d autre : le
+            # bouton affichait « Erreur : ? » (18/11/2026).
+            etat["error"] = _sfs_of_cause(erreurs, aide)
         if remplis and not etat.get("reactivation_us"):
             recoches = []
             for cle, _cid in _sfssetup_models("of", "us"):
@@ -46601,10 +46644,16 @@ def _render_sfssetup_html(page: str = "mym") -> str:
     of_info_html = ""
     if platform == "of":
         _e = _sfssetup_autofill_of_etat()
-        if _e.get("ts"):
-            _quand = time.strftime("%d/%m à %H:%M", time.localtime(int(_e["ts"])))
-            of_info_html = (f"Chiffres OnlyFans relevés le {_quand} (heure du serveur) — "
-                            "SUB Total = abonnés actifs, Last 30 Day = nouveaux abonnés sur 30 jours.")
+        _legende = "SUB Total = abonnés actifs, Last 30 Day = nouveaux abonnés sur 30 jours."
+        _jour = lambda _t: time.strftime("%d/%m à %H:%M", time.localtime(int(_t)))
+        if _e.get("ts") and _e.get("ok", True):
+            of_info_html = f"Chiffres OnlyFans relevés le {_jour(_e['ts'])} (heure du serveur) — {_legende}"
+        elif _e.get("ts"):
+            # Relevé raté : « Chiffres relevés le 17/11 à 23:23 » au-dessus de
+            # quatre refus faisait passer de vieux chiffres pour ceux du jour.
+            of_info_html = (f"Relevé OnlyFans du {_jour(_e['ts'])} (heure du serveur) : aucun chiffre lu. "
+                            + (f"Les chiffres affichés datent du {_jour(_e['ts_ok'])}. " if _e.get("ts_ok")
+                               else "Les chiffres affichés sont ceux d'avant. ") + _legende)
         else:
             of_info_html = "Chiffres OnlyFans : premier relevé en cours…"
         if _of_releve_lance and _e.get("ts"):
@@ -46612,7 +46661,11 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         of_info_html = (f"<div style='color:#7dd3fc;font-size:12.5px;margin:0 0 12px'>{of_info_html}</div>"
                         + "".join("<div style='color:#f59e0b;font-size:12px;margin:-6px 0 10px'>⚠ "
                                   + str(x).replace("&", "&amp;").replace("<", "&lt;") + "</div>"
-                                  for x in (_e.get("erreurs") or [])))
+                                  for x in (_e.get("erreurs") or []))
+                        # quoi faire, sous la cause (voir _SFS_OF_AIDE_*)
+                        + ("<div style='color:#fbbf24;font-size:12px;margin:-6px 0 10px'>→ "
+                           + str(_e["aide"]).replace("&", "&amp;").replace("<", "&lt;") + "</div>"
+                           if _e.get("aide") else ""))
 
     bulk_meta = {
         "niche":      {"icon": "◎", "label": "Niche",       "placeholder": "ex: CAISSE"},
@@ -46776,11 +46829,24 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         f"async function fetchOfStats_{page}(){{"
         f"  const b=document.getElementById('setup-of-btn-{page}');"
         f"  if(b){{ b.disabled=true; b.textContent='↻ Lecture OnlyFans…'; }}"
+        # L alerte dit TOUJOURS une cause. Avant : « Erreur : ? » des que le
+        # serveur rendait ok=false sans champ error (18/11/2026, les quatre
+        # modeles refuses par MyPuls), et une erreur de syntaxe JSON quand la
+        # reponse n etait pas du JSON (session du dashboard expiree).
+        f"  let msg='', recharger=false;"
         f"  try{{"
-        f"    const r=await fetch('/sfssetup/fetch_of_stats'); const j=await r.json();"
-        f"    if(!j.ok){{ alert('Erreur : '+(j.error||'?')); }}"
-        f"    else {{ alert((j.remplis||[]).length+' modele(s) mis a jour depuis OnlyFans'+((j.erreurs||[]).length?(' — '+j.erreurs.join(' ; ')):'')); location.reload(); return; }}"
-        f"  }}catch(e){{ alert('Erreur : '+e); }}"
+        f"    const r=await fetch('/sfssetup/fetch_of_stats');"
+        f"    let j=null; try{{ j=await r.json(); }}catch(e){{}}"
+        f"    if(j&&j.ok){{ alert((j.remplis||[]).length+' modele(s) mis a jour depuis OnlyFans'+((j.erreurs||[]).length?(' — '+j.erreurs.join(' ; ')):'')); location.reload(); return; }}"
+        f"    if(r.status===401) msg='Ta session sur le dashboard a expiré. Recharge la page et reconnecte-toi.';"
+        f"    else if(r.status===403) msg='Ce compte n’a pas le droit de relire les chiffres OnlyFans.';"
+        f"    else if(j&&j.error){{ msg=j.error; recharger=true; }}"
+        f"    else if(j&&(j.erreurs||[]).length){{ msg=j.erreurs.join(' ; '); recharger=true; }}"
+        f"    else msg='Le serveur a répondu HTTP '+r.status+' sans explication. Réessaie dans une minute ; si ça dure, le site est peut-être en train de redémarrer.';"
+        f"  }}catch(e){{ msg='Le site ne répond pas ('+e+'). Vérifie ta connexion, puis réessaie.'; }}"
+        f"  alert('Chiffres OnlyFans non relus.\\n\\n'+msg);"
+        # la page montre alors le meme releve que l alerte, pas celui d avant
+        f"  if(recharger){{ location.reload(); return; }}"
         f"  if(b){{ b.disabled=false; b.textContent='↻ Chiffres depuis OnlyFans'; }}"
         f"}}"
         f"async function fetchMyPulsSubs_{page}(){{"
@@ -74732,7 +74798,10 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         r = _sfssetup_autofill_of(force=True)
-        return jsonify({"ok": bool(r.get("ok")), "error": r.get("error"),
+        ok = bool(r.get("ok"))
+        # un echec part TOUJOURS avec sa cause : le bouton l affiche telle quelle
+        return jsonify({"ok": ok,
+                        "error": None if ok else (r.get("error") or _sfs_of_cause(r.get("erreurs") or [])),
                         "remplis": r.get("remplis") or [], "erreurs": r.get("erreurs") or []})
 
     @app.route("/sfssetup/fetch_mypuls_subs", methods=["GET"])

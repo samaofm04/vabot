@@ -19693,6 +19693,65 @@ try:
             _sOA["role"] = "chatter"
         check("role restreint : /sfssetup/fetch_of_stats refuse (un GET qui ecrit)",
               _cChOA.get("/sfssetup/fetch_of_stats").status_code == 403)
+
+        # 18/11/2026 : MyPuls met un code par e-mail (« Confirmez votre
+        # connexion ») devant l acces OnlyFans. Les quatre modeles sortaient en
+        # « HTTP 401 », et le bouton affichait « Erreur : ? ». Les reponses
+        # ci-dessous sont celles relevees sur le serveur.
+        class _RepOA:
+            def __init__(self, code, texte="", url="https://mypuls.app/x"):
+                self.status_code, self.text, self.url = code, texte, url
+
+            def json(self):
+                return _jsOA.loads(self.text)
+
+        class _SessOA:
+            def __init__(self, code=401, texte='{"error":"step_up_required","redirect":"\\/securite\\/verifier"}'):
+                self.code, self.texte = code, texte
+
+            def get(self, url, **kw):
+                if "/switch-creator/" in url:
+                    return _RepOA(200, "<title>Confirmez votre connexion</title>",
+                                  "https://mypuls.app/securite/verifier")
+                return _RepOA(self.code, self.texte, url)
+
+        _vraiOA = _savOA[4]                       # le vrai of_fans_stats
+        _vOA = _vraiOA(3106, session=_SessOA())
+        check("code par e-mail de MyPuls : reconnu, pas un « HTTP 401 » muet",
+              _vOA.get("ok") is False and _vOA.get("verification") is True
+              and "Confirmez votre connexion" in _vOA.get("error", ""), str(_vOA))
+        _pOA = _vraiOA(3106, session=_SessOA(500, "oups"))
+        check("une vraie panne reste une panne : HTTP 500, pas une demande de code",
+              _pOA.get("error") == "accès OF indisponible (HTTP 500)" and not _pOA.get("verification"), str(_pOA))
+        check("page de code rendue a la place de la page Mass DM : dite aussi",
+              _mpOA.of_massdm_open(3106, _SessOA()).get("verification") is True)
+        _mpOA.of_fans_stats = lambda cid, session=None: {"ok": False, "verification": True,
+                                                         "error": _mpOA.VERIFICATION_MYPULS}
+        _rvOA = _wOA._sfssetup_autofill_of(force=True)
+        check("code demande : UNE ligne qui nomme tous les modeles, la cause et quoi faire",
+              len(_rvOA.get("erreurs") or []) == 1
+              and all(n in _rvOA["erreurs"][0] for n in ("Amelia", "Emy", "Jessye", "Khloe"))
+              and "Confirmez votre connexion" in _rvOA.get("error", "")
+              and "extension" in _rvOA.get("aide", "") and _rvOA["aide"] in _rvOA["error"], str(_rvOA)[:300])
+        _jvOA = _cOA.get("/sfssetup/fetch_of_stats").get_json()
+        check("le bouton recoit la cause : plus jamais « Erreur : ? »",
+              _jvOA.get("ok") is False and "Confirmez votre connexion" in (_jvOA.get("error") or ""), str(_jvOA)[:200])
+        _pvOA = _cOA.get("/?lazy=sfssetupoffr", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("page apres un releve rate : « aucun chiffre lu » et la date des chiffres affiches",
+              "aucun chiffre lu" in _pvOA and "Les chiffres affichés datent du" in _pvOA
+              and "Chiffres OnlyFans relevés le" not in _pvOA and "les remettre avec l'extension" in _pvOA)
+        check("l alerte du bouton ne sait plus dire « ? »",
+              "'?'" not in _pvOA.split("async function fetchOfStats_offr")[1].split("async function")[0])
+        _mpOA.of_fans_stats = lambda cid, session=None: {"ok": False, "error": "accès OF indisponible (HTTP 500)"}
+        _jpOA = _cOA.get("/sfssetup/fetch_of_stats").get_json()
+        check("panne sans cause commune : chaque modele nomme dans la cause, aucune aide inventee",
+              all(n in (_jpOA.get("error") or "") for n in ("Amelia", "Khloe")) and "HTTP 500" in _jpOA["error"]
+              and not _wOA._sfssetup_autofill_of_etat().get("aide"), str(_jpOA)[:200])
+        _mpOA._make_session = lambda: None
+        _jcOA = _cOA.get("/sfssetup/fetch_of_stats").get_json()
+        check("site sans cookie MyPuls : dit, avec ou cliquer pour le remettre",
+              "plus de cookie MyPuls" in (_jcOA.get("error") or "") and "Cookies → youl4b" in _jcOA["error"],
+              str(_jcOA)[:200])
     finally:
         (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
          _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users) = _savOA
