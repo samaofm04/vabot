@@ -380,6 +380,7 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
         _noter_lecture(ok=False, error=f"MyPuls ne répond pas ({type(e).__name__})")
         return out
     if mypuls.verification_demandee(r):
+        mypuls.noter_verification()
         _noter_lecture(ok=False, cause="verification", error=mypuls.VERIFICATION_MYPULS)
         return out
     if r.status_code != 200:
@@ -423,4 +424,6 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     if not out:
         _noter_lecture(ok=False, error="page des créatrices lue chez MyPuls, mais aucun nombre d'abonnés "
                                        f"reconnu ({len(chunks) - 1} carte(s)) — MyPuls a peut-être changé sa page")
+    else:
+        mypuls.lever_verification()       # la page s est ouverte : le code n est plus demande
     return out

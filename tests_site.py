@@ -19627,7 +19627,10 @@ try:
     _dOA = _plOA.Path(_tfOA.mkdtemp())
     _savOA = (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
               _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users)
+    _savCfgOA = (_mpOA.CONFIG_FILE, dict(_mpOA._VERIF_VU))
     try:
+        _mpOA.CONFIG_FILE = _dOA / "mypuls_cookies.json"
+        _mpOA._VERIF_VU["demandee"] = None
         _ssOA.SETUP_FILE = _dOA / "sfs_setup.json"
         _wOA.SFS_OF_AUTOFILL_FILE = _dOA / "sfs_of_autofill.json"
         # etat de depart du serveur : fiches FR remplies a la main, Jessye decochee
@@ -19845,8 +19848,212 @@ try:
     finally:
         (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
          _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users) = _savOA
+        _mpOA.CONFIG_FILE = _savCfgOA[0]
+        _mpOA._VERIF_VU.update(_savCfgOA[1])
 except Exception as _eOA:
     check("Setup SFS OF remplissage auto : testable", False, repr(_eOA)[:200])
+
+print()
+print("=" * 70)
+print("Code de confirmation MyPuls : le site le fait envoyer et le saisit")
+print("=" * 70)
+# 18/11/2026. MyPuls met « Confirmez votre connexion » (un code par e-mail)
+# devant ses pages d abonnes. Le faux MyPuls ci-dessous a les formulaires
+# releves sur la vraie page, et l hypothese la plus dure : le code ne vaut que
+# dans la session qui l a demande, et l appareil retenu se reconnait a mp_dev.
+try:
+    import json as _jsCV
+    import time as _tCV
+    import types as _tyCV
+    import tempfile as _tfCV
+    import pathlib as _plCV
+    import mypuls as _mpCV
+    import web_upload as _wCV
+    from requests.cookies import RequestsCookieJar as _JarCV
+
+    _PAGE_CV = ('<title>Confirmez votre connexion | MyPuls.app</title>%s'
+                '<form method="post" action="/securite/verifier">'
+                '<input type="hidden" name="_token" value="jeton-code">'
+                '<input id="code" name="code" type="text" maxlength="12">'
+                '<input type="checkbox" name="trust_device" value="1" checked>'
+                '<button type="submit">Confirmer</button></form>'
+                '<form method="post" action="/securite/verifier/email">'
+                '<input type="hidden" name="_token" value="jeton-email">'
+                '<button type="submit">Recevoir un code par e-mail</button></form>')
+
+    class _RepCV:
+        def __init__(self, code, texte, url):
+            self.status_code, self.text, self.url, self.content = code, texte, url, texte.encode("utf-8")
+
+        def json(self):
+            return _jsCV.loads(self.text)
+
+    class _SrvCV:
+        sessions, appareils, emails, n, code = {}, set(), 0, 0, None
+
+    class _SessCV:
+        def __init__(self):
+            self.cookies, self.headers = _JarCV(), {}
+
+        def _c(self, nom):
+            return self.cookies.get(nom, domain="mypuls.app")
+
+        def _page(self, extra=""):
+            if not self._c("mp_dev"):
+                _SrvCV.n += 1
+                self.cookies.set("mp_dev", "appareil%d" % _SrvCV.n, domain="mypuls.app", path="/")
+            return _RepCV(200, _PAGE_CV % extra, "https://mypuls.app/securite/verifier")
+
+        def _servir(self, methode, url, data=None):
+            chemin = url.replace("https://mypuls.app", "").split("?")[0]
+            sid = self._c("PHPSESSID")
+            if sid not in _SrvCV.sessions:
+                if not self._c("REMEMBERME"):
+                    return _RepCV(200, "<title>Connexion | MyPuls.app</title>", url)
+                _SrvCV.n += 1
+                sid = "session%d" % _SrvCV.n
+                # une session NEUVE n est confirmee d office que sur un appareil retenu
+                _SrvCV.sessions[sid] = {"ok": self._c("mp_dev") in _SrvCV.appareils}
+                self.cookies.set("PHPSESSID", sid, domain="mypuls.app", path="/")
+            sess = _SrvCV.sessions[sid]
+            d = data or {}
+            if chemin == "/profil":
+                return _RepCV(200, "<title>Profil | MyPuls.app</title>", url)
+            if chemin == "/securite/verifier" and methode == "GET":
+                return _RepCV(200, "<title>Accueil</title>", "https://mypuls.app/") if sess["ok"] else self._page()
+            if chemin == "/securite/verifier/email" and methode == "POST":
+                if d.get("_token") != "jeton-email":
+                    return _RepCV(403, "jeton refuse", url)
+                _SrvCV.emails += 1
+                _SrvCV.code = {"sid": sid, "code": "482913"}
+                return self._page()
+            if chemin == "/securite/verifier" and methode == "POST":
+                if d.get("_token") != "jeton-code":
+                    return _RepCV(403, "jeton refuse", url)
+                if _SrvCV.code and d.get("code") == _SrvCV.code["code"] and _SrvCV.code["sid"] == sid:
+                    sess["ok"] = True
+                    if d.get("trust_device") == "1":
+                        _SrvCV.appareils.add(self._c("mp_dev"))
+                    return _RepCV(200, "<title>Accueil</title>", "https://mypuls.app/")
+                return self._page('<div class="alert alert-danger" role="alert"><i></i> Code invalide ou expiré.</div>')
+            if not sess["ok"]:
+                if chemin.startswith("/of-nav/"):
+                    return _RepCV(401, '{"error":"step_up_required","redirect":"\\/securite\\/verifier"}', url)
+                return self._page()
+            if chemin == "/of-nav/api2/v2/users/me":
+                return _RepCV(200, '{"id": 7, "username": "amelia", "subscribersCount": 5750}', url)
+            if chemin.startswith("/of-nav/"):
+                return _RepCV(200, '{"fans": {"subscribers": {"total": 480}}}', url)
+            return _RepCV(200, "<html><body>page ouverte</body></html>", url)
+
+        def get(self, url, **kw):
+            return self._servir("GET", url)
+
+        def post(self, url, data=None, **kw):
+            return self._servir("POST", url, data)
+
+    _dCV = _plCV.Path(_tfCV.mkdtemp())
+    _savCV = (_mpCV.CONFIG_FILE, _mpCV.requests, dict(_mpCV._VERIF_VU), dict(_mpCV._VERIF_SESSION),
+              _wCV._load_web_users, _wCV._apres_code_mypuls)
+    try:
+        _mpCV.CONFIG_FILE = _dCV / "mypuls_cookies.json"
+        _mpCV.requests = _tyCV.SimpleNamespace(Session=_SessCV)
+        _mpCV._VERIF_VU["demandee"] = None
+        _mpCV._VERIF_SESSION.clear()
+        _remCV = "App.Entity.User%%3AYWJj%%3A%d%%3Asignature" % (int(_tCV.time()) + 5 * 86400)
+        _SrvCV.sessions["vieille"] = {"ok": False}
+        _mpCV.save_config({"PHPSESSID": "vieille", "REMEMBERME": _remCV})
+        _relancesCV = []
+        _wCV._apres_code_mypuls = lambda: _relancesCV.append(1)
+        _wCV._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                        "chat": {"role": "chatter", "password": "x"}}
+        _appCV = _wCV.create_app()
+        _appCV.config["TESTING"] = True
+
+        def _clientCV(nom, role):
+            c = _appCV.test_client()
+            with c.session_transaction() as _s:
+                _s["auth"] = True
+                _s["username"] = nom
+                _s["role"] = role
+            return c
+        _cCV = _clientCV("admin", "admin")
+
+        check("depart : MyPuls demande le code au site (page fermee)",
+              _mpCV.verification_etat().get("etat") == "demandee")
+        _ofCV = _mpCV.of_fans_stats(3106)
+        check("une lecture OnlyFans refusee note « code demande », sans toucher aux cookies",
+              _ofCV.get("verification") is True and _mpCV.cookies_etat().get("code_depuis")
+              and _mpCV.load_config().get("PHPSESSID") == "vieille")
+        _srvCV = [x for x in _wCV._cookies_etat_services() if x.get("cle") == "mypuls"][0]
+        check("Reglages et extension : cookie bon MAIS code demande, en alerte (pas « ko »)",
+              _srvCV.get("niveau") == "alerte" and "code de confirmation" in _srvCV.get("texte", "")
+              and "Recevoir le code" in _srvCV.get("aide", ""), str(_srvCV)[:200])
+        check("Reglages : le cadre de saisie du code est la",
+              "mp-verif-code" in _wCV._render_cookies_etat() and "/mypuls/verification/confirmer" in _wCV._render_cookies_etat())
+        check("role restreint : ne peut ni faire envoyer ni saisir le code (403)",
+              _clientCV("chat", "chatter").post("/mypuls/verification/envoyer").status_code == 403
+              and _clientCV("chat", "chatter").post("/mypuls/verification/confirmer", data={"code": "482913"}).status_code == 403)
+        check("sans session du dashboard : 401", _appCV.test_client().post("/mypuls/verification/envoyer").status_code == 401)
+        check("... et rien n est parti chez MyPuls", _SrvCV.emails == 0)
+
+        _e1CV = _cCV.post("/mypuls/verification/envoyer").get_json()
+        check("« 1 · Recevoir le code » : MyPuls envoie UN e-mail",
+              _e1CV.get("ok") is True and _SrvCV.emails == 1, str(_e1CV))
+        check("l appareil que MyPuls vient de nommer est garde a cote des cookies",
+              str(_mpCV.load_config().get("mp_dev") or "").startswith("appareil"))
+        _e2CV = _cCV.post("/mypuls/verification/envoyer").get_json()
+        check("deux clics de suite : un seul e-mail, et c est dit",
+              _e2CV.get("ok") is False and "vient d'être demandé" in _e2CV.get("error", "") and _SrvCV.emails == 1)
+        _k0CV = _cCV.post("/mypuls/verification/confirmer", data={"code": "12"}).get_json()
+        check("un code trop court n est pas envoye a MyPuls", _k0CV.get("ok") is False and "4 à 12" in _k0CV.get("error", ""))
+        _k1CV = _cCV.post("/mypuls/verification/confirmer", data={"code": "000000"}).get_json()
+        check("mauvais code : refuse, avec les mots de MyPuls, et le code reste demande",
+              _k1CV.get("ok") is False and _k1CV.get("refuse") is True and "Code invalide ou expiré" in _k1CV.get("error", "")
+              and _mpCV.cookies_etat().get("code_depuis") and not _relancesCV, str(_k1CV))
+        # entre les deux clics, un renouvellement range une AUTRE session dans le fichier
+        _cfgCV = _mpCV.load_config()
+        _cfgCV["PHPSESSID"] = "intruse"
+        _mpCV.save_config(_cfgCV)
+        _k2CV = _cCV.post("/mypuls/verification/confirmer", data={"code": " 482913 "}).get_json()
+        check("bon code : accepte dans la session qui l avait demande, meme si le fichier a change entre-temps",
+              _k2CV.get("ok") is True, str(_k2CV))
+        _cfgCV = _mpCV.load_config()
+        check("la session confirmee et l appareil sont gardes, le drapeau est leve, les releves repartent",
+              _cfgCV.get("PHPSESSID") == "vieille" and _cfgCV.get("mp_dev") in _SrvCV.appareils
+              and not _cfgCV.get("verification_demandee") and _relancesCV == [1], str(sorted(_cfgCV)))
+        check("apres : la page fermee s ouvre, et une lecture OnlyFans passe",
+              _mpCV.verification_etat().get("etat") == "passee" and _mpCV.of_fans_stats(3106).get("abonnes") == 5750)
+        check("Reglages : plus d alerte ni de cadre",
+              [x for x in _wCV._cookies_etat_services() if x.get("cle") == "mypuls"][0].get("niveau") == "ok"
+              and "mp-verif-code" not in _wCV._render_cookies_etat())
+        # le renouvellement (deux fois par jour, et a chaque redemarrage) ouvre une session NEUVE
+        _rCV = _mpCV.auto_refresh()
+        check("renouvellement automatique : la session neuve est celle de l appareil retenu, le code n est pas redemande",
+              _rCV.get("ok") is True and _mpCV.load_config().get("PHPSESSID") not in ("vieille", "intruse")
+              and _mpCV.verification_etat().get("etat") == "passee", str(_rCV))
+        _d1CV = _cCV.post("/mypuls/verification/envoyer").get_json()
+        check("« Recevoir le code » quand plus rien n est demande : dit, aucun e-mail",
+              _d1CV.get("ok") is True and _d1CV.get("deja") is True and _SrvCV.emails == 1, str(_d1CV))
+        _cCV.post("/mypuls/clear_cookies")
+        check("« Reset cookies » efface la connexion, pas l appareil retenu",
+              not _mpCV.load_config().get("REMEMBERME") and _mpCV.load_config().get("mp_dev") in _SrvCV.appareils)
+        # temoin : sans mp_dev, le faux MyPuls redemande bien le code (le test ci-dessus prouve donc quelque chose)
+        _mpCV.save_config({"REMEMBERME": _remCV})
+        _mpCV._VERIF_SESSION.clear()
+        check("temoin : une session neuve SANS l appareil retenu se voit redemander le code",
+              _mpCV.auto_refresh().get("ok") is True and _mpCV.verification_etat().get("etat") == "demandee")
+        _carteCV = _wCV._MYPULS_CARTE_CODE
+        check("le cadre : deux boutons, aucun identifiant fixe (plusieurs cadres dans le meme document)",
+              _carteCV.count("mpVerif(this,") == 2 and " id=" not in _carteCV and "'?'" not in _carteCV)
+    finally:
+        (_mpCV.CONFIG_FILE, _mpCV.requests) = _savCV[:2]
+        _mpCV._VERIF_VU.update(_savCV[2])
+        _mpCV._VERIF_SESSION.clear()
+        _mpCV._VERIF_SESSION.update(_savCV[3])
+        (_wCV._load_web_users, _wCV._apres_code_mypuls) = _savCV[4:]
+except Exception as _eCV:
+    check("code de confirmation MyPuls : testable", False, repr(_eCV)[:300])
 
 print()
 print("=" * 70)

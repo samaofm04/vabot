@@ -1313,6 +1313,7 @@ def _make_session() -> Optional[requests.Session]:
     # Set cookies with the domain so they get sent + Set-Cookie peut les remplacer
     for name, value in cookies.items():
         s.cookies.set(name, value, domain="mypuls.app", path="/")
+    _poser_appareil(s)
     s.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1331,6 +1332,7 @@ def _save_rotated_cookies(session: requests.Session) -> bool:
     """
     cfg = load_config()
     changed = False
+    appareil = False
     for c in session.cookies:
         if c.domain not in ("mypuls.app", ".mypuls.app", ""):
             continue
@@ -1339,11 +1341,34 @@ def _save_rotated_cookies(session: requests.Session) -> bool:
             if c.value and c.value != old:
                 cfg[c.name] = c.value
                 changed = True
+        elif c.name == COOKIE_APPAREIL and c.value and c.value != cfg.get(COOKIE_APPAREIL, ""):
+            cfg[COOKIE_APPAREIL] = c.value
+            appareil = True
     if changed:
         import time as _t
         cfg["last_refreshed"] = int(_t.time())
+    if changed or appareil:
         save_config(cfg)
     return changed
+
+
+#: Le cookie par lequel MyPuls reconnait un APPAREIL. Sa page « Confirmez
+#: votre connexion » le pose ; une fois le code saisi avec « Se souvenir de cet
+#: appareil pendant un an », c'est lui qui evite de redemander le code a chaque
+#: session neuve. Le site le garde donc a cote de PHPSESSID et REMEMBERME, et
+#: le renvoie a chaque requete. Ni « Reset cookies » ni un cookie remis par
+#: l'extension ne l'effacent : il designe le site, pas une connexion.
+COOKIE_APPAREIL = "mp_dev"
+
+
+def _poser_appareil(session: requests.Session) -> None:
+    """Ajoute a une session le cookie d'appareil garde par le site, s'il y en a un."""
+    try:
+        valeur = load_config().get(COOKIE_APPAREIL)
+        if valeur:
+            session.cookies.set(COOKIE_APPAREIL, str(valeur), domain="mypuls.app", path="/")
+    except Exception:
+        pass
 
 
 # ---- Le cookie REMEMBERME : son compte, son echeance, sa remise -------------
@@ -1403,6 +1428,9 @@ def _essai_profil(cookies: Dict[str, str], timeout: int = TIMEOUT) -> Dict[str, 
     s = requests.Session()
     for nom, v in cookies.items():
         s.cookies.set(nom, v, domain="mypuls.app", path="/")
+    # la session ouverte ici doit etre celle de l'appareil deja confirme :
+    # sans lui, chaque renouvellement (deux fois par jour) redemanderait le code
+    _poser_appareil(s)
     s.headers.update(_ENTETES_NAVIGATEUR)
     try:
         r = s.get(f"{BASE_URL}/profil", timeout=timeout, allow_redirects=True)
@@ -1444,6 +1472,8 @@ def cookies_etat() -> Dict[str, Any]:
         "expire": echeance_rememberme(rem) if rem else None,
         "renouvele": cfg.get("last_refreshed") or None,
         "refuse_depuis": cfg.get("cookies_refuses") or None,
+        # MyPuls demande son code par e-mail (voir VERIFICATION_MYPULS)
+        "code_depuis": cfg.get("verification_demandee") or None,
     }
 
 
@@ -1494,6 +1524,9 @@ def remettre_rememberme(rememberme: str, forcer: bool = False) -> Dict[str, Any]
         # autre compte : envoyee avec le REMEMBERME neuf, c'est elle que MyPuls
         # suivrait. Sans elle, la prochaine requete en ouvre une.
         cfg.pop("PHPSESSID", None)
+    appareil = next((c.value for c in jar if c.name == COOKIE_APPAREIL), "")
+    if appareil:
+        cfg[COOKIE_APPAREIL] = appareil
     cfg["last_refreshed"] = int(_t.time())
     cfg.pop("cookies_refuses", None)
     save_config(cfg)
@@ -3855,8 +3888,223 @@ def _refus_acces_of(reponse) -> Dict[str, Any]:
     Setup SFS : `verification` dit a l'appelant que la cause vaut pour TOUTES
     les creatrices (inutile de la repeter quatre fois)."""
     if verification_demandee(reponse):
+        noter_verification()
         return {"ok": False, "verification": True, "error": VERIFICATION_MYPULS}
     return {"ok": False, "error": f"accès OF indisponible (HTTP {reponse.status_code})"}
+
+
+# ---- Saisir ce code pour le site ---------------------------------------------
+#
+# Le code vaut pour un appareil. Celui que le proprietaire saisit dans son
+# Chrome ne sert pas au site, et l'extension ne transmet que le cookie de
+# connexion. Le site passe donc l'etape lui-meme, en deux temps demandes depuis
+# le dashboard (Reglages > Cookies MyPuls, et les pages Setup SFS) :
+#   1. verification_envoyer_code() : POST /securite/verifier/email (_token).
+#      MyPuls envoie le code a l'adresse du compte.
+#   2. verification_confirmer(code) : POST /securite/verifier (_token, code,
+#      trust_device=1 = « Se souvenir de cet appareil pendant un an »).
+# Formulaires releves sur la page le 18/11/2026. Ce que MyPuls REPOND a ces deux
+# envois n'a pas pu etre releve sans un vrai code : le succes n'est donc jamais
+# lu dans la reponse, il est constate — une page que MyPuls fermait s'ouvre.
+_VERIF_PAGE = "/securite/verifier"
+#: Une page que MyPuls ferme tant que le code n'est pas saisi (relevee le
+#: 18/11/2026 : 302 vers /securite/verifier), et qui ne change rien chez lui.
+_VERIF_TEMOIN = "/creators"
+#: La session qui a demande le code, gardee 20 min : le code se saisit dans
+#: CELLE-LA. Entre les deux clics, un renouvellement automatique ou un envoi de
+#: l'extension peut ranger une autre session dans le fichier des cookies.
+_VERIF_SESSION: Dict[str, Any] = {}
+_VERIF_SESSION_S = 20 * 60
+_VERIF_ENVOI_MIN_S = 30
+_VERIF_VERROU = _th.Lock()
+#: Ce que ce processus sait deja du drapeau (None = pas encore regarde) :
+#: lever_verification est appelee a chaque lecture OnlyFans reussie, elle ne
+#: doit pas relire le fichier des cookies a chaque fois.
+_VERIF_VU: Dict[str, Any] = {"demandee": None}
+
+
+def noter_verification() -> None:
+    """MyPuls vient de demander son code. La date du PREMIER constat est
+    gardee : Reglages, l'extension et les pages Setup SFS la montrent."""
+    if _VERIF_VU["demandee"] is True:
+        return
+    try:
+        import time as _t
+        cfg = load_config()
+        if not cfg.get("verification_demandee"):
+            cfg["verification_demandee"] = int(_t.time())
+            save_config(cfg)
+        _VERIF_VU["demandee"] = True
+    except Exception:
+        pass
+
+
+def lever_verification() -> None:
+    """Une page fermee par le code s'est ouverte : il n'est plus demande."""
+    if _VERIF_VU["demandee"] is False:
+        return
+    try:
+        cfg = load_config()
+        if cfg.pop("verification_demandee", None):
+            save_config(cfg)
+        _VERIF_VU["demandee"] = False
+    except Exception:
+        pass
+
+
+def _jeton_formulaire(page: str, action: str) -> str:
+    """Le champ cache `_token` du formulaire qui poste vers `action`. La page
+    en porte deux (envoi du code, saisie du code) : chacun a le sien."""
+    for f in re.finditer(r"<form\b([^>]*)>(.*?)</form>", page or "", re.S | re.I):
+        a = re.search(r"""action=["']([^"']*)["']""", f.group(1), re.I)
+        if not a or a.group(1).split("?")[0].rstrip("/") != action:
+            continue
+        for champ in re.finditer(r"<input\b[^>]*>", f.group(2), re.I):
+            if re.search(r"""name=["']_token["']""", champ.group(0), re.I):
+                v = re.search(r"""value=["']([^"']*)["']""", champ.group(0), re.I)
+                if v:
+                    return unescape(v.group(1))
+    return ""
+
+
+def _message_page(page: str) -> str:
+    """Ce que MyPuls ecrit dans un bandeau de sa page (« Code invalide »…),
+    "" s'il n'y en a pas. Du texte nu, coupe a 200 caracteres."""
+    m = re.search(r"""<div\b[^>]*class=["'][^"']*\b(?:alert|invalid-feedback|text-danger)\b[^"']*["'][^>]*>(.*?)</div>""",
+                  page or "", re.S | re.I)
+    if not m:
+        return ""
+    texte = _WS_RE.sub(" ", unescape(_HTML_TAG_RE.sub(" ", m.group(1)))).strip()
+    return texte[:200]
+
+
+def _session_verification() -> Optional[requests.Session]:
+    import time as _t
+    s = _VERIF_SESSION.get("s")
+    if s is not None and _t.time() - float(_VERIF_SESSION.get("t") or 0) < _VERIF_SESSION_S:
+        return s
+    s = _make_session()
+    if s is not None:
+        _VERIF_SESSION.update(s=s, t=_t.time())
+    return s
+
+
+def verification_etat(session: Optional[requests.Session] = None) -> Dict[str, Any]:
+    """Ou en est le site : {"etat": "demandee" | "passee" | "cookies" | "panne", "error"}.
+
+    Constate sur une page que MyPuls ferme tant que le code n'est pas saisi,
+    jamais deduit d'un message."""
+    s = session or _make_session()
+    if s is None:
+        return {"etat": "cookies", "error": "le site n'a plus de cookie MyPuls"}
+    try:
+        r = s.get(f"{BASE_URL}{_VERIF_TEMOIN}", timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"etat": "panne", "error": f"MyPuls ne répond pas ({type(e).__name__})"}
+    if verification_demandee(r):
+        return {"etat": "demandee"}
+    if r.status_code == 200 and not _detect_login_redirect(r.text):
+        return {"etat": "passee"}
+    if r.status_code in (200, 401):
+        return {"etat": "cookies", "error": "MyPuls ne reconnaît plus le cookie du site (il rend sa page de connexion)"}
+    return {"etat": "panne", "error": f"MyPuls a répondu HTTP {r.status_code}"}
+
+
+def _verification_passee(s: requests.Session) -> Dict[str, Any]:
+    """La session `s` passe : on la garde (elle, et l'appareil confirme)."""
+    _save_rotated_cookies(s)
+    lever_verification()
+    _VERIF_SESSION.clear()
+    return {"ok": True}
+
+
+def _page_du_code(s: requests.Session) -> Dict[str, Any]:
+    """Ouvre la page du code avec `s`. {"page": html} si MyPuls la montre,
+    sinon le verdict a rendre tel quel (deja confirmee, cookie mort, panne)."""
+    try:
+        r = s.get(f"{BASE_URL}{_VERIF_PAGE}", timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "error": f"MyPuls ne répond pas ({type(e).__name__})"}
+    if r.status_code == 200 and verification_demandee(r) and _jeton_formulaire(r.text, _VERIF_PAGE):
+        return {"page": r.text}
+    e = verification_etat(s)
+    if e["etat"] == "passee":
+        return dict(_verification_passee(s), deja=True)
+    if e["etat"] == "demandee":
+        return {"ok": False, "error": "La page de confirmation de MyPuls n'a plus la forme connue "
+                                      "(formulaire du code introuvable) : MyPuls l'a peut-être changée."}
+    return {"ok": False, "cause": e["etat"], "error": e.get("error") or "MyPuls ne répond pas comme attendu"}
+
+
+def verification_envoyer_code() -> Dict[str, Any]:
+    """Fait envoyer par MyPuls son code de confirmation, a l'adresse e-mail du
+    compte. {"ok": True} ; {"ok": True, "deja": True} si plus rien n'est
+    demande ; {"ok": False, "error"} sinon."""
+    import time as _t
+    with _VERIF_VERROU:
+        if _t.time() - float(_VERIF_SESSION.get("envoi") or 0) < _VERIF_ENVOI_MIN_S:
+            return {"ok": False, "error": "Un code vient d'être demandé : regarde tes e-mails. "
+                                          "Attends 30 secondes avant d'en redemander un."}
+        s = _session_verification()
+        if s is None:
+            return {"ok": False, "cause": "cookies", "error": "Le site n'a plus de cookie MyPuls : "
+                    "remets-le d'abord avec l'extension « Cookies → youl4b »."}
+        vu = _page_du_code(s)
+        if "page" not in vu:
+            return vu
+        jeton = _jeton_formulaire(vu["page"], _VERIF_PAGE + "/email")
+        if not jeton:
+            return {"ok": False, "error": "Le bouton « Recevoir un code par e-mail » de MyPuls est "
+                                          "introuvable sur sa page : MyPuls l'a peut-être changée."}
+        try:
+            p = s.post(f"{BASE_URL}{_VERIF_PAGE}/email", data={"_token": jeton},
+                       timeout=TIMEOUT, allow_redirects=True)
+        except Exception as e:
+            return {"ok": False, "error": f"MyPuls ne répond pas ({type(e).__name__})"}
+        if p.status_code >= 400:
+            dit = _message_page(p.text)
+            return {"ok": False, "error": f"MyPuls a refusé d'envoyer le code (HTTP {p.status_code})"
+                                          + (f" : {dit}" if dit else ".")}
+        _VERIF_SESSION["envoi"] = _t.time()
+        # la session qui attend le code, et l'appareil que MyPuls vient de nommer
+        _save_rotated_cookies(s)
+        noter_verification()
+        return {"ok": True}
+
+
+def verification_confirmer(code: str) -> Dict[str, Any]:
+    """Saisit le code recu par e-mail, en cochant « Se souvenir de cet
+    appareil ». {"ok": True} quand la page fermee s'ouvre ; sinon
+    {"ok": False, "error"}, avec "refuse" si MyPuls n'a pas voulu du code."""
+    code = str(code or "").strip()
+    # la forme que le champ de MyPuls accepte (pattern et maxlength de sa page)
+    if not re.fullmatch(r"[0-9A-Za-z -]{4,12}", code):
+        return {"ok": False, "error": "Ce n'est pas un code MyPuls : 4 à 12 chiffres ou lettres, "
+                                      "comme dans l'e-mail."}
+    with _VERIF_VERROU:
+        s = _session_verification()
+        if s is None:
+            return {"ok": False, "cause": "cookies", "error": "Le site n'a plus de cookie MyPuls : "
+                    "remets-le d'abord avec l'extension « Cookies → youl4b »."}
+        vu = _page_du_code(s)
+        if "page" not in vu:
+            return vu
+        try:
+            p = s.post(f"{BASE_URL}{_VERIF_PAGE}",
+                       data={"_token": _jeton_formulaire(vu["page"], _VERIF_PAGE),
+                             "code": code, "trust_device": "1"},
+                       timeout=TIMEOUT, allow_redirects=True)
+        except Exception as e:
+            return {"ok": False, "error": f"MyPuls ne répond pas ({type(e).__name__})"}
+        e = verification_etat(s)
+        if e["etat"] == "passee":
+            return _verification_passee(s)
+        if e["etat"] == "demandee":
+            dit = _message_page(getattr(p, "text", "") or "")
+            return {"ok": False, "refuse": True,
+                    "error": "MyPuls n'a pas accepté ce code" + (f" : « {dit} »." if dit else
+                             " (faux, ou trop ancien).") + " Redemande un code et saisis le dernier reçu."}
+        return {"ok": False, "cause": e["etat"], "error": e.get("error") or "MyPuls ne répond pas comme attendu"}
 
 
 def _of_html_to_text(html: str) -> str:
@@ -3918,6 +4166,7 @@ def of_queue(creator_id: int, start: str, end: str,
         return {"ok": False, "error": f"accès OF: {e}"}
     if me.status_code != 200:
         return _refus_acces_of(me)
+    lever_verification()
     try:
         mj = me.json()
     except Exception:
@@ -4230,6 +4479,7 @@ def of_massdm_open(creator_id: int, session: requests.Session) -> Dict[str, Any]
     if verification_demandee(r):
         # sans ce test : « page servie pour la créatrice #None — sélection non
         # prise », qui envoyait chercher du côté du changement de créatrice
+        noter_verification()
         return {"ok": False, "verification": True, "error": VERIFICATION_MYPULS}
     if r.status_code != 200:
         return {"ok": False, "error": f"page Mass DM HTTP {r.status_code}"}
@@ -4787,6 +5037,7 @@ def of_fans_stats(creator_id: int, session: Optional[requests.Session] = None) -
         return {"ok": False, "error": f"accès OF: {e}"}
     if me.status_code != 200:
         return _refus_acces_of(me)
+    lever_verification()
     try:
         mj = me.json()
     except Exception:

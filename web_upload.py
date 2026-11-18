@@ -46344,8 +46344,96 @@ _SFS_AIDE_COOKIES = ("Remets-le : dans Chrome, icône de l'extension « Cookies 
                         "— ou Réglages › Cookies MyPuls. Puis reclique ce bouton.")
 _SFS_AIDE_VERIFICATION = ("Tes cookies MyPuls sont bons : les remettre avec l'extension n'y change rien. "
                           "Ce code vaut pour UN appareil : celui saisi dans ton Chrome ne vaut pas pour "
-                          "le site, et le site n'a pas encore de quoi le saisir. Jusque-là MyPuls lui "
-                          "ferme ses pages d'abonnés, MyM comme OnlyFans.")
+                          "le site. Fais-le envoyer puis colle-le dans le cadre « MyPuls demande de "
+                          "confirmer la connexion du site », sur cette page ou dans Réglages › Cookies MyPuls.")
+
+
+def _mypuls_code_demande() -> bool:
+    """MyPuls demande-t-il son code de confirmation au site ? Le drapeau est
+    pose par les lectures elles-memes (mypuls.noter_verification) et leve par
+    la premiere qui repasse."""
+    try:
+        import mypuls
+        e = mypuls.cookies_etat()
+        return bool(e.get("present") and e.get("code_depuis"))
+    except Exception:
+        return False
+
+
+# Le cadre ou le proprietaire fait envoyer, puis saisit, le code de MyPuls.
+# UN seul texte pour Reglages et pour les pages Setup SFS. Plusieurs cadres
+# peuvent vivre dans le meme document (les onglets y sont charges cote a
+# cote) : pas d id, le script retrouve ses champs depuis le bouton clique.
+_MYPULS_CARTE_CODE = """
+<div class='mp-verif' style='border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.06);border-radius:10px;padding:12px 14px;margin:0 0 12px;font-size:13px'>
+<div style='font-weight:700;color:#fbbf24;margin-bottom:4px'>MyPuls demande de confirmer la connexion du site</div>
+<div style='color:#888;font-size:12px;margin-bottom:10px'>MyPuls envoie un code à l’adresse e-mail de ton compte MyPuls. Clique « 1 », colle ici le code reçu, puis clique « 2 ». Le code que tu as saisi dans ton Chrome ne vaut pas pour le site.</div>
+<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>
+<button type='button' onclick='mpVerif(this,"envoyer")' style='background:transparent;border:1px solid #f59e0b;color:#f59e0b;padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12.5px;white-space:nowrap'>1 · Recevoir le code par e-mail</button>
+<input type='text' class='mp-verif-code' inputmode='numeric' autocomplete='one-time-code' maxlength='12' placeholder='code reçu' style='width:130px;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:14px;letter-spacing:.08em'>
+<button type='button' onclick='mpVerif(this,"confirmer")' style='background:transparent;border:1px solid #f59e0b;color:#f59e0b;padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12.5px;white-space:nowrap'>2 · Confirmer</button>
+</div>
+<div class='mp-verif-msg' style='margin-top:8px;font-size:12.5px;color:#888'></div>
+</div>
+<script>
+window.mpVerif = window.mpVerif || async function(btn, quoi){
+  var boite = btn.closest('.mp-verif'); if(!boite) return;
+  var msg = boite.querySelector('.mp-verif-msg'), champ = boite.querySelector('.mp-verif-code');
+  function dire(t, couleur){ msg.textContent = t; msg.style.color = couleur || '#888'; }
+  var fd = new FormData(), url = '/mypuls/verification/envoyer';
+  if(quoi === 'confirmer'){
+    var code = (champ.value || '').trim();
+    if(!code){ dire('Colle d’abord le code reçu par e-mail.', '#f59e0b'); champ.focus(); return; }
+    fd.set('code', code); url = '/mypuls/verification/confirmer';
+  }
+  var ancien = btn.textContent;
+  btn.disabled = true; btn.textContent = quoi === 'confirmer' ? 'Vérification chez MyPuls…' : 'Demande à MyPuls…';
+  var r = null, j = null, cause = '';
+  try{ r = await fetch(url, {method: 'POST', body: fd}); try{ j = await r.json(); }catch(e){} }
+  catch(e){ cause = 'Le site ne répond pas (' + e + '). Vérifie ta connexion, puis réessaie.'; }
+  btn.disabled = false; btn.textContent = ancien;
+  if(r && j && j.ok){
+    if(quoi === 'confirmer' || j.deja){
+      dire('✓ Connexion confirmée chez MyPuls. Les chiffres se relisent, la page se recharge…', '#34d399');
+      setTimeout(function(){ location.reload(); }, 2500);
+    } else {
+      dire('✓ Code demandé à MyPuls. Regarde la boîte e-mail de ton compte MyPuls (et les indésirables), puis colle le code ici.', '#34d399');
+      champ.focus();
+    }
+    return;
+  }
+  if(!cause){
+    if(r.status === 401) cause = 'Ta session sur le dashboard a expiré. Recharge la page et reconnecte-toi.';
+    else if(r.status === 403) cause = 'Seul un compte à accès complet peut confirmer la connexion MyPuls.';
+    else if(j && j.error) cause = j.error;
+    else cause = 'Le serveur a répondu HTTP ' + r.status + ' sans explication. Réessaie dans une minute.';
+  }
+  dire('✕ ' + cause, '#f87171');
+};
+</script>
+"""
+
+
+def _mypuls_carte_code() -> str:
+    """Le cadre de saisie du code, seulement quand MyPuls le demande."""
+    return _MYPULS_CARTE_CODE if _mypuls_code_demande() else ""
+
+
+def _apres_code_mypuls() -> None:
+    """Le code vient d etre accepte : les deux releves bloques (abonnes MyM,
+    chiffres OnlyFans) repartent tout de suite, en fond. Sinon la page gardait
+    son dernier echec jusqu a six heures."""
+    def _relire():
+        try:
+            import sfs_setup
+            sfs_setup.autofill_mypuls_if_stale(force=True)
+        except Exception as e:                      # noqa: BLE001
+            print(f"[cookies] apres le code MyPuls, abonnes MyM : {e}", flush=True)
+        try:
+            _sfssetup_autofill_of(force=True)
+        except Exception as e:                      # noqa: BLE001
+            print(f"[cookies] apres le code MyPuls, chiffres OnlyFans : {e}", flush=True)
+    threading.Thread(target=_relire, daemon=True, name="apres-code-mypuls").start()
 
 
 def _sfs_mym_cause(lu: dict) -> str:
@@ -46785,6 +46873,8 @@ def _render_sfssetup_html(page: str = "mym") -> str:
             "<div style='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);color:#f59e0b;"
             "border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12.5px'>⚠ "
             + n.replace("&", "&amp;").replace("<", "&lt;") + "</div>" for n in _notes))
+        # MyPuls demande son code : il se saisit ici, sans quitter la page
+        + _mypuls_carte_code()
         # Cards
         + cards_html
         # Bouton generate + output (avec id specifique a la plateforme)
@@ -46922,15 +47012,17 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         # abonnes… Faut un HAR », un message du temps ou la lecture n existait
         # pas. Le 18/11/2026 il s affichait alors que MyPuls demandait un code.
         f"async function fetchMyPulsSubs_{page}(){{"
-        f"  let msg='';"
+        f"  let msg='', recharger=false;"
         f"  try{{"
         f"    const r=await fetch('/sfssetup/fetch_mypuls_subs');"
         f"    let j=null; try{{ j=await r.json(); }}catch(e){{}}"
         f"    if(j&&j.ok&&j.applied){{ alert(j.applied+' modele(s) MyM mis a jour depuis MyPuls'); location.reload(); return; }}"
         f"    if(j&&j.ok) msg='MyPuls a répondu, mais sa page ne montre aucun compte MyM avec un nombre d’abonnés. Rien n’a été changé.';"
-        f"    else msg=sfsCauseEchec_{page}(r,j);"
+        f"    else {{ msg=sfsCauseEchec_{page}(r,j); recharger=!!(j&&j.error)&&r.status<400; }}"
         f"  }}catch(e){{ msg='Le site ne répond pas ('+e+'). Vérifie ta connexion, puis réessaie.'; }}"
         f"  alert('Abonnés MyM non relus.\\n\\n'+msg);"
+        # la page montre alors la cause, et le cadre du code s il est demande
+        f"  if(recharger) location.reload();"
         f"}}"
         "</script>"
         "</div>"
@@ -59045,6 +59137,17 @@ def _cookies_etat_services() -> list:
             return {"niveau": "alerte", "texte": "Cookie enregistré, échéance illisible."}
         if exp < maintenant:
             return {"niveau": "ko", "texte": "Échu depuis le %s." % _jour(exp)}
+        if e.get("code_depuis"):
+            # Le cookie est bon ET le site est bloque : le 18/11/2026 cette
+            # ligne restait verte pendant que MyPuls fermait ses pages
+            # d'abonnes, et le proprietaire remettait ses cookies pour rien.
+            # « alerte » et pas « ko » : rien n'est mort, et un « ko » ferait
+            # renvoyer le cookie par l'extension, ce qui n'arrange rien.
+            return {"niveau": "alerte", "code": True,
+                    "texte": "Cookie bon, mais MyPuls demande un code de confirmation par e-mail "
+                             "depuis le %s : ses pages d’abonnés sont fermées au site." % _jour(e["code_depuis"]),
+                    "aide": "Sur youl4b.com, Réglages › Cookies MyPuls : « Recevoir le code par e-mail », "
+                            "puis colle le code reçu. Remettre le cookie n’y change rien."}
         j = int((exp - maintenant) // 86400)
         if j <= 2:
             # chaque renouvellement redonne 7 jours : 2 jours restants, c'est
@@ -59095,6 +59198,9 @@ def _render_cookies_etat() -> str:
         "<div style='padding:8px 14px;font-size:11px;color:#888;font-weight:600;"
         "text-transform:uppercase;letter-spacing:.05em'>État des cookies</div>"
         + "".join(lignes)
+        # le code de MyPuls se saisit ICI (cadre absent tant qu'il n'est pas demande)
+        + (("<div style='padding:12px 14px 0;border-top:1px solid rgba(148,163,184,.18)'>%s</div>"
+            % _mypuls_carte_code()) if _mypuls_code_demande() else "")
         + "<div style='padding:9px 14px;font-size:12px;color:#888;"
         "border-top:1px solid rgba(148,163,184,.18)'>Un cookie mort ? Dans Chrome, clique "
         "l’extension <b>Cookies → youl4b</b> : elle prend les cookies, tu valides l’envoi. "
@@ -73779,6 +73885,53 @@ def create_app():
         if res.get("ok"):
             return _success(f"✓ Cookies MyPuls enregistrés. Connecté en tant que <code>{res.get('email', '?')}</code>")
         return _error(f"⚠ Cookies enregistrés mais ping échoué : {res.get('error', '?')}")
+
+    def _mypuls_code_route(action):
+        """Tronc des deux routes du code MyPuls : acces complets seulement
+        (un role restreint est deja refuse par le garde-fou des POST), jamais
+        le code ni un cookie au journal."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        try:
+            import mypuls
+            res = action(mypuls)
+        except Exception as e:
+            res = {"ok": False, "error": "%s : %s" % (type(e).__name__, e)}
+        return res
+
+    @app.route("/mypuls/verification/envoyer", methods=["POST"])
+    def mypuls_verification_envoyer():
+        """« 1 · Recevoir le code par e-mail » : MyPuls envoie son code de
+        confirmation a l'adresse du compte (voir mypuls.VERIFICATION_MYPULS)."""
+        from flask import jsonify
+        res = _mypuls_code_route(lambda m: m.verification_envoyer_code())
+        if not isinstance(res, dict):
+            return res
+        print("[cookies] code MyPuls : " + ("demande a MyPuls" if res.get("ok")
+                                            else "non demande (%s)" % res.get("error")), flush=True)
+        return jsonify({k: res[k] for k in ("ok", "error", "deja") if k in res})
+
+    @app.route("/mypuls/verification/confirmer", methods=["POST"])
+    def mypuls_verification_confirmer():
+        """« 2 · Confirmer » : saisit chez MyPuls le code recu, en lui demandant
+        de retenir le site. Les releves bloques repartent aussitot."""
+        from flask import jsonify
+        code = request.form.get("code") or ""
+        res = _mypuls_code_route(lambda m: m.verification_confirmer(code))
+        if not isinstance(res, dict):
+            return res
+        print("[cookies] code MyPuls : " + ("accepte, connexion du site confirmee" if res.get("ok")
+                                            else "non accepte (%s)" % res.get("error")), flush=True)
+        if res.get("ok"):
+            try:
+                _invalidate_all_ttl_cache()
+            except Exception:
+                pass
+            _apres_code_mypuls()
+        return jsonify({k: res[k] for k in ("ok", "error", "deja", "refuse") if k in res})
 
     @app.route("/settings/cookies_etat")
     def settings_cookies_etat():
