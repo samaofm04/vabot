@@ -297,13 +297,20 @@ def test_site(tmp):
             # ---- relier un Discord
             r = chatteur.post("/mypuls/chatter/set_discord", data={"name": "Baadooo", "discord": "ba_doo"})
             check("role restreint : relier un Discord est refuse (403)", r.status_code == 403, r.status_code)
-            check("... et rien n'a ete ecrit", mypuls.get_chatter_meta("Baadooo")["discord"] == "")
+            check("... et rien n'a ete ecrit", mypuls.get_chatter_discord("Baadooo") == "")
             r = admin.post("/mypuls/chatter/set_discord", data={"name": "Baadooo", "discord": "@Ba_Doo "})
             j = r.get_json() or {}
             check("admin : le pseudo est garde sans arobase, en minuscules, et la photo revient",
                   j.get("ok") and j.get("discord") == "ba_doo" and j.get("trouve") is True
                   and "cdn.discordapp.com" in (j.get("avatar") or ""), j)
-            check("... il est sur la fiche du chatteur", mypuls.get_chatter_meta("Baadooo")["discord"] == "ba_doo")
+            check("... il est sur la fiche du chatteur", mypuls.get_chatter_discord("Baadooo") == "ba_doo")
+            # Un patch local du serveur s'accroche a ce dictionnaire : une cle
+            # de plus l'a fait tomber le 18/11/2026 (adresses crypto perdues
+            # de vue sur la page de paie).
+            check("... la fiche garde EXACTEMENT ses six cles (un patch du serveur s'y accroche)",
+                  sorted(mypuls.get_chatter_meta("Baadooo")) == ["commission_pct", "crypto_address", "crypto_file",
+                                                                 "crypto_network", "crypto_type", "paid_periods"],
+                  sorted(mypuls.get_chatter_meta("Baadooo")))
             check("... la commission de la fiche n'a pas bouge",
                   mypuls.get_chatter_meta("Baadooo")["commission_pct"] == mypuls.DEFAULT_COMMISSION_PCT)
             j = (admin.post("/mypuls/chatter/set_discord", data={"name": "Tsiry", "discord": "inconnu99"}).get_json() or {})
@@ -314,7 +321,7 @@ def test_site(tmp):
                             data={"name": "Indéterminé (Créatrice)", "discord": "x"}).get_json() or {})
             check("« Indéterminé (Créatrice) » n'est pas un chatteur : rien a relier", j.get("ok") is False, j)
             j = (admin.post("/mypuls/chatter/set_discord", data={"name": "Tsiry", "discord": ""}).get_json() or {})
-            check("pseudo vide : le lien est retire", j.get("ok") and mypuls.get_chatter_meta("Tsiry")["discord"] == "", j)
+            check("pseudo vide : le lien est retire", j.get("ok") and mypuls.get_chatter_discord("Tsiry") == "", j)
 
             # ---- le complement
             url = "/mypuls/chatters/complement.json?start=2026-11-01&end=2026-11-15"

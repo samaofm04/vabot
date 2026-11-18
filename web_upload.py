@@ -36570,7 +36570,7 @@ body.light .mypuls-bar{background:#e5e7eb}
     for c in chatters:
         if c.get("non_attribue"):
             continue
-        _ps_dc = mypuls.get_chatter_meta(c["name"]).get("discord") or ""
+        _ps_dc = mypuls.get_chatter_discord(c["name"])
         if _ps_dc:
             _extra_chatteurs[c["name"]] = _discord_du_chatteur(_ps_dc)
     extra_json = (_json_mod.dumps(_extra_chatteurs, ensure_ascii=False)

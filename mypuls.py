@@ -3051,9 +3051,6 @@ def get_chatter_meta(name: str) -> dict:
         "crypto_address": meta.get("crypto_address", ""),
         # Periodes ou ce chatteur a deja ete paye (liste de strings "YYYY-MM-DD_YYYY-MM-DD")
         "paid_periods": list(meta.get("paid_periods") or []),
-        # Pseudo Discord relie a la main sur la page Revenus chatteurs : c'est
-        # lui qui donne la photo de profil. "" tant que personne ne l'a relie.
-        "discord": str(meta.get("discord") or ""),
     }
 
 
@@ -3134,6 +3131,21 @@ def set_crypto_address(name: str, crypto_type: str, network: str, address: str):
     data[key]["crypto_address"] = (address or "").strip()
     data[key]["original_name"] = name
     _save_chatters(data)
+
+
+def get_chatter_discord(name: str) -> str:
+    """Le pseudo Discord relie a ce chatteur ("" tant que personne ne l'a relie).
+
+    UNE FONCTION A PART, et pas une cle de plus dans get_chatter_meta : un
+    patch local du serveur (chatter-crypto-display, /root/vabot-patches)
+    s'accroche aux lignes de ce dictionnaire. Y ajouter une cle l'a fait
+    tomber a la mise en ligne du 18/11/2026 — les adresses crypto rangees sous
+    l'ancien nom des chatteurs n'etaient plus retrouvees, et la page de paie
+    les affichait « a renseigner ». Ne pas toucher a ce dictionnaire sans
+    verifier que ce patch s'applique encore (`git apply --check`).
+    """
+    meta = _load_chatters().get((name or "").strip().lower(), {})
+    return str(meta.get("discord") or "") if isinstance(meta, dict) else ""
 
 
 def set_discord(name: str, pseudo: str) -> str:
