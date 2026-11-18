@@ -58798,11 +58798,13 @@ def _cookies_etat_services() -> list:
 
     return [
         _service("gms", "GetMySocial",
-                 "Ouvre getmysocial.com, connecte-toi, puis clique « Envoyer les deux cookies » "
-                 "dans l’extension.", _lire_gms, _dire_gms),
+                 # pas de nom de bouton ici : l'extension a change les siens
+                 # le jour meme (un clic, puis deux etapes), le site n'a pas a suivre
+                 "Ouvre getmysocial.com, connecte-toi, puis envoie le cookie avec l’extension.",
+                 _lire_gms, _dire_gms),
         _service("mypuls", "MyPuls",
-                 "Ouvre mypuls.app, connecte-toi en cochant « Se souvenir de moi », puis clique "
-                 "« Envoyer les deux cookies » dans l’extension.", _lire_mypuls, _dire_mypuls),
+                 "Ouvre mypuls.app, connecte-toi en cochant « Se souvenir de moi », puis envoie "
+                 "le cookie avec l’extension.", _lire_mypuls, _dire_mypuls),
     ]
 
 
@@ -58835,7 +58837,7 @@ def _render_cookies_etat() -> str:
         + "".join(lignes)
         + "<div style='padding:9px 14px;font-size:12px;color:#888;"
         "border-top:1px solid rgba(148,163,184,.18)'>Un cookie mort ? Dans Chrome, clique "
-        "l’extension <b>Cookies → youl4b</b>, puis « Envoyer les deux cookies ». "
+        "l’extension <b>Cookies → youl4b</b> : elle prend les cookies, tu valides l’envoi. "
         "Aucune valeur de cookie n’est affichée ici.</div>"
         "</div>")
 

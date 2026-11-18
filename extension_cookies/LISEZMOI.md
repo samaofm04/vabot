@@ -9,8 +9,13 @@ navigateur du propriétaire :
 | MyPuls | `REMEMBERME` | 7 jours, renouvelé seul par le site | photos des models, pushs, factures |
 
 Un clic sur l'icône montre l'état des deux cookies **du site** (les mêmes
-phrases que Réglages › Cookies GetMySocial / Cookies MyPuls). Le bouton
-« Envoyer les deux cookies » les remet tout de suite.
+phrases que Réglages › Cookies GetMySocial / Cookies MyPuls). L'envoi se fait
+en deux étapes :
+
+1. **« 1 · Prendre les cookies de Chrome »** montre ce que ce Chrome a
+   (trouvé ou non, valable jusqu'à quand, déjà envoyé ou non). Rien ne part.
+2. **« 2 · Valider l'envoi à YouLab »** envoie ce qui vient d'être montré,
+   rien d'autre. « Annuler » revient en arrière.
 
 Sans clic, l'extension envoie aussi :
 
@@ -32,8 +37,11 @@ youl4b.com.
    « Cookies → youl4b » pour garder l'icône visible.
 5. Être connecté à youl4b.com avec un compte admin, dans ce même Chrome.
 
-Après une mise à jour de ce dossier : `chrome://extensions`, flèche ronde
-« Actualiser » sur la carte de l'extension.
+Après une mise à jour de ce dossier : rouvrir le popup suffit, il recharge
+l'extension tout seul une fois (le panneau se ferme, on le rouvre). Sinon :
+`chrome://extensions`, flèche ronde « Actualiser » sur la carte de l'extension.
+Le numéro de version est écrit trois fois et doit rester le même : `manifest.json`,
+`VERSION` dans `background.js`, `ATTENDUE` dans `popup.js`.
 
 ## Ce qu'elle ne fait jamais
 

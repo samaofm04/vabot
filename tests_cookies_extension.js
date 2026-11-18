@@ -102,6 +102,12 @@ function siteQuiVaBien(etat, reponses) {
   };
 }
 
+// Le parcours du popup : étape 1 (aperçu), étape 2 (valider ce qui a été vu).
+async function deuxEtapes(m) {
+  m.apercu = await m.dire({ type: "apercu" });
+  return m.dire({ type: "envoyer", empreintes: m.apercu.empreintes });
+}
+
 async function jouer() {
   // ---------------------------------------------------------------- 1
   console.log("1. A l'installation, le site allant bien");
@@ -121,9 +127,9 @@ async function jouer() {
   check("au controle suivant, le meme cookie GetMySocial n'est pas renvoye", m.posts().length === avant, m.posts().length);
 
   // ---------------------------------------------------------------- 2
-  console.log("2. Le bouton « Envoyer les deux cookies »");
+  console.log("2. Les deux boutons : prendre, puis valider");
   m = monde([CK_GMS(GMS_A), CK_REM(REM_A)], siteQuiVaBien(etatSite()));
-  let rep = await m.dire({ type: "envoyer" });
+  let rep = await deuxEtapes(m);
   p = m.posts();
   check("deux envois : GetMySocial puis MyPuls", p.length === 2 && p[0].url.endsWith("/gms/set_session_cookie") && p[1].url.endsWith("/mypuls/save_cookies"), p.map((x) => x.url));
   check("MyPuls : le REMEMBERME seul (pas de PHPSESSID), marque source=extension",
@@ -136,8 +142,8 @@ async function jouer() {
 
   // ---------------------------------------------------------------- 3
   console.log("3. Aucune valeur ne traine");
-  const partout = JSON.stringify(m.stockage) + m.console.join("\n") + JSON.stringify(rep) + m.requetes.map((r) => r.url).join("\n");
-  check("ni la memoire de l'extension, ni la console, ni la reponse au popup, ni une adresse ne portent une valeur de cookie",
+  const partout = JSON.stringify(m.stockage) + m.console.join("\n") + JSON.stringify(rep) + JSON.stringify(m.apercu) + m.requetes.map((r) => r.url).join("\n");
+  check("ni la memoire de l'extension, ni la console, ni l'apercu, ni la reponse au popup, ni une adresse ne portent une valeur de cookie",
     SECRETS.every((s) => !partout.includes(s)), SECRETS.filter((s) => partout.includes(s)).length + " valeur(s) trouvee(s)");
   check("la memoire garde une empreinte de 16 caracteres", /^[0-9a-f]{16}$/.test(m.stockage.memoire.envois.gms.empreinte || ""), m.stockage.memoire.envois.gms.empreinte);
   check("rien n'est ecrit dans la console", m.console.length === 0, m.console.length);
@@ -182,32 +188,35 @@ async function jouer() {
   await m.attendre();
   check("sans session sur le site, le controle automatique n'envoie aucun cookie", m.posts().length === 0, m.posts().length);
   check("pastille grise « ? » et message clair", m.badge.texte === "?" && /Pas connecté à youl4b\.com/.test(m.stockage.memoire.site.message), JSON.stringify(m.badge) + m.stockage.memoire.site.message);
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("au bouton, le 401 est dit pour chaque service", !rep.envois.gms.ok && /Pas connecté à youl4b\.com/.test(rep.envois.gms.message) && !rep.envois.mypuls.ok, rep.envois.gms.message);
   m = monde([CK_GMS(GMS_A)], () => reponse(0, undefined, "opaqueredirect"));
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("une redirection (Cloudflare, page de connexion) est dite telle quelle", /redirection/.test(rep.site.message) && /redirection/.test(rep.envois.gms.message), rep.site.message);
   m = monde([CK_GMS(GMS_A)], () => reponse(403, { ok: false, error: "Action réservée aux administrateurs" }));
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("un compte sans droit (403) : « il faut un compte admin »", /compte admin/.test(rep.envois.gms.message) && !rep.site.connecte, rep.envois.gms.message);
   m = monde([CK_GMS(GMS_A)], () => { throw new Error("reseau coupe"); });
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("site injoignable : dit, rien ne plante", rep && !rep.site.connecte && /injoignable/.test(rep.site.message) && /injoignable/.test(rep.envois.gms.message), JSON.stringify(rep).slice(0, 200));
 
   // ---------------------------------------------------------------- 7
   console.log("7. Rien a envoyer");
   m = monde([], siteQuiVaBien(etatSite(null, { niveau: "ko", texte: "Aucun cookie sur le site.", jours: null })));
-  rep = await m.dire({ type: "envoyer" });
-  check("pas connecte a GetMySocial ni a MyPuls dans Chrome : aucun envoi, deux consignes", m.posts().length === 0
-    && /getmysocial\.com/.test(rep.envois.gms.message) && /Se souvenir de moi/.test(rep.envois.mypuls.message), rep.envois.mypuls.message);
+  rep = await deuxEtapes(m);
+  check("pas connecte a GetMySocial ni a MyPuls dans Chrome : l'apercu donne deux consignes, rien a valider, aucun envoi", m.posts().length === 0
+    && /getmysocial\.com/.test(m.apercu.services.gms.message) && /Se souvenir de moi/.test(m.apercu.services.mypuls.message)
+    && !m.apercu.services.gms.trouve && Object.keys(m.apercu.empreintes).length === 0, JSON.stringify(m.apercu));
   m.ecoutes.alarme({ name: "verif" });
   await m.attendre();
   check("le controle automatique non plus", m.posts().length === 0, m.posts().length);
   m = monde([CK_GMS(GMS_ECHU)], siteQuiVaBien(etatSite({ niveau: "ko", texte: "Échu.", jours: null })));
-  rep = await m.dire({ type: "envoyer" });
-  check("un jeton GetMySocial echu dans Chrome n'est pas envoye", m.posts().length === 0 && /échu/.test(rep.envois.gms.message), rep.envois.gms.message);
+  rep = await deuxEtapes(m);
+  check("un jeton GetMySocial echu dans Chrome : dit a l'apercu, pas envoyable, pas envoye", m.posts().length === 0
+    && m.apercu.services.gms.trouve && !m.apercu.services.gms.envoyable && /échu/.test(m.apercu.services.gms.message)
+    && !("gms" in m.apercu.empreintes), JSON.stringify(m.apercu));
   m = monde([CK_GMS(GMS_ECHU), { name: "authToken", domain: "app.getmysocial.com", value: GMS_A }], siteQuiVaBien(etatSite()));
-  await m.dire({ type: "envoyer" });
+  await deuxEtapes(m);
   check("deux cookies authToken (domaine et sous-domaine) : celui qui expire le plus tard", m.posts()[0].champs.cookie === GMS_A);
 
   // ---------------------------------------------------------------- 8
@@ -230,16 +239,52 @@ async function jouer() {
   // ---------------------------------------------------------------- 9
   console.log("9. Le site refuse ou repond n'importe quoi");
   m = monde([CK_REM(REM_A)], siteQuiVaBien(etatSite(), { "/mypuls/save_cookies": reponse(200, { ok: false, error: "MyPuls refuse ce cookie" }) }));
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("le refus du site est repris mot pour mot, et « rien change »", /MyPuls refuse ce cookie/.test(rep.envois.mypuls.message) && /Rien changé/.test(rep.envois.mypuls.message) && !rep.envois.mypuls.autre_compte, rep.envois.mypuls.message);
   m = monde([CK_REM(REM_A)], siteQuiVaBien(etatSite(), { "/mypuls/save_cookies": reponse(500, undefined) }));
-  rep = await m.dire({ type: "envoyer" });
+  rep = await deuxEtapes(m);
   check("une reponse qui n'est pas du JSON : « HTTP 500 », pas un succes", !rep.envois.mypuls.ok && /HTTP 500/.test(rep.envois.mypuls.message), rep.envois.mypuls.message);
   m = monde([CK_REM(REM_A)], (url) => (url.endsWith("/settings/cookies_etat") ? reponse(200, { ok: true }) : reponse(200, { ok: true })));
   rep = await m.dire({ type: "etat" });
   check("un etat sans la liste des services n'est pas pris pour « tout va bien »", !rep.site.connecte && m.badge.texte === "?", JSON.stringify(rep.site));
   rep = await m.dire({ type: "memoire" });
   check("« memoire » rend ce qu'on savait sans rien demander au site", rep && rep.site && m.requetes.length === 1, m.requetes.length);
+
+  // --------------------------------------------------------------- 10
+  console.log("10. Deux etapes : rien ne part sans avoir ete vu");
+  m = monde([CK_GMS(GMS_A), CK_REM(REM_A)], siteQuiVaBien(etatSite()));
+  let a = await m.dire({ type: "apercu" });
+  check("l'apercu ne fait AUCUNE requete, ni au site ni ailleurs", m.requetes.length === 0, m.requetes.length);
+  check("il dit pour chaque service : trouve, envoyable, echeance, pas encore envoye",
+    a.services.gms.trouve && a.services.gms.envoyable && a.services.gms.exp === DEMAIN && a.services.gms.deja === null
+    && a.services.mypuls.trouve && a.services.mypuls.envoyable && a.services.mypuls.exp === DEMAIN && a.services.mypuls.deja === null, JSON.stringify(a.services));
+  check("il rend une empreinte de 16 caracteres par cookie, jamais une valeur",
+    /^[0-9a-f]{16}$/.test(a.empreintes.gms) && /^[0-9a-f]{16}$/.test(a.empreintes.mypuls) && SECRETS.every((x) => !JSON.stringify(a).includes(x)), JSON.stringify(a.empreintes));
+  check("l'apercu n'ecrit rien dans la memoire de l'extension", m.stockage.memoire === undefined, JSON.stringify(m.stockage).slice(0, 120));
+  rep = await m.dire({ type: "envoyer" });
+  check("« envoyer » sans apercu : rien ne part", m.posts().length === 0, m.posts().length);
+  rep = await m.dire({ type: "envoyer", empreintes: { gms: a.empreintes.gms } });
+  check("valider un seul des deux : lui seul part", m.posts().length === 1 && m.posts()[0].url.endsWith("/gms/set_session_cookie") && rep.envois.gms.ok && !rep.envois.mypuls, m.posts().map((x) => x.url));
+  a = await m.dire({ type: "apercu" });
+  check("apres l'envoi, l'apercu dit « deja envoye » pour celui-la seulement",
+    typeof a.services.gms.deja === "number" && a.services.gms.deja > 0 && a.services.mypuls.deja === null, JSON.stringify(a.services));
+
+  let cookies = [CK_GMS(GMS_A)];
+  m = monde(cookies, siteQuiVaBien(etatSite()));
+  a = await m.dire({ type: "apercu" });
+  cookies[0] = CK_GMS(GMS_B);          // un autre compte ouvert entre l'apercu et la validation
+  cookies.push(CK_REM(REM_A));         // et un cookie MyPuls apparu entre-temps
+  rep = await m.dire({ type: "envoyer", empreintes: a.empreintes });
+  check("le cookie a change entre l'apercu et la validation : il ne part pas, et c'est dit",
+    m.posts().length === 0 && !rep.envois.gms.ok && /a changé depuis l’aperçu/.test(rep.envois.gms.message), rep.envois.gms.message);
+  check("un cookie apparu apres l'apercu ne part pas non plus (il n'a pas ete vu)", !rep.envois.mypuls && m.posts().length === 0);
+  rep = await m.dire({ type: "envoyer", empreintes: { gms: "0000000000000000", mypuls: 12, inconnu: "abc" } });
+  check("des empreintes fausses ou mal formees n'envoient rien", m.posts().length === 0, m.posts().length);
+
+  m = monde([], siteQuiVaBien(etatSite()));
+  const version = await m.dire({ type: "version" });
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "extension_cookies", "manifest.json"), "utf8"));
+  check("le fond dit sa version, celle du manifest (le popup recharge l'extension si elle differe)", version === manifest.version && /^\d+\.\d+$/.test(version), version);
 
   console.log("=".repeat(70));
   console.log("RESULTAT : " + OKS.length + " OK / " + KOS.length + " ECHEC(S)");

@@ -25,6 +25,11 @@
 // Chrome joint parce que youl4b.com est dans host_permissions.
 
 const SITE = "https://youl4b.com";
+// La version de CE fichier, égale à celle du manifest. Chrome relit popup.js
+// sur le disque à chaque ouverture, mais garde l'ancien service worker tant
+// que l'extension n'est pas rechargée : le popup compare, et recharge si le
+// fond est resté en arrière (sinon il parlerait à un fond qui ne le comprend pas).
+const VERSION = "2.1";
 const RENVOI_S = 24 * 3600; // un même cookie : au plus un essai automatique par jour
 
 const SERVICES = {
@@ -148,9 +153,38 @@ async function lireSite() {
   return site;
 }
 
+// Étape 1 du popup : ce que ce Chrome a, SANS rien envoyer et sans une seule
+// requête. Le propriétaire, 18/11/2026 : « avec un bouton, je fais, et avec un
+// bouton, je valide que ça envoie ». Jamais une valeur : l'échéance, si ce
+// cookie est déjà parti, et l'empreinte que la validation devra retrouver.
+async function apercu() {
+  const m = await lireMemoire();
+  const services = {};
+  const empreintes = {};
+  for (const cle of Object.keys(SERVICES)) {
+    const s = SERVICES[cle];
+    const c = await lireCookie(cle);
+    if (!c) {
+      services[cle] = { trouve: false, envoyable: false, exp: null, deja: null, message: s.absent };
+      continue;
+    }
+    const h = await empreinte(c.valeur);
+    const envoi = m.envois[cle] || {};
+    const echu = cle === "gms" && c.exp && c.exp < maintenant();
+    services[cle] = {
+      trouve: true, envoyable: !echu, exp: c.exp || null,
+      deja: envoi.empreinte_ok === h ? envoi.dernier_ok || null : null,
+      message: echu ? "Le cookie GetMySocial de ce Chrome est échu : reconnecte-toi sur getmysocial.com." : "",
+    };
+    if (!echu) empreintes[cle] = h;
+  }
+  return { services, empreintes };
+}
+
 // Envoie UN cookie au site. `forcer` : remplacer le compte du site par celui
-// de ce Chrome (le site refuse sinon le cookie d'un autre compte).
-async function envoyerService(cle, forcer, raison) {
+// de ce Chrome (le site refuse sinon le cookie d'un autre compte). `attendue` :
+// l'empreinte montrée à l'étape 1 ; un cookie qui a changé depuis ne part pas.
+async function envoyerService(cle, forcer, raison, attendue) {
   const s = SERVICES[cle];
   const memoire = await lireMemoire();
   const avant = memoire.envois[cle] || {};
@@ -170,6 +204,10 @@ async function envoyerService(cle, forcer, raison) {
     return noter();
   }
   essai.empreinte = await empreinte(c.valeur);
+  if (attendue && essai.empreinte !== attendue) {
+    essai.message = "Le cookie " + s.nom + " de ce Chrome a changé depuis l’aperçu. Rien envoyé : recommence.";
+    return noter();
+  }
   if (cle === "gms" && c.exp && c.exp < essai.t) {
     essai.message = "Le cookie GetMySocial de ce Chrome est échu : reconnecte-toi sur getmysocial.com.";
     return noter();
@@ -264,10 +302,14 @@ async function verifier(raison) {
   return envoye ? relireSite() : m;
 }
 
-// Le bouton : les deux cookies, tout de suite. Le site garde son contrôle de
+// Étape 2 du popup : n'envoie QUE ce que l'étape 1 a montré (une empreinte
+// par cookie). Sans aperçu, rien ne part. Le site garde son contrôle de
 // compte : le cookie d'un autre compte est refusé, pas remplacé.
-async function envoyerTout() {
-  for (const cle of Object.keys(SERVICES)) await envoyerService(cle, false, "bouton");
+async function envoyerTout(empreintes) {
+  const vus = empreintes && typeof empreintes === "object" ? empreintes : {};
+  for (const cle of Object.keys(SERVICES)) {
+    if (typeof vus[cle] === "string" && vus[cle]) await envoyerService(cle, false, "bouton", vus[cle]);
+  }
   return relireSite();
 }
 
@@ -334,8 +376,16 @@ chrome.runtime.onMessage.addListener((m, _expediteur, repondre) => {
     repondreOuErreur(enFile(relireSite));
     return true;
   }
+  if (type === "version") {
+    repondre(VERSION);
+    return false;
+  }
+  if (type === "apercu") {
+    repondreOuErreur(apercu());
+    return true;
+  }
   if (type === "envoyer") {
-    repondreOuErreur(enFile(envoyerTout));
+    repondreOuErreur(enFile(() => envoyerTout(m.empreintes)));
     return true;
   }
   if (type === "forcer") {

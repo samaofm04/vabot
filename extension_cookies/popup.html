@@ -17,8 +17,13 @@
   .texte { margin-top: 3px; }
   .petit { color: #999; font-size: 11px; margin-top: 5px; }
   .refus { color: #f87171; font-size: 12px; margin-top: 5px; }
+  .apercu { color: #93c5fd; font-size: 12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #3a3a3a; }
+  .apercu.non { color: #fbbf24; }
   .lien { margin-top: 6px; padding: 0; border: 0; background: none; color: #60a5fa; font-size: 12px; text-decoration: underline; cursor: pointer; }
   #envoyer { margin-top: 4px; width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
+  #envoyer.valider { background: #16a34a; }
+  #annuler { display: block; margin: 8px auto 0; }
+  #annuler[hidden] { display: none; }
   button:disabled { opacity: .6; cursor: default; }
   #pied { text-align: center; }
 </style>
@@ -27,7 +32,8 @@
   <h1>Cookies → youl4b</h1>
   <div id="site" hidden></div>
   <div id="services">Lecture…</div>
-  <button id="envoyer">Envoyer les deux cookies</button>
+  <button id="envoyer">1 · Prendre les cookies de Chrome</button>
+  <button id="annuler" class="lien" hidden>Annuler</button>
   <div class="petit" id="pied">Les cookies vont de ce Chrome à youl4b.com, nulle part ailleurs.</div>
   <script src="popup.js"></script>
 </body>

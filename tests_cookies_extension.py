@@ -503,7 +503,7 @@ try:
     sg, sm = wu._render_gms_cookie_settings(), wu._render_mypuls_cookies_settings()
     check("le bloc nomme les deux services, leur état et l'extension",
           "État des cookies" in bloc and "GetMySocial" in bloc and "MyPuls" in bloc and bloc.count("✓") == 2
-          and "Cookies → youl4b" in bloc and "Envoyer les deux cookies" in bloc, bloc[:300])
+          and "Cookies → youl4b" in bloc and "tu valides l’envoi" in bloc, bloc[:300])
     check("le même bloc ouvre « Cookies GetMySocial » et « Cookies MyPuls », en tête des deux",
           sg.count(bloc) == 1 and sm.count(bloc) == 1 and sg.startswith(bloc) and sm.startswith(bloc))
     check("les deux formulaires à coller sont toujours là", "name='cookie'" in sg and "action='/gms/set_session_cookie'" in sg
@@ -548,6 +548,13 @@ check("aucune écriture dans la console", "console." not in fond and "console." 
 check("une seule adresse de destination : https://youl4b.com",
       fond.count('"https://') == 1 and 'const SITE = "https://youl4b.com";' in fond and "fetch(SITE + chemin" in fond
       and fond.count("fetch(") == 1, fond.count('"https://'))
+versions = (man.get("version"), (fond.split('const VERSION = "', 1) + [""])[1].split('"')[0],
+            (pjs.split('const ATTENDUE = "', 1) + [""])[1].split('"')[0])
+check("une seule version : manifest, fond et popup (sinon le popup recharge l'extension en vain)",
+      len(set(versions)) == 1 and versions[0], versions)
+check("deux étapes : le popup demande un aperçu, puis envoie les empreintes vues",
+      '{ type: "apercu" }' in pjs and '{ type: "envoyer", empreintes: vu.empreintes }' in pjs
+      and pjs.count('type: "envoyer"') == 1 and "1 · Prendre les cookies de Chrome" in popup, pjs.count('type: "envoyer"'))
 check("les routes appelées par l'extension existent sur le site",
       all(any(str(r.rule) == chemin for r in app.url_map.iter_rules())
           for chemin in ("/gms/set_session_cookie", "/mypuls/save_cookies", "/settings/cookies_etat"))

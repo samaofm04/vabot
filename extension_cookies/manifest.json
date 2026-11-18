@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cookies → youl4b",
-  "version": "2.0",
-  "description": "Remet à youl4b.com les cookies de session GetMySocial et MyPuls de ce navigateur : d’un clic, ou tout seul quand l’un d’eux meurt.",
+  "version": "2.1",
+  "description": "Remet à youl4b.com les cookies de session GetMySocial et MyPuls de ce navigateur : en deux clics (voir, puis valider), ou tout seul quand l’un d’eux meurt.",
   "permissions": ["cookies", "alarms", "storage"],
   "host_permissions": [
     "https://getmysocial.com/*",
