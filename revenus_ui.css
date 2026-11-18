@@ -144,3 +144,88 @@ body .mp-revenue-section .mp-revenue-chart .mp-revenue-model-filter img{width:22
  #mp-tab-chatters .mp-revenue-sale-person{gap:7px}
  #mp-tab-chatters .mp-edit-row>td>div{grid-template-columns:1fr!important}
 }
+
+/* ===== Liste des chatteurs au look des pages TRUST (stats_va._STYLE) =====
+   Meme palette que /mes-stats et /trust/liens : carte sombre, accent orange,
+   chiffres en gras alignes a droite, petite ligne grise sous le nom.
+   LA SPECIFICITE EST CALCULEE, pas estimee : les regles d'avant valent
+   (1 id, 2 classes, 2 elements) et posent color / background en !important.
+   Chaque regle ci-dessous porte .mp-trust EN PLUS (1 id, 3 classes au moins) :
+   sans cette classe de plus, !important contre !important laissait gagner
+   l'ancienne, et les montants restaient blancs. */
+#mp-tab-chatters{--mpt-carte:#18181b;--mpt-detail:#1f1f23;--mpt-bord:#2a2a2f;--mpt-texte:#f4f4f5;--mpt-faible:#a1a1aa;--mpt-acc:#f97341;--mpt-ambre:#f59e0b;--mpt-total:rgba(249,115,65,.08);--mpt-vert:#4ade80;--mpt-rouge:#f87171;--mpt-champ:#0e0e10;--mpt-sur-acc:#1c0a02}
+body.light #mp-tab-chatters{--mpt-carte:#fff;--mpt-detail:#f7f8fa;--mpt-bord:#e3e6ec;--mpt-texte:#18181b;--mpt-faible:#687280;--mpt-acc:#c2410c;--mpt-ambre:#b45309;--mpt-total:rgba(249,115,65,.10);--mpt-vert:#15803d;--mpt-rouge:#dc2626;--mpt-champ:#f7f8fa;--mpt-sur-acc:#fff}
+#mp-tab-chatters .mp-revenue-table.mp-trust{--mpr-surface:var(--mpt-carte);--mpr-detail:var(--mpt-detail);--mpr-head:var(--mpt-carte);--mpr-border:var(--mpt-bord);--mpr-text:var(--mpt-texte);--mpr-muted:var(--mpt-faible);--mpr-accent:var(--mpt-acc);
+  --mpt-cols:34px minmax(190px,1.7fr) minmax(74px,.7fr) minmax(96px,1fr) minmax(92px,1fr) minmax(84px,.9fr) minmax(78px,.8fr) minmax(64px,.6fr) minmax(64px,.6fr) minmax(64px,.6fr) minmax(72px,.65fr) 84px minmax(84px,.8fr) 50px minmax(104px,1fr);
+  border-radius:12px;overflow-x:auto;overflow-y:hidden}
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody{display:block;min-width:1240px}
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead>tr,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total{display:grid;grid-template-columns:var(--mpt-cols);align-items:center}
+/* Le filet sous les en-tetes est porte par la LIGNE : porte par chaque case,
+   il se cassait en escalier des qu'un intitule tenait sur deux lignes. */
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead>tr{align-items:end;background:var(--mpt-carte);border-bottom:1px solid var(--mpt-bord)}
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead th{display:block;background:transparent;color:var(--mpt-faible);font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;text-align:right;white-space:normal;line-height:1.25;padding:11px 8px;border:0}
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead th.mp-t-g{text-align:left}
+#mp-tab-chatters .mp-revenue-table.mp-trust>thead th.mp-t-c{text-align:center}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row{border-top:1px solid var(--mpt-bord);background:var(--mpt-carte)}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total{background:var(--mpt-total);border-bottom:2px solid var(--mpt-bord)}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total>td{display:block;border:0;padding:10px 8px;min-width:0;text-align:right;white-space:nowrap;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--mpt-texte)!important;background:transparent!important;text-decoration:none}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-nom,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total>td.mp-t-nom,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-models{text-align:left}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-c,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total>td.mp-t-c{text-align:center}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-rang{color:var(--mpt-faible)!important;font-size:12px;font-weight:600;padding-right:2px}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-ventes,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total>td.mp-t-ventes{color:var(--mpt-acc)!important}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row>td.mp-t-payer,#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-t-total>td.mp-t-payer{color:var(--mpt-vert)!important;font-size:14.5px}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row.mp-row-orphelin>td{color:var(--mpt-faible)!important;font-weight:400}
+#mp-tab-chatters .mp-revenue-table.mp-trust>tbody>.mp-chatter-row.mp-row-orphelin>td.mp-t-ventes{color:var(--mpt-rouge)!important;font-weight:700}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-det{display:block;color:var(--mpt-faible);font-size:11.5px;font-weight:400;margin-top:3px;white-space:normal}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-ev{display:block;font-size:11px;font-weight:700;margin-top:3px}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-ev-haut{color:var(--mpt-vert)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-ev-bas{color:var(--mpt-rouge)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-ev-neuf{color:var(--mpt-ambre)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-ev-plat{color:var(--mpt-faible);font-weight:500}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-qui{display:flex;align-items:center;gap:11px;min-width:0}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-qui>div{min-width:0}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-revenue-toggle{min-height:0;gap:0}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-revenue-name{font-size:14.5px;font-weight:700;color:var(--mpt-texte)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-photo{position:relative;flex:none;width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-photo img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-initiales{background:hsl(var(--mp-teinte,210),30%,22%);color:hsl(var(--mp-teinte,210),80%,76%);border:1px dashed rgba(255,255,255,.18)}
+body.light #mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-initiales{background:hsl(var(--mp-teinte,210),55%,90%);color:hsl(var(--mp-teinte,210),55%,28%);border-color:rgba(0,0,0,.16)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-point{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:var(--mpt-vert);border:2px solid var(--mpt-carte)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-enligne{color:var(--mpt-vert);font-weight:600}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-plus{border:0!important;background:none!important;box-shadow:none!important;padding:0!important;min-height:0!important;color:var(--mpt-acc)!important;font:inherit;font-weight:600;cursor:pointer}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-plus-alerte{color:var(--mpt-ambre)!important}
+#mp-tab-chatters .mp-revenue-table.mp-trust td.mp-t-envoi{opacity:.5}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-revenue-models .mp-revenue-avatar{width:28px;height:28px;font-size:9.5px;box-shadow:0 0 0 2px var(--mpt-carte)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-revenue-models .mp-revenue-avatar+.mp-revenue-avatar{margin-left:-9px}
+#mp-tab-chatters .mp-revenue-table.mp-trust td.mp-t-com form{justify-content:flex-end;width:100%}
+#mp-tab-chatters .mp-revenue-table.mp-trust td.mp-t-com input[type=number]{width:50px!important;padding:5px 6px!important;background:var(--mpt-champ)!important;color:var(--mpt-texte)!important;border:1px solid var(--mpt-bord)!important;border-radius:8px!important;font-size:14px!important;font-weight:700;text-align:right}
+#mp-tab-chatters .mp-revenue-table.mp-trust td.mp-t-com input[type=number]:focus{border-color:var(--mpt-acc)!important;outline:2px solid rgba(249,115,65,.25);outline-offset:0}
+#mp-tab-chatters .mp-revenue-table.mp-trust td.mp-t-com span{color:var(--mpt-faible)!important;font-size:13px!important;font-weight:600}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-adresse{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px;border:0!important;background:none!important;box-shadow:none!important;padding:0!important;min-height:0!important;color:var(--mpt-texte)!important;font:inherit;cursor:pointer;max-width:100%}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-manque{color:var(--mpt-ambre);font-weight:700}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-crypto{display:inline-block;color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:4px;background:#71717a}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-crypto-usdc{background:#2775ca}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-crypto-eth{background:#627eea}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-crypto-sol{background:#9945ff}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-crypto-trx{background:#ef4444}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-adr{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mpt-faible);overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-adresse .mp-t-det{margin-top:0;font-size:10.5px}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-revenue-details-row{border-left:2px solid var(--mpt-acc)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid var(--mpt-bord)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord input{width:220px;max-width:100%;padding:7px 10px;background:var(--mpt-champ)!important;color:var(--mpt-texte)!important;border:1px solid var(--mpt-bord)!important;border-radius:8px;font:inherit;font-size:13px}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord input:focus{border-color:var(--mpt-acc)!important;outline:2px solid rgba(249,115,65,.25)}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-relier{background:var(--mpt-acc)!important;color:var(--mpt-sur-acc)!important;border:0!important;border-radius:8px!important;padding:7px 14px!important;min-height:0!important;font:inherit;font-size:13px;font-weight:700;cursor:pointer;box-shadow:none!important}
+#mp-tab-chatters .mp-revenue-table.mp-trust button.mp-t-relier:disabled{opacity:.55;cursor:default}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord-etat{font-size:12px;color:var(--mpt-faible);font-weight:400;white-space:normal}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord-etat.mp-t-ok{color:var(--mpt-vert)}
+#mp-tab-chatters .mp-revenue-table.mp-trust .mp-t-discord-etat.mp-t-alerte{color:var(--mpt-ambre)}
+#mp-tab-chatters .mp-t-tris{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+#mp-tab-chatters .mp-t-tris .mp-t-lib{color:var(--mpt-faible);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+#mp-tab-chatters .mp-t-tris button{color:var(--mpt-faible)!important;background:transparent!important;border:1px solid var(--mpt-bord)!important;border-radius:999px!important;padding:4px 10px!important;min-height:0!important;font:inherit;font-size:12px;font-weight:500;white-space:nowrap;cursor:pointer;box-shadow:none!important}
+#mp-tab-chatters .mp-t-tris button[aria-pressed=true]{color:var(--mpt-acc)!important;border-color:var(--mpt-acc)!important}
+#mp-tab-chatters .mp-t-avis{color:var(--mpt-faible);font-size:12px;line-height:1.5;margin:12px 0 0}
+/* Les deux boutons du tableau de bord, a cote du registre Excel. */
+.mp-fx-groupe{margin-left:auto;display:inline-flex;gap:8px;align-items:center}
+body .mp-revenue-section button.mp-fx{padding:7px 13px!important;min-height:0!important;background:var(--mpr-detail)!important;border:1px solid var(--mpr-border)!important;color:var(--mpr-text)!important;border-radius:9px!important;font:inherit;font-size:12px!important;font-weight:700!important;letter-spacing:0;text-transform:none;cursor:pointer;box-shadow:none!important;white-space:nowrap}
+body .mp-revenue-section button.mp-fx-mode[data-brut='1']{color:#f59e0b!important}
+body.light .mp-revenue-section button.mp-fx-mode[data-brut='1']{color:#b45309!important}

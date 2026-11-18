@@ -260,6 +260,28 @@ def _titre_colonne_discord(nb: int, tronque: bool) -> str:
 GUILDE_CHATTEURS = "YouLab AGENCY"
 
 
+def _guilde_chatteurs() -> str:
+    """Le serveur ou chercher les chatteurs : GUILDE_CHATTEURS s'il existe
+    encore, sinon "" (tous les serveurs du bot).
+
+    Le nom est compare EXACTEMENT, et ce serveur a disparu de la vue du bot :
+    le 18/11/2026 il voyait Va IG, YouLab AGENCY THREADS, Youl4b ( Spam ),
+    YouCham, You FR et You US — plus aucun « YouLab AGENCY ». La colonne
+    Discord du planning ne fouillait donc plus AUCUN membre : liste de choix
+    « indisponible », et les 16 pseudos saisis tous en orange, sans que rien
+    ne dise pourquoi. Chercher partout propose aussi des VA dans la liste ;
+    c'est moins net qu'un seul serveur, mais ca marche, alors que l'ancien
+    reglage ne trouvait plus personne.
+    """
+    try:
+        if _discord_observable() and any(
+                (getattr(g, "name", "") or "") == GUILDE_CHATTEURS for g in _BOT_REF.guilds):
+            return GUILDE_CHATTEURS
+    except Exception:
+        pass
+    return ""
+
+
 def _etat_discord(handle: str, nb_membres: int = 0, guilde: str = ""):
     """L etat d un pseudo Discord : couleur de bordure, explication, pastille.
 
@@ -301,6 +323,28 @@ def _etat_discord(handle: str, nb_membres: int = 0, guilde: str = ""):
              "« %s » n a ete trouve sur %s." % (handle, ou))
     return ("#f97316", titre,
             "<span style='color:#f97316;margin-right:5px'>⚠</span>")
+
+
+def _discord_du_chatteur(pseudo: str) -> dict:
+    """Ce que la liste des chatteurs affiche pour un pseudo Discord relie.
+
+    UNE SEULE fabrique pour le rendu de la page et pour la reponse de la route
+    qui relie : la ligne repeinte apres une saisie et la meme ligne apres
+    rechargement doivent dire la meme chose.
+
+    `trouve` False + `verifiable` True : aucun membre des serveurs du bot ne
+    porte ce pseudo — la ligne garde ses initiales et le dit. `verifiable`
+    False : le bot ne repond pas, on ne peut rien affirmer.
+    """
+    pseudo = str(pseudo or "").strip()
+    info = _resolve_discord_user_by_handle(pseudo) if pseudo else None
+    return {
+        "discord": pseudo,
+        "avatar": (info or {}).get("avatar_url") or "",
+        "affiche": (info or {}).get("display_name") or "",
+        "trouve": bool(info),
+        "verifiable": _discord_observable(),
+    }
 
 
 def _membres_discord_pour_liste(guilde: str = ""):
@@ -36409,7 +36453,10 @@ body.light .mypuls-bar{background:#e5e7eb}
         for c in chatters if not c.get("non_attribue")
     ), 2)
     total_to_pay_eur = round(total_to_pay_usd / eur_to_usd, 2) if eur_to_usd else 0.0
-    _ca_orphelin = round(sum(c["ca_total"] for c in chatters
+    # En DOLLARS, devise par devise (ca_usd_chatteur) : la somme brute de
+    # « ca_total » empile des euros MyM et des dollars OnlyFans, et elle
+    # s'affichait suivie d'un « € ».
+    _ca_orphelin = round(sum(mypuls.ca_usd_chatteur(c, eur_to_usd) for c in chatters
                              if c.get("non_attribue")), 2)
 
     # Indicateur de fraîcheur du taux
@@ -36443,7 +36490,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             # s'évaporer sans que personne n'aille corriger l'attribution.
             f"<div data-mp-stat='non_attribue' style='font-size:11px;color:#f87171;margin-top:3px' "
             f"title='Ventes que MyPuls n a rattachees a aucun chatteur'>"
-            f"dont {_ca_orphelin:.2f}€ non attribué — non payé</div>"
+            f"dont ${_ca_orphelin:,.2f} non attribué — non payé</div>"
             if _ca_orphelin > 0 else ""
         )
         + "</div>"
@@ -36482,8 +36529,17 @@ body.light .mypuls-bar{background:#e5e7eb}
     # "u": 1 = transaction en USD (OnlyFans) -> le recalcul client du « à payer »
     # ne doit PAS la convertir comme des EUR (même règle que _pay_usd serveur)
     from revenus_dates import transaction_day
+    from revenus_chatteurs import (famille as _famille_vente, FRAIS_OF as _FRAIS_OF,
+                                   FRAIS_MYM as _FRAIS_MYM, SANS_CHATTEUR as _SANS_CHATTEUR)
+    # "k" : 'p' (PPV), 't' (pourboire) ou '' — classe ICI, par la meme regle
+    # que la periode d'avant, pour que le % compare deux choses identiques.
     transactions_js = _json_mod.dumps(
-        [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"],
+        # "h" : une vente sans chatteur porte le nom de SA ligne dans la liste.
+        # Vide, aucune ligne ne la retrouvait : les ventes non attribuees
+        # disparaissaient de la liste au premier filtre (MYM / OF / shift),
+        # et « dont X non attribue » retombait a zero.
+        [{"c": t["creator"], "h": t["chatter"] or _SANS_CHATTEUR, "a": t["amount"], "y": t["type"],
+          "k": _famille_vente(t.get("type")),
           "t": _tx_hour(t.get("date", "")), "u": _tx_is_usd(t),
           "d": t.get("date", ""), "day": transaction_day(t.get("date", "")), "f": t.get("fan", ""),
           "currency": t.get("currency", "")} for t in transactions],
@@ -36507,6 +36563,18 @@ body.light .mypuls-bar{background:#e5e7eb}
         ensure_ascii=False,
     )
 
+    # Le Discord relie a chaque chatteur, et sa photo si le bot le voit. Un
+    # pseudo saisi que le bot ne trouve pas reste dans la liste, avec
+    # trouve=False : la ligne garde ses initiales et le DIT.
+    _extra_chatteurs = {}
+    for c in chatters:
+        if c.get("non_attribue"):
+            continue
+        _ps_dc = mypuls.get_chatter_meta(c["name"]).get("discord") or ""
+        if _ps_dc:
+            _extra_chatteurs[c["name"]] = _discord_du_chatteur(_ps_dc)
+    extra_json = (_json_mod.dumps(_extra_chatteurs, ensure_ascii=False)
+                  .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
     # Period_id pour le tracking "paye" : YYYY-MM-DD_YYYY-MM-DD
     _period_id = f"{start_str}_{end_str}"
     chatters_table = (
@@ -36523,6 +36591,14 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<script>window.__mpPerfCa = {perf_ca_js};</script>"
         f"<script>window.__mpEurToUsd = {eur_to_usd};</script>"
         f"<script>window.__mpPeriodId = '{_period_id}';</script>"
+        f"<script>window.__mpChatterExtra = {extra_json};</script>"
+        f"<script>window.__mpFrais = {{of: {_FRAIS_OF}, mym: {_FRAIS_MYM}}};</script>"
+        f"<script>window.__mpComplementUrl = '/mypuls/chatters/complement.json?start={start_str}&end={end_str}';</script>"
+        # La liste des membres a choisir n'est PAS dans la page : ce rendu est
+        # mis en cache et servi a tous les roles qui ont l'onglet, chatteurs
+        # compris. Elle est lue a part, par une route reservee aux acces
+        # complets (/mypuls/chatters/membres_discord.json).
+        "<datalist id='mp-discord-membres'></datalist>"
         "</div>"
     )
 
@@ -36989,8 +37065,17 @@ document.addEventListener('DOMContentLoaded', function(){
         f"<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct mypuls.app · {start_str} → {end_str}</span>"
         # Registre verifiable, a cote du titre : une vente contestee se
         # retrouve dedans avec son heure, la creatrice et le fan.
+        # Les deux boutons du tableau de bord, repris ici : $ / € et Net /
+        # Brut. MEME reglage (localStorage) sur les deux ecrans, pour qu'un
+        # montant ne change pas de base en changeant d'onglet.
+        "<span class='mp-fx-groupe'>"
+        "<button type='button' class='mp-fx mp-fx-cur' onclick=\"mpFxToggle('cur')\" "
+        "title='Basculer entre dollars et euros'>$ USD</button>"
+        "<button type='button' class='mp-fx mp-fx-mode' onclick=\"mpFxToggle('mode')\" "
+        "title='Basculer entre revenus nets et bruts'>Net</button>"
+        "</span>"
         f"<a href='/chatters/ventes.xlsx?start={start_str}&end={end_str}' "
-        f"class='mypuls-export' style='margin-left:auto' "
+        f"class='mypuls-export' style='margin-left:8px' "
         f"title='Toutes les ventes de la periode : heure, chatteur, creatrice, fan, montant'>"
         f"<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' "
         f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
@@ -52369,7 +52454,7 @@ def _render_chatplanning_html() -> str:
 
     # Les membres du serveur, releves UNE fois pour tout le tableau : un
     # appel par ligne rescannerait les guildes 37 fois pour le meme resultat.
-    _dl_opts, _dl_nb, _dl_tronque = _membres_discord_pour_liste(GUILDE_CHATTEURS)
+    _dl_opts, _dl_nb, _dl_tronque = _membres_discord_pour_liste(_guilde_chatteurs())
 
     # Si pas d EDT, propose les 2 presets + custom
     if not edts:
@@ -52626,7 +52711,7 @@ def _render_chatplanning_html() -> str:
         (cache 120 s) et montre.
         """
         handle = (r.get("discord_username") or "").strip()
-        bord, titre, pastille = _etat_discord(handle, _dl_nb, GUILDE_CHATTEURS)
+        bord, titre, pastille = _etat_discord(handle, _dl_nb, _guilde_chatteurs())
         largeur = 100 if pastille else 120
         return (
             f"<td style='padding:4px 6px;white-space:nowrap' title='{html_escape(titre)}'>"
@@ -73651,6 +73736,87 @@ def create_app():
             pass
         return _success(f"✓ {name} → {pct:g}%")
 
+    @app.route("/mypuls/chatter/set_discord", methods=["POST"])
+    def mypuls_chatter_set_discord():
+        """Relie le Discord d'un chatteur : c'est ce qui donne sa photo.
+
+        Absente de _RESTRICTED_WRITE_ALLOW, donc refusee a tout role
+        restreint : un chatteur ne doit pas pouvoir changer la photo ni le
+        rattachement d'un autre depuis la console.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            import mypuls
+            from ventes_export import est_non_attribue
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "Nom du chatteur manquant"})
+        # « Indetermine (Creatrice) » est un libelle de MyPuls, pas une
+        # personne : rien a relier, comme il n'y a rien a payer.
+        if est_non_attribue(name):
+            return jsonify({"ok": False, "error": "Ventes non attribuées : aucun chatteur à relier"})
+        pseudo = mypuls.set_discord(name, request.form.get("discord") or "")
+        try:
+            _render_mypuls_section_html.invalidate()
+        except Exception:
+            pass
+        return jsonify(dict(_discord_du_chatteur(pseudo), ok=True, name=name))
+
+    @app.route("/mypuls/chatters/membres_discord.json")
+    def mypuls_chatters_membres_discord():
+        """Les membres des serveurs du bot, pour CHOISIR un pseudo au lieu de
+        le taper de memoire. Acces complets seulement : c'est la liste de tout
+        le monde sur les serveurs, pas un chiffre de la page."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            _complet = _role_allowed_tabs(_live_role()) is None
+        except Exception:
+            _complet = False
+        if not _complet:
+            return jsonify({"ok": False, "error": "Accès refusé"}), 403
+        options, nb, tronque = _membres_discord_pour_liste("")
+        return jsonify({"ok": True, "options": options, "nb": nb, "tronque": tronque,
+                        "verifiable": _discord_observable()})
+
+    @app.route("/mypuls/chatters/complement.json")
+    def mypuls_chatters_complement():
+        """Periode d'avant, messages et presence, lus APRES la page.
+
+        Voir revenus_chatteurs : la page de paie ne doit ni attendre ni tomber
+        pour un chiffre de confort. Lecture seule.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "erreurs": ["Session expirée"]}), 401
+        # Meme garde que l'onglet : sans elle, un role qui n'a pas l'ecran
+        # des revenus lirait les ventes de la periode d'avant par cette porte.
+        try:
+            _al_rev = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al_rev = None
+        if _al_rev is not None and "revenus" not in _al_rev:
+            return jsonify({"ok": False, "erreurs": ["Accès refusé"]}), 403
+        debut = (request.args.get("start") or "").strip()
+        fin = (request.args.get("end") or "").strip()
+        try:
+            import mypuls
+            import revenus_chatteurs
+            comptes = {}
+            cr = mypuls.list_creators()
+            if cr.get("ok"):
+                comptes = cr.get("creators") or {}
+            cur = mypuls.fetch_team_stats(debut, fin, use_cache=True)
+            ventes = (cur.get("transactions") or []) if cur.get("ok") else []
+            return jsonify(revenus_chatteurs.complement(debut, fin, comptes, ventes))
+        except Exception as e:
+            return jsonify({"ok": False, "erreurs": [f"{type(e).__name__} : {e}"]})
+
     @app.route("/mypuls/chatter/set_crypto", methods=["POST"])
     def mypuls_chatter_set_crypto():
         if not is_auth():
@@ -77426,7 +77592,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # Un handle qui ne resout pas ne touche pas au pseudo : on ne
         # remplace jamais un nom par du vide ou par une coquille.
         if ok and field == "discord_username":
-            info = _resolve_discord_user_by_handle(value, GUILDE_CHATTEURS) if value else None
+            info = _resolve_discord_user_by_handle(value, _guilde_chatteurs()) if value else None
             rep["rattache"] = bool(info)
             rep["verifiable"] = _discord_observable()
             # Le verdict RENVOYE vient de la meme fonction que le rendu
@@ -77434,8 +77600,8 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             # meme cellule apres rechargement finiraient par dire deux
             # choses differentes du meme pseudo.
             rep["bord"], rep["titre"], _ = _etat_discord(
-                value, _membres_discord_pour_liste(GUILDE_CHATTEURS)[1],
-                GUILDE_CHATTEURS)
+                value, _membres_discord_pour_liste(_guilde_chatteurs())[1],
+                _guilde_chatteurs())
             if info:
                 surnom = (info.get("display_name") or info.get("username") or "").strip()
                 if surnom and chatting.update_cell(edt_id, row_id, "pseudo", surnom):

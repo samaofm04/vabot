@@ -3051,6 +3051,9 @@ def get_chatter_meta(name: str) -> dict:
         "crypto_address": meta.get("crypto_address", ""),
         # Periodes ou ce chatteur a deja ete paye (liste de strings "YYYY-MM-DD_YYYY-MM-DD")
         "paid_periods": list(meta.get("paid_periods") or []),
+        # Pseudo Discord relie a la main sur la page Revenus chatteurs : c'est
+        # lui qui donne la photo de profil. "" tant que personne ne l'a relie.
+        "discord": str(meta.get("discord") or ""),
     }
 
 
@@ -3131,6 +3134,30 @@ def set_crypto_address(name: str, crypto_type: str, network: str, address: str):
     data[key]["crypto_address"] = (address or "").strip()
     data[key]["original_name"] = name
     _save_chatters(data)
+
+
+def set_discord(name: str, pseudo: str) -> str:
+    """Relie (ou delie, avec "") le pseudo Discord d'un chatteur. Rend le pseudo garde.
+
+    LE LIEN VIT SUR LA FICHE DU CHATTEUR, pas dans le planning. Les deux listes
+    ne portent pas les memes noms : MyPuls dit « Skurt », le planning dit
+    « Jerry » pour la meme personne (constate le 18/11/2026). Passer par le
+    planning aurait rattache des photos a la mauvaise ligne.
+    """
+    pseudo = str(pseudo or "").strip().lstrip("@").strip().lower()[:40]
+    data = _load_chatters()
+    key = (name or "").strip().lower()
+    if not key:
+        return ""
+    if key not in data:
+        data[key] = {}
+    if pseudo:
+        data[key]["discord"] = pseudo
+    else:
+        data[key].pop("discord", None)
+    data[key]["original_name"] = name
+    _save_chatters(data)
+    return pseudo
 
 
 def set_commission_pct(name: str, pct: float):
