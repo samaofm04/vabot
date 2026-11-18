@@ -19889,7 +19889,7 @@ try:
             return _jsCV.loads(self.text)
 
     class _SrvCV:
-        sessions, appareils, emails, n, code = {}, set(), 0, 0, None
+        sessions, appareils, emails, n, code, plafond = {}, set(), 0, 0, None, False
 
     class _SessCV:
         def __init__(self):
@@ -19924,6 +19924,12 @@ try:
             if chemin == "/securite/verifier/email" and methode == "POST":
                 if d.get("_token") != "jeton-email":
                     return _RepCV(403, "jeton refuse", url)
+                if _SrvCV.plafond:
+                    # la reponse relevee le 18/11/2026 : HTTP 200, ?cap=1, bandeau rouge
+                    return _RepCV(200, _PAGE_CV % ('<div class="alert alert-danger border-0 bg-danger bg-opacity-10 '
+                                                   'text-danger mb-4">Vous avez demandé trop de codes aujourd&#039;hui. '
+                                                   'Réessayez demain ou contactez le support.</div>'),
+                                  "https://mypuls.app/securite/verifier?cap=1")
                 _SrvCV.emails += 1
                 _SrvCV.code = {"sid": sid, "code": "482913"}
                 return self._page()
@@ -20046,6 +20052,39 @@ try:
         _carteCV = _wCV._MYPULS_CARTE_CODE
         check("le cadre : deux boutons, aucun identifiant fixe (plusieurs cadres dans le meme document)",
               _carteCV.count("mpVerif(this,") == 2 and " id=" not in _carteCV and "'?'" not in _carteCV)
+
+        # 18/11/2026, premier essai reel. MyPuls a repondu a la demande de code, en HTTP 200 :
+        # « Vous avez demandé trop de codes aujourd'hui ». Le site affichait « Code demandé ».
+        _mpCV.noter_verification()
+        _SrvCV.plafond = True
+        _emCV = _SrvCV.emails
+        _p1CV = _cCV.post("/mypuls/verification/envoyer").get_json()
+        check("MyPuls refuse d envoyer un code (trop de codes aujourd hui) : dit avec ses mots, pas « Code demandé »",
+              _p1CV.get("ok") is False and _p1CV.get("plafond") is True and _SrvCV.emails == _emCV
+              and "trop de codes aujourd'hui" in _p1CV.get("error", "") and "demain" in _p1CV["error"], str(_p1CV))
+        check("... et le cadre comme Reglages disent de ne pas recliquer aujourd hui",
+              "refusé d’envoyer un code de plus" in _wCV._mypuls_carte_code()
+              and "refuse d’envoyer un code de plus aujourd’hui" in
+              [x for x in _wCV._cookies_etat_services() if x.get("cle") == "mypuls"][0].get("texte", ""))
+        _cfgCV = _mpCV.load_config()
+        _cfgCV["code_plafond"] = int(_tCV.time()) - 2 * 86400
+        _mpCV.save_config(_cfgCV)
+        check("... seulement le jour meme : un refus d avant-hier ne s affiche plus",
+              "refusé d’envoyer" not in _wCV._mypuls_carte_code() and "mp-verif-code" in _wCV._mypuls_carte_code())
+        # Chaque session neuve est une « Confirmez votre connexion » de plus : tant que le code
+        # est attendu, le site n en ouvre pas tout seul (quinze dans la journee du 18/11).
+        _nCV, _sidCV = len(_SrvCV.sessions), _mpCV.load_config().get("PHPSESSID")
+        _arCV = _mpCV.auto_refresh()
+        check("code attendu : le renouvellement automatique n ouvre PAS de session neuve chez MyPuls",
+              _arCV.get("ok") is True and _arCV.get("attente_code") is True
+              and len(_SrvCV.sessions) == _nCV and _mpCV.load_config().get("PHPSESSID") == _sidCV, str(_arCV))
+        _exCV = _mpCV.remettre_rememberme(_remCV)
+        check("code attendu : le meme cookie renvoye par l extension ne change pas de session non plus",
+              _exCV.get("ok") is True and _exCV.get("inchange") is True
+              and len(_SrvCV.sessions) == _nCV and _mpCV.load_config().get("PHPSESSID") == _sidCV, str(_exCV))
+        _mpCV.lever_verification()
+        check("code passe : le renouvellement reprend",
+              _mpCV.auto_refresh().get("attente_code") is None and len(_SrvCV.sessions) == _nCV + 1)
     finally:
         (_mpCV.CONFIG_FILE, _mpCV.requests) = _savCV[:2]
         _mpCV._VERIF_VU.update(_savCV[2])

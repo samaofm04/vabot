@@ -1474,6 +1474,8 @@ def cookies_etat() -> Dict[str, Any]:
         "refuse_depuis": cfg.get("cookies_refuses") or None,
         # MyPuls demande son code par e-mail (voir VERIFICATION_MYPULS)
         "code_depuis": cfg.get("verification_demandee") or None,
+        # ... et a refuse d'en envoyer un de plus (« trop de codes aujourd'hui »)
+        "code_plafond": cfg.get("code_plafond") or None,
     }
 
 
@@ -1503,6 +1505,14 @@ def remettre_rememberme(rememberme: str, forcer: bool = False) -> Dict[str, Any]
     if ancien and ancien != compte and not forcer:
         return {"ok": False, "autre_compte": True,
                 "error": "ce Chrome est connecté à un AUTRE compte MyPuls que celui du site"}
+    _cfg = load_config()
+    if (ancien == compte and _cfg.get("verification_demandee") and not _cfg.get("cookies_refuses")
+            and (echeance_rememberme(_cfg.get("REMEMBERME", "")) or 0) > _t.time()):
+        # Meme compte, cookie du site encore bon, et MyPuls attend son code :
+        # essayer ce cookie ouvrirait une session neuve pour rien (voir
+        # auto_refresh). Le site garde celle ou le code doit etre saisi.
+        return {"ok": True, "inchange": True, "expire": echeance_rememberme(_cfg.get("REMEMBERME", "")),
+                "compte_change": False}
     # 15 s : l'extension qui attend la reponse est coupee par Chrome a 30 s
     res = _essai_profil({"REMEMBERME": rememberme}, timeout=15)
     if not res["ok"]:
@@ -1554,6 +1564,17 @@ def auto_refresh() -> Dict[str, Any]:
     rememberme = cfg.get("REMEMBERME", "")
     if not rememberme:
         return {"ok": False, "error": "REMEMBERME non configuré — refresh impossible"}
+    if cfg.get("verification_demandee"):
+        # Cet appel ouvre une session NEUVE chez MyPuls, et il part a chaque
+        # redemarrage du bot. Tant que le code de confirmation n'est pas saisi,
+        # une session neuve est une « Confirmez votre connexion » de plus : le
+        # 18/11/2026 le site en a ouvert quinze dans la journee, et MyPuls a
+        # fini par repondre « Vous avez demandé trop de codes aujourd'hui ».
+        # PAS VERIFIE que ces sessions-la usent le quota de codes (il faudrait
+        # la liste des e-mails recus) : c'est une precaution. On garde donc la
+        # session en cours, celle ou le code sera saisi. Le REMEMBERME vaut
+        # 7 jours ; le renouvellement reprend des que le code est passe.
+        return {"ok": True, "rotated": False, "attente_code": True}
     res = _essai_profil({"REMEMBERME": rememberme})
     if load_config().get("REMEMBERME", "") != rememberme:
         # remis pendant l'appel (extension Chrome, formulaire) : ce resultat
@@ -3978,6 +3999,21 @@ def _message_page(page: str) -> str:
     return texte[:200]
 
 
+def _refus_page(page: str) -> str:
+    """Le bandeau ROUGE de la page de MyPuls, "" s'il n'y en a pas.
+
+    Releve le 18/11/2026 apres une demande de code : HTTP 200, un renvoi vers
+    /securite/verifier?cap=1 et <div class="alert alert-danger …">Vous avez
+    demandé trop de codes aujourd'hui. Réessayez demain ou contactez le
+    support.</div>. Un refus de MyPuls a donc le meme code HTTP qu'un succes :
+    il ne se lit que la."""
+    m = re.search(r"""<div\b[^>]*class=["'][^"']*\b(?:alert-danger|alert-warning|invalid-feedback|text-danger)\b[^"']*["'][^>]*>(.*?)</div>""",
+                  page or "", re.S | re.I)
+    if not m:
+        return ""
+    return _WS_RE.sub(" ", unescape(_HTML_TAG_RE.sub(" ", m.group(1)))).strip()[:200]
+
+
 def _session_verification() -> Optional[requests.Session]:
     import time as _t
     s = _VERIF_SESSION.get("s")
@@ -4065,10 +4101,26 @@ def verification_envoyer_code() -> Dict[str, Any]:
             dit = _message_page(p.text)
             return {"ok": False, "error": f"MyPuls a refusé d'envoyer le code (HTTP {p.status_code})"
                                           + (f" : {dit}" if dit else ".")}
-        _VERIF_SESSION["envoi"] = _t.time()
         # la session qui attend le code, et l'appareil que MyPuls vient de nommer
         _save_rotated_cookies(s)
         noter_verification()
+        # Un refus arrive en HTTP 200 (voir _refus_page). Le 18/11/2026 le site
+        # affichait « Code demandé » pendant que MyPuls repondait « trop de
+        # codes aujourd'hui » : le proprietaire attendait un e-mail qui ne
+        # partait pas, et saisissait un vieux code.
+        refus = _refus_page(p.text)
+        plafond = "cap=" in str(getattr(p, "url", "") or "").partition("?")[2]
+        if refus or plafond:
+            if plafond:
+                cfg = load_config()
+                cfg["code_plafond"] = int(_t.time())
+                save_config(cfg)
+            return {"ok": False, "plafond": plafond,
+                    "error": "MyPuls n'a pas envoyé de code. Sa réponse : « %s »"
+                             % (refus or "trop de codes demandés aujourd'hui")
+                             + (" Inutile de recliquer aujourd'hui : réessaie demain, une seule fois, "
+                                "ou écris au support de MyPuls." if plafond else "")}
+        _VERIF_SESSION["envoi"] = _t.time()
         return {"ok": True}
 
 

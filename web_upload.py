@@ -46373,7 +46373,7 @@ _MYPULS_CARTE_CODE = """
 <input type='text' class='mp-verif-code' inputmode='numeric' autocomplete='one-time-code' maxlength='12' placeholder='code reçu' style='width:130px;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:14px;letter-spacing:.08em'>
 <button type='button' onclick='mpVerif(this,"confirmer")' style='background:transparent;border:1px solid #f59e0b;color:#f59e0b;padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12.5px;white-space:nowrap'>2 · Confirmer</button>
 </div>
-<div class='mp-verif-msg' style='margin-top:8px;font-size:12.5px;color:#888'></div>
+<div class='mp-verif-msg' style='margin-top:8px;font-size:12.5px;color:#888'><!--mp-verif-note--></div>
 </div>
 <script>
 window.mpVerif = window.mpVerif || async function(btn, quoi){
@@ -46414,9 +46414,34 @@ window.mpVerif = window.mpVerif || async function(btn, quoi){
 """
 
 
+def _mypuls_plafond_du_jour() -> str:
+    """« 09:28 » si MyPuls a refuse AUJOURD HUI (jour de Paris, le sien)
+    d envoyer un code de plus, sinon "". Releve le 18/11/2026 : « Vous avez
+    demandé trop de codes aujourd'hui. Réessayez demain ou contactez le
+    support. »"""
+    try:
+        import mypuls
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        ts = mypuls.cookies_etat().get("code_plafond")
+        if not ts:
+            return ""
+        paris = ZoneInfo("Europe/Paris")
+        quand = _dt.datetime.fromtimestamp(float(ts), paris)
+        return quand.strftime("%H:%M") if quand.date() == _dt.datetime.now(paris).date() else ""
+    except Exception:
+        return ""
+
+
 def _mypuls_carte_code() -> str:
     """Le cadre de saisie du code, seulement quand MyPuls le demande."""
-    return _MYPULS_CARTE_CODE if _mypuls_code_demande() else ""
+    if not _mypuls_code_demande():
+        return ""
+    heure = _mypuls_plafond_du_jour()
+    note = ("<span style='color:#f87171'>✕ À %s, MyPuls a refusé d’envoyer un code de plus : « trop de codes "
+            "demandés aujourd’hui ». Inutile de recliquer « 1 » avant demain. Si tu as reçu un e-mail de "
+            "MyPuls il y a quelques minutes, son code peut encore marcher.</span>" % heure) if heure else ""
+    return _MYPULS_CARTE_CODE.replace("<!--mp-verif-note-->", note)
 
 
 def _apres_code_mypuls() -> None:
@@ -59143,9 +59168,15 @@ def _cookies_etat_services() -> list:
             # d'abonnes, et le proprietaire remettait ses cookies pour rien.
             # « alerte » et pas « ko » : rien n'est mort, et un « ko » ferait
             # renvoyer le cookie par l'extension, ce qui n'arrange rien.
-            return {"niveau": "alerte", "code": True,
-                    "texte": "Cookie bon, mais MyPuls demande un code de confirmation par e-mail "
-                             "depuis le %s : ses pages d’abonnés sont fermées au site." % _jour(e["code_depuis"]),
+            _texte = ("Cookie bon, mais MyPuls demande un code de confirmation par e-mail "
+                      "depuis le %s : ses pages d’abonnés sont fermées au site." % _jour(e["code_depuis"]))
+            if e.get("code_plafond") and _jour(e["code_plafond"]) == _jour(maintenant):
+                # MyPuls a dit « trop de codes aujourd'hui » : ne pas l'envoyer recliquer
+                return {"niveau": "alerte", "code": True,
+                        "texte": _texte + " MyPuls refuse d’envoyer un code de plus aujourd’hui.",
+                        "aide": "À refaire demain sur youl4b.com, Réglages › Cookies MyPuls : un seul clic sur "
+                                "« Recevoir le code par e-mail ». Remettre le cookie n’y change rien."}
+            return {"niveau": "alerte", "code": True, "texte": _texte,
                     "aide": "Sur youl4b.com, Réglages › Cookies MyPuls : « Recevoir le code par e-mail », "
                             "puis colle le code reçu. Remettre le cookie n’y change rien."}
         j = int((exp - maintenant) // 86400)
@@ -73867,7 +73898,8 @@ def create_app():
             res = mypuls.remettre_rememberme(request.form.get("rememberme") or "",
                                              forcer=request.form.get("forcer") == "1")
             print("[cookies] MyPuls par l'extension : "
-                  + ("remis" if res.get("ok") else "refuse (%s)" % res.get("error")), flush=True)
+                  + (("laisse tel quel (MyPuls attend son code, pas de session neuve)" if res.get("inchange")
+                      else "remis") if res.get("ok") else "refuse (%s)" % res.get("error")), flush=True)
             if res.get("ok"):
                 try:
                     _invalidate_all_ttl_cache()
@@ -73912,7 +73944,7 @@ def create_app():
             return res
         print("[cookies] code MyPuls : " + ("demande a MyPuls" if res.get("ok")
                                             else "non demande (%s)" % res.get("error")), flush=True)
-        return jsonify({k: res[k] for k in ("ok", "error", "deja") if k in res})
+        return jsonify({k: res[k] for k in ("ok", "error", "deja", "plafond") if k in res})
 
     @app.route("/mypuls/verification/confirmer", methods=["POST"])
     def mypuls_verification_confirmer():
