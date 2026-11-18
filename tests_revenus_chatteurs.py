@@ -677,6 +677,64 @@ def test_photo_model(tmp):
           '"/mypuls/avatar/3673?j=%s"' % date.today().isoformat() in page)
 
 
+def test_paie_nette():
+    print("\n--- la paie des chatteurs sur le net OnlyFans, depuis le 01/11/2026 ---")
+    P = mypuls.part_usd_payee
+    check("une vente OnlyFans du 01/11/2026 ou apres compte nette (100 $ -> 80 $) ; avant, brute",
+          [P(100, "2026-11-01T00:05:00+01:00"), P(100, "2026-11-18T12:00:00+01:00"),
+           P(100, "2026-10-31T23:50:00+01:00"), P(100, "2026-06-10T12:00:00+02:00")] == [80.0, 80.0, 100.0, 100.0],
+          [P(100, "2026-11-01T00:05:00+01:00"), P(100, "2026-10-31T23:50:00+01:00")])
+    check("... le jour se lit a l'heure de Paris : 23 h 30 UTC le 31/10 est deja le 1er novembre",
+          P(100, "2026-10-31T23:30:00+00:00") == 80.0, P(100, "2026-10-31T23:30:00+00:00"))
+    check("... un jour deja ecrit « AAAA-MM-JJ » et l'ancien format « JJ/MM/AAAA » sont compris",
+          [P(50, "2026-11-03"), P(50, "2026-10-20"), P(50, "20/10/2026 14:00"), P(50, "03/11/2026 14:00")]
+          == [40.0, 50.0, 50.0, 40.0])
+    check("... une date illisible : traitee comme une vente d'aujourd'hui (le net)", P(100, "??") == 80.0)
+    check("les frais retires de la paie sont ceux du mode « Net » de la page (une seule valeur)",
+          mypuls.FRAIS_OF_PAIE == rc.FRAIS_OF, (mypuls.FRAIS_OF_PAIE, rc.FRAIS_OF))
+    B = mypuls.base_paie_usd
+    check("base de paie : MYM converti + OnlyFans tel que la paie le compte (100 EUR a 1,10 + 160 $ = 270 $)",
+          B({"ca_total": 300, "ca_eur": 100, "ca_usd": 200, "ca_usd_paie": 160}, 1.10) == 270.0)
+    check("... sans cette part (ancien releve en memoire) : l'ancienne base, jamais zero",
+          B({"ca_total": 300, "ca_eur": 100, "ca_usd": 200}, 1.10) == 310.0)
+    check("... si le journal ne recoupe pas le CA (5 %) : on retombe sur le CA entier, comme avant",
+          round(B({"ca_total": 500, "ca_eur": 100, "ca_usd": 200, "ca_usd_paie": 160}, 1.10), 2) == 550.0)
+    with Bouchon():
+        nov = {c["name"]: c for c in mypuls.fetch_team_stats("2026-11-01", "2026-11-15")["chatters"]}
+        octo = {c["name"]: c for c in mypuls.fetch_team_stats("2026-10-16", "2026-10-31")["chatters"]}
+    check("quinzaine de novembre : Baadooo, 280 $ de ventes OnlyFans -> 224 $ dans sa paie",
+          nov["Baadooo"]["ca_usd"] == 280.0 and nov["Baadooo"]["ca_usd_paie"] == 224.0,
+          (nov["Baadooo"].get("ca_usd"), nov["Baadooo"].get("ca_usd_paie")))
+    check("... mazid, 20 EUR de MYM (inchange) et 80 $ d'OnlyFans (-> 64 $) : base 86 $",
+          round(B(nov["mazid"], 1.10), 2) == 86.0, round(B(nov["mazid"], 1.10), 2))
+    check("... un chatteur 100 % MYM ne bouge pas (moyle : 150 EUR -> 165 $)",
+          round(B(nov["moyle@example.com"], 1.10), 2) == 165.0)
+    check("quinzaine d'octobre, deja reglee sur le brut : rien n'est recalcule (Baadooo 100 $ reste 100 $)",
+          octo["Baadooo"]["ca_usd_paie"] == 100.0 and octo["mazid"]["ca_usd_paie"] == 10.0,
+          (octo["Baadooo"].get("ca_usd_paie"), octo["mazid"].get("ca_usd_paie")))
+    # Le registre des ventes (Excel, Google Sheet) : la meme base que la page.
+    import ventes_export as ve
+    lignes = ve.lignes_ventes([
+        {"chatter": "Baadooo", "creator": "Amelia", "amount": 200, "currency": "USD", "type": "Média privé",
+         "date": "2026-11-08T16:00:00+01:00"},
+        {"chatter": "Baadooo", "creator": "Amelia", "amount": 100, "currency": "USD", "type": "Média privé",
+         "date": "2026-10-23T16:00:00+02:00"},
+        {"chatter": "mazid", "creator": "Lolatacrush", "amount": 20, "currency": "EUR", "type": "Média privé",
+         "date": "2026-11-06T13:00:00+01:00"}])
+    cols, paie = ve.paie_quinzaine(lignes, commissions={"_defaut_": 10}, eur_usd=1.10)
+    i_base, i_pay, i_ca = cols.index("Base de paie (USD)"), cols.index("A payer (USD)"), cols.index("CA total (USD)")
+    par = {(r[1], r[0]): r for r in paie}
+    nov_b = next(r for (nom, q), r in par.items() if nom == "Baadooo" and "novembre" in q)
+    oct_b = next(r for (nom, q), r in par.items() if nom == "Baadooo" and "octobre" in q)
+    maz = next(r for (nom, q), r in par.items() if nom == "mazid")
+    check("registre : la vente OnlyFans de novembre est payee sur le net (base 160 $, a payer 16 $), le CA reste 200 $",
+          nov_b[i_base] == 160.0 and nov_b[i_pay] == 16.0 and nov_b[i_ca] == 200.0, nov_b[:12])
+    check("... celle d'octobre reste sur le brut (base 100 $, a payer 10 $)",
+          oct_b[i_base] == 100.0 and oct_b[i_pay] == 10.0, oct_b[:12])
+    check("... et une vente MYM ne change pas (20 EUR -> 22 $, a payer 2,20 $)",
+          maz[i_base] == 22.0 and maz[i_pay] == 2.2, maz[:12])
+
+
 def test_managers(tmp):
     print("\n--- managers et mini-boss : la matrice, la paie, le fichier ---")
     import revenus_managers as rm
@@ -1093,6 +1151,43 @@ def test_site(tmp):
             check("les photos de la legende portent leur couleur de repli et l'adresse du jour",
                   "data-couleur='#" in page and re.search(r"/mypuls/avatar/\d+\?j=\d{4}-\d\d-\d\d' data-couleur", page) is not None)
 
+            # ---- la paie des chatteurs : nette depuis le 01/11/2026, serveur ET navigateur
+            def a_payer(html, nom):
+                m = re.search(r"data-chatter='%s' class='mp-chatter-row'>.*?class='mp-cell-pay'[^>]*>\$([\d.]+)</td>"
+                              % re.escape(nom), html, re.S)
+                return float(m.group(1)) if m else None
+            check("page de novembre : Baadooo est paye sur le net OnlyFans (14 % de 224 $ = 31,36 $, plus 39,20 $)",
+                  a_payer(page, "Baadooo") == 31.36, a_payer(page, "Baadooo"))
+            check("... mazid : 14 % de (22 $ de MYM + 64 $ d'OnlyFans net) = 12,04 $ ; moyle, tout en MYM, ne bouge pas (23,10 $)",
+                  a_payer(page, "mazid") == 12.04 and a_payer(page, "moyle@example.com") == 23.1,
+                  (a_payer(page, "mazid"), a_payer(page, "moyle@example.com")))
+            m = re.search(r"data-mp-stat='total_pay_usd'[^>]*>\$([\d.]+)<", page)
+            check("... le total a payer suit (95,34 $), et la base est ecrite sous le titre",
+                  m is not None and float(m.group(1)) == 95.34 and "Paie calculée sur le net depuis le 01/11/2026" in page,
+                  m and m.group(1))
+            w._render_mypuls_section_html.invalidate()
+            page_oct = admin.get("/?tab=revenus&mp_start=2026-10-16&mp_end=2026-10-31").get_data(as_text=True)
+            check("page d'octobre (quinzaine deja reglee) : Baadooo reste a 14 % du brut (14,00 $), rien n'est recalcule",
+                  a_payer(page_oct, "Baadooo") == 14.0, a_payer(page_oct, "Baadooo"))
+            check("la regle est donnee au navigateur, avec les memes constantes que le serveur",
+                  "window.__mpPaieNet = {depuis:'%s', frais:%s};" % (mypuls.PAIE_NET_DEPUIS, mypuls.FRAIS_OF_PAIE) in page)
+            fonction = re.search(r"function mpPayUsd\(d, pct, rate, perfCa\)\{.*?\n\}\n", page, re.S)
+            noeud = shutil.which("node")
+            if fonction and noeud:
+                essai = (fonction.group(0) + "console.log(JSON.stringify(["
+                         "mpPayUsd({ca_eur:20, ca_usd:80, ca_usd_paie:64}, 14, 1.10, 100),"
+                         "mpPayUsd({ca_eur:20, ca_usd:80, ca_usd_paie:64}, 14, 1.10, null),"
+                         "mpPayUsd({ca_eur:20, ca_usd:80}, 14, 1.10, 100),"
+                         "mpPayUsd({ca_eur:20, ca_usd:80, ca_usd_paie:64}, 14, 1.10, 500)].map(function(x){return Math.round(x*100)/100;})));")
+                f_js = pathlib.Path(tmp) / "paie.js"
+                f_js.write_text(essai, encoding="utf-8")
+                sortie_js = subprocess.run([noeud, str(f_js)], capture_output=True, text=True).stdout.strip()
+                check("navigateur (mpPayUsd) : meme montant que le serveur (12,04 $), avec ou sans table de reference ; "
+                      "sans part nette l'ancien calcul ; journal qui ne recoupe pas -> table de reference, comme avant",
+                      sortie_js == "[12.04,12.04,14.28,77]", sortie_js)
+            else:
+                check("navigateur (mpPayUsd) : la fonction est dans la page", bool(fonction), "introuvable")
+
             # ---- le bloc des chiffres facon Dashboard, la legende, les courbes
             cases = re.findall(r"<div class='mp-apercu-case[^>]*>.*?<div class='mp-apercu-nom'>(.*?)</div></div>", page, re.S)
             # l'interface se traduit : « Pourboires » sort « Tips » en anglais
@@ -1180,6 +1275,7 @@ if __name__ == "__main__":
     test_comptes()
     test_complement()
     test_deux_bots()
+    test_paie_nette()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
         test_photo_model(_tmp)

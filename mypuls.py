@@ -1713,6 +1713,70 @@ def ca_usd_chatteur(c: dict, eur_usd: float) -> float:
     return round(total * eur_usd, 2)
 
 
+# ---------------------------------------------------------------------------
+# LA BASE DE LA PAIE DES CHATTEURS.
+#
+# Jusqu'au 31/10/2026 : MYM net (en euros, converti) + OnlyFans BRUT. MyPuls
+# rend le MYM deja net et l'OnlyFans brut, et la paie prenait les dollars
+# « tels quels ».
+#
+# DECISION DU PROPRIETAIRE, 18/11/2026 (« oui, chatteurs en net », apres avoir
+# vu l'avant / apres de la quinzaine du 01 au 15/11 : 2 508,03 $ -> 2 349,78 $
+# a verser) : la paie se calcule sur le NET, comme celle des managers. Les
+# frais OnlyFans (20 %) sont donc retires de la part en dollars.
+#
+# A PARTIR DES VENTES DU 01/11/2026 SEULEMENT. Les quinzaines d'avant ont ete
+# reglees sur le brut (cochees « paye » jusqu'au 15/10) : les recalculer
+# ferait afficher, a cote d'une case « paye », un montant qui n'a jamais ete
+# verse. La regle se decide donc VENTE PAR VENTE, sur son jour (heure de
+# Paris) : une periode a cheval sur les deux (« 30 j », « Tout ») reste juste.
+#
+# UN SEUL ENDROIT decide : part_usd_payee. La page (serveur), le navigateur
+# (qui recoit ces deux constantes) et le registre des ventes le lisent tous.
+# ---------------------------------------------------------------------------
+PAIE_NET_DEPUIS = "2026-11-01"
+#: Les frais OnlyFans retires de la paie. Meme valeur que
+#: revenus_chatteurs.FRAIS_OF (un test verifie qu'elles ne divergent pas).
+FRAIS_OF_PAIE = 0.20
+
+
+def part_usd_payee(montant, quand) -> float:
+    """Ce qu'une vente OnlyFans (en dollars, BRUTE chez MyPuls) pese dans la
+    paie d'un chatteur : le net depuis PAIE_NET_DEPUIS, le brut avant.
+
+    `quand` : la date de la vente telle que MyPuls la rend, ou deja un jour
+    « AAAA-MM-JJ ». Une date illisible est traitee comme une vente
+    d'aujourd'hui (le net) : c'est la regle en vigueur, et le cas est rare.
+    """
+    try:
+        m = float(montant or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    from revenus_dates import transaction_day
+    jour = str(quand or "")[:10] if len(str(quand or "")) == 10 and str(quand)[4:5] == "-" else transaction_day(quand)
+    if jour and jour < PAIE_NET_DEPUIS:
+        return m
+    return m * (1 - FRAIS_OF_PAIE)
+
+
+def base_paie_usd(c: dict, eur_usd: float) -> float:
+    """La base de la paie d'un chatteur, en dollars : sa part MYM convertie,
+    plus sa part OnlyFans telle que part_usd_payee la compte (`ca_usd_paie`,
+    posee par _assembler_stats).
+
+    Memes garde-fous que ca_usd_chatteur : la ventilation par devise n'est
+    retenue que si elle recoupe le CA affiche a 5 % pres ; sinon on retombe sur
+    l'hypothese MyM (tout en euros), plutot que de sous-payer en silence.
+    """
+    total = float(c.get("ca_total") or 0)
+    eur, usd = c.get("ca_eur"), c.get("ca_usd")
+    if eur is not None and usd is not None and (eur + usd) > 0:
+        if abs((eur + usd) - total) <= max(1.0, 0.05 * total):
+            payee = c.get("ca_usd_paie")
+            return eur * eur_usd + (usd if payee is None else payee)
+    return total * eur_usd
+
+
 def ca_chatteur_net_brut(c: dict, eur_usd: float, of_fee: float = 0.20,
                          mym_fee: float = 0.26) -> Tuple[float, float]:
     """(net, brut) en dollars d'un chatteur, pour un classement qui compare.
@@ -2641,12 +2705,16 @@ def _assembler_stats(transactions, chatters, start_date, end_date,
             continue
         cs = str(t.get("currency") or "").upper()
         cur = "USD" if ("USD" in cs or "$" in cs) else "EUR"
-        d2 = _by_chatter_cur.setdefault(key, {"EUR": 0.0, "USD": 0.0})
+        d2 = _by_chatter_cur.setdefault(key, {"EUR": 0.0, "USD": 0.0, "USD_PAIE": 0.0})
         d2[cur] += float(t.get("amount") or 0)
+        if cur == "USD":
+            # la part OnlyFans telle que la PAIE la compte (net depuis le 01/11/2026)
+            d2["USD_PAIE"] += part_usd_payee(t.get("amount"), t.get("date"))
     for c in chatters:
         split = _by_chatter_cur.get((c.get("name") or "").strip().lower())
         c["ca_eur"] = round(split["EUR"], 2) if split else None
         c["ca_usd"] = round(split["USD"], 2) if split else None
+        c["ca_usd_paie"] = round(split["USD_PAIE"], 2) if split else None
     # Tri par CA Total décroissant
     chatters.sort(key=lambda c: c["ca_total"], reverse=True)
 

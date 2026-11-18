@@ -36612,11 +36612,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         Garde-fou : si le log de transactions ne recoupe pas le CA de la table
         perf (>5 % d'écart : log tronqué, nom différent), on garde l'ancien
         calcul pour CE chatteur plutôt que de sous-payer en silence."""
-        ca_eur, ca_usd = c.get("ca_eur"), c.get("ca_usd")
-        if ca_eur is not None and ca_usd is not None and (ca_eur + ca_usd) > 0:
-            if abs((ca_eur + ca_usd) - c["ca_total"]) <= max(1.0, 0.05 * c["ca_total"]):
-                return round((ca_eur * eur_to_usd + ca_usd) * pct / 100.0, 2)
-        return round(c["ca_total"] * pct / 100.0 * eur_to_usd, 2)
+        # DEPUIS LE 01/11/2026 la part OnlyFans est comptee NETTE (decision
+        # du proprietaire, 18/11/2026) : mypuls.base_paie_usd tient la regle,
+        # avec les memes garde-fous. Le navigateur fait le meme calcul
+        # (mpPayUsd) : sans lui, l'ancien montant reviendrait au premier filtre.
+        return round(mypuls.base_paie_usd(c, eur_to_usd) * pct / 100.0, 2)
 
     # Table chatteurs (toutes les lignes pour les filtres plateforme) — avec % commission, à payer en USD, screenshot crypto
     chatters_rows = []
@@ -36647,7 +36647,9 @@ body.light .mypuls-bar{background:#e5e7eb}
         commission = meta["commission_pct"]
         to_pay = _pay_usd(c, commission)
         # détail affiché au survol : la part de chaque devise
-        _tip_pay = (f"MyM {c['ca_eur']:.2f}€×{eur_to_usd:.4f} + OF ${c['ca_usd']:.2f}"
+        _of_paie = c.get("ca_usd_paie") if c.get("ca_usd_paie") is not None else c.get("ca_usd")
+        _tip_pay = (f"MyM {c['ca_eur']:.2f}€×{eur_to_usd:.4f} + OF ${_of_paie:.2f}"
+                    + (f" net (brut ${c['ca_usd']:.2f})" if abs(_of_paie - c['ca_usd']) > 0.005 else "")
                     if c.get("ca_eur") is not None and c.get("ca_usd") is not None
                     else f"≈ {c['ca_total'] * commission / 100:.2f}€ × {eur_to_usd:.4f}")
         has_crypto = bool(meta["crypto_file"]) or bool(meta["crypto_address"])
@@ -36862,6 +36864,11 @@ body.light .mypuls-bar{background:#e5e7eb}
         "<div style='padding:12px 14px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>"
         "<div style='display:flex;flex-direction:column;gap:2px'>"
         "<div style='font-size:13px;color:#888'>💰 Total à payer aux chatteurs sur cette période</div>"
+        # La base est DITE : une paie qui change de regle sans l'ecrire
+        # ne s'explique plus trois mois apres.
+        f"<div style='font-size:10px;color:#888'>Paie calculée sur le net depuis le "
+        f"{mypuls.PAIE_NET_DEPUIS[8:10]}/{mypuls.PAIE_NET_DEPUIS[5:7]}/{mypuls.PAIE_NET_DEPUIS[:4]} : "
+        f"OnlyFans −{round(mypuls.FRAIS_OF_PAIE * 100)} %, MYM tel quel. Avant cette date : OnlyFans brut.</div>"
         f"<div style='font-size:10px;color:{rate_color};font-weight:600'>Taux EUR→USD : 1€ = {eur_to_usd:.4f}$ <span style='color:#666'>({rate_label})</span> "
         "<form method='POST' action='/mypuls/refresh_rate' style='display:inline;margin-left:6px'>"
         "<button type='submit' style='background:transparent;border:0;color:#3b82f6;font-size:10px;cursor:pointer;padding:0;text-decoration:underline'>↻ MAJ taux</button>"
@@ -36986,6 +36993,9 @@ body.light .mypuls-bar{background:#e5e7eb}
         # memoire et servie a tous les roles. Seule l'adresse y est ; la route
         # ne repond qu'aux acces complets (voir /mypuls/managers.json).
         f"<script>window.__mpManagersUrl = '/mypuls/managers.json?start={start_str}&end={end_str}';</script>"
+        # La regle de paie des chatteurs, pour mpPayUsd : les deux memes
+        # constantes que le serveur (mypuls.part_usd_payee).
+        f"<script>window.__mpPaieNet = {{depuis:'{mypuls.PAIE_NET_DEPUIS}', frais:{mypuls.FRAIS_OF_PAIE}}};</script>"
         # La liste des membres a choisir n'est PAS dans la page : ce rendu est
         # mis en cache et servi a tous les roles qui ont l'onglet, chatteurs
         # compris. Elle est lue a part, par une route reservee aux acces
@@ -37156,10 +37166,18 @@ function mpRecompute(){
     if(t.y === 'Média privé' || (t.y && t.y.indexOf('PPV') >= 0)) totals.ca_ppv += v;
     else if(t.y === 'Pourboires' || (t.y && t.y.indexOf('Tip') >= 0)) totals.ca_tips += v;
     var n = t.h || '?';
-    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0, ca_eur:0, ca_usd:0, usd_total:0, usd_ppv:0, usd_tips:0};
+    if(!byChat[n]) byChat[n] = {ca_total:0, ca_ppv:0, ca_tips:0, ca_eur:0, ca_usd:0, ca_usd_paie:0, usd_total:0, usd_ppv:0, usd_tips:0};
     byChat[n].ca_total += t.a;
     byChat[n].usd_total += v;
-    if(t.u) byChat[n].ca_usd += t.a; else byChat[n].ca_eur += t.a;
+    // ca_usd_paie : la part OnlyFans telle que la PAIE la compte -- nette
+    // (frais retires) pour une vente a partir de __mpPaieNet.depuis, brute
+    // avant. Meme regle que mypuls.part_usd_payee ; une vente sans jour
+    // lisible est traitee comme une vente d aujourd hui.
+    if(t.u){
+      var regle = window.__mpPaieNet || {depuis:'9999-99-99', frais:0};
+      byChat[n].ca_usd += t.a;
+      byChat[n].ca_usd_paie += (t.day && t.day < regle.depuis) ? t.a : t.a * (1 - regle.frais);
+    } else byChat[n].ca_eur += t.a;
     if(t.y === 'Média privé'){ byChat[n].ca_ppv += t.a; byChat[n].usd_ppv += v; }
     else if(t.y === 'Pourboires'){ byChat[n].ca_tips += t.a; byChat[n].usd_tips += v; }
   });
@@ -37294,18 +37312,21 @@ function mpRecompute(){
 // toucher un filtre faisait CHANGER le « Total à payer ».
 function mpPayUsd(d, pct, rate, perfCa){
   var e = (d && d.ca_eur) || 0, u = (d && d.ca_usd) || 0;
+  // up : la part OnlyFans PAYEE (nette depuis le 01/11/2026). `u`, le brut,
+  // ne sert plus qu au garde-fou qui compare le journal a la table de perf.
+  var up = (d && typeof d.ca_usd_paie === 'number') ? d.ca_usd_paie : u;
   // Sans CA de reference, AUCUN garde-fou possible : il n y a rien a comparer.
   // C est le cas des qu un filtre est actif (la table de perf n est filtrable
   // ni par creatrice ni par heure) et pour un chatteur absent de cette table.
   // On calcule alors sur le journal, et l interface le DIT — voir le bandeau
   // pose par mpRecompute.
   if(typeof perfCa !== 'number' || perfCa <= 0){
-    return (e * rate + u) * pct / 100;
+    return (e * rate + up) * pct / 100;
   }
   // Le journal recoupe la table de perf : on paie devise par devise, la part
   // USD (OnlyFans) n etant PAS convertie.
   if((e + u) > 0 && Math.abs((e + u) - perfCa) <= Math.max(1, 0.05 * perfCa)){
-    return (e * rate + u) * pct / 100;
+    return (e * rate + up) * pct / 100;
   }
   // Il ne la recoupe pas — journal tronque, ou nom different. On paie sur la
   // table de perf, exactement comme le serveur, plutot que de sous-payer en

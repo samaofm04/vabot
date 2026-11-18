@@ -241,16 +241,20 @@ def _categorie_vente(type_vente: str) -> str:
 # Colonnes fixes de la feuille de paie, avant les colonnes « Vente N ».
 COLONNES_PAIE = ["Quinzaine", "Chatteur", "Ventes", "CA total (USD)",
                  "PPV (USD)", "Tips (USD)", "Autres (USD)", "CA EUR", "CA USD",
-                 "Commission %", "A payer (USD)"]
+                 "Base de paie (USD)", "Commission %", "A payer (USD)"]
 
 
 def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
     """Une ligne par chatteur et par quinzaine : CA, taux, a payer, et le
     detail de toutes ses ventes SUR LA MEME LIGNE.
 
-    `commissions` : {chatteur: pourcentage}. La part EUR est convertie en USD,
-    la part USD est prise telle quelle — meme regle que la page Paie du site,
-    sinon les ventes OnlyFans seraient surpayees.
+    `commissions` : {chatteur: pourcentage}. La part EUR est convertie en USD.
+    La part USD (OnlyFans) est comptee comme la page Paie du site la compte :
+    NETTE (frais retires) pour une vente a partir de mypuls.PAIE_NET_DEPUIS,
+    brute avant — mypuls.part_usd_payee decide, vente par vente. La colonne
+    « Base de paie (USD) » montre le resultat : « A payer » = base x taux, et
+    le « CA total » a cote reste le chiffre des ventes, sans frais retires.
+    Sans cette colonne, on lirait deux chiffres pour une meme paie.
 
     TOUS les montants de synthese sont en dollars : additionner des euros MyM
     et des dollars OnlyFans dans une colonne « CA total » gonflait la part
@@ -263,6 +267,11 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
     exactement le CA total : une vente ne peut plus disparaitre entre elles.
     """
     commissions = commissions or {}
+    try:
+        from mypuls import part_usd_payee as _part_payee
+    except Exception:                                   # noqa: BLE001
+        def _part_payee(montant, _jour):                # mypuls indisponible : l'ancienne base
+            return montant
 
     def _en_usd(v):
         """Un montant de vente ramene en dollars. USD = OnlyFans, tout le reste
@@ -282,6 +291,8 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         ca_usd = sum(v[6] for v in ventes if v[7] == "USD")
         autres_devises = sum(v[6] for v in ventes if v[7] not in ("EUR", "USD"))
         ca = sum(_en_usd(v) for v in ventes)
+        # v[0] = le jour de la vente (heure de Paris), v[6] son montant
+        base_paie = sum(_part_payee(v[6], v[0]) if v[7] == "USD" else _en_usd(v) for v in ventes)
         # Meme decoupage que les cartes du site, meme regle de classement.
         # La famille est calculee UNE fois par vente : elle sert deux colonnes.
         familles = [(_categorie_vente(v[8]), _en_usd(v)) for v in ventes]
@@ -309,7 +320,7 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
             # vraie quinzaine. Le CA reste chiffre et visible ; la ligne n'est
             # simplement pas payable tant que la date n'est pas rattachee.
             pct = 0.0
-        a_payer = round(ca * pct / 100.0, 2)
+        a_payer = round(base_paie * pct / 100.0, 2)
         # Les ventes s'etalent vers la droite, UNE PAR CASE, de la plus
         # recente a la plus ancienne. Entassees dans une seule cellule elles
         # etaient illisibles et impossibles a trier ou filtrer.
@@ -323,7 +334,7 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
                     # partout ailleurs (mypuls._norm_currency retombe sur EUR) :
                     # ainsi CA EUR + CA USD reste la matiere du CA total.
                     round(ca_eur + autres_devises, 2), round(ca_usd, 2),
-                    pct, a_payer] + detail)
+                    round(base_paie, 2), pct, a_payer] + detail)
 
     # Autant de colonnes « Vente N » que le chatteur le plus actif en a.
     fixes = len(COLONNES_PAIE)
