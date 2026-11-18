@@ -252,3 +252,15 @@ body .mp-revenue-section button.mp-fx{padding:7px 13px!important;min-height:0!im
 body .mp-revenue-section button.mp-fx-mode[data-brut='1']{color:#f59e0b!important}
 body.light .mp-revenue-section button.mp-fx-mode[data-brut='1']{color:#b45309!important}
 .mp-revenue-pastille{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 6px;flex:none}
+/* La rangee de photos des models au-dessus du graphique, facon MyPuls : photos
+   plus grandes qui se chevauchent, anneau de la couleur de la courbe, et la
+   plateforme en petit dessous. Un clic affiche ou masque la model. */
+body .mp-revenue-section .mp-revenue-chart-avatars{padding-left:12px;margin-left:12px;border-left:1px solid var(--mpr-border);min-height:44px}
+body .mp-revenue-section .mp-revenue-chart-avatars button{position:relative;width:42px!important;height:42px!important;margin-left:-10px;overflow:visible;transition:transform .12s;cursor:pointer}
+body .mp-revenue-section .mp-revenue-chart-avatars button:first-child{margin-left:0}
+body .mp-revenue-section .mp-revenue-chart-avatars button:hover{transform:translateY(-2px);z-index:2}
+body .mp-revenue-section .mp-revenue-chart-avatars button[hidden]{display:none!important}
+.mp-revenue-chart-avatars img{border-width:2.5px}
+.mp-revenue-plat{position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);font-style:normal;font-size:7px;font-weight:800;line-height:1;letter-spacing:.02em;padding:2px 4px;border-radius:6px;color:#fff;box-shadow:0 0 0 1.5px var(--mpr-surface);white-space:nowrap}
+.mp-revenue-plat-mym{background:#347dff}
+.mp-revenue-plat-of{background:#00afe8}

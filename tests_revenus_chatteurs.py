@@ -681,6 +681,43 @@ def test_site(tmp):
             j = (admin.post("/mypuls/chatter/set_discord", data={"name": "Tsiry", "discord": ""}).get_json() or {})
             check("pseudo vide : le lien est retire", j.get("ok") and mypuls.get_chatter_discord("Tsiry") == "", j)
 
+            # ---- deposer la photo d'une model (cookie MyPuls absent du serveur)
+            import io
+            JPEG = b"\xff\xd8\xff\xe0" + b"photo" * 30
+            anonyme = app.test_client()
+            depot = "/mypuls/avatar/3673/deposer"
+            r = anonyme.post(depot, data={"photo": (io.BytesIO(JPEG), "a.jpg")}, content_type="multipart/form-data")
+            check("depot sans session ni jeton : refuse (403)", r.status_code == 403, r.status_code)
+            check("un role restreint ne peut pas demander de jeton (403)",
+                  chatteur.get("/mypuls/avatars/jeton").status_code == 403)
+            jeton = (admin.get("/mypuls/avatars/jeton").get_json() or {}).get("jeton") or ""
+            check("un acces complet recoit un jeton de depot", len(jeton) == 32)
+            r = anonyme.post(depot, data={"jeton": "faux" * 8, "photo": (io.BytesIO(JPEG), "a.jpg")},
+                             content_type="multipart/form-data")
+            check("un jeton invente : refuse (403)", r.status_code == 403, r.status_code)
+            r = anonyme.post(depot, data={"jeton": jeton, "photo": (io.BytesIO(b"<html>pas une image</html>"), "a.jpg")},
+                             content_type="multipart/form-data")
+            check("avec le jeton, autre chose qu'une image : refuse (400)", r.status_code == 400, r.status_code)
+            r = anonyme.post("/mypuls/avatar/424242/deposer", data={"jeton": jeton, "photo": (io.BytesIO(JPEG), "a.jpg")},
+                             content_type="multipart/form-data")
+            check("avec le jeton, un compte que le site ne connait pas : refuse (404)", r.status_code == 404, r.status_code)
+            r = anonyme.post(depot, data={"jeton": jeton, "photo": (io.BytesIO(JPEG), "a.jpg")},
+                             content_type="multipart/form-data")
+            check("avec le jeton, la photo d'une model connue : acceptee, et la reponse est lisible depuis mypuls.app",
+                  r.status_code == 200 and (r.get_json() or {}).get("ok")
+                  and r.headers.get("Access-Control-Allow-Origin") == "https://mypuls.app", (r.status_code, r.get_json()))
+            sauve_session = mypuls._make_session
+            try:
+                mypuls._make_session = lambda: None          # aucun cookie sur le serveur
+                r = admin.get("/mypuls/avatar/3673")
+                check("... elle est servie ensuite, meme sans aucun cookie MyPuls",
+                      r.status_code == 200 and r.data == JPEG and r.mimetype == "image/jpeg", (r.status_code, r.mimetype))
+                r = admin.get("/mypuls/avatar/1116")
+                check("... une model sans photo deposee : 404, et la reponse n'est pas gardee",
+                      r.status_code == 404 and "no-store" in (r.headers.get("Cache-Control") or ""), (r.status_code, r.headers.get("Cache-Control")))
+            finally:
+                mypuls._make_session = sauve_session
+
             # ---- le complement
             url = "/mypuls/chatters/complement.json?start=2026-11-01&end=2026-11-15"
             check("complement : refuse sans session (401)", app.test_client().get(url).status_code == 401)

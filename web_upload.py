@@ -74279,6 +74279,87 @@ def create_app():
         resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
+    # Les jetons de depot de photos : en memoire, 10 minutes, rien d'autre.
+    _jetons_avatars = {}
+
+    @app.route("/mypuls/avatars/jeton")
+    def mypuls_avatars_jeton():
+        """Un jeton pour deposer des photos de models, valable 10 minutes.
+
+        POURQUOI UN JETON. Les photos ne se lisent chez MyPuls qu'avec la
+        session d'un navigateur connecte. Ce navigateur est sur mypuls.app :
+        il ne peut pas envoyer le cookie de session de youl4b.com avec son
+        depot (autre site). Le jeton, demande ici par un acces complet, lui
+        ouvre UNE porte, celle du depot d'une image de model, pour 10 minutes.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            _complet = _role_allowed_tabs(_live_role()) is None
+        except Exception:
+            _complet = False
+        if not _complet:
+            return jsonify({"ok": False, "error": "Accès refusé"}), 403
+        import secrets
+        maintenant = time.time()
+        for _j in [j for j, fin in _jetons_avatars.items() if fin < maintenant]:
+            _jetons_avatars.pop(_j, None)
+        jeton = secrets.token_hex(16)
+        _jetons_avatars[jeton] = maintenant + 600
+        return jsonify({"ok": True, "jeton": jeton, "valable_s": 600})
+
+    @app.route("/mypuls/avatar/<int:creator_id>/deposer", methods=["POST"])
+    def mypuls_avatar_deposer(creator_id):
+        """Depose la photo d'une model (voir mypuls.deposer_avatar).
+
+        Deux facons d'y avoir droit : une session a acces complet, ou un jeton
+        de depot encore valable. Rien d'autre qu'une image n'est accepte, et
+        seulement pour un compte que le site connait.
+        """
+        from flask import jsonify
+
+        def _rep(corps, code=200):
+            r = jsonify(corps)
+            r.status_code = code
+            # Le depot vient d'un onglet mypuls.app : sans cet en-tete, il
+            # part bien mais le navigateur cache la reponse, et on ne saurait
+            # pas s'il a reussi.
+            r.headers["Access-Control-Allow-Origin"] = "https://mypuls.app"
+            r.headers["Cache-Control"] = "no-store"
+            return r
+
+        autorise = False
+        if is_auth():
+            try:
+                autorise = _role_allowed_tabs(_live_role()) is None
+            except Exception:
+                autorise = False
+        if not autorise:
+            jeton = (request.form.get("jeton") or "").strip()
+            autorise = bool(jeton) and _jetons_avatars.get(jeton, 0) > time.time()
+        if not autorise:
+            return _rep({"ok": False, "error": "Accès refusé"}, 403)
+        try:
+            import mypuls
+            import revenus_chatteurs
+            connus = {int(v) for v in revenus_chatteurs.comptes().values() if str(v).isdigit()}
+        except Exception as e:
+            return _rep({"ok": False, "error": f"module indispo: {e}"}, 500)
+        if int(creator_id) not in connus:
+            return _rep({"ok": False, "error": "Compte inconnu du site"}, 404)
+        fichier = request.files.get("photo")
+        if fichier is None:
+            return _rep({"ok": False, "error": "Aucune image reçue"}, 400)
+        octets = fichier.read(mypuls.AVATAR_MAX_OCTETS + 1)
+        res = mypuls.deposer_avatar(creator_id, octets)
+        if res.get("ok"):
+            try:
+                _render_mypuls_section_html.invalidate()
+            except Exception:
+                pass
+        return _rep(res, 200 if res.get("ok") else 400)
+
     @app.route("/mypuls/test", methods=["POST"])
     def mypuls_test():
         if not is_auth():

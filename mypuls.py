@@ -4332,6 +4332,37 @@ def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
     return {"ok": True, "content": r.content, "content_type": type_rendu, "source": "mypuls"}
 
 
+#: Poids maximal d'une photo de model deposee (une pastille de 36 px n'a pas
+#: besoin de plus ; au-dela, ce n'est pas une photo de profil).
+AVATAR_MAX_OCTETS = 2_000_000
+
+
+def deposer_avatar(creator_id, octets: bytes) -> Dict[str, Any]:
+    """Range sur le disque la photo d'une model fournie de l'exterieur.
+
+    La photo ne se lit chez MyPuls qu'avec un cookie, et le serveur n'en a pas
+    toujours (le 18/11/2026 : session renvoyee vers /securite/verifier, puis
+    cookies effaces). Un navigateur connecte a MyPuls, lui, la recoit : il peut
+    la deposer ici. get_avatar_bytes la sert ensuite comme n'importe quelle
+    photo gardee, et la remplacera par celle de MyPuls quand un cookie
+    remarchera.
+    """
+    octets = bytes(octets or b"")
+    type_rendu = type_image(octets)
+    if not type_rendu:
+        return {"ok": False, "error": "Ce fichier n'est pas une image (JPEG, PNG, WebP ou GIF)"}
+    if len(octets) > AVATAR_MAX_OCTETS:
+        return {"ok": False, "error": "Image trop lourde (%d Ko)" % (len(octets) // 1000)}
+    try:
+        chemin = _fichier_avatar(creator_id)
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        if not safe_json.write_text(chemin, octets, backup=False):
+            return {"ok": False, "error": "Écriture refusée"}
+    except Exception as e:
+        return {"ok": False, "error": "%s : %s" % (type(e).__name__, e)}
+    return {"ok": True, "content_type": type_rendu, "taille": len(octets)}
+
+
 def ping() -> Dict[str, Any]:
     """Vérifie que les cookies sont valides en chargeant /profil."""
     s = _make_session()

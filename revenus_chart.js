@@ -98,7 +98,21 @@
           avatar.setAttribute('aria-label', (visible ? 'Masquer ' : 'Afficher ') + ds.label);
           avatar.setAttribute('aria-pressed', String(visible)); avatar.title = ds.label;
           avatar.style.setProperty('--mp-series-color',ds.borderColor);
-          avatar.appendChild(modelPhoto(ds.label)); avatar.onclick = function () { window.mpToggleCreator(ds.label); };
+          var photo = modelPhoto(ds.label);
+          // Une photo qui ne vient pas : la pastille entiere se retire, au
+          // lieu de laisser un rond vide dans la rangee.
+          photo.addEventListener('error', function () { avatar.hidden = true; });
+          avatar.appendChild(photo);
+          // La plateforme, en petit sous la photo, comme sur MyPuls.
+          var seg = (window.__mpCreatorSegments || {})[ds.label];
+          if (seg) {
+            var plateforme = document.createElement('i');
+            plateforme.className = 'mp-revenue-plat mp-revenue-plat-' + (seg === 'mym' ? 'mym' : 'of');
+            plateforme.textContent = seg === 'mym' ? 'mym' : 'OF';
+            plateforme.setAttribute('aria-hidden', 'true');
+            avatar.appendChild(plateforme);
+          }
+          avatar.onclick = function () { window.mpToggleCreator(ds.label); };
           headerAvatars.appendChild(avatar);
         }
         var button = buttons.find(function (b) { return b.dataset.mpLegend === ds.label; });
