@@ -350,7 +350,11 @@
       if (!d.discord) entry.discordEtat.textContent = 'Aucun Discord relié : la ligne garde ses initiales.';
       else if (d.trouve) { entry.discordEtat.textContent = 'Relié à ' + (d.affiche || d.discord) + ' · photo à jour.'; entry.discordEtat.classList.add('mp-t-ok'); }
       else if (!d.verifiable) entry.discordEtat.textContent = '@' + d.discord + ' enregistré. Bot Discord hors ligne : photo non vérifiable pour l’instant.';
-      else { entry.discordEtat.textContent = 'Aucun membre des serveurs du bot ne porte « ' + d.discord + ' ». Fais-le rejoindre un serveur où le bot est présent, ou corrige le pseudo.'; entry.discordEtat.classList.add('mp-t-alerte'); }
+      else {
+        var ou = d.serveurs && d.serveurs.length ? ' Serveurs fouillés : ' + d.serveurs.join(', ') + '.' : '';
+        entry.discordEtat.textContent = 'Aucun membre des serveurs que les bots voient ne porte « ' + d.discord + ' ».' + ou + ' Invite le bot sur le serveur de ce chatteur, ou corrige le pseudo.';
+        entry.discordEtat.classList.add('mp-t-alerte');
+      }
     }
     if (entry.discordInput && document.activeElement !== entry.discordInput) entry.discordInput.value = d.discord || '';
     peindreSousLigne(entry);

@@ -222,15 +222,35 @@ def _discord_observable() -> bool:
     reference, gateway pas encore prete, ou cache de guildes vide apres une
     reconnexion.
     """
-    b = _BOT_REF
-    if b is None:
-        return False
-    try:
-        if not b.is_ready():
-            return False
-        return bool(b.guilds)
-    except Exception:
-        return False
+    return bool(_guildes_des_bots())
+
+
+def _guildes_des_bots() -> list:
+    """Les serveurs que voient le bot principal ET le bot admin, sans doublon.
+
+    La recherche d'un pseudo ne fouillait que le bot principal. Constate le
+    18/11/2026 : « ba_doo » existe sur Discord, sur le serveur des chatteurs,
+    et la page repondait « introuvable » — le bot principal n'est plus sur ce
+    serveur (il voit Va IG, YouLab AGENCY THREADS, Youl4b ( Spam ), YouCham,
+    You FR, You US). Le bot admin, lui, est sur neuf serveurs. Chercher chez
+    les deux, c'est trouver un membre des qu'UN des deux le voit.
+
+    Un bot pas pret, ou dont la liste est vide apres une reconnexion, ne
+    compte pas : il n'a rien regarde, il ne peut pas dire « introuvable ».
+    """
+    vues, serveurs = set(), []
+    for b in (_BOT_REF, _BOT_ADMIN_REF):
+        try:
+            if b is None or not b.is_ready():
+                continue
+            for g in (b.guilds or []):
+                gid = getattr(g, "id", None) or id(g)
+                if gid not in vues:
+                    vues.add(gid)
+                    serveurs.append(g)
+        except Exception:
+            continue
+    return serveurs
 
 
 def _titre_colonne_discord(nb: int, tronque: bool) -> str:
@@ -274,8 +294,7 @@ def _guilde_chatteurs() -> str:
     reglage ne trouvait plus personne.
     """
     try:
-        if _discord_observable() and any(
-                (getattr(g, "name", "") or "") == GUILDE_CHATTEURS for g in _BOT_REF.guilds):
+        if any((getattr(g, "name", "") or "") == GUILDE_CHATTEURS for g in _guildes_des_bots()):
             return GUILDE_CHATTEURS
     except Exception:
         pass
@@ -344,6 +363,9 @@ def _discord_du_chatteur(pseudo: str) -> dict:
         "affiche": (info or {}).get("display_name") or "",
         "trouve": bool(info),
         "verifiable": _discord_observable(),
+        # Les serveurs REELLEMENT fouilles : « introuvable » sans dire ou l'on
+        # a cherche ne permet pas de savoir sur quel serveur inviter le bot.
+        "serveurs": sorted({str(getattr(g, "name", "") or "?") for g in _guildes_des_bots()}),
     }
 
 
@@ -363,7 +385,7 @@ def _membres_discord_pour_liste(guilde: str = ""):
         return "", 0, False
     vus = {}
     try:
-        for g in _BOT_REF.guilds:
+        for g in _guildes_des_bots():
             if guilde and (getattr(g, "name", "") or "") != guilde:
                 continue          # nom EXACT (cf. GUILDE_CHATTEURS)
             try:
@@ -425,7 +447,7 @@ def _resolve_discord_user_by_handle(handle: str, guilde: str = ""):
         tn = _norm_handle(target)
         seen_ids = set()
         try:
-            for g in _BOT_REF.guilds:
+            for g in _guildes_des_bots():
                 if guilde and (getattr(g, "name", "") or "") != guilde:
                     continue      # nom EXACT : « ... THREADS » n est pas « ... »
                 try:
@@ -24963,7 +24985,7 @@ def _diag_bot(bot=None) -> str:
         # Le NOM des serveurs, pas seulement leur nombre : deplacer un cog
         # d'un bot a l'autre n'a de sens que si le bot d'arrivee est sur le
         # serveur ou ce cog travaille. Sans ca, on deplace a l'aveugle.
-        noms_g = ", ".join(str(getattr(g, "name", "?"))[:28] for g in gs[:6])
+        noms_g = ", ".join(str(getattr(g, "name", "?"))[:28] for g in gs[:20])
         bloc = (f"{pret} · {n_g} serveur(s) ({html_escape(noms_g)}) · "
                 f"{len(cmds)}/100 commandes · "
                 f"{len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"

@@ -280,6 +280,61 @@ def _scripts(html):
         yield corps
 
 
+class _Membre:
+    def __init__(self, uid, name, nick=""):
+        self.id, self.name, self.global_name, self.display_name, self.nick, self.bot = uid, name, "", nick or name, nick, False
+        self.display_avatar = type("A", (), {"url": "https://cdn.discordapp.com/avatars/%d/x.png?size=1024" % uid})()
+
+
+class _Serveur:
+    def __init__(self, gid, name, membres):
+        self.id, self.name, self.members = gid, name, membres
+
+
+class _Bot:
+    def __init__(self, serveurs, pret=True):
+        self.guilds, self._pret = serveurs, pret
+
+    def is_ready(self):
+        return self._pret
+
+
+def test_deux_bots():
+    print("\n--- un pseudo Discord se cherche chez les DEUX bots ---")
+    import web_upload as w
+    sauve = (w._BOT_REF, w._BOT_ADMIN_REF)
+    commun = _Serveur(1, "Va IG", [_Membre(10, "abdoul_9684")])
+    chatteurs = _Serveur(2, "Youlab Chatting", [_Membre(20, "ba_doo", "BA DOO OF 14 20H")])
+    try:
+        w._BOT_REF, w._BOT_ADMIN_REF = _Bot([commun]), None
+        w._DISCORD_RESOLVE_CACHE.clear()
+        check("bot principal seul : « ba_doo » introuvable (le cas du 18/11/2026)",
+              w._resolve_discord_user_by_handle("ba_doo") is None)
+        w._BOT_ADMIN_REF = _Bot([commun, chatteurs])
+        w._DISCORD_RESOLVE_CACHE.clear()
+        info = w._resolve_discord_user_by_handle("ba_doo") or {}
+        check("le bot admin voit le serveur des chatteurs : « ba_doo » est trouve, avec sa photo en 128 px",
+              info.get("username") == "ba_doo" and "size=128" in (info.get("avatar_url") or ""), info)
+        check("un serveur vu par les deux bots n'est compte qu'une fois",
+              [g.name for g in w._guildes_des_bots()] == ["Va IG", "Youlab Chatting"],
+              [g.name for g in w._guildes_des_bots()])
+        options, nb, _ = w._membres_discord_pour_liste("")
+        check("la liste a choisir propose les membres des deux bots", nb == 2 and "value='ba_doo'" in options, (nb, options))
+        d = w._discord_du_chatteur("inconnu99")
+        check("pseudo introuvable : la reponse dit sur quels serveurs on a cherche",
+              d["trouve"] is False and d["verifiable"] is True and d["serveurs"] == ["Va IG", "Youlab Chatting"], d)
+        w._BOT_ADMIN_REF = _Bot([chatteurs], pret=False)
+        w._DISCORD_RESOLVE_CACHE.clear()
+        check("un bot pas pret ne compte pas : il n'a rien regarde",
+              [g.name for g in w._guildes_des_bots()] == ["Va IG"] and w._resolve_discord_user_by_handle("ba_doo") is None)
+        w._BOT_REF, w._BOT_ADMIN_REF = None, None
+        check("aucun bot : rien n'est verifiable, on n'accuse personne",
+              w._discord_observable() is False and w._discord_du_chatteur("ba_doo")["verifiable"] is False)
+    finally:
+        w._BOT_REF, w._BOT_ADMIN_REF = sauve
+        w._DISCORD_RESOLVE_CACHE.clear()
+
+
 def test_site(tmp):
     print("\n--- la page et ses deux routes ---")
     import web_upload as w
@@ -435,6 +490,7 @@ if __name__ == "__main__":
     test_messages()
     test_comptes()
     test_complement()
+    test_deux_bots()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
         test_site(_tmp)
