@@ -504,6 +504,8 @@
     var button = el('button', 'mp-revenue-toggle'); button.type = 'button';
     button.setAttribute('aria-expanded', 'false'); button.setAttribute('aria-label', 'Détail de ' + entry.label);
     button.appendChild(el('span', 'mp-revenue-name', orphan ? 'Ventes non attribuées' : entry.label));
+    var chevron = el('span', 'mp-revenue-chevron'); chevron.setAttribute('aria-hidden', 'true');
+    button.appendChild(chevron);
     entry.button = button;
     entry.photo = el('span', 'mp-t-photo'); entry.point = el('i', 'mp-t-point'); entry.point.hidden = true;
     entry.sous = el('span', 'mp-t-det');
@@ -581,7 +583,19 @@
     detailHead.appendChild(tabs); detailHead.appendChild(el('span', 'mp-revenue-note', 'Ventes de la période sélectionnée'));
     detailCell.appendChild(detailHead); entry.panel = el('div'); entry.panel.id = 'mp-revenue-panel-' + index; entry.panel.setAttribute('role', 'tabpanel'); detailCell.appendChild(entry.panel);
     row.after(detail);
-    button.onclick = function () { if (openEntry === entry) closeEntry(entry); else ouvrir(entry); };
+    function basculer() { if (openEntry === entry) closeEntry(entry); else ouvrir(entry); }
+    button.onclick = basculer;
+    // TOUTE la ligne ouvre et referme, pas seulement le nom : sans fleche ni
+    // zone evidente, le detail s'ouvrait par « + Discord » ou par l'adresse
+    // et on ne trouvait plus comment le refermer (18/11/2026).
+    row.addEventListener('click', function (event) {
+      if (event.target.closest('input,button,a,label,select,textarea,form')) return;
+      basculer();
+    });
+    var reduire = el('button', 'mp-t-reduire', 'Réduire'); reduire.type = 'button';
+    reduire.setAttribute('aria-label', 'Refermer le détail de ' + entry.label);
+    reduire.onclick = function () { closeEntry(entry); row.scrollIntoView({block:'nearest'}); };
+    detailHead.appendChild(reduire);
     if (!orphan) { peindrePhoto(entry); peindreAdresse(entry); }
     entries.push(entry);
   });
@@ -783,6 +797,18 @@
   // Cocher « Payé » met a jour le compte de la ligne Total.
   table.addEventListener('change', function (event) {
     if (event.target && event.target.classList && event.target.classList.contains('mp-paid-cb')) setTimeout(refresh, 0);
+  });
+  // Photos des models de la legende (rendues par le serveur) : si l'une ne
+  // vient pas (cookie MyPuls mort), on remet la pastille de couleur a sa place.
+  function photoManquante(img) {
+    var pastille = el('span', 'mp-revenue-pastille');
+    pastille.style.background = img.dataset.couleur || '#888';
+    if (img.getAttribute('data-mp-avatar')) { img.style.display = 'none'; return; }   // en-tete : on la retire
+    img.replaceWith(pastille);
+  }
+  (section || host).querySelectorAll('img[data-couleur]').forEach(function (img) {
+    if (img.complete && !img.naturalWidth && img.currentSrc) photoManquante(img);
+    else img.addEventListener('error', function () { photoManquante(img); });
   });
   peindreBoutons();
   applySegment(false);

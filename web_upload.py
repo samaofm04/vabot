@@ -36419,7 +36419,7 @@ body.light .mypuls-bar{background:#e5e7eb}
         ds_total = ds["total"]
         if creator_id:
             avatar_img = (
-                f"<img src='/mypuls/avatar/{creator_id}' alt='{ds_label}' "
+                f"<img src='/mypuls/avatar/{creator_id}?j={today.isoformat()}' alt='{ds_label}' data-couleur='{color}' "
                 f"title='Clic pour activer / désactiver {ds_label}' "
                 f"onclick=\"mpToggleCreator('{ds_label.replace(chr(39), chr(92)+chr(39))}')\" "
                 f"data-mp-avatar='{ds_label}' "
@@ -36427,7 +36427,10 @@ body.light .mypuls-bar{background:#e5e7eb}
             )
             avatars_header.append(avatar_img)
             avatar_legend = (
-                f"<img src='/mypuls/avatar/{creator_id}' loading='lazy' decoding='async' style='width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid {color}'>"
+                # data-couleur : si la photo ne vient pas (cookie MyPuls mort),
+                # le navigateur remet la pastille de couleur a la place — pas
+                # une icone d'image cassee.
+                f"<img src='/mypuls/avatar/{creator_id}?j={today.isoformat()}' data-couleur='{color}' alt='' loading='lazy' decoding='async' style='width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid {color}'>"
             )
         else:
             avatar_legend = f"<span style='width:8px;height:8px;background:{color};border-radius:50%;display:inline-block'></span>"

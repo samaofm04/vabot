@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ICI = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ICI))
@@ -496,29 +497,59 @@ def test_chatting_par_rest(tmp):
         w._DISCORD_RESOLVE_CACHE.clear()
 
 
-def test_photo_model():
+def test_photo_model(tmp):
     print("\n--- la photo d'une model ---")
-    sauve = mypuls._make_session
+    sauve = (mypuls._make_session, mypuls.DATA_DIR)
+    mypuls.DATA_DIR = pathlib.Path(tmp) / "data_photos"
+    JPEG = b"\xff\xd8\xff\xe0" + b"photo" * 20
+    appels = []
 
     class _Rep:
-        def __init__(self, type_rendu, corps):
-            self.status_code, self.headers, self.content = 200, {"Content-Type": type_rendu}, corps
+        def __init__(self, type_rendu, corps, code=200):
+            self.status_code, self.headers, self.content = code, {"Content-Type": type_rendu}, corps
 
     class _Session:
         def __init__(self, rep):
             self.rep = rep
 
         def get(self, *a, **k):
+            appels.append(a)
             return self.rep
     try:
-        mypuls._make_session = lambda: _Session(_Rep("text/html; charset=UTF-8", b"<html>Connexion</html>"))
+        check("une image se reconnait a ses premiers octets, pas a l'en-tete",
+              mypuls.type_image(JPEG) == "image/jpeg" and mypuls.type_image(b"\x89PNG\r\n\x1a\n...") == "image/png"
+              and mypuls.type_image(b"<!doctype html>") == "" and mypuls.type_image(b"") == "")
+        # Le cas du 18/11/2026 : MyPuls renvoie vers /securite/verifier, en 200.
+        mypuls._make_session = lambda: _Session(_Rep("image/jpeg", b"\n<!doctype html><title>Verification</title>"))
         r = mypuls.get_avatar_bytes(3673)
-        check("cookie expire : la page de connexion de MyPuls n'est PAS servie comme une photo", r.get("ok") is False, r)
-        mypuls._make_session = lambda: _Session(_Rep("image/jpeg", b"\xff\xd8photo"))
+        check("cookie mort : la page de MyPuls n'est PAS servie comme une photo, meme annoncee image/jpeg",
+              r.get("ok") is False, r)
+        check("... et rien n'est garde sur le disque", not mypuls._fichier_avatar(3673).exists())
+        mypuls._make_session = lambda: _Session(_Rep("text/html", JPEG))
         r = mypuls.get_avatar_bytes(3673)
-        check("une vraie image passe, avec son type", r.get("ok") is True and r.get("content_type") == "image/jpeg", r)
+        check("une vraie image passe, avec son vrai type", r.get("ok") is True and r.get("content_type") == "image/jpeg"
+              and r.get("source") == "mypuls", r)
+        check("... et elle est gardee sur le disque", mypuls._fichier_avatar(3673).read_bytes() == JPEG)
+        appels.clear()
+        mypuls._make_session = lambda: _Session(_Rep("text/html", b"<html>connexion</html>"))
+        r = mypuls.get_avatar_bytes(3673)
+        check("cookie mort ENSUITE : la photo gardee est resservie, sans rien demander a MyPuls",
+              r.get("ok") is True and r.get("content") == JPEG and r.get("source") == "disque" and appels == [], (r.get("source"), appels))
+        vieux = time.time() - mypuls.AVATAR_FRAIS_S - 10
+        os.utime(mypuls._fichier_avatar(3673), (vieux, vieux))
+        r = mypuls.get_avatar_bytes(3673)
+        check("photo de plus de 7 jours et MyPuls toujours muet : l'ancienne reste servie",
+              r.get("ok") is True and r.get("content") == JPEG and "ancienne" in r.get("source", "") and len(appels) == 1, r.get("source"))
+        NEUVE = b"\x89PNG\r\n\x1a\n" + b"neuve" * 10
+        mypuls._make_session = lambda: _Session(_Rep("image/png", NEUVE))
+        r = mypuls.get_avatar_bytes(3673)
+        check("... et des que MyPuls repond, elle est remplacee",
+              r.get("content") == NEUVE and mypuls._fichier_avatar(3673).read_bytes() == NEUVE, r.get("source"))
+        mypuls._make_session = lambda: None
+        check("aucun cookie et rien sur le disque : echec dit, pas d'image inventee",
+              mypuls.get_avatar_bytes(1116).get("ok") is False)
     finally:
-        mypuls._make_session = sauve
+        mypuls._make_session, mypuls.DATA_DIR = sauve
     import revenus_ui
     from datetime import date
     page = revenus_ui.render_revenus_ui({"Lola": 3673})
@@ -651,6 +682,8 @@ def test_site(tmp):
                   crypto.get(rc.SANS_CHATTEUR, {}).get("commission_pct") == 0.0
                   and crypto.get(rc.SANS_CHATTEUR, {}).get("non_attribue") is True, crypto.get(rc.SANS_CHATTEUR))
             check("le script de la liste est celui du look TRUST", "mp-trust" in page and "mpRevenueBase" in page)
+            check("les photos de la legende portent leur couleur de repli et l'adresse du jour",
+                  "data-couleur='#" in page and re.search(r"/mypuls/avatar/\d+\?j=\d{4}-\d\d-\d\d' data-couleur", page) is not None)
 
             # ---- le JavaScript rendu
             node = shutil.which("node")
@@ -692,9 +725,9 @@ if __name__ == "__main__":
     test_comptes()
     test_complement()
     test_deux_bots()
-    test_photo_model()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
+        test_photo_model(_tmp)
         test_identifiant(_tmp)
         test_chatting_par_rest(_tmp)
         test_site(_tmp)

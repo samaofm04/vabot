@@ -4224,33 +4224,83 @@ def start_massdm_media_download() -> bool:
     return True
 
 
-def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
-    """Proxy : récupère l'image avatar d'un créateur MyPuls.
+def type_image(octets: bytes) -> str:
+    """Le type d'une image d'apres ses PREMIERS OCTETS, ou "" si ce n'en est pas une.
 
-    Retourne {ok, content: bytes, content_type: str, error}.
+    On ne croit pas l'en-tete Content-Type : cookie expire, MyPuls repond 200
+    avec une page (connexion, « verification de securite ») que rien d'autre
+    ne distingue d'une photo.
     """
+    o = bytes(octets or b"")
+    if o[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if o[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if o[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if o[:4] == b"RIFF" and o[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
+def _fichier_avatar(creator_id) -> Path:
+    return DATA_DIR / "mypuls_avatars" / ("%d.img" % int(creator_id))
+
+
+#: Une photo gardee sur le disque est resservie sans redemander MyPuls pendant
+#: ce delai. Au-dela on redemande ; si MyPuls ne repond pas, l'ancienne reste.
+AVATAR_FRAIS_S = 7 * 86400
+
+
+def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
+    """La photo d'une model : {ok, content, content_type, source} ou {ok: False, error}.
+
+    GARDEE SUR LE DISQUE (data/mypuls_avatars). La photo ne vient que du site
+    de MyPuls, par le cookie — l'API n'en donne aucune. Or ce cookie meurt :
+    le 18/11/2026, MyPuls renvoyait la session du serveur vers
+    /securite/verifier, et TOUTES les photos de models avaient disparu du
+    dashboard d'un coup. Une photo recue une fois reste donc servie, meme
+    cookie mort ; elle n'est redemandee qu'au bout de sept jours.
+    """
+    import time as _t
+    try:
+        chemin = _fichier_avatar(creator_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Identifiant de model illisible"}
+    gardee, age = b"", None
+    try:
+        if chemin.exists():
+            gardee = chemin.read_bytes()
+            age = _t.time() - chemin.stat().st_mtime
+    except OSError:
+        gardee = b""
+    type_garde = type_image(gardee)
+    if type_garde and age is not None and age < AVATAR_FRAIS_S:
+        return {"ok": True, "content": gardee, "content_type": type_garde, "source": "disque"}
+
+    def _repli(erreur: str) -> Dict[str, Any]:
+        if type_garde:
+            return {"ok": True, "content": gardee, "content_type": type_garde, "source": "disque (ancienne)"}
+        return {"ok": False, "error": erreur}
+
     s = _make_session()
     if s is None:
-        return {"ok": False, "error": "Cookies non configurés"}
+        return _repli("Cookies non configurés")
     try:
         r = s.get(f"{BASE_URL}/creator/{int(creator_id)}/avatar", timeout=TIMEOUT)
     except Exception as e:
-        return {"ok": False, "error": f"Erreur réseau : {e}"}
+        return _repli(f"Erreur réseau : {e}")
     if r.status_code != 200:
-        return {"ok": False, "error": f"HTTP {r.status_code}"}
-    # UNE PAGE N'EST PAS UNE PHOTO. Cookie expire, MyPuls repond 200 avec sa
-    # page de connexion : elle etait servie comme une image (constate en
-    # ligne le 18/11/2026 : 3,7 Ko de HTML par « photo », toutes les pastilles
-    # de model en initiales), et gardee 24 h par le navigateur — les photos
-    # seraient restees cassees un jour entier apres le retour du cookie.
-    type_rendu = str(r.headers.get("Content-Type", "") or "").lower()
-    if not type_rendu.startswith("image/"):
-        return {"ok": False, "error": "MyPuls n'a pas rendu une image (cookie expiré ?)"}
-    return {
-        "ok": True,
-        "content": r.content,
-        "content_type": type_rendu,
-    }
+        return _repli(f"HTTP {r.status_code}")
+    type_rendu = type_image(r.content)
+    if not type_rendu:
+        return _repli("MyPuls n'a pas rendu une image (cookie expiré ?)")
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(chemin, r.content, backup=False)
+    except Exception:
+        pass                      # la photo est servie quand meme ; elle sera regardee la prochaine fois
+    return {"ok": True, "content": r.content, "content_type": type_rendu, "source": "mypuls"}
 
 
 def ping() -> Dict[str, Any]:
