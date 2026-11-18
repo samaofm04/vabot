@@ -288,6 +288,59 @@ def test_cles_et_repli():
             mypuls._STATS_CACHE.clear()
 
 
+def test_longues_periodes():
+    print("\n--- « Tout » et « Année » : MyPuls refuse plus de 92 jours ---")
+    T = mypuls.tranches_api
+    check("15 jours : une seule tranche, l'appel part tel quel", T("2026-11-01", "2026-11-15") == [("2026-11-01", "2026-11-15")])
+    tr = T("2026-01-01", "2026-11-18")
+    check("l'annee (322 jours) : 4 tranches de 90 jours au plus, de la plus recente a la plus ancienne",
+          len(tr) == 4 and tr[0] == ("2026-08-21", "2026-11-18") and tr[-1][0] == "2026-01-01", tr)
+    from datetime import date as _d
+    check("... sans trou ni chevauchement",
+          all((_d.fromisoformat(tr[i][0]) - _d.fromisoformat(tr[i + 1][1])).days == 1 for i in range(len(tr) - 1))
+          and all((_d.fromisoformat(f) - _d.fromisoformat(d)).days <= 89 for d, f in tr), tr)
+    sauve = (mypuls._api_team_money_tranche, mypuls._api_team_messages_stats_tranche)
+    appels = []
+
+    def fausse_tranche(start, end, *a, **k):
+        appels.append((start, end))
+        if (_d.fromisoformat(end) - _d.fromisoformat(start)).days > 91:
+            return {"ok": False, "error": "HTTP 400 : Period too large (max 92 days)."}
+        # des ventes seulement depuis juin 2026
+        lot = [{"creator": "Lola", "attributed_user": "moyle", "amount": 10, "currency": "EUR", "kind": "ppv",
+                "date": end + "T10:00:00+01:00"}] if end >= "2026-06-01" else []
+        return {"ok": True, "ventes": lot, "pages": 1, "total_annonce": len(lot), "tronque": False}
+    try:
+        mypuls._api_team_money_tranche = fausse_tranche
+        r = mypuls.api_team_money("1970-01-01", "2026-11-18")
+        check("« Tout » (depuis 1970) : lu par tranches, aucune ne depasse 92 jours, pas d'erreur",
+              r.get("ok") is True and len(r["ventes"]) >= 2, (r.get("ok"), r.get("error")))
+        check("... et la lecture s'arrete apres six mois sans vente, au lieu de remonter 230 tranches jusqu'en 1970",
+              len(appels) <= 6 and "lecture arrêtée" in (r.get("arret") or ""), (len(appels), r.get("arret")))
+        appels.clear()
+        r = mypuls.api_team_money("2026-11-01", "2026-11-15")
+        check("une periode courte : un seul appel, comme avant", len(appels) == 1 and r.get("ok"), appels)
+        mypuls._api_team_money_tranche = lambda s, e, *a, **k: (
+            {"ok": False, "error": "Quota MyPuls atteint (429)"} if e < "2026-08-21" else fausse_tranche(s, e))
+        r = mypuls.api_team_money("2026-01-01", "2026-11-18")
+        check("une tranche refusee : la lecture echoue en le disant, pas de total ampute presente comme entier",
+              r.get("ok") is False and "429" in (r.get("error") or "") and "ventes du" in (r.get("error") or ""), r.get("error"))
+        mypuls._api_team_messages_stats_tranche = lambda s, e, creator="all": {
+            "ok": True, "non_attribues": 1,
+            "par_chatteur": [{"user": "Moyle", "total_messages": 100, "ppv_messages": 4, "ppv_sold": 1,
+                              "distinct_fans": 10, "total_words": 500}]}
+        r = mypuls.api_team_messages_stats("2026-01-01", "2026-11-18")
+        check("messages sur une longue periode : additionnes tranche par tranche (4 x 100)",
+              r.get("ok") and r["par_chatteur"][0]["total_messages"] == 400 and r["par_chatteur"][0]["ppv_messages"] == 16
+              and r.get("fans_approximatifs") is True, r)
+    finally:
+        mypuls._api_team_money_tranche, mypuls._api_team_messages_stats_tranche = sauve
+    c = rc.complement("2026-01-01", "2026-11-18", COMPTES)
+    check("le complement d'une longue periode : pas de comparaison, et c'est dit (aucun appel a MyPuls)",
+          c.get("ok") is True and c.get("ventes_avant") is None and c.get("avant") is None
+          and any("90 jours" in n for n in c.get("notes") or []), c.get("notes"))
+
+
 def test_comptes():
     print("\n--- la liste des comptes ---")
     with Bouchon():
@@ -844,6 +897,7 @@ if __name__ == "__main__":
     test_agregat()
     test_messages()
     test_cles_et_repli()
+    test_longues_periodes()
     test_comptes()
     test_complement()
     test_deux_bots()

@@ -1990,9 +1990,89 @@ def _borne_jour(v: str, fin: bool) -> str:
     return t + ("T23:59:59" if fin else "T00:00:00")
 
 
+#: MyPuls refuse toute periode de plus de 92 jours (HTTP 400 « Period too
+#: large (max 92 days) », constate le 18/11/2026). On lit par tranches de 90.
+JOURS_PAR_TRANCHE = 90
+
+#: Une periode « Tout » part de 1970 : on remonte tranche par tranche et on
+#: s'arrete apres ce nombre de tranches VIDES d'affilee (six mois sans une
+#: vente) — sinon « Tout » couterait 230 appels pour remonter a 1970.
+TRANCHES_VIDES_AVANT_ARRET = 2
+
+#: Garde-fou : pas plus de tranches que cela par lecture (environ 5 ans).
+MAX_TRANCHES = 20
+
+
+def tranches_api(start: str, end: str) -> list:
+    """[(debut, fin)] de 90 jours au plus, de la plus RECENTE a la plus ancienne.
+
+    Une periode courte, ou des dates illisibles, rendent une seule tranche :
+    l'appel part alors tel quel, comme avant.
+    """
+    try:
+        d0, d1 = date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
+    except (TypeError, ValueError):
+        return [(start, end)]
+    if (d1 - d0).days < JOURS_PAR_TRANCHE or "T" in str(start) or "T" in str(end):
+        return [(start, end)]
+    tranches, fin = [], d1
+    while fin >= d0:
+        debut = max(d0, fin - timedelta(days=JOURS_PAR_TRANCHE - 1))
+        tranches.append((debut.isoformat(), fin.isoformat()))
+        fin = debut - timedelta(days=1)
+    return tranches
+
+
 def api_team_money(start: str, end: str, creator: str = "all",
                    chatter: str = "all", type_vente: str = "all") -> dict:
-    """Toutes les ventes attribuees de la periode. Suit la pagination.
+    """Toutes les ventes attribuees de la periode, quelle que soit sa longueur.
+
+    AU-DELA DE 92 JOURS, MyPuls REFUSE L'APPEL. « Tout » et « Annee » ne
+    marchaient donc que par l'ancien chemin (la lecture du site par cookie) ;
+    le jour ou le serveur n'a plus eu de cookie (18/11/2026), ces deux
+    periodes ont affiche une erreur a la place de la page. La periode est
+    lue par tranches de 90 jours, de la plus recente a la plus ancienne.
+
+    `arret` dit, s'il y a lieu, jusqu'ou on est remonte : une lecture qui
+    s'arrete avant le debut demande doit se VOIR, pas se deviner.
+    """
+    tranches = tranches_api(start, end)
+    if len(tranches) == 1:
+        return _api_team_money_tranche(start, end, creator, chatter, type_vente)
+    ventes, pages, tronque, total, vides, arret, lues = [], 0, False, 0, 0, "", 0
+    for debut, fin in tranches:
+        if lues >= MAX_TRANCHES:
+            arret = "lecture limitée à %d tranches de %d jours : rien avant le %s" % (
+                MAX_TRANCHES, JOURS_PAR_TRANCHE, fin)
+            tronque = True
+            break
+        r = _api_team_money_tranche(debut, fin, creator, chatter, type_vente)
+        lues += 1
+        if not r.get("ok"):
+            # Une tranche perdue rend le total FAUX : on ne rend pas un
+            # sous-ensemble qui ressemble a un tout.
+            return {"ok": False, "error": "%s (ventes du %s au %s)" % (r.get("error"), debut, fin),
+                    "page_en_echec": r.get("page_en_echec"), "ventes": ventes}
+        lot = r.get("ventes") or []
+        ventes.extend(lot)
+        pages += int(r.get("pages") or 0)
+        tronque = tronque or bool(r.get("tronque"))
+        try:
+            total += int(r.get("total_annonce") or 0)
+        except (TypeError, ValueError):
+            pass
+        vides = 0 if lot else vides + 1
+        if vides >= TRANCHES_VIDES_AVANT_ARRET and fin != tranches[-1][1]:
+            arret = "aucune vente sur %d jours avant le %s : lecture arrêtée là" % (
+                JOURS_PAR_TRANCHE * TRANCHES_VIDES_AVANT_ARRET, debut)
+            break
+    return {"ok": True, "ventes": ventes, "pages": pages, "total_annonce": total,
+            "tronque": tronque, "tranches": lues, "arret": arret}
+
+
+def _api_team_money_tranche(start: str, end: str, creator: str = "all",
+                            chatter: str = "all", type_vente: str = "all") -> dict:
+    """Les ventes d'UNE tranche (92 jours au plus). Suit la pagination.
 
     Rend {ok, ventes:[...], pages, tronque, total_annonce} ou {ok: False}.
     `tronque` dit qu'on s'est arrete au garde-fou : le total serait faux, et
@@ -2090,7 +2170,40 @@ def api_team_messages_stats(start: str, end: str, creator: str = "all") -> dict:
 
     C'est ce qui remplace « Presence / Reactivite / Propose / Vendu / Taux
     conv. », colonnes que la nouvelle page ne porte plus.
+
+    Au-dela de 92 jours MyPuls refuse l'appel : la periode est lue par
+    tranches et les compteurs additionnes. `distinct_fans` devient alors un
+    MAJORANT (un fan ecrit sur deux tranches compte deux fois) : la reponse
+    le dit par `fans_approximatifs`.
     """
+    tranches = tranches_api(start, end)
+    if len(tranches) == 1:
+        return _api_team_messages_stats_tranche(start, end, creator)
+    somme, non_attribues = {}, 0
+    for debut, fin in tranches[:MAX_TRANCHES]:
+        r = _api_team_messages_stats_tranche(debut, fin, creator)
+        if not r.get("ok"):
+            return {"ok": False, "error": "%s (messages du %s au %s)" % (r.get("error"), debut, fin)}
+        for m in r.get("par_chatteur") or []:
+            nom = str((m or {}).get("user") or "").strip()
+            if not nom:
+                continue
+            ligne = somme.setdefault(nom.lower(), {"user": nom})
+            for champ in ("total_messages", "total_words", "distinct_fans", "ppv_messages", "ppv_sold"):
+                try:
+                    ligne[champ] = int(ligne.get(champ) or 0) + int(m.get(champ) or 0)
+                except (TypeError, ValueError):
+                    pass
+        try:
+            non_attribues += int(r.get("non_attribues") or 0)
+        except (TypeError, ValueError):
+            pass
+    return {"ok": True, "par_chatteur": list(somme.values()), "non_attribues": non_attribues,
+            "fans_approximatifs": True}
+
+
+def _api_team_messages_stats_tranche(start: str, end: str, creator: str = "all") -> dict:
+    """Les agregats d'UNE tranche (92 jours au plus)."""
     r = api_get("team/messages/stats", {"start": _borne_jour(start, False),
                                         "end": _borne_jour(end, True),
                                         "creator": creator, "chatter": "all",
@@ -2390,7 +2503,16 @@ def _team_stats_par_api(start_date: str, end_date: str) -> Dict[str, Any]:
     # Les agregats par chatteur. Absents ? On continue : ils enrichissent,
     # ils ne conditionnent rien -- et perdre le CA parce qu'un agregat manque
     # serait un mauvais echange.
-    st = api_team_messages_stats(start_date, end_date)
+    # Periode longue (« Tout » part de 1970) : les messages ne sont demandes
+    # que depuis la premiere vente lue, pas depuis le debut theorique — sinon
+    # on interrogerait MyPuls sur des annees ou l'agence n'existait pas.
+    debut_messages = start_date
+    if r.get("tranches") and transactions:
+        from revenus_dates import transaction_day as _jour_vente
+        jours = sorted(j for j in (_jour_vente(t.get("date", "")) for t in transactions) if j)
+        if jours and jours[0] > str(start_date)[:10]:
+            debut_messages = jours[0]
+    st = api_team_messages_stats(debut_messages, end_date)
     par_membre = {}
     if st.get("ok"):
         for m in st.get("par_chatteur") or []:
@@ -2458,6 +2580,10 @@ def _team_stats_par_api(start_date: str, end_date: str) -> Dict[str, Any]:
         "pages": r.get("pages"),
         # Une reponse tronquee rend un total FAUX : il faut que ca se voie.
         "tronque": r.get("tronque"),
+        # Periode de plus de 92 jours : lue par tranches. `arret` dit jusqu'ou
+        # on est remonte quand la lecture s'est arretee avant le debut demande.
+        "tranches": r.get("tranches"),
+        "arret": r.get("arret") or "",
         "lignes_illisibles": 0, "montants_illisibles": 0,
         "chatters_illisibles": 0,
         "agregats_chatteurs": st.get("ok"),

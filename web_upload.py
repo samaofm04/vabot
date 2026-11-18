@@ -36287,13 +36287,19 @@ body.light .mypuls-bar{background:#e5e7eb}
     # montrerait des chiffres d'il y a une heure sans le dire serait pire
     # qu'une page d'erreur.
     _perime_html = ""
+    # Une longue periode lue par tranches et arretee avant son debut : dit.
+    _arret_lecture = str((res.get("diagnostic") or {}).get("arret") or "")
+    if _arret_lecture:
+        _perime_html += (
+            "<div style='margin:12px 0 0;font-size:12px;color:#888;line-height:1.45'>"
+            f"Longue période, lue par tranches de 90 jours : {html_escape(_arret_lecture)}.</div>")
     _perime = res.get("perime")
     if isinstance(_perime, dict):
         try:
             _lu_a = _dt.datetime.fromtimestamp(float(_perime.get("lu_a") or 0), ZoneInfo("Europe/Paris")).strftime("%d/%m à %H:%M")
         except Exception:
             _lu_a = "une lecture précédente"
-        _perime_html = (
+        _perime_html += (
             "<div style='margin:12px 0 0;padding:10px 14px;border-radius:8px;font-size:12.5px;line-height:1.45;"
             "background:#3a2a08;border:1px solid #8a6a1a;color:#f0c24a'>"
             f"MyPuls ne répond pas pour l’instant : ces chiffres sont ceux lus le {_lu_a} (heure de Paris). "

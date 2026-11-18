@@ -287,6 +287,20 @@ def complement(debut: str, fin: str, comptes: dict, ventes: list = None) -> dict
         avant = periode_precedente(debut, fin)
     except ValueError:
         return {"ok": False, "erreurs": ["Période illisible : %s → %s" % (debut, fin)]}
+    # Au-dela de 90 jours (« Annee », « Tout »), pas de comparaison : la
+    # periode d'avant serait aussi longue (pour « Tout », elle remonterait a
+    # 1913), et MyPuls refuse les periodes de plus de 92 jours. On le DIT ;
+    # les colonnes de comparaison affichent « — ».
+    try:
+        longue = (date.fromisoformat(fin) - date.fromisoformat(debut)).days >= 90
+    except ValueError:
+        longue = False
+    if longue:
+        return {"ok": True, "avant": None, "ventes_avant": None, "messages": None, "messages_avant": None,
+                "presence": {}, "erreurs": [], "frais": {"of": FRAIS_OF, "mym": FRAIS_MYM},
+                "creneaux": [list(c) for c in CRENEAUX],
+                "notes": ["Période de plus de 90 jours : pas de comparaison avec la période d’avant, "
+                          "ni messages et PPV envoyés (MyPuls ne les rend que par tranches de 92 jours)."]}
     cle = (debut, fin, tuple(sorted((str(k), str(v)) for k, v in (comptes or {}).items())))
     close = fin < date.today().isoformat()
     with _VERROU:
