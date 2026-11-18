@@ -825,6 +825,13 @@ def test_site(tmp):
                 long_p = admin.get("/mypuls/chatters/posts.json?start=2026-01-01&end=2026-11-18").get_json() or {}
                 check("posts : au-dela de 90 jours, rien (MyPuls refuse), sans erreur",
                       long_p.get("posts") is None and long_p.get("erreurs") == [] and len(appels_p) == 4, long_p)
+                check("posts : rien de partiel quand tout est lu", rp.get("partiel") is False, rp.get("partiel"))
+                mypuls.api_overview = lambda *a, **k: dict(faux_agregat(*a, **k), manquantes=[{"nom": "n°3867"}])
+                check("posts : une creatrice que MyPuls ne voit plus du tout ne rend pas le chiffre « partiel »",
+                      (admin.get(url_p).get_json() or {}).get("partiel") is False)
+                mypuls.api_overview = lambda *a, **k: dict(faux_agregat(*a, **k), errors=["Lia: 429"])
+                check("posts : une lecture ratee, si -- le chiffre est alors un minimum",
+                      (admin.get(url_p).get_json() or {}).get("partiel") is True)
                 mypuls.api_overview = lambda *a, **k: {"ok": False, "error": "Quota MyPuls atteint (429)"}
                 ko = admin.get(url_p).get_json() or {}
                 check("posts : MyPuls en panne -> pas de chiffre, et la cause est dite",

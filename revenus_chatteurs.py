@@ -409,8 +409,12 @@ def posts(debut: str, fin: str, taux: float, exclure=()) -> dict:
         brut = (float((ov.get("types_of") or {}).get("Posts") or 0) / (1 - FRAIS_OF)
                 + float((ov.get("types_mym") or {}).get("Posts") or 0) / (1 - FRAIS_MYM))
         lignes[seg] = [round(net, 2), round(brut, 2)]
-        if seg == "all" and (ov.get("errors") or ov.get("manquantes")):
-            # Une creatrice sans releve : le chiffre est un minimum, on le dit.
+        if seg == "all" and ov.get("errors"):
+            # Une creatrice dont la lecture a RATE : le chiffre est un minimum,
+            # on le dit. Les « manquantes » n'en sont pas : ce sont des
+            # creatrices que MyPuls ne voit plus du tout (deux le 18/11/2026,
+            # et la case affichait « ≥ » en permanence pour un chiffre
+            # identique a celui du Dashboard, qui les signale deja lui-meme).
             partiel = True
     return {"lignes": lignes, "erreurs": erreurs, "partiel": partiel}
 
