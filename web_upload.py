@@ -308,6 +308,142 @@ def _guilde_chatteurs() -> str:
     return ""
 
 
+#: Ce qu'on sait du serveur de chatting par les bots sans programme, garde en
+#: memoire. Une lecture chez Discord (liste des serveurs d'un bot, puis les
+#: membres) coute un a quelques appels : jamais a chaque ouverture de page.
+_CHATTING_REST = {"serveur": None, "serveur_ts": 0.0, "membres": None, "membres_ts": 0.0}
+_VERROU_CHATTING = threading.Lock()
+
+
+def _chatting_par_rest():
+    """{bot, gid, nom} du serveur de chatting vu par un bot SANS programme, ou None.
+
+    POURQUOI CES BOTS-LA. Le bot principal et le bot admin reagissent a tout
+    ce qui se passe sur leurs serveurs, et un serveur qu'ils ne connaissent
+    pas recoit TOUTES leurs fonctions (guild_features) : tickets ouverts a
+    chaque arrivee, recaps de clics... Les inviter sur le serveur des
+    chatteurs y aurait lance la machinerie des VA. Siri, Threads et Wario
+    (verif_discord) n'ont pas de programme branche sur Discord : ils ne font
+    que ce que le site leur demande, serveur par serveur. Invite sans aucune
+    permission, l'un d'eux suffit pour LIRE la liste des membres.
+
+    Garde 10 minutes ; 2 minutes quand le serveur n'est pas trouve, pour
+    qu'une invitation qui vient d'etre faite se voie vite.
+    """
+    maintenant = time.time()
+    with _VERROU_CHATTING:
+        vu = _CHATTING_REST["serveur"]
+        if maintenant - _CHATTING_REST["serveur_ts"] < (600 if vu else 120):
+            return vu
+    trouve = None
+    try:
+        import verif_discord
+        for b in verif_discord.bots():
+            if not b.get("pret"):
+                continue
+            code, corps = verif_discord._http(b, "GET", "/users/@me/guilds")
+            if code != 200 or not isinstance(corps, list):
+                continue
+            for g in corps:
+                nom = str((g or {}).get("name") or "")
+                if " ".join(nom.lower().split()) in NOMS_GUILDE_CHATTEURS:
+                    trouve = {"bot": b, "gid": str(g.get("id")), "nom": nom}
+                    break
+            if trouve:
+                break
+    except Exception:
+        trouve = None
+    with _VERROU_CHATTING:
+        _CHATTING_REST["serveur"], _CHATTING_REST["serveur_ts"] = trouve, time.time()
+    return trouve
+
+
+def _membres_chatting_par_rest():
+    """Les membres du serveur de chatting : [{id, username, affiche, pseudos,
+    avatar_url}], ou None si aucun bot sans programme ne le voit.
+
+    Garde 10 minutes. Les bots sont ecartes : ce ne sont pas des chatteurs.
+    """
+    serveur = _chatting_par_rest()
+    if not serveur:
+        return None
+    with _VERROU_CHATTING:
+        if _CHATTING_REST["membres"] is not None and time.time() - _CHATTING_REST["membres_ts"] < 600:
+            return _CHATTING_REST["membres"]
+    membres, apres = [], ""
+    try:
+        import verif_discord
+        for _page in range(10):                  # 10 000 membres au plus
+            code, lot = verif_discord._http(
+                serveur["bot"], "GET",
+                f"/guilds/{serveur['gid']}/members?limit=1000" + (f"&after={apres}" if apres else ""))
+            if code != 200 or not isinstance(lot, list):
+                # Une liste amputee ne se garde pas : on prefere « indisponible »
+                # a une liste qui ferait croire qu'un chatteur n'est pas la.
+                return None if not membres else membres
+            for m in lot:
+                u = (m or {}).get("user") or {}
+                uid = str(u.get("id") or "")
+                if not uid or u.get("bot"):
+                    continue
+                empreinte = u.get("avatar")
+                membres.append({
+                    "id": uid,
+                    "username": str(u.get("username") or ""),
+                    "affiche": str(m.get("nick") or u.get("global_name") or u.get("username") or ""),
+                    "pseudos": [str(x) for x in (u.get("username"), u.get("global_name"), m.get("nick")) if x],
+                    "avatar_url": (f"https://cdn.discordapp.com/avatars/{uid}/{empreinte}.png?size=128" if empreinte
+                                   else f"https://cdn.discordapp.com/embed/avatars/{(int(uid) >> 22) % 6}.png"),
+                })
+            if len(lot) < 1000:
+                break
+            apres = str(((lot[-1] or {}).get("user") or {}).get("id") or "")
+            if not apres:
+                break
+    except Exception:
+        return None
+    with _VERROU_CHATTING:
+        _CHATTING_REST["membres"], _CHATTING_REST["membres_ts"] = membres, time.time()
+    return membres
+
+
+def _chatteur_par_rest(pseudo: str):
+    """Un membre du serveur de chatting par son pseudo (pseudo technique, nom
+    affiche ou surnom du serveur), ou None. Meme forme que
+    _resolve_discord_user_by_handle."""
+    cherche = _norm_handle(pseudo)
+    if not cherche:
+        return None
+    for m in _membres_chatting_par_rest() or []:
+        if cherche in {_norm_handle(x) for x in m["pseudos"]}:
+            return {"id": m["id"], "username": m["username"], "display_name": m["affiche"],
+                    "avatar_url": m["avatar_url"]}
+    return None
+
+
+def _serveur_chatting() -> dict:
+    """{nom, source} du serveur de chatting : vu par un bot branche ("bot")
+    ou lu par un bot sans programme ("rest") ; {} si personne ne le voit."""
+    nom = _guilde_chatteurs()
+    if nom:
+        return {"nom": nom, "source": "bot"}
+    rest = _chatting_par_rest()
+    return {"nom": rest["nom"], "source": "rest"} if rest else {}
+
+
+def _invitation_lecteur_chatting() -> str:
+    """Le lien pour inviter le bot sans programme sur le serveur de chatting,
+    SANS aucune permission : il ne peut rien y faire, seulement y etre — ce
+    qui suffit au site pour lire la liste des membres."""
+    try:
+        import verif_discord
+        appli = str(verif_discord.bots()[0].get("app_id") or "").strip()
+    except Exception:
+        appli = ""
+    return (f"https://discord.com/oauth2/authorize?client_id={appli}&permissions=0&scope=bot"
+            if appli.isdigit() else "")
+
+
 def _est_identifiant_discord(texte) -> bool:
     """Les chiffres de « Copier l'identifiant » (17 a 20 en pratique)."""
     t = str(texte or "").strip()
@@ -388,6 +524,8 @@ def _discord_du_chatteur(pseudo: str, fiche: dict = None, reseau: bool = False) 
         info = _discord_par_identifiant(pseudo, reseau)
     else:
         info = _resolve_discord_user_by_handle(pseudo) if pseudo else None
+        if info is None and pseudo and reseau:
+            info = _chatteur_par_rest(pseudo)
     avatar = (info or {}).get("avatar_url") or ""
     affiche = (info or {}).get("display_name") or ""
     trouve = bool(info)
@@ -399,7 +537,9 @@ def _discord_du_chatteur(pseudo: str, fiche: dict = None, reseau: bool = False) 
         # relie (reseau) ou qu'une verification est retenue sur la fiche.
         verifiable = trouve or reseau or retenu
     else:
-        verifiable = _discord_observable()
+        # Un pseudo se verifie parmi des membres : ceux des bots branches, ou
+        # ceux du serveur de chatting quand on vient de le lire (reseau).
+        verifiable = trouve or _discord_observable() or (reseau and bool(_chatting_par_rest()))
     return {
         "discord": pseudo,
         "avatar": avatar,
@@ -418,7 +558,7 @@ def _relier_discord_du_chatteur(nom: str, saisi: str) -> dict:
     import mypuls
     pseudo = mypuls.set_discord(nom, saisi)
     etat = _discord_du_chatteur(pseudo, None, reseau=True)
-    if pseudo and (etat["trouve"] or etat["par_id"]):
+    if pseudo and (etat["trouve"] or etat["par_id"] or etat["verifiable"]):
         # Introuvable par identifiant : on retient AUSSI la verification (photo
         # vide), sinon la page reinterrogerait Discord a chaque ouverture.
         mypuls.set_discord(nom, pseudo, avatar=etat["avatar"], nom=etat["affiche"])
@@ -435,14 +575,28 @@ def _rafraichir_discord_des_chatteurs(noms, limite: int = 10) -> dict:
     """
     import time as _t_dc
     import mypuls
-    changes = {}
+    changes, essais = {}, 0
     for nom in sorted({str(n or "").strip() for n in (noms or []) if str(n or "").strip()}):
-        if len(changes) >= limite:
+        if essais >= limite:
             break
         fiche = mypuls.get_chatter_discord_fiche(nom)
-        if not _est_identifiant_discord(fiche["discord"]) or _t_dc.time() - fiche["maj"] < 86400:
+        # Trouve : une fois par jour suffit (la photo change rarement). Pas
+        # trouve : on retente au bout de 30 minutes, pour qu'un bot invite
+        # entre-temps sur le serveur de chatting se voie sans rien ressaisir.
+        delai = 86400 if (fiche["avatar"] or fiche["nom"]) else 1800
+        if not fiche["discord"] or _t_dc.time() - fiche["maj"] < delai:
             continue
-        changes[nom] = _relier_discord_du_chatteur(nom, fiche["discord"])
+        # Un pseudo que les bots branches voient est deja a jour a chaque
+        # rendu : seuls les identifiants, et les pseudos du serveur de
+        # chatting (lus par un bot sans programme), passent par ici.
+        if (not _est_identifiant_discord(fiche["discord"])
+                and _resolve_discord_user_by_handle(fiche["discord"]) is not None):
+            continue
+        essais += 1
+        avant = _discord_du_chatteur(fiche["discord"], fiche)
+        apres = _relier_discord_du_chatteur(nom, fiche["discord"])
+        if (apres["trouve"], apres["avatar"], apres["verifiable"]) != (avant["trouve"], avant["avatar"], avant["verifiable"]):
+            changes[nom] = apres
     return changes
 
 
@@ -73893,10 +74047,24 @@ def create_app():
         # serveurs, VA compris). Si aucun bot n'y est, la liste est vide et la
         # page explique quoi faire — proposer les autres serveurs a la place
         # ferait relier un chatteur a un inconnu qui porte un pseudo voisin.
-        serveur = _guilde_chatteurs()
-        options, nb, tronque = _membres_discord_pour_liste(serveur) if serveur else ("", 0, False)
+        chatting = _serveur_chatting()
+        serveur = chatting.get("nom", "")
+        options, nb, tronque = "", 0, False
+        if chatting.get("source") == "bot":
+            options, nb, tronque = _membres_discord_pour_liste(serveur)
+        elif chatting.get("source") == "rest":
+            membres = _membres_chatting_par_rest()
+            if membres is None:
+                serveur = ""            # vu, mais illisible a l'instant : on ne montre pas une liste vide comme complete
+            else:
+                tries = sorted(membres, key=lambda m: m["affiche"].lower())
+                nb, tronque = len(tries), len(tries) > 600
+                options = "".join("<option value='%s'>%s</option>"
+                                  % (html_escape(m["username"], quote=True), html_escape(m["affiche"]))
+                                  for m in tries[:600] if m["username"])
         return jsonify({"ok": True, "options": options, "nb": nb, "tronque": tronque,
                         "serveur": serveur, "verifiable": _discord_observable(),
+                        "invitation": "" if serveur else _invitation_lecteur_chatting(),
                         "serveurs_vus": sorted({str(getattr(g, "name", "") or "?")
                                                 for g in _guildes_des_bots()})})
 

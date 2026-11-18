@@ -414,6 +414,88 @@ def test_identifiant(tmp):
         w._DISCORD_RESOLVE_CACHE.clear()
 
 
+def test_chatting_par_rest(tmp):
+    print("\n--- le serveur de chatting lu par un bot SANS programme ---")
+    import verif_discord
+    import web_upload as w
+    sauve = (w._BOT_REF, w._BOT_ADMIN_REF, verif_discord.bots, verif_discord._http, mypuls.DATA_DIR, mypuls.CHATTERS_FILE)
+    mypuls.DATA_DIR = pathlib.Path(tmp) / "data_rest"
+    mypuls.CHATTERS_FILE = mypuls.DATA_DIR / "mypuls_chatters.json"
+    appels = []
+    serveurs = [{"id": "1", "name": "Va IG"}, {"id": "2", "name": "YouLab AGENCY THREADS"}]
+    membres = [
+        {"user": {"id": "111111111111111111", "username": "tsiry0403", "global_name": "Tsiry", "avatar": "h1"}, "nick": "Tsiry 02-08 / mercredi"},
+        {"user": {"id": "222222222222222222", "username": "ba_doo", "global_name": None, "avatar": None}, "nick": None},
+        {"user": {"id": "333333333333333333", "username": "un_bot", "bot": True}},
+    ]
+
+    def faux_http(bot, methode, chemin, **kw):
+        appels.append(chemin)
+        if chemin == "/users/@me/guilds":
+            return 200, list(serveurs)
+        if chemin.startswith("/guilds/9/members"):
+            return 200, list(membres)
+        return 404, {}
+
+    def remise_a_zero():
+        w._CHATTING_REST.update({"serveur": None, "serveur_ts": 0.0, "membres": None, "membres_ts": 0.0})
+        w._DISCORD_RESOLVE_CACHE.clear()
+        appels.clear()
+    try:
+        w._BOT_REF, w._BOT_ADMIN_REF = _Bot([_Serveur(1, "Va IG", [_Membre(10, "abdoul_9684")])]), None
+        verif_discord.bots = lambda: [{"id": "siri", "nom": "Siri", "app_id": "1552153790701117480", "pret": True}]
+        verif_discord._http = faux_http
+        remise_a_zero()
+        check("aucun bot sur le serveur de chatting : rien n'est vu (« ... THREADS » n'est pas lui)",
+              w._serveur_chatting() == {} and w._membres_chatting_par_rest() is None, w._serveur_chatting())
+        lien = w._invitation_lecteur_chatting()
+        check("le lien d'invitation est celui du bot sans programme, SANS aucune permission",
+              "client_id=1552153790701117480" in lien and "permissions=0" in lien and lien.endswith("scope=bot"), lien)
+        n = len(appels)
+        w._serveur_chatting()
+        check("la recherche du serveur est gardee en memoire (pas un appel par ouverture)", len(appels) == n, appels)
+
+        serveurs.append({"id": "9", "name": "YouLab AGENCY"})          # il vient d'etre invite
+        remise_a_zero()
+        check("une fois invite : le serveur est vu par ce bot",
+              w._serveur_chatting() == {"nom": "YouLab AGENCY", "source": "rest"}, w._serveur_chatting())
+        liste = w._membres_chatting_par_rest() or []
+        check("ses membres sont lus, les bots ecartes",
+              [m["username"] for m in liste] == ["tsiry0403", "ba_doo"], [m["username"] for m in liste])
+        check("le surnom du serveur sert de nom affiche, la photo est celle de Discord",
+              liste and liste[0]["affiche"] == "Tsiry 02-08 / mercredi"
+              and liste[0]["avatar_url"] == "https://cdn.discordapp.com/avatars/111111111111111111/h1.png?size=128", liste[:1])
+        appels.clear()
+        check("pendant le rendu de la page : « tsiry0403 » n'est pas cherche chez Discord",
+              w._discord_du_chatteur("tsiry0403")["trouve"] is False and appels == [], appels)
+        etat = w._relier_discord_du_chatteur("Tsiry", "tsiry0403")
+        check("en reliant : « tsiry0403 » est trouve sur le serveur de chatting, avec sa photo",
+              etat["trouve"] and etat["affiche"] == "Tsiry 02-08 / mercredi" and etat["avatar"].endswith("/h1.png?size=128"), etat)
+        fiche = mypuls.get_chatter_discord_fiche("Tsiry")
+        appels.clear()
+        rendu = w._discord_du_chatteur(fiche["discord"], fiche)
+        check("au rendu suivant : la photo retenue est servie, sans lecture chez Discord",
+              rendu["trouve"] and rendu["avatar"] == etat["avatar"] and appels == [], (rendu, appels))
+        check("un pseudo se retrouve aussi par le surnom du serveur ou le nom affiche",
+              (w._chatteur_par_rest("Tsiry 02-08 / mercredi") or {}).get("username") == "tsiry0403"
+              and (w._chatteur_par_rest("BA_DOO") or {}).get("id") == "222222222222222222")
+        etat = w._relier_discord_du_chatteur("Ivan", "pas_la")
+        check("un pseudo absent du serveur : dit introuvable, apres verification",
+              etat["trouve"] is False and etat["verifiable"] is True, etat)
+        # Un pseudo saisi AVANT l'invitation du bot : la reverification le rattrape.
+        mypuls.set_discord("Baadooo", "ba_doo")
+        maj = w._rafraichir_discord_des_chatteurs(["Baadooo", "Tsiry", "Ivan"])
+        check("un pseudo saisi avant l'invitation est rattrape par la reverification, sans rien ressaisir",
+              list(maj) == ["Baadooo"] and maj["Baadooo"]["trouve"] and "/embed/avatars/" in maj["Baadooo"]["avatar"], maj)
+        appels.clear()
+        check("... qui ne relit rien de ce qui vient d'etre verifie",
+              w._rafraichir_discord_des_chatteurs(["Baadooo", "Tsiry", "Ivan"]) == {} and appels == [], appels)
+    finally:
+        (w._BOT_REF, w._BOT_ADMIN_REF, verif_discord.bots, verif_discord._http, mypuls.DATA_DIR, mypuls.CHATTERS_FILE) = sauve
+        w._CHATTING_REST.update({"serveur": None, "serveur_ts": 0.0, "membres": None, "membres_ts": 0.0})
+        w._DISCORD_RESOLVE_CACHE.clear()
+
+
 def test_photo_model():
     print("\n--- la photo d'une model ---")
     sauve = mypuls._make_session
@@ -449,7 +531,7 @@ def test_site(tmp):
     import web_upload as w
     sauve = (w._load_web_users, w._discord_observable, w._resolve_discord_user_by_handle,
              w._membres_discord_pour_liste, mypuls.DATA_DIR, mypuls.CHATTERS_FILE)
-    sauve_guilde = w._guilde_chatteurs
+    sauve_guilde = w._serveur_chatting
     # Tout ce qui s'ecrit pendant ce cas tombe dans le dossier temporaire.
     os.chdir(tmp)
     mypuls.DATA_DIR = pathlib.Path(tmp) / "data"
@@ -540,15 +622,17 @@ def test_site(tmp):
                   extra.get("Baadooo", {}).get("avatar", "").startswith("https://cdn.discordapp.com/"), extra)
             check("la liste des membres n'est PAS dans la page (elle est servie a tous les roles)",
                   "<datalist id='mp-discord-membres'></datalist>" in page and "value='ba_doo'" not in page)
-            w._guilde_chatteurs = lambda: "YouLab AGENCY"
+            w._serveur_chatting = lambda: {"nom": "YouLab AGENCY", "source": "bot"}
             j = admin.get("/mypuls/chatters/membres_discord.json").get_json() or {}
             check("... elle est lue a part par un acces complet, pour le serveur de chatting",
                   j.get("ok") and "value='ba_doo'" in (j.get("options") or "") and j.get("nb") == 2
                   and j.get("serveur") == "YouLab AGENCY", j)
-            w._guilde_chatteurs = lambda: ""
+            w._serveur_chatting = lambda: {}
             j = admin.get("/mypuls/chatters/membres_discord.json").get_json() or {}
             check("... aucun bot sur le serveur de chatting : liste VIDE (on ne propose pas les VA a la place)",
                   j.get("ok") and j.get("options") == "" and j.get("nb") == 0 and j.get("serveur") == "", j)
+            check("... et le lien pour inviter le bot lecteur est fourni, sans permission",
+                  "permissions=0" in (j.get("invitation") or ""), j.get("invitation"))
             check("... et refusee a un role restreint, meme s'il a l'onglet Revenus (403)",
                   chatteur.get("/mypuls/chatters/membres_discord.json").status_code == 403,
                   chatteur.get("/mypuls/chatters/membres_discord.json").status_code)
@@ -597,7 +681,7 @@ def test_site(tmp):
     finally:
         (w._load_web_users, w._discord_observable, w._resolve_discord_user_by_handle,
          w._membres_discord_pour_liste, mypuls.DATA_DIR, mypuls.CHATTERS_FILE) = sauve
-        w._guilde_chatteurs = sauve_guilde
+        w._serveur_chatting = sauve_guilde
         os.chdir(str(ICI))
 
 
@@ -612,6 +696,7 @@ if __name__ == "__main__":
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
         test_identifiant(_tmp)
+        test_chatting_par_rest(_tmp)
         test_site(_tmp)
     except Exception as e:                                   # noqa: BLE001
         import traceback

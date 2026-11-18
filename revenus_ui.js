@@ -392,10 +392,23 @@
         if (liste && j && j.ok && j.options) liste.innerHTML = j.options;
         if (!j || !j.ok) return;
         // D'ou vient la liste, ou pourquoi elle est vide : dit sous le champ.
-        var aide = j.serveur
-          ? 'La liste propose les ' + j.nb + ' membres de « ' + j.serveur + ' ». Tu peux aussi coller un identifiant Discord.'
-          : 'Aucun bot n\u2019est sur ton serveur de chatting : la liste est vide. Colle l\u2019identifiant Discord du chatteur (clic droit sur son profil › Copier l\u2019identifiant), ou invite le bot sur ce serveur depuis youl4b.com/version.';
-        entries.forEach(function (entry) { if (entry.discordAide) entry.discordAide.textContent = aide; });
+        entries.forEach(function (entry) {
+          var aide = entry.discordAide;
+          if (!aide) return;
+          aide.replaceChildren();
+          if (j.serveur) { aide.textContent = 'La liste propose les ' + j.nb + ' membres de « ' + j.serveur + ' ». Tu peux aussi coller un identifiant Discord.'; return; }
+          aide.appendChild(document.createTextNode('Aucun bot n\u2019est sur ton serveur de chatting : la liste est vide. '));
+          if (j.invitation) {
+            // Un bot sans programme, invite sans aucune permission : il ne peut
+            // rien faire sur le serveur, seulement y etre — assez pour lire ses membres.
+            var lien = el('a', 'mp-t-inviter', 'Inviter le bot lecteur sur ce serveur');
+            lien.href = j.invitation; lien.target = '_blank'; lien.rel = 'noopener';
+            aide.appendChild(lien);
+            aide.appendChild(document.createTextNode(' (aucune permission, il ne fait que lire la liste des membres), ou colle l\u2019identifiant Discord du chatteur.'));
+          } else {
+            aide.appendChild(document.createTextNode('Colle l\u2019identifiant Discord du chatteur (clic droit sur son profil › Copier l\u2019identifiant).'));
+          }
+        });
       })
       .catch(function () {});
   }
