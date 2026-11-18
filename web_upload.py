@@ -502,6 +502,72 @@ def _discord_par_identifiant(uid: str, reseau: bool = False):
             "avatar_url": avatar}
 
 
+def _etat_discord(handle: str, nb_membres: int = 0, guilde: str = ""):
+    """L etat d un pseudo Discord : couleur de bordure, explication, pastille.
+
+    UNE SEULE redaction du verdict, pour les DEUX rendus : le serveur peint
+    la cellule au chargement, la route la repeint apres une saisie. Deux
+    formulations du meme jugement finissent toujours par diverger -- c est le
+    « deux endroits decident la meme chose » que ce depot a deja paye cher.
+
+    Rend (bordure, titre, pastille_html).
+
+    REMISE LE 18/11/2026. Le commit 989c234 (photos Discord des revenus
+    chatteurs, 03:11 le meme jour) l avait supprimee en refaisant ses
+    voisines, alors que le PLANNING des chatteurs s en sert : la page
+    « Emploi du temps chatteurs » a affiche « Erreur de chargement » pendant
+    plusieurs heures, sans une ligne au journal (la route avalait
+    l exception). Les tests ne rendaient pas le planning avec un pseudo
+    Discord : c est fait depuis (tests_revenus_chatteurs.py).
+
+    Elle cherche maintenant AUSSI sur le serveur des chatteurs lu par le bot
+    sans programme (_chatteur_par_rest) : aucun bot branche n y est, et tous
+    les pseudos du planning ressortaient « introuvable ».
+    """
+    handle = (handle or "").strip()
+    if not handle:
+        return ("#2a2a2a", "Pseudo Discord du chatteur", "")
+    info = _resolve_discord_user_by_handle(handle, guilde)
+    par_rest = None
+    if not info:
+        try:
+            par_rest = _chatting_par_rest()
+            info = _chatteur_par_rest(handle) if par_rest else None
+        except Exception:
+            par_rest, info = None, None
+    if info:
+        av = info.get("avatar_url") or ""
+        pastille = (f"<img src='{html_escape(av)}' alt='' "
+                    f"style='width:18px;height:18px;border-radius:50%;"
+                    f"vertical-align:middle;margin-right:5px'>") if av else ""
+        return ("#22c55e",
+                "Rattache a " + (info.get("display_name") or handle),
+                pastille)
+    if not _discord_observable() and not par_rest:
+        # Muet n est pas « introuvable » : accuser ici serait un faux negatif.
+        return ("#2a2a2a",
+                "Bot Discord hors ligne : rattachement non verifiable",
+                "<span style='color:#666;margin-right:5px' title='non verifiable'>•</span>")
+    # DIRE POURQUOI, ET QUOI FAIRE. « Aucun membre du Discord » se lisait
+    # comme une panne du site : le proprietaire a signale « ca marche
+    # toujours pas » devant un avertissement qui, lui, disait vrai. Nommer
+    # le nombre de membres reellement fouilles transforme un reproche opaque
+    # en constat verifiable.
+    if par_rest and not guilde:
+        # le serveur reellement fouille : celui des chatteurs, lu par le bot sans programme
+        guilde = par_rest.get("nom") or ""
+        nb_membres = len(_membres_chatting_par_rest() or [])
+    ou = guilde or "tes serveurs"
+    titre = ("Aucun des %d membre%s de %s ne porte « %s ». Cette personne n y "
+             "est pas : fais-la rejoindre, ou invite le bot sur le serveur ou "
+             "elle se trouve." % (nb_membres, "s" if nb_membres > 1 else "",
+                                  ou, handle)
+             ) if nb_membres else (
+             "« %s » n a ete trouve sur %s." % (handle, ou))
+    return ("#f97316", titre,
+            "<span style='color:#f97316;margin-right:5px'>⚠</span>")
+
+
 def _discord_du_chatteur(pseudo: str, fiche: dict = None, reseau: bool = False) -> dict:
     """Ce que la liste des chatteurs affiche pour un Discord relie (pseudo ou
     identifiant).
@@ -64212,6 +64278,13 @@ def create_app():
                 _frag = _prod()
                 return _traduire_html(_frag) if _langue_courante() == "en" else _frag
             except Exception:
+                # JAMAIS EN SILENCE. Le 18/11/2026, l onglet du planning des
+                # chatteurs a affiche ce message pendant des heures apres un
+                # NameError : rien au journal, il a fallu copier les donnees
+                # et rejouer le rendu a la main pour trouver la ligne.
+                import traceback as _tb_lazy
+                print(f"[lazy] onglet « {_name} » en erreur :", flush=True)
+                _tb_lazy.print_exc()
                 return ("<div style='color:#f99;padding:24px'>Erreur de chargement.</div>", 200)
         return _render_upload()
 

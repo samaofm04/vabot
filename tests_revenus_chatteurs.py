@@ -982,6 +982,53 @@ def test_site(tmp):
             check("complement : rendu a l'admin, sans erreur", comp.get("ok") is True and comp.get("erreurs") == [],
                   comp.get("erreurs"))
 
+            # ---- le planning des chatteurs : il se sert des memes fonctions Discord
+            # Le 18/11/2026, en refaisant les photos Discord de cette page, la
+            # fonction _etat_discord a ete supprimee alors que le planning
+            # l'appelle : « Erreur de chargement » pendant des heures, sans une
+            # ligne au journal. Aucun test ne rendait le planning avec un pseudo.
+            import chatting
+            sauve_chat = (chatting.DATA_DIR, chatting.PLANNING_FILE)
+            chatting.DATA_DIR = pathlib.Path(tmp) / "data"
+            chatting.PLANNING_FILE = chatting.DATA_DIR / "chatting_planning.json"
+            try:
+                edt = chatting.create_edt("Planning MYM")
+                for pseudo_dc in ("ba_doo", "inconnu_du_serveur", ""):
+                    ligne = chatting.add_row(edt["id"], "08h-14h")
+                    chatting.update_cell(edt["id"], ligne["id"], "discord_username", pseudo_dc)
+                r = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"})
+                plan = r.get_data(as_text=True)
+                check("planning des chatteurs : l'onglet se charge avec des pseudos Discord dans ses lignes",
+                      r.status_code == 200 and "Erreur de chargement" not in plan
+                      and plan.count("data-field='discord_username'") == 3, (r.status_code, plan[:120]))
+                check("... un pseudo trouve porte sa photo et « Rattache a », un pseudo absent est signale",
+                      "Rattache a Baadooo" in plan and "cdn.discordapp.com/avatars/42" in plan
+                      and "inconnu_du_serveur" in plan and "⚠" in plan)
+                bord, titre, pastille = w._etat_discord("ba_doo", 2, "")
+                check("... et le verdict vient d'une seule fonction, toujours la (bordure verte pour un pseudo trouve)",
+                      bord == "#22c55e" and titre == "Rattache a Baadooo" and "<img" in pastille, (bord, titre))
+                check("... sans pseudo : rien a dire, rien a accuser", w._etat_discord("", 0, "")[0] == "#2a2a2a")
+                # Un onglet qui plante doit l'ECRIRE au journal.
+                import io, contextlib
+                sauve_rendu = w._render_chatplanning_html
+                tampon = io.StringIO()
+                try:
+                    w._render_chatplanning_html = lambda: (_ for _ in ()).throw(NameError("fonction_disparue"))
+                    appli2 = w.create_app()
+                    appli2.config["TESTING"] = True
+                    c2 = appli2.test_client()
+                    with c2.session_transaction() as s2:
+                        s2["auth"], s2["username"], s2["role"] = True, "boss", "owner"
+                    with contextlib.redirect_stdout(tampon), contextlib.redirect_stderr(tampon):
+                        casse = c2.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                finally:
+                    w._render_chatplanning_html = sauve_rendu
+                check("un onglet qui plante affiche son message ET ecrit la cause au journal (plus jamais en silence)",
+                      "Erreur de chargement" in casse and "chatplanning" in tampon.getvalue()
+                      and "fonction_disparue" in tampon.getvalue(), tampon.getvalue()[-200:])
+            finally:
+                chatting.DATA_DIR, chatting.PLANNING_FILE = sauve_chat
+
             # ---- managers et mini-boss : acces complets seulement
             url_m = "/mypuls/managers.json?start=2026-11-01&end=2026-11-15"
             check("managers : refuse sans session (401)", app.test_client().get(url_m).status_code == 401)
