@@ -46158,8 +46158,10 @@ def _render_vtg_html() -> str:
 
 def _norme_setup(nom: str) -> str:
     """« Lola ღ » -> « lola », « Khloe 💕 » -> « khloe » : lettres et chiffres.
-    Meme forme que le rapprochement identite -> profil du planning SFS."""
-    return re.sub(r"[^a-z0-9]", "", (nom or "").lower())
+    Meme forme que le rapprochement identite -> profil du planning SFS.
+    C est celle de sfs_setup.norme_nom : l auto-fill MyM s en sert aussi."""
+    import sfs_setup
+    return sfs_setup.norme_nom(nom)
 
 
 def _cle_setup(pseudo: str, stockees: set) -> str:
@@ -46262,11 +46264,53 @@ def _sfssetup_models(platform: str, marche: str = "", notes: list = None) -> lis
             orphelines = sorted(k for k, v in infos.items()
                                 if k not in vues and any(str((v or {}).get(f) or "").strip()
                                                         for f in champs))
+            # Releve le 18/11/2026 : sur 8 fiches MyM annoncees « sans modele
+            # MyPuls actif », 7 etaient des comptes OnlyFans (amelia, julia,
+            # lola…) ecrits la par l auto-fill MyM, qui ne triait pas les
+            # plateformes. Le proprietaire lisait « Amelia n est plus
+            # active ». Elles sont dites a part, avec ce qu elles sont.
+            par_erreur = _sfssetup_fiches_of_cote_mym(infos, orphelines) if platform == "mym" else []
+            orphelines = [k for k in orphelines if k not in par_erreur]
             if orphelines:
-                notes.append("Fiche(s) remplie(s) sans modele MyPuls actif : " + ", ".join(orphelines))
+                notes.append("Fiche(s) gardée(s) mais hors du message — compte(s) qui ne sont plus "
+                             "actifs chez MyPuls : " + ", ".join(orphelines))
+            if par_erreur:
+                notes.append("Fiche(s) MyM sans effet, créées par l'auto-fill pour des comptes OnlyFans "
+                             "(leurs vraies fiches sont dans OF SFS setup) : " + ", ".join(par_erreur))
         except Exception:
             pass
     return out
+
+
+def _sfssetup_fiches_of_cote_mym(infos: dict, orphelines: list) -> list:
+    """Parmi les fiches MyM sans modele actif, celles qui sont en fait un
+    compte OnlyFans range la par l ancien auto-fill.
+
+    Trois conditions, toutes requises (on ne devine pas) : aucun compte MyM
+    actif ne porte ce nom (c est une orpheline), seul le nombre d abonnes y
+    figure (l auto-fill n ecrit rien d autre pour une carte OnlyFans ;
+    l abonnement « free » est la valeur par defaut), et une fiche OU un
+    compte OnlyFans porte le meme nom."""
+    try:
+        import sfs_setup
+        import mypuls
+        cote_of = {sfs_setup.norme_nom(k) for k in sfs_setup.all_info("of")}
+        try:
+            if mypuls.api_configured():
+                cote_of |= {sfs_setup.norme_nom(c.get("pseudo")) for c in mypuls.api_creators_cached()
+                            if c.get("platform") == "onlyfans"}
+        except Exception:
+            pass
+        cote_of.discard("")
+        out = []
+        for k in orphelines:
+            v = infos.get(k) or {}
+            remplis = {f for f in sfs_setup.fields_for("mym") if str(v.get(f) or "").strip()}
+            if remplis <= {"abonnes", "abonnement"} and sfs_setup.norme_nom(k) in cote_of:
+                out.append(k)
+        return out
+    except Exception:
+        return []
 
 
 SFS_OF_AUTOFILL_FILE = DATA_DIR / "sfs_of_autofill.json"
@@ -46291,22 +46335,31 @@ def _sfssetup_autofill_of_etat() -> dict:
         return {}
 
 
-# Quoi faire, pour les deux causes qui bloquent TOUS les modeles a la fois.
-# Le 18/11/2026 le proprietaire a remis ses cookies pour une panne qui n en
-# venait pas : la phrase dit donc aussi ce qui ne sert a rien.
-_SFS_OF_AIDE_COOKIES = ("Remets-le : dans Chrome, icône de l'extension « Cookies → youl4b », "
+# Quoi faire, pour les deux causes qui bloquent TOUS les modeles a la fois,
+# sur le bouton OnlyFans comme sur le bouton MyM (les deux lisent MyPuls avec
+# les cookies du site). Le 18/11/2026 le proprietaire a remis ses cookies pour
+# une panne qui n en venait pas : la phrase dit donc aussi ce qui ne sert a rien.
+_SFS_AIDE_COOKIES = ("Remets-le : dans Chrome, icône de l'extension « Cookies → youl4b », "
                         "« 1 · Prendre les cookies de Chrome » puis « 2 · Valider l'envoi à YouLab » "
                         "— ou Réglages › Cookies MyPuls. Puis reclique ce bouton.")
-_SFS_OF_AIDE_VERIFICATION = ("Tes cookies MyPuls sont bons : les remettre avec l'extension n'y change rien. "
-                             "Ce code vaut pour UN appareil : celui saisi dans ton Chrome ne vaut pas pour "
-                             "le site, et le site n'a pas encore de quoi le saisir. L'accès OnlyFans lui "
-                             "reste fermé jusque-là.")
+_SFS_AIDE_VERIFICATION = ("Tes cookies MyPuls sont bons : les remettre avec l'extension n'y change rien. "
+                          "Ce code vaut pour UN appareil : celui saisi dans ton Chrome ne vaut pas pour "
+                          "le site, et le site n'a pas encore de quoi le saisir. Jusque-là MyPuls lui "
+                          "ferme ses pages d'abonnés, MyM comme OnlyFans.")
 
 
-def _sfs_of_cause(erreurs: list, aide: str = "") -> str:
-    """Ce que dit le bouton « Chiffres depuis OnlyFans » quand AUCUN modele n a
-    ete lu : la cause, puis quoi faire. Jamais vide — c est ce vide qui
-    donnait « Erreur : ? »."""
+def _sfs_mym_cause(lu: dict) -> str:
+    """La meme phrase pour le bouton MyM, a partir de
+    sfs_setup.derniere_lecture_mypuls()."""
+    aide = {"verification": _SFS_AIDE_VERIFICATION, "cookies": _SFS_AIDE_COOKIES}.get(lu.get("cause"), "")
+    cause = str(lu.get("error") or "").strip() or "MyPuls n'a rendu aucun chiffre, sans dire pourquoi"
+    return _sfs_cause([cause[:1].upper() + cause[1:]], aide)
+
+
+def _sfs_cause(erreurs: list, aide: str = "") -> str:
+    """Ce que disent « Chiffres depuis OnlyFans » et « Auto-fill abonnes depuis
+    MyPuls » quand RIEN n a ete lu : la cause, puis quoi faire. Jamais vide —
+    c est ce vide qui donnait « Erreur : ? »."""
     cause = " ; ".join(str(e) for e in erreurs if e) or "Aucun modèle lu, et MyPuls n'a donné aucune raison"
     return cause + "." + (f"\n\n{aide}" if aide else "")
 
@@ -46343,7 +46396,7 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
         # faire, au lieu de quatre lignes « HTTP 401 » qui ne disaient rien.
         aide = ""
         if s is None:
-            aide = _SFS_OF_AIDE_COOKIES
+            aide = _SFS_AIDE_COOKIES
             erreurs.append(", ".join(c for c, _ in modeles)
                            + " : non lu(s) — le site n'a plus de cookie MyPuls")
         for i, (cle, cid) in enumerate([] if s is None else modeles):
@@ -46352,7 +46405,7 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
                 continue
             r = mypuls.of_fans_stats(cid, session=s)
             if r.get("verification"):
-                aide = _SFS_OF_AIDE_VERIFICATION
+                aide = _SFS_AIDE_VERIFICATION
                 erreurs.append(", ".join(c for c, _ in modeles[i:])
                                + f" : non lu(s) — {r.get('error')}")
                 break
@@ -46388,7 +46441,7 @@ def _sfssetup_autofill_of(force: bool = False) -> dict:
         else:
             # Sans cause ici, la route rendait ok=False et rien d autre : le
             # bouton affichait « Erreur : ? » (18/11/2026).
-            etat["error"] = _sfs_of_cause(erreurs, aide)
+            etat["error"] = _sfs_cause(erreurs, aide)
         if remplis and not etat.get("reactivation_us"):
             recoches = []
             for cle, _cid in _sfssetup_models("of", "us"):
@@ -46497,6 +46550,16 @@ def _render_sfssetup_html(page: str = "mym") -> str:
             _of_releve_lance = False
 
     _notes = []
+    if platform == "mym":
+        # L auto-fill ci-dessus echouait sans un mot : la page montrait de
+        # vieux chiffres comme s ils etaient du jour.
+        try:
+            _lu = sfs_setup.derniere_lecture_mypuls()
+        except Exception:
+            _lu = {}
+        if _lu and not _lu.get("ok"):
+            _notes.append("Abonnés non relus chez MyPuls, les chiffres affichés sont ceux d'avant. "
+                          + _sfs_mym_cause(_lu).replace("\n\n", " "))
     _modeles = _sfssetup_models(platform, marche, _notes)
     identities = [cle for cle, _ in _modeles]
     _cid_de = {cle.lower(): cid for cle, cid in _modeles if cid}
@@ -46662,7 +46725,7 @@ def _render_sfssetup_html(page: str = "mym") -> str:
                         + "".join("<div style='color:#f59e0b;font-size:12px;margin:-6px 0 10px'>⚠ "
                                   + str(x).replace("&", "&amp;").replace("<", "&lt;") + "</div>"
                                   for x in (_e.get("erreurs") or []))
-                        # quoi faire, sous la cause (voir _SFS_OF_AIDE_*)
+                        # quoi faire, sous la cause (voir _SFS_AIDE_*)
                         + ("<div style='color:#fbbf24;font-size:12px;margin:-6px 0 10px'>→ "
                            + str(_e["aide"]).replace("&", "&amp;").replace("<", "&lt;") + "</div>"
                            if _e.get("aide") else ""))
@@ -46838,27 +46901,36 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         f"    const r=await fetch('/sfssetup/fetch_of_stats');"
         f"    let j=null; try{{ j=await r.json(); }}catch(e){{}}"
         f"    if(j&&j.ok){{ alert((j.remplis||[]).length+' modele(s) mis a jour depuis OnlyFans'+((j.erreurs||[]).length?(' — '+j.erreurs.join(' ; ')):'')); location.reload(); return; }}"
-        f"    if(r.status===401) msg='Ta session sur le dashboard a expiré. Recharge la page et reconnecte-toi.';"
-        f"    else if(r.status===403) msg='Ce compte n’a pas le droit de relire les chiffres OnlyFans.';"
-        f"    else if(j&&j.error){{ msg=j.error; recharger=true; }}"
-        f"    else if(j&&(j.erreurs||[]).length){{ msg=j.erreurs.join(' ; '); recharger=true; }}"
-        f"    else msg='Le serveur a répondu HTTP '+r.status+' sans explication. Réessaie dans une minute ; si ça dure, le site est peut-être en train de redémarrer.';"
+        f"    msg=sfsCauseEchec_{page}(r,j); recharger=!!(j&&(j.error||(j.erreurs||[]).length))&&r.status<400;"
         f"  }}catch(e){{ msg='Le site ne répond pas ('+e+'). Vérifie ta connexion, puis réessaie.'; }}"
         f"  alert('Chiffres OnlyFans non relus.\\n\\n'+msg);"
         # la page montre alors le meme releve que l alerte, pas celui d avant
         f"  if(recharger){{ location.reload(); return; }}"
         f"  if(b){{ b.disabled=false; b.textContent='↻ Chiffres depuis OnlyFans'; }}"
         f"}}"
+        # Une cause sur CHAQUE echec, pour les deux boutons (r = reponse HTTP,
+        # j = son JSON ou null). Le serveur envoie la phrase ; le reste couvre
+        # ce qu il ne peut pas dire lui-meme (session expiree, site coupe).
+        f"function sfsCauseEchec_{page}(r,j){{"
+        f"  if(r.status===401) return 'Ta session sur le dashboard a expiré. Recharge la page et reconnecte-toi.';"
+        f"  if(r.status===403) return 'Ce compte n’a pas le droit de relire ces chiffres.';"
+        f"  if(j&&j.error) return j.error;"
+        f"  if(j&&(j.erreurs||[]).length) return j.erreurs.join(' ; ');"
+        f"  return 'Le serveur a répondu HTTP '+r.status+' sans explication. Réessaie dans une minute ; si ça dure, le site est peut-être en train de redémarrer.';"
+        f"}}"
+        # Avant : zero fiche mise a jour = « MyPuls expose pas les counts d
+        # abonnes… Faut un HAR », un message du temps ou la lecture n existait
+        # pas. Le 18/11/2026 il s affichait alors que MyPuls demandait un code.
         f"async function fetchMyPulsSubs_{page}(){{"
-        f"  const r=await fetch('/sfssetup/fetch_mypuls_subs');"
-        f"  const j=await r.json();"
-        f"  if(!j.ok){{ alert('Erreur: '+(j.error||'?')); return; }}"
-        f"  if(!j.applied){{"
-        f"    alert('MyPuls expose pas les counts d abonnes via l API connue. Faut un HAR pour reverse-engineer l endpoint. En attendant, remplis les counts a la main (BCP / MOYEN / PEU ou un nombre).');"
-        f"    return;"
-        f"  }}"
-        f"  alert(j.applied+' modeles mis a jour depuis MyPuls');"
-        f"  location.reload();"
+        f"  let msg='';"
+        f"  try{{"
+        f"    const r=await fetch('/sfssetup/fetch_mypuls_subs');"
+        f"    let j=null; try{{ j=await r.json(); }}catch(e){{}}"
+        f"    if(j&&j.ok&&j.applied){{ alert(j.applied+' modele(s) MyM mis a jour depuis MyPuls'); location.reload(); return; }}"
+        f"    if(j&&j.ok) msg='MyPuls a répondu, mais sa page ne montre aucun compte MyM avec un nombre d’abonnés. Rien n’a été changé.';"
+        f"    else msg=sfsCauseEchec_{page}(r,j);"
+        f"  }}catch(e){{ msg='Le site ne répond pas ('+e+'). Vérifie ta connexion, puis réessaie.'; }}"
+        f"  alert('Abonnés MyM non relus.\\n\\n'+msg);"
         f"}}"
         "</script>"
         "</div>"
@@ -74801,7 +74873,7 @@ def create_app():
         ok = bool(r.get("ok"))
         # un echec part TOUJOURS avec sa cause : le bouton l affiche telle quelle
         return jsonify({"ok": ok,
-                        "error": None if ok else (r.get("error") or _sfs_of_cause(r.get("erreurs") or [])),
+                        "error": None if ok else (r.get("error") or _sfs_cause(r.get("erreurs") or [])),
                         "remplis": r.get("remplis") or [], "erreurs": r.get("erreurs") or []})
 
     @app.route("/sfssetup/fetch_mypuls_subs", methods=["GET"])
@@ -74816,16 +74888,16 @@ def create_app():
             return jsonify({"ok": False, "error": str(e)})
         # Force refresh (bypass cache) - le bouton est un override manuel
         applied = sfs_setup.autofill_mypuls_if_stale(force=True)
-        if applied == 0:
-            return jsonify({"ok": True, "applied": 0, "note": "MyPuls non configure ou pas de donnees"})
-        # diagnostic : quels noms ont été réellement parsés (permet de voir
-        # si une créatrice manque à cause du parsing de SA carte)
-        noms = []
-        try:
-            noms = sorted(sfs_setup.fetch_mypuls_subscribers().keys())
-        except Exception:
-            pass
-        return jsonify({"ok": True, "applied": applied, "noms": noms})
+        lu = sfs_setup.derniere_lecture_mypuls()
+        if not lu.get("ok"):
+            # la cause, pas « MyPuls non configure ou pas de donnees » : le
+            # bouton l affiche telle quelle
+            return jsonify({"ok": False, "applied": 0, "error": _sfs_mym_cause(lu)})
+        # diagnostic : quels noms ont été réellement lus (permet de voir si une
+        # créatrice manque à cause de SA carte), et les comptes OnlyFans de la
+        # page, laissés hors des fiches MyM
+        return jsonify({"ok": True, "applied": applied, "noms": lu.get("noms") or [],
+                        "ecartees": lu.get("ecartees") or []})
 
     @app.route("/sfssetup/generate", methods=["GET"])
     def sfssetup_generate():

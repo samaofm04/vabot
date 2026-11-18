@@ -26,6 +26,7 @@ Structure :
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, Any, List
 import safe_json
@@ -231,27 +232,94 @@ def generate_message(platform: str, identities_ordered: List[str]) -> str:
 _MYPULS_CACHE_TTL = 300  # 5 min
 _mypuls_last_autofetch = {"ts": 0.0}
 
+# Ce que la derniere lecture de la page /creators a donne. Avant le
+# 18/11/2026 une lecture vide ne disait pas pourquoi : le bouton affichait
+# alors « MyPuls expose pas les counts d abonnes… Faut un HAR », un message
+# du temps ou la lecture n existait pas, alors que MyPuls demandait un code
+# de confirmation par e-mail.
+_DERNIERE_LECTURE: Dict[str, Any] = {}
+
+
+def derniere_lecture_mypuls() -> Dict[str, Any]:
+    """Resultat de la derniere lecture des abonnes MyM chez MyPuls :
+    {ok: True, noms, appliquees, ecartees} ou {ok: False, error, cause}.
+
+    `cause` vaut « verification » (MyPuls demande son code par e-mail) ou
+    « cookies » (cookie absent ou refuse) : les deux cas ou le proprietaire
+    peut y faire quelque chose. Vide tant que rien n a ete lu."""
+    return dict(_DERNIERE_LECTURE)
+
+
+def _noter_lecture(**etat) -> None:
+    import time
+    _DERNIERE_LECTURE.clear()
+    _DERNIERE_LECTURE.update(etat, ts=int(time.time()))
+
+
+def norme_nom(nom: str) -> str:
+    """« Lola ღ » -> « lola », « Khloe 💕 » -> « khloe » : lettres et chiffres.
+
+    UNE seule forme reduite pour rapprocher un nom MyPuls d une fiche : la
+    page (web_upload._norme_setup) et l auto-fill s en servent tous les deux."""
+    return re.sub(r"[^a-z0-9]", "", (nom or "").lower())
+
+
+def _comptes_autres_plateformes() -> set:
+    """Formes reduites des comptes que l API MyPuls range AILLEURS que sur MyM.
+
+    La page /creators montre toutes les creatrices, OnlyFans comprises, et
+    l auto-fill ecrivait chaque carte dans les fiches MyM. Releve sur le
+    serveur le 18/11/2026 : sept fiches MyM (« amelia », « julia »,
+    « lola ღ »…) portaient le nombre d abonnes de comptes OnlyFans, et le
+    Setup SFS MYM les annoncait « sans modele MyPuls actif ».
+
+    API muette : ensemble vide, rien n est ecarte — on ne devine pas une
+    plateforme."""
+    try:
+        import mypuls
+        if not mypuls.api_configured():
+            return set()
+        crea = list(mypuls.api_creators_cached() or [])
+    except Exception:
+        return set()
+    mym = {norme_nom(c.get("pseudo")) for c in crea if c.get("platform") == "mym"}
+    return {norme_nom(c.get("pseudo")) for c in crea
+            if c.get("platform") and c.get("platform") != "mym"} - mym - {""}
+
 
 def autofill_mypuls_if_stale(force: bool = False) -> int:
     """Lance fetch_mypuls_subscribers() si le cache est plus vieux que TTL,
     et applique les counts a chaque identite MyM stockee, en preservant les
     autres champs (niche, age, abonnement deja saisis manuellement).
 
-    Retourne le nombre d'identites mises a jour.
+    Retourne le nombre d'identites mises a jour. Le POURQUOI d un zero est
+    dans derniere_lecture_mypuls().
     """
     import time
     now = time.time()
     if not force and (now - _mypuls_last_autofetch["ts"]) < _MYPULS_CACHE_TTL:
         return 0
+    _DERNIERE_LECTURE.clear()
     try:
         data = fetch_mypuls_subscribers()
-    except Exception:
-        return 0
+    except Exception as e:
+        _noter_lecture(ok=False, error=f"lecture MyPuls interrompue ({type(e).__name__}: {e})")
+        data = {}
     if not data:
+        if not _DERNIERE_LECTURE:
+            _noter_lecture(ok=False, error="MyPuls n'a rendu aucun chiffre")
+        # Un echec n est pas retente a chaque ouverture de la page (la lecture
+        # peut attendre 20 s) : nouvel essai dans une minute, ou au bouton.
+        _mypuls_last_autofetch["ts"] = now - _MYPULS_CACHE_TTL + 60
         return 0
+    ailleurs = _comptes_autres_plateformes()
     applied = 0
+    ecartees: List[str] = []
     for ident, counts in data.items():
         if not counts:
+            continue
+        if norme_nom(ident) in ailleurs:
+            ecartees.append(ident)        # compte OnlyFans : pas une fiche MyM
             continue
         # Charge les champs actuels (niche/age/abonnement preserves)
         current = get_identity("mym", ident)
@@ -269,6 +337,7 @@ def autofill_mypuls_if_stale(force: bool = False) -> int:
         )
         applied += 1
     _mypuls_last_autofetch["ts"] = now
+    _noter_lecture(ok=True, noms=sorted(data), appliquees=applied, ecartees=sorted(ecartees))
     return applied
 
 
@@ -293,20 +362,32 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     """
     import re as _re
     out: Dict[str, Dict[str, str]] = {}
+    # Chaque sortie vide dit POURQUOI (_noter_lecture) : sans cela un cookie
+    # absent, une panne et le code par e-mail de MyPuls donnaient le meme
+    # dictionnaire vide, et le bouton un message sans rapport.
     try:
         import mypuls
-    except Exception:
+    except Exception as e:
+        _noter_lecture(ok=False, error=f"module mypuls indisponible ({e})")
         return out
-    if not mypuls.is_configured():
-        return out
-    s = mypuls._make_session()
+    s = mypuls._make_session() if mypuls.is_configured() else None
     if s is None:
+        _noter_lecture(ok=False, cause="cookies", error="le site n'a plus de cookie MyPuls")
         return out
     try:
         r = s.get(f"{mypuls.BASE_URL}/creators", timeout=20)
-        if r.status_code != 200:
-            return out
-    except Exception:
+    except Exception as e:
+        _noter_lecture(ok=False, error=f"MyPuls ne répond pas ({type(e).__name__})")
+        return out
+    if mypuls.verification_demandee(r):
+        _noter_lecture(ok=False, cause="verification", error=mypuls.VERIFICATION_MYPULS)
+        return out
+    if r.status_code != 200:
+        _noter_lecture(ok=False, error=f"MyPuls a répondu HTTP {r.status_code} à la page des créatrices")
+        return out
+    if mypuls._detect_login_redirect(r.text):
+        _noter_lecture(ok=False, cause="cookies",
+                       error="MyPuls ne reconnaît plus le cookie du site (il rend sa page de connexion)")
         return out
 
     # Parse CARTE PAR CARTE (split sur creator-card) et stats indépendantes.
@@ -339,4 +420,7 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
                 vals["interesses"] = v
         if vals:                             # partiel accepté (autofill ne pose
             out[name.lower().strip()] = vals  # que les clés présentes)
+    if not out:
+        _noter_lecture(ok=False, error="page des créatrices lue chez MyPuls, mais aucun nombre d'abonnés "
+                                       f"reconnu ({len(chunks) - 1} carte(s)) — MyPuls a peut-être changé sa page")
     return out

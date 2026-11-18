@@ -19752,6 +19752,96 @@ try:
         check("site sans cookie MyPuls : dit, avec ou cliquer pour le remettre",
               "plus de cookie MyPuls" in (_jcOA.get("error") or "") and "Cookies → youl4b" in _jcOA["error"],
               str(_jcOA)[:200])
+
+        # Meme jour, page voisine « Setup SFS MYM ». Le bouton « Auto-fill
+        # abonnes depuis MyPuls » lit la page /creators avec les cookies du
+        # site : MyPuls la renvoyait vers son code par e-mail, et l alerte
+        # disait « MyPuls expose pas les counts d abonnes… Faut un HAR ».
+        class _SessMM:
+            def __init__(self, rep):
+                self.rep = rep
+
+            def get(self, url, **kw):
+                return self.rep
+
+        _savMM = (_mpOA.is_configured, dict(_ssOA._mypuls_last_autofetch), dict(_ssOA._DERNIERE_LECTURE))
+        try:
+            _mpOA.is_configured = lambda: True
+            _mpOA.api_creators_cached = lambda force=False: [
+                {"id": 769, "platform": "mym", "pseudo": "Amelia_xoxo", "active": True},
+                {"id": 3106, "platform": "onlyfans", "pseudo": "Amelia", "active": True},
+                {"id": 3673, "platform": "onlyfans", "pseudo": "Lola ღ", "active": True}]
+            _mpOA._make_session = lambda: _SessMM(_RepOA(
+                200, "<title>Confirmez votre connexion</title>", "https://mypuls.app/securite/verifier"))
+            _jmOA = _cOA.get("/sfssetup/fetch_mypuls_subs").get_json()
+            check("MyM : code demande par MyPuls -> la cause et quoi faire, pas « Faut un HAR »",
+                  _jmOA.get("ok") is False and "Confirmez votre connexion" in (_jmOA.get("error") or "")
+                  and "extension" in _jmOA["error"] and "HAR" not in _jmOA["error"], str(_jmOA)[:200])
+            _ssOA._mypuls_last_autofetch["ts"] = 0.0
+            _pmOA = _cOA.get("/?lazy=sfssetupmym", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+            check("MyM : la page dit que ses chiffres n ont pas ete relus, et pourquoi",
+                  "Abonnés non relus chez MyPuls" in _pmOA and "Confirmez votre connexion" in _pmOA)
+            check("MyM : le vieux message de developpeur a quitte la page",
+                  "fetchMyPulsSubs_mym" in _pmOA and "Faut un HAR" not in _pmOA and "reverse-engineer" not in _pmOA
+                  and "'?'" not in _pmOA.split("async function fetchMyPulsSubs_mym")[1].split("</script>")[0])
+            _mpOA._make_session = lambda: None
+            _jmcOA = _cOA.get("/sfssetup/fetch_mypuls_subs").get_json()
+            check("MyM : site sans cookie MyPuls -> dit, avec ou cliquer",
+                  _jmcOA.get("ok") is False and "plus de cookie MyPuls" in (_jmcOA.get("error") or "")
+                  and "Cookies → youl4b" in _jmcOA["error"], str(_jmcOA)[:200])
+            _mpOA._make_session = lambda: _SessMM(_RepOA(200, "<html><body>rien</body></html>",
+                                                         "https://mypuls.app/creators"))
+            _jmvOA = _cOA.get("/sfssetup/fetch_mypuls_subs").get_json()
+            check("MyM : page lue sans aucune carte -> dit (MyPuls a peut-etre change sa page)",
+                  _jmvOA.get("ok") is False and "aucun nombre d'abonnés reconnu" in (_jmvOA.get("error") or ""),
+                  str(_jmvOA)[:200])
+            # la page /creators montre TOUTES les creatrices : la carte du
+            # compte OnlyFans « Amelia » ne doit plus creer une fiche MyM
+            _cartesMM = ('<div class="creator-card x"><h5 class="mb-0 fw-bold">Amelia_xoxo</h5>'
+                         '<div class="stat-val">11 550</div><div class="stat-lbl">Abonnés</div>'
+                         '<div class="stat-val">1450</div><div class="stat-lbl">Anciens</div>'
+                         '<div class="stat-val">1141</div><div class="stat-lbl">Intéressés</div></div>'
+                         '<div class="creator-card x"><h5 class="mb-0 fw-bold">Amelia</h5>'
+                         '<div class="stat-val">5150</div><div class="stat-lbl">Abonnés</div></div>'
+                         '<div class="creator-card x"><h5 class="mb-0 fw-bold">Maria_coco</h5>'
+                         '<div class="stat-val">288</div><div class="stat-lbl">Abonnés</div>'
+                         '<div class="stat-val">652</div><div class="stat-lbl">Anciens</div></div>')
+            _mpOA._make_session = lambda: _SessMM(_RepOA(200, _cartesMM, "https://mypuls.app/creators"))
+            _jmkOA = _cOA.get("/sfssetup/fetch_mypuls_subs").get_json()
+            _fmOA = _ssOA.all_info("mym")
+            check("MyM : les abonnes des comptes MyM sont ecrits (11550 / 1450 / 1141)",
+                  _jmkOA.get("ok") is True and _jmkOA.get("applied") == 2
+                  and (_fmOA.get("amelia_xoxo") or {}).get("abonnes") == "11550"
+                  and (_fmOA.get("amelia_xoxo") or {}).get("anciens") == "1450", str(_jmkOA)[:200])
+            check("MyM : la carte d un compte OnlyFans ne cree plus de fiche MyM, et c est dit",
+                  "amelia" not in _fmOA and _jmkOA.get("ecartees") == ["amelia"], str(sorted(_fmOA)))
+            check("MyM : un compte que l API ne connait pas reste ecrit (on ne devine pas sa plateforme)",
+                  (_fmOA.get("maria_coco") or {}).get("anciens") == "652")
+            # les fiches laissees par l ancien auto-fill : dites pour ce qu elles sont
+            _ssOA.save_identity("mym", "jessye", {"abonnes": "20132", "abonnement": "free"})
+            _ssOA.save_identity("mym", "lola ღ", {"abonnes": "4684", "abonnement": "free"})
+            _nMM = []
+            _wOA._sfssetup_models("mym", "", _nMM)
+            _vraiesMM = [n for n in _nMM if "plus actifs chez MyPuls" in n]
+            _erreurMM = [n for n in _nMM if "comptes OnlyFans" in n]
+            check("bandeau MyM : un compte MyM disparu de MyPuls est dit « plus actif », seul",
+                  len(_vraiesMM) == 1 and "maria_coco" in _vraiesMM[0]
+                  and "jessye" not in _vraiesMM[0] and "lola" not in _vraiesMM[0], str(_nMM)[:300])
+            check("bandeau MyM : les comptes OnlyFans ranges cote MyM sont dits a part (fiche ou compte OF du meme nom)",
+                  len(_erreurMM) == 1 and "jessye" in _erreurMM[0] and "lola ღ" in _erreurMM[0]
+                  and all(n.startswith("Fiche") for n in _nMM), str(_nMM)[:300])
+            _ssOA.save_identity("mym", "jessye", {"abonnes": "20132", "niche": "CAISSE"})
+            _nMM2 = []
+            _wOA._sfssetup_models("mym", "", _nMM2)
+            check("bandeau MyM : une fiche remplie a la main (niche) n est jamais dite « creee par erreur »",
+                  any("plus actifs" in n and "jessye" in n for n in _nMM2)
+                  and not any("comptes OnlyFans" in n and "jessye" in n for n in _nMM2), str(_nMM2)[:300])
+        finally:
+            _mpOA.is_configured = _savMM[0]
+            _ssOA._mypuls_last_autofetch.clear()
+            _ssOA._mypuls_last_autofetch.update(_savMM[1])
+            _ssOA._DERNIERE_LECTURE.clear()
+            _ssOA._DERNIERE_LECTURE.update(_savMM[2])
     finally:
         (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
          _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users) = _savOA
