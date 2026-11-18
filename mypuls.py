@@ -467,6 +467,80 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
     return {"ok": True, "data": d}
 
 
+def api_post(path: str, corps: dict = None, _essai: int = 0) -> dict:
+    """POST sur l'API MyPuls : une CREATION. Rend {ok, data, statut} ou
+    {ok: False, error, statut, rien_cree}.
+
+    Une creation ne se retente pas comme une lecture : MyPuls ne sait pas
+    effacer un tracking, un second envoi apres une reponse perdue en laisserait
+    deux, a vie. « rien_cree » dit donc ce que la reponse PROUVE :
+      - True  : MyPuls a refuse avant d'agir (pas de cle, 400, 401, 403, 404,
+                422, 429). Sur 401 / 403 / 429 on change de cle, comme api_get
+                (une creatrice n'est visible que par les cles de son compte) ;
+      - False : on ne sait pas (delai depasse, coupure, 5xx, 2xx illisible).
+                Jamais de second envoi ici : l'appelant regarde ce qui existe.
+    """
+    cle_id, tok = _cle_disponible()
+    if not tok:
+        return {"ok": False, "statut": 0, "rien_cree": True,
+                "error": "Aucun token API MyPuls (Settings → MyPuls)"}
+    import requests
+    url = f"{BASE_URL}/api/v1/{path.lstrip('/')}"
+    try:
+        r = requests.post(url, headers=_entetes_api(tok), json=corps or {}, timeout=TIMEOUT)
+    except Exception as e:
+        # parti ou pas, on ne le sait pas : un delai depasse peut cacher une
+        # creation faite
+        return {"ok": False, "statut": 0, "rien_cree": False,
+                "error": f"l'API n'a pas répondu ({type(e).__name__})"}
+    code = r.status_code
+
+    def raison() -> str:
+        try:
+            d = r.json()
+            if isinstance(d, dict):
+                txt = " | ".join(str(d[k]) for k in ("message", "error", "detail", "invalid_group_ids")
+                                 if d.get(k))
+                if txt:
+                    return txt[:200]
+        except Exception:
+            pass
+        import re as _re
+        return _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", r.text or ""))[:200] or "réponse vide"
+
+    if code == 429:
+        try:
+            repos = float(r.headers.get("Retry-After") or 60)
+        except (TypeError, ValueError):
+            repos = 60.0
+        _noter_cle(cle_id, repos_s=max(1.0, min(300.0, repos)), erreur="quota atteint (429)")
+        if _essai < _reprises_possibles():
+            return api_post(path, corps, _essai=_essai + 1)
+        return {"ok": False, "statut": 429, "rien_cree": True,
+                "error": "Quota MyPuls atteint (429), réessai dans %ds" % int(repos)}
+    if code in (401, 403):
+        _noter_cle(cle_id, ok=(code == 403),
+                   erreur=("clé refusée (401)" if code == 401 else "hors périmètre (403)"))
+        if _essai < _reprises_possibles():
+            return api_post(path, corps, _essai=_essai + 1)
+        return {"ok": False, "statut": code, "rien_cree": True,
+                "error": f"Token API refusé (HTTP {code})"}
+    if code in (400, 404, 405, 422):
+        return {"ok": False, "statut": code, "rien_cree": True, "error": f"HTTP {code} : {raison()}"}
+    if code not in (200, 201):
+        return {"ok": False, "statut": code, "rien_cree": False, "error": f"HTTP {code} : {raison()}"}
+    try:
+        d = r.json()
+    except Exception:
+        # la page web du repartiteur a la place du JSON (voir api_get) : la
+        # demande n'a sans doute pas atteint l'API, mais rien ne le prouve
+        _noter_cle(cle_id, html=True, erreur="MyPuls a répondu par une page web (répartiteur ?)")
+        return {"ok": False, "statut": code, "rien_cree": False,
+                "error": "MyPuls a répondu par une page web au lieu de l'API"}
+    _noter_cle(cle_id, ok=True, compter=True, html=False)
+    return {"ok": True, "data": d, "statut": code}
+
+
 def api_session() -> dict:
     """Vérifie le token (GET /session)."""
     return api_get("session")

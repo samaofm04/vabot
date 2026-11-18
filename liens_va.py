@@ -2726,6 +2726,16 @@ def _garde_creatrice(creer):
                     mypuls._save_rotated_cookies(s)
                 except Exception:                            # noqa: BLE001
                     pass
+            # La page du code par e-mail (« Confirmez votre connexion ») n'est
+            # pas une bascule ratée : dite à part. « Page de personne » ne
+            # disait à personne quoi faire (capture du 18/11/2026).
+            try:
+                code_demande = mypuls.verification_demandee(b) or mypuls.verification_demandee(page)
+            except Exception:                                # noqa: BLE001
+                code_demande = False
+            if code_demande:
+                return {"ok": False, "refuse": True, "code_demande": True,
+                        "erreur": mypuls.VERIFICATION_MYPULS + " : rien créé"}
             profils = {p.lower() for p in re.findall(r"https?://onlyfans\.com/[a-zA-Z0-9_.]+",
                                                      page.text or "")}
             if b.status_code != 200 or page.status_code != 200 or profils != {profil.lower()}:
@@ -2743,6 +2753,103 @@ def _garde_creatrice(creer):
 
 
 creer_tracking = _garde_creatrice(creer_tracking)
+
+
+# ─── Le tracking créé par l'API officielle, avant la session du site ─────
+# Propriétaire, 18/11/2026, capture de « Créer son lien » sur TRUST TWITTER :
+# « ✗ MyPuls : MyPuls n'a pas confirmé la créatrice 3992 […] page de personne,
+# rien créé » — « tu peux fixe ça ». Depuis le 17/11 à 17 h 16 UTC, MyPuls met
+# « Confirmez votre connexion » (un code par e-mail) devant switch-creator :
+# la garde ci-dessus lisait la page du code, n'y trouvait aucun profil et
+# refusait. À raison — mais plus aucun VA ne recevait de lien (le dernier :
+# VA 231, le 17/11 au matin), et MyPuls plafonne les codes par jour.
+# L'API officielle (POST creators/{id}/tracking-links, clé d'API : ni session
+# ni code) crée la campagne chez la créatrice NOMMÉE dans l'adresse : pas de
+# bascule, donc pas de tracking né chez la voisine. Elle passe devant ; la
+# session du site reste le repli quand l'API PROUVE n'avoir rien créé (refus
+# net). Réponse douteuse (délai, 5xx) : on cherche le tracking par son nom et
+# on s'arrête là — un second envoi en laisserait deux, à vie.
+# En enveloppe, comme la garde : le patch local du VPS réécrit le corps.
+#: False : comme avant le 18/11/2026, la session du site seule.
+TRACKING_PAR_API = True
+
+
+def _creer_par_api(nom: str, cid: int) -> Dict[str, Any]:
+    """Le tracking `nom` créé chez la créatrice OnlyFans `cid` par l'API
+    MyPuls. Rend {ok, url, code, erreur}. « repli » : MyPuls a refusé sans
+    rien créer, la session du site peut essayer. Sans « repli », l'erreur est
+    à dire telle quelle : rien d'autre à tenter sans risquer un doublon."""
+    import mypuls
+    profil = profil_of(cid)
+    r = mypuls.api_post(f"creators/{int(cid)}/tracking-links", {"name": nom})
+    if not r.get("ok"):
+        raison = str(r.get("error") or "refus")[:200]
+        if r.get("rien_cree"):
+            return {"ok": False, "repli": True, "erreur": raison}
+        ex = _tracking_existant(nom, cid)
+        if ex:
+            print(f"[lien] tracking « {nom} » : API douteuse ({raison}), mais il est chez MyPuls "
+                  f"({ex['url']}) : repris", flush=True)
+            return {"ok": True, "url": ex["url"], "code": ex["code"], "repris": True, "erreur": ""}
+        print(f"[lien] tracking « {nom} » : API douteuse ({raison}), introuvable par son nom : "
+              "rien tenté de plus", flush=True)
+        return {"ok": False, "refuse": True,
+                "erreur": f"MyPuls n'a pas répondu clairement ({raison}) : reclique dans une minute — "
+                          "si le tracking a été créé entre-temps, il sera repris, pas refait"}
+    d = r.get("data")
+    if isinstance(d, dict) and isinstance(d.get("data"), dict):
+        d = d["data"]
+    d = d if isinstance(d, dict) else {}
+    url = str(d.get("url") or "").strip() or _adresse_dans(r.get("data"))
+    url = re.sub(r"^https?://(?:www\.)?", "https://", url).rstrip("/")
+    if not url:
+        ex = _tracking_existant(nom, cid)
+        if ex:
+            return {"ok": True, "url": ex["url"], "code": ex["code"], "repris": True, "erreur": ""}
+        return {"ok": False, "reponse": r.get("data"),
+                "erreur": "créé d'après l'API MyPuls, mais sans adresse dans sa réponse — "
+                          "à vérifier à la main dans MyPuls"}
+    if not url.lower().startswith(profil.lower() + "/"):
+        return {"ok": False, "arreter": True, "tracking": url,
+                "erreur": f"tracking {url} créé hors de {profil} : à vérifier dans MyPuls"}
+    print(f"[lien] tracking « {nom} » créé par l'API MyPuls : {url}", flush=True)
+    return {"ok": True, "url": url, "code": str(d.get("code") or "") or url.rsplit("/", 1)[-1],
+            "par_api": True, "erreur": ""}
+
+
+def _api_d_abord(creer):
+    import functools
+
+    @functools.wraps(creer)
+    def enveloppe(nom: str, creator_id: Optional[int] = None) -> Dict[str, Any]:
+        cid = int(creator_id or config().get("creator_id") or 0)
+        net = str(nom or "").strip()[:60]        # le nom que creer_tracking donnerait
+        refus_api = ""
+        if TRACKING_PAR_API and cid and net and profil_of(cid):
+            try:
+                r = _creer_par_api(net, cid)
+            except Exception as e:                           # noqa: BLE001
+                # après l'envoi, on ne sait plus : pas de second essai ici
+                print(f"[lien] tracking « {net} » par l'API : {type(e).__name__}: {e}", flush=True)
+                return {"ok": False, "refuse": True,
+                        "erreur": f"création par l'API MyPuls interrompue ({type(e).__name__}) : "
+                                  "à vérifier dans MyPuls avant de recliquer"}
+            if r.get("ok") or not r.get("repli"):
+                return r
+            refus_api = str(r.get("erreur") or "")
+            print(f"[lien] tracking « {net} » : l'API MyPuls n'a rien créé ({refus_api}), "
+                  "essai par la session du site", flush=True)
+        r = creer(nom, creator_id) if creator_id else creer(nom)
+        if refus_api and not r.get("ok"):
+            # les deux raisons : celle de la session seule cachait que l'API
+            # avait refusé d'abord, et pourquoi
+            r = dict(r, erreur=f"{r.get('erreur') or 'refus'} — et par l'API MyPuls : {refus_api}"[:400])
+        return r
+    enveloppe.brut = getattr(creer, "brut", creer)
+    return enveloppe
+
+
+creer_tracking = _api_d_abord(creer_tracking)
 
 
 # ─── Twitter sans Seren : la page de base seule (voir LIA_SEULE) ──────────
