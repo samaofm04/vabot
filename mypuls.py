@@ -256,6 +256,7 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
             # correcte remet le compteur a zero.
             if html is True:
                 c["html_suite"] = int(c.get("html_suite") or 0) + 1
+                c["html_ts"] = _t.time()
             elif html is False:
                 c["html_suite"] = 0
             if repos_s > 0:
@@ -319,7 +320,8 @@ def _cle_disponible():
     # cle qui est mauvaise.
     saines = [c for c in libres
               if "refusée" not in str(c.get("derniere_erreur") or "")
-              and int(c.get("html_suite") or 0) < SEUIL_HTML]
+              and (int(c.get("html_suite") or 0) < SEUIL_HTML
+                   or maintenant - float(c.get("html_ts") or 0) > PAUSE_HTML_S)]
     if saines:
         libres = saines
 
@@ -1951,6 +1953,17 @@ def _table_par_entetes(tables, *exigences) -> int:
 #: pas par hasard.
 SEUIL_HTML = 3
 
+#: Combien de temps une telle cle reste ecartee avant d'etre reessayee.
+#:
+#: SANS CE DELAI, UNE CLE ECARTEE L'ETAIT POUR TOUJOURS. Le compteur ne
+#: retombe a zero que sur une bonne reponse de la cle — or une cle ecartee
+#: n'etait plus jamais appelee, donc plus jamais remise a zero. Constate le
+#: 18/11/2026 : apres un passage ou le repartiteur de MyPuls a servi des pages,
+#: 8 cles sur 11 etaient ecartees alors que toutes repondaient de nouveau
+#: correctement (verifie une par une). Le site tournait sur 3 cles, et la page
+#: Revenus chatteurs est tombee en « Format de page inattendu ».
+PAUSE_HTML_S = 600
+
 #: Grandes pages : moins de requetes pour la meme donnee. Si l'API plafonne
 #: en dessous, elle rend simplement moins d'elements et la pagination suit.
 PAGE_TEAM = 500
@@ -2642,10 +2655,26 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
             return _neg["data"]
 
     def _fail_ts(err: str) -> Dict[str, Any]:
-        out = {"ok": False, "error": err}
-        _STATS_CACHE.setdefault(cache_key, {"ts": 0, "data": None})["neg"] = {
-            "ts": _t.time(), "data": out}
+        # LA VRAIE CAUSE D'ABORD. Quand l'API echoue, on retombe sur la lecture
+        # du site par cookie ; si elle echoue aussi, son message (« Format de
+        # page inattendu ») masquait la panne de l'API, la seule qui compte.
+        if _err_api == "aucun token API":
+            err = "Aucun token API ; lecture par cookie : %s" % err
+        elif _err_api:
+            err = "API MyPuls indisponible (%s) ; lecture par cookie : %s" % (_err_api, err)
+        gardee = _STATS_CACHE.setdefault(cache_key, {"ts": 0, "data": None})
+        ancien = gardee.get("data")
+        if isinstance(ancien, dict) and ancien.get("ok"):
+            # MyPuls ne repond pas, mais on a deja lu cette periode : mieux
+            # vaut ces chiffres-la, DATES, qu'une page d'erreur a la place de
+            # la paie (18/11/2026). L'ecran le dit ; rien n'est invente.
+            out = dict(ancien, perime={"lu_a": gardee.get("ts") or 0, "erreur": err})
+        else:
+            out = {"ok": False, "error": err}
+        gardee["neg"] = {"ts": _t.time(), "data": out}
         return out
+
+    _err_api = ""
 
     # ── L'API D'ABORD ────────────────────────────────────────────────────
     #
@@ -2668,7 +2697,7 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
 
     s = _make_session()
     if s is None:
-        return _fail_ts("Pas de token API (%s) et pas de cookies MyPuls" % _err_api)
+        return _fail_ts("pas de cookies MyPuls")
 
     # Convertir end inclusif (UI) → end exclusif (MyPuls)
     try:
@@ -2691,7 +2720,7 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
 
     tables = _extract_tables(r.text)
     if len(tables) < 2:
-        return {"ok": False, "error": f"Format de page inattendu (seulement {len(tables)} tableaux trouvés)"}
+        return _fail_ts(f"format de page inattendu ({len(tables)} tableaux trouvés)")
 
     # LES DEUX TABLEAUX SE RECONNAISSENT A LEURS COLONNES, pas a leur rang :
     # une table ajoutee a la page decalait tables[1] et faisait lire les

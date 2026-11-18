@@ -36271,6 +36271,25 @@ body.light .mypuls-bar{background:#e5e7eb}
     transactions = res["transactions"]
     max_ca = chatters[0]["ca_total"] if chatters else 1
 
+    # MyPuls ne repond pas : fetch_team_stats ressert les derniers chiffres
+    # lus pour cette periode. On le DIT, avec l'heure — une page de paie qui
+    # montrerait des chiffres d'il y a une heure sans le dire serait pire
+    # qu'une page d'erreur.
+    _perime_html = ""
+    _perime = res.get("perime")
+    if isinstance(_perime, dict):
+        try:
+            _lu_a = _dt.datetime.fromtimestamp(float(_perime.get("lu_a") or 0), ZoneInfo("Europe/Paris")).strftime("%d/%m à %H:%M")
+        except Exception:
+            _lu_a = "une lecture précédente"
+        _perime_html = (
+            "<div style='margin:12px 0 0;padding:10px 14px;border-radius:8px;font-size:12.5px;line-height:1.45;"
+            "background:#3a2a08;border:1px solid #8a6a1a;color:#f0c24a'>"
+            f"MyPuls ne répond pas pour l’instant : ces chiffres sont ceux lus le {_lu_a} (heure de Paris). "
+            "Recharge la page dans une minute. "
+            f"<span style='opacity:.75'>Détail : {html_escape(str(_perime.get('erreur') or ''))[:220]}</span></div>"
+        )
+
     # The rounded shortcuts are limited to Chatter earnings.
     period_html = (
         "<div class='mypuls-period'>"
@@ -37356,7 +37375,7 @@ document.addEventListener('DOMContentLoaded', function(){
         f"<path d='M3.4 9.4h17.2M3.4 15h17.2M9.4 3.4v17.2'/></svg>"
         f"Google Sheets</button>"
         "</h3>"
-        + period_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
+        + period_html + _perime_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
     )
     from revenus_ui import render_revenus_ui
@@ -37385,6 +37404,14 @@ def _render_revenus_html() -> str:
     rows = []
     # ============ MyPuls sync en haut ============
     rows.append(_render_mypuls_section_html())
+    # LE BLOC DES REVENUS SAISIS A LA MAIN (quatre cases, formulaire « Nouveau
+    # revenu », historique) n'est plus affiche tant qu'aucun revenu n'a ete
+    # saisi : il montrait « +0€ / +0€ / 0 / 0 » et un formulaire sous une page
+    # entierement alimentee par MyPuls (demande du proprietaire, 18/11/2026).
+    # S'il existe des revenus saisis, il reste affiche — on ne cache pas des
+    # montants enregistres. Rien n'est supprime : ni la route, ni les donnees.
+    if not items:
+        return "".join(rows)
     rows.append(
         "<div class='stat-grid' style='margin-bottom:16px'>"
         f"<div class='stat'><div class='v' style='color:#00d68f'>+{stats['total_this_month']:.0f}€</div><div class='l'>Revenus ce mois</div></div>"

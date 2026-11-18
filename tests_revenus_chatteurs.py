@@ -224,6 +224,68 @@ def test_messages():
         r = rc.messages("2026-11-01", "2026-11-15", COMPTES)
     check("l'appel echoue : aucune ligne, et l'erreur est nommee",
           r["lignes"] == [] and any("429" in e for e in r["erreurs"]), r)
+    appels = []
+
+    def un_compte_refuse(d, f, creator="all"):
+        appels.append(str(creator))
+        if str(creator) == "1733":
+            return {"ok": False, "error": "Quota MyPuls atteint (429)"}
+        return _stats_messages(d, f, creator)
+    with Bouchon(messages=un_compte_refuse):
+        r = rc.messages("2026-11-01", "2026-11-15", COMPTES)
+    check("un compte refuse : on n'insiste pas sur les suivants (pas de rafale), et c'est dit UNE fois",
+          appels == ["all", "1116", "1733"] and len(r["erreurs"]) == 1 and "Emmabrn" in r["erreurs"][0], (appels, r["erreurs"]))
+    check("... le total tous comptes est affiche a la place", r["par_compte"] is False and all(l[1] == "*" for l in r["lignes"]))
+    appels.clear()
+    with Bouchon(messages=lambda d, f, creator="all": (appels.append(str(creator)), _stats_messages(d, f, creator))[1]):
+        rc.messages("2026-11-01", "2026-11-15", COMPTES)
+        n = len(appels)
+        rc.messages("2026-11-01", "2026-11-15", COMPTES)
+    check("les messages d'un compte sont gardes en memoire : aucun nouvel appel a la deuxieme lecture",
+          n == 6 and len(appels) == 6, appels)
+
+
+def test_cles_et_repli():
+    print("\n--- MyPuls qui flanche : les cles et les derniers chiffres lus ---")
+    sauve = (mypuls._cles_brutes, mypuls.api_configured, mypuls._make_session)
+    maintenant = time.time()
+    cles = [{"id": "saine", "token": "t1", "html_suite": 0},
+            {"id": "ecartee", "token": "t2", "html_suite": 3, "html_ts": maintenant},
+            {"id": "reessayee", "token": "t3", "html_suite": 4, "html_ts": maintenant - mypuls.PAUSE_HTML_S - 5},
+            {"id": "ancienne", "token": "t4", "html_suite": 3}]
+    try:
+        mypuls._cles_brutes = lambda: cles
+        tirees = {mypuls._cle_disponible()[0] for _ in range(60)}
+        check("une cle qui vient de rendre 3 pages d'affilee est ecartee",
+              "ecartee" not in tirees and "saine" in tirees, tirees)
+        check("... mais REESSAYEE au bout de 10 minutes (avant : ecartee pour toujours, 8 cles sur 11 le 18/11/2026)",
+              "reessayee" in tirees and "ancienne" in tirees, tirees)
+    finally:
+        mypuls._cles_brutes = sauve[0]
+
+    with Bouchon() as b:
+        vraie = b._sauve["fetch_team_stats"]
+        try:
+            mypuls.api_configured = lambda: True
+            mypuls._make_session = lambda: None
+            mypuls._STATS_CACHE.clear()
+            r = vraie("2026-11-01", "2026-11-15", use_cache=True)
+            check("lecture normale : 12 ventes, rien de perime", r.get("ok") and len(r["transactions"]) == 12 and "perime" not in r)
+            mypuls.api_team_money = lambda *a, **k: {"ok": False, "error": "Réponse non-JSON"}
+            for v in mypuls._STATS_CACHE.values():
+                v["ts"] = 1.0
+            r = vraie("2026-11-01", "2026-11-15", use_cache=True)
+            check("MyPuls ne repond plus : les derniers chiffres lus sont resservis, pas une page d'erreur",
+                  r.get("ok") is True and len(r["transactions"]) == 12 and isinstance(r.get("perime"), dict), r.get("error"))
+            check("... avec l'heure de lecture et la VRAIE cause (l'API), pas « format de page inattendu »",
+                  r["perime"].get("lu_a") == 1.0 and "API MyPuls indisponible (Réponse non-JSON)" in r["perime"].get("erreur", ""),
+                  r.get("perime"))
+            r = vraie("2026-09-01", "2026-09-15", use_cache=True)
+            check("une periode jamais lue : erreur nette, avec la vraie cause, rien d'invente",
+                  r.get("ok") is False and "API MyPuls indisponible" in (r.get("error") or ""), r)
+        finally:
+            mypuls.api_configured, mypuls._make_session = sauve[1], sauve[2]
+            mypuls._STATS_CACHE.clear()
 
 
 def test_comptes():
@@ -682,6 +744,9 @@ def test_site(tmp):
                   crypto.get(rc.SANS_CHATTEUR, {}).get("commission_pct") == 0.0
                   and crypto.get(rc.SANS_CHATTEUR, {}).get("non_attribue") is True, crypto.get(rc.SANS_CHATTEUR))
             check("le script de la liste est celui du look TRUST", "mp-trust" in page and "mpRevenueBase" in page)
+            check("sans revenu saisi a la main : ni les quatre cases a zero ni le formulaire « Nouveau revenu »",
+                  "Nouveau revenu" not in page and "Chatteurs uniques" not in page and "Aucun revenu enregistré" not in page)
+            check("le bouton « Réduire » n'est plus la (la ligne entiere ouvre et referme)", "mp-t-reduire" not in page)
             check("les photos de la legende portent leur couleur de repli et l'adresse du jour",
                   "data-couleur='#" in page and re.search(r"/mypuls/avatar/\d+\?j=\d{4}-\d\d-\d\d' data-couleur", page) is not None)
 
@@ -722,6 +787,7 @@ if __name__ == "__main__":
     test_periode()
     test_agregat()
     test_messages()
+    test_cles_et_repli()
     test_comptes()
     test_complement()
     test_deux_bots()

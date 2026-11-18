@@ -40,7 +40,7 @@ SANS_CHATTEUR = "(non attribué)"
 
 _CACHE = {}
 _VERROU = threading.Lock()
-_TTL_OUVERTE = 300        # periode en cours : les chiffres bougent
+_TTL_OUVERTE = 600        # periode en cours : les chiffres bougent
 _TTL_CLOSE = 3600         # periode terminee : ils ne bougent plus
 
 
@@ -154,7 +154,26 @@ def comptes() -> dict:
     return liste
 
 
+#: Les messages d'un compte sur une periode, gardes a part du complement : ils
+#: coutent un appel par compte, et la meme periode d'avant sert a plusieurs
+#: ecrans. Periode terminee : 6 h. Periode en cours : 15 minutes.
+_CACHE_MESSAGES = {}
+
+
 def _messages_d_un_compte(debut, fin, compte):
+    cle = (str(debut), str(fin), str(compte))
+    with _VERROU:
+        vu = _CACHE_MESSAGES.get(cle)
+        if vu and time.time() - vu[0] < (21600 if str(fin) < date.today().isoformat() else 900):
+            return vu[1], ""
+    lignes, erreur = _lire_messages_d_un_compte(debut, fin, compte)
+    if lignes is not None:
+        with _VERROU:
+            _CACHE_MESSAGES[cle] = (time.time(), lignes)
+    return lignes, erreur
+
+
+def _lire_messages_d_un_compte(debut, fin, compte):
     import mypuls
     r = mypuls.api_team_messages_stats(debut, fin, creator=str(compte))
     if not r.get("ok"):
@@ -192,18 +211,29 @@ def messages(debut: str, fin: str, comptes: dict) -> dict:
     ne le recoupe pas, on rend le total seul (model « * ») et `par_compte` vaut
     False : la page le DIT au lieu d'afficher un chiffre gonfle.
     """
-    from concurrent.futures import ThreadPoolExecutor
     tout, err = _messages_d_un_compte(debut, fin, "all")
     if tout is None:
         return {"lignes": [], "par_compte": False, "erreurs": ["Messages : " + err], "notes": []}
     noms = [(nom, cid) for nom, cid in (comptes or {}).items() if cid is not None]
     erreurs, notes, lignes, somme = [], [], [], 0
     if noms:
-        with ThreadPoolExecutor(max_workers=min(4, len(noms))) as pool:
-            rendus = list(pool.map(lambda nc: _messages_d_un_compte(debut, fin, nc[1]), noms))
+        # UN APPEL A LA FOIS, pas une rafale. Lances a quatre de front, ces
+        # appels (un par compte, pour deux periodes) arrivaient par paquets
+        # d'une trentaine en quelques secondes, en plus de ceux de la page. Le
+        # 18/11/2026, le repartiteur de MyPuls s'est mis a rendre des pages a
+        # la place des donnees, des cles ont ete ecartees, et la page de paie
+        # est tombee. Ce complement est un confort : il peut prendre dix
+        # secondes, il ne doit pas couter la page.
+        rendus = []
+        for _nom, _cid in noms:
+            rendus.append(_messages_d_un_compte(debut, fin, _cid))
+            if rendus[-1][0] is None:
+                break                     # MyPuls refuse : inutile d'insister sur les comptes suivants
+        rendus += [(None, "non lu")] * (len(noms) - len(rendus))
         for (nom, _cid), (par_chatteur, e) in zip(noms, rendus):
             if par_chatteur is None:
-                erreurs.append("Messages de %s : %s" % (nom, e))
+                if e != "non lu":             # le premier refus suffit a le dire
+                    erreurs.append("Messages de %s : %s" % (nom, e))
                 continue
             for chatteur, (nb, ppv) in par_chatteur.items():
                 if nb or ppv:
@@ -302,3 +332,4 @@ def complement(debut: str, fin: str, comptes: dict, ventes: list = None) -> dict
 def vider_cache():
     with _VERROU:
         _CACHE.clear()
+        _CACHE_MESSAGES.clear()

@@ -592,10 +592,6 @@
       if (event.target.closest('input,button,a,label,select,textarea,form')) return;
       basculer();
     });
-    var reduire = el('button', 'mp-t-reduire', 'Réduire'); reduire.type = 'button';
-    reduire.setAttribute('aria-label', 'Refermer le détail de ' + entry.label);
-    reduire.onclick = function () { closeEntry(entry); row.scrollIntoView({block:'nearest'}); };
-    detailHead.appendChild(reduire);
     if (!orphan) { peindrePhoto(entry); peindreAdresse(entry); }
     entries.push(entry);
   });
