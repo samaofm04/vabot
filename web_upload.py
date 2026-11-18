@@ -36396,9 +36396,6 @@ body.light .mypuls-bar{background:#e5e7eb}
     def _montant_case(cle):
         return f"<span data-mp-stat='{cle}'>${_ca_usd[cle]:,.2f}</span>"
 
-    def _autre_devise(cle):
-        return f"<span class='mp-apercu-autre' data-mp-stat-eur='{cle}'>≈ {round(_ca_usd[cle] / _taux_ca):,} €</span>"
-
     # PPV debloques = nombre de ventes de medias prives, meme regle que la
     # colonne de la liste (revenus_chatteurs.famille).
     import revenus_chatteurs as _rc_apercu
@@ -36423,13 +36420,17 @@ body.light .mypuls-bar{background:#e5e7eb}
         "<div class='mp-apercu-icone' aria-hidden='true'>$</div>"
         "<div><div class='mp-apercu-lib'>Ventes des chatteurs</div>"
         f"<div class='mp-apercu-gros'>{_montant_case('ca_total')}</div>"
-        f"<div class='mp-apercu-sous'>{_autre_devise('ca_total')}"
-        # Le nombre de ventes et les chatteurs actifs tenaient deux cases de
-        # l'ancienne rangee : ils restent lisibles ici, sous le total.
-        f" · <span data-mp-stat='nb_tx'>{totals['nb_transactions']}</span> ventes"
-        f" · <span data-mp-stat='active_chatters'>{totals['active_chatters']}"
-        f"<span class='mp-apercu-sur'>/{totals['nb_chatters']}</span></span> chatteurs actifs"
-        "</div></div></div>"
+        # RIEN SOUS LE TOTAL, a sa demande (18/11/2026) : ni « ≈ 4 199 € »
+        # (« si je veux mettre en euros, je mets en euros et puis c'est tout »),
+        # ni « 219 ventes », ni « 9/41 chatteurs actifs » (« pas besoin de le
+        # dire »). Une seule devise a la fois, celle du bouton $ / €.
+        # Les deux compteurs restent dans la page, CACHES : mpRecompute et
+        # revenus_ui.js y lisent le nombre affiche dans les onglets
+        # « Chatteurs (n) » et « Transactions (n) », juste en dessous.
+        f"<span hidden><span data-mp-stat='nb_tx'>{totals['nb_transactions']}</span>"
+        f"<span data-mp-stat='active_chatters'>{totals['active_chatters']}"
+        f"<span class='mp-apercu-sur'>/{totals['nb_chatters']}</span></span></span>"
+        "</div></div>"
         # LA DISPOSITION DE SA CAPTURE DU DASHBOARD (18/11/2026) : « Media on
         # demand » et « Médias push » a la place d'Abonnements et de
         # Parrainage, « Unlock ratio » a la place de Streams, Messages et
@@ -36445,9 +36446,9 @@ body.light .mypuls-bar{background:#e5e7eb}
                 _c_post[0], _c_post[1], _c_post[2],
                 titre="Revenu des posts des créatrices sur la période : le même chiffre que le Dashboard. "
                       "Ce ne sont pas des ventes de chatteurs : il n'entre ni dans le total ni dans la paie.")
-        + _case(_montant_case("ca_ppv"), "Messages (PPV) " + _autre_devise("ca_ppv"),
+        + _case(_montant_case("ca_ppv"), "Messages (PPV)",
                 _c_msg[0], _c_msg[1], _c_msg[2], montant=True, titre=_base_titre)
-        + _case(_montant_case("ca_tips"), "Pourboires " + _autre_devise("ca_tips"),
+        + _case(_montant_case("ca_tips"), "Pourboires",
                 _c_tip[0], _c_tip[1], _c_tip[2], montant=True, titre=_base_titre)
         + _case(_montant_ou_tiret("ca_push", _ca_push), "Médias push",
                 "#eb5b5b", "rgba(235,91,91,.12)",

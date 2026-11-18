@@ -1114,6 +1114,13 @@ def test_site(tmp):
                   all(("data-mp-stat='%s'" % k) in page for k in
                       ("ca_total", "ca_ppv", "ca_tips", "nb_tx", "active_chatters", "nb_ppv", "unlock_ratio",
                        "ca_posts", "ca_push", "ca_demande")))
+            bloc = page[page.index("<div class='mp-apercu'>"):page.index("class='mp-revenue-chart'")]
+            check("... une seule devise a la fois : plus aucun « ≈ … € » dans le bloc (ni sous le total, ni sous une case)",
+                  "≈" not in bloc and "data-mp-stat-eur" not in bloc)
+            visible = re.sub(r"<span hidden>.*?</span></span></span>", "", bloc, flags=re.S)
+            check("... ni « ventes » ni « chatteurs actifs » sous le total ; les deux compteurs restent, caches, pour les onglets",
+                  "ventes<" not in visible and "chatteurs actifs" not in visible and "data-mp-stat='nb_tx'" not in visible
+                  and "<span hidden><span data-mp-stat='nb_tx'>" in bloc and "data-mp-stat='active_chatters'" in bloc)
             m = re.search(r"class='mp-apercu-gros'><span data-mp-stat='ca_total'>\$([\d,]+\.\d\d)</span>", page)
             check("... le total s'ecrit au centime, comme au Dashboard", m is not None, m and m.group(1))
             # Le 18/11, la troisieme model de la legende s'affichait en bleu
