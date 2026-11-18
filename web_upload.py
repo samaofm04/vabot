@@ -36981,6 +36981,10 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<script>window.__mpFrais = {{of: {_FRAIS_OF}, mym: {_FRAIS_MYM}}};</script>"
         f"<script>window.__mpComplementUrl = '/mypuls/chatters/complement.json?start={start_str}&end={end_str}';</script>"
         f"<script>window.__mpPostsUrl = '/mypuls/chatters/posts.json?start={start_str}&end={end_str}';</script>"
+        # Managers et mini-boss : RIEN dans cette page, qui est gardee en
+        # memoire et servie a tous les roles. Seule l'adresse y est ; la route
+        # ne repond qu'aux acces complets (voir /mypuls/managers.json).
+        f"<script>window.__mpManagersUrl = '/mypuls/managers.json?start={start_str}&end={end_str}';</script>"
         # La liste des membres a choisir n'est PAS dans la page : ce rendu est
         # mis en cache et servi a tous les roles qui ont l'onglet, chatteurs
         # compris. Elle est lue a part, par une route reservee aux acces
@@ -37034,8 +37038,12 @@ body.light .mypuls-bar{background:#e5e7eb}
 function mpTab(btn, name){
   document.querySelectorAll('.mypuls-tab').forEach(function(t){t.classList.remove('mypuls-tab-active');});
   btn.classList.add('mypuls-tab-active');
-  document.getElementById('mp-tab-chatters').style.display = (name === 'chatters') ? 'block' : 'none';
-  document.getElementById('mp-tab-tx').style.display = (name === 'tx') ? 'block' : 'none';
+  // managers / miniboss : panneaux poses par revenus_managers.js, absents
+  // pour un role qui n'a pas l'acces complet.
+  ['chatters', 'tx', 'managers', 'miniboss'].forEach(function(n){
+    var el = document.getElementById('mp-tab-' + n);
+    if(el) el.style.display = (n === name) ? 'block' : 'none';
+  });
 }
 function mpUpdateInlineNetworks(rowIdx){
   var typeSel = document.querySelector('.mp-edit-type[data-row="'+rowIdx+'"]');
@@ -74251,6 +74259,147 @@ def create_app():
             return jsonify(rep)
         except Exception as e:
             return jsonify({"ok": False, "erreurs": [f"{type(e).__name__} : {e}"]})
+
+    # ---- Managers et mini-boss (revenus_managers) ---------------------------
+    # ACCES COMPLETS SEULEMENT, en lecture comme en ecriture : un chatteur a
+    # l'onglet Revenus, il ne doit lire ni ce que touche son manager ni qui
+    # surveille quoi. Les ecritures sont de toute facon refusees aux roles
+    # restreints par le before_request (absentes de _RESTRICTED_WRITE_ALLOW).
+    def _managers_refus():
+        """None si l'appelant a l'acces complet, sinon la reponse de refus."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "erreur": "Session expirée"}), 401
+        try:
+            complet = _role_allowed_tabs(_live_role()) is None
+        except Exception:
+            complet = False
+        if not complet:
+            return jsonify({"ok": False, "erreur": "Accès refusé"}), 403
+        return None
+
+    def _managers_matrice(debut, fin):
+        """(matrice, "") ou (None, pourquoi). Les ventes sont celles de la
+        page (meme lecture, meme cache) : les deux ecrans ne peuvent pas
+        diverger."""
+        import mypuls
+        import revenus_chatteurs
+        import revenus_managers
+        from revenus_segments import creator_segments
+        cur = mypuls.fetch_team_stats(debut, fin, use_cache=True)
+        if not cur.get("ok"):
+            return None, str(cur.get("error") or "MyPuls indisponible")
+        comptes = revenus_chatteurs.comptes()
+        try:
+            acc = mypuls.api_creators_cached() if mypuls.api_configured() else []
+        except Exception:
+            acc = []
+        taux = float(mypuls.get_eur_usd_rate()["rate"])
+        return revenus_managers.matrice(cur.get("transactions") or [], taux, comptes,
+                                        creator_segments(comptes, acc)), ""
+
+    def _managers_fiche(p, mat, reseau=False):
+        """La fiche telle que l'ecran la lit : ce qu'elle touche, et sa photo."""
+        import revenus_managers
+        out = {k: p.get(k) for k in ("id", "role", "nom", "discord", "pct", "cases", "portee", "models",
+                                     "crypto_type", "crypto_network", "crypto_address")}
+        out.update(revenus_managers.du(p, mat or {}))
+        out["photo"], out["discord_nom"], out["discord_trouve"], out["discord_verifiable"] = "", "", False, False
+        if p.get("discord"):
+            etat = _discord_du_chatteur(
+                p["discord"], {"discord": p["discord"], "avatar": p.get("discord_avatar") or "",
+                               "nom": p.get("discord_nom") or "", "maj": p.get("discord_maj") or 0}, reseau=reseau)
+            out["photo"], out["discord_nom"] = etat.get("avatar") or "", etat.get("affiche") or ""
+            out["discord_trouve"], out["discord_verifiable"] = bool(etat.get("trouve")), bool(etat.get("verifiable"))
+        return out
+
+    @app.route("/mypuls/managers.json")
+    def mypuls_managers_json():
+        """Tout ce que les onglets Managers et Mini-boss affichent, pour la
+        periode de la page. Lecture seule."""
+        from flask import jsonify
+        refus = _managers_refus()
+        if refus is not None:
+            return refus
+        debut = (request.args.get("start") or "").strip()
+        fin = (request.args.get("end") or "").strip()
+        try:
+            import mypuls
+            import revenus_chatteurs
+            import revenus_managers
+            mat, pourquoi = _managers_matrice(debut, fin)
+            if mat is None:
+                return jsonify({"ok": False, "erreur": pourquoi})
+            return jsonify({"ok": True, "debut": debut, "fin": fin, "matrice": mat,
+                            "creneaux": [list(c) for c in revenus_chatteurs.CRENEAUX],
+                            "personnes": [_managers_fiche(p, mat) for p in revenus_managers.charger()["personnes"]],
+                            "paye": revenus_managers.payes(debut, fin),
+                            "cryptos": mypuls.CRYPTO_NETWORKS})
+        except Exception as e:
+            return jsonify({"ok": False, "erreur": f"{type(e).__name__} : {e}"})
+
+    @app.route("/mypuls/managers/enregistrer", methods=["POST"])
+    def mypuls_managers_enregistrer():
+        """Cree ou met a jour un manager / mini-boss. Rend la fiche recalculee."""
+        from flask import jsonify
+        refus = _managers_refus()
+        if refus is not None:
+            return refus
+        import revenus_managers
+        corps = request.get_json(silent=True) or {}
+        recu = corps.get("fiche") if isinstance(corps.get("fiche"), dict) else {}
+        # Seules ces cles passent : le reste de la fiche (photo retenue, dates)
+        # ne se regle pas depuis le navigateur.
+        champs = {k: recu[k] for k in ("id", "role", "nom", "pct", "cases", "portee", "models", "discord",
+                                       "crypto_type", "crypto_network", "crypto_address") if k in recu}
+        try:
+            fiche = revenus_managers.enregistrer(champs)
+        except ValueError as e:
+            return jsonify({"ok": False, "erreur": str(e)})
+        try:
+            if "discord" in champs and fiche.get("discord"):
+                etat = _discord_du_chatteur(fiche["discord"], None, reseau=True)
+                if etat["trouve"] or etat["par_id"] or etat["verifiable"]:
+                    # introuvable aussi : on retient la verification (photo
+                    # vide), sinon chaque ouverture reinterrogerait Discord
+                    revenus_managers.retenir_discord(fiche["id"], etat["avatar"], etat["affiche"])
+                    fiche = revenus_managers.trouver(fiche["id"]) or fiche
+        except Exception as e:                          # noqa: BLE001
+            print(f"[managers] Discord non verifie pour {fiche.get('nom')}: {e}", flush=True)
+        mat, _pourquoi = _managers_matrice((corps.get("start") or "").strip(), (corps.get("end") or "").strip())
+        return jsonify({"ok": True, "personne": _managers_fiche(fiche, mat)})
+
+    @app.route("/mypuls/managers/retirer", methods=["POST"])
+    def mypuls_managers_retirer():
+        """Retire un manager / mini-boss de la liste. Sa fiche est gardee
+        dans « retires » : une paie deja cochee doit rester explicable."""
+        from flask import jsonify
+        refus = _managers_refus()
+        if refus is not None:
+            return refus
+        import revenus_managers
+        corps = request.get_json(silent=True) or {}
+        if not revenus_managers.retirer(str(corps.get("id") or "")):
+            return jsonify({"ok": False, "erreur": "Fiche introuvable"})
+        return jsonify({"ok": True})
+
+    @app.route("/mypuls/managers/paye", methods=["POST"])
+    def mypuls_managers_paye():
+        """Coche ou decoche « Paye » pour la periode affichee."""
+        from flask import jsonify
+        refus = _managers_refus()
+        if refus is not None:
+            return refus
+        import revenus_managers
+        corps = request.get_json(silent=True) or {}
+        debut, fin = (corps.get("start") or "").strip(), (corps.get("end") or "").strip()
+        if not debut or not fin:
+            return jsonify({"ok": False, "erreur": "Période manquante"})
+        try:
+            ids = revenus_managers.marquer_paye(str(corps.get("id") or ""), debut, fin, bool(corps.get("paye")))
+        except ValueError as e:
+            return jsonify({"ok": False, "erreur": str(e)})
+        return jsonify({"ok": True, "paye": ids})
 
     @app.route("/mypuls/chatters/posts.json")
     def mypuls_chatters_posts():

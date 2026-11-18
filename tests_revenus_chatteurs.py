@@ -677,6 +677,93 @@ def test_photo_model(tmp):
           '"/mypuls/avatar/3673?j=%s"' % date.today().isoformat() in page)
 
 
+def test_managers(tmp):
+    print("\n--- managers et mini-boss : la matrice, la paie, le fichier ---")
+    import revenus_managers as rm
+    sauve = mypuls.DATA_DIR
+    mypuls.DATA_DIR = pathlib.Path(tmp) / "data_managers"
+    try:
+        comptes = {"Lola": 3673, "Emma": 1733, "Lia": 3992, "SansVente": 77}
+        segments = {"Lola": "of_fr", "Emma": "mym", "Lia": "of_us", "SansVente": "mym"}
+
+        def v(model, chatteur, montant, devise, quand):
+            return {"creator": model, "chatter": chatteur, "amount": montant, "currency": devise,
+                    "type": "Média privé", "date": quand}
+        ventes = [
+            v("Emma", "moyle", 100, "EUR", "2026-11-03T10:00:00+01:00"),      # 8h-14h, 110 $
+            v("Emma", "", 50, "EUR", "2026-11-03T21:00:00+01:00"),            # 20h-2h, 55 $, sans chatteur
+            v("Emma", "Indéterminé (Créatrice)", 10, "EUR", "2026-11-04T01:30:00+01:00"),   # 20h-2h (passe minuit)
+            v("Lola", "baadooo", 200, "USD", "2026-11-03T16:00:00+01:00"),    # 14h-20h, brut
+            v("Lola", "baadooo", 40, "USD", "pas une date"),                   # sans heure
+            v("Lia", "ivan", 300, "USD", "2026-11-03T03:00:00+01:00"),         # 2h-8h
+            v("", "ivan", 999, "USD", "2026-11-03T03:00:00+01:00"),            # sans model
+        ]
+        mat = rm.matrice(ventes, 1.10, comptes, segments)
+        L = mat["lignes"]
+        check("matrice : une ligne par model, rangee par son identifiant MyPuls (il survit a un renommage)",
+              set(L) == {"3673", "1733", "3992", "77"}, sorted(L))
+        check("... MYM en euros converti au taux de la paie, range dans son shift (10 h -> 8h-14h)",
+              L["1733"]["shifts"] == [0.0, 110.0, 0.0, 66.0], L["1733"]["shifts"])
+        check("... 1 h 30 du matin tombe dans le shift 20h-2h, pas dans 2h-8h", L["1733"]["shifts"][3] == 66.0)
+        check("... la part sans chatteur est rendue A PART (vide, ou le libelle de MyPuls)",
+              L["1733"]["sans_chatteur"] == [0.0, 0.0, 0.0, 66.0], L["1733"]["sans_chatteur"])
+        check("... OnlyFans en dollars, pris tel quel (brut)", L["3673"]["shifts"] == [0.0, 0.0, 200.0, 0.0])
+        check("... une vente sans heure lisible : hors des shifts, mais dans le total de la model (24 h)",
+              L["3673"]["total"] == 240.0 and L["3673"]["sans_heure"] == 40.0, L["3673"])
+        check("... une vente sans model : comptee, jamais ecartee en silence", mat["ecartees"] == 1, mat["ecartees"])
+        check("... une model sans vente a quand meme sa ligne (sinon on ne pourrait pas la cocher)",
+              L["77"]["total"] == 0 and L["77"]["segment"] == "mym")
+        check("... l'ordre : du plus gros chiffre au plus petit", mat["ordre"][:3] == ["3992", "3673", "1733"], mat["ordre"])
+
+        g = rm.enregistrer({"role": "manager", "nom": "  Ghost  ", "pct": "3,5", "discord": "@Ghost_45605 ",
+                            "cases": {"1733": [3, 1, 1, 9, "x"], "3673": [], "": [0]}})
+        check("manager cree : nom nettoye, « 3,5 » lu 3.5, pseudo sans arobase en minuscules",
+              g["nom"] == "Ghost" and g["pct"] == 3.5 and g["discord"] == "ghost_45605" and g["id"].startswith("m_"), g)
+        check("... les cases : shifts tries, sans doublon, hors 0-3 ecartes, model sans shift non gardee",
+              g["cases"] == {"1733": [1, 3]}, g["cases"])
+        d = rm.du(g, mat)
+        check("... il touche 3,5 % de ses cases : 110 + 66 = 176 $ -> 6,16 $",
+              d["ca"] == 176.0 and d["a_payer"] == 6.16 and d["nb_cases"] == 2 and d["nb_models"] == 1, d)
+        check("... dont 66 $ de ventes sans chatteur, dits a part", d["sans_chatteur"] == 66.0, d["sans_chatteur"])
+        rm.enregistrer({"id": g["id"], "crypto_type": "usdc", "crypto_address": " 0xabc "})
+        g2 = rm.trouver(g["id"])
+        check("mise a jour partielle : l'adresse change, le carre et le pourcentage restent",
+              g2["crypto_type"] == "USDC" and g2["crypto_address"] == "0xabc" and g2["cases"] == {"1733": [1, 3]}
+              and g2["pct"] == 3.5, g2)
+        for mauvais, quoi in (({"role": "manager", "nom": "X", "pct": "120"}, "pourcentage au-dela de 100"),
+                              ({"role": "manager", "nom": "   "}, "nom vide"),
+                              ({"role": "patron", "nom": "X"}, "role inconnu"),
+                              ({"id": "m_inconnu", "pct": 1}, "fiche inexistante"),
+                              ({"id": g["id"], "crypto_type": "DOGE"}, "crypto inconnue")):
+            try:
+                rm.enregistrer(mauvais)
+                refuse = False
+            except ValueError:
+                refuse = True
+            check("refuse : " + quoi, refuse)
+        check("... et un refus n'a rien ecrit de travers", len(rm.personnes()) == 1 and rm.trouver(g["id"])["pct"] == 3.5)
+
+        b = rm.enregistrer({"role": "miniboss", "nom": "Kiah", "pct": 2})
+        base = dict(rm.trouver(b["id"]))
+        check("mini-boss « Tout » : 2 % de toutes les models sur 24 h (ventes sans heure comprises)",
+              rm.du(base, mat)["ca"] == round(176 + 240 + 300, 2) and rm.du(base, mat)["a_payer"] == 14.32, rm.du(base, mat))
+        check("mini-boss « MYM » : les models MYM seulement", rm.du(dict(base, portee="mym"), mat)["ca"] == 176.0)
+        check("mini-boss « OnlyFans » : OF FR et OF US ensemble", rm.du(dict(base, portee="of"), mat)["ca"] == 540.0)
+        check("mini-boss « Choisir » : les models cochees, rien d'autre",
+              rm.du(dict(base, portee="choix", models=["3992"]), mat)["ca"] == 300.0)
+
+        check("paye : coche pour UNE periode", rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", True) == [g["id"]]
+              and rm.payes("2026-11-01", "2026-11-15") == [g["id"]] and rm.payes("2026-11-16", "2026-11-30") == [])
+        check("... et decoche", rm.marquer_paye(g["id"], "2026-11-01", "2026-11-15", False) == [])
+        check("retirer : la fiche quitte la liste mais reste gardee (rien n'est efface)",
+              rm.retirer(g["id"]) is True and rm.trouver(g["id"]) is None
+              and [r.get("nom") for r in rm.charger()["retires"]] == ["Ghost"])
+        brut = (mypuls.DATA_DIR / "mypuls_managers.json").read_text(encoding="utf-8")
+        check("le fichier est ecrit, lisible, par safe_json", json.loads(brut)["personnes"][0]["nom"] == "Kiah")
+    finally:
+        mypuls.DATA_DIR = sauve
+
+
 def test_site(tmp):
     print("\n--- la page et ses deux routes ---")
     import web_upload as w
@@ -791,6 +878,49 @@ def test_site(tmp):
             comp = admin.get(url).get_json() or {}
             check("complement : rendu a l'admin, sans erreur", comp.get("ok") is True and comp.get("erreurs") == [],
                   comp.get("erreurs"))
+
+            # ---- managers et mini-boss : acces complets seulement
+            url_m = "/mypuls/managers.json?start=2026-11-01&end=2026-11-15"
+            check("managers : refuse sans session (401)", app.test_client().get(url_m).status_code == 401)
+            check("managers : refuse a un chatteur, qui a pourtant l'onglet Revenus (403)",
+                  chatteur.get(url_m).status_code == 403, chatteur.get(url_m).status_code)
+            jm = admin.get(url_m).get_json() or {}
+            check("managers : l'admin recoit la matrice, les 4 shifts et une liste vide",
+                  jm.get("ok") is True and jm.get("personnes") == [] and len(jm.get("creneaux") or []) == 4
+                  and "1116" in (jm.get("matrice") or {}).get("lignes", {}), jm.get("erreur"))
+            fiche = {"role": "manager", "nom": "Ghost", "pct": 10, "discord": "ba_doo", "cases": {"1116": [1]}}
+            corps = {"fiche": fiche, "start": "2026-11-01", "end": "2026-11-15"}
+            r = chatteur.post("/mypuls/managers/enregistrer", json=corps)
+            check("managers : un role restreint ne peut rien enregistrer (403)", r.status_code == 403, r.status_code)
+            import revenus_managers as rm_site
+            check("... et rien n'a ete ecrit", rm_site.personnes() == [])
+            jr = admin.post("/mypuls/managers/enregistrer", json=corps).get_json() or {}
+            pers = jr.get("personne") or {}
+            # Lolatacrush, 8h-14h : 100 + 15,33 (sans chatteur) + 20 euros, a 1,10
+            check("managers : cree, et la fiche revient recalculee sur la periode (148,86 $ -> 14,89 $ a 10 %)",
+                  jr.get("ok") is True and pers.get("ca") == 148.86 and pers.get("a_payer") == 14.89, pers)
+            check("... la part sans chatteur est dite (16,86 $)", pers.get("sans_chatteur") == 16.86, pers.get("sans_chatteur"))
+            check("... et la photo Discord est trouvee et retenue",
+                  pers.get("discord_trouve") is True and "cdn.discordapp.com" in (pers.get("photo") or ""), pers.get("photo"))
+            ko = admin.post("/mypuls/managers/enregistrer", json={"fiche": {"id": pers.get("id"), "pct": "abc"}}).get_json() or {}
+            check("managers : un pourcentage illisible est refuse avec son message", ko.get("ok") is False and "ourcentage" in (ko.get("erreur") or ""), ko)
+            rp = admin.post("/mypuls/managers/paye", json={"id": pers.get("id"), "start": "2026-11-01", "end": "2026-11-15", "paye": True})
+            check("managers : « Paye » coche pour la periode affichee, pas pour une autre",
+                  (rp.get_json() or {}).get("paye") == [pers.get("id")]
+                  and (admin.get(url_m).get_json() or {}).get("paye") == [pers.get("id")]
+                  and (admin.get("/mypuls/managers.json?start=2026-10-16&end=2026-10-31").get_json() or {}).get("paye") == [])
+            check("... un chatteur ne peut ni cocher ni retirer (403)",
+                  chatteur.post("/mypuls/managers/paye", json={"id": pers.get("id"), "start": "a", "end": "b", "paye": True}).status_code == 403
+                  and chatteur.post("/mypuls/managers/retirer", json={"id": pers.get("id")}).status_code == 403)
+            w._render_mypuls_section_html.invalidate()
+            vue_chatteur = chatteur.get("/?tab=revenus&mp_start=2026-11-01&mp_end=2026-11-15").get_data(as_text=True)
+            check("la page servie a un chatteur ne contient ni le nom du manager ni ce qu'il touche",
+                  "Ghost" not in vue_chatteur and "$14.89" not in vue_chatteur and "148.86" not in vue_chatteur
+                  and "mypuls_managers" not in vue_chatteur and "window.__mpManagersUrl" in vue_chatteur)
+            check("managers : retirer range la fiche de cote",
+                  (admin.post("/mypuls/managers/retirer", json={"id": pers.get("id")}).get_json() or {}).get("ok") is True
+                  and (admin.get(url_m).get_json() or {}).get("personnes") == []
+                  and len(rm_site.charger()["retires"]) == 1)
 
             # ---- les posts (case « Posts » du bloc du haut)
             url_p = "/mypuls/chatters/posts.json?start=2026-11-01&end=2026-11-15"
@@ -997,6 +1127,7 @@ if __name__ == "__main__":
         test_photo_model(_tmp)
         test_identifiant(_tmp)
         test_chatting_par_rest(_tmp)
+        test_managers(_tmp)
         test_site(_tmp)
     except Exception as e:                                   # noqa: BLE001
         import traceback

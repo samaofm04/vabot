@@ -1,0 +1,143 @@
+/* Onglets « Managers » et « Mini-boss » (revenus_managers.js). Le look TRUST de
+   la liste des chatteurs : meme palette, memes pastilles, meme orange.
+   Les couleurs par personne et par model passent par des VARIABLES, jamais par
+   un « background:#… » en ligne : les themes repeignent tout style en ligne
+   qui contient certaines couleurs (c'est ce qui avait rendu bleue une case de
+   la legende, le 18/11/2026). */
+.mpm{--mpm-carte:#18181b;--mpm-detail:#131315;--mpm-case:#1b1b1f;--mpm-bord:#2a2a2f;--mpm-texte:#f4f4f5;--mpm-faible:#a1a1aa;--mpm-acc:#f97341;--mpm-acc-voile:rgba(249,115,65,.13);--mpm-ambre:#f59e0b;--mpm-vert:#4ade80;--mpm-rouge:#f87171;--mpm-champ:#0e0e10;--mpm-sur-acc:#1c0a02;color:var(--mpm-texte);margin-top:14px}
+body.light .mpm{--mpm-carte:#fff;--mpm-detail:#f7f8fa;--mpm-case:#fff;--mpm-bord:#e3e6ec;--mpm-texte:#18181b;--mpm-faible:#687280;--mpm-acc:#c2410c;--mpm-acc-voile:rgba(249,115,65,.12);--mpm-ambre:#b45309;--mpm-vert:#15803d;--mpm-rouge:#dc2626;--mpm-champ:#f7f8fa;--mpm-sur-acc:#fff}
+.mpm *{box-sizing:border-box}
+.mpm small{display:block;font-size:11.5px;font-weight:500;color:var(--mpm-faible);margin-top:3px}
+.mpm-vert{color:var(--mpm-vert)}
+.mpm-manque{color:var(--mpm-ambre);font-size:13px;font-weight:700}
+.mpm-alerte{color:var(--mpm-ambre)!important}
+.mpm-mini{display:block;font-size:11px;font-weight:600;margin-top:4px}
+.mpm-note{margin:10px 0 0;font-size:11.5px;line-height:1.45;color:var(--mpm-faible);font-weight:500}
+.mpm-note-ambre{color:var(--mpm-ambre);background:rgba(245,158,11,.09);border-radius:9px;padding:9px 10px;font-weight:600}
+
+/* la bande du haut */
+.mpm-bande{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--mpm-carte);border:1px solid var(--mpm-bord);border-radius:14px;padding:16px 20px;margin-bottom:14px}
+.mpm-bande-titre{font-size:14px;font-weight:600}
+.mpm-bande-aide{font-size:12px;color:var(--mpm-faible);margin-top:3px}
+.mpm-esp{flex:1}
+.mpm-bande-total{text-align:right}
+.mpm-bande-gros{font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--mpm-vert);font-variant-numeric:tabular-nums}
+body .mp-revenue-section .mpm button.mpm-btn{border:1px solid var(--mpm-acc)!important;color:var(--mpm-acc)!important;background:var(--mpm-acc-voile)!important;border-radius:9px!important;padding:9px 14px!important;font:inherit;font-size:13px!important;font-weight:700!important;cursor:pointer;box-shadow:none!important;width:auto;min-height:0}
+body .mp-revenue-section .mpm button.mpm-btn:hover{filter:brightness(1.12)}
+body .mp-revenue-section .mpm button.mpm-btn.mpm-btn-plein{display:block;width:100%;background:var(--mpm-acc)!important;color:var(--mpm-sur-acc)!important;padding:11px!important;font-size:13.5px!important;font-weight:800!important;margin-top:14px}
+body .mp-revenue-section .mpm button.mpm-btn:disabled{opacity:.55;cursor:wait}
+
+/* la liste */
+.mpm-boite{background:var(--mpm-carte);border:1px solid var(--mpm-bord);border-radius:14px;overflow:hidden}
+.mpm-ligne{display:grid;grid-template-columns:34px minmax(210px,1.3fr) minmax(220px,2fr) minmax(120px,.9fr) 92px minmax(96px,.7fr) 56px minmax(140px,.9fr);align-items:center;gap:0 12px;padding:13px 16px;border-bottom:1px solid var(--mpm-bord);text-align:right;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.mpm-boite>.mpm-ligne:last-child{border-bottom:0}
+.mpm-ligne>span{min-width:0}
+.mpm-ligne .mpm-g{text-align:left}.mpm-ligne .mpm-c{text-align:center}
+.mpm-tete{font-size:11.5px;font-weight:600;color:var(--mpm-faible);padding-top:11px;padding-bottom:11px}
+.mpm-personne{cursor:pointer;transition:background .12s}
+.mpm-personne:hover{background:rgba(255,255,255,.025)}
+body.light .mpm-personne:hover{background:rgba(0,0,0,.025)}
+.mpm-personne:focus-visible{outline:2px solid var(--mpm-acc);outline-offset:-2px}
+.mpm-ouverte{background:var(--mpm-acc-voile)!important;border-bottom-color:transparent}
+.mpm-payee>span:not(.mpm-c){opacity:.45}
+.mpm-rang{font-size:12px;font-weight:500;color:var(--mpm-faible);text-align:center}
+.mpm-qui{display:flex;align-items:center;gap:11px}
+.mpm-qui b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mpm-chevron{font-style:normal;color:var(--mpm-faible);font-size:16px;margin-left:4px}
+.mpm-vide{margin:0;padding:26px 20px;text-align:center;color:var(--mpm-faible);font-size:13px}
+.mpm-rond{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:var(--mpm-c,#71717a);color:#fff;font-size:12.5px;font-weight:800;overflow:hidden}
+.mpm-rond img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.mpm-rond-petit{width:28px;height:28px;font-size:9.5px}
+.mpm-puces{display:flex;flex-wrap:wrap;gap:6px}
+.mpm-puce{display:inline-flex;align-items:center;gap:8px;background:var(--mpm-detail);border:1px solid var(--mpm-bord);border-radius:9px;padding:6px 10px;font-size:12px;font-weight:500;color:var(--mpm-faible);white-space:nowrap}
+.mpm-puce b{color:var(--mpm-texte);font-size:12.5px;font-weight:700}
+.mpm-puce-plus{font-weight:700}
+.mpm-pct{display:inline-flex;align-items:center;justify-content:flex-end;gap:2px;min-width:64px;background:var(--mpm-champ);border:1px solid var(--mpm-bord);border-radius:8px;padding:6px 10px;font-size:15px;font-weight:700}
+.mpm-pct i{font-style:normal;font-size:12px;font-weight:500;color:var(--mpm-faible)}
+.mpm-crypto{display:inline-block;margin-right:7px;padding:2px 6px;border-radius:5px;background:#71717a;color:#fff;font-size:10px;font-weight:800}
+.mpm-crypto[data-type=USDC]{background:#2775ca}.mpm-crypto[data-type=SOL]{background:#9945ff}.mpm-crypto[data-type=ETH]{background:#627eea}.mpm-crypto[data-type=TRX]{background:#eb0029}
+.mpm-adr{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:500;color:var(--mpm-faible)}
+/* La case « Paye » : dessinee, la case native sortait en carre gris plein sur le theme sombre. */
+body .mp-revenue-section .mpm input.mpm-paye{-webkit-appearance:none;appearance:none;width:20px!important;height:20px!important;min-height:0;padding:0!important;margin:0!important;border:1.5px solid var(--mpm-faible)!important;border-radius:5px!important;background:transparent!important;box-shadow:none!important;cursor:pointer;vertical-align:middle}
+body .mp-revenue-section .mpm input.mpm-paye:hover{border-color:#22c55e!important}
+body .mp-revenue-section .mpm input.mpm-paye:checked{border-color:#22c55e!important;background:#22c55e url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.5l3.2 3.2L15 7' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/100% no-repeat!important}
+body .mp-revenue-section .mpm input.mpm-paye:disabled{opacity:.5;cursor:wait}
+.mpm-portee{display:inline-flex;flex-wrap:wrap;gap:6px}
+.mpm-portee>span,body .mp-revenue-section .mpm .mpm-portee>button{border:1px solid var(--mpm-bord)!important;border-radius:999px!important;padding:6px 12px!important;font:inherit;font-size:12px!important;font-weight:600!important;color:var(--mpm-faible)!important;background:var(--mpm-detail)!important;box-shadow:none!important;min-height:0;width:auto}
+body .mp-revenue-section .mpm .mpm-portee>button{cursor:pointer;padding:8px 15px!important;font-size:13px!important}
+.mpm-portee>span.mpm-on,body .mp-revenue-section .mpm .mpm-portee>button.mpm-on{background:var(--mpm-acc)!important;border-color:var(--mpm-acc)!important;color:var(--mpm-sur-acc)!important}
+
+/* une fiche ouverte */
+.mpm-detail{display:flex;align-items:flex-start;gap:24px;background:var(--mpm-detail);border-bottom:1px solid var(--mpm-bord);padding:20px 22px 22px;text-align:left}
+.mpm-boite>.mpm-detail:last-child{border-bottom:0}
+.mpm-gauche{flex:1;min-width:0}
+.mpm-gauche h4{margin:0 0 4px;font-size:15px;font-weight:700;color:var(--mpm-texte)}
+.mpm-aide{margin:0 0 14px;font-size:12.5px;line-height:1.45;color:var(--mpm-faible);font-weight:500}
+
+/* le carre : une ligne par model, une colonne par shift */
+.mpm-carre{display:grid;grid-template-columns:minmax(150px,190px) repeat(4,minmax(0,1fr));gap:7px}
+body .mp-revenue-section .mpm .mpm-carre button{font:inherit;box-shadow:none!important;min-height:0;width:auto;cursor:pointer;text-align:left;color:var(--mpm-texte)!important}
+body .mp-revenue-section .mpm button.mpm-tete-shift{background:transparent!important;border:0!important;border-radius:8px!important;padding:2px 0 6px!important;text-align:center}
+.mpm-tete-shift b{display:block;font-size:13.5px;font-weight:700}
+.mpm-tete-shift span{display:block;font-size:11.5px;font-weight:500;color:var(--mpm-faible)}
+body .mp-revenue-section .mpm button.mpm-tete-shift:hover b,body .mp-revenue-section .mpm button.mpm-model:hover b{color:var(--mpm-acc)}
+.mpm-groupe{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:8px 0 1px}
+.mpm-plat{font-size:10.5px;font-weight:800;letter-spacing:.05em;border-radius:6px;padding:3px 8px;color:#fff}
+.mpm-plat-mym{background:#347dff}.mpm-plat-of{background:#00afe8}
+body .mp-revenue-section .mpm button.mpm-tout{background:transparent!important;border:0!important;border-bottom:1px dashed var(--mpm-faible)!important;border-radius:0!important;padding:0!important;font-size:11.5px!important;font-weight:600!important;color:var(--mpm-faible)!important}
+body .mp-revenue-section .mpm button.mpm-tout.mpm-on{color:var(--mpm-acc)!important;border-bottom-color:var(--mpm-acc)!important}
+body .mp-revenue-section .mpm button.mpm-model{display:flex;align-items:center;gap:9px;background:transparent!important;border:0!important;padding:0!important;font-size:13px!important;font-weight:600!important;min-width:0}
+.mpm-model b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+body .mp-revenue-section .mpm button.mpm-case{position:relative;display:block;min-height:54px;background:var(--mpm-case)!important;border:1px solid var(--mpm-bord)!important;border-radius:10px!important;padding:9px 12px!important;transition:border-color .12s,background .12s}
+body .mp-revenue-section .mpm button.mpm-case:hover{border-color:var(--mpm-acc)!important}
+.mpm-case b{display:block;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85}
+.mpm-case span{display:block;margin-top:3px;font-size:11.5px;font-weight:500;color:var(--mpm-faible);font-variant-numeric:tabular-nums}
+body .mp-revenue-section .mpm button.mpm-case.mpm-on{background:var(--mpm-acc-voile)!important;border-color:var(--mpm-acc)!important}
+.mpm-case.mpm-on b{opacity:1}
+.mpm-case.mpm-on span{color:var(--mpm-acc);font-weight:700}
+.mpm-case u{position:absolute;top:8px;right:10px;width:18px;height:18px;border-radius:50%;background:var(--mpm-acc);color:var(--mpm-sur-acc);font-size:11px;font-weight:900;text-decoration:none;display:flex;align-items:center;justify-content:center}
+.mpm-case em{position:absolute;right:9px;bottom:8px;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:normal;font-size:10px;font-weight:700;color:var(--mpm-ambre);background:rgba(245,158,11,.12);border-radius:999px;padding:2px 7px}
+
+/* le perimetre d'un mini-boss */
+.mpm-perimetre .mpm-portee-choix{margin-bottom:14px}
+.mpm-models{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px}
+body .mp-revenue-section .mpm button.mpm-model-choix{position:relative;display:flex;align-items:center;gap:10px;text-align:left;background:var(--mpm-case)!important;border:1px solid var(--mpm-bord)!important;border-radius:10px!important;padding:9px 34px 9px 11px!important;font:inherit;color:var(--mpm-texte)!important;box-shadow:none!important;min-height:0;width:auto;cursor:pointer}
+body .mp-revenue-section .mpm button.mpm-model-choix:disabled{cursor:default;opacity:1}
+body .mp-revenue-section .mpm button.mpm-model-choix.mpm-on{background:var(--mpm-acc-voile)!important;border-color:var(--mpm-acc)!important}
+.mpm-model-choix span:not(.mpm-rond){min-width:0}
+.mpm-model-choix b{display:block;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mpm-model-choix small{margin-top:1px;font-variant-numeric:tabular-nums}
+.mpm-model-choix u{position:absolute;top:50%;right:10px;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;background:var(--mpm-acc);color:var(--mpm-sur-acc);font-size:11px;font-weight:900;text-decoration:none;display:flex;align-items:center;justify-content:center}
+
+/* le panneau de reglage */
+.mpm-reglages{flex:none;width:280px;background:var(--mpm-carte);border:1px solid var(--mpm-bord);border-radius:14px;padding:18px}
+.mpm-champ{display:block;margin:0 0 12px}
+.mpm-champ>small{margin:0 0 5px;font-weight:600}
+body .mp-revenue-section .mpm .mpm-reglages input[type=text],body .mp-revenue-section .mpm .mpm-reglages select{display:block;width:100%!important;background:var(--mpm-champ)!important;color:var(--mpm-texte)!important;border:1px solid var(--mpm-bord)!important;border-radius:8px!important;padding:8px 10px!important;font:inherit;font-size:13px!important;font-weight:500;box-shadow:none!important;height:auto;margin:0}
+body .mp-revenue-section .mpm .mpm-reglages input[type=text]:focus,body .mp-revenue-section .mpm .mpm-reglages select:focus{outline:none;border-color:var(--mpm-acc)!important;box-shadow:0 0 0 3px rgba(249,115,65,.2)!important}
+.mpm-pct-grand{min-width:0;width:110px;padding:0 10px 0 0;border-color:var(--mpm-acc);box-shadow:0 0 0 3px rgba(249,115,65,.2)}
+body .mp-revenue-section .mpm .mpm-reglages .mpm-pct-grand input[type=text]{border:0!important;background:transparent!important;text-align:right;font-size:20px!important;font-weight:800;padding:7px 4px 7px 10px!important;box-shadow:none!important}
+.mpm-pct-grand.mpm-faux{border-color:var(--mpm-rouge);box-shadow:0 0 0 3px rgba(248,113,113,.2)}
+.mpm-chiffres small{margin:0 0 4px;font-weight:600}
+.mpm-gros{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:12px;font-variant-numeric:tabular-nums}
+.mpm-reglages hr{border:0;border-top:1px solid var(--mpm-bord);margin:16px 0 14px}
+.mpm-deux{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mpm-etat{margin-top:10px;font-size:12px;font-weight:600;color:var(--mpm-rouge);line-height:1.4}
+.mpm-bas{display:flex;justify-content:space-between;gap:10px;margin-top:12px}
+body .mp-revenue-section .mpm button.mpm-lien{background:transparent!important;border:0!important;padding:2px 0!important;font:inherit;font-size:12px!important;font-weight:600!important;color:var(--mpm-faible)!important;cursor:pointer;box-shadow:none!important;min-height:0;width:auto}
+body .mp-revenue-section .mpm button.mpm-lien:hover{color:var(--mpm-texte)!important}
+body .mp-revenue-section .mpm button.mpm-lien.mpm-lien-rouge:hover{color:var(--mpm-rouge)!important}
+
+@media(max-width:1180px){
+ .mpm-detail{flex-direction:column}
+ .mpm-reglages{width:100%}
+}
+@media(max-width:900px){
+ .mpm-ligne{grid-template-columns:28px minmax(0,1fr) 84px 96px 44px;gap:6px 10px}
+ .mpm-ligne>span:nth-child(3),.mpm-ligne>span:nth-child(4),.mpm-ligne>span:nth-child(8){display:none}
+ .mpm-carre{grid-template-columns:minmax(92px,120px) repeat(4,minmax(0,1fr));gap:5px}
+ body .mp-revenue-section .mpm button.mpm-case{padding:7px 6px!important;min-height:48px}
+ .mpm-case b{font-size:12.5px}.mpm-case span,.mpm-case em{display:none}
+ .mpm-case u{top:5px;right:5px;width:14px;height:14px;font-size:9px}
+ .mpm-tete-shift b{font-size:11.5px}
+}
