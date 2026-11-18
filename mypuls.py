@@ -2023,6 +2023,14 @@ def tranches_api(start: str, end: str) -> list:
     return tranches
 
 
+def _jour_fr(iso) -> str:
+    """« 05/12/2023 » : la date telle qu'on la lit, pour un message a l'ecran."""
+    try:
+        return date.fromisoformat(str(iso)[:10]).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        return str(iso)
+
+
 def api_team_money(start: str, end: str, creator: str = "all",
                    chatter: str = "all", type_vente: str = "all") -> dict:
     """Toutes les ventes attribuees de la periode, quelle que soit sa longueur.
@@ -2040,10 +2048,13 @@ def api_team_money(start: str, end: str, creator: str = "all",
     if len(tranches) == 1:
         return _api_team_money_tranche(start, end, creator, chatter, type_vente)
     ventes, pages, tronque, total, vides, arret, lues = [], 0, False, 0, 0, "", 0
+    fin_du_vide = ""
     for debut, fin in tranches:
         if lues >= MAX_TRANCHES:
-            arret = "lecture limitée à %d tranches de %d jours : rien avant le %s" % (
-                MAX_TRANCHES, JOURS_PAR_TRANCHE, fin)
+            # `fin` est la premiere tranche NON lue : tout ce qui est a cette
+            # date ou avant manque.
+            arret = "lecture limitée à %d tranches de %d jours : les ventes du %s et d’avant ne sont pas lues" % (
+                MAX_TRANCHES, JOURS_PAR_TRANCHE, _jour_fr(fin))
             tronque = True
             break
         r = _api_team_money_tranche(debut, fin, creator, chatter, type_vente)
@@ -2061,10 +2072,20 @@ def api_team_money(start: str, end: str, creator: str = "all",
             total += int(r.get("total_annonce") or 0)
         except (TypeError, ValueError):
             pass
-        vides = 0 if lot else vides + 1
+        if lot:
+            vides = 0
+        else:
+            vides += 1
+            if vides == 1:
+                fin_du_vide = fin
         if vides >= TRANCHES_VIDES_AVANT_ARRET and fin != tranches[-1][1]:
-            arret = "aucune vente sur %d jours avant le %s : lecture arrêtée là" % (
-                JOURS_PAR_TRANCHE * TRANCHES_VIDES_AVANT_ARRET, debut)
+            # Les deux dates bornent le trou CONSTATE. La premiere version
+            # disait « aucune vente sur 180 jours avant le <debut> » : lu a
+            # l'ecran le 18/11, cela designait les six mois d'AVANT cette
+            # date, qu'on n'a justement pas lus.
+            arret = "aucune vente du %s au %s (%d jours) : lecture arrêtée là" % (
+                _jour_fr(debut), _jour_fr(fin_du_vide),
+                JOURS_PAR_TRANCHE * TRANCHES_VIDES_AVANT_ARRET)
             break
     return {"ok": True, "ventes": ventes, "pages": pages, "total_annonce": total,
             "tronque": tronque, "tranches": lues, "arret": arret}

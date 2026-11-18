@@ -317,6 +317,11 @@ def test_longues_periodes():
               r.get("ok") is True and len(r["ventes"]) >= 2, (r.get("ok"), r.get("error")))
         check("... et la lecture s'arrete apres six mois sans vente, au lieu de remonter 230 tranches jusqu'en 1970",
               len(appels) <= 6 and "lecture arrêtée" in (r.get("arret") or ""), (len(appels), r.get("arret")))
+        # Le 18/11, l'ecran disait « aucune vente sur 180 jours avant le
+        # 2023-12-05 » alors que le trou constate COMMENCAIT a cette date.
+        check("... et la phrase borne le trou constate par ses deux dates, a la francaise",
+              (r.get("arret") or "").startswith("aucune vente du 24/11/2025 au 22/05/2026 (180 jours)"),
+              r.get("arret"))
         appels.clear()
         r = mypuls.api_team_money("2026-11-01", "2026-11-15")
         check("une periode courte : un seul appel, comme avant", len(appels) == 1 and r.get("ok"), appels)
