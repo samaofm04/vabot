@@ -744,6 +744,25 @@ def test_site(tmp):
                   crypto.get(rc.SANS_CHATTEUR, {}).get("commission_pct") == 0.0
                   and crypto.get(rc.SANS_CHATTEUR, {}).get("non_attribue") is True, crypto.get(rc.SANS_CHATTEUR))
             check("le script de la liste est celui du look TRUST", "mp-trust" in page and "mpRevenueBase" in page)
+            # Le cas du 18/11/2026 : « Reset cookies » clique, plus aucun cookie.
+            sauve_cfg = (mypuls.is_configured, mypuls.api_configured)
+            try:
+                mypuls.is_configured = lambda: False
+                mypuls.api_configured = lambda: True
+                w._render_mypuls_section_html.invalidate()
+                sans = admin.get("/?tab=revenus&mp_start=2026-11-01&mp_end=2026-11-15").get_data(as_text=True)
+                check("sans aucun cookie, mais avec des cles d'API : la page s'affiche quand meme",
+                      "id='mp-tab-chatters'" in sans and "Cookies non configurés" not in sans)
+                check("... et elle dit ce qui manque (les photos des models), sans rien bloquer",
+                      "Aucun cookie MyPuls" in sans)
+                mypuls.api_configured = lambda: False
+                w._render_mypuls_section_html.invalidate()
+                rien = admin.get("/?tab=revenus&mp_start=2026-11-01&mp_end=2026-11-15").get_data(as_text=True)
+                check("ni cookie ni cle : la, le formulaire des cookies reste propose",
+                      "Cookies non configurés" in rien and "id='mp-tab-chatters'" not in rien)
+            finally:
+                mypuls.is_configured, mypuls.api_configured = sauve_cfg
+                w._render_mypuls_section_html.invalidate()
             check("sans revenu saisi a la main : ni les quatre cases a zero ni le formulaire « Nouveau revenu »",
                   "Nouveau revenu" not in page and "Chatteurs uniques" not in page and "Aucun revenu enregistré" not in page)
             check("le bouton « Réduire » n'est plus la (la ligne entiere ouvre et referme)", "mp-t-reduire" not in page)

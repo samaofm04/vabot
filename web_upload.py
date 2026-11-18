@@ -35443,7 +35443,8 @@ def _render_home_dashboard_html() -> str:
     mp_data = {"totals": {}, "chatters": [], "transactions": [], "chart": {}}
     try:
         import mypuls
-        mp_configured = mypuls.is_configured()
+        # une cle d'API OU un cookie : voir _render_mypuls_section_html
+        mp_configured = mypuls.is_configured() or mypuls.api_configured()
         if mp_configured:
             res = mypuls.fetch_team_stats(start.isoformat(), end.isoformat(), use_cache=True)
             if res.get("ok"):
@@ -36146,7 +36147,12 @@ def _render_mypuls_section_html() -> str:
     from flask import request as flask_request
     import datetime as _dt
 
-    configured = mypuls.is_configured()
+    # LES VENTES VIENNENT DES CLES D'API ; le cookie ne sert plus qu'aux
+    # photos des models et au repli. Cette page exigeait pourtant un cookie :
+    # le 18/11/2026, un clic sur « Reset cookies » (propose sur l'ecran
+    # d'erreur) l'a remplacee tout entiere par le formulaire des cookies,
+    # alors que les 11 cles repondaient. Une cle OU un cookie suffit.
+    configured = mypuls.is_configured() or mypuls.api_configured()
 
     # CSS commun
     css = """
@@ -36258,10 +36264,15 @@ body.light .mypuls-bar{background:#e5e7eb}
             "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#ef4444' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"
             "Sync MyPuls — Erreur"
             "</h3>"
-            f"<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;margin-bottom:14px'>✕ {res.get('error', '?')}</div>"
-            "<form method='POST' action='/mypuls/clear_cookies' style='margin:0'>"
-            "<button type='submit' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer'>Reset cookies</button>"
-            "</form>"
+            f"<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;margin-bottom:14px'>✕ {html_escape(str(res.get('error', '?')))}</div>"
+            # PAS de bouton « Reset cookies » ici. Il etait la seule action
+            # proposee sur cet ecran, pour une panne ou les cookies ne sont
+            # presque jamais en cause : cliquer effacait le cookie (photos des
+            # models, repli) sans rien reparer. La panne est le plus souvent
+            # passagere : on propose de recharger.
+            "<p style='margin:0 0 12px;font-size:12.5px;color:#aaa;line-height:1.5'>MyPuls ne répond pas à l’instant. "
+            "C’est le plus souvent passager : recharge la page dans une minute. Tes réglages et tes cookies ne sont pas en cause.</p>"
+            "<a href='javascript:location.reload()' style='display:inline-block;border:1px solid #2a2a2a;color:#eee;padding:7px 14px;border-radius:6px;font-size:12px;text-decoration:none'>↻ Recharger</a>"
             "</div>"
         )
         return css + err_html
@@ -37323,7 +37334,12 @@ document.addEventListener('DOMContentLoaded', function(){
 
     # Indicateur cookies auto-refresh
     age_h = mypuls.last_refresh_age_hours()
-    if age_h is None:
+    if not mypuls.is_configured():
+        # Les ventes arrivent par l'API ; sans cookie il ne manque que les
+        # photos des models. On le dit, au lieu d'annoncer des cookies frais.
+        refresh_status = ("<span style='color:#fbbf24'>● Aucun cookie MyPuls : les photos des models ne peuvent pas "
+                          "être lues. À remettre dans Réglages › Cookies MyPuls ou avec l’extension « Cookies → youl4b ».</span>")
+    elif age_h is None:
         refresh_status = "<span style='color:#888'>Cookies frais (pas encore rafraîchis)</span>"
     elif age_h < 1:
         refresh_status = f"<span style='color:#22c55e'>● Cookies auto-renouvelés il y a {int(age_h*60)} min</span>"
