@@ -22,9 +22,15 @@ LES REGLES, DANS L'ORDRE OU ELLES COMPTENT
      sans pseudo Discord n'est jamais deplacee : rien ne dit de qui elle parle.
      Seule exception, sure : son nom est EXACTEMENT le surnom d'un membre range
      — on y pose alors son pseudo au lieu de creer un doublon.
-  3. IL FAUT LES DEUX ROLES. Un shift sans model (ou l'inverse) ne range rien :
-     le chatteur est compte « incomplet » et l'ecran le nomme, pour que le
-     manager voie quoi finir.
+  3. IL FAUT UN SHIFT ET UNE PLATEFORME. La plateforme se lit sur les roles que
+     le serveur avait deja, « CHETTER MYM » et « CHATTER OF » (le proprietaire,
+     19/11/2026 : « si les mecs ont le role MYM, c'est qu'ils font partie de
+     MYM ; s'ils ont le role OF, ils font partie de OF »), ou a defaut sur un
+     role de model (« Amelia MYM » dit MYM). Le role de MODEL ne sert qu'a
+     remplir la case « model » : sans lui la ligne est rangee quand meme, et
+     sa model reste celle qu'on avait mise a la main.
+     Un shift sans plateforme (ou l'inverse) ne range rien : le chatteur est
+     compte « incomplet » et l'ecran le nomme, pour que le manager voie quoi finir.
   4. UNE LIGNE JAMAIS RANGEE PAR UN ROLE N'EST PAS ACCUSEE. Le jour de la mise
      en service, personne n'a de role : marquer toutes les lignes « sans role »
      aurait couvert le planning d'alertes pour rien.
@@ -47,6 +53,14 @@ MODELS = {
 }
 #: Ce qui suit le nom de la model dans le nom du role : « Amelia MYM », « Lola OF ».
 SUFFIXE = {"mym": "MYM", "of": "OF"}
+#: Les roles de PLATEFORME, ceux que le serveur avait avant nous (jamais crees
+#: ni modifies ici). Compares sans casse ni accent ; « chetter » est bien
+#: l'orthographe du serveur, « chatter » est acceptee au cas ou il serait
+#: renomme un jour.
+ROLES_PLATEFORME = {
+    "mym": ("chetter mym", "chatter mym"),
+    "of": ("chatter of", "chetter of", "chatter onlyfans", "chetter onlyfans"),
+}
 ETAT_OK, ETAT_PERDU = "ok", "perdu"
 
 
@@ -80,12 +94,18 @@ def manquants(roles_serveur) -> List[str]:
 def lire(membres, roles_serveur) -> Dict[str, Dict[str, Any]]:
     """Ce que les roles disent de chaque membre.
 
-    {pseudo: {"affiche", "shifts": [creneaux], "mym": [models], "of": [models]}}
-    pour les membres qui portent AU MOINS UN de nos roles. Les listes suivent
-    l'ordre de reference (CRENEAUX, MODELS), pas celui de Discord.
+    {pseudo: {"affiche", "shifts": [creneaux], "plateformes": ["mym", "of"],
+              "mym": [models], "of": [models]}}
+    pour les membres qui portent AU MOINS UN role qui nous parle (shift,
+    model, ou plateforme). `plateformes` : celles que disent ses roles
+    CHETTER MYM / CHATTER OF, plus celles de ses roles de model. Les listes
+    suivent l'ordre de reference (CRENEAUX, MODELS), pas celui de Discord.
     """
     par_id = {}
     attendus = {_norme(r["nom"]): r for r in roles_attendus()}
+    for plateforme, noms in ROLES_PLATEFORME.items():
+        for n in noms:
+            attendus[n] = {"genre": "plateforme", "plateforme": plateforme}
     for r in (roles_serveur or []):
         a = attendus.get(_norme((r or {}).get("name")))
         if a and r.get("id") is not None:
@@ -95,19 +115,23 @@ def lire(membres, roles_serveur) -> Dict[str, Dict[str, Any]]:
         pseudo = chatting._norm_discord((m or {}).get("username"))
         if not pseudo:
             continue
-        shifts, models = set(), {"mym": set(), "of": set()}
+        shifts, models, plateformes = set(), {"mym": set(), "of": set()}, set()
         for rid in (m.get("roles") or []):
             a = par_id.get(str(rid))
             if not a:
                 continue
             if a["genre"] == "shift":
                 shifts.add(a["creneau"])
+            elif a["genre"] == "plateforme":
+                plateformes.add(a["plateforme"])
             else:
                 models[a["plateforme"]].add(a["model"])
-        if not shifts and not models["mym"] and not models["of"]:
+                plateformes.add(a["plateforme"])        # « Amelia MYM » dit aussi MYM
+        if not shifts and not plateformes:
             continue
         lus[pseudo] = {"affiche": str(m.get("affiche") or m.get("username") or ""),
                        "shifts": [c for c in chatting.CRENEAUX if c in shifts],
+                       "plateformes": [p for p in ("mym", "of") if p in plateformes],
                        "mym": [x for x in MODELS["mym"] if x in models["mym"]],
                        "of": [x for x in MODELS["of"] if x in models["of"]]}
     return lus
@@ -137,26 +161,27 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
     SUR PLACE) d'apres ce que les roles disent. Rend le rapport.
 
     {"ranges": n, "crees": [...], "deplaces": [...], "models_changes": [...],
-     "rattaches": [...], "perdus": [...], "incomplets": [...], "sans_planning": [...]}
+     "rattaches": [...], "perdus": [...], "incomplets": [...], "sans_planning": [...],
+     "sans_model": [...]}
 
     Chaque element nomme le chatteur : le rapport s'affiche, il ne se devine pas.
     Rejouee sans changement de role, elle ne modifie rien.
     """
     rapport = {"ranges": 0, "crees": [], "deplaces": [], "models_changes": [], "rattaches": [],
-               "perdus": [], "incomplets": [], "sans_planning": []}
+               "perdus": [], "incomplets": [], "sans_planning": [], "sans_model": []}
     edts = {}
     for e in data.get("edts") or []:
         p = _plateforme_edt(e)
         if p and p not in edts:
             edts[p] = e
     for pseudo, info in sorted(lus.items()):
-        if not info["shifts"] or not (info["mym"] or info["of"]):
-            # Regle 3 : il manque le shift ou la model, on dit lequel.
+        if not info["shifts"] or not info["plateformes"]:
+            # Regle 3 : il manque le shift ou la plateforme, on dit lequel.
             rapport["incomplets"].append({"pseudo": pseudo, "affiche": info["affiche"],
-                                          "manque": "shift" if not info["shifts"] else "model"})
+                                          "manque": "shift" if not info["shifts"] else "plateforme"})
     for plateforme in ("mym", "of"):
         edt = edts.get(plateforme)
-        concernes = {p: i for p, i in lus.items() if i["shifts"] and i[plateforme]}
+        concernes = {p: i for p, i in lus.items() if i["shifts"] and plateforme in i["plateformes"]}
         if edt is None:
             for pseudo, info in sorted(concernes.items()):
                 rapport["sans_planning"].append({"pseudo": pseudo, "affiche": info["affiche"],
@@ -164,7 +189,12 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
             continue
         lignes = edt.setdefault("rows", [])
         for pseudo, info in sorted(concernes.items()):
-            modele = _modele(info[plateforme])
+            # Pas de role de model sur cette plateforme : on ne touche PAS a la
+            # case « model » (celle saisie a la main reste), et on le dit.
+            modele = _modele(info[plateforme]) if info[plateforme] else None
+            if modele is None:
+                rapport["sans_model"].append({"pseudo": pseudo, "affiche": info["affiche"],
+                                              "planning": edt.get("name")})
             a_lui = [r for r in lignes if chatting._norm_discord(r.get("discord_username")) == pseudo]
             if not a_lui:
                 # Regle 2, l'exception : une ligne sans Discord qui porte exactement son surnom.
@@ -193,7 +223,7 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
                     lignes.append(ligne)
                     rapport["crees"].append({"pseudo": pseudo, "affiche": info["affiche"],
                                              "planning": edt.get("name"), "creneau": creneau})
-                if (ligne.get("modele") or "") != modele:
+                if modele is not None and (ligne.get("modele") or "") != modele:
                     if ligne.get("roles_etat"):         # une ligne neuve n'est pas un « changement »
                         rapport["models_changes"].append({"pseudo": pseudo, "affiche": info["affiche"],
                                                           "planning": edt.get("name"),

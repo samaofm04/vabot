@@ -36377,12 +36377,17 @@ def _barre_roles_planning_html() -> str:
             return ", ".join(html_escape(str(x.get("affiche") or x.get("pseudo") or "?"))
                              + (f" ({html_escape(str(suite(x)))})" if suite else "") for x in liste[:12]) \
                    + (f" et {len(liste) - 12} autres" if len(liste) > 12 else "")
+        # La plateforme se lit sur CHETTER MYM / CHATTER OF (ou un role de
+        # model) ; il faut en plus un role de shift pour etre range.
         sans_shift = [x for x in (rapport.get("incomplets") or []) if x.get("manque") == "shift"]
-        sans_model = [x for x in (rapport.get("incomplets") or []) if x.get("manque") == "model"]
-        if sans_model:
-            details.append("Ont un rôle de shift mais pas de model : " + _noms(sans_model))
+        sans_plateforme = [x for x in (rapport.get("incomplets") or []) if x.get("manque") != "shift"]
         if sans_shift:
-            details.append("Ont un rôle de model mais pas de shift : " + _noms(sans_shift))
+            details.append(f"{len(sans_shift)} ont le rôle MYM ou OF mais pas de rôle de shift : " + _noms(sans_shift))
+        if sans_plateforme:
+            details.append("Ont un rôle de shift mais ni MYM ni OF : " + _noms(sans_plateforme))
+        if rapport.get("sans_model"):
+            details.append("Rangés sans rôle de model (leur case « model » reste comme elle est) : "
+                           + _noms(rapport["sans_model"]))
         if rapport.get("perdus"):
             details.append("Rôle retiré, ligne gardée : " + _noms(rapport["perdus"], lambda x: x.get("creneau") or "?"))
         if rapport.get("sans_planning"):

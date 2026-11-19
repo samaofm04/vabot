@@ -760,10 +760,13 @@ def test_planning_roles():
     check("... chaque model d'un role existe dans la liste du planning (sinon sa case ne se choisirait pas)",
           set(pr.MODELS["mym"]) <= set(chatting.MODELES_MYM) and set(pr.MODELS["of"]) <= set(chatting.MODELES_OF),
           (pr.MODELS, chatting.MODELES_MYM, chatting.MODELES_OF))
-    roles = [{"id": str(100 + i), "name": n} for i, n in enumerate(noms)] + [{"id": "1", "name": "CHETTER MYM"}]
+    roles = ([{"id": str(100 + i), "name": n} for i, n in enumerate(noms)]
+             + [{"id": "1", "name": "TEST"}, {"id": "2", "name": "CHETTER MYM"}, {"id": "3", "name": "CHATTER OF"}])
     ident = {r["name"]: r["id"] for r in roles}
     check("roles manquants : les 16 sur un serveur neuf, aucun quand ils y sont",
-          len(pr.manquants([{"id": "1", "name": "CHETTER MYM"}])) == 16 and pr.manquants(roles) == [])
+          len(pr.manquants([{"id": "2", "name": "CHETTER MYM"}])) == 16 and pr.manquants(roles) == [])
+    check("... les roles de plateforme deja la (CHETTER MYM, CHATTER OF) ne sont jamais a creer",
+          not any("CHETTER" in n.upper() or "CHATTER" in n.upper() for n in noms))
     check("... un role recree a la main sans accent ni majuscule est reconnu (« chloe mym », « 02H-08H »)",
           pr.manquants([{"id": "9", "name": "chloe  mym"}, {"id": "8", "name": "02H-08H"}])
           == [n for n in noms if n not in ("Chloé MYM", "02h-08h")])
@@ -787,10 +790,18 @@ def test_planning_roles():
                membre("demi", "Demi", "02h-08h"),
                membre("autre", "Autre")]
     lus = pr.lire(membres, roles)
-    check("lecture : seuls les membres qui portent un de nos roles, dans l'ordre du planning",
+    check("lecture : seuls les membres qui portent un role qui nous parle, dans l'ordre du planning",
           set(lus) == {"skurt01577", "moyle0502", "nouveau", "fessal_dc", "demi"}
-          and lus["nouveau"] == {"affiche": "Nouveau", "shifts": ["08h-14h", "14h-20h"], "mym": ["Chloé"], "of": ["Amelia"]},
+          and lus["nouveau"] == {"affiche": "Nouveau", "shifts": ["08h-14h", "14h-20h"], "plateformes": ["mym", "of"],
+                                 "mym": ["Chloé"], "of": ["Amelia"]},
           lus.get("nouveau"))
+    # « Si les mecs ont le role MYM, ils font partie de MYM ; le role OF, de OF » (19/11/2026)
+    par_plateforme = pr.lire([membre("a", "A", "CHETTER MYM"), membre("b", "B", "CHATTER OF", "02h-08h"),
+                              membre("c", "C", "CHETTER MYM", "CHATTER OF", "Julia OF")], roles)
+    check("la plateforme se lit sur les roles CHETTER MYM et CHATTER OF que le serveur avait deja",
+          par_plateforme["a"]["plateformes"] == ["mym"] and par_plateforme["b"]["plateformes"] == ["of"]
+          and par_plateforme["c"]["plateformes"] == ["mym", "of"] and par_plateforme["c"]["of"] == ["Julia"],
+          par_plateforme)
     d = planning()
     r = pr.ranger(d, lus)
     mym, of, mgr = d["edts"]
@@ -811,8 +822,21 @@ def test_planning_roles():
           and [x["affiche"] for x in r["rattaches"]] == ["Fessal"], r["rattaches"])
     check("une ligne sans Discord au nom inconnu n'est jamais touchee",
           [x for x in mym["rows"] if x["pseudo"] == "Sans Discord"][0].get("roles_etat") is None)
-    check("un shift sans model : rien n'est range, et il est nomme « incomplet »",
-          r["incomplets"] == [{"pseudo": "demi", "affiche": "Demi", "manque": "model"}], r["incomplets"])
+    check("un shift sans plateforme (ni MYM ni OF) : rien n'est range, et il est nomme « incomplet »",
+          r["incomplets"] == [{"pseudo": "demi", "affiche": "Demi", "manque": "plateforme"}], r["incomplets"])
+    d5 = planning()
+    m5 = [membre("skurt01577", "Jerry", "CHETTER MYM", "14h-20h"),          # MYM + shift, pas de role de model
+          membre("of_seul", "Of Seul", "CHATTER OF", "20h-02h"),
+          membre("sans_shift", "Sans Shift", "CHETTER MYM")]
+    r5 = pr.ranger(d5, pr.lire(m5, roles))
+    jerry = [x for x in d5["edts"][0]["rows"] if x["discord_username"] == "skurt01577"][0]
+    check("role MYM + role de shift, sans role de model : range dans le planning MYM, et sa model saisie a la main RESTE",
+          jerry["creneau"] == "14h-20h" and jerry["modele"] == "Emma" and jerry["roles_etat"] == "ok"
+          and [x["affiche"] for x in r5["sans_model"]] == ["Jerry", "Of Seul"], (jerry["creneau"], jerry["modele"], r5["sans_model"]))
+    check("role OF + role de shift : une ligne dans le planning OnlyFans, model laissee vide",
+          [(x["discord_username"], x["creneau"], x["modele"]) for x in d5["edts"][1]["rows"]] == [("of_seul", "20h-02h", "")])
+    check("role MYM sans role de shift : pas range, nomme « il manque le shift »",
+          r5["incomplets"] == [{"pseudo": "sans_shift", "affiche": "Sans Shift", "manque": "shift"}], r5["incomplets"])
     check("le planning des managers n'est jamais touche", len(mgr["rows"]) == 1 and mgr["rows"][0].get("roles_etat") is None)
     check("le rapport compte 7 lignes rangees", r["ranges"] == 7, r["ranges"])
     avant = copy.deepcopy(d)
@@ -1175,12 +1199,29 @@ def test_site(tmp):
                           "id='chat-roles'" in plan2 and "<b>2</b> lignes rangées" in plan2 and "rôles à créer" not in plan2
                           and "Ranger maintenant" in plan2 and "rangé d&#x27;après ses rôles Discord" in plan2,
                           plan2[plan2.find("id='chat-roles'"):][:300] if "id='chat-roles'" in plan2 else "barre absente")
+                    # un chatteur qui n'a que le role MYM du serveur et un shift, et un autre sans shift
+                    serveur_r["roles"].append({"id": "900", "name": "CHETTER MYM", "permissions": "0"})
+                    membres_r.append({"id": "44", "username": "mym_seul", "affiche": "Mym Seul", "pseudos": ["mym_seul"],
+                                      "avatar_url": "", "roles": ["900", ident_r["02h-08h"]]})
+                    membres_r.append({"id": "45", "username": "pas_de_shift", "affiche": "Pas De Shift", "pseudos": ["pas_de_shift"],
+                                      "avatar_url": "", "roles": ["900"]})
+                    admin.post("/chatting/roles/ranger")
+                    lignes_p = {x["discord_username"]: x for x in chatting.get_edt(edt["id"])["rows"] if x.get("discord_username")}
+                    plan_p = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    check("role CHETTER MYM + shift, sans role de model : range dans le planning MYM ; sans shift : nomme dans la barre",
+                          lignes_p["mym_seul"]["creneau"] == "02h-08h" and "pas_de_shift" not in lignes_p
+                          and "1 ont le rôle MYM ou OF mais pas de rôle de shift : Pas De Shift" in plan_p
+                          and "Rangés sans rôle de model" in plan_p and "Mym Seul" in plan_p,
+                          plan_p[plan_p.find("id='chat-roles'"):][:500] if "id='chat-roles'" in plan_p else "barre absente")
+                    membres_r[:] = membres_r[:2]
                     membres_r[0]["roles"] = []
                     admin.post("/chatting/roles/ranger")
                     plan3 = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
-                    check("role retire : la ligne reste et porte « rôle retiré », la barre nomme le chatteur",
-                          len(chatting.get_edt(edt["id"])["rows"]) == 4 and "chat-role-perdu" in plan3
-                          and "Rôle retiré, ligne gardée : Baadooo (20h-02h)" in plan3)
+                    check("role retire : les lignes restent et portent « rôle retiré », la barre nomme les chatteurs",
+                          len(chatting.get_edt(edt["id"])["rows"]) == 5 and plan3.count("chat-role-perdu") == 2
+                          and "Rôle retiré, ligne gardée : " in plan3 and "Baadooo (20h-02h)" in plan3
+                          and "Mym Seul (02h-08h)" in plan3,
+                          plan3[plan3.find("id='chat-roles'"):][:500])
                     vue_c = chatteur.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
                     check("un chatteur voit le planning mais pas la barre des roles ni ses boutons",
                           "data-field='discord_username'" in vue_c and "id='chat-roles'" not in vue_c)
