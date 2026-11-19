@@ -745,6 +745,96 @@ def test_paie_nette():
           maz[i_base] == 22.0 and maz[i_pay] == 2.2, maz[:12])
 
 
+def test_planning_roles():
+    print("\n--- planning : les roles Discord par shift et par model, et le rangement ---")
+    import copy
+    import chatting
+    import planning_roles as pr
+    attendus = pr.roles_attendus()
+    noms = [r["nom"] for r in attendus]
+    check("16 roles : les 4 shifts du planning, 9 models MYM, 3 models OnlyFans",
+          len(noms) == 16 and noms[:4] == chatting.CRENEAUX and "Amelia MYM" in noms and "Alicia MYM" in noms
+          and "Lola OF" in noms, noms)
+    check("... sans Lia (marche US), et sans doublon",
+          not any(n.split()[0].lower() == "lia" for n in noms) and len(set(noms)) == 16)
+    check("... chaque model d'un role existe dans la liste du planning (sinon sa case ne se choisirait pas)",
+          set(pr.MODELS["mym"]) <= set(chatting.MODELES_MYM) and set(pr.MODELS["of"]) <= set(chatting.MODELES_OF),
+          (pr.MODELS, chatting.MODELES_MYM, chatting.MODELES_OF))
+    roles = [{"id": str(100 + i), "name": n} for i, n in enumerate(noms)] + [{"id": "1", "name": "CHETTER MYM"}]
+    ident = {r["name"]: r["id"] for r in roles}
+    check("roles manquants : les 16 sur un serveur neuf, aucun quand ils y sont",
+          len(pr.manquants([{"id": "1", "name": "CHETTER MYM"}])) == 16 and pr.manquants(roles) == [])
+    check("... un role recree a la main sans accent ni majuscule est reconnu (« chloe mym », « 02H-08H »)",
+          pr.manquants([{"id": "9", "name": "chloe  mym"}, {"id": "8", "name": "02H-08H"}])
+          == [n for n in noms if n not in ("Chloé MYM", "02h-08h")])
+
+    def planning():
+        mym = {"id": "e1", "name": "Planning MYM", "rows": []}
+        of = {"id": "e2", "name": "Planning OnlyFans", "rows": []}
+        mgr = {"id": "e3", "name": "Planning Managers", "kind": "manager", "rows": [dict(chatting.nouvelle_ligne(""), pseudo="Ghost")]}
+        for creneau, pseudo, dc, modele in (("02h-08h", "Jerry", "skurt01577", "Emma"), ("14h-20h", "Moyle", "moyle0502", "Emma"),
+                                            ("08h-14h", "Fessal", "", "Lola"), ("20h-02h", "Sans Discord", "", "")):
+            mym["rows"].append(dict(chatting.nouvelle_ligne(creneau), pseudo=pseudo, discord_username=dc, modele=modele,
+                                    presence_by_week={"2026-11-16": {"lun": "Retard"}}))
+        return {"edts": [mym, of, mgr]}
+
+    def membre(pseudo, affiche, *roles_m):
+        return {"username": pseudo, "affiche": affiche, "roles": [ident[r] for r in roles_m] + ["1"]}
+    membres = [membre("skurt01577", "Jerry", "02h-08h", "Emma MYM"),
+               membre("moyle0502", "Moyle", "20h-02h", "Lola MYM", "Julia MYM"),
+               membre("nouveau", "Nouveau", "08h-14h", "14h-20h", "Chloé MYM", "Amelia OF"),
+               membre("fessal_dc", "Fessal", "08h-14h", "Lola MYM"),
+               membre("demi", "Demi", "02h-08h"),
+               membre("autre", "Autre")]
+    lus = pr.lire(membres, roles)
+    check("lecture : seuls les membres qui portent un de nos roles, dans l'ordre du planning",
+          set(lus) == {"skurt01577", "moyle0502", "nouveau", "fessal_dc", "demi"}
+          and lus["nouveau"] == {"affiche": "Nouveau", "shifts": ["08h-14h", "14h-20h"], "mym": ["Chloé"], "of": ["Amelia"]},
+          lus.get("nouveau"))
+    d = planning()
+    r = pr.ranger(d, lus)
+    mym, of, mgr = d["edts"]
+    par = {(x["discord_username"], x["creneau"]): x for x in mym["rows"]}
+    check("deja au bon endroit : la ligne ne bouge pas, elle est seulement marquee rangee",
+          par[("skurt01577", "02h-08h")]["modele"] == "Emma" and par[("skurt01577", "02h-08h")]["roles_etat"] == "ok")
+    check("il change de shift : SA ligne suit, avec ses presences, et prend ses models (« Julia+Lola »)",
+          ("moyle0502", "14h-20h") not in par and par[("moyle0502", "20h-02h")]["modele"] == "Julia+Lola"
+          and par[("moyle0502", "20h-02h")]["presence_by_week"] == {"2026-11-16": {"lun": "Retard"}}
+          and [x["affiche"] for x in r["deplaces"]] == ["Moyle"], r["deplaces"])
+    check("un nouveau, deux shifts, MYM et OnlyFans : une ligne par shift dans chaque planning",
+          [(x["planning"], x["creneau"]) for x in r["crees"]]
+          == [("Planning MYM", "08h-14h"), ("Planning MYM", "14h-20h"),
+              ("Planning OnlyFans", "08h-14h"), ("Planning OnlyFans", "14h-20h")]
+          and {x["modele"] for x in of["rows"]} == {"Amelia"} and of["rows"][0]["pseudo"] == "Nouveau", r["crees"])
+    check("une ligne sans Discord qui porte EXACTEMENT son surnom est rattachee, pas doublee",
+          par[("fessal_dc", "08h-14h")]["pseudo"] == "Fessal" and len([x for x in mym["rows"] if x["pseudo"] == "Fessal"]) == 1
+          and [x["affiche"] for x in r["rattaches"]] == ["Fessal"], r["rattaches"])
+    check("une ligne sans Discord au nom inconnu n'est jamais touchee",
+          [x for x in mym["rows"] if x["pseudo"] == "Sans Discord"][0].get("roles_etat") is None)
+    check("un shift sans model : rien n'est range, et il est nomme « incomplet »",
+          r["incomplets"] == [{"pseudo": "demi", "affiche": "Demi", "manque": "model"}], r["incomplets"])
+    check("le planning des managers n'est jamais touche", len(mgr["rows"]) == 1 and mgr["rows"][0].get("roles_etat") is None)
+    check("le rapport compte 7 lignes rangees", r["ranges"] == 7, r["ranges"])
+    avant = copy.deepcopy(d)
+    r2 = pr.ranger(d, lus)
+    check("rejoue sans changement de role : rien ne bouge",
+          d == avant and not r2["crees"] and not r2["deplaces"] and not r2["rattaches"] and r2["ranges"] == 7)
+    membres[0] = membre("skurt01577", "Jerry")                       # un manager lui retire ses roles
+    nb = len(mym["rows"])
+    r3 = pr.ranger(d, pr.lire(membres, roles))
+    check("ses roles sont retires : la ligne RESTE, avec ses presences, marquee « perdu » et nommee",
+          len(mym["rows"]) == nb and par[("skurt01577", "02h-08h")]["roles_etat"] == "perdu"
+          and par[("skurt01577", "02h-08h")]["presence_by_week"]
+          and [(x["affiche"], x["creneau"]) for x in r3["perdus"]] == [("Jerry", "02h-08h")], r3["perdus"])
+    membres[0] = membre("skurt01577", "Jerry", "02h-08h", "Emma MYM")
+    pr.ranger(d, pr.lire(membres, roles))
+    check("... et rendus : la marque repasse a « rangee »", par[("skurt01577", "02h-08h")]["roles_etat"] == "ok")
+    sans = {"edts": [{"id": "e3", "name": "Planning Managers", "kind": "manager", "rows": []}]}
+    r4 = pr.ranger(sans, lus)
+    check("aucun planning MYM ni OnlyFans : rien n'est cree au hasard, les chatteurs concernes sont nommes",
+          sans["edts"][0]["rows"] == [] and len(r4["sans_planning"]) == 5, r4["sans_planning"])
+
+
 def test_managers(tmp):
     print("\n--- managers et mini-boss : la matrice, la paie, le fichier ---")
     import revenus_managers as rm
@@ -1026,6 +1116,85 @@ def test_site(tmp):
                 check("un onglet qui plante affiche son message ET ecrit la cause au journal (plus jamais en silence)",
                       "Erreur de chargement" in casse and "chatplanning" in tampon.getvalue()
                       and "fonction_disparue" in tampon.getvalue(), tampon.getvalue()[-200:])
+                # ---- les roles Discord du planning : creer, ranger, afficher
+                import planning_roles as pr_site
+                import verif_discord
+                noms_r = [x["nom"] for x in pr_site.roles_attendus()]
+                serveur_r = {"roles": [{"id": "1", "name": "CHETTER MYM", "permissions": "0"}], "droit": False, "postes": []}
+
+                def faux_http(bot, methode, chemin, **kw):
+                    if methode == "POST" and chemin.endswith("/roles"):
+                        if not serveur_r["droit"]:
+                            return 403, {"message": "Missing Permissions"}
+                        serveur_r["postes"].append(kw.get("json"))
+                        serveur_r["roles"].append({"id": str(200 + len(serveur_r["roles"])), "name": kw["json"]["name"],
+                                                   "permissions": "0"})
+                        return 200, serveur_r["roles"][-1]
+                    if methode == "GET" and chemin.endswith("/roles"):
+                        return 200, list(serveur_r["roles"])
+                    return 404, {}
+                sauve_r = (w._chatting_par_rest, w._membres_chatting_par_rest, verif_discord._http)
+                w._chatting_par_rest = lambda: {"bot": {"id": "siri", "nom": "Siri"}, "gid": "777", "nom": "YouLab AGENCY"}
+                membres_r = []
+                w._membres_chatting_par_rest = lambda: list(membres_r)
+                verif_discord._http = faux_http
+                w._CHATTING_REST.update({"roles": None, "roles_ts": 0.0, "rangement_ts": time.time()})
+                try:
+                    check("roles du planning : refuse sans session (401) et a un chatteur (403)",
+                          app.test_client().post("/chatting/roles/creer").status_code == 401
+                          and chatteur.post("/chatting/roles/creer").status_code == 403
+                          and chatteur.post("/chatting/roles/ranger").status_code == 403)
+                    jc = admin.post("/chatting/roles/creer").get_json() or {}
+                    check("creer les roles sans le droit : Discord refuse, le site le DIT et donne le lien du droit, rien n'est cree",
+                          jc.get("ok") is False and "Gérer les rôles" in (jc.get("message") or "")
+                          and "permissions=268435456" in (jc.get("lien") or "") and serveur_r["postes"] == [], jc)
+                    serveur_r["droit"] = True
+                    jc = admin.post("/chatting/roles/creer").get_json() or {}
+                    check("creer les roles avec le droit : les 16, sans aucune permission, et rien d'autre n'est touche",
+                          jc.get("ok") is True and [x["name"] for x in serveur_r["postes"]] == noms_r
+                          and all(x["permissions"] == "0" and x["mentionable"] is False for x in serveur_r["postes"])
+                          and serveur_r["roles"][0]["name"] == "CHETTER MYM", jc.get("message"))
+                    jc2 = admin.post("/chatting/roles/creer").get_json() or {}
+                    check("... recliquer ne cree rien en double", jc2.get("ok") is True and len(serveur_r["postes"]) == 16, jc2)
+                    ident_r = {x["name"]: x["id"] for x in serveur_r["roles"]}
+                    membres_r.append({"id": "42", "username": "ba_doo", "affiche": "Baadooo", "pseudos": ["ba_doo", "Baadooo"],
+                                      "avatar_url": "", "roles": [ident_r["20h-02h"], ident_r["Sarah MYM"], ident_r["Kiara MYM"]]})
+                    membres_r.append({"id": "43", "username": "tout_neuf", "affiche": "Tout Neuf", "pseudos": ["tout_neuf"],
+                                      "avatar_url": "", "roles": [ident_r["14h-20h"], ident_r["Alicia MYM"]]})
+                    jr = admin.post("/chatting/roles/ranger").get_json() or {}
+                    lignes_r = {x["discord_username"]: x for x in chatting.get_edt(edt["id"])["rows"] if x.get("discord_username")}
+                    check("ranger : la ligne de ba_doo passe de 08h-14h a 20h-02h avec « Kiara+Sarah », un nouveau est cree",
+                          jr.get("ok") is True and lignes_r["ba_doo"]["creneau"] == "20h-02h"
+                          and lignes_r["ba_doo"]["modele"] == "Kiara+Sarah" and lignes_r["tout_neuf"]["creneau"] == "14h-20h"
+                          and lignes_r["tout_neuf"]["modele"] == "Alicia" and lignes_r["tout_neuf"]["pseudo"] == "Tout Neuf",
+                          (jr.get("message"), {k: (v["creneau"], v["modele"]) for k, v in lignes_r.items()}))
+                    check("... la ligne d'un pseudo sans role n'a pas bouge",
+                          lignes_r["inconnu_du_serveur"]["creneau"] == "08h-14h" and not lignes_r["inconnu_du_serveur"].get("roles_etat"))
+                    plan2 = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    check("la barre « Rôles Discord » dit ce qui a ete range, sans role a creer, avec le bouton",
+                          "id='chat-roles'" in plan2 and "<b>2</b> lignes rangées" in plan2 and "rôles à créer" not in plan2
+                          and "Ranger maintenant" in plan2 and "rangé d&#x27;après ses rôles Discord" in plan2,
+                          plan2[plan2.find("id='chat-roles'"):][:300] if "id='chat-roles'" in plan2 else "barre absente")
+                    membres_r[0]["roles"] = []
+                    admin.post("/chatting/roles/ranger")
+                    plan3 = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    check("role retire : la ligne reste et porte « rôle retiré », la barre nomme le chatteur",
+                          len(chatting.get_edt(edt["id"])["rows"]) == 4 and "chat-role-perdu" in plan3
+                          and "Rôle retiré, ligne gardée : Baadooo (20h-02h)" in plan3)
+                    vue_c = chatteur.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    check("un chatteur voit le planning mais pas la barre des roles ni ses boutons",
+                          "data-field='discord_username'" in vue_c and "id='chat-roles'" not in vue_c)
+                    if shutil.which("node"):
+                        rates_p = []
+                        for i_s, bloc_s in enumerate(re.findall(r"<script[^>]*>(.*?)</script>", plan2, re.S)):
+                            f_s = pathlib.Path(tmp) / ("planning_%d.js" % i_s)
+                            f_s.write_text(bloc_s, encoding="utf-8")
+                            if subprocess.run([shutil.which("node"), "--check", str(f_s)], capture_output=True).returncode != 0:
+                                rates_p.append(i_s)
+                        check("les scripts de la page du planning passent node --check (le bouton des roles y est)",
+                              not rates_p and "window.chatRoles" in plan2, rates_p)
+                finally:
+                    w._chatting_par_rest, w._membres_chatting_par_rest, verif_discord._http = sauve_r
             finally:
                 chatting.DATA_DIR, chatting.PLANNING_FILE = sauve_chat
 
@@ -1333,6 +1502,7 @@ if __name__ == "__main__":
     test_complement()
     test_deux_bots()
     test_paie_nette()
+    test_planning_roles()
     _tmp = tempfile.mkdtemp(prefix="tests_revenus_chatteurs_")
     try:
         test_photo_model(_tmp)

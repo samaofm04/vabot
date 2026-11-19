@@ -125,7 +125,10 @@ DEFAULT_MODELES = ["", "Julia", "Amelia", "Lola", "Sarah", "Emma", "Kiara"]
 
 # Listes des modeles par plateforme (utilisees pour le multi-select)
 MODELES_OF = ["Julia", "Amelia", "Lola"]
-MODELES_MYM = ["Lola", "Julia", "Amelia", "Kiara", "Sarah", "Emma"]
+# Alicia, Aimee et Chloé : comptes MYM presents chez MyPuls que le planning ne
+# proposait pas (ajoutes le 19/11/2026 avec les roles Discord par model, voir
+# planning_roles.py : un role sans model dans cette liste ne se rangerait pas).
+MODELES_MYM = ["Lola", "Julia", "Amelia", "Kiara", "Sarah", "Emma", "Alicia", "Aimee", "Chloé"]
 
 
 def models_for_edt(edt_name: str) -> List[str]:
@@ -374,6 +377,25 @@ def _empty_presence() -> Dict[str, str]:
     return {d: "Present" for d in DAYS}
 
 
+def nouvelle_ligne(creneau: str) -> Dict[str, Any]:
+    """Une ligne vide du planning. UNE SEULE forme : add_row (a la main) et le
+    rangement par les roles Discord (planning_roles) fabriquent la meme."""
+    return {
+        "id": f"row_{uuid.uuid4().hex[:10]}",
+        "creneau": creneau,
+        "pseudo": "",
+        # Le pseudo Discord du chatteur. C'est le SEUL identifiant qui
+        # le relie a une vraie personne : « pseudo » est un texte libre
+        # saisi a la main, qui ne correspond a rien d'autre dans le
+        # systeme. Rempli = rattachement valide ; vide = a verifier.
+        "discord_username": "",
+        "statut": "Nouveau",
+        "modele": "",
+        "off": "",
+        "presence_by_week": {},
+    }
+
+
 def add_row(edt_id: str, creneau: str = "02h-08h") -> Optional[Dict[str, Any]]:
     data = _load()
     for e in data["edts"]:
@@ -383,20 +405,7 @@ def add_row(edt_id: str, creneau: str = "02h-08h") -> Optional[Dict[str, Any]]:
                 cre = (creneau or "").strip()
             else:
                 cre = creneau if creneau in CRENEAUX else "02h-08h"
-            row = {
-                "id": f"row_{uuid.uuid4().hex[:10]}",
-                "creneau": cre,
-                "pseudo": "",
-                # Le pseudo Discord du chatteur. C'est le SEUL identifiant qui
-                # le relie a une vraie personne : « pseudo » est un texte libre
-                # saisi a la main, qui ne correspond a rien d'autre dans le
-                # systeme. Rempli = rattachement valide ; vide = a verifier.
-                "discord_username": "",
-                "statut": "Nouveau",
-                "modele": "",
-                "off": "",
-                "presence_by_week": {},
-            }
+            row = nouvelle_ligne(cre)
             e["rows"].append(row)
             _save(data)
             return row

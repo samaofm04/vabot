@@ -311,7 +311,8 @@ def _guilde_chatteurs() -> str:
 #: Ce qu'on sait du serveur de chatting par les bots sans programme, garde en
 #: memoire. Une lecture chez Discord (liste des serveurs d'un bot, puis les
 #: membres) coute un a quelques appels : jamais a chaque ouverture de page.
-_CHATTING_REST = {"serveur": None, "serveur_ts": 0.0, "membres": None, "membres_ts": 0.0}
+_CHATTING_REST = {"serveur": None, "serveur_ts": 0.0, "membres": None, "membres_ts": 0.0,
+                  "roles": None, "roles_ts": 0.0, "moi": {}, "rangement_ts": 0.0}
 _VERROU_CHATTING = threading.Lock()
 
 
@@ -392,6 +393,8 @@ def _membres_chatting_par_rest():
                     "username": str(u.get("username") or ""),
                     "affiche": str(m.get("nick") or u.get("global_name") or u.get("username") or ""),
                     "pseudos": [str(x) for x in (u.get("username"), u.get("global_name"), m.get("nick")) if x],
+                    # ses roles sur le serveur (identifiants) : le planning se range dessus
+                    "roles": [str(x) for x in (m.get("roles") or [])],
                     "avatar_url": (f"https://cdn.discordapp.com/avatars/{uid}/{empreinte}.png?size=128" if empreinte
                                    else f"https://cdn.discordapp.com/embed/avatars/{(int(uid) >> 22) % 6}.png"),
                 })
@@ -419,6 +422,141 @@ def _chatteur_par_rest(pseudo: str):
             return {"id": m["id"], "username": m["username"], "display_name": m["affiche"],
                     "avatar_url": m["avatar_url"]}
     return None
+
+
+# ---------------------------------------------------------------------------
+# LES ROLES DU SERVEUR DES CHATTEURS (planning_roles.py decide, ici on lit et
+# on cree). Toujours par le bot SANS programme : c'est le seul present sur ce
+# serveur, et il ne fait que ce que le site lui demande.
+# ---------------------------------------------------------------------------
+_DROIT_GERER_ROLES = 1 << 28           # « Gerer les roles » chez Discord
+_DROIT_ADMINISTRATEUR = 1 << 3
+
+
+def _roles_chatting_par_rest(frais: bool = False):
+    """Les roles du serveur de chatting : [{id, name, position, permissions,
+    managed}], ou None si on ne peut pas les lire. Garde 2 minutes."""
+    serveur = _chatting_par_rest()
+    if not serveur:
+        return None
+    with _VERROU_CHATTING:
+        if (not frais and _CHATTING_REST["roles"] is not None
+                and time.time() - _CHATTING_REST["roles_ts"] < 120):
+            return _CHATTING_REST["roles"]
+    try:
+        import verif_discord
+        code, corps = verif_discord._http(serveur["bot"], "GET", f"/guilds/{serveur['gid']}/roles")
+    except Exception:
+        return None
+    if code != 200 or not isinstance(corps, list):
+        return None
+    roles = [{"id": str(r.get("id")), "name": str(r.get("name") or ""), "position": int(r.get("position") or 0),
+              "permissions": str(r.get("permissions") or "0"), "managed": bool(r.get("managed"))}
+             for r in corps if isinstance(r, dict)]
+    with _VERROU_CHATTING:
+        _CHATTING_REST["roles"], _CHATTING_REST["roles_ts"] = roles, time.time()
+    return roles
+
+
+def _bot_peut_gerer_les_roles():
+    """True / False : le bot sans programme a-t-il « Gerer les roles » sur le
+    serveur de chatting ? None si on n'a pas pu le savoir.
+
+    Le droit se lit sur SES roles (celui que Discord lui cree a l'invitation,
+    plus @everyone), pas en essayant : un essai rate creerait quand meme une
+    ligne dans le journal d'audit du serveur.
+    """
+    serveur, roles = _chatting_par_rest(), _roles_chatting_par_rest()
+    if not serveur or roles is None:
+        return None
+    try:
+        import verif_discord
+        moi = _CHATTING_REST["moi"].get(serveur["bot"]["id"])
+        if not moi:
+            code, corps = verif_discord._http(serveur["bot"], "GET", "/users/@me")
+            if code != 200 or not isinstance(corps, dict) or not corps.get("id"):
+                return None
+            moi = str(corps["id"])
+            _CHATTING_REST["moi"][serveur["bot"]["id"]] = moi
+        code, membre = verif_discord._http(serveur["bot"], "GET", f"/guilds/{serveur['gid']}/members/{moi}")
+        if code != 200 or not isinstance(membre, dict):
+            return None
+    except Exception:
+        return None
+    les_siens = {str(x) for x in (membre.get("roles") or [])} | {str(serveur["gid"])}    # @everyone porte l'id du serveur
+    droits = 0
+    for r in roles:
+        if r["id"] in les_siens:
+            try:
+                droits |= int(r["permissions"])
+            except (TypeError, ValueError):
+                pass
+    return bool(droits & (_DROIT_GERER_ROLES | _DROIT_ADMINISTRATEUR))
+
+
+def _invitation_gerer_roles() -> str:
+    """Le lien qui donne au bot sans programme le droit « Gerer les roles »
+    (et rien d'autre) sur le serveur ou on l'autorise."""
+    lien = _invitation_lecteur_chatting()
+    return lien.replace("permissions=0", "permissions=%d" % _DROIT_GERER_ROLES) if lien else ""
+
+
+def _creer_roles_chatting() -> dict:
+    """Cree sur le serveur de chatting les roles de planning_roles qui manquent.
+
+    {"crees": [noms], "erreurs": [textes], "refus": bool, "restants": [noms]}
+    Ne touche a AUCUN role existant : ni renommage, ni suppression, ni
+    permission. Un role cree n'a aucun droit (permissions 0) : c'est une
+    etiquette, que les managers posent sur les chatteurs.
+    """
+    import planning_roles
+    serveur = _chatting_par_rest()
+    roles = _roles_chatting_par_rest(frais=True)
+    if not serveur or roles is None:
+        return {"crees": [], "erreurs": ["Le serveur de chatting n'est pas lisible pour l'instant."],
+                "refus": False, "restants": []}
+    import verif_discord
+    crees, erreurs, refus = [], [], False
+    for nom in planning_roles.manquants(roles):
+        code, corps = verif_discord._http(
+            serveur["bot"], "POST", f"/guilds/{serveur['gid']}/roles",
+            json={"name": nom, "permissions": "0", "hoist": False, "mentionable": False})
+        if code in (200, 201):
+            crees.append(nom)
+            continue
+        if code == 403:
+            # Inutile d'insister : sans le droit, les quinze suivants echoueraient pareil.
+            refus = True
+            erreurs.append("Discord refuse : le bot n'a pas le droit « Gérer les rôles » sur ce serveur.")
+            break
+        erreurs.append("%s : %s (HTTP %s)" % (nom, str((corps or {}).get("message") or "refus")[:80], code))
+    restants = planning_roles.manquants(_roles_chatting_par_rest(frais=True) or roles)
+    return {"crees": crees, "erreurs": erreurs, "refus": refus, "restants": restants}
+
+
+def _ranger_planning_par_roles(force: bool = False):
+    """Range le planning des chatteurs d'apres les roles Discord. Rend le
+    rapport de planning_roles, {"erreur": ...} si le serveur n'est pas lisible,
+    ou None quand ce n'etait pas encore l'heure.
+
+    Sans `force` : au plus une fois toutes les dix minutes, c'est ce qui fait
+    que la ligne d'un chatteur « suit » quand un manager change son role, sans
+    relire Discord a chaque affichage. Avec `force` (bouton « Ranger
+    maintenant ») : les membres et les roles sont relus tout de suite.
+    """
+    import planning_roles
+    maintenant = time.time()
+    with _VERROU_CHATTING:
+        if not force and maintenant - _CHATTING_REST["rangement_ts"] < 600:
+            return None
+        _CHATTING_REST["rangement_ts"] = maintenant
+        if force:
+            _CHATTING_REST["membres_ts"] = 0.0
+    roles = _roles_chatting_par_rest(frais=force)
+    membres = _membres_chatting_par_rest()
+    if roles is None or membres is None:
+        return {"erreur": "Le serveur de chatting n'est pas lisible pour l'instant (bot absent ou Discord muet)."}
+    return planning_roles.ranger_le_planning(membres, roles)
 
 
 def _serveur_chatting() -> dict:
@@ -36203,6 +36341,73 @@ def _clicrank_carte_html() -> str:
     return f"<div class='home-row home-row-pleine'>{corps}</div>" if corps else ""
 
 
+def _barre_roles_planning_html() -> str:
+    """La barre « Rôles Discord » du planning des chatteurs : ce que le dernier
+    rangement a fait, ce qui manque, et les deux boutons.
+
+    AUCUN appel a Discord ici : elle lit le rapport garde dans le fichier du
+    planning. Reservee aux acces complets — un chatteur voit le planning, il
+    n'a pas a voir qui a perdu quel role ni a pouvoir relancer le rangement.
+    """
+    try:
+        from flask import session as _s_roles
+        if _role_allowed_tabs((_s_roles.get("role") or "").lower()) is not None:
+            return ""
+        import planning_roles
+        rapport = planning_roles.dernier_rapport()
+    except Exception:
+        return ""
+    serveur = (_chatting_par_rest() or {}).get("nom") or "ton serveur de chatting"
+    bouton = ("background:rgba(249,115,65,.12);border:1px solid rgba(249,115,65,.45);color:#f97341;"
+              "font-size:12px;font-weight:700;cursor:pointer;padding:6px 12px;border-radius:8px")
+    morceaux, details = [], []
+    if not rapport:
+        morceaux.append("<span>Le planning ne s'est pas encore rangé d'après les rôles Discord.</span>")
+    else:
+        try:
+            import datetime as _dt_r
+            from zoneinfo import ZoneInfo as _Zi_r
+            quand = _dt_r.datetime.fromtimestamp(float(rapport.get("le") or 0), _Zi_r("Europe/Paris")).strftime("%d/%m à %H:%M")
+        except Exception:
+            quand = "?"
+        nb = int(rapport.get("ranges") or 0)
+        morceaux.append(f"<span><b>{nb}</b> ligne{'s' if nb > 1 else ''} rangée{'s' if nb > 1 else ''} "
+                        f"d'après les rôles · dernier changement le {quand}</span>")
+        def _noms(liste, suite=None):
+            return ", ".join(html_escape(str(x.get("affiche") or x.get("pseudo") or "?"))
+                             + (f" ({html_escape(str(suite(x)))})" if suite else "") for x in liste[:12]) \
+                   + (f" et {len(liste) - 12} autres" if len(liste) > 12 else "")
+        sans_shift = [x for x in (rapport.get("incomplets") or []) if x.get("manque") == "shift"]
+        sans_model = [x for x in (rapport.get("incomplets") or []) if x.get("manque") == "model"]
+        if sans_model:
+            details.append("Ont un rôle de shift mais pas de model : " + _noms(sans_model))
+        if sans_shift:
+            details.append("Ont un rôle de model mais pas de shift : " + _noms(sans_shift))
+        if rapport.get("perdus"):
+            details.append("Rôle retiré, ligne gardée : " + _noms(rapport["perdus"], lambda x: x.get("creneau") or "?"))
+        if rapport.get("sans_planning"):
+            details.append("Aucun planning pour les ranger : " + _noms(rapport["sans_planning"], lambda x: x.get("plateforme") or "?"))
+    manquants = (rapport or {}).get("manquants")
+    if manquants is None:
+        manquants = [r["nom"] for r in planning_roles.roles_attendus()]
+    actions = f"<button type='button' onclick='chatRoles(\"ranger\", this)' style='{bouton}'>Ranger maintenant</button>"
+    if manquants:
+        details.insert(0, f"{len(manquants)} rôle{'s' if len(manquants) > 1 else ''} à créer sur {html_escape(serveur)} : "
+                          + ", ".join(html_escape(m) for m in manquants))
+        actions = (f"<button type='button' onclick='chatRoles(\"creer\", this)' style='{bouton}'>"
+                   f"Créer les {len(manquants)} rôles</button>" + actions)
+    return (
+        "<div id='chat-roles' style='margin:0 0 14px;padding:11px 14px;background:#141416;border:1px solid #2a2a2f;"
+        "border-radius:10px;font-size:12.5px;color:#d4d4d8'>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
+        "<b style='color:#f97341'>Rôles Discord</b>" + "".join(morceaux)
+        + "<span style='flex:1'></span>" + actions + "</div>"
+        + "".join(f"<div style='margin-top:6px;color:#a1a1aa;font-size:12px'>{d}</div>" for d in details)
+        + "<div id='chat-roles-retour' style='display:none;margin-top:8px;font-size:12px;font-weight:600'></div>"
+        "</div>"
+    )
+
+
 @_arg_cached(seconds=180, key_args=("mp_start", "mp_end", "mp_period"))
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
@@ -53177,6 +53382,25 @@ def _render_chatplanning_html() -> str:
         return f"<p style='color:#f99'>Module chatting indispo : {e}</p>"
 
     from flask import request as _req
+    # LE PLANNING SE RANGE D'APRES LES ROLES DISCORD (planning_roles.py), au
+    # plus une fois toutes les dix minutes. Dans un fil a part : Discord peut
+    # mettre vingt secondes a repondre, et la page n'a pas a les attendre. Le
+    # resultat se voit a l'affichage suivant ; le bouton « Ranger maintenant »
+    # le fait tout de suite.
+    try:
+        with _VERROU_CHATTING:
+            _a_ranger = time.time() - _CHATTING_REST["rangement_ts"] >= 600
+        if _a_ranger:
+            def _ranger_en_fond():
+                try:
+                    r = _ranger_planning_par_roles()
+                    if r and r.get("erreur"):
+                        print(f"[planning-roles] rangement impossible : {r['erreur']}", flush=True)
+                except Exception as e:                  # noqa: BLE001
+                    print(f"[planning-roles] rangement en erreur : {type(e).__name__} {e}", flush=True)
+            threading.Thread(target=_ranger_en_fond, daemon=True, name="planning-roles").start()
+    except Exception as e:                              # noqa: BLE001
+        print(f"[planning-roles] rangement non lance : {e}", flush=True)
     edts = chatting.list_edts()
 
     # Week navigation : ?week_start=YYYY-MM-DD
@@ -53464,6 +53688,18 @@ def _render_chatplanning_html() -> str:
         handle = (r.get("discord_username") or "").strip()
         bord, titre, pastille = _etat_discord(handle, _dl_nb, _guilde_chatteurs())
         largeur = 100 if pastille else 120
+        # Rangee d'apres ses roles Discord : dit sur la ligne. « perdu » = il
+        # n'a plus le role de ce shift ou de cette model ; la ligne est gardee
+        # (planning_roles, regle 1), et c'est a un manager de trancher.
+        _etat_roles = r.get("roles_etat")
+        if _etat_roles == "ok":
+            titre += " — rangé d'après ses rôles Discord"
+        elif _etat_roles == "perdu":
+            titre = ("Ce chatteur n'a plus le rôle de ce shift ou de cette model sur Discord. "
+                     "La ligne est gardée, avec ses présences : remets-lui le rôle, ou supprime la ligne.")
+            bord = "#f59e0b"
+            pastille += "<span class='chat-role-perdu' style='color:#f59e0b;font-size:11px;font-weight:700;margin-right:5px'>rôle retiré</span>"
+            largeur = 80
         return (
             f"<td style='padding:4px 6px;white-space:nowrap' title='{html_escape(titre)}'>"
             f"{pastille}"
@@ -53854,6 +54090,34 @@ def _render_chatplanning_html() -> str:
 
     js = """
 <script>
+// Les deux boutons de la barre « Roles Discord » : creer les roles manquants,
+// ou ranger le planning tout de suite. Le serveur repond par une phrase, on
+// l affiche telle quelle puis on recharge le planning.
+window.chatRoles = async function(quoi, bouton){
+  var retour = document.getElementById('chat-roles-retour');
+  var ancien = bouton.textContent;
+  bouton.disabled = true; bouton.textContent = '…';
+  function dire(texte, ok){
+    if(!retour) return;
+    retour.textContent = '';
+    retour.style.display = 'block'; retour.style.color = ok ? '#4ade80' : '#f87171';
+    retour.appendChild(document.createTextNode(texte));
+  }
+  try {
+    var r = await fetch('/chatting/roles/' + quoi, {method:'POST', credentials:'same-origin'});
+    var j = await r.json().catch(function(){ return {ok:false, message:'Réponse illisible (HTTP ' + r.status + ')'}; });
+    dire(j.message || (j.ok ? 'Fait.' : 'Refusé.'), !!j.ok);
+    if(j.lien && retour){
+      var a = document.createElement('a'); a.href = j.lien; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = ' Donner ce droit au bot'; a.style.color = '#f97341'; a.style.textDecoration = 'underline';
+      retour.appendChild(a);
+    }
+    if(j.ok && j.recharger){
+      setTimeout(function(){ if(window.chatSwitchTo){ window.chatSwitchTo(window.location.href); } else { location.reload(); } }, 1400);
+    }
+  } catch(e){ dire('Erreur : ' + e, false); }
+  bouton.disabled = false; bouton.textContent = ancien;
+};
 // AJAX switch entre EDTs et semaines : remplace juste le contenu de #form-chatplanning
 window.chatSwitchTo = async function(url){
   const sec = document.getElementById('form-chatplanning');
@@ -54330,6 +54594,7 @@ async function addChatRow(creneau){
         + tabs_html + add_tab +
         "</div>"
         f"<div style='margin:0 0 14px;color:#666;font-size:11px'>{edt_actions}</div>"
+        + _barre_roles_planning_html()
         + week_nav
         + table
         + recap_html
@@ -78676,6 +78941,72 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         import chatting
         chatting.delete_edt((request.form.get("edt_id") or "").strip())
         return redirect("/?tab=chatplanning")
+
+    # ---- Roles Discord du planning (planning_roles.py) ----------------------
+    # Acces complets seulement : creer des roles sur le serveur Discord et
+    # deplacer des lignes du planning ne sont pas des gestes de chatteur. Les
+    # roles restreints sont de toute facon refuses par le before_request.
+    def _roles_planning_refus():
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "message": "Session expirée"}), 401
+        try:
+            complet = _role_allowed_tabs(_live_role()) is None
+        except Exception:
+            complet = False
+        if not complet:
+            return jsonify({"ok": False, "message": "Accès refusé"}), 403
+        return None
+
+    @app.route("/chatting/roles/creer", methods=["POST"])
+    def chatting_roles_creer():
+        """Cree sur le serveur de chatting les roles de shift et de model qui
+        manquent. Ne modifie aucun role existant."""
+        from flask import jsonify
+        refus = _roles_planning_refus()
+        if refus is not None:
+            return refus
+        try:
+            r = _creer_roles_chatting()
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"ok": False, "message": f"Erreur : {type(e).__name__} {e}"})
+        if r["refus"]:
+            return jsonify({"ok": False, "lien": _invitation_gerer_roles(),
+                            "message": "Le bot n'a pas le droit « Gérer les rôles » sur ce serveur. "
+                                       "Donne-le-lui (un clic), puis reclique sur le bouton."})
+        if r["erreurs"]:
+            return jsonify({"ok": False, "message": " · ".join(r["erreurs"])[:400]})
+        try:
+            _ranger_planning_par_roles(force=True)      # le rapport dit « 0 role a creer »
+        except Exception:
+            pass
+        n = len(r["crees"])
+        return jsonify({"ok": True, "recharger": True, "crees": r["crees"],
+                        "message": (f"{n} rôle{'s' if n > 1 else ''} créé{'s' if n > 1 else ''} : " + ", ".join(r["crees"]))
+                                   if n else "Tous les rôles existent déjà."})
+
+    @app.route("/chatting/roles/ranger", methods=["POST"])
+    def chatting_roles_ranger():
+        """Relit les roles Discord et range le planning tout de suite."""
+        from flask import jsonify
+        refus = _roles_planning_refus()
+        if refus is not None:
+            return refus
+        try:
+            r = _ranger_planning_par_roles(force=True) or {}
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"ok": False, "message": f"Erreur : {type(e).__name__} {e}"})
+        if r.get("erreur"):
+            return jsonify({"ok": False, "message": r["erreur"]})
+        bouts = [f"{r.get('ranges', 0)} ligne(s) rangée(s)"]
+        for cle, mot in (("crees", "créée(s)"), ("deplaces", "déplacée(s)"), ("rattaches", "rattachée(s)")):
+            if r.get(cle):
+                bouts.append(f"{len(r[cle])} {mot}")
+        if r.get("incomplets"):
+            bouts.append(f"{len(r['incomplets'])} chatteur(s) avec un seul des deux rôles")
+        if r.get("manquants"):
+            bouts.append(f"{len(r['manquants'])} rôle(s) pas encore créé(s) sur Discord")
+        return jsonify({"ok": True, "recharger": True, "rapport": r, "message": " · ".join(bouts) + "."})
 
     @app.route("/chatting/add_row", methods=["POST"])
     def chatting_add_row():
