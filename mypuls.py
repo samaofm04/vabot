@@ -3542,6 +3542,20 @@ def get_chatter_discord_fiche(name: str) -> dict:
             "maj": float(meta.get("discord_maj") or 0)}
 
 
+def discords_relies() -> dict:
+    """{Discord relie (pseudo ou identifiant): nom retenu chez Discord} pour
+    toutes les fiches de la paie qui en portent un.
+
+    C'est LA liste des liens chatteur -> Discord que le proprietaire a faits
+    lui-meme. Le planning des chatteurs la reprend (planning_roles, regle 7)
+    au lieu de faire ressaisir les memes pseudos a ses managers — qui, le
+    19/11/2026, en avaient mis 9 sur la mauvaise ligne. Rien d'autre de la
+    fiche ne sort d'ici (ni compte, ni adresse de paiement).
+    """
+    return {str(f["discord"]): str(f.get("discord_nom") or "")
+            for f in _load_chatters().values() if isinstance(f, dict) and f.get("discord")}
+
+
 def set_discord(name: str, pseudo: str, avatar: str = None, nom: str = None) -> str:
     """Relie (ou delie, avec "") le Discord d'un chatteur. Rend ce qui est garde.
 

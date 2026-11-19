@@ -963,6 +963,60 @@ def test_planning_roles():
           and sorted(x["ligne"] for x in r11["discordants"]) == ["Charbel", "Eud"] and not r11["en_attente"],
           (r11["discordants"], r11["en_attente"]))
 
+    # ---- la paie fait foi : « c'est deja sync dans l'autre truc, dans les payes » (19/11/2026)
+    def planning12():
+        d = planning2(("20h-02h", "Ronel", "yedia0439", presence),          # le Discord de Yedia
+                      ("20h-02h", "Hér Ab", "ronel0753_32232", presence),   # celui de Ronel
+                      ("14h-20h", "Yédia", "", presence),                   # case vide
+                      ("20h-02h", "Moyle", "horacio0885", presence),        # deux Moyle au serveur, un seul dans la paie
+                      ("20h-02h", "Eud", "herad_abol", presence),           # personne ne s'appelle « Eud »
+                      ("08h-14h", "Sandy", "", presence),                   # deux Sandy dans la paie : on ne devine pas
+                      ("02h-08h", "Jerry", "skurt01577", presence))
+        d["edts"][1]["rows"] += [dict(chatting.nouvelle_ligne("14h-20h"), pseudo="Jean-luc", **presence),
+                                 dict(chatting.nouvelle_ligne("14h-20h"), pseudo="AGBEDE", discord_username="agbede1997",
+                                      roles_etat="ok")]
+        d["edts"].append({"id": "e3", "name": "Planning Managers", "kind": "manager",
+                          "rows": [dict(chatting.nouvelle_ligne(""), pseudo="Ghost")]})
+        return d
+    m12 = [membre("yedia0439", "✅ Yédia 🐬 ( 20-02) Lola Mym", "CHETTER MYM"),
+           membre("ronel0753_32232", "✅Ronel MYM 20 2H EMMA", "CHETTER MYM", "02h-08h"),
+           membre("moyle0502", "✅ Moyle 14-20 Emma", "CHETTER MYM"),
+           membre("skurt01577", "✅ Skurt 2- 8 MYM EMMA", "CHETTER MYM", "02h-08h"),
+           membre("agbede1997", "AGBEDE  14-20 OF Julia ⚠️⚠️", "CHATTER OF", "14h-20h")]
+    paie12 = {"ronel0753_32232": ["Ronel🛑"], "yedia0439": ["Yédia🐬"], "herad_abol": ["✅Hér Ab  MYM 20 2H"],
+              "moyle0283": ["Moyle ✅"], "agbede1997": ["Jean - Luc"], "skurt01577": ["Skurt 👑"],
+              "sandy160": ["✅Sandy MYM 20h -2H /"], "sandy_bis": ["Sandy"], "ghost_45605": ["Ghost 🛑"]}
+    d12 = planning12()
+    r12 = pr.ranger(d12, pr.lire(m12, roles), paie12)
+    mym12 = {x["pseudo"]: x for x in d12["edts"][0]["rows"]}
+    of12 = d12["edts"][1]["rows"]
+    check("la paie fait foi : une ligne au Discord d'un autre recoit le sien (Ronel, puis Her Ab qui portait celui de Ronel), l'ancien est note",
+          mym12["Ronel"]["discord_username"] == "ronel0753_32232" and mym12["Hér Ab"]["discord_username"] == "herad_abol"
+          and {(x["ligne"], x["de"], x["a"]) for x in r12["repris"]} >= {("Ronel", "yedia0439", "ronel0753_32232"),
+                                                                       ("Hér Ab", "ronel0753_32232", "herad_abol")},
+          r12["repris"])
+    check("... une case Discord vide est remplie (« Yédia »), et la ligne corrigee se range aussitot (Ronel suit son role en 02h-08h)",
+          mym12["Yédia"]["discord_username"] == "yedia0439" and mym12["Ronel"]["creneau"] == "02h-08h"
+          and mym12["Ronel"]["roles_etat"] == "ok" and mym12["Ronel"]["presence_by_week"])
+    check("... deux « Moyle » au serveur mais un seul relie dans la paie : c'est lui ; deux « Sandy » dans la paie : on ne devine pas",
+          mym12["Moyle"]["discord_username"] == "moyle0283" and mym12["Sandy"]["discord_username"] == "")
+    check("... « Eud » ne porte le nom de personne : laissee, marquee, nommee ; « Jerry » relie a « Skurt » n'est pas touche",
+          mym12["Eud"]["discord_username"] == "herad_abol" and mym12["Eud"]["roles_etat"] == "discordant"
+          and [x["ligne"] for x in r12["discordants"]] == ["Eud"] and mym12["Jerry"]["discord_username"] == "skurt01577")
+    check("... « Jean - Luc » dans la paie = « Jean-luc » au planning : sa ligne recoit le Discord, la ligne vide « AGBEDE » creee a cote s'en va",
+          [(x["pseudo"], x["discord_username"], x.get("roles_etat"), bool(x["presence_by_week"])) for x in of12]
+          == [("Jean-luc", "agbede1997", "ok", True)] and len(r12["doublons"]) == 1, of12)
+    check("... le planning des managers n'est jamais touche, meme si la paie connait « Ghost »",
+          d12["edts"][2]["rows"][0]["discord_username"] == "" and len(r12["repris"]) == 5, r12["repris"])
+    avant12 = copy.deepcopy(d12)
+    r12b = pr.ranger(d12, pr.lire(m12, roles), paie12)
+    check("... rejoue : rien ne bouge, rien n'est repris deux fois", d12 == avant12 and not r12b["repris"])
+    d13 = planning12()
+    r13 = pr.ranger(d13, pr.lire(m12, roles))
+    check("sans les liens de la paie, rien n'est repris : les lignes restent a corriger a la main",
+          not r13["repris"] and {x["pseudo"]: x["discord_username"] for x in d13["edts"][0]["rows"]}["Ronel"] == "yedia0439"
+          and "Ronel" in [x["ligne"] for x in r13["discordants"]])
+
 
 def test_managers(tmp):
     print("\n--- managers et mini-boss : la matrice, la paie, le fichier ---")
@@ -1355,6 +1409,31 @@ def test_site(tmp):
                     ronel_d = [x for x in chatting.get_edt(edt["id"])["rows"] if x["id"] == ligne_d["id"]][0]
                     check("... et au rangement suivant la ligne suit son role (02h-08h)",
                           ronel_d["creneau"] == "02h-08h" and ronel_d["roles_etat"] == "ok", ronel_d)
+                    # la paie fait foi : les Discord deja relies la-bas sont repris, l'ancien pseudo reste au journal
+                    membres_r.append({"id": "155168550192742407", "username": "elna_dc", "affiche": "Elnadèse",
+                                      "pseudos": ["elna_dc"], "avatar_url": "", "roles": []})
+                    mypuls.set_discord("compte-herab@test", "herad_abol", nom="✅Hér Ab  MYM 20 2H")
+                    mypuls.set_discord("compte-elna@test", "155168550192742407", nom="Elnadèse")   # relie par IDENTIFIANT
+                    ids_p = {}
+                    for nom_p, dc_p in (("Hér Ab", "yedia0439"), ("Elnadèse", "")):
+                        l_p = chatting.add_row(edt["id"], "20h-02h")
+                        chatting.update_cell(edt["id"], l_p["id"], "pseudo", nom_p)
+                        chatting.update_cell(edt["id"], l_p["id"], "discord_username", dc_p)
+                        ids_p[nom_p] = l_p["id"]
+                    jp = admin.post("/chatting/roles/ranger").get_json() or {}
+                    apres_p = {x["id"]: x for x in chatting.get_edt(edt["id"])["rows"]}
+                    plan_r = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    journal_p = [(x["ligne"], x["de"], x["a"]) for x in pr_site.journal_des_reprises()]
+                    check("la paie fait foi : la ligne « Hér Ab » qui portait le Discord de Yedia recoit le sien, et l'ancien reste au journal",
+                          apres_p[ids_p["Hér Ab"]]["discord_username"] == "herad_abol"
+                          and ("Hér Ab", "yedia0439", "herad_abol") in journal_p
+                          and "2 Discord repris de la paie" in (jp.get("message") or ""), (jp.get("message"), journal_p))
+                    check("... un chatteur relie dans la paie par son IDENTIFIANT : la case vide recoit son pseudo (traduit par la liste des membres)",
+                          apres_p[ids_p["Elnadèse"]]["discord_username"] == "elna_dc" and ("Elnadèse", "", "elna_dc") in journal_p)
+                    check("... la barre le dit, avant → maintenant",
+                          "2 Discord repris de la paie" in plan_r and "yedia0439 → <b>herad_abol</b>" in plan_r
+                          and "« Elnadèse » (20h-02h) : <b>elna_dc</b>" in plan_r,
+                          plan_r[plan_r.find("Discord repris"):][:300] if "Discord repris" in plan_r else "ligne absente")
                     vue_c = chatteur.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
                     check("un chatteur voit le planning mais pas la barre des roles ni ses boutons",
                           "data-field='discord_username'" in vue_c and "id='chat-roles'" not in vue_c)

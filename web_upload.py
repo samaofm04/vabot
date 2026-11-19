@@ -556,7 +556,40 @@ def _ranger_planning_par_roles(force: bool = False):
     membres = _membres_chatting_par_rest()
     if roles is None or membres is None:
         return {"erreur": "Le serveur de chatting n'est pas lisible pour l'instant (bot absent ou Discord muet)."}
-    return planning_roles.ranger_le_planning(membres, roles)
+    return planning_roles.ranger_le_planning(membres, roles, _discords_de_la_paie(membres))
+
+
+def _discords_de_la_paie(membres) -> dict:
+    """{pseudo Discord: [noms]} des chatteurs relies dans l'ecran de la paie.
+
+    Le proprietaire, 19/11/2026 : « c'est deja sync dans l'autre truc, dans les
+    payes ». Le planning reprend donc ces liens au lieu d'en demander d'autres.
+    La paie garde parfois l'IDENTIFIANT (chatteur relie sans serveur commun) :
+    le planning, lui, porte des pseudos — on traduit par la liste des membres.
+    Les noms : celui retenu dans la paie, et le surnom du serveur aujourd'hui.
+    """
+    import chatting
+    try:
+        import mypuls
+        relies = mypuls.discords_relies()
+    except Exception as e:                              # noqa: BLE001
+        print(f"[planning-roles] liens Discord de la paie illisibles : {type(e).__name__} {e}", flush=True)
+        return {}
+    par_id = {str(m.get("id") or ""): m for m in (membres or [])}
+    par_pseudo = {chatting._norm_discord(m.get("username")): m for m in (membres or [])}
+    connus = {}
+    for discord, nom in relies.items():
+        if _est_identifiant_discord(discord):
+            m = par_id.get(discord)
+            pseudo = chatting._norm_discord(m.get("username")) if m else ""
+        else:
+            pseudo = chatting._norm_discord(discord)
+            m = par_pseudo.get(pseudo)
+        if not pseudo:
+            continue                                    # relie par identifiant, absent du serveur : pas de pseudo a poser
+        noms = connus.setdefault(pseudo, [])
+        noms.extend(n for n in (nom, (m or {}).get("affiche")) if n and n not in noms)
+    return connus
 
 
 def _serveur_chatting() -> dict:
@@ -36414,6 +36447,20 @@ def _barre_roles_planning_html() -> str:
                 + (f" ; et {len(discordants) - 20} autres" if len(discordants) > 20 else ""))
         if rapport.get("en_attente"):
             details.append("Attendent cette correction pour être rangés : " + _noms(rapport["en_attente"]))
+    # Les Discord repris de la paie (planning_roles, regle 7), avec l'ANCIEN
+    # pseudo : c'est le seul endroit ou il reste lisible, pour pouvoir defaire.
+    try:
+        repris = [x for x in planning_roles.journal_des_reprises()
+                  if time.time() - float(x.get("le") or 0) < 7 * 86400][-30:]
+    except Exception:
+        repris = []
+    if repris:
+        def _reprise(x):
+            avant = f"{html_escape(str(x['de']))} → " if x.get("de") else ""
+            return (f"« {html_escape(str(x.get('ligne') or '?'))} » ({html_escape(str(x.get('creneau') or '?'))}) : "
+                    f"{avant}<b>{html_escape(str(x.get('a') or '?'))}</b>")
+        details.append(f"<span style='color:#22c55e'>{len(repris)} Discord repris de la paie</span> "
+                       "(7 derniers jours ; avant → maintenant) : " + " ; ".join(_reprise(x) for x in repris))
     manquants = (rapport or {}).get("manquants")
     if manquants is None:
         manquants = [r["nom"] for r in planning_roles.roles_attendus()]
@@ -79037,7 +79084,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False, "message": r["erreur"]})
         bouts = [f"{r.get('ranges', 0)} ligne(s) rangée(s)"]
         for cle, mot in (("crees", "créée(s)"), ("deplaces", "déplacée(s)"), ("rattaches", "rattachée(s)"),
-                         ("doublons", "doublon(s) vide(s) retiré(s)")):
+                         ("doublons", "doublon(s) vide(s) retiré(s)"), ("repris", "Discord repris de la paie")):
             if r.get(cle):
                 bouts.append(f"{len(r[cle])} {mot}")
         if r.get("incomplets"):

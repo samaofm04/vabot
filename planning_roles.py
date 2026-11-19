@@ -46,6 +46,13 @@ LES REGLES, DANS L'ORDRE OU ELLES COMPTENT
      ses presences, sur le shift de Yedia. Une telle ligne est laissee telle
      quelle et NOMMEE (« discordants ») : c'est a un manager de corriger sa
      case Discord, le rangement reprend tout seul ensuite.
+  7. LA PAIE FAIT FOI. Le proprietaire avait deja relie chaque chatteur a son
+     Discord dans l'ecran de la paie (43 fiches le 19/11/2026) : « c'est deja
+     sync dans l'autre truc, dans les payes ». Ces liens-la (`connus`) sont
+     donc repris, sans les ressaisir : une ligne qui porte le prenom d'UN seul
+     Discord relie dans la paie le recoit — qu'elle soit vide ou qu'elle porte
+     celui d'un autre (regle 6). Chaque reprise est ecrite au journal avec
+     l'ancien pseudo : rien n'est perdu, tout se defait a la main.
 """
 from __future__ import annotations
 
@@ -97,7 +104,7 @@ def _nom_nu(texte) -> str:
     Une model en PREMIER mot reste un prenom (une chatteuse s'appelle Sarah).
     """
     fin = {"mym", "of", "onlyfans"} | {_norme(m) for models in MODELS.values() for m in models}
-    garde = []
+    garde, trait = [], False
     for mot in unicodedata.normalize("NFC", str(texte or "")).split():
         debut, bout = 0, len(mot)
         while debut < bout and not mot[debut].isalnum():
@@ -106,12 +113,19 @@ def _nom_nu(texte) -> str:
             bout -= 1
         nu = mot[debut:bout]
         if not nu:
+            if garde and mot in ("-", "–") and not trait:
+                trait = True        # « Jean - Luc » : le trait relie peut-etre deux bouts du prenom
+                continue
             if garde:
                 break               # « : », « / », « 🐬 » apres le prenom : le reste est du commentaire
             continue                # la pastille du debut
         if any(c.isdigit() for c in nu) or (garde and _norme(nu) in fin):
             break
-        garde.append(nu)
+        if trait:
+            garde[-1] += "-" + nu
+            trait = False
+        else:
+            garde.append(nu)
         if bout < len(mot):
             break                   # une pastille collee a la fin du mot : le nom s'arrete la
     return " ".join(garde)
@@ -224,18 +238,44 @@ def _modele(models: List[str]) -> str:
     return "+".join(sorted(models, key=_norme))
 
 
-def _noms_normes(affiche) -> set:
+def _cle(texte) -> str:
+    """Un nom tel qu'on le COMPARE : sans accent, sans casse, lettres et chiffres
+    seuls. « Jean-luc » (le planning) et « Jean - Luc » (Discord) sont la meme
+    personne ; « Jerry » et « Jerry bgn » restent deux."""
+    return "".join(c for c in _norme(texte) if c.isalnum())
+
+
+def _cles(affiche) -> set:
     """Les noms sous lesquels une ligne peut designer ce membre, tels qu'on les
     compare : ses prenoms possibles, et son surnom entier (une ligne creee
     avant la regle 5 le porte encore)."""
-    return {n for n in [_norme(x) for x in noms_possibles(affiche)] + [_norme(affiche)] if n}
+    return {n for n in [_cle(x) for x in noms_possibles(affiche)] + [_cle(affiche)] if n}
+
+
+def _noms_de(lus, connus) -> Dict[str, set]:
+    """{pseudo Discord: les noms qui le designent}, pour tous ceux qu'on connait :
+    les membres qui portent un role (leur surnom du serveur) et les chatteurs
+    relies dans la paie (le nom retenu la-bas, souvent plus ancien — c'est par
+    lui que « AGBEDE 14-20 OF Julia » se revele etre le « Jean-luc » du planning)."""
+    noms = {p: _cles(i["affiche"]) for p, i in lus.items()}
+    for pseudo, autres in (connus or {}).items():
+        for nom in autres or []:
+            noms.setdefault(pseudo, set()).update(_cles(nom))
+    return noms
+
+
+def _nom_de(pseudo, lus, connus) -> str:
+    """Le prenom a afficher pour ce Discord ("" si on ne le connait pas)."""
+    if pseudo in lus:
+        return nom_propre(lus[pseudo]["affiche"])
+    return next((nom_propre(n) for n in (connus or {}).get(pseudo) or [] if n), "")
 
 
 def _sans_discord(ligne) -> bool:
     return not str(ligne.get("discord_username") or "").strip()
 
 
-def _discordantes(lignes, lus, noms_de) -> Dict[int, Dict[str, Any]]:
+def _discordantes(lignes, lus, noms_de, connus=None) -> Dict[int, Dict[str, Any]]:
     """Les lignes dont le nom et le pseudo Discord designent deux personnes
     (regle 6) : {id(ligne): {"ligne", "creneau", "discord", "discord_affiche",
     "attendu": [pseudos de ceux qui portent le nom de la ligne]}}.
@@ -243,33 +283,72 @@ def _discordantes(lignes, lus, noms_de) -> Dict[int, Dict[str, Any]]:
     Une ligne « Jerry » reliee au Discord de « Skurt » n'en est PAS une : un
     chatteur a souvent un prenom et un surnom, et rien ne les contredit. Il
     faut une preuve, l'une des deux :
-      - le nom de la ligne est exactement celui d'un AUTRE membre (« Ronel »
-        reliee au Discord de Yedia, alors qu'un Ronel existe) ;
+      - le nom de la ligne est exactement celui d'un AUTRE Discord connu
+        (« Ronel » reliee au Discord de Yedia, alors qu'un Ronel existe) ;
       - le proprietaire du Discord a SA ligne ailleurs dans le planning
         (« Eud » reliee au Discord de Her Ab, alors qu'une ligne « Her Ab » existe).
     """
     par_nom = {}
     for r in lignes:
-        n = _norme(r.get("pseudo"))
+        n = _cle(r.get("pseudo"))
         if n:
             par_nom.setdefault(n, []).append(r)
     trouve = {}
     for r in lignes:
         pseudo = chatting._norm_discord(r.get("discord_username"))
-        nom = _norme(r.get("pseudo"))
+        nom = _cle(r.get("pseudo"))
         if not pseudo or not nom:
             continue
-        siens = noms_de.get(pseudo, set())      # vide : ce Discord n'a aucun role qui nous parle
+        siens = noms_de.get(pseudo, set())      # vide : un Discord dont on ne sait rien
         if nom in siens:
             continue
-        autres = sorted(p for p in lus if p != pseudo and nom in noms_de[p])
+        autres = sorted(p for p in noms_de if p != pseudo and nom in noms_de[p])
         ailleurs = any(x is not r for n in siens for x in par_nom.get(n, []))
         if autres or ailleurs:
             trouve[id(r)] = {"ligne": r.get("pseudo") or "", "creneau": r.get("creneau") or "",
-                             "discord": pseudo,
-                             "discord_affiche": nom_propre(lus[pseudo]["affiche"]) if pseudo in lus else "",
+                             "discord": pseudo, "discord_affiche": _nom_de(pseudo, lus, connus),
                              "attendu": autres}
     return trouve
+
+
+def _reprendre_la_paie(lignes, lus, noms_de, connus, planning) -> List[Dict[str, Any]]:
+    """Regle 7 : pose sur les lignes le Discord que la paie connait pour leur
+    prenom. Rend ce qui a ete repris, [{planning, ligne, creneau, de, a}].
+
+    Deux cas, et dans les deux il faut UN SEUL Discord de la paie a ce prenom
+    (deux « Moyle » relies : on ne devine pas, la ligne reste a corriger) :
+      - la ligne n'a pas de Discord ;
+      - elle porte celui d'un autre (regle 6).
+    Plusieurs passes : « Ronel » portait le Discord de Yedia et « Her Ab »
+    celui de Ronel — corriger l'une change ce qu'on sait de l'autre.
+    """
+    repris = []
+    if not connus:
+        return repris
+    for _ in range(4):
+        discordantes = _discordantes(lignes, lus, noms_de, connus)
+        change = False
+        for r in lignes:
+            nom = _cle(r.get("pseudo"))
+            if not nom:
+                continue
+            if _sans_discord(r):
+                candidats = sorted(p for p in connus if nom in noms_de.get(p, ()))
+            elif id(r) in discordantes:
+                candidats = [p for p in discordantes[id(r)]["attendu"] if p in connus]
+            else:
+                continue
+            if len(candidats) != 1:
+                continue
+            repris.append({"planning": planning, "ligne": r.get("pseudo") or "", "creneau": r.get("creneau") or "",
+                           "de": chatting._norm_discord(r.get("discord_username")), "a": candidats[0]})
+            r["discord_username"] = candidats[0]
+            if r.get("roles_etat") == ETAT_DISCORDANT:
+                r.pop("roles_etat")
+            change = True
+        if not change:
+            break
+    return repris
 
 
 def _creee_et_vide(ligne, modele) -> bool:
@@ -284,21 +363,26 @@ def _creee_et_vide(ligne, modele) -> bool:
     return all(ligne.get(c) == neuve.get(c) for c in (set(ligne) | set(neuve)) - du_rangement)
 
 
-def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]],
+           connus: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
     """Range les plannings de `data` (le contenu de chatting_planning.json, modifie
     SUR PLACE) d'apres ce que les roles disent. Rend le rapport.
 
+    `connus` : {pseudo Discord: [noms]} des chatteurs relies dans la paie
+    (regle 7). Sans lui, rien n'est repris : le rangement fait comme avant.
+
     {"ranges": n, "crees": [...], "deplaces": [...], "models_changes": [...],
      "rattaches": [...], "perdus": [...], "incomplets": [...], "sans_planning": [...],
-     "sans_model": [...], "discordants": [...], "en_attente": [...], "doublons": [...]}
+     "sans_model": [...], "discordants": [...], "en_attente": [...], "doublons": [...],
+     "repris": [...]}
 
     Chaque element nomme le chatteur : le rapport s'affiche, il ne se devine pas.
     Rejouee sans changement de role, elle ne modifie rien.
     """
     rapport = {"ranges": 0, "crees": [], "deplaces": [], "models_changes": [], "rattaches": [],
                "perdus": [], "incomplets": [], "sans_planning": [], "sans_model": [],
-               "discordants": [], "en_attente": [], "doublons": []}
-    noms_de = {p: _noms_normes(i["affiche"]) for p, i in lus.items()}
+               "discordants": [], "en_attente": [], "doublons": [], "repris": []}
+    noms_de = _noms_de(lus, connus)
     edts = {}
     for e in data.get("edts") or []:
         p = _plateforme_edt(e)
@@ -318,8 +402,10 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
                                                  "plateforme": SUFFIXE[plateforme]})
             continue
         lignes = edt.setdefault("rows", [])
+        # Regle 7 d'abord : ce que la paie sait deja n'a pas a rester « a corriger ».
+        rapport["repris"].extend(_reprendre_la_paie(lignes, lus, noms_de, connus, edt.get("name")))
         # Regle 6 : ces lignes-la ne sont ni rangees ni deplacees d'apres leur pseudo.
-        discordantes = _discordantes(lignes, lus, noms_de)
+        discordantes = _discordantes(lignes, lus, noms_de, connus)
         for d in discordantes.values():
             rapport["discordants"].append(dict(d, planning=edt.get("name")))
         for ligne in lignes:
@@ -338,12 +424,13 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
                      and id(r) not in discordantes]
             for r in a_lui:
                 # Regle 5 : une ligne qui porte son surnom entier prend le prenom seul.
-                if propre and r.get("pseudo") != propre and _norme(r.get("pseudo")) == _norme(info["affiche"]):
+                if propre and r.get("pseudo") != propre and _cle(r.get("pseudo")) == _cle(info["affiche"]) \
+                        and _cle(propre) != _cle(info["affiche"]):
                     r["pseudo"] = propre
             # Regle 2, l'exception : les lignes sans Discord qui portent son prenom
             # sont les siennes — s'il n'a pas deja une vraie ligne a lui.
             vide = {id(r) for r in a_lui if _creee_et_vide(r, modele)}
-            homonymes = [r for r in lignes if _sans_discord(r) and _norme(r.get("pseudo")) in noms_de[pseudo]]
+            homonymes = [r for r in lignes if _sans_discord(r) and _cle(r.get("pseudo")) in noms_de[pseudo]]
             if homonymes and len(vide) == len(a_lui):
                 for r in homonymes:
                     r["discord_username"] = pseudo
@@ -353,7 +440,7 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
             if not a_lui:
                 # Sa ligne existe, mais elle porte le Discord d'un autre (regle 6) :
                 # en creer une seconde ferait un doublon. Il attend la correction.
-                prise = next((d for d in discordantes.values() if _norme(d["ligne"]) in noms_de[pseudo]), None)
+                prise = next((d for d in discordantes.values() if _cle(d["ligne"]) in noms_de[pseudo]), None)
                 if prise:
                     rapport["en_attente"].append({"pseudo": pseudo, "affiche": info["affiche"],
                                                   "planning": edt.get("name"), "ligne": prise["ligne"]})
@@ -428,15 +515,25 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
     return rapport
 
 
-def ranger_le_planning(membres, roles_serveur) -> Dict[str, Any]:
+#: Combien de reprises de la paie le fichier du planning garde (les plus recentes).
+JOURNAL_MAX = 200
+
+
+def ranger_le_planning(membres, roles_serveur, connus=None) -> Dict[str, Any]:
     """Lit les roles, range le fichier du planning, garde le rapport. Une seule
     ecriture (atomique, par chatting._save), et seulement si quelque chose a
     change : un rangement sans effet ne reecrit pas le fichier."""
     import json
     data = chatting._load()
     avant = json.dumps(data.get("edts"), sort_keys=True, ensure_ascii=False)
-    rapport = ranger(data, lire(membres, roles_serveur))
+    rapport = ranger(data, lire(membres, roles_serveur), connus)
     rapport["manquants"] = manquants(roles_serveur)
+    if rapport["repris"]:
+        # Le rapport est remplace au rangement suivant ; l'ANCIEN pseudo d'une ligne
+        # corrigee, lui, doit rester lisible : c'est ce qui permet de defaire.
+        journal = list(data.get("roles_journal") or [])
+        journal.extend(dict(x, le=time.time()) for x in rapport["repris"])
+        data["roles_journal"] = journal[-JOURNAL_MAX:]
     change = json.dumps(data.get("edts"), sort_keys=True, ensure_ascii=False) != avant
     ancien = dict(data.get("roles_rangement") or {})
     # « le » = l'heure du dernier rangement qui a CHANGE le planning (c'est ce que
@@ -451,6 +548,13 @@ def ranger_le_planning(membres, roles_serveur) -> Dict[str, Any]:
         chatting._save(data)
     rapport["change"] = change
     return rapport
+
+
+def journal_des_reprises() -> List[Dict[str, Any]]:
+    """Les Discord repris de la paie, du plus ancien au plus recent :
+    [{le, planning, ligne, creneau, de, a}] (`de` vide : la case etait vide)."""
+    j = chatting._load().get("roles_journal")
+    return [x for x in j if isinstance(x, dict)] if isinstance(j, list) else []
 
 
 def dernier_rapport() -> Optional[Dict[str, Any]]:
