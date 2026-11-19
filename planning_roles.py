@@ -34,6 +34,18 @@ LES REGLES, DANS L'ORDRE OU ELLES COMPTENT
   4. UNE LIGNE JAMAIS RANGEE PAR UN ROLE N'EST PAS ACCUSEE. Le jour de la mise
      en service, personne n'a de role : marquer toutes les lignes « sans role »
      aurait couvert le planning d'alertes pour rien.
+  5. LE NOM D'UNE LIGNE EST UN PRENOM, PAS UN SURNOM DISCORD. Sur ce serveur un
+     surnom s'ecrit « ✅ Odin 14-20 Emma / Alicia » : le premier rangement reel
+     (19/11/2026) a cree une ligne a ce nom, A COTE de la ligne « Odin » que le
+     manager avait saisie. On garde donc le prenom seul (nom_propre), et c'est
+     lui qu'on cherche parmi les lignes sans Discord avant d'en creer une.
+  6. UN NOM ET UN DISCORD QUI DESIGNENT DEUX PERSONNES : ON NE TOUCHE PAS. Le
+     meme jour, 8 lignes saisies a la main portaient le Discord d'un AUTRE
+     chatteur (« Ronel » avec le pseudo de Yedia, « Her Ab » avec celui de
+     Ronel...). Ranger d'apres le pseudo aurait deplace la ligne de Ronel, et
+     ses presences, sur le shift de Yedia. Une telle ligne est laissee telle
+     quelle et NOMMEE (« discordants ») : c'est a un manager de corriger sa
+     case Discord, le rangement reprend tout seul ensuite.
 """
 from __future__ import annotations
 
@@ -62,6 +74,8 @@ ROLES_PLATEFORME = {
     "of": ("chatter of", "chetter of", "chatter onlyfans", "chetter onlyfans"),
 }
 ETAT_OK, ETAT_PERDU = "ok", "perdu"
+#: Regle 6 : le nom de la ligne et son pseudo Discord designent deux personnes.
+ETAT_DISCORDANT = "discordant"
 
 
 def _norme(texte) -> str:
@@ -70,6 +84,60 @@ def _norme(texte) -> str:
     role a la main avec une majuscule de travers ne casse rien."""
     plat = unicodedata.normalize("NFD", str(texte or "").strip().lower())
     return " ".join("".join(c for c in plat if unicodedata.category(c) != "Mn").split())
+
+
+def _nom_nu(texte) -> str:
+    """Le prenom au debut d'un bout de surnom Discord, sans ce qui l'entoure.
+
+    Les surnoms du serveur portent le prenom PUIS les horaires, la plateforme,
+    la model, des pastilles : « ✅ Charbel MYM 20 2H JULIA », « CEJOTV🏀 »,
+    « ✅LAMAR 10% 16/1/2026 », « Miranto 8 14 OF ( Amélia ) ⚠️ ». On lit les
+    mots dans l'ordre et on s'arrete au premier qui n'est plus un nom : un
+    chiffre, « MYM » / « OF », une model, une ponctuation seule, une pastille.
+    Une model en PREMIER mot reste un prenom (une chatteuse s'appelle Sarah).
+    """
+    fin = {"mym", "of", "onlyfans"} | {_norme(m) for models in MODELS.values() for m in models}
+    garde = []
+    for mot in unicodedata.normalize("NFC", str(texte or "")).split():
+        debut, bout = 0, len(mot)
+        while debut < bout and not mot[debut].isalnum():
+            debut += 1
+        while bout > debut and not mot[bout - 1].isalnum():
+            bout -= 1
+        nu = mot[debut:bout]
+        if not nu:
+            if garde:
+                break               # « : », « / », « 🐬 » apres le prenom : le reste est du commentaire
+            continue                # la pastille du debut
+        if any(c.isdigit() for c in nu) or (garde and _norme(nu) in fin):
+            break
+        garde.append(nu)
+        if bout < len(mot):
+            break                   # une pastille collee a la fin du mot : le nom s'arrete la
+    return " ".join(garde)
+
+
+def noms_possibles(affiche) -> List[str]:
+    """Les prenoms qu'un surnom Discord peut cacher, le plus probable d'abord.
+
+    Un seul en general. « Le roi polygame | Salomon » en donne deux : rien ne
+    dit de quel cote de la barre est le prenom. Le DERNIER passe d'abord —
+    l'usage est « surnom | prenom », et la ligne du planning s'appelle bien
+    « salomon ». Jamais vide tant que le surnom ne l'est pas : un surnom dont
+    on ne tire rien (« 229 ») est rendu tel quel.
+    """
+    noms, vus = [], set()
+    for bout in reversed(str(affiche or "").split("|")):
+        nom = _nom_nu(bout)
+        if nom and _norme(nom) not in vus:
+            vus.add(_norme(nom))
+            noms.append(nom)
+    return noms or [" ".join(str(affiche or "").split())]
+
+
+def nom_propre(affiche) -> str:
+    """Le nom qu'une ligne du planning porte pour ce surnom Discord (regle 5)."""
+    return noms_possibles(affiche)[0]
 
 
 def roles_attendus() -> List[Dict[str, str]]:
@@ -156,19 +224,81 @@ def _modele(models: List[str]) -> str:
     return "+".join(sorted(models, key=_norme))
 
 
+def _noms_normes(affiche) -> set:
+    """Les noms sous lesquels une ligne peut designer ce membre, tels qu'on les
+    compare : ses prenoms possibles, et son surnom entier (une ligne creee
+    avant la regle 5 le porte encore)."""
+    return {n for n in [_norme(x) for x in noms_possibles(affiche)] + [_norme(affiche)] if n}
+
+
+def _sans_discord(ligne) -> bool:
+    return not str(ligne.get("discord_username") or "").strip()
+
+
+def _discordantes(lignes, lus, noms_de) -> Dict[int, Dict[str, Any]]:
+    """Les lignes dont le nom et le pseudo Discord designent deux personnes
+    (regle 6) : {id(ligne): {"ligne", "creneau", "discord", "discord_affiche",
+    "attendu": [pseudos de ceux qui portent le nom de la ligne]}}.
+
+    Une ligne « Jerry » reliee au Discord de « Skurt » n'en est PAS une : un
+    chatteur a souvent un prenom et un surnom, et rien ne les contredit. Il
+    faut une preuve, l'une des deux :
+      - le nom de la ligne est exactement celui d'un AUTRE membre (« Ronel »
+        reliee au Discord de Yedia, alors qu'un Ronel existe) ;
+      - le proprietaire du Discord a SA ligne ailleurs dans le planning
+        (« Eud » reliee au Discord de Her Ab, alors qu'une ligne « Her Ab » existe).
+    """
+    par_nom = {}
+    for r in lignes:
+        n = _norme(r.get("pseudo"))
+        if n:
+            par_nom.setdefault(n, []).append(r)
+    trouve = {}
+    for r in lignes:
+        pseudo = chatting._norm_discord(r.get("discord_username"))
+        nom = _norme(r.get("pseudo"))
+        if not pseudo or not nom:
+            continue
+        siens = noms_de.get(pseudo, set())      # vide : ce Discord n'a aucun role qui nous parle
+        if nom in siens:
+            continue
+        autres = sorted(p for p in lus if p != pseudo and nom in noms_de[p])
+        ailleurs = any(x is not r for n in siens for x in par_nom.get(n, []))
+        if autres or ailleurs:
+            trouve[id(r)] = {"ligne": r.get("pseudo") or "", "creneau": r.get("creneau") or "",
+                             "discord": pseudo,
+                             "discord_affiche": nom_propre(lus[pseudo]["affiche"]) if pseudo in lus else "",
+                             "attendu": autres}
+    return trouve
+
+
+def _creee_et_vide(ligne, modele) -> bool:
+    """Une ligne que le rangement a creee et ou personne n'a rien saisi depuis :
+    ni presence, ni jour off, ni statut, ni model a la main. Elle seule peut
+    etre retiree au profit de la ligne saisie a la main (regle 1 : une ligne
+    qui porte quoi que ce soit reste)."""
+    if ligne.get("roles_etat") not in (ETAT_OK, ETAT_PERDU) or (ligne.get("modele") or "") not in ("", modele or ""):
+        return False
+    neuve = chatting.nouvelle_ligne(ligne.get("creneau") or "")
+    du_rangement = {"id", "creneau", "pseudo", "discord_username", "modele", "roles_etat"}
+    return all(ligne.get(c) == neuve.get(c) for c in (set(ligne) | set(neuve)) - du_rangement)
+
+
 def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Range les plannings de `data` (le contenu de chatting_planning.json, modifie
     SUR PLACE) d'apres ce que les roles disent. Rend le rapport.
 
     {"ranges": n, "crees": [...], "deplaces": [...], "models_changes": [...],
      "rattaches": [...], "perdus": [...], "incomplets": [...], "sans_planning": [...],
-     "sans_model": [...]}
+     "sans_model": [...], "discordants": [...], "en_attente": [...], "doublons": [...]}
 
     Chaque element nomme le chatteur : le rapport s'affiche, il ne se devine pas.
     Rejouee sans changement de role, elle ne modifie rien.
     """
     rapport = {"ranges": 0, "crees": [], "deplaces": [], "models_changes": [], "rattaches": [],
-               "perdus": [], "incomplets": [], "sans_planning": [], "sans_model": []}
+               "perdus": [], "incomplets": [], "sans_planning": [], "sans_model": [],
+               "discordants": [], "en_attente": [], "doublons": []}
+    noms_de = {p: _noms_normes(i["affiche"]) for p, i in lus.items()}
     edts = {}
     for e in data.get("edts") or []:
         p = _plateforme_edt(e)
@@ -188,41 +318,89 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
                                                  "plateforme": SUFFIXE[plateforme]})
             continue
         lignes = edt.setdefault("rows", [])
+        # Regle 6 : ces lignes-la ne sont ni rangees ni deplacees d'apres leur pseudo.
+        discordantes = _discordantes(lignes, lus, noms_de)
+        for d in discordantes.values():
+            rapport["discordants"].append(dict(d, planning=edt.get("name")))
+        for ligne in lignes:
+            if id(ligne) in discordantes:
+                # Elle le porte sur elle : le manager voit QUELLE ligne corriger. Une
+                # marque « rangee » posee d'apres ce pseudo-la ne disait rien de vrai.
+                ligne["roles_etat"] = ETAT_DISCORDANT
+            elif ligne.get("roles_etat") == ETAT_DISCORDANT:
+                ligne.pop("roles_etat")                 # corrigee depuis
         for pseudo, info in sorted(concernes.items()):
             # Pas de role de model sur cette plateforme : on ne touche PAS a la
             # case « model » (celle saisie a la main reste), et on le dit.
             modele = _modele(info[plateforme]) if info[plateforme] else None
+            propre = nom_propre(info["affiche"]) or pseudo
+            a_lui = [r for r in lignes if chatting._norm_discord(r.get("discord_username")) == pseudo
+                     and id(r) not in discordantes]
+            for r in a_lui:
+                # Regle 5 : une ligne qui porte son surnom entier prend le prenom seul.
+                if propre and r.get("pseudo") != propre and _norme(r.get("pseudo")) == _norme(info["affiche"]):
+                    r["pseudo"] = propre
+            # Regle 2, l'exception : les lignes sans Discord qui portent son prenom
+            # sont les siennes — s'il n'a pas deja une vraie ligne a lui.
+            vide = {id(r) for r in a_lui if _creee_et_vide(r, modele)}
+            homonymes = [r for r in lignes if _sans_discord(r) and _norme(r.get("pseudo")) in noms_de[pseudo]]
+            if homonymes and len(vide) == len(a_lui):
+                for r in homonymes:
+                    r["discord_username"] = pseudo
+                a_lui = a_lui + homonymes
+                rapport["rattaches"].append({"pseudo": pseudo, "affiche": info["affiche"],
+                                             "planning": edt.get("name")})
+            if not a_lui:
+                # Sa ligne existe, mais elle porte le Discord d'un autre (regle 6) :
+                # en creer une seconde ferait un doublon. Il attend la correction.
+                prise = next((d for d in discordantes.values() if _norme(d["ligne"]) in noms_de[pseudo]), None)
+                if prise:
+                    rapport["en_attente"].append({"pseudo": pseudo, "affiche": info["affiche"],
+                                                  "planning": edt.get("name"), "ligne": prise["ligne"]})
+                    continue
             if modele is None:
                 rapport["sans_model"].append({"pseudo": pseudo, "affiche": info["affiche"],
                                               "planning": edt.get("name")})
-            a_lui = [r for r in lignes if chatting._norm_discord(r.get("discord_username")) == pseudo]
-            if not a_lui:
-                # Regle 2, l'exception : une ligne sans Discord qui porte exactement son surnom.
-                nom = _norme(info["affiche"])
-                homonymes = [r for r in lignes if not r.get("discord_username") and nom
-                             and _norme(r.get("pseudo")) == nom]
-                if len(homonymes) == 1:
-                    homonymes[0]["discord_username"] = pseudo
-                    a_lui = homonymes
-                    rapport["rattaches"].append({"pseudo": pseudo, "affiche": info["affiche"],
-                                                 "planning": edt.get("name")})
-            libres = [r for r in a_lui if r.get("creneau") not in info["shifts"]]
+            # Ses VRAIES lignes (saisies a la main, ou qui portent une presence) passent
+            # avant celles que le rangement a creees et ou personne n'a rien mis.
+            pleines = [r for r in a_lui if id(r) not in vide]
+            vides = [r for r in a_lui if id(r) in vide]
+            libres = [r for r in pleines + vides if r.get("creneau") not in info["shifts"]]
+
+            def _suit(ligne, creneau):
+                # Il a change de shift : sa ligne SUIT, avec ses presences.
+                rapport["deplaces"].append({"pseudo": pseudo, "affiche": info["affiche"],
+                                            "planning": edt.get("name"),
+                                            "de": ligne.get("creneau"), "a": creneau})
+                ligne["creneau"] = creneau
+
             for creneau in info["shifts"]:
-                ligne = next((r for r in a_lui if r.get("creneau") == creneau), None)
-                if ligne is None and libres:
-                    # Il a change de shift : sa ligne SUIT, avec ses presences.
+                ligne = next((r for r in pleines if r.get("creneau") == creneau), None)
+                if ligne is None and libres and id(libres[0]) not in vide:
                     ligne = libres.pop(0)
-                    rapport["deplaces"].append({"pseudo": pseudo, "affiche": info["affiche"],
-                                                "planning": edt.get("name"),
-                                                "de": ligne.get("creneau"), "a": creneau})
-                    ligne["creneau"] = creneau
+                    _suit(ligne, creneau)
+                if ligne is None:
+                    ligne = next((r for r in vides if r.get("creneau") == creneau), None)
+                if ligne is None and libres:
+                    ligne = libres.pop(0)
+                    _suit(ligne, creneau)
                 elif ligne is None:
                     ligne = chatting.nouvelle_ligne(creneau)
                     ligne["discord_username"] = pseudo
-                    ligne["pseudo"] = info["affiche"]
+                    ligne["pseudo"] = propre
                     lignes.append(ligne)
                     rapport["crees"].append({"pseudo": pseudo, "affiche": info["affiche"],
                                              "planning": edt.get("name"), "creneau": creneau})
+                # Une ligne creee par le rangement, restee vide, sur le shift ou sa
+                # vraie ligne vient de prendre place : c'etait un doublon (« Odin » le
+                # 19/11/2026). Elle seule s'en va — elle ne porte rien (regle 1).
+                en_trop = [v for v in vides if v is not ligne and v.get("creneau") == creneau]
+                if en_trop:
+                    lignes[:] = [r for r in lignes if not any(r is v for v in en_trop)]
+                    vides = [v for v in vides if not any(v is x for x in en_trop)]
+                    rapport["doublons"].extend({"pseudo": pseudo, "affiche": info["affiche"],
+                                                "planning": edt.get("name"), "creneau": creneau}
+                                               for _ in en_trop)
                 if modele is not None and (ligne.get("modele") or "") != modele:
                     if ligne.get("roles_etat"):         # une ligne neuve n'est pas un « changement »
                         rapport["models_changes"].append({"pseudo": pseudo, "affiche": info["affiche"],
@@ -230,15 +408,15 @@ def ranger(data: Dict[str, Any], lus: Dict[str, Dict[str, Any]]) -> Dict[str, An
                                                           "de": ligne.get("modele") or "", "a": modele})
                     ligne["modele"] = modele
                 if not ligne.get("pseudo"):
-                    ligne["pseudo"] = info["affiche"]
+                    ligne["pseudo"] = propre
                 ligne["roles_etat"] = ETAT_OK
                 rapport["ranges"] += 1
             for ligne in libres:
                 # Une de ses lignes sur un shift dont il n'a plus le role (regle 1 : elle reste).
                 if ligne.get("roles_etat") == ETAT_OK:
                     ligne["roles_etat"] = ETAT_PERDU
-        # Ceux qui n'ont plus AUCUN role ici : leurs lignes deja rangees passent « perdu ».
         for ligne in lignes:
+            # Ceux qui n'ont plus AUCUN role ici : leurs lignes deja rangees passent « perdu ».
             pseudo = chatting._norm_discord(ligne.get("discord_username"))
             if pseudo and pseudo not in concernes and ligne.get("roles_etat") == ETAT_OK:
                 ligne["roles_etat"] = ETAT_PERDU
@@ -258,10 +436,13 @@ def ranger_le_planning(membres, roles_serveur) -> Dict[str, Any]:
     data = chatting._load()
     avant = json.dumps(data.get("edts"), sort_keys=True, ensure_ascii=False)
     rapport = ranger(data, lire(membres, roles_serveur))
-    rapport["le"] = time.time()
     rapport["manquants"] = manquants(roles_serveur)
     change = json.dumps(data.get("edts"), sort_keys=True, ensure_ascii=False) != avant
     ancien = dict(data.get("roles_rangement") or {})
+    # « le » = l'heure du dernier rangement qui a CHANGE le planning (c'est ce que
+    # l'ecran annonce). Un rapport qui differe sans que rien ne bouge — un role
+    # donne a quelqu'un d'incomplet — garde l'heure d'avant.
+    rapport["le"] = time.time() if change or not ancien.get("le") else ancien["le"]
     ancien.pop("le", None)
     nouveau = dict(rapport)
     nouveau.pop("le", None)

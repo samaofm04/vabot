@@ -36392,6 +36392,28 @@ def _barre_roles_planning_html() -> str:
             details.append("Rôle retiré, ligne gardée : " + _noms(rapport["perdus"], lambda x: x.get("creneau") or "?"))
         if rapport.get("sans_planning"):
             details.append("Aucun planning pour les ranger : " + _noms(rapport["sans_planning"], lambda x: x.get("plateforme") or "?"))
+        discordants = rapport.get("discordants") or []
+        if discordants:
+            # Le 19/11/2026, 9 lignes saisies a la main portaient le Discord d'un
+            # autre chatteur. Chacune est nommee, avec le pseudo a y mettre quand
+            # on le connait : c'est la seule chose a faire pour qu'elle se range.
+            def _une(x):
+                qui = (f"de {html_escape(str(x['discord_affiche']))}" if x.get("discord_affiche")
+                       else html_escape(str(x.get("discord") or "?")))
+                attendu = [html_escape(str(a)) for a in (x.get("attendu") or [])]
+                suite = (f" → le sien : <b>{attendu[0]}</b>" if len(attendu) == 1
+                         else f" → le sien : {' ou '.join(attendu)} ?" if attendu else "")
+                return (f"« {html_escape(str(x.get('ligne') or '?'))} » ({html_escape(str(x.get('creneau') or '?'))}) "
+                        f"porte le Discord {qui}{suite}")
+            details.append(
+                f"<span style='color:#f59e0b'>Nom et Discord ne concordent pas sur {len(discordants)} "
+                f"ligne{'s' if len(discordants) > 1 else ''}</span> — laissée{'s' if len(discordants) > 1 else ''} "
+                "telle" + ("s" if len(discordants) > 1 else "") + " quelle" + ("s" if len(discordants) > 1 else "")
+                + ", corrige leur case Discord pour qu'elles se rangent : "
+                + " ; ".join(_une(x) for x in discordants[:20])
+                + (f" ; et {len(discordants) - 20} autres" if len(discordants) > 20 else ""))
+        if rapport.get("en_attente"):
+            details.append("Attendent cette correction pour être rangés : " + _noms(rapport["en_attente"]))
     manquants = (rapport or {}).get("manquants")
     if manquants is None:
         manquants = [r["nom"] for r in planning_roles.roles_attendus()]
@@ -53705,6 +53727,16 @@ def _render_chatplanning_html() -> str:
             bord = "#f59e0b"
             pastille += "<span class='chat-role-perdu' style='color:#f59e0b;font-size:11px;font-weight:700;margin-right:5px'>rôle retiré</span>"
             largeur = 80
+        elif _etat_roles == "discordant":
+            # planning_roles, regle 6 : la ligne n'est ni rangee ni deplacee tant
+            # qu'on ne sait pas de qui elle parle. Dit SUR la ligne, sinon le
+            # manager lit « 9 lignes » dans la barre et doit les chercher.
+            titre = ("Le nom de cette ligne et son pseudo Discord désignent deux personnes différentes. "
+                     "Elle n'est ni rangée ni déplacée d'après les rôles : corrige le pseudo Discord "
+                     "(la barre « Rôles Discord » dit lequel mettre).")
+            bord = "#f59e0b"
+            pastille += "<span class='chat-role-discordant' style='color:#f59e0b;font-size:11px;font-weight:700;margin-right:5px'>autre Discord ?</span>"
+            largeur = 70
         return (
             f"<td style='padding:4px 6px;white-space:nowrap' title='{html_escape(titre)}'>"
             f"{pastille}"
@@ -79004,11 +79036,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         if r.get("erreur"):
             return jsonify({"ok": False, "message": r["erreur"]})
         bouts = [f"{r.get('ranges', 0)} ligne(s) rangée(s)"]
-        for cle, mot in (("crees", "créée(s)"), ("deplaces", "déplacée(s)"), ("rattaches", "rattachée(s)")):
+        for cle, mot in (("crees", "créée(s)"), ("deplaces", "déplacée(s)"), ("rattaches", "rattachée(s)"),
+                         ("doublons", "doublon(s) vide(s) retiré(s)")):
             if r.get(cle):
                 bouts.append(f"{len(r[cle])} {mot}")
         if r.get("incomplets"):
             bouts.append(f"{len(r['incomplets'])} chatteur(s) avec un seul des deux rôles")
+        if r.get("discordants"):
+            bouts.append(f"{len(r['discordants'])} ligne(s) dont le nom et le Discord ne concordent pas (laissées en place)")
         if r.get("manquants"):
             bouts.append(f"{len(r['manquants'])} rôle(s) pas encore créé(s) sur Discord")
         return jsonify({"ok": True, "recharger": True, "rapport": r, "message": " · ".join(bouts) + "."})

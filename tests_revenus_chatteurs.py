@@ -858,6 +858,111 @@ def test_planning_roles():
     check("aucun planning MYM ni OnlyFans : rien n'est cree au hasard, les chatteurs concernes sont nommes",
           sans["edts"][0]["rows"] == [] and len(r4["sans_planning"]) == 5, r4["sans_planning"])
 
+    # ---- les vrais surnoms du serveur (releves le 19/11/2026, premier rangement reel)
+    surnoms = {"✅ Anjara": "Anjara", "✅ Ashley : 02-08": "Ashley", "✅BA DOO OF 14 20H🔴": "BA DOO",
+               "CEJOTV🏀": "CEJOTV", "✅ Charbel MYM 20 2H JULIA": "Charbel", "Miranto 8 14 OF ( Amélia ) ⚠️": "Miranto",
+               "✅Hér Ab  MYM 20 2H": "Hér Ab", "✅ Horacio  20h a 02h Mym Lola": "Horacio", "✅LAMAR 10% 16/1/2026": "LAMAR",
+               "✅ Yédia 🐬 ( 20-02) Lola Mym": "Yédia", "✅ Odin 14-20 Emma / Alicia": "Odin",
+               "✅ Romuald 14-20 /20-02( AV )": "Romuald", "AGBEDE  14-20 OF Julia ⚠️⚠️": "AGBEDE",
+               "✅Renta économie d'énergie": "Renta économie d'énergie", "Nestor_Espérantos": "Nestor_Espérantos",
+               "✅ Sarah MYM 20 2H": "Sarah", "Jean-luc": "Jean-luc", "229": "229"}
+    rates = {s: pr.nom_propre(s) for s, attendu in surnoms.items() if pr.nom_propre(s) != attendu}
+    check("le prenom se lit dans le surnom Discord : pastilles, horaires, plateforme et model en moins (18 vrais surnoms)",
+          not rates, rates)
+    check("... « Le roi polygame | Salomon » : les deux cotes de la barre sont des noms possibles, le prenom d'abord",
+          pr.noms_possibles("Le roi polygame | Salomon") == ["Salomon", "Le roi polygame"])
+
+    def planning2(*lignes_mym):
+        mym = {"id": "e1", "name": "Planning MYM", "rows": []}
+        for creneau, pseudo, dc, extra in lignes_mym:
+            mym["rows"].append(dict(chatting.nouvelle_ligne(creneau), pseudo=pseudo, discord_username=dc, **extra))
+        return {"edts": [mym, {"id": "e2", "name": "Planning OnlyFans", "rows": []}]}
+    presence = {"presence_by_week": {"2026-11-16": {"lun": "Present"}}}
+    # Le doublon du 19/11 : la ligne « Odin » du manager, et a cote celle que le rangement avait creee.
+    d6 = planning2(("14h-20h", "Odin", "", dict(presence, modele="Emma")),
+                   ("14h-20h", "✅ Odin 14-20 Emma / Alicia", "manitra1502", {"roles_etat": "ok"}),
+                   ("02h-08h", "✅ Tsiry  02-08 / mercredi", "tsiry0403", {"roles_etat": "ok"}),
+                   ("14h-20h", "salomon", "", {}))
+    m6 = [membre("manitra1502", "✅ Odin 14-20 Emma / Alicia", "CHETTER MYM", "14h-20h"),
+          membre("tsiry0403", "✅ Tsiry  02-08 / mercredi", "CHETTER MYM", "02h-08h"),
+          membre("salomon2050", "Le roi polygame | Salomon", "CHETTER MYM", "14h-20h"),
+          membre("anjara0103", "✅ Anjara", "CHETTER MYM", "20h-02h")]
+    r6 = pr.ranger(d6, pr.lire(m6, roles))
+    rows6 = d6["edts"][0]["rows"]
+    odin = [x for x in rows6 if x["discord_username"] == "manitra1502"]
+    check("doublon : la ligne « Odin » du manager recoit le Discord, garde ses presences et sa model ; la ligne vide creee a cote s'en va",
+          len(odin) == 1 and odin[0]["pseudo"] == "Odin" and odin[0]["presence_by_week"] and odin[0]["modele"] == "Emma"
+          and odin[0]["roles_etat"] == "ok" and [x["creneau"] for x in r6["doublons"]] == ["14h-20h"],
+          ([(x["pseudo"], x["discord_username"]) for x in rows6], r6["doublons"]))
+    check("... une ligne deja creee avec le surnom entier prend le prenom seul (« Tsiry »), une ligne neuve aussi (« Anjara »)",
+          sorted(x["pseudo"] for x in rows6) == ["Anjara", "Odin", "Tsiry", "salomon"], [x["pseudo"] for x in rows6])
+    check("... « salomon » est rattache par le prenom apres la barre, pas double",
+          [x["discord_username"] for x in rows6 if x["pseudo"] == "salomon"] == ["salomon2050"]
+          and sorted(x["affiche"] for x in r6["rattaches"]) == ["Le roi polygame | Salomon", "✅ Odin 14-20 Emma / Alicia"])
+    avant6 = copy.deepcopy(d6)
+    r6b = pr.ranger(d6, pr.lire(m6, roles))
+    check("... rejoue : rien ne bouge, rien n'est recree ni retire", d6 == avant6 and not r6b["crees"] and not r6b["doublons"])
+    # Une ligne creee par le rangement ou un manager a deja coche une presence n'est JAMAIS retiree.
+    d7 = planning2(("14h-20h", "Odin", "", {}),
+                   ("14h-20h", "✅ Odin 14-20 Emma / Alicia", "manitra1502", dict(presence, roles_etat="ok")))
+    r7 = pr.ranger(d7, pr.lire(m6[:1], roles))
+    check("une ligne creee qui porte une presence reste (regle 1) : pas de fusion a l'aveugle",
+          len(d7["edts"][0]["rows"]) == 2 and not r7["doublons"] and not r7["rattaches"],
+          [(x["pseudo"], x["discord_username"]) for x in d7["edts"][0]["rows"]])
+    # Deux shifts : la ligne vide du second shift n'est pas un doublon, elle ne doit pas etre retiree puis recreee.
+    d8 = planning2(("14h-20h", "Odin", "manitra1502", presence))
+    m8 = [membre("manitra1502", "✅ Odin 14-20 Emma / Alicia", "CHETTER MYM", "14h-20h", "20h-02h")]
+    pr.ranger(d8, pr.lire(m8, roles))
+    avant8 = copy.deepcopy(d8)
+    r8 = pr.ranger(d8, pr.lire(m8, roles))
+    check("deux shifts : la ligne creee pour le second reste d'un rangement a l'autre (meme identifiant)",
+          d8 == avant8 and len(d8["edts"][0]["rows"]) == 2 and not r8["crees"] and not r8["doublons"])
+    # Le manager corrige ensuite : sa vraie ligne (presences) est sur un autre shift que la ligne vide.
+    d9 = planning2(("20h-02h", "Romuald", "romuald71787", presence),
+                   ("14h-20h", "Romuald", "romuald71787", {"roles_etat": "ok"}))
+    r9 = pr.ranger(d9, pr.lire([membre("romuald71787", "✅ Romuald 14-20 /20-02( AV )", "CHETTER MYM", "14h-20h")], roles))
+    check("vraie ligne sur un autre shift + ligne vide sur le bon : la vraie SUIT avec ses presences, la vide s'en va",
+          [(x["creneau"], bool(x["presence_by_week"])) for x in d9["edts"][0]["rows"]] == [("14h-20h", True)]
+          and [(x["de"], x["a"]) for x in r9["deplaces"]] == [("20h-02h", "14h-20h")] and len(r9["doublons"]) == 1,
+          (d9["edts"][0]["rows"], r9["deplaces"]))
+
+    # ---- nom et Discord qui designent deux personnes (9 lignes du vrai planning, 19/11/2026)
+    d10 = planning2(("20h-02h", "Ronel", "yedia0439", presence),          # porte le Discord de Yedia
+                    ("20h-02h", "Hér Ab", "ronel0753_32232", presence),   # porte celui de Ronel
+                    ("20h-02h", "Eud", "herad_abol", presence),           # porte celui de Her Ab, qui a sa ligne
+                    ("14h-20h", "Yédia", "", presence),
+                    ("02h-08h", "Jerry", "skurt01577", presence),         # prenom + surnom : PAS une contradiction
+                    ("20h-02h", "Charbel", "charbel_ancien", {}))         # un Discord sans role, un Charbel existe
+    m10 = [membre("yedia0439", "✅ Yédia 🐬 ( 20-02) Lola Mym", "CHETTER MYM", "14h-20h"),
+           membre("ronel0753_32232", "✅Ronel MYM 20 2H EMMA", "CHETTER MYM", "02h-08h"),
+           membre("herad_abol", "✅Hér Ab  MYM 20 2H", "CHETTER MYM", "08h-14h"),
+           membre("skurt01577", "✅ Skurt 2- 8 MYM EMMA", "CHETTER MYM", "02h-08h"),
+           membre("charbelsensey", "✅ Charbel MYM 20 2H JULIA", "CHETTER MYM")]
+    r10 = pr.ranger(d10, pr.lire(m10, roles))
+    par10 = {x["pseudo"]: x for x in d10["edts"][0]["rows"]}
+    check("nom et Discord de deux personnes : la ligne n'est NI deplacee NI rangee, elle est marquee et nommee avec le bon pseudo",
+          par10["Ronel"]["creneau"] == "20h-02h" and par10["Ronel"]["roles_etat"] == "discordant"
+          and {x["ligne"]: (x["discord_affiche"], x["attendu"]) for x in r10["discordants"]}
+          == {"Ronel": ("Yédia", ["ronel0753_32232"]), "Hér Ab": ("Ronel", ["herad_abol"]), "Eud": ("Hér Ab", []),
+              "Charbel": ("", ["charbelsensey"])}, r10["discordants"])
+    check("... celui dont la ligne porte le Discord d'un autre n'est pas double : il attend la correction, et il est nomme",
+          len(d10["edts"][0]["rows"]) == 6 and sorted(x["ligne"] for x in r10["en_attente"]) == ["Hér Ab", "Ronel"],
+          r10["en_attente"])
+    check("... Yedia, lui, retrouve SA ligne (sans Discord, a son prenom) ; « Jerry » relie a « Skurt » est range normalement",
+          par10["Yédia"]["discord_username"] == "yedia0439" and par10["Yédia"]["roles_etat"] == "ok"
+          and par10["Jerry"]["roles_etat"] == "ok" and r10["ranges"] == 2, (r10["ranges"], par10["Yédia"]))
+    avant10 = copy.deepcopy(d10)
+    pr.ranger(d10, pr.lire(m10, roles))
+    check("... rejoue : rien ne bouge", d10 == avant10)
+    par10["Ronel"]["discord_username"] = "ronel0753_32232"            # le manager corrige les deux cases
+    par10["Hér Ab"]["discord_username"] = "herad_abol"
+    r11 = pr.ranger(d10, pr.lire(m10, roles))
+    check("la case Discord corrigee : la marque tombe, la ligne se range et suit le role (Ronel passe en 02h-08h avec ses presences)",
+          par10["Ronel"]["roles_etat"] == "ok" and par10["Ronel"]["creneau"] == "02h-08h" and par10["Ronel"]["presence_by_week"]
+          and par10["Hér Ab"]["creneau"] == "08h-14h" and len(d10["edts"][0]["rows"]) == 6
+          and sorted(x["ligne"] for x in r11["discordants"]) == ["Charbel", "Eud"] and not r11["en_attente"],
+          (r11["discordants"], r11["en_attente"]))
+
 
 def test_managers(tmp):
     print("\n--- managers et mini-boss : la matrice, la paie, le fichier ---")
@@ -1222,6 +1327,34 @@ def test_site(tmp):
                           and "Rôle retiré, ligne gardée : " in plan3 and "Baadooo (20h-02h)" in plan3
                           and "Mym Seul (02h-08h)" in plan3,
                           plan3[plan3.find("id='chat-roles'"):][:500])
+                    # nom et Discord qui designent deux personnes : dit sur la ligne ET dans la barre
+                    membres_r.append({"id": "46", "username": "ronel0753", "affiche": "✅Ronel MYM 20 2H EMMA",
+                                      "pseudos": ["ronel0753"], "avatar_url": "", "roles": ["900", ident_r["02h-08h"]]})
+                    membres_r.append({"id": "47", "username": "yedia0439", "affiche": "✅ Yédia 🐬 ( 20-02)",
+                                      "pseudos": ["yedia0439"], "avatar_url": "", "roles": ["900", ident_r["14h-20h"]]})
+                    ligne_d = chatting.add_row(edt["id"], "20h-02h")
+                    chatting.update_cell(edt["id"], ligne_d["id"], "pseudo", "Ronel")
+                    chatting.update_cell(edt["id"], ligne_d["id"], "discord_username", "yedia0439")
+                    nb_d = len(chatting.get_edt(edt["id"])["rows"])
+                    jd = admin.post("/chatting/roles/ranger").get_json() or {}
+                    plan_d = admin.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+                    ronel_d = [x for x in chatting.get_edt(edt["id"])["rows"] if x["id"] == ligne_d["id"]][0]
+                    check("nom et Discord de deux personnes : la ligne reste a sa place, porte « autre Discord ? », la barre dit quel pseudo mettre",
+                          ronel_d["creneau"] == "20h-02h" and ronel_d["roles_etat"] == "discordant"
+                          and plan_d.count("chat-role-discordant") == 1
+                          and "Nom et Discord ne concordent pas sur 1 ligne" in plan_d
+                          and "« Ronel » (20h-02h) porte le Discord de Yédia → le sien : <b>ronel0753</b>" in plan_d
+                          and "Attendent cette correction pour être rangés" in plan_d
+                          and "ne concordent pas" in (jd.get("message") or "")
+                          and len(chatting.get_edt(edt["id"])["rows"]) == nb_d + 1,       # + la ligne de Yedia, pas de doublon de Ronel
+                          (jd.get("message"), plan_d[plan_d.find("Nom et Discord"):][:300]))
+                    chatting.update_cell(edt["id"], ligne_d["id"], "discord_username", "ronel0753")
+                    check("... le manager corrige la case : la marque tombe tout de suite, sans attendre le rangement suivant",
+                          not [x for x in chatting.get_edt(edt["id"])["rows"] if x["id"] == ligne_d["id"]][0].get("roles_etat"))
+                    admin.post("/chatting/roles/ranger")
+                    ronel_d = [x for x in chatting.get_edt(edt["id"])["rows"] if x["id"] == ligne_d["id"]][0]
+                    check("... et au rangement suivant la ligne suit son role (02h-08h)",
+                          ronel_d["creneau"] == "02h-08h" and ronel_d["roles_etat"] == "ok", ronel_d)
                     vue_c = chatteur.get("/?lazy=chatplanning", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
                     check("un chatteur voit le planning mais pas la barre des roles ni ses boutons",
                           "data-field='discord_username'" in vue_c and "id='chat-roles'" not in vue_c)

@@ -470,6 +470,11 @@ def update_cell(edt_id: str, row_id: str, field: str, value: str,
                 _marquer_origine(r, ws, field, "main", "")
             else:
                 return False
+            if field in ("discord_username", "pseudo") and r.get("roles_etat") == "discordant":
+                # La marque « autre Discord ? » (planning_roles, regle 6) parlait de
+                # l'ANCIEN couple nom / pseudo. Sans ca, le manager corrige la case
+                # et la ligne reste accusee jusqu'au rangement suivant.
+                r.pop("roles_etat", None)
             _save(data)
             return True
     return False
