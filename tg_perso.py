@@ -646,7 +646,9 @@ def _repondre(token, cfg, chat_id: int, f: dict):
         _api(token, "sendChatAction", **_dest(chat_id), action="typing")
     except Exception:
         pass
+    t_ia = time.time()
     out = appel_claude(cfg, f.get("histo") or []) if n_jour < IA_PAR_FAN_JOUR else None
+    t_ia = time.time() - t_ia
     nb = int(f.get("nb_msg") or 0)
     depuis = nb - int(f.get("liens_a_msg") or 0)
 
@@ -691,6 +693,12 @@ def _repondre(token, cfg, chat_id: int, f: dict):
             g["liens_envoyes"], g["liens_a_msg"] = now, nb
         g["ia_jour"], g["ia_n"] = jour, n_jour + 1
     _maj_fan(chat_id, _g)
+    # Le 20/11, une réponse est partie deux minutes après le message du fan,
+    # alors que Claude répondait en deux secondes : on garde la mesure pour
+    # voir où le temps passe.
+    attente = int(time.time()) - int(f.get("dernier_msg") or now)
+    print(f"[tgperso] réponse à {chat_id} : {attente}s après son message "
+          f"(Claude {t_ia:.1f}s{', compte perso' if f.get('bc') else ''})", flush=True)
 
 
 def _reponses_dues(token, cfg) -> bool:
