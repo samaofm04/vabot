@@ -32,6 +32,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+import requests.adapters
 import safe_json
 
 DATA_DIR = Path("data")
@@ -375,7 +376,7 @@ def appel_claude(cfg: dict, histo: list) -> dict | None:
                "anthropic-beta": "server-side-fallback-2026-07-01",
                "content-type": "application/json"}
     try:
-        r = requests.post("https://api.anthropic.com/v1/messages",
+        r = _HTTP.post("https://api.anthropic.com/v1/messages",
                           headers=entetes, json=corps, timeout=60)
         if r.status_code == 400:
             # Une option refusée (repli serveur, durée du cache) ne doit pas
@@ -385,7 +386,7 @@ def appel_claude(cfg: dict, histo: list) -> dict | None:
             corps.pop("fallbacks", None)
             entetes.pop("anthropic-beta", None)
             corps["system"][0]["cache_control"] = {"type": "ephemeral"}
-            r = requests.post("https://api.anthropic.com/v1/messages",
+            r = _HTTP.post("https://api.anthropic.com/v1/messages",
                               headers=entetes, json=corps, timeout=60)
         d = r.json()
         if r.status_code != 200:
@@ -417,8 +418,26 @@ def _ajouter_histo(f: dict, de: str, texte: str, liens: bool = False):
 
 # ---------------------------------------------------------------- Telegram
 
+class _AdaptateurIPv4(requests.adapters.HTTPAdapter):
+    """Force l'IPv4. Sur le VPS, l'IPv6 sort mais ne répond pas : chaque
+    nouvelle connexion attendait 20 s avant de retomber sur l'IPv4 (mesuré
+    le 20/11 : 20,17 s contre 0,05 s), et une réponse au fan partait au bout
+    de trois minutes. Se lier à une adresse source IPv4 fait échouer
+    l'essai IPv6 tout de suite. Limité à ce module : le reste du site n'est
+    pas touché."""
+
+    def init_poolmanager(self, *a, **k):
+        k["source_address"] = ("0.0.0.0", 0)
+        return super().init_poolmanager(*a, **k)
+
+
+_HTTP = requests.Session()
+_HTTP.mount("https://", _AdaptateurIPv4())
+
+
 def _api(token: str, methode: str, **params):
-    r = requests.post(f"{TG}/bot{token}/{methode}", json=params, timeout=40)
+    attente = int(params.get("timeout") or 0) if methode == "getUpdates" else 0
+    r = _HTTP.post(f"{TG}/bot{token}/{methode}", json=params, timeout=attente + 20)
     try:
         j = r.json()
     except Exception:
@@ -810,7 +829,7 @@ def _boucle():
                 STATUS["bot_username"] = me.get("username") or ""
                 dernier_token = token
             maj = _api(token, "getUpdates", offset=int(cfg.get("offset") or 0),
-                       timeout=3 if en_attente else 25,
+                       timeout=3 if en_attente else 20,
                        allowed_updates=["message", "callback_query",
                                         "business_connection", "business_message"])
             STATUS["erreur"] = ""
@@ -836,6 +855,11 @@ def _boucle():
                 cfg = c2
             en_attente = _reponses_dues(token, cfg)
             _questions_dues(token, cfg)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            # Coupure réseau : on reprend aussitôt. Attendre 15 s (comme pour
+            # une vraie erreur) retardait d'autant la réponse au fan.
+            print(f"[tgperso] réseau : {e}", flush=True)
+            _STOP.wait(1)
         except Exception as e:
             STATUS["erreur"] = str(e)[:200]
             print(f"[tgperso] boucle : {e}", flush=True)
