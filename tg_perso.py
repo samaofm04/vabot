@@ -229,6 +229,8 @@ RÈGLES QUI NE BOUGENT PAS :
 - Ne fais jamais de l'âge un sujet de drague (« enfin un homme mature », « j'aime les plus vieux », « moi aussi j'ai 18 ans »), et ne mens pas sur toi pour lui ressembler (même ville, même âge).
 - Tu réponds dans la langue du fan : à un Américain, en anglais américain naturel (lowercase, u / ur / ngl / tbh, comme dans les exemples).
 
+LA LIGNE [Infos] (en tête de conversation) : ce que Telegram montre de lui. Son prénom, tu t'en sers. Sa langue d'appli te dit en quoi lui répondre s'il n'a écrit qu'un « hi » ou un emoji. Sa bio ou son anniversaire, seulement si ça vient naturellement (« c'est bientôt ton anniv non ? 👀 »). Ne dis jamais que tu as « vu son profil », sa bio ou qu'il a Premium.
+
 S'IL DIT QU'ON SE CONNAÎT DÉJÀ (« c'est moi », un pseudo, « tu m'as dit de venir ici », « on a parlé sur… ») :
 - Tu fais comme si tu te souvenais de lui : accueil chaleureux avec le pseudo ou le prénom qu'il donne (« ahh c'est toi 😊 trop contente que tu sois venu »). Il vient de ta page ou d'une autre appli où tu lui as parlé : c'est normal.
 - Tu ne lui reposes PAS les questions de base (prénom, d'où il vient) comme à un inconnu. Si tu connais son nom (ligne [Infos] ou ce qu'il a dit), utilise-le.
@@ -296,14 +298,19 @@ _MOTS_EN = {"i", "you", "the", "and", "is", "are", "what", "hey", "hi", "how",
             "my", "your", "yes", "no", "lol", "im", "i'm", "do", "it", "so", "u"}
 
 
-def langue_du_fan(histo: list) -> str:
+def langue_du_fan(histo: list, appli: str = "") -> str:
     """« fr » ou « en », d'après ses derniers messages. Sert à choisir les
     exemples : un Américain à qui l'on montre des exemples français reçoit
-    des réponses qui sentent la traduction."""
+    des réponses qui sentent la traduction. Quand ses messages ne suffisent
+    pas (« hi », un emoji), la langue de son appli Telegram tranche : sans
+    elle, un « hi » d'Américain recevait une réponse à moitié en français."""
     mots = " ".join(h.get("texte", "") for h in histo[-10:] if h.get("de") == "fan")
     mots = [w.strip(".,!?;:()\"'").lower() for w in mots.split()]
     fr = sum(w in _MOTS_FR for w in mots)
     en = sum(w in _MOTS_EN for w in mots)
+    lg = str(appli or "").split("-")[0].lower()
+    if abs(en - fr) <= 1 and lg in ("fr", "en"):
+        return lg
     return "en" if en > fr else "fr"
 
 
@@ -374,7 +381,7 @@ def _compter_ia() -> bool:
     return True
 
 
-def appel_claude(cfg: dict, histo: list, infos: str = "") -> dict | None:
+def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> dict | None:
     """Réponse du cerveau, ou None (pas de clé, plafond, panne, refus) : dans
     ce cas l'appelant envoie la réponse toute faite avec les liens, pour que
     le fan ne reste jamais sans réponse."""
@@ -390,7 +397,7 @@ def appel_claude(cfg: dict, histo: list, infos: str = "") -> dict | None:
         "max_tokens": 2000,
         # Règles + exemples ne bougent pas d'un fan à l'autre : en cache, ils
         # coûtent un dixième du prix à partir du deuxième message.
-        "system": [{"type": "text", "text": prompt_systeme(cfg, langue_du_fan(histo)),
+        "system": [{"type": "text", "text": prompt_systeme(cfg, langue or langue_du_fan(histo)),
                     "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
         "messages": messages,
         # Discussion de comptoir : « low » suffit et répond vite.
@@ -559,6 +566,9 @@ def _traiter_message(token, cfg, m, bc: str | None = None):
         prec.update(f)
         f["nom"] = nom or f.get("nom") or ""
         f["username"] = u.get("username") or ""
+        if u.get("language_code"):
+            f["langue_appli"] = u["language_code"]
+        f["premium"] = bool(u.get("is_premium"))
         f["dernier_msg"] = now
         f["nb_msg"] = int(f.get("nb_msg") or 0) + 1
         f["bloque"] = False
@@ -580,6 +590,75 @@ def _traiter_message(token, cfg, m, bc: str | None = None):
         _envoyer_liens(token, cfg, chat_id, cfg.get("accueil") or ACCUEIL_DEFAUT)
     elif now - int(prec.get("liens_envoyes") or 0) > ANTI_REPETITION:
         _envoyer_liens(token, cfg, chat_id, cfg.get("relance") or RELANCE_DEFAUT)
+
+
+MSG_MINEUR = "désolée, je ne parle qu'aux majeurs 🙏 prends soin de toi"
+# Le profil Telegram (bio, date de naissance) est relu au plus une fois par
+# jour : il change rarement, et chaque lecture coûte un appel.
+PROFIL_TTL = 24 * 3600
+
+
+def _profil_telegram(token, chat_id, f: dict) -> dict:
+    """Bio et date de naissance, quand le fan les a rendues publiques.
+    Telegram ne donne jamais aux bots le numéro, la ville ni les photos."""
+    now = int(time.time())
+    if now - int(f.get("profil_t") or 0) < PROFIL_TTL:
+        return f
+    maj = {"profil_t": now}
+    try:
+        c = _api(token, "getChat", chat_id=chat_id) or {}
+        if c.get("bio"):
+            maj["bio"] = str(c["bio"])[:300]
+        if c.get("birthdate"):
+            maj["naissance"] = c["birthdate"]      # {day, month, year?}
+    except Exception as e:
+        # Fan du compte perso que le bot ne « voit » pas : pas grave.
+        print(f"[tgperso] profil {chat_id} : {e}", flush=True)
+
+    def _g(g):
+        g.update(maj)
+    return _maj_fan(chat_id, _g)
+
+
+def _age(naissance) -> int | None:
+    if not isinstance(naissance, dict) or not naissance.get("year"):
+        return None
+    try:
+        import datetime as _dt
+        auj = _dt.date.today()
+        a = auj.year - int(naissance["year"])
+        if (auj.month, auj.day) < (int(naissance.get("month") or 1), int(naissance.get("day") or 1)):
+            a -= 1
+        return a
+    except Exception:
+        return None
+
+
+_LANGUES = {"fr": "français", "en": "anglais", "es": "espagnol", "de": "allemand",
+            "it": "italien", "pt": "portugais", "nl": "néerlandais", "ar": "arabe"}
+
+
+def _infos_fan(f: dict, age: int | None) -> str:
+    """Tout ce que Telegram dit du fan, pour que le modèle ne devine pas ce
+    qu'on sait déjà (et ne redemande pas un prénom affiché)."""
+    morceaux = []
+    if f.get("nom"):
+        morceaux.append(f"son nom Telegram est « {f['nom']} »")
+    if f.get("username"):
+        morceaux.append(f"son pseudo Telegram est @{f['username']}")
+    lg = str(f.get("langue_appli") or "").split("-")[0]
+    if lg:
+        morceaux.append(f"son appli Telegram est en {_LANGUES.get(lg, lg)}")
+    if f.get("premium"):
+        morceaux.append("il a Telegram Premium")
+    if age is not None:
+        morceaux.append(f"il a {age} ans (date de naissance publique)")
+    elif isinstance(f.get("naissance"), dict) and f["naissance"].get("day"):
+        n = f["naissance"]
+        morceaux.append(f"son anniversaire est le {int(n['day']):02d}/{int(n.get('month') or 0):02d}")
+    if f.get("bio"):
+        morceaux.append(f"sa bio Telegram : « {f['bio']} »")
+    return ", ".join(morceaux)
 
 
 # Le fan qui écrit encore : on attend qu'il ait fini avant de répondre.
@@ -693,10 +772,23 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     except Exception:
         pass
     t_ia = time.time()
-    infos = ", ".join(x for x in (
-        f"son nom Telegram est « {f['nom']} »" if f.get("nom") else "",
-        f"son pseudo Telegram est @{f['username']}" if f.get("username") else "") if x)
-    out = appel_claude(cfg, f.get("histo") or [], infos) if n_jour < IA_PAR_FAN_JOUR else None
+    f = _profil_telegram(token, chat_id, f)
+    age = _age(f.get("naissance"))
+    if age is not None and age < 18:
+        # Date de naissance publique sous 18 ans : on s'arrête sans demander
+        # l'avis du modèle, et sans lien.
+        _envoyer(token, cfg, chat_id, [MSG_MINEUR], False)
+
+        def _gm(g):
+            g["mineur"] = True
+            _ajouter_histo(g, "bot", MSG_MINEUR)
+        _maj_fan(chat_id, _gm)
+        print(f"[tgperso] {chat_id} : {age} ans d'après sa date de naissance, conversation coupée", flush=True)
+        return
+    langue = langue_du_fan(f.get("histo") or [], f.get("langue_appli", ""))
+    infos = _infos_fan(f, age) + (", " if _infos_fan(f, age) else "") + \
+        ("réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français")
+    out = appel_claude(cfg, f.get("histo") or [], infos, langue) if n_jour < IA_PAR_FAN_JOUR else None
     t_ia = time.time() - t_ia
     nb = int(f.get("nb_msg") or 0)
     depuis = nb - int(f.get("liens_a_msg") or 0)
