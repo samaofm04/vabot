@@ -233,7 +233,8 @@ RÈGLES QUI NE BOUGENT PAS :
 - Rien de sexuel ni d'explicite sur Telegram : l'âge n'y est pas vérifié. Tu peux être gentil, drôle, un peu taquin. Si le fan devient chaud, insistant ou demande du contenu, des photos ou « plus », tu restes léger, tu ne rentres pas dedans, et tu l'envoies sur les liens (liens = true).
 - Si le fan dit ou laisse entendre qu'il a moins de 18 ans (âge, collège, lycée, « mes parents »...), tu mets mineur = true, tu lui réponds gentiment que tu ne parles qu'aux majeurs, et tu ne proposes aucun lien.
 - Ne fais jamais de l'âge un sujet de drague (« enfin un homme mature », « j'aime les plus vieux », « moi aussi j'ai 18 ans »), et ne mens pas sur toi pour lui ressembler (même ville, même âge).
-- S'il dit qu'il s'est abonné ou qu'il a rejoint (« c'est bon je suis abonné », « done », « je suis dans ton canal »), mets dit_abonne = true et réponds chaleureusement (« trop bien 🥰 je t'écris là-bas »).
+- S'il dit qu'il s'est abonné ou qu'il a rejoint (« c'est bon je suis abonné », « done », « je suis dans ton canal »), mets dit_abonne = true. Réponds chaleureusement, et dans le même élan demande-lui gentiment des likes : « trop bien 🥰 si t'aimes mes photos laisse-moi des petits likes, ça m'aide trop et ça me fait plaisir 🥺 » (en anglais : « if u like my pics leave me some likes, it helps me so much 🥺 »). Une seule fois, pas à chaque message.
+- Ne mélange JAMAIS le français et l'anglais dans une même réponse (pas de « trop bien » à un Américain) : les phrases données ici en exemple, tu les dis dans SA langue.
 - Tu réponds dans la langue du fan : à un Américain, en anglais américain naturel (lowercase, u / ur / ngl / tbh, comme dans les exemples).
 
 LA LIGNE [Infos] (en tête de conversation) : ce que Telegram montre de lui. Son prénom, tu t'en sers. Sa langue d'appli te dit en quoi lui répondre s'il n'a écrit qu'un « hi » ou un emoji. Sa bio ou son anniversaire, seulement si ça vient naturellement (« c'est bientôt ton anniv non ? 👀 »). Ne dis jamais que tu as « vu son profil », sa bio ou qu'il a Premium.
@@ -961,6 +962,43 @@ def _traiter_callback(token, cfg, q):
         _api(token, "sendMessage", **_dest(chat_id), text=texte)
 
 
+RELANCES_ABO = {
+    "fr": ["t'as réussi à t'abonner ? 😊", "alors, t'as pu t'abonner ? 👀",
+           "t'as réussi à me rejoindre là-bas ? 😊"],
+    "en": ["did u manage to sub? 😊", "so did u make it over there? 👀",
+           "were u able to join? 😊"],
+}
+# Le fan qui écrit en ce moment n'est pas coupé par la relance : l'IA est
+# déjà en train de lui parler.
+CALME_AVANT_RELANCE = 5 * 60
+
+
+def _relance_texte(token, cfg, k, f, now):
+    """Une seule relance en TEXTE, ~15 min après l'envoi du lien, pour les
+    fans du compte perso (ou en mode liens en texte) : comme une vraie
+    personne qui demande « t'as réussi à t'abonner ? », sans bouton."""
+    envoye = int(f.get("liens_envoyes") or 0)
+    if not envoye or f.get("question_t") or f.get("a_repondre"):
+        return
+    if now - envoye < DELAI_QUESTION or now - int(f.get("dernier_msg") or 0) < CALME_AVANT_RELANCE:
+        return
+    import random
+    langue = langue_du_fan(f.get("histo") or [], f.get("langue_appli", ""))
+    texte = random.choice(RELANCES_ABO.get(langue, RELANCES_ABO["fr"]))
+    try:
+        _api(token, "sendMessage", **_dest(int(k)), text=texte)
+    except Exception as e:
+        print(f"[tgperso] relance à {k} : {e}", flush=True)
+        # Hors des 24 h de Telegram, ou fan parti : on n'insiste pas.
+        _maj_fan(k, lambda g: g.__setitem__("question_t", now))
+        return
+
+    def _g(g):
+        _ajouter_histo(g, "bot", texte)
+        g["question_t"] = now
+    _maj_fan(k, _g)
+
+
 def _questions_dues(token, cfg):
     """Pose la question aux fans dont le premier clic date d'un quart d'heure,
     et la relance unique à ceux qui ont répondu « pas encore »."""
@@ -971,9 +1009,10 @@ def _questions_dues(token, cfg):
         # Sur le compte perso, ou quand les liens partent en texte, pas de
         # question à boutons « ✅ C'est fait / ⏳ Pas encore » : ça grille le
         # bot (vu le 20/11). L'IA repère seule « je suis abonné » (dit_abonne).
-        if f.get("bc") or cfg.get("liens_en_texte", True):
+        if now - int(f.get("humain_t") or 0) < _pause(cfg) or f.get("ia_off") or f.get("mineur"):
             continue
-        if now - int(f.get("humain_t") or 0) < _pause(cfg) or f.get("ia_off"):
+        if f.get("bc") or cfg.get("liens_en_texte", True):
+            _relance_texte(token, cfg, k, f, now)
             continue
         a_faire = None
         if f.get("premier_clic") and not f.get("question_t") \
