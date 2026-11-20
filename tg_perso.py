@@ -75,7 +75,10 @@ EXEMPLES_FILE = DATA_DIR / "tg_perso_exemples.json"
 # réponse contre ~0,5 avec Opus. Haiku n'a pas de repli serveur en cas de
 # refus : la réponse toute faite avec les liens prend le relais.
 MODELE = "claude-haiku-5-5"
-HISTO_MAX = 40            # messages gardés par fan (et envoyés à Claude)
+# L'Inbox montre toute la conversation : on en garde beaucoup. Claude n'en
+# lit que les dernières (HISTO_CLAUDE), sinon chaque réponse coûterait plus.
+HISTO_MAX = 400
+HISTO_CLAUDE = 40
 # Plafonds de dépense : un fan qui écrit en boucle, ou un script qui spamme
 # le bot, ne doit pas faire tourner la facture Anthropic toute la nuit.
 IA_PAR_FAN_JOUR = 80
@@ -350,7 +353,7 @@ _SCHEMA = {
 
 def _historique_claude(histo: list, infos: str = "") -> list:
     msgs = []
-    for h in histo[-HISTO_MAX:]:
+    for h in histo[-HISTO_CLAUDE:]:
         role = "user" if h.get("de") == "fan" else "assistant"
         txt = h.get("texte") or ""
         if h.get("liens"):
@@ -440,10 +443,14 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> d
         return None
 
 
-def _ajouter_histo(f: dict, de: str, texte: str, liens: bool = False):
+def _ajouter_histo(f: dict, de: str, texte: str, liens: bool = False,
+                   humain: bool = False):
+    """humain = écrit par le propriétaire lui-même (Telegram ou Inbox) : l'Inbox
+    affiche « Toi » au lieu de « IA »."""
     h = f.setdefault("histo", [])
     h.append({"de": de, "t": int(time.time()), "texte": texte[:1500],
-              **({"liens": True} if liens else {})})
+              **({"liens": True} if liens else {}),
+              **({"humain": True} if humain else {})})
     f["histo"] = h[-HISTO_MAX:]
 
 
@@ -665,7 +672,17 @@ def _infos_fan(f: dict, age: int | None) -> str:
 ATTENTE_REPONSE = 60      # par défaut ; réglable sur la page (delai_reponse)
 # Quand le propriétaire répond lui-même depuis son compte, le bot se tait
 # dans cette conversation : deux voix qui se coupent, le fan le verrait.
-PAUSE_HUMAIN = 6 * 3600
+PAUSE_HUMAIN = 3600        # par défaut ; réglable sur la page (pause_humain_min)
+
+
+def _pause(cfg: dict) -> int:
+    """Le 20/11, 6 h de pause : le propriétaire avait collé un lien à la main,
+    puis testé en fan, et le bot ne répondait plus à « renvoie le lien ».
+    Une heure par défaut, réglable."""
+    try:
+        return max(0, int(cfg.get("pause_humain_min", PAUSE_HUMAIN // 60))) * 60
+    except (TypeError, ValueError):
+        return PAUSE_HUMAIN
 
 
 def _connexion_api(token, bcid) -> dict:
@@ -734,7 +751,7 @@ def _traiter_business(token, cfg, m: dict):
         now = int(time.time())
 
         def _f(f):
-            _ajouter_histo(f, "bot", texte)
+            _ajouter_histo(f, "bot", texte, humain=True)
             f["humain_t"] = now
             f.pop("a_repondre", None)
         _maj_fan(chat_id, _f)
@@ -756,8 +773,10 @@ def _envoyer(token, cfg, chat_id, textes, avec_liens):
 
 def _repondre(token, cfg, chat_id: int, f: dict):
     now = int(time.time())
-    if now - int(f.get("humain_t") or 0) < PAUSE_HUMAIN:
+    if now - int(f.get("humain_t") or 0) < _pause(cfg):
         return                      # tu as pris la conversation : le bot se tait
+    if f.get("ia_off"):
+        return                      # IA coupée pour ce fan depuis l'Inbox
     if f.get("abonne"):
         # Abonné : la conversation continue sur la plateforme, plus ici.
         if now - int(f.get("renvoi_t") or 0) > 6 * 3600:
@@ -786,7 +805,13 @@ def _repondre(token, cfg, chat_id: int, f: dict):
         print(f"[tgperso] {chat_id} : {age} ans d'après sa date de naissance, conversation coupée", flush=True)
         return
     langue = langue_du_fan(f.get("histo") or [], f.get("langue_appli", ""))
-    infos = _infos_fan(f, age) + (", " if _infos_fan(f, age) else "") + \
+    if not [l for l in cfg.get("liens") or [] if lien_valide(l.get("url", ""))]:
+        # Sans lien enregistré, aucun bouton ne part : le bot ne doit pas
+        # promettre « je te mets mes liens 👇 » (vu le 20/11).
+        age_infos = "tu n'as AUCUN lien à envoyer pour l'instant : ne promets pas de lien, mets liens = false"
+    else:
+        age_infos = ""
+    infos = _infos_fan(f, age) + (", " if _infos_fan(f, age) else "") + (age_infos + ", " if age_infos else "") + \
         ("réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français")
     out = appel_claude(cfg, f.get("histo") or [], infos, langue) if n_jour < IA_PAR_FAN_JOUR else None
     t_ia = time.time() - t_ia
@@ -912,7 +937,7 @@ def _questions_dues(token, cfg):
     for k, f in load_fans().items():
         if f.get("abonne") or f.get("bloque"):
             continue
-        if now - int(f.get("humain_t") or 0) < PAUSE_HUMAIN:
+        if now - int(f.get("humain_t") or 0) < _pause(cfg) or f.get("ia_off"):
             continue
         a_faire = None
         if f.get("premier_clic") and not f.get("question_t") \
@@ -1089,7 +1114,7 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
         c = conns[0]
         etat_compte = (f"👤 Répond en ton nom sur ton compte {e(c.get('nom') or '')}"
                        f"{' (@' + e(c['username']) + ')' if c.get('username') else ''}. "
-                       f"Quand tu écris toi-même à un fan, le bot se tait {PAUSE_HUMAIN // 3600} h.")
+                       f"Quand tu écris toi-même à un fan, le bot se tait {_pause(cfg) // 60} min.")
     proprio = ("✅ ton Telegram est relié (notification à chaque abonné)"
                if cfg.get("proprio_chat_id") else
                f"Envoie au bot : <code>/proprio {e(cfg.get('code_proprio', ''))}</code> "
@@ -1124,7 +1149,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 .b.fan{{align-self:flex-start;background:var(--bg);border:1px solid var(--bord)}}
 .b.moi{{align-self:flex-end;background:var(--acc);color:#fff}} .ok{{background:#1f7a3d33;padding:8px 12px;border-radius:8px}}
 </style></head><body><main>
-<h1>📨 Telegram perso</h1>
+<h1>📨 Telegram perso <a href="/tgperso/inbox" style="font-size:15px;margin-left:10px">📥 Ouvrir l'Inbox</a></h1>
 <div class="mut">Le bot accueille le fan et l'envoie sur tes plateformes. Il ne discute pas : la conversation se fait sur MYM, où l'âge est vérifié.</div>
 {bandeau}
 <div class="card"><h2>État</h2><div>{etat}</div><div style="margin-top:6px">{etat_ia}</div><div style="margin-top:6px">{etat_compte}</div><div class="mut" style="margin-top:6px">{proprio}</div></div>
@@ -1160,6 +1185,8 @@ moi: enchanté Karim ! tu viens d'où ?
 <label>Message d'accueil (si le cerveau est coupé ou en panne)</label><textarea name="accueil">{e(cfg.get('accueil') or '')}</textarea>
 <label>Réponse quand le fan écrit</label><textarea name="relance">{e(cfg.get('relance') or '')}</textarea>
 <div class="mut">Envoyée au plus une fois toutes les {ANTI_REPETITION // 60} min, avec les boutons.</div>
+<label>Pause de l'IA quand tu écris toi-même à un fan (minutes)</label>
+<input name="pause_humain_min" type="number" min="0" max="1440" value="{_pause(cfg) // 60}">
 <label>Délai avant de répondre (secondes après son dernier message)</label>
 <input name="delai_reponse" type="number" min="5" max="600" value="{int(cfg.get('delai_reponse') or 60)}">
 <label>Question après le clic</label><input name="question" value="{e(cfg.get('question') or '')}">
@@ -1175,6 +1202,10 @@ def appliquer_reglages(form) -> str:
     cfg["ia"] = form.get("ia") == "1"
     try:
         cfg["delai_reponse"] = max(5, min(600, int(form.get("delai_reponse") or 60)))
+    except ValueError:
+        pass
+    try:
+        cfg["pause_humain_min"] = max(0, min(1440, int(form.get("pause_humain_min") or 60)))
     except ValueError:
         pass
     cfg["prenom"] = (form.get("prenom") or "").strip()[:40] or "Youssef"
@@ -1232,8 +1263,117 @@ def importer_exemples(fichier) -> str:
     return f"Exemples importés : {len(convs)} conversations, {msgs} messages."
 
 
+# ---------------------------------------------------------------- inbox
+
+def _apercu_fan(k: str, f: dict, cfg: dict, now: int) -> dict:
+    """Ce que la colonne de gauche et la fiche de droite affichent."""
+    histo = f.get("histo") or []
+    dernier = histo[-1] if histo else {}
+    lu = int(f.get("lu_t") or 0)
+    noms = {l.get("id"): l.get("label") or l.get("id") for l in cfg.get("liens") or []}
+    pause = int(f.get("humain_t") or 0) + _pause(cfg)
+    age = _age(f.get("naissance"))
+    n = f.get("naissance") if isinstance(f.get("naissance"), dict) else {}
+    compte = ""
+    if f.get("bc"):
+        c = (cfg.get("business") or {}).get(f["bc"]) or {}
+        compte = c.get("nom") or "compte perso"
+    return {
+        "id": k, "nom": f.get("nom") or "", "username": f.get("username") or "",
+        "statut": statut(f), "mineur": bool(f.get("mineur")),
+        "bloque": bool(f.get("bloque")),
+        "dernier": {"texte": (dernier.get("texte") or "")[:120], "t": dernier.get("t") or 0,
+                    "de": dernier.get("de") or "", "humain": bool(dernier.get("humain"))},
+        "non_lus": sum(1 for h in histo if h.get("de") == "fan" and int(h.get("t") or 0) > lu),
+        "ia": bool(cfg.get("ia")) and not f.get("ia_off"),
+        "ia_off": bool(f.get("ia_off")),
+        "pause_jusqua": pause if pause > now else 0,
+        "compte": compte or ("bot @" + STATUS.get("bot_username", "") if STATUS.get("bot_username") else "bot"),
+        "langue": str(f.get("langue_appli") or "").split("-")[0],
+        "premium": bool(f.get("premium")), "bio": f.get("bio") or "",
+        "age": age, "anniv": (f"{int(n['day']):02d}/{int(n.get('month') or 0):02d}" if n.get("day") else ""),
+        "arrive": f.get("arrive") or 0, "nb_msg": int(f.get("nb_msg") or 0),
+        "clics": [{"lien": noms.get(c.get("lien"), c.get("lien")), "t": c.get("t")}
+                  for c in (f.get("clics") or [])[-10:]],
+        "abonne_t": f.get("abonne_t") or 0, "notes": f.get("notes") or "",
+    }
+
+
+def inbox_liste() -> dict:
+    cfg, now = load_cfg(), int(time.time())
+    fans = [_apercu_fan(k, f, cfg, now) for k, f in load_fans().items()]
+    fans.sort(key=lambda x: -int(x["dernier"]["t"] or x["arrive"] or 0))
+    return {"fans": fans, "ia_globale": bool(cfg.get("ia")), "prenom": cfg.get("prenom") or "",
+            "maintenant": now}
+
+
+def inbox_conversation(fan: str) -> dict | None:
+    f = load_fans().get(str(fan))
+    if f is None:
+        return None
+    return {"fan": _apercu_fan(str(fan), f, load_cfg(), int(time.time())),
+            "histo": f.get("histo") or []}
+
+
+def inbox_marquer_lu(fan: str):
+    if str(fan) in load_fans():
+        _maj_fan(fan, lambda f: f.__setitem__("lu_t", int(time.time())))
+
+
+def inbox_notes(fan: str, notes: str):
+    if str(fan) in load_fans():
+        _maj_fan(fan, lambda f: f.__setitem__("notes", (notes or "")[:3000]))
+
+
+def inbox_ia(fan: str, actif: bool):
+    """Interrupteur « IA activée » de l'Inbox. Le rallumer lève aussi la
+    pause de 6 h posée quand tu as écrit toi-même."""
+    if str(fan) not in load_fans():
+        return
+
+    def _f(f):
+        if actif:
+            f.pop("ia_off", None)
+            f.pop("humain_t", None)
+        else:
+            f["ia_off"] = True
+    _maj_fan(fan, _f)
+
+
+def inbox_envoyer(fan: str, texte: str) -> str:
+    """Réponse tapée dans l'Inbox : elle part du compte perso si le fan y a
+    écrit (Telegram Business), sinon du bot. L'IA se tait ensuite 6 h dans
+    cette conversation, comme quand tu écris depuis Telegram. Renvoie "" ou
+    le message d'erreur à afficher."""
+    texte = (texte or "").strip()[:3500]
+    if not texte:
+        return "Message vide."
+    if str(fan) not in load_fans():
+        return "Fan inconnu."
+    token = (load_cfg().get("token") or "").strip()
+    if not token:
+        return "Aucun token de bot."
+    try:
+        _api(token, "sendMessage", **_dest(int(fan)), text=texte)
+    except Exception as e:
+        m = str(e)
+        if "BUSINESS" in m.upper() or "24" in m:
+            return ("Telegram refuse : on ne peut répondre qu'aux fans qui ont écrit "
+                    "dans les dernières 24 h. (" + m[:120] + ")")
+        return "Envoi impossible : " + m[:200]
+    now = int(time.time())
+
+    def _f(f):
+        _ajouter_histo(f, "bot", texte, humain=True)
+        f["humain_t"] = now
+        f["lu_t"] = now
+        f.pop("a_repondre", None)
+    _maj_fan(fan, _f)
+    return ""
+
+
 def register(app, is_auth, is_admin):
-    from flask import request, redirect, Response
+    from flask import request, redirect, Response, jsonify
 
     def _refus():
         return Response("Réservé à l'administration.", status=403, mimetype="text/plain")
@@ -1257,6 +1397,46 @@ def register(app, is_auth, is_admin):
             return _refus()
         from urllib.parse import quote
         return redirect("/tgperso?ok=" + quote(importer_exemples(request.files.get("fichier"))), code=303)
+
+    @app.route("/tgperso/inbox")
+    def tgperso_inbox():
+        if not (is_auth() and is_admin()):
+            return redirect("/")
+        from tg_perso_inbox import INBOX_HTML
+        return Response(INBOX_HTML, mimetype="text/html")
+
+    @app.route("/tgperso/inbox/liste")
+    def tgperso_inbox_liste():
+        if not (is_auth() and is_admin()):
+            return jsonify({"ok": False}), 403
+        return jsonify(inbox_liste())
+
+    @app.route("/tgperso/inbox/conv")
+    def tgperso_inbox_conv():
+        if not (is_auth() and is_admin()):
+            return jsonify({"ok": False}), 403
+        d = inbox_conversation(request.args.get("fan", ""))
+        return (jsonify(d), 200) if d else (jsonify({"ok": False}), 404)
+
+    @app.route("/tgperso/inbox/action", methods=["POST"])
+    def tgperso_inbox_action():
+        if not (is_auth() and is_admin()):
+            return jsonify({"ok": False, "erreur": "Réservé à l'administration."}), 403
+        d = request.get_json(silent=True) or {}
+        fan, quoi = str(d.get("fan") or ""), d.get("quoi")
+        if quoi == "lu":
+            inbox_marquer_lu(fan)
+        elif quoi == "notes":
+            inbox_notes(fan, d.get("notes") or "")
+        elif quoi == "ia":
+            inbox_ia(fan, bool(d.get("actif")))
+        elif quoi == "envoyer":
+            err = inbox_envoyer(fan, d.get("texte") or "")
+            if err:
+                return jsonify({"ok": False, "erreur": err})
+        else:
+            return jsonify({"ok": False, "erreur": "action inconnue"}), 400
+        return jsonify({"ok": True})
 
     @app.route("/tp/<fan>/<lien>/<sig>")
     def tgperso_clic(fan, lien, sig):
