@@ -120,6 +120,9 @@ def _cfg_defaut() -> dict:
         # Secondes d'attente après le DERNIER message du fan. Une réponse en
         # deux secondes trahit le bot ; le propriétaire veut une minute.
         "delai_reponse": 60,
+        # Lien collé en texte, comme une vraie personne, au lieu d'un bouton :
+        # « je sais même pas comment mettre un bouton, ça fait artificiel ».
+        "liens_en_texte": True,
     }
 
 
@@ -243,7 +246,7 @@ QUAND ENVOYER LES LIENS (liens = true) :
 - il demande où te voir, ton Insta, tes réseaux, du contenu, des photos, « plus » ;
 - la conversation devient chaude ;
 - la conversation est bien lancée (après quelques échanges) et ça vient naturellement, par exemple « viens me parler là-bas, je réponds plus vite ».
-Sinon liens = false. Ne les propose pas à chaque message. Quand tu mets liens = true, ton message les annonce en une phrase (« je te mets mes liens 👇 ») : les boutons partent juste en dessous, n'écris jamais d'adresse toi-même.
+Sinon liens = false. Ne les propose pas à chaque message. Quand tu mets liens = true, ton message l'annonce en une phrase (« tiens 👇 », « je te l'envoie ») : le lien part tout seul juste après, dans un message à part. N'écris jamais d'adresse toi-même.
 
 Tu parles au masculin ou au féminin selon ton prénom et ce qu'on sait sur toi (Lola, Julia… = au féminin).
 
@@ -759,8 +762,17 @@ def _traiter_business(token, cfg, m: dict):
     _traiter_message(token, cfg, m, bc=bcid)
 
 
+def _liens_texte(cfg: dict) -> list:
+    """Les adresses telles quelles (pas le lien de suivi /tp/ : une adresse
+    youl4b.com sous le message d'une fille, le fan le verrait)."""
+    return [l["url"] for l in cfg.get("liens") or [] if lien_valide(l.get("url", ""))]
+
+
 def _envoyer(token, cfg, chat_id, textes, avec_liens):
-    kb = _clavier(cfg, chat_id) if avec_liens else None
+    """Renvoie True si les liens sont partis (bouton ou texte)."""
+    texte_mode = bool(cfg.get("liens_en_texte", True))
+    kb = None if texte_mode else (_clavier(cfg, chat_id) if avec_liens else None)
+    urls = _liens_texte(cfg) if (avec_liens and texte_mode) else []
     if avec_liens and not textes:
         textes = [cfg.get("relance") or RELANCE_DEFAUT]
     for i, t in enumerate(textes):
@@ -768,7 +780,11 @@ def _envoyer(token, cfg, chat_id, textes, avec_liens):
         if kb and i == len(textes) - 1:
             params["reply_markup"] = kb
         _api(token, "sendMessage", **params)
-    return bool(kb)
+    # Le lien seul, dans son propre message : Telegram en affiche l'aperçu
+    # (« LOLA 🍒 Mon canal secret / Demander à rejoindre »).
+    for u in urls:
+        _api(token, "sendMessage", **_dest(chat_id), text=u)
+    return bool(kb) or bool(urls)
 
 
 def _repondre(token, cfg, chat_id: int, f: dict):
@@ -828,6 +844,9 @@ def _repondre(token, cfg, chat_id: int, f: dict):
 
             def _g(g):
                 _ajouter_histo(g, "bot", t or RELANCE_DEFAUT, liens=parti)
+                if parti and cfg.get("liens_en_texte", True):
+                    for u in _liens_texte(cfg):
+                        _ajouter_histo(g, "bot", u)
                 g["liens_envoyes"], g["liens_a_msg"] = now, nb
             _maj_fan(chat_id, _g)
         return
@@ -858,6 +877,9 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     def _g(g):
         for i, t in enumerate(textes or [cfg.get("relance") or RELANCE_DEFAUT]):
             _ajouter_histo(g, "bot", t, liens=parti and i == len(textes or [1]) - 1)
+        if parti and cfg.get("liens_en_texte", True):
+            for u in _liens_texte(cfg):
+                _ajouter_histo(g, "bot", u)
         if parti:
             g["liens_envoyes"], g["liens_a_msg"] = now, nb
         g["ia_jour"], g["ia_n"] = jour, n_jour + 1
@@ -1124,6 +1146,7 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
     corps_fans = "".join(lignes_fans) or (
         '<tr><td colspan="6" class="mut">Aucun fan pour l’instant.</td></tr>')
     coche_ia = "checked" if cfg.get("ia") else ""
+    coche_texte = "checked" if cfg.get("liens_en_texte", True) else ""
     ph_token = ("••••• enregistré — laisser vide pour le garder"
                 if cfg.get("token") else "123456:ABC...")
 
@@ -1163,6 +1186,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <input type="file" name="fichier" accept=".json" style="margin-top:8px"><button type="submit">Importer</button></form>
 <form class="card" method="post" action="/tgperso/save"><h2>Réglages</h2>
 <label><input type="checkbox" name="ia" value="1" style="width:auto" {coche_ia}> Le bot discute (cerveau Claude)</label>
+<label><input type="checkbox" name="liens_en_texte" value="1" style="width:auto" {coche_texte}> Liens collés en texte, comme une vraie personne (sinon : boutons, et chaque clic est compté)</label>
 <div class="mut">Coupé : il n'envoie que l'accueil et les liens.</div>
 <label>Ton prénom (le bot parle en ton nom)</label><input name="prenom" value="{e(cfg.get('prenom') or '')}">
 <label>D'où viennent les fans, et où les envoyer</label>
@@ -1200,6 +1224,7 @@ def appliquer_reglages(form) -> str:
     if tok:
         cfg["token"] = tok
     cfg["ia"] = form.get("ia") == "1"
+    cfg["liens_en_texte"] = form.get("liens_en_texte") == "1"
     try:
         cfg["delai_reponse"] = max(5, min(600, int(form.get("delai_reponse") or 60)))
     except ValueError:
