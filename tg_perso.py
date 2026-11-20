@@ -76,6 +76,15 @@ EXEMPLES_FILE = DATA_DIR / "tg_perso_exemples.json"
 # réponse contre ~0,5 avec Opus. Haiku n'a pas de repli serveur en cas de
 # refus : la réponse toute faite avec les liens prend le relais.
 MODELE = "claude-haiku-5-5"
+# Choix du propriétaire sur la page (clé « modele ») pour les réponses de
+# Lola. Mesuré à l'entraînement du 20/11 (45 conversations notées) : Haiku
+# plafonne vers 7,6/10, Sonnet atteint 8,5/10 pour ~10 fois le prix.
+MODELES_LOLA = {"haiku": ("claude-haiku-5-5", "Haiku 5.5 — ~0,03 à 0,1 ct/réponse, ~7,6/10 à l'entraînement"),
+                "sonnet": ("claude-sonnet-5-5", "Sonnet 5.5 — ~0,3 à 0,5 ct/réponse, ~8,5/10 à l'entraînement")}
+
+
+def modele_lola(cfg: dict) -> str:
+    return MODELES_LOLA.get(cfg.get("modele") or "haiku", MODELES_LOLA["haiku"])[0]
 # L'Inbox montre toute la conversation : on en garde beaucoup. Claude n'en
 # lit que les dernières (HISTO_CLAUDE), sinon chaque réponse coûterait plus.
 HISTO_MAX = 400
@@ -239,6 +248,8 @@ REGLES = """Tu discutes sur Telegram, en ton nom : tu es {prenom}. Tu écris com
 {persona}
 D'OÙ VIENT LE FAN : {contexte}
 
+TON LIEN : le lien que tu envoies est ton CANAL Telegram privé, gratuit. En y entrant, il trouve tes liens, dont ton MYM. Ne dis jamais que le lien EST ton MYM, et ne dis jamais que ton MYM est gratuit (seul le canal l'est). Quand le lien part dans ce message, dis « je te l'envoie » ; « juste au-dessus » seulement s'il est déjà parti.
+
 LA RELATION DURE : s'il ne va pas sur ta plateforme, s'il ne veut pas, ou s'il y est déjà, tu continues de discuter avec lui, jour après jour, sans aucune pression. Tu racontes un peu ta journée, tu lui demandes la sienne, tu te souviens de ce qu'il t'a dit. Qu'il se sente bien avec toi passe avant tout.
 
 Tu ne promets jamais un vocal, une photo, un appel ou un rendez-vous (« je t'en envoie un plus tard », « promis je te dirai quand je rentre », « demande-le moi, je dirai peut-être oui ») : tu ne pourrais pas le tenir. Tu esquives avec humour et tu relances.
@@ -246,9 +257,12 @@ Tu es seule à répondre, c'est ton téléphone : ne laisse jamais entendre que 
 VARIE : ne commence jamais deux messages de suite par la même formule (« Haha », « Pas de souci », « Je comprends »), et ne redis jamais une phrase déjà écrite. Refuser quelque chose (photo, vocal, prix) se fait une fois avec humour, la fois suivante tu changes juste de sujet.
 NE TE RÉPÈTE PAS : une même idée (« pas besoin de payer », « on discute tranquille », « repasse quand tu peux », « je suis une vraie personne ») se dit UNE fois dans la conversation, ensuite tu passes à autre chose. Réponds d'abord à ce qu'il vient de dire avant de relancer, et ne repose pas une question à laquelle il a déjà répondu.
 
-S'IL DEMANDE CE QUE TU FAIS / CE QUE TU PROPOSES / CE QUE TU CRÉES : réponds simplement et franchement, sans rester vague : tu fais des photos et du contenu perso, tu les postes sur ton MYM, et ton canal Telegram privé est gratuit, tu y mets tes liens. Puis donne le lien (liens = true).
+S'IL DEMANDE CE QUE TU FAIS / CE QUE TU PROPOSES / CE QUE TU CRÉES : réponds simplement et franchement, sans rester vague : tu fais des photos et du contenu perso, tu les postes sur ton MYM, et ton canal Telegram privé est gratuit, tu y mets tes liens. Puis donne le lien (liens = true). Jamais de « sur-mesure », de vidéo personnalisée, de tarif ni de négociation.
+UN REFUS EST UN VRAI REFUS : photo, selfie, vocal, appel, rencontre, venir chez lui, goûter sa cuisine… tu dis non avec humour, sans « pour l'instant », « pas encore », « on verra », « il faudra voir », « je te dis pas non pour toujours », « un jour peut-être » : ces mots promettent quelque chose que tu ne feras jamais.
 S'IL DEMANDE SI C'EST PAYANT : le canal est gratuit, dis-le clairement (« non c'est gratuit 😊 »). Esquiver le rend méfiant.
 S'IL DEMANDE DE LA DISCRÉTION (en couple, marié, « personne doit savoir ») : rassure-le simplement (« t'inquiète, c'est entre nous / c'est discret »), sans le juger ni lui faire la morale.
+RÉPONDS D'ABORD À SA QUESTION, franchement et simplement, avant de relancer : esquiver une question anodine (« je garde un peu de mystère », « je te dirai plus tard ») sonne faux et froid. Pour ta vie, appuie-toi sur « Ce qu'il faut savoir sur toi » ; ce qui n'y est pas, tu peux le dire simplement sans entrer dans des détails précis, et tu restes cohérente avec ce que tu as déjà dit. Ne demande jamais son nom de famille, son adresse ou d'autres infos perso intrusives.
+AVANT DE POSER UNE QUESTION, vérifie qu'il n'y a pas déjà répondu plus haut ; sinon rebondis sur sa réponse.
 N'INVENTE RIEN SUR TOI POUR LUI RESSEMBLER : pas les mêmes études, la même ville, le même métier que lui ; pas de faux souvenirs (« je crois que tu m'avais dit ») ; jamais de pseudo, de nom de compte, de snap ou d'insta inventé : tout est dans le lien.
 
 LE BUT : faire connaissance, puis l'amener sur tes plateformes (les liens). C'est là-bas que la vraie conversation continue. Tu ne vends rien ici : pas de prix, pas d'offre, pas de photo ni de vidéo envoyée ici.
@@ -264,7 +278,7 @@ RÈGLES QUI NE BOUGENT PAS :
 LA LIGNE [Infos] (en tête de conversation) : ce que Telegram montre de lui. Son prénom, tu t'en sers. Sa langue d'appli te dit en quoi lui répondre s'il n'a écrit qu'un « hi » ou un emoji. Sa bio ou son anniversaire, seulement si ça vient naturellement (« c'est bientôt ton anniv non ? 👀 »). Ne dis jamais que tu as « vu son profil », sa bio ou qu'il a Premium.
 
 S'IL DIT QU'ON SE CONNAÎT DÉJÀ (« c'est moi », un pseudo, « tu m'as dit de venir ici », « on a parlé sur… ») :
-- Tu fais comme si tu te souvenais de lui : accueil chaleureux avec le pseudo ou le prénom qu'il donne (« ahh c'est toi 😊 trop contente que tu sois venu »). Il vient de ta page ou d'une autre appli où tu lui as parlé : c'est normal.
+- Tu fais comme si tu te souvenais de lui, sans rien affirmer de précis (pas de « pas de nouvelles depuis », « la dernière fois tu m'as dit ») : accueil chaleureux avec le pseudo ou le prénom qu'il donne (« ahh c'est toi 😊 trop contente que tu sois venu »). Il vient de ta page ou d'une autre appli où tu lui as parlé : c'est normal.
 - Tu ne lui reposes PAS les questions de base (prénom, d'où il vient) comme à un inconnu. Si tu connais son nom (ligne [Infos] ou ce qu'il a dit), utilise-le.
 - Tu n'inventes aucun détail précis de « votre » conversation. S'il te teste (« tu te souviens de quoi ? », « c'est quoi mon prénom ? »), tu restes vague et joueuse (« évidemment 😏 mais redis-moi, j'ai envie de l'entendre ») et tu relances sur lui.
 
@@ -273,7 +287,7 @@ S'IL NE VEUT PAS PAYER (« je vais pas payer », « je mets pas ma carte », « 
 - Ce n'est pas l'argent qui t'intéresse : tu aimes parler avec lui, et là-bas vous discutez tranquillement.
 - Tu peux dire que tu postes des photos sur ton feed là-bas de temps en temps. Jamais de promesse de photos coquines ici sur Telegram.
 - Ensuite tu relances la conversation normalement (lien seulement s'il ne l'a pas déjà eu ou s'il le redemande).
-- À un fan qui a dit qu'il ne paierait pas : PAS d'accroche taquine vers MYM (ça ressemble à une vente). Présente simplement ton canal : gratuit, il peut s'abonner et liker, ça te fait plaisir.
+- À un fan qui a dit qu'il ne paierait pas : PAS d'accroche taquine vers MYM, et ne présente pas MYM comme « l'endroit où tu discutes vraiment » (ça ressemble à une vente). Présente simplement ton canal : gratuit, il peut s'y abonner et liker, ça te fait plaisir.
 
 QUAND ENVOYER LES LIENS (liens = true) :
 - il demande où te voir, ton Insta, tes réseaux, du contenu, des photos, « plus » ;
@@ -282,7 +296,7 @@ QUAND ENVOYER LES LIENS (liens = true) :
 Sinon liens = false. Ne les propose pas à chaque message.
 LIEN DÉJÀ ENVOYÉ : s'il pose une question dessus (« c'est quoi MYM ? », « y a quoi dessus ? »), tu réponds, et tu peux dire UNE fois « c'est le lien juste au-dessus » ; ensuite tu ne parles plus du lien du tout (ni « il est au-dessus », ni « tu sais où me trouver ») tant qu'il ne le redemande pas. S'il dit qu'il ira voir ou qu'il a cliqué, tu passes simplement à autre chose. liens = false et lien_demande = false. Tu ne le renvoies que s'il le redemande (« renvoie », « j'arrive pas », « je le trouve pas »). N'écris jamais d'adresse toi-même : le lien part tout seul juste après ton message, dans un message à part.
 
-L'ACCROCHE QUAND LE LIEN PART : donne-lui envie de cliquer, pas juste « je réponds plus vite ». Nomme ton MYM, et sois taquine avec un sous-entendu léger : là-bas tu es beaucoup plus libre, plus détendue, vous pourrez vraiment vous amuser (« viens sur mon MYM, là-bas je suis beaucoup plus libre 😏 on pourra vraiment s'amuser… si tu vois ce que je veux dire 👇 », en anglais « come on my MYM, im way more free over there 😏 we can actually have fun… if u know what i mean 👇 »). Le sous-entendu suffit : jamais de description de ton corps, de ta tenue (« en petite tenue »), de ce que tu ferais, ni « j'ai envie de me lâcher avec toi ». Au moindre doute sur son âge, pas d'accroche taquine du tout.
+L'ACCROCHE QUAND LE LIEN PART : donne-lui envie de cliquer, pas juste « je réponds plus vite ». Présente ton canal (gratuit, ton MYM est dedans) et sois taquine avec un sous-entendu léger : sur ton MYM tu es beaucoup plus libre, vous pourrez vraiment vous amuser (« viens dans mon canal, c'est gratuit et mon MYM est dedans 😏 là-bas je suis beaucoup plus libre… si tu vois ce que je veux dire 👇 », en anglais « join my channel, it's free n my MYM is in there 😏 im way more free over there… if u know what i mean 👇 »). Le sous-entendu suffit : jamais de description de ton corps, de ta tenue (« en petite tenue »), de ce que tu ferais, ni « j'ai envie de me lâcher avec toi ». Au moindre doute sur son âge, pas d'accroche taquine du tout.
 
 Tu parles au masculin ou au féminin selon ton prénom et ce qu'on sait sur toi (Lola, Julia… = au féminin : « contente », « désolée », « prête », jamais « content »).
 
@@ -445,8 +459,90 @@ def _message_interne(m: str) -> bool:
     return bool(_INTERNE.search(m))
 
 
-_RENVOI = re.compile(r"renvoi|renvoy|resend|send (it|the link)? ?again|lien|link|j'?arrive pas|marche pas"
-                     r"|trouve pas|can'?t find|doesn'?t work|not working|where is", re.I)
+# Ce qui veut dire « renvoie-le ». Pas « lien » ou « link » seuls : « i'll
+# check ur link » faisait repartir le lien (lien répété chez l'Américain à
+# l'entraînement du 20/11).
+_RENVOI = re.compile(r"renvoi|renvoy|redonne|resend|again|encore le lien|envoie.{0,12}lien|send.{0,15}link"
+                     r"|j'?\s?arrive pas|marche pas|fonctionne pas|trouve pas|vois pas le lien|perdu le lien"
+                     r"|can'?t find|cant see|doesn'?t work|not working|where('?s| is) (the|ur|your) link|lost the link", re.I)
+
+
+_JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+
+
+def _consignes_communes(cfg: dict, histo: list) -> list:
+    """Ce que le modèle ne peut pas deviner : le moment (il inventait « le
+    lundi matin c'est dur »), et le rappel de proposer le lien dans une
+    conversation lancée qui ne l'a pas encore eu (oubli fréquent à
+    l'entraînement du 20/11)."""
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        maintenant = _dt.datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        maintenant = _dt.datetime.now()
+    c = [f"on est {_JOURS[maintenant.weekday()]}, il est {maintenant.hour}h{maintenant.minute:02d} (heure de Paris)"]
+    nb_fan = sum(1 for h in histo if h.get("de") == "fan")
+    # Ses propres derniers messages, en clair : sans ce rappel elle reprenait
+    # les mêmes formules (« le canal est gratuit » trois fois, trois au revoir
+    # identiques) — 1re cause de mauvaise note à l'entraînement du 20/11.
+    siens = [str(h.get("texte") or "") for h in histo if h.get("de") != "fan"
+             and not str(h.get("texte") or "").startswith("http")][-6:]
+    if siens:
+        c.append("tes derniers messages (ne reprends AUCUNE de ces formules, ne redis pas ces idées, "
+                 "ne repose pas ces questions) : " + " | ".join(m[:90] for m in siens))
+    if _liens_texte(cfg) and nb_fan >= 4 and not _lien_recent(cfg, histo, n=len(histo)):
+        c.append("il n'a pas encore eu ton lien alors que vous parlez depuis un moment : propose-le "
+                 "dans cette réponse, naturellement (liens = true)")
+    return c
+
+
+_INDICE_MINEUR = re.compile(
+    r"\b(1[0-7]|[5-9])\s*(ans|an|yo|y/o|years?|yrs)\b|j'?ai\s*(1[0-7])\b|\bi'?m\s*(1[0-7])\b"
+    r"|coll[eè]ge|lyc[eé]e|\bseconde\b|\bterminale\b|\bbrevet\b|\b3e\b|\b4e\b|\bbac (l'an|blanc)"
+    r"|mes parents|ma m[eè]re|mon p[eè]re|ma daronne|mon daron|high ?school|middle school"
+    r"|my (mom|mum|dad|parents)|\bgrade\b|\bmineur", re.I)
+
+_SCHEMA_RELU = {"type": "object", "properties": {"messages": {"type": "array", "items": {"type": "string"}}},
+                "required": ["messages"], "additionalProperties": False}
+
+_RELECTURE = """Tu relis le brouillon de réponse de Lola (une fille qui discute sur Telegram) avant qu'il parte. Corrige SEULEMENT si un de ces défauts est présent, sinon renvoie le brouillon à l'identique :
+1. il reprend une formule, une idée ou une question déjà écrite par Lola plus haut (même ouverture « Haha… / Pas de souci… », même au revoir, « le canal est gratuit » redit, « le lien est au-dessus » redit) ;
+2. il pose une question à laquelle le fan a déjà répondu ;
+3. il invente un détail de vie de Lola (études, ville, métier, souvenir commun) ou contredit ce qu'elle a dit avant ;
+4. il promet ou laisse espérer quelque chose (photo, vocal, appel, rencontre, « pour l'instant », « on verra ») ;
+5. il est bancal, trop formel, ou mélange français et anglais ; accords au féminin pour Lola.
+Garde le même sens, le même ton, la même longueur (1 ou 2 messages courts), la même langue. N'ajoute jamais d'adresse ni de lien."""
+
+
+def _relire(cle: str, histo: list, brouillon: list, infos: str, langue: str) -> list:
+    """Deuxième passe rapide (Haiku) : à l'entraînement du 20/11, Haiku
+    connaissait les règles mais ne les vérifiait pas toutes en écrivant
+    (plateau à 7,7/10, surtout des répétitions). En cas de panne, le
+    brouillon part tel quel."""
+    import json as _json
+    lignes = [("FAN : " if h.get("de") == "fan" else "LOLA : ") + str(h.get("texte") or "")
+              for h in histo[-16:]]
+    contenu = ("Conversation :\n" + "\n".join(lignes) + "\n\nInfos : " + (infos or "") +
+               "\n\nBrouillon de Lola : " + _json.dumps(brouillon, ensure_ascii=False))
+    corps = {"model": MODELE, "max_tokens": 1500, "system": _RELECTURE,
+             "messages": [{"role": "user", "content": contenu}],
+             "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": _SCHEMA_RELU}}}
+    try:
+        r = _HTTP.post("https://api.anthropic.com/v1/messages", timeout=40, json=corps,
+                       headers={"x-api-key": cle, "anthropic-version": "2023-06-01",
+                                "content-type": "application/json"})
+        d = r.json()
+        if r.status_code != 200 or d.get("stop_reason") == "refusal":
+            return brouillon
+        txt = "".join(b.get("text", "") for b in d.get("content") or [] if b.get("type") == "text")
+        relu = [m.strip() for m in _json.loads(txt).get("messages") or []
+                if str(m).strip() and not _message_interne(str(m))][:2]
+        relu = [_URL.sub("", m).strip() for m in relu]
+        return [m for m in relu if m] or brouillon
+    except Exception as e:
+        print(f"[tgperso] relecture : {e}", flush=True)
+        return brouillon
 
 
 def _dernier_fan(histo: list) -> str:
@@ -479,14 +575,15 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
         STATUS["ia_erreur"] = "pas de clé ANTHROPIC_API_KEY" if not cle else STATUS.get("ia_erreur", "")
         return None
     corps = {
-        "model": MODELE,
+        "model": modele_lola(cfg),
         "max_tokens": 2000,
         # Règles + exemples ne bougent pas d'un fan à l'autre : en cache, ils
         # coûtent un dixième du prix à partir du deuxième message.
         "system": [{"type": "text", "text": prompt_systeme(cfg, langue or langue_du_fan(histo)),
                     "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
         "messages": messages,
-        # Discussion de comptoir : « low » suffit et répond vite.
+        # « low » : « medium » n'a rien gagné à l'entraînement du 20/11
+        # (7,5 contre 7,7). C'est la relecture (_relire) qui corrige.
         "output_config": {"effort": "low",
                           "format": {"type": "json_schema", "schema": _SCHEMA}},
     }
@@ -539,6 +636,15 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
                 and not _RENVOI.search(_dernier_fan(histo)):
             out["liens"] = out["lien_demande"] = False
             out["messages"] = [m.replace("👇", "").strip() for m in out["messages"] if m.replace("👇", "").strip()]
+        # « Mineur » sans le moindre indice dans ses messages : faux positif
+        # (vu le 20/11 : un adulte qui parlait de ranger son appart coupé
+        # net). On ne coupe que sur un vrai indice.
+        if out.get("mineur") and not _INDICE_MINEUR.search(
+                " ".join(str(h.get("texte") or "") for h in histo if h.get("de") == "fan")):
+            print("[tgperso] mineur signalé sans indice : ignoré", flush=True)
+            out["mineur"] = False
+        # (Une relecture par une 2e passe a été essayée le 20/11 : elle
+        # rendait Lola fuyante, 7,2/10 contre 7,7. Retirée.)
         # Fan anglophone qui reçoit du français (17 fois à l'entraînement) :
         # une seule nouvelle tentative, avec le rappel en clair.
         if langue == "en" and not _relance and any(
@@ -968,6 +1074,7 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     elif n_jour >= max_jour - 5:
         consignes.append("vous avez déjà beaucoup parlé aujourd'hui : commence à conclure naturellement "
                          "(tu vas devoir filer bientôt), sans couper net")
+    consignes += _consignes_communes(cfg, f.get("histo") or [])
     infos = ", ".join(x for x in [_infos_fan(f, age)] + consignes + [
         "réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français"] if x)
     out = appel_claude(cfg, f.get("histo") or [], infos, langue)
@@ -1321,7 +1428,7 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
     elif STATUS.get("ia_erreur"):
         etat_ia = f"🟠 Cerveau : {e(STATUS['ia_erreur'])}"
     else:
-        etat_ia = (f"🧠 Cerveau actif ({MODELE}) : {len(of)} conversations OnlyFans "
+        etat_ia = (f"🧠 Cerveau actif ({modele_lola(cfg)}) : {len(of)} conversations OnlyFans "
                    f"+ {len(perso)} exemples à toi · {STATUS.get('ia_n', 0)} réponses aujourd'hui")
     conns = [c for c in (cfg.get("business") or {}).values() if c.get("actif")]
     if not conns:
@@ -1344,6 +1451,9 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
     corps_fans = "".join(lignes_fans) or (
         '<tr><td colspan="6" class="mut">Aucun fan pour l’instant.</td></tr>')
     coche_ia = "checked" if cfg.get("ia") else ""
+    options_modele = "".join(
+        f'<option value="{k}"{" selected" if (cfg.get("modele") or "haiku") == k else ""}>{e(v[1])}</option>'
+        for k, v in MODELES_LOLA.items())
     coche_texte = "checked" if cfg.get("liens_en_texte", True) else ""
     ph_token = ("••••• enregistré — laisser vide pour le garder"
                 if cfg.get("token") else "123456:ABC...")
@@ -1386,6 +1496,8 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <label><input type="checkbox" name="ia" value="1" style="width:auto" {coche_ia}> Le bot discute (cerveau Claude)</label>
 <label><input type="checkbox" name="liens_en_texte" value="1" style="width:auto" {coche_texte}> Liens collés en texte, comme une vraie personne (sinon : boutons, et chaque clic est compté)</label>
 <div class="mut">Coupé : il n'envoie que l'accueil et les liens.</div>
+<label>Cerveau de Lola</label>
+<select name="modele" style="width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--bord);border-radius:8px;padding:8px;font:inherit">{options_modele}</select>
 <label>Ton prénom (le bot parle en ton nom)</label><input name="prenom" value="{e(cfg.get('prenom') or '')}">
 <label>D'où viennent les fans, et où les envoyer</label>
 <textarea name="contexte" placeholder="{e(CONTEXTE_DEFAUT)}">{e(cfg.get('contexte') or '')}</textarea>
@@ -1439,6 +1551,8 @@ def appliquer_reglages(form) -> str:
     except ValueError:
         pass
     cfg["prenom"] = (form.get("prenom") or "").strip()[:40] or "Youssef"
+    if form.get("modele") in MODELES_LOLA:
+        cfg["modele"] = form.get("modele")
     # Champs qu'on a le droit de vider : persona et exemples.
     cfg["persona"] = (form.get("persona") or "").strip()[:2000]
     cfg["contexte"] = (form.get("contexte") or "").strip()[:2000]
@@ -1700,6 +1814,7 @@ def entrainement_reponse(histo: list, nom: str = "", langue: str = "") -> dict:
         morceaux.append(f"son nom Telegram est « {nom} »")
     if not _liens_texte(cfg):
         morceaux.append("tu n'as AUCUN lien à envoyer pour l'instant : ne promets pas de lien, mets liens = false")
+    morceaux += _consignes_communes(cfg, histo)
     morceaux.append("réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français")
     out = appel_claude(cfg, histo, ", ".join(morceaux), langue)
     if out is None:
