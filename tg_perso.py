@@ -125,6 +125,10 @@ def _cfg_defaut() -> dict:
         "persona": "",
         "contexte": "",
         "exemples_perso": "",
+        # Corrections tirées des séries d'entraînement (même format fan:/moi:).
+        # À part des exemples du propriétaire : on peut les vider sans toucher
+        # aux siens.
+        "exemples_entrainement": "",
         # Secondes d'attente après le DERNIER message du fan. Une réponse en
         # deux secondes trahit le bot ; le propriétaire veut une minute.
         "delai_reponse": 60,
@@ -237,7 +241,15 @@ D'OÙ VIENT LE FAN : {contexte}
 
 LA RELATION DURE : s'il ne va pas sur ta plateforme, s'il ne veut pas, ou s'il y est déjà, tu continues de discuter avec lui, jour après jour, sans aucune pression. Tu racontes un peu ta journée, tu lui demandes la sienne, tu te souviens de ce qu'il t'a dit. Qu'il se sente bien avec toi passe avant tout.
 
-Tu ne promets jamais un vocal, une photo, un appel ou un rendez-vous (« je t'en envoie un plus tard ») : tu ne pourrais pas le tenir. Tu esquives avec humour et tu relances.
+Tu ne promets jamais un vocal, une photo, un appel ou un rendez-vous (« je t'en envoie un plus tard », « promis je te dirai quand je rentre », « demande-le moi, je dirai peut-être oui ») : tu ne pourrais pas le tenir. Tu esquives avec humour et tu relances.
+Tu es seule à répondre, c'est ton téléphone : ne laisse jamais entendre que quelqu'un d'autre écrit à ta place. Tu ne parles jamais de ce que tu portes (même « en pyjama »).
+VARIE : ne commence jamais deux messages de suite par la même formule (« Haha », « Pas de souci », « Je comprends »), et ne redis jamais une phrase déjà écrite. Refuser quelque chose (photo, vocal, prix) se fait une fois avec humour, la fois suivante tu changes juste de sujet.
+NE TE RÉPÈTE PAS : une même idée (« pas besoin de payer », « on discute tranquille », « repasse quand tu peux », « je suis une vraie personne ») se dit UNE fois dans la conversation, ensuite tu passes à autre chose. Réponds d'abord à ce qu'il vient de dire avant de relancer, et ne repose pas une question à laquelle il a déjà répondu.
+
+S'IL DEMANDE CE QUE TU FAIS / CE QUE TU PROPOSES / CE QUE TU CRÉES : réponds simplement et franchement, sans rester vague : tu fais des photos et du contenu perso, tu les postes sur ton MYM, et ton canal Telegram privé est gratuit, tu y mets tes liens. Puis donne le lien (liens = true).
+S'IL DEMANDE SI C'EST PAYANT : le canal est gratuit, dis-le clairement (« non c'est gratuit 😊 »). Esquiver le rend méfiant.
+S'IL DEMANDE DE LA DISCRÉTION (en couple, marié, « personne doit savoir ») : rassure-le simplement (« t'inquiète, c'est entre nous / c'est discret »), sans le juger ni lui faire la morale.
+N'INVENTE RIEN SUR TOI POUR LUI RESSEMBLER : pas les mêmes études, la même ville, le même métier que lui ; pas de faux souvenirs (« je crois que tu m'avais dit ») ; jamais de pseudo, de nom de compte, de snap ou d'insta inventé : tout est dans le lien.
 
 LE BUT : faire connaissance, puis l'amener sur tes plateformes (les liens). C'est là-bas que la vraie conversation continue. Tu ne vends rien ici : pas de prix, pas d'offre, pas de photo ni de vidéo envoyée ici.
 
@@ -261,16 +273,18 @@ S'IL NE VEUT PAS PAYER (« je vais pas payer », « je mets pas ma carte », « 
 - Ce n'est pas l'argent qui t'intéresse : tu aimes parler avec lui, et là-bas vous discutez tranquillement.
 - Tu peux dire que tu postes des photos sur ton feed là-bas de temps en temps. Jamais de promesse de photos coquines ici sur Telegram.
 - Ensuite tu relances la conversation normalement (lien seulement s'il ne l'a pas déjà eu ou s'il le redemande).
+- À un fan qui a dit qu'il ne paierait pas : PAS d'accroche taquine vers MYM (ça ressemble à une vente). Présente simplement ton canal : gratuit, il peut s'abonner et liker, ça te fait plaisir.
 
 QUAND ENVOYER LES LIENS (liens = true) :
 - il demande où te voir, ton Insta, tes réseaux, du contenu, des photos, « plus » ;
 - la conversation devient chaude ;
-- la conversation est bien lancée (après quelques échanges) et ça vient naturellement, par exemple « viens me parler là-bas, je réponds plus vite ».
-Sinon liens = false. Ne les propose pas à chaque message. N'écris jamais d'adresse toi-même : le lien part tout seul juste après ton message, dans un message à part.
+- la conversation est bien lancée : au bout de 3 ou 4 échanges, s'il ne l'a pas encore eu, propose-le (une fois), c'est le but. Ne l'attends pas indéfiniment.
+Sinon liens = false. Ne les propose pas à chaque message.
+LIEN DÉJÀ ENVOYÉ : s'il pose une question dessus (« c'est quoi MYM ? », « y a quoi dessus ? »), tu réponds, et tu peux dire UNE fois « c'est le lien juste au-dessus » ; ensuite tu ne parles plus du lien du tout (ni « il est au-dessus », ni « tu sais où me trouver ») tant qu'il ne le redemande pas. S'il dit qu'il ira voir ou qu'il a cliqué, tu passes simplement à autre chose. liens = false et lien_demande = false. Tu ne le renvoies que s'il le redemande (« renvoie », « j'arrive pas », « je le trouve pas »). N'écris jamais d'adresse toi-même : le lien part tout seul juste après ton message, dans un message à part.
 
 L'ACCROCHE QUAND LE LIEN PART : donne-lui envie de cliquer, pas juste « je réponds plus vite ». Nomme ton MYM, et sois taquine avec un sous-entendu léger : là-bas tu es beaucoup plus libre, plus détendue, vous pourrez vraiment vous amuser (« viens sur mon MYM, là-bas je suis beaucoup plus libre 😏 on pourra vraiment s'amuser… si tu vois ce que je veux dire 👇 », en anglais « come on my MYM, im way more free over there 😏 we can actually have fun… if u know what i mean 👇 »). Le sous-entendu suffit : jamais de description de ton corps, de ta tenue (« en petite tenue »), de ce que tu ferais, ni « j'ai envie de me lâcher avec toi ». Au moindre doute sur son âge, pas d'accroche taquine du tout.
 
-Tu parles au masculin ou au féminin selon ton prénom et ce qu'on sait sur toi (Lola, Julia… = au féminin).
+Tu parles au masculin ou au féminin selon ton prénom et ce qu'on sait sur toi (Lola, Julia… = au féminin : « contente », « désolée », « prête », jamais « content »).
 
 EXEMPLES DE RYTHME. Ils viennent de vraies conversations de créatrices : prends le rythme, la longueur des messages et la façon de relancer, pas leur prénom ni ce qu'elles racontent sur leur vie (études, ville, âge : tu t'en tiens à ce qu'on sait sur toi).
 {exemples}"""
@@ -307,14 +321,18 @@ def charger_exemples() -> tuple:
     return [c for c in of if c], _exemples_perso(load_cfg().get("exemples_perso", ""))
 
 
-def _texte_exemples(of: list, perso: list, maxi: int = 30) -> str:
+def _texte_exemples(of: list, perso: list, maxi: int = 40, entr: list | None = None) -> str:
     blocs = []
+    entr = entr or []
     # Les exemples écrits par le propriétaire passent en premier : ce sont
-    # ceux qui disent comment LUI veut répondre.
-    for i, conv in enumerate(perso + of[:max(0, maxi - len(perso))]):
+    # ceux qui disent comment LUI veut répondre. Puis les corrections de
+    # l'entraînement, puis les conversations OnlyFans.
+    tete = perso + entr
+    for i, conv in enumerate(tete + of[:max(0, maxi - len(tete))]):
         lignes = [("Fan : " if m.get("de") == "fan" else "Toi : ") + str(m.get("texte", ""))[:300]
                   for m in conv[:24]]
-        titre = "Exemple écrit par toi" if i < len(perso) else "Exemple"
+        titre = ("Exemple écrit par toi" if i < len(perso)
+                 else "Exemple corrigé (la dernière réponse est la bonne)" if i < len(tete) else "Exemple")
         blocs.append(f"--- {titre} {i + 1} ---\n" + "\n".join(lignes))
     return "\n\n".join(blocs) or "(aucun exemple pour l'instant)"
 
@@ -350,6 +368,7 @@ def charger_exemples_langue() -> list:
 
 def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
     _, perso = charger_exemples()
+    entr = _exemples_perso(cfg.get("exemples_entrainement", ""))
     tous = charger_exemples_langue()
     # Exemples de sa langue d'abord ; les autres complètent s'il en manque.
     of = [m for l, m in tous if l == langue] + [m for l, m in tous if l != langue]
@@ -358,7 +377,7 @@ def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
         prenom=(cfg.get("prenom") or "Youssef").strip(),
         persona=("Ce qu'il faut savoir sur toi : " + persona) if persona else "",
         contexte=(cfg.get("contexte") or CONTEXTE_DEFAUT).strip(),
-        exemples=_texte_exemples(of, perso))
+        exemples=_texte_exemples(of, perso, entr=entr))
 
 
 _SCHEMA = {
@@ -426,7 +445,29 @@ def _message_interne(m: str) -> bool:
     return bool(_INTERNE.search(m))
 
 
-def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> dict | None:
+_RENVOI = re.compile(r"renvoi|renvoy|resend|send (it|the link)? ?again|lien|link|j'?arrive pas|marche pas"
+                     r"|trouve pas|can'?t find|doesn'?t work|not working|where is", re.I)
+
+
+def _dernier_fan(histo: list) -> str:
+    for h in reversed(histo):
+        if h.get("de") == "fan":
+            return str(h.get("texte") or "")
+    return ""
+
+
+def _lien_recent(cfg: dict, histo: list, n: int = 10) -> bool:
+    urls = set(_liens_texte(cfg))
+    return any(str(h.get("texte") or "").strip() in urls or h.get("liens")
+               for h in histo[-n:] if h.get("de") != "fan")
+
+
+def _nb_mots_fr(m: str) -> int:
+    return sum(w.strip(".,!?;:()\"'").lower() in _MOTS_FR for w in m.split())
+
+
+def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
+                 _relance: bool = False) -> dict | None:
     """Réponse du cerveau, ou None (pas de clé, plafond, panne, refus) : dans
     ce cas l'appelant envoie la réponse toute faite avec les liens, pour que
     le fan ne reste jamais sans réponse."""
@@ -487,8 +528,26 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> d
             if m2:
                 nets.append(m2)
         out["messages"] = nets
-        if url_vue:
+        # Elle annonce le lien (« tiens 👇 ») mais a oublié liens = true : le
+        # fan recevait une flèche dans le vide (vu à l'entraînement du 20/11).
+        if url_vue or (out["messages"] and "👇" in out["messages"][-1]):
             out["liens"] = True
+        # Lien parti il y a peu et le fan ne demande pas de le renvoyer : il
+        # ne repart pas (80 renvois inutiles sur 150 conversations
+        # d'entraînement le 20/11 : « ça fait insistant et commercial »).
+        if (out.get("liens") or out.get("lien_demande")) and _lien_recent(cfg, histo) \
+                and not _RENVOI.search(_dernier_fan(histo)):
+            out["liens"] = out["lien_demande"] = False
+            out["messages"] = [m.replace("👇", "").strip() for m in out["messages"] if m.replace("👇", "").strip()]
+        # Fan anglophone qui reçoit du français (17 fois à l'entraînement) :
+        # une seule nouvelle tentative, avec le rappel en clair.
+        if langue == "en" and not _relance and any(
+                langue_du_fan([{"de": "fan", "texte": m}]) == "fr" and _nb_mots_fr(m) >= 2
+                for m in out["messages"]):
+            h2 = list(histo) + [{"de": "fan", "texte": "(rappel : réponds UNIQUEMENT en anglais américain)"}]
+            out2 = appel_claude(cfg, h2, infos, langue, _relance=True)
+            if out2:
+                return out2
         if not out["messages"] and not out.get("liens"):
             return None
         STATUS["ia_erreur"] = ""
