@@ -229,6 +229,11 @@ RÈGLES QUI NE BOUGENT PAS :
 - Ne fais jamais de l'âge un sujet de drague (« enfin un homme mature », « j'aime les plus vieux », « moi aussi j'ai 18 ans »), et ne mens pas sur toi pour lui ressembler (même ville, même âge).
 - Tu réponds dans la langue du fan : à un Américain, en anglais américain naturel (lowercase, u / ur / ngl / tbh, comme dans les exemples).
 
+S'IL DIT QU'ON SE CONNAÎT DÉJÀ (« c'est moi », un pseudo, « tu m'as dit de venir ici », « on a parlé sur… ») :
+- Tu fais comme si tu te souvenais de lui : accueil chaleureux avec le pseudo ou le prénom qu'il donne (« ahh c'est toi 😊 trop contente que tu sois venu »). Il vient de ta page ou d'une autre appli où tu lui as parlé : c'est normal.
+- Tu ne lui reposes PAS les questions de base (prénom, d'où il vient) comme à un inconnu. Si tu connais son nom (ligne [Infos] ou ce qu'il a dit), utilise-le.
+- Tu n'inventes aucun détail précis de « votre » conversation. S'il te teste (« tu te souviens de quoi ? », « c'est quoi mon prénom ? »), tu restes vague et joueuse (« évidemment 😏 mais redis-moi, j'ai envie de l'entendre ») et tu relances sur lui.
+
 QUAND ENVOYER LES LIENS (liens = true) :
 - il demande où te voir, ton Insta, tes réseaux, du contenu, des photos, « plus » ;
 - la conversation devient chaude ;
@@ -336,7 +341,7 @@ _SCHEMA = {
 }
 
 
-def _historique_claude(histo: list) -> list:
+def _historique_claude(histo: list, infos: str = "") -> list:
     msgs = []
     for h in histo[-HISTO_MAX:]:
         role = "user" if h.get("de") == "fan" else "assistant"
@@ -351,6 +356,11 @@ def _historique_claude(histo: list) -> list:
     # le bot (accueil d'une ancienne version) est raboté.
     while msgs and msgs[0]["role"] != "user":
         msgs.pop(0)
+    # Ce que Telegram nous dit du fan, en tête du premier message (et pas dans
+    # les consignes : elles resteraient différentes d'un fan à l'autre et le
+    # cache ne servirait plus).
+    if infos and msgs:
+        msgs[0]["content"] = f"[Infos : {infos}]\n" + msgs[0]["content"]
     return msgs
 
 
@@ -364,14 +374,14 @@ def _compter_ia() -> bool:
     return True
 
 
-def appel_claude(cfg: dict, histo: list) -> dict | None:
+def appel_claude(cfg: dict, histo: list, infos: str = "") -> dict | None:
     """Réponse du cerveau, ou None (pas de clé, plafond, panne, refus) : dans
     ce cas l'appelant envoie la réponse toute faite avec les liens, pour que
     le fan ne reste jamais sans réponse."""
     import os
     import json as _json
     cle = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-    messages = _historique_claude(histo)
+    messages = _historique_claude(histo, infos)
     if not cle or not messages or not _compter_ia():
         STATUS["ia_erreur"] = "pas de clé ANTHROPIC_API_KEY" if not cle else STATUS.get("ia_erreur", "")
         return None
@@ -683,7 +693,10 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     except Exception:
         pass
     t_ia = time.time()
-    out = appel_claude(cfg, f.get("histo") or []) if n_jour < IA_PAR_FAN_JOUR else None
+    infos = ", ".join(x for x in (
+        f"son nom Telegram est « {f['nom']} »" if f.get("nom") else "",
+        f"son pseudo Telegram est @{f['username']}" if f.get("username") else "") if x)
+    out = appel_claude(cfg, f.get("histo") or [], infos) if n_jour < IA_PAR_FAN_JOUR else None
     t_ia = time.time() - t_ia
     nb = int(f.get("nb_msg") or 0)
     depuis = nb - int(f.get("liens_a_msg") or 0)
