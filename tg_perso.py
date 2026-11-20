@@ -62,12 +62,15 @@ RELANCE_DEFAUT = (
 QUESTION_DEFAUT = "Alors, tu as pu t'abonner ? 😊"
 
 EXEMPLES_FILE = DATA_DIR / "tg_perso_exemples.json"
-MODELE = "claude-opus-5-5"
+# Haiku 5.5 depuis le 20/11 (choix du propriétaire) : 0,03 à 0,1 centime la
+# réponse contre ~0,5 avec Opus. Haiku n'a pas de repli serveur en cas de
+# refus : la réponse toute faite avec les liens prend le relais.
+MODELE = "claude-haiku-5-5"
 HISTO_MAX = 40            # messages gardés par fan (et envoyés à Claude)
 # Plafonds de dépense : un fan qui écrit en boucle, ou un script qui spamme
 # le bot, ne doit pas faire tourner la facture Anthropic toute la nuit.
 IA_PAR_FAN_JOUR = 80
-IA_TOTAL_JOUR = 2000
+IA_TOTAL_JOUR = 20000      # ~6 à 20 $/jour au plafond avec Haiku
 # Entre deux envois des liens, au moins ce nombre de messages du fan, sauf
 # s'il les demande lui-même (Claude le signale) : sinon le bot ressemble à
 # une pub et le fan part.
@@ -370,10 +373,8 @@ def appel_claude(cfg: dict, histo: list) -> dict | None:
         # Discussion de comptoir : « low » suffit et répond vite.
         "output_config": {"effort": "low",
                           "format": {"type": "json_schema", "schema": _SCHEMA}},
-        "fallbacks": "default",
     }
     entetes = {"x-api-key": cle, "anthropic-version": "2023-06-01",
-               "anthropic-beta": "server-side-fallback-2026-07-01",
                "content-type": "application/json"}
     try:
         r = _HTTP.post("https://api.anthropic.com/v1/messages",
