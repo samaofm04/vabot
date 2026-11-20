@@ -59,6 +59,15 @@ ACCUEIL_DEFAUT = (
 RELANCE_DEFAUT = (
     "Je ne réponds pas sur Telegram 🙈 Viens me parler ici 👇"
 )
+# Le parcours réel (dit par le propriétaire le 20/11) : le fan vient d'un
+# site, arrive sur Telegram, et on le renvoie sur MYM. Sans ce contexte, le
+# bot l'accueillait comme un inconnu tombé là par hasard.
+CONTEXTE_DEFAUT = (
+    "Il a cliqué sur ton lien Telegram depuis ta page (site / réseaux) : il t'a "
+    "déjà vue et il vient exprès te parler. Ne lui demande pas comment il t'a "
+    "trouvée. Tu le mets à l'aise, tu fais connaissance quelques messages, puis "
+    "tu l'envoies sur ton MYM : c'est là-bas que tu discutes vraiment avec lui "
+    "(et c'est vérifié 18+).")
 QUESTION_DEFAUT = "Alors, tu as pu t'abonner ? 😊"
 
 EXEMPLES_FILE = DATA_DIR / "tg_perso_exemples.json"
@@ -103,6 +112,7 @@ def _cfg_defaut() -> dict:
         "ia": True,
         "prenom": "Youssef",
         "persona": "",
+        "contexte": "",
         "exemples_perso": "",
         # Secondes d'attente après le DERNIER message du fan. Une réponse en
         # deux secondes trahit le bot ; le propriétaire veut une minute.
@@ -209,6 +219,8 @@ def lien_valide(url: str) -> bool:
 
 REGLES = """Tu discutes sur Telegram, en ton nom : tu es {prenom}. Tu écris comme une vraie personne sur son téléphone : messages courts (une ou deux phrases), tutoiement, quelques emojis sans en abuser, pas de listes, pas de formules de service client. Tu poses des questions sur lui (son prénom, d'où il vient, ce qu'il fait, sa journée) et tu rebondis sur ce qu'il dit. Tu ne dis jamais que tu es une IA ou un bot, et tu n'inventes pas de rendez-vous ni de promesses.
 {persona}
+D'OÙ VIENT LE FAN : {contexte}
+
 LE BUT : faire connaissance, puis l'amener sur tes plateformes (les liens). C'est là-bas que la vraie conversation continue. Tu ne vends rien ici : pas de prix, pas d'offre, pas de photo ni de vidéo envoyée ici.
 
 RÈGLES QUI NE BOUGENT PAS :
@@ -305,6 +317,7 @@ def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
     return REGLES.format(
         prenom=(cfg.get("prenom") or "Youssef").strip(),
         persona=("Ce qu'il faut savoir sur toi : " + persona) if persona else "",
+        contexte=(cfg.get("contexte") or CONTEXTE_DEFAUT).strip(),
         exemples=_texte_exemples(of, perso))
 
 
@@ -1019,6 +1032,9 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <label><input type="checkbox" name="ia" value="1" style="width:auto" {coche_ia}> Le bot discute (cerveau Claude)</label>
 <div class="mut">Coupé : il n'envoie que l'accueil et les liens.</div>
 <label>Ton prénom (le bot parle en ton nom)</label><input name="prenom" value="{e(cfg.get('prenom') or '')}">
+<label>D'où viennent les fans, et où les envoyer</label>
+<textarea name="contexte" placeholder="{e(CONTEXTE_DEFAUT)}">{e(cfg.get('contexte') or '')}</textarea>
+<div class="mut">Vide = le texte grisé (site → Telegram → MYM).</div>
 <label>Ce que le bot doit savoir sur toi</label>
 <textarea name="persona" placeholder="Ex. : 24 ans, je vis à Paris, je fais de la muscu, j'adore le foot…">{e(cfg.get('persona') or '')}</textarea>
 <label>Tes exemples (c'est ce qui l'entraîne le plus)</label>
@@ -1056,6 +1072,7 @@ def appliquer_reglages(form) -> str:
     cfg["prenom"] = (form.get("prenom") or "").strip()[:40] or "Youssef"
     # Champs qu'on a le droit de vider : persona et exemples.
     cfg["persona"] = (form.get("persona") or "").strip()[:2000]
+    cfg["contexte"] = (form.get("contexte") or "").strip()[:2000]
     cfg["exemples_perso"] = (form.get("exemples_perso") or "").strip()[:20000]
     for champ in ("accueil", "relance", "question"):
         v = (form.get(champ) or "").strip()
