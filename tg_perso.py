@@ -233,6 +233,7 @@ RÈGLES QUI NE BOUGENT PAS :
 - Rien de sexuel ni d'explicite sur Telegram : l'âge n'y est pas vérifié. Tu peux être gentil, drôle, un peu taquin. Si le fan devient chaud, insistant ou demande du contenu, des photos ou « plus », tu restes léger, tu ne rentres pas dedans, et tu l'envoies sur les liens (liens = true).
 - Si le fan dit ou laisse entendre qu'il a moins de 18 ans (âge, collège, lycée, « mes parents »...), tu mets mineur = true, tu lui réponds gentiment que tu ne parles qu'aux majeurs, et tu ne proposes aucun lien.
 - Ne fais jamais de l'âge un sujet de drague (« enfin un homme mature », « j'aime les plus vieux », « moi aussi j'ai 18 ans »), et ne mens pas sur toi pour lui ressembler (même ville, même âge).
+- S'il dit qu'il s'est abonné ou qu'il a rejoint (« c'est bon je suis abonné », « done », « je suis dans ton canal »), mets dit_abonne = true et réponds chaleureusement (« trop bien 🥰 je t'écris là-bas »).
 - Tu réponds dans la langue du fan : à un Américain, en anglais américain naturel (lowercase, u / ur / ngl / tbh, comme dans les exemples).
 
 LA LIGNE [Infos] (en tête de conversation) : ce que Telegram montre de lui. Son prénom, tu t'en sers. Sa langue d'appli te dit en quoi lui répondre s'il n'a écrit qu'un « hi » ou un emoji. Sa bio ou son anniversaire, seulement si ça vient naturellement (« c'est bientôt ton anniv non ? 👀 »). Ne dis jamais que tu as « vu son profil », sa bio ou qu'il a Premium.
@@ -348,8 +349,10 @@ _SCHEMA = {
         "lien_demande": {"type": "boolean",
                          "description": "true si le fan a lui-même demandé où te voir / du contenu"},
         "mineur": {"type": "boolean"},
+        "dit_abonne": {"type": "boolean",
+                       "description": "true si le fan dit qu'il s'est abonné / a rejoint ta plateforme"},
     },
-    "required": ["messages", "liens", "lien_demande", "mineur"],
+    "required": ["messages", "liens", "lien_demande", "mineur", "dit_abonne"],
     "additionalProperties": False,
 }
 
@@ -851,6 +854,12 @@ def _repondre(token, cfg, chat_id: int, f: dict):
             _maj_fan(chat_id, _g)
         return
 
+    if out.get("dit_abonne") and not f.get("abonne"):
+        def _ga(g):
+            g["abonne"] = True
+            g.setdefault("abonne_t", now)
+        f = _maj_fan(chat_id, _ga)
+        _notifier_proprio(token, cfg, f, chat_id)
     if out.get("mineur"):
         _envoyer(token, cfg, chat_id, out["messages"], False)
 
@@ -958,6 +967,11 @@ def _questions_dues(token, cfg):
     now = int(time.time())
     for k, f in load_fans().items():
         if f.get("abonne") or f.get("bloque"):
+            continue
+        # Sur le compte perso, ou quand les liens partent en texte, pas de
+        # question à boutons « ✅ C'est fait / ⏳ Pas encore » : ça grille le
+        # bot (vu le 20/11). L'IA repère seule « je suis abonné » (dit_abonne).
+        if f.get("bc") or cfg.get("liens_en_texte", True):
             continue
         if now - int(f.get("humain_t") or 0) < _pause(cfg) or f.get("ia_off"):
             continue
