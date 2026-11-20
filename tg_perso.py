@@ -100,6 +100,9 @@ def _cfg_defaut() -> dict:
         "prenom": "Youssef",
         "persona": "",
         "exemples_perso": "",
+        # Secondes d'attente après le DERNIER message du fan. Une réponse en
+        # deux secondes trahit le bot ; le propriétaire veut une minute.
+        "delai_reponse": 60,
     }
 
 
@@ -537,7 +540,7 @@ def _traiter_message(token, cfg, m, bc: str | None = None):
 
 
 # Le fan qui écrit encore : on attend qu'il ait fini avant de répondre.
-ATTENTE_REPONSE = 4
+ATTENTE_REPONSE = 60      # par défaut ; réglable sur la page (delai_reponse)
 # Quand le propriétaire répond lui-même depuis son compte, le bot se tait
 # dans cette conversation : deux voix qui se coupent, le fan le verrait.
 PAUSE_HUMAIN = 6 * 3600
@@ -710,7 +713,7 @@ def _reponses_dues(token, cfg) -> bool:
         t = f.get("a_repondre")
         if not t:
             continue
-        if now - int(t) < ATTENTE_REPONSE:
+        if now - int(t) < int(cfg.get("delai_reponse") or ATTENTE_REPONSE):
             reste = True
             continue
         # On efface la marque AVANT de répondre : si Telegram ou Claude
@@ -807,7 +810,7 @@ def _boucle():
                 STATUS["bot_username"] = me.get("username") or ""
                 dernier_token = token
             maj = _api(token, "getUpdates", offset=int(cfg.get("offset") or 0),
-                       timeout=1 if en_attente else 25,
+                       timeout=3 if en_attente else 25,
                        allowed_updates=["message", "callback_query",
                                         "business_connection", "business_message"])
             STATUS["erreur"] = ""
@@ -1008,6 +1011,8 @@ moi: enchanté Karim ! tu viens d'où ?
 <label>Message d'accueil (si le cerveau est coupé ou en panne)</label><textarea name="accueil">{e(cfg.get('accueil') or '')}</textarea>
 <label>Réponse quand le fan écrit</label><textarea name="relance">{e(cfg.get('relance') or '')}</textarea>
 <div class="mut">Envoyée au plus une fois toutes les {ANTI_REPETITION // 60} min, avec les boutons.</div>
+<label>Délai avant de répondre (secondes après son dernier message)</label>
+<input name="delai_reponse" type="number" min="5" max="600" value="{int(cfg.get('delai_reponse') or 60)}">
 <label>Question après le clic</label><input name="question" value="{e(cfg.get('question') or '')}">
 <button type="submit">Enregistrer</button></form>
 </main></body></html>"""
@@ -1019,6 +1024,10 @@ def appliquer_reglages(form) -> str:
     if tok:
         cfg["token"] = tok
     cfg["ia"] = form.get("ia") == "1"
+    try:
+        cfg["delai_reponse"] = max(5, min(600, int(form.get("delai_reponse") or 60)))
+    except ValueError:
+        pass
     cfg["prenom"] = (form.get("prenom") or "").strip()[:40] or "Youssef"
     # Champs qu'on a le droit de vider : persona et exemples.
     cfg["persona"] = (form.get("persona") or "").strip()[:2000]
