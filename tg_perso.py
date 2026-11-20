@@ -712,7 +712,10 @@ def _repondre(token, cfg, chat_id: int, f: dict):
         _maj_fan(chat_id, _g)
         return
 
-    liens = bool(out.get("liens")) and (bool(out.get("lien_demande"))
+    # Le fan demande où te trouver : le lien part, même si le modèle voulait
+    # « faire connaissance d'abord » (vu le 20/11 avec Haiku : il notait la
+    # demande et repoussait le lien).
+    liens = bool(out.get("liens") or out.get("lien_demande")) and (bool(out.get("lien_demande"))
                                         or not f.get("liens_envoyes")
                                         or depuis >= ECART_LIENS)
     if not f.get("liens_envoyes") and nb >= LIENS_AU_PLUS_TARD:
