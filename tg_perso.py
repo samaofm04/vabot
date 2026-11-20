@@ -23,6 +23,7 @@ cogs/tgperso.py, comme tg_router.
 from __future__ import annotations
 
 import hashlib
+import re
 import hmac
 import html
 import secrets
@@ -378,8 +379,9 @@ def _historique_claude(histo: list, infos: str = "") -> list:
     for h in histo[-HISTO_CLAUDE:]:
         role = "user" if h.get("de") == "fan" else "assistant"
         txt = h.get("texte") or ""
-        if h.get("liens"):
-            txt += "\n[les boutons de tes liens sont partis sous ce message]"
+        # (Plus de note « [les boutons de tes liens sont partis…] » ici : le
+        # modèle l'a recopiée telle quelle au fan le 20/11. Le lien envoyé
+        # figure déjà dans l'historique comme un message à part.)
         if msgs and msgs[-1]["role"] == role:
             msgs[-1]["content"] += "\n" + txt
         else:
@@ -404,6 +406,17 @@ def _compter_ia() -> bool:
         return False
     STATUS["ia_n"] += 1
     return True
+
+
+_INTERNE = re.compile(r"^\s*\[.*\]\s*$|boutons? de tes liens|\[infos|liens\s*=\s*(true|false)"
+                      r"|dit_abonne|lien_demande|mineur\s*=", re.I | re.S)
+
+
+def _message_interne(m: str) -> bool:
+    """Texte qui n'est pas pour le fan : note entre crochets, nom de champ,
+    consigne recopiée. Vu le 20/11 : « [les boutons de tes liens sont partis
+    sous ce message] » envoyé tel quel depuis le compte de Lola."""
+    return bool(_INTERNE.search(m))
 
 
 def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> dict | None:
@@ -454,7 +467,8 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "") -> d
             return None
         txt = "".join(b.get("text", "") for b in d.get("content") or [] if b.get("type") == "text")
         out = _json.loads(txt)
-        out["messages"] = [m.strip() for m in out.get("messages") or [] if str(m).strip()][:2]
+        out["messages"] = [m.strip() for m in out.get("messages") or []
+                           if str(m).strip() and not _message_interne(str(m))][:2]
         if not out["messages"] and not out.get("liens"):
             return None
         STATUS["ia_erreur"] = ""
