@@ -81,7 +81,14 @@ HISTO_MAX = 400
 HISTO_CLAUDE = 40
 # Plafonds de dépense : un fan qui écrit en boucle, ou un script qui spamme
 # le bot, ne doit pas faire tourner la facture Anthropic toute la nuit.
-IA_PAR_FAN_JOUR = 80
+# Réponses de l'IA par fan et par jour (réglable : max_reponses_jour). Le
+# propriétaire veut une vraie relation qui dure, pas un robot qui répond à
+# l'infini : « 15-20 messages par jour, 30-40 grand max ». Cinq réponses
+# avant la limite, Lola commence à conclure ; à la limite, elle dit au revoir
+# et se tait jusqu'au lendemain.
+IA_PAR_FAN_JOUR = 30
+# Lien déjà donné : reproposé au plus une fois par jour (sauf s'il le demande).
+RELANCE_LIEN = 24 * 3600
 IA_TOTAL_JOUR = 20000      # ~6 à 20 $/jour au plafond avec Haiku
 # Entre deux envois des liens, au moins ce nombre de messages du fan, sauf
 # s'il les demande lui-même (Claude le signale) : sinon le bot ressemble à
@@ -226,6 +233,8 @@ def lien_valide(url: str) -> bool:
 REGLES = """Tu discutes sur Telegram, en ton nom : tu es {prenom}. Tu écris comme une vraie personne sur son téléphone : messages courts (une ou deux phrases), tutoiement, quelques emojis sans en abuser, pas de listes, pas de formules de service client. Tu poses des questions sur lui (son prénom, d'où il vient, ce qu'il fait, sa journée) et tu rebondis sur ce qu'il dit. Tu ne dis jamais que tu es une IA ou un bot, et tu n'inventes pas de rendez-vous ni de promesses.
 {persona}
 D'OÙ VIENT LE FAN : {contexte}
+
+LA RELATION DURE : s'il ne va pas sur ta plateforme, s'il ne veut pas, ou s'il y est déjà, tu continues de discuter avec lui, jour après jour, sans aucune pression. Tu racontes un peu ta journée, tu lui demandes la sienne, tu te souviens de ce qu'il t'a dit. Qu'il se sente bien avec toi passe avant tout.
 
 LE BUT : faire connaissance, puis l'amener sur tes plateformes (les liens). C'est là-bas que la vraie conversation continue. Tu ne vends rien ici : pas de prix, pas d'offre, pas de photo ni de vidéo envoyée ici.
 
@@ -688,6 +697,13 @@ ATTENTE_REPONSE = 60      # par défaut ; réglable sur la page (delai_reponse)
 PAUSE_HUMAIN = 3600        # par défaut ; réglable sur la page (pause_humain_min)
 
 
+def _max_jour(cfg: dict) -> int:
+    try:
+        return max(3, min(200, int(cfg.get("max_reponses_jour") or IA_PAR_FAN_JOUR)))
+    except (TypeError, ValueError):
+        return IA_PAR_FAN_JOUR
+
+
 def _pause(cfg: dict) -> int:
     """Le 20/11, 6 h de pause : le propriétaire avait collé un lien à la main,
     puis testé en fan, et le bot ne répondait plus à « renvoie le lien ».
@@ -803,15 +819,14 @@ def _repondre(token, cfg, chat_id: int, f: dict):
         return                      # tu as pris la conversation : le bot se tait
     if f.get("ia_off"):
         return                      # IA coupée pour ce fan depuis l'Inbox
-    if f.get("abonne"):
-        # Abonné : la conversation continue sur la plateforme, plus ici.
-        if now - int(f.get("renvoi_t") or 0) > 6 * 3600:
-            _envoyer(token, cfg, chat_id,
-                     ["On se parle là-bas maintenant 😉 je te réponds sur la plateforme"], True)
-            _maj_fan(chat_id, lambda g: g.__setitem__("renvoi_t", now))
-        return
+    # Abonné ou pas, la conversation continue ici : « ça s'arrête jamais,
+    # ça continue à créer une relation avec lui » (le propriétaire). Avant,
+    # un abonné ne recevait plus qu'un message tout fait toutes les 6 h.
     jour = time.strftime("%Y-%m-%d")
     n_jour = int(f.get("ia_n") or 0) if f.get("ia_jour") == jour else 0
+    max_jour = _max_jour(cfg)
+    if n_jour >= max_jour:
+        return                      # au revoir déjà dit : on se reparle demain
     try:
         _api(token, "sendChatAction", **_dest(chat_id), action="typing")
     except Exception:
@@ -837,17 +852,35 @@ def _repondre(token, cfg, chat_id: int, f: dict):
         age_infos = "tu n'as AUCUN lien à envoyer pour l'instant : ne promets pas de lien, mets liens = false"
     else:
         age_infos = ""
-    infos = _infos_fan(f, age) + (", " if _infos_fan(f, age) else "") + (age_infos + ", " if age_infos else "") + \
-        ("réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français")
-    out = appel_claude(cfg, f.get("histo") or [], infos, langue) if n_jour < IA_PAR_FAN_JOUR else None
+    consignes = [age_infos] if age_infos else []
+    deja = int(f.get("liens_envoyes") or 0)
+    if f.get("abonne"):
+        consignes.append("il s'est déjà abonné : continue simplement de discuter avec lui, "
+                         "lien seulement s'il le demande, et rappelle-lui les likes très rarement")
+    elif deja and now - deja < RELANCE_LIEN:
+        consignes.append("il a déjà reçu ton lien aujourd'hui : ne le repropose pas, sauf s'il le redemande")
+    elif deja:
+        consignes.append("il a eu ton lien il y a plus d'un jour sans y aller : tu peux le reproposer "
+                         "UNE fois si ça vient naturellement, sans insister ; sinon discute juste")
+    if n_jour >= max_jour - 1:
+        consignes.append("c'est ton DERNIER message aujourd'hui : dis-lui au revoir gentiment, "
+                         "tu dois y aller et vous vous reparlez demain ; liens = false")
+    elif n_jour >= max_jour - 5:
+        consignes.append("vous avez déjà beaucoup parlé aujourd'hui : commence à conclure naturellement "
+                         "(tu vas devoir filer bientôt), sans couper net")
+    infos = ", ".join(x for x in [_infos_fan(f, age)] + consignes + [
+        "réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français"] if x)
+    out = appel_claude(cfg, f.get("histo") or [], infos, langue)
     t_ia = time.time() - t_ia
     nb = int(f.get("nb_msg") or 0)
     depuis = nb - int(f.get("liens_a_msg") or 0)
 
     if out is None:
-        # Pas de cerveau (clé, plafond, panne) : la réponse toute faite, avec
-        # les liens, sans spammer.
-        if not f.get("liens_envoyes") or now - int(f["liens_envoyes"]) > ANTI_REPETITION:
+        # Pas de cerveau (clé, panne) : la réponse toute faite avec les liens,
+        # mais seulement au premier contact. Pour un fan avec qui on parle
+        # depuis des jours, un message tout fait sonnerait faux : mieux vaut
+        # se taire et répondre au message suivant.
+        if not f.get("liens_envoyes"):
             premier = not f.get("liens_envoyes")
             t = cfg.get("accueil") if premier else cfg.get("relance")
             parti = _envoyer(token, cfg, chat_id, [t or RELANCE_DEFAUT], True)
@@ -880,9 +913,14 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     # Le fan demande où te trouver : le lien part, même si le modèle voulait
     # « faire connaissance d'abord » (vu le 20/11 avec Haiku : il notait la
     # demande et repoussait le lien).
-    liens = bool(out.get("liens") or out.get("lien_demande")) and (bool(out.get("lien_demande"))
-                                        or not f.get("liens_envoyes")
-                                        or depuis >= ECART_LIENS)
+    demande = bool(out.get("lien_demande"))
+    if not f.get("liens_envoyes"):
+        ok_relance = depuis >= 0
+    elif f.get("abonne"):
+        ok_relance = False
+    else:
+        ok_relance = now - int(f["liens_envoyes"]) >= RELANCE_LIEN
+    liens = bool(out.get("liens") or demande) and (demande or ok_relance)
     if not f.get("liens_envoyes") and nb >= LIENS_AU_PLUS_TARD:
         liens = True
     textes = out["messages"]
@@ -1270,6 +1308,9 @@ moi: enchanté Karim ! tu viens d'où ?
 <div class="mut">Envoyée au plus une fois toutes les {ANTI_REPETITION // 60} min, avec les boutons.</div>
 <label>Pause de l'IA quand tu écris toi-même à un fan (minutes)</label>
 <input name="pause_humain_min" type="number" min="0" max="1440" value="{_pause(cfg) // 60}">
+<label>Réponses de l'IA par fan et par jour</label>
+<input name="max_reponses_jour" type="number" min="3" max="200" value="{_max_jour(cfg)}">
+<div class="mut">5 réponses avant, elle commence à conclure ; à la limite elle dit au revoir et reprend le lendemain.</div>
 <label>Délai avant de répondre (secondes après son dernier message)</label>
 <input name="delai_reponse" type="number" min="5" max="600" value="{int(cfg.get('delai_reponse') or 60)}">
 <label>Question après le clic</label><input name="question" value="{e(cfg.get('question') or '')}">
@@ -1290,6 +1331,10 @@ def appliquer_reglages(form) -> str:
         pass
     try:
         cfg["pause_humain_min"] = max(0, min(1440, int(form.get("pause_humain_min") or 60)))
+    except ValueError:
+        pass
+    try:
+        cfg["max_reponses_jour"] = max(3, min(200, int(form.get("max_reponses_jour") or IA_PAR_FAN_JOUR)))
     except ValueError:
         pass
     cfg["prenom"] = (form.get("prenom") or "").strip()[:40] or "Youssef"
