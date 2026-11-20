@@ -429,9 +429,20 @@ def _clavier(cfg: dict, fan) -> dict | None:
     return {"inline_keyboard": rangs} if rangs else None
 
 
+def _dest(chat_id) -> dict:
+    """Où envoyer. Un fan qui a écrit sur le COMPTE PERSO du propriétaire
+    (Telegram Business) porte l'identifiant de connexion : sans lui, la
+    réponse partirait du bot, et le fan verrait un inconnu lui écrire."""
+    f = load_fans().get(str(chat_id)) or {}
+    d = {"chat_id": chat_id}
+    if f.get("bc"):
+        d["business_connection_id"] = f["bc"]
+    return d
+
+
 def _envoyer_liens(token, cfg, chat_id, texte):
     kb = _clavier(cfg, chat_id)
-    params = {"chat_id": chat_id, "text": texte}
+    params = {**_dest(chat_id), "text": texte}
     if kb:
         params["reply_markup"] = kb
     _api(token, "sendMessage", **params)
@@ -443,7 +454,7 @@ def _question(token, cfg, chat_id):
         {"text": "✅ C'est fait", "callback_data": "abo:oui"},
         {"text": "⏳ Pas encore", "callback_data": "abo:pas"},
     ]]}
-    _api(token, "sendMessage", chat_id=chat_id,
+    _api(token, "sendMessage", **_dest(chat_id),
          text=cfg.get("question") or QUESTION_DEFAUT, reply_markup=kb)
 
 
@@ -460,7 +471,7 @@ def _notifier_proprio(token, cfg, f, chat_id):
         print(f"[tgperso] notif proprio : {e}", flush=True)
 
 
-def _traiter_message(token, cfg, m):
+def _traiter_message(token, cfg, m, bc: str | None = None):
     chat = m.get("chat") or {}
     if chat.get("type") != "private":
         return                      # groupes : le bot n'y fait rien
@@ -468,7 +479,7 @@ def _traiter_message(token, cfg, m):
     texte = (m.get("text") or "").strip()
     u = m.get("from") or {}
 
-    if texte.startswith("/proprio"):
+    if not bc and texte.startswith("/proprio"):
         code = texte.split(maxsplit=1)[1].strip().upper() if " " in texte else ""
         if code and hmac.compare_digest(code, str(cfg.get("code_proprio", "")).upper()):
             cfg = load_cfg()
@@ -483,7 +494,7 @@ def _traiter_message(token, cfg, m):
         # Mauvais code : on répond comme à n'importe quel fan, sans dire que
         # la commande existe.
 
-    if cfg.get("proprio_chat_id") == chat_id:
+    if not bc and cfg.get("proprio_chat_id") == chat_id:
         _api(token, "sendMessage", chat_id=chat_id,
              text="Tu es le propriétaire : les fans et les liens se règlent sur youl4b.com/tgperso.")
         return
@@ -503,6 +514,8 @@ def _traiter_message(token, cfg, m):
         f["dernier_msg"] = now
         f["nb_msg"] = int(f.get("nb_msg") or 0) + 1
         f["bloque"] = False
+        if bc:
+            f["bc"] = bc
         if cfg.get("ia"):
             _ajouter_histo(f, "fan", "[il vient d'ouvrir la conversation]"
                            if texte.startswith("/start") else contenu)
@@ -523,6 +536,83 @@ def _traiter_message(token, cfg, m):
 
 # Le fan qui écrit encore : on attend qu'il ait fini avant de répondre.
 ATTENTE_REPONSE = 4
+# Quand le propriétaire répond lui-même depuis son compte, le bot se tait
+# dans cette conversation : deux voix qui se coupent, le fan le verrait.
+PAUSE_HUMAIN = 6 * 3600
+
+
+def _connexion_api(token, bcid) -> dict:
+    try:
+        return _api(token, "getBusinessConnection", business_connection_id=bcid) or {}
+    except Exception as e:
+        print(f"[tgperso] getBusinessConnection : {e}", flush=True)
+        return {}
+
+
+def _traiter_connexion(token, bc: dict):
+    """Le propriétaire a relié (ou délié) le bot à son compte perso, dans
+    Réglages → Telegram Business → Chatbots."""
+    if not bc.get("id"):
+        return
+    u = bc.get("user") or {}
+    droits = bc.get("rights") or {}
+    peut = bool(droits.get("can_reply", bc.get("can_reply")))
+    actif = bool(bc.get("is_enabled"))
+    cfg = load_cfg()
+    cfg.setdefault("business", {})[bc["id"]] = {
+        "user_id": u.get("id"), "nom": u.get("first_name") or "",
+        "username": u.get("username") or "", "actif": actif,
+        "peut_repondre": peut, "t": int(time.time())}
+    # Celui qui relie le bot à son compte EST le propriétaire : plus besoin
+    # du code /proprio pour recevoir les notifications.
+    if actif and bc.get("user_chat_id"):
+        cfg["proprio_chat_id"] = bc["user_chat_id"]
+    save_cfg(cfg)
+    if bc.get("user_chat_id"):
+        if not actif:
+            t = "Le bot est délié de ton compte : il ne répond plus en ton nom."
+        elif not peut:
+            t = ("⚠️ Le bot est relié à ton compte mais n'a PAS le droit de répondre. "
+                 "Réglages → Telegram Business → Chatbots → coche « Répondre aux messages ».")
+        else:
+            t = "✅ Le bot répond maintenant en ton nom dans tes conversations privées."
+        try:
+            _api(token, "sendMessage", chat_id=bc["user_chat_id"], text=t)
+        except Exception as e:
+            print(f"[tgperso] connexion : {e}", flush=True)
+
+
+def _traiter_business(token, cfg, m: dict):
+    """Message d'une conversation privée du COMPTE PERSO. Du fan : on le
+    traite comme un message au bot, la réponse partira du compte. Du
+    propriétaire lui-même : on le note et le bot se tait (PAUSE_HUMAIN)."""
+    bcid = m.get("business_connection_id")
+    if not bcid:
+        return
+    conn = (cfg.get("business") or {}).get(bcid)
+    if not conn:
+        _traiter_connexion(token, _connexion_api(token, bcid))
+        cfg = load_cfg()
+        conn = (cfg.get("business") or {}).get(bcid) or {}
+    if not conn.get("actif", True):
+        return
+    chat_id = (m.get("chat") or {}).get("id")
+    if not chat_id:
+        return
+    de = (m.get("from") or {}).get("id")
+    if de and de == conn.get("user_id"):
+        if m.get("sender_business_bot"):
+            return                  # notre propre réponse, renvoyée par Telegram
+        texte = (m.get("text") or "").strip() or "[média]"
+        now = int(time.time())
+
+        def _f(f):
+            _ajouter_histo(f, "bot", texte)
+            f["humain_t"] = now
+            f.pop("a_repondre", None)
+        _maj_fan(chat_id, _f)
+        return
+    _traiter_message(token, cfg, m, bc=bcid)
 
 
 def _envoyer(token, cfg, chat_id, textes, avec_liens):
@@ -530,7 +620,7 @@ def _envoyer(token, cfg, chat_id, textes, avec_liens):
     if avec_liens and not textes:
         textes = [cfg.get("relance") or RELANCE_DEFAUT]
     for i, t in enumerate(textes):
-        params = {"chat_id": chat_id, "text": t}
+        params = {**_dest(chat_id), "text": t}
         if kb and i == len(textes) - 1:
             params["reply_markup"] = kb
         _api(token, "sendMessage", **params)
@@ -539,6 +629,8 @@ def _envoyer(token, cfg, chat_id, textes, avec_liens):
 
 def _repondre(token, cfg, chat_id: int, f: dict):
     now = int(time.time())
+    if now - int(f.get("humain_t") or 0) < PAUSE_HUMAIN:
+        return                      # tu as pris la conversation : le bot se tait
     if f.get("abonne"):
         # Abonné : la conversation continue sur la plateforme, plus ici.
         if now - int(f.get("renvoi_t") or 0) > 6 * 3600:
@@ -549,7 +641,7 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     jour = time.strftime("%Y-%m-%d")
     n_jour = int(f.get("ia_n") or 0) if f.get("ia_jour") == jour else 0
     try:
-        _api(token, "sendChatAction", chat_id=chat_id, action="typing")
+        _api(token, "sendChatAction", **_dest(chat_id), action="typing")
     except Exception:
         pass
     out = appel_claude(cfg, f.get("histo") or []) if n_jour < IA_PAR_FAN_JOUR else None
@@ -653,10 +745,10 @@ def _traiter_callback(token, cfg, q):
         _maj_fan(chat_id, _f)
         texte = "Pas de souci, les liens restent juste au-dessus 😉"
     try:
-        _api(token, "editMessageText", chat_id=chat_id,
+        _api(token, "editMessageText", **_dest(chat_id),
              message_id=msg.get("message_id"), text=texte)
     except Exception:
-        _api(token, "sendMessage", chat_id=chat_id, text=texte)
+        _api(token, "sendMessage", **_dest(chat_id), text=texte)
 
 
 def _questions_dues(token, cfg):
@@ -665,6 +757,8 @@ def _questions_dues(token, cfg):
     now = int(time.time())
     for k, f in load_fans().items():
         if f.get("abonne") or f.get("bloque"):
+            continue
+        if now - int(f.get("humain_t") or 0) < PAUSE_HUMAIN:
             continue
         a_faire = None
         if f.get("premier_clic") and not f.get("question_t") \
@@ -704,13 +798,18 @@ def _boucle():
                 dernier_token = token
             maj = _api(token, "getUpdates", offset=int(cfg.get("offset") or 0),
                        timeout=1 if en_attente else 25,
-                       allowed_updates=["message", "callback_query"])
+                       allowed_updates=["message", "callback_query",
+                                        "business_connection", "business_message"])
             STATUS["erreur"] = ""
             STATUS["last_update"] = int(time.time())
             for up in maj or []:
                 try:
                     if "message" in up:
                         _traiter_message(token, cfg, up["message"])
+                    elif "business_message" in up:
+                        _traiter_business(token, cfg, up["business_message"])
+                    elif "business_connection" in up:
+                        _traiter_connexion(token, up["business_connection"])
                     elif "callback_query" in up:
                         _traiter_callback(token, cfg, up["callback_query"])
                 except Exception as e:
@@ -820,6 +919,18 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
     else:
         etat_ia = (f"🧠 Cerveau actif ({MODELE}) : {len(of)} conversations OnlyFans "
                    f"+ {len(perso)} exemples à toi · {STATUS.get('ia_n', 0)} réponses aujourd'hui")
+    conns = [c for c in (cfg.get("business") or {}).values() if c.get("actif")]
+    if not conns:
+        etat_compte = ("👤 Pas encore relié à ton compte perso : Réglages → Telegram Business "
+                       "→ Chatbots → ajoute le bot. Sinon les fans parlent au bot lui-même.")
+    elif not any(c.get("peut_repondre") for c in conns):
+        etat_compte = ("🟠 Relié à ton compte, mais sans le droit de répondre : coche "
+                       "« Répondre aux messages » dans Telegram Business → Chatbots.")
+    else:
+        c = conns[0]
+        etat_compte = (f"👤 Répond en ton nom sur ton compte {e(c.get('nom') or '')}"
+                       f"{' (@' + e(c['username']) + ')' if c.get('username') else ''}. "
+                       f"Quand tu écris toi-même à un fan, le bot se tait {PAUSE_HUMAIN // 3600} h.")
     proprio = ("✅ ton Telegram est relié (notification à chaque abonné)"
                if cfg.get("proprio_chat_id") else
                f"Envoie au bot : <code>/proprio {e(cfg.get('code_proprio', ''))}</code> "
@@ -857,7 +968,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <h1>📨 Telegram perso</h1>
 <div class="mut">Le bot accueille le fan et l'envoie sur tes plateformes. Il ne discute pas : la conversation se fait sur MYM, où l'âge est vérifié.</div>
 {bandeau}
-<div class="card"><h2>État</h2><div>{etat}</div><div style="margin-top:6px">{etat_ia}</div><div class="mut" style="margin-top:6px">{proprio}</div></div>
+<div class="card"><h2>État</h2><div>{etat}</div><div style="margin-top:6px">{etat_ia}</div><div style="margin-top:6px">{etat_compte}</div><div class="mut" style="margin-top:6px">{proprio}</div></div>
 <div class="card"><h2>Fans</h2>
 <div class="kpi"><div>🟢 Abonnés<b>{compte['abonne']}</b></div><div>🟡 Ont cliqué<b>{compte['clique']}</b></div><div>🔴 Rien cliqué<b>{compte['froid']}</b></div></div>
 <div class="scroll" style="margin-top:12px"><table><tr><th>Statut</th><th>Nom</th><th>Telegram</th><th>Arrivé</th><th>Liens cliqués</th><th>Abonné le</th></tr>
