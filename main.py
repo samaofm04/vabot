@@ -82,7 +82,11 @@ ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # serveur Spam, categories de Va IG) : ZERO commande slash. Il
               # lit aussi les serveurs que seul le principal voit
               # (cogs/alertes.py).
-              "alertes"]
+              "alertes",
+              # Bot Telegram perso (page /tgperso) : ZERO commande slash.
+              # En fin de liste : la tete de la liste porte le contexte d'un
+              # patch local du VPS (peach_accueil), qui tomberait.
+              "tgperso"]
 
 logging.basicConfig(
     level=logging.INFO,

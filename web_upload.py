@@ -82127,6 +82127,14 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     except Exception as _tk_e:
         log.error(f"veille_tiktok_ui register échoué: {_tk_e}")
 
+    # Bot Telegram perso : reglages + liste des fans sur /tgperso, et /tp/...
+    # qui compte le clic de chaque fan avant de l'envoyer sur la plateforme.
+    try:
+        import tg_perso
+        tg_perso.register(app, is_auth, _is_admin)
+    except Exception as _tp_e:
+        log.error(f"tg_perso register échoué: {_tp_e}")
+
     # Onglet « Remote 2 » : poste de pilotage du parc (parc_web.py).
     # Enregistre /parc/* ET un after_request qui OBSERVE /api/rig/* sans
     # modifier aucune réponse — c'est ce qui donne les dates, les durées et le
