@@ -23,11 +23,14 @@ aura la place (2 Go de modèles) — qui vient chercher le travail ici avec
 visage_worker.py et un jeton (data/studio_ia/machine.json). Le site ne
 calcule rien : il garde la file, la progression et le résultat.
 
-Le genre « Perso » enchaîne deux tâches Kie : Seedream habille d'abord la
-model avec la tenue lue sur une image du reel, puis Wan 2.2 Animate Replace
-met cette photo retouchée dans le reel. Sans la retouche, Wan habillait la
-model comme sur sa photo (t-shirt blanc à la place du hoodie, vu le 04/11) :
-le propriétaire veut « mêmes vêtements, seul le perso change ».
+Le genre « Perso » est une seule tâche Wan 3.0 en mode référence : le reel
+(Video1) + une photo de face de la model (Image1), consigne « remplace la
+fille du reel par elle, garde tout le reste ». C'est la recette vue le
+22/11/2026 dans une vidéo de formation OFM, que le propriétaire a trouvée
+bien meilleure : « je veux uniquement wan, y a que ça qui marche ».
+L'ancienne chaîne (retouche Seedream puis Wan 2.2 Animate Replace) redessinait
+le visage deux fois et s'éloignait de la model ; les tâches de ce type encore
+ouvertes se terminent normalement (_verifier_perso sait toujours enchaîner).
 
 Le genre « Sans caption » retire l'écriture incrustée d'une vidéo en un clic
 (Kling 3.0 Omni, consigne fixe dans kie_ai.PROMPT_SANS_TEXTE). Kling rend la
@@ -157,14 +160,14 @@ T = {
         "visage_refs": "Il faut une photo du visage et une vidéo.",
         "gratuit": "gratuit",
         "visage_lance": "Remplacement de visage mis en file (gratuit).",
-        "perso": "Perso · même tenue",
+        "perso": "Remplacer · Wan 3.0",
         "deposer_perso": "Clique ou dépose la photo de la model et le reel à refaire",
-        "deposer_aide_perso": "JPG/PNG/WebP + MP4/MOV de 1 à 60 s (10 Mo)",
+        "deposer_aide_perso": "Photo de face (JPG/PNG/WebP) + reel MP4/MOV de 1 à 15 s",
         "perso_refs": "Il faut une photo de la model et un reel.",
         "perso_sans_image": "Impossible de lire une image du reel (ffmpeg) : réessaie avec un MP4.",
-        "perso_lance": "Lancé : retouche de la photo, puis remplacement du personnage (≈ {n} crédits).",
+        "perso_lance": "Lancé : Wan 3.0 remplace la fille du reel par la model (≈ {n} crédits, 5 à 10 min).",
         "perso_etape_retouche": "1/2 · la model prend la tenue du reel",
-        "perso_etape_remplacement": "2/2 · remplacement du personnage dans le reel",
+        "perso_etape_remplacement": "remplacement de la fille dans le reel",
         "perso_etape_fini": "terminé",
         "sanstexte": "Sans caption",
         "deposer_sanstexte": "Clique ou dépose la vidéo dont il faut retirer l'écriture",
@@ -256,14 +259,14 @@ T = {
         "visage_refs": "A face photo and a video are both needed.",
         "gratuit": "free",
         "visage_lance": "Face swap queued (free).",
-        "perso": "Character · same outfit",
+        "perso": "Replace · Wan 3.0",
         "deposer_perso": "Click or drop the model's photo and the reel to redo",
-        "deposer_aide_perso": "JPG/PNG/WebP + MP4/MOV, 1 to 60 s (10 MB)",
+        "deposer_aide_perso": "Front-facing photo (JPG/PNG/WebP) + MP4/MOV reel, 1 to 15 s",
         "perso_refs": "A photo of the model and a reel are both needed.",
         "perso_sans_image": "Could not read a frame of the reel (ffmpeg): try again with an MP4.",
-        "perso_lance": "Started: photo retouch, then character replacement (≈ {n} credits).",
+        "perso_lance": "Started: Wan 3.0 replaces the reel's girl with the model (≈ {n} credits, 5 to 10 min).",
         "perso_etape_retouche": "1/2 · the model takes the reel's outfit",
-        "perso_etape_remplacement": "2/2 · replacing the character in the reel",
+        "perso_etape_remplacement": "replacing the girl in the reel",
         "perso_etape_fini": "done",
         "sanstexte": "Remove caption",
         "deposer_sanstexte": "Click or drop the video to strip of its text",
@@ -339,31 +342,28 @@ def registre_visage(langue: str = "fr") -> Dict[str, Any]:
     }
 
 
-#: Le genre « Perso » : deux tâches Kie enchaînées. Wan Replace habille la
-#: model comme sur la PHOTO, pas comme dans le reel (04/11 : t-shirt blanc de
-#: la photo à la place du hoodie) ; une retouche Seedream met donc d'abord la
-#: model dans la tenue du reel, puis Wan remplace la fille du reel par elle.
+#: Le genre « Perso » : Wan 3.0 (wan/3-0-video) en mode référence, une seule
+#: tâche. Wan 3.0 garde la tenue, les gestes et le décor du reel et ne prend
+#: de la photo que la personne : plus besoin de retoucher la photo avant.
+#: Kie facture la durée rendue PLUS celle du reel envoyé, et limite le reel
+#: de référence à 15 s (doc docs.kie.ai/market/wan/3-0-video).
 MODELE_PERSO = {
-    "cle": "perso", "nom": "Retouche + Wan Replace", "editeur": "ByteDance + Alibaba", "editeur_en": "ByteDance + Alibaba",
-    "type": "perso", "badge": "2 étapes", "badge_en": "2 steps",
-    "resume": "la model prend la tenue du reel (Seedream), puis remplace la fille du reel (Wan 2.2) : décor, gestes et texte gardés",
-    "resume_en": "the model takes the reel's outfit (Seedream), then replaces the reel's girl (Wan 2.2): scene, moves and text kept",
+    "cle": "perso", "nom": "Wan 3.0 · remplacer la fille", "editeur": "Alibaba", "editeur_en": "Alibaba",
+    "type": "perso", "badge": "recommandé", "badge_en": "recommended",
+    "resume": "la fille du reel devient la model (Wan 3.0) : tenue, gestes, décor et son gardés",
+    "resume_en": "the reel's girl becomes the model (Wan 3.0): outfit, moves, scene and sound kept",
     "prompt_max": 0, "prompt_min": 0, "sans_prompt": True,
     "references": {
-        "max": 2, "modes": ["perso"], "videos_max": 1, "duree": [1, 60],
-        "aide": "1 photo de la model (de face, nette) + 1 reel MP4/MOV de 1 à 60 s (10 Mo). La tenue est lue sur une image du reel, au-dessus du texte incrusté ; le décor, les gestes et le texte restent ceux du reel.",
-        "aide_en": "1 photo of the model (front-facing, sharp) + 1 MP4/MOV reel of 1 to 60 s (10 MB). The outfit is read from one frame of the reel, above the burned-in text; scene, moves and text stay those of the reel.",
+        "max": 2, "modes": ["perso"], "videos_max": 1, "duree": [1, 15],
+        "aide": "1 photo de la model DE FACE (visage net et entier, fond uni, bonne lumière, cheveux visibles) + 1 reel MP4/MOV de 1 à 15 s. La photo fixe l'identité : un selfie de biais ou flou donne un visage faux.",
+        "aide_en": "1 FRONT-FACING photo of the model (sharp full face, plain background, good light, hair visible) + 1 MP4/MOV reel of 1 to 15 s. The photo sets the identity: a tilted or blurry selfie gives a wrong face.",
     },
     "options": [
         {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
-         "valeurs": ["480p", "580p", "720p"], "defaut": "720p",
-         "libelles": {"480p": {"fr": "480p", "en": "480p"}, "580p": {"fr": "580p", "en": "580p"}, "720p": {"fr": "720p", "en": "720p"}},
-         "aide": "Résolution du remplacement Wan (6 / 9,5 / 12,5 crédits la seconde). La retouche de la photo coûte 7,5 crédits en plus.",
-         "aide_en": "Resolution of the Wan replacement (6 / 9.5 / 12.5 credits per second). The photo retouch adds 7.5 credits."},
-        {"cle": "tenue_s", "nom": "Tenue lue à", "nom_en": "Outfit read at", "type": "nombre",
-         "min": 0, "max": 30, "defaut": 0, "unite": "s",
-         "aide": "Seconde du reel où la tenue se voit le mieux. 0 = le milieu du reel.",
-         "aide_en": "Second of the reel where the outfit shows best. 0 = the middle of the reel."},
+         "valeurs": ["480P", "720P", "1080P"], "defaut": "720P",
+         "libelles": {"480P": {"fr": "480p", "en": "480p"}, "720P": {"fr": "720p", "en": "720p"}, "1080P": {"fr": "1080p", "en": "1080p"}},
+         "aide": "8 / 16 / 32 crédits la seconde, comptés deux fois : la vidéo rendue + le reel envoyé (≈ 350 crédits pour 11 s en 720p).",
+         "aide_en": "8 / 16 / 32 credits per second, counted twice: the rendered video + the uploaded reel (≈ 350 credits for 11 s in 720p)."},
     ],
 }
 
@@ -384,7 +384,7 @@ def registre_perso(langue: str = "fr") -> Dict[str, Any]:
         opts.append(d)
     return {
         "cle": m["cle"], "nom": m["nom"], "editeur": m["editeur_en"] if en else m["editeur"], "type": m["type"],
-        "prix_seconde": kie_ai.PRIX["wan22replace"]["720p"], "sans_prompt": True, "duree": list(r["duree"]),
+        "prix_seconde": 2 * kie_ai.PRIX["wan3"]["720P"], "sans_prompt": True, "duree": list(r["duree"]),
         "badge": m["badge_en"] if en else m["badge"], "resume": m["resume_en"] if en else m["resume"],
         "prompt_max": 0, "prompt_min": 0,
         "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(kie_ai.TYPES_IMAGE + kie_ai.TYPES_VIDEO),
@@ -859,7 +859,7 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     for n, url in enumerate(t.get("urls_kie") or []):
         ext = Path(url.split("?")[0]).suffix.lower()
         if ext not in _MIME_PAR_EXT:
-            ext = ".mp4" if t.get("type") in ("video", "sanstexte") else ".png"
+            ext = ".mp4" if t.get("type") in ("video", "sanstexte", "perso") else ".png"
         nom = f"{tid}_{n}{ext}"
         dest = _dossier_sorties() / nom
         try:
@@ -869,7 +869,7 @@ def _rapatrier(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     neuf = dest.with_suffix(_EXT_PAR_MIME[ctype])
                     dest.replace(neuf)
                     dest, nom, ext = neuf, neuf.name, neuf.suffix
-                if t.get("type") == "sanstexte":
+                if t.get("type") == "sanstexte" or (t.get("type") == "perso" and (t.get("perso") or {}).get("wan3")):
                     # une seule fois, au téléchargement : un second passage
                     # retrouverait le fichier déjà sonorisé
                     note = _son_d_origine(t, dest) or note
@@ -1228,26 +1228,6 @@ def echec_visage(tid: str, erreur: str) -> Optional[Dict[str, Any]]:
 
 # --------------------------------------------------------------- perso --
 
-#: Ce que Seedream reçoit pour habiller la model : image 1 = la model, image
-#: 2 = une image du reel. En anglais : les modèles image le suivent mieux.
-#: Corps entier et bas de la tenue demandés explicitement : avec une image du
-#: reel coupée au buste et une photo arrêtée aux hanches, Seedream inventait le
-#: bas (un short à la place du jogging) et Wan habillait toute la vidéo avec.
-#: Le texte incrusté du reel est écarté par le prompt plutôt que par un
-#: recadrage, qui cachait justement le pantalon.
-PROMPT_RETOUCHE = (
-    "Image 1 is the person: keep her exact face, skin tone, hair and body completely unchanged. "
-    "Show her standing full-length, head to feet, facing the camera, in the same place as image 1 "
-    "(extend the background downward if image 1 is cropped). "
-    "Dress her in exactly the complete outfit of image 2, top AND bottom: the same garments including the trousers, "
-    "shorts or skirt, the same colors, fabric and the way they are worn (hood up or down, sleeves, fit, accessories). "
-    "Ignore and do not reproduce any text, caption, subtitle or watermark from image 2. "
-    "Photorealistic, natural lighting, no text, no captions, no watermark."
-)
-OPTIONS_RETOUCHE = {"quality": "basic", "output_format": "png"}
-RESOLUTIONS_PERSO = ("480p", "580p", "720p")
-
-
 def _dimensions(chemin: Path) -> Tuple[int, int]:
     try:
         r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
@@ -1258,58 +1238,53 @@ def _dimensions(chemin: Path) -> Tuple[int, int]:
         return 0, 0
 
 
-def _format_image(w: int, h: int) -> str:
-    """Le format Seedream le plus proche de la photo : la retouche garde le
-    cadrage de la model au lieu de l'étirer en 9:16."""
-    if w <= 0 or h <= 0:
-        return "9:16"
-    r = w / h
-    return min(kie_ai._FORMATS_IMAGE, key=lambda f: abs(int(f.split(":")[0]) / int(f.split(":")[1]) - r))
-
-
-def _image_du_reel(video: Path, seconde: float, duree: float) -> Optional[bytes]:
-    """Une image JPEG du reel, entière, à la seconde demandée (0 = le
-    milieu). None si ffmpeg ne peut pas."""
-    s = 0.0
-    if duree > 0:
-        s = seconde if 0 < seconde < duree else duree / 2
-        s = min(s, max(0.0, duree - 0.3))
-    with tempfile.TemporaryDirectory(prefix="sia_tenue_") as d:
-        dst = Path(d) / "tenue.jpg"
-        try:
-            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{s:.2f}", "-i", str(video), "-frames:v", "1",
-                                "-q:v", "2", str(dst)],
-                               capture_output=True, timeout=120)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if r.returncode != 0 or not dst.exists():
-            return None
-        return dst.read_bytes()
+#: Consigne de Wan 3.0 : Video1 = le reel, Image1 = la photo de la model.
+#: En anglais, le modèle le suit mieux. Tout ce qui n'est pas la personne est
+#: nommé pour qu'il le garde : sans « same outfit », Wan 2.2 habillait la
+#: model comme sur sa photo (04/11).
+PROMPT_PERSO = (
+    "Replace the woman in Video1 with the woman from Image1. "
+    "Use exactly her face, facial features, skin tone, makeup, hair color and hairstyle from Image1, "
+    "so she is clearly the same person as in Image1 in every frame. "
+    "Keep everything else from Video1 identical: the same outfit and clothes, the same body, pose, "
+    "movements, gestures, facial expressions and lip movements, the same timing, camera framing and camera motion, "
+    "the same background, location and lighting. "
+    "Photorealistic, natural skin texture, smartphone video look, no added text or watermark."
+)
+RESOLUTIONS_PERSO = ("480P", "720P", "1080P")
 
 
 def _options_perso(options: Any) -> Dict[str, Any]:
     o = options if isinstance(options, dict) else {}
-    res = o.get("resolution")
+    res = str(o.get("resolution") or "").upper()
     if res not in RESOLUTIONS_PERSO:
-        res = "720p"
-    try:
-        s = float(o.get("tenue_s") or 0)
-    except (TypeError, ValueError):
-        s = 0.0
-    return {"resolution": res, "tenue_s": max(0.0, min(30.0, s))}
+        res = "720P"
+    return {"resolution": res}
+
+
+def _duree_perso(duree_video: float) -> int:
+    """Durée demandée à Wan : celle du reel, arrondie à la seconde
+    supérieure (Wan rend des secondes entières), entre 2 et 15."""
+    return int(max(2, min(15, -(-float(duree_video or 0) // 1))))
 
 
 def estimer_perso(options: Any, duree_video: float) -> float:
-    """Retouche Seedream (basic, 2 images) + remplacement Wan à la seconde."""
+    """Kie facture la vidéo rendue + le reel envoyé, au prix Wan 3.0."""
     o = _options_perso(options)
-    return round(kie_ai.estimer("seedream5pro", OPTIONS_RETOUCHE, 2)
-                 + kie_ai.estimer("wan22replace", {"resolution": o["resolution"]}, 1, duree_video=duree_video), 2)
+    return round(kie_ai.PRIX["wan3"][o["resolution"]] * (_duree_perso(duree_video) + float(duree_video or 0)), 2)
+
+
+def entree_perso(options: Any, url_photo: str, url_video: str, duree_video: float) -> Dict[str, Any]:
+    """Le corps envoyé à Kie. Le son n'est pas généré : celui du reel est
+    remis au rapatriement (les lèvres suivent le reel, son son colle)."""
+    o = _options_perso(options)
+    return {"prompt": PROMPT_PERSO, "reference_image_urls": [url_photo], "reference_video_urls": [url_video],
+            "resolution": o["resolution"], "aspect_ratio": "adaptive", "duration": _duree_perso(duree_video),
+            "audio": False, "nsfw_checker": False}
 
 
 def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = "fr") -> Dict[str, Any]:
-    """Deux tâches Kie à la suite : Seedream habille la model avec la tenue
-    lue sur le reel, puis Wan Replace la met dans le reel (_verifier_perso
-    enchaîne). Le prix annoncé couvre les deux."""
+    """Une tâche Wan 3.0 : la photo de la model + le reel."""
     t = _t(langue)
     if not kie_ai.cle_presente():
         return {"ok": False, "erreur": t["cle_absente"], "code": "sans_cle"}
@@ -1334,45 +1309,34 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
         return {"ok": False, "code": "credits",
                 "erreur": t["credits_insuffisants"].format(reste=_nb(s["credits"]), besoin=_nb(besoin)),
                 "credits": s["credits"]}
-    tenue = _image_du_reel(video["chemin"], o["tenue_s"], duree_video)
-    if not tenue:
-        print(f"[studio-ia] perso : aucune image lue dans {video['chemin']}", flush=True)
-        return {"ok": False, "erreur": t["perso_sans_image"], "code": "tenue"}
+    modele_api = "wan/3-0-video"
     try:
-        ref_tenue = deposer_reference(utilisateur, tenue, f"tenue_{_nb(o['tenue_s'] or duree_video / 2)}s.jpg",
-                                      "image/jpeg", langue)
-    except (ValueError, kie_ai.ErreurKie) as e:
-        print(f"[studio-ia] perso : image de la tenue refusée : {type(e).__name__}: {e}", flush=True)
-        return {"ok": False, "erreur": str(e), "code": "tenue"}
-    w, h = _dimensions(photo["chemin"])
-    modele_api, entree = kie_ai.entree_api("seedream5pro", PROMPT_RETOUCHE, dict(OPTIONS_RETOUCHE, aspect_ratio=_format_image(w, h)),
-                                           [photo["url"], ref_tenue["url"]])
-    try:
-        task_id = kie_ai.creer_tache(modele_api, entree)
+        task_id = kie_ai.creer_tache(modele_api, entree_perso(o, photo["url"], video["url"], duree_video))
     except kie_ai.ErreurKie as e:
         _oublier_solde()
         msg = kie_ai.message_pour(e.code, str(e), langue) if e.code in (401, 402, 404, 422, 429, 455, "reseau", "sans_cle") else str(e)
-        print(f"[studio-ia] perso : retouche refusée ({e.code}) pour {utilisateur} : {e}", flush=True)
+        print(f"[studio-ia] perso : Wan 3.0 refusé ({e.code}) pour {utilisateur} : {e}", flush=True)
         return {"ok": False, "erreur": msg, "code": e.code}
     maintenant = int(time.time())
     tache = {
         "id": uuid.uuid4().hex[:12], "task_id": task_id, "utilisateur": utilisateur,
         "modele": "perso", "nom_modele": MODELE_PERSO["nom"], "modele_api": modele_api, "type": "perso",
-        "prompt": "", "options": o, "resume": f"{o['resolution']} · {_nb(duree_video)} s",
-        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")}
-                       for r in (photo, video, ref_tenue)],
+        "prompt": "", "options": o, "resume": f"{o['resolution'].lower()} · {_nb(duree_video)} s",
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")} for r in (photo, video)],
         "etat": "en_attente", "message": "", "credits_estimes": besoin, "credits": None,
         "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
         "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,
-        "perso": {"etape": "retouche", "task_retouche": task_id, "task_remplacement": "", "credits_retouche": None,
-                  "ref_retouche": "", "photo": photo["id"], "video": video["id"], "tenue": ref_tenue["id"],
-                  "duree": round(duree_video, 2)},
+        # directement à l'étape « remplacement » : _verifier_perso rapatrie
+        # dès le succès, sans enchaîner de seconde tâche
+        "perso": {"etape": "remplacement", "task_retouche": "", "task_remplacement": task_id, "credits_retouche": 0,
+                  "ref_retouche": "", "photo": photo["id"], "video": video["id"], "tenue": "",
+                  "duree": round(duree_video, 2), "wan3": True},
     }
     with _VERROU:
         taches = _charger()
         taches.append(tache)
         _ecrire(taches)
-    print(f"[studio-ia] perso {tache['id']} lancé par {utilisateur} : retouche {task_id}, ≈{besoin} crédits", flush=True)
+    print(f"[studio-ia] perso {tache['id']} lancé par {utilisateur} : Wan 3.0 {task_id}, ≈{besoin} crédits", flush=True)
     _assurer_suivi()
     return {"ok": True, "tache": _publique(tache, langue)}
 
