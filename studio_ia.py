@@ -169,6 +169,9 @@ T = {
         "perso_etape_retouche": "1/2 · la model prend la tenue du reel",
         "perso_etape_remplacement": "remplacement de la fille dans le reel",
         "perso_etape_fini": "terminé",
+        "perso_etape_apercu": "aperçu en image",
+        "apercu": "Aperçu en image", "apercu_lance": "Aperçu lancé : une image du reel avec la model (≈ {n} crédits, ~30 s).",
+        "apercu_aide": "Une image du milieu du reel, refaite avec la model par Seedream, pour vérifier la photo avant de payer la vidéo. Ce n'est pas Wan : le rendu final peut différer un peu.",
         "sanstexte": "Sans caption",
         "deposer_sanstexte": "Clique ou dépose la vidéo dont il faut retirer l'écriture",
         "deposer_aide_sanstexte": "MP4/MOV de 3 à 15 s, 700 px de côté au moins",
@@ -268,6 +271,9 @@ T = {
         "perso_etape_retouche": "1/2 · the model takes the reel's outfit",
         "perso_etape_remplacement": "replacing the girl in the reel",
         "perso_etape_fini": "done",
+        "perso_etape_apercu": "image preview",
+        "apercu": "Image preview", "apercu_lance": "Preview started: one frame of the reel with the model (≈ {n} credits, ~30 s).",
+        "apercu_aide": "One frame from the middle of the reel, redone with the model by Seedream, to check the photo before paying for the video. It is not Wan: the final render may differ a little.",
         "sanstexte": "Remove caption",
         "deposer_sanstexte": "Click or drop the video to strip of its text",
         "deposer_aide_sanstexte": "MP4/MOV, 3 to 15 s, at least 700 px per side",
@@ -395,6 +401,7 @@ def registre_perso(langue: str = "fr") -> Dict[str, Any]:
         "references": {"max": r["max"], "modes": list(r["modes"]), "types": list(kie_ai.TYPES_IMAGE + kie_ai.TYPES_VIDEO),
                        "videos_max": r["videos_max"], "aide": r["aide_en"] if en else r["aide"]},
         "options": opts, "estimation_defaut": estimer_perso({}, 10.0),
+        "apercu": {"base": kie_ai.PRIX["seedream5pro"]["basic"], "par_photo": kie_ai.PRIX["seedream5pro"]["image_sup"]},
     }
 
 
@@ -1269,13 +1276,59 @@ def prompt_perso(nb_photos: int = 1) -> str:
 PROMPT_PERSO = prompt_perso(1)
 RESOLUTIONS_PERSO = ("480P", "720P", "1080P")
 
+#: L'aperçu en image : Seedream refait UNE image du reel avec la model, pour
+#: juger la photo de référence (vêtements ou bijoux recopiés, effet filtre)
+#: avant de payer la vidéo — demandé le 22/11/2026 après deux essais Wan à
+#: 128 crédits gâchés par une photo trop habillée.
+OPTIONS_APERCU = {"quality": "basic", "output_format": "png"}
+
+
+def prompt_apercu(nb_photos: int = 1) -> str:
+    n = max(1, int(nb_photos))
+    cadre = n + 1
+    photos = "image 1" if n == 1 else "images " + ", ".join(str(i) for i in range(1, n)) + f" and {n}"
+    return (
+        f"Image {cadre} is a frame from a video. Replace the woman in image {cadre} with the woman from {photos}: "
+        "use exactly her face, facial features, skin tone, makeup, hair color and hairstyle. "
+        f"Keep everything else from image {cadre} identical: the same outfit and clothes, body, pose, hands, "
+        "framing, background, lighting and any on-screen text. "
+        "Photorealistic, the same smartphone photo look as the frame."
+    )
+
+
+def _image_du_reel(video: Path, seconde: float, duree: float) -> Optional[bytes]:
+    """Une image JPEG du reel à la seconde demandée (0 = le milieu). None si
+    ffmpeg ne peut pas."""
+    s = 0.0
+    if duree > 0:
+        s = seconde if 0 < seconde < duree else duree / 2
+        s = min(s, max(0.0, duree - 0.3))
+    with tempfile.TemporaryDirectory(prefix="sia_cadre_") as d:
+        dst = Path(d) / "cadre.jpg"
+        try:
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{s:.2f}", "-i", str(video), "-frames:v", "1",
+                                "-q:v", "2", str(dst)], capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if r.returncode != 0 or not dst.exists():
+            return None
+        return dst.read_bytes()
+
+
+def _format_image(w: int, h: int) -> str:
+    """Le format Seedream le plus proche de l'image du reel."""
+    if w <= 0 or h <= 0:
+        return "9:16"
+    r = w / h
+    return min(kie_ai._FORMATS_IMAGE, key=lambda f: abs(int(f.split(":")[0]) / int(f.split(":")[1]) - r))
+
 
 def _options_perso(options: Any) -> Dict[str, Any]:
     o = options if isinstance(options, dict) else {}
     res = str(o.get("resolution") or "").upper()
     if res not in RESOLUTIONS_PERSO:
         res = "720P"
-    return {"resolution": res}
+    return {"resolution": res, "apercu": o.get("apercu") in (True, "true", "1", 1, "on")}
 
 
 def _duree_perso(duree_video: float) -> int:
@@ -1285,9 +1338,12 @@ def _duree_perso(duree_video: float) -> int:
     return int(max(2, min(15, round(float(duree_video or 0)))))
 
 
-def estimer_perso(options: Any, duree_video: float) -> float:
-    """Kie facture la vidéo rendue + le reel envoyé, au prix Wan 3.0."""
+def estimer_perso(options: Any, duree_video: float, nb_photos: int = 1) -> float:
+    """Kie facture la vidéo rendue + le reel envoyé, au prix Wan 3.0. Pour
+    l'aperçu : une retouche Seedream (les photos + une image du reel)."""
     o = _options_perso(options)
+    if o["apercu"]:
+        return kie_ai.estimer("seedream5pro", OPTIONS_APERCU, max(1, int(nb_photos)) + 1)
     return round(kie_ai.PRIX["wan3"][o["resolution"]] * (_duree_perso(duree_video) + float(duree_video or 0)), 2)
 
 
@@ -1321,6 +1377,8 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
     if nb_ouvertes >= MAX_OUVERTES:
         return {"ok": False, "erreur": t["trop_en_cours"].format(n=MAX_OUVERTES), "code": "trop"}
     o = _options_perso(options)
+    if o["apercu"]:
+        return _lancer_apercu(utilisateur, o, images, video, duree_video, langue)
     besoin = estimer_perso(o, duree_video)
     s = solde()
     if s["credits"] is not None and besoin > s["credits"]:
@@ -1359,6 +1417,60 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
     return {"ok": True, "tache": _publique(tache, langue)}
 
 
+def _lancer_apercu(utilisateur: str, o: Dict[str, Any], images: List[Dict[str, Any]], video: Dict[str, Any],
+                   duree_video: float, langue: str = "fr") -> Dict[str, Any]:
+    """Une tâche Seedream : les photos de la model + une image du milieu du
+    reel. Rangée comme un « perso » à l'étape « apercu » : le suivi la
+    rapatrie au succès, sans rien enchaîner."""
+    t = _t(langue)
+    besoin = estimer_perso(o, duree_video, len(images))
+    s = solde()
+    if s["credits"] is not None and besoin > s["credits"]:
+        return {"ok": False, "code": "credits",
+                "erreur": t["credits_insuffisants"].format(reste=_nb(s["credits"]), besoin=_nb(besoin)),
+                "credits": s["credits"]}
+    cadre = _image_du_reel(video["chemin"], 0, duree_video)
+    if not cadre:
+        print(f"[studio-ia] aperçu : aucune image lue dans {video['chemin']}", flush=True)
+        return {"ok": False, "erreur": t["perso_sans_image"], "code": "cadre"}
+    try:
+        ref_cadre = deposer_reference(utilisateur, cadre, f"cadre_{_nb(duree_video / 2)}s.jpg", "image/jpeg", langue)
+    except (ValueError, kie_ai.ErreurKie) as e:
+        print(f"[studio-ia] aperçu : image du reel refusée : {type(e).__name__}: {e}", flush=True)
+        return {"ok": False, "erreur": str(e), "code": "cadre"}
+    w, h = _dimensions(video["chemin"])
+    modele_api, entree = kie_ai.entree_api("seedream5pro", prompt_apercu(len(images)),
+                                           dict(OPTIONS_APERCU, aspect_ratio=_format_image(w, h)),
+                                           [r["url"] for r in images] + [ref_cadre["url"]])
+    try:
+        task_id = kie_ai.creer_tache(modele_api, entree)
+    except kie_ai.ErreurKie as e:
+        _oublier_solde()
+        msg = kie_ai.message_pour(e.code, str(e), langue) if e.code in (401, 402, 404, 422, 429, 455, "reseau", "sans_cle") else str(e)
+        print(f"[studio-ia] aperçu refusé ({e.code}) pour {utilisateur} : {e}", flush=True)
+        return {"ok": False, "erreur": msg, "code": e.code}
+    maintenant = int(time.time())
+    tache = {
+        "id": uuid.uuid4().hex[:12], "task_id": task_id, "utilisateur": utilisateur,
+        "modele": "perso", "nom_modele": "Aperçu · Seedream", "modele_api": modele_api, "type": "perso",
+        "prompt": "", "options": o, "resume": f"aperçu · image à {_nb(duree_video / 2)} s",
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")}
+                       for r in images + [video, ref_cadre]],
+        "etat": "en_attente", "message": "", "credits_estimes": besoin, "credits": None,
+        "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
+        "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,
+        "perso": {"etape": "apercu", "photo": images[0]["id"], "video": video["id"], "cadre": ref_cadre["id"],
+                  "duree": round(duree_video, 2)},
+    }
+    with _VERROU:
+        taches = _charger()
+        taches.append(tache)
+        _ecrire(taches)
+    print(f"[studio-ia] aperçu {tache['id']} lancé par {utilisateur} : Seedream {task_id}, ≈{besoin} crédits", flush=True)
+    _assurer_suivi()
+    return {"ok": True, "tache": _publique(tache, langue)}
+
+
 def _verifier_perso(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Même lecture de Kie que `verifier`, plus l'enchaînement : la retouche
     rendue devient la photo de référence du remplacement Wan."""
@@ -1374,7 +1486,7 @@ def _verifier_perso(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except kie_ai.ErreurKie as e:
         return _maj(tid, derniere_erreur=f"{e.code}: {e}"[:200])
     etat = d.get("state")
-    etape = "Retouche" if p.get("etape") == "retouche" else "Remplacement"
+    etape = {"retouche": "Retouche", "apercu": "Aperçu"}.get(p.get("etape"), "Remplacement")
     if etat in ("waiting", "queuing"):
         return _maj(tid, etat="en_attente", derniere_erreur="")
     if etat == "generating":
@@ -1390,7 +1502,7 @@ def _verifier_perso(t: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     urls = list(d.get("resultUrls") or [])
     if not urls:
         return _maj(tid, etat="echec", message=f"{etape} : succès annoncé sans fichier.", fini_le=int(time.time()))
-    if p.get("etape") == "remplacement":
+    if p.get("etape") in ("remplacement", "apercu"):
         p["etape"] = "fini"
         t = _maj(tid, etat="en_cours", urls_kie=urls, perso=p, derniere_erreur="", duree_calcul=d.get("costTime"),
                  credits=float(p.get("credits_retouche") or 0) + float(d.get("creditsConsumed") or 0))
@@ -1525,6 +1637,9 @@ body.light #sia-root{--sia-carte:#fff;--sia-carte2:#f5f5f5;--sia-bord:#e0e0e0;--
 #sia-root .sia-generer:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(var(--sia-accent-rgb),.4)}
 #sia-root .sia-generer:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
 #sia-root .sia-generer svg{width:16px;height:16px}
+#sia-root .sia-apercu{appearance:none;width:100%;margin-top:8px;border:1px solid var(--sia-bord);border-radius:11px;padding:10px;background:var(--sia-carte2);color:var(--sia-texte);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+#sia-root .sia-apercu:hover{border-color:var(--sia-accent)}
+#sia-root .sia-apercu:disabled{opacity:.45;cursor:not-allowed}
 #sia-root .sia-raccourci{text-align:center;font-size:11px;color:var(--sia-faible);margin:8px 0 0}
 #sia-root .sia-alerte{display:none;margin:10px 0 0;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.45;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.4);color:var(--sia-ko)}
 #sia-root .sia-alerte.on{display:block}
@@ -1675,6 +1790,7 @@ def rendu_html(langue: str = "fr", admin: bool = False, site: str = "https://you
     <section class="sia-carte">
       <div class="sia-estim-l"><span>{e(t["estime"])}</span><b>⚡ <span id="sia-estime">—</span></b></div>
       <button type="button" class="sia-generer" id="sia-generer">{_SVG_ETINCELLE}<span id="sia-generer-txt">{e(t["generer"])}</span></button>
+      <button type="button" class="sia-apercu" id="sia-apercu" title="{e(t["apercu_aide"])}" hidden>👁 <span id="sia-apercu-txt">{e(t["apercu"])}</span></button>
       <p class="sia-raccourci">{e(t["raccourci"])}</p>
       <div class="sia-alerte" id="sia-alerte"></div>
     </section>

@@ -39311,6 +39311,34 @@ try:
               and _sia.registre_perso("fr")["references"]["max"] == 5, _gPm)
         check("perso : 5 photos + reel refusees (4 au plus)",
               _cS.post("/studio-ia/generer", json={"modele": "perso", "references": [_idW] * 5 + [_rV["reference"]["id"]]}).get_json().get("code") == "refs")
+        # -- aperçu en image : Seedream refait une image du reel avec la model
+        check("perso apercu : prix = Seedream basic + 0,5 par photo, annonce dans le registre, bouton dans la page",
+              _sia.estimer_perso({"apercu": True}, 4, 1) == 7.5 and _sia.estimer_perso({"apercu": True}, 4, 3) == 8.5
+              and _sia.registre_perso("fr")["apercu"] == {"base": 7, "par_photo": 0.5}
+              and 'id="sia-apercu"' in _ftS and "Image 3 is a frame" in _sia.prompt_apercu(2))
+        _FAUX["record"] = {"state": "queuing"}
+        _gPa = _cS.post("/studio-ia/generer", json={"modele": "perso", "options": {"resolution": "720P", "apercu": True},
+                                                    "references": [_rW["reference"]["id"], _rV["reference"]["id"]]}).get_json()
+        _ePa = _FAUX.get("entree") or {}
+        _tPa = _gPa.get("tache") or {}
+        check("perso apercu : Seedream part avec la photo PUIS une image du reel deposee, etape apercu, prix 7,5",
+              _gPa.get("ok") and _ePa.get("model") == "seedream/5-pro-image-to-image"
+              and len(_ePa["input"].get("image_urls") or []) == 2 and "Image 2 is a frame" in _ePa["input"].get("prompt", "")
+              and _tPa["perso"]["etape"] == "apercu" and _tPa["credits_estimes"] == 7.5
+              and len(_tPa["references"]) == 3 and _tPa["references"][2]["mime"] == "image/jpeg", _gPa)
+        _dlAvA = _kie.telecharger
+
+        def _fauxDlPngA(url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"\x89PNG" + b"\x00" * 20)
+            return 24, "image/png"
+        _kie.telecharger = _fauxDlPngA
+        _FAUX["record"] = {"state": "success", "resultJson": _jsSia.dumps({"resultUrls": ["https://kie.test/apercu.png"]}), "creditsConsumed": 7.5}
+        _tPa2 = _sia.verifier(_tPa["id"])
+        _kie.telecharger = _dlAvA
+        check("perso apercu : image rendue -> fini, un PNG, rien d enchaine, credits de Kie",
+              _tPa2["etat"] == "fini" and [f["mime"] for f in _tPa2["fichiers"]] == ["image/png"]
+              and _tPa2["credits"] == 7.5 and _tPa2["perso"]["etape"] == "fini" and _tPa2["task_id"] == "task_test", _tPa2)
         check("perso : photo seule refusee (code refs)",
               _cS.post("/studio-ia/generer", json={"modele": "perso", "references": [_rW["reference"]["id"]]}).get_json().get("code") == "refs")
         _pid = _tPe["id"]
@@ -39342,7 +39370,8 @@ try:
         _jsPe = _cS.get("/studio-ia/app.js").get_data(as_text=True)
         check("app.js : le genre perso est une paire photo + video, prix a la seconde, etape montree sur la carte, 2e fichier dans l apercu",
               "perso: 'perso'" in _jsPe and "S.type === 'perso'" in _jsPe and "function prixSeconde" in _jsPe
-              and "perso_etape_" in _jsPe and "deposer_perso" in _jsPe and "S.type !== 'perso' || video" in _jsPe)
+              and "perso_etape_" in _jsPe and "deposer_perso" in _jsPe and "S.type !== 'perso' || video" in _jsPe
+              and "function majApercu" in _jsPe and "apercu: true" in _jsPe)
     else:
         check("motion : ffmpeg present pour le test de depot", False, "ffmpeg absent ou lavfi/webp indisponible")
     _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}

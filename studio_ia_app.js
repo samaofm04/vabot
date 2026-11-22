@@ -189,6 +189,7 @@
     if (!S.envoi) { $('sia-generer-txt').textContent = libelleGenerer(); }
     if (m) { choisirModele(m.cle); } else { rendreModeles(); }
     if (S.type === 'visage') { rafraichirMachine(); }
+    majApercu();
   }
 
   // ------------------------------------------------------------ options --
@@ -327,6 +328,7 @@
     aide.textContent = m ? (m.references.aide || '') : '';
     var drop = $('sia-drop');
     drop.style.display = (m && S.refs.length >= m.references.max) ? 'none' : '';
+    majApercu();   // son prix dépend du nombre de photos
   }
   function ajouterFichiers(files) {
     var m = S.modele;
@@ -390,17 +392,30 @@
   }
 
   // --------------------------------------------------------- génération --
-  function generer() {
+  // perso : l'aperçu en image part par la même route, option apercu en plus
+  function majApercu() {
+    var b = $('sia-apercu');
+    if (!b) { return; }
+    var m = S.modele, ok = S.type === 'perso' && m && m.apercu;
+    b.hidden = !ok;
+    if (!ok) { return; }
+    var nbPhotos = S.refs.filter(function (r) { return !estVideo(r.mime); }).length || 1;
+    $('sia-apercu-txt').textContent = (T.apercu || '') + ' · ≈ ⚡ ' + nb(m.apercu.base + m.apercu.par_photo * nbPhotos);
+    b.disabled = S.envoi || !S.cle;
+  }
+  function generer(apercu) {
     if (!S.modele || S.envoi) { return; }
     if (S.refs.some(function (r) { return r.envoi; })) { toast(T.envoi_ref, 'info'); return; }
     if (typeVideoSeule() && !S.refs.length) { montrerAlerte(T.sanstexte_refs); return; }
     var prompt = $('sia-prompt').value.trim();
     S.envoi = true;
     $('sia-generer').disabled = true;
+    if ($('sia-apercu')) { $('sia-apercu').disabled = true; }
     $('sia-generer-txt').textContent = T.generation || '…';
     effacerAlerte();
     post('/studio-ia/generer', {
-      modele: S.modele.cle, prompt: prompt, options: S.options,
+      modele: S.modele.cle, prompt: prompt,
+      options: apercu === true ? Object.assign({}, S.options, { apercu: true }) : S.options,
       references: S.refs.map(function (r) { return r.id; }).filter(Boolean)
     }).then(function (d) {
       if (!d.ok) {
@@ -408,7 +423,7 @@
         if (d.credits !== undefined && d.credits !== null) { majCredits({ credits: d.credits }); }
         return;
       }
-      var lance = { perso: T.perso_lance, sanstexte: T.sanstexte_lance }[d.tache.type] || T.lance;
+      var lance = apercu === true ? T.apercu_lance : ({ perso: T.perso_lance, sanstexte: T.sanstexte_lance }[d.tache.type] || T.lance);
       toast(d.tache.type === 'visage' ? (T.visage_lance || '') : fmt(lance, { n: nb(d.tache.credits_estimes) }), 'success');
       S.taches = [d.tache].concat(S.taches.filter(function (t) { return t.id !== d.tache.id; }));
       rendreTaches();
@@ -419,6 +434,7 @@
       S.envoi = false;
       $('sia-generer-txt').textContent = libelleGenerer();
       verifierCredits();
+      majApercu();
     });
   }
 
@@ -771,7 +787,8 @@
   Array.prototype.forEach.call($('sia-vues').querySelectorAll('button'), function (b) {
     b.addEventListener('click', function () { choisirVue(b.getAttribute('data-vue')); });
   });
-  $('sia-generer').addEventListener('click', generer);
+  $('sia-generer').addEventListener('click', function () { generer(false); });
+  if ($('sia-apercu')) { $('sia-apercu').addEventListener('click', function () { generer(true); }); }
   $('sia-prompt').addEventListener('input', function () { majPrompt(); if (S.alerteErreur) { effacerAlerte(); verifierCredits(); } });
   $('sia-prompt').addEventListener('keydown', function (ev) {
     if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') { ev.preventDefault(); generer(); }
