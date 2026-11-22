@@ -162,8 +162,8 @@ T = {
         "visage_lance": "Remplacement de visage mis en file (gratuit).",
         "perso": "Remplacer · Wan 3.0",
         "deposer_perso": "Clique ou dépose la photo de la model et le reel à refaire",
-        "deposer_aide_perso": "Photo de face (JPG/PNG/WebP) + reel MP4/MOV de 1 à 15 s",
-        "perso_refs": "Il faut une photo de la model et un reel.",
+        "deposer_aide_perso": "1 à 4 photos (face d'abord, puis profil…) + reel MP4/MOV de 1 à 15 s",
+        "perso_refs": "Il faut 1 à 4 photos de la model et un reel.",
         "perso_sans_image": "Impossible de lire une image du reel (ffmpeg) : réessaie avec un MP4.",
         "perso_lance": "Lancé : Wan 3.0 remplace la fille du reel par la model (≈ {n} crédits, 5 à 10 min).",
         "perso_etape_retouche": "1/2 · la model prend la tenue du reel",
@@ -261,8 +261,8 @@ T = {
         "visage_lance": "Face swap queued (free).",
         "perso": "Replace · Wan 3.0",
         "deposer_perso": "Click or drop the model's photo and the reel to redo",
-        "deposer_aide_perso": "Front-facing photo (JPG/PNG/WebP) + MP4/MOV reel, 1 to 15 s",
-        "perso_refs": "A photo of the model and a reel are both needed.",
+        "deposer_aide_perso": "1 to 4 photos (front first, then profile…) + MP4/MOV reel, 1 to 15 s",
+        "perso_refs": "1 to 4 photos of the model and a reel are needed.",
         "perso_sans_image": "Could not read a frame of the reel (ffmpeg): try again with an MP4.",
         "perso_lance": "Started: Wan 3.0 replaces the reel's girl with the model (≈ {n} credits, 5 to 10 min).",
         "perso_etape_retouche": "1/2 · the model takes the reel's outfit",
@@ -347,6 +347,11 @@ def registre_visage(langue: str = "fr") -> Dict[str, Any]:
 #: de la photo que la personne : plus besoin de retoucher la photo avant.
 #: Kie facture la durée rendue PLUS celle du reel envoyé, et limite le reel
 #: de référence à 15 s (doc docs.kie.ai/market/wan/3-0-video).
+#: Photos de la model acceptées : la vue de face d'une character sheet, plus
+#: ses vues de trois-quarts et de profil (Wan 3.0 en lit jusqu'à 10). Plusieurs
+#: angles aident quand la fille du reel tourne la tête.
+PHOTOS_PERSO_MAX = 4
+
 MODELE_PERSO = {
     "cle": "perso", "nom": "Wan 3.0 · remplacer la fille", "editeur": "Alibaba", "editeur_en": "Alibaba",
     "type": "perso", "badge": "recommandé", "badge_en": "recommended",
@@ -354,9 +359,9 @@ MODELE_PERSO = {
     "resume_en": "the reel's girl becomes the model (Wan 3.0): outfit, moves, scene and sound kept",
     "prompt_max": 0, "prompt_min": 0, "sans_prompt": True,
     "references": {
-        "max": 2, "modes": ["perso"], "videos_max": 1, "duree": [1, 15],
-        "aide": "1 photo de la model DE FACE (visage net et entier, fond uni, bonne lumière, cheveux visibles) + 1 reel MP4/MOV de 1 à 15 s. La photo fixe l'identité : un selfie de biais ou flou donne un visage faux.",
-        "aide_en": "1 FRONT-FACING photo of the model (sharp full face, plain background, good light, hair visible) + 1 MP4/MOV reel of 1 to 15 s. The photo sets the identity: a tilted or blurry selfie gives a wrong face.",
+        "max": PHOTOS_PERSO_MAX + 1, "modes": ["perso"], "videos_max": 1, "duree": [1, 15],
+        "aide": "1 à 4 photos de la model, la 1re DE FACE (visage net et entier, fond uni, bonne lumière, cheveux visibles), les autres de trois-quarts ou de profil + 1 reel MP4/MOV de 1 à 15 s. Les photos fixent l'identité : un selfie de biais ou flou donne un visage faux.",
+        "aide_en": "1 to 4 photos of the model, the 1st FRONT-FACING (sharp full face, plain background, good light, hair visible), the others three-quarter or profile + 1 MP4/MOV reel of 1 to 15 s. The photos set the identity: a tilted or blurry selfie gives a wrong face.",
     },
     "options": [
         {"cle": "resolution", "nom": "Résolution", "nom_en": "Resolution", "type": "choix",
@@ -1238,19 +1243,30 @@ def _dimensions(chemin: Path) -> Tuple[int, int]:
         return 0, 0
 
 
-#: Consigne de Wan 3.0 : Video1 = le reel, Image1 = la photo de la model.
+#: Consigne de Wan 3.0 : Video1 = le reel, Image1… = les photos de la model.
 #: En anglais, le modèle le suit mieux. Tout ce qui n'est pas la personne est
 #: nommé pour qu'il le garde : sans « same outfit », Wan 2.2 habillait la
 #: model comme sur sa photo (04/11).
-PROMPT_PERSO = (
-    "Replace the woman in Video1 with the woman from Image1. "
-    "Use exactly her face, facial features, skin tone, makeup, hair color and hairstyle from Image1, "
-    "so she is clearly the same person as in Image1 in every frame. "
-    "Keep everything else from Video1 identical: the same outfit and clothes, the same body, pose, "
-    "movements, gestures, facial expressions and lip movements, the same timing, camera framing and camera motion, "
-    "the same background, location and lighting. "
-    "Photorealistic, natural skin texture, smartphone video look, no added text or watermark."
-)
+def prompt_perso(nb_photos: int = 1) -> str:
+    n = max(1, int(nb_photos))
+    if n == 1:
+        qui, ref = "the woman from Image1", "Image1"
+    else:
+        images = ", ".join(f"Image{i}" for i in range(1, n))
+        qui = f"the woman shown in {images} and Image{n} (the same person seen from several angles)"
+        ref = "these images"
+    return (
+        f"Replace the woman in Video1 with {qui}. "
+        f"Use exactly her face, facial features, skin tone, makeup, hair color and hairstyle from {ref}, "
+        f"so she is clearly the same person in every frame, from every angle. "
+        "Keep everything else from Video1 identical: the same outfit and clothes, the same body, pose, "
+        "movements, gestures, facial expressions and lip movements, the same timing, camera framing and camera motion, "
+        "the same background, location and lighting. "
+        "Photorealistic, natural skin texture, smartphone video look, no added text or watermark."
+    )
+
+
+PROMPT_PERSO = prompt_perso(1)
 RESOLUTIONS_PERSO = ("480P", "720P", "1080P")
 
 
@@ -1275,11 +1291,12 @@ def estimer_perso(options: Any, duree_video: float) -> float:
     return round(kie_ai.PRIX["wan3"][o["resolution"]] * (_duree_perso(duree_video) + float(duree_video or 0)), 2)
 
 
-def entree_perso(options: Any, url_photo: str, url_video: str, duree_video: float) -> Dict[str, Any]:
+def entree_perso(options: Any, urls_photos: Any, url_video: str, duree_video: float) -> Dict[str, Any]:
     """Le corps envoyé à Kie. Le son n'est pas généré : celui du reel est
     remis au rapatriement (les lèvres suivent le reel, son son colle)."""
     o = _options_perso(options)
-    return {"prompt": PROMPT_PERSO, "reference_image_urls": [url_photo], "reference_video_urls": [url_video],
+    photos = [urls_photos] if isinstance(urls_photos, str) else list(urls_photos)[:PHOTOS_PERSO_MAX]
+    return {"prompt": prompt_perso(len(photos)), "reference_image_urls": photos, "reference_video_urls": [url_video],
             "resolution": o["resolution"], "aspect_ratio": "adaptive", "duration": _duree_perso(duree_video),
             "audio": False, "nsfw_checker": False}
 
@@ -1289,10 +1306,10 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
     t = _t(langue)
     if not kie_ai.cle_presente():
         return {"ok": False, "erreur": t["cle_absente"], "code": "sans_cle"}
-    refs_meta = [r for r in (_reference(x) for x in (refs or [])[:2]) if r]
+    refs_meta = [r for r in (_reference(x) for x in (refs or [])[:PHOTOS_PERSO_MAX + 1]) if r]
     images = [r for r in refs_meta if str(r.get("mime") or "").startswith("image/")]
     videos = [r for r in refs_meta if str(r.get("mime") or "").startswith("video/")]
-    if len(images) != 1 or len(videos) != 1:
+    if not 1 <= len(images) <= PHOTOS_PERSO_MAX or len(videos) != 1:
         return {"ok": False, "erreur": t["perso_refs"], "code": "refs"}
     photo, video = images[0], videos[0]
     duree_video = float(video.get("duree") or 0)
@@ -1312,7 +1329,7 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
                 "credits": s["credits"]}
     modele_api = "wan/3-0-video"
     try:
-        task_id = kie_ai.creer_tache(modele_api, entree_perso(o, photo["url"], video["url"], duree_video))
+        task_id = kie_ai.creer_tache(modele_api, entree_perso(o, [r["url"] for r in images], video["url"], duree_video))
     except kie_ai.ErreurKie as e:
         _oublier_solde()
         msg = kie_ai.message_pour(e.code, str(e), langue) if e.code in (401, 402, 404, 422, 429, 455, "reseau", "sans_cle") else str(e)
@@ -1323,7 +1340,7 @@ def lancer_perso(utilisateur: str, options: Any, refs: List[str], langue: str = 
         "id": uuid.uuid4().hex[:12], "task_id": task_id, "utilisateur": utilisateur,
         "modele": "perso", "nom_modele": MODELE_PERSO["nom"], "modele_api": modele_api, "type": "perso",
         "prompt": "", "options": o, "resume": f"{o['resolution'].lower()} · {_nb(duree_video)} s",
-        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")} for r in (photo, video)],
+        "references": [{"id": r["id"], "nom": r.get("nom", ""), "mime": r.get("mime", "")} for r in images + [video]],
         "etat": "en_attente", "message": "", "credits_estimes": besoin, "credits": None,
         "cree_le": maintenant, "maj_le": maintenant, "fini_le": None,
         "fichiers": [], "urls_kie": [], "essais_dl": 0, "masque": False,

@@ -338,8 +338,14 @@
       if (!mime && /\.(mov|qt)$/.test(nom)) { mime = 'video/quicktime'; }
       if (!mime && /\.mp4$/.test(nom)) { mime = 'video/mp4'; }
       var video = estVideo(mime);
-      if (typePaire()) {
+      // perso : les photos s'ajoutent (face, trois-quarts, profil) ; seule
+      // la vidéo remplace la précédente. Ailleurs, la nouvelle remplace
+      // celle du même genre.
+      if (typePaire() && (S.type !== 'perso' || video)) {
         S.refs = S.refs.filter(function (r) { return estVideo(r.mime) !== video; });
+      }
+      if (S.type === 'perso' && !video && S.refs.filter(function (r) { return !estVideo(r.mime); }).length >= m.references.max - 1) {
+        toast(fmt(T.refs_max, { n: m.references.max - 1 }), 'info'); return;
       }
       if (typeVideoSeule()) {
         if (!video) { toast(T.sanstexte_refs, 'error'); return; }

@@ -39281,7 +39281,7 @@ try:
         # reel, Image1 = la photo de la model), recette du 22/11/2026
         _rPe = _sia.registre_perso("fr")
         check("perso : genre rendu, dans le registre de l ecran (photo + reel 1-15 s, prix = Wan 3.0 compte deux fois), estimation = prix x (rendu + reel)",
-              _rPe["cle"] == "perso" and _rPe["prix_seconde"] == 32 and _rPe["references"]["max"] == 2 and _rPe["duree"] == [1, 15]
+              _rPe["cle"] == "perso" and _rPe["prix_seconde"] == 32 and _rPe["references"]["max"] == 5 and _rPe["duree"] == [1, 15]
               and '"cle": "perso"' in _ftS and 'data-type="perso"' in _ftS and _kie.modele("perso") is None
               and _sia.estimer_perso({"resolution": "720P"}, 10.97) == 351.52 and _sia.estimer_perso({"resolution": "480p"}, 4) == 64
               and _sia._duree_perso(10.97) == 11 and _sia._duree_perso(9.007) == 9 and _sia._duree_perso(0.4) == 2 and _sia._duree_perso(15) == 15
@@ -39300,6 +39300,17 @@ try:
               and _iPe.get("audio") is False and _iPe.get("nsfw_checker") is False and _iPe.get("aspect_ratio") == "adaptive"
               and "Video1" in _iPe.get("prompt", "") and "Image1" in _iPe.get("prompt", "") and "outfit" in _iPe.get("prompt", "")
               and _tPe["resume"] == "480p · 4 s", _gPe)
+        _FAUX["record"] = {"state": "queuing"}
+        _idW = _rW["reference"]["id"]
+        _gPm = _cS.post("/studio-ia/generer", json={"modele": "perso", "options": {"resolution": "480P"},
+                                                    "references": [_idW, _idW, _idW, _rV["reference"]["id"]]}).get_json()
+        _iPm = (_FAUX.get("entree") or {}).get("input") or {}
+        check("perso : 3 photos (face, trois-quarts, profil) + reel -> les 3 partent en Image1-3, consigne qui les nomme, 4 references",
+              _gPm.get("ok") and len(_iPm.get("reference_image_urls") or []) == 3
+              and "Image1, Image2 and Image3" in _iPm.get("prompt", "") and len(_gPm["tache"]["references"]) == 4
+              and _sia.registre_perso("fr")["references"]["max"] == 5, _gPm)
+        check("perso : 5 photos + reel refusees (4 au plus)",
+              _cS.post("/studio-ia/generer", json={"modele": "perso", "references": [_idW] * 5 + [_rV["reference"]["id"]]}).get_json().get("code") == "refs")
         check("perso : photo seule refusee (code refs)",
               _cS.post("/studio-ia/generer", json={"modele": "perso", "references": [_rW["reference"]["id"]]}).get_json().get("code") == "refs")
         _pid = _tPe["id"]
@@ -39331,7 +39342,7 @@ try:
         _jsPe = _cS.get("/studio-ia/app.js").get_data(as_text=True)
         check("app.js : le genre perso est une paire photo + video, prix a la seconde, etape montree sur la carte, 2e fichier dans l apercu",
               "perso: 'perso'" in _jsPe and "S.type === 'perso'" in _jsPe and "function prixSeconde" in _jsPe
-              and "perso_etape_" in _jsPe and "deposer_perso" in _jsPe)
+              and "perso_etape_" in _jsPe and "deposer_perso" in _jsPe and "S.type !== 'perso' || video" in _jsPe)
     else:
         check("motion : ffmpeg present pour le test de depot", False, "ffmpeg absent ou lavfi/webp indisponible")
     _FAUX["record"] = {"state": "fail", "failCode": "500", "failMsg": "content policy"}
