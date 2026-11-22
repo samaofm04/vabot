@@ -1263,9 +1263,10 @@ def _options_perso(options: Any) -> Dict[str, Any]:
 
 
 def _duree_perso(duree_video: float) -> int:
-    """Durée demandée à Wan : celle du reel, arrondie à la seconde
-    supérieure (Wan rend des secondes entières), entre 2 et 15."""
-    return int(max(2, min(15, -(-float(duree_video or 0) // 1))))
+    """Durée demandée à Wan : celle du reel arrondie à la seconde la plus
+    proche (Wan rend des secondes entières), entre 2 et 15. Arrondir vers le
+    haut payait une seconde de plus pour 7 ms (reel de 9,007 s → 10 s)."""
+    return int(max(2, min(15, round(float(duree_video or 0)))))
 
 
 def estimer_perso(options: Any, duree_video: float) -> float:

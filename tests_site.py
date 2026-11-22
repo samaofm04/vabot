@@ -39284,7 +39284,7 @@ try:
               _rPe["cle"] == "perso" and _rPe["prix_seconde"] == 32 and _rPe["references"]["max"] == 2 and _rPe["duree"] == [1, 15]
               and '"cle": "perso"' in _ftS and 'data-type="perso"' in _ftS and _kie.modele("perso") is None
               and _sia.estimer_perso({"resolution": "720P"}, 10.97) == 351.52 and _sia.estimer_perso({"resolution": "480p"}, 4) == 64
-              and _sia._duree_perso(10.97) == 11 and _sia._duree_perso(0.4) == 2 and _sia._duree_perso(15) == 15
+              and _sia._duree_perso(10.97) == 11 and _sia._duree_perso(9.007) == 9 and _sia._duree_perso(0.4) == 2 and _sia._duree_perso(15) == 15
               and _cS.get("/studio-ia/estimer?modele=perso&duree=10.97&o_resolution=720P").get_json()["credits"] == 351.52)
         _FAUX["record"] = {"state": "queuing"}
         _gPe = _cS.post("/studio-ia/generer", json={"modele": "perso", "options": {"resolution": "480P"},
