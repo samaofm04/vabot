@@ -71535,6 +71535,23 @@ def create_app():
             r.headers["Referrer-Policy"] = "no-referrer"
             return r
 
+        # ?c=fr-<model> : les pages des VA de You FR (propriétaire, 23/11/2026 :
+        # « un lien exprès pour Alicia, Emma, Lola, Julia … uniquement pour les
+        # personnes du serveur You FR »). Module à part (OF + MYM) ; la même
+        # clé que la page JESSY LE RETOUR l'ouvre, et elle ne montre aucun
+        # montant. Sans clé : admin seulement.
+        import liens_you_fr as _lyf
+        if _lyf.page_de(request.args.get("c")):
+            k = str(request.args.get("k") or "")
+            if k:
+                if not _il_base.acces_cle(k):
+                    return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+            elif not is_auth():
+                return redirect("/")
+            elif not _is_admin():
+                return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+            return _entetes(_R(_lyf.page(request.args, cle=k), mimetype="text/html"))
+
         # ?c=emy : la même page pour Emy (les liens de l'équipe y sont passés
         # le 06/10) ; sans c, Jessye comme avant
         _il = _il_base.profil(request.args.get("c"))
