@@ -416,9 +416,9 @@ check("le rôle Lia est donné à francky04268 (ROLES_A_DONNER)",
 desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.messages[1:]}
 print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
 import re as _re                        # noqa: E402
-PAGE = r"📷 https://youl4b\.com/mes-comptes/([A-Za-z0-9_-]+)"
-m_al = _re.fullmatch(r"\*\*fahnih\\_37050\*\*\n" + PAGE + r"\n🔗 https://getmysocial\.com/aliciababe\n\n"
-                     r"\*\*york\\_emerick12\*\*\n" + PAGE + r"\n🔗 https://getmysocial\.com/aliciacutie",
+PAGE = r"\[📷 Mes comptes\]\(https://youl4b\.com/mes-comptes/([A-Za-z0-9_-]+)\)"
+m_al = _re.fullmatch(r"\*\*fahnih\\_37050\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciababe\]\(https://getmysocial\.com/aliciababe\)\n"
+                     r"\*\*york\\_emerick12\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciacutie\]\(https://getmysocial\.com/aliciacutie\)",
                      desc["ALICIA"])
 check("Alicia : chaque VA, son nom, sa page youl4b, puis son lien GMS", m_al is not None, desc["ALICIA"])
 check("aucun compte Instagram dans les cartes (« je veux pas les comptes »)",
@@ -431,7 +431,7 @@ if m_al:
           r2 and r2.get("identite") == "alicia" and r2.get("va") == "York Emérick"
           and m_al.group(1) != m_al.group(2), r2)
 check("sans lien GMS : « pas encore de lien » ; sans fiche : page préparée à son pseudo",
-      "**priscah0017\\_30005**\n📷 https://youl4b.com/mes-comptes/" in desc["EMMA"]
+      "**priscah0017\\_30005**  ·  [📷 Mes comptes](https://youl4b.com/mes-comptes/" in desc["EMMA"]
       and "🔗 pas encore de lien" in desc["EMMA"]
       and any(v.get("name") == "priscah0017_30005" for v in jb.list_vas_for_identity("emma")),
       desc["EMMA"])
@@ -457,13 +457,13 @@ REGISTRE["1561628437938970677:amelia"] = {"public_url": "https://getmysocial.com
 cv._statuts_gms = lambda: {"n": False}
 b = run(rv.assurer(g, forcer=True))
 check("lien coupé chez GetMySocial : toujours « pas encore de lien »",
-      "**fenoainir**\n📷 https://youl4b.com/mes-comptes/" in canal.messages[1].embeds[0].description
+      "**fenoainir**  ·  [📷 Mes comptes](https://youl4b.com/mes-comptes/" in canal.messages[1].embeds[0].description
       and "🔗 pas encore de lien" in canal.messages[1].embeds[0].description, b)
 cv._statuts_gms = lambda: {}
 b = run(rv.assurer(g, forcer=True))
 check("lien en service : il apparaît sur la carte Amelia",
       b["details_maj"] == 1
-      and "🔗 https://getmysocial.com/ameliafeno" in canal.messages[1].embeds[0].description, b)
+      and "[🔗 ameliafeno](https://getmysocial.com/ameliafeno)" in canal.messages[1].embeds[0].description, b)
 
 lola = canal.messages[5]
 canal.messages.remove(lola)
@@ -482,13 +482,13 @@ g.members.append(Membre(1561658465569472538, "dioplucky", ("Lola",)))
 b = run(rv.assurer(g, forcer=True))
 d_lola = [m for m in canal.messages if m.embeds[0].title.startswith("🧡 LOLA")][0].embeds[0].description
 check("page refusée (fiche liée à un autre id) : « page pas encore prête », et c'est dit",
-      "**dioplucky**\n📷 page pas encore prête\n🔗 pas encore de lien" in d_lola, d_lola)
+      "**dioplucky**  ·  📷 page pas encore prête  ·  🔗 pas encore de lien" in d_lola, d_lola)
 
 d = rv.description_model([(f"va_{i:03d}", "https://youl4b.com/mes-comptes/" + "x" * 24,
                            "https://getmysocial.com/xxxxxxxxxx") for i in range(80)])
 check("80 VA : coupés en « … +N VA », jamais au milieu d'une adresse, sous 4096",
       len(d) <= 4096 and d.splitlines()[-1].startswith("… +") and d.endswith(" VA")
-      and d.splitlines()[-3].startswith("🔗 https://getmysocial.com/"), len(d))
+      and d.splitlines()[-2].endswith("(https://getmysocial.com/xxxxxxxxxx)"), len(d))
 
 # ── 5. L'envoi ────────────────────────────────────────────────────────────
 print("\n── 5. L'envoi")

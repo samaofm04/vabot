@@ -229,28 +229,30 @@ def page_comptes(gid, uid: int, nom: str, model: str) -> str:
 
 
 def description_model(vas: List[Tuple[str, str, str]]) -> str:
-    """Le texte d'une model. vas = [(nom, page des comptes, lien GMS)], une
-    adresse vide si elle manque :
+    """Le texte d'une model, UNE LIGNE PAR VA. vas = [(nom, page des
+    comptes, lien GMS)], une adresse vide si elle manque :
 
-        **priscah0017_30005**
-        📷 https://youl4b.com/mes-comptes/…
-        🔗 pas encore de lien
+        **priscah0017_30005** · [📷 Mes comptes](https://youl4b.com/mes-comptes/…) · 🔗 pas encore de lien
 
+    Propriétaire, 23/11/2026, devant les adresses brutes : « c'est pas très
+    propre … des cartes plus stylées par model », maquette « une ligne par
+    VA » choisie. Le lien GMS s'affiche par son nom (aliciapeachy).
     Au-delà de PLAFOND_DETAIL signes, la fin devient « … +N VA » : jamais
-    coupée au milieu d'une adresse."""
+    coupée au milieu d'une ligne."""
     if not vas:
         return VIDE
     import discord
-    blocs: List[str] = []
+    lignes: List[str] = []
     for i, (nom, page, gms) in enumerate(vas):
-        bloc = (f"**{discord.utils.escape_markdown(nom)}**\n"
-                f"📷 {page or PAGE_INDISPONIBLE}\n"
-                f"🔗 {gms or PAS_DE_LIEN}")
-        if len("\n\n".join(blocs + [bloc])) > PLAFOND_DETAIL:
-            blocs.append(f"… +{len(vas) - i} VA")
+        p = f"[📷 Mes comptes]({page})" if page else f"📷 {PAGE_INDISPONIBLE}"
+        court = discord.utils.escape_markdown(gms.rstrip("/").rsplit("/", 1)[-1]) if gms else ""
+        g = f"[🔗 {court}]({gms})" if gms else f"🔗 {PAS_DE_LIEN}"
+        ligne = f"**{discord.utils.escape_markdown(nom)}**  ·  {p}  ·  {g}"
+        if len("\n".join(lignes + [ligne])) > PLAFOND_DETAIL:
+            lignes.append(f"… +{len(vas) - i} VA")
             break
-        blocs.append(bloc)
-    return "\n\n".join(blocs)
+        lignes.append(ligne)
+    return "\n".join(lignes)
 
 
 def titre_model(model: str, n: int) -> str:
