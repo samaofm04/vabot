@@ -67,6 +67,17 @@ PREFIXE = "fr-"
 #: c'est priscah0017_30005 qui y est. Ajoutée à la main, sa ligne à elle.
 VA_EN_PLUS: Dict[str, str] = {"1525406324970618890": "priscah0908_23400"}
 
+#: Le serveur You FR, dont les rôles de model décident qui est sur quelle
+#: page (propriétaire, 23/11/2026, en collant 🗓️・répartition-va : « ça c'est
+#: les models avec les VA », puis « Oui, par rôle »).
+GUILD_YOU_FR = 1569560463887442022
+#: Sur chaque page où elles ont un lien, rôle ou pas : Fany n'a aucun rôle de
+#: model sur You FR et Prisca travaille sur un compte qui n'y est pas, mais
+#: leurs liens Va IG font des subs sur plusieurs models (même conversation :
+#: « en gardant Fany et Prisca partout où elles ont des liens »).
+TOUJOURS: frozenset = frozenset({"1525508553081753621",     # fahnih_37050
+                                 "1525406324970618890"})    # priscah0908_23400
+
 TTL_S = 900                      # un relevé (MyPuls ou GMS) resservi 15 min
 ATTENTE_S = 8.0                  # la page n'attend pas plus : la suite au rechargement
 _CACHE: Dict[Tuple, Dict[str, Any]] = {}
@@ -116,7 +127,23 @@ def vas_you_fr(jb: Mapping[str, Any]) -> Dict[str, str]:
     return vas
 
 
-def personnes(model: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+def roles(guild, model: str) -> Optional[Dict[str, str]]:
+    """{uid: nom d'utilisateur} des membres de You FR qui portent le rôle de
+    la model (pseudo_model, la lecture du salon de répartition), ou None si
+    le serveur n'est pas lisible."""
+    if guild is None or not list(getattr(guild, "members", None) or []):
+        return None
+    import pseudo_model as pm
+    out: Dict[str, str] = {}
+    for m in guild.members:
+        if getattr(m, "bot", False):
+            continue
+        if model in pm.models_du_membre(m, (model,)):
+            out[str(m.id)] = str(getattr(m, "name", "") or m.id)
+    return out
+
+
+def personnes(model: str, guild: Any = None) -> Tuple[List[Dict[str, Any]], List[str]]:
     """([{uid, pseudo, liens: [{link_id, url, trackings: {plate: url}}]}],
     avertissements). Jamais une entrée écartée sans le dire."""
     cfg = PAGES[model]
@@ -152,9 +179,26 @@ def personnes(model: str) -> Tuple[List[Dict[str, Any]], List[str]]:
         if cfg["source"] == "va_ig":
             avert.append(f"Les VA de You FR n'ont pas de lien JB pour {cfg['nom']} : "
                          f"seuls leurs liens Va IG sont comptés.")
-    # lia : les lignes viennent des trackings MyPuls (voir tableau())
+    if cfg["source"] != "lia":
+        porteurs = roles(guild, model)
+        if porteurs is None:
+            avert.append("Rôles de You FR illisibles (bot pas encore prêt ?) : "
+                         "tous les VA sont affichés.")
+        else:
+            # hors rôle : retiré, mais nommé (« ne jamais écarter en silence »)
+            hors = sorted(p["pseudo"] for u, p in out.items()
+                          if u not in porteurs and u not in TOUJOURS
+                          and any(l["trackings"] for l in p["liens"]))
+            out = {u: p for u, p in out.items() if u in porteurs or u in TOUJOURS}
+            for u, nom in porteurs.items():
+                # rôle sans aucun lien compté : sa ligne quand même, à zéro
+                p = out.setdefault(u, {"uid": u, "pseudo": nom, "liens": []})
+                # le nom Discord d'aujourd'hui (faxx103 est devenu faxx103_64638)
+                p["pseudo"] = nom or p["pseudo"]
+            if hors:
+                avert.append(f"Sans le rôle {cfg['nom']} sur You FR, pas affichés : {', '.join(hors)}.")
     for p in out.values():
-        if not any(l["trackings"] for l in p["liens"]):
+        if p["liens"] and not any(l["trackings"] for l in p["liens"]):
             avert.append(f"{p['pseudo']} : lien sans tracking MyPuls, aucun sub ne peut lui revenir")
     return sorted(out.values(), key=lambda p: p["pseudo"].casefold()), avert
 
@@ -282,9 +326,9 @@ def _int(v: Any) -> int:
         return 0
 
 
-def tableau(model: str, du: str, au: str) -> Dict[str, Any]:
+def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
     cfg = PAGES[model]
-    gens, avert = personnes(model)
+    gens, avert = personnes(model, guild)
     mp = _releve(("mypuls", du, au), lambda: _mypuls(du, au))
     mpv = mp if "par_url" in mp else (mp.get("perime") or {})
     if mp.get("en_cours"):
@@ -472,10 +516,10 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
     T = {"clics": 0, "fr": 0, "visites": 0, "subs": 0, "of": 0, "mym": 0}
     clics_ok = visites_ok = True
     for x in lignes:
-        det_liens = " · ".join(
+        det_liens = (" · ".join(
             (f'<a href="{e(l["url"])}" rel="noopener noreferrer" target="_blank">'
              f'{e(l["url"].split("/")[-1])}</a>') if l["url"] else e(l["nom"])
-            for l in x["liens"])
+            for l in x["liens"]) or '<span class="faible">aucun lien</span>')
         det_subs = ""
         if x["subs"]:
             parts = []
@@ -552,12 +596,12 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         '</body></html>')
 
 
-def page(args: Mapping[str, Any], cle: str = "") -> str:
+def page(args: Mapping[str, Any], cle: str = "", guild: Any = None) -> str:
     """La page de ?c=fr-<model>. Ne lève jamais."""
     model = page_de(args.get("c"))
     try:
         du, au = periode(args)
-        t = tableau(model, du, au)
+        t = tableau(model, du, au, guild)
         return page_html(t, cle=cle, tri=str(args.get("tri") or "subs"),
                          sens=str(args.get("sens") or "desc"))
     except Exception as ex:                                  # noqa: BLE001

@@ -71550,7 +71550,12 @@ def create_app():
                 return redirect("/")
             elif not _is_admin():
                 return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
-            return _entetes(_R(_lyf.page(request.args, cle=k), mimetype="text/html"))
+            try:
+                # les rôles de model de You FR décident qui est sur la page
+                _g = _BOT_REF.get_guild(_lyf.GUILD_YOU_FR) if _BOT_REF is not None else None
+            except Exception:
+                _g = None            # la page le dit : « rôles illisibles »
+            return _entetes(_R(_lyf.page(request.args, cle=k, guild=_g), mimetype="text/html"))
 
         # ?c=emy : la même page pour Emy (les liens de l'équipe y sont passés
         # le 06/10) ; sans c, Jessye comme avant
