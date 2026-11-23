@@ -593,6 +593,9 @@ def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
         clics = fr = 0
         clics_ok = bool(ids) and any(l["link_id"] for l in p["liens"])
         visites = subs_of = subs_mym = 0
+        # un tracking derrière deux pages (liaberry et liasweetie, tous deux
+        # vers c152) ne compte qu'une fois : sinon ses subs doublaient
+        vus: set = set()
         for l in p["liens"]:
             if l["link_id"]:
                 v = gm.get(l["link_id"])
@@ -602,6 +605,9 @@ def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
                     clics += v[0]
                     fr += v[1]
             for plate, u in l["trackings"].items():
+                if _norm_url(u) in vus:
+                    continue
+                vus.add(_norm_url(u))
                 it = par_url.get(_norm_url(u))
                 if it is None:
                     if par_url:
