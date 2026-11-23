@@ -60,7 +60,16 @@ PAGES: Dict[str, Dict[str, Any]] = {
     "alicia": {"nom": "Alicia", "source": "jb"},
     "julia": {"nom": "Julia", "source": "va_ig"},
     "sarah": {"nom": "Sarah", "source": "va_ig"},
-    "lia": {"nom": "Lia", "source": "lia", "creator_ids": (3992,)},
+    "lia": {"nom": "Lia", "source": "lia", "creator_ids": (3992,),
+            # propriétaire, 23/11/2026 : « y a que Franky normalement qui est
+            # sur Lia ». Franky n'est sur aucun serveur des bots : ses liens à
+            # lui, posés ici (trackings « @francky… » créés pour lui les 06 et
+            # 10/11, page liaberry vers c152). Fany et Prisca n'y sont plus.
+            "fixes": [{"uid": "p:franky", "pseudo": "Franky", "liens": [
+                {"link_id": "lnk_6af2c6df8c186a09f5cd6131", "url": "https://getmysocial.com/liaberry",
+                 "nom": "liaberry", "trackings": {"of": "https://onlyfans.com/liasxcret/c152"}},
+                {"link_id": "", "url": "", "nom": "@francky0425 (c146)",
+                 "trackings": {"of": "https://onlyfans.com/liasxcret/c146"}}]}]},
 }
 #: Préfixe de l'adresse : « fr-amelia » évite toute collision avec les
 #: profils de infloww_liens (?c=emy, ?c=lia : Lia y a déjà SA page YouCham).
@@ -193,9 +202,9 @@ def personnes(model: str, guild: Any = None,
     elif items is not None:
         # Lia : les trackings de Lia dont le nom porte le pseudo d'un VA de
         # You FR (« Instagram FR @fahnih_37050 ») — registre JB ou rôle Lia
-        noms = dict(vas)
-        for u, n in (porteurs or {}).items():
-            noms.setdefault(u, n)
+        # seulement les porteurs du rôle Lia : Fany et Prisca, retenues par
+        # le nom de leurs trackings, n'y sont plus (« y a que Franky »)
+        noms = dict(porteurs or {})
         ids = set(cfg.get("creator_ids") or ())
         for it in items:
             if _int(it.get("creator_id")) not in ids or not it.get("url"):
@@ -206,6 +215,9 @@ def personnes(model: str, guild: Any = None,
                     _ligne(uid, ps)["liens"].append(
                         {"link_id": "", "url": "", "nom": str(it.get("name") or ""),
                          "trackings": {str(it.get("platform") or "of"): str(it["url"])}})
+    for f in cfg.get("fixes") or ():
+        p = _ligne(f["uid"], f["pseudo"])
+        p["liens"].extend(dict(l, trackings=dict(l["trackings"])) for l in f["liens"])
 
     # les liens posés à la main : rôle ou pas, ils sont comptés
     a_la_main: set = set()
@@ -221,7 +233,8 @@ def personnes(model: str, guild: Any = None,
         avert.append("Rôles de You FR illisibles (bot pas encore prêt ?) : "
                      "tous les VA sont affichés.")
     else:
-        gardes = set(porteurs) | TOUJOURS | a_la_main
+        gardes = (set(porteurs) | a_la_main | {f["uid"] for f in cfg.get("fixes") or ()}
+                  | (TOUJOURS if cfg["source"] != "lia" else set()))
         # hors rôle : retiré, mais nommé (« ne jamais écarter en silence »)
         hors = sorted(p["pseudo"] for u, p in out.items()
                       if u not in gardes and any(l["trackings"] for l in p["liens"]))
