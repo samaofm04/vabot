@@ -68,6 +68,10 @@ PAGES: Dict[str, Dict[str, Any]] = {
             # Son nom d'utilisateur sur You FR (salon francky04268-content) :
             # relié à son id Discord quand le serveur est lisible.
             "fixes": [{"uid": "p:francky04268", "pseudo": "francky04268", "liens": [
+                # recréée le 23/11/2026 (« recrée un lien stp et mets le bon
+                # tracking francky04268 ») : SON lien, montré en premier
+                {"link_id": "lnk_6b03f8a308b7021cb759e999", "url": "https://getmysocial.com/liasweetie",
+                 "nom": "liasweetie", "trackings": {"of": "https://onlyfans.com/liasxcret/c152"}},
                 {"link_id": "lnk_6af2c6df8c186a09f5cd6131", "url": "https://getmysocial.com/liaberry",
                  "nom": "liaberry", "trackings": {"of": "https://onlyfans.com/liasxcret/c152"}},
                 {"link_id": "", "url": "", "nom": "@francky0425 (c146)",
