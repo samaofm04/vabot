@@ -417,8 +417,9 @@ desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.
 print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
 import re as _re                        # noqa: E402
 PAGE = r"\[📷 Mes comptes\]\(https://youl4b\.com/mes-comptes/([A-Za-z0-9_-]+)\)"
-m_al = _re.fullmatch(r"\*\*fahnih\\_37050\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciababe\]\(https://getmysocial\.com/aliciababe\)\n"
-                     r"\*\*york\\_emerick12\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciacutie\]\(https://getmysocial\.com/aliciacutie\)",
+STATS = r"  ·  \[📊 Mes stats\]\(https://youl4b\.com/infloww/liens\?c=fr-alicia&va=\d+&t=[0-9a-f]{24}\)"
+m_al = _re.fullmatch(r"\*\*fahnih\\_37050\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciababe\]\(https://getmysocial\.com/aliciababe\)" + STATS + r"\n"
+                     r"\*\*york\\_emerick12\*\*  ·  " + PAGE + r"  ·  \[🔗 aliciacutie\]\(https://getmysocial\.com/aliciacutie\)" + STATS,
                      desc["ALICIA"])
 check("Alicia : chaque VA, son nom, sa page youl4b, puis son lien GMS", m_al is not None, desc["ALICIA"])
 check("aucun compte Instagram dans les cartes (« je veux pas les comptes »)",

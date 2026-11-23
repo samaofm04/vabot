@@ -71543,7 +71543,14 @@ def create_app():
         import liens_you_fr as _lyf
         if _lyf.page_de(request.args.get("c")):
             k = str(request.args.get("k") or "")
-            if k:
+            if request.args.get("va"):
+                # « 📊 Mes stats » des cartes de 🗓️・répartition-va : le jeton
+                # du VA n'ouvre que SA ligne (23/11/2026)
+                if not _lyf.jeton_valide(request.args.get("va"), _lyf.page_de(request.args.get("c")),
+                                         request.args.get("t")):
+                    return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+                k = ""
+            elif k:
                 if not _il_base.acces_cle(k):
                     return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
             elif not is_auth():
@@ -71556,7 +71563,7 @@ def create_app():
             except Exception:
                 _g = None            # la page le dit : « rôles illisibles »
             try:
-                _adm = bool(is_auth() and _is_admin())
+                _adm = bool(is_auth() and _is_admin()) and not request.args.get("va")
             except Exception:
                 _adm = False
             return _entetes(_R(_lyf.page(request.args, cle=k, guild=_g, admin=_adm),

@@ -228,7 +228,7 @@ def page_comptes(gid, uid: int, nom: str, model: str) -> str:
     return url
 
 
-def description_model(vas: List[Tuple[str, str, str]]) -> str:
+def description_model(vas: List[Tuple[str, str, str]], stats: Optional[List[str]] = None) -> str:
     """Le texte d'une model, UNE LIGNE PAR VA. vas = [(nom, page des
     comptes, lien GMS)], une adresse vide si elle manque :
 
@@ -248,6 +248,10 @@ def description_model(vas: List[Tuple[str, str, str]]) -> str:
         court = discord.utils.escape_markdown(gms.rstrip("/").rsplit("/", 1)[-1]) if gms else ""
         g = f"[🔗 {court}]({gms})" if gms else f"🔗 {PAS_DE_LIEN}"
         ligne = f"**{discord.utils.escape_markdown(nom)}**  ·  {p}  ·  {g}"
+        # « 📊 Mes stats » : sa page perso, sa ligne seule (23/11/2026 : « le
+        # truc solo … pour voir ses stats juste pour lui »)
+        if stats and i < len(stats) and stats[i]:
+            ligne += f"  ·  [📊 Mes stats]({stats[i]})"
         if len("\n".join(lignes + [ligne])) > PLAFOND_DETAIL:
             lignes.append(f"… +{len(vas) - i} VA")
             break
@@ -281,7 +285,15 @@ def donnees_details(gid, colonnes, jb=()) -> List[Tuple[str, str]]:
                    # (Franky sur Lia, liens posés à la main)
                    or lyf.lien_public(uid, nom, model))
                   for nom, uid in vas]
-        out.append((model, description_model(lignes)))
+        stats = []
+        for _nom, uid in vas:
+            try:
+                import domaines
+                stats.append(lyf.lien_stats(domaines.site(gid), uid, model)
+                             if model in lyf.PAGES else "")
+            except Exception:                                # noqa: BLE001
+                stats.append("")
+        out.append((model, description_model(lignes, stats)))
     return out
 
 

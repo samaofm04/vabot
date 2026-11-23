@@ -133,6 +133,42 @@ _VERROU = threading.Lock()
 ECHEC_S = 90                     # un échec n'est pas retenté avant
 
 
+SECRET_FICHIER = DATA_DIR / "liens_you_fr_secret.json"
+_VERROU_SECRET = threading.Lock()
+
+
+def _secret() -> bytes:
+    """La clé des liens « 📊 Mes stats », tirée une fois et gardée dans data/."""
+    with _VERROU_SECRET:
+        d = safe_json.load(SECRET_FICHIER, default={}) or {}
+        cle = str(d.get("cle") or "") if isinstance(d, dict) else ""
+        if len(cle) < 32:
+            import secrets
+            cle = secrets.token_hex(32)
+            safe_json.write(SECRET_FICHIER, {"cle": cle})
+        return cle.encode()
+
+
+def jeton_va(uid: Any, model: str) -> str:
+    """Le jeton du lien perso d'un VA pour une model : il n'ouvre que SA
+    ligne de CETTE model. Propriétaire, 23/11/2026 : « ajoute une ligne …
+    le truc solo … pour voir ses stats juste pour lui »."""
+    import hashlib
+    import hmac
+    return hmac.new(_secret(), f"{uid}:{model}".encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def jeton_valide(uid: Any, model: str, jeton: Any) -> bool:
+    import hmac
+    return bool(uid) and model in PAGES and hmac.compare_digest(str(jeton or ""), jeton_va(uid, model))
+
+
+def lien_stats(site: str, uid: Any, model: str) -> str:
+    """https://youl4b.com/infloww/liens?c=fr-<model>&va=<uid>&t=<jeton>"""
+    return (f"{site}/infloww/liens?" +
+            urlencode({"c": PREFIXE + model, "va": str(uid), "t": jeton_va(uid, model)}))
+
+
 def page_de(c: Any) -> str:
     """« amelia » pour « fr-amelia » (casse ignorée), "" sinon."""
     c = str(c or "").strip().lower()
@@ -620,7 +656,7 @@ def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
                 else:
                     subs_of += s
         subs = subs_of + subs_mym
-        lignes.append({"pseudo": p["pseudo"], "liens": p["liens"],
+        lignes.append({"uid": p["uid"], "pseudo": p["pseudo"], "liens": p["liens"],
                        "clics": clics if clics_ok else None, "fr": fr if clics_ok else None,
                        "visites": visites if par_url else None,
                        "subs_of": subs_of, "subs_mym": subs_mym,
@@ -720,14 +756,20 @@ ACTION = "/infloww/liens/you-fr"
 
 
 def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str = "desc",
-              admin: bool = False, message: str = "") -> str:
+              admin: bool = False, message: str = "", solo: Optional[Tuple[str, str]] = None) -> str:
+    """`solo` = (uid, jeton) : la page perso d'un VA, sa seule ligne, sans
+    les autres models ni les noms des autres VA."""
     e = html.escape
     model, du, au = t["model"], t["du"], t["au"]
     tri = tri if tri in TRIS else "subs"
     sens = sens if sens in ("asc", "desc") else "desc"
+    if solo:
+        admin, cle = False, ""
 
     def _url(**kw) -> str:
         base = {"c": PREFIXE + model, "du": du, "au": au, "tri": tri, "sens": sens}
+        if solo:
+            base["va"], base["t"] = solo
         if cle:
             base["k"] = cle
         base.update(kw)
@@ -764,7 +806,11 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
                     f'title="Télécharger la photo">⬇ Télécharger</a>' if pp.get(model) else "")
                  + '</div>')
     caches = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">'
-                     for k, v in (("k", cle), ("c", PREFIXE + model), ("tri", tri), ("sens", sens)) if v)
+                     for k, v in (("k", cle), ("c", PREFIXE + model), ("tri", tri), ("sens", sens),
+                                  ("va", solo[0] if solo else ""), ("t", solo[1] if solo else ""))
+                     if v)
+    if solo:
+        models = ""
 
     def _th(cle_tri: str, lib: str, num: bool = True, titre: str = "") -> str:
         s = "asc" if cle_tri == "nom" else "desc"
@@ -859,6 +905,10 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
             'GetMySocial ni sur MyPuls : seulement relié ici. Visible des admins seulement.</p></details>')
     rafraichir = '<meta http-equiv="refresh" content="45">' if t.get("en_cours") else ""
     titre = f"Liens de suivi · {t['nom']} · You FR"
+    sous_titre = "VA du serveur You FR seulement · " + f"{len(lignes)} VA"
+    if solo:
+        titre = f"Mes stats · {t['nom']}"
+        sous_titre = e(lignes[0]["pseudo"]) if lignes else "aucune ligne"
     return (
         '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -867,9 +917,8 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         f'<style>{CSS}</style></head><body>'
         '<div class="marque">MyPuls · You FR</div>'
         f'<div class="tete">{entete_pp}<div><h1>{e(titre)}</h1>'
-        f'<p class="sous"><b>Du {_jc(du)} au {_jc(au)}</b> · VA du serveur You FR seulement · '
-        f'{len(lignes)} VA</p></div></div>'
-        f'<nav class="models" aria-label="Models">{models}</nav>'
+        f'<p class="sous"><b>Du {_jc(du)} au {_jc(au)}</b> · {sous_titre}</p></div></div>'
+        + (f'<nav class="models" aria-label="Models">{models}</nav>' if models else "") +
         f'<form class="periode" method="get">{caches}'
         f'<input type="date" name="du" value="{du}" max="{auj.isoformat()}" aria-label="Date de début">'
         f'<span class="faible">→</span>'
@@ -893,12 +942,24 @@ def page(args: Mapping[str, Any], cle: str = "", guild: Any = None, admin: bool 
     """La page de ?c=fr-<model>. Ne lève jamais. `admin` : le formulaire des
     liens à la main (session admin du site, jamais la seule clé des VA)."""
     model = page_de(args.get("c"))
+    solo = None
+    if args.get("va"):
+        # page perso « 📊 Mes stats » : sa ligne seule, jeton vérifié par la
+        # route ET ici (jamais la ligne d'un autre sur un jeton faux)
+        if not jeton_valide(args.get("va"), model, args.get("t")):
+            return "Lien invalide."
+        solo = (str(args.get("va")), str(args.get("t")))
     try:
         du, au = periode(args)
-        t = tableau(model, du, au, guild)
+        t = dict(tableau(model, du, au, guild))
+        if solo:
+            t["lignes"] = [x for x in t["lignes"] if str(x.get("uid")) == solo[0]]
+            # rien qui nomme les autres VA (« Sans le rôle … : a, b, c »)
+            t["avert"] = [a for a in t["avert"]
+                          if a.startswith(("MyPuls", "Subs non lus", "Clics GetMySocial"))]
         return page_html(t, cle=cle, tri=str(args.get("tri") or "subs"),
                          sens=str(args.get("sens") or "desc"), admin=admin,
-                         message=str(args.get("m") or "")[:400])
+                         message=str(args.get("m") or "")[:400], solo=solo)
     except Exception as ex:                                  # noqa: BLE001
         auj = _aujourdhui().isoformat()
         return page_html({"model": model or "amelia", "nom": PAGES.get(model, {}).get("nom", "?"),
