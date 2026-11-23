@@ -279,17 +279,38 @@ def donnees_details(gid, colonnes, jb=()) -> List[Tuple[str, str]]:
     return out
 
 
-def embed_model(model: str, n: int, description: str, couleur: Optional[int]):
+def vignette_model(gid, model: str) -> str:
+    """L'adresse publique de la photo de la model (route /pp-model du site),
+    "" si elle n'en a pas. Propriétaire, 23/11/2026 : « les pp des models …
+    carré … sur le Discord dans répartition ». La vignette d'un embed est
+    affichée carrée par Discord, en haut à droite. ?v= change avec la photo :
+    Discord garde sinon l'ancienne en cache."""
+    try:
+        import domaines
+        import liens_you_fr as lyf
+        p = lyf.AVATARS_DIR / f"{lyf.AVATARS[model]}.img"
+        v = int(p.stat().st_mtime)
+        return f"{domaines.site(gid)}/pp-model/{model}.webp?v={v}"
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def embed_model(model: str, n: int, description: str, couleur: Optional[int],
+                vignette: str = ""):
     import discord
-    return discord.Embed(title=titre_model(model, n), description=description, colour=couleur)
+    e = discord.Embed(title=titre_model(model, n), description=description, colour=couleur)
+    if vignette:
+        e.set_thumbnail(url=vignette)
+    return e
 
 
 def empreinte_detail(e) -> Optional[tuple]:
     if e is None:
         return None
     c = getattr(e, "colour", None)
+    vig = getattr(getattr(e, "thumbnail", None), "url", None) or ""
     return (str(getattr(e, "title", "") or ""), str(getattr(e, "description", "") or ""),
-            getattr(c, "value", None) if c is not None else None)
+            getattr(c, "value", None) if c is not None else None, str(vig))
 
 
 def _embed_de(message):
@@ -468,7 +489,8 @@ async def _assurer_details(guild, canal, bot_id, forcer: bool, bilan: dict) -> N
     notes = dict((_etat().get(str(guild.id)) or {}).get("details") or {})
     historique = None
     for model, description in donnees:
-        e = embed_model(model, nb[model], description, cv.couleur_du_role(guild, model))
+        e = embed_model(model, nb[model], description, cv.couleur_du_role(guild, model),
+                        vignette_model(guild.id, model))
         voulu = empreinte_detail(e)
         deja = _POSE_M.get((guild.id, model))
         mid = int(notes.get(model) or 0) or None

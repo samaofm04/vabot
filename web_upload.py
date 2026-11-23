@@ -71645,6 +71645,30 @@ def create_app():
             return _entetes(_R(_il.page_refus_paie(pourquoi, retour), status=400, mimetype="text/html"))
         return _entetes(redirect(retour, code=303))
 
+    @app.route("/pp-model/<model>.webp")
+    def pp_model_publique(model):
+        """La photo de profil d'une model (data/mypuls_avatars), SANS session :
+        Discord la récupère pour la vignette des cartes de 🗓️・répartition-va
+        (propriétaire, 23/11/2026 : « les pp des models … carré … sur le
+        Discord dans répartition »). Seules les models de
+        liens_you_fr.AVATARS : aucun autre fichier n'est lisible ici."""
+        from flask import Response as _R
+        import liens_you_fr as _lyf
+        if model not in _lyf.AVATARS:
+            return _R("", status=404)
+        try:
+            b = (_lyf.AVATARS_DIR / f"{_lyf.AVATARS[model]}.img").read_bytes()
+        except OSError:
+            return _R("", status=404)
+        mime = ("image/webp" if b[:4] == b"RIFF" and b[8:12] == b"WEBP" else
+                "image/png" if b[:8] == b"\x89PNG\r\n\x1a\n" else
+                "image/jpeg" if b[:3] == b"\xff\xd8\xff" else "")
+        if not mime:
+            return _R("", status=404)
+        r = _R(b, mimetype=mime)
+        r.headers["Cache-Control"] = "public, max-age=86400"
+        return r
+
     @app.route("/infloww/liens/you-fr", methods=["POST"])
     def infloww_liens_you_fr_ecrire():
         """Les liens posés à la main sur une page You FR (propriétaire,
