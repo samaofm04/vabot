@@ -228,6 +228,12 @@ PSEUDO_MODEL = {YOU_FR_GUILD_ID}
 #: dans PSEUDO_MODEL lirait quand même les mêmes rôles de model.
 REPARTITION_VA = {YOU_FR_GUILD_ID}
 
+#: Les models d'un serveur EN PLUS de celles de son marché (salons banger) :
+#: rôle, pseudo « (LIA) », colonne de 🗓️・répartition-va, page de suivi.
+#: Propriétaire, 23/11/2026 : « ajoute un rôle Lia » (You FR). Lia n'a pas de
+#: salon banger FR : l'ajouter à bangers.MODELS_FR en aurait créé.
+MODELS_EN_PLUS = {YOU_FR_GUILD_ID: ("lia",)}
+
 #: Les serveurs où chaque VA reçoit dans son -content une carte par model de
 #: ses rôles : son lien GetMySocial et 📷 Ajouter mes comptes
 #: (cartes_va_fr.py). Propriétaire, 10/11/2026 : « tu peux leur donner leurs
@@ -319,6 +325,11 @@ def marche_serveur(guild_or_id):
 def pseudo_model(guild_or_id) -> bool:
     """True si, sur ce serveur, le rôle d'une model s'écrit dans le pseudo."""
     return _gid(guild_or_id) in PSEUDO_MODEL
+
+
+def models_en_plus(guild_or_id) -> tuple:
+    """Les models de ce serveur hors marché (MODELS_EN_PLUS), () sinon."""
+    return tuple(MODELS_EN_PLUS.get(_gid(guild_or_id), ()))
 
 
 def repartition_va(guild_or_id) -> bool:

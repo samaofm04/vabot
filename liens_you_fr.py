@@ -44,6 +44,11 @@ import safe_json
 DATA_DIR = Path(__file__).resolve().parent / "data"
 JB_FICHIER = DATA_DIR / "liens_jb_fr.json"
 FR_FICHIER = DATA_DIR / "liens_va_fr.json"
+#: Les liens posés À LA MAIN sur la page (propriétaire, 23/11/2026 : « je
+#: peux avoir aussi un truc où je mets les liens carrément ») : un lien
+#: GetMySocial et/ou des trackings OF/MYM, pour un VA et une model. Comptés
+#: rôle ou pas : celui qui les pose a choisi.
+MANUELS_FICHIER = DATA_DIR / "liens_you_fr_manuels.json"
 PARIS = ZoneInfo("Europe/Paris")
 
 #: Les pages : clé de l'adresse (?c=) -> nom, créatrices MyPuls (OF, MYM),
@@ -143,9 +148,12 @@ def roles(guild, model: str) -> Optional[Dict[str, str]]:
     return out
 
 
-def personnes(model: str, guild: Any = None) -> Tuple[List[Dict[str, Any]], List[str]]:
+def personnes(model: str, guild: Any = None,
+              items: Optional[List[Mapping[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], List[str]]:
     """([{uid, pseudo, liens: [{link_id, url, trackings: {plate: url}}]}],
-    avertissements). Jamais une entrée écartée sans le dire."""
+    avertissements). Jamais une entrée écartée sans le dire. `items` : les
+    trackings MyPuls de la période (pour Lia, dont les VA n'ont pas de lien
+    GetMySocial : ses trackings portent leur pseudo)."""
     cfg = PAGES[model]
     avert: List[str] = []
     jb = _registre(JB_FICHIER)
@@ -153,16 +161,19 @@ def personnes(model: str, guild: Any = None) -> Tuple[List[Dict[str, Any]], List
         avert.append("registre des liens JB (data/liens_jb_fr.json) vide ou illisible : "
                      "aucun VA de You FR connu")
     vas = vas_you_fr(jb)
+    porteurs = roles(guild, model)
     out: Dict[str, Dict[str, Any]] = {}
+
+    def _ligne(uid: str, pseudo: str) -> Dict[str, Any]:
+        return out.setdefault(uid, {"uid": uid, "pseudo": vas.get(uid) or pseudo, "liens": []})
 
     def _ajouter(uid: str, e: Mapping[str, Any]) -> None:
         tr = e.get("trackings") if isinstance(e.get("trackings"), dict) else {}
-        p = out.setdefault(uid, {"uid": uid, "pseudo": vas.get(uid) or str(e.get("pseudo") or ""),
-                                 "liens": []})
-        p["liens"].append({"link_id": str(e.get("link_id") or ""),
-                           "url": str(e.get("public_url") or ""),
-                           "nom": str(e.get("display_name") or ""),
-                           "trackings": {str(k): str(v) for k, v in tr.items() if v}})
+        _ligne(uid, str(e.get("pseudo") or ""))["liens"].append(
+            {"link_id": str(e.get("link_id") or ""),
+             "url": str(e.get("public_url") or ""),
+             "nom": str(e.get("display_name") or ""),
+             "trackings": {str(k): str(v) for k, v in tr.items() if v}})
 
     if cfg["source"] in ("jb", "va_ig"):
         # leur lien JB (You FR) ET leurs liens Va IG de la model : sans ces
@@ -179,28 +190,178 @@ def personnes(model: str, guild: Any = None) -> Tuple[List[Dict[str, Any]], List
         if cfg["source"] == "va_ig":
             avert.append(f"Les VA de You FR n'ont pas de lien JB pour {cfg['nom']} : "
                          f"seuls leurs liens Va IG sont comptés.")
-    if cfg["source"] != "lia":
-        porteurs = roles(guild, model)
-        if porteurs is None:
-            avert.append("Rôles de You FR illisibles (bot pas encore prêt ?) : "
-                         "tous les VA sont affichés.")
-        else:
-            # hors rôle : retiré, mais nommé (« ne jamais écarter en silence »)
-            hors = sorted(p["pseudo"] for u, p in out.items()
-                          if u not in porteurs and u not in TOUJOURS
-                          and any(l["trackings"] for l in p["liens"]))
-            out = {u: p for u, p in out.items() if u in porteurs or u in TOUJOURS}
-            for u, nom in porteurs.items():
-                # rôle sans aucun lien compté : sa ligne quand même, à zéro
-                p = out.setdefault(u, {"uid": u, "pseudo": nom, "liens": []})
-                # le nom Discord d'aujourd'hui (faxx103 est devenu faxx103_64638)
-                p["pseudo"] = nom or p["pseudo"]
-            if hors:
-                avert.append(f"Sans le rôle {cfg['nom']} sur You FR, pas affichés : {', '.join(hors)}.")
+    elif items is not None:
+        # Lia : les trackings de Lia dont le nom porte le pseudo d'un VA de
+        # You FR (« Instagram FR @fahnih_37050 ») — registre JB ou rôle Lia
+        noms = dict(vas)
+        for u, n in (porteurs or {}).items():
+            noms.setdefault(u, n)
+        ids = set(cfg.get("creator_ids") or ())
+        for it in items:
+            if _int(it.get("creator_id")) not in ids or not it.get("url"):
+                continue
+            nom = str(it.get("name") or "").lower()
+            for uid, ps in noms.items():
+                if ps and ps.lower() in nom:
+                    _ligne(uid, ps)["liens"].append(
+                        {"link_id": "", "url": "", "nom": str(it.get("name") or ""),
+                         "trackings": {str(it.get("platform") or "of"): str(it["url"])}})
+
+    # les liens posés à la main : rôle ou pas, ils sont comptés
+    a_la_main: set = set()
+    for m in manuels(model):
+        uid = m.get("uid") or ("p:" + m["pseudo"].casefold())
+        p = _ligne(uid, m["pseudo"])
+        p["liens"].append({"link_id": m.get("link_id") or "", "url": m.get("url") or "",
+                           "nom": m.get("nom") or "lien ajouté", "trackings": dict(m.get("trackings") or {}),
+                           "manuel": m["id"]})
+        a_la_main.add(uid)
+
+    if porteurs is None:
+        avert.append("Rôles de You FR illisibles (bot pas encore prêt ?) : "
+                     "tous les VA sont affichés.")
+    else:
+        gardes = set(porteurs) | TOUJOURS | a_la_main
+        # hors rôle : retiré, mais nommé (« ne jamais écarter en silence »)
+        hors = sorted(p["pseudo"] for u, p in out.items()
+                      if u not in gardes and any(l["trackings"] for l in p["liens"]))
+        out = {u: p for u, p in out.items() if u in gardes}
+        for u, nom in porteurs.items():
+            # rôle sans aucun lien compté : sa ligne quand même, à zéro
+            p = out.setdefault(u, {"uid": u, "pseudo": nom, "liens": []})
+            # le nom Discord d'aujourd'hui (faxx103 est devenu faxx103_64638)
+            p["pseudo"] = nom or p["pseudo"]
+        if hors:
+            avert.append(f"Sans le rôle {cfg['nom']} sur You FR, pas affichés : {', '.join(hors)}.")
     for p in out.values():
         if p["liens"] and not any(l["trackings"] for l in p["liens"]):
             avert.append(f"{p['pseudo']} : lien sans tracking MyPuls, aucun sub ne peut lui revenir")
     return sorted(out.values(), key=lambda p: p["pseudo"].casefold()), avert
+
+
+# ──────────────────────────────────────────────────── liens posés à la main ──
+
+_VERROU_MANUELS = threading.Lock()
+
+
+def manuels(model: Optional[str] = None) -> List[Dict[str, Any]]:
+    d = safe_json.load(MANUELS_FICHIER, default={}) or {}
+    liste = d.get("liens") if isinstance(d, dict) else None
+    out = [dict(x) for x in (liste or []) if isinstance(x, dict) and x.get("id") and x.get("pseudo")]
+    return [x for x in out if model is None or x.get("model") == model]
+
+
+def _lien_gms(url: str) -> Optional[Dict[str, Any]]:
+    """L'entrée d'un lien GetMySocial collé : d'abord les registres JB et
+    Va IG (avec leurs trackings), sinon le compte GetMySocial. None s'il n'y
+    est nulle part."""
+    def _fin(u: str) -> str:
+        return str(u or "").strip().rstrip("/").split("?")[0].split("/")[-1].lower()
+    voulu = _fin(url)
+    if not voulu:
+        return None
+    for reg in (_registre(JB_FICHIER), _registre(FR_FICHIER)):
+        for e in reg.values():
+            if isinstance(e, dict) and e.get("public_url") and _fin(e["public_url"]) == voulu:
+                return {"link_id": str(e.get("link_id") or ""), "url": str(e["public_url"]),
+                        "nom": str(e.get("display_name") or ""),
+                        "trackings": {k: v for k, v in (e.get("trackings") or {}).items() if v}}
+    import gms
+    r = gms.list_all_links()
+    for l in (r.get("links") or []) if isinstance(r, Mapping) else []:
+        if not isinstance(l, Mapping):
+            continue
+        if voulu in (_fin(l.get("public_url") or l.get("url") or ""), str(l.get("shortcode") or "").lower()):
+            return {"link_id": str(l.get("id") or l.get("link_id") or ""),
+                    "url": str(l.get("public_url") or url), "nom": str(l.get("display_name") or ""),
+                    "trackings": {}}
+    return None
+
+
+def _qui(va: str, guild: Any) -> Tuple[str, str]:
+    """(uid, pseudo) d'un VA tapé : un membre de You FR à ce nom d'utilisateur
+    (ou ce pseudo de serveur), sinon un VA du registre, sinon le texte seul."""
+    v = str(va or "").strip().lstrip("@")
+    cle = v.casefold()
+    for m in list(getattr(guild, "members", None) or []):
+        nick = str(getattr(m, "nick", "") or "").split(" (")[0]
+        if cle in (str(getattr(m, "name", "")).casefold(), nick.casefold()):
+            return str(m.id), str(m.name)
+    for uid, ps in vas_you_fr(_registre(JB_FICHIER)).items():
+        if ps.casefold() == cle:
+            return uid, ps
+    return "", v
+
+
+def ajouter_manuel(model: str, va: str, texte: str, par: str = "", guild: Any = None) -> Tuple[bool, str]:
+    """Pose les liens collés (un par ligne ou séparés d'espaces) pour ce VA.
+    Reconnus : https://onlyfans.com/<créatrice>/c123, https://mym.fans/app/t/<code>,
+    toute autre adresse = une page GetMySocial (retrouvée dans les registres
+    ou le compte). Rend (fait ?, message à afficher)."""
+    if model not in PAGES:
+        return False, "Model inconnue."
+    uid, pseudo = _qui(va, guild)
+    if not pseudo:
+        return False, "Indique le VA (son nom Discord)."
+    urls = re.findall(r"https?://\S+", str(texte or ""))
+    if not urls:
+        return False, "Aucune adresse reconnue (colle des liens qui commencent par https://)."
+    trackings: Dict[str, str] = {}
+    pages: List[Dict[str, Any]] = []
+    refus: List[str] = []
+    for u in urls:
+        n = _norm_url(u)
+        if n.startswith("of:"):
+            trackings["of"] = u.strip()
+        elif n.startswith("mym:"):
+            trackings["mym"] = u.strip()
+        else:
+            try:
+                g = _lien_gms(u)
+            except Exception as e:                           # noqa: BLE001
+                g, refus = None, refus + [f"{u} : GetMySocial illisible ({type(e).__name__})"]
+                continue
+            if g is None or not g.get("link_id"):
+                refus.append(f"{u} : page GetMySocial introuvable dans le compte")
+            else:
+                pages.append(g)
+    if refus:
+        return False, "Rien n'est posé. " + " ; ".join(refus)
+    entrees: List[Dict[str, Any]] = []
+    if pages:
+        for i, g in enumerate(pages):
+            # les trackings collés vont sur le premier lien, avec les siens
+            tr = dict(g.get("trackings") or {})
+            if i == 0:
+                tr.update(trackings)
+            entrees.append({**g, "trackings": tr})
+    else:
+        entrees.append({"link_id": "", "url": "", "nom": "trackings ajoutés", "trackings": trackings})
+    import secrets
+    maintenant = dt.datetime.now(PARIS).isoformat(timespec="seconds")
+    with _VERROU_MANUELS:
+        d = safe_json.load(MANUELS_FICHIER, default={}) or {}
+        liste = [x for x in (d.get("liens") or []) if isinstance(x, dict)] if isinstance(d, dict) else []
+        for e in entrees:
+            liste.append({"id": secrets.token_hex(6), "model": model, "uid": uid, "pseudo": pseudo,
+                          **e, "ajoute_le": maintenant, "par": par})
+        safe_json.write(MANUELS_FICHIER, {"liens": liste})
+    plates = " + ".join(sorted({p.upper() for e in entrees for p in e["trackings"]})) or "aucun tracking"
+    return True, (f"{len(entrees)} lien(s) ajouté(s) à {pseudo} sur {PAGES[model]['nom']} ({plates})"
+                  + ("" if uid else " — ce nom n'est pas un membre de You FR, la ligne garde le texte tapé")
+                  + ".")
+
+
+def retirer_manuel(ident: str) -> Tuple[bool, str]:
+    with _VERROU_MANUELS:
+        d = safe_json.load(MANUELS_FICHIER, default={}) or {}
+        liste = [x for x in (d.get("liens") or []) if isinstance(x, dict)] if isinstance(d, dict) else []
+        reste = [x for x in liste if x.get("id") != ident]
+        if len(reste) == len(liste):
+            return False, "Lien déjà retiré."
+        safe_json.write(MANUELS_FICHIER, {"liens": reste})
+    x = next(x for x in liste if x.get("id") == ident)
+    return True, f"Lien retiré de {x.get('pseudo')} ({PAGES.get(x.get('model'), {}).get('nom', '?')})."
 
 
 # ─────────────────────────────────────────────────── relevés en arrière-plan ──
@@ -328,7 +489,7 @@ def _int(v: Any) -> int:
 
 def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
     cfg = PAGES[model]
-    gens, avert = personnes(model, guild)
+    avert: List[str] = []
     mp = _releve(("mypuls", du, au), lambda: _mypuls(du, au))
     mpv = mp if "par_url" in mp else (mp.get("perime") or {})
     if mp.get("en_cours"):
@@ -340,24 +501,10 @@ def tableau(model: str, du: str, au: str, guild: Any = None) -> Dict[str, Any]:
         avert.append(mpv["tronque"])
     par_url = mpv.get("par_url") or {}
 
-    if cfg["source"] == "lia":
-        # les VA de You FR (pseudos du registre JB) dont le nom figure dans un
-        # tracking de Lia : la seule trace qui relie un tracking Lia à un VA
-        vas = vas_you_fr(_registre(JB_FICHIER))
-        ids = set(cfg.get("creator_ids") or ())
-        par_uid: Dict[str, Dict[str, Any]] = {}
-        for it in mpv.get("items") or []:
-            if _int(it.get("creator_id")) not in ids:
-                continue
-            nom = str(it.get("name") or "").lower()
-            for uid, ps in vas.items():
-                if ps.lower() in nom:
-                    p = par_uid.setdefault(uid, {"uid": uid, "pseudo": ps, "liens": []})
-                    p["liens"].append({"link_id": "", "url": "", "nom": str(it.get("name") or ""),
-                                       "trackings": {str(it.get("platform") or "of"): str(it["url"])}})
-        gens = sorted(par_uid.values(), key=lambda p: p["pseudo"].casefold())
-        if mpv and not gens:
-            avert.append("Aucun tracking de Lia ne porte le pseudo d'un VA de You FR.")
+    gens, av = personnes(model, guild, items=mpv.get("items") or [] if mpv else None)
+    avert.extend(av)
+    if cfg["source"] == "lia" and mpv and not any(p["liens"] for p in gens):
+        avert.append("Aucun tracking de Lia ne porte le pseudo d'un VA de You FR.")
 
     ids = tuple(sorted({l["link_id"] for p in gens for l in p["liens"] if l["link_id"]}))
     gm: Dict[str, Any] = {}
@@ -469,10 +616,24 @@ tfoot td{font-weight:700;border-bottom:0}
 .nv.v1{background:#4ade80;color:#052e16} .nv.v2{background:#16a34a;color:#fff}
 .nv.o1{background:#fbbf24;color:#1c1203} .nv.r{background:#dc2626;color:#fff}
 .note{color:var(--faible);font-size:12px;margin-top:10px}
+.msg{background:#0b2a17;border:1px solid #14532d;color:#86efac;border-radius:8px;padding:7px 10px;margin:0 0 8px;font-size:12.5px}
+.ajout{background:var(--carte);border:1px solid var(--bord);border-radius:12px;padding:10px 12px;margin:0 0 12px}
+.ajout summary{cursor:pointer;font-weight:600}
+.ajout form{display:grid;gap:8px;margin-top:10px}
+.ajout label{display:grid;gap:4px;font-size:12.5px;color:var(--faible)}
+.ajout input,.ajout textarea{background:var(--fond);color:var(--texte);border:1px solid var(--bord);border-radius:6px;padding:6px 8px;font:inherit;width:100%}
+.ajout button{justify-self:start;background:var(--acc);color:#1c0a02;border:0;border-radius:6px;padding:6px 14px;font:inherit;font-weight:700;cursor:pointer}
+.main{color:var(--acc);font-size:10.5px}
+form.retirer{display:inline;margin:0}
+form.retirer button{background:none;border:0;color:var(--faible);cursor:pointer;padding:0 2px;font:inherit}
 """
 
 
-def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str = "desc") -> str:
+ACTION = "/infloww/liens/you-fr"
+
+
+def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str = "desc",
+              admin: bool = False, message: str = "") -> str:
     e = html.escape
     model, du, au = t["model"], t["du"], t["au"]
     tri = tri if tri in TRIS else "subs"
@@ -515,11 +676,25 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
     corps = []
     T = {"clics": 0, "fr": 0, "visites": 0, "subs": 0, "of": 0, "mym": 0}
     clics_ok = visites_ok = True
+    retour = {"c": PREFIXE + model, "du": du, "au": au, "tri": tri, "sens": sens, "k": cle}
+    retour_champs = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">'
+                            for k, v in retour.items() if v)
+
+    def _un_lien(l: Mapping[str, Any]) -> str:
+        txt = ((f'<a href="{e(l["url"])}" rel="noopener noreferrer" target="_blank">'
+                f'{e(l["url"].split("/")[-1])}</a>') if l["url"] else e(l["nom"]))
+        if l.get("manuel"):
+            txt += ' <span class="main">à la main</span>'
+            if admin:
+                txt += (f'<form class="retirer" method="post" action="{ACTION}">{retour_champs}'
+                        f'<input type="hidden" name="op" value="retrait">'
+                        f'<input type="hidden" name="id" value="{e(l["manuel"])}">'
+                        f'<button type="submit" title="Retirer ce lien">✕</button></form>')
+        return txt
+
     for x in lignes:
-        det_liens = (" · ".join(
-            (f'<a href="{e(l["url"])}" rel="noopener noreferrer" target="_blank">'
-             f'{e(l["url"].split("/")[-1])}</a>') if l["url"] else e(l["nom"])
-            for l in x["liens"]) or '<span class="faible">aucun lien</span>')
+        det_liens = (" · ".join(_un_lien(l) for l in x["liens"])
+                     or '<span class="faible">aucun lien</span>')
         det_subs = ""
         if x["subs"]:
             parts = []
@@ -564,6 +739,23 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
     else:
         corps.append('<tr><td colspan="5" class="faible">Aucun VA de You FR sur cette model.</td></tr>')
     avert = "".join(f'<div class="avert">{e(a)}</div>' for a in t["avert"])
+    if message:
+        avert = f'<div class="msg">{e(message)}</div>' + avert
+    ajout = ""
+    if admin:
+        noms = "".join(f'<option value="{e(x["pseudo"])}">' for x in lignes)
+        ajout = (
+            f'<details class="ajout"{" open" if message else ""}><summary>➕ Ajouter des liens à la main</summary>'
+            f'<form method="post" action="{ACTION}">{retour_champs}'
+            '<input type="hidden" name="op" value="ajout">'
+            f'<label>VA (nom Discord)<input name="va" list="vas" required autocomplete="off"></label>'
+            f'<datalist id="vas">{noms}</datalist>'
+            f'<label>Liens pour {e(t["nom"])} — un par ligne : page GetMySocial, tracking OnlyFans '
+            '(onlyfans.com/…/c123), tracking MYM (mym.fans/app/t/…)'
+            '<textarea name="liens" rows="4" required placeholder="https://…"></textarea></label>'
+            '<button type="submit">Ajouter</button></form>'
+            '<p class="note">Comptés sur cette model pour ce VA, rôle ou pas. Rien n\'est créé sur '
+            'GetMySocial ni sur MyPuls : seulement relié ici. Visible des admins seulement.</p></details>')
     rafraichir = '<meta http-equiv="refresh" content="45">' if t.get("en_cours") else ""
     titre = f"Liens de suivi · {t['nom']} · You FR"
     return (
@@ -583,7 +775,7 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         f'<input type="date" name="au" value="{au}" max="{auj.isoformat()}" aria-label="Date de fin">'
         f'<button type="submit">OK</button></form>'
         f'<nav class="raccourcis" aria-label="Périodes">{rac}</nav>'
-        f'{avert}'
+        f'{avert}{ajout}'
         '<div class="boite"><table><thead><tr>'
         + _th("nom", "VA", num=False)
         + _th("clics", "Clics", titre="Clics sur la page GetMySocial du VA, tous pays")
@@ -596,14 +788,16 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         '</body></html>')
 
 
-def page(args: Mapping[str, Any], cle: str = "", guild: Any = None) -> str:
-    """La page de ?c=fr-<model>. Ne lève jamais."""
+def page(args: Mapping[str, Any], cle: str = "", guild: Any = None, admin: bool = False) -> str:
+    """La page de ?c=fr-<model>. Ne lève jamais. `admin` : le formulaire des
+    liens à la main (session admin du site, jamais la seule clé des VA)."""
     model = page_de(args.get("c"))
     try:
         du, au = periode(args)
         t = tableau(model, du, au, guild)
         return page_html(t, cle=cle, tri=str(args.get("tri") or "subs"),
-                         sens=str(args.get("sens") or "desc"))
+                         sens=str(args.get("sens") or "desc"), admin=admin,
+                         message=str(args.get("m") or "")[:400])
     except Exception as ex:                                  # noqa: BLE001
         auj = _aujourdhui().isoformat()
         return page_html({"model": model or "amelia", "nom": PAGES.get(model, {}).get("nom", "?"),

@@ -93,7 +93,12 @@ def vas_du_serveur(guild) -> List[Tuple[int, str]]:
     """[(id, nom d'utilisateur)] des membres qui portent au moins un rôle de
     model (pseudo_model), triés par nom : ceux qui reçoivent les liens."""
     import pseudo_model as pm
-    models = pm.models_du_serveur(guild)
+    import guild_features as gf
+    # le rôle Lia (hors marché, 23/11/2026) ne fait pas un VA JB : sans ça, un
+    # membre qui n'a que lui recevait quatre liens neufs et leurs trackings
+    # MyPuls, qui ne s'effacent pas
+    en_plus = set(gf.models_en_plus(guild))
+    models = tuple(m for m in pm.models_du_serveur(guild) if m not in en_plus)
     out = []
     for m in list(getattr(guild, "members", None) or []):
         if getattr(m, "bot", False):

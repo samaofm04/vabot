@@ -85,7 +85,7 @@ TITRE = "🗓️ Répartition VA"
 #: La couleur du rôle de chaque model sur You FR (celles de Va IG), en cœur :
 #: un embed n'a qu'une couleur, ses colonnes aucune.
 EMOJIS = {"amelia": "🩷", "emma": "💜", "sarah": "💙",
-          "julia": "🩵", "lola": "🧡", "alicia": "💛"}
+          "julia": "🩵", "lola": "🧡", "alicia": "💛", "lia": "❤️"}
 EMOJI_AUTRE = "▫️"
 SANS_MODEL = "⚪ SANS MODEL"
 VIDE = "—"

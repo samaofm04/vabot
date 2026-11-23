@@ -88,7 +88,9 @@ def models_du_serveur(guild) -> Tuple[str, ...]:
         import guild_features as gf
         if gf.marche_serveur(guild) == "fr":
             import bangers
-            return tuple(bangers.MODELS_FR)
+            # + les models hors marché du serveur (Lia sur You FR, 23/11/2026)
+            return tuple(bangers.MODELS_FR) + tuple(m for m in gf.models_en_plus(guild)
+                                                    if m not in bangers.MODELS_FR)
     except Exception as e:                                   # noqa: BLE001
         _dire_une_fois(f"models:{getattr(guild, 'id', '')}:{type(e).__name__}",
                        f"[pseudo-model] models du serveur illisibles ({type(e).__name__}: {e}) : "

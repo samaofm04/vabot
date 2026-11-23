@@ -71555,7 +71555,12 @@ def create_app():
                 _g = _BOT_REF.get_guild(_lyf.GUILD_YOU_FR) if _BOT_REF is not None else None
             except Exception:
                 _g = None            # la page le dit : « rôles illisibles »
-            return _entetes(_R(_lyf.page(request.args, cle=k, guild=_g), mimetype="text/html"))
+            try:
+                _adm = bool(is_auth() and _is_admin())
+            except Exception:
+                _adm = False
+            return _entetes(_R(_lyf.page(request.args, cle=k, guild=_g, admin=_adm),
+                               mimetype="text/html"))
 
         # ?c=emy : la même page pour Emy (les liens de l'équipe y sont passés
         # le 06/10) ; sans c, Jessye comme avant
@@ -71639,6 +71644,34 @@ def create_app():
         if not ok:
             return _entetes(_R(_il.page_refus_paie(pourquoi, retour), status=400, mimetype="text/html"))
         return _entetes(redirect(retour, code=303))
+
+    @app.route("/infloww/liens/you-fr", methods=["POST"])
+    def infloww_liens_you_fr_ecrire():
+        """Les liens posés à la main sur une page You FR (propriétaire,
+        23/11/2026 : « un truc où je mets les liens carrément »). Admin
+        seulement : la clé des VA ouvre la page, jamais ce formulaire."""
+        import liens_you_fr as _lyf
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return "Réservé à l'administration.", 403
+        f = request.form
+        model = _lyf.page_de(f.get("c"))
+        if f.get("op") == "retrait":
+            ok, msg = _lyf.retirer_manuel(str(f.get("id") or ""))
+        elif model:
+            try:
+                _g = _BOT_REF.get_guild(_lyf.GUILD_YOU_FR) if _BOT_REF is not None else None
+            except Exception:
+                _g = None
+            ok, msg = _lyf.ajouter_manuel(model, str(f.get("va") or ""), str(f.get("liens") or ""),
+                                          par=str(session.get("username") or ""), guild=_g)
+        else:
+            msg = "Model inconnue."
+        from urllib.parse import urlencode as _ue
+        q = {k: str(f.get(k) or "") for k in ("c", "du", "au", "tri", "sens", "k") if f.get(k)}
+        q["m"] = msg
+        return redirect("/infloww/liens?" + _ue(q))
 
     @app.route("/mes-stats")
     def stats_va_page():
