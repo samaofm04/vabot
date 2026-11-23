@@ -73,6 +73,32 @@ PAGES: Dict[str, Dict[str, Any]] = {
                 {"link_id": "", "url": "", "nom": "@francky0425 (c146)",
                  "trackings": {"of": "https://onlyfans.com/liasxcret/c146"}}]}]},
 }
+#: La photo de chaque model : celle de son compte MyPuls (OF d'abord, sinon
+#: MYM ; ids de liens_fr.MODELS), déposée dans data/mypuls_avatars/<id>.img.
+#: Propriétaire, 23/11/2026 : « un truc avec les pp des models … télécharger
+#: icône … style et carré ».
+AVATARS = {"amelia": 3106, "emma": 1733, "lola": 3673, "alicia": 2896,
+           "julia": 3109, "sarah": 1469, "lia": 3992}
+AVATARS_DIR = DATA_DIR / "mypuls_avatars"
+
+
+def avatar(model: str) -> str:
+    """La photo de la model en adresse data: (la page s'ouvre aussi par la
+    clé des VA, sans session : /mypuls/avatar leur serait refusé). "" sans
+    photo : la vignette montre l'initiale."""
+    import base64
+    try:
+        b = (AVATARS_DIR / f"{AVATARS.get(model)}.img").read_bytes()
+    except OSError:
+        return ""
+    if len(b) > 200_000:
+        return ""
+    mime = ("image/webp" if b[:4] == b"RIFF" and b[8:12] == b"WEBP" else
+            "image/png" if b[:8] == b"\x89PNG\r\n\x1a\n" else
+            "image/jpeg" if b[:3] == b"\xff\xd8\xff" else "")
+    return f"data:{mime};base64,{base64.b64encode(b).decode()}" if mime else ""
+
+
 #: Préfixe de l'adresse : « fr-amelia » évite toute collision avec les
 #: profils de infloww_liens (?c=emy, ?c=lia : Lia y a déjà SA page YouCham).
 PREFIXE = "fr-"
@@ -614,6 +640,19 @@ body{font:14px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif;padding:20px 1
 h1{font-size:20px;margin:4px 0 2px}
 .sous{color:var(--faible);font-size:13px;margin:0 0 12px;overflow-wrap:anywhere}
 .models{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.models a{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 3px!important;border-radius:9px!important}
+.pp,.pp-grand{display:block;object-fit:cover;background:var(--bord);flex-shrink:0}
+.pp{width:24px;height:24px;border-radius:6px}
+.pp-grand{width:64px;height:64px;border-radius:14px;border:2px solid var(--acc)}
+.initiale{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--texte)}
+.pp.initiale{font-size:12px} .pp-grand.initiale{font-size:26px}
+.models a.on .pp{outline:2px solid var(--acc);outline-offset:1px}
+.tete{display:flex;align-items:center;gap:14px;margin:6px 0 12px}
+.tete h1{margin-top:0}
+.tete .sous{margin:0}
+.tete-pp{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0}
+.dl{color:var(--faible);font-size:11px;text-decoration:none;border:1px solid var(--bord);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.dl:hover{color:var(--acc);border-color:var(--acc)}
 .models a,.raccourcis a{color:var(--faible);text-decoration:none;border:1px solid var(--bord);border-radius:999px;padding:3px 10px;font-size:12px}
 .models a.on,.raccourcis a.on{color:var(--acc);border-color:var(--acc)}
 .periode{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}
@@ -679,9 +718,23 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         f'<a href="{e(_url(du=a.isoformat(), au=b.isoformat()))}"'
         f'{" class=on" if (a.isoformat(), b.isoformat()) == (du, au) else ""}>{e(lib)}</a>'
         for lib, a, b in raccourcis)
+    pp = {m: avatar(m) for m in PAGES}
+
+    def _vignette(m: str, cl: str) -> str:
+        if pp.get(m):
+            return f'<img class="{cl}" src="{pp[m]}" alt="" width="100" height="100">'
+        return f'<span class="{cl} initiale">{e(PAGES[m]["nom"][:1])}</span>'
+
     models = "".join(
-        f'<a href="{e(_url(c=PREFIXE + m))}"{" class=on" if m == model else ""}>{e(c["nom"])}</a>'
+        f'<a href="{e(_url(c=PREFIXE + m))}"{" class=on" if m == model else ""}>'
+        f'{_vignette(m, "pp")}{e(c["nom"])}</a>'
         for m, c in PAGES.items())
+    ext = "webp" if pp.get(model, "").startswith("data:image/webp") else \
+          "png" if pp.get(model, "").startswith("data:image/png") else "jpg"
+    entete_pp = (f'<div class="tete-pp">{_vignette(model, "pp-grand")}'
+                 + (f'<a class="dl" href="{pp[model]}" download="{e(model)}-pp.{ext}" '
+                    f'title="Télécharger la photo">⬇ Télécharger</a>' if pp.get(model) else "")
+                 + '</div>')
     caches = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">'
                      for k, v in (("k", cle), ("c", PREFIXE + model), ("tri", tri), ("sens", sens)) if v)
 
@@ -785,9 +838,9 @@ def page_html(t: Mapping[str, Any], cle: str = "", tri: str = "subs", sens: str 
         f'<meta name="color-scheme" content="dark">{rafraichir}<title>{e(titre)}</title>'
         f'<style>{CSS}</style></head><body>'
         '<div class="marque">MyPuls · You FR</div>'
-        f'<h1>{e(titre)}</h1>'
+        f'<div class="tete">{entete_pp}<div><h1>{e(titre)}</h1>'
         f'<p class="sous"><b>Du {_jc(du)} au {_jc(au)}</b> · VA du serveur You FR seulement · '
-        f'{len(lignes)} VA</p>'
+        f'{len(lignes)} VA</p></div></div>'
         f'<nav class="models" aria-label="Models">{models}</nav>'
         f'<form class="periode" method="get">{caches}'
         f'<input type="date" name="du" value="{du}" max="{auj.isoformat()}" aria-label="Date de début">'
