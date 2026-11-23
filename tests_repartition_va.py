@@ -125,6 +125,9 @@ class Membre:
         self.id, self.name, self.bot = uid, name, bot
         self.roles = [ns(name=r) for r in roles]
 
+    async def add_roles(self, *roles, reason=None):
+        self.roles.extend(roles)
+
 
 class Message:
     def __init__(self, canal, mid, author_id, embed=None):
@@ -323,7 +326,7 @@ reset()
 g = Guilde(YOU_FR, vrais_membres())
 b = run(rv.assurer(g))
 check("salon absent : créé, nommé 🗓️・répartition-va",
-      b["crees"] == ["rôle Lia", "🗓️・répartition-va"] and len(g.creations) == 1, b)
+      b["crees"] == ["rôle Lia", "rôle Lia → francky04268", "🗓️・répartition-va"] and len(g.creations) == 1, b)
 nom, cat, droits = g.creations[0]
 check("créé DANS 📣 ANNONCES ET SUIVI, sans droits à soi (ceux de la catégorie)",
       cat is g.categories[0] and droits is None, g.creations[0])
@@ -403,10 +406,13 @@ canal = g.text_channels[0]
 titres = [m.embeds[0].title for m in canal.messages]
 check("le tableau, puis une carte par model dans l'ordre des models",
       titres == [rv.TITRE, "🩷 AMELIA · 2 VA", "💜 EMMA · 2 VA", "💙 SARAH · 0 VA",
-                 "🩵 JULIA · 0 VA", "🧡 LOLA · 1 VA", "💛 ALICIA · 2 VA", "❤️ LIA · 0 VA"], titres)
+                 "🩵 JULIA · 0 VA", "🧡 LOLA · 1 VA", "💛 ALICIA · 2 VA", "❤️ LIA · 1 VA"], titres)
 check("bilan : 7 cartes de model posées", b["details_poses"] == 7 and not b["rates"], b)
 check("le rôle Lia est créé une fois, et pas au passage suivant",
       [r.name for r in g.roles_crees] == ["Lia"], g.roles_crees)
+_fr = next(m for m in g.members if m.name == "francky04268")
+check("le rôle Lia est donné à francky04268 (ROLES_A_DONNER)",
+      [r.name for r in _fr.roles].count("Lia") == 1, [r.name for r in _fr.roles])
 desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.messages[1:]}
 print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
 import re as _re                        # noqa: E402

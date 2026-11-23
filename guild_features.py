@@ -234,6 +234,11 @@ REPARTITION_VA = {YOU_FR_GUILD_ID}
 #: salon banger FR : l'ajouter à bangers.MODELS_FR en aurait créé.
 MODELS_EN_PLUS = {YOU_FR_GUILD_ID: ("lia",)}
 
+#: Rôles de model à donner UNE fois, par nom d'utilisateur (repartition_va,
+#: noté dans data/repartition_va.json : retiré ensuite à la main, il ne
+#: revient pas). Propriétaire, 23/11/2026 : « Oui, donne-le » (Lia à Franky).
+ROLES_A_DONNER = {YOU_FR_GUILD_ID: {"lia": ("francky04268",)}}
+
 #: Les serveurs où chaque VA reçoit dans son -content une carte par model de
 #: ses rôles : son lien GetMySocial et 📷 Ajouter mes comptes
 #: (cartes_va_fr.py). Propriétaire, 10/11/2026 : « tu peux leur donner leurs
@@ -330,6 +335,11 @@ def pseudo_model(guild_or_id) -> bool:
 def models_en_plus(guild_or_id) -> tuple:
     """Les models de ce serveur hors marché (MODELS_EN_PLUS), () sinon."""
     return tuple(MODELS_EN_PLUS.get(_gid(guild_or_id), ()))
+
+
+def roles_a_donner(guild_or_id) -> dict:
+    """{model: (noms d'utilisateur)} à qui donner le rôle une fois."""
+    return dict(ROLES_A_DONNER.get(_gid(guild_or_id), {}))
 
 
 def repartition_va(guild_or_id) -> bool:

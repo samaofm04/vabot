@@ -395,6 +395,27 @@ async def _roles_en_plus(guild, bilan) -> None:
                 bilan["rates"].append(f"rôle {model} ({type(ex).__name__}: {ex})"[:200])
                 continue
         _noter(guild.id, **{f"role_{model}": r.id})
+    # les rôles à donner une fois (gf.ROLES_A_DONNER) : rôle trouvé par son
+    # nom, membre par son nom d'utilisateur ; fait, c'est noté
+    for model, noms in gf.roles_a_donner(guild).items():
+        r = pm.role_de(guild, model)
+        for nom in noms:
+            if _note(guild.id, f"donne_{model}_{nom}"):
+                continue
+            m = next((m for m in list(getattr(guild, "members", None) or [])
+                      if str(getattr(m, "name", "")).casefold() == nom.casefold()), None)
+            if r is None or m is None:
+                bilan["rates"].append(f"rôle {model} pour {nom} : "
+                                      f"{'rôle' if r is None else 'membre'} introuvable")
+                continue
+            try:
+                if r not in list(getattr(m, "roles", None) or []):
+                    await m.add_roles(r, reason="Demandé par le propriétaire")
+                    bilan["crees"].append(f"rôle {r.name} → {nom}")
+            except Exception as ex:                          # noqa: BLE001
+                bilan["rates"].append(f"rôle {model} pour {nom} ({type(ex).__name__}: {ex})"[:200])
+                continue
+            _noter(guild.id, **{f"donne_{model}_{nom}": int(getattr(m, "id", 0) or 1)})
 
 
 async def _creer_salon(guild, bilan):
