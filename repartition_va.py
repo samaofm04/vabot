@@ -370,6 +370,34 @@ async def creer_salon_annonces(guild, nom: str, raison: str, bilan) -> Optional[
     return c
 
 
+#: La couleur du rôle créé pour une model hors marché (le cœur d'EMOJIS).
+COULEURS_EN_PLUS = {"lia": 0xE74C3C}
+
+
+async def _roles_en_plus(guild, bilan) -> None:
+    """Le rôle des models hors marché (guild_features.MODELS_EN_PLUS : Lia
+    sur You FR), créé UNE fois. Propriétaire, 23/11/2026 : « ajoute un rôle
+    Lia ». Son id est noté : retiré ensuite à la main, il ne revient pas."""
+    import guild_features as gf
+    import pseudo_model as pm
+    for model in gf.models_en_plus(guild):
+        if _note(guild.id, f"role_{model}"):
+            continue
+        r = next((r for r in list(getattr(guild, "roles", None) or [])
+                  if pm.cle(getattr(r, "name", "")) == model), None)
+        if r is None:
+            try:
+                import discord
+                r = await guild.create_role(name=model.capitalize(),
+                                            colour=discord.Colour(COULEURS_EN_PLUS.get(model, 0)),
+                                            reason="Rôle de model demandé par le propriétaire")
+                bilan["crees"].append(f"rôle {r.name}")
+            except Exception as ex:                          # noqa: BLE001
+                bilan["rates"].append(f"rôle {model} ({type(ex).__name__}: {ex})"[:200])
+                continue
+        _noter(guild.id, **{f"role_{model}": r.id})
+
+
 async def _creer_salon(guild, bilan):
     return await creer_salon_annonces(guild, NOM, "Répartition des VA par model", bilan)
 
@@ -480,6 +508,7 @@ async def assurer(guild, forcer: bool = False) -> dict:
                        "aucune model pour ce serveur, salon non tenu")
         return bilan
     async with _verrou(guild.id):
+        await _roles_en_plus(guild, bilan)
         canal = salon(guild)
         if canal is None:
             canal = await _creer_salon(guild, bilan)
