@@ -200,6 +200,14 @@ class Guilde:
         self.categories = [ns(id=1, name="📣 ANNONCES ET SUIVI")] if avec_categorie else []
         self.text_channels = []
         self.creations = []
+        self.roles_crees = []
+
+    async def create_role(self, name, colour=None, reason=None):
+        # le rôle Lia, créé une fois (guild_features.MODELS_EN_PLUS)
+        r = ns(id=900 + len(self.roles_crees), name=name, colour=colour)
+        self.roles_crees.append(r)
+        self.roles = list(getattr(self, "roles", []) or []) + [r]
+        return r
 
     async def create_text_channel(self, name, category=None, overwrites=None, reason=None):
         self.creations.append((name, category, overwrites))
@@ -254,10 +262,11 @@ attendu = [("amelia", ["fenoainir", "york_emerick12"]),
            ("emma", ["priscah0017_30005", "york_emerick12"]),
            ("sarah", []), ("julia", []),
            ("lola", ["eniassy_83352"]),
-           ("alicia", ["fahnih_37050", "york_emerick12"])]
+           ("alicia", ["fahnih_37050", "york_emerick12"]),
+           ("lia", [])]
 check("les colonnes de You FR, dans l'ordre des models", colonnes == attendu, colonnes)
-check("l'ordre des colonnes est celui de bangers.MODELS_FR",
-      [m for m, _ in colonnes] == list(bg.MODELS_FR))
+check("l'ordre des colonnes est celui de bangers.MODELS_FR, puis Lia (hors marché)",
+      [m for m, _ in colonnes] == list(bg.MODELS_FR) + ["lia"])
 check("sans model : francky04268 et noum0075 (ni bot, ni propriétaire)",
       sans == ["francky04268", "noum0075"], sans)
 
@@ -291,11 +300,11 @@ e = rv.embed(g)
 d = e.to_dict()
 noms = [f["name"] for f in d["fields"]]
 check("titre « 🗓️ Répartition VA »", d.get("title") == "🗓️ Répartition VA", d.get("title"))
-check("six colonnes, puis Sans model",
+check("sept colonnes, puis Sans model",
       noms == ["🩷 AMELIA · 2", "💜 EMMA · 2", "💙 SARAH · 0", "🩵 JULIA · 0",
-               "🧡 LOLA · 1", "💛 ALICIA · 2", "⚪ SANS MODEL · 2"], noms)
-check("les six colonnes sont inline (3 par rangée), Sans model non",
-      [f["inline"] for f in d["fields"]] == [True] * 6 + [False])
+               "🧡 LOLA · 1", "💛 ALICIA · 2", "❤️ LIA · 0", "⚪ SANS MODEL · 2"], noms)
+check("les sept colonnes sont inline (3 par rangée), Sans model non",
+      [f["inline"] for f in d["fields"]] == [True] * 7 + [False])
 check("colonne Amelia : un VA par ligne",
       d["fields"][0]["value"] == "fenoainir\nyork\\_emerick12", d["fields"][0]["value"])
 check("aucune description, aucun pied (pas de notice)",
@@ -314,7 +323,7 @@ reset()
 g = Guilde(YOU_FR, vrais_membres())
 b = run(rv.assurer(g))
 check("salon absent : créé, nommé 🗓️・répartition-va",
-      b["crees"] == ["🗓️・répartition-va"] and len(g.creations) == 1, b)
+      b["crees"] == ["rôle Lia", "🗓️・répartition-va"] and len(g.creations) == 1, b)
 nom, cat, droits = g.creations[0]
 check("créé DANS 📣 ANNONCES ET SUIVI, sans droits à soi (ceux de la catégorie)",
       cat is g.categories[0] and droits is None, g.creations[0])
@@ -394,8 +403,10 @@ canal = g.text_channels[0]
 titres = [m.embeds[0].title for m in canal.messages]
 check("le tableau, puis une carte par model dans l'ordre des models",
       titres == [rv.TITRE, "🩷 AMELIA · 2 VA", "💜 EMMA · 2 VA", "💙 SARAH · 0 VA",
-                 "🩵 JULIA · 0 VA", "🧡 LOLA · 1 VA", "💛 ALICIA · 2 VA"], titres)
-check("bilan : 6 cartes de model posées", b["details_poses"] == 6 and not b["rates"], b)
+                 "🩵 JULIA · 0 VA", "🧡 LOLA · 1 VA", "💛 ALICIA · 2 VA", "❤️ LIA · 0 VA"], titres)
+check("bilan : 7 cartes de model posées", b["details_poses"] == 7 and not b["rates"], b)
+check("le rôle Lia est créé une fois, et pas au passage suivant",
+      [r.name for r in g.roles_crees] == ["Lia"], g.roles_crees)
 desc = {m.embeds[0].title.split(" ")[1]: m.embeds[0].description for m in canal.messages[1:]}
 print("   Alicia :", desc["ALICIA"].replace("\n", " | "))
 import re as _re                        # noqa: E402
@@ -429,7 +440,7 @@ check("aucun montant dans les cartes", not any("$" in d or "€" in d for d in d
 
 b = run(rv.assurer(g, forcer=True))
 check("passage forcé : mêmes pages, rien de reposté ni réécrit",
-      b["details_poses"] == 0 and b["details_maj"] == 0 and canal.envois_detail == 6, b)
+      b["details_poses"] == 0 and b["details_maj"] == 0 and canal.envois_detail == 7, b)
 
 jb.add_account("alicia", "alicia.neuve", va="Fahnih")
 b = run(rv.assurer(g, forcer=True))
@@ -457,7 +468,7 @@ check("carte supprimée à la main : reposée, pas de doublon",
 reset()                                   # data/ reparti de zéro
 b = run(rv.assurer(g))
 check("data/ vide : les cartes sont retrouvées par leur titre, aucune reposée",
-      b["details_poses"] == 0 and len(canal.messages) == 7, (b, len(canal.messages)))
+      b["details_poses"] == 0 and len(canal.messages) == 8, (b, len(canal.messages)))
 
 # Un autre id Discord a déjà la fiche « dioplucky » de Lola : sa page est refusée.
 ct.page_du_va(str(YOU_FR), "999", "dioplucky", "lola")

@@ -98,6 +98,13 @@ def models_du_serveur(guild) -> Tuple[str, ...]:
     return ()
 
 
+def role_de(guild, model: str):
+    """Le rôle de cette model sur le serveur (même reconnaissance que
+    models_du_membre), ou None."""
+    return next((r for r in list(getattr(guild, "roles", None) or [])
+                 if cle(getattr(r, "name", "")) == model), None)
+
+
 def models_du_membre(membre, models) -> List[str]:
     """Les models dont le membre porte le rôle, dans l'ordre de `models`."""
     portes = {cle(getattr(r, "name", "")) for r in (getattr(membre, "roles", None) or [])}

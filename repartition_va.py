@@ -383,8 +383,7 @@ async def _roles_en_plus(guild, bilan) -> None:
     for model in gf.models_en_plus(guild):
         if _note(guild.id, f"role_{model}"):
             continue
-        r = next((r for r in list(getattr(guild, "roles", None) or [])
-                  if pm.cle(getattr(r, "name", "")) == model), None)
+        r = pm.role_de(guild, model)
         if r is None:
             try:
                 import discord
