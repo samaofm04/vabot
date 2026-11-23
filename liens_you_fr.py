@@ -65,7 +65,9 @@ PAGES: Dict[str, Dict[str, Any]] = {
             # sur Lia ». Franky n'est sur aucun serveur des bots : ses liens à
             # lui, posés ici (trackings « @francky… » créés pour lui les 06 et
             # 10/11, page liaberry vers c152). Fany et Prisca n'y sont plus.
-            "fixes": [{"uid": "p:franky", "pseudo": "Franky", "liens": [
+            # Son nom d'utilisateur sur You FR (salon francky04268-content) :
+            # relié à son id Discord quand le serveur est lisible.
+            "fixes": [{"uid": "p:francky04268", "pseudo": "francky04268", "liens": [
                 {"link_id": "lnk_6af2c6df8c186a09f5cd6131", "url": "https://getmysocial.com/liaberry",
                  "nom": "liaberry", "trackings": {"of": "https://onlyfans.com/liasxcret/c152"}},
                 {"link_id": "", "url": "", "nom": "@francky0425 (c146)",
@@ -215,8 +217,13 @@ def personnes(model: str, guild: Any = None,
                     _ligne(uid, ps)["liens"].append(
                         {"link_id": "", "url": "", "nom": str(it.get("name") or ""),
                          "trackings": {str(it.get("platform") or "of"): str(it["url"])}})
+    fixes_uids: set = set()
     for f in cfg.get("fixes") or ():
-        p = _ligne(f["uid"], f["pseudo"])
+        # le membre de You FR à ce nom : une seule ligne s'il a aussi le rôle
+        uid = next((str(m.id) for m in list(getattr(guild, "members", None) or [])
+                    if str(getattr(m, "name", "")).casefold() == f["pseudo"].casefold()), f["uid"])
+        fixes_uids.add(uid)
+        p = _ligne(uid, f["pseudo"])
         p["liens"].extend(dict(l, trackings=dict(l["trackings"])) for l in f["liens"])
 
     # les liens posés à la main : rôle ou pas, ils sont comptés
@@ -233,7 +240,7 @@ def personnes(model: str, guild: Any = None,
         avert.append("Rôles de You FR illisibles (bot pas encore prêt ?) : "
                      "tous les VA sont affichés.")
     else:
-        gardes = (set(porteurs) | a_la_main | {f["uid"] for f in cfg.get("fixes") or ()}
+        gardes = (set(porteurs) | a_la_main | fixes_uids
                   | (TOUJOURS if cfg["source"] != "lia" else set()))
         # hors rôle : retiré, mais nommé (« ne jamais écarter en silence »)
         hors = sorted(p["pseudo"] for u, p in out.items()
