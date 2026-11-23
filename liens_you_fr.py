@@ -61,6 +61,12 @@ PAGES: Dict[str, Dict[str, Any]] = {
 #: profils de infloww_liens (?c=emy, ?c=lia : Lia y a déjà SA page YouCham).
 PREFIXE = "fr-"
 
+#: VA comptés en plus du registre JB. Propriétaire, 23/11/2026 : « il manque
+#: prisca et fanih ». Prisca travaille sur priscah0908_23400 (ses liens Va IG
+#: lolacute2, emmaangel2… sont ceux qui cliquent), compte ABSENT de You FR :
+#: c'est priscah0017_30005 qui y est. Ajoutée à la main, sa ligne à elle.
+VA_EN_PLUS: Dict[str, str] = {"1525406324970618890": "priscah0908_23400"}
+
 TTL_S = 900                      # un relevé (MyPuls ou GMS) resservi 15 min
 ATTENTE_S = 8.0                  # la page n'attend pas plus : la suite au rechargement
 _CACHE: Dict[Tuple, Dict[str, Any]] = {}
@@ -99,6 +105,17 @@ def _registre(fichier: Path) -> Dict[str, Any]:
     return liens if isinstance(liens, dict) else {}
 
 
+def vas_you_fr(jb: Mapping[str, Any]) -> Dict[str, str]:
+    """{uid: pseudo} : les VA du registre JB, plus VA_EN_PLUS."""
+    vas: Dict[str, str] = {}
+    for k, e in jb.items():
+        if isinstance(e, dict) and ":" in k and e.get("pseudo"):
+            vas.setdefault(k.split(":", 1)[0], str(e["pseudo"]).strip())
+    for uid, ps in VA_EN_PLUS.items():
+        vas.setdefault(uid, ps)
+    return vas
+
+
 def personnes(model: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     """([{uid, pseudo, liens: [{link_id, url, trackings: {plate: url}}]}],
     avertissements). Jamais une entrée écartée sans le dire."""
@@ -108,10 +125,7 @@ def personnes(model: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     if not jb:
         avert.append("registre des liens JB (data/liens_jb_fr.json) vide ou illisible : "
                      "aucun VA de You FR connu")
-    vas: Dict[str, str] = {}
-    for k, e in jb.items():
-        if isinstance(e, dict) and ":" in k:
-            vas.setdefault(k.split(":", 1)[0], str(e.get("pseudo") or "").strip())
+    vas = vas_you_fr(jb)
     out: Dict[str, Dict[str, Any]] = {}
 
     def _ajouter(uid: str, e: Mapping[str, Any]) -> None:
@@ -123,19 +137,21 @@ def personnes(model: str) -> Tuple[List[Dict[str, Any]], List[str]]:
                            "nom": str(e.get("display_name") or ""),
                            "trackings": {str(k): str(v) for k, v in tr.items() if v}})
 
-    if cfg["source"] == "jb":
+    if cfg["source"] in ("jb", "va_ig"):
+        # leur lien JB (You FR) ET leurs liens Va IG de la model : sans ces
+        # derniers, Fany et Prisca sortaient à zéro alors que leurs liens Va
+        # IG (amelialovely2, aliciababe, lolacute2…) font les clics (23/11)
         for k, e in jb.items():
             if isinstance(e, dict) and k.endswith(f":{model}"):
                 _ajouter(k.split(":", 1)[0], e)
-    elif cfg["source"] == "va_ig":
-        fr = _registre(FR_FICHIER)
-        for k, e in fr.items():
+        for k, e in _registre(FR_FICHIER).items():
             if isinstance(e, dict) and ":" in k and str(e.get("model") or "") == model:
                 uid = k.split(":", 1)[0]
                 if uid in vas:
                     _ajouter(uid, e)
-        avert.append(f"Les VA de You FR n'ont pas de lien JB pour {cfg['nom']} : "
-                     f"ce sont leurs liens Va IG qui sont comptés.")
+        if cfg["source"] == "va_ig":
+            avert.append(f"Les VA de You FR n'ont pas de lien JB pour {cfg['nom']} : "
+                         f"seuls leurs liens Va IG sont comptés.")
     # lia : les lignes viennent des trackings MyPuls (voir tableau())
     for p in out.values():
         if not any(l["trackings"] for l in p["liens"]):
@@ -283,10 +299,7 @@ def tableau(model: str, du: str, au: str) -> Dict[str, Any]:
     if cfg["source"] == "lia":
         # les VA de You FR (pseudos du registre JB) dont le nom figure dans un
         # tracking de Lia : la seule trace qui relie un tracking Lia à un VA
-        vas = {}
-        for k, e in _registre(JB_FICHIER).items():
-            if isinstance(e, dict) and e.get("pseudo"):
-                vas.setdefault(k.split(":", 1)[0], str(e["pseudo"]))
+        vas = vas_you_fr(_registre(JB_FICHIER))
         ids = set(cfg.get("creator_ids") or ())
         par_uid: Dict[str, Dict[str, Any]] = {}
         for it in mpv.get("items") or []:
