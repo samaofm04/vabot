@@ -398,6 +398,24 @@ def ajouter_manuel(model: str, va: str, texte: str, par: str = "", guild: Any = 
                   + ".")
 
 
+def lien_public(uid: Any, nom: str, model: str) -> str:
+    """La page GetMySocial que CETTE page compte pour ce VA sur cette model,
+    hors registres JB et Va IG : liens fixes (Franky sur Lia : liaberry) ou
+    posés à la main. "" sinon. Sert de repli aux cartes de
+    🗓️・répartition-va, qui sans ça disaient « pas encore de lien » à Franky
+    (propriétaire, 23/11/2026 : « normalement Franky il a déjà un tracking »)."""
+    uid, cle = str(uid or ""), str(nom or "").casefold()
+    for f in (PAGES.get(model) or {}).get("fixes") or ():
+        if f["pseudo"].casefold() == cle:
+            for l in f["liens"]:
+                if l.get("url"):
+                    return str(l["url"])
+    for m in manuels(model):
+        if m.get("url") and ((uid and m.get("uid") == uid) or str(m.get("pseudo")).casefold() == cle):
+            return str(m["url"])
+    return ""
+
+
 def retirer_manuel(ident: str) -> Tuple[bool, str]:
     with _VERROU_MANUELS:
         d = safe_json.load(MANUELS_FICHIER, default={}) or {}

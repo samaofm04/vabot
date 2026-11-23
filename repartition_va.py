@@ -272,10 +272,14 @@ def donnees_details(gid, colonnes, jb=()) -> List[Tuple[str, str]]:
     import cartes_va_fr as cv
     import liens_jb_fr as lj
     statuts = cv._statuts_gms() if any(m not in jb for m, vas in colonnes if vas) else {}
+    import liens_you_fr as lyf
     out = []
     for model, vas in colonnes:
         lignes = [(nom, page_comptes(gid, uid, nom, model),
-                   lj.lien_public(uid, model) if model in jb else cv.lien_gms(uid, model, statuts))
+                   (lj.lien_public(uid, model) if model in jb else cv.lien_gms(uid, model, statuts))
+                   # repli : le lien que compte la page de suivi You FR
+                   # (Franky sur Lia, liens posés à la main)
+                   or lyf.lien_public(uid, nom, model))
                   for nom, uid in vas]
         out.append((model, description_model(lignes)))
     return out
