@@ -39,11 +39,11 @@ SOUS LE TABLEAU : UNE CARTE PAR MODEL, LES DEUX LIENS DE CHACUN
     Les cartes privées des -content (cartes_va_fr) sont retirées : tout est
     ici. Un lien créé arrive au passage des trente minutes.
 
-    AMELIA, EMMA, LOLA, ALICIA : CHAQUE VA (10/11/2026, « sous les 4 models »)
-    Pour les models de guild_features.LIENS_JB, la carte liste TOUS les VA
-    du serveur (un rôle de model au moins), rôle ou pas pour celle-ci, avec
-    leur lien de l'équipe VA JB FR (liens_jb_fr : quatre liens neufs par VA,
-    créés par le bot). Le tableau du haut reste la répartition par rôle.
+    AMELIA, EMMA, LOLA, ALICIA : LE LIEN JB, MAIS PAR RÔLE (23/11/2026)
+    Pour les models de guild_features.LIENS_JB, le lien montré est celui de
+    l'équipe VA JB FR (liens_jb_fr). Du 10 au 23/11 ces cartes listaient
+    TOUS les VA ; depuis : « uniquement quand y a le rôle … là ils se
+    perdent ». Chaque carte ne liste que les porteurs du rôle.
 
 LES RÔLES : CEUX DU PSEUDO, PAS UNE SECONDE LISTE
     Un membre est sous une model quand pseudo_model dit qu'il en porte le
@@ -436,13 +436,13 @@ async def _assurer_details(guild, canal, bot_id, forcer: bool, bilan: dict) -> N
     import discord
     import cartes_va_fr as cv
     colonnes, _sans = par_model(guild)
-    # Amelia, Emma, Lola, Alicia : CHAQUE VA, avec son lien JB (« sous les 4
-    # models », 10/11/2026) ; les autres models restent par rôle.
     import liens_jb_fr as lj
     jb = tuple(lj.models_du_serveur(guild))
-    if jb:
-        tous = [(nom, uid) for uid, nom in lj.vas_du_serveur(guild)]
-        colonnes = [(m, tous if m in jb else vas) for m, vas in colonnes]
+    # Chaque carte ne liste que les VA qui portent le rôle de la model, JB
+    # compris. Propriétaire, 23/11/2026 : « je veux qu'ils voient leur lien
+    # et où ranger les comptes uniquement quand y a le rôle … je sais que y
+    # a tout mais là ils se perdent ». Avant : tous les VA sous les 4 models
+    # JB (10/11). Les liens JB restent créés pour tous (liens_jb_fr).
     donnees = await asyncio.to_thread(donnees_details, guild.id, colonnes, jb)
     nb = {m: len(v) for m, v in colonnes}
     notes = dict((_etat().get(str(guild.id)) or {}).get("details") or {})
