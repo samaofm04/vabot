@@ -148,6 +148,9 @@ def _cfg_defaut() -> dict:
         "persona": "",
         "contexte": "",
         "exemples_perso": "",
+        # Réserve d'exemples (data/tg_perso_pool.json) pour les vrais fans :
+        # coupée par défaut, elle n'a pas amélioré la note (24/11).
+        "pool_actif": False,
         # Corrections tirées des séries d'entraînement (même format fan:/moi:).
         # À part des exemples du propriétaire : on peut les vider sans toucher
         # aux siens.
@@ -730,7 +733,7 @@ def _nb_mots_fr(m: str) -> int:
 
 
 def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
-                 _relance: bool = False) -> dict | None:
+                 _relance: bool = False, reserve: bool | None = None) -> dict | None:
     """Réponse du cerveau, ou None (pas de clé, plafond, panne, refus) : dans
     ce cas l'appelant envoie la réponse toute faite avec les liens, pour que
     le fan ne reste jamais sans réponse."""
@@ -742,7 +745,12 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
     if (not cle and not local) or not messages or not _compter_ia():
         STATUS["ia_erreur"] = "pas de clé ANTHROPIC_API_KEY" if not cle else STATUS.get("ia_erreur", "")
         return None
-    proches = exemples_proches(histo, langue or langue_du_fan(histo))
+    # La réserve d'exemples de Lia n'a PAS amélioré la note sur 150 vrais
+    # fans (5,8 contre 5,9, plus de réponses trop chaudes) : elle ne sert au
+    # vrai bot que si la case « pool_actif » est cochée, et à l'entraînement
+    # quand on la demande (reserve=True).
+    avec_reserve = cfg.get("pool_actif", False) if reserve is None else reserve
+    proches = exemples_proches(histo, langue or langue_du_fan(histo)) if avec_reserve else ""
     if local:
         txt = _appel_ollama(modele_lola(cfg)[len("ollama:"):],
                             [prompt_systeme(cfg, langue or langue_du_fan(histo)), proches], messages)
@@ -879,7 +887,7 @@ def _post_traiter(cfg: dict, histo: list, infos: str, langue: str, _relance: boo
             langue_du_fan([{"de": "fan", "texte": m}]) == "fr" and _nb_mots_fr(m) >= 2
             for m in out["messages"]):
         h2 = list(histo) + [{"de": "fan", "texte": "(rappel : réponds UNIQUEMENT en anglais américain)"}]
-        out2 = appel_claude(cfg, h2, infos, langue, _relance=True)
+        out2 = appel_claude(cfg, h2, infos, langue, _relance=True, reserve=reserve)
         if out2:
             return out2
     if not out["messages"] and not out.get("liens"):
@@ -1678,6 +1686,9 @@ def page_html(cfg: dict, fans: dict, message: str = "") -> str:
         f'<option value="{k}"{" selected" if (cfg.get("modele") or "haiku") == k else ""}>{e(v[1])}</option>'
         for k, v in MODELES_LOLA.items())
     coche_texte = "checked" if cfg.get("liens_en_texte", True) else ""
+    coche_pool = "checked" if cfg.get("pool_actif") else ""
+    _charger_pool()
+    nb_pool = len(_POOL["entrees"])
     ph_token = ("••••• enregistré — laisser vide pour le garder"
                 if cfg.get("token") else "123456:ABC...")
 
@@ -1718,6 +1729,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <form class="card" method="post" action="/{PREFIXE}/save"><h2>Réglages</h2>
 <label><input type="checkbox" name="ia" value="1" style="width:auto" {coche_ia}> Le bot discute (cerveau Claude)</label>
 <label><input type="checkbox" name="liens_en_texte" value="1" style="width:auto" {coche_texte}> Liens collés en texte, comme une vraie personne (sinon : boutons, et chaque clic est compté)</label>
+<label><input type="checkbox" name="pool_actif" value="1" style="width:auto" {coche_pool}> Réserve de Lia pour les vrais fans ({nb_pool} échanges) — à essayer d'abord dans l'Entraînement</label>
 <div class="mut">Coupé : il n'envoie que l'accueil et les liens.</div>
 <label>Cerveau de Lola</label>
 <select name="modele" style="width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--bord);border-radius:8px;padding:8px;font:inherit">{options_modele}</select>
@@ -1761,6 +1773,7 @@ def appliquer_reglages(form) -> str:
         cfg["token"] = tok
     cfg["ia"] = form.get("ia") == "1"
     cfg["liens_en_texte"] = form.get("liens_en_texte") == "1"
+    cfg["pool_actif"] = form.get("pool_actif") == "1"
     try:
         cfg["delai_reponse"] = max(5, min(600, int(form.get("delai_reponse") or 60)))
     except ValueError:
@@ -2027,7 +2040,7 @@ def simuler_fan(persona_id: str, histo: list) -> str:
         return ""
 
 
-def entrainement_reponse(histo: list, nom: str = "", langue: str = "") -> dict:
+def entrainement_reponse(histo: list, nom: str = "", langue: str = "", reserve: bool | None = None) -> dict:
     """Ce que Lola répondrait, sans rien envoyer. Mêmes consignes, mêmes
     exemples, même nettoyage que pour un vrai fan."""
     cfg = load_cfg()
@@ -2039,7 +2052,7 @@ def entrainement_reponse(histo: list, nom: str = "", langue: str = "") -> dict:
         morceaux.append("tu n'as AUCUN lien à envoyer pour l'instant : ne promets pas de lien, mets liens = false")
     morceaux += _consignes_communes(cfg, histo)
     morceaux.append("réponds-lui en anglais américain" if langue == "en" else "réponds-lui en français")
-    out = appel_claude(cfg, histo, ", ".join(morceaux), langue)
+    out = appel_claude(cfg, histo, ", ".join(morceaux), langue, reserve=reserve)
     if out is None:
         return {"ok": False, "erreur": STATUS.get("ia_erreur") or "pas de réponse du cerveau"}
     if out.get("mineur"):
@@ -2162,7 +2175,8 @@ def register(app, is_auth, is_admin):
                  for h in (d.get("histo") or [])[-60:] if isinstance(h, dict)]
         quoi = d.get("quoi")
         if quoi == "repondre":
-            return jsonify(entrainement_reponse(histo, str(d.get("nom") or "")[:60], str(d.get("langue") or "")))
+            return jsonify(entrainement_reponse(histo, str(d.get("nom") or "")[:60], str(d.get("langue") or ""),
+                                                reserve=bool(d.get("reserve"))))
         if quoi == "fan":
             m = simuler_fan(str(d.get("persona") or ""), histo)
             return jsonify({"ok": bool(m), "message": m, "erreur": "" if m else "le fan simulé n'a pas répondu"})

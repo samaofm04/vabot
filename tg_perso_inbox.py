@@ -527,6 +527,7 @@ a{color:var(--acc)}
   <div class="sec">Qui joue le fan ?</div>
   <div class="personas" id="personas"></div>
   <div class="reglage">Échanges par partie <input type="number" id="nb" min="1" max="20" value="6"></div>
+  <div class="reglage"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="reserve"> 📚 Réserve de Lia (vrais échanges proches du message)</label></div>
  </div>
  <div class="centre">
   <div class="barre">
@@ -671,7 +672,8 @@ a{color:var(--acc)}
 
   function reponseLola() {
     var p = personaCourante();
-    return api({ quoi: "repondre", histo: histoPourApi(), nom: p ? p.nom : "", langue: p ? p.langue : "" }).then(function (r) {
+    var reserve = document.getElementById("reserve").checked;
+    return api({ quoi: "repondre", histo: histoPourApi(), nom: p ? p.nom : "", langue: p ? p.langue : "", reserve: reserve }).then(function (r) {
       if (!r.ok) { erreur(r.erreur || "Pas de réponse."); return false; }
       var drap = [];
       if (r.liens && r.liens.length) drap.push(["liens", "🔗 lien envoyé"]);
