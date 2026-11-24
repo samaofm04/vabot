@@ -639,6 +639,31 @@ def _consignes_communes(cfg: dict, histo: list) -> list:
     return c
 
 
+# Indices SÛRS (âge sous 18 ans écrit, classe de collège ou de lycée) : la
+# conversation est coupée même si le cerveau ne l'a pas vu. Le 24/11,
+# mistral-nemo répondait « tu es en quelle classe ? » à « jsuis en seconde
+# au lycée ». Plus étroit que _INDICE_MINEUR : « mes parents » ou « ma mère »
+# seuls n'y sont pas, un adulte en parle aussi.
+_MINEUR_SUR = re.compile(
+    r"j'?ai\s*(1[0-7])\s*ans|\b(1[0-7])\s*ans\b|\bi'?m\s*(1[0-7])\b|\b(1[0-7])\s*(yo|y/o|years? old)\b"
+    r"|\b(en|je suis en|jsuis en|j'suis en)\s*(seconde|premi[eè]re|terminale|3e|4e|5e|6e|troisi[eè]me|quatri[eè]me)\b"
+    r"(?!\s+(ligne|fois|place|position|classe|main|vitesse|partie|mi-temps))"
+    r"|\bau (coll[eè]ge|lyc[eé]e)\b|\bdu (coll[eè]ge|lyc[eé]e)\b|\b(le|mon) brevet\b"
+    r"|\b(in|at) (high|middle) ?school\b|\bi'?m a (freshman|sophomore|junior) in high", re.I)
+
+_ADULTE_A_L_ECOLE = re.compile(r"\b(prof|professeur|enseign|bosse|travaille|taf|surveillant|cpe|agent|cantine)", re.I)
+
+
+def _mineur_sur(texte: str) -> bool:
+    """Indice sûr de mineur, sauf l'adulte qui travaille dans l'école."""
+    m = _MINEUR_SUR.search(texte or "")
+    if not m:
+        return False
+    if re.search(r"coll[eè]ge|lyc[eé]e|school", m.group(0), re.I) and _ADULTE_A_L_ECOLE.search(texte):
+        return False
+    return True
+
+
 _INDICE_MINEUR = re.compile(
     r"\b(1[0-7]|[5-9])\s*(ans|an|yo|y/o|years?|yrs)\b|j'?ai\s*(1[0-7])\b|\bi'?m\s*(1[0-7])\b"
     r"|coll[eè]ge|lyc[eé]e|\bseconde\b|\bterminale\b|\bbrevet\b|\b3e\b|\b4e\b|\bbac (l'an|blanc)"
@@ -838,8 +863,12 @@ def _post_traiter(cfg: dict, histo: list, infos: str, langue: str, _relance: boo
     # « Mineur » sans le moindre indice dans ses messages : faux positif
     # (vu le 20/11 : un adulte qui parlait de ranger son appart coupé
     # net). On ne coupe que sur un vrai indice.
-    if out.get("mineur") and not _INDICE_MINEUR.search(
-            " ".join(str(h.get("texte") or "") for h in histo if h.get("de") == "fan")):
+    textes_fan = " ".join(str(h.get("texte") or "") for h in histo if h.get("de") == "fan")
+    if not out.get("mineur") and _mineur_sur(textes_fan):
+        print(f"[{PREFIXE}] mineur repéré par le code (le cerveau l'avait raté)", flush=True)
+        out["mineur"] = True
+        out["liens"] = out["lien_demande"] = False
+    if out.get("mineur") and not _INDICE_MINEUR.search(textes_fan):
         print(f"[{PREFIXE}] mineur signalé sans indice : ignoré", flush=True)
         out["mineur"] = False
     # (Une relecture par une 2e passe a été essayée le 20/11 : elle
