@@ -382,6 +382,80 @@ def charger_exemples_langue() -> list:
             for c in d.get("conversations") or [] if isinstance(c, dict) and c.get("messages")]
 
 
+# ---------------------------------------------------------------- exemples proches
+#
+# Une réserve de vraies conversations (data/tg_perso_pool.json, des milliers
+# d'échanges) : à chaque réponse, Lola reçoit en plus les quelques échanges
+# qui RESSEMBLENT le plus à ce que le fan vient d'écrire (demande de photos,
+# « je vais pas payer », « t'es un bot ? »…). Ils vont dans un bloc à part,
+# après les consignes : celles-ci restent identiques d'un fan à l'autre et
+# gardent leur cache.
+
+POOL_FILE = DATA_DIR / "tg_perso_pool.json"
+_POOL = {"mtime": None, "entrees": [], "idf": {}}
+_MOTS_VIDES = {"the", "and", "you", "your", "are", "for", "that", "this", "with", "les", "des", "une",
+               "est", "pas", "pour", "que", "qui", "dans", "sur", "avec", "mais", "moi", "toi", "tu",
+               "je", "il", "on", "le", "la", "de", "et", "un", "a", "i", "u", "to", "it", "is", "me", "my"}
+
+
+def _jetons(t: str) -> set:
+    return {w for w in re.findall(r"[a-zà-ÿ']{2,}", (t or "").lower()) if w not in _MOTS_VIDES}
+
+
+def _charger_pool():
+    try:
+        mt = POOL_FILE.stat().st_mtime
+    except OSError:
+        _POOL.update(mtime=None, entrees=[], idf={})
+        return
+    if mt == _POOL["mtime"]:
+        return
+    import math
+    d = safe_json.load(POOL_FILE, {}) or {}
+    entrees = []
+    for e in d.get("exemples") or []:
+        if isinstance(e, dict) and e.get("echange"):
+            fan = " ".join(m.get("texte", "") for m in e["echange"] if m.get("de") == "fan")
+            entrees.append({"langue": e.get("langue") or "fr", "echange": e["echange"], "j": _jetons(fan)})
+    df = {}
+    for e in entrees:
+        for w in e["j"]:
+            df[w] = df.get(w, 0) + 1
+    n = max(1, len(entrees))
+    _POOL.update(mtime=mt, entrees=entrees, idf={w: math.log(n / c) for w, c in df.items()})
+
+
+def exemples_proches(histo: list, langue: str, k: int = 8) -> str:
+    """Les k échanges de la réserve les plus proches des derniers messages du
+    fan, dans sa langue, mis en forme ; "" si la réserve est vide."""
+    _charger_pool()
+    if not _POOL["entrees"]:
+        return ""
+    fan = [h.get("texte", "") for h in histo if h.get("de") == "fan"][-2:]
+    q = _jetons(" ".join(fan))
+    if not q:
+        return ""
+    idf = _POOL["idf"]
+    notes = []
+    for i, e in enumerate(_POOL["entrees"]):
+        if e["langue"] != langue:
+            continue
+        commun = q & e["j"]
+        if commun:
+            notes.append((sum(idf.get(w, 0) for w in commun) / (1 + 0.05 * len(e["j"])), i))
+    notes.sort(reverse=True)
+    blocs = []
+    for _, i in notes[:k]:
+        lignes = [("Fan : " if m.get("de") == "fan" else "Toi : ") + str(m.get("texte", ""))[:240]
+                  for m in _POOL["entrees"][i]["echange"][:8]]
+        blocs.append("\n".join(lignes))
+    if not blocs:
+        return ""
+    return ("EXEMPLES PROCHES DE CE QU'IL VIENT D'ÉCRIRE (vraies conversations : prends la manière de "
+            "réagir et le ton, pas les faits ni les prénoms ; tes règles passent avant) :\n\n"
+            + "\n\n---\n".join(blocs))
+
+
 def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
     _, perso = charger_exemples()
     entr = _exemples_perso(cfg.get("exemples_entrainement", ""))
@@ -596,13 +670,15 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
     if not cle or not messages or not _compter_ia():
         STATUS["ia_erreur"] = "pas de clé ANTHROPIC_API_KEY" if not cle else STATUS.get("ia_erreur", "")
         return None
+    proches = exemples_proches(histo, langue or langue_du_fan(histo))
     corps = {
         "model": modele_lola(cfg),
         "max_tokens": 2000,
         # Règles + exemples ne bougent pas d'un fan à l'autre : en cache, ils
         # coûtent un dixième du prix à partir du deuxième message.
         "system": [{"type": "text", "text": prompt_systeme(cfg, langue or langue_du_fan(histo)),
-                    "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
+        + ([{"type": "text", "text": proches}] if proches else []),
         "messages": messages,
         # « low » : « medium » n'a rien gagné à l'entraînement du 20/11
         # (7,5 contre 7,7). C'est la relecture (_relire) qui corrige.
