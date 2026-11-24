@@ -244,7 +244,7 @@ def lien_valide(url: str) -> bool:
 
 # ---------------------------------------------------------------- cerveau
 
-REGLES = """Tu discutes sur Telegram, en ton nom : tu es {prenom}. Tu écris comme une vraie personne sur son téléphone : messages courts (une ou deux phrases), tutoiement, quelques emojis sans en abuser, pas de listes, pas de formules de service client. Tu poses des questions sur lui (son prénom, d'où il vient, ce qu'il fait, sa journée) et tu rebondis sur ce qu'il dit. Tu ne dis jamais que tu es une IA ou un bot, et tu n'inventes pas de rendez-vous ni de promesses.
+REGLES = """Tu discutes sur Telegram, en ton nom : tu es {prenom}. Tu écris comme une vraie personne sur son téléphone : messages courts (une ou deux phrases), tutoiement, TRÈS peu d'emojis (la plupart de tes messages n'en ont aucun ; jamais plus d'un par réponse ; jamais un emoji en fin de chaque phrase), pas de listes, pas de formules de service client. Tu poses des questions sur lui (son prénom, d'où il vient, ce qu'il fait, sa journée) et tu rebondis sur ce qu'il dit. Tu ne dis jamais que tu es une IA ou un bot, et tu n'inventes pas de rendez-vous ni de promesses.
 {persona}
 D'OÙ VIENT LE FAN : {contexte}
 
@@ -452,6 +452,26 @@ _INTERNE = re.compile(r"^\s*\[.*\]\s*$|boutons? de tes liens|\[infos|liens\s*=\s
 _URL = re.compile(r"https?://\S+|(?<!\w)t\.me/\S+", re.I)
 
 
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\U0001F1E6-\U0001F1FF]+")
+
+
+def _limiter_emojis(messages: list, maxi: int = 1) -> list:
+    """Garde au plus `maxi` groupe(s) d'emojis sur toute la réponse ; 👇 compte
+    comme le premier quand le lien suit (il annonce le message d'après)."""
+    vus, sortie = 0, []
+    for m in messages:
+        def _garde(mo):
+            nonlocal vus
+            if mo.group(0) == "👇":      # annonce le lien : toujours gardé
+                return mo.group(0)
+            vus += 1
+            return mo.group(0) if vus <= maxi else ""
+        m2 = re.sub(r"[ \t]{2,}", " ", _EMOJI.sub(_garde, m)).strip()
+        if m2:
+            sortie.append(m2)
+    return sortie
+
+
 def _message_interne(m: str) -> bool:
     """Texte qui n'est pas pour le fan : note entre crochets, nom de champ,
     consigne recopiée. Vu le 20/11 : « [les boutons de tes liens sont partis
@@ -627,6 +647,9 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
         out["messages"] = nets
         # Elle annonce le lien (« tiens 👇 ») mais a oublié liens = true : le
         # fan recevait une flèche dans le vide (vu à l'entraînement du 20/11).
+        # « Y a trop d'emojis » (24/11) : la consigne ne suffisait pas, Haiku
+        # en mettait partout. On en garde au plus UN par réponse, le premier.
+        out["messages"] = _limiter_emojis(out["messages"])
         if url_vue or (out["messages"] and "👇" in out["messages"][-1]):
             out["liens"] = True
         # Lien parti il y a peu et le fan ne demande pas de le renvoyer : il
