@@ -37,8 +37,15 @@ import requests.adapters
 import safe_json
 
 DATA_DIR = Path("data")
-CFG_FILE = DATA_DIR / "tg_perso.json"
-FANS_FILE = DATA_DIR / "tg_perso_fans.json"
+# Deux bots tournent sur ce même code, sans rien partager : Lola (/tgperso,
+# fichiers tg_perso*) et le bot perso du propriétaire (/tgmoi, fichiers
+# tg_moi*, cerveau sur son PC). tg_moi.py recharge ce fichier avec
+# PREFIXE_FORCE = "tgmoi". Lola garde exactement ses anciens fichiers.
+PREFIXE = globals().get("PREFIXE_FORCE", "tgperso")
+_BASE = "tg_perso" if PREFIXE == "tgperso" else "tg_" + PREFIXE[2:]
+CLIC = "tp" if PREFIXE == "tgperso" else "t" + PREFIXE[2:3]
+CFG_FILE = DATA_DIR / f"{_BASE}.json"
+FANS_FILE = DATA_DIR / f"{_BASE}_fans.json"
 TG = "https://api.telegram.org"
 _LOCK = threading.Lock()
 
@@ -71,7 +78,7 @@ CONTEXTE_DEFAUT = (
     "(et c'est vérifié 18+).")
 QUESTION_DEFAUT = "Alors, tu as pu t'abonner ? 😊"
 
-EXEMPLES_FILE = DATA_DIR / "tg_perso_exemples.json"
+EXEMPLES_FILE = DATA_DIR / f"{_BASE}_exemples.json"
 # Haiku 5.5 depuis le 20/11 (choix du propriétaire) : 0,03 à 0,1 centime la
 # réponse contre ~0,5 avec Opus. Haiku n'a pas de repli serveur en cas de
 # refus : la réponse toute faite avec les liens prend le relais.
@@ -80,7 +87,14 @@ MODELE = "claude-haiku-5-5"
 # Lola. Mesuré à l'entraînement du 20/11 (45 conversations notées) : Haiku
 # plafonne vers 7,6/10, Sonnet atteint 8,5/10 pour ~10 fois le prix.
 MODELES_LOLA = {"haiku": ("claude-haiku-5-5", "Haiku 5.5 — ~0,03 à 0,1 ct/réponse, ~7,6/10 à l'entraînement"),
-                "sonnet": ("claude-sonnet-5-5", "Sonnet 5.5 — ~0,3 à 0,5 ct/réponse, ~8,5/10 à l'entraînement")}
+                "sonnet": ("claude-sonnet-5-5", "Sonnet 5.5 — ~0,3 à 0,5 ct/réponse, ~8,5/10 à l'entraînement"),
+                # Sur le PC du propriétaire (RX 6900 XT), par le tunnel SSH
+                # qui sert déjà à Bamboula : gratuit, mais le PC doit être
+                # allumé. Les mêmes garde-fous s'appliquent après la réponse.
+                "pc_qwen": ("ollama:qwen2.5:14b", "Ton PC — qwen2.5:14b (gratuit, PC allumé)"),
+                "pc_gemma": ("ollama:gemma3:12b", "Ton PC — gemma3:12b (gratuit, PC allumé)"),
+                "pc_nemo": ("ollama:mistral-nemo", "Ton PC — mistral-nemo (gratuit, PC allumé)")}
+OLLAMA_URL = "http://127.0.0.1:11434"
 
 
 def modele_lola(cfg: dict) -> str:
@@ -151,6 +165,11 @@ def load_cfg() -> dict:
     with _LOCK:
         d = safe_json.load(CFG_FILE, None)
         base = _cfg_defaut()
+        if PREFIXE != "tgperso":
+            # Bot perso du propriétaire : son prénom, le cerveau de son PC,
+            # et l'IA coupée tant qu'il ne l'a pas entraînée (« je veux la
+            # train avant de la brancher »).
+            base.update(prenom="Youssef", modele="pc_qwen", ia=False)
         if not isinstance(d, dict):
             # Premier lancement : on ÉCRIT tout de suite le secret et le code.
             # Sans ça, chaque lecture en tirait de nouveaux, et un lien de clic
@@ -209,7 +228,7 @@ def signature(secret: str, fan: str, lien: str) -> str:
 
 def url_clic(cfg: dict, fan, lien_id: str) -> str:
     sig = signature(cfg["secret"], str(fan), lien_id)
-    return f"{cfg['base_url'].rstrip('/')}/tp/{fan}/{lien_id}/{sig}"
+    return f"{cfg['base_url'].rstrip('/')}/{CLIC}/{fan}/{lien_id}/{sig}"
 
 
 def enregistrer_clic(fan: str, lien_id: str, sig: str) -> str | None:
@@ -391,7 +410,7 @@ def charger_exemples_langue() -> list:
 # après les consignes : celles-ci restent identiques d'un fan à l'autre et
 # gardent leur cache.
 
-POOL_FILE = DATA_DIR / "tg_perso_pool.json"
+POOL_FILE = DATA_DIR / f"{_BASE}_pool.json"
 _POOL = {"mtime": None, "entrees": [], "idf": {}}
 _MOTS_VIDES = {"the", "and", "you", "your", "are", "for", "that", "this", "with", "les", "des", "une",
                "est", "pas", "pour", "que", "qui", "dans", "sur", "avec", "mais", "moi", "toi", "tu",
@@ -456,6 +475,30 @@ def exemples_proches(histo: list, langue: str, k: int = 8) -> str:
             + "\n\n---\n".join(blocs))
 
 
+# Consignes COURTES pour le cerveau du PC (Ollama). Mesuré le 24/11 : avec
+# les ~7 000 tokens de REGLES, qwen2.5:14b mettait une minute par réponse,
+# inventait des répliques « Fan : … » et oubliait la coupure des mineurs ;
+# gemma3 avouait être « un modèle entraîné par Google ». Un modèle de cette
+# taille suit mieux vingt lignes claires. Les garde-fous du code (mineur,
+# liens, emojis, notes internes) restent les mêmes.
+REGLES_COURTES = """Tu es {prenom}. Tu discutes sur Telegram avec un fan, comme une vraie personne sur son téléphone.
+{persona}
+D'où vient le fan : {contexte}
+
+Réponds avec 1 ou 2 messages TRÈS courts (une phrase chacun), en tutoyant. Au plus un emoji. Pas de listes, pas de « comment puis-je t'aider ».
+Rebondis sur ce qu'il vient de dire, puis pose UNE question sur lui. Ne répète jamais une question ou une phrase déjà dite.
+Tu es une vraie personne : ne dis jamais que tu es une IA, un modèle, un assistant ou un bot.
+N'écris QUE tes propres messages : jamais « Fan : », jamais « Toi : », jamais la suite de la conversation.
+Rien de sexuel ici : s'il devient cru, reste légère, ne rentre pas dedans, et propose-lui ton lien (liens = true).
+Lien : quand il demande où te trouver, tes réseaux, des photos, ou au bout de 4 ou 5 échanges, mets liens = true et annonce-le en une phrase (« tiens 👇 »). N'écris jamais d'adresse toi-même.
+S'il ne veut pas payer : pas besoin, s'abonner ou liker suffit. Tu ne vends rien.
+Mineur : s'il donne un âge sous 18 ans ou parle de collège, lycée, brevet, parents qui interdisent → mineur = true.
+Ne promets jamais photo, vocal, appel ou rendez-vous.
+Réponds dans la langue du fan.
+
+{exemples}"""
+
+
 def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
     _, perso = charger_exemples()
     entr = _exemples_perso(cfg.get("exemples_entrainement", ""))
@@ -463,11 +506,14 @@ def prompt_systeme(cfg: dict, langue: str = "fr") -> str:
     # Exemples de sa langue d'abord ; les autres complètent s'il en manque.
     of = [m for l, m in tous if l == langue] + [m for l, m in tous if l != langue]
     persona = (cfg.get("persona") or "").strip()
-    return REGLES.format(
+    court = modele_lola(cfg).startswith("ollama:")
+    return (REGLES_COURTES if court else REGLES).format(
         prenom=(cfg.get("prenom") or "Youssef").strip(),
         persona=("Ce qu'il faut savoir sur toi : " + persona) if persona else "",
         contexte=(cfg.get("contexte") or CONTEXTE_DEFAUT).strip(),
-        exemples=_texte_exemples(of, perso, entr=entr))
+        # Le PC : ses exemples à lui (entraînement, corrections) d'abord, et
+        # peu, sinon le petit modèle s'y noie.
+        exemples=_texte_exemples(of if not court else [], perso, entr=entr, **({"maxi": 8} if court else {})))
 
 
 _SCHEMA = {
@@ -637,7 +683,7 @@ def _relire(cle: str, histo: list, brouillon: list, infos: str, langue: str) -> 
         relu = [_URL.sub("", m).strip() for m in relu]
         return [m for m in relu if m] or brouillon
     except Exception as e:
-        print(f"[tgperso] relecture : {e}", flush=True)
+        print(f"[{PREFIXE}] relecture : {e}", flush=True)
         return brouillon
 
 
@@ -667,10 +713,21 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
     import json as _json
     cle = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     messages = _historique_claude(histo, infos)
-    if not cle or not messages or not _compter_ia():
+    local = modele_lola(cfg).startswith("ollama:")
+    if (not cle and not local) or not messages or not _compter_ia():
         STATUS["ia_erreur"] = "pas de clé ANTHROPIC_API_KEY" if not cle else STATUS.get("ia_erreur", "")
         return None
     proches = exemples_proches(histo, langue or langue_du_fan(histo))
+    if local:
+        txt = _appel_ollama(modele_lola(cfg)[len("ollama:"):],
+                            [prompt_systeme(cfg, langue or langue_du_fan(histo)), proches], messages)
+        if txt is None:
+            return None
+        try:
+            return _post_traiter(cfg, histo, infos, langue, _relance, _json.loads(txt))
+        except Exception as e:
+            STATUS["ia_erreur"] = f"réponse illisible du PC : {e}"[:200]
+            return None
     corps = {
         "model": modele_lola(cfg),
         "max_tokens": 2000,
@@ -694,7 +751,7 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
             # Une option refusée (repli serveur, durée du cache) ne doit pas
             # priver le fan de réponse : on retente avec la requête minimale,
             # et l'erreur d'origine reste lisible dans le journal.
-            print(f"[tgperso] claude 400, nouvel essai simple : {r.text[:200]}", flush=True)
+            print(f"[{PREFIXE}] claude 400, nouvel essai simple : {r.text[:200]}", flush=True)
             corps.pop("fallbacks", None)
             entetes.pop("anthropic-beta", None)
             corps["system"][0]["cache_control"] = {"type": "ephemeral"}
@@ -703,67 +760,103 @@ def appel_claude(cfg: dict, histo: list, infos: str = "", langue: str = "",
         d = r.json()
         if r.status_code != 200:
             STATUS["ia_erreur"] = f"{r.status_code} {(d.get('error') or {}).get('message', '')}"[:200]
-            print(f"[tgperso] claude : {STATUS['ia_erreur']}", flush=True)
+            print(f"[{PREFIXE}] claude : {STATUS['ia_erreur']}", flush=True)
             return None
         if d.get("stop_reason") == "refusal":
             STATUS["ia_erreur"] = "refus du modèle (réponse toute faite envoyée)"
             return None
         txt = "".join(b.get("text", "") for b in d.get("content") or [] if b.get("type") == "text")
-        out = _json.loads(txt)
-        out["messages"] = [m.strip() for m in out.get("messages") or []
-                           if str(m).strip() and not _message_interne(str(m))][:2]
-        # Le lien part tout seul après (message à part) : si le modèle l'a
-        # écrit lui-même, on le retire de son texte, sinon le fan le reçoit
-        # deux fois (vu le 20/11 à 05:56). Il a voulu donner le lien : c'est
-        # une demande de lien.
-        nets, url_vue = [], False
-        for m in out["messages"]:
-            m2 = _URL.sub("", m).strip(" \n:-")
-            url_vue = url_vue or m2 != m
-            if m2:
-                nets.append(m2)
-        out["messages"] = nets
-        # Elle annonce le lien (« tiens 👇 ») mais a oublié liens = true : le
-        # fan recevait une flèche dans le vide (vu à l'entraînement du 20/11).
-        # « Y a trop d'emojis » (24/11) : la consigne ne suffisait pas, Haiku
-        # en mettait partout. On en garde au plus UN par réponse, le premier.
-        out["messages"] = _limiter_emojis(out["messages"])
-        if url_vue or (out["messages"] and "👇" in out["messages"][-1]):
-            out["liens"] = True
-        # Lien parti il y a peu et le fan ne demande pas de le renvoyer : il
-        # ne repart pas (80 renvois inutiles sur 150 conversations
-        # d'entraînement le 20/11 : « ça fait insistant et commercial »).
-        if (out.get("liens") or out.get("lien_demande")) and _lien_recent(cfg, histo) \
-                and not _RENVOI.search(_dernier_fan(histo)):
-            out["liens"] = out["lien_demande"] = False
-            out["messages"] = [m.replace("👇", "").strip() for m in out["messages"] if m.replace("👇", "").strip()]
-        # « Mineur » sans le moindre indice dans ses messages : faux positif
-        # (vu le 20/11 : un adulte qui parlait de ranger son appart coupé
-        # net). On ne coupe que sur un vrai indice.
-        if out.get("mineur") and not _INDICE_MINEUR.search(
-                " ".join(str(h.get("texte") or "") for h in histo if h.get("de") == "fan")):
-            print("[tgperso] mineur signalé sans indice : ignoré", flush=True)
-            out["mineur"] = False
-        # (Une relecture par une 2e passe a été essayée le 20/11 : elle
-        # rendait Lola fuyante, 7,2/10 contre 7,7. Retirée.)
-        # Fan anglophone qui reçoit du français (17 fois à l'entraînement) :
-        # une seule nouvelle tentative, avec le rappel en clair.
-        if langue == "en" and not _relance and any(
-                langue_du_fan([{"de": "fan", "texte": m}]) == "fr" and _nb_mots_fr(m) >= 2
-                for m in out["messages"]):
-            h2 = list(histo) + [{"de": "fan", "texte": "(rappel : réponds UNIQUEMENT en anglais américain)"}]
-            out2 = appel_claude(cfg, h2, infos, langue, _relance=True)
-            if out2:
-                return out2
-        if not out["messages"] and not out.get("liens"):
-            return None
-        STATUS["ia_erreur"] = ""
-        return out
+        return _post_traiter(cfg, histo, infos, langue, _relance, _json.loads(txt))
+
     except Exception as e:
         STATUS["ia_erreur"] = str(e)[:200]
-        print(f"[tgperso] claude : {e}", flush=True)
+        print(f"[{PREFIXE}] claude : {e}", flush=True)
         return None
 
+
+
+def _appel_ollama(modele: str, systemes: list, messages: list) -> str | None:
+    """Même demande, au modèle local du PC (format imposé par le même
+    schéma). None si le PC est éteint ou le tunnel coupé."""
+    corps = {"model": modele, "stream": False, "format": _SCHEMA, "keep_alive": "30m",
+             "options": {"temperature": 0.7, "num_ctx": 12288},
+             "messages": [{"role": "system", "content": "\n\n".join(x for x in systemes if x)}] + messages}
+    try:
+        r = requests.post(OLLAMA_URL + "/api/chat", json=corps, timeout=240)
+        if r.status_code != 200:
+            STATUS["ia_erreur"] = f"PC : {r.status_code} {r.text[:120]}"
+            return None
+        return (r.json().get("message") or {}).get("content") or None
+    except Exception as e:
+        STATUS["ia_erreur"] = f"PC injoignable (éteint ou tunnel coupé) : {str(e)[:100]}"
+        print(f"[{PREFIXE}] ollama : {e}", flush=True)
+        return None
+
+
+def _post_traiter(cfg: dict, histo: list, infos: str, langue: str, _relance: bool, out: dict) -> dict | None:
+    """Garde-fous communs à tous les cerveaux (Claude ou PC) : messages
+    internes, liens écrits à la main, emojis, lien trop récent, faux mineur,
+    langue."""
+    # Un petit modèle continue parfois la conversation à la place du fan
+    # (« Fan : ah cool merci… ») ou préfixe ses messages (« Toi : … ») : vu
+    # avec qwen2.5 le 24/11. Les répliques du fan sont jetées, le préfixe
+    # retiré.
+    bruts = []
+    for m in out.get("messages") or []:
+        m = str(m).strip()
+        if re.match(r"^(fan|lui|him|user)\s*:", m, re.I):
+            break
+        bruts.append(re.sub(r"^(toi|moi|me|lola|{0})\s*:\s*".format(re.escape((cfg.get("prenom") or "x").lower())),
+                            "", m, flags=re.I))
+    out["messages"] = [m.strip() for m in bruts
+                       if str(m).strip() and not _message_interne(str(m))][:2]
+    # Le lien part tout seul après (message à part) : si le modèle l'a
+    # écrit lui-même, on le retire de son texte, sinon le fan le reçoit
+    # deux fois (vu le 20/11 à 05:56). Il a voulu donner le lien : c'est
+    # une demande de lien.
+    nets, url_vue = [], False
+    for m in out["messages"]:
+        m2 = _URL.sub("", m).strip(" \n:-")
+        url_vue = url_vue or m2 != m
+        if m2:
+            nets.append(m2)
+    out["messages"] = nets
+    # Elle annonce le lien (« tiens 👇 ») mais a oublié liens = true : le
+    # fan recevait une flèche dans le vide (vu à l'entraînement du 20/11).
+    # « Y a trop d'emojis » (24/11) : la consigne ne suffisait pas, Haiku
+    # en mettait partout. On en garde au plus UN par réponse, le premier.
+    out["messages"] = _limiter_emojis(out["messages"])
+    if url_vue or (out["messages"] and "👇" in out["messages"][-1]):
+        out["liens"] = True
+    # Lien parti il y a peu et le fan ne demande pas de le renvoyer : il
+    # ne repart pas (80 renvois inutiles sur 150 conversations
+    # d'entraînement le 20/11 : « ça fait insistant et commercial »).
+    if (out.get("liens") or out.get("lien_demande")) and _lien_recent(cfg, histo) \
+            and not _RENVOI.search(_dernier_fan(histo)):
+        out["liens"] = out["lien_demande"] = False
+        out["messages"] = [m.replace("👇", "").strip() for m in out["messages"] if m.replace("👇", "").strip()]
+    # « Mineur » sans le moindre indice dans ses messages : faux positif
+    # (vu le 20/11 : un adulte qui parlait de ranger son appart coupé
+    # net). On ne coupe que sur un vrai indice.
+    if out.get("mineur") and not _INDICE_MINEUR.search(
+            " ".join(str(h.get("texte") or "") for h in histo if h.get("de") == "fan")):
+        print(f"[{PREFIXE}] mineur signalé sans indice : ignoré", flush=True)
+        out["mineur"] = False
+    # (Une relecture par une 2e passe a été essayée le 20/11 : elle
+    # rendait Lola fuyante, 7,2/10 contre 7,7. Retirée.)
+    # Fan anglophone qui reçoit du français (17 fois à l'entraînement) :
+    # une seule nouvelle tentative, avec le rappel en clair.
+    if langue == "en" and not _relance and any(
+            langue_du_fan([{"de": "fan", "texte": m}]) == "fr" and _nb_mots_fr(m) >= 2
+            for m in out["messages"]):
+        h2 = list(histo) + [{"de": "fan", "texte": "(rappel : réponds UNIQUEMENT en anglais américain)"}]
+        out2 = appel_claude(cfg, h2, infos, langue, _relance=True)
+        if out2:
+            return out2
+    if not out["messages"] and not out.get("liens"):
+        return None
+    STATUS["ia_erreur"] = ""
+    return out
 
 def _ajouter_histo(f: dict, de: str, texte: str, liens: bool = False,
                    humain: bool = False):
@@ -852,7 +945,7 @@ def _notifier_proprio(token, cfg, f, chat_id):
         _api(token, "sendMessage", chat_id=pid, parse_mode="HTML",
              text=f"🟢 <b>{nom}</b>{pseudo} dit s'être abonné.")
     except Exception as e:
-        print(f"[tgperso] notif proprio : {e}", flush=True)
+        print(f"[{PREFIXE}] notif proprio : {e}", flush=True)
 
 
 def _traiter_message(token, cfg, m, bc: str | None = None):
@@ -949,7 +1042,7 @@ def _profil_telegram(token, chat_id, f: dict) -> dict:
             maj["naissance"] = c["birthdate"]      # {day, month, year?}
     except Exception as e:
         # Fan du compte perso que le bot ne « voit » pas : pas grave.
-        print(f"[tgperso] profil {chat_id} : {e}", flush=True)
+        print(f"[{PREFIXE}] profil {chat_id} : {e}", flush=True)
 
     def _g(g):
         g.update(maj)
@@ -1025,7 +1118,7 @@ def _connexion_api(token, bcid) -> dict:
     try:
         return _api(token, "getBusinessConnection", business_connection_id=bcid) or {}
     except Exception as e:
-        print(f"[tgperso] getBusinessConnection : {e}", flush=True)
+        print(f"[{PREFIXE}] getBusinessConnection : {e}", flush=True)
         return {}
 
 
@@ -1059,7 +1152,7 @@ def _traiter_connexion(token, bc: dict):
         try:
             _api(token, "sendMessage", chat_id=bc["user_chat_id"], text=t)
         except Exception as e:
-            print(f"[tgperso] connexion : {e}", flush=True)
+            print(f"[{PREFIXE}] connexion : {e}", flush=True)
 
 
 def _traiter_business(token, cfg, m: dict):
@@ -1150,7 +1243,7 @@ def _repondre(token, cfg, chat_id: int, f: dict):
             g["mineur"] = True
             _ajouter_histo(g, "bot", MSG_MINEUR)
         _maj_fan(chat_id, _gm)
-        print(f"[tgperso] {chat_id} : {age} ans d'après sa date de naissance, conversation coupée", flush=True)
+        print(f"[{PREFIXE}] {chat_id} : {age} ans d'après sa date de naissance, conversation coupée", flush=True)
         return
     langue = langue_du_fan(f.get("histo") or [], f.get("langue_appli", ""))
     if not [l for l in cfg.get("liens") or [] if lien_valide(l.get("url", ""))]:
@@ -1216,7 +1309,7 @@ def _repondre(token, cfg, chat_id: int, f: dict):
             g["mineur"] = True
             _ajouter_histo(g, "bot", arret)
         _maj_fan(chat_id, _g)
-        print(f"[tgperso] {chat_id} : mineur d'après la conversation, coupé", flush=True)
+        print(f"[{PREFIXE}] {chat_id} : mineur d'après la conversation, coupé", flush=True)
         return
 
     # Le fan demande où te trouver : le lien part, même si le modèle voulait
@@ -1251,7 +1344,7 @@ def _repondre(token, cfg, chat_id: int, f: dict):
     # alors que Claude répondait en deux secondes : on garde la mesure pour
     # voir où le temps passe.
     attente = int(time.time()) - int(f.get("dernier_msg") or now)
-    print(f"[tgperso] réponse à {chat_id} : {attente}s après son message "
+    print(f"[{PREFIXE}] réponse à {chat_id} : {attente}s après son message "
           f"(Claude {t_ia:.1f}s{', compte perso' if f.get('bc') else ''})", flush=True)
 
 
@@ -1276,7 +1369,7 @@ def _reponses_dues(token, cfg) -> bool:
         try:
             _repondre(token, cfg, int(k), f)
         except Exception as e:
-            print(f"[tgperso] réponse à {k} : {e}", flush=True)
+            print(f"[{PREFIXE}] réponse à {k} : {e}", flush=True)
     return reste
 
 
@@ -1341,7 +1434,7 @@ def _relance_texte(token, cfg, k, f, now):
     try:
         _api(token, "sendMessage", **_dest(int(k)), text=texte)
     except Exception as e:
-        print(f"[tgperso] relance à {k} : {e}", flush=True)
+        print(f"[{PREFIXE}] relance à {k} : {e}", flush=True)
         # Hors des 24 h de Telegram, ou fan parti : on n'insiste pas.
         _maj_fan(k, lambda g: g.__setitem__("question_t", now))
         return
@@ -1380,7 +1473,7 @@ def _questions_dues(token, cfg):
         except Exception as e:
             # Fan qui a bloqué le bot : on le note au lieu de réessayer à
             # chaque tour (Telegram finirait par limiter tout le bot).
-            print(f"[tgperso] question à {k} : {e}", flush=True)
+            print(f"[{PREFIXE}] question à {k} : {e}", flush=True)
             if "blocked" in str(e) or "deactivated" in str(e) or "not found" in str(e):
                 _maj_fan(k, lambda f: f.__setitem__("bloque", True))
                 continue
@@ -1420,7 +1513,7 @@ def _boucle():
                     elif "callback_query" in up:
                         _traiter_callback(token, cfg, up["callback_query"])
                 except Exception as e:
-                    print(f"[tgperso] update {up.get('update_id')} : {e}", flush=True)
+                    print(f"[{PREFIXE}] update {up.get('update_id')} : {e}", flush=True)
                 # Offset écrit APRÈS chaque update : au redémarrage on ne
                 # rejoue pas les messages déjà traités (le fan recevait deux
                 # fois l'accueil à chaque déploiement).
@@ -1433,11 +1526,11 @@ def _boucle():
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             # Coupure réseau : on reprend aussitôt. Attendre 15 s (comme pour
             # une vraie erreur) retardait d'autant la réponse au fan.
-            print(f"[tgperso] réseau : {e}", flush=True)
+            print(f"[{PREFIXE}] réseau : {e}", flush=True)
             _STOP.wait(1)
         except Exception as e:
             STATUS["erreur"] = str(e)[:200]
-            print(f"[tgperso] boucle : {e}", flush=True)
+            print(f"[{PREFIXE}] boucle : {e}", flush=True)
             dernier_token = None
             _STOP.wait(15)
     STATUS["running"] = False
@@ -1450,7 +1543,7 @@ def start():
     # seul le VPS écoute le bot. Deux machines sur le même token se volent
     # les messages (Telegram rend 409) et le fan recevrait deux réponses.
     if os.environ.get("VA_MACHINE_PROD") != "1":
-        print("[tgperso] pas la machine de prod (VA_MACHINE_PROD) : bot non démarré", flush=True)
+        print(f"[{PREFIXE}] pas la machine de prod (VA_MACHINE_PROD) : bot non démarré", flush=True)
         STATUS["erreur"] = "bot non démarré sur cette machine (seul le VPS l'écoute)"
         return
     if _THREAD and _THREAD.is_alive():
@@ -1581,7 +1674,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 .b.fan{{align-self:flex-start;background:var(--bg);border:1px solid var(--bord)}}
 .b.moi{{align-self:flex-end;background:var(--acc);color:#fff}} .ok{{background:#1f7a3d33;padding:8px 12px;border-radius:8px}}
 </style></head><body><main>
-<h1>📨 Telegram perso <a href="/tgperso/inbox" style="font-size:15px;margin-left:10px">📥 Ouvrir l'Inbox</a><a href="/tgperso/entrainement" style="font-size:15px;margin-left:10px">🎯 Entraînement</a></h1>
+<h1>{"📨 Telegram perso" if PREFIXE == "tgperso" else "🧑 Mon Telegram (IA sur mon PC)"} <a href="/{PREFIXE}/inbox" style="font-size:15px;margin-left:10px">📥 Ouvrir l'Inbox</a><a href="/{PREFIXE}/entrainement" style="font-size:15px;margin-left:10px">🎯 Entraînement</a></h1>
 <div class="mut">Le bot accueille le fan et l'envoie sur tes plateformes. Il ne discute pas : la conversation se fait sur MYM, où l'âge est vérifié.</div>
 {bandeau}
 <div class="card"><h2>État</h2><div>{etat}</div><div style="margin-top:6px">{etat_ia}</div><div style="margin-top:6px">{etat_compte}</div><div class="mut" style="margin-top:6px">{proprio}</div></div>
@@ -1590,10 +1683,10 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px;border-bottom:1p
 <div class="scroll" style="margin-top:12px"><table><tr><th>Statut</th><th>Nom</th><th>Telegram</th><th>Arrivé</th><th>Liens cliqués</th><th>Abonné le</th></tr>
 {corps_fans}</table></div>
 <div class="mut" style="margin-top:8px">« Abonné » = le fan a répondu ✅ à la question posée {DELAI_QUESTION // 60} min après son premier clic.</div></div>
-<form class="card" method="post" action="/tgperso/exemples" enctype="multipart/form-data"><h2>Exemples OnlyFans</h2>
+<form class="card" method="post" action="/{PREFIXE}/exemples" enctype="multipart/form-data"><h2>Exemples OnlyFans</h2>
 <div class="mut">{len(of)} débuts de conversation chargés (sans ventes ni contenu explicite). Importer un fichier les remplace.</div>
 <input type="file" name="fichier" accept=".json" style="margin-top:8px"><button type="submit">Importer</button></form>
-<form class="card" method="post" action="/tgperso/save"><h2>Réglages</h2>
+<form class="card" method="post" action="/{PREFIXE}/save"><h2>Réglages</h2>
 <label><input type="checkbox" name="ia" value="1" style="width:auto" {coche_ia}> Le bot discute (cerveau Claude)</label>
 <label><input type="checkbox" name="liens_en_texte" value="1" style="width:auto" {coche_texte}> Liens collés en texte, comme une vraie personne (sinon : boutons, et chaque clic est compté)</label>
 <div class="mut">Coupé : il n'envoie que l'accueil et les liens.</div>
@@ -1901,7 +1994,7 @@ def simuler_fan(persona_id: str, histo: list) -> str:
         txt = "".join(b.get("text", "") for b in d.get("content") or [] if b.get("type") == "text")
         return str(_json.loads(txt).get("message") or "").strip()[:500]
     except Exception as e:
-        print(f"[tgperso] fan simulé : {e}", flush=True)
+        print(f"[{PREFIXE}] fan simulé : {e}", flush=True)
         return ""
 
 
@@ -1956,47 +2049,47 @@ def register(app, is_auth, is_admin):
     def _refus():
         return Response("Réservé à l'administration.", status=403, mimetype="text/plain")
 
-    @app.route("/tgperso")
+    @app.route(f"/{PREFIXE}", endpoint=f"{PREFIXE}_tgperso_page")
     def tgperso_page():
         if not (is_auth() and is_admin()):
             return redirect("/")
         return page_html(load_cfg(), load_fans(), request.args.get("ok", ""))
 
-    @app.route("/tgperso/save", methods=["POST"])
+    @app.route(f"/{PREFIXE}/save", methods=["POST"], endpoint=f"{PREFIXE}_tgperso_save")
     def tgperso_save():
         if not (is_auth() and is_admin()):
             return _refus()
         from urllib.parse import quote
-        return redirect("/tgperso?ok=" + quote(appliquer_reglages(request.form)), code=303)
+        return redirect(f"/{PREFIXE}?ok=" + quote(appliquer_reglages(request.form)), code=303)
 
-    @app.route("/tgperso/exemples", methods=["POST"])
+    @app.route(f"/{PREFIXE}/exemples", methods=["POST"], endpoint=f"{PREFIXE}_tgperso_exemples")
     def tgperso_exemples():
         if not (is_auth() and is_admin()):
             return _refus()
         from urllib.parse import quote
-        return redirect("/tgperso?ok=" + quote(importer_exemples(request.files.get("fichier"))), code=303)
+        return redirect(f"/{PREFIXE}?ok=" + quote(importer_exemples(request.files.get("fichier"))), code=303)
 
-    @app.route("/tgperso/inbox")
+    @app.route(f"/{PREFIXE}/inbox", endpoint=f"{PREFIXE}_tgperso_inbox")
     def tgperso_inbox():
         if not (is_auth() and is_admin()):
             return redirect("/")
         from tg_perso_inbox import INBOX_HTML
-        return Response(INBOX_HTML, mimetype="text/html")
+        return Response(INBOX_HTML.replace("/tgperso", "/" + PREFIXE), mimetype="text/html")
 
-    @app.route("/tgperso/inbox/liste")
+    @app.route(f"/{PREFIXE}/inbox/liste", endpoint=f"{PREFIXE}_tgperso_inbox_liste")
     def tgperso_inbox_liste():
         if not (is_auth() and is_admin()):
             return jsonify({"ok": False}), 403
         return jsonify(inbox_liste())
 
-    @app.route("/tgperso/inbox/conv")
+    @app.route(f"/{PREFIXE}/inbox/conv", endpoint=f"{PREFIXE}_tgperso_inbox_conv")
     def tgperso_inbox_conv():
         if not (is_auth() and is_admin()):
             return jsonify({"ok": False}), 403
         d = inbox_conversation(request.args.get("fan", ""))
         return (jsonify(d), 200) if d else (jsonify({"ok": False}), 404)
 
-    @app.route("/tgperso/inbox/action", methods=["POST"])
+    @app.route(f"/{PREFIXE}/inbox/action", methods=["POST"], endpoint=f"{PREFIXE}_tgperso_inbox_action")
     def tgperso_inbox_action():
         if not (is_auth() and is_admin()):
             return jsonify({"ok": False, "erreur": "Réservé à l'administration."}), 403
@@ -2016,7 +2109,7 @@ def register(app, is_auth, is_admin):
             return jsonify({"ok": False, "erreur": "action inconnue"}), 400
         return jsonify({"ok": True})
 
-    @app.route("/tgperso/entrainement")
+    @app.route(f"/{PREFIXE}/entrainement", endpoint=f"{PREFIXE}_tgperso_entrainement")
     def tgperso_entrainement():
         if not (is_auth() and is_admin()):
             return redirect("/")
@@ -2028,9 +2121,10 @@ def register(app, is_auth, is_admin):
         # Données posées en JSON dans la page : « </ » échappé pour qu'un
         # texte ne puisse pas fermer la balise script.
         js = _json.dumps(donnees, ensure_ascii=False).replace("</", "<\\/")
-        return Response(ENTRAINEMENT_HTML.replace("__DONNEES__", js), mimetype="text/html")
+        return Response(ENTRAINEMENT_HTML.replace("/tgperso", "/" + PREFIXE).replace("__DONNEES__", js),
+                        mimetype="text/html")
 
-    @app.route("/tgperso/entrainement/action", methods=["POST"])
+    @app.route(f"/{PREFIXE}/entrainement/action", methods=["POST"], endpoint=f"{PREFIXE}_tgperso_entrainement_action")
     def tgperso_entrainement_action():
         if not (is_auth() and is_admin()):
             return jsonify({"ok": False, "erreur": "Réservé à l'administration."}), 403
@@ -2048,7 +2142,7 @@ def register(app, is_auth, is_admin):
             return jsonify({"ok": not err, "erreur": err})
         return jsonify({"ok": False, "erreur": "action inconnue"}), 400
 
-    @app.route("/tp/<fan>/<lien>/<sig>")
+    @app.route(f"/{CLIC}/<fan>/<lien>/<sig>", endpoint=f"{PREFIXE}_tgperso_clic")
     def tgperso_clic(fan, lien, sig):
         # Public : c'est le fan qui ouvre ce lien, sans compte. La signature
         # empêche de gonfler les clics d'un autre fan ou d'inventer un lien.
@@ -2056,3 +2150,12 @@ def register(app, is_auth, is_admin):
         if not url:
             return Response("Lien expiré.", status=404, mimetype="text/plain")
         return redirect(url, code=302)
+
+    # Le bot perso du propriétaire (tg_moi) s'enregistre d'ici : un seul
+    # appel dans web_upload.py suffit pour les deux.
+    if PREFIXE == "tgperso":
+        try:
+            import tg_moi
+            tg_moi.register(app, is_auth, is_admin)
+        except Exception as e:
+            print(f"[tgmoi] register : {e}", flush=True)

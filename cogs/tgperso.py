@@ -6,21 +6,25 @@ Aucune commande slash : le bot admin est déjà près du plafond Discord de
 from discord.ext import commands
 
 import tg_perso
+import tg_moi
 
 
 class TGPerso(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        try:
-            tg_perso.start()
-        except Exception as e:
-            print(f"[tgperso] start: {e}", flush=True)
+        # Deux bots : Lola (tg_perso) et le bot perso du propriétaire (tg_moi).
+        for mod in (tg_perso, tg_moi):
+            try:
+                mod.start()
+            except Exception as e:
+                print(f"[{mod.PREFIXE}] start: {e}", flush=True)
 
     def cog_unload(self):
-        try:
-            tg_perso.stop()
-        except Exception:
-            pass
+        for mod in (tg_perso, tg_moi):
+            try:
+                mod.stop()
+            except Exception:
+                pass
 
 
 async def setup(bot):
