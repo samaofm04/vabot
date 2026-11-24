@@ -1457,10 +1457,19 @@ def _basculer_lien(gid: str, uid: str, p: Dict[str, Any], actif: bool) -> Dict[s
     fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
     _marquer_lien_dans_accueil(gid, uid, str(p.get("channel_id") or ""), actif)
     mot = "remis en service" if actif else "coupé"
-    return _ephemere(f'{"✅" if actif else "🚫"} Lien {mot} : {r.get("url") or ""}\n'
-                     + ("Ses clics recomptent." if actif else
-                        "Il ne renvoie plus personne. Son historique de clics est gardé, "
-                        "tu peux le rallumer quand tu veux."))
+    texte = (f'{"✅" if actif else "🚫"} Lien {mot} : {r.get("url") or ""}\n'
+             + ("Ses clics recomptent." if actif else
+                "Il ne renvoie plus personne. Son historique de clics est gardé, "
+                "tu peux le rallumer quand tu veux."))
+    drapeaux = int(((p.get("message") or {}).get("flags")) or 0)
+    if drapeaux & 64 and not drapeaux & V2:
+        # Cliqué dans la réponse éphémère de « Créer son lien » (_lien_deja_la) :
+        # elle est remplacée, son ✅ part avec elle. Resté là, un second clic
+        # rallumait une deuxième fois chez GetMySocial. Pas un message en
+        # blocs (V2) : Discord y refuserait un « content ».
+        return {"type": 7, "data": {"content": texte, "components": [],
+                                    "allowed_mentions": {"parse": []}}}
+    return _ephemere(texte)
 
 
 def _marquer_lien_dans_accueil(gid: str, uid: str, salon: str, actif: bool) -> None:
@@ -1521,6 +1530,34 @@ def _rendre_creation(cle: str, t: float) -> None:
             _CREATIONS.pop(cle, None)
 
 
+def _lien_deja_la(gid: str, uid: str, deja: Dict[str, Any]) -> Dict[str, Any]:
+    """« Créer son lien » cliqué pour un VA qui a déjà le sien : le bouton
+    affiché était faux. Rien n'est créé — MyPuls ne sait pas effacer un
+    tracking — mais le manager n'est pas laissé sans issue.
+
+    Le 24/11/2026, VA 223 de TRUST TWITTER : parti, son lien coupé
+    (marquer_parti) ; revenu dans un ticket NEUF dont l'accueil portait
+    « Créer son lien ». La réponse « Ce VA a déjà son lien » ne donnait aucun
+    moyen de le rallumer (propriétaire : « je peux plus rien faire »). Coupé,
+    la réponse porte donc ✅ Réactiver le lien : le rallumer reste la décision
+    du manager (marquer_revenu), mais il a le bouton sous la main. Coupé ou
+    non, l'accueil et son menu reprennent en fond le bouton que le registre
+    demande — celui qui vient d'être cliqué n'avait rien à faire là."""
+    import liens_va
+    _EN_FOND(lambda: redessiner_accueil(gid, uid))
+    url, vers = str(deja.get("public_url") or ""), deja.get("tracking") or "?"
+    if liens_va.est_actif(gid, uid):
+        return _ephemere(f"Ce VA a déjà son lien : {url}\n(destination : {vers})")
+    # le bouton tel que boutons_va le dessine : un seul endroit le décrit
+    rallumer = [b for r in boutons_va(uid, confirme=True, a_un_lien=True, gid=gid, lien_actif=False)
+                for b in (r.get("components") or [])
+                if str(b.get("custom_id") or "") == f"lien:on:{uid}"]
+    return {"type": 4, "data": {
+        "content": f"🚫 Ce VA a déjà son lien, coupé pour le moment : {url}\n(destination : {vers})",
+        "components": [{"type": 1, "components": rallumer}] if rallumer else [],
+        "flags": 64, "allowed_mentions": {"parse": []}}}
+
+
 def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:
     """Le bouton « Créer son lien » : MyPuls puis GetMySocial, en différé.
 
@@ -1544,8 +1581,7 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
     try:
         deja = liens_va.lien_de(gid, uid)
         if deja.get("public_url"):
-            return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
-                             f'(destination : {deja.get("tracking") or "?"})')
+            return _lien_deja_la(gid, uid, deja)
         empeche = liens_va.manque(gid)
         if empeche:
             return _ephemere("Rien n'a été créé — " + empeche)
@@ -1861,6 +1897,11 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None,
         code_m, rep_m = _api("POST", f"/channels/{salon}/messages",
                              json={"content": f"<@{uid}>" if staff else f"<@{uid}> {qui}",
                                    "embeds": [embed],
+                                   # Le lien n'est pas passé : boutons_va le lit
+                                   # au registre (fin du fichier). Un VA revenu
+                                   # après un départ a déjà le sien, coupé — son
+                                   # ticket neuf porte ✅ Réactiver le lien, pas
+                                   # « Créer son lien » (VA 223, 24/11/2026).
                                    "components": boutons_va(uid, confirme=not en_essai,
                                                             gid=gid),
                                    "allowed_mentions": mentions})
@@ -5918,3 +5959,134 @@ def _maj_menu_v2(gid: str, uid: str, rangs: Any = None,   # noqa: F811
 
 
 _maj_menu_v2.__doc__ = _maj_menu_v2_sans_verrou.__doc__
+
+
+# ─── Le bouton du lien suit le registre (24/11/2026) ─────────────────────
+# Propriétaire, capture d'un ticket de TRUST TWITTER (VA 223) : « un va a
+# quitté le serv, son lien a été désactivé, mais maintenant je peux plus rien
+# faire ». Parti, son lien avait été coupé (marquer_parti) ; revenu, son
+# ancien salon avait disparu et un ticket NEUF s'est ouvert. L'accueil posté
+# par ouvrir_ticket ne lisait pas le registre des liens : « 🔗 Créer son
+# lien ». Le menu en blocs, qui recopie les rangées de l'accueil, l'affichait
+# sous « 🚫 Désactivé pour le moment » ; le clic répondait « Ce VA a déjà son
+# lien » ; et ✅ Réactiver le lien n'était affiché nulle part.
+#  - boutons_va : ce que l'appelant ne dit pas du lien est lu au registre
+#    (liens_va), au lieu de valoir « pas de lien, en service ». ouvrir_ticket
+#    ne passait rien, « Confirmer le VA », _poser_lien_dans_accueil et
+#    suivi_va oubliaient `lien_actif` : un lien coupé y redevenait
+#    « 🚫 Désactiver ». Ce que l'appelant dit reste ce qu'il dit.
+#  - rattraper_boutons_lien, à chaque tour des liens : un ticket dont le menu
+#    porte un autre bouton que celui du registre est redessiné, compté et dit
+#    au journal. Sans appel à Discord tant que tout concorde.
+# Enveloppes : le corps d'origine de boutons_va est réécrit par un patch du
+# VPS (99-z-tickets-subs-total).
+_boutons_va_dits = boutons_va
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: Optional[bool] = None,   # noqa: F811
+               gid: str = "", lien_actif: Optional[bool] = None):
+    """boutons_va (plus haut). `a_un_lien` et `lien_actif` laissés à None sont
+    lus au registre des liens : ce VA a-t-il un lien, est-il en service. Sans
+    serveur, ou registre illisible : comme avant (pas de lien, en service)."""
+    if a_un_lien is None or lien_actif is None:
+        connu, en_service = False, True
+        if gid:
+            try:
+                import liens_va as lv
+                connu = bool(lv.lien_de(str(gid), str(uid)).get("public_url"))
+                en_service = bool(lv.est_actif(str(gid), str(uid)))
+            except Exception as e:                           # noqa: BLE001
+                print(f"[ticket] boutons : lien de {uid} illisible ({type(e).__name__}: {e})",
+                      flush=True)
+        a_un_lien = connu if a_un_lien is None else a_un_lien
+        lien_actif = en_service if lien_actif is None else lien_actif
+    return _boutons_va_dits(uid, confirme=confirme, a_un_lien=bool(a_un_lien), gid=gid,
+                            lien_actif=bool(lien_actif))
+
+
+def redessiner_accueil(gid: str, uid: str) -> int:
+    """Les rangées de l'accueil de ce VA refaites d'après sa fiche et le
+    registre des liens ; sa copie (le menu) suit par _miroir. Pas d'accueil
+    (jamais noté, ou retiré à la main : 404) : le menu en blocs les reçoit
+    quand même. Rend le code HTTP (0 : rien à redessiner). Ne lève jamais."""
+    try:
+        import verif_discord as vd
+        gid, uid = str(gid), str(uid)
+        f = _fiche(gid, uid)
+        salon, mid = str(f.get("salon") or ""), str(f.get("accueil") or "")
+        rangs = boutons_va(uid, confirme=bool(f.get("confirme")), gid=gid)
+        with vd.sur_serveur(gid):
+            if salon and mid:
+                code, _r = _api("PATCH", f"/channels/{salon}/messages/{mid}",
+                                json={"components": rangs})
+                if code != 404:
+                    return int(code or 0)
+            return int(_maj_menu_v2(gid, uid, rangs) or 0)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] accueil de {gid}:{uid} non redessiné : {type(e).__name__}: {e}", flush=True)
+        return 0
+
+
+def _ids_lien(rangs: Any) -> List[str]:
+    """Les custom_id « lien:… » de ces rangées : le bouton du lien, s'il y est."""
+    return [str(b.get("custom_id") or "") for r in (rangs or []) if isinstance(r, dict)
+            for b in (r.get("components") or [])
+            if isinstance(b, dict) and str(b.get("custom_id") or "").startswith("lien:")]
+
+
+def rattraper_boutons_lien(gid: str) -> Dict[str, Any]:
+    """Les tickets de ce serveur dont le menu porte un autre bouton de lien
+    que celui du registre (« Créer son lien » sous un lien coupé : un accueil
+    posté avant le 24/11/2026) : accueil redessiné, le menu suit. Rend
+    {faux, redessines, rates}, et le dit au journal — combien, et lesquels.
+
+    Lu dans les rangées gardées du menu (« menu_rangs », la copie de celles de
+    l'accueil) : aucun appel à Discord tant que tout concorde. Un ticket sans
+    menu posé attend le sien (le tour de l'heure le pose depuis l'accueil).
+    Seulement les VA qui ONT un lien au registre : un registre illisible un
+    instant ne doit jamais remettre « Créer son lien » sous un VA qui a déjà
+    le sien — un second tracking MyPuls ne s'efface pas."""
+    import liens_va as lv
+    gid = str(gid)
+    bilan: Dict[str, Any] = {"faux": [], "redessines": [], "rates": []}
+    fiches = {k: dict(v) for k, v in (_etat().get("tickets") or {}).items()
+              if str(k).startswith(f"{gid}:") and isinstance(v, dict)
+              and v.get("menu") and v.get("menu_v2") and v.get("menu_rangs")}
+    for cle, f in sorted(fiches.items()):
+        uid = cle.split(":", 1)[1]
+        l = lv.lien_de(gid, uid)
+        if not l.get("public_url"):
+            continue
+        voulu = _ids_lien(boutons_va(uid, confirme=True, gid=gid))
+        montre = _ids_lien(f["menu_rangs"])
+        if not voulu or montre == voulu:
+            continue
+        qui = f"VA {l.get('numero') or '?'} @{l.get('pseudo') or uid}"
+        bilan["faux"].append(f"{qui} ({', '.join(montre) or 'aucun bouton'} au lieu de {voulu[0]})")
+        code = redessiner_accueil(gid, uid)
+        if code == 200:
+            bilan["redessines"].append(qui)
+        else:
+            bilan["rates"].append(f"{qui} (HTTP {code})")
+            if code == 429:
+                break
+    if bilan["faux"]:
+        print(f"[ticket] boutons du lien {gid} : {len(bilan['faux'])} ticket(s) n'affichaient pas "
+              f"le bouton du registre : {bilan['faux']} — {len(bilan['redessines'])} redessiné(s)"
+              + (f", ratés : {bilan['rates']}" if bilan["rates"] else ""), flush=True)
+    return bilan
+
+
+_redessiner_boutons_sans_registre = redessiner_boutons
+
+
+def redessiner_boutons(gid: str) -> Dict[str, Any]:   # noqa: F811
+    """redessiner_boutons (plus haut), puis les boutons de lien restés faux
+    (rattraper_boutons_lien) : après, pour ne compter que ce que le redessin
+    d'une nouvelle version n'a pas déjà remis d'aplomb."""
+    bilan = _redessiner_boutons_sans_registre(gid)
+    try:
+        bilan["liens"] = rattraper_boutons_lien(gid)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] boutons du lien {gid} : {type(e).__name__}: {e}", flush=True)
+    return bilan
