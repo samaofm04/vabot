@@ -76,9 +76,14 @@ AROBASE = "\uff20"
 # (propriétaire : « branche les arrivées et la vérification ») : ticket à la
 # vérification, suivi des managers, départs — comme Twitter.
 AGENCY_IG_ID = "1488331963575177247"
+#: POLE TWITTER FR (25/11/2026) : copie de TRUST TWITTER pour le marché FR,
+#: branchée comme lui (pole_twitter_fr) : ticket à la vérification, menu v2,
+#: pastilles, tri, outils en salons.
+POLE_TWITTER_FR_ID = "1575133611311763578"
 SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
                     "1498948161039896586",    # YouLab THREADS
-                    AGENCY_IG_ID}             # Agency VA INSTAGRAM
+                    AGENCY_IG_ID,             # Agency VA INSTAGRAM
+                    POLE_TWITTER_FR_ID}
 
 #: Les managers d'un serveur quand data/tickets_config.json n'en pose pas.
 #: Vide depuis le 31/10/2026 : Agency avait Gone et Yoshiki écrits ici (23/10),
@@ -716,7 +721,8 @@ def nom_salon_va(gid: str, uid: str, pseudo: str) -> str:
 #: cogs/vaactivity + va_link_status.py (hors git, VPS).
 COULEUR_DANS_SALON = {"1498948161039896586",     # YouLab THREADS
                       "1445108485090971710",     # TRUST TWITTER
-                      AGENCY_IG_ID}              # TRUST INSTAGRAM (Agency)
+                      AGENCY_IG_ID,              # TRUST INSTAGRAM (Agency)
+                      POLE_TWITTER_FR_ID}
 JOURS_CLICS_SALON = 2
 ROND_LA, ROND_CLICS, ROND_RIEN, ROND_ABSENT = "🔵", "🟢", "🟠", "🔴"
 #: Mise en service de la pastille sur un serveur où l'activité des VA n'était
@@ -728,7 +734,9 @@ ROND_LA, ROND_CLICS, ROND_RIEN, ROND_ABSENT = "🔵", "🟢", "🟠", "🔴"
 #: jours d'activité réellement notée, comptés depuis cette date.
 #: 1793487600 = 01/11/2026 00:00 heure de Paris (UTC+1, heure d'hiver).
 COULEUR_DEPUIS: Dict[str, float] = {"1445108485090971710": 1793487600,   # TRUST TWITTER
-                                    AGENCY_IG_ID: 1793487600}            # TRUST INSTAGRAM
+                                    AGENCY_IG_ID: 1793487600,            # TRUST INSTAGRAM
+                                    # 26/11/2026 00:00 Paris : ouvert le 25/11
+                                    POLE_TWITTER_FR_ID: 1795647600}
 
 
 _ACTIVITE: Dict[str, float] = {}
@@ -976,7 +984,8 @@ def numeroter_salons(gid: str, max_par_tour: int = 10) -> Dict[str, Any]:
 #: Va IG n'est pas ici : ses salons ne sont pas des tickets de ce module.
 TRI_SALONS = {"1498948161039896586",             # YouLab THREADS
               "1445108485090971710",             # TRUST TWITTER
-              AGENCY_IG_ID}                      # TRUST INSTAGRAM (Agency)
+              AGENCY_IG_ID,                      # TRUST INSTAGRAM (Agency)
+              POLE_TWITTER_FR_ID}
 ORDRE_RONDS = (ROND_CLICS, ROND_RIEN, ROND_LA, ROND_ABSENT)
 
 
@@ -3310,12 +3319,13 @@ def _avec_mes_stats(gid: str) -> bool:
 # (traiter, plus haut, rend None pour « numx: » : la route le lui passe).
 NUMERO_DANS_MENU = {"1445108485090971710",    # YouLab TWITTER
                     "1498948161039896586",    # YouLab THREADS
-                    AGENCY_IG_ID}
+                    AGENCY_IG_ID, POLE_TWITTER_FR_ID}
 # « 📧 Outlook » juste après (propriétaire, 23/10/2026 : « pour twitter mets ça
 # aussi dans leur ticket comme sur threads ») : la carte Outlook du VA
 # redescend (outlook_x_discord._menu). Twitter seulement : Agency n'a pas de
 # coffre Outlook, Va IG a son propre parcours.
-OUTLOOK_DANS_MENU = {"1445108485090971710"}   # YouLab TWITTER
+OUTLOOK_DANS_MENU = {"1445108485090971710",   # YouLab TWITTER
+                     POLE_TWITTER_FR_ID}
 
 
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
@@ -4349,16 +4359,16 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,   # no
 # menu texte et l'adresse Solana d'avant.
 TWITTER_ID = "1445108485090971710"
 THREADS_ID = "1498948161039896586"
-MENU_V2 = {TWITTER_ID, THREADS_ID}
-USDC_RESEAUX_ICI = {TWITTER_ID, THREADS_ID}
+MENU_V2 = {TWITTER_ID, THREADS_ID, POLE_TWITTER_FR_ID}
+USDC_RESEAUX_ICI = {TWITTER_ID, THREADS_ID, POLE_TWITTER_FR_ID}
 #: le drapeau de MESSAGE des composants v2 (FICHIERS, plus haut, est la
 #: permission ATTACH_FILES, de même valeur)
 V2 = 1 << 15
 EPHEMERE = 64
 TITRE_MENU_V2 = "## 📋 Ton menu"
 TITRE_CARTE_USDC = "## 💳 Paiement"
-_ACCENT_MENU = {TWITTER_ID: 0x1D9BF0, THREADS_ID: 0x5865F2}
-_PLATEFORME = {TWITTER_ID: "Twitter", THREADS_ID: "Threads"}
+_ACCENT_MENU = {TWITTER_ID: 0x1D9BF0, THREADS_ID: 0x5865F2, POLE_TWITTER_FR_ID: 0x1D9BF0}
+_PLATEFORME = {TWITTER_ID: "Twitter", THREADS_ID: "Threads", POLE_TWITTER_FR_ID: "Twitter"}
 USDC_ICONE = "usdc/usdc.png"
 USDC_QR_DOSSIER = DATA_DIR / "usdc_qr"
 USDC_QR_MAX = 8 * 1024 * 1024
@@ -5930,6 +5940,7 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
 # les garde (_boutons_va_complets). BOUTONS_VERSION 13 : les accueils déjà
 # postés sont redessinés une fois.
 TICKET_SANS[TWITTER_ID] = ("numx:menu", "mailx:menu")
+TICKET_SANS[POLE_TWITTER_FR_ID] = TICKET_SANS[TWITTER_ID]
 BOUTONS_VERSION = 13
 # 14 (08/11/2026) : « 📷 Mes comptes » à côté de 🎬 sur TRUST INSTAGRAM ; les
 # accueils et les menus déjà posés sont redessinés une fois.

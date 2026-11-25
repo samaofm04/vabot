@@ -196,6 +196,20 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "quetes": False,
     },
 }
+# POLE TWITTER FR (25/11/2026) : copie de TRUST TWITTER pour le marché FR,
+# mêmes règles (aucune entrée ne passe seule). Ses ids sont ceux de Twitter
+# traduits (pole_twitter_fr) ; le panneau de vérification est posé par le
+# code (salon_verification), celui de Twitter l'avait été à la main. Les
+# salons du parcours de Twitter n'existent plus : ceux d'ici.
+import pole_twitter_fr as _ptf
+POLE_TWITTER_FR_ID = _ptf.POLE_ID
+SERVEURS_EXTRA[POLE_TWITTER_FR_ID] = dict(
+    _ptf.traduire(SERVEURS_EXTRA[TWITTER_ID]), nom="POLE TWITTER FR",
+    salon_verification=_ptf.traduire("1552192942385537034"),   # 🔐・vérification
+    parcours=[("📢 Les annonces", "1575135244372279356"),       # 📣・annonces
+              ("💰 Comment tu es payé", "1575135327478358228"),  # 💳・paiements
+              ("📚 Les formations", "1575135265939390534"),      # 🎓・formation
+              ("❓ Tes questions", "1575135212545904730")])      # 💬・discussions
 # Va IG : 🛡️ Manager (17/10/2026). Le role ci-dessus est BOSS, qui passe de
 # toute facon (administrateur) : un vrai manager de Va IG etait refuse. Pose
 # ici et pas dans le dictionnaire : un patch du serveur s'appuie sur sa ligne.
@@ -384,7 +398,7 @@ def bots() -> List[Dict[str, Any]]:
     siri = {"id": "siri", "nom": "Siri", "app_id": str(APP_ID or "").strip(),
             "cle_publique": str(CLE_PUBLIQUE_APP or "").strip().lower(),
             "fichier_jeton": DATA_DIR / "seven_bot_token", "variable_env": "SEVEN_BOT_TOKEN",
-            "serveurs": {TWITTER_ID, GUILD_ID, VA_IG_ID}}
+            "serveurs": {TWITTER_ID, GUILD_ID, VA_IG_ID, POLE_TWITTER_FR_ID}}
     second = {"id": "threads", "nom": "Threads",
               "app_id": str(c.get("threads_app_id") or THREADS_APP_ID or "").strip(),
               "cle_publique": str(c.get("threads_cle_publique") or THREADS_CLE_PUBLIQUE or "").strip().lower(),
@@ -1901,7 +1915,7 @@ def enregistrer_commandes(gid: str) -> Dict[str, int]:
 # rien : Accepter, Refuser et Bannir restent aux managers.
 # Pas Entretien : ses alertes attendent l'entretien en vocal.
 RELANCE_APRES_S = 48 * 3600
-RELANCE_SERVEURS = (TWITTER_ID, THREADS_ID, VA_IG_ID)
+RELANCE_SERVEURS = (TWITTER_ID, THREADS_ID, VA_IG_ID, POLE_TWITTER_FR_ID)
 RELANCES = DATA_DIR / "verif_relances.json"   # alerte -> sa relance, ou pourquoi aucune
 RELANCE_TOUR_S = 30 * 60
 # Un test ou un contrôle lancé sur le VPS (même .env) meurt avant le premier tour.
@@ -2152,7 +2166,7 @@ def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:   #
 # ne réécrit pas. Un seul point de passage : tout ce que Luigi, Bowser et
 # Wario ÉCRIVENT sur ces trois serveurs passe ici et prend le nom TRUST. Va IG
 # garde YouLab.
-SERVEURS_TRUST = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID}
+SERVEURS_TRUST = {TWITTER_ID, THREADS_ID, AGENCY_IG_ID, POLE_TWITTER_FR_ID}
 _TRUST = (("YouLab Agency", "TRUST Instagram"), ("Agency VA INSTAGRAM", "TRUST INSTAGRAM"),
           ("YOULAB", "TRUST"), ("YouLab", "TRUST"))
 # Le serveur de recrutement (Entretien) devient « TRUST Agency » le 07/11/2026

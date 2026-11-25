@@ -75,7 +75,8 @@ SERVEURS = ["1445108485090971710",       # YouLab TWITTER
             "1505418484052394004",       # Va IG (serveur FR) : Luigi y est, meme jeton
             "1498948161039896586",       # YouLab THREADS
             "1552152470464110703",       # YouLab - Entretien
-            "1488331963575177247"]       # Agency VA INSTAGRAM : Wario seul
+            "1488331963575177247",       # Agency VA INSTAGRAM : Wario seul
+            "1575133611311763578"]       # POLE TWITTER FR : Nasse (25/11/2026)
 
 
 def jeton() -> str:

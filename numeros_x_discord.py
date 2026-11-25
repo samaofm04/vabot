@@ -101,6 +101,11 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "icone": "numeros/numero_getatext.png",
     },
 }
+# POLE TWITTER FR (25/11/2026) : copie de TRUST TWITTER, le même Numéro X
+# (HeroSMS, États-Unis, 3 par jour). Son panneau est dans 🧰 OUTILS TWITTER
+# (outils_tickets) ; l'ancien salon de Twitter n'a pas de double.
+import pole_twitter_fr as _ptf
+SERVEURS[_ptf.POLE_ID] = dict(_ptf.traduire(SERVEURS[vd.TWITTER_ID]), nom="POLE TWITTER FR")
 
 for _g, _c in SERVEURS.items():
     _c.setdefault("gid", _g)
@@ -1688,6 +1693,7 @@ CARTES_RETIREES = {vd.AGENCY_IG_ID}
 # ça ») — le Numéro X se prend dans 📱・numéro. Ses cartes ont le gabarit
 # « ## Numéro X » (_carte_a_retirer).
 CARTES_RETIREES.add(vd.TWITTER_ID)
+CARTES_RETIREES.add(_ptf.POLE_ID)
 
 
 def _numero_en_cours(cle: str) -> bool:
@@ -1896,7 +1902,8 @@ _menu_partout = _menu
 TEXTE_NUMERO_AILLEURS = "📱 Le numéro se prend dans 🧰 OUTILS INSTAGRAM › 📱・numéro."
 #: Par serveur : chacun renvoie à SON salon 📱・numéro.
 TEXTES_NUMERO_AILLEURS = {vd.AGENCY_IG_ID: TEXTE_NUMERO_AILLEURS,
-                          vd.TWITTER_ID: "📱 Le numéro se prend dans 🧰 OUTILS TWITTER › 📱・numéro."}
+                          vd.TWITTER_ID: "📱 Le numéro se prend dans 🧰 OUTILS TWITTER › 📱・numéro.",
+                          _ptf.POLE_ID: "📱 Le numéro se prend dans 🧰 OUTILS TWITTER › 📱・numéro."}
 
 
 def texte_numero_ailleurs(gid: str) -> str:
@@ -1993,7 +2000,8 @@ def _agir(p, gid, uid, cle, membre, user, conf, action, act_id):   # noqa: F811
 
 if __name__ == "__main__":
     import sys
-    noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID, "agency": vd.AGENCY_IG_ID}
+    noms = {"twitter": vd.TWITTER_ID, "threads": vd.THREADS_ID, "agency": vd.AGENCY_IG_ID,
+            "pole": _ptf.POLE_ID}
     if sys.argv[1:2] == ["poser"] and len(sys.argv) <= 3:
         vd._charger_config()
         quel = (sys.argv[2:] or ["twitter"])[0].lower()

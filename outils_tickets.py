@@ -1523,18 +1523,27 @@ def installer_salons(gid: str, essai: bool = True) -> Dict[str, Any]:
 TWITTER_ID = "1445108485090971710"
 SERVEURS.add(TWITTER_ID)
 SALONS_COMMUNS.add(TWITTER_ID)
-CATEGORIES_OUTILS: Dict[str, str] = {AGENCY_IG_ID: CATEGORIE_OUTILS, TWITTER_ID: "outils twitter"}
+#: POLE TWITTER FR (25/11/2026), copie de Twitter : mêmes salons, mêmes
+#: panneaux (ses salons existent déjà, recopiés avec leurs droits).
+POLE_TWITTER_FR_ID = "1575133611311763578"
+COMME_TWITTER = {TWITTER_ID, POLE_TWITTER_FR_ID}
+SERVEURS.add(POLE_TWITTER_FR_ID)
+SALONS_COMMUNS.add(POLE_TWITTER_FR_ID)
+CATEGORIES_OUTILS: Dict[str, str] = {AGENCY_IG_ID: CATEGORIE_OUTILS, TWITTER_ID: "outils twitter",
+                                     POLE_TWITTER_FR_ID: "outils twitter"}
 NOM_CATEGORIE_TWITTER = "🧰 OUTILS TWITTER"
 #: 📚 RESSOURCES > 📧・adresse-outlook : déplacé, ses droits servent de modèle.
 ADRESSE_OUTLOOK_TWITTER = "1552392906340565114"
+ADRESSES_OUTLOOK = {TWITTER_ID: ADRESSE_OUTLOOK_TWITTER,
+                    POLE_TWITTER_FR_ID: "1575135320716869693"}
 #: La catégorie après laquelle 🧰 OUTILS TWITTER est rangée (nom sans décor).
 CATEGORIE_AVANT_TWITTER = "ressources"
 
 
-def _corps_numero_twitter() -> Dict[str, Any]:
+def _corps_numero_twitter(gid: str = TWITTER_ID) -> Dict[str, Any]:
     import numeros_x_discord as nx
     return {"flags": V2, "allowed_mentions": {"parse": []},
-            "components": nx.vue_panneau(nx.SERVEURS[TWITTER_ID])}
+            "components": nx.vue_panneau(nx.SERVEURS[gid])}
 
 
 def _corps_adresse_twitter() -> Dict[str, Any]:
@@ -1555,6 +1564,9 @@ def _panneaux(gid: str) -> List[Tuple[str, str, str, Any]]:
     """Les panneaux des salons communs de ce serveur : (clé, nom, custom_id
     qui reconnaît le panneau, fonction qui rend son corps). TRUST INSTAGRAM :
     PANNEAUX (📱・numéro y est à Rem, pas d'ici)."""
+    if str(gid) == POLE_TWITTER_FR_ID:
+        return [(c, n, m, (lambda: _corps_numero_twitter(POLE_TWITTER_FR_ID)) if c == "numero" else f)
+                for c, n, m, f in PANNEAUX_TWITTER]
     if str(gid) == TWITTER_ID:
         return list(PANNEAUX_TWITTER)
     return [(cle, nom, b[2], (lambda c=cle: corps_panneau(c))) for cle, nom, b in PANNEAUX]
@@ -1568,12 +1580,12 @@ def _ramener_menu(gid: str, uid: str, salon: str) -> None:   # noqa: F811
     INSTAGRAM, une fois les outils en salons communs, le propriétaire l'a
     demandé (« ne renvoie plus le menu à chaque fois dans leur salon »,
     05/11, tickets_discord.MENU_FIXE). Le tour de l'heure, lui, ne change pas."""
-    if str(gid) == TWITTER_ID:
+    if str(gid) in COMME_TWITTER:
         return
     _ramener_menu_partout(gid, uid, salon)
 
 
-def installer_salons_twitter(essai: bool = True) -> Dict[str, Any]:
+def installer_salons_twitter(essai: bool = True, gid: str = TWITTER_ID) -> Dict[str, Any]:
     """Une fois, à la main, SUR LE VPS : 🧰 OUTILS TWITTER (créée si elle
     manque, rangée juste après 📚 RESSOURCES), puis 📱・numéro (créé),
     📧・adresse-outlook (déplacé, ses droits gardés) et 📤・spoofer (créé),
@@ -1582,7 +1594,7 @@ def installer_salons_twitter(essai: bool = True) -> Dict[str, Any]:
     AVANT la première écriture. Relançable : les salons sont repris par leur
     id (fiche data/outils_salons.json) ou leur nom. `essai` : rien n'est
     écrit, le plan est rendu. Rend {plan, faits, rates}."""
-    gid = TWITTER_ID
+    gid = str(gid)
     out: Dict[str, Any] = {"plan": [], "faits": [], "rates": []}
     code, tous = _api("GET", f"/guilds/{gid}/channels", gid=gid)
     if code != 200 or not isinstance(tous, list):
@@ -1590,7 +1602,7 @@ def installer_salons_twitter(essai: bool = True) -> Dict[str, Any]:
         return out
     par_id = {str(c.get("id")): c for c in tous}
     note_id = str(((_etat_salons().get(gid) or {}).get("adresse") or {}).get("salon") or "")
-    adresse = par_id.get(note_id) or par_id.get(ADRESSE_OUTLOOK_TWITTER)
+    adresse = par_id.get(note_id) or par_id.get(ADRESSES_OUTLOOK[gid])
     if adresse is None or adresse.get("type") != 0:
         out["rates"].append("📧・adresse-outlook introuvable : ses droits servent de modèle")
         return out

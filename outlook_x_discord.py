@@ -55,6 +55,9 @@ SERVEURS: Dict[str, Dict[str, Any]] = {
         "panneau": False,
     },
 }
+# POLE TWITTER FR (25/11/2026) : copie de TRUST TWITTER, le même coffre.
+import pole_twitter_fr as _ptf
+SERVEURS[_ptf.POLE_ID] = dict(_ptf.traduire(SERVEURS[vd.TWITTER_ID]), nom="POLE TWITTER FR")
 #: Adresses montrées (les plus récentes) : un message V2 porte 40 composants
 #: au plus, imbriqués compris ; chaque adresse en prend six (mail, mot de
 #: passe, section, son texte, son 🔄, séparateur), plus le cadre, le titre et
@@ -686,7 +689,7 @@ def poser_panneau(gid: str = vd.TWITTER_ID) -> str:
 # l'accueil ni un dépôt adresse / mot de passe. Les dépôts restent (copie sur
 # téléphone). POUR LES REMETTRE : retirer le serveur de CARTES_RETIREES, puis
 # « python outlook_x_discord.py cartes tous ».
-CARTES_RETIREES = {vd.TWITTER_ID}
+CARTES_RETIREES = {vd.TWITTER_ID, _ptf.POLE_ID}
 TEXTE_ADRESSE_AILLEURS = "📧 L'adresse se prend dans 🧰 OUTILS TWITTER › 📧・adresse-outlook."
 
 
