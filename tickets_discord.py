@@ -80,6 +80,9 @@ AGENCY_IG_ID = "1488331963575177247"
 #: branchée comme lui (pole_twitter_fr) : ticket à la vérification, menu v2,
 #: pastilles, tri, outils en salons.
 POLE_TWITTER_FR_ID = "1575133611311763578"
+#: Rangés par model (rôle de model = catégorie), comme Va IG : pas de
+#: catégorie « Manager X » (26/11/2026, « rangés comme sur IG par model »).
+RANGE_PAR_MODEL = {POLE_TWITTER_FR_ID}
 SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
                     "1498948161039896586",    # YouLab THREADS
                     AGENCY_IG_ID,             # Agency VA INSTAGRAM
@@ -1848,6 +1851,11 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None,
         rid = role_manager(gid)
 
         parent, place = _categorie_pour(gid, choisi) if choisi else ("", True)
+        if gid in RANGE_PAR_MODEL:
+            # POLE TWITTER FR : rangé par model comme sur Va IG
+            # (pole_twitter_fr), pas dans la catégorie du manager
+            import pole_twitter_fr as _ptf
+            parent, place = _ptf.categorie_pour_membre(uid), True
         droits = [{"id": gid, "type": 0, "allow": "0", "deny": str(VOIR)},
                   {"id": uid, "type": 1, "allow": str(MEMBRE), "deny": "0"}]
         droits += _droits_staff(rid, role_helper(gid))
@@ -2752,7 +2760,11 @@ def suivre_partout() -> Dict[str, Any]:
         _VU_TOUR[gid] = maintenant
         try:
             with sur_serveur(gid):
-                out[gid] = suivre_managers(gid)
+                # rangé par model : les catégories « Manager X » n'y existent
+                # pas, et le suivi prendrait celles des models pour des
+                # orphelines à vider
+                out[gid] = ({"saute": "rangé par model"} if gid in RANGE_PAR_MODEL
+                            else suivre_managers(gid))
         except Exception as e:
             print(f"[managers] {gid} : {type(e).__name__}: {e}", flush=True)
         # À part : un Helper sans ses salons ne doit pas attendre qu'un tour

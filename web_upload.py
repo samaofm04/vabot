@@ -63425,6 +63425,14 @@ def create_app():
             _ot_boot.demarrer()
     except Exception as _e:
         log.warning(f"outils des tickets non repris: {_e}")
+    # POLE TWITTER FR : rôles de model, rangement, liens et classements
+    # (pole_twitter_fr), toutes les 5 minutes. Même garde que l'accueil d'Agency.
+    try:
+        if not os.environ.get("VABOT_BANC_ESSAI") and _machine_proprietaire("pole-twitter-fr"):
+            import pole_twitter_fr as _ptf_boot
+            _ptf_boot.demarrer()
+    except Exception as _e:
+        log.warning(f"POLE TWITTER FR non démarré: {_e}")
     # Agency VA INSTAGRAM : arrivées, départs et parrains, relevés chaque
     # minute dans le fil d'agency_accueil (surveillé : _FILS_DISCORD). Pas
     # sous le banc d'essai : un rendu de page sur le VPS aurait lancé un
@@ -71920,6 +71928,95 @@ def create_app():
         r.headers["X-Robots-Tag"] = "noindex, nofollow"
         r.headers["Referrer-Policy"] = "no-referrer"
         return r
+
+    # ─── POLE TWITTER FR : le lien de chaque VA, par model (26/11/2026) ───
+    # Propriétaire : « c'est moi je choisis le lien qu'il va avoir », rangés
+    # par model comme sur Va IG (pole_twitter_fr). Rendu serveur seul, sans
+    # script : un formulaire par VA, ses six liens.
+    @app.route("/pole-twitter-fr")
+    def pole_twitter_fr_page():
+        from flask import Response as _R
+        import html as _h
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return _outlook_entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+        import pole_twitter_fr as _p
+        d = _p.etat()
+        membres = d.get("membres") or {}
+        ok = request.args.get("ok") or ""
+        err = request.args.get("err") or ""
+        lignes = []
+        for uid, info in sorted(membres.items(), key=lambda kv: (not kv[1].get("models"),
+                                                               d["numeros"].get(kv[0], 0))):
+            liens = (d.get("liens") or {}).get(uid) or {}
+            champs = []
+            for mo in _p.MODELS:
+                f = liens.get(mo) or {}
+                actif = mo in (info.get("models") or [])
+                note = ""
+                if f.get("url"):
+                    note = ("✓ tracking" if f.get("trackings") else "⚠ aucun tracking lu : 0 sub compté")
+                champs.append(
+                    f'<label class="{"actif" if actif else ""}">{_h.escape(_p.NOMS[mo])}'
+                    f'<input name="lien_{mo}" value="{_h.escape(f.get("url") or "")}" placeholder="https://…">'
+                    f'<small>{_h.escape(note)}</small></label>')
+            mods = ", ".join(_p.NOMS[m] for m in info.get("models") or []) or "sans rôle de model"
+            lignes.append(
+                f'<form method="post" action="/pole-twitter-fr/lien" class="va">'
+                f'<input type="hidden" name="uid" value="{_h.escape(uid)}">'
+                f'<div class="tete"><b>VA {d["numeros"].get(uid, "?")}</b> · {_h.escape(str(info.get("pseudo") or ""))}'
+                f' <span>{_h.escape(mods)}</span>{"" if info.get("salon") else " <em>pas de salon perso</em>"}</div>'
+                f'<div class="champs">{"".join(champs)}</div><button>Enregistrer</button></form>')
+        vu = d.get("vu")
+        page = (
+            '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>POLE TWITTER FR — liens</title>'
+            '<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e5e7eb;margin:0;padding:16px}'
+            'h1{font-size:20px}.va{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:12px;margin:10px 0}'
+            '.tete span{color:#9ca3af}.tete em{color:#f59e0b}.champs{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;margin:8px 0}'
+            'label{display:flex;flex-direction:column;font-size:12px;color:#9ca3af}label.actif{color:#f472b6;font-weight:600}'
+            'input{background:#0f1115;border:1px solid #333a48;color:#e5e7eb;border-radius:8px;padding:6px}'
+            'small{color:#6b7280}button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:6px 14px}'
+            '.ok{color:#34d399}.err{color:#f87171}</style></head><body>'
+            '<h1>POLE TWITTER FR — le lien de chaque VA</h1>'
+            '<p>Le rôle de model du VA décide de sa catégorie et du lien posé dans son salon '
+            '(en rose : ses models). Lien de page GetMySocial, ou tracking OnlyFans / MYM. '
+            'Un champ vidé retire le lien. Le salon est mis à jour dans la minute.</p>'
+            + (f'<p class="ok">{_h.escape(ok)}</p>' if ok else "")
+            + (f'<p class="err">{_h.escape(err)}</p>' if err else "")
+            + (f'<p>Membres relus <span>{_h.escape(time.strftime("%d/%m %H:%M", time.localtime(vu)))}</span>.</p>' if vu
+               else "<p>Pas encore de relevé des membres (toutes les 5 min).</p>")
+            + ("".join(lignes) or "<p>Aucun membre relevé.</p>") + "</body></html>")
+        return _outlook_entetes(_R(page, mimetype="text/html"))
+
+    @app.route("/pole-twitter-fr/lien", methods=["POST"])
+    def pole_twitter_fr_lien():
+        from flask import Response as _R
+        from urllib.parse import quote as _q
+        if not (is_auth() and _is_admin()):
+            return _outlook_entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+        if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return _outlook_entetes(_R("Envoi refusé : il ne vient pas de la page.", status=403, mimetype="text/plain"))
+        import pole_twitter_fr as _p
+        uid = str(request.form.get("uid") or "").strip()
+        if not uid.isdigit():
+            return redirect("/pole-twitter-fr?err=" + _q("VA inconnu"))
+        avant = (_p.etat().get("liens") or {}).get(uid) or {}
+        changes, erreurs = [], []
+        for mo in _p.MODELS:
+            url = str(request.form.get("lien_" + mo) or "").strip()
+            if url == str((avant.get(mo) or {}).get("url") or ""):
+                continue
+            try:
+                _p.poser_lien(uid, mo, url, par=str(session.get("username") or ""))
+                changes.append(_p.NOMS[mo])
+            except ValueError as e:
+                erreurs.append(f"{_p.NOMS[mo]} : {e}")
+        if changes:
+            threading.Thread(target=_p.tour, daemon=True).start()
+        msg = ("Enregistré : " + ", ".join(changes)) if changes else "Rien n'a changé"
+        return redirect("/pole-twitter-fr?ok=" + _q(msg) + ("&err=" + _q(" · ".join(erreurs)) if erreurs else ""))
 
     @app.route("/outlook")
     def outlook_page():
