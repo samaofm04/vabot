@@ -420,37 +420,156 @@ def classement(debut: _dt.date, fin: _dt.date, d: Optional[Dict[str, Any]] = Non
     return out
 
 
-def _texte(titre: str, debut: _dt.date, fin: _dt.date, lignes: List[Dict[str, Any]], podium: bool) -> str:
-    medailles = ("🥇", "🥈", "🥉")
-    t = [f"## {titre}", f"Du {debut:%d/%m} au {fin:%d/%m} · en abonnés · mis à jour <t:{int(time.time())}:R>", ""]
+# Les primes de TRUST TWITTER (propriétaire, 26/11/2026 : « mets les mêmes
+# primes que sur twitter »), recopiées de podium_discord au 26/11 : semaine
+# 10 / 5 / 3 $ dès 100 subs, jour 5 / 3 / 2 $ dès 40 subs. Le gagnant est
+# prévenu dans SON salon, son manager mentionné, son adresse USDC (bouton 💳)
+# rappelée ; le paiement reste à la main, comme sur Twitter.
+PRIMES = {"semaine": [10.0, 5.0, 3.0], "jour": [5.0, 3.0, 2.0]}
+MINIMUM = {"semaine": 100, "jour": 40}
+SALON_BONUS = "1575135256325918741"       # 📣 ANNONCES ET SUIVI › 💰・bonus-journalier
+MEDAILLES = ("🥇", "🥈", "🥉")
+
+
+def primes(cle: str, lignes: List[Dict[str, Any]]) -> List[Optional[float]]:
+    """La prime de chaque ligne (None : pas de prime), aux premiers qui ont le
+    minimum ; jamais à 0 sub."""
+    bareme = PRIMES.get(cle) or []
+    out, k = [], 0
+    for l in lignes:
+        if k < len(bareme) and l["subs"] > 0 and l["subs"] >= MINIMUM.get(cle, 0):
+            out.append(bareme[k])
+            k += 1
+        else:
+            out.append(None)
+    return out
+
+
+def _texte(titre: str, debut: _dt.date, fin: _dt.date, lignes: List[Dict[str, Any]],
+           combien: int, cle: str, fini: bool = False) -> str:
+    pr = primes(cle, lignes)
+    quand = (f"Du {debut:%d/%m} au {fin:%d/%m}" if debut != fin else f"Le {debut:%d/%m}")
+    etat_ = "**terminé**" if fini else f"mis à jour <t:{int(time.time())}:R>"
+    t = [f"## {titre}", f"{quand} · en abonnés · {etat_}"]
+    if cle in MINIMUM:
+        t.append(f"💰 {' / '.join(f'{x:g} $' for x in PRIMES[cle])} · minimum {MINIMUM[cle]} subs")
+    t.append("")
     if not lignes:
-        t.append("_Personne encore : les liens se posent sur le dashboard._")
-    for i, l in enumerate(lignes[:3 if podium else 40]):
-        rang = medailles[i] if i < 3 else f"**{i + 1}.**"
-        t.append(f"{rang} {l['va']} — **{l['subs']}** sub{'s' if l['subs'] > 1 else ''}")
+        t.append("_Personne encore._")
+    for i, l in enumerate(lignes[:combien]):
+        rang = MEDAILLES[i] if i < 3 else f"**{i + 1}.**"
+        prime = f" · 💰 {pr[i]:g} $" if pr[i] else ""
+        t.append(f"{rang} {l['va']} — **{l['subs']}** sub{'s' if l['subs'] > 1 else ''}{prime}")
+    if cle in MINIMUM and not fini:
+        t += ["", "💸 Pour recevoir ta prime : enregistre ton adresse USDC (Solana ou Ethereum) "
+                  "avec le bouton **💳 Mon adresse USDC** du message épinglé de ton espace perso."]
     return "\n".join(t)[:1990]
 
 
+def _annoncer(cle: str, debut: _dt.date, fin: _dt.date, lignes: List[Dict[str, Any]],
+              d: Dict[str, Any]) -> List[str]:
+    """Dit à chaque gagnant, dans son salon, ce qu'il touche. Une fois."""
+    import tickets_discord as td
+    import suivi_va as sv
+    faits = d.setdefault("primes_dites", {})
+    dits = []
+    place = -1
+    for l, montant in zip(lignes, primes(cle, lignes)):
+        if not montant:
+            continue
+        place += 1
+        k = f"{cle}:{debut.isoformat()}:{l['uid']}"
+        if faits.get(k):
+            continue
+        fiche = (td._etat().get("tickets") or {}).get(f"{POLE_ID}:{l['uid']}") or {}
+        salon = str(fiche.get("salon") or "")
+        if not salon or fiche.get("parti"):
+            # parti : sa prime est annulée, pas reportée (comme Twitter)
+            faits[k] = {"sans_salon": True}
+            _log(f"prime {cle} {debut} de {l['va']} : pas de salon, non annoncée")
+            continue
+        mid = str(fiche.get("manager") or "")
+        adr = sv.adresse_de(POLE_ID, l["uid"])
+        ligne_adr = (f"💳 Vers `{adr}`" if adr else
+                     "⚠️ **Aucune adresse enregistrée** — clique 💳 **Mon adresse USDC** sur le message épinglé.")
+        quoi = "de la semaine" if cle == "semaine" else "du jour"
+        periode = (f"Semaine du **{debut:%d/%m}** au **{fin:%d/%m}**" if cle == "semaine"
+                   else f"Journée du **{debut:%d/%m}**")
+        code, _r = _api("POST", f"/channels/{salon}/messages", json={
+            "content": (f"<@{l['uid']}> " + (f"<@{mid}>" if mid else "")).strip(),
+            "allowed_mentions": {"users": [l["uid"]] + ([mid] if mid else [])},
+            "embeds": [{"title": f"{MEDAILLES[place]} {place + 1}e {quoi} — {montant:.2f}$",
+                        "color": 0xF1C40F,
+                        "description": f"{periode} · **{l['subs']}** subs.\n{ligne_adr}"}]})
+        if code in (200, 201):
+            faits[k] = int(time.time())
+            dits.append(f"{l['va']} {montant:g}$")
+    return dits
+
+
+#: une période finie n'est figée (et ses primes annoncées) qu'à partir de
+#: cette heure du lendemain : MyPuls relit les trackings MYM toutes les 30 min,
+#: les subs de 23 h 50 arrivent après minuit
+HEURE_FIGE = 2
+TITRES = {"semaine": ("🏆 Podium de la semaine", 3), "quinzaine": ("📈 Classement de la quinzaine", 40),
+          "jour": ("💰 Bonus du jour", 10)}
+SALONS = {"semaine": SALON_SEMAINE, "quinzaine": SALON_QUINZAINE, "jour": SALON_BONUS}
+
+
+def _maintenant() -> _dt.datetime:
+    return _dt.datetime.now(PARIS) if PARIS else _dt.datetime.now()
+
+
+def _figer(cle: str, fiche: Dict[str, Any], d: Dict[str, Any], out: Dict[str, Any]) -> bool:
+    """Réédite le message d'une période finie ; figé et primes annoncées une
+    fois l'heure passée. Rend vrai quand c'est fait (à retirer de la file)."""
+    titre, combien = TITRES[cle]
+    salon = SALONS[cle]
+    a_deb = _dt.date.fromisoformat(fiche["debut"])
+    a_fin = _dt.date.fromisoformat(fiche.get("fin") or (periodes(a_deb)[cle][1] if cle in ("semaine", "quinzaine")
+                                                        else fiche["debut"]))
+    m = _maintenant()
+    pret = m.date() > a_fin + _dt.timedelta(days=1) or (m.date() > a_fin and m.hour >= HEURE_FIGE)
+    lignes = classement(a_deb, a_fin, d)
+    _api("PATCH", f"/channels/{salon}/messages/{fiche['id']}",
+         json={"content": _texte(titre, a_deb, a_fin, lignes, combien, cle, fini=pret),
+               "allowed_mentions": {"parse": []}})
+    if not pret:
+        return False
+    if cle in PRIMES:
+        out[f"{cle}_{a_deb.isoformat()}_primes"] = _annoncer(cle, a_deb, a_fin, lignes, d)
+    d["classements"].setdefault("figes", {})[f"{cle}:{a_deb.isoformat()}"] = {
+        "id": fiche["id"], "lignes": lignes, "quand": int(time.time())}
+    return True
+
+
 def publier_classements() -> Dict[str, Any]:
-    """Un message par période, réédité ; une nouvelle période = un nouveau
-    message (l'ancien reste, figé)."""
-    out = {}
+    """Un message par période, réédité. Une période finie passe dans la file
+    « a_figer » ; elle y est rééditée jusqu'à HEURE_FIGE le lendemain, puis
+    figée (« terminé ») et ses primes annoncées. Un relevé raté ne fige rien."""
+    out: Dict[str, Any] = {}
     with _VERROU:
         d = etat()
-        p = periodes()
-        for cle, salon, titre, podium in (("semaine", SALON_SEMAINE, "🏆 Podium de la semaine", True),
-                                          ("quinzaine", SALON_QUINZAINE, "📈 Classement de la quinzaine", False)):
-            if not salon:
-                continue
+        auj = _aujourdhui()
+        p = periodes(auj)
+        p["jour"] = (auj, auj)
+        file = d["classements"].setdefault("a_figer", [])
+        for cle in ("semaine", "quinzaine", "jour"):
+            salon = SALONS[cle]
+            titre, combien = TITRES[cle]
             debut, fin = p[cle]
+            fiche = d["classements"].get(cle) or {}
+            if fiche.get("id") and fiche.get("debut") != debut.isoformat():
+                file.append(dict(fiche, cle=cle))
+                fiche = {}
+                d["classements"].pop(cle, None)
             try:
                 lignes = classement(debut, fin, d)
             except Exception as e:                           # noqa: BLE001
                 out[cle] = f"relevé raté ({type(e).__name__})"
                 continue
-            texte = _texte(titre, debut, fin, lignes, podium)
-            fiche = d["classements"].get(cle) or {}
-            if fiche.get("debut") == debut.isoformat() and fiche.get("id"):
+            texte = _texte(titre, debut, fin, lignes, combien, cle)
+            if fiche.get("id"):
                 code, _ = _api("PATCH", f"/channels/{salon}/messages/{fiche['id']}",
                                json={"content": texte, "allowed_mentions": {"parse": []}})
                 if code != 404:
@@ -459,8 +578,18 @@ def publier_classements() -> Dict[str, Any]:
             code, r = _api("POST", f"/channels/{salon}/messages",
                            json={"content": texte, "allowed_mentions": {"parse": []}})
             if code in (200, 201) and isinstance(r, dict):
-                d["classements"][cle] = {"id": str(r["id"]), "debut": debut.isoformat()}
+                d["classements"][cle] = {"id": str(r["id"]), "debut": debut.isoformat(),
+                                         "fin": fin.isoformat()}
             out[cle] = f"posté ({code})"
+        reste = []
+        for f in file:
+            try:
+                if not _figer(f["cle"], f, d, out):
+                    reste.append(f)
+            except Exception as e:                           # noqa: BLE001
+                out[f"{f['cle']}_{f.get('debut')}"] = f"non figé ({type(e).__name__}: {e})"
+                reste.append(f)
+        d["classements"]["a_figer"] = reste
         _ecrire(d)
     return out
 
