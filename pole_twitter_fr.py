@@ -368,6 +368,13 @@ def tour() -> Dict[str, Any]:
         d["membres"] = vus
         d["vu"] = int(time.time())
         _ecrire(d)
+    # le menu v2 des tickets lit le lien d'ici : redessiné s'il a bougé
+    try:
+        import verif_discord as vd
+        with vd.sur_serveur(POLE_ID):
+            td.rafraichir_menus(POLE_ID)
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"menus non redessinés : {type(e).__name__}: {e}")
     if bilan["deplaces"] or bilan["rates"]:
         _log(f"tour : {bilan}")
     return bilan
@@ -618,6 +625,88 @@ def paie(debut: _dt.date, fin: _dt.date, d: Optional[Dict[str, Any]] = None) -> 
         px = prix_du_sub(l["subs"])
         out.append(dict(l, prix=px, montant=round(l["subs"] * px, 2)))
     return out
+
+
+# ─── Le menu du ticket et la page perso (26/11/2026) ─────────────────────
+# Propriétaire, capture du menu d'un VA de Twitter : « comme ça de base non ? »
+# — 🔗 Ton lien, 📊 Tes stats, 💳 Paiement. Le menu v2 de tickets_discord lit
+# ici le lien de la model du rôle (« une ligne par model et il change en
+# fonction du @ »), et « Voir ma page » ouvre /mes-stats avec la clé du VA
+# (stats_va.jeton), servie par page_stats.
+def lien_menu(uid: str) -> Dict[str, Any]:
+    """Ce que tickets_discord._corps_menu attend de liens_va.lien_de."""
+    d = etat()
+    uid = str(uid)
+    info = (d.get("membres") or {}).get(uid) or {}
+    liens = (d.get("liens") or {}).get(uid) or {}
+    url = next((liens[m]["url"] for m in info.get("models") or [] if (liens.get(m) or {}).get("url")), "")
+    out: Dict[str, Any] = {"numero": d["numeros"].get(uid), "pseudo": info.get("pseudo") or ""}
+    if url:
+        out.update(public_url=url, actif=True)
+    return out
+
+
+def lien_stats(uid: str) -> str:
+    import domaines
+    import stats_va
+    if not str(uid).isdigit():
+        return ""
+    return f"{domaines.site(POLE_ID)}/mes-stats?t={stats_va.jeton(POLE_ID, uid)}"
+
+
+def page_stats(uid: str) -> Tuple[int, str]:
+    """La page perso d'un VA : ses subs (jour, semaine, quinzaine), son prix du
+    sub et ses gains de la quinzaine, ses primes. Rien d'un autre VA."""
+    import html as _h
+    d = etat()
+    uid = str(uid)
+    info = (d.get("membres") or {}).get(uid) or {}
+    auj = _aujourdhui()
+    p = periodes(auj)
+    p["jour"] = (auj, auj)
+    cases = []
+    subs: Dict[str, int] = {}
+    for cle, titre in (("jour", "Aujourd'hui"), ("semaine", "Cette semaine"), ("quinzaine", "Cette quinzaine")):
+        deb, fin = p[cle]
+        try:
+            moi = next((l for l in classement(deb, fin, d) if l["uid"] == uid), None)
+            subs[cle] = moi["subs"] if moi else 0
+            val = str(subs[cle])
+        except Exception:                                    # noqa: BLE001
+            val = "—"
+        cases.append(f"<div class=c><span>{titre}</span><b>{val}</b><small>subs</small></div>")
+    q = subs.get("quinzaine")
+    gains = ""
+    if q is not None:
+        px = prix_du_sub(q)
+        gains = (f"<div class=c><span>Gains de la quinzaine</span><b>{q * px:.2f} $</b>"
+                 f"<small>{q} × {px:.2f} $</small></div>")
+    primes_vues = [k.split(":") for k, v in (d.get("primes_dites") or {}).items()
+                   if k.endswith(":" + uid) and isinstance(v, int)]
+    pr = [f"Prime {'de la semaine' if c == 'semaine' else 'du jour'} du {deb_}" for c, deb_, _u in primes_vues]
+    liens = (d.get("liens") or {}).get(uid) or {}
+    mes_liens = "".join(
+        f"<li>{_h.escape(NOMS[m])} : <a href=\"{_h.escape(f['url'])}\">{_h.escape(f['url'])}</a></li>"
+        for m, f in liens.items() if m in (info.get("models") or []) and f.get("url"))
+    grille = " · ".join(f"{s_}+ : {p_:.2f} $" for s_, p_ in sorted(GRILLE))
+    models = ", ".join(NOMS[m] for m in info.get("models") or []) or "sans model"
+    page = ("<!doctype html><html lang=fr><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'><title>Mes stats</title>"
+            "<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e5e7eb;"
+            "padding:16px;max-width:640px;margin:auto}"
+            ".g{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}"
+            ".c{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:12px;display:flex;flex-direction:column}"
+            ".c span{color:#9ca3af;font-size:13px}.c b{font-size:26px}.c small{color:#6b7280}"
+            "a{color:#60a5fa;word-break:break-all}</style></head><body>"
+            f"<h1>📊 Mes stats</h1><p>VA {d['numeros'].get(uid, '?')} · @{_h.escape(str(info.get('pseudo') or ''))}"
+            f" · {_h.escape(models)}</p>"
+            f"<div class=g>{''.join(cases)}{gains}</div>"
+            f"<p>Prix du sub sur la quinzaine : {_h.escape(grille)} (tous tes subs au palier atteint).</p>"
+            + (f"<h2>Mes liens</h2><ul>{mes_liens}</ul>" if mes_liens else "<p>Pas encore de lien.</p>")
+            + (f"<h2>Mes primes</h2><ul>{''.join(f'<li>{_h.escape(x)}</li>' for x in pr)}</ul>" if pr else "")
+            + "<p><small>Les subs arrivent de MyPuls avec un peu de retard (30 min environ).</small></p>"
+            "</body></html>")
+    return 200, page
 
 
 def _boucle() -> None:

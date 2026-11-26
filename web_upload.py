@@ -71722,7 +71722,13 @@ def create_app():
         404 sans rien dire. GET seulement, rien à déclarer au before_request."""
         from flask import Response as _R
         import stats_va
-        code, html = stats_va.page(request.args.get("t"), request.args)
+        _qui = stats_va.qui(request.args.get("t"))
+        if _qui and _qui[0] == "1575133611311763578":
+            # POLE TWITTER FR : sa propre page (pole_twitter_fr.page_stats)
+            import pole_twitter_fr as _ptf
+            code, html = _ptf.page_stats(_qui[1])
+        else:
+            code, html = stats_va.page(request.args.get("t"), request.args)
         r = _R(html, status=code, mimetype="text/html")
         # la clé est dans l'adresse : ni cache, ni moteur de recherche, ni
         # en-tête Referer qui la porterait vers un autre site

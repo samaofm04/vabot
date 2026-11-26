@@ -4509,8 +4509,14 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
     blocs: List[Dict[str, Any]] = []
     entete = TITRE_MENU_V2
     try:
-        import liens_va as lv
-        l = lv.lien_de(gid, uid)
+        if gid in RANGE_PAR_MODEL:
+            # POLE TWITTER FR : le lien posé à la main pour la model de son
+            # rôle (pole_twitter_fr), pas un lien de liens_va
+            import pole_twitter_fr as _ptf
+            l = _ptf.lien_menu(uid)
+        else:
+            import liens_va as lv
+            l = lv.lien_de(gid, uid)
     except Exception as e:                                   # noqa: BLE001
         print(f"[ticket] menu v2 : lien de {uid} illisible ({type(e).__name__}: {e})", flush=True)
         l = {}
@@ -4532,6 +4538,9 @@ def _corps_menu(gid: str, uid: str, rangs: List[Dict[str, Any]], extra: str = ""
             try:
                 import stats_va
                 page = stats_va.lien(gid, uid)
+                if not page and gid in RANGE_PAR_MODEL:
+                    import pole_twitter_fr as _ptf
+                    page = _ptf.lien_stats(uid)
             except Exception as e:                           # noqa: BLE001
                 print(f"[ticket] menu v2 : page de stats de {uid} ({type(e).__name__}: {e})", flush=True)
                 page = ""
