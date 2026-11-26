@@ -71933,6 +71933,35 @@ def create_app():
     # Propriétaire : « c'est moi je choisis le lien qu'il va avoir », rangés
     # par model comme sur Va IG (pole_twitter_fr). Rendu serveur seul, sans
     # script : un formulaire par VA, ses six liens.
+    def _pole_paie_html(_p, d, _h):
+        """La paie des VA (quinzaine en cours et précédente), grille FR."""
+        import datetime as _dtp
+        auj = _p._aujourdhui()
+        en_cours = _p.periodes(auj)["quinzaine"]
+        avant = _p.periodes(en_cours[0] - _dtp.timedelta(days=1))["quinzaine"]
+        membres = d.get("membres") or {}
+        blocs = []
+        for titre, (deb, fin) in (("Quinzaine en cours", en_cours), ("Quinzaine précédente", avant)):
+            try:
+                rangs = _p.paie(deb, fin, d)
+            except Exception as e:
+                blocs.append(f"<p class=\"err\">{titre} : relevé MyPuls raté ({_h.escape(type(e).__name__)})</p>")
+                continue
+            total = sum(r["montant"] for r in rangs)
+            tr = "".join(
+                f"<tr><td>{_h.escape(r['va'])}</td><td>{_h.escape(str((membres.get(r['uid']) or {}).get('pseudo') or r['uid']))}</td>"
+                f"<td>{r['subs']}</td><td>{r['prix']:.2f} $</td><td><b>{r['montant']:.2f} $</b></td></tr>"
+                for r in rangs)
+            blocs.append(
+                f"<h2>{titre} · du {deb:%d/%m} au {fin:%d/%m} · {total:.2f} $</h2>"
+                + (f"<table><tr><th>VA</th><th>Pseudo</th><th>Subs</th><th>Prix</th><th>À payer</th></tr>{tr}</table>"
+                   if rangs else "<p>Aucun sub.</p>"))
+        grille = " · ".join(f"{s_} + : {p_:.2f} $" for s_, p_ in sorted(_p.GRILLE))
+        return ("<section class=\"paie\"><h2>Paie (staff seulement)</h2>"
+                f"<p>Tous les subs de la quinzaine au prix du palier atteint : {_h.escape(grille)}. "
+                "Les primes du jour et de la semaine s'ajoutent, annoncées dans les salons.</p>"
+                + "".join(blocs) + "</section>")
+
     @app.route("/pole-twitter-fr")
     def pole_twitter_fr_page():
         from flask import Response as _R
@@ -71978,7 +72007,7 @@ def create_app():
             'label{display:flex;flex-direction:column;font-size:12px;color:#9ca3af}label.actif{color:#f472b6;font-weight:600}'
             'input{background:#0f1115;border:1px solid #333a48;color:#e5e7eb;border-radius:8px;padding:6px}'
             'small{color:#6b7280}button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:6px 14px}'
-            '.ok{color:#34d399}.err{color:#f87171}</style></head><body>'
+            '.ok{color:#34d399}.err{color:#f87171}table{border-collapse:collapse;margin:6px 0 14px}td,th{border-bottom:1px solid #262b36;padding:4px 10px;text-align:left}h2{font-size:16px}</style></head><body>'
             '<h1>POLE TWITTER FR — le lien de chaque VA</h1>'
             '<p>Le rôle de model du VA décide de sa catégorie et du lien posé dans son salon '
             '(en rose : ses models). Lien de page GetMySocial, ou tracking OnlyFans / MYM. '
@@ -71987,6 +72016,7 @@ def create_app():
             + (f'<p class="err">{_h.escape(err)}</p>' if err else "")
             + (f'<p>Membres relus <span>{_h.escape(time.strftime("%d/%m %H:%M", time.localtime(vu)))}</span>.</p>' if vu
                else "<p>Pas encore de relevé des membres (toutes les 5 min).</p>")
+            + _pole_paie_html(_p, d, _h)
             + ("".join(lignes) or "<p>Aucun membre relevé.</p>") + "</body></html>")
         return _outlook_entetes(_R(page, mimetype="text/html"))
 

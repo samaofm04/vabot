@@ -594,6 +594,32 @@ def publier_classements() -> Dict[str, Any]:
     return out
 
 
+# ─── Paie (26/11/2026) ───────────────────────────────────────────────────
+# Propriétaire : « pour le marché FR mets 0.5 0 à 100, 100-300 0.6, 0.7 300 à
+# 500, et 500+ 0.8 ». Même règle que la grille de TRUST INSTAGRAM / TWITTER
+# (stats_va.GRILLE) : TOUS les subs d'une quinzaine au prix du palier que leur
+# total sur la quinzaine atteint. Montrée au staff seul (/pole-twitter-fr).
+GRILLE = ((500, 0.80), (300, 0.70), (100, 0.60), (0, 0.50))
+
+
+def prix_du_sub(n: int) -> float:
+    for seuil, prix in GRILLE:
+        if n >= seuil:
+            return prix
+    return GRILLE[-1][1]
+
+
+def paie(debut: _dt.date, fin: _dt.date, d: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """[{uid, va, subs, prix, montant}] de la quinzaine, du plus payé au moins."""
+    out = []
+    for l in classement(debut, fin, d):
+        if l["subs"] <= 0:
+            continue
+        px = prix_du_sub(l["subs"])
+        out.append(dict(l, prix=px, montant=round(l["subs"] * px, 2)))
+    return out
+
+
 def _boucle() -> None:
     time.sleep(60)
     dernier = 0.0
