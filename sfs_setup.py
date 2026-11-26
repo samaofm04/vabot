@@ -351,16 +351,22 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     DataTables /fans/data?old=1 comptent TOUS les anciens jamais inscrits,
     alors que le widget affiche un nombre filtre - actifs recuperables).
 
-    Pattern HTML par card :
-      <h5 class="...fw-bold">NomCreator</h5>
+    Pattern HTML par card (version de MyPuls depuis novembre 2026) :
+      <article class="creator-card cr-card ...">
+      <h5 class="cr-card__name" title="NomCreator">NomCreator</h5>
       ...
-      <div class="stat-val">N</div><div class="stat-lbl">Abonnes</div>
-      <div class="stat-val">M</div><div class="stat-lbl">Anciens</div>
-      <div class="stat-val">K</div><div class="stat-lbl">Interesses</div>
+      <span class="cr-aud__value">1 122</span> <span class="cr-label">Abonnés</span>
+      <span class="cr-aud__value">118</span> <span class="cr-label">Anciens</span>
+      <span class="cr-aud__value">121</span> <span class="cr-label">Intéressés</span>
+
+    L ancienne version (<div class="creator-card">, <h5 class="...fw-bold">,
+    <div class="stat-val">N</div><div class="stat-lbl">Abonnes</div>) reste
+    lue aussi : si MyPuls revient en arriere, rien ne casse.
 
     Retourne {identity_lowercase: {"abonnes": "N", "anciens": "M", "interesses": "K"}}
     """
     import re as _re
+    from html import unescape
     out: Dict[str, Dict[str, str]] = {}
     # Chaque sortie vide dit POURQUOI (_noter_lecture) : sans cela un cookie
     # absent, une panne et le code par e-mail de MyPuls donnaient le meme
@@ -397,9 +403,13 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
     # suivante -> la créatrice héritait des chiffres de sa voisine, et la
     # voisine disparaissait (c'est pour ça qu'il manquait des créatrices par
     # paires : amelia_xoxo, klarahockey...).
-    chunks = _re.split(r'<div\s+class="creator-card', r.text)
+    # Fin novembre 2026, MyPuls a refait sa page : la carte est un <article>
+    # (plus un <div>), le nom un <h5 class="cr-card__name" title=...> et les
+    # chiffres des <span class="cr-aud__value"> / <span class="cr-label">.
+    # L'ancien balisage ne donnait plus AUCUNE carte (« 0 carte(s) »).
+    chunks = _re.split(r'<(?:div|article|section|li)\s+class="creator-card', r.text)
     for chunk in chunks[1:]:
-        nm = _re.search(r'<h5\s+class="[^"]*fw-bold[^"]*">([^<]+)</h5>', chunk)
+        nm = _re.search(r'<h5\s+class="[^"]*(?:fw-bold|cr-card__name)[^"]*"[^>]*>([^<]+)</h5>', chunk)
         if not nm:
             continue
         name = nm.group(1).strip()
@@ -407,12 +417,14 @@ def fetch_mypuls_subscribers() -> Dict[str, Dict[str, str]]:
             continue
         vals: Dict[str, str] = {}
         for m2 in _re.finditer(
-                r'<div\s+class="stat-val">\s*([^<]*?)\s*</div>\s*'
-                r'<div\s+class="stat-lbl">\s*([^<]+?)\s*</div>', chunk):
-            v = _re.sub(r'[\s., \xa0]', '', m2.group(1))
+                r'<(?P<t1>div|span)\s+class="(?:stat-val|cr-aud__value)">\s*(?P<v>[^<]*?)\s*</(?P=t1)>\s*'
+                r'<(?P<t2>div|span)\s+class="(?:stat-lbl|cr-label)">\s*(?P<l>[^<]+?)\s*</(?P=t2)>', chunk):
+            # « 1 122 » : MyPuls groupe les milliers par une espace (parfois
+            # insecable, \xa0 ou \u202f, parfois en entite &nbsp;)
+            v = _re.sub(r'[\s.,\xa0\u202f]', '', unescape(m2.group("v")))
             if not v.isdigit():
                 continue                     # '—', vide, 'N/A'... -> stat absente
-            lbl = m2.group(2).lower()
+            lbl = unescape(m2.group("l")).lower()
             if "ancien" in lbl:              # 'Anciens' / 'Anciens abonnés'
                 vals["anciens"] = v
             elif "abonn" in lbl:

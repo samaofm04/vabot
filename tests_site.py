@@ -19820,6 +19820,23 @@ try:
                   "amelia" not in _fmOA and _jmkOA.get("ecartees") == ["amelia"], str(sorted(_fmOA)))
             check("MyM : un compte que l API ne connait pas reste ecrit (on ne devine pas sa plateforme)",
                   (_fmOA.get("maria_coco") or {}).get("anciens") == "652")
+            # la page refaite par MyPuls (fin novembre 2026) : <article>,
+            # cr-card__name, cr-aud__value / cr-label, milliers « 1 122 »
+            _cartesNv = ('<article class="creator-card cr-card cr-card--active">'
+                         '<h5 class="cr-card__name" title="Maria_coco">Maria_coco</h5>'
+                         '<section class="cr-aud"><div class="cr-aud__cell">\n'
+                         '  <span class="cr-aud__value">1 122</span>\n  <span class="cr-label">Abonnés</span>\n'
+                         '</div><div class="cr-aud__cell"><span class="cr-aud__value">118</span>'
+                         '<span class="cr-label">Anciens</span></div><div class="cr-aud__cell">'
+                         '<span class="cr-aud__value">121</span><span class="cr-label">Int&eacute;ress&eacute;s</span>'
+                         '</div></section></article>')
+            _mpOA._make_session = lambda: _SessMM(_RepOA(200, _cartesNv, "https://mypuls.app/creators"))
+            _jmnOA = _cOA.get("/sfssetup/fetch_mypuls_subs").get_json()
+            _fmNv = _ssOA.all_info("mym").get("maria_coco") or {}
+            check("MyM : la nouvelle page MyPuls (article / cr-aud) est lue (1122 / 118 / 121)",
+                  _jmnOA.get("ok") is True and _fmNv.get("abonnes") == "1122"
+                  and _fmNv.get("anciens") == "118" and _fmNv.get("interesses") == "121",
+                  str(_jmnOA)[:200] + " " + str(_fmNv))
             # les fiches laissees par l ancien auto-fill : dites pour ce qu elles sont
             _ssOA.save_identity("mym", "jessye", {"abonnes": "20132", "abonnement": "free"})
             _ssOA.save_identity("mym", "lola ღ", {"abonnes": "4684", "abonnement": "free"})
