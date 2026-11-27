@@ -761,8 +761,10 @@ def envoyer_images(equipe: str, photo: Optional[bytes] = None,
         fichiers["backgroundImage"] = ("fond.jpg", fond, "image/jpeg")
     depuis = time.time()
     champs = {"shortcode": "pgimg" + secrets.token_hex(5),
-              "display_name": "image de page (temporaire)", "type": "landing",
-              "team_id": _sans_tm(equipe)}
+              "display_name": "image de page (temporaire)", "type": "landing"}
+    if equipe:
+        # sans équipe : l'espace perso (POLE TWITTER FR, dont les pages y vivent)
+        champs["team_id"] = _sans_tm(equipe)
     try:
         r = requests.post(f"{gms.PUBLIC_REST_BASE}/links", headers={"Authorization": f"Bearer {cle}"},
                           data=champs, files=fichiers, timeout=60)
@@ -810,9 +812,14 @@ def _retirer_temporaire(equipe: str, sc: str, tid: str) -> bool:
     import gms
     if not tid:
         try:
-            r = gms.list_links_team(equipe, force_refresh=True)
-            tid = next((str(l.get("id")) for l in (r.get("links") or [])
-                        if str(l.get("shortcode") or "") == sc), "")
+            if equipe:
+                r = gms.list_links_team(equipe, force_refresh=True)
+                liste = r.get("links") or []
+            else:
+                r = gms._call_tool("search_links", {"query": sc, "field": "shortcode"})
+                liste = (r.get("data") or {}).get("data") if isinstance(r.get("data"), dict) else r.get("data")
+            tid = next((str(l.get("id")) for l in (liste or []) if isinstance(l, dict)
+                        and str(l.get("shortcode") or "") == sc), "")
         except Exception as e:                               # noqa: BLE001
             _log(f"page temporaire {sc} : équipe illisible ({type(e).__name__})")
             tid = ""

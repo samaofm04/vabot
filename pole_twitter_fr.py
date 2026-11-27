@@ -1127,3 +1127,113 @@ def chiffres_stats(uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
             "cvr": (subs * 100.0 / visites) if subs is not None and visites else None,
             "par_sub": par_sub, "revenu": None, "revenu_partiel": False,
             "gagne": gagne, "communs": [], "lu_a": time.time(), "gid": POLE_ID}
+
+
+# ─── « ✏️ Ta page » : le VA modifie sa page (27/11/2026) ─────────────────
+# Propriétaire : « est-ce que tu peux aussi faire le truc pour qu'ils puissent
+# modifier leur page ou pas, s'ils veulent ? » — la fenêtre de TRUST TWITTER
+# (tickets_discord.fenetre_page : photo, nom, bio, texte du bouton, image de
+# fond), posée sur la page de la model de son rôle (celle de son menu). Les
+# outils sont ceux de pages_va (images envoyées par une page temporaire,
+# texte nettoyé) ; ici, la page n'a pas de second lien : c'est SON lien. Le
+# tracking, l'adresse et le nom de tableau de bord ne bougent jamais.
+def page_du_va(uid: str) -> Tuple[str, Dict[str, Any]]:
+    """(model, fiche) du lien montré dans son menu (lien_menu) ; ("", {}) sans."""
+    d = etat()
+    uid = str(uid)
+    info = (d.get("membres") or {}).get(uid) or {}
+    liens = (d.get("liens") or {}).get(uid) or {}
+    for m in info.get("models") or []:
+        f = liens.get(m) or {}
+        if f.get("url") and f.get("link_id"):
+            return m, f
+    return "", {}
+
+
+def champs_de_page(uid: str) -> Dict[str, Any]:
+    m, f = page_du_va(uid)
+    return dict(f.get("champs") or {}) if m else {}
+
+
+def modifier_ma_page(uid: str, nom: Optional[str] = None, bio: Optional[str] = None,
+                     bouton: Optional[str] = None, photo: Optional[bytes] = None,
+                     fond: Optional[bytes] = None) -> Dict[str, Any]:
+    """Change ce qui est donné (None : on n'y touche pas) sur la page de la
+    model de son rôle, puis relit. Rend {ok, faits, erreur}."""
+    import gms
+    import liens_fr
+    import pages_va as pv
+    uid = str(uid)
+    model, f = page_du_va(uid)
+    if not model:
+        return {"ok": False, "erreur": "pas encore de page (ton lien se crée avec ton rôle de model)"}
+    lid = str(f["link_id"])
+    imgs = pv.envoyer_images("", photo=photo, fond=fond)
+    if not imgs.get("ok"):
+        return {"ok": False, "erreur": imgs.get("erreur") or "images refusées"}
+    lu = gms.get_link(lid)
+    lu = lu.get("link") if lu.get("ok") and isinstance(lu.get("link"), dict) else {}
+    if not lu:
+        return {"ok": False, "erreur": "page illisible chez GetMySocial"}
+    champs: Dict[str, Any] = {"display_name": str(lu.get("display_name") or f.get("nom") or "")}
+    faits: List[str] = []
+    if nom is not None:
+        champs["name_user"] = pv.avec_couleur_du_modele(pv.nettoyer(nom, pv.MAX_NOM), lu.get("name_user"))
+        faits.append("nom")
+    if bio is not None:
+        champs["bio"] = pv.avec_couleur_du_modele(pv.nettoyer(bio, pv.MAX_BIO, lignes=4), lu.get("bio"))
+        faits.append("bio")
+    if fond:
+        champs["background_image"] = imgs["fond"]
+        faits.append("fond")
+    if photo:
+        champs.update(profile_picture=imgs["photo"], show_profile_picture=True,
+                      profile_picture_slides=[{"url": imgs["photo"], "media_type": "image"}])
+        faits.append("photo")
+    if bouton is not None:
+        boutons = [dict(b) for b in (lu.get("buttons") or []) if isinstance(b, dict)]
+        suivis = [b for b in boutons if liens_fr.plateforme(b.get("url"))]
+        if not suivis:
+            return {"ok": False, "erreur": "aucun bouton OnlyFans ni MYM sur la page"}
+        texte = pv.nettoyer(bouton, pv.MAX_BOUTON)
+        for b in suivis:
+            # la page modèle d'Emma écrit son texte en description, sans
+            # libellé : c'est ce texte-là que le VA voit et change
+            if str(b.get("label") or "").strip():
+                b["label"] = texte
+            else:
+                b["description"] = texte
+        champs["buttons"] = boutons               # le tableau ENTIER : les trackings gardés
+        faits.append("bouton")
+    if not faits:
+        return {"ok": True, "faits": [], "erreur": ""}
+    r = gms.update_link(lid, champs)
+    if not r.get("ok"):
+        return {"ok": False, "erreur": "GetMySocial refuse : " + str(r.get("error") or "")[:140]}
+    relu = gms.get_link(lid)
+    relu = relu.get("link") if relu.get("ok") and isinstance(relu.get("link"), dict) else {}
+    rates = [k for k in ("name_user", "bio", "profile_picture", "background_image")
+             if k in champs and str(relu.get(k) or "") != str(champs[k] or "")]
+    if "buttons" in champs:
+        avant = sorted(str(b.get("url")) for b in lu.get("buttons") or [] if liens_fr.plateforme(b.get("url")))
+        apres = sorted(str(b.get("url")) for b in relu.get("buttons") or [] if liens_fr.plateforme(b.get("url")))
+        if avant != apres:
+            rates.append("buttons")
+    if rates:
+        _log(f"page {lid} de {uid} relue autrement : {rates}")
+        return {"ok": False, "faits": faits, "erreur": "relu autrement chez GetMySocial : " + ", ".join(rates)}
+    with _VERROU:
+        d = etat()
+        g = ((d["liens"].get(uid) or {}).get(model))
+        if g is not None:
+            c = g.setdefault("champs", {})
+            if nom is not None:
+                c["nom"] = pv.nettoyer(nom, pv.MAX_NOM)
+            if bio is not None:
+                c["bio"] = pv.nettoyer(bio, pv.MAX_BIO, lignes=4)
+            if bouton is not None:
+                c["bouton"] = pv.nettoyer(bouton, pv.MAX_BOUTON)
+            g["modifiee"] = int(time.time())
+            _ecrire(d)
+    _log(f"page {lid} de {uid} ({model}) modifiée : {faits}")
+    return {"ok": True, "faits": faits, "erreur": ""}

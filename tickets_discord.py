@@ -6192,3 +6192,111 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
         _rendre_creation(cle, t)
         raise
     return _differer()
+
+
+# ─── POLE TWITTER FR : « ✏️ Ta page » sous « 🔗 Ton lien » (27/11/2026) ───
+# La fenêtre de TRUST TWITTER (fenetre_page), sur la page de la model du rôle
+# (pole_twitter_fr.modifier_ma_page) : pas de registre pages_va ici, son lien
+# EST sa page. Le VA lui-même ou un manager (_droit_usdc).
+PAGE_POLE = "ppg:"
+_sections_page_sans_pole = _sections_page
+
+
+def _sections_page(gid: str, uid: str, compact: bool = False) -> List[Dict[str, Any]]:   # noqa: F811
+    if str(gid) not in RANGE_PAR_MODEL:
+        return _sections_page_sans_pole(gid, uid, compact)
+    if (_fiche(gid, uid) or {}).get("parti") or not _ptf.page_du_va(str(uid))[0]:
+        return []
+    return [{"type": 9, "components": [{"type": 10, "content": "**📄 Ta page**\n-# Photo, nom, bio, "
+                                                               "texte du bouton, image de fond"}],
+             "accessory": {"type": 2, "style": 2, "label": "Modifier", "emoji": {"name": "✏️"},
+                           "custom_id": f"{PAGE_POLE}o:{uid}"}}]
+
+
+def _page_pole(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if not cid.startswith(PAGE_POLE) or p.get("type") not in (3, 5):
+        return None
+    import pages_va as pv
+    gid = str(p.get("guild_id") or "")
+    morceaux = cid.split(":")
+    if gid not in RANGE_PAR_MODEL or len(morceaux) != 3 or morceaux[1] not in ("o", "f") \
+            or not morceaux[2].isdigit():
+        return _ephemere("Action inconnue.")
+    action, uid = morceaux[1], morceaux[2]
+    if not _droit_usdc(gid, uid, p):
+        return _ephemere("Seul ce VA ou son manager peut s'en servir.")
+    if not _ptf.page_du_va(uid)[0]:
+        return _ephemere("Pas encore de page : ton lien se crée avec ton rôle de model.")
+    if p.get("type") == 3 and action == "o":
+        f = fenetre_page(gid, uid)
+        c = _ptf.champs_de_page(uid)
+        f["data"]["custom_id"] = f"{PAGE_POLE}f:{uid}"
+        f["data"]["title"] = "Ma page"
+        for bloc in f["data"]["components"]:
+            comp = bloc.get("component") or {}
+            v = str(c.get(comp.get("custom_id")) or "")
+            if comp.get("type") == 4:
+                comp.pop("value", None)
+                if v and len(v) <= int(comp.get("max_length") or 0):
+                    comp["value"] = v
+        return f
+    if p.get("type") != 5 or action != "f":
+        return _ephemere("Action inconnue.")
+    import outils_tickets as ot
+    data = p.get("data") or {}
+    champs = ot._champs(data.get("components"))
+    jointes = ((data.get("resolved") or {}).get("attachments") or {})
+    pieces: Dict[str, Any] = {}
+    for cle_img in ("photo", "fond"):
+        ids = [str(x) for x in (champs.get(cle_img) or []) if x] if isinstance(champs.get(cle_img), list) else []
+        piece = jointes.get(ids[0]) if ids else None
+        if ids and not (isinstance(piece, dict) and piece.get("url")):
+            return _ephemere("📎 Image non reçue, renvoie-la.")
+        if piece and not str(piece.get("content_type") or "").startswith("image/"):
+            return _ephemere("📎 Ce n'est pas une image.")
+        if piece and int(piece.get("size") or 0) > pv.PHOTO_MAX:
+            return _ephemere(f"📎 Image trop lourde ({pv.PHOTO_MAX // (1024 * 1024)} Mo au plus).")
+        if piece:
+            pieces[cle_img] = piece
+    avant = _ptf.champs_de_page(uid)
+    nom = pv.nettoyer(champs.get("nom"), pv.MAX_NOM)
+    bouton = pv.nettoyer(champs.get("bouton"), pv.MAX_BOUTON)
+    bio = pv.nettoyer(champs.get("bio"), pv.MAX_BIO, lignes=4) if "bio" in champs else None
+    nom = nom if nom and nom != avant.get("nom") else None
+    bouton = bouton if bouton and bouton != avant.get("bouton") else None
+    # une bio vide n'efface que si elle avait été remplie ici (préremplie)
+    bio = bio if bio and bio != (avant.get("bio") or "") or (bio == "" and avant.get("bio")) else None
+    if not (pieces or nom or bouton or bio is not None):
+        return _ephemere("Rien n'a changé.")
+    jeton = str(p.get("token") or "")
+
+    def modifier():
+        images: Dict[str, Optional[bytes]] = {"photo": None, "fond": None}
+        for cle_img, piece_img in pieces.items():
+            octets, err = _telecharger_image(str(piece_img["url"]), pv.PHOTO_MAX)
+            if not err:
+                preparer = pv.preparer_photo if cle_img == "photo" else pv.preparer_fond
+                images[cle_img], err = preparer(octets or b"")
+            if err:
+                _suite(jeton, f"✕ {'Photo' if cle_img == 'photo' else 'Fond'} : {err}", p)
+                return
+        r = _ptf.modifier_ma_page(uid, nom=nom, bio=bio, bouton=bouton,
+                                  photo=images["photo"], fond=images["fond"])
+        _suite(jeton, "✅ Ta page est à jour." if r.get("ok") else f"✕ {r.get('erreur')}", p)
+    _EN_FOND(modifier)
+    return _differer()
+
+
+_traiter_sans_page_pole = traiter
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:   # noqa: F811
+    try:
+        rep = _page_pole(p or {})
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[page] POLE : {type(e).__name__}: {e}", flush=True)
+        if str((((p or {}).get("data") or {}).get("custom_id")) or "").startswith(PAGE_POLE):
+            return _ephemere("✕ Une erreur est survenue, reclique dans un instant.")
+        rep = None
+    return rep if rep is not None else _traiter_sans_page_pole(p)
