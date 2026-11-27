@@ -767,8 +767,8 @@ def categorie_pour_membre(uid: str) -> str:
 # ─── « Créer son lien » (27/11/2026) ─────────────────────────────────────
 # Propriétaire : « cree le lien ça crée un lien avec le emma si le mec a le
 # tag emma », puis « il faut bien que ça soit un truc genre Twitter […] pour
-# le marché français, un peu comme sur l'autre marché ». Comme TRUST TWITTER :
-# une adresse sans prénom (« angelyy », liens_va.mots_sans_prenom) et un
+# le marché français, un peu comme sur l'autre marché ». Une adresse au nom de
+# la model (« emmacute », liens_va.mots_doux) et un
 # tracking MyPuls au nom du VA, « Twitter FR <Model> VA n @pseudo ». La page
 # est une copie de la page modèle de la model du rôle (espace perso
 # GetMySocial, où vivent les six pages modèles : un duplicata reste dans
@@ -786,6 +786,21 @@ GABARITS = {
     "sarah": "lnk_6a1eabace11d56977a3d000f",     # sarahtemaplte (MYM ; son OF n'est pas chez MyPuls)
     "alicia": "lnk_6a3da5f27c98eff5cb529b63",    # aliciatemplate (MYM)
 }
+
+
+def adresse(model: str, numero: Any, nom: str, essai: int) -> str:
+    """L'adresse GetMySocial du lien, toujours au nom de la model.
+
+    Propriétaire, 27/11/2026 : « c'est pas cutie, il met le name de la
+    model ». D'abord « emmacute », « emmababy »… (liens_va.mots_doux, départ
+    décalé par le numéro du VA) ; presque tous étaient déjà pris par les
+    autres liens d'Emma (le lien d'Enzo : 40 essais, tous en 409), d'où la
+    suite : la model + un ou deux mots doux + deux y (« emmaangelyy »)."""
+    import liens_va
+    n = len(liens_va.MOTS_DOUX)
+    if essai < n:
+        return liens_va.mots_doux(model, (int(numero) if str(numero).isdigit() else 0) + essai)
+    return (model + liens_va.mots_sans_prenom(nom, essai - n))[:24]
 
 
 def nom_du_lien(model: str, numero: Any, pseudo: str) -> str:
@@ -869,8 +884,16 @@ def _creer_un(uid: str, pseudo: str, model: str, par: str) -> Dict[str, Any]:
         # 1) la page, copiée de la page modèle
         if not link_id:
             for essai in range(liens_va.ESSAIS_ADRESSE):
-                sc = liens_va.mots_sans_prenom(nom, essai)
+                sc = adresse(model, n, nom, essai)
                 r = gms.duplicate_link(GABARITS[model], sc, nom)
+                for _ in range(3):
+                    # 409 en série = autant d'appels : GetMySocial répond 429
+                    # « retry after 15s » (renommage du lien d'Enzo, 27/11)
+                    m429 = re.search(r"retry after (\d+)", str(r.get("error") or ""))
+                    if r.get("ok") or "429" not in str(r.get("error") or ""):
+                        break
+                    time.sleep(min(60, int(m429.group(1)) + 2) if m429 else 16)
+                    r = gms.duplicate_link(GABARITS[model], sc, nom)
                 if r.get("ok"):
                     link_id = str((r.get("link") or {}).get("id") or "")
                     break
