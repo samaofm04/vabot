@@ -1019,3 +1019,111 @@ def creer_au_role() -> Dict[str, Any]:
     if bilan["crees"]:
         tour()                     # le lien posé dans le ticket, le menu redessiné
     return bilan
+
+
+# ─── La page « Mes stats » au gabarit de TRUST (27/11/2026) ───────────────
+# Propriétaire, devant la page maison de POLE : « je veux un truc comme le
+# truc que j'ai au niveau de Trust […] exactement le même, juste pour Twitter
+# français ». La page est celle de stats_va (période, clics, subs, CVR,
+# $ / sub, gagné, adresse USDC) ; ses chiffres viennent d'ici : les liens de
+# CE registre (une page par model), leurs trackings MyPuls (historique
+# compris : un VA qui a changé de model garde ses subs) et la grille FR.
+DEBUT = "2026-11-26"          # ouverture du serveur : « depuis toujours » part d'ici
+PAYS_MARCHE = ("FR",)
+
+
+def _trackings_de(d: Dict[str, Any], uid: str) -> List[str]:
+    hist = list((d.get("historique") or {}).get(uid) or [])
+    for f in ((d.get("liens") or {}).get(uid) or {}).values():
+        hist += [t for t in f.get("trackings") or [] if t not in hist]
+    return hist
+
+
+def _lignes_mypuls(urls: List[str], a: _dt.date, b: _dt.date) -> Optional[List[Dict[str, Any]]]:
+    """Les lignes MyPuls de ces trackings sur [a, b] ; None si MyPuls se tait.
+    Un tracking absent de la lecture compte 0 (comme le classement)."""
+    import mypuls
+    try:
+        lignes = mypuls.api_tracking_links(debut=a.isoformat(), fin=min(b, _aujourdhui()).isoformat())
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"MyPuls illisible pour les stats : {type(e).__name__}: {e}")
+        return None
+    if lignes is None:
+        return None
+    voulus = {u.rstrip("/") for u in urls}
+    return [t for t in lignes if str(t.get("url") or "").rstrip("/") in voulus]
+
+
+def _somme(lignes: Optional[List[Dict[str, Any]]], champ: str) -> Optional[int]:
+    if lignes is None:
+        return None
+    n = 0
+    for t in lignes:
+        if t.get(champ) is None:
+            return None
+        n += int(t[champ])
+    return n
+
+
+def chiffres_stats(uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
+    """Ce que stats_va.page_html attend (voir stats_va.chiffres), pour un VA
+    de POLE TWITTER FR. Lève LookupError s'il n'est pas connu ici."""
+    import gms
+    d = etat()
+    uid = str(uid)
+    info = (d.get("membres") or {}).get(uid) or {}
+    if uid not in d["numeros"] and uid not in (d.get("liens") or {}):
+        raise LookupError("pas de fiche")
+    toujours = not du
+    a = _dt.date.fromisoformat(du or DEBUT)
+    b = min(_dt.date.fromisoformat(au) if au else _aujourdhui(), _aujourdhui())
+    urls = _trackings_de(d, uid)
+    lignes = _lignes_mypuls(urls, a, b) if urls else []
+    subs = _somme(lignes, "abonnes_periode") if urls else None
+    visites = _somme(lignes, "visites_periode") if urls else None
+    # $ / sub : le revenu OnlyFans de ses trackings (en dollars) ; MYM rend
+    # des euros, et TRUST ne l'affiche pas non plus pour MYM
+    par_sub = None
+    if urls and lignes is not None and all("onlyfans.com/" in u for u in urls) and subs:
+        rev = [t.get("revenu") for t in lignes]
+        if rev and all(r is not None for r in rev):
+            par_sub = sum(rev) / subs
+    # les clics : les passages vers la destination de ses pages GetMySocial
+    ids = [str(f.get("link_id")) for f in ((d.get("liens") or {}).get(uid) or {}).values()
+           if f.get("link_id")]
+    fr = glob = None
+    if ids:
+        try:
+            total, pays = gms.boutons_par_pays(ids, a.isoformat(), b.isoformat())
+            if pays is not None:
+                fr = sum(int(pays.get(p) or 0) for p in PAYS_MARCHE)
+                glob = int(total if total is not None else sum(int(v or 0) for v in pays.values()))
+        except Exception as e:                               # noqa: BLE001
+            _log(f"clics GetMySocial de {uid} : {type(e).__name__}: {e}")
+    # gagné : quinzaine par quinzaine, les subs de la période au prix que
+    # TOUTE la quinzaine atteint (la grille FR), comme stats_va._gagne
+    gagne: Optional[float] = None
+    if urls:
+        try:
+            total_g = 0.0
+            q0, q1 = periodes(a)["quinzaine"]
+            while q0 <= b and total_g is not None:
+                n_q = _somme(_lignes_mypuls(urls, q0, q1), "abonnes_periode")
+                lo, hi = max(q0, a), min(q1, b)
+                n_in = n_q if (lo, hi) == (q0, min(q1, _aujourdhui())) else \
+                    _somme(_lignes_mypuls(urls, lo, hi), "abonnes_periode")
+                if n_q is None or n_in is None:
+                    total_g = None
+                    break
+                total_g += n_in * prix_du_sub(n_q)
+                q0 = q1 + _dt.timedelta(days=1)
+                q1 = periodes(q0)["quinzaine"][1]
+            gagne = round(total_g, 2) if total_g is not None else None
+        except Exception as e:                               # noqa: BLE001
+            _log(f"gain de {uid} : {type(e).__name__}: {e}")
+    return {"numero": d["numeros"].get(uid), "pseudo": str(info.get("pseudo") or ""),
+            "du": "" if toujours else du, "au": "" if toujours else (au or b.isoformat()),
+            "us": fr, "glob": glob, "infloww": visites, "subs": subs,
+            "cvr": (subs * 100.0 / visites) if subs is not None and visites else None,
+            "par_sub": par_sub, "revenu": None, "revenu_partiel": False,
+            "gagne": gagne, "communs": [], "lu_a": time.time(), "gid": POLE_ID}

@@ -69,6 +69,10 @@ SERVEURS = {AGENCY_IG_ID, TWITTER_ID, THREADS_ID}
 #: Le bandeau de la page et le nom du lien, par serveur.
 MARQUES = {AGENCY_IG_ID: ("TRUST INSTAGRAM", "Instagram"), TWITTER_ID: ("TRUST TWITTER", "Twitter"),
            THREADS_ID: ("TRUST THREADS", "Threads")}
+# POLE TWITTER FR (27/11/2026) : la même page, ses chiffres viennent de
+# pole_twitter_fr.chiffres_stats (son propre registre de liens, une page par model)
+POLE_TWITTER_FR_ID = "1575133611311763578"
+MARQUES[POLE_TWITTER_FR_ID] = ("POLE TWITTER FR", "Twitter")
 #: trust-ofm.com depuis le 07/11/2026 (domaines.py) : les liens youl4b.com
 #: déjà donnés marchent toujours, c'est la même application.
 SITE = domaines.SITE_TRUST
@@ -429,6 +433,9 @@ def chiffres(gid: str, uid: str, du: str = "", au: str = "") -> Dict[str, Any]:
     """{numero, pseudo, du, au, us, glob, infloww, subs, communs,
     lu_a} sur [du, au] (jours de Paris, bornes incluses) ; sans du : depuis
     toujours. Une valeur illisible vaut None. Lève LookupError sans fiche."""
+    if str(gid) == POLE_TWITTER_FR_ID:
+        import pole_twitter_fr
+        return pole_twitter_fr.chiffres_stats(uid, du, au)
     import liens_va
     import podium_discord as pod
     import subs_va
@@ -928,8 +935,11 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
         marques.append("— : pas encore lisible")
     if d.get("communs"):
         marques.append("un lien de suivi commun à plusieurs VA n'est pas compté")
+    pole = str(d.get("gid") or "") == POLE_TWITTER_FR_ID
+    # POLE TWITTER FR : ni Infloww ni clics US — les visites MyPuls de ses
+    # trackings et les clics de France
     sources = " · ".join(f'API officielle <a href="{_e(u)}" rel="noopener noreferrer">{_e(n)}</a>'
-                         for n, u in SOURCES)
+                         for n, u in SOURCES if not (pole and n == "Infloww"))
     pied = (f'<p class="pied">Sources : {sources}</p>'
             + (f'<p class="pied">{" · ".join(marques)}</p>' if marques else "")
             + '<p class="pied">' + (f"Lu le {_e(lu_t.strftime('%d/%m à %H:%M'))} (heure de Paris) · " if lu_t else "")
@@ -937,8 +947,9 @@ def page_html(d: Dict[str, Any], t: str = "", jour: Optional[dt.date] = None) ->
     corps = (f'<h1>📈 Tes stats · {_e(nom)}</h1><p class="sous">{sous}</p>'
              + _formulaire(t, du, au, jour)
              + '<div class="boite"><table><thead><tr><th class="g">Personne</th>'
-             f'<th>Clics {"US·UK·CA" if str(d.get("gid") or "") in GRILLE_CLICS_ICI else "US"} GMS</th>'
-             '<th>Clics globaux GMS</th><th>Clics Infloww</th><th>Subs</th><th>CVR</th><th>$ / sub</th>'
+             f'<th>Clics {"FR" if pole else "US·UK·CA" if str(d.get("gid") or "") in GRILLE_CLICS_ICI else "US"} GMS</th>'
+             f'<th>Clics globaux GMS</th><th>{"Visites MyPuls" if pole else "Clics Infloww"}</th>'
+             '<th>Subs</th><th>CVR</th><th>$ / sub</th>'
              '<th>Gagné</th><th>Adresse USDC</th></tr></thead><tbody><tr>'
              f'<td class="nom">{("@" + _e(d["pseudo"])) if d.get("pseudo") else _e(nom)}'
              + (f'<span class="det">{_e(nom)}</span>' if d.get("pseudo") else "") + '</td>'
