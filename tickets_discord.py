@@ -6122,3 +6122,73 @@ def redessiner_boutons(gid: str) -> Dict[str, Any]:   # noqa: F811
     except Exception as e:                                   # noqa: BLE001
         print(f"[ticket] boutons du lien {gid} : {type(e).__name__}: {e}", flush=True)
     return bilan
+
+
+# ─── POLE TWITTER FR : « Créer son lien » d'après le rôle (27/11/2026) ────
+# Propriétaire : « il y a toujours pas le bouton pour créer les liens ». Les
+# liens de ce serveur ne sont pas dans liens_va (un VA y a un lien PAR model,
+# celui de son rôle) : le bouton se lit chez pole_twitter_fr, et le clic y
+# crée le lien de la model du rôle (pole_twitter_fr.creer_lien). Pas de
+# « Désactiver » ici : le lien suit le rôle, il se retire sur la page admin.
+import pole_twitter_fr as _ptf                               # noqa: E402
+
+_boutons_va_sans_pole = boutons_va
+
+
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: Optional[bool] = None,   # noqa: F811
+               gid: str = "", lien_actif: Optional[bool] = None):
+    if str(gid) not in RANGE_PAR_MODEL:
+        return _boutons_va_sans_pole(uid, confirme=confirme, a_un_lien=a_un_lien,
+                                     gid=gid, lien_actif=lien_actif)
+    rangs = _boutons_va_sans_pole(uid, confirme=confirme, a_un_lien=False, gid=gid, lien_actif=True)
+    rangs = [dict(r, components=[b for b in (r.get("components") or [])
+                                 if not str(b.get("custom_id") or "").startswith("lien:")])
+             for r in rangs or []]
+    rangs = [r for r in rangs if r.get("components")]
+    try:
+        manque = _ptf.a_creer(str(uid))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[ticket] POLE : liens de {uid} illisibles ({type(e).__name__}: {e})", flush=True)
+        manque = []
+    if manque:
+        b = {"type": 2, "style": 1, "label": "Créer son lien",
+             "custom_id": f"lien:new:{uid}", "emoji": {"name": "🔗"}}
+        place = next((r for r in rangs if len(r["components"]) < 5
+                      and any(str(x.get("custom_id") or "").startswith(_BOUTONS_MANAGERS)
+                              for x in r["components"])), None)
+        if place is not None:
+            place["components"].append(b)
+        elif len(rangs) < 5:
+            rangs.append({"type": 1, "components": [b]})
+    return rangs
+
+
+_creer_lien_sans_pole = _creer_lien
+
+
+def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:   # noqa: F811
+    if str(gid) not in RANGE_PAR_MODEL:
+        return _creer_lien_sans_pole(gid, uid, par, p)
+    cle = f"{gid}:{uid}"
+    t = _prendre_creation(cle)
+    if not t:
+        return _ephemere("⏳ Le lien de ce VA est déjà en cours de création — "
+                         "un seul clic suffit, la réponse arrive.")
+    jeton = str(p.get("token") or "")
+
+    def travail():
+        try:
+            r = _ptf.creer_lien(uid, par=par)
+            _suite(jeton, _ptf.texte_creation(uid, r), p)
+        except Exception as e:                               # noqa: BLE001
+            _suite(jeton, f"✕ {type(e).__name__}: {str(e)[:200]}", p)
+        finally:
+            _rendre_creation(cle, t)
+            redessiner_accueil(gid, uid)
+
+    try:
+        _EN_FOND(travail)
+    except Exception:
+        _rendre_creation(cle, t)
+        raise
+    return _differer()

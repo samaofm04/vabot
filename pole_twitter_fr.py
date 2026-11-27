@@ -267,14 +267,17 @@ def trackings_du_lien(url: str) -> List[str]:
         return []
 
 
-def poser_lien(uid: str, model: str, url: str, par: str = "") -> Dict[str, Any]:
-    """Le lien de ce VA pour cette model (url vide : retiré). Rend la fiche."""
+def poser_lien(uid: str, model: str, url: str, par: str = "",
+               trackings: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Le lien de ce VA pour cette model (url vide : retiré). Rend la fiche.
+    `trackings` : ceux qu'on vient de créer (creer_lien) — sans eux, relus
+    sur la page."""
     uid, model, url = str(uid), str(model).lower(), str(url or "").strip()
     if model not in MODELS:
         raise ValueError("model inconnue")
     if url and not re.match(r"https?://\S+$", url):
         raise ValueError("lien invalide")
-    tr = trackings_du_lien(url) if url else []
+    tr = list(trackings) if trackings is not None else (trackings_du_lien(url) if url else [])
     with _VERROU:
         d = etat()
         fiche = d["liens"].setdefault(uid, {})
@@ -753,3 +756,199 @@ def categorie_pour_membre(uid: str) -> str:
     except Exception as e:                                   # noqa: BLE001
         _log(f"catégorie de {uid} : {type(e).__name__}: {e}")
         return ""
+
+
+# ─── « Créer son lien » (27/11/2026) ─────────────────────────────────────
+# Propriétaire : « cree le lien ça crée un lien avec le emma si le mec a le
+# tag emma », puis « il faut bien que ça soit un truc genre Twitter […] pour
+# le marché français, un peu comme sur l'autre marché ». Comme TRUST TWITTER :
+# une adresse sans prénom (« angelyy », liens_va.mots_sans_prenom) et un
+# tracking MyPuls au nom du VA, « Twitter FR <Model> VA n @pseudo ». La page
+# est une copie de la page modèle de la model du rôle (espace perso
+# GetMySocial, où vivent les six pages modèles : un duplicata reste dans
+# l'espace de sa source).
+#
+# Ce qui ne se défait pas : un tracking MyPuls ne s'efface jamais. La copie de
+# la page vient donc D'ABORD (GetMySocial refuse : rien de créé chez
+# MyPuls) ; un tracking déjà au même nom est repris, jamais doublé ; un essai
+# raté garde sa page et ses trackings (« echecs ») pour le clic suivant.
+GABARITS = {
+    "amelia": "lnk_6a1eab91bc03b4376dd15ade",    # ameliatempalte (OF + MYM)
+    "emma": "lnk_6a1eab77e11d56977a3cfe5f",      # emmatemplatee (MYM)
+    "lola": "lnk_6a1eab9dbc03b4376dd15d68",      # lolatemplate (OF + MYM)
+    "julia": "lnk_6a1eabd9bc03b4376dd16455",     # juliateamplte (OF + MYM)
+    "sarah": "lnk_6a1eabace11d56977a3d000f",     # sarahtemaplte (MYM ; son OF n'est pas chez MyPuls)
+    "alicia": "lnk_6a3da5f27c98eff5cb529b63",    # aliciatemplate (MYM)
+}
+
+
+def nom_du_lien(model: str, numero: Any, pseudo: str) -> str:
+    return f"Twitter FR {NOMS[model]} VA {numero} @{pseudo}"[:60]
+
+
+def models_en_direct(uid: str) -> Tuple[Optional[List[str]], str]:
+    """(models du rôle du membre, pseudo), lus sur Discord à l'instant : un
+    rôle donné il y a une minute compte déjà. (None, "") si Discord se tait."""
+    with _VERROU:
+        d = etat()
+        code, roles = _api("GET", f"/guilds/{POLE_ID}/roles")
+        code2, m = _api("GET", f"/guilds/{POLE_ID}/members/{uid}")
+        if code != 200 or code2 != 200 or not isinstance(m, dict):
+            return None, ""
+        rids = assurer_roles(roles, d)
+        u = m.get("user") or {}
+        uid = str(uid)
+        if uid not in d["numeros"]:
+            d["numeros"][uid] = len(d["numeros"]) + 1
+        _ecrire(d)
+        return models_du_membre(m, rids), str(u.get("username") or uid)
+
+
+def a_creer(uid: str) -> List[str]:
+    """Les models du rôle de ce VA (dernier tour) qui n'ont pas encore de lien :
+    ce que « Créer son lien » ferait. Pour dessiner le bouton."""
+    d = etat()
+    uid = str(uid)
+    mods = ((d.get("membres") or {}).get(uid) or {}).get("models") or []
+    liens = (d.get("liens") or {}).get(uid) or {}
+    return [m for m in mods if not (liens.get(m) or {}).get("url")]
+
+
+def _creer_un(uid: str, pseudo: str, model: str, par: str) -> Dict[str, Any]:
+    import gms
+    import liens_fr
+    import liens_va
+    import liens_jb_fr
+    cfg = liens_fr.MODELS.get(model) or {}
+    with liens_fr._VERROU:
+        d = etat()
+        deja = ((d["liens"].get(uid) or {}).get(model) or {})
+        if deja.get("url"):
+            return {"ok": True, "deja": True, "model": model, "url": deja["url"]}
+        cle = f"{uid}:{model}"
+        ancien = (d.get("echecs") or {}).get(cle) or {}
+        n = ancien.get("numero") or d["numeros"].get(uid) or "?"
+        nom = ancien.get("nom") or nom_du_lien(model, n, pseudo)
+        urls: Dict[str, str] = dict(ancien.get("trackings") or {})
+        link_id, sc = str(ancien.get("link_id") or ""), str(ancien.get("shortcode") or "")
+        soucis: List[str] = []
+
+        def echec(erreur: str) -> Dict[str, Any]:
+            if link_id:
+                # la copie garde les boutons de la page modèle : coupée tant
+                # qu'elle n'a pas SES trackings, jamais donnée — ni supprimée
+                try:
+                    gms.disable_link(link_id)
+                except Exception:                            # noqa: BLE001
+                    pass
+            if urls or link_id:
+                d2 = etat()
+                d2.setdefault("echecs", {})[cle] = {
+                    "numero": n, "nom": nom, "trackings": dict(urls), "link_id": link_id,
+                    "shortcode": sc, "erreur": erreur, "quand": int(time.time())}
+                _ecrire(d2)
+            _log(f"{nom} : ÉCHEC {erreur}")
+            return {"ok": False, "model": model, "erreur": erreur, "trackings": dict(urls)}
+
+        lu = gms._call_tool("get_link", {"link_id": GABARITS[model]})
+        gabarit = liens_fr._objet(lu) if lu.get("ok") else {}
+        boutons = gabarit.get("buttons") or []
+        if not boutons:
+            return echec(f"page modèle de {NOMS[model]} illisible ({str(lu.get('error'))[:120]})")
+        plates = sorted({liens_fr.plateforme(b.get("url")) for b in boutons} - {""})
+        plates = [p for p in plates if cfg.get(p)]
+        if not plates:
+            return echec(f"la page modèle de {NOMS[model]} n'a aucun bouton OF ni MYM suivi par MyPuls")
+
+        # 1) la page, copiée de la page modèle
+        if not link_id:
+            for essai in range(liens_va.ESSAIS_ADRESSE):
+                sc = liens_va.mots_sans_prenom(nom, essai)
+                r = gms.duplicate_link(GABARITS[model], sc, nom)
+                if r.get("ok"):
+                    link_id = str((r.get("link") or {}).get("id") or "")
+                    break
+                err = str(r.get("error") or "")
+                if "shortcode" not in err.lower():
+                    sc = ""
+                    return echec(f"GetMySocial refuse la copie : {err[:160]}")
+            if not link_id:
+                sc = ""
+                return echec("GetMySocial : aucune adresse libre")
+
+        # 2) les trackings MyPuls, au nom du VA — repris s'ils existent déjà
+        tn = liens_fr.nom_tracking(nom)
+        for p in plates:
+            if urls.get(p):
+                continue
+            cid = int(cfg[p])
+            ex = liens_va._tracking_existant(tn, cid)
+            t = {"ok": True, "url": ex["url"]} if ex else liens_fr.creer_tracking(tn, cid)
+            if t.get("ok") and t.get("url"):
+                urls[p] = t["url"]
+            else:
+                soucis.append(f"{p.upper()} : {t.get('erreur')}")
+        if not urls:
+            return echec("aucun tracking MyPuls créé (" + " ; ".join(soucis)[:300] + ")")
+
+        # 3) les boutons vers SES trackings (un bouton sans tracking est retiré)
+        neufs = [{k: v for k, v in b.items() if k != "block_id" and v is not None}
+                 for b in liens_fr.boutons_remplaces(boutons, urls)]
+        r = liens_jb_fr._appel("update_link", {"link_id": link_id, "display_name": nom,
+                                               "buttons": neufs})
+        if not r.get("ok"):
+            return echec(f"boutons non posés ({str(r.get('error'))[:160]})")
+        if ancien.get("link_id"):
+            gms.enable_link(link_id)              # coupée par l'essai raté
+        public = f"{gms.PUBLIC_LINK_DOMAIN}/{sc}"
+        poser_lien(uid, model, public, par=par, trackings=sorted(urls.values()))
+        with _VERROU:
+            d3 = etat()
+            f = d3["liens"].get(uid, {}).get(model)
+            if f is not None:
+                f.update(link_id=link_id, shortcode=sc, nom=nom, cree=True, soucis=soucis)
+            (d3.get("echecs") or {}).pop(cle, None)
+            _ecrire(d3)
+        _log(f"{nom} -> {public} (trackings {sorted(urls)}, soucis {soucis})")
+        return {"ok": True, "model": model, "url": public, "trackings": dict(urls), "soucis": soucis}
+
+
+def creer_lien(uid: str, par: str = "") -> Dict[str, Any]:
+    """« Créer son lien » : un lien par model du rôle de ce VA qui n'en a pas.
+    Rend {ok, faits: [...], erreur}. Bloquant (réseau) : à lancer en fond."""
+    uid = str(uid)
+    mods, pseudo = models_en_direct(uid)
+    if mods is None:
+        return {"ok": False, "erreur": "Discord ne répond pas : rien n'a été créé, reclique dans une minute."}
+    if not mods:
+        return {"ok": False, "erreur": "ce VA n'a aucun rôle de model (Amelia, Emma, Lola, Julia, "
+                                       "Sarah, Alicia) : donne-lui le rôle, puis reclique."}
+    faits = []
+    for m in mods:
+        try:
+            faits.append(_creer_un(uid, pseudo, m, par))
+        except Exception as e:                               # noqa: BLE001
+            faits.append({"ok": False, "model": m, "erreur": f"{type(e).__name__}: {e}"})
+    try:
+        tour()                     # le lien posé dans le ticket, le menu redessiné
+    except Exception as e:                                   # noqa: BLE001
+        _log(f"tour après création : {type(e).__name__}: {e}")
+    return {"ok": any(f.get("ok") for f in faits), "faits": faits, "pseudo": pseudo}
+
+
+def texte_creation(uid: str, r: Dict[str, Any]) -> str:
+    """La réponse au manager, une ligne par model."""
+    if not r.get("faits"):
+        return "✕ " + str(r.get("erreur") or "échec")
+    lignes = []
+    for f in r["faits"]:
+        nom = NOMS.get(f.get("model"), f.get("model"))
+        if f.get("ok") and f.get("deja"):
+            lignes.append(f"🔗 {nom} : déjà fait — {f['url']}")
+        elif f.get("ok"):
+            s = f.get("soucis") or []
+            lignes.append(f"✅ {nom} : lien créé pour <@{uid}> — {f['url']}"
+                          + (f"\n⚠️ {' ; '.join(s)[:300]} (bouton retiré de la page)" if s else ""))
+        else:
+            lignes.append(f"✕ {nom} : {str(f.get('erreur'))[:400]}")
+    return "\n".join(lignes)
