@@ -720,6 +720,12 @@ def _boucle() -> None:
             tour()
         except Exception as e:                               # noqa: BLE001
             _log(f"tour en échec : {type(e).__name__}: {e}")
+        try:
+            auto = creer_au_role()
+            if auto["crees"] or auto["echecs"]:
+                _log(f"liens au rôle : {auto}")
+        except Exception as e:                               # noqa: BLE001
+            _log(f"liens au rôle en échec : {type(e).__name__}: {e}")
         if time.time() - dernier >= CLASSEMENT_S:
             try:
                 _log(f"classements : {publier_classements()}")
@@ -952,3 +958,41 @@ def texte_creation(uid: str, r: Dict[str, Any]) -> str:
         else:
             lignes.append(f"✕ {nom} : {str(f.get('erreur'))[:400]}")
     return "\n".join(lignes)
+
+
+# ─── Le lien créé tout seul au rôle (27/11/2026) ─────────────────────────
+# Propriétaire : « quand le mec il met un rôle Lola, lui créer son lien sur
+# Lola […] si le mec il revient sur Amelia, ça lui met pas à recréer un lien,
+# son lien il est déjà là ». Après chaque tour : un VA dont le rôle de model
+# n'a pas encore de lien reçoit le sien (_creer_un, comme le bouton). Un lien
+# déjà fait reste dans sa case quand le rôle change : il revient avec le rôle,
+# rien n'est recréé. Un essai raté (MYM bloqué par le code MyPuls) n'est
+# retenté qu'au bout de REPRISE_S : sa page est gardée, aucun tracking n'est
+# doublé, mais un essai toutes les 5 min pour rien remplirait le journal.
+REPRISE_S = 60 * 60
+AUTO_PAR_TOUR = 5
+
+
+def creer_au_role() -> Dict[str, Any]:
+    d = etat()
+    bilan: Dict[str, Any] = {"crees": [], "echecs": []}
+    maintenant = time.time()
+    a_faire = []
+    for uid, info in (d.get("membres") or {}).items():
+        for m in a_creer(uid):
+            e = (d.get("echecs") or {}).get(f"{uid}:{m}") or {}
+            if e and maintenant - float(e.get("quand") or 0) < REPRISE_S:
+                continue
+            a_faire.append((uid, str(info.get("pseudo") or uid), m))
+    for uid, pseudo, m in a_faire[:AUTO_PAR_TOUR]:
+        try:
+            r = _creer_un(uid, pseudo, m, "bot (rôle de model)")
+        except Exception as e:                               # noqa: BLE001
+            r = {"ok": False, "erreur": f"{type(e).__name__}: {e}"}
+        if r.get("ok") and not r.get("deja"):
+            bilan["crees"].append(f"{pseudo}/{m} {r.get('url')}")
+        elif not r.get("ok"):
+            bilan["echecs"].append(f"{pseudo}/{m} : {str(r.get('erreur'))[:160]}")
+    if bilan["crees"]:
+        tour()                     # le lien posé dans le ticket, le menu redessiné
+    return bilan
